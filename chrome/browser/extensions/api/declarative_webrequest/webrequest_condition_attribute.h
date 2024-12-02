@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/request_stage.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_rule.h"
 #include "chrome/common/extensions/api/events.h"
@@ -26,13 +27,16 @@ class URLRequest;
 
 namespace extensions {
 
+class HeaderMatcher;
+
 // Base class for all condition attributes of the declarative Web Request API
 // except for condition attribute to test URLPatterns.
 class WebRequestConditionAttribute {
  public:
   enum Type {
     CONDITION_RESOURCE_TYPE,
-    CONDITION_CONTENT_TYPE
+    CONDITION_CONTENT_TYPE,
+    CONDITION_RESPONSE_HEADERS
   };
 
   WebRequestConditionAttribute();
@@ -53,7 +57,8 @@ class WebRequestConditionAttribute {
   virtual int GetStages() const = 0;
 
   // Returns whether the condition is fulfilled for this request.
-  virtual bool IsFulfilled(const WebRequestRule::RequestData& request_data) = 0;
+  virtual bool IsFulfilled(
+      const WebRequestRule::RequestData& request_data) const = 0;
 
   virtual Type GetType() const = 0;
 
@@ -88,8 +93,8 @@ class WebRequestConditionAttributeResourceType
 
   // Implementation of WebRequestConditionAttribute:
   virtual int GetStages() const OVERRIDE;
-  virtual bool IsFulfilled(const WebRequestRule::RequestData& request_data)
-      OVERRIDE;
+  virtual bool IsFulfilled(
+      const WebRequestRule::RequestData& request_data) const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
 
  private:
@@ -118,17 +123,53 @@ class WebRequestConditionAttributeContentType
 
   // Implementation of WebRequestConditionAttribute:
   virtual int GetStages() const OVERRIDE;
-  virtual bool IsFulfilled(const WebRequestRule::RequestData& request_data)
-      OVERRIDE;
+  virtual bool IsFulfilled(
+      const WebRequestRule::RequestData& request_data) const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
 
  private:
   explicit WebRequestConditionAttributeContentType(
-      const std::vector<std::string>& content_types);
+      const std::vector<std::string>& include_content_types,
+      bool inclusive);
 
   std::vector<std::string> content_types_;
+  bool inclusive_;
 
   DISALLOW_COPY_AND_ASSIGN(WebRequestConditionAttributeContentType);
+};
+
+// Condition attribute for matching against response headers. Uses HeaderMatcher
+// to handle the actual tests, in connection with a boolean positiveness
+// flag. If that flag is set to true, then IsFulfilled() returns true iff
+// |header_matcher_| matches at least one header. Otherwise IsFulfilled()
+// returns true iff the |header_matcher_| matches no header.
+class WebRequestConditionAttributeResponseHeaders
+    : public WebRequestConditionAttribute {
+ public:
+  virtual ~WebRequestConditionAttributeResponseHeaders();
+
+  static bool IsMatchingType(const std::string& instance_type);
+
+  // Factory method, see WebRequestConditionAttribute::Create.
+  static scoped_ptr<WebRequestConditionAttribute> Create(
+      const std::string& name,
+      const base::Value* value,
+      std::string* error);
+
+  // Implementation of WebRequestConditionAttribute:
+  virtual int GetStages() const OVERRIDE;
+  virtual bool IsFulfilled(
+      const WebRequestRule::RequestData& request_data) const OVERRIDE;
+  virtual Type GetType() const OVERRIDE;
+
+ private:
+  WebRequestConditionAttributeResponseHeaders(
+      scoped_ptr<const HeaderMatcher>* header_matcher, bool positive);
+
+  const scoped_ptr<const HeaderMatcher> header_matcher_;
+  const bool positive_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebRequestConditionAttributeResponseHeaders);
 };
 
 }  // namespace extensions

@@ -10,9 +10,9 @@
 #include "base/json/json_writer.h"
 #include "base/string_util.h"
 #include "chrome/browser/chromeos/extensions/file_browser_private_api.h"
-#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
-#include "chrome/browser/chromeos/gdata/gdata.pb.h"
+#include "chrome/browser/chromeos/gdata/drive.pb.h"
+#include "chrome/browser/chromeos/gdata/drive_service_interface.h"
+#include "chrome/browser/chromeos/gdata/drive_system_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "content/public/browser/browser_thread.h"
 #include "webkit/fileapi/file_system_types.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/file_system_util.h"
 
 namespace gdata {
@@ -52,21 +53,18 @@ bool DriveTaskExecutor::ExecuteAndNotify(
   std::vector<FilePath> raw_paths;
   for (std::vector<GURL>::const_iterator iter = file_urls.begin();
       iter != file_urls.end(); ++iter) {
-    FilePath raw_path;
-    fileapi::FileSystemType type = fileapi::kFileSystemTypeUnknown;
-    if (!fileapi::CrackFileSystemURL(*iter, NULL, &type, &raw_path) ||
-        type != fileapi::kFileSystemTypeExternal) {
+    fileapi::FileSystemURL url(*iter);
+    if (!url.is_valid() || url.type() != fileapi::kFileSystemTypeDrive)
       return false;
-    }
-    raw_paths.push_back(raw_path);
+    raw_paths.push_back(url.virtual_path());
   }
 
-  gdata::GDataSystemService* system_service =
-      gdata::GDataSystemServiceFactory::GetForProfile(profile());
+  DriveSystemService* system_service =
+      DriveSystemServiceFactory::GetForProfile(profile());
   DCHECK(current_index_ == 0);
   if (!system_service || !system_service->file_system())
     return false;
-  gdata::GDataFileSystemInterface* file_system = system_service->file_system();
+  DriveFileSystemInterface* file_system = system_service->file_system();
 
   // Reset the index, so we know when we're done.
   current_index_ = raw_paths.size();
@@ -81,31 +79,38 @@ bool DriveTaskExecutor::ExecuteAndNotify(
 }
 
 void DriveTaskExecutor::OnFileEntryFetched(
-    GDataFileError error,
-    scoped_ptr<gdata::GDataEntryProto> entry_proto) {
+    DriveFileError error,
+    scoped_ptr<DriveEntryProto> entry_proto) {
   // If we aborted, then this will be zero.
   if (!current_index_)
     return;
 
-  gdata::GDataSystemService* system_service =
-      gdata::GDataSystemServiceFactory::GetForProfile(profile());
+  DriveSystemService* system_service =
+      DriveSystemServiceFactory::GetForProfile(profile());
 
-  // Here, we are only insterested in files.
+  // Here, we are only interested in files.
   if (entry_proto.get() && !entry_proto->has_file_specific_info())
-    error = gdata::GDATA_FILE_ERROR_NOT_FOUND;
+    error = DRIVE_FILE_ERROR_NOT_FOUND;
 
-  if (!system_service || error != GDATA_FILE_OK) {
+  if (!system_service || error != DRIVE_FILE_OK) {
     Done(false);
     return;
   }
 
-  gdata::DocumentsServiceInterface* docs_service =
-      system_service->docs_service();
+  // The edit URL can be empty for non-editable files (such as files shared with
+  // read-only privilege).
+  if (entry_proto->edit_url().empty()) {
+    Done(false);
+    return;
+  }
 
-  // Send off a request for the document service to authorize the apps for the
+  DriveServiceInterface* drive_service =
+      system_service->drive_service();
+
+  // Send off a request for the drive service to authorize the apps for the
   // current document entry for this document so we can get the
   // open-with-<app_id> urls from the document entry.
-  docs_service->AuthorizeApp(
+  drive_service->AuthorizeApp(
       GURL(entry_proto->edit_url()),
       app_id_,
       base::Bind(&DriveTaskExecutor::OnAppAuthorized,
@@ -115,7 +120,7 @@ void DriveTaskExecutor::OnFileEntryFetched(
 
 void DriveTaskExecutor::OnAppAuthorized(
     const std::string& resource_id,
-    gdata::GDataErrorCode error,
+    GDataErrorCode error,
     scoped_ptr<base::Value> feed_data) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
@@ -123,10 +128,10 @@ void DriveTaskExecutor::OnAppAuthorized(
   if (!current_index_)
     return;
 
-  gdata::GDataSystemService* system_service =
-      gdata::GDataSystemServiceFactory::GetForProfile(profile());
+  DriveSystemService* system_service =
+      DriveSystemServiceFactory::GetForProfile(profile());
 
-  if (!system_service || error != gdata::HTTP_SUCCESS) {
+  if (!system_service || error != HTTP_SUCCESS) {
     Done(false);
     return;
   }

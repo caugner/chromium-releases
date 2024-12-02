@@ -7,8 +7,11 @@
 
 #include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/process.h"
+#include "content/browser/renderer_host/ime_adapter_android.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebExternalTextureLayer.h"
 #include "ui/gfx/size.h"
 
 struct ViewHostMsg_TextInputState_Params;
@@ -46,6 +49,7 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
   virtual void MovePluginWindows(
+      const gfx::Point& scroll_offset,
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void Blur() OVERRIDE;
@@ -57,9 +61,7 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
-  virtual void TextInputStateChanged(ui::TextInputType type,
-                                     bool can_compose_inline) OVERRIDE;
-  virtual void ImeUpdateTextInputState(
+  virtual void TextInputStateChanged(
       const ViewHostMsg_TextInputState_Params& params) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void DidUpdateBackingStore(
@@ -106,8 +108,14 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
 
   void SetContentViewCore(ContentViewCoreImpl* content_view_core);
 
+  void SendKeyEvent(const NativeWebKeyboardEvent& event);
   void TouchEvent(const WebKit::WebTouchEvent& event);
   void GestureEvent(const WebKit::WebGestureEvent& event);
+
+  int GetNativeImeAdapter();
+
+  // Select all text between the given coordinates.
+  void SelectRange(const gfx::Point& start, const gfx::Point& end);
 
  private:
   // The model object.
@@ -122,6 +130,15 @@ class RenderWidgetHostViewAndroid : public RenderWidgetHostViewBase {
   // The size that we want the renderer to be.  We keep this in a separate
   // variable because resizing is async.
   gfx::Size requested_size_;
+
+  ImeAdapterAndroid ime_adapter_android_;
+
+  // The texture layer for this view when using browser-side compositing.
+  scoped_ptr<WebKit::WebExternalTextureLayer> texture_layer_;
+
+  // The handle for the transport surface (between renderer and browser-side
+  // compositor) for this view.
+  gfx::GLSurfaceHandle shared_surface_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAndroid);
 };

@@ -14,7 +14,7 @@
 #include "chrome/browser/download/download_file_icon_extractor.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/download/download_test_observer.h"
+#include "chrome/browser/download/download_test_file_chooser_observer.h"
 #include "chrome/browser/extensions/api/downloads/downloads_api.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -35,21 +35,23 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_persistent_store_info.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/test/download_test_observer.h"
 #include "content/test/net/url_request_slow_download_job.h"
 #include "net/base/data_url.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
+#include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_job_factory.h"
-#include "ui/gfx/codec/png_codec.h"
 #include "webkit/blob/blob_data.h"
 #include "webkit/blob/blob_storage_controller.h"
 #include "webkit/blob/blob_url_request_job.h"
 #include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_operation_interface.h"
+#include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_url.h"
 
 using content::BrowserContext;
@@ -368,7 +370,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
       entries.push_back(entry);
     }
     GetOnRecordManager()->OnPersistentStoreQueryComplete(&entries);
-    GetOnRecordManager()->GetAllDownloads(FilePath(), items);
+    GetOnRecordManager()->GetAllDownloads(items);
     EXPECT_EQ(count, items->size());
     if (count != items->size())
       return false;
@@ -390,7 +392,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   void CreateSlowTestDownloads(
       size_t count, DownloadManager::DownloadVector* items) {
     for (size_t i = 0; i < count; ++i) {
-      scoped_ptr<DownloadTestObserver> observer(
+      scoped_ptr<content::DownloadTestObserver> observer(
           CreateInProgressDownloadObserver(1));
       GURL slow_download_url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
       ui_test_utils::NavigateToURLWithDisposition(
@@ -400,12 +402,12 @@ class DownloadExtensionTest : public ExtensionApiTest {
       EXPECT_EQ(
           1u, observer->NumDownloadsSeenInState(DownloadItem::IN_PROGRESS));
     }
-    GetCurrentManager()->GetAllDownloads(FilePath(), items);
+    GetCurrentManager()->GetAllDownloads(items);
     ASSERT_EQ(count, items->size());
   }
 
   DownloadItem* CreateSlowTestDownload() {
-    scoped_ptr<DownloadTestObserver> observer(
+    scoped_ptr<content::DownloadTestObserver> observer(
         CreateInProgressDownloadObserver(1));
     GURL slow_download_url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
     DownloadManager* manager = GetCurrentManager();
@@ -422,7 +424,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
     EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::IN_PROGRESS));
 
     DownloadManager::DownloadVector items;
-    manager->GetAllDownloads(FilePath(), &items);
+    manager->GetAllDownloads(&items);
 
     DownloadItem* new_item = NULL;
     for (DownloadManager::DownloadVector::iterator iter = items.begin();
@@ -437,7 +439,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   }
 
   void FinishPendingSlowDownloads() {
-    scoped_ptr<DownloadTestObserver> observer(
+    scoped_ptr<content::DownloadTestObserver> observer(
         CreateDownloadObserver(1));
     GURL finish_url(URLRequestSlowDownloadJob::kFinishDownloadUrl);
     ui_test_utils::NavigateToURLWithDisposition(
@@ -447,15 +449,15 @@ class DownloadExtensionTest : public ExtensionApiTest {
     EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::COMPLETE));
   }
 
-  DownloadTestObserver* CreateDownloadObserver(size_t download_count) {
-    return new DownloadTestObserverTerminal(
+  content::DownloadTestObserver* CreateDownloadObserver(size_t download_count) {
+    return new content::DownloadTestObserverTerminal(
         GetCurrentManager(), download_count,
-        DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL);
+        content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL);
   }
 
-  DownloadTestObserver* CreateInProgressDownloadObserver(
+  content::DownloadTestObserver* CreateInProgressDownloadObserver(
       size_t download_count) {
-    return new DownloadTestObserverInProgress(
+    return new content::DownloadTestObserverInProgress(
         GetCurrentManager(), download_count);
   }
 
@@ -504,29 +506,6 @@ class DownloadExtensionTest : public ExtensionApiTest {
 
   std::string DownloadItemIdAsArgList(const DownloadItem* download_item) {
     return base::StringPrintf("[%d]", download_item->GetId());
-  }
-
-  // Checks if a data URL encoded image is a PNG of a given size.
-  void ExpectDataURLIsPNGWithSize(const std::string& url, int expected_size) {
-    std::string mime_type;
-    std::string charset;
-    std::string data;
-    EXPECT_FALSE(url.empty());
-    EXPECT_TRUE(net::DataURL::Parse(GURL(url), &mime_type, &charset, &data));
-    EXPECT_STREQ("image/png", mime_type.c_str());
-    EXPECT_FALSE(data.empty());
-
-    if (data.empty())
-      return;
-
-    int width = -1, height = -1;
-    std::vector<unsigned char> decoded_data;
-    EXPECT_TRUE(gfx::PNGCodec::Decode(
-        reinterpret_cast<const unsigned char*>(data.c_str()), data.length(),
-        gfx::PNGCodec::FORMAT_RGBA, &decoded_data,
-        &width, &height));
-    EXPECT_EQ(expected_size, width);
-    EXPECT_EQ(expected_size, height);
   }
 
   const FilePath& downloads_directory() {
@@ -649,9 +628,11 @@ class TestProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
   virtual ~TestProtocolHandler() {}
 
   virtual net::URLRequestJob* MaybeCreateJob(
-      net::URLRequest* request) const OVERRIDE {
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const OVERRIDE {
     return new webkit_blob::BlobURLRequestJob(
         request,
+        network_delegate,
         blob_storage_controller_->GetBlobDataFromUrl(request->url()),
         base::MessageLoopProxy::current());
   }
@@ -679,7 +660,7 @@ class TestURLRequestContext : public net::URLRequestContext {
   }
 
  private:
-  net::URLRequestJobFactory job_factory_;
+  net::URLRequestJobFactoryImpl job_factory_;
   scoped_ptr<webkit_blob::BlobStorageController> blob_storage_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(TestURLRequestContext);
@@ -700,7 +681,8 @@ class HTML5FileWriter {
       events_listener_(events_listener),
       blob_data_(new webkit_blob::BlobData()),
       payload_(payload),
-      fs_(BrowserContext::GetFileSystemContext(profile_)) {
+      fs_(BrowserContext::GetDefaultStoragePartition(profile_)->
+          GetFileSystemContext()) {
     CHECK(profile_);
     CHECK(events_listener_);
     CHECK(fs_);
@@ -741,8 +723,9 @@ class HTML5FileWriter {
         &HTML5FileWriter::CreateFile, base::Unretained(this))));
   }
 
-  fileapi::FileSystemOperationInterface* operation() {
-    return fs_->CreateFileSystemOperation(fileapi::FileSystemURL(GURL(root_)));
+  fileapi::FileSystemOperation* operation() {
+    return fs_->CreateFileSystemOperation(
+        fileapi::FileSystemURL(GURL(root_)), NULL);
   }
 
   void CreateFile() {
@@ -896,105 +879,85 @@ IN_PROC_BROWSER_TEST_F(
                error.c_str());
 }
 
-// Test downloads.getFileIcon() on in-progress, finished, cancelled and deleted
-// download items.
-// The test fails under ASan, see http://crbug.com/138211
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_DownloadExtensionTest_FileIcon_Active \
-    DISABLED_DownloadExtensionTest_FileIcon_Active
-#else
-#define MAYBE_DownloadExtensionTest_FileIcon_Active \
-    DownloadExtensionTest_FileIcon_Active
-#endif
-IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-    MAYBE_DownloadExtensionTest_FileIcon_Active) {
-  DownloadItem* download_item = CreateSlowTestDownload();
-  ASSERT_TRUE(download_item);
-
-  // Get the icon for the in-progress download.  This call should succeed even
-  // if the file type isn't registered.
-  std::string args = base::StringPrintf("[%d, {}]", download_item->GetId());
-  std::string result_string;
-  EXPECT_TRUE(RunFunctionAndReturnString(new DownloadsGetFileIconFunction(),
-                                         args, &result_string));
-
-  // Note: We are checking if the result is a Data URL that has encoded
-  // image/png data for an icon of a specific size. Of these, only the icon size
-  // is specified in the API contract. The image type (image/png) and URL type
-  // (Data) are implementation details.
-
-  // The default size for icons returned by getFileIcon() is 32x32.
-  ExpectDataURLIsPNGWithSize(result_string, 32);
-
-  // Test whether the correct path is being pased into the icon extractor.
-  FilePath expected_path(download_item->GetTargetFilePath());
+UIThreadExtensionFunction* MockedGetFileIconFunction(
+    const FilePath& expected_path,
+    IconLoader::IconSize icon_size,
+    const std::string& response) {
   scoped_refptr<DownloadsGetFileIconFunction> function(
       new DownloadsGetFileIconFunction());
   function->SetIconExtractorForTesting(new MockIconExtractorImpl(
-      expected_path, IconLoader::NORMAL, "foo"));
-  EXPECT_TRUE(RunFunctionAndReturnString(function.release(), args,
-                                         &result_string));
+      expected_path, icon_size, response));
+  return function.release();
+}
+
+// Test downloads.getFileIcon() on in-progress, finished, cancelled and deleted
+// download items.
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+    DownloadExtensionTest_FileIcon_Active) {
+  DownloadItem* download_item = CreateSlowTestDownload();
+  ASSERT_TRUE(download_item);
+  std::string args32(base::StringPrintf("[%d, {\"size\": 32}]",
+                     download_item->GetId()));
+  std::string result_string;
+
+  // Get the icon for the in-progress download.  This call should succeed even
+  // if the file type isn't registered.
+  // Test whether the correct path is being pased into the icon extractor.
+  EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+          download_item->GetTargetFilePath(), IconLoader::NORMAL, "foo"),
+      base::StringPrintf("[%d, {}]", download_item->GetId()), &result_string));
 
   // Now try a 16x16 icon.
-  args = base::StringPrintf("[%d, {\"size\": 16}]", download_item->GetId());
-  EXPECT_TRUE(RunFunctionAndReturnString(new DownloadsGetFileIconFunction(),
-                                         args, &result_string));
-  ExpectDataURLIsPNGWithSize(result_string, 16);
+  EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+          download_item->GetTargetFilePath(), IconLoader::SMALL, "foo"),
+      base::StringPrintf("[%d, {\"size\": 16}]", download_item->GetId()),
+      &result_string));
 
   // Explicitly asking for 32x32 should give us a 32x32 icon.
-  args = base::StringPrintf("[%d, {\"size\": 32}]", download_item->GetId());
-  EXPECT_TRUE(RunFunctionAndReturnString(new DownloadsGetFileIconFunction(),
-                                         args, &result_string));
-  ExpectDataURLIsPNGWithSize(result_string, 32);
+  EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+          download_item->GetTargetFilePath(), IconLoader::NORMAL, "foo"),
+      args32, &result_string));
 
   // Finish the download and try again.
   FinishPendingSlowDownloads();
   EXPECT_EQ(DownloadItem::COMPLETE, download_item->GetState());
-  EXPECT_TRUE(RunFunctionAndReturnString(new DownloadsGetFileIconFunction(),
-                                         args, &result_string));
-  ExpectDataURLIsPNGWithSize(result_string, 32);
+  EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+          download_item->GetTargetFilePath(), IconLoader::NORMAL, "foo"),
+      args32, &result_string));
 
   // Check the path passed to the icon extractor post-completion.
-  function = new DownloadsGetFileIconFunction();
-  function->SetIconExtractorForTesting(new MockIconExtractorImpl(
-      expected_path, IconLoader::NORMAL, "foo"));
-  EXPECT_TRUE(RunFunctionAndReturnString(function.release(), args,
-                                         &result_string));
+  EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+          download_item->GetTargetFilePath(), IconLoader::NORMAL, "foo"),
+      args32, &result_string));
 
   // Now create another download.
   download_item = CreateSlowTestDownload();
+  args32 = base::StringPrintf("[%d, {\"size\": 32}]", download_item->GetId());
   ASSERT_TRUE(download_item);
-  expected_path = download_item->GetTargetFilePath();
 
   // Cancel the download. As long as the download has a target path, we should
   // be able to query the file icon.
   download_item->Cancel(true);
   // Let cleanup complete on the FILE thread.
   content::RunAllPendingInMessageLoop(BrowserThread::FILE);
-  args = base::StringPrintf("[%d, {\"size\": 32}]", download_item->GetId());
-  EXPECT_TRUE(RunFunctionAndReturnString(new DownloadsGetFileIconFunction(),
-                                         args, &result_string));
-  ExpectDataURLIsPNGWithSize(result_string, 32);
-
   // Check the path passed to the icon extractor post-cancellation.
-  function = new DownloadsGetFileIconFunction();
-  function->SetIconExtractorForTesting(new MockIconExtractorImpl(
-      expected_path, IconLoader::NORMAL, "foo"));
-  EXPECT_TRUE(RunFunctionAndReturnString(function.release(), args,
-                                         &result_string));
+  EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+          download_item->GetTargetFilePath(), IconLoader::NORMAL, "foo"),
+      args32,
+      &result_string));
 
   // Simulate an error during icon load by invoking the mock with an empty
   // result string.
-  function = new DownloadsGetFileIconFunction();
-  function->SetIconExtractorForTesting(new MockIconExtractorImpl(
-      expected_path, IconLoader::NORMAL, ""));
-  std::string error = RunFunctionAndReturnError(function.release(), args);
+  std::string error = RunFunctionAndReturnError(MockedGetFileIconFunction(
+        download_item->GetTargetFilePath(), IconLoader::NORMAL, ""),
+      args32);
   EXPECT_STREQ(download_extension_errors::kIconNotFoundError,
                error.c_str());
 
   // Once the download item is deleted, we should return kInvalidOperationError.
   download_item->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
-  error = RunFunctionAndReturnError(new DownloadsGetFileIconFunction(), args);
+  download_item = NULL;
+  error = RunFunctionAndReturnError(new DownloadsGetFileIconFunction(), args32);
   EXPECT_STREQ(download_extension_errors::kInvalidOperationError,
                error.c_str());
 }
@@ -1003,16 +966,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 // whether they exist or not.  If the file doesn't exist we should receive a
 // generic icon from the OS/toolkit that may or may not be specific to the file
 // type.
-// The test fails under ASan, see http://crbug.com/138211
-#if defined(ADDRESS_SANITIZER)
-#define MAYBE_DownloadExtensionTest_FileIcon_History \
-    DISABLED_DownloadExtensionTest_FileIcon_History
-#else
-#define MAYBE_DownloadExtensionTest_FileIcon_History \
-    DownloadExtensionTest_FileIcon_History
-#endif
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-    MAYBE_DownloadExtensionTest_FileIcon_History) {
+    DownloadExtensionTest_FileIcon_History) {
   const HistoryDownloadInfo kHistoryInfo[] = {
     { FILE_PATH_LITERAL("real.txt"),
       DownloadItem::COMPLETE,
@@ -1035,25 +990,13 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   for (DownloadManager::DownloadVector::iterator iter = all_downloads.begin();
        iter != all_downloads.end();
        ++iter) {
-    std::string args(base::StringPrintf("[%d, {\"size\": 32}]",
-                                        (*iter)->GetId()));
     std::string result_string;
-    EXPECT_TRUE(RunFunctionAndReturnString(
-        new DownloadsGetFileIconFunction(), args, &result_string));
-    // Note: We are checking if the result is a Data URL that has encoded
-    // image/png data for an icon of a specific size. Of these, only the icon
-    // size is specified in the API contract. The image type (image/png) and URL
-    // type (Data) are implementation details.
-    ExpectDataURLIsPNGWithSize(result_string, 32);
-
     // Use a MockIconExtractorImpl to test if the correct path is being passed
     // into the DownloadFileIconExtractor.
-    scoped_refptr<DownloadsGetFileIconFunction> function(
-        new DownloadsGetFileIconFunction());
-    function->SetIconExtractorForTesting(new MockIconExtractorImpl(
-        (*iter)->GetFullPath(), IconLoader::NORMAL, "hello"));
-    EXPECT_TRUE(RunFunctionAndReturnString(function.release(), args,
-                                           &result_string));
+    EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+            (*iter)->GetFullPath(), IconLoader::NORMAL, "hello"),
+        base::StringPrintf("[%d, {\"size\": 32}]", (*iter)->GetId()),
+        &result_string));
     EXPECT_STREQ("hello", result_string.c_str());
   }
 
@@ -1320,18 +1263,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 // test that on-record downloads are visible in both incognito and on-record
 // contexts, for DownloadsSearchFunction, DownloadsPauseFunction,
 // DownloadsResumeFunction, and DownloadsCancelFunction.
-// The test fails under ASan, see http://crbug.com/138211
-#if defined(ADDRESS_SANITIZER)
-#define \
-    MAYBE_DownloadExtensionTest_SearchPauseResumeCancelGetFileIconIncognito \
-    DISABLED_DownloadExtensionTest_SearchPauseResumeCancelGetFileIconIncognito
-#else
-#define \
-    MAYBE_DownloadExtensionTest_SearchPauseResumeCancelGetFileIconIncognito \
-    DownloadExtensionTest_SearchPauseResumeCancelGetFileIconIncognito
-#endif
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-    MAYBE_DownloadExtensionTest_SearchPauseResumeCancelGetFileIconIncognito) {
+    DownloadExtensionTest_SearchPauseResumeCancelGetFileIconIncognito) {
   scoped_ptr<base::Value> result_value;
   base::ListValue* result_list = NULL;
   base::DictionaryValue* result_dict = NULL;
@@ -1349,13 +1282,11 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   GoOffTheRecord();
   DownloadItem* off_item = CreateSlowTestDownload();
   ASSERT_TRUE(off_item);
-  ASSERT_TRUE(off_item->IsOtr());
   off_item_arg = DownloadItemIdAsArgList(off_item);
 
   GoOnTheRecord();
   DownloadItem* on_item = CreateSlowTestDownload();
   ASSERT_TRUE(on_item);
-  ASSERT_FALSE(on_item->IsOtr());
   on_item_arg = DownloadItemIdAsArgList(on_item);
   ASSERT_TRUE(on_item->GetFullPath() != off_item->GetFullPath());
 
@@ -1412,11 +1343,11 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   // Do the FileIcon test for both the on- and off-items while off the record.
   // NOTE(benjhayden): This does not include the FileIcon test from history,
   // just active downloads. This shouldn't be a problem.
-  EXPECT_TRUE(RunFunctionAndReturnString(
-      new DownloadsGetFileIconFunction(),
+  EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+          on_item->GetTargetFilePath(), IconLoader::NORMAL, "foo"),
       base::StringPrintf("[%d, {}]", on_item->GetId()), &result_string));
-  EXPECT_TRUE(RunFunctionAndReturnString(
-      new DownloadsGetFileIconFunction(),
+  EXPECT_TRUE(RunFunctionAndReturnString(MockedGetFileIconFunction(
+          off_item->GetTargetFilePath(), IconLoader::NORMAL, "foo"),
       base::StringPrintf("[%d, {}]", off_item->GetId()), &result_string));
 
   // Do the pause/resume/cancel test for both the on- and off-items while off

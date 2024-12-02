@@ -16,7 +16,7 @@
 #include "net/base/server_bound_cert_service.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
-#include "net/url_request/url_request_job_factory.h"
+#include "net/url_request/url_request_job_factory_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -67,8 +67,12 @@ void TestURLRequestContext::Init() {
   if (!cert_verifier())
     context_storage_.set_cert_verifier(net::CertVerifier::CreateDefault());
   if (!ftp_transaction_factory()) {
+#if !defined(DISABLE_FTP_SUPPORT)
     context_storage_.set_ftp_transaction_factory(
         new net::FtpNetworkLayer(host_resolver()));
+#else
+    context_storage_.set_ftp_transaction_factory(NULL);
+#endif  // !defined(DISABLE_FTP_SUPPORT)
   }
   if (!ssl_config_service())
     context_storage_.set_ssl_config_service(new net::SSLConfigServiceDefaults);
@@ -109,7 +113,7 @@ void TestURLRequestContext::Init() {
   if (accept_charset().empty())
     set_accept_charset("iso-8859-1,*,utf-8");
   if (!job_factory())
-    context_storage_.set_job_factory(new net::URLRequestJobFactory);
+    context_storage_.set_job_factory(new net::URLRequestJobFactoryImpl);
 }
 
 TestURLRequest::TestURLRequest(const GURL& url,
@@ -500,8 +504,9 @@ int TestNetworkDelegate::OnBeforeSocketStreamConnect(
   return net::OK;
 }
 
-void TestNetworkDelegate::OnCacheWaitStateChange(const net::URLRequest& request,
-                                                 CacheWaitState state) {
+void TestNetworkDelegate::OnRequestWaitStateChange(
+    const net::URLRequest& request,
+    RequestWaitState state) {
 }
 
 // static
@@ -522,4 +527,32 @@ ScopedCustomUrlRequestTestHttpHost::~ScopedCustomUrlRequestTestHttpHost() {
 // static
 const std::string& ScopedCustomUrlRequestTestHttpHost::value() {
   return value_;
+}
+
+TestJobInterceptor::TestJobInterceptor() : main_intercept_job_(NULL) {
+}
+
+net::URLRequestJob* TestJobInterceptor::MaybeIntercept(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const {
+  net::URLRequestJob* job = main_intercept_job_;
+  main_intercept_job_ = NULL;
+  return job;
+}
+
+net::URLRequestJob* TestJobInterceptor::MaybeInterceptRedirect(
+      const GURL& location,
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const {
+  return NULL;
+}
+
+net::URLRequestJob* TestJobInterceptor::MaybeInterceptResponse(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const {
+  return NULL;
+}
+
+void TestJobInterceptor::set_main_intercept_job(net::URLRequestJob* job) {
+  main_intercept_job_ = job;
 }

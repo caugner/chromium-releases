@@ -19,7 +19,6 @@
 
 namespace media {
 
-class ChunkDemuxerClient;
 class ChunkDemuxerStream;
 class FFmpegURLProtocol;
 
@@ -33,7 +32,14 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
     kReachedIdLimit,  // Reached ID limit. We can't handle any more IDs.
   };
 
-  explicit ChunkDemuxer(ChunkDemuxerClient* client);
+  typedef base::Callback<void(scoped_array<uint8> init_data,
+                              int init_data_size)> NeedKeyCB;
+
+  // |open_cb| Run when Initialize() is called to signal that the demuxer
+  //   is ready to receive media data via AppenData().
+  // |need_key_cb| Run when the demuxer determines that an encryption key is
+  //   needed to decrypt the content.
+  ChunkDemuxer(const base::Closure& open_cb, const NeedKeyCB& need_key_cb);
 
   // Demuxer implementation.
   virtual void Initialize(DemuxerHost* host,
@@ -47,6 +53,7 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
 
   // Methods used by an external object to control this demuxer.
   void StartWaitingForSeek();
+  void CancelPendingSeek();
 
   // Registers a new |id| to use for AppendData() calls. |type| indicates
   // the MIME type for the data that we intend to append for this ID.
@@ -73,11 +80,15 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   // it can accept a new segment.
   void Abort(const std::string& id);
 
-  // Sets a time |offset| in seconds to be applied to subsequent buffers
-  // appended to the source buffer assicated with |id|. Returns true if the
-  // offset is set properly, false if the offset cannot be applied because we're
-  // in the middle of parsing a media segment.
-  bool SetTimestampOffset(const std::string& id, double offset);
+  // Notifies the demuxer that the duration of the media has changed to
+  // |duration|.
+  void SetDuration(base::TimeDelta duration);
+
+  // Sets a time |offset| to be applied to subsequent buffers appended to the
+  // source buffer assicated with |id|. Returns true if the offset is set
+  // properly, false if the offset cannot be applied because we're in the
+  // middle of parsing a media segment.
+  bool SetTimestampOffset(const std::string& id, base::TimeDelta offset);
 
   // Signals an EndOfStream request.
   // Returns false if called in an unexpected state or if there is a gap between
@@ -92,7 +103,6 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   enum State {
     WAITING_FOR_INIT,
     INITIALIZING,
-    WAITING_FOR_START_TIME,
     INITIALIZED,
     ENDED,
     PARSE_ERROR,
@@ -156,7 +166,9 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   State state_;
 
   DemuxerHost* host_;
-  ChunkDemuxerClient* client_;
+  base::Closure open_cb_;
+  NeedKeyCB need_key_cb_;
+
   PipelineStatusCB init_cb_;
   PipelineStatusCB seek_cb_;
 
@@ -181,8 +193,6 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   // removed with RemoveID() but can not be re-added (yet).
   std::string source_id_audio_;
   std::string source_id_video_;
-
-  base::TimeDelta start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(ChunkDemuxer);
 };

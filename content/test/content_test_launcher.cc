@@ -8,14 +8,14 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/scoped_temp_dir.h"
 #include "base/test/test_suite.h"
-#include "content/public/app/content_main.h"
+#include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/content_test_suite_base.h"
 #include "content/shell/shell_content_browser_client.h"
 #include "content/shell/shell_content_client.h"
 #include "content/shell/shell_main_delegate.h"
+#include "content/shell/shell_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_WIN)
@@ -94,35 +94,20 @@ class ContentTestLauncherDelegate : public test_launcher::TestLauncherDelegate {
     return std::string();
   }
 
-  virtual bool Run(int argc, char** argv, int* return_code) OVERRIDE {
-#if defined(OS_WIN) || defined(OS_LINUX)
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
-    if (command_line->HasSwitch(switches::kProcessType)) {
-      ShellMainDelegate delegate;
-#if defined(OS_WIN)
-      sandbox::SandboxInterfaceInfo sandbox_info = {0};
-      InitializeSandboxInfo(&sandbox_info);
-      *return_code =
-          ContentMain(GetModuleHandle(NULL), &sandbox_info, &delegate);
-#elif defined(OS_LINUX)
-      *return_code = ContentMain(argc,
-                                          const_cast<const char**>(argv),
-                                          &delegate);
-#endif  // defined(OS_WIN)
-      return true;
-    }
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
-
-    return false;
-  }
-
   virtual int RunTestSuite(int argc, char** argv) OVERRIDE {
     return ContentBrowserTestSuite(argc, argv).Run();
   }
 
   virtual bool AdjustChildProcessCommandLine(
-      CommandLine* command_line) OVERRIDE {
+      CommandLine* command_line, const FilePath& temp_data_dir) OVERRIDE {
+    command_line->AppendSwitchPath(switches::kContentShellDataPath,
+                                   temp_data_dir);
     return true;
+  }
+
+ protected:
+  virtual content::ContentMainDelegate* CreateContentMainDelegate() OVERRIDE {
+    return new ShellMainDelegate();
   }
 
  private:
@@ -132,6 +117,10 @@ class ContentTestLauncherDelegate : public test_launcher::TestLauncherDelegate {
 }  // namespace content
 
 int main(int argc, char** argv) {
+  // Always use fake WebRTC devices in this binary since we want to be able
+  // to test WebRTC even if we don't have any devices on the system.
+  media_stream::MediaStreamManager::AlwaysUseFakeDevice();
+
   content::ContentTestLauncherDelegate launcher_delegate;
   return test_launcher::LaunchTests(&launcher_delegate, argc, argv);
 }

@@ -179,7 +179,7 @@ std::string CollectDriverVersionNVidia() {
   }
   int event_base = 0, error_base = 0;
   if (!XNVCTRLQueryExtension(display, &event_base, &error_base)) {
-    LOG(INFO) << "NVCtrl extension does not exits.";
+    LOG(INFO) << "NVCtrl extension does not exist.";
     return std::string();
   }
   int screen_count = ScreenCount(display);
@@ -245,6 +245,18 @@ bool CollectPreliminaryGraphicsInfo(content::GPUInfo* gpu_info) {
       if (!driver_version.empty()) {
         gpu_info->driver_vendor = "NVIDIA";
         gpu_info->driver_version = driver_version;
+      }
+      break;
+    case kVendorIDIntel:
+      // In dual-GPU cases, sometimes PCI scan only gives us the
+      // integrated GPU (i.e., the Intel one).
+      driver_version = CollectDriverVersionNVidia();
+      if (!driver_version.empty()) {
+        gpu_info->driver_vendor = "NVIDIA";
+        gpu_info->driver_version = driver_version;
+        // Machines with more than two GPUs are not handled.
+        if (gpu_info->secondary_gpus.size() <= 1)
+          gpu_info->optimus = true;
       }
       break;
   }

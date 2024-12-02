@@ -11,19 +11,25 @@
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "webkit/glue/web_intent_service_data.h"
 
 class MockIntentPickerDelegate : public WebIntentPickerDelegate {
  public:
   MockIntentPickerDelegate() {}
   virtual ~MockIntentPickerDelegate() {}
 
-  MOCK_METHOD2(OnServiceChosen, void(const GURL& url, Disposition disposition));
+  MOCK_METHOD2(OnServiceChosen, void(
+      const GURL& url,
+      webkit_glue::WebIntentServiceData::Disposition disposition));
+  MOCK_METHOD2(OnExtensionLinkClicked, void(
+      const std::string& id,
+      WindowOpenDisposition disposition));
   MOCK_METHOD1(OnInlineDispositionWebContentsCreated,
       void(content::WebContents* web_contents));
   MOCK_METHOD1(OnExtensionInstallRequested, void(const std::string& id));
-  MOCK_METHOD1(OnExtensionLinkClicked, void(const std::string& id));
-  MOCK_METHOD0(OnSuggestionsLinkClicked, void ());
-  MOCK_METHOD0(OnPickerClosed, void());
+  MOCK_METHOD1(OnSuggestionsLinkClicked,
+      void(WindowOpenDisposition disposition));
+  MOCK_METHOD0(OnUserCancelledPickerDialog, void());
   MOCK_METHOD0(OnChooseAnotherService, void());
   MOCK_METHOD0(OnClosing, void());
 };
@@ -61,7 +67,7 @@ void WebIntentSheetControllerBrowserTest::CreatePicker() {
 IN_PROC_BROWSER_TEST_F(WebIntentSheetControllerBrowserTest, CloseWillClose) {
   CreateBubble(chrome::GetActiveTabContents(browser()));
 
-  EXPECT_CALL(delegate_, OnPickerClosed()).Times(0);
+  EXPECT_CALL(delegate_, OnUserCancelledPickerDialog()).Times(0);
   EXPECT_CALL(delegate_, OnClosing());
   picker_->Close();
 
@@ -74,11 +80,11 @@ IN_PROC_BROWSER_TEST_F(WebIntentSheetControllerBrowserTest,
 
   GURL url;
   model_.AddInstalledService(string16(), url,
-      WebIntentPickerModel::DISPOSITION_WINDOW);
+      webkit_glue::WebIntentServiceData::DISPOSITION_WINDOW);
 
   EXPECT_CALL(delegate_, OnServiceChosen(
-      url, WebIntentPickerModel::DISPOSITION_WINDOW));
-  EXPECT_CALL(delegate_, OnPickerClosed()).Times(0);
+      url, webkit_glue::WebIntentServiceData::DISPOSITION_WINDOW));
+  EXPECT_CALL(delegate_, OnUserCancelledPickerDialog()).Times(0);
   EXPECT_CALL(delegate_, OnClosing());
 
   picker_->OnServiceChosen(0);
@@ -90,7 +96,7 @@ IN_PROC_BROWSER_TEST_F(WebIntentSheetControllerBrowserTest,
 IN_PROC_BROWSER_TEST_F(WebIntentSheetControllerBrowserTest,
     OnCancelledWillSignalClose) {
   CreatePicker();
-  EXPECT_CALL(delegate_, OnPickerClosed());
+  EXPECT_CALL(delegate_, OnUserCancelledPickerDialog());
   EXPECT_CALL(delegate_, OnClosing());
   picker_->OnCancelled();
 

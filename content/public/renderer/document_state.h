@@ -177,7 +177,7 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
   webkit::forms::PasswordForm* password_form_data() const {
     return password_form_data_.get();
   }
-  void set_password_form_data(webkit::forms::PasswordForm* data);
+  void set_password_form_data(scoped_ptr<webkit::forms::PasswordForm> data);
 
   const std::string& security_info() const { return security_info_; }
   void set_security_info(const std::string& security_info) {
@@ -195,6 +195,15 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
   bool is_overriding_user_agent() const { return is_overriding_user_agent_; }
   void set_is_overriding_user_agent(bool state) {
     is_overriding_user_agent_ = state;
+  }
+
+  // True if we have to reset the scroll and scale state of the page
+  // after the provisional load has been committed.
+  bool must_reset_scroll_and_scale_state() const {
+    return must_reset_scroll_and_scale_state_;
+  }
+  void set_must_reset_scroll_and_scale_state(bool state) {
+    must_reset_scroll_and_scale_state_ = state;
   }
 
   void set_was_prefetcher(bool value) { was_prefetcher_ = value; }
@@ -279,6 +288,7 @@ class DocumentState : public WebKit::WebDataSource::ExtraData {
   bool use_error_page_;
 
   bool is_overriding_user_agent_;
+  bool must_reset_scroll_and_scale_state_;
 
   // A prefetcher is a page that contains link rel=prefetch elements.
   bool was_prefetcher_;

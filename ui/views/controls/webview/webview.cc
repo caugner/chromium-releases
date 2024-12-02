@@ -15,6 +15,7 @@
 #include "ipc/ipc_message.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/events/event.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/views_delegate.h"
@@ -65,7 +66,7 @@ void WebView::SetWebContents(content::WebContents* web_contents) {
 
 void WebView::LoadInitialURL(const GURL& url) {
   GetWebContents()->GetController().LoadURL(
-      url, content::Referrer(), content::PAGE_TRANSITION_START_PAGE,
+      url, content::Referrer(), content::PAGE_TRANSITION_AUTO_TOPLEVEL,
       std::string());
 }
 
@@ -99,7 +100,7 @@ void WebView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     AttachWebContents();
 }
 
-bool WebView::SkipDefaultKeyEventProcessing(const views::KeyEvent& event) {
+bool WebView::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
   if (allow_accelerators_)
     return FocusManager::IsTabTraversalKeyEvent(event);
 
@@ -216,9 +217,12 @@ void WebView::DetachWebContents() {
     wcv_holder_->Detach();
 #if defined(OS_WIN) && !defined(USE_AURA)
     // TODO(beng): This should either not be necessary, or be done implicitly by
-    //             NativeViewHostWin on Detach(). As it stands, this is needed
-    //             so that the view of the detached contents knows to tell the
-    //             renderer its been hidden.
+    // NativeViewHostWin on Detach(). As it stands, this is needed so that the
+    // view of the detached contents knows to tell the renderer it's been
+    // hidden.
+    //
+    // Moving this out of here would also mean we wouldn't be potentially
+    // calling member functions on a half-destroyed WebContents.
     ShowWindow(web_contents_->GetNativeView(), SW_HIDE);
 #endif
   }
@@ -249,7 +253,6 @@ content::WebContents* WebView::CreateWebContents(
     return content::WebContents::Create(browser_context,
                                         site_instance,
                                         MSG_ROUTING_NONE,
-                                        NULL,
                                         NULL);
   }
 

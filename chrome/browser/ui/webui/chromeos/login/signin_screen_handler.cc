@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/cancelable_callback.h"
 #include "base/command_line.h"
 #include "base/hash_tables.h"
 #include "base/logging.h"
@@ -28,11 +29,12 @@
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/gaia/gaia_auth_util.h"
-#include "chrome/common/net/gaia/gaia_urls.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
@@ -41,6 +43,9 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "google_apis/gaia/gaia_auth_util.h"
+#include "google_apis/gaia/gaia_switches.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -77,7 +82,10 @@ const char kKeyCanRemove[] = "canRemove";
 const char kKeyOauthTokenStatus[] = "oauthTokenStatus";
 
 // Max number of users to show.
-const int kMaxUsers = 5;
+const size_t kMaxUsers = 5;
+
+// Timeout to smooth temporary network state transitions for flaky networks.
+const int kNetworkStateCheckDelayMs = 5000;
 
 const char kReasonNetworkChanged[] = "network changed";
 const char kReasonProxyChanged[] = "proxy changed";
@@ -148,29 +156,32 @@ class NetworkStateInformer
   // CaptivePortalWindowProxyDelegate implementation:
   virtual void OnPortalDetected() OVERRIDE;
 
-  // Returns active network's service path. It can be used to uniquely
+  // Returns active network's ID. It can be used to uniquely
   // identify the network.
-  std::string active_network_service_path() {
-    return active_network_service_path_;
+  std::string active_network_id() {
+    return last_online_network_id_;
   }
 
   bool is_online() { return state_ == ONLINE; }
 
  private:
-  enum State {OFFLINE, ONLINE, CAPTIVE_PORTAL};
+  enum State {OFFLINE, ONLINE, CAPTIVE_PORTAL, CONNECTING};
 
   bool UpdateState(chromeos::NetworkLibrary* cros);
+  void UpdateStateAndNotify();
 
   void SendStateToObservers(const std::string& reason);
 
   content::NotificationRegistrar registrar_;
   base::hash_set<std::string> observers_;
-  std::string active_network_service_path_;
   ConnectionType last_network_type_;
   std::string network_name_;
   State state_;
   SigninScreenHandler* handler_;
   content::WebUI* web_ui_;
+  base::CancelableClosure check_state_;
+  std::string last_online_network_id_;
+  std::string last_connected_network_id_;
 };
 
 // NetworkStateInformer implementation -----------------------------------------
@@ -219,8 +230,38 @@ void NetworkStateInformer::SendState(const std::string& callback,
 }
 
 void NetworkStateInformer::OnNetworkManagerChanged(NetworkLibrary* cros) {
-  if (UpdateState(cros)) {
-    SendStateToObservers(kReasonNetworkChanged);
+  State new_state = OFFLINE;
+  std::string new_network_id;
+  const Network* active_network = cros->active_network();
+  if (active_network) {
+    if (active_network->online()) {
+      new_state = ONLINE;
+      new_network_id = active_network->unique_id();
+    } else if (active_network->connecting()) {
+      new_state = CONNECTING;
+      new_network_id = active_network->unique_id();
+    } else if (active_network->restricted_pool()) {
+      new_state = CAPTIVE_PORTAL;
+    }
+  }
+
+  if ((state_ != ONLINE && (new_state == ONLINE || new_state == CONNECTING)) ||
+      (state_ == ONLINE && (new_state == ONLINE || new_state == CONNECTING) &&
+       new_network_id != last_online_network_id_)) {
+    if (new_state == ONLINE)
+      last_online_network_id_ = new_network_id;
+    // Transitions {OFFLINE, PORTAL} -> ONLINE and connections to different
+    // network are processed without delay.
+    UpdateStateAndNotify();
+  } else {
+    check_state_.Cancel();
+    check_state_.Reset(
+        base::Bind(&NetworkStateInformer::UpdateStateAndNotify,
+                   base::Unretained(this)));
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        check_state_.callback(),
+        base::TimeDelta::FromMilliseconds(kNetworkStateCheckDelayMs));
   }
 }
 
@@ -242,30 +283,41 @@ void NetworkStateInformer::OnPortalDetected() {
 
 bool NetworkStateInformer::UpdateState(NetworkLibrary* cros) {
   State new_state = OFFLINE;
-  std::string new_active_network_service_path;
+  std::string new_network_id;
   network_name_.clear();
 
   const Network* active_network = cros->active_network();
   if (active_network) {
     if (active_network->online())
       new_state = ONLINE;
+    else if (active_network->connecting())
+      new_state = CONNECTING;
     else if (active_network->restricted_pool())
       new_state = CAPTIVE_PORTAL;
 
-    new_active_network_service_path = active_network->service_path();
+    new_network_id = active_network->unique_id();
     network_name_ = active_network->name();
     last_network_type_ = active_network->type();
   }
 
   bool updated = (new_state != state_) ||
-      (active_network_service_path_ != new_active_network_service_path);
+      (new_state != OFFLINE && new_network_id != last_connected_network_id_);
   state_ = new_state;
-  active_network_service_path_ = new_active_network_service_path;
+  if (state_ != OFFLINE)
+    last_connected_network_id_ = new_network_id;
 
   if (updated && state_ == ONLINE)
     handler_->OnNetworkReady();
 
   return updated;
+}
+
+void NetworkStateInformer::UpdateStateAndNotify() {
+  // Cancel pending update request if any.
+  check_state_.Cancel();
+
+  if (UpdateState(CrosLibrary::Get()->GetNetworkLibrary()))
+    SendStateToObservers(kReasonNetworkChanged);
 }
 
 void NetworkStateInformer::SendStateToObservers(const std::string& reason) {
@@ -333,6 +385,8 @@ void SigninScreenHandler::GetLocalizedStrings(
       l10n_util::GetStringUTF16(IDS_SHUTDOWN_BUTTON));
   localized_strings->SetString("addUser",
       l10n_util::GetStringUTF16(IDS_ADD_USER_BUTTON));
+  localized_strings->SetString("browseAsGuest",
+      l10n_util::GetStringUTF16(IDS_GO_INCOGNITO_BUTTON));
   localized_strings->SetString("cancel",
       l10n_util::GetStringUTF16(IDS_CANCEL));
   localized_strings->SetString("signOutUser",
@@ -361,6 +415,11 @@ void SigninScreenHandler::GetLocalizedStrings(
       l10n_util::GetStringUTF16(IDS_OFFLINE_LOGIN_HTML));
   localized_strings->SetString("removeUser",
       l10n_util::GetStringUTF16(IDS_LOGIN_REMOVE));
+  localized_strings->SetString("disabledAddUserTooltip",
+      l10n_util::GetStringUTF16(
+          g_browser_process->browser_policy_connector()->IsEnterpriseManaged() ?
+            IDS_DISABLED_ADD_USER_TOOLTIP_ENTERPRISE :
+            IDS_DISABLED_ADD_USER_TOOLTIP));
 
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled()) {
     localized_strings->SetString("demoLoginMessage",
@@ -388,8 +447,14 @@ void SigninScreenHandler::Show(bool oobe_ui) {
     input_method::InputMethodManager::GetInstance()->GetXKeyboard()->
         SetCapsLockEnabled(false);
 
-    ShowScreen(kAccountPickerScreen, NULL);
+    DictionaryValue params;
+    params.SetBoolean("disableAddUser", AllWhitelistedUsersPresent());
+    ShowScreen(kAccountPickerScreen, &params);
   }
+}
+
+void SigninScreenHandler::ShowRetailModeLoginSpinner() {
+  web_ui()->CallJavascriptFunction("showLoginSpinner");
 }
 
 void SigninScreenHandler::SetDelegate(SigninScreenHandlerDelegate* delegate) {
@@ -474,6 +539,9 @@ void SigninScreenHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("toggleEnrollmentScreen",
       base::Bind(&SigninScreenHandler::HandleToggleEnrollmentScreen,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("toggleResetScreen",
+      base::Bind(&SigninScreenHandler::HandleToggleResetScreen,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("launchHelpApp",
       base::Bind(&SigninScreenHandler::HandleLaunchHelpApp,
@@ -601,10 +669,12 @@ void SigninScreenHandler::OnCapsLockChange(bool enabled) {
 void SigninScreenHandler::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED)
+  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED) {
     UpdateAuthExtension();
-  else
+    UpdateAddButtonStatus();
+  } else {
     NOTREACHED() << "Unexpected notification " << type;
+  }
 }
 
 void SigninScreenHandler::OnDnsCleared() {
@@ -621,7 +691,7 @@ void SigninScreenHandler::ShowSigninScreenIfReady() {
   if (gaia_silent_load_ &&
       (!network_state_informer_->is_online() ||
        gaia_silent_load_network_ !=
-           network_state_informer_->active_network_service_path())) {
+          network_state_informer_->active_network_id())) {
     // Network has changed. Force Gaia reload.
     gaia_silent_load_ = false;
     // Gaia page will be realoded, so focus isn't stolen anymore.
@@ -702,6 +772,12 @@ void SigninScreenHandler::UpdateAuthExtension() {
   UpdateAuthParamsFromSettings(&params, CrosSettings::Get());
   web_ui()->CallJavascriptFunction("login.GaiaSigninScreen.updateAuthExtension",
                                    params);
+}
+
+void SigninScreenHandler::UpdateAddButtonStatus() {
+  base::FundamentalValue disabled(AllWhitelistedUsersPresent());
+  web_ui()->CallJavascriptFunction(
+      "cr.ui.login.DisplayManager.updateAddUserButtonStatus", disabled);
 }
 
 void SigninScreenHandler::ShowSigninScreenForCreds(
@@ -834,6 +910,7 @@ void SigninScreenHandler::HandleRemoveUser(const base::ListValue* args) {
   }
 
   delegate_->RemoveUser(email);
+  UpdateAddButtonStatus();
 }
 
 void SigninScreenHandler::HandleShowAddUser(const base::ListValue* args) {
@@ -859,6 +936,16 @@ void SigninScreenHandler::HandleToggleEnrollmentScreen(
     delegate_->ShowEnterpriseEnrollmentScreen();
 }
 
+void SigninScreenHandler::HandleToggleResetScreen(
+    const base::ListValue* args) {
+  if (delegate_ &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableFactoryReset) &&
+      !g_browser_process->browser_policy_connector()->IsEnterpriseManaged()) {
+    delegate_->ShowResetScreen();
+  }
+}
+
 void SigninScreenHandler::HandleLaunchHelpApp(const base::ListValue* args) {
   if (!delegate_)
     return;
@@ -877,9 +964,8 @@ void SigninScreenHandler::HandleLaunchHelpApp(const base::ListValue* args) {
 void SigninScreenHandler::SendUserList(bool animated) {
   if (!delegate_)
     return;
-  bool show_guest = delegate_->IsShowGuest();
 
-  size_t max_non_owner_users = show_guest ? kMaxUsers - 2 : kMaxUsers - 1;
+  size_t max_non_owner_users = kMaxUsers - 1;
   size_t non_owner_count = 0;
 
   ListValue users_list;
@@ -918,27 +1004,25 @@ void SigninScreenHandler::SendUserList(bool animated) {
     }
   }
 
-  if (show_guest) {
-    // Add the Guest to the user list.
-    DictionaryValue* guest_dict = new DictionaryValue();
-    guest_dict->SetString(kKeyUsername, "");
-    guest_dict->SetString(kKeyEmailAddress, "");
-    guest_dict->SetString(kKeyDisplayName,
-                          l10n_util::GetStringUTF16(IDS_GUEST));
-    guest_dict->SetBoolean(kKeyCanRemove, false);
-    guest_dict->SetInteger(kKeyOauthTokenStatus,
-                           User::OAUTH_TOKEN_STATUS_UNKNOWN);
-    users_list.Append(guest_dict);
-  }
-
-  // Call the Javascript callback
   base::FundamentalValue animated_value(animated);
+  base::FundamentalValue guest_value(delegate_->IsShowGuest());
   web_ui()->CallJavascriptFunction("login.AccountPickerScreen.loadUsers",
-                                   users_list, animated_value);
+                                   users_list, animated_value, guest_value);
 }
 
 void SigninScreenHandler::HandleAccountPickerReady(
     const base::ListValue* args) {
+  LOG(INFO) << "Login WebUI >> AccountPickerReady";
+
+  PrefService* prefs = g_browser_process->local_state();
+  if (prefs->GetBoolean(prefs::kFactoryResetRequested)) {
+    prefs->SetBoolean(prefs::kFactoryResetRequested, false);
+    prefs->CommitPendingWrite();
+    base::ListValue args;
+    HandleToggleResetScreen(&args);
+    return;
+  }
+
   is_account_picker_showing_first_time_ = true;
   MaybePreloadAuthExtension();
 
@@ -1059,8 +1143,14 @@ void SigninScreenHandler::HandleOpenProxySettings(const base::ListValue* args) {
 }
 
 void SigninScreenHandler::HandleLoginVisible(const base::ListValue* args) {
-  LOG(INFO) << "Login WebUI >> LoginVisible, webui_visible_: "
-            << webui_visible_;
+  std::string source;
+  if (!args->GetString(0, &source)) {
+    NOTREACHED();
+    return;
+  }
+
+  LOG(INFO) << "Login WebUI >> LoginVisible, source: " << source
+            << ", webui_visible_: " << webui_visible_;
   if (!webui_visible_) {
     // There might be multiple messages from OOBE UI so send notifications after
     // the first one only.
@@ -1092,10 +1182,8 @@ void SigninScreenHandler::StartClearingCookies() {
   if (cookie_remover_)
     cookie_remover_->RemoveObserver(this);
 
-  cookie_remover_ = new BrowsingDataRemover(
-      Profile::FromWebUI(web_ui()),
-      BrowsingDataRemover::EVERYTHING,
-      base::Time::Now());
+  cookie_remover_ = BrowsingDataRemover::CreateForUnboundedRange(
+      Profile::FromWebUI(web_ui()));
   cookie_remover_->AddObserver(this);
   cookie_remover_->Remove(BrowsingDataRemover::REMOVE_SITE_DATA,
                           BrowsingDataHelper::UNPROTECTED_WEB);
@@ -1114,10 +1202,34 @@ void SigninScreenHandler::MaybePreloadAuthExtension() {
       !dns_clear_task_running_ &&
       network_state_informer_->is_online()) {
     gaia_silent_load_ = true;
-    gaia_silent_load_network_ =
-        network_state_informer_->active_network_service_path();
+    gaia_silent_load_network_ = network_state_informer_->active_network_id();
     LoadAuthExtension(true, true, false);
   }
+}
+
+bool SigninScreenHandler::AllWhitelistedUsersPresent() {
+  CrosSettings* cros_settings = CrosSettings::Get();
+  bool allow_new_user = false;
+  cros_settings->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
+  if (allow_new_user)
+    return false;
+  UserManager* user_manager = UserManager::Get();
+  const UserList& users = user_manager->GetUsers();
+  if (!delegate_ || users.size() > kMaxUsers) {
+    return false;
+  }
+  const base::ListValue* whitelist = NULL;
+  if (!cros_settings->GetList(kAccountsPrefUsers, &whitelist) || !whitelist)
+    return false;
+  for (size_t i = 0; i < whitelist->GetSize(); ++i) {
+    std::string whitelisted_user;
+    // NB: Wildcards in the whitelist are also detected as not present here.
+    if (!whitelist->GetString(i, &whitelisted_user) ||
+        !user_manager->IsKnownUser(whitelisted_user)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace chromeos

@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/string16.h"
 #include "build/build_config.h"
+#include "ui/base/models/menu_separator_types.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/view.h"
 
@@ -90,7 +91,8 @@ class VIEWS_EXPORT MenuItemView : public View {
   // opposite position will be used if base::i18n:IsRTL() is true.
   enum AnchorPosition {
     TOPLEFT,
-    TOPRIGHT
+    TOPRIGHT,
+    BOTTOMCENTER
   };
 
   // Where the menu should be drawn, above or below the bounds (when
@@ -100,8 +102,25 @@ class VIEWS_EXPORT MenuItemView : public View {
   enum MenuPosition {
     POSITION_BEST_FIT,
     POSITION_ABOVE_BOUNDS,
-    POSITION_BELOW_BOUNDS,
-    POSITION_OVER_BOUNDS
+    POSITION_BELOW_BOUNDS
+  };
+
+  // The data structure which is used for the menu size
+  struct MenuItemDimensions {
+    // Width of everything except the accelerator and children views.
+    int standard_width;
+    // The width of all contained views of the item.
+    int children_width;
+    // The amount of space needed to accommodate the accelerator.
+    int accelerator_width;
+    // The height of the menu item.
+    int height;
+
+    MenuItemDimensions()
+        : standard_width(0),
+          children_width(0),
+          accelerator_width(0),
+          height(0) {}
   };
 
   // Constructor for use with the top level menu item. This menu is never
@@ -134,7 +153,8 @@ class VIEWS_EXPORT MenuItemView : public View {
                               int item_id,
                               const string16& label,
                               const gfx::ImageSkia& icon,
-                              Type type);
+                              Type type,
+                              ui::MenuSeparatorType separator_style);
 
   // Remove an item from the menu at a specified index.
   // ChildrenChanged() should be called after removing menu items (whether
@@ -194,7 +214,8 @@ class VIEWS_EXPORT MenuItemView : public View {
   MenuItemView* AppendMenuItemImpl(int item_id,
                                    const string16& label,
                                    const gfx::ImageSkia& icon,
-                                   Type type);
+                                   Type type,
+                                   ui::MenuSeparatorType separator_style);
 
   // Returns the view that contains child menu items. If the submenu has
   // not been creates, this creates it.
@@ -216,11 +237,6 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Returns the type of this menu.
   const Type& GetType() const { return type_; }
-
-  // Returns the requested menu position.
-  const MenuPosition& GetRequestedMenuPosition() {
-    return requested_menu_position_;
-  }
 
   // Sets whether this item is selected. This is invoked as the user moves
   // the mouse around the menu while open.
@@ -255,6 +271,9 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns the preferred size of this item.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
+  // Return the preferred dimensions of the item in pixel.
+  MenuItemDimensions GetPreferredDimensions();
+
   // Returns the object responsible for controlling showing the menu.
   MenuController* GetMenuController();
   const MenuController* GetMenuController() const;
@@ -288,10 +307,6 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Sizes any child views.
   virtual void Layout() OVERRIDE;
 
-  // Returns the amount of space needed to accommodate the accelerator. The
-  // space needed for the accelerator is NOT included in the preferred width.
-  int GetAcceleratorTextWidth();
-
   // Returns true if the menu has mnemonics. This only useful on the root menu
   // item.
   bool has_mnemonics() const { return has_mnemonics_; }
@@ -299,12 +314,6 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Set top and bottom margins in pixels.  If no margin is set or a
   // negative margin is specified then MenuConfig values are used.
   void SetMargins(int top_margin, int bottom_margin);
-
-  // Set the position of the menu with respect to the bounds (top
-  // level only).
-  void set_menu_position(MenuPosition menu_position) {
-    requested_menu_position_ = menu_position;
-  }
 
   // Suppress the right margin if this is set to false.
   void set_use_right_margin(bool use_right_margin) {

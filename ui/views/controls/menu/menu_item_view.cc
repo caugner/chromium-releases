@@ -12,6 +12,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/menu/menu_config.h"
@@ -205,18 +206,20 @@ void MenuItemView::Cancel() {
   }
 }
 
-MenuItemView* MenuItemView::AddMenuItemAt(int index,
-                                          int item_id,
-                                          const string16& label,
-                                          const gfx::ImageSkia& icon,
-                                          Type type) {
+MenuItemView* MenuItemView::AddMenuItemAt(
+    int index,
+    int item_id,
+    const string16& label,
+    const gfx::ImageSkia& icon,
+    Type type,
+    ui::MenuSeparatorType separator_style) {
   DCHECK_NE(type, EMPTY);
   DCHECK_LE(0, index);
   if (!submenu_)
     CreateSubmenu();
   DCHECK_GE(submenu_->child_count(), index);
   if (type == SEPARATOR) {
-    submenu_->AddChildViewAt(new MenuSeparator(), index);
+    submenu_->AddChildViewAt(new MenuSeparator(separator_style), index);
     return NULL;
   }
   MenuItemView* item = new MenuItemView(this, item_id, type);
@@ -224,7 +227,7 @@ MenuItemView* MenuItemView::AddMenuItemAt(int index,
     item->SetTitle(GetDelegate()->GetLabel(item_id));
   else
     item->SetTitle(label);
-  if (!icon.empty())
+  if (!icon.isNull())
     item->SetIcon(icon);
   if (type == SUBMENU)
     item->CreateSubmenu();
@@ -250,18 +253,21 @@ void MenuItemView::RemoveMenuItemAt(int index) {
 MenuItemView* MenuItemView::AppendMenuItem(int item_id,
                                            const string16& label,
                                            Type type) {
-  return AppendMenuItemImpl(item_id, label, gfx::ImageSkia(), type);
+  return AppendMenuItemImpl(item_id, label, gfx::ImageSkia(), type,
+      ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendSubMenu(int item_id,
                                           const string16& label) {
-  return AppendMenuItemImpl(item_id, label, gfx::ImageSkia(), SUBMENU);
+  return AppendMenuItemImpl(item_id, label, gfx::ImageSkia(), SUBMENU,
+      ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendSubMenuWithIcon(int item_id,
                                                   const string16& label,
                                                   const gfx::ImageSkia& icon) {
-  return AppendMenuItemImpl(item_id, label, icon, SUBMENU);
+  return AppendMenuItemImpl(
+      item_id, label, icon, SUBMENU, ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendMenuItemWithLabel(int item_id,
@@ -274,20 +280,23 @@ MenuItemView* MenuItemView::AppendDelegateMenuItem(int item_id) {
 }
 
 void MenuItemView::AppendSeparator() {
-  AppendMenuItemImpl(0, string16(), gfx::ImageSkia(), SEPARATOR);
+  AppendMenuItemImpl(
+      0, string16(), gfx::ImageSkia(), SEPARATOR, ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendMenuItemWithIcon(int item_id,
                                                    const string16& label,
                                                    const gfx::ImageSkia& icon) {
-  return AppendMenuItemImpl(item_id, label, icon, NORMAL);
+  return AppendMenuItemImpl(
+      item_id, label, icon, NORMAL, ui::NORMAL_SEPARATOR);
 }
 
 MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
                                                     int index,
                                                     int id) {
-  gfx::ImageSkia icon;
+  gfx::Image icon;
   string16 label;
+  ui::MenuSeparatorType separator_style = ui::NORMAL_SEPARATOR;
   MenuItemView::Type type;
   ui::MenuModel::ItemType menu_type = model->GetTypeAt(index);
   switch (menu_type) {
@@ -306,6 +315,7 @@ MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
       break;
     case ui::MenuModel::TYPE_SEPARATOR:
       type = MenuItemView::SEPARATOR;
+      separator_style = model->GetSeparatorTypeAt(index);
       break;
     case ui::MenuModel::TYPE_SUBMENU:
       model->GetIconAt(index, &icon);
@@ -318,15 +328,21 @@ MenuItemView* MenuItemView::AppendMenuItemFromModel(ui::MenuModel* model,
       break;
   }
 
-  return AppendMenuItemImpl(id, label, icon, type);
+  return AppendMenuItemImpl(id,
+      label,
+      icon.IsEmpty() ? gfx::ImageSkia() : *icon.ToImageSkia(),
+      type,
+      separator_style);
 }
 
-MenuItemView* MenuItemView::AppendMenuItemImpl(int item_id,
-                                               const string16& label,
-                                               const gfx::ImageSkia& icon,
-                                               Type type) {
+MenuItemView* MenuItemView::AppendMenuItemImpl(
+    int item_id,
+    const string16& label,
+    const gfx::ImageSkia& icon,
+    Type type,
+    ui::MenuSeparatorType separator_style) {
   const int index = submenu_ ? submenu_->child_count() : 0;
-  return AddMenuItemAt(index, item_id, label, icon, type);
+  return AddMenuItemAt(index, item_id, label, icon, type, separator_style);
 }
 
 SubmenuView* MenuItemView::CreateSubmenu() {
@@ -366,7 +382,7 @@ void MenuItemView::SetIcon(const gfx::ImageSkia& icon, int item_id) {
 }
 
 void MenuItemView::SetIcon(const gfx::ImageSkia& icon) {
-  if (icon.empty()) {
+  if (icon.isNull()) {
     SetIconView(NULL);
     return;
   }
@@ -524,11 +540,6 @@ void MenuItemView::Layout() {
       icon_view_->SetPosition(gfx::Point(x, y));
     }
   }
-}
-
-int MenuItemView::GetAcceleratorTextWidth() {
-  string16 text = GetAcceleratorText();
-  return text.empty() ? 0 : GetFont().GetStringWidth(text);
 }
 
 void MenuItemView::SetMargins(int top_margin, int bottom_margin) {
@@ -793,21 +804,39 @@ gfx::Size MenuItemView::GetChildPreferredSize() {
   return gfx::Size(width, height);
 }
 
-gfx::Size MenuItemView::CalculatePreferredSize() {
+MenuItemView::MenuItemDimensions MenuItemView::GetPreferredDimensions() {
   gfx::Size child_size = GetChildPreferredSize();
-  if (IsContainer()) {
-    return gfx::Size(
-        child_size.width(),
-        child_size.height() + GetBottomMargin() + GetTopMargin());
-  }
 
+  MenuItemDimensions dimensions;
+  // Get the container height.
+  dimensions.children_width = child_size.width();
+  dimensions.height = child_size.height() + GetBottomMargin() + GetTopMargin();
+
+  // In case of a container, only the container size needs to be filled.
+  if (IsContainer())
+    return dimensions;
+
+  // Determine the length of the label text.
   const gfx::Font& font = GetFont();
-  int menu_item_height = std::max(font.GetHeight(), child_size.height()) +
-                             GetBottomMargin() + GetTopMargin();
-  return gfx::Size(
-      font.GetStringWidth(title_) + label_start_ +
-          item_right_margin_ + child_size.width(),
-      std::max(menu_item_height, MenuConfig::instance().item_min_height));
+  dimensions.standard_width = font.GetStringWidth(title_) + label_start_ +
+      item_right_margin_;
+  // Determine the length of the accelerator text.
+  string16 text = GetAcceleratorText();
+  dimensions.accelerator_width =
+      text.empty() ? 0 : GetFont().GetStringWidth(text);
+
+  // Determine the height to use.
+  dimensions.height = std::max(dimensions.height,
+      font.GetHeight() + GetBottomMargin() + GetTopMargin());
+  dimensions.height = std::max(dimensions.height,
+      MenuConfig::instance().item_min_height);
+  return dimensions;
+}
+
+gfx::Size MenuItemView::CalculatePreferredSize() {
+  MenuItemView::MenuItemDimensions dimensions = GetPreferredDimensions();
+  return gfx::Size(dimensions.standard_width + dimensions.children_width,
+                   dimensions.height);
 }
 
 string16 MenuItemView::GetAcceleratorText() {

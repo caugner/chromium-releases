@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 
 namespace chrome {
 
@@ -34,7 +34,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_RIGHT, ui::EF_ALT_DOWN, IDC_FORWARD },
   { ui::VKEY_BACK, ui::EF_SHIFT_DOWN, IDC_FORWARD },
   { ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_DEV_TOOLS },
-  { ui::VKEY_F12, ui::EF_NONE, IDC_DEV_TOOLS },
+  { ui::VKEY_F12, ui::EF_NONE, IDC_DEV_TOOLS_TOGGLE },
   { ui::VKEY_J, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     IDC_DEV_TOOLS_CONSOLE },
   { ui::VKEY_C, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
@@ -100,7 +100,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
     IDC_CLEAR_BROWSING_DATA },
   { ui::VKEY_BROWSER_FORWARD, ui::EF_NONE, IDC_FORWARD },
   { ui::VKEY_F2, ui::EF_NONE, IDC_FORWARD },
-  { ui::VKEY_F4, ui::EF_NONE, IDC_FULLSCREEN },
+  { ui::VKEY_F4, ui::EF_SHIFT_DOWN, IDC_FULLSCREEN },
   { ui::VKEY_OEM_2, ui::EF_CONTROL_DOWN, IDC_HELP_PAGE_VIA_KEYBOARD },
   { ui::VKEY_OEM_2, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     IDC_HELP_PAGE_VIA_KEYBOARD },

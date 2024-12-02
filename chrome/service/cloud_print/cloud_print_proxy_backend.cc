@@ -12,8 +12,6 @@
 #include "base/file_util.h"
 #include "base/rand_util.h"
 #include "base/values.h"
-#include "chrome/common/net/gaia/gaia_oauth_client.h"
-#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/service/cloud_print/cloud_print_auth.h"
 #include "chrome/service/cloud_print/cloud_print_connector.h"
 #include "chrome/service/cloud_print/cloud_print_consts.h"
@@ -22,6 +20,8 @@
 #include "chrome/service/gaia/service_gaia_authenticator.h"
 #include "chrome/service/net/service_url_request_context.h"
 #include "chrome/service/service_process.h"
+#include "google_apis/gaia/gaia_oauth_client.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "jingle/notifier/base/notifier_options.h"
@@ -392,6 +392,7 @@ void CloudPrintProxyBackend::Core::InitNotifications(
   notifier_options.request_context_getter =
       g_service_process->GetServiceURLRequestContextGetter();
   notifier_options.auth_mechanism = "X-OAUTH2";
+  notifier_options.try_ssltcp_first = true;
   push_client_ = notifier::PushClient::CreateDefault(notifier_options);
   push_client_->AddObserver(this);
   notifier::Subscription subscription;

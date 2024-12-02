@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var mediaGalleries = chrome.experimental.mediaGalleries;
+var mediaGalleries = chrome.mediaGalleries;
 
 var mediaFileSystemsDirectoryErrorCallback = function(err) {
   chrome.test.fail("Couldn't read from directory: " + err);
 };
 
 var mediaFileSystemsListCallback = function(results) {
-  // There should be a "Pictures" directory on all desktop platforms.
-  var expectedFileSystems = 1;
+  // There should be "Music", "Pictures", and "Videos" directories on all
+  // desktop platforms.
+  var expectedFileSystems = 3;
   // But not on Android and ChromeOS.
   if (/Android/.test(navigator.userAgent) || /CrOS/.test(navigator.userAgent))
     expectedFileSystems = 0;

@@ -25,6 +25,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
@@ -37,6 +38,7 @@
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/favicon_url.h"
@@ -52,6 +54,7 @@
 #include "ui/base/animation/animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/favicon_size.h"
 
 using application_launch::LaunchParams;
 using application_launch::OpenApplication;
@@ -115,7 +118,7 @@ void AppLauncherHandler::CreateAppInfo(
   // impede our ability to determine directionality.
   string16 name = UTF8ToUTF16(extension->name());
   base::i18n::UnadjustStringForLocaleDirection(&name);
-  NewTabUI::SetURLTitleAndDirection(value, name, extension->GetFullLaunchURL());
+  NewTabUI::SetUrlTitleAndDirection(value, name, extension->GetFullLaunchURL());
 
   bool enabled = service->IsExtensionEnabled(extension->id()) &&
       !service->GetTerminatedExtension(extension->id());
@@ -129,7 +132,7 @@ void AppLauncherHandler::CreateAppInfo(
   // Instead of setting grayscale here, we do it in apps_page.js.
   GURL icon_big =
       ExtensionIconSource::GetIconURL(extension,
-                                      ExtensionIconSet::EXTENSION_ICON_LARGE,
+                                      extension_misc::EXTENSION_ICON_LARGE,
                                       ExtensionIconSet::MATCH_BIGGER,
                                       false, &icon_big_exists);
   value->SetString("icon_big", icon_big.spec());
@@ -137,7 +140,7 @@ void AppLauncherHandler::CreateAppInfo(
   bool icon_small_exists = true;
   GURL icon_small =
       ExtensionIconSource::GetIconURL(extension,
-                                      ExtensionIconSet::EXTENSION_ICON_BITTY,
+                                      extension_misc::EXTENSION_ICON_BITTY,
                                       ExtensionIconSet::MATCH_BIGGER,
                                       false, &icon_small_exists);
   value->SetString("icon_small", icon_small.spec());
@@ -162,7 +165,7 @@ void AppLauncherHandler::CreateAppInfo(
     value->Set("notification", SerializeNotification(*notification));
 
   ExtensionSorting* sorting = prefs->extension_sorting();
-  StringOrdinal page_ordinal = sorting->GetPageOrdinal(extension->id());
+  syncer::StringOrdinal page_ordinal = sorting->GetPageOrdinal(extension->id());
   if (!page_ordinal.IsValid()) {
     // Make sure every app has a page ordinal (some predate the page ordinal).
     // The webstore app should be on the first page.
@@ -174,7 +177,7 @@ void AppLauncherHandler::CreateAppInfo(
   value->SetInteger("page_index",
       sorting->PageStringOrdinalAsInteger(page_ordinal));
 
-  StringOrdinal app_launch_ordinal =
+  syncer::StringOrdinal app_launch_ordinal =
       sorting->GetAppLaunchOrdinal(extension->id());
   if (!app_launch_ordinal.IsValid()) {
     // Make sure every app has a launch ordinal (some predate the launch
@@ -185,7 +188,7 @@ void AppLauncherHandler::CreateAppInfo(
         sorting->CreateNextAppLaunchOrdinal(page_ordinal);
     sorting->SetAppLaunchOrdinal(extension->id(), app_launch_ordinal);
   }
-  value->SetString("app_launch_ordinal", app_launch_ordinal.ToString());
+  value->SetString("app_launch_ordinal", app_launch_ordinal.ToInternalValue());
 }
 
 void AppLauncherHandler::RegisterMessages() {
@@ -220,7 +223,7 @@ void AppLauncherHandler::RegisterMessages() {
       base::Bind(&AppLauncherHandler::HandleGenerateAppForLink,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("recordAppLaunchByURL",
-      base::Bind(&AppLauncherHandler::HandleRecordAppLaunchByURL,
+      base::Bind(&AppLauncherHandler::HandleRecordAppLaunchByUrl,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("closeNotification",
       base::Bind(&AppLauncherHandler::HandleNotificationClose,
@@ -649,7 +652,7 @@ void AppLauncherHandler::HandleSetPageIndex(const ListValue* args) {
   double page_index;
   CHECK(args->GetString(0, &extension_id));
   CHECK(args->GetDouble(1, &page_index));
-  const StringOrdinal& page_ordinal =
+  const syncer::StringOrdinal& page_ordinal =
       extension_sorting->PageIntegerAsStringOrdinal(
           static_cast<size_t>(page_index));
 
@@ -684,13 +687,13 @@ void AppLauncherHandler::HandleGenerateAppForLink(const ListValue* args) {
   CHECK(args->GetDouble(2, &page_index));
   ExtensionSorting* extension_sorting =
       extension_service_->extension_prefs()->extension_sorting();
-  const StringOrdinal& page_ordinal =
+  const syncer::StringOrdinal& page_ordinal =
       extension_sorting->PageIntegerAsStringOrdinal(
           static_cast<size_t>(page_index));
 
   Profile* profile = Profile::FromWebUI(web_ui());
   FaviconService* favicon_service =
-      profile->GetFaviconService(Profile::EXPLICIT_ACCESS);
+      FaviconServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
   if (!favicon_service) {
     LOG(ERROR) << "No favicon service";
     return;
@@ -702,13 +705,14 @@ void AppLauncherHandler::HandleGenerateAppForLink(const ListValue* args) {
   install_info->app_url = launch_url;
   install_info->page_ordinal = page_ordinal;
 
-  FaviconService::Handle h = favicon_service->GetFaviconForURL(
-      launch_url, history::FAVICON, &favicon_consumer_,
+  FaviconService::Handle h = favicon_service->GetFaviconImageForURL(
+      FaviconService::FaviconForURLParams(profile, launch_url, history::FAVICON,
+          gfx::kFaviconSize, &favicon_consumer_),
       base::Bind(&AppLauncherHandler::OnFaviconForApp, base::Unretained(this)));
   favicon_consumer_.SetClientData(favicon_service, h, install_info.release());
 }
 
-void AppLauncherHandler::HandleRecordAppLaunchByURL(
+void AppLauncherHandler::HandleRecordAppLaunchByUrl(
     const base::ListValue* args) {
   std::string url;
   CHECK(args->GetString(0, &url));
@@ -719,7 +723,7 @@ void AppLauncherHandler::HandleRecordAppLaunchByURL(
       static_cast<extension_misc::AppLaunchBucket>(static_cast<int>(source));
   CHECK(source < extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
 
-  RecordAppLaunchByURL(Profile::FromWebUI(web_ui()), url, bucket);
+  RecordAppLaunchByUrl(Profile::FromWebUI(web_ui()), url, bucket);
 }
 
 void AppLauncherHandler::HandleNotificationClose(const ListValue* args) {
@@ -752,8 +756,9 @@ void AppLauncherHandler::HandleSetNotificationsDisabled(
   extension_service_->SetAppNotificationDisabled(extension_id, disabled);
 }
 
-void AppLauncherHandler::OnFaviconForApp(FaviconService::Handle handle,
-                                         history::FaviconData data) {
+void AppLauncherHandler::OnFaviconForApp(
+    FaviconService::Handle handle,
+    const history::FaviconImageResult& image_result) {
   scoped_ptr<AppInstallInfo> install_info(
       favicon_consumer_.GetClientDataForCurrentRequest());
   scoped_ptr<WebApplicationInfo> web_app(new WebApplicationInfo());
@@ -762,20 +767,17 @@ void AppLauncherHandler::OnFaviconForApp(FaviconService::Handle handle,
   web_app->app_url = install_info->app_url;
   web_app->urls.push_back(install_info->app_url);
 
-  WebApplicationInfo::IconInfo icon;
-  web_app->icons.push_back(icon);
-  if (data.is_valid() && gfx::PNGCodec::Decode(data.image_data->front(),
-                                               data.image_data->size(),
-                                               &(web_app->icons[0].data))) {
-    web_app->icons[0].url = GURL();
-    web_app->icons[0].width = web_app->icons[0].data.width();
-    web_app->icons[0].height = web_app->icons[0].data.height();
-  } else {
-    web_app->icons.clear();
+  if (!image_result.image.IsEmpty()) {
+    WebApplicationInfo::IconInfo icon;
+    icon.data = image_result.image.AsBitmap();
+    icon.width = icon.data.width();
+    icon.height = icon.data.height();
+    web_app->icons.push_back(icon);
   }
 
   scoped_refptr<CrxInstaller> installer(
       CrxInstaller::Create(extension_service_, NULL));
+  installer->set_error_on_unsupported_requirements(true);
   installer->set_page_ordinal(install_info->page_ordinal);
   installer->InstallWebApp(*web_app);
   attempted_bookmark_app_install_ = true;
@@ -791,7 +793,7 @@ void AppLauncherHandler::SetAppToBeHighlighted() {
 }
 
 // static
-void AppLauncherHandler::RegisterUserPrefs(PrefService* pref_service) {
+void AppLauncherHandler::RegisterUserPrefs(PrefServiceBase* pref_service) {
   pref_service->RegisterListPref(prefs::kNtpAppPageNames,
                                  PrefService::SYNCABLE_PREF);
 }
@@ -821,7 +823,7 @@ void AppLauncherHandler::RecordAppLaunchByID(
 }
 
 // static
-void AppLauncherHandler::RecordAppLaunchByURL(
+void AppLauncherHandler::RecordAppLaunchByUrl(
     Profile* profile,
     std::string escaped_url,
     extension_misc::AppLaunchBucket bucket) {

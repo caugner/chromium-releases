@@ -29,8 +29,11 @@ class ApiResourceEventNotifier;
 // associated with the underlying ApiResource to deliver completion messages.
 class UsbDeviceResource : public ApiResource {
  public:
-  UsbDeviceResource(ApiResourceEventNotifier* notifier, UsbDevice* device);
+  UsbDeviceResource(const std::string& owner_extension_id,
+                    ApiResourceEventNotifier* notifier, UsbDevice* device);
   virtual ~UsbDeviceResource();
+
+  void Close();
 
   // All of the *Transfer variants that are exposed here adapt their arguments
   // for the underlying UsbDevice's interface and invoke the corresponding

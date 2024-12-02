@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_TARGET_PROCESS_H__
-#define SANDBOX_SRC_TARGET_PROCESS_H__
+#ifndef SANDBOX_WIN_SRC_TARGET_PROCESS_H_
+#define SANDBOX_WIN_SRC_TARGET_PROCESS_H_
 
 #include <windows.h>
 
@@ -14,8 +14,17 @@
 #include "sandbox/win/src/crosscall_server.h"
 #include "sandbox/win/src/sandbox_types.h"
 
+namespace base {
+namespace win {
+
+class StartupInformation;
+
+};  // namespace win
+};  // namespace base
+
 namespace sandbox {
 
+class AttributeList;
 class SharedMemIPCServer;
 class ThreadProvider;
 
@@ -38,7 +47,7 @@ class TargetProcess {
   // Creates the new target process. The process is created suspended.
   DWORD Create(const wchar_t* exe_path,
                const wchar_t* command_line,
-               const wchar_t* desktop,
+               const base::win::StartupInformation& startup_info,
                base::win::ScopedProcessInformation* target_info);
 
   // Destroys the target process.
@@ -119,4 +128,4 @@ TargetProcess* MakeTestTargetProcess(HANDLE process, HMODULE base_address);
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_TARGET_PROCESS_H__
+#endif  // SANDBOX_WIN_SRC_TARGET_PROCESS_H_

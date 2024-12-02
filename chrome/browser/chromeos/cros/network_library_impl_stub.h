@@ -62,10 +62,14 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
   virtual void RequestCellularRegister(
       const std::string& network_id) OVERRIDE;
   virtual void SetCellularDataRoamingAllowed(bool new_value) OVERRIDE;
+  virtual void SetCarrier(const std::string& carrier,
+                          const NetworkOperationCallback& completed) OVERRIDE;
   virtual bool IsCellularAlwaysInRoaming() OVERRIDE;
   virtual void RequestNetworkScan() OVERRIDE;
 
   virtual bool GetWifiAccessPoints(WifiAccessPointVector* result) OVERRIDE;
+
+  virtual void RefreshIPConfig(Network* network) OVERRIDE;
 
   virtual void DisconnectFromNetwork(const Network* network) OVERRIDE;
 
@@ -75,7 +79,12 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
       const std::string& device_path,
       std::string* hardware_address,
       HardwareAddressFormat format) OVERRIDE;
-  virtual void SetIPConfig(const NetworkIPConfig& ipconfig) OVERRIDE;
+  virtual void SetIPParameters(const std::string& service_path,
+                               const std::string& address,
+                               const std::string& netmask,
+                               const std::string& gateway,
+                               const std::string& name_servers,
+                               int dhcp_usage_mask) OVERRIDE;
 
  private:
   void AddStubNetwork(Network* network, NetworkProfileType profile_type);

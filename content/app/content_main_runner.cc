@@ -4,6 +4,8 @@
 
 #include "content/public/app/content_main_runner.h"
 
+#include <stdlib.h>
+
 #include "base/allocator/allocator_extension.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
@@ -17,6 +19,8 @@
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/profiler/alternate_timer.h"
+#include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "content/browser/browser_main.h"
@@ -41,7 +45,7 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/win/dpi.h"
-#include "webkit/glue/webkit_glue.h"
+#include "webkit/user_agent/user_agent.h"
 
 #if defined(USE_TCMALLOC)
 #include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
@@ -54,10 +58,12 @@
 #include <malloc.h>
 #elif defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
+#if !defined(OS_IOS)
 #include "base/mach_ipc_mac.h"
 #include "base/system_monitor/system_monitor.h"
 #include "content/browser/mach_broker_mac.h"
 #include "content/common/sandbox_init_mac.h"
+#endif  // !OS_IOS
 #endif  // OS_WIN
 
 #if defined(OS_POSIX)
@@ -92,6 +98,58 @@ extern int ZygoteMain(const MainFunctionParams&,
 }  // namespace content
 #endif
 
+namespace {
+#if defined(OS_WIN)
+// In order to have Theme support, we need to connect to the theme service.
+// This needs to be done before we lock down the process. Officially this
+// can be done with OpenThemeData() but it fails unless you pass a valid
+// window at least the first time. Interestingly, the very act of creating a
+// window also sets the connection to the theme service.
+void EnableThemeSupportOnAllWindowStations() {
+  HDESK desktop_handle = ::OpenInputDesktop(0, FALSE, READ_CONTROL);
+  if (desktop_handle) {
+    // This means we are running in an input desktop, which implies WinSta0.
+    ::CloseDesktop(desktop_handle);
+    return;
+  }
+
+  HWINSTA current_station = ::GetProcessWindowStation();
+  DCHECK(current_station);
+
+  HWINSTA winsta0 = ::OpenWindowStationA("WinSta0", FALSE, GENERIC_READ);
+  if (!winsta0 || !::SetProcessWindowStation(winsta0)) {
+    // Could not set the alternate window station. There is a possibility
+    // that the theme wont be correctly initialized.
+    NOTREACHED() << "Unable to switch to WinSta0, we: "<< ::GetLastError();
+  }
+
+  HWND window = ::CreateWindowExW(0, L"Static", L"", WS_POPUP | WS_DISABLED,
+                                  CW_USEDEFAULT, 0, 0, 0,  HWND_MESSAGE, NULL,
+                                  ::GetModuleHandleA(NULL), NULL);
+  if (!window) {
+    DLOG(WARNING) << "failed to enable theme support";
+  } else {
+    ::DestroyWindow(window);
+    window = NULL;
+  }
+
+  // Revert the window station.
+  if (!::SetProcessWindowStation(current_station)) {
+    // We failed to switch back to the secure window station. This might
+    // confuse the process enough that we should kill it now.
+    LOG(FATAL) << "Failed to restore alternate window station";
+  }
+
+  if (!::CloseWindowStation(winsta0)) {
+    // We might be leaking a winsta0 handle.  This is a security risk, but
+    // since we allow fail over to no desktop protection in low memory
+    // condition, this is not a big risk.
+    NOTREACHED();
+  }
+}
+#endif  // defined(OS_WIN)
+}  // namespace
+
 namespace content {
 
 base::LazyInstance<ContentBrowserClient>
@@ -107,7 +165,7 @@ base::LazyInstance<ContentUtilityClient>
 
 static CAppModule _Module;
 
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
 
 // Completes the Mach IPC handshake by sending this process' task port to the
 // parent process.  The parent is listening on the Mach port given by
@@ -184,6 +242,7 @@ void CommonSubprocessInit(const std::string& process_type) {
 
 static base::ProcessId GetBrowserPid(const CommandLine& command_line) {
   base::ProcessId browser_pid = base::GetCurrentProcId();
+#if !defined(OS_IOS)
   if (command_line.HasSwitch(switches::kProcessChannelID)) {
 #if defined(OS_WIN) || defined(OS_MACOSX)
     std::string channel_name =
@@ -211,6 +270,7 @@ static base::ProcessId GetBrowserPid(const CommandLine& command_line) {
             base::GetParentProcessId(base::GetCurrentProcId()));
 #endif
   }
+#endif  // !OS_IOS
   return browser_pid;
 }
 
@@ -339,6 +399,7 @@ int RunZygote(const MainFunctionParams& main_function_params,
 }
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 
+#if !defined(OS_IOS)
 // Run the FooMain() for a given process type.
 // If |process_type| is empty, runs BrowserMain().
 // Returns the exit code for this process.
@@ -391,6 +452,7 @@ int RunNamedProcessTypeMain(
   NOTREACHED() << "Unknown process type: " << process_type;
   return 1;
 }
+#endif  // !OS_IOS
 
 class ContentMainRunnerImpl : public ContentMainRunner {
  public:
@@ -410,6 +472,10 @@ class ContentMainRunnerImpl : public ContentMainRunner {
   }
 
 #if defined(USE_TCMALLOC)
+static bool GetPropertyThunk(const char* name, size_t* value) {
+  return MallocExtension::instance()->GetNumericProperty(name, value);
+}
+
 static void GetStatsThunk(char* buffer, int buffer_length) {
   MallocExtension::instance()->GetStats(buffer, buffer_length);
 }
@@ -448,8 +514,20 @@ static void ReleaseFreeMemoryThunk() {
     tc_set_new_mode(1);
 
     // On windows, we've already set these thunks up in _heap_init()
+    base::allocator::SetGetPropertyFunction(GetPropertyThunk);
     base::allocator::SetGetStatsFunction(GetStatsThunk);
     base::allocator::SetReleaseFreeMemoryFunction(ReleaseFreeMemoryThunk);
+
+    // Provide optional hook for monitoring allocation quantities on a
+    // per-thread basis.  Only set the hook if the environment indicates this
+    // needs to be enabled.
+    const char* profiling = getenv(tracked_objects::kAlternateProfilerTime);
+    if (profiling &&
+        (atoi(profiling) == tracked_objects::TIME_SOURCE_TYPE_TCMALLOC)) {
+      tracked_objects::SetAlternateTimeSource(
+          MallocExtension::GetBytesAllocatedOnCurrentThread,
+          tracked_objects::TIME_SOURCE_TYPE_TCMALLOC);
+    }
 #endif
 
     // On Android,
@@ -458,7 +536,7 @@ static void ReleaseFreeMemoryThunk() {
     //   stack trace when crashing.
     // - The ipc_fd is passed through the Java service.
     // Thus, these are all disabled.
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
     // Set C library locale to make sure CommandLine can parse argument values
     // in correct encoding.
     setlocale(LC_ALL, "");
@@ -468,7 +546,7 @@ static void ReleaseFreeMemoryThunk() {
     base::GlobalDescriptors* g_fds = base::GlobalDescriptors::GetInstance();
     g_fds->Set(kPrimaryIPCChannel,
                kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
-#endif
+#endif  // !OS_ANDROID && !OS_IOS
 
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
     g_fds->Set(kCrashDumpSignal,
@@ -483,11 +561,12 @@ static void ReleaseFreeMemoryThunk() {
     base::EnableTerminationOnHeapCorruption();
     base::EnableTerminationOnOutOfMemory();
 
-    // On Android, AtExitManager is set up when library is loaded.
-#if !defined(OS_ANDROID)
     // The exit manager is in charge of calling the dtors of singleton objects.
+    // On Android, AtExitManager is set up when library is loaded.
+    // On iOS, it's set up in main(), which can't call directly through to here.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
     exit_manager_.reset(new base::AtExitManager);
-#endif
+#endif  // !OS_ANDROID && !OS_IOS
 
 #if defined(OS_MACOSX)
     // We need this pool for all the objects created before we get to the
@@ -516,6 +595,12 @@ static void ReleaseFreeMemoryThunk() {
       SetContentClient(&empty_content_client_);
     ContentClientInitializer::Set(process_type, delegate_);
 
+#if defined(OS_WIN)
+    // Route stdio to parent console (if any) or create one.
+    if (command_line.HasSwitch(switches::kEnableLogging))
+      base::RouteStdioToConsole();
+#endif
+
     // Enable startup tracing asap to avoid early TRACE_EVENT calls being
     // ignored.
     if (command_line.HasSwitch(switches::kTraceStartup)) {
@@ -523,7 +608,7 @@ static void ReleaseFreeMemoryThunk() {
           command_line.GetSwitchValueASCII(switches::kTraceStartup));
     }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
     // We need to allocate the IO Ports before the Sandbox is initialized or
     // the first instance of SystemMonitor is created.
     // It's important not to allocate the ports for processes which don't
@@ -543,6 +628,9 @@ static void ReleaseFreeMemoryThunk() {
       SendTaskPortToParentProcess();
     }
 #elif defined(OS_WIN)
+    // This must be done early enough since some helper functions like
+    // IsTouchEnanbled, needed to load resources, may call into the theme dll.
+    EnableThemeSupportOnAllWindowStations();
 #if defined(ENABLE_HIDPI)
     ui::EnableHighDPISupport();
 #endif
@@ -595,7 +683,7 @@ static void ReleaseFreeMemoryThunk() {
 
 #if defined(OS_WIN)
     CHECK(InitializeSandbox(sandbox_info));
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
     if (process_type == switches::kRendererProcess ||
         process_type == switches::kPpapiPluginProcess ||
         (delegate && delegate->DelaySandboxInitialization(process_type))) {
@@ -609,7 +697,7 @@ static void ReleaseFreeMemoryThunk() {
     if (delegate)
       delegate->SandboxInitialized(process_type);
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_IOS)
     SetProcessTitleFromCommandLine(argv);
 #endif
 
@@ -631,7 +719,11 @@ static void ReleaseFreeMemoryThunk() {
     main_params.autorelease_pool = autorelease_pool_.get();
 #endif
 
+#if !defined(OS_IOS)
     return RunNamedProcessTypeMain(process_type, main_params, delegate_);
+#else
+    return 1;
+#endif
   }
 
   virtual void Shutdown() OVERRIDE {

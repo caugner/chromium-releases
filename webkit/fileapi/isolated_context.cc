@@ -46,18 +46,11 @@ bool IsSinglePathIsolatedFileSystem(FileSystemType type) {
     case kFileSystemTypeDragged:
       return false;
 
-    // Regular file systems.
-    case kFileSystemTypeIsolated:
-    case kFileSystemTypeNativeMedia:
-    case kFileSystemTypeDeviceMedia:
-    case kFileSystemTypeTemporary:
-    case kFileSystemTypePersistent:
-    case kFileSystemTypeExternal:
-    case kFileSystemTypeTest:
-      return true;
-
     case kFileSystemTypeUnknown:
       NOTREACHED();
+      return true;
+
+    default:
       return true;
   }
   NOTREACHED();
@@ -112,9 +105,60 @@ bool IsolatedContext::FileInfoSet::AddPathWithName(
 
 //--------------------------------------------------------------------------
 
+class IsolatedContext::Instance {
+ public:
+  typedef FileSystemType MountType;
+
+  // For a single-path isolated file system, which could be registered by
+  // IsolatedContext::RegisterFileSystemForPath().
+  // Most of isolated file system contexts should be of this type.
+  Instance(FileSystemType type, const FileInfo& file_info);
+
+  // For a multi-paths isolated file system.  As of writing only file system
+  // type which could have multi-paths is Dragged file system, and
+  // could be registered by IsolatedContext::RegisterDraggedFileSystem().
+  Instance(FileSystemType type, const std::set<FileInfo>& files);
+
+  // For a single-path external file system.
+  Instance(FileSystemType type, const FilePath& path);
+
+  ~Instance();
+
+  MountType mount_type() const { return mount_type_; }
+  FileSystemType type() const { return type_; }
+  const FileInfo& file_info() const { return file_info_; }
+  const std::set<FileInfo>& files() const { return files_; }
+  int ref_counts() const { return ref_counts_; }
+
+  void AddRef() { ++ref_counts_; }
+  void RemoveRef() { --ref_counts_; }
+
+  bool ResolvePathForName(const std::string& name, FilePath* path) const;
+
+  // Returns true if the instance is a single-path instance.
+  bool IsSinglePathInstance() const;
+
+ private:
+  const MountType mount_type_;
+  const FileSystemType type_;
+
+  // For single-path instance.
+  const FileInfo file_info_;
+
+  // For multiple-path instance (e.g. dragged file system).
+  const std::set<FileInfo> files_;
+
+  // Reference counts. Note that an isolated filesystem is created with ref==0
+  // and will get deleted when the ref count reaches <=0.
+  int ref_counts_;
+
+  DISALLOW_COPY_AND_ASSIGN(Instance);
+};
+
 IsolatedContext::Instance::Instance(FileSystemType type,
                                     const FileInfo& file_info)
-    : type_(type),
+    : mount_type_(kFileSystemTypeIsolated),
+      type_(type),
       file_info_(file_info),
       ref_counts_(0) {
   DCHECK(IsSinglePathIsolatedFileSystem(type_));
@@ -122,10 +166,20 @@ IsolatedContext::Instance::Instance(FileSystemType type,
 
 IsolatedContext::Instance::Instance(FileSystemType type,
                                     const std::set<FileInfo>& files)
-    : type_(type),
+    : mount_type_(kFileSystemTypeIsolated),
+      type_(type),
       files_(files),
       ref_counts_(0) {
   DCHECK(!IsSinglePathIsolatedFileSystem(type_));
+}
+
+IsolatedContext::Instance::Instance(FileSystemType type,
+                                    const FilePath& path)
+    : mount_type_(kFileSystemTypeExternal),
+      type_(type),
+      file_info_(FileInfo("", path)),
+      ref_counts_(0) {
+  DCHECK(IsSinglePathIsolatedFileSystem(type_));
 }
 
 IsolatedContext::Instance::~Instance() {}
@@ -155,6 +209,11 @@ IsolatedContext* IsolatedContext::GetInstance() {
   return g_isolated_context.Pointer();
 }
 
+// static
+bool IsolatedContext::IsIsolatedType(FileSystemType type) {
+  return type == kFileSystemTypeIsolated || type == kFileSystemTypeExternal;
+}
+
 std::string IsolatedContext::RegisterDraggedFileSystem(
     const FileInfoSet& files) {
   base::AutoLock locker(lock_);
@@ -166,8 +225,9 @@ std::string IsolatedContext::RegisterDraggedFileSystem(
 
 std::string IsolatedContext::RegisterFileSystemForPath(
     FileSystemType type,
-    const FilePath& path,
+    const FilePath& path_in,
     std::string* register_name) {
+  FilePath path(path_in.NormalizePathSeparators());
   DCHECK(!path.ReferencesParent() && path.IsAbsolute());
   std::string name;
   if (register_name && !register_name->empty()) {
@@ -185,8 +245,39 @@ std::string IsolatedContext::RegisterFileSystemForPath(
   return filesystem_id;
 }
 
-void IsolatedContext::RevokeFileSystemByPath(const FilePath& path) {
+bool IsolatedContext::RegisterExternalFileSystem(const std::string& mount_name,
+                                                 FileSystemType type,
+                                                 const FilePath& path) {
   base::AutoLock locker(lock_);
+  IDToInstance::iterator found = instance_map_.find(mount_name);
+  if (found != instance_map_.end())
+    return false;
+  instance_map_[mount_name] = new Instance(type, path);
+  path_to_id_map_[path].insert(mount_name);
+  return true;
+}
+
+std::vector<IsolatedContext::FileInfo>
+IsolatedContext::GetExternalMountPoints() const {
+  base::AutoLock locker(lock_);
+  std::vector<FileInfo> files;
+  for (IDToInstance::const_iterator iter = instance_map_.begin();
+       iter != instance_map_.end();
+       ++iter) {
+    if (iter->second->mount_type() == kFileSystemTypeExternal)
+      files.push_back(FileInfo(iter->first, iter->second->file_info().path));
+  }
+  return files;
+}
+
+bool IsolatedContext::RevokeFileSystem(const std::string& filesystem_id) {
+  base::AutoLock locker(lock_);
+  return UnregisterFileSystem(filesystem_id);
+}
+
+void IsolatedContext::RevokeFileSystemByPath(const FilePath& path_in) {
+  base::AutoLock locker(lock_);
+  FilePath path(path_in.NormalizePathSeparators());
   PathToID::iterator ids_iter = path_to_id_map_.find(path);
   if (ids_iter == path_to_id_map_.end())
     return;
@@ -218,58 +309,69 @@ void IsolatedContext::RemoveReference(const std::string& filesystem_id) {
   Instance* instance = found->second;
   DCHECK(instance->ref_counts() > 0);
   instance->RemoveRef();
-  if (instance->ref_counts() == 0) {
-    if (instance->IsSinglePathInstance()) {
-      PathToID::iterator ids_iter = path_to_id_map_.find(
-          instance->file_info().path);
-      DCHECK(ids_iter != path_to_id_map_.end());
-      ids_iter->second.erase(filesystem_id);
-      if (ids_iter->second.empty())
-        path_to_id_map_.erase(ids_iter);
-    }
-    delete instance;
-    instance_map_.erase(found);
+  if (instance->ref_counts() == 0 &&
+      instance->mount_type() != kFileSystemTypeExternal) {
+    bool deleted = UnregisterFileSystem(filesystem_id);
+    DCHECK(deleted);
   }
 }
 
 bool IsolatedContext::CrackIsolatedPath(const FilePath& virtual_path,
-                                        std::string* filesystem_id,
+                                        std::string* id_or_name,
                                         FileSystemType* type,
                                         FilePath* path) const {
-  DCHECK(filesystem_id);
+  DCHECK(id_or_name);
   DCHECK(path);
 
   // This should not contain any '..' references.
   if (virtual_path.ReferencesParent())
     return false;
 
-  // The virtual_path should comprise <filesystem_id> and <relative_path> parts.
+  // The virtual_path should comprise <id_or_name> and <relative_path> parts.
   std::vector<FilePath::StringType> components;
   virtual_path.GetComponents(&components);
   if (components.size() < 1)
     return false;
-
-  base::AutoLock locker(lock_);
-  std::string fsid = FilePath(components[0]).MaybeAsASCII();
+  std::vector<FilePath::StringType>::iterator component_iter =
+      components.begin();
+  std::string fsid = FilePath(*component_iter++).MaybeAsASCII();
   if (fsid.empty())
     return false;
-  IDToInstance::const_iterator found_instance = instance_map_.find(fsid);
-  if (found_instance == instance_map_.end())
-    return false;
-  *filesystem_id = fsid;
-  if (type)
-    *type = found_instance->second->type();
-  if (components.size() == 1) {
-    path->clear();
-    return true;
-  }
-  // components[1] should be a name of the registered paths.
+
   FilePath cracked_path;
-  std::string name = FilePath(components[1]).AsUTF8Unsafe();
-  if (!found_instance->second->ResolvePathForName(name, &cracked_path))
-    return false;
-  for (size_t i = 2; i < components.size(); ++i)
-    cracked_path = cracked_path.Append(components[i]);
+  {
+    base::AutoLock locker(lock_);
+    IDToInstance::const_iterator found_instance = instance_map_.find(fsid);
+    if (found_instance == instance_map_.end())
+      return false;
+    *id_or_name = fsid;
+    const Instance* instance = found_instance->second;
+    if (type)
+      *type = instance->type();
+    switch (instance->mount_type()) {
+      case kFileSystemTypeIsolated: {
+        if (component_iter == components.end()) {
+          // The virtual root case.
+          path->clear();
+          return true;
+        }
+        // *component_iter should be a name of the registered path.
+        std::string name = FilePath(*component_iter++).AsUTF8Unsafe();
+        if (!instance->ResolvePathForName(name, &cracked_path))
+          return false;
+        break;
+      }
+      case kFileSystemTypeExternal:
+        cracked_path = instance->file_info().path;
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
+  }
+
+  for (; component_iter != components.end(); ++component_iter)
+    cracked_path = cracked_path.Append(*component_iter);
   *path = cracked_path;
   return true;
 }
@@ -311,8 +413,28 @@ IsolatedContext::~IsolatedContext() {
                                        instance_map_.end());
 }
 
+bool IsolatedContext::UnregisterFileSystem(const std::string& filesystem_id) {
+  lock_.AssertAcquired();
+  IDToInstance::iterator found = instance_map_.find(filesystem_id);
+  if (found == instance_map_.end())
+    return false;
+  Instance* instance = found->second;
+  if (instance->IsSinglePathInstance()) {
+    PathToID::iterator ids_iter = path_to_id_map_.find(
+        instance->file_info().path);
+    DCHECK(ids_iter != path_to_id_map_.end());
+    ids_iter->second.erase(filesystem_id);
+    if (ids_iter->second.empty())
+      path_to_id_map_.erase(ids_iter);
+  }
+  delete found->second;
+  instance_map_.erase(found);
+  return true;
+}
+
 std::string IsolatedContext::GetNewFileSystemId() const {
   // Returns an arbitrary random string which must be unique in the map.
+  lock_.AssertAcquired();
   uint32 random_data[4];
   std::string id;
   do {

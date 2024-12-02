@@ -9,47 +9,62 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/property_bag.h"
 #include "content/public/browser/web_contents_observer.h"
 
-class AlternateErrorPageTabObserver;
 class AutocompleteHistoryManager;
-class AutofillManager;
 class AutofillExternalDelegate;
+class AutofillManager;
 class AutomationTabHelper;
+class BasePanelBrowserTest;
 class BlockedContentTabHelper;
-class BookmarkTabHelper;
+class Browser;
+class BrowserCommandsTabContentsCreator;
+class BrowserLauncherItemControllerContentsCreator;
+class BrowserTabstripTabContentsCreator;
+class ChromeWebContentsHandler;
+class ConstrainedWebDialogDelegateBase;
 class ConstrainedWindowTabHelper;
 class CoreTabHelper;
+class ExtensionTabUtil;
 class ExternalProtocolObserver;
+class ExternalTabContainerWin;
 class FaviconTabHelper;
+class FindBackendTestContentsCreator;
 class FindTabHelper;
+class GeolocationPermissionContextTests;
 class HistoryTabHelper;
 class HungPluginTabHelper;
+class InfoBarControllerContentsCreator;
 class InfoBarTabHelper;
-class MetroPinTabHelper;
+class InstantLoader;
 class NavigationMetricsRecorder;
-class OmniboxSearchHint;
+class OffscreenTabContentsCreator;
+class PanelHost;
 class PasswordManager;
 class PasswordManagerDelegate;
-class PDFTabObserver;
+class PepperBrokerObserver;
 class PluginObserver;
 class PrefsTabHelper;
 class Profile;
-class RestoreTabHelper;
 class SadTabHelper;
 class SearchEngineTabHelper;
-class SnapshotTabHelper;
-class TabContentsSSLHelper;
+class ShellWindow;
+class TabAutofillManagerDelegate;
+class TabContentsTestHarness;
 class TabSpecificContentSettings;
+class TabStripModel;
+class TabStripModelContentsCreator;
 class ThumbnailGenerator;
 class TranslateTabHelper;
+class TranslationInfoBarTestContentsCreator;
+class WebDialogGtk;
+class WebDialogWindowControllerTabContentsCreator;
+class WebIntentInlineDispositionBrowserTest;
+class WebIntentPickerCocoa;
 class WebIntentPickerController;
+class WebIntentPickerGtk;
+class WebUITestContentsCreator;
 class ZoomController;
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-class OneClickSigninHelper;
-#endif
 
 namespace browser_sync {
 class SyncedTabDelegate;
@@ -65,22 +80,19 @@ class SearchTabHelper;
 }
 }
 
-namespace chrome_browser_net {
-class CacheStatsTabHelper;
+namespace chromeos {
+class SimpleWebViewDialog;
+class WebUILoginView;
 }
 
 namespace extensions {
-class TabHelper;
+class WebAuthFlow;
 class WebNavigationTabObserver;
 }
 
 namespace prerender {
+class PrerenderContents;
 class PrerenderTabHelper;
-}
-
-namespace printing {
-class PrintViewManager;
-class PrintPreviewMessageHandler;
 }
 
 namespace safe_browsing {
@@ -104,14 +116,48 @@ class SafeBrowsingTabObserver;
 // least to make easy for other WebContents hosts to include and support.
 class TabContents : public content::WebContentsObserver {
  public:
-  // Takes ownership of |contents|, which must be heap-allocated (as it lives
-  // in a scoped_ptr) and can not be NULL.
-  explicit TabContents(content::WebContents* contents);
-  virtual ~TabContents();
+  class Factory {
+   private:
+    // TabContents is going away <http://crbug.com/107201> so don't allow any
+    // more code to construct instances. Explicitly befriend those who currently
+    // do so.
 
-  // Create a TabContents with the same state as this one. The returned
-  // heap-allocated pointer is owned by the caller.
-  TabContents* Clone();
+    friend class BasePanelBrowserTest;
+    friend class Browser;
+    friend class BrowserCommandsTabContentsCreator;
+    friend class BrowserLauncherItemControllerContentsCreator;
+    friend class BrowserTabstripTabContentsCreator;
+    friend class chromeos::SimpleWebViewDialog;
+    friend class chromeos::WebUILoginView;
+    friend class ChromeWebContentsHandler;
+    friend class ConstrainedWebDialogDelegateBase;
+    friend class extensions::WebAuthFlow;
+    friend class ExtensionTabUtil;
+    friend class ExternalTabContainerWin;
+    friend class FindBackendTestContentsCreator;
+    friend class GeolocationPermissionContextTests;
+    friend class InfoBarControllerContentsCreator;
+    friend class InstantLoader;
+    friend class OffscreenTabContentsCreator;
+    friend class PanelHost;
+    friend class prerender::PrerenderContents;
+    friend class ShellWindow;
+    friend class TabContentsTestHarness;
+    friend class TabStripModel;
+    friend class TabStripModelContentsCreator;
+    friend class TranslationInfoBarTestContentsCreator;
+    friend class WebDialogGtk;
+    friend class WebDialogWindowControllerTabContentsCreator;
+    friend class WebIntentInlineDispositionBrowserTest;
+    friend class WebIntentPickerCocoa;
+    friend class WebIntentPickerGtk;
+    friend class WebUITestContentsCreator;
+
+    static TabContents* CreateTabContents(content::WebContents* contents);
+    static TabContents* CloneTabContents(TabContents* contents);
+  };
+
+  virtual ~TabContents();
 
   // Helper to retrieve the existing instance that owns a given WebContents.
   // Returns NULL if there is no such existing instance.
@@ -149,10 +195,6 @@ class TabContents : public content::WebContentsObserver {
     return blocked_content_tab_helper_.get();
   }
 
-  BookmarkTabHelper* bookmark_tab_helper() {
-    return bookmark_tab_helper_.get();
-  }
-
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
   captive_portal::CaptivePortalTabHelper* captive_portal_tab_helper() {
     return captive_portal_tab_helper_.get();
@@ -165,14 +207,6 @@ class TabContents : public content::WebContentsObserver {
 
   CoreTabHelper* core_tab_helper() { return core_tab_helper_.get(); }
 
-  extensions::TabHelper* extension_tab_helper() {
-    return extension_tab_helper_.get();
-  }
-
-  const extensions::TabHelper* extension_tab_helper() const {
-    return extension_tab_helper_.get();
-  }
-
   FaviconTabHelper* favicon_tab_helper() { return favicon_tab_helper_.get(); }
   FindTabHelper* find_tab_helper() { return find_tab_helper_.get(); }
   HistoryTabHelper* history_tab_helper() { return history_tab_helper_.get(); }
@@ -181,33 +215,11 @@ class TabContents : public content::WebContentsObserver {
   }
   InfoBarTabHelper* infobar_tab_helper() { return infobar_tab_helper_.get(); }
 
-  MetroPinTabHelper* metro_pin_tab_helper() {
-    return metro_pin_tab_helper_.get();
-  }
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  OneClickSigninHelper* one_click_signin_helper() {
-    return one_click_signin_helper_.get();
-  }
-#endif
-
   PasswordManager* password_manager() { return password_manager_.get(); }
   PrefsTabHelper* prefs_tab_helper() { return prefs_tab_helper_.get(); }
 
   prerender::PrerenderTabHelper* prerender_tab_helper() {
     return prerender_tab_helper_.get();
-  }
-
-  printing::PrintViewManager* print_view_manager() {
-    return print_view_manager_.get();
-  }
-
-  RestoreTabHelper* restore_tab_helper() {
-    return restore_tab_helper_.get();
-  }
-
-  const RestoreTabHelper* restore_tab_helper() const {
-    return restore_tab_helper_.get();
   }
 
   SadTabHelper* sad_tab_helper() { return sad_tab_helper_.get(); }
@@ -219,12 +231,6 @@ class TabContents : public content::WebContentsObserver {
   chrome::search::SearchTabHelper* search_tab_helper() {
     return search_tab_helper_.get();
   }
-
-  SnapshotTabHelper* snapshot_tab_helper() {
-    return snapshot_tab_helper_.get();
-  }
-
-  TabContentsSSLHelper* ssl_helper() { return ssl_helper_.get(); }
 
   browser_sync::SyncedTabDelegate* synced_tab_delegate() {
     return synced_tab_delegate_.get();
@@ -257,9 +263,15 @@ class TabContents : public content::WebContentsObserver {
   virtual void WebContentsDestroyed(content::WebContents* tab) OVERRIDE;
 
  private:
-  // Used to retrieve this object from |web_contents_|, which is placed in
-  // its property bag to avoid adding additional interfaces.
-  static base::PropertyAccessor<TabContents*>* property_accessor();
+  friend class TabContentsFactory;
+
+  // Takes ownership of |contents|, which must be heap-allocated (as it lives
+  // in a scoped_ptr) and can not be NULL.
+  explicit TabContents(content::WebContents* contents);
+
+  // Create a TabContents with the same state as this one. The returned
+  // heap-allocated pointer is owned by the caller.
+  TabContents* Clone();
 
   // Tab Helpers ---------------------------------------------------------------
   // (These provide API for callers and have a getter function listed in the
@@ -267,23 +279,20 @@ class TabContents : public content::WebContentsObserver {
 
   scoped_ptr<AutocompleteHistoryManager> autocomplete_history_manager_;
   scoped_refptr<AutofillManager> autofill_manager_;
+  scoped_ptr<TabAutofillManagerDelegate> autofill_delegate_;
   scoped_ptr<AutofillExternalDelegate> autofill_external_delegate_;
   scoped_ptr<AutomationTabHelper> automation_tab_helper_;
   scoped_ptr<BlockedContentTabHelper> blocked_content_tab_helper_;
-  scoped_ptr<BookmarkTabHelper> bookmark_tab_helper_;
-  scoped_ptr<chrome_browser_net::CacheStatsTabHelper> cache_stats_tab_helper_;
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
   scoped_ptr<captive_portal::CaptivePortalTabHelper> captive_portal_tab_helper_;
 #endif
   scoped_ptr<ConstrainedWindowTabHelper> constrained_window_tab_helper_;
   scoped_ptr<CoreTabHelper> core_tab_helper_;
-  scoped_ptr<extensions::TabHelper> extension_tab_helper_;
   scoped_ptr<FaviconTabHelper> favicon_tab_helper_;
   scoped_ptr<FindTabHelper> find_tab_helper_;
   scoped_ptr<HistoryTabHelper> history_tab_helper_;
   scoped_ptr<HungPluginTabHelper> hung_plugin_tab_helper_;
   scoped_ptr<InfoBarTabHelper> infobar_tab_helper_;
-  scoped_ptr<MetroPinTabHelper> metro_pin_tab_helper_;
 
   // PasswordManager and its delegate. The delegate must outlive the manager,
   // per documentation in password_manager.h.
@@ -293,15 +302,9 @@ class TabContents : public content::WebContentsObserver {
   scoped_ptr<PrefsTabHelper> prefs_tab_helper_;
   scoped_ptr<prerender::PrerenderTabHelper> prerender_tab_helper_;
 
-  // Handles print job for this contents.
-  scoped_ptr<printing::PrintViewManager> print_view_manager_;
-
-  scoped_ptr<RestoreTabHelper> restore_tab_helper_;
   scoped_ptr<SadTabHelper> sad_tab_helper_;
   scoped_ptr<SearchEngineTabHelper> search_engine_tab_helper_;
   scoped_ptr<chrome::search::SearchTabHelper> search_tab_helper_;
-  scoped_ptr<SnapshotTabHelper> snapshot_tab_helper_;
-  scoped_ptr<TabContentsSSLHelper> ssl_helper_;
   scoped_ptr<browser_sync::SyncedTabDelegate> synced_tab_delegate_;
 
   // The TabSpecificContentSettings object is used to query the blocked content
@@ -320,17 +323,11 @@ class TabContents : public content::WebContentsObserver {
   // (These provide no API for callers; objects that need to exist 1:1 with tabs
   // and silently do their thing live here.)
 
-  scoped_ptr<AlternateErrorPageTabObserver> alternate_error_page_tab_observer_;
   scoped_ptr<extensions::WebNavigationTabObserver> webnavigation_observer_;
   scoped_ptr<ExternalProtocolObserver> external_protocol_observer_;
   scoped_ptr<NavigationMetricsRecorder> navigation_metrics_recorder_;
-  scoped_ptr<OmniboxSearchHint> omnibox_search_hint_;
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  scoped_ptr<OneClickSigninHelper> one_click_signin_helper_;
-#endif
-  scoped_ptr<PDFTabObserver> pdf_tab_observer_;
+  scoped_ptr<PepperBrokerObserver> pepper_broker_observer_;
   scoped_ptr<PluginObserver> plugin_observer_;
-  scoped_ptr<printing::PrintPreviewMessageHandler> print_preview_;
   scoped_ptr<safe_browsing::SafeBrowsingTabObserver>
       safe_browsing_tab_observer_;
 

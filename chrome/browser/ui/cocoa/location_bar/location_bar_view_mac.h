@@ -13,9 +13,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/command_observer.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
@@ -24,7 +23,6 @@
 #include "chrome/common/content_settings_types.h"
 
 @class AutocompleteTextField;
-class ChromeToMobileDecoration;
 class CommandUpdater;
 class ContentSettingDecoration;
 class EVBubbleDecoration;
@@ -35,9 +33,10 @@ class PageActionDecoration;
 class PlusDecoration;
 class Profile;
 class SelectedKeywordDecoration;
-class SkBitmap;
 class StarDecoration;
 class ToolbarModel;
+class WebIntentsButtonDecoration;
+class ZoomDecoration;
 
 // A C++ bridge class that represents the location bar UI element to
 // the portable code.  Wires up an OmniboxViewMac instance to
@@ -46,8 +45,7 @@ class ToolbarModel;
 class LocationBarViewMac : public LocationBar,
                            public LocationBarTesting,
                            public OmniboxEditController,
-                           public content::NotificationObserver,
-                           public CommandObserver {
+                           public content::NotificationObserver {
  public:
   LocationBarViewMac(AutocompleteTextField* field,
                      CommandUpdater* command_updater,
@@ -69,6 +67,8 @@ class LocationBarViewMac : public LocationBar,
   virtual void UpdateContentSettingsIcons() OVERRIDE;
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
+  virtual void UpdateWebIntentsButton() OVERRIDE;
+  virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE;
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
   virtual const OmniboxView* GetLocationEntry() const OVERRIDE;
@@ -89,20 +89,31 @@ class LocationBarViewMac : public LocationBar,
   // Set the starred state of the bookmark star.
   void SetStarred(bool starred);
 
-  // Set ChromeToMobileDecoration's lit state (to update the icon).
-  void SetChromeToMobileDecorationLit(bool lit);
+  // Set the icon image resource for the action box plus decoration.
+  void SetActionBoxIcon(int image_id);
+
+  // Happens when the zoom changes for the active tab. |can_show_bubble| is
+  // false when the change in zoom for the active tab wasn't an explicit user
+  // action (e.g. switching tabs, creating a new tab, creating a new browser).
+  // Additionally, |can_show_bubble| will only be true when the bubble wouldn't
+  // be obscured by other UI (wrench menu) or redundant (+/- from wrench).
+  void ZoomChangedForActiveTab(bool can_show_bubble);
 
   // Get the point in window coordinates on the star for the bookmark bubble to
   // aim at.
   NSPoint GetBookmarkBubblePoint() const;
 
-  // Get the point in window coordinates on the Chrome To Mobile icon for
-  // anchoring its bubble.
-  NSPoint GetChromeToMobileBubblePoint() const;
+  // Get the point in window coordinates on the Action Box icon for
+  // anchoring its bubbles.
+  NSPoint GetActionBoxAnchorPoint() const;
 
   // Get the point in window coordinates in the security icon at which the page
   // info bubble aims.
   NSPoint GetPageInfoBubblePoint() const;
+
+  // When any image decorations change, call this to ensure everything is
+  // redrawn and laid out if necessary.
+  void OnDecorationsChanged();
 
   // Updates the location bar.  Resets the bar's permanent text and
   // security style, and if |should_restore_state| is true, restores
@@ -125,6 +136,9 @@ class LocationBarViewMac : public LocationBar,
   // will look like for the user upon installation of the extension.
   void SetPreviewEnabledPageAction(ExtensionAction* page_action,
                                    bool preview_enabled);
+
+  // Retrieve the frame for the given |page_action|.
+  NSRect GetPageActionFrame(ExtensionAction* page_action);
 
   // Return |page_action|'s info-bubble point in window coordinates.
   // This function should always be called with a visible page action.
@@ -149,7 +163,7 @@ class LocationBarViewMac : public LocationBar,
   virtual void OnInputInProgress(bool in_progress) OVERRIDE;
   virtual void OnKillFocus() OVERRIDE;
   virtual void OnSetFocus() OVERRIDE;
-  virtual SkBitmap GetFavicon() const OVERRIDE;
+  virtual gfx::Image GetFavicon() const OVERRIDE;
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
   virtual TabContents* GetTabContents() const OVERRIDE;
@@ -163,9 +177,6 @@ class LocationBarViewMac : public LocationBar,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
-  // CommandObserver:
-  virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
 
  private:
   // Posts |notification| to the default notification center.
@@ -185,13 +196,26 @@ class LocationBarViewMac : public LocationBar,
   // tab contents state.
   bool RefreshContentSettingsDecorations();
 
+  // Updates visibility of the web intents button decoration based on the
+  // current tab contents state.
+  void RefreshWebIntentsButtonDecoration();
+
   void ShowFirstRunBubbleInternal();
 
   // Checks if the bookmark star should be enabled or not.
   bool IsStarEnabled();
 
-  // Update the Chrome To Mobile page action visibility and command state.
+  // Update the Chrome To Mobile page action command state.
   void UpdateChromeToMobileEnabled();
+
+  // Updates the zoom decoration in the omnibox with the current zoom level.
+  void UpdateZoomDecoration();
+
+  // Ensures the star decoration is visible or hidden, as required.
+  void UpdateStarDecorationVisibility();
+
+  // Ensures the plus decoration is visible or hidden, as required.
+  void UpdatePlusDecorationVisibility();
 
   scoped_ptr<OmniboxViewMac> omnibox_view_;
 
@@ -223,8 +247,9 @@ class LocationBarViewMac : public LocationBar,
   // Bookmark star right of page actions.
   scoped_ptr<StarDecoration> star_decoration_;
 
-  // Chrome To Mobile page action icon.
-  scoped_ptr<ChromeToMobileDecoration> chrome_to_mobile_decoration_;
+  // A zoom icon at the end of the omnibox, which shows at non-standard zoom
+  // levels.
+  scoped_ptr<ZoomDecoration> zoom_decoration_;
 
   // The installed page actions.
   std::vector<ExtensionAction*> page_actions_;
@@ -237,6 +262,10 @@ class LocationBarViewMac : public LocationBar,
 
   // Keyword hint decoration displayed on the right-hand side.
   scoped_ptr<KeywordHintDecoration> keyword_hint_decoration_;
+
+  // A decoration that shows the web intents "use another service" button
+  // on the right.
+  scoped_ptr<WebIntentsButtonDecoration> web_intents_button_decoration_;
 
   Profile* profile_;
 

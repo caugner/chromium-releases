@@ -24,7 +24,7 @@ class Task;
 class TestProfileSyncService;
 
 ACTION(ReturnNewDataTypeManager) {
-  return new browser_sync::DataTypeManagerImpl(arg0, arg1);
+  return new browser_sync::DataTypeManagerImpl(arg0, arg1, arg2);
 }
 
 namespace browser_sync {
@@ -56,19 +56,18 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
       const base::Closure& retry_callback) OVERRIDE;
 
   virtual void HandleSyncManagerInitializationOnFrontendLoop(
-    const syncer::WeakHandle<syncer::JsBackend>& js_backend, bool success,
-    syncer::ModelTypeSet restored_types) OVERRIDE;
+      const syncer::WeakHandle<syncer::JsBackend>& js_backend,
+      bool success,
+      syncer::ModelTypeSet restored_types) OVERRIDE;
 
   static void SetHistoryServiceExpectations(ProfileMock* profile);
 
   void SetInitialSyncEndedForAllTypes();
 
-  void EmitOnNotificationsEnabled();
-  void EmitOnNotificationsDisabled(
-      syncer::NotificationsDisabledReason reason);
-  void EmitOnIncomingNotification(
-      const syncer::ObjectIdPayloadMap& id_payloads,
-      const syncer::IncomingNotificationSource source);
+  void EmitOnInvalidatorStateChange(syncer::InvalidatorState state);
+  void EmitOnIncomingInvalidation(
+      const syncer::ObjectIdStateMap& id_state_map,
+      const syncer::IncomingInvalidationSource source);
 
  protected:
   virtual void InitCore(const DoInitializeOptions& options) OVERRIDE;
@@ -105,9 +104,8 @@ class TestProfileSyncService : public ProfileSyncService {
       const syncer::WeakHandle<syncer::JsBackend>& backend,
       bool success) OVERRIDE;
 
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  virtual void OnConfigureDone(
+      const browser_sync::DataTypeManager::ConfigureResult& result) OVERRIDE;
 
   // We implement our own version to avoid some DCHECKs.
   virtual syncer::UserShare* GetUserShare() const OVERRIDE;

@@ -18,8 +18,8 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/stl_util.h"
+#include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
@@ -244,7 +244,7 @@ class DriveDetailedView : public TrayDetailsView,
 
     // views::ButtonListener overrides.
     virtual void ButtonPressed(views::Button* sender,
-                               const views::Event& event) OVERRIDE {
+                               const ui::Event& event) OVERRIDE {
       DCHECK(sender == cancel_button_);
       container_->OnCancelOperation(file_path_);
     }

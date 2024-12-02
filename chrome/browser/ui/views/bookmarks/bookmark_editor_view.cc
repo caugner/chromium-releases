@@ -23,6 +23,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/net_util.h"
+#include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/text_button.h"
@@ -195,12 +196,12 @@ void BookmarkEditorView::ContentsChanged(views::Textfield* sender,
 }
 
 bool BookmarkEditorView::HandleKeyEvent(views::Textfield* sender,
-                                        const views::KeyEvent& key_event) {
+                                        const ui::KeyEvent& key_event) {
     return false;
 }
 
 void BookmarkEditorView::ButtonPressed(views::Button* sender,
-                                       const views::Event& event) {
+                                       const ui::Event& event) {
   DCHECK_EQ(new_folder_button_.get(), sender);
   NewFolder();
 }
@@ -284,7 +285,8 @@ void BookmarkEditorView::ShowContextMenuForView(views::View* source,
 
   if (context_menu_runner_->RunMenuAt(source->GetWidget()->GetTopLevelWidget(),
         NULL, gfx::Rect(point, gfx::Size()), views::MenuItemView::TOPRIGHT,
-        views::MenuRunner::HAS_MNEMONICS) == views::MenuRunner::MENU_DELETED)
+        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
+        views::MenuRunner::MENU_DELETED)
     return;
 }
 

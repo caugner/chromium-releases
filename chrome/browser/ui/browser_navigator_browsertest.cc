@@ -87,8 +87,7 @@ TabContents* BrowserNavigatorTest::CreateTabContents() {
       browser()->profile(),
       NULL,
       MSG_ROUTING_NONE,
-      chrome::GetActiveWebContents(browser()),
-      NULL);
+      chrome::GetActiveWebContents(browser()));
 }
 
 void BrowserNavigatorTest::RunSuppressTest(WindowOpenDisposition disposition) {
@@ -1228,60 +1227,22 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
             chrome::GetActiveWebContents(browser())->GetURL());
 }
 
-// This test makes sure any link in a crashed panel page navigates to a tabbed
-// window.
-class PanelBrowserNavigatorTest : public BrowserNavigatorTest {
- protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    command_line->AppendSwitch(switches::kEnablePanels);
-  }
-};
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
+                       NavigateWithoutBrowser) {
+  // First navigate using the profile of the existing browser window, and
+  // check that the window is reused.
+  chrome::NavigateParams params(browser()->profile(), GetGoogleURL(),
+                                content::PAGE_TRANSITION_LINK);
+  ui_test_utils::NavigateToURL(&params);
+  EXPECT_EQ(1u, BrowserList::size());
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserNavigatorTest, NavigateFromCrashedPanel) {
-  GURL url("http://maps.google.com/#a");
-  GURL url2("http://maps.google.com/#b");
-
-  // Create a panel.
-  Browser* panel_browser = new Browser(
-      Browser::CreateParams::CreateForApp(
-          Browser::TYPE_PANEL, "Test", gfx::Rect(100, 100),
-          browser()->profile()));
-
-  // Navigate to the page.
-  chrome::NavigateParams p(MakeNavigateParams(panel_browser));
-  p.url = url;
-  p.disposition = CURRENT_TAB;
-  chrome::Navigate(&p);
-
-  // Navigate() should have navigated in the existing panel window.
-  EXPECT_EQ(panel_browser, p.browser);
-
-  // We should now have two windows, the browser() provided by the framework and
-  // the panel window we opened earlier. The tabbed browser window has 1 tab.
+  // Now navigate using the incognito profile and check that a new window
+  // is created.
+  chrome::NavigateParams params_incognito(
+      browser()->profile()->GetOffTheRecordProfile(),
+      GetGoogleURL(), content::PAGE_TRANSITION_LINK);
+  ui_test_utils::NavigateToURL(&params_incognito);
   EXPECT_EQ(2u, BrowserList::size());
-  EXPECT_EQ(1, browser()->tab_count());
-  EXPECT_EQ(1, panel_browser->tab_count());
-
-  // Kill the panel page.
-  WebContents* web_contents = chrome::GetActiveWebContents(panel_browser);
-  web_contents->SetIsCrashed(base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
-  EXPECT_TRUE(web_contents->IsCrashed());
-
-  // Navigate to the page.
-  chrome::NavigateParams p2(MakeNavigateParams(panel_browser));
-  p2.source_contents = chrome::GetActiveTabContents(panel_browser);
-  p2.url = url2;
-  p2.disposition = CURRENT_TAB;
-  chrome::Navigate(&p2);
-
-  // Navigate() should have opened a new tab in the existing tabbed window.
-  EXPECT_EQ(browser(), p2.browser);
-
-  // We should now have two windows, the browser() provided by the framework and
-  // the panel window we opened earlier. The tabbed browser window has 2 tabs.
-  EXPECT_EQ(2u, BrowserList::size());
-  EXPECT_EQ(2, browser()->tab_count());
-  EXPECT_EQ(1, panel_browser->tab_count());
 }
 
 } // namespace

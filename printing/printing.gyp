@@ -209,6 +209,7 @@
         '../ui/ui.gyp:ui',
       ],
       'sources': [
+        'backend/print_backend_unittest.cc',
         'emf_win_unittest.cc',
         'printing_test.h',
         'page_number_unittest.cc',
@@ -233,6 +234,14 @@
           'sources': [
             'printing_context_win_unittest.cc',
           ]
+        }],
+        ['use_cups==1', {
+          'defines': [
+            'USE_CUPS',
+          ],
+          'sources': [
+            'backend/cups_helper_unittest.cc',
+          ],
         }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [

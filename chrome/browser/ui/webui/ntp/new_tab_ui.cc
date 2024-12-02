@@ -59,6 +59,10 @@
 #include "chrome/browser/ui/webui/ntp/new_tab_page_sync_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_page_handler.h"
+#else
+#include "chrome/browser/ui/webui/ntp/android/bookmarks_handler.h"
+#include "chrome/browser/ui/webui/ntp/android/context_menu_handler.h"
+#include "chrome/browser/ui/webui/ntp/android/promo_handler.h"
 #endif
 
 using content::BrowserThread;
@@ -107,7 +111,7 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     web_ui->AddMessageHandler(new RecentlyClosedTabsHandler());
     web_ui->AddMessageHandler(new MetricsHandler());
 #if !defined(OS_ANDROID)
-    if (NewTabUI::IsSuggestionsPageEnabled())
+    if (NewTabUI::IsDiscoveryInNTPEnabled())
       web_ui->AddMessageHandler(new SuggestionsHandler());
     // Android doesn't have a sync promo/username on NTP.
     if (GetProfile()->IsSyncAccessible())
@@ -127,7 +131,13 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     web_ui->AddMessageHandler(new FaviconWebUIHandler());
   }
 
-#if !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+  // These handlers are specific to the Android NTP page.
+  web_ui->AddMessageHandler(new BookmarksHandler());
+  web_ui->AddMessageHandler(new ContextMenuHandler());
+  if (!GetProfile()->IsOffTheRecord())
+    web_ui->AddMessageHandler(new PromoHandler());
+#else
   // Android uses native UI for sync setup.
   if (NTPLoginHandler::ShouldShow(GetProfile()))
     web_ui->AddMessageHandler(new NTPLoginHandler());
@@ -141,8 +151,8 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
       new NewTabHTMLSource(GetProfile()->GetOriginalProfile());
   // These two resources should be loaded only if suggestions NTP is enabled.
   html_source->AddResource("suggestions_page.css", "text/css",
-      NewTabUI::IsSuggestionsPageEnabled() ? IDR_SUGGESTIONS_PAGE_CSS : 0);
-  if (NewTabUI::IsSuggestionsPageEnabled()) {
+      NewTabUI::IsDiscoveryInNTPEnabled() ? IDR_SUGGESTIONS_PAGE_CSS : 0);
+  if (NewTabUI::IsDiscoveryInNTPEnabled()) {
     html_source->AddResource("suggestions_page.js", "application/javascript",
         IDR_SUGGESTIONS_PAGE_JS);
   }
@@ -269,7 +279,7 @@ void NewTabUI::RegisterUserPrefs(PrefService* prefs) {
   NewTabPageHandler::RegisterUserPrefs(prefs);
 #if !defined(OS_ANDROID)
   AppLauncherHandler::RegisterUserPrefs(prefs);
-  if (NewTabUI::IsSuggestionsPageEnabled())
+  if (NewTabUI::IsDiscoveryInNTPEnabled())
     SuggestionsHandler::RegisterUserPrefs(prefs);
 #endif
   MostVisitedHandler::RegisterUserPrefs(prefs);
@@ -288,13 +298,13 @@ bool NewTabUI::ShouldShowApps() {
 }
 
 // static
-bool NewTabUI::IsSuggestionsPageEnabled() {
+bool NewTabUI::IsDiscoveryInNTPEnabled() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableSuggestionsTabPage);
+      switches::kEnableDiscoveryInNewTabPage);
 }
 
 // static
-void NewTabUI::SetURLTitleAndDirection(DictionaryValue* dictionary,
+void NewTabUI::SetUrlTitleAndDirection(DictionaryValue* dictionary,
                                        const string16& title,
                                        const GURL& gurl) {
   dictionary->SetString("url", gurl.spec());
@@ -400,3 +410,5 @@ void NewTabUI::NewTabHTMLSource::AddResource(const char* resource,
   resource_map_[std::string(resource)] =
       std::make_pair(std::string(mime_type), resource_id);
 }
+
+NewTabUI::NewTabHTMLSource::~NewTabHTMLSource() {}

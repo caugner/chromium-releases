@@ -18,9 +18,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/notification_observer.h"
 
 class ChromeNetLog;
@@ -64,7 +64,6 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual WatchDogThread* watchdog_thread() OVERRIDE;
   virtual ProfileManager* profile_manager() OVERRIDE;
   virtual PrefService* local_state() OVERRIDE;
-  virtual ui::Clipboard* clipboard() OVERRIDE;
   virtual net::URLRequestContextGetter* system_request_context() OVERRIDE;
   virtual chrome_variations::VariationsService* variations_service() OVERRIDE;
 #if defined(OS_CHROMEOS)
@@ -78,7 +77,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual IconManager* icon_manager() OVERRIDE;
   virtual ThumbnailGenerator* GetThumbnailGenerator() OVERRIDE;
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
-  virtual void InitDevToolsHttpProtocolHandler(
+  virtual void CreateDevToolsHttpProtocolHandler(
       Profile* profile,
       const std::string& ip,
       int port,
@@ -169,14 +168,14 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<extensions::EventRouterForwarder>
       extension_event_router_forwarder_;
 
+#if !defined(OS_ANDROID)
   scoped_ptr<RemoteDebuggingServer> remote_debugging_server_;
+#endif
 
   scoped_refptr<printing::PrintPreviewTabController>
       print_preview_tab_controller_;
 
   scoped_ptr<printing::BackgroundPrintingManager> background_printing_manager_;
-
-  scoped_ptr<ui::Clipboard> clipboard_;
 
   scoped_ptr<chrome_variations::VariationsService> variations_service_;
 

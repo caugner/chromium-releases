@@ -53,7 +53,8 @@ PCMQueueOutAudioOutputStream::PCMQueueOutAudioOutputStream(
       should_swizzle_(false),
       should_down_mix_(false),
       stopped_event_(true /* manual reset */, false /* initial state */),
-      num_buffers_left_(kNumBuffers) {
+      num_buffers_left_(kNumBuffers),
+      audio_bus_(AudioBus::Create(params)) {
   // We must have a manager.
   DCHECK(manager_);
   // A frame is one sample across all channels. In interleaved audio the per
@@ -115,14 +116,10 @@ bool PCMQueueOutAudioOutputStream::Open() {
   }
   // Get the size of the channel layout.
   UInt32 core_layout_size;
-  // TODO(annacc): AudioDeviceGetPropertyInfo() is deprecated, but its
-  // replacement, AudioObjectGetPropertyDataSize(), doesn't work yet with
-  // kAudioDevicePropertyPreferredChannelLayout.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  err = AudioDeviceGetPropertyInfo(device_id, 0, false,
-                                   kAudioDevicePropertyPreferredChannelLayout,
-                                   &core_layout_size, NULL);
+  property_address.mSelector = kAudioDevicePropertyPreferredChannelLayout;
+  property_address.mScope = kAudioDevicePropertyScopeOutput;
+  err = AudioObjectGetPropertyDataSize(device_id, &property_address, 0, NULL,
+                                       &core_layout_size);
   if (err != noErr) {
     HandleError(err);
     return false;
@@ -133,17 +130,13 @@ bool PCMQueueOutAudioOutputStream::Open() {
   core_channel_layout.reset(
       reinterpret_cast<AudioChannelLayout*>(malloc(core_layout_size)));
   memset(core_channel_layout.get(), 0, core_layout_size);
-  // TODO(annacc): AudioDeviceGetProperty() is deprecated, but its
-  // replacement, AudioObjectGetPropertyData(), doesn't work yet with
-  // kAudioDevicePropertyPreferredChannelLayout.
-  err = AudioDeviceGetProperty(device_id, 0, false,
-                               kAudioDevicePropertyPreferredChannelLayout,
-                               &core_layout_size, core_channel_layout.get());
+  err = AudioObjectGetPropertyData(device_id, &property_address, 0, NULL,
+                                   &core_layout_size,
+                                   core_channel_layout.get());
   if (err != noErr) {
     HandleError(err);
     return false;
   }
-#pragma clang diagnostic pop
 
   num_core_channels_ =
       static_cast<int>(core_channel_layout->mNumberChannelDescriptions);
@@ -417,11 +410,20 @@ void PCMQueueOutAudioOutputStream::RenderCallback(void* p_this,
   // Adjust the number of pending bytes by subtracting the amount played.
   if (!static_cast<AudioQueueUserData*>(buffer->mUserData)->empty_buffer)
     audio_stream->pending_bytes_ -= buffer->mAudioDataByteSize;
+
   uint32 capacity = buffer->mAudioDataBytesCapacity;
+  AudioBus* audio_bus = audio_stream->audio_bus_.get();
+  DCHECK_EQ(
+      audio_bus->frames() * audio_stream->format_.mBytesPerFrame, capacity);
   // TODO(sergeyu): Specify correct hardware delay for AudioBuffersState.
-  uint32 filled = source->OnMoreData(
-      reinterpret_cast<uint8*>(buffer->mAudioData), capacity,
-      AudioBuffersState(audio_stream->pending_bytes_, 0));
+  int frames_filled = source->OnMoreData(
+      audio_bus, AudioBuffersState(audio_stream->pending_bytes_, 0));
+  uint32 filled = frames_filled * audio_stream->format_.mBytesPerFrame;
+  // Note: If this ever changes to output raw float the data must be clipped and
+  // sanitized since it may come from an untrusted source such as NaCl.
+  audio_bus->ToInterleaved(
+      frames_filled, audio_stream->format_.mBitsPerChannel / 8,
+      buffer->mAudioData);
 
   // In order to keep the callback running, we need to provide a positive amount
   // of data to the audio queue. To simulate the behavior of Windows, we write

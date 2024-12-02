@@ -57,9 +57,9 @@ bool ButtonDropDown::IsMenuShowing() const {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ButtonDropDown::OnMousePressed(const MouseEvent& event) {
+bool ButtonDropDown::OnMousePressed(const ui::MouseEvent& event) {
   if (enabled() && ShouldShowMenu() &&
-      IsTriggerableEvent(event) && HitTest(event.location())) {
+      IsTriggerableEvent(event) && HitTestPoint(event.location())) {
     // Store the y pos of the mouse coordinates so we can use them later to
     // determine if the user dragged the mouse down (which should pop up the
     // drag down menu immediately, instead of waiting for the timer)
@@ -75,7 +75,7 @@ bool ButtonDropDown::OnMousePressed(const MouseEvent& event) {
   return ImageButton::OnMousePressed(event);
 }
 
-bool ButtonDropDown::OnMouseDragged(const MouseEvent& event) {
+bool ButtonDropDown::OnMouseDragged(const ui::MouseEvent& event) {
   bool result = ImageButton::OnMouseDragged(event);
 
   if (show_menu_factory_.HasWeakPtrs()) {
@@ -91,16 +91,17 @@ bool ButtonDropDown::OnMouseDragged(const MouseEvent& event) {
   return result;
 }
 
-void ButtonDropDown::OnMouseReleased(const MouseEvent& event) {
+void ButtonDropDown::OnMouseReleased(const ui::MouseEvent& event) {
   if (IsTriggerableEvent(event) ||
-      (event.IsRightMouseButton() && !HitTest(event.location()))) {
+      (event.IsRightMouseButton() && !HitTestPoint(event.location()))) {
     ImageButton::OnMouseReleased(event);
   }
 
   if (IsTriggerableEvent(event))
     show_menu_factory_.InvalidateWeakPtrs();
 
-  if (enabled() && event.IsRightMouseButton() && HitTest(event.location())) {
+  if (enabled() && event.IsRightMouseButton() &&
+      HitTestPoint(event.location())) {
     show_menu_factory_.InvalidateWeakPtrs();
     ShowDropDownMenu();
   }
@@ -110,7 +111,7 @@ std::string ButtonDropDown::GetClassName() const {
   return kViewClassName;
 }
 
-void ButtonDropDown::OnMouseExited(const MouseEvent& event) {
+void ButtonDropDown::OnMouseExited(const ui::MouseEvent& event) {
   // Starting a drag results in a MouseExited, we need to ignore it.
   // A right click release triggers an exit event. We want to
   // remain in a PUSHED state until the drop down menu closes.
@@ -132,7 +133,7 @@ void ButtonDropDown::GetAccessibleState(ui::AccessibleViewState* state) {
   state->state = ui::AccessibilityTypes::STATE_HASPOPUP;
 }
 
-bool ButtonDropDown::ShouldEnterPushedState(const Event& event) {
+bool ButtonDropDown::ShouldEnterPushedState(const ui::Event& event) {
   // Enter PUSHED state on press with Left or Right mouse button or on taps.
   // Remain in this state while the context menu is open.
   return event.type() == ui::ET_GESTURE_TAP ||
@@ -175,8 +176,8 @@ void ButtonDropDown::ShowDropDownMenu() {
   menu_showing_ = true;
 
   // Create and run menu.  Display an empty menu if model is NULL.
-  if (model_) {
-    MenuModelAdapter menu_delegate(model_);
+  if (model_.get()) {
+    MenuModelAdapter menu_delegate(model_.get());
     menu_delegate.set_triggerable_event_flags(triggerable_event_flags());
     menu_runner_.reset(new MenuRunner(menu_delegate.CreateMenu()));
     MenuRunner::RunResult result =

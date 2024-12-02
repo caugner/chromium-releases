@@ -35,6 +35,27 @@ using extensions::Extension;
 
 namespace errors = extension_manifest_errors;
 
+namespace {
+
+bool ValidateExtensionIconSet(const ExtensionIconSet* icon_set,
+                              const Extension* extension,
+                              int error_message_id,
+                              std::string* error) {
+  for (ExtensionIconSet::IconMap::const_iterator iter = icon_set->map().begin();
+       iter != icon_set->map().end();
+       ++iter) {
+    const FilePath path = extension->GetResource(iter->second).GetFilePath();
+    if (!extension_file_util::ValidateFilePath(path)) {
+      *error = l10n_util::GetStringFUTF8(error_message_id,
+                                         UTF8ToUTF16(iter->second));
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 namespace extension_file_util {
 
 // Validates locale info. Doesn't check if messages.json files are valid.
@@ -320,40 +341,18 @@ bool ValidateExtension(const Extension* extension,
     }
   }
 
-  // Validate icon location and icon file size for page actions.
-  ExtensionAction* page_action = extension->page_action();
-  if (page_action) {
-    std::vector<std::string> icon_paths(*page_action->icon_paths());
-    if (!page_action->default_icon_path().empty())
-      icon_paths.push_back(page_action->default_icon_path());
-    for (std::vector<std::string>::iterator iter = icon_paths.begin();
-         iter != icon_paths.end(); ++iter) {
-      const FilePath path = extension->GetResource(*iter).GetFilePath();
-      if (!ValidateFilePath(path)) {
-        *error =
-            l10n_util::GetStringFUTF8(
-                IDS_EXTENSION_LOAD_ICON_FOR_PAGE_ACTION_FAILED,
-                UTF8ToUTF16(*iter));
-        return false;
-      }
-    }
+  const ExtensionAction* action = extension->page_action();
+  if (action && action->default_icon() &&
+      !ValidateExtensionIconSet(action->default_icon(), extension,
+          IDS_EXTENSION_LOAD_ICON_FOR_PAGE_ACTION_FAILED, error)) {
+    return false;
   }
 
-  // Validate icon location and icon file size for browser actions.
-  // Note: browser actions don't use the icon_paths().
-  ExtensionAction* browser_action = extension->browser_action();
-  if (browser_action) {
-    std::string path = browser_action->default_icon_path();
-    if (!path.empty()) {
-      const FilePath file_path = extension->GetResource(path).GetFilePath();
-      if (!ValidateFilePath(file_path)) {
-        *error =
-            l10n_util::GetStringFUTF8(
-                IDS_EXTENSION_LOAD_ICON_FOR_BROWSER_ACTION_FAILED,
-                UTF8ToUTF16(path));
-        return false;
-      }
-    }
+  action = extension->browser_action();
+  if (action && action->default_icon() &&
+      !ValidateExtensionIconSet(action->default_icon(), extension,
+          IDS_EXTENSION_LOAD_ICON_FOR_BROWSER_ACTION_FAILED, error)) {
+    return false;
   }
 
   // Validate that background scripts exist.
@@ -651,12 +650,10 @@ bool CheckForIllegalFilenames(const FilePath& extension_path,
   // Enumerate all files and directories in the extension root.
   // There is a problem when using pattern "_*" with FileEnumerator, so we have
   // to cheat with find_first_of and match all.
+  const int kFilesAndDirectories =
+      file_util::FileEnumerator::DIRECTORIES | file_util::FileEnumerator::FILES;
   file_util::FileEnumerator all_files(
-    extension_path,
-    false,
-    static_cast<file_util::FileEnumerator::FileType>(
-        file_util::FileEnumerator::DIRECTORIES |
-          file_util::FileEnumerator::FILES));
+      extension_path, false, kFilesAndDirectories);
 
   FilePath file;
   while (!(file = all_files.Next()).empty()) {

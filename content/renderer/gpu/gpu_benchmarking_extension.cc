@@ -10,11 +10,12 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string_number_conversions.h"
+#include "content/common/gpu/gpu_rendering_stats.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/all_rendering_benchmarks.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/rendering_benchmark.h"
-#include "content/renderer/rendering_benchmark_results.h"
+#include "third_party/skia/include/core/SkGraphics.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkStream.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRenderingStats.h"
@@ -35,11 +36,24 @@ const char kGpuBenchmarkingExtensionName[] = "v8/GpuBenchmarking";
 
 namespace {
 
+// Always called on the main render thread.
+// Does not need to be thread-safe.
+void InitSkGraphics() {
+  static bool init = false;
+  if (!init) {
+    SkGraphics::Init();
+    init = true;
+  }
+}
+
 class SkPictureRecorder : public WebViewBenchmarkSupport::PaintClient {
  public:
   explicit SkPictureRecorder(const FilePath& dirpath)
       : dirpath_(dirpath),
         layer_id_(0) {
+    // Let skia register known effect subclasses. This basically enables
+    // reflection on those subclasses required for picture serialization.
+    InitSkGraphics();
   }
 
   virtual WebCanvas* willPaint(const WebSize& size) {
@@ -71,37 +85,6 @@ class SkPictureRecorder : public WebViewBenchmarkSupport::PaintClient {
 
 namespace content {
 
-// Benchmark results object that populates a v8 array.
-class V8BenchmarkResults : public content::RenderingBenchmarkResults {
- public:
-  explicit V8BenchmarkResults()
-    : results_array_(v8::Array::New(0)) { }
-  virtual ~V8BenchmarkResults() {}
-
-  void AddResult(const std::string& benchmark_name,
-                 const std::string& result_name,
-                 const std::string& result_unit,
-                 double result) {
-    v8::Handle<v8::Object> result_object = v8::Object::New();
-    result_object->Set(v8::String::New("benchmarkName", 13),
-                       v8::String::New(benchmark_name.c_str(), -1));
-    result_object->Set(v8::String::New("resultName", 10),
-                       v8::String::New(result_name.c_str(), -1));
-    result_object->Set(v8::String::New("resultUnit", 10),
-                       v8::String::New(result_unit.c_str(), -1));
-    result_object->Set(v8::String::New("result", 6), v8::Number::New(result));
-
-    results_array_->Set(results_array_->Length(), result_object);
-  }
-
-  v8::Handle<v8::Array> results_array() {
-    return results_array_;
-  }
-
- private:
-  v8::Handle<v8::Array> results_array_;
-};
-
 class GpuBenchmarkingWrapper : public v8::Extension {
  public:
   GpuBenchmarkingWrapper() :
@@ -121,15 +104,18 @@ class GpuBenchmarkingWrapper : public v8::Extension {
           "  return PrintToSkPicture(dirname);"
           "};"
           "chrome.gpuBenchmarking.beginSmoothScrollDown = "
-          "    function(scroll_far) {"
+          "    function(scroll_far, opt_callback) {"
           "  scroll_far = scroll_far || false;"
+          "  callback = opt_callback || function() { };"
           "  native function BeginSmoothScroll();"
-          "  return BeginSmoothScroll(true, scroll_far);"
+          "  return BeginSmoothScroll(true, scroll_far, callback);"
           "};"
-          "chrome.gpuBenchmarking.beginSmoothScrollUp = function(scroll_far) {"
+          "chrome.gpuBenchmarking.beginSmoothScrollUp = "
+          "    function(scroll_far, opt_callback) {"
           "  scroll_far = scroll_far || false;"
+          "  callback = opt_callback || function() { };"
           "  native function BeginSmoothScroll();"
-          "  return BeginSmoothScroll(false, scroll_far);"
+          "  return BeginSmoothScroll(false, scroll_far, callback);"
           "};"
           "chrome.gpuBenchmarking.runRenderingBenchmarks = function(filter) {"
           "  native function RunRenderingBenchmarks();"
@@ -166,27 +152,39 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     WebRenderingStats stats;
     render_view_impl->GetRenderingStats(stats);
 
+    content::GpuRenderingStats gpu_stats;
+    render_view_impl->GetGpuRenderingStats(&gpu_stats);
+
     v8::Handle<v8::Object> stats_object = v8::Object::New();
-    if (stats.numAnimationFrames)
-      stats_object->Set(v8::String::New("numAnimationFrames"),
-                        v8::Integer::New(stats.numAnimationFrames),
-                        v8::ReadOnly);
-    if (stats.numFramesSentToScreen)
-      stats_object->Set(v8::String::New("numFramesSentToScreen"),
-                        v8::Integer::New(stats.numFramesSentToScreen),
-                        v8::ReadOnly);
-    if (stats.droppedFrameCount)
-      stats_object->Set(v8::String::New("droppedFrameCount"),
-                        v8::Integer::New(stats.droppedFrameCount),
-                        v8::ReadOnly);
-    if (stats.totalPaintTimeInSeconds)
-      stats_object->Set(v8::String::New("totalPaintTimeInSeconds"),
-                        v8::Number::New(stats.totalPaintTimeInSeconds),
-                        v8::ReadOnly);
-    if (stats.totalRasterizeTimeInSeconds)
-      stats_object->Set(v8::String::New("totalRasterizeTimeInSeconds"),
-                        v8::Number::New(stats.totalRasterizeTimeInSeconds),
-                        v8::ReadOnly);
+    stats_object->Set(v8::String::New("numAnimationFrames"),
+                      v8::Integer::New(stats.numAnimationFrames));
+    stats_object->Set(v8::String::New("numFramesSentToScreen"),
+                      v8::Integer::New(stats.numFramesSentToScreen));
+    stats_object->Set(v8::String::New("droppedFrameCount"),
+                      v8::Integer::New(stats.droppedFrameCount));
+    stats_object->Set(v8::String::New("totalPaintTimeInSeconds"),
+                      v8::Number::New(stats.totalPaintTimeInSeconds));
+    stats_object->Set(v8::String::New("totalRasterizeTimeInSeconds"),
+                      v8::Number::New(stats.totalRasterizeTimeInSeconds));
+    stats_object->Set(v8::String::New("globalTextureUploadCount"),
+                      v8::Number::New(gpu_stats.global_texture_upload_count));
+    stats_object->Set(
+        v8::String::New("globalTotalTextureUploadTimeInSeconds"),
+        v8::Number::New(
+            gpu_stats.global_total_texture_upload_time.InSecondsF()));
+    stats_object->Set(v8::String::New("textureUploadCount"),
+                      v8::Number::New(gpu_stats.texture_upload_count));
+    stats_object->Set(
+        v8::String::New("totalTextureUploadTimeInSeconds"),
+        v8::Number::New(gpu_stats.total_texture_upload_time.InSecondsF()));
+    stats_object->Set(
+        v8::String::New("globalTotalProcessingCommandsTimeInSeconds"),
+        v8::Number::New(
+            gpu_stats.global_total_processing_commands_time.InSecondsF()));
+    stats_object->Set(
+        v8::String::New("totalProcessingCommandsTimeInSeconds"),
+        v8::Number::New(
+            gpu_stats.total_processing_commands_time.InSecondsF()));
     return stats_object;
   }
 
@@ -210,8 +208,8 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (!benchmark_support)
       return v8::Undefined();
 
-    FilePath dirpath;
-    dirpath = dirpath.AppendASCII(*dirname);
+    FilePath dirpath(FilePath::StringType(*dirname,
+                                          *dirname + dirname.length()));
     if (!file_util::CreateDirectory(dirpath) ||
         !file_util::PathIsWritable(dirpath)) {
       std::string msg("Path is not writable: ");
@@ -224,6 +222,21 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     benchmark_support->paint(&recorder,
                              WebViewBenchmarkSupport::PaintModeEverything);
     return v8::Undefined();
+  }
+
+  static void OnSmoothScrollCompleted(v8::Persistent<v8::Function> callback,
+                                      v8::Persistent<v8::Context> context) {
+    v8::HandleScope scope;
+    v8::Context::Scope context_scope(context);
+    WebFrame* frame = WebFrame::frameForContext(context);
+    if (frame) {
+      frame->callFunctionEvenIfScriptDisabled(callback,
+                                              v8::Object::New(),
+                                              0,
+                                              NULL);
+    }
+    callback.Dispose();
+    context.Dispose();
   }
 
   static v8::Handle<v8::Value> BeginSmoothScroll(const v8::Arguments& args) {
@@ -239,13 +252,31 @@ class GpuBenchmarkingWrapper : public v8::Extension {
     if (!render_view_impl)
       return v8::Undefined();
 
-    if (args.Length() != 2 || !args[0]->IsBoolean() || !args[1]->IsBoolean())
+    if (args.Length() != 3 ||
+        !args[0]->IsBoolean() ||
+        !args[1]->IsBoolean() ||
+        !args[2]->IsFunction())
       return v8::False();
 
     bool scroll_down = args[0]->BooleanValue();
     bool scroll_far = args[1]->BooleanValue();
+    v8::Local<v8::Function> callback_local =
+        v8::Local<v8::Function>(v8::Function::Cast(*args[2]));
+    v8::Persistent<v8::Function> callback =
+        v8::Persistent<v8::Function>::New(callback_local);
+    v8::Persistent<v8::Context> context =
+        v8::Persistent<v8::Context>::New(web_frame->mainWorldScriptContext());
 
-    render_view_impl->BeginSmoothScroll(scroll_down, scroll_far);
+    // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
+    // progress, we will leak the callback and context. This needs to be fixed,
+    // somehow.
+    render_view_impl->BeginSmoothScroll(
+        scroll_down,
+        scroll_far,
+        base::Bind(&OnSmoothScrollCompleted,
+                   callback,
+                   context));
+
     return v8::True();
   }
 
@@ -282,7 +313,7 @@ class GpuBenchmarkingWrapper : public v8::Extension {
 
     ScopedVector<RenderingBenchmark> benchmarks = AllRenderingBenchmarks();
 
-    V8BenchmarkResults results;
+    v8::Handle<v8::Array> results = v8::Array::New(0);
     ScopedVector<RenderingBenchmark>::const_iterator it;
     for (it = benchmarks.begin(); it != benchmarks.end(); it++) {
       RenderingBenchmark* benchmark = *it;
@@ -292,11 +323,17 @@ class GpuBenchmarkingWrapper : public v8::Extension {
         continue;
       }
       benchmark->SetUp(support);
-      benchmark->Run(&results, support);
+      double result = benchmark->Run(support);
       benchmark->TearDown(support);
+
+      v8::Handle<v8::Object> result_object = v8::Object::New();
+      result_object->Set(v8::String::New("benchmark", 9),
+                         v8::String::New(name.c_str(), -1));
+      result_object->Set(v8::String::New("result", 6), v8::Number::New(result));
+      results->Set(results->Length(), result_object);
     }
 
-    return results.results_array();
+    return results;
   }
 };
 

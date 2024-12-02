@@ -32,6 +32,10 @@ class ShellDevToolsDelegate : public DevToolsHttpHandlerDelegate {
   virtual bool BundlesFrontendResources() OVERRIDE;
   virtual std::string GetFrontendResourcesBaseURL() OVERRIDE;
 
+  DevToolsHttpHandler* devtools_http_handler() {
+    return devtools_http_handler_;
+  }
+
  private:
   net::URLRequestContextGetter* context_getter_;
   DevToolsHttpHandler* devtools_http_handler_;

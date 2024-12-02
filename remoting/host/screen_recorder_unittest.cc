@@ -6,7 +6,8 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "remoting/base/base_mock_objects.h"
+#include "remoting/base/capture_data.h"
+#include "remoting/codec/video_encoder.h"
 #include "remoting/host/host_mock_objects.h"
 #include "remoting/proto/video.pb.h"
 #include "remoting/protocol/protocol_mock_objects.h"
@@ -68,21 +69,38 @@ static const media::VideoFrame::Format kFormat = media::VideoFrame::RGB32;
 static const VideoPacketFormat::Encoding kEncoding =
     VideoPacketFormat::ENCODING_VERBATIM;
 
+class MockVideoEncoder : public VideoEncoder {
+ public:
+  MockVideoEncoder();
+  virtual ~MockVideoEncoder();
+
+  MOCK_METHOD3(Encode, void(
+      scoped_refptr<CaptureData> capture_data,
+      bool key_frame,
+      const DataAvailableCallback& data_available_callback));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockVideoEncoder);
+};
+
+MockVideoEncoder::MockVideoEncoder() {}
+
+MockVideoEncoder::~MockVideoEncoder() {}
+
 class ScreenRecorderTest : public testing::Test {
  public:
   ScreenRecorderTest() {
   }
 
   virtual void SetUp() OVERRIDE {
-    // VideoFrameCapturer and Encoder are owned by ScreenRecorder.
-    encoder_ = new MockEncoder();
+    // VideoFrameCapturer and VideoEncoder are owned by ScreenRecorder.
+    encoder_ = new MockVideoEncoder();
 
     session_ = new MockSession();
     EXPECT_CALL(*session_, SetEventHandler(_));
     EXPECT_CALL(*session_, Close())
         .Times(AnyNumber());
-    connection_.reset(new MockConnectionToClient(
-        session_, &host_stub_, &event_executor_));
+    connection_.reset(new MockConnectionToClient(session_, &host_stub_));
     connection_->SetEventHandler(&handler_);
 
     record_ = new ScreenRecorder(
@@ -103,13 +121,12 @@ class ScreenRecorderTest : public testing::Test {
 
   MockConnectionToClientEventHandler handler_;
   MockHostStub host_stub_;
-  MockEventExecutor event_executor_;
   MockSession* session_;  // Owned by |connection_|.
   scoped_ptr<MockConnectionToClient> connection_;
 
   // The following mock objects are owned by ScreenRecorder.
   MockVideoFrameCapturer capturer_;
-  MockEncoder* encoder_;
+  MockVideoEncoder* encoder_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ScreenRecorderTest);

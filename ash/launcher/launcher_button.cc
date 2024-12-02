@@ -5,26 +5,20 @@
 #include "ash/launcher/launcher_button.h"
 
 #include <algorithm>
-#include <vector>
 
 #include "ash/launcher/launcher_button_host.h"
-#include "grit/ui_resources.h"
+#include "grit/ash_resources.h"
 #include "skia/ext/image_operations.h"
-#include "ui/aura/event.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/throb_animation.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
-#include "ui/compositor/layer_animation_element.h"
-#include "ui/compositor/layer_animation_observer.h"
-#include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_operations.h"
-#include "ui/gfx/transform_util.h"
 #include "ui/views/controls/image_view.h"
 
 namespace {
@@ -35,11 +29,10 @@ const int kBarSize = 3;
 const int kBarSpacing = 5;
 const int kIconSize = 32;
 const int kHopSpacing = 2;
-const int kActiveBarColor = 0xe6ffffff;
-const int kInactiveBarColor = 0x80ffffff;
-const int kHopUpMS = 200;
+const int kIconPad = 8;
+const int kHopUpMS = 0;
 const int kHopDownMS = 200;
-const int kAttentionThrobDurationMS = 2000;
+const int kAttentionThrobDurationMS = 1000;
 
 bool ShouldHop(int state) {
   return state & ash::internal::LauncherButton::STATE_HOVERED ||
@@ -65,7 +58,7 @@ class LauncherButton::BarView : public views::ImageView,
   }
 
   // View overrides.
-  bool HitTest(const gfx::Point& l) const OVERRIDE {
+  bool HitTestRect(const gfx::Rect& rect) const OVERRIDE {
     // Allow Mouse...() messages to go to the parent view.
     return false;
   }
@@ -103,102 +96,6 @@ class LauncherButton::BarView : public views::ImageView,
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-// LauncherButton::IconPulseAnimation
-
-// IconPulseAnimation plays a pulse animation in a loop for given |icon_view|.
-// It iterates through all animations, wait for one duration then starts again.
-class LauncherButton::IconPulseAnimation {
- public:
-  explicit IconPulseAnimation(IconView* icon_view)
-      : icon_view_(icon_view) {
-    SchedulePulseAnimations();
-  }
-  virtual ~IconPulseAnimation() {
-    // Restore icon_view_ on destruction.
-    ScheduleRestoreAnimation();
-  }
-
- private:
-  // Animation duration in millisecond.
-  static const int kAnimationDurationInMs;
-
-  // Number of animations to run and animation parameters.
-  static const float kAnimationOpacity[];
-  static const float kAnimationScale[];
-
-  // Schedules pulse animations.
-  void SchedulePulseAnimations();
-
-  // Schedule an animation to restore the view to normal state.
-  void ScheduleRestoreAnimation();
-
-  IconView* icon_view_;  // Owned by views hierarchy of LauncherButton.
-
-  DISALLOW_COPY_AND_ASSIGN(IconPulseAnimation);
-};
-
-// static
-const int LauncherButton::IconPulseAnimation::kAnimationDurationInMs = 600;
-const float LauncherButton::IconPulseAnimation::kAnimationOpacity[] =
-    { 0.4f, 0.8f };
-const float LauncherButton::IconPulseAnimation::kAnimationScale[] =
-    { 0.8f, 1.0f };
-
-void LauncherButton::IconPulseAnimation::SchedulePulseAnimations() {
-  // The two animation set should have the same size.
-  DCHECK(arraysize(kAnimationOpacity) == arraysize(kAnimationScale));
-
-  scoped_ptr<ui::LayerAnimationSequence> opacity_sequence(
-      new ui::LayerAnimationSequence());
-  scoped_ptr<ui::LayerAnimationSequence> transform_sequence(
-      new ui::LayerAnimationSequence());
-
-  // The animations loop infinitely.
-  opacity_sequence->set_is_cyclic(true);
-  transform_sequence->set_is_cyclic(true);
-
-  for (size_t i = 0; i < arraysize(kAnimationOpacity); ++i) {
-    opacity_sequence->AddElement(
-        ui::LayerAnimationElement::CreateOpacityElement(
-            kAnimationOpacity[i],
-            base::TimeDelta::FromMilliseconds(kAnimationDurationInMs)));
-    transform_sequence->AddElement(
-        ui::LayerAnimationElement::CreateTransformElement(
-            ui::GetScaleTransform(icon_view_->GetLocalBounds().CenterPoint(),
-                                  kAnimationScale[i]),
-            base::TimeDelta::FromMilliseconds(kAnimationDurationInMs)));
-  }
-
-  ui::LayerAnimationElement::AnimatableProperties opacity_properties;
-  opacity_properties.insert(ui::LayerAnimationElement::OPACITY);
-  opacity_sequence->AddElement(
-      ui::LayerAnimationElement::CreatePauseElement(
-          opacity_properties,
-          base::TimeDelta::FromMilliseconds(kAnimationDurationInMs)));
-
-  ui::LayerAnimationElement::AnimatableProperties transform_properties;
-  transform_properties.insert(ui::LayerAnimationElement::TRANSFORM);
-  transform_sequence->AddElement(
-      ui::LayerAnimationElement::CreatePauseElement(
-          transform_properties,
-          base::TimeDelta::FromMilliseconds(kAnimationDurationInMs)));
-
-  std::vector<ui::LayerAnimationSequence*> animations;
-  // LayerAnimator::ScheduleTogether takes ownership of the sequences.
-  animations.push_back(opacity_sequence.release());
-  animations.push_back(transform_sequence.release());
-  icon_view_->layer()->GetAnimator()->ScheduleTogether(animations);
-}
-
-// Schedule an animation to restore the view to normal state.
-void LauncherButton::IconPulseAnimation::ScheduleRestoreAnimation() {
-  ui::Layer* layer = icon_view_->layer();
-  ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
-  layer->SetOpacity(1.0f);
-  layer->SetTransform(ui::Transform());
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // LauncherButton::IconView
 
 LauncherButton::IconView::IconView() : icon_size_(kIconSize) {
@@ -207,7 +104,7 @@ LauncherButton::IconView::IconView() : icon_size_(kIconSize) {
 LauncherButton::IconView::~IconView() {
 }
 
-bool LauncherButton::IconView::HitTest(const gfx::Point& l) const {
+bool LauncherButton::IconView::HitTestRect(const gfx::Rect& rect) const {
   // Return false so that LauncherButton gets all the mouse events.
   return false;
 }
@@ -250,7 +147,7 @@ void LauncherButton::SetShadowedImage(const gfx::ImageSkia& image) {
 }
 
 void LauncherButton::SetImage(const gfx::ImageSkia& image) {
-  if (image.empty()) {
+  if (image.isNull()) {
     // TODO: need an empty image.
     icon_view_->SetImage(image);
     return;
@@ -277,8 +174,8 @@ void LauncherButton::SetImage(const gfx::ImageSkia& image) {
     return;
   }
 
-  SetShadowedImage(gfx::ImageSkiaOperations::CreateResizedImage(
-      image, gfx::Size(width, height)));
+  SetShadowedImage(gfx::ImageSkiaOperations::CreateResizedImage(image,
+      skia::ImageOperations::RESIZE_BEST, gfx::Size(width, height)));
 }
 
 void LauncherButton::AddState(State state) {
@@ -296,8 +193,6 @@ void LauncherButton::AddState(State state) {
     }
     if (state & STATE_ATTENTION)
       bar_->ShowAttention(true);
-    if (state & STATE_PENDING)
-      icon_pulse_animation_.reset(new IconPulseAnimation(icon_view_));
   }
 }
 
@@ -317,8 +212,6 @@ void LauncherButton::ClearState(State state) {
     }
     if (state & STATE_ATTENTION)
       bar_->ShowAttention(false);
-    if (state & STATE_PENDING)
-      icon_pulse_animation_.reset();
   }
 }
 
@@ -326,13 +219,13 @@ gfx::Rect LauncherButton::GetIconBounds() const {
   return icon_view_->bounds();
 }
 
-bool LauncherButton::OnMousePressed(const views::MouseEvent& event) {
+bool LauncherButton::OnMousePressed(const ui::MouseEvent& event) {
   CustomButton::OnMousePressed(event);
   host_->PointerPressedOnButton(this, LauncherButtonHost::MOUSE, event);
   return true;
 }
 
-void LauncherButton::OnMouseReleased(const views::MouseEvent& event) {
+void LauncherButton::OnMouseReleased(const ui::MouseEvent& event) {
   CustomButton::OnMouseReleased(event);
   host_->PointerReleasedOnButton(this, LauncherButtonHost::MOUSE, false);
 }
@@ -343,31 +236,31 @@ void LauncherButton::OnMouseCaptureLost() {
   CustomButton::OnMouseCaptureLost();
 }
 
-bool LauncherButton::OnMouseDragged(const views::MouseEvent& event) {
+bool LauncherButton::OnMouseDragged(const ui::MouseEvent& event) {
   CustomButton::OnMouseDragged(event);
   host_->PointerDraggedOnButton(this, LauncherButtonHost::MOUSE, event);
   return true;
 }
 
-void LauncherButton::OnMouseMoved(const views::MouseEvent& event) {
+void LauncherButton::OnMouseMoved(const ui::MouseEvent& event) {
   CustomButton::OnMouseMoved(event);
   host_->MouseMovedOverButton(this);
 }
 
-void LauncherButton::OnMouseEntered(const views::MouseEvent& event) {
+void LauncherButton::OnMouseEntered(const ui::MouseEvent& event) {
   AddState(STATE_HOVERED);
   CustomButton::OnMouseEntered(event);
   host_->MouseEnteredButton(this);
 }
 
-void LauncherButton::OnMouseExited(const views::MouseEvent& event) {
+void LauncherButton::OnMouseExited(const ui::MouseEvent& event) {
   ClearState(STATE_HOVERED);
   CustomButton::OnMouseExited(event);
   host_->MouseExitedButton(this);
 }
 
-ui::GestureStatus LauncherButton::OnGestureEvent(
-    const views::GestureEvent& event) {
+ui::EventResult LauncherButton::OnGestureEvent(
+    const ui::GestureEvent& event) {
   switch (event.type()) {
     case ui::ET_GESTURE_TAP_DOWN:
       AddState(STATE_HOVERED);
@@ -377,13 +270,13 @@ ui::GestureStatus LauncherButton::OnGestureEvent(
       return CustomButton::OnGestureEvent(event);
     case ui::ET_GESTURE_SCROLL_BEGIN:
       host_->PointerPressedOnButton(this, LauncherButtonHost::TOUCH, event);
-      return ui::GESTURE_STATUS_CONSUMED;
+      return ui::ER_CONSUMED;
     case ui::ET_GESTURE_SCROLL_UPDATE:
       host_->PointerDraggedOnButton(this, LauncherButtonHost::TOUCH, event);
-      return ui::GESTURE_STATUS_CONSUMED;
+      return ui::ER_CONSUMED;
     case ui::ET_GESTURE_SCROLL_END:
       host_->PointerReleasedOnButton(this, LauncherButtonHost::TOUCH, false);
-      return ui::GESTURE_STATUS_CONSUMED;
+      return ui::ER_CONSUMED;
     default:
       return CustomButton::OnGestureEvent(event);
   }
@@ -395,34 +288,33 @@ void LauncherButton::GetAccessibleState(ui::AccessibleViewState* state) {
 }
 
 void LauncherButton::Layout() {
-  gfx::Rect rect(GetContentsBounds());
-  int image_x, image_y;
+  const gfx::Rect button_bounds(GetContentsBounds());
+  int x_offset = 0, y_offset = 0;
+  gfx::Rect icon_bounds;
 
-  if (IsShelfHorizontal()) {
-    image_x = rect.x() + (rect.width() - icon_view_->width()) / 2;
-    image_y = rect.bottom() - (icon_view_->height() + kBarSize + kBarSpacing);
+  if (host_->GetShelfAlignment() == SHELF_ALIGNMENT_BOTTOM) {
+    icon_bounds.SetRect(
+        button_bounds.x(), button_bounds.y() + kIconPad,
+        button_bounds.width(), kIconSize);
     if (ShouldHop(state_))
-      image_y -= kHopSpacing;
+      y_offset -= kHopSpacing;
   } else {
-    image_y = rect.y() + (rect.height() - icon_view_->height()) / 2;
-    if (host_->GetShelfAlignment() == SHELF_ALIGNMENT_LEFT) {
-      image_x = rect.x() + kBarSize + kBarSpacing;
-      if (ShouldHop(state_))
-        image_x += kHopSpacing;
-    } else {
-      image_x = rect.right() - (icon_view_->width() + kBarSize + kBarSpacing);
-      if (ShouldHop(state_))
-        image_x -= kHopSpacing;
-    }
+    icon_bounds.SetRect(
+        button_bounds.x() + kIconPad, button_bounds.y(),
+        kIconSize, button_bounds.height());
+    if (!ShouldHop(state_))
+      x_offset += kHopSpacing;
   }
 
-  // Offset to compensate for shadows.
-  gfx::Insets icon_shadow_padding = -gfx::ShadowValue::GetMargin(icon_shadows_);
-  image_x -= icon_shadow_padding.left() - icon_shadow_padding.right();
-  image_y -= icon_shadow_padding.top() - icon_shadow_padding.bottom();
+  if (host_->GetShelfAlignment() == SHELF_ALIGNMENT_LEFT)
+    x_offset = -x_offset;
+  icon_bounds.Offset(x_offset, y_offset);
+  icon_view_->SetBoundsRect(icon_bounds);
+  bar_->SetBoundsRect(GetContentsBounds());
+}
 
-  icon_view_->SetPosition(gfx::Point(image_x, image_y));
-  bar_->SetBoundsRect(rect);
+void LauncherButton::ChildPreferredSizeChanged(views::View* child) {
+  Layout();
 }
 
 void LauncherButton::OnFocus() {
@@ -438,19 +330,11 @@ void LauncherButton::OnBlur() {
 void LauncherButton::Init() {
   icon_view_ = CreateIconView();
 
-  gfx::Insets icon_shadow_padding = -gfx::ShadowValue::GetMargin(icon_shadows_);
-  const int horiz_padding = std::max(icon_shadow_padding.left(),
-                                     icon_shadow_padding.right());
-  const int vert_padding = std::max(icon_shadow_padding.top(),
-                                    icon_shadow_padding.bottom());
-
   // TODO: refactor the layers so each button doesn't require 2.
   icon_view_->SetPaintToLayer(true);
   icon_view_->SetFillsBoundsOpaquely(false);
-  icon_view_->SetSize(gfx::Size(kIconSize + horiz_padding,
-                                kIconSize + vert_padding));
   icon_view_->SetHorizontalAlignment(views::ImageView::CENTER);
-  icon_view_->SetVerticalAlignment(views::ImageView::CENTER);
+  icon_view_->SetVerticalAlignment(views::ImageView::LEADING);
 
   AddChildView(icon_view_);
 }
@@ -464,25 +348,29 @@ bool LauncherButton::IsShelfHorizontal() const {
 }
 
 void LauncherButton::UpdateState() {
-  if (state_ == STATE_NORMAL || state_ & STATE_PENDING) {
+  if (state_ == STATE_NORMAL) {
     bar_->SetVisible(false);
   } else {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     int bar_id;
-    bar_->SetVisible(true);
-
-    if (state_ & STATE_ACTIVE || state_ & STATE_ATTENTION) {
-      bar_id = IsShelfHorizontal() ? IDR_AURA_LAUNCHER_UNDERLINE_ACTIVE :
-          IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_ACTIVE;
-    } else if (state_ & STATE_HOVERED || state_ & STATE_FOCUSED) {
-      bar_id = IsShelfHorizontal() ? IDR_AURA_LAUNCHER_UNDERLINE_HOVER :
-          IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_HOVER;
+    if (IsShelfHorizontal()) {
+      if (state_ & (STATE_HOVERED | STATE_FOCUSED | STATE_ATTENTION))
+        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_HOVER;
+      else if (state_ & STATE_ACTIVE)
+        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_ACTIVE;
+      else
+        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_RUNNING;
     } else {
-      bar_id = IsShelfHorizontal() ? IDR_AURA_LAUNCHER_UNDERLINE_RUNNING :
-          IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_RUNNING;
+      if (state_ & (STATE_HOVERED | STATE_FOCUSED | STATE_ATTENTION))
+        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_HOVER;
+      else if (state_ & STATE_ACTIVE)
+        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_ACTIVE;
+      else
+        bar_id = IDR_AURA_LAUNCHER_UNDERLINE_VERTICAL_RUNNING;
     }
 
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     bar_->SetImage(rb.GetImageNamed(bar_id).ToImageSkia());
+    bar_->SetVisible(true);
   }
 
   switch (host_->GetShelfAlignment()) {

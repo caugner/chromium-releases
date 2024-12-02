@@ -8,18 +8,23 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/values.h"
+#include "base/version.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/api/processes/processes_api.h"
+#include "chrome/browser/extensions/api/processes/processes_api_constants.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
-#include "chrome/browser/extensions/extension_processes_api.h"
-#include "chrome/browser/extensions/extension_processes_api_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/process_map.h"
+#include "chrome/browser/extensions/system_info_event_router.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -32,9 +37,11 @@
 using base::Value;
 using content::BrowserThread;
 
+namespace extensions {
+
 namespace {
 
-const char kDispatchEvent[] = "Event.dispatchJSON";
+const char kDispatchEvent[] = "Event.dispatchEvent";
 
 void NotifyEventListenerRemovedOnIOThread(
     void* profile,
@@ -44,9 +51,18 @@ void NotifyEventListenerRemovedOnIOThread(
       profile, extension_id, sub_event_name);
 }
 
-}  // namespace
+void DispatchOnInstalledEvent(
+    Profile* profile,
+    const std::string& extension_id,
+    const Version& old_version) {
+  if (!g_browser_process->profile_manager()->IsValidProfile(profile))
+    return;
 
-namespace extensions {
+  RuntimeEventRouter::DispatchOnInstalledEvent(profile, extension_id,
+                                               old_version);
+}
+
+}  // namespace
 
 struct EventRouter::ListenerProcess {
   content::RenderProcessHost* process;
@@ -66,36 +82,37 @@ struct EventRouter::ListenerProcess {
 };
 
 // static
-void EventRouter::DispatchEvent(IPC::Sender* ipc_sender,
-                                const std::string& extension_id,
-                                const std::string& event_name,
-                                const Value& event_args,
-                                const GURL& event_url,
-                                UserGestureState user_gesture,
-                                const EventFilteringInfo& info) {
-  // TODO(gdk): Reduce number of DeepCopy() calls throughout the event dispatch
-  // chain, starting by replacing the event_args with a Value*.
+void EventRouter::DispatchExtensionMessage(IPC::Sender* ipc_sender,
+                                           const std::string& extension_id,
+                                           const std::string& event_name,
+                                           ListValue* event_args,
+                                           const GURL& event_url,
+                                           UserGestureState user_gesture,
+                                           const EventFilteringInfo& info) {
   ListValue args;
   args.Set(0, Value::CreateStringValue(event_name));
-  args.Set(1, event_args.DeepCopy());
+  args.Set(1, event_args);
   args.Set(2, info.AsValue().release());
-
   ipc_sender->Send(new ExtensionMsg_MessageInvoke(MSG_ROUTING_CONTROL,
       extension_id, kDispatchEvent, args, event_url,
       user_gesture == USER_GESTURE_ENABLED));
+
+  // DispatchExtensionMessage does _not_ take ownership of event_args, so we
+  // must ensure that the destruction of args does not attempt to free it.
+  Value* removed_event_args = NULL;
+  args.Remove(1, &removed_event_args);
 }
 
 // static
 void EventRouter::DispatchEvent(IPC::Sender* ipc_sender,
                                 const std::string& extension_id,
                                 const std::string& event_name,
-                                const std::string& event_args,
+                                scoped_ptr<ListValue> event_args,
                                 const GURL& event_url,
                                 UserGestureState user_gesture,
                                 const EventFilteringInfo& info) {
-  scoped_ptr<Value> event_args_value(Value::CreateStringValue(event_args));
-  DispatchEvent(ipc_sender, extension_id, event_name, *event_args_value.get(),
-                event_url, user_gesture, info);
+  DispatchExtensionMessage(ipc_sender, extension_id, event_name,
+                           event_args.get(), event_url, user_gesture, info);
 }
 
 EventRouter::EventRouter(Profile* profile)
@@ -144,10 +161,14 @@ void EventRouter::OnListenerAdded(const EventListener* listener) {
   // We lazily tell the TaskManager to start updating when listeners to the
   // processes.onUpdated or processes.onUpdatedWithMemory events arrive.
   const std::string& event_name = listener->event_name;
-  if (event_name.compare(extension_processes_api_constants::kOnUpdated) == 0 ||
+  if (event_name.compare(
+          extensions::processes_api_constants::kOnUpdated) == 0 ||
       event_name.compare(
-          extension_processes_api_constants::kOnUpdatedWithMemory) == 0)
-    ExtensionProcessesEventRouter::GetInstance()->ListenerAdded();
+          extensions::processes_api_constants::kOnUpdatedWithMemory) == 0)
+    extensions::ProcessesEventRouter::GetInstance()->ListenerAdded();
+
+  if (SystemInfoEventRouter::IsSystemInfoEvent(event_name))
+    SystemInfoEventRouter::GetInstance()->AddEventListener(event_name);
 }
 
 void EventRouter::OnListenerRemoved(const EventListener* listener) {
@@ -163,15 +184,19 @@ void EventRouter::OnListenerRemoved(const EventListener* listener) {
   // If a processes.onUpdated or processes.onUpdatedWithMemory event listener
   // is removed (or a process with one exits), then we let the extension API
   // know that it has one fewer listener.
-  if (event_name.compare(extension_processes_api_constants::kOnUpdated) == 0 ||
+  if (event_name.compare(
+          extensions::processes_api_constants::kOnUpdated) == 0 ||
       event_name.compare(
-          extension_processes_api_constants::kOnUpdatedWithMemory) == 0)
-    ExtensionProcessesEventRouter::GetInstance()->ListenerRemoved();
+          extensions::processes_api_constants::kOnUpdatedWithMemory) == 0)
+    extensions::ProcessesEventRouter::GetInstance()->ListenerRemoved();
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&NotifyEventListenerRemovedOnIOThread,
                  profile_, listener->extension_id, listener->event_name));
+
+  if (SystemInfoEventRouter::IsSystemInfoEvent(event_name))
+    SystemInfoEventRouter::GetInstance()->RemoveEventListener(event_name);
 }
 
 void EventRouter::AddLazyEventListener(const std::string& event_name,
@@ -280,35 +305,31 @@ bool EventRouter::HasEventListenerImpl(const ListenerMap& listener_map,
 }
 
 void EventRouter::DispatchEventToRenderers(const std::string& event_name,
-                                           const std::string& event_args,
+                                           scoped_ptr<ListValue> event_args,
                                            Profile* restrict_to_profile,
                                            const GURL& event_url,
                                            EventFilteringInfo info) {
-  DCHECK(!event_args.empty());
-  StringValue event_args_value(event_args);
-  linked_ptr<Event> event(new Event(event_name, event_args_value,
+  linked_ptr<Event> event(new Event(event_name, event_args.Pass(),
                                     event_url, restrict_to_profile,
                                     USER_GESTURE_UNKNOWN, info));
   DispatchEventImpl("", event);
 }
 
 void EventRouter::DispatchEventToRenderers(const std::string& event_name,
-                                           const std::string& event_args,
+                                           scoped_ptr<ListValue> event_args,
                                            Profile* restrict_to_profile,
                                            const GURL& event_url) {
-  DispatchEventToRenderers(event_name, event_args, restrict_to_profile,
+  DispatchEventToRenderers(event_name, event_args.Pass(), restrict_to_profile,
                            event_url, EventFilteringInfo());
 }
 
 void EventRouter::DispatchEventToRenderers(const std::string& event_name,
-                                           const std::string& event_args,
+                                           scoped_ptr<ListValue> event_args,
                                            Profile* restrict_to_profile,
                                            const GURL& event_url,
                                            UserGestureState user_gesture) {
-  DCHECK(!event_args.empty());
-  StringValue event_args_value(event_args);
   EventFilteringInfo info;
-  linked_ptr<Event> event(new Event(event_name, event_args_value,
+  linked_ptr<Event> event(new Event(event_name, event_args.Pass(),
                                     event_url, restrict_to_profile,
                                     user_gesture, info));
   DispatchEventImpl("", event);
@@ -316,11 +337,11 @@ void EventRouter::DispatchEventToRenderers(const std::string& event_name,
 
 void EventRouter::DispatchEventToExtension(const std::string& extension_id,
                                            const std::string& event_name,
-                                           const Value& event_args,
+                                           scoped_ptr<ListValue> event_args,
                                            Profile* restrict_to_profile,
                                            const GURL& event_url) {
   DCHECK(!extension_id.empty());
-  linked_ptr<Event> event(new Event(event_name, event_args, event_url,
+  linked_ptr<Event> event(new Event(event_name, event_args.Pass(), event_url,
                                     restrict_to_profile, USER_GESTURE_UNKNOWN,
                                     EventFilteringInfo()));
   DispatchEventImpl(extension_id, event);
@@ -328,23 +349,12 @@ void EventRouter::DispatchEventToExtension(const std::string& extension_id,
 
 void EventRouter::DispatchEventToExtension(const std::string& extension_id,
                                            const std::string& event_name,
-                                           const std::string& event_args,
-                                           Profile* restrict_to_profile,
-                                           const GURL& event_url) {
-  StringValue event_args_value(event_args);
-  DispatchEventToExtension(extension_id, event_name, event_args_value,
-                           restrict_to_profile, event_url);
-}
-
-void EventRouter::DispatchEventToExtension(const std::string& extension_id,
-                                           const std::string& event_name,
-                                           const std::string& event_args,
+                                           scoped_ptr<ListValue> event_args,
                                            Profile* restrict_to_profile,
                                            const GURL& event_url,
                                            UserGestureState user_gesture) {
   DCHECK(!extension_id.empty());
-  StringValue event_args_value(event_args);
-  linked_ptr<Event> event(new Event(event_name, event_args_value, event_url,
+  linked_ptr<Event> event(new Event(event_name, event_args.Pass(), event_url,
                                     restrict_to_profile, user_gesture,
                                     EventFilteringInfo()));
   DispatchEventImpl(extension_id, event);
@@ -352,13 +362,14 @@ void EventRouter::DispatchEventToExtension(const std::string& extension_id,
 
 void EventRouter::DispatchEventsToRenderersAcrossIncognito(
     const std::string& event_name,
-    const std::string& event_args,
+    scoped_ptr<ListValue> event_args,
     Profile* restrict_to_profile,
-    const std::string& cross_incognito_args,
+    scoped_ptr<ListValue> cross_incognito_args,
     const GURL& event_url) {
-  linked_ptr<Event> event(new Event(event_name, event_args,
-                                    event_url, restrict_to_profile,
-                                    cross_incognito_args, USER_GESTURE_UNKNOWN,
+  linked_ptr<Event> event(new Event(event_name, event_args.Pass(), event_url,
+                                    restrict_to_profile,
+                                    cross_incognito_args.Pass(),
+                                    USER_GESTURE_UNKNOWN,
                                     EventFilteringInfo()));
   DispatchEventImpl("", event);
 }
@@ -440,24 +451,25 @@ void EventRouter::DispatchEventToProcess(const std::string& extension_id,
     return;
   }
 
-  const Value* event_args = NULL;
+  ListValue* event_args = NULL;
   if (!CanDispatchEventToProfile(listener_profile, extension,
                                  event, &event_args)) {
     return;
   }
 
-  DispatchEvent(process, extension_id,
-                event->event_name, *event_args,
-                event->event_url, event->user_gesture,
-                event->info);
+  DispatchExtensionMessage(process, extension_id,
+                           event->event_name, event_args,
+                           event->event_url, event->user_gesture,
+                           event->info);
   IncrementInFlightEvents(listener_profile, extension);
 }
 
 bool EventRouter::CanDispatchEventToProfile(Profile* profile,
                                             const Extension* extension,
                                             const linked_ptr<Event>& event,
-                                            const Value** event_args) {
-  *event_args = event->event_args.get();
+                                            ListValue** event_args) {
+  if (event_args)
+    *event_args = event->event_args.get();
 
   // Is this event from a different profile than the renderer (ie, an
   // incognito tab event sent to a normal process, or vice versa).
@@ -469,7 +481,8 @@ bool EventRouter::CanDispatchEventToProfile(Profile* profile,
       return false;
     // Send the event with different arguments to extensions that can't
     // cross incognito.
-    *event_args = event->cross_incognito_args.get();
+    if (event_args)
+      *event_args = event->cross_incognito_args.get();
   }
 
   return true;
@@ -479,8 +492,7 @@ void EventRouter::MaybeLoadLazyBackgroundPageToDispatchEvent(
     Profile* profile,
     const Extension* extension,
     const linked_ptr<Event>& event) {
-  const Value* event_args = NULL;
-  if (!CanDispatchEventToProfile(profile, extension, event, &event_args))
+  if (!CanDispatchEventToProfile(profile, extension, event, NULL))
     return;
 
   LazyBackgroundTaskQueue* queue =
@@ -525,9 +537,10 @@ void EventRouter::DispatchPendingEvent(const linked_ptr<Event>& event,
     return;
 
   if (listeners_.HasProcessListener(host->render_process_host(),
-                                    host->extension()->id()))
+                                    host->extension()->id())) {
     DispatchEventToProcess(host->extension()->id(),
                            host->render_process_host(), event);
+  }
 }
 
 void EventRouter::Observe(int type,
@@ -569,9 +582,18 @@ void EventRouter::Observe(int type,
       // Dispatch the onInstalled event.
       const Extension* extension =
           content::Details<const Extension>(details).ptr();
+
+      // Get the previous version, if this is an upgrade.
+      ExtensionService* service =
+          ExtensionSystem::Get(profile_)->extension_service();
+      const Extension* old = service->GetExtensionById(extension->id(), true);
+      Version old_version;
+      if (old)
+        old_version = *old->version();
+
       MessageLoop::current()->PostTask(FROM_HERE,
-          base::Bind(&RuntimeEventRouter::DispatchOnInstalledEvent,
-                     profile_, extension->id()));
+          base::Bind(&DispatchOnInstalledEvent, profile_, extension->id(),
+                     old_version));
       break;
     }
     default:
@@ -581,57 +603,34 @@ void EventRouter::Observe(int type,
 }
 
 Event::Event(const std::string& event_name,
-             const Value& event_args,
+             scoped_ptr<ListValue> event_args,
              const GURL& event_url,
              Profile* restrict_to_profile,
-             const Value& cross_incognito_args,
+             scoped_ptr<ListValue> cross_incognito_args,
              EventRouter::UserGestureState user_gesture,
              const EventFilteringInfo& info)
     : event_name(event_name),
-      event_args(event_args.DeepCopy()),
+      event_args(event_args.Pass()),
       event_url(event_url),
       restrict_to_profile(restrict_to_profile),
-      cross_incognito_args(cross_incognito_args.DeepCopy()),
+      cross_incognito_args(cross_incognito_args.Pass()),
       user_gesture(user_gesture),
-      info(info) {
-}
+      info(info) {}
 
 Event::Event(const std::string& event_name,
-             const std::string& event_args,
+             scoped_ptr<ListValue> event_args,
              const GURL& event_url,
              Profile* restrict_to_profile,
-             const std::string& cross_incognito_args_param,
              EventRouter::UserGestureState user_gesture,
              const EventFilteringInfo& info)
     : event_name(event_name),
-      event_args(Value::CreateStringValue(event_args)),
+      event_args(event_args.Pass()),
       event_url(event_url),
       restrict_to_profile(restrict_to_profile),
       cross_incognito_args(NULL),
       user_gesture(user_gesture),
-      info(info) {
-  if (!cross_incognito_args_param.empty()) {
-    cross_incognito_args.reset(Value::CreateStringValue(
-        cross_incognito_args_param));
-  }
-}
+      info(info) {}
 
-Event::Event(const std::string& event_name,
-             const Value& event_args,
-             const GURL& event_url,
-             Profile* restrict_to_profile,
-             EventRouter::UserGestureState user_gesture,
-             const EventFilteringInfo& info)
-    : event_name(event_name),
-      event_args(event_args.DeepCopy()),
-      event_url(event_url),
-      restrict_to_profile(restrict_to_profile),
-      cross_incognito_args(NULL),
-      user_gesture(user_gesture),
-      info(info) {
-}
-
-Event::~Event() {
-}
+Event::~Event() {}
 
 }  // namespace extensions

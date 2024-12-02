@@ -11,6 +11,8 @@
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace_controller.h"
+#include "ash/wm/workspace/workspace_window_resizer.h"
 #include "base/command_line.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
@@ -18,30 +20,6 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/screen.h"
-
-namespace {
-
-// Given a |window| and tentative |restore_bounds|, returns new bounds that
-// ensure that at least a few pixels of the screen background are visible
-// outside the edges of the window.  Use this to ensure that restoring a
-// maximized window creates enough space that the resize handles are easily
-// clickable.  We get into this state when updating Chrome OS R18 to R19, as
-// Chrome OS R18 and earlier used only maximized windows and set their restore
-// bounds to the size of the screen.  See crbug.com/108073
-gfx::Rect BoundsWithScreenEdgeVisible(aura::Window* window,
-                                      const gfx::Rect& restore_bounds) {
-  // If the restore_bounds are more than 1 grid step away from the size the
-  // window would be when maximized, inset it.
-  int grid_size = ash::Shell::GetInstance()->GetGridSize();
-  gfx::Rect max_bounds =
-      ash::ScreenAsh::GetMaximizedWindowBoundsInParent(window);
-  max_bounds.Inset(grid_size, grid_size);
-  if (restore_bounds.Contains(max_bounds))
-    return max_bounds;
-  return restore_bounds;
-}
-
-}  // namespace
 
 namespace ash {
 namespace internal {
@@ -64,6 +42,21 @@ BaseLayoutManager::~BaseLayoutManager() {
   for (WindowSet::const_iterator i = windows_.begin(); i != windows_.end(); ++i)
     (*i)->RemoveObserver(this);
   Shell::GetInstance()->RemoveShellObserver(this);
+}
+
+// static
+gfx::Rect BaseLayoutManager::BoundsWithScreenEdgeVisible(
+    aura::Window* window,
+    const gfx::Rect& restore_bounds) {
+  gfx::Rect max_bounds =
+      ash::ScreenAsh::GetMaximizedWindowBoundsInParent(window);
+  // If the restore_bounds are more than 1 grid step away from the size the
+  // window would be when maximized, inset it.
+  max_bounds.Inset(ash::internal::WorkspaceWindowResizer::kScreenEdgeInset,
+                   ash::internal::WorkspaceWindowResizer::kScreenEdgeInset);
+  if (restore_bounds.Contains(max_bounds))
+    return max_bounds;
+  return restore_bounds;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -136,6 +129,7 @@ void BaseLayoutManager::OnWindowPropertyChanged(aura::Window* window,
     ui::WindowShowState new_state =
         window->GetProperty(aura::client::kShowStateKey);
     if (old_state != new_state && old_state != ui::SHOW_STATE_MINIMIZED &&
+        !GetRestoreBoundsInScreen(window) &&
         ((new_state == ui::SHOW_STATE_MAXIMIZED &&
           old_state != ui::SHOW_STATE_FULLSCREEN) ||
          (new_state == ui::SHOW_STATE_FULLSCREEN &&
@@ -143,7 +137,9 @@ void BaseLayoutManager::OnWindowPropertyChanged(aura::Window* window,
       SetRestoreBoundsInParent(window, window->bounds());
     }
     // Minimized state handles its own animations.
-    bool animate = (old_state != ui::SHOW_STATE_MINIMIZED);
+    // TODO(sky): get animations to work with Workspace2.
+    bool animate = (old_state != ui::SHOW_STATE_MINIMIZED) &&
+        !WorkspaceController::IsWorkspace2Enabled();
     UpdateBoundsFromShowState(window, animate);
     ShowStateChanged(window, old_state);
   }

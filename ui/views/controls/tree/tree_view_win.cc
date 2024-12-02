@@ -13,6 +13,7 @@
 #include "grit/ui_resources.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util_win.h"
@@ -472,7 +473,8 @@ bool TreeView::OnKeyDown(ui::KeyboardCode virtual_key_code) {
   } else if (virtual_key_code == ui::VKEY_RETURN && !process_enter_) {
     Widget* widget = GetWidget();
     DCHECK(widget);
-    ui::Accelerator accelerator(virtual_key_code, GetModifiersFromKeyState());
+    ui::Accelerator accelerator(virtual_key_code,
+                                ui::GetModifiersFromKeyState());
     GetFocusManager()->ProcessAccelerator(accelerator);
     return true;
   }
@@ -496,7 +498,7 @@ void TreeView::OnContextMenu(const POINT& location) {
     // Make sure the mouse is over the selected node.
     TVHITTESTINFO hit_info;
     gfx::Point local_loc(location);
-    ConvertPointToView(NULL, this, &local_loc);
+    ConvertPointToTarget(NULL, this, &local_loc);
     hit_info.pt = local_loc.ToPOINT();
     HTREEITEM hit_item = TreeView_HitTest(tree_view_, &hit_info);
     if (!hit_item ||

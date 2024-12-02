@@ -74,6 +74,8 @@ ZoomBubbleView::ZoomBubbleView(views::View* anchor_view,
       label_(NULL),
       tab_contents_(tab_contents),
       auto_close_(auto_close) {
+  // Compensate for built-in vertical padding in the anchor view's image.
+  set_anchor_insets(gfx::Insets(5, 0, 5, 0));
   set_use_focusless(auto_close);
   set_notify_enter_exit_on_child(true);
 }
@@ -85,13 +87,7 @@ void ZoomBubbleView::Refresh() {
   int zoom_percent = tab_contents_->zoom_controller()->zoom_percent();
   label_->SetText(
       l10n_util::GetStringFUTF16Int(IDS_TOOLTIP_ZOOM, zoom_percent));
-
-  if (auto_close_) {
-    // If the bubble should be closed automatically, reset the timer so that
-    // it will show for the full amount of time instead of only what remained
-    // from the previous time.
-    timer_.Reset();
-  }
+  StartTimerIfNecessary();
 }
 
 void ZoomBubbleView::Close() {
@@ -100,11 +96,15 @@ void ZoomBubbleView::Close() {
 
 void ZoomBubbleView::StartTimerIfNecessary() {
   if (auto_close_) {
-    timer_.Start(
-        FROM_HERE,
-        base::TimeDelta::FromMilliseconds(kBubbleCloseDelay),
-        this,
-        &ZoomBubbleView::Close);
+    if (timer_.IsRunning()) {
+      timer_.Reset();
+    } else {
+      timer_.Start(
+          FROM_HERE,
+          base::TimeDelta::FromMilliseconds(kBubbleCloseDelay),
+          this,
+          &ZoomBubbleView::Close);
+    }
   }
 }
 
@@ -112,16 +112,16 @@ void ZoomBubbleView::StopTimer() {
   timer_.Stop();
 }
 
-void ZoomBubbleView::OnMouseEntered(const views::MouseEvent& event) {
+void ZoomBubbleView::OnMouseEntered(const ui::MouseEvent& event) {
   StopTimer();
 }
 
-void ZoomBubbleView::OnMouseExited(const views::MouseEvent& event) {
+void ZoomBubbleView::OnMouseExited(const ui::MouseEvent& event) {
   StartTimerIfNecessary();
 }
 
 void ZoomBubbleView::ButtonPressed(views::Button* sender,
-                                   const views::Event& event) {
+                                   const ui::Event& event) {
   chrome_page_zoom::Zoom(tab_contents_->web_contents(),
                          content::PAGE_ZOOM_RESET);
 }
@@ -147,14 +147,9 @@ void ZoomBubbleView::Init() {
   StartTimerIfNecessary();
 }
 
-gfx::Rect ZoomBubbleView::GetAnchorRect() {
-  // Compensate for some built-in padding in the zoom image.
-  gfx::Rect rect(BubbleDelegateView::GetAnchorRect());
-  rect.Inset(0, anchor_view() ? 5 : 0);
-  return rect;
-}
-
 void ZoomBubbleView::WindowClosing() {
-  DCHECK(zoom_bubble_ == this);
-  zoom_bubble_ = NULL;
+  // |zoom_bubble_| can be a new bubble by this point (as Close(); doesn't
+  // call this right away). Only set to NULL when it's this bubble.
+  if (zoom_bubble_ == this)
+    zoom_bubble_ = NULL;
 }

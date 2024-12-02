@@ -6,7 +6,6 @@
 
 #include <gtk/gtk.h>
 
-#include "base/property_bag.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -166,13 +165,15 @@ void WebDialogGtk::AddNewContents(content::WebContents* source,
                                   content::WebContents* new_contents,
                                   WindowOpenDisposition disposition,
                                   const gfx::Rect& initial_pos,
-                                  bool user_gesture) {
+                                  bool user_gesture,
+                                  bool* was_blocked) {
   if (delegate_ && delegate_->HandleAddNewContents(
           source, new_contents, disposition, initial_pos, user_gesture)) {
     return;
   }
   WebDialogWebContentsDelegate::AddNewContents(
-      source, new_contents, disposition, initial_pos, user_gesture);
+      source, new_contents, disposition, initial_pos, user_gesture,
+      was_blocked);
 }
 
 void WebDialogGtk::LoadingStateChanged(content::WebContents* source) {
@@ -190,7 +191,8 @@ bool WebDialogGtk::ShouldShowDialogTitle() const {
 // A simplified version of BrowserWindowGtk::HandleKeyboardEvent().
 // We don't handle global keyboard shortcuts here, but that's fine since
 // they're all browser-specific. (This may change in the future.)
-void WebDialogGtk::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
+void WebDialogGtk::HandleKeyboardEvent(content::WebContents* source,
+                                       const NativeWebKeyboardEvent& event) {
   GdkEventKey* os_event = &event.os_event->key;
   if (!os_event || event.type == WebKit::WebInputEvent::Char)
     return;
@@ -204,19 +206,18 @@ void WebDialogGtk::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
 // WebDialogGtk:
 
 gfx::NativeWindow WebDialogGtk::InitDialog() {
-  tab_.reset(new TabContents(WebContents::Create(
-      browser_context(), NULL, MSG_ROUTING_NONE, NULL, NULL)));
+  tab_.reset(TabContents::Factory::CreateTabContents(WebContents::Create(
+      browser_context(), NULL, MSG_ROUTING_NONE, NULL)));
   tab_->web_contents()->SetDelegate(this);
 
   // This must be done before loading the page; see the comments in
   // WebDialogUI.
-  WebDialogUI::GetPropertyAccessor().SetProperty(
-      tab_->web_contents()->GetPropertyBag(), this);
+  WebDialogUI::SetDelegate(tab_->web_contents(), this);
 
   tab_->web_contents()->GetController().LoadURL(
       GetDialogContentURL(),
       content::Referrer(),
-      content::PAGE_TRANSITION_START_PAGE,
+      content::PAGE_TRANSITION_AUTO_TOPLEVEL,
       std::string());
   GtkDialogFlags flags = GTK_DIALOG_NO_SEPARATOR;
   if (delegate_->GetDialogModalType() != ui::MODAL_TYPE_NONE)

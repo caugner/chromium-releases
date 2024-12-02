@@ -12,11 +12,19 @@
 #include "base/memory/scoped_nsobject.h"
 #include "chrome/browser/ui/constrained_window.h"
 
-@class BrowserWindowController;
+class ConstrainedWindowMac;
 @class GTMWindowSheetController;
 @class NSView;
 @class NSWindow;
 class TabContents;
+
+// Window controllers that allow hosting constrained windows should
+// implement this protocol.
+@protocol ConstrainedWindowSupport
+
+- (GTMWindowSheetController*)sheetController;
+
+@end
 
 // Base class for constrained dialog delegates. Never inherit from this
 // directly.
@@ -116,6 +124,7 @@ class ConstrainedWindowMac : public ConstrainedWindow {
   // Overridden from ConstrainedWindow:
   virtual void ShowConstrainedWindow() OVERRIDE;
   virtual void CloseConstrainedWindow() OVERRIDE;
+  virtual bool CanShowConstrainedWindow() OVERRIDE;
 
   // Returns the TabContents that constrains this Constrained Window.
   TabContents* owner() const { return tab_contents_; }
@@ -124,7 +133,7 @@ class ConstrainedWindowMac : public ConstrainedWindow {
   ConstrainedWindowMacDelegate* delegate() { return delegate_; }
 
   // Makes the constrained window visible, if it is not yet visible.
-  void Realize(BrowserWindowController* controller);
+  void Realize(NSWindowController<ConstrainedWindowSupport>* controller);
 
  private:
   friend class ConstrainedWindow;
@@ -136,7 +145,7 @@ class ConstrainedWindowMac : public ConstrainedWindow {
   ConstrainedWindowMacDelegate* delegate_;
 
   // Controller of the window that contains this sheet.
-  BrowserWindowController* controller_;
+  NSWindowController<ConstrainedWindowSupport>* controller_;
 
   // Stores if |ShowConstrainedWindow()| was called.
   bool should_be_visible_;

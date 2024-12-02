@@ -19,7 +19,7 @@
 #include "chrome/browser/media_gallery/media_galleries_preferences.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/url_pattern_set.h"
-#include "chrome/common/string_ordinal.h"
+#include "sync/api/string_ordinal.h"
 
 class ExtensionPrefValueMap;
 class ExtensionSorting;
@@ -60,7 +60,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   typedef std::set<std::string> PrefKeySet;
 
   // Vector containing identifiers for extensions.
-  typedef std::vector<std::string> ExtensionIdSet;
+  typedef std::vector<std::string> ExtensionIds;
 
   // This enum is used for the launch type the user wants to use for an
   // application.
@@ -85,6 +85,11 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
                  ExtensionPrefValueMap* extension_pref_value_map);
   virtual ~ExtensionPrefs();
 
+  // Returns all installed extensions from extension preferences provided by
+  // |pref_service|. This is exposed for ProtectedPrefsWatcher because it needs
+  // access to the extension ID list before the ExtensionService is initialized.
+  static ExtensionIds GetExtensionsFrom(const PrefService* pref_service);
+
   // If |extensions_disabled| is true, extension controlled preferences and
   // content settings do not become effective.
   void Init(bool extensions_disabled);
@@ -103,11 +108,13 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // ExtensionService::IsExtensionEnabled instead.
   bool IsExtensionDisabled(const std::string& id) const;
 
-  // Get the order that the browser actions appear in the toolbar.
-  std::vector<std::string> GetToolbarOrder();
+  // Get/Set the order that the browser actions appear in the toolbar.
+  ExtensionIds GetToolbarOrder();
+  void SetToolbarOrder(const ExtensionIds& extension_ids);
 
-  // Set the order that the browser actions appear in the toolbar.
-  void SetToolbarOrder(const std::vector<std::string>& extension_ids);
+  // Get/Set the order that the browser actions appear in the action box.
+  ExtensionIds GetActionBoxOrder();
+  void SetActionBoxOrder(const ExtensionIds& extension_ids);
 
   // Called when an extension is installed, so that prefs get created.
   // If |page_ordinal| is an invalid ordinal, then a page will be found
@@ -115,7 +122,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   void OnExtensionInstalled(const Extension* extension,
                             Extension::State initial_state,
                             bool from_webstore,
-                            const StringOrdinal& page_ordinal);
+                            const syncer::StringOrdinal& page_ordinal);
 
   // Called when an extension is uninstalled, so that prefs get cleaned up.
   void OnExtensionUninstalled(const std::string& extension_id,
@@ -126,13 +133,7 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   void SetExtensionState(const std::string& extension_id, Extension::State);
 
   // Returns all installed extensions
-  void GetExtensions(ExtensionIdSet* out);
-
-  // Returns all installed extensions from |extension_prefs|. This is exposed
-  // for ProtectedPrefsWatcher because it needs access to the extension ID list
-  // before the ExtensionService is initialized.
-  static ExtensionIdSet GetExtensionsFrom(
-      const base::DictionaryValue* extension_prefs);
+  void GetExtensions(ExtensionIds* out);
 
   // Getter and setter for browser action visibility.
   bool GetBrowserActionVisibility(const Extension* extension);
@@ -149,11 +150,12 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
       bool did_escalate);
 
   // Getter and setters for disabled reason.
-  Extension::DisableReason GetDisableReason(
-      const std::string& extension_id);
-  void SetDisableReason(const std::string& extension_id,
+  int GetDisableReasons(const std::string& extension_id);
+  void AddDisableReason(const std::string& extension_id,
                         Extension::DisableReason disable_reason);
-  void RemoveDisableReason(const std::string& extension_id);
+  void RemoveDisableReason(const std::string& extension_id,
+                           Extension::DisableReason disable_reason);
+  void ClearDisableReasons(const std::string& extension_id);
 
   // Returns the version string for the currently installed extension, or
   // the empty string if not found.
@@ -171,9 +173,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
 
   // Updates the prefs based on the blacklist.
   void UpdateBlacklist(const std::set<std::string>& blacklist_set);
-
-  // Based on extension id, checks prefs to see if it is blacklisted.
-  bool IsExtensionBlacklisted(const std::string& id);
 
   // Based on extension id, checks prefs to see if it is orphaned.
   bool IsExtensionOrphaned(const std::string& id);
@@ -325,20 +324,24 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // Set and retrieve permissions for media galleries as identified by the
   // gallery id.
   void SetMediaGalleryPermission(const std::string& extension_id,
-                                 MediaGalleryPrefId gallery, bool has_access);
-  std::vector<MediaGalleryPermission> GetMediaGalleryPermissions(
+                                 chrome::MediaGalleryPrefId gallery,
+                                 bool has_access);
+  void UnsetMediaGalleryPermission(const std::string& extension_id,
+                                   chrome::MediaGalleryPrefId gallery);
+  std::vector<chrome::MediaGalleryPermission> GetMediaGalleryPermissions(
       const std::string& extension_id);
-  void RemoveMediaGalleryPermissions(MediaGalleryPrefId gallery_id);
+  void RemoveMediaGalleryPermissions(chrome::MediaGalleryPrefId gallery_id);
 
   // Saves ExtensionInfo for each installed extension with the path to the
   // version directory and the location. Blacklisted extensions won't be saved
   // and neither will external extensions the user has explicitly uninstalled.
   // Caller takes ownership of returned structure.
-  ExtensionsInfo* GetInstalledExtensionsInfo();
+  ExtensionsInfo* GetInstalledExtensionsInfo() const;
 
   // Returns the ExtensionInfo from the prefs for the given extension. If the
   // extension is not present, NULL is returned.
-  ExtensionInfo* GetInstalledExtensionInfo(const std::string& extension_id);
+  ExtensionInfo* GetInstalledExtensionInfo(
+      const std::string& extension_id) const;
 
   // We've downloaded an updated .crx file for the extension, but are waiting
   // for idle time to install it.
@@ -426,6 +429,9 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // bookmark.
   bool IsFromBookmark(const std::string& extension_id) const;
 
+  // Returns true if the extension was installed as a default app.
+  bool WasInstalledByDefault(const std::string& extension_id) const;
+
   // Helper method to acquire the installation time of an extension.
   // Returns base::Time() if the installation time could not be parsed or
   // found.
@@ -488,17 +494,6 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   // consumers who expect full paths.
   void MakePathsAbsolute(base::DictionaryValue* dict);
 
-  // Reads a boolean pref from |ext| with key |pref_key|.
-  // Return false if the value is false or |pref_key| does not exist.
-  static bool ReadBooleanFromPref(const base::DictionaryValue* ext,
-                                  const std::string& pref_key);
-
-  // Reads an integer pref from |ext| with key |pref_key|.
-  // Return false if the value does not exist.
-  static bool ReadIntegerFromPref(const base::DictionaryValue* ext,
-                                  const std::string& pref_key,
-                                  int* out_value);
-
   // Interprets the list pref, |pref_key| in |extension_id|'s preferences, as a
   // URLPatternSet. The |valid_schemes| specify how to parse the URLPatterns.
   bool ReadExtensionPrefURLPatternSet(const std::string& extension_id,
@@ -532,26 +527,29 @@ class ExtensionPrefs : public ContentSettingsStore::Observer,
   void LoadExtensionControlledPrefs(const std::string& id,
                                     ExtensionPrefsScope scope);
 
-  // Checks if kPrefBlacklist is set to true in the DictionaryValue.
-  // Return false if the value is false or kPrefBlacklist does not exist.
-  // This is used to decide if an extension is blacklisted.
-  static bool IsBlacklistBitSet(const base::DictionaryValue* ext);
-
   // Fix missing preference entries in the extensions that are were introduced
   // in a later Chrome version.
-  void FixMissingPrefs(const ExtensionIdSet& extension_ids);
+  void FixMissingPrefs(const ExtensionIds& extension_ids);
 
   // Installs the persistent extension preferences into |prefs_|'s extension
   // pref store. Does nothing if |extensions_disabled| is true.
   void InitPrefStore(bool extensions_disabled);
 
   // Migrates the permissions data in the pref store.
-  void MigratePermissions(const ExtensionIdSet& extension_ids);
+  void MigratePermissions(const ExtensionIds& extension_ids);
+
+  // Migrates the disable reasons from a single enum to a bit mask.
+  void MigrateDisableReasons(const ExtensionIds& extension_ids);
 
   // Checks whether there is a state pref for the extension and if so, whether
   // it matches |check_state|.
   bool DoesExtensionHaveState(const std::string& id,
                               Extension::State check_state) const;
+
+  // Helper function to Get/Set array of strings from/to prefs.
+  ExtensionIds GetExtensionPrefAsVector(const char* pref);
+  void SetExtensionPrefFromVector(const char* pref,
+                                  const ExtensionIds& extension_ids);
 
   // The pref service specific to this set of extension prefs. Owned by profile.
   PrefService* prefs_;

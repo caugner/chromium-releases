@@ -7,6 +7,7 @@
 
 #include "ash/shell_delegate.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 
 namespace ash {
 namespace test {
@@ -19,6 +20,7 @@ class TestShellDelegate : public ShellDelegate {
   // Overridden from ShellDelegate:
   virtual bool IsUserLoggedIn() OVERRIDE;
   virtual bool IsSessionStarted() OVERRIDE;
+  virtual bool IsFirstRunAfterBoot() OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
@@ -26,6 +28,7 @@ class TestShellDelegate : public ShellDelegate {
   virtual void Exit() OVERRIDE;
   virtual void NewTab() OVERRIDE;
   virtual void NewWindow(bool incognito) OVERRIDE;
+  virtual void ToggleMaximized() OVERRIDE;
   virtual void OpenFileManager(bool as_dialog) OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
   virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
@@ -41,13 +44,19 @@ class TestShellDelegate : public ShellDelegate {
       ash::LauncherModel* model) OVERRIDE;
   virtual SystemTrayDelegate* CreateSystemTrayDelegate(SystemTray* t) OVERRIDE;
   virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
+  virtual CapsLockDelegate* CreateCapsLockDelegate() OVERRIDE;
   virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
   virtual void OpenFeedbackPage() OVERRIDE;
   virtual void RecordUserMetricsAction(UserMetricsAction action) OVERRIDE;
+  virtual void HandleMediaNextTrack() OVERRIDE;
+  virtual void HandleMediaPlayPause() OVERRIDE;
+  virtual void HandleMediaPrevTrack() OVERRIDE;
+  virtual string16 GetTimeRemainingString(base::TimeDelta delta) OVERRIDE;
 
  private:
   bool locked_;
   bool spoken_feedback_enabled_;
+  scoped_ptr<content::BrowserContext> current_browser_context_;
 
   DISALLOW_COPY_AND_ASSIGN(TestShellDelegate);
 };

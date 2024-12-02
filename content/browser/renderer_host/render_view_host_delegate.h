@@ -13,6 +13,7 @@
 #include "base/process_util.h"
 #include "base/string16.h"
 #include "content/common/content_export.h"
+#include "content/public/common/context_menu_source_type.h"
 #include "content/public/common/javascript_message_type.h"
 #include "content/public/common/media_stream_request.h"
 #include "net/base/load_states.h"
@@ -45,6 +46,10 @@ namespace gfx {
 class Point;
 class Rect;
 class Size;
+}
+
+namespace WebKit {
+class WebLayer;
 }
 
 namespace content {
@@ -214,6 +219,10 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // |progress| is a value between 0 (nothing loaded) to 1.0 (top frame
   // entirely loaded).
   virtual void DidChangeLoadProgress(double progress) {}
+
+  // The RenderView has changed its frame hierarchy, so we need to update all
+  // other renderers interested in this event.
+  virtual void DidUpdateFrameTree(RenderViewHost* rvh) {}
 
   // The RenderView's main frame document element is ready. This happens when
   // the document has finished parsing.
@@ -396,7 +405,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
 
   // A context menu should be shown, to be built using the context information
   // provided in the supplied params.
-  virtual void ShowContextMenu(const ContextMenuParams& params) {}
+  virtual void ShowContextMenu(const ContextMenuParams& params,
+                               ContextMenuSourceType type) {}
 
   // The render view has requested access to media devices listed in
   // |request|, and the client should grant or deny that permission by
@@ -404,6 +414,11 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   virtual void RequestMediaAccessPermission(
       const MediaStreamRequest* request,
       const MediaResponseCallback& callback) {}
+
+#if defined(OS_ANDROID)
+  virtual void AttachLayer(WebKit::WebLayer* layer) {}
+  virtual void RemoveLayer(WebKit::WebLayer* layer) {}
+#endif
 
  protected:
   virtual ~RenderViewHostDelegate() {}

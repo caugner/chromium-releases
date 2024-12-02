@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <map>
 
+#include "base/command_line.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -20,7 +21,7 @@
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -36,24 +37,25 @@
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
+#include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/browser/ui/views/location_bar/action_box_button_view.h"
-#include "chrome/browser/ui/views/location_bar/chrome_to_mobile_view.h"
 #include "chrome/browser/ui/views/location_bar/content_setting_image_view.h"
 #include "chrome/browser/ui/views/location_bar/ev_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/keyword_hint_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
+#include "chrome/browser/ui/views/location_bar/open_pdf_in_reader_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_with_badge_view.h"
 #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/location_bar/suggested_text_view.h"
+#include "chrome/browser/ui/views/location_bar/web_intents_button_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_views.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_switch_utils.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -63,6 +65,7 @@
 #include "grit/theme_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -82,6 +85,7 @@
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/ui/views/first_run_bubble.h"
+#include "ui/base/native_theme/native_theme.h"
 #endif
 
 #if defined(USE_AURA)
@@ -127,8 +131,21 @@ const int LocationBarView::kNormalHorizontalEdgeThickness = 2;
 const int LocationBarView::kVerticalEdgeThickness = 3;
 const int LocationBarView::kIconInternalPadding = 2;
 const int LocationBarView::kBubbleHorizontalPadding = 1;
+#if defined(OS_CHROMEOS)
+const SkColor LocationBarView::kOmniboxBackgroundColor =
+    SkColorSetARGB(0, 255, 255, 255);
+#else
+const SkColor LocationBarView::kOmniboxBackgroundColor =
+    SkColorSetARGB(255, 255, 255, 255);
+#endif
 const char LocationBarView::kViewClassName[] =
     "browser/ui/views/location_bar/LocationBarView";
+
+static const int kCSBubbleBackgroundImages[] = {
+  IDR_OMNIBOX_CS_BUBBLE_BACKGROUND_L,
+  IDR_OMNIBOX_CS_BUBBLE_BACKGROUND_C,
+  IDR_OMNIBOX_CS_BUBBLE_BACKGROUND_R,
+};
 
 static const int kEVBubbleBackgroundImages[] = {
   IDR_OMNIBOX_EV_BUBBLE_BACKGROUND_L,
@@ -140,6 +157,12 @@ static const int kSelectedKeywordBackgroundImages[] = {
   IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_L,
   IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_C,
   IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_R,
+};
+
+static const int kWIBubbleBackgroundImages[] = {
+  IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_L,
+  IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_C,
+  IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_R,
 };
 
 #if defined(USE_AURA)
@@ -158,13 +181,15 @@ void LocationBarView::FadeAnimationObserver::OnImplicitAnimationsCompleted() {
 
 // LocationBarView -----------------------------------------------------------
 
-LocationBarView::LocationBarView(Profile* profile,
+LocationBarView::LocationBarView(Browser* browser,
+                                 Profile* profile,
                                  CommandUpdater* command_updater,
                                  ToolbarModel* model,
                                  Delegate* delegate,
                                  chrome::search::SearchModel* search_model,
                                  Mode mode)
-    : profile_(profile),
+    : browser_(browser),
+      profile_(profile),
       command_updater_(command_updater),
       model_(model),
       delegate_(delegate),
@@ -180,9 +205,10 @@ LocationBarView::LocationBarView(Profile* profile,
       suggested_text_view_(NULL),
       keyword_hint_view_(NULL),
       zoom_view_(NULL),
+      open_pdf_in_reader_view_(NULL),
       star_view_(NULL),
+      web_intents_button_view_(NULL),
       action_box_button_view_(NULL),
-      chrome_to_mobile_view_(NULL),
       mode_(mode),
       show_focus_rect_(false),
       template_url_service_(NULL),
@@ -264,38 +290,41 @@ void LocationBarView::Init(views::View* popup_parent_view) {
 
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
     ContentSettingImageView* content_blocked_view =
-        new ContentSettingImageView(static_cast<ContentSettingsType>(i), this);
+        new ContentSettingImageView(static_cast<ContentSettingsType>(i),
+                                    kCSBubbleBackgroundImages, this,
+                                    font_, GetColor(ToolbarModel::NONE, TEXT));
     content_setting_views_.push_back(content_blocked_view);
     AddChildView(content_blocked_view);
     content_blocked_view->SetVisible(false);
   }
 
-  // TODO(khorimoto): After zoom is finished, uncomment the following:
-  // zoom_view_ = new ZoomView(model_, delegate_);
-  // AddChildView(zoom_view_);
+  zoom_view_ = new ZoomView(model_, delegate_);
+  AddChildView(zoom_view_);
 
-  if (extensions::switch_utils::IsActionBoxEnabled()) {
-    action_box_button_view_ = new ActionBoxButtonView(
-        extensions::ExtensionSystem::Get(profile_)->extension_service());
-    AddChildView(action_box_button_view_);
-  } else if (browser_defaults::bookmarks_enabled && (mode_ == NORMAL)) {
-    // Note: condition above means that the star and ChromeToMobile icons are
-    // hidden in popups and in the app launcher.
+  web_intents_button_view_ =
+      new WebIntentsButtonView(this, kWIBubbleBackgroundImages,
+                               font_, GetColor(ToolbarModel::NONE, TEXT));
+  AddChildView(web_intents_button_view_);
+
+  open_pdf_in_reader_view_ = new OpenPDFInReaderView(this);
+  AddChildView(open_pdf_in_reader_view_);
+
+  if (browser_defaults::bookmarks_enabled && (mode_ == NORMAL)) {
+    // Note: condition above means that the star icon is hidden in popups and in
+    // the app launcher.
     star_view_ = new StarView(command_updater_);
     AddChildView(star_view_);
     star_view_->SetVisible(true);
+  }
+  if (extensions::switch_utils::IsActionBoxEnabled() && browser_) {
+    gfx::Point menu_offset(
+        (mode_ == NORMAL) ? kNormalHorizontalEdgeThickness : 0,
+        kVerticalEdgeThickness);
+    action_box_button_view_ = new ActionBoxButtonView(browser_, menu_offset);
+    AddChildView(action_box_button_view_);
 
-    // Also disable Chrome To Mobile for off-the-record and non-synced profiles,
-    // or if the feature is disabled by a command line flag or chrome://flags.
-    if (!profile_->IsOffTheRecord() && profile_->IsSyncAccessible() &&
-        ChromeToMobileService::IsChromeToMobileEnabled()) {
-      chrome_to_mobile_view_ = new ChromeToMobileView(this, command_updater_);
-      AddChildView(chrome_to_mobile_view_);
-      ChromeToMobileService* service =
-          ChromeToMobileServiceFactory::GetForProfile(profile_);
-      service->RequestMobileListUpdate();
-      chrome_to_mobile_view_->SetVisible(service->HasMobiles());
-    }
+    if (star_view_)
+      star_view_->SetVisible(false);
   }
 
   registrar_.Add(this,
@@ -323,7 +352,7 @@ SkColor LocationBarView::GetColor(ToolbarModel::SecurityLevel security_level,
     case SELECTED_TEXT: return color_utils::GetSysSkColor(COLOR_HIGHLIGHTTEXT);
 #else
     // TODO(beng): source from theme provider.
-    case BACKGROUND:    return SK_ColorWHITE;
+    case BACKGROUND:    return LocationBarView::kOmniboxBackgroundColor;
     case TEXT:          return SK_ColorBLACK;
     case SELECTED_TEXT: return SK_ColorWHITE;
 #endif
@@ -383,9 +412,10 @@ void LocationBarView::SetAnimationOffset(int offset) {
   animation_offset_ = offset;
 }
 
-void LocationBarView::ModeChanged(const chrome::search::Mode& mode) {
+void LocationBarView::ModeChanged(const chrome::search::Mode& old_mode,
+                                  const chrome::search::Mode& new_mode) {
 #if defined(USE_AURA)
-  if (mode.is_search() && mode.animate) {
+  if (new_mode.animate && old_mode.is_ntp() && new_mode.is_search()) {
     // Fade in so the icons don't pop.
     StartFadeAnimation();
   } else {
@@ -397,21 +427,25 @@ void LocationBarView::ModeChanged(const chrome::search::Mode& mode) {
 
 void LocationBarView::Update(const WebContents* tab_for_state_restoring) {
   RefreshContentSettingViews();
-  // TODO(khorimoto): After zoom is finished, uncomment the following:
-  // ZoomBubbleView::CloseBubble();
-  // zoom_view_->Update();
+  ZoomBubbleView::CloseBubble();
+  RefreshZoomView();
   RefreshPageActionViews();
+  web_intents_button_view_->Update(GetTabContents());
+  open_pdf_in_reader_view_->Update(
+      model_->input_in_progress() ? NULL : GetTabContents());
 
   bool star_enabled = star_view_ && !model_->input_in_progress() &&
                       edit_bookmarks_enabled_.GetValue();
 
   command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, star_enabled);
-  if (star_view_)
+  if (star_view_ && !extensions::switch_utils::IsActionBoxEnabled())
     star_view_->SetVisible(star_enabled);
 
-  bool enabled = chrome_to_mobile_view_ && !model_->input_in_progress() &&
-      ChromeToMobileServiceFactory::GetForProfile(profile_)->HasMobiles();
-  command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE, enabled);
+  ChromeToMobileService* chrome_to_mobile_service =
+      ChromeToMobileServiceFactory::GetForProfile(profile_);
+  command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE,
+      !model_->input_in_progress() && chrome_to_mobile_service &&
+          chrome_to_mobile_service->HasMobiles());
 
   // Don't Update in app launcher mode so that the location entry does not show
   // a URL or security background.
@@ -452,6 +486,20 @@ void LocationBarView::InvalidatePageActions() {
   }
 }
 
+void LocationBarView::UpdateWebIntentsButton() {
+  web_intents_button_view_->Update(GetTabContents());
+
+  Layout();
+  SchedulePaint();
+}
+
+void LocationBarView::UpdateOpenPDFInReaderPrompt() {
+  open_pdf_in_reader_view_->Update(
+      model_->input_in_progress() ? NULL : GetTabContents());
+  Layout();
+  SchedulePaint();
+}
+
 void LocationBarView::OnFocus() {
   // Focus the view widget first which implements accessibility for
   // Chrome OS.  It is noop on Win. This should be removed once
@@ -481,7 +529,7 @@ void LocationBarView::SetPreviewEnabledPageAction(ExtensionAction* page_action,
     return;
 
   page_action_view->image_view()->set_preview_enabled(preview_enabled);
-  page_action_view->UpdateVisibility(contents, GURL(model_->GetText()));
+  page_action_view->UpdateVisibility(contents, model_->GetURL());
   Layout();
   SchedulePaint();
 }
@@ -499,36 +547,40 @@ views::View* LocationBarView::GetPageActionView(ExtensionAction *page_action) {
 void LocationBarView::SetStarToggled(bool on) {
   if (star_view_)
     star_view_->SetToggled(on);
+
+  if (action_box_button_view_) {
+    if (star_view_ && (star_view_->visible() != on)) {
+      star_view_->SetVisible(on);
+      Layout();
+    }
+  }
 }
 
 void LocationBarView::ShowStarBubble(const GURL& url, bool newly_bookmarked) {
   chrome::ShowBookmarkBubbleView(star_view_, profile_, url, newly_bookmarked);
 }
 
-void LocationBarView::SetZoomIconTooltipPercent(int zoom_percent) {
-  if (!zoom_view_)
-    return;
-  zoom_view_->SetZoomIconTooltipPercent(zoom_percent);
-}
+void LocationBarView::ZoomChangedForActiveTab(bool can_show_bubble) {
+  DCHECK(zoom_view_);
+  RefreshZoomView();
 
-void LocationBarView::SetZoomIconState(
-    ZoomController::ZoomIconState zoom_icon_state) {
-  if (!zoom_view_)
-    return;
-
-  zoom_view_->SetZoomIconState(zoom_icon_state);
   Layout();
   SchedulePaint();
+
+  if (can_show_bubble && zoom_view_->visible())
+    ZoomBubbleView::ShowBubble(zoom_view_, GetTabContents(), true);
 }
 
-void LocationBarView::ShowZoomBubble(int zoom_percent) {
-  // TODO(khorimoto): After zoom is finished, uncomment the following:
-  // ZoomBubbleView::ShowBubble(zoom_view_, GetTabContents(), true);
+void LocationBarView::RefreshZoomView() {
+  DCHECK(zoom_view_);
+  TabContents* tab_contents = GetTabContents();
+  if (tab_contents)
+    zoom_view_->Update(tab_contents->zoom_controller());
 }
 
 void LocationBarView::ShowChromeToMobileBubble() {
-  Browser* browser = GetBrowserFromDelegate(delegate_);
-  chrome::ShowChromeToMobileBubbleView(chrome_to_mobile_view_, browser);
+  chrome::ShowChromeToMobileBubbleView(action_box_button_view_,
+                                       GetBrowserFromDelegate(delegate_));
 }
 
 gfx::Point LocationBarView::GetLocationEntryOrigin() const {
@@ -592,8 +644,11 @@ gfx::Size LocationBarView::GetPreferredSize() {
         location_entry_->GetFont()));
   int delta = chrome::search::IsInstantExtendedAPIEnabled(profile_) ?
       kSearchEditHeightPadding : 0;
-  return gfx::Size(0, GetThemeProvider()->GetImageSkiaNamed(mode_ == POPUP ?
-      IDR_LOCATIONBG_POPUPMODE_CENTER : IDR_LOCATIONBG_C)->height() + delta);
+  int sizing_image_id = mode_ == POPUP ? IDR_LOCATIONBG_POPUPMODE_CENTER :
+                                         IDR_LOCATION_BAR_BORDER;
+  return gfx::Size(
+      0,
+      GetThemeProvider()->GetImageSkiaNamed(sizing_image_id)->height() + delta);
 }
 
 void LocationBarView::Layout() {
@@ -635,7 +690,11 @@ void LocationBarView::Layout() {
       -1 : kBubbleHorizontalPadding;
 
   // Start by reserving the padding at the right edge.
-  int entry_width = width() - kEdgeThickness - GetEdgeItemPadding();
+  int entry_width = width() - kEdgeThickness;
+  // No need for edge item padding with action box as it fills
+  // all the area on the right.
+  if (!action_box_button_view_)
+    entry_width -= GetEdgeItemPadding();
 
   // |location_icon_view_| is visible except when |ev_bubble_view_| or
   // |selected_keyword_view_| are visible.
@@ -662,32 +721,36 @@ void LocationBarView::Layout() {
                     location_icon_width + kItemEditPadding);
   }
 
-  if (star_view_ && star_view_->visible())
-    entry_width -= star_view_->GetPreferredSize().width() + GetItemPadding();
-  if (chrome_to_mobile_view_ && chrome_to_mobile_view_->visible()) {
-    entry_width -= chrome_to_mobile_view_->GetPreferredSize().width() +
-        GetItemPadding();
-  }
   int action_box_button_width = location_height;
   if (action_box_button_view_)
     entry_width -= action_box_button_width + GetItemPadding();
+  if (star_view_ && star_view_->visible())
+    entry_width -= star_view_->GetPreferredSize().width() + GetItemPadding();
+  if (open_pdf_in_reader_view_ && open_pdf_in_reader_view_->visible()) {
+    entry_width -= open_pdf_in_reader_view_->GetPreferredSize().width() +
+        GetItemPadding();
+  }
   for (PageActionViews::const_iterator i(page_action_views_.begin());
        i != page_action_views_.end(); ++i) {
     if ((*i)->visible())
       entry_width -= ((*i)->GetPreferredSize().width() + GetItemPadding());
   }
-  if (zoom_view_ && zoom_view_->visible())
+  if (zoom_view_->visible())
     entry_width -= zoom_view_->GetPreferredSize().width() + GetItemPadding();
   for (ContentSettingViews::const_iterator i(content_setting_views_.begin());
        i != content_setting_views_.end(); ++i) {
     if ((*i)->visible())
       entry_width -= ((*i)->GetPreferredSize().width() + GetItemPadding());
   }
+  if (web_intents_button_view_->visible()) {
+    entry_width -= web_intents_button_view_->GetPreferredSize().width() +
+        GetItemPadding();
+  }
   // The gap between the edit and whatever is to its right is shortened.
   entry_width += kEditInternalSpace;
 
-  // Size the EV bubble after taking star/ChromeToMobile/page actions/content
-  // settings out of |entry_width| so we won't take too much space.
+  // Size the EV bubble after taking star/page actions/content settings out of
+  // |entry_width| so we won't take too much space.
   if (ev_bubble_width) {
     // Try to elide the bubble to be no larger than half the total available
     // space, but never elide it any smaller than 150 px.
@@ -700,10 +763,9 @@ void LocationBarView::Layout() {
     entry_width -= (total_padding + ev_bubble_width);
   }
 
-  int max_edit_width = location_entry_->GetMaxEditWidth(entry_width);
+  const int max_edit_width = location_entry_->GetMaxEditWidth(entry_width);
   if (max_edit_width < 0)
     return;
-  const int available_width = AvailableWidth(max_edit_width);
 
   const bool show_keyword_hint = !keyword.empty() && is_keyword_hint;
   selected_keyword_view_->SetVisible(show_selected_keyword);
@@ -715,10 +777,9 @@ void LocationBarView::Layout() {
           TemplateURLServiceFactory::GetForProfile(profile_)->
           GetTemplateURLForKeyword(keyword);
       if (template_url && template_url->IsExtensionKeyword()) {
-        const SkBitmap& bitmap =
-            profile_->GetExtensionService()->GetOmniboxIcon(
-                template_url->GetExtensionId());
-        selected_keyword_view_->SetImage(bitmap);
+        gfx::Image image = profile_->GetExtensionService()->GetOmniboxIcon(
+            template_url->GetExtensionId());
+        selected_keyword_view_->SetImage(image.AsImageSkia());
         selected_keyword_view_->set_is_extension_icon(true);
       } else {
         ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
@@ -752,14 +813,14 @@ void LocationBarView::Layout() {
     offset -= GetItemPadding() - star_view_->GetBuiltInHorizontalPadding();
   }
 
-  if (chrome_to_mobile_view_ && chrome_to_mobile_view_->visible()) {
-    offset += chrome_to_mobile_view_->GetBuiltInHorizontalPadding();
-    int icon_width = chrome_to_mobile_view_->GetPreferredSize().width();
+  if (open_pdf_in_reader_view_ && open_pdf_in_reader_view_->visible()) {
+    offset += open_pdf_in_reader_view_->GetBuiltInHorizontalPadding();
+    int icon_width = open_pdf_in_reader_view_->GetPreferredSize().width();
     offset -= icon_width;
-    chrome_to_mobile_view_->SetBounds(offset, location_y,
-                                      icon_width, location_height);
+    open_pdf_in_reader_view_->SetBounds(offset, location_y,
+                                        icon_width, location_height);
     offset -= GetItemPadding() -
-        chrome_to_mobile_view_->GetBuiltInHorizontalPadding();
+        open_pdf_in_reader_view_->GetBuiltInHorizontalPadding();
   }
 
   for (PageActionViews::const_iterator i(page_action_views_.begin());
@@ -773,7 +834,7 @@ void LocationBarView::Layout() {
     }
   }
 
-  if (zoom_view_ && zoom_view_->visible()) {
+  if (zoom_view_->visible()) {
     int zoom_width = zoom_view_->GetPreferredSize().width();
     offset -= zoom_width;
     zoom_view_->SetBounds(offset, location_y, zoom_width, location_height);
@@ -789,10 +850,22 @@ void LocationBarView::Layout() {
       offset += (*i)->GetBuiltInHorizontalPadding();
       int content_blocked_width = (*i)->GetPreferredSize().width();
       offset -= content_blocked_width;
-      (*i)->SetBounds(offset, location_y, content_blocked_width,
-                      location_height);
+      (*i)->SetBounds(offset, location_y + kBubbleVerticalPadding,
+                      content_blocked_width, (*i)->GetPreferredSize().height());
       offset -= GetItemPadding() - (*i)->GetBuiltInHorizontalPadding();
     }
+  }
+
+  // Now the web intents button.
+  if (web_intents_button_view_->visible()) {
+    offset += web_intents_button_view_->GetBuiltInHorizontalPadding();
+    int width = web_intents_button_view_->GetPreferredSize().width();
+    offset -= width;
+    web_intents_button_view_->SetBounds(
+        offset, location_y + kBubbleVerticalPadding, width,
+        web_intents_button_view_->GetPreferredSize().height());
+    offset -= GetItemPadding() -
+              web_intents_button_view_->GetBuiltInHorizontalPadding();
   }
 
   // Now lay out items to the left of the edit field.
@@ -819,8 +892,8 @@ void LocationBarView::Layout() {
   if (show_selected_keyword) {
     selected_keyword_view_->SetBounds(0, location_y + kBubbleVerticalPadding,
         0, selected_keyword_view_->GetPreferredSize().height());
-    LayoutView(selected_keyword_view_, kItemEditPadding, available_width,
-               true, &location_bounds);
+    LayoutView(selected_keyword_view_, kItemEditPadding,
+               AvailableWidth(max_edit_width), true, &location_bounds);
     location_bounds.set_x(selected_keyword_view_->visible() ?
         (offset + selected_keyword_view_->width() + kItemEditPadding) :
         (kEdgeThickness + kEdgeEditPadding));
@@ -831,8 +904,8 @@ void LocationBarView::Layout() {
     // its left.  So we undo the enlargement, then include it in the padding for
     // the added view.
     location_bounds.Inset(0, 0, kEditInternalSpace, 0);
-    LayoutView(keyword_hint_view_, kItemEditPadding, available_width, false,
-               &location_bounds);
+    LayoutView(keyword_hint_view_, kItemEditPadding,
+               AvailableWidth(max_edit_width), false, &location_bounds);
     if (!keyword_hint_view_->visible()) {
       // Put back the enlargement that we undid above.
       location_bounds.Inset(0, 0, -kEditInternalSpace, 0);
@@ -917,8 +990,24 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
     canvas->FillRect(bounds, color);
   }
 
-  if (show_focus_rect_ && HasFocus()) {
+  // If |show_focus_rect_| is false but search mode is |NTP|, we still show
+  // focus rect.
+  bool is_search_ntp = search_model_ && search_model_->mode().is_ntp();
+  bool show_focus_rect = show_focus_rect_ || is_search_ntp;
+  if (show_focus_rect && HasFocus()) {
     gfx::Rect r = location_entry_view_->bounds();
+
+    if (is_search_ntp) {
+      r.Inset(0, 0, 1, 0);
+      // To draw focus border with system highlight color, specifically call
+      // |DrawDashedRect|, because default |DrawFocusRect| draws a dashed rect
+      // with gray color.
+      canvas->DrawDashedRect(r,
+          ui::NativeTheme::instance()->GetSystemColor(
+              ui::NativeTheme::kColorId_FocusedBorderColor));
+      return;
+    }
+
     // TODO(jamescook): Is this still needed?
 #if defined(OS_WIN)
     r.Inset(-1,  -1);
@@ -939,7 +1028,7 @@ void LocationBarView::SelectAll() {
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-bool LocationBarView::OnMousePressed(const views::MouseEvent& event) {
+bool LocationBarView::OnMousePressed(const ui::MouseEvent& event) {
   UINT msg;
   if (event.IsLeftMouseButton()) {
     msg = (event.flags() & ui::EF_IS_DOUBLE_CLICK) ?
@@ -958,12 +1047,12 @@ bool LocationBarView::OnMousePressed(const views::MouseEvent& event) {
   return true;
 }
 
-bool LocationBarView::OnMouseDragged(const views::MouseEvent& event) {
+bool LocationBarView::OnMouseDragged(const ui::MouseEvent& event) {
   OnMouseEvent(event, WM_MOUSEMOVE);
   return true;
 }
 
-void LocationBarView::OnMouseReleased(const views::MouseEvent& event) {
+void LocationBarView::OnMouseReleased(const ui::MouseEvent& event) {
   UINT msg;
   if (event.IsLeftMouseButton()) {
     msg = WM_LBUTTONUP;
@@ -1052,9 +1141,9 @@ void LocationBarView::OnSetFocus() {
   focus_manager->SetFocusedView(view_to_focus_);
 }
 
-SkBitmap LocationBarView::GetFavicon() const {
+gfx::Image LocationBarView::GetFavicon() const {
   return delegate_->GetTabContents()->favicon_tab_helper()->
-             GetFavicon().AsBitmap();
+             GetFavicon();
 }
 
 string16 LocationBarView::GetTitle() const {
@@ -1095,8 +1184,7 @@ void LocationBarView::LayoutView(views::View* view,
 void LocationBarView::RefreshContentSettingViews() {
   for (ContentSettingViews::const_iterator i(content_setting_views_.begin());
        i != content_setting_views_.end(); ++i) {
-    (*i)->UpdateFromWebContents(model_->input_in_progress() ? NULL :
-                                GetWebContentsFromDelegate(delegate_));
+    (*i)->Update(model_->input_in_progress() ? NULL : GetTabContents());
   }
 }
 
@@ -1121,10 +1209,12 @@ void LocationBarView::RefreshPageActionViews() {
 
   std::vector<ExtensionAction*> new_page_actions;
 
-  TabContents* tab_contents = GetTabContents();
-  if (tab_contents) {
+  WebContents* contents = GetWebContentsFromDelegate(delegate_);
+  if (contents) {
+    extensions::TabHelper* extensions_tab_helper =
+        extensions::TabHelper::FromWebContents(contents);
     extensions::LocationBarController* controller =
-        tab_contents->extension_tab_helper()->location_bar_controller();
+        extensions_tab_helper->location_bar_controller();
     new_page_actions = controller->GetCurrentActions();
   }
 
@@ -1135,7 +1225,7 @@ void LocationBarView::RefreshPageActionViews() {
     DeletePageActionViews();  // Delete the old views (if any).
 
     page_action_views_.resize(page_actions_.size());
-    View* right_anchor = chrome_to_mobile_view_;
+    View* right_anchor = open_pdf_in_reader_view_;
     if (!right_anchor)
       right_anchor = star_view_;
     if (!right_anchor)
@@ -1152,7 +1242,6 @@ void LocationBarView::RefreshPageActionViews() {
     }
   }
 
-  WebContents* contents = GetWebContentsFromDelegate(delegate_);
   if (!page_action_views_.empty() && contents) {
     Browser* browser = browser::FindBrowserWithWebContents(contents);
     GURL url = chrome::GetActiveWebContents(browser)->GetURL();
@@ -1176,7 +1265,7 @@ void LocationBarView::RefreshPageActionViews() {
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
+void LocationBarView::OnMouseEvent(const ui::MouseEvent& event, UINT msg) {
   OmniboxViewWin* omnibox_win = GetOmniboxViewWin(location_entry_.get());
   if (omnibox_win) {
     UINT flags = event.native_event().wParam;
@@ -1191,7 +1280,7 @@ void LocationBarView::ShowFirstRunBubbleInternal() {
 #if !defined(OS_CHROMEOS)
   // First run bubble doesn't make sense for Chrome OS.
   Browser* browser = GetBrowserFromDelegate(delegate_);
-  FirstRunBubble::ShowBubble(browser, profile_, location_icon_view_);
+  FirstRunBubble::ShowBubble(browser, location_icon_view_);
 #endif
 }
 
@@ -1224,8 +1313,7 @@ std::string LocationBarView::GetClassName() const {
   return kViewClassName;
 }
 
-bool LocationBarView::SkipDefaultKeyEventProcessing(
-    const views::KeyEvent& event) {
+bool LocationBarView::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
 #if defined(OS_WIN)
   if (views::FocusManager::IsTabTraversalKeyEvent(event)) {
     if (location_entry_->model()->popup_model()->IsOpen()) {
@@ -1237,7 +1325,7 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(
       return true;
     }
 
-    // Tab while showing instant commits instant immediately.
+    // Tab while showing Instant commits instant immediately.
     // Return true so that focus traversal isn't attempted. The edit ends
     // up doing nothing in this case.
     if (location_entry_->model()->AcceptCurrentInstantPreview())
@@ -1418,8 +1506,8 @@ void LocationBarView::TestPageActionPressed(size_t index) {
   for (size_t i = 0; i < page_action_views_.size(); ++i) {
     if (page_action_views_[i]->visible()) {
       if (current == index) {
-        const int kLeftMouseButton = 1;
-        page_action_views_[i]->image_view()->ExecuteAction(kLeftMouseButton);
+        page_action_views_[i]->image_view()->ExecuteAction(
+            ExtensionPopup::SHOW);
         return;
       }
       ++current;
@@ -1451,8 +1539,8 @@ void LocationBarView::Observe(int type,
 
     case chrome::NOTIFICATION_EXTENSION_LOCATION_BAR_UPDATED: {
       // Only update if the updated action box was for the active tab contents.
-      TabContents* target_tab = content::Details<TabContents>(details).ptr();
-      if (target_tab == GetTabContents())
+      WebContents* target_tab = content::Details<WebContents>(details).ptr();
+      if (target_tab == GetTabContents()->web_contents())
         UpdatePageActions();
       break;
     }

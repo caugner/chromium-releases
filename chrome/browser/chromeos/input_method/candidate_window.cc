@@ -26,7 +26,6 @@
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/events/event.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
@@ -62,11 +61,7 @@ const SkColor kInfolistTitleBackgroundColor = SkColorSetRGB(0xdd, 0xdd, 0xdd);
 
 // We'll use a bigger font size, so Chinese characters are more readable
 // in the candidate window.
-#if defined(CROS_FONTS_USING_BCI)
-const int kFontSizeDelta = 1;
-#else
 const int kFontSizeDelta = 2;
-#endif
 
 // Currently the infolist window only supports Japanese font.
 #if defined(GOOGLE_CHROME_BUILD)
@@ -146,19 +141,23 @@ views::View* WrapWithPadding(views::View* view, const gfx::Insets& insets) {
 
 // Creates shortcut text from the given index and the orientation.
 string16 CreateShortcutText(int index,
-                            InputMethodLookupTable::Orientation orientation) {
+                            const InputMethodLookupTable& table) {
   // Choose the character used for the shortcut label.
   const char kShortcutCharacters[] = "1234567890ABCDEF";
   // The default character should not be used but just in case.
-  char shortcut_character = L'?';
-  // -1 to exclude the null character at the end.
-  if (index < static_cast<int>(arraysize(kShortcutCharacters) - 1))
-    shortcut_character = kShortcutCharacters[index];
+  std::string shortcut_text = " ";
+  if (table.labels.empty()) {
+    // -1 to exclude the null character at the end.
+    if (index < static_cast<int>(arraysize(kShortcutCharacters) - 1))
+      shortcut_text = std::string(1, kShortcutCharacters[index]);
+  } else {
+    if (index < static_cast<int>(table.labels.size()))
+      shortcut_text = table.labels[index];
+  }
 
-  std::string shortcut_text(1, shortcut_character);
-  if (orientation != InputMethodLookupTable::kVertical)
+  if (table.orientation != InputMethodLookupTable::kVertical)
     shortcut_text += '.';
-  return ASCIIToUTF16(shortcut_text);
+  return UTF8ToUTF16(shortcut_text);
 }
 
 // Creates the shortcut label, and returns it (never returns NULL).
@@ -268,7 +267,7 @@ gfx::Size ComputeShortcutColumnSize(
   // We'll create temporary shortcut labels, and choose the largest width and
   // height.
   for (int i = 0; i < lookup_table.page_size; ++i) {
-    shortcut_label->SetText(CreateShortcutText(i, lookup_table.orientation));
+    shortcut_label->SetText(CreateShortcutText(i, lookup_table));
     gfx::Size text_size = wrapped_shortcut_label->GetPreferredSize();
     shortcut_column_width = std::max(shortcut_column_width, text_size.width());
     shortcut_column_height = std::max(shortcut_column_height,
@@ -723,7 +722,7 @@ gfx::Point CandidateView::GetCandidateLabelPosition() const {
   return candidate_label_->GetMirroredPosition();
 }
 
-bool CandidateView::OnMousePressed(const views::MouseEvent& event) {
+bool CandidateView::OnMousePressed(const ui::MouseEvent& event) {
   // TODO(kinaba): investigate a way to delay the commit until OnMouseReleased.
   // Mouse-down selection is a temporally workaround for crosbug.com/11423.
   //
@@ -759,8 +758,8 @@ bool CandidateView::OnMousePressed(const views::MouseEvent& event) {
   // when a popup window gets hidden. http://crosbug.com/11422
 
   gfx::Point location_in_candidate_window = event.location();
-  views::View::ConvertPointToView(this, parent_candidate_window_,
-                                  &location_in_candidate_window);
+  views::View::ConvertPointToTarget(this, parent_candidate_window_,
+                                    &location_in_candidate_window);
   parent_candidate_window_->OnCandidatePressed(location_in_candidate_window);
   parent_candidate_window_->CommitCandidate();
   return false;
@@ -992,7 +991,7 @@ void CandidateWindowView::UpdateCandidates(
         // candidates is 5). Second, we want to add a period after each
         // shortcut label when the candidate window is horizontal.
         candidate_view->SetShortcutText(
-            CreateShortcutText(i, new_lookup_table.orientation));
+            CreateShortcutText(i, new_lookup_table));
       }
       // Set the candidate text.
       if (candidate_index < new_lookup_table.candidates.size() &&
@@ -1183,9 +1182,9 @@ void CandidateWindowView::OnCandidatePressed(
     const gfx::Point& location) {
   for (size_t i = 0; i < candidate_views_.size(); ++i) {
     gfx::Point converted_location = location;
-    views::View::ConvertPointToView(this, candidate_views_[i],
-                                    &converted_location);
-    if (candidate_views_[i]->HitTest(converted_location)) {
+    views::View::ConvertPointToTarget(this, candidate_views_[i],
+                                      &converted_location);
+    if (candidate_views_[i]->HitTestPoint(converted_location)) {
       SelectCandidateAt(i);
       break;
     }
@@ -1217,8 +1216,8 @@ void CandidateWindowView::ResizeAndMoveParentFrame() {
   const int horizontal_offset = GetHorizontalOffset();
 
   gfx::Rect old_bounds = parent_frame_->GetClientAreaBoundsInScreen();
-  gfx::Rect screen_bounds = gfx::Screen::GetDisplayNearestWindow(
-      parent_frame_->GetNativeView()).work_area();
+  gfx::Rect screen_bounds =
+      gfx::Screen::GetDisplayMatching(cursor_location_).work_area();
   // The size.
   gfx::Rect frame_bounds = old_bounds;
   frame_bounds.set_size(GetPreferredSize());

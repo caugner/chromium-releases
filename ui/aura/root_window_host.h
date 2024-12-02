@@ -50,6 +50,9 @@ class RootWindowHost {
   // Shows the RootWindowHost.
   virtual void Show() = 0;
 
+  // Hides the RootWindowHost.
+  virtual void Hide() = 0;
+
   // Toggles the host's full screen state.
   virtual void ToggleFullScreen() = 0;
 
@@ -102,6 +105,9 @@ class RootWindowHost {
 
   // Called when the device scale factor of the root window has chagned.
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) = 0;
+
+  // Stop listening events in preparation for shutdown.
+  virtual void PrepareForShutdown() = 0;
 };
 
 }  // namespace aura

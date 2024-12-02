@@ -24,7 +24,7 @@
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_shelf.h"
-#include "chrome/browser/download/download_test_observer.h"
+#include "chrome/browser/download/download_test_file_chooser_observer.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -59,6 +59,7 @@
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_file_error_injector.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/test/net/url_request_mock_http_job.h"
@@ -196,6 +197,10 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
   DISALLOW_COPY_AND_ASSIGN(TestRenderViewContextMenu);
 };
 
+bool WasAutoOpened(DownloadItem* item) {
+  return item->GetAutoOpened();
+}
+
 }  // namespace
 
 // While an object of this class exists, it will mock out download
@@ -215,7 +220,7 @@ class MockDownloadOpeningObserver : public DownloadManager::Observer {
   virtual void ModelChanged(DownloadManager* manager) OVERRIDE {
     DCHECK_EQ(manager, download_manager_);
     std::vector<DownloadItem*> downloads;
-    download_manager_->SearchDownloads(string16(), &downloads);
+    download_manager_->GetAllDownloads(&downloads);
 
     for (std::vector<DownloadItem*>::iterator it = downloads.begin();
          it != downloads.end(); ++it) {
@@ -346,31 +351,33 @@ class DownloadTest : public InProcessBrowserTest {
 
   // Create a DownloadTestObserverTerminal that will wait for the
   // specified number of downloads to finish.
-  DownloadTestObserver* CreateWaiter(Browser* browser, int num_downloads) {
+  content::DownloadTestObserver* CreateWaiter(
+      Browser* browser, int num_downloads) {
     DownloadManager* download_manager = DownloadManagerForBrowser(browser);
-    return new DownloadTestObserverTerminal(
+    return new content::DownloadTestObserverTerminal(
         download_manager, num_downloads,
-        DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL);
+        content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL);
   }
 
   // Create a DownloadTestObserverInProgress that will wait for the
   // specified number of downloads to start.
-  DownloadTestObserver* CreateInProgressWaiter(Browser* browser,
-                                               int num_downloads) {
+  content::DownloadTestObserver* CreateInProgressWaiter(
+      Browser* browser, int num_downloads) {
     DownloadManager* download_manager = DownloadManagerForBrowser(browser);
-    return new DownloadTestObserverInProgress(
+    return new content::DownloadTestObserverInProgress(
         download_manager, num_downloads);
   }
 
   // Create a DownloadTestObserverTerminal that will wait for the
   // specified number of downloads to finish, or for
   // a dangerous download warning to be shown.
-  DownloadTestObserver* DangerousDownloadWaiter(
+  content::DownloadTestObserver* DangerousDownloadWaiter(
       Browser* browser,
       int num_downloads,
-      DownloadTestObserver::DangerousDownloadAction dangerous_download_action) {
+      content::DownloadTestObserver::DangerousDownloadAction
+      dangerous_download_action) {
     DownloadManager* download_manager = DownloadManagerForBrowser(browser);
-    return new DownloadTestObserverTerminal(
+    return new content::DownloadTestObserverTerminal(
         download_manager, num_downloads,
         dangerous_download_action);
   }
@@ -402,7 +409,8 @@ class DownloadTest : public InProcessBrowserTest {
                                       WindowOpenDisposition disposition,
                                       int browser_test_flags) {
     // Setup notification, navigate, and block.
-    scoped_ptr<DownloadTestObserver> observer(CreateWaiter(browser, 1));
+    scoped_ptr<content::DownloadTestObserver> observer(
+        CreateWaiter(browser, 1));
     // This call will block until the condition specified by
     // |browser_test_flags|, but will not wait for the download to finish.
     ui_test_utils::NavigateToURLWithDisposition(browser,
@@ -493,7 +501,8 @@ class DownloadTest : public InProcessBrowserTest {
 
     // Download a partial web page in a background tab and wait.
     // The mock system will not complete until it gets a special URL.
-    scoped_ptr<DownloadTestObserver> observer(CreateWaiter(browser, 1));
+    scoped_ptr<content::DownloadTestObserver> observer(
+        CreateWaiter(browser, 1));
     ui_test_utils::NavigateToURL(browser, url);
 
     // TODO(ahendrickson): check download status text before downloading.
@@ -548,7 +557,7 @@ class DownloadTest : public InProcessBrowserTest {
   void GetDownloads(Browser* browser, std::vector<DownloadItem*>* downloads) {
     DCHECK(downloads);
     DownloadManager* manager = DownloadManagerForBrowser(browser);
-    manager->SearchDownloads(string16(), downloads);
+    manager->GetAllDownloads(downloads);
   }
 
   static void ExpectWindowCountAfterDownload(size_t expected) {
@@ -629,11 +638,11 @@ class DownloadTest : public InProcessBrowserTest {
     WebContents* web_contents = chrome::GetActiveWebContents(browser());
     ASSERT_TRUE(web_contents) << s.str();
 
-    scoped_ptr<DownloadTestObserver> observer(
-        new DownloadTestObserverTerminal(
+    scoped_ptr<content::DownloadTestObserver> observer(
+        new content::DownloadTestObserverTerminal(
             download_manager,
             1,
-            DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+            content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
 
     if (download_info.download_method == DOWNLOAD_DIRECT) {
       // Go directly to download.  Don't wait for navigation.
@@ -641,8 +650,8 @@ class DownloadTest : public InProcessBrowserTest {
       // NOTE: |prompt_for_save_location| may change during the download.
       save_info.prompt_for_save_location = false;
 
-      scoped_refptr<DownloadTestItemCreationObserver> creation_observer(
-          new DownloadTestItemCreationObserver);
+      scoped_refptr<content::DownloadTestItemCreationObserver>
+          creation_observer(new content::DownloadTestItemCreationObserver);
 
       scoped_ptr<DownloadUrlParameters> params(
           DownloadUrlParameters::FromWebContents(web_contents, url, save_info));
@@ -894,11 +903,11 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadMimeTypeSelect) {
 
   // Download the file and wait.  We expect the Select File dialog to appear
   // due to the MIME type, but we still wait until the download completes.
-  scoped_ptr<DownloadTestObserver> observer(
-      new DownloadTestObserverTerminal(
+  scoped_ptr<content::DownloadTestObserver> observer(
+      new content::DownloadTestObserverTerminal(
           DownloadManagerForBrowser(browser()),
           1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), url, CURRENT_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
@@ -1196,7 +1205,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CloseNewTab1) {
       browser(),
       url,
       NEW_BACKGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      0);
 
   // When the download finishes, we should still have one tab.
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
@@ -1402,127 +1411,6 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, NewWindow) {
   CheckDownload(browser(), file, file);
 }
 
-// Check that downloading multiple (in this case, 2) files does not result in
-// corrupted files.
-IN_PROC_BROWSER_TEST_F(DownloadTest, MultiDownload) {
-  EXPECT_EQ(1, browser()->tab_count());
-
-  // Create a download, wait until it's started, and confirm
-  // we're in the expected state.
-  scoped_ptr<DownloadTestObserver> observer1(
-      CreateInProgressWaiter(browser(), 1));
-  ui_test_utils::NavigateToURL(
-      browser(), GURL(URLRequestSlowDownloadJob::kUnknownSizeUrl));
-  observer1->WaitForFinished();
-
-  std::vector<DownloadItem*> downloads;
-  DownloadManagerForBrowser(browser())->SearchDownloads(
-      string16(), &downloads);
-  ASSERT_EQ(1u, downloads.size());
-  ASSERT_EQ(DownloadItem::IN_PROGRESS, downloads[0]->GetState());
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
-  DownloadItem* download1 = downloads[0];  // The only download.
-
-  // Start the second download and wait until it's done.
-  FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
-  GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
-  // Download the file and wait.  We do not expect the Select File dialog.
-  DownloadAndWait(browser(), url);
-
-  // Should now have 2 items on the download shelf.
-  downloads.clear();
-  DownloadManagerForBrowser(browser())->SearchDownloads(
-      string16(), &downloads);
-  ASSERT_EQ(2u, downloads.size());
-  // We don't know the order of the downloads.
-  DownloadItem* download2 = downloads[(download1 == downloads[0]) ? 1 : 0];
-
-  ASSERT_EQ(DownloadItem::IN_PROGRESS, download1->GetState());
-  ASSERT_EQ(DownloadItem::COMPLETE, download2->GetState());
-  // The download shelf should be open.
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
-
-  // Allow the first request to finish.  We do this by loading a third URL
-  // in a separate tab.
-  scoped_ptr<DownloadTestObserver> observer2(CreateWaiter(browser(), 1));
-  GURL finish_url(URLRequestSlowDownloadJob::kFinishDownloadUrl);
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      finish_url,
-      NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
-  observer2->WaitForFinished();  // Wait for the third request.
-  EXPECT_EQ(1u, observer2->NumDownloadsSeenInState(DownloadItem::COMPLETE));
-
-  // Get the important info from other threads and check it.
-  EXPECT_TRUE(EnsureNoPendingDownloads());
-
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
-
-  // The |DownloadItem|s should now be done and have the final file names.
-  // Verify that the files have the expected data and size.
-  // |file1| should be full of '*'s, and |file2| should be the same as the
-  // source file.
-  FilePath file1(download1->GetFullPath());
-  size_t file_size1 = URLRequestSlowDownloadJob::kFirstDownloadSize +
-                      URLRequestSlowDownloadJob::kSecondDownloadSize;
-  std::string expected_contents(file_size1, '*');
-  ASSERT_TRUE(VerifyFile(file1, expected_contents, file_size1));
-
-  FilePath file2(download2->GetFullPath());
-  ASSERT_TRUE(file_util::ContentsEqual(OriginFile(file), file2));
-}
-
-IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadCancelled) {
-  EXPECT_EQ(1, browser()->tab_count());
-
-  // TODO(rdsmith): Fragile code warning!  The code below relies on the
-  // DownloadTestObserverInProgress only finishing when the new download
-  // has reached the state of being entered into the history and being
-  // user-visible (that's what's required for the Remove to be valid and
-  // for the download shelf to be visible).  By the pure semantics of
-  // DownloadTestObserverInProgress, that's not guaranteed; DownloadItems
-  // are created in the IN_PROGRESS state and made known to the DownloadManager
-  // immediately, so any ModelChanged event on the DownloadManager after
-  // navigation would allow the observer to return.  However, the only
-  // ModelChanged() event the code will currently fire is in
-  // OnCreateDownloadEntryComplete, at which point the download item will
-  // be in the state we need.
-  // The right way to fix this is to create finer grained states on the
-  // DownloadItem, and wait for the state that indicates the item has been
-  // entered in the history and made visible in the UI.
-
-  // Create a download, wait until it's started, and confirm
-  // we're in the expected state.
-  scoped_ptr<DownloadTestObserver> observer(
-      CreateInProgressWaiter(browser(), 1));
-  ui_test_utils::NavigateToURL(
-      browser(), GURL(URLRequestSlowDownloadJob::kUnknownSizeUrl));
-  observer->WaitForFinished();
-
-  std::vector<DownloadItem*> downloads;
-  DownloadManagerForBrowser(browser())->SearchDownloads(
-      string16(), &downloads);
-  ASSERT_EQ(1u, downloads.size());
-  ASSERT_EQ(DownloadItem::IN_PROGRESS, downloads[0]->GetState());
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
-
-  // Cancel the download and wait for download system quiesce.
-  downloads[0]->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
-  scoped_refptr<DownloadTestFlushObserver> flush_observer(
-      new DownloadTestFlushObserver(
-          DownloadManagerForBrowser(browser())));
-  flush_observer->WaitForFlush();
-
-  // Get the important info from other threads and check it.
-  EXPECT_TRUE(EnsureNoPendingDownloads());
-
-  // Using "DownloadItem::Remove" follows the discard dangerous download path,
-  // which completely removes the browser from the shelf and closes the shelf
-  // if it was there. Download panel stays open on ChromeOS.
-  EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
-}
-
 // Confirm a download makes it into the history properly.
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
@@ -1617,7 +1505,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, AnchorDownloadTag) {
 
   // Create a download, wait until it's complete, and confirm
   // we're in the expected state.
-  scoped_ptr<DownloadTestObserver> observer(CreateWaiter(browser(), 1));
+  scoped_ptr<content::DownloadTestObserver> observer(
+      CreateWaiter(browser(), 1));
   ui_test_utils::NavigateToURL(browser(), url);
   observer->WaitForFinished();
   EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::COMPLETE));
@@ -1647,8 +1536,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, AutoOpen) {
 
   // Find the download and confirm it was opened.
   std::vector<DownloadItem*> downloads;
-  DownloadManagerForBrowser(browser())->SearchDownloads(
-      string16(), &downloads);
+  DownloadManagerForBrowser(browser())->GetAllDownloads(&downloads);
   ASSERT_EQ(1u, downloads.size());
   EXPECT_EQ(DownloadItem::COMPLETE, downloads[0]->GetState());
   EXPECT_TRUE(downloads[0]->GetOpened());
@@ -1668,17 +1556,17 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxDenyInstall) {
 
   GURL extension_url(URLRequestMockHTTPJob::GetMockUrl(kGoodCrxPath));
 
-  scoped_ptr<DownloadTestObserver> observer(
+  scoped_ptr<content::DownloadTestObserver> observer(
       DangerousDownloadWaiter(
           browser(), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_DENY));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_DENY));
   ui_test_utils::NavigateToURL(browser(), extension_url);
 
   observer->WaitForFinished();
   EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::CANCELLED));
   EXPECT_EQ(1u, observer->NumDangerousDownloadsSeen());
 
-  // Download shelf should close. Download panel stays open on ChromeOS.
+  // Download shelf should close.
   EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
 
   // Check that the CRX is not installed.
@@ -1700,10 +1588,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInstallDenysPermissions) {
   download_crx_util::SetMockInstallPromptForTesting(
       new MockAbortExtensionInstallPrompt());
 
-  scoped_ptr<DownloadTestObserver> observer(
+  scoped_ptr<content::DownloadTestObserver> observer(
       DangerousDownloadWaiter(
           browser(), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
   ui_test_utils::NavigateToURL(browser(), extension_url);
 
   observer->WaitForFinished();
@@ -1711,7 +1599,12 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInstallDenysPermissions) {
   CheckDownloadStates(1, DownloadItem::COMPLETE);
   EXPECT_EQ(1u, observer->NumDangerousDownloadsSeen());
 
-  // Download shelf should close. Download panel stays open on ChromeOS.
+  // Download shelf should close from auto-open.
+  content::DownloadManager::DownloadVector downloads;
+  DownloadManagerForBrowser(browser())->GetAllDownloads(&downloads);
+  ASSERT_EQ(1u, downloads.size());
+  content::DownloadUpdatedObserver(
+      downloads[0], base::Bind(&WasAutoOpened)).WaitForEvent();
   EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
 
   // Check that the extension was not installed.
@@ -1732,10 +1625,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInstallAcceptPermissions) {
   // finish the install.
   SetAllowMockInstallPrompt();
 
-  scoped_ptr<DownloadTestObserver> observer(
+  scoped_ptr<content::DownloadTestObserver> observer(
       DangerousDownloadWaiter(
           browser(), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
   ui_test_utils::NavigateToURL(browser(), extension_url);
 
   observer->WaitForFinished();
@@ -1743,7 +1636,12 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInstallAcceptPermissions) {
   CheckDownloadStates(1, DownloadItem::COMPLETE);
   EXPECT_EQ(1u, observer->NumDangerousDownloadsSeen());
 
-  // Download shelf should close. Download panel stays open on ChromeOS.
+  // Download shelf should close from auto-open.
+  content::DownloadManager::DownloadVector downloads;
+  DownloadManagerForBrowser(browser())->GetAllDownloads(&downloads);
+  ASSERT_EQ(1u, downloads.size());
+  content::DownloadUpdatedObserver(
+      downloads[0], base::Bind(WasAutoOpened)).WaitForEvent();
   EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
 
   // Check that the extension was installed.
@@ -1762,10 +1660,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxInvalid) {
   // install failed below.
   SetAllowMockInstallPrompt();
 
-  scoped_ptr<DownloadTestObserver> observer(
+  scoped_ptr<content::DownloadTestObserver> observer(
       DangerousDownloadWaiter(
           browser(), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
   ui_test_utils::NavigateToURL(browser(), extension_url);
 
   observer->WaitForFinished();
@@ -1789,10 +1687,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxLargeTheme) {
   // finish the install.
   SetAllowMockInstallPrompt();
 
-  scoped_ptr<DownloadTestObserver> observer(
+  scoped_ptr<content::DownloadTestObserver> observer(
       DangerousDownloadWaiter(
           browser(), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
   ui_test_utils::NavigateToURL(browser(), extension_url);
 
   observer->WaitForFinished();
@@ -1800,143 +1698,18 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CrxLargeTheme) {
   CheckDownloadStates(1, DownloadItem::COMPLETE);
   EXPECT_EQ(1u, observer->NumDangerousDownloadsSeen());
 
-  // Download shelf should close. Download panel stays open on ChromeOS.
+  // Download shelf should close from auto-open.
+  content::DownloadManager::DownloadVector downloads;
+  DownloadManagerForBrowser(browser())->GetAllDownloads(&downloads);
+  ASSERT_EQ(1u, downloads.size());
+  content::DownloadUpdatedObserver(
+      downloads[0], base::Bind(WasAutoOpened)).WaitForEvent();
   EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
 
   // Check that the extension was installed.
   ExtensionService* extension_service =
       browser()->profile()->GetExtensionService();
   ASSERT_TRUE(extension_service->GetExtensionById(kLargeThemeCrxId, false));
-}
-
-// Sort download items by db_handle.
-static bool DownloadItemSorter(DownloadItem* d1, DownloadItem* d2) {
-  return d1->GetDbHandle() < d2->GetDbHandle();
-}
-
-// Confirm that searching through the history works properly
-IN_PROC_BROWSER_TEST_F(DownloadTest, SearchDownloads) {
-  // Downloads to populate history with.
-  base::Time current(base::Time::Now());
-  DownloadPersistentStoreInfo population_entries[] = {
-    DownloadPersistentStoreInfo(
-        FilePath(FILE_PATH_LITERAL("/path/to/file")),
-        GURL("http://www.google.com/fantasy_download"),
-        GURL(""),
-        current - base::TimeDelta::FromMinutes(5),
-        current,
-        128,
-        128,
-        DownloadItem::COMPLETE,
-        1,
-        false),
-    DownloadPersistentStoreInfo(
-        FilePath(FILE_PATH_LITERAL("/path/to/another_file")),
-        GURL("http://www.google.com/reality_download"),
-        GURL(""),
-        current - base::TimeDelta::FromMinutes(10),
-        current,
-        256,
-        256,
-        DownloadItem::COMPLETE,
-        2,
-        false),
-    DownloadPersistentStoreInfo(
-        FilePath(FILE_PATH_LITERAL("/different_path/to/another_file")),
-        GURL("http://www.izzle.com/not_really_a_download"),
-        GURL(""),
-        current - base::TimeDelta::FromMinutes(15),
-        current,
-        512,
-        512,
-        DownloadItem::COMPLETE,
-        3,
-        true)
-  };
-  std::vector<DownloadPersistentStoreInfo> entries(
-      population_entries, population_entries + arraysize(population_entries));
-
-  // Populate the manager.
-  DownloadManager* manager = DownloadManagerForBrowser(browser());
-  manager->OnPersistentStoreQueryComplete(&entries);
-
-  // Do some searches and check the results.
-  std::vector<DownloadItem*> search_results;
-
-  manager->SearchDownloads(string16(), &search_results);
-  ASSERT_EQ(3u, search_results.size());
-  std::sort(search_results.begin(), search_results.end(),
-            DownloadItemSorter);
-  // We do a full check only once to protect against the data
-  // somehow getting scrambled on its way into the DownloadItems.
-  {
-    DownloadItem* d1 = search_results[0];
-    DownloadItem* d2 = search_results[1];
-    DownloadItem* d3 = search_results[2];
-    EXPECT_EQ(FilePath(FILE_PATH_LITERAL("/path/to/file")), d1->GetFullPath());
-    EXPECT_EQ(GURL("http://www.google.com/fantasy_download"),
-              d1->GetOriginalUrl());
-    EXPECT_EQ(current - base::TimeDelta::FromMinutes(5),
-              d1->GetStartTime());
-    EXPECT_EQ(current, d1->GetEndTime());
-    EXPECT_EQ(128, d1->GetReceivedBytes());
-    EXPECT_EQ(128, d1->GetTotalBytes());
-    EXPECT_EQ(DownloadItem::COMPLETE, d1->GetState());
-    EXPECT_EQ(1, d1->GetDbHandle());
-    EXPECT_FALSE(d1->GetOpened());
-
-    EXPECT_EQ(FilePath(FILE_PATH_LITERAL("/path/to/another_file")),
-              d2->GetFullPath());
-    EXPECT_EQ(GURL("http://www.google.com/reality_download"),
-              d2->GetOriginalUrl());
-    EXPECT_EQ(current - base::TimeDelta::FromMinutes(10),
-              d2->GetStartTime());
-    EXPECT_EQ(current, d2->GetEndTime());
-    EXPECT_EQ(256, d2->GetReceivedBytes());
-    EXPECT_EQ(256, d2->GetTotalBytes());
-    EXPECT_EQ(DownloadItem::COMPLETE, d2->GetState());
-    EXPECT_EQ(2, d2->GetDbHandle());
-    EXPECT_FALSE(d2->GetOpened());
-
-    EXPECT_EQ(FilePath(FILE_PATH_LITERAL("/different_path/to/another_file")),
-              d3->GetFullPath());
-    EXPECT_EQ(GURL("http://www.izzle.com/not_really_a_download"),
-              d3->GetOriginalUrl());
-    EXPECT_EQ(current - base::TimeDelta::FromMinutes(15),
-              d3->GetStartTime());
-    EXPECT_EQ(current, d3->GetEndTime());
-    EXPECT_EQ(512, d3->GetReceivedBytes());
-    EXPECT_EQ(512, d3->GetTotalBytes());
-    EXPECT_EQ(DownloadItem::COMPLETE, d3->GetState());
-    EXPECT_EQ(3, d3->GetDbHandle());
-    EXPECT_TRUE(d3->GetOpened());
-  }
-  search_results.clear();
-
-  string16 search_input;
-  manager->SearchDownloads(UTF8ToUTF16("www.google.com"), &search_results);
-  ASSERT_EQ(2u, search_results.size());
-  std::sort(search_results.begin(), search_results.end(),
-            DownloadItemSorter);
-  EXPECT_EQ(1, search_results[0]->GetDbHandle());
-  EXPECT_EQ(2, search_results[1]->GetDbHandle());
-  search_results.clear();
-
-  manager->SearchDownloads(UTF8ToUTF16("real"), &search_results);
-  ASSERT_EQ(2u, search_results.size());
-  std::sort(search_results.begin(), search_results.end(),
-            DownloadItemSorter);
-  EXPECT_EQ(2, search_results[0]->GetDbHandle());
-  EXPECT_EQ(3, search_results[1]->GetDbHandle());
-  search_results.clear();
-
-  manager->SearchDownloads(UTF8ToUTF16("another_file"), &search_results);
-  ASSERT_EQ(2u, search_results.size());
-  std::sort(search_results.begin(), search_results.end(),
-            DownloadItemSorter);
-  EXPECT_EQ(2, search_results[0]->GetDbHandle());
-  EXPECT_EQ(3, search_results[1]->GetDbHandle());
-  search_results.clear();
 }
 
 // Tests for download initiation functions.
@@ -1950,10 +1723,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadUrl) {
   WebContents* web_contents = chrome::GetActiveWebContents(browser());
   ASSERT_TRUE(web_contents);
 
-  DownloadTestObserver* observer(
-      new DownloadTestObserverTerminal(
+  content::DownloadTestObserver* observer(
+      new content::DownloadTestObserverTerminal(
           DownloadManagerForBrowser(browser()), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
   content::DownloadSaveInfo save_info;
   save_info.prompt_for_save_location = true;
   scoped_ptr<DownloadUrlParameters> params(
@@ -1984,7 +1757,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadUrlToPath) {
   content::DownloadSaveInfo save_info;
   save_info.file_path = target_file_full_path;
 
-  DownloadTestObserver* observer(CreateWaiter(browser(), 1));
+  content::DownloadTestObserver* observer(CreateWaiter(browser(), 1));
   scoped_ptr<DownloadUrlParameters> params(
       DownloadUrlParameters::FromWebContents(web_contents, url, save_info));
   DownloadManagerForBrowser(browser())->DownloadUrl(params.Pass());
@@ -2020,10 +1793,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SavePageNonHTMLViaGet) {
   // is not bypassed then this will fail since the server is no longer
   // reachable.
   ASSERT_TRUE(test_server()->Stop());
-  scoped_ptr<DownloadTestObserver> waiter(
-      new DownloadTestObserverTerminal(
+  scoped_ptr<content::DownloadTestObserver> waiter(
+      new content::DownloadTestObserverTerminal(
           DownloadManagerForBrowser(browser()), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
   chrome::SavePage(browser());
   waiter->WaitForFinished();
   EXPECT_EQ(1u, waiter->NumDownloadsSeenInState(DownloadItem::COMPLETE));
@@ -2036,10 +1809,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SavePageNonHTMLViaGet) {
   ASSERT_EQ(url, download_items[0]->GetOriginalUrl());
 
   // Try to download it via a context menu.
-  scoped_ptr<DownloadTestObserver> waiter_context_menu(
-      new DownloadTestObserverTerminal(
+  scoped_ptr<content::DownloadTestObserver> waiter_context_menu(
+      new content::DownloadTestObserverTerminal(
           DownloadManagerForBrowser(browser()), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
   content::ContextMenuParams context_menu_params;
   context_menu_params.media_type = WebKit::WebContextMenuData::MediaTypeImage;
   context_menu_params.src_url = url;
@@ -2099,10 +1872,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SavePageNonHTMLViaPost) {
   // reachable. This will also fail if it tries to be retrieved via "GET"
   // rather than "POST".
   ASSERT_TRUE(test_server()->Stop());
-  scoped_ptr<DownloadTestObserver> waiter(
-      new DownloadTestObserverTerminal(
+  scoped_ptr<content::DownloadTestObserver> waiter(
+      new content::DownloadTestObserverTerminal(
           DownloadManagerForBrowser(browser()), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
   chrome::SavePage(browser());
   waiter->WaitForFinished();
   EXPECT_EQ(1u, waiter->NumDownloadsSeenInState(DownloadItem::COMPLETE));
@@ -2115,10 +1888,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SavePageNonHTMLViaPost) {
   ASSERT_EQ(jpeg_url, download_items[0]->GetOriginalUrl());
 
   // Try to download it via a context menu.
-  scoped_ptr<DownloadTestObserver> waiter_context_menu(
-      new DownloadTestObserverTerminal(
+  scoped_ptr<content::DownloadTestObserver> waiter_context_menu(
+      new content::DownloadTestObserverTerminal(
           DownloadManagerForBrowser(browser()), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
   content::ContextMenuParams context_menu_params;
   context_menu_params.media_type = WebKit::WebContextMenuData::MediaTypeImage;
   context_menu_params.src_url = jpeg_url;
@@ -2411,8 +2184,9 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadDangerousBlobData) {
   ASSERT_TRUE(test_server()->Start());
   GURL url(test_server()->GetURL(path));
 
-  DownloadTestObserver* observer(DangerousDownloadWaiter(
-      browser(), 1, DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
+  content::DownloadTestObserver* observer(DangerousDownloadWaiter(
+      browser(), 1,
+      content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_ACCEPT));
   ui_test_utils::NavigateToURL(browser(), url);
   observer->WaitForFinished();
 
@@ -2434,10 +2208,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, LoadURLExternallyReferrerPolicy) {
   ASSERT_TRUE(url.is_valid());
   ui_test_utils::NavigateToURL(browser(), url);
 
-  scoped_ptr<DownloadTestObserver> waiter(
-      new DownloadTestObserverTerminal(
+  scoped_ptr<content::DownloadTestObserver> waiter(
+      new content::DownloadTestObserverTerminal(
           DownloadManagerForBrowser(browser()), 1,
-          DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
 
   // Click on the link with the alt key pressed. This will download the link
   // target.

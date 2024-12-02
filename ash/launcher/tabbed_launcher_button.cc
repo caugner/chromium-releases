@@ -8,13 +8,17 @@
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_types.h"
-#include "grit/ui_resources.h"
+#include "grit/ash_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/multi_animation.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/insets.h"
+
+namespace {
+const int kIconOffsetY = 7;
+}
 
 namespace ash {
 namespace internal {
@@ -25,15 +29,14 @@ TabbedLauncherButton::IconView::IconView(
   if (!browser_image_) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
-    browser_image_ = new SkBitmap(
-        *rb.GetImageNamed(IDR_AURA_LAUNCHER_BROWSER).ToSkBitmap());
-    incognito_browser_image_ = new SkBitmap(
-        *rb.GetImageNamed(IDR_AURA_LAUNCHER_INCOGNITO_BROWSER).ToSkBitmap());
-    browser_panel_image_ = new SkBitmap(
-        *rb.GetImageNamed(IDR_AURA_LAUNCHER_BROWSER_PANEL).ToSkBitmap());
-    incognito_browser_panel_image_ = new SkBitmap(
-        *rb.GetImageNamed(
-            IDR_AURA_LAUNCHER_INCOGNITO_BROWSER_PANEL).ToSkBitmap());
+    browser_image_ = rb.GetImageNamed(IDR_AURA_LAUNCHER_BROWSER).ToImageSkia();
+    incognito_browser_image_ =
+        rb.GetImageNamed(IDR_AURA_LAUNCHER_INCOGNITO_BROWSER).ToImageSkia();
+    browser_panel_image_ =
+        rb.GetImageNamed(IDR_AURA_LAUNCHER_BROWSER_PANEL).ToImageSkia();
+    incognito_browser_panel_image_ =
+        rb.GetImageNamed(
+            IDR_AURA_LAUNCHER_INCOGNITO_BROWSER_PANEL).ToImageSkia();
   }
   set_icon_size(0);
   if (host->is_incognito() == STATE_NOT_INCOGNITO)
@@ -57,15 +60,17 @@ void TabbedLauncherButton::IconView::AnimationProgressed(
     SchedulePaint();
 }
 
-void TabbedLauncherButton::IconView::SetTabImage(const SkBitmap& image) {
-  if (image.empty()) {
-    if (!image_.empty()) {
+void TabbedLauncherButton::IconView::SetTabImage(const gfx::ImageSkia& image) {
+  if (image.isNull()) {
+    if (!image_.isNull()) {
       // Pause for 500ms, then ease out for 200ms.
       ui::MultiAnimation::Parts animation_parts;
       animation_parts.push_back(ui::MultiAnimation::Part(500, ui::Tween::ZERO));
       animation_parts.push_back(
           ui::MultiAnimation::Part(200, ui::Tween::EASE_OUT));
-      animation_.reset(new ui::MultiAnimation(animation_parts));
+      animation_.reset(new ui::MultiAnimation(
+          animation_parts,
+          ui::MultiAnimation::GetDefaultTimerInterval()));
       animation_->set_continuous(false);
       animation_->set_delegate(this);
       animation_->Start();
@@ -89,22 +94,23 @@ void TabbedLauncherButton::IconView::OnPaint(gfx::Canvas* canvas) {
   if ((animation_.get() && animation_->is_animating() &&
       animation_->current_part_index() == 1)) {
     int x = (width() - animating_image_.width()) / 2;
-    int y = (height() - animating_image_.height()) / 2;
     canvas->SaveLayerAlpha(animation_->CurrentValueBetween(255, 0));
-    canvas->DrawImageInt(animating_image_, x, y);
+    canvas->DrawImageInt(animating_image_, x, kIconOffsetY);
     canvas->Restore();
   } else {
     int x = (width() - image_.width()) / 2;
-    int y = (height() - image_.height()) / 2;
-    canvas->DrawImageInt(image_, x, y);
+    canvas->DrawImageInt(image_, x, kIconOffsetY);
   }
 }
 
 // static
-SkBitmap* TabbedLauncherButton::IconView::browser_image_ = NULL;
-SkBitmap* TabbedLauncherButton::IconView::incognito_browser_image_ = NULL;
-SkBitmap* TabbedLauncherButton::IconView::browser_panel_image_ = NULL;
-SkBitmap* TabbedLauncherButton::IconView::incognito_browser_panel_image_ = NULL;
+const gfx::ImageSkia* TabbedLauncherButton::IconView::browser_image_ = NULL;
+const gfx::ImageSkia* TabbedLauncherButton::IconView::incognito_browser_image_ =
+    NULL;
+const gfx::ImageSkia* TabbedLauncherButton::IconView::browser_panel_image_ =
+    NULL;
+const gfx::ImageSkia*
+    TabbedLauncherButton::IconView::incognito_browser_panel_image_ = NULL;
 
 TabbedLauncherButton* TabbedLauncherButton::Create(
     views::ButtonListener* listener,
@@ -127,7 +133,7 @@ TabbedLauncherButton::TabbedLauncherButton(views::ButtonListener* listener,
 TabbedLauncherButton::~TabbedLauncherButton() {
 }
 
-void TabbedLauncherButton::SetTabImage(const SkBitmap& image) {
+void TabbedLauncherButton::SetTabImage(const gfx::ImageSkia& image) {
   tabbed_icon_view()->SetTabImage(image);
 }
 

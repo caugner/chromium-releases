@@ -418,8 +418,6 @@
         'test/win_event_receiver.h',
         'test/net/fake_external_tab.cc',
         'test/net/fake_external_tab.h',
-        'test/net/process_singleton_subclass.cc',
-        'test/net/process_singleton_subclass.h',
         'test/net/test_automation_provider.cc',
         'test/net/test_automation_provider.h',
         'test/net/test_automation_resource_message_filter.cc',
@@ -666,7 +664,7 @@
         '../net/net.gyp:net',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/bzip2/bzip2.gyp:bzip2',
-        '../webkit/support/webkit_support.gyp:webkit_user_agent',
+        '../webkit/support/webkit_support.gyp:user_agent',
       ],
       'sources': [
         'bho.cc',

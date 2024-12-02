@@ -17,18 +17,33 @@ namespace content {
 
 // Types of media streams.
 enum MediaStreamDeviceType {
-  MEDIA_STREAM_DEVICE_TYPE_NO_SERVICE = 0,
-  MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE,
-  MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE,
-  NUM_MEDIA_STREAM_DEVICE_TYPES
+  MEDIA_NO_SERVICE = 0,
+
+  // A device provided by the operating system (e.g., webcam input).
+  MEDIA_DEVICE_AUDIO_CAPTURE,
+  MEDIA_DEVICE_VIDEO_CAPTURE,
+
+  // Mirroring of a browser tab.
+  MEDIA_TAB_AUDIO_CAPTURE,
+  MEDIA_TAB_VIDEO_CAPTURE,
+
+  NUM_MEDIA_TYPES
 };
 
+// Convenience predicates to determine whether the given type represents some
+// audio or some video device.
+CONTENT_EXPORT bool IsAudioMediaType(MediaStreamDeviceType type);
+CONTENT_EXPORT bool IsVideoMediaType(MediaStreamDeviceType type);
+
+// TODO(xians): Change the structs to classes.
 // Represents one device in a request for media stream(s).
 struct CONTENT_EXPORT MediaStreamDevice {
   MediaStreamDevice(
       MediaStreamDeviceType type,
       const std::string& device_id,
       const std::string& name);
+
+  ~MediaStreamDevice();
 
   // The device's type.
   MediaStreamDeviceType type;
@@ -65,6 +80,7 @@ struct CONTENT_EXPORT MediaStreamRequest {
 
   // A list of devices present on the user's computer, for each device type
   // requested.
+  // All the elements in this map will be deleted in ~MediaStreamRequest().
   MediaStreamDeviceMap devices;
 };
 

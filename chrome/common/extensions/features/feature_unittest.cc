@@ -18,16 +18,20 @@ struct IsAvailableTestData {
   Feature::Location location;
   Feature::Platform platform;
   int manifest_version;
-  Feature::Availability expected_result;
+  Feature::AvailabilityResult expected_result;
 };
 
-// Fails on official continuous builder - http://crbug.com/126274
-#if defined(GOOGLE_CHROME_BUILD)
-#define MAYBE_IsAvailableNullCase DISABLED_IsAvailableNullCase
-#else
-#define MAYBE_IsAvailableNullCase IsAvailableNullCase
-#endif
-TEST(ExtensionFeatureTest, MAYBE_IsAvailableNullCase) {
+class ExtensionFeatureTest : public testing::Test {
+ protected:
+  ExtensionFeatureTest()
+      : current_channel_(VersionInfo::CHANNEL_UNKNOWN) {}
+  virtual ~ExtensionFeatureTest() {}
+
+ private:
+  Feature::ScopedCurrentChannel current_channel_;
+};
+
+TEST_F(ExtensionFeatureTest, IsAvailableNullCase) {
   const IsAvailableTestData tests[] = {
     { "", Extension::TYPE_UNKNOWN,
       Feature::UNSPECIFIED_LOCATION, Feature::UNSPECIFIED_PLATFORM, -1,
@@ -60,74 +64,56 @@ TEST(ExtensionFeatureTest, MAYBE_IsAvailableNullCase) {
                                             test.extension_type,
                                             test.location,
                                             test.manifest_version,
-                                            test.platform));
+                                            test.platform).result());
   }
 }
 
-// Fails on official continuous builder - http://crbug.com/126274
-#if defined(GOOGLE_CHROME_BUILD)
-#define MAYBE_Whitelist DISABLED_Whitelist
-#else
-#define MAYBE_Whitelist Whitelist
-#endif
-TEST(ExtensionFeatureTest, MAYBE_Whitelist) {
+TEST_F(ExtensionFeatureTest, Whitelist) {
   Feature feature;
   feature.whitelist()->insert("foo");
   feature.whitelist()->insert("bar");
 
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "foo", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "bar", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 
   EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToManifest(
       "baz", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 
   feature.extension_types()->insert(Extension::TYPE_PACKAGED_APP);
   EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToManifest(
       "baz", Extension::TYPE_PACKAGED_APP, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 }
 
-// Fails on official continuous builder - http://crbug.com/126274
-#if defined(GOOGLE_CHROME_BUILD)
-#define MAYBE_PackageType DISABLED_PackageType
-#else
-#define MAYBE_PackageType PackageType
-#endif
-TEST(ExtensionFeatureTest, MAYBE_PackageType) {
+TEST_F(ExtensionFeatureTest, PackageType) {
   Feature feature;
   feature.extension_types()->insert(Extension::TYPE_EXTENSION);
   feature.extension_types()->insert(Extension::TYPE_PACKAGED_APP);
 
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "", Extension::TYPE_EXTENSION, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "", Extension::TYPE_PACKAGED_APP, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 
   EXPECT_EQ(Feature::INVALID_TYPE, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::INVALID_TYPE, feature.IsAvailableToManifest(
       "", Extension::TYPE_THEME, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 }
 
-// Fails on official continuous builder - http://crbug.com/126274
-#if defined(GOOGLE_CHROME_BUILD)
-#define MAYBE_Context DISABLED_Context
-#else
-#define MAYBE_Context Context
-#endif
-TEST(ExtensionFeatureTest, MAYBE_Context) {
+TEST_F(ExtensionFeatureTest, Context) {
   Feature feature;
   feature.contexts()->insert(Feature::BLESSED_EXTENSION_CONTEXT);
   feature.extension_types()->insert(Extension::TYPE_PACKAGED_APP);
@@ -150,14 +136,14 @@ TEST(ExtensionFeatureTest, MAYBE_Context) {
   feature.whitelist()->insert("monkey");
   EXPECT_EQ(Feature::NOT_FOUND_IN_WHITELIST, feature.IsAvailableToContext(
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
-      Feature::CHROMEOS_PLATFORM));
+      Feature::CHROMEOS_PLATFORM).result());
   feature.whitelist()->clear();
 
   feature.extension_types()->clear();
   feature.extension_types()->insert(Extension::TYPE_THEME);
   EXPECT_EQ(Feature::INVALID_TYPE, feature.IsAvailableToContext(
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
-      Feature::CHROMEOS_PLATFORM));
+      Feature::CHROMEOS_PLATFORM).result());
   feature.extension_types()->clear();
   feature.extension_types()->insert(Extension::TYPE_PACKAGED_APP);
 
@@ -165,34 +151,34 @@ TEST(ExtensionFeatureTest, MAYBE_Context) {
   feature.contexts()->insert(Feature::UNBLESSED_EXTENSION_CONTEXT);
   EXPECT_EQ(Feature::INVALID_CONTEXT, feature.IsAvailableToContext(
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
-      Feature::CHROMEOS_PLATFORM));
+      Feature::CHROMEOS_PLATFORM).result());
   feature.contexts()->clear();
   feature.contexts()->insert(Feature::BLESSED_EXTENSION_CONTEXT);
 
   feature.set_location(Feature::COMPONENT_LOCATION);
   EXPECT_EQ(Feature::INVALID_LOCATION, feature.IsAvailableToContext(
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
-      Feature::CHROMEOS_PLATFORM));
+      Feature::CHROMEOS_PLATFORM).result());
   feature.set_location(Feature::UNSPECIFIED_LOCATION);
 
   EXPECT_EQ(Feature::INVALID_PLATFORM, feature.IsAvailableToContext(
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 
   feature.set_min_manifest_version(22);
   EXPECT_EQ(Feature::INVALID_MIN_MANIFEST_VERSION, feature.IsAvailableToContext(
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
-      Feature::CHROMEOS_PLATFORM));
+      Feature::CHROMEOS_PLATFORM).result());
   feature.set_min_manifest_version(21);
 
   feature.set_max_manifest_version(18);
   EXPECT_EQ(Feature::INVALID_MAX_MANIFEST_VERSION, feature.IsAvailableToContext(
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
-      Feature::CHROMEOS_PLATFORM));
+      Feature::CHROMEOS_PLATFORM).result());
   feature.set_max_manifest_version(25);
 }
 
-TEST(ExtensionFeatureTest, Location) {
+TEST_F(ExtensionFeatureTest, Location) {
   Feature feature;
 
   // If the feature specifies "component" as its location, then only component
@@ -200,77 +186,65 @@ TEST(ExtensionFeatureTest, Location) {
   feature.set_location(Feature::COMPONENT_LOCATION);
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::COMPONENT_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::INVALID_LOCATION, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 
   // But component extensions can access anything else, whatever their location.
   feature.set_location(Feature::UNSPECIFIED_LOCATION);
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::COMPONENT_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 }
 
-// Fails on official continuous builder - http://crbug.com/126274
-#if defined(GOOGLE_CHROME_BUILD)
-#define MAYBE_Platform DISABLED_Platform
-#else
-#define MAYBE_Platform Platform
-#endif
-TEST(ExtensionFeatureTest, MAYBE_Platform) {
+TEST_F(ExtensionFeatureTest, Platform) {
   Feature feature;
   feature.set_platform(Feature::CHROMEOS_PLATFORM);
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::CHROMEOS_PLATFORM));
+      Feature::CHROMEOS_PLATFORM).result());
   EXPECT_EQ(Feature::INVALID_PLATFORM, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION, -1,
-      Feature::UNSPECIFIED_PLATFORM));
+      Feature::UNSPECIFIED_PLATFORM).result());
 }
 
-// Fails on official continuous builder - http://crbug.com/126274
-#if defined(GOOGLE_CHROME_BUILD)
-#define MAYBE_Version DISABLED_Version
-#else
-#define MAYBE_Version Version
-#endif
-TEST(ExtensionFeatureTest, MAYBE_Version) {
+TEST_F(ExtensionFeatureTest, Version) {
   Feature feature;
   feature.set_min_manifest_version(5);
 
   EXPECT_EQ(Feature::INVALID_MIN_MANIFEST_VERSION,
             feature.IsAvailableToManifest(
                 "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION,
-                0, Feature::UNSPECIFIED_PLATFORM));
+                0, Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::INVALID_MIN_MANIFEST_VERSION,
             feature.IsAvailableToManifest(
                 "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION,
-                4, Feature::UNSPECIFIED_PLATFORM));
+                4, Feature::UNSPECIFIED_PLATFORM).result());
 
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION,
-      5, Feature::UNSPECIFIED_PLATFORM));
+      5, Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION,
-      10, Feature::UNSPECIFIED_PLATFORM));
+      10, Feature::UNSPECIFIED_PLATFORM).result());
 
   feature.set_max_manifest_version(8);
 
   EXPECT_EQ(Feature::INVALID_MAX_MANIFEST_VERSION,
             feature.IsAvailableToManifest(
                 "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION,
-                10, Feature::UNSPECIFIED_PLATFORM));
+                10, Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::IS_AVAILABLE,
             feature.IsAvailableToManifest(
                 "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION,
-                8, Feature::UNSPECIFIED_PLATFORM));
+                8, Feature::UNSPECIFIED_PLATFORM).result());
   EXPECT_EQ(Feature::IS_AVAILABLE, feature.IsAvailableToManifest(
       "", Extension::TYPE_UNKNOWN, Feature::UNSPECIFIED_LOCATION,
-      7, Feature::UNSPECIFIED_PLATFORM));
+      7, Feature::UNSPECIFIED_PLATFORM).result());
 }
 
-TEST(ExtensionFeatureTest, ParseNull) {
+TEST_F(ExtensionFeatureTest, ParseNull) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
   scoped_ptr<Feature> feature(new Feature());
   feature->Parse(value.get());
@@ -283,7 +257,7 @@ TEST(ExtensionFeatureTest, ParseNull) {
   EXPECT_EQ(0, feature->max_manifest_version());
 }
 
-TEST(ExtensionFeatureTest, ParseWhitelist) {
+TEST_F(ExtensionFeatureTest, ParseWhitelist) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
   ListValue* whitelist = new ListValue();
   whitelist->Append(Value::CreateStringValue("foo"));
@@ -296,7 +270,7 @@ TEST(ExtensionFeatureTest, ParseWhitelist) {
   EXPECT_TRUE(feature->whitelist()->count("bar"));
 }
 
-TEST(ExtensionFeatureTest, ParsePackageTypes) {
+TEST_F(ExtensionFeatureTest, ParsePackageTypes) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
   ListValue* extension_types = new ListValue();
   extension_types->Append(Value::CreateStringValue("extension"));
@@ -320,7 +294,7 @@ TEST(ExtensionFeatureTest, ParsePackageTypes) {
   EXPECT_EQ(*(feature->extension_types()), *(feature2->extension_types()));
 }
 
-TEST(ExtensionFeatureTest, ParseContexts) {
+TEST_F(ExtensionFeatureTest, ParseContexts) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
   ListValue* contexts = new ListValue();
   contexts->Append(Value::CreateStringValue("blessed_extension"));
@@ -342,7 +316,7 @@ TEST(ExtensionFeatureTest, ParseContexts) {
   EXPECT_EQ(*(feature->contexts()), *(feature2->contexts()));
 }
 
-TEST(ExtensionFeatureTest, ParseLocation) {
+TEST_F(ExtensionFeatureTest, ParseLocation) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
   value->SetString("location", "component");
   scoped_ptr<Feature> feature(new Feature());
@@ -350,7 +324,7 @@ TEST(ExtensionFeatureTest, ParseLocation) {
   EXPECT_EQ(Feature::COMPONENT_LOCATION, feature->location());
 }
 
-TEST(ExtensionFeatureTest, ParsePlatform) {
+TEST_F(ExtensionFeatureTest, ParsePlatform) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
   value->SetString("platform", "chromeos");
   scoped_ptr<Feature> feature(new Feature());
@@ -358,7 +332,7 @@ TEST(ExtensionFeatureTest, ParsePlatform) {
   EXPECT_EQ(Feature::CHROMEOS_PLATFORM, feature->platform());
 }
 
-TEST(ExtensionFeatureTest, ManifestVersion) {
+TEST_F(ExtensionFeatureTest, ManifestVersion) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
   value->SetInteger("min_manifest_version", 1);
   value->SetInteger("max_manifest_version", 5);
@@ -368,7 +342,7 @@ TEST(ExtensionFeatureTest, ManifestVersion) {
   EXPECT_EQ(5, feature->max_manifest_version());
 }
 
-TEST(ExtensionFeatureTest, Inheritance) {
+TEST_F(ExtensionFeatureTest, Inheritance) {
   Feature feature;
   feature.whitelist()->insert("foo");
   feature.extension_types()->insert(Extension::TYPE_THEME);
@@ -411,7 +385,7 @@ TEST(ExtensionFeatureTest, Inheritance) {
   EXPECT_EQ(3, feature2.max_manifest_version());
 }
 
-TEST(ExtensionFeatureTest, Equals) {
+TEST_F(ExtensionFeatureTest, Equals) {
   Feature feature;
   feature.whitelist()->insert("foo");
   feature.extension_types()->insert(Extension::TYPE_THEME);
@@ -452,10 +426,9 @@ TEST(ExtensionFeatureTest, Equals) {
   EXPECT_FALSE(feature2.Equals(feature));
 }
 
-Feature::Availability IsAvailableInChannel(
+Feature::AvailabilityResult IsAvailableInChannel(
     const std::string& channel, VersionInfo::Channel channel_for_testing) {
-  Feature::SetChannelCheckingEnabled(true);
-  Feature::SetChannelForTesting(channel_for_testing);
+  Feature::ScopedCurrentChannel current_channel(channel_for_testing);
 
   Feature feature;
   if (!channel.empty()) {
@@ -464,18 +437,14 @@ Feature::Availability IsAvailableInChannel(
     feature.Parse(&feature_value);
   }
 
-  Feature::Availability availability = feature.IsAvailableToManifest(
+  return feature.IsAvailableToManifest(
       "random-extension",
       Extension::TYPE_UNKNOWN,
       Feature::UNSPECIFIED_LOCATION,
-      -1);
-
-  Feature::ResetChannelForTesting();
-  Feature::ResetChannelCheckingEnabled();
-  return availability;
+      -1).result();
 }
 
-TEST(ExtensionFeatureTest, SupportedChannel) {
+TEST_F(ExtensionFeatureTest, SupportedChannel) {
   // stable supported.
   EXPECT_EQ(Feature::IS_AVAILABLE,
       IsAvailableInChannel("stable", VersionInfo::CHANNEL_UNKNOWN));

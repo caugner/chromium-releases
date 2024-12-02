@@ -7,12 +7,12 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -158,7 +158,7 @@ void CheckAutoLaunchCallback(Profile* profile) {
 
   // Don't show the info-bar if there are already info-bars showing.
   InfoBarTabHelper* infobar_helper = tab->infobar_tab_helper();
-  if (infobar_helper->infobar_count() > 0)
+  if (infobar_helper->GetInfoBarCount() > 0)
     return;
 
   infobar_helper->AddInfoBar(

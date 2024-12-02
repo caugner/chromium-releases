@@ -19,14 +19,11 @@
 #include "base/message_loop.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/startup/startup_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-
-#if defined(OS_WIN)
-#include "chrome/browser/profiles/profile_shortcut_manager_win.h"
-#endif
 
 class NewProfileLauncher;
 class ProfileInfoCache;
@@ -166,8 +163,10 @@ class ProfileManager : public base::NonThreadSafe,
   // Directories are named "profile_1", "profile_2", etc., in sequence of
   // creation. (Because directories can be removed, however, it may be the case
   // that at some point the list of numbered profiles is not continuous.)
-  static void CreateMultiProfileAsync(const string16& name,
-                                     const string16& icon_url);
+  static void CreateMultiProfileAsync(
+      const string16& name,
+      const string16& icon_url,
+      const CreateCallback& callback);
 
   // Register multi-profile related preferences in Local State.
   static void RegisterPrefs(PrefService* prefs);
@@ -175,6 +174,10 @@ class ProfileManager : public base::NonThreadSafe,
   // Returns a ProfileInfoCache object which can be used to get information
   // about profiles without having to load them from disk.
   ProfileInfoCache& GetProfileInfoCache();
+
+  // Returns a ProfileShortcut Manager that enables the caller to create
+  // profile specfic desktop shortcuts.
+  ProfileShortcutManager* profile_shortcut_manager();
 
   // Schedules the profile at the given path to be deleted on shutdown.
   void ScheduleProfileForDeletion(const FilePath& profile_dir);
@@ -209,12 +212,6 @@ class ProfileManager : public base::NonThreadSafe,
   virtual Profile* CreateProfileAsyncHelper(const FilePath& path,
                                             Delegate* delegate);
 
-#if defined(OS_WIN)
-  // Creates a shortcut manager. Override this to return a different shortcut
-  // manager or NULL to avoid creating shortcuts.
-  virtual ProfileShortcutManagerWin* CreateShortcutManager();
-#endif
-
  private:
   friend class TestingProfileManager;
   FRIEND_TEST_ALL_PREFIXES(ProfileManagerBrowserTest, DeleteAllProfiles);
@@ -222,15 +219,15 @@ class ProfileManager : public base::NonThreadSafe,
   // This struct contains information about profiles which are being loaded or
   // were loaded.
   struct ProfileInfo {
-    ProfileInfo(Profile* profile, bool created)
-        : profile(profile), created(created) {
-    }
+    ProfileInfo(Profile* profile, bool created);
 
     ~ProfileInfo();
 
     scoped_ptr<Profile> profile;
     // Whether profile has been fully loaded (created and initialized).
     bool created;
+    // Whether or not this profile should have a shortcut.
+    bool create_shortcut;
     // List of callbacks to run when profile initialization is done. Note, when
     // profile is fully loaded this vector will be empty.
     std::vector<CreateCallback> callbacks;
@@ -259,12 +256,6 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Adds |profile| to the profile info cache if it hasn't been added yet.
   void AddProfileToCache(Profile* profile);
-
-#if defined(OS_WIN)
-  // Creates a profile desktop shortcut for |profile| if we are in multi
-  // profile mode and the shortcut has not been created before.
-  void CreateDesktopShortcut(Profile* profile);
-#endif
 
   // Initializes user prefs of |profile|. This includes profile name and
   // avatar values
@@ -308,11 +299,8 @@ class ProfileManager : public base::NonThreadSafe,
   // if it has not been explicitly deleted.
   scoped_ptr<ProfileInfoCache> profile_info_cache_;
 
-#if defined(OS_WIN)
-  // Manages the creation, deletion, and renaming of Windows shortcuts by
-  // observing the ProfileInfoCache.
-  scoped_ptr<ProfileShortcutManagerWin> profile_shortcut_manager_;
-#endif
+  // Manages the process of creating, deleteing and updating Desktop shortcuts.
+  scoped_ptr<ProfileShortcutManager> profile_shortcut_manager_;
 
 #if !defined(OS_ANDROID)
   class BrowserListObserver : public chrome::BrowserListObserver {

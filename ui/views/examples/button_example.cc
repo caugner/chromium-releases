@@ -55,7 +55,7 @@ void ButtonExample::CreateExampleView(View* container) {
   container->AddChildView(image_button_);
 }
 
-void ButtonExample::ButtonPressed(Button* sender, const Event& event) {
+void ButtonExample::ButtonPressed(Button* sender, const ui::Event& event) {
   PrintStatus("Pressed! count: %d", ++count_);
 
   if (event.IsControlDown()) {
@@ -76,6 +76,9 @@ void ButtonExample::ButtonPressed(Button* sender, const Event& event) {
             break;
           case TextButton::ICON_ON_RIGHT:
             text_button_->set_icon_placement(TextButton::ICON_ON_LEFT);
+            break;
+          case TextButton::ICON_CENTERED:
+            // Do nothing.
             break;
         }
       }

@@ -13,9 +13,9 @@
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "base/time.h"
+#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -116,15 +116,30 @@ class BrowsingDataRemover : public content::NotificationObserver,
     virtual ~Observer() {}
   };
 
-  // Creates a BrowsingDataRemover to remove browser data from the specified
-  // profile in the specified time range. Use Remove to initiate the removal.
-  BrowsingDataRemover(Profile* profile, base::Time delete_begin,
-                      base::Time delete_end);
+  // Creates a BrowsingDataRemover object that removes data regardless of the
+  // time it was last modified. Returns a raw pointer, as BrowsingDataRemover
+  // retains ownership of itself, and deletes itself once finished.
+  static BrowsingDataRemover* CreateForUnboundedRange(Profile* profile);
 
-  // Creates a BrowsingDataRemover to remove browser data from the specified
-  // profile in the specified time range.
-  BrowsingDataRemover(Profile* profile, TimePeriod time_period,
-                      base::Time delete_end);
+  // Creates a BrowsingDataRemover object bound on both sides by a time. Returns
+  // a raw pointer, as BrowsingDataRemover retains ownership of itself, and
+  // deletes itself once finished.
+  static BrowsingDataRemover* CreateForRange(Profile* profile,
+                                             base::Time delete_begin,
+                                             base::Time delete_end);
+
+  // Creates a BrowsingDataRemover bound to a specific period of time (as
+  // defined via a TimePeriod). Returns a raw pointer, as BrowsingDataRemover
+  // retains ownership of itself, and deletes itself once finished.
+  static BrowsingDataRemover* CreateForPeriod(Profile* profile,
+                                              TimePeriod period);
+
+  // Quota managed data uses a different bitmask for types than
+  // BrowsingDataRemover uses. This method generates that mask.
+  static int GenerateQuotaClientMask(int remove_mask);
+
+  // Is the BrowsingDataRemover currently in the process of removing data?
+  static bool is_removing() { return is_removing_; }
 
   // Removes the specified items related to browsing for all origins that match
   // the provided |origin_set_mask| (see BrowsingDataHelper::OriginSetMask).
@@ -136,14 +151,8 @@ class BrowsingDataRemover : public content::NotificationObserver,
   // Called when history deletion is done.
   void OnHistoryDeletionDone();
 
-  // Quota managed data uses a different bitmask for types than
-  // BrowsingDataRemover uses. This method generates that mask.
-  static int GenerateQuotaClientMask(int remove_mask);
-
   // Used for testing.
   void OverrideQuotaManagerForTesting(quota::QuotaManager* quota_manager);
-
-  static bool is_removing() { return removing_; }
 
  private:
   // The clear API needs to be able to toggle removing_ in order to test that
@@ -164,8 +173,22 @@ class BrowsingDataRemover : public content::NotificationObserver,
     STATE_CREATE_MEDIA,
     STATE_DELETE_MAIN,
     STATE_DELETE_MEDIA,
+    STATE_DELETE_EXPERIMENT,
     STATE_DONE
   };
+
+  // Calculate the begin time for the deletion range specified by |time_period|.
+  static base::Time CalculateBeginDeleteTime(TimePeriod time_period);
+
+  // Setter for |is_removing_|; DCHECKs that we can only start removing if we're
+  // not already removing, and vice-versa.
+  static void set_removing(bool is_removing);
+
+  // Creates a BrowsingDataRemover to remove browser data from the specified
+  // profile in the specified time range. Use Remove to initiate the removal.
+  BrowsingDataRemover(Profile* profile,
+                      base::Time delete_begin,
+                      base::Time delete_end);
 
   // BrowsingDataRemover deletes itself (using DeleteHelper) and is not supposed
   // to be deleted by other objects so make destructor private and DeleteHelper
@@ -279,15 +302,15 @@ class BrowsingDataRemover : public content::NotificationObserver,
   // NotifyAndDeleteIfDone.
   void OnClearedServerBoundCerts();
 
-  // Calculate the begin time for the deletion range specified by |time_period|.
-  base::Time CalculateBeginDeleteTime(TimePeriod time_period);
+  // Callback on the DB thread so that we can wait for the form data to be
+  // cleared.
+  void FormDataDBThreadHop();
+
+  // Callback from the above method.
+  void OnClearedFormData();
 
   // Returns true if we're all done.
   bool AllDone();
-
-  // Setter for removing_; DCHECKs that we can only start removing if we're not
-  // already removing, and vice-versa.
-  static void set_removing(bool removing);
 
   content::NotificationRegistrar registrar_;
 
@@ -311,7 +334,7 @@ class BrowsingDataRemover : public content::NotificationObserver,
   base::Time delete_end_;
 
   // True if Remove has been invoked.
-  static bool removing_;
+  static bool is_removing_;
 
   CacheState next_cache_state_;
   disk_cache::Backend* cache_;
@@ -341,6 +364,7 @@ class BrowsingDataRemover : public content::NotificationObserver,
   bool waiting_for_clear_plugin_data_;
   bool waiting_for_clear_quota_managed_data_;
   bool waiting_for_clear_content_licenses_;
+  bool waiting_for_clear_form_;
 
   // Tracking how many origins need to be deleted, and whether we're finished
   // gathering origins.

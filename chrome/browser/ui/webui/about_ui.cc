@@ -18,11 +18,13 @@
 #include "base/json/json_writer.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/metrics/stats_table.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
@@ -44,7 +46,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -53,8 +55,10 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/process_type.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -66,9 +70,9 @@
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "v8/include/v8.h"
-#include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/webplugininfo.h"
+#include "webkit/user_agent/user_agent_util.h"
 
 #if defined(ENABLE_THEMES)
 #include "chrome/browser/ui/webui/theme_source.h"
@@ -1110,6 +1114,9 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   }
   ChromeWebUIDataSource::SetFontAndTextDirection(localized_strings);
 
+  localized_strings->SetString("variations_name",
+      l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_VARIATIONS));
+
   std::string data;
   jstemplate_builder::AppendJsonJS(localized_strings, &data);
   return data;
@@ -1289,6 +1296,70 @@ void ChromeOSAboutVersionHandler::OnVersion(
 
 #endif
 
+class VersionDOMHandler : public content::WebUIMessageHandler {
+ public:
+  VersionDOMHandler();
+  virtual ~VersionDOMHandler();
+
+  // content::WebUIMessageHandler implementation.
+  virtual void RegisterMessages() OVERRIDE;
+
+  // Callback for the "requestVariationsList" message. This requests the list of
+  // variations from the client and sends it to the frontend.
+  void HandleRequestVariationsList(const ListValue* args);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(VersionDOMHandler);
+};
+
+VersionDOMHandler::VersionDOMHandler() {
+}
+
+VersionDOMHandler::~VersionDOMHandler() {
+}
+
+void VersionDOMHandler::RegisterMessages() {
+  web_ui()->RegisterMessageCallback(
+      "requestVariationsList",
+      base::Bind(&VersionDOMHandler::HandleRequestVariationsList,
+      base::Unretained(this)));
+}
+
+void VersionDOMHandler::HandleRequestVariationsList(const ListValue* args) {
+  scoped_ptr<ListValue> variations_list(new ListValue());
+  std::vector<std::string> variations;
+#if !defined(NDEBUG)
+  std::string variation_state;
+  base::FieldTrialList::StatesToString(&variation_state);
+
+  std::vector<std::string> tokens;
+  base::SplitString(variation_state,
+                    base::FieldTrialList::kPersistentStringSeparator,
+                    &tokens);
+  // Since StatesToString appends a separator at the end, SplitString will
+  // append an extra empty string in the vector. Drop it. There should
+  // always be an even number of tokens left.
+  tokens.pop_back();
+  DCHECK_EQ(0U, tokens.size() % 2);
+  for (size_t i = 0; i < tokens.size(); i += 2)
+    variations.push_back(tokens[i] + ":" + tokens[i + 1]);
+#else
+  // In release mode, display the hashes only.
+  std::vector<string16> selected_groups;
+  chrome_variations::GetFieldTrialSelectedGroupIdsAsStrings(&selected_groups);
+  for (size_t i = 0; i < selected_groups.size(); ++i)
+    variations.push_back(UTF16ToASCII(selected_groups[i]));
+#endif
+
+  for (std::vector<std::string>::const_iterator it = variations.begin();
+      it != variations.end(); ++it) {
+    variations_list->Append(Value::CreateStringValue(*it));
+  }
+
+  web_ui()->CallJavascriptFunction("returnVariationsList",
+                                   *variations_list.release());
+}
+
 }  // namespace
 
 // AboutUIHTMLSource ----------------------------------------------------------
@@ -1396,6 +1467,8 @@ AboutUI::AboutUI(content::WebUI* web_ui, const std::string& name)
   ThemeSource* theme = new ThemeSource(profile);
   ChromeURLDataManager::AddDataSource(profile, theme);
 #endif
+
+  web_ui->AddMessageHandler(new VersionDOMHandler());
 
   ChromeURLDataManager::DataSource* source =
       new AboutUIHTMLSource(name, profile);

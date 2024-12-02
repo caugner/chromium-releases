@@ -15,7 +15,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_metrics.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -25,7 +24,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/gaia/gaia_auth_util.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
@@ -33,6 +31,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "grit/generated_resources.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store.h"
@@ -72,6 +71,8 @@ LoginPerformer::~LoginPerformer() {
   DVLOG(1) << "Deleting LoginPerformer";
   DCHECK(default_performer_ != NULL) << "Default instance should exist.";
   default_performer_ = NULL;
+  if (authenticator_)
+    authenticator_->SetConsumer(NULL);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -123,7 +124,6 @@ void LoginPerformer::OnLoginFailure(const LoginFailure& failure) {
 void LoginPerformer::OnDemoUserLoginSuccess() {
   content::RecordAction(
       UserMetricsAction("Login_DemoUserLoginSuccess"));
-  KioskModeMetrics::Get()->SessionStarted();
 
   LoginStatusConsumer::OnDemoUserLoginSuccess();
 }
@@ -260,9 +260,10 @@ void LoginPerformer::Observe(int type,
 
 ////////////////////////////////////////////////////////////////////////////////
 // LoginPerformer, public:
-void LoginPerformer::CompleteLogin(const std::string& username,
-                                   const std::string& password) {
-  auth_mode_ = AUTH_MODE_EXTENSION;
+void LoginPerformer::PerformLogin(const std::string& username,
+                                  const std::string& password,
+                                  AuthorizationMode auth_mode) {
+  auth_mode_ = auth_mode;
   username_ = username;
   password_ = password;
 
@@ -273,9 +274,9 @@ void LoginPerformer::CompleteLogin(const std::string& username,
   if (!ScreenLocker::default_screen_locker()) {
     CrosSettingsProvider::TrustedStatus status =
         cros_settings->PrepareTrustedValues(
-            base::Bind(&LoginPerformer::CompleteLogin,
+            base::Bind(&LoginPerformer::PerformLogin,
                        weak_factory_.GetWeakPtr(),
-                       username, password));
+                       username, password, auth_mode));
     // Must not proceed without signature verification.
     if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
       if (delegate_)
@@ -293,50 +294,14 @@ void LoginPerformer::CompleteLogin(const std::string& username,
   bool is_whitelisted = LoginUtils::IsWhitelisted(
       gaia::CanonicalizeEmail(username));
   if (ScreenLocker::default_screen_locker() || is_whitelisted) {
-    // Starts authentication if guest login is allowed or online auth pending.
-    StartLoginCompletion();
-  } else {
-    if (delegate_)
-      delegate_->WhiteListCheckFailed(username);
-    else
-      NOTREACHED();
-  }
-}
-
-void LoginPerformer::Login(const std::string& username,
-                           const std::string& password) {
-  auth_mode_ = AUTH_MODE_INTERNAL;
-  username_ = username;
-  password_ = password;
-
-  CrosSettings* cros_settings = CrosSettings::Get();
-
-  // Whitelist check is always performed during initial login and
-  // should not be performed when ScreenLock is active (pending online auth).
-  if (!ScreenLocker::default_screen_locker()) {
-    CrosSettingsProvider::TrustedStatus status =
-        cros_settings->PrepareTrustedValues(
-            base::Bind(&LoginPerformer::Login,
-                       weak_factory_.GetWeakPtr(),
-                       username, password));
-    // Must not proceed without signature verification.
-    if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
-      if (delegate_)
-        delegate_->PolicyLoadFailed();
-      else
-        NOTREACHED();
-      return;
-    } else if (status != CrosSettingsProvider::TRUSTED) {
-      // Value of AllowNewUser setting is still not verified.
-      // Another attempt will be invoked after verification completion.
-      return;
+    switch (auth_mode_) {
+      case AUTH_MODE_EXTENSION:
+        StartLoginCompletion();
+        break;
+      case AUTH_MODE_INTERNAL:
+        StartAuthentication();
+        break;
     }
-  }
-
-  bool is_whitelisted = LoginUtils::IsWhitelisted(username);
-  if (ScreenLocker::default_screen_locker() || is_whitelisted) {
-    // Starts authentication if guest login is allowed or online auth pending.
-    StartAuthentication();
   } else {
     if (delegate_)
       delegate_->WhiteListCheckFailed(username);

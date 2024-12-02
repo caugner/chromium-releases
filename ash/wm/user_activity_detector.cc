@@ -6,15 +6,13 @@
 
 #include "ash/wm/property_util.h"
 #include "ash/wm/user_activity_observer.h"
-#include "ash/wm/window_util.h"
-#include "ui/aura/event.h"
-#include "ui/aura/window.h"
+#include "ui/base/events/event.h"
 
 namespace ash {
 
 const double UserActivityDetector::kNotifyIntervalMs = 200.0;
 
-UserActivityDetector::UserActivityDetector() {
+UserActivityDetector::UserActivityDetector() : ignore_next_mouse_event_(false) {
 }
 
 UserActivityDetector::~UserActivityDetector() {
@@ -32,41 +30,38 @@ void UserActivityDetector::RemoveObserver(UserActivityObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
+void UserActivityDetector::OnAllOutputsTurnedOff() {
+  ignore_next_mouse_event_ = true;
+}
+
 bool UserActivityDetector::PreHandleKeyEvent(aura::Window* target,
-                                             aura::KeyEvent* event) {
-  // Ignore input events on secondary displays in non extended desktop
-  // mode.  Remove this once this mode is gone. crbug.com/135245.
-  if (!GetRootWindowController(target->GetRootWindow()))
-    return true;
+                                             ui::KeyEvent* event) {
   MaybeNotify();
   return false;
 }
 
 bool UserActivityDetector::PreHandleMouseEvent(aura::Window* target,
-                                               aura::MouseEvent* event) {
-  if (!GetRootWindowController(target->GetRootWindow()))
-    return true;
-  if (!(event->flags() & ui::EF_IS_SYNTHESIZED))
+                                               ui::MouseEvent* event) {
+  VLOG_IF(1, ignore_next_mouse_event_) << "ignoring mouse event";
+  if (!(event->flags() & ui::EF_IS_SYNTHESIZED) &&
+      !ignore_next_mouse_event_)
     MaybeNotify();
+  ignore_next_mouse_event_ = false;
   return false;
 }
 
 ui::TouchStatus UserActivityDetector::PreHandleTouchEvent(
     aura::Window* target,
-    aura::TouchEvent* event) {
-  if (!GetRootWindowController(target->GetRootWindow()))
-    return ui::TOUCH_STATUS_END;
+    ui::TouchEvent* event) {
   MaybeNotify();
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus UserActivityDetector::PreHandleGestureEvent(
+ui::EventResult UserActivityDetector::PreHandleGestureEvent(
     aura::Window* target,
-    aura::GestureEvent* event) {
-  if (!GetRootWindowController(target->GetRootWindow()))
-    return ui::GESTURE_STATUS_CONSUMED;
+    ui::GestureEvent* event) {
   MaybeNotify();
-  return ui::GESTURE_STATUS_UNKNOWN;
+  return ui::ER_UNHANDLED;
 }
 
 void UserActivityDetector::MaybeNotify() {

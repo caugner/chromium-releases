@@ -12,7 +12,7 @@
 #include "ui/base/ui_base_paths.h"
 #include "ui/gfx/gfx_paths.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 #include "base/mac/bundle_locations.h"
 #endif
 
@@ -27,7 +27,7 @@ void UITestSuite::Initialize() {
   ui::RegisterPathProvider();
   gfx::RegisterPathProvider();
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
   // Look in the framework bundle for resources.
   // TODO(port): make a resource bundle for non-app exes.  What's done here
   // isn't really right because this code needs to depend on chrome_dll
@@ -44,10 +44,14 @@ void UITestSuite::Initialize() {
   base::mac::SetOverrideFrameworkBundlePath(path);
 #elif defined(OS_POSIX)
   FilePath pak_dir;
+#if defined(OS_ANDROID)
+  PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &pak_dir);
+#else
   PathService::Get(base::DIR_MODULE, &pak_dir);
   pak_dir = pak_dir.AppendASCII("ui_unittests_strings");
   PathService::Override(ui::DIR_LOCALES, pak_dir);
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_ANDROID)
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
   // Force unittests to run using en-US so if we test against string
   // output, it'll pass regardless of the system language.
@@ -55,7 +59,7 @@ void UITestSuite::Initialize() {
 
 #if !defined(OS_MACOSX) && defined(OS_POSIX)
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-      pak_dir.AppendASCII("ui_resources_100_percent.pak"),
+      pak_dir.AppendASCII("chrome_100_percent.pak"),
       ui::SCALE_FACTOR_100P);
 #endif
 }
@@ -63,7 +67,7 @@ void UITestSuite::Initialize() {
 void UITestSuite::Shutdown() {
   ui::ResourceBundle::CleanupSharedInstance();
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
   base::mac::SetOverrideFrameworkBundle(NULL);
 #endif
   base::TestSuite::Shutdown();

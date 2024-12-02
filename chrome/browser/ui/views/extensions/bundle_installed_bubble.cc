@@ -33,11 +33,7 @@ const int kColumnSetId = 0;
 const int kLeftColumnWidth = 325;
 
 // Heading font size correction.
-#if defined(CROS_FONTS_USING_BCI)
-const int kHeadingFontSizeDelta = 0;
-#else
 const int kHeadingFontSizeDelta = 1;
-#endif
 
 class BundleInstalledBubble : public views::BubbleDelegateView,
                               public views::ButtonListener {
@@ -152,7 +148,7 @@ class BundleInstalledBubble : public views::BubbleDelegateView,
 
   // views::ButtonListener implementation:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE {
+                             const ui::Event& event) OVERRIDE {
     StartFade(false);
   }
 

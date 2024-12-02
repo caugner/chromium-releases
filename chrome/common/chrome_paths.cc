@@ -31,6 +31,10 @@ const FilePath::CharType kInternalFlashPluginFileName[] =
     FILE_PATH_LITERAL("libgcflashplayer.so");
 #endif
 
+// The Pepper Flash plugins are in a directory with this name.
+const FilePath::CharType kPepperFlashBaseDirectory[] =
+    FILE_PATH_LITERAL("PepperFlash");
+
 // File name of the internal PDF plugin on different platforms.
 const FilePath::CharType kInternalPDFPluginFileName[] =
 #if defined(OS_WIN)
@@ -71,7 +75,7 @@ const FilePath::CharType kGTalkPluginFileName[] =
 
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX)
 // The path to the external extension <id>.json files.
 // /usr/share seems like a good choice, see: http://www.pathname.com/fhs/
 const char kFilepathSinglePrefExtensions[] =
@@ -80,7 +84,16 @@ const char kFilepathSinglePrefExtensions[] =
 #else
     FILE_PATH_LITERAL("/usr/share/chromium/extensions");
 #endif  // defined(GOOGLE_CHROME_BUILD)
-#endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#endif  // defined(OS_LINUX)
+
+#if defined(OS_CHROMEOS)
+const char kDefaultAppOrderFileName[] =
+#if defined(GOOGLE_CHROME_BUILD)
+    FILE_PATH_LITERAL("/usr/share/google-chrome/default_app_order.json");
+#else
+    FILE_PATH_LITERAL("/usr/share/chromium/default_app_order.json");
+#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // defined(OS_CHROMEOS)
 
 }  // namespace
 
@@ -163,8 +176,16 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       create_dir = true;
       break;
+    case chrome::DIR_USER_MUSIC:
+      if (!GetUserMusicDirectory(&cur))
+        return false;
+      break;
     case chrome::DIR_USER_PICTURES:
       if (!GetUserPicturesDirectory(&cur))
+        return false;
+      break;
+    case chrome::DIR_USER_VIDEOS:
+      if (!GetUserVideosDirectory(&cur))
         return false;
       break;
     case chrome::DIR_DEFAULT_DOWNLOADS_SAFE:
@@ -242,7 +263,12 @@ bool PathProvider(int key, FilePath* result) {
     case chrome::DIR_PEPPER_FLASH_PLUGIN:
       if (!GetInternalPluginsDirectory(&cur))
         return false;
-      cur = cur.Append(FILE_PATH_LITERAL("PepperFlash"));
+      cur = cur.Append(kPepperFlashBaseDirectory);
+      break;
+    case chrome::DIR_COMPONENT_UPDATED_PEPPER_FLASH_PLUGIN:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(kPepperFlashBaseDirectory);
       break;
     case chrome::FILE_LOCAL_STATE:
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
@@ -338,6 +364,9 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("wallpapers"));
       break;
+    case chrome::FILE_DEFAULT_APP_ORDER:
+      cur = FilePath(FILE_PATH_LITERAL(kDefaultAppOrderFileName));
+      break;
 #endif
     // The following are only valid in the development environment, and
     // will fail if executed from an installed executable (because the
@@ -399,7 +428,7 @@ bool PathProvider(int key, FilePath* result) {
       break;
     }
 #endif
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX)
     case chrome::DIR_STANDALONE_EXTERNAL_EXTENSIONS: {
       cur = FilePath(FILE_PATH_LITERAL(kFilepathSinglePrefExtensions));
       break;

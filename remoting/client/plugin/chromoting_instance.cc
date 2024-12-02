@@ -23,6 +23,7 @@
 #include "media/base/media.h"
 #include "net/socket/ssl_server_socket.h"
 #include "ppapi/cpp/completion_callback.h"
+#include "ppapi/cpp/dev/url_util_dev.h"
 #include "ppapi/cpp/input_event.h"
 #include "ppapi/cpp/mouse_cursor.h"
 #include "ppapi/cpp/rect.h"
@@ -39,9 +40,7 @@
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/host_stub.h"
-#include "remoting/protocol/input_event_tracker.h"
 #include "remoting/protocol/libjingle_transport_factory.h"
-#include "remoting/protocol/mouse_input_filter.h"
 
 // Windows defines 'PostMessage', so we have to undef it.
 #if defined(PostMessage)
@@ -56,6 +55,9 @@ namespace {
 const int kBytesPerPixel = 4;
 
 const int kPerfStatsIntervalMs = 1000;
+
+// URL scheme used by Chrome apps and extensions.
+const char kChromeExtensionUrlScheme[] = "chrome-extension";
 
 std::string ConnectionStateToString(protocol::ConnectionToHost::State state) {
   // Values returned by this function must match the
@@ -155,6 +157,16 @@ ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
       plugin_task_runner_(
           new PluginThreadTaskRunner(&plugin_thread_delegate_)),
       context_(plugin_task_runner_),
+      input_tracker_(&mouse_input_filter_),
+#if defined(OS_MACOSX)
+      // On Mac we need an extra filter to inject missing keyup events.
+      // See remoting/client/plugin/mac_key_event_processor.h for more details.
+      mac_key_event_processor_(&input_tracker_),
+      key_mapper_(&mac_key_event_processor_),
+#else
+      key_mapper_(&input_tracker_),
+#endif
+      input_handler_(&key_mapper_),
       weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   RequestInputEvents(PP_INPUTEVENT_CLASS_MOUSE | PP_INPUTEVENT_CLASS_WHEEL);
   RequestFilteringInputEvents(PP_INPUTEVENT_CLASS_KEYBOARD);
@@ -209,6 +221,12 @@ bool ChromotingInstance::Init(uint32_t argc,
     return false;
   }
 
+  // Check that the calling content is part of an app or extension.
+  if (!IsCallerAppOrExtension()) {
+    LOG(ERROR) << "Not an app or extension";
+    return false;
+  }
+
   // Enable support for SSL server sockets, which must be done as early as
   // possible, preferably before any NSS SSL sockets (client or server) have
   // been created.
@@ -224,8 +242,9 @@ bool ChromotingInstance::Init(uint32_t argc,
   // PepperView with a ref-counted proxy object.
   scoped_refptr<FrameConsumerProxy> consumer_proxy =
       new FrameConsumerProxy(plugin_task_runner_);
-  rectangle_decoder_ = new RectangleUpdateDecoder(
-      context_.decode_task_runner(), consumer_proxy);
+  rectangle_decoder_ = new RectangleUpdateDecoder(context_.main_task_runner(),
+                                                  context_.decode_task_runner(),
+                                                  consumer_proxy);
   view_.reset(new PepperView(this, &context_, rectangle_decoder_.get()));
   consumer_proxy->Attach(view_->AsWeakPtr());
 
@@ -290,8 +309,6 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
     protocol::KeyEvent event;
     event.set_usb_keycode(usb_keycode);
     event.set_pressed(is_pressed);
-    // Even though new hosts will ignore keycode, it's a required field.
-    event.set_keycode(0);
     InjectKeyEvent(event);
   } else if (method == "remapKey") {
     int from_keycode = 0;
@@ -346,9 +363,7 @@ void ChromotingInstance::DidChangeView(const pp::View& view) {
 
   view_->SetView(view);
 
-  if (mouse_input_filter_.get()) {
-    mouse_input_filter_->set_input_size(view_->get_view_size_dips());
-  }
+  mouse_input_filter_.set_input_size(view_->get_view_size_dips());
 }
 
 bool ChromotingInstance::HandleInputEvent(const pp::InputEvent& event) {
@@ -359,11 +374,9 @@ bool ChromotingInstance::HandleInputEvent(const pp::InputEvent& event) {
 
   // TODO(wez): When we have a good hook into Host dimensions changes, move
   // this there.
-  // If |input_handler_| is valid, then |mouse_input_filter_| must also be
-  // since they are constructed together as part of the input pipeline
-  mouse_input_filter_->set_output_size(view_->get_screen_size());
+  mouse_input_filter_.set_output_size(view_->get_screen_size());
 
-  return input_handler_->HandleInputEvent(event);
+  return input_handler_.HandleInputEvent(event);
 }
 
 void ChromotingInstance::SetDesktopSize(const SkISize& size,
@@ -467,7 +480,7 @@ void ChromotingInstance::OnFirstFrameReceived() {
 void ChromotingInstance::Connect(const ClientConfig& config) {
   DCHECK(plugin_task_runner_->BelongsToCurrentThread());
 
-  jingle_glue::JingleThreadWrapper::EnsureForCurrentThread();
+  jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
 
   host_connection_.reset(new protocol::ConnectionToHost(true));
   scoped_ptr<AudioPlayer> audio_player(new PepperAudioPlayer(this));
@@ -476,24 +489,9 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
                                      rectangle_decoder_.get(),
                                      audio_player.Pass()));
 
-  // Construct the input pipeline
-  mouse_input_filter_.reset(
-      new protocol::MouseInputFilter(host_connection_->input_stub()));
-  mouse_input_filter_->set_input_size(view_->get_view_size_dips());
-  input_tracker_.reset(
-      new protocol::InputEventTracker(mouse_input_filter_.get()));
-
-#if defined(OS_MACOSX)
-  // On Mac we need an extra filter to inject missing keyup events.
-  // See remoting/client/plugin/mac_key_event_processor.h for more details.
-  mac_key_event_processor_.reset(
-      new MacKeyEventProcessor(input_tracker_.get()));
-  key_mapper_.set_input_stub(mac_key_event_processor_.get());
-#else
-  key_mapper_.set_input_stub(input_tracker_.get());
-#endif
-  input_handler_.reset(
-      new PepperInputHandler(&key_mapper_));
+  // Connect the input pipeline to the protocol stub & initialize components.
+  mouse_input_filter_.set_input_stub(host_connection_->input_stub());
+  mouse_input_filter_.set_input_size(view_->get_view_size_dips());
 
   LOG(INFO) << "Connecting to " << config.host_jid
             << ". Local jid: " << config.local_jid << ".";
@@ -533,9 +531,8 @@ void ChromotingInstance::Disconnect() {
     client_.reset();
   }
 
-  input_handler_.reset();
-  input_tracker_.reset();
-  mouse_input_filter_.reset();
+  // Disconnect the input pipeline and teardown the connection.
+  mouse_input_filter_.set_input_stub(NULL);
   host_connection_.reset();
 }
 
@@ -545,13 +542,13 @@ void ChromotingInstance::OnIncomingIq(const std::string& iq) {
 
 void ChromotingInstance::ReleaseAllKeys() {
   if (IsConnected())
-    input_tracker_->ReleaseAll();
+    input_tracker_.ReleaseAll();
 }
 
 void ChromotingInstance::InjectKeyEvent(const protocol::KeyEvent& event) {
   // Inject after the KeyEventMapper, so the event won't get mapped or trapped.
   if (IsConnected())
-    input_tracker_->InjectKeyEvent(event);
+    input_tracker_.InjectKeyEvent(event);
 }
 
 void ChromotingInstance::RemapKey(uint32 in_usb_keycode,
@@ -745,6 +742,22 @@ void ChromotingInstance::ProcessLogToUI(const std::string& message) {
   data->SetString("message", message);
   PostChromotingMessage("logDebugMessage", data.Pass());
   g_logging_to_plugin = false;
+}
+
+bool ChromotingInstance::IsCallerAppOrExtension() {
+  const pp::URLUtil_Dev* url_util = pp::URLUtil_Dev::Get();
+  if (!url_util)
+    return false;
+
+  PP_URLComponents_Dev url_components;
+  pp::Var url_var = url_util->GetDocumentURL(this, &url_components);
+  if (!url_var.is_string())
+    return false;
+
+  std::string url = url_var.AsString();
+  std::string url_scheme = url.substr(url_components.scheme.begin,
+                                      url_components.scheme.len);
+  return url_scheme == kChromeExtensionUrlScheme;
 }
 
 bool ChromotingInstance::IsConnected() {

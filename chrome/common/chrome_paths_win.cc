@@ -10,11 +10,13 @@
 #include <shlobj.h>
 #include <shobjidl.h>
 
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "base/win/metro.h"
 #include "base/win/scoped_co_mem.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "content/public/common/content_switches.h"
 
@@ -29,9 +31,34 @@ bool GetUserDataDirectoryForEnvironment(bool current, FilePath* result) {
     return false;
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   *result = result->Append(dist->GetInstallSubDir());
-  if (base::win::IsMetroProcess() ? current : !current)
+
+  // TODO(rsimha): Continue to return the "Metro" subdirectory to allow testing
+  // of sync credential caching in the presence of strange singleton mode.
+  // Delete this block before shipping. See http://crbug.com/144280.
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if ((command_line->HasSwitch(switches::kEnableSyncCredentialCaching)) &&
+      (base::win::IsMetroProcess() ? current : !current)) {
     *result = result->Append(kMetroChromeUserDataSubDir);
+  }
+
   *result = result->Append(chrome::kUserDataDirname);
+  return true;
+}
+
+// Generic function to call SHGetFolderPath().
+bool GetUserDirectory(int csidl_folder, FilePath* result) {
+  // We need to go compute the value. It would be nice to support paths
+  // with names longer than MAX_PATH, but the system functions don't seem
+  // to be designed for it either, with the exception of GetTempPath
+  // (but other things will surely break if the temp path is too long,
+  // so we don't bother handling it.
+  wchar_t path_buf[MAX_PATH];
+  path_buf[0] = 0;
+  if (FAILED(SHGetFolderPath(NULL, csidl_folder, NULL,
+                             SHGFP_TYPE_CURRENT, path_buf))) {
+    return false;
+  }
+  *result = FilePath(path_buf);
   return true;
 }
 
@@ -61,12 +88,7 @@ void GetUserCacheDirectory(const FilePath& profile_dir, FilePath* result) {
 }
 
 bool GetUserDocumentsDirectory(FilePath* result) {
-  wchar_t path_buf[MAX_PATH];
-  if (FAILED(SHGetFolderPath(NULL, CSIDL_MYDOCUMENTS, NULL,
-                             SHGFP_TYPE_CURRENT, path_buf)))
-    return false;
-  *result = FilePath(path_buf);
-  return true;
+  return GetUserDirectory(CSIDL_MYDOCUMENTS, result);
 }
 
 // Return a default path for downloads that is safe.
@@ -97,30 +119,20 @@ bool GetUserDownloadsDirectory(FilePath* result) {
   return GetUserDownloadsDirectorySafe(result);
 }
 
+bool GetUserMusicDirectory(FilePath* result) {
+  return GetUserDirectory(CSIDL_MYMUSIC, result);
+}
+
 bool GetUserPicturesDirectory(FilePath* result) {
-  wchar_t path_buf[MAX_PATH];
-  if (FAILED(SHGetFolderPath(NULL, CSIDL_MYPICTURES, NULL,
-                             SHGFP_TYPE_CURRENT, path_buf))) {
-    return false;
-  }
-  *result = FilePath(path_buf);
-  return true;
+  return GetUserDirectory(CSIDL_MYPICTURES, result);
+}
+
+bool GetUserVideosDirectory(FilePath* result) {
+  return GetUserDirectory(CSIDL_MYVIDEO, result);
 }
 
 bool GetUserDesktop(FilePath* result) {
-  // We need to go compute the value. It would be nice to support paths
-  // with names longer than MAX_PATH, but the system functions don't seem
-  // to be designed for it either, with the exception of GetTempPath
-  // (but other things will surely break if the temp path is too long,
-  // so we don't bother handling it.
-  wchar_t system_buffer[MAX_PATH];
-  system_buffer[0] = 0;
-  if (FAILED(SHGetFolderPath(NULL, CSIDL_DESKTOPDIRECTORY, NULL,
-                             SHGFP_TYPE_CURRENT, system_buffer))) {
-    return false;
-  }
-  *result = FilePath(system_buffer);
-  return true;
+  return GetUserDirectory(CSIDL_DESKTOPDIRECTORY, result);
 }
 
 bool ProcessNeedsProfileDir(const std::string& process_type) {

@@ -8,9 +8,13 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "chrome/browser/chrome_page_zoom.h"
+#include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/prefs/prefs_tab_helper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -26,7 +30,7 @@
 #include "ui/gfx/image/image.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
 
 using content::UserMetricsAction;
@@ -47,26 +51,51 @@ void PanelHost::Init(const GURL& url) {
 
   web_contents_.reset(content::WebContents::Create(
       profile_, content::SiteInstance::CreateForURL(profile_, url),
-      MSG_ROUTING_NONE, NULL, NULL));
+      MSG_ROUTING_NONE, NULL));
   chrome::SetViewType(web_contents_.get(), chrome::VIEW_TYPE_PANEL);
   web_contents_->SetDelegate(this);
   content::WebContentsObserver::Observe(web_contents_.get());
 
   favicon_tab_helper_.reset(new FaviconTabHelper(web_contents_.get()));
+  prefs_tab_helper_.reset(new PrefsTabHelper(web_contents_.get()));
 
   web_contents_->GetController().LoadURL(
       url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
 }
 
 void PanelHost::DestroyWebContents() {
-  web_contents_.reset();
   favicon_tab_helper_.reset();
+  prefs_tab_helper_.reset();
+  web_contents_.reset();
 }
 
-SkBitmap PanelHost::GetPageIcon() const {
-  // TODO: Make this function return gfx::Image.
+gfx::Image PanelHost::GetPageIcon() const {
   return favicon_tab_helper_.get() ?
-      favicon_tab_helper_->GetFavicon().AsBitmap() : SkBitmap();
+      favicon_tab_helper_->GetFavicon() : gfx::Image();
+}
+
+content::WebContents* PanelHost::OpenURLFromTab(
+    content::WebContents* source,
+    const content::OpenURLParams& params) {
+  // These dispositions aren't really navigations.
+  if (params.disposition == SUPPRESS_OPEN ||
+      params.disposition == SAVE_TO_DISK ||
+      params.disposition == IGNORE_ACTION)
+    return NULL;
+
+  // Only allow clicks on links.
+  if (params.transition != content::PAGE_TRANSITION_LINK)
+    return NULL;
+
+  // Force all links to open in a new tab.
+  chrome::NavigateParams navigate_params(profile_,
+                                         params.url,
+                                         params.transition);
+  navigate_params.disposition = params.disposition == NEW_BACKGROUND_TAB ?
+      params.disposition : NEW_FOREGROUND_TAB;
+  chrome::Navigate(&navigate_params);
+  return navigate_params.target_contents ?
+      navigate_params.target_contents->web_contents() : NULL;
 }
 
 void PanelHost::NavigationStateChanged(const content::WebContents* source,
@@ -77,6 +106,32 @@ void PanelHost::NavigationStateChanged(const content::WebContents* source,
       ((changed_flags & content::INVALIDATE_TYPE_TITLE) &&
        !source->IsLoading()))
     panel_->UpdateTitleBar();
+}
+
+void PanelHost::AddNewContents(content::WebContents* source,
+                               content::WebContents* new_contents,
+                               WindowOpenDisposition disposition,
+                               const gfx::Rect& initial_pos,
+                               bool user_gesture,
+                               bool* was_blocked) {
+  chrome::NavigateParams navigate_params(profile_, new_contents->GetURL(),
+                                         content::PAGE_TRANSITION_LINK);
+  // Create a TabContents because the NavigateParams takes a TabContents,
+  // not a WebContents, for the target_contents.
+  TabContents* new_tab_contents = TabContents::FromWebContents(new_contents);
+  if (!new_tab_contents)
+    new_tab_contents = TabContents::Factory::CreateTabContents(new_contents);
+  navigate_params.target_contents = new_tab_contents;
+
+  // Force all links to open in a new tab, even if they were trying to open a
+  // window.
+  navigate_params.disposition =
+      disposition == NEW_BACKGROUND_TAB ? disposition : NEW_FOREGROUND_TAB;
+
+  navigate_params.window_bounds = initial_pos;
+  navigate_params.user_gesture = user_gesture;
+  navigate_params.extension_app_id = panel_->extension_id();
+  chrome::Navigate(&navigate_params);
 }
 
 void PanelHost::ActivateContents(content::WebContents* contents) {
@@ -118,6 +173,7 @@ bool PanelHost::HandleContextMenu(const content::ContextMenuParams& params) {
 }
 
 void PanelHost::HandleKeyboardEvent(
+    content::WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
   return panel_->HandleKeyboardEvent(event);
 }
@@ -129,6 +185,12 @@ void PanelHost::WebContentsFocused(content::WebContents* contents) {
 void PanelHost::ResizeDueToAutoResize(content::WebContents* web_contents,
                                       const gfx::Size& new_size) {
   panel_->OnContentsAutoResized(new_size);
+}
+
+void PanelHost::RenderViewCreated(content::RenderViewHost* render_view_host) {
+  extensions::WindowController* window = GetExtensionWindowController();
+  render_view_host->Send(new ExtensionMsg_UpdateBrowserWindowId(
+      render_view_host->GetRoutingID(), window->GetWindowId()));
 }
 
 void PanelHost::RenderViewGone(base::TerminationStatus status) {

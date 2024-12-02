@@ -6,22 +6,29 @@
 #define ASH_WM_WORKSPACE_CONTROLLER_TEST_HELPER_H_
 
 #include "ash/wm/workspace_controller.h"
+#include "ash/wm/workspace/workspace_manager.h"
+#include "ash/wm/workspace/workspace_manager2.h"
 
 namespace ash {
 namespace internal {
 
 class MultiWindowResizeController;
-class WorkspaceEventFilter;
+class WorkspaceEventHandler;
 
 class WorkspaceControllerTestHelper {
  public:
   explicit WorkspaceControllerTestHelper(WorkspaceController* controller);
   ~WorkspaceControllerTestHelper();
 
-  WorkspaceEventFilter* filter() { return controller_->event_filter_; }
+  WorkspaceEventHandler* GetEventHandler();
   MultiWindowResizeController* GetMultiWindowResizeController();
   WorkspaceManager* workspace_manager() {
-    return controller_->workspace_manager_.get();
+    return static_cast<WorkspaceManager*>(
+        controller_->workspace_manager_.get());
+  }
+  WorkspaceManager2* workspace_manager2() {
+    return static_cast<WorkspaceManager2*>(
+        controller_->workspace_manager_.get());
   }
 
  private:

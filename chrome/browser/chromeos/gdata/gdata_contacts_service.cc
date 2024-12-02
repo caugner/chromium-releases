@@ -9,17 +9,21 @@
 #include <map>
 #include <utility>
 
+#include "base/json/json_value_converter.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util.h"
+#include "base/string_util.h"
+#include "base/time.h"
+#include "base/timer.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/contacts/contact.pb.h"
-#include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
-#include "chrome/browser/chromeos/gdata/gdata_operation_runner.h"
-#include "chrome/browser/chromeos/gdata/gdata_operations.h"
-#include "chrome/browser/chromeos/gdata/gdata_params.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/google_apis/gdata_errorcode.h"
+#include "chrome/browser/google_apis/gdata_operations.h"
+#include "chrome/browser/google_apis/gdata_util.h"
+#include "chrome/browser/google_apis/operation_runner.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -28,8 +32,39 @@ namespace gdata {
 
 namespace {
 
-// Maximum number of profile photos that we'll download at once.
-const int kMaxSimultaneousPhotoDownloads = 10;
+// Download outcomes reported via the "Contacts.FullUpdateResult" and
+// "Contacts.IncrementalUpdateResult" histograms.
+enum HistogramResult {
+  HISTOGRAM_RESULT_SUCCESS = 0,
+  HISTOGRAM_RESULT_GROUPS_DOWNLOAD_FAILURE = 1,
+  HISTOGRAM_RESULT_GROUPS_PARSE_FAILURE = 2,
+  HISTOGRAM_RESULT_MY_CONTACTS_GROUP_NOT_FOUND = 3,
+  HISTOGRAM_RESULT_CONTACTS_DOWNLOAD_FAILURE = 4,
+  HISTOGRAM_RESULT_CONTACTS_PARSE_FAILURE = 5,
+  HISTOGRAM_RESULT_PHOTO_DOWNLOAD_FAILURE = 6,
+  HISTOGRAM_RESULT_MAX_VALUE = 7,
+};
+
+// Maximum number of profile photos that we'll download per second.
+// At values above 10, Google starts returning 503 errors.
+const int kMaxPhotoDownloadsPerSecond = 10;
+
+// Give up after seeing more than this many transient errors while trying to
+// download a photo for a single contact.
+const int kMaxTransientPhotoDownloadErrorsPerContact = 2;
+
+// Hardcoded system group ID for the "My Contacts" group, per
+// https://developers.google.com/google-apps/contacts/v3/#contact_group_entry.
+const char kMyContactsSystemGroupId[] = "Contacts";
+
+// Top-level field in a contact groups feed containing the list of entries.
+const char kGroupEntryField[] = "feed.entry";
+
+// Field in group entries containing the system group ID (e.g. ID "Contacts"
+// for the "My Contacts" system group).  See
+// https://developers.google.com/google-apps/contacts/v3/#contact_group_entry
+// for more details.
+const char kSystemGroupIdField[] = "gContact$systemGroup.id";
 
 // Field in the top-level object containing the contacts feed.
 const char kFeedField[] = "feed";
@@ -47,8 +82,10 @@ const char kCategoryTermValue[] =
 // Field in the contacts feed containing a list of contact entries.
 const char kEntryField[] = "entry";
 
-// Top-level fields in contact entries.
+// Field in group and contact entries containing the item's ID.
 const char kIdField[] = "id.$t";
+
+// Top-level fields in contact entries.
 const char kDeletedField[] = "gd$deleted";
 const char kFullNameField[] = "gd$name.gd$fullName.$t";
 const char kGivenNameField[] = "gd$name.gd$givenName.$t";
@@ -108,12 +145,29 @@ const char kLinkETagField[] = "gd$etag";
 const char kLinkRelPhotoValue[] =
     "http://schemas.google.com/contacts/2008/rel#photo";
 
+// OAuth2 scope for the Contacts API.
+const char kContactsScope[] = "https://www.google.com/m8/feeds/";
+
 // Returns a string containing a pretty-printed JSON representation of |value|.
 std::string PrettyPrintValue(const base::Value& value) {
   std::string out;
   base::JSONWriter::WriteWithOptions(
       &value, base::JSONWriter::OPTIONS_PRETTY_PRINT, &out);
   return out;
+}
+
+// Assigns the value at |path| within |dict| to |out|, returning false if the
+// path wasn't present.  Unicode byte order marks are removed from the string.
+bool GetCleanedString(const DictionaryValue& dict,
+                      const std::string& path,
+                      std::string* out) {
+  if (!dict.GetString(path, out))
+    return false;
+
+  // The Unicode byte order mark, U+FEFF, is useless in UTF-8 strings (which are
+  // interpreted one byte at a time).
+  ReplaceSubstringsAfterOffset(out, 0, "\xEF\xBB\xBF", "");
+  return true;
 }
 
 // Returns whether an address is primary, given a dictionary representing a
@@ -142,7 +196,7 @@ void InitAddressType(const DictionaryValue& address_dict,
   else
     type->set_relation(contacts::Contact_AddressType_Relation_OTHER);
 
-  address_dict.GetString(kAddressLabelField, type->mutable_label());
+  GetCleanedString(address_dict, kAddressLabelField, type->mutable_label());
 }
 
 // Maps the protocol from a dictionary representing a contact's IM address to a
@@ -208,7 +262,7 @@ bool FillContactFromDictionary(const base::DictionaryValue& dict,
   DCHECK(contact);
   contact->Clear();
 
-  if (!dict.GetString(kIdField, contact->mutable_provider_id()))
+  if (!dict.GetString(kIdField, contact->mutable_contact_id()))
     return false;
 
   std::string updated;
@@ -226,12 +280,13 @@ bool FillContactFromDictionary(const base::DictionaryValue& dict,
   if (contact->deleted())
     return true;
 
-  dict.GetString(kFullNameField, contact->mutable_full_name());
-  dict.GetString(kGivenNameField, contact->mutable_given_name());
-  dict.GetString(kAdditionalNameField, contact->mutable_additional_name());
-  dict.GetString(kFamilyNameField, contact->mutable_family_name());
-  dict.GetString(kNamePrefixField, contact->mutable_name_prefix());
-  dict.GetString(kNameSuffixField, contact->mutable_name_suffix());
+  GetCleanedString(dict, kFullNameField, contact->mutable_full_name());
+  GetCleanedString(dict, kGivenNameField, contact->mutable_given_name());
+  GetCleanedString(
+      dict, kAdditionalNameField, contact->mutable_additional_name());
+  GetCleanedString(dict, kFamilyNameField, contact->mutable_family_name());
+  GetCleanedString(dict, kNamePrefixField, contact->mutable_name_prefix());
+  GetCleanedString(dict, kNameSuffixField, contact->mutable_name_suffix());
 
   const ListValue* email_list = NULL;
   if (dict.GetList(kEmailField, &email_list)) {
@@ -241,8 +296,11 @@ bool FillContactFromDictionary(const base::DictionaryValue& dict,
         return false;
 
       contacts::Contact_EmailAddress* email = contact->add_email_addresses();
-      if (!email_dict->GetString(kEmailAddressField, email->mutable_address()))
+      if (!GetCleanedString(*email_dict,
+                            kEmailAddressField,
+                            email->mutable_address())) {
         return false;
+      }
       email->set_primary(IsAddressPrimary(*email_dict));
       InitAddressType(*email_dict, email->mutable_type());
     }
@@ -256,8 +314,11 @@ bool FillContactFromDictionary(const base::DictionaryValue& dict,
         return false;
 
       contacts::Contact_PhoneNumber* phone = contact->add_phone_numbers();
-      if (!phone_dict->GetString(kPhoneNumberField, phone->mutable_number()))
+      if (!GetCleanedString(*phone_dict,
+                            kPhoneNumberField,
+                            phone->mutable_number())) {
         return false;
+      }
       phone->set_primary(IsAddressPrimary(*phone_dict));
       InitAddressType(*phone_dict, phone->mutable_type());
     }
@@ -272,8 +333,9 @@ bool FillContactFromDictionary(const base::DictionaryValue& dict,
 
       contacts::Contact_PostalAddress* address =
           contact->add_postal_addresses();
-      if (!address_dict->GetString(kPostalAddressFormattedField,
-                                   address->mutable_address())) {
+      if (!GetCleanedString(*address_dict,
+                            kPostalAddressFormattedField,
+                            address->mutable_address())) {
         return false;
       }
       address->set_primary(IsAddressPrimary(*address_dict));
@@ -290,8 +352,9 @@ bool FillContactFromDictionary(const base::DictionaryValue& dict,
 
       contacts::Contact_InstantMessagingAddress* im =
           contact->add_instant_messaging_addresses();
-      if (!im_dict->GetString(kInstantMessagingAddressField,
-                              im->mutable_address())) {
+      if (!GetCleanedString(*im_dict,
+                            kInstantMessagingAddressField,
+                            im->mutable_address())) {
         return false;
       }
       im->set_primary(IsAddressPrimary(*im_dict));
@@ -303,33 +366,92 @@ bool FillContactFromDictionary(const base::DictionaryValue& dict,
   return true;
 }
 
+// Structure into which we parse the contact groups feed using
+// JSONValueConverter.
+struct ContactGroups {
+  struct ContactGroup {
+    // Group ID, e.g.
+    // "http://www.google.com/m8/feeds/groups/user%40gmail.com/base/6".
+    std::string group_id;
+
+    // System group ID (e.g. "Contacts" for the "My Contacts" system group) if
+    // this is a system group, and empty otherwise.  See http://goo.gl/oWVnN
+    // for more details.
+    std::string system_group_id;
+  };
+
+  // Given a system group ID, returns the corresponding group ID or an empty
+  // string if the requested system group wasn't present.
+  std::string GetGroupIdForSystemGroup(const std::string& system_group_id) {
+    for (size_t i = 0; i < groups.size(); ++i) {
+      const ContactGroup& group = *groups[i];
+      if (group.system_group_id == system_group_id)
+        return group.group_id;
+    }
+    return std::string();
+  }
+
+  // Given |value| corresponding to a dictionary in a contact group feed's
+  // "entry" list, fills |result| with information about the group.
+  static bool GetContactGroup(const base::Value* value, ContactGroup* result) {
+    DCHECK(value);
+    DCHECK(result);
+    const base::DictionaryValue* dict = NULL;
+    if (!value->GetAsDictionary(&dict))
+      return false;
+
+    dict->GetString(kIdField, &result->group_id);
+    dict->GetString(kSystemGroupIdField, &result->system_group_id);
+    return true;
+  }
+
+  static void RegisterJSONConverter(
+      base::JSONValueConverter<ContactGroups>* converter) {
+    DCHECK(converter);
+    converter->RegisterRepeatedCustomValue<ContactGroup>(
+        kGroupEntryField, &ContactGroups::groups, &GetContactGroup);
+  }
+
+  ScopedVector<ContactGroup> groups;
+};
+
 }  // namespace
 
 // This class handles a single request to download all of a user's contacts.
 //
-// First, the contacts feed is downloaded via GetContactsOperation and parsed.
+// First, the feed containing the user's contact groups is downloaded via
+// GetContactGroupsOperation and examined to find the ID for the "My Contacts"
+// group (by default, the contacts API also returns suggested contacts).  The
+// group ID is cached in GDataContactsService so that this step can be skipped
+// by later DownloadContactRequests.
+//
+// Next, the contacts feed is downloaded via GetContactsOperation and parsed.
 // Individual contacts::Contact objects are created using the data from the
-// feed.  Next, GetContactPhotoOperations are created and used to start
-// downloading contacts' photos in parallel.  When all photos have been
-// downloaded, the contacts are passed to the passed-in callback.
-class GDataContactsService::DownloadContactsRequest
-    : public base::SupportsWeakPtr<DownloadContactsRequest> {
+// feed.
+//
+// Finally, GetContactPhotoOperations are created and used to start downloading
+// contacts' photos in parallel.  When all photos have been downloaded, the
+// contacts are passed to the passed-in callback.
+class GDataContactsService::DownloadContactsRequest {
  public:
   DownloadContactsRequest(GDataContactsService* service,
-                          GDataOperationRunner* runner,
+                          OperationRunner* runner,
                           SuccessCallback success_callback,
                           FailureCallback failure_callback,
-                          const base::Time& min_update_time,
-                          int max_simultaneous_photo_downloads)
+                          const base::Time& min_update_time)
       : service_(service),
         runner_(runner),
         success_callback_(success_callback),
         failure_callback_(failure_callback),
         min_update_time_(min_update_time),
         contacts_(new ScopedVector<contacts::Contact>),
-        max_simultaneous_photo_downloads_(max_simultaneous_photo_downloads),
+        my_contacts_group_id_(service->cached_my_contacts_group_id_),
         num_in_progress_photo_downloads_(0),
-        photo_download_failed_(false) {
+        photo_download_failed_(false),
+        num_photo_download_404_errors_(0),
+        total_photo_bytes_(0),
+        ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     DCHECK(service_);
     DCHECK(runner_);
   }
@@ -340,46 +462,169 @@ class GDataContactsService::DownloadContactsRequest
     runner_ = NULL;
   }
 
-  // Issues the initial request to download the contact feed.
-  void Run() {
-    GetContactsOperation* operation =
-        new GetContactsOperation(
-            runner_->operation_registry(),
-            min_update_time_,
-            base::Bind(&DownloadContactsRequest::HandleFeedData,
-                       base::Unretained(this)));
-    if (!service_->feed_url_for_testing_.is_empty())
-      operation->set_feed_url_for_testing(service_->feed_url_for_testing_);
+  const std::string my_contacts_group_id() const {
+    return my_contacts_group_id_;
+  }
 
-    runner_->StartOperationWithRetry(operation);
+  // Begins the contacts-downloading process.  If the ID for the "My Contacts"
+  // group has previously been cached, then the contacts download is started.
+  // Otherwise, the contact groups download is started.
+  void Run() {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    download_start_time_ = base::TimeTicks::Now();
+    if (!my_contacts_group_id_.empty()) {
+      StartContactsDownload();
+    } else {
+      GetContactGroupsOperation* operation =
+          new GetContactGroupsOperation(
+              runner_->operation_registry(),
+              base::Bind(&DownloadContactsRequest::HandleGroupsFeedData,
+                         weak_ptr_factory_.GetWeakPtr()));
+      if (!service_->groups_feed_url_for_testing_.is_empty()) {
+        operation->set_feed_url_for_testing(
+            service_->groups_feed_url_for_testing_);
+      }
+      runner_->StartOperationWithRetry(operation);
+    }
   }
 
  private:
+  // Invokes the failure callback and notifies GDataContactsService that the
+  // request is done.
+  void ReportFailure(HistogramResult histogram_result) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    SendHistograms(histogram_result);
+    failure_callback_.Run();
+    service_->OnRequestComplete(this);
+  }
+
+  // Reports UMA stats after the request has completed.
+  void SendHistograms(HistogramResult result) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_GE(result, 0);
+    DCHECK_LT(result, HISTOGRAM_RESULT_MAX_VALUE);
+
+    bool success = (result == HISTOGRAM_RESULT_SUCCESS);
+    base::TimeDelta elapsed_time =
+        base::TimeTicks::Now() - download_start_time_;
+    int photo_error_percent = static_cast<int>(
+        100.0 * transient_photo_download_errors_per_contact_.size() /
+        contact_photo_urls_.size() + 0.5);
+
+    if (min_update_time_.is_null()) {
+      UMA_HISTOGRAM_ENUMERATION("Contacts.FullUpdateResult",
+                                result, HISTOGRAM_RESULT_MAX_VALUE);
+      if (success) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("Contacts.FullUpdateDuration",
+                                   elapsed_time);
+        UMA_HISTOGRAM_COUNTS_10000("Contacts.FullUpdateContacts",
+                                   contacts_->size());
+        UMA_HISTOGRAM_COUNTS_10000("Contacts.FullUpdatePhotos",
+                                   contact_photo_urls_.size());
+        UMA_HISTOGRAM_MEMORY_KB("Contacts.FullUpdatePhotoBytes",
+                                total_photo_bytes_);
+        UMA_HISTOGRAM_COUNTS_10000("Contacts.FullUpdatePhoto404Errors",
+                                   num_photo_download_404_errors_);
+        UMA_HISTOGRAM_PERCENTAGE("Contacts.FullUpdatePhotoErrorPercent",
+                                 photo_error_percent);
+      }
+    } else {
+      UMA_HISTOGRAM_ENUMERATION("Contacts.IncrementalUpdateResult",
+                                result, HISTOGRAM_RESULT_MAX_VALUE);
+      if (success) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("Contacts.IncrementalUpdateDuration",
+                                   elapsed_time);
+        UMA_HISTOGRAM_COUNTS_10000("Contacts.IncrementalUpdateContacts",
+                                   contacts_->size());
+        UMA_HISTOGRAM_COUNTS_10000("Contacts.IncrementalUpdatePhotos",
+                                   contact_photo_urls_.size());
+        UMA_HISTOGRAM_MEMORY_KB("Contacts.IncrementalUpdatePhotoBytes",
+                                total_photo_bytes_);
+        UMA_HISTOGRAM_COUNTS_10000("Contacts.IncrementalUpdatePhoto404Errors",
+                                   num_photo_download_404_errors_);
+        UMA_HISTOGRAM_PERCENTAGE("Contacts.IncrementalUpdatePhotoErrorPercent",
+                                 photo_error_percent);
+      }
+    }
+  }
+
+  // Callback for GetContactGroupsOperation calls.  Starts downloading the
+  // actual contacts after finding the "My Contacts" group ID.
+  void HandleGroupsFeedData(GDataErrorCode error,
+                            scoped_ptr<base::Value> feed_data) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    if (error != HTTP_SUCCESS) {
+      LOG(WARNING) << "Got error " << error << " while downloading groups";
+      ReportFailure(HISTOGRAM_RESULT_GROUPS_DOWNLOAD_FAILURE);
+      return;
+    }
+
+    VLOG(2) << "Got groups feed data:\n"
+            << PrettyPrintValue(*(feed_data.get()));
+    ContactGroups groups;
+    base::JSONValueConverter<ContactGroups> converter;
+    if (!converter.Convert(*feed_data, &groups)) {
+      LOG(WARNING) << "Unable to parse groups feed";
+      ReportFailure(HISTOGRAM_RESULT_GROUPS_PARSE_FAILURE);
+      return;
+    }
+
+    my_contacts_group_id_ =
+        groups.GetGroupIdForSystemGroup(kMyContactsSystemGroupId);
+    if (!my_contacts_group_id_.empty()) {
+      StartContactsDownload();
+    } else {
+      LOG(WARNING) << "Unable to find ID for \"My Contacts\" group";
+      ReportFailure(HISTOGRAM_RESULT_MY_CONTACTS_GROUP_NOT_FOUND);
+    }
+  }
+
+  // Starts a download of the contacts from the "My Contacts" group.
+  void StartContactsDownload() {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    GetContactsOperation* operation =
+        new GetContactsOperation(
+            runner_->operation_registry(),
+            my_contacts_group_id_,
+            min_update_time_,
+            base::Bind(&DownloadContactsRequest::HandleContactsFeedData,
+                       weak_ptr_factory_.GetWeakPtr()));
+    if (!service_->contacts_feed_url_for_testing_.is_empty()) {
+      operation->set_feed_url_for_testing(
+          service_->contacts_feed_url_for_testing_);
+    }
+    runner_->StartOperationWithRetry(operation);
+  }
+
   // Callback for GetContactsOperation calls.
-  void HandleFeedData(GDataErrorCode error,
-                      scoped_ptr<base::Value> feed_data) {
+  void HandleContactsFeedData(GDataErrorCode error,
+                              scoped_ptr<base::Value> feed_data) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     if (error != HTTP_SUCCESS) {
       LOG(WARNING) << "Got error " << error << " while downloading contacts";
-      failure_callback_.Run();
-      service_->OnRequestComplete(this);
+      ReportFailure(HISTOGRAM_RESULT_CONTACTS_DOWNLOAD_FAILURE);
       return;
     }
 
-    VLOG(2) << "Got feed data:\n" << PrettyPrintValue(*(feed_data.get()));
-    if (!ProcessFeedData(*feed_data.get())) {
-      LOG(WARNING) << "Unable to process feed data";
-      failure_callback_.Run();
-      service_->OnRequestComplete(this);
+    VLOG(2) << "Got contacts feed data:\n"
+            << PrettyPrintValue(*(feed_data.get()));
+    if (!ProcessContactsFeedData(*feed_data.get())) {
+      LOG(WARNING) << "Unable to process contacts feed data";
+      ReportFailure(HISTOGRAM_RESULT_CONTACTS_PARSE_FAILURE);
       return;
     }
 
+    StartPhotoDownloads();
+    photo_download_timer_.Start(
+        FROM_HERE, service_->photo_download_timer_interval_,
+        this, &DownloadContactsRequest::StartPhotoDownloads);
     CheckCompletion();
   }
 
   // Processes the raw contacts feed from |feed_data| and fills |contacts_|.
   // Returns true on success.
-  bool ProcessFeedData(const base::Value& feed_data) {
+  bool ProcessContactsFeedData(const base::Value& feed_data) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     const DictionaryValue* toplevel_dict = NULL;
     if (!feed_data.GetAsDictionary(&toplevel_dict)) {
       LOG(WARNING) << "Top-level object is not a dictionary";
@@ -439,7 +684,7 @@ class GDataContactsService::DownloadContactsRequest
       }
 
       VLOG(1) << "Got contact " << index << ":"
-              << " id=" << contact->provider_id()
+              << " id=" << contact->contact_id()
               << " full_name=\"" << contact->full_name() << "\""
               << " update_time=" << contact->update_time();
 
@@ -467,30 +712,39 @@ class GDataContactsService::DownloadContactsRequest
     if (contacts_needing_photo_downloads_.empty() &&
         num_in_progress_photo_downloads_ == 0) {
       VLOG(1) << "Done downloading photos; invoking callback";
-      if (photo_download_failed_)
-        failure_callback_.Run();
-      else
+      photo_download_timer_.Stop();
+      if (photo_download_failed_) {
+        ReportFailure(HISTOGRAM_RESULT_PHOTO_DOWNLOAD_FAILURE );
+      } else {
+        SendHistograms(HISTOGRAM_RESULT_SUCCESS);
         success_callback_.Run(contacts_.Pass());
-      service_->OnRequestComplete(this);
+        service_->OnRequestComplete(this);
+      }
       return;
     }
+  }
 
+  // Starts photo downloads for contacts in |contacts_needing_photo_downloads_|.
+  // Should be invoked only once per second.
+  void StartPhotoDownloads() {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     while (!contacts_needing_photo_downloads_.empty() &&
            (num_in_progress_photo_downloads_ <
-            max_simultaneous_photo_downloads_)) {
+            service_->max_photo_downloads_per_second_)) {
       contacts::Contact* contact = contacts_needing_photo_downloads_.back();
       contacts_needing_photo_downloads_.pop_back();
       DCHECK(contact_photo_urls_.count(contact));
       std::string url = contact_photo_urls_[contact];
 
       VLOG(1) << "Starting download of photo " << url << " for "
-              << contact->provider_id();
+              << contact->contact_id();
       runner_->StartOperationWithRetry(
           new GetContactPhotoOperation(
               runner_->operation_registry(),
               GURL(url),
               base::Bind(&DownloadContactsRequest::HandlePhotoData,
-                         AsWeakPtr(), contact)));
+                         weak_ptr_factory_.GetWeakPtr(),
+                         contact)));
       num_in_progress_photo_downloads_++;
     }
   }
@@ -501,14 +755,32 @@ class GDataContactsService::DownloadContactsRequest
                        GDataErrorCode error,
                        scoped_ptr<std::string> download_data) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    VLOG(1) << "Got photo data for " << contact->provider_id()
+    VLOG(1) << "Got photo data for " << contact->contact_id()
             << " (error=" << error << " size=" << download_data->size() << ")";
     num_in_progress_photo_downloads_--;
 
+    if (error == HTTP_INTERNAL_SERVER_ERROR ||
+        error == HTTP_SERVICE_UNAVAILABLE) {
+      int num_errors = ++transient_photo_download_errors_per_contact_[contact];
+      if (num_errors <= kMaxTransientPhotoDownloadErrorsPerContact) {
+        LOG(WARNING) << "Got error " << error << " while downloading photo "
+                     << "for " << contact->contact_id() << "; retrying";
+        contacts_needing_photo_downloads_.push_back(contact);
+        return;
+      }
+    }
+
+    if (error == HTTP_NOT_FOUND) {
+      LOG(WARNING) << "Got error " << error << " while downloading photo "
+                   << "for " << contact->contact_id() << "; skipping";
+      num_photo_download_404_errors_++;
+      CheckCompletion();
+      return;
+    }
+
     if (error != HTTP_SUCCESS) {
       LOG(WARNING) << "Got error " << error << " while downloading photo "
-                   << "for " << contact->provider_id();
-      // TODO(derat): Retry several times for temporary failures?
+                   << "for " << contact->contact_id() << "; giving up";
       photo_download_failed_ = true;
       // Make sure we don't start any more downloads.
       contacts_needing_photo_downloads_.clear();
@@ -516,15 +788,15 @@ class GDataContactsService::DownloadContactsRequest
       return;
     }
 
+    total_photo_bytes_ += download_data->size();
     contact->set_raw_untrusted_photo(*download_data);
     CheckCompletion();
   }
 
- private:
   typedef std::map<contacts::Contact*, std::string> ContactPhotoUrls;
 
   GDataContactsService* service_;  // not owned
-  GDataOperationRunner* runner_;  // not owned
+  OperationRunner* runner_;  // not owned
 
   SuccessCallback success_callback_;
   FailureCallback failure_callback_;
@@ -533,30 +805,55 @@ class GDataContactsService::DownloadContactsRequest
 
   scoped_ptr<ScopedVector<contacts::Contact> > contacts_;
 
+  // ID of the "My Contacts" contacts group.
+  std::string my_contacts_group_id_;
+
   // Map from a contact to the URL at which its photo is located.
   // Contacts without photos do not appear in this map.
   ContactPhotoUrls contact_photo_urls_;
+
+  // Invokes StartPhotoDownloads() once per second.
+  base::RepeatingTimer<DownloadContactsRequest> photo_download_timer_;
 
   // Contacts that have photos that we still need to start downloading.
   // When we start a download, the contact is removed from this list.
   std::vector<contacts::Contact*> contacts_needing_photo_downloads_;
 
-  // Maximum number of photos we'll try to download at once.
-  int max_simultaneous_photo_downloads_;
-
   // Number of in-progress photo downloads.
   int num_in_progress_photo_downloads_;
 
+  // Map from a contact to the number of transient errors that we've encountered
+  // while trying to download its photo.  Contacts for which no errors have been
+  // encountered aren't represented in the map.
+  std::map<contacts::Contact*, int>
+      transient_photo_download_errors_per_contact_;
+
   // Did we encounter a fatal error while downloading a photo?
   bool photo_download_failed_;
+
+  // How many photos did we skip due to 404 errors?
+  int num_photo_download_404_errors_;
+
+  // Total size of all photos that were downloaded.
+  size_t total_photo_bytes_;
+
+  // Time at which Run() was called.
+  base::TimeTicks download_start_time_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<DownloadContactsRequest> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadContactsRequest);
 };
 
 GDataContactsService::GDataContactsService(Profile* profile)
-    : runner_(new GDataOperationRunner(profile)),
-      max_simultaneous_photo_downloads_(kMaxSimultaneousPhotoDownloads) {
+    : max_photo_downloads_per_second_(kMaxPhotoDownloadsPerSecond),
+      photo_download_timer_interval_(base::TimeDelta::FromSeconds(1)) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  std::vector<std::string> scopes;
+  scopes.push_back(kContactsScope);
+  runner_.reset(new OperationRunner(profile, scopes));
 }
 
 GDataContactsService::~GDataContactsService() {
@@ -566,7 +863,7 @@ GDataContactsService::~GDataContactsService() {
   requests_.clear();
 }
 
-GDataAuthService* GDataContactsService::auth_service_for_testing() {
+AuthService* GDataContactsService::auth_service_for_testing() {
   return runner_->auth_service();
 }
 
@@ -584,8 +881,7 @@ void GDataContactsService::DownloadContacts(SuccessCallback success_callback,
                                   runner_.get(),
                                   success_callback,
                                   failure_callback,
-                                  min_update_time,
-                                  max_simultaneous_photo_downloads_);
+                                  min_update_time);
   VLOG(1) << "Starting contacts download with request " << request;
   requests_.insert(request);
   request->Run();
@@ -595,6 +891,8 @@ void GDataContactsService::OnRequestComplete(DownloadContactsRequest* request) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(request);
   VLOG(1) << "Download request " << request << " complete";
+  if (!request->my_contacts_group_id().empty())
+    cached_my_contacts_group_id_ = request->my_contacts_group_id();
   requests_.erase(request);
   delete request;
 }

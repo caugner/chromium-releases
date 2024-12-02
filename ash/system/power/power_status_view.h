@@ -23,7 +23,7 @@ class PowerStatusView : public views::View {
     VIEW_NOTIFICATION
   };
 
-  explicit PowerStatusView(ViewType view_type);
+  PowerStatusView(ViewType view_type, bool default_view_right_align);
   virtual ~PowerStatusView() {}
 
   void UpdatePowerStatus(const PowerSupplyStatus& status);
@@ -39,18 +39,28 @@ class PowerStatusView : public views::View {
   void Update();
   void UpdateTextForDefaultView();
   void UpdateTextForNotificationView();
+  int GetRoundedBatteryPercentage() const;
 
   // Overridden from views::View.
   virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
 
-  // labels used only for VIEW_NOTIFICATION.
+  // Layout default view UI items on the right side of system tray pop up item
+  // if true; otherwise, layout the UI items on the left side.
+  bool default_view_right_align_;
+
+  // Labels used only for VIEW_NOTIFICATION.
   views::Label* status_label_;
   views::Label* time_label_;
 
-  // labels used only for VIEW_DEFAULT.
+  // Labels used only for VIEW_DEFAULT.
   views::Label* time_status_label_;
 
+  // Battery status indicator icon.
   views::ImageView* icon_;
+
+  // Index of the current icon in the icon array image, or -1 if unknown.
+  int icon_image_index_;
+
   ViewType view_type_;
 
   PowerSupplyStatus supply_status_;

@@ -23,6 +23,10 @@ namespace aura {
 class RootWindow;
 }
 
+namespace ui {
+class GestureEvent;
+}
+
 namespace views {
 class Widget;
 }
@@ -116,7 +120,6 @@ class ASH_EXPORT ShelfLayoutManager :
   // on the screen.
   bool IsVisible() const;
 
- public:
   // The launcher is typically created after the layout manager.
   void SetLauncher(Launcher* launcher);
   Launcher* launcher() { return launcher_; }
@@ -140,9 +143,23 @@ class ASH_EXPORT ShelfLayoutManager :
   // Sets whether any windows overlap the shelf. If a window overlaps the shelf
   // the shelf renders slightly differently.
   void SetWindowOverlapsShelf(bool value);
+  bool window_overlaps_shelf() const { return window_overlaps_shelf_; }
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
+
+  // Gesture dragging related functions:
+  void StartGestureDrag(const ui::GestureEvent& gesture);
+  enum DragState {
+    DRAG_SHELF,
+    DRAG_TRAY
+  };
+  // Returns DRAG_SHELF if the gesture should continue to drag the entire shelf.
+  // Returns DRAG_TRAY if the gesture can start dragging the tray-bubble from
+  // this point on.
+  DragState UpdateGestureDrag(const ui::GestureEvent& gesture);
+  void CompleteGestureDrag(const ui::GestureEvent& gesture);
+  void CancelGestureDrag();
 
   // Overridden from aura::LayoutManager:
   virtual void OnWindowResized() OVERRIDE;
@@ -163,12 +180,13 @@ class ASH_EXPORT ShelfLayoutManager :
 
  private:
   class AutoHideEventFilter;
+  class UpdateShelfObserver;
   friend class ash::ScreenAsh;
   friend class ShelfLayoutManagerTest;
   FRIEND_TEST_ALL_PREFIXES(ShelfLayoutManagerTest, SetAutoHideBehavior);
 
   struct TargetBounds {
-    TargetBounds() : opacity(0.0f) {}
+    TargetBounds();
 
     float opacity;
     gfx::Rect launcher_bounds_in_root;
@@ -215,6 +233,10 @@ class ASH_EXPORT ShelfLayoutManager :
 
   // Calculates the target bounds assuming visibility of |visible|.
   void CalculateTargetBounds(const State& state, TargetBounds* target_bounds);
+
+  // Updates the target bounds if a gesture-drag is in progress. This is only
+  // used by |CalculateTargetBounds()|.
+  void UpdateTargetBoundsForGesture(TargetBounds* target_bounds) const;
 
   // Updates the background of the shelf.
   void UpdateShelfBackground(BackgroundAnimator::ChangeType type);
@@ -273,6 +295,27 @@ class ASH_EXPORT ShelfLayoutManager :
   scoped_ptr<AutoHideEventFilter> event_filter_;
 
   ObserverList<Observer> observers_;
+
+  // The shelf reacts to gesture-drags, and can be set to auto-hide for certain
+  // gestures. Some shelf behaviour (e.g. visibility state, background color
+  // etc.) are affected by various stages of the drag. The enum keeps track of
+  // the present status of the gesture drag.
+  enum GestureDragStatus {
+    GESTURE_DRAG_NONE,
+    GESTURE_DRAG_IN_PROGRESS,
+    GESTURE_DRAG_COMPLETE_IN_PROGRESS
+  };
+  GestureDragStatus gesture_drag_status_;
+
+  // Tracks the amount of the drag. The value is only valid when
+  // |gesture_drag_status_| is set to GESTURE_DRAG_IN_PROGRESS.
+  float gesture_drag_amount_;
+
+  // Manage the auto-hide state during the gesture.
+  AutoHideState gesture_drag_auto_hide_state_;
+
+  // Used to delay updating shelf background.
+  UpdateShelfObserver* update_shelf_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ShelfLayoutManager);
 };

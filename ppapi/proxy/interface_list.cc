@@ -50,6 +50,7 @@
 #include "ppapi/c/ppb_view.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/private/ppb_content_decryptor_private.h"
 #include "ppapi/c/private/ppb_file_ref_private.h"
 #include "ppapi/c/private/ppb_flash_clipboard.h"
 #include "ppapi/c/private/ppb_flash_file.h"
@@ -68,6 +69,7 @@
 #include "ppapi/c/private/ppb_tcp_socket_private.h"
 #include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/c/private/ppb_x509_certificate_private.h"
+#include "ppapi/c/private/ppp_content_decryptor_private.h"
 #include "ppapi/c/trusted/ppb_broker_trusted.h"
 #include "ppapi/c/trusted/ppb_browser_font_trusted.h"
 #include "ppapi/c/trusted/ppb_char_set_trusted.h"
@@ -82,7 +84,6 @@
 #include "ppapi/proxy/ppb_file_io_proxy.h"
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/ppb_file_system_proxy.h"
-#include "ppapi/proxy/ppb_flash_device_id_proxy.h"
 #include "ppapi/proxy/ppb_flash_menu_proxy.h"
 #include "ppapi/proxy/ppb_flash_message_loop_proxy.h"
 #include "ppapi/proxy/ppb_flash_proxy.h"
@@ -106,6 +107,7 @@
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
 #include "ppapi/proxy/ppb_x509_certificate_private_proxy.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
+#include "ppapi/proxy/ppp_content_decryptor_private_proxy.h"
 #include "ppapi/proxy/ppp_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppp_input_event_proxy.h"
 #include "ppapi/proxy/ppp_instance_private_proxy.h"
@@ -194,7 +196,6 @@ InterfaceList::InterfaceList() {
          PPB_Core_Proxy::GetPPB_Core_Interface());
   AddPPB(PPB_MESSAGELOOP_DEV_INTERFACE_0_1, API_ID_NONE,
          PPB_MessageLoop_Proxy::GetInterface());
-#if !defined(OS_NACL)
   AddPPB(PPB_OPENGLES2_INTERFACE_1_0, API_ID_NONE,
          PPB_OpenGLES2_Shared::GetInterface());
   AddPPB(PPB_OPENGLES2_INSTANCEDARRAYS_INTERFACE_1_0, API_ID_NONE,
@@ -211,6 +212,7 @@ InterfaceList::InterfaceList() {
          PPB_OpenGLES2_Shared::GetChromiumMapSubInterface());
   AddPPB(PPB_OPENGLES2_QUERY_INTERFACE_1_0, API_ID_NONE,
          PPB_OpenGLES2_Shared::GetQueryInterface());
+#if !defined(OS_NACL)
   AddPPB(PPB_FLASH_PRINT_INTERFACE_1_0, API_ID_PPB_FLASH,
          PPB_Flash_Proxy::GetFlashPrintInterface());
 #endif
@@ -230,6 +232,14 @@ InterfaceList::InterfaceList() {
   AddPPB(PPB_Testing_Proxy::GetInfo());
   AddPPB(PPB_URLLoader_Proxy::GetTrustedInfo());
   AddPPB(PPB_Var_Deprecated_Proxy::GetInfo());
+
+  // TODO(tomfinegan): Figure out where to put these once we refactor things
+  // to load the PPP interface struct from the PPB interface.
+  AddProxy(API_ID_PPP_CONTENT_DECRYPTOR_PRIVATE,
+           &ProxyFactory<PPP_ContentDecryptor_Private_Proxy>);
+  AddPPP(PPP_CONTENTDECRYPTOR_PRIVATE_INTERFACE,
+         API_ID_PPP_CONTENT_DECRYPTOR_PRIVATE,
+         PPP_ContentDecryptor_Private_Proxy::GetProxyInterface());
 #endif
 
   // PPP (plugin) interfaces.
@@ -250,8 +260,8 @@ InterfaceList::InterfaceList() {
   AddPPP(PPP_InputEvent_Proxy::GetInfo());
   AddPPP(PPP_Messaging_Proxy::GetInfo());
   AddPPP(PPP_MouseLock_Proxy::GetInfo());
-#if !defined(OS_NACL)
   AddPPP(PPP_Graphics3D_Proxy::GetInfo());
+#if !defined(OS_NACL)
   AddPPP(PPP_Instance_Private_Proxy::GetInfo());
   AddPPP(PPP_VideoCapture_Proxy::GetInfo());
   AddPPP(PPP_VideoDecoder_Proxy::GetInfo());

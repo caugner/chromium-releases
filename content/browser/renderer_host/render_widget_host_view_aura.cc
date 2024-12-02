@@ -18,6 +18,7 @@
 #include "content/browser/renderer_host/web_input_event_aura.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/view_messages.h"
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
@@ -29,13 +30,16 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/screen_position_client.h"
+#include "ui/aura/client/stacking_client.h"
 #include "ui/aura/client/tooltip_client.h"
 #include "ui/aura/client/window_types.h"
 #include "ui/aura/env.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
+#include "ui/aura/window_tracker.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/base/events/event.h"
 #include "ui/base/gestures/gesture_recognizer.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ime/input_method.h"
@@ -89,7 +93,7 @@ void UpdateWebTouchEventAfterDispatch(WebKit::WebTouchEvent* event,
   }
 }
 
-bool CanRendererHandleEvent(const aura::MouseEvent* event) {
+bool CanRendererHandleEvent(const ui::MouseEvent* event) {
   if (event->type() == ui::ET_MOUSE_CAPTURE_CHANGED)
     return false;
 
@@ -150,7 +154,7 @@ class RenderWidgetHostViewAura::WindowObserver : public aura::WindowObserver {
   explicit WindowObserver(RenderWidgetHostViewAura* view) : view_(view) {}
   virtual ~WindowObserver() {}
 
-    // Overridden from aura::WindowObserver:
+  // Overridden from aura::WindowObserver:
   virtual void OnWindowRemovingFromRootWindow(aura::Window* window) OVERRIDE {
     view_->RemovingFromRootWindow();
   }
@@ -246,7 +250,7 @@ void RenderWidgetHostViewAura::InitAsChild(
 
 void RenderWidgetHostViewAura::InitAsPopup(
     RenderWidgetHostView* parent_host_view,
-    const gfx::Rect& pos) {
+    const gfx::Rect& bounds_in_display) {
   popup_parent_host_view_ =
       static_cast<RenderWidgetHostViewAura*>(parent_host_view);
   popup_parent_host_view_->popup_child_host_view_ = this;
@@ -254,8 +258,18 @@ void RenderWidgetHostViewAura::InitAsPopup(
   window_->Init(ui::LAYER_TEXTURED);
   window_->SetName("RenderWidgetHostViewAura");
 
-  window_->SetParent(NULL);
-  SetBounds(pos);
+  aura::Window* parent = NULL;
+  aura::RootWindow* root = popup_parent_host_view_->window_->GetRootWindow();
+  aura::client::ScreenPositionClient* screen_position_client =
+      aura::client::GetScreenPositionClient(root);
+  if (screen_position_client) {
+    gfx::Point origin_in_screen(bounds_in_display.origin());
+    screen_position_client->ConvertPointToScreen(root, &origin_in_screen);
+    parent = aura::client::GetStackingClient()->GetDefaultParent(
+        window_, gfx::Rect(origin_in_screen, bounds_in_display.size()));
+  }
+  window_->SetParent(parent);
+  SetBounds(bounds_in_display);
   Show();
 }
 
@@ -266,7 +280,22 @@ void RenderWidgetHostViewAura::InitAsFullscreen(
   window_->Init(ui::LAYER_TEXTURED);
   window_->SetName("RenderWidgetHostViewAura");
   window_->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_FULLSCREEN);
-  window_->SetParent(NULL);
+  aura::Window* parent = NULL;
+  if (reference_host_view) {
+    aura::Window* reference_window =
+        static_cast<RenderWidgetHostViewAura*>(reference_host_view)->window_;
+    if (reference_window) {
+      host_tracker_.reset(new aura::WindowTracker);
+      host_tracker_->Add(reference_window);
+    }
+    gfx::Display display =
+        gfx::Screen::GetDisplayNearestWindow(reference_window);
+    aura::client::StackingClient* stacking_client =
+        aura::client::GetStackingClient();
+    if (stacking_client)
+      parent = stacking_client->GetDefaultParent(window_, display.bounds());
+  }
+  window_->SetParent(parent);
   Show();
   Focus();
 }
@@ -311,8 +340,11 @@ void RenderWidgetHostViewAura::SetSize(const gfx::Size& size) {
 void RenderWidgetHostViewAura::SetBounds(const gfx::Rect& rect) {
   if (window_->bounds().size() != rect.size() &&
       host_->is_accelerated_compositing_active()) {
-    resize_locks_.push_back(make_linked_ptr(
-        new ResizeLock(window_->GetRootWindow(), rect.size())));
+    aura::RootWindow* root_window = window_->GetRootWindow();
+    if (root_window) {
+      resize_locks_.push_back(make_linked_ptr(
+          new ResizeLock(root_window, rect.size())));
+    }
   }
   window_->SetBounds(rect);
   host_->WasResized();
@@ -323,7 +355,12 @@ gfx::NativeView RenderWidgetHostViewAura::GetNativeView() const {
 }
 
 gfx::NativeViewId RenderWidgetHostViewAura::GetNativeViewId() const {
+#if defined(OS_WIN)
+  HWND window = window_->GetRootWindow()->GetAcceleratedWidget();
+  return reinterpret_cast<gfx::NativeViewId>(window);
+#else
   return static_cast<gfx::NativeViewId>(NULL);
+#endif
 }
 
 gfx::NativeViewAccessible RenderWidgetHostViewAura::GetNativeViewAccessible() {
@@ -332,12 +369,43 @@ gfx::NativeViewAccessible RenderWidgetHostViewAura::GetNativeViewAccessible() {
 }
 
 void RenderWidgetHostViewAura::MovePluginWindows(
-    const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
-  // We don't support windowed plugins.
+    const gfx::Point& scroll_offset,
+    const std::vector<webkit::npapi::WebPluginGeometry>& plugin_window_moves) {
+#if defined(OS_WIN)
+  // We need to clip the rectangle to the tab's viewport, otherwise we will draw
+  // over the browser UI.
+  if (!window_->GetRootWindow()) {
+    DCHECK(plugin_window_moves.empty());
+    return;
+  }
+  HWND parent = window_->GetRootWindow()->GetAcceleratedWidget();
+  gfx::Rect view_bounds = window_->GetBoundsInRootWindow();
+  std::vector<webkit::npapi::WebPluginGeometry> moves = plugin_window_moves;
+
+  gfx::Rect view_port(scroll_offset.x(), scroll_offset.y(), view_bounds.width(),
+                      view_bounds.height());
+
+  for (size_t i = 0; i < moves.size(); ++i) {
+    gfx::Rect clip = moves[i].clip_rect;
+    clip.Offset(moves[i].window_rect.origin());
+    clip.Offset(scroll_offset);
+    clip = clip.Intersect(view_port);
+    clip.Offset(-moves[i].window_rect.x(), -moves[i].window_rect.y());
+    clip.Offset(-scroll_offset.x(), -scroll_offset.y());
+    moves[i].clip_rect = clip;
+
+    moves[i].window_rect.Offset(view_bounds.origin());
+  }
+  MovePluginWindowsHelper(parent, moves);
+#endif  // defined(OS_WIN)
 }
 
 void RenderWidgetHostViewAura::Focus() {
-  window_->Focus();
+  // Make sure we have a FocusManager before attempting to Focus(). In some
+  // situations we may not yet be in a valid Window hierarchy (such as reloading
+  // after out of memory discared the tab).
+  if (window_->GetFocusManager())
+    window_->Focus();
 }
 
 void RenderWidgetHostViewAura::Blur() {
@@ -381,17 +449,19 @@ void RenderWidgetHostViewAura::SetIsLoading(bool is_loading) {
 }
 
 void RenderWidgetHostViewAura::TextInputStateChanged(
-    ui::TextInputType type,
-    bool can_compose_inline) {
-  if (text_input_type_ != type || can_compose_inline_ != can_compose_inline) {
-    text_input_type_ = type;
-    can_compose_inline_ = can_compose_inline;
-    GetInputMethod()->OnTextInputTypeChanged(this);
+    const ViewHostMsg_TextInputState_Params& params) {
+  if (text_input_type_ != params.type ||
+      can_compose_inline_ != params.can_compose_inline) {
+    text_input_type_ = params.type;
+    can_compose_inline_ = params.can_compose_inline;
+    if (GetInputMethod())
+      GetInputMethod()->OnTextInputTypeChanged(this);
   }
 }
 
 void RenderWidgetHostViewAura::ImeCancelComposition() {
-  GetInputMethod()->CancelComposition(this);
+  if (GetInputMethod())
+    GetInputMethod()->CancelComposition(this);
   has_composition_text_ = false;
 }
 
@@ -432,6 +502,15 @@ void RenderWidgetHostViewAura::DidUpdateBackingStore(
       continue;
 
     SchedulePaintIfNotInClip(rect, clip_rect);
+
+#if defined(OS_WIN)
+    // Send the invalid rect in screen coordinates.
+    gfx::Rect screen_rect = GetViewBounds();
+    gfx::Rect invalid_screen_rect(rect);
+    invalid_screen_rect.Offset(screen_rect.x(), screen_rect.y());
+    HWND hwnd = window_->GetRootWindow()->GetAcceleratedWidget();
+    PaintPluginWindowsHelper(hwnd, invalid_screen_rect);
+#endif  // defined(OS_WIN)
   }
 }
 
@@ -456,16 +535,36 @@ void RenderWidgetHostViewAura::SetTooltipText(const string16& tooltip_text) {
     aura::client::GetTooltipClient(root_window)->UpdateTooltip(window_);
 }
 
+void RenderWidgetHostViewAura::SelectionChanged(const string16& text,
+                                                size_t offset,
+                                                const ui::Range& range) {
+  RenderWidgetHostViewBase::SelectionChanged(text, offset, range);
+
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+  if (text.empty() || range.is_empty())
+    return;
+
+  // Set the BUFFER_SELECTION to the ui::Clipboard.
+  ui::ScopedClipboardWriter clipboard_writer(
+      ui::Clipboard::GetForCurrentThread(),
+      ui::Clipboard::BUFFER_SELECTION);
+  clipboard_writer.WriteText(text);
+#endif  // defined(USE_X11) && !defined(OS_CHROMEOS)
+}
+
 void RenderWidgetHostViewAura::SelectionBoundsChanged(
     const gfx::Rect& start_rect,
-    const gfx::Rect& end_rect) {
+    WebKit::WebTextDirection start_direction,
+    const gfx::Rect& end_rect,
+    WebKit::WebTextDirection end_direction) {
   if (selection_start_rect_ == start_rect && selection_end_rect_ == end_rect)
     return;
 
   selection_start_rect_ = start_rect;
   selection_end_rect_ = end_rect;
 
-  GetInputMethod()->OnCaretBoundsChanged(this);
+  if (GetInputMethod())
+    GetInputMethod()->OnCaretBoundsChanged(this);
 }
 
 BackingStore* RenderWidgetHostViewAura::AllocBackingStore(
@@ -479,9 +578,6 @@ void RenderWidgetHostViewAura::CopyFromCompositingSurface(
     const base::Callback<void(bool)>& callback,
     skia::PlatformCanvas* output) {
   base::ScopedClosureRunner scoped_callback_runner(base::Bind(callback, false));
-  ui::Compositor* compositor = GetCompositor();
-  if (!compositor)
-    return;
 
   std::map<uint64, scoped_refptr<ui::Texture> >::iterator it =
       image_transport_clients_.find(current_surface_);
@@ -497,7 +593,7 @@ void RenderWidgetHostViewAura::CopyFromCompositingSurface(
     return;
 
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-  GLHelper* gl_helper = factory->GetGLHelper(compositor);
+  GLHelper* gl_helper = factory->GetGLHelper();
   if (!gl_helper)
     return;
 
@@ -542,14 +638,8 @@ void RenderWidgetHostViewAura::UpdateExternalTexture() {
   // Delay processing accelerated compositing state change till here where we
   // act upon the state change. (Clear the external texture if switching to
   // software mode or set the external texture if going to accelerated mode).
-  if (accelerated_compositing_state_changed_) {
-    // Don't scale the contents in accelerated mode because the renderer takes
-    // care of it.
-    window_->layer()->set_scale_content(
-        !host_->is_accelerated_compositing_active());
-
+  if (accelerated_compositing_state_changed_)
     accelerated_compositing_state_changed_ = false;
-  }
 
   if (current_surface_ != 0 && host_->is_accelerated_compositing_active()) {
     ui::Texture* container = image_transport_clients_[current_surface_];
@@ -616,9 +706,8 @@ void RenderWidgetHostViewAura::AcceleratedSurfaceBuffersSwapped(
   surface_route_id_ = params_in_pixel.route_id;
   // If protection state changed, then this swap is stale. We must still ACK but
   // do not update current_surface_ since it may have been discarded.
-  if (host_->is_hidden() ||
-      (params_in_pixel.protection_state_id &&
-          params_in_pixel.protection_state_id != protection_state_id_)) {
+  if (params_in_pixel.protection_state_id &&
+      params_in_pixel.protection_state_id != protection_state_id_) {
     DCHECK(!current_surface_);
     if (!params_in_pixel.skip_ack)
       InsertSyncPointAndACK(params_in_pixel.route_id, gpu_host_id, NULL);
@@ -687,9 +776,8 @@ void RenderWidgetHostViewAura::AcceleratedSurfacePostSubBuffer(
   surface_route_id_ = params_in_pixel.route_id;
   // If visible state changed, then this PSB is stale. We must still ACK but
   // do not update current_surface_.
-  if (host_->is_hidden() ||
-      (params_in_pixel.protection_state_id &&
-          params_in_pixel.protection_state_id != protection_state_id_)) {
+  if (params_in_pixel.protection_state_id &&
+      params_in_pixel.protection_state_id != protection_state_id_) {
     DCHECK(!current_surface_);
     InsertSyncPointAndACK(params_in_pixel.route_id, gpu_host_id, NULL);
     return;
@@ -722,7 +810,7 @@ void RenderWidgetHostViewAura::AcceleratedSurfacePostSubBuffer(
     // Damage may not have been DIP aligned, so inflate damage to compensate
     // for any round-off error.
     rect_to_paint.Inset(-1, -1);
-    rect_to_paint.Intersect(window_->bounds());
+    rect_to_paint = rect_to_paint.Intersect(window_->bounds());
 
     window_->SchedulePaintInRect(rect_to_paint);
 
@@ -872,10 +960,9 @@ void RenderWidgetHostViewAura::SetScrollOffsetPinning(
 }
 
 gfx::GLSurfaceHandle RenderWidgetHostViewAura::GetCompositingSurface() {
-  ui::Compositor* compositor = GetCompositor();
-  if (shared_surface_handle_.is_null() && compositor) {
+  if (shared_surface_handle_.is_null()) {
     ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-    shared_surface_handle_ = factory->CreateSharedSurfaceHandle(compositor);
+    shared_surface_handle_ = factory->CreateSharedSurfaceHandle();
     factory->AddObserver(this);
   }
   return shared_surface_handle_;
@@ -1081,7 +1168,8 @@ void RenderWidgetHostViewAura::OnInputMethodChanged() {
   if (!host_)
     return;
 
-  host_->SetInputMethodActive(GetInputMethod()->IsActive());
+  if (GetInputMethod())
+    host_->SetInputMethodActive(GetInputMethod()->IsActive());
 
   // TODO(suzhe): implement the newly added “locale” property of HTML DOM
   // TextEvent.
@@ -1099,6 +1187,13 @@ bool RenderWidgetHostViewAura::ChangeTextDirectionAndLayoutAlignment(
   return true;
 }
 
+void RenderWidgetHostViewAura::ExtendSelectionAndDelete(
+    size_t before, size_t after) {
+  // TODO(horo): implement this method if it is required.
+  // http://crbug.com/149155
+  NOTIMPLEMENTED();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewAura, aura::WindowDelegate implementation:
 
@@ -1108,8 +1203,11 @@ gfx::Size RenderWidgetHostViewAura::GetMinimumSize() const {
 
 void RenderWidgetHostViewAura::OnBoundsChanged(const gfx::Rect& old_bounds,
                                                const gfx::Rect& new_bounds) {
-  // We don't care about this one, we are always sized via SetSize() or
-  // SetBounds().
+  // We care about this only in fullscreen mode, where there is no
+  // WebContentsViewAura. We are sized via SetSize() or SetBounds() by
+  // WebContentsViewAura in other cases.
+  if (is_fullscreen_)
+    SetSize(new_bounds.size());
 }
 
 void RenderWidgetHostViewAura::OnFocus(aura::Window* old_focused_window) {
@@ -1148,14 +1246,123 @@ void RenderWidgetHostViewAura::OnBlur() {
   }
 }
 
-bool RenderWidgetHostViewAura::OnKeyEvent(aura::KeyEvent* event) {
+gfx::NativeCursor RenderWidgetHostViewAura::GetCursor(const gfx::Point& point) {
+  if (mouse_locked_)
+    return ui::kCursorNone;
+  return current_cursor_.GetNativeCursor();
+}
+
+int RenderWidgetHostViewAura::GetNonClientComponent(
+    const gfx::Point& point) const {
+  return HTCLIENT;
+}
+
+bool RenderWidgetHostViewAura::ShouldDescendIntoChildForEventHandling(
+    aura::Window* child,
+    const gfx::Point& location) {
+  return true;
+}
+
+bool RenderWidgetHostViewAura::CanFocus() {
+  return popup_type_ == WebKit::WebPopupTypeNone;
+}
+
+void RenderWidgetHostViewAura::OnCaptureLost() {
+  host_->LostCapture();
+}
+
+void RenderWidgetHostViewAura::OnPaint(gfx::Canvas* canvas) {
+  paint_canvas_ = canvas;
+  BackingStore* backing_store = host_->GetBackingStore(true);
+  paint_canvas_ = NULL;
+  if (backing_store) {
+    static_cast<BackingStoreAura*>(backing_store)->SkiaShowRect(gfx::Point(),
+                                                                canvas);
+  } else if (aura::Env::GetInstance()->render_white_bg()) {
+    canvas->DrawColor(SK_ColorWHITE);
+  }
+}
+
+void RenderWidgetHostViewAura::OnDeviceScaleFactorChanged(
+    float device_scale_factor) {
+  if (!host_)
+    return;
+
+  BackingStoreAura* backing_store = static_cast<BackingStoreAura*>(
+      host_->GetBackingStore(false));
+  if (backing_store)  // NULL in hardware path.
+    backing_store->ScaleFactorChanged(device_scale_factor);
+
+  host_->SetDeviceScaleFactor(device_scale_factor);
+  current_cursor_.SetScaleFactor(device_scale_factor);
+}
+
+void RenderWidgetHostViewAura::OnWindowDestroying() {
+#if defined(OS_WIN)
+  if (window_->GetRootWindow()) {
+    HWND parent = window_->GetRootWindow()->GetAcceleratedWidget();
+    DetachPluginsHelper(parent);
+  }
+#endif
+}
+
+void RenderWidgetHostViewAura::OnWindowDestroyed() {
+  host_->ViewDestroyed();
+  delete this;
+}
+
+void RenderWidgetHostViewAura::OnWindowTargetVisibilityChanged(bool visible) {
+}
+
+bool RenderWidgetHostViewAura::HasHitTestMask() const {
+  return false;
+}
+
+void RenderWidgetHostViewAura::GetHitTestMask(gfx::Path* mask) const {
+}
+
+scoped_refptr<ui::Texture> RenderWidgetHostViewAura::CopyTexture() {
+  if (!host_->is_accelerated_compositing_active())
+    return scoped_refptr<ui::Texture>();
+
+  ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+  GLHelper* gl_helper = factory->GetGLHelper();
+  if (!gl_helper)
+    return scoped_refptr<ui::Texture>();
+
+  std::map<uint64, scoped_refptr<ui::Texture> >::iterator it =
+      image_transport_clients_.find(current_surface_);
+  if (it == image_transport_clients_.end())
+    return scoped_refptr<ui::Texture>();
+
+  ui::Texture* container = it->second;
+  DCHECK(container);
+  WebKit::WebGLId texture_id =
+      gl_helper->CopyTexture(container->texture_id(), container->size());
+  if (!texture_id)
+    return scoped_refptr<ui::Texture>();
+
+  return scoped_refptr<ui::Texture>(
+      factory->CreateOwnedTexture(container->size(), texture_id));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// RenderWidgetHostViewAura, ui::EventHandler implementation:
+
+ui::EventResult RenderWidgetHostViewAura::OnKeyEvent(ui::KeyEvent* event) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnKeyEvent");
   if (popup_child_host_view_ && popup_child_host_view_->NeedsInputGrab() &&
       popup_child_host_view_->OnKeyEvent(event))
-    return true;
+    return ui::ER_HANDLED;
 
   // We need to handle the Escape key for Pepper Flash.
   if (is_fullscreen_ && event->key_code() == ui::VKEY_ESCAPE) {
+    // Focus the window we were created from.
+    if (host_tracker_.get() && !host_tracker_->windows().empty()) {
+      aura::Window* host = *(host_tracker_->windows().begin());
+      if (host->GetFocusManager())
+        host->Focus();
+    }
     if (!in_shutdown_) {
       in_shutdown_ = true;
       host_->Shutdown();
@@ -1175,29 +1382,18 @@ bool RenderWidgetHostViewAura::OnKeyEvent(aura::KeyEvent* event) {
       host_->ForwardKeyboardEvent(webkit_event);
     }
   }
-  return true;
+  return ui::ER_HANDLED;
 }
 
-gfx::NativeCursor RenderWidgetHostViewAura::GetCursor(const gfx::Point& point) {
-  if (mouse_locked_)
-    return ui::kCursorNone;
-  return current_cursor_.GetNativeCursor();
-}
-
-int RenderWidgetHostViewAura::GetNonClientComponent(
-    const gfx::Point& point) const {
-  return HTCLIENT;
-}
-
-bool RenderWidgetHostViewAura::ShouldDescendIntoChildForEventHandling(
-    aura::Window* child,
-    const gfx::Point& location) {
-  return true;
-}
-
-bool RenderWidgetHostViewAura::OnMouseEvent(aura::MouseEvent* event) {
+ui::EventResult RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnMouseEvent");
   if (mouse_locked_) {
+    // Hide the cursor if someone else has shown it.
+    aura::client::CursorClient* cursor_client =
+        aura::client::GetCursorClient(window_->GetRootWindow());
+    if (cursor_client && cursor_client->IsCursorVisible())
+      cursor_client->ShowCursor(false);
+
     WebKit::WebMouseEvent mouse_event = MakeWebMouseEvent(event);
     gfx::Point center(gfx::Rect(window_->bounds().size()).CenterPoint());
 
@@ -1222,12 +1418,12 @@ bool RenderWidgetHostViewAura::OnMouseEvent(aura::MouseEvent* event) {
         host_->ForwardMouseEvent(mouse_event);
     }
 
-    return false;
+    return ui::ER_UNHANDLED;
   }
 
   if (event->type() == ui::ET_MOUSEWHEEL) {
     WebKit::WebMouseWheelEvent mouse_wheel_event =
-        MakeWebMouseWheelEvent(event);
+        MakeWebMouseWheelEvent(static_cast<ui::MouseWheelEvent*>(event));
     if (mouse_wheel_event.deltaX != 0 || mouse_wheel_event.deltaY != 0)
       host_->ForwardWheelEvent(mouse_wheel_event);
   } else if (event->type() == ui::ET_SCROLL) {
@@ -1235,13 +1431,13 @@ bool RenderWidgetHostViewAura::OnMouseEvent(aura::MouseEvent* event) {
         MakeWebGestureEventFlingCancel();
     host_->ForwardGestureEvent(gesture_event);
     WebKit::WebMouseWheelEvent mouse_wheel_event =
-        MakeWebMouseWheelEvent(static_cast<aura::ScrollEvent*>(event));
+        MakeWebMouseWheelEvent(static_cast<ui::ScrollEvent*>(event));
     host_->ForwardWheelEvent(mouse_wheel_event);
     RecordAction(UserMetricsAction("TrackpadScroll"));
   } else if (event->type() == ui::ET_SCROLL_FLING_START ||
       event->type() == ui::ET_SCROLL_FLING_CANCEL) {
     WebKit::WebGestureEvent gesture_event =
-        MakeWebGestureEvent(static_cast<aura::ScrollEvent*>(event));
+        MakeWebGestureEvent(static_cast<ui::ScrollEvent*>(event));
     host_->ForwardGestureEvent(gesture_event);
     if (event->type() == ui::ET_SCROLL_FLING_START)
       RecordAction(UserMetricsAction("TrackpadScrollFling"));
@@ -1271,11 +1467,11 @@ bool RenderWidgetHostViewAura::OnMouseEvent(aura::MouseEvent* event) {
     window_->parent()->delegate()->OnMouseEvent(event);
 
   // Return true so that we receive released/drag events.
-  return true;
+  return ui::ER_HANDLED;
 }
 
 ui::TouchStatus RenderWidgetHostViewAura::OnTouchEvent(
-    aura::TouchEvent* event) {
+    ui::TouchEvent* event) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnTouchEvent");
   // Update the touch event first.
   WebKit::WebTouchPoint* point = UpdateWebTouchEvent(event,
@@ -1292,14 +1488,14 @@ ui::TouchStatus RenderWidgetHostViewAura::OnTouchEvent(
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus RenderWidgetHostViewAura::OnGestureEvent(
-    aura::GestureEvent* event) {
+ui::EventResult RenderWidgetHostViewAura::OnGestureEvent(
+    ui::GestureEvent* event) {
   TRACE_EVENT0("browser", "RenderWidgetHostViewAura::OnGestureEvent");
   // Pinch gestures are currently disabled by default. See crbug.com/128477.
   if ((event->type() == ui::ET_GESTURE_PINCH_BEGIN ||
       event->type() == ui::ET_GESTURE_PINCH_UPDATE ||
       event->type() == ui::ET_GESTURE_PINCH_END) && !ShouldSendPinchGesture()) {
-    return ui::GESTURE_STATUS_CONSUMED;
+    return ui::ER_CONSUMED;
   }
 
   RenderViewHostDelegate* delegate = NULL;
@@ -1340,71 +1536,19 @@ ui::GestureStatus RenderWidgetHostViewAura::OnGestureEvent(
   // (e.g. generates synthetic mouse events). So CONSUMED should be returned
   // from here to avoid any duplicate synthetic mouse-events being generated
   // from aura.
-  return ui::GESTURE_STATUS_CONSUMED;
-}
-
-bool RenderWidgetHostViewAura::CanFocus() {
-  return popup_type_ == WebKit::WebPopupTypeNone;
-}
-
-void RenderWidgetHostViewAura::OnCaptureLost() {
-  host_->LostCapture();
-}
-
-void RenderWidgetHostViewAura::OnPaint(gfx::Canvas* canvas) {
-  paint_canvas_ = canvas;
-  BackingStore* backing_store = host_->GetBackingStore(true);
-  paint_canvas_ = NULL;
-  if (backing_store) {
-    static_cast<BackingStoreAura*>(backing_store)->SkiaShowRect(gfx::Point(),
-                                                                canvas);
-  } else if (aura::Env::GetInstance()->render_white_bg()) {
-    canvas->FillRect(gfx::Rect(window_->bounds().size()), SK_ColorWHITE);
-  }
-}
-
-void RenderWidgetHostViewAura::OnDeviceScaleFactorChanged(
-    float device_scale_factor) {
-  if (!host_)
-    return;
-
-  BackingStoreAura* backing_store = static_cast<BackingStoreAura*>(
-      host_->GetBackingStore(false));
-  if (backing_store)  // NULL in hardware path.
-    backing_store->ScaleFactorChanged(device_scale_factor);
-
-  host_->SetDeviceScaleFactor(device_scale_factor);
-  current_cursor_.SetScaleFactor(device_scale_factor);
-}
-
-void RenderWidgetHostViewAura::OnWindowDestroying() {
-}
-
-void RenderWidgetHostViewAura::OnWindowDestroyed() {
-  host_->ViewDestroyed();
-  delete this;
-}
-
-void RenderWidgetHostViewAura::OnWindowTargetVisibilityChanged(bool visible) {
-}
-
-bool RenderWidgetHostViewAura::HasHitTestMask() const {
-  return false;
-}
-
-void RenderWidgetHostViewAura::GetHitTestMask(gfx::Path* mask) const {
+  return ui::ER_CONSUMED;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewAura, aura::client::ActivationDelegate implementation:
 
-bool RenderWidgetHostViewAura::ShouldActivate(const aura::Event* event) {
+bool RenderWidgetHostViewAura::ShouldActivate(const ui::Event* event) {
   bool activate = false;
   if (event) {
     if (event->type() == ui::ET_MOUSE_PRESSED) {
       activate = true;
     } else if (event->type() == ui::ET_GESTURE_BEGIN) {
-      activate = static_cast<const aura::GestureEvent*>(event)->
+      activate = static_cast<const ui::GestureEvent*>(event)->
           details().touch_points() == 1;
     }
   }
@@ -1448,7 +1592,7 @@ void RenderWidgetHostViewAura::OnCompositingAborted(
 ////////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewAura, ImageTransportFactoryObserver implementation:
 
-void RenderWidgetHostViewAura::OnLostResources(ui::Compositor* compositor) {
+void RenderWidgetHostViewAura::OnLostResources() {
   image_transport_clients_.clear();
   current_surface_ = 0;
   protection_state_id_ = 0;
@@ -1461,7 +1605,7 @@ void RenderWidgetHostViewAura::OnLostResources(ui::Compositor* compositor) {
   DCHECK(!shared_surface_handle_.is_null());
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
   factory->DestroySharedSurfaceHandle(shared_surface_handle_);
-  shared_surface_handle_ = factory->CreateSharedSurfaceHandle(compositor);
+  shared_surface_handle_ = factory->CreateSharedSurfaceHandle();
   host_->CompositingSurfaceUpdated();
   host_->ScheduleComposite();
 }
@@ -1505,7 +1649,10 @@ void RenderWidgetHostViewAura::UpdateCursorIfOverSelf() {
   if (is_loading_)
     cursor = ui::kCursorPointer;
 
-  root_window->SetCursor(cursor);
+  aura::client::CursorClient* cursor_client =
+      aura::client::GetCursorClient(root_window);
+  if (cursor_client)
+    cursor_client->SetCursor(cursor);
 }
 
 ui::InputMethod* RenderWidgetHostViewAura::GetInputMethod() const {
@@ -1612,7 +1759,7 @@ void RenderWidgetHostViewAura::InsertSyncPointAndACK(
   // sync point will not be waited for in the GPU process.
   if (compositor) {
     ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-    sync_point = factory->InsertSyncPoint(compositor);
+    sync_point = factory->InsertSyncPoint();
   }
 
   RenderWidgetHostImpl::AcknowledgeBufferPresent(

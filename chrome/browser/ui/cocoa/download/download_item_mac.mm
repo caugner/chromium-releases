@@ -8,7 +8,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item_model.h"
 #import "chrome/browser/ui/cocoa/download/download_item_controller.h"
-#include "chrome/browser/ui/cocoa/download/download_util_mac.h"
 #include "content/public/browser/download_item.h"
 #include "ui/gfx/image/image.h"
 
@@ -46,15 +45,11 @@ void DownloadItemMac::OnDownloadUpdated(content::DownloadItem* download) {
   }
 
   switch (download->GetState()) {
-    case DownloadItem::REMOVING:
-      [item_controller_ remove];  // We're deleted now!
-      break;
     case DownloadItem::COMPLETE:
       if (download->GetAutoOpened()) {
         [item_controller_ remove];  // We're deleted now!
         return;
       }
-      download_util::NotifySystemOfDownloadComplete(download->GetFullPath());
       // fall through
     case DownloadItem::IN_PROGRESS:
     case DownloadItem::CANCELLED:
@@ -67,6 +62,10 @@ void DownloadItemMac::OnDownloadUpdated(content::DownloadItem* download) {
     default:
       NOTREACHED();
   }
+}
+
+void DownloadItemMac::OnDownloadDestroyed(content::DownloadItem* download) {
+  [item_controller_ remove];  // We're deleted now!
 }
 
 void DownloadItemMac::OnDownloadOpened(content::DownloadItem* download) {
@@ -85,7 +84,7 @@ void DownloadItemMac::LoadIcon() {
   FilePath file = download_model_->download()->GetUserVerifiedFilePath();
   gfx::Image* icon = icon_manager->LookupIcon(file, IconLoader::ALL);
   if (icon) {
-    [item_controller_ setIcon:*icon];
+    [item_controller_ setIcon:icon->ToNSImage()];
     return;
   }
 
@@ -99,5 +98,5 @@ void DownloadItemMac::OnExtractIconComplete(IconManager::Handle handle,
                                             gfx::Image* icon) {
   if (!icon)
     return;
-  [item_controller_ setIcon:*icon];
+  [item_controller_ setIcon:icon->ToNSImage()];
 }

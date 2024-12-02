@@ -129,6 +129,21 @@ function disableTextSelectAndDrag(opt_allowSelectStart, opt_allowDragStart) {
 }
 
 /**
+ * Call this to stop clicks on <a href="#"> links from scrolling to the top of
+ * the page (and possibly showing a # in the link).
+ */
+function preventDefaultOnPoundLinkClicks() {
+  document.addEventListener('click', function(e) {
+    var anchor = findAncestor(e.target, function(el) {
+      return el.tagName == 'A';
+    });
+    // Use getAttribute() to prevent URL normalization.
+    if (anchor && anchor.getAttribute('href') == '#')
+      e.preventDefault();
+  });
+}
+
+/**
  * Check the directionality of the page.
  * @return {boolean} True if Chrome is running an RTL UI.
  */

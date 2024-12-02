@@ -171,10 +171,13 @@ found in the LICENSE file.
                    src="icon_host.png"
                    class="host-list-main-icon">
               <div id="this-host-name" class="box-spacer"></div>
-              <img id="this-host-rename"
-                   class="host-list-edit host-list-rename-icon"
-                   src="icon_pencil.png"
-                   tabIndex="0">
+              <span id="this-host-rename"
+                    class="host-list-edit"
+                    tabIndex="0">
+                <img id="this-host-rename"
+                     class="host-list-rename-icon"
+                     src="icon_pencil.png">
+              </span>
               <button type="button"
                       id="stop-daemon"
                       i18n-content="HOME_DAEMON_STOP_BUTTON">
@@ -605,6 +608,7 @@ found in the LICENSE file.
             </button>
             <ul>
               <li id="send-ctrl-alt-del" i18n-content="SEND_CTRL_ALT_DEL"></li>
+              <li id="send-print-screen" i18n-content="SEND_PRINT_SCREEN"></li>
             </ul>
           </span>
           <span class="menu-button" id="screen-options-menu">

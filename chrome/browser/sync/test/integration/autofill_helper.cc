@@ -17,6 +17,7 @@
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/autofill_table.h"
+#include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -217,6 +218,17 @@ void SetProfiles(int profile, std::vector<AutofillProfile>* autofill_profiles) {
   PersonalDataManager* pdm = GetPersonalDataManager(profile);
   pdm->SetObserver(&observer);
   pdm->SetProfiles(autofill_profiles);
+  MessageLoop::current()->Run();
+  pdm->RemoveObserver(&observer);
+}
+
+void SetCreditCards(int profile, std::vector<CreditCard>* credit_cards) {
+  MockPersonalDataManagerObserver observer;
+  EXPECT_CALL(observer, OnPersonalDataChanged()).
+      WillOnce(QuitUIMessageLoop());
+  PersonalDataManager* pdm = GetPersonalDataManager(profile);
+  pdm->SetObserver(&observer);
+  pdm->SetCreditCards(credit_cards);
   MessageLoop::current()->Run();
   pdm->RemoveObserver(&observer);
 }

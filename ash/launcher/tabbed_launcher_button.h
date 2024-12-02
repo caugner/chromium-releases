@@ -12,6 +12,10 @@
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/glow_hover_controller.h"
 
+namespace gfx {
+class ImageSkia;
+}
+
 namespace ui {
 class MultiAnimation;
 }
@@ -37,7 +41,7 @@ class TabbedLauncherButton : public LauncherButton {
   virtual ~TabbedLauncherButton();
 
   // Sets the images to display for this entry.
-  void SetTabImage(const SkBitmap& image);
+  void SetTabImage(const gfx::ImageSkia& image);
 
   // This only defines how the icon is drawn. Do not use it for other purposes.
   IncognitoState is_incognito() const { return is_incognito_; }
@@ -65,7 +69,7 @@ class TabbedLauncherButton : public LauncherButton {
     virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
     // Sets the image to display for this entry.
-    void SetTabImage(const SkBitmap& image);
+    void SetTabImage(const gfx::ImageSkia& image);
 
    protected:
     // View override.
@@ -73,18 +77,18 @@ class TabbedLauncherButton : public LauncherButton {
 
    private:
     TabbedLauncherButton* host_;
-    SkBitmap image_;
-    SkBitmap animating_image_;
+    gfx::ImageSkia image_;
+    gfx::ImageSkia animating_image_;
 
     // Used to animate image.
     scoped_ptr<ui::MultiAnimation> animation_;
 
     // Background images. Which one is chosen depends on the type of the window.
-    static SkBitmap* browser_image_;
-    static SkBitmap* incognito_browser_image_;
+    static const gfx::ImageSkia* browser_image_;
+    static const gfx::ImageSkia* incognito_browser_image_;
     // TODO[dave] implement panel specific image.
-    static SkBitmap* browser_panel_image_;
-    static SkBitmap* incognito_browser_panel_image_;
+    static const gfx::ImageSkia* browser_panel_image_;
+    static const gfx::ImageSkia* incognito_browser_panel_image_;
 
     DISALLOW_COPY_AND_ASSIGN(IconView);
   };

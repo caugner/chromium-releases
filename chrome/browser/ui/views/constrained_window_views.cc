@@ -17,8 +17,8 @@
 #include "chrome/browser/ui/views/constrained_window_frame_simple.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/chromium_strings.h"
@@ -46,6 +46,7 @@
 #include "ui/views/window/window_shape.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
+#include "ui/base/win/shell.h"
 #include "ui/views/widget/native_widget_win.h"
 #endif
 
@@ -187,7 +188,7 @@ class ConstrainedWindowFrameView : public views::NonClientFrameView,
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
  private:
   // Returns the thickness of the entire nonclient left, right, and bottom
@@ -223,7 +224,7 @@ class ConstrainedWindowFrameView : public views::NonClientFrameView,
   SkColor GetTitleColor() const {
     return container_->owner()->profile()->IsOffTheRecord()
 #if defined(OS_WIN) && !defined(USE_AURA)
-            || !views::NativeWidgetWin::IsAeroGlassEnabled()
+            || !ui::win::IsAeroGlassEnabled()
 #endif
             ? SK_ColorWHITE : SK_ColorBLACK;
   }
@@ -390,7 +391,7 @@ void ConstrainedWindowFrameView::OnThemeChanged() {
 // ConstrainedWindowFrameView, views::ButtonListener implementation:
 
 void ConstrainedWindowFrameView::ButtonPressed(
-    views::Button* sender, const views::Event& event) {
+    views::Button* sender, const ui::Event& event) {
   if (sender == close_button_)
     container_->CloseConstrainedWindow();
 }
@@ -517,7 +518,7 @@ gfx::Rect ConstrainedWindowFrameView::CalculateClientAreaBounds(
 
 void ConstrainedWindowFrameView::InitWindowResources() {
 #if defined(OS_WIN) && !defined(USE_AURA)
-  resources_.reset(views::NativeWidgetWin::IsAeroGlassEnabled() ?
+  resources_.reset(ui::win::IsAeroGlassEnabled() ?
       static_cast<views::WindowResources*>(new VistaWindowResources) :
       new XPWindowResources);
 #else
@@ -559,7 +560,7 @@ class ConstrainedWindowFrameViewAsh : public ash::CustomFrameViewAsh {
 
   // views::ButtonListener overrides:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE {
+                             const ui::Event& event) OVERRIDE {
     if (sender == close_button())
       container_->CloseConstrainedWindow();
   }
@@ -639,7 +640,9 @@ void ConstrainedWindowViews::FocusConstrainedWindow() {
     widget_delegate()->GetInitiallyFocusedView()->RequestFocus();
   }
 #if defined(USE_ASH)
-  GetNativeView()->Focus();
+  // We don't necessarily have a RootWindow yet.
+  if (GetNativeView()->GetRootWindow())
+    GetNativeView()->Focus();
 #endif
 }
 

@@ -126,6 +126,7 @@
 <translation id="5564962323737505851">Konfigurerer passordbehandling. Hvis passordbehandling er aktivert, kan du velge å aktivere eller deaktivere hvorvidt brukeren kan vise lagrede passord i klartekst.</translation>
 <translation id="4668325077104657568">Standardinnstilling for bilder</translation>
 <translation id="7161193985878519056">Inkognitomodus er deaktivert.</translation>
+<translation id="2524379983318108884">Tillat fanging av lyd</translation>
 <translation id="4492287494009043413">Deaktiver mulighet til å ta skjermdumper</translation>
 <translation id="6368403635025849609">Tillat JavaScript på disse nettstedene</translation>
 <translation id="6074963268421707432">Ikke tillat noen nettsteder å vise skrivebordsvarslinger</translation>
@@ -215,19 +216,13 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
       Enkelte nettprogrammer er kjent for å spise en opp stor del av kapasiteten på grunn av sine hengende GET-tilkoblinger (tilkobling lukkes ikke etter overføring av data, men holdes åpen for eventuell senere bruk), så hvis du angir verdien under 32, kan dette medføre at nettleseren også henger om for mange av slike nettprogrammer er i bruk. Du kan angi verdien under standardverdien, men dette skjer på egen risiko.
 
       Standardverdien på 32 brukes om denne retningslinjen ikke er angitt.</translation>
+<translation id="5395271912574071439">Aktiverer begrensning (curtaining) av verter for fjerntilgang mens en tilkobling er aktiv.
+
+          Hvis denne innstillingen er aktivert, deaktiveres vertenes fysiske enheter for inn- og utdata mens en fjerntilkobling er aktiv.
+
+          Hvis denne innstillingen er deaktivert eller ikke angitt, kan både lokale og eksterne brukere samhandle med verten når den deles.</translation>
 <translation id="2312509925391670075">Spør hver gang et nettsted ønsker å bruke kameraet og/eller mikrofonen min</translation>
 <translation id="1426410128494586442">Ja</translation>
-<translation id="1692788808502061374">Lar deg angi en liste over utvidelser som blir installert i bakgrunnen, uten at bruker må foreta seg noe.
-
-          Hvert element på listen er en streng som inneholder en utvidelse-ID og en nettadresse for oppdatering. Disse er adskilt med et semikolon (<ph name="SEMICOLON"/>). Utvidelse-ID-en er strengen på 32 bokstaver, som du finner blant annet på <ph name="CHROME_EXTENSIONS_LINK"/>, når i utviklermodus. Nettadressen for oppdatering skal peke til et .xml-dokument for manifestoppdatering, som beskrevet på <ph name="LINK_TO_EXTENSION_DOC1"/>.
-
-          <ph name="PRODUCT_NAME"/> henter, for hvert element, utvidelsen angitt av utvidelse-ID-en fra oppdateringstjenesten på den spesifiserte nettadressen for oppdatering. Deretter installeres utvidelsen.
-
-          Eksempelvis installerer <ph name="EXTENSION_POLICY_EXAMPLE"/> <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/>-utvidelsen fra standard oppdateringsnettadresse for Chrome Nettmarked. Se <ph name="LINK_TO_EXTENSION_DOC2"/> for mer informasjon om å være vert for utvidelser.
-
-          Brukere vil ikke kunne avinstallere utvidelser som er spesifisert i denne retningslinjen. Hvis du fjerner en utvidelse fra denne listen, blir den automatisk avinstallert av <ph name="PRODUCT_NAME"/>.
-
-          Hvis det ikke angis innstilling for denne retningslinjen, kan brukeren avinstallere enhver utvidelse i <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="4962195944157514011">Angir nettadressen til søkemotoren som brukes til et standard søk. Nettadressen skal inneholde strengen <ph name="SEARCH_TERM_MARKER"/>, som erstattes når søket utføres av termene brukeren søker etter.
 
           Dette alternativet må angis når retningslinjen DefaultSearchProviderEnabled er aktivert, og respekteres bare hvis dette er tilfellet.</translation>
@@ -291,6 +286,13 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
 
           Hvis du deaktiverer denne innstillingen eller ikke angir den, omfatter ikke den genererte Kerberos SPN-en noen port i noe tilfelle.</translation>
 <translation id="3236046242843493070">Nettadressemønstre du vil tillate installasjoner av utvidelser, programmer og brukerskript fra</translation>
+<translation id="3442095178490656861">Angir tidssonen som skal brukes for enheten. Brukere kan overstyre den angitte tidssone for den gjeldende økten. Men ved avlogging tilbakestilles denne til den angitte tidssonen. Hvis en ugyldig verdi angis, er retningslinjen fremdeles aktivert, og benytter «GMT» i stedet.
+
+      Hvis denne retningslinjen ikke brukes, blir den gjeldende tidssonen fremdeles brukt, men brukere kan endre tidssonen, og endringen er vedvarende. Dermed kommer en endring som gjøres av én bruker til å påvirke påloggingssiden og alle andre brukere.
+
+      Nye enheter har tidssonen for USA og Stillehavskysten som standard.
+
+      Formatet på verdien følger navnene på tidssoner i tidssonedatabasen «IANA Time Zone Database» (les mer her: http://en.wikipedia.org/wiki/List_of_tz_database_time). De fleste tidssoner kan refereres til som «kontinent/stor_by» eller «hav/stor_by».</translation>
 <translation id="8992176907758534924">Ikke la noen nettsteder vise bilder</translation>
 <translation id="262740370354162807">Aktiver sending av dokumenter til <ph name="CLOUD_PRINT_NAME"/></translation>
 <translation id="8704831857353097849">Liste over deaktiverte programtillegg</translation>
@@ -362,6 +364,7 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
 
       Hvis denne innstillingen ikke angis, kan brukeren endre listen over programmer som er festet i programlisten.</translation>
 <translation id="7625444193696794922">Angir den frigivende kanalen som denne enheten skal låses til.</translation>
+<translation id="2552966063069741410">Tidssone</translation>
 <translation id="3088288048720661397">Deaktiverer Google Disk-synkronisering over mobilnettverk når angitt som Sann. I slike tilfeller blir data synkronisert bare med Google Disk når tilkoblet via Wi-Fi eller Ethernet.
 
           Hvis innstillingen ikke er angitt eller angitt som Usann, kan brukere overføre filer til Google Disk via tilkoblinger over mobilnettverk.</translation>
@@ -433,6 +436,7 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
       Hvis du aktiverer denne innstillingen eller ikke angir noen verdi, fortsetter autofyll-funksjonen å være under brukerens kontroll. Dette gjør at de kan konfigurere autofyll-profiler og slå autofyll-funksjonen på og av etter eget ønske.</translation>
 <translation id="6157537876488211233">Kommadelt liste over regler for å omgå mellomtjener</translation>
 <translation id="3965339130942650562">Tidsavbrudd før inaktiv brukeravlogging utføres</translation>
+<translation id="5293547923319914979">Aktiver begrensning (curtaining) av verter for fjerntilgang.</translation>
 <translation id="7091198954851103976">Kjører alltid programtillegg som krever godkjenning</translation>
 <translation id="2021307518684405078">Forby nettsteder fra å bruke kameraet og/eller mikrofonen min</translation>
 <translation id="8870318296973696995">Startside</translation>
@@ -482,6 +486,13 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
           Hvis denne innstillingen ikke angis, er standard søkeleverandør aktivert, og brukeren kan angi listen over søkeleverandører.</translation>
 <translation id="8731693562790917685">Innholdsinnstillinger lar deg angi hvordan innholdet for spesifikke elementer (f.eks. informasjonskapsler, bilder eller JavaScript) skal håndteres.</translation>
 <translation id="2411919772666155530">Blokkér varsler på disse nettstedene</translation>
+<translation id="5281259077246025371">Tillatelse til fanging av lyd.
+
+      Når denne retningslinjen er angitt til usann, er ikke fanging av lyd tilgjengelig på enheten mens brukeren er pålogget.
+
+      Denne retningslinjen påvirker alle typer lydinnganger, og ikke bare den innebygde mikrofonen.
+
+      Hvis denne innstillingen er angitt til sann eller ikke er konfigurert, kan brukere benytte alle lydinnganger som støttes på enheten.</translation>
 <translation id="6923366716660828830">Angir navnet på standard søkeleverandør. Hvis dette ikke angis, brukes vertsnavnet angitt av søkenettadressen.
 
           Denne retningslinjen tas bare i betraktning hvis retningslinjen DefaultSearchProviderEnabled er aktivert.</translation>
@@ -529,6 +540,13 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
           Hvis du aktiverer denne innstillingen, kan ikke andre brukere endre eller overstyre dette i <ph name="PRODUCT_NAME"/>.
 
           Deaktivering av denne innstillingen er det samme som å ikke konfigurere den. Brukere kan fortsatt endre det i <ph name="PRODUCT_NAME"/>.</translation>
+<translation id="8161570238552664224">Tillatelse til avspilling av lyd.
+
+      Når denne retningslinjen er angitt til usann, er ikke lydutganger tilgjengelige på enheten mens brukeren er pålogget.
+
+      Denne retningslinjen påvirker alle typer lydutganger, og ikke bare de innebygde høyttalerne. Lydtilgjengelighetsfunksjoner hindres også av denne retningslinjen. Ikke aktiver denne retningslinjen hvis brukeren har behov for å bruke en skjermleser.
+
+      Hvis denne innstillingen er angitt til sann eller ikke er konfigurert, kan brukere benytte alle lydutganger som støttes på enheten.</translation>
 <translation id="5761030451068906335">Konfigurerer innstillinger for mellomtjener i <ph name="PRODUCT_NAME"/>. Disse retningslinjene er ikke klare for bruk ennå, så vi ber deg om ikke å bruke dem.</translation>
 <translation id="8344454543174932833">Importer bokmerker fra standard nettleser ved første kjøring</translation>
 <translation id="1019101089073227242">Angi katalog for brukerdata</translation>
@@ -685,6 +703,7 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
       Hvis du aktiverer eller deaktiverer denne innstillingen, kan ikke brukerne endre eller overstyre denne innstillingen i <ph name="PRODUCT_NAME"/>.
 
       Hvis denne retningslinjen ikke angis, kan brukeren velge om denne knappen skal vises.</translation>
+<translation id="2518231489509538392">Tillat avspilling av lyd</translation>
 <translation id="7547044444554936129">Aktiverer Instant-funksjonen i <ph name="PRODUCT_NAME"/>, og hindrer brukerne i å endre denne innstillingen.
 
       Hvis du aktiverer denne innstillingen, aktiveres Instant i <ph name="PRODUCT_NAME"/>.
@@ -761,6 +780,7 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
           Hvis du ikke angir denne retningslinjen, vil alle tjenere godtas for integrert autentisering.</translation>
 <translation id="2299220924812062390">Angi en liste over aktiverte programtillegg</translation>
 <translation id="924557436754151212">Importér lagrede passord fra standard nettleser ved første kjøring</translation>
+<translation id="1465619815762735808">Klikk for å spille av</translation>
 <translation id="7227967227357489766">Definerer listen over brukere som kan logge seg på enheten. Oppføringer har formatet <ph name="USER_WHITELIST_ENTRY_FORMAT"/>, som for eksempel <ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>. Hvis du vil tillate vilkårlige brukere på domenet, må oppføringer bruke formatet <ph name="USER_WHITELIST_ENTRY_WILDCARD"/>.
 
       Hvis denne retningslinjen ikke er konfigurert, fins det ingen begrensninger for hvilke brukere som kan logge seg på. Vær oppmerksom på at oppretting av nye brukere fortsatt krever at <ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/>-retningslinjen er konfigurert på korrekt måte.</translation>
@@ -820,6 +840,11 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
 <translation id="8631434304112909927">frem til versjon <ph name="UNTIL_VERSION"/></translation>
 <translation id="7469554574977894907">Aktiver søkeforslag</translation>
 <translation id="4906194810004762807">Oppdateringsfrekvens for enhetsinnstilling</translation>
+<translation id="1398889361882383850">Med denne retningslinjen kan du angi hvorvidt nettsteder har tillatelse til å kjøre programtillegg automatisk.  Automatisk kjøring av programtillegg kan enten tillates eller nektes for alle nettsteder.
+
+          Med klikk for avspilling kan du tillate at programtillegg kjøres, men brukeren må klikke på dem for å starte programtilleggene.
+
+          Hvis denne retningslinjen ikke angis, brukes «AllowPlugins», og brukeren kan endre den.</translation>
 <translation id="7974114691960514888">Denne retningslinjen støttes ikke lenger. Aktiverer bruk av STUN og relétjenere ved tilkobling til en ekstern klient. Hvis denne innstillingen er aktivert, kan maskinen oppdage og koble seg til eksterne vertsmaskiner selv om de er adskilt av en brannmur. Hvis denne innstillingen er deaktivert og utgående UDP-tilkoblinger filtreres av brannmuren, kan denne maskinen bare koble seg til vertsmaskiner i det lokale nettverket.</translation>
 <translation id="5511702823008968136">Aktiver bokmerkerad</translation>
 <translation id="7882585827992171421">Denne retningslinjen er aktiv bare i detaljistmodus.
@@ -847,7 +872,6 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
       Hvis du aktiverer denne innstillingen, bruker <ph name="PRODUCT_NAME"/> det angitte språket. Hvis det konfigurerte språket ikke håndteres, brukes språket en-US i stedet.
 
       Hvis denne innstillingen er deakivert eller ikke angis, bruker <ph name="PRODUCT_NAME"/> enten det brukerspesifikke foretrukne språket (hvis dette er konfiguert), systemspråket eller, som siste mulighet, en-US.</translation>
-<translation id="7271483295221961083">Gjør at du kan angi om nettstedene får kjøre programtillegg automatisk. Automatisk kjøring av programtillegg kan enten tillates for alle nettsteder, eller nektes for alle nettsteder. Hvis denne retningslinjen ikke angis, brukes AllowPlugins, og brukeren kan endre på dette.</translation>
 <translation id="718956142899066210">Tilkoblingstyper som tillates for oppdateringer</translation>
 <translation id="6985168562472482191">Navnet på nettbutikken, som vises under program-ikonet på siden Ny fane. Denne innstillingen har ingen effekt hvis EnterpriseWebStoreURL ikke er angitt. Hvis denne innstillingen er deaktivert, merkes nettbutikk-programmet (hvis dette foreligger) med sin egen nettadresse.</translation>
 <translation id="1734716591049455502">Konfigurer eksterne tilgangsalternativer</translation>
@@ -918,6 +942,17 @@ Hvis du aktiverer denne innstillingen, sendes anonym rapportering av bruk og pro
 <translation id="6658245400435704251">Angir grensen for hvor mange sekunder en enhet tilfeldig kan utsette nedlastingen av en oppdatering, fra tidspunktet oppdateringen første ble sendt til tjeneren. Enheten kan sette av en del av denne tiden i form av faktisk ventetid, og den gjenværende delen i form av antall oppdateringer som skal kontrolleres. I alle tilfelle er det den øvre grensen for spredning knyttet til en konstant tidsmengde, slik at enheten aldri blir stående fast og vente på å laste ned en oppdatering for alltid.</translation>
 <translation id="1948757837129151165">Retningslinjer for HTTP-autentisering</translation>
 <translation id="5946082169633555022">Betakanal</translation>
+<translation id="145467868108778033">Med denne retningslinjen kan du angi en liste over utvidelser som skal installeres stille, uten brukermedvirkning.
+
+          Hvert element i listen er en streng som inneholder en utvidelses-ID og en oppdateringsnettadresse med semikolon som skilletegn (<ph name="SEMICOLON"/>). Utvidelses-ID-en er en streng på 32 bokstaver som kan befinne seg på f.eks <ph name="CHROME_EXTENSIONS_LINK"/> når du bruker utviklermodus. Oppdateringsnettadressen bør peke til et oppdateringsmanifest i form av et XML-dokument, som beskrevet i <ph name="LINK_TO_EXTENSION_DOC1"/>. Vær oppmerksom på at oppdateringsnettadressen som angis i denne retningslinjen bare brukes for den første installeringen. Senere oppdateringer av utvidelsen bruker oppdateringsnettadressen som angis i utvidelsens manifest.
+
+          For hvert element henter <ph name="PRODUCT_NAME"/> utvidelsen som angis av utvidelses-ID-en fra oppdateringstjenesten på den bestemte oppdateringsnettadressen, og gjennomfører en stille installering.
+
+          <ph name="EXTENSION_POLICY_EXAMPLE"/> installerer for eksempel utvidelsen <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> fra oppdateringsnettadressen som er angitt som standard for Chrome Nettmarked. Her kan du finne ut mer om bruk av verter for utvidelser: <ph name="LINK_TO_EXTENSION_DOC2"/>.
+
+          Brukere kan ikke avinstallere utvidelser som angis av denne retningslinjen. Hvis du fjerner en utvidelse fra denne listen, blir den automatisk avinstallert av <ph name="PRODUCT_NAME"/>.
+
+          Hvis denne retningslinjen ikke angis, kan brukeren avinstallere utvidelser i <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="8303314579975657113">Angir hvilket GSSAPI-bibliotek som skal brukes for HTTP-autentisering. Du kan angi enten et biblioteksnavn eller en fullstendig bane.
 
           Hvis ingen innstillinger oppgis, går <ph name="PRODUCT_NAME"/> tilbake til å bruke et standard biblioteknavn.</translation>

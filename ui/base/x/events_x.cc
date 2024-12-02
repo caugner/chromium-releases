@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 
 #include <string.h>
 #include <X11/extensions/XInput.h>
@@ -17,6 +17,7 @@
 #include "ui/base/touch/touch_factory.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/x/valuators.h"
+#include "ui/base/x/x11_atom_cache.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/point.h"
@@ -50,6 +51,21 @@ const int kWheelScrollAmount = 53;
 const int kMinWheelButton = 4;
 const int kMaxWheelButton = 7;
 
+const char* kCMTCachedAtoms[] = {
+  AXIS_LABEL_PROP_REL_HWHEEL,
+  AXIS_LABEL_PROP_REL_WHEEL,
+  AXIS_LABEL_PROP_ABS_START_TIME,
+  AXIS_LABEL_PROP_ABS_DBL_START_TIME,
+  AXIS_LABEL_PROP_ABS_END_TIME,
+  AXIS_LABEL_PROP_ABS_DBL_END_TIME,
+  AXIS_LABEL_PROP_ABS_FLING_X,
+  AXIS_LABEL_PROP_ABS_FLING_Y,
+  AXIS_LABEL_PROP_ABS_DBL_FLING_VX,
+  AXIS_LABEL_PROP_ABS_DBL_FLING_VY,
+  AXIS_LABEL_PROP_ABS_FLING_STATE,
+  NULL
+};
+
 // A class to support the detection of scroll events, using X11 valuators.
 class CMTEventData {
  public:
@@ -64,6 +80,7 @@ class CMTEventData {
     touchpads_.reset();
     device_to_valuators_.clear();
 
+#if defined(USE_XI2_MT)
     int count = 0;
 
     // Find all the touchpad devices.
@@ -78,23 +95,18 @@ class CMTEventData {
       XFreeDeviceList(dev_list);
 
     XIDeviceInfo* info_list = XIQueryDevice(display, XIAllDevices, &count);
-    Atom x_axis = XInternAtom(display, AXIS_LABEL_PROP_REL_HWHEEL, false);
-    Atom y_axis = XInternAtom(display, AXIS_LABEL_PROP_REL_WHEEL, false);
-    Atom start_time =
-        XInternAtom(display, AXIS_LABEL_PROP_ABS_START_TIME, false);
+    Atom x_axis = atom_cache_.GetAtom(AXIS_LABEL_PROP_REL_HWHEEL);
+    Atom y_axis = atom_cache_.GetAtom(AXIS_LABEL_PROP_REL_WHEEL);
+    Atom start_time = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_START_TIME);
     Atom start_time_dbl =
-        XInternAtom(display, AXIS_LABEL_PROP_ABS_DBL_START_TIME, false);
-    Atom end_time = XInternAtom(display, AXIS_LABEL_PROP_ABS_END_TIME, false);
-    Atom end_time_dbl =
-        XInternAtom(display, AXIS_LABEL_PROP_ABS_DBL_END_TIME, false);
-    Atom fling_vx = XInternAtom(display, AXIS_LABEL_PROP_ABS_FLING_X, false);
-    Atom fling_vx_dbl =
-        XInternAtom(display, AXIS_LABEL_PROP_ABS_DBL_FLING_VX, false);
-    Atom fling_vy = XInternAtom(display, AXIS_LABEL_PROP_ABS_FLING_Y, false);
-    Atom fling_vy_dbl =
-        XInternAtom(display, AXIS_LABEL_PROP_ABS_DBL_FLING_VY, false);
-    Atom fling_state =
-        XInternAtom(display, AXIS_LABEL_PROP_ABS_FLING_STATE, false);
+        atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_DBL_START_TIME);
+    Atom end_time = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_END_TIME);
+    Atom end_time_dbl = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_DBL_END_TIME);
+    Atom fling_vx = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_FLING_X);
+    Atom fling_vx_dbl = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_DBL_FLING_VX);
+    Atom fling_vy = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_FLING_Y);
+    Atom fling_vy_dbl = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_DBL_FLING_VY);
+    Atom fling_state = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_FLING_STATE);
 
     for (int i = 0; i < count; ++i) {
       XIDeviceInfo* info = info_list + i;
@@ -105,6 +117,10 @@ class CMTEventData {
       Valuators valuators;
       bool is_cmt = false;
       for (int j = 0; j < info->num_classes; ++j) {
+        if (info->classes[j]->type == XIScrollClass) {
+          is_cmt = false;
+          break;
+        }
         if (info->classes[j]->type != XIValuatorClass)
           continue;
 
@@ -164,6 +180,7 @@ class CMTEventData {
     }
     if (info_list)
       XIFreeDeviceInfo(info_list);
+#endif  // defined(USE_XI2_MT)
   }
 
   bool natural_scroll_enabled() const { return natural_scroll_enabled_; }
@@ -355,7 +372,9 @@ class CMTEventData {
 
   };
 
-  CMTEventData() : natural_scroll_enabled_(false) {
+  CMTEventData()
+      : natural_scroll_enabled_(false),
+        atom_cache_(ui::GetXDisplay(), kCMTCachedAtoms) {
     UpdateDeviceList(ui::GetXDisplay());
   }
 
@@ -368,6 +387,7 @@ class CMTEventData {
   std::bitset<kMaxDeviceNum> cmt_devices_;
   std::bitset<kMaxDeviceNum> touchpads_;
   std::map<int, Valuators> device_to_valuators_;
+  ui::X11AtomCache atom_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(CMTEventData);
 };
@@ -576,35 +596,42 @@ gfx::Point CalibrateTouchCoordinates(
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
            switches::kEnableTouchCalibration))
     return gfx::Point(x, y);
+  // Temporarily disabling the calibration for X.
+  bool calibration_x = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableTouchCalibrationX);
   gfx::Rect bounds = gfx::Screen::GetPrimaryDisplay().bounds_in_pixel();
-  const int kLeftBorder = 49;
-  const int kRightBorder = 49;
-  const int kBottomBorder = 53;
+  const int kLeftBorder = 40;
+  const int kRightBorder = 40;
+  const int kBottomBorder = 30;
+  // A negative border offset will scale the top portion over the top area
+  // and a positive number will cut off n pixels.
   const int kTopBorder = 0;
   const int resolution_x = bounds.width();
   const int resolution_y = bounds.height();
   // The "grace area" (10% in this case) is to make it easier for the user to
   // navigate to the corner.
   const double kGraceAreaFraction = 0.1;
-  // Offset the x position to the real
-  x -= kLeftBorder;
-  // Check if we are in the grace area of the left side.
-  // Note: We might not want to do this when the gesture is locked?
-  if (x < 0 && x > -kLeftBorder * kGraceAreaFraction)
-    x = 0;
-  // Check if we are in the grace area of the right side.
-  // Note: We might not want to do this when the gesture is locked?
-  if (x > resolution_x - kLeftBorder &&
-      x < resolution_x - kLeftBorder + kRightBorder * kGraceAreaFraction)
-    x = resolution_x - kLeftBorder;
-  // Scale the screen area back to the full resolution of the screen.
-  x = (x * resolution_x) / (resolution_x - (kRightBorder + kLeftBorder));
-  // Offset the y position to the real
+  if (calibration_x) {
+    // Offset the x position to the real
+    x -= kLeftBorder;
+    // Check if we are in the grace area of the left side.
+    // Note: We might not want to do this when the gesture is locked?
+    if (x < 0 && x > -kLeftBorder * kGraceAreaFraction)
+      x = 0;
+    // Check if we are in the grace area of the right side.
+    // Note: We might not want to do this when the gesture is locked?
+    if (x > resolution_x - kLeftBorder &&
+        x < resolution_x - kLeftBorder + kRightBorder * kGraceAreaFraction)
+      x = resolution_x - kLeftBorder;
+    // Scale the screen area back to the full resolution of the screen.
+    x = (x * resolution_x) / (resolution_x - (kRightBorder + kLeftBorder));
+  }
+  // When there is a top bezel we add our border,
   y -= kTopBorder;
-  // Check if we are in the grace area of the left side.
-  // Note: We might not want to do this when the gesture is locked?
-  if (y < 0 && y > -kTopBorder * kGraceAreaFraction)
-    y = 0;
+  // and increase the sensitivity there.
+  if (kTopBorder < 0 && y < -2 * kTopBorder)
+    y /= 2;
+
   // Check if we are in the grace area of the right side.
   // Note: We might not want to do this when the gesture is locked?
   if (y > resolution_y - kTopBorder &&
@@ -684,12 +711,13 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
           bool is_cancel;
           if (GetFlingData(native_event, &vx, &vy, &is_cancel)) {
             return is_cancel ? ET_SCROLL_FLING_CANCEL : ET_SCROLL_FLING_START;
-          } else if (GetScrollOffsets(native_event, NULL, NULL))
+          } else if (GetScrollOffsets(native_event, NULL, NULL)) {
             return ET_SCROLL;
-          else if (GetButtonMaskForX2Event(xievent)) {
+          } else if (GetButtonMaskForX2Event(xievent)) {
             return ET_MOUSE_DRAGGED;
-          } else
+          } else {
             return ET_MOUSE_MOVED;
+          }
         }
       }
     }
@@ -769,6 +797,10 @@ base::TimeDelta EventTimeFromNative(const base::NativeEvent& native_event) {
     case MotionNotify:
       return base::TimeDelta::FromMilliseconds(native_event->xmotion.time);
       break;
+    case EnterNotify:
+    case LeaveNotify:
+      return base::TimeDelta::FromMilliseconds(native_event->xcrossing.time);
+      break;
     case GenericEvent: {
       double start, end;
       if (GetGestureTimes(native_event, &start, &end)) {
@@ -788,6 +820,9 @@ base::TimeDelta EventTimeFromNative(const base::NativeEvent& native_event) {
 
 gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
   switch (native_event->type) {
+    case EnterNotify:
+    case LeaveNotify:
+      return gfx::Point(native_event->xcrossing.x, native_event->xcrossing.y);
     case ButtonPress:
     case ButtonRelease:
       return gfx::Point(native_event->xbutton.x, native_event->xbutton.y);
@@ -830,6 +865,33 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
   return gfx::Point();
 }
 
+gfx::Point EventSystemLocationFromNative(
+    const base::NativeEvent& native_event) {
+  switch (native_event->type) {
+    case EnterNotify:
+    case LeaveNotify: {
+      return gfx::Point(native_event->xcrossing.x_root,
+                        native_event->xcrossing.y_root);
+    }
+    case ButtonPress:
+    case ButtonRelease: {
+      return gfx::Point(native_event->xbutton.x_root,
+                        native_event->xbutton.y_root);
+    }
+    case MotionNotify: {
+      return gfx::Point(native_event->xmotion.x_root,
+                        native_event->xmotion.y_root);
+    }
+    case GenericEvent: {
+      XIDeviceEvent* xievent =
+          static_cast<XIDeviceEvent*>(native_event->xcookie.data);
+      return gfx::Point(xievent->root_x, xievent->root_y);
+    }
+  }
+
+  return gfx::Point();
+}
+
 int EventButtonFromNative(const base::NativeEvent& native_event) {
   CHECK_EQ(GenericEvent, native_event->type);
   XIDeviceEvent* xievent =
@@ -845,7 +907,9 @@ KeyboardCode KeyboardCodeFromNative(const base::NativeEvent& native_event) {
 }
 
 bool IsMouseEvent(const base::NativeEvent& native_event) {
-  if (native_event->type == ButtonPress ||
+  if (native_event->type == EnterNotify ||
+      native_event->type == LeaveNotify ||
+      native_event->type == ButtonPress ||
       native_event->type == ButtonRelease ||
       native_event->type == MotionNotify)
     return true;
@@ -857,6 +921,29 @@ bool IsMouseEvent(const base::NativeEvent& native_event) {
            xievent->evtype == XI_Motion;
   }
   return false;
+}
+
+int GetChangedMouseButtonFlagsFromNative(
+    const base::NativeEvent& native_event) {
+  switch (native_event->type) {
+    case ButtonPress:
+    case ButtonRelease:
+      return GetEventFlagsFromXState(native_event->xbutton.state);
+    case GenericEvent: {
+      XIDeviceEvent* xievent =
+          static_cast<XIDeviceEvent*>(native_event->xcookie.data);
+      switch (xievent->evtype) {
+        case XI_ButtonPress:
+        case XI_ButtonRelease:
+          return GetEventFlagsForButton(EventButtonFromNative(native_event));
+        default:
+          break;
+      }
+    }
+    default:
+      break;
+  }
+  return 0;
 }
 
 int GetMouseWheelOffset(const base::NativeEvent& native_event) {

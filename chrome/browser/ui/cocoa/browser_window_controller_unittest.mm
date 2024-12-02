@@ -497,6 +497,8 @@ TEST_F(BrowserWindowControllerTest, BookmarkBarIsSameWidth) {
 }
 
 TEST_F(BrowserWindowControllerTest, TestTopRightForBubble) {
+  // The bookmark bubble must be attached to a lit and visible star.
+  [controller_ setStarredState:YES];
   NSPoint p = [controller_ bookmarkBubblePoint];
   NSRect all = [[controller_ window] frame];
 
@@ -707,7 +709,7 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestActivate) {
   [controller_ activate];
 
   // No fullscreen window on 10.7+.
-  if (base::mac::IsOSSnowLeopardOrEarlier())
+  if (base::mac::IsOSSnowLeopard())
     EXPECT_TRUE(IsFrontWindow([controller_ createFullscreenWindow]));
 
   // We have to cleanup after ourselves by unfullscreening.

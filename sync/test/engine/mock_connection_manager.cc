@@ -48,7 +48,8 @@ MockConnectionManager::MockConnectionManager(syncable::Directory* directory)
       throttling_(false),
       fail_with_auth_invalid_(false),
       fail_non_periodic_get_updates_(false),
-      client_command_(NULL),
+      gu_client_command_(NULL),
+      commit_client_command_(NULL),
       next_position_in_parent_(2),
       use_legacy_bookmarks_protocol_(false),
       num_get_updates_requests_(0) {
@@ -81,6 +82,8 @@ bool MockConnectionManager::PostBufferToPath(PostBufferParams* params,
   ClientToServerMessage post;
   CHECK(post.ParseFromString(params->buffer_in));
   CHECK(post.has_protocol_version());
+  CHECK(post.has_api_key());
+  CHECK(post.has_bag_of_chips());
   last_request_.CopyFrom(post);
   client_stuck_ = post.sync_problem_detected();
   sync_pb::ClientToServerResponse response;
@@ -142,9 +145,6 @@ bool MockConnectionManager::PostBufferToPath(PostBufferParams* params,
   } else {
     EXPECT_TRUE(false) << "Unknown/unsupported ClientToServerMessage";
     return false;
-  }
-  if (client_command_.get()) {
-    response.mutable_client_command()->CopyFrom(*client_command_.get());
   }
 
   {
@@ -210,10 +210,14 @@ sync_pb::SyncEntity* MockConnectionManager::AddUpdateDirectory(
                             sync_ts);
 }
 
-sync_pb::ClientCommand* MockConnectionManager::GetNextClientCommand() {
-  if (!client_command_.get())
-    client_command_.reset(new sync_pb::ClientCommand());
-  return client_command_.get();
+void MockConnectionManager::SetGUClientCommand(
+    sync_pb::ClientCommand* command) {
+  gu_client_command_.reset(command);
+}
+
+void MockConnectionManager::SetCommitClientCommand(
+    sync_pb::ClientCommand* command) {
+  commit_client_command_.reset(command);
 }
 
 sync_pb::SyncEntity* MockConnectionManager::AddUpdateBookmark(
@@ -408,8 +412,8 @@ void MockConnectionManager::ProcessGetUpdates(
     EXPECT_EQ(expected_filter_.Has(model_type), (progress_marker != NULL))
         << "Syncer requested_types differs from test expectation.";
     if (progress_marker) {
-      EXPECT_EQ((expected_payloads_.count(model_type) > 0 ?
-                 expected_payloads_[model_type] :
+      EXPECT_EQ((expected_states_.count(model_type) > 0 ?
+                 expected_states_[model_type].payload :
                  std::string()),
                 progress_marker->notification_hint());
     }
@@ -453,6 +457,10 @@ void MockConnectionManager::ProcessGetUpdates(
     response->mutable_get_updates()->set_encryption_key(keystore_key_);
 
   update_queue_.pop_front();
+
+  if (gu_client_command_.get()) {
+    response->mutable_client_command()->CopyFrom(*gu_client_command_.get());
+  }
 }
 
 void MockConnectionManager::SetKeystoreKey(const std::string& key) {
@@ -524,6 +532,11 @@ void MockConnectionManager::ProcessCommit(
     }
   }
   commit_responses_.push_back(new CommitResponse(*commit_response));
+
+  if (commit_client_command_.get()) {
+    response_buffer->mutable_client_command()->CopyFrom(
+        *commit_client_command_.get());
+  }
 }
 
 sync_pb::SyncEntity* MockConnectionManager::AddUpdateDirectory(

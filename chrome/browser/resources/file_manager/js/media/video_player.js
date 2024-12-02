@@ -23,11 +23,18 @@ function FullWindowVideoControls(
     playerContainer, videoContainer, controlsContainer) {
   VideoControls.call(this,
       controlsContainer,
-      onError,
+      onError.bind(null, null),
       function() { chrome.fileBrowserPrivate.toggleFullscreen() },
       videoContainer);
 
-  window.addEventListener('unload', this.savePosition.bind(this));
+  window.addEventListener('unload', function() {
+    this.savePosition();
+    // Workaround for crbug.com/149957. The document is not going to be GC-ed
+    // until the last Files app window closes, but we want the media pipeline
+    // to deinitialize ASAP.
+    this.getMedia().src = '';
+    this.getMedia().load();
+  }.bind(this));
 
   this.updateStyle();
   window.addEventListener('resize', this.updateStyle.bind(this));
@@ -51,33 +58,16 @@ FullWindowVideoControls.prototype = { __proto__: VideoControls.prototype };
  * the page reload.
  */
 FullWindowVideoControls.prototype.onPlayStateChanged = function() {
-  if (!this.getMedia().duration)
-    return;
-
-  var playState = (this.isPlaying() ? 'play' : 'pause') + '=' +
-      this.getMedia().currentTime.toFixed(2);
-
-  var newLocation = document.location.origin + document.location.pathname +
-      document.location.search + '#' + playState;
-
-  history.replaceState(undefined, playState, newLocation);
+  this.encodeStateIntoLocation();
 };
 
 /**
- * Resume the play state after the video is loaded.
+ * Restore the play state after the video is loaded.
  */
-FullWindowVideoControls.prototype.resumePosition = function() {
-  var video = this.getMedia();
-
-  var playState = document.location.hash.substring(1);
-  if (playState) {
-    var parts = playState.split('=');
-    video.currentTime = parseFloat(parts[1]);
-    if (parts[0] != 'pause')
-      video.play();
-  } else {
-    VideoControls.prototype.resumePosition.apply(this, arguments);
-    video.play();
+FullWindowVideoControls.prototype.restorePlayState = function() {
+  if (!this.decodeStateFromLocation()) {
+    VideoControls.prototype.restorePlayState.apply(this, arguments);
+    this.play();
   }
 };
 

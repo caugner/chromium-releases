@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/cpu.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "media/base/decoder_buffer.h"
@@ -16,6 +17,11 @@
 #include "media/ffmpeg/ffmpeg_common.h"
 
 namespace media {
+
+// Maximum number of concurrent VDA::Decode() operations GVD will maintain.
+// Higher values allow better pipelining in the GPU, but also require more
+// resources.
+enum { kMaxInFlightDecodes = 4 };
 
 GpuVideoDecoder::Factories::~Factories() {}
 
@@ -44,20 +50,21 @@ GpuVideoDecoder::BufferData::BufferData(
 GpuVideoDecoder::BufferData::~BufferData() {}
 
 GpuVideoDecoder::GpuVideoDecoder(
-    MessageLoop* message_loop,
-    MessageLoop* vda_loop,
+    const MessageLoopFactoryCB& message_loop_factory_cb,
+    const scoped_refptr<base::MessageLoopProxy>& vda_loop_proxy,
     const scoped_refptr<Factories>& factories)
-    : gvd_loop_proxy_(message_loop->message_loop_proxy()),
-      vda_loop_proxy_(vda_loop->message_loop_proxy()),
+    : message_loop_factory_cb_(message_loop_factory_cb),
+      gvd_loop_proxy_(NULL),
+      vda_loop_proxy_(vda_loop_proxy),
       factories_(factories),
       state_(kNormal),
       demuxer_read_in_progress_(false),
       decoder_texture_target_(0),
       next_picture_buffer_id_(0),
       next_bitstream_buffer_id_(0),
-      shutting_down_(false),
       error_occured_(false) {
-  DCHECK(gvd_loop_proxy_ && factories_);
+  DCHECK(!message_loop_factory_cb_.is_null());
+  DCHECK(factories_);
 }
 
 void GpuVideoDecoder::Reset(const base::Closure& closure)  {
@@ -84,14 +91,7 @@ void GpuVideoDecoder::Reset(const base::Closure& closure)  {
   if (!pending_read_cb_.is_null())
     EnqueueFrameAndTriggerFrameDelivery(VideoFrame::CreateEmptyFrame());
 
-  if (shutting_down_) {
-    // Immediately fire the callback instead of waiting for the reset to
-    // complete (which will happen after PipelineImpl::Stop() completes).
-    gvd_loop_proxy_->PostTask(FROM_HERE, closure);
-  } else {
-    pending_reset_cb_ = closure;
-  }
-
+  pending_reset_cb_ = closure;
   vda_loop_proxy_->PostTask(FROM_HERE, base::Bind(
       &VideoDecodeAccelerator::Reset, weak_vda_));
 }
@@ -113,13 +113,15 @@ void GpuVideoDecoder::Stop(const base::Closure& closure) {
 void GpuVideoDecoder::Initialize(const scoped_refptr<DemuxerStream>& stream,
                                  const PipelineStatusCB& orig_status_cb,
                                  const StatisticsCB& statistics_cb) {
-  if (!gvd_loop_proxy_->BelongsToCurrentThread()) {
+  if (!gvd_loop_proxy_) {
+    gvd_loop_proxy_ = base::ResetAndReturn(&message_loop_factory_cb_).Run();
     gvd_loop_proxy_->PostTask(FROM_HERE, base::Bind(
         &GpuVideoDecoder::Initialize,
         this, stream, orig_status_cb, statistics_cb));
     return;
   }
 
+  DCHECK(gvd_loop_proxy_->BelongsToCurrentThread());
   PipelineStatusCB status_cb = CreateUMAReportingPipelineCB(
       "Media.GpuVideoDecoderInitializeStatus", orig_status_cb);
 
@@ -132,10 +134,28 @@ void GpuVideoDecoder::Initialize(const scoped_refptr<DemuxerStream>& stream,
   // TODO(scherkus): this check should go in Pipeline prior to creating
   // decoder objects.
   const VideoDecoderConfig& config = stream->video_decoder_config();
-  if (!config.IsValidConfig()) {
-    DLOG(ERROR) << "Invalid video stream - " << config.AsHumanReadableString();
+  if (!config.IsValidConfig() || config.is_encrypted()) {
+    DLOG(ERROR) << "Unsupported video stream - "
+                << config.AsHumanReadableString();
     status_cb.Run(PIPELINE_ERROR_DECODE);
     return;
+  }
+
+  // Only non-Windows, Ivy Bridge+ platforms can support more than 1920x1080.
+  // We test against 1088 to account for 16x16 macroblocks.
+  if (config.coded_size().width() > 1920 ||
+      config.coded_size().height() > 1088) {
+    base::CPU cpu;
+    bool hw_large_video_support =
+        cpu.vendor_name() == "GenuineIntel" && cpu.model() >= 58;
+    bool os_large_video_support = true;
+#if defined(OS_WINDOWS)
+    os_large_video_support = false;
+#endif
+    if (!(os_large_video_support && hw_large_video_support)) {
+      status_cb.Run(DECODER_ERROR_NOT_SUPPORTED);
+      return;
+    }
   }
 
   VideoDecodeAccelerator* vda =
@@ -165,6 +185,15 @@ void GpuVideoDecoder::SetVDA(VideoDecodeAccelerator* vda) {
   weak_vda_ = vda->AsWeakPtr();
 }
 
+void GpuVideoDecoder::DestroyTextures() {
+  for (std::map<int32, PictureBuffer>::iterator it =
+          picture_buffers_in_decoder_.begin();
+          it != picture_buffers_in_decoder_.end(); ++it) {
+    factories_->DeleteTexture(it->second.texture_id());
+  }
+  picture_buffers_in_decoder_.clear();
+}
+
 void GpuVideoDecoder::DestroyVDA() {
   DCHECK(gvd_loop_proxy_->BelongsToCurrentThread());
   VideoDecodeAccelerator* vda ALLOW_UNUSED = vda_.release();
@@ -176,6 +205,11 @@ void GpuVideoDecoder::DestroyVDA() {
       FROM_HERE,
       base::Bind(&VideoDecodeAccelerator::Destroy, weak_vda_),
       base::Bind(&GpuVideoDecoder::Release, this));
+
+// TODO(posciak): enable for all.
+#ifdef OS_CHROMEOS
+  DestroyTextures();
+#endif
 }
 
 void GpuVideoDecoder::Read(const ReadCB& read_cb) {
@@ -218,6 +252,17 @@ void GpuVideoDecoder::Read(const ReadCB& read_cb) {
   }
 }
 
+bool GpuVideoDecoder::CanMoreDecodeWorkBeDone() {
+#if defined(OS_WIN)
+  // TODO(ananta): the DXVA decoder stymies our attempt to pipeline Decode()s by
+  // claiming to be done with previous work way too quickly.  Until this is
+  // resolved we don't pipeline work.  http://crbug.com/150925
+  return bitstream_buffers_in_decoder_.empty() && !pending_read_cb_.is_null();
+#else
+  return bitstream_buffers_in_decoder_.size() < kMaxInFlightDecodes;
+#endif
+}
+
 void GpuVideoDecoder::RequestBufferDecode(
     DemuxerStream::Status status,
     const scoped_refptr<DecoderBuffer>& buffer) {
@@ -236,7 +281,7 @@ void GpuVideoDecoder::RequestBufferDecode(
 
     // TODO(acolwell): Add support for reinitializing the decoder when
     // |status| == kConfigChanged. For now we just trigger a decode error.
-    DecoderStatus decoder_status =
+    Status decoder_status =
         (status == DemuxerStream::kAborted) ? kOk : kDecodeError;
     gvd_loop_proxy_->PostTask(FROM_HERE, base::Bind(
         pending_read_cb_, decoder_status, scoped_refptr<VideoFrame>()));
@@ -258,6 +303,9 @@ void GpuVideoDecoder::RequestBufferDecode(
     return;
   }
 
+  if (!pending_reset_cb_.is_null())
+    return;
+
   size_t size = buffer->GetDataSize();
   SHMBuffer* shm_buffer = GetSHM(size);
   memcpy(shm_buffer->shm->memory(), buffer->GetData(), size);
@@ -270,6 +318,9 @@ void GpuVideoDecoder::RequestBufferDecode(
 
   vda_loop_proxy_->PostTask(FROM_HERE, base::Bind(
       &VideoDecodeAccelerator::Decode, weak_vda_, bitstream_buffer));
+
+  if (CanMoreDecodeWorkBeDone())
+    EnsureDemuxOrDecode();
 }
 
 void GpuVideoDecoder::RecordBufferData(
@@ -303,15 +354,6 @@ void GpuVideoDecoder::GetBufferData(int32 id, base::TimeDelta* timestamp,
 
 bool GpuVideoDecoder::HasAlpha() const {
   return true;
-}
-
-void GpuVideoDecoder::PrepareForShutdownHack() {
-  if (!gvd_loop_proxy_->BelongsToCurrentThread()) {
-    gvd_loop_proxy_->PostTask(FROM_HERE, base::Bind(
-        &GpuVideoDecoder::PrepareForShutdownHack, this));
-    return;
-  }
-  shutting_down_ = true;
 }
 
 void GpuVideoDecoder::NotifyInitializeDone() {
@@ -391,6 +433,8 @@ void GpuVideoDecoder::PictureReady(const media::Picture& picture) {
   scoped_refptr<VideoFrame> frame(VideoFrame::WrapNativeTexture(
       pb.texture_id(), decoder_texture_target_, pb.size(), natural_size,
       timestamp,
+      base::Bind(&Factories::ReadPixels, factories_, pb.texture_id(),
+                 decoder_texture_target_, pb.size()),
       base::Bind(&GpuVideoDecoder::ReusePictureBuffer, this,
                  picture.picture_buffer_id())));
 
@@ -476,10 +520,8 @@ void GpuVideoDecoder::NotifyEndOfBitstreamBuffer(int32 id) {
   }
   bitstream_buffers_in_decoder_.erase(it);
 
-  if (!pending_read_cb_.is_null() && pending_reset_cb_.is_null() &&
-      state_ != kDrainingDecoder &&
-      bitstream_buffers_in_decoder_.empty()) {
-    DCHECK(ready_video_frames_.empty());
+  if (pending_reset_cb_.is_null() && state_ != kDrainingDecoder &&
+      CanMoreDecodeWorkBeDone()) {
     EnsureDemuxOrDecode();
   }
 }
@@ -498,6 +540,11 @@ GpuVideoDecoder::~GpuVideoDecoder() {
     it->second.shm_buffer->shm->Close();
   }
   bitstream_buffers_in_decoder_.clear();
+
+// TODO(posciak): enable for all.
+#ifdef OS_CHROMEOS
+  DestroyTextures();
+#endif
 }
 
 void GpuVideoDecoder::EnsureDemuxOrDecode() {

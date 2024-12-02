@@ -266,9 +266,12 @@ void CreateApplicationShortcutView::InitControls() {
   quick_launch_check_box_ = NULL;
 
 #if defined(OS_WIN)
-  menu_check_box_ = AddCheckbox(
-      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_START_MENU_CHKBOX),
-      profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateInAppsMenu));
+  // Do not allow creating shortcuts on the Start Screen for Windows 8.
+  if (base::win::GetVersion() < base::win::VERSION_WIN8) {
+    menu_check_box_ = AddCheckbox(
+        l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_START_MENU_CHKBOX),
+        profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateInAppsMenu));
+  }
 
   quick_launch_check_box_ = AddCheckbox(
       (base::win::GetVersion() >= base::win::VERSION_WIN7) ?
@@ -381,7 +384,7 @@ bool CreateApplicationShortcutView::Accept() {
   shortcut_info_.create_in_quick_launch_bar = false;
 #endif
 
-  web_app::CreateShortcut(profile_->GetPath(), shortcut_info_);
+  web_app::CreateShortcuts(shortcut_info_);
   return true;
 }
 
@@ -399,7 +402,7 @@ views::Checkbox* CreateApplicationShortcutView::AddCheckbox(
 }
 
 void CreateApplicationShortcutView::ButtonPressed(views::Button* sender,
-                                                  const views::Event& event) {
+                                                  const ui::Event& event) {
   if (sender == desktop_check_box_)
     profile_->GetPrefs()->SetBoolean(prefs::kWebAppCreateOnDesktop,
         desktop_check_box_->checked() ? true : false);
@@ -422,7 +425,8 @@ CreateUrlApplicationShortcutView::CreateUrlApplicationShortcutView(
 
   web_app::GetShortcutInfoForTab(tab_contents_, &shortcut_info_);
   const WebApplicationInfo& app_info =
-      tab_contents_->extension_tab_helper()->web_app_info();
+      extensions::TabHelper::FromWebContents(tab_contents_->web_contents())->
+          web_app_info();
   if (!app_info.icons.empty()) {
     web_app::GetIconsInfo(app_info, &unprocessed_icons_);
     FetchIcon();
@@ -440,9 +444,10 @@ bool CreateUrlApplicationShortcutView::Accept() {
   if (!CreateApplicationShortcutView::Accept())
     return false;
 
-  tab_contents_->extension_tab_helper()->SetAppIcon(
-      shortcut_info_.favicon.IsEmpty() ? SkBitmap() :
-                                         *shortcut_info_.favicon.ToSkBitmap());
+  extensions::TabHelper::FromWebContents(tab_contents_->web_contents())->
+      SetAppIcon(shortcut_info_.favicon.IsEmpty()
+          ? SkBitmap()
+          : *shortcut_info_.favicon.ToSkBitmap());
   Browser* browser =
       browser::FindBrowserWithWebContents(tab_contents_->web_contents());
   if (browser)
@@ -493,7 +498,6 @@ CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
   shortcut_info_.url = GURL(app_->launch_web_url());
   shortcut_info_.title = UTF8ToUTF16(app_->name());
   shortcut_info_.description = UTF8ToUTF16(app_->description());
-  shortcut_info_.is_platform_app = app_->is_platform_app();
   shortcut_info_.extension_path = app_->path();
   shortcut_info_.profile_path = profile->GetPath();
 

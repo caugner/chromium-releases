@@ -9,7 +9,7 @@
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/resource_response.h"
 #include "ipc/ipc_message_macros.h"
-#include "net/base/upload_data.h"
+#include "webkit/glue/resource_request_body.h"
 
 #define IPC_MESSAGE_START ResourceMsgStart
 #undef IPC_MESSAGE_EXPORT
@@ -17,7 +17,7 @@
 
 IPC_STRUCT_TRAITS_BEGIN(content::ResourceResponseHead)
   IPC_STRUCT_TRAITS_PARENT(webkit_glue::ResourceResponseInfo)
-  IPC_STRUCT_TRAITS_MEMBER(status)
+  IPC_STRUCT_TRAITS_MEMBER(error_code)
   IPC_STRUCT_TRAITS_MEMBER(request_start)
   IPC_STRUCT_TRAITS_MEMBER(response_start)
 IPC_STRUCT_TRAITS_END()
@@ -94,8 +94,9 @@ IPC_STRUCT_BEGIN(ResourceHostMsg_Request)
   // or kNoHostId.
   IPC_STRUCT_MEMBER(int, appcache_host_id)
 
-  // Optional upload data (may be null).
-  IPC_STRUCT_MEMBER(scoped_refptr<net::UploadData>, upload_data)
+  // Optional resource request body (may be null).
+  IPC_STRUCT_MEMBER(scoped_refptr<webkit_glue::ResourceRequestBody>,
+                    request_body)
 
   IPC_STRUCT_MEMBER(bool, download_to_file)
 
@@ -155,12 +156,26 @@ IPC_MESSAGE_ROUTED3(ResourceMsg_ReceivedRedirect,
                     GURL /* new_url */,
                     content::ResourceResponseHead)
 
-// Sent when some data from a resource request is ready. The handle should
-// already be mapped into the process that receives this message.
+// Sent to set the shared memory buffer to be used to transmit response data to
+// the renderer.  Subsequent DataReceived messages refer to byte ranges in the
+// shared memory buffer.  The shared memory buffer should be retained by the
+// renderer until the resource request completes.
+//
+// NOTE: The shared memory handle should already be mapped into the process
+// that receives this message.
+//
+IPC_MESSAGE_ROUTED3(ResourceMsg_SetDataBuffer,
+                    int /* request_id */,
+                    base::SharedMemoryHandle /* shm_handle */,
+                    int /* shm_size */)
+
+// Sent when some data from a resource request is ready.  The data offset and
+// length specify a byte range into the shared memory buffer provided by the
+// SetDataBuffer message.
 IPC_MESSAGE_ROUTED4(ResourceMsg_DataReceived,
                     int /* request_id */,
-                    base::SharedMemoryHandle /* data */,
-                    int /* data_len */,
+                    int /* data_offset */,
+                    int /* data_length */,
                     int /* encoded_data_length */)
 
 // Sent when some data from a resource request has been downloaded to
@@ -171,9 +186,10 @@ IPC_MESSAGE_ROUTED2(ResourceMsg_DataDownloaded,
                     int /* data_len */)
 
 // Sent when the request has been completed.
-IPC_MESSAGE_ROUTED4(ResourceMsg_RequestComplete,
+IPC_MESSAGE_ROUTED5(ResourceMsg_RequestComplete,
                     int /* request_id */,
-                    net::URLRequestStatus /* status */,
+                    int /* error_code */,
+                    bool /* was_ignored_by_handler */,
                     std::string /* security info */,
                     base::TimeTicks /* completion_time */)
 

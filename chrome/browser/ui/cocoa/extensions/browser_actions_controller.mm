@@ -12,9 +12,10 @@
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
@@ -175,9 +176,13 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
                                        public ExtensionToolbarModel::Observer {
  public:
   ExtensionServiceObserverBridge(BrowserActionsController* owner,
-                                  Profile* profile) : owner_(owner) {
+                                 Browser* browser)
+    : owner_(owner), browser_(browser) {
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-                   content::Source<Profile>(profile));
+                   content::Source<Profile>(browser->profile()));
+    registrar_.Add(this,
+                   chrome::NOTIFICATION_EXTENSION_COMMAND_BROWSER_ACTION_MAC,
+                   content::Source<Profile>(browser->profile()));
   }
 
   // Overridden from content::NotificationObserver.
@@ -190,6 +195,27 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
         if (popup && ![popup isClosing])
           [popup close];
 
+        break;
+      }
+      case chrome::NOTIFICATION_EXTENSION_COMMAND_BROWSER_ACTION_MAC: {
+        std::pair<const std::string, gfx::NativeWindow>* payload =
+            content::Details<std::pair<const std::string, gfx::NativeWindow> >(
+                details).ptr();
+        std::string extension_id = payload->first;
+        gfx::NativeWindow window = payload->second;
+        if (window != browser_->window()->GetNativeWindow())
+          break;
+        ExtensionService* service = browser_->profile()->GetExtensionService();
+        if (!service)
+          break;
+        const Extension* extension = service->GetExtensionById(extension_id,
+                                                               false);
+        if (!extension)
+          break;
+        BrowserActionButton* button = [owner_ buttonForExtension:extension];
+        // |button| can be nil when the browser action has its button hidden.
+        if (button)
+          [owner_ browserActionClicked:button];
         break;
       }
       default:
@@ -211,6 +237,9 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
  private:
   // The object we need to inform when we get a notification. Weak. Owns us.
   BrowserActionsController* owner_;
+
+  // The browser we listen for events from. Weak.
+  Browser* browser_;
 
   // Used for registering to receive notifications and automatic clean up.
   content::NotificationRegistrar registrar_;
@@ -237,11 +266,11 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
         prefs::kBrowserActionContainerWidth))
       [BrowserActionsController registerUserPrefs:profile_->GetPrefs()];
 
-    observer_.reset(new ExtensionServiceObserverBridge(self, profile_));
-    ExtensionService* extensionsService = profile_->GetExtensionService();
-    // |extensionsService| can be NULL in Incognito.
-    if (extensionsService) {
-      toolbarModel_ = extensionsService->toolbar_model();
+    observer_.reset(new ExtensionServiceObserverBridge(self, browser_));
+    ExtensionService* extensionService = profile_->GetExtensionService();
+    // |extensionService| can be NULL in Incognito.
+    if (extensionService) {
+      toolbarModel_ = extensionService->toolbar_model();
       toolbarModel_->AddObserver(observer_.get());
     }
 
@@ -443,8 +472,9 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
     return;
 
   NSUInteger i = 0;
-  for (ExtensionList::iterator iter = toolbarModel_->begin();
-       iter != toolbarModel_->end(); ++iter) {
+  for (ExtensionList::const_iterator iter =
+           toolbarModel_->toolbar_items().begin();
+       iter != toolbarModel_->toolbar_items().end(); ++iter) {
     if (![self shouldDisplayBrowserAction:*iter])
       continue;
 
@@ -533,8 +563,9 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
 
 - (void)positionActionButtonsAndAnimate:(BOOL)animate {
   NSUInteger i = 0;
-  for (ExtensionList::iterator iter = toolbarModel_->begin();
-       iter != toolbarModel_->end(); ++iter) {
+  for (ExtensionList::const_iterator iter =
+           toolbarModel_->toolbar_items().begin();
+       iter != toolbarModel_->toolbar_items().end(); ++iter) {
     if (![self shouldDisplayBrowserAction:*iter])
       continue;
     BrowserActionButton* button = [self buttonForExtension:(*iter)];
@@ -557,7 +588,8 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
     }
     CGFloat intersectionWidth =
         NSWidth(NSIntersectionRect([containerView_ bounds], buttonFrame));
-    CGFloat alpha = std::max(0.0f, intersectionWidth / NSWidth(buttonFrame));
+    CGFloat alpha = std::max(static_cast<CGFloat>(0.0),
+                             intersectionWidth / NSWidth(buttonFrame));
     [button setAlphaValue:alpha];
     [button setNeedsDisplay:YES];
   }
@@ -624,8 +656,9 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
 }
 
 - (void)containerDragFinished:(NSNotification*)notification {
-  for (ExtensionList::iterator iter = toolbarModel_->begin();
-       iter != toolbarModel_->end(); ++iter) {
+  for (ExtensionList::const_iterator iter =
+           toolbarModel_->toolbar_items().begin();
+       iter != toolbarModel_->toolbar_items().end(); ++iter) {
     BrowserActionButton* button = [self buttonForExtension:(*iter)];
     NSRect buttonFrame = [button frame];
     if (NSContainsRect([containerView_ bounds], buttonFrame))
@@ -663,8 +696,9 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
   NSRect draggedButtonFrame = [draggedButton frame];
 
   NSUInteger index = 0;
-  for (ExtensionList::iterator iter = toolbarModel_->begin();
-       iter != toolbarModel_->end(); ++iter) {
+  for (ExtensionList::const_iterator iter =
+           toolbarModel_->toolbar_items().begin();
+       iter != toolbarModel_->toolbar_items().end(); ++iter) {
     BrowserActionButton* button = [self buttonForExtension:(*iter)];
     CGFloat intersectionWidth =
         NSWidth(NSIntersectionRect(draggedButtonFrame, [button frame]));
@@ -813,11 +847,11 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
 }
 
 - (int)currentTabId {
-  TabContents* selected_tab = chrome::GetActiveTabContents(browser_);
-  if (!selected_tab)
+  content::WebContents* active_tab = chrome::GetActiveWebContents(browser_);
+  if (!active_tab)
     return -1;
 
-  return selected_tab->restore_tab_helper()->session_id().id();
+  return SessionTabHelper::FromWebContents(active_tab)->session_id().id();
 }
 
 #pragma mark -
@@ -826,8 +860,10 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
 - (NSButton*)buttonWithIndex:(NSUInteger)index {
   if (profile_->IsOffTheRecord())
     index = toolbarModel_->IncognitoIndexToOriginal(index);
-  if (index < toolbarModel_->size()) {
-    const Extension* extension = toolbarModel_->GetExtensionByIndex(index);
+  const extensions::ExtensionList& toolbar_items =
+      toolbarModel_->toolbar_items();
+  if (index < toolbar_items.size()) {
+    const Extension* extension = toolbar_items[index];
     return [buttons_ objectForKey:base::SysUTF8ToNSString(extension->id())];
   }
   return nil;

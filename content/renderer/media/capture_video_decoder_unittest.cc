@@ -30,6 +30,7 @@ ACTION(DeleteDataBuffer) {
 
 ACTION_P2(CaptureStopped, decoder, vc_impl) {
   decoder->OnStopped(vc_impl);
+  decoder->OnRemoved(vc_impl);
 }
 
 MATCHER_P2(HasSize, width, height, "") {
@@ -159,7 +160,7 @@ class CaptureVideoDecoderTest : public ::testing::Test {
     decoder_->OnBufferReady(vc_impl_.get(), buffer);
   }
 
-  MOCK_METHOD2(FrameReady, void(media::VideoDecoder::DecoderStatus status,
+  MOCK_METHOD2(FrameReady, void(media::VideoDecoder::Status status,
                                 const scoped_refptr<media::VideoFrame>&));
 
   // Fixture members.
@@ -217,12 +218,12 @@ TEST_F(CaptureVideoDecoderTest, ReadAndShutdown) {
   // teardown the pipeline) even when there's no input frame.
   Initialize();
 
-  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk,
-                                HasSize(0, 0))).Times(2);
+  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk, HasSize(0, 0)));
   decoder_->Read(read_cb_);
-  decoder_->PrepareForShutdownHack();
+  Stop();
+
+  // Any read after stopping should be immediately satisfied.
+  EXPECT_CALL(*this, FrameReady(media::VideoDecoder::kOk, HasSize(0, 0)));
   decoder_->Read(read_cb_);
   message_loop_->RunAllPending();
-
-  Stop();
 }

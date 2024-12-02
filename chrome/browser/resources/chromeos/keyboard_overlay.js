@@ -74,7 +74,7 @@ var KEYCODE_TO_LABEL = {
   112: 'back',
   113: 'forward',
   114: 'reload',
-  115: 'full screen',
+  115: 'maximize',
   116: 'switch window',
   117: 'bright down',
   118: 'bright up',
@@ -177,8 +177,6 @@ function getModifiers(e) {
     16: 'SHIFT',
     17: 'CTRL',
     18: 'ALT',
-    91: 'ALT', // left ALT pressed with SHIFT
-    92: 'ALT', // right ALT pressed with SHIFT
   };
   var modifierWithKeyCode = keyCodeToModifier[e.keyCode];
   var isPressed = {'SHIFT': e.shiftKey, 'CTRL': e.ctrlKey, 'ALT': e.altKey};

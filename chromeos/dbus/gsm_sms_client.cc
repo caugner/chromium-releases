@@ -152,8 +152,11 @@ class SMSProxy {
   }
 
   dbus::ObjectProxy* proxy_;
-  base::WeakPtrFactory<SMSProxy> weak_ptr_factory_;
   SmsReceivedHandler sms_received_handler_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<SMSProxy> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SMSProxy);
 };
@@ -206,7 +209,7 @@ class GsmSMSClientImpl : public GsmSMSClient {
 
   // GsmSMSClient override.
   virtual void RequestUpdate(const std::string& service_name,
-                             const dbus::ObjectPath& object_path) {
+                             const dbus::ObjectPath& object_path) OVERRIDE {
   }
 
  private:
@@ -296,7 +299,7 @@ class GsmSMSClientStubImpl : public GsmSMSClient {
 
   // GsmSMSClient override.
   virtual void RequestUpdate(const std::string& service_name,
-                             const dbus::ObjectPath& object_path) {
+                             const dbus::ObjectPath& object_path) OVERRIDE {
     if (!CommandLine::ForCurrentProcess()->HasSwitch(
             chromeos::switches::kSmsTestMessages))
       return;

@@ -14,8 +14,9 @@
 
 namespace extensions {
 
-Socket::Socket(ApiResourceEventNotifier* event_notifier)
-    : ApiResource(event_notifier),
+Socket::Socket(const std::string& owner_extension_id,
+               ApiResourceEventNotifier* event_notifier)
+    : ApiResource(owner_extension_id, event_notifier),
       port_(0),
       is_connected_(false) {
 }
@@ -123,5 +124,16 @@ void Socket::IPEndPointToStringAndPort(const net::IPEndPoint& address,
     *port = address.port();
   }
 }
+
+Socket::WriteRequest::WriteRequest(scoped_refptr<net::IOBuffer> io_buffer,
+                                   int byte_count,
+                                   const CompletionCallback& callback)
+    : io_buffer(io_buffer),
+      byte_count(byte_count),
+      callback(callback),
+      bytes_written(0) {
+}
+
+Socket::WriteRequest::~WriteRequest() { }
 
 }  // namespace extensions

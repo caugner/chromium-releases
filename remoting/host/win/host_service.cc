@@ -8,11 +8,12 @@
 #include "remoting/host/win/host_service.h"
 
 #include <windows.h>
+#include <shellapi.h>
 #include <wtsapi32.h>
-#include <stdio.h>
 
 #include "base/at_exit.h"
 #include "base/base_paths.h"
+#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
@@ -23,6 +24,7 @@
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/wrapped_window_proc.h"
+#include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/scoped_sc_handle_win.h"
 #include "remoting/base/stoppable.h"
@@ -53,35 +55,45 @@ const char kIoThreadName[] = "I/O thread";
 const wchar_t kSessionNotificationWindowClass[] =
   L"Chromoting_SessionNotificationWindow";
 
-// Command line actions and switches:
-// "run" sumply runs the service as usual.
-const wchar_t kRunActionName[] = L"run";
+// Command line switches:
 
 // "--console" runs the service interactively for debugging purposes.
 const char kConsoleSwitchName[] = "console";
+
+// "--elevate=<binary>" requests <binary> to be launched elevated, presenting
+// a UAC prompt if necessary.
+const char kElevateSwitchName[] = "elevate";
 
 // "--help" or "--?" prints the usage message.
 const char kHelpSwitchName[] = "help";
 const char kQuestionSwitchName[] = "?";
 
-const char kUsageMessage[] =
-  "\n"
-  "Usage: %s [action] [options]\n"
-  "\n"
-  "Actions:\n"
-  "  run           - Run the service (default if no action was specified).\n"
-  "\n"
-  "Options:\n"
-  "  --console     - Run the service interactively for debugging purposes.\n"
-  "  --help, --?   - Print this message.\n";
+const wchar_t kUsageMessage[] =
+  L"\n"
+  L"Usage: %ls [options]\n"
+  L"\n"
+  L"Options:\n"
+  L"  --console       - Run the service interactively for debugging purposes.\n"
+  L"  --elevate=<...> - Run <...> elevated.\n"
+  L"  --help, --?     - Print this message.\n";
+
+// The command line parameters that should be copied from the service's command
+// line when launching an elevated child.
+const char* kCopiedSwitchNames[] = {
+    "host-config", "daemon-pipe", switches::kV, switches::kVModule };
 
 // Exit codes:
 const int kSuccessExitCode = 0;
 const int kUsageExitCode = 1;
 const int kErrorExitCode = 2;
 
-void usage(const char* program_name) {
-  fprintf(stderr, kUsageMessage, program_name);
+void usage(const FilePath& program_name) {
+  LOG(INFO) << StringPrintf(kUsageMessage,
+                            UTF16ToWide(program_name.value()).c_str());
+}
+
+void QuitMessageLoop(MessageLoop* message_loop) {
+  message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 }  // namespace
@@ -112,7 +124,7 @@ void HostService::RemoveWtsConsoleObserver(WtsConsoleObserver* observer) {
 
 void HostService::OnChildStopped() {
   child_.reset(NULL);
-  main_task_runner_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  main_task_runner_ = NULL;
 }
 
 void HostService::OnSessionChange() {
@@ -164,17 +176,15 @@ HostService* HostService::GetInstance() {
 bool HostService::InitWithCommandLine(const CommandLine* command_line) {
   CommandLine::StringVector args = command_line->GetArgs();
 
-  // Choose the action to perform.
+  // Check if launch with elevation was requested.
+  if (command_line->HasSwitch(kElevateSwitchName)) {
+    run_routine_ = &HostService::Elevate;
+    return true;
+  }
+
   if (!args.empty()) {
-    if (args.size() > 1) {
-      LOG(ERROR) << "Invalid command line: more than one action requested.";
-      return false;
-    }
-    if (args[0] != kRunActionName) {
-      LOG(ERROR) << "Invalid command line: invalid action specified: "
-                 << args[0];
-      return false;
-    }
+    LOG(ERROR) << "No positional parameters expected.";
+    return false;
   }
 
   // Run interactively if needed.
@@ -190,39 +200,72 @@ int HostService::Run() {
   return (this->*run_routine_)();
 }
 
-void HostService::RunMessageLoop(MessageLoop* message_loop) {
+void HostService::CreateLauncher(
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner) {
+
 #if defined(REMOTING_MULTI_PROCESS)
 
   child_ = DaemonProcess::Create(
       main_task_runner_,
+      io_task_runner,
       base::Bind(&HostService::OnChildStopped,
                  base::Unretained(this))).PassAs<Stoppable>();
 
 #else  // !defined(REMOTING_MULTI_PROCESS)
-
-  // Launch the I/O thread.
-  base::Thread io_thread(kIoThreadName);
-  base::Thread::Options io_thread_options(MessageLoop::TYPE_IO, 0);
-  if (!io_thread.StartWithOptions(io_thread_options)) {
-    LOG(ERROR) << "Failed to start the I/O thread";
-    stopped_event_.Signal();
-    return;
-  }
 
   // Create the session process launcher.
   child_.reset(new WtsSessionProcessLauncher(
       base::Bind(&HostService::OnChildStopped, base::Unretained(this)),
       this,
       main_task_runner_,
-      io_thread.message_loop_proxy()));
+      io_task_runner));
 
 #endif  // !defined(REMOTING_MULTI_PROCESS)
+}
+
+void HostService::RunMessageLoop(MessageLoop* message_loop) {
+  // Launch the I/O thread.
+  base::Thread io_thread(kIoThreadName);
+  base::Thread::Options io_thread_options(MessageLoop::TYPE_IO, 0);
+  if (!io_thread.StartWithOptions(io_thread_options)) {
+    LOG(FATAL) << "Failed to start the I/O thread";
+    return;
+  }
+
+  CreateLauncher(new AutoThreadTaskRunner(io_thread.message_loop_proxy(),
+                                          main_task_runner_));
 
   // Run the service.
   message_loop->Run();
+}
 
-  // Release the control handler.
-  stopped_event_.Signal();
+int HostService::Elevate() {
+  // Get the name of the binary to launch.
+  FilePath binary =
+      CommandLine::ForCurrentProcess()->GetSwitchValuePath(kElevateSwitchName);
+
+  // Create the child process command line by copying known switches from our
+  // command line.
+  CommandLine command_line(CommandLine::NO_PROGRAM);
+  command_line.CopySwitchesFrom(*CommandLine::ForCurrentProcess(),
+                                kCopiedSwitchNames,
+                                _countof(kCopiedSwitchNames));
+  CommandLine::StringType parameters = command_line.GetCommandLineString();
+
+  // Launch the child process requesting elevation.
+  SHELLEXECUTEINFO info;
+  memset(&info, 0, sizeof(info));
+  info.cbSize = sizeof(info);
+  info.lpVerb = L"runas";
+  info.lpFile = binary.value().c_str();
+  info.lpParameters = parameters.c_str();
+  info.nShow = SW_SHOWNORMAL;
+
+  if (!ShellExecuteEx(&info)) {
+    return GetLastError();
+  }
+
+  return kSuccessExitCode;
 }
 
 int HostService::RunAsService() {
@@ -243,8 +286,11 @@ int HostService::RunAsService() {
 int HostService::RunInConsole() {
   MessageLoop message_loop(MessageLoop::TYPE_UI);
 
-  // Allow other threads to post to our message loop.
-  main_task_runner_ = message_loop.message_loop_proxy();
+  // Keep a reference to the main message loop while it is used. Once the last
+  // reference is dropped, QuitClosure() will be posted to the loop.
+  main_task_runner_ =
+      new AutoThreadTaskRunner(message_loop.message_loop_proxy(),
+                               base::Bind(&QuitMessageLoop, &message_loop));
 
   int result = kErrorExitCode;
 
@@ -290,6 +336,9 @@ int HostService::RunInConsole() {
                                      NOTIFY_FOR_ALL_SESSIONS) != FALSE) {
     // Run the service.
     RunMessageLoop(&message_loop);
+
+    // Release the control handler.
+    stopped_event_.Signal();
 
     WTSUnRegisterSessionNotification(window);
     result = kSuccessExitCode;
@@ -339,11 +388,14 @@ DWORD WINAPI HostService::ServiceControlHandler(DWORD control,
 }
 
 VOID WINAPI HostService::ServiceMain(DWORD argc, WCHAR* argv[]) {
-  MessageLoop message_loop;
+  MessageLoop message_loop(MessageLoop::TYPE_DEFAULT);
 
-  // Allow other threads to post to our message loop.
+  // Keep a reference to the main message loop while it is used. Once the last
+  // reference is dropped QuitClosure() will be posted to the loop.
   HostService* self = HostService::GetInstance();
-  self->main_task_runner_ = message_loop.message_loop_proxy();
+  self->main_task_runner_ =
+      new AutoThreadTaskRunner(message_loop.message_loop_proxy(),
+                               base::Bind(&QuitMessageLoop, &message_loop));
 
   // Register the service control handler.
   self->service_status_handle_ =
@@ -380,6 +432,9 @@ VOID WINAPI HostService::ServiceMain(DWORD argc, WCHAR* argv[]) {
   // Run the service.
   self->RunMessageLoop(&message_loop);
 
+  // Release the control handler.
+  self->stopped_event_.Signal();
+
   // Tell SCM that the service is stopped.
   service_status.dwCurrentState = SERVICE_STOPPED;
   service_status.dwControlsAccepted = 0;
@@ -409,14 +464,19 @@ LRESULT CALLBACK HostService::SessionChangeNotificationProc(HWND hwnd,
 
 } // namespace remoting
 
-int main(int argc, char** argv) {
+int CALLBACK WinMain(HINSTANCE instance,
+                     HINSTANCE previous_instance,
+                     LPSTR raw_command_line,
+                     int show_command) {
 #ifdef OFFICIAL_BUILD
   if (remoting::IsUsageStatsAllowed()) {
     remoting::InitializeCrashReporting();
   }
 #endif  // OFFICIAL_BUILD
 
-  CommandLine::Init(argc, argv);
+  // CommandLine::Init() ignores the passed |argc| and |argv| on Windows getting
+  // the command line from GetCommandLineW(), so we can safely pass NULL here.
+  CommandLine::Init(0, NULL);
 
   // This object instance is required by Chrome code (for example,
   // FilePath, LazyInstance, MessageLoop).
@@ -432,16 +492,15 @@ int main(int argc, char** argv) {
               logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
-
   if (command_line->HasSwitch(kHelpSwitchName) ||
       command_line->HasSwitch(kQuestionSwitchName)) {
-    usage(argv[0]);
+    usage(command_line->GetProgram());
     return kSuccessExitCode;
   }
 
   remoting::HostService* service = remoting::HostService::GetInstance();
   if (!service->InitWithCommandLine(command_line)) {
-    usage(argv[0]);
+    usage(command_line->GetProgram());
     return kUsageExitCode;
   }
 

@@ -72,10 +72,9 @@ void Manifest::ValidateManifest(
     Feature::Availability result = feature->IsAvailableToManifest(
         extension_id_, type_, Feature::ConvertLocation(location_),
         GetManifestVersion());
-    if (result != Feature::IS_AVAILABLE)
+    if (!result.is_available())
       warnings->push_back(Extension::InstallWarning(
-          Extension::InstallWarning::FORMAT_TEXT,
-          feature->GetErrorMessage(result)));
+          Extension::InstallWarning::FORMAT_TEXT, result.message()));
   }
 
   // Also generate warnings for keys that are not features.
@@ -146,7 +145,9 @@ bool Manifest::Equals(const Manifest* other) const {
 }
 
 int Manifest::GetManifestVersion() const {
-  int manifest_version = 1;  // default to version 1 if no version is specified
+  // Platform apps were launched after manifest version 2 was the preferred
+  // version, so they default to that.
+  int manifest_version = type_ == Extension::TYPE_PLATFORM_APP ? 2 : 1;
   value_->GetInteger(keys::kManifestVersion, &manifest_version);
   return manifest_version;
 }
@@ -170,9 +171,9 @@ bool Manifest::CanAccessKey(const std::string& key) const {
   if (!feature)
     return true;
 
-  return Feature::IS_AVAILABLE == feature->IsAvailableToManifest(
+  return feature->IsAvailableToManifest(
       extension_id_, type_, Feature::ConvertLocation(location_),
-      GetManifestVersion());
+      GetManifestVersion()).is_available();
 }
 
 }  // namespace extensions

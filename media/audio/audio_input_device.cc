@@ -9,7 +9,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "media/audio/audio_manager_base.h"
-#include "media/audio/audio_util.h"
+#include "media/base/audio_bus.h"
 
 namespace media {
 
@@ -35,6 +35,7 @@ class AudioInputDevice::AudioThreadCallback
 
  private:
   CaptureCallback* capture_callback_;
+  scoped_ptr<AudioBus> audio_bus_;
   DISALLOW_COPY_AND_ASSIGN(AudioThreadCallback);
 };
 
@@ -305,8 +306,9 @@ AudioInputDevice::AudioThreadCallback::AudioThreadCallback(
     base::SharedMemoryHandle memory,
     int memory_length,
     CaptureCallback* capture_callback)
-    : AudioDeviceThread::Callback(audio_parameters, memory, memory_length),
+    : AudioDeviceThread::Callback(audio_parameters, 0, memory, memory_length),
       capture_callback_(capture_callback) {
+  audio_bus_ = AudioBus::Create(audio_parameters_);
 }
 
 AudioInputDevice::AudioThreadCallback::~AudioThreadCallback() {
@@ -328,24 +330,15 @@ void AudioInputDevice::AudioThreadCallback::Process(int pending_data) {
 
   int audio_delay_milliseconds = pending_data / bytes_per_ms_;
   int16* memory = reinterpret_cast<int16*>(&buffer->audio[0]);
-  const size_t number_of_frames = audio_parameters_.frames_per_buffer();
   const int bytes_per_sample = sizeof(memory[0]);
 
   // Deinterleave each channel and convert to 32-bit floating-point
   // with nominal range -1.0 -> +1.0.
-  for (int channel_index = 0; channel_index < audio_parameters_.channels();
-       ++channel_index) {
-    DeinterleaveAudioChannel(memory,
-                             audio_data_[channel_index],
-                             audio_parameters_.channels(),
-                             channel_index,
-                             bytes_per_sample,
-                             number_of_frames);
-  }
+  audio_bus_->FromInterleaved(memory, audio_bus_->frames(), bytes_per_sample);
 
   // Deliver captured data to the client in floating point format
   // and update the audio-delay measurement.
-  capture_callback_->Capture(audio_data_, number_of_frames,
+  capture_callback_->Capture(audio_bus_.get(),
                              audio_delay_milliseconds, volume);
 }
 

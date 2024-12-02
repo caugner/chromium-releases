@@ -48,6 +48,9 @@ class ThrottleController : public base::SupportsUserData::Data,
   virtual void Cancel() {
     NOTREACHED();
   }
+  virtual void CancelAndIgnore() {
+    NOTREACHED();
+  }
 
  private:
   net::URLRequest* request_;
@@ -58,8 +61,13 @@ class ThrottleController : public base::SupportsUserData::Data,
 // whether it starts and finishes.
 class SimpleTestJob : public net::URLRequestTestJob {
  public:
-  explicit SimpleTestJob(net::URLRequest* request)
-    : net::URLRequestTestJob(request, test_headers(), kTestData, true) {}
+  SimpleTestJob(net::URLRequest* request,
+                net::NetworkDelegate* network_delegate)
+      : net::URLRequestTestJob(request,
+                               network_delegate,
+                               test_headers(),
+                               kTestData,
+                               true) {}
  private:
   ~SimpleTestJob() {}
 };
@@ -116,8 +124,9 @@ class UserScriptListenerTest
   }
 
   // net::URLRequest::Interceptor
-  virtual net::URLRequestJob* MaybeIntercept(net::URLRequest* request) {
-    return new SimpleTestJob(request);
+  virtual net::URLRequestJob* MaybeIntercept(
+      net::URLRequest* request, net::NetworkDelegate* network_delegate) {
+    return new SimpleTestJob(request, network_delegate);
   }
 
  protected:
@@ -279,6 +288,36 @@ TEST_F(UserScriptListenerTest, MultiProfile) {
       content::NotificationService::NoDetails());
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(kTestData, delegate.data_received());
+}
+
+// Test when the script updated notification occurs before the throttle's
+// WillStartRequest function is called.  This can occur when there are multiple
+// throttles.
+TEST_F(UserScriptListenerTest, ResumeBeforeStart) {
+  LoadTestExtension();
+  MessageLoop::current()->RunAllPending();
+  TestDelegate delegate;
+  TestURLRequestContext context;
+  GURL url(kMatchingUrl);
+  scoped_ptr<TestURLRequest> request(
+      new TestURLRequest(url, &delegate, &context));
+
+  ResourceThrottle* throttle =
+      listener_->CreateResourceThrottle(url, ResourceType::MAIN_FRAME);
+  ASSERT_TRUE(throttle);
+  request->SetUserData(NULL, new ThrottleController(request.get(), throttle));
+
+  ASSERT_FALSE(request->is_pending());
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
+      content::Source<Profile>(profile_.get()),
+      content::NotificationService::NoDetails());
+  MessageLoop::current()->RunAllPending();
+
+  bool defer = false;
+  throttle->WillStartRequest(&defer);
+  ASSERT_FALSE(defer);
 }
 
 }  // namespace

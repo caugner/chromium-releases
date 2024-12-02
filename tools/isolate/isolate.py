@@ -11,29 +11,51 @@ See more information at
 http://dev.chromium.org/developers/testing/isolated-testing
 """
 
+import copy
 import hashlib
 import logging
 import optparse
 import os
+import posixpath
 import re
 import stat
 import subprocess
 import sys
+import urllib
+import urllib2
 
-import isolate_common
-import merge_isolate
 import trace_inputs
 import run_test_from_archive
+from run_test_from_archive import get_flavor
 
 # Used by process_input().
 NO_INFO, STATS_ONLY, WITH_HASH = range(56, 59)
 SHA_1_NULL = hashlib.sha1().hexdigest()
+
+PATH_VARIABLES = ('DEPTH', 'PRODUCT_DIR')
+DEFAULT_OSES = ('linux', 'mac', 'win')
+
+# Files that should be 0-length when mapped.
+KEY_TOUCHED = 'isolate_dependency_touched'
+# Files that should be tracked by the build tool.
+KEY_TRACKED = 'isolate_dependency_tracked'
+# Files that should not be tracked by the build tool.
+KEY_UNTRACKED = 'isolate_dependency_untracked'
+
+_GIT_PATH = os.path.sep + '.git'
+_SVN_PATH = os.path.sep + '.svn'
+
+# The maximum number of upload attempts to try when uploading a single file.
+MAX_UPLOAD_ATTEMPTS = 5
 
 
 class ExecutionError(Exception):
   """A generic error occurred."""
   def __str__(self):
     return self.args[0]
+
+
+### Path handling code.
 
 
 def relpath(path, root):
@@ -50,6 +72,34 @@ def normpath(path):
   if path.endswith(os.path.sep):
     out += os.path.sep
   return out
+
+
+def posix_relpath(path, root):
+  """posix.relpath() that keeps trailing slash."""
+  out = posixpath.relpath(path, root)
+  if path.endswith('/'):
+    out += '/'
+  return out
+
+
+def cleanup_path(x):
+  """Cleans up a relative path. Converts any os.path.sep to '/' on Windows."""
+  if x:
+    x = x.rstrip(os.path.sep).replace(os.path.sep, '/')
+  if x == '.':
+    x = ''
+  if x:
+    x += '/'
+  return x
+
+
+def default_blacklist(f):
+  """Filters unimportant files normally ignored."""
+  return (
+      f.endswith(('.pyc', '.run_test_cases', 'testserver.log')) or
+      _GIT_PATH in f or
+      _SVN_PATH in f or
+      f in ('.git', '.svn'))
 
 
 def expand_directory_and_symlink(indir, relfile, blacklist):
@@ -130,127 +180,12 @@ def expand_directories_and_symlinks(indir, infiles, blacklist):
   """Expands the directories and the symlinks, applies the blacklist and
   verifies files exist.
 
-  Files are specified in os native path separatro.
+  Files are specified in os native path separator.
   """
   outfiles = []
   for relfile in infiles:
     outfiles.extend(expand_directory_and_symlink(indir, relfile, blacklist))
   return outfiles
-
-
-def replace_variable(part, variables):
-  m = re.match(r'<\(([A-Z_]+)\)', part)
-  if m:
-    if m.group(1) not in variables:
-      raise ExecutionError(
-        'Variable "%s" was not found in %s.\nDid you forget to specify '
-        '--variable?' % (m.group(1), variables))
-    return variables[m.group(1)]
-  return part
-
-
-def eval_variables(item, variables):
-  """Replaces the gyp variables in a string item."""
-  return ''.join(
-      replace_variable(p, variables) for p in re.split(r'(<\([A-Z_]+\))', item))
-
-
-def indent(data, indent_length):
-  """Indents text."""
-  spacing = ' ' * indent_length
-  return ''.join(spacing + l for l in str(data).splitlines(True))
-
-
-def load_isolate(content):
-  """Loads the .isolate file and returns the information unprocessed.
-
-  Returns the command, dependencies and read_only flag. The dependencies are
-  fixed to use os.path.sep.
-  """
-  # Load the .isolate file, process its conditions, retrieve the command and
-  # dependencies.
-  configs = merge_isolate.load_gyp(
-      merge_isolate.eval_content(content), None, merge_isolate.DEFAULT_OSES)
-  flavor = isolate_common.get_flavor()
-  config = configs.per_os.get(flavor) or configs.per_os.get(None)
-  if not config:
-    raise ExecutionError('Failed to load configuration for \'%s\'' % flavor)
-  # Merge tracked and untracked dependencies, isolate.py doesn't care about the
-  # trackability of the dependencies, only the build tool does.
-  dependencies = [
-    f.replace('/', os.path.sep) for f in config.tracked + config.untracked
-  ]
-  touched = [f.replace('/', os.path.sep) for f in config.touched]
-  return config.command, dependencies, touched, config.read_only
-
-
-def process_input(filepath, prevdict, level, read_only):
-  """Processes an input file, a dependency, and return meta data about it.
-
-  Arguments:
-  - filepath: File to act on.
-  - prevdict: the previous dictionary. It is used to retrieve the cached sha-1
-              to skip recalculating the hash.
-  - level: determines the amount of information retrieved.
-  - read_only: If True, the file mode is manipulated. In practice, only save
-               one of 4 modes: 0755 (rwx), 0644 (rw), 0555 (rx), 0444 (r). On
-               windows, mode is not set since all files are 'executable' by
-               default.
-
-  Behaviors:
-  - NO_INFO retrieves no information.
-  - STATS_ONLY retrieves the file mode, file size, file timestamp, file link
-    destination if it is a file link.
-  - WITH_HASH retrieves all of STATS_ONLY plus the sha-1 of the content of the
-    file.
-  """
-  assert level in (NO_INFO, STATS_ONLY, WITH_HASH)
-  out = {}
-  if prevdict.get('touched_only') == True:
-    # The file's content is ignored. Skip the time and hard code mode.
-    if isolate_common.get_flavor() != 'win':
-      out['mode'] = stat.S_IRUSR | stat.S_IRGRP
-    out['size'] = 0
-    out['sha-1'] = SHA_1_NULL
-    out['touched_only'] = True
-    return out
-
-  if level >= STATS_ONLY:
-    filestats = os.lstat(filepath)
-    is_link = stat.S_ISLNK(filestats.st_mode)
-    if isolate_common.get_flavor() != 'win':
-      # Ignore file mode on Windows since it's not really useful there.
-      filemode = stat.S_IMODE(filestats.st_mode)
-      # Remove write access for group and all access to 'others'.
-      filemode &= ~(stat.S_IWGRP | stat.S_IRWXO)
-      if read_only:
-        filemode &= ~stat.S_IWUSR
-      if filemode & stat.S_IXUSR:
-        filemode |= stat.S_IXGRP
-      else:
-        filemode &= ~stat.S_IXGRP
-      out['mode'] = filemode
-    if not is_link:
-      out['size'] = filestats.st_size
-    # Used to skip recalculating the hash. Use the most recent update time.
-    out['timestamp'] = int(round(filestats.st_mtime))
-    # If the timestamp wasn't updated, carry on the sha-1.
-    if prevdict.get('timestamp') == out['timestamp']:
-      if 'sha-1' in prevdict:
-        # Reuse the previous hash.
-        out['sha-1'] = prevdict['sha-1']
-      if 'link' in prevdict:
-        # Reuse the previous link destination.
-        out['link'] = prevdict['link']
-    if is_link and not 'link' in out:
-      # A symlink, store the link destination.
-      out['link'] = os.readlink(filepath)
-
-  if level >= WITH_HASH and not out.get('sha-1') and not out.get('link'):
-    if not is_link:
-      with open(filepath, 'rb') as f:
-        out['sha-1'] = hashlib.sha1(f.read()).hexdigest()
-  return out
 
 
 def recreate_tree(outdir, indir, infiles, action, as_sha1):
@@ -310,6 +245,156 @@ def recreate_tree(outdir, indir, infiles, action, as_sha1):
       run_test_from_archive.link_file(outfile, infile, action)
 
 
+def upload_hash_content(url, params, hash_content):
+  """Uploads the given hash contents.
+
+  Arguments:
+    url: The url to upload the hash contents to.
+    params: The params to include with the upload.
+    hash_contents: The contents to upload.
+  """
+  url = url + '?' + urllib.urlencode(params)
+  request = urllib2.Request(url, data=hash_content)
+  request.add_header('Content-Type', 'application/octet-stream')
+  request.add_header('Content-Length', len(hash_content or ''))
+
+  return urllib2.urlopen(request)
+
+
+def upload_sha1_tree(base_url, indir, infiles):
+  """Upload the given tree to the given url.
+
+  Arguments:
+    base_url: The base url, it is assume that |base_url|/has/ can be used to
+              query if an element was already uploaded, and |base_url|/store/
+              can be used to upload a new element.
+    indir:    Root directory the infiles are based in.
+    infiles:  dict of files to map from |indir| to |outdir|.
+  """
+  logging.info('upload tree(base_url=%s, indir=%s, files=%d)' %
+               (base_url, indir, len(infiles)))
+
+  contains_hash_url = base_url.rstrip('/') + '/content/contains'
+  upload_hash_url = base_url.rstrip('/') + '/content/store'
+
+  # TODO(csharp): Get this code to upload in parallel, similiar to how
+  # run_test_from_achive.py downloads in parallel (should probably reuse
+  # that code here, reworking if necessary).
+  for relfile, metadata in infiles.iteritems():
+    if 'link' in metadata:
+      # Skip links when uploading.
+      continue
+
+    try:
+      response = urllib2.urlopen(contains_hash_url + '?' + urllib.urlencode(
+          {'hash_key': metadata['sha-1']}))
+      if response.read() == 'True':
+        logging.debug('Hash key, %s, already exists on the server, no need to '
+                      'upload again', metadata['sha-1'])
+        continue
+    except urllib2.URLError:
+      # If we encounter any error checking if the file is already on the server,
+      # assume it isn't present.
+      pass
+
+    if metadata.get('touched_only') == True:
+      hash_data = ''
+    else:
+      infile = os.path.join(indir, relfile)
+      with open(infile, 'rb') as f:
+        hash_data = f.read()
+
+    response = None
+    for attempt in range(MAX_UPLOAD_ATTEMPTS):
+      try:
+        logging.debug('Attempting to upload hash key, %s, to %s',
+                      metadata['sha-1'], upload_hash_url)
+
+        response = upload_hash_content(upload_hash_url,
+                                       {'hash_key': metadata['sha-1']},
+                                       hash_data)
+        break
+      except urllib2.URLError:
+        logging.error('Failed to upload hash key, %s, on attempt %d.',
+                      metadata['sha-1'], attempt + 1)
+
+    if not response:
+      raise run_test_from_archive.MappingError('Unable to upload hash key, %s.',
+                                               metadata['sha-1'])
+
+
+def process_input(filepath, prevdict, level, read_only):
+  """Processes an input file, a dependency, and return meta data about it.
+
+  Arguments:
+  - filepath: File to act on.
+  - prevdict: the previous dictionary. It is used to retrieve the cached sha-1
+              to skip recalculating the hash.
+  - level: determines the amount of information retrieved.
+  - read_only: If True, the file mode is manipulated. In practice, only save
+               one of 4 modes: 0755 (rwx), 0644 (rw), 0555 (rx), 0444 (r). On
+               windows, mode is not set since all files are 'executable' by
+               default.
+
+  Behaviors:
+  - NO_INFO retrieves no information.
+  - STATS_ONLY retrieves the file mode, file size, file timestamp, file link
+    destination if it is a file link.
+  - WITH_HASH retrieves all of STATS_ONLY plus the sha-1 of the content of the
+    file.
+  """
+  assert level in (NO_INFO, STATS_ONLY, WITH_HASH)
+  out = {}
+  if prevdict.get('touched_only') == True:
+    # The file's content is ignored. Skip the time and hard code mode.
+    if get_flavor() != 'win':
+      out['mode'] = stat.S_IRUSR | stat.S_IRGRP
+    out['size'] = 0
+    out['sha-1'] = SHA_1_NULL
+    out['touched_only'] = True
+    return out
+
+  if level >= STATS_ONLY:
+    filestats = os.lstat(filepath)
+    is_link = stat.S_ISLNK(filestats.st_mode)
+    if get_flavor() != 'win':
+      # Ignore file mode on Windows since it's not really useful there.
+      filemode = stat.S_IMODE(filestats.st_mode)
+      # Remove write access for group and all access to 'others'.
+      filemode &= ~(stat.S_IWGRP | stat.S_IRWXO)
+      if read_only:
+        filemode &= ~stat.S_IWUSR
+      if filemode & stat.S_IXUSR:
+        filemode |= stat.S_IXGRP
+      else:
+        filemode &= ~stat.S_IXGRP
+      out['mode'] = filemode
+    if not is_link:
+      out['size'] = filestats.st_size
+    # Used to skip recalculating the hash. Use the most recent update time.
+    out['timestamp'] = int(round(filestats.st_mtime))
+    # If the timestamp wasn't updated, carry on the sha-1.
+    if prevdict.get('timestamp') == out['timestamp']:
+      if 'sha-1' in prevdict:
+        # Reuse the previous hash.
+        out['sha-1'] = prevdict['sha-1']
+      if 'link' in prevdict:
+        # Reuse the previous link destination.
+        out['link'] = prevdict['link']
+    if is_link and not 'link' in out:
+      # A symlink, store the link destination.
+      out['link'] = os.readlink(filepath)
+
+  if level >= WITH_HASH and not out.get('sha-1') and not out.get('link'):
+    if not is_link:
+      with open(filepath, 'rb') as f:
+        out['sha-1'] = hashlib.sha1(f.read()).hexdigest()
+  return out
+
+
+### Variable stuff.
+
+
 def result_to_state(filename):
   """Replaces the file's extension."""
   return filename.rsplit('.', 1)[0] + '.state'
@@ -338,6 +423,17 @@ def determine_root_dir(relative_root, infiles):
   return deepest_root
 
 
+def replace_variable(part, variables):
+  m = re.match(r'<\(([A-Z_]+)\)', part)
+  if m:
+    if m.group(1) not in variables:
+      raise ExecutionError(
+        'Variable "%s" was not found in %s.\nDid you forget to specify '
+        '--variable?' % (m.group(1), variables))
+    return variables[m.group(1)]
+  return part
+
+
 def process_variables(variables, relative_base_dir):
   """Processes path variables as a special case and returns a copy of the dict.
 
@@ -345,7 +441,7 @@ def process_variables(variables, relative_base_dir):
   to an absolute path, then sets it as relative to relative_base_dir.
   """
   variables = variables.copy()
-  for i in isolate_common.PATH_VARIABLES:
+  for i in PATH_VARIABLES:
     if i not in variables:
       continue
     variable = os.path.normpath(variables[i])
@@ -359,13 +455,661 @@ def process_variables(variables, relative_base_dir):
   return variables
 
 
+def eval_variables(item, variables):
+  """Replaces the .isolate variables in a string item.
+
+  Note that the .isolate format is a subset of the .gyp dialect.
+  """
+  return ''.join(
+      replace_variable(p, variables) for p in re.split(r'(<\([A-Z_]+\))', item))
+
+
+def classify_files(root_dir, tracked, untracked):
+  """Converts the list of files into a .isolate 'variables' dictionary.
+
+  Arguments:
+  - tracked: list of files names to generate a dictionary out of that should
+             probably be tracked.
+  - untracked: list of files names that must not be tracked.
+  """
+  # These directories are not guaranteed to be always present on every builder.
+  OPTIONAL_DIRECTORIES = (
+    'test/data/plugin',
+    'third_party/WebKit/LayoutTests',
+  )
+
+  new_tracked = []
+  new_untracked = list(untracked)
+
+  def should_be_tracked(filepath):
+    """Returns True if it is a file without whitespace in a non-optional
+    directory that has no symlink in its path.
+    """
+    if filepath.endswith('/'):
+      return False
+    if ' ' in filepath:
+      return False
+    if any(i in filepath for i in OPTIONAL_DIRECTORIES):
+      return False
+    # Look if any element in the path is a symlink.
+    split = filepath.split('/')
+    for i in range(len(split)):
+      if os.path.islink(os.path.join(root_dir, '/'.join(split[:i+1]))):
+        return False
+    return True
+
+  for filepath in sorted(tracked):
+    if should_be_tracked(filepath):
+      new_tracked.append(filepath)
+    else:
+      # Anything else.
+      new_untracked.append(filepath)
+
+  variables = {}
+  if new_tracked:
+    variables[KEY_TRACKED] = sorted(new_tracked)
+  if new_untracked:
+    variables[KEY_UNTRACKED] = sorted(new_untracked)
+  return variables
+
+
+def generate_simplified(
+    tracked, untracked, touched, root_dir, variables, relative_cwd):
+  """Generates a clean and complete .isolate 'variables' dictionary.
+
+  Cleans up and extracts only files from within root_dir then processes
+  variables and relative_cwd.
+  """
+  logging.info(
+      'generate_simplified(%d files, %s, %s, %s)' %
+      (len(tracked) + len(untracked) + len(touched),
+        root_dir, variables, relative_cwd))
+  # Constants.
+  # Skip log in PRODUCT_DIR. Note that these are applied on '/' style path
+  # separator.
+  LOG_FILE = re.compile(r'^\<\(PRODUCT_DIR\)\/[^\/]+\.log$')
+  EXECUTABLE = re.compile(
+      r'^(\<\(PRODUCT_DIR\)\/[^\/\.]+)' +
+      re.escape(variables.get('EXECUTABLE_SUFFIX', '')) +
+      r'$')
+
+  # Preparation work.
+  relative_cwd = cleanup_path(relative_cwd)
+  # Creates the right set of variables here. We only care about PATH_VARIABLES.
+  variables = dict(
+      ('<(%s)' % k, variables[k].replace(os.path.sep, '/'))
+      for k in PATH_VARIABLES if k in variables)
+
+  # Actual work: Process the files.
+  # TODO(maruel): if all the files in a directory are in part tracked and in
+  # part untracked, the directory will not be extracted. Tracked files should be
+  # 'promoted' to be untracked as needed.
+  tracked = trace_inputs.extract_directories(
+      root_dir, tracked, default_blacklist)
+  untracked = trace_inputs.extract_directories(
+      root_dir, untracked, default_blacklist)
+  # touched is not compressed, otherwise it would result in files to be archived
+  # that we don't need.
+
+  def fix(f):
+    """Bases the file on the most restrictive variable."""
+    logging.debug('fix(%s)' % f)
+    # Important, GYP stores the files with / and not \.
+    f = f.replace(os.path.sep, '/')
+    # If it's not already a variable.
+    if not f.startswith('<'):
+      # relative_cwd is usually the directory containing the gyp file. It may be
+      # empty if the whole directory containing the gyp file is needed.
+      f = posix_relpath(f, relative_cwd) or './'
+
+    for variable, root_path in variables.iteritems():
+      if f.startswith(root_path):
+        f = variable + f[len(root_path):]
+        break
+
+    # Now strips off known files we want to ignore and to any specific mangling
+    # as necessary. It's easier to do it here than generate a blacklist.
+    match = EXECUTABLE.match(f)
+    if match:
+      return match.group(1) + '<(EXECUTABLE_SUFFIX)'
+    if LOG_FILE.match(f):
+      return None
+
+    if sys.platform == 'darwin':
+      # On OSX, the name of the output is dependent on gyp define, it can be
+      # 'Google Chrome.app' or 'Chromium.app', same for 'XXX
+      # Framework.framework'. Furthermore, they are versioned with a gyp
+      # variable.  To lower the complexity of the .isolate file, remove all the
+      # individual entries that show up under any of the 4 entries and replace
+      # them with the directory itself. Overall, this results in a bit more
+      # files than strictly necessary.
+      OSX_BUNDLES = (
+        '<(PRODUCT_DIR)/Chromium Framework.framework/',
+        '<(PRODUCT_DIR)/Chromium.app/',
+        '<(PRODUCT_DIR)/Google Chrome Framework.framework/',
+        '<(PRODUCT_DIR)/Google Chrome.app/',
+      )
+      for prefix in OSX_BUNDLES:
+        if f.startswith(prefix):
+          # Note this result in duplicate values, so the a set() must be used to
+          # remove duplicates.
+          return prefix
+
+    return f
+
+  tracked = set(filter(None, (fix(f.path) for f in tracked)))
+  untracked = set(filter(None, (fix(f.path) for f in untracked)))
+  touched = set(filter(None, (fix(f.path) for f in touched)))
+  out = classify_files(root_dir, tracked, untracked)
+  if touched:
+    out[KEY_TOUCHED] = sorted(touched)
+  return out
+
+
+def generate_isolate(
+    tracked, untracked, touched, root_dir, variables, relative_cwd):
+  """Generates a clean and complete .isolate file."""
+  result = generate_simplified(
+      tracked, untracked, touched, root_dir, variables, relative_cwd)
+  return {
+    'conditions': [
+      ['OS=="%s"' % get_flavor(), {
+        'variables': result,
+      }],
+    ],
+  }
+
+
+def split_touched(files):
+  """Splits files that are touched vs files that are read."""
+  tracked = []
+  touched = []
+  for f in files:
+    if f.size:
+      tracked.append(f)
+    else:
+      touched.append(f)
+  return tracked, touched
+
+
+def pretty_print(variables, stdout):
+  """Outputs a gyp compatible list from the decoded variables.
+
+  Similar to pprint.print() but with NIH syndrome.
+  """
+  # Order the dictionary keys by these keys in priority.
+  ORDER = (
+      'variables', 'condition', 'command', 'relative_cwd', 'read_only',
+      KEY_TRACKED, KEY_UNTRACKED)
+
+  def sorting_key(x):
+    """Gives priority to 'most important' keys before the others."""
+    if x in ORDER:
+      return str(ORDER.index(x))
+    return x
+
+  def loop_list(indent, items):
+    for item in items:
+      if isinstance(item, basestring):
+        stdout.write('%s\'%s\',\n' % (indent, item))
+      elif isinstance(item, dict):
+        stdout.write('%s{\n' % indent)
+        loop_dict(indent + '  ', item)
+        stdout.write('%s},\n' % indent)
+      elif isinstance(item, list):
+        # A list inside a list will write the first item embedded.
+        stdout.write('%s[' % indent)
+        for index, i in enumerate(item):
+          if isinstance(i, basestring):
+            stdout.write(
+                '\'%s\', ' % i.replace('\\', '\\\\').replace('\'', '\\\''))
+          elif isinstance(i, dict):
+            stdout.write('{\n')
+            loop_dict(indent + '  ', i)
+            if index != len(item) - 1:
+              x = ', '
+            else:
+              x = ''
+            stdout.write('%s}%s' % (indent, x))
+          else:
+            assert False
+        stdout.write('],\n')
+      else:
+        assert False
+
+  def loop_dict(indent, items):
+    for key in sorted(items, key=sorting_key):
+      item = items[key]
+      stdout.write("%s'%s': " % (indent, key))
+      if isinstance(item, dict):
+        stdout.write('{\n')
+        loop_dict(indent + '  ', item)
+        stdout.write(indent + '},\n')
+      elif isinstance(item, list):
+        stdout.write('[\n')
+        loop_list(indent + '  ', item)
+        stdout.write(indent + '],\n')
+      elif isinstance(item, basestring):
+        stdout.write(
+            '\'%s\',\n' % item.replace('\\', '\\\\').replace('\'', '\\\''))
+      elif item in (True, False, None):
+        stdout.write('%s\n' % item)
+      else:
+        assert False, item
+
+  stdout.write('{\n')
+  loop_dict('  ', variables)
+  stdout.write('}\n')
+
+
+def union(lhs, rhs):
+  """Merges two compatible datastructures composed of dict/list/set."""
+  assert lhs is not None or rhs is not None
+  if lhs is None:
+    return copy.deepcopy(rhs)
+  if rhs is None:
+    return copy.deepcopy(lhs)
+  assert type(lhs) == type(rhs), (lhs, rhs)
+  if hasattr(lhs, 'union'):
+    # Includes set, OSSettings and Configs.
+    return lhs.union(rhs)
+  if isinstance(lhs, dict):
+    return dict((k, union(lhs.get(k), rhs.get(k))) for k in set(lhs).union(rhs))
+  elif isinstance(lhs, list):
+    # Do not go inside the list.
+    return lhs + rhs
+  assert False, type(lhs)
+
+
+def extract_comment(content):
+  """Extracts file level comment."""
+  out = []
+  for line in content.splitlines(True):
+    if line.startswith('#'):
+      out.append(line)
+    else:
+      break
+  return ''.join(out)
+
+
+def eval_content(content):
+  """Evaluates a python file and return the value defined in it.
+
+  Used in practice for .isolate files.
+  """
+  globs = {'__builtins__': None}
+  locs = {}
+  value = eval(content, globs, locs)
+  assert locs == {}, locs
+  assert globs == {'__builtins__': None}, globs
+  return value
+
+
+def verify_variables(variables):
+  """Verifies the |variables| dictionary is in the expected format."""
+  VALID_VARIABLES = [
+    KEY_TOUCHED,
+    KEY_TRACKED,
+    KEY_UNTRACKED,
+    'command',
+    'read_only',
+  ]
+  assert isinstance(variables, dict), variables
+  assert set(VALID_VARIABLES).issuperset(set(variables)), variables.keys()
+  for name, value in variables.iteritems():
+    if name == 'read_only':
+      assert value in (True, False, None), value
+    else:
+      assert isinstance(value, list), value
+      assert all(isinstance(i, basestring) for i in value), value
+
+
+def verify_condition(condition):
+  """Verifies the |condition| dictionary is in the expected format."""
+  VALID_INSIDE_CONDITION = ['variables']
+  assert isinstance(condition, list), condition
+  assert 2 <= len(condition) <= 3, condition
+  assert re.match(r'OS==\"([a-z]+)\"', condition[0]), condition[0]
+  for c in condition[1:]:
+    assert isinstance(c, dict), c
+    assert set(VALID_INSIDE_CONDITION).issuperset(set(c)), c.keys()
+    verify_variables(c.get('variables', {}))
+
+
+def verify_root(value):
+  VALID_ROOTS = ['variables', 'conditions']
+  assert isinstance(value, dict), value
+  assert set(VALID_ROOTS).issuperset(set(value)), value.keys()
+  verify_variables(value.get('variables', {}))
+
+  conditions = value.get('conditions', [])
+  assert isinstance(conditions, list), conditions
+  for condition in conditions:
+    verify_condition(condition)
+
+
+def remove_weak_dependencies(values, key, item, item_oses):
+  """Remove any oses from this key if the item is already under a strong key."""
+  if key == KEY_TOUCHED:
+    for stronger_key in (KEY_TRACKED, KEY_UNTRACKED):
+      oses = values.get(stronger_key, {}).get(item, None)
+      if oses:
+        item_oses -= oses
+
+  return item_oses
+
+
+def invert_map(variables):
+  """Converts a dict(OS, dict(deptype, list(dependencies)) to a flattened view.
+
+  Returns a tuple of:
+    1. dict(deptype, dict(dependency, set(OSes)) for easier processing.
+    2. All the OSes found as a set.
+  """
+  KEYS = (
+    KEY_TOUCHED,
+    KEY_TRACKED,
+    KEY_UNTRACKED,
+    'command',
+    'read_only',
+  )
+  out = dict((key, {}) for key in KEYS)
+  for os_name, values in variables.iteritems():
+    for key in (KEY_TOUCHED, KEY_TRACKED, KEY_UNTRACKED):
+      for item in values.get(key, []):
+        out[key].setdefault(item, set()).add(os_name)
+
+    # command needs special handling.
+    command = tuple(values.get('command', []))
+    out['command'].setdefault(command, set()).add(os_name)
+
+    # read_only needs special handling.
+    out['read_only'].setdefault(values.get('read_only'), set()).add(os_name)
+  return out, set(variables)
+
+
+def reduce_inputs(values, oses):
+  """Reduces the invert_map() output to the strictest minimum list.
+
+  1. Construct the inverse map first.
+  2. Look at each individual file and directory, map where they are used and
+     reconstruct the inverse dictionary.
+  3. Do not convert back to negative if only 2 OSes were merged.
+
+  Returns a tuple of:
+    1. the minimized dictionary
+    2. oses passed through as-is.
+  """
+  KEYS = (
+    KEY_TOUCHED,
+    KEY_TRACKED,
+    KEY_UNTRACKED,
+    'command',
+    'read_only',
+  )
+  out = dict((key, {}) for key in KEYS)
+  assert all(oses), oses
+  if len(oses) > 2:
+    for key in KEYS:
+      for item, item_oses in values.get(key, {}).iteritems():
+        item_oses = remove_weak_dependencies(values, key, item, item_oses)
+        if not item_oses:
+          continue
+
+        # Converts all oses.difference('foo') to '!foo'.
+        assert all(item_oses), item_oses
+        missing = oses.difference(item_oses)
+        if len(missing) == 1:
+          # Replace it with a negative.
+          out[key][item] = set(['!' + tuple(missing)[0]])
+        elif not missing:
+          out[key][item] = set([None])
+        else:
+          out[key][item] = set(item_oses)
+  else:
+    for key in KEYS:
+      for item, item_oses in values.get(key, {}).iteritems():
+        item_oses = remove_weak_dependencies(values, key, item, item_oses)
+        if not item_oses:
+          continue
+
+        # Converts all oses.difference('foo') to '!foo'.
+        assert None not in item_oses, item_oses
+        out[key][item] = set(item_oses)
+  return out, oses
+
+
+def convert_map_to_isolate_dict(values, oses):
+  """Regenerates back a .isolate configuration dict from files and dirs
+  mappings generated from reduce_inputs().
+  """
+  # First, inverse the mapping to make it dict first.
+  config = {}
+  for key in values:
+    for item, oses in values[key].iteritems():
+      if item is None:
+        # For read_only default.
+        continue
+      for cond_os in oses:
+        cond_key = None if cond_os is None else cond_os.lstrip('!')
+        # Insert the if/else dicts.
+        condition_values = config.setdefault(cond_key, [{}, {}])
+        # If condition is negative, use index 1, else use index 0.
+        cond_value = condition_values[int((cond_os or '').startswith('!'))]
+        variables = cond_value.setdefault('variables', {})
+
+        if item in (True, False):
+          # One-off for read_only.
+          variables[key] = item
+        else:
+          if isinstance(item, tuple) and item:
+            # One-off for command.
+            # Do not merge lists and do not sort!
+            # Note that item is a tuple.
+            assert key not in variables
+            variables[key] = list(item)
+          elif item:
+            # The list of items (files or dirs). Append the new item and keep
+            # the list sorted.
+            l = variables.setdefault(key, [])
+            l.append(item)
+            l.sort()
+
+  out = {}
+  for o in sorted(config):
+    d = config[o]
+    if o is None:
+      assert not d[1]
+      out = union(out, d[0])
+    else:
+      c = out.setdefault('conditions', [])
+      if d[1]:
+        c.append(['OS=="%s"' % o] + d)
+      else:
+        c.append(['OS=="%s"' % o] + d[0:1])
+  return out
+
+
+### Internal state files.
+
+
+class OSSettings(object):
+  """Represents the dependencies for an OS. The structure is immutable.
+
+  It's the .isolate settings for a specific file.
+  """
+  def __init__(self, name, values):
+    self.name = name
+    verify_variables(values)
+    self.touched = sorted(values.get(KEY_TOUCHED, []))
+    self.tracked = sorted(values.get(KEY_TRACKED, []))
+    self.untracked = sorted(values.get(KEY_UNTRACKED, []))
+    self.command = values.get('command', [])[:]
+    self.read_only = values.get('read_only')
+
+  def union(self, rhs):
+    assert self.name == rhs.name
+    assert not (self.command and rhs.command)
+    var = {
+      KEY_TOUCHED: sorted(self.touched + rhs.touched),
+      KEY_TRACKED: sorted(self.tracked + rhs.tracked),
+      KEY_UNTRACKED: sorted(self.untracked + rhs.untracked),
+      'command': self.command or rhs.command,
+      'read_only': rhs.read_only if self.read_only is None else self.read_only,
+    }
+    return OSSettings(self.name, var)
+
+  def flatten(self):
+    out = {}
+    if self.command:
+      out['command'] = self.command
+    if self.touched:
+      out[KEY_TOUCHED] = self.touched
+    if self.tracked:
+      out[KEY_TRACKED] = self.tracked
+    if self.untracked:
+      out[KEY_UNTRACKED] = self.untracked
+    if self.read_only is not None:
+      out['read_only'] = self.read_only
+    return out
+
+
+class Configs(object):
+  """Represents a processed .isolate file.
+
+  Stores the file in a processed way, split by each the OS-specific
+  configurations.
+
+  The self.per_os[None] member contains all the 'else' clauses plus the default
+  values. It is not included in the flatten() result.
+  """
+  def __init__(self, oses, file_comment):
+    self.file_comment = file_comment
+    self.per_os = {
+        None: OSSettings(None, {}),
+    }
+    self.per_os.update(dict((name, OSSettings(name, {})) for name in oses))
+
+  def union(self, rhs):
+    items = list(set(self.per_os.keys() + rhs.per_os.keys()))
+    # Takes the first file comment, prefering lhs.
+    out = Configs(items, self.file_comment or rhs.file_comment)
+    for key in items:
+      out.per_os[key] = union(self.per_os.get(key), rhs.per_os.get(key))
+    return out
+
+  def add_globals(self, values):
+    for key in self.per_os:
+      self.per_os[key] = self.per_os[key].union(OSSettings(key, values))
+
+  def add_values(self, for_os, values):
+    self.per_os[for_os] = self.per_os[for_os].union(OSSettings(for_os, values))
+
+  def add_negative_values(self, for_os, values):
+    """Includes the variables to all OSes except |for_os|.
+
+    This includes 'None' so unknown OSes gets it too.
+    """
+    for key in self.per_os:
+      if key != for_os:
+        self.per_os[key] = self.per_os[key].union(OSSettings(key, values))
+
+  def flatten(self):
+    """Returns a flat dictionary representation of the configuration.
+
+    Skips None pseudo-OS.
+    """
+    return dict(
+        (k, v.flatten()) for k, v in self.per_os.iteritems() if k is not None)
+
+
+def load_isolate_as_config(value, file_comment, default_oses):
+  """Parses one .isolate file and returns a Configs() instance.
+
+  |value| is the loaded dictionary that was defined in the gyp file.
+
+  The expected format is strict, anything diverting from the format below will
+  throw an assert:
+  {
+    'variables': {
+      'command': [
+        ...
+      ],
+      'isolate_dependency_tracked': [
+        ...
+      ],
+      'isolate_dependency_untracked': [
+        ...
+      ],
+      'read_only': False,
+    },
+    'conditions': [
+      ['OS=="<os>"', {
+        'variables': {
+          ...
+        },
+      }, {  # else
+        'variables': {
+          ...
+        },
+      }],
+      ...
+    ],
+  }
+  """
+  verify_root(value)
+
+  # Scan to get the list of OSes.
+  conditions = value.get('conditions', [])
+  oses = set(re.match(r'OS==\"([a-z]+)\"', c[0]).group(1) for c in conditions)
+  oses = oses.union(default_oses)
+  configs = Configs(oses, file_comment)
+
+  # Global level variables.
+  configs.add_globals(value.get('variables', {}))
+
+  # OS specific variables.
+  for condition in conditions:
+    condition_os = re.match(r'OS==\"([a-z]+)\"', condition[0]).group(1)
+    configs.add_values(condition_os, condition[1].get('variables', {}))
+    if len(condition) > 2:
+      configs.add_negative_values(
+          condition_os, condition[2].get('variables', {}))
+  return configs
+
+
+def load_isolate_for_flavor(content, flavor):
+  """Loads the .isolate file and returns the information unprocessed.
+
+  Returns the command, dependencies and read_only flag. The dependencies are
+  fixed to use os.path.sep.
+  """
+  # Load the .isolate file, process its conditions, retrieve the command and
+  # dependencies.
+  configs = load_isolate_as_config(eval_content(content), None, DEFAULT_OSES)
+  config = configs.per_os.get(flavor) or configs.per_os.get(None)
+  if not config:
+    raise ExecutionError('Failed to load configuration for \'%s\'' % flavor)
+  # Merge tracked and untracked dependencies, isolate.py doesn't care about the
+  # trackability of the dependencies, only the build tool does.
+  dependencies = [
+    f.replace('/', os.path.sep) for f in config.tracked + config.untracked
+  ]
+  touched = [f.replace('/', os.path.sep) for f in config.touched]
+  return config.command, dependencies, touched, config.read_only
+
+
 class Flattenable(object):
   """Represents data that can be represented as a json file."""
   MEMBERS = ()
 
   def flatten(self):
-    """Returns a json-serializable version of itself."""
-    return dict((member, getattr(self, member)) for member in self.MEMBERS)
+    """Returns a json-serializable version of itself.
+
+    Skips None entries.
+    """
+    items = ((member, getattr(self, member)) for member in self.MEMBERS)
+    return dict((member, value) for member, value in items if value is not None)
 
   @classmethod
   def load(cls, data):
@@ -374,13 +1118,18 @@ class Flattenable(object):
     out = cls()
     for member in out.MEMBERS:
       if member in data:
-        value = data.pop(member)
-        setattr(out, member, value)
+        # Access to a protected member XXX of a client class
+        # pylint: disable=W0212
+        out._load_member(member, data.pop(member))
     if data:
       raise ValueError(
           'Found unexpected entry %s while constructing an object %s' %
             (data, cls.__name__), data, cls.__name__)
     return out
+
+  def _load_member(self, member, value):
+    """Loads a member into self."""
+    setattr(self, member, value)
 
   @classmethod
   def load_file(cls, filename):
@@ -406,9 +1155,12 @@ class Result(Flattenable):
   MEMBERS = (
     'command',
     'files',
+    'os',
     'read_only',
     'relative_cwd',
   )
+
+  os = get_flavor()
 
   def __init__(self):
     super(Result, self).__init__()
@@ -431,6 +1183,14 @@ class Result(Flattenable):
     if read_only is not None:
       self.read_only = read_only
     self.relative_cwd = relative_cwd
+
+  def _load_member(self, member, value):
+    if member == 'os':
+      if value != self.os:
+        raise run_test_from_archive.ConfigError(
+            'The .results file was created on another platform')
+    else:
+      super(Result, self)._load_member(member, value)
 
   def __str__(self):
     out = '%s(\n' % self.__class__.__name__
@@ -522,7 +1282,8 @@ class CompleteState(object):
     with open(isolate_file, 'r') as f:
       # At that point, variables are not replaced yet in command and infiles.
       # infiles may contain directory entries and is in posix style.
-      command, infiles, touched, read_only = load_isolate(f.read())
+      command, infiles, touched, read_only = load_isolate_for_flavor(
+          f.read(), get_flavor())
     command = [eval_variables(i, self.saved_state.variables) for i in command]
     infiles = [eval_variables(f, self.saved_state.variables) for f in infiles]
     touched = [eval_variables(f, self.saved_state.variables) for f in touched]
@@ -568,13 +1329,13 @@ class CompleteState(object):
   def save_files(self):
     """Saves both self.result and self.saved_state."""
     logging.debug('Dumping to %s' % self.result_file)
-    trace_inputs.write_json(self.result_file, self.result.flatten(), False)
+    trace_inputs.write_json(self.result_file, self.result.flatten(), True)
     total_bytes = sum(i.get('size', 0) for i in self.result.files.itervalues())
     if total_bytes:
       logging.debug('Total size: %d bytes' % total_bytes)
     saved_state_file = result_to_state(self.result_file)
     logging.debug('Dumping to %s' % saved_state_file)
-    trace_inputs.write_json(saved_state_file, self.saved_state.flatten(), False)
+    trace_inputs.write_json(saved_state_file, self.saved_state.flatten(), True)
 
   @property
   def root_dir(self):
@@ -595,6 +1356,11 @@ class CompleteState(object):
     return os.path.dirname(self.result_file)
 
   def __str__(self):
+    def indent(data, indent_length):
+      """Indents text."""
+      spacing = ' ' * indent_length
+      return ''.join(spacing + l for l in str(data).splitlines(True))
+
     out = '%s(\n' % self.__class__.__name__
     out += '  root_dir: %s\n' % self.root_dir
     out += '  result: %s\n' % indent(self.result, 2)
@@ -636,7 +1402,7 @@ def load_complete_state(options, level):
   return complete_state
 
 
-def read(complete_state):
+def read_trace_as_isolate_dict(complete_state):
   """Reads a trace and returns the .isolate dictionary."""
   api = trace_inputs.get_api()
   logfile = complete_state.result_file + '.log'
@@ -645,9 +1411,9 @@ def read(complete_state):
         'No log file \'%s\' to read, did you forget to \'trace\'?' % logfile)
   try:
     results = trace_inputs.load_trace(
-        logfile, complete_state.root_dir, api, isolate_common.default_blacklist)
-    tracked, touched = isolate_common.split_touched(results.existent)
-    value = isolate_common.generate_isolate(
+        logfile, complete_state.root_dir, api, default_blacklist)
+    tracked, touched = split_touched(results.existent)
+    value = generate_isolate(
         tracked,
         [],
         touched,
@@ -659,6 +1425,36 @@ def read(complete_state):
     raise ExecutionError(
         'Reading traces failed for: %s\n%s' %
           (' '.join(complete_state.result.command), str(e)))
+
+
+def print_all(comment, data, stream):
+  """Prints a complete .isolate file and its top-level file comment into a
+  stream.
+  """
+  if comment:
+    stream.write(comment)
+  pretty_print(data, stream)
+
+
+def merge(complete_state):
+  """Reads a trace and merges it back into the source .isolate file."""
+  value = read_trace_as_isolate_dict(complete_state)
+
+  # Now take that data and union it into the original .isolate file.
+  with open(complete_state.saved_state.isolate_file, 'r') as f:
+    prev_content = f.read()
+  prev_config = load_isolate_as_config(
+      eval_content(prev_content),
+      extract_comment(prev_content),
+      DEFAULT_OSES)
+  new_config = load_isolate_as_config(value, '', DEFAULT_OSES)
+  config = union(prev_config, new_config)
+  # pylint: disable=E1103
+  data = convert_map_to_isolate_dict(
+      *reduce_inputs(*invert_map(config.flatten())))
+  print 'Updating %s' % complete_state.saved_state.isolate_file
+  with open(complete_state.saved_state.isolate_file, 'wb') as f:
+    print_all(config.file_comment, data, f)
 
 
 def CMDcheck(args):
@@ -681,45 +1477,45 @@ def CMDhashtable(args):
   parser = OptionParserIsolate(command='hashtable')
   options, _ = parser.parse_args(args)
 
-  success = False
-  try:
-    complete_state = load_complete_state(options, WITH_HASH)
-    options.outdir = (
-        options.outdir or os.path.join(complete_state.resultdir, 'hashtable'))
-    recreate_tree(
-        outdir=options.outdir,
-        indir=complete_state.root_dir,
-        infiles=complete_state.result.files,
-        action=run_test_from_archive.HARDLINK,
-        as_sha1=True)
+  with run_test_from_archive.Profiler('GenerateHashtable'):
+    success = False
+    try:
+      complete_state = load_complete_state(options, WITH_HASH)
+      options.outdir = (
+          options.outdir or os.path.join(complete_state.resultdir, 'hashtable'))
+      # Make sure that complete_state isn't modified until save_files() is
+      # called, because any changes made to it here will propagate to the files
+      # created (which is probably not intended).
+      complete_state.save_files()
 
-    complete_state.save_files()
+      logging.info('Creating content addressed object store with %d item',
+                   len(complete_state.result.files))
 
-    # Also archive the .result file.
-    with open(complete_state.result_file, 'rb') as f:
-      result_hash = hashlib.sha1(f.read()).hexdigest()
-    logging.info(
-        '%s -> %s' %
-        (os.path.basename(complete_state.result_file), result_hash))
-    outfile = os.path.join(options.outdir, result_hash)
-    if os.path.isfile(outfile):
-      # Just do a quick check that the file size matches. If they do, skip the
-      # archive. This mean the build result didn't change at all.
-      out_size = os.stat(outfile).st_size
-      in_size = os.stat(complete_state.result_file).st_size
-      if in_size == out_size:
-        success = True
-        return 0
+      with open(complete_state.result_file, 'rb') as f:
+        manifest_hash = hashlib.sha1(f.read()).hexdigest()
+      manifest_metadata = {'sha-1': manifest_hash}
 
-    run_test_from_archive.link_file(
-        outfile, complete_state.result_file, run_test_from_archive.HARDLINK)
-    success = True
-    return 0
-  finally:
-    # If the command failed, delete the .results file if it exists. This is
-    # important so no stale swarm job is executed.
-    if not success and os.path.isfile(options.result):
-      os.remove(options.result)
+      infiles = complete_state.result.files
+      infiles[complete_state.result_file] = manifest_metadata
+
+      if re.match(r'^https?://.+$', options.outdir):
+        upload_sha1_tree(
+            base_url=options.outdir,
+            indir=complete_state.root_dir,
+            infiles=infiles)
+      else:
+        recreate_tree(
+            outdir=options.outdir,
+            indir=complete_state.root_dir,
+            infiles=infiles,
+            action=run_test_from_archive.HARDLINK,
+            as_sha1=True)
+      success = True
+    finally:
+      # If the command failed, delete the .results file if it exists. This is
+      # important so no stale swarm job is executed.
+      if not success and os.path.isfile(options.result):
+        os.remove(options.result)
 
 
 def CMDnoop(args):
@@ -743,27 +1539,7 @@ def CMDmerge(args):
   parser = OptionParserIsolate(command='merge', require_result=False)
   options, _ = parser.parse_args(args)
   complete_state = load_complete_state(options, NO_INFO)
-  value = read(complete_state)
-
-  # Now take that data and union it into the original .isolate file.
-  with open(complete_state.saved_state.isolate_file, 'r') as f:
-    prev_content = f.read()
-  prev_config = merge_isolate.load_gyp(
-      merge_isolate.eval_content(prev_content),
-      merge_isolate.extract_comment(prev_content),
-      merge_isolate.DEFAULT_OSES)
-  new_config = merge_isolate.load_gyp(
-      value,
-      '',
-      merge_isolate.DEFAULT_OSES)
-  config = merge_isolate.union(prev_config, new_config)
-  # pylint: disable=E1103
-  data = merge_isolate.convert_map_to_gyp(
-      *merge_isolate.reduce_inputs(*merge_isolate.invert_map(config.flatten())))
-  print 'Updating %s' % complete_state.saved_state.isolate_file
-  with open(complete_state.saved_state.isolate_file, 'wb') as f:
-    merge_isolate.print_all(config.file_comment, data, f)
-
+  merge(complete_state)
   return 0
 
 
@@ -775,8 +1551,8 @@ def CMDread(args):
   parser = OptionParserIsolate(command='read', require_result=False)
   options, _ = parser.parse_args(args)
   complete_state = load_complete_state(options, NO_INFO)
-  value = read(complete_state)
-  isolate_common.pretty_print(value, sys.stdout)
+  value = read_trace_as_isolate_dict(complete_state)
+  pretty_print(value, sys.stdout)
   return 0
 
 
@@ -878,6 +1654,9 @@ def CMDtrace(args):
   """
   parser = OptionParserIsolate(command='trace')
   parser.enable_interspersed_args()
+  parser.add_option(
+      '-m', '--merge', action='store_true',
+      help='After tracing, merge the results back in the .isolate file')
   options, args = parser.parse_args(args)
   complete_state = load_complete_state(options, STATS_ONLY)
   cmd = complete_state.result.command + args
@@ -901,48 +1680,18 @@ def CMDtrace(args):
     raise ExecutionError('Tracing failed for: %s\n%s' % (' '.join(cmd), str(e)))
 
   complete_state.save_files()
+
+  if options.merge:
+    merge(complete_state)
+
   return result
 
 
-class OptionParserWithNiceDescription(optparse.OptionParser):
-  """Generates the description with the command's docstring."""
-  def __init__(self, *args, **kwargs):
-    """Sets 'description' and 'usage' if not already specified."""
-    command = kwargs.pop('command', None)
-    if not 'description' in kwargs:
-      kwargs['description'] = re.sub(
-          '[\r\n ]{2,}', ' ', get_command_handler(command).__doc__)
-    kwargs.setdefault('usage', '%%prog %s [options]' % command)
-    optparse.OptionParser.__init__(self, *args, **kwargs)
-
-
-class OptionParserWithLogging(OptionParserWithNiceDescription):
-  """Adds automatic --verbose handling."""
-  def __init__(self, *args, **kwargs):
-    OptionParserWithNiceDescription.__init__(self, *args, **kwargs)
-    self.add_option(
-        '-v', '--verbose',
-        action='count',
-        default=int(os.environ.get('ISOLATE_DEBUG', 0)),
-        help='Use multiple times to increase verbosity')
-
-  def parse_args(self, *args, **kwargs):
-    options, args = OptionParserWithNiceDescription.parse_args(
-        self, *args, **kwargs)
-    level = [
-      logging.ERROR, logging.INFO, logging.DEBUG,
-    ][min(2, options.verbose)]
-    logging.basicConfig(
-          level=level,
-          format='%(levelname)5s %(module)15s(%(lineno)3d):%(message)s')
-    return options, args
-
-
-class OptionParserIsolate(OptionParserWithLogging):
+class OptionParserIsolate(trace_inputs.OptionParserWithNiceDescription):
   """Adds automatic --isolate, --result, --out and --variables handling."""
-  def __init__(self, require_result=True, *args, **kwargs):
-    OptionParserWithLogging.__init__(self, *args, **kwargs)
-    default_variables = [('OS', isolate_common.get_flavor())]
+  def __init__(self, require_result=True, **kwargs):
+    trace_inputs.OptionParserWithNiceDescription.__init__(self, **kwargs)
+    default_variables = [('OS', get_flavor())]
     if sys.platform in ('win32', 'cygwin'):
       default_variables.append(('EXECUTABLE_SUFFIX', '.exe'))
     else:
@@ -981,7 +1730,8 @@ class OptionParserIsolate(OptionParserWithLogging):
 
     On Windows, / and \ are often mixed together in a path.
     """
-    options, args = OptionParserWithLogging.parse_args(self, *args, **kwargs)
+    options, args = trace_inputs.OptionParserWithNiceDescription.parse_args(
+        self, *args, **kwargs)
     if not self.allow_interspersed_args and args:
       self.error('Unsupported argument: %s' % args)
 
@@ -1000,7 +1750,7 @@ class OptionParserIsolate(OptionParserWithLogging):
           os.path.abspath(
               options.isolate.replace('/', os.path.sep)))
 
-    if options.outdir:
+    if options.outdir and not re.match(r'^https?://.+$', options.outdir):
       options.outdir = os.path.abspath(
           options.outdir.replace('/', os.path.sep))
 
@@ -1010,56 +1760,16 @@ class OptionParserIsolate(OptionParserWithLogging):
 ### Glue code to make all the commands works magically.
 
 
-def extract_documentation():
-  """Returns a dict {command: description} for each of documented command."""
-  commands = (
-      fn[3:]
-      for fn in dir(sys.modules[__name__])
-      if fn.startswith('CMD') and get_command_handler(fn[3:]).__doc__)
-  return dict((fn, get_command_handler(fn).__doc__) for fn in commands)
-
-
-def CMDhelp(args):
-  """Prints list of commands or help for a specific command."""
-  doc = extract_documentation()
-  # Calculates the optimal offset.
-  offset = max(len(cmd) for cmd in doc)
-  format_str = '  %-' + str(offset + 2) + 's %s'
-  # Generate a one-liner documentation of each commands.
-  commands_description = '\n'.join(
-       format_str % (cmd, doc[cmd].split('\n')[0]) for cmd in sorted(doc))
-
-  parser = OptionParserWithLogging(
-      usage='%prog <command> [options]',
-      description='Commands are:\n%s\n' % commands_description)
-  parser.format_description = lambda _: parser.description
-
-  # Strip out any -h or --help argument.
-  _, args = parser.parse_args([i for i in args if not i in ('-h', '--help')])
-  if len(args) == 1:
-    if not get_command_handler(args[0]):
-      parser.error('Unknown command %s' % args[0])
-    # The command was "%prog help command", replaces ourself with
-    # "%prog command --help" so help is correctly printed out.
-    return main(args + ['--help'])
-  elif args:
-    parser.error('Unknown argument "%s"' % ' '.join(args))
-  parser.print_help()
-  return 0
-
-
-def get_command_handler(name):
-  """Returns the command handler or CMDhelp if it doesn't exist."""
-  return getattr(sys.modules[__name__], 'CMD%s' % name, None)
+CMDhelp = trace_inputs.CMDhelp
 
 
 def main(argv):
-  command = get_command_handler(argv[0] if argv else 'help')
-  if not command:
-    return CMDhelp(argv)
   try:
-    return command(argv[1:])
-  except (ExecutionError, run_test_from_archive.MappingError), e:
+    return trace_inputs.main_impl(argv)
+  except (
+      ExecutionError,
+      run_test_from_archive.MappingError,
+      run_test_from_archive.ConfigError) as e:
     sys.stderr.write('\nError: ')
     sys.stderr.write(str(e))
     sys.stderr.write('\n')

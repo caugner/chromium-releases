@@ -35,6 +35,7 @@
 #include "ppapi/c/private/ppb_host_resolver_private.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
 #include "ppapi/c/private/ppb_tcp_socket_private.h"
+#include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/c/private/ppp_flash_browser_operations.h"
 #include "ppapi/proxy/ppapi_param_traits.h"
 #include "ppapi/proxy/ppapi_proxy_export.h"
@@ -63,8 +64,8 @@ IPC_ENUM_TRAITS(PP_FlashSetting)
 IPC_ENUM_TRAITS(PP_InputEvent_MouseButton)
 IPC_ENUM_TRAITS(PP_InputEvent_Type)
 IPC_ENUM_TRAITS(PP_NetAddressFamily_Private)
-IPC_ENUM_TRAITS(PP_NetworkListType_Private)
 IPC_ENUM_TRAITS(PP_NetworkListState_Private)
+IPC_ENUM_TRAITS(PP_NetworkListType_Private)
 IPC_ENUM_TRAITS(PP_PrintOrientation_Dev)
 IPC_ENUM_TRAITS(PP_PrintOutputFormat_Dev)
 IPC_ENUM_TRAITS(PP_PrintScalingOption_Dev)
@@ -230,13 +231,6 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::PPB_URLRequestInfo_Data::BodyItem)
   IPC_STRUCT_TRAITS_MEMBER(expected_last_modified_time)
 IPC_STRUCT_TRAITS_END()
 
-#if !defined(OS_NACL)
-IPC_STRUCT_TRAITS_BEGIN(ppapi::proxy::PPPVideoCapture_Buffer)
-  IPC_STRUCT_TRAITS_MEMBER(resource)
-  IPC_STRUCT_TRAITS_MEMBER(handle)
-  IPC_STRUCT_TRAITS_MEMBER(size)
-IPC_STRUCT_TRAITS_END()
-
 IPC_STRUCT_TRAITS_BEGIN(ppapi::NetworkInfo)
   IPC_STRUCT_TRAITS_MEMBER(name)
   IPC_STRUCT_TRAITS_MEMBER(type)
@@ -245,7 +239,23 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::NetworkInfo)
   IPC_STRUCT_TRAITS_MEMBER(display_name)
   IPC_STRUCT_TRAITS_MEMBER(mtu)
 IPC_STRUCT_TRAITS_END()
-#endif  // !defined(OS_NACL)
+
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
+IPC_STRUCT_TRAITS_BEGIN(ppapi::proxy::PPPVideoCapture_Buffer)
+  IPC_STRUCT_TRAITS_MEMBER(resource)
+  IPC_STRUCT_TRAITS_MEMBER(handle)
+  IPC_STRUCT_TRAITS_MEMBER(size)
+IPC_STRUCT_TRAITS_END()
+
+// TODO(tomfinegan): This is identical to PPPVideoCapture_Buffer, maybe replace
+// both with a single type?
+IPC_STRUCT_TRAITS_BEGIN(ppapi::proxy::PPPDecryptor_Buffer)
+  IPC_STRUCT_TRAITS_MEMBER(resource)
+  IPC_STRUCT_TRAITS_MEMBER(handle)
+  IPC_STRUCT_TRAITS_MEMBER(size)
+IPC_STRUCT_TRAITS_END()
+
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // These are from the browser to the plugin.
 // Loads the given plugin.
@@ -256,6 +266,14 @@ IPC_MESSAGE_CONTROL1(PpapiMsg_LoadPlugin, FilePath /* path */)
 IPC_MESSAGE_CONTROL2(PpapiMsg_CreateChannel,
                      int /* renderer_id */,
                      bool /* incognito */)
+
+// Creates a channel to talk to a renderer. This message is only used by the
+// NaCl IPC proxy. It is intercepted by NaClIPCAdapter, which creates the
+// actual channel and rewrites the message for the untrusted side.
+IPC_MESSAGE_CONTROL3(PpapiMsg_CreateNaClChannel,
+                     int /* renderer_id */,
+                     bool /* incognito */,
+                     ppapi::proxy::SerializedHandle /* channel_handle */)
 
 // Each plugin may be referenced by multiple renderers. We need the instance
 // IDs to be unique within a plugin, despite coming from different renderers,
@@ -285,7 +303,7 @@ IPC_SYNC_MESSAGE_CONTROL1_1(PpapiMsg_SupportsInterface,
                             std::string /* interface_name */,
                             bool /* result */)
 
-#if !defined(OS_NACL)
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // Network state notification from the browser for implementing
 // PPP_NetworkState_Dev.
 IPC_MESSAGE_CONTROL1(PpapiMsg_SetNetworkState,
@@ -356,7 +374,7 @@ IPC_SYNC_MESSAGE_CONTROL2_1(PpapiMsg_ConnectToPlugin,
                             PP_Instance /* instance */,
                             IPC::PlatformFileForTransit /* handle */,
                             int32_t /* result */)
-#endif  // !defined(OS_NACL)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // PPB_Audio.
 
@@ -367,24 +385,22 @@ IPC_SYNC_MESSAGE_CONTROL2_1(PpapiMsg_ConnectToPlugin,
 //
 // The handler of this message should always close all of the handles passed
 // in, since some could be valid even in the error case.
-IPC_MESSAGE_ROUTED5(PpapiMsg_PPBAudio_NotifyAudioStreamCreated,
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPBAudio_NotifyAudioStreamCreated,
                     ppapi::HostResource /* audio_id */,
                     int32_t /* result_code (will be != PP_OK on failure) */,
-                    IPC::PlatformFileForTransit /* socket_handle */,
-                    base::SharedMemoryHandle /* handle */,
-                    int32_t /* length */)
+                    ppapi::proxy::SerializedHandle /* socket_handle */,
+                    ppapi::proxy::SerializedHandle /* handle */)
 
 // PPB_AudioInput_Dev.
 IPC_MESSAGE_ROUTED3(PpapiMsg_PPBAudioInput_EnumerateDevicesACK,
                     ppapi::HostResource /* audio_input */,
                     int32_t /* result */,
                     std::vector<ppapi::DeviceRefData> /* devices */)
-IPC_MESSAGE_ROUTED5(PpapiMsg_PPBAudioInput_OpenACK,
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPBAudioInput_OpenACK,
                     ppapi::HostResource /* audio_input */,
                     int32_t /* result_code (will be != PP_OK on failure) */,
-                    IPC::PlatformFileForTransit /* socket_handle */,
-                    base::SharedMemoryHandle /* handle */,
-                    int32_t /* length */)
+                    ppapi::proxy::SerializedHandle /* socket_handle */,
+                    ppapi::proxy::SerializedHandle /* handle */)
 
 // PPB_FileIO.
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPBFileIO_GeneralComplete,
@@ -539,6 +555,11 @@ IPC_MESSAGE_ROUTED2(PpapiMsg_PPPMessaging_HandleMessage,
 IPC_MESSAGE_ROUTED1(PpapiMsg_PPPMouseLock_MouseLockLost,
                     PP_Instance /* instance */)
 
+// PPB_NetworkMonitor_Private.
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPBNetworkMonitor_NetworkList,
+                    uint32 /* plugin_dispatcher_id */,
+                    ppapi::NetworkList /* network_list */)
+
 // PPP_Printing
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiMsg_PPPPrinting_QuerySupportedFormats,
                            PP_Instance /* instance */,
@@ -564,14 +585,18 @@ IPC_MESSAGE_ROUTED2(PpapiMsg_PPPTextInput_RequestSurroundingText,
 
 // PPB_URLLoader
 // (Messages from browser to plugin to notify it of changes in state.)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPBURLLoader_ReadResponseBody_Ack,
-                    ppapi::HostResource /* loader */,
-                    int32 /* result */,
-                    std::string /* data */)
+//
+// NOTE: The ReadResponseBody_Ack message is a custom generated message
+// with the following fields appended:
+//   ppapi::HostResource
+//   response data (array of bytes stored via WriteData)
+//   int result
+//
+IPC_MESSAGE_ROUTED0(PpapiMsg_PPBURLLoader_ReadResponseBody_Ack)
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPBURLLoader_CallbackComplete,
                     ppapi::HostResource /* loader */,
                     int32_t /* result */)
-#if !defined(OS_NACL)
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPB_Broker.
 IPC_MESSAGE_ROUTED3(
     PpapiMsg_PPBBroker_ConnectComplete,
@@ -579,10 +604,27 @@ IPC_MESSAGE_ROUTED3(
     IPC::PlatformFileForTransit /* handle */,
     int32_t /* result */)
 
-// PPB_NetworkMonitor_Private.
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPBNetworkMonitor_NetworkList,
-                    uint32 /* plugin_dispatcher_id */,
-                    ppapi::NetworkList /* network_list */)
+// PPP_ContentDecryptor_Dev
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_GenerateKeyRequest,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* key_system, String */,
+                    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */)
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_AddKey,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* session_id, String */,
+                    ppapi::proxy::SerializedVar /* key, ArrayBuffer */,
+                    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPPContentDecryptor_CancelKeyRequest,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* session_id, String */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_Decrypt,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::PPPDecryptor_Buffer /* buffer */,
+                    std::string /* serialized_block_info */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_DecryptAndDecode,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::PPPDecryptor_Buffer /* buffer */,
+                    std::string /* serialized_block_info */)
 
 // PPB_Talk
 IPC_MESSAGE_ROUTED3(
@@ -590,6 +632,7 @@ IPC_MESSAGE_ROUTED3(
     uint32 /* plugin_dispatcher_id */,
     PP_Resource /* resource */,
     int32_t /* result */)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // PPB_TCPSocket_Private.
 IPC_MESSAGE_ROUTED5(PpapiMsg_PPBTCPSocket_ConnectACK,
@@ -632,10 +675,12 @@ IPC_MESSAGE_ROUTED4(PpapiMsg_PPBUDPSocket_SendToACK,
                     bool /* succeeded */,
                     int32_t /* bytes_written */)
 
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPB_URLLoader_Trusted
 IPC_MESSAGE_ROUTED1(
     PpapiMsg_PPBURLLoader_UpdateProgress,
     ppapi::proxy::PPBURLLoader_UpdateProgress_Params /* params */)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // PPB_TCPServerSocket_Private.
 
@@ -665,8 +710,9 @@ IPC_MESSAGE_ROUTED5(PpapiMsg_PPBHostResolver_ResolveACK,
                     uint32 /* host_resolver_id */,
                     bool /* succeeded */,
                     std::string /* canonical_name */,
-                    ppapi::NetAddressList /* net_address_list */)
+                    std::vector<PP_NetAddress_Private> /* net_address_list */)
 
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPP_Instance_Private.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiMsg_PPPInstancePrivate_GetInstanceObject,
                            PP_Instance /* instance */,
@@ -725,7 +771,7 @@ IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_PictureReady,
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPPVideoDecoder_NotifyError,
                     ppapi::HostResource /* video_decoder */,
                     PP_VideoDecodeError_Dev /* error */)
-#endif  // !defined(OS_NACL)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // -----------------------------------------------------------------------------
 // These are from the plugin to the renderer.
@@ -877,7 +923,6 @@ IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBGraphics2D_Dev_SetScale,
                     ppapi::HostResource /* graphics_2d */,
                     float /* scale */)
 
-#if !defined(OS_NACL)
 // PPB_Graphics3D.
 IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBGraphics3D_Create,
                            PP_Instance /* instance */,
@@ -909,14 +954,12 @@ IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBGraphics3D_CreateTransferBuffer,
 IPC_SYNC_MESSAGE_ROUTED2_0(PpapiHostMsg_PPBGraphics3D_DestroyTransferBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* id */)
-IPC_SYNC_MESSAGE_ROUTED2_2(PpapiHostMsg_PPBGraphics3D_GetTransferBuffer,
+IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBGraphics3D_GetTransferBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* id */,
-                           base::SharedMemoryHandle /* transfer_buffer */,
-                           uint32 /* size */)
+                           ppapi::proxy::SerializedHandle /* transfer_buffer */)
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBGraphics3D_SwapBuffers,
                     ppapi::HostResource /* graphics_3d */)
-#endif  // !defined(OS_NACL)
 
 // PPB_ImageData.
 IPC_SYNC_MESSAGE_ROUTED4_3(PpapiHostMsg_PPBImageData_Create,
@@ -934,7 +977,7 @@ IPC_SYNC_MESSAGE_ROUTED4_3(PpapiHostMsg_PPBImageData_CreateNaCl,
                            PP_Bool /* init_to_zero */,
                            ppapi::HostResource /* result_resource */,
                            std::string /* image_data_desc */,
-                           base::SharedMemoryHandle /* result */)
+                           ppapi::proxy::SerializedHandle /* result */)
 
 // PPB_Instance.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetWindowObject,
@@ -990,10 +1033,6 @@ IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_LockMouse,
                     PP_Instance /* instance */)
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_UnlockMouse,
                     PP_Instance /* instance */)
-IPC_SYNC_MESSAGE_ROUTED1_2(PpapiHostMsg_PPBPInstance_GetDefaultPrintSettings,
-                           PP_Instance /* instance */,
-                           PP_PrintSettings_Dev /* settings */,
-                           bool /* result */)
 IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBInstance_ResolveRelativeToDocument,
                            PP_Instance /* instance */,
                            ppapi::proxy::SerializedVar /* relative */,
@@ -1127,7 +1166,7 @@ IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBVar_CreateObjectDeprecated,
                            int64 /* object_data */,
                            ppapi::proxy::SerializedVar /* result */)
 
-#if !defined(OS_NACL)
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPB_Broker.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBBroker_Create,
                            PP_Instance /* instance */,
@@ -1136,11 +1175,48 @@ IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBBroker_Connect,
                     ppapi::HostResource /* broker */)
 
 // PPB_Buffer.
-IPC_SYNC_MESSAGE_ROUTED2_2(PpapiHostMsg_PPBBuffer_Create,
-                           PP_Instance /* instance */,
-                           uint32_t /* size */,
-                           ppapi::HostResource /* result_resource */,
-                           base::SharedMemoryHandle /* result_shm_handle */)
+IPC_SYNC_MESSAGE_ROUTED2_2(
+    PpapiHostMsg_PPBBuffer_Create,
+    PP_Instance /* instance */,
+    uint32_t /* size */,
+    ppapi::HostResource /* result_resource */,
+    ppapi::proxy::SerializedHandle /* result_shm_handle */)
+
+// PPB_ContentDecryptor_Dev messages handled in PPB_Instance_Proxy.
+IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_NeedKey,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* key_system, String */,
+                    ppapi::proxy::SerializedVar /* session_id, String */,
+                    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_KeyAdded,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* key_system, String */,
+                    ppapi::proxy::SerializedVar /* session_id, String */)
+IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_KeyMessage,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* key_system, String */,
+                    ppapi::proxy::SerializedVar /* session_id, String */,
+                    PP_Resource /* message, PPB_Buffer_Dev */,
+                    ppapi::proxy::SerializedVar /* default_url, String */)
+IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_KeyError,
+                    PP_Instance /* instance */,
+                    ppapi::proxy::SerializedVar /* key_system, String */,
+                    ppapi::proxy::SerializedVar /* session_id, String */,
+                    int32_t /* media_error */,
+                    int32_t /* system_code */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DeliverBlock,
+                    PP_Instance /* instance */,
+                    PP_Resource /* decrypted_block, PPB_Buffer_Dev */,
+                    std::string /* serialized_block_info */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DeliverFrame,
+                    PP_Instance /* instance */,
+                    PP_Resource /* decrypted_frame, PPB_Buffer_Dev */,
+                    std::string /* serialized_block_info */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_DeliverSamples,
+                    PP_Instance /* instance */,
+                    PP_Resource /* decrypted_samples, PPB_Buffer_Dev */,
+                    std::string /* serialized_block_info */)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // PPB_NetworkMonitor_Private.
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBNetworkMonitor_Start,
@@ -1156,6 +1232,7 @@ IPC_MESSAGE_CONTROL5(PpapiHostMsg_PPBHostResolver_Resolve,
                      ppapi::HostPortPair /* host_port */,
                      PP_HostResolver_Private_Hint /* hint */)
 
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPB_PDF
 IPC_SYNC_MESSAGE_ROUTED3_1(
     PpapiHostMsg_PPBPDF_GetFontFileWithFallback,
@@ -1175,6 +1252,7 @@ IPC_MESSAGE_ROUTED2(
     PpapiHostMsg_PPBTalk_GetPermission,
     uint32 /* plugin_dispatcher_id */,
     PP_Resource /* resource */)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // PPB_Testing.
 IPC_SYNC_MESSAGE_ROUTED3_1(
@@ -1190,6 +1268,7 @@ IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBTesting_SimulateInputEvent,
                     PP_Instance /* instance */,
                     ppapi::InputEventData /* input_event */)
 
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPB_VideoCapture_Dev.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBVideoCapture_Create,
                            PP_Instance /* instance */,
@@ -1344,6 +1423,7 @@ IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFlashMessageLoop_Run,
                            int32_t /* result */)
 IPC_SYNC_MESSAGE_ROUTED1_0(PpapiHostMsg_PPBFlashMessageLoop_Quit,
                            ppapi::HostResource /* flash_message_loop */)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 // PPB_TCPSocket_Private.
 IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBTCPSocket_Create,
@@ -1379,6 +1459,11 @@ IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBUDPSocket_Create,
                             int32 /* routing_id */,
                             uint32 /* plugin_dispatcher_id */,
                             uint32 /* socket_id */)
+IPC_MESSAGE_CONTROL4(PpapiHostMsg_PPBUDPSocket_SetBoolSocketFeature,
+                     int32 /* routing_id */,
+                     uint32 /* socket_id */,
+                     int32_t /* name */,
+                     bool /* value */)
 IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBUDPSocket_Bind,
                      int32 /* routing_id */,
                      uint32 /* socket_id */,
@@ -1412,11 +1497,12 @@ IPC_SYNC_MESSAGE_CONTROL1_2(PpapiHostMsg_PPBX509Certificate_ParseDER,
                             bool /* succeeded */,
                             ppapi::PPB_X509Certificate_Fields /* result */)
 
+#if !defined(OS_NACL) && !defined(NACL_WIN64)
 // PPB_Font.
 IPC_SYNC_MESSAGE_CONTROL0_1(PpapiHostMsg_PPBFont_GetFontFamilies,
                             std::string /* result */)
 
-#endif  // !defined(OS_NACL)
+#endif  // !defined(OS_NACL) && !defined(NACL_WIN64)
 
 //-----------------------------------------------------------------------------
 // Resource call/reply messages.
@@ -1466,3 +1552,26 @@ IPC_MESSAGE_CONTROL4(PpapiHostMsg_FileChooser_Show,
                      std::vector<std::string> /* accept_mime_types */)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FileChooser_ShowReply,
                      std::vector<ppapi::PPB_FileRef_CreateInfo> /* files */)
+
+// Flash device ID.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDeviceID_Create)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_FlashDeviceID_GetDeviceID)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashDeviceID_GetDeviceIDReply,
+                     std::string /* id */)
+
+// Gamepad.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_Gamepad_Create)
+
+// Requests that the gamepad host send the shared memory handle to the plugin
+// process.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_Gamepad_RequestMemory)
+
+// Reply to a RequestMemory call. This supplies the shared memory handle. The
+// actual handle is passed in the ReplyParams struct.
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_Gamepad_SendMemory)
+
+// Printing.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_Printing_Create)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_Printing_GetDefaultPrintSettings)
+IPC_MESSAGE_CONTROL1(PpapiPluginMsg_Printing_GetDefaultPrintSettingsReply,
+                     PP_PrintSettings_Dev /* print_settings */)

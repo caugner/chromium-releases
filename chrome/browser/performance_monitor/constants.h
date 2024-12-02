@@ -13,21 +13,11 @@ namespace performance_monitor {
 
 extern const char kMetricNotFoundError[];
 extern const char kProcessChromeAggregate[];
-extern const int kGatherIntervalInMinutes;
+extern const int kDefaultGatherIntervalInSeconds;
 
 // State tokens
 extern const char kStateChromeVersion[];
 extern const char kStateProfilePrefix[];
-
-// Metric details
-extern const char kMetricCPUUsageName[];
-extern const char kMetricCPUUsageDescription[];
-extern const char kMetricCPUUsageUnits[];
-extern const double kMetricCPUUsageTickSize;
-extern const char kMetricPrivateMemoryUsageName[];
-extern const char kMetricPrivateMemoryUsageDescription[];
-extern const char kMetricPrivateMemoryUsageUnits[];
-extern const double kMetricPrivateMemoryUsageTickSize;
 
 }  // namespace performance_monitor
 

@@ -20,6 +20,13 @@ cr.define('oobe', function() {
   ];
 
   /**
+   * Whether the web camera item should be preselected, if available.
+   * @type {boolean}
+   * @const
+   */
+  var PRESELECT_CAMERA = false;
+
+  /**
    * Creates a new OOBE screen div.
    * @constructor
    * @extends {HTMLDivElement}
@@ -28,13 +35,21 @@ cr.define('oobe', function() {
 
   /**
    * Registers with Oobe.
+   * @param {boolean} lazyInit If true, screen is decorated on first show.
    */
-  UserImageScreen.register = function() {
+  UserImageScreen.register = function(lazyInit) {
     var screen = $('user-image');
     var isWebRTC = document.documentElement.getAttribute('camera') == 'webrtc';
     UserImageScreen.prototype = isWebRTC ? UserImageScreenWebRTCProto :
         UserImageScreenOldProto;
-    UserImageScreen.decorate(screen);
+    if (lazyInit) {
+      screen.__proto__ = UserImageScreen.prototype;
+      screen.deferredDecorate = function() {
+        UserImageScreen.decorate(screen);
+      };
+    } else {
+      UserImageScreen.decorate(screen);
+    }
     Oobe.getInstance().registerScreen(screen);
   };
 
@@ -90,6 +105,8 @@ cr.define('oobe', function() {
       this.profileImageLoading = true;
 
       this.updateLocalizedContent();
+
+      chrome.send('getImages');
     },
 
     /**
@@ -292,11 +309,12 @@ cr.define('oobe', function() {
      * including URL, title, author and website.
      * @private
      */
-    setDefaultImages_: function(images) {
+    setDefaultImages_: function(imagesData) {
       var imageGrid = $('user-image-grid');
       for (var i = 0, data; data = imagesData[i]; i++) {
         imageGrid.addItem(data.url, data.title);
       }
+      this.classList.remove('loading');
     },
 
     /**
@@ -397,6 +415,8 @@ cr.define('oobe', function() {
           });
 
       this.updateLocalizedContent();
+
+      chrome.send('getImages');
     },
 
     /**
@@ -462,9 +482,10 @@ cr.define('oobe', function() {
 
     /**
      * Handles selection change.
+     * @param {cr.Event} e Selection change event.
      * @private
      */
-    handleSelect_: function() {
+    handleSelect_: function(e) {
       var imageGrid = $('user-image-grid');
       if (imageGrid.selectionType == 'camera' && imageGrid.cameraLive) {
         // No current image selected.
@@ -474,21 +495,22 @@ cr.define('oobe', function() {
         chrome.send('selectImage', [imageGrid.selectedItemUrl]);
       }
       // Start/stop camera on (de)selection.
-      if (imageGrid.selectionType == 'camera' && !imageGrid.cameraOnline &&
-          !imageGrid.inProgramSelection) {
-        // Programmatic selection of camera item is done in checkCameraPresence
-        // callback where streaming is started by itself.
-        imageGrid.checkCameraPresence(
-            function() {  // When present.
-              // Start capture if camera is still the selected item.
-              return imageGrid.selectedItem == imageGrid.cameraImage;
-            },
-            function() {  // When absent.
-              return true;  // Check again after some time.
-            });
-      } else if (imageGrid.selectionType != 'camera' &&
-                 imageGrid.cameraOnline) {
-        imageGrid.stopCamera();
+      if (!imageGrid.inProgramSelection &&
+          imageGrid.selectionType != e.oldSelectionType) {
+        if (imageGrid.selectionType == 'camera') {
+          // Programmatic selection of camera item is done in
+          // checkCameraPresence callback where streaming is started by itself.
+          imageGrid.checkCameraPresence(
+              function() {  // When present.
+                // Start capture if camera is still the selected item.
+                return imageGrid.selectedItem == imageGrid.cameraImage;
+              },
+              function() {  // When absent.
+                return true;  // Check again after some time.
+              });
+        } else {
+          imageGrid.stopCamera();
+        }
       }
       this.updateCaption_();
       // Update image attribution text.
@@ -517,15 +539,21 @@ cr.define('oobe', function() {
       Oobe.getInstance().headerHidden = true;
       var imageGrid = $('user-image-grid');
       imageGrid.updateAndFocus();
-      // Check for camera presence and select it, if present.
-      imageGrid.checkCameraPresence(
-          function() {  // When present.
-            imageGrid.selectedItem = imageGrid.cameraImage;
-            return true;  // Start capture if ready.
-          },
-          function() {  // When absent.
-            return true;  // Check again after some time.
-          });
+      if (PRESELECT_CAMERA) {
+        // Check for camera presence and select it, if present.
+        imageGrid.checkCameraPresence(
+            function() {  // When present.
+              imageGrid.selectedItem = imageGrid.cameraImage;
+              return true;  // Start capture if ready.
+            },
+            function() {  // When absent.
+              return true;  // Check again after some time.
+            });
+      } else {
+        // Check continuously for camera presence but don't select it.
+        imageGrid.checkCameraPresence(function() { return false; },
+                                      function() { return true; });
+      }
       chrome.send('onUserImageScreenShown');
     },
 
@@ -578,6 +606,7 @@ cr.define('oobe', function() {
         item.author = data.author || '';
         item.website = data.website || '';
       }
+      this.classList.remove('loading');
     },
 
     /**

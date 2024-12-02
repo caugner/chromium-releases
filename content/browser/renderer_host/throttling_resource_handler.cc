@@ -95,6 +95,10 @@ void ThrottlingResourceHandler::Cancel() {
   controller()->Cancel();
 }
 
+void ThrottlingResourceHandler::CancelAndIgnore() {
+  controller()->CancelAndIgnore();
+}
+
 void ThrottlingResourceHandler::Resume() {
   DeferredStage last_deferred_stage = deferred_stage_;
   deferred_stage_ = DEFERRED_NONE;

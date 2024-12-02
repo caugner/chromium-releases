@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
@@ -21,7 +22,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -36,7 +37,6 @@
 #import "chrome/browser/ui/cocoa/first_run_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
-#import "chrome/browser/ui/cocoa/location_bar/chrome_to_mobile_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/content_setting_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/ev_bubble_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/keyword_hint_decoration.h"
@@ -45,13 +45,17 @@
 #import "chrome/browser/ui/cocoa/location_bar/plus_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/selected_keyword_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/star_decoration.h"
+#import "chrome/browser/ui/cocoa/location_bar/web_intents_button_decoration.h"
+#import "chrome/browser/ui/cocoa/location_bar/zoom_decoration.h"
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
+#include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
 #import "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -63,9 +67,9 @@
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
 #include "skia/ext/skia_utils_mac.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image.h"
 
 using content::WebContents;
 
@@ -99,9 +103,11 @@ LocationBarViewMac::LocationBarViewMac(
                                  OmniboxViewMac::GetFieldFont())),
       plus_decoration_(NULL),
       star_decoration_(new StarDecoration(command_updater)),
-      chrome_to_mobile_decoration_(nil),
+      zoom_decoration_(new ZoomDecoration(toolbar_model)),
       keyword_hint_decoration_(
           new KeywordHintDecoration(OmniboxViewMac::GetFieldFont())),
+      web_intents_button_decoration_(
+          new WebIntentsButtonDecoration(this, OmniboxViewMac::GetFieldFont())),
       profile_(profile),
       browser_(browser),
       toolbar_model_(toolbar_model),
@@ -109,19 +115,8 @@ LocationBarViewMac::LocationBarViewMac(
           content::PAGE_TRANSITION_TYPED |
           content::PAGE_TRANSITION_FROM_ADDRESS_BAR)),
       weak_ptr_factory_(this) {
-  // Disable Chrome To Mobile for off-the-record and non-synced profiles,
-  // or if the feature is disabled by a command line flag or chrome://flags.
-  if (!profile_->IsOffTheRecord() && profile_->IsSyncAccessible() &&
-      ChromeToMobileService::IsChromeToMobileEnabled()) {
-    command_updater_->AddCommandObserver(IDC_CHROME_TO_MOBILE_PAGE, this);
-    chrome_to_mobile_decoration_.reset(
-        new ChromeToMobileDecoration(profile, command_updater));
-    ChromeToMobileServiceFactory::GetForProfile(profile)->
-        RequestMobileListUpdate();
-  }
-
   if (extensions::switch_utils::IsActionBoxEnabled()) {
-    plus_decoration_.reset(new PlusDecoration(command_updater));
+    plus_decoration_.reset(new PlusDecoration(this, browser_));
   }
 
   for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
@@ -130,6 +125,12 @@ LocationBarViewMac::LocationBarViewMac(
     content_setting_decorations_.push_back(
         new ContentSettingDecoration(type, this, profile_));
   }
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  web_intents_button_decoration_->SetButtonImages(
+      rb.GetNativeImageNamed(IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_L).ToNSImage(),
+      rb.GetNativeImageNamed(IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_C).ToNSImage(),
+      rb.GetNativeImageNamed(IDR_OMNIBOX_WI_BUBBLE_BACKGROUND_R).ToNSImage());
 
   registrar_.Add(this,
       chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
@@ -236,6 +237,14 @@ void LocationBarViewMac::InvalidatePageActions() {
   }
 }
 
+void LocationBarViewMac::UpdateWebIntentsButton() {
+  RefreshWebIntentsButtonDecoration();
+}
+
+void LocationBarViewMac::UpdateOpenPDFInReaderPrompt() {
+  // Not implemented on Mac.
+}
+
 void LocationBarViewMac::SaveStateToContents(WebContents* contents) {
   // TODO(shess): Why SaveStateToContents vs SaveStateToTab?
   omnibox_view_->SaveStateToTab(contents);
@@ -243,12 +252,14 @@ void LocationBarViewMac::SaveStateToContents(WebContents* contents) {
 
 void LocationBarViewMac::Update(const WebContents* contents,
                                 bool should_restore_state) {
-  bool star_enabled = IsStarEnabled();
-  command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, star_enabled);
-  star_decoration_->SetVisible(star_enabled);
+  command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, IsStarEnabled());
+  UpdateStarDecorationVisibility();
+  UpdatePlusDecorationVisibility();
   UpdateChromeToMobileEnabled();
+  UpdateZoomDecoration();
   RefreshPageActionDecorations();
   RefreshContentSettingsDecorations();
+  RefreshWebIntentsButtonDecoration();
   // OmniboxView restores state if the tab is non-NULL.
   omnibox_view_->Update(should_restore_state ? contents : NULL);
   OnChanged();
@@ -317,7 +328,7 @@ void LocationBarViewMac::OnKillFocus() {
   // Do nothing.
 }
 
-SkBitmap LocationBarViewMac::GetFavicon() const {
+gfx::Image LocationBarViewMac::GetFavicon() const {
   return browser_->GetCurrentPageIcon();
 }
 
@@ -395,7 +406,17 @@ void LocationBarViewMac::SetPreviewEnabledPageAction(
     return;
 
   decoration->set_preview_enabled(preview_enabled);
-  decoration->UpdateVisibility(contents, GURL(toolbar_model_->GetText()));
+  decoration->UpdateVisibility(contents, toolbar_model_->GetURL());
+}
+
+NSRect LocationBarViewMac::GetPageActionFrame(ExtensionAction* page_action) {
+  PageActionDecoration* decoration = GetPageActionDecoration(page_action);
+  if (!decoration)
+    return NSZeroRect;
+
+  AutocompleteTextFieldCell* cell = [field_ cell];
+  NSRect frame = [cell frameForDecoration:decoration inFrame:[field_ bounds]];
+  return frame;
 }
 
 NSPoint LocationBarViewMac::GetPageActionBubblePoint(
@@ -404,11 +425,14 @@ NSPoint LocationBarViewMac::GetPageActionBubblePoint(
   if (!decoration)
     return NSZeroPoint;
 
-  AutocompleteTextFieldCell* cell = [field_ cell];
-  NSRect frame = [cell frameForDecoration:decoration inFrame:[field_ bounds]];
-  DCHECK(!NSIsEmptyRect(frame));
-  if (NSIsEmptyRect(frame))
+  NSRect frame = GetPageActionFrame(page_action);
+  if (NSIsEmptyRect(frame)) {
+    // The bubble point positioning assumes that the page action is visible. If
+    // not, something else needs to be done otherwise the bubble will appear
+    // near the top left corner (unanchored).
+    NOTREACHED();
     return NSZeroPoint;
+  }
 
   NSPoint bubble_point = decoration->GetBubblePointInFrame(frame);
   return [field_ convertPoint:bubble_point toView:nil];
@@ -457,8 +481,10 @@ void LocationBarViewMac::TestPageActionPressed(size_t index) {
 
 void LocationBarViewMac::SetEditable(bool editable) {
   [field_ setEditable:editable ? YES : NO];
-  star_decoration_->SetVisible(IsStarEnabled());
+  UpdateStarDecorationVisibility();
+  UpdatePlusDecorationVisibility();
   UpdateChromeToMobileEnabled();
+  UpdateZoomDecoration();
   UpdatePageActions();
   Layout();
 }
@@ -467,9 +493,7 @@ bool LocationBarViewMac::IsEditable() {
   return [field_ isEditable] ? true : false;
 }
 
-void LocationBarViewMac::SetStarred(bool starred) {
-  star_decoration_->SetStarred(starred);
-
+void LocationBarViewMac::OnDecorationsChanged() {
   // TODO(shess): The field-editor frame and cursor rects should not
   // change, here.
   [field_ updateCursorAndToolTipRects];
@@ -477,14 +501,28 @@ void LocationBarViewMac::SetStarred(bool starred) {
   [field_ setNeedsDisplay:YES];
 }
 
-void LocationBarViewMac::SetChromeToMobileDecorationLit(bool lit) {
-  chrome_to_mobile_decoration_->SetLit(lit);
+void LocationBarViewMac::SetStarred(bool starred) {
+  star_decoration_->SetStarred(starred);
+  UpdateStarDecorationVisibility();
+  OnDecorationsChanged();
+}
 
-  // TODO(shess): The field-editor frame and cursor rects should not
-  // change, here.
-  [field_ updateCursorAndToolTipRects];
-  [field_ resetFieldEditorFrameIfNeeded];
-  [field_ setNeedsDisplay:YES];
+void LocationBarViewMac::SetActionBoxIcon(int image_id) {
+  plus_decoration_->SetImage(OmniboxViewMac::ImageForResource(image_id));
+  OnDecorationsChanged();
+}
+
+void LocationBarViewMac::ZoomChangedForActiveTab(bool can_show_bubble) {
+  UpdateZoomDecoration();
+  OnDecorationsChanged();
+
+  // TODO(dbeam): show a zoom bubble when |can_show_bubble| is true, the zoom
+  // decoration is showing, and the wrench menu isn't showing.
+}
+
+NSPoint LocationBarViewMac::GetActionBoxAnchorPoint() const {
+  NSPoint point = plus_decoration_->GetActionBoxAnchorPoint();
+  return [field_ convertPoint:point toView:nil];
 }
 
 NSPoint LocationBarViewMac::GetBookmarkBubblePoint() const {
@@ -492,16 +530,6 @@ NSPoint LocationBarViewMac::GetBookmarkBubblePoint() const {
   const NSRect frame = [cell frameForDecoration:star_decoration_.get()
                                         inFrame:[field_ bounds]];
   const NSPoint point = star_decoration_->GetBubblePointInFrame(frame);
-  return [field_ convertPoint:point toView:nil];
-}
-
-NSPoint LocationBarViewMac::GetChromeToMobileBubblePoint() const {
-  AutocompleteTextFieldCell* cell = [field_ cell];
-  const NSRect frame =
-      [cell frameForDecoration:chrome_to_mobile_decoration_.get()
-                       inFrame:[field_ bounds]];
-  const NSPoint point =
-    chrome_to_mobile_decoration_->GetBubblePointInFrame(frame);
   return [field_ convertPoint:point toView:nil];
 }
 
@@ -526,9 +554,8 @@ NSImage* LocationBarViewMac::GetKeywordImage(const string16& keyword) {
   const TemplateURL* template_url = TemplateURLServiceFactory::GetForProfile(
       profile_)->GetTemplateURLForKeyword(keyword);
   if (template_url && template_url->IsExtensionKeyword()) {
-    const SkBitmap& bitmap = profile_->GetExtensionService()->
-        GetOmniboxIcon(template_url->GetExtensionId());
-    return gfx::SkBitmapToNSImage(bitmap);
+    return profile_->GetExtensionService()->GetOmniboxIcon(
+        template_url->GetExtensionId()).AsNSImage();
   }
 
   return OmniboxViewMac::ImageForResource(IDR_OMNIBOX_SEARCH);
@@ -550,14 +577,14 @@ void LocationBarViewMac::Observe(int type,
 
     case chrome::NOTIFICATION_EXTENSION_LOCATION_BAR_UPDATED: {
       // Only update if the updated action box was for the active tab contents.
-      TabContents* target_tab = content::Details<TabContents>(details).ptr();
-      if (target_tab == GetTabContents())
+      WebContents* target_tab = content::Details<WebContents>(details).ptr();
+      if (target_tab == GetTabContents()->web_contents())
         UpdatePageActions();
       break;
     }
 
     case chrome::NOTIFICATION_PREF_CHANGED:
-      star_decoration_->SetVisible(IsStarEnabled());
+      UpdateStarDecorationVisibility();
       UpdateChromeToMobileEnabled();
       OnChanged();
       break;
@@ -566,12 +593,6 @@ void LocationBarViewMac::Observe(int type,
       NOTREACHED() << "Unexpected notification";
       break;
   }
-}
-
-void LocationBarViewMac::EnabledStateChangedForCommand(int id, bool enabled) {
-  DCHECK_EQ(id, IDC_CHROME_TO_MOBILE_PAGE);
-  UpdateChromeToMobileEnabled();
-  OnChanged();
 }
 
 void LocationBarViewMac::PostNotification(NSString* notification) {
@@ -613,8 +634,8 @@ void LocationBarViewMac::RefreshPageActionDecorations() {
   }
 
   std::vector<ExtensionAction*> new_page_actions =
-      tab_contents->extension_tab_helper()->location_bar_controller()->
-          GetCurrentActions();
+      extensions::TabHelper::FromWebContents(tab_contents->web_contents())->
+          location_bar_controller()->GetCurrentActions();
 
   if (new_page_actions != page_actions_) {
     page_actions_.swap(new_page_actions);
@@ -625,13 +646,23 @@ void LocationBarViewMac::RefreshPageActionDecorations() {
     }
   }
 
-  GURL url = GURL(toolbar_model_->GetText());
+  GURL url = toolbar_model_->GetURL();
   for (size_t i = 0; i < page_action_decorations_.size(); ++i) {
     page_action_decorations_[i]->UpdateVisibility(
         toolbar_model_->input_in_progress() ?
             NULL : tab_contents->web_contents(),
         url);
   }
+}
+
+void LocationBarViewMac::RefreshWebIntentsButtonDecoration() {
+  TabContents* tab_contents = GetTabContents();
+  if (!tab_contents) {
+    web_intents_button_decoration_->SetVisible(false);
+    return;
+  }
+
+  web_intents_button_decoration_->Update(tab_contents);
 }
 
 // TODO(shess): This function should over time grow to closely match
@@ -650,8 +681,8 @@ void LocationBarViewMac::Layout() {
   if (plus_decoration_.get())
     [cell addRightDecoration:plus_decoration_.get()];
   [cell addRightDecoration:star_decoration_.get()];
-  if (chrome_to_mobile_decoration_.get())
-    [cell addRightDecoration:chrome_to_mobile_decoration_.get()];
+  // TODO(dbeam): uncomment when zoom bubble exists.
+  // [cell addRightDecoration:zoom_decoration_.get()];
 
   // Note that display order is right to left.
   for (size_t i = 0; i < page_action_decorations_.size(); ++i) {
@@ -662,6 +693,8 @@ void LocationBarViewMac::Layout() {
   }
 
   [cell addRightDecoration:keyword_hint_decoration_.get()];
+
+  [cell addRightDecoration:web_intents_button_decoration_.get()];
 
   // By default only the location icon is visible.
   location_icon_decoration_->SetVisible(true);
@@ -703,10 +736,7 @@ void LocationBarViewMac::Layout() {
   // TODO(shess): Anytime the field editor might have changed, the
   // cursor rects almost certainly should have changed.  The tooltips
   // might change even when the rects don't change.
-  [field_ resetFieldEditorFrameIfNeeded];
-  [field_ updateCursorAndToolTipRects];
-
-  [field_ setNeedsDisplay:YES];
+  OnDecorationsChanged();
 }
 
 void LocationBarViewMac::RedrawDecoration(LocationBarDecoration* decoration) {
@@ -725,12 +755,33 @@ bool LocationBarViewMac::IsStarEnabled() {
 }
 
 void LocationBarViewMac::UpdateChromeToMobileEnabled() {
-  if (!chrome_to_mobile_decoration_.get())
+  ChromeToMobileService* chrome_to_mobile_service =
+      ChromeToMobileServiceFactory::GetForProfile(profile_);
+  command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE,
+      [field_ isEditable] && !toolbar_model_->input_in_progress() &&
+      chrome_to_mobile_service && chrome_to_mobile_service->HasMobiles());
+}
+
+void LocationBarViewMac::UpdateZoomDecoration() {
+  TabContents* tab_contents = GetTabContents();
+  if (!tab_contents)
     return;
 
-  DCHECK(ChromeToMobileService::IsChromeToMobileEnabled());
-  bool enabled = [field_ isEditable] && !toolbar_model_->input_in_progress() &&
-      ChromeToMobileServiceFactory::GetForProfile(profile_)->HasMobiles();
-  chrome_to_mobile_decoration_->SetVisible(enabled);
-  command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE, enabled);
+  zoom_decoration_->Update(tab_contents->zoom_controller());
+}
+
+void LocationBarViewMac::UpdateStarDecorationVisibility() {
+  // If the action box is enabled, only show the star if it's lit.
+  bool visible = IsStarEnabled();
+  if (!star_decoration_->starred() &&
+      extensions::switch_utils::IsActionBoxEnabled())
+    visible = false;
+  star_decoration_->SetVisible(visible);
+}
+
+void LocationBarViewMac::UpdatePlusDecorationVisibility() {
+  if (extensions::switch_utils::IsActionBoxEnabled()) {
+    // If the action box is enabled, hide it when input is in progress.
+    plus_decoration_->SetVisible(!toolbar_model_->input_in_progress());
+  }
 }

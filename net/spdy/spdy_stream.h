@@ -22,6 +22,7 @@
 #include "net/base/ssl_client_cert_type.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/spdy_framer.h"
+#include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_session.h"
 
@@ -71,6 +72,9 @@ class NET_EXPORT_PRIVATE SpdyStream
                                    base::Time response_time,
                                    int status) = 0;
 
+    // Called when a HEADERS frame is sent.
+    virtual void OnHeadersSent() = 0;
+
     // Called when data is received.
     // Returns network error code. OK when it successfully receives data.
     virtual int OnDataReceived(const char* data, int length) = 0;
@@ -90,14 +94,14 @@ class NET_EXPORT_PRIVATE SpdyStream
   };
 
   // Indicates pending frame type.
-  enum PendingFrameType {
-    TYPE_HEADER,
+  enum FrameType {
+    TYPE_HEADERS,
     TYPE_DATA
   };
 
   // Structure to contains pending frame information.
   typedef struct {
-    PendingFrameType type;
+    FrameType type;
     union {
       SpdyHeaderBlock* header_block;
       SpdyDataFrame* data_frame;
@@ -365,7 +369,14 @@ class NET_EXPORT_PRIVATE SpdyStream
   scoped_ptr<SpdyHeaderBlock> response_;
   base::Time response_time_;
 
+  // An in order list of pending frame data that are going to be sent. HEADERS
+  // frames are queued as SpdyHeaderBlock structures because these must be
+  // compressed just before sending. Data frames are queued as SpdyDataFrame.
   std::list<PendingFrame> pending_frames_;
+
+  // An in order list of sending frame types. It will be used to know which type
+  // of frame is sent and which callback should be invoked in OnOpen().
+  std::list<FrameType> waiting_completions_;
 
   State io_state_;
 

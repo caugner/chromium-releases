@@ -33,9 +33,9 @@ class BluetoothDevice;
 // The class may be instantiated for either a specific adapter, or for the
 // generic "default adapter" which may change depending on availability.
 class BluetoothAdapter : public base::RefCounted<BluetoothAdapter>,
-                         private BluetoothManagerClient::Observer,
-                         private BluetoothAdapterClient::Observer,
-                         private BluetoothDeviceClient::Observer {
+                         public BluetoothManagerClient::Observer,
+                         public BluetoothAdapterClient::Observer,
+                         public BluetoothDeviceClient::Observer {
  public:
   // Interface for observing changes from bluetooth adapters.
   class Observer {
@@ -100,8 +100,12 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter>,
   // where each XX is a hexadecimal number.
   const std::string& address() const { return address_; }
 
+  // The name of the adapter.
+  const std::string& name() const { return name_; }
+
   // Indicates whether the adapter is actually present on the system, for
-  // the default adapter this indicates whether any adapter is present.
+  // the default adapter this indicates whether any adapter is present. An
+  // adapter is only considered present if the address has been obtained.
   virtual bool IsPresent() const;
 
   // Indicates whether the adapter radio is powered.
@@ -118,7 +122,7 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter>,
   // note that a typical discovery process has phases of this being true
   // followed by phases of being false when the adapter interrogates the
   // devices found.
-  bool IsDiscovering() const;
+  virtual bool IsDiscovering() const;
 
   // Requests that the adapter either begin discovering new devices when
   // |discovering| is true, or cease any discovery when false.  On success,
@@ -303,10 +307,6 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter>,
   // List of observers interested in event notifications from us.
   ObserverList<BluetoothAdapter::Observer> observers_;
 
-  // Weak pointer factory for generating 'this' pointers that might live longer
-  // than we do.
-  base::WeakPtrFactory<BluetoothAdapter> weak_ptr_factory_;
-
   // Object path of adapter for this instance, this is fixed at creation time
   // unless |track_default_| is true in which case we update it to always
   // point at the default adapter.
@@ -315,6 +315,9 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter>,
 
   // Address of the adapter.
   std::string address_;
+
+  // Name of the adapter.
+  std::string name_;
 
   // Tracked adapter state, cached locally so we only send change notifications
   // to observers on a genuine change.
@@ -327,6 +330,10 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter>,
   // instance.
   typedef std::map<const std::string, BluetoothDevice*> DevicesMap;
   DevicesMap devices_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<BluetoothAdapter> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothAdapter);
 };

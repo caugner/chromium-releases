@@ -115,7 +115,8 @@ class ExternalTabContainerWin : public ExternalTabContainer,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) OVERRIDE;
+                              bool user_gesture,
+                              bool* was_blocked) OVERRIDE;
   virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual void MoveContents(content::WebContents* source,
                             const gfx::Rect& pos) OVERRIDE;
@@ -130,11 +131,13 @@ class ExternalTabContainerWin : public ExternalTabContainer,
                                   const GURL& target_url,
                                   content::WebContents* new_contents) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
+      content::WebContents* source,
       const content::NativeWebKeyboardEvent& event,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
+      content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual bool TakeFocus(bool reverse) OVERRIDE;
+  virtual bool TakeFocus(content::WebContents* source, bool reverse) OVERRIDE;
   virtual bool CanDownload(content::RenderViewHost* render_view_host,
                            int request_id,
                            const std::string& request_method) OVERRIDE;
@@ -225,8 +228,13 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   virtual ~ExternalTabContainerWin();
 
   // Overridden from views::NativeWidgetWin:
-  virtual LRESULT OnCreate(LPCREATESTRUCT create_struct);
-  virtual void OnDestroy();
+  virtual bool PreHandleMSG(UINT message,
+                            WPARAM w_param,
+                            LPARAM l_param,
+                            LRESULT* result) OVERRIDE;
+  virtual void PostHandleMSG(UINT message,
+                             WPARAM w_param,
+                             LPARAM l_param) OVERRIDE;
   virtual void OnFinalMessage(HWND window);
 
   bool InitNavigationInfo(NavigationInfo* nav_info,

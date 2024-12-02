@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/metrics/histogram.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -22,15 +23,16 @@
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/ui/website_settings/website_settings_infobar_delegate.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/ssl_status.h"
 #include "content/public/common/url_constants.h"
 #include "grit/chromium_strings.h"
@@ -97,6 +99,10 @@ WebsiteSettings::WebsiteSettings(
   PresentSiteData();
   PresentSiteIdentity();
   PresentHistoryInfo(base::Time());
+
+  // Every time the Website Settings UI is opened a |WebsiteSettings| object is
+  // created. So this counts how ofter the Website Settings UI is opened.
+  content::RecordAction(content::UserMetricsAction("WebsiteSettings_Opened"));
 }
 
 WebsiteSettings::~WebsiteSettings() {
@@ -104,6 +110,10 @@ WebsiteSettings::~WebsiteSettings() {
 
 void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
                                               ContentSetting setting) {
+  // Count how often a permission for a specific content type is changed using
+  // the Website Settings UI.
+  UMA_HISTOGRAM_COUNTS("WebsiteSettings.PermissionChanged", type);
+
   ContentSettingsPattern primary_pattern;
   ContentSettingsPattern secondary_pattern;
   switch (type) {
@@ -163,6 +173,12 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
   content_settings_->SetWebsiteSetting(
       primary_pattern, secondary_pattern, type, "", value);
   show_info_bar_ = true;
+
+// TODO(markusheintz): This is a temporary hack to fix issue: http://crbug.com/144203.
+#if defined(OS_MACOSX)
+  // Refresh the UI to reflect the new setting.
+  PresentSitePermissions();
+#endif
 }
 
 void WebsiteSettings::OnGotVisitCountToHost(HistoryService::Handle handle,
@@ -411,6 +427,20 @@ void WebsiteSettings::Init(Profile* profile,
           IDS_PAGE_INFO_SECURITY_TAB_RENEGOTIATION_MESSAGE);
     }
   }
+
+  // By default select the permissions tab that displays all the site
+  // permissions. In case of a connection error or an issue with the
+  // certificate presented by the website, select the connection tab to draw
+  // the user's attention to the issue. If the site does not provide a
+  // certificate because it was loaded over an unencrypted connection, don't
+  // select the connection tab.
+  WebsiteSettingsUI::TabId tab_id = WebsiteSettingsUI::TAB_ID_PERMISSIONS;
+  if (site_connection_status_ == SITE_CONNECTION_STATUS_ENCRYPTED_ERROR ||
+      site_connection_status_ == SITE_CONNECTION_STATUS_MIXED_CONTENT ||
+      site_identity_status_ == SITE_IDENTITY_STATUS_ERROR ||
+      site_identity_status_ == SITE_IDENTITY_STATUS_CERT_REVOCATION_UNKNOWN)
+    tab_id = WebsiteSettingsUI::TAB_ID_CONNECTION;
+  ui_->SetSelectedTab(tab_id);
 }
 
 void WebsiteSettings::PresentSitePermissions() {
@@ -424,8 +454,23 @@ void WebsiteSettings::PresentSitePermissions() {
     scoped_ptr<Value> value(content_settings_->GetWebsiteSetting(
         site_url_, site_url_, permission_info.type, "", &info));
     DCHECK(value.get());
-    permission_info.setting =
-        content_settings::ValueToContentSetting(value.get());
+    // The values for default settings of the CONTENT_SETTINGS_TYPE_MEDIASTREAM
+    // are of type integer, while the values for exceptions are of type
+    // dictionary. Content settings exceptions of type
+    // CONTENT_SETTINGS_TYPE_MEDIASTREAM can only be set in order to allow the
+    // use of a specific camera and/or microphone for a certain website. This
+    // means if the value is of type dictionary then the url has the permission
+    // to use a specific camera and/or microphone.
+    if (value->GetType() == Value::TYPE_INTEGER) {
+      permission_info.setting =
+          content_settings::ValueToContentSetting(value.get());
+    } else if (value->GetType() == Value::TYPE_DICTIONARY &&
+               permission_info.type == CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
+      permission_info.setting = CONTENT_SETTING_ALLOW;
+    } else {
+      NOTREACHED();
+    }
+
     permission_info.source = info.source;
 
     if (info.primary_pattern == ContentSettingsPattern::Wildcard() &&

@@ -49,6 +49,12 @@ class StartupBrowserCreatorTest : public ExtensionBrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
+    command_line->AppendSwitchASCII(switches::kHomePage,
+                                    chrome::kAboutBlankURL);
+#if defined(OS_CHROMEOS)
+    // TODO(nkostylev): Investigate if we can remove this switch.
+    command_line->AppendSwitch(switches::kCreateBrowserOnStartupForTests);
+#endif
   }
 
   // Helper functions return void so that we can ASSERT*().
@@ -645,7 +651,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
             chrome::GetWebContentsAt(new_browser, 0)->GetURL());
   EXPECT_EQ(1U, chrome::GetTabContentsAt(new_browser, 0)->infobar_tab_helper()->
-            infobar_count());
+            GetInfoBarCount());
 
   // The profile which normally opens last open pages displays the new tab page.
   ASSERT_EQ(1u, browser::GetBrowserCount(profile_last));
@@ -655,7 +661,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
             chrome::GetWebContentsAt(new_browser, 0)->GetURL());
   EXPECT_EQ(1U, chrome::GetTabContentsAt(new_browser, 0)->infobar_tab_helper()->
-            infobar_count());
+            GetInfoBarCount());
 
   // The profile which normally opens URLs displays the new tab page.
   ASSERT_EQ(1u, browser::GetBrowserCount(profile_urls));
@@ -665,6 +671,6 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
             chrome::GetWebContentsAt(new_browser, 0)->GetURL());
   EXPECT_EQ(1U, chrome::GetTabContentsAt(new_browser, 0)->infobar_tab_helper()->
-            infobar_count());
+            GetInfoBarCount());
 }
 #endif  // !OS_CHROMEOS

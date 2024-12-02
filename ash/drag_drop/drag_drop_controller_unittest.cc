@@ -8,14 +8,13 @@
 #include "ash/test/ash_test_base.h"
 #include "base/location.h"
 #include "base/utf_string_conversions.h"
-#include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
-#include "ui/views/events/event.h"
+#include "ui/base/events/event.h"
 #include "ui/views/test/test_views_delegate.h"
 #include "ui/views/view.h"
 #include "ui/views/views_delegate.h"
@@ -67,7 +66,7 @@ class DragTestView : public views::View {
     data->SetString(UTF8ToUTF16("I am being dragged"));
   }
 
-  bool OnMousePressed(const views::MouseEvent& event) OVERRIDE {
+  bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE {
     return true;
   }
 
@@ -81,11 +80,11 @@ class DragTestView : public views::View {
     return true;
   }
 
-  void OnDragEntered(const views::DropTargetEvent& event) OVERRIDE {
+  void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE {
     num_drag_enters_++;
   }
 
-  int OnDragUpdated(const views::DropTargetEvent& event) OVERRIDE {
+  int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE {
     num_drag_updates_++;
     return ui::DragDropTypes::DRAG_COPY;
   }
@@ -94,7 +93,7 @@ class DragTestView : public views::View {
     num_drag_exits_++;
   }
 
-  int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE {
+  int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE {
     num_drops_++;
     return ui::DragDropTypes::DRAG_COPY;
   }
@@ -128,20 +127,22 @@ class TestDragDropController : public internal::DragDropController {
 
  private:
   int StartDragAndDrop(const ui::OSExchangeData& data,
+                       aura::RootWindow* root_window,
                        const gfx::Point& location,
                        int operation) OVERRIDE {
     drag_start_received_ = true;
     data.GetString(&drag_string_);
-    return DragDropController::StartDragAndDrop(data, location, operation);
+    return DragDropController::StartDragAndDrop(
+        data, root_window, location, operation);
   }
 
   void DragUpdate(aura::Window* target,
-                  const aura::LocatedEvent& event) OVERRIDE {
+                  const ui::LocatedEvent& event) OVERRIDE {
     DragDropController::DragUpdate(target, event);
     num_drag_updates_++;
   }
 
-  void Drop(aura::Window* target, const aura::LocatedEvent& event) OVERRIDE {
+  void Drop(aura::Window* target, const ui::LocatedEvent& event) OVERRIDE {
     DragDropController::Drop(target, event);
     drop_received_ = true;
   }
@@ -502,7 +503,7 @@ TEST_F(DragDropControllerTest, ViewRemovedWhileInDragDropTest) {
 }
 
 TEST_F(DragDropControllerTest, DragLeavesClipboardAloneTest) {
-  ui::Clipboard* cb = views::ViewsDelegate::views_delegate->GetClipboard();
+  ui::Clipboard* cb = ui::Clipboard::GetForCurrentThread();
   std::string clip_str("I am on the clipboard");
   {
     // We first copy some text to the clipboard.
@@ -606,8 +607,8 @@ TEST_F(DragDropControllerTest, SyntheticEventsDuringDragDrop) {
     // EventGenerator since it implicitly turns these into mouse drag events.
     // The DragDropController should simply ignore these events.
     gfx::Point mouse_move_location = drag_view->bounds().CenterPoint();
-    aura::MouseEvent mouse_move(ui::ET_MOUSE_MOVED,
-                                mouse_move_location, mouse_move_location, 0);
+    ui::MouseEvent mouse_move(ui::ET_MOUSE_MOVED, mouse_move_location,
+                              mouse_move_location, 0);
     Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->OnHostMouseEvent(
         &mouse_move);
   }

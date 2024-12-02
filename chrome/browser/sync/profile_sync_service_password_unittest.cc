@@ -29,12 +29,12 @@
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/profile_mock.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/mock_notification_observer.h"
 #include "content/public/test/test_browser_thread.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/read_transaction.h"
 #include "sync/internal_api/public/write_node.h"
@@ -99,11 +99,25 @@ class PasswordTestProfileSyncService : public TestProfileSyncService {
 
   virtual ~PasswordTestProfileSyncService() {}
 
-  virtual void OnPassphraseAccepted() {
+  virtual void OnPassphraseRequired(
+      syncer::PassphraseRequiredReason reason,
+      const sync_pb::EncryptedData& pending_keys) OVERRIDE {
+    // We purposely don't let passphrase_required_reason_ get set here, in order
+    // to let the datatype manager get blocked later (at which point we then
+    // set the encryption passphrase).
+    // On a normal client, we would have initialized the cryptographer with the
+    // login credentials.
+  }
+
+  virtual void OnPassphraseAccepted() OVERRIDE {
     if (!callback_.is_null())
       callback_.Run();
 
     TestProfileSyncService::OnPassphraseAccepted();
+  }
+
+  virtual void OnConfigureBlocked() OVERRIDE {
+    QuitMessageLoop();
   }
 
  private:
@@ -139,13 +153,6 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
     password_store_ = static_cast<MockPasswordStore*>(
         PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
             &profile_, MockPasswordStore::Build).get());
-
-    registrar_.Add(&observer_,
-        chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-        content::NotificationService::AllSources());
-    registrar_.Add(&observer_,
-        chrome::NOTIFICATION_SYNC_CONFIGURE_BLOCKED,
-        content::NotificationService::AllSources());
   }
 
   virtual void TearDown() {
@@ -193,21 +200,12 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
           WillRepeatedly(MakePasswordSyncComponents(service_.get(),
                                                     password_store_.get(),
                                                     data_type_controller));
-      EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
+      EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _)).
           WillOnce(ReturnNewDataTypeManager());
 
       // We need tokens to get the tests going
       token_service_->IssueAuthTokenForTest(
           GaiaConstants::kSyncService, "token");
-
-      EXPECT_CALL(observer_,
-          Observe(
-              int(chrome::NOTIFICATION_SYNC_CONFIGURE_DONE),_,_));
-      EXPECT_CALL(observer_,
-          Observe(
-              int(
-              chrome::NOTIFICATION_SYNC_CONFIGURE_BLOCKED),_,_))
-          .WillOnce(InvokeWithoutArgs(QuitMessageLoop));
 
       service_->RegisterDataTypeController(data_type_controller);
       service_->Initialize();

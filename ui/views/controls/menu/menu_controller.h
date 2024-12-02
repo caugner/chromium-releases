@@ -15,7 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/timer.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 
@@ -86,6 +86,7 @@ class VIEWS_EXPORT MenuController
                     MenuItemView* root,
                     const gfx::Rect& bounds,
                     MenuItemView::AnchorPosition position,
+                    bool context_menu,
                     int* mouse_event_flags);
 
   // Whether or not Run blocks.
@@ -109,16 +110,16 @@ class VIEWS_EXPORT MenuController
   //
   // NOTE: the coordinates of the events are in that of the
   // MenuScrollViewContainer.
-  void OnMousePressed(SubmenuView* source, const MouseEvent& event);
-  void OnMouseDragged(SubmenuView* source, const MouseEvent& event);
-  void OnMouseReleased(SubmenuView* source, const MouseEvent& event);
-  void OnMouseMoved(SubmenuView* source, const MouseEvent& event);
-  void OnMouseEntered(SubmenuView* source, const MouseEvent& event);
+  void OnMousePressed(SubmenuView* source, const ui::MouseEvent& event);
+  void OnMouseDragged(SubmenuView* source, const ui::MouseEvent& event);
+  void OnMouseReleased(SubmenuView* source, const ui::MouseEvent& event);
+  void OnMouseMoved(SubmenuView* source, const ui::MouseEvent& event);
+  void OnMouseEntered(SubmenuView* source, const ui::MouseEvent& event);
 #if defined(OS_LINUX)
-  bool OnMouseWheel(SubmenuView* source, const MouseWheelEvent& event);
+  bool OnMouseWheel(SubmenuView* source, const ui::MouseWheelEvent& event);
 #endif
-  ui::GestureStatus OnGestureEvent(SubmenuView* source,
-                                   const GestureEvent& event);
+  ui::EventResult OnGestureEvent(SubmenuView* source,
+                                   const ui::GestureEvent& event);
 
   bool GetDropFormats(
       SubmenuView* source,
@@ -126,10 +127,10 @@ class VIEWS_EXPORT MenuController
       std::set<ui::OSExchangeData::CustomFormat>* custom_formats);
   bool AreDropTypesRequired(SubmenuView* source);
   bool CanDrop(SubmenuView* source, const ui::OSExchangeData& data);
-  void OnDragEntered(SubmenuView* source, const DropTargetEvent& event);
-  int OnDragUpdated(SubmenuView* source, const DropTargetEvent& event);
+  void OnDragEntered(SubmenuView* source, const ui::DropTargetEvent& event);
+  int OnDragUpdated(SubmenuView* source, const ui::DropTargetEvent& event);
   void OnDragExited(SubmenuView* source);
-  int OnPerformDrop(SubmenuView* source, const DropTargetEvent& event);
+  int OnPerformDrop(SubmenuView* source, const ui::DropTargetEvent& event);
 
   // Invoked from the scroll buttons of the MenuScrollViewContainer.
   void OnDragEnteredScrollButton(SubmenuView* source, bool is_up);
@@ -198,6 +199,9 @@ class VIEWS_EXPORT MenuController
 
     // Bounds for the monitor we're showing on.
     gfx::Rect monitor_bounds;
+
+    // Is the current menu a context menu.
+    bool context_menu;
   };
 
   // Used by GetMenuPart to indicate the menu part at a particular location.
@@ -244,7 +248,7 @@ class VIEWS_EXPORT MenuController
   void SetSelection(MenuItemView* menu_item, int types);
 
   void SetSelectionOnPointerDown(SubmenuView* source,
-                                 const LocatedEvent& event);
+                                 const ui::LocatedEvent& event);
   void StartDrag(SubmenuView* source, const gfx::Point& location);
 
 #if defined(OS_WIN) || defined(USE_AURA)
@@ -268,7 +272,8 @@ class VIEWS_EXPORT MenuController
   SendAcceleratorResultType SendAcceleratorToHotTrackedView();
 
   void UpdateInitialLocation(const gfx::Rect& bounds,
-                             MenuItemView::AnchorPosition position);
+                             MenuItemView::AnchorPosition position,
+                             bool context_menu);
 
   // Invoked when the user accepts the selected item. This is only used
   // when blocking. This schedules the loop to quit.
@@ -281,7 +286,7 @@ class VIEWS_EXPORT MenuController
   // button. Returns whether a context menu was shown.
   bool ShowContextMenu(MenuItemView* menu_item,
                        SubmenuView* source,
-                       const LocatedEvent& event);
+                       const ui::LocatedEvent& event);
 
   // Closes all menus, including any menus of nested invocations of Run.
   void CloseAllNestedMenus();
@@ -412,7 +417,7 @@ class VIEWS_EXPORT MenuController
 #if defined(OS_WIN) && !defined(USE_AURA)
   // If there is a window at the location of the event, a new mouse event is
   // generated and posted to it at the given location.
-  void RepostEvent(SubmenuView* source, const LocatedEvent& event);
+  void RepostEvent(SubmenuView* source, const ui::LocatedEvent& event);
 #endif
 
   // Sets the drop target to new_item.
@@ -431,13 +436,13 @@ class VIEWS_EXPORT MenuController
   // that they react to click-drag-release as if the user clicked on the view
   // itself.
   void UpdateActiveMouseView(SubmenuView* event_source,
-                             const MouseEvent& event,
+                             const ui::MouseEvent& event,
                              View* target_menu);
 
   // Sends a mouse release event to the current |active_mouse_view_| and sets
   // it to null.
   void SendMouseReleaseToActiveView(SubmenuView* event_source,
-                                    const MouseEvent& event);
+                                    const ui::MouseEvent& event);
 
   // Sends a mouse capture lost event to the current |active_mouse_view_| and
   // sets it to null.
@@ -467,10 +472,6 @@ class VIEWS_EXPORT MenuController
 
   // If true, we're showing.
   bool showing_;
-
-  // Is true for some menu types and only until the first mouse press or mouse
-  // release event occurs.
-  bool drop_first_release_event_;
 
   // Indicates what to exit.
   ExitType exit_type_;

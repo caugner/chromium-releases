@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
@@ -18,7 +19,10 @@
 #include "content/shell/shell_devtools_delegate.h"
 #include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
+#include "grit/net_resources.h"
 #include "net/base/net_module.h"
+#include "net/base/net_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_ANDROID)
 #include "net/base/network_change_notifier.h"
@@ -26,6 +30,8 @@
 #endif
 
 namespace content {
+
+namespace {
 
 static GURL GetStartupURL() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -41,8 +47,24 @@ static GURL GetStartupURL() {
   if (args.empty())
     return GURL("http://www.google.com/");
 
-  return GURL(args[0]);
+  GURL url(args[0]);
+  if (url.is_valid() && url.has_scheme())
+    return url;
+
+  return net::FilePathToFileURL(FilePath(args[0]));
 }
+
+base::StringPiece PlatformResourceProvider(int key) {
+  if (key == IDR_DIR_HEADER_HTML) {
+    base::StringPiece html_data =
+        ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
+            IDR_DIR_HEADER_HTML, ui::SCALE_FACTOR_NONE);
+    return html_data;
+  }
+  return base::StringPiece();
+}
+
+}  // namespace
 
 ShellBrowserMainParts::ShellBrowserMainParts(
     const MainFunctionParams& parameters)
@@ -78,21 +100,28 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   off_the_record_browser_context_.reset(new ShellBrowserContext(true));
 
   Shell::PlatformInitialize();
-  net::NetModule::SetResourceProvider(Shell::PlatformResourceProvider);
+  net::NetModule::SetResourceProvider(PlatformResourceProvider);
 
+  int port = 0;
+// On android the port number isn't used.
+#if !defined(OS_ANDROID)
+  // See if the user specified a port on the command line (useful for
+  // automation). If not, use an ephemeral port by specifying 0.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kRemoteDebuggingPort)) {
+    int temp_port;
     std::string port_str =
         command_line.GetSwitchValueASCII(switches::kRemoteDebuggingPort);
-    int port;
-    if (base::StringToInt(port_str, &port) && port > 0 && port < 65535) {
-      devtools_delegate_ = new ShellDevToolsDelegate(
-          port,
-          browser_context_->GetRequestContext());
+    if (base::StringToInt(port_str, &temp_port) &&
+        temp_port > 0 && temp_port < 65535) {
+      port = temp_port;
     } else {
-      DLOG(WARNING) << "Invalid http debugger port number " << port;
+      DLOG(WARNING) << "Invalid http debugger port number " << temp_port;
     }
   }
+#endif
+  devtools_delegate_ = new ShellDevToolsDelegate(
+      port, browser_context_->GetRequestContext());
 
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
     Shell::CreateNewWindow(browser_context_.get(),

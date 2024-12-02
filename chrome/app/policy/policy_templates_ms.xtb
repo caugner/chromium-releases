@@ -143,6 +143,7 @@
 <translation id="5564962323737505851">Mengkonfigurasi pengurus kata laluan. Jika pengurus kata laluan didayakan, maka anda boleh memilih untuk mendayakan atau melumpuhkan sama ada pengguna boleh menunjukkan kata laluan yang disimpan dalam teks yang jelas.</translation>
 <translation id="4668325077104657568">Tetapan imej lalai</translation>
 <translation id="7161193985878519056">Mod Inkognito dilumpuhkan.</translation>
+<translation id="2524379983318108884">Benarkan rakaman audio</translation>
 <translation id="4492287494009043413">Lumpuhkan pengambilan tangkapan skrin</translation>
 <translation id="6368403635025849609">Benarkan JavaScript pada tapak ini</translation>
 <translation id="6074963268421707432">Jangan benarkan mana-mana tapak untuk memaparkan pemberitahuan desktop</translation>
@@ -245,19 +246,13 @@
       Sesetengah apl web diketahui menggunakan banyak sambungan dengan GET tergantung, maka merendahkan di bawah 32 boleh menyebabkan rangkaian penyemak imbas tergantung jika terlalu banyak apl web sebegitu yang dibuka. Rendahkan di bawah lalai atas risiko anda sendiri.
 
       Jika dasar ini dibiarkan tanpa ditetapkan, nilai lalai, iaitu 32 akan digunakan.</translation>
+<translation id="5395271912574071439">Mendayakan pengadangan hos akses jauh semasa sambungan sedang dijalankan.
+
+          Jika tetapan ini didayakan, maka peranti masukan dan keluaran fizikal hos akan dilumpuhkan semasa sambungan jauh sedang dijalankan.
+
+          Jika tetapan ini dilumpuhkan atau tidak ditetapkan, maka kedua-dua pengguna setempat dan jauh boleh berinteraksi dengan hos apabila hos dikongsi.</translation>
 <translation id="2312509925391670075">Tanya setiap kali tapak ingin mengakses kamera dan/atau mikrofon saya</translation>
 <translation id="1426410128494586442">Ya</translation>
-<translation id="1692788808502061374">Membenarkan anda menentukan senarai pelanjutan yang akan dipasang secara senyap, tanpa interaksi pengguna.
-
-          Setiap item senarai itu ialah rentetan yang mengandungi ID pelanjutan dan URL kemas kini yang dibatasi oleh koma bertitik (<ph name="SEMICOLON"/>). ID pelanjutan ialah rentetan 32 huruf yang didapati cth. pada <ph name="CHROME_EXTENSIONS_LINK"/> apabila dalam mod pembangun. URL kemas kini harus menunjuk kepada dokumen XML Manifes Kemas Kini seperti yang dihuraikan di <ph name="LINK_TO_EXTENSION_DOC1"/>.
-
-          Untuk setiap item, <ph name="PRODUCT_NAME"/> akan mendapatkan balik pelanjutan yang ditetapkan oleh ID pelanjutan dari perkhidmatan kemas kini di URL yang dinyatakan dan memasangnya secara senyap.
-
-          Contohnya, <ph name="EXTENSION_POLICY_EXAMPLE"/> memasang <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> pelanjutan dari URL kemas kini standard Kedai Web Chrome. Untuk mendapatkan maklumat lanjut mengenai mengehoskan pelanjutan, lihat: <ph name="LINK_TO_EXTENSION_DOC2"/>.
-
-          Pengguna tidak akan dapat menyahpasang pelanjutan yang dinyatakan oleh dasar ini. Jika anda mengalih keluar pelanjutan daripada senarai ini, maka pelanjutan tersebut akan dinyahpasang secara automatik oleh <ph name="PRODUCT_NAME"/>.
-
-          Jika dasar ini dibiarkan tanpa ditetapkan, pengguna boleh menyahpasang sebarang pelanjutan dalam <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="4962195944157514011">Menentukan URL enjin carian yang digunakan apabila melakukan carian lalai. URL ini harus mengandungi rentetan '<ph name="SEARCH_TERM_MARKER"/>', yang akan digantikan pada masa pertanyaan dibuat oleh istilah yang dicari oleh pengguna.
 
           Pilihan ini hendaklah ditetapkan apabila dasar 'DefaultSearchProviderEnabled' didayakan dan hanya akan diambil kira dalam keadaan ini.</translation>
@@ -327,6 +322,13 @@
 
           Jika anda melumpuhkan tetapan ini atau membiarkannya tanpa ditetapkan, Kerberos SPN yang dihasilkan tidak akan memasukkan port dalam sebarang keadaan.</translation>
 <translation id="3236046242843493070">Pola URL untuk membenarkan pemasangan pelanjutan, aplikasi dan skrip pengguna</translation>
+<translation id="3442095178490656861">Menentukan zon waktu yang akan digunakan pada peranti. Pengguna boleh menggantikan zon waktu yang ditentukan untuk sesi semasa. Bagaimanapun, semasa log keluar, zon waktu ditetapkan semula kepada zon waktu yang ditentukan. Sebaliknya, jika nilai tidak sah diberikan, dasar masih diaktifkan menggunakan &quot;GMT&quot;.
+
+      Jika dasar ini tidak digunakan, zon waktu aktif akan kekal digunakan, bagaimanapun, pengguna boleh menukar zon waktu dan perubahan tersebut akan berkekalan. Oleh itu, perubahan oleh seorang pengguna mempengaruhi skrin log masuk dan semua pengguna lain.
+
+      Peranti baharu bermula dengan zon waktu yang ditetapkan kepada &quot;US/Pacific&quot;.
+
+      Nilai diformatkan mengikut nama zon waktu dalam &quot;Pangkalan Data Zon Waktu IANA&quot; (lihat &quot;http://en.wikipedia.org/wiki/List_of_tz_database_time&quot;). Secara khususnya, kebanyakan zon waktu boleh dirujuk melalui &quot;continent/large_city&quot; atau &quot;ocean/large_city&quot;.</translation>
 <translation id="8992176907758534924">Jangan benarkan mana-mana tapak untuk menunjukkan imej</translation>
 <translation id="262740370354162807">Dayakan penyerahan dokumen pada <ph name="CLOUD_PRINT_NAME"/></translation>
 <translation id="8704831857353097849">Senarai pemalam yang dilumpuhkan</translation>
@@ -406,6 +408,7 @@
 
       Jika dasar ini tidak ditetapkan, pengguna boleh menukar senarai apl berpin dalam pelancar.</translation>
 <translation id="7625444193696794922">Menetapkan saluran pelepasan yang harus mengunci peranti ini.</translation>
+<translation id="2552966063069741410">Zon waktu</translation>
 <translation id="3088288048720661397">Melumpuhkan penyegerakan Dokumen Google apabila menggunakan sambungan selular apabila ditetapkan kepada Benar. Dalam keadaan ini, data hanya disegerakkan ke Dokumen Google apabila disambungkan melalui WiFi atau Ethernet.
 
           Jika tidak ditetapkan atau ditetapkan kepada Palsu, pengguna akan dapat memindahkan fail ke Dokumen Google melalui sambungan selular.</translation>
@@ -508,6 +511,7 @@
       Jika anda mendayakan tetapan ini atau tidak menetapkan nilai, Auto Isi akan kekal di bawah kawalan pengguna. Perkara ini akan membenarkan mereka mengkonfigurasi profil Auto Isi dan untuk menghidupkan atau mematikan Auto Isi mengikut budi bicara mereka.</translation>
 <translation id="6157537876488211233">Senarai diasingkan koma bagi peraturan memintas proksi</translation>
 <translation id="3965339130942650562">Tamat masa sehingga log keluar pengguna melahu dilaksanakan</translation>
+<translation id="5293547923319914979">Dayakan pengadangan hos akses jauh.</translation>
 <translation id="7091198954851103976">Sentiasa jalankan pemalam yang memerlukan kebenaran</translation>
 <translation id="2021307518684405078">Jangan benarkan mana-mana tapak mengakses kamera dan mikrofon saya</translation>
 <translation id="8870318296973696995">Halaman utama</translation>
@@ -568,6 +572,13 @@
           Jika dasar ini dibiarkan tanpa ditetapkan, penyedia carian lalai akan didayakan dan pengguna akan boleh menetapkan senarai penyedia carian.</translation>
 <translation id="8731693562790917685">Tetapan Kandungan membenarkan anda untuk menentukan cara kandungan bagi jenis tertentu (contohnya Kuki, Imej atau JavaScript) dikendalikan.</translation>
 <translation id="2411919772666155530">Sekat pemberitahuan pada tapak ini</translation>
+<translation id="5281259077246025371">Benarkan rakaman audio.
+
+      Apabila dasar ini ditetapkan kepada palsu, rakaman audio tidak akan tersedia pada peranti semasa pengguna masih log masuk.
+
+      Dasar ini mempengaruhi semua jenis masukan audio dan bukan hanya mikrofon yang terbina dalam.
+
+      Jika tetapan ini ditetapkan kepada benar atau tidak dikonfigurasi, maka pengguna boleh menggunakan semua masukan audio yang disokong pada peranti mereka.</translation>
 <translation id="6923366716660828830">Menentukan nama penyedia carian lalai. Jika dibiarkan kosong atau tidak ditetapkan, nama hos yang ditentukan oleh URL carian akan digunakan.
 
           Dasar ini hanya dipertimbangkan jika dasar 'DefaultSearchProviderEnabled' didayakan.</translation>
@@ -617,6 +628,13 @@
           Jika anda mendayakan tetapan ini, pengguna tidak boleh mengubah atau mengatasinya dalam <ph name="PRODUCT_NAME"/>.
 
           Melumpuhkan tetapan ini sama seperti membiarkannya tidak dikonfigurasi. Pengguna masih boleh mengubahnya dalam <ph name="PRODUCT_NAME"/>.</translation>
+<translation id="8161570238552664224">Benarkan audio dimainkan.
+
+      Apabila dasar ini ditetapkan kepada palsu, keluaran audio tidak akan tersedia pada peranti semasa pengguna masih log masuk.
+
+      Dasar ini mempengaruhi semua jenis audio dan bukan sahaja pembesar suara yang terbina dalam. Ciri kebolehcapaian audio juga disekat oleh dasar ini. Jangan dayakan dasar ini jika pengguna memerlukan alat pembaca skrin.
+
+      Jika tetapan ini ditetapkan kepada benar atau tidak dikonfigurasi, maka pengguna boleh menggunakan semua keluaran audio yang disokong pada peranti mereka.</translation>
 <translation id="5761030451068906335">Mengkonfigurasi tetapan proksi untuk <ph name="PRODUCT_NAME"/>. Dasar ini belum sedia untuk digunakan lagi, jangan gunakannya.</translation>
 <translation id="8344454543174932833">Import penanda halaman daripada penyemak imbas lalai pada kali pertama menjalankannya</translation>
 <translation id="1019101089073227242">Tetapkan direktori data pengguna</translation>
@@ -780,6 +798,7 @@
       Jika anda mendayakan atau melumpuhkan tetapan ini, pengguna tidak boleh mengubah atau mengatasi tetapan ini dalam <ph name="PRODUCT_NAME"/>.
 
       Membiarkan tetapan tanpa ditetapkan akan membolehkan pengguna memilih sama ada untuk memaparkan butang laman utama atau tidak.</translation>
+<translation id="2518231489509538392">Benarkan audio dimainkan</translation>
 <translation id="7547044444554936129">Mendayakan ciri Semerta <ph name="PRODUCT_NAME"/> dan menghalang pengguna daripada mengubah tetapan ini.
 
       Jika anda mendayakan tetapan ini, <ph name="PRODUCT_NAME"/> Semerta didayakan.
@@ -862,6 +881,7 @@
           Jika anda membiarkan dasar ini tanpa ditetapkan, mana-mana pelayan akan diterima untuk pengesahan bersepadu.</translation>
 <translation id="2299220924812062390">Tentukan senarai pemalam yang didayakan</translation>
 <translation id="924557436754151212">Import kata laluan yang disimpan daripada penyemak imbas lalai pada kali pertama menjalankannya</translation>
+<translation id="1465619815762735808">Klik untuk bermain</translation>
 <translation id="7227967227357489766">Mentakrifkan senarai pengguna yang dibenarkan untuk log masuk ke peranti. Masukan ialah dalam bentuk <ph name="USER_WHITELIST_ENTRY_FORMAT"/>, seperti <ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>. Untuk membenarkan pengguna rambang pada domain, gunakan masukan dalam bentuk <ph name="USER_WHITELIST_ENTRY_WILDCARD"/>.
 
       Jika dasar ini tidak dikonfigurasi, tidak terdapat sebarang pengehadan terhadap pengguna yang dibenarkan untuk log masuk. Perlu diingat bahawa membuat pengguna baharu masih memerlukan dasar <ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/> dikonfigurasikan dengan cara yang bersesuaian.</translation>
@@ -929,6 +949,11 @@
 <translation id="8631434304112909927">sehingga versi <ph name="UNTIL_VERSION"/></translation>
 <translation id="7469554574977894907">Dayakan cadangan carian</translation>
 <translation id="4906194810004762807">Segar semula kadar untuk Dasar Peranti</translation>
+<translation id="1398889361882383850">Membolehkan anda menetapkan sama ada laman web dibenarkan menjalankan pemalam secara automatik. Menjalankan pemalam secara automatik boleh ditetapkan sama ada dibenarkan untuk semua laman web atau dinafikan untuk semua laman web.
+
+          Klik untuk main membenarkan pemalam dijalankan tetapi pengguna mesti mengkliknya untuk memulakan pelaksanaan.
+
+          Jika dasar ini dibiarkan tanpa ditetapkan, 'AllowPlugins' akan digunakan dan pengguna akan dapat mengubahnya.</translation>
 <translation id="7974114691960514888">Dasar ini tidak lagi disokong.
           Membolehkan penggunaan pelayan STUN dan geganti apabila bersambung dengan pelanggan jauh.
 
@@ -964,9 +989,6 @@
       Jika anda mendayakan tetapan ini, <ph name="PRODUCT_NAME"/> menggunakan penempatan yang dinyatakan. Sebaliknya, jika penempatan yang dikonfigurasi tidak disokong, 'en-US' akan digunakan.
 
       Jika tetapan ini dilumpuhkan atau tidak dikonfigurasi, <ph name="PRODUCT_NAME"/> menggunakan sama ada penempatan pilihan yang ditentukan pengguna (jika dikonfigurasi), penempatan sistem atau penempatan bertahan 'en-US'.</translation>
-<translation id="7271483295221961083">Membenarkan anda menetapkan sama ada laman web dibenarkan untuk menjalankan pemalam secara automatik. Menjalankan pemalam secara automatik boleh dibenarkan untuk semua tapak web atau dinafikan untuk semua tapak web. Jika dasar ini tidak ditetapkan, 'AllowPlugins' akan digunakan dan pengguna akan dapat mengubahnya.
-
-          Jika dasar ini dibiarkan tanpa ditetapkan, 'AllowPlugins' akan digunakan dan pengguna akan boleh mengubahnya.</translation>
 <translation id="718956142899066210">Jenis sambungan yang dibenarkan untuk kemas kini</translation>
 <translation id="6985168562472482191">Nama kedai web perusahaan, yang akan dipaparkan di bawah ikon aplikasi pada halaman tab baharu. Tetapan ini tidak mempunyai kesan jika EnterpriseWebStoreURL tidak ditetapkan.
 
@@ -1048,6 +1070,17 @@
 <translation id="6658245400435704251">Menyatakan bilangan saat sehingga peranti boleh melambatkan muat turun kemas kini secara rawak dari masa kemas kini mula ditolak keluar ke pelayan. Peranti mungkin menunggu sebahagian masa ini dari segi masa jam dinding dan bahagian yang selebihnya dari segi bilangan semakan kemas kini. Dalam apa jua keadaan, serakan atas disempadani oleh jumlah masa yang tetap supaya peranti tidak sekali-kali akan tersekat menunggu selama-lamanya untuk memuat turun kemas kini.</translation>
 <translation id="1948757837129151165">Dasar untuk Pengesahan HTTP</translation>
 <translation id="5946082169633555022">Saluran Beta</translation>
+<translation id="145467868108778033">Membolehkan anda menentukan senarai pelanjutan yang akan dipasang secara senyap, tanpa interaksi pengguna.
+
+          Setiap item dalam senarai merupakan rentetan yang mengandungi ID pelanjutan dan URL kemas kini yang dihadkan oleh koma bernoktah (<ph name="SEMICOLON"/>). ID pelanjutan ialah rentetan 32 huruf yang terdapat, contohnya, pada <ph name="CHROME_EXTENSIONS_LINK"/> apabila berada dalam mod pembangun. URL kemas kini harus menghala kepada dokumen XML Manifes Kemas Kini seperti yang dihuraikan di <ph name="LINK_TO_EXTENSION_DOC1"/>. Ambil perhatian bahawa URL kemas kini yang ditetapkan dalam dasar ini hanya digunakan untuk pemasangan permulaan; kemas kini pelanjutan yang berikutnya akan menggunakan URL kemas kini yang ditunjukkan dalam manifes pelanjutan.
+
+          Untuk setiap item, <ph name="PRODUCT_NAME"/> akan mendapatkan pelanjutan yang ditentukan oleh ID pelanjutan dari perkhidmatan kemas kini di URL kemas kini yang ditentukan dan memasangnya dengan senyap.
+
+          Contohnya, <ph name="EXTENSION_POLICY_EXAMPLE"/> memasang pelanjutan <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> dari URL kemas kini Kedai Web Chrome piawai. Untuk mendapatkan maklumat lanjut mengenai pelanjutan pengehosan, lihat: <ph name="LINK_TO_EXTENSION_DOC2"/>.
+
+          Pengguna tidak akan dapat menyahpasang pelanjutan yang ditentukan oleh dasar ini. Jika anda mengalih keluar pelanjutan daripada senarai ini, maka pelanjutan ini akan dinyahpasang secara automatik oleh <ph name="PRODUCT_NAME"/>.
+
+          Jika dasar ini dibiarkan tanpa ditetapkan, pengguna boleh menyahpasang sebarang pelanjutan dalam <ph name="PRODUCT_NAME"/>.</translation>
 <translation id="8303314579975657113">Menentukan perpustakaan GSSAPI yang akan digunakan untuk Pengesahan HTTP. Anda boleh menetapkan sama ada nama perpustakaan sahaja atau laluan penuh. Jika tiada tetapan diberikan, <ph name="PRODUCT_NAME"/> akan kembali menggunakan nama perpustakaan lalai.</translation>
 <translation id="7749402620209366169">Mendayakan pengesahan dua faktor untuk hos akses jauh dan bukan PIN yang ditentukan pengguna.
 

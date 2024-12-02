@@ -118,7 +118,7 @@ class NmfUtils(object):
 
   def __init__(self, main_files=None, objdump='x86_64-nacl-objdump',
                lib_path=None, extra_files=None, lib_prefix=None,
-               toolchain=None, remap={}):
+               toolchain=None, remap=None):
     '''Constructor
 
     Args:
@@ -142,7 +142,7 @@ class NmfUtils(object):
     self.needed = None
     self.lib_prefix = lib_prefix or []
     self.toolchain = toolchain
-    self.remap = remap
+    self.remap = remap or {}
 
 
   def GleanFromObjdump(self, files):
@@ -203,10 +203,10 @@ class NmfUtils(object):
     Returns:
       A list of system paths that match the given name within the lib_path'''
     files = []
-    for dir in self.lib_path:
-      file = os.path.join(dir, name)
-      if os.path.exists(file):
-        files.append(file)
+    for dirname in self.lib_path:
+      filename = os.path.join(dirname, name)
+      if os.path.exists(filename):
+        files.append(filename)
     if not files:
       raise Error('cannot find library %s' % name)
     return files
@@ -227,7 +227,7 @@ class NmfUtils(object):
     if runnable:
       examined = set()
       all_files, unexamined = self.GleanFromObjdump(
-          dict([(file, None) for file in self.main_files]))
+          dict([(f, None) for f in self.main_files]))
       for name, arch_file in all_files.items():
         arch_file.url = name
         if unexamined:
@@ -377,6 +377,9 @@ def Main(argv):
                     action='append', default=[],
                     help='Add DIRECTORY to library search path',
                     metavar='DIRECTORY')
+  parser.add_option('-P', '--path-prefix', dest='path_prefix', default='',
+                    help='A path to prepend to shared libraries in the .nmf',
+                    metavar='DIRECTORY')
   parser.add_option('-s', '--stage-dependencies', dest='stage_dependencies',
                     help='Destination directory for staging libraries',
                     metavar='DIRECTORY')
@@ -415,13 +418,19 @@ def Main(argv):
       raise Error('Expecting --name=<orig_arch.so>,<new_name.so>')
     remap[parts[0]] = parts[1]
 
+  if options.path_prefix:
+    path_prefix = options.path_prefix.split('/')
+  else:
+    path_prefix = []
+
   nmf = NmfUtils(objdump=options.objdump,
                  main_files=args,
                  lib_path=options.lib_path,
+                 lib_prefix=path_prefix,
                  toolchain=options.toolchain,
                  remap=remap)
 
-  manifest = nmf.GetManifest()
+  nmf.GetManifest()
   if options.output is None:
     sys.stdout.write(nmf.GetJson())
   else:

@@ -33,14 +33,13 @@ chrome.test.runTests([
     assertThrowsError(document.write);
     assertThrowsError(document.writeln);
 
-    /* TODO(estade): these fail in debug. Timing issue?
     assertThrowsError(function() {document.all;});
     assertThrowsError(function() {document.bgColor;});
     assertThrowsError(function() {document.fgColor;});
     assertThrowsError(function() {document.alinkColor;});
     assertThrowsError(function() {document.linkColor;});
     assertThrowsError(function() {document.vlinkColor;});
-    */
+
     succeed();
   },
 
@@ -154,15 +153,21 @@ chrome.test.runTests([
 
   function testLegacyApis() {
     if (chrome.app) {
-      assertEq("undefined", typeof(chrome.app.getIsInstalled));
-      assertEq("undefined", typeof(chrome.app.install));
-      assertEq("undefined", typeof(chrome.app.isInstalled));
-      assertEq("undefined", typeof(chrome.app.getDetails));
-      assertEq("undefined", typeof(chrome.app.getDetailsForFrame));
-      assertEq("undefined", typeof(chrome.app.runningState));
+      assertEq('undefined', typeof(chrome.app.getIsInstalled));
+      assertEq('undefined', typeof(chrome.app.install));
+      assertEq('undefined', typeof(chrome.app.isInstalled));
+      assertEq('undefined', typeof(chrome.app.getDetails));
+      assertEq('undefined', typeof(chrome.app.getDetailsForFrame));
+      assertEq('undefined', typeof(chrome.app.runningState));
     }
-    assertEq("undefined", typeof(chrome.appNotifications));
-    assertEq("undefined", typeof(chrome.extension));
+    assertEq('undefined', typeof(chrome.appNotifications));
+    assertEq('undefined', typeof(chrome.extension));
+    succeed();
+  },
+
+  function testExtensionApis() {
+    assertEq('undefined', typeof(chrome.tabs));
+    assertEq('undefined', typeof(chrome.windows));
     succeed();
   }
 ]);

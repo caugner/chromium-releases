@@ -12,18 +12,19 @@
 namespace chrome {
 namespace search {
 
-SearchDelegate::SearchDelegate(SearchModel* browser_model)
-    : browser_model_(browser_model),
+SearchDelegate::SearchDelegate(SearchModel* browser_search_model,
+                               ToolbarModel* toolbar_model)
+    : browser_model_(browser_search_model),
       tab_model_(NULL),
-      toolbar_search_animator_(browser_model) {
+      toolbar_search_animator_(browser_search_model, toolbar_model) {
 }
 
 SearchDelegate::~SearchDelegate() {
   DCHECK(!tab_model_) << "All tabs should have been deactivated or closed.";
 }
 
-void SearchDelegate::ModeChanged(const Mode& mode) {
-  browser_model_->SetMode(mode);
+void SearchDelegate::ModeChanged(const Mode& old_mode, const Mode& new_mode) {
+  browser_model_->SetMode(new_mode);
 }
 
 void SearchDelegate::OnTabActivated(TabContents* contents) {

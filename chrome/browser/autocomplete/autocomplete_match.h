@@ -89,6 +89,7 @@ struct AutocompleteMatch {
     SEARCH_OTHER_ENGINE,     // A search with a non-default engine.
     EXTENSION_APP,           // An Extension App with a title/url that contains
                              // the input.
+    CONTACT,                 // One of the user's contacts.
     NUM_TYPES,
   };
 
@@ -111,15 +112,21 @@ struct AutocompleteMatch {
   static std::string TypeToString(Type type);
 
   // Converts |type| to a resource identifier for the appropriate icon for this
-  // type.
+  // type to show in the completion popup.
   static int TypeToIcon(Type type);
+
+  // Converts |type| to a resource identifier for the appropriate icon for this
+  // type to show in the location bar.
+  static int TypeToLocationBarIcon(Type type);
 
   // Comparison function for determining when one match is better than another.
   static bool MoreRelevant(const AutocompleteMatch& elem1,
                            const AutocompleteMatch& elem2);
 
   // Comparison functions for removing matches with duplicate destinations.
-  // Destinations are compared using |stripped_destination_url|.
+  // Destinations are compared using |stripped_destination_url|.  Pairs of
+  // matches with empty destinations are treated as differing, since empty
+  // destinations are expected for non-navigable matches.
   static bool DestinationSortFunc(const AutocompleteMatch& elem1,
                                   const AutocompleteMatch& elem2);
   static bool DestinationsEqual(const AutocompleteMatch& elem1,
@@ -144,6 +151,12 @@ struct AutocompleteMatch {
                                        int style,
                                        ACMatchClassifications* classifications);
 
+  // Returns a new vector of classifications containing the merged contents of
+  // |classifications1| and |classifications2|.
+  static ACMatchClassifications MergeClassifications(
+      const ACMatchClassifications& classifications1,
+      const ACMatchClassifications& classifications2);
+
   // Converts classifications to and from a serialized string representation
   // (using comma-separated integers to sequentially list positions and styles).
   static std::string ClassificationsToString(
@@ -164,9 +177,16 @@ struct AutocompleteMatch {
   // or |description|.
   static string16 SanitizeString(const string16& text);
 
+  // Convenience function to check if |type| is a search (as opposed to a URL or
+  // an extension).
+  static bool IsSearchType(Type type);
+
   // Copies the destination_url with "www." stripped off to
-  // |stripped_destination_url|.  This method is invoked internally by the
-  // AutocompleteController and does not normally need to be invoked.
+  // |stripped_destination_url| and also converts https protocol to
+  // http.  These two conversions are merely to allow comparisons to
+  // remove likely duplicates; these URLs are not used as actual
+  // destination URLs.  This method is invoked internally by the
+  // AutocompleteResult and does not normally need to be invoked.
   void ComputeStrippedDestinationURL();
 
   // Gets data relevant to whether there should be any special keyword-related

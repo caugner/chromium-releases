@@ -5,6 +5,7 @@
 #ifndef SYNC_ENGINE_SYNC_SCHEDULER_IMPL_H_
 #define SYNC_ENGINE_SYNC_SCHEDULER_IMPL_H_
 
+#include <map>
 #include <string>
 
 #include "base/callback.h"
@@ -20,7 +21,7 @@
 #include "sync/engine/nudge_source.h"
 #include "sync/engine/sync_scheduler.h"
 #include "sync/engine/syncer.h"
-#include "sync/internal_api/public/base/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type_state_map.h"
 #include "sync/internal_api/public/engine/polling_constants.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/sessions/sync_session.h"
@@ -28,12 +29,16 @@
 
 namespace syncer {
 
+class BackoffDelayProvider;
+
 class SyncSchedulerImpl : public SyncScheduler {
  public:
   // |name| is a display string to identify the syncer thread.  Takes
-  // |ownership of |syncer|.
+  // |ownership of |syncer| and |delay_provider|.
   SyncSchedulerImpl(const std::string& name,
-                    sessions::SyncSessionContext* context, Syncer* syncer);
+                    BackoffDelayProvider* delay_provider,
+                    sessions::SyncSessionContext* context,
+                    Syncer* syncer);
 
   // Calls Stop().
   virtual ~SyncSchedulerImpl();
@@ -47,9 +52,9 @@ class SyncSchedulerImpl : public SyncScheduler {
       NudgeSource source,
       ModelTypeSet types,
       const tracked_objects::Location& nudge_location) OVERRIDE;
-  virtual void ScheduleNudgeWithPayloadsAsync(
+  virtual void ScheduleNudgeWithStatesAsync(
       const base::TimeDelta& delay, NudgeSource source,
-      const ModelTypePayloadMap& types_with_payloads,
+      const ModelTypeStateMap& type_state_map,
       const tracked_objects::Location& nudge_location) OVERRIDE;
   virtual void SetNotificationsEnabled(bool notifications_enabled) OVERRIDE;
 
@@ -71,16 +76,6 @@ class SyncSchedulerImpl : public SyncScheduler {
   virtual void OnShouldStopSyncingPermanently() OVERRIDE;
   virtual void OnSyncProtocolError(
       const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
-
-  // DDOS avoidance function.  Calculates how long we should wait before trying
-  // again after a failed sync attempt, where the last delay was |base_delay|.
-  // TODO(tim): Look at URLRequestThrottlerEntryInterface.
-  static base::TimeDelta GetRecommendedDelay(const base::TimeDelta& base_delay);
-
-  // For integration tests only.  Override initial backoff value.
-  // TODO(tim): Remove this, use command line flag and plumb through. Done
-  // this way to reduce diffs in hotfix.
-  static void ForceShortInitialBackoffRetry();
 
  private:
   enum JobProcessDecision {
@@ -149,17 +144,6 @@ class SyncSchedulerImpl : public SyncScheduler {
       ContinueNudgeWhileExponentialBackOff);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerTest, TransientPollFailure);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerTest, GetInitialBackoffDelay);
-
-  // A component used to get time delays associated with exponential backoff.
-  // Encapsulated into a class to facilitate testing.
-  class DelayProvider {
-   public:
-    DelayProvider();
-    virtual base::TimeDelta GetDelay(const base::TimeDelta& last_delay);
-    virtual ~DelayProvider();
-   private:
-    DISALLOW_COPY_AND_ASSIGN(DelayProvider);
-  };
 
   struct WaitInterval {
     enum Mode {
@@ -234,11 +218,6 @@ class SyncSchedulerImpl : public SyncScheduler {
   // Helper to ScheduleNextSync in case of consecutive sync errors.
   void HandleContinuationError(const SyncSessionJob& old_job);
 
-  // Helper to calculate the initial value for exponential backoff.
-  // See possible values and comments in polling_constants.h.
-  base::TimeDelta GetInitialBackoffDelay(
-      const sessions::ModelNeutralState& state) const;
-
   // Determines if it is legal to run |job| by checking current
   // operational mode, backoff or throttling, freshness
   // (so we don't make redundant syncs), and connection.
@@ -263,7 +242,7 @@ class SyncSchedulerImpl : public SyncScheduler {
   void ScheduleNudgeImpl(
       const base::TimeDelta& delay,
       sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source,
-      const ModelTypePayloadMap& types_with_payloads,
+      const ModelTypeStateMap& type_state_map,
       bool is_canary_job, const tracked_objects::Location& nudge_location);
 
   // Returns true if the client is currently in exponential backoff.
@@ -300,6 +279,12 @@ class SyncSchedulerImpl : public SyncScheduler {
   // the client starts up and does not need to perform an initial sync.
   void SendInitialSnapshot();
 
+  // This is used for histogramming and analysis of ScheduleNudge* APIs.
+  // SyncScheduler is the ultimate choke-point for all such invocations (with
+  // and without InvalidationState variants, all NudgeSources, etc) and as such
+  // is the most flexible place to do this bookkeeping.
+  void UpdateNudgeTimeRecords(const sessions::SyncSourceInfo& info);
+
   virtual void OnActionableError(const sessions::SyncSessionSnapshot& snapshot);
 
   base::WeakPtrFactory<SyncSchedulerImpl> weak_ptr_factory_;
@@ -335,10 +320,6 @@ class SyncSchedulerImpl : public SyncScheduler {
   // The mode of operation.
   Mode mode_;
 
-  // TODO(tim): Bug 26339. This needs to track more than just time I think,
-  // since the nudges could be for different types. Current impl doesn't care.
-  base::TimeTicks last_sync_session_end_time_;
-
   // The latest connection code we got while trying to connect.
   HttpResponse::ServerConnectionCode connection_code_;
 
@@ -348,12 +329,25 @@ class SyncSchedulerImpl : public SyncScheduler {
   // Current wait state.  Null if we're not in backoff and not throttled.
   scoped_ptr<WaitInterval> wait_interval_;
 
-  scoped_ptr<DelayProvider> delay_provider_;
+  scoped_ptr<BackoffDelayProvider> delay_provider_;
 
   // Invoked to run through the sync cycle.
   scoped_ptr<Syncer> syncer_;
 
-  sessions::SyncSessionContext *session_context_;
+  sessions::SyncSessionContext* session_context_;
+
+  // A map tracking LOCAL NudgeSource invocations of ScheduleNudge* APIs,
+  // organized by datatype. Each datatype that was part of the types requested
+  // in the call will have its TimeTicks value updated.
+  typedef std::map<ModelType, base::TimeTicks> ModelTypeTimeMap;
+  ModelTypeTimeMap last_local_nudges_by_model_type_;
+
+  // Used as an "anti-reentrancy defensive assertion".
+  // While true, it is illegal for any new scheduling activity to take place.
+  // Ensures that higher layers don't break this law in response to events that
+  // take place during a sync cycle. We call this out because such violations
+  // could result in tight sync loops hitting sync servers.
+  bool no_scheduling_allowed_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSchedulerImpl);
 };

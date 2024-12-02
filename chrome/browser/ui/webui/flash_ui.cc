@@ -91,6 +91,9 @@ class FlashDOMHandler : public WebUIMessageHandler,
 
   // GpuDataManager::Observer implementation.
   virtual void OnGpuInfoUpdate() OVERRIDE;
+  virtual void OnVideoMemoryUsageStatsUpdate(
+      const content::GPUVideoMemoryUsageStats& video_memory_usage_stats)
+          OVERRIDE {}
 
   // Callback for the "requestFlashInfo" message.
   void HandleRequestFlashInfo(const ListValue* args);
@@ -379,7 +382,8 @@ FlashUI::FlashUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 }
 
 // static
-base::RefCountedMemory* FlashUI::GetFaviconResourceBytes() {
+base::RefCountedMemory* FlashUI::GetFaviconResourceBytes(
+      ui::ScaleFactor scale_factor) {
   // Use the default icon for now.
   return NULL;
 }

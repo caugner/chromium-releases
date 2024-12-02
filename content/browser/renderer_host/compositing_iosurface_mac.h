@@ -35,7 +35,8 @@ class CompositingIOSurfaceMac {
   ~CompositingIOSurfaceMac();
 
   // Set IOSurface that will be drawn on the next NSView drawRect.
-  void SetIOSurface(uint64 io_surface_handle);
+  void SetIOSurface(uint64 io_surface_handle,
+                    const gfx::Size& size);
 
   // Blit the IOSurface at the upper-left corner of the |view|. If |view| window
   // size is larger than the IOSurface, the remaining right and bottom edges
@@ -74,6 +75,8 @@ class CompositingIOSurfaceMac {
   bool is_vsync_disabled() const { return is_vsync_disabled_; }
 
   // Get vsync scheduling parameters.
+  // |interval_numerator/interval_denominator| equates to fractional number of
+  // seconds between vsyncs.
   void GetVSyncParameters(base::TimeTicks* timebase,
                           uint32* interval_numerator,
                           uint32* interval_denominator);
@@ -158,7 +161,7 @@ class CompositingIOSurfaceMac {
 
   // Called on display-link thread.
   void DisplayLinkTick(CVDisplayLinkRef display_link,
-                       const CVTimeStamp* output_time);
+                       const CVTimeStamp* time);
 
   void CalculateVsyncParametersLockHeld(const CVTimeStamp* time);
 

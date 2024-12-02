@@ -2,15 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// File-level comment to appease parser. Eventually this will not be necessary.
+namespace experimental.pushMessaging{
 
-[nodoc] namespace experimental.pushMessaging{
   dictionary Message {
     // The subchannel the message was sent on.
     long subchannelId;
 
     // The payload associated with the message, if any.
     DOMString payload;
+  };
+
+  dictionary ChannelIdResult {
+    // The channel ID for this app to use for push messaging.
+    DOMString channelId;
+  };
+
+  callback ChannelIdCallback = void (ChannelIdResult channelId);
+
+  interface Functions {
+    // Retrieves the channel ID associated with this app or extension.
+    // Typically an app or extension will want to send this value
+    // to its application server so the server can use it
+    // to trigger push messages back to the app or extension.
+    static void getChannelId(ChannelIdCallback callback);
   };
 
   interface Events {

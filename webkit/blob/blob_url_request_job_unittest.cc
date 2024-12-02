@@ -144,6 +144,7 @@ class BlobURLRequestJobTest : public testing::Test {
 
   static net::URLRequestJob* BlobURLRequestJobFactory(
       net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
       const std::string& scheme) {
     BlobURLRequestJob* temp = blob_url_request_job_;
     blob_url_request_job_ = NULL;
@@ -242,12 +243,12 @@ class BlobURLRequestJobTest : public testing::Test {
                    const net::HttpRequestHeaders& extra_headers,
                    BlobData* blob_data) {
     // This test has async steps.
-    request_.reset(new net::URLRequest(GURL("blob:blah"),
-                                       url_request_delegate_.get(),
-                                       &empty_context_));
+    request_.reset(empty_context_.CreateRequest(
+        GURL("blob:blah"), url_request_delegate_.get()));
     request_->set_method(method);
     blob_url_request_job_ = new BlobURLRequestJob(
         request_.get(),
+        empty_context_.network_delegate(),
         blob_data,
         base::MessageLoopProxy::current());
 

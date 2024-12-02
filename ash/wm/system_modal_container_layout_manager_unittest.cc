@@ -15,7 +15,6 @@
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
-#include "ui/views/events/event.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -28,12 +27,6 @@ aura::Window* GetModalContainer() {
   return Shell::GetContainer(
       Shell::GetPrimaryRootWindow(),
       ash::internal::kShellWindowId_SystemModalContainer);
-}
-
-aura::Window* GetDefaultContainer() {
-  return Shell::GetContainer(
-      Shell::GetPrimaryRootWindow(),
-      ash::internal::kShellWindowId_DefaultContainer);
 }
 
 class TestWindow : public views::WidgetDelegateView {
@@ -81,7 +74,7 @@ class EventTestWindow : public TestWindow {
   }
 
   // Overridden from views::View:
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE {
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE {
     mouse_presses_++;
     return false;
   }
@@ -122,7 +115,7 @@ TEST_F(SystemModalContainerLayoutManagerTest, NonModalTransient) {
   transient->AddObserver(&destruction_observer);
 
   EXPECT_EQ(parent.get(), transient->transient_parent());
-  EXPECT_EQ(GetDefaultContainer(), transient->parent());
+  EXPECT_EQ(parent->parent(), transient->parent());
 
   // The transient should be destroyed with its parent.
   parent.reset();

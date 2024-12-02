@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
-#include "chrome/common/net/gaia/gaia_auth_consumer.h"
+#include "google_apis/gaia/gaia_auth_consumer.h"
 
 class Profile;
 
@@ -89,6 +89,9 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
   // Profile (usually off the record ) that was used to perform the last
   // authentication process.
   Profile* authentication_profile() { return authentication_profile_; }
+
+  // Sets consumer explicitly.
+  void SetConsumer(LoginStatusConsumer* consumer);
 
  protected:
   virtual ~Authenticator();

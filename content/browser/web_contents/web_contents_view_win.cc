@@ -264,9 +264,10 @@ gfx::Rect WebContentsViewWin::GetViewBounds() const {
 }
 
 void WebContentsViewWin::ShowContextMenu(
-    const content::ContextMenuParams& params) {
+    const content::ContextMenuParams& params,
+    content::ContextMenuSourceType type) {
   if (delegate_.get())
-    delegate_->ShowContextMenu(params);
+    delegate_->ShowContextMenu(params, type);
 }
 
 void WebContentsViewWin::ShowPopupMenu(const gfx::Rect& bounds,
@@ -303,7 +304,7 @@ void WebContentsViewWin::GotFocus() {
 
 void WebContentsViewWin::TakeFocus(bool reverse) {
   if (web_contents_->GetDelegate() &&
-      !web_contents_->GetDelegate()->TakeFocus(reverse) &&
+      !web_contents_->GetDelegate()->TakeFocus(web_contents_, reverse) &&
       delegate_.get()) {
     delegate_->TakeFocus(reverse);
   }

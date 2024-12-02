@@ -141,6 +141,7 @@
 <translation id="5564962323737505851">Hiermee wordt Wachtwoordbeheer geconfigureerd. Als Wachtwoordbeheer is ingeschakeld, kunt u specificeren of de gebruiker opgeslagen wachtwoorden als leesbare tekst mag weergeven.</translation>
 <translation id="4668325077104657568">Standaardinstelling voor afbeeldingen</translation>
 <translation id="7161193985878519056">Incognitomodus uitgeschakeld.</translation>
+<translation id="2524379983318108884">Het vastleggen van audio toestaan</translation>
 <translation id="4492287494009043413">Het maken van schermafbeeldingen uitschakelen</translation>
 <translation id="6368403635025849609">JavaScript toestaan op deze sites</translation>
 <translation id="6074963268421707432">Niet toestaan dat sites bureaubladmeldingen weergeven</translation>
@@ -243,19 +244,13 @@
       Het is bekend dat bepaalde webapps veel verbindingen gebruiken voor openstaande GET-verzoeken. Als u deze waarde lager instelt dan 32, lopen netwerkprocessen van de browser daarom mogelijk vast als u te veel van dergelijke webapps heeft geopend. Het tot onder de standaardwaarde verlagen van deze waarde is daarom op eigen risico.
 
       Als dit beleid niet is ingesteld, wordt de standaardwaarde 32 gebruikt.</translation>
+<translation id="5395271912574071439">Schakelt afscherming van hosts voor externe toegang in terwijl een verbinding tot stand wordt gebracht.
+
+          Als deze instelling is ingeschakeld, worden de fysieke invoer- en uitvoerapparaten van hosts uitgeschakeld terwijl een externe verbinding tot stand wordt gebracht.
+
+          Als deze instelling is uitgeschakeld of niet is ingesteld, kunnen zowel lokale als externe gebruikers met de host communiceren terwijl deze wordt gedeeld.</translation>
 <translation id="2312509925391670075">Elke keer vragen wanneer een site toegang wil hebben tot mijn camera en/of microfoon</translation>
 <translation id="1426410128494586442">Ja</translation>
-<translation id="1692788808502061374">Hiermee kunt u een lijst met extensies specificeren die u op de achtergrond wilt laten installeren, zonder interactie door de gebruiker.
-
-          Elk item in de lijst is een tekenreeks die een extensie-ID en een URL voor bijwerken bevat, gescheiden door een puntkomma (<ph name="SEMICOLON"/>). De extensie-ID is de 32-letterige tekenreeks die u bijvoorbeeld op <ph name="CHROME_EXTENSIONS_LINK"/> kunt vinden wanneer de ontwikkelaarsmodus is ingeschakeld. De URL voor bijwerken moet verwijzen naar een XML-document met een manifest voor bijwerken, zoals beschreven in <ph name="LINK_TO_EXTENSION_DOC1"/>.
-
-          Voor elk item haalt <ph name="PRODUCT_NAME"/> de door de extensie-ID gespecificeerde extensie op uit de service voor bijwerken via de gespecificeerde URL voor bijwerken. Vervolgens wordt de extensie op de achtergrond geïnstalleerd.
-
-          Een voorbeeld: <ph name="EXTENSION_POLICY_EXAMPLE"/> installeert de extensie <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> via de standaard-URL voor bijwerken uit de Chrome Web Store. Voor meer informatie over het hosten van extensies gaat u naar: <ph name="LINK_TO_EXTENSION_DOC2"/>.
-
-          Gebruikers kunnen extensies die in dit beleid zijn gespecificeerd, niet verwijderen. Als u een extensie uit deze lijst verwijdert, zal deze automatisch worden verwijderd door <ph name="PRODUCT_NAME"/>.
-
-          Als dit beleid niet wordt ingesteld, kan de gebruiker alle extensies in <ph name="PRODUCT_NAME"/> verwijderen.</translation>
 <translation id="4962195944157514011">Hiermee wordt de URL gespecificeerd voor de zoekmachine die wordt gebruikt voor standaard zoekopdrachten. De URL moet de tekenreeks '<ph name="SEARCH_TERM_MARKER"/>' bevatten, die op het moment van de zoekopdracht wordt vervangen door de termen waarnaar de gebruiker zoekt.
 
           Deze optie moet worden ingesteld wanneer het beleid 'DefaultSearchProviderEnabled' is ingeschakeld en wordt alleen gerespecteerd als dit het geval is.</translation>
@@ -323,6 +318,13 @@
 
           Als u deze instelling uitschakelt of niet instelt, bevat de gegenereerde Kerberos-SPN in geen geval een poortnummer.</translation>
 <translation id="3236046242843493070">URL-patronen om de installatie van extensies, apps en gebruikersscripts toe te staan vanaf</translation>
+<translation id="3442095178490656861">Hiermee wordt de tijdzone gespecificeerd die voor het apparaat moet worden gebruikt. Gebruikers kunnen de gespecificeerde tijdzone overschrijven voor de huidige sessie. Bij het afmelden wordt de tijd echter teruggezet naar de gespecificeerde tijdzone. Als een ongeldige waarde wordt opgegeven, wordt het beleid nog steeds geactiveerd, maar wordt 'GMT' gebruikt.
+
+      Als dit beleid niet wordt gebruikt, blijft de huidige actieve tijdzone in gebruik. Gebruikers kunnen de tijdzone echter wijzigen en de wijziging is blijvend. Een wijziging door één gebruiker is dus van invloed op het aanmeldscherm en op alle andere gebruikers.
+
+      Bij nieuwe apparaten is de tijdzone standaard ingesteld op 'US/Pacific'.
+
+      De notatie van de waarde volgt de naamgeving van tijdzones in de 'IANA Time Zone Database' (zie 'http://en.wikipedia.org/wiki/List_of_tz_database_time'). U kunt naar veel tijdzones verwijzen via 'continent/grote_stad' of 'oceaan/grote_stad'.</translation>
 <translation id="8992176907758534924">Niet toestaan dat sites afbeeldingen weergeven</translation>
 <translation id="262740370354162807">Verzenden van documenten naar <ph name="CLOUD_PRINT_NAME"/> inschakelen</translation>
 <translation id="8704831857353097849">Lijst met uitgeschakelde plug-ins</translation>
@@ -399,6 +401,7 @@ Als deze instelling op 'True' wordt ingesteld, melden de aangemelde apparaten re
 
       Als het beleid niet is ingesteld, kan de gebruiker de lijst met vastgezette apps in het opstartprogramma wijzigen.</translation>
 <translation id="7625444193696794922">Hiermee wordt het releasekanaal gespecificeerd waarmee dit apparaat moet worden vergrendeld.</translation>
+<translation id="2552966063069741410">Tijdzone</translation>
 <translation id="3088288048720661397">Als deze instelling is ingesteld op 'Waar', schakelt u synchronisatie met Google Documenten uit bij gebruik van een mobiele verbinding. In dat geval worden gegevens alleen gesynchroniseerd met Google Documenten bij verbinding via wifi of Ethernet.
 
           Als deze instelling niet is ingesteld of is ingesteld op 'Onwaar', kunnen gebruikers bestanden overzetten naar Google Documenten via mobiele verbindingen.</translation>
@@ -500,6 +503,7 @@ Als dit beleid op 'True' is ingesteld, melden aangemelde apparaten perioden waar
       Als u de instelling inschakelt of geen waarde instelt, kunnen gebruikers de opties voor Automatisch aanvullen zelf beheren. Zo kunnen ze profielen voor Automatisch aanvullen configureren en de functie naar wens in- of uitschakelen.</translation>
 <translation id="6157537876488211233">Door komma's gescheiden lijst van regels voor proxyomzeiling</translation>
 <translation id="3965339130942650562">Time-out tot de inactieve gebruiker is afgemeld</translation>
+<translation id="5293547923319914979">Afschermen van hosts voor externe toegang inschakelen.</translation>
 <translation id="7091198954851103976">Plug-ins waarvoor toestemming is vereist, altijd uitvoeren</translation>
 <translation id="2021307518684405078">Niet toestaan dat sites toegang krijgen tot mijn camera en microfoon</translation>
 <translation id="8870318296973696995">Startpagina</translation>
@@ -560,6 +564,13 @@ Als dit beleid op 'True' is ingesteld, melden aangemelde apparaten perioden waar
           Als dit beleid niet wordt ingesteld, wordt de standaardzoekprovider ingeschakeld en kan de gebruiker de lijst voor de zoekprovider instellen.</translation>
 <translation id="8731693562790917685">Met instellingen voor inhoud kunt u opgeven hoe inhoud van een bepaald type (zoals cookies, afbeeldingen of JavaScript) wordt verwerkt.</translation>
 <translation id="2411919772666155530">Meldingen op deze sites blokkeren</translation>
+<translation id="5281259077246025371">Het vastleggen van audio toestaan.
+
+      Als dit beleid is ingesteld op 'onwaar', is het vastleggen van audio niet beschikbaar op het apparaat wanneer de gebruiker is aangemeld.
+
+      Dit beleid is van invloed op alle typen audio-invoer en niet alleen de ingebouwde microfoon.
+
+      Als deze instelling is ingesteld op 'waar' of 'niet geconfigureerd', kunnen gebruikers alle ondersteunde audio-invoer op hun apparaat gebruiken.</translation>
 <translation id="6923366716660828830">Hiermee wordt de naam van de standaardzoekprovider gespecificeerd. Als dit leeg is of niet wordt ingesteld, wordt de hostnaam gebruikt die door de zoek-URL wordt gespecificeerd.
 
           Dit beleid wordt alleen gebruikt als het beleid 'DefaultSearchProviderEnabled' is ingeschakeld.</translation>
@@ -610,6 +621,13 @@ Als dit beleid op 'True' is ingesteld, melden aangemelde apparaten perioden waar
           Als u deze instelling inschakelt, kunnen gebruikers deze niet wijzigen of negeren in <ph name="PRODUCT_NAME"/>.
 
           Het uitschakelen van deze instelling staat gelijk aan het niet configureren van de instelling. De gebruiker kan de instelling nog steeds wijzigen in <ph name="PRODUCT_NAME"/>.</translation>
+<translation id="8161570238552664224">Het afspelen van audio toestaan.
+
+      Als dit beleid is ingesteld op 'onwaar', is audio-uitvoer niet beschikbaar op het apparaat wanneer de gebruiker is aangemeld.
+
+      Dit beleid is van invloed op alle typen audio-invoer en niet alleen op de ingebouwde luidsprekers. Dit beleid is ook van invloed op toegankelijkheidsfuncties voor audio. Schakel dit beleid niet in als de gebruiker een schermlezer nodig heeft.
+
+      Als deze instelling is ingesteld op 'waar' of 'niet geconfigureerd', kunnen gebruikers alle ondersteunde audio-uitvoer op hun apparaat gebruiken.</translation>
 <translation id="5761030451068906335">Hiermee configureert u de proxyinstellingen voor <ph name="PRODUCT_NAME"/>. Dit beleid is nog niet klaar voor gebruik, gebruik het dus niet.</translation>
 <translation id="8344454543174932833">Bladwijzers importeren uit standaardbrowser bij eerste uitvoering</translation>
 <translation id="1019101089073227242">Gegevensdirectory voor gebruiker instellen</translation>
@@ -775,6 +793,7 @@ Als het beleid niet wordt ingesteld, of op 'False' wordt ingesteld, wordt het sp
       Als u deze instelling in- of uitschakelt, kunnen gebruikers de instelling niet aanpassen of negeren in <ph name="PRODUCT_NAME"/>.
 
       Als dit beleid niet wordt ingesteld, kan de gebruiker kiezen of de knop 'Startpagina' wel of niet wordt weergegeven.</translation>
+<translation id="2518231489509538392">Het afspelen van audio toestaan</translation>
 <translation id="7547044444554936129">Hiermee wordt de functie Instant van <ph name="PRODUCT_NAME"/> ingeschakeld en wordt voorkomen dat gebruikers deze instelling kunnen wijzigen.
 
       Als u deze instelling inschakelt, is <ph name="PRODUCT_NAME"/> Instant ingeschakeld.
@@ -857,6 +876,7 @@ Als het beleid niet wordt ingesteld, of op 'False' wordt ingesteld, wordt het sp
           Als u dit beleid niet instelt, worden alle servers geaccepteerd voor geïntegreerde authenticatie.</translation>
 <translation id="2299220924812062390">Een lijst met ingeschakelde plug-ins specificeren</translation>
 <translation id="924557436754151212">Opgeslagen wachtwoorden importeren uit standaardbrowser bij eerste uitvoering</translation>
+<translation id="1465619815762735808">Klikken om te spelen</translation>
 <translation id="7227967227357489766">Hiermee definieert u de lijst met gebruikers die toestemming hebben zich aan te melden bij het apparaat. Vermeldingen hebben de vorm <ph name="USER_WHITELIST_ENTRY_FORMAT"/>, zoals <ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>. Als u willekeurige gebruikers toegang wilt verlenen tot een domein, gebruikt u vermeldingen in de vorm <ph name="USER_WHITELIST_ENTRY_WILDCARD"/>.
 
       Als dit beleid niet is geconfigureerd, gelden er geen beperkingen voor welke gebruikers zich mogen aanmelden. Houd er rekening mee dat voor het maken van nieuwe gebruikers het beleid <ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/> nog steeds correct moet worden geconfigureerd.</translation>
@@ -924,6 +944,11 @@ Als het beleid niet wordt ingesteld, of op 'False' wordt ingesteld, wordt het sp
 <translation id="8631434304112909927">tot versie <ph name="UNTIL_VERSION"/></translation>
 <translation id="7469554574977894907">Zoeksuggesties inschakelen</translation>
 <translation id="4906194810004762807">Vernieuwingsfrequentie voor apparaatbeleid</translation>
+<translation id="1398889361882383850">Hiermee kunt u instellen of websites automatisch plug-ins mogen uitvoeren. Het automatisch uitvoeren van plug-ins kan ofwel worden toegestaan voor alle websites, ofwel worden geweigerd voor alle websites.
+
+          Met click-to-play kunnen plug-ins worden uitgevoerd, maar de gebruiker moet erop klikken om ze uit te voeren.
+
+          Als dit beleid niet wordt ingesteld, wordt 'AllowPlugins' gebruikt en kan de gebruiker dit wijzigen.</translation>
 <translation id="7974114691960514888">Dit beleid wordt niet meer ondersteund.
           Maakt het gebruik van STUN en relayservers mogelijk bij het verbinding maken met een externe client.
 
@@ -959,9 +984,6 @@ Als het beleid niet wordt ingesteld, of op 'False' wordt ingesteld, wordt het sp
       Als u deze instelling inschakelt, gebruikt <ph name="PRODUCT_NAME"/> de gespecificeerde landinstelling. Als de geconfigureerde landinstelling niet wordt ondersteund, wordt 'en-US' gebruikt.
 
       Als deze instelling is uitgeschakeld of niet is ingesteld, gebruikt <ph name="PRODUCT_NAME"/> de door de gebruiker gespecificeerde landinstelling (indien geconfigureerd), de landinstelling voor het systeem of 'en-US'.</translation>
-<translation id="7271483295221961083">Hiermee kunt u instellen of websites automatisch plug-ins mogen uitvoeren. Het automatisch uitvoeren van plug-ins kan worden toegestaan voor alle websites of worden geweigerd voor alle websites.
-
-          Als dit beleid niet wordt ingesteld, wordt 'AllowPlugins' gebruikt en kan de gebruiker dit wijzigen.</translation>
 <translation id="718956142899066210">Verbindingstypen die zijn toegestaan voor updates</translation>
 <translation id="6985168562472482191">De naam van de zakelijke webwinkel, die onder het app-pictogram op de pagina 'Nieuw tabblad' wordt weergegeven. Deze instelling heeft geen effect als EnterpriseWebStoreURL niet is ingesteld.
 
@@ -1043,6 +1065,17 @@ Als het beleid niet wordt ingesteld, of op 'False' wordt ingesteld, wordt het sp
 <translation id="6658245400435704251">Bepaalt het maximaal aantal seconden dat een apparaat willekeurig de download van een update mag uitstellen vanaf het moment dat de update voor het eerst naar de server werd gepusht. Het apparaat kan een deel van deze tijd wachten in termen van kloktijd en het resterende deel in termen van het aantal updatecontroles. De maximale spreiding is in elk geval begrensd door een constante periode zodat een apparaat nooit vastloopt tijdens het wachten tot een update kan worden gedownload.</translation>
 <translation id="1948757837129151165">Beleid voor HTTP-authenticatie</translation>
 <translation id="5946082169633555022">Bètakanaal</translation>
+<translation id="145467868108778033">Hiermee kunt u een lijst met extensies opgeven die op de achtergrond worden geïnstalleerd, zonder interactie van de gebruiker.
+
+          Elk item in de lijst is een tekenreeks die een extensie-ID en een URL voor bijwerken bevat, gescheiden door een puntkomma (<ph name="SEMICOLON"/>). De extensie-ID is de 32-letterige tekenreeks die u bijvoorbeeld op <ph name="CHROME_EXTENSIONS_LINK"/> kunt vinden wanneer de ontwikkelaarsmodus is ingeschakeld. De URL voor bijwerken moet verwijzen naar een XML-document met een manifest voor bijwerken, zoals beschreven in <ph name="LINK_TO_EXTENSION_DOC1"/>. Houd er rekening mee dat de URL voor bijwerken die in dit beleid is ingesteld, alleen wordt gebruikt voor de eerste installatie. Bij volgende updates van de extensie wordt de URL voor bijwerken gebruikt die is aangegeven in het manifest van de extensie.
+
+          Voor elk item haalt <ph name="PRODUCT_NAME"/> de door de extensie-ID gespecificeerde extensie op uit de service voor bijwerken via de gespecificeerde URL voor bijwerken. Vervolgens wordt de extensie op de achtergrond geïnstalleerd.
+
+          Een voorbeeld: <ph name="EXTENSION_POLICY_EXAMPLE"/> installeert de extensie <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> via de standaard-URL voor bijwerken uit de Chrome Web Store. Voor meer informatie over het hosten van extensies gaat u naar: <ph name="LINK_TO_EXTENSION_DOC2"/>.
+
+          Gebruikers kunnen extensies die in dit beleid zijn gespecificeerd, niet verwijderen. Als u een extensie uit deze lijst verwijdert, wordt deze automatisch verwijderd door <ph name="PRODUCT_NAME"/>.
+
+          Als dit beleid niet wordt ingesteld, kan de gebruiker alle extensies in <ph name="PRODUCT_NAME"/> verwijderen.</translation>
 <translation id="8303314579975657113">Hiermee wordt gespecificeerd welke GSSAPI-bibliotheek moet worden gebruikt voor HTTP-authenticatie. U kunt een bibliotheeknaam instellen of een volledig pad.
 
           Als er geen instelling wordt opgegeven, gebruikt <ph name="PRODUCT_NAME"/> een standaard bibliotheeknaam.</translation>

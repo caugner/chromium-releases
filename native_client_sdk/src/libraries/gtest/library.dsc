@@ -1,6 +1,15 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win'],
+  # TODO(binji): pnacl fails with error:
+  # In file included from gtest.cc:133:
+  # pepper_23/include/gtest/internal/src/gtest-internal-inl.h:213:8:
+  #   error: private field 'pretty_' is not used [-Werror,-Wunused-private-field]
+  #
+  # We can fix this by passing -Wno-unused-private-field to clang, but gcc
+  # doesn't support this flag so we'll have to support splitting CXXFLAGS based
+  # on TOOL first.
+  'TOOLS': ['newlib', 'glibc', 'win', 'linux'],
   'SEARCH': [
+    '.',
     '../../../../testing/gtest/include/gtest',
     '../../../../testing/gtest/include/gtest/internal',
     '../../../../testing/gtest/src',
@@ -18,6 +27,7 @@
         'gtest-printers.cc',
         'gtest-test-part.cc',
         'gtest-typed-test.cc',
+        'nacl_gtest_dummy_sys.cc',
       ],
       # Ignore warning:
       #   gtest.cc:2555: error: enumeration value ‘COLOR_DEFAULT’ not handled in switch
@@ -73,5 +83,4 @@
   ],
   'DEST': 'testing',
   'NAME': 'gtest',
-  'EXPERIMENTAL': True,
 }

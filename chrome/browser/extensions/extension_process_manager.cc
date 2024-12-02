@@ -10,6 +10,7 @@
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
+#include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_info_map.h"
@@ -89,16 +90,20 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
 
 static void CreateBackgroundHostForExtensionLoad(
     ExtensionProcessManager* manager, const Extension* extension) {
-  if (extension->has_persistent_background_page()) {
+  if (extension->has_persistent_background_page())
     manager->CreateBackgroundHost(extension, extension->GetBackgroundURL());
-  }
 }
 
 static void CreateBackgroundHostsForProfileStartup(
-    ExtensionProcessManager* manager, const ExtensionSet* extensions) {
+    Profile* profile,
+    ExtensionProcessManager* manager,
+    const ExtensionSet* extensions) {
   for (ExtensionSet::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
     CreateBackgroundHostForExtensionLoad(manager, *extension);
+
+    extensions::RuntimeEventRouter::DispatchOnStartupEvent(
+        profile, (*extension)->id());
   }
 }
 
@@ -158,9 +163,9 @@ ExtensionProcessManager::ExtensionProcessManager(Profile* profile)
     registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                    content::Source<Profile>(original_profile));
   }
-  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING,
+  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_AGENT_ATTACHED,
                  content::Source<content::BrowserContext>(profile));
-  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
+  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_AGENT_DETACHED,
                  content::Source<content::BrowserContext>(profile));
 
   event_page_idle_time_ = base::TimeDelta::FromSeconds(10);
@@ -557,19 +562,19 @@ void ExtensionProcessManager::Observe(
     const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_EXTENSIONS_READY: {
-      CreateBackgroundHostsForProfileStartup(this,
-          content::Source<Profile>(source).ptr()->
-              GetExtensionService()->extensions());
+      Profile* profile = content::Source<Profile>(source).ptr();
+      CreateBackgroundHostsForProfileStartup(profile, this,
+          profile->GetExtensionService()->extensions());
       break;
     }
 
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
-      ExtensionService* service =
-          content::Source<Profile>(source).ptr()->GetExtensionService();
+      Profile* profile = content::Source<Profile>(source).ptr();
+      ExtensionService* service = profile->GetExtensionService();
       if (service->is_ready()) {
         const Extension* extension =
             content::Details<const Extension>(details).ptr();
-        ::CreateBackgroundHostForExtensionLoad(this, extension);
+        CreateBackgroundHostForExtensionLoad(this, extension);
       }
       break;
     }
@@ -624,7 +629,7 @@ void ExtensionProcessManager::Observe(
       break;
     }
 
-    case content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING: {
+    case content::NOTIFICATION_DEVTOOLS_AGENT_ATTACHED: {
       RenderViewHost* render_view_host =
           content::Details<RenderViewHost>(details).ptr();
       WebContents* web_contents =
@@ -635,13 +640,15 @@ void ExtensionProcessManager::Observe(
               chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
         const Extension* extension = GetExtensionForRenderViewHost(
             render_view_host);
-        if (extension)
+        if (extension) {
+          CancelSuspend(extension);
           IncrementLazyKeepaliveCount(extension);
+        }
       }
       break;
     }
 
-    case content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING: {
+    case content::NOTIFICATION_DEVTOOLS_AGENT_DETACHED: {
       RenderViewHost* render_view_host =
           content::Details<RenderViewHost>(details).ptr();
       WebContents* web_contents =
@@ -805,7 +812,8 @@ void IncognitoExtensionProcessManager::Observe(
         // service will be NULL.
         ExtensionService* service = GetProfile()->GetExtensionService();
         if (service && service->is_ready())
-          CreateBackgroundHostsForProfileStartup(this, service->extensions());
+          CreateBackgroundHostsForProfileStartup(GetProfile(),
+                                                 this, service->extensions());
       }
       break;
     }

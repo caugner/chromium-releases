@@ -9,19 +9,19 @@
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/values.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/extensions/file_browser_notifications.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
-#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
+#include "chrome/browser/chromeos/gdata/drive_service_interface.h"
+#include "chrome/browser/chromeos/gdata/drive_system_service.h"
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
@@ -36,9 +36,8 @@
 using chromeos::disks::DiskMountManager;
 using chromeos::disks::DiskMountManagerEventType;
 using content::BrowserThread;
-using gdata::GDataFileSystemInterface;
-using gdata::GDataSystemService;
-using gdata::GDataSystemServiceFactory;
+using gdata::DriveSystemService;
+using gdata::DriveSystemServiceFactory;
 
 namespace {
   const char kDiskAddedEventType[] = "added";
@@ -110,11 +109,11 @@ void FileBrowserEventRouter::ShutdownOnUIThread() {
   }
   DiskMountManager::GetInstance()->RemoveObserver(this);
 
-  GDataSystemService* system_service =
-      GDataSystemServiceFactory::FindForProfile(profile_);
+  DriveSystemService* system_service =
+      DriveSystemServiceFactory::FindForProfile(profile_);
   if (system_service) {
     system_service->file_system()->RemoveObserver(this);
-    system_service->docs_service()->operation_registry()->RemoveObserver(this);
+    system_service->drive_service()->RemoveObserver(this);
   }
 
   chromeos::NetworkLibrary* network_library =
@@ -138,13 +137,13 @@ void FileBrowserEventRouter::ObserveFileSystemEvents() {
   disk_mount_manager->AddObserver(this);
   disk_mount_manager->RequestMountInfoRefresh();
 
-  GDataSystemService* system_service =
-      GDataSystemServiceFactory::GetForProfile(profile_);
+  DriveSystemService* system_service =
+      DriveSystemServiceFactory::GetForProfile(profile_);
   if (!system_service) {
     NOTREACHED();
     return;
   }
-  system_service->docs_service()->operation_registry()->AddObserver(this);
+  system_service->drive_service()->AddObserver(this);
   system_service->file_system()->AddObserver(this);
 
   chromeos::NetworkLibrary* network_library =
@@ -173,7 +172,7 @@ bool FileBrowserEventRouter::AddFileWatch(
   // directory from there in order to be able to pair these events with
   // their change notifications.
   if (gdata::util::GetSpecialRemoteRootPath().IsParent(watch_path)) {
-    watch_path = gdata::util::ExtractGDataPath(watch_path);
+    watch_path = gdata::util::ExtractDrivePath(watch_path);
     is_remote_watch = true;
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -209,7 +208,7 @@ void FileBrowserEventRouter::RemoveFileWatch(
   // directory from there in order to be able to pair these events with
   // their change notifications.
   if (gdata::util::GetSpecialRemoteRootPath().IsParent(watch_path)) {
-    watch_path = gdata::util::ExtractGDataPath(watch_path);
+    watch_path = gdata::util::ExtractDrivePath(watch_path);
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&FileBrowserEventRouter::HandleRemoteUpdateRequestOnUIThread,
@@ -230,10 +229,10 @@ void FileBrowserEventRouter::MountDrive(
     const base::Closure& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  gdata::GDataSystemService* system_service =
-      gdata::GDataSystemServiceFactory::GetForProfile(profile_);
+  DriveSystemService* system_service =
+      DriveSystemServiceFactory::GetForProfile(profile_);
   if (system_service) {
-    system_service->docs_service()->Authenticate(
+    system_service->drive_service()->Authenticate(
         base::Bind(&FileBrowserEventRouter::OnAuthenticated,
                    this,
                    callback));
@@ -254,7 +253,7 @@ void FileBrowserEventRouter::OnAuthenticated(
     error_code = chromeos::MOUNT_ERROR_NOT_AUTHENTICATED;
 
   // Pass back the gdata mount point path as source path.
-  const std::string& gdata_path = gdata::util::GetGDataMountPointPathAsString();
+  const std::string& gdata_path = gdata::util::GetDriveMountPointPathAsString();
   DiskMountManager::MountPointInfo mount_info(
       gdata_path,
       gdata_path,
@@ -271,7 +270,7 @@ void FileBrowserEventRouter::OnAuthenticated(
 void FileBrowserEventRouter::HandleRemoteUpdateRequestOnUIThread(bool start) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  gdata::GDataFileSystemInterface* file_system = GetRemoteFileSystem();
+  gdata::DriveFileSystemInterface* file_system = GetRemoteFileSystem();
   DCHECK(file_system);
 
   if (start) {
@@ -355,9 +354,9 @@ void FileBrowserEventRouter::MountCompleted(
     if ((event_type == DiskMountManager::MOUNTING) !=
         (error_code == chromeos::MOUNT_ERROR_NONE)) {
       FilePath source_path(mount_info.source_path);
-      gdata::GDataSystemService* system_service =
-          gdata::GDataSystemServiceFactory::GetForProfile(profile_);
-      gdata::GDataCache* cache =
+      DriveSystemService* system_service =
+          DriveSystemServiceFactory::GetForProfile(profile_);
+      gdata::DriveCache* cache =
           system_service ? system_service->cache() : NULL;
       if (cache) {
         cache->SetMountedStateOnUIThread(
@@ -375,7 +374,7 @@ void FileBrowserEventRouter::OnNetworkManagerChanged(
   }
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
       extensions::event_names::kOnFileBrowserNetworkConnectionChanged,
-      "[]", NULL, GURL());
+      scoped_ptr<ListValue>(new ListValue()), NULL, GURL());
 }
 
 void FileBrowserEventRouter::Observe(
@@ -393,7 +392,7 @@ void FileBrowserEventRouter::Observe(
     // make it available.
     if (*pref_name == prefs::kExternalStorageDisabled &&
         profile_->GetPrefs()->GetBoolean(prefs::kExternalStorageDisabled)) {
-      DiskMountManager *manager = DiskMountManager::GetInstance();
+      DiskMountManager* manager = DiskMountManager::GetInstance();
       DiskMountManager::MountPointMap mounts(manager->mount_points());
       for (DiskMountManager::MountPointMap::const_iterator it = mounts.begin();
            it != mounts.end(); ++it) {
@@ -407,13 +406,13 @@ void FileBrowserEventRouter::Observe(
         *pref_name == prefs::kDisableGData) {
       profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
           extensions::event_names::kOnFileBrowserGDataPreferencesChanged,
-          "[]", NULL, GURL());
+          scoped_ptr<ListValue>(new ListValue()), NULL, GURL());
     }
   }
 }
 
 void FileBrowserEventRouter::OnProgressUpdate(
-    const std::vector<gdata::GDataOperationRegistry::ProgressStatus>& list) {
+    const gdata::OperationProgressStatusList& list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   scoped_ptr<ListValue> event_list(
@@ -422,17 +421,13 @@ void FileBrowserEventRouter::OnProgressUpdate(
           file_manager_util::GetFileBrowserExtensionUrl().GetOrigin(),
           list));
 
-  ListValue args;
-  args.Append(event_list.release());
-
-  std::string args_json;
-  base::JSONWriter::Write(&args,
-                          &args_json);
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(event_list.release());
 
   profile_->GetExtensionEventRouter()->DispatchEventToExtension(
       std::string(kFileBrowserDomain),
-      extensions::event_names::kOnFileTransfersUpdated, args_json,
-      NULL, GURL());
+      extensions::event_names::kOnFileTransfersUpdated, args.Pass(), NULL,
+      GURL());
 }
 
 void FileBrowserEventRouter::OnDirectoryChanged(
@@ -445,15 +440,13 @@ void FileBrowserEventRouter::OnDocumentFeedFetched(
     int num_accumulated_entries) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  ListValue args;
-  args.Append(base::Value::CreateIntegerValue(num_accumulated_entries));
-  std::string args_json;
-  base::JSONWriter::Write(&args, &args_json);
+  scoped_ptr<ListValue> args(new ListValue());
+  args->Append(base::Value::CreateIntegerValue(num_accumulated_entries));
 
   profile_->GetExtensionEventRouter()->DispatchEventToExtension(
       std::string(kFileBrowserDomain),
-      extensions::event_names::kOnDocumentFeedFetched, args_json,
-      NULL, GURL());
+      extensions::event_names::kOnDocumentFeedFetched, args.Pass(), NULL,
+      GURL());
 }
 
 void FileBrowserEventRouter::OnFileSystemMounted() {
@@ -466,7 +459,7 @@ void FileBrowserEventRouter::OnFileSystemBeingUnmounted() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Raise a MountCompleted event to notify the File Manager.
-  const std::string& gdata_path = gdata::util::GetGDataMountPointPathAsString();
+  const std::string& gdata_path = gdata::util::GetDriveMountPointPathAsString();
   DiskMountManager::MountPointInfo mount_info(
       gdata_path,
       gdata_path,
@@ -476,11 +469,15 @@ void FileBrowserEventRouter::OnFileSystemBeingUnmounted() {
                  mount_info);
 }
 
-void FileBrowserEventRouter::OnAuthenticationFailed() {
+void FileBrowserEventRouter::OnAuthenticationFailed(
+    gdata::GDataErrorCode error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  if (error == gdata::GDATA_NO_CONNECTION)
+    return;
+
   // Raise a MountCompleted event to notify the File Manager.
-  const std::string& gdata_path = gdata::util::GetGDataMountPointPathAsString();
+  const std::string& gdata_path = gdata::util::GetDriveMountPointPathAsString();
   DiskMountManager::MountPointInfo mount_info(
       gdata_path,
       gdata_path,
@@ -516,19 +513,16 @@ void FileBrowserEventRouter::DispatchFolderChangeEvent(
     GURL base_url = fileapi::GetFileSystemRootURI(target_origin_url,
         fileapi::kFileSystemTypeExternal);
     GURL target_file_url = GURL(base_url.spec() + virtual_path.value());
-    ListValue args;
+    scoped_ptr<ListValue> args(new ListValue());
     DictionaryValue* watch_info = new DictionaryValue();
-    args.Append(watch_info);
+    args->Append(watch_info);
     watch_info->SetString("fileUrl", target_file_url.spec());
     watch_info->SetString("eventType",
                           got_error ? kPathWatchError : kPathChanged);
 
-    std::string args_json;
-    base::JSONWriter::Write(&args, &args_json);
-
     profile_->GetExtensionEventRouter()->DispatchEventToExtension(
-        iter->first, extensions::event_names::kOnFileChanged, args_json,
-        NULL, GURL());
+        iter->first, extensions::event_names::kOnFileChanged, args.Pass(), NULL,
+        GURL());
   }
 }
 
@@ -540,18 +534,16 @@ void FileBrowserEventRouter::DispatchDiskEvent(
     return;
   }
 
-  ListValue args;
+  scoped_ptr<ListValue> args(new ListValue());
   DictionaryValue* mount_info = new DictionaryValue();
-  args.Append(mount_info);
+  args->Append(mount_info);
   mount_info->SetString("eventType",
                         added ? kDiskAddedEventType : kDiskRemovedEventType);
   DictionaryValue* disk_info = DiskToDictionaryValue(disk);
   mount_info->Set("volumeInfo", disk_info);
 
-  std::string args_json;
-  base::JSONWriter::Write(&args, &args_json);
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
-      extensions::event_names::kOnFileBrowserDiskChanged, args_json, NULL,
+      extensions::event_names::kOnFileBrowserDiskChanged, args.Pass(), NULL,
       GURL());
 }
 
@@ -564,9 +556,9 @@ void FileBrowserEventRouter::DispatchMountCompletedEvent(
     return;
   }
 
-  ListValue args;
+  scoped_ptr<ListValue> args(new ListValue());
   DictionaryValue* mount_info_value = new DictionaryValue();
-  args.Append(mount_info_value);
+  args->Append(mount_info_value);
   mount_info_value->SetString("eventType",
       event == DiskMountManager::MOUNTING ? "mount" : "unmount");
   mount_info_value->SetString("status", MountErrorToString(error_code));
@@ -599,10 +591,8 @@ void FileBrowserEventRouter::DispatchMountCompletedEvent(
     }
   }
 
-  std::string args_json;
-  base::JSONWriter::Write(&args, &args_json);
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
-      extensions::event_names::kOnFileBrowserMountCompleted, args_json, NULL,
+      extensions::event_names::kOnFileBrowserMountCompleted, args.Pass(), NULL,
       GURL());
 
   // Do not attempt to open File Manager while the login is in progress or
@@ -781,6 +771,8 @@ FileBrowserEventRouter::FileWatcherExtensions::FileWatcherExtensions(
   AddExtension(extension_id);
 }
 
+FileBrowserEventRouter::FileWatcherExtensions::~FileWatcherExtensions() {}
+
 void FileBrowserEventRouter::FileWatcherExtensions::AddExtension(
     const std::string& extension_id) {
   ExtensionUsageRegistry::iterator it = extensions_.find(extension_id);
@@ -829,11 +821,11 @@ FileBrowserEventRouter::FileWatcherExtensions::GetVirtualPath() const {
   return virtual_path_;
 }
 
-gdata::GDataFileSystemInterface*
+gdata::DriveFileSystemInterface*
 FileBrowserEventRouter::GetRemoteFileSystem() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  gdata::GDataSystemService* system_service =
-      gdata::GDataSystemServiceFactory::GetForProfile(profile_);
+  DriveSystemService* system_service =
+      DriveSystemServiceFactory::GetForProfile(profile_);
   return (system_service ? system_service->file_system() : NULL);
 }
 
@@ -861,7 +853,7 @@ FileBrowserEventRouterFactory::GetInstance() {
 FileBrowserEventRouterFactory::FileBrowserEventRouterFactory()
     : RefcountedProfileKeyedServiceFactory("FileBrowserEventRouter",
           ProfileDependencyManager::GetInstance()) {
-  DependsOn(GDataSystemServiceFactory::GetInstance());
+  DependsOn(DriveSystemServiceFactory::GetInstance());
 }
 
 FileBrowserEventRouterFactory::~FileBrowserEventRouterFactory() {
@@ -873,7 +865,7 @@ FileBrowserEventRouterFactory::BuildServiceInstanceFor(Profile* profile) const {
       new FileBrowserEventRouter(profile));
 }
 
-bool FileBrowserEventRouterFactory::ServiceHasOwnInstanceInIncognito() {
+bool FileBrowserEventRouterFactory::ServiceHasOwnInstanceInIncognito() const {
   // Explicitly and always allow this router in guest login mode.   see
   // chrome/browser/profiles/profile_keyed_base_factory.h comment
   // for the details.

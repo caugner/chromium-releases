@@ -105,10 +105,9 @@ class SSLClientCertificateSelectorTest : public InProcessBrowserTest {
  protected:
   net::URLRequest* MakeURLRequest(
       net::URLRequestContextGetter* context_getter) {
-    net::URLRequest* request = new net::URLRequest(
-        GURL("https://example"),
-        NULL,
-        context_getter->GetURLRequestContext());
+    net::URLRequest* request =
+        context_getter->GetURLRequestContext()->CreateRequest(
+            GURL("https://example"), NULL);
     return request;
   }
 
@@ -276,7 +275,8 @@ IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorTest, SelectNone) {
   // Let the mock get checked on destruction.
 }
 
-IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorTest, Escape) {
+// http://crbug.com/121007
+IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorTest, DISABLED_Escape) {
   EXPECT_CALL(*auth_requestor_, CertificateSelected(NULL));
 
   EXPECT_TRUE(ui_test_utils::SendKeyPressSync(

@@ -27,6 +27,12 @@ bool IsActionBoxEnabled() {
       switches::kEnableActionBox);
 }
 
+bool IsExtensionsInActionBoxEnabled() {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  return command_line->HasSwitch(switches::kEnableActionBox) &&
+         command_line->HasSwitch(switches::kEnableExtensionsInActionBox);
+}
+
 bool AreScriptBadgesEnabled() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableScriptBadges);

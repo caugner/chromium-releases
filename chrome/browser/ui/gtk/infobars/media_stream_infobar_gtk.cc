@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/media/media_stream_devices_menu_model.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/media_stream_infobar_delegate.h"
@@ -15,16 +16,15 @@
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/l10n/l10n_util.h"
 
-InfoBar* MediaStreamInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
+InfoBar* MediaStreamInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
   DCHECK(owner);
-  return new MediaStreamInfoBarGtk(owner, this);
+  return new MediaStreamInfoBarGtk(static_cast<InfoBarTabHelper*>(owner), this);
 }
 
 MediaStreamInfoBarGtk::MediaStreamInfoBarGtk(
     InfoBarTabHelper* owner,
     MediaStreamInfoBarDelegate* delegate)
     : InfoBarGtk(owner, delegate) {
-  devices_menu_model_ = new MediaStreamDevicesMenuModel(delegate);
   Init();
 }
 
@@ -44,7 +44,7 @@ void MediaStreamInfoBarGtk::Init() {
     message_id = IDS_MEDIA_CAPTURE_AUDIO_ONLY;
 
   string16 security_origin = UTF8ToUTF16(
-      GetDelegate()->GetSecurityOrigin().spec());
+      GetDelegate()->GetSecurityOriginSpec());
   string16 text(l10n_util::GetStringFUTF16(message_id,
                                            security_origin, &offset));
 
@@ -73,17 +73,13 @@ void MediaStreamInfoBarGtk::Init() {
 }
 
 void MediaStreamInfoBarGtk::OnDevicesClicked(GtkWidget* sender) {
-  ShowMenuWithModel(sender, NULL, devices_menu_model_);
+  // InfoBarGtk takes the ownership of MediaStreamDevicesMenuModel.
+  ShowMenuWithModel(sender, NULL,
+                    new MediaStreamDevicesMenuModel(GetDelegate()));
 }
 
 void MediaStreamInfoBarGtk::OnAllowButton(GtkWidget* widget) {
-  std::string audio_id, video_id;
-  devices_menu_model_->GetSelectedDeviceId(
-      content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE, &audio_id);
-  devices_menu_model_->GetSelectedDeviceId(
-      content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE, &video_id);
-  bool always_allow = devices_menu_model_->always_allow();
-  GetDelegate()->Accept(audio_id, video_id, always_allow);
+  GetDelegate()->Accept();
   RemoveSelf();
 }
 

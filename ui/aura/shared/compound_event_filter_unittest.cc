@@ -13,6 +13,7 @@
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_activation_client.h"
 #include "ui/aura/test/test_windows.h"
+#include "ui/base/events/event.h"
 
 namespace {
 
@@ -22,7 +23,7 @@ base::TimeDelta GetTime() {
 
 class TestVisibleClient : public aura::client::CursorClient {
  public:
-  TestVisibleClient() : visible_(false) {}
+  TestVisibleClient() : visible_(true) {}
   virtual ~TestVisibleClient() {}
 
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE {
@@ -34,6 +35,9 @@ class TestVisibleClient : public aura::client::CursorClient {
 
   virtual bool IsCursorVisible() const OVERRIDE {
     return visible_;
+  }
+
+  virtual void SetDeviceScaleFactor(float scale_factor) OVERRIDE {
   }
 
  private:
@@ -54,25 +58,25 @@ class ConsumeGestureEventFilter : public EventFilter {
 
  private:
   // Overridden from EventFilter.
-  virtual bool PreHandleKeyEvent(Window* target, KeyEvent* event) OVERRIDE {
+  virtual bool PreHandleKeyEvent(Window* target, ui::KeyEvent* event) OVERRIDE {
     return false;
   }
 
   virtual bool PreHandleMouseEvent(Window* target,
-                                   MouseEvent* event) OVERRIDE {
+                                   ui::MouseEvent* event) OVERRIDE {
     return false;
   }
 
   virtual ui::TouchStatus PreHandleTouchEvent(
       Window* target,
-      TouchEvent* event) OVERRIDE {
+      ui::TouchEvent* event) OVERRIDE {
     return ui::TOUCH_STATUS_UNKNOWN;
   }
 
-  virtual ui::GestureStatus PreHandleGestureEvent(
+  virtual ui::EventResult PreHandleGestureEvent(
       Window* target,
-      GestureEvent* event) OVERRIDE {
-    return ui::GESTURE_STATUS_CONSUMED;
+      ui::GestureEvent* event) OVERRIDE {
+    return ui::ER_CONSUMED;
   }
 
   DISALLOW_COPY_AND_ASSIGN(ConsumeGestureEventFilter);
@@ -86,10 +90,6 @@ typedef AuraTestBase CompoundEventFilterTest;
 
 TEST_F(CompoundEventFilterTest, TouchHidesCursor) {
   aura::Env::GetInstance()->SetEventFilter(new shared::CompoundEventFilter());
-  aura::client::SetActivationClient(root_window(),
-                                    new TestActivationClient(root_window()));
-  aura::client::SetCaptureClient(
-      root_window(), new shared::RootWindowCaptureClient(root_window()));
   TestWindowDelegate delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(&delegate, 1234,
       gfx::Rect(5, 5, 100, 100), NULL));
@@ -99,44 +99,45 @@ TEST_F(CompoundEventFilterTest, TouchHidesCursor) {
   TestVisibleClient cursor_client;
   aura::client::SetCursorClient(root_window(), &cursor_client);
 
-  MouseEvent mouse(ui::ET_MOUSE_MOVED, gfx::Point(10, 10),
-      gfx::Point(10, 10), 0);
-  root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse);
+  ui::MouseEvent mouse0(ui::ET_MOUSE_MOVED, gfx::Point(10, 10),
+                        gfx::Point(10, 10), 0);
+  root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse0);
   EXPECT_TRUE(cursor_client.IsCursorVisible());
 
   // This press is required for the GestureRecognizer to associate a target
   // with kTouchId
-  TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(90, 90), 1, GetTime());
-  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
+  ui::TouchEvent press0(
+      ui::ET_TOUCH_PRESSED, gfx::Point(90, 90), 1, GetTime());
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press0);
   EXPECT_FALSE(cursor_client.IsCursorVisible());
 
-  TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(10, 10), 1,
-                  GetTime());
+  ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(10, 10), 1, GetTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&move);
   EXPECT_FALSE(cursor_client.IsCursorVisible());
 
-  TouchEvent release(ui::ET_TOUCH_RELEASED, gfx::Point(10, 10), 1, GetTime());
+  ui::TouchEvent release(
+      ui::ET_TOUCH_RELEASED, gfx::Point(10, 10), 1, GetTime());
   root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
   EXPECT_FALSE(cursor_client.IsCursorVisible());
 
+  ui::MouseEvent mouse1(ui::ET_MOUSE_MOVED, gfx::Point(10, 10),
+                        gfx::Point(10, 10), 0);
   // Move the cursor again. The cursor should be visible.
-  root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse);
+  root_window()->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse1);
   EXPECT_TRUE(cursor_client.IsCursorVisible());
 
   // Now activate the window and press on it again.
+  ui::TouchEvent press1(
+      ui::ET_TOUCH_PRESSED, gfx::Point(90, 90), 1, GetTime());
   aura::client::GetActivationClient(
       root_window())->ActivateWindow(window.get());
-  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press1);
   EXPECT_FALSE(cursor_client.IsCursorVisible());
 }
 
 // Tests that tapping a window gives the window focus.
 TEST_F(CompoundEventFilterTest, GestureFocusesWindow) {
   aura::Env::GetInstance()->SetEventFilter(new shared::CompoundEventFilter());
-  aura::client::SetActivationClient(root_window(),
-                                    new TestActivationClient(root_window()));
-  aura::client::SetCaptureClient(
-      root_window(), new shared::RootWindowCaptureClient(root_window()));
   TestWindowDelegate delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(&delegate, 1234,
       gfx::Rect(5, 5, 100, 100), NULL));
@@ -159,10 +160,6 @@ TEST_F(CompoundEventFilterTest, FilterConsumedGesture) {
   scoped_ptr<EventFilter> gesture_filter(new ConsumeGestureEventFilter());
   compound_filter->AddFilter(gesture_filter.get());
   aura::Env::GetInstance()->SetEventFilter(compound_filter);
-  aura::client::SetActivationClient(root_window(),
-                                    new TestActivationClient(root_window()));
-  aura::client::SetCaptureClient(
-      root_window(), new shared::RootWindowCaptureClient(root_window()));
   TestWindowDelegate delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(&delegate, 1234,
       gfx::Rect(5, 5, 100, 100), NULL));

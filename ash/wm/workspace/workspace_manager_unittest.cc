@@ -4,6 +4,7 @@
 
 #include "ash/wm/workspace/workspace_manager.h"
 
+#include "ash/ash_switches.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
@@ -15,6 +16,7 @@
 #include "ash/wm/workspace/workspace.h"
 #include "ash/wm/workspace/workspace_layout_manager.h"
 #include "ash/wm/workspace_controller_test_helper.h"
+#include "base/command_line.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
@@ -27,6 +29,14 @@ using aura::Window;
 
 namespace ash {
 namespace internal {
+
+namespace {
+
+bool GetWindowOverlapsShelf() {
+  return Shell::GetInstance()->shelf()->window_overlaps_shelf();
+}
+
+}  // namespace
 
 class WorkspaceManagerTest : public test::AshTestBase {
  public:
@@ -74,11 +84,12 @@ class WorkspaceManagerTest : public test::AshTestBase {
 
   // Overridden from AshTestBase:
   virtual void SetUp() OVERRIDE {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kAshDisableWorkspace2);
     test::AshTestBase::SetUp();
     WorkspaceControllerTestHelper workspace_helper(
         Shell::TestApi(Shell::GetInstance()).workspace_controller());
     manager_ = workspace_helper.workspace_manager();
-    manager_->set_grid_size(0);
   }
   virtual void TearDown() OVERRIDE {
     manager_ = NULL;
@@ -303,8 +314,6 @@ TEST_F(WorkspaceManagerTest, ChangeBoundsOfNormalWindow) {
 
 // Assertions around grid size.
 TEST_F(WorkspaceManagerTest, SnapToGrid) {
-  manager_->set_grid_size(8);
-
   // Verify snap to grid when bounds are set before parented.
   scoped_ptr<Window> w1(CreateTestWindowUnparented());
   w1->SetBounds(gfx::Rect(1, 6, 25, 30));
@@ -460,12 +469,32 @@ TEST_F(WorkspaceManagerTest, ShelfStateUpdated) {
 
   // Two windows, w1 normal, w2 maximized.
   scoped_ptr<Window> w1(CreateTestWindow());
-  w1->SetBounds(gfx::Rect(0, 1, 101, 102));
-  w1->Show();
-
+  const gfx::Rect w1_bounds(0, 1, 101, 102);
   ShelfLayoutManager* shelf = Shell::GetInstance()->shelf();
+  shelf->SetAutoHideBehavior(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  const gfx::Rect touches_shelf_bounds(
+      0, shelf->GetIdealBounds().y() - 10, 101, 102);
+  // Move |w1| to overlap the shelf.
+  w1->SetBounds(touches_shelf_bounds);
+  EXPECT_FALSE(GetWindowOverlapsShelf());
 
-  EXPECT_EQ(ShelfLayoutManager::VISIBLE, shelf->visibility_state());
+  // A visible ignored window should not trigger the overlap.
+  scoped_ptr<Window> w_ignored(CreateTestWindow());
+  w_ignored->SetBounds(touches_shelf_bounds);
+  SetIgnoredByShelf(&(*w_ignored), true);
+  w_ignored->Show();
+  EXPECT_FALSE(GetWindowOverlapsShelf());
+
+  // Make it visible, since visible shelf overlaps should be true.
+  w1->Show();
+  EXPECT_TRUE(GetWindowOverlapsShelf());
+
+  wm::ActivateWindow(w1.get());
+  w1->SetBounds(w1_bounds);
+  w1->Show();
+  wm::ActivateWindow(w1.get());
+
+  EXPECT_EQ(ShelfLayoutManager::AUTO_HIDE, shelf->visibility_state());
 
   // Maximize the window.
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
@@ -474,7 +503,7 @@ TEST_F(WorkspaceManagerTest, ShelfStateUpdated) {
 
   // Restore.
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
-  EXPECT_EQ(ShelfLayoutManager::VISIBLE, shelf->visibility_state());
+  EXPECT_EQ(ShelfLayoutManager::AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ("0,1 101x102", w1->bounds().ToString());
 
   // Fullscreen.
@@ -483,7 +512,7 @@ TEST_F(WorkspaceManagerTest, ShelfStateUpdated) {
 
   // Normal.
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
-  EXPECT_EQ(ShelfLayoutManager::VISIBLE, shelf->visibility_state());
+  EXPECT_EQ(ShelfLayoutManager::AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ("0,1 101x102", w1->bounds().ToString());
 
   // Maximize again.
@@ -493,11 +522,11 @@ TEST_F(WorkspaceManagerTest, ShelfStateUpdated) {
 
   // Minimize.
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
-  EXPECT_EQ(ShelfLayoutManager::VISIBLE, shelf->visibility_state());
+  EXPECT_EQ(ShelfLayoutManager::AUTO_HIDE, shelf->visibility_state());
 
   // Restore.
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
-  EXPECT_EQ(ShelfLayoutManager::VISIBLE, shelf->visibility_state());
+  EXPECT_EQ(ShelfLayoutManager::AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ("0,1 101x102", w1->bounds().ToString());
 
   // Create another window, maximized.
@@ -511,7 +540,7 @@ TEST_F(WorkspaceManagerTest, ShelfStateUpdated) {
 
   // Switch to w1.
   w1->Show();
-  EXPECT_EQ(ShelfLayoutManager::VISIBLE, shelf->visibility_state());
+  EXPECT_EQ(ShelfLayoutManager::AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ("0,1 101x102", w1->bounds().ToString());
   EXPECT_EQ(ScreenAsh::GetMaximizedWindowBoundsInParent(w2.get()).ToString(),
             w2->bounds().ToString());
@@ -693,6 +722,19 @@ TEST_F(WorkspaceManagerTest, MaximizeDontPersistEndsUpInOwnWorkspace) {
   // And resetting to normal should remove it.
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
   EXPECT_FALSE(manager_->Contains(w1.get()));
+}
+
+// Verifies going from maximized to minimized sets the right state for painting
+// the background of the launcher.
+TEST_F(WorkspaceManagerTest, MinimizeResetsVisibility) {
+  scoped_ptr<Window> w1(CreateTestWindow());
+  w1->Show();
+  wm::ActivateWindow(w1.get());
+  w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
+  EXPECT_EQ(ShelfLayoutManager::VISIBLE,
+            Shell::GetInstance()->shelf()->visibility_state());
+  EXPECT_FALSE(Shell::GetInstance()->launcher()->paints_background());
 }
 
 }  // namespace internal

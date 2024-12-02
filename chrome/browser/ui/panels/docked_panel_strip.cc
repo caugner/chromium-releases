@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/panels/docked_panel_strip.h"
 
+#include <math.h>
+
 #include <algorithm>
 #include <vector>
 
@@ -11,7 +13,6 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -585,6 +586,9 @@ bool DockedPanelStrip::ShouldBringUpTitlebars(int mouse_x, int mouse_y) const {
 }
 
 void DockedPanelStrip::BringUpOrDownTitlebars(bool bring_up) {
+  if (are_titlebars_up_ == bring_up)
+    return;
+
   are_titlebars_up_ = bring_up;
   int task_delay_ms = 0;
 

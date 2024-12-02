@@ -8,12 +8,15 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/cocoa/browser_window_utils.h"
+#import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
+#include "chrome/browser/ui/cocoa/extensions/extension_keybinding_registry_cocoa.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
+#include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#import "ui/base/cocoa/underlay_opengl_hosting_window.h"
 
 @interface NSWindow (NSPrivateApis)
 - (void)setBottomCornerRounded:(BOOL)rounded;
@@ -48,11 +51,38 @@
     shellWindow_->WindowDidResignKey();
 }
 
-@end
+- (void)windowDidResize:(NSNotification*)notification {
+  if (shellWindow_)
+    shellWindow_->WindowDidResize();
+}
 
-@interface ShellNSWindow : UnderlayOpenGLHostingWindow
+- (void)windowDidMove:(NSNotification*)notification {
+  if (shellWindow_)
+    shellWindow_->WindowDidMove();
+}
 
-- (void)drawCustomFrameRect:(NSRect)rect forView:(NSView*)view;
+- (void)gtm_systemRequestsVisibilityForView:(NSView*)view {
+  [[self window] makeKeyAndOrderFront:self];
+}
+
+- (GTMWindowSheetController*)sheetController {
+  if (!sheetController_.get()) {
+    sheetController_.reset([[GTMWindowSheetController alloc]
+        initWithWindow:[self window]
+              delegate:self]);
+  }
+  return sheetController_;
+}
+
+- (void)executeCommand:(int)command {
+  // No-op, swallow the event.
+}
+
+- (BOOL)handledByExtensionCommand:(NSEvent*)event {
+  if (shellWindow_)
+    return shellWindow_->HandledByExtensionCommand(event);
+  return NO;
+}
 
 @end
 
@@ -60,6 +90,12 @@
 // view passed into -[NSWindow drawCustomFrameRect:forView:].
 @interface NSView (PrivateMethods)
 - (CGFloat)roundedCornerRadius;
+@end
+
+@interface ShellNSWindow : ChromeEventProcessingWindow
+
+- (void)drawCustomFrameRect:(NSRect)rect forView:(NSView*)view;
+
 @end
 
 @implementation ShellNSWindow
@@ -82,6 +118,32 @@
 
 @end
 
+@interface ShellFramelessNSWindow : ShellNSWindow
+
+@end
+
+@implementation ShellFramelessNSWindow
+
++ (NSRect)frameRectForContentRect:(NSRect)contentRect
+                        styleMask:(NSUInteger)mask {
+  return contentRect;
+}
+
++ (NSRect)contentRectForFrameRect:(NSRect)frameRect
+                        styleMask:(NSUInteger)mask {
+  return frameRect;
+}
+
+- (NSRect)frameRectForContentRect:(NSRect)contentRect {
+  return contentRect;
+}
+
+- (NSRect)contentRectForFrameRect:(NSRect)frameRect {
+  return frameRect;
+}
+
+@end
+
 @interface ControlRegionView : NSView
 @end
 @implementation ControlRegionView
@@ -97,11 +159,9 @@
 - (void)setMouseDownCanMoveWindow:(BOOL)can_move;
 @end
 
-ShellWindowCocoa::ShellWindowCocoa(Profile* profile,
-                                   const extensions::Extension* extension,
-                                   const GURL& url,
+ShellWindowCocoa::ShellWindowCocoa(ShellWindow* shell_window,
                                    const ShellWindow::CreateParams& params)
-    : ShellWindow(profile, extension, url),
+    : shell_window_(shell_window),
       has_frame_(params.frame == ShellWindow::CreateParams::FRAME_CHROME),
       attention_request_id_(0) {
   // Flip coordinates based on the primary screen.
@@ -109,15 +169,35 @@ ShellWindowCocoa::ShellWindowCocoa(Profile* profile,
   NSRect cocoa_bounds = NSMakeRect(params.bounds.x(),
       NSHeight(main_screen_rect) - params.bounds.y() - params.bounds.height(),
       params.bounds.width(), params.bounds.height());
+
+  // If coordinates are < 0, center window on primary screen
+  if (params.bounds.x() < 0) {
+    cocoa_bounds.origin.x =
+        (NSWidth(main_screen_rect) - NSWidth(cocoa_bounds)) / 2;
+  }
+  if (params.bounds.y() < 0) {
+    cocoa_bounds.origin.y =
+        (NSHeight(main_screen_rect) - NSHeight(cocoa_bounds)) / 2;
+  }
+
   NSUInteger style_mask = NSTitledWindowMask | NSClosableWindowMask |
                           NSMiniaturizableWindowMask | NSResizableWindowMask |
                           NSTexturedBackgroundWindowMask;
-  scoped_nsobject<NSWindow> window([[ShellNSWindow alloc]
-      initWithContentRect:cocoa_bounds
-                styleMask:style_mask
-                  backing:NSBackingStoreBuffered
-                    defer:NO]);
-  [window setTitle:base::SysUTF8ToNSString(extension->name())];
+  scoped_nsobject<NSWindow> window;
+  if (has_frame_) {
+    window.reset([[ShellNSWindow alloc]
+        initWithContentRect:cocoa_bounds
+                  styleMask:style_mask
+                    backing:NSBackingStoreBuffered
+                      defer:NO]);
+  } else {
+    window.reset([[ShellFramelessNSWindow alloc]
+        initWithContentRect:cocoa_bounds
+                  styleMask:style_mask
+                    backing:NSBackingStoreBuffered
+                      defer:NO]);
+  }
+  [window setTitle:base::SysUTF8ToNSString(extension()->name())];
   gfx::Size min_size = params.minimum_size;
   if (min_size.width() || min_size.height()) {
     [window setContentMinSize:NSMakeSize(min_size.width(), min_size.height())];
@@ -129,7 +209,7 @@ ShellWindowCocoa::ShellWindowCocoa(Profile* profile,
     [window setContentMaxSize:NSMakeSize(max_width, max_height)];
   }
 
-  if (base::mac::IsOSSnowLeopardOrEarlier() &&
+  if (base::mac::IsOSSnowLeopard() &&
       [window respondsToSelector:@selector(setBottomCornerRounded:)])
     [window setBottomCornerRounded:NO];
 
@@ -139,22 +219,14 @@ ShellWindowCocoa::ShellWindowCocoa(Profile* profile,
   NSView* view = web_contents()->GetView()->GetNativeView();
   [view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
-  if (!has_frame_) {
-    // TODO(jeremya): this is a temporary hack to allow moving the window while
-    // we still don't have proper draggable region support.
-    NSView* controlRegion = [[ControlRegionView alloc] init];
-    [controlRegion setFrame:NSMakeRect(0, 0, NSWidth([view bounds]),
-                                       NSHeight([view bounds]) - 20)];
-    [controlRegion setAutoresizingMask:
-        NSViewWidthSizable | NSViewHeightSizable];
-    [view addSubview:controlRegion];
-    [controlRegion release];
-  }
-
   InstallView();
 
   [[window_controller_ window] setDelegate:window_controller_];
   [window_controller_ setShellWindow:this];
+
+  extension_keybinding_registry_.reset(
+      new ExtensionKeybindingRegistryCocoa(shell_window_->profile(), window,
+          extensions::ExtensionKeybindingRegistry::PLATFORM_APPS_ONLY));
 }
 
 void ShellWindowCocoa::InstallView() {
@@ -176,6 +248,8 @@ void ShellWindowCocoa::InstallView() {
     [[window() standardWindowButton:NSWindowZoomButton] setHidden:YES];
     [[window() standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
     [[window() standardWindowButton:NSWindowCloseButton] setHidden:YES];
+
+    InstallDraggableRegionViews();
   }
 }
 
@@ -210,7 +284,7 @@ void ShellWindowCocoa::SetFullscreen(bool fullscreen) {
     return;
   }
 
-  DCHECK(base::mac::IsOSSnowLeopardOrEarlier());
+  DCHECK(base::mac::IsOSSnowLeopard());
 
   // Fade to black.
   const CGDisplayReservationInterval kFadeDurationSeconds = 0.6;
@@ -339,8 +413,66 @@ void ShellWindowCocoa::SetBounds(const gfx::Rect& bounds) {
   [window() setFrame:cocoa_bounds display:YES];
 }
 
-void ShellWindowCocoa::SetDraggableRegion(SkRegion* region) {
-  // TODO: implement
+void ShellWindowCocoa::UpdateWindowIcon() {
+  // TODO(junmin): implement.
+}
+
+void ShellWindowCocoa::UpdateWindowTitle() {
+  string16 title = shell_window_->GetTitle();
+  [window() setTitle:base::SysUTF16ToNSString(title)];
+}
+
+void ShellWindowCocoa::UpdateDraggableRegions(
+    const std::vector<extensions::DraggableRegion>& regions) {
+  // Draggable region is not supported for non-frameless window.
+  if (has_frame_)
+    return;
+
+  draggable_regions_ = regions;
+  InstallDraggableRegionViews();
+}
+
+void ShellWindowCocoa::HandleKeyboardEvent(
+    const content::NativeWebKeyboardEvent& event) {
+  if (event.skip_in_browser ||
+      event.type == content::NativeWebKeyboardEvent::Char) {
+    return;
+  }
+  [window() redispatchKeyEvent:event.os_event];
+}
+
+void ShellWindowCocoa::InstallDraggableRegionViews() {
+  DCHECK(!has_frame_);
+
+  // All ControlRegionViews should be added as children of the WebContentsView,
+  // because WebContentsView will be removed and re-added when entering and
+  // leaving fullscreen mode.
+  NSView* webView = web_contents()->GetView()->GetNativeView();
+  NSInteger webViewHeight = NSHeight([webView bounds]);
+
+  // Remove all ControlRegionViews that are added last time.
+  // Note that [webView subviews] returns the view's mutable internal array and
+  // it should be copied to avoid mutating the original array while enumerating
+  // it.
+  scoped_nsobject<NSArray> subviews([[webView subviews] copy]);
+  for (NSView* subview in subviews.get())
+    if ([subview isKindOfClass:[ControlRegionView class]])
+      [subview removeFromSuperview];
+
+  // Create and add ControlRegionView for each region that needs to be excluded
+  // from the dragging.
+  for (std::vector<extensions::DraggableRegion>::const_iterator iter =
+           draggable_regions_.begin();
+       iter != draggable_regions_.end();
+       ++iter) {
+    const extensions::DraggableRegion& region = *iter;
+    scoped_nsobject<NSView> controlRegion([[ControlRegionView alloc] init]);
+    [controlRegion setFrame:NSMakeRect(region.bounds.x(),
+                                       webViewHeight - region.bounds.bottom(),
+                                       region.bounds.width(),
+                                       region.bounds.height())];
+    [webView addSubview:controlRegion];
+  }
 }
 
 void ShellWindowCocoa::FlashFrame(bool flash) {
@@ -358,7 +490,8 @@ bool ShellWindowCocoa::IsAlwaysOnTop() const {
 
 void ShellWindowCocoa::WindowWillClose() {
   [window_controller_ setShellWindow:NULL];
-  OnNativeClose();
+  shell_window_->SaveWindowPosition();
+  shell_window_->OnNativeClose();
 }
 
 void ShellWindowCocoa::WindowDidBecomeKey() {
@@ -382,17 +515,30 @@ void ShellWindowCocoa::WindowDidResignKey() {
     rwhv->SetActive(false);
 }
 
+void ShellWindowCocoa::WindowDidResize() {
+  shell_window_->SaveWindowPosition();
+}
+
+void ShellWindowCocoa::WindowDidMove() {
+  shell_window_->SaveWindowPosition();
+}
+
+bool ShellWindowCocoa::HandledByExtensionCommand(NSEvent* event) {
+  return extension_keybinding_registry_->ProcessKeyEvent(
+      content::NativeWebKeyboardEvent(event));
+}
+
 ShellWindowCocoa::~ShellWindowCocoa() {
 }
 
-NSWindow* ShellWindowCocoa::window() const {
-  return [window_controller_ window];
+ShellNSWindow* ShellWindowCocoa::window() const {
+  NSWindow* window = [window_controller_ window];
+  CHECK(!window || [window isKindOfClass:[ShellNSWindow class]]);
+  return static_cast<ShellNSWindow*>(window);
 }
 
 // static
-ShellWindow* ShellWindow::CreateImpl(Profile* profile,
-                                     const extensions::Extension* extension,
-                                     const GURL& url,
-                                     const ShellWindow::CreateParams& params) {
-  return new ShellWindowCocoa(profile, extension, url, params);
+NativeShellWindow* NativeShellWindow::Create(
+    ShellWindow* shell_window, const ShellWindow::CreateParams& params) {
+  return new ShellWindowCocoa(shell_window, params);
 }

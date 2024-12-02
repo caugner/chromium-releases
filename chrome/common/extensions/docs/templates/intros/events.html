@@ -65,7 +65,8 @@ var rule = {
 <p>In addition to conditions and actions you may give each rule an identifier,
 which simplifies unregistering previously registered rules, and a priority to
 define precedences among rules. Priorities are only considered if rules conflict
-each other or need to be executed in a specific order.</p>
+each other or need to be executed in a specific order. Actions are executed in
+decendending order of the priority of their rules.</p>
 
 <pre>
 var rule = {
@@ -80,7 +81,7 @@ var rule = {
 
 <p>
 <a href="events.html">Event objects</a> may support rules. These event objects
-don't call a callback function when events happer but test whether any
+don't call a callback function when events happen but test whether any
 registered rule has at least one fulfilled condition and execute the actions
 associated with this rule. Event objects supporting the declarative API have
 three relevant methods: <a href="#method-addRules"><code>addRules()</code></a>,
@@ -112,6 +113,15 @@ rules are added and the <a
 the callback function is called. Each rule in <code>rule_list</code> must
 contain a unique identifier that is not currently used by another rule or an
 empty identifier.
+</p>
+
+<p class="note">
+<strong>Note:</strong> Rules are persistent across browsing sessions. Therefore,
+you should install rules during extension installation time using the
+<code><a href="runtime.html#event-onInstalled">chrome.runtime.onInstalled</a></code>
+event. Note that this event is also triggered when an extension is updated.
+Therefore, you should first clear previously installed rules and then register
+new rules.
 </p>
 
 <h3 id="removingrules">Removing rules</h3>
@@ -154,5 +164,49 @@ function getRules(rule_ids, function callback(details) {...});
 The <code>details</code> parameter passed to the <code>calback()</code> function
 refers to an array of rules including filled optional parameters.
 </p>
+</div>
+{{/is_apps}}
+
+{{^is_apps}}
+<div class="doc-family extensions">
+<h2 id="filtered">Filtered events</h2>
+
+<p>Filtered events are a mechanism that allows listeners to specify a subset of
+events that they are interested in. A listener that makes use of a filter won't
+be invoked for events that don't pass the filter, which makes the listening
+code more declarative and efficient - an <a href="event_pages.html">event
+  page</a> page need not be woken up to handle events it doesn't care
+about.</p>
+
+<p>Filtered events are intended to allow a transition from manual filtering
+code like this:</p>
+
+<pre>
+chrome.webNavigation.onCommitted.addListener(function(e) {
+  if (hasHostSuffix(e.url, 'google.com') ||
+      hasHostSuffix(e.url, 'google.com.au')) {
+    // ...
+  }
+});
+</pre>
+
+<p>into this:</p>
+
+<pre>
+chrome.webNavigation.onCommitted.addListener(function(e) {
+  // ...
+}, {url: [{hostSuffix: 'google.com'},
+          {hostSuffix: 'google.com.au'}]});
+</pre>
+
+<p>Events support specific filters that are meaningful to that event. The list
+of filters that an event supports will be listed in the documentation for that
+event in the "filters" section.</p>
+
+<p>When matching URLs (as in the example above), event filters support the same
+URL matching capabilities as expressable with a <a
+  href="events.html#type-UrlFilter">UrlFilter</a>, except for scheme and port
+matching.</p>
+
 </div>
 {{/is_apps}}

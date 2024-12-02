@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -42,7 +41,7 @@ ExtensionContextMenuModel::ExtensionContextMenuModel(
 
   if (profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode) &&
       delegate_) {
-    AddSeparator();
+    AddSeparator(ui::NORMAL_SEPARATOR);
     AddItemWithStringId(INSPECT_POPUP, IDS_EXTENSION_ACTION_INSPECT_POPUP);
   }
 }
@@ -74,11 +73,11 @@ bool ExtensionContextMenuModel::IsCommandIdEnabled(int command_id) const {
     // homepage, we just disable this menu item.
     return extension->GetHomepageURL().is_valid();
   } else if (command_id == INSPECT_POPUP) {
-    TabContents* tab_contents = chrome::GetActiveTabContents(browser_);
-    if (!tab_contents)
+    WebContents* web_contents = chrome::GetActiveWebContents(browser_);
+    if (!web_contents)
       return false;
 
-    return extension_action_->HasPopup(SessionID::IdForTab(tab_contents));
+    return extension_action_->HasPopup(SessionID::IdForTab(web_contents));
   } else if (command_id == DISABLE || command_id == UNINSTALL) {
     // Some extension types can not be disabled or uninstalled.
     return extensions::ExtensionSystem::Get(
@@ -165,13 +164,13 @@ void ExtensionContextMenuModel::InitMenu(const Extension* extension) {
     extension_action_ = extension->page_action();
 
   AddItem(NAME, UTF8ToUTF16(extension->name()));
-  AddSeparator();
+  AddSeparator(ui::NORMAL_SEPARATOR);
   AddItemWithStringId(CONFIGURE, IDS_EXTENSIONS_OPTIONS_MENU_ITEM);
   AddItemWithStringId(DISABLE, IDS_EXTENSIONS_DISABLE);
   AddItem(UNINSTALL, l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
   if (extension->browser_action())
     AddItemWithStringId(HIDE, IDS_EXTENSIONS_HIDE_BUTTON);
-  AddSeparator();
+  AddSeparator(ui::NORMAL_SEPARATOR);
   AddItemWithStringId(MANAGE, IDS_MANAGE_EXTENSIONS);
 }
 

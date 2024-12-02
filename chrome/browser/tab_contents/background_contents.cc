@@ -5,7 +5,7 @@
 #include "chrome/browser/tab_contents/background_contents.h"
 
 #include "chrome/browser/background/background_contents_service.h"
-#include "chrome/browser/extensions/message_service.h"
+#include "chrome/browser/extensions/api/messaging/message_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
@@ -31,7 +31,7 @@ BackgroundContents::BackgroundContents(SiteInstance* site_instance,
 
   // TODO(rafaelw): Implement correct session storage.
   web_contents_.reset(WebContents::Create(
-      profile_, site_instance, routing_id, NULL, NULL));
+      profile_, site_instance, routing_id, NULL));
   chrome::SetViewType(
       web_contents_.get(), chrome::VIEW_TYPE_BACKGROUND_CONTENTS);
   web_contents_->SetDelegate(this);
@@ -98,9 +98,10 @@ void BackgroundContents::AddNewContents(WebContents* source,
                                         WebContents* new_contents,
                                         WindowOpenDisposition disposition,
                                         const gfx::Rect& initial_pos,
-                                        bool user_gesture) {
+                                        bool user_gesture,
+                                        bool* was_blocked) {
   delegate_->AddWebContents(
-      new_contents, disposition, initial_pos, user_gesture);
+      new_contents, disposition, initial_pos, user_gesture, was_blocked);
 }
 
 void BackgroundContents::RenderViewGone(base::TerminationStatus status) {

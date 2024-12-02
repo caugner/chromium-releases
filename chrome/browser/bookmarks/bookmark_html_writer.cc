@@ -20,6 +20,7 @@
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -30,6 +31,7 @@
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/favicon_size.h"
 
 using content::BrowserThread;
 
@@ -457,10 +459,12 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
     // Filter out urls that we've already got favicon for.
     URLFaviconMap::const_iterator iter = favicons_map_->find(url);
     if (favicons_map_->end() == iter) {
-      FaviconService* favicon_service =
-          profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
-      favicon_service->GetFaviconForURL(GURL(url), history::FAVICON,
-          &favicon_consumer_,
+      FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+          profile_, Profile::EXPLICIT_ACCESS);
+      favicon_service->GetRawFaviconForURL(
+          FaviconService::FaviconForURLParams(profile_, GURL(url),
+              history::FAVICON, gfx::kFaviconSize, &favicon_consumer_),
+          ui::SCALE_FACTOR_100P,
           base::Bind(&BookmarkFaviconFetcher::OnFaviconDataAvailable,
                      base::Unretained(this)));
       return true;
@@ -473,14 +477,15 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
 
 void BookmarkFaviconFetcher::OnFaviconDataAvailable(
     FaviconService::Handle handle,
-    history::FaviconData favicon) {
+    const history::FaviconBitmapResult& bitmap_result) {
   GURL url;
   if (!bookmark_urls_.empty()) {
     url = GURL(bookmark_urls_.front());
     bookmark_urls_.pop_front();
   }
-  if (favicon.is_valid() && !url.is_empty()) {
-    favicons_map_->insert(make_pair(url.spec(), favicon.image_data));
+  if (bitmap_result.is_valid() && !url.is_empty()) {
+    favicons_map_->insert(
+        make_pair(url.spec(), bitmap_result.bitmap_data));
   }
 
   if (FetchNextFavicon()) {

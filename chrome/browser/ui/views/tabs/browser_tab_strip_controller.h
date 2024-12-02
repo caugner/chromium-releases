@@ -7,7 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
 #include "chrome/browser/ui/search/toolbar_search_animator_observer.h"
 #include "chrome/browser/ui/tabs/hover_tab_selector.h"
@@ -61,7 +61,7 @@ class BrowserTabStripController
   virtual void ExtendSelectionTo(int model_index) OVERRIDE;
   virtual void ToggleSelected(int model_index) OVERRIDE;
   virtual void AddSelectionFromAnchorTo(int model_index) OVERRIDE;
-  virtual void CloseTab(int model_index) OVERRIDE;
+  virtual void CloseTab(int model_index, CloseTabSource source) OVERRIDE;
   virtual void ShowContextMenuForTab(BaseTab* tab,
                                      const gfx::Point& p) OVERRIDE;
   virtual void UpdateLoadingAnimations() OVERRIDE;
@@ -103,12 +103,14 @@ class BrowserTabStripController
                                       int model_index) OVERRIDE;
 
   // chrome::search::SearchModelObserver implementation:
-  virtual void ModeChanged(const chrome::search::Mode& mode) OVERRIDE;
+  virtual void ModeChanged(const chrome::search::Mode& old_mode,
+                           const chrome::search::Mode& new_mode) OVERRIDE;
 
   // chrome::search::ToolbarSearchAnimatorObserver implementation:
   virtual void OnToolbarBackgroundAnimatorProgressed() OVERRIDE;
   virtual void OnToolbarBackgroundAnimatorCanceled(
       TabContents* tab_contents) OVERRIDE;
+  virtual void OnToolbarSeparatorChanged() OVERRIDE {}
 
   // content::NotificationObserver implementation:
   virtual void Observe(int type,

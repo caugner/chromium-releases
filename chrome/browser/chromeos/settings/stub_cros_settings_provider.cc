@@ -30,6 +30,7 @@ const char* kHandledSettings[] = {
   kSettingProxyEverywhere,
   kSignedDataRoamingEnabled,
   kStatsReportingPref,
+  kSystemTimezonePolicy,
   // Kiosk mode settings.
   kIdleLogoutTimeout,
   kIdleLogoutWarningDuration,
@@ -71,9 +72,6 @@ CrosSettingsProvider::TrustedStatus
 bool StubCrosSettingsProvider::HandlesSetting(const std::string& path) const {
   const char** end = kHandledSettings + arraysize(kHandledSettings);
   return std::find(kHandledSettings, end, path) != end;
-}
-
-void StubCrosSettingsProvider::Reload() {
 }
 
 void StubCrosSettingsProvider::DoSet(const std::string& path,

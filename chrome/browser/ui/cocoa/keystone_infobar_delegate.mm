@@ -12,12 +12,12 @@
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
@@ -39,7 +39,7 @@ namespace {
 
 class KeystonePromotionInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  KeystonePromotionInfoBarDelegate(InfoBarTabHelper* infobar_helper,
+  KeystonePromotionInfoBarDelegate(InfoBarService* infobar_service,
                                    PrefService* prefs);
 
  private:
@@ -71,9 +71,9 @@ class KeystonePromotionInfoBarDelegate : public ConfirmInfoBarDelegate {
 };
 
 KeystonePromotionInfoBarDelegate::KeystonePromotionInfoBarDelegate(
-    InfoBarTabHelper* infobar_helper,
+    InfoBarService* infobar_service,
     PrefService* prefs)
-    : ConfirmInfoBarDelegate(infobar_helper),
+    : ConfirmInfoBarDelegate(infobar_service),
       prefs_(prefs),
       can_expire_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
@@ -198,7 +198,7 @@ bool KeystonePromotionInfoBarDelegate::ShouldExpireInternal(
       // default browser info bar works.
       if (tabContents) {
         InfoBarTabHelper* infobar_helper = tabContents->infobar_tab_helper();
-        if (infobar_helper->infobar_count() == 0) {
+        if (infobar_helper->GetInfoBarCount() == 0) {
           infobar_helper->AddInfoBar(
               new KeystonePromotionInfoBarDelegate(
                   infobar_helper,

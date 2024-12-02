@@ -12,7 +12,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/infobars/infobar_delegate.h"
+#include "chrome/browser/api/infobars/infobar_delegate.h"
 #include "chrome/browser/ui/views/infobars/infobar_background.h"
 #include "chrome/browser/ui/views/infobars/infobar_button_border.h"
 #include "grit/generated_resources.h"
@@ -61,7 +61,9 @@ InfoBarView::InfoBarView(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
       icon_(NULL),
       close_button_(NULL) {
   set_owned_by_client();  // InfoBar deletes itself at the appropriate time.
-  set_background(new InfoBarBackground(delegate->GetInfoBarType()));
+  set_background(new InfoBarBackground(
+      GetInfoBarTopColor(delegate->GetInfoBarType()),
+      GetInfoBarBottomColor(delegate->GetInfoBarType())));
 }
 
 InfoBarView::~InfoBarView() {
@@ -241,6 +243,15 @@ void InfoBarView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     RemoveChildView(close_button_);
     AddChildView(close_button_);
   }
+
+  // Ensure the infobar is tall enough to display its contents.
+  const int kMinimumVerticalPadding = 6;
+  int height = kDefaultBarTargetHeight;
+  for (int i = 0; i < child_count(); ++i) {
+    const int child_height = child_at(i)->GetPreferredSize().height();
+    height = std::max(height, child_height + kMinimumVerticalPadding);
+  }
+  SetBarTargetHeight(height);
 }
 
 void InfoBarView::PaintChildren(gfx::Canvas* canvas) {
@@ -259,7 +270,7 @@ void InfoBarView::PaintChildren(gfx::Canvas* canvas) {
 }
 
 void InfoBarView::ButtonPressed(views::Button* sender,
-                                const views::Event& event) {
+                                const ui::Event& event) {
   if (!owned())
     return;  // We're closing; don't call anything, it might access the owner.
   if (sender == close_button_) {

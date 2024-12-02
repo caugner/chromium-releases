@@ -12,7 +12,6 @@
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/activation_delegate.h"
 #include "ui/aura/env.h"
-#include "ui/aura/event.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/shared/compound_event_filter.h"
@@ -23,6 +22,7 @@
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/base/events/event.h"
 #include "ui/base/hit_test.h"
 #include "ui/gfx/screen.h"
 
@@ -116,14 +116,14 @@ TEST_F(WindowManagerTest, Focus) {
   EXPECT_EQ(w121.get(), focus_manager->GetFocusedWindow());
 
   // The key press should be sent to the focused sub-window.
-  aura::KeyEvent keyev(ui::ET_KEY_PRESSED, ui::VKEY_E, 0);
+  ui::KeyEvent keyev(ui::ET_KEY_PRESSED, ui::VKEY_E, 0);
   root_window->AsRootWindowHostDelegate()->OnHostKeyEvent(&keyev);
   EXPECT_EQ(ui::VKEY_E, w121delegate->last_key_code());
 
   // Touch on a sub-window (w122) to focus it.
   gfx::Point click_point = w122->bounds().CenterPoint();
-  aura::Window::ConvertPointToWindow(w122->parent(), root_window, &click_point);
-  aura::TouchEvent touchev(ui::ET_TOUCH_PRESSED, click_point, 0, getTime());
+  aura::Window::ConvertPointToTarget(w122->parent(), root_window, &click_point);
+  ui::TouchEvent touchev(ui::ET_TOUCH_PRESSED, click_point, 0, getTime());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&touchev);
   focus_manager = w122->GetFocusManager();
   EXPECT_EQ(w122.get(), focus_manager->GetFocusedWindow());
@@ -150,11 +150,10 @@ TEST_F(WindowManagerTest, Focus) {
   EXPECT_EQ(w12.get(), w12->GetFocusManager()->GetFocusedWindow());
 
   // Set the focus to w123, but make the w1 not activatable.
-  test::TestActivationDelegate *activation_delegate = new
-      test::TestActivationDelegate(false);
+  test::TestActivationDelegate activation_delegate(false);
   w123->Focus();
   EXPECT_EQ(w123.get(), w12->GetFocusManager()->GetFocusedWindow());
-  aura::client::SetActivationDelegate(w1.get(), activation_delegate);
+  aura::client::SetActivationDelegate(w1.get(), &activation_delegate);
 
   // Hiding the focused window will set the focus to NULL because
   // parent window is not focusable.
@@ -168,7 +167,7 @@ TEST_F(WindowManagerTest, Focus) {
   w123->Show();
   w123->Focus();
   EXPECT_EQ(w123.get(), w12->GetFocusManager()->GetFocusedWindow());
-  aura::client::SetActivationDelegate(w1.get(), activation_delegate);
+  aura::client::SetActivationDelegate(w1.get(), &activation_delegate);
 
   // Removing the focused window will set the focus to NULL because
   // parent window is not focusable.
@@ -263,7 +262,7 @@ TEST_F(WindowManagerTest, ActivateOnMouse) {
 
     // Then click the parent active window. The focus shouldn't move.
     gfx::Point left_top = w1->bounds().origin();
-    aura::Window::ConvertPointToWindow(w1->parent(), root_window, &left_top);
+    aura::Window::ConvertPointToTarget(w1->parent(), root_window, &left_top);
     left_top.Offset(1, 1);
     generator.MoveMouseTo(left_top);
     generator.ClickLeftButton();
@@ -322,8 +321,8 @@ TEST_F(WindowManagerTest, ActivateOnTouch) {
 
   // Touch window2.
   gfx::Point press_point = w2->bounds().CenterPoint();
-  aura::Window::ConvertPointToWindow(w2->parent(), root_window, &press_point);
-  aura::TouchEvent touchev1(ui::ET_TOUCH_PRESSED, press_point, 0, getTime());
+  aura::Window::ConvertPointToTarget(w2->parent(), root_window, &press_point);
+  ui::TouchEvent touchev1(ui::ET_TOUCH_PRESSED, press_point, 0, getTime());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&touchev1);
 
   // Window2 should have become active.
@@ -338,9 +337,9 @@ TEST_F(WindowManagerTest, ActivateOnTouch) {
 
   // Touch window1, but set it up so w1 doesn't activate on touch.
   press_point = w1->bounds().CenterPoint();
-  aura::Window::ConvertPointToWindow(w1->parent(), root_window, &press_point);
+  aura::Window::ConvertPointToTarget(w1->parent(), root_window, &press_point);
   d1.set_activate(false);
-  aura::TouchEvent touchev2(ui::ET_TOUCH_PRESSED, press_point, 1, getTime());
+  ui::TouchEvent touchev2(ui::ET_TOUCH_PRESSED, press_point, 1, getTime());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&touchev2);
 
   // Window2 should still be active and focused.
@@ -366,9 +365,6 @@ TEST_F(WindowManagerTest, ActivateOnTouch) {
 
 TEST_F(WindowManagerTest, MouseEventCursors) {
   aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
-  // Disable ash grid so that test can place a window at
-  // specific location.
-  ash::Shell::GetInstance()->DisableWorkspaceGridLayout();
 
   // Create a window.
   const int kWindowLeft = 123;
@@ -382,57 +378,82 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   // Create two mouse movement events we can switch between.
   gfx::Point point1(kWindowLeft, kWindowTop);
-  aura::Window::ConvertPointToWindow(window->parent(), root_window, &point1);
-  aura::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0x0);
+  aura::Window::ConvertPointToTarget(window->parent(), root_window, &point1);
 
   gfx::Point point2(kWindowLeft + 1, kWindowTop + 1);
-  aura::Window::ConvertPointToWindow(window->parent(), root_window, &point2);
-  aura::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0x0);
+  aura::Window::ConvertPointToTarget(window->parent(), root_window, &point2);
 
   // Cursor starts as a pointer (set during Shell::Init()).
   EXPECT_EQ(ui::kCursorPointer, root_window->last_cursor().native_type());
 
-  // Resize edges and corners show proper cursors.
-  window_delegate.set_hittest_code(HTBOTTOM);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
-  EXPECT_EQ(ui::kCursorSouthResize, root_window->last_cursor().native_type());
+  {
+    // Resize edges and corners show proper cursors.
+    window_delegate.set_hittest_code(HTBOTTOM);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
+    EXPECT_EQ(ui::kCursorSouthResize, root_window->last_cursor().native_type());
+  }
 
-  window_delegate.set_hittest_code(HTBOTTOMLEFT);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move2);
-  EXPECT_EQ(ui::kCursorSouthWestResize,
-      root_window->last_cursor().native_type());
+  {
+    window_delegate.set_hittest_code(HTBOTTOMLEFT);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move2);
+    EXPECT_EQ(ui::kCursorSouthWestResize,
+              root_window->last_cursor().native_type());
+  }
 
-  window_delegate.set_hittest_code(HTBOTTOMRIGHT);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
-  EXPECT_EQ(ui::kCursorSouthEastResize,
-      root_window->last_cursor().native_type());
+  {
+    window_delegate.set_hittest_code(HTBOTTOMRIGHT);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
+    EXPECT_EQ(ui::kCursorSouthEastResize,
+              root_window->last_cursor().native_type());
+  }
 
-  window_delegate.set_hittest_code(HTLEFT);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move2);
-  EXPECT_EQ(ui::kCursorWestResize, root_window->last_cursor().native_type());
+  {
+    window_delegate.set_hittest_code(HTLEFT);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move2);
+    EXPECT_EQ(ui::kCursorWestResize, root_window->last_cursor().native_type());
+  }
 
-  window_delegate.set_hittest_code(HTRIGHT);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
-  EXPECT_EQ(ui::kCursorEastResize, root_window->last_cursor().native_type());
+  {
+    window_delegate.set_hittest_code(HTRIGHT);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
+    EXPECT_EQ(ui::kCursorEastResize, root_window->last_cursor().native_type());
+  }
 
-  window_delegate.set_hittest_code(HTTOP);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move2);
-  EXPECT_EQ(ui::kCursorNorthResize, root_window->last_cursor().native_type());
+  {
+    window_delegate.set_hittest_code(HTTOP);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move2);
+    EXPECT_EQ(ui::kCursorNorthResize, root_window->last_cursor().native_type());
+  }
 
-  window_delegate.set_hittest_code(HTTOPLEFT);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
-  EXPECT_EQ(ui::kCursorNorthWestResize,
-      root_window->last_cursor().native_type());
+  {
+    window_delegate.set_hittest_code(HTTOPLEFT);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
+    EXPECT_EQ(ui::kCursorNorthWestResize,
+              root_window->last_cursor().native_type());
+  }
 
-  window_delegate.set_hittest_code(HTTOPRIGHT);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move2);
-  EXPECT_EQ(ui::kCursorNorthEastResize,
-      root_window->last_cursor().native_type());
+  {
+    window_delegate.set_hittest_code(HTTOPRIGHT);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move2);
+    EXPECT_EQ(ui::kCursorNorthEastResize,
+              root_window->last_cursor().native_type());
+  }
 
-  // Client area uses null cursor.
-  window_delegate.set_hittest_code(HTCLIENT);
-  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
-  EXPECT_EQ(ui::kCursorNull, root_window->last_cursor().native_type());
+  {
+    // Client area uses null cursor.
+    window_delegate.set_hittest_code(HTCLIENT);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0x0);
+    root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&move1);
+    EXPECT_EQ(ui::kCursorNull, root_window->last_cursor().native_type());
+  }
 }
 
 #if defined(OS_MACOSX)
@@ -441,10 +462,6 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 #define MAYBE_TransformActivate TransformActivate
 #endif
 TEST_F(WindowManagerTest, MAYBE_TransformActivate) {
-  // Disable ash grid so that test can place a window at
-  // specific location.
-  ash::Shell::GetInstance()->DisableWorkspaceGridLayout();
-
   aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
   gfx::Size size = root_window->bounds().size();
   EXPECT_EQ(
@@ -466,24 +483,24 @@ TEST_F(WindowManagerTest, MAYBE_TransformActivate) {
 
   gfx::Point miss_point(5, 5);
   transform.TransformPoint(miss_point);
-  aura::MouseEvent mouseev1(ui::ET_MOUSE_PRESSED,
-                            miss_point,
-                            miss_point,
-                            ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseEvent mouseev1(ui::ET_MOUSE_PRESSED,
+                          miss_point,
+                          miss_point,
+                          ui::EF_LEFT_MOUSE_BUTTON);
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouseev1);
   EXPECT_FALSE(w1->GetFocusManager()->GetFocusedWindow());
-  aura::MouseEvent mouseup(ui::ET_MOUSE_RELEASED,
-                           miss_point,
-                           miss_point,
-                           ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseEvent mouseup(ui::ET_MOUSE_RELEASED,
+                         miss_point,
+                         miss_point,
+                         ui::EF_LEFT_MOUSE_BUTTON);
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouseup);
 
   gfx::Point hit_point(5, 15);
   transform.TransformPoint(hit_point);
-  aura::MouseEvent mouseev2(ui::ET_MOUSE_PRESSED,
-                            hit_point,
-                            hit_point,
-                            ui::EF_LEFT_MOUSE_BUTTON);
+  ui::MouseEvent mouseev2(ui::ET_MOUSE_PRESSED,
+                          hit_point,
+                          hit_point,
+                          ui::EF_LEFT_MOUSE_BUTTON);
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouseev2);
   EXPECT_TRUE(wm::IsActiveWindow(w1.get()));
   EXPECT_EQ(w1.get(), w1->GetFocusManager()->GetFocusedWindow());
@@ -514,9 +531,9 @@ TEST_F(WindowManagerTest, AdditionalFilters) {
   env_filter->AddFilter(f2.get());
 
   // Dispatches mouse and keyboard events.
-  aura::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_A, 0);
+  ui::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_A, 0);
   root_window->AsRootWindowHostDelegate()->OnHostKeyEvent(&key_event);
-  aura::MouseEvent mouse_pressed(
+  ui::MouseEvent mouse_pressed(
       ui::ET_MOUSE_PRESSED, gfx::Point(0, 0), gfx::Point(0, 0), 0x0);
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse_pressed);
 
@@ -530,12 +547,12 @@ TEST_F(WindowManagerTest, AdditionalFilters) {
   f2->ResetCounts();
 
   // Makes f1 consume events.
-  f1->set_consumes_key_events(true);
-  f1->set_consumes_mouse_events(true);
+  f1->set_key_event_handling_result(ui::ER_CONSUMED);
+  f1->set_mouse_event_handling_result(ui::ER_CONSUMED);
 
   // Dispatches events.
   root_window->AsRootWindowHostDelegate()->OnHostKeyEvent(&key_event);
-  aura::MouseEvent mouse_released(
+  ui::MouseEvent mouse_released(
       ui::ET_MOUSE_RELEASED, gfx::Point(0, 0), gfx::Point(0, 0), 0x0);
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse_released);
 
@@ -572,19 +589,16 @@ TEST_F(WindowManagerTest, UpdateCursorVisibility) {
   scoped_ptr<aura::Window> window(aura::test::CreateTestWindow(
       SK_ColorWHITE, -1, gfx::Rect(0, 0, 500, 500), NULL));
 
-  aura::shared::CompoundEventFilter* env_filter =
-      Shell::GetInstance()->env_filter();
   ash::CursorManager* cursor_manager =
       ash::Shell::GetInstance()->cursor_manager();
 
-  aura::MouseEvent mouse_moved(
+  ui::MouseEvent mouse_moved(
       ui::ET_MOUSE_MOVED, gfx::Point(0, 0), gfx::Point(0, 0), 0x0);
-  aura::TouchEvent touch_pressed1(
+  ui::TouchEvent touch_pressed1(
       ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, getTime());
-  aura::TouchEvent touch_pressed2(
+  ui::TouchEvent touch_pressed2(
       ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 1, getTime());
 
-  env_filter->set_update_cursor_visibility(true);
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse_moved);
   EXPECT_TRUE(cursor_manager->cursor_visible());
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&touch_pressed1);
@@ -592,12 +606,23 @@ TEST_F(WindowManagerTest, UpdateCursorVisibility) {
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse_moved);
   EXPECT_TRUE(cursor_manager->cursor_visible());
 
-  env_filter->set_update_cursor_visibility(false);
+  // If someone else made cursor invisible keep it invisible even after it
+  // received mouse events.
   cursor_manager->ShowCursor(false);
   root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse_moved);
   EXPECT_FALSE(cursor_manager->cursor_visible());
-  cursor_manager->ShowCursor(true);
   root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&touch_pressed2);
+  EXPECT_FALSE(cursor_manager->cursor_visible());
+  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse_moved);
+  EXPECT_FALSE(cursor_manager->cursor_visible());
+
+  // Back to normal.
+  cursor_manager->ShowCursor(true);
+  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse_moved);
+  EXPECT_TRUE(cursor_manager->cursor_visible());
+  root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&touch_pressed2);
+  EXPECT_FALSE(cursor_manager->cursor_visible());
+  root_window->AsRootWindowHostDelegate()->OnHostMouseEvent(&mouse_moved);
   EXPECT_TRUE(cursor_manager->cursor_visible());
 }
 

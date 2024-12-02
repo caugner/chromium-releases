@@ -12,7 +12,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/time.h"
 #include "chrome/browser/performance_monitor/database.h"
-#include "chrome/browser/performance_monitor/metric_details.h"
+#include "chrome/browser/performance_monitor/metric.h"
 #include "chrome/browser/performance_monitor/performance_monitor_util.h"
 #include "chrome/common/extensions/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -71,18 +71,22 @@ class PerformanceMonitorDatabaseEventTest : public ::testing::Test {
 
  private:
   void InitEvents() {
-    install_event_1_ = util::CreateExtensionInstallEvent(
-        clock_->GetTime(), "a", "extension 1", "http://foo.com",
-        static_cast<int>(Extension::LOAD), "0.1", "Test Test");
-    install_event_2_ = util::CreateExtensionInstallEvent(
-        clock_->GetTime(), "b", "extension 2", "http://bar.com",
-        static_cast<int>(Extension::LOAD), "0.1", "Test Test");
-    uninstall_event_1_ = util::CreateExtensionUninstallEvent(
-        clock_->GetTime(), "a", "extension 1", "http://foo.com",
-        static_cast<int>(Extension::LOAD), "0.1", "Test Test");
-    uninstall_event_2_ = util::CreateExtensionUninstallEvent(
-        clock_->GetTime(), "b", "extension 2", "http://bar.com",
-        static_cast<int>(Extension::LOAD), "0.1", "Test Test");
+    install_event_1_ = util::CreateExtensionEvent(
+        EVENT_EXTENSION_INSTALL, clock_->GetTime(), "a", "extension 1",
+        "http://foo.com", static_cast<int>(Extension::LOAD), "0.1",
+        "Test Test");
+    install_event_2_ = util::CreateExtensionEvent(
+        EVENT_EXTENSION_INSTALL, clock_->GetTime(), "b", "extension 2",
+        "http://bar.com", static_cast<int>(Extension::LOAD), "0.1",
+        "Test Test");
+    uninstall_event_1_ = util::CreateExtensionEvent(
+        EVENT_EXTENSION_UNINSTALL, clock_->GetTime(), "a", "extension 1",
+        "http://foo.com", static_cast<int>(Extension::LOAD), "0.1",
+        "Test Test");
+    uninstall_event_2_ = util::CreateExtensionEvent(
+        EVENT_EXTENSION_UNINSTALL, clock_->GetTime(), "b", "extension 2",
+        "http://bar.com", static_cast<int>(Extension::LOAD), "0.1",
+        "Test Test");
   }
 };
 
@@ -205,7 +209,7 @@ TEST(PerformanceMonitorDatabaseSetupTest,
 
 ////// PerformanceMonitorDatabaseEventTests ////////////////////////////////////
 TEST_F(PerformanceMonitorDatabaseEventTest, GetAllEvents) {
-  std::vector<linked_ptr<Event> > events = db_->GetEvents();
+  Database::EventVector events = db_->GetEvents();
   ASSERT_EQ(4u, events.size());
   EXPECT_TRUE(events[0]->data()->Equals(install_event_1_->data()));
   EXPECT_TRUE(events[1]->data()->Equals(install_event_2_->data()));
@@ -213,8 +217,27 @@ TEST_F(PerformanceMonitorDatabaseEventTest, GetAllEvents) {
   EXPECT_TRUE(events[3]->data()->Equals(uninstall_event_2_->data()));
 }
 
+TEST_F(PerformanceMonitorDatabaseMetricTest, GetMaxMetric) {
+  Metric stat;
+  EXPECT_EQ(0.0, db_->GetMaxStatsForActivityAndMetric(activity_,
+                                                      METRIC_PAGE_LOAD_TIME));
+
+  EXPECT_EQ(1000000,
+            db_->GetMaxStatsForActivityAndMetric(METRIC_PRIVATE_MEMORY_USAGE));
+
+  db_->AddMetric(kProcessChromeAggregate, METRIC_PRIVATE_MEMORY_USAGE,
+                 std::string("99"));
+  EXPECT_EQ(1000000,
+            db_->GetMaxStatsForActivityAndMetric(METRIC_PRIVATE_MEMORY_USAGE));
+
+  db_->AddMetric(kProcessChromeAggregate, METRIC_PRIVATE_MEMORY_USAGE,
+                 std::string("6000000"));
+  EXPECT_EQ(6000000,
+            db_->GetMaxStatsForActivityAndMetric(METRIC_PRIVATE_MEMORY_USAGE));
+}
+
 TEST_F(PerformanceMonitorDatabaseEventTest, GetAllEventTypes) {
-  std::set<EventType> types = db_->GetEventTypes();
+  Database::EventTypeSet types = db_->GetEventTypes();
   ASSERT_EQ(2u, types.size());
   ASSERT_EQ(1u, types.count(EVENT_EXTENSION_INSTALL));
   ASSERT_EQ(1u, types.count(EVENT_EXTENSION_UNINSTALL));
@@ -225,25 +248,22 @@ TEST_F(PerformanceMonitorDatabaseEventTest, GetEventInTimeRange) {
   scoped_ptr<Event> crash_event = util::CreateRendererFreezeEvent(
       clock_->GetTime(), "chrome://freeze");
   db_->AddEvent(*crash_event.get());
-  std::vector<linked_ptr<Event> > events =
-      db_->GetEvents(start_time, clock_->GetTime());
+  Database::EventVector events = db_->GetEvents(start_time, clock_->GetTime());
   ASSERT_EQ(1u, events.size());
   EXPECT_TRUE(events[0]->data()->Equals(crash_event->data()));
 }
 
 TEST_F(PerformanceMonitorDatabaseEventTest, GetInstallEvents) {
-  std::vector<linked_ptr<Event> > events =
-      db_->GetEvents(EVENT_EXTENSION_INSTALL);
+  Database::EventVector events = db_->GetEvents(EVENT_EXTENSION_INSTALL);
   ASSERT_EQ(2u, events.size());
   EXPECT_TRUE(events[0]->data()->Equals(install_event_1_->data()));
   EXPECT_TRUE(events[1]->data()->Equals(install_event_2_->data()));
 }
 
 TEST_F(PerformanceMonitorDatabaseEventTest, GetUnusedEventType) {
-  std::vector<linked_ptr<Event> > events =
-      db_->GetEvents(EVENT_EXTENSION_UNLOAD);
+  Database::EventVector events = db_->GetEvents(EVENT_EXTENSION_DISABLE);
   ASSERT_TRUE(events.empty());
-  events = db_->GetEvents(EVENT_EXTENSION_UNLOAD, clock_->GetTime(),
+  events = db_->GetEvents(EVENT_EXTENSION_DISABLE, clock_->GetTime(),
                           clock_->GetTime());
   ASSERT_TRUE(events.empty());
 }
@@ -251,18 +271,19 @@ TEST_F(PerformanceMonitorDatabaseEventTest, GetUnusedEventType) {
 TEST_F(PerformanceMonitorDatabaseEventTest, GetEventsTimeRange) {
   base::Time start_time = clock_->GetTime();
   scoped_ptr<Event> new_install_event =
-      util::CreateExtensionInstallEvent(
-      clock_->GetTime(), "c", "test extension", "http://foo.com",
-      static_cast<int>(Extension::LOAD), "0.1", "Test Test");
+      util::CreateExtensionEvent(EVENT_EXTENSION_INSTALL, clock_->GetTime(),
+                                 "c", "test extension", "http://foo.com",
+                                 static_cast<int>(Extension::LOAD), "0.1",
+                                 "Test Test");
   scoped_ptr<Event> new_uninstall_event =
-      util::CreateExtensionUninstallEvent(
-      clock_->GetTime(), "c", "test extension", "http://foo.com",
-      static_cast<int>(Extension::LOAD), "0.1", "Test Test");
+      util::CreateExtensionEvent(EVENT_EXTENSION_UNINSTALL, clock_->GetTime(),
+                                 "c", "test extension", "http://foo.com",
+                                 static_cast<int>(Extension::LOAD), "0.1",
+                                 "Test Test");
   base::Time end_time = clock_->GetTime();
   db_->AddEvent(*new_install_event.get());
   db_->AddEvent(*new_uninstall_event.get());
-  std::vector<linked_ptr<Event> > events =
-      db_->GetEvents(start_time, end_time);
+  Database::EventVector events = db_->GetEvents(start_time, end_time);
   ASSERT_EQ(2u, events.size());
   EXPECT_TRUE(events[0]->data()->Equals(new_install_event->data()));
   EXPECT_TRUE(events[1]->data()->Equals(new_uninstall_event->data()));
@@ -274,19 +295,17 @@ TEST_F(PerformanceMonitorDatabaseEventTest, GetEventsTimeRange) {
 
 ////// PerformanceMonitorDatabaseMetricTests ///////////////////////////////////
 TEST_F(PerformanceMonitorDatabaseMetricTest, GetActiveMetrics) {
-  std::vector<const MetricDetails*> active_metrics =
+  Database::MetricTypeSet active_metrics =
     db_->GetActiveMetrics(base::Time(), clock_->GetTime());
-  std::sort(active_metrics.begin(), active_metrics.end());
 
-  std::vector<const MetricDetails*> expected_metrics;
-  expected_metrics.push_back(GetMetricDetails(METRIC_CPU_USAGE));
-  expected_metrics.push_back(GetMetricDetails(METRIC_PRIVATE_MEMORY_USAGE));
-  std::sort(expected_metrics.begin(), expected_metrics.end());
+  Database::MetricTypeSet expected_metrics;
+  expected_metrics.insert(METRIC_CPU_USAGE);
+  expected_metrics.insert(METRIC_PRIVATE_MEMORY_USAGE);
   EXPECT_EQ(expected_metrics, active_metrics);
 }
 
 TEST_F(PerformanceMonitorDatabaseMetricTest, GetRecentMetric) {
-  MetricInfo stat;
+  Metric stat;
   ASSERT_TRUE(db_->GetRecentStatsForActivityAndMetric(activity_,
       METRIC_PRIVATE_MEMORY_USAGE, &stat));
   EXPECT_EQ(3000000, stat.value);
@@ -319,7 +338,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, GetStateOverride) {
 }
 
 TEST_F(PerformanceMonitorDatabaseMetricTest, GetStatsForActivityAndMetric) {
-  Database::MetricInfoVector stats = db_->GetStatsForActivityAndMetric(
+  Database::MetricVector stats = db_->GetStatsForActivityAndMetric(
       activity_, METRIC_CPU_USAGE, base::Time(), clock_->GetTime());
   ASSERT_EQ(1u, stats.size());
   EXPECT_EQ(13.1, stats[0].value);
@@ -346,7 +365,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, GetStatsForMetricByActivity) {
   Database::MetricVectorMap stats_map = db_->GetStatsForMetricByActivity(
       METRIC_CPU_USAGE, base::Time(), clock_->GetTime());
   ASSERT_EQ(2u, stats_map.size());
-  linked_ptr<Database::MetricInfoVector> stats = stats_map[activity_];
+  linked_ptr<Database::MetricVector> stats = stats_map[activity_];
   ASSERT_EQ(1u, stats->size());
   EXPECT_EQ(13.1, stats->at(0).value);
   stats = stats_map[kProcessChromeAggregate];
@@ -368,7 +387,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, GetStatsForMetricByActivity) {
 TEST_F(PerformanceMonitorDatabaseMetricTest, GetFullRange) {
   db_->AddMetric(kProcessChromeAggregate, METRIC_CPU_USAGE, std::string("3.4"));
   db_->AddMetric(kProcessChromeAggregate, METRIC_CPU_USAGE, std::string("21"));
-  Database::MetricInfoVector stats =
+  Database::MetricVector stats =
       db_->GetStatsForActivityAndMetric(METRIC_CPU_USAGE);
   ASSERT_EQ(3u, stats.size());
   ASSERT_EQ(50.5, stats[0].value);
@@ -382,7 +401,7 @@ TEST_F(PerformanceMonitorDatabaseMetricTest, GetRange) {
   db_->AddMetric(kProcessChromeAggregate, METRIC_CPU_USAGE, std::string("9"));
   base::Time end = clock_->GetTime();
   db_->AddMetric(kProcessChromeAggregate, METRIC_CPU_USAGE, std::string("21"));
-  Database::MetricInfoVector stats =
+  Database::MetricVector stats =
       db_->GetStatsForActivityAndMetric(METRIC_CPU_USAGE, start, end);
   ASSERT_EQ(2u, stats.size());
   ASSERT_EQ(3, stats[0].value);

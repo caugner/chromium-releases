@@ -4,7 +4,6 @@
 
 #include "ash/system/status_area_widget.h"
 
-#include "ash/ash_switches.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
@@ -15,24 +14,57 @@
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/web_notification/web_notification_tray.h"
-#include "base/command_line.h"
+#include "ash/volume_control_delegate.h"
+#include "ash/wm/shelf_layout_manager.h"
 #include "base/i18n/time_formatting.h"
 #include "base/utf_string_conversions.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/screen.h"
 
 namespace ash {
 
 namespace {
 
+class DummyVolumeControlDelegate : public VolumeControlDelegate {
+ public:
+  DummyVolumeControlDelegate() {}
+  virtual ~DummyVolumeControlDelegate() {}
+
+  virtual bool HandleVolumeMute(const ui::Accelerator& accelerator) OVERRIDE {
+    return true;
+  }
+  virtual bool HandleVolumeDown(const ui::Accelerator& accelerator) OVERRIDE {
+    return true;
+  }
+  virtual bool HandleVolumeUp(const ui::Accelerator& accelerator) OVERRIDE {
+    return true;
+  }
+  virtual void SetVolumePercent(double percent) OVERRIDE {
+  }
+  virtual bool IsAudioMuted() const OVERRIDE {
+    return true;
+  }
+  virtual void SetAudioMuted(bool muted) OVERRIDE {
+  }
+  virtual float GetVolumeLevel() const OVERRIDE {
+    return 0.0;
+  }
+  virtual void SetVolumeLevel(float level) OVERRIDE {
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DummyVolumeControlDelegate);
+};
+
 class DummySystemTrayDelegate : public SystemTrayDelegate {
  public:
   DummySystemTrayDelegate()
-      : muted_(false),
-        wifi_enabled_(true),
+      : wifi_enabled_(true),
         cellular_enabled_(true),
         bluetooth_enabled_(true),
-        volume_(0.5),
-        caps_lock_enabled_(false) {
+        caps_lock_enabled_(false),
+        volume_control_delegate_(
+            ALLOW_THIS_IN_INITIALIZER_LIST(new DummyVolumeControlDelegate)) {
   }
 
   virtual ~DummySystemTrayDelegate() {}
@@ -84,6 +116,9 @@ class DummySystemTrayDelegate : public SystemTrayDelegate {
   virtual void ShowBluetoothSettings() OVERRIDE {
   }
 
+  virtual void ShowDisplaySettings() OVERRIDE {
+  }
+
   virtual void ShowDriveSettings() OVERRIDE {
   }
 
@@ -93,31 +128,9 @@ class DummySystemTrayDelegate : public SystemTrayDelegate {
   virtual void ShowHelp() OVERRIDE {
   }
 
-  virtual bool IsAudioMuted() const OVERRIDE {
-    return muted_;
+  virtual void ShutDown() OVERRIDE {
+    MessageLoop::current()->Quit();
   }
-
-  virtual void SetAudioMuted(bool muted) OVERRIDE {
-    muted_ = muted;
-  }
-
-  virtual float GetVolumeLevel() const OVERRIDE {
-    return volume_;
-  }
-
-  virtual void SetVolumeLevel(float volume) OVERRIDE {
-    volume_ = volume;
-  }
-
-  virtual bool IsCapsLockOn() const OVERRIDE {
-    return caps_lock_enabled_;
-  }
-
-  virtual void SetCapsLockEnabled(bool enabled) OVERRIDE {
-    caps_lock_enabled_ = enabled;
-  }
-
-  virtual void ShutDown() OVERRIDE {}
 
   virtual void SignOut() OVERRIDE {
     MessageLoop::current()->Quit();
@@ -262,13 +275,22 @@ class DummySystemTrayDelegate : public SystemTrayDelegate {
   virtual void ChangeProxySettings() OVERRIDE {
   }
 
-  bool muted_;
+  virtual VolumeControlDelegate* GetVolumeControlDelegate() const OVERRIDE {
+    return volume_control_delegate_.get();
+  }
+
+  virtual void SetVolumeControlDelegate(
+      scoped_ptr<VolumeControlDelegate> delegate) OVERRIDE {
+    volume_control_delegate_.swap(delegate);
+  }
+
+
   bool wifi_enabled_;
   bool cellular_enabled_;
   bool bluetooth_enabled_;
-  float volume_;
   bool caps_lock_enabled_;
   gfx::ImageSkia null_image_;
+  scoped_ptr<VolumeControlDelegate> volume_control_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(DummySystemTrayDelegate);
 };
@@ -299,13 +321,14 @@ StatusAreaWidget::~StatusAreaWidget() {
 }
 
 void StatusAreaWidget::CreateTrayViews(ShellDelegate* shell_delegate) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshNotify))
-    AddWebNotificationTray();
   AddSystemTray(shell_delegate);
-  // SetBorder() must be called after all trays have been created.
+  AddWebNotificationTray();
+  // Initialize() must be called after all trays have been created.
+  if (system_tray_)
+    system_tray_->Initialize();
   if (web_notification_tray_)
-    web_notification_tray_->SetBorder();
-  system_tray_->SetBorder();
+    web_notification_tray_->Initialize();
+  UpdateAfterLoginStatusChange(system_tray_delegate_->GetUserLoginStatus());
 }
 
 void StatusAreaWidget::Shutdown() {
@@ -313,16 +336,37 @@ void StatusAreaWidget::Shutdown() {
   // hierarchy. Do not used scoped pointers since we don't want to destroy them
   // in the destructor if Shutdown() is not called (e.g. in tests).
   system_tray_delegate_.reset();
-  delete system_tray_;
-  system_tray_ = NULL;
   delete web_notification_tray_;
   web_notification_tray_ = NULL;
+  delete system_tray_;
+  system_tray_ = NULL;
+}
+
+bool StatusAreaWidget::ShouldShowLauncher() const {
+  if ((system_tray_ && system_tray_->HasSystemBubble()) ||
+      (web_notification_tray_ &&
+       web_notification_tray_->IsMessageCenterBubbleVisible()))
+    return true;
+
+  if (!Shell::GetInstance()->shelf()->IsVisible())
+    return false;
+
+  // If the launcher is currently visible, don't hide the launcher if the mouse
+  // is in any of the notification bubbles.
+  return (system_tray_ && system_tray_->IsMouseInNotificationBubble()) ||
+        (web_notification_tray_ &&
+         web_notification_tray_->IsMouseInNotificationBubble());
+}
+
+bool StatusAreaWidget::IsMessageBubbleShown() const {
+  return ((system_tray_ && system_tray_->IsAnyBubbleVisible()) ||
+          (web_notification_tray_ &&
+           web_notification_tray_->IsMessageCenterBubbleVisible()));
 }
 
 void StatusAreaWidget::AddSystemTray(ShellDelegate* shell_delegate) {
   system_tray_ = new SystemTray(this);
   status_area_widget_delegate_->AddTray(system_tray_);
-  system_tray_->Initialize();  // Called after added to widget.
 
   if (shell_delegate) {
     system_tray_delegate_.reset(
@@ -330,9 +374,6 @@ void StatusAreaWidget::AddSystemTray(ShellDelegate* shell_delegate) {
   }
   if (!system_tray_delegate_.get())
     system_tray_delegate_.reset(new DummySystemTrayDelegate());
-
-  system_tray_->CreateItems();  // Called after delegate is created.
-  UpdateAfterLoginStatusChange(system_tray_delegate_->GetUserLoginStatus());
 }
 
 void StatusAreaWidget::AddWebNotificationTray() {
@@ -358,9 +399,9 @@ void StatusAreaWidget::SetPaintsBackground(
     web_notification_tray_->SetPaintsBackground(value, change_type);
 }
 
-void StatusAreaWidget::HideNonSystemNotifications() {
+void StatusAreaWidget::SetHideWebNotifications(bool hide) {
   if (web_notification_tray_)
-    web_notification_tray_->HideNotificationBubble();
+    web_notification_tray_->SetHidePopupBubble(hide);
 }
 
 void StatusAreaWidget::SetHideSystemNotifications(bool hide) {
@@ -368,7 +409,7 @@ void StatusAreaWidget::SetHideSystemNotifications(bool hide) {
     system_tray_->SetHideNotifications(hide);
 }
 
-bool StatusAreaWidget::ShouldShowNonSystemNotifications() {
+bool StatusAreaWidget::ShouldShowWebNotifications() {
   return !(system_tray_ && system_tray_->IsAnyBubbleVisible());
 }
 

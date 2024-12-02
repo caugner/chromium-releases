@@ -125,6 +125,34 @@ TextureManager::TextureInfo::~TextureInfo() {
   }
 }
 
+TextureManager::TextureInfo::LevelInfo::LevelInfo()
+    : cleared(true),
+      target(0),
+      level(-1),
+      internal_format(0),
+      width(0),
+      height(0),
+      depth(0),
+      border(0),
+      format(0),
+      type(0),
+      estimated_size(0) {
+}
+
+TextureManager::TextureInfo::LevelInfo::LevelInfo(const LevelInfo& rhs)
+    : cleared(rhs.cleared),
+      target(rhs.target),
+      level(rhs.level),
+      internal_format(rhs.internal_format),
+      width(rhs.width),
+      height(rhs.height),
+      depth(rhs.depth),
+      border(rhs.border),
+      format(rhs.format),
+      type(rhs.type),
+      estimated_size(rhs.estimated_size) {
+}
+
 bool TextureManager::TextureInfo::CanRender(
     const FeatureInfo* feature_info) const {
   if (target_ == 0) {
@@ -593,10 +621,7 @@ TextureManager::TextureManager(
     FeatureInfo* feature_info,
     GLint max_texture_size,
     GLint max_cube_map_texture_size)
-    : texture_memory_tracker_(new MemoryTypeTracker(
-        memory_tracker,
-        "TextureManager",
-        "TextureMemory")),
+    : texture_memory_tracker_(new MemoryTypeTracker(memory_tracker)),
       feature_info_(feature_info),
       max_texture_size_(max_texture_size),
       max_cube_map_texture_size_(max_cube_map_texture_size),
@@ -705,7 +730,7 @@ TextureManager::TextureInfo::Ref TextureManager::CreateDefaultAndBlackTextures(
 
 bool TextureManager::ValidForTarget(
     GLenum target, GLint level, GLsizei width, GLsizei height, GLsizei depth) {
-  GLsizei max_size = MaxSizeForTarget(target);
+  GLsizei max_size = MaxSizeForTarget(target) >> level;
   return level >= 0 &&
          width >= 0 &&
          height >= 0 &&
@@ -1049,5 +1074,3 @@ GLsizei TextureManager::ComputeMipMapCount(
 
 }  // namespace gles2
 }  // namespace gpu
-
-

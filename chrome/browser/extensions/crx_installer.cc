@@ -14,7 +14,7 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stl_util.h"
+#include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
@@ -29,6 +29,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/permissions_updater.h"
+#include "chrome/browser/extensions/requirements_checker.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
@@ -101,14 +102,19 @@ CrxInstaller::CrxInstaller(
       creation_flags_(Extension::NO_FLAGS),
       off_store_install_allow_reason_(OffStoreInstallDisallowed),
       did_handle_successfully_(true),
-      record_oauth2_grant_(false) {
+      record_oauth2_grant_(false),
+      error_on_unsupported_requirements_(false),
+      requirements_checker_(new extensions::RequirementsChecker()),
+      has_requirement_errors_(false) {
   if (!approval)
     return;
 
   CHECK(profile_->IsSameProfile(approval->profile));
-  client_->install_ui()->SetUseAppInstalledBubble(
-      approval->use_app_installed_bubble);
-  client_->install_ui()->SetSkipPostInstallUI(approval->skip_post_install_ui);
+  if (client_) {
+    client_->install_ui()->SetUseAppInstalledBubble(
+        approval->use_app_installed_bubble);
+    client_->install_ui()->SetSkipPostInstallUI(approval->skip_post_install_ui);
+  }
 
   if (approval->skip_install_dialog) {
     // Mark the extension as approved, but save the expected manifest and ID
@@ -135,8 +141,10 @@ CrxInstaller::~CrxInstaller() {
         base::Bind(&extension_file_util::DeleteFile, source_file_, false));
   }
   // Make sure the UI is deleted on the ui thread.
-  BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, client_);
-  client_ = NULL;
+  if (client_) {
+    BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, client_);
+    client_ = NULL;
+  }
 }
 
 void CrxInstaller::InstallCrx(const FilePath& source_file) {
@@ -379,31 +387,57 @@ void CrxInstaller::OnUnpackSuccess(const FilePath& temp_dir,
 
   if (client_) {
     Extension::DecodeIcon(extension_.get(),
-                          ExtensionIconSet::EXTENSION_ICON_LARGE,
+                          extension_misc::EXTENSION_ICON_LARGE,
                           ExtensionIconSet::MATCH_BIGGER,
                           &install_icon_);
   }
 
   if (!BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&CrxInstaller::ConfirmInstall, this)))
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&CrxInstaller::CheckRequirements, this)))
     NOTREACHED();
+}
+
+void CrxInstaller::CheckRequirements() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!frontend_weak_.get())
+    return;
+#if defined(OS_CHROMEOS)
+  // TODO(jamescook): Remove ifdef after M23 backport, crbug.com/155994
+  if (frontend_weak_->browser_terminating())
+    return;
+#endif
+  AddRef();  // Balanced in OnRequirementsChecked().
+  requirements_checker_->Check(extension_,
+                               base::Bind(&CrxInstaller::OnRequirementsChecked,
+                                          this));
+}
+
+void CrxInstaller::OnRequirementsChecked(
+    std::vector<std::string> requirement_errors) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  Release();  // Balanced in CheckRequirements().
+  if (!requirement_errors.empty()) {
+    if (error_on_unsupported_requirements_) {
+      ReportFailureFromUIThread(CrxInstallerError(
+          UTF8ToUTF16(JoinString(requirement_errors, ' '))));
+      return;
+    }
+    has_requirement_errors_ = true;
+  }
+
+  ConfirmInstall();
 }
 
 void CrxInstaller::ConfirmInstall() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!frontend_weak_.get())
     return;
-
-  if (frontend_weak_->extension_prefs()
-      ->IsExtensionBlacklisted(extension_->id())) {
-    VLOG(1) << "This extension: " << extension_->id()
-            << " is blacklisted. Install failed.";
-    ReportFailureFromUIThread(
-        CrxInstallerError(
-            l10n_util::GetStringUTF16(IDS_EXTENSION_CANT_INSTALL_BLACKLISTED)));
+#if defined(OS_CHROMEOS)
+  // TODO(jamescook): Remove ifdef after M23 backport, crbug.com/155994
+  if (frontend_weak_->browser_terminating())
     return;
-  }
+#endif
 
   string16 error;
   if (!ExtensionSystem::Get(profile_)->management_policy()->
@@ -480,7 +514,9 @@ void CrxInstaller::CompleteInstall() {
     if (current_version.CompareTo(*(extension_->version())) > 0) {
       ReportFailureFromFileThread(
           CrxInstallerError(
-              l10n_util::GetStringUTF16(IDS_EXTENSION_CANT_DOWNGRADE_VERSION)));
+              l10n_util::GetStringUTF16(extension_->is_app() ?
+                  IDS_APP_CANT_DOWNGRADE_VERSION :
+                  IDS_EXTENSION_CANT_DOWNGRADE_VERSION)));
       return;
     }
   }
@@ -505,8 +541,6 @@ void CrxInstaller::CompleteInstall() {
     return;
   }
 
-  std::string extension_id = extension_->id();
-
   // This is lame, but we must reload the extension because absolute paths
   // inside the content scripts are established inside InitFromValue() and we
   // just moved the extension.
@@ -514,6 +548,7 @@ void CrxInstaller::CompleteInstall() {
   // lazily and based on the Extension's root path at that moment.
   // TODO(rdevlin.cronin): Continue removing std::string errors and replacing
   // with string16
+  std::string extension_id = extension_->id();
   std::string error;
   extension_ = extension_file_util::LoadExtension(
       version_dir,
@@ -527,6 +562,7 @@ void CrxInstaller::CompleteInstall() {
     LOG(ERROR) << error << " " << extension_id << " " << download_url_.spec();
     ReportFailureFromFileThread(CrxInstallerError(UTF8ToUTF16(error)));
   }
+
 }
 
 void CrxInstaller::ReportFailureFromFileThread(const CrxInstallerError& error) {
@@ -589,6 +625,11 @@ void CrxInstaller::ReportSuccessFromUIThread() {
 
   if (!frontend_weak_.get())
     return;
+#if defined(OS_CHROMEOS)
+  // TODO(jamescook): Remove ifdef after M23 backport, crbug.com/155994
+  if (frontend_weak_->browser_terminating())
+    return;
+#endif
 
   // If there is a client, tell the client about installation.
   if (client_) {
@@ -608,8 +649,10 @@ void CrxInstaller::ReportSuccessFromUIThread() {
 
   // Tell the frontend about the installation and hand off ownership of
   // extension_ to it.
-  frontend_weak_->OnExtensionInstalled(extension_, is_gallery_install(),
-                                       page_ordinal_);
+  frontend_weak_->OnExtensionInstalled(extension_,
+                                       is_gallery_install(),
+                                       page_ordinal_,
+                                       has_requirement_errors_);
 
   NotifyCrxInstallComplete(extension_.get());
 

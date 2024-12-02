@@ -25,6 +25,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandbox_init.h"
+#include "sandbox/win/src/process_mitigations.h"
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/sandbox_nt_util.h"
 #include "sandbox/win/src/win_utils.h"
@@ -118,6 +119,12 @@ const wchar_t* const kTroublesomePluginDlls[] = {
   L"rpchrome10browserrecordhelper.dll",  // RealPlayer.
   L"ycwebcamerasource.ax"                // Cyberlink Camera helper.
   L"CLRGL.ax"                            // Cyberlink Camera helper.
+};
+
+// The DLLs listed here are known (or under strong suspicion) of causing crashes
+// when they are loaded in the GPU process.
+const wchar_t* const kTroublesomeGpuDlls[] = {
+  L"cmsetac.dll",                 // Unknown (suspected malware).
 };
 
 // Adds the policy rules for the path and path\ with the semantic |access|.
@@ -240,6 +247,14 @@ void AddGenericDllEvictionPolicy(sandbox::TargetPolicy* policy) {
 void AddPluginDllEvictionPolicy(sandbox::TargetPolicy* policy) {
   for (int ix = 0; ix != arraysize(kTroublesomePluginDlls); ++ix)
     BlacklistAddOneDll(kTroublesomePluginDlls[ix], false, policy);
+}
+
+// Same as AddGenericDllEvictionPolicy but specifically for the GPU process.
+// In this we add the blacklisted dlls even if they are not loaded in this
+// process.
+void AddGpuDllEvictionPolicy(sandbox::TargetPolicy* policy) {
+  for (int ix = 0; ix != arraysize(kTroublesomeGpuDlls); ++ix)
+    BlacklistAddOneDll(kTroublesomeGpuDlls[ix], false, policy);
 }
 
 // Returns the object path prepended with the current logon session.
@@ -405,6 +420,7 @@ bool AddPolicyForGPU(CommandLine* cmd_line, sandbox::TargetPolicy* policy) {
 #endif
 
   AddGenericDllEvictionPolicy(policy);
+  AddGpuDllEvictionPolicy(policy);
 #endif
   return true;
 }
@@ -709,6 +725,28 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
     base::LaunchProcess(*cmd_line, base::LaunchOptions(), &process);
     g_broker_services->AddTargetPeer(process);
     return process;
+  }
+
+  // TODO(jschuh): Add all Win8 mitigations. crbug.com/147752
+  if (type != content::PROCESS_TYPE_NACL_LOADER) {
+    if (policy->SetProcessMitigations(MITIGATION_DEP |
+                                      MITIGATION_DEP_NO_ATL_THUNK |
+                                      MITIGATION_SEHOP |
+                                      MITIGATION_BOTTOM_UP_ASLR)
+        != sandbox::SBOX_ALL_OK) {
+      return 0;
+    }
+  } else {
+    // TODO(jschuh): Make NaCl work with DEP and SEHOP. crbug.com/147752
+    if (policy->SetDelayedProcessMitigations(MITIGATION_DEP |
+                                             MITIGATION_DEP_NO_ATL_THUNK)
+        != sandbox::SBOX_ALL_OK) {
+      return 0;
+    }
+    if (policy->SetProcessMitigations(MITIGATION_BOTTOM_UP_ASLR)
+        != sandbox::SBOX_ALL_OK) {
+      return 0;
+    }
   }
 
   if (type == content::PROCESS_TYPE_PLUGIN) {

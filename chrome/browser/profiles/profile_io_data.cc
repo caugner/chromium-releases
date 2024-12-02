@@ -17,6 +17,7 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/net/about_protocol_handler.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -28,12 +29,12 @@
 #include "chrome/browser/extensions/extension_resource_protocols.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/io_thread.h"
-#include "chrome/browser/net/cache_stats.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "chrome/browser/net/chrome_fraudulent_certificate_reporter.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/http_server_properties_manager.h"
+#include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/resource_prefetch_predictor_observer.h"
 #include "chrome/browser/net/transport_security_persister.h"
@@ -62,10 +63,16 @@
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/data_protocol_handler.h"
+#include "net/url_request/file_protocol_handler.h"
+#include "net/url_request/ftp_protocol_handler.h"
 #include "net/url_request/url_request.h"
 
+#if !defined(OS_ANDROID)
+#include "chrome/browser/managed_mode.h"
+#endif
+
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/gdata/gdata_protocol_handler.h"
+#include "chrome/browser/chromeos/gdata/drive_protocol_handler.h"
 #include "chrome/browser/chromeos/gview_request_interceptor.h"
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -186,10 +193,10 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
       ProtocolHandlerRegistryFactory::GetForProfile(profile);
   DCHECK(protocol_handler_registry);
 
-  // the profile instance is only available here in the InitializeOnUIThread
+  // The profile instance is only available here in the InitializeOnUIThread
   // method, so we create the url interceptor here, then save it for
-  // later delivery to the job factory in LazyInitialize
-  params->protocol_handler_url_interceptor.reset(
+  // later delivery to the job factory in LazyInitialize.
+  params->protocol_handler_interceptor.reset(
       protocol_handler_registry->CreateURLInterceptor());
 
   ChromeProxyConfigService* proxy_config_service =
@@ -199,6 +206,12 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
       proxy_config_service);
   params->profile = profile;
   profile_params_.reset(params.release());
+
+  ChromeNetworkDelegate::InitializePrefsOnUIThread(
+      &enable_referrers_,
+      &enable_do_not_track_,
+      pref_service);
+
 #if defined(ENABLE_PRINTING)
   printing_enabled_.Init(prefs::kPrintingEnabled, pref_service, NULL);
   printing_enabled_.MoveToThread(BrowserThread::IO);
@@ -221,10 +234,24 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   BrowserContext::EnsureResourceContextInitialized(profile);
 }
 
+ProfileIOData::MediaRequestContext::MediaRequestContext(
+    chrome_browser_net::LoadTimeStats* load_time_stats)
+    : ChromeURLRequestContext(ChromeURLRequestContext::CONTEXT_TYPE_MEDIA,
+                              load_time_stats) {
+}
+
+void ProfileIOData::MediaRequestContext::SetHttpTransactionFactory(
+    scoped_ptr<net::HttpTransactionFactory> http_factory) {
+  http_factory_ = http_factory.Pass();
+  set_http_transaction_factory(http_factory_.get());
+}
+
+ProfileIOData::MediaRequestContext::~MediaRequestContext() {}
+
 ProfileIOData::AppRequestContext::AppRequestContext(
-    chrome_browser_net::CacheStats* cache_stats)
+    chrome_browser_net::LoadTimeStats* load_time_stats)
     : ChromeURLRequestContext(ChromeURLRequestContext::CONTEXT_TYPE_APP,
-                              cache_stats) {
+                              load_time_stats) {
 }
 
 void ProfileIOData::AppRequestContext::SetCookieStore(
@@ -234,9 +261,15 @@ void ProfileIOData::AppRequestContext::SetCookieStore(
 }
 
 void ProfileIOData::AppRequestContext::SetHttpTransactionFactory(
-    net::HttpTransactionFactory* http_factory) {
-  http_factory_.reset(http_factory);
-  set_http_transaction_factory(http_factory);
+    scoped_ptr<net::HttpTransactionFactory> http_factory) {
+  http_factory_ = http_factory.Pass();
+  set_http_transaction_factory(http_factory_.get());
+}
+
+void ProfileIOData::AppRequestContext::SetJobFactory(
+    scoped_ptr<net::URLRequestJobFactory> job_factory) {
+  job_factory_ = job_factory.Pass();
+  set_job_factory(job_factory_.get());
 }
 
 ProfileIOData::AppRequestContext::~AppRequestContext() {}
@@ -268,8 +301,14 @@ ProfileIOData::~ProfileIOData() {
     main_request_context_->AssertNoURLRequests();
   if (extensions_request_context_.get())
     extensions_request_context_->AssertNoURLRequests();
-  for (AppRequestContextMap::iterator it = app_request_context_map_.begin();
+  for (URLRequestContextMap::iterator it = app_request_context_map_.begin();
        it != app_request_context_map_.end(); ++it) {
+    it->second->AssertNoURLRequests();
+    delete it->second;
+  }
+  for (URLRequestContextMap::iterator it =
+           isolated_media_request_context_map_.begin();
+       it != isolated_media_request_context_map_.end(); ++it) {
     it->second->AssertNoURLRequests();
     delete it->second;
   }
@@ -346,20 +385,40 @@ ProfileIOData::GetExtensionsRequestContext() const {
 ChromeURLRequestContext*
 ProfileIOData::GetIsolatedAppRequestContext(
     ChromeURLRequestContext* main_context,
-    const std::string& app_id) const {
+    const std::string& app_id,
+    scoped_ptr<net::URLRequestJobFactory::Interceptor>
+        protocol_handler_interceptor) const {
   LazyInitialize();
-  ChromeURLRequestContext* context;
+  ChromeURLRequestContext* context = NULL;
   if (ContainsKey(app_request_context_map_, app_id)) {
     context = app_request_context_map_[app_id];
   } else {
-    context = AcquireIsolatedAppRequestContext(main_context, app_id);
+    context = AcquireIsolatedAppRequestContext(
+        main_context, app_id, protocol_handler_interceptor.Pass());
     app_request_context_map_[app_id] = context;
   }
   DCHECK(context);
   return context;
 }
 
+ChromeURLRequestContext*
+ProfileIOData::GetIsolatedMediaRequestContext(
+    ChromeURLRequestContext* app_context,
+    const std::string& app_id) const {
+  LazyInitialize();
+  ChromeURLRequestContext* context = NULL;
+  if (ContainsKey(isolated_media_request_context_map_, app_id)) {
+    context = isolated_media_request_context_map_[app_id];
+  } else {
+    context = AcquireIsolatedMediaRequestContext(app_context, app_id);
+    isolated_media_request_context_map_[app_id] = context;
+  }
+  DCHECK(context);
+  return context;
+}
+
 ExtensionInfoMap* ProfileIOData::GetExtensionInfoMap() const {
+  DCHECK(extension_info_map_) << "ExtensionSystem not initialized";
   return extension_info_map_;
 }
 
@@ -461,16 +520,16 @@ void ProfileIOData::LazyInitialize() const {
   IOThread* const io_thread = profile_params_->io_thread;
   IOThread::Globals* const io_thread_globals = io_thread->globals();
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  cache_stats_ = GetCacheStats(io_thread_globals);
+  load_time_stats_ = GetLoadTimeStats(io_thread_globals);
 
   // Create the common request contexts.
   main_request_context_.reset(
       new ChromeURLRequestContext(ChromeURLRequestContext::CONTEXT_TYPE_MAIN,
-                                  cache_stats_));
+                                  load_time_stats_));
   extensions_request_context_.reset(
       new ChromeURLRequestContext(
           ChromeURLRequestContext::CONTEXT_TYPE_EXTENSIONS,
-          cache_stats_));
+          load_time_stats_));
 
   chrome_url_data_manager_backend_.reset(new ChromeURLDataManagerBackend);
 
@@ -478,10 +537,16 @@ void ProfileIOData::LazyInitialize() const {
         io_thread_globals->extension_event_router_forwarder.get(),
         profile_params_->extension_info_map,
         url_blacklist_manager_.get(),
+#if !defined(OS_ANDROID)
+        ManagedMode::GetURLFilter(),
+#else
+        NULL,
+#endif
         profile_params_->profile,
         profile_params_->cookie_settings,
         &enable_referrers_,
-        cache_stats_));
+        &enable_do_not_track_,
+        load_time_stats_));
 
   fraudulent_certificate_reporter_.reset(
       new chrome_browser_net::ChromeFraudulentCertificateReporter(
@@ -534,19 +599,31 @@ void ProfileIOData::ApplyProfileParamsToContext(
 }
 
 void ProfileIOData::SetUpJobFactoryDefaults(
-    net::URLRequestJobFactory* job_factory) const {
+    net::URLRequestJobFactory* job_factory,
+    scoped_ptr<net::URLRequestJobFactory::Interceptor>
+        protocol_handler_interceptor,
+    net::NetworkDelegate* network_delegate,
+    net::FtpTransactionFactory* ftp_transaction_factory,
+    net::FtpAuthCache* ftp_auth_cache) const {
   // NOTE(willchan): Keep these protocol handlers in sync with
   // ProfileIOData::IsHandledProtocol().
+  bool set_protocol = job_factory->SetProtocolHandler(
+      chrome::kFileScheme, new net::FileProtocolHandler());
+  DCHECK(set_protocol);
 
-  if (profile_params_->protocol_handler_url_interceptor.get()) {
-    job_factory->AddInterceptor(
-        profile_params_->protocol_handler_url_interceptor.release());
+  set_protocol = job_factory->SetProtocolHandler(
+      chrome::kChromeDevToolsScheme,
+      CreateDevToolsProtocolHandler(chrome_url_data_manager_backend(),
+                                    network_delegate));
+  DCHECK(set_protocol);
+
+  if (protocol_handler_interceptor.get()) {
+    job_factory->AddInterceptor(protocol_handler_interceptor.release());
   }
 
-  bool set_protocol = job_factory->SetProtocolHandler(
+  set_protocol = job_factory->SetProtocolHandler(
       chrome::kExtensionScheme,
-      CreateExtensionProtocolHandler(is_incognito(),
-                                     profile_params_->extension_info_map));
+      CreateExtensionProtocolHandler(is_incognito(), GetExtensionInfoMap()));
   DCHECK(set_protocol);
   set_protocol = job_factory->SetProtocolHandler(
       chrome::kExtensionResourceScheme,
@@ -558,16 +635,12 @@ void ProfileIOData::SetUpJobFactoryDefaults(
           chrome_url_data_manager_backend_.get()));
   DCHECK(set_protocol);
   set_protocol = job_factory->SetProtocolHandler(
-      chrome::kChromeDevToolsScheme,
-      CreateDevToolsProtocolHandler(chrome_url_data_manager_backend_.get()));
-  DCHECK(set_protocol);
-  set_protocol = job_factory->SetProtocolHandler(
       chrome::kDataScheme, new net::DataProtocolHandler());
   DCHECK(set_protocol);
 #if defined(OS_CHROMEOS)
   if (!is_incognito()) {
     set_protocol = job_factory->SetProtocolHandler(
-        chrome::kDriveScheme, new gdata::GDataProtocolHandler());
+        chrome::kDriveScheme, new gdata::DriveProtocolHandler());
     DCHECK(set_protocol);
   }
 #if !defined(GOOGLE_CHROME_BUILD)
@@ -578,11 +651,22 @@ void ProfileIOData::SetUpJobFactoryDefaults(
     job_factory->AddInterceptor(new chromeos::GViewRequestInterceptor);
 #endif  // !defined(GOOGLE_CHROME_BUILD)
 #endif  // defined(OS_CHROMEOS)
+
+  job_factory->SetProtocolHandler(chrome::kAboutScheme,
+                                  new net::AboutProtocolHandler());
+#if !defined(DISABLE_FTP_SUPPORT)
+  DCHECK(ftp_transaction_factory);
+  job_factory->SetProtocolHandler(
+      chrome::kFtpScheme,
+      new net::FtpProtocolHandler(ftp_transaction_factory,
+                                  ftp_auth_cache));
+#endif  // !defined(DISABLE_FTP_SUPPORT)
 }
 
 void ProfileIOData::ShutdownOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   enable_referrers_.Destroy();
+  enable_do_not_track_.Destroy();
 #if !defined(OS_CHROMEOS)
   enable_metrics_.Destroy();
 #endif
@@ -605,4 +689,37 @@ void ProfileIOData::set_server_bound_cert_service(
 
 void ProfileIOData::DestroyResourceContext() {
   resource_context_.reset();
+}
+
+void ProfileIOData::PopulateNetworkSessionParams(
+    const ProfileParams* profile_params,
+    net::HttpNetworkSession::Params* params) const {
+
+  ChromeURLRequestContext* context = main_request_context();
+
+  IOThread* const io_thread = profile_params->io_thread;
+  IOThread::Globals* const globals = io_thread->globals();
+
+  params->host_resolver = context->host_resolver();
+  params->cert_verifier = context->cert_verifier();
+  params->server_bound_cert_service = context->server_bound_cert_service();
+  params->transport_security_state = context->transport_security_state();
+  params->proxy_service = context->proxy_service();
+  params->ssl_session_cache_shard = GetSSLSessionCacheShard();
+  params->ssl_config_service = context->ssl_config_service();
+  params->http_auth_handler_factory = context->http_auth_handler_factory();
+  params->network_delegate = context->network_delegate();
+  params->http_server_properties = context->http_server_properties();
+  params->net_log = context->net_log();
+  params->host_mapping_rules = globals->host_mapping_rules.get();
+  params->ignore_certificate_errors = globals->ignore_certificate_errors;
+  params->http_pipelining_enabled = globals->http_pipelining_enabled;
+  params->testing_fixed_http_port = globals->testing_fixed_http_port;
+  params->testing_fixed_https_port = globals->testing_fixed_https_port;
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kTrustedSpdyProxy)) {
+    params->trusted_spdy_proxy = command_line.GetSwitchValueASCII(
+        switches::kTrustedSpdyProxy);
+  }
 }

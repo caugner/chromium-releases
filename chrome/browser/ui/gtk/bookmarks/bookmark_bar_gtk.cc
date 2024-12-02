@@ -251,11 +251,6 @@ void BookmarkBarGtk::Init() {
   gtk_box_pack_start(GTK_BOX(bookmark_hbox_), other_bookmarks_separator_,
                      FALSE, FALSE, 0);
 
-  // Newer versions of Gtk default to not showing images on buttons if a label
-  // is set. Override that here.
-  GtkSettings* default_settings = gtk_settings_get_default();
-  g_object_set(default_settings, "gtk-button-images", TRUE, NULL);
-
   // We pack the button manually (rather than using gtk_button_set_*) so that
   // we can have finer control over its label.
   other_bookmarks_button_ = theme_service_->BuildChromeButton();
@@ -1235,7 +1230,8 @@ void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
     hover_controller->StartThrobbing(0);
 
   GdkEvent* event = gtk_get_current_event();
-  if (event->button.button == 1) {
+  if (event->button.button == 1 ||
+      (event->button.button == 2 && sender == overflow_button_)) {
     PopupForButton(sender);
   } else if (event->button.button == 2) {
     const BookmarkNode* node = GetNodeForToolButton(sender);

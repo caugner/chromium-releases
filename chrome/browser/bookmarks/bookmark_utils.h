@@ -26,7 +26,7 @@ class PageNavigator;
 class WebContents;
 }
 
-namespace views {
+namespace ui {
 class DropTargetEvent;
 }
 
@@ -46,7 +46,7 @@ int BookmarkDragOperation(Profile* profile, const BookmarkNode* node);
 // |parent| is the parent node the drop is to occur on and |index| the index the
 // drop is over.
 int BookmarkDropOperation(Profile* profile,
-                          const views::DropTargetEvent& event,
+                          const ui::DropTargetEvent& event,
                           const BookmarkNodeData& data,
                           const BookmarkNode* parent,
                           int index);
@@ -230,6 +230,16 @@ void RemoveAllBookmarks(BookmarkModel* model, const GURL& url);
 // NOTE: treat this as a const. It is not const as various tests change the
 // value.
 extern int num_urls_before_prompting;
+
+// This enum is used for the Bookmarks.EntryPoint histogram.
+enum BoomarkEntryPoint {
+  ENTRY_POINT_ACCELERATOR,
+  ENTRY_POINT_STAR_GESTURE,
+  ENTRY_POINT_STAR_KEY,
+  ENTRY_POINT_STAR_MOUSE,
+
+  ENTRY_POINT_LIMIT // Keep this last.
+};
 
 // This enum is used for the Bookmarks.LaunchLocation histogram.
 enum BookmarkLaunchLocation {

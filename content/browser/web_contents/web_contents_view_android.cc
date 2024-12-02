@@ -28,6 +28,7 @@ WebContentsViewAndroid::WebContentsViewAndroid(
     WebContentsImpl* web_contents,
     WebContentsViewDelegate* delegate)
     : web_contents_(web_contents),
+      content_view_core_(NULL),
       delegate_(delegate) {
 }
 
@@ -78,7 +79,7 @@ gfx::NativeView WebContentsViewAndroid::GetContentNativeView() const {
 }
 
 gfx::NativeWindow WebContentsViewAndroid::GetTopLevelNativeWindow() const {
-  return content_view_core_;
+  return content_view_core_->GetWindowAndroid();
 }
 
 void WebContentsViewAndroid::GetContainerBounds(gfx::Rect* out) const {
@@ -158,9 +159,11 @@ gfx::Rect WebContentsViewAndroid::GetViewBounds() const {
     return gfx::Rect();
 }
 
-void WebContentsViewAndroid::ShowContextMenu(const ContextMenuParams& params) {
+void WebContentsViewAndroid::ShowContextMenu(
+    const ContextMenuParams& params,
+    content::ContextMenuSourceType type) {
   if (delegate_.get())
-    delegate_->ShowContextMenu(params);
+    delegate_->ShowContextMenu(params, type);
 }
 
 void WebContentsViewAndroid::ShowPopupMenu(
@@ -198,7 +201,7 @@ void WebContentsViewAndroid::GotFocus() {
 // iterated past the last focusable element on the page).
 void WebContentsViewAndroid::TakeFocus(bool reverse) {
   if (web_contents_->GetDelegate() &&
-      web_contents_->GetDelegate()->TakeFocus(reverse))
+      web_contents_->GetDelegate()->TakeFocus(web_contents_, reverse))
     return;
   web_contents_->GetRenderWidgetHostView()->Focus();
 }

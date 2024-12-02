@@ -12,6 +12,7 @@
 #include "base/stringprintf.h"
 #include "chrome/browser/chromeos/input_method/browser_state_monitor.h"
 #include "chrome/browser/chromeos/input_method/candidate_window.h"
+#include "chrome/browser/chromeos/input_method/input_method_engine_ibus.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/language_preferences.h"
@@ -247,7 +248,17 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
     FOR_EACH_OBSERVER(InputMethodManager::Observer,
                       observers_,
                       InputMethodPropertyChanged(this));
-    ibus_controller_->Reset();
+    // Hack for fixing http://crosbug.com/p/12798
+    // We should notify IME switching to ibus-daemon, otherwise
+    // IBusPreeditFocusMode does not work. To achieve it, change engine to
+    // itself if the next engine is XKB layout.
+    const std::string current_input_method_id = current_input_method_.id();
+    if (current_input_method_id.empty() ||
+        InputMethodUtil::IsKeyboardLayout(current_input_method_id)) {
+      ibus_controller_->Reset();
+    } else {
+      ibus_controller_->ChangeInputMethod(current_input_method_id);
+    }
   } else {
     ibus_controller_->ChangeInputMethod(input_method_id_to_switch);
   }
@@ -267,13 +278,13 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
 
     previous_input_method_ = current_input_method_;
     current_input_method_ = *descriptor;
+  }
 
-    // Change the keyboard layout to a preferred layout for the input method.
-    if (!xkeyboard_->SetCurrentKeyboardLayoutByName(
-            current_input_method_.keyboard_layout())) {
-      LOG(ERROR) << "Failed to change keyboard layout to "
-                 << current_input_method_.keyboard_layout();
-    }
+  // Change the keyboard layout to a preferred layout for the input method.
+  if (!xkeyboard_->SetCurrentKeyboardLayoutByName(
+          current_input_method_.keyboard_layout())) {
+    LOG(ERROR) << "Failed to change keyboard layout to "
+               << current_input_method_.keyboard_layout();
   }
 
   // Update input method indicators (e.g. "US", "DV") in Chrome windows.
@@ -292,7 +303,8 @@ void InputMethodManagerImpl::AddInputMethodExtension(
     const std::string& id,
     const std::string& name,
     const std::vector<std::string>& layouts,
-    const std::string& language) {
+    const std::string& language,
+    InputMethodEngine* engine) {
   if (state_ == STATE_TERMINATING)
     return;
 
@@ -304,18 +316,22 @@ void InputMethodManagerImpl::AddInputMethodExtension(
   const std::string layout = layouts.empty() ? "" : layouts[0];
   extra_input_methods_[id] =
       InputMethodDescriptor(id, name, layout, language, true);
+  if (!Contains(filtered_extension_imes_, id)) {
+    if (!Contains(active_input_method_ids_, id)) {
+      active_input_method_ids_.push_back(id);
+    } else {
+      DVLOG(1) << "AddInputMethodExtension: alread added: "
+               << id << ", " << name;
+      // Call Start() anyway, just in case.
+    }
 
-  if (!Contains(active_input_method_ids_, id)) {
-    active_input_method_ids_.push_back(id);
-  } else {
-    DVLOG(1) << "AddInputMethodExtension: alread added: "
-             << id << ", " << name;
-    // Call Start() anyway, just in case.
+    // Ensure that the input method daemon is running.
+    MaybeInitializeCandidateWindowController();
+    ibus_controller_->Start();
   }
 
-  // Ensure that the input method daemon is running.
-  MaybeInitializeCandidateWindowController();
-  ibus_controller_->Start();
+  extra_input_method_instances_[id] =
+      static_cast<InputMethodEngineIBus*>(engine);
 }
 
 void InputMethodManagerImpl::RemoveInputMethodExtension(const std::string& id) {
@@ -338,6 +354,66 @@ void InputMethodManagerImpl::RemoveInputMethodExtension(const std::string& id) {
   // If |current_input_method| is no longer in |active_input_method_ids_|,
   // switch to the first one in |active_input_method_ids_|.
   ChangeInputMethod(current_input_method_.id());
+
+  std::map<std::string, InputMethodEngineIBus*>::iterator ite =
+      extra_input_method_instances_.find(id);
+  if (ite == extra_input_method_instances_.end()) {
+    DVLOG(1) << "The engine instance of " << id << " has already gone.";
+  } else {
+    // Do NOT release the actual instance here. This class does not take an
+    // onwership of engine instance.
+    extra_input_method_instances_.erase(ite);
+  }
+}
+
+void InputMethodManagerImpl::GetInputMethodExtensions(
+    InputMethodDescriptors* result) {
+  // Build the extension input method descriptors from the extra input
+  // methods cache |extra_input_methods_|.
+  std::map<std::string, InputMethodDescriptor>::iterator iter;
+  for (iter = extra_input_methods_.begin(); iter != extra_input_methods_.end();
+       ++iter) {
+    result->push_back(iter->second);
+  }
+}
+
+void InputMethodManagerImpl::SetFilteredExtensionImes(
+    std::vector<std::string>* ids) {
+  filtered_extension_imes_.clear();
+  filtered_extension_imes_.insert(filtered_extension_imes_.end(),
+                                  ids->begin(),
+                                  ids->end());
+
+  bool active_imes_changed = false;
+
+  for (std::map<std::string, InputMethodDescriptor>::iterator extra_iter =
+       extra_input_methods_.begin(); extra_iter != extra_input_methods_.end();
+       ++extra_iter) {
+    std::vector<std::string>::iterator active_iter = std::find(
+        active_input_method_ids_.begin(), active_input_method_ids_.end(),
+        extra_iter->first);
+
+    bool active = active_iter != active_input_method_ids_.end();
+    bool filtered = Contains(filtered_extension_imes_, extra_iter->first);
+
+    if (active && filtered)
+      active_input_method_ids_.erase(active_iter);
+
+    if (!active && !filtered)
+      active_input_method_ids_.push_back(extra_iter->first);
+
+    if (active == filtered)
+      active_imes_changed = true;
+  }
+
+  if (active_imes_changed) {
+    MaybeInitializeCandidateWindowController();
+    ibus_controller_->Start();
+
+    // If |current_input_method| is no longer in |active_input_method_ids_|,
+    // switch to the first one in |active_input_method_ids_|.
+    ChangeInputMethod(current_input_method_.id());
+  }
 }
 
 bool InputMethodManagerImpl::SwitchToNextInputMethod() {
@@ -471,6 +547,26 @@ XKeyboard* InputMethodManagerImpl::GetXKeyboard() {
 
 InputMethodUtil* InputMethodManagerImpl::GetInputMethodUtil() {
   return &util_;
+}
+
+void InputMethodManagerImpl::OnConnected() {
+  for (std::map<std::string, InputMethodEngineIBus*>::iterator ite =
+          extra_input_method_instances_.begin();
+       ite != extra_input_method_instances_.end();
+       ite++) {
+    if (!Contains(filtered_extension_imes_, ite->first))
+      ite->second->OnConnected();
+  }
+}
+
+void InputMethodManagerImpl::OnDisconnected() {
+  for (std::map<std::string, InputMethodEngineIBus*>::iterator ite =
+          extra_input_method_instances_.begin();
+       ite != extra_input_method_instances_.end();
+       ite++) {
+    if (!Contains(filtered_extension_imes_, ite->first))
+      ite->second->OnDisconnected();
+  }
 }
 
 void InputMethodManagerImpl::Init() {

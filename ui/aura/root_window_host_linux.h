@@ -13,7 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "ui/aura/root_window_host.h"
-#include "ui/aura/x11_atom_cache.h"
+#include "ui/base/x/x11_atom_cache.h"
 #include "ui/gfx/rect.h"
 
 namespace ui {
@@ -21,6 +21,10 @@ class ViewProp;
 }
 
 namespace aura {
+
+namespace internal {
+class TouchEventCalibrate;
+}
 
 class RootWindowHostLinux : public RootWindowHost,
                             public MessageLoop::Dispatcher {
@@ -33,10 +37,18 @@ class RootWindowHostLinux : public RootWindowHost,
   virtual bool Dispatch(const base::NativeEvent& event) OVERRIDE;
 
  private:
+  bool DispatchEventForRootWindow(const base::NativeEvent& event);
+
+  // Dispatches XI2 events. Note that some events targetted for the X root
+  // window are dispatched to the aura root window (e.g. touch events after
+  // calibration).
+  void DispatchXI2Event(const base::NativeEvent& event);
+
   // RootWindowHost Overrides.
   virtual RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
+  virtual void Hide() OVERRIDE;
   virtual void ToggleFullScreen() OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
@@ -55,6 +67,7 @@ class RootWindowHostLinux : public RootWindowHost,
       std::vector<unsigned char>* png_representation) OVERRIDE;
   virtual void PostNativeEvent(const base::NativeEvent& event) OVERRIDE;
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
+  virtual void PrepareForShutdown() OVERRIDE;
 
   // Returns true if there's an X window manager present... in most cases.  Some
   // window managers (notably, ion3) don't implement enough of ICCCM for us to
@@ -77,6 +90,9 @@ class RootWindowHostLinux : public RootWindowHost,
   // Current Aura cursor.
   gfx::NativeCursor current_cursor_;
 
+  // Is the window mapped to the screen?
+  bool window_mapped_;
+
   // Is the cursor currently shown?
   bool cursor_shown_;
 
@@ -86,6 +102,9 @@ class RootWindowHostLinux : public RootWindowHost,
   // The bounds of |xwindow_|.
   gfx::Rect bounds_;
 
+  // The bounds of |x_root_window_|.
+  gfx::Rect x_root_bounds_;
+
   // True if the window should be focused when the window is shown.
   bool focus_when_shown_;
 
@@ -93,10 +112,9 @@ class RootWindowHostLinux : public RootWindowHost,
 
   scoped_ptr<ui::ViewProp> prop_;
 
-  class ImageCursors;
-  scoped_ptr<ImageCursors> image_cursors_;
+  scoped_ptr<internal::TouchEventCalibrate> touch_calibrate_;
 
-  X11AtomCache atom_cache_;
+  ui::X11AtomCache atom_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowHostLinux);
 };

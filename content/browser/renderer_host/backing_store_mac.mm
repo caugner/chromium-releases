@@ -87,9 +87,13 @@ void BackingStoreMac::PaintToBackingStore(
   gfx::Size pixel_size = size().Scale(device_scale_factor_);
   gfx::Rect pixel_bitmap_rect = bitmap_rect.Scale(scale_factor);
 
+  size_t bitmap_byte_count =
+      pixel_bitmap_rect.width() * pixel_bitmap_rect.height() * 4;
+  DCHECK_GE(dib->size(), bitmap_byte_count);
+
   base::mac::ScopedCFTypeRef<CGDataProviderRef> data_provider(
       CGDataProviderCreateWithData(NULL, dib->memory(),
-      pixel_bitmap_rect.width() * pixel_bitmap_rect.height() * 4, NULL));
+      bitmap_byte_count, NULL));
 
   base::mac::ScopedCFTypeRef<CGImageRef> bitmap_image(
       CGImageCreate(pixel_bitmap_rect.width(), pixel_bitmap_rect.height(),
@@ -152,12 +156,11 @@ bool BackingStoreMac::CopyFromBackingStore(const gfx::Rect& rect,
 
   skia::ScopedPlatformPaint scoped_platform_paint(output);
   CGContextRef temp_context = scoped_platform_paint.GetPlatformSurface();
-  CGContextSaveGState(temp_context);
+  gfx::ScopedCGContextSaveGState save_gstate(temp_context);
   CGContextTranslateCTM(temp_context, 0.0, size().height());
   CGContextScaleCTM(temp_context, 1.0, -1.0);
   CGContextDrawLayerAtPoint(temp_context, CGPointMake(rect.x(), rect.y()),
                             cg_layer());
-  CGContextRestoreGState(temp_context);
   return true;
 }
 
@@ -183,19 +186,18 @@ void BackingStoreMac::ScrollBackingStore(int dx, int dy,
   if ((dx || dy) && abs(dx) < size().width() && abs(dy) < size().height()) {
     if (cg_layer()) {
       CGContextRef layer = CGLayerGetContext(cg_layer());
-      CGContextSaveGState(layer);
+      gfx::ScopedCGContextSaveGState save_gstate(layer);
       CGContextClipToRect(layer,
                           CGRectMake(clip_rect.x(),
                                      size().height() - clip_rect.bottom(),
                                      clip_rect.width(),
                                      clip_rect.height()));
       CGContextDrawLayerAtPoint(layer, CGPointMake(dx, -dy), cg_layer());
-      CGContextRestoreGState(layer);
     } else {
       // We don't have a layer, so scroll the contents of the CGBitmapContext.
       base::mac::ScopedCFTypeRef<CGImageRef> bitmap_image(
           CGBitmapContextCreateImage(cg_bitmap_));
-      CGContextSaveGState(cg_bitmap_);
+      gfx::ScopedCGContextSaveGState save_gstate(cg_bitmap_);
       CGContextClipToRect(cg_bitmap_,
                           CGRectMake(clip_rect.x(),
                                      size().height() - clip_rect.bottom(),
@@ -204,14 +206,13 @@ void BackingStoreMac::ScrollBackingStore(int dx, int dy,
       CGContextDrawImage(cg_bitmap_,
                          CGRectMake(dx, -dy, size().width(), size().height()),
                          bitmap_image);
-      CGContextRestoreGState(cg_bitmap_);
     }
   }
 }
 
 void BackingStoreMac::CopyFromBackingStoreToCGContext(const CGRect& dest_rect,
                                                       CGContextRef context) {
-  gfx::ScopedCGContextSaveGState CGContextSaveGState(context);
+  gfx::ScopedCGContextSaveGState save_gstate(context);
   CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
   if (cg_layer_) {
     CGContextDrawLayerInRect(context, dest_rect, cg_layer_);

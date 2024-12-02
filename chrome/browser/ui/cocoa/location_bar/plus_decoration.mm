@@ -4,15 +4,28 @@
 
 #import "chrome/browser/ui/cocoa/location_bar/plus_decoration.h"
 
-#include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/command_updater.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
+#import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
+#import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
+#import "chrome/browser/ui/cocoa/menu_controller.h"
+#include "chrome/browser/ui/toolbar/action_box_menu_model.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
-PlusDecoration::PlusDecoration(CommandUpdater* command_updater)
-    : command_updater_(command_updater) {
+namespace {
+// The offset to apply to the menu so that it clears the bottom border of the
+// omnibox.
+const CGFloat kAnchorPointYOffset = 4.0;
+const CGFloat kAnchorPointFrameHeight = 23.0;
+}  // namespace
+
+PlusDecoration::PlusDecoration(LocationBarViewMac* owner,
+                               Browser* browser)
+    : owner_(owner),
+      browser_(browser) {
   SetVisible(true);
 
   const int image_id = IDR_ACTION_BOX_BUTTON;
@@ -29,11 +42,38 @@ bool PlusDecoration::AcceptsMousePress() {
 }
 
 bool PlusDecoration::OnMousePressed(NSRect frame) {
-  // TODO(macourteau): trigger the menu when caitkp@ and beaudoin@'s CL is
-  // ready.
+  ActionBoxMenuModel menu_model(browser_);
+
+  // Controller for the menu attached to the plus decoration.
+  scoped_nsobject<MenuController> menu_controller(
+      [[MenuController alloc] initWithModel:&menu_model
+                     useWithPopUpButtonCell:YES]);
+
+  NSMenu* menu = [menu_controller menu];
+
+  // Align the menu popup to that its top-right corner matches the bottom-right
+  // corner of the omnibox.
+  AutocompleteTextField* field = owner_->GetAutocompleteTextField();
+  NSPoint point = GetActionBoxAnchorPoint();
+  NSRect popUpFrame = NSMakeRect(point.x - menu.size.width,
+      kAnchorPointYOffset, menu.size.width, kAnchorPointFrameHeight);
+  scoped_nsobject<NSPopUpButtonCell> pop_up_cell(
+      [[NSPopUpButtonCell alloc] initTextCell:@"" pullsDown:YES]);
+  DCHECK(pop_up_cell.get());
+
+  [pop_up_cell setMenu:menu];
+  [pop_up_cell selectItem:nil];
+  [pop_up_cell attachPopUpWithFrame:popUpFrame inView:field];
+  [pop_up_cell performClickWithFrame:popUpFrame inView:field];
   return true;
 }
 
 NSString* PlusDecoration::GetToolTip() {
   return tooltip_.get();
+}
+
+NSPoint PlusDecoration::GetActionBoxAnchorPoint() {
+  AutocompleteTextField* field = owner_->GetAutocompleteTextField();
+  NSRect bounds = [field bounds];
+  return NSMakePoint(NSMaxX(bounds), NSMaxY(bounds));
 }

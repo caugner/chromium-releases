@@ -13,7 +13,7 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
-#include "net/url_request/url_request_job_factory.h"
+#include "net/url_request/url_request_job_factory_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/blob/blob_data.h"
 #include "webkit/blob/blob_storage_controller.h"
@@ -24,6 +24,7 @@
 #include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/local_file_system_test_helper.h"
 #include "webkit/fileapi/local_file_util.h"
+#include "webkit/fileapi/mock_file_change_observer.h"
 #include "webkit/quota/quota_manager.h"
 
 using quota::QuotaManager;
@@ -76,7 +77,9 @@ class LocalFileSystemOperationWriteTest
         status_(base::PLATFORM_FILE_OK),
         cancel_status_(base::PLATFORM_FILE_ERROR_FAILED),
         bytes_written_(0),
-        complete_(false) {}
+        complete_(false) {
+    change_observers_ = MockFileChangeObserver::CreateList(&change_observer_);
+  }
 
   LocalFileSystemOperation* operation();
 
@@ -94,17 +97,25 @@ class LocalFileSystemOperationWriteTest
   virtual void TearDown();
 
  protected:
+  const ChangeObserverList& change_observers() const {
+    return change_observers_;
+  }
+
+  MockFileChangeObserver* change_observer() {
+    return &change_observer_;
+  }
+
   FileSystemURL URLForPath(const FilePath& path) const {
     return test_helper_.CreateURL(path);
   }
 
   // Callback function for recording test results.
-  FileSystemOperationInterface::WriteCallback RecordWriteCallback() {
+  FileSystemOperation::WriteCallback RecordWriteCallback() {
     return base::Bind(&LocalFileSystemOperationWriteTest::DidWrite,
                       AsWeakPtr());
   }
 
-  FileSystemOperationInterface::StatusCallback RecordCancelCallback() {
+  FileSystemOperation::StatusCallback RecordCancelCallback() {
     return base::Bind(&LocalFileSystemOperationWriteTest::DidCancel,
                       AsWeakPtr());
   }
@@ -147,6 +158,10 @@ class LocalFileSystemOperationWriteTest
   bool complete_;
 
   DISALLOW_COPY_AND_ASSIGN(LocalFileSystemOperationWriteTest);
+
+ private:
+  MockFileChangeObserver change_observer_;
+  ChangeObserverList change_observers_;
 };
 
 namespace {
@@ -160,9 +175,11 @@ class TestProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
   virtual ~TestProtocolHandler() {}
 
   virtual net::URLRequestJob* MaybeCreateJob(
-      net::URLRequest* request) const OVERRIDE {
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const OVERRIDE {
     return new webkit_blob::BlobURLRequestJob(
         request,
+        network_delegate,
         blob_storage_controller_->GetBlobDataFromUrl(request->url()),
         base::MessageLoopProxy::current());
   }
@@ -190,7 +207,7 @@ class TestURLRequestContext : public net::URLRequestContext {
   }
 
  private:
-  net::URLRequestJobFactory job_factory_;
+  net::URLRequestJobFactoryImpl job_factory_;
   scoped_ptr<webkit_blob::BlobStorageController> blob_storage_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(TestURLRequestContext);
@@ -220,7 +237,9 @@ void LocalFileSystemOperationWriteTest::TearDown() {
 }
 
 LocalFileSystemOperation* LocalFileSystemOperationWriteTest::operation() {
-  return test_helper_.NewOperation();
+  LocalFileSystemOperation* operation = test_helper_.NewOperation();
+  operation->operation_context()->set_change_observers(change_observers());
+  return operation;
 }
 
 TEST_F(LocalFileSystemOperationWriteTest, TestWriteSuccess) {
@@ -241,6 +260,8 @@ TEST_F(LocalFileSystemOperationWriteTest, TestWriteSuccess) {
   EXPECT_EQ(14, bytes_written());
   EXPECT_EQ(base::PLATFORM_FILE_OK, status());
   EXPECT_TRUE(complete());
+
+  EXPECT_EQ(1, change_observer()->get_and_reset_modify_file_count());
 }
 
 TEST_F(LocalFileSystemOperationWriteTest, TestWriteZero) {
@@ -260,6 +281,8 @@ TEST_F(LocalFileSystemOperationWriteTest, TestWriteZero) {
   EXPECT_EQ(0, bytes_written());
   EXPECT_EQ(base::PLATFORM_FILE_OK, status());
   EXPECT_TRUE(complete());
+
+  EXPECT_EQ(1, change_observer()->get_and_reset_modify_file_count());
 }
 
 TEST_F(LocalFileSystemOperationWriteTest, TestWriteInvalidBlobUrl) {
@@ -272,6 +295,8 @@ TEST_F(LocalFileSystemOperationWriteTest, TestWriteInvalidBlobUrl) {
   EXPECT_EQ(0, bytes_written());
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_FAILED, status());
   EXPECT_TRUE(complete());
+
+  EXPECT_EQ(0, change_observer()->get_and_reset_modify_file_count());
 }
 
 TEST_F(LocalFileSystemOperationWriteTest, TestWriteInvalidFile) {
@@ -293,6 +318,8 @@ TEST_F(LocalFileSystemOperationWriteTest, TestWriteInvalidFile) {
   EXPECT_EQ(0, bytes_written());
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
   EXPECT_TRUE(complete());
+
+  EXPECT_EQ(1, change_observer()->get_and_reset_modify_file_count());
 }
 
 TEST_F(LocalFileSystemOperationWriteTest, TestWriteDir) {
@@ -323,6 +350,8 @@ TEST_F(LocalFileSystemOperationWriteTest, TestWriteDir) {
               status() == base::PLATFORM_FILE_ERROR_ACCESS_DENIED ||
               status() == base::PLATFORM_FILE_ERROR_FAILED);
   EXPECT_TRUE(complete());
+
+  EXPECT_EQ(1, change_observer()->get_and_reset_modify_file_count());
 }
 
 TEST_F(LocalFileSystemOperationWriteTest, TestWriteFailureByQuota) {
@@ -344,6 +373,8 @@ TEST_F(LocalFileSystemOperationWriteTest, TestWriteFailureByQuota) {
   EXPECT_EQ(10, bytes_written());
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_NO_SPACE, status());
   EXPECT_TRUE(complete());
+
+  EXPECT_EQ(1, change_observer()->get_and_reset_modify_file_count());
 }
 
 TEST_F(LocalFileSystemOperationWriteTest, TestImmediateCancelSuccessfulWrite) {
@@ -355,7 +386,7 @@ TEST_F(LocalFileSystemOperationWriteTest, TestImmediateCancelSuccessfulWrite) {
   url_request_context.blob_storage_controller()->AddFinishedBlob(
       blob_url, blob_data);
 
-  FileSystemOperationInterface* write_operation = operation();
+  FileSystemOperation* write_operation = operation();
   write_operation->Write(&url_request_context, URLForPath(virtual_path_),
                          blob_url, 0, RecordWriteCallback());
   write_operation->Cancel(RecordCancelCallback());
@@ -372,6 +403,8 @@ TEST_F(LocalFileSystemOperationWriteTest, TestImmediateCancelSuccessfulWrite) {
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_ABORT, status());
   EXPECT_EQ(base::PLATFORM_FILE_OK, cancel_status());
   EXPECT_TRUE(complete());
+
+  EXPECT_EQ(0, change_observer()->get_and_reset_modify_file_count());
 }
 
 TEST_F(LocalFileSystemOperationWriteTest, TestImmediateCancelFailingWrite) {
@@ -383,7 +416,7 @@ TEST_F(LocalFileSystemOperationWriteTest, TestImmediateCancelFailingWrite) {
   url_request_context.blob_storage_controller()->AddFinishedBlob(
       blob_url, blob_data);
 
-  FileSystemOperationInterface* write_operation = operation();
+  FileSystemOperation* write_operation = operation();
   write_operation->Write(&url_request_context,
                          URLForPath(FilePath(FILE_PATH_LITERAL("nonexist"))),
                          blob_url, 0, RecordWriteCallback());
@@ -401,6 +434,8 @@ TEST_F(LocalFileSystemOperationWriteTest, TestImmediateCancelFailingWrite) {
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_ABORT, status());
   EXPECT_EQ(base::PLATFORM_FILE_OK, cancel_status());
   EXPECT_TRUE(complete());
+
+  EXPECT_EQ(0, change_observer()->get_and_reset_modify_file_count());
 }
 
 // TODO(ericu,dmikurube,kinuko): Add more tests for cancel cases.

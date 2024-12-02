@@ -25,7 +25,7 @@
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
-#include "ui/views/examples/examples_window.h"
+#include "ui/views/examples/examples_window_with_content.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
 
@@ -96,7 +96,7 @@ class ModalWindow : public views::WidgetDelegateView,
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
-                             const views::Event& event) OVERRIDE {
+                             const ui::Event& event) OVERRIDE {
     DCHECK(sender == open_button_);
     OpenModalWindow(GetWidget()->GetNativeView(), modal_type_);
   }
@@ -265,7 +265,7 @@ void WindowTypeLauncher::OnPaint(gfx::Canvas* canvas) {
   canvas->FillRect(GetLocalBounds(), SK_ColorWHITE);
 }
 
-bool WindowTypeLauncher::OnMousePressed(const views::MouseEvent& event) {
+bool WindowTypeLauncher::OnMousePressed(const ui::MouseEvent& event) {
   // Overridden so we get OnMouseReleased and can show the context menu.
   return true;
 }
@@ -287,7 +287,7 @@ bool WindowTypeLauncher::CanMaximize() const {
 }
 
 void WindowTypeLauncher::ButtonPressed(views::Button* sender,
-                                       const views::Event& event) {
+                                       const ui::Event& event) {
   if (sender == create_button_) {
     ToplevelWindow::CreateParams params;
     params.can_resize = true;
@@ -337,7 +337,7 @@ void WindowTypeLauncher::ButtonPressed(views::Button* sender,
   }
 #if !defined(OS_MACOSX)
   else if (sender == examples_button_) {
-    views::examples::ShowExamplesWindow(
+    views::examples::ShowExamplesWindowWithContent(
         views::examples::DO_NOTHING_ON_CLOSE,
         ash::Shell::GetInstance()->browser_context());
   }
@@ -373,7 +373,8 @@ void WindowTypeLauncher::ShowContextMenuForView(views::View* source,
   menu_runner_.reset(new MenuRunner(root));
   if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
         MenuItemView::TOPLEFT,
-        MenuRunner::HAS_MNEMONICS) == MenuRunner::MENU_DELETED)
+        MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
+        MenuRunner::MENU_DELETED)
     return;
 }
 #endif  // !defined(OS_MACOSX)

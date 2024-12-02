@@ -87,6 +87,7 @@
 <translation id="5564962323737505851">Mit dieser Richtlinie wird der Passwortmanager konfiguriert. Ist der Passwortmanager aktiviert, können Sie festlegen, ob der Nutzer gespeicherte Passwörter als Klartext anzeigen kann.</translation>
 <translation id="4668325077104657568">Standardeinstellung für Bilder</translation>
 <translation id="7161193985878519056">Inkognito-Modus deaktiviert</translation>
+<translation id="2524379983318108884">Aufnahme von Audioinhalten zulassen</translation>
 <translation id="4492287494009043413">Aufnahme von Screenshots deaktivieren</translation>
 <translation id="6368403635025849609">JavaScript auf diesen Websites zulassen</translation>
 <translation id="6074963268421707432">Anzeige von Desktop-Benachrichtigungen für keine Website zulassen</translation>
@@ -154,19 +155,13 @@
       Einige Web-Apps nutzen viele Verbindungen mit hängenden GETs. Daher kann ein Wert unter 32 dazu führen, dass der Browser hängt, wenn zu viele solcher Web-Apps geöffnet sind. Wenn Sie einen Wert unter dem Standardwert festlegen, geschieht dies auf eigenes Risiko.
 
       Ist diese Richtlinie nicht konfiguriert, so kommt der Standardwert von 32 zum Einsatz.</translation>
+<translation id="5395271912574071439">Aktiviert die Zugangsbeschränkung für Remote-Zugriff-Hosts bei bestehender Verbindung
+
+          Wenn diese Einstellung aktiviert ist, werden die physischen Ein- und Ausgabegeräte des Hosts bei bestehender Remote-Verbindung deaktiviert.
+
+          Wenn diese Einstellung deaktiviert oder nicht festgelegt ist, können lokale und Remote-Nutzer mit dem Host interagieren, sofern dieser freigegeben ist.</translation>
 <translation id="2312509925391670075">Nachfragen, wenn eine Website auf meine Kamera und/oder mein Mikrofon zugreifen möchte</translation>
 <translation id="1426410128494586442">Ja</translation>
-<translation id="1692788808502061374">Mit dieser Richtlinie können Sie eine Liste der Erweiterungen angeben, die automatisch installiert werden, also ohne Interaktion des Nutzers.
-
-          Jedes Element der Liste ist eine Zeichenfolge, die aus einer Erweiterungs-ID und einer Aktualisierungs-URL besteht, die durch ein Semikolon (<ph name="SEMICOLON"/>) getrennt sind. Die Erweiterungs-ID ist die 32-stellige Zeichenfolge, die Sie zum Beispiel im Entwicklermodus unter <ph name="CHROME_EXTENSIONS_LINK"/> finden. Die Aktualisierungs-URL solle auf ein &quot;Update Manifest&quot;-XML-Dokument verweisen, wie unter <ph name="LINK_TO_EXTENSION_DOC1"/> beschrieben.
-
-          <ph name="PRODUCT_NAME"/> ruft für jedes Element die über die Erweiterungs-ID angegebene Erweiterung vom Aktualisierungsdienst unter der angegebenen URL ab und installiert diese ohne Nutzereingriff.
-
-          <ph name="EXTENSION_POLICY_EXAMPLE"/> installiert beispielsweise die Erweiterung &quot;<ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/>&quot; über die Standard-Aktualisierungs-URL des Chrome Web Stores. Weitere Informationen zum Hosten von Erweiterungen finden Sie unter <ph name="LINK_TO_EXTENSION_DOC2"/>.
-
-          Nutzer können keine Erweiterungen deinstallieren, die mithilfe dieser Richtlinie angegeben werden. Wenn Sie eine Erweiterung aus dieser Liste entfernen, wird sie automatisch durch <ph name="PRODUCT_NAME"/> deinstalliert.
-
-          Wenn diese Richtlinie nicht konfiguriert ist, kann der Nutzer beliebige Erweiterungen in <ph name="PRODUCT_NAME"/> deinstallieren.</translation>
 <translation id="4962195944157514011">Gibt die URL einer Suchmaschine an, die für Standardsuchanfragen zum Einsatz kommt. Die URL sollte die Zeichenfolge &quot;<ph name="SEARCH_TERM_MARKER"/>&quot; enthalten. Diese wird bei der Suchanfrage mit dem Text ersetzt, nach dem der Nutzer sucht. Diese Option muss konfiguriert werden, wenn die Richtlinie &quot;DefaultSearchProviderEnabled&quot; aktiviert ist, und wird nur dann beachtet, wenn das der Fall ist.</translation>
 <translation id="6009903244351574348"><ph name="PRODUCT_FRAME_NAME"/> erlauben, die gelisteten Inhaltstypen zu verarbeiten. Wenn diese Richtlinie nicht konfiguriert ist, so kommt der Standard-Renderer für alle Websites gemäß der Richtlinie &quot;ChromeFrameRendererSettings&quot; zum Einsatz.</translation>
 <translation id="3381968327636295719">Standardmäßig Host-Browser verwenden</translation>
@@ -191,7 +186,7 @@
 
           Ist diese Einstellung deaktiviert oder nicht festgelegt, können Hosts über alle Konten gemeinsam genutzt werden.</translation>
 <translation id="6417861582779909667">Ermöglicht die Zusammenstellung einer Liste mit URL-Mustern, die Websites angeben, die keine Cookies speichern dürfen. Wenn diese Richtlinie nicht konfiguriert ist, so kommt für alle Websites der globale Standardwert der Richtlinie &quot;DefaultCookiesSetting&quot;, sofern konfiguriert, oder der persönlichen Konfiguration des Nutzers zum Einsatz.</translation>
-<translation id="5457296720557564923">Hiermit erhalten Seiten Zugriff auf Statistiken zur JavaScript-Speicherauslastung. Über diese Einstellungen werden der Webseite die Speicherstatistiken aus dem Steuerfeld &quot;Profile&quot; der Entwicklertools zur Verfügung gestellt.</translation>
+<translation id="5457296720557564923">Seiten können auf Statistiken zur JavaScript-Speicherauslastung zugreifen. Über diese Einstellungen werden der Webseite die Speicherstatistiken aus dem Steuerfeld &quot;Profile&quot; der Entwicklertools zur Verfügung gestellt.</translation>
 <translation id="3390940575626654915">Unternehmens-Web-Store-Name</translation>
 <translation id="5776485039795852974">Nachfragen, wenn eine Website Desktop-Benachrichtigungen anzeigen will</translation>
 <translation id="5052081091120171147">Diese Richtlinie erzwingt, sofern aktiv, den Import des Browserverlaufs aus dem aktuellen Standardbrowser. Ist die Richtlinie aktiviert, wirkt sie sich auch auf den Importdialog aus. Wenn sie deaktiviert ist, erfolgt kein Import des Browserverlaufs. Sollte sie nicht konfiguriert sein, so wird der Nutzer möglicherweise gefragt, ob ein Import erfolgen soll, oder der Import findet automatisch statt.</translation>
@@ -202,6 +197,13 @@
 <translation id="7003334574344702284">Diese Richtlinie erzwingt, sofern aktiv, den Import von gespeicherten Passwörtern aus dem vorherigen Standardbrowser. Bei einer Aktivierung wirkt sich die Richtlinie auch auf den Importdialog aus. Wenn sie deaktiviert ist, erfolgt kein Import der gespeicherten Passwörter. Sollte sie nicht konfiguriert sein, so wird der Nutzer möglicherweise gefragt, ob ein Import erfolgen soll, oder der Import findet automatisch statt.</translation>
 <translation id="6258193603492867656">Gibt an, ob der generierte Kerberos-SPN einen Nicht-Standard-Port umfassen soll. Falls Sie diese Einstellung aktivieren und ein Nicht-Standard-Port (ein anderer Port als 80 oder 443) eingegeben wird, wird dieser in den generierten Kerberos-SPN aufgenommen. Wenn Sie diese Einstellung deaktivieren oder nicht konfigurieren, umfasst der generierte Kerberos-SPN in keinem Fall einen Port.</translation>
 <translation id="3236046242843493070">URL-Muster für die Installation von Erweiterungen, Apps und Nutzerskripten von</translation>
+<translation id="3442095178490656861">Mit dieser Richtlinie wird die für das Gerät zu verwendende Zeitzone festgelegt. Die Nutzer können die festgelegte Zeitzone für die aktuelle Sitzung außer Kraft setzen. Sobald sie sich abmelden, wird die Zeitzone jedoch wieder auf die festgelegte Einstellung zurückgesetzt. Bei Angabe eines ungültigen Werts greift die Richtlinie weiterhin und es wird stattdessen &quot;GMT&quot; verwendet.
+
+      Wird die Richtlinie nicht angewendet, wird die derzeit aktive Zeitzone verwendet. Allerdings können die Nutzer die Zeitzone dann ändern und die Änderung wird beibehalten. Die Änderung durch einen Nutzer wirkt sich dann auf die Anmeldeseite und die Einstellungen für alle Nutzer aus.
+
+      Bei neuen Geräten ist die Zeitzone &quot;US/Pacific Time&quot; voreingestellt.
+
+      Das Format des Werts entspricht den Namen der Zeitzonen in der &quot;IANA Time Zone Database&quot; (siehe &quot;http://en.wikipedia.org/wiki/List_of_tz_database_time_zones&quot;). Auf die meisten Zeitzonen kann über &quot;Kontinent/Stadt&quot; oder &quot;Ozean/Stadt&quot; verwiesen werden.</translation>
 <translation id="8992176907758534924">Anzeige von Bildern für alle Websites blockieren</translation>
 <translation id="262740370354162807">Senden von Dokumenten an <ph name="CLOUD_PRINT_NAME"/> aktivieren</translation>
 <translation id="8704831857353097849">Liste der deaktivierten Plug-ins</translation>
@@ -255,6 +257,7 @@
 
       Wird diese Richtlinie nicht konfiguriert, können Nutzer die Liste der in der Übersicht angezeigten Apps ändern.</translation>
 <translation id="7625444193696794922">Gibt den Release-Kanal an, an den dieses Gerät gebunden werden soll.</translation>
+<translation id="2552966063069741410">Zeitzone</translation>
 <translation id="3088288048720661397">Bei Festlegung auf &quot;True&quot; ist die Google Docs-Synchronisierung über eine Mobilfunkverbindung deaktiviert. Das heißt, es werden nur Daten mit Google Docs synchronisiert, wenn eine WLAN- oder Ethernet-Verbindung besteht.
 
           Bei Nichtkonfiguration oder Festlegung auf &quot;False&quot; können Nutzer über Mobilfunkverbindungen Dateien an Google Docs senden.</translation>
@@ -322,6 +325,7 @@
 <translation id="6392973646875039351">Aktiviert die AutoFill-Funktion von <ph name="PRODUCT_NAME"/> und ermöglicht es Nutzern, Web-Formulare automatisch mit zuvor gespeicherten Informationen (etwa Adresse oder Kreditkarteninformationen) ausfüllen zu lassen. Wenn Sie diese Einstellung deaktivieren, können Nutzer die AutoFill-Funktion nicht verwenden. Ist diese Einstellung aktiviert oder nicht konfiguriert, kann der Nutzer entscheiden, ob er AutoFill nutzen möchte. Er kann AutoFill-Profile konfigurieren und AutoFill nach eigenem Ermessen aktivieren und deaktivieren.</translation>
 <translation id="6157537876488211233">Kommagetrennte Liste der Proxy-Umgehungsregeln</translation>
 <translation id="3965339130942650562">Timeout bis zur Abmeldung eines inaktiven Nutzers</translation>
+<translation id="5293547923319914979">Zugangsbeschränkung für Remote-Zugriff-Hosts aktivieren</translation>
 <translation id="7091198954851103976">Führt Plug-ins, die eine Autorisierung erfordern, immer aus</translation>
 <translation id="2021307518684405078">Keine Website darf auf meine Kamera und mein Mikrofon zugreifen.</translation>
 <translation id="8870318296973696995">Startseite</translation>
@@ -346,6 +350,13 @@
 <translation id="8469342921412620373">Ermöglicht die Verwendung einer Standardsuchmaschine. Ist diese Einstellung aktiviert, wird eine Standardsuche durchgeführt, wenn der Nutzer Text in die Omnibox eingibt, der keine URL ist. Sie können die zu verwendende Standardsuchmaschine angeben, indem Sie die restlichen Richtlinien zur Standardsuche festlegen. Werden diese nicht festgelegt, kann der Nutzer die Standardsuchmaschine auswählen. Ist diese Einstellung deaktiviert, wird keine Suche durchgeführt, wenn der Nutzer einen anderen Text als eine URL in die Omnibox eingibt. Falls Sie diese Einstellung aktivieren oder deaktivieren, können Nutzer die Einstellung in <ph name="PRODUCT_NAME"/> nicht ändern oder außer Kraft setzen. Sollte die Richtlinie nicht konfiguriert sein, so wird der Standardsuchanbieter aktiviert und der Nutzer kann die Suchanbieterliste selbst zusammenstellen.</translation>
 <translation id="8731693562790917685">Unter &quot;Inhaltseinstellungen&quot; können Sie angeben, wie Inhalte bestimmter Typen (z. B. Cookies, Bilder oder JavaScript) verarbeitet werden.</translation>
 <translation id="2411919772666155530">Benachrichtigungen auf diesen Websites blockieren</translation>
+<translation id="5281259077246025371">Aufnahme von Audioinhalten zulassen
+
+       Wenn diese Richtlinie auf &quot;False&quot; festgelegt wird, ist die Aufnahme von Audioinhalten über das Gerät nicht möglich, während der Nutzer angemeldet ist.
+
+      Diese Richtlinie gilt für jegliche Form der Audioaufnahme, nicht nur für integrierte Mikrofone.
+
+      Wenn diese Einstellung auf &quot;True&quot; festgelegt oder nicht konfiguriert ist, können die Nutzer alle unterstützten Audioaufnahmetypen auf dem Gerät verwenden.</translation>
 <translation id="6923366716660828830">Gibt den Namen des Standardsuchanbieters an. Wenn die Richtlinie leer oder nicht konfiguriert ist, so wird der durch die Such-URL angegebene Hostname verwendet. Diese Richtlinie wird nur dann umgesetzt, wenn &quot;DefaultSearchProviderEnabled&quot; aktiviert ist.</translation>
 <translation id="467236746355332046">Unterstützte Funktionen:</translation>
 <translation id="7632724434767231364">Name der GSSAPI-Bibliothek</translation>
@@ -377,6 +388,13 @@
           Sollten Sie diese Einstellung aktivieren, kann sie nicht von Nutzern in <ph name="PRODUCT_NAME"/> geändert oder überschrieben werden.
 
           Die Deaktivierung dieser Einstellung entspricht einer nicht konfigurierten Option. Ein Nutzer kann sie dann in <ph name="PRODUCT_NAME"/> ändern.</translation>
+<translation id="8161570238552664224">Wiedergabe von Audioinhalten zulassen
+
+      Wenn diese Richtlinie auf &quot;False&quot; festgelegt wird, ist die Wiedergabe von Audioinhalten über das Gerät nicht möglich, während der Nutzer angemeldet ist.
+
+      Diese Richtlinie gilt für jegliche Form der Audiowiedergabe, nicht nur für integrierte Lautsprecher. Bedienungshilfen für Audio werden mit dieser Richtlinie ebenfalls gesperrt. Aktivieren Sie diese Richtlinie nicht, wenn der Nutzer einen Screenreader benötigt.
+
+      Wenn diese Einstellung auf &quot;True&quot; festgelegt oder nicht konfiguriert ist, können die Nutzer alle unterstützten Audiowiedergabetypen auf dem Gerät verwenden.</translation>
 <translation id="5761030451068906335">Hiermit werden die Proxy-Einstellungen für <ph name="PRODUCT_NAME"/> konfiguriert. Diese Richtlinie ist noch nicht einsatzbereit und sollte daher nicht verwendet werden.</translation>
 <translation id="8344454543174932833">Lesezeichen bei erster Ausführung aus Standardbrowser importieren</translation>
 <translation id="1019101089073227242">Verzeichnis für Nutzerdaten festlegen</translation>
@@ -461,6 +479,7 @@
 <translation id="1675002386741412210">Unterstützt von:</translation>
 <translation id="3547954654003013442">Proxy-Einstellungen</translation>
 <translation id="4482640907922304445">Zeigt die Schaltfläche &quot;Startseite&quot; in der Symbolleiste von <ph name="PRODUCT_NAME"/> an. Wenn Sie diese Einstellung aktivieren, so wird die Schaltfläche &quot;Startseite&quot; immer angezeigt. Sollten Sie sie deaktivieren, erscheint die Schaltfläche nicht. Ist diese Einstellung aktiviert oder deaktiviert, können Nutzer sie in <ph name="PRODUCT_NAME"/> nicht ändern oder außer Kraft setzen. Ist die Richtlinie nicht konfiguriert, so kann der Nutzer selbst bestimmen, ob die Schaltfläche &quot;Startseite&quot; zur Verfügung stehen soll.</translation>
+<translation id="2518231489509538392">Wiedergabe von Audioinhalten zulassen</translation>
 <translation id="7547044444554936129">Aktiviert die Instant-Funktion von <ph name="PRODUCT_NAME"/> und verhindert, dass Nutzer diese Einstellung ändern. Wenn Sie die Einstellung aktivieren, wird Instant in <ph name="PRODUCT_NAME"/> aktiviert. Sollten Sie sie deaktivieren, so steht Instant in <ph name="PRODUCT_NAME"/> nicht zur Verfügung. Ist diese Einstellung aktiviert oder deaktiviert, können Nutzer sie nicht ändern oder außer Kraft setzen. Ist die Einstellung nicht konfiguriert, so kann der Nutzer bestimmen, ob er die Funktion in Anspruch nehmen möchte.</translation>
 <translation id="3264793472749429012">Standardsuchmaschinen-Codierungen</translation>
 <translation id="8101760444435022591">Da Online-Überprüfungen zu SoftFail-Zertifikatssperren keinen wirkungsvollen Sicherheitseffekt bieten, werden sie ab <ph name="PRODUCT_NAME"/>-Version 19 standardmäßig deaktiviert. Wenn Sie diese Richtlinie auf &quot;true&quot; setzen, wird das vorherige Verhalten wiederhergestellt und es werden online OCSP-/CRL-Prüfungen durchgeführt.
@@ -509,6 +528,7 @@
 <translation id="8889026535261486875">Für Server, an die <ph name="PRODUCT_NAME"/> möglicherweise etwas delegiert. Trennen Sie mehrere Servernamen durch Kommas. Platzhalter (*) sind möglich. Wenn Sie diese Richtlinie nicht konfigurieren, kommt jeder Server für die integrierte Authentifizierung infrage.</translation>
 <translation id="2299220924812062390">Liste der aktivierten Plug-ins angeben</translation>
 <translation id="924557436754151212">Gespeicherte Passwörter bei erster Ausführung aus Standardbrowser importieren</translation>
+<translation id="1465619815762735808">Click-to-Play</translation>
 <translation id="7227967227357489766">Definiert eine Liste mit Nutzern, die sich auf dem Gerät anmelden dürfen. Die Einträge haben das Format <ph name="USER_WHITELIST_ENTRY_FORMAT"/>, zum Beispiel <ph name="USER_WHITELIST_ENTRY_EXAMPLE"/>. Um allen Nutzern in einer Domain die Anmeldung zu erlauben, verwenden Sie Einträge im Format <ph name="USER_WHITELIST_ENTRY_WILDCARD"/>.
 
        Falls diese Richtlinie nicht konfiguriert ist, gibt es keine Beschränkungen, welche Nutzer sich anmelden dürfen. Zum Erstellen neuer Nutzer muss aber weiterhin die Richtlinie &quot;<ph name="DEVICEALLOWNEWUSERS_POLICY_NAME"/>&quot; entsprechend konfiguriert werden.</translation>
@@ -550,6 +570,11 @@
 <translation id="8631434304112909927">Bis Version <ph name="UNTIL_VERSION"/></translation>
 <translation id="7469554574977894907">Suchvorschläge aktivieren</translation>
 <translation id="4906194810004762807">Aktualisierungsrate für Geräterichtlinien</translation>
+<translation id="1398889361882383850">Mit dieser Richtlinie können Sie festlegen, ob Websites Plug-ins automatisch ausführen dürfen. Das automatische Ausführen von Plug-ins kann entweder allen Websites gestattet oder für alle Websites unterbunden werden.
+
+           Click-to-Play ermöglicht die Ausführung von Plug-ins. Der Nutzer muss jedoch darauf klicken, um die Ausführung zu initiieren.
+
+          Wird diese Richtlinie nicht konfiguriert, wird die Richtlinie &quot;AllowPlugins&quot; genutzt, die der Nutzer ändern kann.</translation>
 <translation id="7974114691960514888">Diese Richtlinie wird nicht mehr unterstützt. Sie aktiviert beim Verbinden zu einem Remote-Client den Einsatz von STUN und Relay-Servern. Wenn diese Einstellung aktiviert wird, kann dieser Computer Remote-Hostcomputer finden und eine Verbindung herstellen, selbst wenn sie sich hinter einer Firewall befinden. Sollte die Einstellung deaktiviert sein und ausgehende UDP-Verbindungen von der Firewall gefiltert werden, dann kann dieser Computer nur Verbindungen zu Hostcomputern innerhalb des lokalen Netzwerks aufbauen.</translation>
 <translation id="5511702823008968136">Lesezeichenleiste aktivieren</translation>
 <translation id="7882585827992171421">Diese Richtlinie ist nur im Händlermodus aktiv.
@@ -568,7 +593,6 @@
 <translation id="4121350739760194865">App-Werbung nicht auf der &quot;Neuer Tab&quot;-Seite anzeigen</translation>
 <translation id="2127599828444728326">Benachrichtigungen auf diesen Websites zulassen</translation>
 <translation id="7635471475589566552">Konfiguriert das Anwendungs-Gebietsschema in <ph name="PRODUCT_NAME"/> und verhindert, dass Nutzer das Gebietsschema ändern. Wenn Sie diese Einstellung aktivieren, verwendet <ph name="PRODUCT_NAME"/> das angegebene Gebietsschema. Wird das konfigurierte Gebietsschema nicht unterstützt, kommt stattdessen &quot;en-US&quot; zum Einsatz. Ist diese Einstellung deaktiviert oder nicht konfiguriert, verwendet <ph name="PRODUCT_NAME"/> das vom Nutzer angegebene bevorzugte Gebietsschema (sofern konfiguriert), das Gebietsschema des Systems oder das Ersatz-Gebietsschema &quot;en-US&quot;.</translation>
-<translation id="7271483295221961083">Ermöglicht Ihnen festzulegen, ob Websites Plug-ins automatisch ausführen dürfen. Das automatische Ausführen von Plug-ins kann entweder allen Websites gestattet oder für alle unterbunden werden. Wenn die Richtlinie nicht konfiguriert ist, so kommt &quot;AllowPlugins&quot; zum Einsatz, wobei der Nutzer dies ändern kann.</translation>
 <translation id="718956142899066210">Für Updates zugelassene Verbindungstypen</translation>
 <translation id="6985168562472482191">Der Name des Unternehmens-Web-Stores, der unter dem App-Symbol auf der &quot;Neuer Tab&quot;-Seite erscheint. Diese Einstellung hat keine Auswirkung, wenn &quot;EnterpriseWebStoreURL&quot; nicht konfiguriert ist. Sollte die Einstellung deaktiviert werden, wird die Unternehmens-Web-Store-App, sofern sie existiert, mit ihrer URL benannt.</translation>
 <translation id="1734716591049455502">Optionen für Remote-Zugriff konfigurieren</translation>
@@ -593,6 +617,17 @@
 <translation id="6658245400435704251">Legt die Anzahl von Sekunden fest, die eine Verzögerung ab dem Übertragungszeitpunkt an den Server maximal betragen darf, wenn ein Gerät ein Update herunterlädt. Die Verzögerungszeit setzt sich aus der Istzeit und der auf die Anzahl der Überprüfungen auf Updates verwendeten Zeit zusammen. Die obere Grenze für den Streufaktor bildet ein konstanter Zeitraum, sodass ein Gerät nur eine begrenzte Zeit lang auf den Download eines Updates wartet.</translation>
 <translation id="1948757837129151165">Richtlinien für HTTP-Authentifizierung</translation>
 <translation id="5946082169633555022">Beta-Kanal</translation>
+<translation id="145467868108778033">Mit dieser Richtlinie können Sie eine Liste der Erweiterungen angeben, die automatisch bzw.ohne Nutzereingriff installiert werden.
+
+          Jedes Element der Liste ist eine Zeichenfolge, die aus einer Erweiterungs-ID und einer Aktualisierungs-URL besteht, die durch ein Semikolon (<ph name="SEMICOLON"/>) getrennt sind. Die Erweiterungs-ID besteht aus 32 Buchstaben, wie beispielsweise im Entwicklermodus unter <ph name="CHROME_EXTENSIONS_LINK"/> zu finden. Die Aktualisierungs-URL sollte auf eine XML-Datei zum Aktualisieren des Manifests verweisen, wie unter <ph name="LINK_TO_EXTENSION_DOC1"/> beschrieben. Beachten Sie, dass die mit dieser Richtlinie festgelegte Aktualisierungs-URL nur für die Erstinstallation verwendet wird. Bei Aktualisierungen der Erweiterung wird die im Manifest der Erweiterung angegebene Aktualisierungs-URL verwendet.
+
+          <ph name="PRODUCT_NAME"/> ruft für jedes Element die Erweiterung, die durch die Erweiterungs-ID angegeben wird, unter einer speziellen Aktualisierungs-URL vom Aktualisierungsdienst ab und installiert diese automatisch.
+
+          <ph name="EXTENSION_POLICY_EXAMPLE"/> installiert beispielsweise die Erweiterung <ph name="EXTENSION_POLICY_EXAMPLE_EXTENSION_NAME"/> von der standardmäßigen Chrome Web Store-Aktualisierungs-URL. Weitere Informationen zum Hosten von Erweiterungen erhalten Sie unter <ph name="LINK_TO_EXTENSION_DOC2"/>.
+
+          Nutzer können die mithilfe dieser Richtlinie festgelegten Erweiterungen nicht deinstallieren. Falls Sie eine Erweiterung aus dieser Liste entfernen, wird sie automatisch durch <ph name="PRODUCT_NAME"/> deinstalliert.
+
+          Wird diese Richtlinie nicht konfiguriert, kann der Nutzer jede Erweiterung in <ph name="PRODUCT_NAME"/> deinstallieren.</translation>
 <translation id="8303314579975657113">Gibt an, welche GSSAPI-Bibliothek für die HTTP-Authentifizierung verwendet werden soll. Sie können entweder nur den Namen einer Bibliothek oder einen vollständigen Pfad angeben. Wenn diese Einstellung nicht festgelegt ist, verwendet <ph name="PRODUCT_NAME"/> einen Standardnamen für die Bibliothek.</translation>
 <translation id="7749402620209366169">Aktiviert die Zwei-Faktor-Authentifizierung für Remote-Zugriff-Hosts anstelle einer vom Nutzer angegebenen PIN.
 
@@ -601,7 +636,7 @@
           Ist diese Einstellung deaktiviert oder nicht festgelegt, wird die Zwei-Faktor-Authentifizierung nicht aktiviert und das Standardverfahren zur Eingabe einer nutzerdefinierten PIN wird verwendet.</translation>
 <translation id="384743459174066962">Ermöglicht Ihnen die Zusammenstellung einer Liste mit URL-Mustern, die Websites angeben, denen das Öffnen von Pop-ups nicht gestattet ist. Wenn diese Richtlinie nicht konfiguriert ist, kommt für alle Websites der globale Standardwert der Richtlinie &quot;DefaultPopupsSetting&quot;, sofern konfiguriert, oder der persönlichen Konfiguration des Nutzers zum Einsatz.</translation>
 <translation id="5645779841392247734">Cookies auf diesen Websites zulassen</translation>
-<translation id="4043912146394966243"> Die Verbindungstypen, die für Betriebssystemaktualisierungen zulässig sind. Betriebssystemaktualisierungen beanspruchen die Verbindung aufgrund ihrer Größe potenziell stark und können zusätzliche Kosten verursachen. Deshalb sind sie für als kostenintensiv geltende Verbindungstypen standardmäßig nicht aktiviert. Dazu gehören derzeit beispielsweise WiMax, Bluetooth und Mobilfunkverbindungen.
+<translation id="4043912146394966243">Die Verbindungstypen, die für Betriebssystemaktualisierungen zulässig sind. Betriebssystemaktualisierungen beanspruchen die Verbindung aufgrund ihrer Größe potenziell stark und können zusätzliche Kosten verursachen. Deshalb sind sie für als kostenintensiv geltende Verbindungstypen standardmäßig nicht aktiviert. Dazu gehören derzeit beispielsweise WiMAX, Bluetooth und Mobilfunkverbindungen.
 
       Die anerkannten Verbindungstypkennungen lauten &quot;ethernet&quot;, &quot;wifi&quot;, &quot;wimax&quot;, &quot;bluetooth&quot; und &quot;cellular&quot;.</translation>
 <translation id="7049373494483449255">Ermöglicht es <ph name="PRODUCT_NAME"/>, Dokumente zum Drucken an <ph name="CLOUD_PRINT_NAME"/> zu senden. Hinweis: Dies wirkt sich nur auf die <ph name="CLOUD_PRINT_NAME"/>-Unterstützung in <ph name="PRODUCT_NAME"/> aus. Die Richtlinie verhindert nicht, dass Nutzer Druckaufträge auf Websites geben. Wenn diese Einstellung aktiviert oder nicht konfiguriert ist, können Nutzer im <ph name="PRODUCT_NAME"/>-Druckdialog über <ph name="CLOUD_PRINT_NAME"/> drucken. Sollte die Einstellung deaktiviert sein, können Nutzer im <ph name="PRODUCT_NAME"/>-Druckdialog über <ph name="CLOUD_PRINT_NAME"/> nicht drucken.</translation>

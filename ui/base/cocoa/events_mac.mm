@@ -4,7 +4,7 @@
 
 #include <Cocoa/Cocoa.h>
 
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
 
 #include "base/logging.h"
 #include "base/time.h"
@@ -126,6 +126,13 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
   location.y = [[window contentView] bounds].size.height - location.y;
 
   return gfx::Point(NSPointToCGPoint(location));
+}
+
+gfx::Point EventSystemLocationFromNative(
+    const base::NativeEvent& native_event) {
+  // TODO(port): Needs to always return screen position here. Returning normal
+  // origin for now since that's obviously wrong.
+  return gfx::Point(0, 0);
 }
 
 KeyboardCode KeyboardCodeFromNative(const base::NativeEvent& native_event) {

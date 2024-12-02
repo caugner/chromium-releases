@@ -14,6 +14,7 @@
 #include "base/debug/trace_event.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/proxy/gamepad_resource.h"
 #include "ppapi/proxy/interface_list.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/plugin_message_filter.h"
@@ -47,7 +48,9 @@ DispatcherSet* g_live_dispatchers = NULL;
 }  // namespace
 
 InstanceData::InstanceData()
-    : flash_fullscreen(PP_FALSE) {
+    : flash_fullscreen(PP_FALSE),
+      is_request_surrounding_text_pending(false),
+      should_do_request_surrounding_text(false) {
 }
 
 InstanceData::~InstanceData() {
@@ -257,6 +260,19 @@ thunk::ResourceCreationAPI* PluginDispatcher::GetResourceCreationAPI() {
       GetInterfaceProxy(API_ID_RESOURCE_CREATION));
 }
 
+// static
+void PluginDispatcher::DispatchResourceReply(
+    const ppapi::proxy::ResourceMessageReplyParams& reply_params,
+    const IPC::Message& nested_msg) {
+  Resource* resource = PpapiGlobals::Get()->GetResourceTracker()->GetResource(
+      reply_params.pp_resource());
+  if (!resource) {
+    NOTREACHED();
+    return;
+  }
+  resource->OnReplyReceived(reply_params, nested_msg);
+}
+
 void PluginDispatcher::ForceFreeAllInstances() {
   if (!g_instance_to_dispatcher)
     return;
@@ -278,14 +294,7 @@ void PluginDispatcher::ForceFreeAllInstances() {
 void PluginDispatcher::OnMsgResourceReply(
     const ppapi::proxy::ResourceMessageReplyParams& reply_params,
     const IPC::Message& nested_msg) {
-  Resource* resource = PpapiGlobals::Get()->GetResourceTracker()->GetResource(
-      reply_params.pp_resource());
-  if (!resource) {
-    NOTREACHED();
-    return;
-  }
-  resource->OnReplyReceived(reply_params.sequence(), reply_params.result(),
-                            nested_msg);
+  DispatchResourceReply(reply_params, nested_msg);
 }
 
 void PluginDispatcher::OnMsgSupportsInterface(

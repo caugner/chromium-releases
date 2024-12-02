@@ -23,6 +23,8 @@
 
 namespace media {
 
+static void OnBufferingState(media::Pipeline::BufferingState buffering_state) {}
+
 Movie::Movie()
     : audio_manager_(AudioManager::Create()),
       enable_audio_(false),
@@ -59,8 +61,9 @@ bool Movie::Open(const wchar_t* url, VideoRendererBase* video_renderer) {
 
   message_loop_factory_.reset(new media::MessageLoopFactory());
 
-  MessageLoop* pipeline_loop =
-      message_loop_factory_->GetMessageLoop("PipelineThread");
+  scoped_refptr<base::MessageLoopProxy> pipeline_loop =
+      message_loop_factory_->GetMessageLoop(
+          media::MessageLoopFactory::kPipeline);
   pipeline_ = new Pipeline(pipeline_loop, new media::MediaLog());
 
   // Open the file.
@@ -76,11 +79,12 @@ bool Movie::Open(const wchar_t* url, VideoRendererBase* video_renderer) {
   collection->AddAudioDecoder(new FFmpegAudioDecoder(
       base::Bind(&MessageLoopFactory::GetMessageLoop,
                  base::Unretained(message_loop_factory_.get()),
-                 "AudioDecoderThread")));
-  collection->AddVideoDecoder(new FFmpegVideoDecoder(
+                 media::MessageLoopFactory::kDecoder)));
+  collection->GetVideoDecoders()->push_back(new FFmpegVideoDecoder(
       base::Bind(&MessageLoopFactory::GetMessageLoop,
                  base::Unretained(message_loop_factory_.get()),
-                 "VideoDecoderThread")));
+                 media::MessageLoopFactory::kDecoder),
+      NULL));
 
   // TODO(vrk): Re-enabled audio. (crbug.com/112159)
   collection->AddAudioRenderer(
@@ -93,7 +97,8 @@ bool Movie::Open(const wchar_t* url, VideoRendererBase* video_renderer) {
       collection.Pass(),
       media::PipelineStatusCB(),
       media::PipelineStatusCB(),
-      note.Callback());
+      note.Callback(),
+      base::Bind(&OnBufferingState));
 
   // Wait until the pipeline is fully initialized.
   note.Wait();

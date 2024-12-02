@@ -4,6 +4,9 @@
 
 #include "net/base/cert_verify_proc_nss.h"
 
+#include <string>
+#include <vector>
+
 #include <cert.h>
 #include <nss.h>
 #include <prerror.h>
@@ -17,6 +20,7 @@
 #include "crypto/sha2.h"
 #include "net/base/asn1_util.h"
 #include "net/base/cert_status_flags.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/crl_set.h"
 #include "net/base/ev_root_ca_metadata.h"
@@ -566,9 +570,17 @@ SECOidTag GetFirstCertPolicy(X509Certificate::OSCertHandle cert_handle) {
   return SECOID_AddEntry(&od);
 }
 
-SHA1Fingerprint CertPublicKeyHash(CERTCertificate* cert) {
-  SHA1Fingerprint hash;
-  SECStatus rv = HASH_HashBuf(HASH_AlgSHA1, hash.data,
+HashValue CertPublicKeyHashSHA1(CERTCertificate* cert) {
+  HashValue hash(HASH_VALUE_SHA1);
+  SECStatus rv = HASH_HashBuf(HASH_AlgSHA1, hash.data(),
+                              cert->derPublicKey.data, cert->derPublicKey.len);
+  DCHECK_EQ(SECSuccess, rv);
+  return hash;
+}
+
+HashValue CertPublicKeyHashSHA256(CERTCertificate* cert) {
+  HashValue hash(HASH_VALUE_SHA256);
+  SECStatus rv = HASH_HashBuf(HASH_AlgSHA256, hash.data(),
                               cert->derPublicKey.data, cert->derPublicKey.len);
   DCHECK_EQ(rv, SECSuccess);
   return hash;
@@ -576,14 +588,17 @@ SHA1Fingerprint CertPublicKeyHash(CERTCertificate* cert) {
 
 void AppendPublicKeyHashes(CERTCertList* cert_list,
                            CERTCertificate* root_cert,
-                           std::vector<SHA1Fingerprint>* hashes) {
+                           HashValueVector* hashes) {
   for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
        !CERT_LIST_END(node, cert_list);
        node = CERT_LIST_NEXT(node)) {
-    hashes->push_back(CertPublicKeyHash(node->cert));
+    hashes->push_back(CertPublicKeyHashSHA1(node->cert));
+    hashes->push_back(CertPublicKeyHashSHA256(node->cert));
   }
-  if (root_cert)
-    hashes->push_back(CertPublicKeyHash(root_cert));
+  if (root_cert) {
+    hashes->push_back(CertPublicKeyHashSHA1(root_cert));
+    hashes->push_back(CertPublicKeyHashSHA256(root_cert));
+  }
 }
 
 // Returns true if |cert_handle| contains a policy OID that is an EV policy
@@ -641,13 +656,13 @@ bool VerifyEV(CERTCertificate* cert_handle,
   ScopedCERTValOutParam scoped_cvout(cvout);
 
   bool rev_checking_enabled =
-      (flags & X509Certificate::VERIFY_REV_CHECKING_ENABLED) ||
-      (flags & X509Certificate::VERIFY_REV_CHECKING_ENABLED_EV_ONLY);
+      (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED) ||
+      (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED_EV_ONLY);
 
   SECStatus status = PKIXVerifyCert(
       cert_handle,
       rev_checking_enabled,
-      flags & X509Certificate::VERIFY_CERT_IO_ENABLED,
+      flags & CertVerifier::VERIFY_CERT_IO_ENABLED,
       &ev_policy_oid,
       1,
       cvout);
@@ -671,7 +686,7 @@ bool VerifyEV(CERTCertificate* cert_handle,
       return false;
   }
 
-  SHA1Fingerprint fingerprint =
+  SHA1HashValue fingerprint =
       X509Certificate::CalculateFingerprint(root_ca);
   return metadata->HasEVPolicyOID(fingerprint, ev_policy_oid);
 }
@@ -715,13 +730,13 @@ int CertVerifyProcNSS::VerifyInternal(X509Certificate* cert,
   EVRootCAMetadata* metadata = EVRootCAMetadata::GetInstance();
   SECOidTag ev_policy_oid = SEC_OID_UNKNOWN;
   bool is_ev_candidate =
-      (flags & X509Certificate::VERIFY_EV_CERT) &&
+      (flags & CertVerifier::VERIFY_EV_CERT) &&
       IsEVCandidate(metadata, cert_handle, &ev_policy_oid);
-  bool cert_io_enabled = flags & X509Certificate::VERIFY_CERT_IO_ENABLED;
+  bool cert_io_enabled = flags & CertVerifier::VERIFY_CERT_IO_ENABLED;
   bool check_revocation =
       cert_io_enabled &&
-      ((flags & X509Certificate::VERIFY_REV_CHECKING_ENABLED) ||
-       ((flags & X509Certificate::VERIFY_REV_CHECKING_ENABLED_EV_ONLY) &&
+      ((flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED) ||
+       ((flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED_EV_ONLY) &&
         is_ev_candidate));
   if (check_revocation)
     verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
@@ -771,7 +786,7 @@ int CertVerifyProcNSS::VerifyInternal(X509Certificate* cert,
   verify_result->is_issued_by_known_root =
       IsKnownRoot(cvout[cvout_trust_anchor_index].value.pointer.cert);
 
-  if ((flags & X509Certificate::VERIFY_EV_CERT) && is_ev_candidate &&
+  if ((flags & CertVerifier::VERIFY_EV_CERT) && is_ev_candidate &&
       VerifyEV(cert_handle, flags, crl_set, metadata, ev_policy_oid)) {
     verify_result->cert_status |= CERT_STATUS_IS_EV;
   }

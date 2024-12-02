@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_SANDBOX_TYPES_H_
-#define SANDBOX_SRC_SANDBOX_TYPES_H_
+#ifndef SANDBOX_WIN_SRC_SANDBOX_TYPES_H_
+#define SANDBOX_WIN_SRC_SANDBOX_TYPES_H_
 
 namespace sandbox {
 
@@ -37,6 +37,14 @@ enum ResultCode {
   SBOX_ERROR_CANNOT_CREATE_WINSTATION = 12,
   // Failed to switch back to the interactive window station.
   SBOX_ERROR_FAILED_TO_SWITCH_BACK_WINSTATION = 13,
+  // The supplied AppContainer is not valid.
+  SBOX_ERROR_INVALID_APP_CONTAINER = 14,
+  // The supplied capability is not valid.
+  SBOX_ERROR_INVALID_CAPABILITY = 15,
+  // There is a failure initializing the AppContainer.
+  SBOX_ERROR_CANNOT_INIT_APPCONTAINER = 16,
+  // Initializing or updating ProcThreadAttributes failed.
+  SBOX_ERROR_PROC_THREAD_ATTRIBUTES = 17,
   // Placeholder for last item of the enum.
   SBOX_ERROR_LAST
 };
@@ -48,7 +56,9 @@ enum TerminationCodes {
   SBOX_FATAL_DROPTOKEN = 7007,       // Could not lower the token.
   SBOX_FATAL_FLUSHANDLES = 7008,     // Failed to flush registry handles.
   SBOX_FATAL_CACHEDISABLE = 7009,    // Failed to forbid HCKU caching.
-  SBOX_FATAL_CLOSEHANDLES = 7010     // Failed to close pending handles.
+  SBOX_FATAL_CLOSEHANDLES = 7010,    // Failed to close pending handles.
+  SBOX_FATAL_MITIGATION = 7011,      // Could not set the mitigation policy.
+  SBOX_FATAL_LAST
 };
 
 class BrokerServices;
@@ -78,4 +88,4 @@ enum InterceptionType {
 
 }  // namespace sandbox
 
-#endif  // SANDBOX_SRC_SANDBOX_TYPES_H_
+#endif  // SANDBOX_WIN_SRC_SANDBOX_TYPES_H_

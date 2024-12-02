@@ -6,9 +6,12 @@
 
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/test/base/javascript_test_observer.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
@@ -135,12 +138,70 @@ TEST_PPAPI_IN_PROCESS(Broker)
 // Flaky, http://crbug.com/111355
 TEST_PPAPI_OUT_OF_PROCESS(DISABLED_Broker)
 
+// Temporarily disabled: http://crbug.com/151734
+IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, DISABLED_Accept) {
+  // Accepting the infobar should grant permission to access the PPAPI broker.
+  InfoBarObserver observer;
+  observer.ExpectInfoBarAndAccept(true);
+
+  GURL url = GetTestFileUrl("Broker_ConnectPermissionGranted");
+  RunTestURL(url);
+
+  // It should also set a content settings exception for the site.
+  HostContentSettingsMap* content_settings =
+      browser()->profile()->GetHostContentSettingsMap();
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            content_settings->GetContentSetting(
+                url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
+}
+
+// Temporarily disabled: http://crbug.com/151734
+IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, DISABLED_Deny) {
+  // Canceling the infobar should deny permission to access the PPAPI broker.
+  InfoBarObserver observer;
+  observer.ExpectInfoBarAndAccept(false);
+
+  GURL url = GetTestFileUrl("Broker_ConnectPermissionDenied");
+  RunTestURL(url);
+
+  // It should *not* set a content settings exception for the site.
+  HostContentSettingsMap* content_settings =
+      browser()->profile()->GetHostContentSettingsMap();
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            content_settings->GetContentSetting(
+                url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
+}
+
+IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Blocked) {
+  // Block access to the PPAPI broker.
+  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PPAPI_BROKER, CONTENT_SETTING_BLOCK);
+
+  // We shouldn't see an infobar.
+  InfoBarObserver observer;
+
+  RunTest("Broker_ConnectPermissionDenied");
+}
+
+IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Allowed) {
+  // Always allow access to the PPAPI broker.
+  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PPAPI_BROKER, CONTENT_SETTING_ALLOW);
+
+  // We shouldn't see an infobar.
+  InfoBarObserver observer;
+
+  RunTest("Broker_ConnectPermissionGranted");
+}
+
 TEST_PPAPI_IN_PROCESS(Core)
 TEST_PPAPI_OUT_OF_PROCESS(Core)
 TEST_PPAPI_NACL_VIA_HTTP(Core)
 
+#if defined(OS_CHROMEOS)
+#define MAYBE_InputEvent InputEvent
+#elif defined(OS_LINUX)
 // Times out on Linux. http://crbug.com/108859
-#if defined(OS_LINUX)
 #define MAYBE_InputEvent DISABLED_InputEvent
 #elif defined(OS_MACOSX)
 // Flaky on Mac. http://crbug.com/109258
@@ -206,10 +267,7 @@ TEST_PPAPI_NACL_VIA_HTTP(Graphics3D)
 
 TEST_PPAPI_IN_PROCESS(ImageData)
 TEST_PPAPI_OUT_OF_PROCESS(ImageData)
-
-// PPAPINaClTest.ImageData times out consistently on all platforms.
-// http://crbug.com/130377
-TEST_PPAPI_NACL_VIA_HTTP(DISABLED_ImageData)
+TEST_PPAPI_NACL_VIA_HTTP(ImageData)
 
 TEST_PPAPI_IN_PROCESS(BrowserFont)
 TEST_PPAPI_OUT_OF_PROCESS(BrowserFont)
@@ -217,16 +275,41 @@ TEST_PPAPI_OUT_OF_PROCESS(BrowserFont)
 TEST_PPAPI_IN_PROCESS(Buffer)
 TEST_PPAPI_OUT_OF_PROCESS(Buffer)
 
-TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate)
-TEST_PPAPI_IN_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate)
-TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate)
+// Fails on Windows tryserver. http://crbug.com/145734
+#if defined(OS_WIN)
+#define MAYBE_TCPSocketPrivate DISABLED_TCPSocketPrivate
+#else
+#define MAYBE_TCPSocketPrivate TCPSocketPrivate
+#endif
+
+TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(MAYBE_TCPSocketPrivate)
+TEST_PPAPI_IN_PROCESS_WITH_SSL_SERVER(MAYBE_TCPSocketPrivate)
+TEST_PPAPI_NACL_WITH_SSL_SERVER(MAYBE_TCPSocketPrivate)
 
 TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
 TEST_PPAPI_IN_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
 
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate)
-TEST_PPAPI_NACL_VIA_HTTP(UDPSocketPrivate)
+// UDPSocketPrivate tests.
+// UDPSocketPrivate_Broadcast is disabled for OSX because it requires
+// root permissions on OSX 10.7+.
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate_Connect)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate_ConnectFailure)
+#if !defined(OS_MACOSX)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate_Broadcast)
+#endif  // !defined(OS_MACOSX)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivate_SetSocketFeatureErrors)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate_Connect)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate_ConnectFailure)
+#if !defined(OS_MACOSX)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate_Broadcast)
+#endif  // !defined(OS_MACOSX)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate_SetSocketFeatureErrors)
+TEST_PPAPI_NACL_VIA_HTTP(UDPSocketPrivate_Connect)
+TEST_PPAPI_NACL_VIA_HTTP(UDPSocketPrivate_ConnectFailure)
+#if !defined(OS_MACOSX)
+TEST_PPAPI_NACL_VIA_HTTP(UDPSocketPrivate_Broadcast)
+#endif  // !defined(OS_MACOSX)
+TEST_PPAPI_NACL_VIA_HTTP(UDPSocketPrivate_SetSocketFeatureErrors)
 
 TEST_PPAPI_NACL_VIA_HTTP_DISALLOWED_SOCKETS(TCPServerSocketPrivateDisallowed)
 TEST_PPAPI_NACL_VIA_HTTP_DISALLOWED_SOCKETS(TCPSocketPrivateDisallowed)
@@ -515,9 +598,19 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, MAYBE_OutOfProcessFlashFullscreen)
   RunTestViaHTTP("FlashFullscreen");
 }
 
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(Fullscreen)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(Fullscreen)
-TEST_PPAPI_NACL_VIA_HTTP(Fullscreen)
+#if defined(OS_MACOSX)
+// http://crbug.com/103912
+#define MAYBE_Fullscreen DISABLED_Fullscreen
+#elif defined(OS_LINUX)
+// http://crbug.com/146008
+#define MAYBE_Fullscreen DISABLED_Fullscreen
+#else
+#define MAYBE_Fullscreen Fullscreen
+#endif
+
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(MAYBE_Fullscreen)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_Fullscreen)
+TEST_PPAPI_NACL_VIA_HTTP(MAYBE_Fullscreen)
 
 TEST_PPAPI_IN_PROCESS(FlashClipboard)
 TEST_PPAPI_OUT_OF_PROCESS(FlashClipboard)
@@ -598,13 +691,17 @@ TEST_PPAPI_NACL_VIA_HTTP(MAYBE_NetAddressPrivateUntrusted_GetPort)
 TEST_PPAPI_NACL_VIA_HTTP(NetAddressPrivateUntrusted_GetAddress)
 
 TEST_PPAPI_IN_PROCESS(NetworkMonitorPrivate_Basic)
-TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_Basic)
 TEST_PPAPI_IN_PROCESS(NetworkMonitorPrivate_2Monitors)
-TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_2Monitors)
 TEST_PPAPI_IN_PROCESS(NetworkMonitorPrivate_DeleteInCallback)
-TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_DeleteInCallback)
 TEST_PPAPI_IN_PROCESS(NetworkMonitorPrivate_ListObserver)
+TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_Basic)
+TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_2Monitors)
+TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_DeleteInCallback)
 TEST_PPAPI_OUT_OF_PROCESS(NetworkMonitorPrivate_ListObserver)
+TEST_PPAPI_NACL_VIA_HTTP(NetworkMonitorPrivate_Basic)
+TEST_PPAPI_NACL_VIA_HTTP(NetworkMonitorPrivate_2Monitors)
+TEST_PPAPI_NACL_VIA_HTTP(NetworkMonitorPrivate_DeleteInCallback)
+TEST_PPAPI_NACL_VIA_HTTP(NetworkMonitorPrivate_ListObserver)
 
 TEST_PPAPI_IN_PROCESS(Flash_SetInstanceAlwaysOnTop)
 TEST_PPAPI_IN_PROCESS(Flash_GetProxyForURL)
@@ -723,15 +820,16 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, View_CreateInvisible) {
 // This test messes with tab visibility so is custom.
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, View_PageHideShow) {
   // The plugin will be loaded in the foreground tab and will send us a message.
-  TestFinishObserver observer(
+  PPAPITestMessageHandler handler;
+  JavascriptTestObserver observer(
       chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
-      TestTimeouts::action_max_timeout());
+      &handler);
 
   GURL url = GetTestFileUrl("View_PageHideShow");
   ui_test_utils::NavigateToURL(browser(), url);
 
-  ASSERT_TRUE(observer.WaitForFinish()) << "Test timed out.";
-  EXPECT_STREQ("TestPageHideShow:Created", observer.result().c_str());
+  ASSERT_TRUE(observer.Run()) << handler.error_message();
+  EXPECT_STREQ("TestPageHideShow:Created", handler.message().c_str());
   observer.Reset();
 
   // Make a new tab to cause the original one to hide, this should trigger the
@@ -742,17 +840,15 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, View_PageHideShow) {
   ui_test_utils::NavigateToURL(&params);
 
   // Wait until the test acks that it got hidden.
-  ASSERT_TRUE(observer.WaitForFinish()) << "Test timed out.";
-  EXPECT_STREQ("TestPageHideShow:Hidden", observer.result().c_str());
-
-  // Wait for the test completion event.
+  ASSERT_TRUE(observer.Run()) << handler.error_message();
+  EXPECT_STREQ("TestPageHideShow:Hidden", handler.message().c_str());
   observer.Reset();
 
   // Switch back to the test tab.
   chrome::ActivateTabAt(browser(), 0, true);
 
-  ASSERT_TRUE(observer.WaitForFinish()) << "Test timed out.";
-  EXPECT_STREQ("PASS", observer.result().c_str());
+  ASSERT_TRUE(observer.Run()) << handler.error_message();
+  EXPECT_STREQ("PASS", handler.message().c_str());
 }
 
 // Tests that if a plugin accepts touch events, the browser knows to send touch
@@ -803,6 +899,19 @@ TEST_PPAPI_OUT_OF_PROCESS(FlashMessageLoop_RunWithoutQuit)
 TEST_PPAPI_IN_PROCESS(MouseCursor)
 TEST_PPAPI_OUT_OF_PROCESS(MouseCursor)
 TEST_PPAPI_NACL_VIA_HTTP(MouseCursor)
+
+// PPB_MessageLoop is only supported out-of-process.
+// TODO(dmichael): Enable for NaCl with the IPC proxy. crbug.com/116317
+TEST_PPAPI_OUT_OF_PROCESS(MessageLoop_Basics)
+// Note to sheriffs: MessageLoop_Post starts a thread, which has a history of
+// slowness, particularly on Windows XP. If this test times out, please try
+// marking it SLOW_ before disabling.
+//    - dmichael
+// MessageLoop_Post starts a thread so only run it if pepper threads are
+// enabled.
+#ifdef ENABLE_PEPPER_THREADING
+TEST_PPAPI_OUT_OF_PROCESS(MessageLoop_Post)
+#endif
 
 // Only enabled in out-of-process mode.
 TEST_PPAPI_OUT_OF_PROCESS(FlashFile_CreateTemporaryFile)

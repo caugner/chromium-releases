@@ -28,7 +28,7 @@ namespace {
 
 void PopulateResourceResponse(net::URLRequest* request,
                               ResourceResponse* response) {
-  response->head.status = request->status();
+  response->head.error_code = request->status().error();
   response->head.request_time = request->request_time();
   response->head.response_time = request->response_time();
   response->head.headers = request->response_headers();
@@ -78,7 +78,7 @@ ResourceLoader::~ResourceLoader() {
 
 void ResourceLoader::StartRequest() {
   if (delegate_->HandleExternalProtocol(this, request_->url())) {
-    CancelRequestInternal(net::ERR_UNKNOWN_URL_SCHEME, false);
+    CancelAndIgnore();
     return;
   }
 
@@ -101,37 +101,44 @@ void ResourceLoader::CancelRequest(bool from_renderer) {
   CancelRequestInternal(net::ERR_ABORTED, from_renderer);
 }
 
+void ResourceLoader::CancelAndIgnore() {
+  ResourceRequestInfoImpl* info = GetRequestInfo();
+  info->set_was_ignored_by_handler(true);
+  CancelRequest(false);
+}
+
 void ResourceLoader::ReportUploadProgress() {
   ResourceRequestInfoImpl* info = GetRequestInfo();
 
   if (waiting_for_upload_progress_ack_)
     return;  // Send one progress event at a time.
 
-  uint64 size = info->GetUploadSize();
-  if (!size)
+  net::UploadProgress progress = request_->GetUploadProgress();
+  if (!progress.size())
     return;  // Nothing to upload.
 
-  uint64 position = request_->GetUploadProgress();
-  if (position == last_upload_position_)
+  if (progress.position() == last_upload_position_)
     return;  // No progress made since last time.
 
   const uint64 kHalfPercentIncrements = 200;
   const TimeDelta kOneSecond = TimeDelta::FromMilliseconds(1000);
 
-  uint64 amt_since_last = position - last_upload_position_;
+  uint64 amt_since_last = progress.position() - last_upload_position_;
   TimeDelta time_since_last = TimeTicks::Now() - last_upload_ticks_;
 
-  bool is_finished = (size == position);
-  bool enough_new_progress = (amt_since_last > (size / kHalfPercentIncrements));
+  bool is_finished = (progress.size() == progress.position());
+  bool enough_new_progress =
+      (amt_since_last > (progress.size() / kHalfPercentIncrements));
   bool too_much_time_passed = time_since_last > kOneSecond;
 
   if (is_finished || enough_new_progress || too_much_time_passed) {
     if (request_->load_flags() & net::LOAD_ENABLE_UPLOAD_PROGRESS) {
-      handler_->OnUploadProgress(info->GetRequestID(), position, size);
+      handler_->OnUploadProgress(
+          info->GetRequestID(), progress.position(), progress.size());
       waiting_for_upload_progress_ack_ = true;
     }
     last_upload_ticks_ = TimeTicks::Now();
-    last_upload_position_ = position;
+    last_upload_position_ = progress.position();
   }
 }
 
@@ -204,7 +211,7 @@ void ResourceLoader::OnReceivedRedirect(net::URLRequest* unused,
 
   if (delegate_->HandleExternalProtocol(this, new_url)) {
     // The request is complete so we can remove it.
-    CancelRequestInternal(net::ERR_UNKNOWN_URL_SCHEME, false);
+    CancelAndIgnore();
     return;
   }
 

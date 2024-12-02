@@ -42,6 +42,9 @@ function DirectoryModel(root, singleSelection,
   this.rootsListSelection_.addEventListener(
       'change', this.onRootChange_.bind(this));
 
+  this.rootsListSelection_.addEventListener(
+      'beforeChange', this.onBeforeRootChange_.bind(this));
+
   /**
    * A map root.fullPath -> currentDirectory.fullPath.
    * @private
@@ -58,7 +61,8 @@ function DirectoryModel(root, singleSelection,
  * @private
  */
 DirectoryModel.fakeGDataEntry_ = {
-  fullPath: RootDirectory.GDATA
+  fullPath: RootDirectory.GDATA,
+  isDirectory: true
 };
 
 /**
@@ -191,7 +195,8 @@ DirectoryModel.prototype.isSearching = function() {
 DirectoryModel.prototype.isPathReadOnly = function(path) {
   switch (PathUtil.getRootType(path)) {
     case RootType.REMOVABLE:
-      return !!this.volumeManager_.isReadOnly(PathUtil.getRootPath(path));
+      return !!this.volumeManager_.isReadOnly(PathUtil.getRootPath(path)) ||
+             !!this.volumeManager_.getMountError(PathUtil.getRootPath(path));
     case RootType.ARCHIVE:
       return true;
     case RootType.DOWNLOADS:
@@ -495,42 +500,6 @@ DirectoryModel.prototype.replaceDirectoryContents_ = function(dirContents) {
 };
 
 /**
- * Delete the list of files and directories from filesystem and
- * update the file list.
- * @param {Array.<Entry>} entries Entries to delete.
- * @param {function()=} opt_callback Called when finished.
- */
-DirectoryModel.prototype.deleteEntries = function(entries, opt_callback) {
-  var downcount = entries.length + 1;
-  var currentDirPath = this.getCurrentDirPath();
-
-  var onComplete = opt_callback ? function() {
-    if (--downcount == 0)
-      opt_callback();
-  } : function() {};
-
-  var fileList = this.getFileList();
-  for (var i = 0; i < entries.length; i++) {
-    var entry = entries[i];
-
-    var onSuccess = function(removedEntry) {
-      if (currentDirPath == this.getCurrentDirPath()) {
-        var index = fileList.indexOf(removedEntry);
-        if (index >= 0)
-          fileList.splice(index, 1);
-      }
-      onComplete();
-    }.bind(this, entry);
-
-    util.removeFileOrDirectory(
-        entry,
-        onSuccess,
-        util.flog('Error deleting ' + entry.fullPath, onComplete));
-  }
-  onComplete();
-};
-
-/**
  * @param {string} name Filename.
  */
 DirectoryModel.prototype.onEntryChanged = function(name) {
@@ -724,12 +693,21 @@ DirectoryModel.prototype.getSelectedRootDirEntry_ = function() {
 };
 
 /**
+ * Handler before root item change.
+ * @param {Event} event The event.
+ * @private
+ */
+DirectoryModel.prototype.onBeforeRootChange_ = function(event) {
+  if (event.changes.length == 1 && !event.changes[0].selected)
+    event.preventDefault();
+};
+
+/**
  * Handler for root item being clicked.
  * @private
- * @param {Entry} entry Entry to navigate to.
  * @param {Event} event The event.
  */
-DirectoryModel.prototype.onRootChange_ = function(entry, event) {
+DirectoryModel.prototype.onRootChange_ = function(event) {
   var newRootDir = this.getSelectedRootDirEntry_();
   if (newRootDir)
     this.changeRoot(newRootDir.fullPath);
@@ -742,7 +720,9 @@ DirectoryModel.prototype.onRootChange_ = function(entry, event) {
  * @param {string} path New current directory path or new root.
  */
 DirectoryModel.prototype.changeRoot = function(path) {
-  if (this.getCurrentRootPath() == path)
+  if ((!DirectoryModel.isMountableRoot(path) ||
+       this.volumeManager_.isMounted(path)) &&
+      this.getCurrentRootPath() == path)
     return;
   if (this.currentDirByRoot_[path]) {
     this.resolveDirectory(
@@ -969,6 +949,20 @@ DirectoryModel.prototype.selectEntry = function(name) {
 };
 
 /**
+ * @param {Array.<string>} urls Array of URLs.
+ */
+DirectoryModel.prototype.selectUrls = function(urls) {
+  var fileList = this.getFileList();
+  this.fileListSelection_.beginChange();
+  this.fileListSelection_.unselectAll();
+  for (var i = 0; i < fileList.length; i++) {
+    if (urls.indexOf(fileList.item(i).toURL()) >= 0)
+      this.fileListSelection_.setIndexSelected(i, true);
+  }
+  this.fileListSelection_.endChange();
+};
+
+/**
  * @param {number} index Index of file.
  */
 DirectoryModel.prototype.selectIndex = function(index) {
@@ -1141,6 +1135,27 @@ DirectoryModel.prototype.onMountChanged_ = function() {
 DirectoryModel.isSystemDirectory = function(path) {
   path = path.replace(/\/+$/, '');
   return path === RootDirectory.REMOVABLE || path === RootDirectory.ARCHIVE;
+};
+
+/**
+ * Check if the root of the given path is mountable or not.
+ *
+ * @param {string} path Path.
+ * @return {boolean} Return true, if the given path is under mountable root.
+ *     Otherwise, return false.
+ */
+DirectoryModel.isMountableRoot = function(path) {
+  var rootType = PathUtil.getRootType(path);
+  switch (rootType) {
+    case RootType.DOWNLOADS:
+      return false;
+    case RootType.ARCHIVE:
+    case RootType.REMOVABLE:
+    case RootType.GDATA:
+      return true;
+    default:
+      throw new Error('Unknown root type!');
+  }
 };
 
 /**

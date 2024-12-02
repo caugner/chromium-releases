@@ -5,6 +5,7 @@
 #include "ui/views/controls/scroll_view.h"
 
 #include "base/logging.h"
+#include "ui/base/events/event.h"
 #include "ui/views/controls/scrollbar/native_scroll_bar.h"
 #include "ui/views/widget/root_view.h"
 
@@ -386,7 +387,7 @@ int ScrollView::GetScrollIncrement(ScrollBar* source, bool is_page,
   return is_horizontal ? viewport_->width() / 5 : viewport_->height() / 5;
 }
 
-bool ScrollView::OnKeyPressed(const KeyEvent& event) {
+bool ScrollView::OnKeyPressed(const ui::KeyEvent& event) {
   bool processed = false;
 
   // Give vertical scrollbar priority
@@ -399,28 +400,29 @@ bool ScrollView::OnKeyPressed(const KeyEvent& event) {
   return processed;
 }
 
-ui::GestureStatus ScrollView::OnGestureEvent(const GestureEvent& event) {
-  ui::GestureStatus status = ui::GESTURE_STATUS_UNKNOWN;
+ui::EventResult ScrollView::OnGestureEvent(const ui::GestureEvent& event) {
+  ui::EventResult status = ui::ER_UNHANDLED;
 
   // If the event happened on one of the scrollbars, then those events are
   // sent directly to the scrollbars. Otherwise, only scroll events are sent to
   // the scrollbars.
   bool scroll_event = event.type() == ui::ET_GESTURE_SCROLL_UPDATE ||
                       event.type() == ui::ET_GESTURE_SCROLL_BEGIN ||
-                      event.type() == ui::ET_GESTURE_SCROLL_END;
+                      event.type() == ui::ET_GESTURE_SCROLL_END ||
+                      event.type() == ui::ET_SCROLL_FLING_START;
 
   if (vert_sb_->visible()) {
     if (vert_sb_->bounds().Contains(event.location()) || scroll_event)
       status = vert_sb_->OnGestureEvent(event);
   }
-  if (status == ui::GESTURE_STATUS_UNKNOWN && horiz_sb_->visible()) {
+  if (status == ui::ER_UNHANDLED && horiz_sb_->visible()) {
     if (horiz_sb_->bounds().Contains(event.location()) || scroll_event)
       status = horiz_sb_->OnGestureEvent(event);
   }
   return status;
 }
 
-bool ScrollView::OnMouseWheel(const MouseWheelEvent& e) {
+bool ScrollView::OnMouseWheel(const ui::MouseWheelEvent& e) {
   bool processed = false;
   // Give vertical scrollbar priority
   if (vert_sb_->visible())

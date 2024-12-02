@@ -18,7 +18,6 @@
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
-#include "ui/views/events/event.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
@@ -184,7 +183,7 @@ void OneClickSigninBubbleView::LinkClicked(views::Link* source,
 }
 
 void OneClickSigninBubbleView::ButtonPressed(views::Button* sender,
-                                             const views::Event& event) {
+                                             const ui::Event& event) {
   StartFade(false);
   if (ok_button_ == sender) {
     base::ResetAndReturn(&start_sync_callback_).Run(

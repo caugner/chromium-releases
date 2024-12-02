@@ -21,11 +21,13 @@ class RootWindowEventFilter;
 }  // namespace aura
 
 namespace ash {
+class ToplevelWindowEventHandler;
 namespace internal {
 
 class EventClientImpl;
 class RootWindowLayoutManager;
 class ScreenDimmer;
+class SystemBackgroundController;
 class WorkspaceController;
 
 // This class maintains the per root window state for ash. This class
@@ -56,8 +58,21 @@ class RootWindowController {
 
   aura::Window* GetContainer(int container_id);
 
-  void CreateContainers();
   void InitLayoutManagers();
+  void CreateContainers();
+
+  // Initializes |background_|.  |is_first_run_after_boot| determines the
+  // background's initial color.
+  void CreateSystemBackground(bool is_first_run_after_boot);
+
+  // Updates |background_| to be black after the desktop background is visible.
+  void HandleDesktopBackgroundVisible();
+
+  // Deletes associated objects and clears the state, but doesn't delete
+  // the root window yet. This is used to delete a secondary displays'
+  // root window safely when the display disconnect signal is received,
+  // which may come while we're in the nested message loop.
+  void Shutdown();
 
   // Deletes all child windows and performs necessary cleanup.
   void CloseChildWindows();
@@ -69,13 +84,29 @@ class RootWindowController {
   void MoveWindowsTo(aura::RootWindow* dest);
 
  private:
+  // Creates each of the special window containers that holds windows of various
+  // types in the shell UI.
+  void CreateContainersInRootWindow(aura::RootWindow* root_window);
+
   scoped_ptr<aura::RootWindow> root_window_;
   internal::RootWindowLayoutManager* root_window_layout_;
+
+  // A background layer that's displayed beneath all other layers.  Without
+  // this, portions of the root window that aren't covered by layers will be
+  // painted white; this can show up if e.g. it takes a long time to decode the
+  // desktop background image when displaying the login screen.
+  scoped_ptr<SystemBackgroundController> background_;
 
   // An event filter that pre-handles all key events to send them to an IME.
   scoped_ptr<internal::EventClientImpl> event_client_;
   scoped_ptr<internal::ScreenDimmer> screen_dimmer_;
   scoped_ptr<internal::WorkspaceController> workspace_controller_;
+
+  // We need to own event handlers for various containers.
+  scoped_ptr<ToplevelWindowEventHandler> default_container_handler_;
+  scoped_ptr<ToplevelWindowEventHandler> always_on_top_container_handler_;
+  scoped_ptr<ToplevelWindowEventHandler> modal_container_handler_;
+  scoped_ptr<ToplevelWindowEventHandler> lock_modal_container_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowController);
 };

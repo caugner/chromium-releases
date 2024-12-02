@@ -14,12 +14,11 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/extensions/file_handler_util.h"
-#include "chrome/browser/chromeos/gdata/gdata.pb.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
-#include "chrome/browser/chromeos/gdata/gdata_files.h"
-#include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
-#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/drive.pb.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system.h"
+#include "chrome/browser/chromeos/gdata/drive_file_system_util.h"
+#include "chrome/browser/chromeos/gdata/drive_files.h"
+#include "chrome/browser/chromeos/gdata/drive_system_service.h"
 #include "chrome/browser/chromeos/media/media_player.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
@@ -41,12 +40,14 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/screen.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
 #include "webkit/fileapi/file_system_util.h"
@@ -59,7 +60,6 @@ using content::BrowserThread;
 using content::PluginService;
 using content::UserMetricsAction;
 using file_handler_util::FileTaskExecutor;
-using gdata::GDataOperationRegistry;
 
 #define FILEBROWSER_EXTENSON_ID "hhaomjibdihmijegdhdafkllkbggdgoj"
 const char kFileBrowserDomain[] = FILEBROWSER_EXTENSON_ID;
@@ -83,6 +83,7 @@ const char kFileBrowserExtensionUrl[] = FILEBROWSER_URL("");
 const char kBaseFileBrowserUrl[] = FILEBROWSER_URL("main.html");
 const char kMediaPlayerUrl[] = FILEBROWSER_URL("mediaplayer.html");
 const char kVideoPlayerUrl[] = FILEBROWSER_URL("video_player.html");
+const char kActionChoiceUrl[] = FILEBROWSER_URL("action_choice.html");
 #undef FILEBROWSER_URL
 #undef FILEBROWSER_EXTENSON_ID
 
@@ -181,7 +182,7 @@ std::string GetDialogTypeAsString(
 DictionaryValue* ProgessStatusToDictionaryValue(
     Profile* profile,
     const GURL& origin_url,
-    const GDataOperationRegistry::ProgressStatus& status) {
+    const gdata::OperationProgressStatus& status) {
   scoped_ptr<DictionaryValue> result(new DictionaryValue());
   GURL file_url;
   if (file_manager_util::ConvertFileToFileSystemUrl(profile,
@@ -193,10 +194,9 @@ DictionaryValue* ProgessStatusToDictionaryValue(
   }
 
   result->SetString("transferState",
-      GDataOperationRegistry::OperationTransferStateToString(
-          status.transfer_state));
+                    OperationTransferStateToString(status.transfer_state));
   result->SetString("transferType",
-      GDataOperationRegistry::OperationTypeToString(status.operation_type));
+                    OperationTypeToString(status.operation_type));
   result->SetInteger("processed", static_cast<int>(status.progress_current));
   result->SetInteger("total", static_cast<int>(status.progress_total));
   return result.release();
@@ -226,19 +226,19 @@ void ShowWarningMessageBox(Profile* profile, const FilePath& path) {
       chrome::MESSAGE_BOX_TYPE_WARNING);
 }
 
-// Called when a file on GData was found. Opens the file found at |file_path|
+// Called when a file on Drive was found. Opens the file found at |file_path|
 // in a new tab with a URL computed based on the |file_type|
-void OnGDataFileFound(Profile* profile,
+void OnDriveFileFound(Profile* profile,
                       const FilePath& file_path,
-                      gdata::GDataFileType file_type,
-                      gdata::GDataFileError error,
-                      scoped_ptr<gdata::GDataEntryProto> entry_proto) {
+                      gdata::DriveFileType file_type,
+                      gdata::DriveFileError error,
+                      scoped_ptr<gdata::DriveEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (entry_proto.get() && !entry_proto->has_file_specific_info())
-    error = gdata::GDATA_FILE_ERROR_NOT_FOUND;
+    error = gdata::DRIVE_FILE_ERROR_NOT_FOUND;
 
-  if (error == gdata::GDATA_FILE_OK) {
+  if (error == gdata::DRIVE_FILE_OK) {
     GURL page_url;
     if (file_type == gdata::REGULAR_FILE) {
       page_url = gdata::util::GetFileResourceUrl(
@@ -253,6 +253,17 @@ void OnGDataFileFound(Profile* profile,
   } else {
     ShowWarningMessageBox(profile, file_path);
   }
+}
+
+// Called when a crx file on Drive was downloaded.
+void OnCRXDownloadCallback(Browser* browser,
+                           gdata::DriveFileError error,
+                           const FilePath& file,
+                           const std::string& unused_mime_type,
+                           gdata::DriveFileType file_type) {
+  if (error != gdata::DRIVE_FILE_OK || file_type != gdata::REGULAR_FILE)
+    return;
+  InstallCRX(browser, file);
 }
 
 }  // namespace
@@ -291,7 +302,8 @@ bool ConvertFileToFileSystemUrl(
 bool ConvertFileToRelativeFileSystemPath(
     Profile* profile, const FilePath& full_file_path, FilePath* virtual_path) {
   fileapi::ExternalFileSystemMountPointProvider* provider =
-      BrowserContext::GetFileSystemContext(profile)->external_provider();
+      BrowserContext::GetDefaultStoragePartition(profile)->
+          GetFileSystemContext()->external_provider();
   if (!provider)
     return false;
 
@@ -342,6 +354,10 @@ GURL GetFileBrowserUrlWithParams(
 
     arg_value.SetBoolean("includeAllFiles", file_types->include_all_files);
   }
+
+  // Disable showing GDrive unless it's specifically supported.
+  arg_value.SetBoolean("disableGData",
+      !file_types || !file_types->support_gdata);
 
   std::string json_args;
   base::JSONWriter::Write(&arg_value, &json_args);
@@ -465,8 +481,60 @@ void OpenFileBrowser(const FilePath& path,
   application_launch::OpenApplication(params);
 }
 
+Browser* GetBrowserForUrl(GURL target_url) {
+  for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
+       browser_iterator != BrowserList::end(); ++browser_iterator) {
+    Browser* browser = *browser_iterator;
+    TabStripModel* tab_strip = browser->tab_strip_model();
+    for (int idx = 0; idx < tab_strip->count(); idx++) {
+      content::WebContents* web_contents =
+          tab_strip->GetTabContentsAt(idx)->web_contents();
+      const GURL& url = web_contents->GetURL();
+      if (url == target_url)
+        return browser;
+    }
+  }
+  return NULL;
+}
+
 void ViewRemovableDrive(const FilePath& path) {
   OpenFileBrowser(path, REUSE_ANY_FILE_MANAGER, "mountTriggered");
+}
+
+void OpenActionChoiceDialog(const FilePath& path) {
+  const int kDialogWidth = 410;
+  // TODO(dgozman): remove 50, which is a title height once popup window
+  // will have no title.
+  const int kDialogHeight = 332 + 50;
+
+  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
+
+  FilePath virtual_path;
+  if (!ConvertFileToRelativeFileSystemPath(profile, path, &virtual_path))
+    return;
+  std::string url = kActionChoiceUrl;
+  url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(), false);
+  GURL dialog_url(url);
+
+  const gfx::Size screen = gfx::Screen::GetPrimaryDisplay().size();
+  const gfx::Rect bounds((screen.width() - kDialogWidth) / 2,
+                         (screen.height() - kDialogHeight) / 2,
+                         kDialogWidth,
+                         kDialogHeight);
+
+  Browser* browser = GetBrowserForUrl(dialog_url);
+
+  if (!browser) {
+    browser = new Browser(
+        Browser::CreateParams::CreateForApp(Browser::TYPE_POPUP,
+                                            "action_choice",
+                                            bounds,
+                                            profile));
+
+    chrome::AddSelectedTabWithURL(browser, dialog_url,
+                                  content::PAGE_TRANSITION_LINK);
+  }
+  browser->window()->Show();
 }
 
 void ShowFileInFolder(const FilePath& path) {
@@ -489,7 +557,7 @@ bool ExecuteDefaultHandler(Profile* profile, const FilePath& path) {
     return false;
 
   const FileBrowserHandler* handler;
-  if (!file_handler_util::GetDefaultTask(profile, url, &handler))
+  if (!file_handler_util::GetTaskForURL(profile, url, &handler))
     return false;
 
   std::string extension_id = handler->extension_id();
@@ -522,7 +590,8 @@ bool ExecuteDefaultHandler(Profile* profile, const FilePath& path) {
     // If File Browser has not been open yet then it did not request access
     // to the file system. Do it now.
     fileapi::ExternalFileSystemMountPointProvider* external_provider =
-        BrowserContext::GetFileSystemContext(profile)->external_provider();
+        BrowserContext::GetDefaultStoragePartition(
+            profile)->GetFileSystemContext()->external_provider();
     if (!external_provider)
       return false;
     external_provider->GrantFullAccessToExtension(source_url.host());
@@ -601,15 +670,15 @@ bool ExecuteBuiltinHandler(Browser* browser, const FilePath& path,
     // Override gdata resource to point to internal handler instead of file:
     // URL.
     if (gdata::util::GetSpecialRemoteRootPath().IsParent(path)) {
-      gdata::GDataSystemService* system_service =
-          gdata::GDataSystemServiceFactory::GetForProfile(profile);
+      gdata::DriveSystemService* system_service =
+          gdata::DriveSystemServiceFactory::GetForProfile(profile);
       if (!system_service)
         return false;
 
       // Open the file once the file is found.
       system_service->file_system()->GetEntryInfoByPath(
-          gdata::util::ExtractGDataPath(path),
-          base::Bind(&OnGDataFileFound, profile, path, gdata::REGULAR_FILE));
+          gdata::util::ExtractDrivePath(path),
+          base::Bind(&OnDriveFileFound, profile, path, gdata::REGULAR_FILE));
       return true;
     }
     OpenNewTab(page_url, NULL);
@@ -618,15 +687,15 @@ bool ExecuteBuiltinHandler(Browser* browser, const FilePath& path,
 
   if (IsSupportedGDocsExtension(file_extension.data())) {
     if (gdata::util::GetSpecialRemoteRootPath().IsParent(path)) {
-      // The file is on Google Docs. Get the Docs from the GData service.
-      gdata::GDataSystemService* system_service =
-          gdata::GDataSystemServiceFactory::GetForProfile(profile);
+      // The file is on Google Docs. Get the Docs from the Drive service.
+      gdata::DriveSystemService* system_service =
+          gdata::DriveSystemServiceFactory::GetForProfile(profile);
       if (!system_service)
         return false;
 
       system_service->file_system()->GetEntryInfoByPath(
-          gdata::util::ExtractGDataPath(path),
-          base::Bind(&OnGDataFileFound, profile, path,
+          gdata::util::ExtractDrivePath(path),
+          base::Bind(&OnDriveFileFound, profile, path,
                      gdata::HOSTED_DOCUMENT));
     } else {
       // The file is local (downloaded from an attachment or otherwise copied).
@@ -671,7 +740,18 @@ bool ExecuteBuiltinHandler(Browser* browser, const FilePath& path,
   }
 
   if (IsCRXFile(file_extension.data())) {
-    InstallCRX(browser, path);
+    if (gdata::util::IsUnderDriveMountPoint(path)) {
+      gdata::DriveSystemService* system_service =
+          gdata::DriveSystemServiceFactory::GetForProfile(profile);
+      if (!system_service)
+        return false;
+      system_service->file_system()->GetFileByPath(
+          gdata::util::ExtractDrivePath(path),
+          base::Bind(&OnCRXDownloadCallback, browser),
+          gdata::GetContentCallback());
+    } else {
+      InstallCRX(browser, path);
+    }
     return true;
   }
 
@@ -693,6 +773,7 @@ void InstallCRX(Browser* browser, const FilePath& path) {
       extensions::CrxInstaller::Create(
           service,
           chrome::CreateExtensionInstallPromptWithBrowser(browser)));
+  installer->set_error_on_unsupported_requirements(true);
   installer->set_is_gallery_install(false);
   installer->set_allow_silent_install(false);
   installer->InstallCrx(path);
@@ -719,11 +800,9 @@ bool ShouldBeOpenedWithPdfPlugin(Profile* profile, const char* file_extension) {
 
 ListValue* ProgressStatusVectorToListValue(
     Profile* profile, const GURL& origin_url,
-    const std::vector<GDataOperationRegistry::ProgressStatus>& list) {
+    const gdata::OperationProgressStatusList& list) {
   scoped_ptr<ListValue> result_list(new ListValue());
-  for (std::vector<
-          GDataOperationRegistry::ProgressStatus>::const_iterator iter =
-              list.begin();
+  for (gdata::OperationProgressStatusList::const_iterator iter = list.begin();
        iter != list.end(); ++iter) {
     result_list->Append(
         ProgessStatusToDictionaryValue(profile, origin_url, *iter));

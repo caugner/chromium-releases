@@ -37,7 +37,6 @@ class SpecialStoragePolicy;
 
 class CommandLine;
 class ExtensionSpecialStoragePolicy;
-class FaviconService;
 class HostContentSettingsMap;
 class PrefService;
 class ProfileDependencyManager;
@@ -58,6 +57,54 @@ class TestingProfile : public Profile {
   // Default constructor that cannot be used with multi-profiles.
   TestingProfile();
 
+  // Helper class for building an instance of TestingProfile (allows injecting
+  // mocks for various services prior to profile initialization).
+  // TODO(atwilson): Remove non-default constructors and various setters in
+  // favor of using the Builder API.
+  class Builder {
+   public:
+    Builder();
+    ~Builder();
+
+    // Sets a Delegate to be called back when the Profile is fully initialized.
+    // This causes the final initialization to be performed via a task so the
+    // caller must run a MessageLoop. Caller maintains ownership of the Delegate
+    // and must manage its lifetime so it continues to exist until profile
+    // initialization is complete.
+    void SetDelegate(Delegate* delegate);
+
+    // Sets the ExtensionSpecialStoragePolicy to be returned by
+    // GetExtensionSpecialStoragePolicy().
+    void SetExtensionSpecialStoragePolicy(
+        scoped_refptr<ExtensionSpecialStoragePolicy> policy);
+
+    // Sets the path to the directory to be used to hold profile data.
+    void SetPath(const FilePath& path);
+
+    // Sets the PrefService to be used by this profile.
+    void SetPrefService(scoped_ptr<PrefService> prefs);
+
+    // Sets the UserCloudPolicyManager to be used by this profile.
+    void SetUserCloudPolicyManager(
+        scoped_ptr<policy::UserCloudPolicyManager> manager);
+
+    // Creates the TestingProfile using previously-set settings.
+    scoped_ptr<TestingProfile> Build();
+
+   private:
+    // If true, Build() has already been called.
+    bool build_called_;
+
+    // Various staging variables where values are held until Build() is invoked.
+    scoped_ptr<policy::UserCloudPolicyManager> user_cloud_policy_manager_;
+    scoped_ptr<PrefService> pref_service_;
+    scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy_;
+    FilePath path_;
+    Delegate* delegate_;
+
+    DISALLOW_COPY_AND_ASSIGN(Builder);
+  };
+
   // Multi-profile aware constructor that takes the path to a directory managed
   // for this profile. This constructor is meant to be used by
   // TestingProfileManager::CreateTestingProfile. If you need to create multi-
@@ -70,6 +117,14 @@ class TestingProfile : public Profile {
   // for this profile and a delegate. This constructor is meant to be used
   // for unittesting the ProfileManager.
   TestingProfile(const FilePath& path, Delegate* delegate);
+
+  // Full constructor allowing the setting of all possible instance data.
+  // Callers should use Builder::Build() instead of invoking this constructor.
+  TestingProfile(const FilePath& path,
+                 Delegate* delegate,
+                 scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy,
+                 scoped_ptr<PrefService> prefs,
+                 scoped_ptr<policy::UserCloudPolicyManager> manager);
 
   virtual ~TestingProfile();
 
@@ -111,6 +166,10 @@ class TestingProfile : public Profile {
   // Blocks until the BookmarkModel finishes loaded. This is NOT invoked from
   // CreateBookmarkModel.
   void BlockUntilBookmarkModelLoaded();
+
+  // Blocks until the HistoryService finishes restoring its in-memory cache.
+  // This is NOT invoked from CreateHistoryService.
+  void BlockUntilHistoryIndexIsRefreshed();
 
   // Blocks until TopSites finishes loading.
   void BlockUntilTopSitesLoaded();
@@ -160,13 +219,12 @@ class TestingProfile : public Profile {
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
-  virtual FaviconService* GetFaviconService(ServiceAccessType access) OVERRIDE;
-  virtual HistoryService* GetHistoryService(ServiceAccessType access) OVERRIDE;
-  virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
   // The CookieMonster will only be returned if a Context has been created. Do
   // this by calling CreateRequestContext(). See the note at GetRequestContext
   // for more information.
   net::CookieMonster* GetCookieMonster();
+
+  virtual policy::UserCloudPolicyManager* GetUserCloudPolicyManager() OVERRIDE;
   virtual policy::PolicyService* GetPolicyService() OVERRIDE;
   // Sets the profile's PrefService. If a pref service hasn't been explicitly
   // set GetPrefs creates one, so normally you need not invoke this. If you need
@@ -182,11 +240,16 @@ class TestingProfile : public Profile {
   // down the IO thread to avoid leaks).
   void ResetRequestContext();
 
-  virtual net::URLRequestContextGetter* GetRequestContextForMedia() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+      int renderer_child_id) OVERRIDE;
   virtual net::URLRequestContextGetter*
       GetRequestContextForExtensions() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForIsolatedApp(
-      const std::string& app_id) OVERRIDE;
+  virtual net::URLRequestContextGetter*
+      GetMediaRequestContextForStoragePartition(
+          const std::string& partition_id) OVERRIDE;
+  virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
+      const std::string& partition_id) OVERRIDE;
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
   virtual std::wstring GetName();
@@ -200,7 +263,6 @@ class TestingProfile : public Profile {
                                    std::wstring* output_string) {}
   virtual void MergeResourceInteger(int message_id, int* output_value) {}
   virtual void MergeResourceBoolean(int message_id, bool* output_value) {}
-  virtual BookmarkModel* GetBookmarkModel() OVERRIDE;
   virtual bool IsSameProfile(Profile *p) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
@@ -242,23 +304,20 @@ class TestingProfile : public Profile {
   TestingPrefService* testing_prefs_;
 
  private:
+  // Creates a temporary directory for use by this profile.
+  void CreateTempProfileDir();
+
   // Common initialization between the two constructors.
   void Init();
 
   // Finishes initialization when a profile is created asynchronously.
   void FinishInit();
 
-  // Destroys favicon service if it has been created.
-  void DestroyFaviconService();
-
   // Creates a TestingPrefService and associates it with the TestingProfile.
   void CreateTestingPrefService();
 
   virtual base::Callback<ChromeURLDataManagerBackend*(void)>
       GetChromeURLDataManagerBackendGetter() const OVERRIDE;
-
-  // The favicon service. Only created if CreateFaviconService is invoked.
-  scoped_ptr<FaviconService> favicon_service_;
 
   // The policy service. Lazily created as a stub.
   scoped_ptr<policy::PolicyService> policy_service_;
@@ -288,6 +347,9 @@ class TestingProfile : public Profile {
 
   // The proxy prefs tracker.
   scoped_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
+
+  // UserCloudPolicyManager returned by GetUserCloudPolicyManager().
+  scoped_ptr<policy::UserCloudPolicyManager> user_cloud_policy_manager_;
 
   // We use a temporary directory to store testing profile data. In a multi-
   // profile environment, this is invalid and the directory is managed by the

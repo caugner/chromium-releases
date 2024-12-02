@@ -26,7 +26,10 @@
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "webkit/plugins/npapi/plugin_group.h"
+#include "webkit/plugins/npapi/plugin_utils.h"
+#include "webkit/plugins/webplugininfo.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -45,10 +48,8 @@ void BeginDownload(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   ResourceDispatcherHost* rdh = ResourceDispatcherHost::Get();
-  scoped_ptr<net::URLRequest> request(new net::URLRequest(
-      url,
-      NULL,
-      resource_context->GetRequestContext()));
+  scoped_ptr<net::URLRequest> request(
+      resource_context->GetRequestContext()->CreateRequest(url, NULL));
   net::Error error = rdh->BeginDownload(
       request.Pass(),
       false,  // is_content_initiated
@@ -72,9 +73,11 @@ PluginInstaller::PluginInstaller(const std::string& identifier,
                                  const string16& name,
                                  bool url_for_display,
                                  const GURL& plugin_url,
-                                 const GURL& help_url)
+                                 const GURL& help_url,
+                                 const string16& group_name_matcher)
     : identifier_(identifier),
       name_(name),
+      group_name_matcher_(group_name_matcher),
       url_for_display_(url_for_display),
       plugin_url_(plugin_url),
       help_url_(help_url),
@@ -92,12 +95,17 @@ void PluginInstaller::AddVersion(const Version& version,
 
 PluginInstaller::SecurityStatus PluginInstaller::GetSecurityStatus(
     const webkit::WebPluginInfo& plugin) const {
-  // If there are no versions defined, the plug-in should require authorization.
-  if (versions_.empty())
+  if (versions_.empty()) {
+#if defined(OS_LINUX)
+    // On Linux, unknown plugins require authorization.
     return SECURITY_STATUS_REQUIRES_AUTHORIZATION;
+#else
+    return SECURITY_STATUS_UP_TO_DATE;
+#endif
+  }
 
   Version version;
-  webkit::npapi::PluginGroup::CreateVersionFromString(plugin.version, &version);
+  webkit::npapi::CreateVersionFromString(plugin.version, &version);
   if (!version.IsValid())
     version = Version("0");
 
@@ -150,11 +158,6 @@ void PluginInstaller::OnDownloadUpdated(DownloadItem* download) {
       DownloadCancelled();
       break;
     }
-    case DownloadItem::REMOVING: {
-      DCHECK_EQ(INSTALLER_STATE_DOWNLOADING, state_);
-      state_ = INSTALLER_STATE_IDLE;
-      break;
-    }
     case DownloadItem::INTERRUPTED: {
       content::DownloadInterruptReason reason = download->GetLastReason();
       DownloadError(content::InterruptReasonDebugString(reason));
@@ -168,7 +171,10 @@ void PluginInstaller::OnDownloadUpdated(DownloadItem* download) {
   download->RemoveObserver(this);
 }
 
-void PluginInstaller::OnDownloadOpened(DownloadItem* download) {
+void PluginInstaller::OnDownloadDestroyed(DownloadItem* download) {
+  DCHECK_EQ(INSTALLER_STATE_DOWNLOADING, state_);
+  state_ = INSTALLER_STATE_IDLE;
+  download->RemoveObserver(this);
 }
 
 void PluginInstaller::AddObserver(PluginInstallerObserver* observer) {
@@ -251,4 +257,8 @@ void PluginInstaller::DownloadCancelled() {
   DCHECK_EQ(INSTALLER_STATE_DOWNLOADING, state_);
   state_ = INSTALLER_STATE_IDLE;
   FOR_EACH_OBSERVER(PluginInstallerObserver, observers_, DownloadCancelled());
+}
+
+bool PluginInstaller::MatchesPlugin(const webkit::WebPluginInfo& plugin) {
+  return plugin.name.find(group_name_matcher_) != string16::npos;
 }

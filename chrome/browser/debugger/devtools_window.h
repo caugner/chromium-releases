@@ -57,7 +57,13 @@ class DevToolsWindow : private content::NotificationObserver,
   static DevToolsWindow* OpenDevToolsWindow(
       content::RenderViewHost* inspected_rvh);
   static DevToolsWindow* ToggleDevToolsWindow(
+      Browser* browser,
+      DevToolsToggleAction action);
+
+  // Exposed for testing, normal clients should not use this method.
+  static DevToolsWindow* ToggleDevToolsWindow(
       content::RenderViewHost* inspected_rvh,
+      bool force_open,
       DevToolsToggleAction action);
   static void InspectElement(
       content::RenderViewHost* inspected_rvh, int x, int y);
@@ -112,12 +118,15 @@ class DevToolsWindow : private content::NotificationObserver,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) OVERRIDE;
+                              bool user_gesture,
+                              bool* was_blocked) OVERRIDE;
   virtual void CloseContents(content::WebContents* source) OVERRIDE {}
   virtual bool PreHandleKeyboardEvent(
+      content::WebContents* source,
       const content::NativeWebKeyboardEvent& event,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
+      content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual content::JavaScriptDialogCreator*
       GetJavaScriptDialogCreator() OVERRIDE;
@@ -127,11 +136,8 @@ class DevToolsWindow : private content::NotificationObserver,
 
   virtual void FrameNavigating(const std::string& url) OVERRIDE {}
 
-  static DevToolsWindow* ToggleDevToolsWindow(
-      content::RenderViewHost* inspected_rvh,
-      bool force_open,
-      DevToolsToggleAction action);
   static DevToolsWindow* AsDevToolsWindow(content::DevToolsClientHost*);
+  static DevToolsWindow* AsDevToolsWindow(content::RenderViewHost*);
 
   // content::DevToolsClientHandlerDelegate overrides.
   virtual void ActivateWindow() OVERRIDE;

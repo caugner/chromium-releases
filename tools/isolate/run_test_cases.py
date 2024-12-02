@@ -21,6 +21,42 @@ import threading
 import time
 
 
+# These are known to influence the way the output is generated.
+KNOWN_GTEST_ENV_VARS = [
+  'GTEST_ALSO_RUN_DISABLED_TESTS',
+  'GTEST_BREAK_ON_FAILURE',
+  'GTEST_CATCH_EXCEPTIONS',
+  'GTEST_COLOR',
+  'GTEST_FILTER',
+  'GTEST_OUTPUT',
+  'GTEST_PRINT_TIME',
+  'GTEST_RANDOM_SEED',
+  'GTEST_REPEAT',
+  'GTEST_SHARD_INDEX',
+  'GTEST_SHARD_STATUS_FILE',
+  'GTEST_SHUFFLE',
+  'GTEST_THROW_ON_FAILURE',
+  'GTEST_TOTAL_SHARDS',
+]
+
+# These needs to be poped out before running a test.
+GTEST_ENV_VARS_TO_REMOVE = [
+  # TODO(maruel): Handle.
+  'GTEST_ALSO_RUN_DISABLED_TESTS',
+  'GTEST_FILTER',
+  # TODO(maruel): Handle.
+  'GTEST_OUTPUT',
+  # TODO(maruel): Handle.
+  'GTEST_RANDOM_SEED',
+  # TODO(maruel): Handle.
+  'GTEST_REPEAT',
+  'GTEST_SHARD_INDEX',
+  # TODO(maruel): Handle.
+  'GTEST_SHUFFLE',
+  'GTEST_TOTAL_SHARDS',
+]
+
+
 def num_processors():
   """Returns the number of processors.
 
@@ -240,6 +276,7 @@ class ThreadPool(object):
     if progress and timeout:
       while not self._tasks.join(timeout):
         progress.print_update()
+      progress.print_update()
     else:
       self._tasks.join()
     out = []
@@ -329,6 +366,18 @@ def fix_python_path(cmd):
   return out
 
 
+def setup_gtest_env():
+  """Copy the enviroment variables and setup for running a gtest."""
+  env = os.environ.copy()
+  for name in GTEST_ENV_VARS_TO_REMOVE:
+    env.pop(name, None)
+
+  # Forcibly enable color by default, if not already disabled.
+  env.setdefault('GTEST_COLOR', 'on')
+
+  return env
+
+
 def gtest_list_tests(executable):
   """List all the test cases for a google test.
 
@@ -336,16 +385,19 @@ def gtest_list_tests(executable):
   """
   cmd = [executable, '--gtest_list_tests']
   cmd = fix_python_path(cmd)
+  env = setup_gtest_env()
   try:
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         env=env)
   except OSError, e:
     raise Failure('Failed to run %s\n%s' % (executable, str(e)))
   out, err = p.communicate()
   if p.returncode:
-    raise Failure('Failed to run %s\n%s' % (executable, err), p.returncode)
+    raise Failure('Failed to run %s\nstdout:\n%s\nstderr:\n%s' %
+                  (executable, out, err), p.returncode)
   # pylint: disable=E1103
   if err and not err.startswith('Xlib:  extension "RANDR" missing on display '):
-    raise Failure('Unexpected spew:\n%s' % err, 1)
+    logging.error('Unexpected spew in gtest_list_tests:\n%s\n%s', err, cmd)
   return out
 
 
@@ -417,19 +469,97 @@ def list_test_cases(executable, index, shards, disabled, fails, flaky):
   return filter_bad_tests(tests, disabled, fails, flaky)
 
 
+class RunSome(object):
+  """Thread-safe object deciding if testing should continue."""
+  def __init__(self, expected_count, retries, min_failures, max_failure_ratio):
+    """Determines if it is better to give up testing after an amount of failures
+    and successes.
+
+    Arguments:
+    - expected_count is the expected number of elements to run.
+    - retries is how many time a failing element can be retried. retries should
+      be set to the maximum number of retries per failure. This permits
+      dampening the curve to determine threshold where to stop.
+    - min_failures is the minimal number of failures to tolerate, to put a lower
+      limit when expected_count is small. This value is multiplied by the number
+      of retries.
+    - max_failure_ratio is the the ratio of permitted failures, e.g. 0.1 to stop
+      after 10% of failed test cases.
+
+    For large values of expected_count, the number of tolerated failures will be
+    at maximum "(expected_count * retries) * max_failure_ratio".
+
+    For small values of expected_count, the number of tolerated failures will be
+    at least "min_failures * retries".
+    """
+    assert 0 < expected_count
+    assert 0 <= retries < 100
+    assert 0 <= min_failures
+    assert 0. < max_failure_ratio < 1.
+    # Constants.
+    self._expected_count = expected_count
+    self._retries = retries
+    self._min_failures = min_failures
+    self._max_failure_ratio = max_failure_ratio
+
+    self._min_failures_tolerated = self._min_failures * self._retries
+    # Pre-calculate the maximum number of allowable failures. Note that
+    # _max_failures can be lower than _min_failures.
+    self._max_failures_tolerated = round(
+        (expected_count * retries) * max_failure_ratio)
+
+    # Variables.
+    self._lock = threading.Lock()
+    self._passed = 0
+    self._failures = 0
+
+  def should_stop(self):
+    """Stops once a threshold was reached. This includes retries."""
+    with self._lock:
+      # Accept at least the minimum number of failures.
+      if self._failures <= self._min_failures_tolerated:
+        return False
+      return self._failures >= self._max_failures_tolerated
+
+  def got_result(self, passed):
+    with self._lock:
+      if passed:
+        self._passed += 1
+      else:
+        self._failures += 1
+
+  def __str__(self):
+    return '%s(%d, %d, %d, %.3f)' % (
+        self.__class__.__name__,
+        self._expected_count,
+        self._retries,
+        self._min_failures,
+        self._max_failure_ratio)
+
+
+class RunAll(object):
+  """Never fails."""
+  @staticmethod
+  def should_stop():
+    return False
+  @staticmethod
+  def got_result(_):
+    pass
+
+
 class Runner(object):
-  def __init__(self, executable, cwd_dir, timeout, progress):
+  def __init__(
+      self, executable, cwd_dir, timeout, progress, retry_count, decider):
     # Constants
     self.executable = executable
     self.cwd_dir = cwd_dir
     self.timeout = timeout
     self.progress = progress
-    self.retry_count = 3
+    self.retry_count = retry_count
     # It is important to remove the shard environment variables since it could
     # conflict with --gtest_filter.
-    self.env = os.environ.copy()
-    self.env.pop('GTEST_SHARD_INDEX', None)
-    self.env.pop('GTEST_TOTAL_SHARDS', None)
+    self.env = setup_gtest_env()
+    self.decider = decider
 
   def map(self, test_case):
     """Traces a single test case and returns its output."""
@@ -437,6 +567,9 @@ class Runner(object):
     cmd = fix_python_path(cmd)
     out = []
     for retry in range(self.retry_count):
+      if self.decider.should_stop():
+        break
+
       start = time.time()
       output, returncode = call_with_timeout(
           cmd,
@@ -449,11 +582,13 @@ class Runner(object):
         'test_case': test_case,
         'returncode': returncode,
         'duration': duration,
-        'output': output,
+        # It needs to be valid utf-8 otherwise it can't be store.
+        'output': output.decode('ascii', 'ignore').encode('utf-8'),
       }
       if '[ RUN      ]' not in output:
         # Can't find gtest marker, mark it as invalid.
         returncode = returncode or 1
+      self.decider.got_result(not bool(returncode))
       out.append(data)
       if sys.platform == 'win32':
         output = output.replace('\r\n', '\n')
@@ -507,19 +642,34 @@ def get_test_cases(executable, whitelist, blacklist, index, shards):
   return tests
 
 
-def run_test_cases(executable, test_cases, jobs, timeout, no_dump):
+def LogResults(result_file, results):
+  """Write the results out to a file if one is given."""
+  if not result_file:
+    return
+  with open(result_file, 'wb') as f:
+    json.dump(results, f, sort_keys=True, indent=2)
+
+
+def run_test_cases(executable, test_cases, jobs, timeout, run_all, result_file):
   """Traces test cases one by one."""
+  if not test_cases:
+    return 0
   progress = Progress(len(test_cases))
+  retries = 3
+  if run_all:
+    decider = RunAll()
+  else:
+    # If 10% of test cases fail, just too bad.
+    decider = RunSome(len(test_cases), retries, 2, 0.1)
   with ThreadPool(jobs) as pool:
-    function = Runner(executable, os.getcwd(), timeout, progress).map
+    function = Runner(
+        executable, os.getcwd(), timeout, progress, retries, decider).map
     for test_case in test_cases:
       pool.add_task(function, test_case)
     results = pool.join(progress, 0.1)
     duration = time.time() - progress.start
-  results = dict((item[0]['test_case'], item) for item in results)
-  if not no_dump:
-    with open('%s.run_test_cases' % executable, 'wb') as f:
-      json.dump(results, f, sort_keys=True, indent=2)
+  results = dict((item[0]['test_case'], item) for item in results if item)
+  LogResults(result_file, results)
   sys.stdout.write('\n')
   total = len(results)
   if not total:
@@ -542,10 +692,16 @@ def run_test_cases(executable, test_cases, jobs, timeout, no_dump):
     else:
       assert False, items
 
+  print 'Summary:'
   for test_case in sorted(flaky):
     items = results[test_case]
     print '%s is flaky (tried %d times)' % (test_case, len(items))
 
+  for test_case in sorted(fail):
+    print '%s failed' % (test_case)
+
+  if decider.should_stop():
+    print '** STOPPED EARLY due to high failure rate **'
   print 'Success: %4d %5.2f%%' % (len(success), len(success) * 100. / total)
   print 'Flaky:   %4d %5.2f%%' % (len(flaky), len(flaky) * 100. / total)
   print 'Fail:    %4d %5.2f%%' % (len(fail), len(fail) * 100. / total)
@@ -557,14 +713,106 @@ def run_test_cases(executable, test_cases, jobs, timeout, no_dump):
   return int(bool(fail))
 
 
+class OptionParserWithLogging(optparse.OptionParser):
+  """Adds --verbose option."""
+  def __init__(self, verbose=0, **kwargs):
+    optparse.OptionParser.__init__(self, **kwargs)
+    self.add_option(
+        '-v', '--verbose',
+        action='count',
+        default=verbose,
+        help='Use multiple times to increase verbosity')
+
+  def parse_args(self, *args, **kwargs):
+    options, args = optparse.OptionParser.parse_args(self, *args, **kwargs)
+    levels = [logging.ERROR, logging.INFO, logging.DEBUG]
+    logging.basicConfig(
+        level=levels[min(len(levels)-1, options.verbose)],
+        format='%(levelname)5s %(module)15s(%(lineno)3d): %(message)s')
+    return options, args
+
+
+class OptionParserWithTestSharding(OptionParserWithLogging):
+  """Adds automatic handling of test sharding"""
+  def __init__(self, **kwargs):
+    OptionParserWithLogging.__init__(self, **kwargs)
+
+    def as_digit(variable, default):
+      return int(variable) if variable.isdigit() else default
+
+    group = optparse.OptionGroup(self, 'Which shard to run')
+    group.add_option(
+        '-i', '--index',
+        type='int',
+        default=as_digit(os.environ.get('GTEST_SHARD_INDEX', ''), None),
+        help='Shard index to run')
+    group.add_option(
+        '-s', '--shards',
+        type='int',
+        default=as_digit(os.environ.get('GTEST_TOTAL_SHARDS', ''), None),
+        help='Total number of shards to calculate from the --index to run')
+    self.add_option_group(group)
+
+  def parse_args(self, *args, **kwargs):
+    options, args = OptionParserWithLogging.parse_args(self, *args, **kwargs)
+    if bool(options.shards) != bool(options.index is not None):
+      self.error('Use both --index X --shards Y or none of them')
+    return options, args
+
+
+class OptionParserWithTestShardingAndFiltering(OptionParserWithTestSharding):
+  """Adds automatic handling of test sharding and filtering."""
+  def __init__(self, *args, **kwargs):
+    OptionParserWithTestSharding.__init__(self, *args, **kwargs)
+
+    group = optparse.OptionGroup(self, 'Which test cases to run')
+    group.add_option(
+        '-w', '--whitelist',
+        default=[],
+        action='append',
+        help='filter to apply to test cases to run, wildcard-style, defaults '
+        'to all test')
+    group.add_option(
+        '-b', '--blacklist',
+        default=[],
+        action='append',
+        help='filter to apply to test cases to skip, wildcard-style, defaults '
+        'to no test')
+    group.add_option(
+        '-T', '--test-case-file',
+        help='File containing the exact list of test cases to run')
+    group.add_option(
+        '--gtest_filter',
+        default=os.environ.get('GTEST_FILTER', ''),
+        help='Runs a single test, provideded to keep compatibility with '
+        'other tools')
+    self.add_option_group(group)
+
+  def parse_args(self, *args, **kwargs):
+    options, args = OptionParserWithTestSharding.parse_args(
+        self, *args, **kwargs)
+
+    if options.gtest_filter:
+      # Override any other option.
+      # Based on UnitTestOptions::FilterMatchesTest() in
+      # http://code.google.com/p/googletest/source/browse/#svn%2Ftrunk%2Fsrc
+      if '-' in options.gtest_filter:
+        options.whitelist, options.blacklist = options.gtest_filter.split('-',
+                                                                          1)
+      else:
+        options.whitelist = options.gtest_filter
+        options.blacklist = ''
+      options.whitelist = [i for i in options.whitelist.split(':') if i]
+      options.blacklist = [i for i in options.blacklist.split(':') if i]
+
+    return options, args
+
+
 def main(argv):
   """CLI frontend to validate arguments."""
-  def as_digit(variable, default):
-    if variable.isdigit():
-      return int(variable)
-    return default
-
-  parser = optparse.OptionParser(usage='%prog <options> [gtest]')
+  parser = OptionParserWithTestShardingAndFiltering(
+      usage='%prog <options> [gtest]',
+      verbose=int(os.environ.get('ISOLATE_DEBUG', 0)))
   parser.add_option(
       '-j', '--jobs',
       type='int',
@@ -576,52 +824,19 @@ def main(argv):
       default=120,
       help='Timeout for a single test case, in seconds default:%default')
   parser.add_option(
-      '-v', '--verbose',
-      action='count',
-      default=int(os.environ.get('ISOLATE_DEBUG', 0)),
-      help='Use multiple times')
+      '--run-all',
+      action='store_true',
+      default=bool(int(os.environ.get('RUN_TEST_CASES_RUN_ALL', '0'))),
+      help='Do not fail early when a large number of test cases fail')
   parser.add_option(
       '--no-dump',
       action='store_true',
-      help='do not generate a .test_cases file')
-
-  group = optparse.OptionGroup(parser, 'Which test cases to run')
-  group.add_option(
-      '-w', '--whitelist',
-      default=[],
-      action='append',
-      help='filter to apply to test cases to run, wildcard-style, defaults to '
-           'all test')
-  group.add_option(
-      '-b', '--blacklist',
-      default=[],
-      action='append',
-      help='filter to apply to test cases to skip, wildcard-style, defaults to '
-           'no test')
-  group.add_option(
-      '-i', '--index',
-      type='int',
-      default=as_digit(os.environ.get('GTEST_SHARD_INDEX', ''), None),
-      help='Shard index to run')
-  group.add_option(
-      '-s', '--shards',
-      type='int',
-      default=as_digit(os.environ.get('GTEST_TOTAL_SHARDS', ''), None),
-      help='Total number of shards to calculate from the --index to run')
-  group.add_option(
-      '-T', '--test-case-file',
-      help='File containing the exact list of test cases to run')
-  group.add_option(
-      '--gtest_filter',
-      help='Runs a single test, provideded to keep compatibility with '
-           'other tools')
-  parser.add_option_group(group)
+      help='do not generate a .run_test_cases file')
+  parser.add_option(
+      '--result',
+      default=os.environ.get('RUN_TEST_CASES_RESULT_FILE', ''),
+      help='Override the default name of the generated .run_test_cases file')
   options, args = parser.parse_args(argv)
-
-  levels = [logging.ERROR, logging.INFO, logging.DEBUG]
-  logging.basicConfig(
-      level=levels[min(len(levels)-1, options.verbose)],
-      format='%(levelname)5s %(module)15s(%(lineno)3d): %(message)s')
 
   if len(args) != 1:
     parser.error(
@@ -638,18 +853,6 @@ def main(argv):
   if not os.path.isfile(executable):
     parser.error('"%s" doesn\'t exist.' % executable)
 
-  if options.gtest_filter:
-    # Override any other option.
-    # Based on UnitTestOptions::FilterMatchesTest() in
-    # http://code.google.com/p/googletest/source/browse/#svn%2Ftrunk%2Fsrc
-    if '-' in options.gtest_filter:
-      options.whitelist, options.blacklist = options.gtest_filter.split('-', 1)
-    else:
-      options.whitelist = options.gtest_filter
-      options.blacklist = ''
-    options.whitelist = [i for i in options.whitelist.split(':') if i]
-    options.blacklist = [i for i in options.blacklist.split(':') if i]
-
   # Grab the test cases.
   if options.test_case_file:
     with open(options.test_case_file, 'r') as f:
@@ -663,14 +866,25 @@ def main(argv):
         options.shards)
 
   if not test_cases:
-    return 0
+    # If test_cases is None then there was a problem generating the tests to
+    # run, so this should be considered a failure.
+    return int(test_cases is None)
+
+  if options.no_dump:
+    result_file = None
+  else:
+    if options.result:
+      result_file = options.result
+    else:
+      result_file = '%s.run_test_cases' % executable
 
   return run_test_cases(
       executable,
       test_cases,
       options.jobs,
       options.timeout,
-      options.no_dump)
+      options.run_all,
+      result_file)
 
 
 if __name__ == '__main__':

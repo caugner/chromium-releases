@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -18,7 +19,6 @@
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/view_type_utils.h"
@@ -178,7 +178,7 @@ GeolocationConfirmInfoBarDelegate::GeolocationConfirmInfoBarDelegate(
       requesting_frame_url_(requesting_frame_url),
       display_languages_(display_languages) {
   const NavigationEntry* committed_entry =
-      infobar_helper->web_contents()->GetController().GetLastCommittedEntry();
+      infobar_helper->GetWebContents()->GetController().GetLastCommittedEntry();
   set_contents_unique_id(committed_entry ? committed_entry->GetUniqueID() : 0);
 }
 
@@ -205,13 +205,13 @@ string16 GeolocationConfirmInfoBarDelegate::GetButtonLabel(
 
 bool GeolocationConfirmInfoBarDelegate::Accept() {
   controller_->OnPermissionSet(render_process_id_, render_view_id_, bridge_id_,
-      requesting_frame_url_, owner()->web_contents()->GetURL(), true);
+      requesting_frame_url_, owner()->GetWebContents()->GetURL(), true);
   return true;
 }
 
 bool GeolocationConfirmInfoBarDelegate::Cancel() {
   controller_->OnPermissionSet(render_process_id_, render_view_id_, bridge_id_,
-      requesting_frame_url_, owner()->web_contents()->GetURL(),
+      requesting_frame_url_, owner()->GetWebContents()->GetURL(),
       false);
   return true;
 }
@@ -234,7 +234,7 @@ bool GeolocationConfirmInfoBarDelegate::LinkClicked(
       Referrer(),
       (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
       content::PAGE_TRANSITION_LINK, false);
-  owner()->web_contents()->OpenURL(params);
+  owner()->GetWebContents()->OpenURL(params);
   return false;  // Do not dismiss the info bar.
 }
 

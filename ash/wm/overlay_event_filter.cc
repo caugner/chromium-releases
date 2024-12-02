@@ -7,6 +7,7 @@
 #include "ash/wm/partial_screenshot_view.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/base/events/event.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
@@ -21,7 +22,7 @@ OverlayEventFilter::~OverlayEventFilter() {
 }
 
 bool OverlayEventFilter::PreHandleKeyEvent(
-    aura::Window* target, aura::KeyEvent* event) {
+    aura::Window* target, ui::KeyEvent* event) {
   if (!delegate_)
     return false;
 
@@ -48,9 +49,10 @@ bool OverlayEventFilter::PreHandleKeyEvent(
 }
 
 bool OverlayEventFilter::PreHandleMouseEvent(
-    aura::Window* target, aura::MouseEvent* event) {
-  if (delegate_) {
-    DCHECK_EQ(target, delegate_->GetWindow());
+    aura::Window* target, ui::MouseEvent* event) {
+  // Handle mouse events only when they are sent to a child of the delegate's
+  // window.
+  if (delegate_ && delegate_->GetWindow()->Contains(target)) {
     target->delegate()->OnMouseEvent(event);
     return true;
   }
@@ -58,13 +60,13 @@ bool OverlayEventFilter::PreHandleMouseEvent(
 }
 
 ui::TouchStatus OverlayEventFilter::PreHandleTouchEvent(
-    aura::Window* target, aura::TouchEvent* event) {
+    aura::Window* target, ui::TouchEvent* event) {
   return ui::TOUCH_STATUS_UNKNOWN;  // Not handled.
 }
 
-ui::GestureStatus OverlayEventFilter::PreHandleGestureEvent(
-    aura::Window* target, aura::GestureEvent* event) {
-  return ui::GESTURE_STATUS_UNKNOWN;  // Not handled.
+ui::EventResult OverlayEventFilter::PreHandleGestureEvent(
+    aura::Window* target, ui::GestureEvent* event) {
+  return ui::ER_UNHANDLED;  // Not handled.
 }
 
 void OverlayEventFilter::OnLoginStateChanged(

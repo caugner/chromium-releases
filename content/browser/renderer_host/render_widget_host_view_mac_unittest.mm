@@ -115,6 +115,7 @@ class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
     geom.visible = true;
     geom.rects_valid = true;
     rwhv_mac_->MovePluginWindows(
+        gfx::Point(),
         std::vector<webkit::npapi::WebPluginGeometry>(1, geom));
 
     return accelerated_handle;
@@ -251,7 +252,7 @@ TEST_F(RenderWidgetHostViewMacTest, Fullscreen) {
   EXPECT_TRUE(rwhv_mac_->pepper_fullscreen_window());
 }
 
-TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharaacterRangeCaretCase) {
+TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharacterRangeCaretCase) {
   const string16 kDummyString = UTF8ToUTF16("hogehoge");
   const size_t kDummyOffset = 0;
 
@@ -261,7 +262,9 @@ TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharaacterRangeCaretCase) {
   NSRect rect;
   NSRange actual_range;
   rwhv_mac_->SelectionChanged(kDummyString, kDummyOffset, caret_range);
-  rwhv_mac_->SelectionBoundsChanged(caret_rect, caret_rect);
+  rwhv_mac_->SelectionBoundsChanged(
+       caret_rect, WebKit::WebTextDirectionLeftToRight,
+       caret_rect, WebKit::WebTextDirectionLeftToRight);
   EXPECT_TRUE(rwhv_mac_->GetCachedFirstRectForCharacterRange(
         caret_range.ToNSRange(),
         &rect,
@@ -286,7 +289,9 @@ TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharaacterRangeCaretCase) {
   caret_rect = gfx::Rect(20, 11, 0, 10);
   caret_range = ui::Range(1, 1);
   rwhv_mac_->SelectionChanged(kDummyString, kDummyOffset, caret_range);
-  rwhv_mac_->SelectionBoundsChanged(caret_rect, caret_rect);
+  rwhv_mac_->SelectionBoundsChanged(
+       caret_rect, WebKit::WebTextDirectionLeftToRight,
+       caret_rect, WebKit::WebTextDirectionLeftToRight);
   EXPECT_TRUE(rwhv_mac_->GetCachedFirstRectForCharacterRange(
         caret_range.ToNSRange(),
         &rect,
@@ -310,7 +315,9 @@ TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharaacterRangeCaretCase) {
   // No caret.
   caret_range = ui::Range(1, 2);
   rwhv_mac_->SelectionChanged(kDummyString, kDummyOffset, caret_range);
-  rwhv_mac_->SelectionBoundsChanged(caret_rect, gfx::Rect(30, 11, 0, 10));
+  rwhv_mac_->SelectionBoundsChanged(
+        caret_rect, WebKit::WebTextDirectionLeftToRight,
+        gfx::Rect(30, 11, 0, 10), WebKit::WebTextDirectionLeftToRight);
   EXPECT_FALSE(rwhv_mac_->GetCachedFirstRectForCharacterRange(
         ui::Range(0, 0).ToNSRange(),
         &rect,
@@ -366,6 +373,15 @@ TEST_F(RenderWidgetHostViewMacTest, UpdateCompositionSinglelineCase) {
       ui::Range(1, 2).ToNSRange(),
       &rect,
       &actual_range));
+
+  // If the firstRectForCharacterRange is failed in renderer, empty rect vector
+  // is sent. Make sure this does not crash.
+  rwhv_mac_->ImeCompositionRangeChanged(ui::Range(10, 12),
+                                        std::vector<gfx::Rect>());
+  EXPECT_FALSE(rwhv_mac_->GetCachedFirstRectForCharacterRange(
+      ui::Range(10, 11).ToNSRange(),
+      &rect,
+      NULL));
 
   const int kCompositionLength = 10;
   std::vector<gfx::Rect> composition_bounds;

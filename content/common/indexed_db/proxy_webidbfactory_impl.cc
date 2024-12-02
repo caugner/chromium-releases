@@ -13,6 +13,7 @@ using WebKit::WebDOMStringList;
 using WebKit::WebFrame;
 using WebKit::WebIDBCallbacks;
 using WebKit::WebIDBDatabase;
+using WebKit::WebIDBDatabaseCallbacks;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
 
@@ -37,6 +38,7 @@ void RendererWebIDBFactoryImpl::open(
     const WebString& name,
     long long version,
     WebIDBCallbacks* callbacks,
+    WebIDBDatabaseCallbacks* database_callbacks,
     const WebSecurityOrigin& origin,
     WebFrame* web_frame,
     const WebString& data_dir) {
@@ -45,7 +47,8 @@ void RendererWebIDBFactoryImpl::open(
   IndexedDBDispatcher* dispatcher =
       IndexedDBDispatcher::ThreadSpecificInstance();
   dispatcher->RequestIDBFactoryOpen(
-      name, version, callbacks, origin.databaseIdentifier(), web_frame);
+      name, version, callbacks, database_callbacks, origin.databaseIdentifier(),
+      web_frame);
 }
 
 void RendererWebIDBFactoryImpl::deleteDatabase(

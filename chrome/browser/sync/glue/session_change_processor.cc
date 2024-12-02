@@ -24,7 +24,7 @@
 #include "content/public/browser/web_contents.h"
 #include "sync/api/sync_error.h"
 #include "sync/internal_api/public/base/model_type.h"
-#include "sync/internal_api/public/base/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type_state_map.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/protocol/session_specifics.pb.h"
@@ -112,8 +112,9 @@ void SessionChangeProcessor::Observe(
     }
 
     case chrome::NOTIFICATION_TAB_PARENTED: {
-      SyncedTabDelegate* tab =
-          content::Source<TabContents>(source).ptr()->synced_tab_delegate();
+      TabContents* tab_contents = TabContents::FromWebContents(
+          content::Source<WebContents>(source).ptr());
+      SyncedTabDelegate* tab = tab_contents->synced_tab_delegate();
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -140,9 +141,8 @@ void SessionChangeProcessor::Observe(
     case chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED: {
       TabContents* tab_contents = content::Source<TabContents>(source).ptr();
       SyncedTabDelegate* tab = tab_contents->synced_tab_delegate();
-      if (!tab || tab->profile() != profile_) {
+      if (!tab || tab->profile() != profile_)
         return;
-      }
       modified_tabs.push_back(tab);
       DVLOG(1) << "Received NOTIFICATION_TAB_CONTENTS_DESTROYED for profile "
                << profile_;
@@ -182,14 +182,14 @@ void SessionChangeProcessor::Observe(
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
       extensions::TabHelper* extension_tab_helper =
           content::Source<extensions::TabHelper>(source).ptr();
-      if (!extension_tab_helper ||
-          extension_tab_helper->web_contents()->GetBrowserContext() !=
+      if (extension_tab_helper->web_contents()->GetBrowserContext() !=
               profile_) {
         return;
       }
       if (extension_tab_helper->extension_app()) {
-        modified_tabs.push_back(extension_tab_helper->tab_contents()->
-            synced_tab_delegate());
+        TabContents* tab_contents =
+            TabContents::FromWebContents(extension_tab_helper->web_contents());
+        modified_tabs.push_back(tab_contents->synced_tab_delegate());
       }
       DVLOG(1) << "Received TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED "
                << "for profile " << profile_;
@@ -214,12 +214,12 @@ void SessionChangeProcessor::Observe(
         entry->GetVirtualURL().spec() == kNTPOpenTabSyncURL) {
       DVLOG(1) << "Triggering sync refresh for sessions datatype.";
       const syncer::ModelType type = syncer::SESSIONS;
-      syncer::ModelTypePayloadMap payload_map;
-      payload_map[type] = "";
+      syncer::ModelTypeStateMap state_map;
+      state_map.insert(std::make_pair(type, syncer::InvalidationState()));
       content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
           content::Source<Profile>(profile_),
-          content::Details<const syncer::ModelTypePayloadMap>(&payload_map));
+          content::Details<const syncer::ModelTypeStateMap>(&state_map));
     }
   }
 

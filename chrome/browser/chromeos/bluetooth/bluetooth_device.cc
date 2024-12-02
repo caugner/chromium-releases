@@ -38,14 +38,14 @@
 namespace chromeos {
 
 BluetoothDevice::BluetoothDevice(BluetoothAdapter* adapter)
-  : weak_ptr_factory_(this),
-    adapter_(adapter),
+  : adapter_(adapter),
     bluetooth_class_(0),
     visible_(false),
     bonded_(false),
     connected_(false),
     pairing_delegate_(NULL),
-    connecting_applications_counter_(0) {
+    connecting_applications_counter_(0),
+    weak_ptr_factory_(this) {
 }
 
 BluetoothDevice::~BluetoothDevice() {
@@ -249,9 +249,13 @@ void BluetoothDevice::Connect(PairingDelegate* pairing_delegate,
                                 agent_path_basename);
 
     dbus::Bus* system_bus = DBusThreadManager::Get()->GetSystemBus();
-    agent_.reset(BluetoothAgentServiceProvider::Create(system_bus,
-                                                       agent_path,
-                                                       this));
+    if (system_bus) {
+      agent_.reset(BluetoothAgentServiceProvider::Create(system_bus,
+                                                         agent_path,
+                                                         this));
+    } else {
+      agent_.reset(NULL);
+    }
 
     DVLOG(1) << "Pairing: " << address_;
     DBusThreadManager::Get()->GetBluetoothAdapterClient()->
@@ -638,14 +642,16 @@ void BluetoothDevice::GetServiceRecordsForConnectCallback(
     const std::string& service_uuid,
     const SocketCallback& callback,
     const ServiceRecordList& list) {
-  // If multiple service records are found, use the first one that works.
   for (ServiceRecordList::const_iterator i = list.begin();
       i != list.end(); ++i) {
-    scoped_refptr<BluetoothSocket> socket(
-        BluetoothSocket::CreateBluetoothSocket(**i));
-    if (socket.get() != NULL) {
-      callback.Run(socket);
-      return;
+    if ((*i)->uuid() == service_uuid) {
+      // If multiple service records are found, use the first one that works.
+      scoped_refptr<BluetoothSocket> socket(
+          BluetoothSocket::CreateBluetoothSocket(**i));
+      if (socket.get() != NULL) {
+        callback.Run(socket);
+        return;
+      }
     }
   }
   callback.Run(NULL);

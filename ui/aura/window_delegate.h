@@ -5,8 +5,11 @@
 #ifndef UI_AURA_WINDOW_DELEGATE_H_
 #define UI_AURA_WINDOW_DELEGATE_H_
 
+#include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "ui/aura/aura_export.h"
-#include "ui/base/events.h"
+#include "ui/base/events/event_constants.h"
+#include "ui/base/events/event_handler.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
@@ -17,16 +20,18 @@ class Rect;
 class Size;
 }
 
-namespace aura {
-
-class Event;
+namespace ui {
 class GestureEvent;
 class KeyEvent;
 class MouseEvent;
+class Texture;
 class TouchEvent;
+}
+
+namespace aura {
 
 // Delegate interface for aura::Window.
-class AURA_EXPORT WindowDelegate {
+class AURA_EXPORT WindowDelegate : public ui::EventHandler {
  public:
   // Returns the window's minimum size, or size 0,0 if there is no limit.
   virtual gfx::Size GetMinimumSize() const = 0;
@@ -38,8 +43,6 @@ class AURA_EXPORT WindowDelegate {
   // Sent to the Window's delegate when the Window gains or loses focus.
   virtual void OnFocus(aura::Window* old_focused_window) = 0;
   virtual void OnBlur() = 0;
-
-  virtual bool OnKeyEvent(KeyEvent* event) = 0;
 
   // Returns the native cursor for the specified point, in window coordinates,
   // or NULL for the default cursor.
@@ -54,12 +57,6 @@ class AURA_EXPORT WindowDelegate {
   virtual bool ShouldDescendIntoChildForEventHandling(
       Window* child,
       const gfx::Point& location) = 0;
-
-  virtual bool OnMouseEvent(MouseEvent* event) = 0;
-
-  virtual ui::TouchStatus OnTouchEvent(TouchEvent* event) = 0;
-
-  virtual ui::GestureStatus OnGestureEvent(GestureEvent* event) = 0;
 
   // Returns true of the window can be focused.
   virtual bool CanFocus() = 0;
@@ -99,8 +96,15 @@ class AURA_EXPORT WindowDelegate {
   // above returns true.
   virtual void GetHitTestMask(gfx::Path* mask) const = 0;
 
+  // Called from RecreateLayer() if the layer the window is associated with has
+  // an external texture.
+  virtual scoped_refptr<ui::Texture> CopyTexture() = 0;
+
  protected:
   virtual ~WindowDelegate() {}
+
+  // Overridden from ui::EventHandler:
+  virtual ui::EventResult OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
 };
 
 }  // namespace aura

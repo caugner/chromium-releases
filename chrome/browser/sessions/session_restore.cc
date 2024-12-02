@@ -20,6 +20,7 @@
 #include "base/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
@@ -42,6 +43,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/session_storage_namespace.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "net/base/network_change_notifier.h"
@@ -49,6 +51,10 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
+#endif
+
+#if defined(OS_WIN)
+#include "base/win/metro.h"
 #endif
 
 using content::NavigationController;
@@ -440,6 +446,8 @@ void TabLoader::HandleTabClosedOrLoaded(NavigationController* tab) {
   if (tabs_loading_.empty() && tabs_to_load_.empty()) {
     base::TimeDelta time_to_load =
         base::TimeTicks::Now() - restore_started_;
+    performance_monitor::StartupTimer::SetElapsedSessionRestoreTime(
+        time_to_load);
     UMA_HISTOGRAM_CUSTOM_TIMES(
         "SessionRestore.AllTabsLoaded",
         time_to_load,
@@ -590,7 +598,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
                                  selected_index,
                                  true,
                                  tab.extension_app_id,
-                                 NULL);
+                                 NULL,
+                                 tab.user_agent_override);
     } else {
       int tab_index = use_new_window ? 0 : browser->active_index() + 1;
       WebContents* web_contents = chrome::AddRestoredTab(
@@ -602,7 +611,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
           false,  // selected
           tab.pinned,
           true,
-          NULL);
+          NULL,
+          tab.user_agent_override);
       // Start loading the tab immediately.
       web_contents->GetController().LoadIfNecessary();
     }
@@ -733,7 +743,10 @@ class SessionRestoreImpl : public content::NotificationObserver {
         100);
 
     if (windows->empty()) {
-      // Restore was unsuccessful.
+      // Restore was unsuccessful. The DOM storage system can also delete its
+      // data, since no session restore will happen at a later point in time.
+      content::BrowserContext::GetDefaultStoragePartition(profile_)->
+          GetDOMStorageContext()->StartScavengingUnusedSessionStorage();
       return FinishedTabCreation(false, false);
     }
 
@@ -777,12 +790,33 @@ class SessionRestoreImpl : public content::NotificationObserver {
           show_state = ui::SHOW_STATE_NORMAL;
           has_visible_browser = true;
         }
-
-        browser = CreateRestoredBrowser(
-            static_cast<Browser::Type>((*i)->type),
-            (*i)->bounds,
-            show_state,
-            (*i)->app_name);
+        browser = NULL;
+#if defined(OS_WIN)
+        if (base::win::IsMetroProcess()) {
+          // We don't want to add tabs to the off the record browser.
+          if (browser_ && !browser_->profile()->IsOffTheRecord()) {
+            browser = browser_;
+          } else {
+            browser = last_browser;
+            // last_browser should never be off the record either.
+            // We don't set browser higher above when browser_ is offtherecord,
+            // and CreateRestoredBrowser below, is never created offtherecord.
+            DCHECK(!browser || !browser->profile()->IsOffTheRecord());
+          }
+          // Metro should only have tabbed browsers.
+          // It never creates any non-tabbed browser, and thus should never
+          // restore non-tabbed items...
+          DCHECK(!browser || browser->is_type_tabbed());
+          DCHECK((*i)->type == Browser::TYPE_TABBED);
+        }
+#endif
+        if (!browser) {
+          browser = CreateRestoredBrowser(
+              static_cast<Browser::Type>((*i)->type),
+              (*i)->bounds,
+              show_state,
+              (*i)->app_name);
+        }
 #if defined(OS_CHROMEOS)
     chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
         "SessionRestore-CreateRestoredBrowser-End", false);
@@ -822,6 +856,12 @@ class SessionRestoreImpl : public content::NotificationObserver {
     Browser* finished_browser = FinishedTabCreation(true, has_tabbed_browser);
     if (finished_browser)
       last_browser = finished_browser;
+
+    // sessionStorages needed for the session restore have now been recreated
+    // by RestoreTab. Now it's safe for the DOM storage system to start
+    // deleting leftover data.
+    content::BrowserContext::GetDefaultStoragePartition(profile_)->
+        GetDOMStorageContext()->StartScavengingUnusedSessionStorage();
     return last_browser;
   }
 
@@ -866,7 +906,11 @@ class SessionRestoreImpl : public content::NotificationObserver {
                           const int tab_index,
                           Browser* browser,
                           bool schedule_load) {
-    DCHECK(!tab.navigations.empty());
+    // It's possible (particularly for foreign sessions) to receive a tab
+    // without valid navigations. In that case, just skip it.
+    // See crbug.com/154129.
+    if (tab.navigations.empty())
+      return NULL;
     int selected_index = tab.current_navigation_index;
     selected_index = std::max(
         0,
@@ -879,8 +923,9 @@ class SessionRestoreImpl : public content::NotificationObserver {
     scoped_refptr<content::SessionStorageNamespace> session_storage_namespace;
     if (!tab.session_storage_persistent_id.empty()) {
       session_storage_namespace =
-          content::BrowserContext::GetDefaultDOMStorageContext(profile_)->
-          RecreateSessionStorage(tab.session_storage_persistent_id);
+          content::BrowserContext::GetDefaultStoragePartition(profile_)->
+              GetDOMStorageContext()->RecreateSessionStorage(
+                  tab.session_storage_persistent_id);
     }
 
     WebContents* web_contents =
@@ -892,7 +937,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
                                false,  // select
                                tab.pinned,
                                true,
-                               session_storage_namespace.get());
+                               session_storage_namespace.get(),
+                               tab.user_agent_override);
     // Regression check: check that the tab didn't start loading right away. The
     // focused tab will be loaded by Browser, and TabLoader will load the rest.
     DCHECK(web_contents->GetController().NeedsReload());
@@ -905,7 +951,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
         base::PLATFORM_FILE_EXCLUSIVE_READ |
         base::PLATFORM_FILE_ASYNC;
     const std::string& state =
-        tab.navigations.at(selected_index).state();
+        tab.navigations.at(selected_index).content_state();
     const std::vector<FilePath>& file_paths =
         webkit_glue::FilePathsFromHistoryState(state);
     for (std::vector<FilePath>::const_iterator file = file_paths.begin();
@@ -968,7 +1014,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
         add_types |= TabStripModel::ADD_ACTIVE;
       int index = chrome::GetIndexForInsertionDuringRestore(browser, i);
       chrome::NavigateParams params(browser, urls[i],
-                                    content::PAGE_TRANSITION_START_PAGE);
+                                    content::PAGE_TRANSITION_AUTO_TOPLEVEL);
       params.disposition = i == 0 ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
       params.tabstrip_index = index;
       params.tabstrip_add_types = add_types;

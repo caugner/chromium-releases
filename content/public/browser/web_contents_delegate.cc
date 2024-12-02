@@ -59,7 +59,7 @@ bool WebContentsDelegate::ShouldFocusPageAfterCrash() {
   return true;
 }
 
-bool WebContentsDelegate::TakeFocus(bool reverse) {
+bool WebContentsDelegate::TakeFocus(WebContents* soruce, bool reverse) {
   return false;
 }
 
@@ -106,6 +106,7 @@ void WebContentsDelegate::ViewSourceForFrame(WebContents* source,
 }
 
 bool WebContentsDelegate::PreHandleKeyboardEvent(
+    WebContents* source,
     const NativeWebKeyboardEvent& event,
     bool* is_keyboard_shortcut) {
   return false;
@@ -133,6 +134,12 @@ bool WebContentsDelegate::ShouldCreateWebContents(
     const GURL& target_url) {
   return true;
 }
+
+#if defined(OS_ANDROID)
+bool WebContentsDelegate::ShouldOverrideLoading(const GURL& url) {
+  return false;
+}
+#endif
 
 JavaScriptDialogCreator* WebContentsDelegate::GetJavaScriptDialogCreator() {
   return NULL;

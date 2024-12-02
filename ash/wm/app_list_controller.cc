@@ -12,12 +12,11 @@
 #include "ash/wm/property_util.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "ui/app_list/app_list_view.h"
-#include "ui/app_list/icon_cache.h"
 #include "ui/app_list/pagination_model.h"
-#include "ui/aura/event.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/base/events/event.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/transform_util.h"
@@ -33,6 +32,12 @@ const int kAnimationDurationMs = 200;
 
 // Offset in pixels to animation away/towards the launcher.
 const int kAnimationOffset = 8;
+
+// Duration for snap back animation after over-scroll in milliseconds.
+const int kSnapBackAnimationDurationMs = 100;
+
+// The maximum shift in pixels when over-scroll happens.
+const int kMaxOverScrollShift = 48;
 
 ui::Layer* GetLayer(views::Widget* widget) {
   return widget->GetNativeView()->layer();
@@ -86,9 +91,10 @@ gfx::Rect OffsetTowardsShelf(const gfx::Rect& rect) {
 AppListController::AppListController()
     : pagination_model_(new app_list::PaginationModel),
       is_visible_(false),
-      view_(NULL) {
-  app_list::IconCache::CreateInstance();
+      view_(NULL),
+      should_snap_back_(false) {
   Shell::GetInstance()->AddShellObserver(this);
+  pagination_model_->AddObserver(this);
 }
 
 AppListController::~AppListController() {
@@ -97,8 +103,8 @@ AppListController::~AppListController() {
   if (view_ && view_->GetWidget())
     view_->GetWidget()->CloseNow();
 
-  app_list::IconCache::DeleteInstance();
   Shell::GetInstance()->RemoveShellObserver(this);
+  pagination_model_->RemoveObserver(this);
 }
 
 void AppListController::SetVisible(bool visible) {
@@ -123,6 +129,7 @@ void AppListController::SetVisible(bool visible) {
             kShellWindowId_AppListContainer),
         pagination_model_.get(),
         Shell::GetInstance()->launcher()->GetAppListButtonView(),
+        gfx::Point(),
         GetBubbleArrowLocation());
     SetView(view);
   }
@@ -143,8 +150,6 @@ void AppListController::SetView(app_list::AppListView* view) {
   DCHECK(view_ == NULL);
 
   if (is_visible_) {
-    app_list::IconCache::GetInstance()->MarkAllEntryUnused();
-
     view_ = view;
     views::Widget* widget = view_->GetWidget();
     widget->AddObserver(this);
@@ -173,8 +178,6 @@ void AppListController::ResetView() {
   widget->GetNativeView()->GetRootWindow()->RemoveRootWindowObserver(this);
   widget->GetNativeView()->GetFocusManager()->RemoveObserver(this);
   view_ = NULL;
-
-  app_list::IconCache::GetInstance()->PurgeAllUnused();
 }
 
 void AppListController::ScheduleAnimation() {
@@ -202,7 +205,7 @@ void AppListController::ScheduleAnimation() {
 }
 
 void AppListController::ProcessLocatedEvent(aura::Window* target,
-                                            const aura::LocatedEvent& event) {
+                                            const ui::LocatedEvent& event) {
   // If the event happened on a menu, then the event should not close the app
   // list.
   if (target) {
@@ -234,12 +237,12 @@ void AppListController::UpdateBounds() {
 // AppListController, aura::EventFilter implementation:
 
 bool AppListController::PreHandleKeyEvent(aura::Window* target,
-                                          aura::KeyEvent* event) {
+                                          ui::KeyEvent* event) {
   return false;
 }
 
 bool AppListController::PreHandleMouseEvent(aura::Window* target,
-                                            aura::MouseEvent* event) {
+                                            ui::MouseEvent* event) {
   if (event->type() == ui::ET_MOUSE_PRESSED)
     ProcessLocatedEvent(target, *event);
   return false;
@@ -247,16 +250,16 @@ bool AppListController::PreHandleMouseEvent(aura::Window* target,
 
 ui::TouchStatus AppListController::PreHandleTouchEvent(
     aura::Window* target,
-    aura::TouchEvent* event) {
+    ui::TouchEvent* event) {
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
-ui::GestureStatus AppListController::PreHandleGestureEvent(
+ui::EventResult AppListController::PreHandleGestureEvent(
     aura::Window* target,
-    aura::GestureEvent* event) {
+    ui::GestureEvent* event) {
   if (event->type() == ui::ET_GESTURE_TAP)
     ProcessLocatedEvent(target, *event);
-  return ui::GESTURE_STATUS_UNKNOWN;
+  return ui::ER_UNHANDLED;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -310,6 +313,51 @@ void AppListController::OnShelfAlignmentChanged() {
 
 void AppListController::OnLauncherIconPositionsChanged() {
   UpdateBounds();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// AppListController, PaginationModelObserver implementation:
+
+void AppListController::TotalPagesChanged() {
+}
+
+void AppListController::SelectedPageChanged(int old_selected,
+                                            int new_selected) {
+}
+
+void AppListController::TransitionChanged() {
+  // |view_| could be NULL when app list is closed with a running transition.
+  if (!view_)
+    return;
+
+  const app_list::PaginationModel::Transition& transition =
+      pagination_model_->transition();
+  if (pagination_model_->is_valid_page(transition.target_page))
+    return;
+
+  if (!pagination_model_->IsRevertingCurrentTransition()) {
+    // Update cached |view_bounds_| before the first over-scroll move.
+    if (!should_snap_back_)
+      view_bounds_ = view_->GetWidget()->GetNativeView()->bounds();
+
+    const int current_page = pagination_model_->selected_page();
+    const int dir = transition.target_page > current_page ? -1 : 1;
+
+    const double progress = 1.0 - pow(1.0 - transition.progress, 4);
+    const int shift = kMaxOverScrollShift * progress * dir;
+
+    gfx::Rect shifted(view_bounds_);
+    shifted.set_x(shifted.x() + shift);
+    view_->GetWidget()->SetBounds(shifted);
+    should_snap_back_ = true;
+  } else if (should_snap_back_) {
+    should_snap_back_ = false;
+    ui::Layer* layer = GetLayer(view_->GetWidget());
+    ui::ScopedLayerAnimationSettings animation(layer->GetAnimator());
+    animation.SetTransitionDuration(
+        base::TimeDelta::FromMilliseconds(kSnapBackAnimationDurationMs));
+    layer->SetBounds(view_bounds_);
+  }
 }
 
 }  // namespace internal

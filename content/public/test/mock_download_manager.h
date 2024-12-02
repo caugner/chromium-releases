@@ -25,12 +25,7 @@ class MockDownloadManager : public DownloadManager {
   MOCK_METHOD1(SetDelegate, void(DownloadManagerDelegate* delegate));
   MOCK_CONST_METHOD0(GetDelegate, DownloadManagerDelegate*());
   MOCK_METHOD0(Shutdown, void());
-  MOCK_METHOD2(GetTemporaryDownloads, void(const FilePath& dir_path,
-                                           DownloadVector* result));
-  MOCK_METHOD2(GetAllDownloads, void(const FilePath& dir_path,
-                                     DownloadVector* result));
-  MOCK_METHOD2(SearchDownloads, void(const string16& query,
-                                     DownloadVector* result));
+  MOCK_METHOD1(GetAllDownloads, void(DownloadVector* downloads));
   MOCK_METHOD1(Init, bool(BrowserContext* browser_context));
 
   // Gasket for handling scoped_ptr arguments.
@@ -73,7 +68,6 @@ class MockDownloadManager : public DownloadManager {
   MOCK_METHOD1(GetDownload, DownloadItem*(int id));
   MOCK_METHOD1(SavePageDownloadFinished, void(DownloadItem* download));
   MOCK_METHOD1(GetActiveDownloadItem, DownloadItem*(int id));
-  MOCK_METHOD0(GenerateFileHash, bool());
   MOCK_METHOD1(GetActiveDownload, DownloadItem*(int32 download_id));
 
  protected:

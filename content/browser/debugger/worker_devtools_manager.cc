@@ -138,9 +138,9 @@ class WorkerDevToolsManager::WorkerDevToolsAgentHost
   static void ForwardToWorkerDevToolsAgent(
       int worker_process_id,
       int worker_route_id,
-      const IPC::Message& message) {
+      IPC::Message* message) {
     WorkerDevToolsManager::GetInstance()->ForwardToWorkerDevToolsAgent(
-        worker_process_id, worker_route_id, message);
+        worker_process_id, worker_route_id, *message);
   }
 
   // DevToolsAgentHost implementation.
@@ -151,9 +151,10 @@ class WorkerDevToolsManager::WorkerDevToolsAgentHost
             &WorkerDevToolsAgentHost::ForwardToWorkerDevToolsAgent,
             worker_id_.first,
             worker_id_.second,
-            *message));
+            base::Owned(message)));
   }
-  virtual void NotifyClientClosing() OVERRIDE {}
+  virtual void NotifyClientAttaching() OVERRIDE {}
+  virtual void NotifyClientDetaching() OVERRIDE {}
   virtual int GetRenderProcessId() OVERRIDE { return -1; }
 
   WorkerId worker_id_;
@@ -288,6 +289,7 @@ void WorkerDevToolsManager::WorkerCreated(
   for (TerminatedInspectedWorkers::iterator it = terminated_workers_.begin();
        it != terminated_workers_.end(); ++it) {
     if (instance.Matches(it->worker_url, it->worker_name,
+                         instance.partition(),
                          instance.resource_context())) {
       worker->Send(new DevToolsAgentMsg_PauseWorkerContextOnStart(
           instance.worker_route_id()));

@@ -5,10 +5,10 @@
 #ifndef MEDIA_FILTERS_GPU_VIDEO_DECODER_H_
 #define MEDIA_FILTERS_GPU_VIDEO_DECODER_H_
 
-#include <deque>
 #include <list>
 #include <map>
 #include <utility>
+#include <vector>
 
 #include "media/base/pipeline_status.h"
 #include "media/base/demuxer_stream.h"
@@ -47,6 +47,10 @@ class MEDIA_EXPORT GpuVideoDecoder
                                 uint32 texture_target) = 0;
     virtual void DeleteTexture(uint32 texture_id) = 0;
 
+    // Read pixels from a native texture and store into |*pixels| as RGBA.
+    virtual void ReadPixels(uint32 texture_id, uint32 texture_target,
+                            const gfx::Size& size, void* pixels) = 0;
+
     // Allocate & return a shared memory segment.  Caller is responsible for
     // Close()ing the returned pointer.
     virtual base::SharedMemory* CreateSharedMemory(size_t size) = 0;
@@ -56,8 +60,10 @@ class MEDIA_EXPORT GpuVideoDecoder
     virtual ~Factories();
   };
 
-  GpuVideoDecoder(MessageLoop* message_loop,
-                  MessageLoop* vda_loop,
+  typedef base::Callback<
+      scoped_refptr<base::MessageLoopProxy>()> MessageLoopFactoryCB;
+  GpuVideoDecoder(const MessageLoopFactoryCB& message_loop_factory_cb,
+                  const scoped_refptr<base::MessageLoopProxy>& vda_loop_proxy,
                   const scoped_refptr<Factories>& factories);
 
   // VideoDecoder implementation.
@@ -68,7 +74,6 @@ class MEDIA_EXPORT GpuVideoDecoder
   virtual void Reset(const base::Closure& closure) OVERRIDE;
   virtual void Stop(const base::Closure& closure) OVERRIDE;
   virtual bool HasAlpha() const OVERRIDE;
-  virtual void PrepareForShutdownHack() OVERRIDE;
 
   // VideoDecodeAccelerator::Client implementation.
   virtual void NotifyInitializeDone() OVERRIDE;
@@ -100,6 +105,9 @@ class MEDIA_EXPORT GpuVideoDecoder
   // If no demuxer read is in flight and no bitstream buffers are in the
   // decoder, kick some off demuxing/decoding.
   void EnsureDemuxOrDecode();
+
+  // Return true if more decode work can be piled on to the VDA.
+  bool CanMoreDecodeWorkBeDone();
 
   // Callback to pass to demuxer_stream_->Read() for receiving encoded bits.
   void RequestBufferDecode(DemuxerStream::Status status,
@@ -144,10 +152,15 @@ class MEDIA_EXPORT GpuVideoDecoder
   // Return a shared-memory segment to the available pool.
   void PutSHM(SHMBuffer* shm_buffer);
 
+  void DestroyTextures();
+
   StatisticsCB statistics_cb_;
 
   // Pointer to the demuxer stream that will feed us compressed buffers.
   scoped_refptr<DemuxerStream> demuxer_stream_;
+
+  // This is !is_null() iff Initialize() hasn't been called.
+  MessageLoopFactoryCB message_loop_factory_cb_;
 
   // MessageLoop on which to fire callbacks and trampoline calls to this class
   // if they arrive on other loops.
@@ -209,10 +222,6 @@ class MEDIA_EXPORT GpuVideoDecoder
   std::list<scoped_refptr<VideoFrame> > ready_video_frames_;
   int64 next_picture_buffer_id_;
   int64 next_bitstream_buffer_id_;
-
-  // Indicates PrepareForShutdownHack()'s been called.  Makes further calls to
-  // this class not require the render thread's loop to be processing.
-  bool shutting_down_;
 
   // Indicates decoding error occurred.
   bool error_occured_;

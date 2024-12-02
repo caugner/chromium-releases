@@ -165,6 +165,12 @@
    fun:net::TestRootCerts::*
 }
 {
+   bug_66941_d
+   Heapcheck:Leak
+   fun:sqlite3MemMalloc
+   fun:net::TestRootCerts::Add
+}
+{
    bug_todo_getdelim_lucid
    Heapcheck:Leak
    fun:_IO_getdelim
@@ -177,6 +183,71 @@
    fun:aura::Env::Init
    fun:aura::Env::GetInstance
 }
+{
+   bug_146464_a
+   Heapcheck:Leak
+   fun:get_peer_sock_name
+   fun:base::MessagePumpAuraX11::GetDefaultXDisplay
+}
+{
+   bug_146464_b
+   Heapcheck:Leak
+   fun:add_codeset.isra.10
+   ...
+   fun:RootWindowHostLinux
+   fun:aura::RootWindowHost::Create
+}
+{
+   bug_146464_c
+   Heapcheck:Leak
+   fun:??
+   ...
+   fun:RootWindowHostLinux
+   fun:aura::RootWindowHost::Create
+}
+# leak in OSMesa used to run compositor_unittests in bots.
+{
+   bug_148477_a
+   Heapcheck:Leak
+   ...
+   fun:gfx::GLContextOSMesa::MakeCurrent
+   ...
+   fun:webkit::gpu::WebGraphicsContext3DInProcessImpl::*
+}
+{
+   bug_148477_b
+   Heapcheck:Leak
+   ...
+   fun:webkit::gpu::WebGraphicsContext3DInProcessImpl::compileShader
+   fun:WebCore::ProgramBindingBase::loadShader
+   fun:WebCore::ProgramBindingBase::init
+   fun:WebCore::ProgramBinding::ProgramBinding
+   ...
+   fun:WebCore::CCSingleThreadProxy::commitAndComposite
+   fun:WebCore::CCSingleThreadProxy::compositeImmediately
+   fun:WebCore::CCLayerTreeHost::composite
+   fun:WebKit::WebLayerTreeViewImpl::composite
+}
+{
+   bug_148477_c
+   Heapcheck:Leak
+   ...
+   fun:webkit::gpu::WebGraphicsContext3DInProcessImpl::linkProgram
+   fun:WebCore::ProgramBindingBase::link
+   fun:WebCore::ProgramBinding::initialize
+   ...
+   fun:WebCore::CCRendererGL::drawQuad
+   fun:WebCore::CCDirectRenderer::drawRenderPass
+   fun:WebCore::CCDirectRenderer::drawFrame
+   fun:WebCore::CCLayerTreeHostImpl::drawLayers
+   fun:WebCore::CCSingleThreadProxy::doComposite
+   fun:WebCore::CCSingleThreadProxy::commitAndComposite
+   fun:WebCore::CCSingleThreadProxy::compositeImmediately
+   fun:WebCore::CCLayerTreeHost::composite
+   fun:WebKit::WebLayerTreeViewImpl::composite
+   fun:ui::Compositor::Draw
+}
+
 
 #-----------------------------------------------------------------------
 # 2. intentional unit test errors, or stuff that is somehow a false positive
@@ -344,94 +415,6 @@
    ...
    fun:NetTestSuite::InitializeTestThread
    fun:NetTestSuite::Initialize
-}
-{
-   bug_46571_a
-   Heapcheck:Leak
-   fun:WTF::fastMalloc
-   fun:WebCore::StringImpl::createUninitialized
-   fun:WebCore::String::createUninitialized
-   fun:WebCore::StringTraits::fromV8String
-   fun:WebCore::v8StringToWebCoreString
-   fun:WebCore::v8StringToWebCoreString
-   fun:WebCore::v8ValueToWebCoreString
-   fun:WebCore::toWebCoreString
-   fun:WebCore::ScriptValue::getString
-   fun:WebKit::WebFrameImpl::loadJavaScriptURL
-   fun:WebKit::WebFrameImpl::loadRequest
-   fun:TestShell::Navigate
-}
-{
-   bug_46571_b
-   Heapcheck:Leak
-   fun:WebCore::makeExternalString
-   fun:WebCore::v8ExternalString
-   fun:WebCore::V8Proxy::evaluate
-   fun:WebCore::ScriptController::evaluate
-   fun:WebCore::ScriptController::executeScript
-   fun:WebCore::ScriptController::executeScript
-   fun:WebKit::WebFrameImpl::loadJavaScriptURL
-   fun:WebKit::WebFrameImpl::loadRequest
-   fun:TestShell::Navigate
-}
-{
-   bug_46571_c
-   Heapcheck:Leak
-   fun:WebCore::makeExternalString
-   fun:WebCore::v8ExternalString
-   fun:WebCore::v8String
-   fun:WebCore::ScriptController::bindToWindowObject
-   fun:WebKit::WebFrameImpl::bindToWindowObject
-   fun:CppBoundClass::BindToJavascript
-   fun:TestShell::BindJSObjectsToWindow
-   fun:TestWebViewDelegate::didClearWindowObject
-   fun:WebKit::FrameLoaderClientImpl::dispatchDidClearWindowObjectInWorld
-   fun:WebCore::FrameLoader::dispatchDidClearWindowObjectInWorld
-   fun:WebCore::V8DOMWindowShell::initContextIfNeeded
-   fun:WebCore::V8Proxy::mainWorldContext
-   fun:WebCore::V8Proxy::mainWorldContext
-   fun:WebCore::ScriptController::bindToWindowObject
-   fun:WebKit::WebFrameImpl::bindToWindowObject
-   fun:CppBoundClass::BindToJavascript
-   fun:AccessibilityController::BindToJavascript
-   fun:TestShell::BindJSObjectsToWindow
-}
-{
-   bug_46571_d
-   Heapcheck:Leak
-   fun:WebCore::makeExternalString
-   fun:WebCore::v8ExternalString
-   fun:WebCore::v8String
-   fun:WebCore::ScriptController::bindToWindowObject
-   fun:WebKit::WebFrameImpl::bindToWindowObject
-   fun:CppBoundClass::BindToJavascript
-   fun:AccessibilityController::BindToJavascript
-   fun:TestShell::BindJSObjectsToWindow
-   fun:TestWebViewDelegate::didClearWindowObject
-   fun:WebKit::FrameLoaderClientImpl::dispatchDidClearWindowObjectInWorld
-   fun:WebCore::FrameLoader::dispatchDidClearWindowObjectInWorld
-   fun:WebCore::V8DOMWindowShell::initContextIfNeeded
-   fun:WebCore::V8Proxy::mainWorldContext
-   fun:WebCore::V8Proxy::mainWorldContext
-   fun:WebCore::ScriptController::bindToWindowObject
-   fun:WebKit::WebFrameImpl::bindToWindowObject
-   fun:CppBoundClass::BindToJavascript
-   fun:AccessibilityController::BindToJavascript
-   fun:TestShell::BindJSObjectsToWindow
-}
-# "*~TestShell" means "~TestShell" and "TestShell::~TestShell".
-{
-   bug_46571_e
-   Heapcheck:Leak
-   fun:WebCore::makeExternalString
-   fun:WebCore::v8ExternalString
-   fun:WebCore::V8Proxy::evaluate
-   fun:WebCore::ScriptController::collectGarbage
-   fun:WebKit::WebFrameImpl::collectGarbage
-   fun:TestShell::CallJSGC
-   fun:*~TestShell
-   fun:::MainWindowDestroyed
-   fun:g_closure_invoke
 }
 {
    bug_46678_a
@@ -649,25 +632,6 @@
    fun:std::vector::_M_insert_aux
    fun:std::vector::push_back
    fun:IPC::ChannelProxy::Context::OnAddFilter
-}
-{
-   bug_66054_a
-   Heapcheck:Leak
-   ...
-   fun:policy::CreateSequencedTestDictionaryActionP::gmock_Impl::gmock_PerformImpl
-   fun:testing::internal::ActionHelper::Perform
-   fun:policy::CreateSequencedTestDictionaryActionP::gmock_Impl::Perform
-   fun:testing::Action::Perform
-   fun:testing::internal::FunctionMockerBase::InvokeWith
-   fun:testing::internal::FunctionMocker::Invoke
-   fun:policy::ProviderDelegateMock::Load
-   fun:policy::AsynchronousPolicyLoader::Reload
-   fun:policy::AsynchronousPolicyLoaderTest_ProviderNotificationOnPolicyChange_Test::TestBody
-}
-{
-   bug_66054_b
-   Heapcheck:Leak
-   fun:policy::AsynchronousPolicyTestBase_ProviderRefresh_Test::TestBody
 }
 {
    bug_67524
@@ -1200,11 +1164,33 @@
    fun:GetNumObjects
 }
 {
-   bug_114750
+   bug_114750_a
    Heapcheck:Leak
    fun:::FindBestMatchFontFamilyName
    fun:gfx::PlatformFontPango::PlatformFontPango
    fun:PlatformFontPangoTest_FamilyList_Test::TestBody
+}
+{
+   bug_114750_b
+   Heapcheck:Leak
+   fun:??
+   fun:FindBestMatchFontFamilyName
+   fun:PlatformFontPango
+   fun:gfx::PlatformFont::CreateFromNativeFont
+   fun:Font
+   fun:PlatformFontPango
+   fun:gfx::PlatformFont::CreateDefault
+   fun:Font
+   fun:Label
+   fun:ash::internal::TrayItemView::CreateLabel
+   fun:ash::internal::TrayIME::CreateTrayView
+   fun:ash::SystemTray::AddTrayItem
+   fun:ash::SystemTray::CreateItems
+   fun:ash::SystemTray::Initialize
+   fun:ash::internal::StatusAreaWidget::CreateTrayViews
+   fun:ash::Shell::Init
+   fun:ash::Shell::CreateInstance
+   fun:ash::test::AshTestBase::SetUp
 }
 {
    bug_114758
@@ -1422,44 +1408,15 @@
   fun:GtkThemeService::GetDefaultFavicon
 }
 {
-   bug_131668_a
-   Heapcheck:Leak
-   ...
-   fun:history::InMemoryURLIndex::PostRestoreFromCacheFileTask
-   fun:history::InMemoryURLIndex::Init
-   fun:HistoryService::Init
-   fun:TestingProfile::CreateHistoryService
-   fun:ShortcutsProviderTest::SetUp
-}
-{
-   bug_131668_b
-   Heapcheck:Leak
-   fun:std::basic_string::_Rep::_S_create
-   fun:base::PrepareForUTF8Output
-   fun:UTF16ToUTF8
-   fun:UTF16ToUTF8
-   fun:l10n_util::GetStringUTF8
-   fun:::CreateLocaleDefaultValue
-   fun:PrefService::RegisterLocalizedStringPref
-   fun:PrefsTabHelper::RegisterUserPrefs
-   fun:browser::RegisterUserPrefs
-   fun:TestingProfile::CreateTestingPrefService
-   fun:TestingProfile::GetPrefs
-   fun:ProfileKeyedBaseFactory::RegisterUserPrefsOnProfile
-   fun:ProfileDependencyManager::CreateProfileServices
-   fun:TestingProfile::Init
-   fun:TestingProfile::TestingProfile
-   fun:ShortcutsProviderTest::SetUp
-}
-{
    bug_132431
    Heapcheck:Leak
    ...
    fun:gfx::::LoadDefaults
-   fun:gfx::GetDefaultFontRenderParams
+   fun:gfx::GetDefaultWebKitFontRenderParams
    fun:renderer_preferences_util::UpdateFromSystemSettings
    fun:PrefsTabHelper::PrefsTabHelper
    fun:TabContents::TabContents
+   fun:TabContents::Factory::CreateTabContents
    fun:TabContentsTestHarness::SetContents
    fun:content::RenderViewHostTestHarness::SetUp
    fun:ChromeRenderViewHostTestHarness::SetUp
@@ -1488,23 +1445,88 @@
    fun:base::PlatformThread::SetName
 }
 {
-   bug_140628_a
+   bug_143431
    Heapcheck:Leak
    ...
-   fun:ExtensionAction::RunIconAnimation
-   fun:ExtensionAction::SetAppearance
+   fun:ManagedMode::ManagedMode
+   fun:*FakeManagedMode
+   fun:ManagedModeTest::ManagedModeTest
 }
 {
-   bug_140628_b
+   bug_143563
    Heapcheck:Leak
    ...
-   fun:ExtensionAction::GetIconAnimation
+   fun:TaskManagerModel::RefreshVideoMemoryUsageStats
+   fun:TaskManagerModel::Refresh
+   fun:TaskManagerTest_RefreshCalled_Test::TestBody
 }
 {
-   bug_141037
+   bug_143565
    Heapcheck:Leak
    ...
-   fun:ReloadButton::CreateMenuModel
-   fun:ReloadButton::ReloadButton
-   fun:ReloadButtonTest::ReloadButtonTest
+   fun:appcache::AppCacheStorageImpl::Initialize
+   fun:appcache::AppCacheService::Initialize
+   fun:ChromeAppCacheService::InitializeOnIOThread
+}
+{
+   bug_144913
+   Heapcheck:Leak
+   ...
+   fun:DBusThreadManagerImpl
+   fun:chromeos::DBusThreadManager::Initialize
+   fun:chromeos::KioskModeIdleLogoutTest::SetUp
+}
+{
+   bug_144913_b
+   Heapcheck:Leak
+   fun:chromeos::DBusThreadManager::Initialize
+   fun:chromeos::KioskModeIdleLogoutTest::SetUp
+}
+{
+   bug_144913_c
+   Heapcheck:Leak
+   fun:MessageLoop::MessageLoop
+   fun:MessageLoopForUI::MessageLoopForUI
+   fun:AshTestBase
+   fun:KioskModeIdleLogoutTest
+   fun:KioskModeIdleLogoutTest_CheckObserversAfterUserLogin_Test
+   fun:testing::internal::TestFactoryImpl::CreateTest
+}
+{
+   bug_144913_d
+   Heapcheck:Leak
+   fun:MessageLoop::MessageLoop
+   fun:MessageLoopForUI::MessageLoopForUI
+   fun:AshTestBase
+   fun:KioskModeIdleLogoutTest
+   fun:KioskModeIdleLogoutTest_CheckObserversBeforeUserLogin_Test
+   fun:testing::internal::TestFactoryImpl::CreateTest
+}
+{
+   bug_147755_a
+   Heapcheck:Leak
+   ...
+   fun:PluginFinder::GetPluginInstaller
+   fun:PluginPrefs::EnablePluginIfPossibleCallback
+}
+{
+   bug_147755_b
+   Heapcheck:Leak
+   ...
+   fun:ASCIIToUTF16
+   fun:PluginPrefsTest_UnifiedPepperFlashState_Test::TestBody
+}
+{
+   bug_150648
+   Heapcheck:Leak
+   fun:WTF::fastMalloc
+   fun:WTF::StringImpl::createUninitialized
+   fun:WTF::StringImpl::create
+   fun:WebKit::WebString::assign
+   fun:WebKit::WebString::WebString
+   fun:webkit_glue::CppBoundClass::BindToJavascript
+   fun:::TestWebFrameClient::didClearWindowObject
+   fun:WebKit::FrameLoaderClientImpl::dispatchDidClearWindowObjectInWorld
+   fun:WebCore::FrameLoader::dispatchDidClearWindowObjectInWorld
+   fun:WebCore::V8DOMWindowShell::initializeIfNeeded
 }

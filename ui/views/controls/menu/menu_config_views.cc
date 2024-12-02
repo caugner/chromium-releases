@@ -19,7 +19,7 @@ MenuConfig* MenuConfig::Create() {
   config->text_color = ui::NativeTheme::instance()->GetSystemColor(
       ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor);
   config->submenu_horizontal_margin_size = 0;
-  config->submenu_vertical_margin_size = 2;
+  config->submenu_vertical_margin_size = 0;
   config->submenu_horizontal_inset = 1;
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   config->arrow_to_edge_padding = 20;
@@ -29,20 +29,18 @@ MenuConfig* MenuConfig::Create() {
   // Add 4 to force some padding between check and label.
   config->check_width = check->width() + 4;
   config->check_height = check->height();
-  if (ui::GetDisplayLayout() == ui::LAYOUT_TOUCH) {
-    config->separator_height = 1;
-    config->item_min_height = 40;
-    config->item_left_margin = 4;
-  } else {
-    config->separator_height = 5;
-    config->item_min_height = 30;
-    config->item_left_margin = 8;
-  }
+  config->item_left_margin = 4;
+  config->item_min_height = 29;
+  config->separator_height = 15;
+  config->separator_spacing_height = 7;
+  config->separator_lower_height = 8;
+  config->separator_upper_height = 8;
   config->font = rb.GetFont(ResourceBundle::BaseFont);
   config->label_to_arrow_padding = 20;
   config->label_to_accelerator_padding = 20;
   config->always_use_icon_to_label_padding = true;
   config->align_arrow_and_shortcut = true;
+  config->offset_context_menus = true;
 
   return config;
 }

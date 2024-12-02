@@ -41,8 +41,8 @@
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_event_handler.h"
 #include "sync/notifier/invalidation_state_tracker.h"
-#include "sync/notifier/sync_notifier.h"
-#include "sync/notifier/sync_notifier_factory.h"
+#include "sync/notifier/invalidator_factory.h"
+#include "sync/notifier/invalidator.h"
 #include "sync/test/fake_encryptor.h"
 
 #if defined(OS_MACOSX)
@@ -81,6 +81,12 @@ class NullInvalidationStateTracker
       int64 max_invalidation_version) OVERRIDE {
     VLOG(1) << "Setting max invalidation version for "
             << ObjectIdToString(id) << " to " << max_invalidation_version;
+  }
+
+  virtual void Forget(const ObjectIdSet& ids) OVERRIDE {
+    for (ObjectIdSet::const_iterator it = ids.begin(); it != ids.end(); ++it) {
+      VLOG(1) << "Forgetting invalidation state for " << ObjectIdToString(*it);
+    }
   }
 
   virtual std::string GetInvalidationState() const OVERRIDE {
@@ -308,7 +314,7 @@ int SyncClientMain(int argc, char* argv[]) {
       ParseNotifierOptions(command_line, context_getter);
   const char kClientInfo[] = "sync_listen_notifications";
   NullInvalidationStateTracker null_invalidation_state_tracker;
-  SyncNotifierFactory sync_notifier_factory(
+  InvalidatorFactory invalidator_factory(
       notifier_options, kClientInfo,
       null_invalidation_state_tracker.AsWeakPtr());
 
@@ -351,6 +357,11 @@ int SyncClientMain(int argc, char* argv[]) {
   const char kRestoredKeystoreKeyForBootstrapping[] = "";
   NullEncryptor null_encryptor;
   LoggingUnrecoverableErrorHandler unrecoverable_error_handler;
+  InternalComponentsFactoryImpl::Switches factory_switches = {
+      InternalComponentsFactory::ENCRYPTION_KEYSTORE,
+      InternalComponentsFactory::BACKOFF_NORMAL
+  };
+
   sync_manager->Init(database_dir.path(),
                     WeakHandle<JsEventHandler>(
                         js_event_handler.AsWeakPtr()),
@@ -363,13 +374,12 @@ int SyncClientMain(int argc, char* argv[]) {
                     extensions_activity_monitor,
                     &change_delegate,
                     credentials,
-                    scoped_ptr<SyncNotifier>(
-                        sync_notifier_factory.CreateSyncNotifier()),
+                    scoped_ptr<Invalidator>(
+                        invalidator_factory.CreateInvalidator()),
                     kRestoredKeyForBootstrapping,
                     kRestoredKeystoreKeyForBootstrapping,
-                    true,  // enable keystore encryption
                     scoped_ptr<InternalComponentsFactory>(
-                        new InternalComponentsFactoryImpl()),
+                        new InternalComponentsFactoryImpl(factory_switches)),
                     &null_encryptor,
                     &unrecoverable_error_handler,
                     &LogUnrecoverableErrorContext);

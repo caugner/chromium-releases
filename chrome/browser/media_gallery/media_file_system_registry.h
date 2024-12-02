@@ -15,14 +15,16 @@
 
 #include "base/basictypes.h"
 #include "base/lazy_instance.h"
+#include "base/file_path.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/system_monitor/system_monitor.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "webkit/fileapi/media/media_file_system_config.h"
 
-class FilePath;
+class Profile;
 
 namespace content {
-class RenderProcessHost;
+class RenderViewHost;
 }
 
 namespace extensions {
@@ -35,75 +37,99 @@ class IsolatedContext;
 
 namespace chrome {
 
-class MediaFileSystemRegistry
-    : public base::SystemMonitor::DevicesChangedObserver,
-      public content::NotificationObserver {
- public:
-  struct MediaFSInfo {
-    std::string name;
-    std::string fsid;
-    FilePath path;
-  };
+class ExtensionGalleriesHost;
+class MediaGalleriesPreferences;
+class ScopedMediaDeviceMapEntry;
 
+struct MediaFileSystemInfo {
+  MediaFileSystemInfo(const std::string& fs_name,
+                      const FilePath& fs_path,
+                      const std::string& filesystem_id);
+  MediaFileSystemInfo();
+
+  std::string name;  // JSON string, must not contain slashes.
+  FilePath path;
+  std::string fsid;
+};
+
+typedef base::Callback<void(const std::vector<MediaFileSystemInfo>&)>
+    MediaFileSystemsCallback;
+
+class MediaFileSystemRegistry
+    : public base::SystemMonitor::DevicesChangedObserver {
+ public:
   // The instance is lazily created per browser process.
   static MediaFileSystemRegistry* GetInstance();
 
-  // Returns the list of media filesystem IDs and paths for a given RPH.
-  // Called on the UI thread.
-  std::vector<MediaFSInfo> GetMediaFileSystemsForExtension(
-      const content::RenderProcessHost* rph,
-      const extensions::Extension& extension);
+  // Passes to |callback| the list of media filesystem IDs and paths for a
+  // given RVH. Called on the UI thread.
+  void GetMediaFileSystemsForExtension(
+      const content::RenderViewHost* rvh,
+      const extensions::Extension* extension,
+      const MediaFileSystemsCallback& callback);
+
+#if defined(SUPPORT_MEDIA_FILESYSTEM)
+  // Registers and returns the file system id for the mtp or ptp device
+  // specified by |device_id| and |path|. Updates |entry| with the corresponding
+  // ScopedMediaDeviceMapEntry object.
+  std::string RegisterFileSystemForMtpDevice(
+      const std::string& device_id, const FilePath& path,
+      scoped_refptr<ScopedMediaDeviceMapEntry>* entry);
+#endif
 
   // base::SystemMonitor::DevicesChangedObserver implementation.
-  virtual void OnMediaDeviceDetached(const std::string& id) OVERRIDE;
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  virtual void OnRemovableStorageAttached(
+      const std::string& id, const string16& name,
+      const FilePath::StringType& location) OVERRIDE;
+  virtual void OnRemovableStorageDetached(const std::string& id) OVERRIDE;
 
  private:
   friend struct base::DefaultLazyInstanceTraits<MediaFileSystemRegistry>;
 
-  // Mapping of media directories to filesystem IDs.
-  typedef std::map<FilePath, std::string> MediaPathToFSIDMap;
+  // Map an extension to the ExtensionGalleriesHost.
+  typedef std::map<std::string /*extension_id*/,
+                   scoped_refptr<ExtensionGalleriesHost> > ExtensionHostMap;
+  // Map a profile and extension to the ExtensionGalleriesHost.
+  typedef std::map<Profile*, ExtensionHostMap> ExtensionGalleriesHostMap;
 
-  // Mapping of RPH to MediaPathToFSIDMaps.
-  typedef std::map<const content::RenderProcessHost*,
-                   MediaPathToFSIDMap> ChildIdToMediaFSMap;
-
-  // Mapping of device id to media device info.
-  typedef std::map<std::string, base::SystemMonitor::MediaDeviceInfo>
-      DeviceIdToInfoMap;
+#if defined(SUPPORT_MEDIA_FILESYSTEM)
+  // Map a mtp or ptp device location to the weak pointer of
+  // ScopedMediaDeviceMapEntry.
+  typedef std::map<const FilePath::StringType,
+                   base::WeakPtr<ScopedMediaDeviceMapEntry> >
+      MTPDeviceDelegateMap;
+#endif
 
   // Obtain an instance of this class via GetInstance().
   MediaFileSystemRegistry();
   virtual ~MediaFileSystemRegistry();
 
-  // Helper functions to register / unregister listening for renderer process
-  // closed / terminiated notifications.
-  void RegisterForRPHGoneNotifications(const content::RenderProcessHost* rph);
-  void UnregisterForRPHGoneNotifications(const content::RenderProcessHost* rph);
+#if defined(SUPPORT_MEDIA_FILESYSTEM)
+  // Returns ScopedMediaDeviceMapEntry object for the given |device_location|.
+  ScopedMediaDeviceMapEntry* GetOrCreateScopedMediaDeviceMapEntry(
+      const FilePath::StringType& device_location);
 
-  // Registers a path as a media file system and return the filesystem id.
-  std::string RegisterPathAsFileSystem(
-      const base::SystemMonitor::MediaDeviceType& device_type,
-      const FilePath& path);
+  // Removes the ScopedMediaDeviceMapEntry associated with the given
+  // |device_location|.
+  void RemoveScopedMediaDeviceMapEntry(
+      const FilePath::StringType& device_location);
+#endif
 
+  // Register all the media devices found in system monitor as auto-detected
+  // galleries for the passed |preferences|.
+  void AddAttachedMediaDeviceGalleries(MediaGalleriesPreferences* preferences);
 
-  // Revoke a media file system with a given |path|.
-  void RevokeMediaFileSystem(
-      const base::SystemMonitor::MediaDeviceType& device_type,
-      const FilePath& path);
+  void OnExtensionGalleriesHostEmpty(Profile* profile,
+                                     const std::string& extension_id);
 
+  // Only accessed on the UI thread. This map owns all the
+  // ExtensionGalleriesHost objects created.
+  ExtensionGalleriesHostMap extension_hosts_map_;
+
+#if defined(SUPPORT_MEDIA_FILESYSTEM)
   // Only accessed on the UI thread.
-  ChildIdToMediaFSMap media_fs_map_;
-
-  // Only accessed on the UI thread.
-  DeviceIdToInfoMap device_id_map_;
-
-  // Is only used on the UI thread.
-  content::NotificationRegistrar registrar_;
+  MTPDeviceDelegateMap mtp_delegate_map_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(MediaFileSystemRegistry);
 };

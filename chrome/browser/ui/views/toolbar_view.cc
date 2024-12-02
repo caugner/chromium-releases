@@ -69,6 +69,8 @@
 #endif
 
 #if defined(USE_AURA)
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/search_view_controller.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
 #endif
@@ -117,10 +119,10 @@ int location_bar_vert_spacing() {
     switch (ui::GetDisplayLayout()) {
       case ui::LAYOUT_ASH:
       case ui::LAYOUT_DESKTOP:
-        value = 4;
+        value = ToolbarView::kVertSpacing;
         break;
       case ui::LAYOUT_TOUCH:
-        value = 6;
+        value = 10;
         break;
       default:
         NOTREACHED();
@@ -220,12 +222,8 @@ ToolbarView::~ToolbarView() {
 
 void ToolbarView::Init(views::View* location_bar_parent,
                        views::View* popup_parent_view) {
-  back_menu_model_.reset(new BackForwardMenuModel(
+  back_ = new views::ButtonDropDown(this, new BackForwardMenuModel(
       browser_, BackForwardMenuModel::BACKWARD_MENU));
-  forward_menu_model_.reset(new BackForwardMenuModel(
-      browser_, BackForwardMenuModel::FORWARD_MENU));
-
-  back_ = new views::ButtonDropDown(this, back_menu_model_.get());
   back_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
                                      ui::EF_MIDDLE_MOUSE_BUTTON);
   back_->set_tag(IDC_BACK);
@@ -235,7 +233,8 @@ void ToolbarView::Init(views::View* location_bar_parent,
   back_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_BACK));
   back_->set_id(VIEW_ID_BACK_BUTTON);
 
-  forward_ = new views::ButtonDropDown(this, forward_menu_model_.get());
+  forward_ = new views::ButtonDropDown(this, new BackForwardMenuModel(
+      browser_, BackForwardMenuModel::FORWARD_MENU));
   forward_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
                                         ui::EF_MIDDLE_MOUSE_BUTTON);
   forward_->set_tag(IDC_FORWARD);
@@ -246,8 +245,10 @@ void ToolbarView::Init(views::View* location_bar_parent,
   // Have to create this before |reload_| as |reload_|'s constructor needs it.
   location_bar_container_ = new LocationBarContainer(
       location_bar_parent,
+      this,
       chrome::search::IsInstantExtendedAPIEnabled(browser_->profile()));
   location_bar_ = new LocationBarView(
+      browser_,
       browser_->profile(),
       browser_->command_controller()->command_updater(),
       model_,
@@ -404,9 +405,37 @@ gfx::ImageSkia ToolbarView::GetAppMenuIcon(
 }
 
 void ToolbarView::LayoutForSearch() {
-  if (chrome::search::IsInstantExtendedAPIEnabled(browser_->profile()) &&
-      browser_->search_model()->mode().is_ntp())
-    LayoutLocationBarNTP();
+  if (!(chrome::search::IsInstantExtendedAPIEnabled(browser_->profile()) &&
+        browser_->search_model()->mode().is_ntp()))
+    return;
+
+#if defined(USE_AURA)
+  const BrowserView* browser_view =
+      static_cast<BrowserView*>(browser_->window());
+  if (!browser_view)
+    return;
+
+  gfx::Rect location_container_bounds =
+      browser_view->search_view_controller()->GetNTPOmniboxBounds(
+          location_bar_container_->parent());
+  if (location_container_bounds.width() == 0)
+    return;
+
+  location_bar_container_->SetInToolbar(false);
+  location_container_bounds.set_height(
+      location_bar_container_->GetPreferredSize().height());
+
+  // If bounds of |location_bar_container_| is not contained within its
+  // parent's, adjust the former's to within the latter's.  This will clip its
+  // child |location_bar_view_| within its bounds without resizing it.
+  // Note that parent of |location_bar_container_| i.e. BrowserView can't clip
+  // its children, else it loses the 3D shadows.
+  gfx::Rect parent_rect = location_bar_container_->parent()->GetLocalBounds();
+  gfx::Rect intersect_rect = parent_rect.Intersect(location_container_bounds);
+  // If the two bounds don't intersect, set bounds of |location_bar_container_|
+  // to 0.
+  location_bar_container_->SetBoundsRect(intersect_rect);
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -415,6 +444,14 @@ void ToolbarView::LayoutForSearch() {
 bool ToolbarView::SetPaneFocus(views::View* initial_focus) {
   if (!AccessiblePaneView::SetPaneFocus(initial_focus))
     return false;
+
+  // Put the location bar container between the home button and browser
+  // actions when doing a focus search. This needs to be done here rather
+  // than during initialization, because the location bar container might
+  // get siblings added to it after initialization of this view, which
+  // breaks our override.
+  home_->SetNextFocusableView(location_bar_container_);
+  location_bar_container_->SetNextFocusableView(browser_actions_);
 
   location_bar_->SetShowFocusRect(true);
   return true;
@@ -491,10 +528,11 @@ void ToolbarView::OnInputInProgress(bool in_progress) {
 
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, chrome::search::SearchModelObserver implementation:
-void ToolbarView::ModeChanged(const chrome::search::Mode& mode) {
+void ToolbarView::ModeChanged(const chrome::search::Mode& old_mode,
+                              const chrome::search::Mode& new_mode) {
   // Layout location bar to determine the visibility of each of its child
   // view based on toolbar mode change.
-  if (mode.is_ntp())
+  if (new_mode.is_ntp())
     location_bar_->Layout();
 
   Layout();
@@ -529,7 +567,7 @@ void ToolbarView::EnabledStateChangedForCommand(int id, bool enabled) {
 // ToolbarView, views::Button::ButtonListener implementation:
 
 void ToolbarView::ButtonPressed(views::Button* sender,
-                                const views::Event& event) {
+                                const ui::Event& event) {
   int command = sender->tag();
   WindowOpenDisposition disposition =
       chrome::DispositionFromEventFlags(sender->mouse_event_flags());
@@ -669,10 +707,15 @@ void ToolbarView::Layout() {
   int delta = !chrome::search::IsInstantExtendedAPIEnabled(
       browser_->profile()) ? 0 : kSearchTopButtonSpacing;
 
-  int child_y = std::min(kVertSpacing, height()) + delta;
   // We assume all child elements are the same height.
   int child_height =
-      std::min(back_->GetPreferredSize().height(), height() - child_y);
+      std::min(back_->GetPreferredSize().height(), height());
+
+  // Set child_y such that buttons appear vertically centered. To preseve
+  // the behaviour on non-touch UIs, round-up by taking
+  // ceil((height() - child_height) / 2) + delta
+  // which is equivalent to the below.
+  int child_y = (1 + ((height() - child_height - 1) / 2)) + delta;
 
   // If the window is maximized, we extend the back button to the left so that
   // clicking on the left-most pixel will activate the back button.
@@ -710,8 +753,11 @@ void ToolbarView::Layout() {
   int location_x = home_->x() + home_->width() + kStandardSpacing;
   int available_width = std::max(0, width() - kRightEdgeSpacing -
       app_menu_width - browser_actions_width - location_x);
-  int location_y = std::min(location_bar_vert_spacing() + top_delta,
-                            height());
+
+  int location_y =
+      top_delta + 1 + ((height() -
+          location_bar_container_->GetPreferredSize().height() - 1) / 2);
+
   int available_height = location_bar_->GetPreferredSize().height();
   const gfx::Rect location_bar_bounds(location_x, location_y,
                                       available_width, available_height);
@@ -733,7 +779,7 @@ void ToolbarView::Layout() {
     if (si_mode.animate && si_mode.is_search() &&
         !location_bar_container_->IsAnimating()) {
       gfx::Point location_bar_origin(location_bar_bounds.origin());
-      views::View::ConvertPointToView(this, location_bar_container_->parent(),
+      views::View::ConvertPointToTarget(this, location_bar_container_->parent(),
                                       &location_bar_origin);
       location_bar_container_->AnimateTo(
           gfx::Rect(location_bar_origin, location_bar_bounds.size()));
@@ -765,13 +811,13 @@ void ToolbarView::Layout() {
                        app_menu_width, child_height);
 }
 
-bool ToolbarView::HitTest(const gfx::Point& point) const {
+bool ToolbarView::HitTestRect(const gfx::Rect& rect) const {
   // Don't take hits in our top shadow edge.  Let them fall through to the
   // tab strip above us.
-  if (point.y() < kContentShadowHeight)
+  if (rect.y() < kContentShadowHeight)
     return false;
   // Otherwise let our superclass take care of it.
-  return AccessiblePaneView::HitTest(point);
+  return AccessiblePaneView::HitTestRect(rect);
 }
 
 void ToolbarView::OnPaint(gfx::Canvas* canvas) {
@@ -812,7 +858,7 @@ bool ToolbarView::CanDrop(const ui::OSExchangeData& data) {
   return data.HasURL() || data.HasString();
 }
 
-int ToolbarView::OnDragUpdated(const views::DropTargetEvent& event) {
+int ToolbarView::OnDragUpdated(const ui::DropTargetEvent& event) {
   if (event.source_operations() & ui::DragDropTypes::DRAG_COPY) {
     return ui::DragDropTypes::DRAG_COPY;
   } else if (event.source_operations() & ui::DragDropTypes::DRAG_LINK) {
@@ -821,7 +867,7 @@ int ToolbarView::OnDragUpdated(const views::DropTargetEvent& event) {
   return ui::DragDropTypes::DRAG_NONE;
 }
 
-int ToolbarView::OnPerformDrop(const views::DropTargetEvent& event) {
+int ToolbarView::OnPerformDrop(const ui::DropTargetEvent& event) {
   return location_bar_->GetLocationEntry()->OnPerformDrop(event);
 }
 
@@ -834,10 +880,14 @@ std::string ToolbarView::GetClassName() const {
 }
 
 bool ToolbarView::AcceleratorPressed(const ui::Accelerator& accelerator) {
-  const views::View* focused_view = focus_manager_->GetFocusedView();
+  const views::View* focused_view = focus_manager()->GetFocusedView();
   if (focused_view == location_bar_)
     return false;  // Let location bar handle all accelerator events.
   return AccessiblePaneView::AcceleratorPressed(accelerator);
+}
+
+bool ToolbarView::IsWrenchMenuShowing() const {
+  return wrench_menu_.get() && wrench_menu_->IsShowing();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -848,6 +898,7 @@ bool ToolbarView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 // also so that it selects all content in the location bar.
 bool ToolbarView::SetPaneFocusAndFocusDefault() {
   if (!location_bar_->HasFocus()) {
+    SetPaneFocus(location_bar_);
     location_bar_->FocusLocation(true);
     return true;
   }
@@ -861,6 +912,21 @@ bool ToolbarView::SetPaneFocusAndFocusDefault() {
 void ToolbarView::RemovePaneFocus() {
   AccessiblePaneView::RemovePaneFocus();
   location_bar_->SetShowFocusRect(false);
+}
+
+views::View* ToolbarView::GetParentForFocusSearch(views::View* v) {
+  if (v == location_bar_container_)
+    return this;
+
+  return AccessiblePaneView::GetParentForFocusSearch(v);
+}
+
+bool ToolbarView::ContainsForFocusSearch(views::View* root,
+                                         const views::View* v) {
+  if (Contains(root) && location_bar_container_->Contains(v))
+    return true;
+
+  return AccessiblePaneView::ContainsForFocusSearch(root, v);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -947,65 +1013,6 @@ void ToolbarView::UpdateAppMenuState() {
   SchedulePaint();
 }
 
-void ToolbarView::LayoutLocationBarNTP() {
-  // TODO(kuan): this likely needs to cancel animations.
-
-  WebContents* contents = chrome::GetActiveWebContents(browser_);
-#if defined(USE_AURA)
-  // Under aura we can't use WebContentsView::GetContainerBounds since it is
-  // affected by any animations that scale the window (such as during startup).
-  // Instead we convert coordinates using aura::Window.
-  aura::Window* contents_view = contents && contents->GetView() ?
-      contents->GetView()->GetNativeView() : NULL;
-  if (!contents_view)
-    return;
-
-  aura::Window* browser_window = GetWidget()->GetNativeView();
-  // BrowserWindow may not contain contents during startup on the lock screen.
-  if (!browser_window || !browser_window->Contains(contents_view))
-    return;
-
-  gfx::Size contents_size(contents_view->bounds().size());
-  gfx::Rect location_rect = chrome::search::GetNTPOmniboxBounds(contents_size);
-  if (location_rect.width() == 0)
-    return;
-
-  gfx::Point location_container_origin;
-  aura::Window::ConvertPointToWindow(
-      contents_view, browser_window, &location_container_origin);
-  views::View::ConvertPointFromWidget(location_bar_container_->parent(),
-                                      &location_container_origin);
-  location_container_origin =
-      location_container_origin.Add(location_rect.origin());
-#else
-  // Get screen bounds of web contents page.
-  gfx::Rect web_rect_in_screen;
-  if (contents && contents->GetView())
-    contents->GetView()->GetContainerBounds(&web_rect_in_screen);
-  // No need to layout NTP location bar if there's no web contents page yet.
-  if (web_rect_in_screen.IsEmpty())
-    return;
-
-  gfx::Rect location_rect = chrome::search::GetNTPOmniboxBounds(
-      web_rect_in_screen.size());
-  if (location_rect.width() == 0)
-    return;
-
-  gfx::Point location_container_origin(
-      web_rect_in_screen.x() + location_rect.x(),
-      web_rect_in_screen.y() + location_rect.y());
-  views::View::ConvertPointFromScreen(location_bar_container_->parent(),
-                                      &location_container_origin);
-#endif
-
-  location_bar_container_->SetInToolbar(false);
-  location_bar_container_->SetBounds(
-      location_container_origin.x(),
-      location_container_origin.y(),
-      location_rect.width(),
-      location_bar_container_->GetPreferredSize().height());
-}
-
 void ToolbarView::SetLocationBarContainerBounds(
     const gfx::Rect& bounds) {
   if (location_bar_container_->IsAnimating())
@@ -1013,8 +1020,8 @@ void ToolbarView::SetLocationBarContainerBounds(
 
   // LocationBarContainer is not a child of the ToolbarView.
   gfx::Point origin(bounds.origin());
-  views::View::ConvertPointToView(this, location_bar_container_->parent(),
-                                  &origin);
+  views::View::ConvertPointToTarget(this, location_bar_container_->parent(),
+                                    &origin);
   gfx::Rect target_bounds(origin, bounds.size());
   if (location_bar_container_->GetTargetBounds() != target_bounds) {
     location_bar_container_->SetInToolbar(true);

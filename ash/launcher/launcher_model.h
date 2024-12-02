@@ -5,15 +5,10 @@
 #ifndef ASH_LAUNCHER_LAUNCHER_MODEL_H_
 #define ASH_LAUNCHER_LAUNCHER_MODEL_H_
 
-#include <vector>
-
 #include "ash/ash_export.h"
 #include "ash/launcher/launcher_types.h"
+#include "base/basictypes.h"
 #include "base/observer_list.h"
-
-namespace aura {
-class Window;
-}
 
 namespace ash {
 
@@ -22,6 +17,12 @@ class LauncherModelObserver;
 // Model used by LauncherView.
 class ASH_EXPORT LauncherModel {
  public:
+  enum Status {
+    STATUS_NORMAL,
+    // A status that indicates apps are syncing/loading.
+    STATUS_LOADING,
+  };
+
   LauncherModel();
   ~LauncherModel();
 
@@ -44,7 +45,7 @@ class ASH_EXPORT LauncherModel {
   void Set(int index, const LauncherItem& item);
 
   // Returns the index of the item by id.
-  int ItemIndexByID(int id);
+  int ItemIndexByID(int id) const;
 
   // Returns the id assigned to the next item added.
   LauncherID next_id() const { return next_id_; }
@@ -55,6 +56,9 @@ class ASH_EXPORT LauncherModel {
 
   const LauncherItems& items() const { return items_; }
   int item_count() const { return static_cast<int>(items_.size()); }
+
+  void SetStatus(Status status);
+  Status status() const { return status_; }
 
   void AddObserver(LauncherModelObserver* observer);
   void RemoveObserver(LauncherModelObserver* observer);
@@ -68,6 +72,7 @@ class ASH_EXPORT LauncherModel {
   // ID assigned to the next item.
   LauncherID next_id_;
   LauncherItems items_;
+  Status status_;
   ObserverList<LauncherModelObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherModel);

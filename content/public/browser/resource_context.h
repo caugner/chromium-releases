@@ -5,6 +5,7 @@
 #ifndef CONTENT_PUBLIC_BROWSER_RESOURCE_CONTEXT_H_
 #define CONTENT_PUBLIC_BROWSER_RESOURCE_CONTEXT_H_
 
+#include "base/basictypes.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
 
@@ -24,12 +25,13 @@ namespace content {
 // the UI thread. It must be destructed on the IO thread.
 class CONTENT_EXPORT ResourceContext : public base::SupportsUserData {
  public:
-  static appcache::AppCacheService* GetAppCacheService(
-      ResourceContext* resource_context);
-
   ResourceContext();
   virtual ~ResourceContext();
   virtual net::HostResolver* GetHostResolver() = 0;
+
+  // DEPRECATED: This is no longer a valid given isolated apps/sites and
+  // storage partitioning. This getter returns the default context associated
+  // with a BrowsingContext.
   virtual net::URLRequestContext* GetRequestContext() = 0;
 };
 

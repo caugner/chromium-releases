@@ -21,6 +21,13 @@ class CredentialCacheServiceFactory : public ProfileKeyedServiceFactory {
 
   static CredentialCacheServiceFactory* GetInstance();
 
+  // Returns true if |profile| uses the "Default" directory, and false if not.
+  static bool IsDefaultProfile(Profile* profile);
+
+  // Returns true if |profile| uses the "Default" directory in the alternate
+  // user data directory, and false if not. Used only for testing.
+  static bool IsDefaultAlternateProfileForTest(Profile* profile);
+
  private:
   friend struct DefaultSingletonTraits<CredentialCacheServiceFactory>;
 
@@ -28,11 +35,8 @@ class CredentialCacheServiceFactory : public ProfileKeyedServiceFactory {
 
   virtual ~CredentialCacheServiceFactory();
 
-  // Returns true if |profile| uses the "Default" directory, and false if not.
-  static bool IsDefaultProfile(Profile* profile);
-
   // ProfileKeyedServiceFactory implementation.
-  virtual bool ServiceIsCreatedWithProfile() OVERRIDE;
+  virtual bool ServiceIsCreatedWithProfile() const OVERRIDE;
 
   // ProfileKeyedServiceFactory implementation.
   virtual ProfileKeyedService* BuildServiceInstanceFor(

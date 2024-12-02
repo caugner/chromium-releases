@@ -9,13 +9,14 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "chrome/browser/ui/website_settings/website_settings_ui.h"
 #include "chrome/browser/ui/views/website_settings/permission_selector_view_observer.h"
+#include "chrome/browser/ui/website_settings/website_settings_ui.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane_listener.h"
 
+class Browser;
 class GURL;
 class PermissionSelectorView;
 class PopupHeaderView;
@@ -47,26 +48,27 @@ class WebsiteSettingsPopupView
                         Profile* profile,
                         TabContents* tab_contents,
                         const GURL& url,
-                        const content::SSLStatus& ssl);
+                        const content::SSLStatus& ssl,
+                        Browser* browser);
 
  private:
   WebsiteSettingsPopupView(views::View* anchor_view,
                            Profile* profile,
                            TabContents* tab_contents,
                            const GURL& url,
-                           const content::SSLStatus& ssl);
+                           const content::SSLStatus& ssl,
+                           Browser* browser);
 
   // PermissionSelectorViewObserver implementation.
   virtual void OnPermissionChanged(
       PermissionSelectorView* selector) OVERRIDE;
 
-  // views::BubbleDelegate implementations.
-  virtual gfx::Rect GetAnchorRect() OVERRIDE;
+  // views::BubbleDelegate implementation.
   virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
 
   // views::ButtonListener implementation.
   virtual void ButtonPressed(views::Button* button,
-                             const views::Event& event) OVERRIDE;
+                             const ui::Event& event) OVERRIDE;
 
   // views::LinkListener implementation.
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
@@ -83,6 +85,7 @@ class WebsiteSettingsPopupView
       const PermissionInfoList& permission_info_list) OVERRIDE;
   virtual void SetIdentityInfo(const IdentityInfo& identity_info) OVERRIDE;
   virtual void SetFirstVisit(const string16& first_visit) OVERRIDE;
+  virtual void SetSelectedTab(TabId tab_id) OVERRIDE;
 
   // Creates the contents of the "Permissions" tab. The ownership of the
   // returned view is transferred to the caller.
@@ -116,8 +119,10 @@ class WebsiteSettingsPopupView
   // tab.
   TabContents* tab_contents_;
 
-  // The presenter that controlls the Website Settings UI. |presenter_| is null
-  // if the popup is opened for a internal chrome url.
+  // The Browser is used to load the help center page.
+  Browser* browser_;
+
+  // The presenter that controlls the Website Settings UI.
   scoped_ptr<WebsiteSettings> presenter_;
 
   PopupHeaderView* header_;  // Owned by views hierarchy.
@@ -134,6 +139,8 @@ class WebsiteSettingsPopupView
   // "Permissions" tab.
   views::View* permissions_content_;
 
+  // The view that contains the connection tab contents.
+  views::View* connection_tab_;
   // The view that contains the ui elements for displaying information about
   // the site's identity.
   views::View* identity_info_content_;
@@ -144,6 +151,10 @@ class WebsiteSettingsPopupView
   // The id of the certificate provided by the site. If the site does not
   // provide a certificate then |cert_id_| is 0.
   int cert_id_;
+
+  // The link to open the help center page that contains more information about
+  // the connection status icons.
+  views::Link* help_center_link_;
 
   views::View* connection_info_content_;
   views::View* page_info_content_;

@@ -5,7 +5,8 @@
 #include "ash/wm/workspace_controller_test_helper.h"
 
 #include "ash/wm/workspace_controller.h"
-#include "ash/wm/workspace/workspace_event_filter_test_helper.h"
+#include "ash/wm/workspace/workspace_event_handler_test_helper.h"
+#include "ui/aura/window.h"
 
 namespace ash {
 namespace internal {
@@ -18,9 +19,18 @@ WorkspaceControllerTestHelper::WorkspaceControllerTestHelper(
 WorkspaceControllerTestHelper::~WorkspaceControllerTestHelper() {
 }
 
+WorkspaceEventHandler* WorkspaceControllerTestHelper::GetEventHandler() {
+  if (WorkspaceController::IsWorkspace2Enabled()) {
+    ui::EventTarget::TestApi test_api(controller_->viewport_->children()[0]);
+    return static_cast<WorkspaceEventHandler*>(
+        test_api.pre_target_handlers().front());
+  }
+  return controller_->event_handler_;
+}
+
 MultiWindowResizeController*
 WorkspaceControllerTestHelper::GetMultiWindowResizeController() {
-  return WorkspaceEventFilterTestHelper(filter()).resize_controller();
+  return WorkspaceEventHandlerTestHelper(GetEventHandler()).resize_controller();
 }
 
 }  // namespace internal

@@ -21,12 +21,14 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/content_settings_observer.h"
-#include "chrome/renderer/extensions/extension_dispatcher.h"
+#include "chrome/renderer/extensions/dispatcher.h"
+#include "chrome/renderer/extensions/extension_helper.h"
 #include "chrome/renderer/external_host_bindings.h"
 #include "chrome/renderer/frame_sniffer.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "chrome/renderer/translate_helper.h"
+#include "chrome/renderer/webview_animating_overlay.h"
 #include "chrome/renderer/webview_color_overlay.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/renderer/render_view.h"
@@ -219,7 +221,7 @@ ChromeRenderViewObserver::ChromeRenderViewObserver(
     content::RenderView* render_view,
     ContentSettingsObserver* content_settings,
     ChromeRenderProcessObserver* chrome_render_process_observer,
-    ExtensionDispatcher* extension_dispatcher,
+    extensions::Dispatcher* extension_dispatcher,
     TranslateHelper* translate_helper)
     : content::RenderViewObserver(render_view),
       chrome_render_process_observer_(chrome_render_process_observer),
@@ -381,17 +383,29 @@ void ChromeRenderViewObserver::OnSetClientSidePhishingDetection(
 }
 
 void ChromeRenderViewObserver::OnSetVisuallyDeemphasized(bool deemphasized) {
-  bool already_deemphasized = !!dimmed_color_overlay_.get();
-  if (already_deemphasized == deemphasized)
-    return;
-
-  if (deemphasized) {
-    // 70% opaque grey.
-    SkColor greyish = SkColorSetARGB(178, 0, 0, 0);
-    dimmed_color_overlay_.reset(
-        new WebViewColorOverlay(render_view(), greyish));
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableFramelessConstrainedDialogs)) {
+    if (!dimmed_animating_overlay_.get()) {
+      dimmed_animating_overlay_.reset(
+          new WebViewAnimatingOverlay(render_view()));
+    }
+    if (deemphasized)
+      dimmed_animating_overlay_->Show();
+    else
+      dimmed_animating_overlay_->Hide();
   } else {
-    dimmed_color_overlay_.reset();
+    bool already_deemphasized = !!dimmed_color_overlay_.get();
+    if (already_deemphasized == deemphasized)
+      return;
+
+    if (deemphasized) {
+      // 70% opaque grey.
+      SkColor greyish = SkColorSetARGB(178, 0, 0, 0);
+      dimmed_color_overlay_.reset(
+          new WebViewColorOverlay(render_view(), greyish));
+    } else {
+      dimmed_color_overlay_.reset();
+    }
   }
 }
 
@@ -485,21 +499,16 @@ bool ChromeRenderViewObserver::allowWriteToClipboard(WebFrame* frame,
   return allowed;
 }
 
-bool ChromeRenderViewObserver::HasExtensionPermission(
-    const WebSecurityOrigin& origin, APIPermission::ID permission) const {
+const extensions::Extension* ChromeRenderViewObserver::GetExtension(
+    const WebSecurityOrigin& origin) const {
   if (!EqualsASCII(origin.protocol(), chrome::kExtensionScheme))
-    return false;
+    return NULL;
 
   const std::string extension_id = origin.host().utf8().data();
   if (!extension_dispatcher_->IsExtensionActive(extension_id))
-    return false;
+    return NULL;
 
-  const extensions::Extension* extension =
-      extension_dispatcher_->extensions()->GetByID(extension_id);
-  if (!extension)
-    return false;
-
-  return extension->HasAPIPermission(permission);
+  return extension_dispatcher_->extensions()->GetByID(extension_id);
 }
 
 bool ChromeRenderViewObserver::allowWebComponents(const WebDocument& document,
@@ -511,12 +520,27 @@ bool ChromeRenderViewObserver::allowWebComponents(const WebDocument& document,
   if (EqualsASCII(origin.protocol(), chrome::kChromeUIScheme))
     return true;
 
-  // The <browser> tag is implemented via Shadow DOM.
-  if (HasExtensionPermission(origin, APIPermission::kBrowserTag))
-    return true;
+  if (const extensions::Extension* extension = GetExtension(origin)) {
+    // Titlebars in app windows are implmented via Shadow DOM.
+    if (extension->HasAPIPermission(APIPermission::kAppWindow))
+      return true;
 
-  if (HasExtensionPermission(origin, APIPermission::kExperimental))
-    return true;
+    // The <browser> tag is implemented via Shadow DOM.
+    if (extension->HasAPIPermission(APIPermission::kBrowserTag))
+      return true;
+
+    if (extension->HasAPIPermission(APIPermission::kExperimental))
+      return true;
+  } else {
+    // When a packaged app opens a window with a sandboxed resource, the origin
+    // will be unique (i.e. the empty string), so the fact that it is a shell
+    // window must be deduced from the view type instead to enable web
+    // components for HTML titlebars.
+    extensions::ExtensionHelper* helper =
+        extensions::ExtensionHelper::Get(render_view());
+    if (helper->view_type() == chrome::VIEW_TYPE_APP_SHELL)
+      return true;
+  }
 
   return false;
 }
@@ -524,7 +548,17 @@ bool ChromeRenderViewObserver::allowWebComponents(const WebDocument& document,
 bool ChromeRenderViewObserver::allowHTMLNotifications(
     const WebDocument& document) {
   WebSecurityOrigin origin = document.securityOrigin();
-  return HasExtensionPermission(origin, APIPermission::kNotification);
+  const extensions::Extension* extension = GetExtension(origin);
+  return extension && extension->HasAPIPermission(APIPermission::kNotification);
+}
+
+bool ChromeRenderViewObserver::allowMutationEvents(const WebDocument& document,
+                                                   bool default_value) {
+  WebSecurityOrigin origin = document.securityOrigin();
+  const extensions::Extension* extension = GetExtension(origin);
+  if (extension && extension->is_platform_app())
+    return false;
+  return default_value;
 }
 
 static void SendInsecureContentSignal(int signal) {

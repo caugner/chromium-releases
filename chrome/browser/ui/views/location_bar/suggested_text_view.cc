@@ -73,10 +73,13 @@ void SuggestedTextView::AnimationCanceled(const ui::Animation* animation) {
 ui::Animation* SuggestedTextView::CreateAnimation() {
   ui::MultiAnimation::Parts parts;
   parts.push_back(ui::MultiAnimation::Part(
-      InstantController::kAutoCommitPauseTimeMS, ui::Tween::ZERO));
+      InstantController::kInlineAutocompletePauseTimeMS, ui::Tween::ZERO));
   parts.push_back(ui::MultiAnimation::Part(
-      InstantController::kAutoCommitFadeInTimeMS, ui::Tween::EASE_IN));
-  ui::MultiAnimation* animation = new ui::MultiAnimation(parts);
+      InstantController::kInlineAutocompleteFadeInTimeMS, ui::Tween::EASE_IN));
+  ui::MultiAnimation* animation =
+      new ui::MultiAnimation(
+          parts,
+          ui::MultiAnimation::GetDefaultTimerInterval());
   animation->set_delegate(this);
   animation->set_continuous(false);
   return animation;

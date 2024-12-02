@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "base/property_bag.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
@@ -33,21 +32,20 @@ ConstrainedWebDialogDelegateBase::ConstrainedWebDialogDelegateBase(
       release_tab_on_close_(false) {
   CHECK(delegate);
   WebContents* web_contents =
-      WebContents::Create(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
-  tab_.reset(new TabContents(web_contents));
+      WebContents::Create(profile, NULL, MSG_ROUTING_NONE, NULL);
+  tab_.reset(TabContents::Factory::CreateTabContents(web_contents));
   if (tab_delegate) {
     override_tab_delegate_.reset(tab_delegate);
     web_contents->SetDelegate(tab_delegate);
   } else {
     web_contents->SetDelegate(this);
   }
-  // Set |this| as a property so the ConstrainedWebDialogUI can retrieve it.
-  ConstrainedWebDialogUI::GetPropertyAccessor().SetProperty(
-      web_contents->GetPropertyBag(), this);
+  // Set |this| as a delegate so the ConstrainedWebDialogUI can retrieve it.
+  ConstrainedWebDialogUI::SetConstrainedDelegate(web_contents, this);
 
   web_contents->GetController().LoadURL(delegate->GetDialogContentURL(),
                                         content::Referrer(),
-                                        content::PAGE_TRANSITION_START_PAGE,
+                                        content::PAGE_TRANSITION_AUTO_TOPLEVEL,
                                         std::string());
 }
 
@@ -58,12 +56,12 @@ ConstrainedWebDialogDelegateBase::~ConstrainedWebDialogDelegateBase() {
 
 const WebDialogDelegate*
     ConstrainedWebDialogDelegateBase::GetWebDialogDelegate() const {
-  return web_dialog_delegate_;
+  return web_dialog_delegate_.get();
 }
 
 WebDialogDelegate*
     ConstrainedWebDialogDelegateBase::GetWebDialogDelegate() {
-  return web_dialog_delegate_;
+  return web_dialog_delegate_.get();
 }
 
 void ConstrainedWebDialogDelegateBase::OnDialogCloseFromWebUI() {
@@ -97,5 +95,6 @@ TabContents* ConstrainedWebDialogDelegateBase::tab() {
 }
 
 void ConstrainedWebDialogDelegateBase::HandleKeyboardEvent(
+    content::WebContents* source,
     const NativeWebKeyboardEvent& event) {
 }

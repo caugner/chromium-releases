@@ -354,6 +354,8 @@ void ExtensionAPI::InitDefaultConfiguration() {
       IDR_EXTENSION_API_JSON_CHROMEOSINFOPRIVATE));
   RegisterSchema("cloudPrintPrivate", ReadFromResource(
       IDR_EXTENSION_API_JSON_CLOUDPRINTPRIVATE));
+  RegisterSchema("commands", ReadFromResource(
+      IDR_EXTENSION_API_JSON_COMMANDS));
   RegisterSchema("contentSettings", ReadFromResource(
       IDR_EXTENSION_API_JSON_CONTENTSETTINGS));
   RegisterSchema("contextMenus", ReadFromResource(
@@ -374,14 +376,14 @@ void ExtensionAPI::InitDefaultConfiguration() {
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_APP));
   RegisterSchema("experimental.bookmarkManager", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_BOOKMARKMANAGER));
-  RegisterSchema("experimental.commands", ReadFromResource(
-      IDR_EXTENSION_API_JSON_EXPERIMENTAL_COMMANDS));
   RegisterSchema("experimental.infobars", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_INFOBARS));
   RegisterSchema("experimental.input.virtualKeyboard", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_INPUT_VIRTUALKEYBOARD));
   RegisterSchema("experimental.offscreenTabs", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_OFFSCREENTABS));
+  RegisterSchema("experimental.power", ReadFromResource(
+      IDR_EXTENSION_API_JSON_EXPERIMENTAL_POWER));
   RegisterSchema("experimental.processes", ReadFromResource(
       IDR_EXTENSION_API_JSON_EXPERIMENTAL_PROCESSES));
   RegisterSchema("experimental.record", ReadFromResource(
@@ -501,7 +503,7 @@ bool ExtensionAPI::IsAvailable(const std::string& full_name,
 
     Feature::Availability availability =
         feature->IsAvailableToContext(extension, context);
-    if (availability != Feature::IS_AVAILABLE)
+    if (!availability.is_available())
       return false;
   }
 
@@ -583,11 +585,23 @@ const DictionaryValue* ExtensionAPI::GetSchema(const std::string& full_name) {
 
 namespace {
 
+const char* kDisallowedPlatformAppFeatures[] = {
+  // "app" refers to the the legacy app namespace for hosted apps.
+  "app",
+  "extension",
+  "tabs",
+  "windows"
+};
+
 bool IsFeatureAllowedForExtension(const std::string& feature,
                                   const extensions::Extension& extension) {
-  if (extension.is_platform_app() &&
-      (feature == "app" || feature == "extension"))
-    return false;
+  if (extension.is_platform_app()) {
+    for (size_t i = 0; i < arraysize(kDisallowedPlatformAppFeatures); ++i) {
+      if (feature == kDisallowedPlatformAppFeatures[i])
+        return false;
+    }
+  }
+
   return true;
 }
 

@@ -39,6 +39,7 @@ class MockPluginDelegate : public PluginDelegate {
   virtual WebKit::WebPlugin* CreatePluginReplacement(const FilePath& file_path);
   virtual PlatformImage2D* CreateImage2D(int width, int height);
   virtual PlatformContext3D* CreateContext3D();
+  virtual void ReparentContext(PlatformContext3D*);
   virtual PlatformVideoDecoder* CreateVideoDecoder(
       media::VideoDecodeAccelerator::Client* client,
       int32 command_buffer_route_id);
@@ -141,6 +142,10 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void RegisterTCPSocket(PPB_TCPSocket_Private_Impl* socket,
                                  uint32 socket_id);
   virtual uint32 UDPSocketCreate();
+  virtual void UDPSocketSetBoolSocketFeature(PPB_UDPSocket_Private_Impl* socket,
+                                             uint32 socket_id,
+                                             int32_t name,
+                                             bool value);
   virtual void UDPSocketBind(PPB_UDPSocket_Private_Impl* socket,
                              uint32 socket_id,
                              const PP_NetAddress_Private& addr);
@@ -187,7 +192,6 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void DidStopLoading();
   virtual void SetContentRestriction(int restrictions);
   virtual void SaveURLAs(const GURL& url);
-  virtual webkit_glue::P2PTransport* CreateP2PTransport();
   virtual double GetLocalTimeZoneOffset(base::Time t);
   virtual base::SharedMemory* CreateAnonymousSharedMemory(uint32_t size);
   virtual ::ppapi::Preferences GetPreferences();
@@ -202,6 +206,7 @@ class MockPluginDelegate : public PluginDelegate {
   virtual bool IsPageVisible() const;
   virtual int EnumerateDevices(PP_DeviceType_Dev type,
                                const EnumerateDevicesCallback& callback);
+  virtual void StopEnumerateDevices(int request_id);
   virtual webkit_glue::ClipboardClient* CreateClipboardClient() const;
   virtual std::string GetDeviceID();
   virtual PP_FlashLSORestrictions GetLocalDataRestrictions(

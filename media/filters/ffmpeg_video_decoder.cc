@@ -10,7 +10,8 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/location.h"
+#include "base/message_loop_proxy.h"
 #include "base/string_number_conversions.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/demuxer_stream.h"
@@ -54,13 +55,14 @@ static int GetThreadCount(CodecID codec_id) {
 }
 
 FFmpegVideoDecoder::FFmpegVideoDecoder(
-    const base::Callback<MessageLoop*()>& message_loop_cb)
-    : message_loop_factory_cb_(message_loop_cb),
+    const MessageLoopFactoryCB& message_loop_factory_cb,
+    Decryptor* decryptor)
+    : message_loop_factory_cb_(message_loop_factory_cb),
       message_loop_(NULL),
       state_(kUninitialized),
       codec_context_(NULL),
       av_frame_(NULL),
-      decryptor_(NULL) {
+      decryptor_(decryptor) {
 }
 
 int FFmpegVideoDecoder::GetVideoBuffer(AVCodecContext* codec_context,
@@ -101,7 +103,8 @@ int FFmpegVideoDecoder::GetVideoBuffer(AVCodecContext* codec_context,
     frame->linesize[i] = video_frame->stride(i);
   }
 
-  frame->opaque = video_frame.release();
+  frame->opaque = NULL;
+  video_frame.swap(reinterpret_cast<VideoFrame**>(&frame->opaque));
   frame->type = FF_BUFFER_TYPE_USER;
   frame->pkt_pts = codec_context->pkt ? codec_context->pkt->pts :
                                         AV_NOPTS_VALUE;
@@ -118,12 +121,8 @@ static int GetVideoBufferImpl(AVCodecContext* s, AVFrame* frame) {
 }
 
 static void ReleaseVideoBufferImpl(AVCodecContext* s, AVFrame* frame) {
-  // We're releasing the reference to the buffer allocated in
-  // GetVideoBuffer() here, so the explicit Release() here is
-  // intentional.
-  scoped_refptr<VideoFrame> video_frame =
-      static_cast<VideoFrame*>(frame->opaque);
-  video_frame->Release();
+  scoped_refptr<VideoFrame> video_frame;
+  video_frame.swap(reinterpret_cast<VideoFrame**>(&frame->opaque));
 
   // The FFmpeg API expects us to zero the data pointers in
   // this callback
@@ -138,16 +137,14 @@ void FFmpegVideoDecoder::Initialize(const scoped_refptr<DemuxerStream>& stream,
   FFmpegGlue::GetInstance();
 
   if (!message_loop_) {
-    message_loop_ = message_loop_factory_cb_.Run();
-    message_loop_factory_cb_.Reset();
-
+    message_loop_ = base::ResetAndReturn(&message_loop_factory_cb_).Run();
     message_loop_->PostTask(FROM_HERE, base::Bind(
         &FFmpegVideoDecoder::Initialize, this,
         stream, status_cb, statistics_cb));
     return;
   }
 
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(!demuxer_stream_);
 
   if (!stream) {
@@ -158,44 +155,13 @@ void FFmpegVideoDecoder::Initialize(const scoped_refptr<DemuxerStream>& stream,
   demuxer_stream_ = stream;
   statistics_cb_ = statistics_cb;
 
-  const VideoDecoderConfig& config = stream->video_decoder_config();
-
-  // TODO(scherkus): this check should go in Pipeline prior to creating
-  // decoder objects.
-  if (!config.IsValidConfig()) {
-    DLOG(ERROR) << "Invalid video stream - " << config.AsHumanReadableString();
-    status_cb.Run(PIPELINE_ERROR_DECODE);
-    return;
-  }
-
-  // Initialize AVCodecContext structure.
-  codec_context_ = avcodec_alloc_context3(NULL);
-  VideoDecoderConfigToAVCodecContext(config, codec_context_);
-
-  // Enable motion vector search (potentially slow), strong deblocking filter
-  // for damaged macroblocks, and set our error detection sensitivity.
-  codec_context_->error_concealment = FF_EC_GUESS_MVS | FF_EC_DEBLOCK;
-  codec_context_->err_recognition = AV_EF_CAREFUL;
-  codec_context_->thread_count = GetThreadCount(codec_context_->codec_id);
-  codec_context_->opaque = this;
-  codec_context_->flags |= CODEC_FLAG_EMU_EDGE;
-  codec_context_->get_buffer = GetVideoBufferImpl;
-  codec_context_->release_buffer = ReleaseVideoBufferImpl;
-
-  AVCodec* codec = avcodec_find_decoder(codec_context_->codec_id);
-  if (!codec) {
-    status_cb.Run(PIPELINE_ERROR_DECODE);
-    return;
-  }
-
-  if (avcodec_open2(codec_context_, codec, NULL) < 0) {
+  if (!ConfigureDecoder()) {
     status_cb.Run(PIPELINE_ERROR_DECODE);
     return;
   }
 
   // Success!
   state_ = kNormal;
-  av_frame_ = avcodec_alloc_frame();
   status_cb.Run(PIPELINE_OK);
 }
 
@@ -207,7 +173,7 @@ void FFmpegVideoDecoder::Read(const ReadCB& read_cb) {
 }
 
 void FFmpegVideoDecoder::Reset(const base::Closure& closure) {
-  if (MessageLoop::current() != message_loop_) {
+  if (!message_loop_->BelongsToCurrentThread()) {
     message_loop_->PostTask(FROM_HERE, base::Bind(
         &FFmpegVideoDecoder::Reset, this, closure));
     return;
@@ -232,7 +198,7 @@ void FFmpegVideoDecoder::DoReset() {
 }
 
 void FFmpegVideoDecoder::Stop(const base::Closure& closure) {
-  if (MessageLoop::current() != message_loop_) {
+  if (!message_loop_->BelongsToCurrentThread()) {
     message_loop_->PostTask(FROM_HERE, base::Bind(
         &FFmpegVideoDecoder::Stop, this, closure));
     return;
@@ -256,17 +222,12 @@ void FFmpegVideoDecoder::DoStop() {
   base::ResetAndReturn(&stop_cb_).Run();
 }
 
-void FFmpegVideoDecoder::set_decryptor(Decryptor* decryptor) {
-  DCHECK_EQ(state_, kUninitialized);
-  decryptor_ = decryptor;
-}
-
 FFmpegVideoDecoder::~FFmpegVideoDecoder() {
   ReleaseFFmpegResources();
 }
 
 void FFmpegVideoDecoder::DoRead(const ReadCB& read_cb) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(!read_cb.is_null());
   CHECK(read_cb_.is_null()) << "Overlapping decodes are not supported.";
 
@@ -308,7 +269,7 @@ void FFmpegVideoDecoder::DecryptOrDecodeBuffer(
 void FFmpegVideoDecoder::DoDecryptOrDecodeBuffer(
     DemuxerStream::Status status,
     const scoped_refptr<DecoderBuffer>& buffer) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK_NE(state_, kUninitialized);
   DCHECK_NE(state_, kDecodeFinished);
   DCHECK(!read_cb_.is_null());
@@ -325,10 +286,18 @@ void FFmpegVideoDecoder::DoDecryptOrDecodeBuffer(
     return;
   }
 
-  if (status != DemuxerStream::kOk) {
-    DecoderStatus decoder_status =
-        (status == DemuxerStream::kAborted) ? kOk : kDecodeError;
-    base::ResetAndReturn(&read_cb_).Run(decoder_status, NULL);
+  if (status == DemuxerStream::kAborted) {
+    base::ResetAndReturn(&read_cb_).Run(kOk, NULL);
+    return;
+  }
+
+  if (status == DemuxerStream::kConfigChanged) {
+    if (!ConfigureDecoder()) {
+      base::ResetAndReturn(&read_cb_).Run(kDecodeError, NULL);
+      return;
+    }
+
+    ReadFromDemuxerStream();
     return;
   }
 
@@ -344,16 +313,16 @@ void FFmpegVideoDecoder::DoDecryptOrDecodeBuffer(
 }
 
 void FFmpegVideoDecoder::BufferDecrypted(
-    Decryptor::DecryptStatus decrypt_status,
+    Decryptor::Status decrypt_status,
     const scoped_refptr<DecoderBuffer>& buffer) {
   message_loop_->PostTask(FROM_HERE, base::Bind(
       &FFmpegVideoDecoder::DoBufferDecrypted, this, decrypt_status, buffer));
 }
 
 void FFmpegVideoDecoder::DoBufferDecrypted(
-    Decryptor::DecryptStatus decrypt_status,
+    Decryptor::Status decrypt_status,
     const scoped_refptr<DecoderBuffer>& buffer) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK_NE(state_, kUninitialized);
   DCHECK_NE(state_, kDecodeFinished);
   DCHECK(!read_cb_.is_null());
@@ -380,7 +349,7 @@ void FFmpegVideoDecoder::DoBufferDecrypted(
 
 void FFmpegVideoDecoder::DecodeBuffer(
     const scoped_refptr<DecoderBuffer>& buffer) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK_NE(state_, kUninitialized);
   DCHECK_NE(state_, kDecodeFinished);
   DCHECK(reset_cb_.is_null());
@@ -527,6 +496,42 @@ void FFmpegVideoDecoder::ReleaseFFmpegResources() {
     av_free(av_frame_);
     av_frame_ = NULL;
   }
+}
+
+bool FFmpegVideoDecoder::ConfigureDecoder() {
+  const VideoDecoderConfig& config = demuxer_stream_->video_decoder_config();
+
+  if (!config.IsValidConfig()) {
+    DLOG(ERROR) << "Invalid video stream - " << config.AsHumanReadableString();
+    return false;
+  }
+
+  // Release existing decoder resources if necessary.
+  ReleaseFFmpegResources();
+
+  // Initialize AVCodecContext structure.
+  codec_context_ = avcodec_alloc_context3(NULL);
+  VideoDecoderConfigToAVCodecContext(config, codec_context_);
+
+  // Enable motion vector search (potentially slow), strong deblocking filter
+  // for damaged macroblocks, and set our error detection sensitivity.
+  codec_context_->error_concealment = FF_EC_GUESS_MVS | FF_EC_DEBLOCK;
+  codec_context_->err_recognition = AV_EF_CAREFUL;
+  codec_context_->thread_count = GetThreadCount(codec_context_->codec_id);
+  codec_context_->opaque = this;
+  codec_context_->flags |= CODEC_FLAG_EMU_EDGE;
+  codec_context_->get_buffer = GetVideoBufferImpl;
+  codec_context_->release_buffer = ReleaseVideoBufferImpl;
+
+  AVCodec* codec = avcodec_find_decoder(codec_context_->codec_id);
+  if (!codec)
+    return false;
+
+  if (avcodec_open2(codec_context_, codec, NULL) < 0)
+    return false;
+
+  av_frame_ = avcodec_alloc_frame();
+  return true;
 }
 
 }  // namespace media

@@ -65,7 +65,24 @@ const int kDRMIdentifierSize = (256 / 8) * 2;
 // The path to the file containing the DRM ID.
 // It is mirrored from
 //   chrome/browser/chromeos/system/drm_settings.cc
+// TODO(brettw) remove this when we remove the sync Device ID getter in
+// preference for the async one.
 const char kDRMIdentifierFile[] = "Pepper DRM ID.0";
+
+void CreateNetAddressListFromAddressList(
+    const net::AddressList& list,
+    std::vector<PP_NetAddress_Private>* net_address_list) {
+  PP_NetAddress_Private address;
+  for (size_t i = 0; i < list.size(); ++i) {
+    if (!NetAddressPrivateImpl::IPEndPointToNetAddress(list[i].address(),
+                                                       list[i].port(),
+                                                       &address)) {
+      net_address_list->clear();
+      return;
+    }
+    net_address_list->push_back(address);
+  }
+}
 
 }  // namespace
 
@@ -76,10 +93,6 @@ PepperMessageFilter::PepperMessageFilter(
     : process_type_(type),
       process_id_(process_id),
       resource_context_(browser_context->GetResourceContext()),
-      permissions_(),  // Renderer has no PPAPI permissions,
-      host_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
-      ppapi_host_(ALLOW_THIS_IN_INITIALIZER_LIST(this), &host_factory_,
-                  permissions_),
       host_resolver_(NULL),
       next_socket_id_(1) {
   DCHECK(type == RENDERER);
@@ -91,15 +104,10 @@ PepperMessageFilter::PepperMessageFilter(
 }
 
 PepperMessageFilter::PepperMessageFilter(ProcessType type,
-                                         net::HostResolver* host_resolver,
-                                         const ppapi::PpapiPermissions& perms)
+                                         net::HostResolver* host_resolver)
     : process_type_(type),
       process_id_(0),
       resource_context_(NULL),
-      permissions_(perms),
-      host_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
-      ppapi_host_(ALLOW_THIS_IN_INITIALIZER_LIST(this), &host_factory_,
-                  permissions_),
       host_resolver_(host_resolver),
       next_socket_id_(1),
       incognito_(false) {
@@ -116,22 +124,13 @@ void PepperMessageFilter::OverrideThreadForMessage(
       message.type() == PpapiHostMsg_PPBTCPServerSocket_Listen::ID ||
       message.type() == PpapiHostMsg_PPBHostResolver_Resolve::ID) {
     *thread = BrowserThread::UI;
-  } else if (message.type() == PepperMsg_GetDeviceID::ID ||
-             message.type() == PpapiHostMsg_PPBFlashDeviceID_Get::ID) {
+  } else if (message.type() == PepperMsg_GetDeviceID::ID) {
     *thread = BrowserThread::FILE;
   }
 }
 
 bool PepperMessageFilter::OnMessageReceived(const IPC::Message& msg,
                                             bool* message_was_ok) {
-if (process_type_ == PLUGIN) {
-    // Handle new-style host messages directly from the plugin. Don't allow
-    // renderers to send these messages since they have fewer capabilities for
-    // some classes of things than plugins.
-    if (ppapi_host_.OnMessageReceived(msg))
-      return true;
-  }
-
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(PepperMessageFilter, msg, *message_was_ok)
     IPC_MESSAGE_HANDLER(PepperMsg_GetLocalTimeZoneOffset,
@@ -151,6 +150,8 @@ if (process_type_ == PLUGIN) {
 
     // UDP messages.
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBUDPSocket_Create, OnUDPCreate)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBUDPSocket_SetBoolSocketFeature,
+                        OnUDPSetBoolSocketFeature)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBUDPSocket_Bind, OnUDPBind)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBUDPSocket_RecvFrom, OnUDPRecvFrom)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBUDPSocket_SendTo, OnUDPSendTo)
@@ -181,7 +182,6 @@ if (process_type_ == PLUGIN) {
     // Flash messages.
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_UpdateActivity, OnUpdateActivity)
     IPC_MESSAGE_HANDLER(PepperMsg_GetDeviceID, OnGetDeviceID)
-    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlashDeviceID_Get, OnGetDeviceIDAsync)
     IPC_MESSAGE_HANDLER(PepperMsg_GetLocalDataRestrictions,
                         OnGetLocalDataRestrictions)
 
@@ -398,6 +398,36 @@ void PepperMessageFilter::OnUDPCreate(int32 routing_id,
       new PepperUDPSocket(this, routing_id, plugin_dispatcher_id, *socket_id));
 }
 
+void PepperMessageFilter::OnUDPSetBoolSocketFeature(
+    int32 routing_id,
+    uint32 socket_id,
+    int32_t name,
+    bool value) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  UDPSocketMap::iterator iter = udp_sockets_.find(socket_id);
+  if (iter == udp_sockets_.end()) {
+    NOTREACHED();
+    return;
+  }
+
+  if (routing_id != iter->second->routing_id()) {
+    NOTREACHED();
+    return;
+  }
+
+  switch(static_cast<PP_UDPSocketFeature_Private>(name)) {
+    case PP_UDPSOCKETFEATURE_ADDRESS_REUSE:
+      iter->second->AllowAddressReuse(value);
+      break;
+    case PP_UDPSOCKETFEATURE_BROADCAST:
+      iter->second->AllowBroadcast(value);
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+}
+
 void PepperMessageFilter::OnUDPBind(int32 routing_id,
                                     uint32 socket_id,
                                     const PP_NetAddress_Private& addr) {
@@ -600,9 +630,9 @@ void PepperMessageFilter::OnHostResolverResolveLookupFinished(
                                     bound_info.host_resolver_id);
   } else {
     const std::string& canonical_name = addresses.canonical_name();
-    scoped_ptr<ppapi::NetAddressList> net_address_list(
-        ppapi::CreateNetAddressListFromAddressList(addresses));
-    if (!net_address_list.get()) {
+    std::vector<PP_NetAddress_Private> net_address_list;
+    CreateNetAddressListFromAddressList(addresses, &net_address_list);
+    if (net_address_list.size() == 0) {
       SendHostResolverResolveACKError(bound_info.routing_id,
                                       bound_info.plugin_dispatcher_id,
                                       bound_info.host_resolver_id);
@@ -613,7 +643,7 @@ void PepperMessageFilter::OnHostResolverResolveLookupFinished(
           bound_info.host_resolver_id,
           true,
           canonical_name,
-          *net_address_list.get()));
+          net_address_list));
     }
   }
 }
@@ -628,7 +658,7 @@ bool PepperMessageFilter::SendHostResolverResolveACKError(
       host_resolver_id,
       false,
       "",
-      ppapi::NetAddressList()));
+      std::vector<PP_NetAddress_Private>()));
 }
 
 void PepperMessageFilter::OnNetworkMonitorStart(uint32 plugin_dispatcher_id) {
@@ -671,6 +701,8 @@ void PepperMessageFilter::OnUpdateActivity() {
 #endif
 }
 
+// TODO(brettw) remove this when we remove the sync Device ID getter in
+// preference for the async one.
 void PepperMessageFilter::OnGetDeviceID(std::string* id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   id->clear();
@@ -703,17 +735,6 @@ void PepperMessageFilter::OnGetDeviceID(std::string* id) {
     return;
   }
   id->assign(id_buf, kDRMIdentifierSize);
-}
-
-void PepperMessageFilter::OnGetDeviceIDAsync(int32_t routing_id,
-                                             PP_Resource resource) {
-  std::string result;
-  OnGetDeviceID(&result);
-  Send(new PpapiMsg_PPBFlashDeviceID_GetReply(ppapi::API_ID_PPB_FLASH_DEVICE_ID,
-                                              routing_id, resource,
-                                              result.empty() ? PP_ERROR_FAILED
-                                                             : PP_OK,
-                                              result));
 }
 
 void PepperMessageFilter::OnGetLocalDataRestrictions(
@@ -846,7 +867,7 @@ void PepperMessageFilter::SendNetworkList(
 
     network_copy.addresses.resize(1, NetAddressPrivateImpl::kInvalidNetAddress);
     bool result = NetAddressPrivateImpl::IPEndPointToNetAddress(
-        net::IPEndPoint(network.address, 0), &(network_copy.addresses[0]));
+        network.address, 0, &(network_copy.addresses[0]));
     DCHECK(result);
 
     // TODO(sergeyu): Currently net::NetworkInterfaceList provides

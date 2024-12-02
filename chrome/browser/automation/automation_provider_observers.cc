@@ -23,6 +23,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -48,14 +49,10 @@
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
-#include "chrome/browser/translate/page_translated_details.h"
-#include "chrome/browser/translate/translate_infobar_delegate.h"
-#include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -254,8 +251,8 @@ void NavigationControllerRestoredObserver::Observe(
     int type, const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   if (FinishedRestoring()) {
-    SendDone();
     registrar_.RemoveAll();
+    SendDone();
   }
 }
 
@@ -265,12 +262,11 @@ bool NavigationControllerRestoredObserver::FinishedRestoring() {
 }
 
 void NavigationControllerRestoredObserver::SendDone() {
-  if (!automation_)
-    return;
-
-  AutomationMsg_WaitForTabToBeRestored::WriteReplyParams(reply_message_.get(),
-                                                         true);
-  automation_->Send(reply_message_.release());
+  if (automation_) {
+    AutomationJSONReply(automation_, reply_message_.release())
+        .SendSuccess(NULL);
+  }
+  delete this;
 }
 
 NavigationNotificationObserver::NavigationNotificationObserver(
@@ -387,20 +383,15 @@ void TabStripNotificationObserver::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (type == notification_) {
-    if (type == chrome::NOTIFICATION_TAB_PARENTED) {
-      ObserveTab(&(content::Source<TabContents>(source).ptr()->
-                     web_contents()->GetController()));
-    } else if (type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED) {
-      ObserveTab(&(content::Source<content::WebContents>(source).ptr()->
-                     GetController()));
-    } else {
-      ObserveTab(content::Source<NavigationController>(source).ptr());
-    }
-    delete this;
+  DCHECK_EQ(notification_, type);
+  if (type == chrome::NOTIFICATION_TAB_PARENTED) {
+    ObserveTab(&content::Source<content::WebContents>(source)->GetController());
+  } else if (type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED) {
+    ObserveTab(&content::Source<content::WebContents>(source)->GetController());
   } else {
-    NOTREACHED();
+    ObserveTab(content::Source<NavigationController>(source).ptr());
   }
+  delete this;
 }
 
 TabAppendedNotificationObserver::TabAppendedNotificationObserver(
@@ -442,11 +433,9 @@ TabClosedNotificationObserver::TabClosedNotificationObserver(
     bool wait_until_closed,
     IPC::Message* reply_message,
     bool use_json_interface)
-    : TabStripNotificationObserver(
-      wait_until_closed
-          ? static_cast<int>(content::NOTIFICATION_WEB_CONTENTS_DESTROYED)
-          : static_cast<int>(chrome::NOTIFICATION_TAB_CLOSING),
-          automation),
+    : TabStripNotificationObserver((wait_until_closed ?
+          static_cast<int>(content::NOTIFICATION_WEB_CONTENTS_DESTROYED) :
+          static_cast<int>(chrome::NOTIFICATION_TAB_CLOSING)), automation),
       reply_message_(reply_message),
       use_json_interface_(use_json_interface),
       for_browser_command_(false) {
@@ -811,7 +800,8 @@ BrowserOpenedNotificationObserver::~BrowserOpenedNotificationObserver() {
 }
 
 void BrowserOpenedNotificationObserver::Observe(
-    int type, const content::NotificationSource& source,
+    int type,
+    const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   if (!automation_) {
     delete this;
@@ -823,13 +813,15 @@ void BrowserOpenedNotificationObserver::Observe(
     // to stop loading.
     new_window_id_ = ExtensionTabUtil::GetWindowId(
         content::Source<Browser>(source).ptr());
-  } else if (type == content::NOTIFICATION_LOAD_STOP) {
+  } else {
+    DCHECK_EQ(content::NOTIFICATION_LOAD_STOP, type);
     // Only send the result if the loaded tab is in the new window.
     NavigationController* controller =
         content::Source<NavigationController>(source).ptr();
-    TabContents* tab =
-        TabContents::FromWebContents(controller->GetWebContents());
-    int window_id = tab ? tab->restore_tab_helper()->window_id().id() : -1;
+    SessionTabHelper* session_tab_helper =
+        SessionTabHelper::FromWebContents(controller->GetWebContents());
+    int window_id = session_tab_helper ? session_tab_helper->window_id().id()
+                                       : -1;
     if (window_id == new_window_id_) {
       if (use_json_interface_) {
         AutomationJSONReply(automation_,
@@ -844,8 +836,6 @@ void BrowserOpenedNotificationObserver::Observe(
       delete this;
       return;
     }
-  } else {
-    NOTREACHED();
   }
 }
 
@@ -872,7 +862,7 @@ BrowserClosedNotificationObserver::~BrowserClosedNotificationObserver() {}
 void BrowserClosedNotificationObserver::Observe(
     int type, const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_BROWSER_CLOSED);
+  DCHECK_EQ(chrome::NOTIFICATION_BROWSER_CLOSED, type);
 
   if (!automation_) {
     delete this;
@@ -1175,16 +1165,15 @@ void DomOperationObserver::Observe(
       OnDomOperationCompleted(dom_op_details->json);
   } else if (type == chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN) {
     OnModalDialogShown();
-  } else if (type == chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED) {
+  } else {
+    DCHECK_EQ(chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED, type);
     WebContents* web_contents = content::Source<WebContents>(source).ptr();
     if (web_contents) {
       TabContents* tab_contents = TabContents::FromWebContents(web_contents);
-      if (tab_contents &&
-          tab_contents->content_settings() &&
+      if (tab_contents && tab_contents->content_settings() &&
           tab_contents->content_settings()->IsContentBlocked(
-              CONTENT_SETTINGS_TYPE_JAVASCRIPT)) {
+              CONTENT_SETTINGS_TYPE_JAVASCRIPT))
         OnJavascriptBlocked();
-      }
     }
   }
 }
@@ -1262,104 +1251,6 @@ void MetricEventDurationObserver::Observe(
       metric_event_duration->duration_ms;
 }
 
-PageTranslatedObserver::PageTranslatedObserver(AutomationProvider* automation,
-                                               IPC::Message* reply_message,
-                                               WebContents* web_contents)
-  : automation_(automation->AsWeakPtr()),
-    reply_message_(reply_message) {
-  registrar_.Add(this, chrome::NOTIFICATION_PAGE_TRANSLATED,
-                 content::Source<WebContents>(web_contents));
-}
-
-PageTranslatedObserver::~PageTranslatedObserver() {}
-
-void PageTranslatedObserver::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (!automation_) {
-    delete this;
-    return;
-  }
-
-  DCHECK(type == chrome::NOTIFICATION_PAGE_TRANSLATED);
-  AutomationJSONReply reply(automation_, reply_message_.release());
-
-  PageTranslatedDetails* translated_details =
-      content::Details<PageTranslatedDetails>(details).ptr();
-  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
-  return_value->SetBoolean(
-      "translation_success",
-      translated_details->error_type == TranslateErrors::NONE);
-  reply.SendSuccess(return_value.get());
-  delete this;
-}
-
-TabLanguageDeterminedObserver::TabLanguageDeterminedObserver(
-    AutomationProvider* automation, IPC::Message* reply_message,
-    WebContents* web_contents, TranslateInfoBarDelegate* translate_bar)
-    : automation_(automation->AsWeakPtr()),
-      reply_message_(reply_message),
-      web_contents_(web_contents),
-      translate_bar_(translate_bar) {
-  registrar_.Add(this, chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
-                 content::Source<WebContents>(web_contents_));
-}
-
-TabLanguageDeterminedObserver::~TabLanguageDeterminedObserver() {}
-
-void TabLanguageDeterminedObserver::Observe(
-    int type, const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED);
-
-  if (!automation_) {
-    delete this;
-    return;
-  }
-
-  TranslateTabHelper* helper =
-      TabContents::FromWebContents(web_contents_)->translate_tab_helper();
-  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
-  return_value->SetBoolean("page_translated",
-                           helper->language_state().IsPageTranslated());
-  return_value->SetBoolean(
-      "can_translate_page", TranslatePrefs::CanTranslate(
-          automation_->profile()->GetPrefs(),
-          helper->language_state().original_language(),
-          web_contents_->GetURL()));
-  return_value->SetString("original_language",
-                          helper->language_state().original_language());
-  if (translate_bar_) {
-    DictionaryValue* bar_info = new DictionaryValue;
-    std::map<TranslateInfoBarDelegate::Type, std::string> type_to_string;
-    type_to_string[TranslateInfoBarDelegate::BEFORE_TRANSLATE] =
-        "BEFORE_TRANSLATE";
-    type_to_string[TranslateInfoBarDelegate::TRANSLATING] =
-        "TRANSLATING";
-    type_to_string[TranslateInfoBarDelegate::AFTER_TRANSLATE] =
-        "AFTER_TRANSLATE";
-    type_to_string[TranslateInfoBarDelegate::TRANSLATION_ERROR] =
-        "TRANSLATION_ERROR";
-
-    if (translate_bar_->type() == TranslateInfoBarDelegate::BEFORE_TRANSLATE) {
-      bar_info->SetBoolean("always_translate_lang_button_showing",
-                           translate_bar_->ShouldShowAlwaysTranslateButton());
-      bar_info->SetBoolean("never_translate_lang_button_showing",
-                           translate_bar_->ShouldShowNeverTranslateButton());
-    }
-    bar_info->SetString("bar_state", type_to_string[translate_bar_->type()]);
-    bar_info->SetString("target_lang_code",
-                        translate_bar_->GetTargetLanguageCode());
-    bar_info->SetString("original_lang_code",
-                        translate_bar_->GetOriginalLanguageCode());
-    return_value->Set("translate_bar", bar_info);
-  }
-  AutomationJSONReply(automation_, reply_message_.release())
-      .SendSuccess(return_value.get());
-  delete this;
-}
-
 InfoBarCountObserver::InfoBarCountObserver(AutomationProvider* automation,
                                            IPC::Message* reply_message,
                                            TabContents* tab_contents,
@@ -1388,7 +1279,7 @@ void InfoBarCountObserver::Observe(
 }
 
 void InfoBarCountObserver::CheckCount() {
-  if (tab_contents_->infobar_tab_helper()->infobar_count() != target_count_)
+  if (tab_contents_->infobar_tab_helper()->GetInfoBarCount() != target_count_)
     return;
 
   if (automation_) {
@@ -1403,10 +1294,12 @@ AutomationProviderBookmarkModelObserver::
 AutomationProviderBookmarkModelObserver(
     AutomationProvider* provider,
     IPC::Message* reply_message,
-    BookmarkModel* model)
+    BookmarkModel* model,
+    bool use_json_interface)
     : automation_provider_(provider->AsWeakPtr()),
       reply_message_(reply_message),
-      model_(model) {
+      model_(model),
+      use_json_interface_(use_json_interface) {
   model_->AddObserver(this);
 }
 
@@ -1425,11 +1318,20 @@ void AutomationProviderBookmarkModelObserver::BookmarkModelBeingDeleted(
   ReplyAndDelete(false);
 }
 
+IPC::Message* AutomationProviderBookmarkModelObserver::ReleaseReply() {
+  return reply_message_.release();
+}
+
 void AutomationProviderBookmarkModelObserver::ReplyAndDelete(bool success) {
   if (automation_provider_) {
-    AutomationMsg_WaitForBookmarkModelToLoad::WriteReplyParams(
-        reply_message_.get(), success);
-    automation_provider_->Send(reply_message_.release());
+    if (use_json_interface_) {
+      AutomationJSONReply(automation_provider_,
+                          reply_message_.release()).SendSuccess(NULL);
+    } else {
+      AutomationMsg_WaitForBookmarkModelToLoad::WriteReplyParams(
+          reply_message_.get(), success);
+      automation_provider_->Send(reply_message_.release());
+    }
   }
   delete this;
 }
@@ -1438,10 +1340,12 @@ AutomationProviderDownloadUpdatedObserver::
 AutomationProviderDownloadUpdatedObserver(
     AutomationProvider* provider,
     IPC::Message* reply_message,
-    bool wait_for_open)
+    bool wait_for_open,
+    bool incognito)
     : provider_(provider->AsWeakPtr()),
       reply_message_(reply_message),
-      wait_for_open_(wait_for_open) {
+      wait_for_open_(wait_for_open),
+      incognito_(incognito) {
 }
 
 AutomationProviderDownloadUpdatedObserver::
@@ -1458,7 +1362,7 @@ void AutomationProviderDownloadUpdatedObserver::OnDownloadUpdated(
 
   if (provider_) {
     scoped_ptr<DictionaryValue> return_value(
-        provider_->GetDictionaryFromDownloadItem(download));
+        provider_->GetDictionaryFromDownloadItem(download, incognito_));
     AutomationJSONReply(provider_, reply_message_.release()).SendSuccess(
         return_value.get());
   }
@@ -1471,7 +1375,7 @@ void AutomationProviderDownloadUpdatedObserver::OnDownloadOpened(
 
   if (provider_) {
     scoped_ptr<DictionaryValue> return_value(
-        provider_->GetDictionaryFromDownloadItem(download));
+        provider_->GetDictionaryFromDownloadItem(download, incognito_));
     AutomationJSONReply(provider_, reply_message_.release()).SendSuccess(
         return_value.get());
   }
@@ -1522,26 +1426,42 @@ AllDownloadsCompleteObserver::AllDownloadsCompleteObserver(
       return;
     }
   }
-  download_manager_->AddObserver(this);  // Will call initial ModelChanged().
-}
-
-AllDownloadsCompleteObserver::~AllDownloadsCompleteObserver() {}
-
-void AllDownloadsCompleteObserver::ModelChanged(DownloadManager* manager) {
-  DCHECK_EQ(manager, download_manager_);
-  // The set of downloads in the download manager has changed.  If there are
-  // any new downloads that are still in progress, add them to the pending list.
-  std::vector<DownloadItem*> downloads;
-  download_manager_->GetAllDownloads(FilePath(), &downloads);
-  for (std::vector<DownloadItem*>::iterator it = downloads.begin();
-       it != downloads.end(); ++it) {
-    if ((*it)->GetState() == DownloadItem::IN_PROGRESS &&
-        pre_download_ids_.find((*it)->GetId()) == pre_download_ids_.end()) {
-      (*it)->AddObserver(this);
-      pending_downloads_.insert(*it);
-    }
+  download_manager_->AddObserver(this);
+  DownloadManager::DownloadVector all_items;
+  download_manager->GetAllDownloads(&all_items);
+  for (DownloadManager::DownloadVector::const_iterator
+       it = all_items.begin(); it != all_items.end(); ++it) {
+    OnDownloadCreated(download_manager_, *it);
   }
   ReplyIfNecessary();
+}
+
+AllDownloadsCompleteObserver::~AllDownloadsCompleteObserver() {
+  if (download_manager_) {
+    download_manager_->RemoveObserver(this);
+    download_manager_ = NULL;
+  }
+  for (std::set<DownloadItem*>::const_iterator it = pending_downloads_.begin();
+       it != pending_downloads_.end(); ++it) {
+    (*it)->RemoveObserver(this);
+  }
+  pending_downloads_.clear();
+}
+
+void AllDownloadsCompleteObserver::ManagerGoingDown(DownloadManager* manager) {
+  DCHECK_EQ(manager, download_manager_);
+  download_manager_->RemoveObserver(this);
+  download_manager_ = NULL;
+}
+
+void AllDownloadsCompleteObserver::OnDownloadCreated(
+    DownloadManager* manager, DownloadItem* item) {
+  // This method is also called in the c-tor for previously existing items.
+  if (pre_download_ids_.find(item->GetId()) == pre_download_ids_.end() &&
+      item->GetState() == DownloadItem::IN_PROGRESS) {
+    item->AddObserver(this);
+    pending_downloads_.insert(item);
+  }
 }
 
 void AllDownloadsCompleteObserver::OnDownloadUpdated(DownloadItem* download) {
@@ -1788,22 +1708,6 @@ void PasswordStoreLoginsChangedObserver::IndicateError(
   if (automation_)
     AutomationJSONReply(automation_, reply_message_.release()).SendError(error);
   Release();
-}
-
-AutomationProviderBrowsingDataObserver::AutomationProviderBrowsingDataObserver(
-    AutomationProvider* provider,
-    IPC::Message* reply_message)
-    : provider_(provider->AsWeakPtr()),
-      reply_message_(reply_message) {
-}
-
-AutomationProviderBrowsingDataObserver::
-    ~AutomationProviderBrowsingDataObserver() {}
-
-void AutomationProviderBrowsingDataObserver::OnBrowsingDataRemoverDone() {
-  if (provider_)
-    AutomationJSONReply(provider_, reply_message_.release()).SendSuccess(NULL);
-  delete this;
 }
 
 OmniboxAcceptNotificationObserver::OmniboxAcceptNotificationObserver(
@@ -2197,210 +2101,23 @@ AppLaunchObserver::~AppLaunchObserver() {}
 void AppLaunchObserver::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
-  if (type == content::NOTIFICATION_LOAD_STOP) {
-    if (launch_container_ == extension_misc::LAUNCH_TAB) {
-      // The app has been launched in the new tab.
-      if (automation_) {
-        AutomationJSONReply(automation_,
-                            reply_message_.release()).SendSuccess(NULL);
-      }
-      delete this;
-      return;
-    } else {
-      // The app has launched only if the loaded tab is in the new window.
-      NavigationController* controller =
-          content::Source<NavigationController>(source).ptr();
-      TabContents* tab =
-          TabContents::FromWebContents(controller->GetWebContents());
-      int window_id = tab ? tab->restore_tab_helper()->window_id().id() : -1;
-      if (window_id == new_window_id_) {
-        if (automation_) {
-          AutomationJSONReply(automation_,
-                              reply_message_.release()).SendSuccess(NULL);
-        }
-        delete this;
-        return;
-      }
-    }
-  } else if (type == chrome::NOTIFICATION_BROWSER_WINDOW_READY) {
-    new_window_id_ = ExtensionTabUtil::GetWindowId(
-        content::Source<Browser>(source).ptr());
-  } else {
-    NOTREACHED();
-  }
-}
-
-AutofillDisplayedObserver::AutofillDisplayedObserver(
-    int notification,
-    RenderViewHost* render_view_host,
-    AutomationProvider* automation,
-    IPC::Message* reply_message)
-    : notification_(notification),
-      render_view_host_(render_view_host),
-      automation_(automation->AsWeakPtr()),
-      reply_message_(reply_message) {
-  content::Source<RenderViewHost> source(render_view_host_);
-  registrar_.Add(this, notification_, source);
-}
-
-AutofillDisplayedObserver::~AutofillDisplayedObserver() {}
-
-void AutofillDisplayedObserver::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(type, notification_);
-  DCHECK_EQ(content::Source<RenderViewHost>(source).ptr(), render_view_host_);
-  if (automation_) {
-    AutomationJSONReply(automation_,
-                        reply_message_.release()).SendSuccess(NULL);
-  }
-  delete this;
-}
-
-AutofillChangedObserver::AutofillChangedObserver(
-    AutomationProvider* automation,
-    IPC::Message* reply_message,
-    int num_profiles,
-    int num_credit_cards)
-    : automation_(automation->AsWeakPtr()),
-      reply_message_(reply_message),
-      num_profiles_(num_profiles),
-      num_credit_cards_(num_credit_cards),
-      done_event_(false, false) {
-  DCHECK(num_profiles_ >= 0 && num_credit_cards_ >= 0);
-  AddRef();
-}
-
-AutofillChangedObserver::~AutofillChangedObserver() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-}
-
-void AutofillChangedObserver::Init() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  BrowserThread::PostTask(
-      BrowserThread::DB,
-      FROM_HERE,
-      base::Bind(&AutofillChangedObserver::RegisterObserversTask, this));
-  done_event_.Wait();
-}
-
-void AutofillChangedObserver::RegisterObserversTask() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  registrar_.reset(new content::NotificationRegistrar);
-  registrar_->Add(this, chrome::NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED,
-                  content::NotificationService::AllSources());
-  registrar_->Add(this, chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
-                  content::NotificationService::AllSources());
-  done_event_.Signal();
-}
-
-void AutofillChangedObserver::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-
-  if (type == chrome::NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED) {
-    num_credit_cards_--;
-  } else if (type == chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED) {
-    num_profiles_--;
-  } else {
-    NOTREACHED();
-  }
-
-  if (num_profiles_ <= 0 && num_credit_cards_ <= 0) {
-    registrar_.reset();  // Must be done from the DB thread.
-
-    // Notify the UI thread that we're done listening for all relevant
-    // autofill notifications.
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&AutofillChangedObserver::IndicateDone, this));
-  }
-}
-
-void AutofillChangedObserver::IndicateDone() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (automation_) {
-    AutomationJSONReply(automation_,
-                        reply_message_.release()).SendSuccess(NULL);
-  }
-  Release();
-}
-
-AutofillFormSubmittedObserver::AutofillFormSubmittedObserver(
-    AutomationProvider* automation,
-    IPC::Message* reply_message,
-    PersonalDataManager* pdm)
-    : automation_(automation->AsWeakPtr()),
-      reply_message_(reply_message),
-      pdm_(pdm),
-      infobar_helper_(NULL) {
-  pdm_->SetObserver(this);
-  registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
-                 content::NotificationService::AllSources());
-}
-
-AutofillFormSubmittedObserver::~AutofillFormSubmittedObserver() {
-  pdm_->RemoveObserver(this);
-
-  if (infobar_helper_) {
-    InfoBarDelegate* infobar = NULL;
-    if (infobar_helper_->infobar_count() > 0 &&
-        (infobar = infobar_helper_->GetInfoBarDelegateAt(0))) {
-      infobar_helper_->RemoveInfoBar(infobar);
-    }
-  }
-}
-
-void AutofillFormSubmittedObserver::OnPersonalDataChanged() {
-  if (automation_) {
-    AutomationJSONReply(automation_,
-                        reply_message_.release()).SendSuccess(NULL);
-  }
-  delete this;
-}
-
-void AutofillFormSubmittedObserver::OnInsufficientFormData() {
-  if (automation_) {
-    AutomationJSONReply(automation_,
-                        reply_message_.release()).SendSuccess(NULL);
-  }
-  delete this;
-}
-
-void AutofillFormSubmittedObserver::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED);
-
-  // Accept in the infobar.
-  infobar_helper_ = content::Source<InfoBarTabHelper>(source).ptr();
-  InfoBarDelegate* infobar = NULL;
-  infobar = infobar_helper_->GetInfoBarDelegateAt(0);
-
-  ConfirmInfoBarDelegate* confirm_infobar = infobar->AsConfirmInfoBarDelegate();
-  if (!confirm_infobar) {
-    if (automation_) {
-      AutomationJSONReply(
-          automation_, reply_message_.release()).SendError(
-              "Infobar is not a confirm infobar.");
-    }
-    delete this;
+  if (type == chrome::NOTIFICATION_BROWSER_WINDOW_READY) {
+    new_window_id_ =
+        ExtensionTabUtil::GetWindowId(content::Source<Browser>(source).ptr());
     return;
   }
 
-  if (!confirm_infobar->Accept()) {
+  DCHECK_EQ(content::NOTIFICATION_LOAD_STOP, type);
+  SessionTabHelper* session_tab_helper = SessionTabHelper::FromWebContents(
+      content::Source<NavigationController>(source)->GetWebContents());
+  if ((launch_container_ == extension_misc::LAUNCH_TAB) ||
+      (session_tab_helper &&
+          (session_tab_helper->window_id().id() == new_window_id_))) {
     if (automation_) {
-      AutomationJSONReply(
-          automation_, reply_message_.release()).SendError(
-              "Could not accept in the infobar.");
+      AutomationJSONReply(automation_,
+                          reply_message_.release()).SendSuccess(NULL);
     }
     delete this;
-    return;
   }
 }
 
@@ -2726,8 +2443,7 @@ void NewTabObserver::Observe(int type,
                              const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_TAB_PARENTED, type);
   NavigationController* controller =
-      &(content::Source<TabContents>(source).ptr()->
-          web_contents()->GetController());
+      &(content::Source<content::WebContents>(source).ptr()->GetController());
   if (automation_) {
     // TODO(phajdan.jr): Clean up this hack. We write the correct return type
     // here, but don't send the message. NavigationNotificationObserver
@@ -3036,13 +2752,15 @@ void BrowserOpenedWithNewProfileNotificationObserver::Observe(
     // to stop loading.
     new_window_id_ = ExtensionTabUtil::GetWindowId(
         content::Source<Browser>(source).ptr());
-  } else if (type == content::NOTIFICATION_LOAD_STOP) {
+  } else {
+    DCHECK_EQ(content::NOTIFICATION_LOAD_STOP, type);
     // Only send the result if the loaded tab is in the new window.
     NavigationController* controller =
         content::Source<NavigationController>(source).ptr();
-    TabContents* tab =
-        TabContents::FromWebContents(controller->GetWebContents());
-    int window_id = tab ? tab->restore_tab_helper()->window_id().id() : -1;
+    SessionTabHelper* session_tab_helper =
+        SessionTabHelper::FromWebContents(controller->GetWebContents());
+    int window_id = session_tab_helper ? session_tab_helper->window_id().id()
+                                       : -1;
     if (window_id == new_window_id_) {
       if (automation_) {
         AutomationJSONReply(automation_, reply_message_.release())
@@ -3050,8 +2768,6 @@ void BrowserOpenedWithNewProfileNotificationObserver::Observe(
       }
       delete this;
     }
-  } else {
-    NOTREACHED();
   }
 }
 
@@ -3150,9 +2866,10 @@ void BrowserOpenedWithExistingProfileNotificationObserver::Observe(
     // Only consider if the loaded tab is in the new window.
     NavigationController* controller =
         content::Source<NavigationController>(source).ptr();
-    TabContents* tab = TabContents::FromWebContents(
-        controller->GetWebContents());
-    int window_id = tab ? tab->restore_tab_helper()->window_id().id() : -1;
+    SessionTabHelper* session_tab_helper =
+        SessionTabHelper::FromWebContents(controller->GetWebContents());
+    int window_id = session_tab_helper ? session_tab_helper->window_id().id()
+                                       : -1;
     if (window_id == new_window_id_ && --num_loads_ == 0) {
       if (automation_) {
         AutomationJSONReply(automation_, reply_message_.release())

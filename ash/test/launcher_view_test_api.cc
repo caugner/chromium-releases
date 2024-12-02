@@ -5,11 +5,11 @@
 #include "ash/test/launcher_view_test_api.h"
 
 #include "ash/launcher/launcher_button.h"
+#include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_view.h"
 #include "ash/launcher/overflow_button.h"
 #include "base/message_loop.h"
 #include "ui/views/animation/bounds_animator.h"
-#include "ui/views/controls/button/image_button.h"
 #include "ui/views/view_model.h"
 
 namespace {
@@ -49,7 +49,7 @@ int LauncherViewTestAPI::GetButtonCount() {
 
 internal::LauncherButton* LauncherViewTestAPI::GetButton(int index) {
   // App list button is not a LauncherButton.
-  if (index == GetButtonCount() - 1)
+  if (launcher_view_->model_->items()[index].type == ash::TYPE_APP_LIST)
     return NULL;
 
   return static_cast<internal::LauncherButton*>(

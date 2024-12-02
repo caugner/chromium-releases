@@ -107,7 +107,7 @@ class FileBrowserNotifications::NotificationMessage {
     virtual void Error() OVERRIDE {}
     virtual void Close(bool by_user) OVERRIDE {
       if (host_)
-        host_->HideNotificationById(id_);
+        host_->RemoveNotificationById(id_);
     }
     virtual void Click() OVERRIDE {
       // TODO(tbarzic): Show more info page once we have one.
@@ -135,13 +135,14 @@ class FileBrowserNotifications::NotificationMessage {
         type_(type),
         notification_id_(notification_id),
         message_(message) {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            ash::switches::kAshNotify)) {
+    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+            ash::switches::kAshNotifyDisabled)) {
       const gfx::ImageSkia& icon =
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
               IDR_FILES_APP_ICON);
+      string16 replace_id = UTF8ToUTF16(notification_id_);
       notification_id_ = DesktopNotificationService::AddIconNotification(
-          GURL(), GetTitle(type_), message, icon,
+          GURL(), GetTitle(type_), message, icon, replace_id,
           new Delegate(host->AsWeakPtr(), notification_id_), profile_);
     } else {
       system_notification_.reset(
@@ -392,14 +393,33 @@ void FileBrowserNotifications::ShowNotificationById(
   notification->Show();
 }
 
-void FileBrowserNotifications::HideNotificationById(const std::string& id) {
-  NotificationMap::iterator it = notification_map_.find(id);
+void FileBrowserNotifications::HideNotificationById(
+    const std::string& notification_id) {
+  NotificationMap::iterator it = notification_map_.find(notification_id);
   if (it != notification_map_.end()) {
-    it->second->Hide();
-    delete it->second;
-    notification_map_.erase(it);
+    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+            ash::switches::kAshNotifyDisabled)) {
+      // Will trigger Delegate::Close which will call RemoveNotificationById.
+      DesktopNotificationService::RemoveNotification(notification_id);
+    } else {
+      NotificationMessage* notification = it->second;
+      notification_map_.erase(it);
+      notification->Hide();
+      delete notification;
+    }
   } else {
     // Mark as hidden so it does not get shown from a delayed task.
-    hidden_notifications_.insert(id);
+    hidden_notifications_.insert(notification_id);
+  }
+}
+
+void FileBrowserNotifications::RemoveNotificationById(
+    const std::string& notification_id) {
+  NotificationMap::iterator it = notification_map_.find(notification_id);
+  if (it != notification_map_.end()) {
+    NotificationMessage* notification = it->second;
+    notification_map_.erase(it);
+    notification->Hide();
+    delete notification;
   }
 }

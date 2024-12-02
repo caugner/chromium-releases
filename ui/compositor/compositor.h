@@ -7,6 +7,7 @@
 
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebLayer.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebLayerTreeView.h"
@@ -53,10 +54,9 @@ class COMPOSITOR_EXPORT ContextFactory {
   virtual WebKit::WebGraphicsContext3D* CreateContext(
       Compositor* compositor) = 0;
 
-  // Creates a context for given compositor used for offscreen rendering. See
-  // the comments of CreateContext to know how per-compositor data is handled.
-  virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext(
-      Compositor* compositor) = 0;
+  // Creates a context used for offscreen rendering. This context can be shared
+  // with all compositors.
+  virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext() = 0;
 
   // Destroys per-compositor data.
   virtual void RemoveCompositor(Compositor* compositor) = 0;
@@ -71,8 +71,7 @@ class COMPOSITOR_EXPORT DefaultContextFactory : public ContextFactory {
   // ContextFactory implementation
   virtual WebKit::WebGraphicsContext3D* CreateContext(
       Compositor* compositor) OVERRIDE;
-  virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext(
-      Compositor* compositor) OVERRIDE;
+  virtual WebKit::WebGraphicsContext3D* CreateOffscreenContext() OVERRIDE;
   virtual void RemoveCompositor(Compositor* compositor) OVERRIDE;
 
   bool Initialize();
@@ -101,6 +100,7 @@ class COMPOSITOR_EXPORT Texture : public base::RefCounted<Texture> {
   void set_texture_id(unsigned int id) { texture_id_ = id; }
   bool flipped() const { return flipped_; }
   gfx::Size size() const { return size_; }
+  virtual WebKit::WebGraphicsContext3D* HostContext3D() = 0;
 
  protected:
   virtual ~Texture();
@@ -211,8 +211,8 @@ class COMPOSITOR_EXPORT Compositor
   virtual void layout();
   virtual void applyScrollAndScale(const WebKit::WebSize& scrollDelta,
                                    float scaleFactor);
-  virtual WebKit::WebGraphicsContext3D* createContext3D();
-  virtual void didRebindGraphicsContext(bool success);
+  virtual WebKit::WebCompositorOutputSurface* createOutputSurface();
+  virtual void didRecreateOutputSurface(bool success);
   virtual void didCommit();
   virtual void didCommitAndDrawFrame();
   virtual void didCompleteSwapBuffers();
@@ -223,11 +223,6 @@ class COMPOSITOR_EXPORT Compositor
 
  private:
   friend class base::RefCounted<Compositor>;
-
-  // When reading back pixel data we often get RGBA rather than BGRA pixels and
-  // and the image often needs to be flipped vertically.
-  static void SwizzleRGBAToBGRAAndFlip(unsigned char* pixels,
-                                       const gfx::Size& image_size);
 
   // Notifies the compositor that compositing is complete.
   void NotifyEnd();
@@ -241,8 +236,8 @@ class COMPOSITOR_EXPORT Compositor
   ObserverList<CompositorObserver> observer_list_;
 
   gfx::AcceleratedWidget widget_;
-  WebKit::WebLayer root_web_layer_;
-  WebKit::WebLayerTreeView host_;
+  scoped_ptr<WebKit::WebLayer> root_web_layer_;
+  scoped_ptr<WebKit::WebLayerTreeView> host_;
 
   // This is set to true when the swap buffers has been posted and we're waiting
   // for completion.

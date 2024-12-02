@@ -81,12 +81,13 @@ void BalloonHost::AddNewContents(WebContents* source,
                                  WebContents* new_contents,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
-                                 bool user_gesture) {
+                                 bool user_gesture,
+                                 bool* was_blocked) {
   Browser* browser = browser::FindLastActiveWithProfile(
       Profile::FromBrowserContext(new_contents->GetBrowserContext()));
   if (browser) {
     chrome::AddWebContents(browser, NULL, new_contents, disposition,
-                           initial_pos, user_gesture);
+                           initial_pos, user_gesture, was_blocked);
   }
 }
 
@@ -133,7 +134,6 @@ void BalloonHost::Init() {
       balloon_->profile(),
       site_instance_.get(),
       MSG_ROUTING_NONE,
-      NULL,
       NULL));
   chrome::SetViewType(web_contents_.get(), chrome::VIEW_TYPE_NOTIFICATION);
   web_contents_->SetDelegate(this);

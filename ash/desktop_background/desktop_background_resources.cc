@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/rand_util.h"
-#include "grit/ui_resources_wallpapers.h"
+#include "grit/ash_wallpaper_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 
@@ -413,7 +413,7 @@ const int kSolidColorIndex = -2;
 #if defined(GOOGLE_CHROME_BUILD)
 const int kDefaultWallpaperIndex = 20; // IDR_AURA_WALLPAPERS_2_LANDSCAPE8
 const int kLastRandomWallpaperIndex = 19; // The first 20 are random.
-const int kGuestWallpaperIndex = kDefaultWallpaperIndex;
+const int kGuestWallpaperIndex = 15; // IDR_AURA_WALLPAPERS_2_LANDSCAPE7
 #else
 // Set default wallpaper to the grey background for faster wallpaper loading
 // time in browser tests. Otherwise, some of the tests will finish before
@@ -470,6 +470,7 @@ const WallpaperInfo& GetWallpaperInfo(int index) {
 
 const WallpaperViewInfo& GetWallpaperViewInfo(int index,
                                               WallpaperResolution resolution) {
+  DCHECK(index >= 0 && index < kDefaultWallpaperCount);
   if (resolution == SMALL)
     return kDefaultWallpapers[index].small_wallpaper;
   else

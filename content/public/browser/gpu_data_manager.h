@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_BROWSER_GPU_DATA_MANAGER_H_
 #define CONTENT_PUBLIC_BROWSER_GPU_DATA_MANAGER_H_
 
+#include <string>
+
 #include "content/common/content_export.h"
 #include "content/public/common/gpu_feature_type.h"
 
@@ -19,18 +21,26 @@ namespace content {
 class GpuDataManagerObserver;
 struct GPUInfo;
 
-// This class lives on the UI thread. Only methods that explicitly state that
-// they can be called on other threads are thread-safe.
+// This class is fully thread-safe.
 class GpuDataManager {
  public:
   // Getter for the singleton.
   CONTENT_EXPORT static GpuDataManager* GetInstance();
 
-  // Can be called on any thread.
-  virtual GpuFeatureType GetGpuFeatureType() = 0;
+  virtual void InitializeForTesting(const std::string& gpu_blacklist_json,
+                                    const content::GPUInfo& gpu_info) = 0;
 
-  // Gives the new feature flags.  This is always called on the UI thread.
-  virtual void SetGpuFeatureType(GpuFeatureType feature_type) = 0;
+  virtual std::string GetBlacklistVersion() const = 0;
+
+  virtual GpuFeatureType GetBlacklistedFeatures() const = 0;
+
+  virtual GpuSwitchingOption GetGpuSwitchingOption() const = 0;
+
+  // Returns the reasons for the latest run of blacklisting decisions.
+  // For the structure of returned value, see documentation for
+  // GpuBlacklist::GetBlacklistedReasons().
+  // Caller is responsible to release the returned value.
+  virtual base::ListValue* GetBlacklistReasons() const = 0;
 
   virtual GPUInfo GetGPUInfo() const = 0;
 
@@ -40,24 +50,38 @@ class GpuDataManager {
   // process, establish GPU channel, and GPU info collection, should be
   // blocked.
   // Can be called on any thread.
-  virtual bool GpuAccessAllowed() = 0;
+  virtual bool GpuAccessAllowed() const = 0;
 
   // Requests complete GPUinfo if it has not already been requested
   virtual void RequestCompleteGpuInfoIfNeeded() = 0;
 
-  virtual bool IsCompleteGPUInfoAvailable() const = 0;
+  virtual bool IsCompleteGpuInfoAvailable() const = 0;
+
+  // Requests that the GPU process report its current video memory usage stats,
+  // which can be retrieved via the GPU data manager's on-update function.
+  virtual void RequestVideoMemoryUsageStatsUpdate() const = 0;
 
   // Returns true if the software rendering should currently be used.
-  virtual bool ShouldUseSoftwareRendering() = 0;
+  virtual bool ShouldUseSoftwareRendering() const = 0;
 
   // Register a path to the SwiftShader software renderer.
   virtual void RegisterSwiftShaderPath(const FilePath& path) = 0;
 
-  virtual const base::ListValue& GetLogMessages() const = 0;
+  virtual void AddLogMessage(
+      int level, const std::string& header, const std::string& message) = 0;
+
+  // Returns a new copy of the ListValue.  Caller is responsible to release
+  // the returned value.
+  virtual base::ListValue* GetLogMessages() const = 0;
 
   // Registers/unregister |observer|.
   virtual void AddObserver(GpuDataManagerObserver* observer) = 0;
   virtual void RemoveObserver(GpuDataManagerObserver* observer) = 0;
+
+  // Notifies the gpu process about the number of browser windows, so
+  // they can be used to determine managed memory allocation.
+  virtual void SetWindowCount(uint32 count) = 0;
+  virtual uint32 GetWindowCount() const = 0;
 
  protected:
   virtual ~GpuDataManager() {}

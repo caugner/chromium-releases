@@ -113,6 +113,9 @@
   "error_invalid_access_code": {
     "message": "Adgangskoden er ugyldig. Pr\u00f8v igen."
   },
+  "error_invalid_host_domain": {
+    "message": "Politikindstillingerne tillader ikke, at denne computer deles som en Chrome Fjernskrivebord-host. Kontakt din systemadministrator for at f\u00e5 hj\u00e6lp."
+  },
   "error_missing_plugin": {
     "message": "Nogle komponenter, der kr\u00e6ves til Chrome Fjernskrivebord, mangler. Kontroller, at du har den nyeste version af Google Chrome, og pr\u00f8v igen."
   },
@@ -324,7 +327,7 @@
     "message": "F\u00e5 adgang til andre computere, eller giv en anden bruger adgang til din computer sikkert via internettet."
   },
   "product_name": {
-    "message": "Chrome Fjernskrivebord beta"
+    "message": "Chrome Fjernskrivebord"
   },
   "reconnect": {
     "message": "Genopret forbindelse"
@@ -340,6 +343,9 @@
   },
   "send_keys": {
     "message": "Send taster"
+  },
+  "send_print_screen": {
+    "message": "PrtScn"
   },
   "shrink_to_fit": {
     "message": "Tilpas til vinduet"
