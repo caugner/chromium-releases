@@ -19,25 +19,27 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
+#include "jingle/glue/thread_wrapper.h"
 #include "media/base/media.h"
+#include "net/socket/ssl_server_socket.h"
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/input_event.h"
+#include "ppapi/cpp/mouse_cursor.h"
 #include "ppapi/cpp/rect.h"
-// TODO(wez): Remove this when crbug.com/86353 is complete.
-#include "ppapi/cpp/private/var_private.h"
 #include "remoting/base/constants.h"
 #include "remoting/base/util.h"
 #include "remoting/client/client_config.h"
 #include "remoting/client/chromoting_client.h"
 #include "remoting/client/frame_consumer_proxy.h"
-#include "remoting/client/plugin/chromoting_scriptable_object.h"
 #include "remoting/client/plugin/pepper_input_handler.h"
+#include "remoting/client/plugin/pepper_port_allocator.h"
 #include "remoting/client/plugin/pepper_view.h"
 #include "remoting/client/plugin/pepper_xmpp_proxy.h"
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/input_event_tracker.h"
+#include "remoting/protocol/libjingle_transport_factory.h"
 #include "remoting/protocol/mouse_input_filter.h"
 
 // Windows defines 'PostMessage', so we have to undef it.
@@ -48,6 +50,9 @@
 namespace remoting {
 
 namespace {
+
+// 32-bit BGRA is 4 bytes per pixel.
+const int kBytesPerPixel = 4;
 
 const int kPerfStatsIntervalMs = 1000;
 
@@ -87,18 +92,20 @@ std::string ConnectionErrorToString(ChromotingInstance::ConnectionError error) {
   return "";
 }
 
-}  // namespace
-
 // This flag blocks LOGs to the UI if we're already in the middle of logging
 // to the UI. This prevents a potential infinite loop if we encounter an error
 // while sending the log message to the UI.
-static bool g_logging_to_plugin = false;
-static bool g_has_logging_instance = false;
-static ChromotingInstance* g_logging_instance = NULL;
-static logging::LogMessageHandlerFunction g_logging_old_handler = NULL;
-
-static base::LazyInstance<base::Lock>::Leaky
+bool g_logging_to_plugin = false;
+bool g_has_logging_instance = false;
+base::LazyInstance<scoped_refptr<base::SingleThreadTaskRunner> >::Leaky
+    g_logging_task_runner = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::WeakPtr<ChromotingInstance> >::Leaky
+    g_logging_instance = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::Lock>::Leaky
     g_logging_lock = LAZY_INSTANCE_INITIALIZER;
+logging::LogMessageHandlerFunction g_logging_old_handler = NULL;
+
+}  // namespace
 
 // String sent in the "hello" message to the plugin to describe features.
 const char ChromotingInstance::kApiFeatures[] =
@@ -107,36 +114,30 @@ const char ChromotingInstance::kApiFeatures[] =
 
 bool ChromotingInstance::ParseAuthMethods(const std::string& auth_methods_str,
                                           ClientConfig* config) {
-  if (auth_methods_str == "v1_token") {
-    config->use_v1_authenticator = true;
-  } else {
-    config->use_v1_authenticator = false;
-
-    std::vector<std::string> auth_methods;
-    base::SplitString(auth_methods_str, ',', &auth_methods);
-    for (std::vector<std::string>::iterator it = auth_methods.begin();
-         it != auth_methods.end(); ++it) {
-      protocol::AuthenticationMethod authentication_method =
-          protocol::AuthenticationMethod::FromString(*it);
-      if (authentication_method.is_valid())
-        config->authentication_methods.push_back(authentication_method);
-    }
-    if (config->authentication_methods.empty()) {
-      LOG(ERROR) << "No valid authentication methods specified.";
-      return false;
-    }
+  std::vector<std::string> auth_methods;
+  base::SplitString(auth_methods_str, ',', &auth_methods);
+  for (std::vector<std::string>::iterator it = auth_methods.begin();
+       it != auth_methods.end(); ++it) {
+    protocol::AuthenticationMethod authentication_method =
+        protocol::AuthenticationMethod::FromString(*it);
+    if (authentication_method.is_valid())
+      config->authentication_methods.push_back(authentication_method);
+  }
+  if (config->authentication_methods.empty()) {
+    LOG(ERROR) << "No valid authentication methods specified.";
+    return false;
   }
 
   return true;
 }
 
 ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
-    : pp::InstancePrivate(pp_instance),
+    : pp::Instance(pp_instance),
       initialized_(false),
       plugin_message_loop_(
           new PluginMessageLoopProxy(&plugin_thread_delegate_)),
       context_(plugin_message_loop_),
-      thread_proxy_(new ScopedThreadProxy(plugin_message_loop_)) {
+      weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   RequestInputEvents(PP_INPUTEVENT_CLASS_MOUSE | PP_INPUTEVENT_CLASS_WHEEL);
   RequestFilteringInputEvents(PP_INPUTEVENT_CLASS_KEYBOARD);
 
@@ -154,10 +155,6 @@ ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
 ChromotingInstance::~ChromotingInstance() {
   DCHECK(plugin_message_loop_->BelongsToCurrentThread());
 
-  // Detach the log proxy so we don't log anything else to the UI.
-  // This needs to be done before the instance is unregistered for logging.
-  thread_proxy_->Detach();
-
   // Unregister this instance so that debug log messages will no longer be sent
   // to it. This will stop all logging in all Chromoting instances.
   UnregisterLoggingInstance();
@@ -172,10 +169,7 @@ ChromotingInstance::~ChromotingInstance() {
   // Stopping the context shuts down all chromoting threads.
   context_.Stop();
 
-  // Delete |thread_proxy_| before we detach |plugin_message_loop_|,
-  // otherwise ScopedThreadProxy may DCHECK when being destroyed.
-  thread_proxy_.reset();
-
+  // Ensure that nothing touches the plugin thread delegate after this point.
   plugin_message_loop_->Detach();
 }
 
@@ -194,6 +188,13 @@ bool ChromotingInstance::Init(uint32_t argc,
     return false;
   }
 
+  // Enable support for SSL server sockets, which must be done as early as
+  // possible, preferably before any NSS SSL sockets (client or server) have
+  // been created.
+  // It's possible that the hosting process has already made use of SSL, in
+  // which case, there may be a slight race.
+  net::EnableSSLServerSockets();
+
   // Start all the threads.
   context_.Start();
 
@@ -203,7 +204,7 @@ bool ChromotingInstance::Init(uint32_t argc,
   scoped_refptr<FrameConsumerProxy> consumer_proxy =
       new FrameConsumerProxy(plugin_message_loop_);
   rectangle_decoder_ = new RectangleUpdateDecoder(
-      context_.decode_message_loop(), consumer_proxy);
+      context_.decode_task_runner(), consumer_proxy);
   view_.reset(new PepperView(this, &context_, rectangle_decoder_.get()));
   consumer_proxy->Attach(view_->AsWeakPtr());
 
@@ -349,26 +350,11 @@ bool ChromotingInstance::HandleInputEvent(const pp::InputEvent& event) {
   return input_handler_->HandleInputEvent(event);
 }
 
-pp::Var ChromotingInstance::GetInstanceObject() {
-  if (instance_object_.is_undefined()) {
-    ChromotingScriptableObject* object =
-        new ChromotingScriptableObject(this, plugin_message_loop_);
-    object->Init();
-
-    // The pp::Var takes ownership of object here.
-    instance_object_ = pp::VarPrivate(this, object);
-  }
-
-  return instance_object_;
-}
-
 void ChromotingInstance::SetDesktopSize(int width, int height) {
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
   data->SetInteger("width", width);
   data->SetInteger("height", height);
   PostChromotingMessage("onDesktopSize", data.Pass());
-
-  GetScriptableObject()->SetDesktopSize(width, height);
 }
 
 void ChromotingInstance::SetConnectionState(
@@ -378,29 +364,22 @@ void ChromotingInstance::SetConnectionState(
   data->SetString("state", ConnectionStateToString(state));
   data->SetString("error", ConnectionErrorToString(error));
   PostChromotingMessage("onConnectionStatus", data.Pass());
-
-  GetScriptableObject()->SetConnectionStatus(state, error);
 }
 
-ChromotingScriptableObject* ChromotingInstance::GetScriptableObject() {
-  pp::VarPrivate object = GetInstanceObject();
-  if (!object.is_undefined()) {
-    pp::deprecated::ScriptableObject* so = object.AsScriptableObject();
-    DCHECK(so != NULL);
-    return static_cast<ChromotingScriptableObject*>(so);
-  }
-  LOG(ERROR) << "Unable to get ScriptableObject for Chromoting plugin.";
-  return NULL;
+void ChromotingInstance::OnFirstFrameReceived() {
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  PostChromotingMessage("onFirstFrameReceived", data.Pass());
 }
 
 void ChromotingInstance::Connect(const ClientConfig& config) {
   DCHECK(plugin_message_loop_->BelongsToCurrentThread());
 
-  host_connection_.reset(new protocol::ConnectionToHost(
-      context_.network_message_loop(), this, true));
-  client_.reset(new ChromotingClient(config, &context_, host_connection_.get(),
-                                     view_.get(), rectangle_decoder_.get(),
-                                     base::Closure()));
+  jingle_glue::JingleThreadWrapper::EnsureForCurrentThread();
+
+  host_connection_.reset(new protocol::ConnectionToHost(true));
+  client_.reset(new ChromotingClient(config, context_.main_task_runner(),
+                                     host_connection_.get(), view_.get(),
+                                     rectangle_decoder_.get()));
 
   // Construct the input pipeline
   mouse_input_filter_.reset(
@@ -408,7 +387,16 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
   mouse_input_filter_->set_input_size(view_->get_view_size());
   input_tracker_.reset(
       new protocol::InputEventTracker(mouse_input_filter_.get()));
+
+#if defined(OS_MACOSX)
+  // On Mac we need an extra filter to inject missing keyup events.
+  // See remoting/client/plugin/mac_key_event_processor.h for more details.
+  mac_key_event_processor_.reset(
+      new MacKeyEventProcessor(input_tracker_.get()));
+  key_mapper_.set_input_stub(mac_key_event_processor_.get());
+#else
   key_mapper_.set_input_stub(input_tracker_.get());
+#endif
   input_handler_.reset(
       new PepperInputHandler(&key_mapper_));
 
@@ -418,11 +406,15 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
   // Setup the XMPP Proxy.
   xmpp_proxy_ = new PepperXmppProxy(
       base::Bind(&ChromotingInstance::SendOutgoingIq, AsWeakPtr()),
-      plugin_message_loop_,
-      context_.network_message_loop());
+      plugin_message_loop_, context_.main_task_runner());
+
+  scoped_ptr<cricket::HttpPortAllocatorBase> port_allocator(
+      PepperPortAllocator::Create(this));
+  scoped_ptr<protocol::TransportFactory> transport_factory(
+      new protocol::LibjingleTransportFactory(port_allocator.Pass(), false));
 
   // Kick off the connection.
-  client_->Start(xmpp_proxy_);
+  client_->Start(xmpp_proxy_, transport_factory.Pass());
 
   // Start timer that periodically sends perf stats.
   plugin_message_loop_->PostDelayedTask(
@@ -537,8 +529,6 @@ void ChromotingInstance::SendOutgoingIq(const std::string& iq) {
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
   data->SetString("iq", iq);
   PostChromotingMessage("sendOutgoingIq", data.Pass());
-
-  GetScriptableObject()->SendIq(iq);
 }
 
 void ChromotingInstance::SendPerfStats() {
@@ -570,6 +560,52 @@ void ChromotingInstance::InjectClipboardEvent(
   PostChromotingMessage("injectClipboardItem", data.Pass());
 }
 
+void ChromotingInstance::SetCursorShape(
+    const protocol::CursorShapeInfo& cursor_shape) {
+  if (!cursor_shape.has_data() ||
+      !cursor_shape.has_width() ||
+      !cursor_shape.has_height() ||
+      !cursor_shape.has_hotspot_x() ||
+      !cursor_shape.has_hotspot_y()) {
+    return;
+  }
+
+  if (pp::ImageData::GetNativeImageDataFormat() !=
+      PP_IMAGEDATAFORMAT_BGRA_PREMUL) {
+    VLOG(2) << "Unable to set cursor shape - non-native image format";
+    return;
+  }
+
+  int width = cursor_shape.width();
+  int height = cursor_shape.height();
+
+  if (width > 32 || height > 32) {
+    VLOG(2) << "Cursor too large for SetCursor: "
+            << width << "x" << height << " > 32x32";
+    return;
+  }
+
+  int hotspot_x = cursor_shape.hotspot_x();
+  int hotspot_y = cursor_shape.hotspot_y();
+
+  pp::ImageData cursor_image(this, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+                             pp::Size(width, height), false);
+
+  int bytes_per_row = width * kBytesPerPixel;
+  const uint8* src_row_data = reinterpret_cast<const uint8*>(
+      cursor_shape.data().data());
+  uint8* dst_row_data = reinterpret_cast<uint8*>(cursor_image.data());
+  for (int row = 0; row < height; row++) {
+    memcpy(dst_row_data, src_row_data, bytes_per_row);
+    src_row_data += bytes_per_row;
+    dst_row_data += cursor_image.stride();
+  }
+
+  pp::MouseCursor::SetCursor(this, PP_MOUSECURSOR_TYPE_CUSTOM,
+                             cursor_image,
+                             pp::Point(hotspot_x, hotspot_y));
+}
+
 // static
 void ChromotingInstance::RegisterLogMessageHandler() {
   base::AutoLock lock(g_logging_lock.Get());
@@ -591,7 +627,8 @@ void ChromotingInstance::RegisterLoggingInstance() {
   // and display them to the user.
   // If multiple plugins are run, then the last one registered will handle all
   // logging for all instances.
-  g_logging_instance = this;
+  g_logging_instance.Get() = weak_factory_.GetWeakPtr();
+  g_logging_task_runner.Get() = plugin_message_loop_;
   g_has_logging_instance = true;
 }
 
@@ -599,12 +636,13 @@ void ChromotingInstance::UnregisterLoggingInstance() {
   base::AutoLock lock(g_logging_lock.Get());
 
   // Don't unregister unless we're the currently registered instance.
-  if (this != g_logging_instance)
+  if (this != g_logging_instance.Get().get())
     return;
 
   // Unregister this instance for logging.
   g_has_logging_instance = false;
-  g_logging_instance = NULL;
+  g_logging_instance.Get().reset();
+  g_logging_task_runner.Get() = NULL;
 
   VLOG(1) << "Unregistering global log handler";
 }
@@ -626,24 +664,28 @@ bool ChromotingInstance::LogToUI(int severity, const char* file, int line,
   // the lock and check |g_logging_instance| unnecessarily. This is not
   // problematic because we always set |g_logging_instance| inside a lock.
   if (g_has_logging_instance) {
-    // Do not LOG anything while holding this lock or else the code will
-    // deadlock while trying to re-get the lock we're already in.
-    base::AutoLock lock(g_logging_lock.Get());
-    if (g_logging_instance &&
-        // If |g_logging_to_plugin| is set and we're on the logging thread, then
-        // this LOG message came from handling a previous LOG message and we
-        // should skip it to avoid an infinite loop of LOG messages.
-        // We don't have a lock around |g_in_processtoui|, but that's OK since
-        // the value is only read/written on the logging thread.
-        (!g_logging_instance->plugin_message_loop_->BelongsToCurrentThread() ||
-         !g_logging_to_plugin)) {
+    scoped_refptr<base::SingleThreadTaskRunner> logging_task_runner;
+    base::WeakPtr<ChromotingInstance> logging_instance;
+
+    {
+      base::AutoLock lock(g_logging_lock.Get());
+      // If we're on the logging thread and |g_logging_to_plugin| is set then
+      // this LOG message came from handling a previous LOG message and we
+      // should skip it to avoid an infinite loop of LOG messages.
+      if (!g_logging_task_runner.Get()->BelongsToCurrentThread() ||
+          !g_logging_to_plugin) {
+        logging_task_runner = g_logging_task_runner.Get();
+        logging_instance = g_logging_instance.Get();
+      }
+    }
+
+    if (logging_task_runner.get()) {
       std::string message = remoting::GetTimestampString();
       message += (str.c_str() + message_start);
-      // |thread_proxy_| is safe to use here because we detach it before
-      // tearing down the |g_logging_instance|.
-      g_logging_instance->thread_proxy_->PostTask(
+
+      logging_task_runner->PostTask(
           FROM_HERE, base::Bind(&ChromotingInstance::ProcessLogToUI,
-                                base::Unretained(g_logging_instance), message));
+                                logging_instance, message));
     }
   }
 
@@ -658,15 +700,11 @@ void ChromotingInstance::ProcessLogToUI(const std::string& message) {
   // This flag (which is set only here) is used to prevent LogToUI from posting
   // new tasks while we're in the middle of servicing a LOG call. This can
   // happen if the call to LogDebugInfo tries to LOG anything.
+  // Since it is read on the plugin thread, we don't need to lock to set it.
   g_logging_to_plugin = true;
-  ChromotingScriptableObject* scriptable_object = GetScriptableObject();
-  if (scriptable_object) {
-    scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
-    data->SetString("message", message);
-    PostChromotingMessage("logDebugMessage", data.Pass());
-
-    scriptable_object->LogDebugInfo(message);
-  }
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->SetString("message", message);
+  PostChromotingMessage("logDebugMessage", data.Pass());
   g_logging_to_plugin = false;
 }
 

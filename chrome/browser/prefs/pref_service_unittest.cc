@@ -28,8 +28,8 @@
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
-#include "content/test/web_contents_tester.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/web_contents_tester.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/test/data/resource.h"
@@ -368,9 +368,9 @@ class PrefServiceWebKitPrefs : public ChromeRenderViewHostTestHarness {
     pref_services->SetUserPref(prefs::kUsesSystemTheme,
                                Value::CreateBooleanValue(false));
 #endif
-    pref_services->SetUserPref(prefs::kGlobalDefaultCharset,
+    pref_services->SetUserPref(prefs::kDefaultCharset,
                                Value::CreateStringValue("utf8"));
-    pref_services->SetUserPref(prefs::kWebKitGlobalDefaultFontSize,
+    pref_services->SetUserPref(prefs::kWebKitDefaultFontSize,
                                Value::CreateIntegerValue(20));
     pref_services->SetUserPref(prefs::kWebKitTextAreasAreResizable,
                                Value::CreateBooleanValue(false));
@@ -387,7 +387,7 @@ class PrefServiceWebKitPrefs : public ChromeRenderViewHostTestHarness {
 // Tests to see that webkit preferences are properly loaded and copied over
 // to a WebPreferences object.
 TEST_F(PrefServiceWebKitPrefs, PrefsCopied) {
-  WebPreferences webkit_prefs =
+  webkit_glue::WebPreferences webkit_prefs =
       WebContentsTester::For(contents())->TestGetWebkitPrefs();
 
   // These values have been overridden by the profile preferences.
@@ -404,6 +404,7 @@ TEST_F(PrefServiceWebKitPrefs, PrefsCopied) {
 #else
   const char kDefaultFont[] = "Times New Roman";
 #endif
-  EXPECT_EQ(ASCIIToUTF16(kDefaultFont), webkit_prefs.standard_font_family);
+  EXPECT_EQ(ASCIIToUTF16(kDefaultFont),
+            webkit_prefs.standard_font_family_map[prefs::kWebKitCommonScript]);
   EXPECT_TRUE(webkit_prefs.javascript_enabled);
 }

@@ -11,8 +11,9 @@
 #include "base/location.h"
 #include "base/stringprintf.h"
 #include "sync/engine/syncer_proto_util.h"
-#include "sync/test/engine/test_id_factory.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
+#include "sync/syncable/syncable.h"
+#include "sync/test/engine/test_id_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using browser_sync::HttpResponse;
@@ -86,6 +87,7 @@ bool MockConnectionManager::PostBufferToPath(PostBufferParams* params,
     browser_sync::ScopedServerStatusWatcher* watcher) {
   ClientToServerMessage post;
   CHECK(post.ParseFromString(params->buffer_in));
+  CHECK(post.has_protocol_version());
   last_request_.CopyFrom(post);
   client_stuck_ = post.sync_problem_detected();
   ClientToServerResponse response;
@@ -169,6 +171,7 @@ bool MockConnectionManager::PostBufferToPath(PostBufferParams* params,
   if (post.message_contents() == ClientToServerMessage::COMMIT &&
       !mid_commit_callback_.is_null()) {
     mid_commit_callback_.Run();
+    mid_commit_callback_.Reset();
   }
   if (mid_commit_observer_) {
     mid_commit_observer_->Observe();

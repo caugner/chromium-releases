@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -67,7 +67,6 @@ class BrowsingDataCookieHelperTest : public testing::Test {
   }
 
   void FetchCallback(const net::CookieList& cookies) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     ASSERT_EQ(2UL, cookies.size());
     cookie_list_ = cookies;
     net::CookieList::const_iterator it = cookies.begin();
@@ -86,7 +85,6 @@ class BrowsingDataCookieHelperTest : public testing::Test {
   }
 
   void DeleteCallback(const net::CookieList& cookies) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     ASSERT_EQ(1UL, cookies.size());
     net::CookieList::const_iterator it = cookies.begin();
 
@@ -99,7 +97,6 @@ class BrowsingDataCookieHelperTest : public testing::Test {
   }
 
   void CannedUniqueCallback(const net::CookieList& cookies) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     ASSERT_EQ(1UL, cookies.size());
     cookie_list_ = cookies;
     net::CookieList::const_iterator it = cookies.begin();
@@ -109,6 +106,10 @@ class BrowsingDataCookieHelperTest : public testing::Test {
     EXPECT_EQ("A", it->Name());
 
     ASSERT_TRUE(++it == cookies.end());
+  }
+
+  void CannedDifferentFramesCallback(const net::CookieList& cookie_list) {
+    ASSERT_EQ(3U, cookie_list.size());
   }
 
  protected:
@@ -123,7 +124,7 @@ class BrowsingDataCookieHelperTest : public testing::Test {
 TEST_F(BrowsingDataCookieHelperTest, FetchData) {
   CreateCookiesForTest();
   scoped_refptr<BrowsingDataCookieHelper> cookie_helper(
-      new BrowsingDataCookieHelper(testing_profile_.get()));
+      new BrowsingDataCookieHelper(testing_profile_->GetRequestContext()));
 
   cookie_helper->StartFetching(
       base::Bind(&BrowsingDataCookieHelperTest::FetchCallback,
@@ -136,7 +137,7 @@ TEST_F(BrowsingDataCookieHelperTest, FetchData) {
 TEST_F(BrowsingDataCookieHelperTest, DeleteCookie) {
   CreateCookiesForTest();
   scoped_refptr<BrowsingDataCookieHelper> cookie_helper(
-      new BrowsingDataCookieHelper(testing_profile_.get()));
+      new BrowsingDataCookieHelper(testing_profile_->GetRequestContext()));
 
   cookie_helper->StartFetching(
       base::Bind(&BrowsingDataCookieHelperTest::FetchCallback,
@@ -159,11 +160,12 @@ TEST_F(BrowsingDataCookieHelperTest, CannedUnique) {
   net::CookieList cookie;
 
   scoped_refptr<CannedBrowsingDataCookieHelper> helper(
-      new CannedBrowsingDataCookieHelper(testing_profile_.get()));
+      new CannedBrowsingDataCookieHelper(
+          testing_profile_->GetRequestContext()));
 
   ASSERT_TRUE(helper->empty());
-  helper->AddChangedCookie(origin, "A=1", net::CookieOptions());
-  helper->AddChangedCookie(origin, "A=1", net::CookieOptions());
+  helper->AddChangedCookie(origin, origin, "A=1", net::CookieOptions());
+  helper->AddChangedCookie(origin, origin, "A=1", net::CookieOptions());
   helper->StartFetching(
       base::Bind(&BrowsingDataCookieHelperTest::CannedUniqueCallback,
                  base::Unretained(this)));
@@ -171,8 +173,8 @@ TEST_F(BrowsingDataCookieHelperTest, CannedUnique) {
   helper->Reset();
   ASSERT_TRUE(helper->empty());
 
-  helper->AddReadCookies(origin, cookie);
-  helper->AddReadCookies(origin, cookie);
+  helper->AddReadCookies(origin, origin, cookie);
+  helper->AddReadCookies(origin, origin, cookie);
   helper->StartFetching(
       base::Bind(&BrowsingDataCookieHelperTest::CannedUniqueCallback,
                  base::Unretained(this)));
@@ -182,10 +184,11 @@ TEST_F(BrowsingDataCookieHelperTest, CannedEmpty) {
   const GURL url_google("http://www.google.com");
 
   scoped_refptr<CannedBrowsingDataCookieHelper> helper(
-      new CannedBrowsingDataCookieHelper(testing_profile_.get()));
+      new CannedBrowsingDataCookieHelper(
+          testing_profile_->GetRequestContext()));
 
   ASSERT_TRUE(helper->empty());
-  helper->AddChangedCookie(url_google, "a=1",
+  helper->AddChangedCookie(url_google, url_google, "a=1",
                           net::CookieOptions());
   ASSERT_FALSE(helper->empty());
   helper->Reset();
@@ -197,10 +200,32 @@ TEST_F(BrowsingDataCookieHelperTest, CannedEmpty) {
       new net::CookieMonster::CanonicalCookie(url_google, pc));
   cookies.push_back(*cookie);
 
-  helper->AddReadCookies(url_google, cookies);
+  helper->AddReadCookies(url_google, url_google, cookies);
   ASSERT_FALSE(helper->empty());
   helper->Reset();
   ASSERT_TRUE(helper->empty());
+}
+
+TEST_F(BrowsingDataCookieHelperTest, CannedDifferentFrames) {
+  GURL frame1_url("http://www.google.com");
+  GURL frame2_url("http://www.google.de");
+  GURL request_url("http://www.google.com");
+
+  scoped_refptr<CannedBrowsingDataCookieHelper> helper(
+      new CannedBrowsingDataCookieHelper(
+          testing_profile_->GetRequestContext()));
+
+  ASSERT_TRUE(helper->empty());
+  helper->AddChangedCookie(frame1_url, request_url, "a=1",
+                           net::CookieOptions());
+  helper->AddChangedCookie(frame1_url, request_url, "b=1",
+                           net::CookieOptions());
+  helper->AddChangedCookie(frame2_url, request_url, "c=1",
+                           net::CookieOptions());
+
+  helper->StartFetching(
+      base::Bind(&BrowsingDataCookieHelperTest::CannedDifferentFramesCallback,
+                 base::Unretained(this)));
 }
 
 }  // namespace

@@ -16,13 +16,13 @@ class ChromiumBinariesDistribution : public BrowserDistribution {
  public:
   virtual string16 GetAppGuid() OVERRIDE;
 
-  virtual string16 GetApplicationName() OVERRIDE;
+  virtual string16 GetBaseAppName() OVERRIDE;
 
   virtual string16 GetAppShortCutName() OVERRIDE;
 
   virtual string16 GetAlternateApplicationName() OVERRIDE;
 
-  virtual string16 GetBrowserAppId() OVERRIDE;
+  virtual string16 GetBaseAppId() OVERRIDE;
 
   virtual string16 GetInstallSubDir() OVERRIDE;
 

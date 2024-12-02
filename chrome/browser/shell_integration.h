@@ -23,16 +23,32 @@ class ShellIntegration {
   // false if this operation fails.
   static bool SetAsDefaultBrowser();
 
+  // Initiates an OS shell flow which (if followed by the user) should set
+  // Chrome as the default browser. Returns false if the flow cannot be
+  // initialized, if it is not supported (introduced for Windows 8) or if the
+  // user cancels the operation. This is a blocking call and requires a FILE
+  // thread.
+  static bool SetAsDefaultBrowserInteractive();
+
   // Sets Chrome as the default client application for the given protocol
   // (only for the current user). Returns false if this operation fails.
   static bool SetAsDefaultProtocolClient(const std::string& protocol);
 
-  // Returns true if the running browser can be set as the default browser.
-  static bool CanSetAsDefaultBrowser();
+  // In Windows 8 a browser can be made default-in-metro only in an interactive
+  // flow. We will distinguish between two types of permissions here to avoid
+  // forcing the user into UI interaction when this should not be done.
+  enum DefaultWebClientSetPermission {
+    SET_DEFAULT_NOT_ALLOWED = 0,
+    SET_DEFAULT_UNATTENDED,
+    SET_DEFAULT_INTERACTIVE,
+  };
 
-  // Returns true if the running browser can be set as the default client
-  // application for specific protocols.
-  static bool CanSetAsDefaultProtocolClient();
+  // Returns requirements for making the running browser the user's default.
+  static DefaultWebClientSetPermission CanSetAsDefaultBrowser();
+
+  // Returns requirements for making the running browser the user's default
+  // client application for specific protocols.
+  static DefaultWebClientSetPermission CanSetAsDefaultProtocolClient();
 
   // On Linux, it may not be possible to determine or set the default browser
   // on some desktop environments or configurations. So, we use this enum and
@@ -107,15 +123,19 @@ class ShellIntegration {
       bool is_platform_app);
 
 #if defined(OS_WIN)
-  // Generates Win7 app id for given app name and profile path. The returned app
-  // id is in the format of "|app_name|[.<profile_id>]". "profile_id" is
-  // appended when user override the default value.
-  static string16 GetAppId(const string16& app_name,
-                           const FilePath& profile_path);
+  // Generates an application user model ID (AppUserModelId) for a given app
+  // name and profile path. The returned app id is in the format of
+  // "|app_name|[.<profile_id>]". "profile_id" is appended when user override
+  // the default value.
+  // Note: If the app has an installation specific suffix (e.g. on user-level
+  // Chrome installs), |app_name| should already be suffixed, this method will
+  // then further suffix it with the profile id as described above.
+  static string16 GetAppModelIdForProfile(const string16& app_name,
+                                          const FilePath& profile_path);
 
-  // Generates Win7 app id for Chromium by calling GetAppId with
-  // chrome::kBrowserAppID as app_name.
-  static string16 GetChromiumAppId(const FilePath& profile_path);
+  // Generates an application user model ID (AppUserModelId) for Chromium by
+  // calling GetAppModelIdForProfile() with ShellUtil::GetAppId() as app_name.
+  static string16 GetChromiumModelIdForProfile(const FilePath& profile_path);
 
   // Returns the path to the Chromium icon. This is used to specify the icon
   // to use for the taskbar group on Win 7.
@@ -124,6 +144,11 @@ class ShellIntegration {
   // Migrates existing chrome shortcuts by tagging them with correct app id.
   // see http://crbug.com/28104
   static void MigrateChromiumShortcuts();
+
+  // Activates Chrome in metro-mode on Windows 8.  Returns false if called on
+  // earlier versions of Windows, if called from within metro-mode, if Chrome
+  // is not the default browser, or if an actual error occurs.
+  static bool ActivateMetroChrome();
 #endif  // defined(OS_WIN)
 
   // The current default web client application UI state. This is used when
@@ -145,6 +170,9 @@ class ShellIntegration {
     // Observer classes that return true to OwnedByWorker are automatically
     // freed by the worker when they are no longer needed.
     virtual bool IsOwnedByWorker() { return false; }
+    // An observer can permit or decline set-as-default operation if it
+    // requires triggering user interaction.
+    virtual bool IsInteractiveSetDefaultPermitted() { return false; }
   };
 
   //  Helper objects that handle checking if Chrome is the default browser
@@ -180,7 +208,7 @@ class ShellIntegration {
     virtual DefaultWebClientState CheckIsDefault() = 0;
 
     // Function that sets Chrome as the default web client.
-    virtual void SetAsDefault() = 0;
+    virtual void SetAsDefault(bool interactive_permitted) = 0;
 
     // Function that handles performing the check on the file thread. This
     // function is posted as a task onto the file thread, where it performs
@@ -229,7 +257,7 @@ class ShellIntegration {
     virtual DefaultWebClientState CheckIsDefault() OVERRIDE;
 
     // Set Chrome as the default browser.
-    virtual void SetAsDefault() OVERRIDE;
+    virtual void SetAsDefault(bool interactive_permitted) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(DefaultBrowserWorker);
   };
@@ -253,7 +281,7 @@ class ShellIntegration {
     virtual DefaultWebClientState CheckIsDefault() OVERRIDE;
 
     // Set Chrome as the default handler for this protocol.
-    virtual void SetAsDefault() OVERRIDE;
+    virtual void SetAsDefault(bool interactive_permitted) OVERRIDE;
 
     std::string protocol_;
 

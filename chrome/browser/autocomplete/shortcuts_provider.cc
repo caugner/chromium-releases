@@ -19,10 +19,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/guid.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/url_parse.h"
@@ -65,7 +65,8 @@ void ShortcutsProvider::Start(const AutocompleteInput& input,
                               bool minimal_changes) {
   matches_.clear();
 
-  if (input.type() == AutocompleteInput::INVALID)
+  if ((input.type() == AutocompleteInput::INVALID) ||
+      (input.type() == AutocompleteInput::FORCED_QUERY))
     return;
 
   if (input.text().empty())
@@ -100,7 +101,7 @@ void ShortcutsProvider::DeleteMatch(const AutocompleteMatch& match) {
   // Delete the match from the history DB. This will eventually result in a
   // second call to DeleteShortcutsWithURLs(), which is harmless.
   HistoryService* const history_service =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
 
   DCHECK(history_service && match.destination_url.is_valid());
   history_service->DeleteURL(match.destination_url);

@@ -13,7 +13,7 @@
 #include "base/memory/ref_counted.h"
 
 class CrxInstaller;
-class ExtensionInstallUI;
+class ExtensionInstallPrompt;
 class Profile;
 
 namespace content {
@@ -22,17 +22,12 @@ class DownloadItem;
 
 namespace download_crx_util {
 
-// Allow tests to install a mock extension install UI object, to fake
+// Allow tests to install a mock ExtensionInstallPrompt object, to fake
 // user clicks on the permissions dialog.  Each installed mock object
 // is only used once.  If you want to return a mock for two different
 // installs, you need to call this function once before the first
 // install, and again after the first install and before the second.
-void SetMockInstallUIForTesting(ExtensionInstallUI* mock_ui);
-
-// Returns true if the specified download_item containing an extension should be
-// automatically installed. This is typically true in the case of webstore
-// installations.
-bool ShouldOpenExtensionDownload(const content::DownloadItem& download_item);
+void SetMockInstallPromptForTesting(ExtensionInstallPrompt* mock_prompt);
 
 // Start installing a downloaded item item as a CRX (extension, theme, app,
 // ...).  The installer does work on the file thread, so the installation
@@ -41,6 +36,10 @@ bool ShouldOpenExtensionDownload(const content::DownloadItem& download_item);
 scoped_refptr<CrxInstaller> OpenChromeExtension(
     Profile* profile,
     const content::DownloadItem& download_item);
+
+// Returns true if this is an extension download. This also considers user
+// scripts to be extension downloads, since we convert those automatically.
+bool IsExtensionDownload(const content::DownloadItem& download_item);
 
 }  // namespace download_crx_util
 

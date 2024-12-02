@@ -11,22 +11,18 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/public/common/content_switches.h"
-#include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
-#include "content/shell/shell_devtools_delegate.h"
-#include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_module.h"
-#include "ui/base/clipboard/clipboard.h"
 #include "ui/views/examples/examples_window.h"
-#include "ui/views/test/test_views_delegate.h"
 #include "ui/views/focus/accelerator_handler.h"
+#include "ui/views/test/test_views_delegate.h"
 
 #if defined(USE_AURA)
-#include "ui/aura/single_monitor_manager.h"
 #include "ui/aura/desktop/desktop_screen.h"
 #include "ui/aura/desktop/desktop_stacking_client.h"
 #include "ui/aura/env.h"
+#include "ui/aura/single_monitor_manager.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/desktop_native_widget_helper_aura.h"
 #include "ui/views/widget/native_widget_aura.h"
@@ -48,21 +44,10 @@ class ExamplesViewsDelegate : public views::TestViewsDelegate {
 }  // namespace
 
 ExamplesBrowserMainParts::ExamplesBrowserMainParts(
-    const content::MainFunctionParams& parameters)
-    : BrowserMainParts(),
-      devtools_delegate_(NULL) {
+    const content::MainFunctionParams& parameters) {
 }
 
 ExamplesBrowserMainParts::~ExamplesBrowserMainParts() {
-}
-
-#if !defined(OS_MACOSX)
-void ExamplesBrowserMainParts::PreMainMessageLoopStart() {
-}
-#endif
-
-int ExamplesBrowserMainParts::PreCreateThreads() {
-  return 0;
 }
 
 void ExamplesBrowserMainParts::PreMainMessageLoopRun() {
@@ -80,8 +65,6 @@ void ExamplesBrowserMainParts::PreMainMessageLoopRun() {
 }
 
 void ExamplesBrowserMainParts::PostMainMessageLoopRun() {
-  if (devtools_delegate_)
-    devtools_delegate_->Stop();
   browser_context_.reset();
   views_delegate_.reset();
 #if defined(USE_AURA)
@@ -99,12 +82,6 @@ bool ExamplesBrowserMainParts::MainMessageLoopRun(int* result_code) {
   MessageLoopForUI::current()->Run();
 #endif
   return true;
-}
-
-ui::Clipboard* ExamplesBrowserMainParts::GetClipboard() {
-  if (!clipboard_.get())
-    clipboard_.reset(new ui::Clipboard());
-  return clipboard_.get();
 }
 
 }  // namespace examples

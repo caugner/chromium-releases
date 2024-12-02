@@ -195,7 +195,7 @@ typedef ViewsTestBase ViewTest;
 // A derived class for testing purpose.
 class TestView : public View {
  public:
-  TestView() : View(), in_touch_sequence_(false) {}
+  TestView() : View(), delete_on_pressed_(false), in_touch_sequence_(false) {}
   virtual ~TestView() {}
 
   // Reset all test state
@@ -235,6 +235,7 @@ class TestView : public View {
   gfx::Point location_;
   bool received_mouse_enter_;
   bool received_mouse_exit_;
+  bool delete_on_pressed_;
 
   // Painting.
   std::vector<gfx::Rect> scheduled_paint_rects_;
@@ -326,6 +327,8 @@ TEST_F(ViewTest, OnBoundsChanged) {
 bool TestView::OnMousePressed(const MouseEvent& event) {
   last_mouse_event_type_ = event.type();
   location_.SetPoint(event.x(), event.y());
+  if (delete_on_pressed_)
+    delete this;
   return true;
 }
 
@@ -403,6 +406,38 @@ TEST_F(ViewTest, MouseEvent) {
   EXPECT_EQ(v2->location_.y(), -100);
   // Make sure v1 did not receive the event
   EXPECT_EQ(v1->last_mouse_event_type_, 0);
+
+  widget->CloseNow();
+}
+
+// Confirm that a view can be deleted as part of processing a mouse press.
+TEST_F(ViewTest, DeleteOnPressed) {
+  TestView* v1 = new TestView();
+  v1->SetBoundsRect(gfx::Rect(0, 0, 300, 300));
+
+  TestView* v2 = new TestView();
+  v2->SetBoundsRect(gfx::Rect(100, 100, 100, 100));
+
+  v1->Reset();
+  v2->Reset();
+
+  scoped_ptr<Widget> widget(new Widget);
+  Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.bounds = gfx::Rect(50, 50, 650, 650);
+  widget->Init(params);
+  View* root = widget->GetRootView();
+
+  root->AddChildView(v1);
+  v1->AddChildView(v2);
+
+  v2->delete_on_pressed_ = true;
+  MouseEvent pressed(ui::ET_MOUSE_PRESSED,
+                     110,
+                     120,
+                     ui::EF_LEFT_MOUSE_BUTTON);
+  root->OnMousePressed(pressed);
+  EXPECT_EQ(0, v1->child_count());
 
   widget->CloseNow();
 }
@@ -567,6 +602,10 @@ TEST_F(ViewTest, GestureEvent) {
   EXPECT_EQ(gfx::Point(10, 10), v2->location_);
   EXPECT_EQ(ui::ET_UNKNOWN, v1->last_gesture_event_type_);
 
+  // Simulate an up so that RootView is no longer targetting |v3|.
+  GestureEventForTest g1_up(ui::ET_GESTURE_END, 110, 110, 0);
+  root->OnGestureEvent(g1_up);
+
   v1->Reset();
   v2->Reset();
   v3->Reset();
@@ -577,6 +616,15 @@ TEST_F(ViewTest, GestureEvent) {
   EXPECT_EQ(ui::ET_GESTURE_TAP, v1->last_gesture_event_type_);
   EXPECT_EQ(gfx::Point(80, 80), v1->location_);
   EXPECT_EQ(ui::ET_UNKNOWN, v2->last_gesture_event_type_);
+
+  // Send event |g1| again. Even though the coordinates target |v3| it should go
+  // to |v1| as that is the view the touch was initially down on.
+  v1->last_gesture_event_type_ = ui::ET_UNKNOWN;
+  v3->last_gesture_event_type_ = ui::ET_UNKNOWN;
+  root->OnGestureEvent(g1);
+  EXPECT_EQ(ui::ET_GESTURE_TAP, v1->last_gesture_event_type_);
+  EXPECT_EQ(ui::ET_UNKNOWN, v3->last_gesture_event_type_);
+  EXPECT_EQ("110,110", v1->location_.ToString());
 
   widget->CloseNow();
 }
@@ -1129,7 +1177,7 @@ bool TestView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 #if defined(OS_WIN) && !defined(USE_AURA)
 TEST_F(ViewTest, ActivateAccelerator) {
   // Register a keyboard accelerator before the view is added to a window.
-  ui::Accelerator return_accelerator(ui::VKEY_RETURN, false, false, false);
+  ui::Accelerator return_accelerator(ui::VKEY_RETURN, ui::EF_NONE);
   TestView* view = new TestView();
   view->Reset();
   view->AddAccelerator(return_accelerator);
@@ -1154,7 +1202,7 @@ TEST_F(ViewTest, ActivateAccelerator) {
   EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 1);
 
   // Hit the escape key. Nothing should happen.
-  ui::Accelerator escape_accelerator(ui::VKEY_ESCAPE, false, false, false);
+  ui::Accelerator escape_accelerator(ui::VKEY_ESCAPE, ui::EF_NONE);
   EXPECT_FALSE(focus_manager->ProcessAccelerator(escape_accelerator));
   EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 1);
   EXPECT_EQ(view->accelerator_count_map_[escape_accelerator], 0);
@@ -1195,7 +1243,7 @@ TEST_F(ViewTest, ActivateAccelerator) {
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 TEST_F(ViewTest, HiddenViewWithAccelerator) {
-  ui::Accelerator return_accelerator(ui::VKEY_RETURN, false, false, false);
+  ui::Accelerator return_accelerator(ui::VKEY_RETURN, ui::EF_NONE);
   TestView* view = new TestView();
   view->Reset();
   view->AddAccelerator(return_accelerator);
@@ -1225,7 +1273,7 @@ TEST_F(ViewTest, HiddenViewWithAccelerator) {
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 TEST_F(ViewTest, ViewInHiddenWidgetWithAccelerator) {
-  ui::Accelerator return_accelerator(ui::VKEY_RETURN, false, false, false);
+  ui::Accelerator return_accelerator(ui::VKEY_RETURN, ui::EF_NONE);
   TestView* view = new TestView();
   view->Reset();
   view->AddAccelerator(return_accelerator);
@@ -1367,7 +1415,7 @@ class MockMenuModel : public ui::MenuModel {
       ui::Accelerator* accelerator));
   MOCK_CONST_METHOD1(IsItemCheckedAt, bool(int index));
   MOCK_CONST_METHOD1(GetGroupIdAt, int(int index));
-  MOCK_METHOD2(GetIconAt, bool(int index, SkBitmap* icon));
+  MOCK_METHOD2(GetIconAt, bool(int index, gfx::ImageSkia* icon));
   MOCK_CONST_METHOD1(GetButtonMenuItemAt, ui::ButtonMenuItemModel*(int index));
   MOCK_CONST_METHOD1(IsEnabledAt, bool(int index));
   MOCK_CONST_METHOD1(IsVisibleAt, bool(int index));
@@ -3158,6 +3206,36 @@ TEST_F(ViewLayerTest, ReorderUnderWidget) {
   content->ReorderChildView(c1, -1);
   EXPECT_EQ(c1->layer(), parent_layer->children()[1]);
   EXPECT_EQ(c2->layer(), parent_layer->children()[0]);
+}
+
+// Verifies that the layer of a view can be acquired properly.
+TEST_F(ViewLayerTest, AcquireLayer) {
+  View* content = new View;
+  widget()->SetContentsView(content);
+  scoped_ptr<View> c1(new View);
+  c1->SetPaintToLayer(true);
+  EXPECT_TRUE(c1->layer());
+  content->AddChildView(c1.get());
+
+  scoped_ptr<ui::Layer> layer(c1->AcquireLayer());
+  EXPECT_EQ(layer.get(), c1->layer());
+
+  scoped_ptr<ui::Layer> layer2(c1->RecreateLayer());
+  EXPECT_NE(c1->layer(), layer2.get());
+
+  // Destroy view before destroying layer.
+  c1.reset();
+}
+
+// Verify that new layer scales content only if the old layer does.
+TEST_F(ViewLayerTest, RecreateLayer) {
+  scoped_ptr<View> v(new View());
+  v->SetPaintToLayer(true);
+  // Set to non default value.
+  v->layer()->set_scale_content(false);
+  scoped_ptr<ui::Layer> old_layer(v->RecreateLayer());
+  ui::Layer* new_layer = v->layer();
+  EXPECT_EQ(false, new_layer->scale_content());
 }
 
 #endif  // USE_AURA

@@ -17,13 +17,16 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_tray.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -40,6 +43,8 @@
 #include "ui/base/resource/resource_bundle.h"
 
 using content::UserMetricsAction;
+using extensions::Extension;
+using extensions::UpdatedExtensionPermissionsInfo;
 
 BackgroundModeManager::BackgroundModeData::BackgroundModeData(
     int command_id,
@@ -78,17 +83,18 @@ void BackgroundModeManager::BackgroundModeData::ExecuteCommand(int item) {
       break;
     default:
       // Launch the app associated with this item.
-      const Extension* extension = applications_->GetExtension(item);
+      const Extension* extension = applications_->
+          GetExtension(item);
       BackgroundModeManager::LaunchBackgroundApplication(profile_, extension);
       break;
   }
 }
 
 Browser* BackgroundModeManager::BackgroundModeData::GetBrowserWindow() {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+  Browser* browser = browser::FindLastActiveWithProfile(profile_);
   if (!browser) {
     Browser::OpenEmptyWindow(profile_);
-    browser = BrowserList::GetLastActiveWithProfile(profile_);
+    browser = browser::FindLastActiveWithProfile(profile_);
   }
   return browser;
 }
@@ -107,10 +113,11 @@ void BackgroundModeManager::BackgroundModeData::BuildProfileMenu(
     menu->AddItemWithStringId(IDC_MinimumLabelValue,
                               IDS_BACKGROUND_APP_NOT_INSTALLED);
   } else {
-    for (ExtensionList::const_iterator cursor = applications_->begin();
+    for (extensions::ExtensionList::const_iterator cursor =
+             applications_->begin();
          cursor != applications_->end();
          ++cursor, ++position) {
-      const SkBitmap* icon = applications_->GetIcon(*cursor);
+      const gfx::ImageSkia* icon = applications_->GetIcon(*cursor);
       DCHECK(position == applications_->GetPosition(*cursor));
       const std::string& name = (*cursor)->name();
       menu->AddItem(position, UTF8ToUTF16(name));
@@ -173,7 +180,7 @@ BackgroundModeManager::BackgroundModeManager(
   // there are background apps) or exit if there are none.
   if (command_line->HasSwitch(switches::kNoStartupWindow)) {
     keep_alive_for_startup_ = true;
-    BrowserList::StartKeepAlive();
+    browser::StartKeepAlive();
   }
 
   // If the -keep-alive-for-test flag is passed, then always keep chrome running
@@ -259,8 +266,8 @@ void BackgroundModeManager::LaunchBackgroundApplication(
   extension_misc::LaunchContainer launch_container =
       service->extension_prefs()->GetLaunchContainer(
           extension, ExtensionPrefs::LAUNCH_REGULAR);
-  Browser::OpenApplication(profile, extension, launch_container, GURL(),
-                           NEW_FOREGROUND_TAB);
+  application_launch::OpenApplication(profile, extension, launch_container,
+                                      GURL(), NEW_FOREGROUND_TAB, NULL);
 }
 
 bool BackgroundModeManager::IsBackgroundModeActiveForTest() {
@@ -492,13 +499,13 @@ void BackgroundModeManager::ExecuteCommand(int command_id) {
       break;
     case IDC_EXIT:
       content::RecordAction(UserMetricsAction("Exit"));
-      BrowserList::AttemptExit();
+      browser::AttemptExit();
       break;
     case IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND: {
       // Background mode must already be enabled (as otherwise this menu would
       // not be visible).
       DCHECK(IsBackgroundModePrefEnabled());
-      DCHECK(BrowserList::WillKeepAlive());
+      DCHECK(browser::WillKeepAlive());
 
       // Set the background mode pref to "disabled" - the resulting notification
       // will result in a call to DisableBackgroundMode().
@@ -523,7 +530,7 @@ void BackgroundModeManager::EndKeepAliveForStartup() {
     // keep-alive (which can shutdown Chrome) before the message loop has
     // started.
     MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&BrowserList::EndKeepAlive));
+        FROM_HERE, base::Bind(&browser::EndKeepAlive));
   }
 }
 
@@ -538,7 +545,7 @@ void BackgroundModeManager::StartBackgroundMode() {
   in_background_mode_ = true;
 
   // Put ourselves in KeepAlive mode and create a status tray icon.
-  BrowserList::StartKeepAlive();
+  browser::StartKeepAlive();
 
   // Display a status icon to exit Chrome.
   InitStatusTrayIcon();
@@ -563,7 +570,7 @@ void BackgroundModeManager::EndBackgroundMode() {
   in_background_mode_ = false;
 
   // End KeepAlive mode and blow away our status tray icon.
-  BrowserList::EndKeepAlive();
+  browser::EndKeepAlive();
 
   RemoveStatusTrayIcon();
   content::NotificationService::current()->Notify(
@@ -656,9 +663,9 @@ void BackgroundModeManager::CreateStatusTrayIcon() {
 
   // Set the image and add ourselves as a click observer on it.
   // TODO(rlp): Status tray icon should have submenus for each profile.
-  SkBitmap* bitmap = ResourceBundle::GetSharedInstance().GetBitmapNamed(
-      IDR_STATUS_TRAY_ICON);
-  status_icon_->SetImage(*bitmap);
+  gfx::ImageSkia* image_skia = ResourceBundle::GetSharedInstance().
+      GetImageSkiaNamed(IDR_STATUS_TRAY_ICON);
+  status_icon_->SetImage(*image_skia);
   status_icon_->SetToolTip(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
   UpdateStatusTrayIconContextMenu();
 }

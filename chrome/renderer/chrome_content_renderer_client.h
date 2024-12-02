@@ -15,7 +15,6 @@
 #include "content/public/renderer/content_renderer_client.h"
 
 class ChromeRenderProcessObserver;
-class Extension;
 class ExtensionDispatcher;
 class ExtensionSet;
 class RendererHistogramSnapshots;
@@ -25,6 +24,10 @@ class SpellCheckProvider;
 class VisitedLinkSlave;
 
 struct ChromeViewHostMsg_GetPluginInfo_Status;
+
+namespace media {
+class AudioRendererSink;
+}
 
 namespace prerender {
 class PrerenderDispatcher;
@@ -75,6 +78,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
       media::FilterCollection* collection,
       WebKit::WebAudioSourceProvider* audio_source_provider,
+      media::AudioRendererSink* audio_renderer_sink,
       media::MessageLoopFactory* message_loop_factory,
       webkit_media::MediaStreamClient* media_stream_client,
       media::MediaLog* media_log) OVERRIDE;

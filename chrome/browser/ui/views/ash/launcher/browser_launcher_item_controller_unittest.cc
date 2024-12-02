@@ -9,15 +9,16 @@
 
 #include "ash/launcher/launcher_model.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/tabs/test_tab_strip_model_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/test_tab_strip_model_delegate.h"
 #include "chrome/browser/ui/views/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/activation_delegate.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/test_activation_client.h"
@@ -35,12 +36,12 @@ class AppIconLoaderImpl : public ChromeLauncherController::AppIconLoader {
 
   // Sets the id for the specified tab. The id is removed if Remove() is
   // invoked.
-  void SetAppID(TabContentsWrapper* tab, const std::string& id) {
+  void SetAppID(TabContents* tab, const std::string& id) {
     tab_id_map_[tab] = id;
   }
 
   // Returns true if there is an id registered for |tab|.
-  bool HasAppID(TabContentsWrapper* tab) const {
+  bool HasAppID(TabContents* tab) const {
     return tab_id_map_.find(tab) != tab_id_map_.end();
   }
 
@@ -53,7 +54,7 @@ class AppIconLoaderImpl : public ChromeLauncherController::AppIconLoader {
   }
 
   // AppIconLoader implementation:
-  virtual std::string GetAppID(TabContentsWrapper* tab) OVERRIDE {
+  virtual std::string GetAppID(TabContents* tab) OVERRIDE {
     return tab_id_map_.find(tab) != tab_id_map_.end() ? tab_id_map_[tab] :
         std::string();
   }
@@ -72,7 +73,7 @@ class AppIconLoaderImpl : public ChromeLauncherController::AppIconLoader {
   }
 
  private:
-  typedef std::map<TabContentsWrapper*, std::string> TabToStringMap;
+  typedef std::map<TabContents*, std::string> TabToStringMap;
 
   TabToStringMap tab_id_map_;
 
@@ -195,7 +196,7 @@ class BrowserLauncherItemControllerTest :
 TEST_F(BrowserLauncherItemControllerTest, TabbedSetup) {
   size_t initial_size = launcher_model_->items().size();
   {
-    TabContentsWrapper wrapper(CreateTestWebContents());
+    TabContents tab_contents(CreateTestWebContents());
     State state(this, std::string(),
                 BrowserLauncherItemController::TYPE_TABBED);
 
@@ -210,11 +211,11 @@ TEST_F(BrowserLauncherItemControllerTest, TabbedSetup) {
 
   // Do the same, but this time add the tab first.
   {
-    TabContentsWrapper wrapper(CreateTestWebContents());
+    TabContents tab_contents(CreateTestWebContents());
 
     TestTabStripModelDelegate tab_strip_delegate;
     TabStripModel tab_strip(&tab_strip_delegate, profile());
-    tab_strip.InsertTabContentsAt(0, &wrapper, TabStripModel::ADD_ACTIVE);
+    tab_strip.InsertTabContentsAt(0, &tab_contents, TabStripModel::ADD_ACTIVE);
     aura::Window window(NULL);
     window.Init(ui::LAYER_NOT_DRAWN);
     root_window()->AddChild(&window);
@@ -239,7 +240,7 @@ TEST_F(BrowserLauncherItemControllerTest, PanelItem) {
     aura::Window window(NULL);
     TestTabStripModelDelegate tab_strip_delegate;
     TabStripModel tab_strip(&tab_strip_delegate, profile());
-    TabContentsWrapper panel_tab(CreateTestWebContents());
+    TabContents panel_tab(CreateTestWebContents());
     app_icon_loader_->SetAppID(&panel_tab, "1");  // Panels are apps.
     tab_strip.InsertTabContentsAt(0, &panel_tab, TabStripModel::ADD_ACTIVE);
     BrowserLauncherItemController updater(
@@ -256,7 +257,7 @@ TEST_F(BrowserLauncherItemControllerTest, PanelItem) {
     aura::Window window(NULL);
     TestTabStripModelDelegate tab_strip_delegate;
     TabStripModel tab_strip(&tab_strip_delegate, profile());
-    TabContentsWrapper panel_tab(CreateTestWebContents());
+    TabContents panel_tab(CreateTestWebContents());
     app_icon_loader_->SetAppID(&panel_tab, "1");  // Panels are apps.
     tab_strip.InsertTabContentsAt(0, &panel_tab, TabStripModel::ADD_ACTIVE);
     BrowserLauncherItemController updater(
@@ -272,7 +273,7 @@ TEST_F(BrowserLauncherItemControllerTest, PanelItem) {
 // Verifies pinned apps are persisted and restored.
 TEST_F(BrowserLauncherItemControllerTest, PersistPinned) {
   size_t initial_size = launcher_model_->items().size();
-  TabContentsWrapper tab1(CreateTestWebContents());
+  TabContents tab1(CreateTestWebContents());
 
   app_icon_loader_->SetAppID(&tab1, "1");
 
@@ -361,4 +362,30 @@ TEST_F(BrowserLauncherItemControllerTest, SwitchDirectlyToApp) {
   EXPECT_EQ(ash::STATUS_RUNNING, launcher_model_->items()[index1].status);
   EXPECT_EQ(ash::STATUS_ACTIVE, launcher_model_->items()[index2].status);
   EXPECT_EQ(&state2.window, activation_client_->GetActiveWindow());
+}
+
+// Test attention states of windows.
+TEST_F(BrowserLauncherItemControllerTest, FlashWindow) {
+  // App panel first
+  State app_state(this, "1", BrowserLauncherItemController::TYPE_APP_PANEL);
+  EXPECT_EQ(ash::STATUS_ACTIVE, app_state.GetUpdaterItem().status);
+
+  // Active windows don't show attention.
+  app_state.window.SetProperty(aura::client::kDrawAttentionKey, true);
+  EXPECT_EQ(ash::STATUS_ACTIVE, app_state.GetUpdaterItem().status);
+
+  // Then browser window
+  State browser_state(
+      this, std::string(), BrowserLauncherItemController::TYPE_TABBED);
+  // First browser is active.
+  EXPECT_EQ(ash::STATUS_ACTIVE, browser_state.GetUpdaterItem().status);
+  EXPECT_EQ(ash::STATUS_RUNNING, app_state.GetUpdaterItem().status);
+
+  // App window should go to attention state.
+  app_state.window.SetProperty(aura::client::kDrawAttentionKey, true);
+  EXPECT_EQ(ash::STATUS_ATTENTION, app_state.GetUpdaterItem().status);
+
+  // Activating app window should clear attention state.
+  activation_client_->ActivateWindow(&app_state.window);
+  EXPECT_EQ(ash::STATUS_ACTIVE, app_state.GetUpdaterItem().status);
 }

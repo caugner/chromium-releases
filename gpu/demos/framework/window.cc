@@ -12,6 +12,7 @@
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/service/context_group.h"
+#include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "gpu/demos/framework/demo.h"
 #include "gpu/demos/framework/demo_factory.h"
 
@@ -44,7 +45,7 @@ Window::~Window() {
   gles2_cmd_helper_.reset();
 
   if (decoder_.get()) {
-    decoder_->Destroy();
+    decoder_->Destroy(true);
   }
 }
 
@@ -65,12 +66,18 @@ void Window::OnPaint() {
 }
 
 bool Window::CreateRenderContext(gfx::AcceleratedWidget hwnd) {
-  command_buffer_.reset(new CommandBufferService);
+  {
+    TransferBufferManager* manager = new TransferBufferManager();
+    transfer_buffer_manager_.reset(manager);
+    EXPECT_TRUE(manager->Initialize());
+  }
+  command_buffer_.reset(
+      new CommandBufferService(transfer_buffer_manager_.get()));
   if (!command_buffer_->Initialize()) {
     return false;
   }
 
-  gpu::gles2::ContextGroup::Ref group(new gpu::gles2::ContextGroup(true));
+  gpu::gles2::ContextGroup::Ref group(new gpu::gles2::ContextGroup(NULL, true));
 
   decoder_.reset(gpu::gles2::GLES2Decoder::Create(group.get()));
   if (!decoder_.get())
@@ -90,6 +97,8 @@ bool Window::CreateRenderContext(gfx::AcceleratedWidget hwnd) {
       NULL, surface_.get(), gfx::PreferDiscreteGpu);
   if (!context_.get())
     return false;
+
+  context_->MakeCurrent(surface_);
 
   std::vector<int32> attribs;
   if (!decoder_->Initialize(surface_.get(),

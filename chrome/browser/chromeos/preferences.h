@@ -35,10 +35,6 @@ class Preferences : public content::NotificationObserver {
   // This method will register the prefs associated with Chrome OS settings.
   static void RegisterUserPrefs(PrefService* prefs);
 
-  // This method is called when kLanguagePreferredVirtualKeyboard is updated to
-  // change the virtual keyboard settings to reflect the new value.
-  static void UpdateVirturalKeyboardPreference(PrefService* prefs);
-
   // This method will initialize Chrome OS settings to values in user prefs.
   void Init(PrefService* prefs);
 
@@ -93,9 +89,6 @@ class Preferences : public content::NotificationObserver {
   // Restores the user's preferred input method / keyboard layout on signing in.
   void SetInputMethodList();
 
-  // Updates the mapping of modifier keys following current prefs values.
-  void UpdateModifierKeyMapping();
-
   // Updates the initial key repeat delay and key repeat interval following
   // current prefs values. We set the delay and interval at once since an
   // underlying XKB API requires it.
@@ -144,9 +137,6 @@ class Preferences : public content::NotificationObserver {
       language_prefs::kNumMozcMultipleChoicePrefs];
   IntegerPrefMember mozc_integer_prefs_[
       language_prefs::kNumMozcIntegerPrefs];
-  IntegerPrefMember xkb_remap_search_key_to_;
-  IntegerPrefMember xkb_remap_control_key_to_;
-  IntegerPrefMember xkb_remap_alt_key_to_;
   BooleanPrefMember xkb_auto_repeat_enabled_;
   IntegerPrefMember xkb_auto_repeat_delay_pref_;
   IntegerPrefMember xkb_auto_repeat_interval_pref_;

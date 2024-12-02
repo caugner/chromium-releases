@@ -4,7 +4,8 @@
 
 #include "remoting/protocol/libjingle_transport_factory.h"
 
-#include "base/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "jingle/glue/channel_socket_adapter.h"
 #include "jingle/glue/pseudotcp_adapter.h"
 #include "jingle/glue/utils.h"
@@ -14,6 +15,7 @@
 #include "remoting/protocol/transport_config.h"
 #include "third_party/libjingle/source/talk/base/basicpacketsocketfactory.h"
 #include "third_party/libjingle/source/talk/base/network.h"
+#include "third_party/libjingle/source/talk/p2p/base/constants.h"
 #include "third_party/libjingle/source/talk/p2p/base/p2ptransportchannel.h"
 #include "third_party/libjingle/source/talk/p2p/client/basicportallocator.h"
 #include "third_party/libjingle/source/talk/p2p/client/httpportallocator.h"
@@ -73,6 +75,8 @@ class LibjingleStreamTransport : public StreamTransport,
   EventHandler* event_handler_;
   StreamTransport::ConnectedCallback callback_;
   scoped_ptr<ChannelAuthenticator> authenticator_;
+  std::string ice_username_fragment_;
+  std::string ice_password_;
 
   scoped_ptr<cricket::P2PTransportChannel> channel_;
 
@@ -87,7 +91,10 @@ LibjingleStreamTransport::LibjingleStreamTransport(
     bool incoming_only)
     : port_allocator_(port_allocator),
       incoming_only_(incoming_only),
-      event_handler_(NULL) {
+      event_handler_(NULL),
+      ice_username_fragment_(
+          talk_base::CreateRandomString(cricket::ICE_UFRAG_LENGTH)),
+      ice_password_(talk_base::CreateRandomString(cricket::ICE_PWD_LENGTH)) {
 }
 
 LibjingleStreamTransport::~LibjingleStreamTransport() {
@@ -97,7 +104,7 @@ LibjingleStreamTransport::~LibjingleStreamTransport() {
   DCHECK(!is_connected() || socket_.get() == NULL);
 
   if (channel_.get()) {
-    base::MessageLoopProxy::current()->DeleteSoon(
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(
         FROM_HERE, channel_.release());
   }
 }
@@ -130,7 +137,9 @@ void LibjingleStreamTransport::Connect(
   // Create P2PTransportChannel, attach signal handlers and connect it.
   // TODO(sergeyu): Specify correct component ID for the channel.
   channel_.reset(new cricket::P2PTransportChannel(
-      name_, 0, NULL, port_allocator_));
+      0, NULL, port_allocator_));
+  channel_->SetIceUfrag(ice_username_fragment_);
+  channel_->SetIcePwd(ice_password_);
   channel_->SignalRequestSignaling.connect(
       this, &LibjingleStreamTransport::OnRequestSignaling);
   channel_->SignalCandidateReady.connect(
@@ -277,7 +286,7 @@ void LibjingleStreamTransport::NotifyConnectFailed() {
   // This method may be called in response to a libjingle signal, so
   // libjingle objects must be deleted asynchronously.
   if (channel_.get()) {
-    base::MessageLoopProxy::current()->DeleteSoon(
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(
         FROM_HERE, channel_.release());
   }
 
@@ -308,12 +317,11 @@ LibjingleTransportFactory::LibjingleTransportFactory()
 LibjingleTransportFactory::~LibjingleTransportFactory() {
   // This method may be called in response to a libjingle signal, so
   // libjingle objects must be deleted asynchronously.
-  base::MessageLoopProxy::current()->DeleteSoon(
-      FROM_HERE, port_allocator_.release());
-  base::MessageLoopProxy::current()->DeleteSoon(
-      FROM_HERE, socket_factory_.release());
-  base::MessageLoopProxy::current()->DeleteSoon(
-      FROM_HERE, network_manager_.release());
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      base::ThreadTaskRunnerHandle::Get();
+  task_runner->DeleteSoon(FROM_HERE, port_allocator_.release());
+  task_runner->DeleteSoon(FROM_HERE, socket_factory_.release());
+  task_runner->DeleteSoon(FROM_HERE, network_manager_.release());
 }
 
 void LibjingleTransportFactory::SetTransportConfig(

@@ -9,10 +9,11 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/common/renderer_preferences.h"
 #include "googleurl/src/gurl.h"
 
@@ -33,7 +34,8 @@ enum ResourceRequestAction {
 class CONTENT_EXPORT InterstitialPageImpl
     : public NON_EXPORTED_BASE(content::InterstitialPage),
       public content::NotificationObserver,
-      public content::RenderViewHostDelegate {
+      public content::RenderViewHostDelegate,
+      public content::RenderWidgetHostDelegate {
  public:
   // The different state of actions the user can take in an interstitial.
   enum ActionState {
@@ -81,7 +83,7 @@ class CONTENT_EXPORT InterstitialPageImpl
                        const content::NotificationDetails& details) OVERRIDE;
 
   // RenderViewHostDelegate implementation:
-  virtual View* GetViewDelegate() OVERRIDE;
+  virtual content::RenderViewHostDelegateView* GetDelegateView() OVERRIDE;
   virtual const GURL& GetURL() const OVERRIDE;
   virtual void RenderViewGone(content::RenderViewHost* render_view_host,
                               base::TerminationStatus status,
@@ -95,13 +97,31 @@ class CONTENT_EXPORT InterstitialPageImpl
                            base::i18n::TextDirection title_direction) OVERRIDE;
   virtual content::RendererPreferences GetRendererPrefs(
       content::BrowserContext* browser_context) const OVERRIDE;
-  virtual WebPreferences GetWebkitPrefs() OVERRIDE;
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut) OVERRIDE;
-  virtual void HandleKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual content::ViewType GetRenderViewType() const OVERRIDE;
+  virtual webkit_glue::WebPreferences GetWebkitPrefs() OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
+  virtual void CreateNewWindow(
+      int route_id,
+      const ViewHostMsg_CreateWindow_Params& params,
+      content::SessionStorageNamespace* session_storage_namespace) OVERRIDE;
+  virtual void CreateNewWidget(int route_id,
+                               WebKit::WebPopupType popup_type) OVERRIDE;
+  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
+  virtual void ShowCreatedWindow(int route_id,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture) OVERRIDE;
+  virtual void ShowCreatedWidget(int route_id,
+                                 const gfx::Rect& initial_pos) OVERRIDE;
+  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+  virtual void ShowContextMenu(
+      const content::ContextMenuParams& params) OVERRIDE;
+
+  // RenderWidgetHostDelegate implementation:
+  virtual bool PreHandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event,
+      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
 
   bool enabled() const { return enabled_; }
   content::WebContents* web_contents() const;
@@ -119,7 +139,7 @@ class CONTENT_EXPORT InterstitialPageImpl
   content::NotificationRegistrar notification_registrar_;
 
  private:
-  class InterstitialPageRVHViewDelegate;
+  class InterstitialPageRVHDelegateView;
 
   // Disable the interstitial:
   // - if it is not yet showing, then it won't be shown.
@@ -183,7 +203,7 @@ class CONTENT_EXPORT InterstitialPageImpl
   string16 original_web_contents_title_;
 
   // Our RenderViewHostViewDelegate, necessary for accelerators to work.
-  scoped_ptr<InterstitialPageRVHViewDelegate> rvh_view_delegate_;
+  scoped_ptr<InterstitialPageRVHDelegateView> rvh_delegate_view_;
 
   // Settings passed to the renderer.
   mutable content::RendererPreferences renderer_preferences_;

@@ -22,11 +22,13 @@
 #include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_secret.h"
 #include "remoting/host/it2me_host_user_interface.h"
+#include "remoting/host/network_settings.h"
 #include "remoting/host/pin_hash.h"
 #include "remoting/host/plugin/daemon_controller.h"
 #include "remoting/host/plugin/host_log_handler.h"
 #include "remoting/host/policy_hack/nat_policy.h"
 #include "remoting/host/register_support_host_request.h"
+#include "remoting/host/session_manager_factory.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/protocol/it2me_host_authenticator_factory.h"
 
@@ -96,10 +98,6 @@ HostNPScriptObject::HostNPScriptObject(
 HostNPScriptObject::~HostNPScriptObject() {
   CHECK_EQ(base::PlatformThread::CurrentId(), np_thread_id_);
 
-  // Shutdown It2MeHostUserInterface first so that it doesn't try to post
-  // tasks on the UI thread while we are stopping the host.
-  it2me_host_user_interface_.reset();
-
   HostLogHandler::UnregisterLoggingScriptObject(this);
 
   plugin_message_loop_proxy_->Detach();
@@ -120,6 +118,13 @@ HostNPScriptObject::~HostNPScriptObject() {
     disconnected_event_.Reset();
     DisconnectInternal();
     disconnected_event_.Wait();
+
+    // UI needs to be shut down on the UI thread before we destroy the
+    // host context (because it depends on the context object), but
+    // only after the host has been shut down (becase the UI object is
+    // registered as status observer for the host, and we can't
+    // unregister it from this thread).
+    it2me_host_user_interface_.reset();
 
     // Stops all threads.
     host_context_.reset();
@@ -456,6 +461,10 @@ bool HostNPScriptObject::Connect(const NPVariant* args,
     return false;
   }
 
+  // The UserInterface object needs to be created on the UI thread.
+  it2me_host_user_interface_.reset(
+      new It2MeHostUserInterface(host_context_.get()));
+
   ReadPolicyAndConnect(uid, auth_token, auth_service);
 
   return true;
@@ -553,17 +562,17 @@ void HostNPScriptObject::FinishConnectNetworkThread(
   LOG(INFO) << "NAT state: " << nat_traversal_enabled_;
   host_ = new ChromotingHost(
       host_context_.get(), signal_strategy_.get(), desktop_environment_.get(),
-      NetworkSettings(nat_traversal_enabled_ ?
-                      NetworkSettings::NAT_TRAVERSAL_ENABLED :
-                      NetworkSettings::NAT_TRAVERSAL_DISABLED));
+      CreateHostSessionManager(
+          NetworkSettings(nat_traversal_enabled_ ?
+                          NetworkSettings::NAT_TRAVERSAL_ENABLED :
+                          NetworkSettings::NAT_TRAVERSAL_DISABLED),
+          host_context_->url_request_context_getter()));
   host_->AddStatusObserver(this);
   log_to_server_.reset(
       new LogToServer(host_, ServerLogEntry::IT2ME, signal_strategy_.get()));
   base::Closure disconnect_callback = base::Bind(
       &ChromotingHost::Shutdown, base::Unretained(host_.get()),
       base::Closure());
-  it2me_host_user_interface_.reset(
-      new It2MeHostUserInterface(host_context_.get()));
   it2me_host_user_interface_->Start(host_.get(), disconnect_callback);
 
   {

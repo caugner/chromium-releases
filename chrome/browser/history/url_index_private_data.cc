@@ -9,7 +9,9 @@
 #include <iterator>
 #include <limits>
 #include <numeric>
+#include <vector>
 
+#include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram.h"
@@ -17,8 +19,10 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/browser/autocomplete/url_prefix.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/in_memory_url_index.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -49,17 +53,6 @@ typedef imui::InMemoryURLIndexCacheItem_WordStartsMapItem WordStartsMapItem;
 typedef imui::InMemoryURLIndexCacheItem_WordStartsMapItem_WordStartsMapEntry
     WordStartsMapEntry;
 
-// The maximum score any candidate result can achieve.
-const int kMaxTotalScore = 1425;
-
-// Score ranges used to get a 'base' score for each of the scoring factors
-// (such as recency of last visit, times visited, times the URL was typed,
-// and the quality of the string match). There is a matching value range for
-// each of these scores for each factor. Note that the top score is greater
-// than |kMaxTotalScore|. The score for each candidate will be capped in the
-// final calculation.
-const int kScoreRank[] = { 1450, 1200, 900, 400 };
-
 // SearchTermCacheItem ---------------------------------------------------------
 
 URLIndexPrivateData::SearchTermCacheItem::SearchTermCacheItem(
@@ -79,43 +72,6 @@ URLIndexPrivateData::SearchTermCacheItem::~SearchTermCacheItem() {}
 // Comparison function for sorting search terms by descending length.
 bool LengthGreater(const string16& string_a, const string16& string_b) {
   return string_a.length() > string_b.length();
-}
-
-// std::accumulate helper function to add up TermMatches' lengths.
-int AccumulateMatchLength(int total, const TermMatch& match) {
-  return total + match.length;
-}
-
-// Converts a raw value for some particular scoring factor into a score
-// component for that factor.  The conversion function is piecewise linear, with
-// input values provided in |value_ranks| and resulting output scores from
-// |kScoreRank| (mathematically, f(value_rank[i]) = kScoreRank[i]).  A score
-// cannot be higher than kScoreRank[0], and drops directly to 0 if lower than
-// kScoreRank[3].
-//
-// For example, take |value| == 70 and |value_ranks| == { 100, 50, 30, 10 }.
-// Because 70 falls between ranks 0 (100) and 1 (50), the score is given by the
-// linear function:
-//   score = m * value + b, where
-//   m = (kScoreRank[0] - kScoreRank[1]) / (value_ranks[0] - value_ranks[1])
-//   b = value_ranks[1]
-// Any value higher than 100 would be scored as if it were 100, and any value
-// lower than 10 scored 0.
-int ScoreForValue(int value, const int* value_ranks) {
-  int i = 0;
-  int rank_count = arraysize(kScoreRank);
-  while ((i < rank_count) && ((value_ranks[0] < value_ranks[1]) ?
-         (value > value_ranks[i]) : (value < value_ranks[i])))
-    ++i;
-  if (i >= rank_count)
-    return 0;
-  int score = kScoreRank[i];
-  if (i > 0) {
-    score += (value - value_ranks[i]) *
-        (kScoreRank[i - 1] - kScoreRank[i]) /
-        (value_ranks[i - 1] - value_ranks[i]);
-  }
-  return score;
 }
 
 // InMemoryURLIndex's Private Data ---------------------------------------------
@@ -154,6 +110,7 @@ scoped_refptr<URLIndexPrivateData> URLIndexPrivateData::Duplicate() const {
   data_copy->word_id_history_map_ = word_id_history_map_;
   data_copy->history_id_word_map_ = history_id_word_map_;
   data_copy->history_info_map_ = history_info_map_;
+  data_copy->word_starts_map_ = word_starts_map_;
   return data_copy;
   // Not copied:
   //    search_term_cache_
@@ -523,7 +480,7 @@ ScoredHistoryMatches URLIndexPrivateData::HistoryItemsForTerms(
   Tokenize(lower_raw_string, kWhitespaceUTF16, &lower_raw_terms);
   scored_items = std::for_each(history_id_set.begin(), history_id_set.end(),
       AddHistoryMatch(*this, lower_raw_string,
-                      lower_raw_terms)).ScoredMatches();
+                      lower_raw_terms, base::Time::Now())).ScoredMatches();
 
   // Select and sort only the top kMaxMatches results.
   if (scored_items.size() > AutocompleteProvider::kMaxMatches) {
@@ -560,10 +517,12 @@ ScoredHistoryMatches URLIndexPrivateData::HistoryItemsForTerms(
 URLIndexPrivateData::AddHistoryMatch::AddHistoryMatch(
     const URLIndexPrivateData& private_data,
     const string16& lower_string,
-    const String16Vector& lower_terms)
+    const String16Vector& lower_terms,
+    const base::Time now)
   : private_data_(private_data),
     lower_string_(lower_string),
-    lower_terms_(lower_terms) {}
+    lower_terms_(lower_terms),
+    now_(now) {}
 
 URLIndexPrivateData::AddHistoryMatch::~AddHistoryMatch() {}
 
@@ -571,176 +530,16 @@ void URLIndexPrivateData::AddHistoryMatch::operator()(
     const HistoryID history_id) {
   HistoryInfoMap::const_iterator hist_pos =
       private_data_.history_info_map_.find(history_id);
-  // Note that a history_id may be present in the word_id_history_map_ yet not
-  // be found in the history_info_map_. This occurs when an item has been
-  // deleted by the user or the item no longer qualifies as a quick result.
   if (hist_pos != private_data_.history_info_map_.end()) {
     const URLRow& hist_item = hist_pos->second;
     WordStartsMap::const_iterator starts_pos =
         private_data_.word_starts_map_.find(history_id);
     DCHECK(starts_pos != private_data_.word_starts_map_.end());
-    ScoredHistoryMatch match(ScoredMatchForURL(hist_item, lower_string_,
-                                               lower_terms_,
-                                               starts_pos->second));
+    ScoredHistoryMatch match(hist_item, lower_string_, lower_terms_,
+                             starts_pos->second, now_);
     if (match.raw_score > 0)
       scored_matches_.push_back(match);
   }
-}
-
-// static
-// TODO(mrossetti): This can be made a ctor for ScoredHistoryMatch.
-ScoredHistoryMatch URLIndexPrivateData::ScoredMatchForURL(
-    const URLRow& row,
-    const string16& lower_string,
-    const String16Vector& terms,
-    const RowWordStarts& word_starts) {
-  ScoredHistoryMatch match(row);
-  GURL gurl = row.url();
-  if (!gurl.is_valid())
-    return match;
-
-  // Figure out where each search term appears in the URL and/or page title
-  // so that we can score as well as provide autocomplete highlighting.
-  string16 url = base::i18n::ToLower(UTF8ToUTF16(gurl.spec()));
-  string16 title = base::i18n::ToLower(row.title());
-  int term_num = 0;
-  for (String16Vector::const_iterator iter = terms.begin(); iter != terms.end();
-       ++iter, ++term_num) {
-    string16 term = *iter;
-    TermMatches url_term_matches = MatchTermInString(term, url, term_num);
-    TermMatches title_term_matches = MatchTermInString(term, title, term_num);
-    if (url_term_matches.empty() && title_term_matches.empty())
-      return match;  // A term was not found in either URL or title - reject.
-    match.url_matches.insert(match.url_matches.end(), url_term_matches.begin(),
-                             url_term_matches.end());
-    match.title_matches.insert(match.title_matches.end(),
-                               title_term_matches.begin(),
-                               title_term_matches.end());
-  }
-
-  // Sort matches by offset and eliminate any which overlap.
-  match.url_matches = SortAndDeoverlapMatches(match.url_matches);
-  match.title_matches = SortAndDeoverlapMatches(match.title_matches);
-
-  // We can inline autocomplete a result if:
-  //  1) there is only one search term
-  //  2) AND EITHER:
-  //    2a) the first match starts at the beginning of the candidate URL, OR
-  //    2b) the candidate URL starts with one of the standard URL prefixes with
-  //        the URL match immediately following that prefix.
-  //  3) AND the search string does not end in whitespace (making it look to
-  //     the IMUI as though there is a single search term when actually there
-  //     is a second, empty term).
-  match.can_inline = !match.url_matches.empty() &&
-      terms.size() == 1 &&
-      (match.url_matches[0].offset == 0 ||
-       IsInlineablePrefix(url.substr(0, match.url_matches[0].offset))) &&
-      !IsWhitespace(*(lower_string.rbegin()));
-  match.match_in_scheme = match.can_inline && match.url_matches[0].offset == 0;
-
-  // Get partial scores based on term matching. Note that the score for
-  // each of the URL and title are adjusted by the fraction of the
-  // terms appearing in each.
-  int url_score = ScoreComponentForMatches(match.url_matches, url.length()) *
-      std::min(match.url_matches.size(), terms.size()) / terms.size();
-  int title_score =
-      ScoreComponentForMatches(match.title_matches, title.length()) *
-      std::min(match.title_matches.size(), terms.size()) / terms.size();
-  // Arbitrarily pick the best.
-  // TODO(mrossetti): It might make sense that a term which appears in both the
-  // URL and the Title should boost the score a bit.
-  int term_score = std::max(url_score, title_score);
-  if (term_score == 0)
-    return match;
-
-  // Determine scoring factors for the recency of visit, visit count and typed
-  // count attributes of the URLRow.
-  const int kDaysAgoLevel[] = { 1, 10, 20, 30 };
-  int days_ago_value = ScoreForValue((base::Time::Now() -
-      row.last_visit()).InDays(), kDaysAgoLevel);
-  const int kVisitCountLevel[] = { 50, 30, 10, 5 };
-  int visit_count_value = ScoreForValue(row.visit_count(), kVisitCountLevel);
-  const int kTypedCountLevel[] = { 50, 30, 10, 5 };
-  int typed_count_value = ScoreForValue(row.typed_count(), kTypedCountLevel);
-
-  // The final raw score is calculated by:
-  //   - multiplying each factor by a 'relevance'
-  //   - calculating the average.
-  // Note that visit_count is reduced by typed_count because both are bumped
-  // when a typed URL is recorded thus giving visit_count too much weight.
-  const int kTermScoreRelevance = 4;
-  const int kDaysAgoRelevance = 2;
-  const int kVisitCountRelevance = 2;
-  const int kTypedCountRelevance = 5;
-  int effective_visit_count_value =
-      std::max(0, visit_count_value - typed_count_value);
-  match.raw_score = term_score * kTermScoreRelevance +
-                    days_ago_value * kDaysAgoRelevance +
-                    effective_visit_count_value * kVisitCountRelevance +
-                    typed_count_value * kTypedCountRelevance;
-  match.raw_score /= (kTermScoreRelevance + kDaysAgoRelevance +
-                      kVisitCountRelevance + kTypedCountRelevance);
-  match.raw_score = std::min(kMaxTotalScore, match.raw_score);
-
-  return match;
-}
-
-int URLIndexPrivateData::ScoreComponentForMatches(const TermMatches& matches,
-                                                  size_t max_length) {
-  if (matches.empty())
-    return 0;
-
-  // Score component for whether the input terms (if more than one) were found
-  // in the same order in the match.  Start with kOrderMaxValue points divided
-  // equally among (number of terms - 1); then discount each of those terms that
-  // is out-of-order in the match.
-  const int kOrderMaxValue = 1000;
-  int order_value = kOrderMaxValue;
-  if (matches.size() > 1) {
-    int max_possible_out_of_order = matches.size() - 1;
-    int out_of_order = 0;
-    for (size_t i = 1; i < matches.size(); ++i) {
-      if (matches[i - 1].term_num > matches[i].term_num)
-        ++out_of_order;
-    }
-    order_value = (max_possible_out_of_order - out_of_order) * kOrderMaxValue /
-        max_possible_out_of_order;
-  }
-
-  // Score component for how early in the match string the first search term
-  // appears.  Start with kStartMaxValue points and discount by
-  // kStartMaxValue/kMaxSignificantChars points for each character later than
-  // the first at which the term begins. No points are earned if the start of
-  // the match occurs at or after kMaxSignificantChars.
-  const int kStartMaxValue = 1000;
-  int start_value = (kMaxSignificantChars -
-      std::min(kMaxSignificantChars, matches[0].offset)) * kStartMaxValue /
-      kMaxSignificantChars;
-
-  // Score component for how much of the matched string the input terms cover.
-  // kCompleteMaxValue points times the fraction of the URL/page title string
-  // that was matched.
-  size_t term_length_total = std::accumulate(matches.begin(), matches.end(),
-                                             0, AccumulateMatchLength);
-  const size_t kMaxSignificantLength = 50;
-  size_t max_significant_length =
-      std::min(max_length, std::max(term_length_total, kMaxSignificantLength));
-  const int kCompleteMaxValue = 1000;
-  int complete_value =
-      term_length_total * kCompleteMaxValue / max_significant_length;
-
-  const int kOrderRelevance = 1;
-  const int kStartRelevance = 6;
-  const int kCompleteRelevance = 3;
-  int raw_score = order_value * kOrderRelevance +
-                  start_value * kStartRelevance +
-                  complete_value * kCompleteRelevance;
-  raw_score /= (kOrderRelevance + kStartRelevance + kCompleteRelevance);
-
-  // Scale the raw score into a single score component in the same manner as
-  // used in ScoredMatchForURL().
-  const int kTermScoreLevel[] = { 1000, 750, 500, 200 };
-  return ScoreForValue(raw_score, kTermScoreLevel);
 }
 
 void URLIndexPrivateData::ResetSearchTermCache() {
@@ -1094,7 +893,7 @@ void URLIndexPrivateData::SaveWordStartsMap(
 void URLIndexPrivateData::RestoreFromFileTask(
     const FilePath& file_path,
     scoped_refptr<URLIndexPrivateData> private_data,
-    std::string languages) {
+    const std::string& languages) {
   private_data = URLIndexPrivateData::RestoreFromFile(file_path, languages);
 }
 

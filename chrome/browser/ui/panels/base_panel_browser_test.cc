@@ -4,8 +4,6 @@
 
 #include "chrome/browser/ui/panels/base_panel_browser_test.h"
 
-#include "chrome/browser/ui/browser_list.h"
-
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
@@ -18,7 +16,7 @@
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -27,9 +25,10 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
-#include "content/test/web_contents_tester.h"
+#include "content/public/test/web_contents_tester.h"
 
 #if defined(OS_LINUX)
+#include "chrome/browser/ui/browser_window.h"
 #include "ui/base/x/x11_util.h"
 #endif
 
@@ -40,6 +39,7 @@
 #endif
 
 using content::WebContentsTester;
+using extensions::Extension;
 
 namespace {
 
@@ -238,27 +238,7 @@ void BasePanelBrowserTest::SetUpOnMainThread() {
 
   // This is needed so the subsequently created panels can be activated.
   // On a Mac, it transforms background-only test process into foreground one.
-  EXPECT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-}
-
-void BasePanelBrowserTest::WaitForPanelAdded(Panel* panel) {
-  if (ExistsPanel(panel))
-    return;
-  ui_test_utils::WindowedNotificationObserver signal(
-      chrome::NOTIFICATION_PANEL_ADDED,
-      content::Source<Panel>(panel));
-  signal.Wait();
-  EXPECT_TRUE(ExistsPanel(panel));
-}
-
-void BasePanelBrowserTest::WaitForPanelRemoved(Panel* panel) {
-  if (!ExistsPanel(panel))
-    return;
-  ui_test_utils::WindowedNotificationObserver signal(
-      chrome::NOTIFICATION_PANEL_CLOSED,
-      content::Source<Panel>(panel));
-  signal.Wait();
-  EXPECT_FALSE(ExistsPanel(panel));
+  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
 }
 
 void BasePanelBrowserTest::WaitForPanelActiveState(
@@ -277,7 +257,7 @@ void BasePanelBrowserTest::WaitForPanelActiveState(
 
 void BasePanelBrowserTest::WaitForWindowSizeAvailable(Panel* panel) {
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   ui_test_utils::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_WINDOW_SIZE_KNOWN,
       content::Source<Panel>(panel));
@@ -289,7 +269,7 @@ void BasePanelBrowserTest::WaitForWindowSizeAvailable(Panel* panel) {
 
 void BasePanelBrowserTest::WaitForBoundsAnimationFinished(Panel* panel) {
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   ui_test_utils::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
       content::Source<Panel>(panel));
@@ -322,43 +302,23 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
 #endif
 
-  Browser* panel_browser = Browser::CreateWithParams(
-      Browser::CreateParams::CreateForApp(
-          Browser::TYPE_PANEL, params.name, params.bounds,
-          browser()->profile()));
-  EXPECT_TRUE(panel_browser->is_type_panel());
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::NotificationService::AllSources());
 
-  if (!params.url.is_empty()) {
-    ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP,
-        content::NotificationService::AllSources());
-    panel_browser->AddSelectedTabWithURL(params.url,
-                                         content::PAGE_TRANSITION_START_PAGE);
+  PanelManager* manager = PanelManager::GetInstance();
+  Panel* panel = manager->CreatePanel(params.name, browser()->profile(),
+                                      params.url, params.bounds.size());
+
+  if (!params.url.is_empty())
     observer.Wait();
-  }
 
-  Panel* panel = static_cast<Panel*>(panel_browser->window());
-
-  if (!PanelManager::GetInstance()->auto_sizing_enabled() ||
+  if (!manager->auto_sizing_enabled() ||
       params.bounds.width() || params.bounds.height()) {
     EXPECT_FALSE(panel->auto_resizable());
   } else {
     EXPECT_TRUE(panel->auto_resizable());
   }
-
-#if defined(OS_LINUX)
-  // On bots, we might have a simple window manager which always activates new
-  // windows, and can't always deactivate them. Keep track of the previously
-  // active window so we can activate that window back to ensure the new window
-  // is inactive.
-  Browser* last_active_browser_to_restore = NULL;
-  if (params.expected_active_state == SHOW_AS_INACTIVE &&
-      ui::GuessWindowManager() == ui::WM_ICE_WM) {
-    last_active_browser_to_restore = BrowserList::GetLastActive();
-    EXPECT_TRUE(last_active_browser_to_restore);
-    EXPECT_NE(last_active_browser_to_restore, panel->browser());
-  }
-#endif
 
   if (params.show_flag == SHOW_AS_ACTIVE) {
     panel->Show();
@@ -370,9 +330,13 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
     MessageLoopForUI::current()->RunAllPending();
 
 #if defined(OS_LINUX)
-    // Restore focus where it was. It will deactivate the new panel.
-    if (last_active_browser_to_restore)
-      last_active_browser_to_restore->window()->Activate();
+    // On bots, we might have a simple window manager which always activates new
+    // windows, and can't always deactivate them. Re-activate the main tabbed
+    // browser to "deactivate" the newly created panel.
+    if (params.expected_active_state == SHOW_AS_INACTIVE &&
+        ui::GuessWindowManager() == ui::WM_ICE_WM) {
+      browser()->window()->Activate();
+    }
 #endif
     // More waiting, because gaining or losing focus may require inter-process
     // asynchronous communication, and it is not enough to just run the local
@@ -423,10 +387,15 @@ Panel* BasePanelBrowserTest::CreateDetachedPanel(const std::string& name,
   return panel;
 }
 
+// static
+NativePanelTesting* BasePanelBrowserTest::CreateNativePanelTesting(
+    Panel* panel) {
+  return panel->native_panel()->CreateNativePanelTesting();
+}
+
 void BasePanelBrowserTest::CreateTestTabContents(Browser* browser) {
-  TabContentsWrapper* tab_contents =
-      new TabContentsWrapper(
-          WebContentsTester::CreateTestWebContents(browser->profile(), NULL));
+  TabContents* tab_contents = new TabContents(
+      WebContentsTester::CreateTestWebContents(browser->profile(), NULL));
   browser->AddTab(tab_contents, content::PAGE_TRANSITION_LINK);
 }
 
@@ -447,8 +416,7 @@ scoped_refptr<Extension> BasePanelBrowserTest::CreateExtension(
 
   std::string error;
   scoped_refptr<Extension> extension = Extension::Create(
-      full_path,  location, *input_value,
-      Extension::STRICT_ERROR_CHECKS, &error);
+      full_path,  location, *input_value, Extension::NO_FLAGS, &error);
   EXPECT_TRUE(extension.get());
   EXPECT_STREQ("", error.c_str());
   browser()->profile()->GetExtensionService()->
@@ -464,17 +432,18 @@ void BasePanelBrowserTest::SetTestingAreas(const gfx::Rect& primary_screen_area,
       work_area.IsEmpty() ? primary_screen_area : work_area);
 }
 
-void BasePanelBrowserTest::CloseWindowAndWait(Browser* browser) {
-  // Closing a browser window may involve several async tasks. Need to use
+void BasePanelBrowserTest::CloseWindowAndWait(Panel* panel) {
+  // Closing a panel may involve several async tasks. Need to use
   // message pump and wait for the notification.
-  size_t browser_count = BrowserList::size();
+  PanelManager* manager = PanelManager::GetInstance();
+  int panel_count = manager->num_panels();
   ui_test_utils::WindowedNotificationObserver signal(
-      chrome::NOTIFICATION_BROWSER_CLOSED,
-      content::Source<Browser>(browser));
-  browser->CloseWindow();
+      chrome::NOTIFICATION_PANEL_CLOSED,
+      content::Source<Panel>(panel));
+  panel->Close();
   signal.Wait();
-  // Now we have one less browser instance.
-  EXPECT_EQ(browser_count - 1, BrowserList::size());
+  // Now we have one less panel.
+  EXPECT_EQ(panel_count - 1, manager->num_panels());
 
 #if defined(OS_MACOSX)
   // Mac window controllers may be autoreleased, and in the non-test
@@ -486,6 +455,16 @@ void BasePanelBrowserTest::CloseWindowAndWait(Browser* browser) {
   // Make sure that everything has a chance to run.
   chrome::testing::NSRunLoopRunAllPending();
 #endif  // OS_MACOSX
+}
+
+void BasePanelBrowserTest::MoveMouseAndWaitForExpansionStateChange(
+    Panel* panel,
+    const gfx::Point& position) {
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
+      content::Source<Panel>(panel));
+  MoveMouse(position);
+  signal.Wait();
 }
 
 void BasePanelBrowserTest::MoveMouse(const gfx::Point& position) {

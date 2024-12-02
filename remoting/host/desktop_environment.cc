@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "remoting/host/capturer.h"
-#include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/event_executor.h"
 
@@ -21,9 +20,9 @@ namespace remoting {
 scoped_ptr<DesktopEnvironment> DesktopEnvironment::Create(
     ChromotingHostContext* context) {
   scoped_ptr<Capturer> capturer(Capturer::Create());
-  scoped_ptr<protocol::HostEventStub> event_executor =
-      EventExecutor::Create(context->desktop_message_loop(),
-                            capturer.get());
+  scoped_ptr<EventExecutor> event_executor = EventExecutor::Create(
+      context->desktop_message_loop()->message_loop_proxy(),
+      context->ui_message_loop(), capturer.get());
 
   if (capturer.get() == NULL || event_executor.get() == NULL) {
     LOG(ERROR) << "Unable to create DesktopEnvironment";
@@ -40,9 +39,9 @@ scoped_ptr<DesktopEnvironment> DesktopEnvironment::Create(
 scoped_ptr<DesktopEnvironment> DesktopEnvironment::CreateForService(
     ChromotingHostContext* context) {
   scoped_ptr<Capturer> capturer(Capturer::Create());
-  scoped_ptr<protocol::HostEventStub> event_executor =
-      EventExecutor::Create(context->desktop_message_loop(),
-                            capturer.get());
+  scoped_ptr<EventExecutor> event_executor = EventExecutor::Create(
+      context->desktop_message_loop()->message_loop_proxy(),
+      context->ui_message_loop(), capturer.get());
 
   if (capturer.get() == NULL || event_executor.get() == NULL) {
     LOG(ERROR) << "Unable to create DesktopEnvironment";
@@ -66,7 +65,7 @@ scoped_ptr<DesktopEnvironment> DesktopEnvironment::CreateForService(
 scoped_ptr<DesktopEnvironment> DesktopEnvironment::CreateFake(
     ChromotingHostContext* context,
     scoped_ptr<Capturer> capturer,
-    scoped_ptr<protocol::HostEventStub> event_executor) {
+    scoped_ptr<EventExecutor> event_executor) {
   return scoped_ptr<DesktopEnvironment>(
       new DesktopEnvironment(context,
                              capturer.Pass(),
@@ -76,14 +75,22 @@ scoped_ptr<DesktopEnvironment> DesktopEnvironment::CreateFake(
 DesktopEnvironment::DesktopEnvironment(
     ChromotingHostContext* context,
     scoped_ptr<Capturer> capturer,
-    scoped_ptr<protocol::HostEventStub> event_executor)
-    : host_(NULL),
-      context_(context),
+    scoped_ptr<EventExecutor> event_executor)
+    : context_(context),
       capturer_(capturer.Pass()),
       event_executor_(event_executor.Pass()) {
 }
 
 DesktopEnvironment::~DesktopEnvironment() {
+}
+
+void DesktopEnvironment::OnSessionStarted(
+    scoped_ptr<protocol::ClipboardStub> client_clipboard) {
+  event_executor_->OnSessionStarted(client_clipboard.Pass());
+}
+
+void DesktopEnvironment::OnSessionFinished() {
+  event_executor_->OnSessionFinished();
 }
 
 }  // namespace remoting

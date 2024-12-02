@@ -13,15 +13,17 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "jingle/notifier/listener/talk_mediator.h"
+#include "base/threading/non_thread_safe.h"
+#include "jingle/notifier/listener/push_client_observer.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/notifier/notifications_disabled_reason.h"
 #include "sync/notifier/sync_notifier.h"
-#include "sync/syncable/model_type.h"
 
-namespace base {
-class MessageLoopProxy;
-}
-
+namespace notifier {
+class PushClient;
+}  // namespace notifier
 
 namespace sync_notifier {
 
@@ -81,17 +83,14 @@ class P2PNotificationData {
 
 class P2PNotifier
     : public SyncNotifier,
-      public notifier::TalkMediator::Delegate {
+      public notifier::PushClientObserver {
  public:
-  // Takes ownership of |talk_mediator|, but it is guaranteed that
-  // |talk_mediator| is destroyed only when this object is destroyed.
-  //
   // The |send_notification_target| parameter was added to allow us to send
   // self-notifications in some cases, but not others.  The value should be
   // either NOTIFY_ALL to send notifications to all clients, or NOTIFY_OTHERS
-  // to send notificaitons to all clients except for the one that triggered the
+  // to send notifications to all clients except for the one that triggered the
   // notification.  See crbug.com/97780.
-  P2PNotifier(notifier::TalkMediator* talk_mediator,
+  P2PNotifier(scoped_ptr<notifier::PushClient> push_client,
               P2PNotificationTarget send_notification_target);
 
   virtual ~P2PNotifier();
@@ -100,7 +99,7 @@ class P2PNotifier
   virtual void AddObserver(SyncNotifierObserver* observer) OVERRIDE;
   virtual void RemoveObserver(SyncNotifierObserver* observer) OVERRIDE;
   virtual void SetUniqueId(const std::string& unique_id) OVERRIDE;
-  virtual void SetState(const std::string& state) OVERRIDE;
+  virtual void SetStateDeprecated(const std::string& state) OVERRIDE;
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE;
   virtual void UpdateEnabledTypes(
@@ -108,36 +107,36 @@ class P2PNotifier
   virtual void SendNotification(
       syncable::ModelTypeSet changed_types) OVERRIDE;
 
-  // TalkMediator::Delegate implementation.
-  virtual void OnNotificationStateChange(bool notifications_enabled) OVERRIDE;
+  // PushClientObserver implementation.
+  virtual void OnNotificationsEnabled() OVERRIDE;
+  virtual void OnNotificationsDisabled(
+      notifier::NotificationsDisabledReason reason) OVERRIDE;
   virtual void OnIncomingNotification(
       const notifier::Notification& notification) OVERRIDE;
-  virtual void OnOutgoingNotification() OVERRIDE;
 
-  // For testing.
   void SendNotificationDataForTest(
       const P2PNotificationData& notification_data);
 
  private:
   void SendNotificationData(const P2PNotificationData& notification_data);
 
+  base::NonThreadSafe non_thread_safe_;
+
   ObserverList<SyncNotifierObserver> observer_list_;
 
-  // The actual notification listener.
-  scoped_ptr<notifier::TalkMediator> talk_mediator_;
+  // The push client.
+  scoped_ptr<notifier::PushClient> push_client_;
   // Our unique ID.
   std::string unique_id_;
-  // Whether we called Login() on |talk_mediator_| yet.
+  // Whether we have called UpdateCredentials() yet.
   bool logged_in_;
-  // Whether |talk_mediator_| has notified us that notifications are
-  // enabled.
   bool notifications_enabled_;
   // Which set of clients should be sent notifications.
   P2PNotificationTarget send_notification_target_;
 
   syncable::ModelTypeSet enabled_types_;
-  scoped_refptr<base::MessageLoopProxy> parent_message_loop_proxy_;
 };
 
 }  // namespace sync_notifier
+
 #endif  // SYNC_NOTIFIER_P2P_NOTIFIER_H_

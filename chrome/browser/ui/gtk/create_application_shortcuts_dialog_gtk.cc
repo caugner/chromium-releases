@@ -13,7 +13,7 @@
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/shell_integration_linux.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/web_applications/web_app.h"
@@ -25,13 +25,14 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 namespace {
 
@@ -45,7 +46,7 @@ const int kDescriptionLabelHeightLines = 3;
 
 // static
 void CreateWebApplicationShortcutsDialogGtk::Show(
-    GtkWindow* parent, TabContentsWrapper* tab_contents) {
+    GtkWindow* parent, TabContents* tab_contents) {
   new CreateWebApplicationShortcutsDialogGtk(parent, tab_contents);
 }
 
@@ -285,7 +286,7 @@ void CreateApplicationShortcutsDialogGtk::OnToggleCheckbox(GtkWidget* sender) {
 
 CreateWebApplicationShortcutsDialogGtk::CreateWebApplicationShortcutsDialogGtk(
     GtkWindow* parent,
-    TabContentsWrapper* tab_contents)
+    TabContents* tab_contents)
   : CreateApplicationShortcutsDialogGtk(parent),
     tab_contents_(tab_contents) {
 

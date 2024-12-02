@@ -4,7 +4,9 @@
 
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
+#include "base/string_util.h"
 #include "jingle/notifier/base/gaia_token_pre_xmpp_auth.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/xmpp_socket_adapter.h"
@@ -20,6 +22,10 @@ const char kDefaultResourceName[] = "chromoting";
 // connections that are idle for more than a minute.
 const int kKeepAliveIntervalSeconds = 50;
 
+void DisconnectXmppClient(buzz::XmppClient* client) {
+  client->Disconnect();
+}
+
 }  // namespace
 
 namespace remoting {
@@ -34,11 +40,11 @@ XmppSignalStrategy::XmppSignalStrategy(JingleThread* jingle_thread,
      auth_token_service_(auth_token_service),
      resource_name_(kDefaultResourceName),
      xmpp_client_(NULL),
-     state_(DISCONNECTED) {
+     state_(DISCONNECTED),
+     error_(OK) {
 }
 
 XmppSignalStrategy::~XmppSignalStrategy() {
-  DCHECK_EQ(listeners_.size(), 0U);
   Disconnect();
 }
 
@@ -55,7 +61,7 @@ void XmppSignalStrategy::Connect() {
   settings.set_resource(resource_name_);
   settings.set_use_tls(buzz::TLS_ENABLED);
   settings.set_token_service(auth_token_service_);
-  settings.set_auth_cookie(auth_token_);
+  settings.set_auth_token(buzz::AUTH_MECHANISM_GOOGLE_TOKEN, auth_token_);
   settings.set_server(talk_base::SocketAddress("talk.google.com", 5222));
 
   buzz::AsyncSocket* socket = new XmppSocketAdapter(settings, false);
@@ -87,6 +93,11 @@ void XmppSignalStrategy::Disconnect() {
 SignalStrategy::State XmppSignalStrategy::GetState() const {
   DCHECK(CalledOnValidThread());
   return state_;
+}
+
+SignalStrategy::Error XmppSignalStrategy::GetError() const {
+  DCHECK(CalledOnValidThread());
+  return error_;
 }
 
 std::string XmppSignalStrategy::GetLocalJid() const {
@@ -154,6 +165,7 @@ void XmppSignalStrategy::SetResourceName(const std::string &resource_name) {
 void XmppSignalStrategy::OnConnectionStateChanged(
     buzz::XmppEngine::State state) {
   DCHECK(CalledOnValidThread());
+
   if (state == buzz::XmppEngine::STATE_OPEN) {
     keep_alive_timer_.Start(
         FROM_HERE, base::TimeDelta::FromSeconds(kKeepAliveIntervalSeconds),
@@ -171,6 +183,18 @@ void XmppSignalStrategy::OnConnectionStateChanged(
     // Client is destroyed by the TaskRunner after the client is
     // closed. Reset the pointer so we don't try to use it later.
     xmpp_client_ = NULL;
+
+    switch (error) {
+      case buzz::XmppEngine::ERROR_UNAUTHORIZED:
+      case buzz::XmppEngine::ERROR_AUTH:
+      case buzz::XmppEngine::ERROR_MISSING_USERNAME:
+        error_ = AUTHENTICATION_FAILED;
+        break;
+
+      default:
+        error_ = NETWORK_ERROR;
+    }
+
     SetState(DISCONNECTED);
   }
 }
@@ -197,7 +221,7 @@ buzz::PreXmppAuth* XmppSignalStrategy::CreatePreXmppAuth(
   }
 
   return new notifier::GaiaTokenPreXmppAuth(
-      jid.Str(), settings.auth_cookie(), settings.token_service(), mechanism);
+      jid.Str(), settings.auth_token(), settings.token_service(), mechanism);
 }
 
 }  // namespace remoting

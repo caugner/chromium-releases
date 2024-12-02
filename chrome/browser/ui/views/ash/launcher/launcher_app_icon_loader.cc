@@ -6,9 +6,10 @@
 
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "content/public/browser/web_contents.h"
 
 LauncherAppIconLoader::LauncherAppIconLoader(
@@ -21,8 +22,8 @@ LauncherAppIconLoader::LauncherAppIconLoader(
 LauncherAppIconLoader::~LauncherAppIconLoader() {
 }
 
-std::string LauncherAppIconLoader::GetAppID(TabContentsWrapper* tab) {
-  const Extension* extension = GetExtensionForTab(tab);
+std::string LauncherAppIconLoader::GetAppID(TabContents* tab) {
+  const extensions::Extension* extension = GetExtensionForTab(tab);
   return extension ? extension->id() : std::string();
 }
 
@@ -37,7 +38,7 @@ void LauncherAppIconLoader::FetchImage(const std::string& id) {
       return;  // Already loading the image.
   }
 
-  const Extension* extension = GetExtensionByID(id);
+  const extensions::Extension* extension = GetExtensionByID(id);
   if (!extension)
     return;
   if (!image_loader_.get())
@@ -67,18 +68,18 @@ void LauncherAppIconLoader::OnImageLoaded(const gfx::Image& image,
     host_->SetAppImage(id, image.ToSkBitmap());
 }
 
-const Extension* LauncherAppIconLoader::GetExtensionForTab(
-    TabContentsWrapper* tab) {
+const extensions::Extension* LauncherAppIconLoader::GetExtensionForTab(
+    TabContents* tab) {
   ExtensionService* extension_service = profile_->GetExtensionService();
   if (!extension_service)
     return NULL;
   return extension_service->GetInstalledApp(tab->web_contents()->GetURL());
 }
 
-const Extension* LauncherAppIconLoader::GetExtensionByID(
+const extensions::Extension* LauncherAppIconLoader::GetExtensionByID(
     const std::string& id) {
   ExtensionService* service = profile_->GetExtensionService();
   if (!service)
     return NULL;
-  return service->GetInstalledExtension(id);
+  return service->extensions()->GetByID(id);
 }

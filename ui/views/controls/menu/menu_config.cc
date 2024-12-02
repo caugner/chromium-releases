@@ -4,9 +4,8 @@
 
 #include "ui/views/controls/menu/menu_config.h"
 
-#include "base/command_line.h"
 #include "build/build_config.h"
-#include "ui/base/ui_base_switches.h"
+#include "ui/base/layout.h"
 
 namespace views {
 
@@ -16,6 +15,7 @@ MenuConfig::MenuConfig()
     : text_color(SK_ColorBLACK),
       submenu_horizontal_margin_size(3),
       submenu_vertical_margin_size(3),
+      submenu_horizontal_inset(3),
       item_top_margin(3),
       item_bottom_margin(4),
       item_no_icon_top_margin(1),
@@ -38,10 +38,11 @@ MenuConfig::MenuConfig()
       scroll_arrow_height(3),
       label_to_accelerator_padding(10),
       item_min_height(0),
-      show_accelerators(true) {
+      show_accelerators(true),
+      always_use_icon_to_label_padding(false),
+      align_arrow_and_shortcut(false) {
   // Use 40px tall menu items when running in touch optimized mode.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kTouchOptimizedUI)) {
+  if (ui::GetDisplayLayout() == ui::LAYOUT_TOUCH) {
     item_top_margin = item_no_icon_top_margin = 12;
     item_bottom_margin = item_no_icon_bottom_margin = 13;
   }

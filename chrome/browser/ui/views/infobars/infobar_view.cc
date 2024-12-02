@@ -60,7 +60,7 @@ InfoBarView::InfoBarView(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
     : InfoBar(owner, delegate),
       icon_(NULL),
       close_button_(NULL) {
-  set_parent_owned(false);  // InfoBar deletes itself at the appropriate time.
+  set_owned_by_client();  // InfoBar deletes itself at the appropriate time.
   set_background(new InfoBarBackground(delegate->GetInfoBarType()));
 }
 
@@ -104,7 +104,7 @@ views::MenuButton* InfoBarView::CreateMenuButton(
   menu_button->set_animate_on_state_change(false);
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   menu_button->set_menu_marker(
-      rb.GetImageNamed(IDR_INFOBARBUTTON_MENU_DROPARROW).ToSkBitmap());
+      rb.GetImageNamed(IDR_INFOBARBUTTON_MENU_DROPARROW).ToImageSkia());
   menu_button->SetEnabledColor(SK_ColorBLACK);
   menu_button->SetHighlightColor(SK_ColorBLACK);
   menu_button->SetHoverColor(SK_ColorBLACK);
@@ -218,18 +218,18 @@ void InfoBarView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     gfx::Image* image = delegate()->GetIcon();
     if (image) {
       icon_ = new views::ImageView;
-      icon_->SetImage(image->ToSkBitmap());
+      icon_->SetImage(image->ToImageSkia());
       AddChildView(icon_);
     }
 
     close_button_ = new views::ImageButton(this);
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     close_button_->SetImage(views::CustomButton::BS_NORMAL,
-                            rb.GetImageNamed(IDR_CLOSE_BAR).ToSkBitmap());
+                            rb.GetImageNamed(IDR_CLOSE_BAR).ToImageSkia());
     close_button_->SetImage(views::CustomButton::BS_HOT,
-                            rb.GetImageNamed(IDR_CLOSE_BAR_H).ToSkBitmap());
+                            rb.GetImageNamed(IDR_CLOSE_BAR_H).ToImageSkia());
     close_button_->SetImage(views::CustomButton::BS_PUSHED,
-                            rb.GetImageNamed(IDR_CLOSE_BAR_P).ToSkBitmap());
+                            rb.GetImageNamed(IDR_CLOSE_BAR_P).ToImageSkia());
     close_button_->SetAccessibleName(
         l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
     close_button_->set_focusable(true);

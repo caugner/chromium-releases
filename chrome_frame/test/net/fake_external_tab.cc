@@ -44,6 +44,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/logging/win/file_logger.h"
 #include "chrome/test/logging/win/log_file_printer.h"
 #include "chrome/test/logging/win/test_log_collector.h"
@@ -146,29 +147,19 @@ class FakeMainDelegate : public content::ContentMainDelegate {
     logging_win::InstallTestLogCollector(
         testing::UnitTest::GetInstance());
 
-    // Initialize the content client.
     content::SetContentClient(&g_chrome_content_client.Get());
-
-    // Override the default ContentBrowserClient to let Chrome participate in
-    // content logic.  We use a subclass of Chrome's implementation,
-    // FakeContentBrowserClient, to override CreateBrowserMainParts.  Must
-    // be done before any tabs are created.
-    content::GetContentClient()->set_browser(&g_browser_client.Get());
-    content::GetContentClient()->set_renderer(&g_renderer_client.Get());
+    content::GetContentClient()->set_renderer_for_testing(
+        &g_renderer_client.Get());
     return false;
   }
 
-  virtual void PreSandboxStartup() OVERRIDE {
-  }
-
-  virtual void SandboxInitialized(const std::string& process_type) OVERRIDE {}
-
-  virtual int RunProcess(
-      const std::string& process_type,
-      const content::MainFunctionParams& main_function_params) OVERRIDE {
-    return -1;
-  }
-  virtual void ProcessExiting(const std::string& process_type) OVERRIDE {}
+  // Override the default ContentBrowserClient to let Chrome participate in
+  // content logic.  We use a subclass of Chrome's implementation,
+  // FakeContentBrowserClient, to override CreateBrowserMainParts.  Must
+  // be done before any tabs are created.
+  virtual content::ContentBrowserClient* CreateContentBrowserClient() OVERRIDE {
+    return &g_browser_client.Get();
+  };
 };
 
 void FilterDisabledTests() {
@@ -285,6 +276,7 @@ void FilterDisabledTests() {
     "HTTPSRequestTest.SSLSessionCacheShardTest",
     "HTTPSRequestTest.SSLSessionCacheShardTest",
     "HTTPSRequestTest.SSLv3Fallback",
+    "HTTPSRequestTest.TLSv1Fallback",
     "HTTPSRequestTest.HTTPSErrorsNoClobberTSSTest",
     "HTTPSOCSPTest.*",
     "HTTPSEVCRLSetTest.*",
@@ -458,7 +450,7 @@ void FakeExternalTab::Initialize() {
   DCHECK(res_mod);
   _AtlBaseModule.SetResourceInstance(res_mod);
 
-  ResourceBundle::InitSharedInstanceWithLocale("en-US");
+  ResourceBundle::InitSharedInstanceWithLocale("en-US", NULL);
 
   CommandLine* cmd = CommandLine::ForCurrentProcess();
   cmd->AppendSwitch(switches::kDisableWebResources);
@@ -517,8 +509,10 @@ void CFUrlRequestUnittestRunner::StartChromeFrameInHostBrowser() {
 
   // Tweak IE settings to make it amenable to testing before launching it.
   ie_configurator_.reset(chrome_frame_test::CreateConfigurator());
-  if (ie_configurator_.get() != NULL)
+  if (ie_configurator_.get() != NULL) {
+    ie_configurator_->Initialize();
     ie_configurator_->ApplySettings();
+  }
 
   test_http_server_.reset(new test_server::SimpleWebServer(kTestServerPort));
   test_http_server_->AddResponse(&chrome_frame_html_);
@@ -704,6 +698,11 @@ void CFUrlRequestUnittestRunner::StartInitializationTimeout() {
 
 void CFUrlRequestUnittestRunner::OnInitializationTimeout() {
   LOG(ERROR) << "Failed to start Chrome Frame in the host browser.";
+
+  FilePath snapshot;
+  if (ui_test_utils::SaveScreenSnapshotToDesktop(&snapshot))
+    LOG(ERROR) << "Screen snapshot saved to " << snapshot.value();
+
   StopFileLogger(true);
 
   if (launch_browser_) {

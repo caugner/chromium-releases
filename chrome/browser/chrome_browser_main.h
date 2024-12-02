@@ -15,11 +15,10 @@
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/task_profiler/auto_tracking.h"
-#include "chrome/browser/ui/browser_init.h"
+#include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_thread.h"
 
-class BrowserInit;
 class BrowserProcessImpl;
 class ChromeBrowserMainExtraParts;
 class FieldTrialSynchronizer;
@@ -27,6 +26,7 @@ class HistogramSynchronizer;
 class MetricsService;
 class PrefService;
 class Profile;
+class StartupBrowserCreator;
 class StartupTimeBomb;
 class ShutdownWatcherHelper;
 class TranslateManager;
@@ -72,11 +72,14 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   virtual void PostDestroyThreads() OVERRIDE;
 
   // Additional stages for ChromeBrowserMainExtraParts. These stages are called
-  // in order from PreMainMessageLoopStart(). See implementation for details.
+  // in order from PreMainMessageLoopRun(). See implementation for details.
   virtual void PreProfileInit();
   virtual void PostProfileInit();
   virtual void PreBrowserStart();
   virtual void PostBrowserStart();
+
+  // Runs the PageCycler; called if the switch kVisitURLs is present.
+  virtual void RunPageCycler();
 
   // Displays a warning message that we can't find any locale data files.
   virtual void ShowMissingLocaleMessageBox() = 0;
@@ -126,12 +129,12 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // computer startup has on retention and usage of Chrome.
   void AutoLaunchChromeFieldTrial();
 
-  // Field trial for testing domain bound certs.
-  void DomainBoundCertsFieldTrial();
-
   // A collection of field trials intended to test the uniformity and
   // correctness of the field trial control, bucketing and reporting systems.
   void SetupUniformityFieldTrials();
+
+  // Disables the new tab field trial if not running in desktop mode.
+  void DisableNewTabFieldTrialIfNecesssary();
 
   // Methods for |SetupMetricsAndFieldTrials()| --------------------------------
 
@@ -185,7 +188,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Members initialized after / released before main_message_loop_ ------------
 
-  scoped_ptr<BrowserInit> browser_init_;
+  scoped_ptr<StartupBrowserCreator> browser_creator_;
   scoped_ptr<BrowserProcessImpl> browser_process_;
   scoped_refptr<HistogramSynchronizer> histogram_synchronizer_;
   scoped_refptr<chrome_browser_metrics::TrackingSynchronizer>

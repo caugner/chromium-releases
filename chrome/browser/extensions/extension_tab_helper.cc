@@ -5,18 +5,22 @@
 #include "chrome/browser/extensions/extension_tab_helper.h"
 
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/page_action_controller.h"
+#include "chrome/browser/extensions/script_badge_controller.h"
+#include "chrome/browser/extensions/script_executor_impl.h"
 #include "chrome/browser/extensions/webstore_inline_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/extension_switch_utils.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
@@ -26,7 +30,12 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/gfx/image/image.h"
 
+using content::RenderViewHost;
 using content::WebContents;
+using extensions::Extension;
+using extensions::PageActionController;
+using extensions::ScriptBadgeController;
+using extensions::ScriptExecutorImpl;
 
 namespace {
 
@@ -34,13 +43,21 @@ const char kPermissionError[] = "permission_error";
 
 }  // namespace
 
-ExtensionTabHelper::ExtensionTabHelper(TabContentsWrapper* wrapper)
-    : content::WebContentsObserver(wrapper->web_contents()),
+ExtensionTabHelper::ExtensionTabHelper(TabContents* tab_contents)
+    : content::WebContentsObserver(tab_contents->web_contents()),
       delegate_(NULL),
       extension_app_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          extension_function_dispatcher_(wrapper->profile(), this)),
-      wrapper_(wrapper) {
+          extension_function_dispatcher_(tab_contents->profile(), this)),
+      tab_contents_(tab_contents),
+      active_tab_permission_manager_(tab_contents) {
+  if (extensions::switch_utils::AreScriptBadgesEnabled()) {
+    script_badge_controller_ = new ScriptBadgeController(tab_contents);
+  } else {
+    script_executor_.reset(
+        new ScriptExecutorImpl(tab_contents->web_contents()));
+    location_bar_controller_.reset(new PageActionController(tab_contents));
+  }
 }
 
 ExtensionTabHelper::~ExtensionTabHelper() {
@@ -58,6 +75,14 @@ void ExtensionTabHelper::PageActionStateChanged() {
 
 void ExtensionTabHelper::GetApplicationInfo(int32 page_id) {
   Send(new ExtensionMsg_GetApplicationInfo(routing_id(), page_id));
+}
+
+int ExtensionTabHelper::tab_id() const {
+  return tab_contents_->restore_tab_helper()->session_id().id();
+}
+
+int ExtensionTabHelper::window_id() const {
+  return tab_contents_->restore_tab_helper()->window_id().id();
 }
 
 void ExtensionTabHelper::SetExtensionApp(const Extension* extension) {
@@ -93,6 +118,24 @@ SkBitmap* ExtensionTabHelper::GetExtensionAppIcon() {
   return &extension_app_icon_;
 }
 
+extensions::ScriptExecutor* ExtensionTabHelper::script_executor() {
+  if (script_badge_controller_.get())
+    return script_badge_controller_.get();
+  return script_executor_.get();
+}
+
+extensions::LocationBarController*
+    ExtensionTabHelper::location_bar_controller() {
+  if (script_badge_controller_.get())
+    return script_badge_controller_.get();
+  return location_bar_controller_.get();
+}
+
+void ExtensionTabHelper::RenderViewCreated(RenderViewHost* render_view_host) {
+  render_view_host->Send(
+      new ExtensionMsg_SetTabId(render_view_host->GetRoutingID(), tab_id()));
+}
+
 void ExtensionTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
@@ -110,7 +153,7 @@ void ExtensionTabHelper::DidNavigateMainFrame(
     ExtensionAction* browser_action = (*it)->browser_action();
     if (browser_action) {
       browser_action->ClearAllValuesForTab(
-          wrapper_->restore_tab_helper()->session_id().id());
+          tab_contents_->restore_tab_helper()->session_id().id());
       content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
           content::Source<ExtensionAction>(browser_action),
@@ -120,7 +163,7 @@ void ExtensionTabHelper::DidNavigateMainFrame(
     ExtensionAction* page_action = (*it)->page_action();
     if (page_action) {
       page_action->ClearAllValuesForTab(
-          wrapper_->restore_tab_helper()->session_id().id());
+          tab_contents_->restore_tab_helper()->session_id().id());
       PageActionStateChanged();
     }
   }
@@ -150,12 +193,12 @@ void ExtensionTabHelper::OnDidGetApplicationInfo(
   web_app_info_ = info;
 
   if (delegate_)
-    delegate_->OnDidGetApplicationInfo(wrapper_, page_id);
+    delegate_->OnDidGetApplicationInfo(tab_contents_, page_id);
 }
 
 void ExtensionTabHelper::OnInstallApplication(const WebApplicationInfo& info) {
   if (delegate_)
-    delegate_->OnInstallApplication(wrapper_, info);
+    delegate_->OnInstallApplication(tab_contents_, info);
 }
 
 void ExtensionTabHelper::OnInlineWebstoreInstall(
@@ -185,7 +228,7 @@ void ExtensionTabHelper::OnGetAppNotifyChannel(
   ExtensionService* extension_service = profile->GetExtensionService();
   extensions::ProcessMap* process_map = extension_service->process_map();
   content::RenderProcessHost* process =
-      tab_contents_wrapper()->web_contents()->GetRenderProcessHost();
+      tab_contents()->web_contents()->GetRenderProcessHost();
   const Extension* extension =
       extension_service->GetInstalledApp(requestor_url);
 
@@ -209,7 +252,7 @@ void ExtensionTabHelper::OnGetAppNotifyChannel(
   }
 
   AppNotifyChannelUI* ui = new AppNotifyChannelUIImpl(
-      profile, tab_contents_wrapper(), extension->name(),
+      profile, tab_contents(), extension->name(),
       AppNotifyChannelUI::NOTIFICATION_INFOBAR);
 
   scoped_refptr<AppNotifyChannelSetup> channel_setup(

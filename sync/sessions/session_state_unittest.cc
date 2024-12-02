@@ -11,6 +11,10 @@
 #include "base/test/values_test_util.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "sync/internal_api/public/sessions/error_counters.h"
+#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "sync/internal_api/public/sessions/sync_source_info.h"
+#include "sync/internal_api/public/sessions/syncer_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace browser_sync {
@@ -96,12 +100,10 @@ TEST_F(SessionStateTest, SyncSessionSnapshotToValue) {
 
   const bool kHasMoreToSync = false;
   const bool kIsSilenced = true;
-  const int kUnsyncedCount = 1053;
   const int kNumEncryptionConflicts = 1054;
   const int kNumHierarchyConflicts = 1055;
   const int kNumSimpleConflicts = 1056;
   const int kNumServerConflicts = 1057;
-  const bool kDidCommitItems = true;
 
   SyncSourceInfo source;
   scoped_ptr<DictionaryValue> expected_source_value(source.ToValue());
@@ -114,19 +116,17 @@ TEST_F(SessionStateTest, SyncSessionSnapshotToValue) {
                                download_progress_markers,
                                kHasMoreToSync,
                                kIsSilenced,
-                               kUnsyncedCount,
                                kNumEncryptionConflicts,
                                kNumHierarchyConflicts,
                                kNumSimpleConflicts,
                                kNumServerConflicts,
-                               kDidCommitItems,
                                source,
                                false,
                                0,
                                base::Time::Now(),
                                false);
   scoped_ptr<DictionaryValue> value(snapshot.ToValue());
-  EXPECT_EQ(16u, value->size());
+  EXPECT_EQ(14u, value->size());
   ExpectDictDictionaryValue(*expected_syncer_status_value, *value,
                             "syncerStatus");
   ExpectDictIntegerValue(kNumServerChangesRemaining, *value,
@@ -138,7 +138,6 @@ TEST_F(SessionStateTest, SyncSessionSnapshotToValue) {
                             *value, "downloadProgressMarkers");
   ExpectDictBooleanValue(kHasMoreToSync, *value, "hasMoreToSync");
   ExpectDictBooleanValue(kIsSilenced, *value, "isSilenced");
-  ExpectDictIntegerValue(kUnsyncedCount, *value, "unsyncedCount");
   ExpectDictIntegerValue(kNumEncryptionConflicts, *value,
                          "numEncryptionConflicts");
   ExpectDictIntegerValue(kNumHierarchyConflicts, *value,
@@ -147,8 +146,6 @@ TEST_F(SessionStateTest, SyncSessionSnapshotToValue) {
                          "numSimpleConflicts");
   ExpectDictIntegerValue(kNumServerConflicts, *value,
                          "numServerConflicts");
-  ExpectDictBooleanValue(kDidCommitItems, *value,
-                         "didCommitItems");
   ExpectDictDictionaryValue(*expected_source_value, *value, "source");
   ExpectDictBooleanValue(false, *value, "notificationsEnabled");
 }

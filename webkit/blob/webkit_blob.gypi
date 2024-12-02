@@ -37,8 +37,8 @@
         'blob_url_request_job.h',
         'blob_url_request_job_factory.cc',
         'blob_url_request_job_factory.h',
-        'local_file_reader.cc',
-        'local_file_reader.h',
+        'local_file_stream_reader.cc',
+        'local_file_stream_reader.h',
         'shareable_file_reference.cc',
         'shareable_file_reference.h',
         'view_blob_internals_job.cc',
@@ -48,13 +48,6 @@
         ['inside_chromium_build==0', {
           'dependencies': [
             '<(DEPTH)/webkit/support/setup_third_party.gyp:third_party_headers',
-          ],
-        }],
-        # TODO(dpranke): Figure out why this works at all and/or get
-        # rid of it.
-        ['OS=="win" and component == "shared_library"', {
-          'dependencies': [
-            '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
           ],
         }],
       ],

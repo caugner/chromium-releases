@@ -143,6 +143,9 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
     base::TimeDelta close_delay =
         base::TimeDelta::FromSeconds(kStreamCloseDelaySeconds);
     const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+    // TODO(dalecurtis): Browser side mixing has a couple issues that must be
+    // fixed before it can be turned on by default: http://crbug.com/138098 and
+    // http://crbug.com/140247
     if (cmd_line->HasSwitch(switches::kEnableAudioMixer)) {
       dispatcher = new AudioOutputMixer(this, params, close_delay);
     } else {
@@ -231,7 +234,7 @@ void AudioManagerBase::ShutdownOnAudioThread() {
       // both physical audio stream objects that belong to the dispatcher as
       // well as the message loop of the audio thread that will soon go away.
       // So, better crash now than later.
-      CHECK(dispatcher->HasOneRef()) << "AudioOutputProxies are still alive";
+      DCHECK(dispatcher->HasOneRef()) << "AudioOutputProxies are still alive";
       dispatcher = NULL;
     }
   }

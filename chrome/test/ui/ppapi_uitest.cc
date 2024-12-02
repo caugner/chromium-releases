@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
 #include "base/string_util.h"
@@ -24,6 +25,7 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "media/audio/audio_manager.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 #include "webkit/plugins/plugin_switches.h"
@@ -47,6 +49,11 @@ const char library_name[] = "libppapi_tests.so";
 // http://crbug.com/108264
 static int kTimeoutMs = 90000;
 //static int kTimeoutMs = TestTimeouts::large_test_timeout_ms());
+
+bool IsAudioOutputAvailable() {
+  scoped_ptr<media::AudioManager> audio_manager(media::AudioManager::Create());
+  return audio_manager->HasAudioOutputDevices();
+}
 
 class TestFinishObserver : public content::NotificationObserver {
  public:
@@ -189,6 +196,26 @@ void PPAPITestBase::RunTestWithWebSocketServer(const std::string& test_case) {
                     StringPrintf("websocket_port=%d", port));
 }
 
+void PPAPITestBase::RunTestIfAudioOutputAvailable(
+    const std::string& test_case) {
+  if (IsAudioOutputAvailable()) {
+    RunTest(test_case);
+  } else {
+    LOG(WARNING) << "PPAPITest: " << test_case <<
+        " was not executed because there are no audio devices available.";
+  }
+}
+
+void PPAPITestBase::RunTestViaHTTPIfAudioOutputAvailable(
+    const std::string& test_case) {
+  if (IsAudioOutputAvailable()) {
+    RunTestViaHTTP(test_case);
+  } else {
+    LOG(WARNING) << "PPAPITest: " << test_case <<
+        " was not executed because there are no audio devices available.";
+  }
+}
+
 std::string PPAPITestBase::StripPrefixes(const std::string& test_name) {
   const char* const prefixes[] = {
       "FAILS_", "FLAKY_", "DISABLED_", "SLOW_" };
@@ -205,7 +232,7 @@ void PPAPITestBase::RunTestURL(const GURL& test_url) {
   // any other value indicates completion (in this case it will start with
   // "PASS" or "FAIL"). This keeps us from timing out on waits for long tests.
   TestFinishObserver observer(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(), kTimeoutMs);
+      browser()->GetActiveWebContents()->GetRenderViewHost(), kTimeoutMs);
 
   ui_test_utils::NavigateToURL(browser(), test_url);
 
@@ -305,9 +332,6 @@ void OutOfProcessPPAPITest::SetUpCommandLine(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kPpapiOutOfProcess);
 }
 
-PPAPINaClTest::PPAPINaClTest() {
-}
-
 void PPAPINaClTest::SetUpCommandLine(CommandLine* command_line) {
   PPAPITestBase::SetUpCommandLine(command_line);
 
@@ -321,13 +345,17 @@ void PPAPINaClTest::SetUpCommandLine(CommandLine* command_line) {
 }
 
 // Append the correct mode and testcase string
-std::string PPAPINaClTest::BuildQuery(const std::string& base,
+std::string PPAPINaClNewlibTest::BuildQuery(const std::string& base,
                                       const std::string& test_case) {
-  return StringPrintf("%smode=nacl&testcase=%s", base.c_str(),
+  return StringPrintf("%smode=nacl_newlib&testcase=%s", base.c_str(),
                       test_case.c_str());
 }
 
-PPAPINaClTestDisallowedSockets::PPAPINaClTestDisallowedSockets() {
+// Append the correct mode and testcase string
+std::string PPAPINaClGLibcTest::BuildQuery(const std::string& base,
+                                      const std::string& test_case) {
+  return StringPrintf("%smode=nacl_glibc&testcase=%s", base.c_str(),
+                      test_case.c_str());
 }
 
 void PPAPINaClTestDisallowedSockets::SetUpCommandLine(
@@ -346,7 +374,7 @@ void PPAPINaClTestDisallowedSockets::SetUpCommandLine(
 std::string PPAPINaClTestDisallowedSockets::BuildQuery(
     const std::string& base,
     const std::string& test_case) {
-  return StringPrintf("%smode=nacl&testcase=%s", base.c_str(),
+  return StringPrintf("%smode=nacl_newlib&testcase=%s", base.c_str(),
                       test_case.c_str());
 }
 
@@ -384,7 +412,7 @@ std::string PPAPINaClTestDisallowedSockets::BuildQuery(
       RunTestWithSSLServer(STRIP_PREFIXES(test_name)); \
     }
 
-// Similar macros that test with WebSocket server
+// Similar macros that test with WebSocket server.
 #define TEST_PPAPI_IN_PROCESS_WITH_WS(test_name) \
     IN_PROC_BROWSER_TEST_F(PPAPITest, test_name) { \
       RunTestWithWebSocketServer(STRIP_PREFIXES(test_name)); \
@@ -394,17 +422,30 @@ std::string PPAPINaClTestDisallowedSockets::BuildQuery(
       RunTestWithWebSocketServer(STRIP_PREFIXES(test_name)); \
     }
 
+// Similar macros for tests that require an audio device.
+#define TEST_PPAPI_IN_PROCESS_WITH_AUDIO_OUTPUT(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPITest, test_name) { \
+      RunTestIfAudioOutputAvailable(STRIP_PREFIXES(test_name)); \
+    }
+#define TEST_PPAPI_OUT_OF_PROCESS_WITH_AUDIO_OUTPUT(test_name) \
+    IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, test_name) { \
+      RunTestIfAudioOutputAvailable(STRIP_PREFIXES(test_name)); \
+    }
 
 #if defined(DISABLE_NACL)
 #define TEST_PPAPI_NACL_VIA_HTTP(test_name)
 #define TEST_PPAPI_NACL_VIA_HTTP_DISALLOWED_SOCKETS(test_name)
 #define TEST_PPAPI_NACL_WITH_SSL_SERVER(test_name)
 #define TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(test_name)
+#define TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(test_name)
 #else
 
 // NaCl based PPAPI tests
 #define TEST_PPAPI_NACL_VIA_HTTP(test_name) \
-    IN_PROC_BROWSER_TEST_F(PPAPINaClTest, test_name) { \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
+    } \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, test_name) { \
       RunTestViaHTTP(STRIP_PREFIXES(test_name)); \
     }
 
@@ -416,14 +457,29 @@ std::string PPAPINaClTestDisallowedSockets::BuildQuery(
 
 // NaCl based PPAPI tests with SSL server
 #define TEST_PPAPI_NACL_WITH_SSL_SERVER(test_name) \
-    IN_PROC_BROWSER_TEST_F(PPAPINaClTest, test_name) { \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestWithSSLServer(STRIP_PREFIXES(test_name)); \
+    } \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, test_name) { \
       RunTestWithSSLServer(STRIP_PREFIXES(test_name)); \
     }
 
 // NaCl based PPAPI tests with WebSocket server
 #define TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(test_name) \
-    IN_PROC_BROWSER_TEST_F(PPAPINaClTest, test_name) { \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
       RunTestWithWebSocketServer(STRIP_PREFIXES(test_name)); \
+    } \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, test_name) { \
+      RunTestWithWebSocketServer(STRIP_PREFIXES(test_name)); \
+    }
+
+// NaCl based PPAPI tests requiring an Audio device.
+#define TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(test_name) \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, test_name) { \
+      RunTestViaHTTPIfAudioOutputAvailable(STRIP_PREFIXES(test_name)); \
+    } \
+    IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, test_name) { \
+      RunTestViaHTTPIfAudioOutputAvailable(STRIP_PREFIXES(test_name)); \
     }
 #endif
 
@@ -459,6 +515,11 @@ TEST_PPAPI_OUT_OF_PROCESS(MAYBE_InputEvent)
 // TODO(bbudge) Enable when input events are proxied correctly for NaCl.
 TEST_PPAPI_NACL_VIA_HTTP(DISABLED_InputEvent)
 
+TEST_PPAPI_IN_PROCESS(ImeInputEvent)
+TEST_PPAPI_OUT_OF_PROCESS(ImeInputEvent)
+// TODO(kinaba) Enable when IME events are proxied correctly for NaCl.
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_ImeInputEvent)
+
 TEST_PPAPI_IN_PROCESS(Instance_ExecuteScript);
 TEST_PPAPI_OUT_OF_PROCESS(Instance_ExecuteScript)
 // ExecuteScript isn't supported by NaCl.
@@ -485,7 +546,10 @@ TEST_PPAPI_NACL_VIA_HTTP(Graphics2D)
 
 TEST_PPAPI_IN_PROCESS(ImageData)
 TEST_PPAPI_OUT_OF_PROCESS(ImageData)
-TEST_PPAPI_NACL_VIA_HTTP(ImageData)
+
+// PPAPINaClTest.ImageData times out consistently on all platforms.
+// http://crbug.com/130377
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_ImageData)
 
 TEST_PPAPI_IN_PROCESS(BrowserFont)
 TEST_PPAPI_OUT_OF_PROCESS(BrowserFont)
@@ -540,7 +604,8 @@ TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLLoader_TrustedCrossOriginRequest)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLLoader_UntrustedJavascriptURLRestriction)
 // TODO(bbudge) Fix Javascript URLs for trusted loaders.
 // http://crbug.com/103062
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FAILS_URLLoader_TrustedJavascriptURLRestriction)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(
+    DISABLED_URLLoader_TrustedJavascriptURLRestriction)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLLoader_UntrustedHttpRestriction)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLLoader_TrustedHttpRestriction)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLLoader_FollowURLRedirect)
@@ -567,7 +632,7 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLLoader_UntrustedJavascriptURLRestriction)
 // TODO(bbudge) Fix Javascript URLs for trusted loaders.
 // http://crbug.com/103062
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(
-    FAILS_URLLoader_TrustedJavascriptURLRestriction)
+    DISABLED_URLLoader_TrustedJavascriptURLRestriction)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLLoader_UntrustedHttpRestriction)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLLoader_TrustedHttpRestriction)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLLoader_FollowURLRedirect)
@@ -597,7 +662,17 @@ TEST_PPAPI_NACL_VIA_HTTP(URLLoader_UntendedLoad)
 // URLRequestInfo tests.
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_CreateAndIsURLRequestInfo)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_CreateAndIsURLRequestInfo)
-TEST_PPAPI_NACL_VIA_HTTP(URLRequest_CreateAndIsURLRequestInfo)
+
+// Timing out on Windows. http://crbug.com/129571
+#if defined(OS_WIN)
+#define MAYBE_URLRequest_CreateAndIsURLRequestInfo \
+  FLAKY_URLRequest_CreateAndIsURLRequestInfo
+#else
+#define MAYBE_URLRequest_CreateAndIsURLRequestInfo \
+    URLRequest_CreateAndIsURLRequestInfo
+#endif
+TEST_PPAPI_NACL_VIA_HTTP(MAYBE_URLRequest_CreateAndIsURLRequestInfo)
+
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_SetProperty)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_SetProperty)
 TEST_PPAPI_NACL_VIA_HTTP(URLRequest_SetProperty)
@@ -615,7 +690,7 @@ TEST_PPAPI_NACL_VIA_HTTP(PaintAggregator)
 // TODO(danakj): http://crbug.com/115286
 TEST_PPAPI_IN_PROCESS(DISABLED_Scrollbar)
 // http://crbug.com/89961
-IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FAILS_Scrollbar) {
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, DISABLED_Scrollbar) {
   RunTest("Scrollbar");
 }
 // TODO(danakj): http://crbug.com/115286
@@ -728,12 +803,19 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_FileIO_WillWriteWillSetLength)
 #define MAYBE_FileIO_ParallelReads FileIO_ParallelReads
 #endif
 
+// PPAPINaclTest.FileIO_TouchQuery is flaky on Windows. http://crbug.com/130349
+#if defined(OS_WIN)
+#define MAYBE_NACL_FileIO_TouchQuery DISABLED_FileIO_TouchQuery
+#else
+#define MAYBE_NACL_FileIO_TouchQuery MAYBE_FileIO_TouchQuery
+#endif
+
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_Open)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_AbortCalls)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_ParallelReads)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_ParallelWrites)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_NotAllowMixedReadWrite)
-TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_TouchQuery)
+TEST_PPAPI_NACL_VIA_HTTP(MAYBE_NACL_FileIO_TouchQuery)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_ReadWriteSetLength)
 // The following test requires PPB_FileIO_Trusted, not available in NaCl.
 TEST_PPAPI_NACL_VIA_HTTP(DISABLED_FileIO_WillWriteWillSetLength)
@@ -744,7 +826,16 @@ TEST_PPAPI_NACL_VIA_HTTP(FileRef)
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileSystem)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileSystem)
-TEST_PPAPI_NACL_VIA_HTTP(FileSystem)
+
+// PPAPINaClTest.FileSystem times out consistently on Windows and Mac.
+// http://crbug.com/130372
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#define MAYBE_FileSystem DISABLED_FileSystem
+#else
+#define MAYBE_FileSystem FileSystem
+#endif
+
+TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileSystem)
 
 // Mac/Aura reach NOTIMPLEMENTED/time out.
 // Other systems work in-process, but flake out-of-process because of the
@@ -767,10 +858,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, MAYBE_OutOfProcessFlashFullscreen)
   RunTestViaHTTP("FlashFullscreen");
 }
 
-//Disabling for official tests
-#if !defined(OS_LINUX)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(Fullscreen)
-#endif
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(Fullscreen)
 
 TEST_PPAPI_IN_PROCESS(FlashClipboard)
@@ -791,17 +879,6 @@ TEST_PPAPI_OUT_OF_PROCESS(X509CertificatePrivate)
 IN_PROC_BROWSER_TEST_F(PPAPITest, MAYBE_DirectoryReader) {
   RunTestViaHTTP("DirectoryReader");
 }
-
-#if defined(ENABLE_P2P_APIS)
-// Flaky. http://crbug.com/84294
-IN_PROC_BROWSER_TEST_F(PPAPITest, DISABLED_Transport) {
-  RunTest("Transport");
-}
-// http://crbug.com/89961
-IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, DISABLED_Transport) {
-  RunTestViaHTTP("Transport");
-}
-#endif // ENABLE_P2P_APIS
 
 // There is no proxy. This is used for PDF metrics reporting, and PDF only
 // runs in process, so there's currently no need for a proxy.
@@ -845,12 +922,20 @@ TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_GetScopeID)
   NetAddressPrivateUntrusted_GetPort
 #endif
 
+// PPAPINaClTest.NetAddressPrivateUntrusted_GetFamily timing out frequently on
+// Windows and Mac. http://crbug.com/130380
+#if defined(OS_WIN) || defined(OS_MACOSX)
+#define MAYBE_NetAddressPrivateUntrusted_GetFamily DISABLED_NetAddressPrivateUntrusted_GetFamily
+#else
+#define MAYBE_NetAddressPrivateUntrusted_GetFamily NetAddressPrivateUntrusted_GetFamily
+#endif
+
 TEST_PPAPI_NACL_VIA_HTTP(NetAddressPrivateUntrusted_AreEqual)
 TEST_PPAPI_NACL_VIA_HTTP(NetAddressPrivateUntrusted_AreHostsEqual)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_NetAddressPrivateUntrusted_Describe)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_NetAddressPrivateUntrusted_ReplacePort)
 TEST_PPAPI_NACL_VIA_HTTP(NetAddressPrivateUntrusted_GetAnyAddress)
-TEST_PPAPI_NACL_VIA_HTTP(NetAddressPrivateUntrusted_GetFamily)
+TEST_PPAPI_NACL_VIA_HTTP(MAYBE_NetAddressPrivateUntrusted_GetFamily)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_NetAddressPrivateUntrusted_GetPort)
 TEST_PPAPI_NACL_VIA_HTTP(NetAddressPrivateUntrusted_GetAddress)
 TEST_PPAPI_NACL_VIA_HTTP(NetAddressPrivateUntrusted_GetScopeID)
@@ -870,12 +955,16 @@ TEST_PPAPI_IN_PROCESS(Flash_MessageLoop)
 TEST_PPAPI_IN_PROCESS(Flash_GetLocalTimeZoneOffset)
 TEST_PPAPI_IN_PROCESS(Flash_GetCommandLineArgs)
 TEST_PPAPI_IN_PROCESS(Flash_GetDeviceID)
+TEST_PPAPI_IN_PROCESS(Flash_GetSettingInt)
+TEST_PPAPI_IN_PROCESS(Flash_GetSetting)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_SetInstanceAlwaysOnTop)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetProxyForURL)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_MessageLoop)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetLocalTimeZoneOffset)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetCommandLineArgs)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetDeviceID)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_GetSettingInt)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_GetSetting)
 
 TEST_PPAPI_IN_PROCESS(WebSocket_IsWebSocket)
 TEST_PPAPI_IN_PROCESS(WebSocket_UninitializedPropertiesAccess)
@@ -928,25 +1017,31 @@ TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_UtilityTextSendReceive)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_UtilityBinarySendReceive)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_UtilityBufferedAmount)
 
+TEST_PPAPI_IN_PROCESS(AudioConfig_RecommendSampleRate)
 TEST_PPAPI_IN_PROCESS(AudioConfig_ValidConfigs)
 TEST_PPAPI_IN_PROCESS(AudioConfig_InvalidConfigs)
+TEST_PPAPI_OUT_OF_PROCESS(AudioConfig_RecommendSampleRate)
 TEST_PPAPI_OUT_OF_PROCESS(AudioConfig_ValidConfigs)
 TEST_PPAPI_OUT_OF_PROCESS(AudioConfig_InvalidConfigs)
 
-// PPAPITest.Audio_Creation fails on Linux & Mac try servers.
-// http://crbug.com/114712
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-#define MAYBE_Audio_Creation DISABLED_Audio_Creation
-#else
-#define MAYBE_Audio_Creation Audio_Creation
-#endif
-
-TEST_PPAPI_IN_PROCESS(MAYBE_Audio_Creation)
-TEST_PPAPI_IN_PROCESS(Audio_DestroyNoStop)
-TEST_PPAPI_IN_PROCESS(Audio_Failures)
-TEST_PPAPI_OUT_OF_PROCESS(MAYBE_Audio_Creation)
-TEST_PPAPI_OUT_OF_PROCESS(Audio_DestroyNoStop)
-TEST_PPAPI_OUT_OF_PROCESS(Audio_Failures)
+// Only run audio output tests if we have an audio device available.
+// TODO(raymes): We should probably test scenarios where there is no audio
+// device available.
+TEST_PPAPI_IN_PROCESS_WITH_AUDIO_OUTPUT(Audio_Creation)
+TEST_PPAPI_IN_PROCESS_WITH_AUDIO_OUTPUT(Audio_DestroyNoStop)
+TEST_PPAPI_IN_PROCESS_WITH_AUDIO_OUTPUT(Audio_Failures)
+TEST_PPAPI_IN_PROCESS_WITH_AUDIO_OUTPUT(Audio_AudioCallback1)
+TEST_PPAPI_IN_PROCESS_WITH_AUDIO_OUTPUT(Audio_AudioCallback2)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_AUDIO_OUTPUT(Audio_Creation)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_AUDIO_OUTPUT(Audio_DestroyNoStop)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_AUDIO_OUTPUT(Audio_Failures)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_AUDIO_OUTPUT(Audio_AudioCallback1)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_AUDIO_OUTPUT(Audio_AudioCallback2)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(Audio_Creation)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(Audio_DestroyNoStop)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(Audio_Failures)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(Audio_AudioCallback1)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_AUDIO_OUTPUT(Audio_AudioCallback2)
 
 TEST_PPAPI_IN_PROCESS(View_CreateVisible);
 TEST_PPAPI_OUT_OF_PROCESS(View_CreateVisible);
@@ -967,7 +1062,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, View_CreateInvisible) {
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, View_PageHideShow) {
   // The plugin will be loaded in the foreground tab and will send us a message.
   TestFinishObserver observer(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      browser()->GetActiveWebContents()->GetRenderViewHost(),
       TestTimeouts::action_max_timeout_ms());
 
   GURL url = GetTestFileUrl("View_PageHideShow");
@@ -1022,5 +1117,8 @@ TEST_PPAPI_OUT_OF_PROCESS(FlashMessageLoop_RunWithoutQuit)
 TEST_PPAPI_IN_PROCESS(MouseCursor)
 TEST_PPAPI_OUT_OF_PROCESS(MouseCursor)
 TEST_PPAPI_NACL_VIA_HTTP(MouseCursor)
+
+// Only enabled in out-of-process mode.
+TEST_PPAPI_OUT_OF_PROCESS(FlashFile_CreateTemporaryFile)
 
 #endif // ADDRESS_SANITIZER

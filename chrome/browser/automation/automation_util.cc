@@ -24,14 +24,13 @@
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/view_type_utils.h"
 #include "chrome/common/automation_id.h"
-#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store.h"
@@ -407,7 +406,7 @@ bool SendErrorIfModalDialogActive(AutomationProvider* provider,
   return active;
 }
 
-AutomationId GetIdForTab(const TabContentsWrapper* tab) {
+AutomationId GetIdForTab(const TabContents* tab) {
   return AutomationId(
       AutomationId::kTypeTab,
       base::IntToString(tab->restore_tab_helper()->session_id().id()));
@@ -416,7 +415,8 @@ AutomationId GetIdForTab(const TabContentsWrapper* tab) {
 AutomationId GetIdForExtensionView(
     const content::RenderViewHost* render_view_host) {
   AutomationId::Type type;
-  switch (render_view_host->GetDelegate()->GetRenderViewType()) {
+  WebContents* web_contents = WebContents::FromRenderViewHost(render_view_host);
+  switch (chrome::GetViewType(web_contents)) {
     case chrome::VIEW_TYPE_EXTENSION_POPUP:
       type = AutomationId::kTypeExtensionPopup;
       break;
@@ -438,7 +438,7 @@ AutomationId GetIdForExtensionView(
   return AutomationId(type, id);
 }
 
-AutomationId GetIdForExtension(const Extension* extension) {
+AutomationId GetIdForExtension(const extensions::Extension* extension) {
   return AutomationId(AutomationId::kTypeExtension, extension->id());
 }
 
@@ -452,20 +452,21 @@ bool GetTabForId(const AutomationId& id, WebContents** tab) {
   for (; iter != BrowserList::end(); ++iter) {
     Browser* browser = *iter;
     for (int tab_index = 0; tab_index < browser->tab_count(); ++tab_index) {
-      TabContentsWrapper* wrapper = browser->GetTabContentsWrapperAt(tab_index);
-      if (base::IntToString(wrapper->restore_tab_helper()->session_id().id()) ==
-              id.id()) {
-        *tab = wrapper->web_contents();
+      TabContents* tab_contents = browser->GetTabContentsAt(tab_index);
+      if (base::IntToString(
+              tab_contents->restore_tab_helper()->session_id().id()) ==
+                  id.id()) {
+        *tab = tab_contents->web_contents();
         return true;
       }
       if (preview_controller) {
-        TabContentsWrapper* preview_wrapper =
-            preview_controller->GetPrintPreviewForTab(wrapper);
-        if (preview_wrapper) {
+        TabContents* preview_tab_contents =
+            preview_controller->GetPrintPreviewForTab(tab_contents);
+        if (preview_tab_contents) {
           std::string preview_id = base::IntToString(
-              preview_wrapper->restore_tab_helper()->session_id().id());
+              preview_tab_contents->restore_tab_helper()->session_id().id());
           if (preview_id == id.id()) {
-            *tab = preview_wrapper->web_contents();
+            *tab = preview_tab_contents->web_contents();
             return true;
           }
         }
@@ -526,11 +527,11 @@ bool GetRenderViewForId(
 bool GetExtensionForId(
     const AutomationId& id,
     Profile* profile,
-    const Extension** extension) {
+    const extensions::Extension** extension) {
   if (id.type() != AutomationId::kTypeExtension)
     return false;
   ExtensionService* service = profile->GetExtensionService();
-  const Extension* installed_extension =
+  const extensions::Extension* installed_extension =
       service->GetInstalledExtension(id.id());
   if (installed_extension)
     *extension = installed_extension;
@@ -550,7 +551,7 @@ bool DoesObjectWithIdExist(const AutomationId& id, Profile* profile) {
       return GetExtensionRenderViewForId(id, profile, &rvh);
     }
     case AutomationId::kTypeExtension: {
-      const Extension* extension;
+      const extensions::Extension* extension;
       return GetExtensionForId(id, profile, &extension);
     }
     default:

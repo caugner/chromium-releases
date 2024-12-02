@@ -6,13 +6,20 @@
 #define CHROME_BROWSER_EXTENSIONS_API_BLUETOOTH_BLUETOOTH_API_H_
 #pragma once
 
+#include <string>
+
+#include "chrome/browser/extensions/api/api_function.h"
 #include "chrome/browser/extensions/extension_function.h"
 
 #if defined(OS_CHROMEOS)
+#include "base/memory/ref_counted.h"
+#include "chrome/browser/chromeos/bluetooth/bluetooth_device.h"
+#include "chrome/browser/chromeos/bluetooth/bluetooth_socket.h"
+
 namespace chromeos {
 
-class BluetoothAdapter;
-class BluetoothDevice;
+class BluetoothSocket;
+struct BluetoothOutOfBandPairingData;
 
 }  // namespace chromeos
 #endif
@@ -20,27 +27,7 @@ class BluetoothDevice;
 namespace extensions {
 namespace api {
 
-class BluetoothExtensionFunction : public SyncExtensionFunction {
- protected:
-  virtual ~BluetoothExtensionFunction() {}
-
-#if defined(OS_CHROMEOS)
-  const chromeos::BluetoothAdapter* adapter() const;
-  chromeos::BluetoothAdapter* GetMutableAdapter();
-#endif
-};
-
-class AsyncBluetoothExtensionFunction : public AsyncExtensionFunction {
- protected:
-  virtual ~AsyncBluetoothExtensionFunction() {}
-
-#if defined(OS_CHROMEOS)
-  const chromeos::BluetoothAdapter* adapter() const;
-  chromeos::BluetoothAdapter* GetMutableAdapter();
-#endif
-};
-
-class BluetoothIsAvailableFunction : public BluetoothExtensionFunction {
+class BluetoothIsAvailableFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.isAvailable")
 
@@ -51,7 +38,7 @@ class BluetoothIsAvailableFunction : public BluetoothExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-class BluetoothIsPoweredFunction : public BluetoothExtensionFunction {
+class BluetoothIsPoweredFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.isPowered")
 
@@ -62,7 +49,7 @@ class BluetoothIsPoweredFunction : public BluetoothExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-class BluetoothGetAddressFunction : public BluetoothExtensionFunction {
+class BluetoothGetAddressFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.getAddress")
 
@@ -73,45 +60,69 @@ class BluetoothGetAddressFunction : public BluetoothExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-class BluetoothGetDevicesWithServiceUUIDFunction
-    : public BluetoothExtensionFunction {
+class BluetoothGetDevicesFunction : public AsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME(
-      "experimental.bluetooth.getDevicesWithServiceUUID")
-
- protected:
-  virtual ~BluetoothGetDevicesWithServiceUUIDFunction() {}
-
-  // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
-};
-
-class BluetoothGetDevicesWithServiceNameFunction
-    : public AsyncBluetoothExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION_NAME(
-      "experimental.bluetooth.getDevicesWithServiceName")
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.getDevices")
 
 #if defined(OS_CHROMEOS)
-  BluetoothGetDevicesWithServiceNameFunction();
+  BluetoothGetDevicesFunction();
 #endif
 
  protected:
-  virtual ~BluetoothGetDevicesWithServiceNameFunction() {}
+  virtual ~BluetoothGetDevicesFunction() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
 
-#if defined(OS_CHROMEOS)
  private:
-  void AddDeviceIfTrue(
-      ListValue* list, const chromeos::BluetoothDevice* device, bool result);
+#if defined(OS_CHROMEOS)
+  void AddDeviceIfTrueCallback(ListValue* list,
+                               const chromeos::BluetoothDevice* device,
+                               bool shouldAdd);
 
   int callbacks_pending_;
 #endif
 };
 
-class BluetoothDisconnectFunction : public BluetoothExtensionFunction {
+class BluetoothGetServicesFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.getServices")
+
+ protected:
+  virtual ~BluetoothGetServicesFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+
+
+#if defined(OS_CHROMEOS)
+ private:
+  void GetServiceRecordsCallback(
+      base::ListValue* services,
+      const chromeos::BluetoothDevice::ServiceRecordList& records);
+  void OnErrorCallback();
+#endif
+};
+
+class BluetoothConnectFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.connect")
+
+ protected:
+  virtual ~BluetoothConnectFunction() {}
+
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+#if defined(OS_CHROMEOS)
+  void ConnectToServiceCallback(
+      const chromeos::BluetoothDevice* device,
+      const std::string& service_uuid,
+      scoped_refptr<chromeos::BluetoothSocket> socket);
+#endif
+};
+
+class BluetoothDisconnectFunction : public SyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.disconnect")
 
@@ -122,19 +133,49 @@ class BluetoothDisconnectFunction : public BluetoothExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-class BluetoothReadFunction : public BluetoothExtensionFunction {
+class BluetoothReadFunction : public AsyncAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.read")
+  BluetoothReadFunction();
 
  protected:
-  virtual ~BluetoothReadFunction() {}
+  virtual ~BluetoothReadFunction();
 
-  // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  // AsyncAPIFunction:
+  virtual bool Prepare() OVERRIDE;
+  virtual bool Respond() OVERRIDE;
+  virtual void Work() OVERRIDE;
+
+ private:
+  bool success_;
+#if defined(OS_CHROMEOS)
+  scoped_refptr<chromeos::BluetoothSocket> socket_;
+#endif
+};
+
+class BluetoothWriteFunction : public AsyncAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.write")
+  BluetoothWriteFunction();
+
+ protected:
+  virtual ~BluetoothWriteFunction();
+
+  // AsyncAPIFunction:
+  virtual bool Prepare() OVERRIDE;
+  virtual bool Respond() OVERRIDE;
+  virtual void Work() OVERRIDE;
+
+ private:
+  bool success_;
+  const base::BinaryValue* data_to_write_;  // memory is owned by args_
+#if defined(OS_CHROMEOS)
+  scoped_refptr<chromeos::BluetoothSocket> socket_;
+#endif
 };
 
 class BluetoothSetOutOfBandPairingDataFunction
-    : public BluetoothExtensionFunction {
+    : public AsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME(
       "experimental.bluetooth.setOutOfBandPairingData")
@@ -142,43 +183,65 @@ class BluetoothSetOutOfBandPairingDataFunction
  protected:
   virtual ~BluetoothSetOutOfBandPairingDataFunction() {}
 
+#if defined(OS_CHROMEOS)
+  void OnSuccessCallback();
+  void OnErrorCallback();
+#endif
+
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
 };
 
-class BluetoothGetOutOfBandPairingDataFunction
-    : public BluetoothExtensionFunction {
+class BluetoothGetLocalOutOfBandPairingDataFunction
+    : public AsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME(
-      "experimental.bluetooth.getOutOfBandPairingData")
+      "experimental.bluetooth.getLocalOutOfBandPairingData")
 
  protected:
-  virtual ~BluetoothGetOutOfBandPairingDataFunction() {}
+  virtual ~BluetoothGetLocalOutOfBandPairingDataFunction() {}
+
+#if defined(OS_CHROMEOS)
+  void ReadCallback(const chromeos::BluetoothOutOfBandPairingData& data);
+  void ErrorCallback();
+#endif
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
 };
 
-class BluetoothWriteFunction : public BluetoothExtensionFunction {
+class BluetoothStartDiscoveryFunction : public AsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.write")
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.startDiscovery")
 
+ protected:
+  virtual ~BluetoothStartDiscoveryFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+
+#if defined(OS_CHROMEOS)
  private:
-  virtual ~BluetoothWriteFunction() {}
-
-  // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  void OnSuccessCallback();
+  void OnErrorCallback();
+#endif
 };
 
-class BluetoothConnectFunction : public BluetoothExtensionFunction {
+class BluetoothStopDiscoveryFunction : public AsyncExtensionFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.connect")
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.bluetooth.stopDiscovery")
 
  protected:
-  virtual ~BluetoothConnectFunction() {}
+  virtual ~BluetoothStopDiscoveryFunction() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
+
+#if defined(OS_CHROMEOS)
+ private:
+  void OnSuccessCallback();
+  void OnErrorCallback();
+#endif
 };
 
 }  // namespace api

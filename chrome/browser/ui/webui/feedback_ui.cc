@@ -16,13 +16,14 @@
 #include "base/utf_string_conversions.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/feedback/feedback_data.h"
 #include "chrome/browser/feedback/feedback_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/screenshot_source.h"
@@ -43,16 +44,20 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/shell.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system/syslogs_provider.h"
+#include "ui/aura/root_window.h"
+#include "ui/aura/window.h"
 #endif
 
 using content::BrowserThread;
 using content::WebContents;
 using content::WebUIMessageHandler;
+using ui::WebDialogUI;
 
 namespace {
 
@@ -64,7 +69,7 @@ const char kDescriptionParameter[] = "description=";
 
 #if defined(OS_CHROMEOS)
 const char kSavedScreenshotsUrl[] = "chrome://screenshots/saved/";
-const char kScreenshotPattern[] = "screenshot-*.png";
+const char kScreenshotPattern[] = "Screenshot *.png";
 
 const char kTimestampParameter[] = "timestamp=";
 
@@ -84,13 +89,10 @@ bool ScreenshotTimestampComp(const std::string& filepath1,
 void GetSavedScreenshots(std::vector<std::string>* saved_screenshots) {
   saved_screenshots->clear();
 
-  FilePath fileshelf_path;
-  if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS,
-                        &fileshelf_path))
-    return;
-
-  FeedbackUI::GetMostRecentScreenshots(fileshelf_path, saved_screenshots,
-                                       kMaxSavedScreenshots);
+  FeedbackUI::GetMostRecentScreenshots(
+      download_util::GetDefaultDownloadDirectory(),
+      saved_screenshots,
+      kMaxSavedScreenshots);
 }
 
 std::string GetUserEmail() {
@@ -107,7 +109,7 @@ std::string GetUserEmail() {
 int GetIndexOfFeedbackTab(Browser* browser) {
   GURL feedback_url(chrome::kChromeUIFeedbackURL);
   for (int i = 0; i < browser->tab_count(); ++i) {
-    WebContents* tab = browser->GetTabContentsWrapperAt(i)->web_contents();
+    WebContents* tab = browser->GetWebContentsAt(i);
     if (tab && tab->GetURL().GetWithEmptyPath() == feedback_url)
       return i;
   }
@@ -145,8 +147,19 @@ void ShowWebFeedbackView(Browser* browser,
       FeedbackUtil::GetScreenshotPng();
   last_screenshot_png->clear();
 
-  gfx::NativeWindow native_window = browser->window()->GetNativeHandle();
-  gfx::Rect snapshot_bounds = gfx::Rect(browser->window()->GetBounds().size());
+  gfx::NativeWindow native_window;
+  gfx::Rect snapshot_bounds;
+
+#if defined(OS_CHROMEOS)
+  // For ChromeOS, don't use the browser window but the root window
+  // instead to grab the screenshot. We want everything on the screen, not
+  // just the current browser.
+  native_window = ash::Shell::GetPrimaryRootWindow();
+  snapshot_bounds = gfx::Rect(native_window->bounds());
+#else
+  native_window = browser->window()->GetNativeWindow();
+  snapshot_bounds = gfx::Rect(browser->window()->GetBounds().size());
+#endif
   bool success = browser::GrabWindowSnapshot(native_window,
                                              last_screenshot_png,
                                              snapshot_bounds);
@@ -218,6 +231,7 @@ class FeedbackHandler : public WebUIMessageHandler,
 ChromeWebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
   ChromeWebUIDataSource* source =
       new ChromeWebUIDataSource(chrome::kChromeUIFeedbackHost);
+  source->set_use_json_js_format_v2();
 
   source->AddLocalizedString("title", IDS_FEEDBACK_TITLE);
   source->AddLocalizedString("page-title", IDS_FEEDBACK_REPORT_PAGE_TITLE);
@@ -344,6 +358,8 @@ bool FeedbackHandler::Init() {
   }
 #endif
 
+  // TODO(beng): Replace GetLastActive with a more specific method of locating
+  //             the target contents.
   Browser* browser = BrowserList::GetLastActive();
   // Sanity checks.
   if (((index == 0) && (index_str != "0")) || !browser ||
@@ -351,8 +367,7 @@ bool FeedbackHandler::Init() {
     return false;
   }
 
-  WebContents* target_tab =
-      browser->GetTabContentsWrapperAt(index)->web_contents();
+  WebContents* target_tab = browser->GetWebContentsAt(index);
   if (target_tab) {
     target_tab_url_ = target_tab->GetURL().spec();
   }
@@ -427,7 +442,6 @@ void FeedbackHandler::HandleRefreshCurrentScreenshot(const ListValue*) {
   StringValue screenshot(current_screenshot);
   web_ui()->CallJavascriptFunction("setupCurrentScreenshot", screenshot);
 }
-
 
 #if defined(OS_CHROMEOS)
 void FeedbackHandler::HandleRefreshSavedScreenshots(const ListValue*) {
@@ -535,14 +549,13 @@ void FeedbackHandler::HandleCancel(const ListValue*) {
 
 void FeedbackHandler::HandleOpenSystemTab(const ListValue* args) {
 #if defined(OS_CHROMEOS)
-  Browser* last_active = BrowserList::GetLastActive();
-  last_active->OpenURL(
+  web_ui()->GetWebContents()->GetDelegate()->OpenURLFromTab(
+      web_ui()->GetWebContents(),
       content::OpenURLParams(GURL(chrome::kChromeUISystemInfoURL),
                              content::Referrer(),
                              NEW_FOREGROUND_TAB,
                              content::PAGE_TRANSITION_LINK,
                              false));
-  last_active->window()->Activate();
 #endif
 }
 
@@ -559,13 +572,7 @@ void FeedbackHandler::CancelFeedbackCollection() {
 
 void FeedbackHandler::CloseFeedbackTab() {
   ClobberScreenshotsSource();
-
-  Browser* browser = BrowserList::GetLastActive();
-  if (browser) {
-    browser->CloseTabContents(tab_);
-  } else {
-    LOG(FATAL) << "Failed to get last active browser.";
-  }
+  tab_->GetDelegate()->CloseContents(tab_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

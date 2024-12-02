@@ -13,13 +13,12 @@
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/constrained_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
@@ -129,15 +128,6 @@ WebContents* LoginHandler::GetWebContentsForLogin() const {
 
   return tab_util::GetWebContentsByID(render_process_host_id_,
                                       tab_contents_id_);
-}
-
-RenderViewHostDelegate* LoginHandler::GetRenderViewHostDelegate() const {
-  RenderViewHost* rvh = RenderViewHost::FromID(render_process_host_id_,
-                                               tab_contents_id_);
-  if (!rvh)
-    return NULL;
-
-  return rvh->GetDelegate();
 }
 
 void LoginHandler::SetAuth(const string16& username,
@@ -443,16 +433,15 @@ void LoginDialogCallback(const GURL& request_url,
     return;
   }
 
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(parent_contents);
-  if (!wrapper) {
+  TabContents* tab_contents = TabContents::FromWebContents(parent_contents);
+  if (!tab_contents) {
     // Same logic as above.
     handler->CancelAuth();
     return;
   }
 
   // Tell the password manager to look for saved passwords.
-  PasswordManager* password_manager = wrapper->password_manager();
+  PasswordManager* password_manager = tab_contents->password_manager();
   std::vector<PasswordForm> v;
   MakeInputForPasswordManager(request_url, auth_info, handler, &v);
   password_manager->OnPasswordFormsParsed(v);

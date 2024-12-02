@@ -19,7 +19,26 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/mime_util.h"
 
+using extensions::Extension;
+
 namespace {
+
+// TODO(hshi): Temporary workaround for http://crbug.com/134197.
+// If no user-set default service is found, use built-in QuickOffice Viewer as
+// default for MS office files. Remove this once full defaults is in place.
+const char kViewActionURL[] = "http://webintents.org/view";
+
+const char kQuickOfficeViewerServiceURL[] =
+  "chrome-extension://gbkeegbaiigmenfmjfclcdgdpimamgkj/views/appViewer.html";
+
+const char* kQuickOfficeViewerMimeType[] = {
+  "application/msword",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+};
 
 typedef WebIntentsRegistry::IntentServiceList IntentServiceList;
 
@@ -39,37 +58,7 @@ bool MimeTypesAreEqual(const string16& type1, const string16& type2) {
 // "*" is also accepted as a valid MIME type.
 // The passed |type_str| should have no leading or trailing whitespace.
 bool IsMimeType(const string16& type_str) {
-  // MIME types are always ASCII and case-insensitive (at least, the top-level
-  // and secondary types we care about).
-  if (!IsStringASCII(type_str))
-    return false;
-  std::string raw_type = UTF16ToASCII(type_str);
-  StringToLowerASCII(&raw_type);
-
-  // See http://www.iana.org/assignments/media-types/index.html
-  if (StartsWithASCII(raw_type, "application/", false) ||
-      StartsWithASCII(raw_type, "audio/", false) ||
-      StartsWithASCII(raw_type, "example/", false) ||
-      StartsWithASCII(raw_type, "image/", false) ||
-      StartsWithASCII(raw_type, "message/", false) ||
-      StartsWithASCII(raw_type, "model/", false) ||
-      StartsWithASCII(raw_type, "multipart/", false) ||
-      StartsWithASCII(raw_type, "text/", false) ||
-      StartsWithASCII(raw_type, "video/", false) ||
-      raw_type == "*/*" || raw_type == "*") {
-    return true;
-  }
-
-  // If there's a "/" separator character, and the token before it is
-  // "x-" + (ascii characters), it is also a MIME type.
-  size_t slash = raw_type.find('/');
-  if (slash < 3 || slash == std::string::npos || slash == raw_type.length() - 1)
-    return false;
-
-  if (StartsWithASCII(raw_type, "x-", false))
-    return true;
-
-  return false;
+  return net::IsMimeType(UTF16ToUTF8(type_str));
 }
 
 // Compares two web intents type specifiers to see if there is a match.
@@ -312,6 +301,23 @@ void WebIntentsRegistry::OnWebDataServiceDefaultsRequestDone(
       default_service = *iter;
     else if (iter->url_pattern < default_service.url_pattern)
       default_service = *iter;
+  }
+
+  // TODO(hshi): Temporary workaround for http://crbug.com/134197.
+  // If no user-set default service is found, use built-in QuickOffice Viewer as
+  // default for MS office files. Remove this once full defaults is in place.
+  if (default_service.user_date <= 0) {
+    for (size_t i = 0; i < sizeof(kQuickOfficeViewerMimeType) / sizeof(char*);
+         ++i) {
+      DefaultWebIntentService qoviewer_service;
+      qoviewer_service.action = ASCIIToUTF16(kViewActionURL);
+      qoviewer_service.type = ASCIIToUTF16(kQuickOfficeViewerMimeType[i]);
+      qoviewer_service.service_url = kQuickOfficeViewerServiceURL;
+      if (WebIntentsTypesMatch(qoviewer_service.type, query->type_)) {
+        default_service = qoviewer_service;
+        break;
+      }
+    }
   }
 
   query->default_callback_.Run(default_service);

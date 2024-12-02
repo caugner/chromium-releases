@@ -47,7 +47,7 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
-  virtual int GetPeerAddress(AddressList* address) const OVERRIDE;
+  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE;
   virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
   virtual const BoundNetLog& NetLog() const OVERRIDE;
   virtual void SetSubresourceSpeculation() OVERRIDE;
@@ -69,6 +69,9 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
                     const CompletionCallback& callback) OVERRIDE;
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
+
+  virtual bool SetKeepAlive(bool enable, int delay);
+  virtual bool SetNoDelay(bool no_delay);
 
  private:
   // State machine for connecting the socket.
@@ -123,7 +126,7 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
   int DoConnectComplete(int result);
 
   // Helper used by Disconnect(), which disconnects minus the logging and
-  // resetting of current_ai_.
+  // resetting of current_address_index_.
   void DoDisconnect();
 
   void DoReadCallback(int rv);
@@ -155,8 +158,8 @@ class NET_EXPORT_PRIVATE TCPClientSocketLibevent : public StreamSocket,
   // The list of addresses we should try in order to establish a connection.
   AddressList addresses_;
 
-  // Where we are in above list, or NULL if all addrinfos have been tried.
-  const struct addrinfo* current_ai_;
+  // Where we are in above list. Set to -1 if uninitialized.
+  int current_address_index_;
 
   // The socket's libevent wrappers
   MessageLoopForIO::FileDescriptorWatcher read_socket_watcher_;

@@ -7,24 +7,36 @@
 #pragma once
 
 #include "chrome/browser/ui/extensions/shell_window.h"
-#include "chrome/browser/ui/views/extensions/extension_view.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/scoped_sk_region.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/widget/widget_delegate.h"
 
-class ExtensionHost;
+class Profile;
+
+namespace extensions {
+class Extension;
+}
+
+namespace views {
+class WebView;
+}
 
 class ShellWindowViews : public ShellWindow,
-                         public ExtensionView::Container,
-                         public views::WidgetDelegateView {
+                         public views::WidgetDelegateView,
+                         public views::ButtonListener {
  public:
-  explicit ShellWindowViews(ExtensionHost* host);
+  ShellWindowViews(Profile* profile,
+                   const extensions::Extension* extension,
+                   const GURL& url,
+                   const CreateParams& params);
 
   // BaseWindow implementation.
   virtual bool IsActive() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
+  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -51,15 +63,38 @@ class ShellWindowViews : public ShellWindow,
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
 
-  // ExtensionView::Container implementation.
-  virtual void OnViewWasResized() OVERRIDE;
+ protected:
+  // views::View implementation.
+  virtual void Layout() OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      bool is_add, views::View *parent, views::View *child) OVERRIDE;
+
+  // ShellWindow implementation.
+  virtual void UpdateWindowTitle() OVERRIDE;
+  virtual void SetFullscreen(bool fullscreen) OVERRIDE;
+  virtual bool IsFullscreenOrPending() const OVERRIDE;
 
  private:
+  friend class ShellWindowFrameView;
+
   virtual ~ShellWindowViews();
 
+  void OnViewWasResized();
+
+  // views::ButtonListener implementation.
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event)
+      OVERRIDE;
+
+  views::View* title_view_;
+  views::WebView* web_view_;
   views::Widget* window_;
+  bool is_fullscreen_;
 
   gfx::ScopedSkRegion caption_region_;
+
+  bool use_custom_frame_;
+  gfx::Size minimum_size_;
+  gfx::Size maximum_size_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellWindowViews);
 };

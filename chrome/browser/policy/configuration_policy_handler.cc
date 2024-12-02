@@ -25,7 +25,6 @@
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/content_settings.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -265,7 +264,8 @@ bool ExtensionListPolicyHandler::CheckAndGetList(
                        ValueTypeToString(base::Value::TYPE_STRING));
       return false;
     }
-    if (!(allow_wildcards_ && id == "*") && !Extension::IdIsValid(id)) {
+    if (!(allow_wildcards_ && id == "*") &&
+        !extensions::Extension::IdIsValid(id)) {
       errors->AddError(policy_name(),
                        entry - list_value->begin(),
                        IDS_POLICY_VALUE_FORMAT_ERROR);
@@ -277,6 +277,64 @@ bool ExtensionListPolicyHandler::CheckAndGetList(
     *extension_ids = list_value;
 
   return true;
+}
+
+// ExtensionURLPatternListPolicyHandler implementation -------------------------
+
+ExtensionURLPatternListPolicyHandler::ExtensionURLPatternListPolicyHandler(
+    const char* policy_name,
+    const char* pref_path)
+    : TypeCheckingPolicyHandler(policy_name, base::Value::TYPE_LIST),
+      pref_path_(pref_path) {}
+
+ExtensionURLPatternListPolicyHandler::~ExtensionURLPatternListPolicyHandler() {}
+
+bool ExtensionURLPatternListPolicyHandler::CheckPolicySettings(
+    const PolicyMap& policies,
+    PolicyErrorMap* errors) {
+  const base::Value* value = NULL;
+  if (!CheckAndGetValue(policies, errors, &value))
+    return false;
+
+  if (!value)
+    return true;
+
+  const base::ListValue* list_value = NULL;
+  if (!value->GetAsList(&list_value)) {
+    NOTREACHED();
+    return false;
+  }
+
+  // Check that the list contains valid URLPattern strings only.
+  for (base::ListValue::const_iterator entry(list_value->begin());
+       entry != list_value->end(); ++entry) {
+    std::string url_pattern_string;
+    if (!(*entry)->GetAsString(&url_pattern_string)) {
+      errors->AddError(policy_name(),
+                       entry - list_value->begin(),
+                       IDS_POLICY_TYPE_ERROR,
+                       ValueTypeToString(base::Value::TYPE_STRING));
+      return false;
+    }
+
+    URLPattern pattern(URLPattern::SCHEME_ALL);
+    if (pattern.Parse(url_pattern_string) != URLPattern::PARSE_SUCCESS) {
+      errors->AddError(policy_name(),
+                       entry - list_value->begin(),
+                       IDS_POLICY_VALUE_FORMAT_ERROR);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void ExtensionURLPatternListPolicyHandler::ApplyPolicySettings(
+    const PolicyMap& policies,
+    PrefValueMap* prefs) {
+  const Value* value = policies.GetValue(policy_name());
+  if (value)
+    prefs->SetValue(pref_path_, value->DeepCopy());
 }
 
 // SimplePolicyHandler implementation ------------------------------------------
@@ -1035,6 +1093,71 @@ void JavascriptPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
     prefs->SetValue(prefs::kManagedDefaultJavaScriptSetting,
                     Value::CreateIntegerValue(setting));
   }
+}
+
+// ClearSiteDataOnExitPolicyHandler implementation -----------------------------
+
+ClearSiteDataOnExitPolicyHandler::ClearSiteDataOnExitPolicyHandler()
+    : TypeCheckingPolicyHandler(key::kClearSiteDataOnExit,
+                                Value::TYPE_BOOLEAN) {
+}
+
+ClearSiteDataOnExitPolicyHandler::~ClearSiteDataOnExitPolicyHandler() {
+}
+
+bool ClearSiteDataOnExitPolicyHandler::CheckPolicySettings(
+    const PolicyMap& policies,
+    PolicyErrorMap* errors) {
+  ContentSetting content_setting = CONTENT_SETTING_DEFAULT;
+  if (ClearSiteDataEnabled(policies) &&
+      GetContentSetting(policies, &content_setting) &&
+      content_setting == CONTENT_SETTING_ALLOW) {
+    errors->AddError(key::kDefaultCookiesSetting,
+                     IDS_POLICY_OVERRIDDEN,
+                     policy_name());
+  }
+
+  return TypeCheckingPolicyHandler::CheckPolicySettings(policies, errors);
+}
+
+void ClearSiteDataOnExitPolicyHandler::ApplyPolicySettings(
+    const PolicyMap& policies,
+    PrefValueMap* prefs) {
+  if (ClearSiteDataEnabled(policies)) {
+    ContentSetting content_setting = CONTENT_SETTING_DEFAULT;
+    if (!GetContentSetting(policies, &content_setting) ||
+        content_setting == CONTENT_SETTING_ALLOW) {
+      prefs->SetValue(
+          prefs::kManagedDefaultCookiesSetting,
+          Value::CreateIntegerValue(CONTENT_SETTING_SESSION_ONLY));
+    }
+  }
+}
+
+bool ClearSiteDataOnExitPolicyHandler::ClearSiteDataEnabled(
+    const PolicyMap& policies) {
+  const base::Value* value = NULL;
+  PolicyErrorMap errors;
+  bool clear_site_data = false;
+
+  return (CheckAndGetValue(policies, &errors, &value) &&
+          value &&
+          value->GetAsBoolean(&clear_site_data) &&
+          clear_site_data);
+}
+
+// static
+bool ClearSiteDataOnExitPolicyHandler::GetContentSetting(
+    const PolicyMap& policies,
+    ContentSetting* content_setting) {
+  const base::Value* value = policies.GetValue(key::kDefaultCookiesSetting);
+  int setting = CONTENT_SETTING_DEFAULT;
+  if (value && value->GetAsInteger(&setting)) {
+    *content_setting = static_cast<ContentSetting>(setting);
+    return true;
+  }
+
+  return false;
 }
 
 // RestoreOnStartupPolicyHandler implementation --------------------------------

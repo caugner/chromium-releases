@@ -25,6 +25,7 @@
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/invalidations/invalidator_storage.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -32,11 +33,11 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
-#include "sync/engine/model_safe_worker.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/util/experiments.h"
+#include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 #include "sync/js/sync_js_controller.h"
-#include "sync/syncable/model_type.h"
-#include "sync/util/experiments.h"
-#include "sync/util/unrecoverable_error_handler.h"
 
 class Profile;
 class ProfileSyncComponentsFactory;
@@ -180,9 +181,16 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   void RegisterAuthNotifications();
 
+  // Returns true if sync is enabled/not suppressed and the user is logged in.
+  // (being logged in does not mean that tokens are available - tokens may
+  // be missing because they have not loaded yet, or because they were deleted
+  // due to http://crbug.com/121755).
+  // Virtual to enable mocking in tests.
+  virtual bool IsSyncEnabledAndLoggedIn();
+
   // Return whether all sync tokens are loaded and available for the backend to
   // start up. Virtual to enable mocking in tests.
-  virtual bool AreCredentialsAvailable();
+  virtual bool IsSyncTokenAvailable();
 
   // Registers a data type controller with the sync service.  This
   // makes the data type controller available for use, it does not
@@ -271,9 +279,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // downloading data types yet (we don't start syncing until after sync setup
   // is complete). The UI calls this as soon as any part of the signin wizard is
   // displayed (even just the login UI).
-  void set_setup_in_progress(bool setup_in_progress) {
-      setup_in_progress_ = setup_in_progress;
-  }
+  // If |setup_in_progress| is false, this also kicks the sync engine to ensure
+  // that data download starts.
+  virtual void SetSetupInProgress(bool setup_in_progress);
 
   // Returns true if the SyncBackendHost has told us it's ready to accept
   // changes.
@@ -284,7 +292,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // TODO(timsteele): What happens if the bookmark model is loaded, a change
   // takes place, and the backend isn't initialized yet?
   virtual bool sync_initialized() const;
-  virtual bool unrecoverable_error_detected() const;
+
+  virtual bool HasUnrecoverableError() const;
   const std::string& unrecoverable_error_message() {
     return unrecoverable_error_message_;
   }
@@ -340,7 +349,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
       const tracked_objects::Location& from_here,
       const std::string& message) OVERRIDE;
 
-  virtual void OnDisableDatatype(syncable::ModelType type,
+  // Called when a datatype wishes to disable itself due to having hit an
+  // unrecoverable error.
+  virtual void DisableBrokenDatatype(
+      syncable::ModelType type,
       const tracked_objects::Location& from_here,
       std::string message);
 
@@ -550,6 +562,15 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   sync_api::PassphraseRequiredReason passphrase_required_reason_;
 
  private:
+  enum UnrecoverableErrorReason {
+    ERROR_REASON_UNSET,
+    ERROR_REASON_SYNCER,
+    ERROR_REASON_BACKEND_INIT_FAILURE,
+    ERROR_REASON_CONFIGURATION_RETRY,
+    ERROR_REASON_CONFIGURATION_FAILURE,
+    ERROR_REASON_ACTIONABLE_ERROR,
+    ERROR_REASON_LIMIT
+  };
   friend class ProfileSyncServicePasswordTest;
   friend class SyncTest;
   friend class TestProfileSyncService;
@@ -623,6 +644,20 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   void RefreshSpareBootstrapToken(const std::string& passphrase);
 #endif
 
+  // Internal unrecoverable error handler. Used to track error reason via
+  // Sync.UnrecoverableErrors histogram.
+  void OnInternalUnrecoverableError(const tracked_objects::Location& from_here,
+                                    const std::string& message,
+                                    bool delete_sync_database,
+                                    UnrecoverableErrorReason reason);
+
+  // Destroys / recreates an instance of ProfileSyncService. Used exclusively by
+  // the sync integration tests so they can restart sync from scratch without
+  // tearing down and recreating the browser process. Needed because simply
+  // calling Shutdown() and Initialize() will not recreate other internal
+  // objects like SyncBackendHost, SyncManager, etc.
+  void ResetForTest();
+
   // Factory used to create various dependent objects.
   scoped_ptr<ProfileSyncComponentsFactory> factory_;
 
@@ -632,6 +667,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // The class that handles getting, setting, and persisting sync
   // preferences.
   browser_sync::SyncPrefs sync_prefs_;
+
+  // TODO(tim): Move this to InvalidationService, once it exists. Bug 124137.
+  browser_sync::InvalidatorStorage invalidator_storage_;
 
   // TODO(ncarter): Put this in a profile, once there is UI for it.
   // This specifies where to find the sync server.
@@ -655,12 +693,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // email address.
   SigninManager* signin_;
 
-  // True if an unrecoverable error (e.g. violation of an assumed invariant)
-  // occurred during syncer operation.  This value should be checked before
-  // doing any work that might corrupt things further.
-  bool unrecoverable_error_detected_;
-
-  // A message sent when an unrecoverable error occurred.
+  // Information describing an unrecoverable error.
+  UnrecoverableErrorReason unrecoverable_error_reason_;
   std::string unrecoverable_error_message_;
   tracked_objects::Location unrecoverable_error_location_;
 
@@ -688,13 +722,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   // Keep track of where we are in a server clear operation
   ClearServerDataState clear_server_data_state_;
-
-  // Destroys / recreates an instance of ProfileSyncService. Used exclusively by
-  // the sync integration tests so they can restart sync from scratch without
-  // tearing down and recreating the browser process. Needed because simply
-  // calling Shutdown() and Initialize() will not recreate other internal
-  // objects like SyncBackendHost, SyncManager, etc.
-  void ResetForTest();
 
   // Timeout for the clear data command.  This timeout is a temporary hack
   // and is necessary because the nudge sync framework can drop nudges for

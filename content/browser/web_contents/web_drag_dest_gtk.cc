@@ -16,6 +16,7 @@
 #include "content/public/browser/web_drag_dest_delegate.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_screen_util.h"
@@ -25,6 +26,26 @@ using WebKit::WebDragOperation;
 using WebKit::WebDragOperationNone;
 
 namespace content {
+
+namespace {
+
+int GetModifierFlags(GtkWidget* widget) {
+  int modifier_state = 0;
+  GdkModifierType state;
+  gdk_window_get_pointer(gtk_widget_get_window(widget), NULL, NULL, &state);
+
+  if (state & GDK_SHIFT_MASK)
+    modifier_state |= WebKit::WebInputEvent::ShiftKey;
+  if (state & GDK_CONTROL_MASK)
+    modifier_state |= WebKit::WebInputEvent::ControlKey;
+  if (state & GDK_MOD1_MASK)
+    modifier_state |= WebKit::WebInputEvent::AltKey;
+  if (state & GDK_META_MASK)
+    modifier_state |= WebKit::WebInputEvent::MetaKey;
+  return modifier_state;
+}
+
+}  // namespace
 
 WebDragDestGtk::WebDragDestGtk(WebContents* web_contents, GtkWidget* widget)
     : web_contents_(web_contents),
@@ -70,9 +91,10 @@ void WebDragDestGtk::UpdateDragStatus(WebDragOperation operation) {
 
 void WebDragDestGtk::DragLeave() {
   GetRenderViewHost()->DragTargetDragLeave();
-
   if (delegate())
     delegate()->OnDragLeave();
+
+  drop_data_.reset();
 }
 
 gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
@@ -119,7 +141,8 @@ gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
     GetRenderViewHost()->DragTargetDragOver(
         ui::ClientPoint(widget_),
         ui::ScreenPoint(widget_),
-        content::GdkDragActionToWebDragOp(context->actions));
+        content::GdkDragActionToWebDragOp(context->actions),
+        GetModifierFlags(widget_));
 
     if (delegate())
       delegate()->OnDragOver();
@@ -152,8 +175,9 @@ void WebDragDestGtk::OnDragDataReceived(
     if (target == ui::GetAtomForTarget(ui::TEXT_PLAIN)) {
       guchar* text = gtk_selection_data_get_text(data);
       if (text) {
-        drop_data_->plain_text =
-            UTF8ToUTF16(std::string(reinterpret_cast<const char*>(text)));
+        drop_data_->text = NullableString16(
+            UTF8ToUTF16(std::string(reinterpret_cast<const char*>(text))),
+            false);
         g_free(text);
       }
     } else if (target == ui::GetAtomForTarget(ui::TEXT_URI_LIST)) {
@@ -169,11 +193,13 @@ void WebDragDestGtk::OnDragDataReceived(
           FilePath file_path;
           if (url.SchemeIs(chrome::kFileScheme) &&
               net::FileURLToFilePath(url, &file_path)) {
-            drop_data_->filenames.push_back(UTF8ToUTF16(file_path.value()));
+            drop_data_->filenames.push_back(
+                WebDropData::FileInfo(UTF8ToUTF16(file_path.value()),
+                                      string16()));
             // This is a hack. Some file managers also populate text/plain with
             // a file URL when dragging files, so we clear it to avoid exposing
             // it to the web content.
-            drop_data_->plain_text.clear();
+            drop_data_->text = NullableString16(true);
           } else if (!drop_data_->url.is_valid()) {
             // Also set the first non-file URL as the URL content for the drop.
             drop_data_->url = url;
@@ -183,9 +209,10 @@ void WebDragDestGtk::OnDragDataReceived(
       }
     } else if (target == ui::GetAtomForTarget(ui::TEXT_HTML)) {
       // TODO(estade): Can the html have a non-UTF8 encoding?
-      drop_data_->text_html =
+      drop_data_->html = NullableString16(
           UTF8ToUTF16(std::string(reinterpret_cast<const char*>(raw_data),
-                                  data_length));
+                                  data_length)),
+          false);
       // We leave the base URL empty.
     } else if (target == ui::GetAtomForTarget(ui::NETSCAPE_URL)) {
       std::string netscape_url(reinterpret_cast<const char*>(raw_data),
@@ -225,7 +252,8 @@ void WebDragDestGtk::OnDragDataReceived(
         *drop_data_.get(),
         ui::ClientPoint(widget_),
         ui::ScreenPoint(widget_),
-        content::GdkDragActionToWebDragOp(context->actions));
+        content::GdkDragActionToWebDragOp(context->actions),
+        GetModifierFlags(widget_));
 
     if (delegate())
       delegate()->OnDragEnter();
@@ -240,7 +268,13 @@ void WebDragDestGtk::OnDragLeave(GtkWidget* sender, GdkDragContext* context,
   // Set |context_| to NULL to make sure we will recognize the next DragMotion
   // as an enter.
   context_ = NULL;
-  drop_data_.reset();
+
+  // Sometimes we get a drag-leave event before getting a drag-data-received
+  // event. In that case, we don't want to bother the renderer with a
+  // DragLeave event.
+  if (data_requests_ != 0)
+    return;
+
   // When GTK sends us a drag-drop signal, it is shortly (and synchronously)
   // preceded by a drag-leave. The renderer doesn't like getting the signals
   // in this order so delay telling it about the drag-leave till we are sure
@@ -256,7 +290,8 @@ gboolean WebDragDestGtk::OnDragDrop(GtkWidget* sender, GdkDragContext* context,
   method_factory_.InvalidateWeakPtrs();
 
   GetRenderViewHost()->
-      DragTargetDrop(ui::ClientPoint(widget_), ui::ScreenPoint(widget_));
+      DragTargetDrop(ui::ClientPoint(widget_), ui::ScreenPoint(widget_),
+          GetModifierFlags(widget_));
 
   if (delegate())
     delegate()->OnDrop();

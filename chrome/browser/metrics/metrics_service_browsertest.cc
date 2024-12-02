@@ -62,19 +62,20 @@ IN_PROC_BROWSER_TEST_F(MetricsServiceTest, CloseRenderersNormally) {
   // Verify that the expected stability metrics were recorded.
   const PrefService* prefs = g_browser_process->local_state();
   EXPECT_EQ(1, prefs->GetInteger(prefs::kStabilityLaunchCount));
-#if defined(USE_VIRTUAL_KEYBOARD)
-  // The keyboard page loads.
-  EXPECT_EQ(4, prefs->GetInteger(prefs::kStabilityPageLoadCount));
-#else
   EXPECT_EQ(3, prefs->GetInteger(prefs::kStabilityPageLoadCount));
-#endif
   EXPECT_EQ(0, prefs->GetInteger(prefs::kStabilityRendererCrashCount));
   // TODO(isherman): We should also verify that prefs::kStabilityExitedCleanly
   // is set to true, but this preference isn't set until the browser
   // exits... it's not clear to me how to test that.
 }
 
-IN_PROC_BROWSER_TEST_F(MetricsServiceTest, CrashRenderers) {
+// Flaky on Linux. See http://crbug.com/131094
+#if defined(OS_LINUX)
+#define MAYBE_CrashRenderers DISABLED_CrashRenderers
+#else
+#define MAYBE_CrashRenderers CrashRenderers
+#endif
+IN_PROC_BROWSER_TEST_F(MetricsServiceTest, MAYBE_CrashRenderers) {
   OpenTabs();
 
   // Kill the process for one of the tabs.
@@ -97,12 +98,7 @@ IN_PROC_BROWSER_TEST_F(MetricsServiceTest, CrashRenderers) {
 
   // Verify that the expected stability metrics were recorded.
   EXPECT_EQ(1, prefs->GetInteger(prefs::kStabilityLaunchCount));
-#if defined(USE_VIRTUAL_KEYBOARD)
-  // The keyboard page loads.
-  EXPECT_EQ(5, prefs->GetInteger(prefs::kStabilityPageLoadCount));
-#else
   EXPECT_EQ(4, prefs->GetInteger(prefs::kStabilityPageLoadCount));
-#endif
   EXPECT_EQ(1, prefs->GetInteger(prefs::kStabilityRendererCrashCount));
   // TODO(isherman): We should also verify that prefs::kStabilityExitedCleanly
   // is set to true, but this preference isn't set until the browser

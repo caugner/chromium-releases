@@ -25,7 +25,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -225,8 +225,12 @@ void ProfileInfoCache::RemoveObserver(ProfileInfoCacheObserver* obs) {
 }
 
 void ProfileInfoCache::DeleteProfileFromCache(const FilePath& profile_path) {
-  string16 name = GetNameOfProfileAtIndex(
-      GetIndexOfProfileWithPath(profile_path));
+  size_t profile_index = GetIndexOfProfileWithPath(profile_path);
+  if (profile_index == std::string::npos) {
+    NOTREACHED();
+    return;
+  }
+  string16 name = GetNameOfProfileAtIndex(profile_index);
 
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
                     observer_list_,

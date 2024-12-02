@@ -30,6 +30,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
@@ -44,6 +45,7 @@ namespace {
 ChromeWebUIDataSource* CreateCrashesUIHTMLSource() {
   ChromeWebUIDataSource* source =
       new ChromeWebUIDataSource(chrome::kChromeUICrashesHost);
+  source->set_use_json_js_format_v2();
 
   source->AddLocalizedString("crashesTitle", IDS_CRASHES_TITLE);
   source->AddLocalizedString("crashCountFormat",
@@ -171,7 +173,8 @@ CrashesUI::CrashesUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 // static
 base::RefCountedMemory* CrashesUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
-      LoadDataResourceBytes(IDR_SAD_FAVICON);
+      LoadDataResourceBytes(IDR_SAD_FAVICON,
+                            ui::SCALE_FACTOR_NONE);
 }
 
 // static

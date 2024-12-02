@@ -11,7 +11,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -63,7 +63,7 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, ProcessOverflow) {
   base_url = base_url.ReplaceComponents(replace_host);
 
   // Load an extension before adding tabs.
-  const Extension* extension1 = LoadExtension(
+  const extensions::Extension* extension1 = LoadExtension(
       test_data_dir_.AppendASCII("api_test/browser_action/basics"));
   ASSERT_TRUE(extension1);
   GURL extension1_url = extension1->url();
@@ -101,7 +101,7 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, ProcessOverflow) {
       NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   // Load another extension.
-  const Extension* extension2 = LoadExtension(
+  const extensions::Extension* extension2 = LoadExtension(
       test_data_dir_.AppendASCII("api_test/browser_action/close_background"));
   ASSERT_TRUE(extension2);
   GURL extension2_url = extension2->url();

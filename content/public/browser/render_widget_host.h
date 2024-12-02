@@ -11,6 +11,7 @@
 #include "content/public/browser/keyboard_listener.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "ipc/ipc_channel.h"
+#include "ipc/ipc_sender.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "ui/gfx/size.h"
@@ -102,7 +103,7 @@ class RenderWidgetHostView;
 // messages for select popups. This placement is more out of convenience than
 // anything else. When the view is live, these messages are forwarded to it by
 // the RenderWidgetHost's IPC message map.
-class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Sender {
+class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
  public:
   // Free all backing stores used for rendering to drop memory usage.
   static void RemoveAllBackingStores();
@@ -163,33 +164,25 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Sender {
 
   virtual void Blur() = 0;
 
-  // DEPRECATED: Synchronous version of AsyncCopyFromBackingSurface.
-  // This will be removed once all the caller have been changed to use the
-  // asynchronous version.
-  virtual bool CopyFromBackingStore(const gfx::Rect& src_rect,
-                                    const gfx::Size& accelerated_dest_size,
-                                    skia::PlatformCanvas* output) = 0;
-
   // Copies the given subset of the backing store into the given (uninitialized)
   // PlatformCanvas. If |src_rect| is empty, the whole contents is copied.
-  // |callback| is invoked with true on success, false otherwise. |output| can
-  // be initialized even on failure.
-  // When accelerated compositing is active, the contents is copied
-  // asynchronously from the compositing surface, but when the backing store is
-  // available, the contents is copied synchronously because it's fast enough.
+  // NOTE: |src_rect| is not supported yet when accelerated compositing is
+  // active (http://crbug.com/118571) and the whole content is always copied
+  // regardless of |src_rect|.
   // If non empty |accelerated_dest_size| is given and accelerated compositing
   // is active, the content is shrinked so that it fits in
   // |accelerated_dest_size|. If |accelerated_dest_size| is larger than the
   // contens size, the content is not resized. If |accelerated_dest_size| is
   // empty, the size copied from the source contents is used.
-  // NOTE: |src_rect| is not supported yet when accelerated compositing is
-  // active (http://crbug.com/118571) and the whole content is always copied
-  // regardless of |src_rect|.
-  virtual void AsyncCopyFromBackingStore(
-      const gfx::Rect& src_rect,
-      const gfx::Size& accelerated_dest_size,
-      skia::PlatformCanvas* output,
-      base::Callback<void(bool)> callback) = 0;
+  // |callback| is invoked with true on success, false otherwise. |output| can
+  // be initialized even on failure.
+  // NOTE: |callback| is called synchronously if the backing store is available.
+  // When accelerated compositing is active, it is called asynchronously on Aura
+  // and synchronously on the other platforms.
+  virtual void CopyFromBackingStore(const gfx::Rect& src_rect,
+                                    const gfx::Size& accelerated_dest_size,
+                                    skia::PlatformCanvas* output,
+                                    base::Callback<void(bool)> callback) = 0;
 #if defined(TOOLKIT_GTK)
   // Paint the backing store into the target's |dest_rect|.
   virtual bool CopyFromBackingStoreToGtkWindow(const gfx::Rect& dest_rect,
@@ -277,6 +270,9 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Sender {
 
   // Remove a keyboard listener.
   virtual void RemoveKeyboardListener(KeyboardListener* listener) = 0;
+
+  // Update the device scale factor.
+  virtual void SetDeviceScaleFactor(float scale) = 0;
 
  protected:
   friend class RenderWidgetHostImpl;

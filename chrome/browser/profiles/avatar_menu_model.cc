@@ -15,9 +15,9 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
@@ -36,8 +36,8 @@ void OnProfileCreated(bool always_create,
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
     ProfileManager::FindOrCreateNewWindowForProfile(
         profile,
-        BrowserInit::IS_NOT_PROCESS_STARTUP,
-        BrowserInit::IS_NOT_FIRST_RUN,
+        browser::startup::IS_NOT_PROCESS_STARTUP,
+        browser::startup::IS_NOT_FIRST_RUN,
         always_create);
   }
 }
@@ -68,6 +68,7 @@ AvatarMenuModel::~AvatarMenuModel() {
 AvatarMenuModel::Item::Item(size_t model_index, const gfx::Image& icon)
     : icon(icon),
       active(false),
+      signed_in(false),
       model_index(model_index) {
 }
 

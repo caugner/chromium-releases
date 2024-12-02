@@ -34,8 +34,7 @@
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/page_info_bubble.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/task_manager/task_manager_dialog.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_source.h"
@@ -51,6 +50,7 @@
 #import "chrome/browser/ui/cocoa/one_click_signin_bubble_controller.h"
 #endif
 
+using content::NativeWebKeyboardEvent;
 using content::SSLStatus;
 using content::WebContents;
 
@@ -146,7 +146,7 @@ void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
   cocoa_bounds.origin.y =
-      [screen frame].size.height - real_bounds.height() - real_bounds.y();
+      NSHeight([screen frame]) - real_bounds.height() - real_bounds.y();
 
   [window() setFrame:cocoa_bounds display:YES];
 }
@@ -200,7 +200,7 @@ bool BrowserWindowCocoa::IsActive() const {
   return [window() isKeyWindow];
 }
 
-gfx::NativeWindow BrowserWindowCocoa::GetNativeHandle() {
+gfx::NativeWindow BrowserWindowCocoa::GetNativeWindow() {
   return window();
 }
 
@@ -237,7 +237,7 @@ void BrowserWindowCocoa::BookmarkBarStateChanged(
 
 void BrowserWindowCocoa::UpdateDevTools() {
   [controller_ updateDevToolsForContents:
-      browser_->GetSelectedWebContents()];
+      browser_->GetActiveWebContents()];
 }
 
 void BrowserWindowCocoa::SetDevToolsDockSide(DevToolsDockSide side) {
@@ -252,12 +252,24 @@ void BrowserWindowCocoa::SetStarredState(bool is_starred) {
   [controller_ setStarredState:is_starred ? YES : NO];
 }
 
+void BrowserWindowCocoa::SetZoomIconState(ZoomController::ZoomIconState state) {
+  // TODO(khorimoto): Find someone to implement this.
+}
+
+void BrowserWindowCocoa::SetZoomIconTooltipPercent(int zoom_percent) {
+  // TODO(khorimoto): Find someone to implement this.
+}
+
+void BrowserWindowCocoa::ShowZoomBubble(int zoom_percent) {
+  // TODO(khorimoto): Find someone to implement this.
+}
+
 gfx::Rect BrowserWindowCocoa::GetRestoredBounds() const {
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
   NSRect frame = [controller_ regularWindowFrame];
-  gfx::Rect bounds(frame.origin.x, 0, frame.size.width, frame.size.height);
-  bounds.set_y([screen frame].size.height - frame.origin.y - frame.size.height);
+  gfx::Rect bounds(frame.origin.x, 0, NSWidth(frame), NSHeight(frame));
+  bounds.set_y(NSHeight([screen frame]) - NSMaxY(frame));
   return bounds;
 }
 
@@ -341,7 +353,7 @@ void BrowserWindowCocoa::UpdateReloadStopState(bool is_loading, bool force) {
   [controller_ setIsLoading:is_loading force:force];
 }
 
-void BrowserWindowCocoa::UpdateToolbar(TabContentsWrapper* contents,
+void BrowserWindowCocoa::UpdateToolbar(TabContents* contents,
                                        bool should_restore_state) {
   [controller_ updateToolbarWithContents:contents->web_contents()
                       shouldRestoreState:should_restore_state ? YES : NO];
@@ -415,29 +427,11 @@ void BrowserWindowCocoa::ShowUpdateChromeDialog() {
 }
 
 void BrowserWindowCocoa::ShowTaskManager() {
-#if defined(WEBUI_TASK_MANAGER)
-  TaskManagerDialog::Show();
-#else
-  // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (TaskManagerDialog::UseWebUITaskManager()) {
-    TaskManagerDialog::Show();
-  } else {
-    TaskManagerMac::Show(false);
-  }
-#endif  // defined(WEBUI_TASK_MANAGER)
+  TaskManagerMac::Show(false);
 }
 
 void BrowserWindowCocoa::ShowBackgroundPages() {
-#if defined(WEBUI_TASK_MANAGER)
-  TaskManagerDialog::ShowBackgroundPages();
-#else
-  // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (TaskManagerDialog::UseWebUITaskManager()) {
-    TaskManagerDialog::ShowBackgroundPages();
-  } else {
-    TaskManagerMac::Show(true);
-  }
-#endif  // defined(WEBUI_TASK_MANAGER)
+  TaskManagerMac::Show(true);
 }
 
 void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
@@ -451,15 +445,12 @@ void BrowserWindowCocoa::ShowChromeToMobileBubble() {
 }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
-
 void BrowserWindowCocoa::ShowOneClickSigninBubble(
-      const base::Closure& learn_more_callback,
-      const base::Closure& advanced_callback) {
+      const StartSyncCallback& start_sync_callback) {
   OneClickSigninBubbleController* bubble_controller =
       [[OneClickSigninBubbleController alloc]
         initWithBrowserWindowController:cocoa_controller()
-                      learnMoreCallback:learn_more_callback
-                       advancedCallback:advanced_callback];
+                    start_sync_callback:start_sync_callback];
   [bubble_controller showWindow:nil];
 }
 #endif
@@ -500,12 +491,13 @@ void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
                                       const GURL& url,
                                       const SSLStatus& ssl,
                                       bool show_history) {
-  browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history);
+  browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history,
+                              browser_);
 }
 
 void BrowserWindowCocoa::ShowWebsiteSettings(
     Profile* profile,
-    TabContentsWrapper* tab_contents_wrapper,
+    TabContents* tab_contents,
     const GURL& url,
     const content::SSLStatus& ssl,
     bool show_history) {
@@ -541,12 +533,12 @@ void BrowserWindowCocoa::HandleKeyboardEvent(
 }
 
 void BrowserWindowCocoa::ShowCreateWebAppShortcutsDialog(
-    TabContentsWrapper* tab_contents) {
+    TabContents* tab_contents) {
   NOTIMPLEMENTED();
 }
 
 void BrowserWindowCocoa::ShowCreateChromeAppShortcutsDialog(
-    Profile* profile, const Extension* app) {
+    Profile* profile, const extensions::Extension* app) {
   NOTIMPLEMENTED();
 }
 
@@ -581,7 +573,7 @@ bool BrowserWindowCocoa::InPresentationMode() {
   return [controller_ inPresentationMode];
 }
 
-void BrowserWindowCocoa::ShowInstant(TabContentsWrapper* preview) {
+void BrowserWindowCocoa::ShowInstant(TabContents* preview) {
   [controller_ showInstant:preview->web_contents()];
 }
 

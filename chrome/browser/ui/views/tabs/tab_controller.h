@@ -58,11 +58,11 @@ class TabController {
   // Potentially starts a drag for the specified Tab.
   virtual void MaybeStartDrag(
       BaseTab* tab,
-      const views::LocatedEvent& event,
+      const views::MouseEvent& event,
       const TabStripSelectionModel& original_selection) = 0;
 
   // Continues dragging a Tab.
-  virtual void ContinueDrag(const views::MouseEvent& event) = 0;
+  virtual void ContinueDrag(views::View* view, const gfx::Point& location) = 0;
 
   // Ends dragging a Tab. |canceled| is true if the drag was aborted in a way
   // other than the user releasing the mouse. Returns whether the tab has been
@@ -77,6 +77,15 @@ class TabController {
   // Informs that an active tab is selected when already active (ie - clicked
   // when already active/foreground).
   virtual void ClickActiveTab(const BaseTab* tab) const = 0;
+
+  // Invoked when a mouse event occurs on |source|.
+  virtual void OnMouseEventInTab(views::View* source,
+                                 const views::MouseEvent& event) = 0;
+
+  // Returns true if |tab| needs to be painted. If false is returned the tab is
+  // not painted. If true is returned the tab should be painted and |clip| is
+  // set to the clip (if |clip| is empty means no clip).
+  virtual bool ShouldPaintTab(const BaseTab* tab, gfx::Rect* clip) = 0;
 
  protected:
   virtual ~TabController() {}

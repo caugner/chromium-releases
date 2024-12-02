@@ -14,7 +14,6 @@
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service_defaults.h"
-#include "net/base/sys_addrinfo.h"
 #include "net/base/test_certificate_data.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -49,7 +48,8 @@ class SSLClientSocketPoolTest : public testing::Test {
             &host_resolver_)),
         session_(CreateNetworkSession()),
         direct_transport_socket_params_(new TransportSocketParams(
-            HostPortPair("host", 443), MEDIUM, false, false)),
+            HostPortPair("host", 443), MEDIUM, false, false,
+            OnHostResolutionCallback())),
         transport_histograms_("MockTCP"),
         transport_socket_pool_(
             kMaxSockets,
@@ -57,7 +57,8 @@ class SSLClientSocketPoolTest : public testing::Test {
             &transport_histograms_,
             &socket_factory_),
         proxy_transport_socket_params_(new TransportSocketParams(
-            HostPortPair("proxy", 443), MEDIUM, false, false)),
+            HostPortPair("proxy", 443), MEDIUM, false, false,
+            OnHostResolutionCallback())),
         socks_socket_params_(new SOCKSSocketParams(
             proxy_transport_socket_params_, true,
             HostPortPair("sockshost", 443), MEDIUM)),
@@ -721,9 +722,8 @@ TEST_F(SSLClientSocketPoolTest, IPPooling) {
 
   // TODO(rtenneti): MockClientSocket::GetPeerAddress returns 0 as the port
   // number. Fix it to return port 80 and then use GetPeerAddress to AddAlias.
-  const addrinfo* address = test_hosts[0].addresses.head();
   SpdySessionPoolPeer pool_peer(session_->spdy_session_pool());
-  pool_peer.AddAlias(address, test_hosts[0].pair);
+  pool_peer.AddAlias(test_hosts[0].addresses.front(), test_hosts[0].pair);
 
   scoped_refptr<SpdySession> spdy_session;
   rv = session_->spdy_session_pool()->GetSpdySessionFromSocket(
@@ -807,9 +807,8 @@ TEST_F(SSLClientSocketPoolTest, IPPoolingClientCert) {
 
   // TODO(rtenneti): MockClientSocket::GetPeerAddress returns 0 as the port
   // number. Fix it to return port 80 and then use GetPeerAddress to AddAlias.
-  const addrinfo* address = test_hosts[0].addresses.head();
   SpdySessionPoolPeer pool_peer(session_->spdy_session_pool());
-  pool_peer.AddAlias(address, test_hosts[0].pair);
+  pool_peer.AddAlias(test_hosts[0].addresses.front(), test_hosts[0].pair);
 
   scoped_refptr<SpdySession> spdy_session;
   rv = session_->spdy_session_pool()->GetSpdySessionFromSocket(

@@ -17,27 +17,29 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "jingle/notifier/base/notifier_options.h"
-#include "sync/notifier/invalidation_version_tracker.h"
+#include "sync/internal_api/public/util/weak_handle.h"
+#include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/sync_notifier.h"
 #include "sync/notifier/sync_notifier_observer.h"
-#include "sync/util/weak_handle.h"
 
 namespace base {
-class MessageLoopProxy;
-}
+class SingleThreadTaskRunner;
+}  // namespace base
 
 namespace sync_notifier {
 
 class NonBlockingInvalidationNotifier
     : public SyncNotifier,
+      // SyncNotifierObserver to "observe" our Core via WeakHandle.
       public SyncNotifierObserver {
  public:
-  // |invalidation_version_tracker| must be initialized.
+  // |invalidation_state_tracker| must be initialized.
   NonBlockingInvalidationNotifier(
       const notifier::NotifierOptions& notifier_options,
       const InvalidationVersionMap& initial_max_invalidation_versions,
-      const browser_sync::WeakHandle<InvalidationVersionTracker>&
-          invalidation_version_tracker,
+      const std::string& initial_invalidation_state,
+      const browser_sync::WeakHandle<InvalidationStateTracker>&
+          invalidation_state_tracker,
       const std::string& client_info);
 
   virtual ~NonBlockingInvalidationNotifier();
@@ -46,7 +48,7 @@ class NonBlockingInvalidationNotifier
   virtual void AddObserver(SyncNotifierObserver* observer) OVERRIDE;
   virtual void RemoveObserver(SyncNotifierObserver* observer) OVERRIDE;
   virtual void SetUniqueId(const std::string& unique_id) OVERRIDE;
-  virtual void SetState(const std::string& state) OVERRIDE;
+  virtual void SetStateDeprecated(const std::string& state) OVERRIDE;
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE;
   virtual void UpdateEnabledTypes(
@@ -55,11 +57,12 @@ class NonBlockingInvalidationNotifier
       syncable::ModelTypeSet changed_types) OVERRIDE;
 
   // SyncNotifierObserver implementation.
+  virtual void OnNotificationsEnabled() OVERRIDE;
+  virtual void OnNotificationsDisabled(
+      NotificationsDisabledReason reason) OVERRIDE;
   virtual void OnIncomingNotification(
       const syncable::ModelTypePayloadMap& type_payloads,
       IncomingNotificationSource source) OVERRIDE;
-  virtual void OnNotificationStateChange(bool notifications_enabled) OVERRIDE;
-  virtual void StoreState(const std::string& state) OVERRIDE;
 
  private:
   class Core;
@@ -72,8 +75,8 @@ class NonBlockingInvalidationNotifier
   // The real guts of NonBlockingInvalidationNotifier, which allows
   // this class to live completely on the parent thread.
   scoped_refptr<Core> core_;
-  scoped_refptr<base::MessageLoopProxy> parent_message_loop_proxy_;
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
+  scoped_refptr<base::SingleThreadTaskRunner> parent_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(NonBlockingInvalidationNotifier);
 };

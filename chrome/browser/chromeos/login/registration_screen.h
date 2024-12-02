@@ -9,7 +9,6 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/web_page_screen.h"
@@ -54,6 +53,9 @@ class RegistrationScreen : public ViewScreen<RegistrationView>,
   explicit RegistrationScreen(ViewScreenDelegate* delegate);
   virtual ~RegistrationScreen();
 
+  // WizardScreen overrides:
+  virtual std::string GetName() const OVERRIDE;
+
   // Handler factory for net::URLRequestFilter::AddHostnameHandler.
   static net::URLRequestJob* Factory(net::URLRequest* request,
                                      const std::string& scheme);
@@ -70,7 +72,7 @@ class RegistrationScreen : public ViewScreen<RegistrationView>,
       const content::OpenURLParams& params) OVERRIDE;
 
   virtual void HandleKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
 
   // WebPageScreen implementation:
   virtual void CloseScreen(ScreenObserver::ExitCodes code) OVERRIDE;

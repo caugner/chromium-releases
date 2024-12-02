@@ -15,25 +15,26 @@
 #include "chrome/common/net/gaia/oauth2_api_call_flow.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/common/url_fetcher.h"
-#include "content/public/common/url_fetcher_delegate.h"
-#include "content/public/common/url_fetcher_factory.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/url_fetcher_delegate.h"
+#include "net/url_request/url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::URLFetcher;
-using content::URLFetcherDelegate;
-using content::URLFetcherFactory;
 using net::HttpRequestHeaders;
+using net::URLFetcher;
+using net::URLFetcherDelegate;
+using net::URLFetcherFactory;
 using net::URLRequestStatus;
 using testing::_;
 using testing::Return;
 
 namespace {
+
 static std::string CreateBody() {
   return "some body";
 }
@@ -48,8 +49,6 @@ static std::vector<std::string> CreateTestScopes() {
   scopes.push_back("scope2");
   return scopes;
 }
-
-}  // namespace
 
 class MockUrlFetcherFactory : public ScopedURLFetcherFactory,
                               public URLFetcherFactory {
@@ -93,15 +92,17 @@ class MockApiCallFlow : public OAuth2ApiCallFlow {
   MOCK_METHOD0(CreateApiCallUrl, GURL ());
   MOCK_METHOD0(CreateApiCallBody, std::string ());
   MOCK_METHOD1(ProcessApiCallSuccess,
-      void (const content::URLFetcher* source));
+      void (const URLFetcher* source));
   MOCK_METHOD1(ProcessApiCallFailure,
-      void (const content::URLFetcher* source));
+      void (const URLFetcher* source));
   MOCK_METHOD1(ProcessNewAccessToken,
       void (const std::string& access_token));
   MOCK_METHOD1(ProcessMintAccessTokenFailure,
       void (const GoogleServiceAuthError& error));
   MOCK_METHOD0(CreateAccessTokenFetcher, OAuth2AccessTokenFetcher* ());
 };
+
+}  // namespace
 
 class OAuth2ApiCallFlowTest : public testing::Test {
  public:

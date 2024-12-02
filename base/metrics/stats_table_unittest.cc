@@ -312,6 +312,7 @@ TEST_F(StatsTableTest, StatsCounterTimer) {
   const std::string kTableName = "StatTable";
   const int kMaxThreads = 20;
   const int kMaxCounter = 5;
+  DeleteShmem(kTableName);
   StatsTable table(kTableName, kMaxThreads, kMaxCounter);
   StatsTable::set_current(&table);
 
@@ -337,6 +338,7 @@ TEST_F(StatsTableTest, StatsCounterTimer) {
   bar.Stop();
   EXPECT_GT(table.GetCounterValue("t:bar"), 0);
   EXPECT_LE(kDuration.InMilliseconds() * 2, table.GetCounterValue("t:bar"));
+  DeleteShmem(kTableName);
 }
 
 // Test some basic StatsRate operations
@@ -345,6 +347,7 @@ TEST_F(StatsTableTest, StatsRate) {
   const std::string kTableName = "StatTable";
   const int kMaxThreads = 20;
   const int kMaxCounter = 5;
+  DeleteShmem(kTableName);
   StatsTable table(kTableName, kMaxThreads, kMaxCounter);
   StatsTable::set_current(&table);
 
@@ -370,6 +373,7 @@ TEST_F(StatsTableTest, StatsRate) {
   baz.Stop();
   EXPECT_EQ(2, table.GetCounterValue("c:baz"));
   EXPECT_LE(kDuration.InMilliseconds() * 2, table.GetCounterValue("t:baz"));
+  DeleteShmem(kTableName);
 }
 
 // Test some basic StatsScope operations

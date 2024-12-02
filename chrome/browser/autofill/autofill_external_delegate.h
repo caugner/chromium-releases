@@ -11,12 +11,12 @@
 #include "base/compiler_specific.h"
 #include "base/string16.h"
 #include "chrome/browser/autofill/password_autofill_manager.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "webkit/forms/form_data.h"
 #include "webkit/forms/form_field.h"
 #include "webkit/forms/password_form_dom_manager.h"
 
 class AutofillManager;
-class TabContentsWrapper;
 
 namespace gfx {
 class Rect;
@@ -63,6 +63,12 @@ class AutofillExternalDelegate {
                                  const webkit::forms::FormField& field,
                                  const gfx::Rect& bounds);
 
+  // Set the data list value associated with the current field.
+  void SetCurrentDataListValues(const std::vector<string16>& autofill_values,
+                                const std::vector<string16>& autofill_labels,
+                                const std::vector<string16>& autofill_icons,
+                                const std::vector<int>& autofill_unique_ids);
+
   // Remove the given Autocomplete entry from the DB.
   virtual void RemoveAutocompleteEntry(const string16& value);
 
@@ -98,10 +104,10 @@ class AutofillExternalDelegate {
   // MUST implement this.  The 1st arg is the tab contents that owns
   // this delegate; the second is the Autofill manager owned by the
   // tab contents.
-  static AutofillExternalDelegate* Create(TabContentsWrapper*,
+  static AutofillExternalDelegate* Create(TabContents*,
                                           AutofillManager*);
  protected:
-  explicit AutofillExternalDelegate(TabContentsWrapper* tab_contents_wrapper,
+  explicit AutofillExternalDelegate(TabContents* tab_contents,
                                     AutofillManager* autofill_manager);
 
   // Displays the the Autofill results to the user with an external
@@ -125,6 +131,9 @@ class AutofillExternalDelegate {
   // Set the bounds of the Autofill element being worked with.
   virtual void SetBounds(const gfx::Rect& bounds) = 0;
 
+  // Return the profile that this autofill delegate is currently working with.
+  Profile* profile() { return tab_contents_->profile(); }
+
  private:
   // Fills the form with the Autofill data corresponding to |unique_id|.
   // If |is_preview| is true then this is just a preview to show the user what
@@ -132,7 +141,28 @@ class AutofillExternalDelegate {
   // this data.
   void FillAutofillFormData(int unique_id, bool is_preview);
 
-  TabContentsWrapper* tab_contents_wrapper_;  // weak; owns me.
+  // Handle applying any Autofill warnings to the Autofill popup.
+  void ApplyAutofillWarnings(std::vector<string16>* autofill_values,
+                             std::vector<string16>* autofill_labels,
+                             std::vector<string16>* autofill_icons,
+                             std::vector<int>* autofill_unique_ids);
+
+  // Handle applying any Autofill option listings to the Autofill popup.
+  // This function should only get called when there is at least one
+  // multi-field suggestion in the list of suggestions.
+  void ApplyAutofillOptions(std::vector<string16>* autofill_values,
+                            std::vector<string16>* autofill_labels,
+                            std::vector<string16>* autofill_icons,
+                            std::vector<int>* autofill_unique_ids);
+
+  // Insert the data list values at the start of the given list, including
+  // any required separators.
+  void InsertDataListValues(std::vector<string16>* autofill_values,
+                            std::vector<string16>* autofill_labels,
+                            std::vector<string16>* autofill_icons,
+                            std::vector<int>* autofill_unique_ids);
+
+  TabContents* tab_contents_;  // weak; owns me.
   AutofillManager* autofill_manager_;  // weak.
 
   // Password Autofill manager, handles all password-related Autofilling.
@@ -152,6 +182,15 @@ class AutofillExternalDelegate {
   // Have we already shown Autofill suggestions for the field the user is
   // currently editing?  Used to keep track of state for metrics logging.
   bool has_shown_autofill_popup_for_current_edit_;
+
+  // Used to indicate if a popup is currently being shown or not.
+  bool popup_visible_;
+
+  // The current data list values.
+  std::vector<string16> data_list_values_;
+  std::vector<string16> data_list_labels_;
+  std::vector<string16> data_list_icons_;
+  std::vector<int> data_list_unique_ids_;
 
   DISALLOW_COPY_AND_ASSIGN(AutofillExternalDelegate);
 };

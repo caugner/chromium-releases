@@ -9,6 +9,7 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/uninstall_browser_prompt.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/shell_util.h"
@@ -17,8 +18,10 @@
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 UninstallView::UninstallView(int* user_selection)
     : confirm_label_(NULL),
@@ -66,10 +69,15 @@ void UninstallView::SetupControls() {
       l10n_util::GetStringUTF16(IDS_UNINSTALL_DELETE_PROFILE));
   layout->AddView(delete_profile_);
 
-  // Set default browser combo box
+  // Set default browser combo box. If the default should not or cannot be
+  // changed, widgets are not shown. We assume here that if Chrome cannot
+  // be set programatically as default, neither can any other browser (for
+  // instance because the OS doesn't permit that).
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   if (dist->CanSetAsDefault() &&
-      ShellIntegration::IsDefaultBrowser()) {
+      ShellIntegration::IsDefaultBrowser() &&
+      (ShellIntegration::CanSetAsDefaultBrowser() !=
+          ShellIntegration::SET_DEFAULT_INTERACTIVE)) {
     browsers_.reset(new BrowsersMap());
     ShellUtil::GetRegisteredBrowsers(dist, browsers_.get());
     if (!browsers_->empty()) {
@@ -102,11 +110,11 @@ bool UninstallView::Accept() {
   if (delete_profile_->checked())
     user_selection_ = chrome::RESULT_CODE_UNINSTALL_DELETE_PROFILE;
   if (change_default_browser_ && change_default_browser_->checked()) {
-    BrowsersMap::const_iterator it = browsers_->begin();
-    std::advance(it, browsers_combo_->selected_index());
+    BrowsersMap::const_iterator i = browsers_->begin();
+    std::advance(i, browsers_combo_->selected_index());
     base::LaunchOptions options;
     options.start_hidden = true;
-    base::LaunchProcess((*it).second, options, NULL);
+    base::LaunchProcess(i->second, options, NULL);
   }
   return true;
 }
@@ -148,7 +156,19 @@ int UninstallView::GetItemCount() const {
 
 string16 UninstallView::GetItemAt(int index) {
   DCHECK_LT(index, static_cast<int>(browsers_->size()));
-  BrowsersMap::const_iterator it = browsers_->begin();
-  std::advance(it, index);
-  return WideToUTF16Hack((*it).first);
+  BrowsersMap::const_iterator i = browsers_->begin();
+  std::advance(i, index);
+  return WideToUTF16Hack(i->first);
 }
+
+namespace browser {
+
+int ShowUninstallBrowserPrompt() {
+  int result = content::RESULT_CODE_NORMAL_EXIT;
+  views::Widget::CreateWindow(new UninstallView(&result))->Show();
+  views::AcceleratorHandler accelerator_handler;
+  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
+  return result;
+}
+
+}  // namespace browser

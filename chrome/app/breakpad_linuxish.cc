@@ -41,7 +41,7 @@
 #include "chrome/common/chrome_version_info_posix.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/logging_chrome.h"
-#include "content/common/chrome_descriptors.h"
+#include "content/public/common/content_descriptors.h"
 
 #if defined(OS_ANDROID)
 #include <android/log.h>
@@ -60,10 +60,6 @@
 #else
 #define STAT_STRUCT struct kernel_stat
 #define FSTAT_FUNC sys_fstat
-#endif
-
-#ifndef PR_SET_PTRACER
-#define PR_SET_PTRACER 0x59616d61
 #endif
 
 // Some versions of gcc are prone to warn about unused return values. In cases
@@ -557,10 +553,12 @@ void HandleCrashDump(const BreakpadInfo& info) {
     writer.AddPairString("guid", info.guid);
     writer.AddBoundary();
     if (info.pid > 0) {
-      char pid_buf[kUint64StringSize];
-      uint64_t pid_str_len = my_uint64_len(info.pid);
-      my_uint64tos(pid_buf, info.pid, pid_str_len);
-      writer.AddPairString("pid", pid_buf);
+      char pid_value_buf[kUint64StringSize];
+      uint64_t pid_value_len = my_uint64_len(info.pid);
+      my_uint64tos(pid_value_buf, info.pid, pid_value_len);
+      static const char pid_key_name[] = "pid";
+      writer.AddPairData(pid_key_name, sizeof(pid_key_name) - 1,
+                         pid_value_buf, pid_value_len);
       writer.AddBoundary();
     }
 #if defined(OS_ANDROID)
@@ -914,7 +912,7 @@ void HandleCrashDump(const BreakpadInfo& info) {
   // Main browser process.
   if (child <= 0)
     return;
-  HANDLE_EINTR(sys_waitpid(child, NULL, 0));
+  (void) HANDLE_EINTR(sys_waitpid(child, NULL, 0));
 }
 
 static bool CrashDone(const char* dump_path,
@@ -1025,17 +1023,6 @@ static bool NonBrowserCrashHandler(const void* crash_context,
     WriteLog(msg, sizeof(msg)-1);
     return false;
   }
-
-  // On kernels with ptrace protection, e.g. Ubuntu 10.10+, the browser cannot
-  // ptrace this crashing process and crash dumping will fail. When using the
-  // SUID sandbox, this crashing process is likely to be in its own PID
-  // namespace, and thus there is no way to permit only the browser process to
-  // ptrace it.
-  // The workaround is to allow all processes to ptrace this process if we
-  // reach this point, by passing -1 as the allowed PID. However, support for
-  // passing -1 as the PID won't reach kernels until around the Ubuntu 12.04
-  // timeframe.
-  sys_prctl(PR_SET_PTRACER, -1);
 
   // Start constructing the message to send to the browser.
   char guid[kGuidSize + 1] = {0};

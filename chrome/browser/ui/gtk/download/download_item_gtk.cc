@@ -27,6 +27,7 @@
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -872,7 +873,7 @@ gboolean DownloadItemGtk::OnProgressAreaExpose(GtkWidget* widget,
   // there is no need to use the chromium-specific default download item icon.
   if (icon_small_) {
     const int offset = download_util::kSmallProgressIconOffset;
-    canvas.DrawBitmapInt(*icon_small_->ToSkBitmap(),
+    canvas.DrawImageInt(*icon_small_->ToSkBitmap(),
         allocation.x + offset, allocation.y + offset);
   }
 
@@ -896,8 +897,11 @@ void DownloadItemGtk::ShowPopupMenu(GtkWidget* button,
   if (complete_animation_.is_animating())
     complete_animation_.End();
 
-  if (!menu_.get())
-    menu_.reset(new DownloadShelfContextMenuGtk(download_model_.get(), this));
+  if (!menu_.get()) {
+    menu_.reset(new DownloadShelfContextMenuGtk(download_model_.get(),
+                                                this,
+                                                parent_shelf_->GetNavigator()));
+  }
   menu_->Popup(button, event);
 }
 

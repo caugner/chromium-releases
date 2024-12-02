@@ -102,8 +102,6 @@ void ConnectionToClient::OnSessionStateChange(Session::State state) {
       break;
 
     case Session::AUTHENTICATED:
-      handler_->OnConnectionAuthenticated(this);
-
       // Initialize channels.
       control_dispatcher_.reset(new HostControlDispatcher());
       control_dispatcher_->Init(session_.get(), base::Bind(
@@ -118,11 +116,13 @@ void ConnectionToClient::OnSessionStateChange(Session::State state) {
       event_dispatcher_->set_sequence_number_callback(base::Bind(
           &ConnectionToClient::UpdateSequenceNumber, base::Unretained(this)));
 
-      video_writer_.reset(VideoWriter::Create(
-          base::MessageLoopProxy::current(), session_->config()));
+      video_writer_ = VideoWriter::Create(session_->config());
       video_writer_->Init(session_.get(), base::Bind(
           &ConnectionToClient::OnChannelInitialized, base::Unretained(this)));
 
+      // Notify the handler after initializing the channels, so that
+      // ClientSession can get a client clipboard stub.
+      handler_->OnConnectionAuthenticated(this);
       break;
 
     case Session::CLOSED:

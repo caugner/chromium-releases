@@ -9,6 +9,7 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/scoped_temp_dir.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -54,7 +55,7 @@ class IsolatedFileUtilTest : public testing::Test {
 
   void SetUp() {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
-    file_util_.reset(new IsolatedFileUtil(new NativeFileUtil()));
+    file_util_.reset(new IsolatedFileUtil());
 
     // Register the files/directories of RegularTestCases (with random
     // root paths) as dropped files.
@@ -63,13 +64,13 @@ class IsolatedFileUtilTest : public testing::Test {
     file_system_context_ = new FileSystemContext(
         base::MessageLoopProxy::current(),
         base::MessageLoopProxy::current(),
-        new quota::MockSpecialStoragePolicy(),
+        make_scoped_refptr(new quota::MockSpecialStoragePolicy()),
         NULL /* quota_manager */,
         data_dir_.path(),
         CreateAllowFileAccessOptions());
 
     // For cross-FileUtil copy/move tests.
-    other_file_util_.reset(new LocalFileUtil(new NativeFileUtil()));
+    other_file_util_.reset(new LocalFileUtil());
     other_file_util_helper_.SetUp(file_system_context_, other_file_util_.get());
   }
 
@@ -209,6 +210,7 @@ class IsolatedFileUtilTest : public testing::Test {
   }
 
   ScopedTempDir data_dir_;
+  MessageLoop message_loop_;
   std::string filesystem_id_;
   scoped_refptr<FileSystemContext> file_system_context_;
   std::map<FilePath, FilePath> toplevel_root_map_;
@@ -332,6 +334,20 @@ TEST_F(IsolatedFileUtilTest, ReadDirectoryTest) {
       EXPECT_EQ(found->second.last_modified_time.ToDoubleT(),
                 entry.last_modified_time.ToDoubleT());
     }
+  }
+}
+
+TEST_F(IsolatedFileUtilTest, GetLocalFilePathTest) {
+  for (size_t i = 0; i < test::kRegularTestCaseSize; ++i) {
+    const test::TestCaseRecord& test_case = test::kRegularTestCases[i];
+    FileSystemPath path = GetFileSystemPath(FilePath(test_case.path));
+
+    FileSystemOperationContext context(file_system_context());
+
+    FilePath local_file_path;
+    EXPECT_EQ(base::PLATFORM_FILE_OK,
+              file_util()->GetLocalFilePath(&context, path, &local_file_path));
+    EXPECT_EQ(GetTestCasePlatformPath(test_case.path), local_file_path);
   }
 }
 

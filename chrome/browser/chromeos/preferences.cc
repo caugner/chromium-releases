@@ -217,10 +217,10 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                              input_method::kSearchKey,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kLanguageXkbRemapControlKeyTo,
-                             input_method::kLeftControlKey,
+                             input_method::kControlKey,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kLanguageXkbRemapAltKeyTo,
-                             input_method::kLeftAltKey,
+                             input_method::kAltKey,
                              PrefService::SYNCABLE_PREF);
   // We don't sync the following keyboard prefs since they are not user-
   // configurable.
@@ -233,9 +233,6 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterIntegerPref(prefs::kLanguageXkbAutoRepeatInterval,
                              language_prefs::kXkbAutoRepeatIntervalInMs,
                              PrefService::UNSYNCABLE_PREF);
-
-  prefs->RegisterDictionaryPref(prefs::kLanguagePreferredVirtualKeyboard,
-                                PrefService::SYNCABLE_PREF);
 
   // Screen lock default to off.
   prefs->RegisterBooleanPref(prefs::kEnableScreenLock,
@@ -334,12 +331,6 @@ void Preferences::InitUserPrefs(PrefService* prefs) {
     mozc_integer_prefs_[i].Init(
         language_prefs::kMozcIntegerPrefs[i].pref_name, prefs, this);
   }
-  xkb_remap_search_key_to_.Init(
-      prefs::kLanguageXkbRemapSearchKeyTo, prefs, this);
-  xkb_remap_control_key_to_.Init(
-      prefs::kLanguageXkbRemapControlKeyTo, prefs, this);
-  xkb_remap_alt_key_to_.Init(
-      prefs::kLanguageXkbRemapAltKeyTo, prefs, this);
   xkb_auto_repeat_enabled_.Init(
       prefs::kLanguageXkbAutoRepeatEnabled, prefs, this);
   xkb_auto_repeat_delay_pref_.Init(
@@ -357,9 +348,6 @@ void Preferences::Init(PrefService* prefs) {
 
   // Initialize preferences to currently saved state.
   NotifyPrefChanged(NULL);
-
-  // Initialize virtual keyboard settings to currently saved state.
-  UpdateVirturalKeyboardPreference(prefs);
 
   // If a guest is logged in, initialize the prefs as if this is the first
   // login.
@@ -444,16 +432,6 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     // preferencs, we don't need to send this to ibus-daemon.
   }
 
-  // Here, we set up the the modifier key mapping. This has to be done
-  // before changing the current keyboard layout, so that the modifier key
-  // preference is properly preserved. For this reason, we should do this
-  // before setting preload engines, that could change the current
-  // keyboard layout as needed.
-  if (!pref_name || (*pref_name == prefs::kLanguageXkbRemapSearchKeyTo ||
-                     *pref_name == prefs::kLanguageXkbRemapControlKeyTo ||
-                     *pref_name == prefs::kLanguageXkbRemapAltKeyTo)) {
-    UpdateModifierKeyMapping();
-  }
   if (!pref_name || *pref_name == prefs::kLanguageXkbAutoRepeatEnabled) {
     const bool enabled = xkb_auto_repeat_enabled_.GetValue();
     input_method::XKeyboard::SetAutoRepeatEnabled(enabled);
@@ -669,34 +647,6 @@ void Preferences::SetInputMethodList() {
     input_method_manager_->ChangeInputMethod(current_input_method_id);
 }
 
-void Preferences::UpdateModifierKeyMapping() {
-  const int search_remap = xkb_remap_search_key_to_.GetValue();
-  const int control_remap = xkb_remap_control_key_to_.GetValue();
-  const int alt_remap = xkb_remap_alt_key_to_.GetValue();
-  if ((search_remap < input_method::kNumModifierKeys) && (search_remap >= 0) &&
-      (control_remap < input_method::kNumModifierKeys) &&
-      (control_remap >= 0) &&
-      (alt_remap < input_method::kNumModifierKeys) && (alt_remap >= 0)) {
-    input_method::ModifierMap modifier_map;
-    modifier_map.push_back(
-        input_method::ModifierKeyPair(
-            input_method::kSearchKey,
-            input_method::ModifierKey(search_remap)));
-    modifier_map.push_back(
-        input_method::ModifierKeyPair(
-            input_method::kLeftControlKey,
-            input_method::ModifierKey(control_remap)));
-    modifier_map.push_back(
-        input_method::ModifierKeyPair(
-            input_method::kLeftAltKey,
-            input_method::ModifierKey(alt_remap)));
-    input_method_manager_->GetXKeyboard()->RemapModifierKeys(modifier_map);
-  } else {
-    LOG(ERROR) << "Failed to remap modifier keys. Unexpected value(s): "
-               << search_remap << ", " << control_remap << ", " << alt_remap;
-  }
-}
-
 void Preferences::UpdateAutoRepeatRate() {
   // Avoid setting repeat rate on desktop dev environment.
   if (!base::chromeos::IsRunningOnChromeOS())
@@ -708,32 +658,6 @@ void Preferences::UpdateAutoRepeatRate() {
   DCHECK(rate.initial_delay_in_ms > 0);
   DCHECK(rate.repeat_interval_in_ms > 0);
   input_method::XKeyboard::SetAutoRepeatRate(rate);
-}
-
-// static
-void Preferences::UpdateVirturalKeyboardPreference(PrefService* prefs) {
-  const DictionaryValue* virtual_keyboard_pref =
-      prefs->GetDictionary(prefs::kLanguagePreferredVirtualKeyboard);
-  DCHECK(virtual_keyboard_pref);
-
-  // TODO(yusukes): Clear all virtual keyboard preferences here.
-  std::string url;
-  std::vector<std::string> layouts_to_remove;
-  for (DictionaryValue::key_iterator iter = virtual_keyboard_pref->begin_keys();
-       iter != virtual_keyboard_pref->end_keys();
-       ++iter) {
-    const std::string& layout_id = *iter;  // e.g. "us", "handwriting-vk"
-    if (!virtual_keyboard_pref->GetString(layout_id, &url))
-      continue;
-    // TODO(yusukes): add the virtual keyboard preferences here.
-  }
-
-  // Remove invalid prefs.
-  DictionaryPrefUpdate updater(prefs, prefs::kLanguagePreferredVirtualKeyboard);
-  DictionaryValue* pref_value = updater.Get();
-  for (size_t i = 0; i < layouts_to_remove.size(); ++i) {
-    pref_value->RemoveWithoutPathExpansion(layouts_to_remove[i], NULL);
-  }
 }
 
 }  // namespace chromeos

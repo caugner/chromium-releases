@@ -5,9 +5,37 @@
   var eventBindingsNatives = requireNative('event_bindings');
   var AttachEvent = eventBindingsNatives.AttachEvent;
   var DetachEvent = eventBindingsNatives.DetachEvent;
-  var Print = eventBindingsNatives.Print;
+  var sendRequest = require('sendRequest').sendRequest;
+  var utils = require('utils');
+  var validate = require('schemaUtils').validate;
 
   var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+  var GetExtensionAPIDefinition =
+      requireNative('apiDefinitions').GetExtensionAPIDefinition;
+
+  // Schemas for the rule-style functions on the events API that
+  // only need to be generated occasionally, so populate them lazily.
+  var ruleFunctionSchemas = {
+    // These values are set lazily:
+    // addRules: {},
+    // getRules: {},
+    // removeRules: {}
+  };
+
+  // This function ensures that |ruleFunctionSchemas| is populated.
+  function ensureRuleSchemasLoaded() {
+    if (ruleFunctionSchemas.addRules)
+      return;
+    var eventsSchema = GetExtensionAPIDefinition("events")[0];
+    var eventType = utils.lookup(eventsSchema.types, 'id', 'events.Event');
+
+    ruleFunctionSchemas.addRules =
+        utils.lookup(eventType.functions, 'name', 'addRules');
+    ruleFunctionSchemas.getRules =
+        utils.lookup(eventType.functions, 'name', 'getRules');
+    ruleFunctionSchemas.removeRules =
+        utils.lookup(eventType.functions, 'name', 'removeRules');
+  }
 
   // Local implementation of JSON.parse & JSON.stringify that protect us
   // from being clobbered by an extension.
@@ -69,21 +97,21 @@
     if (this.eventOptions_.supportsRules && !opt_eventName)
       throw new Error("Events that support rules require an event name.");
 
-    // Validate event parameters if we are in debug.
+    // Validate event arguments (the data that is passed to the callbacks)
+    // if we are in debug.
     if (opt_argSchemas &&
-        chromeHidden.validateCallbacks &&
-        chromeHidden.validate) {
+        chromeHidden.validateCallbacks) {
 
-      this.validate_ = function(args) {
+      this.validateEventArgs_ = function(args) {
         try {
-          chromeHidden.validate(args, opt_argSchemas);
+          validate(args, opt_argSchemas);
         } catch (exception) {
           return "Event validation error during " + opt_eventName + " -- " +
                  exception;
         }
       };
     } else {
-      this.validate_ = function() {}
+      this.validateEventArgs_ = function() {}
     }
   };
 
@@ -111,7 +139,12 @@
   chromeHidden.Event.dispatchJSON = function(name, args) {
     if (attachedNamedEvents[name]) {
       if (args) {
-        args = chromeHidden.JSON.parse(args);
+        // TODO(asargent): This is an antiquity. Until all callers of
+        // dispatchJSON use actual values, this must remain here to catch the
+        // cases where a caller has hard-coded a JSON string to pass in.
+        if (typeof(args) == "string") {
+          args = chromeHidden.JSON.parse(args);
+        }
         if (eventArgumentMassagers[name])
           eventArgumentMassagers[name](args);
       }
@@ -193,8 +226,9 @@
     if (!this.eventOptions_.supportsListeners)
       throw new Error("This event does not support listeners.");
     var args = Array.prototype.slice.call(arguments);
-    var validationErrors = this.validate_(args);
+    var validationErrors = this.validateEventArgs_(args);
     if (validationErrors) {
+      console.error(validationErrors);
       return {validationErrors: validationErrors};
     }
     var results = [];
@@ -247,52 +281,72 @@
 
   chrome.Event.prototype.destroy_ = function() {
     this.listeners_ = [];
-    this.validate_ = [];
+    this.validateEventArgs_ = [];
     this.detach_(false);
   };
-
-  // Gets the declarative API object, or undefined if this extension doesn't
-  // have access to it.
-  //
-  // This is defined as a function (rather than a variable) because it isn't
-  // accessible until the schema bindings have been generated.
-  function getDeclarativeAPI() {
-    if (chromeHidden.internalAPIs.experimental)
-      return chromeHidden.internalAPIs.experimental.declarative;
-    else
-      return undefined;
-  }
 
   chrome.Event.prototype.addRules = function(rules, opt_cb) {
     if (!this.eventOptions_.supportsRules)
       throw new Error("This event does not support rules.");
-    if (!getDeclarativeAPI()) {
-      throw new Error("You must have permission to use the declarative " +
-                      "API to support rules in events");
+
+    // Takes a list of JSON datatype identifiers and returns a schema fragment
+    // that verifies that a JSON object corresponds to an array of only these
+    // data types.
+    function buildArrayOfChoicesSchema(typesList) {
+      return {
+        'type': 'array',
+        'items': {
+          'choices': typesList.map(function(el) {return {'$ref': el};})
+        }
+      };
+    };
+
+    // Validate conditions and actions against specific schemas of this
+    // event object type.
+    // |rules| is an array of JSON objects that follow the Rule type of the
+    // declarative extension APIs. |conditions| is an array of JSON type
+    // identifiers that are allowed to occur in the conditions attribute of each
+    // rule. Likewise, |actions| is an array of JSON type identifiers that are
+    // allowed to occur in the actions attribute of each rule.
+    function validateRules(rules, conditions, actions) {
+      var conditionsSchema = buildArrayOfChoicesSchema(conditions);
+      var actionsSchema = buildArrayOfChoicesSchema(actions);
+      rules.forEach(function(rule) {
+        validate([rule.conditions], [conditionsSchema]);
+        validate([rule.actions], [actionsSchema]);
+      })
+    };
+
+    if (!this.eventOptions_.conditions || !this.eventOptions_.actions) {
+      throw new Error('Event ' + this.eventName_ + ' misses conditions or ' +
+                'actions in the API specification.');
     }
-    getDeclarativeAPI().addRules(this.eventName_, rules, opt_cb);
+
+    validateRules(rules,
+                  this.eventOptions_.conditions,
+                  this.eventOptions_.actions);
+
+    ensureRuleSchemasLoaded();
+    sendRequest("events.addRules", [this.eventName_, rules, opt_cb],
+                ruleFunctionSchemas.addRules.parameters);
   }
 
   chrome.Event.prototype.removeRules = function(ruleIdentifiers, opt_cb) {
     if (!this.eventOptions_.supportsRules)
       throw new Error("This event does not support rules.");
-    if (!getDeclarativeAPI()) {
-      throw new Error("You must have permission to use the declarative " +
-                      "API to support rules in events");
-    }
-    getDeclarativeAPI().removeRules(
-        this.eventName_, ruleIdentifiers, opt_cb);
+    ensureRuleSchemasLoaded();
+    sendRequest("events.removeRules",
+                [this.eventName_, ruleIdentifiers, opt_cb],
+                ruleFunctionSchemas.removeRules.parameters);
   }
 
   chrome.Event.prototype.getRules = function(ruleIdentifiers, cb) {
     if (!this.eventOptions_.supportsRules)
       throw new Error("This event does not support rules.");
-    if (!getDeclarativeAPI()) {
-      throw new Error("You must have permission to use the declarative " +
-                      "API to support rules in events");
-    }
-    getDeclarativeAPI().getRules(
-        this.eventName_, ruleIdentifiers, cb);
+    ensureRuleSchemasLoaded();
+    sendRequest("events.getRules",
+                [this.eventName_, ruleIdentifiers, cb],
+                ruleFunctionSchemas.getRules.parameters);
   }
 
   // Special load events: we don't use the DOM unload because that slows
@@ -316,3 +370,5 @@
   chromeHidden.dispatchError = function(msg) {
     console.error(msg);
   };
+
+  exports.Event = chrome.Event;

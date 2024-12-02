@@ -12,7 +12,7 @@
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "content/test/mock_download_item.h"
+#include "content/public/test/mock_download_item.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -55,8 +55,6 @@ class DownloadItemModelTest : public testing::Test {
     ON_CALL(item_, GetTotalBytes()).WillByDefault(Return(2048));
     ON_CALL(item_, IsInProgress()).WillByDefault(Return(false));
     ON_CALL(item_, TimeRemaining(_)).WillByDefault(Return(false));
-    ON_CALL(item_, PromptUserForSaveLocation())
-        .WillByDefault(Return(false));
     ON_CALL(item_, GetMimeType()).WillByDefault(Return("text/html"));
     ON_CALL(item_, AllDataSaved()).WillByDefault(Return(false));
     ON_CALL(item_, GetOpenWhenComplete()).WillByDefault(Return(false));
@@ -66,6 +64,9 @@ class DownloadItemModelTest : public testing::Test {
     ON_CALL(item_, GetURL()).WillByDefault(ReturnRefOfCopy(url));
     ON_CALL(item_, GetFileNameToReportUser())
         .WillByDefault(Return(FilePath(FILE_PATH_LITERAL("foo.bar"))));
+    ON_CALL(item_, GetTargetDisposition())
+        .WillByDefault(
+            Return(content::DownloadItem::TARGET_DISPOSITION_OVERWRITE));
   }
 
   void SetupInterruptedDownloadItem(content::DownloadInterruptReason reason) {

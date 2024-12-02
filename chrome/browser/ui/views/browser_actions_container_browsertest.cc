@@ -11,6 +11,8 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 
+using extensions::Extension;
+
 class BrowserActionsContainerTest : public ExtensionBrowserTest {
  public:
   BrowserActionsContainerTest() {
@@ -68,13 +70,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, Basic) {
   EXPECT_EQ(0, browser_actions_bar()->NumberOfBrowserActions());
 }
 
-// http://crbug.com/38992: Times out occasionally.
-#if defined(OS_CHROMEOS)
-#define MAYBE_Visibility DISABLED_Visibility
-#else
-#define MAYBE_Visibility Visibility
-#endif
-IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, MAYBE_Visibility) {
+IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, Visibility) {
   BrowserActionsContainer::disable_animations_during_testing_ = true;
 
   base::TimeTicks start_time = base::TimeTicks::Now();
@@ -233,8 +229,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, ForceHide) {
 
   // Force hide this browser action.
   ExtensionService* service = browser()->profile()->GetExtensionService();
-  service->SetBrowserActionVisibility(service->GetExtensionById(idA, false),
-                                      false);
+  service->extension_prefs()->SetBrowserActionVisibility(
+      service->GetExtensionById(idA, false), false);
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
 
   ReloadExtension(idA);

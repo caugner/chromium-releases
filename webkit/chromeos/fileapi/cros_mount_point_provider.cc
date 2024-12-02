@@ -8,7 +8,6 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/utf_string_conversions.h"
@@ -17,11 +16,12 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "webkit/chromeos/fileapi/file_access_permissions.h"
+#include "webkit/chromeos/fileapi/remote_file_stream_writer.h"
 #include "webkit/chromeos/fileapi/remote_file_system_operation.h"
-#include "webkit/fileapi/file_system_file_reader.h"
+#include "webkit/fileapi/file_system_file_stream_reader.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/native_file_util.h"
+#include "webkit/fileapi/local_file_stream_writer.h"
 #include "webkit/glue/webkit_glue.h"
 
 namespace {
@@ -60,8 +60,7 @@ CrosMountPointProvider::CrosMountPointProvider(
     scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy)
     : special_storage_policy_(special_storage_policy),
       file_access_permissions_(new FileAccessPermissions()),
-      local_file_util_(
-          new fileapi::LocalFileUtil(new fileapi::NativeFileUtil())) {
+      local_file_util_(new fileapi::LocalFileUtil()) {
   const std::string home = GetHomeDirectory();
   if (!home.empty()) {
     AddLocalMountPoint(
@@ -130,6 +129,11 @@ bool CrosMountPointProvider::IsAccessAllowed(const GURL& origin_url,
 // TODO(zelidrag): Share this code with SandboxMountPointProvider impl.
 bool CrosMountPointProvider::IsRestrictedFileName(const FilePath& path) const {
   return false;
+}
+
+fileapi::FileSystemQuotaUtil* CrosMountPointProvider::GetQuotaUtil() {
+  // No quota support.
+  return NULL;
 }
 
 bool CrosMountPointProvider::HasMountPoint(const FilePath& mount_point) {
@@ -244,24 +248,42 @@ CrosMountPointProvider::CreateFileSystemOperation(
     const GURL& origin_url,
     fileapi::FileSystemType file_system_type,
     const FilePath& virtual_path,
-    base::MessageLoopProxy* file_proxy,
     fileapi::FileSystemContext* context) const {
   const MountPoint* mount_point = GetMountPoint(virtual_path);
   if (mount_point && mount_point->location == REMOTE)
     return new chromeos::RemoteFileSystemOperation(mount_point->remote_proxy);
 
-  return new fileapi::FileSystemOperation(file_proxy, context);
+  return new fileapi::FileSystemOperation(context);
 }
 
-webkit_blob::FileReader* CrosMountPointProvider::CreateFileReader(
+webkit_blob::FileStreamReader* CrosMountPointProvider::CreateFileStreamReader(
     const GURL& url,
     int64 offset,
-    base::MessageLoopProxy* file_proxy,
     fileapi::FileSystemContext* context) const {
   // For now we return a generic Reader implementation which utilizes
   // CreateSnapshotFile internally (i.e. will download everything first).
   // TODO(satorux,zel): implement more efficient reader for remote cases.
-  return new fileapi::FileSystemFileReader(file_proxy, context, url, offset);
+  return new fileapi::FileSystemFileStreamReader(context, url, offset);
+}
+
+fileapi::FileStreamWriter* CrosMountPointProvider::CreateFileStreamWriter(
+    const GURL& url,
+    int64 offset,
+    fileapi::FileSystemContext* context) const {
+  FilePath virtual_path;
+  if (!fileapi::CrackFileSystemURL(url, NULL, NULL, &virtual_path))
+    return NULL;
+  const MountPoint* mount_point = GetMountPoint(virtual_path);
+  if (!mount_point)
+    return NULL;
+  if (mount_point->location == REMOTE) {
+    return new fileapi::RemoteFileStreamWriter(mount_point->remote_proxy,
+                                               url,
+                                               offset);
+  }
+  FilePath root_path = mount_point->local_root_path;
+  return new fileapi::LocalFileStreamWriter(
+      root_path.Append(virtual_path), offset);
 }
 
 bool CrosMountPointProvider::GetVirtualPath(const FilePath& filesystem_path,

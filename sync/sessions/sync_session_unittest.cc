@@ -10,9 +10,10 @@
 #include "base/message_loop.h"
 #include "sync/engine/conflict_resolver.h"
 #include "sync/engine/syncer_types.h"
+#include "sync/engine/throttled_data_type_tracker.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/sessions/session_state.h"
 #include "sync/sessions/status_controller.h"
-#include "sync/syncable/model_type.h"
 #include "sync/syncable/syncable.h"
 #include "sync/syncable/syncable_id.h"
 #include "sync/test/engine/fake_model_worker.h"
@@ -27,8 +28,7 @@ namespace sessions {
 namespace {
 
 class SyncSessionTest : public testing::Test,
-                        public SyncSession::Delegate,
-                        public ModelSafeWorkerRegistrar {
+                        public SyncSession::Delegate {
  public:
   SyncSessionTest() : controller_invocations_allowed_(false) {}
 
@@ -40,9 +40,16 @@ class SyncSessionTest : public testing::Test,
   }
 
   virtual void SetUp() {
+    ModelSafeRoutingInfo routing_info;
+    std::vector<ModelSafeWorker*> workers;
+
+    GetModelSafeRoutingInfo(&routing_info);
+    GetWorkers(&workers);
+
     context_.reset(
         new SyncSessionContext(
-            NULL, NULL, this, &extensions_activity_monitor_,
+            NULL, NULL, routing_info, workers, &extensions_activity_monitor_,
+            throttled_data_type_tracker_.get(),
             std::vector<SyncEngineEventListener*>(), NULL, NULL));
     routes_.clear();
     routes_[syncable::BOOKMARKS] = GROUP_UI;
@@ -58,6 +65,7 @@ class SyncSessionTest : public testing::Test,
     workers_.push_back(ui_worker);
     workers_.push_back(db_worker);
     session_.reset(MakeSession());
+    throttled_data_type_tracker_.reset(new ThrottledDataTypeTracker(NULL));
   }
   virtual void TearDown() {
     session_.reset();
@@ -91,15 +99,14 @@ class SyncSessionTest : public testing::Test,
     FailControllerInvocationIfDisabled("SyncProtocolError");
   }
 
-  // ModelSafeWorkerRegistrar implementation.
-  virtual void GetWorkers(std::vector<ModelSafeWorker*>* out) OVERRIDE {
+  void GetWorkers(std::vector<ModelSafeWorker*>* out) const {
     out->clear();
     for (std::vector<scoped_refptr<ModelSafeWorker> >::const_iterator it =
              workers_.begin(); it != workers_.end(); ++it) {
       out->push_back(it->get());
     }
   }
-  virtual void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) OVERRIDE {
+  void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) const {
     *out = routes_;
   }
 
@@ -127,6 +134,7 @@ class SyncSessionTest : public testing::Test,
   std::vector<scoped_refptr<ModelSafeWorker> > workers_;
   ModelSafeRoutingInfo routes_;
   FakeExtensionsActivityMonitor extensions_activity_monitor_;
+  scoped_ptr<ThrottledDataTypeTracker> throttled_data_type_tracker_;
 };
 
 TEST_F(SyncSessionTest, EnabledGroupsEmpty) {
@@ -190,26 +198,6 @@ TEST_F(SyncSessionTest, SetWriteTransaction) {
     sessions::ScopedSetSessionWriteTransaction set_trans(session.get(), &trans);
     EXPECT_TRUE(&trans == session->write_transaction());
   }
-}
-
-TEST_F(SyncSessionTest, MoreToSyncIfUnsyncedGreaterThanCommitted) {
-  // If any forward progress was made during the session, and the number of
-  // unsynced handles still exceeds the number of commit ids we added, there is
-  // more to sync. For example, this occurs if we had more commit ids
-  // than could fit in a single commit batch.
-  EXPECT_FALSE(session_->HasMoreToSync());
-  OrderedCommitSet commit_set(routes_);
-  commit_set.AddCommitItem(0, syncable::Id(), syncable::BOOKMARKS);
-  status()->set_commit_set(commit_set);
-  EXPECT_FALSE(session_->HasMoreToSync());
-
-  std::vector<int64> unsynced_handles;
-  unsynced_handles.push_back(1);
-  unsynced_handles.push_back(2);
-  status()->set_unsynced_handles(unsynced_handles);
-  EXPECT_FALSE(session_->HasMoreToSync());
-  status()->increment_num_successful_commits();
-  EXPECT_TRUE(session_->HasMoreToSync());
 }
 
 TEST_F(SyncSessionTest, MoreToDownloadIfDownloadFailed) {

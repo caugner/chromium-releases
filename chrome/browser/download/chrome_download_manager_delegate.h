@@ -12,6 +12,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/safe_browsing/download_protection_service.h"
+#include "content/public/browser/download_danger_type.h"
+#include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -20,10 +22,8 @@ class CrxInstaller;
 class DownloadHistory;
 class DownloadPrefs;
 class Profile;
-struct DownloadStateInfo;
 
 namespace content {
-class DownloadItem;
 class DownloadManager;
 }
 
@@ -48,9 +48,6 @@ class ChromeDownloadManagerDelegate
 
   void SetDownloadManager(content::DownloadManager* dm);
 
-  // Returns true if the given item is for an extension download.
-  static bool IsExtensionDownload(const content::DownloadItem* item);
-
   // Should be called before the first call to ShouldCompleteDownload() to
   // disable SafeBrowsing checks for |item|.
   static void DisableSafeBrowsing(content::DownloadItem* item);
@@ -58,14 +55,15 @@ class ChromeDownloadManagerDelegate
   virtual void Shutdown() OVERRIDE;
   virtual content::DownloadId GetNextId() OVERRIDE;
   virtual bool ShouldStartDownload(int32 download_id) OVERRIDE;
-  virtual void ChooseDownloadPath(content::WebContents* web_contents,
-                                  const FilePath& suggested_path,
-                                  int32 download_id) OVERRIDE;
-  virtual FilePath GetIntermediatePath(const FilePath& suggested_path) OVERRIDE;
+  virtual void ChooseDownloadPath(content::DownloadItem* item) OVERRIDE;
+  virtual FilePath GetIntermediatePath(const content::DownloadItem& item,
+                                       bool* ok_to_overwrite) OVERRIDE;
   virtual content::WebContents*
       GetAlternativeWebContentsToNotifyForDownload() OVERRIDE;
   virtual bool ShouldOpenFileBasedOnExtension(const FilePath& path) OVERRIDE;
-  virtual bool ShouldCompleteDownload(content::DownloadItem* item) OVERRIDE;
+  virtual bool ShouldCompleteDownload(
+      content::DownloadItem* item,
+      const base::Closure& complete_callback) OVERRIDE;
   virtual bool ShouldOpenDownload(content::DownloadItem* item) OVERRIDE;
   virtual bool GenerateFileHash() OVERRIDE;
   virtual void AddItemToPersistentStore(content::DownloadItem* item) OVERRIDE;
@@ -81,7 +79,8 @@ class ChromeDownloadManagerDelegate
       base::Time remove_end) OVERRIDE;
   virtual void GetSaveDir(content::WebContents* web_contents,
                           FilePath* website_save_dir,
-                          FilePath* download_save_dir) OVERRIDE;
+                          FilePath* download_save_dir,
+                          bool* skip_dir_check) OVERRIDE;
   virtual void ChooseSavePath(
       content::WebContents* web_contents,
       const FilePath& suggested_path,
@@ -96,6 +95,19 @@ class ChromeDownloadManagerDelegate
   // So that test classes can inherit from this for override purposes.
   virtual ~ChromeDownloadManagerDelegate();
 
+  // Returns the SafeBrowsing download protection service if it's
+  // enabled. Returns NULL otherwise. Protected virtual for testing.
+  virtual safe_browsing::DownloadProtectionService*
+     GetDownloadProtectionService();
+
+  // Returns true if this download should show the "dangerous file" warning.
+  // Various factors are considered, such as the type of the file, whether a
+  // user action initiated the download, and whether the user has explicitly
+  // marked the file type as "auto open". Protected virtual for testing.
+  virtual bool IsDangerousFile(const content::DownloadItem& download,
+                               const FilePath& suggested_path,
+                               bool visited_referrer_before);
+
   // So that test classes that inherit from this for override purposes
   // can call back into the DownloadManager.
   scoped_refptr<content::DownloadManager> download_manager_;
@@ -108,10 +120,6 @@ class ChromeDownloadManagerDelegate
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Returns the SafeBrowsing download protection service if it's
-  // enabled. Returns NULL otherwise.
-  safe_browsing::DownloadProtectionService* GetDownloadProtectionService();
-
   // Callback function after url is checked with safebrowsing service.
   void CheckDownloadUrlDone(
       int32 download_id,
@@ -123,29 +131,46 @@ class ChromeDownloadManagerDelegate
       safe_browsing::DownloadProtectionService::DownloadCheckResult result);
 
   // Callback function after we check whether the referrer URL has been visited
-  // before today.
+  // before today. Determines the danger state of the download based on the file
+  // type and |visited_referrer_before|. Generates a target path for the
+  // download. Invokes |CheckIfSuggestedPathExists| on the FILE thread to check
+  // the target path.
   void CheckVisitedReferrerBeforeDone(int32 download_id,
+                                      content::DownloadDangerType danger_type,
                                       bool visited_referrer_before);
 
-  // Called on the download thread to check whether the suggested file path
-  // exists.  We don't check if the file exists on the UI thread to avoid UI
-  // stalls from interacting with the file system.
+#if defined (OS_CHROMEOS)
+  // GDataDownloadObserver::SubstituteGDataDownloadPath callback.
+  // Posts CheckIfSuggestedPathExists on the FILE thread.
+  void SubstituteGDataDownloadPathCallback(
+      int32 download_id,
+      bool should_prompt,
+      bool is_forced_path,
+      content::DownloadDangerType danger_type,
+      const FilePath& unverified_path);
+#endif
+
+  // Called on the FILE thread to check whether the suggested file path exists.
+  // We don't check if the file exists on the UI thread to avoid UI stalls from
+  // interacting with the file system. Creates the default download directory
+  // specified in |default_path| if it doesn't exist. Uniquifies |unverified
+  // path| if necessary. The verified path is then passed down to
+  // |OnPathExistenceAvailable|.
   void CheckIfSuggestedPathExists(int32 download_id,
-                                  DownloadStateInfo state,
+                                  const FilePath& unverified_path,
+                                  bool should_prompt,
+                                  bool is_forced_path,
+                                  content::DownloadDangerType danger_type,
                                   const FilePath& default_path);
 
   // Called on the UI thread once it's determined whether the suggested file
-  // path exists.
-  void OnPathExistenceAvailable(int32 download_id,
-                                const DownloadStateInfo& new_state);
-
-  // Returns true if this download should show the "dangerous file" warning.
-  // Various factors are considered, such as the type of the file, whether a
-  // user action initiated the download, and whether the user has explicitly
-  // marked the file type as "auto open".
-  bool IsDangerousFile(const content::DownloadItem& download,
-                       const DownloadStateInfo& state,
-                       bool visited_referrer_before);
+  // path exists. Updates the download identified by |download_id| with the
+  // |target_path|, |target_disposition| and |danger_type|.
+  void OnPathExistenceAvailable(
+      int32 download_id,
+      const FilePath& target_path,
+      content::DownloadItem::TargetDisposition disposition,
+      content::DownloadDangerType danger_type);
 
   // Callback from history system.
   void OnItemAddedToPersistentStore(int32 download_id, int64 db_handle);
@@ -156,6 +181,14 @@ class ChromeDownloadManagerDelegate
 
   // Open the given item with a web intent dispatch.
   void OpenWithWebIntent(const content::DownloadItem* item);
+
+  // Internal gateways for ShouldCompleteDownload().
+  bool IsDownloadReadyForCompletion(
+      content::DownloadItem* item,
+      const base::Closure& internal_complete_callback);
+  void ShouldCompleteDownloadInternal(
+    int download_id,
+    const base::Closure& user_complete_callback);
 
   Profile* profile_;
   int next_download_id_;

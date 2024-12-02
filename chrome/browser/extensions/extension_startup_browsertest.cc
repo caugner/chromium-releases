@@ -90,7 +90,7 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
     int found_extensions = 0;
     for (ExtensionSet::const_iterator it = service->extensions()->begin();
          it != service->extensions()->end(); ++it)
-      if ((*it)->location() != Extension::COMPONENT)
+      if ((*it)->location() != extensions::Extension::COMPONENT)
         found_extensions++;
 
     ASSERT_EQ(static_cast<uint32>(num_expected_extensions),
@@ -117,7 +117,7 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
 
     bool result = false;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-        browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+        browser()->GetActiveWebContents()->GetRenderViewHost(), L"",
         L"window.domAutomationController.send("
         L"document.defaultView.getComputedStyle(document.body, null)."
         L"getPropertyValue('background-color') == 'rgb(245, 245, 220)')",
@@ -126,7 +126,7 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
 
     result = false;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-        browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+        browser()->GetActiveWebContents()->GetRenderViewHost(), L"",
         L"window.domAutomationController.send(document.title == 'Modified')",
         &result));
     EXPECT_EQ(expect_script, result);
@@ -172,12 +172,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionsStartupTest, MAYBE_NoFileAccess) {
 
   // Keep a separate list of extensions for which to disable file access, since
   // doing so reloads them.
-  std::vector<const Extension*> extension_list;
+  std::vector<const extensions::Extension*> extension_list;
 
   ExtensionService* service = browser()->profile()->GetExtensionService();
   for (ExtensionSet::const_iterator it = service->extensions()->begin();
        it != service->extensions()->end(); ++it) {
-    if ((*it)->location() == Extension::COMPONENT)
+    if ((*it)->location() == extensions::Extension::COMPONENT)
       continue;
     if (service->AllowFileAccess(*it))
       extension_list.push_back(*it);

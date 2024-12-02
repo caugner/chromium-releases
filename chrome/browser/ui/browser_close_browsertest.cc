@@ -25,6 +25,7 @@
 #include "content/public/common/page_transition_types.h"
 #include "content/test/net/url_request_slow_download_job.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
@@ -112,7 +113,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
     // Setup an observer waiting for the given number of downloads
     // to get to IN_PROGRESS.
     DownloadManager* download_manager =
-        browser->profile()->GetDownloadManager();
+        BrowserContext::GetDownloadManager(browser->profile());
     scoped_ptr<DownloadTestObserver> observer(
         new DownloadTestObserverInProgress(download_manager,
                                            num_downloads,
@@ -146,7 +147,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
       DownloadService* download_service =
           DownloadServiceFactory::GetForProfile(*pit);
       if (download_service->HasCreatedDownloadManager()) {
-        DownloadManager *mgr = download_service->GetDownloadManager();
+        DownloadManager *mgr = BrowserContext::GetDownloadManager(*pit);
         scoped_refptr<DownloadTestFlushObserver> observer(
             new DownloadTestFlushObserver(mgr));
         observer->WaitForFlush();
@@ -156,8 +157,8 @@ class BrowserCloseTest : public InProcessBrowserTest {
           DownloadServiceFactory::GetForProfile(
               (*pit)->GetOffTheRecordProfile());
         if (incognito_download_service->HasCreatedDownloadManager()) {
-          DownloadManager *mgr =
-              incognito_download_service->GetDownloadManager();
+          DownloadManager *mgr = BrowserContext::GetDownloadManager(
+              (*pit)->GetOffTheRecordProfile());
           scoped_refptr<DownloadTestFlushObserver> observer(
               new DownloadTestFlushObserver(mgr));
           observer->WaitForFlush();
@@ -172,7 +173,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
     new_browser->AddSelectedTabWithURL(GURL(chrome::kAboutBlankURL),
                                        content::PAGE_TRANSITION_START_PAGE);
     ui_test_utils::WaitForLoadStop(
-        new_browser->GetSelectedWebContents());
+        new_browser->GetActiveWebContents());
     new_browser->window()->Show();
     return new_browser;
   }

@@ -42,6 +42,7 @@ struct ChannelHandle;
 }
 
 namespace ppapi {
+class PepperFilePath;
 class PPB_X509Certificate_Fields;
 }
 
@@ -52,7 +53,6 @@ class Range;
 namespace webkit {
 struct WebPluginInfo;
 namespace ppapi {
-class PepperFilePath;
 class PluginInstance;
 class PluginModule;
 }
@@ -97,6 +97,13 @@ class PepperPluginDelegateImpl
       const webkit::WebPluginInfo& webplugin_info,
       bool* pepper_plugin_was_registered);
 
+  // Creates a browser plugin instance given the process handle, and channel
+  // handle to access the guest renderer.
+  // If the plugin fails to initialize then return NULL.
+  scoped_refptr<webkit::ppapi::PluginModule> CreateBrowserPluginModule(
+      const IPC::ChannelHandle& channel_handle,
+      int guest_process_id);
+
   // Called by RenderView to tell us about painting events, these two functions
   // just correspond to the WillInitiatePaint, DidInitiatePaint and
   // DidFlushPaint hooks in RenderView.
@@ -119,7 +126,6 @@ class PepperPluginDelegateImpl
 
   // Called by RenderView when ViewMsg_PpapiBrokerChannelCreated.
   void OnPpapiBrokerChannelCreated(int request_id,
-                                   base::ProcessHandle broker_process_handle,
                                    const IPC::ChannelHandle& handle);
 
   // Removes broker from pending_connect_broker_ if present. Returns true if so.
@@ -162,6 +168,12 @@ class PepperPluginDelegateImpl
       webkit::ppapi::PluginInstance* instance) OVERRIDE;
   virtual void PluginSelectionChanged(
       webkit::ppapi::PluginInstance* instance) OVERRIDE;
+  virtual void SimulateImeSetComposition(
+      const string16& text,
+      const std::vector<WebKit::WebCompositionUnderline>& underlines,
+      int selection_start,
+      int selection_end) OVERRIDE;
+  virtual void SimulateImeConfirmComposition(const string16& text) OVERRIDE;
   virtual void PluginCrashed(webkit::ppapi::PluginInstance* instance) OVERRIDE;
   virtual void InstanceCreated(
       webkit::ppapi::PluginInstance* instance) OVERRIDE;
@@ -239,23 +251,25 @@ class PepperPluginDelegateImpl
   virtual void WillUpdateFile(const GURL& file_path) OVERRIDE;
   virtual void DidUpdateFile(const GURL& file_path, int64_t delta) OVERRIDE;
   virtual base::PlatformFileError OpenFile(
-      const webkit::ppapi::PepperFilePath& path,
+      const ppapi::PepperFilePath& path,
       int flags,
       base::PlatformFile* file) OVERRIDE;
   virtual base::PlatformFileError RenameFile(
-      const webkit::ppapi::PepperFilePath& from_path,
-      const webkit::ppapi::PepperFilePath& to_path) OVERRIDE;
+      const ppapi::PepperFilePath& from_path,
+      const ppapi::PepperFilePath& to_path) OVERRIDE;
   virtual base::PlatformFileError DeleteFileOrDir(
-      const webkit::ppapi::PepperFilePath& path,
+      const ppapi::PepperFilePath& path,
       bool recursive) OVERRIDE;
   virtual base::PlatformFileError CreateDir(
-      const webkit::ppapi::PepperFilePath& path) OVERRIDE;
+      const ppapi::PepperFilePath& path) OVERRIDE;
   virtual base::PlatformFileError QueryFile(
-      const webkit::ppapi::PepperFilePath& path,
+      const ppapi::PepperFilePath& path,
       base::PlatformFileInfo* info) OVERRIDE;
   virtual base::PlatformFileError GetDirContents(
-      const webkit::ppapi::PepperFilePath& path,
-      webkit::ppapi::DirContents* contents) OVERRIDE;
+      const ppapi::PepperFilePath& path,
+      ppapi::DirContents* contents) OVERRIDE;
+  virtual base::PlatformFileError CreateTemporaryFile(
+      base::PlatformFile* file) OVERRIDE;
   virtual void SyncGetFileSystemPlatformPath(
       const GURL& url,
       FilePath* platform_path) OVERRIDE;
@@ -449,6 +463,9 @@ class PepperPluginDelegateImpl
   MouseLockDispatcher::LockTarget* GetOrCreateLockTargetAdapter(
       webkit::ppapi::PluginInstance* instance);
   void UnSetAndDeleteLockTargetAdapter(webkit::ppapi::PluginInstance* instance);
+
+  MouseLockDispatcher* GetMouseLockDispatcher(
+      webkit::ppapi::PluginInstance* instance);
 
   // Pointer to the RenderView that owns us.
   RenderViewImpl* render_view_;

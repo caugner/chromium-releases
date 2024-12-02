@@ -16,6 +16,7 @@
 #include "chromeos/dbus/bluetooth_adapter_client.h"
 #include "chromeos/dbus/bluetooth_device_client.h"
 #include "chromeos/dbus/bluetooth_manager_client.h"
+#include "chromeos/dbus/bluetooth_out_of_band_client.h"
 #include "dbus/object_path.h"
 
 namespace chromeos {
@@ -91,21 +92,28 @@ class BluetoothAdapter : private BluetoothManagerClient::Observer,
   // is called, in the success case the callback is simply not called.
   typedef base::Callback<void()> ErrorCallback;
 
+  // The BluetoothOutOfBandPairingDataCallback is used to return
+  // BluetoothOutOfBandPairingData to the caller.
+  typedef base::Callback<void(const BluetoothOutOfBandPairingData& data)>
+      BluetoothOutOfBandPairingDataCallback;
+
   // The address of this adapter.  The address format is "XX:XX:XX:XX:XX:XX",
   // where each XX is a hexadecimal number.
   const std::string& address() const { return address_; }
 
   // Indicates whether the adapter is actually present on the system, for
   // the default adapter this indicates whether any adapter is present.
-  bool IsPresent() const;
+  virtual bool IsPresent() const;
 
   // Indicates whether the adapter radio is powered.
-  bool IsPowered() const;
+  virtual bool IsPowered() const;
 
-  // Requests a change to the adapter radio power, setting |powered| to
-  // true will turn on the radio and false will turn it off. |callback|
-  // will only be called if the request fails.
-  void SetPowered(bool powered, ErrorCallback callback);
+  // Requests a change to the adapter radio power, setting |powered| to true
+  // will turn on the radio and false will turn it off.  On success, callback
+  // will be called.  On failure, |error_callback| will be called.
+  void SetPowered(bool powered,
+                  const base::Closure& callback,
+                  const ErrorCallback& error_callback);
 
   // Indicates whether the adapter is currently discovering new devices,
   // note that a typical discovery process has phases of this being true
@@ -114,22 +122,29 @@ class BluetoothAdapter : private BluetoothManagerClient::Observer,
   bool IsDiscovering() const;
 
   // Requests that the adapter either begin discovering new devices when
-  // |discovering| is true, or cease any discovery when false. |callback|
-  // will only be called if the request fails.
-  void SetDiscovering(bool discovering, ErrorCallback callback);
+  // |discovering| is true, or cease any discovery when false.  On success,
+  // callback will be called.  On failure, |error_callback| will be called.
+  virtual void SetDiscovering(bool discovering,
+                              const base::Closure& callback,
+                              const ErrorCallback& error_callback);
 
   // Requests the list of devices from the adapter, all are returned
   // including those currently connected and those paired. Use the
   // returned device pointers to determine which they are.
   typedef std::vector<BluetoothDevice*> DeviceList;
-  DeviceList GetDevices();
+  virtual DeviceList GetDevices();
   typedef std::vector<const BluetoothDevice*> ConstDeviceList;
-  ConstDeviceList GetDevices() const;
+  virtual ConstDeviceList GetDevices() const;
 
   // Returns a pointer to the device with the given address |address| or
   // NULL if no such device is known.
-  BluetoothDevice* GetDevice(const std::string& address);
-  const BluetoothDevice* GetDevice(const std::string& address) const;
+  virtual BluetoothDevice* GetDevice(const std::string& address);
+  virtual const BluetoothDevice* GetDevice(const std::string& address) const;
+
+  // Requests the local Out Of Band pairing data.
+  virtual void ReadLocalOutOfBandPairingData(
+      const BluetoothOutOfBandPairingDataCallback& callback,
+      const ErrorCallback& error_callback);
 
   // Creates the instance for the default adapter, whichever that may
   // be at the time. Use IsPresent() and the AdapterPresentChanged() observer
@@ -143,6 +158,7 @@ class BluetoothAdapter : private BluetoothManagerClient::Observer,
 
  private:
   friend class BluetoothDevice;
+  friend class MockBluetoothAdapter;
 
   BluetoothAdapter();
 
@@ -182,7 +198,10 @@ class BluetoothAdapter : private BluetoothManagerClient::Observer,
   void RemoveAdapter();
 
   // Called by dbus:: in response to the method call send by SetPowered().
-  void OnSetPowered(ErrorCallback callback, bool success);
+  // |callback| and |error_callback| are the callbacks passed to SetPowered().
+  void OnSetPowered(const base::Closure& callback,
+                    const ErrorCallback& error_callback,
+                    bool success);
 
   // Updates the tracked state of the adapter's radio power to |powered|
   // and notifies observers. Called on receipt of a property changed signal,
@@ -190,15 +209,27 @@ class BluetoothAdapter : private BluetoothManagerClient::Observer,
   void PoweredChanged(bool powered);
 
   // Called by dbus:: in response to the method calls send by SetDiscovering().
-  void OnStartDiscovery(ErrorCallback callback,
-                        const dbus::ObjectPath& adapter_path, bool success);
-  void OnStopDiscovery(ErrorCallback callback,
-                       const dbus::ObjectPath& adapter_path, bool success);
+  // |callback| and |error_callback| are the callbacks passed to
+  // SetDiscovering().
+  void OnStartDiscovery(const base::Closure& callback,
+                        const ErrorCallback& error_callback,
+                        const dbus::ObjectPath& adapter_path,
+                        bool success);
+  void OnStopDiscovery(const base::Closure& callback,
+                       const ErrorCallback& error_callback,
+                       const dbus::ObjectPath& adapter_path,
+                       bool success);
 
   // Updates the tracked state of the adapter's discovering state to
   // |discovering| and notifies observers. Called on receipt of a property
   // changed signal, and directly using values obtained from properties.
   void DiscoveringChanged(bool discovering);
+
+  // Called by dbus:: in response to the ReadLocalData method call.
+  void OnReadLocalData(const BluetoothOutOfBandPairingDataCallback& callback,
+                       const ErrorCallback& error_callback,
+                       const BluetoothOutOfBandPairingData& data,
+                       bool success);
 
   // BluetoothAdapterClient::Observer override.
   //

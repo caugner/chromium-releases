@@ -31,7 +31,7 @@ def BuildStep(name):
   sys.stdout.flush()
 
 
-def Run(args, cwd=None, shell=False):
+def Run(args, cwd=None, env=None, shell=False):
   """Start a process with the provided arguments.
   
   Starts a process in the provided directory given the provided arguments. If
@@ -41,7 +41,7 @@ def Run(args, cwd=None, shell=False):
   print 'Running: ' + ' '.join(args)
   sys.stdout.flush()
   sys.stderr.flush()
-  subprocess.check_call(args, cwd=cwd, shell=shell)
+  subprocess.check_call(args, cwd=cwd, env=env, shell=shell)
   sys.stdout.flush()
   sys.stderr.flush()
 
@@ -52,11 +52,15 @@ def CopyDir(src, dst, excludes=['.svn', '*/.svn']):
   for exc in excludes:
     args.append('--exclude=' + exc)
   print 'cp -r %s %s' % (src, dst)
+  if os.path.abspath(src) == os.path.abspath(dst):
+    ErrorExit('ERROR: Copying directory onto itself: ' + src)
   oshelpers.Copy(args)
 
 
 def CopyFile(src, dst):
   print 'cp -r %s %s' % (src, dst)
+  if os.path.abspath(src) == os.path.abspath(dst):
+    ErrorExit('ERROR: Copying file onto itself: ' + src)
   args = [src, dst]
   oshelpers.Copy(args)
 

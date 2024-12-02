@@ -4,6 +4,7 @@
 
 #include "chrome/browser/browser_process_impl.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <vector>
@@ -20,6 +21,7 @@
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_trial.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_plugin_service_filter.h"
 #include "chrome/browser/component_updater/component_updater_configurator.h"
@@ -33,15 +35,16 @@
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/thread_watcher.h"
+#include "chrome/browser/metrics/variations_service.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/policy_service_impl.h"
-#include "chrome/browser/policy/policy_service_stub.h"
+#include "chrome/browser/policy/policy_service.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
@@ -80,6 +83,10 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if !defined(ENABLE_CONFIGURATION_POLICY)
+#include "chrome/browser/policy/policy_service_stub.h"
+#endif  // defined(ENABLE_CONFIGURATION_POLICY)
+
 #if defined(OS_WIN)
 #include "ui/views/focus/view_storage.h"
 #elif defined(OS_MACOSX)
@@ -91,7 +98,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/oom_priority_manager.h"
+#include "chrome/browser/chromeos/oom_priority_manager.h"
 #endif  // defined(OS_CHROMEOS)
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
@@ -123,10 +130,10 @@ using content::ResourceDispatcherHost;
 BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
     : created_metrics_service_(false),
       created_watchdog_thread_(false),
+      created_browser_policy_connector_(false),
       created_profile_manager_(false),
       created_local_state_(false),
       created_icon_manager_(false),
-      created_browser_policy_connector_(false),
       created_notification_ui_manager_(false),
       created_safe_browsing_service_(false),
       module_ref_count_(0),
@@ -138,7 +145,7 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
   g_browser_process = this;
   clipboard_.reset(new ui::Clipboard);
 
-#if !defined(OS_ANDROID)
+#if defined(ENABLE_PRINTING)
   // Must be created after the NotificationService.
   print_job_manager_.reset(new printing::PrintJobManager);
 #endif
@@ -147,6 +154,8 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
 
   ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
       chrome::kExtensionScheme);
+  ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
+      chrome::kExtensionResourceScheme);
 
   extension_event_router_forwarder_ = new ExtensionEventRouterForwarder;
 
@@ -154,12 +163,6 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
-#if !defined(OS_ANDROID)
-  // Wait for the pending print jobs to finish.
-  print_job_manager_->OnQuit();
-  print_job_manager_.reset();
-#endif
-
   tracked_objects::ThreadData::EnsureCleanupWasCalled(4);
 
   g_browser_process = NULL;
@@ -184,13 +187,14 @@ void BrowserProcessImpl::StartTearDown() {
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::Bind(&SdchDictionaryFetcher::Shutdown));
 
-  // We need to destroy the MetricsService, IntranetRedirectDetector, and
-  // SafeBrowsing ClientSideDetectionService (owned by the SafeBrowsingService)
-  // before the io_thread_ gets destroyed, since their destructors can call the
-  // URLFetcher destructor, which does a PostDelayedTask operation on the IO
-  // thread. (The IO thread will handle that URLFetcher operation before going
-  // away.)
+  // We need to destroy the MetricsService, VariationsService,
+  // IntranetRedirectDetector, and SafeBrowsing ClientSideDetectionService
+  // (owned by the SafeBrowsingService) before the io_thread_ gets destroyed,
+  // since their destructors can call the URLFetcher destructor, which does a
+  // PostDelayedTask operation on the IO thread. (The IO thread will handle that
+  // URLFetcher operation before going away.)
   metrics_service_.reset();
+  variations_service_.reset();
   intranet_redirect_detector_.reset();
 #if defined(ENABLE_SAFE_BROWSING)
   if (safe_browsing_service_.get()) {
@@ -278,16 +282,15 @@ unsigned int BrowserProcessImpl::ReleaseModule() {
   if (0 == module_ref_count_) {
     release_last_reference_callstack_ = base::debug::StackTrace();
 
+#if defined(ENABLE_PRINTING)
+    // Wait for the pending print jobs to finish. Don't do this later, since
+    // this might cause a nested message loop to run, and we don't want pending
+    // tasks to run once teardown has started.
+    print_job_manager_->OnQuit();
+    print_job_manager_.reset();
+#endif
+
     CHECK(MessageLoop::current()->is_running());
-    // Allow UI and IO threads to do blocking IO on shutdown, since we do a lot
-    // of it on shutdown for valid reasons.
-    base::ThreadRestrictions::SetIOAllowed(true);
-    CHECK(!BrowserList::GetLastActive());
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(base::IgnoreResult(&base::ThreadRestrictions::SetIOAllowed),
-                   true));
 
 #if defined(OS_MACOSX)
     MessageLoop::current()->PostTask(
@@ -394,11 +397,18 @@ net::URLRequestContextGetter* BrowserProcessImpl::system_request_context() {
   return io_thread()->system_url_request_context_getter();
 }
 
+VariationsService* BrowserProcessImpl::variations_service() {
+  DCHECK(CalledOnValidThread());
+  if (!variations_service_.get())
+    variations_service_.reset(new VariationsService());
+  return variations_service_.get();
+}
+
 #if defined(OS_CHROMEOS)
-browser::OomPriorityManager* BrowserProcessImpl::oom_priority_manager() {
+chromeos::OomPriorityManager* BrowserProcessImpl::oom_priority_manager() {
   DCHECK(CalledOnValidThread());
   if (!oom_priority_manager_.get())
-    oom_priority_manager_.reset(new browser::OomPriorityManager());
+    oom_priority_manager_.reset(new chromeos::OomPriorityManager());
   return oom_priority_manager_.get();
 }
 #endif  // defined(OS_CHROMEOS)
@@ -419,11 +429,13 @@ policy::BrowserPolicyConnector* BrowserProcessImpl::browser_policy_connector() {
   DCHECK(CalledOnValidThread());
   if (!created_browser_policy_connector_) {
     DCHECK(browser_policy_connector_.get() == NULL);
-    created_browser_policy_connector_ = true;
 #if defined(ENABLE_CONFIGURATION_POLICY)
     browser_policy_connector_.reset(new policy::BrowserPolicyConnector());
     browser_policy_connector_->Init();
 #endif
+    // Init() should not reenter this function. Updating
+    // |created_browser_policy_connector_| here makes reentering hit the DCHECK.
+    created_browser_policy_connector_ = true;
   }
   return browser_policy_connector_.get();
 }
@@ -431,7 +443,8 @@ policy::BrowserPolicyConnector* BrowserProcessImpl::browser_policy_connector() {
 policy::PolicyService* BrowserProcessImpl::policy_service() {
   if (!policy_service_.get()) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
-    policy_service_.reset(browser_policy_connector()->CreatePolicyService());
+    policy_service_.reset(
+        browser_policy_connector()->CreatePolicyService(NULL));
 #else
     policy_service_.reset(new policy::PolicyServiceStub());
 #endif
@@ -487,27 +500,27 @@ printing::PrintJobManager* BrowserProcessImpl::print_job_manager() {
 
 printing::PrintPreviewTabController*
     BrowserProcessImpl::print_preview_tab_controller() {
-#if defined(OS_ANDROID)
-  NOTIMPLEMENTED();
-  return NULL;
-#else
+#if defined(ENABLE_PRINTING)
   DCHECK(CalledOnValidThread());
   if (!print_preview_tab_controller_.get())
     CreatePrintPreviewTabController();
   return print_preview_tab_controller_.get();
+#else
+  NOTIMPLEMENTED();
+  return NULL;
 #endif
 }
 
 printing::BackgroundPrintingManager*
     BrowserProcessImpl::background_printing_manager() {
-#if defined(OS_ANDROID)
-  NOTIMPLEMENTED();
-  return NULL;
-#else
+#if defined(ENABLE_PRINTING)
   DCHECK(CalledOnValidThread());
   if (!background_printing_manager_.get())
     CreateBackgroundPrintingManager();
   return background_printing_manager_.get();
+#else
+  NOTIMPLEMENTED();
+  return NULL;
 #endif
 }
 
@@ -526,6 +539,8 @@ const std::string& BrowserProcessImpl::GetApplicationLocale() {
 void BrowserProcessImpl::SetApplicationLocale(const std::string& locale) {
   locale_ = locale;
   extension_l10n_util::SetProcessLocale(locale);
+  static_cast<chrome::ChromeContentBrowserClient*>(
+      content::GetContentClient()->browser())->SetApplicationLocale(locale);
 }
 
 DownloadStatusUpdater* BrowserProcessImpl::download_status_updater() {
@@ -693,14 +708,15 @@ void BrowserProcessImpl::CreateLocalState() {
   FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
   local_state_.reset(
-      PrefService::CreatePrefService(local_state_path, NULL, false));
+      PrefService::CreatePrefService(local_state_path, policy_service(), NULL,
+                                     false));
 
   // Initialize the prefs of the local state.
   browser::RegisterLocalState(local_state_.get());
 
   pref_change_registrar_.Init(local_state_.get());
 
-#if !defined(OS_ANDROID)
+#if defined(ENABLE_PRINTING)
   print_job_manager_->InitOnUIThread(local_state_.get());
 #endif
 
@@ -793,9 +809,11 @@ void BrowserProcessImpl::CreateIntranetRedirectDetector() {
 }
 
 void BrowserProcessImpl::CreateNotificationUIManager() {
+#if defined(ENABLE_NOTIFICATIONS)
   DCHECK(notification_ui_manager_.get() == NULL);
   notification_ui_manager_.reset(NotificationUIManager::Create(local_state()));
   created_notification_ui_manager_ = true;
+#endif
 }
 
 void BrowserProcessImpl::CreateTabCloseableStateWatcher() {
@@ -816,17 +834,21 @@ void BrowserProcessImpl::CreateStatusTray() {
 }
 
 void BrowserProcessImpl::CreatePrintPreviewTabController() {
-#if defined(OS_ANDROID)
-  NOTIMPLEMENTED();
-#else
+#if defined(ENABLE_PRINTING)
   DCHECK(print_preview_tab_controller_.get() == NULL);
   print_preview_tab_controller_ = new printing::PrintPreviewTabController();
+#else
+  NOTIMPLEMENTED();
 #endif
 }
 
 void BrowserProcessImpl::CreateBackgroundPrintingManager() {
+#if defined(ENABLE_PRINTING)
   DCHECK(background_printing_manager_.get() == NULL);
   background_printing_manager_.reset(new printing::BackgroundPrintingManager());
+#else
+  NOTIMPLEMENTED();
+#endif
 }
 
 void BrowserProcessImpl::CreateSafeBrowsingService() {
@@ -871,7 +893,7 @@ void BrowserProcessImpl::ApplyAllowCrossOriginAuthPromptPolicy() {
 bool BrowserProcessImpl::CanAutorestartForUpdate() const {
   // Check if browser is in the background and if it needs to be restarted to
   // apply a pending update.
-  return BrowserList::size() == 0 && BrowserList::WillKeepAlive() &&
+  return BrowserList::size() == 0 && browser::WillKeepAlive() &&
          upgrade_util::IsUpdatePendingRestart();
 }
 
@@ -908,7 +930,7 @@ void BrowserProcessImpl::RestartBackgroundInstance() {
   }
 
   DLOG(WARNING) << "Shutting down current instance of the browser.";
-  BrowserList::AttemptExit();
+  browser::AttemptExit();
 
   // Transfer ownership to Upgrade.
   upgrade_util::SetNewCommandLine(new_cl.release());

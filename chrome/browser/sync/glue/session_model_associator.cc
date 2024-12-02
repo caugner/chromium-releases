@@ -17,7 +17,6 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/synced_session.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/glue/synced_window_delegate.h"
@@ -29,13 +28,14 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/session_specifics.pb.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_payload_map.h"
 #include "sync/syncable/syncable.h"
 #include "sync/util/get_session_name.h"
 #include "sync/util/time.h"
@@ -648,67 +648,67 @@ void SessionModelAssociator::PopulateSessionSpecificsNavigation(
   switch (navigation.GetTransitionType()) {
     case content::PAGE_TRANSITION_LINK:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_LINK);
+        sync_pb::SyncEnums_PageTransition_LINK);
       break;
     case content::PAGE_TRANSITION_TYPED:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_TYPED);
+        sync_pb::SyncEnums_PageTransition_TYPED);
       break;
     case content::PAGE_TRANSITION_AUTO_BOOKMARK:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_AUTO_BOOKMARK);
+        sync_pb::SyncEnums_PageTransition_AUTO_BOOKMARK);
       break;
     case content::PAGE_TRANSITION_AUTO_SUBFRAME:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_AUTO_SUBFRAME);
+        sync_pb::SyncEnums_PageTransition_AUTO_SUBFRAME);
       break;
     case content::PAGE_TRANSITION_MANUAL_SUBFRAME:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_MANUAL_SUBFRAME);
+        sync_pb::SyncEnums_PageTransition_MANUAL_SUBFRAME);
       break;
     case content::PAGE_TRANSITION_GENERATED:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_GENERATED);
+        sync_pb::SyncEnums_PageTransition_GENERATED);
       break;
     case content::PAGE_TRANSITION_START_PAGE:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_START_PAGE);
+        sync_pb::SyncEnums_PageTransition_START_PAGE);
       break;
     case content::PAGE_TRANSITION_FORM_SUBMIT:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_FORM_SUBMIT);
+        sync_pb::SyncEnums_PageTransition_FORM_SUBMIT);
       break;
     case content::PAGE_TRANSITION_RELOAD:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_RELOAD);
+        sync_pb::SyncEnums_PageTransition_RELOAD);
       break;
     case content::PAGE_TRANSITION_KEYWORD:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_KEYWORD);
+        sync_pb::SyncEnums_PageTransition_KEYWORD);
       break;
     case content::PAGE_TRANSITION_KEYWORD_GENERATED:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_KEYWORD_GENERATED);
+        sync_pb::SyncEnums_PageTransition_KEYWORD_GENERATED);
       break;
     case content::PAGE_TRANSITION_CHAIN_START:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_CHAIN_START);
+        sync_pb::SyncEnums_PageTransition_CHAIN_START);
       break;
     case content::PAGE_TRANSITION_CHAIN_END:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_CHAIN_END);
+        sync_pb::SyncEnums_PageTransition_CHAIN_END);
       break;
     case content::PAGE_TRANSITION_CLIENT_REDIRECT:
       tab_navigation->set_navigation_qualifier(
-        sync_pb::TabNavigation_PageTransitionQualifier_CLIENT_REDIRECT);
+        sync_pb::SyncEnums_PageTransitionQualifier_CLIENT_REDIRECT);
       break;
     case content::PAGE_TRANSITION_SERVER_REDIRECT:
       tab_navigation->set_navigation_qualifier(
-        sync_pb::TabNavigation_PageTransitionQualifier_SERVER_REDIRECT);
+        sync_pb::SyncEnums_PageTransitionQualifier_SERVER_REDIRECT);
       break;
     default:
       tab_navigation->set_page_transition(
-        sync_pb::TabNavigation_PageTransition_TYPED);
+        sync_pb::SyncEnums_PageTransition_TYPED);
   }
   tab_navigation->set_unique_id(navigation.GetUniqueID());
   tab_navigation->set_timestamp(TimeToProtoTime(base::Time::Now()));
@@ -765,9 +765,9 @@ SyncError SessionModelAssociator::AssociateModels() {
     if (local_session_syncid_ == sync_api::kInvalidId) {
       // The sync db didn't have a header node for us, we need to create one.
       sync_api::WriteNode write_node(&trans);
-      if (!write_node.InitUniqueByCreation(SESSIONS,
-                                           root,
-                                           current_machine_tag_)) {
+      sync_api::WriteNode::InitUniqueByCreationResult result =
+          write_node.InitUniqueByCreation(SESSIONS, root, current_machine_tag_);
+      if (result != sync_api::WriteNode::INIT_SUCCESS) {
         // If we can't look it up, and we can't create it, chances are there's
         // a pre-existing node that has encryption issues. But, since we can't
         // load the item, we can't remove it, and error out at this point.
@@ -1213,53 +1213,51 @@ void SessionModelAssociator::AppendSessionTabNavigation(
   if (specifics.has_page_transition() ||
       specifics.has_navigation_qualifier()) {
     switch (specifics.page_transition()) {
-      case sync_pb::TabNavigation_PageTransition_LINK:
+      case sync_pb::SyncEnums_PageTransition_LINK:
         transition = content::PAGE_TRANSITION_LINK;
         break;
-      case sync_pb::TabNavigation_PageTransition_TYPED:
+      case sync_pb::SyncEnums_PageTransition_TYPED:
         transition = content::PAGE_TRANSITION_TYPED;
         break;
-      case sync_pb::TabNavigation_PageTransition_AUTO_BOOKMARK:
+      case sync_pb::SyncEnums_PageTransition_AUTO_BOOKMARK:
         transition = content::PAGE_TRANSITION_AUTO_BOOKMARK;
         break;
-      case sync_pb::TabNavigation_PageTransition_AUTO_SUBFRAME:
+      case sync_pb::SyncEnums_PageTransition_AUTO_SUBFRAME:
         transition = content::PAGE_TRANSITION_AUTO_SUBFRAME;
         break;
-      case sync_pb::TabNavigation_PageTransition_MANUAL_SUBFRAME:
+      case sync_pb::SyncEnums_PageTransition_MANUAL_SUBFRAME:
         transition = content::PAGE_TRANSITION_MANUAL_SUBFRAME;
         break;
-      case sync_pb::TabNavigation_PageTransition_GENERATED:
+      case sync_pb::SyncEnums_PageTransition_GENERATED:
         transition = content::PAGE_TRANSITION_GENERATED;
         break;
-      case sync_pb::TabNavigation_PageTransition_START_PAGE:
+      case sync_pb::SyncEnums_PageTransition_START_PAGE:
         transition = content::PAGE_TRANSITION_START_PAGE;
         break;
-      case sync_pb::TabNavigation_PageTransition_FORM_SUBMIT:
+      case sync_pb::SyncEnums_PageTransition_FORM_SUBMIT:
         transition = content::PAGE_TRANSITION_FORM_SUBMIT;
         break;
-      case sync_pb::TabNavigation_PageTransition_RELOAD:
+      case sync_pb::SyncEnums_PageTransition_RELOAD:
         transition = content::PAGE_TRANSITION_RELOAD;
         break;
-      case sync_pb::TabNavigation_PageTransition_KEYWORD:
+      case sync_pb::SyncEnums_PageTransition_KEYWORD:
         transition = content::PAGE_TRANSITION_KEYWORD;
         break;
-      case sync_pb::TabNavigation_PageTransition_KEYWORD_GENERATED:
+      case sync_pb::SyncEnums_PageTransition_KEYWORD_GENERATED:
         transition = content::PAGE_TRANSITION_KEYWORD_GENERATED;
         break;
-      case sync_pb::TabNavigation_PageTransition_CHAIN_START:
+      case sync_pb::SyncEnums_PageTransition_CHAIN_START:
         transition = content::PAGE_TRANSITION_CHAIN_START;
         break;
-      case sync_pb::TabNavigation_PageTransition_CHAIN_END:
+      case sync_pb::SyncEnums_PageTransition_CHAIN_END:
         transition = content::PAGE_TRANSITION_CHAIN_END;
         break;
       default:
         switch (specifics.navigation_qualifier()) {
-          case sync_pb::
-              TabNavigation_PageTransitionQualifier_CLIENT_REDIRECT:
+          case sync_pb::SyncEnums_PageTransitionQualifier_CLIENT_REDIRECT:
             transition = content::PAGE_TRANSITION_CLIENT_REDIRECT;
             break;
-            case sync_pb::
-                TabNavigation_PageTransitionQualifier_SERVER_REDIRECT:
+            case sync_pb::SyncEnums_PageTransitionQualifier_SERVER_REDIRECT:
             transition = content::PAGE_TRANSITION_SERVER_REDIRECT;
               break;
             default:
@@ -1356,7 +1354,9 @@ int64 SessionModelAssociator::TabNodePool::GetFreeTabNode() {
     size_t tab_node_id = tab_syncid_pool_.size();
     std::string tab_node_tag = TabIdToTag(machine_tag_, tab_node_id);
     sync_api::WriteNode tab_node(&trans);
-    if (!tab_node.InitUniqueByCreation(SESSIONS, root, tab_node_tag)) {
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        tab_node.InitUniqueByCreation(SESSIONS, root, tab_node_tag);
+    if (result != sync_api::WriteNode::INIT_SUCCESS) {
       LOG(ERROR) << "Could not create new node with tag "
                  << tab_node_tag << "!";
       return sync_api::kInvalidId;

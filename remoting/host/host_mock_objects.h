@@ -24,7 +24,7 @@ class MockCapturer : public Capturer {
   MockCapturer();
   virtual ~MockCapturer();
 
-  MOCK_METHOD0(Start, void());
+  MOCK_METHOD1(Start, void(const CursorShapeChangedCallback& callback));
   MOCK_METHOD0(Stop, void());
   MOCK_METHOD0(ScreenConfigurationChanged, void());
   MOCK_CONST_METHOD0(pixel_format, media::VideoFrame::Format());
@@ -64,7 +64,8 @@ class MockLocalInputMonitor : public LocalInputMonitor {
   MockLocalInputMonitor();
   virtual ~MockLocalInputMonitor();
 
-  MOCK_METHOD1(Start, void(remoting::ChromotingHost* host));
+  MOCK_METHOD2(Start, void(MouseMoveObserver* mouse_move_observer,
+                           const base::Closure& disconnect_callback));
   MOCK_METHOD0(Stop, void());
 };
 
@@ -126,6 +127,9 @@ class MockEventExecutor : public EventExecutor {
                void(const protocol::ClipboardEvent& event));
   MOCK_METHOD1(InjectKeyEvent, void(const protocol::KeyEvent& event));
   MOCK_METHOD1(InjectMouseEvent, void(const protocol::MouseEvent& event));
+  MOCK_METHOD0(OnSessionFinished, void());
+
+  void OnSessionStarted(scoped_ptr<protocol::ClipboardStub> client_clipboard);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockEventExecutor);

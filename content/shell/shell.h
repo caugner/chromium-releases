@@ -12,8 +12,10 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_piece.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/browser/web_contents_observer.h"
+#include "ipc/ipc_channel.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(TOOLKIT_GTK)
@@ -37,7 +39,7 @@ class SiteInstance;
 // This represents one window of the Content Shell, i.e. all the UI including
 // buttons and url bar, as well as the web content area.
 class Shell : public WebContentsDelegate,
-              public WebContentsObserver {
+              public NotificationObserver {
  public:
   virtual ~Shell();
 
@@ -70,9 +72,6 @@ class Shell : public WebContentsDelegate,
   static void PlatformExit();
 
   WebContents* web_contents() const { return web_contents_.get(); }
-
-  // layoutTestController related methods.
-  void set_wait_until_done() { wait_until_done_ = true; }
 
 #if defined(OS_MACOSX)
   // Public to be called by an ObjC bridge object.
@@ -108,6 +107,8 @@ class Shell : public WebContentsDelegate,
   void PlatformSetAddressBarURL(const GURL& url);
   // Sets whether the spinner is spinning.
   void PlatformSetIsLoading(bool loading);
+  // Set the title of shell window
+  void PlatformSetTitle(const string16& title);
 
 #if (defined(OS_WIN) && !defined(USE_AURA)) || defined(TOOLKIT_GTK)
   // Resizes the main window to the given dimensions.
@@ -129,11 +130,16 @@ class Shell : public WebContentsDelegate,
   virtual void HandleKeyboardEvent(
       const NativeWebKeyboardEvent& event) OVERRIDE;
 #endif
+  virtual bool AddMessageToConsole(WebContents* source,
+                                   int32 level,
+                                   const string16& message,
+                                   int32 line_no,
+                                   const string16& source_id) OVERRIDE;
 
-  // content::WebContentsObserver
-  virtual void DidFinishLoad(int64 frame_id,
-                             const GURL& validated_url,
-                             bool is_main_frame) OVERRIDE;
+  // content::NotificationObserver
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
 #if defined(OS_WIN) && !defined(USE_AURA)
   static ATOM RegisterWindowClass();
@@ -157,11 +163,11 @@ class Shell : public WebContentsDelegate,
 
   scoped_ptr<WebContents> web_contents_;
 
-  // layoutTestController related variables.
-  bool wait_until_done_;
-
   gfx::NativeWindow window_;
   gfx::NativeEditView url_edit_view_;
+
+  // Notification manager
+  NotificationRegistrar registrar_;
 
 #if defined(OS_WIN) && !defined(USE_AURA)
   WNDPROC default_edit_wnd_proc_;

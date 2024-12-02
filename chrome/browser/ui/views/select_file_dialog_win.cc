@@ -19,6 +19,7 @@
 #include "base/string_split.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/metro.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
@@ -36,6 +37,44 @@ namespace {
 std::wstring GetExtensionWithoutLeadingDot(const std::wstring& extension) {
   DCHECK(extension.empty() || extension[0] == L'.');
   return extension.empty() ? extension : extension.substr(1);
+}
+
+// Diverts to a metro-specific implementation as appropriate.
+bool CallGetOpenFileName(OPENFILENAME* ofn) {
+  HMODULE metro_module = base::win::GetMetroModule();
+  if (metro_module != NULL) {
+    typedef BOOL (*MetroGetOpenFileName)(OPENFILENAME*);
+    MetroGetOpenFileName metro_get_open_file_name =
+        reinterpret_cast<MetroGetOpenFileName>(
+            ::GetProcAddress(metro_module, "MetroGetOpenFileName"));
+    if (metro_get_open_file_name == NULL) {
+      NOTREACHED();
+      return false;
+    }
+
+    return metro_get_open_file_name(ofn) == TRUE;
+  } else {
+    return GetOpenFileName(ofn) == TRUE;
+  }
+}
+
+// Diverts to a metro-specific implementation as appropriate.
+bool CallGetSaveFileName(OPENFILENAME* ofn) {
+  HMODULE metro_module = base::win::GetMetroModule();
+  if (metro_module != NULL) {
+    typedef BOOL (*MetroGetSaveFileName)(OPENFILENAME*);
+    MetroGetSaveFileName metro_get_save_file_name =
+        reinterpret_cast<MetroGetSaveFileName>(
+            ::GetProcAddress(metro_module, "MetroGetSaveFileName"));
+    if (metro_get_save_file_name == NULL) {
+      NOTREACHED();
+      return false;
+    }
+
+    return metro_get_save_file_name(ofn) == TRUE;
+  } else {
+    return GetSaveFileName(ofn) == TRUE;
+  }
 }
 
 }  // namespace
@@ -314,7 +353,7 @@ bool SaveFileAsWithFilter(HWND owner,
   save_as.pvReserved = NULL;
   save_as.dwReserved = 0;
 
-  if (!GetSaveFileName(&save_as)) {
+  if (!CallGetSaveFileName(&save_as)) {
     // Zero means the dialog was closed, otherwise we had an error.
     DWORD error_code = CommDlgExtendedError();
     if (error_code != 0) {
@@ -749,7 +788,7 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
 
   if (!filter.empty())
     ofn.lpstrFilter = filter.c_str();
-  bool success = !!GetOpenFileName(&ofn);
+  bool success = CallGetOpenFileName(&ofn);
   DisableOwner(owner);
   if (success)
     *path = FilePath(filename);
@@ -781,7 +820,8 @@ bool SelectFileDialogImpl::RunOpenMultiFileDialog(
   if (!filter.empty()) {
     ofn.lpstrFilter = filter.c_str();
   }
-  bool success = !!GetOpenFileName(&ofn);
+
+  bool success = CallGetOpenFileName(&ofn);
   DisableOwner(owner);
   if (success) {
     std::vector<FilePath> files;

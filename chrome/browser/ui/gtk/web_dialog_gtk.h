@@ -11,33 +11,36 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/webui/web_dialog_delegate.h"
 #include "chrome/browser/ui/webui/web_dialog_web_contents_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
+#include "ui/web_dialogs/web_dialog_delegate.h"
 
 typedef struct _GtkWidget GtkWidget;
 
 class Browser;
-class Profile;
 class TabContentsContainerGtk;
-class TabContentsWrapper;
+class TabContents;
 class WebDialogController;
 
+namespace content {
+class BrowserContext;
+}
+
 class WebDialogGtk : public WebDialogWebContentsDelegate,
-                     public WebDialogDelegate {
+                     public ui::WebDialogDelegate {
  public:
-  WebDialogGtk(Profile* profile,
+  WebDialogGtk(content::BrowserContext* context,
                Browser* browser,
-               WebDialogDelegate* delegate,
+               ui::WebDialogDelegate* delegate,
                gfx::NativeWindow parent_window);
   virtual ~WebDialogGtk();
 
   // Initializes the contents of the dialog (the DOMView and the callbacks).
   gfx::NativeWindow InitDialog();
 
-  // Overridden from WebDialogDelegate:
+  // Overridden from ui::WebDialogDelegate:
   virtual ui::ModalType GetDialogModalType() const OVERRIDE;
   virtual string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;
@@ -53,7 +56,7 @@ class WebDialogGtk : public WebDialogWebContentsDelegate,
 
   // Overridden from content::WebContentsDelegate:
   virtual void HandleKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual content::WebContents* OpenURLFromTab(
       content::WebContents* source,
@@ -72,14 +75,14 @@ class WebDialogGtk : public WebDialogWebContentsDelegate,
   // about when the dialog is closing. For all other actions (besides dialog
   // closing) we delegate to the creator of this view, which we keep track of
   // using this variable.
-  WebDialogDelegate* delegate_;
+  ui::WebDialogDelegate* delegate_;
 
   gfx::NativeWindow parent_window_;
 
   GtkWidget* dialog_;
 
   scoped_ptr<WebDialogController> dialog_controller_;
-  scoped_ptr<TabContentsWrapper> tab_;
+  scoped_ptr<TabContents> tab_;
   scoped_ptr<TabContentsContainerGtk> tab_contents_container_;
 
   DISALLOW_COPY_AND_ASSIGN(WebDialogGtk);

@@ -19,17 +19,24 @@
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/common/content_export.h"
 #include "content/common/media/media_stream_options.h"
+#include "content/public/browser/browser_thread.h"
 #include "media/video/capture/video_capture_device.h"
 #include "media/video/capture/video_capture_types.h"
 
+class MockVideoCaptureManager;
 class VideoCaptureController;
 class VideoCaptureControllerEventHandler;
 
 namespace media_stream {
 
 // VideoCaptureManager opens/closes and start/stops video capture devices.
+// It is deleted on the FILE thread so that it can call base::Thread::Stop()
+// there without blocking UI/IO threads. This is also needed for incognito
+// window. When incognito window is closed, IO thread is not in shutdown mode
+// and base::Thread::Stop() can't be called on IO thread.
 class CONTENT_EXPORT VideoCaptureManager
-    : public base::RefCountedThreadSafe<VideoCaptureManager>,
+    : public base::RefCountedThreadSafe<VideoCaptureManager,
+          content::BrowserThread::DeleteOnFileThread>,
       public MediaStreamProvider {
  public:
   // Calling |Start| of this id will open the first device, even though open has
@@ -54,18 +61,18 @@ class CONTENT_EXPORT VideoCaptureManager
   // Start allocates the device and no other application can use the device
   // before Stop is called. Captured video frames will be delivered to
   // video_capture_receiver.
-  void Start(const media::VideoCaptureParams& capture_params,
+  virtual void Start(const media::VideoCaptureParams& capture_params,
              media::VideoCaptureDevice::EventHandler* video_capture_receiver);
 
   // Stops capture device referenced by |capture_session_id|. No more frames
   // will be delivered to the frame receiver, and |stopped_cb| will be called.
   // |stopped_cb| can be NULL.
-  void Stop(const media::VideoCaptureSessionId& capture_session_id,
+  virtual void Stop(const media::VideoCaptureSessionId& capture_session_id,
             base::Closure stopped_cb);
 
   // A capture device error has occurred for |capture_session_id|. The device
   // won't stream any more captured frames.
-  void Error(const media::VideoCaptureSessionId& capture_session_id);
+  virtual void Error(const media::VideoCaptureSessionId& capture_session_id);
 
   // Used by unit test to make sure a fake device is used instead of a real
   // video capture device. Due to timing requirements, the function must be
@@ -85,7 +92,13 @@ class CONTENT_EXPORT VideoCaptureManager
       VideoCaptureControllerEventHandler* handler);
 
  private:
-  friend class base::RefCountedThreadSafe<VideoCaptureManager>;
+  friend class ::MockVideoCaptureManager;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::FILE>;
+  friend class base::DeleteHelper<VideoCaptureManager>;
+  friend class base::RefCountedThreadSafe<VideoCaptureManager,
+          content::BrowserThread::DeleteOnFileThread>;
+
   virtual ~VideoCaptureManager();
 
   typedef std::list<VideoCaptureControllerEventHandler*> Handlers;

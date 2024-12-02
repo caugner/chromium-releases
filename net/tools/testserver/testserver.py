@@ -180,7 +180,7 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
 class SyncHTTPServer(ClientRestrictingServerMixIn, StoppableHTTPServer):
   """An HTTP server that handles sync commands."""
 
-  def __init__(self, server_address, request_handler_class):
+  def __init__(self, server_address, xmpp_port, request_handler_class):
     # We import here to avoid pulling in chromiumsync's dependencies
     # unless strictly necessary.
     import chromiumsync
@@ -189,7 +189,7 @@ class SyncHTTPServer(ClientRestrictingServerMixIn, StoppableHTTPServer):
     self._sync_handler = chromiumsync.TestServer()
     self._xmpp_socket_map = {}
     self._xmpp_server = xmppserver.XmppServer(
-      self._xmpp_socket_map, ('localhost', 0))
+      self._xmpp_socket_map, ('localhost', xmpp_port))
     self.xmpp_port = self._xmpp_server.getsockname()[1]
     self.authenticated = True
 
@@ -408,6 +408,7 @@ class TestPageHandler(BasePageHandler):
       self.GDataDocumentsFeedQueryHandler,
       self.FileHandler,
       self.SetCookieHandler,
+      self.SetManyCookiesHandler,
       self.SetHeaderHandler,
       self.AuthBasicHandler,
       self.AuthDigestHandler,
@@ -1078,6 +1079,26 @@ class TestPageHandler(BasePageHandler):
     self.end_headers()
     for cookie_value in cookie_values:
       self.wfile.write('%s' % cookie_value)
+    return True
+
+  def SetManyCookiesHandler(self):
+    """This handler just sets a given number of cookies, for testing handling
+       of large numbers of cookies."""
+
+    if not self._ShouldHandleRequest("/set-many-cookies"):
+      return False
+
+    query_char = self.path.find('?')
+    if query_char != -1:
+      num_cookies = int(self.path[query_char + 1:])
+    else:
+      num_cookies = 0
+    self.send_response(200)
+    self.send_header('', 'text/html')
+    for i in range(0, num_cookies):
+      self.send_header('Set-Cookie', 'a=')
+    self.end_headers()
+    self.wfile.write('%d cookies were sent' % num_cookies)
     return True
 
   def SetHeaderHandler(self):
@@ -2063,7 +2084,8 @@ def main(options, args):
     server.policy_user = options.policy_user
     server.gdata_auth_token = options.auth_token
   elif options.server_type == SERVER_SYNC:
-    server = SyncHTTPServer((host, port), SyncPageHandler)
+    xmpp_port = options.xmpp_port
+    server = SyncHTTPServer((host, port), xmpp_port, SyncPageHandler)
     print 'Sync HTTP server started on port %d...' % server.server_port
     print 'Sync XMPP server started on port %d...' % server.xmpp_port
     server_data['port'] = server.server_port
@@ -2164,6 +2186,9 @@ if __name__ == '__main__':
   option_parser.add_option('', '--port', default='0', type='int',
                            help='Port used by the server. If unspecified, the '
                            'server will listen on an ephemeral port.')
+  option_parser.add_option('', '--xmpp-port', default='0', type='int',
+                           help='Port used by the XMPP server. If unspecified, '
+                           'the XMPP server will listen on an ephemeral port.')
   option_parser.add_option('', '--data-dir', dest='data_dir',
                            help='Directory from which to read the files.')
   option_parser.add_option('', '--https', action='store_true', dest='https',
@@ -2177,9 +2202,12 @@ if __name__ == '__main__':
                            'automatically generated certificate. One of '
                            '[ok,revoked,invalid]')
   option_parser.add_option('', '--tls-intolerant', dest='tls_intolerant',
-                           const=True, default=False, action='store_const',
-                           help='If true, TLS connections will be aborted '
-                           ' in order to test SSLv3 fallback.')
+                           default='0', type='int',
+                           help='If nonzero, certain TLS connections will be'
+                           ' aborted in order to test version fallback. 1'
+                           ' means all TLS versions will be aborted. 2 means'
+                           ' TLS 1.1 or higher will be aborted. 3 means TLS'
+                           ' 1.2 or higher will be aborted.')
   option_parser.add_option('', '--https-record-resume', dest='record_resume',
                            const=True, default=False, action='store_const',
                            help='Record resumption cache events rather than'

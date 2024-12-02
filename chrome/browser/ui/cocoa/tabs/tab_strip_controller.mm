@@ -13,10 +13,12 @@
 #include "base/command_line.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
+#include "base/metrics/histogram.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
@@ -25,8 +27,6 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -47,8 +47,10 @@
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/navigation_controller.h"
@@ -59,6 +61,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -70,8 +73,6 @@ using content::OpenURLParams;
 using content::Referrer;
 using content::UserMetricsAction;
 using content::WebContents;
-
-NSString* const kTabStripNumberOfTabsChanged = @"kTabStripNumberOfTabsChanged";
 
 namespace {
 
@@ -145,13 +146,14 @@ private:
 - (void)addSubviewToPermanentList:(NSView*)aView;
 - (void)regenerateSubviewList;
 - (NSInteger)indexForContentsView:(NSView*)view;
-- (void)updateFaviconForContents:(TabContentsWrapper*)contents
+- (void)updateFaviconForContents:(TabContents*)contents
                          atIndex:(NSInteger)modelIndex;
 - (void)layoutTabsWithAnimation:(BOOL)animate
              regenerateSubviews:(BOOL)doUpdate;
 - (void)animationDidStopForController:(TabController*)controller
                              finished:(BOOL)finished;
 - (NSInteger)indexFromModelIndex:(NSInteger)index;
+- (void)clickNewTabButton:(id)sender;
 - (NSInteger)numberOfOpenTabs;
 - (NSInteger)numberOfOpenMiniTabs;
 - (NSInteger)numberOfOpenNonMiniTabs;
@@ -303,7 +305,7 @@ private:
 #pragma mark -
 
 // In general, there is a one-to-one correspondence between TabControllers,
-// TabViews, TabContentsControllers, and the TabContentsWrapper in the
+// TabViews, TabContentsControllers, and the TabContents in the
 // TabStripModel. In the steady-state, the indices line up so an index coming
 // from the model is directly mapped to the same index in the parallel arrays
 // holding our views and controllers. This is also true when new tabs are
@@ -352,7 +354,7 @@ private:
     tabStripView_.reset([view retain]);
     switchView_ = switchView;
     browser_ = browser;
-    tabStripModel_ = browser_->tabstrip_model();
+    tabStripModel_ = browser_->tab_strip_model();
     hoverTabSelector_.reset(new HoverTabSelector(tabStripModel_));
     delegate_ = delegate;
     bridge_.reset(new TabStripModelObserverBridge(tabStripModel_, self));
@@ -366,8 +368,9 @@ private:
     // (see |-addSubviewToPermanentList:|) will be wiped out.
     permanentSubviews_.reset([[NSMutableArray alloc] init]);
 
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     defaultFavicon_.reset(
-        [gfx::GetCachedImageWithName(@"nav.pdf") retain]);
+        [rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON) retain]);
 
     [self setLeftIndentForControls:[[self class] defaultLeftIndentForControls]];
     [self setRightIndentForControls:0];
@@ -377,9 +380,8 @@ private:
     // the tab view, it draws with all sorts of crazy artifacts."
     newTabButton_ = [view getNewTabButton];
     [self addSubviewToPermanentList:newTabButton_];
-    [newTabButton_ setTarget:nil];
-    [newTabButton_ setAction:@selector(commandDispatch:)];
-    [newTabButton_ setTag:IDC_NEW_TAB];
+    [newTabButton_ setTarget:self];
+    [newTabButton_ setAction:@selector(clickNewTabButton:)];
 
     // Set the images from code because Cocoa fails to find them in our sub
     // bundle during tests.
@@ -454,10 +456,9 @@ private:
     // means the tab model is already fully formed with tabs. Need to walk the
     // list and create the UI for each.
     const int existingTabCount = tabStripModel_->count();
-    const TabContentsWrapper* selection =
-        tabStripModel_->GetActiveTabContents();
+    const TabContents* selection = tabStripModel_->GetActiveTabContents();
     for (int i = 0; i < existingTabCount; ++i) {
-      TabContentsWrapper* currentContents = tabStripModel_->GetTabContentsAt(i);
+      TabContents* currentContents = tabStripModel_->GetTabContentsAt(i);
       [self insertTabWithContents:currentContents
                           atIndex:i
                      inForeground:NO];
@@ -557,7 +558,7 @@ private:
 
   // Make sure the new tabs's sheets are visible (necessary when a background
   // tab opened a sheet while it was in the background and now becomes active).
-  TabContentsWrapper* newTab = tabStripModel_->GetTabContentsAt(modelIndex);
+  TabContents* newTab = tabStripModel_->GetTabContentsAt(modelIndex);
   DCHECK(newTab);
   if (newTab) {
     ConstrainedWindowTabHelper::ConstrainedWindowList::iterator it, end;
@@ -587,6 +588,14 @@ private:
   [[controller view] setHidden:YES];
 
   return controller;
+}
+
+// (Private) Handles a click on the new tab button.
+- (void)clickNewTabButton:(id)sender {
+  content::RecordAction(UserMetricsAction("NewTab_Button"));
+  UMA_HISTOGRAM_ENUMERATION("Tab.NewTab", TabStripModel::NEW_TAB_BUTTON,
+                            TabStripModel::NEW_TAB_ENUM_COUNT);
+  tabStripModel_->delegate()->AddBlankTab(true);
 }
 
 // (Private) Returns the number of open tabs in the tab strip. This is the
@@ -1145,7 +1154,7 @@ private:
 
 // Called when a notification is received from the model to insert a new tab
 // at |modelIndex|.
-- (void)insertTabWithContents:(TabContentsWrapper*)contents
+- (void)insertTabWithContents:(TabContents*)contents
                       atIndex:(NSInteger)modelIndex
                  inForeground:(bool)inForeground {
   DCHECK(contents);
@@ -1199,17 +1208,12 @@ private:
   // into the right state up front as we won't be told to do it from anywhere
   // else.
   [self updateFaviconForContents:contents atIndex:modelIndex];
-
-  // Send a broadcast that the number of tabs have changed.
-  [[NSNotificationCenter defaultCenter]
-      postNotificationName:kTabStripNumberOfTabsChanged
-                    object:self];
 }
 
 // Called when a notification is received from the model to select a particular
 // tab. Swaps in the toolbar and content area associated with |newContents|.
-- (void)activateTabWithContents:(TabContentsWrapper*)newContents
-               previousContents:(TabContentsWrapper*)oldContents
+- (void)activateTabWithContents:(TabContents*)newContents
+               previousContents:(TabContents*)oldContents
                         atIndex:(NSInteger)modelIndex
                     userGesture:(bool)wasUserGesture {
   // Take closing tabs into account.
@@ -1267,8 +1271,8 @@ private:
   }
 }
 
-- (void)tabReplacedWithContents:(TabContentsWrapper*)newContents
-               previousContents:(TabContentsWrapper*)oldContents
+- (void)tabReplacedWithContents:(TabContents*)newContents
+               previousContents:(TabContents*)oldContents
                         atIndex:(NSInteger)modelIndex {
   NSInteger index = [self indexFromModelIndex:modelIndex];
   TabContentsController* oldController =
@@ -1382,7 +1386,7 @@ private:
 // Called when a notification is received from the model that the given tab
 // has gone away. Start an animation then force a layout to put everything
 // in motion.
-- (void)tabDetachedWithContents:(TabContentsWrapper*)contents
+- (void)tabDetachedWithContents:(TabContents*)contents
                         atIndex:(NSInteger)modelIndex {
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
@@ -1398,17 +1402,12 @@ private:
     [self removeTab:tab];
   }
 
-  // Send a broadcast that the number of tabs have changed.
-  [[NSNotificationCenter defaultCenter]
-      postNotificationName:kTabStripNumberOfTabsChanged
-                    object:self];
-
   [delegate_ onTabDetachedWithContents:contents->web_contents()];
 }
 
 // A helper routine for creating an NSImageView to hold the favicon or app icon
 // for |contents|.
-- (NSImageView*)iconImageViewForContents:(TabContentsWrapper*)contents {
+- (NSImageView*)iconImageViewForContents:(TabContents*)contents {
   BOOL isApp = contents->extension_tab_helper()->is_app();
   NSImage* image = nil;
   // Favicons come from the renderer, and the renderer draws everything in the
@@ -1434,7 +1433,7 @@ private:
 
 // Updates the current loading state, replacing the icon view with a favicon,
 // a throbber, the default icon, or nothing at all.
-- (void)updateFaviconForContents:(TabContentsWrapper*)contents
+- (void)updateFaviconForContents:(TabContents*)contents
                          atIndex:(NSInteger)modelIndex {
   if (!contents)
     return;
@@ -1506,7 +1505,7 @@ private:
 // Called when a notification is received from the model that the given tab
 // has been updated. |loading| will be YES when we only want to update the
 // throbber state, not anything else about the (partially) loading tab.
-- (void)tabChangedWithContents:(TabContentsWrapper*)contents
+- (void)tabChangedWithContents:(TabContents*)contents
                        atIndex:(NSInteger)modelIndex
                     changeType:(TabStripModelObserver::TabChangeType)change {
   // Take closing tabs into account.
@@ -1536,7 +1535,7 @@ private:
 // Called when a tab is moved (usually by drag&drop). Keep our parallel arrays
 // in sync with the tab strip model. It can also be pinned/unpinned
 // simultaneously, so we need to take care of that.
-- (void)tabMovedWithContents:(TabContentsWrapper*)contents
+- (void)tabMovedWithContents:(TabContents*)contents
                    fromIndex:(NSInteger)modelFrom
                      toIndex:(NSInteger)modelTo {
   // Take closing tabs into account.
@@ -1565,7 +1564,7 @@ private:
 }
 
 // Called when a tab is pinned or unpinned without moving.
-- (void)tabMiniStateChangedWithContents:(TabContentsWrapper*)contents
+- (void)tabMiniStateChangedWithContents:(TabContents*)contents
                                 atIndex:(NSInteger)modelIndex {
   // Take closing tabs into account.
   NSInteger index = [self indexFromModelIndex:modelIndex];
@@ -1594,6 +1593,10 @@ private:
   [targetFrames_ setObject:[NSValue valueWithRect:frame]
                     forKey:identifier];
   [view setFrame:frame];
+}
+
+- (TabStripModel*)tabStripModel {
+  return tabStripModel_;
 }
 
 - (NSView*)activeTabView {
@@ -1648,7 +1651,7 @@ private:
   tabStripModel_->MoveTabContentsAt(from, toIndex, true);
 }
 
-// Drop a given TabContentsWrapper at the location of the current placeholder.
+// Drop a given TabContents at the location of the current placeholder.
 // If there is no placeholder, it will go at the end. Used when dragging from
 // another window when we don't have access to the WebContents as part of our
 // strip. |frame| is in the coordinate system of the tab strip view and
@@ -1657,7 +1660,7 @@ private:
 // its previous window, setting |pinned| to YES will propagate that state to the
 // new window. Mini-tabs are either app or pinned tabs; the app state is stored
 // by the |contents|, but the |pinned| state is the caller's responsibility.
-- (void)dropTabContents:(TabContentsWrapper*)contents
+- (void)dropTabContents:(TabContents*)contents
               withFrame:(NSRect)frame
             asPinnedTab:(BOOL)pinned {
   int modelIndex = [self indexOfPlaceholder];
@@ -1958,7 +1961,7 @@ private:
 
   // If the input is plain text, classify the input and make the URL.
   AutocompleteMatch match;
-  browser_->profile()->GetAutocompleteClassifier()->Classify(
+  AutocompleteClassifierFactory::GetForProfile(browser_->profile())->Classify(
       base::SysNSStringToUTF16(text), string16(), false, false, &match, NULL);
   GURL url(match.destination_url);
 

@@ -8,6 +8,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
+#include "ui/base/events.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/font.h"
@@ -57,6 +58,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
   virtual bool GetDropFormats(
       int* formats,
@@ -154,6 +156,8 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
   virtual bool CanComposeInline() const OVERRIDE;
   virtual gfx::Rect GetCaretBounds() OVERRIDE;
+  virtual bool GetCompositionCharacterBounds(uint32 index,
+                                             gfx::Rect* rect) OVERRIDE;
   virtual bool HasCompositionText() OVERRIDE;
   virtual bool GetTextRange(ui::Range* range) OVERRIDE;
   virtual bool GetCompositionTextRange(ui::Range* range) OVERRIDE;

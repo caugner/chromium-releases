@@ -7,9 +7,13 @@
 #include <algorithm>
 
 #include "base/values.h"
+#include "chrome/browser/extensions/api/discovery/suggested_links_registry.h"
+#include "chrome/browser/extensions/api/discovery/suggested_links_registry_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_source.h"
+#include "chrome/browser/ui/webui/ntp/suggestions_source_discovery.h"
+#include "chrome/browser/ui/webui/ntp/suggestions_source_top_sites.h"
 
 namespace {
 
@@ -18,18 +22,28 @@ static const size_t kSuggestionsCount = 8;
 }  // namespace
 
 SuggestionsCombiner::SuggestionsCombiner(
-    SuggestionsHandler* suggestions_handler)
+    SuggestionsCombiner::Delegate* delegate)
     : sources_fetching_count_(0),
-      suggestions_handler_(suggestions_handler),
+      delegate_(delegate),
       suggestions_count_(kSuggestionsCount),
-      pages_value_(new base::ListValue()) {
+      page_values_(new base::ListValue()),
+      debug_enabled_(false) {
 }
 
 SuggestionsCombiner::~SuggestionsCombiner() {
 }
 
-base::ListValue* SuggestionsCombiner::GetPagesValue() {
-  return pages_value_.get();
+void SuggestionsCombiner::AddSource(SuggestionsSource* source) {
+  source->SetCombiner(this);
+  source->SetDebug(debug_enabled_);
+  sources_.push_back(source);
+}
+
+void SuggestionsCombiner::EnableDebug(bool enable) {
+  debug_enabled_ = enable;
+  for (size_t i = 0; i < sources_.size(); ++i) {
+    sources_[i]->SetDebug(enable);
+  }
 }
 
 void SuggestionsCombiner::FetchItems(Profile* profile) {
@@ -39,20 +53,49 @@ void SuggestionsCombiner::FetchItems(Profile* profile) {
   }
 }
 
-void SuggestionsCombiner::AddSource(SuggestionsSource* source) {
-  source->SetCombiner(this);
-  sources_.push_back(source);
+base::ListValue* SuggestionsCombiner::GetPageValues() {
+  return page_values_.get();
 }
 
-void SuggestionsCombiner::FillPagesValue() {
+void SuggestionsCombiner::OnItemsReady() {
+  DCHECK_GT(sources_fetching_count_, 0);
+  sources_fetching_count_--;
+  if (sources_fetching_count_ == 0) {
+    FillPageValues();
+    delegate_->OnSuggestionsReady();
+  }
+}
+
+void SuggestionsCombiner::SetSuggestionsCount(size_t suggestions_count) {
+  suggestions_count_ = suggestions_count;
+}
+
+// static
+SuggestionsCombiner* SuggestionsCombiner::Create(
+    SuggestionsCombiner::Delegate* delegate, Profile* profile) {
+  SuggestionsCombiner* combiner = new SuggestionsCombiner(delegate);
+  combiner->AddSource(new SuggestionsSourceTopSites());
+
+  extensions::SuggestedLinksRegistry* registry =
+      extensions::SuggestedLinksRegistryFactory::GetForProfile(profile);
+  scoped_ptr<std::vector<std::string> > list = registry->GetExtensionIds();
+  for (std::vector<std::string>::iterator it = list->begin();
+      it != list->end(); ++it) {
+    combiner->AddSource(new SuggestionsSourceDiscovery(*it));
+  }
+
+  return combiner;
+}
+
+void SuggestionsCombiner::FillPageValues() {
   int total_weight = 0;
   for (size_t i = 0; i < sources_.size(); ++i)
     total_weight += sources_[i]->GetWeight();
   DCHECK_GT(total_weight, 0);
 
-  pages_value_.reset(new base::ListValue());
+  page_values_.reset(new base::ListValue());
 
-  // Evaluate how many items to obtain from each sources. We use error diffusion
+  // Evaluate how many items to obtain from each source. We use error diffusion
   // to ensure that we get the total desired number of items.
   int error = 0;
 
@@ -66,8 +109,8 @@ void SuggestionsCombiner::FillPagesValue() {
         sources_[i]->GetItemCount());
 
     for (int j = 0; j < item_count; ++j)
-      pages_value_->Append(sources_[i]->PopItem());
-    next_item_index_for_source.push_back(pages_value_->GetSize());
+      page_values_->Append(sources_[i]->PopItem());
+    next_item_index_for_source.push_back(page_values_->GetSize());
   }
 
   // Fill in extra items, prioritizing the first source.
@@ -76,22 +119,13 @@ void SuggestionsCombiner::FillPagesValue() {
   // number of extra items that were added and offset indices by that much.
   size_t extra_items_added = 0;
   for (size_t i = 0; i < sources_.size() &&
-      pages_value_->GetSize() < suggestions_count_; ++i) {
+      page_values_->GetSize() < suggestions_count_; ++i) {
 
     size_t index = next_item_index_for_source[i] + extra_items_added;
-    while (pages_value_->GetSize() < suggestions_count_ &&
+    while (page_values_->GetSize() < suggestions_count_ &&
         (item = sources_[i]->PopItem())) {
-      pages_value_->Insert(index++, item);
+      page_values_->Insert(index++, item);
       extra_items_added++;
     }
-  }
-}
-
-void SuggestionsCombiner::OnItemsReady() {
-  DCHECK_GT(sources_fetching_count_, 0);
-  sources_fetching_count_--;
-  if (sources_fetching_count_ == 0) {
-    FillPagesValue();
-    suggestions_handler_->OnPagesValueReady();
   }
 }

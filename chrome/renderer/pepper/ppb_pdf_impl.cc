@@ -50,8 +50,6 @@ class PrivateFontFile : public ppapi::Resource {
       : Resource(ppapi::OBJECT_IS_IMPL, instance),
         fd_(fd) {
   }
-  virtual ~PrivateFontFile() {
-  }
 
   bool GetFontTable(uint32_t table,
                     void* output,
@@ -62,6 +60,9 @@ class PrivateFontFile : public ppapi::Resource {
     *output_length = static_cast<uint32_t>(temp_size);
     return rv;
   }
+
+ protected:
+  virtual ~PrivateFontFile() {}
 
  private:
   int fd_;
@@ -371,6 +372,7 @@ const PPB_PDF* PPB_PDF_Impl::GetInterface() {
 
 // static
 void PPB_PDF_Impl::InvokePrintingForInstance(PP_Instance instance_id) {
+#if defined(ENABLE_PRINTING)
   PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
   if (!instance)
     return;
@@ -382,4 +384,5 @@ void PPB_PDF_Impl::InvokePrintingForInstance(PP_Instance instance_id) {
   PrintWebViewHelper* print_view_helper = PrintWebViewHelper::Get(render_view);
   if (print_view_helper)
     print_view_helper->PrintNode(element);
+#endif
 }

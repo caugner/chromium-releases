@@ -5,6 +5,8 @@
 #ifndef REMOTING_HOST_CONSTANTS_H_
 #define REMOTING_HOST_CONSTANTS_H_
 
+#include "base/compiler_specific.h"
+
 namespace remoting {
 
 // Known host exit codes.
@@ -23,6 +25,11 @@ enum HostExitCodes {
   kMinPermanentErrorExitCode = kInvalidHostConfigurationExitCode,
   kMaxPermanentErrorExitCode = kInvalidOauthCredentialsExitCode
 };
+
+#if defined(OS_WIN)
+// The Omaha Appid of the host.
+extern const wchar_t kHostOmahaAppid[];
+#endif  // defined(OS_WIN)
 
 }  // namespace remoting
 

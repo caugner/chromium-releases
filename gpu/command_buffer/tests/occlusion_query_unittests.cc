@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GL_GLEXT_PROTOTYPES
-#define GL_GLEXT_PROTOTYPES
-#endif
-
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
@@ -18,10 +14,6 @@ namespace gpu {
 
 class OcclusionQueryTest : public testing::Test {
  protected:
-  OcclusionQueryTest()
-      : gl_(NULL, NULL) {
-  }
-
   virtual void SetUp() {
     gl_.Initialize(gfx::Size(512, 512));
   }
@@ -74,6 +66,11 @@ void OcclusionQueryTest::DrawRect(float x, float z, float scale, float* color) {
 }
 
 TEST_F(OcclusionQueryTest, Occlusion) {
+#ifdef OS_MACOSX
+  EXPECT_TRUE(GLTestHelper::HasExtension("GL_EXT_occlusion_query_boolean"))
+      << "GL_EXT_occlusion_query_boolean is required on OSX";
+#endif
+
   if (!GLTestHelper::HasExtension("GL_EXT_occlusion_query_boolean")) {
     return;
   }
@@ -100,22 +97,7 @@ TEST_F(OcclusionQueryTest, Occlusion) {
   matrix_loc_ = glGetUniformLocation(program, "worldMatrix");
   color_loc_ = glGetUniformLocation(program, "color");
 
-  GLuint vbo = 0;
-  glGenBuffers(1, &vbo);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  static float vertices[] = {
-      1,  1, 0.0,
-     -1,  1, 0.0,
-     -1, -1, 0.0,
-      1,  1, 0.0,
-     -1, -1, 0.0,
-      1, -1, 0.0,
-  };
-  glBufferData(GL_ARRAY_BUFFER,
-               sizeof(vertices),
-               NULL,
-               GL_STATIC_DRAW);
-  glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+  GLTestHelper::SetupUnitQuad(position_loc_);
 
   GLuint query = 0;
   glGenQueriesEXT(1, &query);
@@ -125,10 +107,6 @@ TEST_F(OcclusionQueryTest, Occlusion) {
 
   // Use the program object
   glUseProgram(program);
-
-  // Load the vertex data
-  glEnableVertexAttribArray(position_loc_);
-  glVertexAttribPointer(position_loc_, 3, GL_FLOAT, GL_FALSE, 0, 0);
 
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   static float red[] = { 1.0f, 0.0f, 0.0f, 1.0f };
@@ -163,7 +141,6 @@ TEST_F(OcclusionQueryTest, Occlusion) {
   EXPECT_TRUE(result);
   glGetQueryObjectuivEXT(query, GL_QUERY_RESULT_EXT, &query_status);
   EXPECT_TRUE(query_status);
-
   GLTestHelper::CheckGLError("no errors", __LINE__);
 }
 

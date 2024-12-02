@@ -10,14 +10,12 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/system/user/login_status.h"
 #include "ash/system/power/power_supply_status.h"
+#include "ash/system/user/login_status.h"
 #include "base/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string16.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-
-class SkBitmap;
+#include "ui/gfx/image/image_skia.h"
 
 namespace ash {
 
@@ -27,7 +25,7 @@ struct ASH_EXPORT NetworkIconInfo {
 
   bool highlight;
   bool tray_icon_visible;
-  SkBitmap image;
+  gfx::ImageSkia image;
   string16 name;
   string16 description;
   std::string service_path;
@@ -91,6 +89,7 @@ struct ASH_EXPORT IMEInfo {
   ~IMEInfo();
 
   bool selected;
+  bool third_party;
   std::string id;
   string16 name;
   string16 short_name;
@@ -106,16 +105,13 @@ class SystemTrayDelegate {
   virtual bool GetTrayVisibilityOnStartup() = 0;
 
   // Gets information about the logged in user.
-  virtual const std::string GetUserDisplayName() const = 0;
+  virtual const string16 GetUserDisplayName() const = 0;
   virtual const std::string GetUserEmail() const = 0;
-  virtual const SkBitmap& GetUserImage() const = 0;
+  virtual const gfx::ImageSkia& GetUserImage() const = 0;
   virtual user::LoginStatus GetUserLoginStatus() const = 0;
 
   // Returns whether a system upgrade is available.
   virtual bool SystemShouldUpgrade() const = 0;
-
-  // Returns the resource id for the icon to show for the update notification.
-  virtual int GetSystemUpdateIconResource() const = 0;
 
   // Returns the desired hour clock type.
   virtual base::HourClockType GetHourClockType() const = 0;
@@ -164,9 +160,6 @@ class SystemTrayDelegate {
 
   // Sets the caps lock status to |enabled|.
   virtual void SetCapsLockEnabled(bool enabled) = 0;
-
-  // Gets whether accessibility mode is turned on.
-  virtual bool IsInAccessibilityMode() const = 0;
 
   // Attempts to shut down the system.
   virtual void ShutDown() = 0;
@@ -238,8 +231,8 @@ class SystemTrayDelegate {
   // Toggles wifi network.
   virtual void ToggleWifi() = 0;
 
-  // Toggles cellular network.
-  virtual void ToggleCellular() = 0;
+  // Toggles mobile network.
+  virtual void ToggleMobile() = 0;
 
   // Toggles bluetooth.
   virtual void ToggleBluetooth() = 0;
@@ -250,11 +243,14 @@ class SystemTrayDelegate {
   // Shows UI to search for cellular networks.
   virtual void ShowOtherCellular() = 0;
 
+  // Returns whether the system is connected to any network.
+  virtual bool IsNetworkConnected() = 0;
+
   // Returns whether wifi is available.
   virtual bool GetWifiAvailable() = 0;
 
-  // Returns whether cellular networking is available.
-  virtual bool GetCellularAvailable() = 0;
+  // Returns whether mobile networking (cellular or wimax) is available.
+  virtual bool GetMobileAvailable() = 0;
 
   // Returns whether bluetooth capability is available.
   virtual bool GetBluetoothAvailable() = 0;
@@ -262,14 +258,14 @@ class SystemTrayDelegate {
   // Returns whether wifi is enabled.
   virtual bool GetWifiEnabled() = 0;
 
-  // Returns whether cellular networking is enabled.
-  virtual bool GetCellularEnabled() = 0;
+  // Returns whether mobile (cellular or wimax) networking is enabled.
+  virtual bool GetMobileEnabled() = 0;
 
   // Returns whether bluetooth is enabled.
   virtual bool GetBluetoothEnabled() = 0;
 
-  // Returns whether cellular scanning is supported.
-  virtual bool GetCellularScanSupported() = 0;
+  // Returns whether mobile scanning is supported.
+  virtual bool GetMobileScanSupported() = 0;
 
   // Retrieves information about the carrier and locale specific |setup_url|.
   // If none of the carrier info/setup URL cannot be retrieved, returns false.

@@ -6,13 +6,17 @@
 #define CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_AURA_H_
 #pragma once
 
+#include <vector>
+
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/web_contents/web_contents_view_helper.h"
 #include "content/common/content_export.h"
+#include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/window_delegate.h"
+
+class WebContentsImpl;
 
 namespace aura {
 class Window;
@@ -25,14 +29,16 @@ class WebDragDestDelegate;
 
 class CONTENT_EXPORT WebContentsViewAura
     : public content::WebContentsView,
+      public content::RenderViewHostDelegateView,
       public aura::WindowDelegate,
       public aura::client::DragDropDelegate {
  public:
   WebContentsViewAura(WebContentsImpl* web_contents,
                       content::WebContentsViewDelegate* delegate);
-  virtual ~WebContentsViewAura();
 
  private:
+  virtual ~WebContentsViewAura();
+
   void SizeChangedCommon(const gfx::Size& size);
 
   void EndDrag(WebKit::WebDragOperationsMask ops);
@@ -59,22 +65,9 @@ class CONTENT_EXPORT WebContentsViewAura
   virtual WebDropData* GetDropData() const OVERRIDE;
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
-  virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
+  virtual gfx::Rect GetViewBounds() const OVERRIDE;
 
-  // Overridden from RenderViewHostDelegate::View:
-  virtual void CreateNewWindow(
-      int route_id,
-      const ViewHostMsg_CreateWindow_Params& params) OVERRIDE;
-  virtual void CreateNewWidget(int route_id,
-                               WebKit::WebPopupType popup_type) OVERRIDE;
-  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
-  virtual void ShowCreatedWindow(int route_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
-                                 bool user_gesture) OVERRIDE;
-  virtual void ShowCreatedWidget(int route_id,
-                                 const gfx::Rect& initial_pos) OVERRIDE;
-  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+  // Overridden from RenderViewHostDelegateView:
   virtual void ShowContextMenu(
       const content::ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
@@ -82,7 +75,8 @@ class CONTENT_EXPORT WebContentsViewAura
                              double item_font_size,
                              int selected_item,
                              const std::vector<WebMenuItem>& items,
-                             bool right_aligned) OVERRIDE;
+                             bool right_aligned,
+                             bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask operations,
                              const SkBitmap& image,
@@ -95,20 +89,26 @@ class CONTENT_EXPORT WebContentsViewAura
   virtual gfx::Size GetMinimumSize() const OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
                                const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
+  virtual void OnFocus(aura::Window* old_focused_window) OVERRIDE;
   virtual void OnBlur() OVERRIDE;
   virtual bool OnKeyEvent(aura::KeyEvent* event) OVERRIDE;
   virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
+  virtual bool ShouldDescendIntoChildForEventHandling(
+      aura::Window* child,
+      const gfx::Point& location) OVERRIDE;
   virtual bool OnMouseEvent(aura::MouseEvent* event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(aura::TouchEvent* event) OVERRIDE;
   virtual ui::GestureStatus OnGestureEvent(aura::GestureEvent* event) OVERRIDE;
   virtual bool CanFocus() OVERRIDE;
   virtual void OnCaptureLost() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void OnWindowDestroying() OVERRIDE;
   virtual void OnWindowDestroyed() OVERRIDE;
   virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE;
+  virtual bool HasHitTestMask() const OVERRIDE;
+  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
   // Overridden from aura::client::DragDropDelegate:
   virtual void OnDragEntered(const aura::DropTargetEvent& event) OVERRIDE;
@@ -127,9 +127,6 @@ class CONTENT_EXPORT WebContentsViewAura
 
   scoped_ptr<content::WebContentsViewDelegate> delegate_;
 
-  // Common implementations of some WebContentsView methods.
-  WebContentsViewHelper web_contents_view_helper_;
-
   WebKit::WebDragOperationsMask current_drag_op_;
 
   // Set to true if we want to close the tab after the system drag operation
@@ -137,6 +134,12 @@ class CONTENT_EXPORT WebContentsViewAura
   bool close_tab_after_drag_ends_;
 
   content::WebDragDestDelegate* drag_dest_delegate_;
+
+  // We keep track of the render view host we're dragging over.  If it changes
+  // during a drag, we need to re-send the DragEnter message.  WARNING:
+  // this pointer should never be dereferenced.  We only use it for comparing
+  // pointers.
+  void* current_rvh_for_drag_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewAura);
 };

@@ -13,6 +13,11 @@ body {
   margin-top: 10px;
 }
 
+#help-product-logo {
+  /* TODO: Remove once http://crbug.com/135179 is fixed */
+  content: url('chrome://theme/IDR_PRODUCT_LOGO_32');
+}
+
 #product-description {
   -webkit-margin-start: 10px;
 }
@@ -62,10 +67,12 @@ body {
 
 #update-status-icon.available {
   background-image: url('chrome://theme/IDR_UPDATE_AVAILABLE');
+  background-size: 17px;
 }
 
 #update-status-icon.up-to-date {
   background-image: url('chrome://theme/IDR_UPDATE_UPTODATE');
+  background-size: 17px;
 }
 
 #update-status-icon.working {
@@ -74,6 +81,11 @@ body {
 
 #update-status-icon.failed {
   background-image: url('chrome://theme/IDR_UPDATE_FAIL');
+  background-size: 17px;
+}
+
+#update-obsolete-os-container {
+  -webkit-margin-start: 25px;
 }
 
 #more-info-expander {

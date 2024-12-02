@@ -8,11 +8,12 @@
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/text_input_client_message_filter.h"
 #include "content/common/text_input_client_messages.h"
-#include "content/test//test_browser_context.h"
-#include "content/test/mock_render_process_host.h"
+#include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/test_browser_context.h"
 #include "ipc/ipc_test_sink.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
@@ -25,6 +26,12 @@ namespace {
 
 const int64 kTaskDelayMs = 200;
 
+class MockRenderWidgetHostDelegate : public content::RenderWidgetHostDelegate {
+ public:
+  MockRenderWidgetHostDelegate() {}
+  virtual ~MockRenderWidgetHostDelegate() {}
+};
+
 // This test does not test the WebKit side of the dictionary system (which
 // performs the actual data fetching), but rather this just tests that the
 // service's signaling system works.
@@ -34,7 +41,9 @@ class TextInputClientMacTest : public testing::Test {
       : message_loop_(MessageLoop::TYPE_UI),
         browser_context_(),
         process_factory_(),
-        widget_(process_factory_.CreateRenderProcessHost(&browser_context_),
+        delegate_(),
+        widget_(&delegate_,
+                process_factory_.CreateRenderProcessHost(&browser_context_),
                 MSG_ROUTING_NONE),
         thread_("TextInputClientMacTestThread") {}
 
@@ -68,10 +77,11 @@ class TextInputClientMacTest : public testing::Test {
   friend class ScopedTestingThread;
 
   MessageLoop message_loop_;
-  TestBrowserContext browser_context_;
+  content::TestBrowserContext browser_context_;
 
   // Gets deleted when the last RWH in the "process" gets destroyed.
   MockRenderProcessHostFactory process_factory_;
+  MockRenderWidgetHostDelegate delegate_;
   RenderWidgetHostImpl widget_;
 
   base::Thread thread_;

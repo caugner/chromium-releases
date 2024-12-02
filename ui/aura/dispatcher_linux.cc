@@ -37,27 +37,46 @@ void PreprocessXEvent(XEvent* xevent) {
 
 namespace aura {
 
-DispatcherLinux::DispatcherLinux() {
-  base::MessagePumpX::SetDefaultDispatcher(this);
+DispatcherLinux::DispatcherLinux()
+    : x_root_window_(
+        DefaultRootWindow(base::MessagePumpAuraX11::GetDefaultXDisplay())) {
+  base::MessagePumpAuraX11::SetDefaultDispatcher(this);
+  MessageLoopForUI::current()->AddObserver(this);
 }
 
 DispatcherLinux::~DispatcherLinux() {
-  base::MessagePumpX::SetDefaultDispatcher(NULL);
+  MessageLoopForUI::current()->RemoveObserver(this);
+  base::MessagePumpAuraX11::SetDefaultDispatcher(NULL);
 }
 
-void DispatcherLinux::WindowDispatcherCreated(
-    ::Window window,
+void DispatcherLinux::AddDispatcherForWindow(
+    MessageLoop::Dispatcher* dispatcher,
+    ::Window x_window) {
+  dispatchers_.insert(std::make_pair(x_window, dispatcher));
+}
+
+void DispatcherLinux::RemoveDispatcherForWindow(::Window x_window) {
+  dispatchers_.erase(x_window);
+}
+
+void DispatcherLinux::AddDispatcherForRootWindow(
     MessageLoop::Dispatcher* dispatcher) {
-  dispatchers_.insert(std::make_pair(window, dispatcher));
+  DCHECK(std::find(root_window_dispatchers_.begin(),
+                   root_window_dispatchers_.end(),
+                   dispatcher) ==
+         root_window_dispatchers_.end());
+  root_window_dispatchers_.push_back(dispatcher);
 }
 
-void DispatcherLinux::WindowDispatcherDestroying(::Window window) {
-  dispatchers_.erase(window);
+void DispatcherLinux::RemoveDispatcherForRootWindow(
+    MessageLoop::Dispatcher* dispatcher) {
+  root_window_dispatchers_.erase(
+      std::remove(root_window_dispatchers_.begin(),
+                  root_window_dispatchers_.end(),
+                  dispatcher));
 }
 
 bool DispatcherLinux::Dispatch(const base::NativeEvent& xev) {
-  PreprocessXEvent(xev);
-
   // XI_HierarchyChanged events are special. There is no window associated with
   // these events. So process them directly from here.
   if (xev->type == GenericEvent &&
@@ -76,19 +95,35 @@ bool DispatcherLinux::Dispatch(const base::NativeEvent& xev) {
     }
     return true;
   }
-
+  if (xev->xany.window == x_root_window_) {
+    for (Dispatchers::const_iterator it = root_window_dispatchers_.begin();
+         it != root_window_dispatchers_.end();
+         ++it) {
+      (*it)->Dispatch(xev);
+    }
+    return true;
+  }
   MessageLoop::Dispatcher* dispatcher = GetDispatcherForXEvent(xev);
   return dispatcher ? dispatcher->Dispatch(xev) : true;
 }
 
+base::EventStatus DispatcherLinux::WillProcessEvent(
+    const base::NativeEvent& event) {
+  PreprocessXEvent(event);
+  return base::EVENT_CONTINUE;
+}
+
+void DispatcherLinux::DidProcessEvent(const base::NativeEvent& event) {
+}
+
 MessageLoop::Dispatcher* DispatcherLinux::GetDispatcherForXEvent(
     XEvent* xev) const {
-  ::Window window = xev->xany.window;
+  ::Window x_window = xev->xany.window;
   if (xev->type == GenericEvent) {
     XIDeviceEvent* xievent = static_cast<XIDeviceEvent*>(xev->xcookie.data);
-    window = xievent->event;
+    x_window = xievent->event;
   }
-  DispatchersMap::const_iterator it = dispatchers_.find(window);
+  DispatchersMap::const_iterator it = dispatchers_.find(x_window);
   return it != dispatchers_.end() ? it->second : NULL;
 }
 

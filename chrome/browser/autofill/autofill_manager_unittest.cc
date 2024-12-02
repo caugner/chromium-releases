@@ -26,15 +26,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tab_contents/test_tab_contents.h"
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/web_contents.h"
-#include "content/test/mock_render_process_host.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ipc/ipc_test_sink.h"
@@ -439,7 +439,7 @@ void ExpectFilledCreditCardYearMonthWithYearMonth(int page_id,
 
 class TestAutofillManager : public AutofillManager {
  public:
-  TestAutofillManager(TabContentsWrapper* tab_contents,
+  TestAutofillManager(TabContents* tab_contents,
                       TestPersonalDataManager* personal_data)
       : AutofillManager(tab_contents, personal_data),
         personal_data_(personal_data),
@@ -579,12 +579,12 @@ class TestAutofillManager : public AutofillManager {
 
 }  // namespace
 
-class AutofillManagerTest : public TabContentsWrapperTestHarness {
+class AutofillManagerTest : public TabContentsTestHarness {
  public:
   typedef AutofillManager::GUIDPair GUIDPair;
 
   AutofillManagerTest()
-      : TabContentsWrapperTestHarness(),
+      : TabContentsTestHarness(),
         ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE) {
   }
@@ -601,8 +601,8 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
     PersonalDataManagerFactory::GetInstance()->SetTestingFactory(
         profile, TestPersonalDataManager::Build);
 
-    TabContentsWrapperTestHarness::SetUp();
-    autofill_manager_ = new TestAutofillManager(contents_wrapper(),
+    TabContentsTestHarness::SetUp();
+    autofill_manager_ = new TestAutofillManager(tab_contents(),
                                                 &personal_data_);
 
     file_thread_.Start();
@@ -610,7 +610,7 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
 
   virtual void TearDown() OVERRIDE {
     file_thread_.Stop();
-    TabContentsWrapperTestHarness::TearDown();
+    TabContentsTestHarness::TearDown();
   }
 
   void UpdatePasswordGenerationState(bool new_renderer) {
@@ -633,7 +633,7 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
   }
 
   void AutocompleteSuggestionsReturned(const std::vector<string16>& result) {
-    contents_wrapper()->autocomplete_history_manager()->
+    tab_contents()->autocomplete_history_manager()->
         SendSuggestions(&result);
   }
 
@@ -681,7 +681,7 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
     if (unique_ids)
       *unique_ids = autofill_param.e;
 
-    contents_wrapper()->autocomplete_history_manager()->CancelPendingQuery();
+    tab_contents()->autocomplete_history_manager()->CancelPendingQuery();
     process()->sink().ClearMessages();
     return true;
   }
@@ -2921,9 +2921,12 @@ TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUpload) {
   FormSubmitted(form);
 }
 
-TEST_F(AutofillManagerTest, UpdatePasswordGenerationState) {
+TEST_F(AutofillManagerTest, UpdatePasswordSyncState) {
   // Allow this test to control what should get synced.
   profile()->GetPrefs()->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
+  // Always set password generation enabled check box so we can test the
+  // behavior of password sync.
+  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, true);
 
   // Sync some things, but not passwords. Shouldn't send anything since
   // password generation is disabled by default.
@@ -2964,6 +2967,48 @@ TEST_F(AutofillManagerTest, UpdatePasswordGenerationState) {
   profile()->set_incognito(true);
   UpdatePasswordGenerationState(false);
   EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
+
+  // When a new render_view is created, we send the state even if it's the
+  // same.
+  UpdatePasswordGenerationState(true);
+  EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
+  EXPECT_FALSE(autofill_manager_->GetSentStates()[0]);
+  autofill_manager_->ClearSentStates();
+}
+
+TEST_F(AutofillManagerTest, UpdatePasswordGenerationState) {
+  // Always set password sync enabled so we can test the behavior of password
+  // generation.
+  profile()->GetPrefs()->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
+  ProfileSyncService* sync_service = GetProfileSyncService();
+  sync_service->SetSyncSetupCompleted();
+  syncable::ModelTypeSet preferred_set;
+  preferred_set.Put(syncable::PASSWORDS);
+  sync_service->ChangePreferredDataTypes(preferred_set);
+
+  // Enabled state remains false, should not sent.
+  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, false);
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
+
+  // Enabled state from false to true, should sent true.
+  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, true);
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
+  EXPECT_TRUE(autofill_manager_->GetSentStates()[0]);
+  autofill_manager_->ClearSentStates();
+
+  // Enabled states remains true, should not sent.
+  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, true);
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(0u, autofill_manager_->GetSentStates().size());
+
+  // Enabled states from true to false, should sent false.
+  profile()->GetPrefs()->SetBoolean(prefs::kPasswordGenerationEnabled, false);
+  UpdatePasswordGenerationState(false);
+  EXPECT_EQ(1u, autofill_manager_->GetSentStates().size());
+  EXPECT_FALSE(autofill_manager_->GetSentStates()[0]);
+  autofill_manager_->ClearSentStates();
 
   // When a new render_view is created, we send the state even if it's the
   // same.
@@ -3028,9 +3073,9 @@ namespace {
 
 class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
  public:
-  explicit MockAutofillExternalDelegate(TabContentsWrapper* wrapper,
+  explicit MockAutofillExternalDelegate(TabContents* tab_contents,
                                         AutofillManager* autofill_manager)
-      : TestAutofillExternalDelegate(wrapper, autofill_manager) {}
+      : TestAutofillExternalDelegate(tab_contents, autofill_manager) {}
   virtual ~MockAutofillExternalDelegate() {}
 
   MOCK_METHOD5(OnQuery, void(int query_id,
@@ -3052,7 +3097,7 @@ class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
 
 // Test our external delegate is called at the right time.
 TEST_F(AutofillManagerTest, TestExternalDelegate) {
-  MockAutofillExternalDelegate external_delegate(contents_wrapper(),
+  MockAutofillExternalDelegate external_delegate(tab_contents(),
                                                  autofill_manager_);
   EXPECT_CALL(external_delegate, OnQuery(_, _, _, _, _));
   autofill_manager_->SetExternalDelegate(&external_delegate);
@@ -3078,15 +3123,15 @@ TEST_F(AutofillManagerTest, TestTabContentsWithExternalDelegate) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kExternalAutofillPopup);
 
-  // Setting the contents creates a new TabContentsWrapper.
+  // Setting the contents creates a new TabContents.
   WebContents* contents = CreateTestWebContents();
   SetContents(contents);
 
-  AutofillManager* autofill_manager = contents_wrapper()->autofill_manager();
+  AutofillManager* autofill_manager = tab_contents()->autofill_manager();
   EXPECT_TRUE(autofill_manager->external_delegate());
 
   AutocompleteHistoryManager* autocomplete_history_manager =
-      contents_wrapper()->autocomplete_history_manager();
+      tab_contents()->autocomplete_history_manager();
   EXPECT_TRUE(autocomplete_history_manager->external_delegate());
 }
 

@@ -22,13 +22,16 @@ enum AcceleratorAction {
   CYCLE_FORWARD_MRU,
   EXIT,
   FOCUS_LAUNCHER,
-  FOCUS_TRAY,
+  FOCUS_NEXT_PANE,
+  FOCUS_PREVIOUS_PANE,
+  FOCUS_SYSTEM_TRAY,
   NEW_INCOGNITO_WINDOW,
+  NEW_TAB,
   NEW_WINDOW,
   NEXT_IME,
   PREVIOUS_IME,
+  RESTORE_TAB,
   ROTATE_WINDOWS,
-  SEARCH_KEY,
   SELECT_LAST_WIN,
   SELECT_WIN_0,
   SELECT_WIN_1,
@@ -38,7 +41,9 @@ enum AcceleratorAction {
   SELECT_WIN_5,
   SELECT_WIN_6,
   SELECT_WIN_7,
+  SHOW_KEYBOARD_OVERLAY,
   SHOW_OAK,
+  SHOW_TASK_MANAGER,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
   TAKE_PARTIAL_SCREENSHOT,
   TAKE_SCREENSHOT,
@@ -54,13 +59,16 @@ enum AcceleratorAction {
   WINDOW_SNAP_LEFT,
   WINDOW_SNAP_RIGHT,
 #if defined(OS_CHROMEOS)
+  CYCLE_DISPLAY_MODE,
   LOCK_SCREEN,
   OPEN_CROSH,
-  OPEN_FILE_MANAGER,
+  OPEN_FILE_MANAGER_DIALOG,
+  OPEN_FILE_MANAGER_TAB,
 #endif
 #if !defined(NDEBUG)
-  ADD_REMOVE_MONITOR,
-  CYCLE_MONITOR,
+  MONITOR_ADD_REMOVE,
+  MONITOR_CYCLE,
+  MONITOR_TOGGLE_SCALE,
   PRINT_LAYER_HIERARCHY,
   PRINT_WINDOW_HIERARCHY,
   ROTATE_SCREEN,
@@ -72,9 +80,7 @@ enum AcceleratorAction {
 struct AcceleratorData {
   bool trigger_on_press;
   ui::KeyboardCode keycode;
-  bool shift;
-  bool ctrl;
-  bool alt;
+  int modifiers;
   AcceleratorAction action;
 };
 
@@ -84,11 +90,25 @@ ASH_EXPORT extern const AcceleratorData kAcceleratorData[];
 // The number of elements in kAcceleratorData.
 ASH_EXPORT extern const size_t kAcceleratorDataLength;
 
-// Actions allowed while user is not signed in or screen is locked.
-extern const AcceleratorAction kActionsAllowedAtLoginScreen[];
+// Actions that should be handled very early in Ash unless the current target
+// window is full-screen.
+ASH_EXPORT extern const AcceleratorAction kReservedActions[];
 
-// The number of elements in kActionsAllowedAtLoginScreen.
-extern const size_t kActionsAllowedAtLoginScreenLength;
+// The number of elements in kReservedActions.
+ASH_EXPORT extern const size_t kReservedActionsLength;
+
+// Actions allowed while user is not signed in or screen is locked.
+ASH_EXPORT extern const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[];
+
+// The number of elements in kActionsAllowedAtLoginOrLockScreen.
+ASH_EXPORT extern const size_t kActionsAllowedAtLoginOrLockScreenLength;
+
+// Actions allowed while screen is locked (in addition to
+// kActionsAllowedAtLoginOrLockScreen).
+ASH_EXPORT extern const AcceleratorAction kActionsAllowedAtLockScreen[];
+
+// The number of elements in kActionsAllowedAtLockScreen.
+ASH_EXPORT extern const size_t kActionsAllowedAtLockScreenLength;
 
 }  // namespace ash
 

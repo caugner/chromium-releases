@@ -11,14 +11,12 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_descriptor.h"
-#include "chrome/browser/chromeos/input_method/input_method_whitelist.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
 #include "chrome/browser/ui/webui/options2/chromeos/cros_language_options_handler2.h"
 
 using chromeos::input_method::InputMethodDescriptor;
 using chromeos::input_method::InputMethodDescriptors;
 using chromeos::input_method::InputMethodManager;
-using chromeos::input_method::InputMethodWhitelist;
 using chromeos::input_method::MockInputMethodManager;
 
 namespace {
@@ -46,14 +44,12 @@ class LanguageOptionsHandlerTest : public testing::Test {
   InputMethodDescriptor GetDesc(const std::string& id,
                                 const std::string& raw_layout,
                                 const std::string& language_code) {
-    return InputMethodDescriptor(whitelist_,
-                                 id,
+    return InputMethodDescriptor(id,
                                  "",  // name
                                  raw_layout,
-                                 language_code);
+                                 language_code,
+                                 false);
   }
-
-  const InputMethodWhitelist whitelist_;
 };
 
 }  // namespace
@@ -122,7 +118,7 @@ TEST_F(LanguageOptionsHandlerTest, GetLanguageList) {
   scoped_ptr<ListValue> list(
       chromeos::options2::CrosLanguageOptionsHandler::GetLanguageList(
           descriptors));
-  ASSERT_EQ(8U, list->GetSize());
+  ASSERT_EQ(9U, list->GetSize());
 
   DictionaryValue* entry = NULL;
   std::string language_code;
@@ -194,6 +190,15 @@ TEST_F(LanguageOptionsHandlerTest, GetLanguageList) {
 
   // This comes from kExtraLanguages.
   ASSERT_TRUE(list->GetDictionary(7, &entry));
+  ASSERT_TRUE(entry->GetString("code", &language_code));
+  ASSERT_TRUE(entry->GetString("displayName", &display_name));
+  ASSERT_TRUE(entry->GetString("nativeDisplayName", &native_display_name));
+  EXPECT_EQ("ms", language_code);
+  EXPECT_EQ("Malay", display_name);
+  EXPECT_EQ("Bahasa Melayu", native_display_name);
+
+  // This comes from kExtraLanguages.
+  ASSERT_TRUE(list->GetDictionary(8, &entry));
   ASSERT_TRUE(entry->GetString("code", &language_code));
   ASSERT_TRUE(entry->GetString("displayName", &display_name));
   ASSERT_TRUE(entry->GetString("nativeDisplayName", &native_display_name));

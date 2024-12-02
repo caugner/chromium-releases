@@ -4,7 +4,6 @@
 
 #include "ui/gfx/render_text_linux.h"
 
-#include <fontconfig/fontconfig.h>
 #include <pango/pangocairo.h>
 #include <algorithm>
 #include <string>
@@ -16,6 +15,7 @@
 #include "ui/base/text/utf16_indexing.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/font_render_params_linux.h"
 #include "ui/gfx/pango_util.h"
 
 namespace gfx {
@@ -46,28 +46,19 @@ bool IndexInRange(const ui::Range& range, size_t index) {
   return index >= range.start() && index < range.end();
 }
 
-// Sends an empty query to FontConfig and checks whether subpixel rendering is
-// enabled or not in the returned settings.  Caches the result.
-bool IsSubpixelRenderingEnabledInFontConfig() {
-  static bool subpixel_enabled = false;
-  static bool already_queried = false;
-
-  if (already_queried)
-    return subpixel_enabled;
-
-  // TODO(derat): Create font_config_util.h/cc and move this there.
-  FcPattern* pattern = FcPatternCreate();
-  FcResult result;
-  FcPattern* match = FcFontMatch(0, pattern, &result);
-  DCHECK(match);
-  int fc_rgba = FC_RGBA_RGB;
-  FcPatternGetInteger(match, FC_RGBA, 0, &fc_rgba);
-  FcPatternDestroy(pattern);
-  FcPatternDestroy(match);
-
-  already_queried = true;
-  subpixel_enabled = (fc_rgba != FC_RGBA_NONE);
-  return subpixel_enabled;
+// Sets underline metrics on |renderer| according to Pango font |desc|.
+void SetPangoUnderlineMetrics(PangoFontDescription *desc,
+                              internal::SkiaTextRenderer* renderer) {
+  PangoFontMetrics* metrics = GetPangoFontMetrics(desc);
+  int thickness = pango_font_metrics_get_underline_thickness(metrics);
+  // Pango returns the position "above the baseline". Change its sign to convert
+  // it to a vertical offset from the baseline.
+  int position = -pango_font_metrics_get_underline_position(metrics);
+  pango_quantize_line_geometry(&thickness, &position);
+  // Note: pango_quantize_line_geometry() guarantees pixel boundaries, so
+  //       PANGO_PIXELS() is safe to use.
+  renderer->SetUnderlineMetrics(PANGO_PIXELS(thickness),
+                                PANGO_PIXELS(position));
 }
 
 }  // namespace
@@ -138,28 +129,21 @@ SelectionModel RenderTextLinux::FindCursorPosition(const Point& point) {
                         (trailing > 0) ? CURSOR_BACKWARD : CURSOR_FORWARD);
 }
 
-size_t RenderTextLinux::IndexOfAdjacentGrapheme(
-    size_t index,
-    LogicalCursorDirection direction) {
-  if (index > text().length())
-    return text().length();
+std::vector<RenderText::FontSpan> RenderTextLinux::GetFontSpansForTesting() {
   EnsureLayout();
-  ptrdiff_t char_offset = ui::UTF16IndexToOffset(text(), 0, index);
-  if (direction == CURSOR_BACKWARD) {
-    if (char_offset > 0) {
-      do {
-        --char_offset;
-      } while (char_offset > 0 && !log_attrs_[char_offset].is_cursor_position);
-    }
-  } else {  // direction == CURSOR_FORWARD
-    if (char_offset < num_log_attrs_ - 1) {
-      do {
-        ++char_offset;
-      } while (char_offset < num_log_attrs_ - 1 &&
-               !log_attrs_[char_offset].is_cursor_position);
-    }
+
+  std::vector<RenderText::FontSpan> spans;
+  for (GSList* it = current_line_->runs; it; it = it->next) {
+    PangoItem* item = reinterpret_cast<PangoLayoutRun*>(it->data)->item;
+    const int start = LayoutIndexToTextIndex(item->offset);
+    const int end = LayoutIndexToTextIndex(item->offset + item->length);
+    const ui::Range range(start, end);
+
+    ScopedPangoFontDescription desc(pango_font_describe(item->analysis.font));
+    spans.push_back(RenderText::FontSpan(Font(desc.get()), range));
   }
-  return ui::UTF16OffsetToIndex(text(), 0, char_offset);
+
+  return spans;
 }
 
 SelectionModel RenderTextLinux::AdjacentCharSelectionModel(
@@ -242,6 +226,7 @@ void RenderTextLinux::GetGlyphBounds(size_t index,
                                      int* height) {
   PangoRectangle pos;
   pango_layout_index_to_pos(layout_, TextIndexToLayoutIndex(index), &pos);
+  // TODO(derat): Support fractional ranges for subpixel positioning?
   *xspan = ui::Range(PANGO_PIXELS(pos.x), PANGO_PIXELS(pos.x + pos.width));
   *height = PANGO_PIXELS(pos.height);
 }
@@ -261,6 +246,10 @@ std::vector<Rect> RenderTextLinux::GetSubstringBounds(ui::Range range) {
 bool RenderTextLinux::IsCursorablePosition(size_t position) {
   if (position == 0 && text().empty())
     return true;
+  if (position >= text().length())
+    return position == text().length();
+  if (!ui::IsValidCodePointIndex(text(), position))
+    return false;
 
   EnsureLayout();
   ptrdiff_t offset = ui::UTF16IndexToOffset(text(), 0, position);
@@ -341,14 +330,13 @@ void RenderTextLinux::SetupPangoAttributes(PangoLayout* layout) {
     // with the same Fonts (to avoid unnecessarily splitting up runs).
     if (i->font_style != default_font_style) {
       FontList derived_font_list = font_list().DeriveFontList(i->font_style);
-      PangoFontDescription* desc = pango_font_description_from_string(
-          derived_font_list.GetFontDescriptionString().c_str());
+      ScopedPangoFontDescription desc(pango_font_description_from_string(
+          derived_font_list.GetFontDescriptionString().c_str()));
 
-      PangoAttribute* pango_attr = pango_attr_font_desc_new(desc);
+      PangoAttribute* pango_attr = pango_attr_font_desc_new(desc.get());
       pango_attr->start_index = TextIndexToLayoutIndex(i->range.start());
       pango_attr->end_index = TextIndexToLayoutIndex(i->range.end());
       pango_attr_list_insert(attrs, pango_attr);
-      pango_font_description_free(desc);
     }
   }
 
@@ -386,9 +374,16 @@ void RenderTextLinux::DrawVisualText(Canvas* canvas) {
   internal::SkiaTextRenderer renderer(canvas);
   ApplyFadeEffects(&renderer);
   ApplyTextShadows(&renderer);
+
+  // TODO(derat): Use font-specific params: http://crbug.com/125235
+  const gfx::FontRenderParams& render_params =
+      gfx::GetDefaultFontRenderParams();
+  const bool use_subpixel_rendering =
+      render_params.subpixel_rendering !=
+          gfx::FontRenderParams::SUBPIXEL_RENDERING_NONE;
   renderer.SetFontSmoothingSettings(
-      true /* enable_smoothing */,
-      IsSubpixelRenderingEnabledInFontConfig() && !background_is_transparent());
+      render_params.antialiasing,
+      use_subpixel_rendering && !background_is_transparent());
 
   for (GSList* it = current_line_->runs; it; it = it->next) {
     PangoLayoutRun* run = reinterpret_cast<PangoLayoutRun*>(it->data);
@@ -411,14 +406,12 @@ void RenderTextLinux::DrawVisualText(Canvas* canvas) {
     }
     DCHECK_GE(style, 0);
 
-    PangoFontDescription* native_font =
-        pango_font_describe(run->item->analysis.font);
+    ScopedPangoFontDescription desc(
+        pango_font_describe(run->item->analysis.font));
 
     const std::string family_name =
-        pango_font_description_get_family(native_font);
-    renderer.SetTextSize(GetPangoFontSizeInPixels(native_font));
-
-    pango_font_description_free(native_font);
+        pango_font_description_get_family(desc.get());
+    renderer.SetTextSize(GetPangoFontSizeInPixels(desc.get()));
 
     SkScalar glyph_x = x;
     SkScalar start_x = x;
@@ -430,9 +423,12 @@ void RenderTextLinux::DrawVisualText(Canvas* canvas) {
     for (int i = 0; i < glyph_count; ++i) {
       const PangoGlyphInfo& glyph = run->glyphs->glyphs[i];
       glyphs[i] = static_cast<uint16>(glyph.glyph);
-      pos[i].set(glyph_x + PANGO_PIXELS(glyph.geometry.x_offset),
-                 y + PANGO_PIXELS(glyph.geometry.y_offset));
-      glyph_x += PANGO_PIXELS(glyph.geometry.width);
+      // Use pango_units_to_double() rather than PANGO_PIXELS() here so that
+      // units won't get rounded to the pixel grid if we're using subpixel
+      // positioning.
+      pos[i].set(glyph_x + pango_units_to_double(glyph.geometry.x_offset),
+                 y + pango_units_to_double(glyph.geometry.y_offset));
+      glyph_x += pango_units_to_double(glyph.geometry.width);
 
       // If this glyph is beyond the current style, draw the glyphs so far and
       // advance to the next style.
@@ -447,6 +443,8 @@ void RenderTextLinux::DrawVisualText(Canvas* canvas) {
         renderer.SetForegroundColor(styles[style].foreground);
         renderer.SetFontFamilyWithStyle(family_name, styles[style].font_style);
         renderer.DrawPosText(&pos[start], &glyphs[start], i - start);
+        if (styles[style].underline)
+          SetPangoUnderlineMetrics(desc.get(), &renderer);
         renderer.DrawDecorations(start_x, y, glyph_x - start_x, styles[style]);
 
         start = i;
@@ -463,6 +461,8 @@ void RenderTextLinux::DrawVisualText(Canvas* canvas) {
     renderer.SetForegroundColor(styles[style].foreground);
     renderer.SetFontFamilyWithStyle(family_name, styles[style].font_style);
     renderer.DrawPosText(&pos[start], &glyphs[start], glyph_count - start);
+    if (styles[style].underline)
+      SetPangoUnderlineMetrics(desc.get(), &renderer);
     renderer.DrawDecorations(start_x, y, glyph_x - start_x, styles[style]);
     x = glyph_x;
   }
@@ -532,6 +532,7 @@ std::vector<Rect> RenderTextLinux::CalculateSubstringBounds(ui::Range range) {
 
   std::vector<Rect> bounds;
   for (int i = 0; i < n_ranges; ++i) {
+    // TODO(derat): Support fractional bounds for subpixel positioning?
     int x = PANGO_PIXELS(ranges[2 * i]);
     int width = PANGO_PIXELS(ranges[2 * i + 1]) - x;
     Rect rect(x, y, width, height);

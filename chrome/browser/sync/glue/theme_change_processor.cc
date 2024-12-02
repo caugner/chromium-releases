@@ -15,12 +15,12 @@
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "sync/internal_api/change_record.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/util/unrecoverable_error_handler.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/theme_specifics.pb.h"
-#include "sync/util/unrecoverable_error_handler.h"
 
 namespace browser_sync {
 
@@ -47,7 +47,7 @@ void ThemeChangeProcessor::Observe(
                                  kCurrentThemeClientTag) !=
           sync_api::BaseNode::INIT_OK) {
     std::string err = "Could not create node with client tag: ";
-    error_handler()->OnUnrecoverableError(FROM_HERE,
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
                                           err + kCurrentThemeClientTag);
     return;
   }
@@ -92,7 +92,7 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
       change.action != sync_api::ChangeRecord::ACTION_DELETE) {
     std::string err = "strange theme change.action " +
         base::IntToString(change.action);
-    error_handler()->OnUnrecoverableError(FROM_HERE, err);
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE, err);
     return;
   }
   sync_pb::ThemeSpecifics theme_specifics;

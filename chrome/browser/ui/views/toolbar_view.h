@@ -69,9 +69,9 @@ class ToolbarView : public views::AccessiblePaneView,
   // Remove a menu listener.
   void RemoveMenuListener(views::MenuListener* listener);
 
-  // Gets a bitmap with the icon for the app menu and any overlaid notification
+  // Gets an image with the icon for the app menu and any overlaid notification
   // badge.
-  SkBitmap GetAppMenuIcon(views::CustomButton::ButtonState state);
+  gfx::ImageSkia GetAppMenuIcon(views::CustomButton::ButtonState state);
 
   virtual bool GetAcceleratorInfo(int id, ui::Accelerator* accel);
 
@@ -91,7 +91,7 @@ class ToolbarView : public views::AccessiblePaneView,
                                    const gfx::Point& point) OVERRIDE;
 
   // Overridden from LocationBarView::Delegate:
-  virtual TabContentsWrapper* GetTabContentsWrapper() const OVERRIDE;
+  virtual TabContents* GetTabContents() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
   virtual views::Widget* CreateViewsBubble(
       views::BubbleDelegateView* bubble_delegate) OVERRIDE;
@@ -182,7 +182,7 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // Gets a badge for the wrench icon corresponding to the number of
   // unacknowledged background pages in the system.
-  SkBitmap GetBackgroundPageBadge();
+  gfx::ImageSkia GetBackgroundPageBadge();
 
   scoped_ptr<BackForwardMenuModel> back_menu_model_;
   scoped_ptr<BackForwardMenuModel> forward_menu_model_;

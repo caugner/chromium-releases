@@ -64,27 +64,27 @@ cr.define('options.contentSettings', function() {
       // Setting select element for edit mode.
       var select = cr.doc.createElement('select');
       var optionAllow = cr.doc.createElement('option');
-      optionAllow.textContent = templateData.allowException;
+      optionAllow.textContent = loadTimeData.getString('allowException');
       optionAllow.value = 'allow';
       select.appendChild(optionAllow);
 
       if (this.enableAskOption) {
         var optionAsk = cr.doc.createElement('option');
-        optionAsk.textContent = templateData.askException;
+        optionAsk.textContent = loadTimeData.getString('askException');
         optionAsk.value = 'ask';
         select.appendChild(optionAsk);
       }
 
       if (this.contentType == 'cookies') {
         var optionSession = cr.doc.createElement('option');
-        optionSession.textContent = templateData.sessionException;
+        optionSession.textContent = loadTimeData.getString('sessionException');
         optionSession.value = 'session';
         select.appendChild(optionSession);
       }
 
       if (this.contentType != 'fullscreen') {
         var optionBlock = cr.doc.createElement('option');
-        optionBlock.textContent = templateData.blockException;
+        optionBlock.textContent = loadTimeData.getString('blockException');
         optionBlock.value = 'block';
         select.appendChild(optionBlock);
       }
@@ -125,6 +125,19 @@ cr.define('options.contentSettings', function() {
         this.setAttribute('managedby', this.dataItem.source);
         this.deletable = false;
         this.editable = false;
+      }
+
+      // If the exception comes from a hosted app, display the name and the
+      // icon of the app.
+      if (this.dataItem.source == 'HostedApp') {
+        this.title =
+            loadTimeData.getString('set_by') + ' ' + this.dataItem.appName;
+        var button = this.querySelector('.row-delete-button');
+        // Use the host app's favicon (16px, match bigger size).
+        // See c/b/ui/webui/extensions/extension_icon_source.h
+        // for a description of the chrome://extension-icon URL.
+        button.style.backgroundImage =
+            'url(\'chrome://extension-icon/' + this.dataItem.appId + '/16/1\')';
       }
 
       var listItem = this;
@@ -169,13 +182,13 @@ cr.define('options.contentSettings', function() {
     settingForDisplay: function() {
       var setting = this.setting;
       if (setting == 'allow')
-        return templateData.allowException;
+        return loadTimeData.getString('allowException');
       else if (setting == 'block')
-        return templateData.blockException;
+        return loadTimeData.getString('blockException');
       else if (setting == 'ask')
-        return templateData.askException;
+        return loadTimeData.getString('askException');
       else if (setting == 'session')
-        return templateData.sessionException;
+        return loadTimeData.getString('sessionException');
     },
 
     /**
@@ -299,7 +312,8 @@ cr.define('options.contentSettings', function() {
     decorate: function() {
       ExceptionsListItem.prototype.decorate.call(this);
 
-      this.input.placeholder = templateData.addNewExceptionInstructions;
+      this.input.placeholder =
+          loadTimeData.getString('addNewExceptionInstructions');
 
       // Do we always want a default of allow?
       this.setting = 'allow';
@@ -361,7 +375,8 @@ cr.define('options.contentSettings', function() {
       var exceptionList = this;
 
       // Whether the exceptions in this list allow an 'Ask every time' option.
-      this.enableAskOption = this.contentType == 'plugins';
+      this.enableAskOption = this.contentType == 'plugins' ||
+                             this.contentType == 'pepper-flash-cameramic';
 
       this.autoExpands = true;
       this.reset();
@@ -472,7 +487,7 @@ cr.define('options.contentSettings', function() {
    */
   function ContentSettingsExceptionsArea() {
     OptionsPage.call(this, 'contentExceptions',
-                     templateData.contentSettingsPageTabTitle,
+                     loadTimeData.getString('contentSettingsPageTabTitle'),
                      'content-settings-exceptions-area');
   }
 
@@ -504,7 +519,7 @@ cr.define('options.contentSettings', function() {
      */
     showList: function(type) {
       var header = this.pageDiv.querySelector('h1');
-      header.textContent = templateData[type + '_header'];
+      header.textContent = loadTimeData.getString(type + '_header');
 
       var divs = this.pageDiv.querySelectorAll('div[contentType]');
       for (var i = 0; i < divs.length; i++) {

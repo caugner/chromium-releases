@@ -24,6 +24,7 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -70,9 +71,8 @@ struct PrepopulatedEngine {
   // must use two different unique IDs (and different keywords).
   //
   // The following unique IDs are available:
-  //    33, 34, 36, 39, 40, 42, 43, 47, 48, 49, 50, 52, 53, 56, 58, 60, 61, 64,
-  //    65, 66, 70, 74, 78, 79, 80, 81, 84, 86, 88, 91, 92, 93, 94, 95, 96, 97,
-  //    98, 99, 102+
+  //    50, 52, 53, 56, 58, 60, 61, 64, 65, 66, 70, 74, 78, 79, 80, 81, 84, 86,
+  //    88, 91, 92, 93, 94, 95, 96, 97, 98, 99, 102+
   //
   // IDs > 1000 are reserved for distribution custom engines.
   //
@@ -82,6 +82,11 @@ struct PrepopulatedEngine {
   //       of the current range or it will not be counted in stats.
   const int id;
 };
+
+// Prepopulated engines ////////////////////////////////////////////////////////
+
+// The following engines are included in country lists and are added to the list
+// of search engines on the first run depending on user's country.
 
 const PrepopulatedEngine abcsok = {
   L"ABC S\x00f8k",
@@ -1084,9 +1089,9 @@ const PrepopulatedEngine google = {
   L"Google",
   L"google.com",  // This will be dynamically updated by the TemplateURL system.
   "http://www.google.com/favicon.ico",
-  "{google:baseURL}search?{google:RLZ}{google:acceptedSuggestion}"
-      "{google:originalQueryForSuggestion}{google:searchFieldtrialParameter}"
-      "sourceid=chrome&ie={inputEncoding}&q={searchTerms}",
+  "{google:baseURL}search?q={searchTerms}&{google:RLZ}"
+      "{google:acceptedSuggestion}{google:originalQueryForSuggestion}"
+      "{google:searchFieldtrialParameter}sourceid=chrome&ie={inputEncoding}",
   "UTF-8",
   "{google:baseSuggestURL}search?{google:searchFieldtrialParameter}"
       "client=chrome&hl={language}&q={searchTerms}",
@@ -2096,6 +2101,144 @@ const PrepopulatedEngine zoznam = {
   85,
 };
 
+// UMA-only engines ////////////////////////////////////////////////////////////
+
+// The following engines are not included in any of the country lists. They
+// are listed in |kAllEngines|, however, so that GetEngineType can find them
+// for UMA reporting purposes.
+
+const PrepopulatedEngine all_by = {
+  L"ALL.BY",
+  L"all.by",
+  NULL,
+  "http://www.all.by/cgi-bin/search.cgi?mode=by&query={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_ALL_BY,
+  33,
+};
+
+const PrepopulatedEngine aport = {
+  L"Aport",
+  L"aport.ru",
+  NULL,
+  "http://www.aport.ru/search/?r={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_APORT,
+  34,
+};
+
+const PrepopulatedEngine conduit = {
+  L"Conduit",
+  L"conduit.com",
+  NULL,
+  "http://search.conduit.com/Results.aspx?q={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_CONDUIT,
+  36,
+};
+
+const PrepopulatedEngine icq = {
+  L"ICQ",
+  L"icq.com",
+  NULL,
+  "http://search.icq.com/search/results.php?q={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_ICQ,
+  39,
+};
+
+const PrepopulatedEngine meta_ua = {
+  L"Meta-Ukraine",
+  L"meta.ua",
+  NULL,
+  "http://meta.ua/search.asp?q={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_META_UA,
+  40,
+};
+
+const PrepopulatedEngine metabot_ru = {
+  L"Metabot",
+  L"metabot.ru",
+  NULL,
+  "http://results.metabot.ru/?st={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_METABOT_RU,
+  42,
+};
+
+const PrepopulatedEngine nigma = {
+  L"Nigma",
+  L"nigma.ru",
+  NULL,
+  "http://www.nigma.ru/?s={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_NIGMA,
+  43,
+};
+
+const PrepopulatedEngine qip = {
+  L"QIP",
+  L"qip.ru",
+  NULL,
+  "http://search.qip.ru/?query={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_QIP,
+  47,
+};
+
+const PrepopulatedEngine ukr_net = {
+  L"Ukr.net",
+  L"ukr.net",
+  NULL,
+  "http://search.ukr.net/google/search.php?q={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_UKR_NET,
+  48,
+};
+
+const PrepopulatedEngine webalta = {
+  L"Webalta",
+  L"webalta.ru",
+  NULL,
+  "http://webalta.ru/search?q={searchTerms}",
+  "UTF-8",
+  NULL,
+  NULL,
+  SEARCH_ENGINE_WEBALTA,
+  49,
+};
+
+const PrepopulatedEngine yandex_tr = {
+  L"Yandex",
+  L"yandex.com.tr",
+  "http://yandex.com.tr/favicon.ico",
+  "http://yandex.com.tr/yandsearch?text={searchTerms}",
+  "UTF-8",
+  "http://suggest.yandex.net/suggest-ff.cgi?part={searchTerms}",
+  NULL,
+  SEARCH_ENGINE_YANDEX,
+  15,
+};
+
 // Lists of engines per country ////////////////////////////////////////////////
 
 // Put these in order with most interesting/important first.  The default will
@@ -2537,7 +2680,8 @@ const PrepopulatedEngine* engines_ZW[] =
 
 // A list of all the engines that we know about.
 const PrepopulatedEngine* kAllEngines[] =
-    { &abcsok, &altavista, &altavista_ar, &altavista_se, &aol, &araby, &ask,
+    { // Prepopulated engines:
+      &abcsok, &altavista, &altavista_ar, &altavista_se, &aol, &araby, &ask,
       &ask_de, &ask_es, &ask_it, &ask_nl, &ask_uk, &atlas_cz, &atlas_sk, &baidu,
       &bing, &bing_ar_XA, &bing_bg_BG, &bing_cs_CZ, &bing_da_DK, &bing_de_AT,
       &bing_de_CH, &bing_de_DE, &bing_el_GR, &bing_en_AU, &bing_en_CA,
@@ -2563,7 +2707,10 @@ const PrepopulatedEngine* kAllEngines[] =
       &yahoo_jp, &yahoo_kr, &yahoo_malaysia, &yahoo_mx, &yahoo_nl, &yahoo_no,
       &yahoo_nz, &yahoo_pe, &yahoo_ph, &yahoo_qc, &yahoo_ru, &yahoo_se,
       &yahoo_sg, &yahoo_th, &yahoo_tw, &yahoo_uk, &yahoo_ve, &yahoo_vn, &yamli,
-      &yandex_ru, &yandex_ua, &zoznam };
+      &yandex_ru, &yandex_ua, &zoznam,
+      // UMA-only engines:
+      &all_by, &aport, &conduit, &icq, &meta_ua, &metabot_ru, &nigma, &qip,
+      &ukr_net, &webalta, &yandex_tr };
 
 
 // Geographic mappings /////////////////////////////////////////////////////////
@@ -2682,8 +2829,11 @@ int GetCurrentCountryID() {
 #elif defined(OS_ANDROID)
 
 int GetCurrentCountryID() {
-  NOTIMPLEMENTED();
-  return kCountryIDUnknown;
+  const std::string country_code_at_install =
+      TemplateURLPrepopulateData::GetCountryCodeAtInstall();
+  return country_code_at_install.empty() ? kCountryIDUnknown :
+      CountryCharsToCountryIDWithUpdate(country_code_at_install[0],
+                                        country_code_at_install[1]);
 }
 
 #elif defined(OS_POSIX)
@@ -3134,7 +3284,7 @@ void RegisterUserPrefs(PrefService* prefs) {
 int GetDataVersion(PrefService* prefs) {
   // Increment this if you change the above data in ways that mean users with
   // existing data should get a new version.
-  const int kCurrentDataVersion = 39;
+  const int kCurrentDataVersion = 40;
   // Allow tests to override the local version.
   return (prefs && prefs->HasPrefPath(prefs::kSearchProviderOverridesVersion)) ?
       prefs->GetInteger(prefs::kSearchProviderOverridesVersion) :
@@ -3254,52 +3404,44 @@ TemplateURL* GetPrepopulatedDefaultSearch(Profile* profile) {
   return default_search_provider;
 }
 
-static const PrepopulatedEngine* GetEngineForURL(const std::string& url) {
-  // We may get a valid URL, or we may get the Google prepopulate URL which
-  // can't be converted to a GURL.  Instead of forcing callers to substitute to
-  // ensure the provided URL is valid, just detect the second case directly
-  // here.
-  GURL as_gurl(url);
-  if (!as_gurl.is_valid()) {
-    // We only need to check Google, the other engines should all be valid URLs
-    // and thus won't ever string-compare successfully against |url|.
-    return (url == google.search_url) ? &google : NULL;
-  }
+SearchEngineType GetEngineType(const std::string& url) {
+  // Restricted to UI thread because ReplaceSearchTerms() is so restricted.
+  using content::BrowserThread;
+  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+         BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  // For all other cases, check using origins, in order to more aggressively
-  // match search engine types for data imported from other browsers.
+  // We may get a valid URL, or we may get the Google prepopulate URL which
+  // can't be converted directly to a GURL.  To handle the latter, we first
+  // construct a TemplateURL from the provided |url|, then call
+  // ReplaceSearchTerms().  This should return a valid URL even when the input
+  // has Google base URLs.
+  TemplateURLData data;
+  data.SetURL(url);
+  TemplateURL turl(NULL, data);
+  GURL as_gurl(turl.url_ref().ReplaceSearchTerms(ASCIIToUTF16("x"),
+      TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
+  if (!as_gurl.is_valid())
+    return SEARCH_ENGINE_OTHER;
+
+  // Check using origins, in order to more aggressively match search engine
+  // types for data imported from other browsers.
   //
   // First special-case Google, because the prepopulate URL for it will not
   // convert to a GURL and thus won't have an origin.  Instead see if the
   // incoming URL's host is "[*.]google.<TLD>".
   if (google_util::IsGoogleHostname(as_gurl.host(),
                                     google_util::DISALLOW_SUBDOMAIN))
-    return &google;
+    return google.type;
 
   // Now check the rest of the prepopulate data.
   GURL origin(as_gurl.GetOrigin());
   for (size_t i = 0; i < arraysize(kAllEngines); ++i) {
     GURL engine_url(kAllEngines[i]->search_url);
     if (engine_url.is_valid() && (origin == engine_url.GetOrigin()))
-      return kAllEngines[i];
+      return kAllEngines[i]->type;
   }
 
-  return NULL;
-}
-
-string16 GetEngineName(const std::string& url) {
-  const PrepopulatedEngine* engine = GetEngineForURL(url);
-  if (engine)
-    return WideToUTF16(engine->name);
-  GURL as_gurl(url);
-  return (as_gurl.is_valid() && !as_gurl.host().empty()) ?
-      UTF8ToUTF16(as_gurl.host()) :
-      l10n_util::GetStringUTF16(IDS_UNKNOWN_SEARCH_ENGINE_NAME);
-}
-
-SearchEngineType GetEngineType(const std::string& url) {
-  const PrepopulatedEngine* engine = GetEngineForURL(url);
-  return engine ? engine->type : SEARCH_ENGINE_OTHER;
+  return SEARCH_ENGINE_OTHER;
 }
 
 }  // namespace TemplateURLPrepopulateData

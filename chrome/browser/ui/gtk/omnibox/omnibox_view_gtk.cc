@@ -24,7 +24,6 @@
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
@@ -155,11 +154,12 @@ void ClipboardSelectionCleared(GtkClipboard* clipboard,
 OmniboxViewGtk::OmniboxViewGtk(
     AutocompleteEditController* controller,
     ToolbarModel* toolbar_model,
-    Profile* profile,
+    Browser* browser,
     CommandUpdater* command_updater,
     bool popup_window_mode,
     GtkWidget* location_bar)
-    : text_view_(NULL),
+    : browser_(browser),
+      text_view_(NULL),
       tag_table_(NULL),
       text_buffer_(NULL),
       faded_text_tag_(NULL),
@@ -169,7 +169,7 @@ OmniboxViewGtk::OmniboxViewGtk(
       instant_anchor_tag_(NULL),
       instant_view_(NULL),
       instant_mark_(NULL),
-      model_(new AutocompleteEditModel(this, controller, profile)),
+      model_(new AutocompleteEditModel(this, controller, browser->profile())),
       controller_(controller),
       toolbar_model_(toolbar_model),
       command_updater_(command_updater),
@@ -177,7 +177,7 @@ OmniboxViewGtk::OmniboxViewGtk(
       security_level_(ToolbarModel::NONE),
       mark_set_handler_id_(0),
       button_1_pressed_(false),
-      theme_service_(GtkThemeService::GetFrom(profile)),
+      theme_service_(GtkThemeService::GetFrom(browser->profile())),
       enter_was_pressed_(false),
       tab_was_pressed_(false),
       paste_clipboard_requested_(false),
@@ -188,7 +188,7 @@ OmniboxViewGtk::OmniboxViewGtk(
       handling_key_press_(false),
       content_maybe_changed_by_key_press_(false),
       update_popup_without_focus_(false),
-      supports_pre_edit_(gtk_check_version(2, 20, 0)),
+      supports_pre_edit_(!gtk_check_version(2, 20, 0)),
       pre_edit_size_before_change_(0),
       going_to_focus_(NULL) {
   popup_view_.reset(
@@ -552,7 +552,7 @@ void OmniboxViewGtk::SetForcedQuery() {
   }
 }
 
-bool OmniboxViewGtk::IsSelectAll() {
+bool OmniboxViewGtk::IsSelectAll() const {
   GtkTextIter sel_start, sel_end;
   gtk_text_buffer_get_selection_bounds(text_buffer_, &sel_start, &sel_end);
 
@@ -1481,8 +1481,7 @@ void OmniboxViewGtk::HandleDragDataGet(GtkWidget* widget,
       break;
     }
     case ui::CHROME_NAMED_URL: {
-      WebContents* current_tab =
-          BrowserList::GetLastActive()->GetSelectedWebContents();
+      WebContents* current_tab = browser_->GetActiveWebContents();
       string16 tab_title = current_tab->GetTitle();
       // Pass an empty string if user has edited the URL.
       if (current_tab->GetURL().spec() != dragged_text_)
@@ -2252,8 +2251,6 @@ void OmniboxViewGtk::AdjustVerticalAlignmentOfInstantView() {
   PangoLayout* layout = gtk_label_get_layout(GTK_LABEL(instant_view_));
   int height;
   pango_layout_get_size(layout, NULL, &height);
-  PangoLayoutIter* iter = pango_layout_get_iter(layout);
-  int baseline = pango_layout_iter_get_baseline(iter);
-  pango_layout_iter_free(iter);
+  int baseline = pango_layout_get_baseline(layout);
   g_object_set(instant_anchor_tag_, "rise", baseline - height, NULL);
 }

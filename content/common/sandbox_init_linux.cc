@@ -32,8 +32,36 @@
   #define SYS_SECCOMP 1
 #endif
 
+#ifndef __NR_migrate_pages
+  #define __NR_migrate_pages 256
+#endif
+
+#ifndef __NR_openat
+  #define __NR_openat 257
+#endif
+
+#ifndef __NR_mkdirat
+  #define __NR_mkdirat 258
+#endif
+
+#ifndef __NR_readlinkat
+  #define __NR_readlinkat 267
+#endif
+
+#ifndef __NR_move_pages
+  #define __NR_move_pages 279
+#endif
+
 #ifndef __NR_eventfd2
   #define __NR_eventfd2 290
+#endif
+
+#ifndef __NR_process_vm_readv
+  #define __NR_process_vm_readv 310
+#endif
+
+#ifndef __NR_process_vm_writev
+  #define __NR_process_vm_writev 311
 #endif
 
 // Constants from very new header files that we can't yet include.
@@ -48,14 +76,19 @@
 
 namespace {
 
-static void CheckSingleThreaded() {
+static void CheckSingleThreaded(const std::string& process_type) {
   // Possibly racy, but it's ok because this is more of a debug check to catch
   // new threaded situations arising during development.
-  // It also has to be a DCHECK() because production builds will be running
-  // the suid sandbox, which will prevent /proc access in some contexts.
-  DCHECK_EQ(file_util::CountFilesCreatedAfter(FilePath("/proc/self/task"),
-                                              base::Time::UnixEpoch()),
-            1);
+  int num_threads =
+    file_util::CountFilesCreatedAfter(FilePath("/proc/self/task"),
+                                      base::Time::UnixEpoch());
+
+  // We pass the check if we don't know ( == 0), because the setuid sandbox
+  // will prevent /proc access in some contexts.
+  DCHECK((num_threads == 1 || num_threads == 0)) << "Counted "
+                                                 << num_threads << " threads "
+                                                 << "in " << process_type
+                                                 << ".";
 }
 
 static void SIGSYS_Handler(int signal, siginfo_t* info, void* void_context) {
@@ -153,9 +186,22 @@ static void EmitPreamble(std::vector<struct sock_filter>* program) {
   EmitLoad(0, program);
 }
 
+static void EmitTrap(std::vector<struct sock_filter>* program) {
+  EmitRet(SECCOMP_RET_TRAP, program);
+}
+
+static void EmitAllow(std::vector<struct sock_filter>* program) {
+  EmitRet(SECCOMP_RET_ALLOW, program);
+}
+
 static void EmitAllowSyscall(int nr, std::vector<struct sock_filter>* program) {
   EmitJEQJF(nr, 1, program);
-  EmitRet(SECCOMP_RET_ALLOW, program);
+  EmitAllow(program);
+}
+
+static void EmitDenySyscall(int nr, std::vector<struct sock_filter>* program) {
+  EmitJEQJF(nr, 1, program);
+  EmitTrap(program);
 }
 
 static void EmitAllowSyscallArgN(int nr,
@@ -167,7 +213,7 @@ static void EmitAllowSyscallArgN(int nr,
   EmitJEQJF(nr, 4, program);
   EmitLoadArg(arg_nr, program);
   EmitJEQJF(arg_val, 1, program);
-  EmitRet(SECCOMP_RET_ALLOW, program);
+  EmitAllow(program);
   // We trashed syscall_nr so put it back in the accumulator.
   EmitLoad(0, program);
 }
@@ -178,18 +224,33 @@ static void EmitFailSyscall(int nr, int err,
   EmitRet(SECCOMP_RET_ERRNO | err, program);
 }
 
-static void EmitTrap(std::vector<struct sock_filter>* program) {
-  EmitRet(SECCOMP_RET_TRAP, program);
-}
-
-static void EmitAllowKillSelf(int signal,
-                              std::vector<struct sock_filter>* program) {
-  EmitAllowSyscallArgN(__NR_kill, 2, signal, program);
+// TODO(cevans) -- only really works as advertised once we restrict clone()
+// to CLONE_THREAD.
+static void EmitAllowSignalSelf(std::vector<struct sock_filter>* program) {
+  EmitAllowSyscallArgN(__NR_kill, 1, getpid(), program);
+  EmitAllowSyscallArgN(__NR_tgkill, 1, getpid(), program);
 }
 
 static void EmitAllowGettime(std::vector<struct sock_filter>* program) {
   EmitAllowSyscall(__NR_clock_gettime, program);
   EmitAllowSyscall(__NR_gettimeofday, program);
+  EmitAllowSyscall(__NR_time, program);
+}
+
+static void EmitSetupEmptyFileSystem(std::vector<struct sock_filter>* program) {
+  EmitFailSyscall(__NR_open, ENOENT, program);
+  EmitFailSyscall(__NR_openat, ENOENT, program);
+  EmitFailSyscall(__NR_execve, ENOENT, program);
+  EmitFailSyscall(__NR_access, ENOENT, program);
+  EmitFailSyscall(__NR_mkdir, ENOENT, program);
+  EmitFailSyscall(__NR_mkdirat, ENOENT, program);
+  EmitFailSyscall(__NR_readlink, ENOENT, program);
+  EmitFailSyscall(__NR_readlinkat, ENOENT, program);
+  EmitFailSyscall(__NR_stat, ENOENT, program);
+  EmitFailSyscall(__NR_lstat, ENOENT, program);
+  EmitFailSyscall(__NR_chdir, ENOENT, program);
+  EmitFailSyscall(__NR_mknod, ENOENT, program);
+  EmitFailSyscall(__NR_mknodat, ENOENT, program);
 }
 
 static void ApplyGPUPolicy(std::vector<struct sock_filter>* program) {
@@ -214,6 +275,7 @@ static void ApplyGPUPolicy(std::vector<struct sock_filter>* program) {
   EmitAllowSyscall(__NR_pipe, program);
   EmitAllowSyscall(__NR_mmap, program);
   EmitAllowSyscall(__NR_mprotect, program);
+  // TODO(cevans): restrict flags.
   EmitAllowSyscall(__NR_clone, program);
   EmitAllowSyscall(__NR_set_robust_list, program);
   EmitAllowSyscall(__NR_getuid, program);
@@ -240,14 +302,15 @@ static void ApplyGPUPolicy(std::vector<struct sock_filter>* program) {
   EmitAllowSyscall(__NR_getpid, program);  // Nvidia binary driver.
   EmitAllowSyscall(__NR_getppid, program);  // ATI binary driver.
   EmitAllowSyscall(__NR_lseek, program);  // Nvidia binary driver.
-  EmitAllowKillSelf(SIGTERM, program);  // GPU watchdog.
+  EmitAllowSyscall(__NR_shutdown, program);  // Virtual driver.
+  EmitAllowSyscall(__NR_rt_sigaction, program);  // Breakpad signal handler.
+  EmitFailSyscall(__NR_socket, EACCES, program);  // Nvidia binary driver.
+  EmitFailSyscall(__NR_fchmod, EPERM, program);  // ATI binary driver.
+  EmitAllowSignalSelf(program);  // GPU watchdog.
 
   // Generally, filename-based syscalls will fail with ENOENT to behave
   // similarly to a possible future setuid sandbox.
-  EmitFailSyscall(__NR_open, ENOENT, program);
-  EmitFailSyscall(__NR_access, ENOENT, program);
-  EmitFailSyscall(__NR_mkdir, ENOENT, program);  // Nvidia binary driver.
-  EmitFailSyscall(__NR_readlink, ENOENT, program);  // ATI binary driver.
+  EmitSetupEmptyFileSystem(program);
 }
 
 static void ApplyFlashPolicy(std::vector<struct sock_filter>* program) {
@@ -260,6 +323,7 @@ static void ApplyFlashPolicy(std::vector<struct sock_filter>* program) {
 
   // Less hot syscalls.
   EmitAllowGettime(program);
+  // TODO(cevans): restrict flags.
   EmitAllowSyscall(__NR_clone, program);
   EmitAllowSyscall(__NR_set_robust_list, program);
   EmitAllowSyscall(__NR_getuid, program);
@@ -291,15 +355,28 @@ static void ApplyFlashPolicy(std::vector<struct sock_filter>* program) {
   EmitAllowSyscall(__NR_lseek, program);
   EmitAllowSyscall(__NR_brk, program);
   EmitAllowSyscall(__NR_sched_yield, program);
+  EmitAllowSyscall(__NR_shutdown, program);
+  EmitAllowSyscall(__NR_sched_getaffinity, program);  // 3D
+  EmitAllowSyscall(__NR_sched_setscheduler, program);
+  EmitAllowSyscall(__NR_dup, program);  // Flash Access.
+  EmitFailSyscall(__NR_ioctl, ENOTTY, program);  // Flash Access.
+  EmitFailSyscall(__NR_socket, EACCES, program);
+  EmitAllowSignalSelf(program);
 
   // These are under investigation, and hopefully not here for the long term.
   EmitAllowSyscall(__NR_shmctl, program);
   EmitAllowSyscall(__NR_shmat, program);
   EmitAllowSyscall(__NR_shmdt, program);
 
-  EmitFailSyscall(__NR_open, ENOENT, program);
-  EmitFailSyscall(__NR_execve, ENOENT, program);
-  EmitFailSyscall(__NR_access, ENOENT, program);
+  EmitSetupEmptyFileSystem(program);
+}
+
+static void ApplyNoPtracePolicy(std::vector<struct sock_filter>* program) {
+  EmitDenySyscall(__NR_ptrace, program);
+  EmitDenySyscall(__NR_process_vm_readv, program);
+  EmitDenySyscall(__NR_process_vm_writev, program);
+  EmitDenySyscall(__NR_migrate_pages, program);
+  EmitDenySyscall(__NR_move_pages, program);
 }
 
 static bool CanUseSeccompFilters() {
@@ -321,6 +398,27 @@ static void InstallFilter(const std::vector<struct sock_filter>& program) {
   PLOG_IF(FATAL, ret != 0) << "Failed to install filter.";
 }
 
+static bool ShouldEnableGPUSandbox() {
+  // Default setting is: enabled for Linux, disabled for Chrome OS.
+  // '--disable-gpu-sandbox' takes precedence over '--enable-gpu-sandbox'.
+#if defined(OS_CHROMEOS)
+  bool res = false;
+#else
+  bool res = true;
+#endif
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
+  if (command_line.HasSwitch(switches::kEnableGpuSandbox)) {
+    res = true;
+  }
+  if (command_line.HasSwitch(switches::kDisableGpuSandbox)) {
+    res = false;
+  }
+
+  return res;
+}
+
 }  // anonymous namespace
 
 namespace content {
@@ -334,26 +432,30 @@ void InitializeSandbox() {
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
   if (process_type == switches::kGpuProcess &&
-      command_line.HasSwitch(switches::kDisableGpuSandbox))
+      !ShouldEnableGPUSandbox())
     return;
 
   if (!CanUseSeccompFilters())
     return;
 
-  CheckSingleThreaded();
+  CheckSingleThreaded(process_type);
 
   std::vector<struct sock_filter> program;
   EmitPreamble(&program);
 
   if (process_type == switches::kGpuProcess) {
     ApplyGPUPolicy(&program);
+    EmitTrap(&program);  // Default deny.
   } else if (process_type == switches::kPpapiPluginProcess) {
     ApplyFlashPolicy(&program);
+    EmitTrap(&program);  // Default deny.
+  } else if (process_type == switches::kRendererProcess ||
+             process_type == switches::kWorkerProcess) {
+    ApplyNoPtracePolicy(&program);
+    EmitAllow(&program);  // Default permit.
   } else {
     NOTREACHED();
   }
-
-  EmitTrap(&program);
 
   InstallSIGSYSHandler();
   InstallFilter(program);
@@ -371,4 +473,3 @@ void InitializeSandbox() {
 }  // namespace content
 
 #endif
-

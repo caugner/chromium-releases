@@ -149,11 +149,12 @@ list:not([disabled]) > .network-group[selected] {
 }
 
 .network-icon {
+  -webkit-margin-end: 8px;
   background-position: left top;
+  background-size: 25px;
   display: -webkit-box;
-  height: 23px;
-  margin-right: 8px;
-  width: 23px;
+  height: 25px;
+  width: 25px;
 }
 
 @-webkit-keyframes connecting-animation {
@@ -185,14 +186,22 @@ list:not([disabled]) > .network-group[selected] {
 
 .network-wifi {
   background-image: url('chrome://theme/IDR_STATUSBAR_NETWORK_ARCS_DARK');
+  background-size: 25px;
+}
+
+.network-wimax {
+  background-image: url('chrome://theme/IDR_STATUSBAR_NETWORK_BARS_DARK');
+  background-size: 25px;
 }
 
 .network-cellular {
   background-image: url('chrome://theme/IDR_STATUSBAR_NETWORK_BARS_DARK');
+  background-size: 25px;
 }
 
 .network-vpn {
   background-image: url('chrome://theme/IDR_STATUSBAR_VPN');
+  background-size: 25px;
 }
 
 .network-add-connection,
@@ -204,6 +213,7 @@ list:not([disabled]) > .network-group[selected] {
 
 .network-add-connection {
   background-image: url('chrome://theme/IDR_SIDETABS_NEW_TAB');
+  background-size: 16px;
 }
 
 .network-control-inactive {
@@ -212,6 +222,7 @@ list:not([disabled]) > .network-group[selected] {
 
 .network-control-active {
   background-image: url('chrome://theme/IDR_PROFILE_SELECTED');
+  background-size: 16px;
 }
 
 .network-options-button {
@@ -227,6 +238,7 @@ list:not([disabled]) > .network-group[selected] {
 
 .network-menu-item:hover .network-options-button {
   background-image: url('chrome://theme/IDR_STATUSBAR_EDIT');
+  background-size: 25px;
 }
 
 .network-group > .controlled-setting-indicator,
@@ -303,6 +315,7 @@ list:not([disabled]) > .network-group[selected] {
 .network-menu-item {
   -webkit-padding-start: 32px;
   background: left center no-repeat;
+  background-size: 25px;
   display: -webkit-box;
   height: 32px;
   margin-left: 4px;
@@ -310,8 +323,10 @@ list:not([disabled]) > .network-group[selected] {
   vertical-align: middle;
 }
 
-html[touch-optimized] .network-menu-item {
-  height: 40px;
+@media (pointer:coarse) {
+  network-menu-item {
+    height: 40px;
+  }
 }
 
 .network-menu-item-label {
@@ -325,8 +340,10 @@ html[touch-optimized] .network-menu-item {
   white-space: nowrap;
 }
 
-html[touch-optimized] .network-menu-item-label {
-  padding-top: 14px;
+@media (pointer:coarse) {
+  .network-menu-item-label {
+    padding-top: 14px;
+  }
 }
 
 .network-disabled-control {
@@ -349,11 +366,13 @@ html[touch-optimized] .network-menu-item-label {
     text-overflow: ellipsis;
 }
 
-html[touch-optimized] .network-menu-group {
-  max-height: 200px;
+@media (pointer:coarse) {
+  .network-menu-group {
+    max-height: 200px;
+  }
 }
 
-.network-menu-item[dir=rtl] {
+html[dir=rtl] .network-menu-item {
   background: right center no-repeat;
 }
 

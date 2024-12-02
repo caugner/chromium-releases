@@ -62,8 +62,22 @@ case "${TARGET_PRODUCT-full}" in
     return 1
 esac
 
+# If we are building NDK/SDK, and in the upstream (open source) tree,
+# define a special variable for bringup purposes.
+case "${ANDROID_BUILD_TOP-undefined}" in
+  "undefined")
+    DEFINES+=" android_upstream_bringup=1"
+    ;;
+esac
+
 toolchain_path="${ANDROID_NDK_ROOT}/toolchains/${toolchain_arch}/prebuilt/"
 export ANDROID_TOOLCHAIN="${toolchain_path}/${toolchain_dir}/bin/"
+
+if [ ! -d "${ANDROID_TOOLCHAIN}" ]; then
+  echo "Can not find Android toolchain in ${ANDROID_TOOLCHAIN}." >& 2
+  echo "The NDK version might be wrong." >& 2
+  return 1
+fi
 
 export ANDROID_SDK_VERSION="15"
 
@@ -74,16 +88,22 @@ export ANDROID_SDK_HOME=${ANDROID_SDK_ROOT}
 export PATH=$PATH:${ANDROID_NDK_ROOT}
 export PATH=$PATH:${ANDROID_SDK_ROOT}/tools
 export PATH=$PATH:${ANDROID_SDK_ROOT}/platform-tools
-
-if [ ! -d "${ANDROID_TOOLCHAIN}" ]; then
-  echo "Can not find Android toolchain in ${ANDROID_TOOLCHAIN}." >& 2
-  echo "The NDK version might be wrong." >& 2
-  return 1
-fi
+# Must have tools like arm-linux-androideabi-gcc on the path for ninja
+export PATH=$PATH:${ANDROID_TOOLCHAIN}
 
 if [ -z "${CHROME_SRC}" ]; then
   # If $CHROME_SRC was not set, assume current directory is CHROME_SRC.
-  export CHROME_SRC=$(readlink -f .)
+  export CHROME_SRC="${PWD}"
+fi
+
+if [ "${PWD/"${CHROME_SRC}"/}" == "${PWD}" ]; then
+  # If current directory is not in $CHROME_SRC, it might be set for other
+  # source tree. If $CHROME_SRC was set correctly and we are in the correct
+  # directory, "${PWD/"${CHROME_SRC}"/}" will be "".
+  # Otherwise, it will equal to "${PWD}"
+  echo "Warning: Current directory is out of CHROME_SRC, it may not be \
+the one you want."
+  echo "${CHROME_SRC}"
 fi
 
 if [ ! -d "${CHROME_SRC}" ]; then
@@ -95,19 +115,21 @@ fi
 # Must be after CHROME_SRC is set.
 export PATH=$PATH:${CHROME_SRC}/build/android
 
+ANDROID_GOMA_WRAPPER=""
+if [[ -d $GOMA_DIR ]]; then
+  ANDROID_GOMA_WRAPPER="$GOMA_DIR/gomacc"
+fi
+export ANDROID_GOMA_WRAPPER
+
+export CC_target=$(basename ${ANDROID_TOOLCHAIN}/*-gcc)
+export CXX_target=$(basename ${ANDROID_TOOLCHAIN}/*-g++)
+export LINK_target=$(basename ${ANDROID_TOOLCHAIN}/*-gcc)
+export AR_target=$(basename ${ANDROID_TOOLCHAIN}/*-ar)
+
 # Performs a gyp_chromium run to convert gyp->Makefile for android code.
 android_gyp() {
-  GOMA_WRAPPER=""
-  if [[ -d $GOMA_DIR ]]; then
-    GOMA_WRAPPER="$GOMA_DIR/gomacc"
-  fi
-  # Ninja requires "*_target" for target builds.
-  GOMA_WRAPPER=${GOMA_WRAPPER} \
-  CC_target=$(basename ${ANDROID_TOOLCHAIN}/*-gcc) \
-  CXX_target=$(basename ${ANDROID_TOOLCHAIN}/*-g++) \
-  LINK_target=$(basename ${ANDROID_TOOLCHAIN}/*-gcc) \
-  AR_target=$(basename ${ANDROID_TOOLCHAIN}/*-ar) \
-  "${CHROME_SRC}/build/gyp_chromium" --depth="${CHROME_SRC}"
+  echo "GYP_GENERATORS set to '$GYP_GENERATORS'"
+  "${CHROME_SRC}/build/gyp_chromium" --depth="${CHROME_SRC}" "$@"
 }
 
 export OBJCOPY=$(echo ${ANDROID_TOOLCHAIN}/*-objcopy)
@@ -126,7 +148,7 @@ DEFINES+=" remoting=0"
 DEFINES+=" p2p_apis=0"
 DEFINES+=" enable_touch_events=1"
 DEFINES+=" build_ffmpegsumo=0"
-# TODO(bulach): use "shared_libraries" once the transition from executable
+# TODO(bulach): use "shared_library" once the transition from executable
 # is over.
 DEFINES+=" gtest_target_type=executable"
 DEFINES+=" branding=Chromium"

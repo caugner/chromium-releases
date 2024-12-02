@@ -15,18 +15,20 @@
 #include "base/test/test_file_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/test/base/chrome_test_suite.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -34,9 +36,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/renderer/mock_content_renderer_client.h"
-#include "content/test/test_browser_thread.h"
-#include "content/test/test_launcher.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_launcher.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
 #include "ui/compositor/compositor_switches.h"
@@ -113,8 +114,8 @@ void InProcessBrowserTest::SetUp() {
   if (command_line->HasSwitch(switches::kSingleProcess)) {
     content::RenderProcessHost::set_run_renderer_in_process(true);
     single_process_renderer_client_.reset(
-        new content::MockContentRendererClient);
-    content::GetContentClient()->set_renderer(
+        new chrome::ChromeContentRendererClient);
+    content::GetContentClient()->set_renderer_for_testing(
         single_process_renderer_client_.get());
   }
 
@@ -345,9 +346,9 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   autorelease_pool_->Recycle();
 #endif
 
-  if (BrowserList::size()) {
+  if (!BrowserList::empty()) {
     browser_ = *BrowserList::begin();
-    ui_test_utils::WaitForLoadStop(browser_->GetSelectedWebContents());
+    ui_test_utils::WaitForLoadStop(browser_->GetActiveWebContents());
   }
 
   // Pump any pending events that were created as a result of creating a
@@ -373,20 +374,31 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 #endif
 
   QuitBrowsers();
+  CHECK(BrowserList::empty());
 }
 
 void InProcessBrowserTest::QuitBrowsers() {
-  if (BrowserList::size() == 0)
+  if (BrowserList::empty())
     return;
 
-  // Invoke CloseAllBrowsersAndMayExit on a running message loop.
-  // CloseAllBrowsersAndMayExit exits the message loop after everything has been
+  // Invoke AttemptExit on a running message loop.
+  // AttemptExit exits the message loop after everything has been
   // shut down properly.
   MessageLoopForUI::current()->PostTask(FROM_HERE,
-                                        base::Bind(&BrowserList::AttemptExit));
+                                        base::Bind(&browser::AttemptExit));
   ui_test_utils::RunMessageLoop();
 
 #if defined(OS_MACOSX)
+  // browser::AttemptExit() will attempt to close all browsers by deleting
+  // their tab contents. The last tab contents being removed triggers closing of
+  // the browser window.
+  //
+  // On the Mac, this eventually reaches
+  // -[BrowserWindowController windowWillClose:], which will post a deferred
+  // -autorelease on itself to ultimately destroy the Browser object. The line
+  // below is necessary to pump these pending messages to ensure all Browsers
+  // get deleted.
+  ui_test_utils::RunAllPendingInMessageLoop();
   delete autorelease_pool_;
   autorelease_pool_ = NULL;
 #endif

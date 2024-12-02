@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/select_file_dialog.h"
 #include "googleurl/src/gurl.h"
 
+class Browser;
 class Profile;
 
 namespace base {
@@ -21,6 +22,8 @@ class ListValue;
 }
 
 extern const char kFileBrowserDomain[];
+extern const char kFileBrowserGalleryTaskId[];
+extern const char kFileBrowserWatchTaskId[];
 
 // File manager helper methods.
 namespace file_manager_util {
@@ -29,7 +32,7 @@ namespace file_manager_util {
 GURL GetFileBrowserExtensionUrl();
 GURL GetFileBrowserUrl();
 GURL GetMediaPlayerUrl();
-GURL GetMediaPlayerPlaylistUrl();
+GURL GetVideoPlayerUrl();
 
 // Converts |full_file_path| into external filesystem: url. Returns false
 // if |full_file_path| is not managed by the external filesystem provider.
@@ -75,11 +78,14 @@ void ShowFileInFolder(const FilePath& path);
 // Opens file browser application.
 void OpenApplication();
 
-// Tries to open |file| directly in the browser. Returns false if the browser
-// can't directly handle this type of file.
-bool TryViewingFile(Profile* profile, const FilePath& path);
+// Executes the built-in File Manager handler or tries to open |file| directly
+// in the browser. Returns false if neither is possible.
+bool ExecuteBuiltinHandler(
+    Browser* browser,
+    const FilePath& path,
+    const std::string& internal_task_id);
 
-void InstallCRX(Profile* profile, const FilePath& path);
+void InstallCRX(Browser* browser, const FilePath& path);
 
 bool ShouldBeOpenedWithPdfPlugin(Profile* profile, const char* file_extension);
 

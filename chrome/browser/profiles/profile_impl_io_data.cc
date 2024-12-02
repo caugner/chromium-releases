@@ -13,6 +13,7 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
+#include "chrome/browser/net/clear_on_exit_policy.h"
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/http_server_properties_manager.h"
 #include "chrome/browser/net/predictor.h"
@@ -30,6 +31,7 @@
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/url_request/url_request_job_factory.h"
+#include "webkit/quota/special_storage_policy.h"
 
 using content::BrowserThread;
 
@@ -82,7 +84,8 @@ void ProfileImplIOData::Handle::Init(
       chrome_browser_net::Predictor* predictor,
       PrefService* local_state,
       IOThread* io_thread,
-      bool restore_old_session_cookies) {
+      bool restore_old_session_cookies,
+      quota::SpecialStoragePolicy* special_storage_policy) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!io_data_->lazy_params_.get());
   DCHECK(predictor);
@@ -97,6 +100,7 @@ void ProfileImplIOData::Handle::Init(
   lazy_params->media_cache_max_size = media_cache_max_size;
   lazy_params->extensions_cookie_path = extensions_cookie_path;
   lazy_params->restore_old_session_cookies = restore_old_session_cookies;
+  lazy_params->special_storage_policy = special_storage_policy;
 
   io_data_->lazy_params_.reset(lazy_params);
 
@@ -191,7 +195,6 @@ ProfileImplIOData::Handle::GetIsolatedAppRequestContextGetter(
   if (iter != app_request_context_getter_map_.end())
     return iter->second;
 
-
   ChromeURLRequestContextGetter* context =
       ChromeURLRequestContextGetter::CreateOriginalForIsolatedApp(
           profile_, io_data_, app_id);
@@ -225,9 +228,6 @@ void ProfileImplIOData::Handle::LazyInitialize() const {
       new chrome_browser_net::HttpServerPropertiesManager(pref_service));
   ChromeNetworkDelegate::InitializeReferrersEnabled(
       io_data_->enable_referrers(), pref_service);
-  io_data_->clear_local_state_on_exit()->Init(
-      prefs::kClearSiteDataOnExit, pref_service, NULL);
-  io_data_->clear_local_state_on_exit()->MoveToThread(BrowserThread::IO);
   io_data_->session_startup_pref()->Init(
       prefs::kRestoreOnStartup, pref_service, NULL);
   io_data_->session_startup_pref()->MoveToThread(BrowserThread::IO);
@@ -247,35 +247,34 @@ ProfileImplIOData::LazyParams::LazyParams()
 ProfileImplIOData::LazyParams::~LazyParams() {}
 
 ProfileImplIOData::ProfileImplIOData()
-    : ProfileIOData(false),
-      clear_local_state_on_exit_(false) {}
+    : ProfileIOData(false) {}
 ProfileImplIOData::~ProfileImplIOData() {
   DestroyResourceContext();
 
-  if (media_request_context_)
+  if (media_request_context_.get())
     media_request_context_->AssertNoURLRequests();
 }
 
 void ProfileImplIOData::LazyInitializeInternal(
     ProfileParams* profile_params) const {
-  // Keep track of clear_local_state_on_exit for isolated apps.
-  clear_local_state_on_exit_ = profile_params->clear_local_state_on_exit;
-
   ChromeURLRequestContext* main_context = main_request_context();
   ChromeURLRequestContext* extensions_context = extensions_request_context();
-  media_request_context_ = new ChromeURLRequestContext;
+  media_request_context_.reset(new ChromeURLRequestContext);
 
   IOThread* const io_thread = profile_params->io_thread;
   IOThread::Globals* const io_thread_globals = io_thread->globals();
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  bool record_mode = chrome::kRecordModeEnabled &&
-                     command_line.HasSwitch(switches::kRecordMode);
+  // Only allow Record Mode if we are in a Debug build or where we are running
+  // a cycle, and the user has limited control.
+  bool record_mode = command_line.HasSwitch(switches::kRecordMode) &&
+                     (chrome::kRecordModeEnabled ||
+                      command_line.HasSwitch(switches::kVisitURLs));
   bool playback_mode = command_line.HasSwitch(switches::kPlaybackMode);
 
   // Initialize context members.
 
   ApplyProfileParamsToContext(main_context);
-  ApplyProfileParamsToContext(media_request_context_);
+  ApplyProfileParamsToContext(media_request_context_.get());
   ApplyProfileParamsToContext(extensions_context);
 
   if (http_server_properties_manager())
@@ -344,9 +343,8 @@ void ProfileImplIOData::LazyInitializeInternal(
     scoped_refptr<SQLitePersistentCookieStore> cookie_db =
         new SQLitePersistentCookieStore(
             lazy_params_->cookie_path,
-            lazy_params_->restore_old_session_cookies);
-    cookie_db->SetClearLocalStateOnExit(
-        profile_params->clear_local_state_on_exit);
+            lazy_params_->restore_old_session_cookies,
+            new ClearOnExitPolicy(lazy_params_->special_storage_policy));
     cookie_store =
         new net::CookieMonster(cookie_db.get(),
                                profile_params->cookie_monster_delegate);
@@ -358,7 +356,7 @@ void ProfileImplIOData::LazyInitializeInternal(
       new net::CookieMonster(
           new SQLitePersistentCookieStore(
               lazy_params_->extensions_cookie_path,
-              lazy_params_->restore_old_session_cookies), NULL);
+              lazy_params_->restore_old_session_cookies, NULL), NULL);
   // Enable cookies for devtools and extension URLs.
   const char* schemes[] = {chrome::kChromeDevToolsScheme,
                            chrome::kExtensionScheme};
@@ -373,9 +371,9 @@ void ProfileImplIOData::LazyInitializeInternal(
     DCHECK(!lazy_params_->server_bound_cert_path.empty());
 
     scoped_refptr<SQLiteServerBoundCertStore> server_bound_cert_db =
-        new SQLiteServerBoundCertStore(lazy_params_->server_bound_cert_path);
-    server_bound_cert_db->SetClearLocalStateOnExit(
-        profile_params->clear_local_state_on_exit);
+        new SQLiteServerBoundCertStore(
+            lazy_params_->server_bound_cert_path,
+            new ClearOnExitPolicy(lazy_params_->special_storage_policy));
     server_bound_cert_service = new net::ServerBoundCertService(
         new net::DefaultServerBoundCertStore(server_bound_cert_db.get()),
         base::WorkerPool::GetTaskRunner(true));
@@ -449,9 +447,9 @@ void ProfileImplIOData::LazyInitializeInternal(
   lazy_params_.reset();
 }
 
-scoped_refptr<ChromeURLRequestContext>
+ChromeURLRequestContext*
 ProfileImplIOData::InitializeAppRequestContext(
-    scoped_refptr<ChromeURLRequestContext> main_context,
+    ChromeURLRequestContext* main_context,
     const std::string& app_id) const {
   AppRequestContext* context = new AppRequestContext;
 
@@ -465,8 +463,11 @@ ProfileImplIOData::InitializeAppRequestContext(
   int cache_max_size = 0;
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  bool record_mode = chrome::kRecordModeEnabled &&
-                     command_line.HasSwitch(switches::kRecordMode);
+  // Only allow Record Mode if we are in a Debug build or where we are running
+  // a cycle, and the user has limited control.
+  bool record_mode = command_line.HasSwitch(switches::kRecordMode) &&
+                     (chrome::kRecordModeEnabled ||
+                      command_line.HasSwitch(switches::kVisitURLs));
   bool playback_mode = command_line.HasSwitch(switches::kPlaybackMode);
 
   // Use a separate HTTP disk cache for isolated apps.
@@ -497,8 +498,7 @@ ProfileImplIOData::InitializeAppRequestContext(
     DCHECK(!cookie_path.empty());
 
     scoped_refptr<SQLitePersistentCookieStore> cookie_db =
-        new SQLitePersistentCookieStore(cookie_path, false);
-    cookie_db->SetClearLocalStateOnExit(clear_local_state_on_exit_);
+        new SQLitePersistentCookieStore(cookie_path, false, NULL);
     // TODO(creis): We should have a cookie delegate for notifying the cookie
     // extensions API, but we need to update it to understand isolated apps
     // first.
@@ -511,18 +511,18 @@ ProfileImplIOData::InitializeAppRequestContext(
   return context;
 }
 
-scoped_refptr<ChromeURLRequestContext>
+ChromeURLRequestContext*
 ProfileImplIOData::AcquireMediaRequestContext() const {
-  DCHECK(media_request_context_);
-  return media_request_context_;
+  DCHECK(media_request_context_.get());
+  return media_request_context_.get();
 }
 
-scoped_refptr<ChromeURLRequestContext>
+ChromeURLRequestContext*
 ProfileImplIOData::AcquireIsolatedAppRequestContext(
-    scoped_refptr<ChromeURLRequestContext> main_context,
+    ChromeURLRequestContext* main_context,
     const std::string& app_id) const {
   // We create per-app contexts on demand, unlike the others above.
-  scoped_refptr<ChromeURLRequestContext> app_request_context =
+  ChromeURLRequestContext* app_request_context =
       InitializeAppRequestContext(main_context, app_id);
   DCHECK(app_request_context);
   return app_request_context;

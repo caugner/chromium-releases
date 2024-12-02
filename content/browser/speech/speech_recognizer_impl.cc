@@ -12,8 +12,8 @@
 #include "content/browser/speech/google_one_shot_remote_engine.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
-#include "content/public/browser/speech_recognizer.h"
 #include "content/public/common/speech_recognition_error.h"
+#include "content/public/common/speech_recognition_grammar.h"
 #include "content/public/common/speech_recognition_result.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -21,8 +21,8 @@ using content::BrowserMainLoop;
 using content::BrowserThread;
 using content::SpeechRecognitionError;
 using content::SpeechRecognitionEventListener;
+using content::SpeechRecognitionGrammar;
 using content::SpeechRecognitionResult;
-using content::SpeechRecognizer;
 using media::AudioInputController;
 using media::AudioManager;
 using media::AudioParameters;
@@ -65,40 +65,6 @@ void KeepAudioControllerRefcountedForDtor(scoped_refptr<AudioInputController>) {
 }
 
 }  // namespace
-
-// TODO(primiano) Create(...) is transitional (until we fix speech input
-// extensions) and should be removed soon. The manager should be the only one
-// knowing the existence of SpeechRecognizer(Impl), thus the only one in charge
-// of instantiating it.
-SpeechRecognizer* SpeechRecognizer::Create(
-    SpeechRecognitionEventListener* listener,
-    int session_id,
-    const std::string& language,
-    const std::string& grammar,
-    net::URLRequestContextGetter* context_getter,
-    bool filter_profanities,
-    const std::string& hardware_info,
-    const std::string& origin_url) {
-  speech::GoogleOneShotRemoteEngineConfig remote_engine_config;
-  remote_engine_config.language = language;
-  remote_engine_config.grammar = grammar;
-  remote_engine_config.audio_sample_rate =
-      speech::SpeechRecognizerImpl::kAudioSampleRate;
-  remote_engine_config.audio_num_bits_per_sample =
-      speech::SpeechRecognizerImpl::kNumBitsPerAudioSample;
-  remote_engine_config.filter_profanities = filter_profanities;
-  remote_engine_config.hardware_info = hardware_info;
-  remote_engine_config.origin_url = origin_url;
-
-  // SpeechRecognizerImpl takes ownership of google_remote_engine.
-  speech::GoogleOneShotRemoteEngine* google_remote_engine =
-      new speech::GoogleOneShotRemoteEngine(context_getter);
-  google_remote_engine->SetConfig(remote_engine_config);
-
-  return new speech::SpeechRecognizerImpl(listener,
-                                          session_id,
-                                          google_remote_engine);
-}
 
 namespace speech {
 
@@ -291,24 +257,24 @@ SpeechRecognizerImpl::ExecuteTransitionAndGetNextState(
     case STATE_STARTING:
       switch (event) {
         case EVENT_ABORT:
-          return Abort(event_args);
+          return AbortWithError(event_args);
         case EVENT_START:
           return NotFeasible(event_args);
         case EVENT_STOP_CAPTURE:
-          return Abort(event_args);
+          return AbortSilently(event_args);
         case EVENT_AUDIO_DATA:
           return StartRecognitionEngine(event_args);
         case EVENT_ENGINE_RESULT:
           return NotFeasible(event_args);
         case EVENT_ENGINE_ERROR:
         case EVENT_AUDIO_ERROR:
-          return Abort(event_args);
+          return AbortWithError(event_args);
       }
       break;
     case STATE_ESTIMATING_ENVIRONMENT:
       switch (event) {
         case EVENT_ABORT:
-          return Abort(event_args);
+          return AbortWithError(event_args);
         case EVENT_START:
           return NotFeasible(event_args);
         case EVENT_STOP_CAPTURE:
@@ -319,13 +285,13 @@ SpeechRecognizerImpl::ExecuteTransitionAndGetNextState(
           return ProcessIntermediateResult(event_args);
         case EVENT_ENGINE_ERROR:
         case EVENT_AUDIO_ERROR:
-          return Abort(event_args);
+          return AbortWithError(event_args);
       }
       break;
     case STATE_WAITING_FOR_SPEECH:
       switch (event) {
         case EVENT_ABORT:
-          return Abort(event_args);
+          return AbortWithError(event_args);
         case EVENT_START:
           return NotFeasible(event_args);
         case EVENT_STOP_CAPTURE:
@@ -336,13 +302,13 @@ SpeechRecognizerImpl::ExecuteTransitionAndGetNextState(
           return ProcessIntermediateResult(event_args);
         case EVENT_ENGINE_ERROR:
         case EVENT_AUDIO_ERROR:
-          return Abort(event_args);
+          return AbortWithError(event_args);
       }
       break;
     case STATE_RECOGNIZING:
       switch (event) {
         case EVENT_ABORT:
-          return Abort(event_args);
+          return AbortWithError(event_args);
         case EVENT_START:
           return NotFeasible(event_args);
         case EVENT_STOP_CAPTURE:
@@ -353,13 +319,13 @@ SpeechRecognizerImpl::ExecuteTransitionAndGetNextState(
           return ProcessIntermediateResult(event_args);
         case EVENT_ENGINE_ERROR:
         case EVENT_AUDIO_ERROR:
-          return Abort(event_args);
+          return AbortWithError(event_args);
       }
       break;
     case STATE_WAITING_FINAL_RESULT:
       switch (event) {
         case EVENT_ABORT:
-          return Abort(event_args);
+          return AbortWithError(event_args);
         case EVENT_START:
           return NotFeasible(event_args);
         case EVENT_STOP_CAPTURE:
@@ -369,7 +335,7 @@ SpeechRecognizerImpl::ExecuteTransitionAndGetNextState(
           return ProcessFinalResult(event_args);
         case EVENT_ENGINE_ERROR:
         case EVENT_AUDIO_ERROR:
-          return Abort(event_args);
+          return AbortWithError(event_args);
       }
       break;
   }
@@ -425,13 +391,13 @@ SpeechRecognizerImpl::StartRecording(const FSMEventArgs&) {
   listener_->OnRecognitionStart(session_id_);
 
   if (!audio_manager->HasAudioInputDevices()) {
-    return AbortWithError(SpeechRecognitionError(
+    return Abort(SpeechRecognitionError(
         content::SPEECH_RECOGNITION_ERROR_AUDIO,
         content::SPEECH_AUDIO_ERROR_DETAILS_NO_MIC));
   }
 
   if (audio_manager->IsRecordingInProcess()) {
-    return AbortWithError(SpeechRecognitionError(
+    return Abort(SpeechRecognitionError(
         content::SPEECH_RECOGNITION_ERROR_AUDIO,
         content::SPEECH_AUDIO_ERROR_DETAILS_IN_USE));
   }
@@ -444,7 +410,7 @@ SpeechRecognizerImpl::StartRecording(const FSMEventArgs&) {
   audio_controller_ = AudioInputController::Create(audio_manager, this, params);
 
   if (audio_controller_.get() == NULL) {
-    return AbortWithError(
+    return Abort(
         SpeechRecognitionError(content::SPEECH_RECOGNITION_ERROR_AUDIO));
   }
 
@@ -490,7 +456,7 @@ SpeechRecognizerImpl::DetectUserSpeechOrTimeout(const FSMEventArgs&) {
     listener_->OnSoundStart(session_id_);
     return STATE_RECOGNIZING;
   } else if (GetElapsedTimeMs() >= kNoSpeechTimeoutMs) {
-    return AbortWithError(
+    return Abort(
         SpeechRecognitionError(content::SPEECH_RECOGNITION_ERROR_NO_SPEECH));
   }
   return STATE_WAITING_FOR_SPEECH;
@@ -520,28 +486,27 @@ SpeechRecognizerImpl::StopCaptureAndWaitForResult(const FSMEventArgs&) {
 }
 
 SpeechRecognizerImpl::FSMState
-SpeechRecognizerImpl::Abort(const FSMEventArgs& event_args) {
-  // TODO(primiano) Should raise SPEECH_RECOGNITION_ERROR_ABORTED in lack of
-  // other specific error sources (so that it was an explicit abort request).
-  // However, SPEECH_RECOGNITION_ERROR_ABORTED is not currently caught by
-  // ChromeSpeechRecognitionManagerDelegate and would cause an exception.
-  // JS support will probably need it in future.
+SpeechRecognizerImpl::AbortSilently(const FSMEventArgs& event_args) {
+  DCHECK_NE(event_args.event, EVENT_AUDIO_ERROR);
+  DCHECK_NE(event_args.event, EVENT_ENGINE_ERROR);
+  return Abort(
+      SpeechRecognitionError(content::SPEECH_RECOGNITION_ERROR_NONE));
+}
+
+SpeechRecognizerImpl::FSMState
+SpeechRecognizerImpl::AbortWithError(const FSMEventArgs& event_args) {
   if (event_args.event == EVENT_AUDIO_ERROR) {
-    return AbortWithError(
+    return Abort(
         SpeechRecognitionError(content::SPEECH_RECOGNITION_ERROR_AUDIO));
   } else if (event_args.event == EVENT_ENGINE_ERROR) {
-    return AbortWithError(event_args.engine_error);
+    return Abort(event_args.engine_error);
   }
-  return AbortWithError(NULL);
+  return Abort(
+      SpeechRecognitionError(content::SPEECH_RECOGNITION_ERROR_ABORTED));
 }
 
-SpeechRecognizerImpl::FSMState SpeechRecognizerImpl::AbortWithError(
+SpeechRecognizerImpl::FSMState SpeechRecognizerImpl::Abort(
     const SpeechRecognitionError& error) {
-  return AbortWithError(&error);
-}
-
-SpeechRecognizerImpl::FSMState SpeechRecognizerImpl::AbortWithError(
-    const SpeechRecognitionError* error) {
   if (IsCapturingAudio())
     CloseAudioControllerAsynchronously();
 
@@ -559,8 +524,8 @@ SpeechRecognizerImpl::FSMState SpeechRecognizerImpl::AbortWithError(
   if (state_ > STATE_STARTING && state_ < STATE_WAITING_FINAL_RESULT)
     listener_->OnAudioEnd(session_id_);
 
-  if (error != NULL)
-    listener_->OnRecognitionError(session_id_, *error);
+  if (error.code != content::SPEECH_RECOGNITION_ERROR_NONE)
+    listener_->OnRecognitionError(session_id_, error);
 
   listener_->OnRecognitionEnd(session_id_);
 

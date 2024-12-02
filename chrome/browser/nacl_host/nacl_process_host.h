@@ -34,9 +34,10 @@ class BrowserChildProcessHost;
 // running in the renderer and NaCl processes.
 class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
  public:
-  // The argument is the URL of the manifest of the Native Client plugin being
+  // manifest_url: the URL of the manifest of the Native Client plugin being
   // executed.
-  explicit NaClProcessHost(const GURL& manifest_url);
+  // off_the_record: was the process launched from an incognito renderer?
+  NaClProcessHost(const GURL& manifest_url, bool off_the_record);
   virtual ~NaClProcessHost();
 
   // Do any minimal work that must be done at browser startup.
@@ -79,10 +80,9 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
 
   // BrowserChildProcessHostDelegate implementation:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
-  virtual void OnProcessCrashed(int exit_code) OVERRIDE;
   virtual void OnProcessLaunched() OVERRIDE;
 
-  void IrtReady();
+  void OnResourcesReady();
 
   // Sends the reply message to the renderer who is waiting for the plugin
   // to load. Returns true on success.
@@ -149,6 +149,8 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   scoped_ptr<content::BrowserChildProcessHost> process_;
 
   bool enable_exception_handling_;
+
+  bool off_the_record_;
 
   DISALLOW_COPY_AND_ASSIGN(NaClProcessHost);
 };

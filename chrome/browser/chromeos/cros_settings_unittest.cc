@@ -21,7 +21,7 @@
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::AnyNumber;
@@ -64,7 +64,8 @@ class CrosSettingsTest : public testing::Test {
     if (expected_props_.find(pref) == expected_props_.end())
       return;
 
-    if (CrosSettings::Get()->PrepareTrustedValues(
+    if (CrosSettingsProvider::TRUSTED ==
+        CrosSettings::Get()->PrepareTrustedValues(
             base::Bind(&CrosSettingsTest::FetchPref,
                        pointer_factory_.GetWeakPtr(), pref))) {
       scoped_ptr<base::Value> expected_value(

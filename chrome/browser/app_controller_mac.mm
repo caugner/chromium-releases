@@ -23,10 +23,11 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/virtual_driver_install_helper.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
-#include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/sessions/session_service.h"
@@ -37,9 +38,11 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/sync/sync_ui_util_mac.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_init.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/startup/startup_browser_creator.h"
+#include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -71,6 +74,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadManager;
 using content::UserMetricsAction;
@@ -95,9 +99,9 @@ NSString* NSPopoverDidCloseNotification = @"NSPopoverDidCloseNotification";
 #endif
 
 // True while AppController is calling Browser::NewEmptyWindow(). We need a
-// global flag here, analogue to BrowserInit::InProcessStartup() because
-// otherwise the SessionService will try to restore sessions when we make a new
-// window while there are no other active windows.
+// global flag here, analogue to StartupBrowserCreator::InProcessStartup()
+// because otherwise the SessionService will try to restore sessions when we
+// make a new window while there are no other active windows.
 bool g_is_opening_new_window = false;
 
 // Activates a browser window having the given profile (the last one active) if
@@ -105,7 +109,7 @@ bool g_is_opening_new_window = false;
 // not possible. If the last active browser is minimized (in particular, if
 // there are only minimized windows), it will unminimize it.
 Browser* ActivateBrowser(Profile* profile) {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+  Browser* browser = browser::FindLastActiveWithProfile(profile);
   if (browser)
     browser->window()->Activate();
   return browser;
@@ -119,7 +123,7 @@ Browser* CreateBrowser(Profile* profile) {
     Browser::NewEmptyWindow(profile);
   }
 
-  Browser* browser = BrowserList::GetLastActive();
+  Browser* browser = browser::GetLastActiveBrowser();
   CHECK(browser);
   return browser;
 }
@@ -162,8 +166,10 @@ void RecordLastRunAppBundlePath() {
       BaseBundleID_CFString());
 
   // Sync after a delay avoid I/O contention on startup; 1500 ms is plenty.
-  BrowserThread::PostDelayedTask(BrowserThread::FILE, FROM_HERE,
-                                 base::Bind(&PrefsSyncCallback), 1500);
+  BrowserThread::PostDelayedTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&PrefsSyncCallback),
+      base::TimeDelta::FromMilliseconds(1500));
 }
 
 }  // anonymous namespace
@@ -310,18 +316,14 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
   size_t num_browsers = BrowserList::size();
 
-  // Give any print jobs in progress time to finish.
-  if (!browser_shutdown::IsTryingToQuit())
-    g_browser_process->print_job_manager()->StopJobs(true);
-
-  // Initiate a shutdown (via BrowserList::CloseAllBrowsers()) if we aren't
+  // Initiate a shutdown (via browser::CloseAllBrowsers()) if we aren't
   // already shutting down.
   if (!browser_shutdown::IsTryingToQuit()) {
     content::NotificationService::current()->Notify(
         content::NOTIFICATION_APP_EXITING,
         content::NotificationService::AllSources(),
         content::NotificationService::NoDetails());
-    BrowserList::CloseAllBrowsers();
+    browser::CloseAllBrowsers();
   }
 
   return num_browsers == 0 ? YES : NO;
@@ -365,14 +367,14 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
   // Tell BrowserList not to keep the browser process alive. Once all the
   // browsers get dealloc'd, it will stop the RunLoop and fall back into main().
-  BrowserList::EndKeepAlive();
+  browser::EndKeepAlive();
 
   [self unregisterEventHandlers];
 }
 
 - (void)didEndMainMessageLoop {
-  DCHECK(!BrowserList::HasBrowserWithProfile([self lastProfile]));
-  if (!BrowserList::HasBrowserWithProfile([self lastProfile])) {
+  DCHECK_EQ(0u, browser::GetBrowserCount([self lastProfile]));
+  if (!browser::GetBrowserCount([self lastProfile])) {
     // As we're shutting down, we need to nuke the TabRestoreService, which
     // will start the shutdown of the NavigationControllers and allow for
     // proper shutdown. If we don't do this, Chrome won't shut down cleanly,
@@ -570,7 +572,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 - (void)applicationDidFinishLaunching:(NSNotification*)notify {
   // Notify BrowserList to keep the application running so it doesn't go away
   // when all the browser windows get closed.
-  BrowserList::StartKeepAlive();
+  browser::StartKeepAlive();
 
   [self setUpdateCheckInterval];
 
@@ -675,13 +677,13 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       DownloadServiceFactory::GetForProfile(profiles[i]);
     DownloadManager* download_manager =
         (download_service->HasCreatedDownloadManager() ?
-         download_service->GetDownloadManager() : NULL);
+         BrowserContext::GetDownloadManager(profiles[i]) : NULL);
     if (download_manager && download_manager->InProgressCount() > 0) {
       int downloadCount = download_manager->InProgressCount();
       if ([self userWillWaitForInProgressDownloads:downloadCount]) {
         // Create a new browser window (if necessary) and navigate to the
         // downloads page if the user chooses to wait.
-        Browser* browser = BrowserList::FindBrowserWithProfile(profiles[i]);
+        Browser* browser = browser::FindBrowserWithProfile(profiles[i]);
         if (!browser) {
           browser = Browser::Create(profiles[i]);
           browser->window()->Show();
@@ -714,9 +716,9 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 // sheets) will not count as blocking the browser. But things like open/save
 // dialogs that are window modal will block the browser.
 - (BOOL)keyWindowIsNotModal {
-  Browser* browser = BrowserList::GetLastActive();
+  Browser* browser = browser::GetLastActiveBrowser();
   return [NSApp modalWindow] == nil && (!browser ||
-         ![[browser->window()->GetNativeHandle() attachedSheet]
+         ![[browser->window()->GetNativeWindow() attachedSheet]
              isKindOfClass:[NSWindow class]]);
 }
 
@@ -889,11 +891,11 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       else
         Browser::OpenExtensionsWindow(lastProfile);
       break;
-    case IDC_HELP_PAGE:
+    case IDC_HELP_PAGE_VIA_MENU:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        browser->ShowHelpTab();
+        browser->ShowHelpTab(Browser::HELP_SOURCE_MENU);
       else
-        Browser::OpenHelpWindow(lastProfile);
+        Browser::OpenHelpWindow(lastProfile, Browser::HELP_SOURCE_MENU);
       break;
     case IDC_SHOW_SYNC_SETUP:
       if (Browser* browser = ActivateBrowser(lastProfile))
@@ -925,7 +927,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   BackgroundApplicationListModel applications(profile);
   DCHECK(tag >= 0 &&
          tag < static_cast<int>(applications.size()));
-  const Extension* extension = applications.GetExtension(tag);
+  const extensions::Extension* extension = applications.GetExtension(tag);
   BackgroundModeManager::LaunchBackgroundApplication(profile, extension);
 }
 
@@ -996,10 +998,11 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   {
     AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
     int return_code;
-    BrowserInit browser_init;
-    browser_init.LaunchBrowser(command_line, [self lastProfile], FilePath(),
-                               BrowserInit::IS_NOT_PROCESS_STARTUP,
-                               BrowserInit::IS_NOT_FIRST_RUN, &return_code);
+    StartupBrowserCreator browser_creator;
+    browser_creator.LaunchBrowser(
+        command_line, [self lastProfile], FilePath(),
+        browser::startup::IS_NOT_PROCESS_STARTUP,
+        browser::startup::IS_NOT_FIRST_RUN, &return_code);
   }
 
   // We've handled the reopen event, so return NO to tell AppKit not
@@ -1021,7 +1024,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   menuState_->UpdateCommandEnabled(IDC_SHOW_HISTORY, true);
   menuState_->UpdateCommandEnabled(IDC_SHOW_DOWNLOADS, true);
   menuState_->UpdateCommandEnabled(IDC_MANAGE_EXTENSIONS, true);
-  menuState_->UpdateCommandEnabled(IDC_HELP_PAGE, true);
+  menuState_->UpdateCommandEnabled(IDC_HELP_PAGE_VIA_MENU, true);
   menuState_->UpdateCommandEnabled(IDC_IMPORT_SETTINGS, true);
   menuState_->UpdateCommandEnabled(IDC_FEEDBACK, true);
   menuState_->UpdateCommandEnabled(IDC_SHOW_SYNC_SETUP, true);
@@ -1085,9 +1088,9 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 }
 
 // Various methods to open URLs that we get in a native fashion. We use
-// BrowserInit here because on the other platforms, URLs to open come through
-// the ProcessSingleton, and it calls BrowserInit. It's best to bottleneck the
-// openings through that for uniform handling.
+// StartupBrowserCreator here because on the other platforms, URLs to open come
+// through the ProcessSingleton, and it calls StartupBrowserCreator. It's best
+// to bottleneck the openings through that for uniform handling.
 
 - (void)openUrls:(const std::vector<GURL>&)urls {
   // If the browser hasn't started yet, just queue up the URLs.
@@ -1096,7 +1099,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
     return;
   }
 
-  Browser* browser = BrowserList::GetLastActive();
+  Browser* browser = browser::GetLastActiveBrowser();
   // if no browser window exists then create one with no tabs to be filled in
   if (!browser) {
     browser = Browser::Create([self lastProfile]);
@@ -1104,9 +1107,9 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   }
 
   CommandLine dummy(CommandLine::NO_PROGRAM);
-  BrowserInit::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      BrowserInit::IS_FIRST_RUN : BrowserInit::IS_NOT_FIRST_RUN;
-  BrowserInit::LaunchWithProfile launch(FilePath(), dummy, first_run);
+  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      browser::startup::IS_FIRST_RUN : browser::startup::IS_NOT_FIRST_RUN;
+  StartupBrowserCreatorImpl launch(FilePath(), dummy, first_run);
   launch.OpenURLsInBrowser(browser, false, urls);
 }
 
@@ -1139,9 +1142,9 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
     string16 title16 = base::SysNSStringToUTF16(printTitle);
     string16 printTicket16 = base::SysNSStringToUTF16(printTicket);
     print_dialog_cloud::CreatePrintDialogForFile(
+        ProfileManager::GetDefaultProfile(), NULL,
         FilePath([inputPath UTF8String]), title16,
-        printTicket16, [mime UTF8String], /*modal=*/false,
-        /*delete_on_close=*/false);
+        printTicket16, [mime UTF8String], /*delete_on_close=*/false);
   }
 }
 
@@ -1238,7 +1241,8 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       NSString* menuStr =
           l10n_util::GetNSStringWithFixup(IDS_BACKGROUND_APPS_MAC);
       scoped_nsobject<NSMenu> appMenu([[NSMenu alloc] initWithTitle:menuStr]);
-      for (ExtensionList::const_iterator cursor = applications.begin();
+      for (extensions::ExtensionList::const_iterator cursor =
+            applications.begin();
            cursor != applications.end();
            ++cursor, ++position) {
         DCHECK_EQ(applications.GetPosition(*cursor), position);

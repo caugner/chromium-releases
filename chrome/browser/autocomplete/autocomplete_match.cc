@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/autocomplete/autocomplete_match.h"
+
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 
 // AutocompleteMatch ----------------------------------------------------------
 
@@ -24,6 +27,7 @@ const char16 AutocompleteMatch::kInvalidChars[] = {
 AutocompleteMatch::AutocompleteMatch()
     : provider(NULL),
       relevance(0),
+      typed_count(-1),
       deletable(false),
       inline_autocomplete_offset(string16::npos),
       transition(content::PAGE_TRANSITION_GENERATED),
@@ -39,6 +43,7 @@ AutocompleteMatch::AutocompleteMatch(AutocompleteProvider* provider,
                                      Type type)
     : provider(provider),
       relevance(relevance),
+      typed_count(-1),
       deletable(deletable),
       inline_autocomplete_offset(string16::npos),
       transition(content::PAGE_TRANSITION_TYPED),
@@ -51,6 +56,7 @@ AutocompleteMatch::AutocompleteMatch(AutocompleteProvider* provider,
 AutocompleteMatch::AutocompleteMatch(const AutocompleteMatch& match)
     : provider(match.provider),
       relevance(match.relevance),
+      typed_count(match.typed_count),
       deletable(match.deletable),
       fill_into_edit(match.fill_into_edit),
       inline_autocomplete_offset(match.inline_autocomplete_offset),
@@ -80,6 +86,7 @@ AutocompleteMatch& AutocompleteMatch::operator=(
 
   provider = match.provider;
   relevance = match.relevance;
+  typed_count = match.typed_count;
   deletable = match.deletable;
   fill_into_edit = match.fill_into_edit;
   inline_autocomplete_offset = match.inline_autocomplete_offset;
@@ -126,9 +133,9 @@ int AutocompleteMatch::TypeToIcon(Type type) {
   int icons[] = {
     IDR_OMNIBOX_HTTP,
     IDR_OMNIBOX_HTTP,
-    IDR_OMNIBOX_HISTORY,
-    IDR_OMNIBOX_HISTORY,
-    IDR_OMNIBOX_HISTORY,
+    IDR_OMNIBOX_HTTP,
+    IDR_OMNIBOX_HTTP,
+    IDR_OMNIBOX_HTTP,
     IDR_OMNIBOX_HTTP,
     IDR_OMNIBOX_SEARCH,
     IDR_OMNIBOX_SEARCH,
@@ -335,9 +342,13 @@ void AutocompleteMatch::ValidateClassifications(
   for (ACMatchClassifications::const_iterator i(classifications.begin() + 1);
        i != classifications.end(); ++i) {
     DCHECK_GT(i->offset, last_offset)
-        << "Classification unsorted for \"" << text << '"';
+        << " Classification for \"" << text << "\" with offset of " << i->offset
+        << " is unsorted in relation to last offset of " << last_offset
+        << ". Provider: " << (provider ? provider->name() : "None") << ".";
     DCHECK_LT(i->offset, text.length())
-        << "Classification out of bounds for \"" << text << '"';
+        << " Classification of [" << i->offset << "," << text.length()
+        << "] is out of bounds for \"" << text << "\". Provider: "
+        << (provider ? provider->name() : "None") << ".";
     last_offset = i->offset;
   }
 }

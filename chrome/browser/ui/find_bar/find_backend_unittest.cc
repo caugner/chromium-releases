@@ -8,22 +8,22 @@
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tab_contents/test_tab_contents.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/web_contents.h"
-#include "content/test/test_browser_thread.h"
-#include "content/test/web_contents_tester.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/web_contents_tester.h"
 
 using content::BrowserThread;
 using content::WebContents;
 using content::WebContentsTester;
 
-class FindBackendTest : public TabContentsWrapperTestHarness {
+class FindBackendTest : public TabContentsTestHarness {
  public:
   FindBackendTest()
-      : TabContentsWrapperTestHarness(),
+      : TabContentsTestHarness(),
         browser_thread_(BrowserThread::UI, &message_loop_) {}
 
  private:
@@ -42,7 +42,7 @@ string16 FindPrepopulateText(WebContents* contents) {
 // This test takes two WebContents objects, searches in both of them and
 // tests the internal state for find_text and find_prepopulate_text.
 TEST_F(FindBackendTest, InternalState) {
-  FindTabHelper* find_tab_helper = contents_wrapper()->find_tab_helper();
+  FindTabHelper* find_tab_helper = tab_contents()->find_tab_helper();
   // Initial state for the WebContents is blank strings.
   EXPECT_EQ(string16(), FindPrepopulateText(contents()));
   EXPECT_EQ(string16(), find_tab_helper->find_text());
@@ -50,8 +50,8 @@ TEST_F(FindBackendTest, InternalState) {
   // Get another WebContents object ready.
   WebContents* contents2 =
       WebContentsTester::CreateTestWebContents(profile(), NULL);
-  TabContentsWrapper wrapper2(contents2);
-  FindTabHelper* find_tab_helper2 = wrapper2.find_tab_helper();
+  TabContents tab_contents(contents2);
+  FindTabHelper* find_tab_helper2 = tab_contents.find_tab_helper();
 
   // No search has still been issued, strings should be blank.
   EXPECT_EQ(string16(), FindPrepopulateText(contents()));

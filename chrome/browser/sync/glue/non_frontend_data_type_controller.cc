@@ -9,14 +9,14 @@
 #include "base/logging.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "content/public/browser/browser_thread.h"
-#include "sync/syncable/model_type.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/util/data_type_histogram.h"
 
 using content::BrowserThread;
@@ -27,13 +27,12 @@ NonFrontendDataTypeController::NonFrontendDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile,
     ProfileSyncService* sync_service)
-    : profile_sync_factory_(profile_sync_factory),
+    : state_(NOT_RUNNING),
+      profile_sync_factory_(profile_sync_factory),
       profile_(profile),
       profile_sync_service_(sync_service),
-      state_(NOT_RUNNING),
       abort_association_(false),
       abort_association_complete_(false, false),
-      datatype_stopped_(false, false),
       start_association_called_(true, false),
       start_models_failed_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -42,31 +41,51 @@ NonFrontendDataTypeController::NonFrontendDataTypeController(
   DCHECK(profile_sync_service_);
 }
 
-void NonFrontendDataTypeController::Start(const StartCallback& start_callback) {
+void NonFrontendDataTypeController::LoadModels(
+    const ModelLoadCallback& model_load_callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!start_callback.is_null());
+  DCHECK(!model_load_callback.is_null());
   start_association_called_.Reset();
   start_models_failed_ = false;
   if (state_ != NOT_RUNNING) {
-    start_callback.Run(BUSY, SyncError());
+    model_load_callback.Run(type(), SyncError(FROM_HERE,
+                                              "Model already loaded",
+                                              type()));
     return;
   }
-
-  start_callback_ = start_callback;
-  abort_association_ = false;
 
   state_ = MODEL_STARTING;
   if (!StartModels()) {
     start_models_failed_ = true;
-    // If we are waiting for some external service to load before associating
-    // or we failed to start the models, we exit early.
+    // We failed to start the models. There is no point in waiting.
+    // Note: This code is deprecated. The only 2 datatypes here,
+    // passwords and typed urls, dont have any special loading. So if we
+    // get a false it means they failed.
     DCHECK(state_ == NOT_RUNNING || state_ == MODEL_STARTING
            || state_ == DISABLED);
+    model_load_callback.Run(type(), SyncError(FROM_HERE,
+                                              "Failed loading",
+                                              type()));
     return;
   }
+  state_ = MODEL_LOADED;
+
+  model_load_callback.Run(type(), SyncError());
+}
+
+void NonFrontendDataTypeController::OnModelLoaded() {
+  NOTREACHED();
+}
+
+void NonFrontendDataTypeController::StartAssociating(
+    const StartCallback& start_callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!start_callback.is_null());
+  DCHECK_EQ(state_, MODEL_LOADED);
 
   // Kick off association on the thread the datatype resides on.
   state_ = ASSOCIATING;
+  start_callback_ = start_callback;
   if (!StartAssociationAsync()) {
     SyncError error(FROM_HERE, "Failed to post StartAssociation", type());
     StartDoneImpl(ASSOCIATION_FAILED, DISABLED, error);
@@ -110,6 +129,14 @@ void NonFrontendDataTypeController::StopWhileAssociating() {
 
   StartDoneImpl(ABORTED, STOPPING, SyncError());
 }
+
+namespace {
+// Helper function that signals the UI thread once the StopAssociation task
+// has finished completing (this task is queued after the StopAssociation task).
+void SignalCallback(base::WaitableEvent* wait_event) {
+  wait_event->Signal();
+}
+}  // namespace
 
 void NonFrontendDataTypeController::Stop() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -187,10 +214,7 @@ void NonFrontendDataTypeController::Stop() {
       break;
     case MODEL_STARTING:
       state_ = STOPPING;
-      // If Stop() is called while Start() is waiting for the models to start,
-      // abort the start. We don't need to continue on since it means we haven't
-      // kicked off the association, and once we call StopModels, we never will.
-      StartDoneImpl(ABORTED, NOT_RUNNING, SyncError());
+      NOTREACHED();
       return;
     case DISABLED:
       state_ = NOT_RUNNING;
@@ -208,9 +232,7 @@ void NonFrontendDataTypeController::Stop() {
   // for any more changes or process them from server.
   profile_sync_service_->DeactivateDataType(type());
 
-  if (StopAssociationAsync()) {
-    datatype_stopped_.Wait();
-  } else {
+  if (!StopAssociationAsync()) {
     // We do DFATAL here because this will eventually lead to a failed CHECK
     // when the change processor gets destroyed on the wrong thread.
     LOG(DFATAL) << "Failed to destroy datatype " << name();
@@ -227,18 +249,6 @@ DataTypeController::State NonFrontendDataTypeController::state() const {
   return state_;
 }
 
-void NonFrontendDataTypeController::OnUnrecoverableError(
-    const tracked_objects::Location& from_here,
-    const std::string& message) {
-  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
-  RecordUnrecoverableError(from_here, message);
-  BrowserThread::PostTask(BrowserThread::UI, from_here,
-      base::Bind(&NonFrontendDataTypeController::OnUnrecoverableErrorImpl,
-                 this,
-                 from_here,
-                 message));
-}
-
 void NonFrontendDataTypeController::OnSingleDatatypeUnrecoverableError(
     const tracked_objects::Location& from_here,
     const std::string& message) {
@@ -252,13 +262,12 @@ void NonFrontendDataTypeController::OnSingleDatatypeUnrecoverableError(
 }
 
 NonFrontendDataTypeController::NonFrontendDataTypeController()
-    : profile_sync_factory_(NULL),
+    : state_(NOT_RUNNING),
+      profile_sync_factory_(NULL),
       profile_(NULL),
       profile_sync_service_(NULL),
-      state_(NOT_RUNNING),
       abort_association_(false),
       abort_association_complete_(false, false),
-      datatype_stopped_(false, false),
       start_association_called_(true, false) {
 }
 
@@ -338,18 +347,11 @@ void NonFrontendDataTypeController::StopModels() {
   // Do nothing by default.
 }
 
-void NonFrontendDataTypeController::OnUnrecoverableErrorImpl(
-    const tracked_objects::Location& from_here,
-    const std::string& message) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  profile_sync_service_->OnUnrecoverableError(from_here, message);
-}
-
 void NonFrontendDataTypeController::DisableImpl(
     const tracked_objects::Location& from_here,
     const std::string& message) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  profile_sync_service_->OnDisableDatatype(type(), from_here, message);
+  profile_sync_service_->DisableBrokenDatatype(type(), from_here, message);
 }
 
 void NonFrontendDataTypeController::RecordAssociationTime(
@@ -466,13 +468,31 @@ void NonFrontendDataTypeController::StartAssociation() {
 bool NonFrontendDataTypeController::StopAssociationAsync() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(state(), STOPPING);
-  return PostTaskOnBackendThread(
-      FROM_HERE,
-      base::Bind(
-          &NonFrontendDataTypeController::StopAssociation, this));
+  if (PostTaskOnBackendThread(
+          FROM_HERE,
+          base::Bind(
+              &NonFrontendDataTypeController::StopAssociation, this))) {
+    // The remote thread will hold on to a reference to this object until
+    // the StopAssociation task finishes running. We want to make sure that we
+    // do not return from this routine until there are no more references to
+    // this object on the remote thread, so we queue up the SignalCallback
+    // task below - this task does not maintain a reference to the DTC, so
+    // when it signals this thread, we know that the previous task has executed
+    // and there are no more lingering remote references to the DTC.
+    // This fixes the race described in http://crbug.com/127706.
+    base::WaitableEvent datatype_stopped(false, false);
+    if (PostTaskOnBackendThread(
+            FROM_HERE,
+            base::Bind(&SignalCallback, &datatype_stopped))) {
+      datatype_stopped.Wait();
+      return true;
+    }
+  }
+  return false;
 }
 
 void NonFrontendDataTypeController::StopAssociation() {
+  DCHECK(!HasOneRef());
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (model_associator_.get()) {
     SyncError error;  // Not used.
@@ -480,7 +500,6 @@ void NonFrontendDataTypeController::StopAssociation() {
   }
   model_associator_.reset();
   change_processor_.reset();
-  datatype_stopped_.Signal();
 }
 
 }  // namespace browser_sync

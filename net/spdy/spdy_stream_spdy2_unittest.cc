@@ -194,7 +194,8 @@ TEST_F(SpdyStreamSpdy2Test, SendDataAfterOpen) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   scoped_refptr<TransportSocketParams> transport_params(
-      new TransportSocketParams(host_port_pair, LOWEST, false, false));
+      new TransportSocketParams(host_port_pair, LOWEST, false, false,
+                                OnHostResolutionCallback()));
 
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(host_port_pair.ToString(), transport_params,
@@ -262,7 +263,9 @@ TEST_F(SpdyStreamSpdy2Test, PushedStream) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   scoped_refptr<TransportSocketParams> transport_params(
-      new TransportSocketParams(host_port_pair, LOWEST, false, false));
+      new TransportSocketParams(host_port_pair, LOWEST, false, false,
+                                OnHostResolutionCallback()));
+
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(host_port_pair.ToString(), transport_params,
                                  LOWEST, CompletionCallback(),
@@ -351,7 +354,7 @@ TEST_F(SpdyStreamSpdy2Test, StreamError) {
   reads[1].sequence_number = 3;
   reads[2].sequence_number = 4;
 
-  net::CapturingBoundNetLog log(net::CapturingNetLog::kUnbounded);
+  CapturingBoundNetLog log;
 
   scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
@@ -367,7 +370,8 @@ TEST_F(SpdyStreamSpdy2Test, StreamError) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   scoped_refptr<TransportSocketParams> transport_params(
-      new TransportSocketParams(host_port_pair, LOWEST, false, false));
+      new TransportSocketParams(host_port_pair, LOWEST, false, false,
+                                OnHostResolutionCallback()));
 
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(OK, connection->Init(host_port_pair.ToString(), transport_params,
@@ -416,7 +420,7 @@ TEST_F(SpdyStreamSpdy2Test, StreamError) {
   EXPECT_TRUE(delegate->closed());
 
   // Check that the NetLog was filled reasonably.
-  net::CapturingNetLog::EntryList entries;
+  net::CapturingNetLog::CapturedEntryList entries;
   log.GetEntries(&entries);
   EXPECT_LT(0u, entries.size());
 
@@ -426,11 +430,9 @@ TEST_F(SpdyStreamSpdy2Test, StreamError) {
       net::NetLog::TYPE_SPDY_STREAM_ERROR,
       net::NetLog::PHASE_NONE);
 
-  CapturingNetLog::Entry entry = entries[pos];
-  NetLogSpdyStreamErrorParameter* request_params =
-      static_cast<NetLogSpdyStreamErrorParameter*>(
-          entry.extra_parameters.get());
-  EXPECT_EQ(stream_id, request_params->stream_id());
+  int stream_id2;
+  ASSERT_TRUE(entries[pos].GetIntegerValue("stream_id", &stream_id2));
+  EXPECT_EQ(static_cast<int>(stream_id), stream_id2);
 }
 
 }  // namespace net

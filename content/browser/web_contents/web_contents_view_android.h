@@ -6,9 +6,16 @@
 #define CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_ANDROID_H_
 #pragma once
 
+#include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/public/browser/web_contents_view.h"
 
-class WebContentsViewAndroid : public content::WebContentsView {
+namespace content {
+class WebContents;
+}
+
+class WebContentsViewAndroid
+    : public content::WebContentsView,
+      public content::RenderViewHostDelegateView {
  public:
   explicit WebContentsViewAndroid(content::WebContents* web_contents);
   virtual ~WebContentsViewAndroid();
@@ -37,22 +44,9 @@ class WebContentsViewAndroid : public content::WebContentsView {
   virtual WebDropData* GetDropData() const OVERRIDE;
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
-  virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
+  virtual gfx::Rect GetViewBounds() const OVERRIDE;
 
-  // Backend implementation of RenderViewHostDelegate::View.
-  virtual void CreateNewWindow(
-      int route_id,
-      const ViewHostMsg_CreateWindow_Params& params) OVERRIDE;
-  virtual void CreateNewWidget(int route_id,
-                               WebKit::WebPopupType popup_type) OVERRIDE;
-  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
-  virtual void ShowCreatedWindow(int route_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
-                                 bool user_gesture) OVERRIDE;
-  virtual void ShowCreatedWidget(int route_id,
-                                 const gfx::Rect& initial_pos) OVERRIDE;
-  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+  // Backend implementation of RenderViewHostDelegateView.
   virtual void ShowContextMenu(
       const content::ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
@@ -60,7 +54,8 @@ class WebContentsViewAndroid : public content::WebContentsView {
                              double item_font_size,
                              int selected_item,
                              const std::vector<WebMenuItem>& items,
-                             bool right_aligned) OVERRIDE;
+                             bool right_aligned,
+                             bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_ops,
                              const SkBitmap& image,

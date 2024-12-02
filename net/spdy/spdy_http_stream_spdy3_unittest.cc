@@ -46,7 +46,8 @@ class SpdyHttpStreamSpdy3Test : public testing::Test {
     http_session_ = SpdySessionDependencies::SpdyCreateSession(&session_deps_);
     session_ = http_session_->spdy_session_pool()->Get(pair, BoundNetLog());
     transport_params_ = new TransportSocketParams(host_port_pair,
-                                      MEDIUM, false, false);
+                                                  MEDIUM, false, false,
+                                                  OnHostResolutionCallback());
     TestCompletionCallback callback;
     scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
     EXPECT_EQ(ERR_IO_PENDING,
@@ -106,8 +107,9 @@ TEST_F(SpdyHttpStreamSpdy3Test, SendRequest) {
       OK,
       http_stream->InitializeStream(&request, net_log, CompletionCallback()));
 
-  EXPECT_EQ(ERR_IO_PENDING, http_stream->SendRequest(headers, NULL, &response,
-                                                     callback.callback()));
+  EXPECT_EQ(ERR_IO_PENDING,
+            http_stream->SendRequest(headers, scoped_ptr<UploadDataStream>(),
+                                     &response, callback.callback()));
   EXPECT_TRUE(http_session_->spdy_session_pool()->HasSession(pair));
 
   // This triggers the MockWrite and read 2
@@ -163,11 +165,11 @@ TEST_F(SpdyHttpStreamSpdy3Test, SendChunkedPost) {
       OK,
       http_stream.InitializeStream(&request, net_log, CompletionCallback()));
 
-  // http_stream.SendRequest() will take ownership of upload_stream.
-  UploadDataStream* upload_stream = new UploadDataStream(request.upload_data);
+  scoped_ptr<UploadDataStream> upload_stream(
+      new UploadDataStream(request.upload_data));
   ASSERT_EQ(OK, upload_stream->Init());
   EXPECT_EQ(ERR_IO_PENDING, http_stream.SendRequest(
-      headers, upload_stream, &response, callback.callback()));
+      headers, upload_stream.Pass(), &response, callback.callback()));
   EXPECT_TRUE(http_session_->spdy_session_pool()->HasSession(pair));
 
   // This triggers the MockWrite and read 2
@@ -215,8 +217,9 @@ TEST_F(SpdyHttpStreamSpdy3Test, SpdyURLTest) {
       OK,
       http_stream->InitializeStream(&request, net_log, CompletionCallback()));
 
-  EXPECT_EQ(ERR_IO_PENDING, http_stream->SendRequest(headers, NULL, &response,
-                                                     callback.callback()));
+  EXPECT_EQ(ERR_IO_PENDING,
+            http_stream->SendRequest(headers, scoped_ptr<UploadDataStream>(),
+                                     &response, callback.callback()));
 
   SpdyHeaderBlock* spdy_header =
     http_stream->stream()->spdy_headers().get();
@@ -390,7 +393,8 @@ void SpdyHttpStreamSpdy3Test::TestSendCredentials(
       &session_deps_);
   session_ = http_session_->spdy_session_pool()->Get(pair, BoundNetLog());
   transport_params_ = new TransportSocketParams(host_port_pair,
-                                                MEDIUM, false, false);
+                                                MEDIUM, false, false,
+                                                OnHostResolutionCallback());
   TestCompletionCallback callback;
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   SSLConfig ssl_config;
@@ -434,8 +438,9 @@ void SpdyHttpStreamSpdy3Test::TestSendCredentials(
   //  GURL new_origin(kUrl2);
   //  EXPECT_TRUE(session_->NeedsCredentials(new_origin));
 
-  EXPECT_EQ(ERR_IO_PENDING, http_stream->SendRequest(headers, NULL, &response,
-                                                     callback.callback()));
+  EXPECT_EQ(ERR_IO_PENDING,
+            http_stream->SendRequest(headers, scoped_ptr<UploadDataStream>(),
+                                     &response, callback.callback()));
   EXPECT_TRUE(http_session_->spdy_session_pool()->HasSession(pair));
 
   data->RunFor(2);
@@ -448,8 +453,9 @@ void SpdyHttpStreamSpdy3Test::TestSendCredentials(
   ASSERT_EQ(
       OK,
       http_stream2->InitializeStream(&request, net_log, CompletionCallback()));
-  EXPECT_EQ(ERR_IO_PENDING, http_stream2->SendRequest(headers, NULL, &response,
-                                                     callback.callback()));
+  EXPECT_EQ(ERR_IO_PENDING,
+            http_stream2->SendRequest(headers, scoped_ptr<UploadDataStream>(),
+                                      &response, callback.callback()));
   data->RunFor(2);
   callback.WaitForResult();
 

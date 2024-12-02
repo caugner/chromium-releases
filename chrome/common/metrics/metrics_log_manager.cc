@@ -10,6 +10,8 @@
 #include "third_party/bzip2/bzlib.h"
 #endif
 
+#include <algorithm>
+
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "chrome/common/metrics/metrics_log_base.h"
@@ -35,6 +37,10 @@ MetricsLogManager::~MetricsLogManager() {}
 bool MetricsLogManager::SerializedLog::empty() const {
   DCHECK_EQ(xml.empty(), proto.empty());
   return xml.empty();
+}
+
+size_t MetricsLogManager::SerializedLog::length() const {
+  return std::max(xml.length(), proto.length());
 }
 
 void MetricsLogManager::SerializedLog::swap(SerializedLog& log) {
@@ -87,11 +93,17 @@ void MetricsLogManager::StageNextLogForUpload() {
 }
 
 bool MetricsLogManager::has_staged_log() const {
-  return !staged_log_text().empty();
+  return has_staged_log_proto() || has_staged_log_xml();
 }
 
 bool MetricsLogManager::has_staged_log_proto() const {
-  return has_staged_log() && staged_log_text().proto != kDiscardedLog;
+  return !staged_log_text().proto.empty() &&
+      staged_log_text().proto != kDiscardedLog;
+}
+
+bool MetricsLogManager::has_staged_log_xml() const {
+  return !staged_log_text().xml.empty() &&
+      staged_log_text().xml != kDiscardedLog;
 }
 
 void MetricsLogManager::DiscardStagedLog() {
@@ -102,6 +114,18 @@ void MetricsLogManager::DiscardStagedLog() {
 
 void MetricsLogManager::DiscardStagedLogProto() {
   staged_log_text_.proto = kDiscardedLog;
+
+  // If we're discarding the last piece of the log, reset the staged log state.
+  if (!has_staged_log())
+    DiscardStagedLog();
+}
+
+void MetricsLogManager::DiscardStagedLogXml() {
+  staged_log_text_.xml = kDiscardedLog;
+
+  // If we're discarding the last piece of the log, reset the staged log state.
+  if (!has_staged_log())
+    DiscardStagedLog();
 }
 
 void MetricsLogManager::DiscardCurrentLog() {

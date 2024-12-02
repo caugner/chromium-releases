@@ -21,6 +21,7 @@
 #include "googleurl/src/gurl.h"
 #include "grit/app_locale_settings.h"
 #include "grit/generated_resources.h"
+#include "grit/ui_strings.h"
 #include "net/base/escape.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -42,11 +43,8 @@
 #include "ui/views/views_delegate.h"
 
 #if defined(USE_AURA)
+#include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
-#endif
-
-#if defined(OS_WIN)
-#include "chrome/browser/ui/views/omnibox/omnibox_view_win.h"
 #endif
 
 using content::WebContents;
@@ -86,7 +84,22 @@ class AutocompleteTextfield : public views::Textfield {
   }
 
   virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE {
-    return omnibox_view_->HandleMousePressEvent(event);
+    // Pass through the views::Textfield's return value; we don't need to
+    // override its behavior.
+    bool result = views::Textfield::OnMousePressed(event);
+    omnibox_view_->HandleMousePressEvent(event);
+    return result;
+  }
+
+  virtual bool OnMouseDragged(const views::MouseEvent& event) OVERRIDE {
+    bool result = views::Textfield::OnMouseDragged(event);
+    omnibox_view_->HandleMouseDragEvent(event);
+    return result;
+  }
+
+  virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE {
+    views::Textfield::OnMouseReleased(event);
+    omnibox_view_->HandleMouseReleaseEvent(event);
   }
 
  private:
@@ -170,7 +183,8 @@ OmniboxViewViews::OmniboxViewViews(AutocompleteEditController* controller,
                                    CommandUpdater* command_updater,
                                    bool popup_window_mode,
                                    LocationBarView* location_bar)
-    : popup_window_mode_(popup_window_mode),
+    : textfield_(NULL),
+      popup_window_mode_(popup_window_mode),
       model_(new AutocompleteEditModel(this, controller, profile)),
       controller_(controller),
       toolbar_model_(toolbar_model),
@@ -179,7 +193,8 @@ OmniboxViewViews::OmniboxViewViews(AutocompleteEditController* controller,
       ime_composing_before_change_(false),
       delete_at_end_pressed_(false),
       location_bar_view_(location_bar),
-      ime_candidate_window_open_(false) {
+      ime_candidate_window_open_(false),
+      select_all_on_mouse_release_(false) {
 }
 
 OmniboxViewViews::~OmniboxViewViews() {
@@ -215,7 +230,7 @@ void OmniboxViewViews::Init() {
 
   // Create popup view using the same font as |textfield_|'s.
   popup_view_.reset(
-      new AutocompletePopupContentsView(
+      AutocompletePopupContentsView::CreateForEnvironment(
           textfield_->font(), this, model_.get(), location_bar_view_));
 
   const int vertical_margin = !popup_window_mode_ ?
@@ -226,6 +241,19 @@ void OmniboxViewViews::Init() {
   chromeos::input_method::InputMethodManager::GetInstance()->
       AddCandidateWindowObserver(this);
 #endif
+}
+
+gfx::Font OmniboxViewViews::GetFont() {
+  return textfield_->font();
+}
+
+int OmniboxViewViews::WidthOfTextAfterCursor() {
+  ui::Range sel;
+  textfield_->GetSelectedRange(&sel);
+  // See comments in LocationBarView::Layout as to why this uses -1.
+  const int start = std::max(0, static_cast<int>(sel.end()) - 1);
+  // TODO: add horizontal margin.
+  return textfield_->font().GetStringWidth(GetText().substr(start));
 }
 
 bool OmniboxViewViews::HandleAfterKeyEvent(const views::KeyEvent& event,
@@ -304,14 +332,22 @@ bool OmniboxViewViews::HandleKeyReleaseEvent(const views::KeyEvent& event) {
   return false;
 }
 
-bool OmniboxViewViews::HandleMousePressEvent(const views::MouseEvent& event) {
-  if (!textfield_->HasFocus() && !textfield_->HasSelection()) {
-    textfield_->SelectAll();
-    textfield_->RequestFocus();
-    return true;
-  }
+void OmniboxViewViews::HandleMousePressEvent(const views::MouseEvent& event) {
+  select_all_on_mouse_release_ =
+      (event.IsOnlyLeftMouseButton() || event.IsOnlyRightMouseButton()) &&
+      !textfield_->HasFocus();
+}
 
-  return false;
+void OmniboxViewViews::HandleMouseDragEvent(const views::MouseEvent& event) {
+  select_all_on_mouse_release_ = false;
+}
+
+void OmniboxViewViews::HandleMouseReleaseEvent(const views::MouseEvent& event) {
+  if ((event.IsOnlyLeftMouseButton() || event.IsOnlyRightMouseButton()) &&
+      select_all_on_mouse_release_) {
+    textfield_->SelectAll();
+  }
+  select_all_on_mouse_release_ = false;
 }
 
 void OmniboxViewViews::HandleFocusIn() {
@@ -328,7 +364,7 @@ void OmniboxViewViews::HandleFocusOut() {
   if (widget) {
     aura::RootWindow* root = widget->GetNativeView()->GetRootWindow();
     if (root)
-      native_view = root->focused_window();
+      native_view = root->GetFocusManager()->GetFocusedWindow();
   }
 #endif
   model_->OnWillKillFocus(native_view);
@@ -493,7 +529,7 @@ void OmniboxViewViews::SetForcedQuery() {
     textfield_->SelectRange(ui::Range(current_text.size(), start + 1));
 }
 
-bool OmniboxViewViews::IsSelectAll() {
+bool OmniboxViewViews::IsSelectAll() const {
   // TODO(oshima): IME support.
   return textfield_->text() == textfield_->GetSelectedText();
 }
@@ -506,8 +542,15 @@ void OmniboxViewViews::GetSelectionBounds(string16::size_type* start,
                                           string16::size_type* end) const {
   ui::Range range;
   textfield_->GetSelectedRange(&range);
-  *start = static_cast<size_t>(range.end());
-  *end = static_cast<size_t>(range.start());
+  if (range.is_empty()) {
+    // Omnibox API expects that selection bounds is at cursor position
+    // if there is no selection.
+    *start = textfield_->GetCursorPosition();
+    *end = textfield_->GetCursorPosition();
+  } else {
+    *start = static_cast<size_t>(range.end());
+    *end = static_cast<size_t>(range.start());
+  }
 }
 
 void OmniboxViewViews::SelectAll(bool reversed) {
@@ -626,11 +669,7 @@ gfx::NativeView OmniboxViewViews::GetNativeView() const {
 }
 
 gfx::NativeView OmniboxViewViews::GetRelativeWindowForPopup() const {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  return OmniboxViewWin::GetRelativeWindowForNativeView(GetNativeView());
-#else
   return GetWidget()->GetTopLevelWidget()->GetNativeView();
-#endif
 }
 
 CommandUpdater* OmniboxViewViews::GetCommandUpdater() {
@@ -727,7 +766,7 @@ void OmniboxViewViews::OnAfterCutOrCopy() {
   const string16 text = textfield_->text();
   GURL url;
   bool write_url;
-  model_->AdjustTextForCopy(selection_range.start(), selected_text == text,
+  model_->AdjustTextForCopy(selection_range.GetMin(), selected_text == text,
       &selected_text, &url, &write_url);
   ui::ScopedClipboardWriter scw(cb, ui::Clipboard::BUFFER_STANDARD);
   scw.WriteText(selected_text);
@@ -758,13 +797,26 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
   // on IDC_ for now.
   menu_contents->AddItemWithStringId(IDC_EDIT_SEARCH_ENGINES,
       IDS_EDIT_SEARCH_ENGINES);
+
+  int paste_position = menu_contents->GetIndexOfCommandId(IDS_APP_PASTE);
+  if (paste_position >= 0)
+    menu_contents->InsertItemWithStringIdAt(
+        paste_position + 1, IDS_PASTE_AND_GO, IDS_PASTE_AND_GO);
 }
 
 bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
+  if (command_id == IDS_PASTE_AND_GO)
+    return !popup_window_mode_ && model_->CanPasteAndGo(GetClipboardText());
+
   return command_updater_->IsCommandEnabled(command_id);
 }
 
 void OmniboxViewViews::ExecuteCommand(int command_id) {
+  if (command_id == IDS_PASTE_AND_GO) {
+    model_->PasteAndGo();
+    return;
+  }
+
   command_updater_->ExecuteCommand(command_id);
 }
 
@@ -841,23 +893,3 @@ string16 OmniboxViewViews::GetSelectedText() const {
   // TODO(oshima): Support instant, IME.
   return textfield_->GetSelectedText();
 }
-
-#if defined(USE_AURA)
-// static
-OmniboxView* OmniboxView::CreateOmniboxView(
-    AutocompleteEditController* controller,
-    ToolbarModel* toolbar_model,
-    Profile* profile,
-    CommandUpdater* command_updater,
-    bool popup_window_mode,
-    LocationBarView* location_bar) {
-  OmniboxViewViews* omnibox_view = new OmniboxViewViews(controller,
-                                                        toolbar_model,
-                                                        profile,
-                                                        command_updater,
-                                                        popup_window_mode,
-                                                        location_bar);
-  omnibox_view->Init();
-  return omnibox_view;
-}
-#endif

@@ -48,7 +48,7 @@ void TCPListenSocketTester::SetUp() {
 
   // verify the connect/accept and setup test_socket_
   test_socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  ASSERT_NE(INVALID_SOCKET, test_socket_);
+  ASSERT_NE(StreamListenSocket::kInvalidSocket, test_socket_);
   struct sockaddr_in client;
   client.sin_family = AF_INET;
   client.sin_addr.s_addr = inet_addr(kLoopback);
@@ -56,7 +56,7 @@ void TCPListenSocketTester::SetUp() {
   int ret = HANDLE_EINTR(
       connect(test_socket_, reinterpret_cast<sockaddr*>(&client),
               sizeof(client)));
-  ASSERT_NE(ret, SOCKET_ERROR);
+  ASSERT_NE(ret, StreamListenSocket::kSocketError);
 
   NextAction();
   ASSERT_EQ(ACTION_ACCEPT, last_action_.type());
@@ -100,7 +100,7 @@ int TCPListenSocketTester::ClearTestSocket() {
   int len_ret = 0;
   do {
     int len = HANDLE_EINTR(recv(test_socket_, buf, kReadBufSize, 0));
-    if (len == SOCKET_ERROR || len == 0) {
+    if (len == StreamListenSocket::kSocketError || len == 0) {
       break;
     } else {
       len_ret += len;
@@ -119,10 +119,9 @@ void TCPListenSocketTester::Shutdown() {
 
 void TCPListenSocketTester::Listen() {
   server_ = DoListen();
-  if (server_) {
-    server_->AddRef();
-    ReportAction(TCPListenSocketTestAction(ACTION_LISTEN));
-  }
+  ASSERT_TRUE(server_);
+  server_->AddRef();
+  ReportAction(TCPListenSocketTestAction(ACTION_LISTEN));
 }
 
 void TCPListenSocketTester::SendFromTester() {
@@ -179,10 +178,43 @@ void TCPListenSocketTester::TestServerSend() {
   ASSERT_STREQ(buf, kHelloWorld);
 }
 
-bool TCPListenSocketTester::Send(SOCKET sock, const std::string& str) {
+void TCPListenSocketTester::TestServerSendMultiple() {
+  // Send enough data to exceed the socket receive window. 20kb is probably a
+  // safe bet.
+  int send_count = (1024*20) / (sizeof(kHelloWorld)-1);
+  int i;
+
+  // Send multiple writes. Since no reading is occuring the data should be
+  // buffered in TCPListenSocket.
+  for (i = 0; i < send_count; ++i) {
+    loop_->PostTask(FROM_HERE, base::Bind(
+        &TCPListenSocketTester::SendFromTester, this));
+    NextAction();
+    ASSERT_EQ(ACTION_SEND, last_action_.type());
+  }
+
+  // Make multiple reads. All of the data should eventually be returned.
+  char buf[sizeof(kHelloWorld)];
+  const int buf_len = sizeof(kHelloWorld);
+  for (i = 0; i < send_count; ++i) {
+    unsigned recv_len = 0;
+    while (recv_len < buf_len-1) {
+      int r = HANDLE_EINTR(recv(test_socket_, buf, buf_len-1, 0));
+      ASSERT_GE(r, 0);
+      recv_len += static_cast<unsigned>(r);
+      if (!r)
+        break;
+    }
+    buf[recv_len] = 0;
+    ASSERT_STREQ(buf, kHelloWorld);
+  }
+}
+
+bool TCPListenSocketTester::Send(SocketDescriptor sock,
+                                 const std::string& str) {
   int len = static_cast<int>(str.length());
   int send_len = HANDLE_EINTR(send(sock, str.data(), len, 0));
-  if (send_len == SOCKET_ERROR) {
+  if (send_len == StreamListenSocket::kSocketError) {
     LOG(ERROR) << "send failed: " << errno;
     return false;
   } else if (send_len != len) {
@@ -191,27 +223,27 @@ bool TCPListenSocketTester::Send(SOCKET sock, const std::string& str) {
   return true;
 }
 
-void TCPListenSocketTester::DidAccept(ListenSocket *server,
-                                      ListenSocket *connection) {
+void TCPListenSocketTester::DidAccept(StreamListenSocket* server,
+                                      StreamListenSocket* connection) {
   connection_ = connection;
   connection_->AddRef();
   ReportAction(TCPListenSocketTestAction(ACTION_ACCEPT));
 }
 
-void TCPListenSocketTester::DidRead(ListenSocket *connection,
+void TCPListenSocketTester::DidRead(StreamListenSocket* connection,
                                     const char* data,
                                     int len) {
   std::string str(data, len);
   ReportAction(TCPListenSocketTestAction(ACTION_READ, str));
 }
 
-void TCPListenSocketTester::DidClose(ListenSocket *sock) {
+void TCPListenSocketTester::DidClose(StreamListenSocket* sock) {
   ReportAction(TCPListenSocketTestAction(ACTION_CLOSE));
 }
 
 TCPListenSocketTester::~TCPListenSocketTester() {}
 
-TCPListenSocket* TCPListenSocketTester::DoListen() {
+scoped_refptr<TCPListenSocket> TCPListenSocketTester::DoListen() {
   return TCPListenSocket::CreateAndListen(kLoopback, kTestPort, this);
 }
 
@@ -246,6 +278,10 @@ TEST_F(TCPListenSocketTest, ClientSendLong) {
 
 TEST_F(TCPListenSocketTest, ServerSend) {
   tester_->TestServerSend();
+}
+
+TEST_F(TCPListenSocketTest, ServerSendMultiple) {
+  tester_->TestServerSendMultiple();
 }
 
 }  // namespace net

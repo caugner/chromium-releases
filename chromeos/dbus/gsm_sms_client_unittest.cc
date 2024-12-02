@@ -312,7 +312,7 @@ TEST_F(GsmSMSClientTest, List) {
       kTextKey, base::Value::CreateStringValue(kExampleText));
   expected_result.Append(sms);
   expected_result_ = &expected_result;
-  // Call Delete.
+  // Call List.
   client_->List(kServiceName, dbus::ObjectPath(kObjectPath),
                 base::Bind(&MockListCallback::Run,
                            base::Unretained(&callback)));

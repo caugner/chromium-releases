@@ -12,6 +12,7 @@
 #include "chromeos/dbus/bluetooth_adapter_client.h"
 #include "chromeos/dbus/bluetooth_device_client.h"
 #include "chromeos/dbus/bluetooth_manager_client.h"
+#include "chromeos/dbus/bluetooth_out_of_band_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "dbus/object_path.h"
 
@@ -149,18 +150,25 @@ bool BluetoothAdapter::IsPowered() const {
   return powered_;
 }
 
-void BluetoothAdapter::SetPowered(bool powered, ErrorCallback callback) {
+void BluetoothAdapter::SetPowered(bool powered,
+                                  const base::Closure& callback,
+                                  const ErrorCallback& error_callback) {
   DBusThreadManager::Get()->GetBluetoothAdapterClient()->
       GetProperties(object_path_)->powered.Set(
           powered,
           base::Bind(&BluetoothAdapter::OnSetPowered,
                      weak_ptr_factory_.GetWeakPtr(),
-                     callback));
+                     callback,
+                     error_callback));
 }
 
-void BluetoothAdapter::OnSetPowered(ErrorCallback callback, bool success) {
-  if (!success)
+void BluetoothAdapter::OnSetPowered(const base::Closure& callback,
+                                    const ErrorCallback& error_callback,
+                                    bool success) {
+  if (success)
     callback.Run();
+  else
+    error_callback.Run();
 }
 
 void BluetoothAdapter::PoweredChanged(bool powered) {
@@ -178,23 +186,27 @@ bool BluetoothAdapter::IsDiscovering() const {
 }
 
 void BluetoothAdapter::SetDiscovering(bool discovering,
-                                      ErrorCallback callback) {
+                                      const base::Closure& callback,
+                                      const ErrorCallback& error_callback) {
   if (discovering) {
     DBusThreadManager::Get()->GetBluetoothAdapterClient()->
         StartDiscovery(object_path_,
                        base::Bind(&BluetoothAdapter::OnStartDiscovery,
                                   weak_ptr_factory_.GetWeakPtr(),
-                                  callback));
+                                  callback,
+                                  error_callback));
   } else {
     DBusThreadManager::Get()->GetBluetoothAdapterClient()->
         StopDiscovery(object_path_,
                       base::Bind(&BluetoothAdapter::OnStopDiscovery,
                                  weak_ptr_factory_.GetWeakPtr(),
-                                 callback));
+                                 callback,
+                                 error_callback));
   }
 }
 
-void BluetoothAdapter::OnStartDiscovery(ErrorCallback callback,
+void BluetoothAdapter::OnStartDiscovery(const base::Closure& callback,
+                                        const ErrorCallback& error_callback,
                                         const dbus::ObjectPath& adapter_path,
                                         bool success) {
   if (success) {
@@ -202,24 +214,26 @@ void BluetoothAdapter::OnStartDiscovery(ErrorCallback callback,
 
     // Clear devices found in previous discovery attempts
     ClearDiscoveredDevices();
+    callback.Run();
   } else {
     // TODO(keybuk): in future, don't run the callback if the error was just
     // that we were already discovering.
-    callback.Run();
+    error_callback.Run();
   }
 }
 
-void BluetoothAdapter::OnStopDiscovery(ErrorCallback callback,
+void BluetoothAdapter::OnStopDiscovery(const base::Closure& callback,
+                                       const ErrorCallback& error_callback,
                                        const dbus::ObjectPath& adapter_path,
                                        bool success) {
   if (success) {
     DVLOG(1) << object_path_.value() << ": stopped discovery.";
-
+    callback.Run();
     // Leave found devices available for perusing.
   } else {
     // TODO(keybuk): in future, don't run the callback if the error was just
     // that we weren't discovering.
-    callback.Run();
+    error_callback.Run();
   }
 }
 
@@ -231,6 +245,17 @@ void BluetoothAdapter::DiscoveringChanged(bool discovering) {
 
   FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
                     AdapterDiscoveringChanged(this, discovering_));
+}
+
+void BluetoothAdapter::OnReadLocalData(
+    const BluetoothOutOfBandPairingDataCallback& callback,
+    const ErrorCallback& error_callback,
+    const BluetoothOutOfBandPairingData& data,
+    bool success) {
+  if (success)
+    callback.Run(data);
+  else
+    error_callback.Run();
 }
 
 void BluetoothAdapter::AdapterPropertyChanged(
@@ -276,7 +301,7 @@ void BluetoothAdapter::UpdateDevice(const dbus::ObjectPath& device_path) {
   // or it may be the device going from discovered to connected and gaining
   // an object path. Update the existing object and notify observers.
   DevicesMap::iterator iter = devices_.find(address);
-  if (iter != devices_.end()){
+  if (iter != devices_.end()) {
     BluetoothDevice* device = iter->second;
 
     if (!device->IsPaired())
@@ -333,16 +358,28 @@ const BluetoothDevice* BluetoothAdapter::GetDevice(
   return NULL;
 }
 
+void BluetoothAdapter::ReadLocalOutOfBandPairingData(
+    const BluetoothOutOfBandPairingDataCallback& callback,
+    const ErrorCallback& error_callback) {
+  DBusThreadManager::Get()->GetBluetoothOutOfBandClient()->
+      ReadLocalData(object_path_,
+          base::Bind(&BluetoothAdapter::OnReadLocalData,
+              weak_ptr_factory_.GetWeakPtr(),
+              callback,
+              error_callback));
+}
+
 void BluetoothAdapter::ClearDevices() {
-  for (DevicesMap::iterator iter = devices_.begin();
-       iter != devices_.end(); ++iter) {
+  DevicesMap replace;
+  devices_.swap(replace);
+  for (DevicesMap::iterator iter = replace.begin();
+       iter != replace.end(); ++iter) {
     BluetoothDevice* device = iter->second;
     FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
                       DeviceRemoved(this, device));
 
     delete device;
   }
-  devices_.clear();
 }
 
 void BluetoothAdapter::DeviceCreated(const dbus::ObjectPath& adapter_path,

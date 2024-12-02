@@ -24,12 +24,13 @@
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sorting.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
@@ -52,6 +53,7 @@
 #include "ui/gfx/codec/png_codec.h"
 
 using content::WebContents;
+using extensions::Extension;
 
 namespace {
 
@@ -112,6 +114,10 @@ void AppLauncherHandler::CreateAppInfo(const Extension* extension,
   bool enabled = service->IsExtensionEnabled(extension->id()) &&
       !service->GetTerminatedExtension(extension->id());
   extension->GetBasicInfo(enabled, value);
+
+  value->SetBoolean("mayDisable", ExtensionSystem::Get(
+      service->profile())->management_policy()->UserMayModifySettings(
+      extension, NULL));
 
   bool icon_big_exists = true;
   // Instead of setting grayscale here, we do it in apps_page.js.
@@ -273,15 +279,16 @@ void AppLauncherHandler::Observe(int type,
     }
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
       const Extension* extension =
-          content::Details<UnloadedExtensionInfo>(details)->extension;
+          content::Details<extensions::UnloadedExtensionInfo>(
+              details)->extension;
       if (!extension->is_app())
         return;
 
       scoped_ptr<DictionaryValue> app_info(GetAppInfo(extension));
       scoped_ptr<base::FundamentalValue> uninstall_value(
           Value::CreateBooleanValue(
-              content::Details<UnloadedExtensionInfo>(details)->reason ==
-              extension_misc::UNLOAD_REASON_UNINSTALL));
+              content::Details<extensions::UnloadedExtensionInfo>(
+                  details)->reason == extension_misc::UNLOAD_REASON_UNINSTALL));
       if (app_info.get()) {
         scoped_ptr<base::FundamentalValue> from_page(
             Value::CreateBooleanValue(!extension_id_prompting_.empty()));
@@ -542,13 +549,14 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
 
   if (disposition == NEW_FOREGROUND_TAB || disposition == NEW_BACKGROUND_TAB) {
     // TODO(jamescook): Proper support for background tabs.
-    Browser::OpenApplication(
-        profile, extension, extension_misc::LAUNCH_TAB, GURL(url), disposition);
+    application_launch::OpenApplication(
+        profile, extension, extension_misc::LAUNCH_TAB, GURL(url), disposition,
+        NULL);
   } else if (disposition == NEW_WINDOW) {
     // Force a new window open.
-    Browser::OpenApplication(
+    application_launch::OpenApplication(
         profile, extension, extension_misc::LAUNCH_WINDOW, GURL(url),
-        disposition);
+        disposition, NULL);
   } else {
     // Look at preference to find the right launch container.  If no preference
     // is set, launch as a regular tab.
@@ -558,14 +566,14 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
 
     // To give a more "launchy" experience when using the NTP launcher, we close
     // it automatically.
-    Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+    Browser* browser = browser::FindLastActiveWithProfile(profile);
     WebContents* old_contents = NULL;
     if (browser)
-      old_contents = browser->GetSelectedWebContents();
+      old_contents = browser->GetActiveWebContents();
 
-    WebContents* new_contents = Browser::OpenApplication(
+    WebContents* new_contents = application_launch::OpenApplication(
         profile, extension, launch_container, GURL(url),
-        old_contents ? CURRENT_TAB : NEW_FOREGROUND_TAB);
+        old_contents ? CURRENT_TAB : NEW_FOREGROUND_TAB, NULL);
 
     // This will also destroy the handler, so do not perform any actions after.
     if (new_contents != old_contents && browser && browser->tab_count() > 1)
@@ -602,7 +610,8 @@ void AppLauncherHandler::HandleUninstallApp(const ListValue* args) {
   if (!extension)
     return;
 
-  if (!Extension::UserMayDisable(extension->location())) {
+  if (!ExtensionSystem::Get(extension_service_->profile())->
+        management_policy()->UserMayModifySettings(extension, NULL)) {
     LOG(ERROR) << "Attempt to uninstall an extension that is non-usermanagable "
                << "was made. Extension id : " << extension->id();
     return;
@@ -630,7 +639,7 @@ void AppLauncherHandler::HandleCreateAppShortcut(const ListValue* args) {
   if (!extension)
     return;
 
-  Browser* browser = BrowserList::GetLastActiveWithProfile(
+  Browser* browser = browser::FindLastActiveWithProfile(
       extension_service_->profile());
   if (!browser)
     return;
@@ -837,16 +846,6 @@ void AppLauncherHandler::RecordAppLaunchType(
     extension_misc::AppLaunchBucket bucket) {
   UMA_HISTOGRAM_ENUMERATION(extension_misc::kAppLaunchHistogram, bucket,
                             extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
-
-  static const bool webstore_link_experiment_exists =
-      base::FieldTrialList::TrialExists(kWebStoreLinkExperiment);
-  if (webstore_link_experiment_exists) {
-    UMA_HISTOGRAM_ENUMERATION(
-        base::FieldTrial::MakeName(extension_misc::kAppLaunchHistogram,
-                                   kWebStoreLinkExperiment),
-        bucket,
-        extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
-  }
 }
 
 // static
@@ -914,7 +913,7 @@ void AppLauncherHandler::PromptToEnableApp(const std::string& extension_id) {
     return;  // Only one prompt at a time.
 
   extension_id_prompting_ = extension_id;
-  GetExtensionInstallUI()->ConfirmReEnable(this, extension);
+  GetExtensionInstallPrompt()->ConfirmReEnable(this, extension);
 }
 
 void AppLauncherHandler::ExtensionUninstallAccepted() {
@@ -982,18 +981,19 @@ ExtensionUninstallDialog* AppLauncherHandler::GetExtensionUninstallDialog() {
   return extension_uninstall_dialog_.get();
 }
 
-ExtensionInstallUI* AppLauncherHandler::GetExtensionInstallUI() {
+ExtensionInstallPrompt* AppLauncherHandler::GetExtensionInstallPrompt() {
   if (!extension_install_ui_.get()) {
-    extension_install_ui_.reset(
-        new ExtensionInstallUI(Profile::FromWebUI(web_ui())));
+    Browser* browser = browser::FindBrowserWithWebContents(
+        web_ui()->GetWebContents());
+    extension_install_ui_.reset(new ExtensionInstallPrompt(browser));
   }
   return extension_install_ui_.get();
 }
 
 void AppLauncherHandler::UninstallDefaultApps() {
   AppsPromo* apps_promo = extension_service_->apps_promo();
-  const ExtensionIdSet& app_ids = apps_promo->old_default_apps();
-  for (ExtensionIdSet::const_iterator iter = app_ids.begin();
+  const extensions::ExtensionIdSet& app_ids = apps_promo->old_default_apps();
+  for (extensions::ExtensionIdSet::const_iterator iter = app_ids.begin();
        iter != app_ids.end(); ++iter) {
     if (extension_service_->GetExtensionById(*iter, true))
       extension_service_->UninstallExtension(*iter, false, NULL);

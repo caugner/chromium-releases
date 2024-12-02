@@ -8,10 +8,11 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/path_service.h"
-#include "ui/base/resource/resource_handle.h"
 #include "base/synchronization/lock.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/gtk/scoped_gobject.h"
+#include "ui/base/layout.h"
+#include "ui/base/resource/resource_handle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/gfx/image/image.h"
 
@@ -56,18 +57,20 @@ FilePath GetResourcesPakFilePath(const std::string& pak_name) {
   FilePath path;
   if (PathService::Get(base::DIR_MODULE, &path))
     return path.AppendASCII(pak_name.c_str());
-  return FilePath();
+
+  // Return just the name of the pack file.
+  return FilePath(pak_name.c_str());
 }
 
 }  // namespace
 
 void ResourceBundle::LoadCommonResources() {
   AddDataPack(GetResourcesPakFilePath("chrome.pak"),
-              ResourceHandle::kScaleFactor100x);
+              SCALE_FACTOR_100P);
   AddDataPack(GetResourcesPakFilePath("theme_resources_standard.pak"),
-              ResourceHandle::kScaleFactor100x);
+              SCALE_FACTOR_100P);
   AddDataPack(GetResourcesPakFilePath("ui_resources_standard.pak"),
-              ResourceHandle::kScaleFactor100x);
+              SCALE_FACTOR_100P);
 }
 
 gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id, ImageRTL rtl) {
@@ -77,33 +80,36 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id, ImageRTL rtl) {
   // Check to see if the image is already in the cache.
   {
     base::AutoLock lock_scope(*images_and_fonts_lock_);
-    ImageMap::const_iterator found = images_.find(key);
-    if (found != images_.end())
-      return *found->second;
+    if (images_.count(key))
+      return images_[key];
   }
 
-  scoped_refptr<base::RefCountedStaticMemory> data(
-      LoadDataResourceBytes(resource_id));
-  GdkPixbuf* pixbuf = LoadPixbuf(data.get(), rtl == RTL_ENABLED);
+  gfx::Image image;
+  if (delegate_)
+    image = delegate_->GetNativeImageNamed(resource_id, rtl);
 
-  // The load was successful, so cache the image.
-  if (pixbuf) {
-    base::AutoLock lock_scope(*images_and_fonts_lock_);
+  if (image.IsEmpty()) {
+    scoped_refptr<base::RefCountedStaticMemory> data(
+        LoadDataResourceBytes(resource_id, SCALE_FACTOR_100P));
+    GdkPixbuf* pixbuf = LoadPixbuf(data.get(), rtl == RTL_ENABLED);
 
-    // Another thread raced the load and has already cached the image.
-    if (images_.count(key)) {
-      g_object_unref(pixbuf);
-      return *images_[key];
+    if (!pixbuf) {
+      LOG(WARNING) << "Unable to load pixbuf with id " << resource_id;
+      NOTREACHED();  // Want to assert in debug mode.
+      return GetEmptyImage();
     }
 
-    gfx::Image* image = new gfx::Image(pixbuf);  // Takes ownership.
-    images_[key] = image;
-    return *image;
+    image = gfx::Image(pixbuf);  // Takes ownership.
   }
 
-  LOG(WARNING) << "Unable to pixbuf with id " << resource_id;
-  NOTREACHED();  // Want to assert in debug mode.
-  return *GetEmptyImage();
+  base::AutoLock lock_scope(*images_and_fonts_lock_);
+
+  // Another thread raced the load and has already cached the image.
+  if (images_.count(key))
+    return images_[key];
+
+  images_[key] = image;
+  return images_[key];
 }
 
 }  // namespace ui

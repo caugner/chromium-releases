@@ -10,7 +10,6 @@
 
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process.h"
 #include "build/build_config.h"
@@ -70,8 +69,7 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   // module ID will be set upon receipt of the InitializeModule message.
   //
   // You must call InitPluginWithChannel after the constructor.
-  PluginDispatcher(base::ProcessHandle remote_process_handle,
-                   PP_GetInterface_Func get_interface,
+  PluginDispatcher(PP_GetInterface_Func get_interface,
                    bool incognito);
   virtual ~PluginDispatcher();
 

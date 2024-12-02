@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_ASH_LAUNCHER_CHROME_LAUNCHER_CONTROLLER_H_
 #pragma once
 
-#include <deque>
+#include <list>
 #include <map>
 #include <string>
 
@@ -18,34 +18,53 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_prefs.h"
+#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/aura/client/activation_change_observer.h"
+#include "ui/aura/window_observer.h"
 
 namespace ash {
 class LauncherModel;
+}
+
+namespace aura {
+class Window;
+
+namespace client {
+class ActivationClient;
+}
+
 }
 
 class BrowserLauncherItemController;
 class BrowserLauncherItemControllerTest;
 class PrefService;
 class Profile;
-class TabContentsWrapper;
+class TabContents;
 
 // ChromeLauncherController manages the launcher items needed for tabbed
 // browsers (BrowserLauncherItemController) and browser shortcuts.
 class ChromeLauncherController : public ash::LauncherDelegate,
                                  public ash::LauncherModelObserver,
-                                 public content::NotificationObserver {
+                                 public content::NotificationObserver,
+                                 public ShellWindowRegistry::Observer,
+                                 public aura::client::ActivationChangeObserver,
+                                 public aura::WindowObserver {
  public:
-  // Path within the dictionary entries in the prefs::kPinnedLauncherApps list
-  // specifying the extension ID of the app to be pinned by that entry.
-  static const char kPinnedAppsPrefAppIDPath[];
-
   // Indicates if a launcher item is incognito or not.
   enum IncognitoState {
     STATE_INCOGNITO,
     STATE_NOT_INCOGNITO,
+  };
+
+  // Used to update the state of non plaform apps, as tab contents change.
+  enum AppState {
+    APP_STATE_ACTIVE,
+    APP_STATE_WINDOW_ACTIVE,
+    APP_STATE_INACTIVE,
+    APP_STATE_REMOVED
   };
 
   // Interface used to load app icons. This is in it's own class so that it can
@@ -56,7 +75,7 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
     // Returns the app id of the specified tab, or an empty string if there is
     // no app.
-    virtual std::string GetAppID(TabContentsWrapper* tab) = 0;
+    virtual std::string GetAppID(TabContents* tab) = 0;
 
     // Returns true if |id| is valid. Used during restore to ignore no longer
     // valid extensions.
@@ -76,17 +95,13 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // Returns the single ChromeLauncherController instnace.
   static ChromeLauncherController* instance() { return instance_; }
 
-  // Registers the prefs used by ChromeLauncherController.
-  static void RegisterUserPrefs(PrefService* user_prefs);
-
-  // Creates a new tabbed item on the launcher for |updater|.
+  // Creates a new tabbed item on the launcher for |controller|.
   ash::LauncherID CreateTabbedLauncherItem(
       BrowserLauncherItemController* controller,
       IncognitoState is_incognito,
       ash::LauncherItemStatus status);
 
-  // Creates a new app item on the launcher for |updater|. If there is an
-  // existing pinned app that isn't running on the launcher, its id is returned.
+  // Creates a new app item on the launcher for |controller|.
   ash::LauncherID CreateAppLauncherItem(
       BrowserLauncherItemController* controller,
       const std::string& app_id,
@@ -97,6 +112,9 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // Invoked when the underlying browser/app is closed.
   void LauncherItemClosed(ash::LauncherID id);
+
+  // Pins the specified id. Currently only supports platform apps.
+  void Pin(ash::LauncherID id);
 
   // Unpins the specified id, closing if not running.
   void Unpin(ash::LauncherID id);
@@ -115,6 +133,10 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // event which triggered this command.
   void Open(ash::LauncherID id, int event_flags);
 
+  // Opens the application identified by |app_id|. If already running
+  // reactivates the most recently used window or tab owned by the app.
+  void OpenAppID(const std::string& app_id, int event_flags);
+
   // Closes the specified item.
   void Close(ash::LauncherID id);
 
@@ -125,7 +147,9 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   ExtensionPrefs::LaunchType GetLaunchType(ash::LauncherID id);
 
   // Returns the id of the app for the specified tab.
-  std::string GetAppID(TabContentsWrapper* tab);
+  std::string GetAppID(TabContents* tab);
+
+  ash::LauncherID GetLauncherIDForAppID(const std::string& app_id);
 
   // Sets the image for an app tab. This is intended to be invoked from the
   // AppIconLoader.
@@ -157,11 +181,23 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // by policy in case there is a pre-defined set of pinned apps.
   bool CanPin() const;
 
+  // Updates the pinned pref state. The pinned state consists of a list pref.
+  // Each item of the list is a dictionary. The key |kAppIDPath| gives the
+  // id of the app.
+  void PersistPinnedState();
+
   ash::LauncherModel* model() { return model_; }
 
   Profile* profile() { return profile_; }
 
   void SetAutoHideBehavior(ash::ShelfAutoHideBehavior behavior);
+
+  // The tab no longer represents its previously identified application.
+  void RemoveTabFromRunningApp(TabContents* tab, const std::string& app_id);
+
+  // Notify the controller that the state of an non platform app's tabs
+  // have changed,
+  void UpdateAppState(TabContents* tab, AppState app_state);
 
   // ash::LauncherDelegate overrides:
   virtual void CreateNewTab() OVERRIDE;
@@ -187,8 +223,22 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // Overridden from ShellWindowRegistry::Observer:
+  virtual void OnShellWindowAdded(ShellWindow* shell_window) OVERRIDE;
+  virtual void OnShellWindowRemoved(ShellWindow* shell_window) OVERRIDE;
+
+  // Overriden from client::ActivationChangeObserver:
+  virtual void OnWindowActivated(
+      aura::Window* active,
+      aura::Window* old_active) OVERRIDE;
+
+  // Overriden from aura::WindowObserver:
+  virtual void OnWindowRemovingFromRootWindow(aura::Window* window) OVERRIDE;
+
  private:
   friend class BrowserLauncherItemControllerTest;
+  friend class ChromeLauncherControllerTest;
 
   enum ItemType {
     TYPE_APP,
@@ -199,8 +249,6 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   struct Item {
     Item();
     ~Item();
-
-    bool is_pinned() const { return controller == NULL; }
 
     // Type of item.
     ItemType item_type;
@@ -214,11 +262,11 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   };
 
   typedef std::map<ash::LauncherID, Item> IDToItemMap;
-
-  // Updates the pinned pref state. The pinned state consists of a list pref.
-  // Each item of the list is a dictionary. The key |kAppIDPath| gives the
-  // id of the app.
-  void PersistPinnedState();
+  typedef std::map<aura::Window*, ash::LauncherID> WindowToIDMap;
+  typedef std::list<aura::Window*> WindowList;
+  typedef std::list<TabContents*> TabContentsList;
+  typedef std::map<std::string, TabContentsList> AppIDToTabContentsListMap;
+  typedef std::map<TabContents*, std::string> TabContentsToAppIDMap;
 
   // Sets the AppIconLoader, taking ownership of |loader|. This is intended for
   // testing.
@@ -227,18 +275,31 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // Returns the profile used for new windows.
   Profile* GetProfileForNewWindows();
 
-  // Checks |pending_pinnned_apps_| list and creates pinned app items for apps
-  // that are ready. To maintain the order, the list is iterated from the
-  // beginning to the end and stops the iteration when hitting a not-ready app.
-  void ProcessPendingPinnedApps();
+  // Returns item status for given |id|.
+  ash::LauncherItemStatus GetItemStatus(ash::LauncherID id) const;
+
+  // Finds the launcher item that represents given |app_id| and updates the
+  // pending state.
+  void MarkAppPending(const std::string& app_id);
 
   // Internal helpers for pinning and unpinning that handle both
   // client-triggered and internal pinning operations.
   void DoPinAppWithID(const std::string& app_id);
   void DoUnpinAppsWithID(const std::string& app_id);
 
-  // Creates app launchers as specified in prefs::kPinnedLauncherApps.
-  void CreateAppLaunchersFromPref();
+  // Re-syncs launcher model with prefs::kPinnedLauncherApps.
+  void UpdateAppLaunchersFromPref();
+
+  // Returns the most recently active tab contents for an app.
+  TabContents* GetLastActiveTabContents(const std::string& app_id);
+
+  // Creates an app launcher to insert at |index|. Note that |index| may be
+  // adjusted by the model to meet ordering constraints.
+  ash::LauncherID InsertAppLauncherItem(
+      BrowserLauncherItemController* controller,
+      const std::string& app_id,
+      ash::LauncherItemStatus status,
+      int index);
 
   static ChromeLauncherController* instance_;
 
@@ -250,18 +311,27 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   IDToItemMap id_to_item_map_;
 
+  // Maintains activation order of tab contents for each app.
+  AppIDToTabContentsListMap app_id_to_tab_contents_list_;
+
+  // Direct access to app_id for a tab contents.
+  TabContentsToAppIDMap tab_contents_to_app_id_;
+
+  // Allows us to get from an aura::Window to the id of a launcher item.
+  // Currently only used for platform app windows.
+  WindowToIDMap window_to_id_map_;
+
+  // Maintains the activation order. The first element is most recent.
+  // Currently only used for platform app windows.
+  WindowList platform_app_windows_;
+
   // Used to load the image for an app tab.
   scoped_ptr<AppIconLoader> app_icon_loader_;
-
-  // A list of items that are in pinned app list but corresponding apps are
-  // not ready. Keep them in this list and create pinned item when the apps
-  // are installed (via sync or external extension provider.) The order of the
-  // list reflects the original order in pinned app list.
-  std::deque<Item> pending_pinned_apps_;
 
   content::NotificationRegistrar notification_registrar_;
 
   PrefChangeRegistrar pref_change_registrar_;
+  aura::client::ActivationClient* activation_client_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeLauncherController);
 };

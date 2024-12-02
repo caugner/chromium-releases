@@ -14,8 +14,10 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "content/public/browser/notification_service.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using extensions::Extension;
 
 namespace browser_sync {
 
@@ -35,8 +37,7 @@ scoped_refptr<Extension> MakeExtension(const std::string& name) {
   value.SetString(keys::kName, name);
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
-      path, Extension::INVALID, value, Extension::STRICT_ERROR_CHECKS,
-      &error));
+      path, Extension::INVALID, value, Extension::NO_FLAGS, &error));
   EXPECT_TRUE(error.empty());
   return extension;
 }

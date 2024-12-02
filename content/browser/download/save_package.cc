@@ -25,6 +25,7 @@
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/download/save_item.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/common/view_messages.h"
@@ -34,7 +35,6 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
@@ -45,6 +45,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializerClient.h"
 
 using base::Time;
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::NavigationEntry;
@@ -263,7 +264,8 @@ void SavePackage::InternalInit() {
   file_manager_ = rdh->save_file_manager();
   DCHECK(file_manager_);
 
-  download_manager_ = web_contents()->GetBrowserContext()->GetDownloadManager();
+  download_manager_ = BrowserContext::GetDownloadManager(
+      web_contents()->GetBrowserContext());
   DCHECK(download_manager_);
 
   download_stats::RecordSavePackageEvent(download_stats::SAVE_PACKAGE_STARTED);
@@ -311,7 +313,7 @@ bool SavePackage::Init(
         SaveFileCreateInfo::SAVE_FILE_FROM_FILE :
         SaveFileCreateInfo::SAVE_FILE_FROM_NET;
     SaveItem* save_item = new SaveItem(page_url_,
-                                       GURL(),
+                                       content::Referrer(),
                                        this,
                                        save_source);
     // Add this item to waiting list.
@@ -337,11 +339,11 @@ void SavePackage::OnMHTMLGenerated(const FilePath& path, int64 size) {
   // GDataDownloadObserver::ShouldUpload() to return true.
   // ShouldCompleteDownload() may depend on the gdata uploader to finish.
   download_->OnAllDataSaved(size, DownloadItem::kEmptyFileHash);
-  // GDataDownloadObserver is waiting for the upload to complete. When that
-  // happens, it will call download_->MaybeCompleteDownload(), which will call
-  // through our OnDownloadUpdated() allowing us to Finish().
-  // OnDownloadUpdated() may have been called in OnAllDataSaved(), so |this| may
-  // be deleted at this point.
+  if (!download_manager_->GetDelegate() ||
+      download_manager_->GetDelegate()->ShouldCompleteDownload(
+          download_, base::Bind(&SavePackage::Finish, this))) {
+    Finish();
+  }
 }
 
 // On POSIX, the length of |pure_file_name| + |file_name_ext| is further
@@ -1084,7 +1086,7 @@ void SavePackage::GetAllSavableResourceLinksForCurrentPage() {
 // HTML data.
 void SavePackage::OnReceivedSavableResourceLinksForCurrentPage(
     const std::vector<GURL>& resources_list,
-    const std::vector<GURL>& referrers_list,
+    const std::vector<content::Referrer>& referrers_list,
     const std::vector<GURL>& frames_list) {
   if (wait_state_ != RESOURCES_LIST)
     return;
@@ -1113,7 +1115,7 @@ void SavePackage::OnReceivedSavableResourceLinksForCurrentPage(
     for (int i = 0; i < static_cast<int>(frames_list.size()); ++i) {
       const GURL& u = frames_list[i];
       DCHECK(u.is_valid());
-      SaveItem* save_item = new SaveItem(u, GURL(),
+      SaveItem* save_item = new SaveItem(u, content::Referrer(),
           this, SaveFileCreateInfo::SAVE_FILE_FROM_DOM);
       waiting_item_queue_.push(save_item);
     }
@@ -1237,9 +1239,12 @@ void SavePackage::GetSaveInfo() {
   // Can't use web_contents_ in the file thread, so get the data that we need
   // before calling to it.
   FilePath website_save_dir, download_save_dir;
+  bool skip_dir_check;
   DCHECK(download_manager_);
-  download_manager_->delegate()->GetSaveDir(
-      web_contents(), &website_save_dir, &download_save_dir);
+  if (download_manager_->GetDelegate()) {
+    download_manager_->GetDelegate()->GetSaveDir(
+        web_contents(), &website_save_dir, &download_save_dir, &skip_dir_check);
+  }
   std::string mime_type = web_contents()->GetContentsMimeType();
   std::string accept_languages =
       content::GetContentClient()->browser()->GetAcceptLangs(
@@ -1248,17 +1253,20 @@ void SavePackage::GetSaveInfo() {
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&SavePackage::CreateDirectoryOnFileThread, this,
-          website_save_dir, download_save_dir, mime_type, accept_languages));
+          website_save_dir, download_save_dir, skip_dir_check,
+          mime_type, accept_languages));
 }
 
 void SavePackage::CreateDirectoryOnFileThread(
     const FilePath& website_save_dir,
     const FilePath& download_save_dir,
+    bool skip_dir_check,
     const std::string& mime_type,
     const std::string& accept_langs) {
   FilePath save_dir;
   // If the default html/websites save folder doesn't exist...
-  if (!file_util::DirectoryExists(website_save_dir)) {
+  // We skip the directory check for gdata directories on ChromeOS.
+  if (!skip_dir_check && !file_util::DirectoryExists(website_save_dir)) {
     // If the default download dir doesn't exist, create it.
     if (!file_util::DirectoryExists(download_save_dir)) {
       bool res = file_util::CreateDirectory(download_save_dir);
@@ -1301,14 +1309,14 @@ void SavePackage::ContinueGetSaveInfo(const FilePath& suggested_path,
   // The WebContents which owns this SavePackage may have disappeared during
   // the UI->FILE->UI thread hop of
   // GetSaveInfo->CreateDirectoryOnFileThread->ContinueGetSaveInfo.
-  if (!web_contents())
+  if (!web_contents() || !download_manager_->GetDelegate())
     return;
 
   FilePath::StringType default_extension;
   if (can_save_as_complete)
     default_extension = kDefaultHtmlExtension;
 
-  download_manager_->delegate()->ChooseSavePath(
+  download_manager_->GetDelegate()->ChooseSavePath(
       web_contents(),
       suggested_path,
       default_extension,
@@ -1357,20 +1365,6 @@ void SavePackage::OnDownloadUpdated(DownloadItem* download) {
   // Check for removal.
   if (download_->GetState() == DownloadItem::REMOVING) {
     StopObservation();
-  }
-
-  // MHTML saves may need to wait for GData to finish uploading.
-  if ((save_type_ == content::SAVE_PAGE_TYPE_AS_MHTML) &&
-      download_->AllDataSaved() &&
-      !download_->IsComplete() &&
-      !mhtml_finishing_ &&
-      download_manager_->delegate()->ShouldCompleteDownload(download_)) {
-    // Post a task to avoid re-entering OnDownloadUpdated. Set a flag to
-    // prevent double-calling Finish() in case another OnDownloadUpdated happens
-    // before Finish() runs.
-    mhtml_finishing_ = true;
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-        base::Bind(&SavePackage::Finish, this));
   }
 }
 

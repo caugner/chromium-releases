@@ -377,11 +377,6 @@ IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_IndexName,
                             int32, /* idb_index_id */
                             string16 /* name */)
 
-// WebIDBIndex::storeName() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_IndexStoreName,
-                            int32, /* idb_index_id */
-                            string16 /* store_name */)
-
 // WebIDBIndex::keyPath() message.
 IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_IndexKeyPath,
                             int32, /* idb_index_id */
@@ -448,6 +443,11 @@ IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStoreKeyPath,
 IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStoreIndexNames,
                             int32, /* idb_object_store_id */
                             std::vector<string16> /* index_names */)
+
+// WebIDBObjectStore::autoIncrement() message.
+IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStoreAutoIncrement,
+                            int32, /* idb_object_store_id */
+                            bool /* auto_increment */)
 
 // WebIDBObjectStore::get() message.
 IPC_SYNC_MESSAGE_CONTROL5_1(IndexedDBHostMsg_ObjectStoreGet,

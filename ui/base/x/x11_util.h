@@ -121,6 +121,9 @@ UI_EXPORT GtkWindow* GetGtkWindowFromX11Window(XID xid);
 UI_EXPORT void* GetVisualFromGtkWidget(GtkWidget* widget);
 #endif  // defined(TOOLKIT_GTK)
 
+// Sets _GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED on |window|.
+UI_EXPORT void SetHideTitlebarWhenMaximizedProperty(XID window);
+
 // Return the number of bits-per-pixel for a pixmap of the given depth
 UI_EXPORT int BitsPerPixelForPixmapDepth(Display* display, int depth);
 
@@ -184,6 +187,9 @@ class EnumerateWindowsDelegate {
 // windows up to a depth of |max_depth|.
 UI_EXPORT bool EnumerateAllWindows(EnumerateWindowsDelegate* delegate,
                                    int max_depth);
+
+// Enumerates the top-level windows of the current display.
+UI_EXPORT void EnumerateTopLevelWindows(ui::EnumerateWindowsDelegate* delegate);
 
 // Returns all children windows of a given window in top-to-bottom stacking
 // order.

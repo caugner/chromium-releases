@@ -14,7 +14,6 @@
 #include "sync/engine/syncer.h"
 #include "sync/engine/syncer_util.h"
 #include "sync/protocol/nigori_specifics.pb.h"
-#include "sync/protocol/service_constants.h"
 #include "sync/sessions/status_controller.h"
 #include "sync/syncable/syncable.h"
 #include "sync/util/cryptographer.h"
@@ -259,12 +258,6 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
         server_nigori->set_using_explicit_passphrase(
             entry.Get(syncable::SPECIFICS).nigori().
                 using_explicit_passphrase());
-      }
-      // TODO(zea): Find a better way of doing this. As it stands, we have to
-      // update this code whenever we add a new non-cryptographer related field
-      // to the nigori node.
-      if (entry.Get(syncable::SPECIFICS).nigori().sync_tabs()) {
-        server_nigori->set_sync_tabs(true);
       }
       // We deliberately leave the server's device information. This client will
       // add its own device information on restart.

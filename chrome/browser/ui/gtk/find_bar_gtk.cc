@@ -31,7 +31,7 @@
 #include "chrome/browser/ui/gtk/tab_contents_container_gtk.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_source.h"
@@ -46,6 +46,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
+
+using content::NativeWebKeyboardEvent;
 
 namespace {
 
@@ -586,7 +588,7 @@ int FindBarGtk::GetWidth() {
 }
 
 void FindBarGtk::FindEntryTextInContents(bool forward_search) {
-  TabContentsWrapper* tab_contents = find_bar_controller_->tab_contents();
+  TabContents* tab_contents = find_bar_controller_->tab_contents();
   if (!tab_contents)
     return;
   FindTabHelper* find_tab_helper = tab_contents->find_tab_helper();
@@ -598,7 +600,7 @@ void FindBarGtk::FindEntryTextInContents(bool forward_search) {
                                false);  // Not case sensitive.
   } else {
     // The textbox is empty so we reset.
-    find_tab_helper->StopFinding(FindBarController::kClearSelection);
+    find_tab_helper->StopFinding(FindBarController::kClearSelectionOnPage);
     UpdateUIForFindResult(find_tab_helper->find_result(), string16());
 
     // Clearing the text box should also clear the prepopulate state so that
@@ -671,7 +673,7 @@ bool FindBarGtk::MaybeForwardKeyEventToRenderer(GdkEventKey* event) {
       return false;
   }
 
-  TabContentsWrapper* contents = find_bar_controller_->tab_contents();
+  TabContents* contents = find_bar_controller_->tab_contents();
   if (!contents)
     return false;
 
@@ -782,14 +784,16 @@ gboolean FindBarGtk::OnKeyPressEvent(GtkWidget* widget, GdkEventKey* event,
     return TRUE;
   } else if (GDK_Escape == event->keyval) {
     find_bar->find_bar_controller_->EndFindSession(
-        FindBarController::kKeepSelection);
+        FindBarController::kKeepSelectionOnPage,
+        FindBarController::kKeepResultsInFindBox);
     return TRUE;
   } else if (GDK_Return == event->keyval ||
              GDK_KP_Enter == event->keyval) {
     if ((event->state & gtk_accelerator_get_default_mod_mask()) ==
         GDK_CONTROL_MASK) {
       find_bar->find_bar_controller_->EndFindSession(
-          FindBarController::kActivateSelection);
+          FindBarController::kActivateSelectionOnPage,
+          FindBarController::kClearResultsInFindBox);
       return TRUE;
     }
 
@@ -809,7 +813,9 @@ gboolean FindBarGtk::OnKeyReleaseEvent(GtkWidget* widget, GdkEventKey* event,
 
 void FindBarGtk::OnClicked(GtkWidget* button) {
   if (button == close_button_->widget()) {
-    find_bar_controller_->EndFindSession(FindBarController::kKeepSelection);
+    find_bar_controller_->EndFindSession(
+        FindBarController::kKeepSelectionOnPage,
+        FindBarController::kKeepResultsInFindBox);
   } else if (button == find_previous_button_->widget() ||
              button == find_next_button_->widget()) {
     FindEntryTextInContents(button == find_next_button_->widget());

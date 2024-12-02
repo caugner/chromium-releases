@@ -19,13 +19,14 @@
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
-
-namespace omaha {
+#include "base/win/scoped_variant.h"
 #include "google_update/google_update_idl.h"
-}  // namespace omaha
+#include "remoting/base/dispatch_win.h"
+#include "remoting/host/constants.h"
 
 using base::win::ScopedBstr;
 using base::win::ScopedComPtr;
+using base::win::ScopedVariant;
 
 namespace {
 
@@ -44,10 +45,6 @@ const char16 kGoogleUpdateCommandLineFormat[] =
     TO_L_STRING("\"%ls\" /install \"bundlename=Chromoting%%20Host&appguid=%ls&")
     TO_L_STRING("appname=Chromoting%%20Host&needsadmin=True&lang=%ls\"");
 
-// The Omaha Appid of the host.
-const char16 kOmahaAppid[] =
-    TO_L_STRING("{b210701e-ffc4-49e3-932b-370728c72662}");
-
 // TODO(alexeypa): Get the desired laungage from the web app.
 const char16 kOmahaLanguage[] = TO_L_STRING("en");
 
@@ -65,7 +62,7 @@ namespace remoting {
 // per-machine Omaha instance.
 class DaemonComInstallerWin : public DaemonInstallerWin {
  public:
-  DaemonComInstallerWin(const ScopedComPtr<omaha::IGoogleUpdate3Web>& update3,
+  DaemonComInstallerWin(const ScopedComPtr<IDispatch>& update3,
                         const CompletionCallback& done);
 
   // DaemonInstallerWin implementation.
@@ -77,9 +74,9 @@ class DaemonComInstallerWin : public DaemonInstallerWin {
   void PollInstallationStatus();
 
   // Omaha interfaces.
-  ScopedComPtr<omaha::IAppWeb> app_;
-  ScopedComPtr<omaha::IAppBundleWeb> bundle_;
-  ScopedComPtr<omaha::IGoogleUpdate3Web> update3_;
+  ScopedVariant app_;
+  ScopedVariant bundle_;
+  ScopedComPtr<IDispatch> update3_;
 
   base::Timer polling_timer_;
 };
@@ -108,7 +105,7 @@ class DaemonCommandLineInstallerWin
 };
 
 DaemonComInstallerWin::DaemonComInstallerWin(
-    const ScopedComPtr<omaha::IGoogleUpdate3Web>& update3,
+    const ScopedComPtr<IDispatch>& update3,
     const CompletionCallback& done)
     : DaemonInstallerWin(done),
       update3_(update3),
@@ -123,52 +120,50 @@ DaemonComInstallerWin::DaemonComInstallerWin(
 
 void DaemonComInstallerWin::Install() {
   // Create an app bundle.
-  ScopedComPtr<IDispatch> dispatch;
-  HRESULT hr = update3_->createAppBundleWeb(dispatch.Receive());
+  HRESULT hr = dispatch::Invoke(update3_.get(), L"createAppBundleWeb",
+                                DISPATCH_METHOD, bundle_.Receive());
   if (FAILED(hr)) {
     Done(hr);
     return;
   }
-
-  hr = dispatch.QueryInterface(omaha::IID_IAppBundleWeb, bundle_.ReceiveVoid());
-  if (FAILED(hr)) {
-    Done(hr);
+  if (bundle_.type() != VT_DISPATCH) {
+    Done(DISP_E_TYPEMISMATCH);
     return;
   }
 
-  hr = bundle_->initialize();
+  hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"initialize", DISPATCH_METHOD,
+                        NULL);
   if (FAILED(hr)) {
     Done(hr);
     return;
   }
 
   // Add Chromoting Host to the bundle.
-  ScopedBstr appid(kOmahaAppid);
-  ScopedBstr empty(kOmahaEmpty);
-  ScopedBstr language(kOmahaLanguage);
-  hr = bundle_->createApp(appid, empty, language, empty);
+  ScopedVariant appid(kHostOmahaAppid);
+  ScopedVariant empty(kOmahaEmpty);
+  ScopedVariant language(kOmahaLanguage);
+  hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"createApp", DISPATCH_METHOD,
+                        appid, empty, language, empty, NULL);
   if (FAILED(hr)) {
     Done(hr);
     return;
   }
 
-  hr = bundle_->checkForUpdate();
+  hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"checkForUpdate",
+                        DISPATCH_METHOD, NULL);
   if (FAILED(hr)) {
     Done(hr);
     return;
   }
 
-  dispatch.Release();
-  hr = bundle_->get_appWeb(0, dispatch.Receive());
+  hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"appWeb",
+                        DISPATCH_PROPERTYGET, ScopedVariant(0), app_.Receive());
   if (FAILED(hr)) {
     Done(hr);
     return;
   }
-
-  hr = dispatch.QueryInterface(omaha::IID_IAppWeb,
-                               app_.ReceiveVoid());
-  if (FAILED(hr)) {
-    Done(hr);
+  if (app_.type() != VT_DISPATCH) {
+    Done(DISP_E_TYPEMISMATCH);
     return;
   }
 
@@ -181,78 +176,84 @@ void DaemonComInstallerWin::PollInstallationStatus() {
   // N.B. The object underlying the ICurrentState interface has static data that
   // does not get updated as the server state changes. To get the most "current"
   // state, the currentState property needs to be queried again.
-  ScopedComPtr<IDispatch> dispatch;
-  HRESULT hr = app_->get_currentState(dispatch.Receive());
+  ScopedVariant current_state;
+  HRESULT hr = dispatch::Invoke(V_DISPATCH(&app_), L"currentState",
+                                DISPATCH_PROPERTYGET, current_state.Receive());
   if (FAILED(hr)) {
     Done(hr);
     return;
   }
-
-  ScopedComPtr<omaha::ICurrentState> current_state;
-  hr = dispatch.QueryInterface(omaha::IID_ICurrentState,
-                               current_state.ReceiveVoid());
-  if (FAILED(hr)) {
-    Done(hr);
+  if (current_state.type() != VT_DISPATCH) {
+    Done(DISP_E_TYPEMISMATCH);
     return;
   }
 
-  LONG state;
-  hr = current_state->get_stateValue(&state);
-  if (FAILED(hr)) {
-    Done(hr);
+  ScopedVariant state;
+  hr = dispatch::Invoke(V_DISPATCH(&current_state), L"stateValue",
+                        DISPATCH_PROPERTYGET, state.Receive());
+  if (state.type() != VT_I4) {
+    Done(DISP_E_TYPEMISMATCH);
     return;
   }
 
   // Perform state-specific actions.
-  switch (state) {
-    case omaha::STATE_INIT:
-    case omaha::STATE_WAITING_TO_CHECK_FOR_UPDATE:
-    case omaha::STATE_CHECKING_FOR_UPDATE:
-    case omaha::STATE_WAITING_TO_DOWNLOAD:
-    case omaha::STATE_RETRYING_DOWNLOAD:
-    case omaha::STATE_DOWNLOADING:
-    case omaha::STATE_WAITING_TO_INSTALL:
-    case omaha::STATE_INSTALLING:
-    case omaha::STATE_PAUSED:
+  switch (V_I4(&state)) {
+    case STATE_INIT:
+    case STATE_WAITING_TO_CHECK_FOR_UPDATE:
+    case STATE_CHECKING_FOR_UPDATE:
+    case STATE_WAITING_TO_DOWNLOAD:
+    case STATE_RETRYING_DOWNLOAD:
+    case STATE_DOWNLOADING:
+    case STATE_WAITING_TO_INSTALL:
+    case STATE_INSTALLING:
+    case STATE_PAUSED:
       break;
 
-    case omaha::STATE_UPDATE_AVAILABLE:
-      hr = bundle_->download();
+    case STATE_UPDATE_AVAILABLE:
+      hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"download",
+                            DISPATCH_METHOD, NULL);
       if (FAILED(hr)) {
         Done(hr);
         return;
       }
       break;
 
-    case omaha::STATE_DOWNLOAD_COMPLETE:
-    case omaha::STATE_EXTRACTING:
-    case omaha::STATE_APPLYING_DIFFERENTIAL_PATCH:
-    case omaha::STATE_READY_TO_INSTALL:
-      hr = bundle_->install();
+    case STATE_DOWNLOAD_COMPLETE:
+    case STATE_EXTRACTING:
+    case STATE_APPLYING_DIFFERENTIAL_PATCH:
+    case STATE_READY_TO_INSTALL:
+      hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"install",
+                            DISPATCH_METHOD, NULL);
       if (FAILED(hr)) {
         Done(hr);
         return;
       }
       break;
 
-    case omaha::STATE_INSTALL_COMPLETE:
-    case omaha::STATE_NO_UPDATE:
+    case STATE_INSTALL_COMPLETE:
+    case STATE_NO_UPDATE:
       // Installation complete or not required. Report success.
       Done(S_OK);
       return;
 
-    case omaha::STATE_ERROR: {
-      HRESULT error_code;
-      hr = current_state->get_errorCode(&error_code);
+    case STATE_ERROR: {
+      ScopedVariant error_code;
+      hr = dispatch::Invoke(V_DISPATCH(&current_state), L"errorCode",
+                            DISPATCH_PROPERTYGET, error_code.Receive());
       if (FAILED(hr)) {
-        error_code = hr;
+        Done(hr);
+        return;
       }
-      Done(error_code);
+      if (error_code.type() != VT_UI4) {
+        Done(DISP_E_TYPEMISMATCH);
+        return;
+      }
+      Done(V_UI4(&error_code));
       return;
     }
 
     default:
-      LOG(ERROR) << "Unknown bundle state: " << state << ".";
+      LOG(ERROR) << "Unknown bundle state: " << V_I4(&state) << ".";
       Done(E_FAIL);
       return;
   }
@@ -292,7 +293,7 @@ void DaemonCommandLineInstallerWin::Install() {
   string16 command_line =
       StringPrintf(kGoogleUpdateCommandLineFormat,
                    google_update.c_str(),
-                   kOmahaAppid,
+                   kHostOmahaAppid,
                    kOmahaLanguage);
 
   base::LaunchOptions options;
@@ -341,11 +342,11 @@ scoped_ptr<DaemonInstallerWin> DaemonInstallerWin::Create(
   bind_options.hwnd = GetTopLevelWindow(window_handle);
   bind_options.dwClassContext = CLSCTX_LOCAL_SERVER;
 
-  ScopedComPtr<omaha::IGoogleUpdate3Web> update3;
+  ScopedComPtr<IDispatch> update3;
   HRESULT result = ::CoGetObject(
       kOmahaElevationMoniker,
       &bind_options,
-      omaha::IID_IGoogleUpdate3Web,
+      IID_IDispatch,
       update3.ReceiveVoid());
   if (SUCCEEDED(result)) {
     // The machine instance of Omaha is available and we successfully passed

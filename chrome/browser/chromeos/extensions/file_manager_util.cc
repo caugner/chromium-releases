@@ -18,18 +18,20 @@
 #include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/media/media_player.h"
 #include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/simple_message_box.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
+#include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/file_browser_handler.h"
 #include "chrome/common/url_constants.h"
@@ -46,10 +48,6 @@
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/plugins/webplugininfo.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/media/media_player.h"
-#endif
-
 using base::DictionaryValue;
 using base::ListValue;
 using content::BrowserContext;
@@ -64,6 +62,10 @@ const char kFileBrowserDomain[] = FILEBROWSER_EXTENSON_ID;
 
 const char kFileBrowserGalleryTaskId[] = "gallery";
 const char kFileBrowserMountArchiveTaskId[] = "mount-archive";
+const char kFileBrowserWatchTaskId[] = "watch";
+const char kFileBrowserPlayTaskId[] = "play";
+
+const char kVideoPlayerAppName[] = "videoplayer";
 
 namespace file_manager_util {
 namespace {
@@ -76,7 +78,7 @@ namespace {
 const char kFileBrowserExtensionUrl[] = FILEBROWSER_URL("");
 const char kBaseFileBrowserUrl[] = FILEBROWSER_URL("main.html");
 const char kMediaPlayerUrl[] = FILEBROWSER_URL("mediaplayer.html");
-const char kMediaPlayerPlaylistUrl[] = FILEBROWSER_URL("playlist.html");
+const char kVideoPlayerUrl[] = FILEBROWSER_URL("video_player.html");
 #undef FILEBROWSER_URL
 #undef FILEBROWSER_EXTENSON_ID
 
@@ -90,21 +92,10 @@ const char* kBrowserSupportedExtensions[] = {
     ".bmp", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".txt", ".html", ".htm",
     ".mhtml", ".mht"
 };
-// List of file extension that can be handled with the media player.
-const char* kAVExtensions[] = {
-#if defined(GOOGLE_CHROME_BUILD) || defined(USE_PROPRIETARY_CODECS)
-    ".mp3", ".m4a",
-#endif
-    ".flac", ".ogm", ".ogg", ".oga", ".wav",
-/* TODO(zelidrag): Add unsupported ones as we enable them:
-    ".mkv", ".divx", ".xvid", ".wmv", ".asf", ".mpeg", ".mpg",
-    ".wma", ".aiff",
-*/
-};
 
 // Keep in sync with 'open-hosted' task handler in the File Browser manifest.
 const char* kGDocsExtensions[] = {
-    ".gdoc", ".gsheet", ".gslides", ".gdraw", ".gtable"
+    ".gdoc", ".gsheet", ".gslides", ".gdraw", ".gtable", ".glink"
 };
 
 // List of all extensions we want to be shown in histogram that keep track of
@@ -119,15 +110,6 @@ const char* kUMATrackingExtensions[] = {
 bool IsSupportedBrowserExtension(const char* file_extension) {
   for (size_t i = 0; i < arraysize(kBrowserSupportedExtensions); i++) {
     if (base::strcasecmp(file_extension, kBrowserSupportedExtensions[i]) == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool IsSupportedAVExtension(const char* file_extension) {
-  for (size_t i = 0; i < arraysize(kAVExtensions); i++) {
-    if (base::strcasecmp(file_extension, kAVExtensions[i]) == 0) {
       return true;
     }
   }
@@ -218,7 +200,7 @@ DictionaryValue* ProgessStatusToDictionaryValue(
 
 void OpenNewTab(const GURL& url, Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  Browser* browser = Browser::GetOrCreateTabbedBrowser(
+  Browser* browser = browser::FindOrCreateTabbedBrowser(
       profile ? profile : ProfileManager::GetDefaultProfileOrOffTheRecord());
   browser->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_LINK);
   // If the current browser is not tabbed then the new tab will be created
@@ -228,13 +210,16 @@ void OpenNewTab(const GURL& url, Profile* profile) {
 
 // Shows a warning message box saying that the file could not be opened.
 void ShowWarningMessageBox(Profile* profile, const FilePath& path) {
-  Browser* browser = Browser::GetOrCreateTabbedBrowser(profile);
-  browser::ShowWarningMessageBox(
-      browser->window()->GetNativeHandle(),
+  // TODO: if FindOrCreateTabbedBrowser creates a new browser the returned
+  // browser is leaked.
+  Browser* browser = browser::FindOrCreateTabbedBrowser(profile);
+  browser::ShowMessageBox(
+      browser->window()->GetNativeWindow(),
       l10n_util::GetStringFUTF16(
           IDS_FILE_BROWSER_ERROR_VIEWING_FILE_TITLE,
           UTF8ToUTF16(path.BaseName().value())),
-      l10n_util::GetStringUTF16(IDS_FILE_BROWSER_ERROR_VIEWING_FILE));
+      l10n_util::GetStringUTF16(IDS_FILE_BROWSER_ERROR_VIEWING_FILE),
+      browser::MESSAGE_BOX_TYPE_WARNING);
 }
 
 // Called when a file on GData was found. Opens the file found at |file_path|
@@ -277,8 +262,8 @@ GURL GetMediaPlayerUrl() {
   return GURL(kMediaPlayerUrl);
 }
 
-GURL GetMediaPlayerPlaylistUrl() {
-  return GURL(kMediaPlayerPlaylistUrl);
+GURL GetVideoPlayerUrl(const GURL& source_url) {
+  return GURL(kVideoPlayerUrl + std::string("?") + source_url.spec());
 }
 
 bool ConvertFileToFileSystemUrl(
@@ -410,7 +395,7 @@ bool FileManageTabExists(const FilePath& path, TAB_REUSE_MODE mode) {
   for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
        browser_iterator != BrowserList::end(); ++browser_iterator) {
     Browser* browser = *browser_iterator;
-    TabStripModel* tab_strip = browser->tabstrip_model();
+    TabStripModel* tab_strip = browser->tab_strip_model();
     for (int idx = 0; idx < tab_strip->count(); idx++) {
       content::WebContents* web_contents =
           tab_strip->GetTabContentsAt(idx)->web_contents();
@@ -457,18 +442,14 @@ void OpenFileBrowser(const FilePath& path,
   if (!service)
     return;
 
-  const Extension* extension =
+  const extensions::Extension* extension =
       service->GetExtensionById(kFileBrowserDomain, false);
   if (!extension)
     return;
 
-  extension_misc::LaunchContainer launch_container =
-      service->extension_prefs()->
-          GetLaunchContainer(extension, ExtensionPrefs::LAUNCH_DEFAULT);
-
   content::RecordAction(UserMetricsAction("ShowFileBrowserFullTab"));
-  Browser::OpenApplication(
-      profile, extension, launch_container, GURL(url), NEW_FOREGROUND_TAB);
+  application_launch::OpenApplication(profile, extension,
+      extension_misc::LAUNCH_WINDOW, GURL(url), NEW_FOREGROUND_TAB, NULL);
 }
 
 void ViewRemovableDrive(const FilePath& path) {
@@ -500,12 +481,12 @@ class StandaloneExecutor : public FileTaskExecutor {
  protected :
   // FileTaskExecutor overrides.
   virtual Browser* browser() {
-    return Browser::GetOrCreateTabbedBrowser(profile());
+    return browser::FindOrCreateTabbedBrowser(profile());
   }
   virtual void Done(bool) {}
 };
 
-bool TryOpeningFileBrowser(Profile* profile, const FilePath& path) {
+bool ExecuteDefaultHandler(Profile* profile, const FilePath& path) {
   GURL url;
   if (!ConvertFileToFileSystemUrl(profile, path,
       GetFileBrowserExtensionUrl().GetOrigin(), &url))
@@ -517,9 +498,10 @@ bool TryOpeningFileBrowser(Profile* profile, const FilePath& path) {
 
   std::string extension_id = handler->extension_id();
   std::string action_id = handler->id();
+  Browser* browser = browser::FindLastActiveWithProfile(profile);
   if (extension_id == kFileBrowserDomain) {
     // Only two of the built-in File Browser tasks require opening the File
-    // Browser tab. Others just end up calling TryViewingFile.
+    // Browser tab.
     if (action_id == kFileBrowserGalleryTaskId ||
         action_id == kFileBrowserMountArchiveTaskId) {
       // Tab reuse currently does not work for these two tasks.
@@ -528,6 +510,8 @@ bool TryOpeningFileBrowser(Profile* profile, const FilePath& path) {
       // |mount-archive| does not even try.
       OpenFileBrowser(path, REUSE_SAME_PATH, "");
       return true;
+    } else {
+      return ExecuteBuiltinHandler(browser, path, action_id);
     }
   } else {
     // We are executing the task on behalf of File Browser extension.
@@ -548,15 +532,13 @@ bool TryOpeningFileBrowser(Profile* profile, const FilePath& path) {
     executor->Execute(urls);
     return true;
   }
-  return false;
+  return ExecuteBuiltinHandler(browser, path, std::string());
 }
 
 void ViewFile(const FilePath& path) {
   Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
-  if (!TryOpeningFileBrowser(profile, path) &&
-      !TryViewingFile(profile, path)) {
+  if (!ExecuteDefaultHandler(profile, path))
     ShowWarningMessageBox(profile, path);
-  }
 }
 
 // Reads an entire file into a string. Fails is the file is 4K or longer.
@@ -602,16 +584,18 @@ void ReadUrlFromGDocOnFileThread(const FilePath& file_path) {
       base::Bind(OpenNewTab, GURL(edit_url_string), (Profile*)NULL));
 }
 
-bool TryViewingFile(Profile* profile, const FilePath& path) {
+bool ExecuteBuiltinHandler(Browser* browser, const FilePath& path,
+    const std::string& internal_task_id) {
+
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  Profile* profile = browser->profile();
   std::string file_extension = path.Extension();
   // For things supported natively by the browser, we should open it
   // in a tab.
   if (IsSupportedBrowserExtension(file_extension.data()) ||
       ShouldBeOpenedWithPdfPlugin(profile, file_extension.data())) {
     GURL page_url = net::FilePathToFileURL(path);
-#if defined(OS_CHROMEOS)
     // Override gdata resource to point to internal handler instead of file:
     // URL.
     if (gdata::util::GetSpecialRemoteRootPath().IsParent(path)) {
@@ -621,13 +605,12 @@ bool TryViewingFile(Profile* profile, const FilePath& path) {
         return false;
 
       // Open the file once the file is found.
-      system_service->file_system()->GetFileInfoByPathAsync(
+      system_service->file_system()->GetFileInfoByPath(
           gdata::util::ExtractGDataPath(path),
           base::Bind(&OnGDataFileFound, profile, path, gdata::REGULAR_FILE));
       return true;
     }
-#endif
-    OpenNewTab(page_url, (Profile*)NULL);
+    OpenNewTab(page_url, NULL);
     return true;
   }
 
@@ -639,7 +622,7 @@ bool TryViewingFile(Profile* profile, const FilePath& path) {
       if (!system_service)
         return false;
 
-      system_service->file_system()->GetFileInfoByPathAsync(
+      system_service->file_system()->GetFileInfoByPath(
           gdata::util::ExtractGDataPath(path),
           base::Bind(&OnGDataFileFound, profile, path,
                      gdata::HOSTED_DOCUMENT));
@@ -652,8 +635,7 @@ bool TryViewingFile(Profile* profile, const FilePath& path) {
     return true;
   }
 
-#if defined(OS_CHROMEOS)
-  if (IsSupportedAVExtension(file_extension.data())) {
+  if (internal_task_id == kFileBrowserPlayTaskId) {
     GURL url;
     if (!ConvertFileToFileSystemUrl(profile, path,
         GetFileBrowserExtensionUrl().GetOrigin(), &url))
@@ -663,10 +645,29 @@ bool TryViewingFile(Profile* profile, const FilePath& path) {
     mediaplayer->ForcePlayMediaURL(url);
     return true;
   }
-#endif  // OS_CHROMEOS
+  if (internal_task_id == kFileBrowserWatchTaskId) {
+    GURL url;
+    if (!ConvertFileToFileSystemUrl(profile, path,
+        GetFileBrowserExtensionUrl().GetOrigin(), &url))
+      return false;
+
+    ExtensionService* service = profile->GetExtensionService();
+    if (!service)
+      return false;
+
+    const extensions::Extension* extension =
+      service->GetExtensionById(kFileBrowserDomain, false);
+    if (!extension)
+      return false;
+
+    application_launch::OpenApplication(
+        profile, extension, extension_misc::LAUNCH_WINDOW,
+        GetVideoPlayerUrl(url), NEW_FOREGROUND_TAB, NULL);
+    return true;
+  }
 
   if (IsCRXFile(file_extension.data())) {
-    InstallCRX(profile, path);
+    InstallCRX(browser, path);
     return true;
   }
 
@@ -680,14 +681,12 @@ bool TryViewingFile(Profile* profile, const FilePath& path) {
   return false;
 }
 
-void InstallCRX(Profile* profile, const FilePath& path) {
-  ExtensionService* service = profile->GetExtensionService();
+void InstallCRX(Browser* browser, const FilePath& path) {
+  ExtensionService* service = browser->profile()->GetExtensionService();
   CHECK(service);
-  if (!service)
-    return;
 
-  scoped_refptr<CrxInstaller> installer(CrxInstaller::Create(service,
-                                            new ExtensionInstallUI(profile)));
+  scoped_refptr<CrxInstaller> installer(
+      CrxInstaller::Create(service, new ExtensionInstallPrompt(browser)));
   installer->set_is_gallery_install(false);
   installer->set_allow_silent_install(false);
   installer->InstallCrx(path);

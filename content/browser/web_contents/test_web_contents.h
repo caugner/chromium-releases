@@ -8,7 +8,7 @@
 
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/page_transition_types.h"
-#include "content/test/web_contents_tester.h"
+#include "content/public/test/web_contents_tester.h"
 #include "webkit/glue/webpreferences.h"
 
 class SiteInstanceImpl;
@@ -31,6 +31,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   virtual int GetNumberOfFocusCalls() OVERRIDE;
   virtual RenderViewHost* GetPendingRenderViewHost() const OVERRIDE;
   virtual void NavigateAndCommit(const GURL& url) OVERRIDE;
+  virtual void TestSetIsLoading(bool value) OVERRIDE;
   virtual void ProceedWithCrossSiteNavigation() OVERRIDE;
   virtual void TestDidNavigate(RenderViewHost* render_view_host,
                                int page_id,
@@ -41,7 +42,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
                                            const GURL& url,
                                            const Referrer& referrer,
                                            PageTransition transition) OVERRIDE;
-  virtual WebPreferences TestGetWebkitPrefs() OVERRIDE;
+  virtual webkit_glue::WebPreferences TestGetWebkitPrefs() OVERRIDE;
 
   TestRenderViewHost* pending_test_rvh() const;
 
@@ -66,9 +67,9 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   // Set by individual tests.
   bool transition_cross_site;
 
-  // Allow mocking of the RenderViewHostDelegate::View.
-  virtual RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
-  void set_view_delegate(RenderViewHostDelegate::View* view) {
+  // Allow mocking of the RenderViewHostDelegateView.
+  virtual RenderViewHostDelegateView* GetDelegateView() OVERRIDE;
+  void set_delegate_view(RenderViewHostDelegateView* view) {
     delegate_view_override_ = view;
   }
 
@@ -89,7 +90,24 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
                                         int32 min_page_id) OVERRIDE;
 
  private:
-  RenderViewHostDelegate::View* delegate_view_override_;
+  // WebContentsImpl overrides
+  virtual void CreateNewWindow(
+      int route_id,
+      const ViewHostMsg_CreateWindow_Params& params,
+      SessionStorageNamespace* session_storage_namespace) OVERRIDE;
+  virtual void CreateNewWidget(int route_id,
+                               WebKit::WebPopupType popup_type) OVERRIDE;
+  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
+  virtual void ShowCreatedWindow(int route_id,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture) OVERRIDE;
+  virtual void ShowCreatedWidget(int route_id,
+                                 const gfx::Rect& initial_pos) OVERRIDE;
+  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+
+
+  RenderViewHostDelegateView* delegate_view_override_;
 
   // Expectations for arguments of |SetHistoryLengthAndPrune()|.
   bool expect_set_history_length_and_prune_;

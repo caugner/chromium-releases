@@ -93,7 +93,6 @@ static const FilePath::CharType kChromeFirstRender[] =
     FPL("chrome-first-render");
 
 // Names of login UMA values.
-static const char kUmaAuthenticate[] = "BootTime.Authenticate";
 static const char kUmaLogin[] = "BootTime.Login";
 static const char kUmaLoginPrefix[] = "BootTime.";
 static const char kUmaLogout[] = "ShutdownTime.Logout";
@@ -235,7 +234,7 @@ void BootTimesLoader::Backend::GetBootTimes(
         BrowserThread::FILE,
         FROM_HERE,
         base::Bind(&Backend::GetBootTimes, this, request),
-        kReadAttemptDelayMs);
+        base::TimeDelta::FromMilliseconds(kReadAttemptDelayMs));
     return;
   }
 
@@ -352,7 +351,7 @@ void BootTimesLoader::WriteTimes(
 
 void BootTimesLoader::LoginDone() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  AddLoginTimeMarker("LoginDone", true);
+  AddLoginTimeMarker("LoginDone", false);
   RecordCurrentStats(kChromeFirstRender);
   registrar_.Remove(this, content::NOTIFICATION_LOAD_START,
                     content::NotificationService::AllSources());
@@ -360,14 +359,16 @@ void BootTimesLoader::LoginDone() {
                     content::NotificationService::AllSources());
   registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                     content::NotificationService::AllSources());
-  registrar_.Remove(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
-                    content::NotificationService::AllSources());
+  registrar_.Remove(
+      this,
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
+      content::NotificationService::AllSources());
   // Don't swamp the FILE thread right away.
   BrowserThread::PostDelayedTask(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&WriteTimes, kLoginTimes, kUmaLogin, kUmaLoginPrefix,
                  login_time_markers_),
-      kLoginTimeWriteDelayMs);
+      base::TimeDelta::FromMilliseconds(kLoginTimeWriteDelayMs));
 }
 
 void BootTimesLoader::WriteLogoutTimes() {
@@ -425,8 +426,10 @@ void BootTimesLoader::RecordLoginAttempted() {
                    content::NotificationService::AllSources());
     registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                    content::NotificationService::AllSources());
-    registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
-                   content::NotificationService::AllSources());
+    registrar_.Add(
+        this,
+        content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
+        content::NotificationService::AllSources());
   }
 }
 
@@ -496,7 +499,7 @@ void BootTimesLoader::Observe(
       }
       break;
     }
-    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT: {
+    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE: {
       RenderWidgetHost* rwh = content::Source<RenderWidgetHost>(source).ptr();
       if (render_widget_hosts_loading_.find(rwh) !=
           render_widget_hosts_loading_.end()) {

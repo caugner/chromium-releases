@@ -10,21 +10,28 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
 #include "base/win/win_util.h"
-#include "content/browser/web_contents/web_contents_view_helper.h"
 #include "content/common/content_export.h"
+#include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/base/win/window_impl.h"
 
 class RenderWidgetHostViewWin;
 class WebDragDest;
 class WebContentsDragWin;
+class WebContentsImpl;
 
 namespace content {
 class WebContentsViewDelegate;
 }
 
+namespace ui {
+class HWNDMessageFilter;
+}
+
 // An implementation of WebContentsView for Windows.
-class CONTENT_EXPORT WebContentsViewWin : public content::WebContentsView,
+class CONTENT_EXPORT WebContentsViewWin
+    : public content::WebContentsView,
+      public content::RenderViewHostDelegateView,
                                           public ui::WindowImpl {
  public:
   WebContentsViewWin(WebContentsImpl* web_contents,
@@ -32,6 +39,7 @@ class CONTENT_EXPORT WebContentsViewWin : public content::WebContentsView,
   virtual ~WebContentsViewWin();
 
   BEGIN_MSG_MAP_EX(WebContentsViewWin)
+    MESSAGE_HANDLER(WM_CREATE, OnCreate)
     MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
     MESSAGE_HANDLER(WM_WINDOWPOSCHANGED, OnWindowPosChanged)
     MESSAGE_HANDLER(WM_LBUTTONDOWN, OnMouseDown)
@@ -41,6 +49,7 @@ class CONTENT_EXPORT WebContentsViewWin : public content::WebContentsView,
     MESSAGE_HANDLER(base::win::kReflectedMessage, OnReflectedMessage)
     // Hacks for old ThinkPad touchpads/scroll points.
     MESSAGE_HANDLER(WM_NCCALCSIZE, OnNCCalcSize)
+    MESSAGE_HANDLER(WM_NCHITTEST, OnNCHitTest)
     MESSAGE_HANDLER(WM_HSCROLL, OnScroll)
     MESSAGE_HANDLER(WM_VSCROLL, OnScroll)
     MESSAGE_HANDLER(WM_SIZE, OnSize)
@@ -68,22 +77,9 @@ class CONTENT_EXPORT WebContentsViewWin : public content::WebContentsView,
   virtual WebDropData* GetDropData() const OVERRIDE;
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
-  virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
+  virtual gfx::Rect GetViewBounds() const OVERRIDE;
 
-  // Implementation of RenderViewHostDelegate::View.
-  virtual void CreateNewWindow(
-      int route_id,
-      const ViewHostMsg_CreateWindow_Params& params) OVERRIDE;
-  virtual void CreateNewWidget(int route_id,
-                               WebKit::WebPopupType popup_type) OVERRIDE;
-  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
-  virtual void ShowCreatedWindow(int route_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
-                                 bool user_gesture) OVERRIDE;
-  virtual void ShowCreatedWidget(int route_id,
-                                 const gfx::Rect& initial_pos) OVERRIDE;
-  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+  // Implementation of RenderViewHostDelegateView.
   virtual void ShowContextMenu(
       const content::ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
@@ -91,7 +87,8 @@ class CONTENT_EXPORT WebContentsViewWin : public content::WebContentsView,
                              double item_font_size,
                              int selected_item,
                              const std::vector<WebMenuItem>& items,
-                             bool right_aligned) OVERRIDE;
+                             bool right_aligned,
+                             bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask operations,
                              const SkBitmap& image,
@@ -106,6 +103,8 @@ class CONTENT_EXPORT WebContentsViewWin : public content::WebContentsView,
   void EndDragging();
   void CloseTab();
 
+  LRESULT OnCreate(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
   LRESULT OnDestroy(
       UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
   LRESULT OnWindowPosChanged(
@@ -117,6 +116,8 @@ class CONTENT_EXPORT WebContentsViewWin : public content::WebContentsView,
   LRESULT OnReflectedMessage(
       UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
   LRESULT OnNCCalcSize(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+  LRESULT OnNCHitTest(
       UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
   LRESULT OnScroll(
       UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
@@ -146,8 +147,7 @@ class CONTENT_EXPORT WebContentsViewWin : public content::WebContentsView,
   // Used to close the tab after the stack has unwound.
   base::OneShotTimer<WebContentsViewWin> close_tab_timer_;
 
-  // Common implementations of some WebContentsView methods.
-  WebContentsViewHelper web_contents_view_helper_;
+  scoped_ptr<ui::HWNDMessageFilter> hwnd_message_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewWin);
 };

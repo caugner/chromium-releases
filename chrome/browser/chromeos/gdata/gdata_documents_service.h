@@ -22,6 +22,7 @@ namespace gdata {
 
 class GDataOperationInterface;
 class GDataOperationRegistry;
+class GDataOperationRunner;
 
 // Document export format.
 enum DocumentExportFormat {
@@ -75,14 +76,28 @@ class DocumentsServiceInterface {
   // URL is empty, the call will fetch the default root or change document feed.
   // |start_changestamp| specifies the starting point from change feeds only.
   // Value different than 0, it would trigger delta feed fetching.
+  //
   // |search_query| specifies search query to be sent to the server. It will be
   // used only if |start_changestamp| is 0. If empty string is passed,
   // |search_query| is ignored.
+  //
+  // |directory_resource_id| specifies the directory from which documents are
+  // fetched. It will be used only if |start_changestamp| is 0. If empty
+  // string is passed, |directory_resource_id| is ignored.
+  //
   // Upon completion, invokes |callback| with results on the calling thread.
+  // TODO(satorux): Refactor this function: crbug.com/128746
   virtual void GetDocuments(const GURL& feed_url,
                             int start_changestamp,
                             const std::string& search_query,
+                            const std::string& directory_resource_id,
                             const GetDataCallback& callback) = 0;
+
+  // Fetches single entry metadata from server. The entry's resource id equals
+  // |resource_id|.
+  // Upon completion, invokes |callback| with results on the calling thread.
+  virtual void GetDocumentEntry(const std::string& resource_id,
+                                const GetDataCallback& callback) = 0;
 
   // Gets the account metadata from the server using the default account
   // metadata URL. Upon completion, invokes |callback| with results on the
@@ -167,13 +182,13 @@ class DocumentsServiceInterface {
 };
 
 // This class provides documents feed service calls.
-class DocumentsService
-    : public DocumentsServiceInterface,
-      public GDataAuthService::Observer {
+class DocumentsService : public DocumentsServiceInterface {
  public:
   // DocumentsService is usually owned and created by GDataFileSystem.
   DocumentsService();
   virtual ~DocumentsService();
+
+  GDataAuthService* auth_service_for_testing();
 
   // DocumentsServiceInterface Overrides
   virtual void Initialize(Profile* profile) OVERRIDE;
@@ -183,7 +198,11 @@ class DocumentsService
   virtual void GetDocuments(const GURL& feed_url,
                             int start_changestamp,
                             const std::string& search_query,
+                            const std::string& directory_resource_id,
                             const GetDataCallback& callback) OVERRIDE;
+  virtual void GetDocumentEntry(const std::string& resource_id,
+                                const GetDataCallback& callback) OVERRIDE;
+
   virtual void GetAccountMetadata(const GetDataCallback& callback) OVERRIDE;
   virtual void DeleteDocument(const GURL& document_url,
                               const EntryActionCallback& callback) OVERRIDE;
@@ -222,36 +241,10 @@ class DocumentsService
   virtual void ResumeUpload(const ResumeUploadParams& params,
                             const ResumeUploadCallback& callback) OVERRIDE;
 
-  GDataAuthService* gdata_auth_service() { return gdata_auth_service_.get(); }
-
  private:
-  // GDataAuthService::Observer override.
-  virtual void OnOAuth2RefreshTokenChanged() OVERRIDE;
-
-  // Starts an operation implementing the GDataOperationInterface interface,
-  // and makes the operation retry upon authentication failures by calling
-  // back to DocumentsService::RetryOperation.
-  void StartOperationWithRetry(GDataOperationInterface* operation);
-
-  // Starts an operation implementing the GDataOperationInterface interface.
-  void StartOperation(GDataOperationInterface* operation);
-
-  // Called when the authentication token is refreshed.
-  void OnOperationAuthRefresh(GDataOperationInterface* operation,
-                              GDataErrorCode error,
-                              const std::string& auth_token);
-
-  // Clears any authentication token and retries the operation, which
-  // forces an authentication token refresh.
-  void RetryOperation(GDataOperationInterface* operation);
-
-  // Data members.
   Profile* profile_;
 
-  scoped_ptr<GDataAuthService> gdata_auth_service_;
-  scoped_ptr<GDataOperationRegistry> operation_registry_;
-  base::WeakPtrFactory<DocumentsService> weak_ptr_factory_;
-  base::WeakPtr<DocumentsService> weak_ptr_bound_to_ui_thread_;
+  scoped_ptr<GDataOperationRunner> runner_;
 
   DISALLOW_COPY_AND_ASSIGN(DocumentsService);
 };

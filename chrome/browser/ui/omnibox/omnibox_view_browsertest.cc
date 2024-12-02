@@ -36,16 +36,15 @@
 #include "net/base/mock_host_resolver.h"
 #include "ui/base/events.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/gfx/point.h"
 
 #if defined(TOOLKIT_GTK)
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #endif
 
-#if defined(TOOLKIT_VIEWS)
-#include "ui/views/controls/textfield/native_textfield_views.h"
-#include "ui/views/events/event.h"
-#include "ui/views/widget/widget.h"
+#if defined(USE_AURA)
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #endif
 
 using base::Time;
@@ -173,7 +172,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(window);
     LocationBar* loc_bar = window->GetLocationBar();
     ASSERT_TRUE(loc_bar);
-    *omnibox_view = loc_bar->location_entry();
+    *omnibox_view = loc_bar->GetLocationEntry();
     ASSERT_TRUE(*omnibox_view);
   }
 
@@ -584,9 +583,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(SendKeyAndWait(browser(), ui::VKEY_RETURN, ui::EF_CONTROL_DOWN,
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::Source<content::NavigationController>(
-            &browser()->GetSelectedWebContents()->GetController())));
+            &browser()->GetActiveWebContents()->GetController())));
 
-    GURL url = browser()->GetSelectedWebContents()->GetURL();
+    GURL url = browser()->GetActiveWebContents()->GetURL();
     EXPECT_STREQ(kDesiredTLDHostname, url.host().c_str());
   }
 
@@ -620,8 +619,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(SendKeyAndWait(browser(), ui::VKEY_RETURN, 0,
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::Source<content::NavigationController>(
-            &browser()->GetSelectedWebContents()->GetController())));
-    GURL url = browser()->GetSelectedWebContents()->GetURL();
+            &browser()->GetActiveWebContents()->GetController())));
+    GURL url = browser()->GetActiveWebContents()->GetURL();
     EXPECT_STREQ(kSearchTextURL, url.spec().c_str());
 
     // Test that entering a single character then Enter performs a search.
@@ -640,8 +639,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(SendKeyAndWait(browser(), ui::VKEY_RETURN, 0,
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::Source<content::NavigationController>(
-            &browser()->GetSelectedWebContents()->GetController())));
-    url = browser()->GetSelectedWebContents()->GetURL();
+            &browser()->GetActiveWebContents()->GetController())));
+    url = browser()->GetActiveWebContents()->GetURL();
     EXPECT_STREQ(kSearchSingleCharURL, url.spec().c_str());
   }
 
@@ -1270,6 +1269,45 @@ class OmniboxViewTest : public InProcessBrowserTest,
     EXPECT_EQ(old_text, omnibox_view->GetText());
   }
 
+#if defined(USE_AURA)
+  const BrowserView* GetBrowserView() const {
+    return static_cast<BrowserView*>(browser()->window());
+  }
+
+  const views::View* GetFocusView() const {
+    return GetBrowserView()->GetViewByID(location_bar_focus_view_id_);
+  }
+
+  // Move the mouse to the center of the browser window and left-click.
+  void ClickBrowserWindowCenter() {
+    ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(
+                    GetBrowserView()->GetScreenBounds().CenterPoint()));
+    ASSERT_TRUE(ui_test_utils::SendMouseEventsSync(
+                    ui_controls::LEFT, ui_controls::DOWN));
+    ASSERT_TRUE(ui_test_utils::SendMouseEventsSync(
+                    ui_controls::LEFT, ui_controls::UP));
+  }
+
+  // Press and release the mouse in the focus view at an offset from its origin.
+  // If |release_offset| differs from |press_offset|, the mouse will be moved
+  // between the press and release.
+  void ClickFocusViewOrigin(ui_controls::MouseButton button,
+                            const gfx::Point& press_offset,
+                            const gfx::Point& release_offset) {
+    gfx::Point focus_view_origin = GetFocusView()->GetScreenBounds().origin();
+    gfx::Point press_point = focus_view_origin;
+    press_point.Offset(press_offset.x(), press_offset.y());
+    ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(press_point));
+    ASSERT_TRUE(ui_test_utils::SendMouseEventsSync(button, ui_controls::DOWN));
+
+    gfx::Point release_point = focus_view_origin;
+    release_point.Offset(release_offset.x(), release_offset.y());
+    if (release_point != press_point)
+      ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(release_point));
+    ASSERT_TRUE(ui_test_utils::SendMouseEventsSync(button, ui_controls::UP));
+  }
+#endif  // defined(USE_AURA)
+
  private:
   ViewID location_bar_focus_view_id_;
 };
@@ -1293,7 +1331,14 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_PopupAccelerators) {
   PopupAcceleratorsTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, BackspaceInKeywordMode) {
+// http://crbug.com/133341
+#if defined(OS_LINUX)
+#define MAYBE_BackspaceInKeywordMode DISABLED_BackspaceInKeywordMode
+#else
+#define MAYBE_BackspaceInKeywordMode BackspaceInKeywordMode
+#endif
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BackspaceInKeywordMode) {
   BackspaceInKeywordModeTest();
 }
 
@@ -1309,7 +1354,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AltEnter) {
   AltEnterTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, EnterToSearch) {
+// http://crbug.com/133354
+#if defined(OS_LINUX)
+#define MAYBE_EnterToSearch DISABLED_EnterToSearch
+#else
+#define MAYBE_EnterToSearch EnterToSearch
+#endif
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_EnterToSearch) {
   EnterToSearchTest();
 }
 
@@ -1317,11 +1368,24 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, EscapeToDefaultMatch) {
   EscapeToDefaultMatchTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, BasicTextOperations) {
+// http://crbug.com/133370
+#if defined(OS_LINUX)
+#define MAYBE_BasicTextOperations DISABLED_BasicTextOperations
+#else
+#define MAYBE_BasicTextOperations BasicTextOperations
+#endif
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BasicTextOperations) {
   BasicTextOperationsTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AcceptKeywordBySpace) {
+// http://crbug.com/131179
+#if defined(OS_LINUX)
+#define MAYBE_AcceptKeywordBySpace DISABLED_AcceptKeywordBySpace
+#else
+#define MAYBE_AcceptKeywordBySpace AcceptKeywordBySpace
+#endif
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_AcceptKeywordBySpace) {
   AcceptKeywordBySpaceTest();
 }
 
@@ -1329,36 +1393,69 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
   NonSubstitutingKeywordTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DeleteItem) {
+// http://crbug.com/131179
+#if defined(OS_LINUX)
+#define MAYBE_DeleteItem DISABLED_DeleteItem
+#else
+#define MAYBE_DeleteItem DeleteItem
+#endif
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DeleteItem) {
   DeleteItemTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, TabAcceptKeyword) {
+// http://crbug.com/133344
+#if defined(OS_LINUX)
+#define MAYBE_TabAcceptKeyword DISABLED_TabAcceptKeyword
+#else
+#define MAYBE_TabAcceptKeyword TabAcceptKeyword
+#endif
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_TabAcceptKeyword) {
   TabAcceptKeyword();
 }
 
 #if !defined(OS_MACOSX)
 // Mac intentionally does not support this behavior.
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, TabTraverseResultsTest) {
+
+// http://crbug.com/133360
+#if defined(OS_LINUX)
+#define MAYBE_TabTraverseResultsTest DISABLED_TabTraverseResultsTest
+#else
+#define MAYBE_TabTraverseResultsTest TabTraverseResultsTest
+#endif
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_TabTraverseResultsTest) {
   TabTraverseResultsTest();
 }
 #endif
 
+
+// http://crbug.com/133347
+#if defined(OS_LINUX)
+#define MAYBE_PersistKeywordModeOnTabSwitch DISABLED_PersistKeywordModeOnTabSwitch
+#else
+#define MAYBE_PersistKeywordModeOnTabSwitch PersistKeywordModeOnTabSwitch
+#endif
+
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
-                       PersistKeywordModeOnTabSwitch) {
+                       MAYBE_PersistKeywordModeOnTabSwitch) {
   PersistKeywordModeOnTabSwitch();
 }
 
+// http://crbug.com/133355
+#if defined(OS_LINUX)
+#define MAYBE_CtrlKeyPressedWithInlineAutocompleteTest DISABLED_CtrlKeyPressedWithInlineAutocompleteTest
+#else
+#define MAYBE_CtrlKeyPressedWithInlineAutocompleteTest CtrlKeyPressedWithInlineAutocompleteTest
+#endif
+
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
-                       CtrlKeyPressedWithInlineAutocompleteTest) {
+                       MAYBE_CtrlKeyPressedWithInlineAutocompleteTest) {
   CtrlKeyPressedWithInlineAutocompleteTest();
 }
 
-#if defined(TOOLKIT_GTK)
-// TODO(oshima): enable these tests for views-implmentation when
-// these featuers are supported. http://crbug.com/121558.
-
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, UndoRedoLinux) {
+#if defined(TOOLKIT_GTK) || defined(USE_AURA)
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, UndoRedo) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
   browser()->FocusLocationBar();
 
@@ -1423,6 +1520,25 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, UndoRedoLinux) {
   EXPECT_TRUE(omnibox_view->GetText().empty());
 }
 
+// See http://crosbug.com/10306
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
+                       BackspaceDeleteHalfWidthKatakana) {
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+  // Insert text: ﾀﾞ
+  omnibox_view->SetUserText(UTF8ToUTF16("\357\276\200\357\276\236"));
+
+  // Move the cursor to the end.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_END, 0));
+
+  // Backspace should delete one character.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, 0));
+  EXPECT_EQ(UTF8ToUTF16("\357\276\200"), omnibox_view->GetText());
+}
+
+#endif  // defined(TOOLKIT_GTK) || defined(USE_AURA)
+
+#if defined(TOOLKIT_GTK)
 // See http://crbug.com/63860
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PrimarySelection) {
   OmniboxView* omnibox_view = NULL;
@@ -1448,22 +1564,6 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PrimarySelection) {
   EXPECT_EQ("Hello world", GetPrimarySelectionText());
 }
 
-// See http://crosbug.com/10306
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
-                       BackspaceDeleteHalfWidthKatakana) {
-  OmniboxView* omnibox_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-  // Insert text: ﾀﾞ
-  omnibox_view->SetUserText(UTF8ToUTF16("\357\276\200\357\276\236"));
-
-  // Move the cursor to the end.
-  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_END, 0));
-
-  // Backspace should delete one character.
-  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, 0));
-  EXPECT_EQ(UTF8ToUTF16("\357\276\200"), omnibox_view->GetText());
-}
-
 // http://crbug.com/12316
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PasteReplacingAll) {
   OmniboxView* omnibox_view = NULL;
@@ -1481,4 +1581,67 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PasteReplacingAll) {
   // Inline autocomplete shouldn't be triggered.
   ASSERT_EQ(ASCIIToUTF16("abc"), omnibox_view->GetText());
 }
-#endif
+#endif  // defined(TOOLKIT_GTK)
+
+// TODO(derat): Enable on Windows: http://crbug.com/128556
+#if defined(USE_AURA)
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, SelectAllOnClick) {
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+  omnibox_view->SetUserText(ASCIIToUTF16("http://www.google.com/"));
+  const gfx::Point kClickOffset(2, 2);
+
+  // Take the focus away from the omnibox.
+  ASSERT_NO_FATAL_FAILURE(ClickBrowserWindowCenter());
+  EXPECT_FALSE(omnibox_view->IsSelectAll());
+  EXPECT_FALSE(GetFocusView()->HasFocus());
+
+  // Click in the omnibox.  All of its text should be selected.
+  ASSERT_NO_FATAL_FAILURE(
+      ClickFocusViewOrigin(ui_controls::LEFT, kClickOffset, kClickOffset));
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  EXPECT_TRUE(GetFocusView()->HasFocus());
+
+  // Ensure that all of the text is selected and then take the focus away.  The
+  // selection should persist.
+  omnibox_view->SelectAll(false);
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  ASSERT_NO_FATAL_FAILURE(ClickBrowserWindowCenter());
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  EXPECT_FALSE(GetFocusView()->HasFocus());
+
+  // Clicking in the omnibox while some of its text is already selected should
+  // have the effect of re-selecting the text.
+  ASSERT_NO_FATAL_FAILURE(
+      ClickFocusViewOrigin(ui_controls::LEFT, kClickOffset, kClickOffset));
+  EXPECT_TRUE(omnibox_view->IsSelectAll());
+  EXPECT_TRUE(GetFocusView()->HasFocus());
+
+  // Click in a different spot in the omnibox.  It should keep the focus but
+  // lose the selection.
+  omnibox_view->SelectAll(false);
+  const gfx::Point kSecondClickOffset(kClickOffset.x() + 10, kClickOffset.y());
+  ASSERT_NO_FATAL_FAILURE(
+      ClickFocusViewOrigin(
+          ui_controls::LEFT, kSecondClickOffset, kSecondClickOffset));
+  EXPECT_FALSE(omnibox_view->IsSelectAll());
+  EXPECT_TRUE(GetFocusView()->HasFocus());
+
+  // Take the focus away and click in the omnibox again, but drag a bit before
+  // releasing.  We should focus the omnibox but not select all of its text.
+  ASSERT_NO_FATAL_FAILURE(ClickBrowserWindowCenter());
+  const gfx::Point kReleaseOffset(kClickOffset.x() + 10, kClickOffset.y());
+  ASSERT_NO_FATAL_FAILURE(
+      ClickFocusViewOrigin(ui_controls::LEFT, kClickOffset, kReleaseOffset));
+  EXPECT_FALSE(omnibox_view->IsSelectAll());
+  EXPECT_TRUE(GetFocusView()->HasFocus());
+
+  // Middle-clicking shouldn't select all the text either.
+  ASSERT_NO_FATAL_FAILURE(
+      ClickFocusViewOrigin(ui_controls::LEFT, kClickOffset, kClickOffset));
+  ASSERT_NO_FATAL_FAILURE(ClickBrowserWindowCenter());
+  ASSERT_NO_FATAL_FAILURE(
+      ClickFocusViewOrigin(ui_controls::MIDDLE, kClickOffset, kClickOffset));
+  EXPECT_FALSE(omnibox_view->IsSelectAll());
+}
+#endif  // defined(USE_AURA)

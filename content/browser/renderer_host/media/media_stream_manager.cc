@@ -19,6 +19,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/media_observer.h"
+#include "googleurl/src/gurl.h"
 #include "media/audio/audio_manager.h"
 
 using content::BrowserThread;
@@ -90,7 +91,7 @@ struct MediaStreamManager::DeviceRequest {
                 const StreamOptions& request_options,
                 int render_process_id,
                 int render_view_id,
-                const std::string& request_security_origin)
+                const GURL& request_security_origin)
       : requester(requester),
         options(request_options),
         state(content::NUM_MEDIA_STREAM_DEVICE_TYPES, kNotRequested),
@@ -109,7 +110,7 @@ struct MediaStreamManager::DeviceRequest {
   RequestType type;
   int render_process_id;
   int render_view_id;
-  std::string security_origin;
+  GURL security_origin;
   std::string requested_device_id;
   StreamDeviceInfoArray audio_devices;
   StreamDeviceInfoArray video_devices;
@@ -166,7 +167,7 @@ void MediaStreamManager::GenerateStream(MediaStreamRequester* requester,
                                         int render_process_id,
                                         int render_view_id,
                                         const StreamOptions& options,
-                                        const std::string& security_origin,
+                                        const GURL& security_origin,
                                         std::string* label) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -213,6 +214,38 @@ void MediaStreamManager::CancelRequests(MediaStreamRequester* requester) {
   }
 }
 
+void MediaStreamManager::CancelGenerateStream(const std::string& label) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  DeviceRequests::iterator it = requests_.find(label);
+  if (it != requests_.end()) {
+    // The request isn't complete.
+    if (!RequestDone(it->second)) {
+      DeviceRequest* request = &(it->second);
+      if (request->state[content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE] ==
+          DeviceRequest::kOpening) {
+        for (StreamDeviceInfoArray::iterator it =
+             request->audio_devices.begin(); it != request->audio_devices.end();
+             ++it) {
+          audio_input_device_manager()->Close(it->session_id);
+        }
+      }
+      if (request->state[content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE] ==
+          DeviceRequest::kOpening) {
+        for (StreamDeviceInfoArray::iterator it =
+             request->video_devices.begin(); it != request->video_devices.end();
+             ++it) {
+          video_capture_manager()->Close(it->session_id);
+        }
+      }
+      requests_.erase(it);
+    } else {
+      StopGeneratedStream(label);
+    }
+    device_settings_->RemovePendingCaptureRequest(label);
+  }
+}
+
 void MediaStreamManager::StopGeneratedStream(const std::string& label) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Find the request and close all open devices for the request.
@@ -241,7 +274,7 @@ void MediaStreamManager::EnumerateDevices(
     int render_process_id,
     int render_view_id,
     MediaStreamType type,
-    const std::string& security_origin,
+    const GURL& security_origin,
     std::string* label) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -267,7 +300,7 @@ void MediaStreamManager::OpenDevice(
     int render_view_id,
     const std::string& device_id,
     MediaStreamType type,
-    const std::string& security_origin,
+    const GURL& security_origin,
     std::string* label) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 

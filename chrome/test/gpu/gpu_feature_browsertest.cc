@@ -21,7 +21,7 @@
 #include "content/test/gpu/gpu_test_config.h"
 #include "content/test/gpu/test_switches.h"
 #include "net/base/net_util.h"
-#include "ui/gfx/gl/gl_switches.h"
+#include "ui/gl/gl_switches.h"
 #if defined(OS_MACOSX)
 #include "ui/surface/io_surface_support_mac.h"
 #endif
@@ -35,7 +35,7 @@ using trace_analyzer::TraceEventVector;
 namespace {
 
 typedef uint32 GpuResultFlags;
-#define EXPECT_NO_GPU_PROCESS         GpuResultFlags(1<<0)
+#define EXPECT_NO_GPU_SWAP_BUFFERS    GpuResultFlags(1<<0)
 // Expect a SwapBuffers to occur (see gles2_cmd_decoder.cc).
 #define EXPECT_GPU_SWAP_BUFFERS       GpuResultFlags(1<<1)
 
@@ -134,11 +134,10 @@ class GpuFeatureTest : public InProcessBrowserTest {
     analyzer_->AssociateBeginEndEvents();
     TraceEventVector events;
 
-    // This measurement is flaky, because the GPU process is sometimes
-    // started before the test (always with force-compositing-mode on CrOS).
-    if (expectations & EXPECT_NO_GPU_PROCESS) {
-      EXPECT_EQ(0u, analyzer_->FindEvents(
-          Query::MatchBeginName("OnGraphicsInfoCollected"), &events));
+    if (expectations & EXPECT_NO_GPU_SWAP_BUFFERS) {
+      EXPECT_EQ(analyzer_->FindEvents(Query::EventName() ==
+                                      Query::String("SwapBuffers"), &events),
+                size_t(0));
     }
 
     // Check for swap buffers if expected:
@@ -184,7 +183,7 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, AcceleratedCompositingBlocked) {
   EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING);
 
   const FilePath url(FILE_PATH_LITERAL("feature_compositing.html"));
-  RunTest(url, EXPECT_NO_GPU_PROCESS);
+  RunTest(url, EXPECT_NO_GPU_SWAP_BUFFERS);
 }
 
 class AcceleratedCompositingTest : public GpuFeatureTest {
@@ -198,7 +197,7 @@ class AcceleratedCompositingTest : public GpuFeatureTest {
 IN_PROC_BROWSER_TEST_F(AcceleratedCompositingTest,
                        AcceleratedCompositingDisabled) {
   const FilePath url(FILE_PATH_LITERAL("feature_compositing.html"));
-  RunTest(url, EXPECT_NO_GPU_PROCESS);
+  RunTest(url, EXPECT_NO_GPU_SWAP_BUFFERS);
 }
 
 IN_PROC_BROWSER_TEST_F(GpuFeatureTest, WebGLAllowed) {
@@ -228,7 +227,7 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, WebGLBlocked) {
   EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
 
   const FilePath url(FILE_PATH_LITERAL("feature_webgl.html"));
-  RunTest(url, EXPECT_NO_GPU_PROCESS);
+  RunTest(url, EXPECT_NO_GPU_SWAP_BUFFERS);
 }
 
 class WebGLTest : public GpuFeatureTest {
@@ -241,7 +240,7 @@ class WebGLTest : public GpuFeatureTest {
 
 IN_PROC_BROWSER_TEST_F(WebGLTest, WebGLDisabled) {
   const FilePath url(FILE_PATH_LITERAL("feature_webgl.html"));
-  RunTest(url, EXPECT_NO_GPU_PROCESS);
+  RunTest(url, EXPECT_NO_GPU_SWAP_BUFFERS);
 }
 
 IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MultisamplingAllowed) {
@@ -254,39 +253,22 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MultisamplingAllowed) {
   if (use_gl == gfx::kGLImplementationOSMesaName)
     return;
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
   // Linux Intel uses mesa driver, where multisampling is not supported.
   // Multisampling is also not supported on virtualized mac os.
-  GPUTestBotConfig test_bot;
-  test_bot.LoadCurrentConfig(NULL);
-
-  const std::vector<uint32>& gpu_vendor = test_bot.gpu_vendor();
-#if defined(OS_LINUX)
-  if (gpu_vendor.size() == 1 && gpu_vendor[0] == 0x8086)
+  std::vector<std::string> configs;
+  configs.push_back("LINUX INTEL");
+  configs.push_back("MAC VMWARE");
+  if (GPUTestBotConfig::CurrentConfigMatches(configs))
     return;
-#endif  // defined(OS_LINUX)
-
-#if defined(OS_MACOSX)
-  if (gpu_vendor.size() == 1 && gpu_vendor[0] == 0x15AD)
-    return;
-#endif  // defined(OS_MACOSX)
-
-#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
 
   const FilePath url(FILE_PATH_LITERAL("feature_multisampling.html"));
   RunTest(url, "\"TRUE\"", true);
 }
 
 IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MultisamplingBlocked) {
-#if defined(OS_MACOSX)
   // Multisampling fails on virtualized mac os.
-  GPUTestBotConfig test_bot;
-  test_bot.LoadCurrentConfig(NULL);
-
-  const std::vector<uint32>& gpu_vendor = test_bot.gpu_vendor();
-  if (gpu_vendor.size() == 1 && gpu_vendor[0] == 0x15AD)
+  if (GPUTestBotConfig::CurrentConfigMatches("MAC VMWARE"))
     return;
-#endif
 
   const std::string json_blacklist =
       "{\n"
@@ -318,28 +300,18 @@ class WebGLMultisamplingTest : public GpuFeatureTest {
 };
 
 IN_PROC_BROWSER_TEST_F(WebGLMultisamplingTest, MultisamplingDisabled) {
-#if defined(OS_MACOSX)
   // Multisampling fails on virtualized mac os.
-  GPUTestBotConfig test_bot;
-  test_bot.LoadCurrentConfig(NULL);
-
-  const std::vector<uint32>& gpu_vendor = test_bot.gpu_vendor();
-  if (gpu_vendor.size() == 1 && gpu_vendor[0] == 0x15AD)
+  if (GPUTestBotConfig::CurrentConfigMatches("MAC VMWARE"))
     return;
-#endif
 
   const FilePath url(FILE_PATH_LITERAL("feature_multisampling.html"));
   RunTest(url, "\"FALSE\"", true);
 }
 
 IN_PROC_BROWSER_TEST_F(GpuFeatureTest, Canvas2DAllowed) {
-#if defined(OS_WIN)
   // Accelerated canvas 2D is not supported on XP.
-  GPUTestBotConfig test_bot;
-  test_bot.LoadCurrentConfig(NULL);
-  if (test_bot.os() == GPUTestConfig::kOsWinXP)
+  if (GPUTestBotConfig::CurrentConfigMatches("XP"))
     return;
-#endif
 
   GpuFeatureType type = GpuDataManager::GetInstance()->GetGpuFeatureType();
   EXPECT_EQ(type, 0);
@@ -367,7 +339,7 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, Canvas2DBlocked) {
   EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS);
 
   const FilePath url(FILE_PATH_LITERAL("feature_canvas2d.html"));
-  RunTest(url, EXPECT_NO_GPU_PROCESS);
+  RunTest(url, EXPECT_NO_GPU_SWAP_BUFFERS);
 }
 
 class Canvas2DDisabledTest : public GpuFeatureTest {
@@ -380,7 +352,7 @@ class Canvas2DDisabledTest : public GpuFeatureTest {
 
 IN_PROC_BROWSER_TEST_F(Canvas2DDisabledTest, Canvas2DDisabled) {
   const FilePath url(FILE_PATH_LITERAL("feature_canvas2d.html"));
-  RunTest(url, EXPECT_NO_GPU_PROCESS);
+  RunTest(url, EXPECT_NO_GPU_SWAP_BUFFERS);
 }
 
 IN_PROC_BROWSER_TEST_F(GpuFeatureTest,
@@ -416,9 +388,13 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, RafNoDamage) {
   if (!analyzer_.get())
     return;
 
+  // Search for matching name on begin event or async_begin event (any begin).
+  Query query_raf =
+      (Query::EventPhase() == Query::Phase(TRACE_EVENT_PHASE_BEGIN) ||
+       Query::EventPhase() == Query::Phase(TRACE_EVENT_PHASE_ASYNC_BEGIN)) &&
+      Query::EventName() == Query::String("___RafWithNoDamage___");
   TraceEventVector events;
-  size_t num_events = analyzer_->FindEvents(
-      Query::MatchBeginName("___RafWithNoDamage___"), &events);
+  size_t num_events = analyzer_->FindEvents(query_raf, &events);
 
   trace_analyzer::RateStats stats;
   trace_analyzer::RateStatsOptions stats_options;

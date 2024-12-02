@@ -24,12 +24,12 @@ namespace remoting {
 // not connected it keeps trying to reconnect it until it is
 // connected. It limits connection attempt rate using exponential
 // backoff. It also monitors network state and reconnects signalling
-// whenever online state changes or IP address changes.
+// whenever connection type changes or IP address changes.
 class SignalingConnector
     : public base::SupportsWeakPtr<SignalingConnector>,
       public base::NonThreadSafe,
       public SignalStrategy::Listener,
-      public net::NetworkChangeNotifier::OnlineStateObserver,
+      public net::NetworkChangeNotifier::ConnectionTypeObserver,
       public net::NetworkChangeNotifier::IPAddressObserver,
       public GaiaOAuthClient::Delegate {
  public:
@@ -50,13 +50,14 @@ class SignalingConnector
     OAuthClientInfo client_info;
   };
 
-  // OAuth token is updated refreshed when |oauth_credentials| is
-  // not NULL.
-  SignalingConnector(XmppSignalStrategy* signal_strategy);
+  // The |auth_failed_callback| is called when authentication fails.
+  SignalingConnector(XmppSignalStrategy* signal_strategy,
+                     const base::Closure& auth_failed_callback);
   virtual ~SignalingConnector();
 
+  // May be called immediately after the constructor to enable OAuth
+  // access token updating.
   void EnableOAuth(scoped_ptr<OAuthCredentials> oauth_credentials,
-                   const base::Closure& oauth_failed_callback,
                    net::URLRequestContextGetter* url_context);
 
   // SignalStrategy::Listener interface.
@@ -66,11 +67,13 @@ class SignalingConnector
   // NetworkChangeNotifier::IPAddressObserver interface.
   virtual void OnIPAddressChanged() OVERRIDE;
 
-  // NetworkChangeNotifier::OnlineStateObserver interface.
-  virtual void OnOnlineStateChanged(bool online) OVERRIDE;
+  // NetworkChangeNotifier::ConnectionTypeObserver interface.
+  virtual void OnConnectionTypeChanged(
+      net::NetworkChangeNotifier::ConnectionType type) OVERRIDE;
 
   // GaiaOAuthClient::Delegate interface.
-  virtual void OnRefreshTokenResponse(const std::string& access_token,
+  virtual void OnRefreshTokenResponse(const std::string& user_email,
+                                      const std::string& access_token,
                                       int expires_seconds) OVERRIDE;
   virtual void OnOAuthError() OVERRIDE;
   virtual void OnNetworkError(int response_code) OVERRIDE;
@@ -83,9 +86,9 @@ class SignalingConnector
   void RefreshOAuthToken();
 
   XmppSignalStrategy* signal_strategy_;
+  base::Closure auth_failed_callback_;
 
   scoped_ptr<OAuthCredentials> oauth_credentials_;
-  base::Closure oauth_failed_callback_;
   scoped_ptr<GaiaOAuthClient> gaia_oauth_client_;
 
   // Number of times we tried to connect without success.

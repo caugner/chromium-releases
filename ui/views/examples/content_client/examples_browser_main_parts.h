@@ -16,18 +16,9 @@ class StackingClient;
 }
 }
 
-namespace base {
-class Thread;
-}
-
-namespace ui {
-class Clipboard;
-}
-
 namespace content {
 
 class ShellBrowserContext;
-class ShellDevToolsDelegate;
 struct MainFunctionParams;
 }
 
@@ -42,21 +33,9 @@ class ExamplesBrowserMainParts : public content::BrowserMainParts {
   virtual ~ExamplesBrowserMainParts();
 
   // Overridden from content::BrowserMainParts:
-  virtual void PreEarlyInitialization() OVERRIDE {}
-  virtual void PostEarlyInitialization() OVERRIDE {}
-  virtual void PreMainMessageLoopStart() OVERRIDE;
-  virtual void PostMainMessageLoopStart() OVERRIDE {}
-  virtual void ToolkitInitialized() OVERRIDE {}
-  virtual int PreCreateThreads() OVERRIDE;
   virtual void PreMainMessageLoopRun() OVERRIDE;
   virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
   virtual void PostMainMessageLoopRun() OVERRIDE;
-  virtual void PostDestroyThreads() OVERRIDE {}
-
-  ui::Clipboard* GetClipboard();
-  content::ShellDevToolsDelegate* devtools_delegate() {
-    return devtools_delegate_;
-  }
 
   content::ShellBrowserContext* browser_context() {
     return browser_context_.get();
@@ -65,8 +44,6 @@ class ExamplesBrowserMainParts : public content::BrowserMainParts {
  private:
   scoped_ptr<content::ShellBrowserContext> browser_context_;
 
-  scoped_ptr<ui::Clipboard> clipboard_;
-  content::ShellDevToolsDelegate* devtools_delegate_;
   scoped_ptr<views::ViewsDelegate> views_delegate_;
 #if defined(USE_AURA)
   scoped_ptr<aura::client::StackingClient> stacking_client_;

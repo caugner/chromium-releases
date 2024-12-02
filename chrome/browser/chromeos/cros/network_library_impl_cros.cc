@@ -36,7 +36,8 @@ const char kDefaultCheckPortalList[] = "ethernet,wifi,cellular";
 ////////////////////////////////////////////////////////////////////////////
 
 NetworkLibraryImplCros::NetworkLibraryImplCros()
-    : NetworkLibraryImplBase() {
+    : NetworkLibraryImplBase(),
+      weak_ptr_factory_(this) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableLibcros)) {
     LOG(INFO) << "Using Libcros network fucntions.";
     SetLibcrosNetworkFunctionsEnabled(true);
@@ -54,11 +55,16 @@ void NetworkLibraryImplCros::Init() {
   // First, get the currently available networks. This data is cached
   // on the connman side, so the call should be quick.
   VLOG(1) << "Requesting initial network manager info from libcros.";
-  CrosRequestNetworkManagerProperties(base::Bind(&NetworkManagerUpdate, this));
+  CrosRequestNetworkManagerProperties(
+      base::Bind(&NetworkLibraryImplCros::NetworkManagerUpdate,
+                 weak_ptr_factory_.GetWeakPtr()));
   network_manager_watcher_.reset(CrosMonitorNetworkManagerProperties(
-      base::Bind(&NetworkManagerStatusChangedHandler, this)));
+      base::Bind(&NetworkLibraryImplCros::NetworkManagerStatusChangedHandler,
+                 weak_ptr_factory_.GetWeakPtr())));
   data_plan_watcher_.reset(
-      CrosMonitorCellularDataPlan(base::Bind(&DataPlanUpdateHandler, this)));
+      CrosMonitorCellularDataPlan(
+          base::Bind(&NetworkLibraryImplCros::UpdateCellularDataPlan,
+                     weak_ptr_factory_.GetWeakPtr())));
   // Always have at least one device obsever so that device updates are
   // always received.
   network_device_observer_.reset(new NetworkLibraryDeviceObserver());
@@ -75,7 +81,9 @@ void NetworkLibraryImplCros::MonitorNetworkStart(
     const std::string& service_path) {
   if (monitored_networks_.find(service_path) == monitored_networks_.end()) {
     CrosNetworkWatcher* watcher = CrosMonitorNetworkServiceProperties(
-        base::Bind(&NetworkStatusChangedHandler, this), service_path);
+        base::Bind(&NetworkLibraryImplCros::UpdateNetworkStatus,
+                   weak_ptr_factory_.GetWeakPtr()),
+        service_path);
     monitored_networks_[service_path] = watcher;
   }
 }
@@ -93,7 +101,9 @@ void NetworkLibraryImplCros::MonitorNetworkDeviceStart(
     const std::string& device_path) {
   if (monitored_devices_.find(device_path) == monitored_devices_.end()) {
     CrosNetworkWatcher* watcher = CrosMonitorNetworkDeviceProperties(
-        base::Bind(&NetworkDevicePropertyChangedHandler, this), device_path);
+        base::Bind(&NetworkLibraryImplCros::UpdateNetworkDeviceStatus,
+                   weak_ptr_factory_.GetWeakPtr()),
+        device_path);
     monitored_devices_[device_path] = watcher;
   }
 }
@@ -105,19 +115,6 @@ void NetworkLibraryImplCros::MonitorNetworkDeviceStop(
     delete iter->second;
     monitored_devices_.erase(iter);
   }
-}
-
-// static callback
-void NetworkLibraryImplCros::NetworkStatusChangedHandler(
-    void* object,
-    const std::string& path,
-    const std::string& key,
-    const Value& value) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
-  networklib->UpdateNetworkStatus(path, key, value);
 }
 
 void NetworkLibraryImplCros::UpdateNetworkStatus(
@@ -140,19 +137,6 @@ void NetworkLibraryImplCros::UpdateNetworkStatus(
   }
 }
 
-// static callback
-void NetworkLibraryImplCros::NetworkDevicePropertyChangedHandler(
-    void* object,
-    const std::string& path,
-    const std::string& key,
-    const Value& value) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
-  networklib->UpdateNetworkDeviceStatus(path, key, value);
-}
-
 void NetworkLibraryImplCros::UpdateNetworkDeviceStatus(
     const std::string& path, const std::string& key, const Value& value) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -173,9 +157,10 @@ void NetworkLibraryImplCros::UpdateNetworkDeviceStatus(
     NotifyNetworkDeviceChanged(device, index);
     // If a device's power state changes, new properties may become defined.
     if (index == PROPERTY_INDEX_POWERED) {
-      CrosRequestNetworkDeviceProperties(path,
-                                         base::Bind(&NetworkDeviceUpdate,
-                                                    this));
+      CrosRequestNetworkDeviceProperties(
+          path,
+          base::Bind(&NetworkLibraryImplCros::NetworkDeviceUpdate,
+                     weak_ptr_factory_.GetWeakPtr()));
     }
   }
 }
@@ -211,12 +196,10 @@ void NetworkLibraryImplCros::CallConfigureService(const std::string& identifier,
   CrosConfigureService(*info);
 }
 
-// static callback
 void NetworkLibraryImplCros::NetworkConnectCallback(
-    void* object,
-    const char* service_path,
+    const std::string& service_path,
     NetworkMethodErrorType error,
-    const char* error_message) {
+    const std::string& error_message) {
   DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkConnectStatus status;
   if (error == NETWORK_METHOD_ERROR_NONE) {
@@ -225,43 +208,35 @@ void NetworkLibraryImplCros::NetworkConnectCallback(
     LOG(WARNING) << "Error from ServiceConnect callback for: "
                  << service_path
                  << " Error: " << error << " Message: " << error_message;
-    if (error_message &&
-        strcmp(error_message, flimflam::kErrorPassphraseRequiredMsg) == 0) {
+    if (error_message == flimflam::kErrorPassphraseRequiredMsg) {
       status = CONNECT_BAD_PASSPHRASE;
     } else {
       status = CONNECT_FAILED;
     }
   }
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  Network* network = networklib->FindNetworkByPath(service_path);
+  Network* network = FindNetworkByPath(service_path);
   if (!network) {
     LOG(ERROR) << "No network for path: " << service_path;
     return;
   }
-  networklib->NetworkConnectCompleted(network, status);
+  NetworkConnectCompleted(network, status);
 }
 
 void NetworkLibraryImplCros::CallConnectToNetwork(Network* network) {
   DCHECK(network);
-  CrosRequestNetworkServiceConnect(network->service_path(),
-                                   NetworkConnectCallback, this);
+  CrosRequestNetworkServiceConnect(
+      network->service_path(),
+      base::Bind(&NetworkLibraryImplCros::NetworkConnectCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-// static callback
 void NetworkLibraryImplCros::WifiServiceUpdateAndConnect(
-    void* object,
     const std::string& service_path,
     const base::DictionaryValue* properties) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   if (properties) {
-    Network* network = networklib->ParseNetwork(service_path, *properties);
-    DCHECK_EQ(network->type(), TYPE_WIFI);
-    networklib->ConnectToWifiNetworkUsingConnectData(
-        static_cast<WifiNetwork*>(network));
+    Network* network = ParseNetwork(service_path, *properties);
+    CHECK_EQ(network->type(), TYPE_WIFI);
+    ConnectToWifiNetworkUsingConnectData(static_cast<WifiNetwork*>(network));
   }
 }
 
@@ -272,23 +247,18 @@ void NetworkLibraryImplCros::CallRequestWifiNetworkAndConnect(
   CrosRequestHiddenWifiNetworkProperties(
       ssid,
       SecurityToString(security),
-      base::Bind(&WifiServiceUpdateAndConnect, this));
+      base::Bind(&NetworkLibraryImplCros::WifiServiceUpdateAndConnect,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-// static callback
 void NetworkLibraryImplCros::VPNServiceUpdateAndConnect(
-    void* object,
     const std::string& service_path,
     const base::DictionaryValue* properties) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   if (properties) {
     VLOG(1) << "Connecting to new VPN Service: " << service_path;
-    Network* network = networklib->ParseNetwork(service_path, *properties);
-    DCHECK_EQ(network->type(), TYPE_VPN);
-    networklib->ConnectToVirtualNetworkUsingConnectData(
+    Network* network = ParseNetwork(service_path, *properties);
+    CHECK_EQ(network->type(), TYPE_VPN);
+    ConnectToVirtualNetworkUsingConnectData(
         static_cast<VirtualNetwork*>(network));
   } else {
     LOG(WARNING) << "Unable to create VPN Service: " << service_path;
@@ -303,7 +273,8 @@ void NetworkLibraryImplCros::CallRequestVirtualNetworkAndConnect(
       service_name,
       server_hostname,
       ProviderTypeToString(provider_type),
-      base::Bind(&VPNServiceUpdateAndConnect, this));
+      base::Bind(&NetworkLibraryImplCros::VPNServiceUpdateAndConnect,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void NetworkLibraryImplCros::CallDeleteRememberedNetwork(
@@ -333,8 +304,10 @@ void NetworkLibraryImplCros::ChangePin(const std::string& old_pin,
     return;
   }
   sim_operation_ = SIM_OPERATION_CHANGE_PIN;
-  CrosRequestChangePin(cellular->device_path(), old_pin, new_pin,
-                       PinOperationCallback, this);
+  CrosRequestChangePin(
+      cellular->device_path(), old_pin, new_pin,
+      base::Bind(&NetworkLibraryImplCros::PinOperationCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void NetworkLibraryImplCros::ChangeRequirePin(bool require_pin,
@@ -347,8 +320,10 @@ void NetworkLibraryImplCros::ChangeRequirePin(bool require_pin,
     return;
   }
   sim_operation_ = SIM_OPERATION_CHANGE_REQUIRE_PIN;
-  CrosRequestRequirePin(cellular->device_path(), pin, require_pin,
-                        PinOperationCallback, this);
+  CrosRequestRequirePin(
+      cellular->device_path(), pin, require_pin,
+      base::Bind(&NetworkLibraryImplCros::PinOperationCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void NetworkLibraryImplCros::EnterPin(const std::string& pin) {
@@ -358,7 +333,9 @@ void NetworkLibraryImplCros::EnterPin(const std::string& pin) {
     return;
   }
   sim_operation_ = SIM_OPERATION_ENTER_PIN;
-  CrosRequestEnterPin(cellular->device_path(), pin, PinOperationCallback, this);
+  CrosRequestEnterPin(cellular->device_path(), pin,
+                      base::Bind(&NetworkLibraryImplCros::PinOperationCallback,
+                                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void NetworkLibraryImplCros::UnblockPin(const std::string& puk,
@@ -369,20 +346,17 @@ void NetworkLibraryImplCros::UnblockPin(const std::string& puk,
     return;
   }
   sim_operation_ = SIM_OPERATION_UNBLOCK_PIN;
-  CrosRequestUnblockPin(cellular->device_path(), puk, new_pin,
-                        PinOperationCallback, this);
+  CrosRequestUnblockPin(
+      cellular->device_path(), puk, new_pin,
+      base::Bind(&NetworkLibraryImplCros::PinOperationCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-// static callback
 void NetworkLibraryImplCros::PinOperationCallback(
-    void* object,
-    const char* path,
+    const std::string& path,
     NetworkMethodErrorType error,
-    const char* error_message) {
+    const std::string& error_message) {
   DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   PinOperationError pin_error;
   VLOG(1) << "PinOperationCallback, error: " << error
           << " error_msg: " << error_message;
@@ -390,19 +364,17 @@ void NetworkLibraryImplCros::PinOperationCallback(
     pin_error = PIN_ERROR_NONE;
     VLOG(1) << "Pin operation completed successfuly";
   } else {
-    if (error_message &&
-        (strcmp(error_message, flimflam::kErrorIncorrectPinMsg) == 0 ||
-         strcmp(error_message, flimflam::kErrorPinRequiredMsg) == 0)) {
+    if (error_message == flimflam::kErrorIncorrectPinMsg ||
+        error_message == flimflam::kErrorPinRequiredMsg) {
       pin_error = PIN_ERROR_INCORRECT_CODE;
-    } else if (error_message &&
-               strcmp(error_message, flimflam::kErrorPinBlockedMsg) == 0) {
+    } else if (error_message == flimflam::kErrorPinBlockedMsg) {
       pin_error = PIN_ERROR_BLOCKED;
     } else {
       pin_error = PIN_ERROR_UNKNOWN;
       NOTREACHED() << "Unknown PIN error: " << error_message;
     }
   }
-  networklib->NotifyPinOperationCompleted(pin_error);
+  NotifyPinOperationCompleted(pin_error);
 }
 
 void NetworkLibraryImplCros::RequestCellularScan() {
@@ -422,19 +394,16 @@ void NetworkLibraryImplCros::RequestCellularRegister(
     return;
   }
   CrosRequestCellularRegister(
-      cellular->device_path(), network_id, CellularRegisterCallback, this);
+      cellular->device_path(), network_id,
+      base::Bind(&NetworkLibraryImplCros::CellularRegisterCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-// static callback
 void NetworkLibraryImplCros::CellularRegisterCallback(
-    void* object,
-    const char* path,
+    const std::string& path,
     NetworkMethodErrorType error,
-    const char* error_message) {
+    const std::string& error_message) {
   DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   // TODO(dpolukhin): Notify observers about network registration status
   // but not UI doesn't assume such notification so just ignore result.
 }
@@ -472,11 +441,17 @@ void NetworkLibraryImplCros::RequestNetworkScan() {
     wifi_scanning_ = true;  // Cleared when updates are received.
     CrosRequestNetworkScan(flimflam::kTypeWifi);
   }
+
+  if (wimax_enabled())
+    CrosRequestNetworkScan(flimflam::kTypeWimax);
+
   if (cellular_network())
     cellular_network()->RefreshDataPlansIfNeeded();
   // Make sure all Manager info is up to date. This will also update
   // remembered networks and visible services.
-  CrosRequestNetworkManagerProperties(base::Bind(&NetworkManagerUpdate, this));
+  CrosRequestNetworkManagerProperties(
+      base::Bind(&NetworkLibraryImplCros::NetworkManagerUpdate,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 bool NetworkLibraryImplCros::GetWifiAccessPoints(
@@ -540,6 +515,8 @@ void NetworkLibraryImplCros::SetIPConfig(const NetworkIPConfig& ipconfig) {
   if (ipconfig.device_path.empty())
     return;
 
+  VLOG(1) << "Setting IPConfig: " << ipconfig.ToString();
+
   NetworkIPConfig* ipconfig_dhcp = NULL;
   std::string ipconfig_dhcp_path;
   NetworkIPConfig* ipconfig_static = NULL;
@@ -561,17 +538,24 @@ void NetworkLibraryImplCros::SetIPConfig(const NetworkIPConfig& ipconfig) {
   NetworkIPConfigVector ipconfigs2;
   std::vector<std::string> ipconfig_paths2;
   if (ipconfig.type == chromeos::IPCONFIG_TYPE_DHCP) {
-    // If switching from static to dhcp, create new dhcp ip config.
-    if (!ipconfig_dhcp)
-      CrosAddIPConfig(ipconfig.device_path, chromeos::IPCONFIG_TYPE_DHCP);
-    // User wants DHCP now. So delete the static ip config.
+    // If switching from static to DHCP, create new DHCP IPConfig.
+    if (!ipconfig_dhcp &&
+        !CrosAddIPConfig(ipconfig.device_path, chromeos::IPCONFIG_TYPE_DHCP)) {
+      LOG(ERROR) << "Unable to add new DHCP IPConfig";
+      return;
+    }
+    // User wants DHCP now. So delete the static IPConfig.
     if (ipconfig_static)
       CrosRemoveIPConfig(ipconfig_static_path);
   } else if (ipconfig.type == chromeos::IPCONFIG_TYPE_IPV4) {
-    // If switching from dhcp to static, create new static ip config.
+    // If switching from DHCP to static, create new static IPConfig.
     if (!ipconfig_static) {
-      CrosAddIPConfig(ipconfig.device_path, chromeos::IPCONFIG_TYPE_IPV4);
-      // Now find the newly created IP config.
+      if (!CrosAddIPConfig(ipconfig.device_path,
+                           chromeos::IPCONFIG_TYPE_IPV4)) {
+        LOG(ERROR) << "Unable to add new static IPConfig";
+        return;
+      }
+      // Now find the newly created IPConfig.
       if (CrosListIPConfigs(ipconfig.device_path, &ipconfigs2,
                             &ipconfig_paths2, NULL)) {
         for (size_t i = 0; i < ipconfigs2.size(); ++i) {
@@ -581,60 +565,60 @@ void NetworkLibraryImplCros::SetIPConfig(const NetworkIPConfig& ipconfig) {
           }
         }
       }
+      if (!ipconfig_static) {
+        LOG(ERROR) << "Unable to find newly added static IPConfig";
+        return;
+      }
     }
-    if (ipconfig_static) {
-      // Save any changed details.
-      if (ipconfig.address != ipconfig_static->address) {
-        base::StringValue value(ipconfig.address);
-        CrosSetNetworkIPConfigProperty(ipconfig_static->device_path,
-                                       flimflam::kAddressProperty, value);
-      }
-      if (ipconfig.netmask != ipconfig_static->netmask) {
-        int prefixlen = ipconfig.GetPrefixLength();
-        if (prefixlen == -1) {
-          VLOG(1) << "IP config prefixlen is invalid for netmask "
-                  << ipconfig.netmask;
-        } else {
-          base::FundamentalValue value(prefixlen);
-          CrosSetNetworkIPConfigProperty(ipconfig_static->device_path,
-                                         flimflam::kPrefixlenProperty, value);
-        }
-      }
-      if (ipconfig.gateway != ipconfig_static->gateway) {
-        base::StringValue value(ipconfig.gateway);
-        CrosSetNetworkIPConfigProperty(ipconfig_static->device_path,
-                                       flimflam::kGatewayProperty, value);
-      }
-      if (ipconfig.name_servers != ipconfig_static->name_servers) {
-        base::StringValue value(ipconfig.name_servers);
-        CrosSetNetworkIPConfigProperty(ipconfig_static->device_path,
-                                       flimflam::kNameServersProperty, value);
-      }
-      // Remove dhcp ip config if there is one.
-      if (ipconfig_dhcp)
-        CrosRemoveIPConfig(ipconfig_dhcp_path);
+
+    // Save any changed details.
+    if (ipconfig.address != ipconfig_static->address) {
+      base::StringValue value(ipconfig.address);
+      CrosSetNetworkIPConfigProperty(ipconfig_static_path,
+                                     flimflam::kAddressProperty, value);
     }
+    if (ipconfig.netmask != ipconfig_static->netmask) {
+      int prefixlen = ipconfig.GetPrefixLength();
+      if (prefixlen == -1) {
+        VLOG(1) << "IPConfig prefix length is invalid for netmask "
+            << ipconfig.netmask;
+      } else {
+        base::FundamentalValue value(prefixlen);
+        CrosSetNetworkIPConfigProperty(ipconfig_static_path,
+                                       flimflam::kPrefixlenProperty, value);
+      }
+    }
+    if (ipconfig.gateway != ipconfig_static->gateway) {
+      base::StringValue value(ipconfig.gateway);
+      CrosSetNetworkIPConfigProperty(ipconfig_static_path,
+                                     flimflam::kGatewayProperty, value);
+    }
+    if (ipconfig.name_servers != ipconfig_static->name_servers) {
+      base::StringValue value(ipconfig.name_servers);
+      CrosSetNetworkIPConfigProperty(ipconfig_static_path,
+                                     flimflam::kNameServersProperty, value);
+    }
+    // Remove DHCP IPConfig if there is one.
+    if (ipconfig_dhcp)
+      CrosRemoveIPConfig(ipconfig_dhcp_path);
   }
 }
 
 /////////////////////////////////////////////////////////////////////////////
 // Network Manager functions.
 
-// static
 void NetworkLibraryImplCros::NetworkManagerStatusChangedHandler(
-    void* object,
     const std::string& path,
     const std::string& key,
     const Value& value) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
-  networklib->NetworkManagerStatusChanged(key, &value);
+  if (!NetworkManagerStatusChanged(key, &value)) {
+    LOG(ERROR) << "Invalid key-value pair, key: " << key << " type: "
+               << value.GetType();
+  }
 }
 
 // This processes all Manager update messages.
-void NetworkLibraryImplCros::NetworkManagerStatusChanged(
+bool NetworkLibraryImplCros::NetworkManagerStatusChanged(
     const std::string& key, const Value* value) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   base::TimeTicks start = base::TimeTicks::Now();
@@ -645,20 +629,23 @@ void NetworkLibraryImplCros::NetworkManagerStatusChanged(
       // Currently we ignore the network manager state.
       break;
     case PROPERTY_INDEX_AVAILABLE_TECHNOLOGIES: {
-      DCHECK_EQ(value->GetType(), Value::TYPE_LIST);
-      const ListValue* vlist = static_cast<const ListValue*>(value);
+      const ListValue* vlist = NULL;
+      if (!value->GetAsList(&vlist))
+        return false;
       UpdateAvailableTechnologies(vlist);
       break;
     }
     case PROPERTY_INDEX_ENABLED_TECHNOLOGIES: {
-      DCHECK_EQ(value->GetType(), Value::TYPE_LIST);
-      const ListValue* vlist = static_cast<const ListValue*>(value);
+      const ListValue* vlist = NULL;
+      if (!value->GetAsList(&vlist))
+        return false;
       UpdateEnabledTechnologies(vlist);
       break;
     }
     case PROPERTY_INDEX_CONNECTED_TECHNOLOGIES: {
-      DCHECK_EQ(value->GetType(), Value::TYPE_LIST);
-      const ListValue* vlist = static_cast<const ListValue*>(value);
+      const ListValue* vlist = NULL;
+      if (!value->GetAsList(&vlist))
+        return false;
       UpdateConnectedTechnologies(vlist);
       break;
     }
@@ -682,28 +669,32 @@ void NetworkLibraryImplCros::NetworkManagerStatusChanged(
       break;
     }
     case PROPERTY_INDEX_PROFILES: {
-      DCHECK_EQ(value->GetType(), Value::TYPE_LIST);
-      const ListValue* vlist = static_cast<const ListValue*>(value);
+      const ListValue* vlist = NULL;
+      if (!value->GetAsList(&vlist))
+        return false;
       UpdateRememberedNetworks(vlist);
       RequestRememberedNetworksUpdate();
       break;
     }
     case PROPERTY_INDEX_SERVICES: {
-      DCHECK_EQ(value->GetType(), Value::TYPE_LIST);
-      const ListValue* vlist = static_cast<const ListValue*>(value);
+      const ListValue* vlist = NULL;
+      if (!value->GetAsList(&vlist))
+        return false;
       UpdateNetworkServiceList(vlist);
       break;
     }
     case PROPERTY_INDEX_SERVICE_WATCH_LIST: {
-      DCHECK_EQ(value->GetType(), Value::TYPE_LIST);
-      const ListValue* vlist = static_cast<const ListValue*>(value);
+      const ListValue* vlist = NULL;
+      if (!value->GetAsList(&vlist))
+        return false;
       UpdateWatchedNetworkServiceList(vlist);
       break;
     }
     case PROPERTY_INDEX_DEVICE:
     case PROPERTY_INDEX_DEVICES: {
-      DCHECK_EQ(value->GetType(), Value::TYPE_LIST);
-      const ListValue* vlist = static_cast<const ListValue*>(value);
+      const ListValue* vlist = NULL;
+      if (!value->GetAsList(&vlist))
+        return false;
       UpdateNetworkDeviceList(vlist);
       break;
     }
@@ -717,54 +708,39 @@ void NetworkLibraryImplCros::NetworkManagerStatusChanged(
       // Currently we ignore PortalURL and ArpGateway.
       break;
     default:
-      LOG(WARNING) << "Manager: Unhandled key: " << key;
+      VLOG(2) << "Manager: Unhandled key: " << key;
       break;
   }
   base::TimeDelta delta = base::TimeTicks::Now() - start;
   VLOG(2) << "NetworkManagerStatusChanged: time: "
           << delta.InMilliseconds() << " ms.";
   HISTOGRAM_TIMES("CROS_NETWORK_UPDATE", delta);
+  return true;
 }
 
-// static
 void NetworkLibraryImplCros::NetworkManagerUpdate(
-    void* object,
     const std::string& manager_path,
     const base::DictionaryValue* properties) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   if (!properties) {
     LOG(ERROR) << "Error retrieving manager properties: " << manager_path;
     return;
   }
   VLOG(1) << "Received NetworkManagerUpdate.";
-  networklib->ParseNetworkManager(*properties);
-}
 
-void NetworkLibraryImplCros::ParseNetworkManager(const DictionaryValue& dict) {
-  for (DictionaryValue::key_iterator iter = dict.begin_keys();
-       iter != dict.end_keys(); ++iter) {
+  for (DictionaryValue::key_iterator iter = properties->begin_keys();
+       iter != properties->end_keys(); ++iter) {
     const std::string& key = *iter;
     Value* value;
-    bool res = dict.GetWithoutPathExpansion(key, &value);
+    bool res = properties->GetWithoutPathExpansion(key, &value);
     CHECK(res);
-    NetworkManagerStatusChanged(key, value);
+    if (!NetworkManagerStatusChanged(key, value)) {
+      LOG(ERROR) << "Invalid key-value pair, key: " << key << " type: "
+                 << value->GetType();
+    }
   }
   // If there is no Profiles entry, request remembered networks here.
-  if (!dict.HasKey(flimflam::kProfilesProperty))
+  if (!properties->HasKey(flimflam::kProfilesProperty))
     RequestRememberedNetworksUpdate();
-}
-
-// static
-void NetworkLibraryImplCros::DataPlanUpdateHandler(
-    void* object,
-    const std::string& modem_service_path,
-    CellularDataPlanVector* data_plan_vector) {
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  networklib->UpdateCellularDataPlan(modem_service_path, data_plan_vector);
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -851,9 +827,11 @@ void NetworkLibraryImplCros::UpdateNetworkServiceList(
       // Use update_request map to store network priority.
       network_update_requests_[service_path] = network_priority_order++;
       wifi_scanning_ = true;
-      CrosRequestNetworkServiceProperties(service_path,
-                                          base::Bind(&NetworkServiceUpdate,
-                                                     this));
+      VLOG(2) << "UpdateNetworkServiceList, Service: " << service_path;
+      CrosRequestNetworkServiceProperties(
+          service_path,
+          base::Bind(&NetworkLibraryImplCros::NetworkServiceUpdate,
+                     weak_ptr_factory_.GetWeakPtr()));
     }
   }
   // Iterate through list of remaining networks that are no longer in the
@@ -865,11 +843,16 @@ void NetworkLibraryImplCros::UpdateNetworkServiceList(
             << " State = " << network->GetStateString()
             << " connecting = " << network->connecting()
             << " connection_started = " << network->connection_started();
+    WifiNetwork* wifi = NULL;
+    if (network->type() == TYPE_WIFI)
+      wifi = static_cast<WifiNetwork*>(network);
     if (network->failed() && network->notify_failure()) {
       // We have not notified observers of a connection failure yet.
       AddNetwork(network);
-    } else if (network->connecting() && network->connection_started()) {
-      // Network was in connecting state; set state to failed.
+    } else if (network->connecting() && network->connection_started() &&
+               !(wifi && wifi->hidden_ssid())) {
+      // Network was in connecting state; set state to failed, but not if it
+      // had a hidden SSID (since that won't appear in the scanning list).
       VLOG(2) << "Removed network was connecting: " << network->name();
       network->SetState(STATE_FAILURE);
       AddNetwork(network);
@@ -898,23 +881,19 @@ void NetworkLibraryImplCros::UpdateWatchedNetworkServiceList(
       VLOG(1) << "Watched Service: " << service_path;
       CrosRequestNetworkServiceProperties(
           service_path,
-          base::Bind(&NetworkServiceUpdate, this));
+          base::Bind(&NetworkLibraryImplCros::NetworkServiceUpdate,
+                     weak_ptr_factory_.GetWeakPtr()));
     }
   }
 }
 
-// static
 void NetworkLibraryImplCros::NetworkServiceUpdate(
-    void* object,
     const std::string& service_path,
     const base::DictionaryValue* properties) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   if (!properties)
     return;  // Network no longer in visible list, ignore.
-  networklib->ParseNetwork(service_path, *properties);
+  VLOG(2) << "NetworkServiceUpdate: " << service_path;
+  ParseNetwork(service_path, *properties);
 }
 
 // Called from NetworkServiceUpdate and WifiServiceUpdateAndConnect.
@@ -1013,33 +992,27 @@ void NetworkLibraryImplCros::RequestRememberedNetworksUpdate() {
     NetworkProfile& profile = *iter;
     VLOG(1) << " Requesting Profile: " << profile.path;
     CrosRequestNetworkProfileProperties(
-        profile.path, base::Bind(&ProfileUpdate, this));
+        profile.path,
+        base::Bind(&NetworkLibraryImplCros::UpdateProfile,
+                   weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
-// static
-void NetworkLibraryImplCros::ProfileUpdate(
-    void* object,
+void NetworkLibraryImplCros::UpdateProfile(
     const std::string& profile_path,
     const base::DictionaryValue* properties) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   if (!properties) {
     LOG(ERROR) << "Error retrieving profile: " << profile_path;
     return;
   }
-  VLOG(1) << "Received ProfileUpdate for: " << profile_path;
-  ListValue* entries(NULL);
-  properties->GetList(flimflam::kEntriesProperty, &entries);
-  DCHECK(entries);
-  networklib->UpdateRememberedServiceList(profile_path, entries);
-}
+  VLOG(1) << "UpdateProfile for path: " << profile_path;
+  ListValue* profile_entries(NULL);
+  properties->GetList(flimflam::kEntriesProperty, &profile_entries);
+  if (!profile_entries) {
+    LOG(ERROR) << "'Entries' property is missing.";
+    return;
+  }
 
-void NetworkLibraryImplCros::UpdateRememberedServiceList(
-    const std::string& profile_path, const ListValue* profile_entries) {
-  VLOG(1) << "UpdateRememberedServiceList for path: " << profile_path;
   NetworkProfileList::iterator iter1;
   for (iter1 = profile_list_.begin(); iter1 != profile_list_.end(); ++iter1) {
     if (iter1->path == profile_path)
@@ -1061,31 +1034,26 @@ void NetworkLibraryImplCros::UpdateRememberedServiceList(
       LOG(WARNING) << "Empty service path in profile.";
       continue;
     }
-    VLOG(1) << " Remembered service: " << service_path;
+    VLOG(2) << " Remembered service: " << service_path;
     // Add service to profile list.
     profile.services.insert(service_path);
     // Request update for remembered network.
     CrosRequestNetworkProfileEntryProperties(
         profile_path,
         service_path,
-        base::Bind(&RememberedNetworkServiceUpdate, this));
+        base::Bind(&NetworkLibraryImplCros::RememberedNetworkServiceUpdate,
+                   weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
-// static
 void NetworkLibraryImplCros::RememberedNetworkServiceUpdate(
-    void* object,
     const std::string& service_path,
     const base::DictionaryValue* properties) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   if (!properties) {
     // Remembered network no longer exists.
-    networklib->DeleteRememberedNetwork(service_path);
+    DeleteRememberedNetwork(service_path);
   } else {
-    networklib->ParseRememberedNetwork(service_path, *properties);
+    ParseRememberedNetwork(service_path, *properties);
   }
 }
 
@@ -1121,7 +1089,7 @@ Network* NetworkLibraryImplCros::ParseRememberedNetwork(
 
   SetProfileTypeFromPath(remembered);
 
-  VLOG(1) << "ParseRememberedNetwork: " << remembered->name()
+  VLOG(2) << "ParseRememberedNetwork: " << remembered->name()
           << " path: " << remembered->service_path()
           << " profile: " << remembered->profile_path_;
   NotifyNetworkManagerChanged(false);  // Not forced.
@@ -1132,14 +1100,15 @@ Network* NetworkLibraryImplCros::ParseRememberedNetwork(
     if (!FindNetworkByUniqueId(remembered->unique_id())) {
       VirtualNetwork* vpn = static_cast<VirtualNetwork*>(remembered);
       std::string provider_type = ProviderTypeToString(vpn->provider_type());
-      VLOG(1) << "Requesting VPN: " << vpn->name()
+      VLOG(2) << "Requesting VPN: " << vpn->name()
               << " Server: " << vpn->server_hostname()
               << " Type: " << provider_type;
       CrosRequestVirtualNetworkProperties(
           vpn->name(),
           vpn->server_hostname(),
           provider_type,
-          base::Bind(&NetworkServiceUpdate, this));
+          base::Bind(&NetworkLibraryImplCros::NetworkServiceUpdate,
+                     weak_ptr_factory_.GetWeakPtr()));
     }
   }
 
@@ -1169,7 +1138,8 @@ void NetworkLibraryImplCros::UpdateNetworkDeviceList(const ListValue* devices) {
       }
       CrosRequestNetworkDeviceProperties(
           device_path,
-          base::Bind(&NetworkDeviceUpdate, this));
+          base::Bind(&NetworkLibraryImplCros::NetworkDeviceUpdate,
+                     weak_ptr_factory_.GetWeakPtr()));
     }
   }
   // Delete any old devices that no longer exist.
@@ -1181,20 +1151,14 @@ void NetworkLibraryImplCros::UpdateNetworkDeviceList(const ListValue* devices) {
   }
 }
 
-// static
 void NetworkLibraryImplCros::NetworkDeviceUpdate(
-    void* object,
     const std::string& device_path,
     const base::DictionaryValue* properties) {
-  DCHECK(CrosLibrary::Get()->libcros_loaded());
-  NetworkLibraryImplCros* networklib =
-      static_cast<NetworkLibraryImplCros*>(object);
-  DCHECK(networklib);
   if (!properties) {
     // device no longer exists.
-    networklib->DeleteDevice(device_path);
+    DeleteDevice(device_path);
   } else {
-    networklib->ParseNetworkDevice(device_path, *properties);
+    ParseNetworkDevice(device_path, *properties);
   }
 }
 
@@ -1214,7 +1178,7 @@ void NetworkLibraryImplCros::ParseNetworkDevice(const std::string& device_path,
     }
     CHECK(device) << "Attempted to add NULL device for path: " << device_path;
   }
-  VLOG(1) << "ParseNetworkDevice:" << device->name();
+  VLOG(2) << "ParseNetworkDevice:" << device->name();
   if (device && device->type() == TYPE_CELLULAR) {
     if (!device->data_roaming_allowed() && IsCellularAlwaysInRoaming()) {
       SetCellularDataRoamingAllowed(true);

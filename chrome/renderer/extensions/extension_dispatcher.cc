@@ -10,20 +10,21 @@
 #include "base/string_piece.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_view_type.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_permission_set.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/view_type.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/extensions/api_definitions_natives.h"
 #include "chrome/renderer/extensions/app_bindings.h"
+#include "chrome/renderer/extensions/app_window_custom_bindings.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/context_menus_custom_bindings.h"
 #include "chrome/renderer/extensions/event_bindings.h"
-#include "chrome/renderer/extensions/experimental.socket_custom_bindings.h"
 #include "chrome/renderer/extensions/experimental.usb_custom_bindings.h"
 #include "chrome/renderer/extensions/extension_custom_bindings.h"
 #include "chrome/renderer/extensions/extension_groups.h"
@@ -31,12 +32,15 @@
 #include "chrome/renderer/extensions/extension_request_sender.h"
 #include "chrome/renderer/extensions/file_browser_handler_custom_bindings.h"
 #include "chrome/renderer/extensions/file_browser_private_custom_bindings.h"
+#include "chrome/renderer/extensions/file_system_natives.h"
 #include "chrome/renderer/extensions/i18n_custom_bindings.h"
+#include "chrome/renderer/extensions/media_gallery_custom_bindings.h"
 #include "chrome/renderer/extensions/miscellaneous_bindings.h"
 #include "chrome/renderer/extensions/page_actions_custom_bindings.h"
 #include "chrome/renderer/extensions/page_capture_custom_bindings.h"
 #include "chrome/renderer/extensions/send_request_natives.h"
 #include "chrome/renderer/extensions/set_icon_natives.h"
+#include "chrome/renderer/extensions/tab_finder.h"
 #include "chrome/renderer/extensions/tabs_custom_bindings.h"
 #include "chrome/renderer/extensions/tts_custom_bindings.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
@@ -56,6 +60,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "v8/include/v8.h"
 
@@ -68,23 +73,29 @@ using WebKit::WebString;
 using WebKit::WebVector;
 using WebKit::WebView;
 using content::RenderThread;
+using content::RenderView;
 using extensions::ApiDefinitionsNatives;
+using extensions::AppWindowCustomBindings;
 using extensions::ContextMenusCustomBindings;
-using extensions::ExperimentalSocketCustomBindings;
+using extensions::Extension;
 using extensions::ExperimentalUsbCustomBindings;
 using extensions::ExtensionAPI;
 using extensions::ExtensionCustomBindings;
 using extensions::Feature;
 using extensions::FileBrowserHandlerCustomBindings;
 using extensions::FileBrowserPrivateCustomBindings;
+using extensions::FileSystemNatives;
 using extensions::I18NCustomBindings;
 using extensions::MiscellaneousBindings;
+using extensions::MediaGalleryCustomBindings;
 using extensions::PageActionsCustomBindings;
 using extensions::PageCaptureCustomBindings;
 using extensions::SendRequestNatives;
 using extensions::SetIconNatives;
 using extensions::TTSCustomBindings;
+using extensions::TabFinder;
 using extensions::TabsCustomBindings;
+using extensions::UpdatedExtensionPermissionsInfo;
 using extensions::WebRequestCustomBindings;
 
 namespace {
@@ -92,8 +103,7 @@ namespace {
 static const int64 kInitialExtensionIdleHandlerDelayMs = 5*1000;
 static const int64 kMaxExtensionIdleHandlerDelayMs = 5*60*1000;
 static const char kEventDispatchFunction[] = "Event.dispatchJSON";
-static const char kOnUnloadEvent[] =
-    "experimental.runtime.onBackgroundPageUnloadingSoon";
+static const char kOnUnloadEvent[] = "runtime.onBackgroundPageUnloadingSoon";
 
 class ChromeHiddenNativeHandler : public NativeHandler {
  public:
@@ -146,7 +156,7 @@ class LazyBackgroundPageNativeHandler : public ChromeV8Extension {
         extension_dispatcher()->v8_context_set().GetCurrent();
     if (!context)
       return v8::Undefined();
-    content::RenderView* render_view = context->GetRenderView();
+    RenderView* render_view = context->GetRenderView();
     if (IsContextLazyBackgroundPage(render_view, context->extension())) {
       render_view->Send(new ExtensionHostMsg_IncrementLazyKeepaliveCount(
           render_view->GetRoutingID()));
@@ -159,7 +169,7 @@ class LazyBackgroundPageNativeHandler : public ChromeV8Extension {
         extension_dispatcher()->v8_context_set().GetCurrent();
     if (!context)
       return v8::Undefined();
-    content::RenderView* render_view = context->GetRenderView();
+    RenderView* render_view = context->GetRenderView();
     if (IsContextLazyBackgroundPage(render_view, context->extension())) {
       render_view->Send(new ExtensionHostMsg_DecrementLazyKeepaliveCount(
           render_view->GetRoutingID()));
@@ -168,7 +178,7 @@ class LazyBackgroundPageNativeHandler : public ChromeV8Extension {
   }
 
  private:
-  bool IsContextLazyBackgroundPage(content::RenderView* render_view,
+  bool IsContextLazyBackgroundPage(RenderView* render_view,
                                    const Extension* extension) {
     if (!render_view)
       return false;
@@ -177,6 +187,22 @@ class LazyBackgroundPageNativeHandler : public ChromeV8Extension {
     return (extension && extension->has_lazy_background_page() &&
             helper->view_type() == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE);
   }
+};
+
+class ChannelNativeHandler : public NativeHandler {
+ public:
+  explicit ChannelNativeHandler(chrome::VersionInfo::Channel channel)
+      : channel_(channel) {
+    RouteFunction("IsDevChannel",
+        base::Bind(&ChannelNativeHandler::IsDevChannel,
+                   base::Unretained(this)));
+  }
+
+  v8::Handle<v8::Value> IsDevChannel(const v8::Arguments& args) {
+    return v8::Boolean::New(channel_ <= chrome::VersionInfo::CHANNEL_DEV);
+  }
+
+  chrome::VersionInfo::Channel channel_;
 };
 
 void InstallAppBindings(ModuleSystem* module_system,
@@ -204,7 +230,8 @@ ExtensionDispatcher::ExtensionDispatcher()
       webrequest_adblock_(false),
       webrequest_adblock_plus_(false),
       webrequest_other_(false),
-      source_map_(&ResourceBundle::GetSharedInstance()) {
+      source_map_(&ResourceBundle::GetSharedInstance()),
+      chrome_channel_(chrome::VersionInfo::CHANNEL_UNKNOWN) {
   const CommandLine& command_line = *(CommandLine::ForCurrentProcess());
   is_extension_process_ =
       command_line.HasSwitch(switches::kExtensionProcess) ||
@@ -228,6 +255,7 @@ bool ExtensionDispatcher::OnControlMessageReceived(
     const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionDispatcher, message)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_SetChannel, OnSetChannel)
     IPC_MESSAGE_HANDLER(ExtensionMsg_MessageInvoke, OnMessageInvoke)
     IPC_MESSAGE_HANDLER(ExtensionMsg_DispatchOnConnect, OnDispatchOnConnect)
     IPC_MESSAGE_HANDLER(ExtensionMsg_DeliverMessage, OnDeliverMessage)
@@ -240,6 +268,10 @@ bool ExtensionDispatcher::OnControlMessageReceived(
                         OnSetScriptingWhitelist)
     IPC_MESSAGE_HANDLER(ExtensionMsg_ActivateExtension, OnActivateExtension)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UpdatePermissions, OnUpdatePermissions)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateTabSpecificPermissions,
+                        OnUpdateTabSpecificPermissions)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_ClearTabSpecificPermissions,
+                        OnClearTabSpecificPermissions)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateUserScripts, OnUpdateUserScripts)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UsingWebRequestAPI, OnUsingWebRequestAPI)
     IPC_MESSAGE_HANDLER(ExtensionMsg_ShouldUnload, OnShouldUnload)
@@ -292,6 +324,10 @@ void ExtensionDispatcher::OnSetFunctionNames(
     function_names_.insert(names[i]);
 }
 
+void ExtensionDispatcher::OnSetChannel(int channel) {
+  chrome_channel_ = channel;
+}
+
 void ExtensionDispatcher::OnMessageInvoke(const std::string& extension_id,
                                           const std::string& function_name,
                                           const ListValue& args,
@@ -317,7 +353,7 @@ void ExtensionDispatcher::OnMessageInvoke(const std::string& extension_id,
   const Extension* extension = extensions_.GetByID(extension_id);
   if (extension && extension->has_lazy_background_page() &&
       function_name == kEventDispatchFunction) {
-    content::RenderView* background_view =
+    RenderView* background_view =
         ExtensionHelper::GetBackgroundPage(extension_id);
     if (background_view) {
       background_view->Send(new ExtensionHostMsg_EventAck(
@@ -390,7 +426,8 @@ void ExtensionDispatcher::OnLoaded(
     patterns.assign(platform_app_patterns);
     WebView::addUserStyleSheet(
         WebString::fromUTF8(ResourceBundle::GetSharedInstance().
-                            GetRawDataResource(IDR_PLATFORM_APP_CSS)),
+            GetRawDataResource(IDR_PLATFORM_APP_CSS,
+                               ui::SCALE_FACTOR_NONE)),
         patterns,
         WebView::UserContentInjectInAllFrames,
         WebView::UserStyleInjectInExistingDocuments);
@@ -463,16 +500,22 @@ void ExtensionDispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
       scoped_ptr<NativeHandler>(
           new SetIconNatives(this, request_sender_.get())));
 
+  // Natives used by multiple APIs.
+  module_system->RegisterNativeHandler("file_system_natives",
+      scoped_ptr<NativeHandler>(new FileSystemNatives()));
+
   // Custom bindings.
   module_system->RegisterNativeHandler("app",
       scoped_ptr<NativeHandler>(new AppBindings(this, context)));
+  module_system->RegisterNativeHandler("app_window",
+      scoped_ptr<NativeHandler>(new AppWindowCustomBindings(this)));
   module_system->RegisterNativeHandler("context_menus",
       scoped_ptr<NativeHandler>(new ContextMenusCustomBindings()));
   module_system->RegisterNativeHandler("extension",
       scoped_ptr<NativeHandler>(
           new ExtensionCustomBindings(this)));
-  module_system->RegisterNativeHandler("experimental_socket",
-      scoped_ptr<NativeHandler>(new ExperimentalSocketCustomBindings()));
+  module_system->RegisterNativeHandler("experimental_mediaGalleries",
+      scoped_ptr<NativeHandler>(new MediaGalleryCustomBindings()));
   module_system->RegisterNativeHandler("experimental_usb",
       scoped_ptr<NativeHandler>(new ExperimentalUsbCustomBindings()));
   module_system->RegisterNativeHandler("file_browser_handler",
@@ -506,38 +549,42 @@ void ExtensionDispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("apitest", IDR_EXTENSION_APITEST_JS);
 
   // Libraries.
+  source_map_.RegisterSource("schemaUtils", IDR_SCHEMA_UTILS_JS);
   source_map_.RegisterSource("sendRequest", IDR_SEND_REQUEST_JS);
   source_map_.RegisterSource("setIcon", IDR_SET_ICON_JS);
+  source_map_.RegisterSource("utils", IDR_UTILS_JS);
 
   // Custom bindings.
   source_map_.RegisterSource("app", IDR_APP_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("appWindow", IDR_APP_WINDOW_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("browserAction",
                              IDR_BROWSER_ACTION_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("contentSettings",
                              IDR_CONTENT_SETTINGS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("contextMenus",
                              IDR_CONTEXT_MENUS_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("declarativeWebRequest",
+                             IDR_DECLARATIVE_WEBREQUEST_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("devtools", IDR_DEVTOOLS_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("experimental.declarative",
-                             IDR_EXPERIMENTAL_DECLARATIVE_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("experimental.app",
+                             IDR_EXPERIMENTAL_APP_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("experimental.bluetooth",
+                             IDR_EXPERIMENTAL_BLUETOOTH_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("experimental.mediaGalleries",
+                             IDR_MEDIA_GALLERY_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("experimental.offscreen",
                              IDR_EXPERIMENTAL_OFFSCREENTABS_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("experimental.runtime",
-                             IDR_EXPERIMENTAL_RUNTIME_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("experimental.socket",
-                             IDR_EXPERIMENTAL_SOCKET_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("experimental.usb",
                              IDR_EXPERIMENTAL_USB_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("experimental.webRequest",
-                             IDR_EXPERIMENTAL_WEBREQUEST_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("extension", IDR_EXTENSION_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("fileBrowserHandler",
                              IDR_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("fileBrowserPrivate",
                              IDR_FILE_BROWSER_PRIVATE_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("fileSystem",
+                             IDR_FILE_SYSTEM_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("i18n", IDR_I18N_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("experimental.input.ime",
-                             IDR_INPUT_IME_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("input.ime", IDR_INPUT_IME_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("omnibox", IDR_OMNIBOX_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("pageActions",
                              IDR_PAGE_ACTIONS_CUSTOM_BINDINGS_JS);
@@ -545,12 +592,15 @@ void ExtensionDispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("pageCapture",
                              IDR_PAGE_CAPTURE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("platformApp", IDR_PLATFORM_APP_JS);
+  source_map_.RegisterSource("runtime", IDR_RUNTIME_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("storage", IDR_STORAGE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("tabs", IDR_TABS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("tts", IDR_TTS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("ttsEngine", IDR_TTS_ENGINE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("types", IDR_TYPES_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("webRequest", IDR_WEB_REQUEST_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("webRequestInternal",
+                             IDR_WEB_REQUEST_INTERNAL_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
 }
 
@@ -622,6 +672,9 @@ void ExtensionDispatcher::DidCreateScriptContext(
       scoped_ptr<NativeHandler>(new PrintNativeHandler()));
   module_system->RegisterNativeHandler("lazy_background_page",
       scoped_ptr<NativeHandler>(new LazyBackgroundPageNativeHandler(this)));
+  module_system->RegisterNativeHandler("channel",
+      scoped_ptr<NativeHandler>(new ChannelNativeHandler(
+          static_cast<chrome::VersionInfo::Channel>(chrome_channel_))));
 
   int manifest_version = 1;
   if (extension)
@@ -736,12 +789,13 @@ void ExtensionDispatcher::InitOriginPermissions(const Extension* extension) {
         false);
   }
 
-  UpdateOriginPermissions(UpdatedExtensionPermissionsInfo::ADDED,
-                          extension,
-                          extension->GetActivePermissions()->explicit_hosts());
+  AddOrRemoveOriginPermissions(
+      UpdatedExtensionPermissionsInfo::ADDED,
+      extension,
+      extension->GetActivePermissions()->explicit_hosts());
 }
 
-void ExtensionDispatcher::UpdateOriginPermissions(
+void ExtensionDispatcher::AddOrRemoveOriginPermissions(
     UpdatedExtensionPermissionsInfo::Reason reason,
     const Extension* extension,
     const URLPatternSet& origins) {
@@ -785,15 +839,49 @@ void ExtensionDispatcher::OnUpdatePermissions(
       static_cast<UpdatedExtensionPermissionsInfo::Reason>(reason_id);
 
   const ExtensionPermissionSet* new_active = NULL;
-  if (reason == UpdatedExtensionPermissionsInfo::ADDED) {
-    new_active = ExtensionPermissionSet::CreateUnion(old_active, delta);
-  } else {
-    CHECK_EQ(UpdatedExtensionPermissionsInfo::REMOVED, reason);
-    new_active = ExtensionPermissionSet::CreateDifference(old_active, delta);
+  switch (reason) {
+    case UpdatedExtensionPermissionsInfo::ADDED:
+      new_active = ExtensionPermissionSet::CreateUnion(old_active, delta);
+      break;
+    case UpdatedExtensionPermissionsInfo::REMOVED:
+      new_active = ExtensionPermissionSet::CreateDifference(old_active, delta);
+      break;
   }
 
   extension->SetActivePermissions(new_active);
-  UpdateOriginPermissions(reason, extension, explicit_hosts);
+  AddOrRemoveOriginPermissions(reason, extension, explicit_hosts);
+}
+
+void ExtensionDispatcher::OnUpdateTabSpecificPermissions(
+    int page_id,
+    int tab_id,
+    const std::string& extension_id,
+    const URLPatternSet& origin_set) {
+  RenderView* view = TabFinder::Find(tab_id);
+
+  // For now, the message should only be sent to the render view that contains
+  // the target tab. This may change. Either way, if this is the target tab it
+  // gives us the chance to check against the page ID to avoid races.
+  DCHECK(view);
+  if (view && view->GetPageId() != page_id)
+    return;
+
+  const Extension* extension = extensions_.GetByID(extension_id);
+  if (!extension)
+    return;
+
+  extension->SetTabSpecificHostPermissions(tab_id, origin_set);
+}
+
+void ExtensionDispatcher::OnClearTabSpecificPermissions(
+    int tab_id,
+    const std::vector<std::string>& extension_ids) {
+  for (std::vector<std::string>::const_iterator it = extension_ids.begin();
+       it != extension_ids.end(); ++it) {
+    const Extension* extension = extensions_.GetByID(*it);
+    if (extension)
+      extension->ClearTabSpecificHostPermissions(tab_id);
+  }
 }
 
 void ExtensionDispatcher::OnUpdateUserScripts(
@@ -856,6 +944,16 @@ Feature::Context ExtensionDispatcher::ClassifyJavaScriptContext(
   if (extension_group == EXTENSION_GROUP_CONTENT_SCRIPTS)
     return Feature::CONTENT_SCRIPT_CONTEXT;
 
+  // We have an explicit check for sandboxed pages first since:
+  // 1. Sandboxed pages run in the same process as regular extension pages, so
+  //    the extension is considered active.
+  // 2. ScriptContext creation (which triggers bindings injection) happens
+  //    before the SecurityContext is updated with the sandbox flags (after
+  //    reading the CSP header), so url_info.url().securityOrigin() is not
+  //    unique yet.
+  if (extensions_.IsSandboxedPage(url_info))
+    return Feature::WEB_PAGE_CONTEXT;
+
   if (IsExtensionActive(extension_id))
     return Feature::BLESSED_EXTENSION_CONTEXT;
 
@@ -894,8 +992,8 @@ bool ExtensionDispatcher::CheckCurrentContextAccessToExtensionAPI(
     return false;
   }
 
-  if (!IsExtensionActive(context->extension()->id()) &&
-      ExtensionAPI::GetSharedInstance()->IsPrivileged(function_name)) {
+  if (ExtensionAPI::GetSharedInstance()->IsPrivileged(function_name) &&
+      context->context_type() != Feature::BLESSED_EXTENSION_CONTEXT) {
     static const char kMessage[] =
         "%s can only be used in an extension process.";
     std::string error_msg = base::StringPrintf(kMessage, function_name.c_str());
@@ -903,6 +1001,15 @@ bool ExtensionDispatcher::CheckCurrentContextAccessToExtensionAPI(
         v8::Exception::Error(v8::String::New(error_msg.c_str())));
     return false;
   }
+
+  // We should never end up with sandboxed contexts trying to invoke extension
+  // APIs, they don't get extension bindings injected. If we end up here it
+  // means that a sandboxed page somehow managed to invoke an API anyway, so
+  // we should abort.
+  WebKit::WebFrame* frame = context->web_frame();
+  ExtensionURLInfo url_info(frame->document().securityOrigin(),
+      UserScriptSlave::GetDataSourceURLForFrame(frame));
+  CHECK(!extensions_.IsSandboxedPage(url_info));
 
   return true;
 }

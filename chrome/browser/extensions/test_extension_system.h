@@ -10,6 +10,9 @@
 
 class CommandLine;
 class FilePath;
+namespace base {
+class Time;
+}
 
 // Test ExtensionSystem, for use with TestingProfile.
 class TestExtensionSystem : public ExtensionSystem {
@@ -26,20 +29,26 @@ class TestExtensionSystem : public ExtensionSystem {
                                            const FilePath& install_directory,
                                            bool autoupdate_enabled);
 
+  // Creates and returns a ManagementPolicy with the ExtensionService and
+  // ExtensionPrefs registered. If not invoked, the ManagementPolicy is NULL.
+  extensions::ManagementPolicy* CreateManagementPolicy();
+
   // Creates an ExtensionProcessManager. If not invoked, the
   // ExtensionProcessManager is NULL.
   void CreateExtensionProcessManager();
 
   // Creates an AlarmManager. Will be NULL otherwise.
-  void CreateAlarmManager();
+  void CreateAlarmManager(base::Time (*now)());
 
   virtual void Init(bool extensions_enabled) OVERRIDE {}
   virtual ExtensionService* extension_service() OVERRIDE;
+  virtual extensions::ManagementPolicy* management_policy() OVERRIDE;
   void SetExtensionService(ExtensionService* service);
   virtual UserScriptMaster* user_script_master() OVERRIDE;
   virtual ExtensionDevToolsManager* devtools_manager() OVERRIDE;
   virtual ExtensionProcessManager* process_manager() OVERRIDE;
   virtual extensions::AlarmManager* alarm_manager() OVERRIDE;
+  virtual extensions::StateStore* state_store() OVERRIDE;
   virtual ExtensionInfoMap* info_map() OVERRIDE;
   virtual extensions::LazyBackgroundTaskQueue*
       lazy_background_task_queue() OVERRIDE;
@@ -57,7 +66,9 @@ class TestExtensionSystem : public ExtensionSystem {
   // The Extension Preferences. Only created if CreateExtensionService is
   // invoked.
   scoped_ptr<ExtensionPrefs> extension_prefs_;
+  scoped_ptr<extensions::StateStore> state_store_;
   scoped_ptr<ExtensionService> extension_service_;
+  scoped_ptr<extensions::ManagementPolicy> management_policy_;
   scoped_ptr<ExtensionProcessManager> extension_process_manager_;
   scoped_ptr<extensions::AlarmManager> alarm_manager_;
 };

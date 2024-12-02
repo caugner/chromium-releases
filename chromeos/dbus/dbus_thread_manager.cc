@@ -5,12 +5,15 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 
 #include "base/chromeos/chromeos_version.h"
+#include "base/command_line.h"
 #include "base/threading/thread.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/bluetooth_adapter_client.h"
 #include "chromeos/dbus/bluetooth_device_client.h"
 #include "chromeos/dbus/bluetooth_input_client.h"
 #include "chromeos/dbus/bluetooth_manager_client.h"
 #include "chromeos/dbus/bluetooth_node_client.h"
+#include "chromeos/dbus/bluetooth_out_of_band_client.h"
 #include "chromeos/dbus/cashew_client.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/dbus/cryptohome_client.h"
@@ -23,10 +26,14 @@
 #include "chromeos/dbus/flimflam_profile_client.h"
 #include "chromeos/dbus/flimflam_service_client.h"
 #include "chromeos/dbus/gsm_sms_client.h"
+#include "chromeos/dbus/ibus/ibus_client.h"
+#include "chromeos/dbus/ibus/ibus_input_context_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
+#include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "chromeos/dbus/sms_client.h"
 #include "chromeos/dbus/speech_synthesizer_client.h"
 #include "chromeos/dbus/update_engine_client.h"
 #include "dbus/bus.h"
@@ -38,7 +45,14 @@ static DBusThreadManager* g_dbus_thread_manager = NULL;
 // The DBusThreadManager implementation used in production.
 class DBusThreadManagerImpl : public DBusThreadManager {
  public:
-  DBusThreadManagerImpl() {
+  explicit DBusThreadManagerImpl(DBusClientImplementationType client_type) {
+    // If --dbus-stub was requested, pass STUB to specific components;
+    // Many components like login are not useful with a stub implementation.
+    DBusClientImplementationType client_type_maybe_stub = client_type;
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+            chromeos::switches::kDbusStub))
+      client_type_maybe_stub = STUB_DBUS_CLIENT_IMPLEMENTATION;
+
     // Create the D-Bus thread.
     base::Thread::Options thread_options;
     thread_options.message_loop_type = MessageLoop::TYPE_IO;
@@ -53,11 +67,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
         dbus_thread_->message_loop_proxy();
     system_bus_ = new dbus::Bus(system_bus_options);
 
-    // Determine whether we use stub or real client implementations.
-    const DBusClientImplementationType client_type =
-        base::chromeos::IsRunningOnChromeOS() ?
-        REAL_DBUS_CLIENT_IMPLEMENTATION : STUB_DBUS_CLIENT_IMPLEMENTATION;
-
     // Create the bluetooth clients.
     bluetooth_manager_client_.reset(BluetoothManagerClient::Create(
         client_type, system_bus_.get()));
@@ -69,6 +78,8 @@ class DBusThreadManagerImpl : public DBusThreadManager {
         client_type, system_bus_.get(), bluetooth_adapter_client_.get()));
     bluetooth_node_client_.reset(BluetoothNodeClient::Create(
         client_type, system_bus_.get(), bluetooth_device_client_.get()));
+    bluetooth_out_of_band_client_.reset(BluetoothOutOfBandClient::Create(
+        client_type, system_bus_.get()));
     // Create the Cashew client.
     cashew_client_.reset(CashewClient::Create(client_type, system_bus_.get()));
     // Create the cros-disks client.
@@ -98,7 +109,7 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     // Create the Flimflam Service client.
     flimflam_service_client_.reset(
         FlimflamServiceClient::Create(client_type, system_bus_.get()));
-    // Create the SMS cilent.
+    // Create the Gsm SMS client.
     gsm_sms_client_.reset(
         GsmSMSClient::Create(client_type, system_bus_.get()));
     // Create the image burner client.
@@ -107,12 +118,18 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     // Create the introspectable object client.
     introspectable_client_.reset(
         IntrospectableClient::Create(client_type, system_bus_.get()));
+    // Create the ModemMessaging client.
+    modem_messaging_client_.reset(
+        ModemMessagingClient::Create(client_type, system_bus_.get()));
     // Create the power manager client.
-    power_manager_client_.reset(PowerManagerClient::Create(client_type,
-                                                           system_bus_.get()));
+    power_manager_client_.reset(
+        PowerManagerClient::Create(client_type_maybe_stub, system_bus_.get()));
     // Create the session manager client.
     session_manager_client_.reset(
         SessionManagerClient::Create(client_type, system_bus_.get()));
+    // Create the SMS client.
+    sms_client_.reset(
+        SMSClient::Create(client_type, system_bus_.get()));
     // Create the speech synthesizer client.
     speech_synthesizer_client_.reset(
         SpeechSynthesizerClient::Create(client_type, system_bus_.get()));
@@ -125,14 +142,47 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     // Shut down the bus. During the browser shutdown, it's ok to shut down
     // the bus synchronously.
     system_bus_->ShutdownOnDBusThreadAndBlock();
+    if (ibus_bus_.get())
+      ibus_bus_->ShutdownOnDBusThreadAndBlock();
 
     // Stop the D-Bus thread.
     dbus_thread_->Stop();
   }
 
   // DBusThreadManager override.
+  virtual void InitIBusBus(const std::string &ibus_address) OVERRIDE {
+    DCHECK(!ibus_bus_);
+    dbus::Bus::Options ibus_bus_options;
+    ibus_bus_options.bus_type = dbus::Bus::CUSTOM_ADDRESS;
+    ibus_bus_options.address = ibus_address;
+    ibus_bus_options.connection_type = dbus::Bus::PRIVATE;
+    ibus_bus_options.dbus_thread_message_loop_proxy =
+        dbus_thread_->message_loop_proxy();
+    ibus_bus_ = new dbus::Bus(ibus_bus_options);
+    ibus_address_ = ibus_address;
+    VLOG(1) << "Connected to ibus-daemon: " << ibus_address;
+
+    DBusClientImplementationType client_type =
+        base::chromeos::IsRunningOnChromeOS() ? REAL_DBUS_CLIENT_IMPLEMENTATION
+                                              : STUB_DBUS_CLIENT_IMPLEMENTATION;
+
+    // Create the ibus client.
+    ibus_client_.reset(
+        IBusClient::Create(client_type, ibus_bus_.get()));
+
+    // Create the ibus input context client.
+    ibus_input_context_client_.reset(
+        IBusInputContextClient::Create(client_type));
+  }
+
+  // DBusThreadManager override.
   virtual dbus::Bus* GetSystemBus() OVERRIDE {
     return system_bus_.get();
+  }
+
+  // DBusThreadManager override.
+  virtual dbus::Bus* GetIBusBus() OVERRIDE {
+    return ibus_bus_.get();
   }
 
   // DBusThreadManager override.
@@ -158,6 +208,11 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   // DBusThreadManager override.
   virtual BluetoothNodeClient* GetBluetoothNodeClient() OVERRIDE {
     return bluetooth_node_client_.get();
+  }
+
+  // DBusThreadManager override.
+  virtual BluetoothOutOfBandClient* GetBluetoothOutOfBandClient() OVERRIDE {
+    return bluetooth_out_of_band_client_.get();
   }
 
   // DBusThreadManager override.
@@ -226,6 +281,11 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   }
 
   // DBusThreadManager override.
+  virtual ModemMessagingClient* GetModemMessagingClient() OVERRIDE {
+    return modem_messaging_client_.get();
+  }
+
+  // DBusThreadManager override.
   virtual PowerManagerClient* GetPowerManagerClient() OVERRIDE {
     return power_manager_client_.get();
   }
@@ -233,6 +293,11 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   // DBusThreadManager override.
   virtual SessionManagerClient* GetSessionManagerClient() OVERRIDE {
     return session_manager_client_.get();
+  }
+
+  // DBusThreadManager override.
+  virtual SMSClient* GetSMSClient() OVERRIDE {
+    return sms_client_.get();
   }
 
   // DBusThreadManager override.
@@ -245,13 +310,25 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     return update_engine_client_.get();
   }
 
+  // DBusThreadManager override.
+  virtual IBusClient* GetIBusClient() OVERRIDE {
+    return ibus_client_.get();
+  }
+
+  // DBusThreadManager override.
+  virtual IBusInputContextClient* GetIBusInputContextClient() OVERRIDE {
+    return ibus_input_context_client_.get();
+  }
+
   scoped_ptr<base::Thread> dbus_thread_;
   scoped_refptr<dbus::Bus> system_bus_;
+  scoped_refptr<dbus::Bus> ibus_bus_;
   scoped_ptr<BluetoothAdapterClient> bluetooth_adapter_client_;
   scoped_ptr<BluetoothDeviceClient> bluetooth_device_client_;
   scoped_ptr<BluetoothInputClient> bluetooth_input_client_;
   scoped_ptr<BluetoothManagerClient> bluetooth_manager_client_;
   scoped_ptr<BluetoothNodeClient> bluetooth_node_client_;
+  scoped_ptr<BluetoothOutOfBandClient> bluetooth_out_of_band_client_;
   scoped_ptr<CashewClient> cashew_client_;
   scoped_ptr<CrosDisksClient> cros_disks_client_;
   scoped_ptr<CryptohomeClient> cryptohome_client_;
@@ -265,10 +342,16 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   scoped_ptr<GsmSMSClient> gsm_sms_client_;
   scoped_ptr<ImageBurnerClient> image_burner_client_;
   scoped_ptr<IntrospectableClient> introspectable_client_;
+  scoped_ptr<ModemMessagingClient> modem_messaging_client_;
   scoped_ptr<PowerManagerClient> power_manager_client_;
   scoped_ptr<SessionManagerClient> session_manager_client_;
+  scoped_ptr<SMSClient> sms_client_;
   scoped_ptr<SpeechSynthesizerClient> speech_synthesizer_client_;
   scoped_ptr<UpdateEngineClient> update_engine_client_;
+  scoped_ptr<IBusClient> ibus_client_;
+  scoped_ptr<IBusInputContextClient> ibus_input_context_client_;
+
+  std::string ibus_address_;
 };
 
 // static
@@ -277,8 +360,16 @@ void DBusThreadManager::Initialize() {
     LOG(WARNING) << "DBusThreadManager was already initialized";
     return;
   }
-  g_dbus_thread_manager = new DBusThreadManagerImpl;
-  VLOG(1) << "DBusThreadManager initialized";
+  // Determine whether we use stub or real client implementations.
+  if (base::chromeos::IsRunningOnChromeOS()) {
+    g_dbus_thread_manager =
+        new DBusThreadManagerImpl(REAL_DBUS_CLIENT_IMPLEMENTATION);
+    VLOG(1) << "DBusThreadManager initialized for ChromeOS";
+  } else {
+    g_dbus_thread_manager =
+        new DBusThreadManagerImpl(STUB_DBUS_CLIENT_IMPLEMENTATION);
+    VLOG(1) << "DBusThreadManager initialized with Stub";
+  }
 }
 
 // static
@@ -288,8 +379,16 @@ void DBusThreadManager::InitializeForTesting(
     LOG(WARNING) << "DBusThreadManager was already initialized";
     return;
   }
+  CHECK(dbus_thread_manager);
   g_dbus_thread_manager = dbus_thread_manager;
-  VLOG(1) << "DBusThreadManager initialized";
+  VLOG(1) << "DBusThreadManager initialized with test implementation";
+}
+
+// static
+void DBusThreadManager::InitializeWithStub() {
+  g_dbus_thread_manager =
+        new DBusThreadManagerImpl(STUB_DBUS_CLIENT_IMPLEMENTATION);
+    VLOG(1) << "DBusThreadManager initialized with stub implementation";
 }
 
 // static

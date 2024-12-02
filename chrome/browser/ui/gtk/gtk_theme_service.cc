@@ -16,6 +16,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/chrome_gtk_frame.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/hover_controller_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -31,6 +33,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -103,8 +106,6 @@ const int kAutocompleteImages[] = {
   IDR_OMNIBOX_EXTENSION_APP,
   IDR_OMNIBOX_HTTP,
   IDR_OMNIBOX_HTTP_DARK,
-  IDR_OMNIBOX_HISTORY,
-  IDR_OMNIBOX_HISTORY_DARK,
   IDR_OMNIBOX_SEARCH,
   IDR_OMNIBOX_SEARCH_DARK,
   IDR_OMNIBOX_STAR,
@@ -213,7 +214,7 @@ void BuildIconFromIDRWithColor(int id,
       fill_color, original);
 
   GtkIconSource* icon = gtk_icon_source_new();
-  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&masked);
+  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(masked);
   gtk_icon_source_set_pixbuf(icon, pixbuf);
   g_object_unref(pixbuf);
 
@@ -244,8 +245,10 @@ void GdkColorHSLShift(const color_utils::HSL& shift, GdkColor* frame_color) {
 }  // namespace
 
 GtkWidget* GtkThemeService::icon_widget_ = NULL;
-gfx::Image* GtkThemeService::default_folder_icon_ = NULL;
-gfx::Image* GtkThemeService::default_bookmark_icon_ = NULL;
+base::LazyInstance<gfx::Image> GtkThemeService::default_folder_icon_ =
+    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<gfx::Image> GtkThemeService::default_bookmark_icon_ =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 GtkThemeService* GtkThemeService::GetFrom(Profile* profile) {
@@ -301,6 +304,12 @@ SkBitmap* GtkThemeService::GetBitmapNamed(int id) const {
   return const_cast<SkBitmap*>(GetImageNamed(id)->ToSkBitmap());
 }
 
+gfx::ImageSkia* GtkThemeService::GetImageSkiaNamed(int id) const {
+  // TODO(pkotwicz): Remove this const cast.  The gfx::Image interface returns
+  // its images const. GetImageSkiaNamed() also should but has many callsites.
+  return const_cast<gfx::ImageSkia*>(GetImageNamed(id)->ToImageSkia());
+}
+
 const gfx::Image* GtkThemeService::GetImageNamed(int id) const {
   // Try to get our cached version:
   ImageCache::const_iterator it = gtk_images_.find(id);
@@ -339,7 +348,7 @@ void GtkThemeService::InitThemesFor(NotificationObserver* observer) {
                     content::NotificationService::NoDetails());
 }
 
-void GtkThemeService::SetTheme(const Extension* extension) {
+void GtkThemeService::SetTheme(const extensions::Extension* extension) {
   profile()->GetPrefs()->SetBoolean(prefs::kUsesSystemTheme, false);
   LoadDefaultValues();
   ThemeService::SetTheme(extension);
@@ -561,42 +570,44 @@ void GtkThemeService::GetScrollbarColors(GdkColor* thumb_active_color,
 }
 
 // static
-gfx::Image* GtkThemeService::GetFolderIcon(bool native) {
+gfx::Image GtkThemeService::GetFolderIcon(bool native) {
   if (native) {
     if (!icon_widget_)
       icon_widget_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    // We never release our ref, so we will leak this on program shutdown.
-    if (!default_folder_icon_) {
+
+    if (default_folder_icon_.Get().IsEmpty()) {
+      // This seems to leak.
       GdkPixbuf* pixbuf = gtk_widget_render_icon(
           icon_widget_, GTK_STOCK_DIRECTORY, GTK_ICON_SIZE_MENU, NULL);
       if (pixbuf)
-        default_folder_icon_ = new gfx::Image(pixbuf);
+        default_folder_icon_.Get() = gfx::Image(pixbuf);
     }
-    if (default_folder_icon_)
-      return default_folder_icon_;
+    if (!default_folder_icon_.Get().IsEmpty())
+      return default_folder_icon_.Get();
   }
 
-  return &ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+  return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_BOOKMARK_BAR_FOLDER);
 }
 
 // static
-gfx::Image* GtkThemeService::GetDefaultFavicon(bool native) {
+gfx::Image GtkThemeService::GetDefaultFavicon(bool native) {
   if (native) {
     if (!icon_widget_)
       icon_widget_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    // We never release our ref, so we will leak this on program shutdown.
-    if (!default_bookmark_icon_) {
+
+    if (default_bookmark_icon_.Get().IsEmpty()) {
+      // This seems to leak.
       GdkPixbuf* pixbuf = gtk_widget_render_icon(
           icon_widget_, GTK_STOCK_FILE, GTK_ICON_SIZE_MENU, NULL);
       if (pixbuf)
-        default_bookmark_icon_ = new gfx::Image(pixbuf);
+        default_bookmark_icon_.Get() = gfx::Image(pixbuf);
     }
-    if (default_bookmark_icon_)
-      return default_bookmark_icon_;
+    if (!default_bookmark_icon_.Get().IsEmpty())
+      return default_bookmark_icon_.Get();
   }
 
-  return &ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+  return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_DEFAULT_FAVICON);
 }
 
@@ -653,9 +664,12 @@ void GtkThemeService::NotifyThemeChanged() {
     gtk_util::SetLabelColor(it->first, color);
   }
 
-  Browser* browser = BrowserList::GetLastActive();
-  if (browser && browser->window()) {
-    GtkWindow* window = browser->window()->GetNativeHandle();
+  for (BrowserList::const_iterator browser_iterator = BrowserList::begin();
+       browser_iterator != BrowserList::end(); browser_iterator++) {
+    Browser* browser = (*browser_iterator);
+    if (!browser->window())
+      continue;
+    GtkWindow* window = browser->window()->GetNativeWindow();
     gtk_util::SetDefaultWindowIcon(window);
     gtk_util::SetWindowIcon(window, browser->profile());
   }
@@ -668,10 +682,8 @@ void GtkThemeService::FreePlatformCaches() {
 
 void GtkThemeService::OnStyleSet(GtkWidget* widget,
                                  GtkStyle* previous_style) {
-  gfx::Image* default_folder_icon = default_folder_icon_;
-  gfx::Image* default_bookmark_icon = default_bookmark_icon_;
-  default_folder_icon_ = NULL;
-  default_bookmark_icon_ = NULL;
+  default_folder_icon_.Get() = gfx::Image();
+  default_bookmark_icon_.Get() = gfx::Image();
 
   if (profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme)) {
     ClearAllThemeData();
@@ -680,13 +692,6 @@ void GtkThemeService::OnStyleSet(GtkWidget* widget,
   }
 
   RebuildMenuIconSets();
-
-  // Free the old icons only after the theme change notification has gone
-  // through.
-  if (default_folder_icon)
-    delete default_folder_icon;
-  if (default_bookmark_icon)
-    delete default_bookmark_icon;
 }
 
 void GtkThemeService::LoadGtkValues() {
@@ -782,7 +787,7 @@ void GtkThemeService::LoadGtkValues() {
   SetThemeColorFromGtk(ThemeService::COLOR_NTP_SECTION_LINK_UNDERLINE,
                        link_color);
 
-  if (link_color && !is_default_link_color)
+  if (!is_default_link_color)
     gdk_color_free(const_cast<GdkColor*>(link_color));
 
   // Generate the colors that we pass to WebKit.
@@ -933,16 +938,16 @@ void GtkThemeService::FreeIconSets() {
   }
 }
 
-SkBitmap* GtkThemeService::GenerateGtkThemeBitmap(int id) const {
+SkBitmap GtkThemeService::GenerateGtkThemeBitmap(int id) const {
   switch (id) {
     case IDR_THEME_TOOLBAR: {
       GtkStyle* style = gtk_rc_get_style(fake_window_);
       GdkColor* color = &style->bg[GTK_STATE_NORMAL];
-      SkBitmap* bitmap = new SkBitmap;
-      bitmap->setConfig(SkBitmap::kARGB_8888_Config,
-                        kToolbarImageWidth, kToolbarImageHeight);
-      bitmap->allocPixels();
-      bitmap->eraseRGB(color->red >> 8, color->green >> 8, color->blue >> 8);
+      SkBitmap bitmap;
+      bitmap.setConfig(SkBitmap::kARGB_8888_Config,
+                       kToolbarImageWidth, kToolbarImageHeight);
+      bitmap.allocPixels();
+      bitmap.eraseRGB(color->red >> 8, color->green >> 8, color->blue >> 8);
       return bitmap;
     }
     case IDR_THEME_TAB_BACKGROUND:
@@ -968,7 +973,6 @@ SkBitmap* GtkThemeService::GenerateGtkThemeBitmap(int id) const {
     // mode because some themes that try to be dark *and* light have very
     // different colors between the omnibox and the normal background area.
     case IDR_OMNIBOX_EXTENSION_APP:
-    case IDR_OMNIBOX_HISTORY:
     case IDR_OMNIBOX_HTTP:
     case IDR_OMNIBOX_SEARCH:
     case IDR_OMNIBOX_STAR:
@@ -982,7 +986,6 @@ SkBitmap* GtkThemeService::GenerateGtkThemeBitmap(int id) const {
     // base[GTK_STATE_SELECTED] color, so tint the icons so they won't collide
     // with the selected color.
     case IDR_OMNIBOX_EXTENSION_APP_DARK:
-    case IDR_OMNIBOX_HISTORY_DARK:
     case IDR_OMNIBOX_HTTP_DARK:
     case IDR_OMNIBOX_SEARCH_DARK:
     case IDR_OMNIBOX_STAR_DARK:
@@ -995,7 +998,7 @@ SkBitmap* GtkThemeService::GenerateGtkThemeBitmap(int id) const {
   }
 }
 
-SkBitmap* GtkThemeService::GenerateFrameImage(
+SkBitmap GtkThemeService::GenerateFrameImage(
     int color_id,
     const char* gradient_name) const {
   // We use two colors: the main color (passed in) and a lightened version of
@@ -1032,23 +1035,23 @@ SkBitmap* GtkThemeService::GenerateFrameImage(
 
   canvas.FillRect(gfx::Rect(0, gradient_size, kToolbarImageWidth,
                             kToolbarImageHeight - gradient_size), base);
-  return new SkBitmap(canvas.ExtractBitmap());
+  return canvas.ExtractBitmap();
 }
 
-SkBitmap* GtkThemeService::GenerateTabImage(int base_id) const {
+SkBitmap GtkThemeService::GenerateTabImage(int base_id) const {
   SkBitmap* base_image = GetBitmapNamed(base_id);
   SkBitmap bg_tint = SkBitmapOperations::CreateHSLShiftedBitmap(
       *base_image, GetTint(ThemeService::TINT_BACKGROUND_TAB));
-  return new SkBitmap(SkBitmapOperations::CreateTiledBitmap(
-      bg_tint, 0, 0, bg_tint.width(), bg_tint.height()));
+  return SkBitmapOperations::CreateTiledBitmap(
+      bg_tint, 0, 0, bg_tint.width(), bg_tint.height());
 }
 
-SkBitmap* GtkThemeService::GenerateTintedIcon(
+SkBitmap GtkThemeService::GenerateTintedIcon(
     int base_id,
     const color_utils::HSL& tint) const {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  return new SkBitmap(SkBitmapOperations::CreateHSLShiftedBitmap(
-      *rb.GetBitmapNamed(base_id), tint));
+  return SkBitmapOperations::CreateHSLShiftedBitmap(
+      *rb.GetBitmapNamed(base_id), tint);
 }
 
 void GtkThemeService::GetNormalButtonTintHSL(

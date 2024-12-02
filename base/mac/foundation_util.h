@@ -33,6 +33,9 @@ typedef unsigned int NSSearchPathDirectory;
 typedef unsigned int NSSearchPathDomainMask;
 #endif
 
+typedef struct OpaqueSecTrustRef* SecACLRef;
+typedef struct OpaqueSecTrustedApplicationRef* SecTrustedApplicationRef;
+
 namespace base {
 namespace mac {
 
@@ -60,9 +63,9 @@ BASE_EXPORT OSType CreatorCodeForApplication();
 // Searches for directories for the given key in only the given |domain_mask|.
 // If found, fills result (which must always be non-NULL) with the
 // first found directory and returns true.  Otherwise, returns false.
-bool GetSearchPathDirectory(NSSearchPathDirectory directory,
-                            NSSearchPathDomainMask domain_mask,
-                            FilePath* result);
+BASE_EXPORT bool GetSearchPathDirectory(NSSearchPathDirectory directory,
+                                        NSSearchPathDomainMask domain_mask,
+                                        FilePath* result);
 
 // Searches for directories for the given key in only the local domain.
 // If found, fills result (which must always be non-NULL) with the
@@ -245,7 +248,10 @@ CF_CAST_DECL(CFNumber);
 CF_CAST_DECL(CFSet);
 CF_CAST_DECL(CFString);
 
-#undef CF_CAST_DEFN
+CF_CAST_DECL(SecACL);
+CF_CAST_DECL(SecTrustedApplication);
+
+#undef CF_CAST_DECL
 
 #if defined(__OBJC__)
 

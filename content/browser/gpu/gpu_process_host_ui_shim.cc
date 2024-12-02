@@ -21,7 +21,7 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/browser_thread.h"
-#include "ui/gfx/gl/gl_switches.h"
+#include "ui/gl/gl_switches.h"
 
 #if defined(TOOLKIT_GTK)
 // These two #includes need to come after gpu_messages.h.
@@ -283,7 +283,7 @@ void GpuProcessHostUIShim::OnResizeView(int32 surface_id,
       std::max(1, size.width()),
       std::max(1, size.height()),
       SWP_NOSENDCHANGING | SWP_NOCOPYBITS | SWP_NOZORDER |
-          SWP_NOACTIVATE | SWP_DEFERERASE);
+          SWP_NOACTIVATE | SWP_DEFERERASE | SWP_NOMOVE);
 #endif
 }
 

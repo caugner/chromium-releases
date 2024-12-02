@@ -9,11 +9,11 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/common/gpu/gpu_messages.h"
-#include "ui/gfx/gl/gl_bindings.h"
-#include "ui/gfx/gl/gl_context.h"
-#include "ui/gfx/gl/gl_implementation.h"
-#include "ui/gfx/gl/gl_surface_cgl.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_context.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_surface_cgl.h"
 #include "ui/surface/io_surface_support_mac.h"
 
 namespace {
@@ -37,7 +37,8 @@ class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
-  virtual void SetBufferAllocation(BufferAllocationState state) OVERRIDE;
+  virtual void SetBackbufferAllocation(bool allocated) OVERRIDE;
+  virtual void SetFrontbufferAllocation(bool allocated) OVERRIDE;
 
  protected:
   // ImageTransportSurface implementation
@@ -51,10 +52,13 @@ class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
  private:
   virtual ~IOSurfaceImageTransportSurface() OVERRIDE;
 
+  void AdjustBufferAllocation();
   void UnrefIOSurface();
   void CreateIOSurface();
 
-  BufferAllocationState buffer_allocation_state_;
+  // Tracks the current buffer allocation state.
+  bool backbuffer_suggested_allocation_;
+  bool frontbuffer_suggested_allocation_;
 
   uint32 fbo_id_;
   GLuint texture_id_;
@@ -97,7 +101,8 @@ IOSurfaceImageTransportSurface::IOSurfaceImageTransportSurface(
     GpuCommandBufferStub* stub,
     gfx::PluginWindowHandle handle)
     : gfx::NoOpGLSurfaceCGL(gfx::Size(1, 1)),
-      buffer_allocation_state_(BUFFER_ALLOCATION_FRONT_AND_BACK),
+      backbuffer_suggested_allocation_(true),
+      frontbuffer_suggested_allocation_(true),
       fbo_id_(0),
       texture_id_(0),
       io_surface_handle_(0),
@@ -158,31 +163,37 @@ unsigned int IOSurfaceImageTransportSurface::GetBackingFrameBufferObject() {
   return fbo_id_;
 }
 
-void IOSurfaceImageTransportSurface::SetBufferAllocation(
-    BufferAllocationState state) {
-  if (buffer_allocation_state_ == state)
+void IOSurfaceImageTransportSurface::SetBackbufferAllocation(bool allocation) {
+  if (backbuffer_suggested_allocation_ == allocation)
     return;
-  buffer_allocation_state_ = state;
+  backbuffer_suggested_allocation_ = allocation;
+  AdjustBufferAllocation();
+}
 
-  switch (state) {
-    case BUFFER_ALLOCATION_FRONT_AND_BACK:
-      CreateIOSurface();
-      break;
+void IOSurfaceImageTransportSurface::SetFrontbufferAllocation(bool allocation) {
+  if (frontbuffer_suggested_allocation_ == allocation)
+    return;
+  frontbuffer_suggested_allocation_ = allocation;
+  AdjustBufferAllocation();
+}
 
-    case BUFFER_ALLOCATION_FRONT_ONLY:
-      break;
-
-    case BUFFER_ALLOCATION_NONE:
-      UnrefIOSurface();
-      helper_->Suspend();
-      break;
-
-    default:
-      NOTREACHED();
+void IOSurfaceImageTransportSurface::AdjustBufferAllocation() {
+  // On mac, the frontbuffer and backbuffer are the same buffer. The buffer is
+  // free'd when both the browser and gpu processes have Unref'd the IOSurface.
+  if (!backbuffer_suggested_allocation_ &&
+      !frontbuffer_suggested_allocation_ &&
+      io_surface_.get()) {
+    UnrefIOSurface();
+    helper_->Suspend();
+  } else if (backbuffer_suggested_allocation_ && !io_surface_.get()) {
+    CreateIOSurface();
   }
 }
 
 bool IOSurfaceImageTransportSurface::SwapBuffers() {
+  DCHECK(backbuffer_suggested_allocation_);
+  if (!frontbuffer_suggested_allocation_)
+    return true;
   glFlush();
 
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
@@ -195,6 +206,9 @@ bool IOSurfaceImageTransportSurface::SwapBuffers() {
 
 bool IOSurfaceImageTransportSurface::PostSubBuffer(
     int x, int y, int width, int height) {
+  DCHECK(backbuffer_suggested_allocation_);
+  if (!frontbuffer_suggested_allocation_)
+    return true;
   glFlush();
 
   GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params params;

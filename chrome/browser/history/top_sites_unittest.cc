@@ -28,7 +28,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -166,11 +166,11 @@ class TopSitesTest : public HistoryUnitTestBase {
 
   // Creates a bitmap of the specified color. Caller takes ownership.
   gfx::Image CreateBitmap(SkColor color) {
-    SkBitmap* thumbnail = new SkBitmap;
-    thumbnail->setConfig(SkBitmap::kARGB_8888_Config, 4, 4);
-    thumbnail->allocPixels();
-    thumbnail->eraseColor(color);
-    return gfx::Image(thumbnail);  // takes ownership.
+    SkBitmap thumbnail;
+    thumbnail.setConfig(SkBitmap::kARGB_8888_Config, 4, 4);
+    thumbnail.allocPixels();
+    thumbnail.eraseColor(color);
+    return gfx::Image(thumbnail);  // adds ref.
   }
 
   // Forces top sites to load top sites from history, then recreates top sites.

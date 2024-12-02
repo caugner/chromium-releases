@@ -20,12 +20,11 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/sync/one_click_signin_dialog.h"
 #include "chrome/browser/ui/sync/one_click_signin_histogram.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -63,6 +62,8 @@ class OneClickLoginInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
+  virtual string16 GetLinkText() const OVERRIDE;
+  virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE;
 
   virtual InfoBarAutomationType GetInfoBarAutomationType() const OVERRIDE;
 
@@ -129,47 +130,28 @@ string16 OneClickLoginInfoBarDelegate::GetButtonLabel(
 
 namespace {
 
-void OnLearnMore(Browser* browser) {
-  browser->AddSelectedTabWithURL(
-      GURL(chrome::kSyncLearnMoreURL),
-      content::PAGE_TRANSITION_AUTO_BOOKMARK);
-}
-
-void OnAdvanced(Browser* browser) {
-  browser->AddSelectedTabWithURL(
-      GURL(std::string(chrome::kChromeUISettingsURL) +
-           chrome::kSyncSetupSubPage),
-      content::PAGE_TRANSITION_AUTO_BOOKMARK);
-}
-
 // Start syncing with the given user information.
 void StartSync(content::WebContents* web_contents,
                const std::string& session_index,
                const std::string& email,
                const std::string& password,
-               bool use_default_settings) {
+               OneClickSigninSyncStarter::StartSyncMode start_mode) {
   // The starter deletes itself once its done.
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  ignore_result(
-      new OneClickSigninSyncStarter(
-          profile, session_index, email, password, use_default_settings));
-
-  Browser* browser = BrowserList::FindBrowserWithWebContents(web_contents);
-  browser->window()->ShowOneClickSigninBubble(
-      base::Bind(&OnLearnMore, base::Unretained(browser)),
-      base::Bind(&OnAdvanced, base::Unretained(browser)));
+  new OneClickSigninSyncStarter(profile, session_index, email, password,
+                                start_mode);
 }
 
 }  // namespace
 
 bool OneClickLoginInfoBarDelegate::Accept() {
   DisableOneClickSignIn();
+  content::WebContents* web_contents = owner()->web_contents();
   RecordHistogramAction(one_click_signin::HISTOGRAM_ACCEPTED);
-  ShowOneClickSigninDialog(
-      owner()->web_contents()->GetView()->GetTopLevelNativeWindow(),
-      base::Bind(&StartSync, owner()->web_contents(), session_index_, email_,
-                 password_));
+  browser::FindBrowserWithWebContents(web_contents)->window()->
+      ShowOneClickSigninBubble(base::Bind(&StartSync, web_contents,
+                                          session_index_, email_, password_));
   button_pressed_ = true;
   return true;
 }
@@ -181,6 +163,21 @@ bool OneClickLoginInfoBarDelegate::Cancel() {
   return true;
 }
 
+string16 OneClickLoginInfoBarDelegate::GetLinkText() const {
+  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
+}
+
+bool OneClickLoginInfoBarDelegate::LinkClicked(
+    WindowOpenDisposition disposition) {
+  RecordHistogramAction(one_click_signin::HISTOGRAM_LEARN_MORE);
+  content::OpenURLParams params(
+      GURL(chrome::kChromeSyncLearnMoreURL), content::Referrer(), disposition,
+      content::PAGE_TRANSITION_LINK, false);
+  owner()->web_contents()->OpenURL(params);
+  return false;
+}
+
+
 InfoBarDelegate::InfoBarAutomationType
     OneClickLoginInfoBarDelegate::GetInfoBarAutomationType() const {
   return ONE_CLICK_LOGIN_INFOBAR;
@@ -188,8 +185,8 @@ InfoBarDelegate::InfoBarAutomationType
 
 void OneClickLoginInfoBarDelegate::DisableOneClickSignIn() {
   PrefService* pref_service =
-      TabContentsWrapper::GetCurrentWrapperForContents(
-          owner()->web_contents())->profile()->GetPrefs();
+      TabContents::FromWebContents(owner()->web_contents())->
+          profile()->GetPrefs();
   pref_service->SetBoolean(prefs::kReverseAutologinEnabled, false);
 }
 
@@ -304,15 +301,21 @@ void OneClickSigninHelper::ShowInfoBarUIThread(
     }
   }
 
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
-  if (!wrapper)
+  // Make sure this username is not prohibited by policy.
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  SigninManager* signin = SigninManagerFactory::GetForProfile(profile);
+  if (!signin->IsAllowedUsername(email))
+    return;
+
+  TabContents* tab_contents = TabContents::FromWebContents(web_contents);
+  if (!tab_contents)
     return;
 
   // Save the email in the one-click signin manager.  The manager may
   // not exist if the contents is incognito or if the profile is already
   // connected to a Google account.
-  OneClickSigninHelper* helper = wrapper->one_click_signin_helper();
+  OneClickSigninHelper* helper = tab_contents->one_click_signin_helper();
   if (helper)
     helper->SaveSessionIndexAndEmail(session_index, email);
 }
@@ -328,11 +331,10 @@ void OneClickSigninHelper::DidStopLoading() {
   if (email_.empty() || password_.empty())
     return;
 
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(web_contents());
+  TabContents* tab_contents = TabContents::FromWebContents(web_contents());
 
-  wrapper->infobar_tab_helper()->AddInfoBar(
-      new OneClickLoginInfoBarDelegate(wrapper->infobar_tab_helper(),
+  tab_contents->infobar_tab_helper()->AddInfoBar(
+      new OneClickLoginInfoBarDelegate(tab_contents->infobar_tab_helper(),
                                        session_index_, email_, password_));
 
   email_.clear();

@@ -18,9 +18,9 @@
 #include "base/memory/scoped_vector.h"
 #include "base/process_util.h"
 #include "net/base/mock_host_resolver.h"
-#include "net/test/test_server.h"
+#include "net/test/local_sync_test_server.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/protocol/sync_protocol_error.h"
-#include "sync/syncable/model_type.h"
 
 class CommandLine;
 class Profile;
@@ -201,9 +201,6 @@ class SyncTest : public InProcessBrowserTest {
   void TriggerSyncError(const browser_sync::SyncProtocolError& error,
                         SyncErrorFrequency frequency);
 
-  // Triggers setting the sync_tabs field of the nigori node.
-  void TriggerSetSyncTabs();
-
   // Triggers the creation the Synced Bookmarks folder on the server.
   void TriggerCreateSyncedBookmarks();
 
@@ -298,7 +295,7 @@ class SyncTest : public InProcessBrowserTest {
   void SetupMockGaiaResponses();
 
   // Test server of type sync, started on demand.
-  net::TestServer sync_server_;
+  net::LocalSyncTestServer sync_server_;
 
   // Helper class to whitelist the notification port.
   scoped_ptr<net::ScopedPortException> xmpp_port_;

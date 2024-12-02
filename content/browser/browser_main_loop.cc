@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
+#include "base/hi_res_timer_manager.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/field_trial.h"
@@ -16,6 +17,7 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/download/download_file_manager.h"
 #include "content/browser/download/save_file_manager.h"
+#include "content/browser/gamepad/gamepad_service.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
@@ -23,8 +25,8 @@
 #include "content/browser/net/browser_online_state_observer.h"
 #include "content/browser/plugin_service_impl.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
+#include "content/browser/speech/speech_recognition_manager_impl.h"
 #include "content/browser/trace_controller_impl.h"
-#include "content/common/hi_res_timer_manager.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_shutdown.h"
 #include "content/public/browser/content_browser_client.h"
@@ -319,7 +321,6 @@ void BrowserMainLoop::MainMessageLoopStart() {
 
   system_monitor_.reset(new base::SystemMonitor);
   hi_res_timer_manager_.reset(new HighResolutionTimerManager);
-
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   audio_manager_.reset(media::AudioManager::Create());
   online_state_observer_.reset(new BrowserOnlineStateObserver);
@@ -429,20 +430,6 @@ void BrowserMainLoop::CreateThreads() {
   // Do not allow disk IO from the UI thread.
   base::ThreadRestrictions::SetIOAllowed(false);
   base::ThreadRestrictions::DisallowWaiting();
-
-  // When running the GPU thread in-process, avoid optimistically starting it
-  // since creating the GPU thread races against creation of the one-and-only
-  // ChildProcess instance which is created by the renderer thread.
-  if (!parsed_command_line_.HasSwitch(switches::kSingleProcess) &&
-      !parsed_command_line_.HasSwitch(switches::kInProcessGPU)) {
-    BrowserThread::PostDelayedTask(
-        BrowserThread::IO, FROM_HERE, base::Bind(
-            base::IgnoreResult(&GpuProcessHost::Get),
-            GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
-            content::CAUSE_FOR_GPU_LAUNCH_BROWSER_STARTUP),
-        // Arbitrary delay to avoid allow browser init precious CPU cycles.
-        base::TimeDelta::FromSeconds(5));
-  }
 }
 
 void BrowserMainLoop::RunMainMessageLoopParts() {
@@ -480,10 +467,14 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
   if (resource_dispatcher_host_.get())
     resource_dispatcher_host_.get()->Shutdown();
 
+  speech_recognition_manager_.reset();
+
 #if defined(USE_AURA)
   ImageTransportFactory::Terminate();
 #endif
   BrowserGpuChannelHostFactory::Terminate();
+
+  GamepadService::GetInstance()->Terminate();
 
   // Must be size_t so we can subtract from it.
   for (size_t thread_id = BrowserThread::ID_COUNT - 1;
@@ -592,6 +583,10 @@ void BrowserMainLoop::InitializeMainThread() {
 void BrowserMainLoop::BrowserThreadsStarted() {
   // RDH needs the IO thread to be created.
   resource_dispatcher_host_.reset(new ResourceDispatcherHostImpl());
+
+#if defined(ENABLE_INPUT_SPEECH)
+  speech_recognition_manager_.reset(new speech::SpeechRecognitionManagerImpl());
+#endif
 
   // Start the GpuDataManager before we set up the MessageLoops because
   // otherwise we'll trigger the assertion about doing IO on the UI thread.

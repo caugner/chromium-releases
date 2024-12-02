@@ -163,7 +163,7 @@ class ProfileItemView : public views::CustomButton,
   const AvatarMenuModel::Item& item() { return item_; }
 
  private:
-  static SkBitmap GetBadgedIcon(const SkBitmap& icon);
+  static gfx::ImageSkia GetBadgedIcon(const gfx::ImageSkia& icon);
 
   bool IsHighlighted();
 
@@ -180,12 +180,12 @@ ProfileItemView::ProfileItemView(const AvatarMenuModel::Item& item,
     : views::CustomButton(switch_profile_listener),
       item_(item) {
   image_view_ = new ProfileImageView();
-  SkBitmap profile_icon = *item_.icon.ToSkBitmap();
+  gfx::ImageSkia profile_icon = *item_.icon.ToImageSkia();
   if (item_.active) {
-    SkBitmap badged_icon(GetBadgedIcon(profile_icon));
-    image_view_->SetImage(&badged_icon);
+    gfx::ImageSkia badged_icon(GetBadgedIcon(profile_icon));
+    image_view_->SetImage(badged_icon);
   } else {
-    image_view_->SetImage(&profile_icon);
+    image_view_->SetImage(profile_icon);
   }
   AddChildView(image_view_);
 
@@ -241,7 +241,7 @@ void ProfileItemView::Layout() {
     icon_rect.set_size(image_view_->GetPreferredSize());
     icon_rect.set_y((height() - icon_rect.height()) / 2);
   } else {
-    const SkBitmap& icon = image_view_->GetImage();
+    const gfx::ImageSkia& icon = image_view_->GetImage();
     icon_rect = GetCenteredAndScaledRect(icon.width(), icon.height(), 0, 0,
         profiles::kAvatarIconWidth, height());
   }
@@ -312,22 +312,23 @@ void ProfileItemView::OnFocusStateChanged(bool has_focus) {
 }
 
 // static
-SkBitmap ProfileItemView::GetBadgedIcon(const SkBitmap& icon) {
+gfx::ImageSkia ProfileItemView::GetBadgedIcon(const gfx::ImageSkia& icon) {
   gfx::Rect icon_rect = GetCenteredAndScaledRect(icon.width(), icon.height(),
       0, 0, profiles::kAvatarIconWidth, kItemHeight);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  const SkBitmap* badge = rb.GetImageNamed(IDR_PROFILE_SELECTED).ToSkBitmap();
+  const gfx::ImageSkia* badge = rb.GetImageNamed(
+      IDR_PROFILE_SELECTED).ToImageSkia();
   const float kBadgeOverlapRatioX = 1.0f / 5.0f;
   int width = icon_rect.width() + badge->width() * kBadgeOverlapRatioX;
   const float kBadgeOverlapRatioY = 1.0f / 3.0f;
   int height = icon_rect.height() + badge->height() * kBadgeOverlapRatioY;
 
   gfx::Canvas canvas(gfx::Size(width, height), false);
-  canvas.DrawBitmapInt(icon, 0, 0, icon.width(), icon.height(), 0, 0,
-                       icon_rect.width(), icon_rect.height(), true);
-  canvas.DrawBitmapInt(*badge, width - badge->width(),
-                       height - badge->height());
+  canvas.DrawImageInt(icon, 0, 0, icon.width(), icon.height(), 0, 0,
+                      icon_rect.width(), icon_rect.height(), true);
+  canvas.DrawImageInt(*badge, width - badge->width(),
+                      height - badge->height());
   return canvas.ExtractBitmap();
 }
 
@@ -474,8 +475,8 @@ gfx::Rect AvatarMenuBubbleView::GetAnchorRect() {
 void AvatarMenuBubbleView::Init() {
   // Build the menu for the first time.
   OnAvatarMenuModelChanged(avatar_menu_model_.get());
-  AddAccelerator(ui::Accelerator(ui::VKEY_DOWN, 0));
-  AddAccelerator(ui::Accelerator(ui::VKEY_UP, 0));
+  AddAccelerator(ui::Accelerator(ui::VKEY_DOWN, ui::EF_NONE));
+  AddAccelerator(ui::Accelerator(ui::VKEY_UP, ui::EF_NONE));
 }
 
 void AvatarMenuBubbleView::OnAvatarMenuModelChanged(

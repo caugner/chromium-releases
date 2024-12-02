@@ -6,16 +6,34 @@
   'variables': {
     'chromium_code': 1,  # Use higher warning level.
     'directxsdk_exists': '<!(python <(DEPTH)/build/dir_exists.py ../third_party/directxsdk)',
+    'conditions': [
+      ['inside_chromium_build==0', {
+        'webkit_src_dir': '../../../..',
+      },{
+        'webkit_src_dir': '../third_party/WebKit',
+      }],
+    ],
   },
   'includes': [
     '../build/win_precompile.gypi',
     'content_shell.gypi',
-    'content_tests.gypi',
   ],
   'target_defaults': {
     'defines': ['CONTENT_IMPLEMENTATION'],
+    'conditions': [
+      ['inside_chromium_build==0', {
+        'dependencies': [
+          '../webkit/support/setup_third_party.gyp:third_party_headers',
+        ],
+      }],
+    ],
   },
   'conditions': [
+    ['inside_chromium_build==1', {
+      'includes': [
+        'content_tests.gypi',
+      ]
+    }],
    # In component mode, we build all of content as a single DLL.
    # However, in the static mode, we need to build content as multiple
    # targets in order to prevent dependencies from getting introduced
@@ -200,13 +218,34 @@
    ['OS == "android"', {
      'targets': [
        {
+         'target_name': 'common_aidl',
+         'type': 'none',
+         'variables': {
+           'aidl_interface_file': '../content/public/android/java/org/chromium/content/common/common.aidl',
+         },
+         'sources': [
+           '../content/public/android/java/org/chromium/content/common/ISandboxedProcessCallback.aidl',
+           '../content/public/android/java/org/chromium/content/common/ISandboxedProcessService.aidl',
+         ],
+         'includes': [ '../build/java_aidl.gypi' ],
+       },
+       {
          'target_name': 'content_java',
          'type': 'none',
+         'dependencies': [
+           '../base/base.gyp:base_java',
+           'content_common',
+         ],
          'variables': {
            'package_name': 'content',
            'java_in_dir': '../content/public/android/java',
          },
          'includes': [ '../build/java.gypi' ],
+       },
+       {
+         'target_name': 'content_jni_headers',
+         'type': 'none',
+         'includes': [ 'content_jni.gypi' ],
        },
      ],
    }],  # OS == "android"

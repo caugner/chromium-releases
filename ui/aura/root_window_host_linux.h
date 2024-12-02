@@ -14,6 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "ui/aura/root_window_host.h"
+#include "ui/aura/x11_atom_cache.h"
 #include "ui/gfx/rect.h"
 
 namespace ui {
@@ -50,7 +51,11 @@ class RootWindowHostLinux : public RootWindowHost,
   virtual void UnConfineCursor() OVERRIDE;
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
   virtual void SetFocusWhenShown(bool focus_when_shown) OVERRIDE;
+  virtual bool GrabSnapshot(
+      const gfx::Rect& snapshot_bounds,
+      std::vector<unsigned char>* png_representation) OVERRIDE;
   virtual void PostNativeEvent(const base::NativeEvent& event) OVERRIDE;
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
 
   // Returns true if there's an X window manager present... in most cases.  Some
   // window managers (notably, ion3) don't implement enough of ICCCM for us to
@@ -82,18 +87,6 @@ class RootWindowHostLinux : public RootWindowHost,
   // The bounds of |xwindow_|.
   gfx::Rect bounds_;
 
-  // Names of cached atoms that we fetch during the constructor to minimize
-  // round trips to the X11 server.
-  enum AtomList {
-    ATOM_WM_DELETE_WINDOW = 0,
-    ATOM__NET_WM_PING,
-    ATOM__NET_WM_PID,
-    ATOM_WM_S0,
-
-    ATOM_COUNT
-  };
-  ::Atom cached_atoms_[ATOM_COUNT];
-
   // True if the window should be focused when the window is shown.
   bool focus_when_shown_;
 
@@ -103,6 +96,8 @@ class RootWindowHostLinux : public RootWindowHost,
 
   class ImageCursors;
   scoped_ptr<ImageCursors> image_cursors_;
+
+  X11AtomCache atom_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowHostLinux);
 };

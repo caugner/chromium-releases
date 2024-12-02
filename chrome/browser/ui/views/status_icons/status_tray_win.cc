@@ -13,16 +13,20 @@
 static const UINT kStatusIconMessage = WM_APP + 1;
 
 StatusTrayWin::StatusTrayWin()
-    : next_icon_id_(1) {
+    : next_icon_id_(1),
+      atom_(0),
+      instance_(NULL),
+      window_(NULL) {
   // Register our window class
-  HINSTANCE hinst = GetModuleHandle(NULL);
-  WNDCLASSEX wc = {0};
-  wc.cbSize = sizeof(wc);
-  wc.lpfnWndProc = base::win::WrappedWindowProc<StatusTrayWin::WndProcStatic>;
-  wc.hInstance = hinst;
-  wc.lpszClassName = chrome::kStatusTrayWindowClass;
-  ATOM clazz = RegisterClassEx(&wc);
-  DCHECK(clazz);
+  WNDCLASSEX window_class;
+  base::win::InitializeWindowClass(
+      chrome::kStatusTrayWindowClass,
+      &base::win::WrappedWindowProc<StatusTrayWin::WndProcStatic>,
+      0, 0, 0, NULL, NULL, NULL, NULL, NULL,
+      &window_class);
+  instance_ = window_class.hInstance;
+  atom_ = RegisterClassEx(&window_class);
+  CHECK(atom_);
 
   // If the taskbar is re-created after we start up, we have to rebuild all of
   // our icons.
@@ -32,8 +36,8 @@ StatusTrayWin::StatusTrayWin()
   // create a hidden WS_POPUP window instead of an HWND_MESSAGE window, because
   // only top-level windows such as popups can receive broadcast messages like
   // "TaskbarCreated".
-  window_ = CreateWindow(chrome::kStatusTrayWindowClass,
-                         0, WS_POPUP, 0, 0, 0, 0, 0, 0, hinst, 0);
+  window_ = CreateWindow(MAKEINTATOM(atom_),
+                         0, WS_POPUP, 0, 0, 0, 0, 0, 0, instance_, 0);
   ui::CheckWindowCreated(window_);
   ui::SetWindowUserData(window_, this);
 }
@@ -56,10 +60,9 @@ LRESULT CALLBACK StatusTrayWin::WndProc(HWND hwnd,
                                         LPARAM lparam) {
   if (message == taskbar_created_message_) {
     // We need to reset all of our icons because the taskbar went away.
-    for (StatusIconList::const_iterator iter = status_icons().begin();
-         iter != status_icons().end();
-         ++iter) {
-      StatusIconWin* win_icon = static_cast<StatusIconWin*>(*iter);
+    for (StatusIcons::const_iterator i(status_icons().begin());
+         i != status_icons().end(); ++i) {
+      StatusIconWin* win_icon = static_cast<StatusIconWin*>(*i);
       win_icon->ResetIcon();
     }
     return TRUE;
@@ -70,7 +73,7 @@ LRESULT CALLBACK StatusTrayWin::WndProc(HWND hwnd,
       case WM_CONTEXTMENU:
         // Walk our icons, find which one was clicked on, and invoke its
         // HandleClickEvent() method.
-        for (StatusIconList::const_iterator i(status_icons().begin());
+        for (StatusIcons::const_iterator i(status_icons().begin());
              i != status_icons().end(); ++i) {
           StatusIconWin* win_icon = static_cast<StatusIconWin*>(*i);
           if (win_icon->icon_id() == wparam) {
@@ -88,7 +91,9 @@ LRESULT CALLBACK StatusTrayWin::WndProc(HWND hwnd,
 StatusTrayWin::~StatusTrayWin() {
   if (window_)
     DestroyWindow(window_);
-  UnregisterClass(chrome::kStatusTrayWindowClass, GetModuleHandle(NULL));
+
+  if (atom_)
+    UnregisterClass(MAKEINTATOM(atom_), instance_);
 }
 
 StatusIcon* StatusTrayWin::CreatePlatformStatusIcon() {

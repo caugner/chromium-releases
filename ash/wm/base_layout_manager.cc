@@ -4,21 +4,20 @@
 
 #include "ash/wm/base_layout_manager.h"
 
+#include "ash/ash_switches.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
-#include "ash/wm/property_util.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "ash/wm/window_animations.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
+#include "base/command_line.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/aura/window_property.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/screen.h"
-
-DECLARE_WINDOW_PROPERTY_TYPE(ui::WindowShowState)
 
 namespace {
 
@@ -40,10 +39,6 @@ gfx::Rect BoundsWithScreenEdgeVisible(aura::Window* window,
     return max_bounds;
   return restore_bounds;
 }
-
-// Used to remember the show state before the window was minimized.
-DEFINE_WINDOW_PROPERTY_KEY(
-    ui::WindowShowState, kRestoreShowStateKey, ui::SHOW_STATE_DEFAULT);
 
 }  // namespace
 
@@ -82,7 +77,7 @@ void BaseLayoutManager::OnWindowAddedToLayout(aura::Window* child) {
   // Only update the bounds if the window has a show state that depends on the
   // workspace area.
   if (wm::IsWindowMaximized(child) || wm::IsWindowFullscreen(child))
-    UpdateBoundsFromShowState(child);
+    UpdateBoundsFromShowState(child, false);
 }
 
 void BaseLayoutManager::OnWillRemoveWindowFromLayout(aura::Window* child) {
@@ -98,20 +93,19 @@ void BaseLayoutManager::OnChildWindowVisibilityChanged(aura::Window* child,
   if (visible && wm::IsWindowMinimized(child)) {
     // Attempting to show a minimized window. Unminimize it.
     child->SetProperty(aura::client::kShowStateKey,
-                       child->GetProperty(kRestoreShowStateKey));
-    child->ClearProperty(kRestoreShowStateKey);
+                       child->GetProperty(internal::kRestoreShowStateKey));
+    child->ClearProperty(internal::kRestoreShowStateKey);
   }
 }
 
 void BaseLayoutManager::SetChildBounds(aura::Window* child,
                                        const gfx::Rect& requested_bounds) {
   gfx::Rect child_bounds(requested_bounds);
-  // Avoid a janky resize on startup by ensuring the initial bounds fill the
-  // screen.
+  // Some windows rely on this to set their initial bounds.
   if (wm::IsWindowMaximized(child))
     child_bounds = ScreenAsh::GetMaximizedWindowBounds(child);
   else if (wm::IsWindowFullscreen(child))
-    child_bounds = gfx::Screen::GetMonitorNearestWindow(child).bounds();
+    child_bounds = gfx::Screen::GetDisplayNearestWindow(child).bounds();
   SetChildBoundsDirect(child, child_bounds);
 }
 
@@ -137,8 +131,11 @@ void BaseLayoutManager::OnWindowPropertyChanged(aura::Window* window,
                                                 const void* key,
                                                 intptr_t old) {
   if (key == aura::client::kShowStateKey) {
-    UpdateBoundsFromShowState(window);
-    ShowStateChanged(window, static_cast<ui::WindowShowState>(old));
+    ui::WindowShowState old_state = static_cast<ui::WindowShowState>(old);
+    // Minimized state handles its own animations.
+    bool animate = (old_state != ui::SHOW_STATE_MINIMIZED);
+    UpdateBoundsFromShowState(window, animate);
+    ShowStateChanged(window, old_state);
   }
 }
 
@@ -156,7 +153,7 @@ void BaseLayoutManager::ShowStateChanged(aura::Window* window,
                                          ui::WindowShowState last_show_state) {
   if (wm::IsWindowMinimized(window)) {
     // Save the previous show state so that we can correctly restore it.
-    window->SetProperty(kRestoreShowStateKey, last_show_state);
+    window->SetProperty(internal::kRestoreShowStateKey, last_show_state);
     SetWindowVisibilityAnimationType(
         window, WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE);
 
@@ -174,13 +171,15 @@ void BaseLayoutManager::ShowStateChanged(aura::Window* window,
   }
 }
 
-void BaseLayoutManager::UpdateBoundsFromShowState(aura::Window* window) {
+void BaseLayoutManager::UpdateBoundsFromShowState(aura::Window* window,
+                                                  bool animate) {
   switch (window->GetProperty(aura::client::kShowStateKey)) {
     case ui::SHOW_STATE_DEFAULT:
     case ui::SHOW_STATE_NORMAL: {
       const gfx::Rect* restore = GetRestoreBounds(window);
       if (restore) {
-        SetChildBoundsDirect(window,
+        MaybeAnimateToBounds(window,
+                             animate,
                              BoundsWithScreenEdgeVisible(window, *restore));
       }
       window->ClearProperty(aura::client::kRestoreBoundsKey);
@@ -189,18 +188,37 @@ void BaseLayoutManager::UpdateBoundsFromShowState(aura::Window* window) {
 
     case ui::SHOW_STATE_MAXIMIZED:
       SetRestoreBoundsIfNotSet(window);
-      SetChildBoundsDirect(window, ScreenAsh::GetMaximizedWindowBounds(window));
+      MaybeAnimateToBounds(window,
+                           animate,
+                           ScreenAsh::GetMaximizedWindowBounds(window));
       break;
 
     case ui::SHOW_STATE_FULLSCREEN:
       SetRestoreBoundsIfNotSet(window);
+      // Don't animate the full-screen window transition.
+      // TODO(jamescook): Use animation here.  Be sure the lock screen works.
       SetChildBoundsDirect(
-          window, gfx::Screen::GetMonitorNearestWindow(window).bounds());
+          window, gfx::Screen::GetDisplayNearestWindow(window).bounds());
       break;
 
     default:
       break;
   }
+}
+
+void BaseLayoutManager::MaybeAnimateToBounds(aura::Window* window,
+                                             bool animate,
+                                             const gfx::Rect& new_bounds) {
+  // Only animate visible windows.
+  if (animate &&
+      window->TargetVisibility() &&
+      !window->GetProperty(aura::client::kAnimationsDisabledKey) &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          ash::switches::kAshWindowAnimationsDisabled)) {
+    CrossFadeToBounds(window, new_bounds);
+    return;
+  }
+  SetChildBoundsDirect(window, new_bounds);
 }
 
 void BaseLayoutManager::AdjustWindowSizesForScreenChange() {
@@ -217,11 +235,11 @@ void BaseLayoutManager::AdjustWindowSizesForScreenChange() {
       SetChildBoundsDirect(window, ScreenAsh::GetMaximizedWindowBounds(window));
     } else if (wm::IsWindowFullscreen(window)) {
       SetChildBoundsDirect(
-          window, gfx::Screen::GetMonitorNearestWindow(window).bounds());
+          window, gfx::Screen::GetDisplayNearestWindow(window).bounds());
     } else {
       // The work area may be smaller than the full screen.
       gfx::Rect monitor_rect =
-          gfx::Screen::GetMonitorNearestWindow(window).work_area();
+          gfx::Screen::GetDisplayNearestWindow(window).work_area();
       // Put as much of the window as possible within the monitor area.
       window->SetBounds(window->bounds().AdjustToFit(monitor_rect));
     }

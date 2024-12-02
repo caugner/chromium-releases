@@ -41,18 +41,19 @@
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
 #include "chrome/browser/webdata/autofill_table.h"
+#include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "content/public/browser/notification_source.h"
-#include "content/test/test_browser_thread.h"
-#include "sync/engine/model_changing_syncer_command.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "content/public/test/test_browser_thread.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/autofill_specifics.pb.h"
-#include "sync/syncable/model_type.h"
 #include "sync/syncable/syncable.h"
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -160,9 +161,17 @@ syncable::ModelType GetModelType<AutofillProfile>() {
 
 class WebDataServiceFake : public WebDataService {
  public:
-  explicit WebDataServiceFake(WebDatabase* web_database)
-      : web_database_(web_database),
+  WebDataServiceFake()
+      : web_database_(NULL),
         syncable_service_created_or_destroyed_(false, false) {
+  }
+
+  static scoped_refptr<RefcountedProfileKeyedService> Build(Profile* profile) {
+    return new WebDataServiceFake;
+  }
+
+  void SetDatabase(WebDatabase* web_database) {
+    web_database_ = web_database;
   }
 
   void StartSyncableService() {
@@ -218,6 +227,8 @@ class WebDataServiceFake : public WebDataService {
 
     return autofill_profile_syncable_service_;
   }
+
+  virtual void ShutdownOnUIThread() OVERRIDE {}
 
  private:
   virtual ~WebDataServiceFake() {}
@@ -345,6 +356,8 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
  protected:
   ProfileSyncServiceAutofillTest() {
   }
+  virtual ~ProfileSyncServiceAutofillTest() {
+  }
 
   AutofillProfileFactory profile_factory_;
   AutofillEntryFactory entry_factory_;
@@ -362,28 +375,27 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
 
   virtual void SetUp() OVERRIDE {
     AbstractProfileSyncServiceTest::SetUp();
-    profile_.CreateRequestContext();
+    profile_.reset(new ProfileMock());
+    profile_->CreateRequestContext();
     web_database_.reset(new WebDatabaseFake(&autofill_table_));
-    web_data_service_ = new WebDataServiceFake(web_database_.get());
+    web_data_service_ = static_cast<WebDataServiceFake*>(
+        WebDataServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+            profile_.get(), WebDataServiceFake::Build).get());
+    web_data_service_->SetDatabase(web_database_.get());
     personal_data_manager_ = static_cast<PersonalDataManagerMock*>(
         PersonalDataManagerFactory::GetInstance()->SetTestingFactoryAndUse(
-            &profile_, PersonalDataManagerMock::Build));
+            profile_.get(), PersonalDataManagerMock::Build));
     token_service_ = static_cast<TokenService*>(
         TokenServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-            &profile_, BuildTokenService));
+            profile_.get(), BuildTokenService));
     // GetHistoryService() gets called indirectly, but the result is ignored, so
     // it is safe to return NULL.
-    EXPECT_CALL(profile_, GetHistoryService(_)).
+    EXPECT_CALL(*profile_, GetHistoryService(_)).
         WillRepeatedly(Return(static_cast<HistoryService*>(NULL)));
     EXPECT_CALL(*personal_data_manager_, LoadProfiles()).Times(1);
     EXPECT_CALL(*personal_data_manager_, LoadCreditCards()).Times(1);
-    EXPECT_CALL(profile_, GetWebDataService(_)).
-        // TokenService::Initialize
-        // AutofillDataTypeController::StartModels()
-        // In some tests:
-        // AutofillProfileSyncableService::AutofillProfileSyncableService()
-        WillRepeatedly(Return(web_data_service_.get()));
-    personal_data_manager_->Init(&profile_);
+
+    personal_data_manager_->Init(profile_.get());
 
     // Note: This must be called *after* the notification service is created.
     web_data_service_->StartSyncableService();
@@ -393,7 +405,10 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
     // Note: The tear down order is important.
     service_.reset();
     web_data_service_->ShutdownSyncableService();
-    profile_.ResetRequestContext();
+    profile_->ResetRequestContext();
+    // To prevent a leak, fully release TestURLRequestContext to ensure its
+    // destruction on the IO message loop.
+    profile_.reset();
     AbstractProfileSyncServiceTest::TearDown();
   }
 
@@ -401,20 +416,20 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
                         bool will_fail_association,
                         syncable::ModelType type) {
     AbstractAutofillFactory* factory = GetFactory(type);
-    SigninManager* signin = SigninManagerFactory::GetForProfile(&profile_);
+    SigninManager* signin = SigninManagerFactory::GetForProfile(profile_.get());
     signin->SetAuthenticatedUsername("test_user");
     ProfileSyncComponentsFactoryMock* components_factory =
         new ProfileSyncComponentsFactoryMock();
     service_.reset(
         new TestProfileSyncService(components_factory,
-                                   &profile_,
+                                   profile_.get(),
                                    signin,
                                    ProfileSyncService::AUTO_START,
                                    false,
                                    callback));
     DataTypeController* data_type_controller =
         factory->CreateDataTypeController(components_factory,
-            &profile_,
+            profile_.get(),
             service_.get());
 
     factory->SetExpectation(components_factory,
@@ -448,7 +463,9 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
     sync_api::WriteNode node(&trans);
     std::string tag = AutocompleteSyncableService::KeyToTag(
         UTF16ToUTF8(entry.key().name()), UTF16ToUTF8(entry.key().value()));
-    if (!node.InitUniqueByCreation(syncable::AUTOFILL, autofill_root, tag))
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        node.InitUniqueByCreation(syncable::AUTOFILL, autofill_root, tag);
+    if (result != sync_api::WriteNode::INIT_SUCCESS)
       return false;
 
     sync_pb::EntitySpecifics specifics;
@@ -468,9 +485,12 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
     }
     sync_api::WriteNode node(&trans);
     std::string tag = profile.guid();
-    if (!node.InitUniqueByCreation(syncable::AUTOFILL_PROFILE,
-                                   autofill_root, tag))
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        node.InitUniqueByCreation(syncable::AUTOFILL_PROFILE,
+                                  autofill_root, tag);
+    if (result != sync_api::WriteNode::INIT_SUCCESS)
       return false;
+
     sync_pb::EntitySpecifics specifics;
     AutofillProfileSyncableService::WriteAutofillProfile(profile, &specifics);
     sync_pb::AutofillProfileSpecifics* profile_specifics =
@@ -579,7 +599,7 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
   friend class AddAutofillHelper<AutofillProfile>;
   friend class FakeServerUpdater;
 
-  ProfileMock profile_;
+  scoped_ptr<ProfileMock> profile_;
   AutofillTableMock autofill_table_;
   scoped_ptr<WebDatabaseFake> web_database_;
   scoped_refptr<WebDataServiceFake> web_data_service_;
@@ -766,7 +786,7 @@ bool IncludesField(const AutofillProfile& profile1,
 TEST_F(ProfileSyncServiceAutofillTest, FailModelAssociation) {
   // Don't create the root autofill node so startup fails.
   StartSyncService(base::Closure(), true, syncable::AUTOFILL);
-  EXPECT_TRUE(service_->unrecoverable_error_detected());
+  EXPECT_TRUE(service_->HasUnrecoverableError());
 }
 
 TEST_F(ProfileSyncServiceAutofillTest, EmptyNativeEmptySync) {

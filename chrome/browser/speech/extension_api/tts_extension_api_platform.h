@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SPEECH_EXTENSION_API_TTS_EXTENSION_API_PLATFORM_H_
 #define CHROME_BROWSER_SPEECH_EXTENSION_API_TTS_EXTENSION_API_PLATFORM_H_
+#pragma once
 
 #include <string>
 
@@ -52,6 +53,9 @@ class ExtensionTtsPlatformImpl {
 
  protected:
   ExtensionTtsPlatformImpl() {}
+
+  // On some platforms this may be a leaky singleton - do not rely on the
+  // destructor being called!  http://crbug.com/122026
   virtual ~ExtensionTtsPlatformImpl() {}
 
   std::string error_;

@@ -7,10 +7,10 @@
 #include "base/string16.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -43,7 +43,7 @@ using content::WebContents;
 
 - (void)UpdateActiveTabPairs {
   activeTabPairsVector_.clear();
-  Browser* browser = BrowserList::GetLastActive();
+  Browser* browser = browser::GetLastActiveBrowser();
   const int tabCount = browser->tab_count();
   for (int i = 0; i < tabCount; ++i) {
     WebContents* contents = browser->GetWebContentsAt(i);

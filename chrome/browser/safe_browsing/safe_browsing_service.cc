@@ -120,15 +120,15 @@ class SafeBrowsingURLRequestContextGetter
 
   // Implementation for net::UrlRequestContextGetter.
   virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const
-      OVERRIDE;
+  virtual scoped_refptr<base::SingleThreadTaskRunner>
+      GetNetworkTaskRunner() const OVERRIDE;
 
  protected:
   virtual ~SafeBrowsingURLRequestContextGetter();
 
  private:
   SafeBrowsingService* const sb_service_;  // Owned by BrowserProcess.
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
+  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
 
   base::debug::LeakTracker<SafeBrowsingURLRequestContextGetter> leak_tracker_;
 };
@@ -136,7 +136,7 @@ class SafeBrowsingURLRequestContextGetter
 SafeBrowsingURLRequestContextGetter::SafeBrowsingURLRequestContextGetter(
     SafeBrowsingService* sb_service)
     : sb_service_(sb_service),
-      io_message_loop_proxy_(
+      network_task_runner_(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)) {
 }
 
@@ -145,14 +145,14 @@ SafeBrowsingURLRequestContextGetter::~SafeBrowsingURLRequestContextGetter() {}
 net::URLRequestContext*
 SafeBrowsingURLRequestContextGetter::GetURLRequestContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(sb_service_->url_request_context_);
+  DCHECK(sb_service_->url_request_context_.get());
 
-  return sb_service_->url_request_context_;
+  return sb_service_->url_request_context_.get();
 }
 
-scoped_refptr<base::MessageLoopProxy>
-SafeBrowsingURLRequestContextGetter::GetIOMessageLoopProxy() const {
-  return io_message_loop_proxy_;
+scoped_refptr<base::SingleThreadTaskRunner>
+SafeBrowsingURLRequestContextGetter::GetNetworkTaskRunner() const {
+  return network_task_runner_;
 }
 
 // static
@@ -611,10 +611,10 @@ void SafeBrowsingService::InitURLRequestContextOnIOThread(
 
   scoped_refptr<net::CookieStore> cookie_store = new net::CookieMonster(
       new SQLitePersistentCookieStore(
-          FilePath(BaseFilename().value() + kCookiesFile), false),
+          FilePath(BaseFilename().value() + kCookiesFile), false, NULL),
       NULL);
 
-  url_request_context_ = new SafeBrowsingURLRequestContext;
+  url_request_context_.reset(new SafeBrowsingURLRequestContext);
   // |system_url_request_context_getter| may be NULL during tests.
   if (system_url_request_context_getter)
     url_request_context_->CopyFrom(
@@ -633,8 +633,7 @@ void SafeBrowsingService::DestroyURLRequestContextOnIOThread() {
   using base::debug::LeakTracker;
   LeakTracker<SafeBrowsingURLRequestContextGetter>::CheckForLeaks();
 
-  DCHECK(url_request_context_.get());
-  url_request_context_ = NULL;
+  url_request_context_.reset();
 }
 
 void SafeBrowsingService::StartOnIOThread() {
@@ -1209,6 +1208,9 @@ void SafeBrowsingService::ReportSafeBrowsingHitOnIOThread(
 void SafeBrowsingService::SendSerializedMalwareDetails(
     const std::string& serialized) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (!enabled_)
+    return;
+
   if (!serialized.empty()) {
     DVLOG(1) << "Sending serialized malware details.";
     protocol_manager_->ReportMalwareDetails(serialized);

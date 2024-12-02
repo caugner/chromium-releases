@@ -5,7 +5,6 @@
 #include "chrome/browser/prefs/pref_service.h"
 
 #include <algorithm>
-#include <string>
 
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -115,9 +114,11 @@ class ReadErrorHandler : public PersistentPrefStore::ReadErrorDelegate {
 }  // namespace
 
 // static
-PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
-                                            PrefStore* extension_prefs,
-                                            bool async) {
+PrefService* PrefService::CreatePrefService(
+    const FilePath& pref_filename,
+    policy::PolicyService* policy_service,
+    PrefStore* extension_prefs,
+    bool async) {
   using policy::ConfigurationPolicyPrefStore;
 
 #if defined(OS_LINUX)
@@ -135,9 +136,11 @@ PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   ConfigurationPolicyPrefStore* managed =
-      ConfigurationPolicyPrefStore::CreateMandatoryPolicyPrefStore();
+      ConfigurationPolicyPrefStore::CreateMandatoryPolicyPrefStore(
+          policy_service);
   ConfigurationPolicyPrefStore* recommended =
-      ConfigurationPolicyPrefStore::CreateRecommendedPolicyPrefStore();
+      ConfigurationPolicyPrefStore::CreateRecommendedPolicyPrefStore(
+          policy_service);
 #else
   ConfigurationPolicyPrefStore* managed = NULL;
   ConfigurationPolicyPrefStore* recommended = NULL;
@@ -222,6 +225,7 @@ PrefService::~PrefService() {
   user_pref_store_ = NULL;
   default_store_ = NULL;
   pref_sync_associator_.reset();
+  pref_notifier_.reset();
 }
 
 void PrefService::InitFromStorage(bool async) {
@@ -696,16 +700,25 @@ const base::Value* PrefService::GetUserPrefValue(const char* path) const {
   // Look for an existing preference in the user store. If it doesn't
   // exist, return NULL.
   base::Value* value = NULL;
-  if (user_pref_store_->GetMutableValue(path, &value) !=
-          PersistentPrefStore::READ_OK) {
+  if (user_pref_store_->GetMutableValue(path, &value) != PrefStore::READ_OK)
     return NULL;
-  }
 
   if (!value->IsType(pref->GetType())) {
     NOTREACHED() << "Pref value type doesn't match registered type.";
     return NULL;
   }
 
+  return value;
+}
+
+const base::Value* PrefService::GetDefaultPrefValue(const char* path) const {
+  DCHECK(CalledOnValidThread());
+  // Lookup the preference in the default store.
+  const base::Value* value = NULL;
+  if (default_store_->GetValue(path, &value) != PrefStore::READ_OK) {
+    NOTREACHED() << "Default value missing for pref: " << path;
+    return NULL;
+  }
   return value;
 }
 
@@ -870,8 +883,7 @@ Value* PrefService::GetMutableUserPref(const char* path,
   // Look for an existing preference in the user store. If it doesn't
   // exist or isn't the correct type, create a new user preference.
   Value* value = NULL;
-  if (user_pref_store_->GetMutableValue(path, &value)
-          != PersistentPrefStore::READ_OK ||
+  if (user_pref_store_->GetMutableValue(path, &value) != PrefStore::READ_OK ||
       !value->IsType(type)) {
     if (type == Value::TYPE_DICTIONARY) {
       value = new DictionaryValue;

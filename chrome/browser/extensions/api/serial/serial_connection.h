@@ -9,13 +9,10 @@
 #include <set>
 #include <string>
 
-#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/platform_file.h"
 #include "chrome/browser/extensions/api/api_resource.h"
 #include "net/base/io_buffer.h"
-
-FORWARD_DECLARE_TEST(SerialConnectionTest, ValidPortNamePatterns);
-FORWARD_DECLARE_TEST(SerialConnectionTest, InvalidPortNamePatterns);
 
 namespace extensions {
 
@@ -33,30 +30,18 @@ class SerialConnection : public APIResource {
 
   bool Open();
   void Close();
+  void Flush();
 
   int Read(uint8* byte);
   int Write(scoped_refptr<net::IOBuffer> io_buffer, int byte_count);
 
-  typedef std::set<std::string> StringSet;
-
-  // Returns true if the given port name (e.g., "/dev/tty.usbmodemXXX")
-  // matches that of a serial port that exists on this machine.
-  static bool DoesPortExist(const StringSet& port_patterns,
-                            const std::string& port_name);
+ protected:
+  // Do platform-specific work after a successful Open().
+  bool PostOpen();
 
  private:
-  // TODO(miket): expose this functionality via API. Otherwise developers have
-  // to guess at valid names.
-  static StringSet GenerateValidSerialPortNames();
-
-  // Returns a StringSet of patterns to be used with MatchPattern.
-  static StringSet GenerateValidPatterns();
-
   std::string port_;
-  int fd_;
-
-  FRIEND_TEST_ALL_PREFIXES(::SerialConnectionTest, ValidPortNamePatterns);
-  FRIEND_TEST_ALL_PREFIXES(::SerialConnectionTest, InvalidPortNamePatterns);
+  base::PlatformFile file_;
 };
 
 }  // namespace extensions

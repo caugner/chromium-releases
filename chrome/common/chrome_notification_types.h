@@ -54,6 +54,14 @@ enum NotificationType {
   // that was closed, no details are expected.
   NOTIFICATION_WINDOW_CLOSED,
 
+#if defined(OS_LINUX)
+  // On Linux maximize can be an asynchronous operation. This notification
+  // indicates that the window has been maximized. The source is
+  // a Source<BrowserWindow> containing the BrowserWindow that was maximized.
+  // No details are expected.
+  NOTIFICATION_BROWSER_WINDOW_MAXIMIZED,
+#endif  // defined(OS_LINUX)
+
   // Sent when the language (English, French...) for a page has been detected.
   // The details Details<std::string> contain the ISO 639-1 language code and
   // the source is Source<WebContents>.
@@ -78,11 +86,6 @@ enum NotificationType {
   // Sent when the renderer returns focus to the browser, as part of focus
   // traversal. The source is the browser, there are no details.
   NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
-
-  // Sent after an WebDialog dialog has been shown. The source is the
-  // dialog. The details is a Details<RenderViewHost> with a pointer to the RVH
-  // for the shown dialog.
-  NOTIFICATION_WEB_DIALOG_SHOWN,
 
   // A new tab is created from an existing tab to serve as a target of a
   // navigation that is about to happen. The source will be a Source<Profile>
@@ -151,7 +154,7 @@ enum NotificationType {
   NOTIFICATION_TAB_ADDED,
 
   // This notification is sent after a tab has been appended to the tab_strip.
-  // The source is a Source<TabContentsWrapper> of the tab being added. There
+  // The source is a Source<TabContents> of the tab being added. There
   // are no details.
   NOTIFICATION_TAB_PARENTED,
 
@@ -159,9 +162,18 @@ enum NotificationType {
   // Source<NavigationController> with a pointer to the controller for the
   // closed tab.  No details are expected.
   //
-  // See also content::NOTIFICATION_WEB_CONTENTS_DESTROYED, which is sent when
-  // the WebContents containing the NavigationController is destroyed.
+  // See also NOTIFICATION_TAB_CONTENTS_DESTROYED, which is sent when the
+  // TabContents is destroyed, and
+  // content::NOTIFICATION_WEB_CONTENTS_DESTROYED, which is sent when the
+  // WebContents containing the NavigationController is destroyed.
   NOTIFICATION_TAB_CLOSING,
+
+  // Sent when a TabContents is being destroyed.  At this point it's safe
+  // to call TabContents member functions, which is not true of the
+  // similar content::NOTIFICATION_WEB_CONTENTS_DESTROYED that fires later
+  // during teardown.  The source is a Source<TabContents>.  There are no
+  // details.
+  NOTIFICATION_TAB_CONTENTS_DESTROYED,
 
   // Stuff inside the tabs ---------------------------------------------------
 
@@ -327,6 +339,12 @@ enum NotificationType {
   // Sent when WebUI TaskManager opens and is ready for showing tasks.
   NOTIFICATION_TASK_MANAGER_WINDOW_READY,
 
+  // The TaskManagerChildProcessResourceProvider collects the list of child
+  // processes when StartUpdating is called. This data is collected on the IO
+  // thread and passed back to the UI thread. Once all entries are added to the
+  // task manager, this notification is sent.
+  NOTIFICATION_TASK_MANAGER_CHILD_PROCESSES_DATA_READY,
+
   // Sent when a renderer process is notified of new v8 heap statistics. The
   // source is the ID of the renderer process, and the details are a
   // V8HeapStatsDetails object.
@@ -365,10 +383,6 @@ enum NotificationType {
   // details are NoDetails.
   NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
 
-  // The number of times that NTP4 bubble is shown has been changed. The NTP
-  // resource cache has to be refreshed to remove the NTP4 bubble.
-  NTP4_INTRO_PREF_CHANGED,
-
   // Autocomplete ------------------------------------------------------------
 
   // Sent by the autocomplete controller when done.  The source is the
@@ -382,7 +396,8 @@ enum NotificationType {
   // Sent when the Google URL for a profile has been updated.  Some services
   // cache this value and need to update themselves when it changes.  See
   // google_util::GetGoogleURLAndUpdateIfNecessary().  The source is the
-  // Profile, the details the new (const) GURL.
+  // Profile, the details a GoogleURLTracker::UpdatedDetails containing the old
+  // and new URLs.
   //
   // Note that because incognito mode requests for the GoogleURLTracker are
   // redirected to the non-incognito profile's copy, this notification will only
@@ -398,7 +413,7 @@ enum NotificationType {
   NOTIFICATION_PRINT_JOB_EVENT,
 
   // Sent when a PrintJob has been released.
-  // Source is the TabContentsWrapper that holds the print job.
+  // Source is the TabContents that holds the print job.
   NOTIFICATION_PRINT_JOB_RELEASED,
 
   // Shutdown ----------------------------------------------------------------
@@ -429,6 +444,11 @@ enum NotificationType {
   // testing scenarios this can happen multiple times if extensions are
   // unloaded and reloaded. The source is a Profile.
   NOTIFICATION_EXTENSIONS_READY,
+
+  // Sent when an extension icon being displayed in the location bar is updated.
+  // The source is the Profile and the details are the TabContents for
+  // the tab.
+  NOTIFICATION_EXTENSION_LOCATION_BAR_UPDATED,
 
   // Sent when a new extension is loaded. The details are an Extension, and
   // the source is a Profile.
@@ -528,6 +548,14 @@ enum NotificationType {
   // Sent when a page action's visibility has changed. The source is the
   // ExtensionAction* that changed. The details are a WebContents*.
   NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
+
+  // A new extension RenderViewHost has been registered. The details are
+  // the RenderViewHost*.
+  NOTIFICATION_EXTENSION_VIEW_REGISTERED,
+
+  // An extension RenderViewHost has been unregistered. The details are
+  // the RenderViewHost*.
+  NOTIFICATION_EXTENSION_VIEW_UNREGISTERED,
 
   // Sent by an extension to notify the browser about the results of a unit
   // test.
@@ -802,14 +830,24 @@ enum NotificationType {
   // Profile. The details are a TokenAvailableDetails object.
   NOTIFICATION_TOKEN_UPDATED,
 
+  // Fired when the TokenService has had all of its tokens removed (such as due
+  // to the user signing out). The source is the TokenService. There are no
+  // details.
+  NOTIFICATION_TOKENS_CLEARED,
+
   // Sent when a user signs into Google services such as sync.
-  // The source is the Profile. The details are a GoogleServiceSignin object.
+  // The source is the Profile. The details are a
+  // GoogleServiceSigninSuccessDetails object.
   NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
 
   // Sent when a user fails to sign into Google services such as sync.
   // The source is the Profile. The details are a GoogleServiceAuthError
   // object.
   NOTIFICATION_GOOGLE_SIGNIN_FAILED,
+
+  // Sent when the currently signed-in user for a user has been signed out.
+  // The source is the Profile. There are no details.
+  NOTIFICATION_GOOGLE_SIGNED_OUT,
 
   // Autofill Notifications --------------------------------------------------
 
@@ -862,27 +900,70 @@ enum NotificationType {
   // Sent when webui lock screen is ready.
   NOTIFICATION_LOCK_WEBUI_READY,
 
-  // Sent when webui login screen is ready and gaia iframe has loaded.
-  NOTIFICATION_LOGIN_WEBUI_READY,
+  // Sent when GAIA iframe has been loaded.
+  // First paint event after this fires NOTIFICATION_LOGIN_WEBUI_VISIBLE.
+  // Possible scenarios:
+  // 1. Boot into device that has user pods display disabled or no users.
+  //    Note that booting with network not connected would first generate
+  //    NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN.
+  // 2. From the user pods list, open "Add User" for the second time
+  //    (see below).
+  // TODO(nkostylev): Send this notification any time "Add User" is activated
+  //                  even if it has been silently preloaded on boot.
+  // Not sent on "silent preload" i.e. when booting into login screen
+  // with user pods, GAIA frame is silently preloaded in the background.
+  // Activating it ("Add User") for the first time would not generate this
+  // notification.
+  NOTIFICATION_LOGIN_WEBUI_LOADED,
 
   // Sent when the user images on the WebUI login screen have all been loaded.
+  // "Normal boot" i.e. for the device with at least one user would generate
+  // this one on boot.
+  // First paint event after this fires NOTIFICATION_LOGIN_WEBUI_VISIBLE.
   NOTIFICATION_LOGIN_USER_IMAGES_LOADED,
+
+  // Sent when a network error message is displayed on the WebUI login screen.
+  // First paint event of this fires NOTIFICATION_LOGIN_WEBUI_VISIBLE.
+  NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
+
+  // Sent when the first OOBE screen has been displayed. Note that the screen
+  // may not be fully rendered at this point.
+  // First paint event after this fires NOTIFICATION_LOGIN_WEBUI_VISIBLE.
+  NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
+
+  // Sent when the specific part of login WebUI is considered to be visible.
+  // That moment is tracked as the first paint event after one of the:
+  // 1. NOTIFICATION_LOGIN_USER_IMAGES_LOADED
+  // 2. NOTIFICATION_LOGIN_WEBUI_LOADED
+  // 3. NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN
+  // 4. NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN
+  //
+  // Possible series of notifications:
+  // 1. Boot into fresh OOBE
+  //    NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN
+  //    NOTIFICATION_LOGIN_WEBUI_VISIBLE
+  // 2. Boot into user pods list (normal boot)
+  //    NOTIFICATION_LOGIN_USER_IMAGES_LOADED
+  //    NOTIFICATION_LOGIN_WEBUI_VISIBLE
+  // 3. Boot into GAIA sign in UI (user pods display disabled or no users):
+  //    if no network is connected or flaky network
+  //    (NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN +
+  //     NOTIFICATION_LOGIN_WEBUI_VISIBLE)
+  //    NOTIFICATION_LOGIN_WEBUI_LOADED
+  //    NOTIFICATION_LOGIN_WEBUI_VISIBLE
+  NOTIFICATION_LOGIN_WEBUI_VISIBLE,
 
   // Sent when proxy dialog is closed.
   NOTIFICATION_LOGIN_PROXY_CHANGED,
 
-  // Sent when a network error message is displayed on the WebUI login screen.
-  NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
+  // Sent when the user list has changed due to a policy change.
+  NOTIFICATION_POLICY_USER_LIST_CHANGED,
 
   // Sent when a panel state changed.
   NOTIFICATION_PANEL_STATE_CHANGED,
 
   // Sent when the window manager's layout mode has changed.
   NOTIFICATION_LAYOUT_MODE_CHANGED,
-
-  // Sent when the first OOBE screen has been displayed.  Note that the screen
-  // may not be fully rendered at this point.
-  NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
 
   // Sent when the screen lock state has changed. The source is
   // ScreenLocker and the details is a bool specifing that the
@@ -933,7 +1014,10 @@ enum NotificationType {
 
   // Send when a context menu is shown. Used to notify tests that the context
   // menu has been created and shown.
-  NOTIFICATION_CONTEXT_MENU_SHOWN,
+  NOTIFICATION_RENDER_VIEW_CONTEXT_MENU_SHOWN,
+
+  // Send when a context menu is closed.
+  NOTIFICATION_RENDER_VIEW_CONTEXT_MENU_CLOSED,
 
   // Sent when the tab's closeable state has changed due to increase/decrease
   // in number of tabs in browser or increase/decrease in number of browsers.
@@ -948,13 +1032,18 @@ enum NotificationType {
   NOTIFICATION_INSTANT_CONTROLLER_SHOWN,
 
   // Sent when an Instant preview is committed.  The Source is the
-  // TabContentsWrapper containing the committed preview.  There are no details.
+  // TabContents containing the committed preview.  There are no details.
   NOTIFICATION_INSTANT_COMMITTED,
 
   // Sent when the instant loader determines whether the page supports the
   // instant API or not. The details is a boolean indicating if the page
   // supports instant. The source is not used.
   NOTIFICATION_INSTANT_SUPPORT_DETERMINED,
+
+  // Sent when the CaptivePortalService checks if we're behind a captive portal.
+  // The Source is the Profile the CaptivePortalService belongs to, and the
+  // Details are a Details<CaptivePortalService::CheckResults>.
+  NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT,
 
   // Password Store ----------------------------------------------------------
   // This notification is sent whenenever login entries stored in the password
@@ -993,25 +1082,6 @@ enum NotificationType {
   // Sent when a new web store promo has been loaded.
   NOTIFICATION_WEB_STORE_PROMO_LOADED,
 
-#if defined(USE_VIRTUAL_KEYBOARD)
-  // Sent when the keyboard visibility has changed. Used for testing purposes
-  // only. Source is the keyboard manager, and Details is a boolean indicating
-  // whether the keyboard is visibile or not.
-  NOTIFICATION_KEYBOARD_VISIBILITY_CHANGED,
-
-  // Sent when an API for hiding the keyboard is invoked from JavaScript code.
-  NOTIFICATION_HIDE_KEYBOARD_INVOKED,
-
-  // Sent when an API for set height of the keyboard is invoked from
-  // JavaScript code.
-  NOTIFICATION_SET_KEYBOARD_HEIGHT_INVOKED,
-
-  // Sent after the keyboard has been animated up or down. Source is the
-  // keyboard Widget, and Details is bounds of the keyboard in screen
-  // coordinates.
-  NOTIFICATION_KEYBOARD_VISIBLE_BOUNDS_CHANGED,
-#endif
-
   // Protocol Handler Registry -----------------------------------------------
   // Sent when a ProtocolHandlerRegistry is changed. The source is the profile.
   NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
@@ -1025,6 +1095,10 @@ enum NotificationType {
 
   // Sent when the browser enters or exits fullscreen mode.
   NOTIFICATION_FULLSCREEN_CHANGED,
+
+  // Sent when the FullscreenController changes, confirms, or denies mouse lock.
+  // The source is the browser's FullscreenController, no details.
+  NOTIFICATION_MOUSE_LOCK_CHANGED,
 
   // Sent by the PluginPrefs when there is a change of plugin enable/disable
   // status. The source is the profile.
@@ -1050,19 +1124,13 @@ enum NotificationType {
   // Used only in unit testing.
   NOTIFICATION_PANEL_WINDOW_SIZE_KNOWN,
 
-  // Sent when panel's bounds get changed.
-  // The source is the Panel, no details.
+  // Sent when panel strip get updated.
+  // The source is the PanelStrip, no details.
   // Used only in coordination with notification balloons.
-  NOTIFICATION_PANEL_CHANGED_BOUNDS,
-
-  // Sent when panel is added into the panel manager.
-  // The source is the Panel, no details.
-  // Used only in coordination with notification balloons.
-  NOTIFICATION_PANEL_ADDED,
+  NOTIFICATION_PANEL_STRIP_UPDATED,
 
   // Sent when panel is closed.
   // The source is the Panel, no details.
-  // Used only in coordination with notification balloons.
   NOTIFICATION_PANEL_CLOSED,
 
   // Sent when a global error has changed and the error UI should update it
@@ -1088,7 +1156,7 @@ enum NotificationType {
   // Blocked content.
   // Sent when content changes to or from the blocked state in
   // BlockedContentTabHelper.
-  // The source is the TabContentsWrapper of the blocked content and details
+  // The source is the TabContents of the blocked content and details
   // is a boolean: true if the content is entering the blocked state, false
   // if it is leaving.
   NOTIFICATION_CONTENT_BLOCKED_STATE_CHANGED,

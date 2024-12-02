@@ -47,8 +47,8 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
+#include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -250,7 +250,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     folderImage_.reset(
         [rb.GetNativeImageNamed(IDR_BOOKMARK_BAR_FOLDER) retain]);
-    defaultImage_.reset([gfx::GetCachedImageWithName(@"nav.pdf") retain]);
+    defaultImage_.reset([rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON) retain]);
 
     // Register for theme changes, bookmark button pulsing, ...
     NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
@@ -312,6 +312,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 }
 
 - (void)dealloc {
+  // Clear delegate so it doesn't get called during stopAnimation.
+  [[self animatableView] setResizeDelegate:nil];
+
   // We better stop any in-flight animation if we're being killed.
   [[self animatableView] stopAnimation];
 
@@ -2285,7 +2288,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 #pragma mark BookmarkBarToolbarViewController Protocol
 
 - (int)currentTabContentsHeight {
-  WebContents* wc = browser_->GetSelectedWebContents();
+  WebContents* wc = browser_->GetActiveWebContents();
   return wc ? wc->GetView()->GetContainerSize().height() : 0;
 }
 

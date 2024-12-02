@@ -15,7 +15,7 @@
         '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
-        '<(DEPTH)/ui/gfx/gl/gl.gyp:gl',
+        '<(DEPTH)/ui/gl/gl.gyp:gl',
         '<(DEPTH)/ui/ui.gyp:ui',
         '<(DEPTH)/webkit/support/webkit_support.gyp:fileapi',
         '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
@@ -34,6 +34,8 @@
         'compositor_switches.h',
         'debug_utils.cc',
         'debug_utils.h',
+        'dip_util.cc',
+        'dip_util.h',
         'layer.cc',
         'layer.h',
         'layer_animation_delegate.h',
@@ -45,6 +47,9 @@
         'layer_animation_sequence.h',
         'layer_animator.cc',
         'layer_animator.h',
+        'layer_delegate.h',
+        'layer_owner.cc',
+        'layer_owner.h',
         'layer_type.h',
         'scoped_layer_animation_settings.cc',
         'scoped_layer_animation_settings.h',
@@ -59,7 +64,7 @@
           # TODO(sky): before we make this real need to remove
           # IDR_BITMAP_BRUSH_IMAGE.
           'dependencies': [
-            '<(DEPTH)/ui/ui.gyp:gfx_resources',
+            '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
             '<(DEPTH)/third_party/angle/src/build_angle.gyp:libEGL',
             '<(DEPTH)/third_party/angle/src/build_angle.gyp:libGLESv2',
           ],
@@ -98,8 +103,10 @@
         '<(DEPTH)/base/base.gyp:test_support_base',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gtest.gyp:gtest',
-        '<(DEPTH)/ui/gfx/gl/gl.gyp:gl',
+        '<(DEPTH)/ui/gl/gl.gyp:gl',
         '<(DEPTH)/ui/ui.gyp:ui',
+        '<(DEPTH)/ui/ui.gyp:ui_resources',
+        '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
         'compositor',
         'compositor_test_support',
       ],
@@ -121,8 +128,8 @@
         'test/test_suite.h',
         'test/test_utils.cc',
         'test/test_utils.h',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc'
+        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
+        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
       ],
       'conditions': [
         # osmesa GL implementation is used on linux.

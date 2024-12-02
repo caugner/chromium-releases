@@ -10,6 +10,10 @@
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_drag_controller.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/panels/test_panel_mouse_watcher.h"
+
+// Refactor has only been done for Mac panels so far.
+#if defined(OS_MACOSX)
 
 class PanelDragBrowserTest : public BasePanelBrowserTest {
  public:
@@ -33,7 +37,7 @@ class PanelDragBrowserTest : public BasePanelBrowserTest {
   // Drag |panel| from its origin by the offset |delta|.
   void DragPanelByDelta(Panel* panel, const gfx::Point& delta) {
     scoped_ptr<NativePanelTesting> panel_testing(
-        NativePanelTesting::Create(panel->native_panel()));
+        CreateNativePanelTesting(panel));
     gfx::Point mouse_location(panel->GetBounds().origin());
     panel_testing->PressLeftMouseButtonTitlebar(mouse_location);
     panel_testing->DragTitlebar(mouse_location.Add(delta));
@@ -44,7 +48,7 @@ class PanelDragBrowserTest : public BasePanelBrowserTest {
   void DragPanelToMouseLocation(Panel* panel,
                                 const gfx::Point& new_mouse_location) {
     scoped_ptr<NativePanelTesting> panel_testing(
-        NativePanelTesting::Create(panel->native_panel()));
+        CreateNativePanelTesting(panel));
     gfx::Point mouse_location(panel->GetBounds().origin());
     panel_testing->PressLeftMouseButtonTitlebar(panel->GetBounds().origin());
     panel_testing->DragTitlebar(new_mouse_location);
@@ -86,7 +90,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragOneDockedPanel) {
 
   Panel* panel = CreateDockedPanel("1", gfx::Rect(0, 0, 100, 100));
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   gfx::Rect panel_old_bounds = panel->GetBounds();
 
   // Drag left.
@@ -178,9 +182,9 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragTwoDockedPanels) {
   Panel* panel1 = CreateDockedPanel("1", gfx::Rect(0, 0, 100, 100));
   Panel* panel2 = CreateDockedPanel("2", gfx::Rect(0, 0, 100, 100));
   scoped_ptr<NativePanelTesting> panel1_testing(
-      NativePanelTesting::Create(panel1->native_panel()));
+      CreateNativePanelTesting(panel1));
   scoped_ptr<NativePanelTesting> panel2_testing(
-      NativePanelTesting::Create(panel2->native_panel()));
+      CreateNativePanelTesting(panel2));
   gfx::Point position1 = panel1->GetBounds().origin();
   gfx::Point position2 = panel2->GetBounds().origin();
 
@@ -273,9 +277,9 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragThreeDockedPanels) {
   Panel* panel2 = CreateDockedPanel("2", gfx::Rect(0, 0, 100, 100));
   Panel* panel3 = CreateDockedPanel("3", gfx::Rect(0, 0, 100, 100));
   scoped_ptr<NativePanelTesting> panel2_testing(
-      NativePanelTesting::Create(panel2->native_panel()));
+      CreateNativePanelTesting(panel2));
   scoped_ptr<NativePanelTesting> panel3_testing(
-      NativePanelTesting::Create(panel3->native_panel()));
+      CreateNativePanelTesting(panel3));
   gfx::Point position1 = panel1->GetBounds().origin();
   gfx::Point position2 = panel2->GetBounds().origin();
   gfx::Point position3 = panel3->GetBounds().origin();
@@ -401,6 +405,96 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragThreeDockedPanels) {
   PanelManager::GetInstance()->CloseAll();
 }
 
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragMinimizedPanel) {
+  // We'll simulate mouse movements for test.
+  PanelMouseWatcher* mouse_watcher = new TestPanelMouseWatcher();
+  PanelManager::GetInstance()->SetMouseWatcherForTesting(mouse_watcher);
+
+  Panel* panel = CreatePanel("panel1");
+  scoped_ptr<NativePanelTesting> panel_testing(
+      CreateNativePanelTesting(panel));
+
+  panel->Minimize();
+  EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
+
+  // Hover over minimized panel to bring up titlebar.
+  gfx::Point hover_point(panel->GetBounds().origin());
+  MoveMouseAndWaitForExpansionStateChange(panel, hover_point);
+  EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  // Verify we can drag a minimized panel.
+  gfx::Rect panel_old_bounds = panel->GetBounds();
+  gfx::Point mouse_location = panel_old_bounds.origin();
+  panel_testing->PressLeftMouseButtonTitlebar(mouse_location);
+  EXPECT_EQ(panel_old_bounds, panel->GetBounds());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  mouse_location.Offset(-70, 0);
+  panel_testing->DragTitlebar(mouse_location);
+  gfx::Rect panel_new_bounds = panel_old_bounds;
+  panel_new_bounds.Offset(-70, 0);
+  EXPECT_EQ(panel_new_bounds, panel->GetBounds());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  // Verify panel returns to fully minimized state after dragging ends once
+  // mouse moves away from panel.
+  panel_testing->FinishDragTitlebar();
+  EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  MoveMouseAndWaitForExpansionStateChange(panel, mouse_location);
+  EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
+
+  panel->Close();
+}
+
+IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest,
+                       DragMinimizedPanelWhileDrawingAttention) {
+  // We'll simulate mouse movements for test.
+  PanelMouseWatcher* mouse_watcher = new TestPanelMouseWatcher();
+  PanelManager::GetInstance()->SetMouseWatcherForTesting(mouse_watcher);
+
+  Panel* panel = CreatePanel("panel1");
+  scoped_ptr<NativePanelTesting> panel_testing(
+      CreateNativePanelTesting(panel));
+  CreatePanel("panel2");
+
+  panel->Minimize();
+  EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
+
+  panel->FlashFrame(true);
+  EXPECT_TRUE(panel->IsDrawingAttention());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  // Drag the panel. Verify panel stays in title-only state after attention is
+  // cleared because it is being dragged.
+  gfx::Rect panel_old_bounds = panel->GetBounds();
+  gfx::Point mouse_location = panel_old_bounds.origin();
+  panel_testing->PressLeftMouseButtonTitlebar(mouse_location);
+  EXPECT_EQ(panel_old_bounds, panel->GetBounds());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  mouse_location.Offset(-70, 0);
+  panel_testing->DragTitlebar(mouse_location);
+  gfx::Rect panel_new_bounds = panel_old_bounds;
+  panel_new_bounds.Offset(-70, 0);
+  EXPECT_EQ(panel_new_bounds, panel->GetBounds());
+
+  panel->FlashFrame(false);
+  EXPECT_FALSE(panel->IsDrawingAttention());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  // Verify panel returns to fully minimized state after dragging ends once
+  // mouse moves away from the panel.
+  panel_testing->FinishDragTitlebar();
+  EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
+
+  mouse_location.Offset(0, -50);
+  MoveMouseAndWaitForExpansionStateChange(panel, mouse_location);
+  EXPECT_EQ(Panel::MINIMIZED, panel->expansion_state());
+
+  PanelManager::GetInstance()->CloseAll();
+}
+
 IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDockedPanelOnDrag) {
   PanelManager* panel_manager = PanelManager::GetInstance();
   PanelDragController* drag_controller = panel_manager->drag_controller();
@@ -415,7 +509,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDockedPanelOnDrag) {
   ASSERT_EQ(4, docked_strip->num_panels());
 
   scoped_ptr<NativePanelTesting> panel1_testing(
-      NativePanelTesting::Create(panel1->native_panel()));
+      CreateNativePanelTesting(panel1));
   gfx::Point position1 = panel1->GetBounds().origin();
   gfx::Point position2 = panel2->GetBounds().origin();
   gfx::Point position3 = panel3->GetBounds().origin();
@@ -450,7 +544,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDockedPanelOnDrag) {
     // Closing another panel while dragging in progress will keep the dragging
     // panel intact.
     // We have:  P1*  P4  P3
-    CloseWindowAndWait(panel2->browser());
+    CloseWindowAndWait(panel2);
     EXPECT_TRUE(drag_controller->IsDragging());
     EXPECT_EQ(panel1, drag_controller->dragging_panel());
 
@@ -505,7 +599,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDockedPanelOnDrag) {
     // Closing another panel while dragging in progress will keep the dragging
     // panel intact.
     // We have:  P1*  P4
-    CloseWindowAndWait(panel3->browser());
+    CloseWindowAndWait(panel3);
     EXPECT_TRUE(drag_controller->IsDragging());
     EXPECT_EQ(panel1, drag_controller->dragging_panel());
 
@@ -553,7 +647,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDockedPanelOnDrag) {
 
     // Closing the dragging panel should end the drag.
     // We have:  P4
-    CloseWindowAndWait(panel1->browser());
+    CloseWindowAndWait(panel1);
     EXPECT_FALSE(drag_controller->IsDragging());
 
     ASSERT_EQ(1, docked_strip->num_panels());
@@ -571,7 +665,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragOneDetachedPanel) {
   // Test that the detached panel can be dragged almost anywhere except getting
   // close to the bottom of the docked area to trigger the attach.
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   gfx::Point origin = panel->GetBounds().origin();
 
   panel_testing->PressLeftMouseButtonTitlebar(origin);
@@ -624,7 +718,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDetachedPanelOnDrag) {
   ASSERT_EQ(4, detached_strip->num_panels());
 
   scoped_ptr<NativePanelTesting> panel1_testing(
-      NativePanelTesting::Create(panel1->native_panel()));
+      CreateNativePanelTesting(panel1));
   gfx::Point panel1_old_position = panel1->GetBounds().origin();
   gfx::Point panel2_position = panel2->GetBounds().origin();
   gfx::Point panel3_position = panel3->GetBounds().origin();
@@ -653,7 +747,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDetachedPanelOnDrag) {
 
     // Closing another panel while dragging in progress will keep the dragging
     // panel intact.
-    CloseWindowAndWait(panel2->browser());
+    CloseWindowAndWait(panel2);
     EXPECT_TRUE(drag_controller->IsDragging());
     EXPECT_EQ(panel1, drag_controller->dragging_panel());
 
@@ -700,7 +794,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDetachedPanelOnDrag) {
 
     // Closing another panel while dragging in progress will keep the dragging
     // panel intact.
-    CloseWindowAndWait(panel3->browser());
+    CloseWindowAndWait(panel3);
     EXPECT_TRUE(drag_controller->IsDragging());
     EXPECT_EQ(panel1, drag_controller->dragging_panel());
 
@@ -739,7 +833,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, CloseDetachedPanelOnDrag) {
     EXPECT_EQ(panel4_position, panel4->GetBounds().origin());
 
     // Closing the dragging panel should end the drag.
-    CloseWindowAndWait(panel1->browser());
+    CloseWindowAndWait(panel1);
     EXPECT_FALSE(drag_controller->IsDragging());
 
     ASSERT_EQ(1, detached_strip->num_panels());
@@ -764,7 +858,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, Detach) {
 
   // Press on title-bar.
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   gfx::Point mouse_location(panel->GetBounds().origin());
   panel_testing->PressLeftMouseButtonTitlebar(mouse_location);
 
@@ -819,7 +913,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DetachAndCancel) {
 
   // Press on title-bar.
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   gfx::Point mouse_location(panel->GetBounds().origin());
   panel_testing->PressLeftMouseButtonTitlebar(mouse_location);
 
@@ -875,7 +969,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, Attach) {
 
   // Press on title-bar.
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   gfx::Point mouse_location(panel->GetBounds().origin());
   panel_testing->PressLeftMouseButtonTitlebar(mouse_location);
 
@@ -934,7 +1028,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, AttachAndCancel) {
 
   // Press on title-bar.
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   gfx::Point mouse_location(panel->GetBounds().origin());
   panel_testing->PressLeftMouseButtonTitlebar(mouse_location);
 
@@ -988,7 +1082,7 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DetachAttachAndCancel) {
 
   // Press on title-bar.
   scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
+      CreateNativePanelTesting(panel));
   gfx::Point mouse_location(panel->GetBounds().origin());
   panel_testing->PressLeftMouseButtonTitlebar(mouse_location);
 
@@ -1250,3 +1344,5 @@ IN_PROC_BROWSER_TEST_F(PanelDragBrowserTest, DragDetachedPanelToTop) {
 
   panel_manager->CloseAll();
 }
+
+#endif // OS_MACOSX

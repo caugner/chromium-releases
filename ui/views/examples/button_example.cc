@@ -29,7 +29,7 @@ ButtonExample::ButtonExample()
       icon_(NULL),
       count_(0) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  icon_ = rb.GetImageNamed(IDR_CLOSE_SA_H).ToSkBitmap();
+  icon_ = rb.GetImageNamed(IDR_CLOSE_SA_H).ToImageSkia();
 }
 
 ButtonExample::~ButtonExample() {
@@ -45,12 +45,13 @@ void ButtonExample::CreateExampleView(View* container) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   image_button_ = new ImageButton(this);
   image_button_->SetImage(ImageButton::BS_NORMAL,
-                          rb.GetImageNamed(IDR_CLOSE).ToSkBitmap());
+                          rb.GetImageNamed(IDR_CLOSE).ToImageSkia());
   image_button_->SetImage(ImageButton::BS_HOT,
-                          rb.GetImageNamed(IDR_CLOSE_H).ToSkBitmap());
+                          rb.GetImageNamed(IDR_CLOSE_H).ToImageSkia());
   image_button_->SetImage(ImageButton::BS_PUSHED,
-                          rb.GetImageNamed(IDR_CLOSE_P).ToSkBitmap());
-  image_button_->SetOverlayImage(rb.GetImageNamed(IDR_MENU_CHECK).ToSkBitmap());
+                          rb.GetImageNamed(IDR_CLOSE_P).ToImageSkia());
+  image_button_->SetOverlayImage(rb.GetImageNamed(
+      IDR_MENU_CHECK).ToImageSkia());
   container->AddChildView(image_button_);
 }
 
@@ -69,7 +70,7 @@ void ButtonExample::ButtonPressed(Button* sender, const Event& event) {
           text_button_->SetText(ASCIIToUTF16("Button"));
         }
       } else {
-        switch(text_button_->icon_placement()) {
+        switch (text_button_->icon_placement()) {
           case TextButton::ICON_ON_LEFT:
             text_button_->set_icon_placement(TextButton::ICON_ON_RIGHT);
             break;
@@ -80,11 +81,11 @@ void ButtonExample::ButtonPressed(Button* sender, const Event& event) {
       }
     } else if (event.IsAltDown()) {
       if (text_button_->HasIcon())
-        text_button_->SetIcon(SkBitmap());
+        text_button_->SetIcon(gfx::ImageSkia());
       else
         text_button_->SetIcon(*icon_);
     } else {
-      switch(alignment_) {
+      switch (alignment_) {
         case TextButton::ALIGN_LEFT:
           alignment_ = TextButton::ALIGN_CENTER;
           break;

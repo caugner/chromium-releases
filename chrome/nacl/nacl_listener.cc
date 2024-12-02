@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/rand_util.h"
 #include "chrome/common/nacl_messages.h"
 #include "chrome/nacl/nacl_validation_db.h"
 #include "chrome/nacl/nacl_validation_query.h"
@@ -84,8 +85,8 @@ int BrokerDuplicateHandle(NaClHandle source_handle,
                                         options);
 }
 
-int AttachDebugExceptionHandler(void* info, size_t info_size) {
-  std::string info_string(reinterpret_cast<char*>(info), info_size);
+int AttachDebugExceptionHandler(const void* info, size_t info_size) {
+  std::string info_string(reinterpret_cast<const char*>(info), info_size);
   bool result = false;
   if (!g_listener->Send(new NaClProcessMsg_AttachDebugExceptionHandler(
            info_string, &result)))
@@ -94,16 +95,6 @@ int AttachDebugExceptionHandler(void* info, size_t info_size) {
 }
 
 #endif
-
-// Use an env var because command line args are eaten by nacl_helper.
-bool CheckEnvVar(const char* name, bool default_value) {
-  bool result = default_value;
-  const char* var = getenv(name);
-  if (var && strlen(var) > 0) {
-    result = var[0] != '0';
-  }
-  return result;
-}
 
 }  // namespace
 
@@ -141,8 +132,7 @@ class BrowserValidationDBProxy : public NaClValidationDB {
 
 NaClListener::NaClListener() : shutdown_event_(true, false),
                                io_thread_("NaCl_IOThread"),
-                               main_loop_(NULL),
-                               debug_enabled_(false) {
+                               main_loop_(NULL) {
   io_thread_.StartWithOptions(base::Thread::Options(MessageLoop::TYPE_IO, 0));
 #if defined(OS_WIN)
   DCHECK(g_listener == NULL);
@@ -201,6 +191,11 @@ void NaClListener::OnMsgStart(const nacl::NaClStartParams& params) {
   std::vector<nacl::FileDescriptor> handles = params.handles;
 
 #if defined(OS_LINUX) || defined(OS_MACOSX)
+  args->urandom_fd = dup(base::GetUrandomFD());
+  if (args->urandom_fd < 0) {
+    LOG(ERROR) << "Failed to dup() the urandom FD";
+    return;
+  }
   args->create_memory_object_func = CreateMemoryObject;
 # if defined(OS_MACOSX)
   CHECK(handles.size() >= 1);
@@ -224,8 +219,9 @@ void NaClListener::OnMsgStart(const nacl::NaClStartParams& params) {
   args->irt_fd = irt_handle;
 #endif
 
-  if (CheckEnvVar("NACL_VALIDATION_CACHE", false)) {
-    LOG(INFO) << "NaCl validation cache enabled.";
+  if (params.validation_cache_enabled) {
+    // SHA256 block size.
+    CHECK_EQ(params.validation_cache_key.length(), (size_t) 64);
     // The cache structure is not freed and exists until the NaCl process exits.
     args->validation_cache = CreateValidationCache(
         new BrowserValidationDBProxy(this), params.validation_cache_key,
@@ -235,7 +231,7 @@ void NaClListener::OnMsgStart(const nacl::NaClStartParams& params) {
   CHECK(handles.size() == 1);
   args->imc_bootstrap_handle = nacl::ToNativeHandle(handles[0]);
   args->enable_exception_handling = params.enable_exception_handling;
-  args->enable_debug_stub = debug_enabled_;
+  args->enable_debug_stub = params.enable_debug_stub;
 #if defined(OS_WIN)
   args->broker_duplicate_handle_func = BrokerDuplicateHandle;
   args->attach_debug_exception_handler_func = AttachDebugExceptionHandler;

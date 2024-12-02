@@ -5,6 +5,7 @@
 #include "ash/wm/panel_layout_manager.h"
 
 #include <algorithm>
+#include <map>
 
 #include "ash/launcher/launcher.h"
 #include "ash/shell.h"
@@ -91,13 +92,15 @@ PanelLayoutManager::PanelLayoutManager(aura::Window* panel_container)
   views::View* content_view = new views::View;
   content_view->set_background(new CalloutWidgetBackground);
   callout_widget_->SetContentsView(content_view);
-  Shell::GetRootWindow()->AddObserver(this);
+  aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
+      AddObserver(this);
 }
 
 PanelLayoutManager::~PanelLayoutManager() {
   if (launcher_)
     launcher_->RemoveIconObserver(this);
-  Shell::GetRootWindow()->RemoveObserver(this);
+  aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
+      RemoveObserver(this);
 }
 
 void PanelLayoutManager::StartDragging(aura::Window* panel) {
@@ -216,24 +219,23 @@ void PanelLayoutManager::SetChildBounds(aura::Window* child,
 
 ////////////////////////////////////////////////////////////////////////////////
 // PanelLayoutManager, ash::LauncherIconObserver implementation:
+
 void PanelLayoutManager::OnLauncherIconPositionsChanged() {
+  // TODO: As this is called for every animation step now. Relayout needs to be
+  // updated to use current icon position instead of use the ideal bounds so
+  // that the panels slide with their icons instead of jumping.
   Relayout();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// PanelLayoutManager, aura::WindowObserver implementation:
-void PanelLayoutManager::OnWindowPropertyChanged(aura::Window* window,
-                                                 const void* key,
-                                                 intptr_t old) {
-  if (key == aura::client::kRootWindowActiveWindowKey) {
-    aura::Window* active = window->GetProperty(
-        aura::client::kRootWindowActiveWindowKey);
-    if (active && active->type() == aura::client::WINDOW_TYPE_PANEL) {
-      UpdateStacking(active);
-      UpdateCallout(active);
-    } else {
-      UpdateCallout(NULL);
-    }
+// PanelLayoutManager, aura::client::ActivationChangeObserver implementation:
+void PanelLayoutManager::OnWindowActivated(aura::Window* active,
+                                           aura::Window* old_active) {
+  if (active && active->type() == aura::client::WINDOW_TYPE_PANEL) {
+    UpdateStacking(active);
+    UpdateCallout(active);
+  } else {
+    UpdateCallout(NULL);
   }
 }
 

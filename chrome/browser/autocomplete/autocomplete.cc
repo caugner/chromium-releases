@@ -28,7 +28,6 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
-#include "chrome/browser/instant/instant_field_trial.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -544,9 +543,48 @@ void AutocompleteProvider::Stop() {
   done_ = true;
 }
 
+metrics::OmniboxEventProto_ProviderType AutocompleteProvider::
+    AsOmniboxEventProviderType() const {
+  if (name_ == "HistoryURL")
+    return metrics::OmniboxEventProto::HISTORY_URL;
+  if (name_ == "HistoryContents")
+    return metrics::OmniboxEventProto::HISTORY_CONTENTS;
+  if (name_ == "HistoryQuickProvider")
+    return metrics::OmniboxEventProto::HISTORY_QUICK;
+  if (name_ == "Search")
+    return metrics::OmniboxEventProto::SEARCH;
+  if (name_ == "Keyword")
+    return metrics::OmniboxEventProto::KEYWORD;
+  if (name_ == "Builtin")
+    return metrics::OmniboxEventProto::BUILTIN;
+  if (name_ == "ShortcutsProvider")
+    return metrics::OmniboxEventProto::SHORTCUTS;
+  if (name_ == "ExtensionApps")
+    return metrics::OmniboxEventProto::EXTENSION_APPS;
+
+  NOTREACHED();
+  return metrics::OmniboxEventProto::UNKNOWN_PROVIDER;
+}
+
 void AutocompleteProvider::DeleteMatch(const AutocompleteMatch& match) {
   DLOG(WARNING) << "The AutocompleteProvider '" << name()
                 << "' has not implemented DeleteMatch.";
+}
+
+void AutocompleteProvider::AddProviderInfo(
+    ProvidersInfo* provider_info) const {
+}
+
+string16 AutocompleteProvider::StringForURLDisplay(const GURL& url,
+                                                   bool check_accept_lang,
+                                                   bool trim_http) const {
+  std::string languages = (check_accept_lang && profile_) ?
+      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages) : std::string();
+  return net::FormatUrl(
+      url,
+      languages,
+      net::kFormatUrlOmitAll & ~(trim_http ? 0 : net::kFormatUrlOmitHTTP),
+      net::UnescapeRule::SPACES, NULL, NULL, NULL);
 }
 
 AutocompleteProvider::~AutocompleteProvider() {
@@ -575,18 +613,6 @@ void AutocompleteProvider::UpdateStarredStateOfMatches() {
 
   for (ACMatches::iterator i = matches_.begin(); i != matches_.end(); ++i)
     i->starred = bookmark_model->IsBookmarked(GURL(i->destination_url));
-}
-
-string16 AutocompleteProvider::StringForURLDisplay(const GURL& url,
-                                                   bool check_accept_lang,
-                                                   bool trim_http) const {
-  std::string languages = (check_accept_lang && profile_) ?
-      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages) : std::string();
-  return net::FormatUrl(
-      url,
-      languages,
-      net::kFormatUrlOmitAll & ~(trim_http ? 0 : net::kFormatUrlOmitHTTP),
-      net::UnescapeRule::SPACES, NULL, NULL, NULL);
 }
 
 // AutocompleteResult ---------------------------------------------------------
@@ -923,8 +949,7 @@ void AutocompleteController::Start(
   if (matches_requested == AutocompleteInput::ALL_MATCHES &&
       (text.length() < 6)) {
     base::TimeTicks end_time = base::TimeTicks::Now();
-    std::string name = "Omnibox.QueryTime." + base::IntToString(text.length()) +
-        InstantFieldTrial::GetModeAsString(profile_);
+    std::string name = "Omnibox.QueryTime." + base::IntToString(text.length());
     base::Histogram* counter = base::Histogram::FactoryGet(
         name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
     counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));
@@ -979,6 +1004,19 @@ void AutocompleteController::OnProviderUpdate(bool updated_matches) {
   // results if we're not in Start().
   if (!in_start_ && (updated_matches || done_))
     UpdateResult(false);
+}
+
+void AutocompleteController::AddProvidersInfo(
+    ProvidersInfo* provider_info) const {
+  provider_info->clear();
+  for (ACProviders::const_iterator i(providers_.begin()); i != providers_.end();
+       ++i) {
+    // Add per-provider info, if any.
+    (*i)->AddProviderInfo(provider_info);
+
+    // This is also a good place to put code to add info that you want to
+    // add for every provider.
+  }
 }
 
 void AutocompleteController::UpdateResult(bool is_synchronous_pass) {
@@ -1142,5 +1180,9 @@ AutocompleteLog::AutocompleteLog(
       elapsed_time_since_user_first_modified_omnibox(
           elapsed_time_since_user_first_modified_omnibox),
       inline_autocompleted_length(inline_autocompleted_length),
-      result(result) {
+      result(result),
+      providers_info() {
+}
+
+AutocompleteLog::~AutocompleteLog() {
 }

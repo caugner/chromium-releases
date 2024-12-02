@@ -78,6 +78,7 @@ class ScreenRecorderTest : public testing::Test {
 
     session_ = new MockSession();
     EXPECT_CALL(*session_, SetStateChangeCallback(_));
+    EXPECT_CALL(*session_, SetRouteChangeCallback(_));
     EXPECT_CALL(*session_, Close())
         .Times(AnyNumber());
     connection_.reset(new MockConnectionToClient(
@@ -127,7 +128,7 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
     planes.strides[i] = kWidth * 4;
   }
 
-  Expectation capturer_start = EXPECT_CALL(capturer_, Start());
+  Expectation capturer_start = EXPECT_CALL(capturer_, Start(_));
 
   SkISize size(SkISize::Make(kWidth, kHeight));
   scoped_refptr<CaptureData> data(new CaptureData(planes, size, kFormat));
@@ -171,6 +172,7 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
 }
 
 TEST_F(ScreenRecorderTest, StopWithoutStart) {
+  EXPECT_CALL(capturer_, Stop());
   record_->Stop(base::Bind(&QuitMessageLoop, &message_loop_));
   message_loop_.Run();
 }

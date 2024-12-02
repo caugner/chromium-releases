@@ -564,6 +564,14 @@
   fun:frame_worker_thread
 }
 {
+  bug_93932_i
+  ThreadSanitizer:Race
+  ...
+  fun:ff_thread_flush
+  ...
+  fun:media::FFmpegVideoDecoder::DoReset
+}
+{
   bug_100020
   ThreadSanitizer:Race
   fun:linked_ptr_internal::join
@@ -688,6 +696,14 @@
   fun:webrtc::ProcessThreadImpl::Run
   fun:webrtc::ThreadPosix::Run
   fun:StartThread
+}
+{
+  bug_103711j
+  ThreadSanitizer:Race
+  fun:webrtc::ProcessThreadImpl::Stop
+  fun:webrtc::VoEBaseImpl::TerminateInternal
+  fun:webrtc::VoEBaseImpl::Terminate
+  fun:WebRTCAudioDeviceTest_PlayLocalFile_Test::TestBody
 }
 {
    bug_104769
@@ -921,4 +937,28 @@
   fun:ProcessSingleton::LinuxWatcher::SocketReader::FinishWithACK
   fun:ProcessSingleton::LinuxWatcher::HandleMessage
   fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_131001
+  ThreadSanitizer:Race
+  ...
+  fun:media::AudioOutputMixer::StopStream
+  fun:media::AudioOutputProxy::Stop
+  fun:media::AudioOutputController::DoStopCloseAndClearStream
+  fun:media::AudioOutputController::DoClose
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+   bug_132230a
+   ThreadSanitizer:Race
+   ...
+   fun:ProtocolHandlerRegistry::DefaultClientObserver::~DefaultClientObserver
+   fun:::FakeClientObserver::~FakeClientObserver
+   fun:ProtocolHandlerRegistry::Finalize
+}
+{
+   bug_132230b
+   ThreadSanitizer:Race
+   fun:ShellIntegration::DefaultWebClientWorker::ExecuteSetAsDefault
+   fun:base::internal::RunnableAdapter::Run
 }

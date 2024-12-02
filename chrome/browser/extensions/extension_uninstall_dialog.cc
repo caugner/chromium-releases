@@ -11,7 +11,7 @@
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 
@@ -29,7 +29,8 @@ ExtensionUninstallDialog::ExtensionUninstallDialog(
 
 ExtensionUninstallDialog::~ExtensionUninstallDialog() {}
 
-void ExtensionUninstallDialog::ConfirmUninstall(const Extension* extension) {
+void ExtensionUninstallDialog::ConfirmUninstall(
+    const extensions::Extension* extension) {
   DCHECK(ui_loop_ == MessageLoop::current());
   extension_ = extension;
 
@@ -45,14 +46,14 @@ void ExtensionUninstallDialog::ConfirmUninstall(const Extension* extension) {
 void ExtensionUninstallDialog::SetIcon(const gfx::Image& image) {
   if (image.IsEmpty()) {
     if (extension_->is_app()) {
-      icon_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
+      icon_ = *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
           IDR_APP_DEFAULT_ICON);
     } else {
-      icon_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
+      icon_ = *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
           IDR_EXTENSION_DEFAULT_ICON);
     }
   } else {
-    icon_ = *image.ToSkBitmap();
+    icon_ = *image.ToImageSkia();
   }
 }
 

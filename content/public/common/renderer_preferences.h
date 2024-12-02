@@ -54,6 +54,10 @@ struct CONTENT_EXPORT RendererPreferences {
   // Currently only used by Linux.
   RendererPreferencesSubpixelRenderingEnum subpixel_rendering;
 
+  // Whether subpixel positioning should be used, permitting fractional X
+  // positions for glyphs.  Currently only used by Linux.
+  bool use_subpixel_positioning;
+
   // The color of the focus ring. Currently only used on Linux.
   SkColor focus_ring_color;
 
@@ -70,10 +74,10 @@ struct CONTENT_EXPORT RendererPreferences {
   SkColor inactive_selection_fg_color;
 
   // Browser wants a look at all non-local top level navigation requests.
-  bool browser_handles_top_level_requests;
+  bool browser_handles_non_local_top_level_requests;
 
-  // Browser wants a look at all navigation requests.
-  bool browser_handles_all_requests;
+  // Browser wants a look at all top-level navigation requests.
+  bool browser_handles_all_top_level_requests;
 
   // Cursor blink rate in seconds.
   // Currently only changed from default on Linux.  Uses |gtk-cursor-blink|

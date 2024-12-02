@@ -26,7 +26,7 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/common/chrome_switches.h"
-#include "sync/sessions/session_state.h"
+#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
 
 using browser_sync::sessions::SyncSessionSnapshot;
 
@@ -108,7 +108,8 @@ ProfileSyncServiceHarness::ProfileSyncServiceHarness(
       timestamp_match_partner_(NULL),
       username_(username),
       password_(password),
-      profile_debug_name_(profile->GetDebugName()) {
+      profile_debug_name_(profile->GetDebugName()),
+      waiting_for_status_change_(false) {
   if (IsSyncAlreadySetup()) {
     service_ = ProfileSyncServiceFactory::GetInstance()->GetForProfile(
         profile_);
@@ -170,7 +171,7 @@ bool ProfileSyncServiceHarness::SetupSync(
 
   // Tell the sync service that setup is in progress so we don't start syncing
   // until we've finished configuration.
-  service_->set_setup_in_progress(true);
+  service_->SetSetupInProgress(true);
 
   // Authenticate sync client using GAIA credentials.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -237,7 +238,7 @@ bool ProfileSyncServiceHarness::SetupSync(
   }
 
   // Notify ProfileSyncService that we are done with configuration.
-  service_->set_setup_in_progress(false);
+  service_->SetSetupInProgress(false);
 
   // Indicate to the browser that sync setup is complete.
   service()->SetSyncSetupCompleted();
@@ -262,7 +263,8 @@ void ProfileSyncServiceHarness::SignalStateCompleteWithNextState(
 }
 
 void ProfileSyncServiceHarness::SignalStateComplete() {
-  MessageLoop::current()->Quit();
+  if (waiting_for_status_change_)
+    MessageLoop::current()->Quit();
 }
 
 bool ProfileSyncServiceHarness::RunStateChangeMachine() {
@@ -398,7 +400,7 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
       DVLOG(1) << GetClientInfoString("WAITING_FOR_ACTIONABLE_ERROR");
       ProfileSyncService::Status status = GetStatus();
       if (status.sync_protocol_error.action != browser_sync::UNKNOWN_ACTION &&
-          service_->unrecoverable_error_detected() == true) {
+          service_->HasUnrecoverableError() == true) {
         // An actionable error has been detected.
         SignalStateCompleteWithNextState(WAITING_FOR_NOTHING);
       }
@@ -601,7 +603,7 @@ bool ProfileSyncServiceHarness::AwaitActionableError() {
       "Waiting for actionable error");
   status = GetStatus();
   return (status.sync_protocol_error.action != browser_sync::UNKNOWN_ACTION &&
-          service_->unrecoverable_error_detected());
+          service_->HasUnrecoverableError());
 }
 
 bool ProfileSyncServiceHarness::AwaitMigration(
@@ -730,6 +732,9 @@ bool ProfileSyncServiceHarness::AwaitStatusChangeWithTimeout(
   scoped_refptr<StateChangeTimeoutEvent> timeout_signal(
       new StateChangeTimeoutEvent(this, reason));
   {
+    // Set the flag to tell SignalStateComplete() that it's OK to quit out of
+    // the MessageLoop if we hit a state transition.
+    waiting_for_status_change_ = true;
     MessageLoop* loop = MessageLoop::current();
     MessageLoop::ScopedNestableTaskAllower allow(loop);
     loop->PostDelayedTask(
@@ -738,6 +743,7 @@ bool ProfileSyncServiceHarness::AwaitStatusChangeWithTimeout(
                    timeout_signal.get()),
         base::TimeDelta::FromMilliseconds(timeout_milliseconds));
     loop->Run();
+    waiting_for_status_change_ = false;
   }
 
   if (timeout_signal->Abort()) {
@@ -786,10 +792,12 @@ bool ProfileSyncServiceHarness::IsFullySynced() {
     return false;
   }
   const SyncSessionSnapshot& snap = GetLastSessionSnapshot();
-  // snap.unsynced_count() == 0 is a fairly reliable indicator of whether or not
-  // our timestamp is in sync with the server.
-  bool is_fully_synced = IsDataSyncedImpl(snap) &&
-      snap.unsynced_count() == 0;
+  // If we didn't try to commit anything in the previous cycle, there's a
+  // good chance that we're now fully up to date.
+  bool is_fully_synced =
+      snap.syncer_status().num_successful_commits == 0
+      && snap.errors().commit_result == browser_sync::SYNCER_OK
+      && IsDataSyncedImpl(snap);
 
   DVLOG(1) << GetClientInfoString(
       is_fully_synced ? "IsFullySynced: true" : "IsFullySynced: false");
@@ -991,9 +999,10 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
     os << "has_more_to_sync: "
        << snap.has_more_to_sync()
        << ", has_unsynced_items: "
-       << service()->HasUnsyncedItems()
-       << ", unsynced_count: "
-       << snap.unsynced_count()
+       << (service()->sync_initialized() ? service()->HasUnsyncedItems() : 0)
+       << ", did_commit: "
+       << (snap.syncer_status().num_successful_commits == 0
+           && snap.errors().commit_result == browser_sync::SYNCER_OK)
        << ", encryption conflicts: "
        << snap.num_encryption_conflicts()
        << ", hierarchy conflicts: "

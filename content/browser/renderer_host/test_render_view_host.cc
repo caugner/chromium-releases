@@ -16,6 +16,7 @@
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 
+using content::NativeWebKeyboardEvent;
 using webkit::forms::PasswordForm;
 
 namespace content {
@@ -68,6 +69,10 @@ bool TestRenderWidgetHostView::HasFocus() const {
   return true;
 }
 
+bool TestRenderWidgetHostView::IsSurfaceAvailableForCopy() const {
+  return true;
+}
+
 void TestRenderWidgetHostView::Show() {
   is_showing_ = true;
 }
@@ -94,13 +99,7 @@ BackingStore* TestRenderWidgetHostView::AllocBackingStore(
   return new TestBackingStore(rwh_, size);
 }
 
-bool TestRenderWidgetHostView::CopyFromCompositingSurface(
-    const gfx::Size& size,
-    skia::PlatformCanvas* output) {
-  return false;
-}
-
-void TestRenderWidgetHostView::AsyncCopyFromCompositingSurface(
+void TestRenderWidgetHostView::CopyFromCompositingSurface(
     const gfx::Size& size,
     skia::PlatformCanvas* output,
     base::Callback<void(bool)> callback) {
@@ -130,8 +129,7 @@ bool TestRenderWidgetHostView::HasAcceleratedSurface(
 
 #if defined(OS_MACOSX)
 
-gfx::Rect TestRenderWidgetHostView::GetViewCocoaBounds() const {
-  return gfx::Rect();
+void TestRenderWidgetHostView::AboutToWaitForBackingStoreMsg() {
 }
 
 void TestRenderWidgetHostView::SetActive(bool active) {
@@ -208,12 +206,15 @@ bool TestRenderWidgetHostView::LockMouse() {
 void TestRenderWidgetHostView::UnlockMouse() {
 }
 
-TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
-                                       RenderViewHostDelegate* delegate,
-                                       int routing_id,
-                                       bool swapped_out)
+TestRenderViewHost::TestRenderViewHost(
+    SiteInstance* instance,
+    RenderViewHostDelegate* delegate,
+    RenderWidgetHostDelegate* widget_delegate,
+    int routing_id,
+    bool swapped_out)
     : RenderViewHostImpl(instance,
                          delegate,
+                         widget_delegate,
                          routing_id,
                          swapped_out,
                          dom_storage::kInvalidSessionStorageNamespaceId),
@@ -236,9 +237,12 @@ TestRenderViewHost::~TestRenderViewHost() {
   delete GetView();
 }
 
-bool TestRenderViewHost::CreateRenderView(const string16& frame_name,
-                                          int opener_route_id,
-                                          int32 max_page_id) {
+bool TestRenderViewHost::CreateRenderView(
+    const string16& frame_name,
+    int opener_route_id,
+    int32 max_page_id,
+    const std::string& embedder_channel_name,
+    int embedder_container_id) {
   DCHECK(!render_view_created_);
   render_view_created_ = true;
   return true;

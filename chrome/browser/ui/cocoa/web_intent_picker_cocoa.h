@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/intents/web_intent_picker_model_observer.h"
 
 class ConstrainedWindow;
-class TabContentsWrapper;
+class TabContents;
 @class WebIntentPickerSheetController;
 class WebIntentInlineDispositionDelegate;
 
@@ -24,14 +24,16 @@ class WebIntentInlineDispositionDelegate;
 class WebIntentPickerCocoa : public WebIntentPicker,
                              public WebIntentPickerModelObserver {
  public:
-  // |wrapper|, and |delegate| must not be NULL.
+  // |tab_contents| and |delegate| must not be NULL.
   // |browser| should only be NULL for testing purposes.
-  WebIntentPickerCocoa(TabContentsWrapper* wrapper,
+  WebIntentPickerCocoa(TabContents* tab_contents,
                        WebIntentPickerDelegate* delegate,
                        WebIntentPickerModel* model);
   virtual ~WebIntentPickerCocoa();
 
   void OnSheetDidEnd(NSWindow* sheet);
+
+  WebIntentPickerModel* model() { return model_; }
 
   // WebIntentPickerDelegate forwarding API.
   void OnCancelled();
@@ -45,6 +47,7 @@ class WebIntentPickerCocoa : public WebIntentPicker,
   virtual void SetActionString(const string16& action) OVERRIDE;
   virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
   virtual void OnExtensionInstallFailure(const std::string& id) OVERRIDE;
+  virtual void OnInlineDispositionAutoResize(const gfx::Size& size) OVERRIDE;
 
   // WebIntentPickerModelObserver implementation.
   virtual void OnModelChanged(WebIntentPickerModel* model) OVERRIDE;
@@ -64,13 +67,13 @@ class WebIntentPickerCocoa : public WebIntentPicker,
   // The picker model. Weak reference.
   WebIntentPickerModel* model_;
 
-  // Wrapper around the WebContents we're in. Weak Reference.
-  TabContentsWrapper* wrapper_;
+  // TabContents we're in. Weak Reference.
+  TabContents* tab_contents_;
 
   WebIntentPickerSheetController* sheet_controller_;  // Weak reference.
 
-  // Tab contents wrapper to hold intent page if inline disposition is used.
-  scoped_ptr<TabContentsWrapper> inline_disposition_tab_contents_;
+  // TabContents to hold intent page if inline disposition is used.
+  scoped_ptr<TabContents> inline_disposition_tab_contents_;
 
   // Delegate for inline disposition tab contents.
   scoped_ptr<WebIntentInlineDispositionDelegate> inline_disposition_delegate_;

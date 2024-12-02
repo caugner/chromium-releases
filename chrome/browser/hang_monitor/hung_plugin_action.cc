@@ -8,7 +8,7 @@
 
 #include "base/metrics/histogram.h"
 #include "base/version.h"
-#include "chrome/browser/simple_message_box.h"
+#include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/logging_chrome.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -113,7 +113,9 @@ bool HungPluginAction::OnHungWindowDetected(HWND hung_window,
                           HungWindowResponseCallback,
                           reinterpret_cast<ULONG_PTR>(this));
       current_hung_plugin_window_ = hung_window;
-      if (browser::ShowQuestionMessageBox(NULL, title, message)) {
+      if (browser::ShowMessageBox(NULL, title, message,
+          browser::MESSAGE_BOX_TYPE_QUESTION) ==
+          browser::MESSAGE_BOX_RESULT_YES) {
         *action = HungWindowNotification::HUNG_WINDOW_TERMINATE_PROCESS;
       } else {
         // If the user choses to ignore the hung window warning, the

@@ -18,7 +18,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 
 using content::BrowserThread;
@@ -136,7 +136,7 @@ class HistoryBrowserTest : public InProcessBrowserTest {
   void LoadAndWaitForURL(const GURL& url) {
     string16 expected_title(ASCIIToUTF16("OK"));
     ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetSelectedWebContents(), expected_title);
+        browser()->GetActiveWebContents(), expected_title);
     title_watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
     ui_test_utils::NavigateToURL(browser(), url);
     EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
@@ -157,7 +157,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryEnabled) {
   EXPECT_TRUE(GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS));
   EXPECT_TRUE(GetProfile()->GetHistoryService(Profile::IMPLICIT_ACCESS));
 
-  ui_test_utils::WaitForHistoryToLoad(browser());
+  ui_test_utils::WaitForHistoryToLoad(
+      browser()->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS));
   ExpectEmptyHistory();
 
   ui_test_utils::NavigateToURL(browser(), GetTestUrl());
@@ -177,7 +178,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryDisabled) {
   EXPECT_TRUE(GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS));
   EXPECT_FALSE(GetProfile()->GetHistoryService(Profile::IMPLICIT_ACCESS));
 
-  ui_test_utils::WaitForHistoryToLoad(browser());
+  ui_test_utils::WaitForHistoryToLoad(
+      browser()->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS));
   ExpectEmptyHistory();
 
   ui_test_utils::NavigateToURL(browser(), GetTestUrl());
@@ -190,7 +192,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryDisabled) {
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryEnabledThenDisabled) {
   EXPECT_FALSE(GetPrefs()->GetBoolean(prefs::kSavingBrowserHistoryDisabled));
 
-  ui_test_utils::WaitForHistoryToLoad(browser());
+  ui_test_utils::WaitForHistoryToLoad(
+      browser()->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS));
 
   ui_test_utils::NavigateToURL(browser(), GetTestUrl());
   WaitForHistoryBackendToRun();
@@ -219,7 +222,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryEnabledThenDisabled) {
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryDisabledThenEnabled) {
   GetPrefs()->SetBoolean(prefs::kSavingBrowserHistoryDisabled, true);
 
-  ui_test_utils::WaitForHistoryToLoad(browser());
+  ui_test_utils::WaitForHistoryToLoad(
+      browser()->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS));
   ExpectEmptyHistory();
 
   ui_test_utils::NavigateToURL(browser(), GetTestUrl());
@@ -271,7 +275,7 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest,
   // Therefore, Page 11 should be in the history in addition to Page 12.
   LoadAndWaitForFile("history_length_test_page_11.html");
 
-  ui_test_utils::SimulateMouseClick(browser()->GetSelectedWebContents());
+  ui_test_utils::SimulateMouseClick(browser()->GetActiveWebContents());
   LoadAndWaitForFile("history_length_test_page_11.html");
 }
 
@@ -296,9 +300,9 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, HistorySearchXSS) {
   // so that we're not susceptible (less susceptible?) to a race condition.
   // Should a race condition ever trigger, it won't result in flakiness.
   int num = ui_test_utils::FindInPage(
-      browser()->GetSelectedTabContentsWrapper(), ASCIIToUTF16("<img"), true,
+      browser()->GetActiveTabContents(), ASCIIToUTF16("<img"), true,
       true, NULL);
   EXPECT_GT(num, 0);
   EXPECT_EQ(ASCIIToUTF16("History"),
-            browser()->GetSelectedWebContents()->GetTitle());
+            browser()->GetActiveWebContents()->GetTitle());
 }

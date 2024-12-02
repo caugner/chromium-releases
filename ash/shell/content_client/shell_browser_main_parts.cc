@@ -14,23 +14,27 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/public/common/content_switches.h"
-#include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
-#include "content/shell/shell_devtools_delegate.h"
-#include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_module.h"
 #include "ui/aura/client/stacking_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/base/clipboard/clipboard.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/test/compositor_test_support.h"
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/test/test_views_delegate.h"
+
+#if defined(OS_LINUX)
+#include "ui/base/touch/touch_factory.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/dbus/dbus_thread_manager.h"
+#endif
 
 namespace ash {
 namespace shell {
@@ -60,8 +64,7 @@ class ShellViewsDelegate : public views::TestViewsDelegate {
 
 ShellBrowserMainParts::ShellBrowserMainParts(
     const content::MainFunctionParams& parameters)
-    : BrowserMainParts(),
-      devtools_delegate_(NULL) {
+    : BrowserMainParts() {
 }
 
 ShellBrowserMainParts::~ShellBrowserMainParts() {
@@ -69,11 +72,16 @@ ShellBrowserMainParts::~ShellBrowserMainParts() {
 
 #if !defined(OS_MACOSX)
 void ShellBrowserMainParts::PreMainMessageLoopStart() {
+#if defined(OS_LINUX)
+  ui::TouchFactory::SetTouchDeviceListFromCommandLine();
+#endif
 }
 #endif
 
-int ShellBrowserMainParts::PreCreateThreads() {
-  return 0;
+void ShellBrowserMainParts::PostMainMessageLoopStart() {
+#if defined(OS_CHROMEOS)
+  chromeos::DBusThreadManager::Initialize();
+#endif
 }
 
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
@@ -92,12 +100,10 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
 
   ash::shell::InitWindowTypeLauncher();
 
-  ash::Shell::GetRootWindow()->ShowRootWindow();
+  ash::Shell::GetPrimaryRootWindow()->ShowRootWindow();
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopRun() {
-  if (devtools_delegate_)
-    devtools_delegate_->Stop();
   browser_context_.reset();
 
   window_watcher_.reset();
@@ -108,12 +114,6 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
 bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code) {
   MessageLoopForUI::current()->Run();
   return true;
-}
-
-ui::Clipboard* ShellBrowserMainParts::GetClipboard() {
-  if (!clipboard_.get())
-    clipboard_.reset(new ui::Clipboard());
-  return clipboard_.get();
 }
 
 }  // namespace shell

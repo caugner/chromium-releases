@@ -23,19 +23,20 @@
 #include "base/test/values_test_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "sync/engine/model_safe_worker.h"
 #include "sync/engine/nigori_util.h"
-#include "sync/engine/polling_constants.h"
-#include "sync/internal_api/change_record.h"
-#include "sync/internal_api/http_post_provider_factory.h"
-#include "sync/internal_api/http_post_provider_interface.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
-#include "sync/internal_api/sync_manager.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/internal_api/public/engine/polling_constants.h"
+#include "sync/internal_api/public/http_post_provider_factory.h"
+#include "sync/internal_api/public/http_post_provider_interface.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/sync_manager.h"
+#include "sync/internal_api/public/syncable/model_type_test_util.h"
+#include "sync/internal_api/public/test/test_user_share.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/internal_api/syncapi_internal.h"
-#include "sync/internal_api/test_user_share.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
 #include "sync/js/js_arg_list.h"
 #include "sync/js/js_backend.h"
 #include "sync/js/js_event_handler.h"
@@ -51,7 +52,6 @@
 #include "sync/protocol/proto_value_conversions.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/sessions/sync_session.h"
-#include "sync/syncable/model_type_test_util.h"
 #include "sync/syncable/syncable.h"
 #include "sync/syncable/syncable_id.h"
 #include "sync/test/fake_encryptor.h"
@@ -79,7 +79,6 @@ using browser_sync::MockJsEventHandler;
 using browser_sync::MockJsReplyHandler;
 using browser_sync::ModelSafeRoutingInfo;
 using browser_sync::ModelSafeWorker;
-using browser_sync::ModelSafeWorkerRegistrar;
 using browser_sync::sessions::SyncSessionSnapshot;
 using browser_sync::TestUnrecoverableErrorHandler;
 using browser_sync::WeakHandle;
@@ -131,7 +130,9 @@ int64 MakeNode(UserShare* share,
   ReadNode root_node(&trans);
   root_node.InitByRootLookup();
   WriteNode node(&trans);
-  EXPECT_TRUE(node.InitUniqueByCreation(model_type, root_node, client_tag));
+  sync_api::WriteNode::InitUniqueByCreationResult result =
+      node.InitUniqueByCreation(model_type, root_node, client_tag);
+  EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
   node.SetIsFolder(false);
   return node.GetId();
 }
@@ -146,7 +147,9 @@ int64 MakeNodeWithParent(UserShare* share,
   ReadNode parent_node(&trans);
   EXPECT_EQ(BaseNode::INIT_OK, parent_node.InitByIdLookup(parent_id));
   WriteNode node(&trans);
-  EXPECT_TRUE(node.InitUniqueByCreation(model_type, parent_node, client_tag));
+  sync_api::WriteNode::InitUniqueByCreationResult result =
+      node.InitUniqueByCreation(model_type, parent_node, client_tag);
+  EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
   node.SetIsFolder(false);
   return node.GetId();
 }
@@ -375,8 +378,9 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
     folder_id = folder_node.GetId();
 
     WriteNode wnode(&trans);
-    EXPECT_TRUE(wnode.InitUniqueByCreation(syncable::BOOKMARKS,
-        root_node, "testtag"));
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        wnode.InitUniqueByCreation(syncable::BOOKMARKS, root_node, "testtag");
+    EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
     wnode.SetIsFolder(false);
     wnode.SetTitle(UTF8ToWide(test_title));
 
@@ -416,8 +420,9 @@ TEST_F(SyncApiTest, TestDeleteBehavior) {
 
     WriteNode wnode(&trans);
     // This will undelete the tag.
-    EXPECT_TRUE(wnode.InitUniqueByCreation(syncable::BOOKMARKS,
-        folder_node, "testtag"));
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        wnode.InitUniqueByCreation(syncable::BOOKMARKS, folder_node, "testtag");
+    EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
     EXPECT_EQ(wnode.GetIsFolder(), false);
     EXPECT_EQ(wnode.GetParentId(), folder_node.GetId());
     EXPECT_EQ(wnode.GetId(), node_id);
@@ -449,8 +454,10 @@ TEST_F(SyncApiTest, WriteAndReadPassword) {
     root_node.InitByRootLookup();
 
     WriteNode password_node(&trans);
-    EXPECT_TRUE(password_node.InitUniqueByCreation(syncable::PASSWORDS,
-                                                   root_node, "foo"));
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        password_node.InitUniqueByCreation(syncable::PASSWORDS,
+                                           root_node, "foo");
+    EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
     sync_pb::PasswordSpecificsData data;
     data.set_password_value("secret");
     password_node.SetPasswordSpecifics(data);
@@ -483,13 +490,16 @@ TEST_F(SyncApiTest, WriteEncryptedTitle) {
     root_node.InitByRootLookup();
 
     WriteNode bookmark_node(&trans);
-    EXPECT_TRUE(bookmark_node.InitUniqueByCreation(syncable::BOOKMARKS,
-                                                   root_node, "foo"));
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        bookmark_node.InitUniqueByCreation(syncable::BOOKMARKS,
+                                           root_node, "foo");
+    EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
     bookmark_node.SetTitle(UTF8ToWide("foo"));
 
     WriteNode pref_node(&trans);
-    EXPECT_TRUE(pref_node.InitUniqueByCreation(syncable::PREFERENCES,
-                                               root_node, "bar"));
+    result =
+        pref_node.InitUniqueByCreation(syncable::PREFERENCES, root_node, "bar");
+    EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
     pref_node.SetTitle(UTF8ToWide("bar"));
   }
   {
@@ -627,8 +637,9 @@ TEST_F(SyncApiTest, EmptyTags) {
   root_node.InitByRootLookup();
   WriteNode node(&trans);
   std::string empty_tag;
-  EXPECT_FALSE(node.InitUniqueByCreation(
-      syncable::TYPED_URLS, root_node, empty_tag));
+  sync_api::WriteNode::InitUniqueByCreationResult result =
+      node.InitUniqueByCreation(syncable::TYPED_URLS, root_node, empty_tag);
+  EXPECT_NE(sync_api::WriteNode::INIT_SUCCESS, result);
   EXPECT_EQ(BaseNode::INIT_FAILED_PRECONDITION,
             node.InitByTagLookup(empty_tag));
 }
@@ -669,7 +680,7 @@ class TestHttpPostProviderFactory : public HttpPostProviderFactory {
     return new TestHttpPostProviderInterface();
   }
   virtual void Destroy(HttpPostProviderInterface* http) OVERRIDE {
-    delete http;
+    delete static_cast<TestHttpPostProviderInterface*>(http);
   }
 };
 
@@ -701,7 +712,7 @@ class SyncNotifierMock : public sync_notifier::SyncNotifier {
   MOCK_METHOD1(AddObserver, void(sync_notifier::SyncNotifierObserver*));
   MOCK_METHOD1(RemoveObserver, void(sync_notifier::SyncNotifierObserver*));
   MOCK_METHOD1(SetUniqueId, void(const std::string&));
-  MOCK_METHOD1(SetState, void(const std::string&));
+  MOCK_METHOD1(SetStateDeprecated, void(const std::string&));
   MOCK_METHOD2(UpdateCredentials,
                void(const std::string&, const std::string&));
   MOCK_METHOD1(UpdateEnabledTypes,
@@ -712,7 +723,6 @@ class SyncNotifierMock : public sync_notifier::SyncNotifier {
 }  // namespace
 
 class SyncManagerTest : public testing::Test,
-                        public ModelSafeWorkerRegistrar,
                         public SyncManager::ChangeDelegate {
  protected:
   enum NigoriStatus {
@@ -748,13 +758,12 @@ class SyncManagerTest : public testing::Test,
     EXPECT_CALL(*sync_notifier_mock_, AddObserver(_)).
         WillOnce(Invoke(this, &SyncManagerTest::SyncNotifierAddObserver));
     EXPECT_CALL(*sync_notifier_mock_, SetUniqueId(_));
-    EXPECT_CALL(*sync_notifier_mock_, SetState(""));
+    EXPECT_CALL(*sync_notifier_mock_, SetStateDeprecated(""));
     EXPECT_CALL(*sync_notifier_mock_,
                 UpdateCredentials(credentials.email, credentials.sync_token));
     EXPECT_CALL(*sync_notifier_mock_, UpdateEnabledTypes(_)).
-        Times(AtLeast(1)).
-        WillRepeatedly(
-            Invoke(this, &SyncManagerTest::SyncNotifierUpdateEnabledTypes));
+            WillRepeatedly(
+                Invoke(this, &SyncManagerTest::SyncNotifierUpdateEnabledTypes));
     EXPECT_CALL(*sync_notifier_mock_, RemoveObserver(_)).
         WillOnce(Invoke(this, &SyncManagerTest::SyncNotifierRemoveObserver));
 
@@ -765,15 +774,18 @@ class SyncManagerTest : public testing::Test,
     EXPECT_FALSE(sync_notifier_observer_);
     EXPECT_FALSE(js_backend_.IsInitialized());
 
+    std::vector<ModelSafeWorker*> workers;
+    ModelSafeRoutingInfo routing_info;
+    GetModelSafeRoutingInfo(&routing_info);
+
     // Takes ownership of |sync_notifier_mock_|.
     sync_manager_.Init(temp_dir_.path(),
                        WeakHandle<JsEventHandler>(),
                        "bogus", 0, false,
                        base::MessageLoopProxy::current(),
-                       new TestHttpPostProviderFactory(), this,
+                       new TestHttpPostProviderFactory(), routing_info, workers,
                        &extensions_activity_monitor_, this, "bogus",
                        credentials,
-                       false /* enable_sync_tabs_for_other_clients */,
                        sync_notifier_mock_, "",
                        sync_api::SyncManager::TEST_IN_MEMORY,
                        &encryptor_,
@@ -783,12 +795,10 @@ class SyncManagerTest : public testing::Test,
     EXPECT_TRUE(sync_notifier_observer_);
     EXPECT_TRUE(js_backend_.IsInitialized());
 
-    EXPECT_EQ(1, update_enabled_types_call_count_);
+    EXPECT_EQ(0, update_enabled_types_call_count_);
 
-    ModelSafeRoutingInfo routes;
-    GetModelSafeRoutingInfo(&routes);
-    for (ModelSafeRoutingInfo::iterator i = routes.begin(); i != routes.end();
-         ++i) {
+    for (ModelSafeRoutingInfo::iterator i = routing_info.begin();
+         i != routing_info.end(); ++i) {
       type_roots_[i->first] = MakeServerNodeForType(
           sync_manager_.GetUserShare(), i->first);
     }
@@ -803,12 +813,7 @@ class SyncManagerTest : public testing::Test,
     PumpLoop();
   }
 
-  // ModelSafeWorkerRegistrar implementation.
-  virtual void GetWorkers(std::vector<ModelSafeWorker*>* out) OVERRIDE {
-    NOTIMPLEMENTED();
-    out->clear();
-  }
-  virtual void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) OVERRIDE {
+  void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
     (*out)[syncable::NIGORI] = browser_sync::GROUP_PASSIVE;
     (*out)[syncable::BOOKMARKS] = browser_sync::GROUP_PASSIVE;
     (*out)[syncable::THEMES] = browser_sync::GROUP_PASSIVE;
@@ -942,32 +947,15 @@ class SyncManagerTest : public testing::Test,
 };
 
 TEST_F(SyncManagerTest, UpdateEnabledTypes) {
+  EXPECT_EQ(0, update_enabled_types_call_count_);
+
+  ModelSafeRoutingInfo routes;
+  GetModelSafeRoutingInfo(&routes);
+  const syncable::ModelTypeSet enabled_types =
+        GetRoutingInfoTypes(routes);
+
+  sync_manager_.UpdateEnabledTypes(enabled_types);
   EXPECT_EQ(1, update_enabled_types_call_count_);
-  // Triggers SyncNotifierUpdateEnabledTypes.
-  sync_manager_.UpdateEnabledTypes();
-  EXPECT_EQ(2, update_enabled_types_call_count_);
-}
-
-TEST_F(SyncManagerTest, DoNotSyncTabsInNigoriNode) {
-  const syncable::ModelTypeSet encrypted_types(syncable::TYPED_URLS);
-  sync_manager_.MaybeSetSyncTabsInNigoriNode(encrypted_types);
-
-  ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
-  ReadNode node(&trans);
-  ASSERT_EQ(BaseNode::INIT_OK,
-            node.InitByIdLookup(GetIdForDataType(syncable::NIGORI)));
-  EXPECT_FALSE(node.GetNigoriSpecifics().sync_tabs());
-}
-
-TEST_F(SyncManagerTest, SyncTabsInNigoriNode) {
-  const syncable::ModelTypeSet encrypted_types(syncable::SESSIONS);
-  sync_manager_.MaybeSetSyncTabsInNigoriNode(encrypted_types);
-
-  ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
-  ReadNode node(&trans);
-  ASSERT_EQ(BaseNode::INIT_OK,
-            node.InitByIdLookup(GetIdForDataType(syncable::NIGORI)));
-  EXPECT_TRUE(node.GetNigoriSpecifics().sync_tabs());
 }
 
 TEST_F(SyncManagerTest, ProcessJsMessage) {
@@ -1276,16 +1264,19 @@ TEST_F(SyncManagerTest, OnNotificationStateChange) {
               HandleJsEvent("onNotificationStateChange",
                             HasDetailsAsDictionary(false_details)));
 
-  sync_manager_.TriggerOnNotificationStateChangeForTest(true);
-  sync_manager_.TriggerOnNotificationStateChangeForTest(false);
+  sync_manager_.SimulateEnableNotificationsForTest();
+  sync_manager_.SimulateDisableNotificationsForTest(
+      sync_notifier::TRANSIENT_NOTIFICATION_ERROR);
 
   SetJsEventHandler(event_handler.AsWeakHandle());
-  sync_manager_.TriggerOnNotificationStateChangeForTest(true);
-  sync_manager_.TriggerOnNotificationStateChangeForTest(false);
+  sync_manager_.SimulateEnableNotificationsForTest();
+  sync_manager_.SimulateDisableNotificationsForTest(
+      sync_notifier::TRANSIENT_NOTIFICATION_ERROR);
   SetJsEventHandler(WeakHandle<JsEventHandler>());
 
-  sync_manager_.TriggerOnNotificationStateChangeForTest(true);
-  sync_manager_.TriggerOnNotificationStateChangeForTest(false);
+  sync_manager_.SimulateEnableNotificationsForTest();
+  sync_manager_.SimulateDisableNotificationsForTest(
+      sync_notifier::TRANSIENT_NOTIFICATION_ERROR);
 
   // Should trigger the replies.
   PumpLoop();
@@ -1586,8 +1577,10 @@ TEST_F(SyncManagerTest, SetPassphraseWithPassword) {
     root_node.InitByRootLookup();
 
     WriteNode password_node(&trans);
-    EXPECT_TRUE(password_node.InitUniqueByCreation(syncable::PASSWORDS,
-                                                   root_node, "foo"));
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        password_node.InitUniqueByCreation(syncable::PASSWORDS,
+                                           root_node, "foo");
+    EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
     sync_pb::PasswordSpecificsData data;
     data.set_password_value("secret");
     password_node.SetPasswordSpecifics(data);
@@ -1818,8 +1811,9 @@ TEST_F(SyncManagerTest, SetPassphraseWithEmptyPasswordNode) {
     root_node.InitByRootLookup();
 
     WriteNode password_node(&trans);
-    EXPECT_TRUE(password_node.InitUniqueByCreation(syncable::PASSWORDS,
-                                                   root_node, tag));
+    sync_api::WriteNode::InitUniqueByCreationResult result =
+        password_node.InitUniqueByCreation(syncable::PASSWORDS, root_node, tag);
+    EXPECT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
     node_id = password_node.GetId();
   }
   EXPECT_CALL(observer_, OnBootstrapTokenUpdated(_));

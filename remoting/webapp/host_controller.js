@@ -24,7 +24,11 @@ remoting.HostController = function() {
       console.log('Host version:', version);
     }
   };
-  this.plugin_.getDaemonVersion(printVersion);
+  try {
+    this.plugin_.getDaemonVersion(printVersion);
+  } catch (err) {
+    console.log('Host version not available.');
+  }
 };
 
 // Note that the values in the enums below are copied from
@@ -68,21 +72,14 @@ remoting.HostController.prototype.state = function() {
 remoting.HostController.prototype.updateDom = function() {
   var match = '';
   var state = this.state();
-  switch (state) {
-    case remoting.HostController.State.STARTED:
-      remoting.updateModalUi('enabled', 'data-daemon-state');
-      break;
-    case remoting.HostController.State.NOT_IMPLEMENTED:
-      document.getElementById('start-daemon').disabled = true;
-      document.getElementById('start-daemon-message').innerText =
-          chrome.i18n.getMessage(
-              /*i18n-content*/'HOME_DAEMON_DISABLED_MESSAGE');
-      // No break;
-    case remoting.HostController.State.STOPPED:
-    case remoting.HostController.State.NOT_INSTALLED:
-      remoting.updateModalUi('disabled', 'data-daemon-state');
-      break;
-  }
+  var enabled = (state == remoting.HostController.State.STARTED);
+  var supported = (state != remoting.HostController.State.NOT_IMPLEMENTED);
+  remoting.updateModalUi(enabled ? 'enabled' : 'disabled', 'data-daemon-state');
+  document.getElementById('daemon-control').hidden = !supported;
+  var element = document.getElementById('host-list-empty-hosting-supported');
+  element.hidden = !supported;
+  element = document.getElementById('host-list-empty-hosting-unsupported');
+  element.hidden = supported;
 };
 
 /**
@@ -112,7 +109,7 @@ remoting.HostController.prototype.setTooltips = function() {
 remoting.HostController.prototype.start = function(hostPin, callback) {
   /** @type {remoting.HostController} */
   var that = this;
-  var hostName = that.plugin_.getHostName();
+  var hostName = this.plugin_.getHostName();
 
   /** @return {string} */
   function generateUuid() {
@@ -238,8 +235,10 @@ remoting.HostController.prototype.stop = function(callback) {
 
   /** @param {remoting.HostController.AsyncResult} result */
   function onStopped(result) {
-    if (that.localHost && that.localHost.hostId)
+    if (result == remoting.HostController.AsyncResult.OK &&
+        that.localHost && that.localHost.hostId) {
       remoting.HostList.unregisterHostById(that.localHost.hostId);
+    }
     callback(result);
   };
   this.plugin_.stopDaemon(onStopped);

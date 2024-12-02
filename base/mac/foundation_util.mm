@@ -13,6 +13,11 @@
 #include "base/mac/mac_logging.h"
 #include "base/sys_string_conversions.h"
 
+extern "C" {
+CFTypeID SecACLGetTypeID();
+CFTypeID SecTrustedApplicationGetTypeID();
+}  // extern "C"
+
 namespace base {
 namespace mac {
 
@@ -289,7 +294,7 @@ CFCast<TypeCF##Ref>(const CFTypeRef& cf_val) { \
     return NULL; \
   } \
   if (CFGetTypeID(cf_val) == TypeCF##GetTypeID()) { \
-    return reinterpret_cast<TypeCF##Ref>(cf_val); \
+    return (TypeCF##Ref)(cf_val); \
   } \
   return NULL; \
 } \
@@ -311,6 +316,9 @@ CF_CAST_DEFN(CFNull);
 CF_CAST_DEFN(CFNumber);
 CF_CAST_DEFN(CFSet);
 CF_CAST_DEFN(CFString);
+
+CF_CAST_DEFN(SecACL);
+CF_CAST_DEFN(SecTrustedApplication);
 
 #undef CF_CAST_DEFN
 

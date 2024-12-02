@@ -5,9 +5,9 @@
 #include "chrome/browser/extensions/settings/settings_namespace.h"
 #include "chrome/browser/extensions/settings/settings_sync_processor.h"
 #include "chrome/browser/extensions/settings/settings_sync_util.h"
-#include "chrome/browser/sync/api/sync_data.h"
-#include "chrome/browser/sync/api/sync_change_processor.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/api/sync_change_processor.h"
+#include "sync/api/sync_data.h"
 #include "sync/protocol/extension_setting_specifics.pb.h"
 
 using content::BrowserThread;
@@ -42,7 +42,8 @@ void SettingsSyncProcessor::Init(const DictionaryValue& initial_state) {
   initialized_ = true;
 }
 
-SyncError SettingsSyncProcessor::SendChanges(const SettingChangeList& changes) {
+SyncError SettingsSyncProcessor::SendChanges(
+    const ValueStoreChangeList& changes) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   CHECK(initialized_) << "Init not called";
 
@@ -50,7 +51,7 @@ SyncError SettingsSyncProcessor::SendChanges(const SettingChangeList& changes) {
   std::set<std::string> added_keys;
   std::set<std::string> deleted_keys;
 
-  for (SettingChangeList::const_iterator i = changes.begin();
+  for (ValueStoreChangeList::const_iterator i = changes.begin();
       i != changes.end(); ++i) {
     const std::string& key = i->key();
     const Value* value = i->new_value();
@@ -94,11 +95,11 @@ SyncError SettingsSyncProcessor::SendChanges(const SettingChangeList& changes) {
   return SyncError();
 }
 
-void SettingsSyncProcessor::NotifyChanges(const SettingChangeList& changes) {
+void SettingsSyncProcessor::NotifyChanges(const ValueStoreChangeList& changes) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   CHECK(initialized_) << "Init not called";
 
-  for (SettingChangeList::const_iterator i = changes.begin();
+  for (ValueStoreChangeList::const_iterator i = changes.begin();
       i != changes.end(); ++i) {
     if (i->new_value())
       synced_keys_.insert(i->key());

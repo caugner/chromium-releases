@@ -13,8 +13,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
+#include "net/url_request/url_fetcher_delegate.h"
 
 // Authenticate a user against the Google Accounts ClientLogin API
 // with various capabilities and return results to a GaiaAuthConsumer.
@@ -29,11 +29,12 @@
 class GaiaAuthFetcherTest;
 
 namespace net {
+class URLFetcher;
 class URLRequestContextGetter;
 class URLRequestStatus;
 }
 
-class GaiaAuthFetcher : public content::URLFetcherDelegate {
+class GaiaAuthFetcher : public net::URLFetcherDelegate {
  public:
   enum HostedAccountsSetting {
     HostedAccountsAllowed,
@@ -99,17 +100,8 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
   // called on the consumer on the original thread.
   void StartGetUserInfo(const std::string& lsid);
 
-  // Start a TokenAuth request to exchange the uber-auth token |auth_token|
-  // obtained from a call to StartUberAuthTokenFetch() for ClientLogin style
-  // service tokens, as returned by StartClientLogin().
-  //
-  // Either OnTokenAuthSuccess or OnTokenAuthFailure will be
-  // called on the consumer on the original thread.
-  void StartTokenAuth(const std::string& uber_token);
-
   // Start a MergeSession request to pre-login the user with the given
-  // credentials.  Unlike TokenAuth above, MergeSession will not sign out any
-  // existing accounts.
+  // credentials.
   //
   // Start a MergeSession request to fill the browsing cookie jar with
   // credentials represented by the account whose uber-auth token is
@@ -120,8 +112,8 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
   void StartMergeSession(const std::string& uber_token);
 
   // Start a request to exchange an OAuthLogin-scoped oauth2 access token for an
-  // uber-auth token.  The returned token can be used with the methods
-  // StartTokenAuth() and StartMergeSession().
+  // uber-auth token.  The returned token can be used with the method
+  // StartMergeSession().
   //
   // Either OnUberAuthTokenSuccess or OnUberAuthTokenFailure will be
   // called on the consumer on the original thread.
@@ -169,8 +161,8 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
   void StartOAuthLogin(const std::string& access_token,
                        const std::string& service);
 
-  // Implementation of content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+  // Implementation of net::URLFetcherDelegate
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
   // StartClientLogin been called && results not back yet?
   bool HasPendingFetch();
@@ -203,16 +195,10 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
   static const char kOAuth2CodeToTokenPairBodyFormat[];
   // The format of the POST body for GetUserInfo.
   static const char kGetUserInfoFormat[];
-  // The format of the POST body for TokenAuth.
-  static const char kTokenAuthFormat[];
   // The format of the POST body for MergeSession.
   static const char kMergeSessionFormat[];
   // The format of the URL for UberAuthToken.
   static const char kUberAuthTokenURLFormat[];
-  // The format of the body for ClientOAuth.
-  static const char kClientOAuthFormat[];
-  // The format of the body for ClientOAuth challenge responses.
-  static const char kClientOAuthChallengeResponseFormat[];
   // The format of the body for OAuthLogin.
   static const char kOAuthLoginFormat[];
 
@@ -266,11 +252,6 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
   void OnGetUserInfoFetched(const std::string& data,
                             const net::URLRequestStatus& status,
                             int response_code);
-
-  void OnTokenAuthFetched(const net::ResponseCookies& cookies,
-                          const std::string& data,
-                          const net::URLRequestStatus& status,
-                          int response_code);
 
   void OnMergeSessionFetched(const std::string& data,
                              const net::URLRequestStatus& status,
@@ -338,11 +319,6 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
   static std::string MakeGetUserInfoBody(const std::string& lsid);
 
   // Supply the authentication token returned from StartIssueAuthToken.
-  static std::string MakeTokenAuthBody(const std::string& auth_token,
-                                       const std::string& continue_url,
-                                       const std::string& source);
-
-  // Supply the authentication token returned from StartIssueAuthToken.
   static std::string MakeMergeSessionBody(const std::string& auth_token,
                                        const std::string& continue_url,
                                        const std::string& source);
@@ -370,15 +346,15 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
   // as the body of the POST request sent to GAIA.  Any strings listed in
   // |headers| are added as extra HTTP headers in the request.
   //
-  // |load_flags| are passed to directly to content::URLFetcher::Create() when
+  // |load_flags| are passed to directly to net::URLFetcher::Create() when
   // creating the URL fetcher.
-  static content::URLFetcher* CreateGaiaFetcher(
+  static net::URLFetcher* CreateGaiaFetcher(
       net::URLRequestContextGetter* getter,
       const std::string& body,
       const std::string& headers,
       const GURL& gaia_gurl,
       int load_flags,
-      content::URLFetcherDelegate* delegate);
+      net::URLFetcherDelegate* delegate);
 
   // From a URLFetcher result, generate an appropriate error.
   // From the API documentation, both IssueAuthToken and ClientLogin have
@@ -395,14 +371,13 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
   const GURL issue_auth_token_gurl_;
   const GURL oauth2_token_gurl_;
   const GURL get_user_info_gurl_;
-  const GURL token_auth_gurl_;
   const GURL merge_session_gurl_;
   const GURL uberauth_token_gurl_;
   const GURL client_oauth_gurl_;
   const GURL oauth_login_gurl_;
 
   // While a fetch is going on:
-  scoped_ptr<content::URLFetcher> fetcher_;
+  scoped_ptr<net::URLFetcher> fetcher_;
   GURL client_login_to_oauth2_gurl_;
   std::string request_body_;
   std::string requested_service_; // Currently tracked for IssueAuthToken only.
@@ -422,7 +397,9 @@ class GaiaAuthFetcher : public content::URLFetcherDelegate {
       ParseClientLoginToOAuth2Response);
   FRIEND_TEST_ALL_PREFIXES(GaiaAuthFetcherTest, ParseOAuth2TokenPairResponse);
   FRIEND_TEST_ALL_PREFIXES(GaiaAuthFetcherTest, ClientOAuthSuccess);
+  FRIEND_TEST_ALL_PREFIXES(GaiaAuthFetcherTest, ClientOAuthWithQuote);
   FRIEND_TEST_ALL_PREFIXES(GaiaAuthFetcherTest, ClientOAuthChallengeSuccess);
+  FRIEND_TEST_ALL_PREFIXES(GaiaAuthFetcherTest, ClientOAuthChallengeQuote);
 
   DISALLOW_COPY_AND_ASSIGN(GaiaAuthFetcher);
 };

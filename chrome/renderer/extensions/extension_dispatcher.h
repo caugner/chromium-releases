@@ -14,7 +14,7 @@
 #include "base/timer.h"
 #include "content/public/renderer/render_process_observer.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "chrome/common/extensions/feature.h"
+#include "chrome/common/extensions/features/feature.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_context_set.h"
 #include "chrome/renderer/extensions/v8_schema_registry.h"
@@ -38,6 +38,10 @@ class ListValue;
 
 namespace content {
 class RenderThread;
+}
+
+namespace extension {
+class Extension;
 }
 
 // Dispatches extension control messages sent to the renderer and stores
@@ -122,6 +126,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   virtual void WebKitInitialized() OVERRIDE;
   virtual void IdleNotification() OVERRIDE;
 
+  void OnSetChannel(int channel);
   void OnMessageInvoke(const std::string& extension_id,
                        const std::string& function_name,
                        const base::ListValue& args,
@@ -139,7 +144,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
       const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions);
   void OnUnloaded(const std::string& id);
   void OnSetScriptingWhitelist(
-      const Extension::ScriptingWhitelist& extension_ids);
+      const extensions::Extension::ScriptingWhitelist& extension_ids);
   void OnPageActionsUpdated(const std::string& extension_id,
       const std::vector<std::string>& page_actions);
   void OnActivateExtension(const std::string& extension_id);
@@ -148,6 +153,13 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                            const ExtensionAPIPermissionSet& apis,
                            const URLPatternSet& explicit_hosts,
                            const URLPatternSet& scriptable_hosts);
+  void OnUpdateTabSpecificPermissions(int page_id,
+                                      int tab_id,
+                                      const std::string& extension_id,
+                                      const URLPatternSet& origin_set);
+  void OnClearTabSpecificPermissions(
+      int tab_id,
+      const std::vector<std::string>& extension_ids);
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
   void OnUsingWebRequestAPI(
       bool adblock,
@@ -164,10 +176,11 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   void RegisterExtension(v8::Extension* extension, bool restrict_to_extensions);
 
   // Sets up the host permissions for |extension|.
-  void InitOriginPermissions(const Extension* extension);
-  void UpdateOriginPermissions(UpdatedExtensionPermissionsInfo::Reason reason,
-                               const Extension* extension,
-                               const URLPatternSet& origins);
+  void InitOriginPermissions(const extensions::Extension* extension);
+  void AddOrRemoveOriginPermissions(
+      extensions::UpdatedExtensionPermissionsInfo::Reason reason,
+      const extensions::Extension* extension,
+      const URLPatternSet& origins);
 
   void RegisterNativeHandlers(ModuleSystem* module_system,
                               ChromeV8Context* context);
@@ -236,6 +249,10 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
 
   // Sends API requests to the extension host.
   scoped_ptr<ExtensionRequestSender> request_sender_;
+
+  // The current channel. From VersionInfo::GetChannel().
+  // TODO(aa): Remove when we can restrict non-permission APIs to dev-only.
+  int chrome_channel_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionDispatcher);
 };

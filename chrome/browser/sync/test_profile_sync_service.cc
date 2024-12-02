@@ -11,10 +11,10 @@
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/test/test_http_bridge_factory.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "sync/internal_api/user_share.h"
+#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "sync/internal_api/public/user_share.h"
 #include "sync/js/js_reply_handler.h"
 #include "sync/protocol/encryption.pb.h"
-#include "sync/sessions/session_state.h"
 #include "sync/syncable/syncable.h"
 
 using browser_sync::ModelSafeRoutingInfo;
@@ -31,12 +31,13 @@ namespace browser_sync {
 SyncBackendHostForProfileSyncTest::SyncBackendHostForProfileSyncTest(
     Profile* profile,
     const base::WeakPtr<SyncPrefs>& sync_prefs,
+    const base::WeakPtr<InvalidatorStorage>& invalidator_storage,
     bool set_initial_sync_ended_on_init,
     bool synchronous_init,
     bool fail_initial_download,
     bool use_real_database)
     : browser_sync::SyncBackendHost(
-        profile->GetDebugName(), profile, sync_prefs),
+        profile->GetDebugName(), profile, sync_prefs, invalidator_storage),
       synchronous_init_(synchronous_init),
       fail_initial_download_(fail_initial_download),
       use_real_database_(use_real_database) {}
@@ -52,8 +53,8 @@ void SyncBackendHostForProfileSyncTest::
   syncable::ModelTypePayloadMap download_progress_markers;
   HandleSyncCycleCompletedOnFrontendLoop(SyncSessionSnapshot(
       SyncerStatus(), ErrorCounters(), 0, false,
-      sync_ended, download_progress_markers, false, false, 0, 0, 0, 0, 0,
-      false, SyncSourceInfo(), false, 0, base::Time::Now(), false));
+      sync_ended, download_progress_markers, false, false, 0, 0, 0, 0,
+      SyncSourceInfo(), false, 0, base::Time::Now(), false));
 }
 
 namespace {
@@ -95,8 +96,8 @@ void SyncBackendHostForProfileSyncTest::StartConfiguration(
     syncable::ModelTypePayloadMap download_progress_markers;
     HandleSyncCycleCompletedOnFrontendLoop(SyncSessionSnapshot(
         SyncerStatus(), ErrorCounters(), 0, false,
-        sync_ended, download_progress_markers, false, false, 0, 0, 0, 0, 0,
-        false, SyncSourceInfo(), false, 0, base::Time::Now(), false));
+        sync_ended, download_progress_markers, false, false, 0, 0, 0, 0,
+        SyncSourceInfo(), false, 0, base::Time::Now(), false));
   }
 }
 
@@ -225,6 +226,7 @@ void TestProfileSyncService::CreateBackend() {
   backend_.reset(new browser_sync::SyncBackendHostForProfileSyncTest(
       profile(),
       sync_prefs_.AsWeakPtr(),
+      invalidator_storage_.AsWeakPtr(),
       set_initial_sync_ended_on_init_,
       synchronous_backend_initialization_,
       fail_initial_download_,

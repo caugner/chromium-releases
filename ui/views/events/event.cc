@@ -166,9 +166,20 @@ base::TimeDelta TouchEvent::GetTimestamp() const {
   return base::TimeDelta::FromMilliseconds(time_stamp().ToDoubleT() * 1000);
 }
 
-TouchEvent* TouchEvent::Copy() const {
-  return new TouchEvent(type(), location().x(), location().y(),
-      flags(), touch_id_, radius_x_, radius_y_, rotation_angle_, force_);
+float TouchEvent::RadiusX() const {
+  return radius_x_;
+}
+
+float TouchEvent::RadiusY() const {
+  return radius_y_;
+}
+
+float TouchEvent::RotationAngle() const {
+  return rotation_angle_;
+}
+
+float TouchEvent::Force() const {
+  return force_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -201,8 +212,7 @@ const int MouseWheelEvent::kWheelDelta = 53;
 GestureEvent::GestureEvent(const GestureEvent& model, View* source,
                            View* target)
     : LocatedEvent(model, source, target),
-      delta_x_(model.delta_x_),
-      delta_y_(model.delta_y_) {
+      details_(model.details_) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -210,14 +220,12 @@ GestureEvent::GestureEvent(const GestureEvent& model, View* source,
 
 GestureEvent::GestureEvent(const GestureEvent& model, View* root)
     : LocatedEvent(model, root),
-      delta_x_(model.delta_x_),
-      delta_y_(model.delta_y_) {
+      details_(model.details_) {
 }
 
 GestureEvent::GestureEvent(ui::EventType type, int x, int y, int flags)
     : LocatedEvent(type, gfx::Point(x, y), flags),
-      delta_x_(0),
-      delta_y_(0) {
+      details_(type, 0.f, 0.f) {
 }
 
 GestureEvent::~GestureEvent() {

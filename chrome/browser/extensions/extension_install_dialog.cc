@@ -7,13 +7,12 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/message_loop.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
 
 namespace {
@@ -25,7 +24,7 @@ enum AutoConfirmForTest {
   ABORT
 };
 
-void AutoConfirmTask(ExtensionInstallUI::Delegate* delegate, bool proceed) {
+void AutoConfirmTask(ExtensionInstallPrompt::Delegate* delegate, bool proceed) {
   if (proceed)
     delegate->InstallUIProceed();
   else
@@ -33,7 +32,7 @@ void AutoConfirmTask(ExtensionInstallUI::Delegate* delegate, bool proceed) {
 }
 
 void DoAutoConfirm(AutoConfirmForTest setting,
-                   ExtensionInstallUI::Delegate* delegate) {
+                   ExtensionInstallPrompt::Delegate* delegate) {
   bool proceed = (setting == PROCEED);
   // We use PostTask instead of calling the delegate directly here, because in
   // the real implementations it's highly likely the message loop will be
@@ -60,13 +59,13 @@ AutoConfirmForTest CheckAutoConfirmCommandLineSwitch() {
 
 }  // namespace
 
-void ShowExtensionInstallDialog(Profile* profile,
-                                ExtensionInstallUI::Delegate* delegate,
-                                const ExtensionInstallUI::Prompt& prompt) {
+void ShowExtensionInstallDialog(Browser* browser,
+                                ExtensionInstallPrompt::Delegate* delegate,
+                                const ExtensionInstallPrompt::Prompt& prompt) {
   AutoConfirmForTest auto_confirm = CheckAutoConfirmCommandLineSwitch();
   if (auto_confirm != DO_NOT_SKIP) {
     DoAutoConfirm(auto_confirm, delegate);
     return;
   }
-  ShowExtensionInstallDialogImpl(profile, delegate, prompt);
+  ShowExtensionInstallDialogImpl(browser, delegate, prompt);
 }

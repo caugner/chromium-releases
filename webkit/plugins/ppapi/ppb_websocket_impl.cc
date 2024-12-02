@@ -211,28 +211,35 @@ int32_t PPB_WebSocket_Impl::Close(uint16_t code,
   if (!websocket_.get())
     return PP_ERROR_FAILED;
 
-  // Validate |code|. Need to cast |CloseEventCodeNotSpecified| which is -1 to
-  // uint16_t for the comparison to work.
-  if (code != static_cast<uint16_t>(WebSocket::CloseEventCodeNotSpecified)) {
-    if (!(code == WebSocket::CloseEventCodeNormalClosure ||
-        (WebSocket::CloseEventCodeMinimumUserDefined <= code &&
-        code <= WebSocket::CloseEventCodeMaximumUserDefined)))
-    // RFC 6455 limits applications to use reserved connection close code in
-    // section 7.4.2.. The WebSocket API (http://www.w3.org/TR/websockets/)
-    // defines this out of range error as InvalidAccessError in JavaScript.
-    return PP_ERROR_NOACCESS;
-  }
-
+  // Validate |code| and |reason|.
   scoped_refptr<StringVar> reason_string;
   WebString web_reason;
-  // |reason| must be ignored if it is PP_VARTYPE_UNDEFINED.
-  if (reason.type != PP_VARTYPE_UNDEFINED) {
-    // Validate |reason|.
-    reason_string = StringVar::FromPPVar(reason);
-    if (!reason_string ||
-        reason_string->value().size() > kMaxReasonSizeInBytes)
-      return PP_ERROR_BADARGUMENT;
-    web_reason = WebString::fromUTF8(reason_string->value());
+  WebSocket::CloseEventCode event_code =
+      static_cast<WebSocket::CloseEventCode>(code);
+  if (code == PP_WEBSOCKETSTATUSCODE_NOT_SPECIFIED) {
+    // PP_WEBSOCKETSTATUSCODE_NOT_SPECIFIED and CloseEventCodeNotSpecified are
+    // assigned to different values. A conversion is needed if
+    // PP_WEBSOCKETSTATUSCODE_NOT_SPECIFIED is specified.
+    event_code = WebSocket::CloseEventCodeNotSpecified;
+  } else {
+    if (!(code == PP_WEBSOCKETSTATUSCODE_NORMAL_CLOSURE ||
+        (PP_WEBSOCKETSTATUSCODE_USER_REGISTERED_MIN <= code &&
+        code <= PP_WEBSOCKETSTATUSCODE_USER_PRIVATE_MAX)))
+      // RFC 6455 limits applications to use reserved connection close code in
+      // section 7.4.2.. The WebSocket API (http://www.w3.org/TR/websockets/)
+      // defines this out of range error as InvalidAccessError in JavaScript.
+      return PP_ERROR_NOACCESS;
+
+    // |reason| must be ignored if it is PP_VARTYPE_UNDEFINED or |code| is
+    // PP_WEBSOCKETSTATUSCODE_NOT_SPECIFIED.
+    if (reason.type != PP_VARTYPE_UNDEFINED) {
+      // Validate |reason|.
+      reason_string = StringVar::FromPPVar(reason);
+      if (!reason_string ||
+          reason_string->value().size() > kMaxReasonSizeInBytes)
+        return PP_ERROR_BADARGUMENT;
+      web_reason = WebString::fromUTF8(reason_string->value());
+    }
   }
 
   // Check state.
@@ -271,7 +278,7 @@ int32_t PPB_WebSocket_Impl::Close(uint16_t code,
 
   // Close connection.
   state_ = PP_WEBSOCKETREADYSTATE_CLOSING;
-  websocket_->close(code, web_reason);
+  websocket_->close(event_code, web_reason);
 
   return PP_OK_COMPLETIONPENDING;
 }
@@ -506,16 +513,20 @@ void PPB_WebSocket_Impl::didClose(unsigned long unhandled_buffered_amount,
   PP_WebSocketReadyState state = state_;
   state_ = PP_WEBSOCKETREADYSTATE_CLOSED;
 
+  // User handlers may release WebSocket PP_Resource in the following
+  // completion callbacks. Retain |this| here to assure that this object
+  // keep on being valid in this function.
+  scoped_refptr<PPB_WebSocket_Impl> retain_this(this);
   if (state == PP_WEBSOCKETREADYSTATE_CONNECTING)
     TrackedCallback::ClearAndRun(&connect_callback_, PP_ERROR_FAILED);
 
   if (wait_for_receive_) {
     wait_for_receive_ = false;
     receive_callback_var_ = NULL;
-    TrackedCallback::ClearAndAbort(&receive_callback_);
+    TrackedCallback::ClearAndRun(&receive_callback_, PP_ERROR_FAILED);
   }
 
-  if (state == PP_WEBSOCKETREADYSTATE_CLOSING)
+  if ((state == PP_WEBSOCKETREADYSTATE_CLOSING) && close_callback_.get())
     TrackedCallback::ClearAndRun(&close_callback_, PP_OK);
 
   // Disconnect.

@@ -25,6 +25,7 @@
 class AutocompleteEditController;
 class AutocompleteEditModel;
 class AutocompletePopupView;
+class LocationBarView;
 class Profile;
 
 namespace ui {
@@ -71,8 +72,11 @@ class OmniboxViewViews
   // Called when KeyRelease event is generated on textfield.
   bool HandleKeyReleaseEvent(const views::KeyEvent& event);
 
-  // Called when the mouse press event is generated on textfield.
-  bool HandleMousePressEvent(const views::MouseEvent& event);
+  // Called when mouse events are generated on the textfield.
+  // The views::Textfield implementations will be executed first.
+  void HandleMousePressEvent(const views::MouseEvent& event);
+  void HandleMouseDragEvent(const views::MouseEvent& event);
+  void HandleMouseReleaseEvent(const views::MouseEvent& event);
 
   // Called when Focus is set/unset on textfield.
   void HandleFocusIn();
@@ -113,7 +117,7 @@ class OmniboxViewViews
                                         bool update_popup,
                                         bool notify_text_changed) OVERRIDE;
   virtual void SetForcedQuery() OVERRIDE;
-  virtual bool IsSelectAll() OVERRIDE;
+  virtual bool IsSelectAll() const OVERRIDE;
   virtual bool DeleteAtEndPressed() OVERRIDE;
   virtual void GetSelectionBounds(string16::size_type* start,
                                   string16::size_type* end) const OVERRIDE;
@@ -141,6 +145,8 @@ class OmniboxViewViews
   virtual int GetMaxEditWidth(int entry_width) const OVERRIDE;
   virtual views::View* AddToView(views::View* parent) OVERRIDE;
   virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
+  virtual gfx::Font GetFont() OVERRIDE;
+  virtual int WidthOfTextAfterCursor() OVERRIDE;
 
   // views::TextfieldController:
   virtual void ContentsChanged(views::Textfield* sender,
@@ -214,6 +220,12 @@ class OmniboxViewViews
   // avoid showing the popup. So far, the candidate window is detected only
   // on Chrome OS.
   bool ime_candidate_window_open_;
+
+  // Should we select all the text when we see the mouse button get released?
+  // We select in response to a click that focuses the omnibox, but we defer
+  // until release, setting this variable back to false if we saw a drag, to
+  // allow the user to select just a portion of the text.
+  bool select_all_on_mouse_release_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewViews);
 };

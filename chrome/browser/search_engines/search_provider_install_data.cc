@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop_helpers.h"
+#include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/search_host_to_urls_map.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
@@ -20,6 +21,7 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
@@ -132,7 +134,8 @@ void GoogleURLObserver::Observe(int type,
   if (type == chrome::NOTIFICATION_GOOGLE_URL_UPDATED) {
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
         base::Bind(&GoogleURLChangeNotifier::OnChange, change_notifier_.get(),
-                   content::Details<const GURL>(details)->spec()));
+            content::Details<GoogleURLTracker::UpdatedDetails>(details)->second.
+                spec()));
   } else {
     // This must be the death notification.
     delete this;
@@ -158,7 +161,8 @@ SearchProviderInstallData::SearchProviderInstallData(
     Profile* profile,
     int ui_death_notification,
     const content::NotificationSource& ui_death_source)
-    : web_service_(profile->GetWebDataService(Profile::EXPLICIT_ACCESS)),
+    : web_service_(WebDataServiceFactory::GetForProfile(profile,
+          Profile::EXPLICIT_ACCESS)),
       load_handle_(0),
       google_base_url_(UIThreadSearchTermsData(profile).GoogleBaseURLValue()) {
   // GoogleURLObserver is responsible for killing itself when
@@ -243,12 +247,9 @@ void SearchProviderInstallData::OnWebDataServiceRequestDone(
   TemplateURL* default_search_provider = NULL;
   int new_resource_keyword_version = 0;
   std::vector<TemplateURL*> extracted_template_urls;
-  GetSearchProvidersUsingKeywordResult(*result,
-                                       NULL,
-                                       NULL,
-                                       &extracted_template_urls,
-                                       &default_search_provider,
-                                       &new_resource_keyword_version);
+  GetSearchProvidersUsingKeywordResult(*result, NULL, NULL,
+      &extracted_template_urls, &default_search_provider,
+      &new_resource_keyword_version, NULL);
   template_urls_.get().insert(template_urls_.get().begin(),
                               extracted_template_urls.begin(),
                               extracted_template_urls.end());

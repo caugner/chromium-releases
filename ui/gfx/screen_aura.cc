@@ -5,7 +5,7 @@
 #include "ui/gfx/screen.h"
 
 #include "base/logging.h"
-#include "ui/gfx/monitor.h"
+#include "ui/gfx/display.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/screen_impl.h"
 
@@ -27,6 +27,11 @@ void Screen::SetInstance(ScreenImpl* screen) {
 // ifdef.
 
 // static
+bool Screen::IsDIPEnabled() {
+  return true;
+}
+
+// static
 Point Screen::GetCursorScreenPoint() {
   return g_instance_->GetCursorScreenPoint();
 }
@@ -37,28 +42,28 @@ NativeWindow Screen::GetWindowAtCursorScreenPoint() {
 }
 
 // static
-int Screen::GetNumMonitors() {
-  return g_instance_->GetNumMonitors();
+int Screen::GetNumDisplays() {
+  return g_instance_->GetNumDisplays();
 }
 
 // static
-Monitor Screen::GetMonitorNearestWindow(NativeView window) {
-  return g_instance_->GetMonitorNearestWindow(window);
+Display Screen::GetDisplayNearestWindow(NativeView window) {
+  return g_instance_->GetDisplayNearestWindow(window);
 }
 
 // static
-Monitor Screen::GetMonitorNearestPoint(const Point& point) {
-  return g_instance_->GetMonitorNearestPoint(point);
+Display Screen::GetDisplayNearestPoint(const Point& point) {
+  return g_instance_->GetDisplayNearestPoint(point);
 }
 
 // static
-Monitor Screen::GetPrimaryMonitor() {
-  return g_instance_->GetPrimaryMonitor();
+Display Screen::GetPrimaryDisplay() {
+  return g_instance_->GetPrimaryDisplay();
 }
 
 // static
-Monitor Screen::GetMonitorMatching(const gfx::Rect& match_rect) {
-  return g_instance_->GetMonitorNearestPoint(match_rect.CenterPoint());
+Display Screen::GetDisplayMatching(const gfx::Rect& match_rect) {
+  return g_instance_->GetDisplayNearestPoint(match_rect.CenterPoint());
 }
 
 }  // namespace gfx

@@ -122,6 +122,13 @@ class ShellUtil {
   // Registry value name for the DelegateExecute verb handler.
   static const wchar_t* kRegDelegateExecute;
 
+  // Returns true if |chrome_exe| is registered in HKLM with |suffix|.
+  // Note: This only checks one deterministic key in HKLM for |chrome_exe| and
+  // doesn't otherwise validate a full Chrome install in HKLM.
+  static bool QuickIsChromeRegisteredInHKLM(BrowserDistribution* dist,
+                                            const string16& chrome_exe,
+                                            const string16& suffix);
+
   // Creates Chrome shortcut on the Desktop.
   // |dist| gives the type of browser distribution currently in use.
   // |chrome_exe| provides the target path information.
@@ -199,20 +206,60 @@ class ShellUtil {
   // User's profile only affects any new user profiles (not existing ones).
   static bool GetQuickLaunchPath(bool system_level, FilePath* path);
 
-  // Gets a mapping of all registered browser (on local machine) names and
-  // their reinstall command (which usually sets browser as default).
+  // Gets a mapping of all registered browser names (excluding browsers in the
+  // |dist| distribution) and their reinstall command (which usually sets
+  // browser as default).
+  // Given browsers can be registered in HKCU (as of Win7) and/or in HKLM, this
+  // method looks in both and gives precedence to values in HKCU as per the msdn
+  // standard: http://goo.gl/xjczJ.
   static void GetRegisteredBrowsers(BrowserDistribution* dist,
                                     std::map<string16, string16>* browsers);
 
-  // This function gets a suffix (user's login name) that can be added
-  // to Chromium default browser entry in the registry to create a unique name
-  // if there are multiple users on the machine, each with their own copy of
-  // Chromium that they want to set as default browser.
-  // This suffix value is assigned to |entry|. The function also checks for
-  // existence of Default Browser registry key with this suffix and
-  // returns true if it exists. In all other cases it returns false.
-  static bool GetUserSpecificDefaultBrowserSuffix(BrowserDistribution* dist,
-                                                  string16* entry);
+  // Returns the suffix this user's Chrome install is registered with.
+  // Always returns the empty string on system-level installs.
+  //
+  // This method is meant for external methods which need to know the suffix of
+  // the current install at run-time, not for install-time decisions.
+  // There are no guarantees that this suffix will not change later:
+  // (e.g. if two user-level installs were previously installed in parallel on
+  // the same machine, both without admin rights and with no user-level install
+  // having claimed the non-suffixed HKLM registrations, they both have no
+  // suffix in their progId entries (as per the old suffix rules). If they were
+  // to both fully register (i.e. click "Make Chrome Default" and go through
+  // UAC; or upgrade to Win8 and get the automatic no UAC full registration)
+  // they would then both get a suffixed registration as per the new suffix
+  // rules).
+  //
+  // |chrome_exe| The path to the currently installed (or running) chrome.exe.
+  static string16 GetCurrentInstallationSuffix(BrowserDistribution* dist,
+                                               const string16& chrome_exe);
+
+  // Returns the application name of the program under |dist|.
+  // This application name will be suffixed as is appropriate for the current
+  // install.
+  // This is the name that is registered with Default Programs on Windows and
+  // that should thus be used to "make chrome default" and such.
+  static string16 GetApplicationName(BrowserDistribution* dist,
+                                     const string16& chrome_exe);
+
+  // Returns the AppUserModelId for |dist|. This identifier is unconditionally
+  // suffixed with a unique id for this user on user-level installs (in contrast
+  // to other registration entries which are suffixed as described in
+  // GetCurrentInstallationSuffix() above).
+  static string16 GetBrowserModelId(BrowserDistribution* dist,
+                                    const string16& chrome_exe);
+
+  // Returns an AppUserModelId composed of each member of |components| separated
+  // by dots.
+  // The returned appid is guaranteed to be no longer than
+  // chrome::kMaxAppModelIdLength (some of the components might have been
+  // shortened to enforce this).
+  static string16 BuildAppModelId(const std::vector<string16>& components);
+
+  // Returns true if Chrome can make itself the default browser without relying
+  // on the Windows shell to prompt the user. This is the case for versions of
+  // Windows prior to Windows 8.
+  static bool CanMakeChromeDefaultUnattended();
 
   // Make Chrome the default browser. This function works by going through
   // the url protocols and file associations that are related to general
@@ -237,6 +284,15 @@ class ShellUtil {
                                 const string16& chrome_exe,
                                 bool elevate_if_not_admin);
 
+  // Shows to the user a system dialog where Chrome can be set as the
+  // default browser. This is intended for Windows 8 and above only.
+  // This is a blocking call.
+  //
+  // |dist| gives the type of browser distribution currently in use.
+  // |chrome_exe| The chrome.exe path to register as default browser.
+  static bool ShowMakeChromeDefaultSystemUI(BrowserDistribution* dist,
+                                            const string16& chrome_exe);
+
   // Make Chrome the default application for a protocol.
   // chrome_exe: The chrome.exe path to register as default browser.
   // protocol: The protocol to register as the default handler for.
@@ -244,27 +300,31 @@ class ShellUtil {
                                               const string16& chrome_exe,
                                               const string16& protocol);
 
-  // This method adds Chrome to the list that shows up in Add/Remove Programs->
-  // Set Program Access and Defaults and also creates Chrome ProgIds under
-  // Software\Classes. This method requires write access to HKLM so is just
-  // best effort deal. If write to HKLM fails and elevate_if_not_admin is true,
-  // this method will:
-  // - add the ProgId entries to HKCU on XP. HKCU entries will not make
-  //   Chrome show in Set Program Access and Defaults but they are still useful
-  //   because we can make Chrome run when user clicks on http link or html
-  //   file.
-  // - will try to launch setup.exe with admin priviledges on Vista to do
-  //   these tasks. Users will see standard Vista elevation prompt and if they
-  //   enter the right credentials, the write operation will work.
-  // Currently elevate_if_not_admin is true only when user tries to make Chrome
-  // default browser (through the UI or through installer options) and Chrome
-  // is not registered on the machine.
+  // Registers Chrome as a potential default browser and handler for filetypes
+  // and protocols.
+  // If Chrome is already registered, this method is a no-op.
+  // This method requires write access to HKLM (prior to Win8) so is just a
+  // best effort deal.
+  // If write to HKLM is required, but fails, and:
+  // - |elevate_if_not_admin| is true (and OS is Vista or above):
+  //   tries to launch setup.exe with admin priviledges (by prompting the user
+  //   with a UAC) to do these tasks.
+  // - |elevate_if_not_admin| is false (or OS is XP):
+  //   adds the ProgId entries to HKCU. These entries will not make Chrome show
+  //   in Default Programs but they are still useful because Chrome can be
+  //   registered to run when the user clicks on an http link or an html file.
   //
   // |chrome_exe| full path to chrome.exe.
   // |unique_suffix| Optional input. If given, this function appends the value
   // to default browser entries names that it creates in the registry.
+  // Currently, this is only used to continue an install with the same suffix
+  // when elevating and calling setup.exe with admin privileges as described
+  // above.
   // |elevate_if_not_admin| if true will make this method try alternate methods
-  // as described above.
+  // as described above. This should only be true when following a user action
+  // (e.g. "Make Chrome Default") as it allows this method to UAC.
+  //
+  // Returns true if Chrome is successfully registered (or already registered).
   static bool RegisterChromeBrowser(BrowserDistribution* dist,
                                     const string16& chrome_exe,
                                     const string16& unique_suffix,
@@ -344,6 +404,36 @@ class ShellUtil {
                                    const string16& icon_path,
                                    int icon_index,
                                    uint32 options);
+
+  // Sets |suffix| to the base 32 encoding of the md5 hash of this user's sid
+  // preceded by a dot.
+  // This is guaranteed to be unique on the machine and 27 characters long
+  // (including the '.').
+  // This suffix is then meant to be added to all registration that may conflict
+  // with another user-level Chrome install.
+  // Note that prior to Chrome 21, the suffix registered used to be the user's
+  // username (see GetOldUserSpecificRegistrySuffix() below). We still honor old
+  // installs registered that way, but it was wrong because some of the
+  // characters allowed in a username are not allowed in a ProgId.
+  // Returns true unless the OS call to retrieve the username fails.
+  // NOTE: Only the installer should use this suffix directly. Other callers
+  // should call GetCurrentInstallationSuffix().
+  static bool GetUserSpecificRegistrySuffix(string16* suffix);
+
+  // Sets |suffix| to this user's username preceded by a dot. This suffix should
+  // only be used to support legacy installs that used this suffixing
+  // style.
+  // Returns true unless the OS call to retrieve the username fails.
+  // NOTE: Only the installer should use this suffix directly. Other callers
+  // should call GetCurrentInstallationSuffix().
+  static bool GetOldUserSpecificRegistrySuffix(string16* suffix);
+
+  // Returns the base32 encoding (using the [A-Z2-7] alphabet) of |bytes|.
+  // |size| is the length of |bytes|.
+  // Note: This method does not suffix the output with '=' signs as technically
+  // required by the base32 standard for inputs that aren't a multiple of 5
+  // bytes.
+  static string16 ByteArrayToBase32(const uint8* bytes, size_t size);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellUtil);

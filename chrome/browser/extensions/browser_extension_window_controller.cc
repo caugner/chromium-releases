@@ -4,12 +4,13 @@
 
 #include "chrome/browser/extensions/browser_extension_window_controller.h"
 
+#include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/extensions/extension.h"
 
 BrowserExtensionWindowController::BrowserExtensionWindowController(
     Browser* browser)
@@ -21,7 +22,7 @@ int BrowserExtensionWindowController::GetWindowId() const {
   return static_cast<int>(browser_->session_id().id());
 }
 
-namespace keys = extension_tabs_module_constants;
+namespace keys = extensions::tabs_constants;
 
 std::string BrowserExtensionWindowController::GetWindowTypeText() const {
   if (browser_->is_type_popup())
@@ -67,4 +68,11 @@ void BrowserExtensionWindowController::SetFullscreenMode(
 
 Browser* BrowserExtensionWindowController::GetBrowser() const {
   return browser_;
+}
+
+bool BrowserExtensionWindowController::IsVisibleToExtension(
+    const extensions::Extension* extension) const {
+  // Platform apps can only see their own windows.
+  // TODO(mihaip): what about non-Aura panels?
+  return !extension->is_platform_app();
 }

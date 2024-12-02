@@ -13,6 +13,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/guid.h"
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/string_util.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/autofill/form_structure.h"
+#include "chrome/browser/autofill/password_generator.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/autofill/phone_number.h"
@@ -40,13 +42,12 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/guid.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -176,9 +177,9 @@ void DeterminePossibleFieldTypesForUpload(
 
 }  // namespace
 
-AutofillManager::AutofillManager(TabContentsWrapper* tab_contents)
+AutofillManager::AutofillManager(TabContents* tab_contents)
     : content::WebContentsObserver(tab_contents->web_contents()),
-      tab_contents_wrapper_(tab_contents),
+      tab_contents_(tab_contents),
       personal_data_(NULL),
       download_manager_(tab_contents->profile(), this),
       disable_download_manager_requests_(false),
@@ -195,6 +196,8 @@ AutofillManager::AutofillManager(TabContentsWrapper* tab_contents)
   personal_data_ = PersonalDataManagerFactory::GetForProfile(
       tab_contents->profile()->GetOriginalProfile());
   RegisterWithSyncService();
+  registrar_.Init(tab_contents->profile()->GetPrefs());
+  registrar_.Add(prefs::kPasswordGenerationEnabled, this);
 }
 
 AutofillManager::~AutofillManager() {
@@ -205,6 +208,9 @@ AutofillManager::~AutofillManager() {
 // static
 void AutofillManager::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kAutofillEnabled,
+                             true,
+                             PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kPasswordGenerationEnabled,
                              true,
                              PrefService::SYNCABLE_PREF);
 #if defined(OS_MACOSX)
@@ -226,8 +232,7 @@ void AutofillManager::RegisterUserPrefs(PrefService* prefs) {
 
 void AutofillManager::RegisterWithSyncService() {
   ProfileSyncService* temp_sync_service =
-      ProfileSyncServiceFactory::GetForProfile(
-          tab_contents_wrapper_->profile());
+      ProfileSyncServiceFactory::GetForProfile(tab_contents_->profile());
   if (temp_sync_service) {
     sync_service_ = temp_sync_service->AsWeakPtr();
     sync_service_->AddObserver(this);
@@ -240,20 +245,34 @@ void AutofillManager::SendPasswordGenerationStateToRenderer(
                                                        enabled));
 }
 
+// In order for password generation to be enabled, we need to make sure:
+// (1) Password sync is enabled,
+// (2) Password manager is enabled, and
+// (3) Password generation preference check box is checked.
 void AutofillManager::UpdatePasswordGenerationState(
     content::RenderViewHost* host,
     bool new_renderer) {
   if (!sync_service_)
     return;
 
-  // Password generation requires sync for passwords and the password manager
-  // to both be enabled.
   syncable::ModelTypeSet sync_set = sync_service_->GetPreferredDataTypes();
-  bool password_sync_enabled = (sync_service_->HasSyncSetupCompleted() &&
-                                sync_set.Has(syncable::PASSWORDS));
+  bool password_sync_enabled =
+      sync_service_->HasSyncSetupCompleted() &&
+      sync_set.Has(syncable::PASSWORDS);
+
+  bool password_manager_enabled =
+      tab_contents_->password_manager()->IsSavingEnabled();
+
+  Profile* profile = Profile::FromBrowserContext(
+      web_contents()->GetBrowserContext());
+  bool preference_checked =
+      profile->GetPrefs()->GetBoolean(prefs::kPasswordGenerationEnabled);
+
   bool new_password_generation_enabled =
       password_sync_enabled &&
-      tab_contents_wrapper_->password_manager()->IsSavingEnabled();
+      password_manager_enabled &&
+      preference_checked;
+
   if (new_password_generation_enabled != password_generation_enabled_ ||
       new_renderer) {
     password_generation_enabled_ = new_password_generation_enabled;
@@ -262,7 +281,18 @@ void AutofillManager::UpdatePasswordGenerationState(
 }
 
 void AutofillManager::RenderViewCreated(content::RenderViewHost* host) {
-      UpdatePasswordGenerationState(host, true);
+  UpdatePasswordGenerationState(host, true);
+}
+
+void AutofillManager::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK_EQ(chrome::NOTIFICATION_PREF_CHANGED, type);
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  std::string* pref = content::Details<std::string>(details).ptr();
+  DCHECK(*pref == prefs::kPasswordGenerationEnabled);
+  UpdatePasswordGenerationState(web_contents()->GetRenderViewHost(), false);
 }
 
 void AutofillManager::OnStateChanged() {
@@ -313,6 +343,8 @@ bool AutofillManager::OnMessageReceived(const IPC::Message& message) {
                         OnAddPasswordFormMapping)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_ShowPasswordSuggestions,
                         OnShowPasswordSuggestions)
+    IPC_MESSAGE_HANDLER(AutofillHostMsg_SetDataList,
+                        OnSetDataList)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -322,7 +354,7 @@ bool AutofillManager::OnMessageReceived(const IPC::Message& message) {
 bool AutofillManager::OnFormSubmitted(const FormData& form,
                                       const TimeTicks& timestamp) {
   // Let AutoComplete know as well.
-  tab_contents_wrapper_->autocomplete_history_manager()->OnFormSubmitted(form);
+  tab_contents_->autocomplete_history_manager()->OnFormSubmitted(form);
 
   if (!IsAutofillEnabled())
     return false;
@@ -524,7 +556,7 @@ void AutofillManager::OnQueryFormFieldAutofill(int query_id,
   // Add the results from AutoComplete.  They come back asynchronously, so we
   // hand off what we generated and they will send the results back to the
   // renderer.
-  tab_contents_wrapper_->autocomplete_history_manager()->
+  tab_contents_->autocomplete_history_manager()->
       OnGetAutocompleteSuggestions(
           query_id, field.name, field.value, values, labels, icons, unique_ids);
 }
@@ -635,7 +667,7 @@ void AutofillManager::OnShowAutofillDialog() {
 #if defined(OS_ANDROID)
   NOTIMPLEMENTED();
 #else
-  Browser* browser = BrowserList::GetLastActiveWithProfile(
+  Browser* browser = browser::FindLastActiveWithProfile(
       Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
   if (browser)
     browser->ShowOptionsTab(chrome::kAutofillSubPage);
@@ -687,13 +719,18 @@ void AutofillManager::OnHideAutofillPopup() {
     external_delegate_->HideAutofillPopup();
 }
 
-void AutofillManager::OnShowPasswordGenerationPopup(const gfx::Rect& bounds) {
+void AutofillManager::OnShowPasswordGenerationPopup(
+    const gfx::Rect& bounds,
+    int max_length,
+    const webkit::forms::PasswordForm& form) {
 #if defined(OS_ANDROID)
   NOTIMPLEMENTED();
 #else
-  Browser* browser = BrowserList::GetLastActiveWithProfile(
+  Browser* browser = browser::FindLastActiveWithProfile(
       Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
-  browser->window()->ShowPasswordGenerationBubble(bounds);
+  password_generator_.reset(new autofill::PasswordGenerator(max_length));
+  browser->window()->ShowPasswordGenerationBubble(
+      bounds, password_generator_.get(), form);
 #endif  // #if defined(OS_ANDROID)
 }
 
@@ -734,6 +771,18 @@ void AutofillManager::OnShowPasswordSuggestions(
     const std::vector<string16>& suggestions) {
   if (external_delegate_)
     external_delegate_->OnShowPasswordSuggestions(suggestions, field, bounds);
+}
+
+void AutofillManager::OnSetDataList(const std::vector<string16>& values,
+                                    const std::vector<string16>& labels,
+                                    const std::vector<string16>& icons,
+                                    const std::vector<int>& unique_ids) {
+  if (external_delegate_) {
+    external_delegate_->SetCurrentDataListValues(values,
+                                                 labels,
+                                                 icons,
+                                                 unique_ids);
+  }
 }
 
 void AutofillManager::OnLoadedServerPredictions(
@@ -784,8 +833,7 @@ void AutofillManager::ImportFormData(const FormStructure& submitted_form) {
   // it.
   scoped_ptr<const CreditCard> scoped_credit_card(imported_credit_card);
   if (imported_credit_card && web_contents()) {
-    InfoBarTabHelper* infobar_helper =
-        tab_contents_wrapper_->infobar_tab_helper();
+    InfoBarTabHelper* infobar_helper = tab_contents_->infobar_tab_helper();
     infobar_helper->AddInfoBar(
         new AutofillCCInfoBarDelegate(infobar_helper,
                                       scoped_credit_card.release(),
@@ -849,10 +897,10 @@ void AutofillManager::Reset() {
     external_delegate_->Reset();
 }
 
-AutofillManager::AutofillManager(TabContentsWrapper* tab_contents,
+AutofillManager::AutofillManager(TabContents* tab_contents,
                                  PersonalDataManager* personal_data)
     : content::WebContentsObserver(tab_contents->web_contents()),
-      tab_contents_wrapper_(tab_contents),
+      tab_contents_(tab_contents),
       personal_data_(personal_data),
       download_manager_(tab_contents->profile(), this),
       disable_download_manager_requests_(true),
@@ -867,6 +915,7 @@ AutofillManager::AutofillManager(TabContentsWrapper* tab_contents,
       external_delegate_(NULL) {
   DCHECK(tab_contents);
   RegisterWithSyncService();
+  // Test code doesn't need registrar_.
 }
 
 void AutofillManager::set_metric_logger(const AutofillMetrics* metric_logger) {
@@ -901,11 +950,11 @@ bool AutofillManager::GetProfileOrCreditCard(
   GUIDPair credit_card_guid;
   GUIDPair profile_guid;
   UnpackGUIDs(unique_id, &credit_card_guid, &profile_guid);
-  DCHECK(!guid::IsValidGUID(credit_card_guid.first) ||
-         !guid::IsValidGUID(profile_guid.first));
+  DCHECK(!base::IsValidGUID(credit_card_guid.first) ||
+         !base::IsValidGUID(profile_guid.first));
 
   // Find the profile that matches the |profile_guid|, if one is specified.
-  if (guid::IsValidGUID(profile_guid.first)) {
+  if (base::IsValidGUID(profile_guid.first)) {
     for (std::vector<AutofillProfile*>::const_iterator iter = profiles.begin();
          iter != profiles.end(); ++iter) {
       if ((*iter)->guid() == profile_guid.first) {
@@ -919,7 +968,7 @@ bool AutofillManager::GetProfileOrCreditCard(
   }
 
   // Find the credit card that matches the |credit_card_guid|, if specified.
-  if (guid::IsValidGUID(credit_card_guid.first)) {
+  if (base::IsValidGUID(credit_card_guid.first)) {
     for (std::vector<CreditCard*>::const_iterator iter = credit_cards.begin();
          iter != credit_cards.end(); ++iter) {
       if ((*iter)->guid() == credit_card_guid.first) {
@@ -1296,7 +1345,7 @@ void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
 }
 
 int AutofillManager::GUIDToID(const GUIDPair& guid) const {
-  if (!guid::IsValidGUID(guid.first))
+  if (!base::IsValidGUID(guid.first))
     return 0;
 
   std::map<GUIDPair, int>::const_iterator iter = guid_id_map_.find(guid);

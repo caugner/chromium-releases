@@ -40,6 +40,7 @@ remoting.init = function() {
   remoting.formatIq = new remoting.FormatIq();
   remoting.hostList = new remoting.HostList(
       document.getElementById('host-list'),
+      document.getElementById('host-list-empty'),
       document.getElementById('host-list-error'));
   remoting.toolbar = new remoting.Toolbar(
       document.getElementById('session-toolbar'));
@@ -296,3 +297,29 @@ function jsonParseSafe(jsonString) {
     return undefined;
   }
 }
+
+/**
+ * Return the current time as a formatted string suitable for logging.
+ *
+ * @return {string} The current time, formatted as [mmdd/hhmmss.xyz]
+*/
+remoting.timestamp = function() {
+  /**
+   * @param {number} num A number.
+   * @param {number} len The required length of the answer.
+   * @return {string} The number, formatted as a string of the specified length
+   *     by prepending zeroes as necessary.
+   */
+  var pad = function(num, len) {
+    var result = num.toString();
+    if (result.length < len) {
+      result = new Array(len - result.length + 1).join('0') + result;
+    }
+    return result;
+  };
+  var now = new Date();
+  var timestamp = pad(now.getMonth() + 1, 2) + pad(now.getDate(), 2) + '/' +
+      pad(now.getHours(), 2) + pad(now.getMinutes(), 2) +
+      pad(now.getSeconds(), 2) + '.' + pad(now.getMilliseconds(), 3);
+  return '[' + timestamp + ']';
+};

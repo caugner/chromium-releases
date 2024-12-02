@@ -10,14 +10,21 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/chromeos/gdata/drive_webapps_registry.h"
+#include "chrome/browser/chromeos/gdata/gdata_file_system_proxy.h"
 #include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_download_observer.h"
 #include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "chrome/browser/chromeos/gdata/gdata_sync_client.h"
 #include "chrome/browser/chromeos/gdata/gdata_uploader.h"
+#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "webkit/fileapi/file_system_context.h"
+#include "webkit/fileapi/file_system_mount_point_provider.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 
 namespace gdata {
@@ -25,46 +32,85 @@ namespace gdata {
 //===================== GDataSystemService ====================================
 GDataSystemService::GDataSystemService(Profile* profile)
     : profile_(profile),
-      file_system_(new GDataFileSystem(profile, new DocumentsService)),
-      uploader_(new GDataUploader(file_system_.get())),
+      sequence_token_(BrowserThread::GetBlockingPool()->GetSequenceToken()),
+      cache_(GDataCache::CreateGDataCacheOnUIThread(
+          GDataCache::GetCacheRootPath(profile_),
+          BrowserThread::GetBlockingPool(),
+          sequence_token_)),
+      documents_service_(new DocumentsService),
+      uploader_(new GDataUploader(docs_service())),
+      file_system_(new GDataFileSystem(profile,
+                                       cache(),
+                                       docs_service(),
+                                       uploader(),
+                                       sequence_token_)),
       download_observer_(new GDataDownloadObserver),
-      sync_client_(new GDataSyncClient(profile, file_system_.get())),
+      sync_client_(new GDataSyncClient(profile, file_system(), cache())),
       webapps_registry_(new DriveWebAppsRegistry) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // TODO(satorux): The dependency to GDataFileSystem should be
+  // eliminated. http://crbug.com/133860
+  uploader_->set_file_system(file_system());
 }
 
 GDataSystemService::~GDataSystemService() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  cache_->DestroyOnUIThread();
 }
 
 void GDataSystemService::Initialize() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  sync_client_->Initialize();
   file_system_->Initialize();
+  cache_->RequestInitializeOnUIThread();
 
   content::DownloadManager* download_manager =
     g_browser_process->download_status_updater() ?
-        DownloadServiceFactory::GetForProfile(profile_)->GetDownloadManager() :
-        NULL;
+        BrowserContext::GetDownloadManager(profile_) : NULL;
   download_observer_->Initialize(
       uploader_.get(),
       download_manager,
-      file_system_->GetCacheDirectoryPath(
-          GDataRootDirectory::CACHE_TYPE_TMP_DOWNLOADS));
+      cache_->GetCacheDirectoryPath(
+          GDataCache::CACHE_TYPE_TMP_DOWNLOADS));
 
-  sync_client_->Initialize();
+  AddDriveMountPoint();
 }
 
 void GDataSystemService::Shutdown() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  RemoveDriveMountPoint();
 
-  // These should shut down here as they depend on |file_system_|.
+  // Shut down the member objects in the reverse order of creation.
+  webapps_registry_.reset();
   sync_client_.reset();
   download_observer_.reset();
-  uploader_.reset();
-  webapps_registry_.reset();
-
   file_system_.reset();
+  uploader_.reset();
+  documents_service_.reset();
+}
+
+void GDataSystemService::AddDriveMountPoint() {
+  if (!gdata::util::IsGDataAvailable(profile_))
+    return;
+
+  const FilePath mount_point = gdata::util::GetGDataMountPointPath();
+  fileapi::ExternalFileSystemMountPointProvider* provider =
+      BrowserContext::GetFileSystemContext(profile_)->external_provider();
+  if (provider && !provider->HasMountPoint(mount_point)) {
+    provider->AddRemoteMountPoint(
+        mount_point,
+        new GDataFileSystemProxy(file_system_.get()));
+  }
+}
+
+void GDataSystemService::RemoveDriveMountPoint() {
+  const FilePath mount_point = gdata::util::GetGDataMountPointPath();
+  fileapi::ExternalFileSystemMountPointProvider* provider =
+      BrowserContext::GetFileSystemContext(profile_)->external_provider();
+  if (provider && provider->HasMountPoint(mount_point))
+    provider->RemoveMountPoint(mount_point);
 }
 
 //===================== GDataSystemServiceFactory =============================

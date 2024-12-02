@@ -2196,13 +2196,12 @@ TEST_P(SpdyNetworkTransactionSpdy2Test, RedirectGetRequest) {
   HttpStreamFactory::set_force_spdy_always(true);
   TestDelegate d;
   {
+    SpdyURLRequestContext spdy_url_request_context;
     net::URLRequest r(GURL("http://www.google.com/"), &d);
-    SpdyURLRequestContext* spdy_url_request_context =
-        new SpdyURLRequestContext();
-    r.set_context(spdy_url_request_context);
-    spdy_url_request_context->socket_factory().
+    r.set_context(&spdy_url_request_context);
+    spdy_url_request_context.socket_factory().
         AddSocketDataProvider(data.get());
-    spdy_url_request_context->socket_factory().
+    spdy_url_request_context.socket_factory().
         AddSocketDataProvider(data2.get());
 
     d.set_quit_on_redirect(true);
@@ -2452,12 +2451,11 @@ TEST_P(SpdyNetworkTransactionSpdy2Test, RedirectServerPush) {
   HttpStreamFactory::set_force_spdy_always(true);
   TestDelegate d;
   TestDelegate d2;
-  scoped_refptr<SpdyURLRequestContext> spdy_url_request_context(
-      new SpdyURLRequestContext());
+  SpdyURLRequestContext spdy_url_request_context;
   {
     net::URLRequest r(GURL("http://www.google.com/"), &d);
-    r.set_context(spdy_url_request_context);
-    spdy_url_request_context->socket_factory().
+    r.set_context(&spdy_url_request_context);
+    spdy_url_request_context.socket_factory().
         AddSocketDataProvider(data.get());
 
     r.Start();
@@ -2468,8 +2466,8 @@ TEST_P(SpdyNetworkTransactionSpdy2Test, RedirectServerPush) {
     EXPECT_EQ(contents, d.data_received());
 
     net::URLRequest r2(GURL("http://www.google.com/foo.dat"), &d2);
-    r2.set_context(spdy_url_request_context);
-    spdy_url_request_context->socket_factory().
+    r2.set_context(&spdy_url_request_context);
+    spdy_url_request_context.socket_factory().
         AddSocketDataProvider(data2.get());
 
     d2.set_quit_on_redirect(true);
@@ -3543,7 +3541,7 @@ TEST_P(SpdyNetworkTransactionSpdy2Test, NetLog) {
     MockRead(ASYNC, 0, 0)  // EOF
   };
 
-  net::CapturingBoundNetLog log(net::CapturingNetLog::kUnbounded);
+  CapturingBoundNetLog log;
 
   scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(1, reads, arraysize(reads),
@@ -3560,7 +3558,7 @@ TEST_P(SpdyNetworkTransactionSpdy2Test, NetLog) {
   // This test is intentionally non-specific about the exact ordering of the
   // log; instead we just check to make sure that certain events exist, and that
   // they are in the right order.
-  net::CapturingNetLog::EntryList entries;
+  net::CapturingNetLog::CapturedEntryList entries;
   log.GetEntries(&entries);
 
   EXPECT_LT(0u, entries.size());
@@ -3589,25 +3587,25 @@ TEST_P(SpdyNetworkTransactionSpdy2Test, NetLog) {
       entries, 0,
       net::NetLog::TYPE_SPDY_SESSION_SYN_STREAM,
       net::NetLog::PHASE_NONE);
-  CapturingNetLog::Entry entry = entries[pos];
-  NetLogSpdySynParameter* request_params =
-      static_cast<NetLogSpdySynParameter*>(entry.extra_parameters.get());
-  SpdyHeaderBlock* headers =
-      request_params->GetHeaders().get();
 
-  SpdyHeaderBlock expected;
-  expected["host"] = "www.google.com";
-  expected["url"] = "/";
-  expected["scheme"] = "http";
-  expected["version"] = "HTTP/1.1";
-  expected["method"] = "GET";
-  expected["user-agent"] = "Chrome";
-  EXPECT_EQ(expected.size(), headers->size());
-  SpdyHeaderBlock::const_iterator end = expected.end();
-  for (SpdyHeaderBlock::const_iterator it = expected.begin();
-      it != end;
-      ++it) {
-    EXPECT_EQ(it->second, (*headers)[it->first]);
+  ListValue* header_list;
+  ASSERT_TRUE(entries[pos].params.get());
+  ASSERT_TRUE(entries[pos].params->GetList("headers", &header_list));
+
+  std::vector<std::string> expected;
+  expected.push_back("host: www.google.com");
+  expected.push_back("url: /");
+  expected.push_back("scheme: http");
+  expected.push_back("version: HTTP/1.1");
+  expected.push_back("method: GET");
+  expected.push_back("user-agent: Chrome");
+  EXPECT_EQ(expected.size(), header_list->GetSize());
+  for (std::vector<std::string>::const_iterator it = expected.begin();
+       it != expected.end();
+       ++it) {
+    base::StringValue header(*it);
+    EXPECT_NE(header_list->end(), header_list->Find(header)) <<
+        "Header not found: " << *it;
   }
 }
 
@@ -5561,6 +5559,92 @@ TEST_P(SpdyNetworkTransactionSpdy2Test, RetryAfterRefused) {
   HttpResponseInfo response = *trans->GetResponseInfo();
   EXPECT_TRUE(response.headers != NULL);
   EXPECT_EQ("HTTP/1.1 200 OK", response.headers->GetStatusLine());
+}
+
+TEST_P(SpdyNetworkTransactionSpdy2Test, OutOfOrderSynStream) {
+  // This first request will start to establish the SpdySession.
+  // Then we will start the second (MEDIUM priority) and then third
+  // (HIGHEST priority) request in such a way that the third will actually
+  // start before the second, causing the second to be re-numbered.
+  scoped_ptr<SpdyFrame> req1(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
+  scoped_ptr<SpdyFrame> req2(ConstructSpdyGet(NULL, 0, false, 3, MEDIUM));
+  scoped_ptr<SpdyFrame> req3(ConstructSpdyGet(NULL, 0, false, 5, HIGHEST));
+  MockWrite writes[] = {
+    CreateMockWrite(*req1, 0),
+    CreateMockWrite(*req2, 3),
+    CreateMockWrite(*req3, 4),
+  };
+
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> body1(ConstructSpdyBodyFrame(1, true));
+  scoped_ptr<SpdyFrame> resp2(ConstructSpdyGetSynReply(NULL, 0, 3));
+  scoped_ptr<SpdyFrame> body2(ConstructSpdyBodyFrame(3, true));
+  scoped_ptr<SpdyFrame> resp3(ConstructSpdyGetSynReply(NULL, 0, 5));
+  scoped_ptr<SpdyFrame> body3(ConstructSpdyBodyFrame(5, true));
+  MockRead reads[] = {
+    CreateMockRead(*resp1, 1),
+    CreateMockRead(*body1, 2),
+    CreateMockRead(*resp2, 5),
+    CreateMockRead(*body2, 6),
+    CreateMockRead(*resp3, 7),
+    CreateMockRead(*body3, 8),
+    MockRead(ASYNC, 0, 9)  // EOF
+  };
+
+  scoped_refptr<DeterministicSocketData> data(
+      new DeterministicSocketData(reads, arraysize(reads),
+                                  writes, arraysize(writes)));
+  NormalSpdyTransactionHelper helper(CreateGetRequest(),
+                                     BoundNetLog(), GetParam(), NULL);
+  helper.SetDeterministic();
+  helper.RunPreTestSetup();
+  helper.AddDeterministicData(data.get());
+
+  // Start the first transaction to set up the SpdySession
+  HttpNetworkTransaction* trans = helper.trans();
+  TestCompletionCallback callback;
+  HttpRequestInfo info1 = CreateGetRequest();
+  info1.priority = LOWEST;
+  int rv = trans->Start(&info1, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  // Run the message loop, but do not allow the write to complete.
+  // This leaves the SpdySession with a write pending, which prevents
+  // SpdySession from attempting subsequent writes until this write completes.
+  MessageLoop::current()->RunAllPending();
+
+  // Now, start both new transactions
+  HttpRequestInfo info2 = CreateGetRequest();
+  info2.priority = MEDIUM;
+  TestCompletionCallback callback2;
+    scoped_ptr<HttpNetworkTransaction> trans2(
+        new HttpNetworkTransaction(helper.session()));
+  rv = trans2->Start(&info2, callback2.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  MessageLoop::current()->RunAllPending();
+
+  HttpRequestInfo info3 = CreateGetRequest();
+  info3.priority = HIGHEST;
+  TestCompletionCallback callback3;
+  scoped_ptr<HttpNetworkTransaction> trans3(
+      new HttpNetworkTransaction(helper.session()));
+  rv = trans3->Start(&info3, callback3.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  MessageLoop::current()->RunAllPending();
+
+  // We now have two SYN_STREAM frames queued up which will be
+  // dequeued only once the first write completes, which we
+  // now allow to happen.
+  data->RunFor(2);
+  EXPECT_EQ(OK, callback.WaitForResult());
+
+  // And now we can allow everything else to run to completion.
+  data->SetStop(10);
+  data->Run();
+  EXPECT_EQ(OK, callback2.WaitForResult());
+  EXPECT_EQ(OK, callback3.WaitForResult());
+
+  helper.VerifyDataConsumed();
 }
 
 }  // namespace net

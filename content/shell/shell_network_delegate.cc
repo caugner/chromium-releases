@@ -86,4 +86,15 @@ bool ShellNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
   return true;
 }
 
+bool ShellNetworkDelegate::OnCanThrottleRequest(
+    const net::URLRequest& request) const {
+  return false;
+}
+
+int ShellNetworkDelegate::OnBeforeSocketStreamConnect(
+    net::SocketStream* socket,
+    const net::CompletionCallback& callback) {
+  return net::OK;
+}
+
 }  // namespace content

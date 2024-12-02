@@ -14,14 +14,6 @@ const char* kModuleName = "module_name";
 const char* kModuleField = "module_field";
 const char* kModulesField = "modules";
 
-void DumpException(v8::Handle<v8::Message> message) {
-  LOG(ERROR) << "["
-             << *v8::String::Utf8Value(
-                 message->GetScriptResourceName()->ToString())
-             << "(" << message->GetLineNumber() << ")] "
-             << *v8::String::Utf8Value(message->Get());
-}
-
 } // namespace
 
 ModuleSystem::ModuleSystem(v8::Handle<v8::Context> context,
@@ -63,6 +55,22 @@ ModuleSystem::NativesEnabledScope::~NativesEnabledScope() {
 bool ModuleSystem::IsPresentInCurrentContext() {
   v8::Handle<v8::Object> global(v8::Context::GetCurrent()->Global());
   return !global->GetHiddenValue(v8::String::New(kModuleSystem))->IsUndefined();
+}
+
+// static
+void ModuleSystem::DumpException(v8::Handle<v8::Message> message) {
+  std::string resource_name = "<unknown resource>";
+  if (!message->GetScriptResourceName().IsEmpty()) {
+    resource_name = *v8::String::Utf8Value(
+        message->GetScriptResourceName()->ToString());
+  }
+
+  std::string error_message = "<no error message>";
+  if (!message->Get().IsEmpty())
+    error_message = *v8::String::Utf8Value(message->Get());
+
+  LOG(ERROR) << "[" << resource_name << "(" << message->GetLineNumber() << ")] "
+             << error_message;
 }
 
 void ModuleSystem::Require(const std::string& module_name) {
@@ -117,6 +125,10 @@ void ModuleSystem::RegisterNativeHandler(const std::string& name,
       linked_ptr<NativeHandler>(native_handler.release());
 }
 
+void ModuleSystem::OverrideNativeHandler(const std::string& name) {
+  overridden_native_handlers_.insert(name);
+}
+
 void ModuleSystem::RunString(const std::string& code, const std::string& name) {
   v8::HandleScope handle_scope;
   RunString(v8::String::New(code.c_str()), v8::String::New(name.c_str()));
@@ -142,8 +154,8 @@ v8::Handle<v8::Value> ModuleSystem::LazyFieldGetter(
   v8::Handle<v8::Object> module;
   {
     NativesEnabledScope scope(module_system);
-    module = module_system->RequireForJsInner(
-        parameters->Get(v8::String::New(kModuleName))->ToString())->ToObject();
+    module = v8::Handle<v8::Object>::Cast(module_system->RequireForJsInner(
+        parameters->Get(v8::String::New(kModuleName))->ToString()));
   }
   if (module.IsEmpty())
     return handle_scope.Close(v8::Handle<v8::Value>());
@@ -205,6 +217,8 @@ v8::Handle<v8::Value> ModuleSystem::GetNative(const v8::Arguments& args) {
   if (natives_enabled_ == 0)
     return ThrowException("Natives disabled");
   std::string native_name = *v8::String::AsciiValue(args[0]->ToString());
+  if (overridden_native_handlers_.count(native_name) > 0u)
+    return RequireForJs(args);
   NativeHandlerMap::iterator i = native_handler_map_.find(native_name);
   if (i == native_handler_map_.end())
     return v8::Undefined();

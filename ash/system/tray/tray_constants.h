@@ -10,6 +10,13 @@ typedef unsigned int SkColor;
 
 namespace ash {
 
+extern const int kPaddingFromRightEdgeOfScreenBottomAlignment;
+extern const int kPaddingFromBottomOfScreenBottomAlignment;
+extern const int kPaddingFromEdgeOfScreenVerticalAlignment;
+extern const int kPaddingFromEdgeOfLauncherVerticalAlignment;
+extern const int kPaddingFromRightEdgeOfScreenRightAlignment;
+extern const int kPaddingFromBottomOfScreenVerticalAlignment;
+
 extern const int kTrayPopupAutoCloseDelayInSeconds;
 extern const int kTrayPopupAutoCloseDelayForTextInSeconds;
 extern const int kTrayPopupPaddingHorizontal;
@@ -23,8 +30,8 @@ extern const int kTrayRoundedBorderRadius;
 extern const SkColor kBackgroundColor;
 extern const SkColor kHoverBackgroundColor;
 
-extern const SkColor kHeaderBackgroundColor;
-extern const SkColor kHeaderHoverBackgroundColor;
+extern const SkColor kHeaderBackgroundColorLight;
+extern const SkColor kHeaderBackgroundColorDark;
 
 extern const SkColor kBorderDarkColor;
 extern const SkColor kBorderLightColor;
@@ -32,7 +39,12 @@ extern const SkColor kButtonStrokeColor;
 
 extern const SkColor kFocusBorderColor;
 
+extern const SkColor kHeaderTextColorNormal;
+extern const SkColor kHeaderTextColorHover;
+
 extern const int kTrayPopupWidth;
+extern const int kNotificationIconWidth;
+extern const int kTrayNotificationContentsWidth;
 
 }  // namespace ash
 

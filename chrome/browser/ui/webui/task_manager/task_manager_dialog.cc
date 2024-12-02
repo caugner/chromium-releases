@@ -18,15 +18,16 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/webui/web_dialog_delegate.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/size.h"
+#include "ui/web_dialogs/web_dialog_delegate.h"
 
 #if defined(OS_CHROMEOS)
 #include "ui/views/widget/widget.h"
@@ -43,6 +44,7 @@ const int kMinimumTaskManagerHeight = 480;
 using content::BrowserThread;
 using content::WebContents;
 using content::WebUIMessageHandler;
+using ui::WebDialogDelegate;
 
 class TaskManagerDialogImpl : public WebDialogDelegate {
  public:
@@ -192,10 +194,9 @@ void TaskManagerDialogImpl::OnCloseDialog() {
 }
 
 void TaskManagerDialogImpl::OpenWebDialog() {
-  Browser* browser = BrowserList::GetLastActive();
-  DCHECK(browser);
-  window_ = browser::ShowWebDialog(
-      NULL, browser->profile()->GetOriginalProfile(), NULL, this);
+  window_ = browser::ShowWebDialog(NULL,
+                                   ProfileManager::GetDefaultProfile(),
+                                   this);
 }
 
 // static
@@ -210,10 +211,4 @@ void TaskManagerDialog::ShowBackgroundPages() {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&TaskManagerDialogImpl::Show, true));
-}
-
-// static
-bool TaskManagerDialog::UseWebUITaskManager() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kWebUITaskManager);
 }

@@ -8,7 +8,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
@@ -46,9 +47,9 @@ gfx::NativeWindow GetParent(Profile* profile) {
     return app_list;
 #endif
 
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+  Browser* browser = browser::FindLastActiveWithProfile(profile);
   if (browser && browser->window())
-    return browser->window()->GetNativeHandle();
+    return browser->window()->GetNativeWindow();
 
   return NULL;
 }
@@ -79,8 +80,8 @@ class ExtensionUninstallDialogDelegateView : public views::DialogDelegateView {
  public:
   ExtensionUninstallDialogDelegateView(
       ExtensionUninstallDialogViews* dialog_view,
-      const Extension* extension,
-      SkBitmap* icon);
+      const extensions::Extension* extension,
+      gfx::ImageSkia* icon);
   virtual ~ExtensionUninstallDialogDelegateView();
 
   // Called when the ExtensionUninstallDialog has been destroyed to make sure
@@ -155,8 +156,8 @@ void ExtensionUninstallDialogViews::ExtensionUninstallCanceled() {
 
 ExtensionUninstallDialogDelegateView::ExtensionUninstallDialogDelegateView(
     ExtensionUninstallDialogViews* dialog_view,
-    const Extension* extension,
-    SkBitmap* icon)
+    const extensions::Extension* extension,
+    gfx::ImageSkia* icon)
     : dialog_(dialog_view) {
   // Scale down to icon size, but allow smaller icons (don't scale up).
   gfx::Size size(icon->width(), icon->height());

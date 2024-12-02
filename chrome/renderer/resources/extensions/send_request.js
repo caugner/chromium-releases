@@ -4,6 +4,7 @@
 
 var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
 var natives = requireNative('sendRequest');
+var validate = require('schemaUtils').validate;
 
 // Callback handling.
 var requests = [];
@@ -44,8 +45,7 @@ chromeHidden.handleResponse = function(requestId, name,
           if (request.callbackSchema.parameters.length > 1) {
             throw new Error("Callbacks may only define one parameter");
           }
-          chromeHidden.validate(callbackArgs,
-              request.callbackSchema.parameters);
+          validate(callbackArgs, request.callbackSchema.parameters);
         } catch (exception) {
           return "Callback validation error during " + name + " -- " +
                  exception.stack;
@@ -72,9 +72,8 @@ function prepareRequest(args, argSchemas) {
 
   // Look for callback param.
   if (argSchemas.length > 0 &&
-      args.length == argSchemas.length &&
       argSchemas[argSchemas.length - 1].type == "function") {
-    request.callback = args[argSchemas.length - 1];
+    request.callback = args[args.length - 1];
     request.callbackSchema = argSchemas[argSchemas.length - 1];
     --argCount;
   }
@@ -107,8 +106,13 @@ function sendRequest(functionName, args, argSchemas, opt_args) {
   if (request.args === undefined)
     request.args = null;
 
-  var sargs = opt_args.noStringify ?
-      request.args : chromeHidden.JSON.stringify(request.args);
+  // TODO(asargent) - convert all optional native functions to accept raw
+  // v8 values instead of expecting JSON strings.
+  var doStringify = false;
+  if (opt_args.nativeFunction && !opt_args.noStringify)
+    doStringify = true;
+  var requestArgs = doStringify ?
+      chromeHidden.JSON.stringify(request.args) : request.args;
   var nativeFunction = opt_args.nativeFunction || natives.StartRequest;
 
   var requestId = natives.GetNextRequestId();
@@ -116,7 +120,7 @@ function sendRequest(functionName, args, argSchemas, opt_args) {
   requests[requestId] = request;
   var hasCallback =
       (request.callback || opt_args.customCallback) ? true : false;
-  return nativeFunction(functionName, sargs, requestId, hasCallback,
+  return nativeFunction(functionName, requestArgs, requestId, hasCallback,
                         opt_args.forIOThread);
 }
 

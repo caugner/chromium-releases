@@ -21,11 +21,11 @@
 // corresponding changes must happen in the unit tests, and new migration test
 // added.  See |WebDatabaseMigrationTest::kCurrentTestedVersionNumber|.
 // static
-const int WebDatabase::kCurrentVersionNumber = 45;
+const int WebDatabase::kCurrentVersionNumber = 46;
 
 namespace {
 
-const int kCompatibleVersionNumber = 45;
+const int kCompatibleVersionNumber = 46;
 
 // Change the version number and possibly the compatibility version of
 // |meta_table_|.
@@ -158,8 +158,15 @@ sql::InitStatus WebDatabase::Init(const FilePath& db_name) {
 }
 
 sql::InitStatus WebDatabase::MigrateOldVersionsAsNeeded() {
+  // Some malware tries to force protector to re-sign things by lowering the
+  // version number, causing migration to fail. Ensure the version number is at
+  // least as high as the compatible version number.
+  int current_version = std::max(meta_table_.GetVersionNumber(),
+                                 meta_table_.GetCompatibleVersionNumber());
+  if (current_version > meta_table_.GetVersionNumber())
+    ChangeVersion(&meta_table_, current_version, false);
+
   // Migrate if necessary.
-  int current_version = meta_table_.GetVersionNumber();
   switch (current_version) {
     // Versions 1 - 19 are unhandled.  Version numbers greater than
     // kCurrentVersionNumber should have already been weeded out by the caller.
@@ -327,6 +334,13 @@ sql::InitStatus WebDatabase::MigrateOldVersionsAsNeeded() {
         return FailedMigrationTo(45);
 
       ChangeVersion(&meta_table_, 45, true);
+      // FALL THROUGH
+
+    case 45:
+      if (!web_intents_table_->MigrateToVersion46AddSchemeColumn())
+        return FailedMigrationTo(46);
+
+      ChangeVersion(&meta_table_, 46, true);
       // FALL THROUGH
 
     // Add successive versions here.  Each should set the version number and

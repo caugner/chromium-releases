@@ -20,21 +20,21 @@
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/debugger/devtools_toggle_action.h"
 #include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/repost_form_warning_controller.h"
+#include "chrome/browser/tab_contents/render_view_context_menu_win.h"
 #include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
+#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_creator.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/views/browser_dialogs.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
-#include "chrome/browser/ui/views/tab_contents/render_view_context_menu_views.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -64,11 +64,12 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/view_prop.h"
-#include "ui/views/layout/grid_layout.h"
 #include "ui/views/controls/webview/webview.h"
+#include "ui/views/layout/grid_layout.h"
 
 using content::BrowserThread;
 using content::LoadNotificationDetails;
+using content::NativeWebKeyboardEvent;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -149,7 +150,7 @@ bool ExternalTabContainer::Init(Profile* profile,
                                 DWORD style,
                                 bool load_requests_via_automation,
                                 bool handle_top_level_requests,
-                                TabContentsWrapper* existing_contents,
+                                TabContents* existing_contents,
                                 const GURL& initial_url,
                                 const GURL& referrer,
                                 bool infobars_enabled,
@@ -184,7 +185,7 @@ bool ExternalTabContainer::Init(Profile* profile,
   } else {
     WebContents* new_contents = WebContents::Create(
         profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
-    tab_contents_.reset(new TabContentsWrapper(new_contents));
+    tab_contents_.reset(new TabContents(new_contents));
   }
 
   if (!infobars_enabled)
@@ -193,7 +194,7 @@ bool ExternalTabContainer::Init(Profile* profile,
   tab_contents_->web_contents()->SetDelegate(this);
 
   tab_contents_->web_contents()->
-      GetMutableRendererPrefs()->browser_handles_top_level_requests =
+      GetMutableRendererPrefs()->browser_handles_non_local_top_level_requests =
           handle_top_level_requests;
 
   if (!existing_contents) {
@@ -449,23 +450,23 @@ void ExternalTabContainer::AddNewContents(WebContents* source,
 
   // Make sure that ExternalTabContainer instance is initialized with
   // an unwrapped Profile.
-  scoped_ptr<TabContentsWrapper> wrapper(new TabContentsWrapper(new_contents));
+  scoped_ptr<TabContents> tab_contents(new TabContents(new_contents));
   bool result = new_container->Init(
-      wrapper->profile()->GetOriginalProfile(),
+      tab_contents->profile()->GetOriginalProfile(),
       NULL,
       initial_pos,
       WS_CHILD,
       load_requests_via_automation_,
       handle_top_level_requests_,
-      wrapper.get(),
+      tab_contents.get(),
       GURL(),
       GURL(),
       true,
       route_all_top_level_navigations_);
 
   if (result) {
-    Profile* profile = wrapper->profile();
-    wrapper.release();  // Ownership has been transferred.
+    Profile* profile = tab_contents->profile();
+    tab_contents.release();  // Ownership has been transferred.
     if (route_all_top_level_navigations_) {
       return;
     }
@@ -520,8 +521,8 @@ void ExternalTabContainer::MoveContents(WebContents* source,
     automation_->Send(new AutomationMsg_MoveWindow(tab_handle_, pos));
 }
 
-TabContentsWrapper* ExternalTabContainer::GetConstrainingContentsWrapper(
-    TabContentsWrapper* source) {
+TabContents* ExternalTabContainer::GetConstrainingTabContents(
+    TabContents* source) {
   return source;
 }
 
@@ -532,7 +533,6 @@ bool ExternalTabContainer::IsPopupOrPanel(const WebContents* source) const {
 void ExternalTabContainer::UpdateTargetURL(WebContents* source,
                                            int32 page_id,
                                            const GURL& url) {
-  Browser::UpdateTargetURLHelper(source, page_id, url);
   if (automation_) {
     string16 url_string = CA2W(url.spec().c_str());
     automation_->Send(
@@ -625,9 +625,10 @@ bool ExternalTabContainer::HandleContextMenu(
     NOTREACHED();
     return false;
   }
-  external_context_menu_.reset(
-      new RenderViewContextMenuViews(web_contents(), params));
-  external_context_menu_->SetExternal();
+  external_context_menu_.reset(RenderViewContextMenuViews::Create(
+      web_contents(), params));
+  static_cast<RenderViewContextMenuWin*>(
+      external_context_menu_.get())->SetExternal();
   external_context_menu_->Init();
   external_context_menu_->UpdateMenuItemStates();
 
@@ -716,17 +717,17 @@ void ExternalTabContainer::ShowRepostFormWarningDialog(
     WebContents* source) {
   browser::ShowTabModalConfirmDialog(
       new RepostFormWarningController(source),
-      TabContentsWrapper::GetCurrentWrapperForContents(source));
+      TabContents::FromWebContents(source));
 }
 
 void ExternalTabContainer::RunFileChooser(
     WebContents* tab, const content::FileChooserParams& params) {
-  Browser::RunFileChooserHelper(tab, params);
+  FileSelectHelper::RunFileChooser(tab, params);
 }
 
 void ExternalTabContainer::EnumerateDirectory(WebContents* tab, int request_id,
                                               const FilePath& path) {
-  Browser::EnumerateDirectoryHelper(tab, request_id, path);
+  FileSelectHelper::EnumerateDirectory(tab, request_id, path);
 }
 
 void ExternalTabContainer::JSOutOfMemory(WebContents* tab) {
@@ -736,18 +737,17 @@ void ExternalTabContainer::JSOutOfMemory(WebContents* tab) {
 void ExternalTabContainer::RegisterProtocolHandler(WebContents* tab,
                                                    const std::string& protocol,
                                                    const GURL& url,
-                                                   const string16& title) {
-  Browser::RegisterProtocolHandlerHelper(tab, protocol, url, title);
+                                                   const string16& title,
+                                                   bool user_gesture) {
+  Browser::RegisterProtocolHandlerHelper(tab, protocol, url, title,
+                                         user_gesture);
 }
 
-void ExternalTabContainer::RegisterIntentHandler(WebContents* tab,
-                                                 const string16& action,
-                                                 const string16& type,
-                                                 const string16& href,
-                                                 const string16& title,
-                                                 const string16& disposition) {
-  Browser::RegisterIntentHandlerHelper(
-      tab, action, type, href, title, disposition);
+void ExternalTabContainer::RegisterIntentHandler(
+    WebContents* tab,
+    const webkit_glue::WebIntentServiceData& data,
+    bool user_gesture) {
+  Browser::RegisterIntentHandlerHelper(tab, data, user_gesture);
 }
 
 void ExternalTabContainer::WebIntentDispatch(
@@ -768,6 +768,13 @@ void ExternalTabContainer::FindReply(WebContents* tab,
                            active_match_ordinal, final_update);
 }
 
+void ExternalTabContainer::RequestMediaAccessPermission(
+    content::WebContents* web_contents,
+    const content::MediaStreamRequest* request,
+    const content::MediaResponseCallback& callback) {
+  Browser::RequestMediaAccessPermissionHelper(web_contents, request, callback);
+}
+
 bool ExternalTabContainer::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExternalTabContainer, message)
@@ -783,7 +790,8 @@ void ExternalTabContainer::DidFailProvisionalLoad(
     bool is_main_frame,
     const GURL& validated_url,
     int error_code,
-    const string16& error_description) {
+    const string16& error_description,
+    content::RenderViewHost* render_view_host) {
   automation_->Send(new AutomationMsg_NavigationFailed(
       tab_handle_, error_code, validated_url));
   ignore_next_load_notification_ = true;
@@ -1108,12 +1116,9 @@ void ExternalTabContainer::LoadAccelerators() {
 
   // Let's fill our own accelerator table.
   for (int i = 0; i < count; ++i) {
-    bool alt_down = (accelerators[i].fVirt & FALT) == FALT;
-    bool ctrl_down = (accelerators[i].fVirt & FCONTROL) == FCONTROL;
-    bool shift_down = (accelerators[i].fVirt & FSHIFT) == FSHIFT;
     ui::Accelerator accelerator(
         static_cast<ui::KeyboardCode>(accelerators[i].key),
-        shift_down, ctrl_down, alt_down);
+        ui::GetModifiersFromACCEL(accelerators[i]));
     accelerator_table_[accelerator] = accelerators[i].cmd;
 
     // Also register with the focus manager.

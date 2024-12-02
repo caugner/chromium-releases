@@ -16,6 +16,7 @@
 #include "content/public/browser/download_url_parameters.h"
 #include "net/base/file_stream.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
@@ -26,7 +27,7 @@ DragDownloadFile::DragDownloadFile(
     const FilePath& file_name_or_path,
     linked_ptr<net::FileStream> file_stream,
     const GURL& url,
-    const GURL& referrer,
+    const content::Referrer& referrer,
     const std::string& referrer_encoding,
     WebContents* web_contents)
     : file_stream_(file_stream),
@@ -127,7 +128,8 @@ void DragDownloadFile::InitiateDownload() {
   }
 #endif
 
-  download_manager_ = web_contents_->GetBrowserContext()->GetDownloadManager();
+  download_manager_ = BrowserContext::GetDownloadManager(
+      web_contents_->GetBrowserContext());
   download_manager_observer_added_ = true;
   download_manager_->AddObserver(this);
 

@@ -11,21 +11,26 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/web_contents/web_contents_view_helper.h"
 #include "content/common/content_export.h"
+#include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/base/gtk/focus_store_gtk.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 
+class WebContentsImpl;
+
 namespace content {
 
+class WebContents;
 class WebContentsViewDelegate;
 class WebDragDestDelegate;
 class WebDragDestGtk;
 class WebDragSourceGtk;
 
-class CONTENT_EXPORT WebContentsViewGtk : public WebContentsView {
+class CONTENT_EXPORT WebContentsViewGtk
+    : public WebContentsView,
+      public RenderViewHostDelegateView {
  public:
   // The corresponding WebContentsImpl is passed in the constructor, and manages
   // our lifetime. This doesn't need to be the case, but is this way currently
@@ -63,22 +68,9 @@ class CONTENT_EXPORT WebContentsViewGtk : public WebContentsView {
   virtual WebDropData* GetDropData() const OVERRIDE;
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
-  virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
+  virtual gfx::Rect GetViewBounds() const OVERRIDE;
 
-  // Backend implementation of RenderViewHostDelegate::View.
-  virtual void CreateNewWindow(
-      int route_id,
-      const ViewHostMsg_CreateWindow_Params& params) OVERRIDE;
-  virtual void CreateNewWidget(int route_id,
-                               WebKit::WebPopupType popup_type) OVERRIDE;
-  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
-  virtual void ShowCreatedWindow(int route_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
-                                 bool user_gesture) OVERRIDE;
-  virtual void ShowCreatedWidget(int route_id,
-                                 const gfx::Rect& initial_pos) OVERRIDE;
-  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+  // Backend implementation of RenderViewHostDelegateView.
   virtual void ShowContextMenu(
       const content::ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
@@ -86,7 +78,8 @@ class CONTENT_EXPORT WebContentsViewGtk : public WebContentsView {
                              double item_font_size,
                              int selected_item,
                              const std::vector<WebMenuItem>& items,
-                             bool right_aligned) OVERRIDE;
+                             bool right_aligned,
+                             bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_ops,
                              const SkBitmap& image,
@@ -118,9 +111,6 @@ class CONTENT_EXPORT WebContentsViewGtk : public WebContentsView {
 
   // The WebContentsImpl whose contents we display.
   WebContentsImpl* web_contents_;
-
-  // Common implementations of some WebContentsView methods.
-  WebContentsViewHelper web_contents_view_helper_;
 
   // This container holds the tab's web page views. It is a GtkExpandedContainer
   // so that we can control the size of the web pages.

@@ -59,7 +59,7 @@ class ChromeResourceDispatcherHostDelegate
       int child_id,
       int route_id,
       int request_id,
-      bool is_new_request,
+      bool is_content_initiated,
       ScopedVector<content::ResourceThrottle>* throttles) OVERRIDE;
   virtual bool AcceptSSLClientCertificateRequest(
         net::URLRequest* request,
@@ -73,10 +73,9 @@ class ChromeResourceDispatcherHostDelegate
                                       int route_id) OVERRIDE;
   virtual bool ShouldForceDownloadResource(
       const GURL& url, const std::string& mime_type) OVERRIDE;
-  virtual void OnResponseStarted(
-      net::URLRequest* request,
-      content::ResourceResponse* response,
-      IPC::Message::Sender* sender) OVERRIDE;
+  virtual void OnResponseStarted(net::URLRequest* request,
+                                 content::ResourceResponse* response,
+                                 IPC::Sender* sender) OVERRIDE;
   virtual void OnRequestRedirected(
       net::URLRequest* request,
       content::ResourceResponse* response) OVERRIDE;

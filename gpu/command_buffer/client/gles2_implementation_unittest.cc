@@ -333,8 +333,15 @@ class GLES2ImplementationTest : public testing::Test {
   virtual void TearDown() OVERRIDE;
 
   bool NoCommandsWritten() {
-    return static_cast<const uint8*>(static_cast<const void*>(commands_))[0] ==
-           kInitialValue;
+    Buffer ring_buffer = helper_->get_ring_buffer();
+    const uint8* cmds = reinterpret_cast<const uint8*>(ring_buffer.ptr);
+    const uint8* end = cmds + ring_buffer.size;
+    for (; cmds < end; ++cmds) {
+      if (*cmds != kInitialValue) {
+        return false;
+      }
+    }
+    return true;
   }
 
   QueryTracker::Query* GetQuery(GLuint id) {
@@ -354,30 +361,31 @@ class GLES2ImplementationTest : public testing::Test {
     helper_.reset(new GLES2CmdHelper(command_buffer()));
     helper_->Initialize(kCommandBufferSizeBytes);
 
-    GLES2Implementation::GLState state;
-    state.max_combined_texture_image_units = kMaxCombinedTextureImageUnits;
-    state.max_cube_map_texture_size = kMaxCubeMapTextureSize;
-    state.max_fragment_uniform_vectors = kMaxFragmentUniformVectors;
-    state.max_renderbuffer_size = kMaxRenderbufferSize;
-    state.max_texture_image_units = kMaxTextureImageUnits;
-    state.max_texture_size = kMaxTextureSize;
-    state.max_varying_vectors = kMaxVaryingVectors;
-    state.max_vertex_attribs = kMaxVertexAttribs;
-    state.max_vertex_texture_image_units = kMaxVertexTextureImageUnits;
-    state.max_vertex_uniform_vectors = kMaxVertexUniformVectors;
-    state.num_compressed_texture_formats = kNumCompressedTextureFormats;
-    state.num_shader_binary_formats = kNumShaderBinaryFormats;
+    GLES2Implementation::GLCachedState state;
+    GLES2Implementation::GLCachedState::IntState& int_state = state.int_state;
+    int_state.max_combined_texture_image_units = kMaxCombinedTextureImageUnits;
+    int_state.max_cube_map_texture_size = kMaxCubeMapTextureSize;
+    int_state.max_fragment_uniform_vectors = kMaxFragmentUniformVectors;
+    int_state.max_renderbuffer_size = kMaxRenderbufferSize;
+    int_state.max_texture_image_units = kMaxTextureImageUnits;
+    int_state.max_texture_size = kMaxTextureSize;
+    int_state.max_varying_vectors = kMaxVaryingVectors;
+    int_state.max_vertex_attribs = kMaxVertexAttribs;
+    int_state.max_vertex_texture_image_units = kMaxVertexTextureImageUnits;
+    int_state.max_vertex_uniform_vectors = kMaxVertexUniformVectors;
+    int_state.num_compressed_texture_formats = kNumCompressedTextureFormats;
+    int_state.num_shader_binary_formats = kNumShaderBinaryFormats;
 
-    // This just happens to work for now because GLState has 1 GLint per
-    // state. If GLState gets more complicated this code will need to get
-    // more complicated.
-    ExpectedMemoryInfo mem1 = GetExpectedMemory(sizeof(state) * 2);
+    // This just happens to work for now because IntState has 1 GLint per state.
+    // If IntState gets more complicated this code will need to get more
+    // complicated.
+    ExpectedMemoryInfo mem1 = GetExpectedMemory(sizeof(int_state) * 2);
 
     {
       InSequence sequence;
 
       EXPECT_CALL(*command_buffer(), OnFlush())
-          .WillOnce(SetMemory(mem1.ptr + sizeof(state), state))
+          .WillOnce(SetMemory(mem1.ptr + sizeof(int_state), int_state))
           .RetiresOnSaturation();
       GetNextToken();  // eat the token that starting up will use.
 
@@ -2285,7 +2293,11 @@ TEST_F(GLES2ImplementationTest, GetString) {
   // GL_CHROMIUM_map_sub GL_CHROMIUM_flipy are hard coded into
   // GLES2Implementation.
   const char* expected_str =
-      "foobar GL_CHROMIUM_map_sub GL_CHROMIUM_flipy GL_EXT_unpack_subimage";
+      "foobar "
+      "GL_CHROMIUM_map_sub "
+      "GL_CHROMIUM_flipy "
+      "GL_CHROMIUM_consistent_uniform_locations "
+      "GL_EXT_unpack_subimage";
   const char kBad = 0x12;
   struct Cmds {
     cmd::SetBucketSize set_bucket_size1;
@@ -2391,6 +2403,39 @@ TEST_F(GLES2ImplementationTest, BufferDataLargerThanTransferBuffer) {
   expected.set_token2.Init(GetNextToken());
   gl_->BufferData(GL_ARRAY_BUFFER, arraysize(buf), buf, GL_DYNAMIC_DRAW);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, CapabilitiesAreCached) {
+  static const GLenum kStates[] = {
+    GL_DITHER,
+    GL_BLEND,
+    GL_CULL_FACE,
+    GL_DEPTH_TEST,
+    GL_POLYGON_OFFSET_FILL,
+    GL_SAMPLE_ALPHA_TO_COVERAGE,
+    GL_SAMPLE_COVERAGE,
+    GL_SCISSOR_TEST,
+    GL_STENCIL_TEST,
+  };
+  struct Cmds {
+    Enable enable_cmd;
+  };
+  Cmds expected;
+
+  for (size_t ii = 0; ii < arraysize(kStates); ++ii) {
+    GLenum state = kStates[ii];
+    expected.enable_cmd.Init(state);
+    GLboolean result = gl_->IsEnabled(state);
+    EXPECT_FALSE(result);
+    EXPECT_TRUE(NoCommandsWritten());
+    const void* commands = GetPut();
+    gl_->Enable(state);
+    EXPECT_EQ(0, memcmp(&expected, commands, sizeof(expected)));
+    ClearCommands();
+    result = gl_->IsEnabled(state);
+    EXPECT_TRUE(result);
+    EXPECT_TRUE(NoCommandsWritten());
+  }
 }
 
 TEST_F(GLES2ImplementationTest, BeginEndQueryEXT) {
@@ -2511,6 +2556,64 @@ TEST_F(GLES2ImplementationTest, BeginEndQueryEXT) {
   gl_->GetQueryObjectuivEXT(id1, GL_QUERY_RESULT_AVAILABLE_EXT, &available);
   EXPECT_TRUE(NoCommandsWritten());
   EXPECT_EQ(0u, available);
+}
+
+TEST_F(GLES2ImplementationTest, GetUniformLocationsCHROMIUM) {
+  static const GLUniformDefinitionCHROMIUM good_defs[] = {
+    { GL_FLOAT_VEC4, 1, "moo", },
+    { GL_FLOAT_VEC4, 4, "bar", },
+    { GL_FLOAT_VEC4, 3, "foo", },
+  };
+
+  static const GLUniformDefinitionCHROMIUM bad_defs[] = {
+    { GL_FLOAT_VEC4, 1, "moo", },
+    { GL_FLOAT_VEC4, 0, "bar", },
+    { GL_FLOAT_VEC4, 3, "foo", },
+  };
+
+  // Test bad count
+  GLint locations[50] = { -1, };
+  gl_->GetUniformLocationsCHROMIUM(bad_defs, 0, 1, locations);
+  EXPECT_EQ(GL_INVALID_VALUE, CheckError());
+  EXPECT_EQ(-1, locations[0]);
+
+  // Test bad size.
+  gl_->GetUniformLocationsCHROMIUM(
+      bad_defs, arraysize(bad_defs), 1, locations);
+  EXPECT_EQ(GL_INVALID_VALUE, CheckError());
+  EXPECT_EQ(-1, locations[0]);
+
+  // Test max_locations
+  gl_->GetUniformLocationsCHROMIUM(
+      good_defs, arraysize(good_defs), 3, locations);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(2, 0)),
+            locations[0]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 0)),
+            locations[1]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 1)),
+            locations[2]);
+  EXPECT_EQ(0, locations[3]);
+
+  // Test all.
+  gl_->GetUniformLocationsCHROMIUM(
+      good_defs, arraysize(good_defs), arraysize(locations), locations);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(2, 0)),
+            locations[0]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 0)),
+            locations[1]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 1)),
+            locations[2]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 2)),
+            locations[3]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 3)),
+            locations[4]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(1, 0)),
+            locations[5]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(1, 1)),
+            locations[6]);
+  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(1, 2)),
+            locations[7]);
+  EXPECT_EQ(0, locations[8]);
 }
 
 #include "gpu/command_buffer/client/gles2_implementation_unittest_autogen.h"

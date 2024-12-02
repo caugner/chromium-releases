@@ -11,6 +11,8 @@
 #include "chrome/common/extensions/file_browser_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using extensions::Extension;
+
 namespace errors = extension_manifest_errors;
 
 TEST_F(ExtensionManifestTest, FileBrowserHandlers) {
@@ -78,9 +80,7 @@ TEST_F(ExtensionManifestTest, FileManagerURLOverride) {
   // A component extention can override chrome://files/ URL.
   std::string error;
   LoadExtension(Manifest("filebrowser_url_override.json"),
-                &error,
-                Extension::COMPONENT,
-                Extension::STRICT_ERROR_CHECKS);
+                &error, Extension::COMPONENT, Extension::NO_FLAGS);
 #if defined(FILE_MANAGER_EXTENSION)
   EXPECT_EQ("", error);
 #else

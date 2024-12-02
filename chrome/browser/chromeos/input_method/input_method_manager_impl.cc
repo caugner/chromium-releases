@@ -221,6 +221,12 @@ bool InputMethodManagerImpl::SetInputMethodConfig(
 
 void InputMethodManagerImpl::ChangeInputMethod(
     const std::string& input_method_id) {
+  ChangeInputMethodInternal(input_method_id, false);
+}
+
+void InputMethodManagerImpl::ChangeInputMethodInternal(
+    const std::string& input_method_id,
+    bool show_message) {
   if (state_ == STATE_TERMINATING)
     return;
 
@@ -274,7 +280,7 @@ void InputMethodManagerImpl::ChangeInputMethod(
   // Update input method indicators (e.g. "US", "DV") in Chrome windows.
   FOR_EACH_OBSERVER(InputMethodManager::Observer,
                     observers_,
-                    InputMethodChanged(this));
+                    InputMethodChanged(this, show_message));
 }
 
 void InputMethodManagerImpl::ActivateInputMethodProperty(
@@ -296,9 +302,9 @@ void InputMethodManagerImpl::AddInputMethodExtension(
     return;
   }
 
-  const std::string virtual_layouts = JoinString(layouts, ',');
-  extra_input_methods_[id] = InputMethodDescriptor(
-      whitelist_, id, name, virtual_layouts, language);
+  const std::string layout = layouts.empty() ? "" : layouts[0];
+  extra_input_methods_[id] =
+      InputMethodDescriptor(id, name, layout, language, true);
 
   if (!Contains(active_input_method_ids_, id)) {
     active_input_method_ids_.push_back(id);
@@ -386,7 +392,7 @@ bool InputMethodManagerImpl::SwitchToPreviousInputMethod() {
     // previous_input_method_ is not supported.
     return SwitchToNextInputMethod();
   }
-  ChangeInputMethod(*iter);
+  ChangeInputMethodInternal(*iter, true);
   return true;
 }
 
@@ -417,7 +423,6 @@ bool InputMethodManagerImpl::SwitchInputMethod(
       input_method_ids_to_switch.push_back("xkb:jp::jpn");
       break;
     case ui::VKEY_HANGUL:  // Hangul (or right Alt) key on Korean keyboard
-    case ui::VKEY_SPACE:  // Shift+Space
       input_method_ids_to_switch.push_back("mozc-hangul");
       input_method_ids_to_switch.push_back("xkb:kr:kr104:kor");
       break;
@@ -460,7 +465,7 @@ void InputMethodManagerImpl::SwitchToNextInputMethodInternal(
     ++iter;
   if (iter == input_method_ids.end())
     iter = input_method_ids.begin();
-  ChangeInputMethod(*iter);
+  ChangeInputMethodInternal(*iter, true);
 }
 
 InputMethodDescriptor InputMethodManagerImpl::GetCurrentInputMethod() const {
@@ -581,7 +586,6 @@ bool InputMethodManagerImpl::ContainOnlyKeyboardLayout(
 }
 
 void InputMethodManagerImpl::MaybeInitializeCandidateWindowController() {
-#if !defined(USE_VIRTUAL_KEYBOARD)
   if (candidate_window_controller_.get())
     return;
 
@@ -591,7 +595,6 @@ void InputMethodManagerImpl::MaybeInitializeCandidateWindowController() {
     candidate_window_controller_->AddObserver(this);
   else
     DVLOG(1) << "Failed to initialize the candidate window controller";
-#endif
 }
 
 // static

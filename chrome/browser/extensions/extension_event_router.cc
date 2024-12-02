@@ -17,20 +17,21 @@
 #include "chrome/browser/extensions/extension_processes_api_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/api/extension_api.h"
+#include "chrome/common/view_type.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 
+using base::Value;
 using content::BrowserThread;
+using extensions::Extension;
 using extensions::ExtensionAPI;
 
 namespace {
@@ -66,12 +67,39 @@ struct ExtensionEventRouter::ListenerProcess {
 
 struct ExtensionEventRouter::ExtensionEvent {
   std::string event_name;
-  std::string event_args;
+  scoped_ptr<Value> event_args;
   GURL event_url;
   Profile* restrict_to_profile;
-  std::string cross_incognito_args;
+  scoped_ptr<Value> cross_incognito_args;
   UserGestureState user_gesture;
 
+  ExtensionEvent(const std::string& event_name,
+                 const Value& event_args,
+                 const GURL& event_url,
+                 Profile* restrict_to_profile,
+                 const Value& cross_incognito_args,
+                 UserGestureState user_gesture)
+    : event_name(event_name),
+      event_args(event_args.DeepCopy()),
+      event_url(event_url),
+      restrict_to_profile(restrict_to_profile),
+      cross_incognito_args(cross_incognito_args.DeepCopy()),
+      user_gesture(user_gesture) {}
+
+  ExtensionEvent(const std::string& event_name,
+                 const Value& event_args,
+                 const GURL& event_url,
+                 Profile* restrict_to_profile,
+                 UserGestureState user_gesture)
+    : event_name(event_name),
+      event_args(event_args.DeepCopy()),
+      event_url(event_url),
+      restrict_to_profile(restrict_to_profile),
+      cross_incognito_args(NULL),
+      user_gesture(user_gesture) {}
+
+  // TODO(gdk): This variant should be retired once the callers are switched to
+  // providing Values instead of just strings.
   ExtensionEvent(const std::string& event_name,
                  const std::string& event_args,
                  const GURL& event_url,
@@ -79,26 +107,40 @@ struct ExtensionEventRouter::ExtensionEvent {
                  const std::string& cross_incognito_args,
                  UserGestureState user_gesture)
     : event_name(event_name),
-      event_args(event_args),
+      event_args(Value::CreateStringValue(event_args)),
       event_url(event_url),
       restrict_to_profile(restrict_to_profile),
-      cross_incognito_args(cross_incognito_args),
+      cross_incognito_args(Value::CreateStringValue(cross_incognito_args)),
       user_gesture(user_gesture) {}
 };
 
 // static
-void ExtensionEventRouter::DispatchEvent(IPC::Message::Sender* ipc_sender,
+void ExtensionEventRouter::DispatchEvent(IPC::Sender* ipc_sender,
+                                         const std::string& extension_id,
+                                         const std::string& event_name,
+                                         const Value& event_args,
+                                         const GURL& event_url,
+                                         UserGestureState user_gesture) {
+  // TODO(gdk): Reduce number of DeepCopy() calls throughout the event dispatch
+  // chain, starting by replacing the event_args with a Value*.
+  ListValue args;
+  args.Set(0, Value::CreateStringValue(event_name));
+  args.Set(1, event_args.DeepCopy());
+  ipc_sender->Send(new ExtensionMsg_MessageInvoke(MSG_ROUTING_CONTROL,
+      extension_id, kDispatchEvent, args, event_url,
+      user_gesture == USER_GESTURE_ENABLED));
+}
+
+// static
+void ExtensionEventRouter::DispatchEvent(IPC::Sender* ipc_sender,
                                          const std::string& extension_id,
                                          const std::string& event_name,
                                          const std::string& event_args,
                                          const GURL& event_url,
                                          UserGestureState user_gesture) {
-  ListValue args;
-  args.Set(0, Value::CreateStringValue(event_name));
-  args.Set(1, Value::CreateStringValue(event_args));
-  ipc_sender->Send(new ExtensionMsg_MessageInvoke(MSG_ROUTING_CONTROL,
-      extension_id, kDispatchEvent, args, event_url,
-      user_gesture == USER_GESTURE_ENABLED));
+  scoped_ptr<Value> event_args_value(Value::CreateStringValue(event_args));
+  DispatchEvent(ipc_sender, extension_id, event_name, *event_args_value.get(),
+                event_url, user_gesture);
 }
 
 ExtensionEventRouter::ExtensionEventRouter(Profile* profile)
@@ -132,8 +174,10 @@ void ExtensionEventRouter::AddEventListener(
                                                   process->GetID());
 
   // We lazily tell the TaskManager to start updating when listeners to the
-  // processes.onUpdated event arrive.
-  if (event_name.compare(extension_processes_api_constants::kOnUpdated) == 0)
+  // processes.onUpdated or processes.onUpdatedWithMemory events arrive.
+  if (event_name.compare(extension_processes_api_constants::kOnUpdated) == 0 ||
+      event_name.compare(
+          extension_processes_api_constants::kOnUpdatedWithMemory) == 0)
     ExtensionProcessesEventRouter::GetInstance()->ListenerAdded();
 }
 
@@ -153,9 +197,12 @@ void ExtensionEventRouter::RemoveEventListener(
     extension_devtools_manager_->RemoveEventListener(event_name,
                                                      process->GetID());
 
-  // If a processes.onUpdated event listener is removed (or a process with one
-  // exits), then we let the TaskManager know that it has one fewer listener.
-  if (event_name.compare(extension_processes_api_constants::kOnUpdated) == 0)
+  // If a processes.onUpdated or processes.onUpdatedWithMemory event listener
+  // is removed (or a process with one exits), then we let the extension API
+  // know that it has one fewer listener.
+  if (event_name.compare(extension_processes_api_constants::kOnUpdated) == 0 ||
+      event_name.compare(
+          extension_processes_api_constants::kOnUpdatedWithMemory) == 0)
     ExtensionProcessesEventRouter::GetInstance()->ListenerRemoved();
 
   BrowserThread::PostTask(
@@ -238,14 +285,25 @@ void ExtensionEventRouter::DispatchEventToRenderers(
 void ExtensionEventRouter::DispatchEventToExtension(
     const std::string& extension_id,
     const std::string& event_name,
-    const std::string& event_args,
+    const Value& event_args,
     Profile* restrict_to_profile,
     const GURL& event_url) {
   DCHECK(!extension_id.empty());
   linked_ptr<ExtensionEvent> event(
       new ExtensionEvent(event_name, event_args, event_url,
-                         restrict_to_profile, "", USER_GESTURE_UNKNOWN));
+                         restrict_to_profile, USER_GESTURE_UNKNOWN));
   DispatchEventImpl(extension_id, event);
+}
+
+void ExtensionEventRouter::DispatchEventToExtension(
+    const std::string& extension_id,
+    const std::string& event_name,
+    const std::string& event_args,
+    Profile* restrict_to_profile,
+    const GURL& event_url) {
+  scoped_ptr<Value> event_args_value(Value::CreateStringValue(event_args));
+  DispatchEventToExtension(extension_id, event_name, *event_args_value.get(),
+                           restrict_to_profile, event_url);
 }
 
 void ExtensionEventRouter::DispatchEventToExtension(
@@ -321,7 +379,7 @@ void ExtensionEventRouter::DispatchEventToListener(
     return;
   }
 
-  const std::string* event_args;
+  const Value* event_args = NULL;
   if (!CanDispatchEventToProfile(listener_profile, extension,
                                  event, &event_args))
     return;
@@ -336,8 +394,8 @@ bool ExtensionEventRouter::CanDispatchEventToProfile(
     Profile* profile,
     const Extension* extension,
     const linked_ptr<ExtensionEvent>& event,
-    const std::string** event_args) {
-  *event_args = &event->event_args;
+    const Value** event_args) {
+  *event_args = event->event_args.get();
 
   // Is this event from a different profile than the renderer (ie, an
   // incognito tab event sent to a normal process, or vice versa).
@@ -345,11 +403,11 @@ bool ExtensionEventRouter::CanDispatchEventToProfile(
       profile != event->restrict_to_profile;
   if (cross_incognito &&
       !profile->GetExtensionService()->CanCrossIncognito(extension)) {
-    if (event->cross_incognito_args.empty())
+    if (!event->cross_incognito_args.get())
       return false;
     // Send the event with different arguments to extensions that can't
     // cross incognito.
-    *event_args = &event->cross_incognito_args;
+    *event_args = event->cross_incognito_args.get();
   }
 
   return true;
@@ -390,7 +448,7 @@ void ExtensionEventRouter::MaybeLoadLazyBackgroundPage(
     Profile* profile,
     const Extension* extension,
     const linked_ptr<ExtensionEvent>& event) {
-  const std::string* event_args;
+  const Value* event_args = NULL;
   if (!CanDispatchEventToProfile(profile, extension, event, &event_args))
     return;
 
@@ -425,8 +483,10 @@ void ExtensionEventRouter::OnEventAck(
   // The event ACK is routed to the background host, so this should never be
   // NULL.
   CHECK(host);
-  CHECK(host->extension()->has_lazy_background_page());
-  pm->DecrementLazyKeepaliveCount(host->extension());
+  // TODO(mpcomplete): We should never get this message unless
+  // has_lazy_background_page is true. Find out why we're getting it anyway.
+  if (host->extension() && host->extension()->has_lazy_background_page())
+    pm->DecrementLazyKeepaliveCount(host->extension());
 }
 
 void ExtensionEventRouter::DispatchPendingEvent(
@@ -482,8 +542,8 @@ void ExtensionEventRouter::Observe(
     }
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
       // Remove all registered lazy listeners from our cache.
-      UnloadedExtensionInfo* unloaded =
-          content::Details<UnloadedExtensionInfo>(details).ptr();
+      extensions::UnloadedExtensionInfo* unloaded =
+          content::Details<extensions::UnloadedExtensionInfo>(details).ptr();
       ListenerProcess lazy_listener(NULL, unloaded->extension->id());
       for (ListenerMap::iterator it = lazy_listeners_.begin();
            it != lazy_listeners_.end(); ++it) {

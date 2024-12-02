@@ -4,10 +4,13 @@
 
 #import "content/browser/web_contents/web_drag_dest_mac.h"
 
+#import <Carbon/Carbon.h>
+
 #include "base/sys_string_conversions.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #import "ui/base/dragdrop/cocoa_dnd_util.h"
@@ -17,6 +20,20 @@
 using WebKit::WebDragOperationsMask;
 using content::OpenURLParams;
 using content::Referrer;
+
+int GetModifierFlags() {
+  int modifier_state = 0;
+  UInt32 currentModifiers = GetCurrentKeyModifiers();
+  if (currentModifiers & ::shiftKey)
+    modifier_state |= WebKit::WebInputEvent::ShiftKey;
+  if (currentModifiers & ::controlKey)
+    modifier_state |= WebKit::WebInputEvent::ControlKey;
+  if (currentModifiers & ::optionKey)
+    modifier_state |= WebKit::WebInputEvent::AltKey;
+  if (currentModifiers & ::cmdKey)
+      modifier_state |= WebKit::WebInputEvent::MetaKey;
+  return modifier_state;
+}
 
 @implementation WebDragDest
 
@@ -30,6 +47,10 @@ using content::Referrer;
   return self;
 }
 
+- (WebDropData*)currentDropData {
+  return dropData_.get();
+}
+
 - (void)setDragDelegate:(content::WebDragDestDelegate*)delegate {
   delegate_ = delegate;
 }
@@ -37,7 +58,7 @@ using content::Referrer;
 // Call to set whether or not we should allow the drop. Takes effect the
 // next time |-draggingUpdated:| is called.
 - (void)setCurrentOperation:(NSDragOperation)operation {
-  current_operation_ = operation;
+  currentOperation_ = operation;
 }
 
 // Given a point in window coordinates and a view in that window, return a
@@ -93,8 +114,9 @@ using content::Referrer;
   }
 
   // Fill out a WebDropData from pasteboard.
-  WebDropData data;
-  [self populateWebDropData:&data fromPasteboard:[info draggingPasteboard]];
+  dropData_.reset(new WebDropData());
+  [self populateWebDropData:dropData_.get()
+             fromPasteboard:[info draggingPasteboard]];
 
   // Create the appropriate mouse locations for WebCore. The draggingLocation
   // is in window coordinates. Both need to be flipped.
@@ -103,15 +125,16 @@ using content::Referrer;
   NSPoint screenPoint = [self flipWindowPointToScreen:windowPoint view:view];
   NSDragOperation mask = [info draggingSourceOperationMask];
   webContents_->GetRenderViewHost()->DragTargetDragEnter(
-      data,
+      *dropData_,
       gfx::Point(viewPoint.x, viewPoint.y),
       gfx::Point(screenPoint.x, screenPoint.y),
-      static_cast<WebDragOperationsMask>(mask));
+      static_cast<WebDragOperationsMask>(mask),
+      GetModifierFlags());
 
   // We won't know the true operation (whether the drag is allowed) until we
   // hear back from the renderer. For now, be optimistic:
-  current_operation_ = NSDragOperationCopy;
-  return current_operation_;
+  currentOperation_ = NSDragOperationCopy;
+  return currentOperation_;
 }
 
 - (void)draggingExited:(id<NSDraggingInfo>)info {
@@ -125,6 +148,7 @@ using content::Referrer;
     delegate_->OnDragLeave();
 
   webContents_->GetRenderViewHost()->DragTargetDragLeave();
+  dropData_.reset();
 }
 
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info
@@ -148,12 +172,13 @@ using content::Referrer;
   webContents_->GetRenderViewHost()->DragTargetDragOver(
       gfx::Point(viewPoint.x, viewPoint.y),
       gfx::Point(screenPoint.x, screenPoint.y),
-      static_cast<WebDragOperationsMask>(mask));
+      static_cast<WebDragOperationsMask>(mask),
+      GetModifierFlags());
 
   if (delegate_)
     delegate_->OnDragOver();
 
-  return current_operation_;
+  return currentOperation_;
 }
 
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)info
@@ -162,6 +187,7 @@ using content::Referrer;
     [self draggingEntered:info view:view];
 
   // Check if we only allow navigation and navigate to a url on the pasteboard.
+  BOOL result = YES;
   if ([self onlyAllowsNavigation]) {
     NSPasteboard* pboard = [info draggingPasteboard];
     if ([pboard containsURLData]) {
@@ -170,13 +196,13 @@ using content::Referrer;
       webContents_->OpenURL(OpenURLParams(
           url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_AUTO_BOOKMARK,
           false));
-      return YES;
+    } else {
+      result = NO;
     }
-    return NO;
+  } else {
+    if (delegate_)
+      delegate_->OnDrop();
   }
-
-  if (delegate_)
-    delegate_->OnDrop();
 
   currentRVH_ = NULL;
 
@@ -187,13 +213,17 @@ using content::Referrer;
   NSPoint screenPoint = [self flipWindowPointToScreen:windowPoint view:view];
   webContents_->GetRenderViewHost()->DragTargetDrop(
       gfx::Point(viewPoint.x, viewPoint.y),
-      gfx::Point(screenPoint.x, screenPoint.y));
+      gfx::Point(screenPoint.x, screenPoint.y),
+      GetModifierFlags());
 
-  return YES;
+  dropData_.reset();
+
+  return result;
 }
 
 // Given |data|, which should not be nil, fill it in using the contents of the
-// given pasteboard.
+// given pasteboard. The types handled by this method should be kept in sync
+// with [WebContentsViewCocoa registerDragTypes].
 - (void)populateWebDropData:(WebDropData*)data
              fromPasteboard:(NSPasteboard*)pboard {
   DCHECK(data);
@@ -209,17 +239,19 @@ using content::Referrer;
 
   // Get plain text.
   if ([types containsObject:NSStringPboardType]) {
-    data->plain_text =
-        base::SysNSStringToUTF16([pboard stringForType:NSStringPboardType]);
+    data->text = NullableString16(
+        base::SysNSStringToUTF16([pboard stringForType:NSStringPboardType]),
+        false);
   }
 
   // Get HTML. If there's no HTML, try RTF.
   if ([types containsObject:NSHTMLPboardType]) {
-    data->text_html =
-        base::SysNSStringToUTF16([pboard stringForType:NSHTMLPboardType]);
+    data->html = NullableString16(
+        base::SysNSStringToUTF16([pboard stringForType:NSHTMLPboardType]),
+        false);
   } else if ([types containsObject:NSRTFPboardType]) {
     NSString* html = [pboard htmlFromRtf];
-    data->text_html = base::SysNSStringToUTF16(html);
+    data->html = NullableString16(base::SysNSStringToUTF16(html), false);
   }
 
   // Get files.
@@ -228,11 +260,13 @@ using content::Referrer;
     if ([files isKindOfClass:[NSArray class]] && [files count]) {
       for (NSUInteger i = 0; i < [files count]; i++) {
         NSString* filename = [files objectAtIndex:i];
-        BOOL isDir = NO;
-        BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:filename
-                                                           isDirectory:&isDir];
-        if (exists && !isDir)
-          data->filenames.push_back(base::SysNSStringToUTF16(filename));
+        BOOL exists = [[NSFileManager defaultManager]
+                           fileExistsAtPath:filename];
+        if (exists) {
+          data->filenames.push_back(
+              WebDropData::FileInfo(
+                  base::SysNSStringToUTF16(filename), string16()));
+        }
       }
     }
   }

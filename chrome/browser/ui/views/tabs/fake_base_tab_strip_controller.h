@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/tabs/tab_strip_selection_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 
 class TabStrip;
@@ -49,6 +49,7 @@ class FakeBaseTabStripController : public TabStripController {
   virtual void CreateNewTab() OVERRIDE;
   virtual void ClickActiveTab(int index) OVERRIDE;
   virtual bool IsIncognito() OVERRIDE;
+  virtual void LayoutTypeMaybeChanged() OVERRIDE;
 
  private:
   TabStrip* tab_strip_;

@@ -21,6 +21,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/test_data_stream.h"
+#include "net/proxy/proxy_info.h"
 #include "net/socket/socket.h"
 namespace chrome_browser_net {
 
@@ -101,6 +102,7 @@ class NetworkStats {
   bool Start(net::HostResolver* host_resolver,
              const net::HostPortPair& server,
              HistogramPortSelector histogram_port,
+             bool has_proxy_server,
              uint32 bytes_to_send,
              uint32 packets_to_send,
              const net::CompletionCallback& callback);
@@ -109,6 +111,7 @@ class NetworkStats {
   // Constructs an NetworkStats object that collects metrics for network
   // connectivity (either TCP or UDP).
   NetworkStats();
+  // NetworkStats is deleted when Finish() is called.
   virtual ~NetworkStats();
 
   // Initializes |finished_callback_| and the number of bytes to send to the
@@ -116,6 +119,7 @@ class NetworkStats {
   // |finished_callback| is mainly useful for unittests.
   void Initialize(uint32 bytes_to_send,
                   HistogramPortSelector histogram_port,
+                  bool has_proxy_server,
                   uint32 packets_to_send,
                   const net::CompletionCallback& finished_callback);
 
@@ -151,7 +155,7 @@ class NetworkStats {
   base::TimeTicks start_time() const { return start_time_; }
 
   // Returns |addresses_|.
-  net::AddressList GetAddressList() const { return addresses_; }
+  const net::AddressList& addresses() const { return addresses_; }
 
   // Returns packets_received_mask_ (used by unit tests).
   uint32 packets_received_mask() const { return packets_received_mask_; }
@@ -161,6 +165,8 @@ class NetworkStats {
   // server and if connectivity failed, at what stage (Connect or Write or Read)
   // did it fail?
   // b) What is RTT for the echo message.
+  // c) Packet loss correlation and other network connectivity data by calling
+  // RecordAcksReceivedHistograms() and RecordStatusAndRTTHistograms().
   void RecordHistograms(const ProtocolValue& protocol,
                         const Status& status,
                         int result);
@@ -224,28 +230,24 @@ class NetworkStats {
   // if all the bytes are verified.
   NetworkStats::Status VerifyBytes(const std::string& response);
 
-  // Returns the histogram names for collecting network connectivity stats.
-  // This is called by RecordHistograms. It sets the histogram names in
-  // |rtt_histogram_name| and |status_histogram_name|.
-  // If |result| equals to net::OK, it returns
-  // "NetConnectivity.<protocol>.Success.<port>.<load_size>.RTT" as histogram
-  // name for RTT histogram,
-  // "NetConnectivity.<protocol>.Status.<port>.<load_size>" as histogram name
-  // for status histogram and
-  // "NetConnectivity.<protocol>.PacketLoss.<port>.<load_size>" as histogram
-  // name for packet loss histogram.
-  // |protocol| argument sets <protocol> in the histogram name. It would be
-  // either TCP or UDP. <port> is the string representation of |histogram_port|.
-  // |load_size| argument determines <load_size> in the histogram name. It would
-  // be either 100B or 1K.
-  static void GetHistogramNames(const ProtocolValue& protocol,
-                                HistogramPortSelector histogram_port,
-                                uint32 load_size,
-                                int result,
-                                std::string* rtt_histogram_name,
-                                std::string* status_histogram_name,
-                                std::string* packet_loss_histogram_name);
+  // Collect the following network connectivity stats when
+  // kMaximumSequentialPackets (21) packets are sent.
+  // a) Received the "echo response" for at least one packet.
+  // b) Received the "echo response" for the nth packet.
+  // c) Count the number of "echo responses" received for each of the initial
+  // sequences of packets 1...n.
+  void RecordAcksReceivedHistograms();
 
+  // Collect the following network connectivity stats.
+  // a) What percentage of users can get a message end-to-end to a TCP/UDP
+  // server and if connectivity failed, at what stage (Connect or Write or Read)
+  // did it fail?
+  // b) What is RTT for the echo message.
+  // c) Records if there is a probabalistic dependency in packet loss when
+  // kMaximumCorrelationPackets packets are sent consecutively.
+  void RecordStatusAndRTTHistograms(const ProtocolValue& protocol,
+                                    const Status& status,
+                                    int result);
   // The socket handle for this session.
   scoped_ptr<net::Socket> socket_;
 
@@ -270,6 +272,9 @@ class NetworkStats {
   // |histogram_port_| specifies the port for which we are testing the network
   // connectivity.
   HistogramPortSelector histogram_port_;
+
+  // |has_proxy_server_| specifies if there is a proxy server or not.
+  bool has_proxy_server_;
 
   // HostResolver fills out the |addresses_| after host resolution is completed.
   net::AddressList addresses_;
@@ -298,6 +303,7 @@ class UDPStatsClient : public NetworkStats {
   // Constructs an UDPStatsClient object that collects metrics for UDP
   // connectivity.
   UDPStatsClient();
+  // UDPStatsClient is deleted when Finish() is called.
   virtual ~UDPStatsClient();
 
  protected:
@@ -315,7 +321,8 @@ class UDPStatsClient : public NetworkStats {
   virtual bool ReadComplete(int result) OVERRIDE;
 
   // Collects stats for UDP connectivity. This is called when all the data from
-  // server is read or when there is a failure during connect/read/write.
+  // server is read or when there is a failure during connect/read/write. This
+  // object is deleted at the end of this method.
   virtual void Finish(Status status, int result) OVERRIDE;
 };
 
@@ -324,6 +331,7 @@ class TCPStatsClient : public NetworkStats {
   // Constructs a TCPStatsClient object that collects metrics for TCP
   // connectivity.
   TCPStatsClient();
+  // TCPStatsClient is deleted when Finish() is called.
   virtual ~TCPStatsClient();
 
  protected:
@@ -339,7 +347,8 @@ class TCPStatsClient : public NetworkStats {
   virtual bool ReadComplete(int result) OVERRIDE;
 
   // Collects stats for TCP connectivity. This is called when all the data from
-  // server is read or when there is a failure during connect/read/write.
+  // server is read or when there is a failure during connect/read/write. This
+  // object is deleted at the end of this method.
   virtual void Finish(Status status, int result) OVERRIDE;
 
  private:
@@ -348,12 +357,64 @@ class TCPStatsClient : public NetworkStats {
   void OnConnectComplete(int result);
 };
 
+class ProxyDetector {
+ public:
+  // Used for the callback that is called from |OnResolveProxyComplete|.
+  typedef base::Callback<void(bool)> OnResolvedCallback;
+
+  // Constructs a ProxyDetector object that finds out if access to
+  // |server_address| goes through a proxy server or not. Calls the |callback|
+  // after proxy resolution is completed by currying the proxy resolution
+  // status.
+  ProxyDetector(net::ProxyService* proxy_service,
+                const net::HostPortPair& server_address,
+                OnResolvedCallback callback);
+
+  // This method uses |proxy_service_| to resolve the proxy for
+  // |server_address_|.
+  void StartResolveProxy();
+
+ private:
+  // This object is deleted from |OnResolveProxyComplete|.
+  ~ProxyDetector();
+
+  // Calls the |callback_| by currying the proxy resolution status.
+  void OnResolveProxyComplete(int result);
+
+  // |proxy_service_| specifies the proxy service that is to be used to find
+  // if access to |server_address_| goes through proxy server or not.
+  net::ProxyService* proxy_service_;
+
+  // |server_address_| specifies the server host and port pair for which we are
+  // trying to see if access to it, goes through proxy or not.
+  net::HostPortPair server_address_;
+
+  // |callback_| will be called after proxy resolution is completed.
+  OnResolvedCallback callback_;
+
+  // |proxy_info_| holds proxy information returned by ResolveProxy.
+  net::ProxyInfo proxy_info_;
+
+  // Indicates if there is a pending a proxy resolution. We use this to assert
+  // that there is no in-progress proxy resolution request.
+  bool has_pending_proxy_resolution_;
+};
+
 // This collects the network connectivity stats for UDP and TCP for small
 // percentage of users who are participating in the experiment. All users must
 // have enabled "UMA upload". This method gets called only if UMA upload to the
 // server has succeeded.
 void CollectNetworkStats(const std::string& network_stats_server_url,
                          IOThread* io_thread);
+
+// This starts a test randomly selected among "TCP test with small packet size",
+// "TCP test with large packet size", "UDP test with small packet size", "UDP
+// test with large packet size" and "UDP multi packet loss" tests to collect the
+// network connectivity stats.
+void StartNetworkStatsTest(net::HostResolver* host_resolver,
+                           const net::HostPortPair& server_address,
+                           NetworkStats::HistogramPortSelector histogram_port,
+                           bool has_proxy_server);
 
 }  // namespace chrome_browser_net
 

@@ -24,7 +24,7 @@ string16 ChromiumBinariesDistribution::GetAppGuid() {
   return string16();
 }
 
-string16 ChromiumBinariesDistribution::GetApplicationName() {
+string16 ChromiumBinariesDistribution::GetBaseAppName() {
   NOTREACHED();
   return string16();
 }
@@ -38,7 +38,7 @@ string16 ChromiumBinariesDistribution::GetAlternateApplicationName() {
   return string16();
 }
 
-string16 ChromiumBinariesDistribution::GetBrowserAppId() {
+string16 ChromiumBinariesDistribution::GetBaseAppId() {
   NOTREACHED();
   return string16();
 }

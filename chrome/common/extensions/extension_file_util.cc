@@ -16,6 +16,7 @@
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -29,12 +30,15 @@
 #include "net/base/file_stream.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using extensions::Extension;
+
 namespace errors = extension_manifest_errors;
 
 namespace extension_file_util {
 
 // Validates locale info. Doesn't check if messages.json files are valid.
-static bool ValidateLocaleInfo(const Extension& extension, std::string* error);
+static bool ValidateLocaleInfo(const Extension& extension,
+                               std::string* error);
 
 // Returns false and sets the error if script file can't be loaded,
 // or if it's not UTF-8 encoded.
@@ -124,8 +128,7 @@ scoped_refptr<Extension> LoadExtension(const FilePath& extension_path,
                                        Extension::Location location,
                                        int flags,
                                        std::string* error) {
-  return LoadExtension(
-      extension_path, std::string(), location, flags, error);
+  return LoadExtension(extension_path, std::string(), location, flags, error);
 }
 
 scoped_refptr<Extension> LoadExtension(const FilePath& extension_path,
@@ -140,18 +143,19 @@ scoped_refptr<Extension> LoadExtension(const FilePath& extension_path,
                                               error))
     return NULL;
 
-  scoped_refptr<Extension> extension(Extension::Create(
-      extension_path,
-      location,
-      *manifest,
-      flags,
-      extension_id,
-      error));
+  scoped_refptr<Extension> extension(Extension::Create(extension_path,
+                                                       location,
+                                                       *manifest,
+                                                       flags,
+                                                       extension_id,
+                                                       error));
   if (!extension.get())
     return NULL;
 
-  if (!ValidateExtension(extension.get(), error))
+  Extension::InstallWarningVector warnings;
+  if (!ValidateExtension(extension.get(), error, &warnings))
     return NULL;
+  extension->AddInstallWarnings(warnings);
 
   return extension;
 }
@@ -190,7 +194,35 @@ DictionaryValue* LoadManifest(const FilePath& extension_path,
   return static_cast<DictionaryValue*>(root.release());
 }
 
-bool ValidateExtension(const Extension* extension, std::string* error) {
+std::vector<FilePath> FindPrivateKeyFiles(const FilePath& extension_dir) {
+  std::vector<FilePath> result;
+  // Pattern matching only works at the root level, so filter manually.
+  file_util::FileEnumerator traversal(extension_dir, /*recursive=*/true,
+                                      file_util::FileEnumerator::FILES);
+  for (FilePath current = traversal.Next(); !current.empty();
+       current = traversal.Next()) {
+    if (!current.MatchesExtension(chrome::kExtensionKeyFileExtension))
+      continue;
+
+    std::string key_contents;
+    if (!file_util::ReadFileToString(current, &key_contents)) {
+      // If we can't read the file, assume it's not a private key.
+      continue;
+    }
+    std::string key_bytes;
+    if (!Extension::ParsePEMKeyBytes(key_contents, &key_bytes)) {
+      // If we can't parse the key, assume it's ok too.
+      continue;
+    }
+
+    result.push_back(current);
+  }
+  return result;
+}
+
+bool ValidateExtension(const Extension* extension,
+                       std::string* error,
+                       Extension::InstallWarningVector* warnings) {
   // Validate icons exist.
   for (ExtensionIconSet::IconMap::const_iterator iter =
            extension->icons().map().begin();
@@ -363,6 +395,27 @@ bool ValidateExtension(const Extension* extension, std::string* error) {
     return false;
   }
 
+  // Check that extensions don't include private key files.
+  std::vector<FilePath> private_keys = FindPrivateKeyFiles(extension->path());
+  if (extension->creation_flags() & Extension::ERROR_ON_PRIVATE_KEY) {
+    if (!private_keys.empty()) {
+      // Only print one of the private keys because l10n_util doesn't have a way
+      // to translate a list of strings.
+      *error = l10n_util::GetStringFUTF8(
+          IDS_EXTENSION_CONTAINS_PRIVATE_KEY,
+          private_keys.front().LossyDisplayName());
+      return false;
+    }
+  } else {
+    for (size_t i = 0; i < private_keys.size(); ++i) {
+      warnings->push_back(Extension::InstallWarning(
+          Extension::InstallWarning::FORMAT_TEXT,
+          l10n_util::GetStringFUTF8(
+              IDS_EXTENSION_CONTAINS_PRIVATE_KEY,
+              private_keys[i].LossyDisplayName())));
+    }
+    // Only warn; don't block loading the extension.
+  }
   return true;
 }
 
@@ -435,7 +488,8 @@ ExtensionMessageBundle* LoadExtensionMessageBundle(
     std::string* error) {
   error->clear();
   // Load locale information if available.
-  FilePath locale_path = extension_path.Append(Extension::kLocaleFolder);
+  FilePath locale_path = extension_path.Append(
+      Extension::kLocaleFolder);
   if (!file_util::PathExists(locale_path))
     return NULL;
 
@@ -484,9 +538,11 @@ SubstitutionMap* LoadExtensionMessageBundleSubstitutionMap(
   return returnValue;
 }
 
-static bool ValidateLocaleInfo(const Extension& extension, std::string* error) {
+static bool ValidateLocaleInfo(const Extension& extension,
+                               std::string* error) {
   // default_locale and _locales have to be both present or both missing.
-  const FilePath path = extension.path().Append(Extension::kLocaleFolder);
+  const FilePath path = extension.path().Append(
+      Extension::kLocaleFolder);
   bool path_exists = file_util::PathExists(path);
   std::string default_locale = extension.default_locale();
 
@@ -632,6 +688,25 @@ FilePath ExtensionURLToRelativeFilePath(const GURL& url) {
   if (path.IsAbsolute())
     return FilePath();
 
+  return path;
+}
+
+FilePath ExtensionResourceURLToFilePath(const GURL& url, const FilePath& root) {
+  std::string host = net::UnescapeURLComponent(url.host(),
+      net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS);
+  if (host.empty())
+    return FilePath();
+
+  FilePath relative_path = ExtensionURLToRelativeFilePath(url);
+  if (relative_path.empty())
+    return FilePath();
+
+  FilePath path = root.AppendASCII(host).Append(relative_path);
+  if (!file_util::PathExists(path) ||
+      !file_util::AbsolutePath(&path) ||
+      !root.IsParent(path)) {
+    return FilePath();
+  }
   return path;
 }
 

@@ -41,7 +41,7 @@ views::SmoothedThrobber* CreateDefaultSmoothedThrobber() {
   views::SmoothedThrobber* throbber =
       new views::SmoothedThrobber(kThrobberFrameMs);
   throbber->SetFrames(
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_SPINNER));
+      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(IDR_SPINNER));
   throbber->set_start_delay_ms(kThrobberStartDelayMs);
   return throbber;
 }
@@ -49,12 +49,12 @@ views::SmoothedThrobber* CreateDefaultSmoothedThrobber() {
 views::Throbber* CreateDefaultThrobber() {
   views::Throbber* throbber = new views::Throbber(kThrobberFrameMs, false);
   throbber->SetFrames(
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_SPINNER));
+      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(IDR_SPINNER));
   return throbber;
 }
 
 gfx::Rect CalculateScreenBounds(const gfx::Size& size) {
-  gfx::Rect bounds(gfx::Screen::GetPrimaryMonitor().bounds());
+  gfx::Rect bounds(gfx::Screen::GetPrimaryDisplay().bounds());
   if (!size.IsEmpty()) {
     int horizontal_diff = bounds.width() - size.width();
     int vertical_diff = bounds.height() - size.height();
@@ -87,12 +87,16 @@ string16 GetCurrentNetworkName(NetworkLibrary* network_library) {
     return UTF8ToUTF16(network_library->wifi_network()->name());
   } else if (network_library->cellular_connected()) {
     return UTF8ToUTF16(network_library->cellular_network()->name());
+  } else if (network_library->wimax_connected()) {
+    return UTF8ToUTF16(network_library->wimax_network()->name());
   } else if (network_library->ethernet_connecting()) {
     return l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET);
   } else if (network_library->wifi_connecting()) {
     return UTF8ToUTF16(network_library->wifi_network()->name());
   } else if (network_library->cellular_connecting()) {
     return UTF8ToUTF16(network_library->cellular_network()->name());
+  } else if (network_library->wimax_connecting()) {
+    return UTF8ToUTF16(network_library->wimax_network()->name());
   } else {
     return string16();
   }

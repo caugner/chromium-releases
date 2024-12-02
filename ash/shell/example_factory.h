@@ -6,8 +6,7 @@
 #define ASH_SHELL_EXAMPLE_FACTORY_H_
 #pragma once
 
-namespace ash {
-class AppListModel;
+namespace app_list {
 class AppListViewDelegate;
 }
 
@@ -25,9 +24,7 @@ void CreateLockScreen();
 // Creates a window showing samples of commonly used widgets.
 void CreateWidgetsWindow();
 
-void BuildAppListModel(ash::AppListModel* model);
-
-ash::AppListViewDelegate* CreateAppListViewDelegate();
+app_list::AppListViewDelegate* CreateAppListViewDelegate();
 
 }  // namespace shell
 }  // namespace ash

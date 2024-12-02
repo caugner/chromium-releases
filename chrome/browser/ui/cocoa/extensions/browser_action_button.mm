@@ -19,7 +19,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -28,6 +28,8 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/size.h"
+
+using extensions::Extension;
 
 NSString* const kBrowserActionButtonUpdatedNotification =
     @"BrowserActionButtonUpdatedNotification";

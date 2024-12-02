@@ -11,9 +11,10 @@
 
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/common/view_type.h"
+#include "content/public/common/console_message_level.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
-#include "content/public/common/view_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 
 class ExtensionDispatcher;
@@ -42,7 +43,7 @@ class ExtensionHelper
   static std::vector<content::RenderView*> GetExtensionViews(
       const std::string& extension_id,
       int browser_window_id,
-      content::ViewType view_type);
+      chrome::ViewType view_type);
 
   // Returns the given extension's background page, or NULL if none.
   static content::RenderView* GetBackgroundPage(
@@ -59,8 +60,9 @@ class ExtensionHelper
   bool InstallWebApplicationUsingDefinitionFile(WebKit::WebFrame* frame,
                                                 string16* error);
 
+  int tab_id() const { return tab_id_; }
   int browser_window_id() const { return browser_window_id_; }
-  content::ViewType view_type() const { return view_type_; }
+  chrome::ViewType view_type() const { return view_type_; }
 
  private:
   // RenderViewObserver implementation.
@@ -91,8 +93,11 @@ class ExtensionHelper
   void OnExtensionDispatchOnDisconnect(int port_id, bool connection_error);
   void OnExecuteCode(const ExtensionMsg_ExecuteCode_Params& params);
   void OnGetApplicationInfo(int page_id);
-  void OnNotifyRendererViewType(content::ViewType view_type);
+  void OnNotifyRendererViewType(chrome::ViewType view_type);
+  void OnSetTabId(int tab_id);
   void OnUpdateBrowserWindowId(int window_id);
+  void OnAddMessageToConsole(content::ConsoleMessageLevel level,
+                             const std::string& message);
 
   // Callback triggered when we finish downloading the application definition
   // file.
@@ -104,8 +109,9 @@ class ExtensionHelper
   void DidDownloadApplicationIcon(webkit_glue::ImageResourceFetcher* fetcher,
                                   const SkBitmap& image);
 
-  // Helper to add an error message to the root frame's console.
-  void AddErrorToRootConsole(const string16& message);
+  // Helper to add an logging message to the root frame's console.
+  void AddMessageToRootConsole(content::ConsoleMessageLevel level,
+                               const string16& message);
 
   ExtensionDispatcher* extension_dispatcher_;
 
@@ -127,7 +133,10 @@ class ExtensionHelper
   int pending_app_icon_requests_;
 
   // Type of view attached with RenderView.
-  content::ViewType view_type_;
+  chrome::ViewType view_type_;
+
+  // Id of the tab which the RenderView is attached to.
+  int tab_id_;
 
   // Id number of browser window which RenderView is attached to.
   int browser_window_id_;

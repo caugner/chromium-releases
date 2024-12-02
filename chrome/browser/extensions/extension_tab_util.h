@@ -9,10 +9,9 @@
 #include <string>
 
 class Browser;
-class Extension;
 class GURL;
 class Profile;
-class TabContentsWrapper;
+class TabContents;
 class TabStripModel;
 
 namespace base {
@@ -22,6 +21,10 @@ class ListValue;
 
 namespace content {
 class WebContents;
+}
+
+namespace extensions {
+class Extension;
 }
 
 // Provides various utility functions that help manipulate tabs.
@@ -52,14 +55,14 @@ class ExtensionTabUtil {
                                TabStripModel** tab_strip_model,
                                int* tab_index);
   static bool GetDefaultTab(Browser* browser,
-                            TabContentsWrapper** contents,
+                            TabContents** contents,
                             int* tab_id);
   // Any out parameter (|browser|, |tab_strip|, |contents|, & |tab_index|) may
   // be NULL and will not be set within the function.
   static bool GetTabById(int tab_id, Profile* profile, bool incognito_enabled,
                          Browser** browser,
                          TabStripModel** tab_strip,
-                         TabContentsWrapper** contents,
+                         TabContents** contents,
                          int* tab_index);
 
   // Takes |url_string| and returns a GURL which is either valid and absolute
@@ -71,7 +74,7 @@ class ExtensionTabUtil {
   // extension base, we decided it wasn't worth breaking existing extensions to
   // fix.
   static GURL ResolvePossiblyRelativeURL(const std::string& url_string,
-                                         const Extension* extension);
+      const extensions::Extension* extension);
 
   // Returns true if |url| is used for testing crashes.
   static bool IsCrashURL(const GURL& url);

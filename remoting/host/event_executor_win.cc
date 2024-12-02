@@ -8,10 +8,11 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "remoting/host/capturer.h"
+#include "remoting/host/clipboard.h"
 #include "remoting/proto/event.pb.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 
 namespace remoting {
 
@@ -23,13 +24,15 @@ using protocol::MouseEvent;
 
 // USB to XKB keycode map table.
 #define USB_KEYMAP(usb, xkb, win, mac) {usb, win}
-#include "remoting/host/usb_keycode_map.h"
+#include "ui/base/keycodes/usb_keycode_map.h"
 #undef USB_KEYMAP
 
 // A class to generate events on Windows.
 class EventExecutorWin : public EventExecutor {
  public:
-  EventExecutorWin(MessageLoop* message_loop, Capturer* capturer);
+  EventExecutorWin(scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+                   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+                   Capturer* capturer);
   virtual ~EventExecutorWin() {}
 
   // ClipboardStub interface.
@@ -39,30 +42,50 @@ class EventExecutorWin : public EventExecutor {
   virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
   virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
 
+  // EventExecutor interface.
+  virtual void OnSessionStarted(
+      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+  virtual void OnSessionFinished() OVERRIDE;
+
  private:
   HKL GetForegroundKeyboardLayout();
   void HandleKey(const KeyEvent& event);
   void HandleMouse(const MouseEvent& event);
 
-  MessageLoop* message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
   Capturer* capturer_;
+  scoped_ptr<Clipboard> clipboard_;
 
   DISALLOW_COPY_AND_ASSIGN(EventExecutorWin);
 };
 
-EventExecutorWin::EventExecutorWin(MessageLoop* message_loop,
-                                   Capturer* capturer)
-    : message_loop_(message_loop),
-      capturer_(capturer) {
+EventExecutorWin::EventExecutorWin(
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+    Capturer* capturer)
+    : main_task_runner_(main_task_runner),
+      ui_task_runner_(ui_task_runner),
+      capturer_(capturer),
+      clipboard_(Clipboard::Create()) {
 }
 
 void EventExecutorWin::InjectClipboardEvent(const ClipboardEvent& event) {
-  // TODO(simonmorris): Implement clipboard injection.
+  if (!ui_task_runner_->BelongsToCurrentThread()) {
+    ui_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&EventExecutorWin::InjectClipboardEvent,
+                   base::Unretained(this),
+                   event));
+    return;
+  }
+
+  clipboard_->InjectClipboardEvent(event);
 }
 
 void EventExecutorWin::InjectKeyEvent(const KeyEvent& event) {
-  if (MessageLoop::current() != message_loop_) {
-    message_loop_->PostTask(
+  if (!main_task_runner_->BelongsToCurrentThread()) {
+    main_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&EventExecutorWin::InjectKeyEvent, base::Unretained(this),
                    event));
@@ -73,8 +96,8 @@ void EventExecutorWin::InjectKeyEvent(const KeyEvent& event) {
 }
 
 void EventExecutorWin::InjectMouseEvent(const MouseEvent& event) {
-  if (MessageLoop::current() != message_loop_) {
-    message_loop_->PostTask(
+  if (!main_task_runner_->BelongsToCurrentThread()) {
+    main_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&EventExecutorWin::InjectMouseEvent, base::Unretained(this),
                    event));
@@ -82,6 +105,32 @@ void EventExecutorWin::InjectMouseEvent(const MouseEvent& event) {
   }
 
   HandleMouse(event);
+}
+
+void EventExecutorWin::OnSessionStarted(
+    scoped_ptr<protocol::ClipboardStub> client_clipboard) {
+  if (!ui_task_runner_->BelongsToCurrentThread()) {
+    ui_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&EventExecutorWin::OnSessionStarted,
+                   base::Unretained(this),
+                   base::Passed(&client_clipboard)));
+    return;
+  }
+
+  clipboard_->Start(client_clipboard.Pass());
+}
+
+void EventExecutorWin::OnSessionFinished() {
+  if (!ui_task_runner_->BelongsToCurrentThread()) {
+    ui_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&EventExecutorWin::OnSessionFinished,
+                   base::Unretained(this)));
+    return;
+  }
+
+  clipboard_->Stop();
 }
 
 HKL EventExecutorWin::GetForegroundKeyboardLayout() {
@@ -238,10 +287,12 @@ void EventExecutorWin::HandleMouse(const MouseEvent& event) {
 
 }  // namespace
 
-scoped_ptr<protocol::HostEventStub> EventExecutor::Create(
-    MessageLoop* message_loop, Capturer* capturer) {
-  return scoped_ptr<protocol::HostEventStub>(
-      new EventExecutorWin(message_loop, capturer));
+scoped_ptr<EventExecutor> EventExecutor::Create(
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+    Capturer* capturer) {
+  return scoped_ptr<EventExecutor>(
+      new EventExecutorWin(main_task_runner, ui_task_runner, capturer));
 }
 
 }  // namespace remoting

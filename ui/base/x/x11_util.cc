@@ -423,10 +423,10 @@ XcursorImage* SkBitmapToXcursorImage(const SkBitmap* bitmap,
 
   if (bitmap->width() && bitmap->height()) {
     bitmap->lockPixels();
-    gfx::ConvertSkiaToRGBA(
-        static_cast<const unsigned char*>(bitmap->getPixels()),
-        bitmap->width() * bitmap->height(),
-        reinterpret_cast<unsigned char*>(image->pixels));
+    // The |bitmap| contains ARGB image, so just copy it.
+    memcpy(image->pixels,
+           bitmap->getPixels(),
+           bitmap->width() * bitmap->height() * 4);
     bitmap->unlockPixels();
   }
 
@@ -468,6 +468,18 @@ void* GetVisualFromGtkWidget(GtkWidget* widget) {
   return GDK_VISUAL_XVISUAL(gtk_widget_get_visual(widget));
 }
 #endif  // defined(TOOLKIT_GTK)
+
+void SetHideTitlebarWhenMaximizedProperty(XID window) {
+  uint32 hide = 1;
+  XChangeProperty(GetXDisplay(),
+      window,
+      GetAtom("_GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED"),
+      XA_CARDINAL,
+      32,  // size in bits
+      PropModeReplace,
+      reinterpret_cast<unsigned char*>(&hide),
+      1);
+}
 
 int BitsPerPixelForPixmapDepth(Display* dpy, int depth) {
   int count;
@@ -755,6 +767,25 @@ bool EnumerateChildren(EnumerateWindowsDelegate* delegate, XID window,
 bool EnumerateAllWindows(EnumerateWindowsDelegate* delegate, int max_depth) {
   XID root = GetX11RootWindow();
   return EnumerateChildren(delegate, root, max_depth, 0);
+}
+
+void EnumerateTopLevelWindows(ui::EnumerateWindowsDelegate* delegate) {
+  std::vector<XID> stack;
+  if (!ui::GetXWindowStack(ui::GetX11RootWindow(), &stack)) {
+    // Window Manager doesn't support _NET_CLIENT_LIST_STACKING, so fall back
+    // to old school enumeration of all X windows.  Some WMs parent 'top-level'
+    // windows in unnamed actual top-level windows (ion WM), so extend the
+    // search depth to all children of top-level windows.
+    const int kMaxSearchDepth = 1;
+    ui::EnumerateAllWindows(delegate, kMaxSearchDepth);
+    return;
+  }
+
+  std::vector<XID>::iterator iter;
+  for (iter = stack.begin(); iter != stack.end(); iter++) {
+    if (delegate->ShouldStopIterating(*iter))
+      return;
+  }
 }
 
 bool GetXWindowStack(Window window, std::vector<XID>* windows) {

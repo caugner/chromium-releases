@@ -6,6 +6,8 @@
 #define CHROMEOS_DBUS_DBUS_THREAD_MANAGER_H_
 #pragma once
 
+#include <string>
+
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chromeos/chromeos_export.h"
@@ -26,6 +28,7 @@ class BluetoothDeviceClient;
 class BluetoothInputClient;
 class BluetoothManagerClient;
 class BluetoothNodeClient;
+class BluetoothOutOfBandClient;
 class CashewClient;
 class CrosDisksClient;
 class CryptohomeClient;
@@ -37,10 +40,14 @@ class FlimflamNetworkClient;
 class FlimflamProfileClient;
 class FlimflamServiceClient;
 class GsmSMSClient;
+class IBusClient;
+class IBusInputContextClient;
 class ImageBurnerClient;
 class IntrospectableClient;
+class ModemMessagingClient;
 class PowerManagerClient;
 class SessionManagerClient;
+class SMSClient;
 class SpeechSynthesizerClient;
 class UpdateEngineClient;
 
@@ -75,14 +82,25 @@ class CHROMEOS_EXPORT DBusThreadManager {
   // by Shutdown().
   static void InitializeForTesting(DBusThreadManager* dbus_thread_manager);
 
+  // Initialize with stub implementations for tests based on stubs.
+  static void InitializeWithStub();
+
   // Destroys the global instance.
   static void Shutdown();
 
   // Gets the global instance. Initialize() must be called first.
   static DBusThreadManager* Get();
 
+  // Creates new IBusBus instance to communicate with ibus-daemon with specified
+  // ibus address. Must be called before using ibus related clients.
+  // TODO(nona): Support shutdown to enable dynamical ibus-daemon shutdown.
+  virtual void InitIBusBus(const std::string &ibus_address) = 0;
+
   // Returns the D-Bus system bus instance, owned by DBusThreadManager.
   virtual dbus::Bus* GetSystemBus() = 0;
+
+  // Returns the IBus bus instance, owned by DBusThreadManager.
+  virtual dbus::Bus* GetIBusBus() = 0;
 
   // Returns the bluetooth adapter client, owned by DBusThreadManager.
   // Do not cache this pointer and use it after DBusThreadManager is shut
@@ -108,6 +126,11 @@ class CHROMEOS_EXPORT DBusThreadManager {
   // Do not cache this pointer and use it after DBusThreadManager is shut
   // down.
   virtual BluetoothNodeClient* GetBluetoothNodeClient() = 0;
+
+  // Returns the bluetooth node client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManager is shut
+  // down.
+  virtual BluetoothOutOfBandClient* GetBluetoothOutOfBandClient() = 0;
 
   // Returns the Cashew client, owned by DBusThreadManager.
   // Do not cache this pointer and use it after DBusThreadManager is shut
@@ -174,6 +197,11 @@ class CHROMEOS_EXPORT DBusThreadManager {
   // down.
   virtual IntrospectableClient* GetIntrospectableClient() = 0;
 
+  // Returns the Modem Messaging client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManager is shut
+  // down.
+  virtual ModemMessagingClient* GetModemMessagingClient() = 0;
+
   // Returns the power manager client, owned by DBusThreadManager.
   // See also comments at session_manager_client().
   virtual PowerManagerClient* GetPowerManagerClient() = 0;
@@ -183,6 +211,11 @@ class CHROMEOS_EXPORT DBusThreadManager {
   // down.
   virtual SessionManagerClient* GetSessionManagerClient() = 0;
 
+  // Returns the SMS client, owned by DBusThreadManager.
+  // Do not cache this pointer and use it after DBusThreadManager is shut
+  // down.
+  virtual SMSClient* GetSMSClient() = 0;
+
   // Returns the speech synthesizer client, owned by DBusThreadManager.
   // Do not cache this pointer and use it after DBusThreadManager is shut
   // down.
@@ -191,6 +224,14 @@ class CHROMEOS_EXPORT DBusThreadManager {
   // Returns the update engine client, owned by DBusThreadManager.  Do not
   // cache this pointer and use it after DBusThreadManager is shut down.
   virtual UpdateEngineClient* GetUpdateEngineClient() = 0;
+
+  // Returns the ibus client, owned by DBusThreadManager. Do not cache this
+  // pointer and use it after DBusThreadManager is shut down.
+  virtual IBusClient* GetIBusClient() = 0;
+
+  // Returns the ibus input context client, owned by DBusThreadManager. Do not
+  // cache this pointer and use it after DBusThreadManager is shut down.
+  virtual IBusInputContextClient* GetIBusInputContextClient() = 0;
 
   virtual ~DBusThreadManager();
 

@@ -22,20 +22,21 @@
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
 #include "chrome/browser/sync/glue/bookmark_model_associator.h"
 #include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "chrome/browser/sync/glue/data_type_error_handler_mock.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
-#include "sync/internal_api/change_record.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
-#include "sync/internal_api/test_user_share.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "content/public/test/test_browser_thread.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/test/test_user_share.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
+#include "sync/syncable/syncable.h"  // TODO(tim): Remove. Bug 131130.
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -911,7 +912,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, RepeatedMiddleInsertion) {
 // puts itself into a lame, error state.
 TEST_F(ProfileSyncServiceBookmarkTest, UnrecoverableErrorSuspendsService) {
   EXPECT_CALL(mock_error_handler_,
-              OnUnrecoverableError(_, _));
+              OnSingleDatatypeUnrecoverableError(_, _));
 
   LoadBookmarkModel(DELETE_EXISTING_STORAGE, DONT_SAVE_TO_STORAGE);
   StartSync();

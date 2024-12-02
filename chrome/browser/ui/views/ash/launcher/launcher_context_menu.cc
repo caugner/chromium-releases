@@ -6,8 +6,11 @@
 
 #include "ash/launcher/launcher_context_menu.h"
 #include "ash/shell.h"
+#include "base/command_line.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/ui/views/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/common/chrome_switches.h"
+#include "grit/ash_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -24,21 +27,24 @@ LauncherContextMenu::LauncherContextMenu(ChromeLauncherController* controller,
       AddItem(
           MENU_PIN,
           l10n_util::GetStringUTF16(IDS_LAUNCHER_CONTEXT_MENU_UNPIN));
-      AddSeparator();
-      AddCheckItemWithStringId(
-          LAUNCH_TYPE_REGULAR_TAB,
-          IDS_APP_CONTEXT_MENU_OPEN_REGULAR);
-      AddCheckItemWithStringId(
-          LAUNCH_TYPE_PINNED_TAB,
-          IDS_APP_CONTEXT_MENU_OPEN_PINNED);
-      AddCheckItemWithStringId(
-          LAUNCH_TYPE_WINDOW,
-          IDS_APP_CONTEXT_MENU_OPEN_WINDOW);
-      // Even though the launch type is Full Screen it is more accurately
-      // described as Maximized in Ash.
-      AddCheckItemWithStringId(
-          LAUNCH_TYPE_FULLSCREEN,
-          IDS_APP_CONTEXT_MENU_OPEN_MAXIMIZED);
+      // No open actions for pending app shortcut.
+      if (item->status != ash::STATUS_IS_PENDING) {
+        AddSeparator();
+        AddCheckItemWithStringId(
+            LAUNCH_TYPE_REGULAR_TAB,
+            IDS_APP_CONTEXT_MENU_OPEN_REGULAR);
+        AddCheckItemWithStringId(
+            LAUNCH_TYPE_PINNED_TAB,
+            IDS_APP_CONTEXT_MENU_OPEN_PINNED);
+        AddCheckItemWithStringId(
+            LAUNCH_TYPE_WINDOW,
+            IDS_APP_CONTEXT_MENU_OPEN_WINDOW);
+        // Even though the launch type is Full Screen it is more accurately
+        // described as Maximized in Ash.
+        AddCheckItemWithStringId(
+            LAUNCH_TYPE_FULLSCREEN,
+            IDS_APP_CONTEXT_MENU_OPEN_MAXIMIZED);
+      }
     } else if (item_.type == ash::TYPE_BROWSER_SHORTCUT) {
       AddItem(MENU_NEW_WINDOW,
               l10n_util::GetStringUTF16(IDS_LAUNCHER_NEW_WINDOW));
@@ -48,6 +54,11 @@ LauncherContextMenu::LauncherContextMenu(ChromeLauncherController* controller,
       }
     } else {
       AddItem(MENU_OPEN, controller->GetTitle(item_));
+      if (item_.type == ash::TYPE_PLATFORM_APP) {
+        AddItem(
+            MENU_PIN,
+            l10n_util::GetStringUTF16(IDS_LAUNCHER_CONTEXT_MENU_PIN));
+      }
       if (controller->IsOpen(item_.id)) {
         AddItem(MENU_CLOSE,
                 l10n_util::GetStringUTF16(IDS_LAUNCHER_CONTEXT_MENU_CLOSE));
@@ -57,6 +68,12 @@ LauncherContextMenu::LauncherContextMenu(ChromeLauncherController* controller,
   }
   AddCheckItemWithStringId(
       MENU_AUTO_HIDE, ash::LauncherContextMenu::GetAutoHideResourceStringId());
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kShowLauncherAlignmentMenu)) {
+    AddSubMenuWithStringId(MENU_ALIGNMENT_MENU,
+                           IDS_AURA_LAUNCHER_CONTEXT_MENU_POSITION,
+                           &alignment_menu_);
+  }
 }
 
 LauncherContextMenu::~LauncherContextMenu() {
@@ -86,7 +103,8 @@ bool LauncherContextMenu::IsCommandIdChecked(int command_id) const {
 bool LauncherContextMenu::IsCommandIdEnabled(int command_id) const {
   switch (command_id) {
     case MENU_PIN:
-      return controller_->IsPinnable(item_.id);
+      return item_.type == ash::TYPE_PLATFORM_APP ||
+          controller_->IsPinnable(item_.id);
     default:
       return true;
   }
@@ -130,6 +148,8 @@ void LauncherContextMenu::ExecuteCommand(int command_id) {
       break;
     case MENU_NEW_INCOGNITO_WINDOW:
       controller_->CreateNewIncognitoWindow();
+      break;
+    case MENU_ALIGNMENT_MENU:
       break;
   }
 }

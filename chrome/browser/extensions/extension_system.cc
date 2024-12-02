@@ -26,6 +26,8 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
+#include "chrome/browser/extensions/management_policy.h"
+#include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -35,6 +37,7 @@
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/features/feature.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -45,6 +48,10 @@ using content::BrowserThread;
 //
 
 ExtensionSystem::ExtensionSystem() {
+  // In lieu of a way for Feature to check whether it's running on the browser
+  // process, tell it.
+  // See http://crbug.com/126535.
+  extensions::Feature::SetChannelCheckingEnabled(true);
 }
 
 ExtensionSystem::~ExtensionSystem() {
@@ -77,6 +84,15 @@ void ExtensionSystemImpl::Shared::InitPrefs() {
       profile_->GetPath().AppendASCII(ExtensionService::kInstallDirectoryName),
       ExtensionPrefValueMapFactory::GetForProfile(profile_)));
   extension_prefs_->Init(extensions_disabled);
+
+  state_store_.reset(new extensions::StateStore(
+      profile_,
+      profile_->GetPath().AppendASCII(ExtensionService::kStateStoreName)));
+}
+
+void ExtensionSystemImpl::Shared::RegisterManagementPolicyProviders() {
+  DCHECK(extension_prefs_.get());
+  management_policy_->RegisterProvider(extension_prefs_.get());
 }
 
 void ExtensionSystemImpl::Shared::InitInfoMap() {
@@ -114,6 +130,17 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
       extension_prefs_.get(),
       autoupdate_enabled,
       extensions_enabled));
+
+  // These services must be registered before the ExtensionService tries to
+  // load any extensions.
+  {
+    rules_registry_service_.reset(
+        new extensions::RulesRegistryService(profile_));
+    rules_registry_service_->RegisterDefaultRulesRegistries();
+
+    management_policy_.reset(new extensions::ManagementPolicy);
+    RegisterManagementPolicyProviders();
+  }
 
   extension_service_->component_loader()->AddDefaultComponentExtensions();
   if (command_line->HasSwitch(switches::kLoadComponentExtension)) {
@@ -175,13 +202,18 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
       extension_service_->InitEventRouters();
     }
   }
+}
 
-  rules_registry_service_.reset(new extensions::RulesRegistryService(profile_));
-  rules_registry_service_->RegisterDefaultRulesRegistries();
+extensions::StateStore* ExtensionSystemImpl::Shared::state_store() {
+  return state_store_.get();
 }
 
 ExtensionService* ExtensionSystemImpl::Shared::extension_service() {
   return extension_service_.get();
+}
+
+extensions::ManagementPolicy* ExtensionSystemImpl::Shared::management_policy() {
+  return management_policy_.get();
 }
 
 UserScriptMaster* ExtensionSystemImpl::Shared::user_script_master() {
@@ -247,13 +279,18 @@ void ExtensionSystemImpl::Init(bool extensions_enabled) {
   shared_->InitInfoMap();
 
   extension_process_manager_.reset(ExtensionProcessManager::Create(profile_));
-  alarm_manager_.reset(new extensions::AlarmManager(profile_));
+  alarm_manager_.reset(new extensions::AlarmManager(profile_,
+                                                    &base::Time::Now));
 
   shared_->Init(extensions_enabled);
 }
 
 ExtensionService* ExtensionSystemImpl::extension_service() {
   return shared_->extension_service();
+}
+
+extensions::ManagementPolicy* ExtensionSystemImpl::management_policy() {
+  return shared_->management_policy();
 }
 
 UserScriptMaster* ExtensionSystemImpl::user_script_master() {
@@ -272,6 +309,10 @@ ExtensionProcessManager* ExtensionSystemImpl::process_manager() {
 
 extensions::AlarmManager* ExtensionSystemImpl::alarm_manager() {
   return alarm_manager_.get();
+}
+
+extensions::StateStore* ExtensionSystemImpl::state_store() {
+  return shared_->state_store();
 }
 
 ExtensionInfoMap* ExtensionSystemImpl::info_map() {
@@ -297,9 +338,9 @@ ExtensionSystemImpl::rules_registry_service() {
 }
 
 void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
-    const Extension* extension) {
+    const extensions::Extension* extension) {
   base::Time install_time;
-  if (extension->location() != Extension::COMPONENT) {
+  if (extension->location() != extensions::Extension::COMPONENT) {
     install_time = extension_service()->extension_prefs()->
         GetInstallTime(extension->id());
   }

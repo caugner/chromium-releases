@@ -126,7 +126,10 @@ void SpawnerCommunicator::StartIOThread() {
 void SpawnerCommunicator::Shutdown() {
   DCHECK_NE(MessageLoop::current(), io_thread_.message_loop());
   DCHECK(is_running_);
+  // The request and its context should be created and destroyed only on the
+  // IO thread.
   DCHECK(!cur_request_.get());
+  DCHECK(!context_.get());
   io_thread_.Stop();
   allowed_port_.reset();
 }
@@ -173,8 +176,8 @@ void SpawnerCommunicator::SendCommandAndWaitForResultOnIOThread(
   cur_request_->SetUserData(this, data);
 
   // Build the URLRequest.
-  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
-  cur_request_->set_context(context);
+  context_.reset(new TestURLRequestContext);
+  cur_request_->set_context(context_.get());
   if (post_data.empty()) {
     cur_request_->set_method("GET");
   } else {
@@ -239,6 +242,10 @@ void SpawnerCommunicator::OnSpawnerCommandCompleted(URLRequest* request) {
   // Clear current request to indicate the completion of sending a command
   // to spawner server and getting the result.
   cur_request_.reset();
+  context_.reset();
+  // Invalidate the weak pointers on the IO thread.
+  weak_factory_.InvalidateWeakPtrs();
+
   // Wakeup the caller in user thread.
   event_.Signal();
 }
@@ -321,9 +328,7 @@ bool SpawnerCommunicator::StartServer(const std::string& arguments,
     return false;
 
   // Check whether the data returned from spawner server is JSON-formatted.
-  base::JSONReader json_reader;
-  scoped_ptr<base::Value> value(json_reader.JsonToValue(server_return_data,
-                                                        true, false));
+  scoped_ptr<base::Value> value(base::JSONReader::Read(server_return_data));
   if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY)) {
     LOG(ERROR) << "Invalid server data: " << server_return_data.c_str();
     return false;
@@ -364,4 +369,3 @@ bool SpawnerCommunicator::StopServer() {
 }
 
 }  // namespace net
-

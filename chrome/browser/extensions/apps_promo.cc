@@ -10,9 +10,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
@@ -202,7 +202,7 @@ AppsPromo::AppsPromo(PrefService* prefs)
 
 AppsPromo::~AppsPromo() {}
 
-bool AppsPromo::ShouldShowPromo(const ExtensionIdSet& installed_ids,
+bool AppsPromo::ShouldShowPromo(const extensions::ExtensionIdSet& installed_ids,
                                 bool* just_expired) {
   *just_expired = false;
 
@@ -253,7 +253,8 @@ bool AppsPromo::ShouldShowPromo(const ExtensionIdSet& installed_ids,
   return false;
 }
 
-bool AppsPromo::ShouldShowAppLauncher(const ExtensionIdSet& installed_ids) {
+bool AppsPromo::ShouldShowAppLauncher(
+    const extensions::ExtensionIdSet& installed_ids) {
   // On Chrome OS the default apps are installed via a separate mechanism that
   // is always enabled. Therefore we always show the launcher.
 #if defined(OS_CHROMEOS)
@@ -331,7 +332,7 @@ AppsPromoLogoFetcher::AppsPromoLogoFetcher(
 AppsPromoLogoFetcher::~AppsPromoLogoFetcher() {}
 
 void AppsPromoLogoFetcher::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   std::string data;
   std::string base64_data;
 
@@ -357,7 +358,7 @@ void AppsPromoLogoFetcher::FetchLogo() {
   CHECK(promo_data_.logo.scheme() == chrome::kHttpsScheme);
 
   url_fetcher_.reset(content::URLFetcher::Create(
-      0, promo_data_.logo, content::URLFetcher::GET, this));
+      0, promo_data_.logo, net::URLFetcher::GET, this));
   url_fetcher_->SetRequestContext(
       g_browser_process->system_request_context());
   url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |

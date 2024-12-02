@@ -13,7 +13,6 @@
       'type': 'none',
       'dependencies': [
         '../content/content.gyp:content_shell_apk',
-        'util/build_util.gyp:*',
         'android_builder_tests',
       ],
     }, # target_name: All
@@ -59,7 +58,12 @@
             '../testing/android/native_test.gyp:native_test_apk',
             # Unit test bundles packaged as an apk.
             '../base/base.gyp:base_unittests_apk',
+            '../content/content.gyp:content_unittests_apk',
+            '../gpu/gpu.gyp:gpu_unittests_apk',
+            '../sql/sql.gyp:sql_unittests_apk',
+            '../sync/sync.gyp:sync_unit_tests_apk',
             '../ipc/ipc.gyp:ipc_tests_apk',
+            '../net/net.gyp:net_unittests_apk',
             '../ui/ui.gyp:ui_unittests_apk',
           ],
         }]

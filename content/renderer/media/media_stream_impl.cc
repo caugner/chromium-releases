@@ -9,9 +9,12 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
 #include "content/renderer/media/capture_video_decoder.h"
+#include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_dependency_factory.h"
 #include "content/renderer/media/media_stream_dispatcher.h"
 #include "content/renderer/media/peer_connection_handler.h"
@@ -21,7 +24,6 @@
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "content/renderer/p2p/ipc_network_manager.h"
 #include "content/renderer/p2p/ipc_socket_factory.h"
-#include "content/renderer/p2p/socket_dispatcher.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "media/base/message_loop_factory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -55,51 +57,17 @@ static void UpdateWebRTCMethodCount(JavaScriptAPIName api_name) {
 
 static int g_next_request_id  = 0;
 
-// The MediaStreamMananger label for a stream is globally unique. The track
-// session id is globally unique for the set of audio tracks and video tracks
-// respectively. An audio track and a video track can have the same session id
-// (without being related). Hence we create a unique track label from the stream
-// label, track type and track session id:
-// <MediaStreamManager-label>#{audio,video}-<session-ID>.
-static std::string CreateTrackLabel(
-    const std::string& manager_label,
-    int session_id,
-    bool is_video) {
-  std::string track_label = manager_label;
-  if (is_video) {
-    track_label += "#video-";
-  } else {
-    track_label += "#audio-";
-  }
-  track_label += session_id;
-  return track_label;
-}
-
-// Extracting the MediaStreamManager stream label will only work for track
-// labels created by CreateTrackLabel. If is wasn't, the contents of the
-// returned string is undefined.
-static std::string ExtractManagerStreamLabel(
-    const std::string& track_label) {
-  std::string manager_label = track_label;
-  size_t pos = manager_label.rfind("#");
-  // If # isn't found, the string is left intact.
-  manager_label = manager_label.substr(0, pos);
-  return manager_label;
-}
-
 static void CreateWebKitSourceVector(
     const std::string& label,
     const media_stream::StreamDeviceInfoArray& devices,
     WebKit::WebMediaStreamSource::Type type,
     WebKit::WebVector<WebKit::WebMediaStreamSource>& webkit_sources) {
   ASSERT(devices.size() == webkit_sources.size());
-
   for (size_t i = 0; i < devices.size(); ++i) {
-    std::string track_label = CreateTrackLabel(
-        label, devices[i].session_id,
-        type == WebKit::WebMediaStreamSource::TypeVideo);
+    std::string source_id = StringPrintf("%s%d%u", label.c_str(), type,
+                                         static_cast<unsigned int>(i));
     webkit_sources[i].initialize(
-          UTF8ToUTF16(track_label),
+          UTF8ToUTF16(source_id),
           type,
           UTF8ToUTF16(devices[i].name));
   }
@@ -123,25 +91,7 @@ MediaStreamImpl::MediaStreamImpl(
 }
 
 MediaStreamImpl::~MediaStreamImpl() {
-  DCHECK(peer_connection_handlers_.empty());
-  DCHECK(local_media_streams_.empty());
-  if (dependency_factory_.get())
-    dependency_factory_->ReleasePeerConnectionFactory();
-  if (network_manager_) {
-    // The network manager needs to free its resources on the thread they were
-    // created, which is the worked thread.
-    if (chrome_worker_thread_.IsRunning()) {
-      chrome_worker_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
-          &MediaStreamImpl::DeleteIpcNetworkManager,
-          base::Unretained(this)));
-      // Stopping the thread will wait until all tasks have been
-      // processed before returning. We wait for the above task to finish before
-      // letting the destructor continue to avoid any potential race issues.
-      chrome_worker_thread_.Stop();
-    } else {
-      NOTREACHED() << "Worker thread not running.";
-    }
-  }
+  CleanupPeerConnectionFactory();
 }
 
 WebKit::WebPeerConnectionHandler* MediaStreamImpl::CreatePeerConnectionHandler(
@@ -156,10 +106,7 @@ WebKit::WebPeerConnectionHandler* MediaStreamImpl::CreatePeerConnectionHandler(
 
   PeerConnectionHandler* pc_handler = new PeerConnectionHandler(
       client,
-      this,
       dependency_factory_.get());
-  peer_connection_handlers_.push_back(pc_handler);
-
   return pc_handler;
 }
 
@@ -176,59 +123,31 @@ MediaStreamImpl::CreatePeerConnectionHandlerJsep(
 
   PeerConnectionHandlerJsep* pc_handler = new PeerConnectionHandlerJsep(
       client,
-      this,
       dependency_factory_.get());
-  peer_connection_handlers_.push_back(pc_handler);
-
   return pc_handler;
 }
 
-void MediaStreamImpl::ClosePeerConnection(
-    PeerConnectionHandlerBase* pc_handler) {
-  DCHECK(CalledOnValidThread());
-  peer_connection_handlers_.remove(pc_handler);
-}
-
-webrtc::LocalMediaStreamInterface* MediaStreamImpl::GetLocalMediaStream(
-    const WebKit::WebMediaStreamDescriptor& stream) {
-  // TODO(perkj): Change the mapping between a native local media stream and
-  // WebMediaStreamDescriptor once there is a common id.
-  // For now, we are forced to lookup the sources within a MediaStream.
-  WebKit::WebVector<WebKit::WebMediaStreamComponent> video_components;
-  stream.videoSources(video_components);
-
-  std::string msm_label;
-  if (!video_components.isEmpty()) {
-    std::string source_id = UTF16ToUTF8(video_components[0].source().id());
-    msm_label = ExtractManagerStreamLabel(source_id);
-  }
-  // If no local video source was found, check if there is an audio source.
-  if (msm_label.empty()) {
-    WebKit::WebVector<WebKit::WebMediaStreamComponent> audio_components;
-    stream.audioSources(audio_components);
-    if (!audio_components.isEmpty()) {
-        std::string source_id = UTF16ToUTF8(audio_components[0].source().id());
-        msm_label = ExtractManagerStreamLabel(source_id);
-      }
-  }
-  LocalNativeStreamMap::iterator it = local_media_streams_.find(msm_label);
-  if (it == local_media_streams_.end())
-    return NULL;
-  return it->second.stream_.get();
-}
-
-bool MediaStreamImpl::StopLocalMediaStream(
+void MediaStreamImpl::StopLocalMediaStream(
     const WebKit::WebMediaStreamDescriptor& stream) {
   DVLOG(1) << "MediaStreamImpl::StopLocalMediaStream";
-  webrtc::LocalMediaStreamInterface* native_stream = GetLocalMediaStream(
-      stream);
-  if (native_stream) {
-    media_stream_dispatcher_->StopStream(native_stream->label());
-    local_media_streams_.erase(native_stream->label());
-    return true;
+
+  MediaStreamExtraData* extra_data =
+      static_cast<MediaStreamExtraData*>(stream.extraData());
+  if (extra_data && extra_data->local_stream()) {
+    media_stream_dispatcher_->StopStream(extra_data->local_stream()->label());
+    local_media_streams_.erase(extra_data->local_stream()->label());
   } else {
-    return false;
+    NOTREACHED();
   }
+}
+
+void MediaStreamImpl::CreateMediaStream(
+    WebKit::WebFrame* frame,
+    WebKit::WebMediaStreamDescriptor* stream) {
+  DVLOG(1) << "MediaStreamImpl::CreateMediaStream";
+  // TODO(perkj): Need to find the source from all existing local and
+  // remote MediaStreams.
+  NOTIMPLEMENTED();
 }
 
 void MediaStreamImpl::requestUserMedia(
@@ -244,7 +163,7 @@ void MediaStreamImpl::requestUserMedia(
   bool audio = false;
   bool video = false;
   WebKit::WebFrame* frame = NULL;
-  std::string security_origin;
+  GURL security_origin;
 
   // |user_media_request| can't be mocked. So in order to test at all we check
   // if it isNull.
@@ -255,8 +174,7 @@ void MediaStreamImpl::requestUserMedia(
   } else {
     audio = user_media_request.audio();
     video = user_media_request.video();
-    security_origin = UTF16ToUTF8(
-        user_media_request.securityOrigin().toString());
+    security_origin = GURL(user_media_request.securityOrigin().toString());
     // Get the WebFrame that requested a MediaStream.
     // The frame is needed to tell the MediaStreamDispatcher when a stream goes
     // out of scope.
@@ -267,7 +185,7 @@ void MediaStreamImpl::requestUserMedia(
   DVLOG(1) << "MediaStreamImpl::generateStream(" << request_id << ", [ "
            << (audio ? "audio" : "")
            << (user_media_request.video() ? " video" : "") << "], "
-           << security_origin << ")";
+           << security_origin.spec() << ")";
 
   user_media_requests_[request_id] =
       UserMediaRequestInfo(frame, user_media_request);
@@ -282,32 +200,43 @@ void MediaStreamImpl::requestUserMedia(
 void MediaStreamImpl::cancelUserMediaRequest(
     const WebKit::WebUserMediaRequest& user_media_request) {
   DCHECK(CalledOnValidThread());
-  // TODO(grunell): Implement.
-  NOTIMPLEMENTED();
+  MediaRequestMap::iterator it = user_media_requests_.begin();
+  for (; it != user_media_requests_.end(); ++it) {
+    if (it->second.request_ == user_media_request)
+      break;
+  }
+  if (it != user_media_requests_.end()) {
+    media_stream_dispatcher_->CancelGenerateStream(it->first);
+    user_media_requests_.erase(it);
+  }
+}
+
+WebKit::WebMediaStreamDescriptor MediaStreamImpl::GetMediaStream(
+    const GURL& url) {
+  return WebKit::WebMediaStreamRegistry::lookupMediaStreamDescriptor(url);
 }
 
 scoped_refptr<media::VideoDecoder> MediaStreamImpl::GetVideoDecoder(
     const GURL& url,
     media::MessageLoopFactory* message_loop_factory) {
   DCHECK(CalledOnValidThread());
-  WebKit::WebMediaStreamDescriptor descriptor(
-      WebKit::WebMediaStreamRegistry::lookupMediaStreamDescriptor(url));
-  if (descriptor.isNull())
+  WebKit::WebMediaStreamDescriptor descriptor(GetMediaStream(url));
+
+  if (descriptor.isNull() || !descriptor.extraData())
     return NULL;  // This is not a valid stream.
 
-  webrtc::LocalMediaStreamInterface* local_stream =
-      GetLocalMediaStream(descriptor);
-  if (local_stream)
-    return CreateLocalVideoDecoder(local_stream, message_loop_factory);
+  DVLOG(1) << "MediaStreamImpl::GetVideoDecoder stream:"
+           << UTF16ToUTF8(descriptor.label());
 
-  PeerConnectionHandlerBase* pc_handler =
-      FindPeerConnectionByStream(descriptor);
-  if (pc_handler != NULL) {
-    return CreateRemoteVideoDecoder(descriptor,
-                                    pc_handler,
-                                    url,
+  MediaStreamExtraData* extra_data =
+      static_cast<MediaStreamExtraData*>(descriptor.extraData());
+  if (extra_data->local_stream())
+    return CreateLocalVideoDecoder(extra_data->local_stream(),
+                                   message_loop_factory);
+  if (extra_data->remote_stream())
+    return CreateRemoteVideoDecoder(extra_data->remote_stream(), url,
                                     message_loop_factory);
-  }
+  NOTREACHED();
   return NULL;
 }
 
@@ -334,20 +263,34 @@ void MediaStreamImpl::OnStreamGenerated(
   MediaRequestMap::iterator it = user_media_requests_.find(request_id);
   if (it == user_media_requests_.end()) {
     DVLOG(1) << "Request ID not found";
+    media_stream_dispatcher_->StopStream(label);
     return;
   }
 
-  CreateNativeLocalMediaStream(label, it->second.frame_,
-                               audio_source_vector, video_source_vector);
+  LocalNativeStreamPtr native_stream(CreateNativeLocalMediaStream(
+      label, it->second.frame_, audio_source_vector, video_source_vector));
+  if (!native_stream.get()) {
+    DVLOG(1) << "Failed to create native stream in OnStreamGenerated.";
+    media_stream_dispatcher_->StopStream(label);
+    it->second.request_.requestFailed();
+    user_media_requests_.erase(it);
+    return;
+  }
 
-  WebKit::WebUserMediaRequest user_media_request(it->second.request_);
+  WebKit::WebString webkit_label = UTF8ToUTF16(label);
+  WebKit::WebMediaStreamDescriptor description;
+  description.initialize(webkit_label, audio_source_vector,
+                         video_source_vector);
+  description.setExtraData(new MediaStreamExtraData(native_stream));
+
+  CompleteGetUserMediaRequest(description, &it->second.request_);
   user_media_requests_.erase(it);
+}
 
-  // |user_media_request| can't be mocked. So in order to test at all we check
-  // if it isNull.
-  if (!user_media_request.isNull())
-    user_media_request.requestSucceeded(audio_source_vector,
-                                        video_source_vector);
+void MediaStreamImpl::CompleteGetUserMediaRequest(
+      const WebKit::WebMediaStreamDescriptor& stream,
+      WebKit::WebUserMediaRequest* request) {
+  request->requestSucceeded(stream);
 }
 
 void MediaStreamImpl::OnStreamGenerationFailed(int request_id) {
@@ -413,9 +356,20 @@ void MediaStreamImpl::OnDeviceOpenFailed(int request_id) {
 }
 
 void MediaStreamImpl::FrameWillClose(WebKit::WebFrame* frame) {
+  MediaRequestMap::iterator request_it = user_media_requests_.begin();
+  while (request_it != user_media_requests_.end()) {
+    if (request_it->second.frame_ == frame) {
+      DVLOG(1) << "MediaStreamImpl::FrameWillClose: "
+               << "Cancel user media request " << request_it->first;
+      cancelUserMediaRequest(request_it->second.request_);
+      request_it = user_media_requests_.begin();
+    } else {
+      ++request_it;
+    }
+  }
   LocalNativeStreamMap::iterator it = local_media_streams_.begin();
   while (it != local_media_streams_.end()) {
-    if (it->second.frame_ == frame) {
+    if (it->second == frame) {
       DVLOG(1) << "MediaStreamImpl::FrameWillClose: "
                << "Stopping stream " << it->first;
       media_stream_dispatcher_->StopStream(it->first);
@@ -425,6 +379,10 @@ void MediaStreamImpl::FrameWillClose(WebKit::WebFrame* frame) {
       ++it;
     }
   }
+}
+
+void MediaStreamImpl::OnSocketDispatcherDestroyed() {
+  CleanupPeerConnectionFactory();
 }
 
 void MediaStreamImpl::InitializeWorkerThread(talk_base::Thread** thread,
@@ -481,6 +439,7 @@ bool MediaStreamImpl::EnsurePeerConnectionFactory() {
           base::Unretained(this),
           &event));
     event.Wait();
+    p2p_socket_dispatcher_->AddDestructionObserver(this);
   }
 
   if (!socket_factory_.get()) {
@@ -503,8 +462,29 @@ bool MediaStreamImpl::EnsurePeerConnectionFactory() {
   return true;
 }
 
+void MediaStreamImpl::CleanupPeerConnectionFactory() {
+  if (dependency_factory_.get())
+    dependency_factory_->ReleasePeerConnectionFactory();
+  if (network_manager_) {
+    // The network manager needs to free its resources on the thread they were
+    // created, which is the worked thread.
+    if (chrome_worker_thread_.IsRunning()) {
+      chrome_worker_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
+          &MediaStreamImpl::DeleteIpcNetworkManager,
+          base::Unretained(this)));
+      // Stopping the thread will wait until all tasks have been
+      // processed before returning. We wait for the above task to finish before
+      // letting the the function continue to avoid any potential race issues.
+      chrome_worker_thread_.Stop();
+    } else {
+      NOTREACHED() << "Worker thread not running.";
+    }
+    p2p_socket_dispatcher_->RemoveDestructionObserver(this);
+  }
+}
+
 scoped_refptr<media::VideoDecoder> MediaStreamImpl::CreateLocalVideoDecoder(
-    webrtc::LocalMediaStreamInterface* stream,
+    webrtc::MediaStreamInterface* stream,
     media::MessageLoopFactory* message_loop_factory) {
   if (!stream->video_tracks() || stream->video_tracks()->count() == 0)
     return NULL;
@@ -518,6 +498,10 @@ scoped_refptr<media::VideoDecoder> MediaStreamImpl::CreateLocalVideoDecoder(
   capability.color = media::VideoCaptureCapability::kI420;
   capability.expected_capture_delay = 0;
   capability.interlaced = false;
+
+  DVLOG(1) << "MediaStreamImpl::CreateLocalVideoDecoder video_session_id:"
+           << video_session_id;
+
   return new CaptureVideoDecoder(
       message_loop_factory->GetMessageLoopProxy("CaptureVideoDecoderThread"),
       video_session_id,
@@ -525,40 +509,27 @@ scoped_refptr<media::VideoDecoder> MediaStreamImpl::CreateLocalVideoDecoder(
       capability);
 }
 
-PeerConnectionHandlerBase* MediaStreamImpl::FindPeerConnectionByStream(
-    const WebKit::WebMediaStreamDescriptor& stream) {
-  std::list<PeerConnectionHandlerBase*>::iterator it;
-  for (it = peer_connection_handlers_.begin();
-       it != peer_connection_handlers_.end(); ++it) {
-    if ((*it)->GetRemoteMediaStream(stream) != NULL) {
-      return *it;
-    }
-  }
-  return NULL;
-}
-
 scoped_refptr<media::VideoDecoder> MediaStreamImpl::CreateRemoteVideoDecoder(
-    const WebKit::WebMediaStreamDescriptor& stream,
-    PeerConnectionHandlerBase* pc_handler,
+    webrtc::MediaStreamInterface* stream,
     const GURL& url,
     media::MessageLoopFactory* message_loop_factory) {
-  WebKit::WebVector<WebKit::WebMediaStreamComponent> video_sources;
-  stream.videoSources(video_sources);
-  if (video_sources.isEmpty())
+  if (!stream->video_tracks() || stream->video_tracks()->count() == 0)
     return NULL;
 
-  std::string source_id = UTF16ToUTF8(video_sources[0].source().id());
+  DVLOG(1) << "MediaStreamImpl::CreateRemoteVideoDecoder label:"
+           << stream->label();
+
   RTCVideoDecoder* rtc_video_decoder = new RTCVideoDecoder(
       message_loop_factory->GetMessageLoop("RtcVideoDecoderThread"),
       url.spec());
   talk_base::scoped_refptr<webrtc::VideoRendererWrapperInterface> renderer(
       new talk_base::RefCountedObject<VideoRendererWrapper>(rtc_video_decoder));
-
-  pc_handler->SetRemoteVideoRenderer(source_id, renderer);
+  stream->video_tracks()->at(0)->SetRenderer(renderer);
   return rtc_video_decoder;
 }
 
-void MediaStreamImpl::CreateNativeLocalMediaStream(
+talk_base::scoped_refptr<webrtc::LocalMediaStreamInterface>
+MediaStreamImpl::CreateNativeLocalMediaStream(
     const std::string& label,
     WebKit::WebFrame* frame,
     const WebKit::WebVector<WebKit::WebMediaStreamSource>& audio_sources,
@@ -570,35 +541,34 @@ void MediaStreamImpl::CreateNativeLocalMediaStream(
   // track objects however, so we'll just have to skip that. Furthermore,
   // creating a peer connection later on will fail if we don't have a factory.
   if (!EnsurePeerConnectionFactory()) {
-    return;
+    return NULL;
   }
 
-  LocalMediaStreamPtr native_stream =
+  LocalNativeStreamPtr native_stream =
       dependency_factory_->CreateLocalMediaStream(label);
 
   // Add audio tracks.
   for (size_t i = 0; i < audio_sources.size(); ++i) {
     talk_base::scoped_refptr<webrtc::LocalAudioTrackInterface> audio_track(
         dependency_factory_->CreateLocalAudioTrack(
-            UTF16ToUTF8(audio_sources[i].name()), NULL));
+            UTF16ToUTF8(audio_sources[i].id()), NULL));
     native_stream->AddTrack(audio_track);
   }
 
   // Add video tracks.
   for (size_t i = 0; i < video_sources.size(); ++i) {
-    std::string msm_label = ExtractManagerStreamLabel(
-        UTF16ToUTF8(video_sources[i].id()));
-    if (!media_stream_dispatcher_->IsStream(msm_label)) {
+    if (!media_stream_dispatcher_->IsStream(label)) {
       continue;
     }
     int video_session_id =
-        media_stream_dispatcher_->video_session_id(msm_label, 0);
+        media_stream_dispatcher_->video_session_id(label, 0);
     talk_base::scoped_refptr<webrtc::LocalVideoTrackInterface> video_track(
         dependency_factory_->CreateLocalVideoTrack(
-            UTF16ToUTF8(video_sources[i].name()), video_session_id));
+            UTF16ToUTF8(video_sources[i].id()), video_session_id));
     native_stream->AddTrack(video_track);
   }
-  local_media_streams_[label] = LocalMediaStreamInfo(frame, native_stream);
+  local_media_streams_[label] = frame;
+  return native_stream;
 }
 
 MediaStreamImpl::VideoRendererWrapper::VideoRendererWrapper(
@@ -609,5 +579,13 @@ MediaStreamImpl::VideoRendererWrapper::VideoRendererWrapper(
 MediaStreamImpl::VideoRendererWrapper::~VideoRendererWrapper() {
 }
 
-MediaStreamImpl::LocalMediaStreamInfo::~LocalMediaStreamInfo() {
+MediaStreamExtraData::MediaStreamExtraData(
+    webrtc::MediaStreamInterface* remote_stream)
+    : remote_stream_(remote_stream) {
+}
+MediaStreamExtraData::MediaStreamExtraData(
+    webrtc::LocalMediaStreamInterface* local_stream)
+    : local_stream_(local_stream) {
+}
+MediaStreamExtraData::~MediaStreamExtraData() {
 }

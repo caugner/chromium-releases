@@ -7,6 +7,7 @@ from model import PropertyType
 import any_helper
 import cpp_util
 import model
+import schema_util
 import sys
 import util_cc_helper
 
@@ -32,7 +33,7 @@ class CCGenerator(object):
       .Append()
       .Append(self._util_cc_helper.GetIncludePath())
       .Append('#include "%s/%s.h"' %
-          (self._namespace.source_file_dir, self._namespace.name))
+          (self._namespace.source_file_dir, self._namespace.unix_name))
     )
     includes = self._cpp_type_generator.GenerateIncludes()
     if not includes.IsEmpty():
@@ -71,8 +72,8 @@ class CCGenerator(object):
         .Append()
       )
     for type_ in self._namespace.types.values():
-      (c.Concat(self._GenerateType(type_.name, type_))
-        .Append()
+      (c.Concat(self._GenerateType(
+        schema_util.StripSchemaNamespace(type_.name), type_)).Append()
       )
     if self._namespace.functions:
       (c.Append('//')
@@ -95,16 +96,10 @@ class CCGenerator(object):
   def _GenerateType(self, cpp_namespace, type_):
     """Generates the function definitions for a type.
     """
-    classname = cpp_util.Classname(type_.name)
+    classname = cpp_util.Classname(schema_util.StripSchemaNamespace(type_.name))
     c = Code()
 
     if type_.functions:
-      # Types with functions are not instantiable in C++ because they are
-      # handled in pure Javascript and hence have no properties or
-      # additionalProperties.
-      if type_.properties:
-        raise NotImplementedError('\n'.join(model.GetModelHierarchy(type_)) +
-            '\nCannot generate both functions and properties on a type')
       for function in type_.functions.values():
         (c.Concat(
             self._GenerateFunction(
@@ -174,7 +169,7 @@ class CCGenerator(object):
 
     E.g for type "Foo", generates Foo::Populate()
     """
-    classname = cpp_util.Classname(type_.name)
+    classname = cpp_util.Classname(schema_util.StripSchemaNamespace(type_.name))
     c = Code()
     (c.Append('// static')
       .Sblock('bool %(namespace)s::Populate'
@@ -350,6 +345,8 @@ class CCGenerator(object):
       return '%s.DeepCopy()' % var
     elif prop.type_ == PropertyType.ENUM:
       return 'CreateEnumValue(%s).release()' % var
+    elif prop.type_ == PropertyType.BINARY:
+      return '%s->DeepCopy()' % var
     elif self._IsArrayOrArrayRef(prop):
       return '%s.release()' % self._util_cc_helper.CreateValueFromArray(
           self._cpp_type_generator.GetReferencedProperty(prop), var,
@@ -357,6 +354,7 @@ class CCGenerator(object):
     elif self._IsFundamentalOrFundamentalRef(prop):
       if prop.optional:
         var = '*' + var
+      prop = self._cpp_type_generator.GetReferencedProperty(prop);
       return {
           PropertyType.STRING: 'Value::CreateStringValue(%s)',
           PropertyType.BOOLEAN: 'Value::CreateBooleanValue(%s)',
@@ -578,6 +576,9 @@ class CCGenerator(object):
             param_namespace + '::' + cpp_util.Classname(param.name),
             param))
         c.Append()
+      elif param.type_ == PropertyType.ARRAY:
+        c.Concat(self._GeneratePropertyFunctions(
+            param_namespace, [param.item_type]))
       elif param.type_ == PropertyType.CHOICES:
         c.Concat(self._GeneratePropertyFunctions(
             param_namespace, param.choices.values()))

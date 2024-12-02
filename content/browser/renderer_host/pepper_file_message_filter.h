@@ -16,23 +16,22 @@
 #include "build/build_config.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "ipc/ipc_platform_file.h"
-#include "webkit/plugins/ppapi/dir_contents.h"
+#include "ppapi/shared_impl/dir_contents.h"
 
 namespace content {
 class BrowserContext;
 }
 
-namespace webkit {
 namespace ppapi {
 class PepperFilePath;
 }
-}
 
-// A message filter for Pepper-specific File I/O messages.
+// A message filter for Pepper-specific File I/O messages. Used on
+// renderer channels, this denys the renderer the trusted operations
+// permitted only by plugin processes.
 class PepperFileMessageFilter : public content::BrowserMessageFilter {
  public:
-  PepperFileMessageFilter(int child_id,
-                          content::BrowserContext* browser_context);
+  explicit PepperFileMessageFilter(int child_id);
 
   // content::BrowserMessageFilter methods:
   virtual void OverrideThreadForMessage(
@@ -57,29 +56,31 @@ class PepperFileMessageFilter : public content::BrowserMessageFilter {
   friend class base::DeleteHelper<PepperFileMessageFilter>;
 
   // Called on the FILE thread:
-  void OnOpenFile(const webkit::ppapi::PepperFilePath& path,
+  void OnOpenFile(const ppapi::PepperFilePath& path,
                   int flags,
                   base::PlatformFileError* error,
                   IPC::PlatformFileForTransit* file);
-  void OnRenameFile(const webkit::ppapi::PepperFilePath& from_path,
-                    const webkit::ppapi::PepperFilePath& to_path,
+  void OnRenameFile(const ppapi::PepperFilePath& from_path,
+                    const ppapi::PepperFilePath& to_path,
                     base::PlatformFileError* error);
-  void OnDeleteFileOrDir(const webkit::ppapi::PepperFilePath& path,
+  void OnDeleteFileOrDir(const ppapi::PepperFilePath& path,
                          bool recursive,
                          base::PlatformFileError* error);
-  void OnCreateDir(const webkit::ppapi::PepperFilePath& path,
+  void OnCreateDir(const ppapi::PepperFilePath& path,
                    base::PlatformFileError* error);
-  void OnQueryFile(const webkit::ppapi::PepperFilePath& path,
+  void OnQueryFile(const ppapi::PepperFilePath& path,
                    base::PlatformFileInfo* info,
                    base::PlatformFileError* error);
-  void OnGetDirContents(const webkit::ppapi::PepperFilePath& path,
-                        webkit::ppapi::DirContents* contents,
+  void OnGetDirContents(const ppapi::PepperFilePath& path,
+                        ppapi::DirContents* contents,
                         base::PlatformFileError* error);
+  void OnCreateTemporaryFile(base::PlatformFileError* error,
+                             IPC::PlatformFileForTransit* file);
 
   // Validate and convert the Pepper file path to a "real" |FilePath|. Returns
   // an empty |FilePath| on error.
-  FilePath ValidateAndConvertPepperFilePath(
-      const webkit::ppapi::PepperFilePath& pepper_path, int flags);
+  virtual FilePath ValidateAndConvertPepperFilePath(
+      const ppapi::PepperFilePath& pepper_path, int flags);
 
   // The ID of the child process.
   const int child_id_;
@@ -88,10 +89,51 @@ class PepperFileMessageFilter : public content::BrowserMessageFilter {
   // owned by this class.
   IPC::Channel* channel_;
 
-  // The base path for the pepper data.
-  FilePath pepper_path_;
-
   DISALLOW_COPY_AND_ASSIGN(PepperFileMessageFilter);
+};
+
+// Message filter used with out-of-process pepper flash plugin channels that
+// provides the trusted operations permitted only by plugin processes.
+class PepperTrustedFileMessageFilter : public PepperFileMessageFilter {
+ public:
+  PepperTrustedFileMessageFilter(int child_id,
+                                 const std::string& plugin_name,
+                                 const FilePath& profile_data_directory);
+
+ protected:
+  virtual ~PepperTrustedFileMessageFilter();
+
+ private:
+  virtual FilePath ValidateAndConvertPepperFilePath(
+      const ppapi::PepperFilePath& pepper_path, int flags) OVERRIDE;
+
+  // The path to the per-plugin directory under the per-profile data directory
+  // (includes module name).
+  FilePath plugin_data_directory_;
+
+  DISALLOW_COPY_AND_ASSIGN(PepperTrustedFileMessageFilter);
+};
+
+// Message filter used with in-process pepper flash plugins that provides the
+// renderer channels with the trusted operations permitted only by plugin
+// process. This should not be used as part of normal operations, and may
+// only be applied under the control of a command-line flag.
+class PepperUnsafeFileMessageFilter : public PepperFileMessageFilter {
+ public:
+  PepperUnsafeFileMessageFilter(int child_id,
+                                const FilePath& profile_data_directory);
+
+ protected:
+  virtual ~PepperUnsafeFileMessageFilter();
+
+ private:
+  virtual FilePath ValidateAndConvertPepperFilePath(
+      const ppapi::PepperFilePath& pepper_path, int flags) OVERRIDE;
+
+  // The per-profile data directory (not including module name).
+  FilePath profile_data_directory_;
+
+  DISALLOW_COPY_AND_ASSIGN(PepperUnsafeFileMessageFilter);
 };
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_PEPPER_FILE_MESSAGE_FILTER_H_

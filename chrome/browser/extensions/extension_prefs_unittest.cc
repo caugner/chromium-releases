@@ -20,11 +20,13 @@
 #include "chrome/common/string_ordinal.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "content/test/notification_observer_mock.h"
+#include "content/public/test/mock_notification_observer.h"
 
 using base::Time;
 using base::TimeDelta;
 using content::BrowserThread;
+using extensions::Extension;
+using extensions::ExtensionList;
 
 namespace {
 
@@ -447,7 +449,7 @@ class ExtensionPrefsBlacklist : public ExtensionPrefsTest {
     EXPECT_EQ(4u, info->size());
     ExtensionPrefs::ExtensionsInfo::iterator info_iter;
     for (info_iter = info->begin(); info_iter != info->end(); ++info_iter) {
-      ExtensionInfo* extension_info = info_iter->get();
+      extensions::ExtensionInfo* extension_info = info_iter->get();
       EXPECT_NE(extensions_[0]->id(), extension_info->extension_id);
     }
   }
@@ -716,8 +718,7 @@ class ExtensionPrefsFlags : public ExtensionPrefsTest {
       dictionary.SetString(extension_manifest_keys::kName, "from_webstore");
       dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
       webstore_extension_ = prefs_.AddExtensionWithManifestAndFlags(
-          dictionary, Extension::INTERNAL,
-          Extension::STRICT_ERROR_CHECKS | Extension::FROM_WEBSTORE);
+          dictionary, Extension::INTERNAL, Extension::FROM_WEBSTORE);
     }
 
     {
@@ -725,8 +726,7 @@ class ExtensionPrefsFlags : public ExtensionPrefsTest {
       dictionary.SetString(extension_manifest_keys::kName, "from_bookmark");
       dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
       bookmark_extension_ = prefs_.AddExtensionWithManifestAndFlags(
-          dictionary, Extension::INTERNAL,
-          Extension::STRICT_ERROR_CHECKS | Extension::FROM_BOOKMARK);
+          dictionary, Extension::INTERNAL, Extension::FROM_BOOKMARK);
     }
   }
 
@@ -761,16 +761,16 @@ ExtensionPrefsPrepopulatedTest::ExtensionPrefsPrepopulatedTest()
 
   ext1_scoped_ = Extension::Create(
       prefs_.temp_dir().AppendASCII("ext1_"), Extension::EXTERNAL_PREF,
-      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+      simple_dict, Extension::NO_FLAGS, &error);
   ext2_scoped_ = Extension::Create(
       prefs_.temp_dir().AppendASCII("ext2_"), Extension::EXTERNAL_PREF,
-      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+      simple_dict, Extension::NO_FLAGS, &error);
   ext3_scoped_ = Extension::Create(
       prefs_.temp_dir().AppendASCII("ext3_"), Extension::EXTERNAL_PREF,
-      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+      simple_dict, Extension::NO_FLAGS, &error);
   ext4_scoped_ = Extension::Create(
       prefs_.temp_dir().AppendASCII("ext4_"), Extension::EXTERNAL_PREF,
-      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+      simple_dict, Extension::NO_FLAGS, &error);
 
   ext1_ = ext1_scoped_.get();
   ext2_ = ext2_scoped_.get();
@@ -935,7 +935,7 @@ class ExtensionPrefsUninstallExtension : public ExtensionPrefsPrepopulatedTest {
   virtual void Initialize() {
     InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
     InstallExtControlledPref(ext1_, kPref2, Value::CreateStringValue("val2"));
-    ExtensionContentSettingsStore* store = prefs()->content_settings_store();
+    extensions::ContentSettingsStore* store = prefs()->content_settings_store();
     ContentSettingsPattern pattern =
         ContentSettingsPattern::FromString("http://[*.]example.com");
     store->SetExtensionContentSetting(ext1_->id(),
@@ -967,12 +967,12 @@ class ExtensionPrefsNotifyWhenNeeded : public ExtensionPrefsPrepopulatedTest {
     using testing::Mock;
     using testing::StrEq;
 
-    content::NotificationObserverMock observer;
+    content::MockNotificationObserver observer;
     PrefChangeRegistrar registrar;
     registrar.Init(prefs()->pref_service());
     registrar.Add(kPref1, &observer);
 
-    content::NotificationObserverMock incognito_observer;
+    content::MockNotificationObserver incognito_observer;
     scoped_ptr<PrefService> incog_prefs(prefs_.CreateIncognitoPrefService());
     PrefChangeRegistrar incognito_registrar;
     incognito_registrar.Init(incog_prefs.get());
@@ -1138,3 +1138,70 @@ class ExtensionPrefsDisableExtensions : public ExtensionPrefsPrepopulatedTest {
   int iteration_;
 };
 TEST_F(ExtensionPrefsDisableExtensions, ExtensionPrefsDisableExtensions) {}
+
+// Parent class for testing the ManagementPolicy provider methods.
+class ExtensionPrefsManagementPolicyProvider : public ExtensionPrefsTest {
+ public:
+  virtual void Initialize() {}
+  virtual void Verify() {}
+
+  void InitializeWithLocation(Extension::Location location, bool required) {
+    ASSERT_EQ(required, Extension::IsRequired(location));
+
+    DictionaryValue values;
+    values.SetString(keys::kName, "test");
+    values.SetString(keys::kVersion, "0.1");
+    std::string error;
+    extension_ = Extension::Create(FilePath(), location, values,
+                                   Extension::NO_FLAGS, &error);
+    ASSERT_TRUE(extension_.get());
+  }
+
+ protected:
+  scoped_refptr<Extension> extension_;
+};
+
+// Tests the behavior of the ManagementPolicy provider methods for an
+// extension required by policy.
+class ExtensionPrefsRequiredExtension
+    : public ExtensionPrefsManagementPolicyProvider {
+ public:
+  virtual void Initialize() {
+    InitializeWithLocation(Extension::EXTERNAL_POLICY_DOWNLOAD, true);
+  }
+
+  virtual void Verify() {
+    string16 error16;
+    EXPECT_TRUE(prefs()->UserMayLoad(extension_.get(), &error16));
+    EXPECT_EQ(string16(), error16);
+
+    // We won't check the exact wording of the error, but it should say
+    // something.
+    EXPECT_FALSE(prefs()->UserMayModifySettings(extension_.get(), &error16));
+    EXPECT_NE(string16(), error16);
+    EXPECT_TRUE(prefs()->MustRemainEnabled(extension_.get(), &error16));
+    EXPECT_NE(string16(), error16);
+  }
+};
+TEST_F(ExtensionPrefsRequiredExtension, RequiredExtension) {}
+
+// Tests the behavior of the ManagementPolicy provider methods for an
+// extension required by policy.
+class ExtensionPrefsNotRequiredExtension
+    : public ExtensionPrefsManagementPolicyProvider {
+ public:
+  virtual void Initialize() {
+    InitializeWithLocation(Extension::INTERNAL, false);
+  }
+
+  virtual void Verify() {
+  string16 error16;
+    EXPECT_TRUE(prefs()->UserMayLoad(extension_.get(), &error16));
+    EXPECT_EQ(string16(), error16);
+    EXPECT_TRUE(prefs()->UserMayModifySettings(extension_.get(), &error16));
+    EXPECT_EQ(string16(), error16);
+    EXPECT_FALSE(prefs()->MustRemainEnabled(extension_.get(), &error16));
+    EXPECT_EQ(string16(), error16);
+  }
+};
+TEST_F(ExtensionPrefsNotRequiredExtension, NotRequiredExtension) {}

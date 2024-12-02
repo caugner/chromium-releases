@@ -16,7 +16,6 @@ remoting.HostSetupFlow = function(sequence) {
   this.sequence_ = sequence;
   this.currentStep_ = 0;
   this.state_ = sequence[0];
-
   this.pin = '';
 };
 
@@ -228,7 +227,7 @@ remoting.HostSetupDialog.prototype.updateState_ = function() {
     if (opt_tag2) {
       l10n.localizeElementFromTag(messageDiv, opt_tag2);
     } else {
-      messageDiv.innerHTML = '';
+      messageDiv.innerText = '';
     }
     remoting.setMode(remoting.AppMode.HOST_SETUP_DONE);
   }

@@ -10,11 +10,13 @@
 #include "base/message_loop.h"
 #include "base/observer_list.h"
 #include "ui/aura/aura_export.h"
+#include "ui/aura/cursor_manager.h"
 #include "ui/aura/client/stacking_client.h"
 
 namespace aura {
-
+class CursorManager;
 class EnvObserver;
+class EventFilter;
 class MonitorManager;
 class Window;
 
@@ -45,6 +47,10 @@ class AURA_EXPORT Env {
     mouse_button_flags_ = mouse_button_flags;
   }
 
+  // Whether any touch device is currently down.
+  bool is_touch_down() const { return is_touch_down_; }
+  void set_touch_down(bool value) { is_touch_down_ = value; }
+
   client::StackingClient* stacking_client() { return stacking_client_; }
   void set_stacking_client(client::StackingClient* stacking_client) {
     stacking_client_ = stacking_client;
@@ -54,6 +60,12 @@ class AURA_EXPORT Env {
   // transfered.
   MonitorManager* monitor_manager() { return monitor_manager_.get(); }
   void SetMonitorManager(MonitorManager* monitor_manager);
+
+  // Env takes ownership of the EventFilter.
+  EventFilter* event_filter() { return event_filter_.get(); }
+  void SetEventFilter(EventFilter* event_filter);
+
+  CursorManager* cursor_manager() { return &cursor_manager_; }
 
   // Returns the native event dispatcher. The result should only be passed to
   // MessageLoopForUI::RunWithDispatcher() or
@@ -78,8 +90,11 @@ class AURA_EXPORT Env {
 
   static Env* instance_;
   int mouse_button_flags_;
+  bool is_touch_down_;
   client::StackingClient* stacking_client_;
   scoped_ptr<MonitorManager> monitor_manager_;
+  scoped_ptr<EventFilter> event_filter_;
+  CursorManager cursor_manager_;
 
 #if defined(USE_X11)
   scoped_ptr<internal::MonitorChangeObserverX11> monitor_change_observer_;

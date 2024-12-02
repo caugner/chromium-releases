@@ -173,6 +173,9 @@
 // secondary provider is the default provider. If the user has not typed a
 // keyword, then the primary provider corresponds to the default provider.
 //
+// Search providers may supply relevance values along with their results to be
+// used in place of client-side calculated values.
+//
 // The value column gives the ranking returned from the various providers.
 // ++: a series of matches with relevance from n up to (n + max_matches).
 // --: relevance score falls off over time (discounted 50 points @ 15 minutes,
@@ -192,11 +195,13 @@ class AutocompleteResult;
 class KeywordProvider;
 class OmniboxUIHandler;
 class Profile;
+struct ProviderInfo;
 class SearchProvider;
 class TemplateURL;
 
 typedef std::vector<AutocompleteMatch> ACMatches;
 typedef std::vector<AutocompleteProvider*> ACProviders;
+typedef std::vector<metrics::OmniboxEventProto_ProviderInfo> ProvidersInfo;
 
 // AutocompleteInput ----------------------------------------------------------
 
@@ -410,7 +415,9 @@ class AutocompleteProvider
   bool done() const { return done_; }
 
   // Returns the name of this provider.
-  const char* name() const { return name_; }
+  const std::string& name() const { return name_; }
+  // Returns the enum equivalent to the name of this provider.
+  metrics::OmniboxEventProto_ProviderType AsOmniboxEventProviderType() const;
 
   // Called to delete a match and the backing data that produced it.  This
   // match should not appear again in this or future queries.  This can only be
@@ -418,6 +425,19 @@ class AutocompleteProvider
   // called when no query is running.
   // NOTE: Remember to call OnProviderUpdate() if matches_ is updated.
   virtual void DeleteMatch(const AutocompleteMatch& match);
+
+  // Called when an omnibox event log entry is generated.  This gives
+  // a provider the opportunity to add diagnostic information to the
+  // logs.  A provider is expected to append a single entry of whatever
+  // information it wants to |provider_info|.
+  virtual void AddProviderInfo(ProvidersInfo* provider_info) const;
+
+  // A convenience function to call net::FormatUrl() with the current set of
+  // "Accept Languages" when check_accept_lang is true.  Otherwise, it's called
+  // with an empty list.
+  string16 StringForURLDisplay(const GURL& url,
+                               bool check_accept_lang,
+                               bool trim_http) const;
 
 #ifdef UNIT_TEST
   void set_listener(ACProviderListener* listener) { listener_ = listener; }
@@ -440,13 +460,6 @@ class AutocompleteProvider
   // profile's bookmark bar model.
   void UpdateStarredStateOfMatches();
 
-  // A convenience function to call net::FormatUrl() with the current set of
-  // "Accept Languages" when check_accept_lang is true.  Otherwise, it's called
-  // with an empty list.
-  string16 StringForURLDisplay(const GURL& url,
-                               bool check_accept_lang,
-                               bool trim_http) const;
-
   // The profile associated with the AutocompleteProvider.  Reference is not
   // owned by us.
   Profile* profile_;
@@ -456,7 +469,7 @@ class AutocompleteProvider
   bool done_;
 
   // The name of this provider.  Used for logging.
-  const char* name_;
+  std::string name_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AutocompleteProvider);
@@ -707,6 +720,14 @@ class AutocompleteController : public ACProviderListener {
   // From AutocompleteProvider::Listener
   virtual void OnProviderUpdate(bool updated_matches);
 
+  // Called when an omnibox event log entry is generated.
+  // Populates provider_info with diagnostic information about the status
+  // of various providers.  In turn, calls
+  // AutocompleteProvider::AddProviderInfo() so each provider can add
+  // provider-specific information, information we want to log for a
+  // particular provider but not others.
+  void AddProvidersInfo(ProvidersInfo* provider_info) const;
+
  private:
   friend class AutocompleteProviderTest;
   FRIEND_TEST_ALL_PREFIXES(AutocompleteProviderTest,
@@ -783,6 +804,7 @@ struct AutocompleteLog {
       base::TimeDelta elapsed_time_since_user_first_modified_omnibox,
       size_t inline_autocompleted_length,
       const AutocompleteResult& result);
+  ~AutocompleteLog();
   // The user's input text in the omnibox.
   string16 text;
   // Whether the user deleted text immediately before selecting an omnibox
@@ -811,6 +833,10 @@ struct AutocompleteLog {
   size_t inline_autocompleted_length;
   // Result set.
   const AutocompleteResult& result;
+  // Diagnostic information from providers.  See
+  // AutocompleteController::AddProvidersInfo() and
+  // AutocompleteProvider::AddProviderInfo() above.
+  ProvidersInfo providers_info;
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_H_

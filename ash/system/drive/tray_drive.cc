@@ -10,6 +10,7 @@
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_details_view.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_item_view.h"
 #include "ash/system/tray/tray_views.h"
@@ -18,7 +19,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/stl_util.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
@@ -69,7 +70,7 @@ class DriveDefaultView : public TrayItemMore {
       : TrayItemMore(owner) {
     ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
 
-    SetImage(bundle.GetImageNamed(IDR_AURA_UBER_TRAY_DRIVE).ToSkBitmap());
+    SetImage(bundle.GetImageNamed(IDR_AURA_UBER_TRAY_DRIVE).ToImageSkia());
     Update(list);
   }
 
@@ -86,26 +87,20 @@ class DriveDefaultView : public TrayItemMore {
   DISALLOW_COPY_AND_ASSIGN(DriveDefaultView);
 };
 
-class DriveDetailedView : public views::View,
+class DriveDetailedView : public TrayDetailsView,
                           public ViewClickListener {
  public:
   DriveDetailedView(SystemTrayItem* owner,
                     const DriveOperationStatusList* list)
-      : header_(NULL),
-        operations_(NULL),
-        settings_(NULL),
+      : settings_(NULL),
         in_progress_img_(NULL),
         done_img_(NULL),
         failed_img_(NULL) {
-    SetLayoutManager(new views::BoxLayout(
-        views::BoxLayout::kVertical, 0, 0, 0));
-    set_background(views::Background::CreateSolidBackground(kBackgroundColor));
-
-    in_progress_img_ = ResourceBundle::GetSharedInstance().GetBitmapNamed(
+    in_progress_img_ = ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
         IDR_AURA_UBER_TRAY_DRIVE);
-    done_img_ = ResourceBundle::GetSharedInstance().GetBitmapNamed(
+    done_img_ = ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
         IDR_AURA_UBER_TRAY_DRIVE_DONE);
-    failed_img_ = ResourceBundle::GetSharedInstance().GetBitmapNamed(
+    failed_img_ = ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
         IDR_AURA_UBER_TRAY_DRIVE_FAILED);
 
     Update(list);
@@ -116,9 +111,10 @@ class DriveDetailedView : public views::View,
   }
 
   void Update(const DriveOperationStatusList* list) {
-    AppendHeaderEntry(list);
     AppendOperationList(list);
     AppendSettings();
+    AppendHeaderEntry(list);
+
     PreferredSizeChanged();
     SchedulePaint();
   }
@@ -177,10 +173,10 @@ class DriveDetailedView : public views::View,
 
       cancel_button_ = new views::ImageButton(this);
       cancel_button_->SetImage(views::ImageButton::BS_NORMAL,
-          ResourceBundle::GetSharedInstance().GetBitmapNamed(
+          ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
               IDR_AURA_UBER_TRAY_DRIVE_CANCEL));
       cancel_button_->SetImage(views::ImageButton::BS_HOT,
-          ResourceBundle::GetSharedInstance().GetBitmapNamed(
+          ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
               IDR_AURA_UBER_TRAY_DRIVE_CANCEL_HOVER));
 
       UpdateStatus(state, progress);
@@ -265,13 +261,13 @@ class DriveDetailedView : public views::View,
   };
 
   void AppendHeaderEntry(const DriveOperationStatusList* list) {
-    if (header_)
+    if (footer())
       return;
-    header_ = CreateDetailedHeaderEntry(IDS_ASH_STATUS_TRAY_DRIVE, this);
-    AddChildView(header_);
+    CreateSpecialRow(IDS_ASH_STATUS_TRAY_DRIVE, this);
   }
 
-  SkBitmap* GetImageForState(ash::DriveOperationStatus::OperationState state) {
+  gfx::ImageSkia* GetImageForState(
+      ash::DriveOperationStatus::OperationState state) {
     switch (state) {
       case ash::DriveOperationStatus::OPERATION_NOT_STARTED:
       case ash::DriveOperationStatus::OPERATION_STARTED:
@@ -292,12 +288,8 @@ class DriveDetailedView : public views::View,
   }
 
   void AppendOperationList(const DriveOperationStatusList* list) {
-    if (!operations_) {
-      operations_ = new views::View;
-      operations_->SetLayoutManager(new views::BoxLayout(
-          views::BoxLayout::kVertical, 0, 0, 1));
-      AddChildView(operations_);
-    }
+    if (!scroller())
+      CreateScrollableList();
 
     // Apply the update.
     std::set<FilePath> new_set;
@@ -319,7 +311,7 @@ class DriveDetailedView : public views::View,
                                         operation.file_path);
 
         update_map_[operation.file_path] = row_view;
-        operations_->AddChildView(row_view);
+        scroll_content()->AddChildView(row_view);
       }
     }
 
@@ -361,8 +353,8 @@ class DriveDetailedView : public views::View,
   // Overridden from ViewClickListener.
   virtual void ClickedOn(views::View* sender) OVERRIDE {
     SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
-    if (sender == header_) {
-      Shell::GetInstance()->tray()->ShowDefaultView();
+    if (sender == footer()->content()) {
+      Shell::GetInstance()->system_tray()->ShowDefaultView(BUBBLE_USE_EXISTING);
     } else if (sender == settings_) {
       delegate->ShowDriveSettings();
     }
@@ -370,12 +362,10 @@ class DriveDetailedView : public views::View,
 
   // Maps operation entries to their file paths.
   std::map<FilePath, RowView*> update_map_;
-  views::View* header_;
-  views::View* operations_;
   views::View* settings_;
-  SkBitmap* in_progress_img_;
-  SkBitmap* done_img_;
-  SkBitmap* failed_img_;
+  gfx::ImageSkia* in_progress_img_;
+  gfx::ImageSkia* done_img_;
+  gfx::ImageSkia* failed_img_;
 
   DISALLOW_COPY_AND_ASSIGN(DriveDetailedView);
 };

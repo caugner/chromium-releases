@@ -35,9 +35,9 @@
 #include "chromeos/dbus/mock_dbus_thread_manager.h"
 #include "chromeos/dbus/mock_session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/url_fetcher_delegate.h"
-#include "content/test/test_browser_thread.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_url_fetcher_factory.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -108,6 +108,7 @@ class LoginUtilsTest : public testing::Test,
             static_cast<TestingBrowserProcess*>(g_browser_process)),
         local_state_(browser_process_),
         ui_thread_(content::BrowserThread::UI, &loop_),
+        db_thread_(content::BrowserThread::DB),
         file_thread_(content::BrowserThread::FILE, &loop_),
         io_thread_(content::BrowserThread::IO),
         mock_async_method_caller_(NULL),
@@ -368,6 +369,7 @@ class LoginUtilsTest : public testing::Test,
   ScopedTestingLocalState local_state_;
 
   content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
   content::TestBrowserThread file_thread_;
   content::TestBrowserThread io_thread_;
   scoped_ptr<IOThread> io_thread_state_;

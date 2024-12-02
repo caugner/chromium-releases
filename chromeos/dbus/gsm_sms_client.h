@@ -25,7 +25,7 @@ class ObjectPath;
 
 namespace chromeos {
 
-// GsmSMSClient is used to communicate with
+// GsmSMSClient is used to communicate with the
 // org.freedesktop.ModemManager.Modem.Gsm.SMS service.
 // All methods should be called from the origin thread (UI thread) which
 // initializes the DBusThreadManager instance.
@@ -43,12 +43,12 @@ class CHROMEOS_EXPORT GsmSMSClient {
   static GsmSMSClient* Create(DBusClientImplementationType type,
                               dbus::Bus* bus);
 
-  // Sets DataPlansUpdate signal handler.
+  // Sets SmsReceived signal handler.
   virtual void SetSmsReceivedHandler(const std::string& service_name,
                                      const dbus::ObjectPath& object_path,
                                      const SmsReceivedHandler& handler) = 0;
 
-  // Resets DataPlansUpdate signal handler.
+  // Resets SmsReceived signal handler.
   virtual void ResetSmsReceivedHandler(const std::string& service_name,
                                        const dbus::ObjectPath& object_path) = 0;
 
@@ -68,6 +68,11 @@ class CHROMEOS_EXPORT GsmSMSClient {
   virtual void List(const std::string& service_name,
                     const dbus::ObjectPath& object_path,
                     const ListCallback& callback) = 0;
+
+  // Requests a check for new messages. In flimflam this does nothing. The
+  // stub implementation uses it to generate a sequence of test messages.
+  virtual void RequestUpdate(const std::string& service_name,
+                             const dbus::ObjectPath& object_path) = 0;
 
  protected:
   // Create() should be used instead.

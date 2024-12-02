@@ -46,8 +46,14 @@
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_process_observer.h"
 #include "content/public/renderer/render_view_visitor.h"
+#include "content/renderer/browser_plugin/old/browser_plugin_channel_manager.h"
+#include "content/renderer/browser_plugin/old/browser_plugin_registry.h"
 #include "content/renderer/devtools_agent_filter.h"
+#include "content/renderer/dom_storage/dom_storage_dispatcher.h"
+#include "content/renderer/dom_storage/webstoragearea_impl.h"
+#include "content/renderer/dom_storage/webstoragenamespace_impl.h"
 #include "content/renderer/gpu/compositor_thread.h"
+#include "content/renderer/gpu/gpu_benchmarking_extension.h"
 #include "content/renderer/media/audio_input_message_filter.h"
 #include "content/renderer/media/audio_message_filter.h"
 #include "content/renderer/media/media_stream_center.h"
@@ -57,8 +63,6 @@
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
-#include "content/renderer/renderer_webstoragearea_impl.h"
-#include "content/renderer/renderer_webstoragenamespace_impl.h"
 #include "grit/content_resources.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
@@ -76,9 +80,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "ui/base/layout.h"
 #include "ui/base/ui_base_switches.h"
 #include "v8/include/v8.h"
 #include "webkit/glue/webkit_glue.h"
@@ -105,7 +109,6 @@ using WebKit::WebRuntimeFeatures;
 using WebKit::WebScriptController;
 using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
-using WebKit::WebStorageEventDispatcher;
 using WebKit::WebView;
 using content::RenderProcessObserver;
 
@@ -210,7 +213,13 @@ void RenderThreadImpl::Init() {
   compositor_initialized_ = false;
 
   appcache_dispatcher_.reset(new AppCacheDispatcher(Get()));
+  dom_storage_dispatcher_.reset(new DomStorageDispatcher());
   main_thread_indexed_db_dispatcher_.reset(new IndexedDBDispatcher());
+
+  browser_plugin_registry_.reset(new content::BrowserPluginRegistry());
+  browser_plugin_channel_manager_.reset(
+      new content::BrowserPluginChannelManager());
+  AddObserver(browser_plugin_channel_manager_.get());
 
   media_stream_center_ = NULL;
 
@@ -232,6 +241,19 @@ void RenderThreadImpl::Init() {
   AddFilter(new IndexedDBMessageFilter);
 
   content::GetContentClient()->renderer()->RenderThreadStarted();
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kEnableGpuBenchmarking))
+      RegisterExtension(content::GpuBenchmarkingExtension::Get());
+
+#if defined(WEBCOMPOSITOR_OWNS_SETTINGS)
+  WebKit::WebCompositor::setAcceleratedAnimationEnabled(
+      !command_line.HasSwitch(switches::kDisableThreadedAnimation));
+  WebKit::WebCompositor::setPerTilePaintingEnabled(
+      command_line.HasSwitch(switches::kEnablePerTilePainting));
+  WebKit::WebCompositor::setPartialSwapEnabled(
+      command_line.HasSwitch(switches::kEnablePartialSwap));
+#endif
 
   // Note that under Linux, the media library will normally already have
   // been initialized by the Zygote before this instance became a Renderer.
@@ -384,6 +406,11 @@ IPC::SyncMessageFilter* RenderThreadImpl::GetSyncMessageFilter() {
   return sync_message_filter();
 }
 
+scoped_refptr<base::MessageLoopProxy>
+    RenderThreadImpl::GetIOMessageLoopProxy() {
+  return ChildProcess::current()->io_message_loop_proxy();
+}
+
 void RenderThreadImpl::AddRoute(int32 routing_id,
                                 IPC::Channel::Listener* listener) {
   widget_count_++;
@@ -487,7 +514,7 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDomAutomationController)) {
     base::StringPiece extension = content::GetContentClient()->GetDataResource(
-        IDR_DOM_AUTOMATION_JS);
+        IDR_DOM_AUTOMATION_JS, ui::SCALE_FACTOR_NONE);
     RegisterExtension(new v8::Extension(
         "dom_automation.js", extension.data(), 0, NULL, extension.size()));
   }
@@ -527,8 +554,7 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableMediaPlayer(
       media::IsMediaLibraryInitialized());
 
-  WebKit::WebRuntimeFeatures::enableMediaStream(
-      command_line.HasSwitch(switches::kEnableMediaStream));
+  WebKit::WebRuntimeFeatures::enableMediaStream(true);
 
   WebKit::WebRuntimeFeatures::enablePeerConnection(
       command_line.HasSwitch(switches::kEnablePeerConnection));
@@ -546,7 +572,8 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
       command_line.HasSwitch(switches::kEnableEncryptedMedia));
 
   WebRuntimeFeatures::enableWebAudio(
-      !command_line.HasSwitch(switches::kDisableWebAudio));
+      !command_line.HasSwitch(switches::kDisableWebAudio) &&
+      media::IsMediaLibraryInitialized());
 
   WebRuntimeFeatures::enablePushState(true);
 
@@ -571,8 +598,7 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableJavaScriptI18NAPI(
       !command_line.HasSwitch(switches::kDisableJavaScriptI18NAPI));
 
-  WebRuntimeFeatures::enableGamepad(
-      command_line.HasSwitch(switches::kEnableGamepad));
+  WebRuntimeFeatures::enableGamepad(true);
 
   WebRuntimeFeatures::enableQuota(true);
 
@@ -698,6 +724,26 @@ void RenderThreadImpl::PostponeIdleNotification() {
   idle_notifications_to_skip_ = 2;
 }
 
+base::WeakPtr<WebGraphicsContext3DCommandBufferImpl>
+RenderThreadImpl::GetGpuVDAContext3D() {
+  // If we already handed out a pointer to a context and it's been lost, create
+  // a new one.
+  if (gpu_vda_context3d_.get() && gpu_vda_context3d_->isContextLost()) {
+    if (compositor_thread()) {
+      compositor_thread()->GetWebThread()->message_loop()->DeleteSoon(
+          FROM_HERE, gpu_vda_context3d_.release());
+    } else {
+      gpu_vda_context3d_.reset();
+    }
+  }
+  if (!gpu_vda_context3d_.get()) {
+    gpu_vda_context3d_.reset(
+        WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
+            this, WebKit::WebGraphicsContext3D::Attributes()));
+  }
+  return gpu_vda_context3d_->AsWeakPtr();
+}
+
 #if defined(OS_WIN)
 void RenderThreadImpl::PreCacheFont(const LOGFONT& log_font) {
   Send(new ChildProcessHostMsg_PreCacheFont(log_font));
@@ -763,6 +809,11 @@ scoped_ptr<base::SharedMemory> RenderThreadImpl::AllocateSharedMemory(
 
 int32 RenderThreadImpl::CreateViewCommandBuffer(
       int32 surface_id, const GPUCreateCommandBufferConfig& init_params) {
+  TRACE_EVENT1("gpu",
+               "RenderThreadImpl::CreateViewCommandBuffer",
+               "surface_id",
+               surface_id);
+
   int32 route_id = MSG_ROUTING_NONE;
   IPC::Message* message = new GpuHostMsg_CreateViewCommandBuffer(
       surface_id,
@@ -807,44 +858,6 @@ void RenderThreadImpl::OnSetZoomLevelForCurrentURL(const std::string& host,
   content::RenderView::ForEach(&zoomer);
 }
 
-void RenderThreadImpl::OnDOMStorageEvent(
-    const DOMStorageMsg_Event_Params& params) {
-  EnsureWebKitInitialized();
-
-  bool originated_in_process = params.connection_id != 0;
-  RendererWebStorageAreaImpl* originating_area = NULL;
-  if (originated_in_process) {
-    originating_area = RendererWebStorageAreaImpl::FromConnectionId(
-        params.connection_id);
-  }
-
-  if (params.namespace_id == dom_storage::kLocalStorageNamespaceId) {
-    WebStorageEventDispatcher::dispatchLocalStorageEvent(
-        params.key,
-        params.old_value,
-        params.new_value,
-        params.origin,
-        params.page_url,
-        originating_area,
-        originated_in_process);
-  } else if (originated_in_process) {
-    // TODO(michaeln): For now, we only raise session storage events into the
-    // process which caused the event to occur. However there are cases where
-    // sessions can span process boundaries, so there are correctness issues.
-    RendererWebStorageNamespaceImpl
-        session_namespace_for_event_dispatch(params.namespace_id);
-    WebStorageEventDispatcher::dispatchSessionStorageEvent(
-        params.key,
-        params.old_value,
-        params.new_value,
-        params.origin,
-        params.page_url,
-        session_namespace_for_event_dispatch,
-        originating_area,
-        originated_in_process);
-  }
-}
-
 bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
   ObserverListBase<RenderProcessObserver>::Iterator it(observers_);
   RenderProcessObserver* observer;
@@ -854,8 +867,10 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
   }
 
   // Some messages are handled by delegates.
-  if (appcache_dispatcher_->OnMessageReceived(msg))
+  if (appcache_dispatcher_->OnMessageReceived(msg) ||
+      dom_storage_dispatcher_->OnMessageReceived(msg)) {
     return true;
+  }
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderThreadImpl, msg)
@@ -867,7 +882,6 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewMsg_New, OnCreateNewView)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgePluginListCache, OnPurgePluginListCache)
     IPC_MESSAGE_HANDLER(ViewMsg_NetworkStateChanged, OnNetworkStateChanged)
-    IPC_MESSAGE_HANDLER(DOMStorageMsg_Event, OnDOMStorageEvent)
     IPC_MESSAGE_HANDLER(ViewMsg_TempCrashWithData, OnTempCrashWithData)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -898,26 +912,32 @@ void RenderThreadImpl::OnSetCSSColors(
 void RenderThreadImpl::OnCreateNewView(const ViewMsg_New_Params& params) {
   EnsureWebKitInitialized();
   // When bringing in render_view, also bring in webkit's glue and jsbindings.
-  RenderViewImpl::Create(
-      params.parent_window,
-      params.opener_route_id,
-      params.renderer_preferences,
-      params.web_preferences,
-      new SharedRenderViewCounter(0),
-      params.view_id,
-      params.surface_id,
-      params.session_storage_namespace_id,
-      params.frame_name,
-      false,
-      params.swapped_out,
-      params.next_page_id,
-      params.screen_info,
-      params.guest,
-      params.accessibility_mode);
+  if (!params.embedder_channel_name.empty()) {
+    browser_plugin_channel_manager()->CreateRenderView(params);
+  } else {
+    RenderViewImpl::Create(
+        params.parent_window,
+        params.opener_route_id,
+        params.renderer_preferences,
+        params.web_preferences,
+        new SharedRenderViewCounter(0),
+        params.view_id,
+        params.surface_id,
+        params.session_storage_namespace_id,
+        params.frame_name,
+        false,
+        params.swapped_out,
+        params.next_page_id,
+        params.screen_info,
+        NULL,
+        params.accessibility_mode);
+  }
 }
 
 GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
     content::CauseForGpuLaunch cause_for_gpu_launch) {
+  TRACE_EVENT0("gpu", "RenderThreadImpl::EstablishGpuChannelSync");
+
   if (gpu_channel_.get()) {
     // Do nothing if we already have a GPU channel or are already
     // establishing one.
@@ -959,10 +979,6 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
 WebKit::WebMediaStreamCenter* RenderThreadImpl::CreateMediaStreamCenter(
     WebKit::WebMediaStreamCenterClient* client) {
 #if defined(ENABLE_WEBRTC)
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableMediaStream)) {
-    return NULL;
-  }
   if (!media_stream_center_)
     media_stream_center_ = new content::MediaStreamCenter(client);
 #endif

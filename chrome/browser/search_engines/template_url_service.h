@@ -18,13 +18,12 @@
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/search_engines/template_url_id.h"
-#include "chrome/browser/sync/api/sync_change.h"
-#include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "sync/api/sync_change.h"
+#include "sync/api/syncable_service.h"
 
-class Extension;
 class GURL;
 class PrefService;
 class Profile;
@@ -33,6 +32,10 @@ class SearchTermsData;
 class SyncData;
 class SyncErrorFactory;
 class TemplateURLServiceObserver;
+
+namespace extensions {
+class Extension;
+}
 
 namespace history {
 struct URLVisitedDetails;
@@ -174,16 +177,17 @@ class TemplateURLService : public WebDataServiceConsumer,
   // If the given extension has an omnibox keyword, adds a TemplateURL for that
   // keyword. Only 1 keyword is allowed for a given extension. If the keyword
   // already exists for this extension, does nothing.
-  void RegisterExtensionKeyword(const Extension* extension);
+  void RegisterExtensionKeyword(const extensions::Extension* extension);
 
   // Removes the TemplateURL containing the keyword for the given extension,
   // if any.
-  void UnregisterExtensionKeyword(const Extension* extension);
+  void UnregisterExtensionKeyword(const extensions::Extension* extension);
 
   // Returns the TemplateURL associated with the keyword for this extension.
   // This works by checking the extension ID, not the keyword, so it will work
   // even if the user changed the keyword.
-  TemplateURL* GetTemplateURLForExtension(const Extension* extension);
+  TemplateURL* GetTemplateURLForExtension(
+      const extensions::Extension* extension);
 
   // Returns the set of URLs describing the keywords. The elements are owned
   // by TemplateURLService and should not be deleted.
@@ -254,13 +258,6 @@ class TemplateURLService : public WebDataServiceConsumer,
   string16 GetKeywordShortName(const string16& keyword,
                                bool* is_extension_keyword);
 
-  // content::NotificationObserver method. TemplateURLService listens for three
-  // notification types:
-  // . NOTIFY_HISTORY_URL_VISITED: adds keyword search terms if the visit
-  //   corresponds to a keyword.
-  // . NOTIFY_GOOGLE_URL_UPDATED: updates mapping for any keywords containing
-  //   a google base url replacement term.
-  // . PREF_CHANGED: checks whether the default search engine has changed.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
@@ -349,17 +346,42 @@ class TemplateURLService : public WebDataServiceConsumer,
                            CreateTemplateURLFromSyncData);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest, UniquifyKeyword);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
-                           ResolveSyncKeywordConflict);
+                           SyncKeywordConflictNeitherAutoreplace);
+  FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
+                           SyncKeywordConflictBothAutoreplace);
+  FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
+                           SyncKeywordConflictOneAutoreplace);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
                            FindDuplicateOfSyncTemplateURL);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
                            MergeSyncAndLocalURLDuplicates);
+  FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
+                           PreSyncDeletes);
 
   friend class TemplateURLServiceTestUtil;
 
   typedef std::map<string16, TemplateURL*> KeywordToTemplateMap;
   typedef std::map<std::string, TemplateURL*> GUIDToTemplateMap;
   typedef std::list<std::string> PendingExtensionIDs;
+
+  // Declaration of values to be used in an enumerated histogram to tally
+  // changes to the default search provider from various entry points. In
+  // particular, we use this to see what proportion of changes are from Sync
+  // entry points, to help spot erroneous Sync activity.
+  enum DefaultSearchChangeOrigin {
+    // Various known Sync entry points.
+    DSP_CHANGE_SYNC_PREF,
+    DSP_CHANGE_SYNC_ADD,
+    DSP_CHANGE_SYNC_DELETE,
+    DSP_CHANGE_SYNC_NOT_MANAGED,
+    // "Other" origins. We differentiate between Sync and not Sync so we know if
+    // certain changes were intentionally from the system, or possibly some
+    // unintentional change from when we were Syncing.
+    DSP_CHANGE_SYNC_UNINTENTIONAL,
+    DSP_CHANGE_NOT_SYNC,
+    // Boundary value.
+    DSP_CHANGE_MAX,
+  };
 
   // Helper functor for FindMatchingKeywords(), for finding the range of
   // keywords which begin with a prefix.
@@ -420,11 +442,13 @@ class TemplateURLService : public WebDataServiceConsumer,
   // |new_values|, but the ID for |existing_turl| is retained.  Notifying
   // observers is the responsibility of the caller.  Returns whether
   // |existing_turl| was found in |template_urls_| and thus could be updated.
+  // |old_search_terms_data| is passed to SearchHostToURLsMap::Remove().
   //
   // NOTE: This should not be called with an extension keyword as there are no
   // updates needed in that case.
   bool UpdateNoNotify(TemplateURL* existing_turl,
-                      const TemplateURL& new_values);
+                      const TemplateURL& new_values,
+                      const SearchTermsData& old_search_terms_data);
 
   // Returns the preferences we use.
   PrefService* GetPrefs();
@@ -449,7 +473,7 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Invoked when the Google base URL has changed. Updates the mapping for all
   // TemplateURLs that have a replacement term of {google:baseURL} or
   // {google:baseSuggestURL}.
-  void GoogleBaseURLChanged();
+  void GoogleBaseURLChanged(const GURL& old_base_url);
 
   // Update the default search.  Called at initialization or when a managed
   // preference has changed.
@@ -502,18 +526,31 @@ class TemplateURLService : public WebDataServiceConsumer,
   string16 UniquifyKeyword(const TemplateURL& turl);
 
   // Given a TemplateURL from Sync (cloud) and a local, non-extension
-  // TemplateURL with the same keyword, resolves the conflict by uniquifying
-  // either the cloud keyword or the local keyword (whichever is older).  If the
-  // cloud TURL is changed, then an appropriate SyncChange is appended to
-  // |change_list|.  If a local TURL is changed, the service is updated with the
-  // new keyword, and a SyncChange is also appended (though this may be deleted
-  // before being sent to the server; see comments in the implementation).  In
-  // the case of tied last_modified dates, |sync_turl| wins.
+  // TemplateURL with the same keyword, selects "better" and "worse" entries:
+  //   * If one of the TemplateURLs is replaceable and the other is not, the
+  //     non-replaceable entry is better.
+  //   * Otherwise, if |local_turl| was created by policy, is the default
+  //     provider, or was modified more recently, it is better.
+  //   * Otherwise |sync_turl| is better.
+  // Then resolves the conflict:
+  //   * If the "worse" entry is |sync_turl|, and it is replaceable, add a
+  //     SyncChange to delete it, and return false.
+  //   * If the "worse" entry is |local_turl|, and it is replaceable, remove it
+  //     from the service and return true.
+  //   * Otherwise, uniquify the keyword of the "worse" entry.  If it is
+  //     |local_turl|, update it within the service.  Add a SyncChange to update
+  //     things (always for |sync_turl|, sometimes for |local_turl|; see
+  //     comments in implementation), and return true.
+  // When the function returns true, callers can then go ahead and add or update
+  // |sync_turl| within the service.  If it returns false, callers must not add
+  // the |sync_turl|, and must Remove() the |sync_turl| if it was being updated.
+  // (Be careful; calling Remove() could add an ACTION_DELETE sync change, which
+  // this function has already done.  Make sure to avoid duplicates.)
   //
   // Note that we never call this for conflicts with extension keywords because
   // other code (e.g. AddToMaps()) is responsible for correctly prioritizing
   // extension- vs. non-extension-based TemplateURLs with the same keyword.
-  void ResolveSyncKeywordConflict(TemplateURL* sync_turl,
+  bool ResolveSyncKeywordConflict(TemplateURL* sync_turl,
                                   TemplateURL* local_turl,
                                   SyncChangeList* change_list);
 
@@ -627,6 +664,17 @@ class TemplateURLService : public WebDataServiceConsumer,
   // TemplateURL entry it refers to, and to handle the case when we want to use
   // the Synced default when the default search provider becomes unmanaged.
   bool pending_synced_default_search_;
+
+  // A set of sync GUIDs denoting TemplateURLs that have been removed from this
+  // model or the underlying WebDataService prior to MergeDataAndStartSyncing.
+  // This set is used to determine what entries from the server we want to
+  // ignore locally and return a delete command for.
+  std::set<std::string> pre_sync_deletes_;
+
+  // This is used to log the origin of changes to the default search provider.
+  // We set this value to increasingly specific values when we know what is the
+  // cause/origin of a default search change.
+  DefaultSearchChangeOrigin dsp_change_origin_;
 
   DISALLOW_COPY_AND_ASSIGN(TemplateURLService);
 };

@@ -13,7 +13,7 @@
 #include "base/values.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
-#include "chrome/common/extensions/feature.h"
+#include "chrome/common/extensions/features/feature.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace errors = extension_manifest_errors;
@@ -65,10 +65,10 @@ TEST_F(ManifestTest, Extension) {
   scoped_ptr<Manifest> manifest(
       new Manifest(Extension::INTERNAL, manifest_value.Pass()));
   std::string error;
-  std::vector<std::string> warnings;
+  Extension::InstallWarningVector warnings;
   manifest->ValidateManifest(&error, &warnings);
   EXPECT_TRUE(error.empty());
-  EXPECT_TRUE(warnings.empty());
+  ASSERT_EQ(1u, warnings.size());
   AssertType(manifest.get(), Extension::TYPE_EXTENSION);
 
   // The known key 'background_page' should be accessible.
@@ -92,13 +92,13 @@ TEST_F(ManifestTest, Extension) {
   warnings.clear();
   manifest->ValidateManifest(&error, &warnings);
   EXPECT_TRUE(error.empty());
-  ASSERT_EQ(1u, warnings.size());
+  ASSERT_EQ(2u, warnings.size());
   {
     Feature feature;
     feature.set_name("background_page");
     feature.set_max_manifest_version(1);
     EXPECT_EQ(feature.GetErrorMessage(Feature::INVALID_MAX_MANIFEST_VERSION),
-              warnings[0]);
+              warnings[0].message);
   }
 
   // Test DeepCopy and Equals.
@@ -119,7 +119,7 @@ TEST_F(ManifestTest, ExtensionTypes) {
   scoped_ptr<Manifest> manifest(
       new Manifest(Extension::INTERNAL, value.Pass()));
   std::string error;
-  std::vector<std::string> warnings;
+  Extension::InstallWarningVector warnings;
   manifest->ValidateManifest(&error, &warnings);
   EXPECT_TRUE(error.empty());
   EXPECT_TRUE(warnings.empty());
@@ -134,23 +134,17 @@ TEST_F(ManifestTest, ExtensionTypes) {
   MutateManifest(
       &manifest, keys::kTheme, NULL);
 
-  // Platform app.
-  MutateManifest(
-      &manifest, keys::kPlatformApp, new DictionaryValue());
-  AssertType(manifest.get(), Extension::TYPE_EXTENSION);  // must be boolean
-  MutateManifest(
-      &manifest, keys::kPlatformApp, Value::CreateBooleanValue(false));
-  AssertType(manifest.get(), Extension::TYPE_EXTENSION);  // must be true
-  MutateManifest(
-      &manifest, keys::kPlatformApp, Value::CreateBooleanValue(true));
-  AssertType(manifest.get(), Extension::TYPE_PLATFORM_APP);
-  MutateManifest(
-      &manifest, keys::kPlatformApp, NULL);
-
   // Packaged app.
   MutateManifest(
       &manifest, keys::kApp, new DictionaryValue());
   AssertType(manifest.get(), Extension::TYPE_PACKAGED_APP);
+
+  // Platform app.
+  MutateManifest(
+      &manifest, keys::kPlatformAppBackground, new DictionaryValue());
+  AssertType(manifest.get(), Extension::TYPE_PLATFORM_APP);
+  MutateManifest(
+      &manifest, keys::kPlatformAppBackground, NULL);
 
   // Hosted app.
   MutateManifest(
@@ -174,7 +168,7 @@ TEST_F(ManifestTest, RestrictedKeys) {
   scoped_ptr<Manifest> manifest(
       new Manifest(Extension::INTERNAL, value.Pass()));
   std::string error;
-  std::vector<std::string> warnings;
+  Extension::InstallWarningVector warnings;
   manifest->ValidateManifest(&error, &warnings);
   EXPECT_TRUE(error.empty());
   EXPECT_TRUE(warnings.empty());
@@ -188,12 +182,12 @@ TEST_F(ManifestTest, RestrictedKeys) {
   EXPECT_TRUE(manifest->Get(keys::kPageAction, &output));
 
   MutateManifest(
-      &manifest, keys::kPlatformApp, Value::CreateBooleanValue(true));
+      &manifest, keys::kPlatformAppBackground, new DictionaryValue());
   AssertType(manifest.get(), Extension::TYPE_PLATFORM_APP);
   EXPECT_FALSE(manifest->HasKey(keys::kPageAction));
   EXPECT_FALSE(manifest->Get(keys::kPageAction, &output));
   MutateManifest(
-      &manifest, keys::kPlatformApp, NULL);
+      &manifest, keys::kPlatformAppBackground, NULL);
 
   // "commands" is restricted to manifest_version >= 2.
   MutateManifest(

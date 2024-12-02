@@ -7,8 +7,8 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "sync/engine/model_safe_worker.h"
 #include "sync/engine/syncer_command.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
 
 namespace browser_sync {
 namespace sessions {
@@ -54,14 +54,6 @@ class ModelChangingSyncerCommand : public SyncerCommand {
   // groups.
   virtual std::set<ModelSafeGroup> GetGroupsToChange(
       const sessions::SyncSession& session) const = 0;
-
-  // Sometimes, a command has work to do that needs to touch global state
-  // belonging to multiple ModelSafeGroups, but in a way that is known to be
-  // safe.  This will be called once, prior to ModelChangingExecuteImpl,
-  // *without* a ModelSafeGroup restriction in place on the SyncSession.
-  // Returns true on success, false on failure.
-  // TODO(tim): Remove this (bug 36594).
-  virtual SyncerError ModelNeutralExecuteImpl(sessions::SyncSession* session);
 
   // Abstract method to be implemented by subclasses to handle logic that
   // operates on the model.  This is invoked with a SyncSession ModelSafeGroup

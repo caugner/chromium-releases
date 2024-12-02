@@ -115,7 +115,7 @@ int32_t FileChooser::ShowWithoutUserGesture(
     PP_Var suggested_file_name,
     const PP_ArrayOutput& output,
     const PP_CompletionCallback& callback) {
-  int32_t result = Show(false, save_as, PP_MakeUndefined(), callback);
+  int32_t result = Show(false, save_as, suggested_file_name, callback);
   if (result == PP_OK_COMPLETIONPENDING)
     output_.set_pp_array_output(output);
   return result;
@@ -204,7 +204,7 @@ PPB_FileChooser_Proxy::~PPB_FileChooser_Proxy() {
 PP_Resource PPB_FileChooser_Proxy::CreateProxyResource(
     PP_Instance instance,
     PP_FileChooserMode_Dev mode,
-    const char* accept_mime_types) {
+    const char* accept_types) {
   Dispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
   if (!dispatcher)
     return 0;
@@ -213,7 +213,7 @@ PP_Resource PPB_FileChooser_Proxy::CreateProxyResource(
   dispatcher->Send(new PpapiHostMsg_PPBFileChooser_Create(
       API_ID_PPB_FILE_CHOOSER, instance,
       mode,
-      accept_mime_types ? accept_mime_types : "",
+      accept_types ? accept_types : "",
       &result));
 
   if (result.is_null())
@@ -239,14 +239,14 @@ bool PPB_FileChooser_Proxy::OnMessageReceived(const IPC::Message& msg) {
 void PPB_FileChooser_Proxy::OnMsgCreate(
     PP_Instance instance,
     int mode,
-    std::string accept_mime_types,
+    std::string accept_types,
     HostResource* result) {
   thunk::EnterResourceCreation enter(instance);
   if (enter.succeeded()) {
     result->SetHostResource(instance, enter.functions()->CreateFileChooser(
         instance,
         static_cast<PP_FileChooserMode_Dev>(mode),
-        accept_mime_types.c_str()));
+        accept_types.c_str()));
   }
 }
 

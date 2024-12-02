@@ -15,6 +15,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -761,12 +762,12 @@ class NotificationBridge : public content::NotificationObserver {
       base::SysNSStringToUTF8([urls objectAtIndex:0]), std::string()));
 
   if (url.SchemeIs(chrome::kJavaScriptScheme)) {
-    browser_->window()->GetLocationBar()->location_entry()->SetUserText(
-        OmniboxView::StripJavascriptSchemas(UTF8ToUTF16(url.spec())));
+    browser_->window()->GetLocationBar()->GetLocationEntry()->SetUserText(
+          OmniboxView::StripJavascriptSchemas(UTF8ToUTF16(url.spec())));
   }
   OpenURLParams params(
       url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-  browser_->GetSelectedWebContents()->OpenURL(params);
+  browser_->GetActiveWebContents()->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)
@@ -777,13 +778,13 @@ class NotificationBridge : public content::NotificationObserver {
 
   // If the input is plain text, classify the input and make the URL.
   AutocompleteMatch match;
-  browser_->profile()->GetAutocompleteClassifier()->Classify(
+  AutocompleteClassifierFactory::GetForProfile(browser_->profile())->Classify(
       base::SysNSStringToUTF16(text), string16(), false, false, &match, NULL);
   GURL url(match.destination_url);
 
   OpenURLParams params(
       url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
-  browser_->GetSelectedWebContents()->OpenURL(params);
+  browser_->GetActiveWebContents()->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)

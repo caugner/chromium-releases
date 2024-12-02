@@ -15,7 +15,7 @@
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
-#include "ui/gfx/gl/gl_switches.h"
+#include "ui/gl/gl_switches.h"
 
 ImageTransportSurface::ImageTransportSurface() {}
 
@@ -150,11 +150,6 @@ void ImageTransportHelper::SetScheduled(bool is_scheduled) {
   if (!scheduler)
     return;
 
-  if (is_scheduled) {
-    TRACE_EVENT_ASYNC_END0("gpu", "Descheduled", this);
-  } else {
-    TRACE_EVENT_ASYNC_BEGIN0("gpu", "Descheduled", this);
-  }
   scheduler->SetScheduled(is_scheduled);
 }
 
@@ -165,6 +160,11 @@ void ImageTransportHelper::DeferToFence(base::Closure task) {
   scheduler->DeferToFence(task);
 }
 
+void ImageTransportHelper::SetPreemptByCounter(
+    scoped_refptr<gpu::RefCountedCounter> preempt_by_counter) {
+  stub_->channel()->SetPreemptByCounter(preempt_by_counter);
+}
+
 bool ImageTransportHelper::MakeCurrent() {
   gpu::gles2::GLES2Decoder* decoder = Decoder();
   if (!decoder)
@@ -172,11 +172,11 @@ bool ImageTransportHelper::MakeCurrent() {
   return decoder->MakeCurrent();
 }
 
-void ImageTransportHelper::SetSwapInterval() {
+void ImageTransportHelper::SetSwapInterval(gfx::GLContext* context) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableGpuVsync))
-    Decoder()->GetGLContext()->SetSwapInterval(0);
+    context->SetSwapInterval(0);
   else
-    Decoder()->GetGLContext()->SetSwapInterval(1);
+    context->SetSwapInterval(1);
 }
 
 void ImageTransportHelper::Suspend() {
@@ -230,7 +230,7 @@ void ImageTransportHelper::Resize(gfx::Size size) {
 
 #if defined(OS_WIN)
   Decoder()->MakeCurrent();
-  SetSwapInterval();
+  SetSwapInterval(Decoder()->GetGLContext());
 #endif
 }
 
@@ -298,7 +298,7 @@ bool PassThroughImageTransportSurface::PostSubBuffer(
 
 bool PassThroughImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
   if (!did_set_swap_interval_) {
-    helper_->SetSwapInterval();
+    ImageTransportHelper::SetSwapInterval(context);
     did_set_swap_interval_ = true;
   }
   return true;

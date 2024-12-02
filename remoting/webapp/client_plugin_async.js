@@ -58,10 +58,7 @@ remoting.ClientPluginAsync = function(plugin) {
   this.plugin.addEventListener('message', function(event) {
       that.handleMessage_(event.data);
     }, false);
-  var showPluginForClickToPlay = function() {
-    that.showPluginForClickToPlay_();
-  };
-  window.setTimeout(showPluginForClickToPlay, 500);
+  window.setTimeout(this.showPluginForClickToPlay_.bind(this), 500);
 };
 
 /**
@@ -179,7 +176,7 @@ remoting.ClientPluginAsync.prototype.handleMessage_ = function(messageStr) {
     }
     this.perfStats_ =
         /** @type {remoting.ClientSession.PerfStats} */ message.data;
-  } else if (message.method = 'injectClipboardItem') {
+  } else if (message.method == 'injectClipboardItem') {
     if (typeof message.data['mimeType'] != 'string' ||
         typeof message.data['item'] != 'string') {
       console.error('Received incorrect injectClipboardItem message.');
@@ -188,6 +185,10 @@ remoting.ClientPluginAsync.prototype.handleMessage_ = function(messageStr) {
     if (remoting.clipboard) {
       remoting.clipboard.fromHost(message.data['mimeType'],
                                   message.data['item']);
+    }
+  } else if (message.method == 'onFirstFrameReceived') {
+    if (remoting.clientSession) {
+      remoting.clientSession.onFirstFrameReceived();
     }
   }
 }
@@ -291,16 +292,6 @@ remoting.ClientPluginAsync.prototype.connect = function(
       }
     }));
 };
-
-/**
- * @param {boolean} scaleToFit True if scale-to-fit should be enabled.
- */
-remoting.ClientPluginAsync.prototype.setScaleToFit = function(scaleToFit) {
-  // scaleToFit() will be removed in future versions of the plugin.
-  if (this.plugin && typeof this.plugin.setScaleToFit === 'function')
-    this.plugin.setScaleToFit(scaleToFit);
-};
-
 
 /**
  * Release all currently pressed keys.

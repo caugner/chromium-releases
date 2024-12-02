@@ -16,12 +16,15 @@
 #include "base/string_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/chromeos/gdata/gdata_files.h"
+#include "chrome/browser/chromeos/gdata/gdata.pb.h"
+#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_file_system.h"
+#include "chrome/browser/chromeos/gdata/gdata_files.h"
+#include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/escape.h"
@@ -62,7 +65,7 @@ void EmptyCompletionCallback(int) {
 }
 
 // Helper function that reads file size.
-void GetFileSizeOnIOThreadPool(const FilePath& file_path,
+void GetFileSizeOnBlockingPool(const FilePath& file_path,
                                int64* file_size) {
   if (!file_util::GetFileSize(file_path, file_size))
     *file_size = 0;
@@ -82,52 +85,25 @@ bool ParseDriveUrl(const std::string& path, std::string* resource_id) {
   return resource_id->size();
 }
 
-}  // namespace
+// Helper function to get GDataSystemService from Profile.
+GDataSystemService* GetSystemService() {
+  return GDataSystemServiceFactory::GetForProfile(
+      ProfileManager::GetDefaultProfile());
+}
 
 // Helper function to get GDataFileSystem from Profile on UI thread.
 void GetFileSystemOnUIThread(GDataFileSystem** file_system) {
-  GDataSystemService* system_service = GDataSystemServiceFactory::GetForProfile(
-      ProfileManager::GetDefaultProfile());
+  GDataSystemService* system_service = GetSystemService();
   *file_system = system_service ? system_service->file_system() : NULL;
 }
 
 // Helper function to cancel GData download operation on UI thread.
 void CancelGDataDownloadOnUIThread(const FilePath& gdata_file_path) {
-  GDataFileSystem* file_system = NULL;
-  GetFileSystemOnUIThread(&file_system);
-  if (file_system)
-    file_system->GetOperationRegistry()->CancelForFilePath(gdata_file_path);
+  GDataSystemService* system_service = GetSystemService();
+  if (system_service)
+    system_service->docs_service()->operation_registry()->CancelForFilePath(
+        gdata_file_path);
 }
-
-// Class delegate to find file by resource id and extract relevant file info.
-class GetFileInfoDelegate : public gdata::FindEntryDelegate {
- public:
-  GetFileInfoDelegate() : initial_file_size_(0) {}
-  virtual ~GetFileInfoDelegate() {}
-
-  const std::string& mime_type() const { return mime_type_; }
-  const std::string& file_name() const { return file_name_; }
-  const FilePath& gdata_file_path() const { return gdata_file_path_; }
-  int64 initial_file_size() const { return initial_file_size_; }
-
- private:
-  // GDataFileSystem::FindEntryDelegate overrides.
-  virtual void OnDone(base::PlatformFileError error,
-                      const FilePath& directory_path,
-                      gdata::GDataEntry* entry) OVERRIDE {
-    if (error == base::PLATFORM_FILE_OK && entry && entry->AsGDataFile()) {
-      mime_type_ = entry->AsGDataFile()->content_mime_type();
-      file_name_ = entry->AsGDataFile()->file_name();
-      gdata_file_path_= entry->GetFilePath();
-      initial_file_size_ = entry->file_info().size;
-    }
-  }
-
-  std::string mime_type_;
-  std::string file_name_;
-  FilePath gdata_file_path_;
-  int64 initial_file_size_;
-};
 
 // GDataURLRequesetJob is the gateway between network-level drive://...
 // requests for gdata resources and GDataFileSytem.  It exposes content URLs
@@ -170,9 +146,15 @@ class GDataURLRequestJob : public net::URLRequestJob {
                              const std::string& mime_type,
                              GDataFileType file_type);
 
-  // Helper callback for GetFileSizeOnIOThreadPool that sets |remaining_bytes_|
+  // Helper callback for GetFileSizeOnBlockingPool that sets |remaining_bytes_|
   // to |file_size|, and notifies result for Start().
   void OnGetFileSize(int64 *file_size);
+
+  // Helper callback for GetFileInfoByResourceId invoked by StartAsync.
+  void OnGetFileInfoByResourceId(const std::string& resource_id,
+                                 base::PlatformFileError error,
+                                 const FilePath& gdata_file_path,
+                                 scoped_ptr<GDataFileProto> file_proto);
 
   // Helper methods for ReadRawData to open file and read from its corresponding
   // stream in a streaming fashion.
@@ -266,9 +248,9 @@ void GDataURLRequestJob::Start() {
   //    7.1) Whenever content::URLFetcherCore::OnReadCompleted() receives a part
   //         of the response, it invokes
   //         constent::URLFetcherDelegate::OnURLFetchDownloadData() if
-  //         content::URLFetcherDelegate::ShouldSendDownloadData() is true.
+  //         net::URLFetcherDelegate::ShouldSendDownloadData() is true.
   //    7.2) gdata::DownloadFileOperation overrides the default implementations
-  //         of the following methods of content::URLFetcherDelegate:
+  //         of the following methods of net::URLFetcherDelegate:
   //         - ShouldSendDownloadData(): returns true for non-null
   //                                     GetDownloadDataCallback.
   //         - OnURLFetchDownloadData(): invokes non-null
@@ -345,19 +327,7 @@ void GDataURLRequestJob::Kill() {
 
 bool GDataURLRequestJob::GetMimeType(std::string* mime_type) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  if (!file_system_)
-    return false;
-
-  std::string resource_id;
-  std::string unused_file_name;
-  if (!ParseDriveUrl(request_->url().spec(), &resource_id)) {
-    return false;
-  }
-
-  GetFileInfoDelegate delegate;
-  file_system_->FindEntryByResourceIdSync(resource_id, &delegate);
-  mime_type->assign(delegate.mime_type());
+  mime_type->assign(mime_type_);
   return !mime_type->empty();
 }
 
@@ -506,13 +476,28 @@ void GDataURLRequestJob::StartAsync(GDataFileSystem** file_system) {
     return;
   }
 
-  // First, check if file metadata is matching our expectations.
-  GetFileInfoDelegate delegate;
-  file_system_->FindEntryByResourceIdSync(resource_id, &delegate);
+  file_system_->GetFileInfoByResourceId(
+      resource_id,
+      base::Bind(&GDataURLRequestJob::OnGetFileInfoByResourceId,
+                 weak_ptr_factory_->GetWeakPtr(),
+                 resource_id));
+}
 
-  mime_type_ = delegate.mime_type();
-  gdata_file_path_ = delegate.gdata_file_path();
-  initial_file_size_ = delegate.initial_file_size();
+void GDataURLRequestJob::OnGetFileInfoByResourceId(
+    const std::string& resource_id,
+    base::PlatformFileError error,
+    const FilePath& gdata_file_path,
+    scoped_ptr<GDataFileProto> file_proto) {
+  if (error == base::PLATFORM_FILE_OK) {
+    DCHECK(file_proto.get());
+    mime_type_ = file_proto->content_mime_type();
+    gdata_file_path_ = gdata_file_path;
+    initial_file_size_ = file_proto->gdata_entry().file_info().size();
+  } else {
+    mime_type_.clear();
+    gdata_file_path_.clear();
+    initial_file_size_ = 0;
+  }
   remaining_bytes_ = initial_file_size_;
 
   DVLOG(1) << "Getting file for resource id";
@@ -664,12 +649,12 @@ void GDataURLRequestJob::OnGetFileByResourceId(
     return;
 
   // Even though we're already on BrowserThread::IO thread,
-  // file_util::GetFileSize can only be called IO thread pool, so post a task
-  // to blocking pool instead.
+  // file_util::GetFileSize can only be called on a thread with file
+  // operations allowed, so post a task to blocking pool instead.
   int64* file_size = new int64(0);
   BrowserThread::GetBlockingPool()->PostTaskAndReply(
       FROM_HERE,
-      base::Bind(&GetFileSizeOnIOThreadPool,
+      base::Bind(&GetFileSizeOnBlockingPool,
                  local_file_path_,
                  base::Unretained(file_size)),
       base::Bind(&GDataURLRequestJob::OnGetFileSize,
@@ -910,6 +895,8 @@ void GDataURLRequestJob::HeadersCompleted(int status_code,
 
   NotifyHeadersComplete();
 }
+
+}  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // GDataProtocolHandler class

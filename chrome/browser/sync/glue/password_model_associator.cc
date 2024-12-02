@@ -10,13 +10,13 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store.h"
-#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "net/base/escape.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "webkit/forms/password_form.h"
 
@@ -117,8 +117,9 @@ SyncError PasswordModelAssociator::AssociateModels() {
         Associate(&tag, node.GetId());
       } else {
         sync_api::WriteNode node(&trans);
-        if (!node.InitUniqueByCreation(syncable::PASSWORDS,
-                                       password_root, tag)) {
+        sync_api::WriteNode::InitUniqueByCreationResult result =
+            node.InitUniqueByCreation(syncable::PASSWORDS, password_root, tag);
+        if (result != sync_api::WriteNode::INIT_SUCCESS) {
           STLDeleteElements(&passwords);
           return error_handler_->CreateAndUploadError(
               FROM_HERE,

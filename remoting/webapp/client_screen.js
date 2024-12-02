@@ -320,7 +320,7 @@ function startSession_() {
   remoting.clientSession =
       new remoting.ClientSession(
           remoting.hostJid, remoting.hostPublicKey,
-          remoting.accessCode, 'v1_token', '',
+          remoting.accessCode, 'spake2_plain', '',
           /** @type {string} */ (remoting.oauth2.getCachedEmail()),
           remoting.ClientSession.Mode.IT2ME,
           onClientStateChange_);
@@ -382,7 +382,7 @@ function setConnectionInterruptedButtonsText_() {
  */
 function parseServerResponse_(xhr) {
   remoting.supportHostsXhr_ = null;
-  console.log('parseServerResponse: xhr = ' + xhr);
+  console.log('parseServerResponse: xhr =', xhr);
   if (xhr.status == 200) {
     var host = /** @type {{data: {jabberId: string, publicKey: string}}} */
         jsonParseSafe(xhr.responseText);
@@ -456,24 +456,6 @@ function updateStatistics_() {
 }
 
 /**
- * @return {boolean} true if the client plugin supports PIN auth.
- */
-remoting.isPinAuthSupported = function () {
-  var plugin = /** @type {remoting.ViewerPlugin} */
-      document.createElement('embed');
-  plugin.src = 'about://none';
-  plugin.type = 'pepper-application/x-chromoting';
-  plugin.width = 0;
-  plugin.height = 0;
-  document.body.appendChild(plugin);
-  var version = plugin.apiVersion;
-  document.body.removeChild(plugin);
-  // Future version of the plugin will not have apiVersion. We assume
-  // that they support PINs.
-  return !version || version >= 4;
-};
-
-/**
  * Shows PIN entry screen.
  *
  * @param {string} hostId The unique id of the host.
@@ -487,21 +469,16 @@ remoting.connectMe2Me = function(hostId, retryIfOffline) {
   remoting.hostId = hostId;
   remoting.retryIfOffline = retryIfOffline;
 
-  if (!remoting.isPinAuthSupported()) {
-    // Skip PIN prompt if it is not supported.
-    remoting.connectMe2MeWithPin();
-  } else {
-    var host = remoting.hostList.getHostForId(remoting.hostId);
-    // If we're re-loading a tab for a host that has since been unregistered
-    // then the hostId may no longer resolve.
-    if (!host) {
-      showConnectError_(remoting.Error.HOST_IS_OFFLINE);
-      return;
-    }
-    var message = document.getElementById('pin-message');
-    l10n.localizeElement(message, host.hostName);
-    remoting.setMode(remoting.AppMode.CLIENT_PIN_PROMPT);
+  var host = remoting.hostList.getHostForId(remoting.hostId);
+  // If we're re-loading a tab for a host that has since been unregistered
+  // then the hostId may no longer resolve.
+  if (!host) {
+    showConnectError_(remoting.Error.HOST_IS_OFFLINE);
+    return;
   }
+  var message = document.getElementById('pin-message');
+  l10n.localizeElement(message, host.hostName);
+  remoting.setMode(remoting.AppMode.CLIENT_PIN_PROMPT);
 };
 
 /**

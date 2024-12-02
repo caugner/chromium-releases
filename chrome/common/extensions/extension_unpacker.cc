@@ -30,6 +30,8 @@ namespace errors = extension_manifest_errors;
 namespace keys = extension_manifest_keys;
 namespace filenames = extension_filenames;
 
+using extensions::Extension;
+
 namespace {
 
 // Errors
@@ -190,10 +192,13 @@ bool ExtensionUnpacker::Run() {
     return false;
   }
 
-  if (!extension_file_util::ValidateExtension(extension.get(), &error)) {
+  Extension::InstallWarningVector warnings;
+  if (!extension_file_util::ValidateExtension(extension.get(),
+                                              &error, &warnings)) {
     SetError(error);
     return false;
   }
+  extension->AddInstallWarnings(warnings);
 
   // Decode any images that the browser needs to display.
   std::set<FilePath> image_paths = extension->GetBrowserImages();

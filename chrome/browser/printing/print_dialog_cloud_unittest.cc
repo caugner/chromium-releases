@@ -25,7 +25,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -41,6 +41,7 @@ using testing::NotNull;
 using testing::Return;
 using testing::StrEq;
 using testing::_;
+using ui::ExternalWebDialogUI;
 
 static const char* const kPDFTestFile = "printing/cloud_print_unittest.pdf";
 static const char* const kEmptyPDFTestFile =
@@ -317,7 +318,7 @@ class CloudPrintWebDialogDelegateTest : public testing::Test {
     EXPECT_CALL(*mock_flow_handler_.get(), SetDialogDelegate(_));
     EXPECT_CALL(*mock_flow_handler_.get(), SetDialogDelegate(NULL));
     delegate_.reset(new CloudPrintWebDialogDelegate(
-        mock_flow_handler_.get(), 100, 100, std::string(), true, false));
+        mock_path, mock_flow_handler_.get(), std::string(), false));
   }
 
   virtual void TearDown() {
@@ -333,7 +334,6 @@ class CloudPrintWebDialogDelegateTest : public testing::Test {
 };
 
 TEST_F(CloudPrintWebDialogDelegateTest, BasicChecks) {
-  EXPECT_EQ(ui::MODAL_TYPE_WINDOW, delegate_->GetDialogModalType());
   EXPECT_THAT(delegate_->GetDialogContentURL().spec(),
               StrEq(chrome::kChromeUICloudPrintResourcesURL));
   EXPECT_TRUE(delegate_->GetDialogTitle().empty());

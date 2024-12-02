@@ -21,6 +21,11 @@ import shutil
 import subprocess
 import sys
 
+# cmd_helper.py is under ../../build/android/
+sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), '..',
+   '..', 'build', 'android'))
+import cmd_helper # pylint: disable=F0401
+
 
 class NativeTestApkGenerator(object):
   """Generate a native test apk source tree.
@@ -46,10 +51,11 @@ class NativeTestApkGenerator(object):
                       'native_test_apk.xml',
                       'res/values/strings.xml']
 
-  def __init__(self, native_library, jars, output_directory):
+  def __init__(self, native_library, jars, output_directory, target_abi):
     self._native_library = native_library
     self._jars = jars
     self._output_directory = output_directory
+    self._target_abi = target_abi
     self._root_name = None
     if self._native_library:
       self._root_name = self._LibraryRoot()
@@ -114,12 +120,14 @@ class NativeTestApkGenerator(object):
   def _CopyLibraryAndJars(self):
     """Copy the shlib and jars into the apk source tree (if relevant)"""
     if self._native_library:
-      destdir = os.path.join(self._output_directory, 'libs/armeabi')
+      destdir = os.path.join(self._output_directory, 'libs/' + self._target_abi)
       if not os.path.exists(destdir):
         os.makedirs(destdir)
       dest = os.path.join(destdir, os.path.basename(self._native_library))
-      logging.warn('%s --> %s' % (self._native_library, dest))
-      shutil.copyfile(self._native_library, dest)
+      logging.warn('strip %s --> %s' % (self._native_library, dest))
+      strip = os.environ['STRIP']
+      cmd_helper.RunCmd(
+          [strip, '--strip-unneeded', self._native_library, '-o', dest])
     if self._jars:
       destdir = os.path.join(self._output_directory, 'libs')
       if not os.path.exists(destdir):
@@ -129,8 +137,11 @@ class NativeTestApkGenerator(object):
         logging.warn('%s --> %s' % (jar, dest))
         shutil.copyfile(jar, dest)
 
-  def CreateBundle(self):
+  def CreateBundle(self, ant_compile):
     """Create the apk bundle source and assemble components."""
+    if not ant_compile:
+      self._SOURCE_FILES.append('Android.mk')
+      self._REPLACEME_FILES.append('Android.mk')
     self._CopyTemplateFiles()
     self._ReplaceStrings()
     self._CopyLibraryAndJars()
@@ -154,6 +165,16 @@ class NativeTestApkGenerator(object):
       logging.error('Ant return code %d' % p.returncode)
       sys.exit(p.returncode)
 
+  def CompileAndroidMk(self):
+    """Build the generated apk within Android source tree using Android.mk."""
+    try:
+      import compile_android_mk  # pylint: disable=F0401
+    except:
+      raise AssertionError('Not in Android source tree. '
+                           'Please use --ant-compile.')
+    compile_android_mk.CompileAndroidMk(self._native_library,
+                                        self._output_directory)
+
 
 def main(argv):
   parser = optparse.OptionParser()
@@ -161,12 +182,16 @@ def main(argv):
                     help='Be verbose')
   parser.add_option('--native_library',
                     help='Full name of native shared library test bundle')
-  parser.add_option('--jar', action='append',
-                    help='Include this jar; can be specified multiple times')
+  parser.add_option('--jars',
+                    help='Space separated list of jars to be included')
   parser.add_option('--output',
                     help='Output directory for generated files.')
+  parser.add_option('--app_abi', default='armeabi',
+                    help='ABI for native shared library')
   parser.add_option('--ant-compile', action='store_true',
-                    help='If specified, build the generated apk with ant')
+                    help='If specified, build the generated apk with ant. '
+                         'Otherwise assume compiling within the Android '
+                         'source tree using Android.mk.')
   parser.add_option('--ant-args',
                     help='extra args for ant')
 
@@ -181,12 +206,21 @@ def main(argv):
   if options.verbose:
     logging.basicConfig(level=logging.DEBUG, format=' %(message)s')
 
+  # Remove all quotes from the jars string
+  jar_list = []
+  if options.jars:
+    jar_list = options.jars.replace('"', '').split()
+
   ntag = NativeTestApkGenerator(native_library=options.native_library,
-                                jars=options.jar,
-                                output_directory=options.output)
-  ntag.CreateBundle()
+                                jars=jar_list,
+                                output_directory=options.output,
+                                target_abi=options.app_abi)
+  ntag.CreateBundle(options.ant_compile)
+
   if options.ant_compile:
     ntag.Compile(options.ant_args)
+  else:
+    ntag.CompileAndroidMk()
 
   logging.warn('COMPLETE.')
 

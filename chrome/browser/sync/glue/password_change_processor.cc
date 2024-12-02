@@ -18,10 +18,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "sync/internal_api/change_record.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
+#include "sync/internal_api/public/change_record.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "webkit/forms/password_form.h"
 
@@ -68,7 +68,7 @@ void PasswordChangeProcessor::Observe(
   sync_api::ReadNode password_root(&trans);
   if (password_root.InitByTagLookup(kPasswordTag) !=
           sync_api::BaseNode::INIT_OK) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Server did not create the top-level password node. "
         "We might be running against an out-of-date server.");
     return;
@@ -82,8 +82,10 @@ void PasswordChangeProcessor::Observe(
     switch (change->type()) {
       case PasswordStoreChange::ADD: {
         sync_api::WriteNode sync_node(&trans);
-        if (sync_node.InitUniqueByCreation(syncable::PASSWORDS,
-                                           password_root, tag)) {
+        sync_api::WriteNode::InitUniqueByCreationResult result =
+            sync_node.InitUniqueByCreation(syncable::PASSWORDS, password_root,
+                                           tag);
+        if (result == sync_api::WriteNode::INIT_SUCCESS) {
           PasswordModelAssociator::WriteToSyncNode(change->form(), &sync_node);
           model_associator_->Associate(&tag, sync_node.GetId());
           break;
@@ -102,12 +104,14 @@ void PasswordChangeProcessor::Observe(
           if (sync_api::kInvalidId == sync_id) {
             error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
                 "Unable to create or retrieve password node");
+            LOG(ERROR) << "Invalid sync id.";
             return;
           }
           if (sync_node.InitByIdLookup(sync_id) !=
                   sync_api::BaseNode::INIT_OK) {
             error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
-                "Unable to create or retrieve password node");
+                "Password node lookup failed.");
+            LOG(ERROR) << "Password node lookup failed.";
             return;
           }
           PasswordModelAssociator::WriteToSyncNode(change->form(), &sync_node);
@@ -119,13 +123,15 @@ void PasswordChangeProcessor::Observe(
         int64 sync_id = model_associator_->GetSyncIdFromChromeId(tag);
         if (sync_api::kInvalidId == sync_id) {
           error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
-              "Unexpected notification for: ");
+              "Invalid sync id");
+          LOG(ERROR) << "Invalid sync id.";
           return;
         } else {
           if (sync_node.InitByIdLookup(sync_id) !=
                   sync_api::BaseNode::INIT_OK) {
             error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
                 "Password node lookup failed.");
+            LOG(ERROR) << "Password node lookup failed.";
             return;
           }
         }
@@ -168,7 +174,7 @@ void PasswordChangeProcessor::ApplyChangesFromSyncModel(
   sync_api::ReadNode password_root(trans);
   if (password_root.InitByTagLookup(kPasswordTag) !=
           sync_api::BaseNode::INIT_OK) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Password root node lookup failed.");
     return;
   }

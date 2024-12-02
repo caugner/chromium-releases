@@ -7,8 +7,7 @@
 #include "base/string_util.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/policy_service_impl.h"
-#include "chrome/browser/policy/policy_service_stub.h"
+#include "chrome/browser/policy/policy_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/printing/background_printing_manager.h"
@@ -19,6 +18,10 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !defined(ENABLE_CONFIGURATION_POLICY)
+#include "chrome/browser/policy/policy_service_stub.h"
+#endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
 TestingBrowserProcess::TestingBrowserProcess()
     : notification_service_(content::NotificationService::Create()),
@@ -62,6 +65,10 @@ PrefService* TestingBrowserProcess::local_state() {
   return local_state_;
 }
 
+VariationsService* TestingBrowserProcess::variations_service() {
+  return NULL;
+}
+
 policy::BrowserPolicyConnector*
     TestingBrowserProcess::browser_policy_connector() {
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -74,7 +81,8 @@ policy::BrowserPolicyConnector*
 policy::PolicyService* TestingBrowserProcess::policy_service() {
   if (!policy_service_.get()) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
-    policy_service_.reset(browser_policy_connector()->CreatePolicyService());
+    policy_service_.reset(
+        browser_policy_connector()->CreatePolicyService(NULL));
 #else
     policy_service_.reset(new policy::PolicyServiceStub());
 #endif
@@ -116,7 +124,7 @@ net::URLRequestContextGetter* TestingBrowserProcess::system_request_context() {
 }
 
 #if defined(OS_CHROMEOS)
-browser::OomPriorityManager* TestingBrowserProcess::oom_priority_manager() {
+chromeos::OomPriorityManager* TestingBrowserProcess::oom_priority_manager() {
   return NULL;
 }
 #endif  // defined(OS_CHROMEOS)
@@ -180,27 +188,27 @@ printing::PrintJobManager* TestingBrowserProcess::print_job_manager() {
 
 printing::PrintPreviewTabController*
 TestingBrowserProcess::print_preview_tab_controller() {
-#if defined(OS_ANDROID)
-  NOTIMPLEMENTED();
-  return NULL;
-#else
+#if defined(ENABLE_PRINTING)
   if (!print_preview_tab_controller_.get())
     print_preview_tab_controller_ = new printing::PrintPreviewTabController();
   return print_preview_tab_controller_.get();
+#else
+  NOTIMPLEMENTED();
+  return NULL;
 #endif
 }
 
 printing::BackgroundPrintingManager*
 TestingBrowserProcess::background_printing_manager() {
-#if defined(OS_ANDROID)
-  NOTIMPLEMENTED();
-  return NULL;
-#else
+#if defined(ENABLE_PRINTING)
   if (!background_printing_manager_.get()) {
     background_printing_manager_.reset(
         new printing::BackgroundPrintingManager());
   }
   return background_printing_manager_.get();
+#else
+  NOTIMPLEMENTED();
+  return NULL;
 #endif
 }
 

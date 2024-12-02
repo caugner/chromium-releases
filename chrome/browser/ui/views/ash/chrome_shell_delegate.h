@@ -37,14 +37,19 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual bool IsScreenLocked() const OVERRIDE;
   virtual void Shutdown() OVERRIDE;
   virtual void Exit() OVERRIDE;
+  virtual void NewTab() OVERRIDE;
   virtual void NewWindow(bool is_incognito) OVERRIDE;
-  virtual void Search() OVERRIDE;
-  virtual void OpenFileManager() OVERRIDE;
+  virtual void OpenFileManager(bool as_dialog) OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
-  virtual void OpenMobileSetup() OVERRIDE;
+  virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
+  virtual void RestoreTab() OVERRIDE;
+  virtual bool RotatePaneFocus(ash::Shell::Direction direction) OVERRIDE;
+  virtual void ShowKeyboardOverlay() OVERRIDE;
+  virtual void ShowTaskManager() OVERRIDE;
   virtual content::BrowserContext* GetCurrentBrowserContext() OVERRIDE;
   virtual void ToggleSpokenFeedback() OVERRIDE;
-  virtual ash::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
+  virtual bool IsSpokenFeedbackEnabled() const OVERRIDE;
+  virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
   virtual void StartPartialScreenshot(
       ash::ScreenshotDelegate* screenshot_delegate) OVERRIDE;
   virtual ash::LauncherDelegate* CreateLauncherDelegate(
@@ -52,6 +57,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual ash::SystemTrayDelegate* CreateSystemTrayDelegate(
       ash::SystemTray* tray) OVERRIDE;
   virtual ash::UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
+  virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
 
   // content::NotificationObserver override:
   virtual void Observe(int type,

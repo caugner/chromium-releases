@@ -13,7 +13,7 @@
 
 struct BookmarkNodeData;
 class Profile;
-class TabContentsWrapper;
+class TabContents;
 
 namespace base {
 class ListValue;
@@ -23,11 +23,10 @@ class ListValue;
 class BookmarkManagerExtensionEventRouter
     : public BookmarkTabHelper::BookmarkDrag {
  public:
-  BookmarkManagerExtensionEventRouter(Profile* profile,
-                                      TabContentsWrapper* tab);
+  BookmarkManagerExtensionEventRouter(Profile* profile, TabContents* tab);
   virtual ~BookmarkManagerExtensionEventRouter();
 
-  // RenderViewHostDelegate::BookmarkDrag interface
+  // BookmarkTabHelper::BookmarkDrag interface
   virtual void OnDragEnter(const BookmarkNodeData& data) OVERRIDE;
   virtual void OnDragOver(const BookmarkNodeData& data) OVERRIDE;
   virtual void OnDragLeave(const BookmarkNodeData& data) OVERRIDE;
@@ -47,7 +46,7 @@ class BookmarkManagerExtensionEventRouter
   void DispatchDragEvent(const BookmarkNodeData& data, const char* event_name);
 
   Profile* profile_;
-  TabContentsWrapper* tab_;
+  TabContents* tab_;
   BookmarkNodeData bookmark_drag_data_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkManagerExtensionEventRouter);
@@ -180,5 +179,18 @@ class RecordLaunchBookmarkFunction : public BookmarksFunction {
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
 };
+
+class CanOpenNewWindowsBookmarkFunction : public BookmarksFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME(
+      "experimental.bookmarkManager.canOpenNewWindows");
+
+ protected:
+  virtual ~CanOpenNewWindowsBookmarkFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+};
+
 
 #endif  // CHROME_BROWSER_BOOKMARKS_BOOKMARK_MANAGER_EXTENSION_API_H_

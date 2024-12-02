@@ -14,10 +14,11 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -46,6 +47,13 @@ struct TestURLInfo {
   // If a host has a match, we should pick it up during host synthesis.
   {"http://news.google.com/?ned=us&topic=n", "Google News - U.S.", 2, 2},
   {"http://news.google.com/", "Google News", 1, 1},
+
+  // Matches that are normally not inline-autocompletable should be
+  // autocompleted if they are shorter substitutes for longer matches that would
+  // have been inline autocompleted.
+  {"http://synthesisatest.com/foo/", "Test A", 1, 1},
+  {"http://synthesisbtest.com/foo/", "Test B", 1, 1},
+  {"http://synthesisbtest.com/foo/bar.html", "Test B Bar", 2, 2},
 
   // Suggested short URLs must be "good enough" and must match user input.
   {"http://foo.com/", "Dir", 5, 5},
@@ -182,7 +190,9 @@ void HistoryURLProviderTest::OnProviderUpdate(bool updated_matches) {
 void HistoryURLProviderTest::SetUpImpl(bool no_db) {
   profile_.reset(new TestingProfile());
   profile_->CreateHistoryService(true, no_db);
-  history_service_ = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  history_service_ =
+      HistoryServiceFactory::GetForProfile(profile_.get(),
+                                           Profile::EXPLICIT_ACCESS);
 
   autocomplete_ = new HistoryURLProvider(this, profile_.get(), "en-US,en,ko");
 
@@ -280,6 +290,25 @@ TEST_F(HistoryURLProviderTest, PromoteShorterURLs) {
 
   // Test that unpopular pages are ignored completely.
   RunTest(ASCIIToUTF16("fresh"), string16(), true, NULL, 0);
+
+  // Test that if we create or promote shorter suggestions that would not
+  // normally be inline autocompletable, we make them inline autocompletable if
+  // the original suggestion (that we replaced as "top") was inline
+  // autocompletable.
+  const std::string expected_synthesisa[] = {
+    "http://synthesisatest.com/",
+    "http://synthesisatest.com/foo/",
+  };
+  RunTest(ASCIIToUTF16("synthesisa"), string16(), false, expected_synthesisa,
+          arraysize(expected_synthesisa));
+  EXPECT_LT(matches_.front().relevance, 1200);
+  const std::string expected_synthesisb[] = {
+    "http://synthesisbtest.com/foo/",
+    "http://synthesisbtest.com/foo/bar.html",
+  };
+  RunTest(ASCIIToUTF16("synthesisb"), string16(), false, expected_synthesisb,
+          arraysize(expected_synthesisb));
+  EXPECT_GE(matches_.front().relevance, 1410);
 
   // Test that if we have a synthesized host that matches a suggestion, they
   // get combined into one.

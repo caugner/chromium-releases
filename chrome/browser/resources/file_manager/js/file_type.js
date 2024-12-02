@@ -85,6 +85,8 @@ FileType.types = [
    subtype: 'draw', pattern: /\.gdraw$/i},
   {type: 'hosted', icon: 'gtable', name: 'GTABLE_DOCUMENT_FILE_TYPE',
    subtype: 'table', pattern: /\.gtable$/i},
+  {type: 'hosted', icon: 'glink', name: 'GLINK_DOCUMENT_FILE_TYPE',
+   subtype: 'glink', pattern: /\.glink$/i},
 
   // Others
   {type: 'document', icon: 'pdf', name: 'PDF_DOCUMENT_FILE_TYPE',
@@ -144,6 +146,21 @@ FileType.getType = function(file) {
              subtype: extension, icon: '' };
   }
 };
+
+/**
+ * Pattern for urls pointing to Google Drive files.
+ */
+FileType.GDRIVE_URL_PATTERN =
+    new RegExp('^filesystem:[^/]*://[^/]*/[^/]*/drive/(.*)');
+
+/**
+ * @param {string} url The url.
+ * @return {boolean} Whether this provider supports the url.
+ */
+FileType.isOnGDrive = function(url) {
+  return FileType.GDRIVE_URL_PATTERN.test(url);
+};
+
 
 /**
  * Get the media type for a given url.
@@ -220,31 +237,4 @@ FileType.getIcon = function(file) {
  */
 FileType.getPreviewArt = function(type) {
   return FileType.previewArt[type] || FileType.previewArt['unknown'];
-};
-
-/**
- * Files with more pixels won't have preview.
- */
-FileType.MAX_PREVIEW_PIXEL_COUNT = 1 << 21; // 2 MPix
-
-/**
- * Files of bigger size won't have preview.
- */
-FileType.MAX_PREVIEW_FILE_SIZE = 1 << 20; // 1 Mb
-
-/**
- * If an image file does not have an embedded thumbnail we might want to use
- * the image itself as a thumbnail. If the image is too large it hurts
- * the performance very much so we allow it only for moderately sized files.
- *
- * @param {Object} metadata From MetadataProvider.
- * @param {number} opt_size The file size to be used if the metadata does not
- *   contain fileSize.
- * @return {boolean} Whether it is OK to use the image url for a preview.
- */
-FileType.canUseImageUrlForPreview = function(metadata, opt_size) {
-  var fileSize = metadata.fileSize || opt_size;
-  return ((fileSize && fileSize <= FileType.MAX_PREVIEW_FILE_SIZE) ||
-      (metadata.width && metadata.height &&
-      (metadata.width * metadata.height <= FileType.MAX_PREVIEW_PIXEL_COUNT)));
 };

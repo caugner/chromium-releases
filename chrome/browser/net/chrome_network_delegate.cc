@@ -18,6 +18,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_request_info.h"
@@ -27,6 +28,7 @@
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
+#include "net/socket_stream/socket_stream.h"
 #include "net/url_request/url_request.h"
 
 #if defined(OS_CHROMEOS)
@@ -48,6 +50,10 @@ bool ChromeNetworkDelegate::g_allow_file_access_ = false;
 #else
 bool ChromeNetworkDelegate::g_allow_file_access_ = true;
 #endif
+
+// This remains false unless the --disable-extensions-http-throttling
+// flag is passed to the browser.
+bool ChromeNetworkDelegate::g_never_throttle_requests_ = false;
 
 namespace {
 
@@ -138,6 +144,11 @@ ChromeNetworkDelegate::ChromeNetworkDelegate(
 ChromeNetworkDelegate::~ChromeNetworkDelegate() {}
 
 // static
+void ChromeNetworkDelegate::NeverThrottleRequests() {
+  g_never_throttle_requests_ = true;
+}
+
+// static
 void ChromeNetworkDelegate::InitializeReferrersEnabled(
     BooleanPrefMember* enable_referrers,
     PrefService* pref_service) {
@@ -162,10 +173,10 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   if (url_blacklist_manager_ &&
       url_blacklist_manager_->IsURLBlocked(request->url())) {
     // URL access blocked by policy.
-    scoped_refptr<net::NetLog::EventParameters> params;
-    params = new net::NetLogStringParameter("url", request->url().spec());
     request->net_log().AddEvent(
-        net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST, params);
+        net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
+        net::NetLog::StringCallback("url",
+                                    &request->url().possibly_invalid_spec()));
     return net::ERR_NETWORK_ACCESS_DENIED;
   }
 #endif
@@ -303,9 +314,6 @@ bool ChromeNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
   bool allow = cookie_settings_->IsSettingCookieAllowed(
       request.url(), request.first_party_for_cookies());
 
-  if (cookie_settings_->IsCookieSessionOnly(request.url()))
-    options->set_force_session();
-
   int render_process_id = -1;
   int render_view_id = -1;
   if (content::ResourceRequestInfo::GetRenderViewForRequest(
@@ -356,4 +364,31 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
 #else
   return true;
 #endif  // defined(OS_CHROMEOS)
+}
+
+bool ChromeNetworkDelegate::OnCanThrottleRequest(
+    const net::URLRequest& request) const {
+  if (g_never_throttle_requests_) {
+    return false;
+  }
+
+  return request.first_party_for_cookies().scheme() ==
+      chrome::kExtensionScheme;
+}
+
+int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(
+    net::SocketStream* socket,
+    const net::CompletionCallback& callback) {
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  if (url_blacklist_manager_ &&
+      url_blacklist_manager_->IsURLBlocked(socket->url())) {
+    // URL access blocked by policy.
+    socket->net_log()->AddEvent(
+        net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
+        net::NetLog::StringCallback("url",
+                                    &socket->url().possibly_invalid_spec()));
+    return net::ERR_NETWORK_ACCESS_DENIED;
+  }
+#endif
+  return net::OK;
 }

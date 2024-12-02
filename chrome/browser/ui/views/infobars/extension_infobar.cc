@@ -12,7 +12,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -90,7 +90,7 @@ void ExtensionInfoBar::ViewHierarchyChanged(bool is_add,
   // This must happen after adding all children because it can trigger layout,
   // which assumes that particular children (e.g. the close button) have already
   // been added.
-  const Extension* extension = extension_host->extension();
+  const extensions::Extension* extension = extension_host->extension();
   ExtensionIconSet::Icons image_size = ExtensionIconSet::EXTENSION_ICON_BITTY;
   ExtensionResource icon_resource = extension->GetIconResource(
       image_size, ExtensionIconSet::MATCH_EXACTLY);
@@ -108,26 +108,27 @@ void ExtensionInfoBar::OnImageLoaded(const gfx::Image& image,
   if (!GetDelegate())
     return;  // The delegate can go away while we asynchronously load images.
 
-  const SkBitmap* icon = NULL;
+  const gfx::ImageSkia* icon = NULL;
   // Fall back on the default extension icon on failure.
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   if (image.IsEmpty())
-    icon = rb.GetImageNamed(IDR_EXTENSIONS_SECTION).ToSkBitmap();
+    icon = rb.GetImageNamed(IDR_EXTENSIONS_SECTION).ToImageSkia();
   else
-    icon = image.ToSkBitmap();
+    icon = image.ToImageSkia();
 
-  const SkBitmap* drop_image = rb.GetImageNamed(IDR_APP_DROPARROW).ToSkBitmap();
+  const gfx::ImageSkia* drop_image =
+      rb.GetImageNamed(IDR_APP_DROPARROW).ToImageSkia();
 
   int image_size = ExtensionIconSet::EXTENSION_ICON_BITTY;
-  // The margin between the extension icon and the drop-down arrow bitmap.
+  // The margin between the extension icon and the drop-down arrow image.
   static const int kDropArrowLeftMargin = 3;
   scoped_ptr<gfx::Canvas> canvas(new gfx::Canvas(
       gfx::Size(image_size + kDropArrowLeftMargin + drop_image->width(),
                 image_size), false));
-  canvas->DrawBitmapInt(*icon, 0, 0, icon->width(), icon->height(), 0, 0,
-                        image_size, image_size, false);
-  canvas->DrawBitmapInt(*drop_image, image_size + kDropArrowLeftMargin,
-                        image_size / 2);
+  canvas->DrawImageInt(*icon, 0, 0, icon->width(), icon->height(), 0, 0,
+                       image_size, image_size, false);
+  canvas->DrawImageInt(*drop_image, image_size + kDropArrowLeftMargin,
+                       image_size / 2);
   menu_->SetIcon(canvas->ExtractBitmap());
   menu_->SetVisible(true);
 
@@ -142,7 +143,8 @@ void ExtensionInfoBar::OnMenuButtonClicked(views::View* source,
                                            const gfx::Point& point) {
   if (!owned())
     return;  // We're closing; don't call anything, it might access the owner.
-  const Extension* extension = GetDelegate()->extension_host()->extension();
+  const extensions::Extension* extension = GetDelegate()->extension_host()->
+      extension();
   if (!extension->ShowConfigureContextMenus())
     return;
 

@@ -20,17 +20,17 @@
 #include "chrome/browser/sync/glue/chrome_sync_notification_bridge.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "googleurl/src/gurl.h"
-#include "sync/engine/model_safe_worker.h"
-#include "sync/internal_api/configure_reason.h"
-#include "sync/internal_api/sync_manager.h"
+#include "sync/internal_api/public/configure_reason.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "sync/internal_api/public/sync_manager.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/util/report_unrecoverable_error_function.h"
+#include "sync/internal_api/public/util/unrecoverable_error_handler.h"
+#include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/notifier/sync_notifier_factory.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/sync_protocol_error.h"
-#include "sync/sessions/session_state.h"
-#include "sync/syncable/model_type.h"
-#include "sync/util/report_unrecoverable_error_function.h"
-#include "sync/util/unrecoverable_error_handler.h"
-#include "sync/util/weak_handle.h"
 
 class MessageLoop;
 class Profile;
@@ -39,6 +39,7 @@ namespace browser_sync {
 
 class ChangeProcessor;
 struct Experiments;
+class InvalidatorStorage;
 class JsBackend;
 class JsEventHandler;
 class SyncBackendRegistrar;
@@ -143,15 +144,19 @@ class SyncFrontend {
 // that the SyncFrontend is only accessed on the UI loop.
 class SyncBackendHost : public BackendDataTypeConfigurer {
  public:
-  typedef sync_api::SyncManager::Status Status;
+  typedef sync_api::SyncStatus Status;
 
   // Create a SyncBackendHost with a reference to the |frontend| that
   // it serves and communicates to via the SyncFrontend interface (on
   // the same thread it used to call the constructor).  Must outlive
-  // |sync_prefs|.
-  SyncBackendHost(const std::string& name,
-                  Profile* profile,
-                  const base::WeakPtr<SyncPrefs>& sync_prefs);
+  // |sync_prefs| and |invalidator_storage|.
+  SyncBackendHost(
+      const std::string& name,
+      Profile* profile,
+      const base::WeakPtr<SyncPrefs>& sync_prefs,
+      // TODO(tim): Temporary, remove when bug 124137 finished.
+      const base::WeakPtr<InvalidatorStorage>& invalidator_storage);
+
   // For testing.
   // TODO(skrul): Extract an interface so this is not needed.
   explicit SyncBackendHost(Profile* profile);
@@ -289,6 +294,8 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
     DoInitializeOptions(
         MessageLoop* sync_loop,
         SyncBackendRegistrar* registrar,
+        const ModelSafeRoutingInfo& routing_info,
+        const std::vector<ModelSafeWorker*>& workers,
         ExtensionsActivityMonitor* extensions_activity_monitor,
         const WeakHandle<JsEventHandler>& event_handler,
         const GURL& service_url,
@@ -305,6 +312,8 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
 
     MessageLoop* sync_loop;
     SyncBackendRegistrar* registrar;
+    ModelSafeRoutingInfo routing_info;
+    std::vector<ModelSafeWorker*> workers;
     ExtensionsActivityMonitor* extensions_activity_monitor;
     WeakHandle<JsEventHandler> event_handler;
     GURL service_url;

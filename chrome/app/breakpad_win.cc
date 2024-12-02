@@ -105,6 +105,18 @@ extern "C" void __declspec(dllexport) __cdecl DumpProcessWithoutCrash() {
   }
 }
 
+DWORD WINAPI DumpProcessWithoutCrashThread(void*) {
+  DumpProcessWithoutCrash();
+  return 0;
+}
+
+// Injects a thread into a remote process to dump state when there is no crash.
+extern "C" HANDLE __declspec(dllexport) __cdecl
+InjectDumpProcessWithoutCrash(HANDLE process) {
+  return CreateRemoteThread(process, NULL, 0, DumpProcessWithoutCrashThread,
+                            0, 0, NULL);
+}
+
 // Reduces the size of the string |str| to a max of 64 chars. Required because
 // breakpad's CustomInfoEntry raises an invalid_parameter error if the string
 // we want to set is longer.
@@ -151,32 +163,33 @@ bool IsBoringCommandLineSwitch(const std::wstring& flag) {
          flag == L"--flag-switches-end";
 }
 
-extern "C" void __declspec(dllexport) __cdecl SetCommandLine(
-    const CommandLine* command_line) {
+// Note that this is suffixed with "2" due to a parameter change that was made
+// to the predecessor "SetCommandLine()". If the signature changes again, use
+// a new name.
+extern "C" void __declspec(dllexport) __cdecl SetCommandLine2(
+    const wchar_t** argv, size_t argc) {
   if (!g_custom_entries)
     return;
-
-  const CommandLine::StringVector& argv = command_line->argv();
 
   // Copy up to the kMaxSwitches arguments into the custom entries array. Skip
   // past the first argument, as it is just the executable path.
   size_t argv_i = 1;
   size_t num_added = 0;
 
-  for (; argv_i < argv.size() && num_added < kMaxSwitches; ++argv_i) {
+  for (; argv_i < argc && num_added < kMaxSwitches; ++argv_i) {
     // Don't bother including boring command line switches in crash reports.
     if (IsBoringCommandLineSwitch(argv[argv_i]))
       continue;
 
     base::wcslcpy((*g_custom_entries)[g_switches_offset + num_added].value,
-                  argv[argv_i].c_str(),
+                  argv[argv_i],
                   google_breakpad::CustomInfoEntry::kValueMaxLength);
     num_added++;
   }
 
   // Make note of the total number of switches. This is useful in case we have
   // truncated at kMaxSwitches, to see how many were unaccounted for.
-  SetIntegerValue(g_num_switches_offset, static_cast<int>(argv.size()) - 1);
+  SetIntegerValue(g_num_switches_offset, static_cast<int>(argc) - 1);
 }
 
 // Appends the plugin path to |g_custom_entries|.
@@ -304,7 +317,7 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
       google_breakpad::CustomInfoEntry(L"guid", guid.c_str()));
 
   // Add empty values for the command line switches. We will fill them with
-  // actual values as part of SetCommandLine().
+  // actual values as part of SetCommandLine2().
   g_num_switches_offset = g_custom_entries->size();
   g_custom_entries->push_back(
       google_breakpad::CustomInfoEntry(L"num-switches", L""));
@@ -317,9 +330,12 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
   }
 
   // Fill in the command line arguments using CommandLine::ForCurrentProcess().
-  // The browser process may call SetCommandLine() again later on with a command
-  // line that has been augmented with the about:flags experiments.
-  SetCommandLine(CommandLine::ForCurrentProcess());
+  // The browser process may call SetCommandLine2() again later on with a
+  // command line that has been augmented with the about:flags experiments.
+  std::vector<const wchar_t*> switches;
+  StringVectorToCStringVector(
+      CommandLine::ForCurrentProcess()->argv(), &switches);
+  SetCommandLine2(&switches[0], switches.size());
 
   if (type == L"renderer" || type == L"plugin" || type == L"gpu-process") {
     g_num_of_views_offset = g_custom_entries->size();
@@ -598,6 +614,14 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
     return false;
   }
 
+  // Only show this for the browser process. See crbug.com/132119.
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
+  if (!process_type.empty()) {
+    return false;
+  }
+
   DWORD len = ::GetEnvironmentVariableW(
       ASCIIToWide(env_vars::kRestartInfo).c_str(), NULL, 0);
   if (!len)
@@ -822,4 +846,12 @@ void InitCrashReporter() {
 
 void InitDefaultCrashCallback(LPTOP_LEVEL_EXCEPTION_FILTER filter) {
   previous_filter = SetUnhandledExceptionFilter(filter);
+}
+
+void StringVectorToCStringVector(const std::vector<std::wstring>& wstrings,
+                                 std::vector<const wchar_t*>* cstrings) {
+  cstrings->clear();
+  cstrings->reserve(wstrings.size());
+  for (size_t i = 0; i < wstrings.size(); ++i)
+    cstrings->push_back(wstrings[i].c_str());
 }

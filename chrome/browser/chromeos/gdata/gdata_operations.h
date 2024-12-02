@@ -21,6 +21,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
+#include "net/url_request/url_fetcher.h"
 
 namespace gdata {
 
@@ -82,7 +83,7 @@ class GDataOperationInterface {
 // Base class for operations that are fetching URLs.
 class UrlFetchOperationBase : public GDataOperationInterface,
                               public GDataOperationRegistry::Operation,
-                              public content::URLFetcherDelegate {
+                              public net::URLFetcherDelegate {
  public:
   // Overridden from GDataOperationInterface.
   virtual void Start(const std::string& auth_token) OVERRIDE;
@@ -103,7 +104,7 @@ class UrlFetchOperationBase : public GDataOperationInterface,
   virtual GURL GetURL() const = 0;
   // Returns the request type. A derived class should override this method
   // for a request type other than HTTP GET.
-  virtual content::URLFetcher::RequestType GetRequestType() const;
+  virtual net::URLFetcher::RequestType GetRequestType() const;
   // Returns the extra HTTP headers for the request. A derived class should
   // override this method to specify any extra headers needed for the request.
   virtual std::vector<std::string> GetExtraRequestHeaders() const;
@@ -115,7 +116,7 @@ class UrlFetchOperationBase : public GDataOperationInterface,
 
   // Invoked by OnURLFetchComplete when the operation completes without an
   // authentication error. Must be implemented by a derived class.
-  virtual bool ProcessURLFetchResults(const content::URLFetcher* source) = 0;
+  virtual bool ProcessURLFetchResults(const net::URLFetcher* source) = 0;
 
   // Invoked when it needs to notify the status. Chunked operations that
   // constructs a logically single operation from multiple physical operations
@@ -131,20 +132,24 @@ class UrlFetchOperationBase : public GDataOperationInterface,
   virtual void DoCancel() OVERRIDE;
 
   // Overridden from URLFetcherDelegate.
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
   // Overridden from GDataOperationInterface.
   virtual void OnAuthFailed(GDataErrorCode code) OVERRIDE;
 
+  // Returns an appropriate GDataErrorCode based on the HTTP response code and
+  // the status of the URLFetcher.
+  GDataErrorCode GetErrorCode(const net::URLFetcher* source) const;
+
   std::string GetResponseHeadersAsString(
-      const content::URLFetcher* url_fetcher);
+      const net::URLFetcher* url_fetcher);
 
   Profile* profile_;
   ReAuthenticateCallback re_authenticate_callback_;
   int re_authenticate_count_;
   bool save_temp_file_;
   FilePath output_file_path_;
-  scoped_ptr<content::URLFetcher> url_fetcher_;
+  scoped_ptr<net::URLFetcher> url_fetcher_;
   bool started_;
 };
 
@@ -163,7 +168,7 @@ class EntryActionOperation : public UrlFetchOperationBase {
  protected:
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
-  virtual bool ProcessURLFetchResults(const content::URLFetcher* source)
+  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
       OVERRIDE;
   virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
 
@@ -191,7 +196,7 @@ class GetDataOperation : public UrlFetchOperationBase {
 
  protected:
   // Overridden from UrlFetchOperationBase.
-  virtual bool ProcessURLFetchResults(const content::URLFetcher* source)
+  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
       OVERRIDE;
   virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
 
@@ -209,6 +214,7 @@ class GetDocumentsOperation : public GetDataOperation {
                         Profile* profile,
                         int start_changestamp,
                         const std::string& search_string,
+                        const std::string& directory_resource_id,
                         const GetDataCallback& callback);
   virtual ~GetDocumentsOperation();
 
@@ -224,8 +230,31 @@ class GetDocumentsOperation : public GetDataOperation {
   GURL override_url_;
   int start_changestamp_;
   std::string search_string_;
+  std::string directory_resource_id_;
 
   DISALLOW_COPY_AND_ASSIGN(GetDocumentsOperation);
+};
+
+//========================= GetDocumentEntryOperation ==========================
+
+// This class performs the operation for fetching a single document entry.
+class GetDocumentEntryOperation : public GetDataOperation {
+ public:
+  GetDocumentEntryOperation(GDataOperationRegistry* registry,
+                            Profile* profile,
+                            const std::string& resource_id,
+                            const GetDataCallback& callback);
+  virtual ~GetDocumentEntryOperation();
+
+ protected:
+  // Overridden from GetGdataOperation.
+  virtual GURL GetURL() const OVERRIDE;
+
+ private:
+  // Resource id of the requested entry.
+  std::string resource_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(GetDocumentEntryOperation);
 };
 
 //========================= GetAccountMetadataOperation ========================
@@ -264,16 +293,16 @@ class DownloadFileOperation : public UrlFetchOperationBase {
  protected:
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
-  virtual bool ProcessURLFetchResults(const content::URLFetcher* source)
+  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
       OVERRIDE;
   virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
 
-  // Overridden from content::URLFetcherDelegate.
-  virtual void OnURLFetchDownloadProgress(const content::URLFetcher* source,
+  // Overridden from net::URLFetcherDelegate.
+  virtual void OnURLFetchDownloadProgress(const net::URLFetcher* source,
                                           int64 current, int64 total) OVERRIDE;
   virtual bool ShouldSendDownloadData() OVERRIDE;
   virtual void OnURLFetchDownloadData(
-      const content::URLFetcher* source,
+      const net::URLFetcher* source,
       scoped_ptr<std::string> download_data) OVERRIDE;
 
  private:
@@ -297,7 +326,7 @@ class DeleteDocumentOperation : public EntryActionOperation {
 
  protected:
   // Overridden from EntryActionOperation.
-  virtual content::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
 
  private:
@@ -320,7 +349,7 @@ class CreateDirectoryOperation : public GetDataOperation {
  protected:
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
-  virtual content::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
 
   // Overridden from UrlFetchOperationBase.
   virtual bool GetContentData(std::string* upload_content_type,
@@ -347,7 +376,7 @@ class CopyDocumentOperation : public GetDataOperation {
 
  protected:
   // Overridden from GetDataOperation.
-  virtual content::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
 
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
@@ -375,7 +404,7 @@ class RenameResourceOperation : public EntryActionOperation {
 
  protected:
   // Overridden from EntryActionOperation.
-  virtual content::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
 
   // Overridden from UrlFetchOperationBase.
@@ -406,7 +435,7 @@ class AddResourceToDirectoryOperation : public EntryActionOperation {
   virtual GURL GetURL() const OVERRIDE;
 
   // Overridden from UrlFetchOperationBase.
-  virtual content::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual bool GetContentData(std::string* upload_content_type,
                               std::string* upload_content) OVERRIDE;
 
@@ -435,7 +464,7 @@ class RemoveResourceFromDirectoryOperation : public EntryActionOperation {
   virtual GURL GetURL() const OVERRIDE;
 
   // Overridden from UrlFetchOperationBase.
-  virtual content::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
 
  private:
@@ -459,13 +488,13 @@ class InitiateUploadOperation : public UrlFetchOperationBase {
  protected:
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
-  virtual bool ProcessURLFetchResults(const content::URLFetcher* source)
+  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
       OVERRIDE;
   virtual void NotifySuccessToOperationRegistry() OVERRIDE;
   virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
 
   // Overridden from UrlFetchOperationBase.
-  virtual content::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
   virtual bool GetContentData(std::string* upload_content_type,
                               std::string* upload_content) OVERRIDE;
@@ -492,20 +521,20 @@ class ResumeUploadOperation : public UrlFetchOperationBase {
  protected:
   // Overridden from UrlFetchOperationBase.
   virtual GURL GetURL() const OVERRIDE;
-  virtual bool ProcessURLFetchResults(const content::URLFetcher* source)
+  virtual bool ProcessURLFetchResults(const net::URLFetcher* source)
       OVERRIDE;
   virtual void NotifyStartToOperationRegistry() OVERRIDE;
   virtual void NotifySuccessToOperationRegistry() OVERRIDE;
   virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE;
 
   // Overridden from UrlFetchOperationBase.
-  virtual content::URLFetcher::RequestType GetRequestType() const OVERRIDE;
+  virtual net::URLFetcher::RequestType GetRequestType() const OVERRIDE;
   virtual std::vector<std::string> GetExtraRequestHeaders() const OVERRIDE;
   virtual bool GetContentData(std::string* upload_content_type,
                               std::string* upload_content) OVERRIDE;
 
   // Overridden from content::UrlFetcherDelegate
-  virtual void OnURLFetchUploadProgress(const content::URLFetcher* source,
+  virtual void OnURLFetchUploadProgress(const net::URLFetcher* source,
                                         int64 current, int64 total) OVERRIDE;
 
  private:

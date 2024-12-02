@@ -7,10 +7,7 @@
 #   http://www.gnu.org/software/make/manual/make.html
 #
 
-PROJECTS:=dlopen file_histogram fullscreen_tumbler gamepad geturl
-PROJECTS:=hello_world_glibc hello_world_interactive hello_world_newlib
-PROJECTS:=input_events load_progress mouselock multithreaded_input_events
-PROJECTS:=pi_generator pong sine_synth tumbler websocket
+__PROJECT_LIST__
 
 # Define the default target
 all:

@@ -9,6 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
+#include "chrome/browser/tab_contents/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -45,36 +46,6 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
   }
 };
 
-// Wait for a context menu to be shown, and then execute a command with the
-// given command id in this menu, and close the menu again.
-class ContextMenuNotificationObserver : public content::NotificationObserver {
- public:
-  explicit ContextMenuNotificationObserver(int command_to_execute)
-      : command_to_execute_(command_to_execute) {
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_CONTEXT_MENU_SHOWN,
-                   content::NotificationService::AllSources());
-  }
-
-  virtual ~ContextMenuNotificationObserver() {}
-
- private:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
-    DCHECK_EQ(chrome::NOTIFICATION_CONTEXT_MENU_SHOWN, type);
-    RenderViewContextMenu* context_menu =
-        content::Source<RenderViewContextMenu>(source).ptr();
-    context_menu->ExecuteCommand(command_to_execute_);
-    context_menu->Cancel();
-  }
-
-  content::NotificationRegistrar registrar_;
-  int command_to_execute_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContextMenuNotificationObserver);
-};
-
 class ContextMenuBrowserTest : public InProcessBrowserTest {
  public:
   ContextMenuBrowserTest() { }
@@ -84,7 +55,7 @@ class ContextMenuBrowserTest : public InProcessBrowserTest {
     params.media_type = WebKit::WebContextMenuData::MediaTypeNone;
     params.unfiltered_link_url = unfiltered_url;
     params.link_url = url;
-    WebContents* web_contents = browser()->GetSelectedWebContents();
+    WebContents* web_contents = browser()->GetActiveWebContents();
     params.page_url = web_contents->GetController().GetActiveEntry()->GetURL();
 #if defined(OS_MACOSX)
     params.writing_direction_default = 0;
@@ -92,7 +63,7 @@ class ContextMenuBrowserTest : public InProcessBrowserTest {
     params.writing_direction_right_to_left = 0;
 #endif  // OS_MACOSX
     TestRenderViewContextMenu* menu = new TestRenderViewContextMenu(
-        browser()->GetSelectedWebContents(), params);
+        browser()->GetActiveWebContents(), params);
     menu->Init();
     return menu;
   }
@@ -123,9 +94,6 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
 // GTK requires a X11-level mouse event to open a context menu correctly.
 #if defined(TOOLKIT_GTK)
 #define MAYBE_RealMenu DISABLED_RealMenu
-#elif defined(ADDRESS_SANITIZER)
-// See http://crbug.com/126360.
-#define MAYBE_RealMenu DISABLED_RealMenu
 #else
 #define MAYBE_RealMenu RealMenu
 #endif
@@ -133,7 +101,8 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
                        MAYBE_RealMenu) {
   ContextMenuNotificationObserver menu_observer(
-      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
+      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
+      chrome::NOTIFICATION_TAB_ADDED);
   ui_test_utils::WindowedTabAddedNotificationObserver tab_observer(
       content::NotificationService::AllSources());
 
@@ -148,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
   mouse_event.x = 15;
   mouse_event.y = 15;
   gfx::Rect offset;
-  content::WebContents* tab = browser()->GetSelectedWebContents();
+  content::WebContents* tab = browser()->GetActiveWebContents();
   tab->GetView()->GetContainerBounds(&offset);
   mouse_event.globalX = 15 + offset.x();
   mouse_event.globalY = 15 + offset.y();

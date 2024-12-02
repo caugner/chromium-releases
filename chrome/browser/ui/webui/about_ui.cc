@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -64,27 +65,32 @@
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "v8/include/v8.h"
 #include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/webplugininfo.h"
 
+#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#include "content/public/browser/zygote_host_linux.h"
+#include "content/public/common/sandbox_linux.h"
+#endif
+
 #if defined(OS_WIN)
 #include "chrome/browser/enumerate_modules_model_win.h"
-#elif defined(OS_CHROMEOS)
+#endif
+
+#if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/oom_priority_manager.h"
 #include "chrome/browser/chromeos/version_loader.h"
-#include "chrome/browser/oom_priority_manager.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "content/public/browser/zygote_host_linux.h"
-#elif defined(OS_LINUX) || defined(OS_OPENBSD)
-#include "content/public/browser/zygote_host_linux.h"
 #endif
 
 #if defined(USE_ASH)
@@ -241,7 +247,7 @@ class ChromeOSTermsHandler
     // Do nothing if OEM EULA load failed.
     if (contents_.empty() && path_ != chrome::kOemEulaURLPath) {
       contents_ = ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_TERMS_HTML).as_string();
+          IDR_TERMS_HTML, ui::SCALE_FACTOR_NONE).as_string();
     }
     source_->FinishDataRequest(contents_, request_id_);
   }
@@ -364,6 +370,7 @@ std::string ToHtmlTableHeader(const chromeos::Network* network) {
     str += WrapWithTH("Encryption");
     str += WrapWithTH("Passphrase");
     str += WrapWithTH("Identity");
+    str += WrapWithTH("Frequency");
   }
   if (network->type() == chromeos::TYPE_CELLULAR) {
     str += WrapWithTH("Technology");
@@ -402,6 +409,7 @@ std::string ToHtmlTableRow(const chromeos::Network* network) {
     str += WrapWithTD(wifi->GetEncryptionString());
     str += WrapWithTD(std::string(wifi->passphrase().length(), '*'));
     str += WrapWithTD(wifi->identity());
+    str += WrapWithTD(base::IntToString(wifi->frequency()));
   }
   if (network->type() == chromeos::TYPE_CELLULAR) {
     const chromeos::CellularNetwork* cell =
@@ -587,7 +595,7 @@ std::string AboutDiscards(const std::string& path) {
       "<p>Tabs sorted from most interesting to least interesting. The least "
       "interesting tab may be discarded if we run out of physical memory.</p>");
 
-  browser::OomPriorityManager* oom = g_browser_process->oom_priority_manager();
+  chromeos::OomPriorityManager* oom = g_browser_process->oom_priority_manager();
   std::vector<string16> titles = oom->GetTabTitles();
   if (!titles.empty()) {
     output.append("<ol>");
@@ -832,7 +840,8 @@ void FinishMemoryDataRequest(const std::string& path,
     source->FinishDataRequest(
         ResourceBundle::GetSharedInstance().GetRawDataResource(
             path == kMemoryJsPath ? IDR_ABOUT_MEMORY_JS :
-                IDR_ABOUT_MEMORY_HTML).as_string(), request_id);
+                IDR_ABOUT_MEMORY_HTML,
+            ui::SCALE_FACTOR_NONE).as_string(), request_id);
   }
 }
 
@@ -983,8 +992,8 @@ std::string AboutStats(const std::string& query) {
   } else {
     // Get about_stats.html/js from resource bundle.
     data = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        (query == kStatsJsPath ? IDR_ABOUT_STATS_JS : IDR_ABOUT_STATS_HTML)).
-        as_string();
+        (query == kStatsJsPath ? IDR_ABOUT_STATS_JS : IDR_ABOUT_STATS_HTML),
+        ui::SCALE_FACTOR_NONE).as_string();
 
     if (query != kStatsJsPath) {
       // Clear the timer list since we stored the data in the timers list
@@ -1048,19 +1057,19 @@ std::string AboutSandbox() {
   data.append("<table>");
 
   AboutSandboxRow(&data, "", IDS_ABOUT_SANDBOX_SUID_SANDBOX,
-                  status & content::ZygoteHost::kSandboxSUID);
+                  status & content::kSandboxLinuxSUID);
   AboutSandboxRow(&data, "&nbsp;&nbsp;", IDS_ABOUT_SANDBOX_PID_NAMESPACES,
-                  status & content::ZygoteHost::kSandboxPIDNS);
+                  status & content::kSandboxLinuxPIDNS);
   AboutSandboxRow(&data, "&nbsp;&nbsp;", IDS_ABOUT_SANDBOX_NET_NAMESPACES,
-                  status & content::ZygoteHost::kSandboxNetNS);
+                  status & content::kSandboxLinuxNetNS);
   AboutSandboxRow(&data, "", IDS_ABOUT_SANDBOX_SECCOMP_SANDBOX,
-                  status & content::ZygoteHost::kSandboxSeccomp);
+                  status & content::kSandboxLinuxSeccomp);
 
   data.append("</table>");
 
-  bool good = ((status & content::ZygoteHost::kSandboxSUID) &&
-               (status & content::ZygoteHost::kSandboxPIDNS)) ||
-              (status & content::ZygoteHost::kSandboxSeccomp);
+  bool good = ((status & content::kSandboxLinuxSUID) &&
+               (status & content::kSandboxLinuxPIDNS)) ||
+              (status & content::kSandboxLinuxSeccomp);
   if (good) {
     data.append("<p style=\"color: green\">");
     data.append(l10n_util::GetStringUTF8(IDS_ABOUT_SANDBOX_OK));
@@ -1079,7 +1088,7 @@ std::string AboutVersionStaticContent(const std::string& query) {
   return ResourceBundle::GetSharedInstance().GetRawDataResource(
       query ==  kVersionJsPath ?
       IDR_ABOUT_VERSION_JS :
-      IDR_ABOUT_VERSION_HTML).as_string();
+      IDR_ABOUT_VERSION_HTML, ui::SCALE_FACTOR_NONE).as_string();
 }
 
 std::string AboutVersionStrings(DictionaryValue* localized_strings,
@@ -1380,7 +1389,7 @@ void AboutUIHTMLSource::StartDataRequest(const std::string& path,
   } else if (host == chrome::kChromeUICreditsHost) {
     int idr = (path == kCreditsJsPath) ? IDR_CREDITS_JS : IDR_CREDITS_HTML;
     response = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        idr).as_string();
+        idr, ui::SCALE_FACTOR_NONE).as_string();
 #if defined(OS_CHROMEOS)
   } else if (host == chrome::kChromeUICryptohomeHost) {
     FinishCryptohomeDataRequest(this, path, request_id);
@@ -1411,7 +1420,7 @@ void AboutUIHTMLSource::StartDataRequest(const std::string& path,
     response = AboutNetwork(path);
   } else if (host == chrome::kChromeUIOSCreditsHost) {
     response = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        IDR_OS_CREDITS_HTML).as_string();
+        IDR_OS_CREDITS_HTML, ui::SCALE_FACTOR_NONE).as_string();
 #endif
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
   } else if (host == chrome::kChromeUISandboxHost) {
@@ -1425,7 +1434,7 @@ void AboutUIHTMLSource::StartDataRequest(const std::string& path,
     return;
 #else
     response = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        IDR_TERMS_HTML).as_string();
+        IDR_TERMS_HTML, ui::SCALE_FACTOR_NONE).as_string();
 #endif
   } else if (host == chrome::kChromeUIVersionHost) {
     if (path == kStringsJsPath) {

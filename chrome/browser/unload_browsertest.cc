@@ -11,7 +11,7 @@
 #include "base/process_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -127,7 +127,7 @@ class UnloadTest : public InProcessBrowserTest {
 
   void CheckTitle(const char* expected_title) {
     string16 expected = ASCIIToUTF16(expected_title);
-    EXPECT_EQ(expected, browser()->GetSelectedWebContents()->GetTitle());
+    EXPECT_EQ(expected, browser()->GetActiveWebContents()->GetTitle());
   }
 
   void NavigateToDataURL(const std::string& html_content,
@@ -274,7 +274,7 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseBeforeUnloadCancel) {
   // the renderer.
   string16 expected_title = ASCIIToUTF16("cancelled");
   ui_test_utils::TitleWatcher title_watcher(
-      browser()->GetSelectedWebContents(), expected_title);
+      browser()->GetActiveWebContents(), expected_title);
   ClickModalDialogButton(false);
   ASSERT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 
@@ -389,7 +389,7 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseTabWhenOtherTabHasListener) {
   ui_test_utils::WindowedNotificationObserver load_stop_observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
-  ui_test_utils::SimulateMouseClick(browser()->GetSelectedWebContents());
+  ui_test_utils::SimulateMouseClick(browser()->GetActiveWebContents());
   observer.Wait();
   load_stop_observer.Wait();
   CheckTitle("popup");

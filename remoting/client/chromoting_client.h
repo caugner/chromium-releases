@@ -10,8 +10,8 @@
 #include <list>
 
 #include "base/callback.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
-#include "remoting/base/scoped_thread_proxy.h"
 #include "remoting/client/client_config.h"
 #include "remoting/client/chromoting_stats.h"
 #include "remoting/client/chromoting_view.h"
@@ -22,37 +22,45 @@
 #include "remoting/protocol/video_stub.h"
 #include "remoting/jingle_glue/xmpp_proxy.h"
 
-class MessageLoop;
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
 
 namespace remoting {
 
-class ClientContext;
+namespace protocol {
+class TransportFactory;
+}  // namespace protocol
+
 class RectangleUpdateDecoder;
 
 // TODO(sergeyu): Move VideoStub implementation to RectangleUpdateDecoder.
 class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
                          public protocol::ClientStub,
-                         public protocol::ClipboardStub,
                          public protocol::VideoStub {
  public:
   // Objects passed in are not owned by this class.
   ChromotingClient(const ClientConfig& config,
-                   ClientContext* context,
+                   scoped_refptr<base::SingleThreadTaskRunner> task_runner,
                    protocol::ConnectionToHost* connection,
                    ChromotingView* view,
-                   RectangleUpdateDecoder* rectangle_decoder,
-                   const base::Closure& client_done);
+                   RectangleUpdateDecoder* rectangle_decoder);
   virtual ~ChromotingClient();
 
-  void Start(scoped_refptr<XmppProxy> xmpp_proxy);
+  // Start/stop the client. Must be called on the main thread.
+  void Start(scoped_refptr<XmppProxy> xmpp_proxy,
+             scoped_ptr<protocol::TransportFactory> transport_factory);
   void Stop(const base::Closure& shutdown_task);
-  void ClientDone();
 
   // Return the stats recorded by this client.
   ChromotingStats* GetStats();
 
-  // ClipboardStub implementation.
+  // ClipboardStub implementation for receiving clipboard data from host.
   virtual void InjectClipboardEvent(const protocol::ClipboardEvent& event)
+      OVERRIDE;
+
+  // CursorShapeStub implementation for receiving cursor shape updates.
+  virtual void SetCursorShape(const protocol::CursorShapeInfo& cursor_shape)
       OVERRIDE;
 
   // ConnectionToHost::HostEventCallback implementation.
@@ -74,8 +82,6 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
     base::Closure done;
   };
 
-  base::MessageLoopProxy* message_loop();
-
   // Initializes connection.
   void Initialize();
 
@@ -92,7 +98,7 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
 
   // The following are not owned by this class.
   ClientConfig config_;
-  ClientContext* context_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   protocol::ConnectionToHost* connection_;
   ChromotingView* view_;
   RectangleUpdateDecoder* rectangle_decoder_;
@@ -116,7 +122,9 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   // Keep track of the last sequence number bounced back from the host.
   int64 last_sequence_number_;
 
-  ScopedThreadProxy thread_proxy_;
+  // WeakPtr used to avoid tasks accessing the client after it is deleted.
+  base::WeakPtrFactory<ChromotingClient> weak_factory_;
+  base::WeakPtr<ChromotingClient> weak_ptr_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingClient);
 };

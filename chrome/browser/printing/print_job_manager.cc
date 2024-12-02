@@ -35,15 +35,7 @@ void PrintJobManager::InitOnUIThread(PrefService* prefs) {
 }
 
 void PrintJobManager::OnQuit() {
-#if defined(OS_MACOSX)
-  // OnQuit is too late to try to wait for jobs on the Mac, since the runloop
-  // has already been torn down; instead, StopJobs(true) is called earlier in
-  // the shutdown process, and this is just here in case something sneaks
-  // in after that.
-  StopJobs(false);
-#else
   StopJobs(true);
-#endif
   registrar_.RemoveAll();
 }
 
@@ -58,9 +50,9 @@ void PrintJobManager::StopJobs(bool wait_for_finish) {
       PrintJob* job = current_jobs[i];
       if (!job)
         continue;
-      // Wait for 120 seconds for the print job to be spooled.
+      // Wait for two minutes for the print job to be spooled.
       if (wait_for_finish)
-        job->FlushJob(120000);
+        job->FlushJob(base::TimeDelta::FromMinutes(2));
       job->Stop();
     }
   }

@@ -11,8 +11,10 @@
 #include "base/string_util.h"
 #include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
+#include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/common_decoder.h"
 #include "gpu/command_buffer/service/mocks.h"
+#include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::gfx::MockGLInterface;
@@ -129,17 +131,6 @@ TEST_F(ProgramManagerTest, ProgramInfo) {
   EXPECT_TRUE(info1->log_info() == NULL);
 }
 
-TEST_F(ProgramManagerTest, SwizzleLocation) {
-  GLint power = 1;
-  for (GLint p = 0; p < 5; ++p, power *= 10) {
-    GLint limit = power * 20 + 1;
-    for (GLint ii = -limit; ii < limit; ii += power) {
-      GLint s = manager_.SwizzleLocation(ii);
-      EXPECT_EQ(ii, manager_.UnswizzleLocation(s));
-    }
-  }
-}
-
 class ProgramManagerWithShaderTest : public testing::Test {
  public:
   ProgramManagerWithShaderTest()
@@ -198,21 +189,8 @@ class ProgramManagerWithShaderTest : public testing::Test {
   static const size_t kNumUniforms;
 
  protected:
-  struct AttribInfo {
-    const char* name;
-    GLint size;
-    GLenum type;
-    GLint location;
-  };
-
-  struct UniformInfo {
-    const char* name;
-    const char* good_name;
-    GLint size;
-    GLenum type;
-    GLint fake_location;
-    GLint real_location;
-  };
+  typedef TestHelper::AttribInfo AttribInfo;
+  typedef TestHelper::UniformInfo UniformInfo;
 
   virtual void SetUp() {
     gl_.reset(new StrictMock<gfx::MockGLInterface>());
@@ -243,104 +221,19 @@ class ProgramManagerWithShaderTest : public testing::Test {
   void SetupShader(AttribInfo* attribs, size_t num_attribs,
                    UniformInfo* uniforms, size_t num_uniforms,
                    GLuint service_id) {
-    InSequence s;
-
-    EXPECT_CALL(*gl_,
-        LinkProgram(service_id))
-        .Times(1)
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_,
-        GetProgramiv(service_id, GL_LINK_STATUS, _))
-        .WillOnce(SetArgumentPointee<2>(1))
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_,
-        GetProgramiv(service_id, GL_INFO_LOG_LENGTH, _))
-        .WillOnce(SetArgumentPointee<2>(0))
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_,
-        GetProgramiv(service_id, GL_ACTIVE_ATTRIBUTES, _))
-        .WillOnce(SetArgumentPointee<2>(num_attribs))
-        .RetiresOnSaturation();
-    size_t max_attrib_len = 0;
-    for (size_t ii = 0; ii < num_attribs; ++ii) {
-      size_t len = strlen(attribs[ii].name) + 1;
-      max_attrib_len = std::max(max_attrib_len, len);
-    }
-    EXPECT_CALL(*gl_,
-        GetProgramiv(service_id, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, _))
-        .WillOnce(SetArgumentPointee<2>(max_attrib_len))
-        .RetiresOnSaturation();
-    for (size_t ii = 0; ii < num_attribs; ++ii) {
-      const AttribInfo& info = attribs[ii];
-      EXPECT_CALL(*gl_,
-          GetActiveAttrib(service_id, ii,
-                          max_attrib_len, _, _, _, _))
-          .WillOnce(DoAll(
-              SetArgumentPointee<3>(strlen(info.name)),
-              SetArgumentPointee<4>(info.size),
-              SetArgumentPointee<5>(info.type),
-              SetArrayArgument<6>(info.name,
-                                  info.name + strlen(info.name) + 1)))
-          .RetiresOnSaturation();
-      if (!ProgramManager::IsInvalidPrefix(info.name, strlen(info.name))) {
-        EXPECT_CALL(*gl_, GetAttribLocation(service_id,
-                                            StrEq(info.name)))
-            .WillOnce(Return(info.location))
-            .RetiresOnSaturation();
-      }
-    }
-    EXPECT_CALL(*gl_,
-        GetProgramiv(service_id, GL_ACTIVE_UNIFORMS, _))
-        .WillOnce(SetArgumentPointee<2>(num_uniforms))
-        .RetiresOnSaturation();
-    size_t max_uniform_len = 0;
-    for (size_t ii = 0; ii < num_uniforms; ++ii) {
-      size_t len = strlen(uniforms[ii].name) + 1;
-      max_uniform_len = std::max(max_uniform_len, len);
-    }
-    EXPECT_CALL(*gl_,
-        GetProgramiv(service_id, GL_ACTIVE_UNIFORM_MAX_LENGTH, _))
-        .WillOnce(SetArgumentPointee<2>(max_uniform_len))
-        .RetiresOnSaturation();
-    for (size_t ii = 0; ii < num_uniforms; ++ii) {
-      const UniformInfo& info = uniforms[ii];
-      EXPECT_CALL(*gl_,
-          GetActiveUniform(service_id, ii,
-                           max_uniform_len, _, _, _, _))
-          .WillOnce(DoAll(
-              SetArgumentPointee<3>(strlen(info.name)),
-              SetArgumentPointee<4>(info.size),
-              SetArgumentPointee<5>(info.type),
-              SetArrayArgument<6>(info.name,
-                                  info.name + strlen(info.name) + 1)))
-          .RetiresOnSaturation();
-      if (!ProgramManager::IsInvalidPrefix(info.name, strlen(info.name))) {
-        EXPECT_CALL(*gl_, GetUniformLocation(service_id,
-                                             StrEq(info.name)))
-            .WillOnce(Return(info.real_location))
-            .RetiresOnSaturation();
-        if (info.size > 1) {
-          std::string base_name = info.name;
-          size_t array_pos = base_name.rfind("[0]");
-          if (base_name.size() > 3 && array_pos == base_name.size() - 3) {
-            base_name = base_name.substr(0, base_name.size() - 3);
-          }
-          for (GLsizei jj = 1; jj < info.size; ++jj) {
-            std::string element_name(
-                std::string(base_name) + "[" + base::IntToString(jj) + "]");
-            EXPECT_CALL(*gl_, GetUniformLocation(service_id,
-                                                 StrEq(element_name)))
-                .WillOnce(Return(info.real_location + jj * 2))
-                .RetiresOnSaturation();
-          }
-        }
-      }
-    }
+    TestHelper::SetupShader(
+        gl_.get(), attribs, num_attribs, uniforms, num_uniforms, service_id);
   }
 
   void SetupDefaultShaderExpectations() {
     SetupShader(kAttribs, kNumAttribs, kUniforms, kNumUniforms,
                 kServiceProgramId);
+  }
+
+  void SetupExpectationsForClearingUniforms(
+      UniformInfo* uniforms, size_t num_uniforms) {
+    TestHelper::SetupExpectationsForClearingUniforms(
+        gl_.get(), uniforms, num_uniforms);
   }
 
   virtual void TearDown() {
@@ -420,25 +313,25 @@ const size_t ProgramManagerWithShaderTest::kNumAttribs =
 ProgramManagerWithShaderTest::UniformInfo
     ProgramManagerWithShaderTest::kUniforms[] = {
   { kUniform1Name,
-    kUniform1Name,
     kUniform1Size,
     kUniform1Type,
     kUniform1FakeLocation,
     kUniform1RealLocation,
+    kUniform1Name,
   },
   { kUniform2Name,
-    kUniform2Name,
     kUniform2Size,
     kUniform2Type,
     kUniform2FakeLocation,
     kUniform2RealLocation,
+    kUniform2Name,
   },
   { kUniform3BadName,
-    kUniform3GoodName,
     kUniform3Size,
     kUniform3Type,
     kUniform3FakeLocation,
     kUniform3RealLocation,
+    kUniform3GoodName,
   },
 };
 
@@ -590,15 +483,12 @@ TEST_F(ProgramManagerWithShaderTest, GetUniformFakeLocation) {
   EXPECT_EQ(kUniform3FakeLocation,
             program_info->GetUniformFakeLocation(kUniform3GoodName));
   // Check that we can get the locations of the array elements > 1
-  EXPECT_EQ(ProgramManager::ProgramInfo::GetFakeLocation(
-              kUniform2FakeLocation, 1),
+  EXPECT_EQ(GLES2Util::MakeFakeLocation(kUniform2FakeLocation, 1),
             program_info->GetUniformFakeLocation("uniform2[1]"));
-  EXPECT_EQ(ProgramManager::ProgramInfo::GetFakeLocation(
-                kUniform2FakeLocation, 2),
+  EXPECT_EQ(GLES2Util::MakeFakeLocation(kUniform2FakeLocation, 2),
             program_info->GetUniformFakeLocation("uniform2[2]"));
   EXPECT_EQ(-1, program_info->GetUniformFakeLocation("uniform2[3]"));
-  EXPECT_EQ(ProgramManager::ProgramInfo::GetFakeLocation(
-                kUniform3FakeLocation, 1),
+  EXPECT_EQ(GLES2Util::MakeFakeLocation(kUniform3FakeLocation, 1),
             program_info->GetUniformFakeLocation("uniform3[1]"));
   EXPECT_EQ(-1, program_info->GetUniformFakeLocation("uniform3[2]"));
 }
@@ -639,25 +529,25 @@ TEST_F(ProgramManagerWithShaderTest, GLDriverReturnsGLUnderscoreUniform) {
   static const char* kUniform2Name = "gl_longNameWeCanCheckFor";
   static ProgramManagerWithShaderTest::UniformInfo kUniforms[] = {
     { kUniform1Name,
-      kUniform1Name,
       kUniform1Size,
       kUniform1Type,
       kUniform1FakeLocation,
       kUniform1RealLocation,
+      kUniform1Name,
     },
     { kUniform2Name,
-      kUniform2Name,
       kUniform2Size,
       kUniform2Type,
       kUniform2FakeLocation,
       kUniform2RealLocation,
+      kUniform2Name,
     },
     { kUniform3BadName,
-      kUniform3GoodName,
       kUniform3Size,
       kUniform3Type,
       kUniform3FakeLocation,
       kUniform3RealLocation,
+      kUniform3GoodName,
     },
   };
   const size_t kNumUniforms = arraysize(kUniforms);
@@ -741,25 +631,25 @@ TEST_F(ProgramManagerWithShaderTest, GLDriverReturnsWrongTypeInfo) {
   };
   static ProgramManagerWithShaderTest::UniformInfo kUniforms[] = {
     { kUniform1Name,
-      kUniform1Name,
       kUniform1Size,
       kUniform1Type,
       kUniform1FakeLocation,
       kUniform1RealLocation,
+      kUniform1Name,
     },
     { kUniform2Name,
-      kUniform2Name,
       kUniform2Size,
       kUniform2BadType,
       kUniform2FakeLocation,
       kUniform2RealLocation,
+      kUniform2Name,
     },
     { kUniform3BadName,
-      kUniform3GoodName,
       kUniform3Size,
       kUniform3Type,
       kUniform3FakeLocation,
       kUniform3RealLocation,
+      kUniform3GoodName,
     },
   };
   const size_t kNumAttribs= arraysize(kAttribs);
@@ -945,9 +835,8 @@ TEST_F(ProgramManagerWithShaderTest, ProgramInfoGetProgramInfo) {
         input->location_offset, sizeof(int32) * input->size);
     ASSERT_TRUE(locations != NULL);
     for (int32 jj = 0; jj < input->size; ++jj) {
-      EXPECT_EQ(manager_.SwizzleLocation(
-          ProgramManager::ProgramInfo::GetFakeLocation(
-              expected.fake_location, jj)),
+      EXPECT_EQ(GLES2Util::SwizzleLocation(
+          GLES2Util::MakeFakeLocation(expected.fake_location, jj)),
           locations[jj]);
     }
     const char* name_buf = bucket.GetDataAs<const char*>(
@@ -1026,6 +915,143 @@ TEST_F(ProgramManagerWithShaderTest, BindAttribLocationConflicts) {
   program_info->SetAttribLocationBinding(kAttrib2Name, 0);
   EXPECT_TRUE(program_info->DetectAttribLocationBindingConflicts());
   EXPECT_TRUE(LinkAsExpected(program_info, false));
+}
+
+TEST_F(ProgramManagerWithShaderTest, ClearWithSamplerTypes) {
+  const GLuint kVShaderClientId = 2001;
+  const GLuint kFShaderClientId = 2002;
+  const GLuint kVShaderServiceId = 3001;
+  const GLuint kFShaderServiceId = 3002;
+  ShaderManager::ShaderInfo* vshader = shader_manager_.CreateShaderInfo(
+      kVShaderClientId, kVShaderServiceId, GL_VERTEX_SHADER);
+  ASSERT_TRUE(vshader != NULL);
+  vshader->SetStatus(true, NULL, NULL);
+  ShaderManager::ShaderInfo* fshader = shader_manager_.CreateShaderInfo(
+      kFShaderClientId, kFShaderServiceId, GL_FRAGMENT_SHADER);
+  ASSERT_TRUE(fshader != NULL);
+  fshader->SetStatus(true, NULL, NULL);
+  static const GLuint kClientProgramId = 1234;
+  static const GLuint kServiceProgramId = 5679;
+  ProgramManager::ProgramInfo* program_info = manager_.CreateProgramInfo(
+      kClientProgramId, kServiceProgramId);
+  ASSERT_TRUE(program_info != NULL);
+  EXPECT_TRUE(program_info->AttachShader(&shader_manager_, vshader));
+  EXPECT_TRUE(program_info->AttachShader(&shader_manager_, fshader));
+
+  static const GLenum kSamplerTypes[] = {
+    GL_SAMPLER_2D,
+    GL_SAMPLER_CUBE,
+    GL_SAMPLER_EXTERNAL_OES,
+    GL_SAMPLER_3D_OES,
+    GL_SAMPLER_2D_RECT_ARB,
+  };
+  const size_t kNumSamplerTypes = arraysize(kSamplerTypes);
+  for (size_t ii = 0; ii < kNumSamplerTypes; ++ii) {
+    static ProgramManagerWithShaderTest::AttribInfo kAttribs[] = {
+      { kAttrib1Name, kAttrib1Size, kAttrib1Type, kAttrib1Location, },
+      { kAttrib2Name, kAttrib2Size, kAttrib2Type, kAttrib2Location, },
+      { kAttrib3Name, kAttrib3Size, kAttrib3Type, kAttrib3Location, },
+    };
+    ProgramManagerWithShaderTest::UniformInfo kUniforms[] = {
+      { kUniform1Name,
+        kUniform1Size,
+        kUniform1Type,
+        kUniform1FakeLocation,
+        kUniform1RealLocation,
+        kUniform1Name,
+      },
+      { kUniform2Name,
+        kUniform2Size,
+        kSamplerTypes[ii],
+        kUniform2FakeLocation,
+        kUniform2RealLocation,
+        kUniform2Name,
+      },
+      { kUniform3BadName,
+        kUniform3Size,
+        kUniform3Type,
+        kUniform3FakeLocation,
+        kUniform3RealLocation,
+        kUniform3GoodName,
+      },
+    };
+    const size_t kNumAttribs = arraysize(kAttribs);
+    const size_t kNumUniforms = arraysize(kUniforms);
+    SetupShader(kAttribs, kNumAttribs, kUniforms, kNumUniforms,
+                kServiceProgramId);
+    program_info->Link();
+    SetupExpectationsForClearingUniforms(kUniforms, kNumUniforms);
+    manager_.ClearUniforms(program_info);
+  }
+}
+
+TEST_F(ProgramManagerWithShaderTest, UniformsAreSorted) {
+  const GLuint kVShaderClientId = 2001;
+  const GLuint kFShaderClientId = 2002;
+  const GLuint kVShaderServiceId = 3001;
+  const GLuint kFShaderServiceId = 3002;
+  ShaderManager::ShaderInfo* vshader = shader_manager_.CreateShaderInfo(
+      kVShaderClientId, kVShaderServiceId, GL_VERTEX_SHADER);
+  ASSERT_TRUE(vshader != NULL);
+  vshader->SetStatus(true, "", NULL);
+  ShaderManager::ShaderInfo* fshader = shader_manager_.CreateShaderInfo(
+      kFShaderClientId, kFShaderServiceId, GL_FRAGMENT_SHADER);
+  ASSERT_TRUE(fshader != NULL);
+  fshader->SetStatus(true, "", NULL);
+  static ProgramManagerWithShaderTest::AttribInfo kAttribs[] = {
+    { kAttrib1Name, kAttrib1Size, kAttrib1Type, kAttrib1Location, },
+    { kAttrib2Name, kAttrib2Size, kAttrib2Type, kAttrib2Location, },
+    { kAttrib3Name, kAttrib3Size, kAttrib3Type, kAttrib3Location, },
+  };
+  static ProgramManagerWithShaderTest::UniformInfo kUniforms[] = {
+    { kUniform2Name,
+      kUniform2Size,
+      kUniform2Type,
+      kUniform2FakeLocation,
+      kUniform2RealLocation,
+      kUniform2Name,
+    },
+    { kUniform3GoodName,
+      kUniform3Size,
+      kUniform3Type,
+      kUniform3FakeLocation,
+      kUniform3RealLocation,
+      kUniform3GoodName,
+    },
+    { kUniform1Name,
+      kUniform1Size,
+      kUniform1Type,
+      kUniform1FakeLocation,
+      kUniform1RealLocation,
+      kUniform1Name,
+    },
+  };
+  const size_t kNumAttribs= arraysize(kAttribs);
+  const size_t kNumUniforms = arraysize(kUniforms);
+  static const GLuint kClientProgramId = 1234;
+  static const GLuint kServiceProgramId = 5679;
+  SetupShader(kAttribs, kNumAttribs, kUniforms, kNumUniforms,
+              kServiceProgramId);
+  ProgramManager::ProgramInfo* program_info = manager_.CreateProgramInfo(
+      kClientProgramId, kServiceProgramId);
+  ASSERT_TRUE(program_info != NULL);
+  EXPECT_TRUE(program_info->AttachShader(&shader_manager_, vshader));
+  EXPECT_TRUE(program_info->AttachShader(&shader_manager_, fshader));
+  program_info->Link();
+  // Check Uniforms
+  const ProgramManager::ProgramInfo::UniformInfo* uniform_info =
+        program_info->GetUniformInfo(0);
+  ASSERT_TRUE(uniform_info != NULL);
+  EXPECT_STREQ(kUniform1Name, uniform_info->name.c_str());
+  EXPECT_EQ(0, uniform_info->fake_location_base);
+  uniform_info = program_info->GetUniformInfo(1);
+  ASSERT_TRUE(uniform_info != NULL);
+  EXPECT_STREQ(kUniform2Name, uniform_info->name.c_str());
+  EXPECT_EQ(1, uniform_info->fake_location_base);
+  uniform_info = program_info->GetUniformInfo(2);
+  ASSERT_TRUE(uniform_info != NULL);
+  EXPECT_STREQ(kUniform3GoodName, uniform_info->name.c_str());
+  EXPECT_EQ(2, uniform_info->fake_location_base);
 }
 
 }  // namespace gles2

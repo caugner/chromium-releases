@@ -34,7 +34,7 @@ using content::BrowserThread;
 static const int kSbTimerStartIntervalSec = 5 * 60;
 
 // The maximum time, in seconds, to wait for a response to an update request.
-static const int kSbMaxUpdateWaitSec = 10;
+static const int kSbMaxUpdateWaitSec = 30;
 
 // Maximum back off multiplier.
 static const int kSbMaxBackOff = 8;
@@ -153,8 +153,8 @@ void SafeBrowsingProtocolManager::GetFullHash(
     return;
   }
   GURL gethash_url = GetHashUrl();
-  content::URLFetcher* fetcher = content::URLFetcher::Create(
-      gethash_url, content::URLFetcher::POST, this);
+  net::URLFetcher* fetcher = content::URLFetcher::Create(
+      gethash_url, net::URLFetcher::POST, this);
   hash_requests_[fetcher] = check;
 
   std::string get_hash;
@@ -172,7 +172,7 @@ void SafeBrowsingProtocolManager::GetNextUpdate() {
     IssueUpdateRequest();
 }
 
-// content::URLFetcherDelegate implementation ----------------------------------
+// net::URLFetcherDelegate implementation ----------------------------------
 
 // All SafeBrowsing request responses are handled here.
 // TODO(paulg): Clarify with the SafeBrowsing team whether a failed parse of a
@@ -183,17 +183,17 @@ void SafeBrowsingProtocolManager::GetNextUpdate() {
 //              do will report all the chunks we have. If that chunk is still
 //              required, the SafeBrowsing servers will tell us to get it again.
 void SafeBrowsingProtocolManager::OnURLFetchComplete(
-    const content::URLFetcher* source) {
-  scoped_ptr<const content::URLFetcher> fetcher;
+    const net::URLFetcher* source) {
+  scoped_ptr<const net::URLFetcher> fetcher;
   bool parsed_ok = true;
   bool must_back_off = false;  // Reduce SafeBrowsing service query frequency.
 
   // See if this is a safebrowsing report fetcher. We don't take any action for
   // the response to those.
-  std::set<const content::URLFetcher*>::iterator sit =
+  std::set<const net::URLFetcher*>::iterator sit =
       safebrowsing_reports_.find(source);
   if (sit != safebrowsing_reports_.end()) {
-    const content::URLFetcher* report = *sit;
+    const net::URLFetcher* report = *sit;
     safebrowsing_reports_.erase(sit);
     delete report;
     return;
@@ -498,7 +498,7 @@ void SafeBrowsingProtocolManager::IssueChunkRequest() {
   GURL chunk_url = NextChunkUrl(next_chunk.url);
   request_type_ = CHUNK_REQUEST;
   request_.reset(content::URLFetcher::Create(
-      chunk_url, content::URLFetcher::GET, this));
+      chunk_url, net::URLFetcher::GET, this));
   request_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   request_->SetRequestContext(request_context_getter_);
   chunk_request_start_ = base::Time::Now();
@@ -539,7 +539,7 @@ void SafeBrowsingProtocolManager::OnGetChunksComplete(
 
   GURL update_url = UpdateUrl();
   request_.reset(content::URLFetcher::Create(
-      update_url, content::URLFetcher::POST, this));
+      update_url, net::URLFetcher::POST, this));
   request_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   request_->SetRequestContext(request_context_getter_);
   request_->SetUploadData("text/plain", list_data);
@@ -557,7 +557,7 @@ void SafeBrowsingProtocolManager::UpdateResponseTimeout() {
   DCHECK_EQ(request_type_, UPDATE_REQUEST);
   request_.reset();
   UpdateFinished(false);
-  ScheduleNextUpdate(false);
+  ScheduleNextUpdate(true);
 }
 
 void SafeBrowsingProtocolManager::OnChunkInserted() {
@@ -582,9 +582,9 @@ void SafeBrowsingProtocolManager::ReportSafeBrowsingHit(
   GURL report_url = SafeBrowsingHitUrl(malicious_url, page_url,
                                        referrer_url, is_subresource,
                                        threat_type);
-  content::URLFetcher* report = content::URLFetcher::Create(
+  net::URLFetcher* report = content::URLFetcher::Create(
       report_url,
-      post_data.empty() ? content::URLFetcher::GET : content::URLFetcher::POST,
+      post_data.empty() ? net::URLFetcher::GET : net::URLFetcher::POST,
       this);
   report->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   report->SetRequestContext(request_context_getter_);
@@ -598,8 +598,8 @@ void SafeBrowsingProtocolManager::ReportSafeBrowsingHit(
 void SafeBrowsingProtocolManager::ReportMalwareDetails(
     const std::string& report) {
   GURL report_url = MalwareDetailsUrl();
-  content::URLFetcher* fetcher = content::URLFetcher::Create(
-      report_url, content::URLFetcher::POST, this);
+  net::URLFetcher* fetcher = content::URLFetcher::Create(
+      report_url, net::URLFetcher::POST, this);
   fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   fetcher->SetRequestContext(request_context_getter_);
   fetcher->SetUploadData("application/octet-stream", report);

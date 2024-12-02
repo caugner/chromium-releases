@@ -7,8 +7,8 @@
 #pragma once
 
 #include "base/callback.h"
-#include "sync/internal_api/configure_reason.h"
-#include "sync/syncable/model_type.h"
+#include "sync/internal_api/public/configure_reason.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 
 namespace browser_sync {
 

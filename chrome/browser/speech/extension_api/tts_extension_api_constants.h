@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SPEECH_EXTENSION_API_TTS_EXTENSION_API_CONSTANTS_H_
 #define CHROME_BROWSER_SPEECH_EXTENSION_API_TTS_EXTENSION_API_CONSTANTS_H_
+#pragma once
 
 #include <string>
 
@@ -27,6 +28,7 @@ extern const char kDesiredEventTypesKey[];
 extern const char kExtensionIdKey[];
 extern const char kSrcIdKey[];
 extern const char kIsFinalEventKey[];
+extern const char kOnEventKey[];
 
 extern const char kGenderFemale[];
 extern const char kGenderMale[];

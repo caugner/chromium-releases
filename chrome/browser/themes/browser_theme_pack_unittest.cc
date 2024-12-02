@@ -13,13 +13,14 @@
 #include "base/values.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/common/chrome_paths.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_utils.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 class BrowserThemePackTest : public ::testing::Test {
  public:
@@ -410,7 +411,7 @@ TEST_F(BrowserThemePackTest, CanBuildAndReadPack) {
     ASSERT_TRUE(valid_value.get());
     scoped_refptr<Extension> extension(Extension::Create(
         star_gazing_path, Extension::INVALID, *valid_value,
-        Extension::REQUIRE_KEY | Extension::STRICT_ERROR_CHECKS, &error));
+        Extension::REQUIRE_KEY, &error));
     ASSERT_TRUE(extension.get());
     ASSERT_EQ("", error);
 

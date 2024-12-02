@@ -46,10 +46,8 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIPluginsHost,
   chrome::kChromeUIPolicyHost,
   chrome::kChromeUIPredictorsHost,
-  chrome::kChromeUIPrintHost,
   chrome::kChromeUIProfilerHost,
   chrome::kChromeUIQuotaInternalsHost,
-  chrome::kChromeUISessionsHost,
   chrome::kChromeUISettingsHost,
   chrome::kChromeUIStatsHost,
   chrome::kChromeUISyncInternalsHost,
@@ -76,6 +74,10 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIOSCreditsHost,
   chrome::kChromeUIProxySettingsHost,
   chrome::kChromeUISystemInfoHost,
+  chrome::kChromeUIWallpaperHost,
+#endif
+#if defined(ENABLE_PRINTING)
+  chrome::kChromeUIPrintHost,
 #endif
 };
 
@@ -164,4 +166,3 @@ std::vector<std::string> ChromePaths() {
     paths.push_back(kChromePaths[i]);
   return paths;
 }
-

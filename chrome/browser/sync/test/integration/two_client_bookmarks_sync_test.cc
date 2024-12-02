@@ -8,7 +8,7 @@
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 #include "chrome/browser/sync/test/integration/passwords_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "sync/sessions/session_state.h"
+#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
 
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::AddURL;
@@ -1915,7 +1915,6 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
   RestartSyncService(0);
   ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion("Restarted sync."));
   ASSERT_TRUE(AllModelsMatchVerifier());
-  ASSERT_EQ(0, GetClient(0)->GetStatus().unsynced_count);
 }
 
 // Trigger the server side creation of Synced Bookmarks. Ensure both clients

@@ -47,6 +47,8 @@
 
 #ifdef OS_WIN
 #include <windows.h>
+#elif defined(OS_MACOSX)
+#include <CoreServices/CoreServices.h>
 #endif
 
 using content::BrowserThread;
@@ -73,8 +75,7 @@ PepperMessageFilter::PepperMessageFilter(
     content::BrowserContext* browser_context)
     : process_type_(type),
       process_id_(process_id),
-      resource_context_(browser_context ?
-          browser_context->GetResourceContext() : NULL),
+      resource_context_(browser_context->GetResourceContext()),
       host_resolver_(NULL),
       next_socket_id_(1) {
   DCHECK(type == RENDERER);
@@ -91,7 +92,8 @@ PepperMessageFilter::PepperMessageFilter(ProcessType type,
       process_id_(0),
       resource_context_(NULL),
       host_resolver_(host_resolver),
-      next_socket_id_(1) {
+      next_socket_id_(1),
+      incognito_(false) {
   DCHECK(type == PLUGIN);
   DCHECK(host_resolver);
 }
@@ -105,7 +107,8 @@ void PepperMessageFilter::OverrideThreadForMessage(
       message.type() == PpapiHostMsg_PPBTCPServerSocket_Listen::ID ||
       message.type() == PpapiHostMsg_PPBHostResolver_Resolve::ID) {
     *thread = BrowserThread::UI;
-  } else if (message.type() == PepperMsg_GetDeviceID::ID) {
+  } else if (message.type() == PepperMsg_GetDeviceID::ID ||
+             message.type() == PpapiHostMsg_PPBFlashDeviceID_Get::ID) {
     *thread = BrowserThread::FILE;
   }
 }
@@ -161,6 +164,7 @@ bool PepperMessageFilter::OnMessageReceived(const IPC::Message& msg,
     // Flash messages.
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_UpdateActivity, OnUpdateActivity)
     IPC_MESSAGE_HANDLER(PepperMsg_GetDeviceID, OnGetDeviceID)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlashDeviceID_Get, OnGetDeviceIDAsync)
 
   IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
@@ -576,10 +580,9 @@ void PepperMessageFilter::OnHostResolverResolveLookupFinished(
                                     bound_info.plugin_dispatcher_id,
                                     bound_info.host_resolver_id);
   } else {
-    std::string canonical_name;
-    addresses.GetCanonicalName(&canonical_name);
+    const std::string& canonical_name = addresses.canonical_name();
     scoped_ptr<ppapi::NetAddressList> net_address_list(
-        ppapi::CreateNetAddressListFromAddrInfo(addresses.head()));
+        ppapi::CreateNetAddressListFromAddressList(addresses));
     if (!net_address_list.get()) {
       SendHostResolverResolveACKError(bound_info.routing_id,
                                       bound_info.plugin_dispatcher_id,
@@ -642,6 +645,8 @@ void PepperMessageFilter::OnUpdateActivity() {
   int value = 0;
   if (SystemParametersInfo(SPI_GETSCREENSAVETIMEOUT, 0, &value, 0))
     SystemParametersInfo(SPI_SETSCREENSAVETIMEOUT, value, NULL, 0);
+#elif defined(OS_MACOSX)
+  UpdateSystemActivity(OverallAct);
 #else
   // TODO(brettw) implement this for other platforms.
 #endif
@@ -679,6 +684,17 @@ void PepperMessageFilter::OnGetDeviceID(std::string* id) {
     return;
   }
   id->assign(id_buf, kDRMIdentifierSize);
+}
+
+void PepperMessageFilter::OnGetDeviceIDAsync(int32_t routing_id,
+                                             PP_Resource resource) {
+  std::string result;
+  OnGetDeviceID(&result);
+  Send(new PpapiMsg_PPBFlashDeviceID_GetReply(ppapi::API_ID_PPB_FLASH_DEVICE_ID,
+                                              routing_id, resource,
+                                              result.empty() ? PP_ERROR_FAILED
+                                                             : PP_OK,
+                                              result));
 }
 
 void PepperMessageFilter::GetFontFamiliesComplete(
@@ -751,7 +767,7 @@ bool PepperMessageFilter::CanUseSocketAPIs(int32 render_id) {
   if (!site_instance)
     return false;
 
-  if (!content::GetContentClient()->browser()->AllowSocketAPI(
+  if (!content::GetContentClient()->browser()->AllowPepperSocketAPI(
           site_instance->GetBrowserContext(),
           site_instance->GetSite())) {
     LOG(ERROR) << "Host " << site_instance->GetSite().host()
