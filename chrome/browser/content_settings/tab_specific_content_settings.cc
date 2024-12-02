@@ -29,7 +29,6 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "net/cookies/canonical_cookie.h"
@@ -42,22 +41,6 @@ using content::RenderViewHost;
 using content::WebContents;
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(TabSpecificContentSettings);
-
-namespace {
-
-class InterstitialHostObserver : public content::RenderViewHostObserver {
- public:
-  explicit InterstitialHostObserver(RenderViewHost* rvh)
-      : content::RenderViewHostObserver(rvh) {}
-
-  // content::RenderViewHostObserver overrides.
-  virtual void RenderViewHostInitialized() OVERRIDE {
-    Send(new ChromeViewMsg_SetAsInterstitial(routing_id()));
-    delete this;
-  }
-};
-
-}  // namespace
 
 TabSpecificContentSettings::SiteDataObserver::SiteDataObserver(
     TabSpecificContentSettings* tab_specific_content_settings)
@@ -529,14 +512,18 @@ TabSpecificContentSettings::GetMicrophoneCameraState() const {
 
 void TabSpecificContentSettings::OnMediaStreamPermissionSet(
     const GURL& request_origin,
-    const MediaStreamDevicesController::MediaStreamTypePermissionMap&
+    const MediaStreamDevicesController::MediaStreamTypeSettingsMap&
         request_permissions) {
   media_stream_access_origin_ = request_origin;
 
-  MediaStreamDevicesController::MediaStreamTypePermissionMap::const_iterator
-      it = request_permissions.find(content::MEDIA_DEVICE_AUDIO_CAPTURE);
+  MediaStreamDevicesController::MediaStreamTypeSettingsMap::const_iterator it =
+      request_permissions.find(content::MEDIA_DEVICE_AUDIO_CAPTURE);
   if (it != request_permissions.end()) {
-    switch (it->second) {
+    media_stream_requested_audio_device_ = it->second.requested_device_id;
+    switch (it->second.permission) {
+      case MediaStreamDevicesController::MEDIA_NONE:
+        NOTREACHED();
+        break;
       case MediaStreamDevicesController::MEDIA_ALLOWED:
         OnContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
         break;
@@ -552,7 +539,11 @@ void TabSpecificContentSettings::OnMediaStreamPermissionSet(
 
   it = request_permissions.find(content::MEDIA_DEVICE_VIDEO_CAPTURE);
   if (it != request_permissions.end()) {
-    switch (it->second) {
+    media_stream_requested_video_device_ = it->second.requested_device_id;
+    switch (it->second.permission) {
+      case MediaStreamDevicesController::MEDIA_NONE:
+        NOTREACHED();
+        break;
       case MediaStreamDevicesController::MEDIA_ALLOWED:
         OnContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
         break;
@@ -656,8 +647,9 @@ void TabSpecificContentSettings::SetPepperBrokerAllowed(bool allowed) {
 void TabSpecificContentSettings::RenderViewForInterstitialPageCreated(
     RenderViewHost* render_view_host) {
   // We want to tell the renderer-side code to ignore content settings for this
-  // page but we must wait until the RenderView is created.
-  new InterstitialHostObserver(render_view_host);
+  // page.
+  render_view_host->Send(new ChromeViewMsg_SetAsInterstitial(
+      render_view_host->GetRoutingID()));
 }
 
 bool TabSpecificContentSettings::OnMessageReceived(
@@ -701,6 +693,7 @@ void TabSpecificContentSettings::DidStartProvisionalLoadForFrame(
     ClearCookieSpecificContentSettings();
   ClearGeolocationContentSettings();
   ClearMIDIContentSettings();
+  ClearPendingProtocolHandler();
 }
 
 void TabSpecificContentSettings::AppCacheAccessed(const GURL& manifest_url,

@@ -51,11 +51,17 @@ enum ExtractMask {
 // Google code project settings.
 extern const size_t kMaxParseableFields;
 
+// Returns true if |element| is a month input element.
+bool IsMonthInput(const WebKit::WebInputElement* element);
+
 // Returns true if |element| is a text input element.
 bool IsTextInput(const WebKit::WebInputElement* element);
 
 // Returns true if |element| is a select element.
 bool IsSelectElement(const WebKit::WebFormControlElement& element);
+
+// Returns true if |element| is a textarea element.
+bool IsTextAreaElement(const WebKit::WebFormControlElement& element);
 
 // Returns true if |element| is a checkbox or a radio button element.
 bool IsCheckableElement(const WebKit::WebInputElement* element);

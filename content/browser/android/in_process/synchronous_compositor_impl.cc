@@ -178,15 +178,13 @@ class SynchronousCompositorFactoryImpl : public SynchronousCompositorFactory {
 
   virtual scoped_ptr<StreamTextureFactory> CreateStreamTextureFactory(
       int view_id) OVERRIDE {
-    scoped_refptr<VideoContextProvider> context_provider;
-    if (CanCreateMainThreadContext()) {
-      context_provider =
-          new VideoContextProvider(offscreen_context_for_main_thread_,
-                                   wrapped_gl_context_for_main_thread_);
-    }
-    return make_scoped_ptr(new StreamTextureFactorySynchronousImpl(
-                               context_provider.get(), view_id))
-        .PassAs<StreamTextureFactory>();
+    scoped_ptr<StreamTextureFactorySynchronousImpl> factory(
+        new StreamTextureFactorySynchronousImpl(
+            base::Bind(&SynchronousCompositorFactoryImpl::
+                            TryCreateStreamTextureFactory,
+                       base::Unretained(this)),
+            view_id));
+    return factory.PassAs<StreamTextureFactory>();
   }
 
   void CompositorInitializedHardwareDraw(SynchronousCompositorImpl* compositor);
@@ -195,6 +193,8 @@ class SynchronousCompositorFactoryImpl : public SynchronousCompositorFactory {
  private:
   void ReleaseGlobalHardwareResources();
   bool CanCreateMainThreadContext();
+  scoped_refptr<StreamTextureFactorySynchronousImpl::ContextProvider>
+      TryCreateStreamTextureFactory();
 
   SynchronousInputEventFilter synchronous_input_event_filter_;
 
@@ -245,6 +245,19 @@ void SynchronousCompositorFactoryImpl::ReleaseGlobalHardwareResources() {
 bool SynchronousCompositorFactoryImpl::CanCreateMainThreadContext() {
   base::AutoLock lock(num_hardware_compositor_lock_);
   return num_hardware_compositors_ > 0;
+}
+
+scoped_refptr<StreamTextureFactorySynchronousImpl::ContextProvider>
+SynchronousCompositorFactoryImpl::TryCreateStreamTextureFactory() {
+  scoped_refptr<StreamTextureFactorySynchronousImpl::ContextProvider>
+      context_provider;
+  if (CanCreateMainThreadContext() && offscreen_context_for_main_thread_) {
+    DCHECK(wrapped_gl_context_for_main_thread_);
+    context_provider =
+        new VideoContextProvider(offscreen_context_for_main_thread_,
+                                 wrapped_gl_context_for_main_thread_);
+  }
+  return context_provider;
 }
 
 base::LazyInstance<SynchronousCompositorFactoryImpl>::Leaky g_factory =
@@ -415,6 +428,13 @@ void SynchronousCompositorImpl::DidActivatePendingTree() {
     compositor_client_->DidUpdateContent();
 }
 
+void SynchronousCompositorImpl::SetMaxScrollOffset(
+    gfx::Vector2dF max_scroll_offset) {
+  DCHECK(CalledOnValidThread());
+  if (compositor_client_)
+    compositor_client_->SetMaxRootLayerScrollOffset(max_scroll_offset);
+}
+
 void SynchronousCompositorImpl::SetTotalScrollOffset(gfx::Vector2dF new_value) {
   DCHECK(CalledOnValidThread());
   if (compositor_client_)
@@ -426,6 +446,26 @@ gfx::Vector2dF SynchronousCompositorImpl::GetTotalScrollOffset() {
   if (compositor_client_)
     return compositor_client_->GetTotalRootLayerScrollOffset();
   return gfx::Vector2dF();
+}
+
+bool SynchronousCompositorImpl::IsExternalFlingActive() const {
+  DCHECK(CalledOnValidThread());
+  if (compositor_client_)
+    return compositor_client_->IsExternalFlingActive();
+  return false;
+}
+
+void SynchronousCompositorImpl::SetTotalPageScaleFactor(
+    float page_scale_factor) {
+  DCHECK(CalledOnValidThread());
+  if (compositor_client_)
+    compositor_client_->SetRootLayerPageScaleFactor(page_scale_factor);
+}
+
+void SynchronousCompositorImpl::SetScrollableSize(gfx::SizeF scrollable_size) {
+  DCHECK(CalledOnValidThread());
+  if (compositor_client_)
+    compositor_client_->SetRootLayerScrollableSize(scrollable_size);
 }
 
 // Not using base::NonThreadSafe as we want to enforce a more exacting threading

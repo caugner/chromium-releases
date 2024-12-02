@@ -106,6 +106,11 @@ NSString* NSPopoverDidShowNotification = @"NSPopoverDidShowNotification";
 NSString* NSPopoverDidCloseNotification = @"NSPopoverDidCloseNotification";
 #endif
 
+// How long we allow a workspace change notification to wait to be
+// associated with a dock activation. The animation lasts 250ms. See
+// applicationShouldHandleReopen:hasVisibleWindows:.
+static const int kWorkspaceChangeTimeoutMs = 500;
+
 // True while AppController is calling chrome::NewEmptyWindow(). We need a
 // global flag here, analogue to StartupBrowserCreator::InProcessStartup()
 // because otherwise the SessionService will try to restore sessions when we
@@ -196,6 +201,7 @@ void RecordLastRunAppBundlePath() {
      withReply:(NSAppleEventDescriptor*)reply;
 - (void)submitCloudPrintJob:(NSAppleEventDescriptor*)event;
 - (void)windowLayeringDidChange:(NSNotification*)inNotification;
+- (void)activeSpaceDidChange:(NSNotification*)inNotification;
 - (void)windowChangedToProfile:(Profile*)profile;
 - (void)checkForAnyKeyWindows;
 - (BOOL)userWillWaitForInProgressDownloads:(int)downloadCount;
@@ -314,6 +320,13 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
              object:nil];
   }
 
+  // Register for space change notifications.
+  [[[NSWorkspace sharedWorkspace] notificationCenter]
+    addObserver:self
+       selector:@selector(activeSpaceDidChange:)
+           name:NSWorkspaceActiveSpaceDidChangeNotification
+         object:nil];
+
   // Set up the command updater for when there are no windows open
   [self initMenuState];
 
@@ -330,6 +343,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   [em removeEventHandlerForEventClass:'WWW!'
                            andEventID:'OURL'];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
 }
 
 // (NSApplicationDelegate protocol) This is the Apple-approved place to override
@@ -359,14 +373,14 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
   size_t num_browsers = chrome::GetTotalBrowserCount();
 
-  // Initiate a shutdown (via chrome::CloseAllBrowsers()) if we aren't
+  // Initiate a shutdown (via chrome::CloseAllBrowsersAndQuit()) if we aren't
   // already shutting down.
   if (!browser_shutdown::IsTryingToQuit()) {
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
         content::NotificationService::AllSources(),
         content::NotificationService::NoDetails());
-    chrome::CloseAllBrowsers();
+    chrome::CloseAllBrowsersAndQuit();
   }
 
   return num_browsers == 0 ? YES : NO;
@@ -556,6 +570,28 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   }
 }
 
+- (void)activeSpaceDidChange:(NSNotification*)notify {
+  if (reopenTime_.is_null() ||
+      ![NSApp isActive] ||
+      (base::TimeTicks::Now() - reopenTime_).InMilliseconds() >
+      kWorkspaceChangeTimeoutMs) {
+    return;
+  }
+
+  // The last applicationShouldHandleReopen:hasVisibleWindows: call
+  // happened during a space change. Now that the change has
+  // completed, raise browser windows.
+  reopenTime_ = base::TimeTicks();
+  std::set<NSWindow*> browserWindows;
+  for (chrome::BrowserIterator iter; !iter.done(); iter.Next()) {
+    Browser* browser = *iter;
+    browserWindows.insert(browser->window()->GetNativeWindow());
+  }
+  if (!browserWindows.empty()) {
+    ui::FocusWindowSet(browserWindows, false);
+  }
+}
+
 // Called on Lion and later when a popover (e.g. dictionary) is shown.
 - (void)popoverDidShow:(NSNotification*)notify {
   hasPopover_ = YES;
@@ -645,8 +681,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
   // Start managing the menu for app windows. This needs to be done here because
   // main menu item titles are not yet initialized in awakeFromNib.
-  if (apps::IsAppShimsEnabled())
-    appShimMenuController_.reset([[AppShimMenuController alloc] init]);
+  [self initAppShimMenuController];
 
   // Build up the encoding menu, the order of the items differs based on the
   // current locale (see http://crbug.com/7647 for details).
@@ -760,8 +795,9 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
     DownloadManager* download_manager =
         (download_service->HasCreatedDownloadManager() ?
          BrowserContext::GetDownloadManager(profiles[i]) : NULL);
-    if (download_manager && download_manager->InProgressCount() > 0) {
-      int downloadCount = download_manager->InProgressCount();
+    if (download_manager &&
+        download_manager->NonMaliciousInProgressCount() > 0) {
+      int downloadCount = download_manager->NonMaliciousInProgressCount();
       if ([self userWillWaitForInProgressDownloads:downloadCount]) {
         // Create a new browser window (if necessary) and navigate to the
         // downloads page if the user chooses to wait.
@@ -1082,9 +1118,26 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
       browserWindows.insert(browser->window()->GetNativeWindow());
     }
     if (!browserWindows.empty()) {
-      ui::FocusWindowSet(browserWindows, false);
-      // Return NO; we've done the unminimize, so AppKit shouldn't do
-      // anything.
+      NSWindow* keyWindow = [NSApp keyWindow];
+      if (keyWindow && ![keyWindow isOnActiveSpace]) {
+        // The key window is not on the active space. We must be mid-animation
+        // for a space transition triggered by the dock. Delay the call to
+        // |ui::FocusWindowSet| until the transition completes. Otherwise, the
+        // wrong space's windows get raised, resulting in an off-screen key
+        // window. It does not work to |ui::FocusWindowSet| twice, once here
+        // and once in |activeSpaceDidChange:|, as that appears to break when
+        // the omnibox is focused.
+        //
+        // This check relies on OS X setting the key window to a window on the
+        // target space before calling this method.
+        //
+        // See http://crbug.com/309656.
+        reopenTime_ = base::TimeTicks::Now();
+      } else {
+        ui::FocusWindowSet(browserWindows, false);
+      }
+      // Return NO; we've done (or soon will do) the deminiaturize, so
+      // AppKit shouldn't do anything.
       return NO;
     }
   }
@@ -1099,7 +1152,8 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
       doneOnce = YES;
       if (base::mac::WasLaunchedAsHiddenLoginItem()) {
         SessionService* sessionService =
-            SessionServiceFactory::GetForProfile([self lastProfile]);
+            SessionServiceFactory::GetForProfileForSessionRestore(
+                [self lastProfile]);
         if (sessionService &&
             sessionService->RestoreIfNecessary(std::vector<GURL>()))
           return NO;
@@ -1404,6 +1458,11 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
 - (void)removeObserverForWorkAreaChange:(ui::WorkAreaWatcherObserver*)observer {
   workAreaChangeObservers_.RemoveObserver(observer);
+}
+
+- (void)initAppShimMenuController {
+  if (apps::IsAppShimsEnabled() && !appShimMenuController_)
+    appShimMenuController_.reset([[AppShimMenuController alloc] init]);
 }
 
 - (void)applicationDidChangeScreenParameters:(NSNotification*)notification {

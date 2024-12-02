@@ -29,8 +29,10 @@ namespace ash {
 namespace internal {
 namespace {
 
+#if defined(OS_WIN)
 DEFINE_WINDOW_PROPERTY_KEY(gfx::Display::Rotation, kRotationPropertyKey,
                            gfx::Display::ROTATE_0);
+#endif
 
 // Round near zero value to zero.
 void RoundNearZero(gfx::Transform* transform) {
@@ -48,7 +50,7 @@ void RoundNearZero(gfx::Transform* transform) {
 // when the device scale factor is changed, instead of
 // precalculating the transform using fixed value.
 
-gfx::Transform CreateRotationTransform(aura::RootWindow* root_window,
+gfx::Transform CreateRotationTransform(aura::Window* root_window,
                                        const gfx::Display& display) {
   DisplayInfo info =
       Shell::GetInstance()->display_manager()->GetDisplayInfo(display.id());
@@ -90,7 +92,7 @@ gfx::Transform CreateRotationTransform(aura::RootWindow* root_window,
   return rotate;
 }
 
-gfx::Transform CreateMagnifierTransform(aura::RootWindow* root_window) {
+gfx::Transform CreateMagnifierTransform(aura::Window* root_window) {
   MagnificationController* magnifier =
       Shell::GetInstance()->magnification_controller();
   float magnifier_scale = 1.f;
@@ -121,7 +123,7 @@ gfx::Transform CreateInsetsAndScaleTransform(const gfx::Insets& insets,
   return transform;
 }
 
-gfx::Transform CreateOverscanAndUIScaleTransform(aura::RootWindow* root_window,
+gfx::Transform CreateOverscanAndUIScaleTransform(aura::Window* root_window,
                                                  const gfx::Display& display) {
   DisplayInfo info =
       Shell::GetInstance()->display_manager()->GetDisplayInfo(display.id());
@@ -134,7 +136,7 @@ gfx::Transform CreateOverscanAndUIScaleTransform(aura::RootWindow* root_window,
 // RootWindowTransformer for ash environment.
 class AshRootWindowTransformer : public aura::RootWindowTransformer {
  public:
-  AshRootWindowTransformer(aura::RootWindow* root,
+  AshRootWindowTransformer(aura::Window* root,
                            const gfx::Display& display)
       : root_window_(root) {
     root_window_bounds_transform_ =
@@ -183,7 +185,7 @@ class AshRootWindowTransformer : public aura::RootWindowTransformer {
  private:
   virtual ~AshRootWindowTransformer() {}
 
-  aura::RootWindow* root_window_;
+  aura::Window* root_window_;
   gfx::Transform transform_;
 
   // The accurate representation of the inverse of the |transform_|.
@@ -275,7 +277,7 @@ class MirrorRootWindowTransformer : public aura::RootWindowTransformer {
 }  // namespace
 
 aura::RootWindowTransformer* CreateRootWindowTransformerForDisplay(
-    aura::RootWindow* root,
+    aura::Window* root,
     const gfx::Display& display) {
   return new AshRootWindowTransformer(root, display);
 }

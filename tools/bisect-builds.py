@@ -48,6 +48,7 @@ import optparse
 import os
 import pipes
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -221,9 +222,31 @@ class PathContext(object):
     # Download the revlist and filter for just the range between good and bad.
     minrev = min(self.good_revision, self.bad_revision)
     maxrev = max(self.good_revision, self.bad_revision)
-    revlist = map(int, self.ParseDirectoryIndex())
-    revlist = [x for x in revlist if x >= int(minrev) and x <= int(maxrev)]
+    revlist_all = map(int, self.ParseDirectoryIndex())
+
+    revlist = [x for x in revlist_all if x >= int(minrev) and x <= int(maxrev)]
     revlist.sort()
+
+    # Set good and bad revisions to be legit revisions.
+    if revlist:
+      if self.good_revision < self.bad_revision:
+        self.good_revision = revlist[0]
+        self.bad_revision = revlist[-1]
+      else:
+        self.bad_revision = revlist[0]
+        self.good_revision = revlist[-1]
+
+      # Fix chromium rev so that the deps blink revision matches REVISIONS file.
+      if self.base_url == WEBKIT_BASE_URL:
+        revlist_all.sort()
+        self.good_revision = FixChromiumRevForBlink(revlist,
+                                                    revlist_all,
+                                                    self,
+                                                    self.good_revision)
+        self.bad_revision = FixChromiumRevForBlink(revlist,
+                                                   revlist_all,
+                                                   self,
+                                                   self.bad_revision)
     return revlist
 
   def GetOfficialBuildsList(self):
@@ -344,7 +367,7 @@ def RunRevision(context, revision, zipfile, profile, num_runs, command, args):
     testargs.append('--no-sandbox')
 
   runcommand = []
-  for token in command.split():
+  for token in shlex.split(command):
     if token == "%a":
       runcommand.extend(testargs)
     else:
@@ -608,10 +631,24 @@ def Bisect(base_url,
   return (revlist[minrev], revlist[maxrev])
 
 
-def GetBlinkRevisionForChromiumRevision(self, rev):
+def GetBlinkDEPSRevisionForChromiumRevision(rev):
   """Returns the blink revision that was in REVISIONS file at
   chromium revision |rev|."""
   # . doesn't match newlines without re.DOTALL, so this is safe.
+  blink_re = re.compile(r'webkit_revision\D*(\d+)')
+  url = urllib.urlopen(DEPS_FILE % rev)
+  m = blink_re.search(url.read())
+  url.close()
+  if m:
+    return int(m.group(1))
+  else:
+    raise Exception('Could not get Blink revision for Chromium rev %d'
+                    % rev)
+
+
+def GetBlinkRevisionForChromiumRevision(self, rev):
+  """Returns the blink revision that was in REVISIONS file at
+  chromium revision |rev|."""
   file_url = "%s/%s%d/REVISIONS" % (self.base_url,
                                     self._listing_platform_dir, rev)
   url = urllib.urlopen(file_url)
@@ -622,6 +659,24 @@ def GetBlinkRevisionForChromiumRevision(self, rev):
   else:
     raise Exception('Could not get blink revision for cr rev %d' % rev)
 
+def FixChromiumRevForBlink(revisions_final, revisions, self, rev):
+  """Returns the chromium revision that has the correct blink revision
+  for blink bisect, DEPS and REVISIONS file might not match since
+  blink snapshots point to tip of tree blink.
+  Note: The revisions_final variable might get modified to include
+  additional revisions."""
+
+  blink_deps_rev = GetBlinkDEPSRevisionForChromiumRevision(rev)
+
+  while (GetBlinkRevisionForChromiumRevision(self, rev) > blink_deps_rev):
+    idx = revisions.index(rev)
+    if idx > 0:
+      rev = revisions[idx-1]
+      if rev not in revisions_final:
+        revisions_final.insert(0, rev)
+
+  revisions_final.sort()
+  return rev
 
 def GetChromiumRevision(url):
   """Returns the chromium revision read from given URL."""
@@ -755,20 +810,33 @@ def main():
     # Silently ignore the failure.
     min_blink_rev, max_blink_rev = 0, 0
 
-  # We're done. Let the user know the results in an official manner.
-  if good_rev > bad_rev:
-    print DONE_MESSAGE_GOOD_MAX % (str(min_chromium_rev), str(max_chromium_rev))
-  else:
-    print DONE_MESSAGE_GOOD_MIN % (str(min_chromium_rev), str(max_chromium_rev))
+  if opts.blink:
+    # We're done. Let the user know the results in an official manner.
+    if good_rev > bad_rev:
+      print DONE_MESSAGE_GOOD_MAX % (str(min_blink_rev), str(max_blink_rev))
+    else:
+      print DONE_MESSAGE_GOOD_MIN % (str(min_blink_rev), str(max_blink_rev))
 
-  if min_blink_rev != max_blink_rev:
     print 'BLINK CHANGELOG URL:'
     print '  ' + BLINK_CHANGELOG_URL % (max_blink_rev, min_blink_rev)
-  print 'CHANGELOG URL:'
-  if opts.official_builds:
-    print OFFICIAL_CHANGELOG_URL % (min_chromium_rev, max_chromium_rev)
+
   else:
-    print '  ' + CHANGELOG_URL % (min_chromium_rev, max_chromium_rev)
+    # We're done. Let the user know the results in an official manner.
+    if good_rev > bad_rev:
+      print DONE_MESSAGE_GOOD_MAX % (str(min_chromium_rev),
+                                     str(max_chromium_rev))
+    else:
+      print DONE_MESSAGE_GOOD_MIN % (str(min_chromium_rev),
+                                     str(max_chromium_rev))
+    if min_blink_rev != max_blink_rev:
+      print ("NOTE: There is a Blink roll in the range, "
+             "you might also want to do a Blink bisect.")
+
+    print 'CHANGELOG URL:'
+    if opts.official_builds:
+      print OFFICIAL_CHANGELOG_URL % (min_chromium_rev, max_chromium_rev)
+    else:
+      print '  ' + CHANGELOG_URL % (min_chromium_rev, max_chromium_rev)
 
 if __name__ == '__main__':
   sys.exit(main())

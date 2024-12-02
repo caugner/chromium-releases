@@ -187,7 +187,8 @@ class MetadataDatabase {
   // Finds the set of trackers whose parent's tracker ID is |parent_tracker_id|,
   // and who has |title| as its title in the synced_details.
   // Copies the tracker set to |trackers| if it is non-NULL.
-  size_t FindTrackersByParentAndTitle(
+  // Returns true if the trackers are found.
+  bool FindTrackersByParentAndTitle(
       int64 parent_tracker_id,
       const std::string& title,
       TrackerSet* trackers) const;
@@ -200,8 +201,16 @@ class MetadataDatabase {
   // Updates database by |changes|.
   // Marks each tracker for modified file as dirty and adds new trackers if
   // needed.
-  void UpdateByChangeList(ScopedVector<google_apis::ChangeResource> changes,
+  void UpdateByChangeList(int64 largest_change_id,
+                          ScopedVector<google_apis::ChangeResource> changes,
                           const SyncStatusCallback& callback);
+
+  // Updates database by |resource|.
+  // Marks each tracker for modified file as dirty and adds new trackers if
+  // needed.
+  void UpdateByFileResource(int64 change_id,
+                            const google_apis::FileResource& resource,
+                            const SyncStatusCallback& callback);
 
   // Adds |child_file_ids| to |folder_id| as its children.
   // This method affects the active tracker only.
@@ -216,6 +225,9 @@ class MetadataDatabase {
                      const SyncStatusCallback& callback);
 
  private:
+  friend class ListChangesTaskTest;
+  friend class MetadataDatabaseTest;
+  friend class RegisterAppTaskTest;
   friend class SyncEngineInitializerTest;
 
   struct DirtyTrackerComparator {
@@ -224,8 +236,6 @@ class MetadataDatabase {
   };
 
   typedef std::set<FileTracker*, DirtyTrackerComparator> DirtyTrackers;
-
-  friend class MetadataDatabaseTest;
 
   explicit MetadataDatabase(base::SequencedTaskRunner* task_runner);
   static void CreateOnTaskRunner(base::SingleThreadTaskRunner* callback_runner,
@@ -237,6 +247,8 @@ class MetadataDatabase {
       scoped_ptr<MetadataDatabase>* metadata_database_out);
   SyncStatusCode InitializeOnTaskRunner(const base::FilePath& database_path);
   void BuildIndexes(DatabaseContents* contents);
+
+  SyncStatusCode SetLargestChangeIDForTesting(int64 largest_changestamp);
 
   // Database manipulation methods.
   void RegisterTrackerAsAppRoot(const std::string& app_id,

@@ -37,14 +37,24 @@
 #include "chrome/test/chromedriver/chrome/version.h"
 #include "chrome/test/chromedriver/chrome/web_view.h"
 #include "chrome/test/chromedriver/chrome/zip.h"
-#include "chrome/test/chromedriver/net/net_util.h"
+#include "chrome/test/chromedriver/net/port_server.h"
 #include "chrome/test/chromedriver/net/url_request_context_getter.h"
 #include "crypto/sha2.h"
+
+#if defined(OS_POSIX)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
 
 namespace {
 
 const char* kCommonSwitches[] = {
     "ignore-certificate-errors", "metrics-recording-only"};
+
+#if defined(OS_LINUX)
+const char* kEnableCrashReport = "enable-crash-reporter-for-testing";
+#endif
 
 Status UnpackAutomationExtension(const base::FilePath& temp_dir,
                                  base::FilePath* automation_extension) {
@@ -197,6 +207,7 @@ Status LaunchExistingChromeSession(
 Status LaunchDesktopChrome(
     URLRequestContextGetter* context_getter,
     int port,
+    scoped_ptr<PortReservation> port_reservation,
     const SyncWebSocketFactory& socket_factory,
     const Capabilities& capabilities,
     ScopedVector<DevToolsEventListener>& devtools_event_listeners,
@@ -216,11 +227,40 @@ Status LaunchDesktopChrome(
 
   base::LaunchOptions options;
 
+#if defined(OS_LINUX)
+  // If minidump path is set in the capability, enable minidump for crashes.
+  if (!capabilities.minidump_path.empty()) {
+    VLOG(0) << "Minidump generation specified. Will save dumps to: "
+            << capabilities.minidump_path;
+
+    options.environ["CHROME_HEADLESS"] = 1;
+    options.environ["BREAKPAD_DUMP_LOCATION"] = capabilities.minidump_path;
+
+    if (!command.HasSwitch(kEnableCrashReport))
+      command.AppendSwitch(kEnableCrashReport);
+  }
+#endif
+
 #if !defined(OS_WIN)
   if (!capabilities.log_path.empty())
     options.environ["CHROME_LOG_FILE"] = capabilities.log_path;
   if (capabilities.detach)
     options.new_process_group = true;
+#endif
+
+#if defined(OS_POSIX)
+  base::FileHandleMappingVector no_stderr;
+  int devnull = -1;
+  file_util::ScopedFD scoped_devnull(&devnull);
+  if (!CommandLine::ForCurrentProcess()->HasSwitch("verbose")) {
+    // Redirect stderr to /dev/null, so that Chrome log spew doesn't confuse
+    // users.
+    devnull = open("/dev/null", O_WRONLY);
+    if (devnull == -1)
+      return Status(kUnknownError, "couldn't open /dev/null");
+    no_stderr.push_back(std::make_pair(devnull, STDERR_FILENO));
+    options.fds_to_remap = &no_stderr;
+  }
 #endif
 
 #if defined(OS_WIN)
@@ -274,7 +314,9 @@ Status LaunchDesktopChrome(
   scoped_ptr<ChromeDesktopImpl> chrome_desktop(
       new ChromeDesktopImpl(devtools_client.Pass(),
                             devtools_event_listeners,
+                            port_reservation.Pass(),
                             process,
+                            command,
                             &user_data_dir,
                             &extension_dir));
   for (size_t i = 0; i < extension_bg_pages.size(); ++i) {
@@ -296,6 +338,7 @@ Status LaunchDesktopChrome(
 Status LaunchAndroidChrome(
     URLRequestContextGetter* context_getter,
     int port,
+    scoped_ptr<PortReservation> port_reservation,
     const SyncWebSocketFactory& socket_factory,
     const Capabilities& capabilities,
     ScopedVector<DevToolsEventListener>& devtools_event_listeners,
@@ -334,8 +377,10 @@ Status LaunchAndroidChrome(
   if (status.IsError())
     return status;
 
-  chrome->reset(new ChromeAndroidImpl(
-      devtools_client.Pass(), devtools_event_listeners, device.Pass()));
+  chrome->reset(new ChromeAndroidImpl(devtools_client.Pass(),
+                                      devtools_event_listeners,
+                                      port_reservation.Pass(),
+                                      device.Pass()));
   return Status(kOk);
 }
 
@@ -345,6 +390,8 @@ Status LaunchChrome(
     URLRequestContextGetter* context_getter,
     const SyncWebSocketFactory& socket_factory,
     DeviceManager* device_manager,
+    PortServer* port_server,
+    PortManager* port_manager,
     const Capabilities& capabilities,
     ScopedVector<DevToolsEventListener>& devtools_event_listeners,
     scoped_ptr<Chrome>* chrome) {
@@ -354,18 +401,33 @@ Status LaunchChrome(
         capabilities, devtools_event_listeners, chrome);
   }
 
-  int port;
-  if (!FindOpenPort(&port))
-    return Status(kUnknownError, "failed to find an open port for Chrome");
+  int port = 0;
+  scoped_ptr<PortReservation> port_reservation;
+  Status port_status(kOk);
+  if (port_server)
+    port_status = port_server->ReservePort(&port, &port_reservation);
+  else
+    port_status = port_manager->ReservePort(&port, &port_reservation);
+  if (port_status.IsError())
+    return Status(kUnknownError, "cannot reserve port for Chrome", port_status);
 
   if (capabilities.IsAndroid()) {
-    return LaunchAndroidChrome(
-        context_getter, port, socket_factory, capabilities,
-        devtools_event_listeners, device_manager, chrome);
+    return LaunchAndroidChrome(context_getter,
+                               port,
+                               port_reservation.Pass(),
+                               socket_factory,
+                               capabilities,
+                               devtools_event_listeners,
+                               device_manager,
+                               chrome);
   } else {
-    return LaunchDesktopChrome(
-        context_getter, port, socket_factory, capabilities,
-        devtools_event_listeners, chrome);
+    return LaunchDesktopChrome(context_getter,
+                               port,
+                               port_reservation.Pass(),
+                               socket_factory,
+                               capabilities,
+                               devtools_event_listeners,
+                               chrome);
   }
 }
 

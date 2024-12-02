@@ -50,6 +50,7 @@ class AutofillDialogCocoa : public AutofillDialogView,
   virtual void UpdateForErrors() OVERRIDE;
   virtual void UpdateNotificationArea() OVERRIDE;
   virtual void UpdateSection(DialogSection section) OVERRIDE;
+  virtual void UpdateErrorBubble() OVERRIDE;
   virtual void FillSection(DialogSection section,
                            const DetailInput& originating_input) OVERRIDE;
   virtual void GetUserInput(DialogSection section,
@@ -61,8 +62,8 @@ class AutofillDialogCocoa : public AutofillDialogView,
   virtual const content::NavigationController* ShowSignIn() OVERRIDE;
   virtual void HideSignIn() OVERRIDE;
   virtual void ModelChanged() OVERRIDE;
-  virtual void OnSignInResize(const gfx::Size& pref_size) OVERRIDE;
   virtual TestableAutofillDialogView* GetTestableView() OVERRIDE;
+  virtual void OnSignInResize(const gfx::Size& pref_size) OVERRIDE;
 
   // TestableAutofillDialogView implementation:
   // TODO(groby): Create a separate class to implement the testable interface:
@@ -77,6 +78,8 @@ class AutofillDialogCocoa : public AutofillDialogView,
       const base::string16& text) OVERRIDE;
   virtual void ActivateInput(const DetailInput& input) OVERRIDE;
   virtual gfx::Size GetSize() const OVERRIDE;
+  virtual content::WebContents* GetSignInWebContents() OVERRIDE;
+  virtual bool IsShowingOverlay() const OVERRIDE;
 
   // ConstrainedWindowMacDelegate implementation:
   virtual void OnConstrainedWindowClosed(
@@ -124,6 +127,9 @@ class AutofillDialogCocoa : public AutofillDialogView,
 // A child view request re-layouting.
 - (void)requestRelayout;
 
+// Cancels all previous requests to re-layout.
+- (void)cancelRelayout;
+
 // Validate data. If it is valid, notify the delegate that the user would
 // like to use the data.
 - (IBAction)accept:(id)sender;
@@ -142,10 +148,13 @@ class AutofillDialogCocoa : public AutofillDialogView,
            forInput:(const autofill::DetailInput&)input;
 - (void)getInputs:(autofill::DetailOutputMap*)outputs
        forSection:(autofill::DialogSection)section;
+- (NSString*)getCvc;
 - (BOOL)saveDetailsLocally;
 - (content::NavigationController*)showSignIn;
 - (void)hideSignIn;
 - (void)modelChanged;
+- (void)updateErrorBubble;
+- (void)onSignInResize:(NSSize)size;
 
 @end
 
@@ -158,6 +167,8 @@ class AutofillDialogCocoa : public AutofillDialogView,
 - (void)setTextContents:(NSString*)text
  ofSuggestionForSection:(autofill::DialogSection)section;
 - (void)activateFieldForInput:(const autofill::DetailInput&)input;
+- (content::WebContents*)getSignInWebContents;
+- (BOOL)IsShowingOverlay;
 
 @end
 

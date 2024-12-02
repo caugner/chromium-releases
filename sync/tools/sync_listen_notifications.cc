@@ -45,7 +45,6 @@ const char kTokenSwitch[] = "token";
 const char kHostPortSwitch[] = "host-port";
 const char kTrySslTcpFirstSwitch[] = "try-ssltcp-first";
 const char kAllowInsecureConnectionSwitch[] = "allow-insecure-connection";
-const char kNotificationMethodSwitch[] = "notification-method";
 
 // Class to print received notifications events.
 class NotificationPrinter : public InvalidationHandler {
@@ -60,12 +59,10 @@ class NotificationPrinter : public InvalidationHandler {
 
   virtual void OnIncomingInvalidation(
       const ObjectIdInvalidationMap& invalidation_map) OVERRIDE {
-    for (ObjectIdInvalidationMap::const_iterator it = invalidation_map.begin();
-         it != invalidation_map.end(); ++it) {
-      LOG(INFO) << "Remote invalidation: id = "
-                << ObjectIdToString(it->first)
-                << ", version = " << it->second.version
-                << ", payload = " << it->second.payload;
+    ObjectIdSet ids = invalidation_map.GetObjectIds();
+    for (ObjectIdSet::const_iterator it = ids.begin(); it != ids.end(); ++it) {
+      LOG(INFO) << "Remote invalidation: "
+                << invalidation_map.ToString();
     }
   }
 

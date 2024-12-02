@@ -24,7 +24,7 @@ class FilePath;
 // class.
 class ComponentInstallerTraits {
  public:
-  virtual ~ComponentInstallerTraits() {}
+  virtual ~ComponentInstallerTraits();
 
   // Verifies that a working installation resides within the directory specified
   // by |dir|. |dir| is of the form <base directory>/<version>.
@@ -37,7 +37,7 @@ class ComponentInstallerTraits {
   // OnCustomInstall is called during the installation process. Components that
   // require custom installation operations should implement them here.
   // Returns false if a custom operation failed, and true otherwise.
-  // Called only from the FILE thread.
+  // Called only from a thread belonging to a blocking thread pool.
   virtual bool OnCustomInstall(const base::DictionaryValue& manifest,
                                const base::FilePath& install_dir) = 0;
 
@@ -47,12 +47,14 @@ class ComponentInstallerTraits {
   // In both cases the install is verified before this is called. This method
   // is guaranteed to be called before any observers of the component are
   // notified of a successful install, and is meant to support follow-on work
-  // such as updating paths elsewhere in Chrome. Called only from the FILE
-  // thread.
-  // |version| is the version of the component, while |path| is the path to the
-  // install directory.
-  virtual void ComponentReady(const base::Version& version,
-                              const base::FilePath& install_dir) = 0;
+  // such as updating paths elsewhere in Chrome. Called on the UI thread.
+  // |version| is the version of the component.
+  // |install_dir| is the path to the install directory for this version.
+  // |manifest| is the manifest for this version of the component.
+  virtual void ComponentReady(
+      const base::Version& version,
+      const base::FilePath& install_dir,
+      scoped_ptr<base::DictionaryValue> manifest) = 0;
 
   // Returns the directory that the installer will place versioned installs of
   // the component into.
@@ -95,6 +97,7 @@ class DefaultComponentInstaller : public ComponentInstaller {
 
   base::Version current_version_;
   std::string current_fingerprint_;
+  scoped_ptr<base::DictionaryValue> current_manifest_;
   scoped_ptr<ComponentInstallerTraits> installer_traits_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultComponentInstaller);

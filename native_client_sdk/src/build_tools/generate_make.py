@@ -157,6 +157,7 @@ def GenerateManifest(srcroot, dstroot, desc):
       'name': desc['TITLE'],
       'description': '%s Example' % desc['TITLE'],
       'key': True,
+      'channel': None,
       'permissions': pretty_permissions,
       'version': build_version.ChromeVersionNoTrunk()
   }
@@ -226,6 +227,7 @@ def ProcessProject(pepperdir, srcroot, dstroot, desc, toolchains, configs=None,
     target['CXXFLAGS'].insert(0, '-Wall')
 
   template_dict = {
+    'desc': desc,
     'rel_sdk': '/'.join(['..'] * (len(desc['DEST'].split('/')) + 1)),
     'pre': desc.get('PRE', ''),
     'post': desc.get('POST', ''),

@@ -38,8 +38,7 @@ if util.IsLinux():
   from pylib import valgrind_tools
 
 
-_NEGATIVE_FILTER = {}
-_NEGATIVE_FILTER['HEAD'] = [
+_NEGATIVE_FILTER = [
     # https://code.google.com/p/chromedriver/issues/detail?id=213
     'ChromeDriverTest.testClickElementInSubFrame',
     # This test is flaky since it uses setTimeout.
@@ -47,59 +46,60 @@ _NEGATIVE_FILTER['HEAD'] = [
     'ChromeDriverTest.testAlert',
 ]
 
-_DESKTOP_OS_SPECIFIC_FILTER = []
-if util.IsWindows():
-  _DESKTOP_OS_SPECIFIC_FILTER = [
-      # https://code.google.com/p/chromedriver/issues/detail?id=214
-      'ChromeDriverTest.testCloseWindow',
-      # https://code.google.com/p/chromedriver/issues/detail?id=299
-      'ChromeLogPathCapabilityTest.testChromeLogPath',
-  ]
-elif util.IsLinux():
-  _DESKTOP_OS_SPECIFIC_FILTER = [
-      # Xvfb doesn't support maximization.
-      'ChromeDriverTest.testWindowMaximize',
-      # https://code.google.com/p/chromedriver/issues/detail?id=302
-      'ChromeDriverTest.testWindowPosition',
-      'ChromeDriverTest.testWindowSize',
-  ]
-elif util.IsMac():
-  _DESKTOP_OS_SPECIFIC_FILTER = [
-      # https://code.google.com/p/chromedriver/issues/detail?id=304
-      'ChromeDriverTest.testGoBackAndGoForward',
-  ]
+_VERSION_SPECIFIC_FILTER = {}
+_VERSION_SPECIFIC_FILTER['HEAD'] = [
+    # These tests rely on the reference chromedriver which is currently broken.
+    # Re-enable once we have uploaded a new reference chromedriver (see
+    # https://code.google.com/p/chromedriver/issues/detail?id=602).
+    'PerfTest.*',
+]
 
+_OS_SPECIFIC_FILTER = {}
+_OS_SPECIFIC_FILTER['win'] = [
+    # https://code.google.com/p/chromedriver/issues/detail?id=214
+    'ChromeDriverTest.testCloseWindow',
+    # https://code.google.com/p/chromedriver/issues/detail?id=299
+    'ChromeLogPathCapabilityTest.testChromeLogPath',
+]
+_OS_SPECIFIC_FILTER['linux'] = [
+    # Xvfb doesn't support maximization.
+    'ChromeDriverTest.testWindowMaximize',
+    # https://code.google.com/p/chromedriver/issues/detail?id=302
+    'ChromeDriverTest.testWindowPosition',
+    'ChromeDriverTest.testWindowSize',
+]
+_OS_SPECIFIC_FILTER['mac'] = [
+    # https://code.google.com/p/chromedriver/issues/detail?id=304
+    'ChromeDriverTest.testGoBackAndGoForward',
+]
 
-_DESKTOP_NEGATIVE_FILTER = {}
-_DESKTOP_NEGATIVE_FILTER['HEAD'] = (
-    _NEGATIVE_FILTER['HEAD'] +
-    _DESKTOP_OS_SPECIFIC_FILTER + [
-        # Desktop doesn't support touch (without --touch-events).
-        'ChromeDriverTest.testSingleTapElement',
-        'ChromeDriverTest.testTouchDownUpElement',
-        'ChromeDriverTest.testTouchMovedElement',
-    ]
-)
+_DESKTOP_NEGATIVE_FILTER = [
+    # Desktop doesn't support touch (without --touch-events).
+    'ChromeDriverTest.testSingleTapElement',
+    'ChromeDriverTest.testTouchDownUpElement',
+    'ChromeDriverTest.testTouchMovedElement',
+]
 
 
 def _GetDesktopNegativeFilter(version_name):
-  if version_name in _DESKTOP_NEGATIVE_FILTER:
-    return _DESKTOP_NEGATIVE_FILTER[version_name]
-  return _DESKTOP_NEGATIVE_FILTER['HEAD']
-
+  filter = _NEGATIVE_FILTER + _DESKTOP_NEGATIVE_FILTER
+  os = util.GetPlatformName();
+  if os in _OS_SPECIFIC_FILTER:
+    filter += _OS_SPECIFIC_FILTER[os]
+  if version_name in _VERSION_SPECIFIC_FILTER:
+    filter += _VERSION_SPECIFIC_FILTER[version_name]
+  return filter
 
 _ANDROID_NEGATIVE_FILTER = {}
 _ANDROID_NEGATIVE_FILTER['com.google.android.apps.chrome'] = (
-    _NEGATIVE_FILTER['HEAD'] + [
+    _NEGATIVE_FILTER + [
+        # TODO(chrisgao): fix hang of tab crash test on android.
+        'ChromeDriverTest.testTabCrash',
         # Android doesn't support switches and extensions.
         'ChromeSwitchesCapabilityTest.*',
         'ChromeExtensionsCapabilityTest.*',
-        # https://code.google.com/p/chromedriver/issues/detail?id=459
-        'ChromeDriverTest.testShouldHandleNewWindowLoadingProperly',
         # https://crbug.com/274650
         'ChromeDriverTest.testCloseWindow',
-        # https://code.google.com/p/chromedriver/issues/detail?id=259
-        'ChromeDriverTest.testSendKeysToElement',
         # https://code.google.com/p/chromedriver/issues/detail?id=270
         'ChromeDriverTest.testPopups',
         # https://code.google.com/p/chromedriver/issues/detail?id=298
@@ -112,15 +112,12 @@ _ANDROID_NEGATIVE_FILTER['com.google.android.apps.chrome'] = (
         'PerfTest.testSessionStartTime',
         'PerfTest.testSessionStopTime',
         'PerfTest.testColdExecuteScript',
+        # https://code.google.com/p/chromedriver/issues/detail?id=459
+        'ChromeDriverTest.testShouldHandleNewWindowLoadingProperly',
     ]
 )
 _ANDROID_NEGATIVE_FILTER['com.android.chrome'] = (
-    _ANDROID_NEGATIVE_FILTER['com.google.android.apps.chrome'] + [
-        # Touch support was added to devtools in Chrome v30.
-        'ChromeDriverTest.testTouchDownUpElement',
-        'ChromeDriverTest.testTouchMovedElement',
-    ]
-)
+    _ANDROID_NEGATIVE_FILTER['com.google.android.apps.chrome'])
 _ANDROID_NEGATIVE_FILTER['com.chrome.beta'] = (
     _ANDROID_NEGATIVE_FILTER['com.google.android.apps.chrome'])
 _ANDROID_NEGATIVE_FILTER['org.chromium.chrome.testshell'] = (
@@ -128,6 +125,7 @@ _ANDROID_NEGATIVE_FILTER['org.chromium.chrome.testshell'] = (
         # ChromiumTestShell doesn't support multiple tabs.
         'ChromeDriverTest.testGetWindowHandles',
         'ChromeDriverTest.testSwitchToWindow',
+        'ChromeDriverTest.testShouldHandleNewWindowLoadingProperly',
     ]
 )
 
@@ -164,11 +162,14 @@ class ChromeDriverTest(ChromeDriverBaseTest):
   def GlobalSetUp():
     ChromeDriverTest._http_server = webserver.WebServer(
         chrome_paths.GetTestData())
+    ChromeDriverTest._sync_server = webserver.SyncWebServer()
     if _ANDROID_PACKAGE:
       ChromeDriverTest._adb = android_commands.AndroidCommands()
-      host_port = ChromeDriverTest._http_server._server.server_port
+      http_host_port = ChromeDriverTest._http_server._server.server_port
+      sync_host_port = ChromeDriverTest._sync_server._server.server_port
       forwarder.Forwarder.Map(
-          [(host_port, host_port)], ChromeDriverTest._adb)
+          [(http_host_port, http_host_port), (sync_host_port, sync_host_port)],
+          ChromeDriverTest._adb)
 
   @staticmethod
   def GlobalTearDown():
@@ -542,7 +543,6 @@ class ChromeDriverTest(ChromeDriverBaseTest):
 
   def testShouldHandleNewWindowLoadingProperly(self):
     """Tests that ChromeDriver determines loading correctly for new windows."""
-    sync_server = webserver.SyncWebServer()
     self._http_server.SetDataForPath(
         '/newwindow',
         """
@@ -550,7 +550,7 @@ class ChromeDriverTest(ChromeDriverBaseTest):
         <body>
         <a href='%s' target='_blank'>new window/tab</a>
         </body>
-        </html>""" % sync_server.GetUrl())
+        </html>""" % self._sync_server.GetUrl())
     self._driver.Load(self._http_server.GetUrl() + '/newwindow')
     old_windows = self._driver.GetWindowHandles()
     self._driver.FindElement('tagName', 'a').Click()
@@ -560,7 +560,7 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     self.assertFalse(self._driver.IsLoading())
     self._driver.SwitchToWindow(new_window)
     self.assertTrue(self._driver.IsLoading())
-    sync_server.RespondWithContent('<html>new window</html>')
+    self._sync_server.RespondWithContent('<html>new window</html>')
     self._driver.ExecuteScript('return 1')  # Shouldn't hang.
 
   def testPopups(self):
@@ -611,6 +611,13 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     self.assertEquals([100, 200], self._driver.GetWindowPosition())
     self.assertEquals([600, 400], self._driver.GetWindowSize())
 
+  def testConsoleLogSources(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/console_log.html'))
+    logs = self._driver.GetLog('browser')
+    self.assertEquals(len(logs), 2)
+    self.assertEquals(logs[0]['source'], 'network')
+    self.assertEquals(logs[1]['source'], 'javascript')
+
   def testContextMenuEventFired(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/context_menu.html'))
     self._driver.MouseMoveTo(self._driver.FindElement('tagName', 'div'))
@@ -621,6 +628,18 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     # Some pages (about:blank) cause Chrome to put the focus in URL bar.
     # This breaks tests depending on focus.
     self.assertTrue(self._driver.ExecuteScript('return document.hasFocus()'))
+
+  def testTabCrash(self):
+    # If a tab is crashed, the session will be deleted.
+    # When 31 is released, will reload the tab instead.
+    # https://code.google.com/p/chromedriver/issues/detail?id=547
+    self.assertRaises(chromedriver.UnknownError,
+                      self._driver.Load, 'chrome://crash')
+    self.assertRaises(chromedriver.NoSuchSession,
+                      self._driver.GetCurrentUrl)
+
+  def testDoesntHangOnDebugger(self):
+    self._driver.ExecuteScript('debugger;')
 
 
 class ChromeSwitchesCapabilityTest(ChromeDriverBaseTest):
@@ -799,6 +818,9 @@ if __name__ == '__main__':
       '', '--chromedriver',
       help='Path to chromedriver server (REQUIRED!)')
   parser.add_option(
+      '', '--log-path',
+      help='Output verbose server logs to this file')
+  parser.add_option(
       '', '--reference-chromedriver',
       help='Path to the reference chromedriver server')
   parser.add_option(
@@ -818,7 +840,8 @@ if __name__ == '__main__':
     parser.error('chromedriver is required or the given path is invalid.' +
                  'Please run "%s --help" for help' % __file__)
 
-  chromedriver_server = server.Server(os.path.abspath(options.chromedriver))
+  chromedriver_server = server.Server(os.path.abspath(options.chromedriver),
+                                      options.log_path)
   global _CHROMEDRIVER_SERVER_URL
   _CHROMEDRIVER_SERVER_URL = chromedriver_server.GetUrl()
 

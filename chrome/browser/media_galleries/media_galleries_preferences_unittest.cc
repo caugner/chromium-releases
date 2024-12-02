@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -110,6 +111,9 @@ class MediaGalleriesPreferencesTest : public testing::Test {
         CommandLine::ForCurrentProcess(), base::FilePath(), false);
 
     gallery_prefs_.reset(new MediaGalleriesPreferences(profile_.get()));
+    base::RunLoop loop;
+    gallery_prefs_->EnsureInitialized(loop.QuitClosure());
+    loop.Run();
 
     // Load the default galleries into the expectations.
     const MediaGalleriesPrefInfoMap& known_galleries =
@@ -257,6 +261,8 @@ class MediaGalleriesPreferencesTest : public testing::Test {
  private:
   // Needed for extension service & friends to work.
   content::TestBrowserThreadBundle thread_bundle_;
+
+  EnsureMediaDirectoriesExists mock_gallery_locations_;
 
 #if defined OS_CHROMEOS
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;

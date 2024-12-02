@@ -22,7 +22,7 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/lazy_background_task_queue.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -36,6 +36,7 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/common/extension_urls.h"
 
 using base::DictionaryValue;
@@ -631,9 +632,9 @@ bool EventRouter::CanDispatchEventToProfile(Profile* profile,
   // incognito tab event sent to a normal process, or vice versa).
   bool cross_incognito =
       event->restrict_to_profile && profile != event->restrict_to_profile;
-  if (cross_incognito &&
-      !ExtensionSystem::Get(profile)->extension_service()->
-          CanCrossIncognito(extension)) {
+  if (cross_incognito && !extension_util::CanCrossIncognito(
+          extension,
+          ExtensionSystem::Get(profile)->extension_service())) {
     return false;
   }
 

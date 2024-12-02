@@ -106,7 +106,7 @@ cr.define('options', function() {
       Preferences.getInstance().addEventListener('session.restore_on_startup',
           this.onRestoreOnStartupChanged_.bind(this));
       Preferences.getInstance().addEventListener(
-          'session.urls_to_restore_on_startup',
+          'session.startup_urls',
           function(event) {
             $('startup-set-pages').disabled = event.value.disabled;
           });
@@ -210,9 +210,18 @@ cr.define('options', function() {
 
       if (cr.isChromeOS) {
         if (!UIAccountTweaks.loggedInAsGuest()) {
-          $('account-picture-wrapper').onclick = function(event) {
-            OptionsPage.navigateToPage('changePicture');
+          var pictureWrapper = $('account-picture-wrapper');
+          pictureWrapper.setAttribute('role', 'button');
+          pictureWrapper.tabIndex = 0;
+          function activate(event) {
+            if (event.type == 'click' ||
+                (event.type == 'keydown' && event.keyCode == 32)) {
+              OptionsPage.navigateToPage('changePicture');
+            }
           };
+          pictureWrapper.onclick = activate;
+          pictureWrapper.addEventListener('keydown', activate);
+
         }
 
         // Username (canonical email) of the currently logged in user or
@@ -635,13 +644,13 @@ cr.define('options', function() {
       var sectionTop = section.offsetTop;
       if (pageTop + sectionBottom > document.body.scrollHeight ||
           pageTop + sectionTop < 0) {
-        pageContainer.oldScrollTop = -pageTop;
         // Currently not all layout updates are guaranteed to precede the
         // initializationComplete event (for example 'set-as-default-browser'
         // button) leaving some uncertainty in the optimal scroll position.
         // The section is placed approximately in the middle of the screen.
-        pageContainer.style.top = document.body.scrollHeight / 2 -
-            sectionBottom + 'px';
+        var top = Math.min(0, document.body.scrollHeight / 2 - sectionBottom);
+        pageContainer.style.top = top + 'px';
+        pageContainer.oldScrollTop = -top;
       }
     },
 
@@ -723,9 +732,13 @@ cr.define('options', function() {
 
       // If the user gets signed out while the advanced sync settings dialog is
       // visible, say, due to a dashboard clear, close the dialog.
+      // However, if the user gets signed out as a result of abandoning first
+      // time sync setup, do not call closeOverlay as it will redirect the
+      // browser to the main settings page and override any in-progress
+      // user-initiated navigation. See crbug.com/278030.
       // Note: SyncSetupOverlay.closeOverlay is a no-op if the overlay is
       // already hidden.
-      if (this.signedIn_ && !syncData.signedIn)
+      if (this.signedIn_ && !syncData.signedIn && !syncData.setupInProgress)
         SyncSetupOverlay.closeOverlay();
 
       this.signedIn_ = syncData.signedIn;
@@ -811,6 +824,16 @@ cr.define('options', function() {
     },
 
     /**
+     * Update the UI depending on whether the current profile manages any
+     * supervised users.
+     * @param {boolean} value True if the current profile manages any supervised
+     *     users.
+     */
+    updateManagesSupervisedUsers_: function(value) {
+      $('profiles-supervised-dashboard-tip').hidden = !value;
+    },
+
+    /**
      * Get the start/stop sync button DOM element. Used for testing.
      * @return {DOMElement} The start/stop sync button.
      * @private
@@ -890,19 +913,18 @@ cr.define('options', function() {
     onDefaultDownloadDirectoryChanged_: function(event) {
       $('downloadLocationPath').value = event.value.value;
       if (cr.isChromeOS) {
-        // On ChromeOS, replace /special/drive with Drive for drive paths, and
-        // /home/chronos/user/Downloads with Downloads for local files.
-        // Also replace '/' with ' \u203a ' (angled quote sign) everywhere.
+        // On ChromeOS, replace /special/drive/root with Drive for drive paths,
+        // /home/chronos/user/Downloads or /home/chronos/u-<hash>/Downloads
+        // with Downloads for local paths, and '/' with ' \u203a ' (angled quote
+        // sign) everywhere. The modified path is used only for display purpose.
         var path = $('downloadLocationPath').value;
         path = path.replace(/^\/special\/drive\/root/, 'Google Drive');
-        path = path.replace(/^\/home\/chronos\/user\//, '');
+        path = path.replace(/^\/home\/chronos\/(user|u-[^\/]*)\//, '');
         path = path.replace(/\//g, ' \u203a ');
         $('downloadLocationPath').value = path;
       }
-      if (event.value.disabled)
-        $('download-location-label').classList.add('disabled');
-      else
-        $('download-location-label').classList.remove('disabled');
+      $('download-location-label').classList.toggle('disabled',
+                                                    event.value.disabled);
       $('downloadLocationChangeButton').disabled = event.value.disabled;
     },
 
@@ -1175,6 +1197,14 @@ cr.define('options', function() {
     },
 
     /**
+     * Enables or disables the Manage SSL Certificates button.
+     * @private
+     */
+    enableCertificateButton_: function(enabled) {
+      $('certificatesManageButton').disabled = !enabled;
+    },
+
+    /**
      * Enables factory reset section.
      * @private
      */
@@ -1228,7 +1258,7 @@ cr.define('options', function() {
       selectCtl.disabled = pref.disabled;
       // Create a synthetic pref change event decorated as
       // CoreOptionsHandler::CreateValueForPref() does.
-      var event = new cr.Event('synthetic-font-size');
+      var event = new Event('synthetic-font-size');
       event.value = {
         value: pref.value,
         controlledBy: pref.controlledBy,
@@ -1484,6 +1514,7 @@ cr.define('options', function() {
   //Forward public APIs to private implementations.
   [
     'addBluetoothDevice',
+    'enableCertificateButton',
     'enableFactoryResetSection',
     'getCurrentProfile',
     'getStartStopSyncButton',
@@ -1518,6 +1549,7 @@ cr.define('options', function() {
     'updateAccountPicture',
     'updateAutoLaunchState',
     'updateDefaultBrowserState',
+    'updateManagesSupervisedUsers',
     'updateSearchEngines',
     'updateStartupPages',
     'updateSyncState',

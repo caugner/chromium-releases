@@ -53,3 +53,11 @@ class SyncTest(test_case.HostDrivenTestCase):
   def testAboutSyncPageDisplaysCurrentSyncStatus(self):
     java_tests = ['testAboutSyncPageDisplaysCurrentSyncStatus']
     return self._RunSyncTests(java_tests)
+
+  # Disabled for http://crbug.com/311091
+  # @tests_annotations.Feature(['Sync'])
+  # @tests_annotations.EnormousTest
+  @tests_annotations.DisabledTest
+  def testDisableAndEnableSync(self):
+    java_tests = ['testDisableAndEnableSync']
+    return self._RunSyncTests(java_tests)

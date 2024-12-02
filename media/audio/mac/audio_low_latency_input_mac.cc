@@ -9,13 +9,10 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/mac/mac_logging.h"
-#include "media/audio/audio_util.h"
 #include "media/audio/mac/audio_manager_mac.h"
 #include "media/base/data_buffer.h"
 
 namespace media {
-
-static const int kMinIntervalBetweenVolumeUpdatesMs = 1000;
 
 static std::ostream& operator<<(std::ostream& os,
                                 const AudioStreamBasicDescription& format) {

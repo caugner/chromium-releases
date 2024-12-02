@@ -37,8 +37,8 @@
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/webui/jstemplate_builder.h"
-#include "ui/webui/web_ui_util.h"
+#include "ui/base/webui/jstemplate_builder.h"
+#include "ui/base/webui/web_ui_util.h"
 
 using content::BrowserThread;
 using content::WebContents;
@@ -64,7 +64,6 @@ const char kTriesLeft[] = "tries";
 
 // Error constants, passed to the page.
 const char kErrorPin[] = "incorrectPin";
-const char kErrorPuk[] = "incorrectPuk";
 const char kErrorOk[] = "ok";
 
 chromeos::NetworkDeviceHandler* GetNetworkDeviceHandler() {
@@ -732,9 +731,9 @@ void SimUnlockHandler::ProcessSimCardState(
             << " retries: " << retries_left;
     switch (state_) {
       case SIM_UNLOCK_LOADING:
-        if (sim_lock_type_ == flimflam::kSIMLockPin) {
+        if (sim_lock_type_ == shill::kSIMLockPin) {
           state_ = SIM_LOCKED_PIN;
-        } else if (sim_lock_type_ == flimflam::kSIMLockPuk) {
+        } else if (sim_lock_type_ == shill::kSIMLockPuk) {
           if (retries_left > 0)
             state_ = SIM_LOCKED_PUK;
           else
@@ -765,7 +764,7 @@ void SimUnlockHandler::ProcessSimCardState(
         // that means entered PIN was incorrect.
         if (sim_lock_type_.empty()) {
           error_msg = kErrorPin;
-        } else if (sim_lock_type_ == flimflam::kSIMLockPuk) {
+        } else if (sim_lock_type_ == shill::kSIMLockPuk) {
           state_ = SIM_LOCKED_NO_PIN_TRIES_LEFT;
         } else {
           NOTREACHED()
@@ -774,9 +773,9 @@ void SimUnlockHandler::ProcessSimCardState(
         }
         break;
       case SIM_LOCKED_PIN:
-        if (sim_lock_type_ == flimflam::kSIMLockPuk) {
+        if (sim_lock_type_ == shill::kSIMLockPuk) {
           state_ = SIM_LOCKED_NO_PIN_TRIES_LEFT;
-        } else if (sim_lock_type_ == flimflam::kSIMLockPin) {
+        } else if (sim_lock_type_ == shill::kSIMLockPin) {
           // Still locked with PIN.
           error_msg = kErrorPin;
         } else {
@@ -788,8 +787,8 @@ void SimUnlockHandler::ProcessSimCardState(
         state_ = SIM_LOCKED_PUK;
         break;
       case SIM_LOCKED_PUK:
-        if (sim_lock_type_ != flimflam::kSIMLockPin &&
-            sim_lock_type_ != flimflam::kSIMLockPuk) {
+        if (sim_lock_type_ != shill::kSIMLockPin &&
+            sim_lock_type_ != shill::kSIMLockPuk) {
           state_ = SIM_ABSENT_NOT_LOCKED;
         } else if (retries_left == 0) {
           state_ = SIM_LOCKED_NO_PUK_TRIES_LEFT;

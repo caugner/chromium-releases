@@ -2,12 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""This measurement runs a blink performance test and reports the results."""
-
 import os
 import sys
 
-from telemetry.core import util
 from telemetry.page import page_measurement
 from telemetry.page import page_set
 
@@ -53,9 +50,10 @@ def CreatePageSetFromPath(path):
   return page_set.PageSet.FromDict(page_set_dict, os.getcwd() + os.sep)
 
 
-class BlinkPerf(page_measurement.PageMeasurement):
+class BlinkPerfMeasurement(page_measurement.PageMeasurement):
+  """Tuns a blink performance test and reports the results."""
   def __init__(self):
-    super(BlinkPerf, self).__init__('')
+    super(BlinkPerfMeasurement, self).__init__('')
     with open(os.path.join(os.path.dirname(__file__),
                            'blink_perf.js'), 'r') as f:
       self._blink_perf_js = f.read()
@@ -87,9 +85,7 @@ class BlinkPerf(page_measurement.PageMeasurement):
     ])
 
   def MeasurePage(self, page, tab, results):
-    def _IsDone():
-      return tab.EvaluateJavaScript('testRunner.isDone')
-    util.WaitFor(_IsDone, 600)
+    tab.WaitForJavaScriptExpression('testRunner.isDone', 600)
 
     log = tab.EvaluateJavaScript('document.getElementById("log").innerHTML')
 

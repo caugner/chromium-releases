@@ -13,6 +13,11 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 
+namespace iphoto {
+class IPhotoDataProvider;
+class IPhotoDataProviderTest;
+}
+
 namespace itunes {
 class ITunesDataProvider;
 class ITunesDataProviderTest;
@@ -39,6 +44,9 @@ class ImportedMediaGalleryRegistry {
   std::string RegisterITunesFilesystemOnUIThread(
       const base::FilePath& xml_library_path);
 
+  std::string RegisterIPhotoFilesystemOnUIThread(
+      const base::FilePath& xml_library_path);
+
   bool RevokeImportedFilesystemOnUIThread(const std::string& fsid);
 
   // Should be called on the MediaTaskRunner thread only.
@@ -47,8 +55,13 @@ class ImportedMediaGalleryRegistry {
   static itunes::ITunesDataProvider* ITunesDataProvider();
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
+#if defined(OS_MACOSX)
+  static iphoto::IPhotoDataProvider* IPhotoDataProvider();
+#endif  // defined(OS_MACOSX)
+
  private:
   friend struct base::DefaultLazyInstanceTraits<ImportedMediaGalleryRegistry>;
+  friend class iphoto::IPhotoDataProviderTest;
   friend class itunes::ITunesDataProviderTest;
   friend class picasa::PicasaDataProviderTest;
 
@@ -61,7 +74,14 @@ class ImportedMediaGalleryRegistry {
 
   void RegisterITunesFileSystem(const base::FilePath& xml_library_path);
   void RevokeITunesFileSystem();
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
+#if defined(OS_MACOSX)
+  void RegisterIPhotoFileSystem(const base::FilePath& xml_library_path);
+  void RevokeIPhotoFileSystem();
+#endif  // defined(OS_MACOSX)
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
   // The data providers are only set or accessed on the task runner thread.
   scoped_ptr<picasa::PicasaDataProvider> picasa_data_provider_;
   scoped_ptr<itunes::ITunesDataProvider> itunes_data_provider_;
@@ -75,6 +95,16 @@ class ImportedMediaGalleryRegistry {
   base::FilePath itunes_xml_library_path_;
 #endif
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+#if defined(OS_MACOSX)
+  scoped_ptr<iphoto::IPhotoDataProvider> iphoto_data_provider_;
+
+  std::set<std::string> iphoto_fsids_;
+
+#ifndef NDEBUG
+  base::FilePath iphoto_xml_library_path_;
+#endif
+#endif  // defined(OS_MACOSX)
 
   DISALLOW_COPY_AND_ASSIGN(ImportedMediaGalleryRegistry);
 };

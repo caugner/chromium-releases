@@ -24,6 +24,7 @@ extern const char kAboutVersionURL[];
 // components below.
 extern const char kChromeUIAboutURL[];
 extern const char kChromeUIAppsURL[];
+extern const char kChromeUIAppListStartPageURL[];
 extern const char kChromeUIBookmarksURL[];
 extern const char kChromeUICertificateViewerURL[];
 extern const char kChromeUIChromeURLsURL[];
@@ -78,6 +79,7 @@ extern const char kChromeUITaskManagerURL[];
 extern const char kChromeUITermsURL[];
 extern const char kChromeUIThemeURL[];
 extern const char kChromeUIThumbnailURL[];
+extern const char kChromeUIThumbnailListURL[];
 extern const char kChromeUIUberURL[];
 extern const char kChromeUIUberFrameURL[];
 extern const char kChromeUIUserActionsURL[];
@@ -90,6 +92,7 @@ extern const char kChromeUIWelcomeURL[];
 #if defined(OS_CHROMEOS)
 extern const char kChromeUIActivationMessage[];
 extern const char kChromeUIBluetoothPairingURL[];
+extern const char kChromeUIChargerReplacementURL[];
 extern const char kChromeUIChooseMobileNetworkURL[];
 extern const char kChromeUIDiagnosticsURL[];
 extern const char kChromeUIDiscardsURL[];
@@ -109,10 +112,6 @@ extern const char kChromeUISlowURL[];
 extern const char kChromeUISystemInfoURL[];
 extern const char kChromeUITermsOemURL[];
 extern const char kChromeUIUserImageURL[];
-#endif
-
-#if defined(FILE_MANAGER_EXTENSION)
-extern const char kChromeUIFileManagerURL[];
 #endif
 
 #if defined(USE_AURA)
@@ -135,6 +134,7 @@ extern const char kChromeUIAboutHost[];
 extern const char kChromeUIAboutPageFrameHost[];
 extern const char kChromeUIBlankHost[];
 extern const char kChromeUIAppLauncherPageHost[];
+extern const char kChromeUIAppListStartPageHost[];
 extern const char kChromeUIBookmarksHost[];
 extern const char kChromeUICacheHost[];
 extern const char kChromeUICertificateViewerHost[];
@@ -155,6 +155,7 @@ extern const char kChromeUIDNSHost[];
 extern const char kChromeUIDownloadsHost[];
 extern const char kChromeUIDriveInternalsHost[];
 extern const char kChromeUIEditSearchEngineDialogHost[];
+extern const char kChromeUIEnhancedBookmarksHost[];
 extern const char kChromeUIExtensionIconHost[];
 extern const char kChromeUIExtensionInfoHost[];
 extern const char kChromeUIExtensionsFrameHost[];
@@ -212,6 +213,7 @@ extern const char kChromeUITermsHost[];
 extern const char kChromeUIThemeHost[];
 extern const char kChromeUIThumbnailHost[];
 extern const char kChromeUIThumbnailHost2[];
+extern const char kChromeUIThumbnailListHost[];
 extern const char kChromeUITouchIconHost[];
 extern const char kChromeUITranslateInternalsHost[];
 extern const char kChromeUIUberFrameHost[];
@@ -236,6 +238,7 @@ extern const char kChromeUISandboxHost[];
 extern const char kChromeUIActivationMessageHost[];
 extern const char kChromeUIAppLaunchHost[];
 extern const char kChromeUIBluetoothPairingHost[];
+extern const char kChromeUIChargerReplacementHost[];
 extern const char kChromeUIChooseMobileNetworkHost[];
 extern const char kChromeUICryptohomeHost[];
 extern const char kChromeUIDiagnosticsHost[];
@@ -257,6 +260,7 @@ extern const char kChromeUIRotateHost[];
 extern const char kChromeUISimUnlockHost[];
 extern const char kChromeUISlideshowHost[];
 extern const char kChromeUISlowHost[];
+extern const char kChromeUISlowTraceHost[];
 extern const char kChromeUISystemInfoHost[];
 extern const char kChromeUIUserImageHost[];
 
@@ -267,10 +271,6 @@ extern const char kChromeUIWrenchMenu[];
 extern const char kEULAPathFormat[];
 extern const char kOemEulaURLPath[];
 extern const char kOnlineEulaURLPath[];
-#endif
-
-#if defined(FILE_MANAGER_EXTENSION)
-extern const char kChromeUIFileManagerHost[];
 #endif
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
@@ -329,11 +329,20 @@ extern const char kChromeHelpViaWebUIURL[];
 extern const char kChromeAccessibilityHelpURL[];
 #endif
 
+#if defined (ENABLE_ONE_CLICK_SIGNIN)
 // "Learn more" URL for the one click signin infobar.
 extern const char kChromeSyncLearnMoreURL[];
 
+// "Learn more" URL for the "Sign in with a different account" confirmation
+// dialog.
+extern const char kChromeSyncMergeTroubleshootingURL[];
+#endif
+
 // "Learn more" URL for the enterprise sign-in confirmation dialog.
 extern const char kChromeEnterpriseSignInLearnMoreURL[];
+
+// "Learn more" URL for resetting profile preferences.
+extern const char kResetProfileSettingsLearnMoreURL[];
 
 // Management URL for the supervised users.
 extern const char kSupervisedUserManagementURL[];
@@ -366,6 +375,12 @@ extern const char kPrivacyLearnMoreURL[];
 // "Learn more" URL for the "Do not track" setting in the privacy section.
 extern const char kDoNotTrackLearnMoreURL[];
 
+#if defined(OS_CHROMEOS)
+// "Learn more" URL for the attestation of content protection dialog / setting.
+// This URL is currently ChromeOS only.
+extern const char kAttestationForContentProtectionLearnMoreURL[];
+#endif
+
 // The URL for the Chromium project used in the About dialog.
 extern const char kChromiumProjectURL[];
 
@@ -390,10 +405,6 @@ extern const char kSyncLearnMoreURL[];
 
 // The URL for the "Learn more" page for download scanning.
 extern const char kDownloadScanningLearnMoreURL[];
-
-// The URL for the "Learn more" page for downloads flagged as potentially
-// unwanted by the SafeBrowsing service.
-extern const char kDownloadPotentiallyUnwantedLearnMoreURL[];
 
 // The URL for the "Learn more" page for interrupted downloads.
 extern const char kDownloadInterruptedLearnMoreURL[];
@@ -423,6 +434,9 @@ extern const char kLearnMoreEnterpriseURL[];
 #endif
 
 extern const char kNotificationsHelpURL[];
+
+// The Welcome Notification More Info URL.
+extern const char kNotificationWelcomeLearnMoreURL[];
 
 // Gets the hosts/domains that are shown in chrome://chrome-urls.
 extern const char* const kChromeHostURLs[];
@@ -473,6 +487,9 @@ extern const char kDriveScheme[];
 
 // "Learn more" URL for the Cloud Print section under Options.
 extern const char kCloudPrintLearnMoreURL[];
+
+// "Learn more" URL for the Cloud Print Preview No Destinations Promotion.
+extern const char kCloudPrintNoDestinationsLearnMoreURL[];
 
 // Parameters that get appended to force SafeSearch.
 extern const char kSafeSearchSafeParameter[];

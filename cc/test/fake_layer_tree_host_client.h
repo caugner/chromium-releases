@@ -6,8 +6,8 @@
 #define CC_TEST_FAKE_LAYER_TREE_HOST_CLIENT_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "cc/debug/test_context_provider.h"
 #include "cc/input/input_handler.h"
+#include "cc/test/test_context_provider.h"
 #include "cc/trees/layer_tree_host.h"
 
 namespace cc {
@@ -24,8 +24,8 @@ class FakeLayerTreeHostClient : public LayerTreeHostClient {
   explicit FakeLayerTreeHostClient(RendererOptions options);
   virtual ~FakeLayerTreeHostClient();
 
-  virtual void WillBeginFrame() OVERRIDE {}
-  virtual void DidBeginFrame() OVERRIDE {}
+  virtual void WillBeginMainFrame() OVERRIDE {}
+  virtual void DidBeginMainFrame() OVERRIDE {}
   virtual void Animate(double frame_begin_time) OVERRIDE {}
   virtual void Layout() OVERRIDE {}
   virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
@@ -41,17 +41,13 @@ class FakeLayerTreeHostClient : public LayerTreeHostClient {
   // Used only in the single-threaded path.
   virtual void ScheduleComposite() OVERRIDE {}
 
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForMainThread() OVERRIDE;
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForCompositorThread() OVERRIDE;
+  virtual scoped_refptr<ContextProvider> OffscreenContextProvider() OVERRIDE;
 
  private:
   bool use_software_rendering_;
   bool use_delegating_renderer_;
 
-  scoped_refptr<TestContextProvider> main_thread_contexts_;
-  scoped_refptr<TestContextProvider> compositor_thread_contexts_;
+  scoped_refptr<TestContextProvider> offscreen_contexts_;
 };
 
 }  // namespace cc

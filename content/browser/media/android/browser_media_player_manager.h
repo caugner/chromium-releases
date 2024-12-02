@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_MEDIA_ANDROID_BROWSER_MEDIA_PLAYER_MANAGER_H_
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -16,7 +17,7 @@
 #include "base/time/time.h"
 #include "content/browser/android/content_video_view.h"
 #include "content/common/media/media_player_messages_enums_android.h"
-#include "content/public/browser/render_view_host_observer.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "media/base/android/media_player_android.h"
 #include "media/base/android/media_player_manager.h"
 #include "ui/gfx/rect_f.h"
@@ -28,7 +29,7 @@ class MediaDrmBridge;
 }
 
 namespace content {
-
+class BrowserDemuxerAndroid;
 class WebContents;
 
 // This class manages all the MediaPlayerAndroid objects. It receives
@@ -37,7 +38,7 @@ class WebContents;
 // MediaPlayerAndroid objects are converted to IPCs and then sent to the
 // render process.
 class CONTENT_EXPORT BrowserMediaPlayerManager
-    : public RenderViewHostObserver,
+    : public WebContentsObserver,
       public media::MediaPlayerManager {
  public:
   // Permits embedders to provide an extended version of the class.
@@ -49,7 +50,7 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
 
   virtual ~BrowserMediaPlayerManager();
 
-  // RenderViewHostObserver overrides.
+  // WebContentsObserver overrides.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Fullscreen video playback controls.
@@ -58,6 +59,10 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   virtual void FullscreenPlayerSeek(int msec);
   virtual void ExitFullscreen(bool release_media_player);
   virtual void SetVideoSurface(gfx::ScopedJavaSurface surface);
+
+  // Called when browser player wants the renderer media element to seek.
+  // Any actual seek started by renderer will be handled by browser in OnSeek().
+  void OnSeekRequest(int player_id, const base::TimeDelta& time_to_seek);
 
   // media::MediaPlayerManager overrides.
   virtual void OnTimeUpdate(
@@ -72,7 +77,8 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   virtual void OnMediaInterrupted(int player_id) OVERRIDE;
   virtual void OnBufferingUpdate(int player_id, int percentage) OVERRIDE;
   virtual void OnSeekComplete(
-      int player_id, base::TimeDelta current_time) OVERRIDE;
+      int player_id,
+      const base::TimeDelta& current_time) OVERRIDE;
   virtual void OnError(int player_id, int error) OVERRIDE;
   virtual void OnVideoSizeChanged(
       int player_id, int width, int height) OVERRIDE;
@@ -100,6 +106,10 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   void DetachExternalVideoSurface(int player_id);
 #endif
 
+  // Called to disble the current fullscreen playback if the video is encrypted.
+  // TODO(qinmin): remove this once we have the new fullscreen mode.
+  void DisableFullscreenEncryptedMediaPlayback();
+
  protected:
   // Clients must use Create() or subclass constructor.
   explicit BrowserMediaPlayerManager(RenderViewHost* render_view_host);
@@ -114,7 +124,7 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
       const GURL& first_party_for_cookies,
       int demuxer_client_id);
   virtual void OnStart(int player_id);
-  virtual void OnSeek(int player_id, base::TimeDelta time);
+  virtual void OnSeek(int player_id, const base::TimeDelta& time);
   virtual void OnPause(int player_id, bool is_media_related_action);
   virtual void OnSetVolume(int player_id, double volume);
   virtual void OnReleaseResources(int player_id);
@@ -180,7 +190,7 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
       int demuxer_client_id,
       bool hide_url_log,
       media::MediaPlayerManager* manager,
-      media::DemuxerAndroid* demuxer);
+      BrowserDemuxerAndroid* demuxer);
 
   // An array of managed players.
   ScopedVector<media::MediaPlayerAndroid> players_;
@@ -188,12 +198,22 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   // An array of managed media DRM bridges.
   ScopedVector<media::MediaDrmBridge> drm_bridges_;
 
+  // a set of media keys IDs that are pending approval or approved to access
+  // device DRM credentials.
+  // These 2 sets does not cover all the EME videos. If a video only streams
+  // clear data, it will not be included in either set.
+  std::set<int> media_keys_ids_pending_approval_;
+  std::set<int> media_keys_ids_approved_;
+
   // The fullscreen video view object or NULL if video is not played in
   // fullscreen.
   scoped_ptr<ContentVideoView> video_view_;
 
   // Player ID of the fullscreen media player.
   int fullscreen_player_id_;
+
+  // The player ID pending to enter fullscreen.
+  int pending_fullscreen_player_id_;
 
   WebContents* web_contents_;
 

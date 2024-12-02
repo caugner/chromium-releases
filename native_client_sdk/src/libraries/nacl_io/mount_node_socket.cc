@@ -7,8 +7,8 @@
 
 #include <errno.h>
 #include <string.h>
-#include <sys/fcntl.h>
 
+#include "nacl_io/kernel_handle.h"
 #include "nacl_io/mount.h"
 #include "nacl_io/mount_node_socket.h"
 #include "nacl_io/pepper_interface.h"
@@ -24,8 +24,23 @@ MountNodeSocket::MountNodeSocket(Mount* mount)
       local_addr_(0),
       remote_addr_(0),
       socket_flags_(0),
-      last_errno_(0) {
-  stat_.st_mode |= S_IFSOCK;
+      last_errno_(0),
+      keep_alive_(false) {
+  memset(&linger_, 0, sizeof(linger_));
+  SetType(S_IFSOCK);
+}
+
+MountNodeSocket::MountNodeSocket(Mount* mount, PP_Resource socket)
+    : MountNodeStream(mount),
+      socket_resource_(socket),
+      local_addr_(0),
+      remote_addr_(0),
+      socket_flags_(0),
+      last_errno_(0),
+      keep_alive_(false) {
+  memset(&linger_, 0, sizeof(linger_));
+  SetType(S_IFSOCK);
+  mount_->ppapi()->AddRefResource(socket_resource_);
 }
 
 void MountNodeSocket::Destroy() {
@@ -53,18 +68,18 @@ Error MountNodeSocket::MMap(void* addr,
 
 // Normal read/write operations on a Socket are equivalent to
 // send/recv with a flag value of 0.
-Error MountNodeSocket::Read(size_t offs,
+Error MountNodeSocket::Read(const HandleAttr& attr,
                             void* buf,
                             size_t count,
                             int* out_bytes) {
-  return Recv(buf, count, 0, out_bytes);
+  return Recv(attr, buf, count, 0, out_bytes);
 }
 
-Error MountNodeSocket::Write(size_t offs,
-                      const void* buf,
-                      size_t count,
-                      int* out_bytes) {
-  return Send(buf, count, 0, out_bytes);
+Error MountNodeSocket::Write(const HandleAttr& attr,
+                             const void* buf,
+                             size_t count,
+                             int* out_bytes) {
+  return Send(attr, buf, count, 0, out_bytes);
 }
 
 
@@ -181,12 +196,16 @@ bool MountNodeSocket::IsEquivalentAddress(PP_Resource addr1,
   return memcmp(saddr1, saddr2, len1) == 0;
 }
 
-
-Error MountNodeSocket::Accept(const struct sockaddr* addr, socklen_t len) {
+Error MountNodeSocket::Accept(const HandleAttr& attr,
+                              PP_Resource* new_sock,
+                              struct sockaddr* addr,
+                              socklen_t* len) {
   return ENOSYS;
 }
 
-Error MountNodeSocket::Connect(const struct sockaddr* addr, socklen_t len) {
+Error MountNodeSocket::Connect(const HandleAttr& attr,
+                               const struct sockaddr* addr,
+                               socklen_t len) {
   if (len < 1)
     return EINVAL;
 
@@ -204,34 +223,113 @@ Error MountNodeSocket::GetSockOpt(int lvl,
                                   int optname,
                                   void* optval,
                                   socklen_t* len) {
-  return EINVAL;
+  if (lvl != SOL_SOCKET)
+    return ENOPROTOOPT;
+
+  int value = 0;
+  socklen_t value_len = 0;
+  void* value_ptr = NULL;
+
+  switch (optname) {
+    case SO_REUSEADDR:
+      // SO_REUSEADDR is effectively always on since we can't
+      // disable it with PPAPI sockets.
+      value = 1;
+      value_ptr = &value;
+      value_len = sizeof(value);
+      break;
+    case SO_LINGER:
+      value_ptr = &linger_;
+      value_len = sizeof(linger_);
+      break;
+    case SO_KEEPALIVE:
+      value = keep_alive_;
+      value_ptr = &value;
+      value_len = sizeof(value);
+      break;
+    case SO_ERROR:
+      value_ptr = &last_errno_;
+      value_len = sizeof(last_errno_);
+      last_errno_ = 0;
+      break;
+    default:
+      return ENOPROTOOPT;
+  }
+
+
+  int copy_bytes = std::min(value_len, *len);
+  memcpy(optval, value_ptr, copy_bytes);
+  *len = value_len;
+  return 0;
 }
 
 Error MountNodeSocket::SetSockOpt(int lvl,
                                   int optname,
                                   const void* optval,
                                   socklen_t len) {
-  return EINVAL;
+  if (lvl != SOL_SOCKET)
+    return ENOPROTOOPT;
+
+  switch (optname) {
+    case SO_REUSEADDR: {
+      // SO_REUSEADDR is effectivly always on since we can't
+      // disable it with PPAPI sockets. Just return success
+      // here regardless.
+      if (len < sizeof(int))
+        return EINVAL;
+      return 0;
+    }
+    case SO_LINGER: {
+      // Not supported by the PPAPI interface but we preserve
+      // the settings and pretend to support it.
+      if (len < sizeof(struct linger))
+        return EINVAL;
+      struct linger new_linger = *static_cast<const linger*>(optval);
+      // Don't allow setting linger to be enabled until we
+      // implement the required synchronous shutdown()/close().
+      // TODO(sbc): remove this after http://crbug.com/312401
+      // gets fixed.
+      if (new_linger.l_onoff != 0)
+        return EINVAL;
+      linger_ = new_linger;
+      return 0;
+    }
+    case SO_KEEPALIVE: {
+      // Not supported by the PPAPI interface but we preserve
+      // the flag and pretend to support it.
+      if (len < sizeof(int))
+        return EINVAL;
+      int value = *static_cast<const int*>(optval);
+      keep_alive_ = value != 0;
+      return 0;
+    }
+  }
+
+  return ENOPROTOOPT;
 }
 
 Error MountNodeSocket::Bind(const struct sockaddr* addr, socklen_t len) {
   return EINVAL;
 }
 
-
-Error MountNodeSocket::Recv(void* buf, size_t len, int flags, int* out_len) {
-  return RecvFrom(buf, len, flags, NULL, 0, out_len);
+Error MountNodeSocket::Recv(const HandleAttr& attr,
+                            void* buf,
+                            size_t len,
+                            int flags,
+                            int* out_len) {
+  return RecvFrom(attr, buf, len, flags, NULL, 0, out_len);
 }
 
-Error MountNodeSocket::RecvFrom(void* buf,
+Error MountNodeSocket::RecvFrom(const HandleAttr& attr,
+                                void* buf,
                                 size_t len,
                                 int flags,
                                 struct sockaddr* src_addr,
                                 socklen_t* addrlen,
                                 int* out_len) {
-  PP_Resource addr;
-  Error err = RecvHelper(buf, len, flags, &addr, out_len);
-  if (0 != addr) {
+  PP_Resource addr = 0;
+  Error err = RecvHelper(attr, buf, len, flags, &addr, out_len);
+  if (0 == err && 0 != addr) {
     if (src_addr)
       *addrlen = ResourceToSockAddr(addr, *addrlen, src_addr);
 
@@ -241,7 +339,8 @@ Error MountNodeSocket::RecvFrom(void* buf,
   return err;
 }
 
-Error MountNodeSocket::RecvHelper(void* buf,
+Error MountNodeSocket::RecvHelper(const HandleAttr& attr,
+                                  void* buf,
                                   size_t len,
                                   int flags,
                                   PP_Resource* addr,
@@ -250,7 +349,7 @@ Error MountNodeSocket::RecvHelper(void* buf,
     return EBADF;
 
   int ms = read_timeout_;
-  if ((flags & MSG_DONTWAIT) || (GetMode() & O_NONBLOCK))
+  if ((flags & MSG_DONTWAIT) || !attr.IsBlocking())
     ms = 0;
 
   //TODO(noelallen) BUG=295177
@@ -273,15 +372,16 @@ Error MountNodeSocket::RecvHelper(void* buf,
   return err;
 }
 
-
-Error MountNodeSocket::Send(const void* buf,
-                              size_t len,
-                              int flags,
-                              int* out_len) {
-  return SendHelper(buf, len, flags, remote_addr_, out_len);
+Error MountNodeSocket::Send(const HandleAttr& attr,
+                            const void* buf,
+                            size_t len,
+                            int flags,
+                            int* out_len) {
+  return SendHelper(attr, buf, len, flags, remote_addr_, out_len);
 }
 
-Error MountNodeSocket::SendTo(const void* buf,
+Error MountNodeSocket::SendTo(const HandleAttr& attr,
+                              const void* buf,
                               size_t len,
                               int flags,
                               const struct sockaddr* dest_addr,
@@ -291,16 +391,16 @@ Error MountNodeSocket::SendTo(const void* buf,
     return EDESTADDRREQ;
 
   PP_Resource addr = SockAddrToResource(dest_addr, addrlen);
-  if (addr) {
-    Error err = SendHelper(buf, len, flags, addr, out_len);
-    mount_->ppapi()->ReleaseResource(addr);
-    return err;
-  }
+  if (0 == addr)
+    return EINVAL;
 
-  return EINVAL;
+  Error err = SendHelper(attr, buf, len, flags, addr, out_len);
+  mount_->ppapi()->ReleaseResource(addr);
+  return err;
 }
 
-Error MountNodeSocket::SendHelper(const void* buf,
+Error MountNodeSocket::SendHelper(const HandleAttr& attr,
+                                  const void* buf,
                                   size_t len,
                                   int flags,
                                   PP_Resource addr,
@@ -312,7 +412,7 @@ Error MountNodeSocket::SendHelper(const void* buf,
     return ENOTCONN;
 
   int ms = write_timeout_;
-  if ((flags & MSG_DONTWAIT) || (GetMode() & O_NONBLOCK))
+  if ((flags & MSG_DONTWAIT) || !attr.IsBlocking())
     ms = 0;
 
   EventListenerLock wait(GetEventEmitter());

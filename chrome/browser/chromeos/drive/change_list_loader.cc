@@ -287,15 +287,14 @@ class FastFetchFeedFetcher : public ChangeListLoader::FeedFetcher {
   // since currently we always use WAPI for fast fetch, regardless of the flag.
   void FixResourceIdInChangeList(ChangeList* change_list) {
     std::vector<ResourceEntry>* entries = change_list->mutable_entries();
+    std::vector<std::string>* parent_resource_ids =
+        change_list->mutable_parent_resource_ids();
     for (size_t i = 0; i < entries->size(); ++i) {
       ResourceEntry* entry = &(*entries)[i];
       if (entry->has_resource_id())
         entry->set_resource_id(FixResourceId(entry->resource_id()));
 
-      // Currently parent local id is the parent's resource id.
-      // It will be replaced by actual local id. (crbug.com/260514).
-      if (entry->has_parent_local_id())
-        entry->set_parent_local_id(FixResourceId(entry->parent_local_id()));
+      (*parent_resource_ids)[i] = FixResourceId((*parent_resource_ids)[i]);
     }
   }
 
@@ -388,19 +387,6 @@ void ChangeListLoader::LoadIfNeeded(
     return;
   }
   Load(directory_fetch_info, callback);
-}
-
-void ChangeListLoader::LoadDirectoryFromServer(
-    const std::string& directory_resource_id,
-    const FileOperationCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  scheduler_->GetAboutResource(
-      base::Bind(&ChangeListLoader::LoadDirectoryFromServerAfterGetAbout,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 directory_resource_id,
-                 callback));
 }
 
 void ChangeListLoader::Load(const DirectoryFetchInfo& directory_fetch_info,
@@ -678,25 +664,6 @@ void ChangeListLoader::LoadChangeListFromServerAfterUpdate() {
                     OnLoadFromServerComplete());
 }
 
-void ChangeListLoader::LoadDirectoryFromServerAfterGetAbout(
-    const std::string& directory_resource_id,
-    const FileOperationCallback& callback,
-    google_apis::GDataErrorCode status,
-    scoped_ptr<google_apis::AboutResource> about_resource) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  if (GDataToFileError(status) == FILE_ERROR_OK) {
-    DCHECK(about_resource);
-    last_known_remote_changestamp_ = about_resource->largest_change_id();
-    root_folder_id_ = about_resource->root_folder_id();
-  }
-
-  DoLoadDirectoryFromServer(
-      DirectoryFetchInfo(directory_resource_id, last_known_remote_changestamp_),
-      callback);
-}
-
 void ChangeListLoader::CheckChangestampAndLoadDirectoryIfNeeded(
     const DirectoryFetchInfo& directory_fetch_info,
     int64 local_changestamp,
@@ -882,8 +849,6 @@ void ChangeListLoader::DoLoadDirectoryFromServerAfterLoad(
     return;
   }
 
-  ChangeListProcessor::ResourceEntryMap entry_map;
-  ChangeListProcessor::ConvertToMap(change_lists.Pass(), &entry_map, NULL);
   base::FilePath* directory_path = new base::FilePath;
   base::PostTaskAndReplyWithResult(
       blocking_task_runner_,
@@ -891,7 +856,7 @@ void ChangeListLoader::DoLoadDirectoryFromServerAfterLoad(
       base::Bind(&ChangeListProcessor::RefreshDirectory,
                  resource_metadata_,
                  directory_fetch_info,
-                 entry_map,
+                 base::Passed(&change_lists),
                  directory_path),
       base::Bind(&ChangeListLoader::DoLoadDirectoryFromServerAfterRefresh,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -935,7 +900,8 @@ void ChangeListLoader::UpdateFromChangeList(
   util::Log(logging::LOG_INFO,
             "Apply change lists (is delta: %d)",
             is_delta_update);
-  blocking_task_runner_->PostTaskAndReply(
+  base::PostTaskAndReplyWithResult(
+      blocking_task_runner_,
       FROM_HERE,
       base::Bind(&ChangeListProcessor::Apply,
                  base::Unretained(change_list_processor),
@@ -954,7 +920,8 @@ void ChangeListLoader::UpdateFromChangeListAfterApply(
     ChangeListProcessor* change_list_processor,
     bool should_notify_changed_directories,
     base::Time start_time,
-    const base::Closure& callback) {
+    const base::Closure& callback,
+    FileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(change_list_processor);
   DCHECK(!callback.is_null());

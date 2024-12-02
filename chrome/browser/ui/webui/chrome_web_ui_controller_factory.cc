@@ -96,6 +96,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/chromeos/bluetooth_pairing_ui.h"
+#include "chrome/browser/ui/webui/chromeos/charger_replacement_ui.h"
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
 #include "chrome/browser/ui/webui/chromeos/cryptohome_ui.h"
 #include "chrome/browser/ui/webui/chromeos/diagnostics/diagnostics_ui.h"
@@ -109,6 +110,7 @@
 #include "chrome/browser/ui/webui/chromeos/proxy_settings_ui.h"
 #include "chrome/browser/ui/webui/chromeos/salsa_ui.h"
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
+#include "chrome/browser/ui/webui/chromeos/slow_trace_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_ui.h"
 #include "chrome/browser/ui/webui/chromeos/system_info_ui.h"
 #endif
@@ -134,6 +136,10 @@
 
 #if defined(ENABLE_MDNS)
 #include "chrome/browser/ui/webui/local_discovery/local_discovery_ui.h"
+#endif
+
+#if defined(ENABLE_APP_LIST)
+#include "chrome/browser/ui/webui/app_list/start_page_ui.h"
 #endif
 
 using content::WebUI;
@@ -290,6 +296,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIWebRtcLogsHost)
     return &NewWebUI<WebRtcLogsUI>;
 #endif
+#if defined(ENABLE_APP_LIST)
+  if (url.host() == chrome::kChromeUIAppListStartPageHost)
+    return &NewWebUI<app_list::StartPageUI>;
+#endif
 
   /****************************************************************************
    * OS Specific #defines
@@ -311,6 +321,11 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // Downloads list on Android uses the built-in download manager.
   if (url.host() == chrome::kChromeUIDownloadsHost)
     return &NewWebUI<DownloadsUI>;
+#if defined(ENABLE_ENHANCED_BOOKMARKS)
+  // Bookmarks are part of NTP on Android.
+  if (url.host() == chrome::kChromeUIEnhancedBookmarksHost)
+    return &NewWebUI<BookmarksUI>;
+#endif
   // Flash is not available on android.
   if (url.host() == chrome::kChromeUIFlashHost)
     return &NewWebUI<FlashUI>;
@@ -361,6 +376,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if defined(OS_CHROMEOS)
   if (url.host() == chrome::kChromeUIBluetoothPairingHost)
     return &NewWebUI<chromeos::BluetoothPairingUI>;
+  if (url.host() == chrome::kChromeUIChargerReplacementHost)
+    return &NewWebUI<chromeos::ChargerReplacementUI>;
   if (url.host() == chrome::kChromeUIChooseMobileNetworkHost)
     return &NewWebUI<chromeos::ChooseMobileNetworkUI>;
   if (url.host() == chrome::kChromeUICryptohomeHost)
@@ -387,6 +404,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::SimUnlockUI>;
   if (url.host() == chrome::kChromeUISlowHost)
     return &NewWebUI<chromeos::SlowUI>;
+  if (url.host() == chrome::kChromeUISlowTraceHost)
+    return &NewWebUI<chromeos::SlowTraceController>;
   if (url.host() == chrome::kChromeUISystemInfoHost)
     return &NewWebUI<chromeos::SystemInfoUI>;
   if (url.host() == chrome::kChromeUINetworkHost)
@@ -548,7 +567,7 @@ void ChromeWebUIControllerFactory::GetFaviconForURL(
 
       // Assume that |bitmap| is |gfx::kFaviconSize| x |gfx::kFaviconSize|
       // DIP.
-      float scale = ui::GetScaleFactorScale(scale_factors[i]);
+      float scale = ui::GetImageScale(scale_factors[i]);
       int edge_pixel_size =
           static_cast<int>(gfx::kFaviconSize * scale + 0.5f);
       bitmap_result.pixel_size = gfx::Size(edge_pixel_size, edge_pixel_size);

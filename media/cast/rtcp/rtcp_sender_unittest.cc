@@ -12,7 +12,6 @@
 namespace media {
 namespace cast {
 
-static const int kRtcpInterval = 1000;
 static const uint32 kSendingSsrc = 0x12345678;
 static const uint32 kMediaSsrc = 0x87654321;
 static const std::string kCName("test@10.1.1.1");
@@ -24,24 +23,22 @@ class TestRtcpTransport : public PacedPacketSender {
         packet_count_(0) {
   }
 
-  virtual bool SendRtcpPacket(const std::vector<uint8>& packet) OVERRIDE {
+  virtual bool SendRtcpPacket(const Packet& packet) OVERRIDE {
     EXPECT_EQ(expected_packet_length_, packet.size());
     EXPECT_EQ(0, memcmp(expected_packet_, &(packet[0]), packet.size()));
     packet_count_++;
     return true;
   }
 
-  virtual bool SendPacket(const std::vector<uint8>& packet,
-                          int num_of_packets) {
+  virtual bool SendPackets(const PacketList& packets) OVERRIDE {
     return false;
   }
 
-  virtual bool ResendPacket(const std::vector<uint8>& packet,
-                            int num_of_packets) {
+  virtual bool ResendPackets(const PacketList& packets) OVERRIDE {
     return false;
   }
 
-  void SetExpectedRtcpPacket(const uint8* rtcp_buffer, int length) {
+  void SetExpectedRtcpPacket(const uint8* rtcp_buffer, size_t length) {
     expected_packet_length_ = length;
     memcpy(expected_packet_, rtcp_buffer, length);
   }
@@ -228,7 +225,7 @@ TEST_F(RtcpSenderTest, RtcpReceiverReportWithCast) {
 
   RtcpCastMessage cast_message(kMediaSsrc);
   cast_message.ack_frame_id_ = kAckFrameId;
-  std::set<uint16_t> missing_packets;
+  PacketIdSet missing_packets;
   cast_message.missing_frames_and_packets_[
       kLostFrameId] = missing_packets;
 

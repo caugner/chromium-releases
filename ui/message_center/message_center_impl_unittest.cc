@@ -9,6 +9,8 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/size.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_types.h"
 #include "ui/message_center/notification_blocker.h"
@@ -40,6 +42,27 @@ class MessageCenterImplTest : public testing::Test,
   MessageCenter* message_center() const { return message_center_; }
   base::RunLoop* run_loop() const { return run_loop_.get(); }
   base::Closure closure() const { return closure_; }
+
+ protected:
+  Notification* CreateSimpleNotification(const std::string& id) {
+    return CreateNotification(id, NOTIFICATION_TYPE_SIMPLE);
+  }
+
+  Notification* CreateNotification(const std::string& id,
+                                   message_center::NotificationType type) {
+    RichNotificationData optional_fields;
+    optional_fields.buttons.push_back(ButtonInfo(UTF8ToUTF16("foo")));
+    optional_fields.buttons.push_back(ButtonInfo(UTF8ToUTF16("foo")));
+    return new Notification(type,
+                            id,
+                            UTF8ToUTF16("title"),
+                            UTF8ToUTF16(id),
+                            gfx::Image() /* icon */,
+                            base::string16() /* display_source */,
+                            NotifierId(NotifierId::APPLICATION, "app1"),
+                            optional_fields,
+                            NULL);
+  }
 
  private:
   MessageCenter* message_center_;
@@ -123,7 +146,6 @@ class MockPopupTimersController : public PopupTimersController {
   virtual ~MockPopupTimersController() {}
 
   virtual void TimerFinished(const std::string& id) OVERRIDE {
-    LOG(INFO) << "In timer finished for id " << id;
     base::MessageLoop::current()->PostTask(FROM_HERE, quit_closure_);
     timer_finished_ = true;
     last_id_ = id;
@@ -294,35 +316,35 @@ TEST_F(MessageCenterImplTest, NotificationBlocker) {
       RichNotificationData(),
       NULL)));
   EXPECT_EQ(2u, message_center()->GetPopupNotifications().size());
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 
   // Block all notifications. All popups are gone and message center should be
   // hidden.
   blocker1.SetNotificationsEnabled(false);
   EXPECT_TRUE(message_center()->GetPopupNotifications().empty());
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 
   // Updates |blocker2| state, which doesn't affect the global state.
   blocker2.SetNotificationsEnabled(false);
   EXPECT_TRUE(message_center()->GetPopupNotifications().empty());
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 
   blocker2.SetNotificationsEnabled(true);
   EXPECT_TRUE(message_center()->GetPopupNotifications().empty());
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 
   // If |blocker2| blocks, then unblocking blocker1 doesn't change the global
   // state.
   blocker2.SetNotificationsEnabled(false);
   blocker1.SetNotificationsEnabled(true);
   EXPECT_TRUE(message_center()->GetPopupNotifications().empty());
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 
   // Unblock both blockers, which recovers the global state, but the popups
   // aren't shown.
   blocker2.SetNotificationsEnabled(true);
   EXPECT_TRUE(message_center()->GetPopupNotifications().empty());
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 }
 
 TEST_F(MessageCenterImplTest, NotificationsDuringBlocked) {
@@ -340,7 +362,7 @@ TEST_F(MessageCenterImplTest, NotificationsDuringBlocked) {
       RichNotificationData(),
       NULL)));
   EXPECT_EQ(1u, message_center()->GetPopupNotifications().size());
-  EXPECT_EQ(1u, message_center()->GetNotifications().size());
+  EXPECT_EQ(1u, message_center()->GetVisibleNotifications().size());
 
   // Create a notification during blocked. Still no popups.
   blocker.SetNotificationsEnabled(false);
@@ -355,7 +377,7 @@ TEST_F(MessageCenterImplTest, NotificationsDuringBlocked) {
       RichNotificationData(),
       NULL)));
   EXPECT_TRUE(message_center()->GetPopupNotifications().empty());
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 
   // Unblock notifications, the id1 should appear as a popup.
   blocker.SetNotificationsEnabled(true);
@@ -363,7 +385,7 @@ TEST_F(MessageCenterImplTest, NotificationsDuringBlocked) {
       message_center()->GetPopupNotifications();
   EXPECT_EQ(1u, popups.size());
   EXPECT_TRUE(PopupNotificationsContain(popups, "id2"));
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 }
 
 // Similar to other blocker cases but this test case allows |notifier_id2| even
@@ -400,7 +422,7 @@ TEST_F(MessageCenterImplTest, NotificationBlockerAllowsPopups) {
       message_center()->GetPopupNotifications();
   EXPECT_EQ(1u, popups.size());
   EXPECT_TRUE(PopupNotificationsContain(popups, "id2"));
-  EXPECT_EQ(2u, message_center()->GetNotifications().size());
+  EXPECT_EQ(2u, message_center()->GetVisibleNotifications().size());
 
   message_center()->AddNotification(scoped_ptr<Notification>(new Notification(
       NOTIFICATION_TYPE_SIMPLE,
@@ -426,7 +448,7 @@ TEST_F(MessageCenterImplTest, NotificationBlockerAllowsPopups) {
   EXPECT_EQ(2u, popups.size());
   EXPECT_TRUE(PopupNotificationsContain(popups, "id2"));
   EXPECT_TRUE(PopupNotificationsContain(popups, "id4"));
-  EXPECT_EQ(4u, message_center()->GetNotifications().size());
+  EXPECT_EQ(4u, message_center()->GetVisibleNotifications().size());
 
   blocker.SetNotificationsEnabled(true);
   popups = message_center()->GetPopupNotifications();
@@ -434,7 +456,7 @@ TEST_F(MessageCenterImplTest, NotificationBlockerAllowsPopups) {
   EXPECT_TRUE(PopupNotificationsContain(popups, "id2"));
   EXPECT_TRUE(PopupNotificationsContain(popups, "id3"));
   EXPECT_TRUE(PopupNotificationsContain(popups, "id4"));
-  EXPECT_EQ(4u, message_center()->GetNotifications().size());
+  EXPECT_EQ(4u, message_center()->GetVisibleNotifications().size());
 }
 
 TEST_F(MessageCenterImplTest, QueueUpdatesWithCenterVisible) {
@@ -442,48 +464,148 @@ TEST_F(MessageCenterImplTest, QueueUpdatesWithCenterVisible) {
   std::string id2("id2");
   NotifierId notifier_id1(NotifierId::APPLICATION, "app1");
 
-  scoped_ptr<Notification> notification(new Notification(
-      NOTIFICATION_TYPE_SIMPLE,
-      id,
-      UTF8ToUTF16("title"),
-      UTF8ToUTF16("message"),
-      gfx::Image() /* icon */,
-      base::string16() /* display_source */,
-      notifier_id1,
-      RichNotificationData(),
-      NULL));
-
+  // First, add and update a notification to ensure updates happen
+  // normally.
+  scoped_ptr<Notification> notification(CreateSimpleNotification(id));
   message_center()->AddNotification(notification.Pass());
-  notification.reset(new Notification(
-      NOTIFICATION_TYPE_MULTIPLE,
-      id2,
-      UTF8ToUTF16("title"),
-      UTF8ToUTF16("message"),
-      gfx::Image() /* icon */,
-      base::string16() /* display_source */,
-      notifier_id1,
-      RichNotificationData(),
-      NULL));
+  notification.reset(CreateSimpleNotification(id2));
   message_center()->UpdateNotification(id, notification.Pass());
   EXPECT_TRUE(message_center()->HasNotification(id2));
   EXPECT_FALSE(message_center()->HasNotification(id));
+
+  // Then open the message center.
   message_center()->SetVisibility(VISIBILITY_MESSAGE_CENTER);
-  notification.reset(new Notification(
-      NOTIFICATION_TYPE_MULTIPLE,
-      id,
-      UTF8ToUTF16("title"),
-      UTF8ToUTF16("message"),
-      gfx::Image() /* icon */,
-      base::string16() /* display_source */,
-      notifier_id1,
-      RichNotificationData(),
-      NULL));
+
+  // Then update a notification; nothing should have happened.
+  notification.reset(CreateSimpleNotification(id));
   message_center()->UpdateNotification(id2, notification.Pass());
   EXPECT_TRUE(message_center()->HasNotification(id2));
   EXPECT_FALSE(message_center()->HasNotification(id));
+
+  // Close the message center; then the update should have propagated.
   message_center()->SetVisibility(VISIBILITY_TRANSIENT);
   EXPECT_FALSE(message_center()->HasNotification(id2));
   EXPECT_TRUE(message_center()->HasNotification(id));
+}
+
+TEST_F(MessageCenterImplTest, ComplexQueueing) {
+  std::string ids[5] = {"0", "1", "2", "3", "4p"};
+  NotifierId notifier_id1(NotifierId::APPLICATION, "app1");
+
+  scoped_ptr<Notification> notification;
+  // Add some notifications
+  int i = 0;
+  for (; i < 3; i++) {
+    notification.reset(CreateSimpleNotification(ids[i]));
+    message_center()->AddNotification(notification.Pass());
+  }
+  for (i = 0; i < 3; i++) {
+    EXPECT_TRUE(message_center()->HasNotification(ids[i]));
+  }
+  for (; i < 5; i++) {
+    EXPECT_FALSE(message_center()->HasNotification(ids[i]));
+  }
+
+  notification.reset(CreateNotification(ids[4], NOTIFICATION_TYPE_PROGRESS));
+  message_center()->AddNotification(notification.Pass());
+
+  // Now start queueing.
+  // NL: ["0", "1", "2", "4p"]
+  message_center()->SetVisibility(VISIBILITY_MESSAGE_CENTER);
+
+  // This should update notification "1" to have id "3".
+  notification.reset(CreateSimpleNotification(ids[3]));
+  message_center()->UpdateNotification(ids[1], notification.Pass());
+
+  notification.reset(CreateSimpleNotification(ids[4]));
+  message_center()->UpdateNotification(ids[4], notification.Pass());
+
+  notification.reset(CreateNotification(ids[4], NOTIFICATION_TYPE_PROGRESS));
+  message_center()->UpdateNotification(ids[4], notification.Pass());
+
+  // This should update notification "3" to a new ID after we go TRANSIENT.
+  notification.reset(CreateSimpleNotification("New id"));
+  message_center()->UpdateNotification(ids[3], notification.Pass());
+
+  // This should create a new "3", that doesn't overwrite the update to 3
+  // before.
+  notification.reset(CreateSimpleNotification(ids[3]));
+  message_center()->AddNotification(notification.Pass());
+
+  // The NL should still be the same: ["0", "1", "2", "4p"]
+  EXPECT_TRUE(message_center()->HasNotification(ids[0]));
+  EXPECT_TRUE(message_center()->HasNotification(ids[1]));
+  EXPECT_TRUE(message_center()->HasNotification(ids[2]));
+  EXPECT_FALSE(message_center()->HasNotification(ids[3]));
+  EXPECT_TRUE(message_center()->HasNotification(ids[4]));
+  EXPECT_EQ(message_center()->GetVisibleNotifications().size(), 4u);
+  message_center()->SetVisibility(VISIBILITY_TRANSIENT);
+
+  EXPECT_TRUE(message_center()->HasNotification(ids[0]));
+  EXPECT_FALSE(message_center()->HasNotification(ids[1]));
+  EXPECT_TRUE(message_center()->HasNotification(ids[2]));
+  EXPECT_TRUE(message_center()->HasNotification(ids[3]));
+  EXPECT_TRUE(message_center()->HasNotification(ids[4]));
+  EXPECT_TRUE(message_center()->HasNotification("New id"));
+  EXPECT_EQ(message_center()->GetVisibleNotifications().size(), 5u);
+}
+
+TEST_F(MessageCenterImplTest, QueuedDirectUpdates) {
+  std::string id("id1");
+  std::string id2("id2");
+  NotifierId notifier_id1(NotifierId::APPLICATION, "app1");
+
+  gfx::Size original_size(0, 0);
+  // Open the message center to prevent adding notifications
+  message_center()->SetVisibility(VISIBILITY_MESSAGE_CENTER);
+
+  // Create new notification to be added to the queue; images all have the same
+  // original size.
+  scoped_ptr<Notification> notification(CreateSimpleNotification(id));
+
+  // Double-check that sizes all match.
+  const std::vector<ButtonInfo>& original_buttons = notification->buttons();
+  ASSERT_EQ(2u, original_buttons.size());
+
+  EXPECT_EQ(original_size, notification->icon().Size());
+  EXPECT_EQ(original_size, notification->image().Size());
+  EXPECT_EQ(original_size, original_buttons[0].icon.Size());
+  EXPECT_EQ(original_size, original_buttons[1].icon.Size());
+
+  message_center()->AddNotification(notification.Pass());
+
+  // The notification should be in the queue.
+  EXPECT_FALSE(message_center()->HasNotification(id));
+
+  // Now try setting the icon to a different size.
+  gfx::Size new_size(16, 16);
+  EXPECT_NE(original_size, new_size);
+
+  gfx::Canvas canvas(new_size, 1.0f, true);
+  canvas.DrawColor(SK_ColorBLUE);
+  gfx::Image testImage(gfx::Image(gfx::ImageSkia(canvas.ExtractImageRep())));
+  message_center()->SetNotificationIcon(id, testImage);
+  message_center()->SetNotificationImage(id, testImage);
+  message_center()->SetNotificationButtonIcon(id, 0, testImage);
+  message_center()->SetNotificationButtonIcon(id, 1, testImage);
+
+  // The notification should be in the queue.
+  EXPECT_FALSE(message_center()->HasNotification(id));
+
+  // Close the message center; then the update should have propagated.
+  message_center()->SetVisibility(VISIBILITY_TRANSIENT);
+  // The notification should no longer be in the queue.
+  EXPECT_TRUE(message_center()->HasNotification(id));
+
+  Notification* mc_notification =
+      *(message_center()->GetVisibleNotifications().begin());
+  const std::vector<ButtonInfo>& buttons = mc_notification->buttons();
+  ASSERT_EQ(2u, buttons.size());
+
+  EXPECT_EQ(new_size, mc_notification->icon().Size());
+  EXPECT_EQ(new_size, mc_notification->image().Size());
+  EXPECT_EQ(new_size, buttons[0].icon.Size());
+  EXPECT_EQ(new_size, buttons[1].icon.Size());
 }
 
 }  // namespace internal

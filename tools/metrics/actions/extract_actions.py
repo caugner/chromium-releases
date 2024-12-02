@@ -199,11 +199,16 @@ def AddAndroidActions(actions):
   Arguments
     actions: set of actions to add to.
   """
+  actions.add('Cast_Sender_CastEnterFullscreen');
+  actions.add('Cast_Sender_CastDeviceSelected');
+  actions.add('Cast_Sender_YouTubeDeviceSelected');
+  actions.add('Cast_Sender_CastPlayRequested');
   actions.add('DataReductionProxy_PromoDisplayed');
   actions.add('DataReductionProxy_PromoLearnMore');
   actions.add('DataReductionProxy_TurnedOn');
   actions.add('DataReductionProxy_TurnedOnFromPromo');
   actions.add('DataReductionProxy_TurnedOff');
+  actions.add('MobileActionBarShown')
   actions.add('MobileBeamCallbackSuccess')
   actions.add('MobileBeamInvalidAppState')
   actions.add('MobileBreakpadUploadAttempt')
@@ -223,6 +228,9 @@ def AddAndroidActions(actions):
   actions.add('MobileContextMenuShareLink')
   actions.add('MobileContextMenuText')
   actions.add('MobileContextMenuViewImage')
+  actions.add('MobileFocusedFakeboxOnNtp')
+  actions.add('MobileFocusedOmniboxNotOnNtp')
+  actions.add('MobileFocusedOmniboxOnNtp')
   actions.add('MobileFreAttemptSignIn')
   actions.add('MobileFreSignInSuccessful')
   actions.add('MobileFreSkipSignIn')
@@ -246,6 +254,7 @@ def AddAndroidActions(actions):
   actions.add('MobileNTPBookmark')
   actions.add('MobileNTPForeignSession')
   actions.add('MobileNTPMostVisited')
+  actions.add('MobileNTPRecentlyClosed')
   actions.add('MobileNTPSwitchToBookmarks')
   actions.add('MobileNTPSwitchToIncognito')
   actions.add('MobileNTPSwitchToMostVisited')
@@ -253,6 +262,7 @@ def AddAndroidActions(actions):
   actions.add('MobileNewTabOpened')
   actions.add('MobileOmniboxSearch')
   actions.add('MobileOmniboxVoiceSearch')
+  actions.add('MobileOmniboxRefineSuggestion')
   actions.add('MobilePageLoaded')
   actions.add('MobilePageLoadedDesktopUserAgent')
   actions.add('MobilePageLoadedWithKeyboard')
@@ -359,14 +369,12 @@ def AddExtensionActions(actions):
   actions.add('FileBrowser.CreateNewFolder')
   actions.add('FileBrowser.PhotoEditor.Edit')
   actions.add('FileBrowser.PhotoEditor.View')
+  actions.add('FileBrowser.SuggestApps.ShowDialog')
 
   # Actions sent by Google Now client.
   actions.add('GoogleNow.MessageClicked')
   actions.add('GoogleNow.ButtonClicked0')
   actions.add('GoogleNow.ButtonClicked1')
-  actions.add('GoogleNow.WelcomeToastClickedYes')
-  actions.add('GoogleNow.WelcomeToastClickedNo')
-  actions.add('GoogleNow.WelcomeToastDismissed')
   actions.add('GoogleNow.Dismissed')
 
 def GrepForActions(path, actions):
@@ -557,22 +565,6 @@ def AddHistoryPageActions(actions):
   actions.add('HistoryPage_ConfirmRemoveSelected')
   actions.add('HistoryPage_CancelRemoveSelected')
 
-def AddDevicesPageActions(actions):
-  """Add actions that are used in Devices page.
-
-  Arguments
-    actions: set of actions to add to.
-  """
-  actions.add('DevicesPage_AddPrintersClicked')
-  actions.add('DevicesPage_LogInStartedFromDeviceListPromo')
-  actions.add('DevicesPage_LogInStartedFromRegisterPromo')
-  actions.add('DevicesPage_ManageClicked')
-  actions.add('DevicesPage_Opened')
-  actions.add('DevicesPage_RegisterCancel')
-  actions.add('DevicesPage_RegisterClicked')
-  actions.add('DevicesPage_RegisterFailure')
-  actions.add('DevicesPage_RegisterSuccess')
-
 def main(argv):
   if '--hash' in argv:
     hash_output = True
@@ -611,7 +603,6 @@ def main(argv):
   AddBookmarkManagerActions(actions)
   AddChromeOSActions(actions)
   AddClosedSourceActions(actions)
-  AddDevicesPageActions(actions)
   AddExtensionActions(actions)
   AddHistoryPageActions(actions)
 

@@ -19,7 +19,7 @@ FakeOutputSurface::FakeOutputSurface(
     : OutputSurface(context_provider),
       client_(NULL),
       num_sent_frames_(0),
-      needs_begin_frame_(false),
+      needs_begin_impl_frame_(false),
       forced_draw_to_software_device_(false),
       has_external_stencil_test_(false),
       fake_weak_ptr_factory_(this) {
@@ -84,22 +84,22 @@ void FakeOutputSurface::SwapBuffers(CompositorFrame* frame) {
   }
 }
 
-void FakeOutputSurface::SetNeedsBeginFrame(bool enable) {
-  needs_begin_frame_ = enable;
-  OutputSurface::SetNeedsBeginFrame(enable);
+void FakeOutputSurface::SetNeedsBeginImplFrame(bool enable) {
+  needs_begin_impl_frame_ = enable;
+  OutputSurface::SetNeedsBeginImplFrame(enable);
 
-  // If there is not BeginFrame emulation from the FrameRateController,
-  // then we just post a BeginFrame to emulate it as part of the test.
+  // If there is not BeginImplFrame emulation from the FrameRateController,
+  // then we just post a BeginImplFrame to emulate it as part of the test.
   if (enable && !frame_rate_controller_) {
     base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE, base::Bind(&FakeOutputSurface::OnBeginFrame,
+        FROM_HERE, base::Bind(&FakeOutputSurface::OnBeginImplFrame,
                               fake_weak_ptr_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(16));
   }
 }
 
-void FakeOutputSurface::OnBeginFrame() {
-  OutputSurface::BeginFrame(BeginFrameArgs::CreateForTesting());
+void FakeOutputSurface::OnBeginImplFrame() {
+  OutputSurface::BeginImplFrame(BeginFrameArgs::CreateForTesting());
 }
 
 
@@ -110,6 +110,10 @@ bool FakeOutputSurface::ForcedDrawToSoftwareDevice() const {
 bool FakeOutputSurface::BindToClient(OutputSurfaceClient* client) {
   if (OutputSurface::BindToClient(client)) {
     client_ = client;
+    if (memory_policy_to_set_at_bind_) {
+      client_->SetMemoryPolicy(*memory_policy_to_set_at_bind_.get());
+      memory_policy_to_set_at_bind_.reset();
+    }
     return true;
   } else {
     return false;
@@ -137,6 +141,11 @@ void FakeOutputSurface::ReturnResource(unsigned id, CompositorFrameAck* ack) {
 
 bool FakeOutputSurface::HasExternalStencilTest() const {
   return has_external_stencil_test_;
+}
+
+void FakeOutputSurface::SetMemoryPolicyToSetAtBind(
+    scoped_ptr<cc::ManagedMemoryPolicy> memory_policy_to_set_at_bind) {
+  memory_policy_to_set_at_bind_.swap(memory_policy_to_set_at_bind);
 }
 
 }  // namespace cc

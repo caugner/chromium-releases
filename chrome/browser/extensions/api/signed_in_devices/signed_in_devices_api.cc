@@ -86,6 +86,19 @@ ScopedVector<DeviceInfo> GetAllSignedInDevices(
                                extension_prefs);
 }
 
+scoped_ptr<DeviceInfo> GetLocalDeviceInfo(const std::string& extension_id,
+                                          Profile* profile) {
+  ProfileSyncService* pss = ProfileSyncServiceFactory::GetForProfile(profile);
+  if (!pss) {
+    return scoped_ptr<DeviceInfo>();
+  }
+  std::string guid = pss->GetLocalDeviceGUID();
+  scoped_ptr<DeviceInfo> device = GetDeviceInfoForClientId(guid,
+                                                           extension_id,
+                                                           profile);
+  return device.Pass();
+}
+
 bool SignedInDevicesGetFunction::RunImpl() {
   scoped_ptr<api::signed_in_devices::Get::Params> params(
       api::signed_in_devices::Get::Params::Create(*args_));
@@ -94,14 +107,18 @@ bool SignedInDevicesGetFunction::RunImpl() {
   bool is_local = params->is_local.get() ? *params->is_local : false;
 
   if (is_local) {
-    // TODO(lipalani): Set the device info for local device.
+    scoped_ptr<DeviceInfo> device =
+        GetLocalDeviceInfo(extension_id(), GetProfile());
     base::ListValue* result = new base::ListValue();
+    if (device.get()) {
+      result->Append(device->ToValue());
+    }
     SetResult(result);
     return true;
   }
 
-  ScopedVector<DeviceInfo> devices = GetAllSignedInDevices(extension_id(),
-                                                           profile());
+  ScopedVector<DeviceInfo> devices =
+      GetAllSignedInDevices(extension_id(), GetProfile());
 
   scoped_ptr<base::ListValue> result(new base::ListValue());
 

@@ -23,9 +23,9 @@ namespace {
 
 // Adds the windows that can be cycled through for the specified window id to
 // |windows|.
-void AddTrackedWindows(aura::RootWindow* root,
-                     int container_id,
-                     MruWindowTracker::WindowList* windows) {
+void AddTrackedWindows(aura::Window* root,
+                       int container_id,
+                       MruWindowTracker::WindowList* windows) {
   aura::Window* container = Shell::GetContainer(root, container_id);
   const MruWindowTracker::WindowList& children(container->children());
   windows->insert(windows->end(), children.begin(), children.end());
@@ -42,6 +42,13 @@ bool IsSwitchableContainer(aura::Window* window) {
   return false;
 }
 
+// Returns whether |w1| should be considered less recently used than |w2|. This
+// is used for a stable sort to move minimized windows to the LRU end of the
+// list.
+bool CompareWindowState(aura::Window* w1, aura::Window* w2) {
+  return ash::wm::IsWindowMinimized(w1) && !ash::wm::IsWindowMinimized(w2);
+}
+
 // Returns a list of windows ordered by their stacking order.
 // If |mru_windows| is passed, these windows are moved to the front of the list.
 // If |top_most_at_end|, the list is returned in descending (bottom-most / least
@@ -52,7 +59,7 @@ MruWindowTracker::WindowList BuildWindowListInternal(
   MruWindowTracker::WindowList windows;
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
 
-  aura::RootWindow* active_root = Shell::GetTargetRootWindow();
+  aura::Window* active_root = Shell::GetTargetRootWindow();
   for (Shell::RootWindowList::const_iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter) {
     if (*iter == active_root)
@@ -96,6 +103,9 @@ MruWindowTracker::WindowList BuildWindowListInternal(
       }
     }
   }
+
+  // Move minimized windows to the beginning (LRU end) of the list.
+  std::stable_sort(windows.begin(), windows.end(), CompareWindowState);
 
   // Window cycling expects the topmost window at the front of the list.
   if (!top_most_at_end)

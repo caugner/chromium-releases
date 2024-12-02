@@ -105,7 +105,7 @@ class EmitterTest : public ::testing::Test {
     waiting_++;
     EXPECT_EQ(0, listener.WaitOnEvent(POLLIN, -1));
     emitter_.ClearEvents_Locked(POLLIN);
-    signaled_ ++;
+    signaled_++;
     return NULL;
   }
 
@@ -123,9 +123,6 @@ TEST_F(EmitterTest, MultiThread) {
   for (int a=0; a <NUM_THREADS; a++)
     CreateThread();
 
-  sleep(1);
-  EXPECT_EQ(0, signaled_);
-
   {
     AUTO_LOCK(emitter_.GetLock());
 
@@ -133,10 +130,15 @@ TEST_F(EmitterTest, MultiThread) {
     while(waiting_ < NUM_THREADS)
       pthread_cond_wait(&multi_cond_, emitter_.GetLock().mutex());
 
+    ASSERT_EQ(0, signaled_);
+
     emitter_.RaiseEvents_Locked(POLLIN);
   }
 
-  sleep(1);
+  // sleep for 50 milliseconds
+  struct timespec sleeptime = { 0,  50 * 1000 * 1000 };
+  nanosleep(&sleeptime, NULL);
+
   EXPECT_EQ(1, signaled_);
 
   {
@@ -144,7 +146,7 @@ TEST_F(EmitterTest, MultiThread) {
     emitter_.RaiseEvents_Locked(POLLIN);
   }
 
-  sleep(1);
+  nanosleep(&sleeptime, NULL);
   EXPECT_EQ(2, signaled_);
 
   // Clean up remaining threads.
@@ -154,6 +156,21 @@ TEST_F(EmitterTest, MultiThread) {
   }
 }
 
+TEST(EventListenerPollTest, WaitForAny) {
+  ScopedEventEmitter emitter1(new EventEmitter());
+  ScopedEventEmitter emitter2(new EventEmitter());
+  ScopedEventEmitter emitter3(new EventEmitter());
+  EventListenerPoll listener;
+  EventRequest requests[3] = {
+    { emitter1, 0, 0 },
+    { emitter2, 0, 0 },
+    { emitter3, 0, 0 },
+  };
+  Error error = listener.WaitOnAny(requests,
+                                   sizeof(requests)/sizeof(requests[0]),
+                                   1);
+  ASSERT_EQ(ETIMEDOUT, error);
+}
 
 TEST(PipeTest, Listener) {
   const char hello[] = "Hello World.";
@@ -254,23 +271,25 @@ TEST_F(SelectPollTest, PollMemPipe) {
   // Both FDs for regular files should be read/write but not exception.
   fds[0] = kp->open("/test.txt", O_CREAT | O_WRONLY);
   fds[1] = kp->open("/test.txt", O_RDONLY);
+  ASSERT_GT(fds[0], -1);
+  ASSERT_GT(fds[1], -1);
 
   SetFDs(fds, 2);
 
-  EXPECT_EQ(2, kp->poll(pollfds, 2, 0));
-  EXPECT_EQ(POLLIN | POLLOUT, pollfds[0].revents);
-  EXPECT_EQ(POLLIN | POLLOUT, pollfds[1].revents);
+  ASSERT_EQ(2, kp->poll(pollfds, 2, 0));
+  ASSERT_EQ(POLLIN | POLLOUT, pollfds[0].revents);
+  ASSERT_EQ(POLLIN | POLLOUT, pollfds[1].revents);
   CloseFDs(fds, 2);
 
   // The write FD should select for write-only, read FD should not select
-  EXPECT_EQ(0, kp->pipe(fds));
+  ASSERT_EQ(0, kp->pipe(fds));
   SetFDs(fds, 2);
 
-  EXPECT_EQ(2, kp->poll(pollfds, 2, 0));
+  ASSERT_EQ(2, kp->poll(pollfds, 2, 0));
   // TODO(noelallen) fix poll based on open mode
   // EXPECT_EQ(0, pollfds[0].revents);
   // Bug 291018
-  EXPECT_EQ(POLLOUT, pollfds[1].revents);
+  ASSERT_EQ(POLLOUT, pollfds[1].revents);
 
   CloseFDs(fds, 2);
 }
@@ -281,9 +300,11 @@ TEST_F(SelectPollTest, SelectMemPipe) {
   // Both FDs for regular files should be read/write but not exception.
   fds[0] = kp->open("/test.txt", O_CREAT | O_WRONLY);
   fds[1] = kp->open("/test.txt", O_RDONLY);
+  ASSERT_GT(fds[0], -1);
+  ASSERT_GT(fds[1], -1);
   SetFDs(fds, 2);
 
-  EXPECT_EQ(4, kp->select(fds[1] + 1, &rd_set, &wr_set, &ex_set, &tv));
+  ASSERT_EQ(4, kp->select(fds[1] + 1, &rd_set, &wr_set, &ex_set, &tv));
   EXPECT_NE(0, FD_ISSET(fds[0], &rd_set));
   EXPECT_NE(0, FD_ISSET(fds[1], &rd_set));
   EXPECT_NE(0, FD_ISSET(fds[0], &wr_set));
@@ -294,10 +315,10 @@ TEST_F(SelectPollTest, SelectMemPipe) {
   CloseFDs(fds, 2);
 
   // The write FD should select for write-only, read FD should not select
-  EXPECT_EQ(0, kp->pipe(fds));
+  ASSERT_EQ(0, kp->pipe(fds));
   SetFDs(fds, 2);
 
-  EXPECT_EQ(2, kp->select(fds[1] + 1, &rd_set, &wr_set, &ex_set, &tv));
+  ASSERT_EQ(2, kp->select(fds[1] + 1, &rd_set, &wr_set, &ex_set, &tv));
   EXPECT_EQ(0, FD_ISSET(fds[0], &rd_set));
   EXPECT_EQ(0, FD_ISSET(fds[1], &rd_set));
   // TODO(noelallen) fix poll based on open mode

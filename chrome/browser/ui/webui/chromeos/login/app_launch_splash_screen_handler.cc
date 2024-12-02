@@ -12,13 +12,13 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/webui/web_ui_util.h"
+#include "ui/base/webui/web_ui_util.h"
 
 namespace {
 
 const char kJsScreenPath[] = "login.AppLaunchSplashScreen";
 
-} // namespace
+}  // namespace
 
 namespace chromeos {
 
@@ -142,6 +142,10 @@ int AppLaunchSplashScreenHandler::GetProgressMessageFromState(
       return IDS_APP_START_NETWORK_WAIT_MESSAGE;
     case APP_LAUNCH_STATE_INSTALLING_APPLICATION:
       return IDS_APP_START_APP_WAIT_MESSAGE;
+    case APP_LAUNCH_STATE_WAITING_APP_WINDOW:
+      return IDS_APP_START_WAIT_FOR_APP_WINDOW_MESSAGE;
+    case APP_LAUNCH_STATE_NETWORK_WAIT_TIMEOUT:
+      return IDS_APP_START_NETWORK_WAIT_TIMEOUT_MESSAGE;
   }
   return IDS_APP_START_NETWORK_WAIT_MESSAGE;
 }

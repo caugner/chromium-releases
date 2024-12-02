@@ -13,6 +13,8 @@
 namespace media {
 namespace cast {
 
+// These values are arbitrary only for the purpose of testing.
+
 // Sender report.
 static const int kNtpHigh = 0x01020304;
 static const int kNtpLow = 0x05060708;
@@ -32,7 +34,7 @@ static const int kLastRr = 0x34561234;
 static const int kDelayLastRr = 1000;
 
 // REMB.
-static const int kRembBitrate = 524286;
+static const int kRembBitrate = 52428;
 
 // RPSI.
 static const int kPayloadtype = 126;
@@ -54,6 +56,8 @@ class TestRtcpPacketBuilder {
   TestRtcpPacketBuilder();
 
   void AddSr(uint32 sender_ssrc, int number_of_report_blocks);
+  void AddSrWithNtp(uint32 sender_ssrc, uint32 ntp_high, uint32 ntp_low,
+                    uint32 rtp_timestamp);
   void AddRr(uint32 sender_ssrc, int number_of_report_blocks);
   void AddRb(uint32 rtp_ssrc);
   void AddSdesCname(uint32 sender_ssrc, const std::string& c_name);
@@ -90,5 +94,3 @@ class TestRtcpPacketBuilder {
 }  // namespace media
 
 #endif //  MEDIA_CAST_RTCP_TEST_RTCP_PACKET_BUILDER_H_
-
-

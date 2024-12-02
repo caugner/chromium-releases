@@ -37,6 +37,10 @@ void CommandHandler::GetLocalizedValues(content::WebUIDataSource* source) {
       l10n_util::GetStringUTF16(IDS_EXTENSION_TYPE_SHORTCUT));
   source->AddString("extensionCommandsDelete",
       l10n_util::GetStringUTF16(IDS_EXTENSION_DELETE_SHORTCUT));
+  source->AddString("extensionCommandsGlobal",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_COMMANDS_GLOBAL));
+  source->AddString("extensionCommandsRegular",
+      l10n_util::GetStringUTF16(IDS_EXTENSION_COMMANDS_NOT_GLOBAL));
   source->AddString("ok", l10n_util::GetStringUTF16(IDS_OK));
 }
 
@@ -54,6 +58,9 @@ void CommandHandler::RegisterMessages() {
       base::Unretained(this)));
   web_ui()->RegisterMessageCallback("setExtensionCommandShortcut",
       base::Bind(&CommandHandler::HandleSetExtensionCommandShortcut,
+      base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("setCommandScope",
+      base::Bind(&CommandHandler::HandleSetCommandScope,
       base::Unretained(this)));
 }
 
@@ -94,6 +101,24 @@ void CommandHandler::HandleSetExtensionCommandShortcut(
   command_service->UpdateKeybindingPrefs(extension_id, command_name, keystroke);
 
   UpdateCommandDataOnPage();
+}
+
+void CommandHandler::HandleSetCommandScope(
+    const base::ListValue* args) {
+  std::string extension_id;
+  std::string command_name;
+  bool global;
+  if (!args->GetString(0, &extension_id) ||
+      !args->GetString(1, &command_name) ||
+      !args->GetBoolean(2, &global)) {
+    NOTREACHED();
+    return;
+  }
+
+  Profile* profile = Profile::FromWebUI(web_ui());
+  CommandService* command_service = CommandService::Get(profile);
+  if (command_service->SetScope(extension_id, command_name, global))
+    UpdateCommandDataOnPage();
 }
 
 void CommandHandler::HandleSetShortcutHandlingSuspended(const ListValue* args) {
@@ -149,12 +174,14 @@ void CommandHandler::GetAllCommands(base::DictionaryValue* commands) {
     extensions::CommandMap named_commands;
     if (command_service->GetNamedCommands((*extension)->id(),
                                           CommandService::ALL,
+                                          extensions::CommandService::ANY_SCOPE,
                                           &named_commands)) {
       for (extensions::CommandMap::const_iterator iter = named_commands.begin();
            iter != named_commands.end(); ++iter) {
-        ui::Accelerator shortcut_assigned =
-            command_service->FindShortcutForCommand(
+        extensions::Command command = command_service->FindCommandByName(
                 (*extension)->id(), iter->second.command_name());
+        ui::Accelerator shortcut_assigned = command.accelerator();
+
         active = (shortcut_assigned.key_code() != ui::VKEY_UNKNOWN);
 
         extensions_list->Append(

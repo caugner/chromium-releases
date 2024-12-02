@@ -41,9 +41,6 @@ using notifier::ChromeNotifierService;
 
 namespace {
 
-const int kNotificationPriority = static_cast<int>(
-    message_center::LOW_PRIORITY);
-
 // Extract notification id from syncer::SyncData.
 std::string GetNotificationId(const SyncData& sync_data) {
   SyncedNotificationSpecifics specifics = sync_data.GetSpecifics().
@@ -382,6 +379,11 @@ TEST_F(ChromeNotifierServiceTest, ProcessSyncChangesNonEmptyModel) {
   EXPECT_TRUE(notifier.FindNotificationById(kKey2));
   EXPECT_FALSE(notifier.FindNotificationById(kKey3));
   EXPECT_TRUE(notifier.FindNotificationById(kKey4));
+
+  // Verify that the first run preference is now set to false.
+  bool first_run = notifier.profile()->GetPrefs()->GetBoolean(
+      prefs::kSyncedNotificationFirstRun);
+  EXPECT_NE(true, first_run);
 }
 
 // Process sync changes that arrive before the change they are supposed to
@@ -679,6 +681,11 @@ TEST_F(ChromeNotifierServiceTest, InitializePrefsTest) {
           prefs::kInitializedSyncedNotificationSendingServices);
   iter = initialized_set->Find(service_name_value);
   EXPECT_NE(initialized_set->end(), iter);
+
+  // Verify that synced notification first run pref is set to "true".
+  bool first_run = notifier.profile()->GetPrefs()->GetBoolean(
+      prefs::kSyncedNotificationFirstRun);
+  EXPECT_EQ(true, first_run);
 }
 
 TEST_F(ChromeNotifierServiceTest,

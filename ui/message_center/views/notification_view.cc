@@ -108,7 +108,8 @@ bool HasAlpha(gfx::ImageSkia& image, views::Widget* widget) {
   }
 
   // Extract that bitmap's alpha and look for a non-opaque pixel there.
-  SkBitmap bitmap = image.GetRepresentation(factor).sk_bitmap();
+  SkBitmap bitmap =
+      image.GetRepresentation(ui::GetImageScale(factor)).sk_bitmap();
   if (!bitmap.isNull()) {
     SkBitmap alpha;
     alpha.setConfig(SkBitmap::kA1_Config, bitmap.width(), bitmap.height(), 0);
@@ -454,7 +455,8 @@ NotificationView::NotificationView(const Notification& notification,
                                    MessageCenter* message_center,
                                    MessageCenterTray* tray,
                                    bool expanded)
-    : MessageView(notification, message_center, tray, expanded) {
+    : MessageView(notification, message_center, tray, expanded),
+      clickable_(notification.clickable()){
   std::vector<string16> accessible_lines;
 
   // Create the opaque background that's above the view's shadow.
@@ -557,11 +559,12 @@ NotificationView::NotificationView(const Notification& notification,
     icon_view->SetImageSize(gfx::Size(kLegacyIconSize, kLegacyIconSize));
     icon_view->SetHorizontalAlignment(views::ImageView::CENTER);
     icon_view->SetVerticalAlignment(views::ImageView::CENTER);
-    icon_view->set_background(MakeBackground(kLegacyIconBackgroundColor));
     icon_view_ = icon_view;
   } else {
     icon_view_ = new ProportionalImageView(icon);
   }
+
+  icon_view_->set_background(MakeBackground(kIconBackgroundColor));
 
   // Create the bottom_view_, which collects into a vertical box all content
   // below the notification icon except for the expand button.
@@ -711,7 +714,7 @@ views::View* NotificationView::GetEventHandlerForPoint(
 }
 
 gfx::NativeCursor NotificationView::GetCursor(const ui::MouseEvent& event) {
-  if (!message_center()->HasClickedListener(notification_id()))
+  if (!clickable_ || !message_center()->HasClickedListener(notification_id()))
     return views::View::GetCursor(event);
 
 #if defined(USE_AURA)

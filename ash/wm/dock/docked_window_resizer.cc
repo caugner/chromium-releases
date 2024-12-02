@@ -16,11 +16,13 @@
 #include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/dock/docked_window_layout_manager.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_util.h"
 #include "ash/wm/workspace/magnetism_matcher.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/window_tree_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -40,7 +42,7 @@ DockedWindowLayoutManager* GetDockedLayoutManagerAtPoint(
   gfx::Display display = ScreenAsh::FindDisplayContainingPoint(point);
   if (!display.is_valid())
     return NULL;
-  aura::RootWindow* root = Shell::GetInstance()->display_controller()->
+  aura::Window* root = Shell::GetInstance()->display_controller()->
       GetRootWindowForDisplayId(display.id());
   aura::Window* dock_container = Shell::GetContainer(
       root, kShellWindowId_DockedContainer);
@@ -187,11 +189,6 @@ bool DockedWindowResizer::MaybeSnapToEdge(const gfx::Rect& bounds,
       GetTarget()->parent(),
       dock_layout_->dock_container()->GetBoundsInScreen());
 
-  // Distance in pixels that the cursor must move past an edge for a window
-  // to move beyond that edge. Same constant as in WorkspaceWindowResizer
-  // is used for consistency.
-  const int kStickyDistance = WorkspaceWindowResizer::kStickyDistancePixels;
-
   // Short-range magnetism when retaining docked state. Same constant as in
   // MagnetismMatcher is used for consistency.
   const int kSnapToDockDistance = MagnetismMatcher::kMagneticDistance;
@@ -199,7 +196,7 @@ bool DockedWindowResizer::MaybeSnapToEdge(const gfx::Rect& bounds,
   if (dock_alignment == DOCKED_ALIGNMENT_LEFT ||
       dock_alignment == DOCKED_ALIGNMENT_NONE) {
     const int distance = bounds.x() - dock_bounds.x();
-    if (distance < kSnapToDockDistance && distance > -kStickyDistance) {
+    if (distance < kSnapToDockDistance && distance > 0) {
       offset->set_x(-distance);
       return true;
     }
@@ -207,7 +204,7 @@ bool DockedWindowResizer::MaybeSnapToEdge(const gfx::Rect& bounds,
   if (dock_alignment == DOCKED_ALIGNMENT_RIGHT ||
       dock_alignment == DOCKED_ALIGNMENT_NONE) {
     const int distance = dock_bounds.right() - bounds.right();
-    if (distance < kSnapToDockDistance && distance > -kStickyDistance) {
+    if (distance < kSnapToDockDistance && distance > 0) {
       offset->set_x(distance);
       return true;
     }
@@ -233,7 +230,7 @@ void DockedWindowResizer::StartedDragging() {
     aura::Window* docked_container = Shell::GetContainer(
         GetTarget()->GetRootWindow(),
         kShellWindowId_DockedContainer);
-    docked_container->AddChild(GetTarget());
+    wm::ReparentChildWithTransientChildren(docked_container, GetTarget());
   }
   if (is_docked_)
     dock_layout_->DockDraggedWindow(GetTarget());
@@ -242,6 +239,7 @@ void DockedWindowResizer::StartedDragging() {
 void DockedWindowResizer::FinishedDragging() {
   if (!did_move_or_resize_)
     return;
+  did_move_or_resize_ = false;
   aura::Window* window = GetTarget();
   wm::WindowState* window_state = wm::GetWindowState(window);
   const bool attached_panel =
@@ -249,6 +247,16 @@ void DockedWindowResizer::FinishedDragging() {
       window_state->panel_attached();
   const bool is_resized =
       (details_.bounds_change & WindowResizer::kBoundsChange_Resizes) != 0;
+
+  // When drag is completed the dragged docked window is resized to the bounds
+  // calculated by the layout manager that conform to other docked windows.
+  if (!attached_panel && is_docked_ && !is_resized) {
+    gfx::Rect bounds = ScreenAsh::ConvertRectFromScreen(
+        window->parent(), dock_layout_->dragged_bounds());
+    if (!bounds.IsEmpty() && bounds.width() != window->bounds().width()) {
+      window->SetBounds(bounds);
+    }
+  }
   // No longer restore to pre-docked bounds if a window has been resized.
   if (is_resized && is_docked_)
     window_state->ClearRestoreBounds();
@@ -260,18 +268,20 @@ void DockedWindowResizer::FinishedDragging() {
   if ((is_resized || !attached_panel) &&
       is_docked_ != (window->parent() == dock_container)) {
     if (is_docked_) {
-      dock_container->AddChild(window);
+      wm::ReparentChildWithTransientChildren(dock_container, window);
     } else if (window->parent()->id() == kShellWindowId_DockedContainer) {
       // Reparent the window back to workspace.
-      // We need to be careful to give SetDefaultParentByRootWindow location in
+      // We need to be careful to give ParentWindowWithContext a location in
       // the right root window (matching the logic in DragWindowResizer) based
       // on which root window a mouse pointer is in. We want to undock into the
       // right screen near the edge of a multiscreen setup (based on where the
       // mouse is).
       gfx::Rect near_last_location(last_location_, gfx::Size());
       // Reparenting will cause Relayout and possible dock shrinking.
-      window->SetDefaultParentByRootWindow(window->GetRootWindow(),
-                                           near_last_location);
+      aura::Window* previous_parent = window->parent();
+      aura::client::ParentWindowWithContext(window, window, near_last_location);
+      if (window->parent() != previous_parent)
+        wm::ReparentTransientChildrenOfChild(window->parent(), window);
     }
   }
   dock_layout_->FinishDragging();

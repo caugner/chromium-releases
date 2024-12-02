@@ -12,18 +12,20 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/features/base_feature_provider.h"
-#include "chrome/common/extensions/permissions/api_permission_set.h"
-#include "chrome/common/extensions/permissions/chrome_scheme_hosts.h"
-#include "chrome/common/extensions/permissions/permission_set.h"
-#include "chrome/common/extensions/permissions/permissions_info.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/extensions_client.h"
 #include "extensions/common/features/feature.h"
+#include "extensions/common/features/feature_provider.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/permissions/api_permission_set.h"
+#include "extensions/common/permissions/permission_message_provider.h"
+#include "extensions/common/permissions/permission_set.h"
+#include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/switches.h"
 #include "extensions/common/url_pattern_set.h"
 #include "extensions/common/user_script.h"
@@ -37,21 +39,6 @@ namespace errors = manifest_errors;
 namespace {
 
 PermissionsData::PolicyDelegate* g_policy_delegate = NULL;
-
-bool ContainsManifestForbiddenPermission(const APIPermissionSet& apis,
-                                         string16* error) {
-  CHECK(error);
-  for (APIPermissionSet::const_iterator iter = apis.begin();
-       iter != apis.end(); ++iter) {
-    if ((*iter)->ManifestEntryForbidden()) {
-      *error = ErrorUtils::FormatErrorMessageUTF16(
-          errors::kPermissionNotAllowedInManifest,
-          (*iter)->info()->name());
-      return true;
-    }
-  }
-  return false;
-}
 
 // Custom checks for the experimental permission that can't be expressed in
 // _permission_features.json.
@@ -80,7 +67,7 @@ bool CanSpecifyHostPermission(const Extension* extension,
                               const APIPermissionSet& permissions) {
   if (!pattern.match_all_urls() &&
       pattern.MatchesScheme(chrome::kChromeUIScheme)) {
-    URLPatternSet chrome_scheme_hosts =
+    URLPatternSet chrome_scheme_hosts = ExtensionsClient::Get()->
         GetPermittedChromeSchemeHosts(extension, permissions);
     if (chrome_scheme_hosts.ContainsPattern(pattern))
       return true;
@@ -134,7 +121,7 @@ bool ParseHelper(Extension* extension,
   // Verify feature availability of permissions.
   std::vector<APIPermission::ID> to_remove;
   FeatureProvider* permission_features =
-      BaseFeatureProvider::GetByName("permission");
+      FeatureProvider::GetPermissionFeatures();
   for (APIPermissionSet::const_iterator iter = api_permissions->begin();
        iter != api_permissions->end(); ++iter) {
     Feature* feature = permission_features->GetFeature(iter->name());
@@ -228,9 +215,11 @@ bool ParseHelper(Extension* extension,
       host_permissions->AddPattern(pattern);
       // We need to make sure all_urls matches chrome://favicon and (maybe)
       // chrome://thumbnail, so add them back in to host_permissions separately.
-      if (pattern.match_all_urls())
-        host_permissions->AddPatterns(GetPermittedChromeSchemeHosts(
-            extension, *api_permissions));
+      if (pattern.match_all_urls()) {
+        host_permissions->AddPatterns(
+            ExtensionsClient::Get()->GetPermittedChromeSchemeHosts(
+                extension, *api_permissions));
+      }
       continue;
     }
 
@@ -434,8 +423,8 @@ PermissionMessages PermissionsData::GetPermissionMessages(
   if (ShouldSkipPermissionWarnings(extension)) {
     return PermissionMessages();
   } else {
-    return GetActivePermissions(extension)->GetPermissionMessages(
-        extension->GetType());
+    return PermissionMessageProvider::Get()->GetPermissionMessages(
+        GetActivePermissions(extension), extension->GetType());
   }
 }
 
@@ -446,8 +435,8 @@ std::vector<string16> PermissionsData::GetPermissionMessageStrings(
   if (ShouldSkipPermissionWarnings(extension)) {
     return std::vector<string16>();
   } else {
-    return GetActivePermissions(extension)->GetWarningMessages(
-        extension->GetType());
+    return PermissionMessageProvider::Get()->GetWarningMessages(
+        GetActivePermissions(extension), extension->GetType());
   }
 }
 
@@ -458,8 +447,8 @@ std::vector<string16> PermissionsData::GetPermissionMessageDetailsStrings(
   if (ShouldSkipPermissionWarnings(extension)) {
     return std::vector<string16>();
   } else {
-    return GetActivePermissions(extension)->GetWarningMessagesDetails(
-        extension->GetType());
+    return PermissionMessageProvider::Get()->GetWarningMessagesDetails(
+        GetActivePermissions(extension), extension->GetType());
   }
 }
 
@@ -548,16 +537,11 @@ bool PermissionsData::CanExecuteScriptEverywhere(const Extension* extension) {
   if (extension->location() == Manifest::COMPONENT)
     return true;
 
-  const Extension::ScriptingWhitelist* whitelist =
-      Extension::GetScriptingWhitelist();
+  const ExtensionsClient::ScriptingWhitelist& whitelist =
+      ExtensionsClient::Get()->GetScriptingWhitelist();
 
-  for (Extension::ScriptingWhitelist::const_iterator iter = whitelist->begin();
-       iter != whitelist->end(); ++iter) {
-    if (extension->id() == *iter)
-      return true;
-  }
-
-  return false;
+  return std::find(whitelist.begin(), whitelist.end(), extension->id()) !=
+      whitelist.end();
 }
 
 // static
@@ -614,13 +598,6 @@ bool PermissionsData::ParsePermissions(Extension* extension, string16* error) {
                    &initial_optional_permissions_->api_permissions,
                    &initial_optional_permissions_->host_permissions,
                    error)) {
-    return false;
-  }
-
-  if (ContainsManifestForbiddenPermission(
-          initial_required_permissions_->api_permissions, error) ||
-      ContainsManifestForbiddenPermission(
-          initial_optional_permissions_->api_permissions, error)) {
     return false;
   }
 

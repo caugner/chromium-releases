@@ -10,7 +10,6 @@
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_tracker.h"
@@ -23,6 +22,7 @@ namespace corewm {
 namespace {
 
 bool ShouldHideCursorOnKeyEvent(const ui::KeyEvent& event) {
+#if defined(OS_CHROMEOS)
   // All alt and control key commands are ignored.
   if (event.IsAltDown() || event.IsControlDown())
     return false;
@@ -64,6 +64,21 @@ bool ShouldHideCursorOnKeyEvent(const ui::KeyEvent& event) {
     return false;
 
   return true;
+#else  // !defined(OS_CHROMEOS)
+  return false;
+#endif  // defined(OS_CHROMEOS)
+}
+
+// Returns true if the cursor should be hidden on touch events.
+bool ShouldHideCursorOnTouch() {
+#if defined(OS_CHROMEOS)
+  return true;
+#else
+  // Not necessary on windows as windows does it for us. If we do need this
+  // funcionality on linux (non-chromeos) we need to make sure
+  // CompoundEventFilter shows on the right root (it currently doesn't always).
+  return false;
+#endif
 }
 
 }  // namespace
@@ -120,7 +135,7 @@ void CompoundEventFilter::UpdateCursor(aura::Window* target,
                                        ui::MouseEvent* event) {
   // If drag and drop is in progress, let the drag drop client set the cursor
   // instead of setting the cursor here.
-  aura::RootWindow* root_window = target->GetRootWindow();
+  aura::Window* root_window = target->GetRootWindow();
   aura::client::DragDropClient* drag_drop_client =
       aura::client::GetDragDropClient(root_window);
   if (drag_drop_client && drag_drop_client->IsDragDropInProgress())
@@ -170,6 +185,7 @@ void CompoundEventFilter::FilterTouchEvent(ui::TouchEvent* event) {
 void CompoundEventFilter::SetCursorVisibilityOnEvent(aura::Window* target,
                                                      ui::Event* event,
                                                      bool show) {
+  DCHECK(ShouldHideCursorOnTouch());
   if (event->flags() & ui::EF_IS_SYNTHESIZED)
     return;
 
@@ -238,8 +254,10 @@ void CompoundEventFilter::OnMouseEvent(ui::MouseEvent* event) {
       event->type() == ui::ET_MOUSE_MOVED ||
       event->type() == ui::ET_MOUSE_PRESSED ||
       event->type() == ui::ET_MOUSEWHEEL) {
-    SetMouseEventsEnableStateOnEvent(window, event, true);
-    SetCursorVisibilityOnEvent(window, event, true);
+    if (ShouldHideCursorOnTouch()) {
+      SetMouseEventsEnableStateOnEvent(window, event, true);
+      SetCursorVisibilityOnEvent(window, event, true);
+    }
     UpdateCursor(window, event);
   }
 
@@ -251,8 +269,9 @@ void CompoundEventFilter::OnScrollEvent(ui::ScrollEvent* event) {
 
 void CompoundEventFilter::OnTouchEvent(ui::TouchEvent* event) {
   FilterTouchEvent(event);
-  if (!event->handled() && event->type() == ui::ET_TOUCH_PRESSED &&
-      !aura::Env::GetInstance()->is_mouse_button_down()) {
+  if (ShouldHideCursorOnTouch() && !event->handled() &&
+      event->type() == ui::ET_TOUCH_PRESSED &&
+      !aura::Env::GetInstance()->IsMouseButtonDown()) {
     SetMouseEventsEnableStateOnEvent(
         static_cast<aura::Window*>(event->target()), event, false);
   }

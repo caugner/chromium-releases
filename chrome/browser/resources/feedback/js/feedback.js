@@ -12,6 +12,22 @@ var FEEDBACK_LANDING_PAGE =
  */
 var MAX_ATTACH_FILE_SIZE = 3 * 1024 * 1024;
 
+/**
+ * @type {number}
+ * @const
+ */
+var FEEDBACK_MIN_WIDTH = 500;
+/**
+ * @type {number}
+ * @const
+ */
+var FEEDBACK_MIN_HEIGHT = 625;
+
+/** @type {number}
+ * @const
+ */
+var CONTENT_MARGIN_HEIGHT = 40;
+
 var attachedFileBlob = null;
 var lastReader = null;
 
@@ -72,6 +88,15 @@ function openSystemInfoWindow() {
 }
 
 /**
+ * Opens a new window with chrome://slow_trace, downloading performance data.
+ */
+function openSlowTraceWindow() {
+  chrome.windows.create(
+      {url: 'chrome://slow_trace/tracing.zip#' + feedbackInfo.traceId},
+      function(win) {});
+}
+
+/**
  * Sends the report; after the report is sent, we need to be redirected to
  * the landing page, but we shouldn't be able to navigate back, hence
  * we open the landing page in a new tab and sendReport closes this tab.
@@ -85,6 +110,8 @@ function sendReport() {
     return false;
   }
 
+  // Prevent double clicking from sending additional reports.
+  $('send-report-button').disabled = true;
   console.log('Feedback: Sending report');
   if (!feedbackInfo.attachedFile && attachedFileBlob) {
     feedbackInfo.attachedFile = { name: $('attach-file').value,
@@ -176,16 +203,29 @@ function performanceFeedbackChanged() {
 
     $('screenshot-checkbox').disabled = true;
     $('screenshot-checkbox').checked = false;
-
-    $('sys-info-checkbox').disabled = true;
-    $('sys-info-checkbox').checked = false;
   } else {
     $('attach-file').disabled = false;
     $('screenshot-checkbox').disabled = false;
-    $('sys-info-checkbox').disabled = false;
   }
 }
 </if>
+
+function resizeAppWindow() {
+  // We pick the width from the titlebar, which has no margins.
+  var width = $('title-bar').scrollWidth;
+  if (width < FEEDBACK_MIN_WIDTH)
+    width = FEEDBACK_MIN_WIDTH;
+
+  // We get the height by adding the titlebar height and the content height +
+  // margins. We can't get the margins for the content-pane here by using
+  // style.margin - the variable seems to not exist.
+  var height = $('title-bar').scrollHeight +
+      $('content-pane').scrollHeight + CONTENT_MARGIN_HEIGHT;
+  if (height < FEEDBACK_MIN_HEIGHT)
+    height = FEEDBACK_MIN_HEIGHT;
+
+  chrome.app.window.current().resizeTo(width, height);
+}
 
 /**
  * Initializes our page.
@@ -199,9 +239,14 @@ function performanceFeedbackChanged() {
  * .) Screenshot taken         -> . Show Feedback window.
  */
 function initialize() {
+  // TODO(rkc):  Remove logging once crbug.com/284662 is closed.
+  console.log('FEEDBACK_DEBUG: feedback.js: initialize()');
+
   // Add listener to receive the feedback info object.
   chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.sentFromEventPage) {
+      // TODO(rkc):  Remove logging once crbug.com/284662 is closed.
+      console.log('FEEDBACK_DEBUG: Received feedbackInfo.');
       feedbackInfo = request.data;
       $('description-text').textContent = feedbackInfo.description;
       if (feedbackInfo.pageUrl)
@@ -210,6 +255,11 @@ function initialize() {
       takeScreenshot(function(screenshotDataUrl) {
         $('screenshot-image').src = screenshotDataUrl;
         feedbackInfo.screenshot = dataUrlToBlob(screenshotDataUrl);
+        // TODO(rkc):  Remove logging once crbug.com/284662 is closed.
+        console.log('FEEDBACK_DEBUG: Taken screenshot. Showing window.');
+        window.webkitRequestAnimationFrame(function() {
+          resizeAppWindow();
+        });
         chrome.app.window.current().show();
       });
 
@@ -235,6 +285,7 @@ function initialize() {
         $('performance-info-area').hidden = false;
         $('performance-info-checkbox').checked = true;
         performanceFeedbackChanged();
+        $('performance-info-link').onclick = openSlowTraceWindow;
       }
 </if>
 
@@ -246,6 +297,8 @@ function initialize() {
   });
 
   window.addEventListener('DOMContentLoaded', function() {
+    // TODO(rkc):  Remove logging once crbug.com/284662 is closed.
+    console.log('FEEDBACK_DEBUG: feedback.js: DOMContentLoaded');
     // Ready to receive the feedback object.
     chrome.runtime.sendMessage({ready: true});
 

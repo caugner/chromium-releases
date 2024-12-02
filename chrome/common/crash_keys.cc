@@ -11,6 +11,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/installer/util/google_update_settings.h"
 
 #if defined(OS_MACOSX)
 #include "breakpad/src/common/simple_string_dictionary.h"
@@ -51,12 +52,17 @@ COMPILE_ASSERT(kMediumSize <= kSingleChunkLength,
                mac_has_medium_size_crash_key_chunks);
 #endif
 
+const char kClientID[] = "guid";
+
 const char kChannel[] = "channel";
 
 const char kActiveURL[] = "url-chunk";
 
 const char kSwitch[] = "switch-%" PRIuS;
 const char kNumSwitches[] = "num-switches";
+
+const char kNumVariations[] = "num-experiments";
+const char kVariations[] = "variations";
 
 const char kExtensionID[] = "extension-%" PRIuS;
 const char kNumExtensionsCount[] = "num-extensions";
@@ -70,11 +76,11 @@ const char kGPUDeviceID[] = "gpu-devid";
 const char kGPUDriverVersion[] = "gpu-driver";
 const char kGPUPixelShaderVersion[] = "gpu-psver";
 const char kGPUVertexShaderVersion[] = "gpu-vsver";
-#if defined(OS_LINUX)
+#if defined(OS_MACOSX)
+const char kGPUGLVersion[] = "gpu-glver";
+#elif defined(OS_POSIX)
 const char kGPUVendor[] = "gpu-gl-vendor";
 const char kGPURenderer[] = "gpu-gl-renderer";
-#elif defined(OS_MACOSX)
-const char kGPUGLVersion[] = "gpu-glver";
 #endif
 
 const char kPrinterInfo[] = "prn-info-%" PRIuS;
@@ -96,8 +102,6 @@ const char kSendAction[] = "sendaction";
 const char kZombie[] = "zombie";
 const char kZombieTrace[] = "zombie_dealloc_bt";
 
-const char kPasswordThreadDtorTrace[] = "password_thread_dtor";
-
 }  // namespace mac
 #endif
 
@@ -105,9 +109,12 @@ size_t RegisterChromeCrashKeys() {
   // The following keys may be chunked by the underlying crash logging system,
   // but ultimately constitute a single key-value pair.
   base::debug::CrashKey fixed_keys[] = {
+    { kClientID, kSmallSize },
     { kChannel, kSmallSize },
     { kActiveURL, kLargeSize },
     { kNumSwitches, kSmallSize },
+    { kNumVariations, kSmallSize },
+    { kVariations, kLargeSize },
     { kNumExtensionsCount, kSmallSize },
     { kNumberOfViews, kSmallSize },
 #if !defined(OS_ANDROID)
@@ -117,11 +124,11 @@ size_t RegisterChromeCrashKeys() {
     { kGPUDriverVersion, kSmallSize },
     { kGPUPixelShaderVersion, kSmallSize },
     { kGPUVertexShaderVersion, kSmallSize },
-#if defined(OS_LINUX)
+#if defined(OS_MACOSX)
+    { kGPUGLVersion, kSmallSize },
+#elif defined(OS_POSIX)
     { kGPUVendor, kSmallSize },
     { kGPURenderer, kSmallSize },
-#elif defined(OS_MACOSX)
-    { kGPUGLVersion, kSmallSize },
 #endif
 
     // content/:
@@ -137,7 +144,6 @@ size_t RegisterChromeCrashKeys() {
     { mac::kSendAction, kMediumSize },
     { mac::kZombie, kMediumSize },
     { mac::kZombieTrace, kMediumSize },
-    { mac::kPasswordThreadDtorTrace, kLargeSize },
     // content/:
     { "channel_error_bt", kMediumSize },
     { "remove_route_bt", kMediumSize },
@@ -203,6 +209,17 @@ size_t RegisterChromeCrashKeys() {
                                     kSingleChunkLength);
 }
 
+void SetClientID(const std::string& client_id) {
+  std::string guid(client_id);
+  // Remove all instance of '-' char from the GUID. So BCD-WXY becomes BCDWXY.
+  ReplaceSubstringsAfterOffset(&guid, 0, "-", "");
+  if (guid.empty())
+    return;
+
+  base::debug::SetCrashKeyValue(kClientID, guid);
+  GoogleUpdateSettings::SetMetricsId(guid);
+}
+
 static bool IsBoringSwitch(const std::string& flag) {
 #if defined(OS_WIN)
   return StartsWithASCII(flag, "--channel=", true) ||
@@ -221,7 +238,7 @@ static bool IsBoringSwitch(const std::string& flag) {
          StartsWithASCII(flag, "--plugin-path=", true) ||
 
          // This is too big so we end up truncating it anyway.
-         StartsWithASCII(flag, "--force-fieldtest=", true) ||
+         StartsWithASCII(flag, "--force-fieldtrials=", true) ||
 
          // These surround the flags that were added by about:flags, it lets
          // you distinguish which flags were added manually via the command
@@ -260,6 +277,10 @@ void SetSwitchesFromCommandLine(const CommandLine* command_line) {
     if (IsBoringSwitch(switch_str))
       continue;
 
+    // Stop if there are too many switches.
+    if (i > crash_keys::kSwitchesMaxCount)
+      break;
+
     std::string key = base::StringPrintf(kSwitch, key_i++);
     base::debug::SetCrashKeyValue(key, switch_str);
   }
@@ -268,6 +289,25 @@ void SetSwitchesFromCommandLine(const CommandLine* command_line) {
   for (; key_i <= kSwitchesMaxCount; ++key_i) {
     base::debug::ClearCrashKey(base::StringPrintf(kSwitch, key_i));
   }
+}
+
+void SetVariationsList(const std::vector<std::string>& variations) {
+  base::debug::SetCrashKeyValue(kNumVariations,
+      base::StringPrintf("%" PRIuS, variations.size()));
+
+  std::string variations_string;
+  variations_string.reserve(kLargeSize);
+
+  for (size_t i = 0; i < variations.size(); ++i) {
+    const std::string& variation = variations[i];
+    // Do not truncate an individual experiment.
+    if (variations_string.size() + variation.size() >= kLargeSize)
+      break;
+    variations_string += variation;
+    variations_string += ",";
+  }
+
+  base::debug::SetCrashKeyValue(kVariations, variations_string);
 }
 
 void SetActiveExtensions(const std::set<std::string>& extensions) {

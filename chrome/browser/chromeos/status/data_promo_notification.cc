@@ -4,12 +4,8 @@
 
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
 
-#include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "ash/system/chromeos/network/network_connect.h"
 #include "ash/system/system_notifier.h"
-#include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_notifier.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,8 +15,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/login/login_state.h"
@@ -43,10 +39,6 @@
 namespace chromeos {
 
 namespace {
-
-// Time in milliseconds to delay showing of promo
-// notification when Chrome window is not on screen.
-const int kPromoShowDelayMs = 10000;
 
 const int kNotificationCountPrefDefault = -1;
 
@@ -132,12 +124,10 @@ void NotificationClicked(const std::string& service_path,
   if (info_url.empty())
     ash::network_connect::ShowNetworkSettings(service_path);
 
-  Browser* browser = chrome::FindOrCreateTabbedBrowser(
+  chrome::ScopedTabbedBrowserDisplayer displayer(
       ProfileManager::GetDefaultProfileOrOffTheRecord(),
       chrome::HOST_DESKTOP_TYPE_ASH);
-  if (!browser)
-    return;
-  chrome::ShowSingletonTab(browser, GURL(info_url));
+  chrome::ShowSingletonTab(displayer.browser(), GURL(info_url));
 }
 
 }  // namespace
@@ -165,7 +155,7 @@ void DataPromoNotification::RegisterPrefs(PrefRegistrySimple* registry) {
 
 void DataPromoNotification::NetworkPropertiesUpdated(
     const NetworkState* network) {
-  if (!network || network->type() != flimflam::kTypeCellular)
+  if (!network || network->type() != shill::kTypeCellular)
     return;
   ShowOptionalMobileDataPromoNotification();
 }
@@ -184,7 +174,7 @@ void DataPromoNotification::ShowOptionalMobileDataPromoNotification() {
     return;
   const NetworkState* default_network =
       NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-  if (!default_network || default_network->type() != flimflam::kTypeCellular)
+  if (!default_network || default_network->type() != shill::kTypeCellular)
     return;
   // When requesting a network connection, do not show the notification.
   if (NetworkHandler::Get()->network_connection_handler()->
@@ -214,7 +204,7 @@ void DataPromoNotification::ShowOptionalMobileDataPromoNotification() {
   }
 
   int icon_id;
-  if (default_network->network_technology() == flimflam::kNetworkTechnologyLte)
+  if (default_network->network_technology() == shill::kNetworkTechnologyLte)
     icon_id = IDR_AURA_UBER_TRAY_NOTIFICATION_LTE;
   else
     icon_id = IDR_AURA_UBER_TRAY_NOTIFICATION_3G;

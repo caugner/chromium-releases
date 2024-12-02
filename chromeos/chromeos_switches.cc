@@ -18,9 +18,6 @@ const char kAshWebUIInit[]                  = "ash-webui-init";
 // Enables overriding the path for the default authentication extension.
 const char kAuthExtensionPath[]             = "auth-ext-path";
 
-// Enables overriding the Chrome OS board type when running on Linux.
-const char kChromeOSReleaseBoard[] = "chromeos-release-board";
-
 // Forces the stub implementation of dbus clients.
 const char kDbusStub[] = "dbus-stub";
 
@@ -80,16 +77,18 @@ const char kEnableBackgroundLoader[]        = "enable-background-loader";
 // Enables switching between different cellular carriers from the UI.
 const char kEnableCarrierSwitching[]        = "enable-carrier-switching";
 
-// Enable switching between audio devices in Chrome instead of cras.
-const char kEnableChromeAudioSwitching[] = "enable-chrome-audio-switching";
-
 // Enables Chrome Captive Portal detector, which initiates Captive
 // Portal detection for new active networks.
 const char kEnableChromeCaptivePortalDetector[] =
     "enable-chrome-captive-portal-detector";
 
-// Enables screensaver extensions.
-const char kEnableScreensaverExtensions[] = "enable-screensaver-extensions";
+// Enables reporting recently logged in users for enterprise-managed devices.
+const char kEnableEnterpriseUserReporting[] =
+    "enable-enterprise-user-reporting";
+
+// Enable to show the indicator about the IME (input method editor) mode
+// on Chrome OS.
+const char kEnableIMEModeIndicator[] = "enable-ime-mode-indicator";
 
 // Enable "interactive" mode for stub implemenations (e.g. NetworkStateHandler)
 const char kEnableStubInteractive[] = "enable-stub-interactive";
@@ -108,10 +107,6 @@ const char kEnableKioskMode[]               = "enable-kiosk-mode";
 // Enables request of tablet site (via user agent override).
 const char kEnableRequestTabletSite[]       = "enable-request-tablet-site";
 
-// Enables static ip configuration. This flag should be removed when it's on by
-// default.
-const char kEnableStaticIPConfig[]          = "enable-static-ip-config";
-
 // Power of the power-of-2 initial modulus that will be used by the
 // auto-enrollment client. E.g. "4" means the modulus will be 2^4 = 16.
 const char kEnterpriseEnrollmentInitialModulus[] =
@@ -121,6 +116,11 @@ const char kEnterpriseEnrollmentInitialModulus[] =
 // auto-enrollment client.
 const char kEnterpriseEnrollmentModulusLimit[] =
     "enterprise-enrollment-modulus-limit";
+
+// Don't create robot account on enrollment. Used when testing device
+// enrollment against YAPS or the Python test server.
+const char kEnterpriseEnrollmentSkipRobotAuth[] =
+    "enterprise-enrollment-skip-robot-auth";
 
 // Shows the selecting checkboxes in the Files.app.
 const char kFileManagerShowCheckboxes[]     = "file-manager-show-checkboxes";
@@ -169,17 +169,11 @@ const char kLoginUser[]                     = "login-user";
 // Enables natural scroll by default.
 const char kNaturalScrollDefault[]          = "enable-natural-scroll-default";
 
-// Disables tab discard in low memory conditions, a feature which silently
-// closes inactive tabs to free memory and to attempt to avoid the kernel's
-// out-of-memory process killer.
-const char kNoDiscardTabs[]                 = "no-discard-tabs";
-
-// Disables recording of swap and CPU utilization metrics logging after tab
-// switch and scroll events.
-const char kNoSwapMetrics[]                 = "no-swap-metrics";
-
 // Skips all other OOBE pages after user login.
 const char kOobeSkipPostLogin[]             = "oobe-skip-postlogin";
+
+// Integer flag that sets the DeviceRegistered local state pref.
+const char kDeviceRegistered[]              = "device-registered";
 
 // Skips the machine hwid check. Useful for running in VMs because they have no
 // hwid.
@@ -201,6 +195,9 @@ const char kEnableSamlSignin[]              = "enable-saml-signin";
 
 // Enables new first-run overlay UI.
 const char kEnableFirstRunUI[] = "enable-first-run-ui";
+
+// Enables testing for auto update UI.
+const char kTestAutoUpdateUI[] = "test-auto-update-ui";
 
 }  // namespace switches
 }  // namespace chromeos

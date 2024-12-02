@@ -55,10 +55,14 @@ bool WindowHandleToWebViewId(const std::string& window_handle,
 InitSessionParams::InitSessionParams(
     scoped_refptr<URLRequestContextGetter> context_getter,
     const SyncWebSocketFactory& socket_factory,
-    DeviceManager* device_manager)
+    DeviceManager* device_manager,
+    PortServer* port_server,
+    PortManager* port_manager)
     : context_getter(context_getter),
       socket_factory(socket_factory),
-      device_manager(device_manager) {}
+      device_manager(device_manager),
+      port_server(port_server),
+      port_manager(port_manager) {}
 
 InitSessionParams::~InitSessionParams() {}
 
@@ -72,8 +76,9 @@ scoped_ptr<base::DictionaryValue> CreateCapabilities(Chrome* chrome) {
   caps->SetString("platform", chrome->GetOperatingSystemName());
   caps->SetBoolean("javascriptEnabled", true);
   caps->SetBoolean("takesScreenshot", true);
+  caps->SetBoolean("takesHeapSnapshot", true);
   caps->SetBoolean("handlesAlerts", true);
-  caps->SetBoolean("databaseEnabled", true);
+  caps->SetBoolean("databaseEnabled", false);
   caps->SetBoolean("locationContextEnabled", true);
   caps->SetBoolean("applicationCacheEnabled", false);
   caps->SetBoolean("browserConnectionEnabled", false);
@@ -82,6 +87,14 @@ scoped_ptr<base::DictionaryValue> CreateCapabilities(Chrome* chrome) {
   caps->SetBoolean("rotatable", false);
   caps->SetBoolean("acceptSslCerts", true);
   caps->SetBoolean("nativeEvents", true);
+  scoped_ptr<base::DictionaryValue> chrome_caps(new base::DictionaryValue());
+  if (chrome->GetAsDesktop()) {
+    chrome_caps->SetString(
+        "userDataDir",
+        chrome->GetAsDesktop()->command().GetSwitchValueNative(
+            "user-data-dir"));
+  }
+  caps->Set("chrome", chrome_caps.release());
   return caps.Pass();
 }
 
@@ -119,6 +132,8 @@ Status InitSessionHelper(
   status = LaunchChrome(bound_params.context_getter.get(),
                         bound_params.socket_factory,
                         bound_params.device_manager,
+                        bound_params.port_server,
+                        bound_params.port_manager,
                         capabilities,
                         devtools_event_listeners,
                         &session->chrome);
@@ -407,8 +422,15 @@ Status ExecuteGetWindowPosition(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
+  ChromeDesktopImpl* desktop = session->chrome->GetAsDesktop();
+  if (!desktop) {
+    return Status(
+        kUnknownError,
+        "command only supported for desktop Chrome without debuggerAddress");
+  }
+
   AutomationExtension* extension = NULL;
-  Status status = session->chrome->GetAutomationExtension(&extension);
+  Status status = desktop->GetAutomationExtension(&extension);
   if (status.IsError())
     return status;
 
@@ -431,8 +453,16 @@ Status ExecuteSetWindowPosition(
   double x, y;
   if (!params.GetDouble("x", &x) || !params.GetDouble("y", &y))
     return Status(kUnknownError, "missing or invalid 'x' or 'y'");
+
+  ChromeDesktopImpl* desktop = session->chrome->GetAsDesktop();
+  if (!desktop) {
+    return Status(
+        kUnknownError,
+        "command only supported for desktop Chrome without debuggerAddress");
+  }
+
   AutomationExtension* extension = NULL;
-  Status status = session->chrome->GetAutomationExtension(&extension);
+  Status status = desktop->GetAutomationExtension(&extension);
   if (status.IsError())
     return status;
 
@@ -443,8 +473,15 @@ Status ExecuteGetWindowSize(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
+  ChromeDesktopImpl* desktop = session->chrome->GetAsDesktop();
+  if (!desktop) {
+    return Status(
+        kUnknownError,
+        "command only supported for desktop Chrome without debuggerAddress");
+  }
+
   AutomationExtension* extension = NULL;
-  Status status = session->chrome->GetAutomationExtension(&extension);
+  Status status = desktop->GetAutomationExtension(&extension);
   if (status.IsError())
     return status;
 
@@ -468,8 +505,16 @@ Status ExecuteSetWindowSize(
   if (!params.GetDouble("width", &width) ||
       !params.GetDouble("height", &height))
     return Status(kUnknownError, "missing or invalid 'width' or 'height'");
+
+  ChromeDesktopImpl* desktop = session->chrome->GetAsDesktop();
+  if (!desktop) {
+    return Status(
+        kUnknownError,
+        "command only supported for desktop Chrome without debuggerAddress");
+  }
+
   AutomationExtension* extension = NULL;
-  Status status = session->chrome->GetAutomationExtension(&extension);
+  Status status = desktop->GetAutomationExtension(&extension);
   if (status.IsError())
     return status;
 
@@ -481,8 +526,15 @@ Status ExecuteMaximizeWindow(
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
+  ChromeDesktopImpl* desktop = session->chrome->GetAsDesktop();
+  if (!desktop) {
+    return Status(
+        kUnknownError,
+        "command only supported for desktop Chrome without debuggerAddress");
+  }
+
   AutomationExtension* extension = NULL;
-  Status status = session->chrome->GetAutomationExtension(&extension);
+  Status status = desktop->GetAutomationExtension(&extension);
   if (status.IsError())
     return status;
 

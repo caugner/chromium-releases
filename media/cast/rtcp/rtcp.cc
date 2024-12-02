@@ -84,7 +84,8 @@ class LocalRtcpReceiverFeedback : public RtcpReceiverFeedback {
   Rtcp* rtcp_;
 };
 
-Rtcp::Rtcp(RtcpSenderFeedback* sender_feedback,
+Rtcp::Rtcp(base::TickClock* clock,
+           RtcpSenderFeedback* sender_feedback,
            PacedPacketSender* paced_packet_sender,
            RtpSenderStatistics* rtp_sender_statistics,
            RtpReceiverStatistics* rtp_receiver_statistics,
@@ -109,7 +110,7 @@ Rtcp::Rtcp(RtcpSenderFeedback* sender_feedback,
       last_received_ntp_fraction_(0),
       min_rtt_(base::TimeDelta::FromMilliseconds(kMaxRttMs)),
       number_of_rtt_in_avg_(0),
-      clock_(&default_tick_clock_) {
+      clock_(clock) {
   rtcp_receiver_.reset(new RtcpReceiver(sender_feedback,
                                         receiver_feedback_.get(),
                                         rtt_feedback_.get(),
@@ -119,9 +120,9 @@ Rtcp::Rtcp(RtcpSenderFeedback* sender_feedback,
 Rtcp::~Rtcp() {}
 
 // static
-bool Rtcp::IsRtcpPacket(const uint8* packet, int length) {
-  DCHECK_GE(length, 8) << "Invalid RTCP packet";
-  if (length < 8) return false;
+bool Rtcp::IsRtcpPacket(const uint8* packet, size_t length) {
+  DCHECK_GE(length, kMinLengthOfRtcp) << "Invalid RTCP packet";
+  if (length < kMinLengthOfRtcp) return false;
 
   uint8 packet_type = packet[1];
   if (packet_type >= kPacketTypeLow && packet_type <= kPacketTypeHigh) {
@@ -131,7 +132,8 @@ bool Rtcp::IsRtcpPacket(const uint8* packet, int length) {
 }
 
 // static
-uint32 Rtcp::GetSsrcOfSender(const uint8* rtcp_buffer, int length) {
+uint32 Rtcp::GetSsrcOfSender(const uint8* rtcp_buffer, size_t length) {
+  DCHECK_GE(length, kMinLengthOfRtcp) << "Invalid RTCP packet";
   uint32 ssrc_of_sender;
   net::BigEndianReader big_endian_reader(rtcp_buffer, length);
   big_endian_reader.Skip(4);  // Skip header
@@ -150,7 +152,7 @@ void Rtcp::SetRemoteSSRC(uint32 ssrc) {
   rtcp_receiver_->SetRemoteSSRC(ssrc);
 }
 
-void Rtcp::IncomingRtcpPacket(const uint8* rtcp_buffer, int length) {
+void Rtcp::IncomingRtcpPacket(const uint8* rtcp_buffer, size_t length) {
   RtcpParser rtcp_parser(rtcp_buffer, length);
   if (!rtcp_parser.IsValid()) {
     // Silently ignore packet.
@@ -271,7 +273,7 @@ void Rtcp::SendRtcp(const base::TimeTicks& now,
 
     packet_type_flags |= RtcpSender::kRtcpRrtr;
     RtcpReceiverReferenceTimeReport rrtr;
-    ConvertTimeToNtp(now, &rrtr.ntp_seconds, &rrtr.ntp_fraction);
+    ConvertTimeTicksToNtp(now, &rrtr.ntp_seconds, &rrtr.ntp_fraction);
 
     time_last_report_sent_ = now;
     last_report_sent_ = ConvertToNtpDiff(rrtr.ntp_seconds, rrtr.ntp_fraction);
@@ -333,9 +335,9 @@ bool Rtcp::RtpTimestampInSenderTime(int frequency, uint32 rtp_timestamp,
   // Sanity check.
   if (abs(rtp_time_diff_ms) > kMaxDiffSinceReceivedRtcpMs)  return false;
 
-  *rtp_timestamp_in_ticks =
-     ConvertNtpToTime(last_received_ntp_seconds_, last_received_ntp_fraction_) +
-     base::TimeDelta::FromMilliseconds(rtp_time_diff_ms);
+  *rtp_timestamp_in_ticks = ConvertNtpToTimeTicks(last_received_ntp_seconds_,
+      last_received_ntp_fraction_) +
+      base::TimeDelta::FromMilliseconds(rtp_time_diff_ms);
   return true;
 }
 

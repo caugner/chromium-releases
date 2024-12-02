@@ -26,7 +26,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/manifest_handlers/kiosk_enabled_info.h"
+#include "chrome/common/extensions/manifest_handlers/kiosk_mode_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
@@ -222,16 +222,14 @@ void StartupAppLauncher::LaunchApp() {
       extension_service()->GetInstalledExtension(app_id_);
   CHECK(extension);
 
-  if (!extensions::KioskEnabledInfo::IsKioskEnabled(extension)) {
+  if (!extensions::KioskModeInfo::IsKioskEnabled(extension)) {
     OnLaunchFailure(KioskAppLaunchError::NOT_KIOSK_ENABLED);
     return;
   }
 
   // Always open the app in a window.
-  chrome::OpenApplication(chrome::AppLaunchParams(profile_,
-                                                  extension,
-                                                  extension_misc::LAUNCH_WINDOW,
-                                                  NEW_WINDOW));
+  OpenApplication(AppLaunchParams(profile_, extension,
+                                  extension_misc::LAUNCH_WINDOW, NEW_WINDOW));
   InitAppSession(profile_, app_id_);
 
   UserManager::Get()->SessionStarted();

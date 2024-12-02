@@ -156,7 +156,7 @@ void ZeroSuggestProvider::StartZeroSuggest(
   Stop(true);
   field_trial_triggered_ = false;
   field_trial_triggered_in_session_ = false;
-  if (!ShouldRunZeroSuggest(url))
+  if (!ShouldRunZeroSuggest(url, page_classification))
     return;
   verbatim_relevance_ = kDefaultVerbatimZeroSuggestRelevance;
   done_ = false;
@@ -186,8 +186,10 @@ ZeroSuggestProvider::ZeroSuggestProvider(
 ZeroSuggestProvider::~ZeroSuggestProvider() {
 }
 
-bool ZeroSuggestProvider::ShouldRunZeroSuggest(const GURL& url) const {
-  if (!ShouldSendURL(url))
+bool ZeroSuggestProvider::ShouldRunZeroSuggest(
+    const GURL& url,
+    AutocompleteInput::PageClassification page_classification) const {
+  if (!ShouldSendURL(url, page_classification))
     return false;
 
   // Don't run if there's no profile or in incognito mode.
@@ -220,8 +222,19 @@ bool ZeroSuggestProvider::ShouldRunZeroSuggest(const GURL& url) const {
   return true;
 }
 
-bool ZeroSuggestProvider::ShouldSendURL(const GURL& url) const {
+bool ZeroSuggestProvider::ShouldSendURL(
+    const GURL& url,
+    AutocompleteInput::PageClassification page_classification) const {
   if (!url.is_valid())
+    return false;
+
+  // TODO(hfung): Show Most Visited on NTP with appropriate verbatim
+  // description when the user actively focuses on the omnibox as discussed in
+  // crbug/305366 if Most Visited (or something similar) will launch.
+  if (page_classification ==
+      AutocompleteInput::INSTANT_NEW_TAB_PAGE_WITH_FAKEBOX_AS_STARTING_FOCUS ||
+      page_classification ==
+      AutocompleteInput::INSTANT_NEW_TAB_PAGE_WITH_OMNIBOX_AS_STARTING_FOCUS)
     return false;
 
   // Only allow HTTP URLs or Google HTTPS URLs (including Google search
@@ -303,7 +316,8 @@ void ZeroSuggestProvider::FillResults(
       }
     } else {
       suggest_results->push_back(SearchProvider::SuggestResult(
-          result, false, relevance, relevances != NULL, false));
+          result, result, string16(), std::string(), false, relevance,
+          relevances != NULL, false));
     }
   }
 }
@@ -328,16 +342,19 @@ void ZeroSuggestProvider::AddMatchToMap(int relevance,
   // TODO(samarth|melevin): use the actual omnibox margin here as well instead
   // of passing in -1.
   AutocompleteMatch match = SearchProvider::CreateSearchSuggestion(
-      this, relevance, type, template_url, query_string, query_string,
-      AutocompleteInput(), false, accepted_suggestion, -1, true);
+      this, AutocompleteInput(), query_string, relevance, type, false,
+      query_string, string16(), template_url, query_string, std::string(),
+      accepted_suggestion, -1, true);
   if (!match.destination_url.is_valid())
     return;
 
   // Try to add |match| to |map|.  If a match for |query_string| is already in
   // |map|, replace it if |match| is more relevant.
   // NOTE: Keep this ToLower() call in sync with url_database.cc.
+  SearchProvider::MatchKey match_key(
+      std::make_pair(base::i18n::ToLower(query_string), std::string()));
   const std::pair<SearchProvider::MatchMap::iterator, bool> i(map->insert(
-      std::make_pair(base::i18n::ToLower(query_string), match)));
+      std::make_pair(match_key, match)));
   // NOTE: We purposefully do a direct relevance comparison here instead of
   // using AutocompleteMatch::MoreRelevant(), so that we'll prefer "items added
   // first" rather than "items alphabetically first" when the scores are equal.
@@ -463,6 +480,8 @@ void ZeroSuggestProvider::ConvertResultsToAutocompleteMatches() {
 
   // Show Most Visited results after ZeroSuggest response is received.
   if (OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial()) {
+    if (!current_url_match_.destination_url.is_valid())
+      return;
     matches_.push_back(current_url_match_);
     int relevance = 600;
     if (num_results > 0) {

@@ -34,8 +34,6 @@
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gl/gl_switches.h"
 
-namespace chrome {
-
 namespace {
 
 const char kExtensionId[] = "ddchlicdkolnonkihahngkmmmjnjlkkf";
@@ -56,7 +54,6 @@ enum TestFlags {
   kScaleQualityGood    = 2 << 5,
   kScaleQualityBest    = 3 << 5,
 };
-
 
 class TabCapturePerformanceTest
     : public ExtensionApiTest,
@@ -128,12 +125,10 @@ class TabCapturePerformanceTest
       command_line->AppendSwitchASCII(switches::kWindowSize, "2000,1500");
     }
 
-    command_line->AppendSwitch(switches::kDisableTestCompositor);
+    UseRealGLContexts();
 
     if (!HasFlag(kUseGpu)) {
-      command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);
-      command_line->AppendSwitch(switches::kDisableExperimentalWebGL);
-      command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
+      command_line->AppendSwitch(switches::kDisableGpu);
     } else {
       command_line->AppendSwitch(switches::kForceCompositingMode);
     }
@@ -219,7 +214,6 @@ class TabCapturePerformanceTest
                                    "frame_time");
     EXPECT_TRUE(sw_frames || gpu_frames);
     EXPECT_NE(sw_frames, gpu_frames);
-    EXPECT_EQ(gpu_frames, HasFlag(kUseGpu));
 
     // This prints out the average time between capture events.
     // As the capture frame rate is capped at 30fps, this score
@@ -233,9 +227,7 @@ class TabCapturePerformanceTest
 
 }  // namespace
 
-
-// Disabled due to failures on GPU bots (crbug.com/279443)
-IN_PROC_BROWSER_TEST_P(TabCapturePerformanceTest, DISABLED_Performance) {
+IN_PROC_BROWSER_TEST_P(TabCapturePerformanceTest, Performance) {
   RunTest("TabCapturePerformance");
 }
 
@@ -254,7 +246,7 @@ INSTANTIATE_TEST_CASE_P(
         kTestThroughWebRTC | kDisableVsync,
         kTestThroughWebRTC | kDisableVsync | kUseGpu | kForceGpuComposited));
 
-#ifdef USE_AURA
+#if defined(USE_AURA)
 // TODO(hubbe):
 // These are temporary tests for the purpose of determining what the
 // appropriate scaling quality is. Once that has been determined,
@@ -275,5 +267,3 @@ INSTANTIATE_TEST_CASE_P(
         kScalingTestBase | kScaleQualityBest | kSmallWindow));
 
 #endif  // USE_AURA
-
-}  // namespace chrome

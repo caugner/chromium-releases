@@ -13,14 +13,15 @@
 #include "chrome/browser/chromeos/attestation/platform_verification_flow.h"
 #include "chrome/browser/chromeos/login/mock_user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
-#include "chrome/browser/chromeos/system/mock_statistics_provider.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/attestation/mock_attestation_flow.h"
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
+#include "chromeos/settings/cros_settings_names.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -44,7 +45,7 @@ const char kTestSignature[] = "test_signature";
 const char kTestCertificate[] = "test_certificate";
 const char kTestEmail[] = "test_email@chromium.org";
 const char kTestURL[] = "http://mytestdomain/test";
-const char kTestDomain[] = "mytestdomain";
+const char kTestURLSecure[] = "https://mytestdomain/test";
 
 class FakeDelegate : public PlatformVerificationFlow::Delegate {
  public:
@@ -53,7 +54,6 @@ class FakeDelegate : public PlatformVerificationFlow::Delegate {
   virtual ~FakeDelegate() {}
 
   virtual void ShowConsentPrompt(
-      PlatformVerificationFlow::ConsentType type,
       content::WebContents* web_contents,
       const PlatformVerificationFlow::Delegate::ConsentCallback& callback)
       OVERRIDE {
@@ -124,42 +124,31 @@ class PlatformVerificationFlowTest : public ::testing::Test {
         ui_thread_(content::BrowserThread::UI, &message_loop_),
         certificate_success_(true),
         sign_challenge_success_(true),
-        result_(PlatformVerificationFlow::INTERNAL_ERROR),
-        check_state_result_(false) {}
+        result_(PlatformVerificationFlow::INTERNAL_ERROR) {}
 
   void SetUp() {
     // Configure a user for the mock user manager.
     mock_user_manager_.SetActiveUser(kTestEmail);
 
-    // Configure the statistics provider to report verified mode.
-    EXPECT_CALL(mock_statistics_provider_,
-                GetMachineStatistic(system::kDevSwitchBootMode, _))
-        .WillRepeatedly(DoAll(SetArgumentPointee<1>(std::string("0")),
-                              Return(true)));
-
     // Create a verifier for tests to call.
-    verifier_.reset(new PlatformVerificationFlow(&mock_attestation_flow_,
-                                                 &mock_async_caller_,
-                                                 &fake_cryptohome_client_,
-                                                 &mock_user_manager_,
-                                                 &mock_statistics_provider_,
-                                                 &fake_delegate_));
+    verifier_ = new PlatformVerificationFlow(&mock_attestation_flow_,
+                                             &mock_async_caller_,
+                                             &fake_cryptohome_client_,
+                                             &mock_user_manager_,
+                                             &fake_delegate_);
 
     // Create callbacks for tests to use with verifier_.
     callback_ = base::Bind(&PlatformVerificationFlowTest::FakeChallengeCallback,
                            base::Unretained(this));
-    check_state_callback_ = base::Bind(
-        &PlatformVerificationFlowTest::FakeCheckStateCallback,
-        base::Unretained(this));
 
     // Configure the test pref service.
     pref_service_.registry()->RegisterBooleanPref(prefs::kEnableDRM, true);
     pref_service_.registry()->RegisterBooleanPref(prefs::kRAConsentFirstTime,
                                                   true);
-    pref_service_.registry()->RegisterBooleanPref(prefs::kRAConsentAlways,
-                                                  false);
-    pref_service_.registry()->RegisterDictionaryPref(prefs::kRAConsentDomains);
+    RegisterHostContentSettingsPrefs(pref_service_.registry());
     verifier_->set_testing_prefs(&pref_service_);
+    test_content_settings_ = new HostContentSettingsMap(&pref_service_, false);
+    verifier_->set_testing_content_settings(test_content_settings_);
 
     // Configure the global cros_settings.
     CrosSettings* cros_settings = CrosSettings::Get();
@@ -173,12 +162,74 @@ class PlatformVerificationFlowTest : public ::testing::Test {
     verifier_->set_testing_url(GURL(kTestURL));
   }
 
+  void RegisterHostContentSettingsPrefs(PrefRegistrySimple* registry) {
+    registry->RegisterIntegerPref(
+        prefs::kContentSettingsWindowLastTabIndex,
+        0);
+    registry->RegisterIntegerPref(
+        prefs::kContentSettingsDefaultWhitelistVersion,
+        0);
+    registry->RegisterBooleanPref(
+        prefs::kContentSettingsClearOnExitMigrated,
+        false);
+    DictionaryValue* default_content_settings = new DictionaryValue();
+    registry->RegisterDictionaryPref(
+        prefs::kDefaultContentSettings,
+        default_content_settings);
+    registry->RegisterIntegerPref(
+        prefs::kContentSettingsVersion,
+        ContentSettingsPattern::kContentSettingsPatternVersion);
+    registry->RegisterDictionaryPref(
+        prefs::kContentSettingsPatternPairs);
+    registry->RegisterListPref(prefs::kManagedAutoSelectCertificateForUrls);
+    registry->RegisterListPref(prefs::kManagedCookiesAllowedForUrls);
+    registry->RegisterListPref(prefs::kManagedCookiesBlockedForUrls);
+    registry->RegisterListPref(prefs::kManagedCookiesSessionOnlyForUrls);
+    registry->RegisterListPref(prefs::kManagedImagesAllowedForUrls);
+    registry->RegisterListPref(prefs::kManagedImagesBlockedForUrls);
+    registry->RegisterListPref(prefs::kManagedJavaScriptAllowedForUrls);
+    registry->RegisterListPref(prefs::kManagedJavaScriptBlockedForUrls);
+    registry->RegisterListPref(prefs::kManagedPluginsAllowedForUrls);
+    registry->RegisterListPref(prefs::kManagedPluginsBlockedForUrls);
+    registry->RegisterListPref(prefs::kManagedPopupsAllowedForUrls);
+    registry->RegisterListPref(prefs::kManagedPopupsBlockedForUrls);
+    registry->RegisterListPref(prefs::kManagedNotificationsAllowedForUrls);
+    registry->RegisterListPref(prefs::kManagedNotificationsBlockedForUrls);
+    registry->RegisterIntegerPref(
+        prefs::kManagedDefaultCookiesSetting,
+        CONTENT_SETTING_DEFAULT);
+    registry->RegisterIntegerPref(
+        prefs::kManagedDefaultImagesSetting,
+        CONTENT_SETTING_DEFAULT);
+    registry->RegisterIntegerPref(
+        prefs::kManagedDefaultJavaScriptSetting,
+        CONTENT_SETTING_DEFAULT);
+    registry->RegisterIntegerPref(
+        prefs::kManagedDefaultPluginsSetting,
+        CONTENT_SETTING_DEFAULT);
+    registry->RegisterIntegerPref(
+        prefs::kManagedDefaultPopupsSetting,
+        CONTENT_SETTING_DEFAULT);
+    registry->RegisterIntegerPref(
+        prefs::kManagedDefaultGeolocationSetting,
+        CONTENT_SETTING_DEFAULT);
+    registry->RegisterIntegerPref(
+        prefs::kManagedDefaultNotificationsSetting,
+        CONTENT_SETTING_DEFAULT);
+    registry->RegisterIntegerPref(
+        prefs::kManagedDefaultMediaStreamSetting,
+        CONTENT_SETTING_DEFAULT);
+    registry->RegisterBooleanPref(
+        prefs::kClearSiteDataOnExit,
+        false);
+  }
+
   void TearDown() {
-    verifier_.reset();
     // Restore the real DeviceSettingsProvider.
     CrosSettings* cros_settings = CrosSettings::Get();
     cros_settings->RemoveSettingsProvider(&stub_settings_provider_);
     cros_settings->AddSettingsProvider(device_settings_provider_);
+    test_content_settings_->ShutdownOnUIThread();
   }
 
   void ExpectAttestationFlow() {
@@ -197,10 +248,19 @@ class PlatformVerificationFlowTest : public ::testing::Test {
     std::string expected_key_name = std::string(kContentProtectionKeyPrefix) +
                                     std::string(kTestID);
     EXPECT_CALL(mock_async_caller_,
-                TpmAttestationSignSimpleChallenge(KEY_USER, expected_key_name,
+                TpmAttestationSignSimpleChallenge(KEY_USER, kTestEmail,
+                                                  expected_key_name,
                                                   kTestChallenge, _))
-        .WillRepeatedly(WithArgs<3>(Invoke(
+        .WillRepeatedly(WithArgs<4>(Invoke(
             this, &PlatformVerificationFlowTest::FakeSignChallenge)));
+  }
+
+  void SetUserConsent(const GURL& url, bool allow) {
+    verifier_->RecordDomainConsent(test_content_settings_, url, allow);
+  }
+
+  void SetURL(const GURL& url) {
+    verifier_->set_testing_url(url);
   }
 
   void FakeGetCertificate(
@@ -230,10 +290,6 @@ class PlatformVerificationFlowTest : public ::testing::Test {
     certificate_ = certificate;
   }
 
-  void FakeCheckStateCallback(bool result) {
-    check_state_result_ = result;
-  }
-
   std::string CreateFakeResponseProto() {
     SignedData pb;
     pb.set_data(kTestSignedData);
@@ -250,14 +306,14 @@ class PlatformVerificationFlowTest : public ::testing::Test {
   cryptohome::MockAsyncMethodCaller mock_async_caller_;
   CustomFakeCryptohomeClient fake_cryptohome_client_;
   MockUserManager mock_user_manager_;
-  system::MockStatisticsProvider mock_statistics_provider_;
   FakeDelegate fake_delegate_;
   TestingPrefServiceSimple pref_service_;
   CrosSettingsProvider* device_settings_provider_;
   StubCrosSettingsProvider stub_settings_provider_;
   ScopedTestDeviceSettingsService test_device_settings_service_;
   ScopedTestCrosSettings test_cros_settings_;
-  scoped_ptr<PlatformVerificationFlow> verifier_;
+  scoped_refptr<HostContentSettingsMap> test_content_settings_;
+  scoped_refptr<PlatformVerificationFlow> verifier_;
 
   // Controls result of FakeGetCertificate.
   bool certificate_success_;
@@ -271,11 +327,10 @@ class PlatformVerificationFlowTest : public ::testing::Test {
   std::string challenge_salt_;
   std::string challenge_signature_;
   std::string certificate_;
-  base::Callback<void(bool result)> check_state_callback_;
-  bool check_state_result_;
 };
 
 TEST_F(PlatformVerificationFlowTest, SuccessNoConsent) {
+  SetUserConsent(GURL(kTestURL), true);
   // Make sure the call will fail if consent is requested.
   fake_delegate_.set_response(PlatformVerificationFlow::CONSENT_RESPONSE_DENY);
   ExpectAttestationFlow();
@@ -288,20 +343,8 @@ TEST_F(PlatformVerificationFlowTest, SuccessNoConsent) {
   EXPECT_EQ(0, fake_delegate_.num_consent_calls());
 }
 
-TEST_F(PlatformVerificationFlowTest, SuccessWithAlwaysAskConsent) {
-  pref_service_.SetUserPref(prefs::kRAConsentAlways,
-                            new base::FundamentalValue(true));
-  ExpectAttestationFlow();
-  verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(PlatformVerificationFlow::SUCCESS, result_);
-  EXPECT_EQ(kTestSignedData, challenge_salt_);
-  EXPECT_EQ(kTestSignature, challenge_signature_);
-  EXPECT_EQ(kTestCertificate, certificate_);
-  EXPECT_EQ(1, fake_delegate_.num_consent_calls());
-}
-
 TEST_F(PlatformVerificationFlowTest, SuccessWithAttestationConsent) {
+  SetUserConsent(GURL(kTestURL), true);
   fake_cryptohome_client_.set_attestation_enrolled(false);
   ExpectAttestationFlow();
   verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
@@ -314,6 +357,7 @@ TEST_F(PlatformVerificationFlowTest, SuccessWithAttestationConsent) {
 }
 
 TEST_F(PlatformVerificationFlowTest, SuccessWithFirstTimeConsent) {
+  SetUserConsent(GURL(kTestURL), true);
   pref_service_.SetUserPref(prefs::kRAConsentFirstTime,
                             new base::FundamentalValue(false));
   ExpectAttestationFlow();
@@ -327,8 +371,6 @@ TEST_F(PlatformVerificationFlowTest, SuccessWithFirstTimeConsent) {
 }
 
 TEST_F(PlatformVerificationFlowTest, ConsentRejected) {
-  pref_service_.SetUserPref(prefs::kRAConsentAlways,
-                            new base::FundamentalValue(true));
   fake_delegate_.set_response(PlatformVerificationFlow::CONSENT_RESPONSE_DENY);
   verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
   base::RunLoop().RunUntilIdle();
@@ -355,9 +397,7 @@ TEST_F(PlatformVerificationFlowTest, FeatureDisabledByUser) {
 }
 
 TEST_F(PlatformVerificationFlowTest, FeatureDisabledByUserForDomain) {
-  base::DictionaryValue* domains = new base::DictionaryValue();
-  domains->SetBoolean(kTestDomain, false);
-  pref_service_.SetUserPref(prefs::kRAConsentDomains, domains);
+  SetUserConsent(GURL(kTestURL), false);
   verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(PlatformVerificationFlow::POLICY_REJECTED, result_);
@@ -389,66 +429,34 @@ TEST_F(PlatformVerificationFlowTest, DBusFailure) {
 
 TEST_F(PlatformVerificationFlowTest, ConsentNoResponse) {
   fake_delegate_.set_response(PlatformVerificationFlow::CONSENT_RESPONSE_NONE);
-  pref_service_.SetUserPref(prefs::kRAConsentAlways,
-                            new base::FundamentalValue(true));
   verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(PlatformVerificationFlow::USER_REJECTED, result_);
 }
 
-TEST_F(PlatformVerificationFlowTest, FastCheck) {
-  verifier_->CheckPlatformState(check_state_callback_);
+TEST_F(PlatformVerificationFlowTest, ConsentPerScheme) {
+  fake_delegate_.set_response(PlatformVerificationFlow::CONSENT_RESPONSE_DENY);
+  verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(check_state_result_);
+  EXPECT_EQ(PlatformVerificationFlow::USER_REJECTED, result_);
+  // Call again and expect denial based on previous response.
+  verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(PlatformVerificationFlow::POLICY_REJECTED, result_);
+  // Call with a different scheme and expect another consent prompt.
+  SetURL(GURL(kTestURLSecure));
+  verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(PlatformVerificationFlow::USER_REJECTED, result_);
+  EXPECT_EQ(2, fake_delegate_.num_consent_calls());
 }
 
-TEST_F(PlatformVerificationFlowTest, FastCheckNoStat) {
-  // Configure the stats provider to fail.
-  EXPECT_CALL(mock_statistics_provider_,
-              GetMachineStatistic(system::kDevSwitchBootMode, _))
-      .WillRepeatedly(Return(false));
-
-  verifier_->CheckPlatformState(check_state_callback_);
+TEST_F(PlatformVerificationFlowTest, Timeout) {
+  verifier_->set_timeout_delay(base::TimeDelta::FromSeconds(0));
+  ExpectAttestationFlow();
+  verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
   base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(check_state_result_);
-}
-
-TEST_F(PlatformVerificationFlowTest, FastCheckStatDevMode) {
-  // Configure the stats provider to fail.
-  EXPECT_CALL(mock_statistics_provider_,
-              GetMachineStatistic(system::kDevSwitchBootMode, _))
-      .WillRepeatedly(DoAll(SetArgumentPointee<1>(std::string("1")),
-                            Return(true)));
-
-  verifier_->CheckPlatformState(check_state_callback_);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(check_state_result_);
-}
-
-TEST_F(PlatformVerificationFlowTest, FastCheckStatInvalidMode) {
-  // Configure the stats provider to fail.
-  EXPECT_CALL(mock_statistics_provider_,
-              GetMachineStatistic(system::kDevSwitchBootMode, _))
-      .WillRepeatedly(DoAll(SetArgumentPointee<1>(std::string("INVALID")),
-                            Return(true)));
-
-  verifier_->CheckPlatformState(check_state_callback_);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(check_state_result_);
-}
-
-TEST_F(PlatformVerificationFlowTest, FastCheckNoAttestation) {
-  fake_cryptohome_client_.set_attestation_prepared(false);
-  verifier_->CheckPlatformState(check_state_callback_);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(check_state_result_);
-}
-
-TEST_F(PlatformVerificationFlowTest, FastCheckDBusFailure) {
-  fake_cryptohome_client_.set_call_status(DBUS_METHOD_CALL_FAILURE);
-  verifier_->CheckPlatformState(check_state_callback_);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(check_state_result_);
+  EXPECT_EQ(PlatformVerificationFlow::TIMEOUT, result_);
 }
 
 }  // namespace attestation

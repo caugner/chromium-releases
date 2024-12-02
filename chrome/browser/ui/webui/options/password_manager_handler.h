@@ -55,14 +55,18 @@ class PasswordManagerHandler : public OptionsPageUIHandler,
   // Remove All password exceptions
   void RemoveAllPasswordExceptions(const ListValue* args);
 
-  // Get password value for the selected entry.
-  // @param value the selected entry index.
-  void ShowSelectedPassword(const ListValue* args);
+  // Request the plain text password for an entry to be revealed.
+  // @param index The index of the entry.
+  void RequestShowPassword(const ListValue* args);
 
   // Sets the password and exception list contents to the given data.
   // We take ownership of the PasswordForms in the vector.
   void SetPasswordList();
   void SetPasswordExceptionList();
+
+  // Returns true if the user needs to be authenticated before a plaintext
+  // password is revealed.
+  bool IsAuthenticationRequired();
 
   // A short class to mediate requests to the password store.
   class ListPopulater : public PasswordStoreConsumer {
@@ -122,6 +126,14 @@ class PasswordManagerHandler : public OptionsPageUIHandler,
 
   // Whether to show stored passwords or not.
   BooleanPrefMember show_passwords_;
+
+  // Indicates whether or not the password manager should require the user to
+  // reauthenticate before revealing plaintext passwords.
+  bool require_reauthentication_;
+
+  // The last time the user was successfully authenticated.
+  // Used to determine whether or not to reveal plaintext passwords.
+  base::TimeTicks last_authentication_time_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerHandler);
 };

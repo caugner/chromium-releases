@@ -157,14 +157,12 @@ class LoginHandlerViews : public LoginHandler,
         WebContentsModalDialogManager::FromWebContents(requesting_contents);
     WebContentsModalDialogManagerDelegate* modal_delegate =
         web_contents_modal_dialog_manager->delegate();
-    DCHECK(modal_delegate);
+    CHECK(modal_delegate);
     dialog_ = views::Widget::CreateWindowAsFramelessChild(
         this,
         requesting_contents->GetView()->GetNativeView(),
         modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
     web_contents_modal_dialog_manager->ShowDialog(dialog_->GetNativeView());
-    web_contents_modal_dialog_manager->SetCloseOnInterstitialWebUI(
-        dialog_->GetNativeView(), true);
     NotifyAuthNeeded();
   }
 

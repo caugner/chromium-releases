@@ -19,7 +19,7 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/cryptohome/async_method_caller.h"
-#include "chromeos/cryptohome/cryptohome_library.h"
+#include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/login/login_state.h"
@@ -75,7 +75,8 @@ void TriggerResolveWithLoginTimeMarker(
 // Calls cryptohome's mount method.
 void Mount(AuthAttemptState* attempt,
            scoped_refptr<ParallelAuthenticator> resolver,
-           int flags) {
+           int flags,
+           const std::string& system_salt) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
       "CryptohomeMount-Start", false);
@@ -84,7 +85,8 @@ void Mount(AuthAttemptState* attempt,
   attempt->UsernameHashRequested();
   cryptohome::AsyncMethodCaller::GetInstance()->AsyncMount(
       attempt->user_context.username,
-      attempt->ascii_hash,
+      ParallelAuthenticator::HashPassword(attempt->user_context.password,
+                                          system_salt),
       flags,
       base::Bind(&TriggerResolveWithLoginTimeMarker,
                  "CryptohomeMount-End",
@@ -131,7 +133,8 @@ void MountPublic(AuthAttemptState* attempt,
 void Migrate(AuthAttemptState* attempt,
              scoped_refptr<ParallelAuthenticator> resolver,
              bool passing_old_hash,
-             const std::string& hash) {
+             const std::string& old_password,
+             const std::string& system_salt) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
       "CryptohomeMigrate-Start", false);
@@ -140,8 +143,9 @@ void Migrate(AuthAttemptState* attempt,
   if (passing_old_hash) {
     caller->AsyncMigrateKey(
         attempt->user_context.username,
-        hash,
-        attempt->ascii_hash,
+        ParallelAuthenticator::HashPassword(old_password, system_salt),
+        ParallelAuthenticator::HashPassword(attempt->user_context.password,
+                                            system_salt),
         base::Bind(&TriggerResolveWithLoginTimeMarker,
                    "CryptohomeMount-End",
                    attempt,
@@ -149,8 +153,9 @@ void Migrate(AuthAttemptState* attempt,
   } else {
     caller->AsyncMigrateKey(
         attempt->user_context.username,
-        attempt->ascii_hash,
-        hash,
+        ParallelAuthenticator::HashPassword(attempt->user_context.password,
+                                            system_salt),
+        ParallelAuthenticator::HashPassword(old_password, system_salt),
         base::Bind(&TriggerResolveWithLoginTimeMarker,
                    "CryptohomeMount-End",
                    attempt,
@@ -174,33 +179,14 @@ void Remove(AuthAttemptState* attempt,
 
 // Calls cryptohome's key check method.
 void CheckKey(AuthAttemptState* attempt,
-              scoped_refptr<ParallelAuthenticator> resolver) {
+              scoped_refptr<ParallelAuthenticator> resolver,
+              const std::string& system_salt) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   cryptohome::AsyncMethodCaller::GetInstance()->AsyncCheckKey(
       attempt->user_context.username,
-      attempt->ascii_hash,
+      ParallelAuthenticator::HashPassword(attempt->user_context.password,
+                                          system_salt),
       base::Bind(&TriggerResolve, attempt, resolver));
-}
-
-// Returns hash of |password|, salted with the system salt.
-std::string HashPassword(const std::string& password) {
-  // Get salt, ascii encode, update sha with that, then update with ascii
-  // of password, then end.
-  std::string ascii_salt = CryptohomeLibrary::Get()->GetSystemSalt();
-  // TODO(stevenjb/nkostylev): Handle empty system salt gracefully.
-  CHECK(!ascii_salt.empty());
-  char passhash_buf[kPasswordHashLength];
-
-  // Hash salt and password
-  crypto::SHA256HashString(ascii_salt + password,
-                           &passhash_buf, sizeof(passhash_buf));
-
-  // Only want the top half for 'weak' hashing so that the passphrase is not
-  // immediately exposed even if the output is reversed.
-  const int encoded_length = sizeof(passhash_buf) / 2;
-
-  return StringToLowerASCII(base::HexEncode(
-      reinterpret_cast<const void*>(passhash_buf), encoded_length));
 }
 
 }  // namespace
@@ -215,7 +201,6 @@ ParallelAuthenticator::ParallelAuthenticator(LoginStatusConsumer* consumer)
       already_reported_success_(false),
       owner_is_verified_(false),
       user_can_login_(false),
-      using_oauth_(true),
       remove_user_data_on_failure_(false),
       delayed_login_failure_(NULL) {
 }
@@ -230,7 +215,6 @@ void ParallelAuthenticator::AuthenticateToLogin(
           UserContext(canonicalized,
                       user_context.password,
                       user_context.auth_code),
-          HashPassword(user_context.password),
           std::string(), // login_token, not used.
           std::string(), // login_captcha, not used.
           User::USER_TYPE_REGULAR,
@@ -238,20 +222,11 @@ void ParallelAuthenticator::AuthenticateToLogin(
   // Reset the verified flag.
   owner_is_verified_ = false;
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  SystemSaltGetter::Get()->GetSystemSalt(
       base::Bind(&Mount,
                  current_state_.get(),
                  scoped_refptr<ParallelAuthenticator>(this),
                  cryptohome::MOUNT_FLAGS_NONE));
-  // ClientLogin authentication check should happen immediately here.
-  // We should not try OAuthLogin check until the profile loads.
-  if (!using_oauth_) {
-    // Initiate ClientLogin-based post authentication.
-    current_online_.reset(new OnlineAttempt(current_state_.get(),
-                                            this));
-    current_online_->Initiate(profile);
-  }
 }
 
 void ParallelAuthenticator::CompleteLogin(Profile* profile,
@@ -263,36 +238,23 @@ void ParallelAuthenticator::CompleteLogin(Profile* profile,
           UserContext(canonicalized,
                       user_context.password,
                       user_context.auth_code),
-          HashPassword(user_context.password),
           !UserManager::Get()->IsKnownUser(canonicalized)));
 
   // Reset the verified flag.
   owner_is_verified_ = false;
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  SystemSaltGetter::Get()->GetSystemSalt(
       base::Bind(&Mount,
                  current_state_.get(),
                  scoped_refptr<ParallelAuthenticator>(this),
                  cryptohome::MOUNT_FLAGS_NONE));
 
-  if (!using_oauth_) {
-    // Test automation needs to disable oauth, but that leads to other
-    // services not being able to fetch a token, leading to browser crashes.
-    // So initiate ClientLogin-based post authentication.
-    // TODO(xiyuan): This should not be required.
-    // Context: http://crbug.com/201374
-    current_online_.reset(new OnlineAttempt(current_state_.get(),
-                                            this));
-    current_online_->Initiate(profile);
-  } else {
-    // For login completion from extension, we just need to resolve the current
-    // auth attempt state, the rest of OAuth related tasks will be done in
-    // parallel.
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&ParallelAuthenticator::ResolveLoginCompletionStatus, this));
-  }
+  // For login completion from extension, we just need to resolve the current
+  // auth attempt state, the rest of OAuth related tasks will be done in
+  // parallel.
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&ParallelAuthenticator::ResolveLoginCompletionStatus, this));
 }
 
 void ParallelAuthenticator::AuthenticateToUnlock(
@@ -300,11 +262,10 @@ void ParallelAuthenticator::AuthenticateToUnlock(
   current_state_.reset(
       new AuthAttemptState(
           gaia::CanonicalizeEmail(user_context.username),
-          HashPassword(user_context.password)));
+          user_context.password));
   remove_user_data_on_failure_ = false;
   check_key_attempted_ = true;
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  SystemSaltGetter::Get()->GetSystemSalt(
       base::Bind(&CheckKey,
                  current_state_.get(),
                  scoped_refptr<ParallelAuthenticator>(this)));
@@ -316,15 +277,16 @@ void ParallelAuthenticator::LoginAsLocallyManagedUser(
   // TODO(nkostylev): Pass proper value for |user_is_new| or remove (not used).
   current_state_.reset(
       new AuthAttemptState(user_context,
-                           HashPassword(user_context.password),
                            "",   // login_token
                            "",   // login_captcha
                            User::USER_TYPE_LOCALLY_MANAGED,
                            false));
   remove_user_data_on_failure_ = false;
-  Mount(current_state_.get(),
-        scoped_refptr<ParallelAuthenticator>(this),
-        cryptohome::MOUNT_FLAGS_NONE);
+  SystemSaltGetter::Get()->GetSystemSalt(
+      base::Bind(&Mount,
+                 current_state_.get(),
+                 scoped_refptr<ParallelAuthenticator>(this),
+                 cryptohome::MOUNT_FLAGS_NONE));
 }
 
 void ParallelAuthenticator::LoginRetailMode() {
@@ -335,7 +297,6 @@ void ParallelAuthenticator::LoginRetailMode() {
         UserContext(UserManager::kRetailModeUserName,
                     std::string(),   // password
                     std::string()),  // auth_code
-        std::string(),  // ascii_hash
         std::string(),  // login_token
         std::string(),  // login_captcha
         User::USER_TYPE_RETAIL_MODE,
@@ -352,7 +313,6 @@ void ParallelAuthenticator::LoginOffTheRecord() {
       UserContext(UserManager::kGuestUserName,  // username
                   std::string(),                // password
                   std::string()),               // auth_code
-      std::string(),  // ascii_hash
       std::string(),  // login_token
       std::string(),  // login_captcha
       User::USER_TYPE_GUEST,
@@ -369,16 +329,17 @@ void ParallelAuthenticator::LoginAsPublicAccount(const std::string& username) {
       UserContext(username,
                   std::string(),  // password
                   std::string()),  // auth_code
-      std::string(),  // ascii_hash
       std::string(),  // login_token
       std::string(),  // login_captcha
       User::USER_TYPE_PUBLIC_ACCOUNT,
       false));
   remove_user_data_on_failure_ = false;
   ephemeral_mount_attempted_ = true;
-  Mount(current_state_.get(),
-        scoped_refptr<ParallelAuthenticator>(this),
-        cryptohome::CREATE_IF_MISSING | cryptohome::ENSURE_EPHEMERAL);
+  SystemSaltGetter::Get()->GetSystemSalt(
+      base::Bind(&Mount,
+                 current_state_.get(),
+                 scoped_refptr<ParallelAuthenticator>(this),
+                 cryptohome::CREATE_IF_MISSING | cryptohome::ENSURE_EPHEMERAL));
 }
 
 void ParallelAuthenticator::LoginAsKioskAccount(
@@ -388,7 +349,6 @@ void ParallelAuthenticator::LoginAsKioskAccount(
       UserContext(app_user_id,
                   std::string(),  // password
                   std::string()),  // auth_code
-      std::string(),  // ascii_hash
       std::string(),  // login_token
       std::string(),  // login_captcha
       User::USER_TYPE_KIOSK_APP,
@@ -412,7 +372,7 @@ void ParallelAuthenticator::OnRetailModeLoginSuccess() {
     consumer_->OnRetailModeLoginSuccess(current_state_->user_context);
 }
 
-void ParallelAuthenticator::OnLoginSuccess(bool request_pending) {
+void ParallelAuthenticator::OnLoginSuccess() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   VLOG(1) << "Login success";
   // Send notification of success
@@ -426,9 +386,7 @@ void ParallelAuthenticator::OnLoginSuccess(bool request_pending) {
     already_reported_success_ = true;
   }
   if (consumer_)
-    consumer_->OnLoginSuccess(current_state_->user_context,
-                              request_pending,
-                              using_oauth_);
+    consumer_->OnLoginSuccess(current_state_->user_context);
 }
 
 void ParallelAuthenticator::OnOffTheRecordLoginSuccess() {
@@ -473,16 +431,14 @@ void ParallelAuthenticator::OnLoginFailure(const LoginFailure& error) {
 
 void ParallelAuthenticator::RecoverEncryptedData(
     const std::string& old_password) {
-  std::string old_hash = HashPassword(old_password);
   migrate_attempted_ = true;
   current_state_->ResetCryptohomeStatus();
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  SystemSaltGetter::Get()->GetSystemSalt(
       base::Bind(&Migrate,
                  current_state_.get(),
                  scoped_refptr<ParallelAuthenticator>(this),
                  true,
-                 old_hash));
+                 old_password));
 }
 
 void ParallelAuthenticator::RemoveEncryptedData() {
@@ -540,7 +496,6 @@ void ParallelAuthenticator::OnOwnershipChecked(bool is_owner) {
 
 void ParallelAuthenticator::Resolve() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  bool request_pending = false;
   int mount_flags = cryptohome::MOUNT_FLAGS_NONE;
   ParallelAuthenticator::AuthState state = ResolveState();
   VLOG(1) << "Resolved state to: " << state;
@@ -604,8 +559,7 @@ void ParallelAuthenticator::Resolve() {
       mount_flags |= cryptohome::CREATE_IF_MISSING;
     case RECOVER_MOUNT:
       current_state_->ResetCryptohomeStatus();
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      SystemSaltGetter::Get()->GetSystemSalt(
           base::Bind(&Mount,
                      current_state_.get(),
                      scoped_refptr<ParallelAuthenticator>(this),
@@ -623,14 +577,6 @@ void ParallelAuthenticator::Resolve() {
       break;
     case OFFLINE_LOGIN:
       VLOG(2) << "Offline login";
-      // Marking request_pending to false when using OAuth because OAuth related
-      // tasks are performed after user profile is mounted and are not performed
-      // by ParallelAuthenticator.
-      // TODO(xiyuan): Revert this when we support Gaia in lock screen and
-      // start to use ParallelAuthenticator's VerifyOAuth1AccessToken again.
-      request_pending = using_oauth_ ?
-          false :
-          !current_state_->online_complete();
       // Fall through.
     case UNLOCK:
       VLOG(2) << "Unlock";
@@ -639,12 +585,11 @@ void ParallelAuthenticator::Resolve() {
       VLOG(2) << "Online login";
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this,
-                     request_pending));
+          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this));
       break;
     case DEMO_LOGIN:
       VLOG(2) << "Retail mode login";
-      using_oauth_ = false;
+      current_state_->user_context.using_oauth = false;
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           base::Bind(&ParallelAuthenticator::OnRetailModeLoginSuccess, this));
@@ -656,18 +601,16 @@ void ParallelAuthenticator::Resolve() {
       break;
     case KIOSK_ACCOUNT_LOGIN:
     case PUBLIC_ACCOUNT_LOGIN:
-      using_oauth_ = false;
+      current_state_->user_context.using_oauth = false;
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this, false));
+          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this));
       break;
     case LOCALLY_MANAGED_USER_LOGIN:
-      using_oauth_ = false;
-      // TODO(nkostylev): Figure out whether there's need to call
-      // a separate success method here.
+      current_state_->user_context.using_oauth = false;
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this, false));
+          base::Bind(&ParallelAuthenticator::OnLoginSuccess, this));
       break;
     case LOGIN_FAILED:
       current_state_->ResetCryptohomeStatus();
@@ -698,6 +641,27 @@ void ParallelAuthenticator::Resolve() {
       NOTREACHED();
       break;
   }
+}
+
+// static.
+std::string ParallelAuthenticator::HashPassword(const std::string& password,
+                                                const std::string& ascii_salt) {
+  // Update sha with ascii encoded salt, then update with ascii of password,
+  // then end.
+  // TODO(stevenjb/nkostylev): Handle empty system salt gracefully.
+  CHECK(!ascii_salt.empty());
+  char passhash_buf[kPasswordHashLength];
+
+  // Hash salt and password
+  crypto::SHA256HashString(ascii_salt + password,
+                           &passhash_buf, sizeof(passhash_buf));
+
+  // Only want the top half for 'weak' hashing so that the passphrase is not
+  // immediately exposed even if the output is reversed.
+  const int encoded_length = sizeof(passhash_buf) / 2;
+
+  return StringToLowerASCII(base::HexEncode(
+      reinterpret_cast<const void*>(passhash_buf), encoded_length));
 }
 
 ParallelAuthenticator::~ParallelAuthenticator() {}
@@ -763,12 +727,10 @@ ParallelAuthenticator::ResolveCryptohomeFailureState() {
     return FAILED_TPM;
   }
 
-  // Return intermediate states in the following cases:
-  // 1. When there is a parallel online attempt to resolve them later;
-  //    This is the case with legacy ClientLogin flow;
-  // 2. When there is an online result to use;
-  //    This is the case after user finishes Gaia login;
-  if (current_online_.get() || current_state_->online_complete()) {
+  // Return intermediate states in the following case:
+  // when there is an online result to use;
+  // This is the case after user finishes Gaia login;
+  if (current_state_->online_complete()) {
     if (current_state_->cryptohome_code() ==
         cryptohome::MOUNT_ERROR_KEY_FAILURE) {
       // If we tried a mount but they used the wrong key, we may need to

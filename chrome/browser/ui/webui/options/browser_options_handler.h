@@ -53,6 +53,7 @@ class BrowserOptionsHandler
   virtual void InitializeHandler() OVERRIDE;
   virtual void InitializePage() OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
+  virtual void Uninitialize() OVERRIDE;
 
   // ProfileSyncServiceObserver implementation.
   virtual void OnStateChanged() OVERRIDE;
@@ -263,6 +264,12 @@ class BrowserOptionsHandler
   // Setup the proxy settings section UI.
   void SetupProxySettingsSection();
 
+  // Setup the manage certificates section UI.
+  void SetupManageCertificatesSection();
+
+  // Setup the UI specific to managing supervised users.
+  void SetupManagingSupervisedUsers();
+
 #if defined(OS_CHROMEOS)
   // Setup the accessibility features for ChromeOS.
   void SetupAccessibilityFeatures();
@@ -281,9 +288,6 @@ class BrowserOptionsHandler
 
   TemplateURLService* template_url_service_;  // Weak.
 
-  // Used to get WeakPtr to self for use on the UI thread.
-  base::WeakPtrFactory<BrowserOptionsHandler> weak_ptr_factory_;
-
   scoped_refptr<ui::SelectFileDialog> select_folder_dialog_;
 
 #if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
@@ -292,10 +296,15 @@ class BrowserOptionsHandler
   bool cloud_print_connector_ui_enabled_;
 #endif
 
+  bool cloud_print_mdns_ui_enabled_;
+
   StringPrefMember auto_open_files_;
   DoublePrefMember default_zoom_level_;
 
   PrefChangeRegistrar profile_pref_registrar_;
+
+  // Used to get WeakPtr to self for use on the UI thread.
+  base::WeakPtrFactory<BrowserOptionsHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserOptionsHandler);
 };

@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "ash/ash_switches.h"
-#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -17,6 +16,7 @@
 #include "base/process/launch.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
+#include "base/sys_info.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "cc/base/switches.h"
@@ -36,6 +36,7 @@
 #include "media/base/media_switches.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/compositor/compositor_switches.h"
+#include "ui/events/event_switches.h"
 #include "ui/gfx/switches.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/views/corewm/corewm_switches.h"
@@ -52,9 +53,6 @@ const char kGuestModeLoggingLevel[] = "1";
 
 // Format of command line switch.
 const char kSwitchFormatString[] = " --%s=\"%s\"";
-
-// User name which is used in the Guest session.
-const char kGuestUserName[] = "";
 
 // Derives the new command line from |base_command_line| by doing the following:
 // - Forward a given switches list to new command;
@@ -81,19 +79,19 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kDisableGpuShaderDiskCache,
       ::switches::kDisableGpuWatchdog,
       ::switches::kDisableGpuCompositing,
-      ::switches::kDisableLegacyEncryptedMedia,
+      ::switches::kDisablePrefixedEncryptedMedia,
       ::switches::kDisablePanelFitting,
       ::switches::kDisableSeccompFilterSandbox,
       ::switches::kDisableSetuidSandbox,
       ::switches::kDisableThreadedCompositing,
       ::switches::kDisableTouchDragDrop,
       ::switches::kDisableTouchEditing,
+      ::switches::kDisableUniversalAcceleratedOverflowScroll,
       ::switches::kDisableWebKitMediaSource,
       ::switches::kDisableAcceleratedFixedRootBackground,
       ::switches::kEnableAcceleratedFixedRootBackground,
       ::switches::kEnableAcceleratedOverflowScroll,
       ::switches::kEnableBeginFrameScheduling,
-      ::switches::kEnableBrowserInputController,
       ::switches::kEnableCompositingForFixedPosition,
       ::switches::kEnableDeadlineScheduling,
       ::switches::kEnableDelegatedRenderer,
@@ -103,9 +101,11 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kDisableGpuSandbox,
       ::switches::kEnableLogging,
       ::switches::kEnablePinch,
+      ::switches::kEnableRepaintAfterLayout,
       ::switches::kEnableThreadedCompositing,
       ::switches::kEnableTouchDragDrop,
       ::switches::kEnableTouchEditing,
+      ::switches::kEnableUniversalAcceleratedOverflowScroll,
       ::switches::kEnableViewport,
       ::switches::kForceDeviceScaleFactor,
       ::switches::kGpuStartupDialog,
@@ -143,14 +143,15 @@ std::string DeriveCommandLine(const GURL& start_url,
 #if defined(ENABLE_WEBRTC)
       ::switches::kDisableWebRtcHWDecoding,
       ::switches::kDisableWebRtcHWEncoding,
+      ::switches::kEnableWebRtcHWVp8Encoding,
 #endif
-      ash::switches::kAshDefaultGuestWallpaperLarge,
-      ash::switches::kAshDefaultGuestWallpaperSmall,
       ash::switches::kAshDefaultWallpaperLarge,
       ash::switches::kAshDefaultWallpaperSmall,
 #if defined(OS_CHROMEOS)
       ash::switches::kAshDisableAudioDeviceMenu,
 #endif
+      ash::switches::kAshGuestWallpaperLarge,
+      ash::switches::kAshGuestWallpaperSmall,
       ash::switches::kAshHostWindowBounds,
       ash::switches::kAshTouchHud,
       ash::switches::kAuraLegacyPowerButton,
@@ -160,6 +161,7 @@ std::string DeriveCommandLine(const GURL& start_url,
       cc::switches::kBackgroundColorInsteadOfCheckerboard,
       cc::switches::kCompositeToMailbox,
       cc::switches::kDisableCompositedAntialiasing,
+      cc::switches::kDisableCompositorTouchHitTesting,
       cc::switches::kDisableImplSidePainting,
       cc::switches::kDisableMapImage,
       cc::switches::kDisableThreadedAnimation,
@@ -356,7 +358,7 @@ void RestartChrome(const std::string& command_line) {
   }
   restart_requested = true;
 
-  if (!base::chromeos::IsRunningOnChromeOS()) {
+  if (!base::SysInfo::IsRunningOnChromeOS()) {
     // Relaunch chrome without session manager on dev box.
     ReLaunch(command_line);
     return;

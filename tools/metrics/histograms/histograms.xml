@@ -62,10 +62,24 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Accessibility.CrosAutoclick" enum="BooleanEnabled">
+  <summary>
+    Whether the Chrome OS Autoclick feature is on (checked once 45 secs after
+    startup).
+  </summary>
+</histogram>
+
+<histogram name="Accessibility.CrosAutoclickDelay" units="milliseconds">
+  <summary>
+    If the user has enabled Autoclick, this is the delay set by the user for
+    autoclicks to occur, in milliseconds.
+  </summary>
+</histogram>
+
 <histogram name="Accessibility.CrosHighContrast" enum="BooleanEnabled">
   <summary>
-    Whether the Chrome OS High Constrast mode feature is on (checked once 45
-    secs after startup).
+    Whether the Chrome OS High Contrast mode feature is on (checked once 45 secs
+    after startup).
   </summary>
 </histogram>
 
@@ -1174,9 +1188,55 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Bookmarks.LaunchDepth">
+  <summary>
+    Logs the depth of the bookmark in the bookmark tree hiearchy every time a
+    bookmark is launched. Depth indicates how many levels below a permanent
+    bookmark folder the bookmark was found in (e.g. a bookmark immediately in
+    the bookmark bar has depth 1).
+  </summary>
+</histogram>
+
 <histogram name="Canvas.ContextType" enum="CanvasContextType">
   <summary>
     Records the context type names used to create canvas rendering contexts.
+  </summary>
+</histogram>
+
+<histogram name="Cast.Sender.CastButtonShown" enum="BooleanEnabled">
+  <summary>
+    Records the number of times the cast button was shown to the user. The value
+    will be true if the button is enabled, and false if the button is disabled.
+    Note that depending on the current UX, it's possible that we hide the button
+    entirely if it's disabled, so it's possible for the false values to be 0.
+  </summary>
+</histogram>
+
+<histogram name="Cast.Sender.CastButtonShownInitialFullscreen"
+    enum="BooleanEnabled">
+  <summary>
+    Records the number of times the cast button was shown to the user when the
+    video is fullscreened. The value will only be recorded on entering
+    fullscreen. The value will be true if the button is enabled, and false if
+    the button is disabled. Note that depending on the current UX,it's possible
+    that we hide the button entirely if it's disabled, so it's possible for the
+    false values to be 0.
+  </summary>
+</histogram>
+
+<histogram name="Cast.Sender.CastPlaySuccess" enum="BooleanSuccess">
+  <summary>
+    Records the result of a request to play remotely. The value will be true if
+    the playback succeeded, and false if there was an error.
+  </summary>
+</histogram>
+
+<histogram name="Cast.Sender.CastTimeRemainingPercentage"
+    units="percent remaining">
+  <summary>
+    Records the percentage of the video left at the time the remote playback is
+    stopped. This will be recorded when the playback is stopped by the user, or
+    when it's stopped by the cast device.
   </summary>
 </histogram>
 
@@ -1250,6 +1310,13 @@ other types of suffix sets.
     examine compliance with the CA/Browser Forum requirements and security best
     practice. This histogram considers the notBefore as the issuance date, for
     purposes of what requirements apply.
+  </summary>
+</histogram>
+
+<histogram name="Chrome.Browser.ExecutionPhase" enum="ExecutionPhase">
+  <summary>
+    Indicates the execution phase the browser was in when browser didn't exit
+    cleanly.
   </summary>
 </histogram>
 
@@ -1335,10 +1402,26 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="ChromeNotifierService.Actions"
+    enum="ChromeNotifierServiceActionType">
+  <summary>
+    The actions to enable or disable services sending synced notifications.
+    Synced Notification Sending services can be individually disabled by the
+    user in the Chrome Notification center settings dialog.
+  </summary>
+</histogram>
+
 <histogram name="clickjacking.discard_download" units="ms">
   <summary>
     The length of time between a dangerous download appearing on the downloads
     shelf, and the &quot;Discard&quot; button being clicked.
+  </summary>
+</histogram>
+
+<histogram name="clickjacking.dismiss_download" units="ms">
+  <summary>
+    The length of time between a dangerous download appearing on the downloads
+    shelf, and the &quot;Dismiss&quot; button being clicked.
   </summary>
 </histogram>
 
@@ -1467,6 +1550,29 @@ other types of suffix sets.
   <summary>
     The type of file system that Chrome OS cros-disks daemon is requested to
     mount.
+  </summary>
+</histogram>
+
+<histogram name="DataReductionProxy.BypassInfoFallback"
+    enum="DataReductionProxyBypassEventType">
+  <summary>
+    Counts various events that trigger Chrome to bypass the fallback
+    configuration of the data reduction proxy.
+  </summary>
+</histogram>
+
+<histogram name="DataReductionProxy.BypassInfoPrimary"
+    enum="DataReductionProxyBypassEventType">
+  <summary>
+    Counts various events that trigger Chrome to bypass the primary
+    configuration of the data reduction proxy.
+  </summary>
+</histogram>
+
+<histogram name="DataReductionProxy.ProbeURL"
+    enum="DataReductionProxyProbeURLFetchResult">
+  <summary>
+    Counts various outcomes of requesting the data reduction proxy's probe URL.
   </summary>
 </histogram>
 
@@ -1919,6 +2025,24 @@ other types of suffix sets.
     The user selection in the Sideload Wipeout bubble, grouped by the
     UmaWipeoutHistogramOptions enum.
   </summary>
+</histogram>
+
+<histogram name="DiskCache.0.FilesAge" units="hours">
+  <summary>The age of the cache's files (wall time).</summary>
+</histogram>
+
+<histogram name="DiskCache.2.FilesAge" units="hours">
+  <summary>
+    The age of the cache's files (wall time). Media-specific cache.
+  </summary>
+</histogram>
+
+<histogram name="DiskCache.3.FilesAge" units="hours">
+  <summary>The age of the cache's files (wall time). AppCache.</summary>
+</histogram>
+
+<histogram name="DiskCache.4.FilesAge" units="hours">
+  <summary>The age of the cache's files (wall time). ShaderCache.</summary>
 </histogram>
 
 <histogram name="DiskCache.TotalIOTime" units="milliseconds">
@@ -2691,6 +2815,31 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Download.DangerousFile.DangerousDownloadValidated"
+    enum="DownloadItem.DangerousFileType">
+  <summary>
+    User chose to save a download which was marked DANGEROUS_FILE. Grouped by
+    the type of file.
+  </summary>
+</histogram>
+
+<histogram name="Download.DangerousFile.Discard"
+    enum="DownloadItem.DangerousFileType">
+  <summary>
+    A download which was marked DANGEROUS_FILE was discarded without the user
+    directly choosing, because the browser was closed.  Grouped by the file
+    extension.
+  </summary>
+</histogram>
+
+<histogram name="Download.DangerousFile.UserDiscard"
+    enum="DownloadItem.DangerousFileType">
+  <summary>
+    User chose to discard a download which was marked DANGEROUS_FILE. Grouped by
+    the file extension.
+  </summary>
+</histogram>
+
 <histogram name="Download.DatabaseRecordDropped"
     enum="DownloadDatabaseRecordDroppedType">
   <summary>Reason for dropping a record read in from the DB.</summary>
@@ -2936,6 +3085,14 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Download.ShowDangerousDownloadConfirmationPrompt"
+    enum="DownloadItem.DangerType">
+  <summary>
+    User saw the confirm prompt to save a download which was marked dangerous.
+    Grouped by the type of danger.
+  </summary>
+</histogram>
+
 <histogram name="Download.Sources" enum="DownloadSource">
   <summary>
     The initiation source (if initiated within the content layer of chrome) for
@@ -3013,6 +3170,22 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Drive.MetadataDBVersionBeforeUpgradeCheck">
+  <summary>
+    Version number of drive resource metadata DB found on the disk before
+    checking whether it should be upgraded. Recorded during Drive metadata
+    initialization triggered by profile initialization.
+  </summary>
+</histogram>
+
+<histogram name="Drive.NumberOfCacheFilesRecoveredAfterDBCorruption">
+  <summary>
+    Number of files recovered from Drive cache directory. Recorded when file
+    recovery takes place after metadata DB corruption is found during metadata
+    DB initialization.
+  </summary>
+</histogram>
+
 <histogram name="Drive.NumberOfHostedDocuments">
   <summary>
     Number of hosted documents (spreadsheets etc.) on Drive. Logged when Drive
@@ -3045,6 +3218,16 @@ other types of suffix sets.
   <summary>
     Tracks whether the push notification request is registered correctly for
     Drive. Recorded when the push notification manager is initialized.
+  </summary>
+</histogram>
+
+<histogram name="Drive.SearchMetadataTime" units="microseconds">
+  <summary>
+    Time spent to perform an incremental search for auto completion of files on
+    Drive. This time is collected for every partial query the user types for
+    auto completion.  For instance, if the user types &quot;faq&quot;,
+    incremental searches are performed for &quot;f&quot;, &quot;fa&quot;, and
+    &quot;faq&quot; respectively.
   </summary>
 </histogram>
 
@@ -3938,6 +4121,10 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Extensions.CrxFetchError" enum="NetErrorCodes">
+  <summary>Net error results from URLFetcher.</summary>
+</histogram>
+
 <histogram name="Extensions.CrxFetchFailureRetryCountGoogleUrl">
   <summary>
     Number of times chrome retried to download an extension with a url on a
@@ -4408,6 +4595,36 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Extensions.ResourceDirectoryTimestampQueryLatency"
+    units="milliseconds">
+  <summary>
+    The initialization latency (in milliseconds) introduced to each extension
+    resource request by querying the directory timestamp.
+  </summary>
+</histogram>
+
+<histogram name="Extensions.ResourceLastModifiedDelta" units="seconds">
+  <summary>
+    The difference in seconds between an extension resource's last modification
+    time and its extension base directory's creation time. Recorded on each
+    extension resource request if the difference is non-negative (i.e., the
+    resource's last modification time is more recent than the directory's
+    creation time.) For cases where the directory creation date is more recent,
+    see Extensions.ResourceLastModifiedNegativeDelta instead.
+  </summary>
+</histogram>
+
+<histogram name="Extensions.ResourceLastModifiedNegativeDelta" units="seconds">
+  <summary>
+    The absolute difference in seconds between an extension resource's last
+    modification time and extension base directory's creation time. Recorded on
+    each extension resource request if the difference is negative (i.e., the
+    directory's creation time is more recent than the resource's last
+    modification time.) For cases where the resource modification time is more
+    recent, see Extensions.ResourceLastModifiedDelta instead.
+  </summary>
+</histogram>
+
 <histogram name="Extensions.SandboxUnpackFailure">
   <summary>
     Count the number of times a sandboxed extension unpack fails.
@@ -4608,6 +4825,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Extensions.UpdaterWriteCrx" enum="ExtensionFileWriteResult">
+  <obsolete>
+    Deprecated 10/2013.
+  </obsolete>
   <summary>
     What happened when the extension updater tried to write a file?
   </summary>
@@ -4784,6 +5004,36 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="FileBrowser.SuggestApps.Close"
+    enum="SuggestAppsDialogCloseReason">
+  <summary>
+    Chrome OS File Browser: the reason why the suggest apps dialog was closed.
+  </summary>
+</histogram>
+
+<histogram name="FileBrowser.SuggestApps.Install"
+    enum="SuggestAppsDialogInstall">
+  <summary>
+    Chrome OS File Browser: whether the Webstore item user selected was
+    successfully installed or not.
+  </summary>
+</histogram>
+
+<histogram name="FileBrowser.SuggestApps.Load" enum="SuggestAppsDialogLoad">
+  <summary>
+    Chrome OS File Browser: whether the initialization of the dialog succeeded
+    or not.
+  </summary>
+</histogram>
+
+<histogram name="FileBrowser.SuggestApps.LoadTime" units="milliseconds">
+  <summary>
+    Chrome OS File Browser: time to load the suggest apps dialog. Measured
+    between the moment window appears and the moment all the contants in the
+    dialog including the Chrome Webstore widget are ready.
+  </summary>
+</histogram>
+
 <histogram name="FileBrowser.ViewingFileType" enum="ViewFileType">
   <summary>
     File types that were tried to be viewed through browser. This is recorded
@@ -4853,8 +5103,48 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Geolocation.GeolocationDispatcherHostImpl.EnableHighAccuracy"
+    enum="BooleanEnabled">
+  <summary>
+    Whether high accuracy geolocation information was requested.
+  </summary>
+</histogram>
+
+<histogram name="Geolocation.InfoBarDelegate.Event"
+    enum="GeolocationInfoBarDelegateEvent">
+  <summary>Events in GeolocationInfoBarDelegate.</summary>
+</histogram>
+
+<histogram name="Geolocation.InfoBarDelegateAndroid.Event"
+    enum="GeolocationInfoBarDelegateAndroidEvent">
+  <summary>Events in GeolocationInfoBarDelegateAndroid.</summary>
+</histogram>
+
+<histogram name="Geolocation.NetworkLocationRequest.AccessPoints">
+  <summary>
+    The number of wifi access points used to determine geolocation.
+  </summary>
+</histogram>
+
+<histogram name="Geolocation.NetworkLocationRequest.Event"
+    enum="NetworkLocationRequestEvent">
+  <summary>Events in NetworkLocationRequest.</summary>
+</histogram>
+
+<histogram name="Geolocation.NetworkLocationRequest.ResponseCode"
+    units="HTTP response code">
+  <summary>Http response codes in NetworkLocationRequest.</summary>
+</histogram>
+
 <histogram name="GoogleNow.Event" enum="GoogleNowEvent">
   <summary>Events in Google Now component extension.</summary>
+</histogram>
+
+<histogram name="GPU.AcceleratedSurfaceRefreshRate" units="hz">
+  <summary>
+    Refresh rate of the display in Hz.  This is recorded every time we present a
+    frame.
+  </summary>
 </histogram>
 
 <histogram name="History.DeleteFTSIndexDatabases">
@@ -4862,6 +5152,38 @@ other types of suffix sets.
     Count of &quot;History Index *&quot; databases deleted.  These databases
     stored the full-text-search data for history, which was removed at r213442,
     this histogram tracks cleanup.
+  </summary>
+</histogram>
+
+<histogram name="History.FaviconsRecoveredPercentage" units="%">
+  <summary>
+    Size of the recovered Favicons database relative to the original corrupt
+    database.  Recovery is VACUUM-like, so the resulting database should always
+    be smaller.  Substantial 100% results would indicate empty databases being
+    recovered, substantial low% results would indicate very little data being
+    recovered.
+  </summary>
+</histogram>
+
+<histogram name="History.FaviconsRecoveredRowsFaviconBitmaps">
+  <summary>
+    Rows recovered from [favicon_bitmaps] table in Favicons recovery.
+  </summary>
+</histogram>
+
+<histogram name="History.FaviconsRecoveredRowsFavicons">
+  <summary>Rows recovered from [favicons] table in Favicons recovery.</summary>
+</histogram>
+
+<histogram name="History.FaviconsRecoveredRowsIconMapping">
+  <summary>
+    Rows recovered from [icon_mapping] table in Favicons recovery.
+  </summary>
+</histogram>
+
+<histogram name="History.FaviconsRecovery" enum="HistoryFaviconsRecoveryEnum">
+  <summary>
+    Track results of SQLite database recovery code in thumbnail_database.cc.
   </summary>
 </histogram>
 
@@ -4931,6 +5253,10 @@ other types of suffix sets.
 
 <histogram name="HttpCache.ReadErrorRestartable" enum="NetErrorCodes">
   <summary>Net error results from restartable cache read errors.</summary>
+</histogram>
+
+<histogram name="HttpCache.Vary" enum="VaryType">
+  <summary>The type of Vary header for a given GET response.</summary>
 </histogram>
 
 <histogram name="Import.ImporterType.AutoImport" enum="ImporterType">
@@ -5018,6 +5344,13 @@ other types of suffix sets.
 <histogram name="Installer.NormalErrorCodes" enum="UpdateEngineErrorCode">
   <summary>
     Errors from update_engine process when running in normal mode.
+  </summary>
+</histogram>
+
+<histogram name="Installer.OSAgeDays" units="days">
+  <summary>
+    The age of the OS, defined as the age of the /etc/lsb-release file. This is
+    reported on every update check but at most once a day.
   </summary>
 </histogram>
 
@@ -5139,6 +5472,13 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="InstantExtended.CacheableNTPLoad"
+    enum="InstantExtended_CacheableNTPLoad">
+  <summary>
+    Records a histogram for how often the Cacheable NTP fails to load.
+  </summary>
+</histogram>
+
 <histogram name="InstantExtended.FallbackToLocalOverlay"
     enum="InstantExtended_FallbackCause">
   <summary>
@@ -5149,6 +5489,10 @@ other types of suffix sets.
 
 <histogram name="InstantExtended.InstantNavigation"
     enum="InstantExtended_InstantNavigation">
+  <obsolete>
+    Deprecated as of 10/2013. This histogram is no longer relevant since the
+    HTML overlay went away.
+  </obsolete>
   <summary>
     Records a histogram for instant extended (Local NTP and Online NTP) and
     non-extended navigations.
@@ -5343,6 +5687,14 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Keyboard.KeystrokeDeltas" units="milliseconds">
+  <summary>
+    The time between keystrokes in Aura text fields. The only keystrokes that
+    are measured are ones that produce a printable character and are not over 5
+    seconds apart.
+  </summary>
+</histogram>
+
 <histogram name="LanguageUsage.AcceptLanguage" enum="LanguageCode">
   <summary>Accept languages.</summary>
 </histogram>
@@ -5352,6 +5704,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="LevelDBEnv.All.SafeThreadAccess" units="accesses">
+  <obsolete>
+    Deprecated 2013-10. No thread-unsafety was found.
+  </obsolete>
   <summary>
     Linux and CrOS use unlocked_stdio(3). If it is used unsafely, record it
     here. If there is no record of unsafety after chrome 29 has been in the
@@ -5414,11 +5769,25 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="LevelDBEnv.IDB.MissingFiles" units="files">
+  <summary>
+    Number of backup files found without corresponding ldb files. As measured by
+    GetChildren when used in IndexedDB.
+  </summary>
+</histogram>
+
 <histogram name="LevelDBEnv.IDB.RetryRecoveredFromErrorIn"
     enum="PlatformFileError">
   <summary>
     When IDB LevelDBEnv successfully retries an operation that had failed,
     record the error from the most recent failed attempt.
+  </summary>
+</histogram>
+
+<histogram name="LevelDBEnv.IDB.Table" enum="BooleanSuccess">
+  <summary>
+    Success indicates a successful backup or restore operation for .ldb table
+    files when used in IndexedDB.
   </summary>
 </histogram>
 
@@ -5486,10 +5855,24 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="LevelDBEnv.MissingFiles" units="files">
+  <summary>
+    Number of backup files found without corresponding ldb files. As measured by
+    GetChildren when used in LevelDB clients other than IndexedDB.
+  </summary>
+</histogram>
+
 <histogram name="LevelDBEnv.RetryRecoveredFromErrorIn" enum="PlatformFileError">
   <summary>
     When Non-IDB LevelDBEnv successfully retries an operation that had failed,
     record the error from the most recent failed attempt.
+  </summary>
+</histogram>
+
+<histogram name="LevelDBEnv.Table" enum="BooleanSuccess">
+  <summary>
+    Success indicates a successful backup or restore operation for .ldb table
+    files when used by LevelDB clients other than IndexedDB.
   </summary>
 </histogram>
 
@@ -5581,6 +5964,13 @@ other types of suffix sets.
   <summary>
     Time spent waiting in AudioOutputController::WaitTillDataReady() if the data
     was not initially available.
+  </summary>
+</histogram>
+
+<histogram name="Media.AudioOutputControllerPlaybackStartupSuccess"
+    enum="BooleanSuccess">
+  <summary>
+    Whether playback started successfully after stream startup was requested.
   </summary>
 </histogram>
 
@@ -5871,6 +6261,13 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Media.LocalRendererSinkStates" enum="LocalRendererSinkStates">
+  <summary>
+    State of the WebRtc local renderer, sampled once during the lifetime of a
+    local renderer.
+  </summary>
+</histogram>
+
 <histogram name="Media.MSE.AudioCodec" enum="MSECodec">
   <summary>
     Audio codec used in Media Source Extensions playback. Set when AddId() is
@@ -5982,7 +6379,28 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Media.RTCVideoDecoderInitDecodeStatus" enum="BooleanSuccess">
+  <obsolete>
+    Renamed to Media.RTCVideoDecoderInitDecodeSuccess.
+  </obsolete>
   <summary>Results of attempts to RTCVideoDecoder::InitDecode().</summary>
+</histogram>
+
+<histogram name="Media.RTCVideoDecoderInitDecodeSuccess" enum="BooleanSuccess">
+  <summary>
+    Indicates whether we were successful in initializing hardware video decoder
+    for use in the RTC pipeline.
+  </summary>
+</histogram>
+
+<histogram name="Media.RTCVideoEncoderInitEncodeSuccess" enum="BooleanSuccess">
+  <summary>
+    Indicates whether we were successful in initializing hardware video encoder
+    for use in the RTC pipeline.
+  </summary>
+</histogram>
+
+<histogram name="Media.RTCVideoEncoderProfile" enum="VideoCodecProfile">
+  <summary>Video codec profile used in RTC video encoder.</summary>
 </histogram>
 
 <histogram name="Media.TimeToPipelineStarted" units="ms">
@@ -6033,6 +6451,12 @@ other types of suffix sets.
   <summary>Coded width of HTML5 video.</summary>
 </histogram>
 
+<histogram name="Media.VideoColorRange" enum="FFmpegColorRanges">
+  <summary>
+    Pixel format color range of HTML5 video. Emitted on video load.
+  </summary>
+</histogram>
+
 <histogram name="Media.VideoVisibleAspectRatio">
   <summary>Visible aspect ratio of HTML5 video.</summary>
 </histogram>
@@ -6074,6 +6498,10 @@ other types of suffix sets.
     Time needed to buffer A/V data after an underrun for the YouTube
     application.
   </summary>
+</histogram>
+
+<histogram name="MediaGalleries.Counts" enum="MediaGalleriesUsageType">
+  <summary>Various usage counts for media galleries.</summary>
 </histogram>
 
 <histogram name="Memory.BackingStore">
@@ -6557,6 +6985,46 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="MultiProfile.SessionMode" enum="MultiProfileSessionMode">
+  <summary>
+    The session counter for different multi profile modes which gets stored once
+    per session at the beginning of the session.
+  </summary>
+</histogram>
+
+<histogram name="MultiProfile.SigninUserUIPath"
+    enum="MultiProfileSigninUserAction">
+  <summary>
+    Count the number of times each UI path is taken for signing into a new
+    account in a ChromeOS multiprofile session. UI paths include the system tray
+    and the user account switcher on the browser frame.
+  </summary>
+</histogram>
+
+<histogram name="MultiProfile.SwitchActiveUserUIPath"
+    enum="MultiProfileSwitchActiveUserAction">
+  <summary>
+    Count the number of times each UI path is taken for switching the active
+    account in a ChromeOS multiprofile session. UI paths include the system tray
+    and the keyboard shortcut.
+  </summary>
+</histogram>
+
+<histogram name="MultiProfile.TeleportWindow"
+    enum="MultiProfileTeleportWindowAction">
+  <summary>
+    Counts the number of window teleportations when using separated desktop
+    mode.
+  </summary>
+</histogram>
+
+<histogram name="Multiprofile.UserCount">
+  <summary>
+    The number of users simultaneously signed into a multiprofile session on
+    ChromeOS. This is recorded whenever a new user logs in.
+  </summary>
+</histogram>
+
 <histogram name="Navigation.MainFrameScheme" enum="NavigationScheme">
   <summary>The scheme of the URL for each main-frame navigation.</summary>
 </histogram>
@@ -6606,6 +7074,25 @@ other types of suffix sets.
 
 <histogram name="Net.AuthGenerateToken_ntlm" units="milliseconds">
   <summary>The time to generate an NTLM HTTP authentication token.</summary>
+</histogram>
+
+<histogram name="Net.CertCommonNameFallback" enum="BooleanCommonNameMatch">
+  <summary>
+    Whether the certificate common name was used for matching the hostname,
+    instead of the subjectAlternativeName.
+
+    Measures results for all CAs (internal and publicly-trusted).
+  </summary>
+</histogram>
+
+<histogram name="Net.CertCommonNameFallbackPrivateCA"
+    enum="BooleanCommonNameMatch">
+  <summary>
+    Whether the certificate common name was used for matching the hostname,
+    instead of the subjectAlternativeName.
+
+    Measures results ony for internal (non-publicly-trusted) CAs.
+  </summary>
 </histogram>
 
 <histogram name="Net.CertificatePinSuccess" enum="BooleanSuccess">
@@ -6933,7 +7420,82 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Net.DailyContentLength" units="KB">
+  <summary>
+    The total content size in KB of all HTTP/HTTPS response bodies in the
+    previous calendar day. The metric is reported when the first response in the
+    current day is received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyContentLength_DataReductionProxyEnabled" units="KB">
+  <summary>
+    The total content size in KB of all HTTP/HTTPS response bodies in the
+    previous calendar day while the data reduction proxy setting was enabled.
+    The metric is reported when the first response in the current day is
+    received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyContentLength_ViaDataReductionProxy" units="KB">
+  <summary>
+    The total content size in KB of all HTTP/HTTPS response bodies in the
+    previous calendar day via the data reduction proxy. The metric is reported
+    when the first response in the current day is received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyContentPercent_DataReductionProxyEnabled"
+    units="Percent">
+  <summary>
+    The percentage of total HTTP/HTTPS response body size while the data
+    reduction proxy is enabled to total HTTP/HTTPS response body size in the
+    previous calendar day. The metric is reported when the first response in the
+    current day is received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyContentPercent_ViaDataReductionProxy" units="Percent">
+  <summary>
+    The percentage of total HTTP/HTTPS response body size via the data reduction
+    proxy to total HTTP/HTTPS response body size in the previous calendar day.
+    The metric is reported when the first response in the current day is
+    received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyContentSavingPercent" units="Percent">
+  <summary>
+    The percentage of data saving in the previous calendar day. A negative
+    saving will be shown as zero. The metric is reported when the first response
+    in the current day is received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyContentSavingPercent_DataReductionProxyEnabled"
+    units="Percent">
+  <summary>
+    The percentage of data saving in the previous calendar day while the data
+    reduction proxy was enabled. A negative saving will be shown as zero. This
+    only counts responses while the data reduction proxy is enabled. The metric
+    is reported when the first response in the current day is received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyContentSavingPercent_ViaDataReductionProxy"
+    units="Percent">
+  <summary>
+    The percentage of data saving in the previous calendar day via the data
+    reduction proxy. A negative saving will be shown as zero. This only counts
+    responses via the data reduction proxy. The metric is reported when the
+    first response in the current day is received.
+  </summary>
+</histogram>
+
 <histogram name="Net.DailyHttpContentLengthViaDataReductionProxy" units="KB">
+  <obsolete>
+    Deprecated- see Net.DailyContentLength_ViaDataReductionProxy.
+  </obsolete>
   <summary>
     Total size in KB of all response bodies in the previous calendar day that
     were received through the data reduction proxy.
@@ -6942,6 +7504,9 @@ other types of suffix sets.
 
 <histogram name="Net.DailyHttpContentLengthWithDataReductionProxyEnabled"
     units="KB">
+  <obsolete>
+    Deprecated- see Net.DailyContentLength_DataReductionProxyEnabled
+  </obsolete>
   <summary>
     Total size in KB of all response bodies in the previous calendar day that
     were received when the data reduction proxy was enabled.
@@ -6949,6 +7514,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Net.DailyHttpContentSavings" units="Percent">
+  <obsolete>
+    Deprecated- see Net.DailyContentSavingPercent.
+  </obsolete>
   <summary>
     The percentage of data saving in the previous calendar day. A negative
     saving will be shown as zero.
@@ -6957,6 +7525,9 @@ other types of suffix sets.
 
 <histogram name="Net.DailyHttpContentSavings_DataReductionProxy"
     units="Percent">
+  <obsolete>
+    Deprecated- see Net.DailyContentSavingPercent_DataReductionProxyEnabled.
+  </obsolete>
   <summary>
     The percentage of data saving in the previous calendar day when the data
     reduction proxy was enabled for at least some responses during the day. A
@@ -6965,6 +7536,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Net.DailyHttpOriginalContentLength" units="KB">
+  <obsolete>
+    Deprecated- see Net.DailyOriginalContentLength.
+  </obsolete>
   <summary>
     Total size in KB specified in the X-Original-Content-Length headers of all
     responses in the previous calendar day. If the header is not present in a
@@ -6973,12 +7547,49 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Net.DailyHttpReceivedContentLength" units="KB">
+  <obsolete>
+    Deprecated- see Net.DailyContentLength.
+  </obsolete>
   <summary>
     Total size in KB of all response bodies in the previous calendar day.
   </summary>
 </histogram>
 
+<histogram name="Net.DailyOriginalContentLength" units="KB">
+  <summary>
+    The total size in KB specified in the X-Original-Content-Length headers of
+    all HTTP/HTTPS response bodies in the previous calendar day. If the header
+    is not present in a response, the size of the response body is used. The
+    metric is reported when the first response in the current day is received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyOriginalContentLength_DataReductionProxyEnabled"
+    units="KB">
+  <summary>
+    The total size in KB specified in the X-Original-Content-Length headers of
+    all HTTP/HTTPS response bodies in the previous calendar day while the data
+    reduction proxy is enabled. If the header is not present in a response, the
+    size of the response body is used. The metric is reported when the first
+    response in the current day is received.
+  </summary>
+</histogram>
+
+<histogram name="Net.DailyOriginalContentLength_ViaDataReductionProxy"
+    units="KB">
+  <summary>
+    The total size in KB specified in the X-Original-Content-Length headers of
+    all HTTP/HTTPS response bodies in the previous calendar day via the data
+    reduction proxy. If the header is not present in a response, the size of the
+    response body is used. The metric is reported when the first response in the
+    current day is received.
+  </summary>
+</histogram>
+
 <histogram name="Net.DailyReceivedContentViaDataReductionProxy" units="Percent">
+  <obsolete>
+    Deprecated- see Net.DailyContentPercent_ViaDataReductionProxy.
+  </obsolete>
   <summary>
     The percentage of Net.DailyHttpContentLengthViaDataReductionProxy in
     Net.DailyHttpReceivedContentLength.
@@ -6987,6 +7598,9 @@ other types of suffix sets.
 
 <histogram name="Net.DailyReceivedContentWithDataReductionProxyEnabled"
     units="Percent">
+  <obsolete>
+    Deprecated- see Net.DailyContentPercent_DataReductionProxyEnabled.
+  </obsolete>
   <summary>
     The percentage of Net.DailyHttpContentLengthWithDataReductionProxyEnabled in
     Net.DailyHttpReceivedContentLength.
@@ -7800,6 +8414,47 @@ other types of suffix sets.
   </details>
 </histogram>
 
+<histogram name="Net.Prefetch.Pattern" enum="PrefetchStatus">
+  <summary>
+    The completion status of prefetches that have finished loading.
+  </summary>
+  <details>
+    Measurement occurs at ResourceLoader::ResponseCompleted so requests canceled
+    before that point are not registered.
+
+    Note that &quot;success from cache&quot; means that the
+    UrlRequest::was_cached() was true, and &quot;success from network&quot;
+    means that was_cached() was false.  Validated results are considered cached,
+    even though a conditional network request is made.
+  </details>
+</histogram>
+
+<histogram name="Net.Prefetch.PrefilterBytesReadFromNetwork" units="bytes">
+  <summary>
+    Number of bytes read from the network on behalf of prefetch requests.  This
+    is prefilter, so before any decompression.
+  </summary>
+</histogram>
+
+<histogram name="Net.Prefetch.TimeBeforeCancel" units="milliseconds">
+  <summary>
+    Time spent on prefetch requests before the request was canceled.
+  </summary>
+</histogram>
+
+<histogram name="Net.Prefetch.TimeSpentPrefetchingFromCache"
+    units="milliseconds">
+  <summary>Time spent on prefetch requests when fetched from cache.</summary>
+</histogram>
+
+<histogram name="Net.Prefetch.TimeSpentPrefetchingFromNetwork"
+    units="milliseconds">
+  <summary>
+    Time spent on prefetch requests when fetched from the network, including
+    validation time.
+  </summary>
+</histogram>
+
 <histogram name="Net.Priority_High_Latency" units="milliseconds">
   <obsolete>
     Replaced by Net.Priority_High_Latency_b.
@@ -8031,6 +8686,18 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Net.QuicNumStreamFramesInPacket">
+  <summary>
+    The number of stream frames bundled within a received packet.
+  </summary>
+</histogram>
+
+<histogram name="Net.QuicNumStreamFramesPerStreamInPacket">
+  <summary>
+    The number of stream frames per stream ID within a received packet.
+  </summary>
+</histogram>
+
 <histogram name="Net.QuicSession.CloseSessionOnError" enum="NetErrorCodes">
   <summary>
     The network error code which resulted in the session being closed.
@@ -8039,6 +8706,14 @@ other types of suffix sets.
 
 <histogram name="Net.QuicSession.ConnectionClose.NumOpenStreams.TimedOut">
   <summary>The number of streams open when a QUIC session timed out.</summary>
+</histogram>
+
+<histogram
+    name="Net.QuicSession.ConnectionClose.NumTotalStreams.HandshakeTimedOut">
+  <summary>
+    The number of total streams created when a QUIC session crypto handshake
+    timed out.
+  </summary>
 </histogram>
 
 <histogram name="Net.QuicSession.ConnectionCloseErrorCode"
@@ -8061,6 +8736,25 @@ other types of suffix sets.
   <summary>
     The QUIC error code which resulted in the connection being closed by the
     server.
+  </summary>
+</histogram>
+
+<histogram name="Net.QuicSession.FinalTcpCwnd">
+  <summary>
+    The value of the TCP cubic sender's CWND when the session is closed.
+  </summary>
+</histogram>
+
+<histogram name="Net.QuicSession.NumOpenStreams">
+  <summary>
+    The number of QUIC streams opened when a new QUIC stream is created.
+  </summary>
+</histogram>
+
+<histogram name="Net.QuicSession.NumTotalStreams">
+  <summary>
+    The total number of streams created by the client when the session is
+    closed.
   </summary>
 </histogram>
 
@@ -8103,6 +8797,20 @@ other types of suffix sets.
   <summary>
     The network error code returned when attempting to read to a QUIC
     connection.
+  </summary>
+</histogram>
+
+<histogram name="Net.QuicSession.RstStreamErrorCodeClient"
+    enum="QuicRstStreamErrorCodes">
+  <summary>
+    The QUIC error code which resulted in a stream being reset by the client.
+  </summary>
+</histogram>
+
+<histogram name="Net.QuicSession.RstStreamErrorCodeServer"
+    enum="QuicRstStreamErrorCodes">
+  <summary>
+    The QUIC error code which resulted in a stream being reset by the server.
   </summary>
 </histogram>
 
@@ -8843,6 +9551,22 @@ other types of suffix sets.
 
 <histogram name="Net.Wifi.ScanLatency" units="milliseconds">
   <summary>The time that a Wi-fi scan takes.</summary>
+</histogram>
+
+<histogram name="Net.WpadQuickCheckFailure" units="milliseconds">
+  <summary>
+    Duration of time that a failing WPAD QuickCheck takes. WPAD QuickCheck does
+    a name lookup for &quot;wpad&quot; and times out quickly to fail fast when
+    there's no WPAD server on the network.
+  </summary>
+</histogram>
+
+<histogram name="Net.WpadQuickCheckSuccess" units="milliseconds">
+  <summary>
+    Duration of time that a successful WPAD QuickCheck takes. WPAD QuickCheck
+    does a name lookup for &quot;wpad&quot; and times out quickly to fail fast
+    when there's no WPAD server on the network.
+  </summary>
 </histogram>
 
 <histogram name="NetConnectivity.Pipeline.0.NetworkError" enum="NetErrorCodes">
@@ -10248,6 +10972,14 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="NewTabPage.BookmarkActionAndroid"
+    enum="NewTabPageBookmarkActionAndroid">
+  <summary>
+    Actions taken by users on partner bookmarks (editing / renaming) on the NTP
+    on Android.
+  </summary>
+</histogram>
+
 <histogram name="NewTabPage.DefaultPageType" enum="NtpPaneType">
   <summary>The default pane when the NTP is first opened.</summary>
 </histogram>
@@ -10649,6 +11381,14 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="OSX.CatSixtyFour" enum="CatSixtyFour">
+  <summary>The cat's flavor and how many bits there are in it.</summary>
+</histogram>
+
+<histogram name="OSX.ExceptionHandlerEvents" enum="OSXExceptionHandlerEvents">
+  <summary>Events seen by the OSX NSException swizzle.</summary>
+</histogram>
+
 <histogram name="OutdatedUpgradeBubble.NumLaterPerReinstall">
   <summary>
     Counts the number of times the user clicked on the later button of the
@@ -10812,6 +11552,32 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="PasswordManager.AccountsPerSite">
+  <summary>
+    The number of accounts stored per site in the the password manager (one
+    event per site)
+  </summary>
+</histogram>
+
+<histogram name="PasswordManager.ActionsTaken"
+    enum="PasswordManagerActionsTaken">
+  <obsolete>
+    Deprecated as of Chrome 32. See PasswordManagerActionsTakenWithPsl
+  </obsolete>
+  <summary>
+    Stats documenting how we handle every form containing a password, bucketed
+    by the actions taken.
+  </summary>
+</histogram>
+
+<histogram name="PasswordManager.ActionsTakenWithPsl"
+    enum="PasswordManagerActionsTakenWithPsl">
+  <summary>
+    Stats documenting how we handle every form containing a password, bucketed
+    by the actions taken.
+  </summary>
+</histogram>
+
 <histogram name="PasswordManager.BlacklistedSites">
   <summary>
     The total number of sites that the user has blacklisted. Recorded by
@@ -10823,6 +11589,36 @@ other types of suffix sets.
   <summary>
     Indicates whether the password manager is enabled when a tab is opened. This
     includes prerendered tabs.
+  </summary>
+</histogram>
+
+<histogram name="PasswordManager.InfoBarResponse" enum="InfoBarResponse">
+  <summary>
+    The distribution of responses to the &quot;Do you want Chrome to remember
+    this password&quot;? info bar prompt.
+  </summary>
+</histogram>
+
+<histogram name="PasswordManager.NumPasswordsDeletedByBulkDelete">
+  <summary>
+    Number of passwords deleted when the user chooses to clear passwords via the
+    clear browsing data UI.
+  </summary>
+</histogram>
+
+<histogram name="PasswordManager.NumPasswordsDeletedWhenBlacklisting">
+  <summary>
+    When the user chooses to never remember passwords for a form, we remove all
+    previously saved credentials for that form. This is the count of those
+    credentials.
+  </summary>
+</histogram>
+
+<histogram name="PasswordManager.NumPasswordsNotShown">
+  <summary>
+    The password manager only shows those credentials that are considered the
+    best match for a particular form. This stat keep track of the credentials
+    that were not as good of a match and were suppressed.
   </summary>
 </histogram>
 
@@ -10839,6 +11635,15 @@ other types of suffix sets.
   <summary>
     Breakdown of cases where a password is submitted, but we don't even try and
     save it. Recorded for every password form submit.
+  </summary>
+</histogram>
+
+<histogram name="PasswordManager.PslDomainMatchTriggering"
+    enum="PasswordManagerPslDomainMatchTriggering">
+  <summary>
+    Breakdown on trigger rate of providing a password form autofill entry based
+    on matching stored information using the public suffix list for possible
+    matches.
   </summary>
 </histogram>
 
@@ -10876,6 +11681,29 @@ other types of suffix sets.
     The number of times each saved password has been used to log in. Does not
     include generated passwords. Recorded by iterating over stored passwords
     once per run. This information is persisted and synced.
+  </summary>
+</histogram>
+
+<histogram name="PasswordManager.TotalAccounts">
+  <summary>
+    The number of accounts stored in the password manager (across all sites)
+  </summary>
+</histogram>
+
+<histogram name="PerformanceMonitor.AverageCPU.BrowserProcess"
+    units="PercentCPUUsage">
+  <summary>
+    Average CPU utilization of the browser process, read out at each two-minute
+    interval. The utilization is in the 0-100% range per CPU, which is then
+    summed up. I.e. a quadcore system fully loaded would read as 400%.
+  </summary>
+</histogram>
+
+<histogram name="PerformanceMonitor.HighCPU.BrowserProcess" enum="BooleanHit">
+  <summary>
+    The number of times a browser process has continuously stayed above a
+    certain threshold of CPU utilization over a certain time period (currently
+    set to two minutes).
   </summary>
 </histogram>
 
@@ -11043,6 +11871,12 @@ other types of suffix sets.
     *string++;  Separately each warning is also collected (with its hash) via
     the crash reporter, but only its first occurrence in each boot session.
     Contact semenzato@ for further info.
+  </summary>
+</histogram>
+
+<histogram name="Platform.LogicalCpuCount">
+  <summary>
+    Number of logical processors. This includes Hyperthreaded cores.
   </summary>
 </histogram>
 
@@ -11231,6 +12065,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap0.Time1" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11238,6 +12075,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap0.Time2" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11245,6 +12085,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap0.Time3" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11252,6 +12095,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap0.Time4" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11259,6 +12105,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap1.Time1" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11266,6 +12115,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap1.Time2" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11273,6 +12125,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap1.Time3" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11280,6 +12135,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap1.Time4" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11287,6 +12145,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap2.Time1" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11294,6 +12155,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap2.Time2" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11301,6 +12165,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap2.Time3" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11308,6 +12175,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap2.Time4" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11315,6 +12185,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap3.Time1" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11322,6 +12195,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap3.Time2" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11329,6 +12205,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap3.Time3" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11336,6 +12215,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.Scroll.Cpu.Swap3.Time4" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11344,6 +12226,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap0.Time1"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11352,6 +12237,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap0.Time2"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11360,6 +12248,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap0.Time3"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11368,6 +12259,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap0.Time4"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11376,6 +12270,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap1.Time1"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11384,6 +12281,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap1.Time2"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11392,6 +12292,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap1.Time3"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11400,6 +12303,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap1.Time4"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11408,6 +12314,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap2.Time1"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11416,6 +12325,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap2.Time2"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11432,6 +12344,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap2.Time4"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11440,6 +12355,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap3.Time1"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11448,6 +12366,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap3.Time2"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11456,6 +12377,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap3.Time3"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11464,6 +12388,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.Scroll.Faults.Swap3.Time4"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     scroll event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11471,6 +12398,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap0.Time1" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11478,6 +12408,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap0.Time2" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11485,6 +12418,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap0.Time3" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11492,6 +12428,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap0.Time4" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11499,6 +12438,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap1.Time1" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11506,6 +12448,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap1.Time2" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11513,6 +12458,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap1.Time3" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11520,6 +12468,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap1.Time4" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11527,6 +12478,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap2.Time1" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11534,6 +12488,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap2.Time2" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11541,6 +12498,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap2.Time3" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11548,6 +12508,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap2.Time4" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11555,6 +12518,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap3.Time1" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11562,6 +12528,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap3.Time2" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11569,6 +12538,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap3.Time3" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11576,6 +12548,9 @@ other types of suffix sets.
 </histogram>
 
 <histogram name="Platform.SwapJank.TabSwitch.Cpu.Swap3.Time4" units="%">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     CPU utilization for the specified swap group and time interval after a tab
     switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11584,6 +12559,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap0.Time1"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11592,6 +12570,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap0.Time2"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11600,6 +12581,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap0.Time3"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11608,6 +12592,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap0.Time4"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11616,6 +12603,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap1.Time1"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11624,6 +12614,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap1.Time2"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11632,6 +12625,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap1.Time3"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11640,6 +12636,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap1.Time4"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11648,6 +12647,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap2.Time1"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11656,6 +12658,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap2.Time2"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11664,6 +12669,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap2.Time3"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11672,6 +12680,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap2.Time4"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11680,6 +12691,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap3.Time1"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11688,6 +12702,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap3.Time2"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11696,6 +12713,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap3.Time3"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -11704,6 +12724,9 @@ other types of suffix sets.
 
 <histogram name="Platform.SwapJank.TabSwitch.Faults.Swap3.Time4"
     units="page faults/second">
+  <obsolete>
+    Deprecated 9/2013 when the SwapJank64vs32Parrot experiment ended.
+  </obsolete>
   <summary>
     Page faults/second for the specified swap group and time interval after a
     tab switch event.  See src/chrome/browser/chromeos/swap_metrics.cc.
@@ -12047,6 +13070,107 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="PLT.PT_BeginToCommit" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.BeginToCommit. Commit: responseStart. Begin: requestStart or
+    navigationStart if user-initiated request.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_BeginToFinish" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.BeginToFinish. Finish: loadEventEnd. Begin: requestStart or
+    navigationStart if user-initiated request.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_BeginToFinishDoc" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.BeginToFinishDoc. FinishDoc: loadEventStart. Begin:
+    requestStart or navigationStart if user-initiated request.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_CommitToFinish" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.CommitToFinish. Commit: responseStart. Finish: loadEventEnd.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_CommitToFinishDoc" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.CommitToFinishDoc. Commit: responseStart. FinishDoc:
+    loadEventStart.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_FinishDocToFinish" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.FinishDocToFinish. Finish: loadEventEnd. FinishDoc:
+    loadEventStart.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_RequestToCommit" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and measures the time until
+    the renderer got first byte of document. Commit: time when renderer got
+    first byte of document. Request: navigationStart.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_RequestToDomContentLoaded" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and measures the time until
+    the beginning of the DOMContentLoaded event. DOMContentLoaded:
+    domContentLoadedEventStart. Request: navigationStart.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_RequestToFinish" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.RequestToFinish. Finish: loadEventEnd. Request:
+    navigationStart.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_RequestToFinishDoc" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and measures the page load
+    time until the beginning of the load event. Finish: loadEventStart. Request:
+    navigationStart.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_RequestToStart" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.RequestToStart. Start: requestStart. Request:
+    navigationStart.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_StartToCommit" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.StartToCommit. Start: requestStart. Commit: responseStart.
+  </summary>
+</histogram>
+
+<histogram name="PLT.PT_StartToFinish" units="milliseconds">
+  <summary>
+    This time is based on the NavigationTiming spec and is a more accurate
+    version of PLT.StartToFinish. Start: requestStart. Finish: loadEventEnd.
+  </summary>
+</histogram>
+
 <histogram name="PLT.RequestToFinish" units="milliseconds">
   <summary>
     Time from &quot;request&quot; to &quot;finish.&quot;  &quot;Request&quot; ==
@@ -12216,6 +13340,14 @@ other types of suffix sets.
   <summary>
     Number of times the user has adjusted brightness up and down while running
     on AC power.
+  </summary>
+</histogram>
+
+<histogram name="Power.ChargerType" enum="PowerChargerType">
+  <summary>
+    External power supply type such as MAINS_CHARGER, USB_CHARGER,
+    UNCONFIRMED_SPRING_CHARGER, SAFE_SPRING_CHARGER. A sample is reported each
+    time a charger is connected to the device.
   </summary>
 </histogram>
 
@@ -12556,6 +13688,15 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Prerender.ModPagespeedHeader">
+  <obsolete>
+    Deprecated as of 10/2013.
+  </obsolete>
+  <summary>
+    Previous version of the Prerender.PagespeedHeader.* histograms.
+  </summary>
+</histogram>
+
 <histogram name="Prerender.OmniboxNavigationsCouldPrerender">
   <summary>
     A boolean that indicates whether the Omnibox navigation being committed
@@ -12584,6 +13725,36 @@ other types of suffix sets.
     given the text the user has entered and the Autocomplete suggestion
     currently selected. It is only incremented if Prerendering from the Omnibox
     is enabled.
+  </summary>
+</histogram>
+
+<histogram name="Prerender.PagespeedHeader.ServerCounts"
+    enum="PagespeedHeaderServerType">
+  <summary>
+    The number of responses received bucketed into the range [0,4]: bucket 0 is
+    the total number of responses received; bucket 1 is the number of responses
+    received with an X-Mod-Pagespeed header [indicating a mod_pagespeed server];
+    bucket 2 is the number of responses received with an X-Page-Speed header and
+    a header value in the X-Mod-Pagespeed format (a.b.c.d-e) [indicating an
+    ngx_pagespeed server]; bucket 3 is the number of responses received with an
+    X-Page-Speed header and a header value in the PageSpeed Service format
+    (a_b_c) [indicating a PSS server]; and bucket 4 is the number of responses
+    received with an X-Page-Speed header and a header value in neither of the
+    preceding formats [indicating some other server; IISpeed is the only known
+    one at this stage].
+  </summary>
+</histogram>
+
+<histogram name="Prerender.PagespeedHeader.VersionCounts"
+    enum="PagespeedVersion">
+  <summary>
+    The number of responses received that either have an X-Mod-Pagespeed header
+    or have an X-Page-Speed header with a value in the X-Mod-Pagespeed format
+    (a.b.c.d-e), bucketed into the range [1,99]: bucket 1 is for header values
+    that aren't in the a.b.c.d-e format, the remaining buckets are an encoding
+    of the value: 2 + 2 * (max(c, 10) - 10) + (d &gt; 1 ? 1 : 0). The rationale
+    is that 'c' is incremented with each new release and 'd' is initially 0 but
+    is incremented for each patch to a release.
   </summary>
 </histogram>
 
@@ -13261,10 +14432,41 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Renderer.GpuLatency" units="milliseconds">
+  <summary>
+    The delay between the compositor submitting a command to the GPU and that
+    command executing on the GPU. This delay is measured once per frame.
+  </summary>
+</histogram>
+
+<histogram name="Renderer.GpuLatencyOverestimate" units="milliseconds">
+  <summary>
+    The amount by which GPU latency was overestimated in a particular frame (0
+    if the latency was perfectly predicted or underestimated).
+  </summary>
+</histogram>
+
+<histogram name="Renderer.GpuLatencyUnderestimate" units="milliseconds">
+  <summary>
+    The amount by which GPU latency was underestimated in a particular frame (0
+    if the latency was perfectly predicted or overestimated).
+  </summary>
+</histogram>
+
 <histogram name="Renderer.PixelIncreaseFromTransitions">
   <summary>
     A lower-bound on the percentage increase in memory that would result from
     promoting all layers that have a webkit-transition on opacity or transform.
+  </summary>
+</histogram>
+
+<histogram name="Renderer.unloadEventsDurationMS" units="milliseconds">
+  <obsolete>
+    Deprecated as of 10/2013.
+  </obsolete>
+  <summary>
+    This measures how long all unload event handlers required to run whenever an
+    unload event is processed.
   </summary>
 </histogram>
 
@@ -13498,6 +14700,13 @@ other types of suffix sets.
     &quot;Finish&quot;==after onload() and all resources are loaded. &quot;First
     paint after load&quot;== time after onload() when first paint operation is
     performed.
+  </summary>
+</histogram>
+
+<histogram name="Renderer4.InvalidationRegionApproximateRectCount"
+    units="rects">
+  <summary>
+    Number of rects inside of a PictureLayer's invalidation region per commit.
   </summary>
 </histogram>
 
@@ -14166,6 +15375,13 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="SB2.InterstitialActionDetails"
+    enum="SB2InterstitialActionDetails">
+  <summary>
+    Tracks the click-through rate for specific cases of the interstitial.
+  </summary>
+</histogram>
+
 <histogram name="SB2.MalwareInterstitialTimeClosed" units="milliseconds">
   <summary>
     The time between when we show the SafeBrowsing malware interstitial and the
@@ -14705,7 +15921,17 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="SBDownloadFeedback.Eligible" enum="DownloadItem.DangerType">
+  <summary>
+    Count of times eligible download notifications are shown. Broken down by
+    danger type.
+  </summary>
+</histogram>
+
 <histogram name="SBDownloadFeedback.Shown" enum="DownloadItem.DangerType">
+  <obsolete>
+    Starting with M32, replaced by SBDownloadFeedback.Eligible.
+  </obsolete>
   <summary>
     Count of times download feedback button has been shown, broken down by
     danger type.
@@ -14898,6 +16124,18 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Settings.StartupURLsMigration" enum="StartupURLsMigration">
+  <summary>The startup URLs pref migration steps.</summary>
+</histogram>
+
+<histogram name="Settings.StartupURLsResetTime" units="milliseconds">
+  <summary>
+    The time elapsed in milliseconds in between startup URLs pref migration. A
+    value of 0 indicates that the last migration time was in the future due to
+    e.g. an incorrect system time.
+  </summary>
+</histogram>
+
 <histogram name="Settings.TrackedPreferenceChanged" enum="TrackedPreference">
   <summary>
     The id of a tracked preference whose value has been changed since the last
@@ -14917,7 +16155,14 @@ other types of suffix sets.
   <summary>
     The id of a tracked preference whose last value isn't known. We may be just
     starting to track the preference, or local state may have been changed
-    outside of Chrome.
+    outside of Chrome. This should only happen once per pref per profile.
+  </summary>
+</histogram>
+
+<histogram name="Settings.TrackedPreferenceMigrated" enum="TrackedPreference">
+  <summary>
+    Logs the tracked preference id when it is migrated to the new MAC algorithm.
+    This should only happen once per pref per profile.
   </summary>
 </histogram>
 
@@ -14925,6 +16170,14 @@ other types of suffix sets.
   <summary>
     The id of a tracked preference whose value has not changed since the last
     time Chrome set it.
+  </summary>
+</histogram>
+
+<histogram name="SettingsResetBubble.NumNoThanksPerReset">
+  <summary>
+    Counts the number of times the user clicked on the No Thanks button of the
+    settings reset bubble before clicking on the Reset button in the same Chrome
+    session.
   </summary>
 </histogram>
 
@@ -14949,6 +16202,14 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="SimpleCache.App.EntryCreatedAndStream2Omitted"
+    enum="SimpleCache.EntryCreatedAndStream2Omitted">
+  <summary>
+    Whether, upon creation of a new cache entry, the file for stream 2 was
+    omitted since that stream was empty.
+  </summary>
+</histogram>
+
 <histogram name="SimpleCache.App.EntryCreationResult" enum="BooleanSuccess">
   <summary>
     For entry creation operations that were sent to the disk, the result of
@@ -14958,6 +16219,14 @@ other types of suffix sets.
 
 <histogram name="SimpleCache.App.EntryCreationTime" units="milliseconds">
   <summary>The time, in ms, spent creating a new entry on disk.</summary>
+</histogram>
+
+<histogram name="SimpleCache.App.EntryOpenedAndStream2Removed"
+    enum="SimpleCache.EntryOpenedAndStream2Removed">
+  <summary>
+    Whether, upon opening of an existing cache entry, stream 2 was empty and the
+    file for that stream was therefore removed.
+  </summary>
 </histogram>
 
 <histogram name="SimpleCache.App.EntryOperationsPending">
@@ -15648,6 +16917,14 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="SimpleCache.Http.EntryCreatedAndStream2Omitted"
+    enum="SimpleCache.EntryCreatedAndStream2Omitted">
+  <summary>
+    Whether, upon creation of a new cache entry, the file for stream 2 was
+    omitted since that stream was empty.
+  </summary>
+</histogram>
+
 <histogram name="SimpleCache.Http.EntryCreationResult" enum="BooleanSuccess">
   <summary>
     For entry creation operations that were sent to the disk, the result of
@@ -15657,6 +16934,14 @@ other types of suffix sets.
 
 <histogram name="SimpleCache.Http.EntryCreationTime" units="milliseconds">
   <summary>The time, in ms, spent creating a new entry on disk.</summary>
+</histogram>
+
+<histogram name="SimpleCache.Http.EntryOpenedAndStream2Removed"
+    enum="SimpleCache.EntryOpenedAndStream2Removed">
+  <summary>
+    Whether, upon opening of an existing cache entry, stream 2 was empty and the
+    file for that stream was therefore removed.
+  </summary>
 </histogram>
 
 <histogram name="SimpleCache.Http.EntryOperationsPending">
@@ -16884,6 +18169,14 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="SpellCheck.SpellingService.Enabled" enum="BooleanEnabled">
+  <summary>
+    Whether the user has opted in to asking Google for spelling suggestions.
+    Recorded both when spelling is initialized and when the preference is
+    changed.
+  </summary>
+</histogram>
+
 <histogram name="Sqlite.AppCache.Error" enum="SqliteErrorCode">
   <summary>Error codes returned by sqlite for the appcache db.</summary>
 </histogram>
@@ -16898,6 +18191,13 @@ other types of suffix sets.
 
 <histogram name="Sqlite.DatabaseTracker.Error" enum="SqliteErrorCode">
   <summary>Error codes returned by sqlite the websqldb tracker db.</summary>
+</histogram>
+
+<histogram name="Sqlite.DeprecationVersionResult"
+    enum="SqliteVersionDeprecation">
+  <summary>
+    Annotations for which bits of sql::MetaTable::CheckDeprecated() fire.
+  </summary>
 </histogram>
 
 <histogram name="Sqlite.DomainBoundCerts.Error" enum="SqliteErrorCode">
@@ -17170,10 +18470,26 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="Sync.BackendInitializeRestoreState"
+    enum="SyncBackendInitializeRestoreState">
+  <summary>
+    Compares sync's has_setup_completed pref against the set of types actually
+    restored from the sync DB.  Mismatches should be rare.
+  </summary>
+</histogram>
+
 <histogram name="Sync.RefreshTokenAvailable" enum="BooleanSuccess">
   <summary>
     Whether OAuth2 refresh token was available at the time when
     ProfileSyncService was starting backend.
+  </summary>
+</histogram>
+
+<histogram name="SyncedNotification.Actions"
+    enum="SyncedNotificationActionType">
+  <summary>
+    The actions taken on synced notifications, recorded every time they happen.
+    This histogram will record every single event that happens separately.
   </summary>
 </histogram>
 
@@ -17223,9 +18539,19 @@ other types of suffix sets.
 
 <histogram name="Tab.StatusWhenSwitchedBackToForeground" enum="TabStatus">
   <summary>
-    The status of a tab collected each time the user switches to it on Android.
+    The status of a tab collected each time the user switches to it on mobile.
     That does not include tabs being created at the time the user switches to
     them, such as NTP or tabs opened to handle intents.
+  </summary>
+</histogram>
+
+<histogram name="Tab.StatusWhenSwitchedBackToForegroundDataProxyEnabled"
+    enum="TabStatus">
+  <summary>
+    The status of a tab collected each time the user switches to it on mobile
+    with the data reduction proxy enabled. This is populated identically, and in
+    addition to Tab.StatusWhenSwitchedBackToForeground for any given tab
+    switching event if the proxy is enabled.
   </summary>
 </histogram>
 
@@ -17292,6 +18618,13 @@ other types of suffix sets.
   <summary>
     Accuracy of the tab switch predictions made when the user enters the tab
     switcher.
+  </summary>
+</histogram>
+
+<histogram name="Tabs.SpeculativeRestoreTargetStatus"
+    enum="SpeculativeRestoreTabStatus">
+  <summary>
+    Status of a tab recorded when the tab is targeted with speculative restore.
   </summary>
 </histogram>
 
@@ -17996,6 +19329,22 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="VirtualKeyboard.KeyboardControlEvent"
+    enum="KeyboardControlEvent">
+  <summary>
+    A count of various control events that can occur on the virtual keyboard,
+    such as showing and hiding.
+  </summary>
+</histogram>
+
+<histogram name="VirtualKeyboard.KeystrokesBetweenBackspace">
+  <summary>
+    Counts the number of keys typed by the virtual keyboard between each
+    backspace. This metric provides a rough approximation of an error rate for
+    the virtual keyboard.
+  </summary>
+</histogram>
+
 <histogram name="Wallet.ApiCallDuration.AcceptLegalDocuments" units="ms">
   <summary>
     Measures the time taken by Google Online Wallet server's accept legal
@@ -18394,6 +19743,14 @@ other types of suffix sets.
   </summary>
 </histogram>
 
+<histogram name="WebFont.CacheHit" enum="WebFontCacheHit">
+  <summary>
+    Recorded upon web fonts load. Counts the number of times web font is loaded
+    from cache (disk cache or memory cache), fetched over network, or served
+    from data URL.
+  </summary>
+</histogram>
+
 <histogram name="WebFont.DownloadTime.0.Under10KB" units="milliseconds">
   <summary>
     The time it takes for a webfont download to finish, for webfonts of under
@@ -18671,6 +20028,13 @@ other types of suffix sets.
   <summary>Counts number of calls to WebRTC APIs from JavaScript.</summary>
 </histogram>
 
+<histogram name="Win8.PageLoad" enum="Win8PageLoadType">
+  <summary>
+    Count of page loads in each of the 2 different environments (metro/desktop)
+    on Windows 8.
+  </summary>
+</histogram>
+
 <histogram name="WinTimeTicks.FailedToChangeCores" enum="WindowsVersion">
   <summary>
     Incremented each time the TimeTicks field trial runs on a machine with
@@ -18813,6 +20177,10 @@ other types of suffix sets.
   <int value="19" label="NTP_WEBSTORE_PLUS_ICON"/>
   <int value="20" label="APP_LIST_MAIN"/>
   <int value="21" label="APP_LIST_SEARCH"/>
+  <int value="22" label="APP_LIST_MAIN_CHROME"/>
+  <int value="23" label="APP_LIST_MAIN_WEBSTORE"/>
+  <int value="24" label="APP_LIST_SEARCH_CHROME"/>
+  <int value="25" label="APP_LIST_SEARCH_WEBSTORE"/>
 </enum>
 
 <enum name="AppLaunchContainer" type="int">
@@ -19227,6 +20595,11 @@ other types of suffix sets.
   <int value="1" label="Attempted"/>
 </enum>
 
+<enum name="BooleanCommonNameMatch" type="int">
+  <int value="0" label="subjectAltName used"/>
+  <int value="1" label="Common Name used"/>
+</enum>
+
 <enum name="BooleanCorrupt" type="int">
   <int value="0" label="Not Corrupt"/>
   <int value="1" label="Corrupt"/>
@@ -19344,6 +20717,27 @@ other types of suffix sets.
   <int value="3" label="webgl"/>
 </enum>
 
+<enum name="CatSixtyFour" type="int">
+  <int value="0" label="Saber-Toothed Cat (&lt;10.6), 32-bit (?)"/>
+  <int value="1" label="Saber-Toothed Cat (&lt;10.6), 64-bit (?)"/>
+  <int value="2" label="Snow Leopard (10.6), 32-bit"/>
+  <int value="3" label="Snow Leopard (10.6), 64-bit"/>
+  <int value="4" label="Lion (10.7), 32-bit (?)"/>
+  <int value="5" label="Lion (10.7), 64-bit"/>
+  <int value="6" label="Mountain Lion (10.8), 32-bit (?)"/>
+  <int value="7" label="Mountain Lion (10.8), 64-bit"/>
+  <int value="8" label="Mavericks (10.9), 32-bit (?)"/>
+  <int value="9" label="Mavericks (10.9), 64-bit"/>
+  <int value="10" label="Saber-Toothed Cat (&lt;10.6), 8-bit (?)"/>
+  <int value="11" label="Snow Leopard (10.6), 8-bit (?)"/>
+  <int value="12" label="Lion (10.7), 8-bit (?)"/>
+  <int value="13" label="Mountain Lion (10.8), 8-bit (?)"/>
+  <int value="14" label="Mavericks (10.9), 8-bit (?)"/>
+  <int value="15" label="FutureCat (&gt;10.9), 32-bit (?)"/>
+  <int value="16" label="FutureCat (&gt;10.9), 64-bit"/>
+  <int value="17" label="FutureCat (&gt;10.9), 8-bit (?)"/>
+</enum>
+
 <enum name="ChannelLayout" type="int">
   <int value="0" label="CHANNEL_LAYOUT_NONE"/>
   <int value="1" label="CHANNEL_LAYOUT_UNSUPPORTED"/>
@@ -19398,6 +20792,12 @@ other types of suffix sets.
   <int value="2" label="Initiated by WebStore Installer"/>
   <int value="3" label="Initiated by ImageBurner"/>
   <int value="4" label="Initiated by Plugin Installer"/>
+</enum>
+
+<enum name="ChromeNotifierServiceActionType" type="int">
+  <int value="0" label="Unknown"/>
+  <int value="1" label="First service enabled"/>
+  <int value="2" label="First service disabled"/>
 </enum>
 
 <enum name="ChromeOSUserImageId" type="int">
@@ -19579,6 +20979,21 @@ other types of suffix sets.
   <int value="6" label="Sheets"/>
   <int value="7" label="Slides"/>
   <int value="8" label="PlayMusic"/>
+</enum>
+
+<enum name="DataReductionProxyBypassEventType" type="int">
+  <int value="0" label="Short bypass"/>
+  <int value="1" label="Long bypass"/>
+  <int value="2" label="Bypass due to internal server error"/>
+  <int value="3" label="Bypass due to otehr error"/>
+</enum>
+
+<enum name="DataReductionProxyProbeURLFetchResult" type="int">
+  <int value="0" label="Internet disconnected"/>
+  <int value="1" label="Probe failed, proxy disabled"/>
+  <int value="2" label="Probe failed, proxy already disabled"/>
+  <int value="3" label="Probe succeeded, proxy enabled"/>
+  <int value="4" label="Probe succeeded, proxy already enabled"/>
 </enum>
 
 <enum name="DataReductionProxyPromoAction" type="int">
@@ -19827,6 +21242,134 @@ other types of suffix sets.
   <int value="1" label="Size Unknown"/>
 </enum>
 
+<enum name="DownloadItem.DangerousFileType" type="int">
+  <int value="0" label="unknown"/>
+  <int value="1" label="ad"/>
+  <int value="2" label="ade"/>
+  <int value="3" label="adp"/>
+  <int value="4" label="ah"/>
+  <int value="5" label="apk"/>
+  <int value="6" label="app"/>
+  <int value="7" label="application"/>
+  <int value="8" label="asp"/>
+  <int value="9" label="asx"/>
+  <int value="10" label="bas"/>
+  <int value="11" label="bash"/>
+  <int value="12" label="bat"/>
+  <int value="13" label="cfg"/>
+  <int value="14" label="chi"/>
+  <int value="15" label="chm"/>
+  <int value="16" label="class"/>
+  <int value="17" label="cmd"/>
+  <int value="18" label="com"/>
+  <int value="19" label="command"/>
+  <int value="20" label="crt"/>
+  <int value="21" label="crx"/>
+  <int value="22" label="csh"/>
+  <int value="23" label="deb"/>
+  <int value="24" label="dex"/>
+  <int value="25" label="dll"/>
+  <int value="26" label="drv"/>
+  <int value="27" label="exe"/>
+  <int value="28" label="fxp"/>
+  <int value="29" label="grp"/>
+  <int value="30" label="hlp"/>
+  <int value="31" label="hta"/>
+  <int value="32" label="htm"/>
+  <int value="33" label="html"/>
+  <int value="34" label="htt"/>
+  <int value="35" label="inf"/>
+  <int value="36" label="ini"/>
+  <int value="37" label="ins"/>
+  <int value="38" label="isp"/>
+  <int value="39" label="jar"/>
+  <int value="40" label="jnlp"/>
+  <int value="41" label="user.js"/>
+  <int value="42" label="js"/>
+  <int value="43" label="jse"/>
+  <int value="44" label="ksh"/>
+  <int value="45" label="lnk"/>
+  <int value="46" label="local"/>
+  <int value="47" label="mad"/>
+  <int value="48" label="maf"/>
+  <int value="49" label="mag"/>
+  <int value="50" label="mam"/>
+  <int value="51" label="manifest"/>
+  <int value="52" label="maq"/>
+  <int value="53" label="mar"/>
+  <int value="54" label="mas"/>
+  <int value="55" label="mat"/>
+  <int value="56" label="mau"/>
+  <int value="57" label="mav"/>
+  <int value="58" label="maw"/>
+  <int value="59" label="mda"/>
+  <int value="60" label="mdb"/>
+  <int value="61" label="mde"/>
+  <int value="62" label="mdt"/>
+  <int value="63" label="mdw"/>
+  <int value="64" label="mdz"/>
+  <int value="65" label="mht"/>
+  <int value="66" label="mhtml"/>
+  <int value="67" label="mmc"/>
+  <int value="68" label="mof"/>
+  <int value="69" label="msc"/>
+  <int value="70" label="msh"/>
+  <int value="71" label="mshxml"/>
+  <int value="72" label="msi"/>
+  <int value="73" label="msp"/>
+  <int value="74" label="mst"/>
+  <int value="75" label="ocx"/>
+  <int value="76" label="ops"/>
+  <int value="77" label="pcd"/>
+  <int value="78" label="pif"/>
+  <int value="79" label="pkg"/>
+  <int value="80" label="pl"/>
+  <int value="81" label="plg"/>
+  <int value="82" label="prf"/>
+  <int value="83" label="prg"/>
+  <int value="84" label="pst"/>
+  <int value="85" label="py"/>
+  <int value="86" label="pyc"/>
+  <int value="87" label="pyw"/>
+  <int value="88" label="rb"/>
+  <int value="89" label="reg"/>
+  <int value="90" label="rpm"/>
+  <int value="91" label="scf"/>
+  <int value="92" label="scr"/>
+  <int value="93" label="sct"/>
+  <int value="94" label="sh"/>
+  <int value="95" label="shar"/>
+  <int value="96" label="shb"/>
+  <int value="97" label="shs"/>
+  <int value="98" label="shtm"/>
+  <int value="99" label="shtml"/>
+  <int value="100" label="spl"/>
+  <int value="101" label="svg"/>
+  <int value="102" label="swf"/>
+  <int value="103" label="sys"/>
+  <int value="104" label="tcsh"/>
+  <int value="105" label="url"/>
+  <int value="106" label="vb"/>
+  <int value="107" label="vbe"/>
+  <int value="108" label="vbs"/>
+  <int value="109" label="vsd"/>
+  <int value="110" label="vsmacros"/>
+  <int value="111" label="vss"/>
+  <int value="112" label="vst"/>
+  <int value="113" label="vsw"/>
+  <int value="114" label="ws"/>
+  <int value="115" label="wsc"/>
+  <int value="116" label="wsf"/>
+  <int value="117" label="wsh"/>
+  <int value="118" label="xbap"/>
+  <int value="119" label="xht"/>
+  <int value="120" label="xhtm"/>
+  <int value="121" label="xhtml"/>
+  <int value="122" label="xml"/>
+  <int value="123" label="xsl"/>
+  <int value="124" label="xslt"/>
+</enum>
+
 <enum name="DownloadItem.DangerType" type="int">
   <int value="0" label="NOT_DANGEROUS"/>
   <int value="1" label="DANGEROUS_FILE"/>
@@ -19912,6 +21455,9 @@ other types of suffix sets.
   <int value="4" label="Failed to open DB for unknown reason"/>
   <int value="5" label="Incompatible DB format"/>
   <int value="6" label="DB is broken"/>
+  <int value="7" label="Opened existing DB."/>
+  <int value="8" label="No existing DB was found. Created new DB."/>
+  <int value="9" label="Cannot open existing DB. Created new DB."/>
 </enum>
 
 <enum name="EAPInnerProtocol" type="int">
@@ -20062,6 +21608,18 @@ other types of suffix sets.
   <int value="18" label="Missing licenses">
     No licenses left for that domain.
   </int>
+  <int value="19" label="Robot auth code fetch failed">
+    Enrollment failed due to an error fetching the device robot authorization
+    code from the DM Server.
+  </int>
+  <int value="20" label="Robot refresh token fetch failed">
+    Enrollment failed due to an error fetching the device robot refresh token
+    from Gaia.
+  </int>
+  <int value="21" label="Robot refresh token store failed">
+    Enrollment failed due to an error persisting the device robot refresh token
+    on the device.
+  </int>
 </enum>
 
 <enum name="EnterprisePolicies" type="int">
@@ -20190,8 +21748,8 @@ other types of suffix sets.
       label="Enable submission of documents to Google Cloud Print"/>
   <int value="110" label="Set disk cache size in bytes"/>
   <int value="111" label="Set media disk cache size in bytes"/>
-  <int value="112" label="Enterprise web store URL"/>
-  <int value="113" label="Enterprise web store name"/>
+  <int value="112" label="Enterprise web store URL (deprecated)"/>
+  <int value="113" label="Enterprise web store name (deprecated)"/>
   <int value="114" label="Enable TLS domain-bound certificates extension"/>
   <int value="115" label="Enable reporting memory info (JS heap size) to page"/>
   <int value="116" label="Proxy settings"/>
@@ -20222,8 +21780,10 @@ other types of suffix sets.
   <int value="137" label="Load specified urls on demo login"/>
   <int value="138"
       label="Continue running background apps when Google Chrome is closed"/>
-  <int value="139" label="Disables Drive"/>
-  <int value="140" label="Disables Google Drive over Cellular connections"/>
+  <int value="139" label="Disables Drive in the Chrome OS Files app"/>
+  <int value="140"
+      label="Disables Google Drive over Cellular connections in the Chrome OS
+             Files app"/>
   <int value="141"
       label="Additional command line parameters for Google Chrome"/>
   <int value="142" label="Target Auto Update Version"/>
@@ -20280,9 +21840,10 @@ other types of suffix sets.
   <int value="183"
       label="Specify whether video activity affects power management"/>
   <int value="184"
-      label="Percentage by which to scale the idle delay in presentation mode"/>
+      label="Percentage by which to scale the idle delay in presentation mode
+             (deprecated)"/>
   <int value="185"
-      label="Allow users to redeem offers through Chrome OS Registration."/>
+      label="Allow users to redeem offers through Chrome OS Registration"/>
   <int value="186" label="Set the Terms of Service for a device-local account"/>
   <int value="187" label="Enable deleting browser and download history"/>
   <int value="188" label="Show accessibility options in system tray menu"/>
@@ -20298,6 +21859,86 @@ other types of suffix sets.
       label="Set the restriction on the fetching of the Variations seed"/>
   <int value="197" label="Idle warning delay when running on AC power"/>
   <int value="198" label="Idle warning delay when running on battery power"/>
+  <int value="199"
+      label="Set the restriction on the fetching of the Variations seed"/>
+  <int value="200" label="Enable remote attestation for the user"/>
+  <int value="201"
+      label="Extensions allowed to to use the remote attestation API"/>
+  <int value="202" label="Enable bailout keyboard shortcut for auto-login"/>
+  <int value="203" label="Allow screen wake locks"/>
+  <int value="204" label="Default behavior for sites not in any content pack"/>
+  <int value="205" label="Managed user manual exception hosts"/>
+  <int value="206" label="Managed user manual exception URLs"/>
+  <int value="207" label="Enable remote attestation for the device"/>
+  <int value="208"
+      label="URLs that will be granted access to audio capture devices
+             without prompt"/>
+  <int value="209"
+      label="URLs that will be granted access to video capture devices
+             without prompt"/>
+  <int value="210"
+      label="Percentage by which to scale the screen dim delay if the user
+             becomes active after dimming"/>
+  <int value="211" label="Enable large cursor"/>
+  <int value="212" label="Enable spoken feedback"/>
+  <int value="213" label="Enable high contrast mode"/>
+  <int value="214" label="Set screen magnifier type"/>
+  <int value="215"
+      label="Set default state of the large cursor on the login screen"/>
+  <int value="216"
+      label="Set the default state of spoken feedback on the login screen"/>
+  <int value="217"
+      label="Set the default state of high contrast mode on the login screen"/>
+  <int value="218"
+      label="Set the default screen magnifier type enabled on the login
+             screen"/>
+  <int value="219" label="Enable supervised users"/>
+  <int value="220"
+      label="Percentage by which to scale the screen dim delay in
+             presentation mode"/>
+  <int value="221" label="Suppress the Google Chrome Frame turndown prompt"/>
+  <int value="222"
+      label="Action to take when the idle delay is reached while running on
+             battery power"/>
+  <int value="223" label="Enable creation of supervised users"/>
+  <int value="224" label="Report device network interfaces"/>
+  <int value="225" label="Power mangement on the login screen"/>
+  <int value="226"
+      label="Action to take when the idle delay is reached while running on
+             AC power"/>
+  <int value="227" label="Managed Bookmarks"/>
+  <int value="228" label="Maximum fetch delay after a policy invalidation"/>
+  <int value="229"
+      label="Parameter providing search-by-image feature for the default
+             search provider"/>
+  <int value="230" label="Parameters for search URL which uses POST"/>
+  <int value="231" label="Parameters for suggest URL which uses POST"/>
+  <int value="232" label="Parameters for instant URL which uses POST"/>
+  <int value="233" label="Parameters for image URL which uses POST"/>
+  <int value="234" label="Enable or disable PIN-less authentication"/>
+  <int value="235"
+      label="Whether online OCSP/CRL checks are required for local trust
+             anchors"/>
+  <int value="236" label="Use 24 hour clock by default"/>
+  <int value="237" label="Default search provider new tab page URL"/>
+  <int value="238" label="Skip the meta tag check in Google Chrome Frame"/>
+  <int value="239"
+      label="Enable the use of remote attestation for content protection for
+             the device"/>
+  <int value="240" label="Allow fullscreen mode"/>
+  <int value="241" label="Enable the data compression proxy feature"/>
+  <int value="242" label="Auto update p2p enabled"/>
+  <int value="243" label="Allow autoupdate downloads via HTTP"/>
+  <int value="244" label="Control the user behavior in a multiprofile session"/>
+  <int value="245" label="Ephemeral profile"/>
+  <int value="246"
+      label="Selects the strategy used to free up disk space during automatic
+             clean-up"/>
+  <int value="247"
+      label="Specify whether power management delays and the session length
+             limit should only start running after initial user activity in a
+             session"/>
+  <int value="248" label="Report device users"/>
 </enum>
 
 <enum name="EnterprisePolicyInvalidations" type="int">
@@ -20485,6 +22126,16 @@ other types of suffix sets.
   <int value="11004" label="WSANO_DATA"/>
 </enum>
 
+<enum name="ExecutionPhase" type="int">
+  <int value="0" label="CLEAN_SHUTDOWN"/>
+  <int value="100" label="START_METRICS_RECORDING"/>
+  <int value="200" label="CREATE_PROFILE"/>
+  <int value="300" label="STARTUP_TIMEBOMB_ARM"/>
+  <int value="400" label="THREAD_WATCHER_START"/>
+  <int value="500" label="MAIN_MESSAGE_LOOP_RUN"/>
+  <int value="600" label="SHUTDOWN_TIMEBOMB_ARM"/>
+</enum>
+
 <enum name="ExtensionBackgroundPageType" type="int">
   <int value="0" label="None"/>
   <int value="1" label="Persistent"/>
@@ -20498,6 +22149,9 @@ other types of suffix sets.
 </enum>
 
 <enum name="ExtensionFileWriteResult" type="int">
+  <obsolete>
+    Deprecated 10/2013.
+  </obsolete>
   <int value="0" label="SUCCESS"/>
   <int value="1" label="CANT_CREATE_TEMP_CRX"/>
   <int value="2" label="CANT_WRITE_CRX_DATA"/>
@@ -21035,6 +22689,8 @@ other types of suffix sets.
   <int value="518" label="AUTOTESTPRIVATE_SIMULATEASANMEMORYBUG"/>
   <int value="519" label="WALLPAPER_SETWALLPAPER"/>
   <int value="520" label="VIRTUALKEYBOARDPRIVATE_HIDEKEYBOARD"/>
+  <int value="521" label="SYSTEM_STORAGE_GETAVAILABLECAPACITY"/>
+  <int value="522" label="VIRTUALKEYBOARDPRIVATE_KEYBOARDLOADED"/>
 </enum>
 
 <enum name="ExtensionInstallCause" type="int">
@@ -21060,6 +22716,9 @@ other types of suffix sets.
   <int value="5" label="COMPONENT"/>
   <int value="6" label="EXTERNAL_PREF_DOWNLOAD"/>
   <int value="7" label="EXTERNAL_POLICY_DOWNLOAD"/>
+  <int value="8" label="COMMAND_LINE"/>
+  <int value="9" label="EXTERNAL_POLICY"/>
+  <int value="10" label="EXTERNAL_COMPONENT"/>
 </enum>
 
 <enum name="ExtensionPermission" type="int">
@@ -21309,6 +22968,65 @@ other types of suffix sets.
   <int value="125" label="NavigatorVendorSub"/>
   <int value="126" label="FileError"/>
   <int value="127" label="DocumentCharset"/>
+  <int value="128" label="PrefixedAnimationEndEvent"/>
+  <int value="129" label="UnprefixedAnimationEndEvent"/>
+  <int value="130" label="PrefixedAndUnprefixedAnimationEndEvent"/>
+  <int value="131" label="PrefixedAnimationStartEvent"/>
+  <int value="132" label="UnprefixedAnimationStartEvent"/>
+  <int value="133" label="PrefixedAndUnprefixedAnimationStartEvent"/>
+  <int value="134" label="PrefixedAnimationIterationEvent"/>
+  <int value="135" label="UnprefixedAnimationIterationEvent"/>
+  <int value="136" label="PrefixedAndUnprefixedAnimationIterationEvent"/>
+  <int value="137" label="EventReturnValue"/>
+  <int value="138" label="SVGSVGElement"/>
+  <int value="139" label="SVGAnimateColorElement"/>
+  <int value="140" label="InsertAdjacentText"/>
+  <int value="141" label="InsertAdjacentElement"/>
+  <int value="142" label="HasAttributes"/>
+  <int value="143" label="DOMSubtreeModifiedEvent"/>
+  <int value="144" label="DOMNodeInsertedEvent"/>
+  <int value="145" label="DOMNodeRemovedEvent"/>
+  <int value="146" label="DOMNodeRemovedFromDocumentEvent"/>
+  <int value="147" label="DOMNodeInsertedIntoDocumentEvent"/>
+  <int value="148" label="DOMCharacterDataModifiedEvent"/>
+  <int value="149" label="DocumentAllTags"/>
+  <int value="150" label="DocumentAllLegacyCall"/>
+  <int value="151" label="HTMLAppletElementLegacyCall"/>
+  <int value="152" label="HTMLEmbedElementLegacyCall"/>
+  <int value="153" label="HTMLObjectElementLegacyCall"/>
+  <int value="154" label="BeforeLoadEvent"/>
+  <int value="155" label="GetMatchedCSSRules"/>
+  <int value="156" label="SVGFontInCSS"/>
+  <int value="157" label="ScrollTopBodyNotQuirksMode"/>
+  <int value="158" label="ScrollLeftBodyNotQuirksMode"/>
+  <int value="159" label="AttributeIsId"/>
+  <int value="160" label="AttributeOwnerElement"/>
+  <int value="161" label="AttributeSetPrefix"/>
+  <int value="162" label="AttributeSpecified"/>
+  <int value="163" label="BeforeLoadEventInIsolatedWorld"/>
+  <int value="164" label="PrefixedAudioDecodedByteCount"/>
+  <int value="165" label="PrefixedVideoDecodedByteCount"/>
+  <int value="166" label="PrefixedVideoSupportsFullscreen"/>
+  <int value="167" label="PrefixedVideoDisplayingFullscreen"/>
+  <int value="168" label="PrefixedVideoEnterFullscreen"/>
+  <int value="169" label="PrefixedVideoExitFullscreen"/>
+  <int value="170" label="PrefixedVideoEnterFullScreen"/>
+  <int value="171" label="PrefixedVideoExitFullScreen"/>
+  <int value="172" label="PrefixedVideoDecodedFrameCount"/>
+  <int value="173" label="PrefixedVideoDroppedFrameCount"/>
+  <int value="174" label="SourceElementCandidate"/>
+  <int value="175" label="SourceElementNonMatchingMedia"/>
+  <int value="176" label="PrefixedElementRequestFullscreen"/>
+  <int value="177" label="PrefixedElementRequestFullScreen"/>
+  <int value="178" label="BarPropLocationbar"/>
+  <int value="179" label="BarPropMenubar"/>
+  <int value="180" label="BarPropPersonalbar"/>
+  <int value="181" label="BarPropScrollbars"/>
+  <int value="182" label="BarPropStatusbar"/>
+  <int value="183" label="BarPropToolbar"/>
+  <int value="184" label="input[type=email][multiple]"/>
+  <int value="185" label="input[type=email][maxlength]"/>
+  <int value="186" label="input[type=email][multiple][maxlength]"/>
 </enum>
 
 <enum name="FFmpegCodecs" type="int">
@@ -21682,6 +23400,12 @@ other types of suffix sets.
   <int value="1950507339" label="TAK"/>
 </enum>
 
+<enum name="FFmpegColorRanges" type="int">
+  <int value="0" label="UNSPECIFIED"/>
+  <int value="1" label="MPEG"/>
+  <int value="2" label="JPEG"/>
+</enum>
+
 <enum name="FileDialogType" type="int">
   <int value="0" label="Select folder"/>
   <int value="1" label="Save as file"/>
@@ -21782,6 +23506,23 @@ other types of suffix sets.
   <int value="32770" label="PDF"/>
 </enum>
 
+<enum name="GeolocationInfoBarDelegateAndroidEvent" type="int">
+  <int value="0" label="User allowed the page to use geolocation">
+    For the Android platform the count for this event should be exactly the same
+    as the corresponding event in the GeolocationInfoBarDelegateEvent enum.
+  </int>
+  <int value="1" label="User opened geolocation settings"/>
+</enum>
+
+<enum name="GeolocationInfoBarDelegateEvent" type="int">
+  <int value="0" label="The bar was created"/>
+  <int value="1" label="User allowed use of geolocation"/>
+  <int value="2" label="User denied use of geolocation"/>
+  <int value="3" label="User dismissed the bar"/>
+  <int value="4" label="User clicked on link"/>
+  <int value="5" label="User ignored the bar"/>
+</enum>
+
 <enum name="GestureActionType" type="int">
   <int value="0" label="Unknown"/>
   <int value="1" label="Omnibox pinch"/>
@@ -21856,9 +23597,9 @@ other types of suffix sets.
   <int value="5" label="LOCATION_REQUEST"/>
   <int value="6" label="LOCATION_UPDATE"/>
   <int value="7" label="EXTENSION_START"/>
-  <int value="8" label="SHOW_WELCOME_TOAST"/>
+  <int value="8" label="DELETED_SHOW_WELCOME_TOAST"/>
   <int value="9" label="STOPPED"/>
-  <int value="10" label="USER_SUPPRESSED"/>
+  <int value="10" label="DELETED_USER_SUPPRESSED"/>
 </enum>
 
 <enum name="GoogleServiceAuthError" type="int">
@@ -21875,6 +23616,62 @@ other types of suffix sets.
   <int value="10" label="HOSTED_NOT_ALLOWED"/>
   <int value="11" label="UNEXPECTED_SERVICE_RESPONSE"/>
   <int value="12" label="SERVICE_ERROR"/>
+</enum>
+
+<enum name="HistoryFaviconsRecoveryEnum" type="int">
+  <summary>Error states noted in thumbnail_database.cc recovery code.</summary>
+  <int value="0" label="RECOVERY_EVENT_RECOVERED">Successful recovery.</int>
+  <int value="1" label="RECOVERY_EVENT_FAILED_SCOPER">
+    sql::Recovery failed init.
+  </int>
+  <int value="2" label="RECOVERY_EVENT_FAILED_META_VERSION_ERROR">
+    Query failed against recovery meta table.
+  </int>
+  <int value="3" label="RECOVERY_EVENT_FAILED_META_VERSION_NONE">
+    No version row in recovery meta table.
+  </int>
+  <int value="4" label="RECOVERY_EVENT_FAILED_META_WRONG_VERSION6">
+    Recovery meta table has version 6.
+  </int>
+  <int value="5" label="RECOVERY_EVENT_FAILED_META_WRONG_VERSION5">
+    Recovery meta table has version 5.
+  </int>
+  <int value="6" label="RECOVERY_EVENT_FAILED_META_WRONG_VERSION">
+    Recovery meta table has an unexpected version.
+  </int>
+  <int value="7" label="RECOVERY_EVENT_FAILED_RECOVER_META">
+    Failed to create recovery meta table.
+  </int>
+  <int value="8" label="RECOVERY_EVENT_FAILED_META_INSERT">
+    Failed to copy recovery meta table.
+  </int>
+  <int value="9" label="RECOVERY_EVENT_FAILED_INIT">
+    Failed to init target schema.
+  </int>
+  <int value="10" label="RECOVERY_EVENT_FAILED_RECOVER_FAVICONS">
+    Failed to create recovery favicons table.
+  </int>
+  <int value="11" label="RECOVERY_EVENT_FAILED_FAVICONS_INSERT">
+    Failed to copy recovery favicons table.
+  </int>
+  <int value="12" label="RECOVERY_EVENT_FAILED_RECOVER_FAVICON_BITMAPS">
+    Failed to create recovery favicon_bitmaps table.
+  </int>
+  <int value="13" label="RECOVERY_EVENT_FAILED_FAVICON_BITMAPS_INSERT">
+    Failed to copy recovery favicon_bitmaps table.
+  </int>
+  <int value="14" label="RECOVERY_EVENT_FAILED_RECOVER_ICON_MAPPING">
+    Failed to create recovery icon_mapping table.
+  </int>
+  <int value="15" label="RECOVERY_EVENT_FAILED_ICON_MAPPING_INSERT">
+    Failed to copy recovery icon_mapping table.
+  </int>
+  <int value="16" label="RECOVERY_EVENT_RECOVERED_VERSION6">
+    Successful recovery of version 6 database.
+  </int>
+  <int value="17" label="RECOVERY_EVENT_FAILED_META_INIT">
+    Failed sql::MetaTable::Init().
+  </int>
 </enum>
 
 <enum name="HttpAuthCount" type="int">
@@ -22058,6 +23855,14 @@ other types of suffix sets.
   <int value="11" label="OpenAttemptDiskFull">
     An open failed on a machine with a full disk. No cleanup was attempted.
   </int>
+  <int value="12" label="OpenAttemptPathTooLong">
+    Open failed because either a path component or the overall path was too
+    long.
+  </int>
+  <int value="13" label="OpenAttemptNoRecovery">
+    An open attempt failed with an I/O error that doesn't necessitate a recovery
+    attempt.
+  </int>
 </enum>
 
 <enum name="ImporterType" type="int">
@@ -22080,10 +23885,22 @@ other types of suffix sets.
   <int value="4" label="Open()"/>
 </enum>
 
+<enum name="InfoBarResponse" type="int">
+  <int value="0" label="No Response selected"/>
+  <int value="1" label="Save Password"/>
+  <int value="2" label="Never for this site (blacklist / exception)"/>
+  <int value="3" label="InfoBar dismissed by clicking the 'X'"/>
+</enum>
+
 <enum name="InstantControllerEvent" type="int">
   <int value="0" label="URL_ADDED_TO_BLACKLIST"/>
   <int value="1" label="URL_REMOVED_FROM_BLACKLIST"/>
   <int value="2" label="URL_BLOCKED_BY_BLACKLIST"/>
+</enum>
+
+<enum name="InstantExtended_CacheableNTPLoad" type="int">
+  <int value="0" label="Failed to load"/>
+  <int value="1" label="Loaded successfuly"/>
 </enum>
 
 <enum name="InstantExtended_FallbackCause" type="int">
@@ -22097,6 +23914,9 @@ other types of suffix sets.
 </enum>
 
 <enum name="InstantExtended_InstantNavigation" type="int">
+  <obsolete>
+    Deprecated as of 10/2013.
+  </obsolete>
   <int value="0" label="Local click"/>
   <int value="1" label="Local submit"/>
   <int value="2" label="Online click"/>
@@ -22179,6 +23999,12 @@ other types of suffix sets.
   <int value="1" label="PeerConnection00"/>
   <int value="2" label="DeprecatedPeerConnection"/>
   <int value="3" label="RTCPeerConnection"/>
+</enum>
+
+<enum name="KeyboardControlEvent" type="int">
+  <int value="0" label="Keyboard was shown."/>
+  <int value="1" label="Keyboard was automatically hidden."/>
+  <int value="2" label="Keyboard was hidden by the user."/>
 </enum>
 
 <enum name="LanguageCode" type="int">
@@ -22779,6 +24605,7 @@ other types of suffix sets.
   <int value="17" label="GetTestDirectory"/>
   <int value="18" label="NewLogger"/>
   <int value="19" label="SyncParent"/>
+  <int value="20" label="GetChildren"/>
 </enum>
 
 <enum name="LinkMonitorFailureType" type="int">
@@ -22823,6 +24650,11 @@ other types of suffix sets.
     Allow stale data (avoid doing a re-post)
   </int>
   <int value="9" label="PRERENDER_LOAD">Speculative prerendering of a page</int>
+</enum>
+
+<enum name="LocalRendererSinkStates" type="int">
+  <int value="0" label="SinkStarted"/>
+  <int value="1" label="SinkNeverStarted"/>
 </enum>
 
 <enum name="LoginFailureReason" type="int">
@@ -23349,6 +25181,9 @@ other types of suffix sets.
   <int value="432" label="animation-timing-function"/>
   <int value="433" label="object-fit"/>
   <int value="434" label="paint-order"/>
+  <int value="435" label="mask-source-type"/>
+  <int value="436" label="isolation"/>
+  <int value="437" label="object-position"/>
 </enum>
 
 <enum name="MediaContainers" type="int">
@@ -23390,6 +25225,17 @@ other types of suffix sets.
   <int value="35" label="WAV / WAVE (Waveform Audio)"/>
   <int value="36" label="Matroska / WebM"/>
   <int value="37" label="WTV (Windows Television)"/>
+</enum>
+
+<enum name="MediaGalleriesUsageType" type="int">
+  <int value="0" label="Gallery added from dialog"/>
+  <int value="1" label="Gallery permission added from dialog"/>
+  <int value="2" label="Gallery permission removed from dialog"/>
+  <int value="3" label="GetMediaFileSystems API invocations"/>
+  <int value="4" label="Profiles With API Usage"/>
+  <int value="5" label="Dialog shown"/>
+  <int value="6" label="Gallery added from WebUI"/>
+  <int value="7" label="Gallery removed from WebUI"/>
 </enum>
 
 <enum name="MediaKeyError" type="int">
@@ -23449,6 +25295,29 @@ other types of suffix sets.
   <int value="7" label="EAC3"/>
   <int value="8" label="MP3"/>
   <int value="9" label="OPUS"/>
+</enum>
+
+<enum name="MultiProfileSessionMode" type="int">
+  <int value="0" label="Single user mode"/>
+  <int value="1" label="Side by side mode"/>
+  <int value="2" label="Separate desktop mode"/>
+</enum>
+
+<enum name="MultiProfileSigninUserAction" type="int">
+  <int value="0" label="System tray"/>
+  <int value="1" label="Browser frame"/>
+</enum>
+
+<enum name="MultiProfileSwitchActiveUserAction" type="int">
+  <int value="0" label="System tray"/>
+  <int value="1" label="Keyboard accelerator"/>
+</enum>
+
+<enum name="MultiProfileTeleportWindowAction" type="int">
+  <int value="0" label="Drag and drop"/>
+  <int value="1" label="Caption context menu"/>
+  <int value="2" label="Return by minimize"/>
+  <int value="3" label="Return by launcher"/>
 </enum>
 
 <enum name="NavigationScheme" type="int">
@@ -23819,6 +25688,16 @@ other types of suffix sets.
   <int value="1" label="User Disconnect"/>
 </enum>
 
+<enum name="NetworkLocationRequestEvent" type="int">
+  <int value="0" label="REQUEST_START"/>
+  <int value="1" label="REQUEST_CANCEL"/>
+  <int value="2" label="RESPONSE_SUCCESS"/>
+  <int value="3" label="RESPONSE_NOT_OK"/>
+  <int value="4" label="RESPONSE_EMPTY"/>
+  <int value="5" label="RESPONSE_MALFORMED"/>
+  <int value="6" label="RESPONSE_INVALID_FIX"/>
+</enum>
+
 <enum name="NetworkPhyModeType" type="int">
   <int value="0" label="UNDEF"/>
   <int value="1" label="802.11a"/>
@@ -23889,6 +25768,17 @@ other types of suffix sets.
   <int value="4" label="Opened a recently closed tab"/>
   <int value="5" label="Opened a bookmark"/>
   <int value="6" label="Opened a foreign session (from other devices section)"/>
+</enum>
+
+<enum name="NewTabPageBookmarkActionAndroid" type="int">
+  <summary>
+    These values are defined in PartnerBookmarkAction enum in
+    chrome/browser/ui/webui/ntp/android/bookmarks_handler.cc.
+  </summary>
+  <int value="0" label="Deleted partner bookmark"/>
+  <int value="1" label="Deleted root partner folder"/>
+  <int value="2" label="Renamed partner bookmark"/>
+  <int value="3" label="Renamed root partner folder"/>
 </enum>
 
 <enum name="NewTabPageMobilePromo" type="int">
@@ -24172,6 +26062,26 @@ other types of suffix sets.
   <int value="34" label="ERANGE">Numerical result out of range</int>
 </enum>
 
+<enum name="OSXExceptionHandlerEvents" type="int">
+  <int value="0" label="EXCEPTION_ACCESSIBILITY">
+    Object does not support accessibility attributes
+  </int>
+  <int value="1" label="EXCEPTION_MENU_ITEM_BOUNDS_CHECK">
+    Forced crash due to menu item bounds checking failure
+  </int>
+  <int value="2" label="EXCEPTION_VIEW_NOT_IN_WINDOW">
+    Forced crash due to view not in a window requiring a window
+  </int>
+  <int value="3" label="EXCEPTION_NSURL_INIT_NIL">
+    Whitelisted exception for bug 85463.  Suspect ImageKit conversions for media
+    browser in open or save panel.
+  </int>
+  <int value="4" label="EXCEPTION_NSDATADETECTOR_NIL_STRING">
+    Whitelisted exception for bug 316759.  Suspect background address detection,
+    field unknown.
+  </int>
+</enum>
+
 <enum name="OtherPossibleUsernamesUsage" type="int">
   <int value="0" label="Nothing to Autofill"/>
   <int value="1" label="No other possible usernames"/>
@@ -24204,6 +26114,120 @@ other types of suffix sets.
   <int value="4" label="Index"/>
 </enum>
 
+<enum name="PagespeedHeaderServerType" type="int">
+  <int value="0" label="Total responses"/>
+  <int value="1" label="mod_pagespeed server"/>
+  <int value="2" label="ngx_pagespeed server"/>
+  <int value="3" label="PageSpeed Service server"/>
+  <int value="4" label="Unknown server type"/>
+</enum>
+
+<enum name="PagespeedVersion" type="int">
+  <summary>
+    The version of PageSpeed. Values up to 1.6.29.x are in use as of 2013-10-01
+    while later values may adjust 'a' and/or 'b' arbitrarily.
+  </summary>
+  <int value="1" label="Unknown"/>
+  <int value="2" label="0.9.10.0"/>
+  <int value="3" label="0.9.10.x"/>
+  <int value="4" label="0.9.11.0"/>
+  <int value="5" label="0.9.11.x"/>
+  <int value="6" label="0.9.12.0"/>
+  <int value="7" label="0.9.12.x"/>
+  <int value="8" label="0.9.13.0"/>
+  <int value="9" label="0.9.13.x"/>
+  <int value="10" label="0.9.14.0"/>
+  <int value="11" label="0.9.14.x"/>
+  <int value="12" label="0.9.15.0"/>
+  <int value="13" label="0.9.15.x"/>
+  <int value="14" label="0.9.16.0"/>
+  <int value="15" label="0.9.16.x"/>
+  <int value="16" label="0.9.17.0"/>
+  <int value="17" label="0.9.17.x"/>
+  <int value="18" label="0.9.18.0"/>
+  <int value="19" label="0.9.18.x"/>
+  <int value="20" label="0.10.19.0"/>
+  <int value="21" label="0.10.19.x"/>
+  <int value="22" label="0.10.20.0"/>
+  <int value="23" label="0.10.20.x"/>
+  <int value="24" label="0.10.21.0"/>
+  <int value="25" label="0.10.21.x"/>
+  <int value="26" label="0.10.22.0"/>
+  <int value="27" label="0.10.22.x"/>
+  <int value="28" label="1.1.23.0"/>
+  <int value="29" label="1.1.23.x"/>
+  <int value="30" label="1.2.24.0"/>
+  <int value="31" label="1.2.24.x"/>
+  <int value="32" label="1.3.25.0"/>
+  <int value="33" label="1.3.25.x"/>
+  <int value="34" label="1.4.26.0"/>
+  <int value="35" label="1.4.26.x"/>
+  <int value="36" label="1.5.27.0"/>
+  <int value="37" label="1.5.27.x"/>
+  <int value="38" label="1.5.28.0"/>
+  <int value="39" label="1.5.28.x"/>
+  <int value="40" label="1.6.29.0"/>
+  <int value="41" label="1.6.29.x"/>
+  <int value="42" label="a.b.30.0"/>
+  <int value="43" label="a.b.30.x"/>
+  <int value="44" label="a.b.31.0"/>
+  <int value="45" label="a.b.31.x"/>
+  <int value="46" label="a.b.32.0"/>
+  <int value="47" label="a.b.32.x"/>
+  <int value="48" label="a.b.33.0"/>
+  <int value="49" label="a.b.33.x"/>
+  <int value="50" label="a.b.34.0"/>
+  <int value="51" label="a.b.34.x"/>
+  <int value="52" label="a.b.35.0"/>
+  <int value="53" label="a.b.35.x"/>
+  <int value="54" label="a.b.36.0"/>
+  <int value="55" label="a.b.36.x"/>
+  <int value="56" label="a.b.37.0"/>
+  <int value="57" label="a.b.37.x"/>
+  <int value="58" label="a.b.38.0"/>
+  <int value="59" label="a.b.38.x"/>
+  <int value="60" label="a.b.39.0"/>
+  <int value="61" label="a.b.39.x"/>
+  <int value="62" label="a.b.40.0"/>
+  <int value="63" label="a.b.40.x"/>
+  <int value="64" label="a.b.41.0"/>
+  <int value="65" label="a.b.41.x"/>
+  <int value="66" label="a.b.42.0"/>
+  <int value="67" label="a.b.42.x"/>
+  <int value="68" label="a.b.43.0"/>
+  <int value="69" label="a.b.43.x"/>
+  <int value="70" label="a.b.44.0"/>
+  <int value="71" label="a.b.44.x"/>
+  <int value="72" label="a.b.45.0"/>
+  <int value="73" label="a.b.45.x"/>
+  <int value="74" label="a.b.46.0"/>
+  <int value="75" label="a.b.46.x"/>
+  <int value="76" label="a.b.47.0"/>
+  <int value="77" label="a.b.47.x"/>
+  <int value="78" label="a.b.48.0"/>
+  <int value="79" label="a.b.48.x"/>
+  <int value="80" label="a.b.49.0"/>
+  <int value="81" label="a.b.49.x"/>
+  <int value="82" label="a.b.50.0"/>
+  <int value="83" label="a.b.50.x"/>
+  <int value="84" label="a.b.51.0"/>
+  <int value="85" label="a.b.51.x"/>
+  <int value="86" label="a.b.52.0"/>
+  <int value="87" label="a.b.52.x"/>
+  <int value="88" label="a.b.53.0"/>
+  <int value="89" label="a.b.53.x"/>
+  <int value="90" label="a.b.54.0"/>
+  <int value="91" label="a.b.54.x"/>
+  <int value="92" label="a.b.55.0"/>
+  <int value="93" label="a.b.55.x"/>
+  <int value="94" label="a.b.56.0"/>
+  <int value="95" label="a.b.56.x"/>
+  <int value="96" label="a.b.57.0"/>
+  <int value="97" label="a.b.57.x"/>
+  <int value="98" label="a.b.58.0"/>
+  <int value="99" label="a.b.58.x"/>
+</enum>
+
 <enum name="ParsedCookieStatus" type="int">
   <obsolete>
     Deprecated as of 9/2013. Experiment to measure control characters in cookies
@@ -24213,6 +26237,278 @@ other types of suffix sets.
   <int value="1" label="Cookie contains control chars"/>
   <int value="2" label="Cookie is invalid"/>
   <int value="3" label="Cookie contains both control chars and is invalid"/>
+</enum>
+
+<enum name="PasswordManagerActionsTaken" type="int">
+  <obsolete>
+    Deprecated as of Chrome 32. See PasswordManagerActionsTakenWithPsl
+  </obsolete>
+  <summary>
+    The value is a combination of three different options - what did the
+    password manager do, what did the user do, and was the form submitted (and
+    submitted successfully or not). The meaning of each value can be determined
+    from the values in chrome/browser/password_manager/password_form_manager.h
+  </summary>
+  <int value="0"
+      label="manager did nothing / user did nothing / form not submitted"/>
+  <int value="1"
+      label="manager did nothing / user chose a value / form not submitted"/>
+  <int value="2"
+      label="manager did nothing / user typed in something / form not
+             submitted"/>
+  <int value="3"
+      label="manager filled the fields / user did nothing / form not
+             submitted"/>
+  <int value="4"
+      label="manager filled the fields / user chose a value / form not
+             submitted"/>
+  <int value="5"
+      label="manager filled the fields / user typed in something / form not
+             submitted"/>
+  <int value="6"
+      label="manager did nothing (site was blacklisted) / user did nothing /
+             form not submitted"/>
+  <int value="7"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             / form not submitted (this value shouldn't be possible)"/>
+  <int value="8"
+      label="manager did nothing (site was blacklisted) / user typed in
+             something / form not submitted"/>
+  <int value="9"
+      label="manager did nothing (autocomplete off) / user did nothing / form
+             not submitted"/>
+  <int value="10"
+      label="manager did nothing (autocomplete off) / user chose a value /
+             form not submitted (this value shouldn't be possible)"/>
+  <int value="11"
+      label="manager did nothing (autocomplete off) / user typed in something
+             / form not submitted"/>
+  <int value="12"
+      label="manager did nothing / user did nothing / form submit failed"/>
+  <int value="13"
+      label="manager did nothing / user chose a value / form submit failed"/>
+  <int value="14"
+      label="manager did nothing / user typed in something / form submit
+             failed"/>
+  <int value="15"
+      label="manager filled the fields / user did nothing / form submit
+             failed"/>
+  <int value="16"
+      label="manager filled the fields / user chose a value / form submit
+             failed"/>
+  <int value="17"
+      label="manager filled the fields / user typed in something / form
+             submit failed"/>
+  <int value="18"
+      label="manager did nothing (site was blacklisted) / user did nothing /
+             form submit failed"/>
+  <int value="19"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             / form submit failed (this value shouldn't be possible)"/>
+  <int value="20"
+      label="manager did nothing (site was blacklisted) / user typed in
+             something / form submit failed"/>
+  <int value="21"
+      label="manager did nothing (autocomplete off) / user did nothing / form
+             submit failed"/>
+  <int value="22"
+      label="manager did nothing (autocomplete off) / user chose a value /
+             form submit failed (this value shouldn't be possible)"/>
+  <int value="23"
+      label="manager did nothing (autocomplete off) / user typed in something
+             / form submit failed"/>
+  <int value="24"
+      label="manager did nothing / user did nothing / form submit succeeded"/>
+  <int value="25"
+      label="manager did nothing / user chose a value / form submit succeeded"/>
+  <int value="26"
+      label="manager did nothing / user typed in something / form submit
+             succeeded"/>
+  <int value="27"
+      label="manager filled the fields / user did nothing / form submit
+             succeeded"/>
+  <int value="28"
+      label="manager filled the fields / user chose a value / form submit
+             succeeded"/>
+  <int value="29"
+      label="manager filled the fields / user typed in something / form
+             submit succeeded"/>
+  <int value="30"
+      label="manager did nothing (site was blacklisted) / user did nothing /
+             form submit succeeded"/>
+  <int value="31"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             / form submit succeeded (this value shouldn't be possible)"/>
+  <int value="32"
+      label="manager did nothing (site was blacklisted) / user typed in
+             something / form submit succeeded"/>
+  <int value="33"
+      label="manager did nothing (autocomplete off) / user did nothing / form
+             submit succeeded"/>
+  <int value="34"
+      label="manager did nothing (autocomplete off) / user chose a value /
+             form submit succeeded (this value shouldn't be possible)"/>
+  <int value="35"
+      label="manager did nothing (autocomplete off) / user typed in something
+             / form submit succeeded"/>
+</enum>
+
+<enum name="PasswordManagerActionsTakenWithPsl" type="int">
+  <summary>
+    The value is a combination of three different options - what did the
+    password manager do, what did the user do, and was the form submitted (and
+    submitted successfully or not). The meaning of each value can be determined
+    from the values in chrome/browser/password_manager/password_form_manager.h
+  </summary>
+  <int value="0"
+      label="manager did nothing / user did nothing / form not submitted"/>
+  <int value="1"
+      label="manager did nothing / user chose a value / form not submitted"/>
+  <int value="2"
+      label="manager did nothing / user chose a value from PSL / form not
+             submitted"/>
+  <int value="3"
+      label="manager did nothing / user typed in something / form not
+             submitted"/>
+  <int value="4"
+      label="manager filled the fields / user did nothing / form not
+             submitted"/>
+  <int value="5"
+      label="manager filled the fields / user chose a value / form not
+             submitted"/>
+  <int value="6"
+      label="manager filled the fields / user chose a value from PSL / form
+             not submitted"/>
+  <int value="7"
+      label="manager filled the fields / user typed in something / form not
+             submitted"/>
+  <int value="8"
+      label="manager did nothing (site was blacklisted) / user did nothing /
+             form not submitted"/>
+  <int value="9"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             / form not submitted (this value shouldn't be possible)"/>
+  <int value="10"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             from PSL / form not submitted (this value shouldn't be possible)"/>
+  <int value="11"
+      label="manager did nothing (site was blacklisted) / user typed in
+             something / form not submitted"/>
+  <int value="12"
+      label="manager did nothing (autocomplete off) / user did nothing / form
+             not submitted"/>
+  <int value="13"
+      label="manager did nothing (autocomplete off) / user chose a value /
+             form not submitted (this value shouldn't be possible)"/>
+  <int value="14"
+      label="manager did nothing (autocomplete off) / user chose a value from
+             psl / form not submitted (this value shouldn't be possible)"/>
+  <int value="15"
+      label="manager did nothing (autocomplete off) / user typed in something
+             / form not submitted"/>
+  <int value="16"
+      label="manager did nothing / user did nothing / form submit failed"/>
+  <int value="17"
+      label="manager did nothing / user chose a value / form submit failed"/>
+  <int value="18"
+      label="manager did nothing / user chose a value from psl / form submit
+             failed"/>
+  <int value="19"
+      label="manager did nothing / user typed in something / form submit
+             failed"/>
+  <int value="20"
+      label="manager filled the fields / user did nothing / form submit
+             failed"/>
+  <int value="21"
+      label="manager filled the fields / user chose a value / form submit
+             failed"/>
+  <int value="22"
+      label="manager filled the fields / user chose a value from psl / form
+             submit failed"/>
+  <int value="23"
+      label="manager filled the fields / user typed in something / form
+             submit failed"/>
+  <int value="24"
+      label="manager did nothing (site was blacklisted) / user did nothing /
+             form submit failed"/>
+  <int value="25"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             / form submit failed (this value shouldn't be possible)"/>
+  <int value="26"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             from psl / form submit failed (this value shouldn't be possible)"/>
+  <int value="27"
+      label="manager did nothing (site was blacklisted) / user typed in
+             something / form submit failed"/>
+  <int value="28"
+      label="manager did nothing (autocomplete off) / user did nothing / form
+             submit failed"/>
+  <int value="29"
+      label="manager did nothing (autocomplete off) / user chose a value /
+             form submit failed (this value shouldn't be possible)"/>
+  <int value="30"
+      label="manager did nothing (autocomplete off) / user chose a value from
+             psl / form submit failed (this value shouldn't be possible)"/>
+  <int value="31"
+      label="manager did nothing (autocomplete off) / user typed in something
+             / form submit failed"/>
+  <int value="32"
+      label="manager did nothing / user did nothing / form submit succeeded"/>
+  <int value="33"
+      label="manager did nothing / user chose a value / form submit succeeded"/>
+  <int value="34"
+      label="manager did nothing / user chose a value from psl / form submit
+             succeeded"/>
+  <int value="35"
+      label="manager did nothing / user typed in something / form submit
+             succeeded"/>
+  <int value="36"
+      label="manager filled the fields / user did nothing / form submit
+             succeeded"/>
+  <int value="37"
+      label="manager filled the fields / user chose a value / form submit
+             succeeded"/>
+  <int value="38"
+      label="manager filled the fields / user chose a value from psl / form
+             submit succeeded"/>
+  <int value="39"
+      label="manager filled the fields / user typed in something / form
+             submit succeeded"/>
+  <int value="40"
+      label="manager did nothing (site was blacklisted) / user did nothing /
+             form submit succeeded"/>
+  <int value="41"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             / form submit succeeded (this value shouldn't be possible)"/>
+  <int value="42"
+      label="manager did nothing (site was blacklisted) / user chose a value
+             from psl / form submit succeeded (this value shouldn't be
+             possible)"/>
+  <int value="43"
+      label="manager did nothing (site was blacklisted) / user typed in
+             something / form submit succeeded"/>
+  <int value="44"
+      label="manager did nothing (autocomplete off) / user did nothing / form
+             submit succeeded"/>
+  <int value="45"
+      label="manager did nothing (autocomplete off) / user chose a value /
+             form submit succeeded (this value shouldn't be possible)"/>
+  <int value="46"
+      label="manager did nothing (autocomplete off) / user chose a value from
+             psl / form submit succeeded (this value shouldn't be possible)"/>
+  <int value="47"
+      label="manager did nothing (autocomplete off) / user typed in something
+             / form submit succeeded"/>
+</enum>
+
+<enum name="PasswordManagerPslDomainMatchTriggering" type="int">
+  <summary>
+    The value indicates whether an entry returned by password autofill contains
+    a value that was found by matching against the public suffix list.
+  </summary>
+  <int value="0" label="Matching disabled"/>
+  <int value="1" label="No match"/>
+  <int value="2" label="Match"/>
 </enum>
 
 <enum name="PepperVideoDecodeError" type="int">
@@ -24324,6 +26620,14 @@ other types of suffix sets.
   <int value="2" label="Brightness Absolute"/>
 </enum>
 
+<enum name="PowerChargerType" type="int">
+  <int value="0" label="Unknown charger"/>
+  <int value="1" label="MAINS charger"/>
+  <int value="2" label="USB Charger"/>
+  <int value="3" label="Unconfirmed Spring Charger"/>
+  <int value="4" label="Safe Spring Charger"/>
+</enum>
+
 <enum name="PreconnectedNavigation" type="int">
   <int value="0" label="No recent pre-connect to the page"/>
   <int value="1" label="Page nav. preceded by a pre-connect"/>
@@ -24352,6 +26656,13 @@ other types of suffix sets.
 <enum name="PreconnectTriggerUsed" type="int">
   <int value="0" label="The pre-connect triggered host was not accessed"/>
   <int value="1" label="The pre-connect triggered host was accessed"/>
+</enum>
+
+<enum name="PrefetchStatus" type="int">
+  <int value="0" label="undefined"/>
+  <int value="1" label="success from cache"/>
+  <int value="2" label="success from network"/>
+  <int value="3" label="canceled in-flight"/>
 </enum>
 
 <enum name="PrerenderFinalStatus" type="int">
@@ -24398,6 +26709,10 @@ other types of suffix sets.
   <int value="40" label="OPEN_URL"/>
   <int value="41" label="WOULD_HAVE_BEEN_USED"/>
   <int value="42" label="REGISTER_PROTOCOL_HANDLER"/>
+  <int value="43" label="CREATING_AUDIO_STREAM"/>
+  <int value="44" label="PAGE_BEING_CAPTURED"/>
+  <int value="45" label="BAD_DEFERRED_REDIRECT"/>
+  <int value="46" label="NAVIGATION_UNCOMMITTED"/>
 </enum>
 
 <enum name="PrerenderHoverEvent" type="int">
@@ -24480,6 +26795,20 @@ other types of suffix sets.
   <int value="66" label="Prerender Service hinting url lookup timed out"/>
   <int value="67" label="Prerender Service candidate url lookup timed out"/>
   <int value="68" label="Continue prerender check service whitelist"/>
+  <int value="69" label="Continue prerender check next URL local"/>
+  <int value="70" label="Continue prerender check next URL service"/>
+  <int value="71" label="AddVisit relevant transition repeat URL"/>
+  <int value="72" label="AddVisit relevant transition new URL"/>
+  <int value="73" label="Tab Helper namespace mismatch: no namespace"/>
+  <int value="74" label="Tab Helper namespace mismatch: merge issued"/>
+  <int value="75" label="Namespace mismatch: merge result received"/>
+  <int value="76" label="Namespace mismatch: merge result namespace not found"/>
+  <int value="77" label="Namespace mismatch: merge result not logging"/>
+  <int value="78" label="Namespace mismatch: merge result no transactions"/>
+  <int value="79"
+      label="Namespace mismatch: merge result too many transactions"/>
+  <int value="80" label="Namespace mismatch: merge result not mergeable"/>
+  <int value="81" label="Namespace mismatch: merge result mergeable"/>
 </enum>
 
 <enum name="PrerenderLocalVisitCoreTransition" type="int">
@@ -24828,6 +27157,16 @@ other types of suffix sets.
   <int value="11" label="ppsm"/>
 </enum>
 
+<enum name="QuicRstStreamErrorCodes" type="int">
+  <int value="0" label="NO_ERROR"/>
+  <int value="1" label="ERROR_PROCESSING_STREAM"/>
+  <int value="2" label="MULTIPLE_TERMINATION_OFFSETS"/>
+  <int value="3" label="BAD_APPLICATION_PAYLOAD"/>
+  <int value="4" label="CONNECTION_ERROR"/>
+  <int value="5" label="PEER_GOING_AWAY"/>
+  <int value="6" label="CANCELLED"/>
+</enum>
+
 <enum name="RecentTabsAction" type="int">
   <int value="0" label="Local Session Tab"/>
   <int value="1" label="Other Device Tab"/>
@@ -24988,6 +27327,17 @@ other types of suffix sets.
   <int value="12" label="MALWARE_SHOW_ADVANCED"/>
   <int value="13" label="MULTIPLE_SHOW_ADVANCED"/>
   <int value="14" label="PHISHING_SHOW_ADVANCED"/>
+</enum>
+
+<enum name="SB2InterstitialActionDetails" type="int">
+  <int value="0" label="MALWARE_SHOW_NEW_SITE"/>
+  <int value="1" label="MALWARE_PROCEED_NEW_SITE"/>
+  <int value="2" label="MALWARE_SHOW_CROSS_SITE"/>
+  <int value="3" label="MALWARE_PROCEED_CROSS_SITE"/>
+  <int value="4" label="PHISHING_SHOW_NEW_SITE"/>
+  <int value="5" label="PHISHING_PROCEED_NEW_SITE"/>
+  <int value="6" label="PHISHING_SHOW_CROSS_SITE"/>
+  <int value="7" label="PHISHING_PROCEED_CROSS_SITE"/>
 </enum>
 
 <enum name="SB2PrefixSetEvent" type="int">
@@ -25226,6 +27576,16 @@ other types of suffix sets.
   <int value="0" label="Learn more"/>
   <int value="1" label="Settings page"/>
   <int value="2" label="Dismiss"/>
+</enum>
+
+<enum name="SimpleCache.EntryCreatedAndStream2Omitted" type="int">
+  <int value="0" label="Stream 2 file was present"/>
+  <int value="1" label="Empty stream 2 file was omitted"/>
+</enum>
+
+<enum name="SimpleCache.EntryOpenedAndStream2Removed" type="int">
+  <int value="0" label="Stream 2 file was already omitted or not empty"/>
+  <int value="1" label="Empty stream 2 file removed"/>
 </enum>
 
 <enum name="SimpleCache.FileDescriptorLimitStatus" type="int">
@@ -25523,6 +27883,11 @@ other types of suffix sets.
   <int value="2" label="Miss (tab not switched)"/>
 </enum>
 
+<enum name="SpeculativeRestoreTabStatus" type="int">
+  <int value="0" label="Already loaded"/>
+  <int value="1" label="Needs restore"/>
+</enum>
+
 <enum name="SqliteErrorCode" type="int">
   <summary>Error codes returned by SQLite - see sqlite3.h</summary>
   <int value="0" label="SQLITE_OK">Successful result</int>
@@ -25659,6 +28024,24 @@ other types of suffix sets.
     Error in stat while mmapping file
   </int>
   <int value="20" label="SQLITE_IOERR_SHMLOCK">Unused</int>
+</enum>
+
+<enum name="SqliteVersionDeprecation" type="int">
+  <summary>Sqlite database version deprecation status</summary>
+  <int value="0" label="DEPRECATION_DATABASE_NOT_EMPTY">
+    Database has tables, but no meta table.
+  </int>
+  <int value="1" label="DEPRECATION_DATABASE_UNKNOWN">
+    Failure figuring out if database has tables.
+  </int>
+  <int value="2" label="DEPRECATION_FAILED_VERSION">
+    Failed querying meta table.
+  </int>
+  <int value="3" label="DEPRECATION_NO_VERSION">
+    No version row in meta table.
+  </int>
+  <int value="4" label="DEPRECATION_RAZED">Raze succeeded.</int>
+  <int value="5" label="DEPRECATION_RAZE_FAILED">Raze failed.</int>
 </enum>
 
 <enum name="SSLCipherSuite" type="int">
@@ -26011,11 +28394,51 @@ other types of suffix sets.
   <int value="15" label="PROCEED_NEW_SITE"/>
 </enum>
 
+<enum name="StartupURLsMigration" type="int">
+  <int value="0" label="Performed migration"/>
+  <int value="1" label="No migration value"/>
+  <int value="2" label="Reset migration"/>
+</enum>
+
+<enum name="SuggestAppsDialogCloseReason" type="int">
+  <int value="0" label="Unknown error"/>
+  <int value="1" label="Item installed"/>
+  <int value="2" label="User cancelled"/>
+  <int value="3" label="Webstore link clicked"/>
+</enum>
+
+<enum name="SuggestAppsDialogInstall" type="int">
+  <int value="0" label="Install succeeded"/>
+  <int value="1" label="Install cancelled"/>
+  <int value="2" label="Install failed"/>
+</enum>
+
+<enum name="SuggestAppsDialogLoad" type="int">
+  <int value="0" label="Load succeeded"/>
+  <int value="1" label="Load cancelled"/>
+  <int value="2" label="Load failed"/>
+</enum>
+
 <enum name="SuspendStatus" type="int">
   <int value="0" label="Success"/>
   <int value="1" label="Failure"/>
   <int value="2" label="Cancelled"/>
   <int value="3" label="Attempted"/>
+</enum>
+
+<enum name="SyncBackendInitializeRestoreState" type="int">
+  <int value="0" label="Expected restored types and found some"/>
+  <int value="1" label="Expected restored types but found none"/>
+  <int value="2" label="Did not expect restored types and found none"/>
+  <int value="3" label="Did not expect restored types but found some"/>
+</enum>
+
+<enum name="SyncedNotificationActionType" type="int">
+  <int value="0" label="Unknown"/>
+  <int value="1" label="Notification clicked"/>
+  <int value="2" label="Notification button clicked"/>
+  <int value="3" label="Notification closed by user"/>
+  <int value="4" label="Notification closed by system"/>
 </enum>
 
 <enum name="TabRestoreResult" type="int">
@@ -26116,6 +28539,7 @@ other types of suffix sets.
   <int value="9" label="prefs::kDefaultSearchProviderKeyword"/>
   <int value="10" label="prefs::kDefaultSearchProviderName"/>
   <int value="11" label="prefs::kPinnedTabs"/>
+  <int value="12" label="prefs::kExtensionKnownDisabled"/>
 </enum>
 
 <enum name="TranslateError" type="int">
@@ -26325,6 +28749,12 @@ other types of suffix sets.
   <int value="2" label="Seed Corrupt"/>
 </enum>
 
+<enum name="VaryType" type="int">
+  <int value="0" label="No Vary header present"/>
+  <int value="1" label="Vary:User-Agent"/>
+  <int value="2" label="Other"/>
+</enum>
+
 <enum name="VAVDAH264DecoderFailure" type="int">
   <int value="0" label="FRAME_MBS_ONLY_FLAG_NOT_ONE"/>
   <int value="1" label="GAPS_IN_FRAME_NUM"/>
@@ -26476,6 +28906,12 @@ other types of suffix sets.
   <int value="11" label="Require phone number"/>
 </enum>
 
+<enum name="WebFontCacheHit" type="int">
+  <int value="0" label="Miss"/>
+  <int value="1" label="Hit"/>
+  <int value="2" label="Served from data URL"/>
+</enum>
+
 <enum name="WebFontUsageType" type="int">
   <int value="0" label="Styled, and used"/>
   <int value="1" label="Styled, but not used"/>
@@ -26568,6 +29004,13 @@ other types of suffix sets.
   <int value="1" label="kStatusCodeTypeByClient"/>
   <int value="2" label="kStatusCodeTypeByUser"/>
   <int value="3" label="kStatusCodeTypeConsideredDead"/>
+</enum>
+
+<enum name="Win8PageLoadType" type="int">
+  <int value="0" label="Metro"/>
+  <int value="1" label="Desktop"/>
+  <int value="2" label="Metro Aura"/>
+  <int value="3" label="Desktop Aura"/>
 </enum>
 
 <enum name="WindowsVersion" type="int">
@@ -26804,6 +29247,19 @@ other types of suffix sets.
   <affected-histogram name="PLT.NT_Redirect"/>
   <affected-histogram name="PLT.NT_Request"/>
   <affected-histogram name="PLT.NT_Response"/>
+  <affected-histogram name="PLT.PT_BeginToCommit"/>
+  <affected-histogram name="PLT.PT_BeginToFinish"/>
+  <affected-histogram name="PLT.PT_BeginToFinishDoc"/>
+  <affected-histogram name="PLT.PT_CommitToFinish"/>
+  <affected-histogram name="PLT.PT_CommitToFinishDoc"/>
+  <affected-histogram name="PLT.PT_FinishDocToFinish"/>
+  <affected-histogram name="PLT.PT_RequestToCommit"/>
+  <affected-histogram name="PLT.PT_RequestToDomContentLoaded"/>
+  <affected-histogram name="PLT.PT_RequestToFinish"/>
+  <affected-histogram name="PLT.PT_RequestToFinishDoc"/>
+  <affected-histogram name="PLT.PT_RequestToStart"/>
+  <affected-histogram name="PLT.PT_StartToCommit"/>
+  <affected-histogram name="PLT.PT_StartToFinish"/>
 </fieldtrial>
 
 <fieldtrial name="DefaultAppsExperiment">
@@ -26944,13 +29400,36 @@ other types of suffix sets.
       label="Time spent constructing the main Javascript object."/>
   <group name="DOM" label="Time to initialize DOM."/>
   <group name="FileSystem"
-      label="Time to get access to the local file system."/>
+      label="Deprecated as of 9/2013. Time to get access to the local file
+             system."/>
   <group name="Parse" label="Time to parse Javascript and CSS."/>
   <group name="Roots" label="Time to enumerate file system roots."/>
   <group name="Total"
       label="Total load time from the moment the Javascript started parsing
              till the moment the empty file list is displayed."/>
   <affected-histogram name="FileBrowser.Load"/>
+</fieldtrial>
+
+<fieldtrial name="FromGWS">
+  <group name="FromGWS"
+      label="Only page loads that are a result of a navigation from a web
+             search are considered."/>
+  <affected-histogram name="PLT.BeginToFinish"/>
+  <affected-histogram name="PLT.BeginToFinishDoc"/>
+  <affected-histogram name="PLT.BeginToFirstPaint"/>
+  <affected-histogram name="PLT.CommitToFirstPaint"/>
+  <affected-histogram name="PLT.PT_BeginToCommit"/>
+  <affected-histogram name="PLT.PT_BeginToFinish"/>
+  <affected-histogram name="PLT.PT_BeginToFinishDoc"/>
+  <affected-histogram name="PLT.PT_CommitToFinish"/>
+  <affected-histogram name="PLT.PT_CommitToFinishDoc"/>
+  <affected-histogram name="PLT.PT_RequestToCommit"/>
+  <affected-histogram name="PLT.PT_RequestToDomContentLoaded"/>
+  <affected-histogram name="PLT.PT_RequestToFinish"/>
+  <affected-histogram name="PLT.PT_RequestToFinishDoc"/>
+  <affected-histogram name="PLT.PT_RequestToStart"/>
+  <affected-histogram name="PLT.PT_StartToCommit"/>
+  <affected-histogram name="PLT.PT_StartToFinish"/>
 </fieldtrial>
 
 <fieldtrial name="HttpPipeliningCompatibility">
@@ -27001,6 +29480,7 @@ other types of suffix sets.
   <group name="CreateDir" label="ChromiumEnv::CreateDir"/>
   <group name="DeleteDir" label="ChromiumEnv::DeleteDir"/>
   <group name="DeleteFile" label="ChromiumEnv::DeleteFile"/>
+  <group name="GetChildren" label="ChromiumEnv::GetChildren"/>
   <group name="GetFileSize" label="ChromiumEnv::GetFileSize"/>
   <group name="LockFile" label="ChromiumEnv::LockFile"/>
   <group name="NewRandomAccessFile" label="ChromiumEnv::NewRandomAccessFile"/>
@@ -27024,6 +29504,15 @@ other types of suffix sets.
   <group name="Extended" label="Suggestions + Results"/>
   <group name="Instant" label="Results"/>
   <affected-histogram name="Instant.SessionsStorageNamespace"/>
+</fieldtrial>
+
+<fieldtrial name="Interval_20ms_plus_and_minus" separator="_">
+  <group name="Interval_20ms_Minus"
+      label="Interval between two consecutive connects is less than 20ms."/>
+  <group name="Interval_20ms_Plus"
+      label="Interval between two consecutive connects is greater than or
+             equal to 20ms."/>
+  <affected-histogram name="Net.TCP_Connection_Latency"/>
 </fieldtrial>
 
 <fieldtrial name="IPv6_Probe">
@@ -27057,6 +29546,13 @@ other types of suffix sets.
   <affected-histogram name="Renderer4.StartToFinish"/>
 </fieldtrial>
 
+<fieldtrial name="LevelDBEnvBackupRestore" separator="">
+  <group name="Backup" label="Backing up an ldb file."/>
+  <group name="Restore" label="Restoring an ldb file."/>
+  <affected-histogram name="LevelDBEnv.IDB.Table"/>
+  <affected-histogram name="LevelDBEnv.Table"/>
+</fieldtrial>
+
 <fieldtrial name="LevelDBEnvMaxFDs" separator=".">
   <group name="Success"
       label="This histogram shows the limit when open succeeded."/>
@@ -27072,6 +29568,7 @@ other types of suffix sets.
 
 <fieldtrial name="LevelDBEnvPlatformFileErrors" separator="">
   <group name="CreateDir" label="ChromiumEnv::CreateDir"/>
+  <group name="GetChildren" label="ChromiumEnv::GetChildren"/>
   <group name="LockFile" label="ChromiumEnv::LockFile"/>
   <group name="NewRandomAccessFile" label="ChromiumEnv::NewRandomAccessFile"/>
   <group name="RenameFile" label="ChromiumEnv::RenameFile"/>
@@ -28494,7 +30991,16 @@ other types of suffix sets.
       label="Progressive scan @ 50%, 8 frequency bins."/>
   <group name="100Percent_8MinMax"
       label="Progressive scan @ 100%, 8 frequency bins."/>
+  <group name="100Percent_1MinSeen_A"
+      label="Progressive scan @ all previously seen frequencies (A)."/>
+  <group name="100Percent_1MinSeen_B"
+      label="Progressive scan @ all previously seen frequencies (B)."/>
+  <group name="100Percent_1Min_4Max"
+      label="Progressive scan @ 100%, minimum 1/maximum 4 frequencies."/>
+  <affected-histogram name="Network.Shill.TimeToDrop"/>
   <affected-histogram name="Network.Shill.WiFi.ScanResult"/>
+  <affected-histogram name="Network.Shill.Wifi.TimeToConnect"/>
+  <affected-histogram name="Network.Shill.Wifi.TimeToJoin"/>
   <affected-histogram name="Network.Shill.Wifi.TimeToScan"/>
   <affected-histogram name="Network.Shill.Wifi.TimeToScanAndConnect"/>
 </fieldtrial>

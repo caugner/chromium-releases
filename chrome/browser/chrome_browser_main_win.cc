@@ -22,6 +22,7 @@
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/browser_util_win.h"
+#include "chrome/browser/install_module_verifier_win.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/shell_integration.h"
@@ -38,6 +39,7 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/shell_util.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/common/main_function_params.h"
 #include "grit/app_locale_settings.h"
 #include "grit/chromium_strings.h"
@@ -49,6 +51,7 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/win/message_box_win.h"
 #include "ui/gfx/platform_font_win.h"
+#include "ui/gfx/switches.h"
 
 namespace {
 
@@ -83,6 +86,10 @@ class TranslationDelegate : public installer::TranslationDelegate {
  public:
   virtual string16 GetLocalizedString(int installer_string_id) OVERRIDE;
 };
+
+bool IsSafeModeStart() {
+  return ::GetEnvironmentVariableA(chrome::kSafeModeEnvVar, NULL, 0) != 0;
+}
 
 }  // namespace
 
@@ -206,6 +213,13 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
 int ChromeBrowserMainPartsWin::PreCreateThreads() {
   int rv = ChromeBrowserMainParts::PreCreateThreads();
 
+  if (IsSafeModeStart()) {
+    // TODO(cpu): disable other troublesome features for safe mode.
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kDisableGpu);
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kHighDPISupport, "0");
+  }
   // TODO(viettrungluu): why don't we run this earlier?
   if (!parsed_command_line().HasSwitch(switches::kNoErrorDialogs) &&
       base::win::GetVersion() < base::win::VERSION_XP) {
@@ -222,6 +236,18 @@ void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
   ui::MessageBox(NULL, ASCIIToUTF16(chrome_browser::kMissingLocaleDataMessage),
                  ASCIIToUTF16(chrome_browser::kMissingLocaleDataTitle),
                  MB_OK | MB_ICONERROR | MB_TOPMOST);
+}
+
+void ChromeBrowserMainPartsWin::PostBrowserStart() {
+  ChromeBrowserMainParts::PostBrowserStart();
+
+  // Set up a task to verify installed modules in the current process. Use a
+  // delay to reduce the impact on startup time.
+  content::BrowserThread::GetMessageLoopProxyForThread(
+      content::BrowserThread::UI)->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&BeginModuleVerification),
+          base::TimeDelta::FromSeconds(45));
 }
 
 // static

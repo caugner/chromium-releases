@@ -299,6 +299,55 @@ function testAPIMethodExistence() {
   document.body.appendChild(webview);
 }
 
+// This test verifies that the loadstop event fires when loading a webview
+// accessible resource from a partition that is privileged.
+function testChromeExtensionURL() {
+  var localResource = chrome.runtime.getURL('guest.html');
+  var webview = document.createElement('webview');
+  // foobar is a privileged partition according to the manifest file.
+  webview.partition = 'foobar';
+  webview.addEventListener('loadabort', function(e) {
+    embedder.test.fail();
+  });
+  webview.addEventListener('loadstop', function(e) {
+    embedder.test.succeed();
+  });
+  webview.setAttribute('src', localResource);
+  document.body.appendChild(webview);
+}
+
+// This test verifies that the loadstop event fires when loading a webview
+// accessible resource from a partition that is privileged if the src URL
+// is not fully qualified.
+function testChromeExtensionRelativePath() {
+  var webview = document.createElement('webview');
+  // foobar is a privileged partition according to the manifest file.
+  webview.partition = 'foobar';
+  webview.addEventListener('loadabort', function(e) {
+    embedder.test.fail();
+  });
+  webview.addEventListener('loadstop', function(e) {
+    embedder.test.succeed();
+  });
+  webview.setAttribute('src', 'guest.html');
+  document.body.appendChild(webview);
+}
+
+// This tests verifies that webview fires a loadabort event instead of crashing
+// the browser if we attempt to navigate to a chrome-extension: URL with an
+// extension ID that does not exist.
+function testInvalidChromeExtensionURL() {
+  var invalidResource = 'chrome-extension://abc123/guest.html';
+  var webview = document.createElement('webview');
+  // foobar is a privileged partition according to the manifest file.
+  webview.partition = 'foobar';
+  webview.addEventListener('loadabort', function(e) {
+    embedder.test.succeed();
+  });
+  webview.setAttribute('src', invalidResource);
+  document.body.appendChild(webview);
+}
+
 function testWebRequestAPIExistence() {
   var apiPropertiesToCheck = [
     'onBeforeRequest',
@@ -699,6 +748,31 @@ function testBrowserPluginNotAllowed() {
   embedder.test.succeed();
 }
 
+function testPluginLoadPermission() {
+  var pluginIdentifier = 'unknown platform';
+  if (navigator.platform.match(/linux/i))
+    pluginIdentifier = 'libppapi_tests.so';
+  else if (navigator.platform.match(/win32/i))
+    pluginIdentifier = 'ppapi_tests.dll';
+  else if (navigator.platform.match(/mac/i))
+    pluginIdentifier = 'ppapi_tests.plugin';
+
+  var webview = document.createElement('webview');
+  webview.addEventListener('permissionrequest', function(e) {
+    e.preventDefault();
+    embedder.test.assertEq('loadplugin', e.permission);
+    embedder.test.assertEq(pluginIdentifier, e.name);
+    embedder.test.assertEq(pluginIdentifier, e.identifier);
+    embedder.test.assertEq('function', typeof e.request.allow);
+    embedder.test.assertEq('function', typeof e.request.deny);
+    embedder.test.succeed();
+  });
+  webview.setAttribute('src', 'data:text/html,<body>' +
+                              '<embed type="application/x-ppapi-tests">' +
+                              '</embed></body>');
+  document.body.appendChild(webview);
+}
+
 // This test verifies that new window attachment functions as expected.
 function testNewWindow() {
   var webview = document.createElement('webview');
@@ -882,6 +956,22 @@ function testLoadStartLoadRedirect() {
   document.body.appendChild(webview);
 }
 
+// This test verifies that the loadabort event fires when loading a webview
+// accessible resource from a partition that is not privileged.
+function testLoadAbortChromeExtensionURLWrongPartition() {
+  var localResource = chrome.runtime.getURL('guest.html');
+  var webview = document.createElement('webview');
+  webview.addEventListener('loadabort', function(e) {
+    embedder.test.assertEq('ERR_ADDRESS_UNREACHABLE', e.reason);
+    embedder.test.succeed();
+  });
+  webview.addEventListener('loadstop', function(e) {
+    embedder.test.fail();
+  });
+  webview.setAttribute('src', localResource);
+  document.body.appendChild(webview);
+}
+
 // This test verifies that the loadabort event fires as expected and with the
 // appropriate fields when an empty response is returned.
 function testLoadAbortEmptyResponse() {
@@ -1055,6 +1145,9 @@ embedder.test.testList = {
   'testAutosizeRemoveAttributes': testAutosizeRemoveAttributes,
   'testAutosizeWithPartialAttributes': testAutosizeWithPartialAttributes,
   'testAPIMethodExistence': testAPIMethodExistence,
+  'testChromeExtensionURL': testChromeExtensionURL,
+  'testChromeExtensionRelativePath': testChromeExtensionRelativePath,
+  'testInvalidChromeExtensionURL': testInvalidChromeExtensionURL,
   'testWebRequestAPIExistence': testWebRequestAPIExistence,
   'testEventName': testEventName,
   'testOnEventProperties': testOnEventProperties,
@@ -1072,6 +1165,7 @@ embedder.test.testList = {
   'testReassignSrcAttribute': testReassignSrcAttribute,
   'testRemoveSrcAttribute': testRemoveSrcAttribute,
   'testBrowserPluginNotAllowed': testBrowserPluginNotAllowed,
+  'testPluginLoadPermission': testPluginLoadPermission,
   'testNewWindow': testNewWindow,
   'testNewWindowTwoListeners': testNewWindowTwoListeners,
   'testNewWindowNoPreventDefault': testNewWindowNoPreventDefault,
@@ -1083,6 +1177,8 @@ embedder.test.testList = {
       testWebRequestListenerSurvivesReparenting,
   'testGetProcessId': testGetProcessId,
   'testLoadStartLoadRedirect': testLoadStartLoadRedirect,
+  'testLoadAbortChromeExtensionURLWrongPartition':
+      testLoadAbortChromeExtensionURLWrongPartition,
   'testLoadAbortEmptyResponse': testLoadAbortEmptyResponse,
   'testLoadAbortIllegalChromeURL': testLoadAbortIllegalChromeURL,
   'testLoadAbortIllegalFileURL': testLoadAbortIllegalFileURL,

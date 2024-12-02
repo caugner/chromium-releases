@@ -9,6 +9,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/task_runner_util.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_test_base.h"
@@ -59,7 +60,7 @@ TEST_F(OpenFileOperationTest, OpenExistingFile) {
   close_callback.Run();
   EXPECT_EQ(
       1U,
-      observer()->upload_needed_local_ids().count(src_entry.resource_id()));
+      observer()->upload_needed_local_ids().count(src_entry.local_id()));
 }
 
 TEST_F(OpenFileOperationTest, OpenNonExistingFile) {
@@ -127,9 +128,9 @@ TEST_F(OpenFileOperationTest, CreateNonExistingFile) {
 
   ASSERT_FALSE(close_callback.is_null());
   close_callback.Run();
-  // Here we don't know about the resource id, so just make sure
-  // OnCacheFileUploadNeededByOperation is called actually.
-  EXPECT_EQ(1U, observer()->upload_needed_local_ids().size());
+  EXPECT_EQ(
+      1U,
+      observer()->upload_needed_local_ids().count(GetLocalId(file_in_root)));
 }
 
 TEST_F(OpenFileOperationTest, OpenOrCreateExistingFile) {
@@ -164,13 +165,18 @@ TEST_F(OpenFileOperationTest, OpenOrCreateExistingFile) {
   close_callback.Run();
   EXPECT_EQ(
       1U,
-      observer()->upload_needed_local_ids().count(src_entry.resource_id()));
+      observer()->upload_needed_local_ids().count(src_entry.local_id()));
 
   bool success = false;
   FileCacheEntry cache_entry;
-  cache()->GetCacheEntryOnUIThread(
-      src_entry.resource_id(),
-      google_apis::test_util::CreateCopyResultCallback(&success, &cache_entry));
+  base::PostTaskAndReplyWithResult(
+      blocking_task_runner(),
+      FROM_HERE,
+      base::Bind(&internal::FileCache::GetCacheEntry,
+                 base::Unretained(cache()),
+                 src_entry.local_id(),
+                 &cache_entry),
+      google_apis::test_util::CreateCopyResultCallback(&success));
   test_util::RunBlockingPoolTask();
   EXPECT_TRUE(success);
   EXPECT_TRUE(cache_entry.is_present());
@@ -200,9 +206,9 @@ TEST_F(OpenFileOperationTest, OpenOrCreateNonExistingFile) {
 
   ASSERT_FALSE(close_callback.is_null());
   close_callback.Run();
-  // Here we don't know about the resource id, so just make sure
-  // OnCacheFileUploadNeededByOperation is called actually.
-  EXPECT_EQ(1U, observer()->upload_needed_local_ids().size());
+  EXPECT_EQ(
+      1U,
+      observer()->upload_needed_local_ids().count(GetLocalId(file_in_root)));
 }
 
 TEST_F(OpenFileOperationTest, OpenFileTwice) {
@@ -259,7 +265,7 @@ TEST_F(OpenFileOperationTest, OpenFileTwice) {
   // Here, all the clients close the file, so it should be uploaded then.
   EXPECT_EQ(
       1U,
-      observer()->upload_needed_local_ids().count(src_entry.resource_id()));
+      observer()->upload_needed_local_ids().count(src_entry.local_id()));
 }
 
 }  // namespace file_system

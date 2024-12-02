@@ -921,9 +921,6 @@ bool OmniboxViewWin::OnAfterPossibleChangeInternal(bool force_text_changed) {
       text_before_change_, new_text, new_sel.cpMin, new_sel.cpMax,
       selection_differs, text_differs, just_deleted_text, !IsImeComposing());
 
-  if (selection_differs)
-    controller()->OnSelectionBoundsChanged();
-
   if (something_changed && text_differs)
     TextChanged();
 
@@ -1397,10 +1394,10 @@ void OmniboxViewWin::OnCopy() {
   if (write_url) {
     BookmarkNodeData data;
     data.ReadFromTuple(url, text);
-    data.WriteToClipboard();
+    data.WriteToClipboard(ui::CLIPBOARD_TYPE_COPY_PASTE);
   } else {
     ui::ScopedClipboardWriter scw(ui::Clipboard::GetForCurrentThread(),
-                                  ui::Clipboard::BUFFER_STANDARD);
+                                  ui::CLIPBOARD_TYPE_COPY_PASTE);
     scw.WriteText(text);
   }
 }
@@ -2514,7 +2511,7 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
   // it to fully transparent so any antialiasing will look nice when painted
   // atop the edit.
   gfx::Canvas canvas(gfx::Size(scheme_rect.Width(), scheme_rect.Height()),
-                     ui::SCALE_FACTOR_100P, false);
+                     1.0f, false);
   SkCanvas* sk_canvas = canvas.sk_canvas();
   sk_canvas->getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
 

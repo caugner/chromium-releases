@@ -72,6 +72,11 @@ std::string GetCTMAction(
       ctm.x_scale, ctm.x_offset, ctm.y_scale, ctm.y_offset);
 }
 
+// Returns a string describing a TestDelegate::SetHDCPState() call.
+std::string GetSetHDCPStateAction(RROutput id, HDCPState state) {
+  return base::StringPrintf("set_hdcp(id=%lu,state=%d)", id, state);
+}
+
 // Joins a sequence of strings describing actions (e.g. kScreenDim) such
 // that they can be compared against a string returned by
 // TestDelegate::GetActionsAndClear().  The list of actions must be
@@ -95,7 +100,9 @@ class TestDelegate : public OutputConfigurator::Delegate {
  public:
   static const int kXRandREventBase = 10;
 
-  TestDelegate() : configure_crtc_result_(true) {}
+  TestDelegate()
+      : configure_crtc_result_(true),
+        hdcp_state_(HDCP_STATE_UNDESIRED) {}
   virtual ~TestDelegate() {}
 
   const std::vector<OutputConfigurator::OutputSnapshot>& outputs() const {
@@ -109,6 +116,8 @@ class TestDelegate : public OutputConfigurator::Delegate {
   void set_configure_crtc_result(bool result) {
     configure_crtc_result_ = result;
   }
+
+  void set_hdcp_state(HDCPState state) { hdcp_state_ = state; }
 
   // Returns a comma-separated string describing the actions that were
   // requested since the previous call to GetActionsAndClear() (i.e.
@@ -167,6 +176,16 @@ class TestDelegate : public OutputConfigurator::Delegate {
     AppendAction(projecting ? kProjectingOn : kProjectingOff);
   }
 
+  virtual bool GetHDCPState(RROutput id, HDCPState* state) OVERRIDE {
+    *state = hdcp_state_;
+    return true;
+  }
+
+  virtual bool SetHDCPState(RROutput id, HDCPState state) OVERRIDE {
+    AppendAction(GetSetHDCPStateAction(id, state));
+    return true;
+  }
+
  private:
   struct ModeDetails {
     ModeDetails() : width(0), height(0), interlaced(false) {}
@@ -195,6 +214,9 @@ class TestDelegate : public OutputConfigurator::Delegate {
 
   // Return value returned by ConfigureCrtc().
   bool configure_crtc_result_;
+
+  // Result value of GetHDCPState().
+  HDCPState hdcp_state_;
 
   DISALLOW_COPY_AND_ASSIGN(TestDelegate);
 };
@@ -332,9 +354,11 @@ class OutputConfiguratorTest : public testing::Test {
     o->current_mode = kSmallModeId;
     o->native_mode = kSmallModeId;
     o->is_internal = true;
+    o->type = OUTPUT_TYPE_INTERNAL;
     o->is_aspect_preserving_scaling = true;
     o->mode_infos[kSmallModeId] = small_mode_info;
     o->has_display_id = true;
+    o->display_id = 123;
     o->index = 0;
 
     o = &outputs_[1];
@@ -343,10 +367,12 @@ class OutputConfiguratorTest : public testing::Test {
     o->current_mode = kBigModeId;
     o->native_mode = kBigModeId;
     o->is_internal = false;
+    o->type = OUTPUT_TYPE_HDMI;
     o->is_aspect_preserving_scaling = true;
     o->mode_infos[kSmallModeId] = small_mode_info;
     o->mode_infos[kBigModeId] = big_mode_info;
     o->has_display_id = true;
+    o->display_id = 456;
     o->index = 1;
 
     UpdateOutputs(2, false);
@@ -1014,6 +1040,23 @@ TEST_F(OutputConfiguratorTest, AvoidUnnecessaryProbes) {
             delegate_->GetActionsAndClear());
 }
 
+TEST_F(OutputConfiguratorTest, UpdateCachedOutputsEvenAfterFailure) {
+  InitWithSingleOutput();
+  const std::vector<OutputConfigurator::OutputSnapshot>* cached =
+      &test_api_.cached_outputs();
+  ASSERT_EQ(static_cast<size_t>(1), cached->size());
+  EXPECT_EQ(outputs_[0].current_mode, (*cached)[0].current_mode);
+
+  // After connecting a second output, check that it shows up in
+  // |cached_outputs_| even if an invalid state is requested.
+  state_controller_.set_state(STATE_SINGLE);
+  UpdateOutputs(2, true);
+  cached = &test_api_.cached_outputs();
+  ASSERT_EQ(static_cast<size_t>(2), cached->size());
+  EXPECT_EQ(outputs_[0].current_mode, (*cached)[0].current_mode);
+  EXPECT_EQ(outputs_[1].current_mode, (*cached)[1].current_mode);
+}
+
 TEST_F(OutputConfiguratorTest, PanelFitting) {
   // Configure the internal display to support only the big mode and the
   // external display to support only the small mode.
@@ -1063,6 +1106,121 @@ TEST_F(OutputConfiguratorTest, PanelFitting) {
   ASSERT_TRUE(info);
   EXPECT_EQ(kSmallModeWidth, info->width);
   EXPECT_EQ(kSmallModeHeight, info->height);
+}
+
+TEST_F(OutputConfiguratorTest, OutputProtection) {
+  configurator_.Init(false);
+  configurator_.Start(0);
+  EXPECT_NE(kNoActions, delegate_->GetActionsAndClear());
+
+  OutputConfigurator::OutputProtectionClientId id =
+      configurator_.RegisterOutputProtectionClient();
+  EXPECT_NE(0u, id);
+
+  // One output.
+  UpdateOutputs(1, true);
+  EXPECT_NE(kNoActions, delegate_->GetActionsAndClear());
+  uint32_t link_mask = 0;
+  uint32_t protection_mask = 0;
+  EXPECT_TRUE(configurator_.QueryOutputProtectionStatus(id,
+                                                        outputs_[0].display_id,
+                                                        &link_mask,
+                                                        &protection_mask));
+  EXPECT_EQ(static_cast<uint32_t>(OUTPUT_TYPE_INTERNAL), link_mask);
+  EXPECT_EQ(static_cast<uint32_t>(OUTPUT_PROTECTION_METHOD_NONE),
+            protection_mask);
+  EXPECT_EQ(kNoActions, delegate_->GetActionsAndClear());
+
+  // Two outputs.
+  UpdateOutputs(2, true);
+  EXPECT_NE(kNoActions, delegate_->GetActionsAndClear());
+  EXPECT_TRUE(configurator_.QueryOutputProtectionStatus(id,
+                                                        outputs_[1].display_id,
+                                                        &link_mask,
+                                                        &protection_mask));
+  EXPECT_EQ(static_cast<uint32_t>(OUTPUT_TYPE_HDMI),
+            link_mask);
+  EXPECT_EQ(static_cast<uint32_t>(OUTPUT_PROTECTION_METHOD_NONE),
+            protection_mask);
+  EXPECT_EQ(kNoActions, delegate_->GetActionsAndClear());
+
+  EXPECT_TRUE(
+      configurator_.EnableOutputProtection(id,
+                                           outputs_[1].display_id,
+                                           OUTPUT_PROTECTION_METHOD_HDCP));
+  EXPECT_EQ(GetSetHDCPStateAction(outputs_[1].output, HDCP_STATE_DESIRED),
+            delegate_->GetActionsAndClear());
+
+  // Enable protection.
+  delegate_->set_hdcp_state(HDCP_STATE_ENABLED);
+  EXPECT_TRUE(configurator_.QueryOutputProtectionStatus(id,
+                                                        outputs_[1].display_id,
+                                                        &link_mask,
+                                                        &protection_mask));
+  EXPECT_EQ(static_cast<uint32_t>(OUTPUT_TYPE_HDMI), link_mask);
+  EXPECT_EQ(static_cast<uint32_t>(OUTPUT_PROTECTION_METHOD_HDCP),
+            protection_mask);
+  EXPECT_EQ(kNoActions, delegate_->GetActionsAndClear());
+
+  // Protections should be disabled after unregister.
+  configurator_.UnregisterOutputProtectionClient(id);
+  EXPECT_EQ(GetSetHDCPStateAction(outputs_[1].output, HDCP_STATE_UNDESIRED),
+            delegate_->GetActionsAndClear());
+}
+
+TEST_F(OutputConfiguratorTest, OutputProtectionTwoClients) {
+  OutputConfigurator::OutputProtectionClientId client1 =
+      configurator_.RegisterOutputProtectionClient();
+  OutputConfigurator::OutputProtectionClientId client2 =
+      configurator_.RegisterOutputProtectionClient();
+  EXPECT_NE(client1, client2);
+
+  configurator_.Init(false);
+  configurator_.Start(0);
+  UpdateOutputs(2, true);
+  EXPECT_NE(kNoActions, delegate_->GetActionsAndClear());
+
+  // Clients never know state enableness for methods that they didn't request.
+  EXPECT_TRUE(
+      configurator_.EnableOutputProtection(client1,
+                                           outputs_[1].display_id,
+                                           OUTPUT_PROTECTION_METHOD_HDCP));
+  EXPECT_EQ(GetSetHDCPStateAction(outputs_[1].output,
+                                  HDCP_STATE_DESIRED).c_str(),
+            delegate_->GetActionsAndClear());
+  delegate_->set_hdcp_state(HDCP_STATE_ENABLED);
+
+  uint32_t link_mask = 0;
+  uint32_t protection_mask = 0;
+  EXPECT_TRUE(configurator_.QueryOutputProtectionStatus(client1,
+                                                        outputs_[1].display_id,
+                                                        &link_mask,
+                                                        &protection_mask));
+  EXPECT_EQ(static_cast<uint32_t>(OUTPUT_TYPE_HDMI), link_mask);
+  EXPECT_EQ(OUTPUT_PROTECTION_METHOD_HDCP, protection_mask);
+
+  EXPECT_TRUE(configurator_.QueryOutputProtectionStatus(client2,
+                                                        outputs_[1].display_id,
+                                                        &link_mask,
+                                                        &protection_mask));
+  EXPECT_EQ(static_cast<uint32_t>(OUTPUT_TYPE_HDMI), link_mask);
+  EXPECT_EQ(OUTPUT_PROTECTION_METHOD_NONE, protection_mask);
+
+  // Protections will be disabled only if no more clients request them.
+  EXPECT_TRUE(
+      configurator_.EnableOutputProtection(client2,
+                                           outputs_[1].display_id,
+                                           OUTPUT_PROTECTION_METHOD_NONE));
+  EXPECT_EQ(GetSetHDCPStateAction(outputs_[1].output,
+                                  HDCP_STATE_DESIRED).c_str(),
+            delegate_->GetActionsAndClear());
+  EXPECT_TRUE(
+      configurator_.EnableOutputProtection(client1,
+                                           outputs_[1].display_id,
+                                           OUTPUT_PROTECTION_METHOD_NONE));
+  EXPECT_EQ(GetSetHDCPStateAction(outputs_[1].output,
+                                  HDCP_STATE_UNDESIRED).c_str(),
+            delegate_->GetActionsAndClear());
 }
 
 }  // namespace chromeos

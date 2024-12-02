@@ -16,6 +16,7 @@
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/browser/media_galleries/fileapi/native_media_file_util.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_file_system_options.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/browser/fileapi/external_mount_points.h"
 #include "webkit/browser/fileapi/file_system_backend.h"
@@ -23,7 +24,6 @@
 #include "webkit/browser/fileapi/file_system_operation_runner.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 #include "webkit/browser/fileapi/isolated_context.h"
-#include "webkit/browser/fileapi/mock_file_system_options.h"
 #include "webkit/browser/fileapi/native_file_util.h"
 #include "webkit/browser/quota/mock_special_storage_policy.h"
 
@@ -304,6 +304,7 @@ TEST_F(NativeMediaFileUtilTest, CopySourceFiltering) {
       }
       operation_runner()->Copy(
           url, dest_url,
+          fileapi::FileSystemOperation::OPTION_NONE,
           fileapi::FileSystemOperationRunner::CopyProgressCallback(),
           base::Bind(&ExpectEqHelper, test_name, expectation));
       base::MessageLoop::current()->RunUntilIdle();
@@ -368,6 +369,7 @@ TEST_F(NativeMediaFileUtilTest, CopyDestFiltering) {
       }
       operation_runner()->Copy(
           src_url, url,
+          fileapi::FileSystemOperation::OPTION_NONE,
           fileapi::FileSystemOperationRunner::CopyProgressCallback(),
           base::Bind(&ExpectEqHelper, test_name, expectation));
       base::MessageLoop::current()->RunUntilIdle();
@@ -406,7 +408,8 @@ TEST_F(NativeMediaFileUtilTest, MoveSourceFiltering) {
         expectation = base::PLATFORM_FILE_ERROR_INVALID_OPERATION;
       }
       operation_runner()->Move(
-          url, dest_url, base::Bind(&ExpectEqHelper, test_name, expectation));
+          url, dest_url, fileapi::FileSystemOperation::OPTION_NONE,
+          base::Bind(&ExpectEqHelper, test_name, expectation));
       base::MessageLoop::current()->RunUntilIdle();
     }
   }
@@ -470,7 +473,8 @@ TEST_F(NativeMediaFileUtilTest, MoveDestFiltering) {
         }
       }
       operation_runner()->Move(
-          src_url, url, base::Bind(&ExpectEqHelper, test_name, expectation));
+          src_url, url, fileapi::FileSystemOperation::OPTION_NONE,
+          base::Bind(&ExpectEqHelper, test_name, expectation));
       base::MessageLoop::current()->RunUntilIdle();
     }
   }

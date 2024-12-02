@@ -64,7 +64,6 @@ const char kXmppHostPortSwitch[] = "xmpp-host-port";
 const char kXmppTrySslTcpFirstSwitch[] = "xmpp-try-ssltcp-first";
 const char kXmppAllowInsecureConnectionSwitch[] =
     "xmpp-allow-insecure-connection";
-const char kNotificationMethodSwitch[] = "notification-method";
 
 // Needed to use a real host resolver.
 class MyTestURLRequestContext : public net::TestURLRequestContext {
@@ -372,7 +371,7 @@ int SyncClientMain(int argc, char* argv[]) {
                     &null_encryptor,
                     scoped_ptr<UnrecoverableErrorHandler>(
                         new LoggingUnrecoverableErrorHandler).Pass(),
-                    &LogUnrecoverableErrorContext, false,
+                    &LogUnrecoverableErrorContext,
                     &scm_cancelation_signal);
   // TODO(akalin): Avoid passing in model parameters multiple times by
   // organizing handling of model types.

@@ -182,7 +182,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
 
   // onFocus event should be fired if FocusIn function is called.
   ExtensionTestMessageListener focus_listener("onFocus", false);;
-  engine_handler->FocusIn();
+  engine_handler->FocusIn(ibus::TEXT_INPUT_TYPE_TEXT);
   ASSERT_TRUE(focus_listener.WaitUntilSatisfied());
   ASSERT_TRUE(focus_listener.was_satisfied());
 
@@ -209,8 +209,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
 
   // onMenuItemActivated should be fired if PropertyActivate is called.
   ExtensionTestMessageListener property_listener("onMenuItemActivated", false);
-  engine_handler->PropertyActivate("property_name",
-                                   ibus::IBUS_PROPERTY_STATE_CHECKED);
+  engine_handler->PropertyActivate("property_name");
   ASSERT_TRUE(property_listener.WaitUntilSatisfied());
   ASSERT_TRUE(property_listener.was_satisfied());
 
@@ -264,7 +263,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
       1);
 
   engine_handler->Enable();
-  engine_handler->FocusIn();
+  engine_handler->FocusIn(ibus::TEXT_INPUT_TYPE_TEXT);
 
   {
     SCOPED_TRACE("KeyDown, Ctrl:No, alt:No, Shift:No, Caps:No");
@@ -501,7 +500,7 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
     EXPECT_TRUE(
         mock_candidate_window->last_update_lookup_table_arg().is_visible);
 
-    const IBusLookupTable& table =
+    const CandidateWindow& table =
         mock_candidate_window->last_update_lookup_table_arg().lookup_table;
     EXPECT_TRUE(table.is_cursor_visible());
   }
@@ -527,13 +526,13 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
     EXPECT_TRUE(
         mock_candidate_window->last_update_lookup_table_arg().is_visible);
 
-    const IBusLookupTable& table =
+    const CandidateWindow& table =
         mock_candidate_window->last_update_lookup_table_arg().lookup_table;
 
     // cursor visibility is kept as before.
     EXPECT_TRUE(table.is_cursor_visible());
 
-    EXPECT_EQ(IBusLookupTable::VERTICAL, table.orientation());
+    EXPECT_EQ(CandidateWindow::VERTICAL, table.orientation());
   }
   {
     SCOPED_TRACE("setCandidateWindowProperties:pageSize test");
@@ -557,14 +556,14 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
     EXPECT_TRUE(
         mock_candidate_window->last_update_lookup_table_arg().is_visible);
 
-    const IBusLookupTable& table =
+    const CandidateWindow& table =
         mock_candidate_window->last_update_lookup_table_arg().lookup_table;
 
     // cursor visibility is kept as before.
     EXPECT_TRUE(table.is_cursor_visible());
 
     // oritantation is kept as before.
-    EXPECT_EQ(IBusLookupTable::VERTICAL, table.orientation());
+    EXPECT_EQ(CandidateWindow::VERTICAL, table.orientation());
 
     EXPECT_EQ(7U, table.page_size());
   }
@@ -652,14 +651,14 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
     EXPECT_TRUE(
         mock_candidate_window->last_update_lookup_table_arg().is_visible);
 
-    const IBusLookupTable& table =
+    const CandidateWindow& table =
         mock_candidate_window->last_update_lookup_table_arg().lookup_table;
 
     // cursor visibility is kept as before.
     EXPECT_TRUE(table.is_cursor_visible());
 
     // oritantation is kept as before.
-    EXPECT_EQ(IBusLookupTable::VERTICAL, table.orientation());
+    EXPECT_EQ(CandidateWindow::VERTICAL, table.orientation());
 
     // page size is kept as before.
     EXPECT_EQ(7U, table.page_size());
@@ -700,14 +699,14 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
     EXPECT_TRUE(
         mock_candidate_window->last_update_lookup_table_arg().is_visible);
 
-    const IBusLookupTable& table =
+    const CandidateWindow& table =
         mock_candidate_window->last_update_lookup_table_arg().lookup_table;
 
     // cursor visibility is kept as before.
     EXPECT_TRUE(table.is_cursor_visible());
 
     // oritantation is kept as before.
-    EXPECT_EQ(IBusLookupTable::VERTICAL, table.orientation());
+    EXPECT_EQ(CandidateWindow::VERTICAL, table.orientation());
 
     // page size is kept as before.
     EXPECT_EQ(7U, table.page_size());
@@ -753,29 +752,26 @@ IN_PROC_BROWSER_TEST_P(InputMethodEngineIBusBrowserTest,
         host->host_contents(), set_menu_item_test_script));
     EXPECT_EQ(1, mock_property->register_properties_call_count());
 
-    const IBusPropertyList& props =
+    const InputMethodPropertyList& props =
         mock_property->last_registered_properties();
     ASSERT_EQ(5U, props.size());
 
-    EXPECT_EQ("ID0", props[0]->key());
-    EXPECT_EQ("ID1", props[1]->key());
-    EXPECT_EQ("ID2", props[2]->key());
-    EXPECT_EQ("ID3", props[3]->key());
-    EXPECT_EQ("ID4", props[4]->key());
+    EXPECT_EQ("ID0", props[0].key);
+    EXPECT_EQ("ID1", props[1].key);
+    EXPECT_EQ("ID2", props[2].key);
+    EXPECT_EQ("ID3", props[3].key);
+    EXPECT_EQ("ID4", props[4].key);
 
-    EXPECT_EQ("LABEL1", props[1]->label());
-    EXPECT_EQ("LABEL2", props[2]->label());
-    EXPECT_EQ("LABEL3", props[3]->label());
-    EXPECT_EQ("LABEL4", props[4]->label());
+    EXPECT_EQ("LABEL1", props[1].label);
+    EXPECT_EQ("LABEL2", props[2].label);
+    EXPECT_EQ("LABEL3", props[3].label);
+    EXPECT_EQ("LABEL4", props[4].label);
 
-    EXPECT_EQ(IBusProperty::IBUS_PROPERTY_TYPE_RADIO, props[2]->type());
-    EXPECT_EQ(IBusProperty::IBUS_PROPERTY_TYPE_TOGGLE, props[3]->type());
-    EXPECT_EQ(IBusProperty::IBUS_PROPERTY_TYPE_SEPARATOR, props[4]->type());
+    EXPECT_TRUE(props[2].is_selection_item);
+    // TODO(nona): Add tests for style: ["toggle" and "separator"]
+    // and visible:, when implement them.
 
-    EXPECT_TRUE(props[3]->visible());
-    EXPECT_TRUE(props[4]->visible());
-
-    EXPECT_TRUE(props[4]->checked());
+    EXPECT_TRUE(props[4].is_selection_item_checked);
   }
   {
     SCOPED_TRACE("deleteSurroundingText test");

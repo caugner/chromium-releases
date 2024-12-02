@@ -54,12 +54,6 @@ using base::FilePath;
 
 namespace {
 
-#if defined(OS_WIN)
-const wchar_t kProcessName[] = L"base_unittests.exe";
-#else
-const wchar_t kProcessName[] = L"base_unittests";
-#endif  // defined(OS_WIN)
-
 #if defined(OS_ANDROID)
 const char kShellPath[] = "/system/bin/sh";
 const char kPosixShell[] = "sh";
@@ -69,7 +63,6 @@ const char kPosixShell[] = "bash";
 #endif
 
 const char kSignalFileSlow[] = "SlowChildProcess.die";
-const char kSignalFileCrash[] = "CrashingChildProcess.die";
 const char kSignalFileKill[] = "KilledChildProcess.die";
 
 #if defined(OS_WIN)
@@ -221,6 +214,7 @@ TEST_F(ProcessUtilTest, GetProcId) {
 // TODO(gspencer): turn this test process into a very small program
 // with no symbols (instead of using the multiprocess testing
 // framework) to reduce the ReportCrash overhead.
+const char kSignalFileCrash[] = "CrashingChildProcess.die";
 
 MULTIPROCESS_TEST_MAIN(CrashingChildProcess) {
   WaitToDie(ProcessUtilTest::GetSignalFilePath(kSignalFileCrash).c_str());
@@ -775,7 +769,16 @@ TEST_F(ProcessUtilTest, GetAppOutputRestrictedSIGPIPE) {
 }
 #endif
 
-TEST_F(ProcessUtilTest, GetAppOutputRestrictedNoZombies) {
+#if defined(ADDRESS_SANITIZER) && defined(OS_MACOSX) && \
+    defined(ARCH_CPU_64_BITS)
+// Times out under AddressSanitizer on 64-bit OS X, see
+// http://crbug.com/298197.
+#define MAYBE_GetAppOutputRestrictedNoZombies \
+    DISABLED_GetAppOutputRestrictedNoZombies
+#else
+#define MAYBE_GetAppOutputRestrictedNoZombies GetAppOutputRestrictedNoZombies
+#endif
+TEST_F(ProcessUtilTest, MAYBE_GetAppOutputRestrictedNoZombies) {
   std::vector<std::string> argv;
 
   argv.push_back(std::string(kShellPath));  // argv[0]

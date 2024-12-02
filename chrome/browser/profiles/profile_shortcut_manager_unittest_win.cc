@@ -313,8 +313,7 @@ TEST_F(ProfileShortcutManagerTest, ShortcutFilenameStripsReservedCharacters) {
   const string16 kSanitizedProfileName = L"Harry";
   BrowserDistribution* distribution = GetDistribution();
   const string16 expected_name = kSanitizedProfileName + L" - " +
-      distribution->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME) +
-          installer::kLnkExt;
+      l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME) + installer::kLnkExt;
   EXPECT_EQ(expected_name,
             profiles::internal::GetShortcutFilenameForProfile(kProfileName,
                                                               distribution));
@@ -791,8 +790,7 @@ TEST_F(ProfileShortcutManagerTest, CreateProfileIcon) {
   EXPECT_TRUE(base::DeleteFile(icon_path, false));
   EXPECT_FALSE(base::PathExists(icon_path));
 
-  profile_shortcut_manager_->CreateOrUpdateProfileIcon(profile_1_path_,
-                                                       base::Closure());
+  profile_shortcut_manager_->CreateOrUpdateProfileIcon(profile_1_path_);
   RunPendingTasks();
   EXPECT_TRUE(base::PathExists(icon_path));
 }

@@ -207,7 +207,7 @@ void RemoteSyncDelegate::DidDownloadFile(
     const std::string& md5_checksum,
     int64 file_size,
     const base::Time& updated_time,
-    scoped_ptr<webkit_blob::ScopedFile> downloaded_file) {
+    webkit_blob::ScopedFile downloaded_file) {
   if (error == google_apis::HTTP_NOT_MODIFIED) {
     sync_action_ = SYNC_ACTION_NONE;
     DidApplyRemoteChange(callback, SYNC_STATUS_OK);
@@ -228,7 +228,7 @@ void RemoteSyncDelegate::DidDownloadFile(
     return;
   }
 
-  temporary_file_ = downloaded_file->Pass();
+  temporary_file_ = downloaded_file.Pass();
   drive_metadata_.set_md5_checksum(md5_checksum);
   remote_change_processor()->ApplyRemoteChange(
       remote_file_change(), temporary_file_.path(), url(),
@@ -437,23 +437,22 @@ void RemoteSyncDelegate::CompleteSync(
 void RemoteSyncDelegate::AbortSync(
     const SyncStatusCallback& callback,
     SyncStatusCode status) {
+  clear_local_changes_ = false;
   DidFinish(callback, status);
 }
 
 void RemoteSyncDelegate::DidFinish(
     const SyncStatusCallback& callback,
     SyncStatusCode status) {
-  // Clear the local changes. If the operation was resolve-to-local, we should
-  // not clear them here since we added the fake local change to sync with the
-  // remote file.
-  if (clear_local_changes_) {
-    clear_local_changes_ = false;
-    remote_change_processor()->ClearLocalChanges(
-        url(), base::Bind(&RemoteSyncDelegate::DidFinish,
-                          AsWeakPtr(), callback, status));
-    return;
-  }
+  remote_change_processor()->FinalizeRemoteSync(
+      url(), clear_local_changes_,
+      base::Bind(&RemoteSyncDelegate::DispatchCallbackAfterDidFinish,
+                 AsWeakPtr(), callback, status));
+}
 
+void RemoteSyncDelegate::DispatchCallbackAfterDidFinish(
+    const SyncStatusCallback& callback,
+    SyncStatusCode status) {
   if (status == SYNC_STATUS_OK && sync_action_ != SYNC_ACTION_NONE) {
     sync_service_->NotifyObserversFileStatusChanged(
         url(),

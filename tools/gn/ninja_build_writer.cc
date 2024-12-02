@@ -47,8 +47,27 @@ std::string GetSelfInvocationCommand(const BuildSettings* build_settings) {
 
   CommandLine cmdline(executable);
   cmdline.AppendSwitchPath("--root", build_settings->root_path());
+  cmdline.AppendSwitch("-q");  // Don't write output.
 
-  // TODO(brettw) append other parameters.
+  EscapeOptions escape_shell;
+  escape_shell.mode = ESCAPE_SHELL;
+#if defined(OS_WIN)
+  // The command line code quoting varies by platform. We have one string,
+  // possibly with spaces, that we want to quote. The Windows command line
+  // quotes again, so we don't want quoting. The Posix one doesn't.
+  escape_shell.inhibit_quoting = true;
+#endif
+
+  const CommandLine& our_cmdline = *CommandLine::ForCurrentProcess();
+  const CommandLine::SwitchMap& switches = our_cmdline.GetSwitches();
+  for (CommandLine::SwitchMap::const_iterator i = switches.begin();
+       i != switches.end(); ++i) {
+    if (i->first != "q" && i->first != "root") {
+      std::string escaped_value =
+          EscapeString(FilePathToUTF8(i->second), escape_shell, NULL);
+      cmdline.AppendSwitchASCII(i->first, escaped_value);
+    }
+  }
 
 #if defined(OS_WIN)
   return WideToUTF8(cmdline.GetCommandLineString());
@@ -115,7 +134,7 @@ bool NinjaBuildWriter::RunAndWriteFile(
 void NinjaBuildWriter::WriteNinjaRules() {
   out_ << "rule gn\n";
   out_ << "  command = " << GetSelfInvocationCommand(build_settings_) << "\n";
-  out_ << "  description = GN the world\n\n";
+  out_ << "  description = Regenerating ninja files\n\n";
 
   out_ << "build build.ninja: gn\n"
        << "  depfile = build.ninja.d\n";

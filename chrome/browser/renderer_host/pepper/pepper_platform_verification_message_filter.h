@@ -38,15 +38,11 @@ class PepperPlatformVerificationMessageFilter
       const IPC::Message& msg,
       ppapi::host::HostMessageContext* context) OVERRIDE;
 
-  int32_t OnCanChallengePlatform(ppapi::host::HostMessageContext* context);
   int32_t OnChallengePlatform(ppapi::host::HostMessageContext* context,
                               const std::string& service_id,
                               const std::vector<uint8_t>& challenge);
 
   // PlatformVerificationFlow callbacks.
-  void CanChallengePlatformCallback(
-      ppapi::host::ReplyMessageContext reply_context,
-      bool can_challenge_platform);
   void ChallengePlatformCallback(
       ppapi::host::ReplyMessageContext reply_context,
       chromeos::attestation::PlatformVerificationFlow::Result challenge_result,
@@ -59,7 +55,7 @@ class PepperPlatformVerificationMessageFilter
   int render_view_id_;
 
   // Must only be accessed on the UI thread.
-  scoped_ptr<chromeos::attestation::PlatformVerificationFlow> pv_;
+  scoped_refptr<chromeos::attestation::PlatformVerificationFlow> pv_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperPlatformVerificationMessageFilter);
 };

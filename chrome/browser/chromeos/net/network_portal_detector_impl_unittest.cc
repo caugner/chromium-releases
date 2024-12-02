@@ -50,7 +50,6 @@ class NetworkPortalDetectorImplTest
     profile_.reset(new TestingProfile());
     network_portal_detector_.reset(
         new NetworkPortalDetectorImpl(profile_->GetRequestContext()));
-    network_portal_detector_->Init();
     network_portal_detector_->Enable(false);
 
     set_detector(network_portal_detector_->captive_portal_detector_.get());
@@ -60,7 +59,7 @@ class NetworkPortalDetectorImplTest
   }
 
   virtual void TearDown() {
-    network_portal_detector_->Shutdown();
+    network_portal_detector_.reset();
     profile_.reset();
     NetworkHandler::Shutdown();
     DBusThreadManager::Shutdown();
@@ -167,7 +166,7 @@ class NetworkPortalDetectorImplTest
   void SetBehindPortal(const std::string& service_path) {
     DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
         dbus::ObjectPath(service_path),
-        flimflam::kStateProperty, base::StringValue(flimflam::kStatePortal),
+        shill::kStateProperty, base::StringValue(shill::kStatePortal),
         base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
     base::RunLoop().RunUntilIdle();
   }
@@ -197,19 +196,19 @@ class NetworkPortalDetectorImplTest
     const bool add_to_watchlist = true;
     service_test->AddService(kStubEthernet,
                              kStubEthernet,
-                             flimflam::kTypeEthernet, flimflam::kStateIdle,
+                             shill::kTypeEthernet, shill::kStateIdle,
                              add_to_visible, add_to_watchlist);
     service_test->AddService(kStubWireless1,
                              kStubWireless1,
-                             flimflam::kTypeWifi, flimflam::kStateIdle,
+                             shill::kTypeWifi, shill::kStateIdle,
                              add_to_visible, add_to_watchlist);
     service_test->AddService(kStubWireless2,
                              kStubWireless2,
-                             flimflam::kTypeWifi, flimflam::kStateIdle,
+                             shill::kTypeWifi, shill::kStateIdle,
                              add_to_visible, add_to_watchlist);
     service_test->AddService(kStubCellular,
                              kStubCellular,
-                             flimflam::kTypeCellular, flimflam::kStateIdle,
+                             shill::kTypeCellular, shill::kStateIdle,
                              add_to_visible, add_to_watchlist);
   }
 
@@ -707,7 +706,7 @@ TEST_F(NetworkPortalDetectorImplTest, RequestTimeouts) {
   set_min_time_between_attempts(base::TimeDelta());
   set_lazy_check_interval(base::TimeDelta());
 
-  SetNetworkDeviceEnabled(flimflam::kTypeWifi, false);
+  SetNetworkDeviceEnabled(shill::kTypeWifi, false);
   SetConnected(kStubCellular);
 
   // First portal detection attempt for cellular1 uses 5sec timeout.
@@ -737,7 +736,7 @@ TEST_F(NetworkPortalDetectorImplTest, RequestTimeouts) {
                                         net::URLFetcher::RESPONSE_CODE_INVALID);
   ASSERT_TRUE(is_state_idle());
 
-  SetNetworkDeviceEnabled(flimflam::kTypeWifi, true);
+  SetNetworkDeviceEnabled(shill::kTypeWifi, true);
   SetConnected(kStubWireless1);
 
   // First portal detection attempt for wifi1 uses 5sec timeout.

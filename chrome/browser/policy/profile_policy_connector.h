@@ -15,15 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/dbus/dbus_method_call_status.h"
-#endif
-
 class Profile;
-
-namespace base {
-class SequencedTaskRunner;
-}
 
 namespace net {
 class CertTrustAnchorProvider;
@@ -34,8 +26,13 @@ class X509Certificate;
 typedef std::vector<scoped_refptr<X509Certificate> > CertificateList;
 }
 
+namespace chromeos {
+class User;
+}
+
 namespace policy {
 
+class CloudPolicyManager;
 class ConfigurationPolicyProvider;
 class UserNetworkConfigurationUpdater;
 class PolicyService;
@@ -50,7 +47,10 @@ class ProfilePolicyConnector : public BrowserContextKeyedService {
 
   // If |force_immediate_load| then disk caches will be loaded synchronously.
   void Init(bool force_immediate_load,
-            base::SequencedTaskRunner* sequenced_task_runner);
+#if defined(OS_CHROMEOS)
+            const chromeos::User* user,
+#endif
+            CloudPolicyManager* user_cloud_policy_manager);
 
   void InitForTesting(scoped_ptr<PolicyService> service);
 

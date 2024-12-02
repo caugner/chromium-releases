@@ -15,11 +15,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "cc/layers/delegated_frame_provider.h"
+#include "cc/layers/delegated_frame_resource_collection.h"
 #include "cc/resources/texture_mailbox.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/aura/image_transport_factory.h"
-#include "content/browser/renderer_host/frame_memory_manager.h"
+#include "content/browser/renderer_host/delegated_frame_evictor.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "content/browser/renderer_host/software_frame_manager.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -57,7 +60,6 @@ class Texture;
 }
 
 namespace content {
-class MemoryHolder;
 class RenderWidgetHostImpl;
 class RenderWidgetHostView;
 class ResizeLock;
@@ -76,8 +78,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       public aura::client::CursorClientObserver,
       public ImageTransportFactoryObserver,
       public BrowserAccessibilityDelegate,
-      public FrameContainer,
-      public base::SupportsWeakPtr<RenderWidgetHostViewAura> {
+      public SoftwareFrameManagerClient,
+      public DelegatedFrameEvictorClient,
+      public base::SupportsWeakPtr<RenderWidgetHostViewAura>,
+      public cc::DelegatedFrameResourceCollectionClient {
  public:
   // Used to notify whenever the paint-content of the view changes.
   class PaintObserver {
@@ -247,6 +251,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 #if defined(OS_WIN)
   virtual void SetParentNativeViewAccessible(
       gfx::NativeViewAccessible accessible_parent) OVERRIDE;
+  virtual gfx::NativeViewId GetParentForWindowlessPlugin() const OVERRIDE;
 #endif
 
   // Overridden from ui::TextInputClient:
@@ -260,17 +265,17 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
   virtual ui::TextInputMode GetTextInputMode() const OVERRIDE;
   virtual bool CanComposeInline() const OVERRIDE;
-  virtual gfx::Rect GetCaretBounds() OVERRIDE;
+  virtual gfx::Rect GetCaretBounds() const OVERRIDE;
   virtual bool GetCompositionCharacterBounds(uint32 index,
-                                             gfx::Rect* rect) OVERRIDE;
-  virtual bool HasCompositionText() OVERRIDE;
-  virtual bool GetTextRange(gfx::Range* range) OVERRIDE;
-  virtual bool GetCompositionTextRange(gfx::Range* range) OVERRIDE;
-  virtual bool GetSelectionRange(gfx::Range* range) OVERRIDE;
+                                             gfx::Rect* rect) const OVERRIDE;
+  virtual bool HasCompositionText() const OVERRIDE;
+  virtual bool GetTextRange(gfx::Range* range) const OVERRIDE;
+  virtual bool GetCompositionTextRange(gfx::Range* range) const OVERRIDE;
+  virtual bool GetSelectionRange(gfx::Range* range) const OVERRIDE;
   virtual bool SetSelectionRange(const gfx::Range& range) OVERRIDE;
   virtual bool DeleteRange(const gfx::Range& range) OVERRIDE;
   virtual bool GetTextFromRange(const gfx::Range& range,
-                                string16* text) OVERRIDE;
+                                string16* text) const OVERRIDE;
   virtual void OnInputMethodChanged() OVERRIDE;
   virtual bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) OVERRIDE;
@@ -329,8 +334,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   virtual void OnRootWindowHostMoved(const aura::RootWindow* root,
                                      const gfx::Point& new_origin) OVERRIDE;
 
-  // FrameContainer implementation:
-  virtual void ReleaseCurrentFrame() OVERRIDE;
+  // SoftwareFrameManagerClient implementation:
+  virtual void SoftwareFrameWasFreed(
+      uint32 output_surface_id, unsigned frame_id) OVERRIDE;
+  virtual void ReleaseReferencesToSoftwareFrame() OVERRIDE;
 
   bool CanCopyToBitmap() const;
 
@@ -340,6 +347,11 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // rects.
   void UpdateConstrainedWindowRects(const std::vector<gfx::Rect>& rects);
 #endif
+
+  // Method to indicate if this instance is shutting down or closing.
+  // TODO(shrikant): Discuss around to see if it makes sense to add this method
+  // as part of RenderWidgetHostView.
+  bool IsClosing() const { return in_shutdown_; };
 
  protected:
   friend class RenderWidgetHostView;
@@ -378,13 +390,12 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, SwapNotifiesWindow);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
                            SkippedDelegatedFrames);
+  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, OutputSurfaceIdChange);
+  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
+                           DiscardDelegatedFrames);
 
   class WindowObserver;
   friend class WindowObserver;
-#if defined(OS_WIN)
-  class TransientWindowObserver;
-  friend class TransientWindowObserver;
-#endif
 
   // Overridden from ImageTransportFactoryObserver:
   virtual void OnLostResources() OVERRIDE;
@@ -403,6 +414,11 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   void UpdateCursorIfOverSelf();
   bool ShouldSkipFrame(gfx::Size size_in_dip) const;
+
+  // Set the bounds of the window and handle size changes.  Assumes the caller
+  // has already adjusted the origin of |rect| to conform to whatever coordinate
+  // space is required by the aura::Window.
+  void InternalSetBounds(const gfx::Rect& rect);
 
   // Lazily grab a resize lock if the aura window size doesn't match the current
   // frame size, to give time to the renderer.
@@ -482,10 +498,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void ApplyEventFilterForPopupExit(ui::MouseEvent* event);
 
   // Converts |rect| from window coordinate to screen coordinate.
-  gfx::Rect ConvertRectToScreen(const gfx::Rect& rect);
+  gfx::Rect ConvertRectToScreen(const gfx::Rect& rect) const;
 
   // Converts |rect| from screen coordinate to window coordinate.
-  gfx::Rect ConvertRectFromScreen(const gfx::Rect& rect);
+  gfx::Rect ConvertRectFromScreen(const gfx::Rect& rect) const;
 
   typedef base::Callback<void(bool, const scoped_refptr<ui::Texture>&)>
       BufferPresentedCallback;
@@ -515,12 +531,18 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       float frame_device_scale_factor,
       const ui::LatencyInfo& latency_info);
   void SendDelegatedFrameAck(uint32 output_surface_id);
+  void SendReturnedDelegatedResources(uint32 output_surface_id);
 
-  void SwapSoftwareFrame(
-      uint32 output_surface_id,
-      scoped_ptr<cc::SoftwareFrameData> frame_data,
-      float frame_device_scale_factor,
-      const ui::LatencyInfo& latency_info);
+  // DelegatedFrameEvictorClient implementation.
+  virtual void EvictDelegatedFrame() OVERRIDE;
+
+  // cc::DelegatedFrameProviderClient implementation.
+  virtual void UnusedResourcesAreAvailable() OVERRIDE;
+
+  void SwapSoftwareFrame(uint32 output_surface_id,
+                         scoped_ptr<cc::SoftwareFrameData> frame_data,
+                         float frame_device_scale_factor,
+                         const ui::LatencyInfo& latency_info);
   void SendSoftwareFrameAck(uint32 output_surface_id);
   void SendReclaimSoftwareFrames();
   void ReleaseSoftwareFrame(uint32 output_surface_id,
@@ -530,12 +552,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
 
   BrowserAccessibilityManager* GetOrCreateBrowserAccessibilityManager();
 
-#if defined(OS_WIN)
-  // Sets the cutout rects from transient windows. These are rectangles that
-  // windowed NPAPI plugins shouldn't paint in. Overwrites any previous cutout
-  // rects.
-  void UpdateTransientRects(const std::vector<gfx::Rect>& rects);
+  // Helper function to set keyboard focus to the main window.
+  void SetKeyboardFocus();
 
+#if defined(OS_WIN)
   // Updates the total list of cutout rects, which is the union of transient
   // windows and constrained windows.
   void UpdateCutoutRects();
@@ -593,6 +613,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // Indicates if there is onging composition text.
   bool has_composition_text_;
 
+  // Whether return characters should be passed on to the RenderWidgetHostImpl.
+  bool accept_return_character_;
+
   // Current tooltip text.
   string16 tooltip_;
 
@@ -601,13 +624,17 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // The current frontbuffer texture.
   scoped_refptr<ui::Texture> current_surface_;
 
-  // This holds the current software framebuffer.
-  scoped_refptr<MemoryHolder> framebuffer_holder_;
+  // This holds the current software framebuffer, if any.
+  scoped_ptr<SoftwareFrameManager> software_frame_manager_;
 
   // With delegated renderer, this is the last output surface, used to
   // disambiguate resources with the same id coming from different output
   // surfaces.
   uint32 last_output_surface_id_;
+
+  // The number of delegated frame acks that are pending, to delay resource
+  // returns until the acks are sent.
+  int pending_delegated_ack_count_;
 
   // The damage in the previously presented buffer.
   SkRegion previous_damage_;
@@ -618,6 +645,14 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // True after a delegated frame has been skipped, until a frame is not
   // skipped.
   bool skipped_frames_;
+
+  // Holds delegated resources that have been given to a DelegatedFrameProvider,
+  // and gives back resources when they are no longer in use for return to the
+  // renderer.
+  scoped_refptr<cc::DelegatedFrameResourceCollection> resource_collection_;
+
+  // Provides delegated frame updates to the cc::DelegatedRendererLayer.
+  scoped_refptr<cc::DelegatedFrameProvider> frame_provider_;
 
   // The size of the last frame that was swapped (even if we skipped it).
   // Used to determine when the skipped_damage_ needs to be reset due to
@@ -694,11 +729,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   PaintObserver* paint_observer_;
 
 #if defined(OS_WIN)
-  scoped_ptr<TransientWindowObserver> transient_observer_;
-
-  // The list of rectangles from transient and constrained windows over this
-  // view. Windowed NPAPI plugins shouldn't draw over them.
-  std::vector<gfx::Rect> transient_rects_;
+  // The list of rectangles from constrained windows over this view. Windowed
+  // NPAPI plugins shouldn't draw over them.
   std::vector<gfx::Rect> constrained_rects_;
 
   typedef std::map<HWND, WebPluginGeometry> PluginWindowMoves;
@@ -728,8 +760,17 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
     uint32 output_surface_id;
     unsigned frame_id;
   };
-  std::vector<ReleasedFrameInfo> released_software_frames_;
+  scoped_ptr<ReleasedFrameInfo> released_software_frame_;
+  scoped_ptr<DelegatedFrameEvictor> delegated_frame_evictor_;
 
+  base::WeakPtrFactory<RenderWidgetHostViewAura> weak_ptr_factory_;
+
+#if defined(OS_WIN)
+  // The dummy HWND which corresponds to the bounds of the web page. This is
+  // passed to windowless plugins like Flash/Silverlight, etc as the
+  // container window.
+  HWND plugin_parent_window_;
+#endif
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAura);
 };
 

@@ -6,15 +6,16 @@
 #define CHROME_BROWSER_UI_VIEWS_AUTOFILL_AUTOFILL_DIALOG_VIEWS_H_
 
 #include <map>
+#include <set>
 
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
-#include "base/timer/timer.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view_delegate.h"
 #include "chrome/browser/ui/autofill/testable_autofill_dialog_view.h"
+#include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
@@ -84,6 +85,7 @@ class AutofillDialogViews : public AutofillDialogView,
   virtual void UpdateForErrors() OVERRIDE;
   virtual void UpdateNotificationArea() OVERRIDE;
   virtual void UpdateSection(DialogSection section) OVERRIDE;
+  virtual void UpdateErrorBubble() OVERRIDE;
   virtual void FillSection(DialogSection section,
                            const DetailInput& originating_input) OVERRIDE;
   virtual void GetUserInput(DialogSection section,
@@ -110,9 +112,12 @@ class AutofillDialogViews : public AutofillDialogView,
       const base::string16& text) OVERRIDE;
   virtual void ActivateInput(const DetailInput& input) OVERRIDE;
   virtual gfx::Size GetSize() const OVERRIDE;
+  virtual content::WebContents* GetSignInWebContents() OVERRIDE;
+  virtual bool IsShowingOverlay() const OVERRIDE;
 
   // views::View implementation.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetMinimumSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
 
   // views::DialogDelegate implementation:
@@ -126,6 +131,7 @@ class AutofillDialogViews : public AutofillDialogView,
       OVERRIDE;
   virtual bool ShouldDefaultButtonBeBlue() const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
+  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
   virtual views::View* CreateExtraView() OVERRIDE;
   virtual views::View* CreateTitlebarExtraView() OVERRIDE;
   virtual views::View* CreateFootnoteView() OVERRIDE;
@@ -164,33 +170,63 @@ class AutofillDialogViews : public AutofillDialogView,
   virtual void OnMenuButtonClicked(views::View* source,
                                    const gfx::Point& point) OVERRIDE;
 
+ protected:
+  // Exposed for testing.
+  views::View* GetLoadingShieldForTesting();
+  views::WebView* GetSignInWebViewForTesting();
+  views::View* GetNotificationAreaForTesting();
+  views::View* GetScrollableAreaForTesting();
+
  private:
+  // What the entire dialog should be doing (e.g. gathering info from the user,
+  // asking the user to sign in, etc.).
+  enum DialogMode {
+    DETAIL_INPUT,
+    LOADING,
+    SIGN_IN,
+  };
+
   // A class that creates and manages a widget for error messages.
-  class ErrorBubble : public views::WidgetObserver {
+  class ErrorBubble : public views::BubbleDelegateView {
    public:
-    ErrorBubble(views::View* anchor, const base::string16& message);
+    ErrorBubble(views::View* anchor,
+                views::View* anchor_container,
+                const base::string16& message);
     virtual ~ErrorBubble();
 
-    bool IsShowing();
-
-    // Re-positions the bubble over |anchor_|. If |anchor_| is not visible,
-    // the bubble will hide.
+    // Updates the position of the bubble.
     void UpdatePosition();
 
-    virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+    // Hides and closes the bubble.
+    void Hide();
 
-    views::View* anchor() { return anchor_; }
+    // views::BubbleDelegateView:
+    virtual gfx::Size GetPreferredSize() OVERRIDE;
+    virtual gfx::Rect GetBubbleBounds() OVERRIDE;
+    virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+    virtual bool ShouldFlipArrowForRtl() const OVERRIDE;
+
+    const views::View* anchor() const { return anchor_; }
 
    private:
-    // Calculates and returns the bounds of |widget_|, depending on |anchor_|
-    // and |contents_|.
-    gfx::Rect GetBoundsForWidget();
+    // Calculate the effective container width (ignores edge padding).
+    int GetContainerWidth();
+
+    // Returns the desired bubble width (total).
+    int GetPreferredBubbleWidth();
+
+    // Whether the bubble should stick to the right edge of |anchor_|.
+    bool ShouldArrowGoOnTheRight();
 
     views::Widget* widget_;  // Weak, may be NULL.
-    views::View* anchor_;  // Weak.
-    // The contents view of |widget_|.
-    views::View* contents_;  // Weak.
-    ScopedObserver<views::Widget, ErrorBubble> observer_;
+    views::View* const anchor_;  // Weak.
+
+    // Used to determine the width of the bubble and whether to stick to the
+    // right edge of |anchor_|. Must contain |anchor_|.
+    views::View* const anchor_container_;  // Weak.
+
+    // Whether the bubble should be shown above the anchor (default is below).
+    const bool show_above_anchor_;
 
     DISALLOW_COPY_AND_ASSIGN(ErrorBubble);
   };
@@ -268,7 +304,7 @@ class AutofillDialogViews : public AutofillDialogView,
     // Child View. Front and center.
     views::ImageView* image_view_;
     // Child View. When visible, below |image_view_|.
-    views::View* message_stack_;
+    views::Label* message_view_;
 
     DISALLOW_COPY_AND_ASSIGN(OverlayView);
   };
@@ -330,20 +366,26 @@ class AutofillDialogViews : public AutofillDialogView,
     void SetForwardMouseEvents(bool forward);
 
     // views::View implementation.
+    virtual const char* GetClassName() const OVERRIDE;
     virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
     virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
     virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
     virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
     virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+    // This is needed because not all events percolate up the views hierarchy.
+    virtual View* GetEventHandlerForPoint(const gfx::Point& point) OVERRIDE;
 
    private:
     // Converts |event| to one suitable for |proxy_button_|.
     static ui::MouseEvent ProxyEvent(const ui::MouseEvent& event);
 
+    // Returns true if the given event should be forwarded to |proxy_button_|.
+    bool ShouldForwardEvent(const ui::MouseEvent& event);
+
     // Mouse events on |this| are sent to this button.
     views::Button* proxy_button_;  // Weak reference.
 
-    // When true, mouse events will be forwarded to |proxy_button_|.
+    // When true, all mouse events will be forwarded to |proxy_button_|.
     bool forward_mouse_events_;
 
     DISALLOW_COPY_AND_ASSIGN(SectionContainer);
@@ -474,19 +516,17 @@ class AutofillDialogViews : public AutofillDialogView,
 
   typedef std::map<DialogSection, DetailsGroup> DetailGroupMap;
 
-  gfx::Size CalculatePreferredSize();
-
-  // Returns the height of the initiating WebContents' view.
-  int GetBrowserViewHeight() const;
-
-  // Returns the |size| inset by |GetInsets()|.
-  gfx::Size InsetSize(const gfx::Size& size) const;
+  // Returns the preferred size or minimum size (if |get_minimum_size| is true).
+  gfx::Size CalculatePreferredSize(bool get_minimum_size);
 
   // Returns the minimum size of the sign in view for this dialog.
   gfx::Size GetMinimumSignInViewSize() const;
 
   // Returns the maximum size of the sign in view for this dialog.
   gfx::Size GetMaximumSignInViewSize() const;
+
+  // Returns which section should currently be used for credit card info.
+  DialogSection GetCreditCardSection() const;
 
   void InitChildViews();
 
@@ -503,10 +543,6 @@ class AutofillDialogViews : public AutofillDialogView,
   // inputs View, and suggestion model. Relevant pointers are stored in |group|.
   void CreateDetailsSection(DialogSection section);
 
-  // Like CreateDetailsSection, but creates the combined billing/cc section,
-  // which is somewhat more complicated than the others.
-  void CreateBillingSection();
-
   // Creates the view that holds controls for inputing or selecting data for
   // a given section.
   views::View* CreateInputsContainer(DialogSection section);
@@ -515,6 +551,11 @@ class AutofillDialogViews : public AutofillDialogView,
   // in the appropriate DetailsGroup. The top level View in the hierarchy is
   // returned.
   views::View* InitInputsView(DialogSection section);
+
+  // Changes the function of the whole dialog. Currently this can show a loading
+  // shield, an embedded sign in web view, or the more typical detail input mode
+  // (suggestions and form inputs).
+  void ShowDialogInMode(DialogMode dialog_mode);
 
   // Updates the given section to match the state provided by |delegate_|. If
   // |clobber_inputs| is true, the current state of the textfields will be
@@ -532,6 +573,9 @@ class AutofillDialogViews : public AutofillDialogView,
   // Returns NULL if no DetailsGroup was found.
   DetailsGroup* GroupForView(views::View* view);
 
+  // Explicitly focuses the initially focusable view.
+  void FocusInitialView();
+
   // Sets the visual state for an input to be either valid or invalid. This
   // should work on Comboboxes or DecoratedTextfields. If |message| is empty,
   // the input is valid.
@@ -542,9 +586,14 @@ class AutofillDialogViews : public AutofillDialogView,
   // |validity_map_|.
   void ShowErrorBubbleForViewIfNecessary(views::View* view);
 
-  // Updates validity of the inputs in |section| with the new validity data.
+  // Hides |error_bubble_| (if it exists).
+  void HideErrorBubble();
+
+  // Updates validity of the inputs in |section| with new |validity_messages|.
+  // Fields are only updated with unsure messages if |overwrite_valid| is true.
   void MarkInputsInvalid(DialogSection section,
-                         const ValidityData& validity_data);
+                         const ValidityMessages& validity_messages,
+                         bool overwrite_invalid);
 
   // Checks all manual inputs in |group| for validity. Decorates the invalid
   // ones and returns true if all were valid.
@@ -578,14 +627,13 @@ class AutofillDialogViews : public AutofillDialogView,
   // Called when the details container changes in size or position.
   void DetailsContainerBoundsChanged();
 
-  // Returns true when the dialog is showing the sign in webview. Also returns
-  // true if showing the loading indicator (spinner) after having gone through
-  // sign in.
-  bool SignInWebviewDictatesHeight() const;
-
   // Sets the icons in |section| according to the field values. For example,
   // sets the credit card and CVC icons according to the credit card number.
   void SetIconsForSection(DialogSection section);
+
+  // Iterates over all the inputs in |section| and sets their enabled/disabled
+  // state.
+  void SetEditabilityForSection(DialogSection section);
 
   // The delegate that drives this view. Weak pointer, always non-NULL.
   AutofillDialogViewDelegate* const delegate_;
@@ -604,9 +652,6 @@ class AutofillDialogViews : public AutofillDialogView,
   // dialog is closing.
   views::Widget* window_;
 
-  // A timer used to coalesce re-layouts due to browser window resizes.
-  base::Timer browser_resize_timer_;
-
   // A DialogSection-keyed map of the DetailGroup structs.
   DetailGroupMap detail_groups_;
 
@@ -621,7 +666,7 @@ class AutofillDialogViews : public AutofillDialogView,
 
   // A WebView to that navigates to a Google sign-in page to allow the user to
   // sign-in.
-  views::WebView* sign_in_webview_;
+  views::WebView* sign_in_web_view_;
 
   // View that wraps |details_container_| and makes it scroll vertically.
   views::ScrollView* scrollable_area_;
@@ -631,6 +676,10 @@ class AutofillDialogViews : public AutofillDialogView,
 
   // A view that overlays |this| (for "loading..." messages).
   views::View* loading_shield_;
+
+  // The height for |loading_shield_|. This prevents the height of the dialog
+  // from changing while the loading shield is showing.
+  int loading_shield_height_;
 
   // The view that completely overlays the dialog (used for the splash page).
   OverlayView* overlay_view_;
@@ -663,7 +712,7 @@ class AutofillDialogViews : public AutofillDialogView,
   views::FocusManager* focus_manager_;
 
   // The object that manages the error bubble widget.
-  scoped_ptr<ErrorBubble> error_bubble_;
+  ErrorBubble* error_bubble_;  // Weak; owns itself.
 
   // Map from input view (textfield or combobox) to error string.
   std::map<views::View*, base::string16> validity_map_;

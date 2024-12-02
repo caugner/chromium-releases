@@ -27,42 +27,10 @@ namespace google_apis {
 namespace {
 
 // Term values for kSchemeKind category:
-const char kSchemeKind[] = "http://schemas.google.com/g/2005#kind";
 const char kTermPrefix[] = "http://schemas.google.com/docs/2007#";
-const char kFileTerm[] = "file";
-const char kFolderTerm[] = "folder";
-const char kItemTerm[] = "item";
-const char kPdfTerm[] = "pdf";
-const char kDocumentTerm[] = "document";
-const char kSpreadSheetTerm[] = "spreadsheet";
-const char kPresentationTerm[] = "presentation";
-
-const char kSchemeLabels[] = "http://schemas.google.com/g/2005/labels";
 
 // Node names.
-const char kAuthorNode[] = "author";
-const char kCategoryNode[] = "category";
-const char kContentNode[] = "content";
-const char kEditedNode[] = "edited";
-const char kEmailNode[] = "email";
 const char kEntryNode[] = "entry";
-const char kFeedLinkNode[] = "feedLink";
-const char kFilenameNode[] = "filename";
-const char kIDNode[] = "id";
-const char kLastModifiedByNode[] = "lastModifiedBy";
-const char kLastViewedNode[] = "lastViewed";
-const char kLinkNode[] = "link";
-const char kMd5ChecksumNode[] = "md5Checksum";
-const char kModifiedByMeDateNode[] = "modifiedByMeDate";
-const char kNameNode[] = "name";
-const char kPublishedNode[] = "published";
-const char kQuotaBytesUsedNode[] = "quotaBytesUsed";
-const char kResourceIdNode[] = "resourceId";
-const char kSizeNode[] = "size";
-const char kSuggestedFilenameNode[] = "suggestedFilename";
-const char kTitleNode[] = "title";
-const char kUpdatedNode[] = "updated";
-const char kWritersCanInviteNode[] = "writersCanInvite";
 
 // Field names.
 const char kAuthorField[] = "author";
@@ -120,20 +88,6 @@ const char kTitleTField[] = "title.$t";
 const char kTypeField[] = "type";
 const char kUpdatedField[] = "updated.$t";
 
-// Attribute names.
-// Attributes are not namespace-blind as node names in XmlReader.
-const char kETagAttr[] = "gd:etag";
-const char kEmailAttr[] = "email";
-const char kHrefAttr[] = "href";
-const char kLabelAttr[] = "label";
-const char kNameAttr[] = "name";
-const char kRelAttr[] = "rel";
-const char kSchemeAttr[] = "scheme";
-const char kSrcAttr[] = "src";
-const char kTermAttr[] = "term";
-const char kTypeAttr[] = "type";
-const char kValueAttr[] = "value";
-
 // Link Prefixes
 const char kOpenWithPrefix[] = "http://schemas.google.com/docs/2007#open-with-";
 const size_t kOpenWithPrefixSize = arraysize(kOpenWithPrefix) - 1;
@@ -152,6 +106,7 @@ const EntryKindMap kEntryKindMap[] = {
     { ENTRY_KIND_PRESENTATION, "presentation", ".gslides" },
     { ENTRY_KIND_DRAWING,      "drawing",      ".gdraw"},
     { ENTRY_KIND_TABLE,        "table",        ".gtable"},
+    { ENTRY_KIND_FORM,         "form",         ".gform"},
     { ENTRY_KIND_EXTERNAL_APP, "externalapp",  ".glink"},
     { ENTRY_KIND_SITE,         "site",         NULL},
     { ENTRY_KIND_FOLDER,       "folder",       NULL},
@@ -497,7 +452,10 @@ ResourceEntry::ResourceEntry()
       file_size_(0),
       deleted_(false),
       removed_(false),
-      changestamp_(0) {
+      changestamp_(0),
+      image_width_(-1),
+      image_height_(-1),
+      image_rotation_(-1) {
 }
 
 ResourceEntry::~ResourceEntry() {
@@ -562,6 +520,7 @@ void ResourceEntry::RegisterJSONConverter(
   converter->RegisterCustomValueField<int64>(
       kChangestampField, &ResourceEntry::changestamp_,
       &ResourceEntry::ParseChangestamp);
+  // ImageMediaMetadata fields are not supported by WAPI.
 }
 
 std::string ResourceEntry::GetHostedDocumentExtension() const {
@@ -628,6 +587,7 @@ int ResourceEntry::ClassifyEntryKind(DriveEntryKind kind) {
     case ENTRY_KIND_PRESENTATION:
     case ENTRY_KIND_DRAWING:
     case ENTRY_KIND_TABLE:
+    case ENTRY_KIND_FORM:
       classes = KIND_OF_GOOGLE_DOCUMENT | KIND_OF_HOSTED_DOCUMENT;
       break;
 

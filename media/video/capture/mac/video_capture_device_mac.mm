@@ -4,12 +4,11 @@
 
 #include "media/video/capture/mac/video_capture_device_mac.h"
 
-#import <QTKit/QTKit.h>
-
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/time/time.h"
+#import "media/video/capture/mac/platform_video_capturing_mac.h"
 #include "media/video/capture/mac/video_capture_device_qtkit_mac.h"
 
 namespace {
@@ -34,6 +33,12 @@ const Resolution* const kWellSupportedResolutions[] = {
    &kVGA,
    &kHD,
 };
+
+// Rescaling the image to fix the pixel aspect ratio runs the risk of making
+// the aspect ratio worse, if QTKit selects a new source mode with a different
+// shape.  This constant ensures that we don't take this risk if the current
+// aspect ratio is tolerable.
+const float kMaxPixelAspectRatio = 1.15;
 
 // TODO(ronghuawu): Replace this with CapabilityList::GetBestMatchedCapability.
 void GetBestMatchSupportedResolution(int* width, int* height) {
@@ -71,6 +76,12 @@ void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
   }
 }
 
+// static
+void VideoCaptureDevice::GetDeviceSupportedFormats(const Name& device,
+    VideoCaptureCapabilities* formats) {
+  NOTIMPLEMENTED();
+}
+
 const std::string VideoCaptureDevice::Name::GetModel() const {
   // Both PID and VID are 4 characters.
   if (unique_id_.size() < 2 * kVidPidSize) {
@@ -99,8 +110,8 @@ VideoCaptureDevice* VideoCaptureDevice::Create(const Name& device_name) {
 
 VideoCaptureDeviceMac::VideoCaptureDeviceMac(const Name& device_name)
     : device_name_(device_name),
-      observer_(NULL),
       sent_frame_info_(false),
+      tried_to_square_pixels_(false),
       loop_proxy_(base::MessageLoopProxy::current()),
       state_(kNotInitialized),
       weak_factory_(this),
@@ -113,9 +124,9 @@ VideoCaptureDeviceMac::~VideoCaptureDeviceMac() {
   [capture_device_ release];
 }
 
-void VideoCaptureDeviceMac::Allocate(
+void VideoCaptureDeviceMac::AllocateAndStart(
     const VideoCaptureCapability& capture_format,
-    EventHandler* observer) {
+    scoped_ptr<VideoCaptureDevice::Client> client) {
   DCHECK_EQ(loop_proxy_, base::MessageLoopProxy::current());
   if (state_ != kIdle) {
     return;
@@ -124,13 +135,12 @@ void VideoCaptureDeviceMac::Allocate(
   int height = capture_format.height;
   int frame_rate = capture_format.frame_rate;
 
-  // QTKit can scale captured frame to any size requested, which would lead to
-  // undesired aspect ratio change. Tries to open the camera with a natively
-  // supported format and let the client to crop/pad the captured frames.
-  GetBestMatchSupportedResolution(&width,
-                                  &height);
+  // The OS API can scale captured frame to any size requested, which would lead
+  // to undesired aspect ratio change. Try to open the camera with a natively
+  // supported format and let the client crop/pad the captured frames.
+  GetBestMatchSupportedResolution(&width, &height);
 
-  observer_ = observer;
+  client_ = client.Pass();
   NSString* deviceId =
       [NSString stringWithUTF8String:device_name_.id().c_str()];
 
@@ -149,19 +159,15 @@ void VideoCaptureDeviceMac::Allocate(
   current_settings_.width = width;
   current_settings_.height = height;
   current_settings_.frame_rate = frame_rate;
-  current_settings_.expected_capture_delay = 0;
-  current_settings_.interlaced = false;
 
-  if (width != kHD.width || height != kHD.height) {
+  if (width <= kVGA.width || height <= kVGA.height) {
     // If the resolution is VGA or QVGA, set the capture resolution to the
-    // target size. For most cameras (though not all), at these resolutions
-    // QTKit produces frames with square pixels.
+    // target size. Essentially all supported cameras offer at least VGA.
     if (!UpdateCaptureResolution())
       return;
-
-    sent_frame_info_ = true;
-    observer_->OnFrameInfo(current_settings_);
   }
+  // For higher resolutions, we first open at the default resolution to find
+  // out if the request is larger than the camera's native resolution.
 
   // If the resolution is HD, start capturing without setting a resolution.
   // QTKit will produce frames at the native resolution, allowing us to
@@ -174,42 +180,19 @@ void VideoCaptureDeviceMac::Allocate(
     return;
   }
 
-  state_ = kAllocated;
-}
-
-void VideoCaptureDeviceMac::Start() {
-  DCHECK_EQ(loop_proxy_, base::MessageLoopProxy::current());
-  DCHECK_EQ(state_, kAllocated);
   state_ = kCapturing;
-
-  // This method no longer has any effect.  Capturing is triggered by
-  // the call to Allocate.
-  // TODO(bemasc, ncarter): Remove this method.
 }
 
-void VideoCaptureDeviceMac::Stop() {
+void VideoCaptureDeviceMac::StopAndDeAllocate() {
   DCHECK_EQ(loop_proxy_, base::MessageLoopProxy::current());
   DCHECK(state_ == kCapturing || state_ == kError) << state_;
   [capture_device_ stopCapture];
-  state_ = kAllocated;
-}
 
-void VideoCaptureDeviceMac::DeAllocate() {
-  DCHECK_EQ(loop_proxy_, base::MessageLoopProxy::current());
-  if (state_ != kAllocated && state_ != kCapturing) {
-    return;
-  }
-  if (state_ == kCapturing) {
-    [capture_device_ stopCapture];
-  }
   [capture_device_ setCaptureDevice:nil];
   [capture_device_ setFrameReceiver:nil];
-
+  client_.reset();
   state_ = kIdle;
-}
-
-const VideoCaptureDevice::Name& VideoCaptureDeviceMac::device_name() {
-  return device_name_;
+  tried_to_square_pixels_ = false;
 }
 
 bool VideoCaptureDeviceMac::Init() {
@@ -241,38 +224,64 @@ void VideoCaptureDeviceMac::ReceiveFrame(
   // i.e. any thread controlled by QTKit.
 
   if (!sent_frame_info_) {
-    if (current_settings_.width == kHD.width &&
-        current_settings_.height == kHD.height) {
-      bool changeToVga = false;
-      if (frame_info.width < kHD.width || frame_info.height < kHD.height) {
+    // Final resolution has not yet been selected.
+    if (current_settings_.width > kVGA.width ||
+        current_settings_.height > kVGA.height) {
+      // We are requesting HD.  Make sure that the picture is good, otherwise
+      // drop down to VGA.
+      bool change_to_vga = false;
+      if (frame_info.width < current_settings_.width ||
+          frame_info.height < current_settings_.height) {
         // These are the default capture settings, not yet configured to match
         // |current_settings_|.
         DCHECK(frame_info.frame_rate == 0);
         DVLOG(1) << "Switching to VGA because the default resolution is " <<
             frame_info.width << "x" << frame_info.height;
-        changeToVga = true;
+        change_to_vga = true;
       }
-      if (frame_info.width == kHD.width && frame_info.height == kHD.height &&
+
+      if (frame_info.width == current_settings_.width &&
+          frame_info.height == current_settings_.height &&
           aspect_numerator != aspect_denominator) {
         DVLOG(1) << "Switching to VGA because HD has nonsquare pixel " <<
             "aspect ratio " << aspect_numerator << ":" << aspect_denominator;
-        changeToVga = true;
+        change_to_vga = true;
       }
 
-      if (changeToVga) {
+      if (change_to_vga) {
         current_settings_.width = kVGA.width;
         current_settings_.height = kVGA.height;
       }
     }
 
     if (current_settings_.width == frame_info.width &&
+        current_settings_.height == frame_info.height &&
+        !tried_to_square_pixels_ &&
+        (aspect_numerator > kMaxPixelAspectRatio * aspect_denominator ||
+         aspect_denominator > kMaxPixelAspectRatio * aspect_numerator)) {
+      // The requested size results in non-square PAR.
+      // Shrink the frame to 1:1 PAR (assuming QTKit selects the same input
+      // mode, which is not guaranteed).
+      int new_width = current_settings_.width;
+      int new_height = current_settings_.height;
+      if (aspect_numerator < aspect_denominator) {
+        new_width = (new_width * aspect_numerator) / aspect_denominator;
+      } else {
+        new_height = (new_height * aspect_denominator) / aspect_numerator;
+      }
+      current_settings_.width = new_width;
+      current_settings_.height = new_height;
+      tried_to_square_pixels_ = true;
+    }
+
+    if (current_settings_.width == frame_info.width &&
         current_settings_.height == frame_info.height) {
       sent_frame_info_ = true;
-      observer_->OnFrameInfo(current_settings_);
+      client_->OnFrameInfo(current_settings_);
     } else {
       UpdateCaptureResolution();
-      // The current frame does not have the right width and height, so it
-      // must not be passed to |observer_|.
+      // OnFrameInfo has not yet been called.  OnIncomingCapturedFrame must
+      // not be called until after OnFrameInfo, so we return early.
       return;
     }
   }
@@ -280,7 +289,7 @@ void VideoCaptureDeviceMac::ReceiveFrame(
   DCHECK(current_settings_.width == frame_info.width &&
          current_settings_.height == frame_info.height);
 
-  observer_->OnIncomingCapturedFrame(
+  client_->OnIncomingCapturedFrame(
       video_frame, video_frame_length, base::Time::Now(), 0, false, false);
 }
 
@@ -294,7 +303,7 @@ void VideoCaptureDeviceMac::SetErrorState(const std::string& reason) {
   DCHECK_EQ(loop_proxy_, base::MessageLoopProxy::current());
   DLOG(ERROR) << reason;
   state_ = kError;
-  observer_->OnError();
+  client_->OnError();
 }
 
 bool VideoCaptureDeviceMac::UpdateCaptureResolution() {

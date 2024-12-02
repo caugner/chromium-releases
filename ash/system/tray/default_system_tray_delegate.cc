@@ -152,6 +152,13 @@ void DefaultSystemTrayDelegate::ShowLocallyManagedUserInfo() {
 void DefaultSystemTrayDelegate::ShowUserLogin() {
 }
 
+void DefaultSystemTrayDelegate::ShowSpringChargerReplacementDialog() {
+}
+
+bool DefaultSystemTrayDelegate::HasUserConfirmedSafeSpringCharger() {
+  return false;
+}
+
 void DefaultSystemTrayDelegate::ShutDown() {
 }
 
@@ -201,13 +208,14 @@ void DefaultSystemTrayDelegate::GetDriveOperationStatusList(
     ash::DriveOperationStatusList*) {
 }
 
-void DefaultSystemTrayDelegate::ConfigureNetwork(
-    const std::string& network_id) {
-}
-
-void DefaultSystemTrayDelegate::EnrollOrConfigureNetwork(
+void DefaultSystemTrayDelegate::ShowNetworkConfigure(
     const std::string& network_id,
     gfx::NativeWindow parent_window) {
+}
+
+bool DefaultSystemTrayDelegate::EnrollNetwork(const std::string& network_id,
+                                              gfx::NativeWindow parent_window) {
+  return true;
 }
 
 void DefaultSystemTrayDelegate::ManageBluetoothDevices() {
@@ -228,13 +236,8 @@ void DefaultSystemTrayDelegate::ShowMobileSetupDialog(
     const std::string& service_path) {
 }
 
-void DefaultSystemTrayDelegate::ShowOtherWifi() {
-}
-
-void DefaultSystemTrayDelegate::ShowOtherVPN() {
-}
-
-void DefaultSystemTrayDelegate::ShowOtherCellular() {
+void DefaultSystemTrayDelegate::ShowOtherNetworkDialog(
+    const std::string& type) {
 }
 
 bool DefaultSystemTrayDelegate::GetBluetoothAvailable() {

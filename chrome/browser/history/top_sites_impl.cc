@@ -9,12 +9,13 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/metrics/histogram.h"
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
@@ -26,7 +27,7 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites_cache.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/browser/history/url_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -235,17 +236,33 @@ bool TopSitesImpl::GetPageThumbnail(
   }
 
   if (prefix_match) {
-    // Still not found, so strip "?query#ref", and perform prefix match.
-    GURL::Replacements replacements;
-    replacements.ClearQuery();
-    replacements.ClearRef();
-    GURL url_stripped(url.ReplaceComponents(replacements));
-    base::AutoLock lock(lock_);
-    GURL canonical_url(
-        thread_safe_cache_->GetCanonicalURLForPrefix(url_stripped));
-    if (thread_safe_cache_->GetPageThumbnail(canonical_url, bytes))
-      return true;
+    // If http or https, search with |url| first, then try the other one.
+    std::vector<GURL> url_list;
+    url_list.push_back(url);
+    if (url.SchemeIsHTTPOrHTTPS())
+      url_list.push_back(ToggleHTTPAndHTTPS(url));
+
+    for (std::vector<GURL>::iterator it = url_list.begin();
+         it != url_list.end(); ++it) {
+      base::AutoLock lock(lock_);
+
+      GURL canonical_url;
+      // Test whether |url| is prefix of any stored URL.
+      canonical_url = thread_safe_cache_->GetSpecializedCanonicalURL(*it);
+      if (!canonical_url.is_empty() &&
+          thread_safe_cache_->GetPageThumbnail(canonical_url, bytes)) {
+        return true;
+      }
+
+      // Test whether any stored URL is a prefix of |url|.
+      canonical_url = thread_safe_cache_->GetGeneralizedCanonicalURL(*it);
+      if (!canonical_url.is_empty() &&
+          thread_safe_cache_->GetPageThumbnail(canonical_url, bytes)) {
+        return true;
+      }
+    }
   }
+
   return false;
 }
 

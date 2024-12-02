@@ -11,5 +11,14 @@ const char kSyncRootFolderTitle[] = "Chrome Syncable FileSystem";
 const base::FilePath::CharType kDatabaseName[] =
     FILE_PATH_LITERAL("DriveMetadata");
 
+const char kDatabaseVersionKey[] = "VERSION";
+const int64 kCurrentDatabaseVersion = 3;
+const char kServiceMetadataKey[] = "SERVICE";
+const char kFileMetadataKeyPrefix[] = "FILE: ";
+const char kFileTrackerKeyPrefix[] = "TRACKER: ";
+
+const int kMaxRetry = 5;
+const int64 kListChangesRetryDelaySeconds = 60 * 60;
+
 }  // namespace drive_backend
 }  // namespace sync_file_system

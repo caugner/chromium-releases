@@ -56,7 +56,7 @@ WebViewInternal.prototype.handleDialogEvent_ =
     var article = (VOWELS.indexOf(dialogType.charAt(0)) >= 0) ? 'An' : 'A';
     var output = WARNING_MSG_DIALOG_BLOCKED.replace('%1', article);
     output = output.replace('%2', dialogType);
-    console.warn(output);
+    window.console.warn(output);
   };
 
   var self = this;
@@ -80,11 +80,11 @@ WebViewInternal.prototype.handleDialogEvent_ =
     ok: function(user_input) {
       validateCall();
       user_input = user_input || '';
-      WebView.setPermission(self.instanceId_, requestId, true, user_input);
+      WebView.setPermission(self.instanceId_, requestId, 'allow', user_input);
     },
     cancel: function() {
       validateCall();
-      WebView.setPermission(self.instanceId_, requestId, false, '');
+      WebView.setPermission(self.instanceId_, requestId, 'deny');
     }
   };
   webViewEvent.dialog = dialog;
@@ -102,24 +102,37 @@ WebViewInternal.prototype.handleDialogEvent_ =
       if (actionTaken) {
         return;
       }
-      WebView.setPermission(self.instanceId_, requestId, false, '');
-      showWarningMessage(event.messageType);
+      WebView.setPermission(
+          self.instanceId_, requestId, 'default', '', function(allowed) {
+        if (allowed) {
+          return;
+        }
+        showWarningMessage(event.messageType);
+      });
     });
   } else {
     actionTaken = true;
     // The default action is equivalent to canceling the dialog.
-    WebView.setPermission(self.instanceId_, requestId, false, '');
-    showWarningMessage(event.messageType);
+    WebView.setPermission(
+        self.instanceId_, requestId, 'default', '', function(allowed) {
+      if (allowed) {
+        return;
+      }
+      showWarningMessage(event.messageType);
+    });
   }
 };
 
-/**
- * @private
- */
+/** @private */
 WebViewInternal.prototype.maybeGetExperimentalEvents_ = function() {
   return WEB_VIEW_EXPERIMENTAL_EVENTS;
 };
 
+WebViewInternal.prototype.maybeGetExperimentalPermissions_ = function() {
+  return ['loadplugin'];
+};
+
+/** @private */
 WebViewInternal.prototype.clearData_ = function(var_args) {
   if (!this.instanceId_) {
     return;
@@ -128,9 +141,43 @@ WebViewInternal.prototype.clearData_ = function(var_args) {
   $Function.apply(WebView.clearData, null, args);
 };
 
+/** @private */
+WebViewInternal.prototype.getUserAgent_ = function() {
+  return this.userAgentOverride_ || navigator.userAgent;
+};
+
+/** @private */
+WebViewInternal.prototype.isUserAgentOverridden_ = function() {
+  return !!this.userAgentOverride_ &&
+      this.userAgentOverride_ != navigator.userAgent;
+};
+
+/** @private */
+WebViewInternal.prototype.setUserAgentOverride_ = function(userAgentOverride) {
+  this.userAgentOverride_ = userAgentOverride;
+  if (!this.instanceId_) {
+    // If we are not attached yet, then we will pick up the user agent on
+    // attachment.
+    return;
+  }
+  WebView.overrideUserAgent(this.instanceId_, userAgentOverride);
+};
+
 WebViewInternal.maybeRegisterExperimentalAPIs = function(proto, secret) {
   proto.clearData = function(var_args) {
     var internal = this.internal_(secret);
     $Function.apply(internal.clearData_, internal, arguments);
+  };
+
+  proto.getUserAgent = function() {
+    return this.internal_(secret).getUserAgent_();
+  };
+
+  proto.isUserAgentOverridden = function() {
+    return this.internal_(secret).isUserAgentOverridden_();
+  };
+
+  proto.setUserAgentOverride = function(userAgentOverride) {
+    this.internal_(secret).setUserAgentOverride_(userAgentOverride);
   };
 };

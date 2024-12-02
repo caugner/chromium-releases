@@ -201,10 +201,10 @@ Chrome supports. -->
           http://support.google.com/chrome/?p=ib_chromeframe
         </message>
         <message name="IDS_CHROME_FRAME_TURNDOWN_TEXT_IE_OLDER" desc="Text of Chrome Frame turndown prompt for IE 6, 7, and 8">
-          This site is using the Chrome Frame plug-in which will soon be unsupported. Please uninstall it and upgrade to a modern browser.
+          This site is using the Chrome Frame plug-in which will soon stop receiving security and stability updates. Please uninstall it and upgrade to a modern browser.
         </message>
         <message name="IDS_CHROME_FRAME_TURNDOWN_TEXT_IE_NEWER" desc="Text of Chrome Frame turndown prompt for IE 9 and 10">
-          This site is using the Chrome Frame plug-in that will soon be unsupported. Please uninstall it and download a compatible browser.
+          This site is using the Chrome Frame plug-in which will soon stop receiving security and stability updates. Please uninstall it and download a compatible browser.
         </message>
         <message name="IDS_SHORTCUT_NEW_WINDOW" desc="The text label of the New window shortcut context menu entry as of Windows 8">
           New window
@@ -420,6 +420,11 @@ Google Chrome is unable to recover your settings.
           Do you want Google Chrome to save your password for this site?
         </message>
       </if>
+      <if expr="is_macosx">
+        <message name="IDS_PASSWORDS_PAGE_AUTHENTICATION_PROMPT" desc="Text for the dialog box that prompts the user for their OS account password before revealing plaintext passwords on the password page.">
+          Google Chrome is trying to show passwords.
+        </message>
+      </if>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_EXIT_BUTTON" desc="Text on button of dialog that closes Chrome if we can't create a directory for this user.">
         Exit Chrome
       </message>
@@ -580,13 +585,17 @@ Google Chrome is unable to recover your settings.
       </message>
 
       <message name="IDS_PROMPT_DOWNLOAD_CHANGES_SETTINGS"
-               desc="Message shown on the download shelf when the download is known to change browser settings.">
-        <ph name="FILE_NAME">$1<ex>bla.exe</ex></ph> may change your Chrome settings.
+               desc="Message shown on the download shelf when the download is known to change settings in the browser.">
+        <ph name="FILE_NAME">$1<ex>bla.exe</ex></ph> makes settings changes similar to some malware, so Chrome has blocked it.
       </message>
 
-      <message name="IDS_PROMPT_DOWNLOAD_CHANGES_SEARCH_SETTINGS"
-               desc="Message shown on the download shelf when the download is known to change search engine settings in the browser.">
-        <ph name="FILE_NAME">$1<ex>bla.exe</ex></ph> may change how your searches work in Chrome.
+      <message name="IDS_PROMPT_MALICIOUS_DOWNLOAD_URL"
+         desc="Message shown to the user to validate the download when the download url is classified to lead to malware by the safebrowsing database.">
+        This file is malicious, and Chrome has blocked it.
+      </message>
+      <message name="IDS_PROMPT_MALICIOUS_DOWNLOAD_CONTENT"
+         desc="Message shown to the user to validate the download when the download content is classified to lead to malware by safebrowsing.">
+        <ph name="FILE_NAME">$1<ex>malware.exe</ex></ph> is malicious, and Chrome has blocked it.
       </message>
 
       <!-- Remove in-progress downloads confirmation dialog -->
@@ -723,6 +732,10 @@ For Google Chrome, processes used to display diagnostics information (such as th
         Remove from Chrome
       </message>
 
+      <message name="IDS_EXTENSIONS_SUSPICIOUS_DISABLED_BODY" desc="Body of the dialog shown when suspicious extensions have been disabled">
+        To make Chrome safer, we disabled some extensions that aren't listed in the <ph name="IDS_EXTENSION_WEB_STORE_TITLE">$1<ex>Chrome Web Store</ex></ph> and may have been added without your knowledge.
+      </message>
+
       <!-- Wrench menu -->
       <message name="IDS_APPMENU_TOOLTIP" desc="The tooltip to show for the browser menu">
         Customize and control Google Chrome
@@ -763,24 +776,12 @@ For Google Chrome, processes used to display diagnostics information (such as th
         <message name="IDS_SHORT_HELPER_NAME" desc="The helper application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Helper, not Google Chrome Helper.">
           Chrome Helper
         </message>
-
-        <!-- TODO(mark): All helper tasks are currently handled by the helper process.  The following strings exist in support of possibly changing things so that there's a distinct .app bundle for each of the various tasks.  This ensures that if and when a split is made, translated names will be available.  If the helper process is not split into multiple .app bundles, these strings can be removed. -->
-        <message name="IDS_RENDERER_APP_NAME" desc="The renderer application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Renderer.">
-          Google Chrome Renderer
-        </message>
-        <message name="IDS_PLUGIN_APP_NAME" desc="The plug-in host application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Plug-In Host.">
-          Google Chrome Plug-In Host
-        </message>
-        <message name="IDS_SHORT_PLUGIN_APP_NAME" desc="The plug-in host application's short name, used for the Mac's application menu, activity monitor, etc. Example: Chrome Plug-In Host, not Google Chrome Plug-In Host.">
-          Chrome Plug-In Host
-        </message>
-        <message name="IDS_WORKER_APP_NAME" desc="The worker application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Worker.">
-          Google Chrome Worker
-        </message>
-        <message name="IDS_UTILITY_APP_NAME" desc="The utility application's name.  Should contain the Chrome application name (IDS_PRODUCT_NAME). Example: Google Chrome Utility.">
-          Google Chrome Utility
-        </message>
       </if>
+
+      <!-- Sync Promo New Tab Page bubble strings -->
+      <message name="IDS_SYNC_PROMO_NTP_BUBBLE_MESSAGE_NEW" desc="The body of the sync promo NTP bubble.">
+        Now that you're signed in, you can get your tabs, bookmarks and other Chrome stuff across your laptop, phone and tablet. You will also receive more relevant suggestions and features on Google services.
+      </message>
 
       <!-- One click sign in infobar -->
       <if expr="not pp_ifdef('chromeos')">
@@ -793,6 +794,9 @@ For Google Chrome, processes used to display diagnostics information (such as th
         </message>
         <message name="IDS_ONE_CLICK_SIGNIN_BUBBLE_MESSAGE" desc="The body of the sync promo NTP bubble.">
           You're now signed in to Chrome! Your bookmarks, history, and other settings will be synced to your Google Account.
+        </message>
+        <message name="IDS_ONE_CLICK_SIGNIN_BUBBLE_MESSAGE_NEW" desc="The body of the sync promo NTP bubble.">
+          Now that you're signed in, you can get your tabs, bookmarks and other Chrome stuff across your laptop, phone and tablet. You will also receive more relevant suggestions and features on Google services.
         </message>
         <message name="IDS_ONE_CLICK_SIGNIN_BUBBLE_SYNC_DISABLED_MESSAGE" desc="The body of the signin bubble, when sync has been disabled.">
           You're now signed in to Chrome! Sync is disabled by your administrator.

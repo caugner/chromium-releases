@@ -66,8 +66,10 @@ using drive_backend::FakeDriveServiceHelper;
 
 namespace {
 
+#if !defined(OS_ANDROID)
 const char kExtensionName1[] = "example1";
 const char kExtensionName2[] = "example2";
+#endif
 
 void DidInitialize(bool* done, SyncStatusCode status, bool created) {
   EXPECT_FALSE(*done);
@@ -99,9 +101,9 @@ void DidDownloadRemoteVersion(
     SyncStatusCode* status_out,
     webkit_blob::ScopedFile* downloaded_out,
     SyncStatusCode status,
-    scoped_ptr<webkit_blob::ScopedFile> downloaded) {
+    webkit_blob::ScopedFile downloaded) {
   *status_out = status;
-  *downloaded_out = downloaded->Pass();
+  *downloaded_out = downloaded.Pass();
 }
 
 void ExpectEqStatus(bool* done,
@@ -143,7 +145,7 @@ GURL ExtensionNameToGURL(const std::string& extension_name) {
 }
 
 ACTION(InvokeCompletionCallback) {
-  base::MessageLoopProxy::current()->PostTask(FROM_HERE, arg1);
+  base::MessageLoopProxy::current()->PostTask(FROM_HERE, arg2);
 }
 
 ACTION(PrepareForRemoteChange_Busy) {
@@ -295,7 +297,7 @@ class DriveFileSyncServiceFakeTest : public testing::Test {
     // Call UnloadExtension instead of UninstallExtension since it does
     // unnecessary cleanup (e.g. deleting extension data) and emits warnings.
     extension_service_->UnloadExtension(
-        extension_id, extension_misc::UNLOAD_REASON_UNINSTALL);
+        extension_id, extensions::UnloadedExtensionInfo::REASON_UNINSTALL);
   }
 
   void UpdateRegisteredOrigins() {
@@ -623,7 +625,7 @@ void DriveFileSyncServiceFakeTest::TestRemoteChange_Busy() {
               PrepareForProcessRemoteChange(CreateURL(origin, kFileName), _))
       .WillOnce(PrepareForRemoteChange_Busy());
   EXPECT_CALL(*mock_remote_processor(),
-              ClearLocalChanges(CreateURL(origin, kFileName), _))
+              FinalizeRemoteSync(CreateURL(origin, kFileName), _, _))
       .WillOnce(InvokeCompletionCallback());
 
   SetUpDriveSyncService(true);
@@ -652,7 +654,7 @@ void DriveFileSyncServiceFakeTest::TestRemoteChange_NewFile() {
               PrepareForProcessRemoteChange(CreateURL(origin, kFileName), _))
       .WillOnce(PrepareForRemoteChange_NotFound());
   EXPECT_CALL(*mock_remote_processor(),
-              ClearLocalChanges(CreateURL(origin, kFileName), _))
+              FinalizeRemoteSync(CreateURL(origin, kFileName), _, _))
       .WillOnce(InvokeCompletionCallback());
 
   EXPECT_CALL(*mock_remote_processor(),
@@ -685,7 +687,7 @@ void DriveFileSyncServiceFakeTest::TestRemoteChange_UpdateFile() {
               PrepareForProcessRemoteChange(CreateURL(origin, kFileName), _))
       .WillOnce(PrepareForRemoteChange_NotModified());
   EXPECT_CALL(*mock_remote_processor(),
-              ClearLocalChanges(CreateURL(origin, kFileName), _))
+              FinalizeRemoteSync(CreateURL(origin, kFileName), _, _))
       .WillOnce(InvokeCompletionCallback());
 
   EXPECT_CALL(*mock_remote_processor(),

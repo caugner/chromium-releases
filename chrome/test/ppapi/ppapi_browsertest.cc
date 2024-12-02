@@ -287,17 +287,19 @@ TEST_PPAPI_NACL(Graphics2D_FlushOffscreenUpdate)
 TEST_PPAPI_NACL(Graphics2D_BindNull)
 
 #if defined(OS_WIN)
-// In-process and NaCl tests are having flaky failures on Win: crbug.com/242252
-#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
-#define MAYBE_OUT_Graphics3D Graphics3D
-#define MAYBE_NACL_Graphics3D DISABLED_Graphics3D
-#elif defined(OS_WIN) && defined(USE_AURA)
+#if defined(USE_AURA)
 // These tests fail with the test compositor which is what's used by default for
 // browser tests on Windows Aura. Renable when the software compositor is
 // available.
 #define MAYBE_IN_Graphics3D DISABLED_Graphics3D
 #define MAYBE_OUT_Graphics3D DISABLED_Graphics3D
 #define MAYBE_NACL_Graphics3D DISABLED_Graphics3D
+#else  // defined(USE_AURA)
+// In-process and NaCl tests are having flaky failures on Win: crbug.com/242252
+#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
+#define MAYBE_OUT_Graphics3D Graphics3D
+#define MAYBE_NACL_Graphics3D DISABLED_Graphics3D
+#endif  // defined(USE_AURA)
 #else
 // The tests are failing in-process. crbug.com/280282
 #define MAYBE_IN_Graphics3D DISABLED_Graphics3D
@@ -313,7 +315,13 @@ TEST_PPAPI_OUT_OF_PROCESS(ImageData)
 TEST_PPAPI_NACL(ImageData)
 
 TEST_PPAPI_IN_PROCESS(BrowserFont)
-TEST_PPAPI_OUT_OF_PROCESS(BrowserFont)
+// crbug.com/308949
+#if defined(OS_WIN)
+#define MAYBE_OUT_BrowserFont DISABLED_BrowserFont
+#else
+#define MAYBE_OUT_BrowserFont BrowserFont
+#endif
+TEST_PPAPI_OUT_OF_PROCESS(MAYBE_OUT_BrowserFont)
 
 TEST_PPAPI_IN_PROCESS(Buffer)
 TEST_PPAPI_OUT_OF_PROCESS(Buffer)
@@ -326,6 +334,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, TCPSocket) {
       LIST_TEST(TCPSocket_SetOption)
       LIST_TEST(TCPSocket_Listen)
       LIST_TEST(TCPSocket_Backlog)
+      LIST_TEST(TCPSocket_Interface_1_0)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, TCPSocket) {
@@ -335,6 +344,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, TCPSocket) {
       LIST_TEST(TCPSocket_SetOption)
       LIST_TEST(TCPSocket_Listen)
       LIST_TEST(TCPSocket_Backlog)
+      LIST_TEST(TCPSocket_Interface_1_0)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(TCPSocket)) {
@@ -344,6 +354,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(TCPSocket)) {
       LIST_TEST(TCPSocket_SetOption)
       LIST_TEST(TCPSocket_Listen)
       LIST_TEST(TCPSocket_Backlog)
+      LIST_TEST(TCPSocket_Interface_1_0)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, TCPSocket) {
@@ -353,6 +364,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, TCPSocket) {
       LIST_TEST(TCPSocket_SetOption)
       LIST_TEST(TCPSocket_Listen)
       LIST_TEST(TCPSocket_Backlog)
+      LIST_TEST(TCPSocket_Interface_1_0)
   );
 }
 
@@ -555,7 +567,13 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, URLLoader) {
       LIST_TEST(URLLoader_PrefetchBufferThreshold)
   );
 }
-IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(URLLoader)) {
+// Flaky on 32-bit linux bot; http://crbug.com/308906
+#if defined(OS_LINUX) && defined(ARCH_CPU_X86)
+#define MAYBE_NaCl_Glibc_URLLoader DISABLED_URLLoader
+#else
+#define MAYBE_NaCl_Glibc_URLLoader URLLoader
+#endif
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_NaCl_Glibc_URLLoader) {
   RunTestViaHTTP(
       LIST_TEST(URLLoader_BasicGET)
       LIST_TEST(URLLoader_BasicPOST)
@@ -637,9 +655,9 @@ TEST_PPAPI_NACL(DISABLED_URLRequest_SetProperty)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_AppendDataToBody)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_AppendDataToBody)
 TEST_PPAPI_NACL(URLRequest_AppendDataToBody)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_AppendFileToBody)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_AppendFileToBody)
-TEST_PPAPI_NACL(URLRequest_AppendFileToBody)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(DISABLED_URLRequest_AppendFileToBody)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(DISABLED_URLRequest_AppendFileToBody)
+TEST_PPAPI_NACL(DISABLED_URLRequest_AppendFileToBody)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_Stress)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_Stress)
 TEST_PPAPI_NACL(URLRequest_Stress)
@@ -670,6 +688,10 @@ TEST_PPAPI_IN_PROCESS(Var)
 TEST_PPAPI_OUT_OF_PROCESS(Var)
 TEST_PPAPI_NACL(Var)
 
+TEST_PPAPI_IN_PROCESS(VarResource)
+TEST_PPAPI_OUT_OF_PROCESS(VarResource)
+TEST_PPAPI_NACL(VarResource)
+
 // Flaky on mac, http://crbug.com/121107
 #if defined(OS_MACOSX)
 #define MAYBE_VarDeprecated DISABLED_VarDeprecated
@@ -692,6 +714,7 @@ IN_PROC_BROWSER_TEST_F(PPAPITest, PostMessage) {
       LIST_TEST(PostMessage_SendingArrayBuffer)
       LIST_TEST(DISABLED_PostMessage_SendingArray)
       LIST_TEST(DISABLED_PostMessage_SendingDictionary)
+      LIST_TEST(DISABLED_PostMessage_SendingResource)
       LIST_TEST(DISABLED_PostMessage_SendingComplexVar)
       LIST_TEST(PostMessage_MessageEvent)
       LIST_TEST(PostMessage_NoHandler)
@@ -712,6 +735,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, MAYBE_PostMessage) {
       LIST_TEST(PostMessage_SendingArrayBuffer)
       LIST_TEST(PostMessage_SendingArray)
       LIST_TEST(PostMessage_SendingDictionary)
+      LIST_TEST(PostMessage_SendingResource)
       LIST_TEST(PostMessage_SendingComplexVar)
       LIST_TEST(PostMessage_MessageEvent)
       LIST_TEST(PostMessage_NoHandler)
@@ -726,6 +750,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, PostMessage) {
       LIST_TEST(PostMessage_SendingArrayBuffer)
       LIST_TEST(PostMessage_SendingArray)
       LIST_TEST(PostMessage_SendingDictionary)
+      LIST_TEST(PostMessage_SendingResource)
       LIST_TEST(PostMessage_SendingComplexVar)
       LIST_TEST(PostMessage_MessageEvent)
       LIST_TEST(PostMessage_NoHandler)
@@ -740,6 +765,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(PostMessage)) {
       LIST_TEST(PostMessage_SendingArrayBuffer)
       LIST_TEST(PostMessage_SendingArray)
       LIST_TEST(PostMessage_SendingDictionary)
+      LIST_TEST(PostMessage_SendingResource)
       LIST_TEST(PostMessage_SendingComplexVar)
       LIST_TEST(PostMessage_MessageEvent)
       LIST_TEST(PostMessage_NoHandler)
@@ -754,6 +780,7 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, PostMessage) {
       LIST_TEST(PostMessage_SendingArrayBuffer)
       LIST_TEST(PostMessage_SendingArray)
       LIST_TEST(PostMessage_SendingDictionary)
+      LIST_TEST(PostMessage_SendingResource)
       LIST_TEST(PostMessage_SendingComplexVar)
       LIST_TEST(PostMessage_MessageEvent)
       LIST_TEST(PostMessage_NoHandler)
@@ -781,7 +808,6 @@ IN_PROC_BROWSER_TEST_F(PPAPITest, FileIO) {
       LIST_TEST(FileIO_ReadWriteSetLength)
       LIST_TEST(FileIO_ReadToArrayWriteSetLength)
       LIST_TEST(FileIO_TouchQuery)
-      LIST_TEST(FileIO_WillWriteWillSetLength)
       LIST_TEST(FileIO_RequestOSFileHandle)
       LIST_TEST(FileIO_RequestOSFileHandleWithOpenExclusive)
       LIST_TEST(FileIO_Mmap)
@@ -797,13 +823,18 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FileIO) {
       LIST_TEST(FileIO_ReadWriteSetLength)
       LIST_TEST(FileIO_ReadToArrayWriteSetLength)
       LIST_TEST(FileIO_TouchQuery)
-      LIST_TEST(FileIO_WillWriteWillSetLength)
       LIST_TEST(FileIO_RequestOSFileHandle)
       LIST_TEST(FileIO_RequestOSFileHandleWithOpenExclusive)
       LIST_TEST(FileIO_Mmap)
   );
 }
-IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, FileIO) {
+// Flaky on XP; times out, http://crbug.com/313401
+#if defined(OS_WIN)
+#define MAYBE_FileIO DISABLED_FileIO
+#else
+#define MAYBE_FileIO FileIO
+#endif
+IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, MAYBE_FileIO) {
   RunTestViaHTTP(
       LIST_TEST(FileIO_Open)
       LIST_TEST(FileIO_AbortCalls)
@@ -813,14 +844,18 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, FileIO) {
       LIST_TEST(FileIO_ReadWriteSetLength)
       LIST_TEST(FileIO_ReadToArrayWriteSetLength)
       LIST_TEST(FileIO_TouchQuery)
-      // The following test requires PPB_FileIO_Trusted, not available in NaCl.
-      LIST_TEST(DISABLED_FileIO_WillWriteWillSetLength)
       LIST_TEST(FileIO_RequestOSFileHandle)
       LIST_TEST(FileIO_RequestOSFileHandleWithOpenExclusive)
       LIST_TEST(FileIO_Mmap)
   );
 }
-IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(FileIO)) {
+// Flaky on 32-bit linux bot; http://crbug.com/308905
+#if defined(OS_LINUX) && defined(ARCH_CPU_X86)
+#define MAYBE_NaCl_Glibc_FileIO DISABLED_FileIO
+#else
+#define MAYBE_NaCl_Glibc_FileIO FileIO
+#endif
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_NaCl_Glibc_FileIO) {
   RunTestViaHTTP(
       LIST_TEST(FileIO_Open)
       LIST_TEST(FileIO_AbortCalls)
@@ -830,14 +865,18 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(FileIO)) {
       LIST_TEST(FileIO_ReadWriteSetLength)
       LIST_TEST(FileIO_ReadToArrayWriteSetLength)
       LIST_TEST(FileIO_TouchQuery)
-      // The following test requires PPB_FileIO_Trusted, not available in NaCl.
-      LIST_TEST(DISABLED_FileIO_WillWriteWillSetLength)
       LIST_TEST(FileIO_RequestOSFileHandle)
       LIST_TEST(FileIO_RequestOSFileHandleWithOpenExclusive)
       LIST_TEST(FileIO_Mmap)
   );
 }
-IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, FileIO) {
+// Flaky on XP; times out, http://crbug.com/313205
+#if defined(OS_WIN)
+#define MAYBE_PNaCl_FileIO DISABLED_FileIO
+#else
+#define MAYBE_PNaCl_FileIO FileIO
+#endif
+IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, MAYBE_PNaCl_FileIO) {
   RunTestViaHTTP(
       LIST_TEST(FileIO_Open)
       LIST_TEST(FileIO_AbortCalls)
@@ -847,8 +886,6 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, FileIO) {
       LIST_TEST(FileIO_ReadWriteSetLength)
       LIST_TEST(FileIO_ReadToArrayWriteSetLength)
       LIST_TEST(FileIO_TouchQuery)
-      // The following test requires PPB_FileIO_Trusted, not available in NaCl.
-      LIST_TEST(DISABLED_FileIO_WillWriteWillSetLength)
       LIST_TEST(FileIO_RequestOSFileHandle)
       LIST_TEST(FileIO_RequestOSFileHandleWithOpenExclusive)
       LIST_TEST(FileIO_Mmap)
@@ -866,11 +903,9 @@ IN_PROC_BROWSER_TEST_F(PPAPITest, FileRef) {
       LIST_TEST(FileRef_QueryAndTouchFile)
       LIST_TEST(FileRef_DeleteFileAndDirectory)
       LIST_TEST(FileRef_RenameFileAndDirectory)
-      // TODO(teravest): Add in-process support.
-      // LIST_TEST(FileRef_Query)
+      LIST_TEST(FileRef_Query)
       LIST_TEST(FileRef_FileNameEscaping)
-      // TODO(teravest): Add in-process support.
-      // LIST_TEST(FileRef_ReadDirectoryEntries)
+      LIST_TEST(FileRef_ReadDirectoryEntries)
   );
 }
 // OutOfProcessPPAPITest.FileRef times out fairly often.
@@ -907,7 +942,13 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, FileRef) {
       LIST_TEST(DISABLED_FileRef_ReadDirectoryEntries)
   );
 }
-IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(FileRef)) {
+// Flaky on 32-bit linux bot; http://crbug.com/308908
+#if defined(OS_LINUX) && defined(ARCH_CPU_X86)
+#define MAYBE_NaCl_Glibc_FileRef DISABLED_FileRef
+#else
+#define MAYBE_NaCl_Glibc_FileRef FileRef
+#endif
+IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_NaCl_Glibc_FileRef) {
   RunTestViaHTTP(
       LIST_TEST(FileRef_Create)
       LIST_TEST(FileRef_GetFileSystemType)
@@ -1548,3 +1589,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FlashDRM) {
 
 TEST_PPAPI_IN_PROCESS(TalkPrivate)
 TEST_PPAPI_OUT_OF_PROCESS(TalkPrivate)
+
+#if defined(OS_CHROMEOS)
+TEST_PPAPI_OUT_OF_PROCESS(OutputProtectionPrivate)
+#endif

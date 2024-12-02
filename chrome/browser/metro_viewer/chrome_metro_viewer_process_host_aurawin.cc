@@ -5,22 +5,25 @@
 #include "chrome/browser/metro_viewer/chrome_metro_viewer_process_host_aurawin.h"
 
 #include "ash/shell.h"
+#include "ash/wm/window_positioner.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_aurawin.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/ui/ash/ash_init.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/env_vars.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
@@ -47,12 +50,13 @@ void CloseOpenAshBrowsers() {
 }
 
 void OpenURL(const GURL& url) {
-  Browser* browser = chrome::FindOrCreateTabbedBrowser(
+  chrome::NavigateParams params(
       ProfileManager::GetDefaultProfileOrOffTheRecord(),
-      chrome::HOST_DESKTOP_TYPE_ASH);
-  browser->OpenURL(content::OpenURLParams(
-    GURL(url), content::Referrer(), NEW_FOREGROUND_TAB,
-    content::PAGE_TRANSITION_TYPED, false));
+      GURL(url),
+      content::PAGE_TRANSITION_TYPED);
+  params.disposition = NEW_FOREGROUND_TAB;
+  params.host_desktop_type = chrome::HOST_DESKTOP_TYPE_ASH;
+  chrome::Navigate(&params);
 }
 
 }  // namespace
@@ -93,6 +97,11 @@ void ChromeMetroViewerProcessHost::OnChannelConnected(int32 /*peer_pid*/) {
   // Set environment variable to let breakpad know that metro process was
   // connected.
   ::SetEnvironmentVariableA(env_vars::kMetroConnected, "1");
+
+  if (!content::GpuDataManager::GetInstance()->GpuAccessAllowed(NULL)) {
+    DLOG(INFO) << "No GPU access, attempting to restart in Desktop\n";
+    chrome::AttemptRestartToDesktopMode();
+  }
 }
 
 void ChromeMetroViewerProcessHost::OnSetTargetSurface(
@@ -104,6 +113,9 @@ void ChromeMetroViewerProcessHost::OnSetTargetSurface(
   chrome::OpenAsh();
   ash::Shell::GetInstance()->CreateLauncher();
   ash::Shell::GetInstance()->ShowLauncher();
+  // On Windows 8 ASH we default to SHOW_STATE_MAXIMIZED for the browser
+  // window. This is to ensure that we honor metro app conventions by default.
+  ash::WindowPositioner::SetMaximizeFirstWindow(true);
   // Tell the rest of Chrome that Ash is running.
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_ASH_SESSION_STARTED,

@@ -162,6 +162,7 @@
 #include "base/metrics/statistics_recorder.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -185,15 +186,14 @@
 #include "chrome/browser/net/http_pipelining_compatibility_client.h"
 #include "chrome/browser/net/network_stats.h"
 #include "chrome/browser/omnibox/omnibox_log.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
-#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/crash_keys.h"
 #include "chrome/common/metrics/caching_permuted_entropy_provider.h"
 #include "chrome/common/metrics/metrics_log_manager.h"
 #include "chrome/common/net/test_server_locations.h"
@@ -220,12 +220,16 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/external_metrics.h"
-#include "chrome/browser/chromeos/system/statistics_provider.h"
+#include "chromeos/system/statistics_provider.h"
 #endif
 
 #if defined(OS_WIN)
 #include <windows.h>  // Needed for STATUS_* codes
 #include "base/win/registry.h"
+#endif
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/service/service_process_control.h"
 #endif
 
 using base::Time;
@@ -325,6 +329,8 @@ int MapCrashExitCodeForHistogram(int exit_code) {
 void MarkAppCleanShutdownAndCommit() {
   PrefService* pref = g_browser_process->local_state();
   pref->SetBoolean(prefs::kStabilityExitedCleanly, true);
+  pref->SetInteger(prefs::kStabilityExecutionPhase,
+                   MetricsService::CLEAN_SHUTDOWN);
   // Start writing right away (write happens on a different thread).
   pref->CommitPendingWrite();
 }
@@ -334,6 +340,9 @@ void MarkAppCleanShutdownAndCommit() {
 // static
 MetricsService::ShutdownCleanliness MetricsService::clean_shutdown_status_ =
     MetricsService::CLEANLY_SHUTDOWN;
+
+MetricsService::ExecutionPhase MetricsService::execution_phase_ =
+    MetricsService::CLEAN_SHUTDOWN;
 
 // This is used to quickly log stats from child process related notifications in
 // MetricsService::child_stats_buffer_.  The buffer's contents are transferred
@@ -405,6 +414,8 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(prefs::kStabilityStatsVersion, std::string());
   registry->RegisterInt64Pref(prefs::kStabilityStatsBuildTime, 0);
   registry->RegisterBooleanPref(prefs::kStabilityExitedCleanly, true);
+  registry->RegisterIntegerPref(prefs::kStabilityExecutionPhase,
+                                CLEAN_SHUTDOWN);
   registry->RegisterBooleanPref(prefs::kStabilitySessionEndCompleted, true);
   registry->RegisterIntegerPref(prefs::kMetricsSessionID, -1);
   registry->RegisterIntegerPref(prefs::kStabilityLaunchCount, 0);
@@ -441,6 +452,7 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
 // static
 void MetricsService::DiscardOldStabilityStats(PrefService* local_state) {
   local_state->SetBoolean(prefs::kStabilityExitedCleanly, true);
+  local_state->SetInteger(prefs::kStabilityExecutionPhase, CLEAN_SHUTDOWN);
   local_state->SetBoolean(prefs::kStabilitySessionEndCompleted, true);
 
   local_state->SetInteger(prefs::kStabilityIncompleteSessionEndCount, 0);
@@ -476,6 +488,7 @@ MetricsService::MetricsService()
       self_ptr_factory_(this),
       state_saver_factory_(this),
       waiting_for_asynchronous_reporting_step_(false),
+      num_async_histogram_fetches_in_progress_(0),
       entropy_source_returned_(LAST_ENTROPY_NONE) {
   DCHECK(IsSingleThreaded());
   InitializeMetricsState();
@@ -591,7 +604,7 @@ void MetricsService::EnableRecording() {
   recording_active_ = true;
 
   ForceClientIdCreation();
-  child_process_logging::SetClientId(client_id_);
+  crash_keys::SetClientID(client_id_);
   if (!log_manager_.current_log())
     OpenNewLog();
 
@@ -768,6 +781,7 @@ void MetricsService::OnAppEnterBackground() {
 void MetricsService::OnAppEnterForeground() {
   PrefService* pref = g_browser_process->local_state();
   pref->SetBoolean(prefs::kStabilityExitedCleanly, false);
+  pref->SetInteger(prefs::kStabilityExecutionPhase, execution_phase_);
 
   StartSchedulerIfNecessary();
 }
@@ -775,6 +789,7 @@ void MetricsService::OnAppEnterForeground() {
 void MetricsService::LogNeedForCleanShutdown() {
   PrefService* pref = g_browser_process->local_state();
   pref->SetBoolean(prefs::kStabilityExitedCleanly, false);
+  pref->SetInteger(prefs::kStabilityExecutionPhase, execution_phase_);
   // Redundant setting to be sure we call for a clean shutdown.
   clean_shutdown_status_ = NEED_TO_SHUTDOWN;
 }
@@ -893,6 +908,13 @@ void MetricsService::InitializeMetricsState() {
     // Reset flag, and wait until we call LogNeedForCleanShutdown() before
     // monitoring.
     pref->SetBoolean(prefs::kStabilityExitedCleanly, true);
+
+    // TODO(rtenneti): On windows, consider saving/getting execution_phase from
+    // the registry.
+    int execution_phase = pref->GetInteger(prefs::kStabilityExecutionPhase);
+    UMA_HISTOGRAM_SPARSE_SLOWLY("Chrome.Browser.ExecutionPhase",
+                                execution_phase);
+    pref->SetInteger(prefs::kStabilityExecutionPhase, CLEAN_SHUTDOWN);
   }
 
 #if defined(OS_WIN)
@@ -906,8 +928,8 @@ void MetricsService::InitializeMetricsState() {
   }
 
   // Initialize uptime counters.
-  int64 startup_uptime = MetricsLog::GetIncrementalUptime(pref);
-  DCHECK_EQ(0, startup_uptime);
+  const base::TimeDelta startup_uptime = GetIncrementalUptime(pref);
+  DCHECK_EQ(0, startup_uptime.InMicroseconds());
   // For backwards compatibility, leave this intact in case Omaha is checking
   // them.  prefs::kStabilityLastTimestampSec may also be useless now.
   // TODO(jar): Delete these if they have no uses.
@@ -1048,7 +1070,25 @@ void MetricsService::ReceivedProfilerData(
 
 void MetricsService::FinishedReceivingProfilerData() {
   DCHECK_EQ(INIT_TASK_SCHEDULED, state_);
-    state_ = INIT_TASK_DONE;
+  state_ = INIT_TASK_DONE;
+}
+
+base::TimeDelta MetricsService::GetIncrementalUptime(PrefService* pref) {
+  base::TimeTicks now = base::TimeTicks::Now();
+  // If this is the first call, init |last_updated_time_|.
+  if (last_updated_time_.is_null())
+    last_updated_time_ = now;
+  const base::TimeDelta incremental_time = now - last_updated_time_;
+  last_updated_time_ = now;
+
+  const int64 incremental_time_secs = incremental_time.InSeconds();
+  if (incremental_time_secs > 0) {
+    int64 metrics_uptime = pref->GetInt64(prefs::kUninstallMetricsUptimeSec);
+    metrics_uptime += incremental_time_secs;
+    pref->SetInt64(prefs::kUninstallMetricsUptimeSec, metrics_uptime);
+  }
+
+  return incremental_time;
 }
 
 int MetricsService::GetLowEntropySource() {
@@ -1168,7 +1208,9 @@ void MetricsService::CloseCurrentLog() {
       static_cast<MetricsLog*>(log_manager_.current_log());
   DCHECK(current_log);
   current_log->RecordEnvironmentProto(plugins_, google_update_metrics_);
-  current_log->RecordIncrementalStabilityElements(plugins_);
+  PrefService* pref = g_browser_process->local_state();
+  current_log->RecordIncrementalStabilityElements(plugins_,
+                                                  GetIncrementalUptime(pref));
   RecordCurrentHistograms();
 
   log_manager_.FinishCurrentLog();
@@ -1286,12 +1328,32 @@ void MetricsService::OnMemoryDetailCollectionDone() {
       &MetricsService::OnHistogramSynchronizationDone,
       self_ptr_factory_.GetWeakPtr());
 
+  base::TimeDelta timeout =
+      base::TimeDelta::FromMilliseconds(kMaxHistogramGatheringWaitDuration);
+
+  DCHECK_EQ(num_async_histogram_fetches_in_progress_, 0);
+
+#if defined(OS_ANDROID)
+  // Android has no service process.
+  num_async_histogram_fetches_in_progress_ = 1;
+#else  // OS_ANDROID
+  num_async_histogram_fetches_in_progress_ = 2;
+  // Run requests to service and content in parallel.
+  if (!ServiceProcessControl::GetInstance()->GetHistograms(callback, timeout)) {
+    // Assume |num_async_histogram_fetches_in_progress_| is not changed by
+    // |GetHistograms()|.
+    DCHECK_EQ(num_async_histogram_fetches_in_progress_, 2);
+    // Assign |num_async_histogram_fetches_in_progress_| above and decrement it
+    // here to make code work even if |GetHistograms()| fired |callback|.
+    --num_async_histogram_fetches_in_progress_;
+  }
+#endif  // OS_ANDROID
+
   // Set up the callback to task to call after we receive histograms from all
   // child processes. Wait time specifies how long to wait before absolutely
   // calling us back on the task.
-  content::FetchHistogramsAsynchronously(
-      base::MessageLoop::current(), callback,
-      base::TimeDelta::FromMilliseconds(kMaxHistogramGatheringWaitDuration));
+  content::FetchHistogramsAsynchronously(base::MessageLoop::current(), callback,
+                                         timeout);
 }
 
 void MetricsService::OnHistogramSynchronizationDone() {
@@ -1299,6 +1361,11 @@ void MetricsService::OnHistogramSynchronizationDone() {
   // This function should only be called as the callback from an ansynchronous
   // step.
   DCHECK(waiting_for_asynchronous_reporting_step_);
+  DCHECK_GT(num_async_histogram_fetches_in_progress_, 0);
+
+  // Check if all expected requests finished.
+  if (--num_async_histogram_fetches_in_progress_ > 0)
+    return;
 
   waiting_for_asynchronous_reporting_step_ = false;
   OnFinalLogInfoCollectionDone();
@@ -1376,7 +1443,9 @@ void MetricsService::PrepareInitialLog() {
 
   DCHECK(initial_log_.get());
   initial_log_->set_hardware_class(hardware_class_);
-  initial_log_->RecordEnvironment(plugins_, google_update_metrics_);
+  PrefService* pref = g_browser_process->local_state();
+  initial_log_->RecordEnvironment(plugins_, google_update_metrics_,
+                                  GetIncrementalUptime(pref));
 
   // Histograms only get written to the current log, so make the new log current
   // before writing them.
@@ -1441,6 +1510,11 @@ void MetricsService::PrepareFetchWithStagedLog() {
       current_fetch_->SetUploadData(kMimeType, compressed_log_text);
       // Tell the server that we're uploading gzipped protobufs.
       current_fetch_->SetExtraRequestHeaders("content-encoding: gzip");
+      const std::string hash =
+          base::HexEncode(log_manager_.staged_log_hash().data(),
+                          log_manager_.staged_log_hash().size());
+      DCHECK(!hash.empty());
+      current_fetch_->AddExtraRequestHeader("X-Chrome-UMA-Log-SHA1: " + hash);
       UMA_HISTOGRAM_PERCENTAGE(
           "UMA.ProtoCompressionRatio",
           100 * compressed_log_text.size() / log_text.size());
@@ -1613,6 +1687,9 @@ void MetricsService::LogCleanShutdown() {
   clean_shutdown_status_ = CLEANLY_SHUTDOWN;
 
   RecordBooleanPrefValue(prefs::kStabilityExitedCleanly, true);
+  PrefService* pref = g_browser_process->local_state();
+  pref->SetInteger(prefs::kStabilityExecutionPhase,
+                   MetricsService::CLEAN_SHUTDOWN);
 }
 
 #if defined(OS_CHROMEOS)

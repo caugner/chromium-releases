@@ -46,6 +46,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #import "content/public/browser/render_widget_host_view_mac_delegate.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -163,7 +164,7 @@ static BOOL SupportsBackingPropertiesChangedNotification() {
 }
 
 static float ScaleFactor(NSView* view) {
-  return ui::GetScaleFactorScale(ui::GetScaleFactorForNativeView(view));
+  return ui::GetImageScale(ui::GetScaleFactorForNativeView(view));
 }
 
 // Private methods:
@@ -188,9 +189,6 @@ static float ScaleFactor(NSView* view) {
 - (void)checkForPluginImeCancellation;
 - (void)updateTabBackingStoreScaleFactor;
 @end
-
-// NSEvent subtype for scroll gestures events.
-static const short kIOHIDEventTypeScroll = 6;
 
 // A window subclass that allows the fullscreen window to become main and gain
 // keyboard focus. This is only used for pepper flash. Normal fullscreen is
@@ -426,11 +424,13 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
       allow_overlapping_views_(false),
       use_core_animation_(false),
       is_loading_(false),
-      is_hidden_(false),
       weak_factory_(this),
       fullscreen_parent_host_view_(NULL),
       pending_swap_buffers_acks_weak_factory_(this),
-      next_swap_ack_time_(base::Time::Now()) {
+      next_swap_ack_time_(base::Time::Now()),
+      software_frame_weak_ptr_factory_(this) {
+  software_frame_manager_.reset(new SoftwareFrameManager(
+      software_frame_weak_ptr_factory_.GetWeakPtr()));
   // |cocoa_view_| owns us and we will be deleted when |cocoa_view_|
   // goes away.  Since we autorelease it, our caller must put
   // |GetNativeView()| into the view hierarchy right after calling us.
@@ -730,13 +730,13 @@ RenderWidgetHost* RenderWidgetHostViewMac::GetRenderWidgetHost() const {
 }
 
 void RenderWidgetHostViewMac::WasShown() {
-  if (!is_hidden_)
+  if (!render_widget_host_->is_hidden())
     return;
 
   if (web_contents_switch_paint_time_.is_null())
     web_contents_switch_paint_time_ = base::TimeTicks::Now();
-  is_hidden_ = false;
   render_widget_host_->WasShown();
+  software_frame_manager_->SetVisibility(true);
 
   // We're messing with the window, so do this to ensure no flashes.
   if (!use_core_animation_)
@@ -746,21 +746,17 @@ void RenderWidgetHostViewMac::WasShown() {
 }
 
 void RenderWidgetHostViewMac::WasHidden() {
-  if (is_hidden_)
+  if (render_widget_host_->is_hidden())
     return;
 
   // Send ACKs for any pending SwapBuffers (if any) since we won't be displaying
   // them and the GPU process is waiting.
   AckPendingSwapBuffers();
 
-  // If we receive any more paint messages while we are hidden, we want to
-  // ignore them so we don't re-allocate the backing store.  We will paint
-  // everything again when we become selected again.
-  is_hidden_ = true;
-
   // If we have a renderer, then inform it that we are being hidden so it can
   // reduce its resource utilization.
   render_widget_host_->WasHidden();
+  software_frame_manager_->SetVisibility(false);
 
   // There can be a transparent flash as this view is removed and the next is
   // added, because of OSX windowing races between displaying the contents of
@@ -782,7 +778,7 @@ void RenderWidgetHostViewMac::SetSize(const gfx::Size& size) {
 void RenderWidgetHostViewMac::SetBounds(const gfx::Rect& rect) {
   // |rect.size()| is view coordinates, |rect.origin| is screen coordinates,
   // TODO(thakis): fix, http://crbug.com/73362
-  if (is_hidden_)
+  if (render_widget_host_->is_hidden())
     return;
 
   // During the initial creation of the RenderWidgetHostView in
@@ -953,46 +949,46 @@ void RenderWidgetHostViewMac::DidUpdateBackingStore(
 
   software_latency_info_.MergeWith(latency_info);
 
-  if (!is_hidden_) {
-    std::vector<gfx::Rect> rects(copy_rects);
+  if (render_widget_host_->is_hidden())
+    return;
 
-    // Because the findbar might be open, we cannot use scrollRect:by: here. For
-    // now, simply mark all of scroll rect as dirty.
-    if (!scroll_rect.IsEmpty())
-      rects.push_back(scroll_rect);
+  std::vector<gfx::Rect> rects(copy_rects);
 
-    for (size_t i = 0; i < rects.size(); ++i) {
-      NSRect ns_rect = [cocoa_view_ flipRectToNSRect:rects[i]];
+  // Because the findbar might be open, we cannot use scrollRect:by: here. For
+  // now, simply mark all of scroll rect as dirty.
+  if (!scroll_rect.IsEmpty())
+    rects.push_back(scroll_rect);
 
-      if (about_to_validate_and_paint_) {
-        // As much as we'd like to use -setNeedsDisplayInRect: here, we can't.
-        // We're in the middle of executing a -drawRect:, and as soon as it
-        // returns Cocoa will clear its record of what needs display. We
-        // instead use |performSelector:| to call |setNeedsDisplayInRect:|
-        // after returning to the main loop, at which point |drawRect:| is no
-        // longer on the stack.
-        DCHECK([NSThread isMainThread]);
-        if (!call_set_needs_display_in_rect_pending_) {
-          [cocoa_view_ performSelector:@selector(callSetNeedsDisplayInRect)
-                       withObject:nil
-                       afterDelay:0];
-          call_set_needs_display_in_rect_pending_ = true;
-          invalid_rect_ = ns_rect;
-        } else {
-          // The old invalid rect is probably invalid now, since the view has
-          // most likely been resized, but there's no harm in dirtying the
-          // union.  In the limit, this becomes equivalent to dirtying the
-          // whole view.
-          invalid_rect_ = NSUnionRect(invalid_rect_, ns_rect);
-        }
+  for (size_t i = 0; i < rects.size(); ++i) {
+    NSRect ns_rect = [cocoa_view_ flipRectToNSRect:rects[i]];
+
+    if (about_to_validate_and_paint_) {
+      // As much as we'd like to use -setNeedsDisplayInRect: here, we can't.
+      // We're in the middle of executing a -drawRect:, and as soon as it
+      // returns Cocoa will clear its record of what needs display. We instead
+      // use |performSelector:| to call |setNeedsDisplayInRect:| after returning
+      //  to the main loop, at which point |drawRect:| is no longer on the
+      // stack.
+      DCHECK([NSThread isMainThread]);
+      if (!call_set_needs_display_in_rect_pending_) {
+        [cocoa_view_ performSelector:@selector(callSetNeedsDisplayInRect)
+                      withObject:nil
+                      afterDelay:0];
+        call_set_needs_display_in_rect_pending_ = true;
+        invalid_rect_ = ns_rect;
       } else {
-        [cocoa_view_ setNeedsDisplayInRect:ns_rect];
+        // The old invalid rect is probably invalid now, since the view has most
+        // likely been resized, but there's no harm in dirtying the union.  In
+        // the limit, this becomes equivalent to dirtying the whole view.
+        invalid_rect_ = NSUnionRect(invalid_rect_, ns_rect);
       }
+    } else {
+      [cocoa_view_ setNeedsDisplayInRect:ns_rect];
     }
-
-    if (!about_to_validate_and_paint_)
-      [cocoa_view_ displayIfNeeded];
   }
+
+  if (!about_to_validate_and_paint_)
+    [cocoa_view_ displayIfNeeded];
 }
 
 void RenderWidgetHostViewMac::RenderProcessGone(base::TerminationStatus status,
@@ -1274,7 +1270,7 @@ void RenderWidgetHostViewMac::CompositorSwapBuffers(
     const gfx::Size& size,
     float surface_scale_factor,
     const ui::LatencyInfo& latency_info) {
-  if (is_hidden_)
+  if (render_widget_host_->is_hidden())
     return;
 
   NSWindow* window = [cocoa_view_ window];
@@ -1660,15 +1656,48 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceRelease() {
 
 bool RenderWidgetHostViewMac::HasAcceleratedSurface(
       const gfx::Size& desired_size) {
-  return last_frame_was_accelerated_ &&
-         compositing_iosurface_ &&
-         compositing_iosurface_->HasIOSurface() &&
-         (desired_size.IsEmpty() ||
-          compositing_iosurface_->dip_io_surface_size() == desired_size);
+  if (last_frame_was_accelerated_) {
+    return compositing_iosurface_ &&
+           compositing_iosurface_->HasIOSurface() &&
+           (desired_size.IsEmpty() ||
+               compositing_iosurface_->dip_io_surface_size() == desired_size);
+  } else {
+    return (software_frame_manager_->HasCurrentFrame() &&
+           (desired_size.IsEmpty() ||
+               software_frame_manager_->GetCurrentFrameSizeInDIP() ==
+                   desired_size));
+  }
+  return false;
 }
 
 void RenderWidgetHostViewMac::AboutToWaitForBackingStoreMsg() {
   AckPendingSwapBuffers();
+}
+
+void RenderWidgetHostViewMac::OnSwapCompositorFrame(
+    uint32 output_surface_id, scoped_ptr<cc::CompositorFrame> frame) {
+  // Only software compositor frames are accepted.
+  if (!frame->software_frame_data) {
+    DLOG(ERROR) << "Received unexpected frame type.";
+    RecordAction(
+        UserMetricsAction("BadMessageTerminate_UnexpectedFrameType"));
+    render_widget_host_->GetProcess()->ReceivedBadMessage();
+    return;
+  }
+
+  GotSoftwareFrame();
+  if (!software_frame_manager_->SwapToNewFrame(
+          output_surface_id,
+          frame->software_frame_data.get(),
+          frame->metadata.device_scale_factor,
+          render_widget_host_->GetProcess()->GetHandle())) {
+    render_widget_host_->GetProcess()->ReceivedBadMessage();
+    return;
+  }
+  software_frame_manager_->SwapToNewFrameComplete(
+      !render_widget_host_->is_hidden());
+
+  [cocoa_view_ setNeedsDisplay:YES];
 }
 
 void RenderWidgetHostViewMac::OnAcceleratedCompositingStateChange() {
@@ -1751,6 +1780,19 @@ bool RenderWidgetHostViewMac::Send(IPC::Message* message) {
   return false;
 }
 
+void RenderWidgetHostViewMac::SoftwareFrameWasFreed(
+    uint32 output_surface_id, unsigned frame_id) {
+  cc::CompositorFrameAck ack;
+  ack.last_software_frame_id = frame_id;
+  RenderWidgetHostImpl::SendReclaimCompositorResources(
+      render_widget_host_->GetRoutingID(),
+      output_surface_id,
+      render_widget_host_->GetProcess()->GetID(),
+      ack);
+}
+
+void RenderWidgetHostViewMac::ReleaseReferencesToSoftwareFrame() {
+}
 
 void RenderWidgetHostViewMac::ShutdownHost() {
   weak_factory_.InvalidateWeakPtrs();
@@ -1774,6 +1816,7 @@ void RenderWidgetHostViewMac::GotAcceleratedFrame() {
 
     // Delete software backingstore.
     BackingStoreManager::RemoveBackingStore(render_widget_host_);
+    software_frame_manager_->DiscardCurrentFrame();
   }
 }
 
@@ -1905,7 +1948,8 @@ gfx::Rect RenderWidgetHostViewMac::GetScaledOpenGLPixelRect(
 }
 
 void RenderWidgetHostViewMac::FrameSwapped() {
-  software_latency_info_.swap_timestamp = base::TimeTicks::HighResNow();
+  software_latency_info_.AddLatencyNumber(
+      ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT, 0, 0);
   render_widget_host_->FrameSwapped(software_latency_info_);
   software_latency_info_.Clear();
 }
@@ -2181,14 +2225,15 @@ void RenderWidgetHostViewMac::FrameSwapped() {
   return YES;
 }
 
-- (void)keyEvent:(NSEvent*)theEvent {
+- (EventHandled)keyEvent:(NSEvent*)theEvent {
   if (delegate_ && [delegate_ respondsToSelector:@selector(handleEvent:)]) {
     BOOL handled = [delegate_ handleEvent:theEvent];
     if (handled)
-      return;
+      return kEventHandled;
   }
 
   [self keyEvent:theEvent wasKeyEquivalent:NO];
+  return kEventHandled;
 }
 
 - (void)keyEvent:(NSEvent*)theEvent wasKeyEquivalent:(BOOL)equiv {
@@ -2726,29 +2771,62 @@ void RenderWidgetHostViewMac::FrameSwapped() {
 - (void)drawBackingStore:(BackingStoreMac*)backingStore
                dirtyRect:(CGRect)dirtyRect
                inContext:(CGContextRef)context {
-  if (backingStore) {
+  content::SoftwareFrameManager* software_frame_manager =
+      renderWidgetHostView_->software_frame_manager_.get();
+  // There should never be both a legacy software and software composited
+  // frame.
+  DCHECK(!backingStore || !software_frame_manager->HasCurrentFrame());
+
+  if (backingStore || software_frame_manager->HasCurrentFrame()) {
     // Note: All coordinates are in view units, not pixels.
-    gfx::Rect bitmapRect(0, 0,
-                         backingStore->size().width(),
-                         backingStore->size().height());
+    gfx::Rect bitmapRect(
+        software_frame_manager->HasCurrentFrame() ?
+            software_frame_manager->GetCurrentFrameSizeInDIP() :
+            backingStore->size());
 
     // Specify the proper y offset to ensure that the view is rooted to the
     // upper left corner.  This can be negative, if the window was resized
     // smaller and the renderer hasn't yet repainted.
-    int yOffset = NSHeight([self bounds]) - backingStore->size().height();
+    int yOffset = NSHeight([self bounds]) - bitmapRect.height();
 
     NSRect nsDirtyRect = NSRectFromCGRect(dirtyRect);
     const gfx::Rect damagedRect([self flipNSRectToRect:nsDirtyRect]);
 
     gfx::Rect paintRect = gfx::IntersectRects(bitmapRect, damagedRect);
     if (!paintRect.IsEmpty()) {
-      // if we have a CGLayer, draw that into the window
-      if (backingStore->cg_layer()) {
+      if (software_frame_manager->HasCurrentFrame()) {
+        // If a software compositor framebuffer is present, draw using that.
+        gfx::Size sizeInPixels =
+            software_frame_manager->GetCurrentFrameSizeInPixels();
+        base::ScopedCFTypeRef<CGDataProviderRef> dataProvider(
+            CGDataProviderCreateWithData(
+                NULL,
+                software_frame_manager->GetCurrentFramePixels(),
+                4 * sizeInPixels.width() * sizeInPixels.height(),
+                NULL));
+        base::ScopedCFTypeRef<CGImageRef> image(
+            CGImageCreate(
+                sizeInPixels.width(),
+                sizeInPixels.height(),
+                8,
+                32,
+                4 * sizeInPixels.width(),
+                base::mac::GetSystemColorSpace(),
+                kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                dataProvider,
+                NULL,
+                false,
+                kCGRenderingIntentDefault));
+        CGRect imageRect = bitmapRect.ToCGRect();
+        imageRect.origin.y = yOffset;
+        CGContextDrawImage(context, imageRect, image);
+      } else if (backingStore->cg_layer()) {
+        // If we have a CGLayer, draw that into the window
         // TODO: add clipping to dirtyRect if it improves drawing performance.
         CGContextDrawLayerAtPoint(context, CGPointMake(0.0, yOffset),
                                   backingStore->cg_layer());
       } else {
-        // if we haven't created a layer yet, draw the cached bitmap into
+        // If we haven't created a layer yet, draw the cached bitmap into
         // the window.  The CGLayer will be created the next time the renderer
         // paints.
         base::ScopedCFTypeRef<CGImageRef> image(
@@ -2900,7 +2978,8 @@ void RenderWidgetHostViewMac::FrameSwapped() {
 // move) for the given event. Customize here to be more selective about which
 // key presses to autohide on.
 + (BOOL)shouldAutohideCursorForEvent:(NSEvent*)event {
-  return ([event type] == NSKeyDown) ? YES : NO;
+  return ([event type] == NSKeyDown &&
+             !([event modifierFlags] & NSCommandKeyMask)) ? YES : NO;
 }
 
 - (NSArray *)accessibilityArrayAttributeValues:(NSString *)attribute
@@ -3792,7 +3871,7 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   CGRect clipRect = CGContextGetClipBoundingBox(context);
 
   if (!renderWidgetHostView_->render_widget_host_ ||
-      renderWidgetHostView_->is_hidden()) {
+      renderWidgetHostView_->render_widget_host_->is_hidden()) {
     CGContextSetFillColorWithColor(context,
                                    CGColorGetConstantColor(kCGColorWhite));
     CGContextFillRect(context, clipRect);

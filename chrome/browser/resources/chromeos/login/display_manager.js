@@ -30,8 +30,8 @@
 /** @const */ var ACCELERATOR_KIOSK_ENABLE = 'kiosk_enable';
 /** @const */ var ACCELERATOR_VERSION = 'version';
 /** @const */ var ACCELERATOR_RESET = 'reset';
-/** @const */ var ACCELERATOR_LEFT = 'left';
-/** @const */ var ACCELERATOR_RIGHT = 'right';
+/** @const */ var ACCELERATOR_FOCUS_PREV = 'focus_prev';
+/** @const */ var ACCELERATOR_FOCUS_NEXT = 'focus_next';
 /** @const */ var ACCELERATOR_DEVICE_REQUISITION = 'device_requisition';
 /** @const */ var ACCELERATOR_DEVICE_REQUISITION_REMORA =
     'device_requisition_remora';
@@ -172,8 +172,10 @@ cr.define('cr.ui.login', function() {
      */
     set forceKeyboardFlow(value) {
       this.forceKeyboardFlow_ = value;
-      if (value)
+      if (value) {
         keyboard.initializeKeyboardFlow();
+        cr.ui.Dropdown.enableKeyboardFlow();
+      }
     },
 
     /**
@@ -229,10 +231,8 @@ cr.define('cr.ui.login', function() {
         if (this.isOobeUI())
           this.showDeviceRequisitionPrompt_();
       } else if (name == ACCELERATOR_DEVICE_REQUISITION_REMORA) {
-        if (this.isOobeUI()) {
-          this.deviceRequisition_ = 'remora';
-          this.showDeviceRequisitionPrompt_();
-        }
+        if (this.isOobeUI())
+          this.showDeviceRequisitionRemoraPrompt_();
       } else if (name == ACCELERATOR_APP_LAUNCH_BAILOUT) {
         var currentStepId = this.screens_[this.currentStep_];
         if (currentStepId == SCREEN_APP_LAUNCH_SPLASH)
@@ -243,9 +243,9 @@ cr.define('cr.ui.login', function() {
         return;
 
       // Handle special accelerators for keyboard enhanced navigation flow.
-      if (name == ACCELERATOR_LEFT)
+      if (name == ACCELERATOR_FOCUS_PREV)
         keyboard.raiseKeyFocusPrevious(document.activeElement);
-      else if (name == ACCELERATOR_RIGHT)
+      else if (name == ACCELERATOR_FOCUS_NEXT)
         keyboard.raiseKeyFocusNext(document.activeElement);
     },
 
@@ -590,6 +590,27 @@ cr.define('cr.ui.login', function() {
     },
 
     /**
+     * Shows the special remora device requisition prompt.
+     * @private
+     */
+    showDeviceRequisitionRemoraPrompt_: function() {
+      if (!this.deviceRequisitionRemoraDialog_) {
+        this.deviceRequisitionRemoraDialog_ =
+            new cr.ui.dialogs.ConfirmDialog(document.body);
+        this.deviceRequisitionRemoraDialog_.setOkLabel(
+            loadTimeData.getString('deviceRequisitionRemoraPromptOk'));
+        this.deviceRequisitionRemoraDialog_.setCancelLabel(
+            loadTimeData.getString('deviceRequisitionRemoraPromptCancel'));
+      }
+      this.deviceRequisitionRemoraDialog_.showWithTitle(
+          loadTimeData.getString('deviceRequisitionRemoraPromptTitle'),
+          loadTimeData.getString('deviceRequisitionRemoraPromptText'),
+          function() {
+            chrome.send('setDeviceRequisition', ['remora']);
+          });
+    },
+
+    /**
      * Returns true if Oobe UI is shown.
      */
     isOobeUI: function() {
@@ -721,8 +742,9 @@ cr.define('cr.ui.login', function() {
       error.appendChild(helpLink);
     }
 
-    var currentScreenId = Oobe.getInstance().currentScreen.id;
-    $(currentScreenId).showErrorBubble(loginAttempts, error);
+    var currentScreen = Oobe.getInstance().currentScreen;
+    if (currentScreen && typeof currentScreen.showErrorBubble === 'function')
+      currentScreen.showErrorBubble(loginAttempts, error);
   };
 
   /**

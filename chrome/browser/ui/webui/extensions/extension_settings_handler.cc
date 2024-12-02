@@ -37,8 +37,8 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/extension_warning_set.h"
-#include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
@@ -76,6 +76,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "extensions/browser/extension_error.h"
+#include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "grit/browser_resources.h"
@@ -104,6 +105,38 @@ ExtensionPage::ExtensionPage(const GURL& url,
       generated_background_page(generated_background_page) {
 }
 
+// On Mac, the install prompt is not modal. This means that the user can
+// navigate while the dialog is up, causing the dialog handler to outlive the
+// ExtensionSettingsHandler. That's a problem because the dialog framework will
+// try to contact us back once the dialog is closed, which causes a crash.
+// This class is designed to broker the message between the two objects, while
+// managing its own lifetime so that it can outlive the ExtensionSettingsHandler
+// and (when doing so) gracefully ignore the message from the dialog.
+class BrokerDelegate : public ExtensionInstallPrompt::Delegate {
+ public:
+  explicit BrokerDelegate(
+      const base::WeakPtr<ExtensionSettingsHandler>& delegate)
+      : delegate_(delegate) {}
+
+  // ExtensionInstallPrompt::Delegate implementation.
+  virtual void InstallUIProceed() OVERRIDE {
+    if (delegate_)
+      delegate_->InstallUIProceed();
+    delete this;
+  };
+
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE {
+    if (delegate_)
+      delegate_->InstallUIAbort(user_initiated);
+    delete this;
+  };
+
+ private:
+  base::WeakPtr<ExtensionSettingsHandler> delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrokerDelegate);
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 //
 // ExtensionSettingsHandler
@@ -115,17 +148,14 @@ ExtensionSettingsHandler::ExtensionSettingsHandler()
       management_policy_(NULL),
       ignore_notifications_(false),
       deleting_rvh_(NULL),
+      deleting_rwh_id_(-1),
+      deleting_rph_id_(-1),
       registered_for_notifications_(false),
-      rvh_created_callback_(
-          base::Bind(&ExtensionSettingsHandler::RenderViewHostCreated,
-                     base::Unretained(this))),
       warning_service_observer_(this),
       error_console_observer_(this) {
 }
 
 ExtensionSettingsHandler::~ExtensionSettingsHandler() {
-  content::RenderViewHost::RemoveCreatedCallback(rvh_created_callback_);
-
   // There may be pending file dialogs, we need to tell them that we've gone
   // away so they don't try and call back to us.
   if (load_extension_dialog_.get())
@@ -138,6 +168,8 @@ ExtensionSettingsHandler::ExtensionSettingsHandler(ExtensionService* service,
       management_policy_(policy),
       ignore_notifications_(false),
       deleting_rvh_(NULL),
+      deleting_rwh_id_(-1),
+      deleting_rph_id_(-1),
       registered_for_notifications_(false),
       warning_service_observer_(this),
       error_console_observer_(this) {
@@ -177,13 +209,13 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   extension_data->SetBoolean("terminated",
       extension_service_->terminated_extensions()->Contains(extension->id()));
   extension_data->SetBoolean("enabledIncognito",
-      extension_service_->IsIncognitoEnabled(extension->id()));
+      extension_util::IsIncognitoEnabled(extension->id(), extension_service_));
   extension_data->SetBoolean("incognitoCanBeToggled",
                              extension->can_be_incognito_enabled() &&
                              !extension->force_incognito_enabled());
   extension_data->SetBoolean("wantsFileAccess", extension->wants_file_access());
   extension_data->SetBoolean("allowFileAccess",
-                             extension_service_->AllowFileAccess(extension));
+      extension_util::AllowFileAccess(extension, extension_service_));
   extension_data->SetBoolean("allow_reload",
       Manifest::IsUnpackedLocation(extension->location()));
   extension_data->SetBoolean("is_hosted_app", extension->is_hosted_app());
@@ -192,7 +224,7 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
       ManifestURL::GetHomepageURL(extension).is_valid());
 
   string16 location_text;
-  if (extension->location() == Manifest::EXTERNAL_POLICY_DOWNLOAD) {
+  if (Manifest::IsPolicyLocation(extension->location())) {
     location_text = l10n_util::GetStringUTF16(
         IDS_OPTIONS_INSTALL_LOCATION_ENTERPRISE);
   } else if (extension->location() == Manifest::INTERNAL &&
@@ -205,8 +237,7 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   }
   extension_data->SetString("locationText", location_text);
 
-  // Determine the sort order: Extensions loaded through --load-extensions show
-  // up at the top. Disabled extensions show up at the bottom.
+  // Force unpacked extensions to show at the top.
   if (Manifest::IsUnpackedLocation(extension->location()))
     extension_data->SetInteger("order", 1);
   else
@@ -272,10 +303,19 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
       scoped_ptr<ListValue> runtime_errors(new ListValue);
       for (ErrorConsole::ErrorList::const_iterator iter = errors.begin();
            iter != errors.end(); ++iter) {
-        if ((*iter)->type() == ExtensionError::MANIFEST_ERROR)
+        if ((*iter)->type() == ExtensionError::MANIFEST_ERROR) {
           manifest_errors->Append((*iter)->ToValue().release());
-        else
-          runtime_errors->Append((*iter)->ToValue().release());
+        } else {  // Handle runtime error.
+          const RuntimeError* error = static_cast<const RuntimeError*>(*iter);
+          scoped_ptr<DictionaryValue> value = error->ToValue();
+          bool can_inspect =
+              !(deleting_rwh_id_ == error->render_view_id() &&
+                deleting_rph_id_ == error->render_process_id()) &&
+              RenderViewHost::FromID(error->render_process_id(),
+                                     error->render_view_id()) != NULL;
+          value->SetBoolean("canInspect", can_inspect);
+          runtime_errors->Append(value.release());
+        }
       }
       if (!manifest_errors->empty())
         extension_data->Set("manifestErrors", manifest_errors.release());
@@ -397,17 +437,8 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
 }
 
-void ExtensionSettingsHandler::RenderViewHostCreated(
-    content::RenderViewHost* render_view_host) {
-  Profile* source_profile = Profile::FromBrowserContext(
-      render_view_host->GetSiteInstance()->GetBrowserContext());
-  if (!Profile::FromWebUI(web_ui())->IsSameProfile(source_profile))
-    return;
-  MaybeUpdateAfterNotification();
-}
-
 void ExtensionSettingsHandler::RenderViewDeleted(
-    content::RenderViewHost* render_view_host) {
+    RenderViewHost* render_view_host) {
   deleting_rvh_ = render_view_host;
   Profile* source_profile = Profile::FromBrowserContext(
       render_view_host->GetSiteInstance()->GetBrowserContext());
@@ -524,6 +555,14 @@ void ExtensionSettingsHandler::Observe(
           return;
       MaybeUpdateAfterNotification();
       break;
+    case content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED: {
+      content::RenderWidgetHost* rwh =
+          content::Source<content::RenderWidgetHost>(source).ptr();
+      deleting_rwh_id_ = rwh->GetRoutingID();
+      deleting_rph_id_ = rwh->GetProcess()->GetID();
+      MaybeUpdateAfterNotification();
+      break;
+    }
     case chrome::NOTIFICATION_EXTENSION_LOADED:
     case chrome::NOTIFICATION_EXTENSION_UNLOADED:
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED:
@@ -751,10 +790,10 @@ void ExtensionSettingsHandler::HandleLaunchMessage(
   CHECK(args->GetString(0, &extension_id));
   const Extension* extension =
       extension_service_->GetExtensionById(extension_id, false);
-  chrome::OpenApplication(chrome::AppLaunchParams(extension_service_->profile(),
-                                                  extension,
-                                                  extension_misc::LAUNCH_WINDOW,
-                                                  NEW_WINDOW));
+  OpenApplication(AppLaunchParams(extension_service_->profile(),
+                                  extension,
+                                  extension_misc::LAUNCH_WINDOW,
+                                  NEW_WINDOW));
 }
 
 void ExtensionSettingsHandler::HandleReloadMessage(
@@ -830,8 +869,9 @@ void ExtensionSettingsHandler::HandleEnableIncognitoMessage(
   // Bug: http://crbug.com/41384
   base::AutoReset<bool> auto_reset_ignore_notifications(
       &ignore_notifications_, true);
-  extension_service_->SetIsIncognitoEnabled(extension->id(),
-                                            enable_str == "true");
+  extension_util::SetIsIncognitoEnabled(extension->id(),
+                                        extension_service_,
+                                        enable_str == "true");
 }
 
 void ExtensionSettingsHandler::HandleAllowFileAccessMessage(
@@ -852,7 +892,8 @@ void ExtensionSettingsHandler::HandleAllowFileAccessMessage(
     return;
   }
 
-  extension_service_->SetAllowFileAccess(extension, allow_str == "true");
+  extension_util::SetAllowFileAccess(
+      extension, extension_service_, allow_str == "true");
 }
 
 void ExtensionSettingsHandler::HandleUninstallMessage(
@@ -911,7 +952,9 @@ void ExtensionSettingsHandler::HandlePermissionsMessage(
       retained_file_paths.push_back(retained_file_entries[i].path);
     }
   }
-  prompt_->ReviewPermissions(this, extension, retained_file_paths);
+  // The BrokerDelegate manages its own lifetime.
+  prompt_->ReviewPermissions(
+      new BrokerDelegate(AsWeakPtr()), extension, retained_file_paths);
 }
 
 void ExtensionSettingsHandler::HandleShowButtonMessage(
@@ -1011,7 +1054,9 @@ void ExtensionSettingsHandler::MaybeRegisterForNotifications() {
                  chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
                  content::NotificationService::AllBrowserContextsAndSources());
 
-  content::RenderViewHost::AddCreatedCallback(rvh_created_callback_);
+  registrar_.Add(this,
+                 content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
+                 content::NotificationService::AllBrowserContextsAndSources());
 
   content::WebContentsObserver::Observe(web_ui()->GetWebContents());
 

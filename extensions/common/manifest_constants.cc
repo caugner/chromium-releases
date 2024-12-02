@@ -11,7 +11,6 @@ namespace manifest_keys {
 const char kAllFrames[] = "all_frames";
 const char kAltKey[] = "altKey";
 const char kApp[] = "app";
-const char kAudio[] = "audio";
 const char kBackgroundAllowJsAccess[] = "background.allow_js_access";
 const char kBackgroundPage[] = "background.page";
 const char kBackgroundPageLegacy[] = "background_page";
@@ -46,6 +45,7 @@ const char kFileHandlers[] = "file_handlers";
 const char kFileHandlerExtensions[] = "extensions";
 const char kFileHandlerTitle[] = "title";
 const char kFileHandlerTypes[] = "types";
+const char kGlobal[] = "global";
 const char kHomepageURL[] = "homepage_url";
 const char kIcons[] = "icons";
 const char kId[] = "id";
@@ -58,6 +58,8 @@ const char kJs[] = "js";
 const char kKey[] = "key";
 const char kKeycode[] = "keyCode";
 const char kKioskEnabled[] = "kiosk_enabled";
+const char kKioskOnly[] = "kiosk_only";
+const char kKioskMode[] = "kiosk_mode";
 const char kLanguage[] = "language";
 const char kLaunch[] = "app.launch";
 const char kLaunchContainer[] = "app.launch.container";
@@ -109,10 +111,15 @@ const char kRunAt[] = "run_at";
 const char kSandboxedPages[] = "sandbox.pages";
 const char kSandboxedPagesCSP[] = "sandbox.content_security_policy";
 const char kScriptBadge[] = "script_badge";
+const char kSearchProvider[] = "chrome_settings_overrides.search_provider";
+const char kSettingsOverride[] = "chrome_settings_overrides";
+const char kSettingsOverrideAlternateUrls[] =
+    "chrome_settings_overrides.search_provider.alternate_urls";
 const char kShiftKey[] = "shiftKey";
 const char kShortcutKey[] = "shortcutKey";
 const char kShortName[] = "short_name";
 const char kSignature[] = "signature";
+const char kSockets[] = "sockets";
 const char kSpellcheck[] = "spellcheck";
 const char kSpellcheckDictionaryFormat[] = "dictionary_format";
 const char kSpellcheckDictionaryLanguage[] = "dictionary_language";
@@ -121,7 +128,6 @@ const char kSpellcheckDictionaryPath[] = "dictionary_path";
 const char kStorageManagedSchema[] = "storage.managed_schema";
 const char kSuggestedKey[] = "suggested_key";
 const char kSystemIndicator[] = "system_indicator";
-const char kSystemInfoDisplay[] = "systemInfo.display";
 const char kTheme[] = "theme";
 const char kThemeColors[] = "colors";
 const char kThemeDisplayProperties[] = "properties";
@@ -148,6 +154,9 @@ const char kUrlHandlerTitle[] = "title";
 const char kVersion[] = "version";
 const char kWebAccessibleResources[] = "web_accessible_resources";
 const char kWebURLs[] = "app.urls";
+const char kWebview[] = "webview";
+const char kWebviewAccessibleResources[] = "accessible_resources";
+const char kWebviewPrivilegedPartitions[] = "privileged_partitions";
 
 }  // namespace manifest_keys
 
@@ -331,6 +340,8 @@ const char kInvalidGlob[] =
     "Invalid value for 'content_scripts[*].*[*]'.";
 const char kInvalidGlobList[] =
     "Invalid value for 'content_scripts[*].*'.";
+const char kInvalidHomepageOverrideURL[] =
+    "Invalid value for overriding homepage url: '[*]'.";
 const char kInvalidHomepageURL[] =
     "Invalid value for homepage url: '[*]'.";
 const char kInvalidIconPath[] =
@@ -417,6 +428,10 @@ const char kInvalidKeyBindingUnknownPlatform[] =
     " 'chromeos', 'linux' and 'default'.";
 const char kInvalidKioskEnabled[] =
     "Invalid value for 'kiosk_enabled'.";
+const char kInvalidKioskOnly[] =
+    "Invalid value for 'kiosk_only'.";
+const char kInvalidKioskOnlyButNotEnabled[] =
+    "The 'kiosk_only' key is set, but 'kiosk_enabled' is not set.";
 const char kInvalidLaunchContainer[] =
     "Invalid value for 'app.launch.container'.";
 const char kInvalidLaunchValue[] =
@@ -469,8 +484,6 @@ const char kInvalidOptionsPageExpectUrlInPackage[] =
 const char kInvalidOptionsPageInHostedApp[] =
     "Invalid value for 'options_page'. Hosted apps must specify an "
     "absolute URL.";
-const char kInvalidOptionalPermissions[] =
-    "Invalid value for 'optional_permissions'.";
 const char kInvalidPageAction[] =
     "Invalid value for 'page_action'.";
 const char kInvalidPageActionDefaultTitle[] =
@@ -520,6 +533,8 @@ const char kInvalidSandboxedPagesCSP[] =
     "Invalid value for 'sandbox.content_security_policy'.";
 const char kInvalidScriptBadge[] =
     "Invalid value for 'script_badge'.";
+const char kInvalidEmptySettingsOverrides[] =
+    "Empty dictionary for 'chrome_settings_overrides'.";
 const char kInvalidShortName[] =
     "Invalid value for 'short_name'.";
 const char kInvalidSignature[] =
@@ -534,6 +549,8 @@ const char kInvalidSpellcheckDictionaryLocale[] =
     "Invalid value for spellcheck dictionary locale.";
 const char kInvalidSpellcheckDictionaryPath[] =
     "Invalid value for spellcheck dictionary path.";
+const char kInvalidStartupOverrideURL[] =
+    "Invalid value for overriding startup URL: '[*]'.";
 const char kInvalidSystemIndicator[] =
     "Invalid value for 'system_indicator'.";
 const char kInvalidTheme[] =
@@ -577,6 +594,16 @@ const char kInvalidWebAccessibleResourcesList[] =
     "Invalid value for 'web_accessible_resources'.";
 const char kInvalidWebAccessibleResource[] =
     "Invalid value for 'web_accessible_resources[*]'.";
+const char kInvalidWebview[] =
+    "Invalid value for 'webview'.";
+const char kInvalidWebviewAccessibleResourcesList[] =
+    "Invalid value for'webview.accessible_resources'.";
+const char kInvalidWebviewAccessibleResource[] =
+    "Invalid value for 'webview.accessible_resources[*]'.";
+const char kInvalidWebviewPrivilegedPartitionList[] =
+    "Invalid value for 'webview.privileged_partitions'.";
+const char kInvalidWebviewPrivilegedPartition[] =
+    "Invalid value for 'webview.privileged_partitions[*]'.";
 const char kInvalidWebURL[] =
     "Invalid value for 'app.urls[*]': *";
 const char kInvalidWebURLs[] =

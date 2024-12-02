@@ -108,7 +108,10 @@ void JavaScriptAppModalDialog::Invalidate() {
     return;
 
   AppModalDialog::Invalidate();
-  callback_.Reset();
+  if (!callback_.is_null()) {
+    callback_.Run(false, string16());
+    callback_.Reset();
+  }
   if (native_dialog())
     CloseModalDialog();
 }
@@ -116,10 +119,10 @@ void JavaScriptAppModalDialog::Invalidate() {
 void JavaScriptAppModalDialog::OnCancel(bool suppress_js_messages) {
   // If we are shutting down and this is an onbeforeunload dialog, cancel the
   // shutdown.
-  // TODO(sammc): Remove this when kEnableBatchedShutdown becomes mandatory.
+  // TODO(sammc): Remove this when kDisableBatchedShutdown is removed.
   if (is_before_unload_dialog_ &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBatchedShutdown)) {
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableBatchedShutdown)) {
     browser_shutdown::SetTryingToQuit(false);
   }
 
@@ -161,7 +164,10 @@ void JavaScriptAppModalDialog::NotifyDelegate(bool success,
   if (!IsValid())
     return;
 
-  callback_.Run(success, user_input);
+  if (!callback_.is_null()) {
+    callback_.Run(success, user_input);
+    callback_.Reset();
+  }
 
   // The callback_ above may delete web_contents_, thus removing the extra
   // data from the map owned by ChromeJavaScriptDialogManager. Make sure

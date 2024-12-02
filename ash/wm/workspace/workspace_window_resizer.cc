@@ -47,9 +47,12 @@ scoped_ptr<WindowResizer> CreateWindowResizer(
     aura::client::WindowMoveSource source) {
   DCHECK(window);
   wm::WindowState* window_state = wm::GetWindowState(window);
-  // No need to return a resizer when the window cannot get resized.
-  if (!window_state->CanResize() && window_component != HTCAPTION)
+  // No need to return a resizer when the window cannot get resized or when a
+  // resizer already exists for this window.
+  if ((!window_state->CanResize() && window_component != HTCAPTION) ||
+      window_state->window_resizer()) {
     return scoped_ptr<WindowResizer>();
+  }
 
   // TODO(varkha): The chaining of window resizers causes some of the logic
   // to be repeated and the logic flow difficult to control. With some windows
@@ -95,12 +98,14 @@ scoped_ptr<WindowResizer> CreateWindowResizer(
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAshEnableDockedWindows) &&
       window_resizer && window->parent() &&
+      !window->transient_parent() &&
       (window->parent()->id() == internal::kShellWindowId_DefaultContainer ||
        window->parent()->id() == internal::kShellWindowId_DockedContainer ||
        window->parent()->id() == internal::kShellWindowId_PanelContainer)) {
     window_resizer = internal::DockedWindowResizer::Create(
         window_resizer, window, point_in_parent, window_component, source);
   }
+  window_state->set_window_resizer_(window_resizer);
   return make_scoped_ptr<WindowResizer>(window_resizer);
 }
 
@@ -389,7 +394,7 @@ void WorkspaceWindowResizer::Drag(const gfx::Point& location_in_parent,
   gfx::Point location_in_screen = location_in_parent;
   wm::ConvertPointToScreen(window()->parent(), &location_in_screen);
 
-  aura::RootWindow* root = NULL;
+  aura::Window* root = NULL;
   gfx::Display display =
       ScreenAsh::FindDisplayContainingPoint(location_in_screen);
   // Track the last screen that the pointer was on to keep the snap phantom
@@ -418,7 +423,7 @@ void WorkspaceWindowResizer::Drag(const gfx::Point& location_in_parent,
     snap_type_ = SNAP_NONE;
     snap_phantom_window_controller_.reset();
     snap_sizer_.reset();
-    UpdateDockedState(false);
+    SetDraggedWindowDocked(false);
   }
 }
 
@@ -435,7 +440,8 @@ void WorkspaceWindowResizer::CompleteDrag(int event_flags) {
   // is called, so it does not matter.
   if (window_state()->IsNormalShowState() &&
       (window()->type() != aura::client::WINDOW_TYPE_PANEL ||
-       !window_state()->panel_attached()) &&
+       !window_state()->panel_attached() ||
+       dock_layout_->is_dragged_window_docked()) &&
       (snap_type_ == SNAP_LEFT || snap_type_ == SNAP_RIGHT)) {
     if (!window_state()->HasRestoreBounds()) {
       gfx::Rect initial_bounds = ScreenAsh::ConvertRectToScreen(
@@ -773,8 +779,10 @@ void WorkspaceWindowResizer::AdjustBoundsForMainWindow(
       ScreenAsh::ConvertRectFromScreen(window()->parent(), display.work_area());
   if (details_.window_component == HTCAPTION) {
     // Adjust the bounds to the work area where the mouse cursor is located.
-    // Always keep kMinOnscreenHeight on the bottom.
-    int max_y = work_area.bottom() - kMinOnscreenHeight;
+    // Always keep kMinOnscreenHeight or the window height (whichever is less)
+    // on the bottom.
+    int max_y = work_area.bottom() - std::min(kMinOnscreenHeight,
+                                              bounds->height());
     if (bounds->y() > max_y) {
       bounds->set_y(max_y);
     } else if (bounds->y() <= work_area.y()) {
@@ -818,25 +826,26 @@ bool WorkspaceWindowResizer::StickToWorkAreaOnMove(
   const int right_edge = work_area.right();
   const int top_edge = work_area.y();
   const int bottom_edge = work_area.bottom();
+  bool updated = false;
   if (ShouldStickToEdge(bounds->x() - left_edge, sticky_size)) {
     bounds->set_x(left_edge);
-    return true;
+    updated = true;
   } else if (ShouldStickToEdge(right_edge - bounds->right(), sticky_size)) {
     bounds->set_x(right_edge - bounds->width());
-    return true;
+    updated = true;
   }
   if (ShouldStickToEdge(bounds->y() - top_edge, sticky_size)) {
     bounds->set_y(top_edge);
-    return true;
+    updated = true;
   } else if (ShouldStickToEdge(bottom_edge - bounds->bottom(), sticky_size) &&
              bounds->height() < (bottom_edge - top_edge)) {
     // Only snap to the bottom if the window is smaller than the work area.
     // Doing otherwise can lead to window snapping in weird ways as it bounces
     // between snapping to top then bottom.
     bounds->set_y(bottom_edge - bounds->height());
-    return true;
+    updated = true;
   }
-  return false;
+  return updated;
 }
 
 void WorkspaceWindowResizer::StickToWorkAreaOnResize(
@@ -894,15 +903,24 @@ void WorkspaceWindowResizer::UpdateSnapPhantomWindow(const gfx::Point& location,
   if (snap_type_ == SNAP_NONE || snap_type_ != last_type) {
     snap_phantom_window_controller_.reset();
     snap_sizer_.reset();
-    UpdateDockedState(false);
-    if (snap_type_ == SNAP_NONE)
+    if (snap_type_ == SNAP_NONE) {
+      SetDraggedWindowDocked(false);
       return;
+    }
+  }
+  const bool can_dock = dock_layout_->CanDockWindow(window(), snap_type_);
+  const bool can_snap = window_state()->CanSnap();
+  if (!can_snap && !can_dock) {
+    snap_type_ = SNAP_NONE;
+    snap_phantom_window_controller_.reset();
+    snap_sizer_.reset();
+    SetDraggedWindowDocked(false);
+    return;
   }
   SnapSizer::Edge edge = (snap_type_ == SNAP_LEFT) ?
       SnapSizer::LEFT_EDGE : SnapSizer::RIGHT_EDGE;
-
   if (!snap_sizer_) {
-    snap_sizer_.reset(new SnapSizer(window(),
+    snap_sizer_.reset(new SnapSizer(window_state(),
                                     location,
                                     edge,
                                     internal::SnapSizer::OTHER_INPUT));
@@ -910,21 +928,21 @@ void WorkspaceWindowResizer::UpdateSnapPhantomWindow(const gfx::Point& location,
     snap_sizer_->Update(location);
   }
 
-  const bool can_dock = dock_layout_->CanDockWindow(window(), snap_type_);
-  if (!window_state()->CanSnap() && !can_dock)
-    return;
-
   // Update phantom window with snapped or docked guide bounds.
   // Windows that cannot be snapped or are less wide than kMaxDockWidth can get
   // docked without going through a snapping sequence.
   gfx::Rect phantom_bounds;
-  if (!can_dock ||
-      window()->bounds().width() > DockedWindowLayoutManager::kMaxDockWidth)
+  if (can_snap &&
+      (!can_dock ||
+       window()->bounds().width() > DockedWindowLayoutManager::kMaxDockWidth))
     phantom_bounds = snap_sizer_->target_bounds();
-  const bool is_docked = can_dock &&
-      (phantom_bounds.IsEmpty() || snap_sizer_->end_of_sequence());
-  UpdateDockedState(is_docked);
-  if (is_docked) {
+  const bool should_dock = can_dock &&
+      (phantom_bounds.IsEmpty() ||
+       snap_sizer_->end_of_sequence() ||
+       dock_layout_->is_dragged_window_docked());
+  SetDraggedWindowDocked(should_dock);
+  snap_type_ = GetSnapType(location);
+  if (dock_layout_->is_dragged_window_docked()) {
     phantom_bounds = ScreenAsh::ConvertRectFromScreen(
         window()->parent(), dock_layout_->dragged_bounds());
   }
@@ -985,8 +1003,8 @@ SnapType WorkspaceWindowResizer::GetSnapType(
   return SNAP_NONE;
 }
 
-void WorkspaceWindowResizer::UpdateDockedState(bool is_docked) {
-  if (is_docked &&
+void WorkspaceWindowResizer::SetDraggedWindowDocked(bool should_dock) {
+  if (should_dock &&
       dock_layout_->GetAlignmentOfWindow(window()) != DOCKED_ALIGNMENT_NONE) {
     if (!dock_layout_->is_dragged_window_docked())
       dock_layout_->DockDraggedWindow(window());

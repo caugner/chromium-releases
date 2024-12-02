@@ -12,6 +12,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/alias.h"
+#include "base/debug/leak_annotations.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -32,6 +33,7 @@
 #include "chrome/browser/devtools/remote_debugging_server.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_status_updater.h"
+#include "chrome/browser/extensions/chrome_extensions_browser_client.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_renderer_state.h"
 #include "chrome/browser/first_run/upgrade_util.h"
@@ -186,6 +188,8 @@ BrowserProcessImpl::BrowserProcessImpl(
   apps::AppsClient::Set(ChromeAppsClient::GetInstance());
   extensions::ExtensionsClient::Set(
       extensions::ChromeExtensionsClient::GetInstance());
+  extensions::ExtensionsBrowserClient::Set(
+      extensions::ChromeExtensionsBrowserClient::GetInstance());
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
   ExtensionRendererState::GetInstance()->Init();
 
@@ -341,6 +345,14 @@ unsigned int BrowserProcessImpl::ReleaseModule() {
     print_job_manager_->Shutdown();
 #endif
 
+#if defined(LEAK_SANITIZER)
+    // Check for memory leaks now, before we start shutting down threads. Doing
+    // this early means we won't report any shutdown-only leaks (as they have
+    // not yet happened at this point).
+    // If leaks are found, this will make the process exit immediately.
+    __lsan_do_leak_check();
+#endif
+
     CHECK(base::MessageLoop::current()->is_running());
 
 #if defined(OS_MACOSX)
@@ -364,9 +376,12 @@ void BrowserProcessImpl::EndSession() {
   MetricsService* metrics = g_browser_process->metrics_service();
   if (metrics && local_state()) {
     metrics->RecordStartOfSessionEnd();
-
+#if !defined(OS_CHROMEOS)
     // MetricsService lazily writes to prefs, force it to write now.
+    // On ChromeOS, chrome gets killed when hangs, so no need to
+    // commit prefs::kStabilitySessionEndCompleted change immediately.
     local_state()->CommitPendingWrite();
+#endif
   }
 
   // http://crbug.com/125207
@@ -671,8 +686,10 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kEulaAccepted, false);
 #endif  // defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_IOS)
 #if defined(OS_WIN)
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8)
-    registry->RegisterBooleanPref(prefs::kRestartSwitchMode, false);
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    registry->RegisterStringPref(prefs::kRelaunchMode,
+                                 upgrade_util::kRelaunchModeDefault);
+  }
 #endif
 
   // TODO(brettw,*): this comment about ResourceBundle was here since
@@ -768,6 +785,8 @@ prerender::PrerenderTracker* BrowserProcessImpl::prerender_tracker() {
 
 ComponentUpdateService* BrowserProcessImpl::component_updater() {
   if (!component_updater_.get()) {
+    if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
+      return NULL;
     ComponentUpdateService::Configurator* configurator =
         MakeChromeComponentUpdaterConfigurator(
             CommandLine::ForCurrentProcess(),
@@ -856,6 +875,15 @@ void BrowserProcessImpl::CreateLocalState() {
       base::Bind(&BrowserProcessImpl::ApplyDefaultBrowserPolicy,
                  base::Unretained(this)));
 
+  // This preference must be kept in sync with external values; update them
+  // whenever the preference or its controlling policy changes.
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+  pref_change_registrar_.Add(
+      prefs::kMetricsReportingEnabled,
+      base::Bind(&BrowserProcessImpl::ApplyMetricsReportingPolicy,
+                 base::Unretained(this)));
+#endif
+
   int max_per_proxy = local_state_->GetInteger(prefs::kMaxConnectionsPerProxy);
   net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(
       net::HttpNetworkSession::NORMAL_SOCKET_POOL,
@@ -882,6 +910,10 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 
   if (local_state_->IsManagedPreference(prefs::kDefaultBrowserSettingEnabled))
     ApplyDefaultBrowserPolicy();
+
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+  ApplyMetricsReportingPolicy();
+#endif
 
 #if defined(ENABLE_PLUGINS)
   PluginService* plugin_service = PluginService::GetInstance();
@@ -1004,6 +1036,16 @@ void BrowserProcessImpl::ApplyDefaultBrowserPolicy() {
 void BrowserProcessImpl::ApplyAllowCrossOriginAuthPromptPolicy() {
   bool value = local_state()->GetBoolean(prefs::kAllowCrossOriginAuthPrompt);
   ResourceDispatcherHost::Get()->SetAllowCrossOriginAuthPrompt(value);
+}
+
+void BrowserProcessImpl::ApplyMetricsReportingPolicy() {
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+  CHECK(BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(
+          base::IgnoreResult(&GoogleUpdateSettings::SetCollectStatsConsent),
+          local_state()->GetBoolean(prefs::kMetricsReportingEnabled))));
+#endif
 }
 
 // Mac is currently not supported.

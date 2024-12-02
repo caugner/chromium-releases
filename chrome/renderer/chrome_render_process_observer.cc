@@ -37,7 +37,6 @@
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "crypto/nss_util.h"
-#include "media/base/media_switches.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_module.h"
 #include "third_party/WebKit/public/web/WebCache.h"
@@ -269,14 +268,14 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
 
 #if defined(ENABLE_AUTOFILL_DIALOG)
 #if defined(OS_MACOSX)
-  bool enableAutofill = command_line.HasSwitch(
+  bool enable_autofill = command_line.HasSwitch(
       autofill::switches::kEnableInteractiveAutocomplete);
 #else
-  bool enableAutofill = !command_line.HasSwitch(
+  bool enable_autofill = !command_line.HasSwitch(
       autofill::switches::kDisableInteractiveAutocomplete);
 #endif
   WebRuntimeFeatures::enableRequestAutocomplete(
-      enableAutofill ||
+      enable_autofill ||
       command_line.HasSwitch(switches::kEnableExperimentalWebPlatformFeatures));
 #endif
 

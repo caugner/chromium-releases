@@ -70,11 +70,18 @@ class LocallyManagedUserCreationScreen
   virtual void CreateManagedUser(
       const string16& display_name,
       const std::string& managed_user_password) OVERRIDE;
+  virtual void ImportManagedUser(const std::string& user_id) OVERRIDE;
+  virtual void ImportManagedUserWithPassword(
+      const std::string& user_id,
+      const std::string& password) OVERRIDE;
   virtual void AuthenticateManager(
       const std::string& manager_id,
       const std::string& manager_password) OVERRIDE;
   virtual void AbortFlow() OVERRIDE;
   virtual void FinishFlow() OVERRIDE;
+  virtual bool FindUserByDisplayName(const string16& display_name,
+                                     std::string *out_id) const OVERRIDE;
+  virtual void OnPageSelected(const std::string& page) OVERRIDE;
 
   // LocallyManagedUserController::StatusConsumer overrides.
   virtual void OnCreationError(
@@ -105,14 +112,16 @@ class LocallyManagedUserCreationScreen
  private:
   void ApplyPicture();
   void OnCameraPresenceCheckDone();
+  void OnGetManagedUsers(const base::DictionaryValue* users);
 
   base::WeakPtrFactory<LocallyManagedUserCreationScreen> weak_factory_;
   LocallyManagedUserCreationScreenHandler* actor_;
 
   scoped_ptr<LocallyManagedUserCreationController> controller_;
+  scoped_ptr<base::DictionaryValue> existing_users_;
 
   bool on_error_screen_;
-  bool on_image_screen_;
+  std::string last_page_;
 
   gfx::ImageSkia user_photo_;
   scoped_refptr<ImageDecoder> image_decoder_;

@@ -41,12 +41,19 @@ const char kTestUploadExistingFilePath[] = "/upload/existingfile/path";
 const char kTestUploadNewFilePath[] = "/upload/newfile/path";
 const char kTestDownloadPathPrefix[] = "/download/";
 
+// Used as a GetContentCallback.
+void AppendContent(std::string* out,
+                   GDataErrorCode error,
+                   scoped_ptr<std::string> content) {
+  EXPECT_EQ(HTTP_SUCCESS, error);
+  out->append(*content);
+}
+
 }  // namespace
 
 class DriveApiRequestsTest : public testing::Test {
  public:
-  DriveApiRequestsTest()
-      : test_server_(message_loop_.message_loop_proxy()) {
+  DriveApiRequestsTest() {
   }
 
   virtual void SetUp() OVERRIDE {
@@ -625,6 +632,8 @@ TEST_F(DriveApiRequestsTest, ChangesListNextPageRequest) {
 }
 
 TEST_F(DriveApiRequestsTest, FilesCopyRequest) {
+  const base::Time::Exploded kModifiedDate = {2012, 7, 0, 19, 15, 59, 13, 123};
+
   // Set an expected data file containing the dummy file entry data.
   // It'd be returned if we copy a file.
   expected_data_file_path_ =
@@ -643,6 +652,7 @@ TEST_F(DriveApiRequestsTest, FilesCopyRequest) {
             &run_loop,
             test_util::CreateCopyResultCallback(&error, &file_resource)));
     request->set_file_id("resource_id");
+    request->set_modified_date(base::Time::FromUTCExploded(kModifiedDate));
     request->add_parent("parent_resource_id");
     request->set_title("new title");
     request_sender_->StartRequestWithRetry(request);
@@ -656,7 +666,8 @@ TEST_F(DriveApiRequestsTest, FilesCopyRequest) {
 
   EXPECT_TRUE(http_request_.has_content);
   EXPECT_EQ(
-      "{\"parents\":[{\"id\":\"parent_resource_id\"}],\"title\":\"new title\"}",
+      "{\"modifiedDate\":\"2012-07-19T15:59:13.123Z\","
+      "\"parents\":[{\"id\":\"parent_resource_id\"}],\"title\":\"new title\"}",
       http_request_.content);
   EXPECT_TRUE(file_resource);
 }
@@ -1540,6 +1551,41 @@ TEST_F(DriveApiRequestsTest, DownloadFileRequest) {
 
   std::string contents;
   base::ReadFileToString(temp_file, &contents);
+  base::DeleteFile(temp_file, false);
+
+  EXPECT_EQ(HTTP_SUCCESS, result_code);
+  EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
+  EXPECT_EQ(kTestDownloadPathPrefix + kTestId, http_request_.relative_url);
+  EXPECT_EQ(kDownloadedFilePath, temp_file);
+
+  const std::string expected_contents = kTestId + kTestId + kTestId;
+  EXPECT_EQ(expected_contents, contents);
+}
+
+TEST_F(DriveApiRequestsTest, DownloadFileRequest_GetContentCallback) {
+  const base::FilePath kDownloadedFilePath =
+      temp_dir_.path().AppendASCII("cache_file");
+  const std::string kTestId("dummyId");
+
+  GDataErrorCode result_code = GDATA_OTHER_ERROR;
+  base::FilePath temp_file;
+  std::string contents;
+  {
+    base::RunLoop run_loop;
+    drive::DownloadFileRequest* request = new drive::DownloadFileRequest(
+        request_sender_.get(),
+        *url_generator_,
+        kTestId,
+        kDownloadedFilePath,
+        test_util::CreateQuitCallback(
+            &run_loop,
+            test_util::CreateCopyResultCallback(&result_code, &temp_file)),
+        base::Bind(&AppendContent, &contents),
+        ProgressCallback());
+    request_sender_->StartRequestWithRetry(request);
+    run_loop.Run();
+  }
+
   base::DeleteFile(temp_file, false);
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);

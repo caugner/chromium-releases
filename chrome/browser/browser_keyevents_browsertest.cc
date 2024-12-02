@@ -298,17 +298,8 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   }
 };
 
-#if defined(OS_MACOSX)
-// http://crbug.com/81451
-#define MAYBE_NormalKeyEvents DISABLED_NormalKeyEvents
-#elif defined(OS_LINUX)
-// http://crbug.com/129235
-#define MAYBE_NormalKeyEvents DISABLED_NormalKeyEvents
-#else
-#define MAYBE_NormalKeyEvents NormalKeyEvents
-#endif
-
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_NormalKeyEvents) {
+// Flaky: http://crbug.com/129235, http://crbug.com/81451.
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_NormalKeyEvents) {
   static const KeyEventTestData kTestNoInput[] = {
     // a
     { ui::VKEY_A, false, false, false, false,
@@ -732,10 +723,8 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
   // Reserved accelerators can't be suppressed.
   ASSERT_NO_FATAL_FAILURE(SuppressAllEvents(1, true));
 
-  content::WindowedNotificationObserver wait_for_tab_closed(
-      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-      content::Source<content::WebContents>(
-          browser()->tab_strip_model()->GetWebContentsAt(1)));
+  content::WebContentsDestroyedWatcher destroyed_watcher(
+      browser()->tab_strip_model()->GetWebContentsAt(1));
 
   // Press Ctrl/Cmd+W, which will close the tab.
 #if defined(OS_MACOSX)
@@ -746,7 +735,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
       browser(), ui::VKEY_W, true, false, false, false));
 #endif
 
-  ASSERT_NO_FATAL_FAILURE(wait_for_tab_closed.Wait());
+  ASSERT_NO_FATAL_FAILURE(destroyed_watcher.Wait());
 
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
 }

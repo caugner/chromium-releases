@@ -11,6 +11,7 @@
 #include "chrome/browser/chromeos/drive/drive_app_registry.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/file_task_executor.h"
+#include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/file_manager/file_browser_handlers.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/open_util.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/extensions/api/file_browser_handlers/file_browser_handler.h"
@@ -49,9 +51,6 @@ const char kDriveAppTaskType[] = "drive";
 
 // Drive apps always use the action ID.
 const char kDriveAppActionID[] = "open-with";
-
-// Default icon path for drive docs.
-const char kDefaultIcon[] = "images/filetype_generic.png";
 
 // Converts a TaskType to a string.
 std::string TaskTypeToString(TaskType task_type) {
@@ -110,6 +109,29 @@ bool FileBrowserHasAccessPermissionForFiles(
   }
 
   return true;
+}
+
+// Returns true if path_mime_set contains a Google document.
+bool ContainsGoogleDocument(const PathAndMimeTypeSet& path_mime_set) {
+  for (PathAndMimeTypeSet::const_iterator iter = path_mime_set.begin();
+       iter != path_mime_set.end(); ++iter) {
+    if (google_apis::ResourceEntry::ClassifyEntryKindByFileExtension(
+            iter->first) &
+        google_apis::ResourceEntry::KIND_OF_GOOGLE_DOCUMENT) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Leaves tasks handled by the file manger itself as is and removes all others.
+void KeepOnlyFileManagerInternalTasks(std::vector<FullTaskDescriptor>* tasks) {
+  std::vector<FullTaskDescriptor> filtered;
+  for (size_t i = 0; i < tasks->size(); ++i) {
+    if ((*tasks)[i].task_descriptor().app_id == kFileManagerAppId)
+      filtered.push_back((*tasks)[i]);
+  }
+  tasks->swap(filtered);
 }
 
 }  // namespace
@@ -379,7 +401,7 @@ void FindFileHandlerTasks(
       continue;
 
     if (profile->IsOffTheRecord() &&
-        !service->IsIncognitoEnabled(extension->id()))
+        !extension_util::IsIncognitoEnabled(extension->id(), service))
       continue;
 
     typedef std::vector<const extensions::FileHandlerInfo*> FileHandlerList;
@@ -455,51 +477,32 @@ void FindFileBrowserHandlerTasks(
 
 void FindAllTypesOfTasks(
     Profile* profile,
+    const drive::DriveAppRegistry* drive_app_registry,
     const PathAndMimeTypeSet& path_mime_set,
     const std::vector<GURL>& file_urls,
     std::vector<FullTaskDescriptor>* result_list) {
   DCHECK(profile);
   DCHECK(result_list);
 
-  // Check if file_paths contain a google document.
-  bool has_google_document = false;
-  for (PathAndMimeTypeSet::const_iterator iter = path_mime_set.begin();
-       iter != path_mime_set.end(); ++iter) {
-    if (google_apis::ResourceEntry::ClassifyEntryKindByFileExtension(
-            iter->first) &
-        google_apis::ResourceEntry::KIND_OF_GOOGLE_DOCUMENT) {
-      has_google_document = true;
-      break;
-    }
-  }
-
-  // List Drive apps only for non Google document files. This is to avoid dups
-  // since Files.app already provides an internal handler for Google documents.
-  if (!has_google_document) {
-    drive::DriveAppRegistry* app_registry =
-        drive::util::GetDriveAppRegistryByProfile(profile);
-    // |app_registry| is NULL if Drive is disabled.
-    if (app_registry)
-      FindDriveAppTasks(*app_registry, path_mime_set, result_list);
-  }
+  // Find Drive app tasks, if the drive app registry is present.
+  if (drive_app_registry)
+    FindDriveAppTasks(*drive_app_registry, path_mime_set, result_list);
 
   // Find and append file handler tasks. We know there aren't duplicates
   // because Drive apps and platform apps are entirely different kinds of
   // tasks.
-  FindFileHandlerTasks(profile,
-                       path_mime_set,
-                       result_list);
+  FindFileHandlerTasks(profile, path_mime_set, result_list);
 
   // Find and append file browser handler tasks. We know there aren't
   // duplicates because "file_browser_handlers" and "file_handlers" shouldn't
   // be used in the same manifest.json.
-  FindFileBrowserHandlerTasks(profile,
-                              file_urls,
-                              result_list);
+  FindFileBrowserHandlerTasks(profile, file_urls, result_list);
 
-  ChooseAndSetDefaultTask(*profile->GetPrefs(),
-                          path_mime_set,
-                          result_list);
+  // Google documents can only be handled by internal handlers.
+  if (ContainsGoogleDocument(path_mime_set))
+    KeepOnlyFileManagerInternalTasks(result_list);
+
+  ChooseAndSetDefaultTask(*profile->GetPrefs(), path_mime_set, result_list);
 }
 
 void ChooseAndSetDefaultTask(const PrefService& pref_service,

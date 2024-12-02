@@ -11,8 +11,9 @@
 #include "tools/gn/target.h"
 
 NinjaScriptTargetWriter::NinjaScriptTargetWriter(const Target* target,
+                                                 const Toolchain* toolchain,
                                                  std::ostream& out)
-    : NinjaTargetWriter(target, out),
+    : NinjaTargetWriter(target, toolchain, out),
       path_output_no_escaping_(
           target->settings()->build_settings()->build_dir(),
           ESCAPE_NONE, false) {
@@ -22,8 +23,6 @@ NinjaScriptTargetWriter::~NinjaScriptTargetWriter() {
 }
 
 void NinjaScriptTargetWriter::Run() {
-  WriteEnvironment();
-
   FileTemplate args_template(target_->script_values().args());
   std::string custom_rule_name = WriteRuleDefinition(args_template);
   std::string implicit_deps = GetSourcesImplicitDeps();
@@ -75,24 +74,30 @@ std::string NinjaScriptTargetWriter::WriteRuleDefinition(
     rspfile += ".rsp";
 
     out_ << "rule " << custom_rule_name << std::endl;
-    out_ << "  command = $pythonpath gyp-win-tool action-wrapper $arch "
-         << rspfile << std::endl;
+    out_ << "  command = ";
+    path_output_.WriteFile(out_, settings_->build_settings()->python_path());
+    // TODO(brettw) this hardcodes "environment.x86" which is something that
+    // the Chrome Windows toolchain writes. We should have a way to invoke
+    // python without requiring this gyp_win_tool thing.
+    out_ << " gyp-win-tool action-wrapper environment.x86 " << rspfile
+         << std::endl;
     out_ << "  description = CUSTOM " << target_label << std::endl;
     out_ << "  restat = 1" << std::endl;
     out_ << "  rspfile = " << rspfile << std::endl;
 
     // The build command goes in the rsp file.
-    out_ << "  rspfile_content = $pythonpath ";
+    out_ << "  rspfile_content = ";
+    path_output_.WriteFile(out_, settings_->build_settings()->python_path());
+    out_ << " ";
     path_output_.WriteFile(out_, target_->script_values().script());
     args_template.WriteWithNinjaExpansions(out_);
     out_ << std::endl;
   } else {
     // Posix can execute Python directly.
     out_ << "rule " << custom_rule_name << std::endl;
-    out_ << "  command = cd ";
-    path_output_.WriteDir(out_, target_->label().dir(),
-                          PathOutput::DIR_NO_LAST_SLASH);
-    out_ << "; $pythonpath ";
+    out_ << "  command = ";
+    path_output_.WriteFile(out_, settings_->build_settings()->python_path());
+    out_ << " ";
     path_output_.WriteFile(out_, target_->script_values().script());
     args_template.WriteWithNinjaExpansions(out_);
     out_ << std::endl;
@@ -130,7 +135,7 @@ void NinjaScriptTargetWriter::WriteSourceRules(
     out_ << "build";
     WriteOutputFilesForBuildLine(output_template, sources[i], output_files);
 
-    out_ << ": " << custom_rule_name;
+    out_ << ": " << custom_rule_name << " ";
     path_output_.WriteFile(out_, sources[i]);
     out_ << implicit_deps << std::endl;
 
@@ -148,7 +153,7 @@ void NinjaScriptTargetWriter::WriteStamp(
   out_ << "build ";
   path_output_.WriteFile(out_, helper_.GetTargetOutputFile(target_));
   out_ << ": "
-       << helper_.GetRulePrefix(target_->settings()->toolchain())
+       << helper_.GetRulePrefix(target_->settings())
        << "stamp";
   for (size_t i = 0; i < output_files.size(); i++) {
     out_ << " ";

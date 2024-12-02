@@ -26,14 +26,14 @@ TEST_F(PlatformAppsManifestTest, PlatformApps) {
   scoped_refptr<Extension> extension =
       LoadAndExpectSuccess("init_valid_platform_app.json");
   EXPECT_TRUE(AppIsolationInfo::HasIsolatedStorage(extension.get()));
-  EXPECT_TRUE(IncognitoInfo::IsSplitMode(extension.get()));
+  EXPECT_FALSE(IncognitoInfo::IsSplitMode(extension.get()));
 
   extension =
       LoadAndExpectSuccess("init_valid_platform_app_no_manifest_version.json");
   EXPECT_EQ(2, extension->manifest_version());
 
   extension = LoadAndExpectSuccess("incognito_valid_platform_app.json");
-  EXPECT_TRUE(IncognitoInfo::IsSplitMode(extension.get()));
+  EXPECT_FALSE(IncognitoInfo::IsSplitMode(extension.get()));
 
   Testcase error_testcases[] = {
     Testcase("init_invalid_platform_app_2.json",
@@ -48,18 +48,18 @@ TEST_F(PlatformAppsManifestTest, PlatformApps) {
     Testcase(
         "init_invalid_platform_app_1.json",
         "'app.launch' is only allowed for hosted apps and legacy packaged "
-            "apps, and this is a packaged app."),
+            "apps, but this is a packaged app."),
     Testcase(
         "init_invalid_platform_app_4.json",
-        "'background' is only allowed for extensions, hosted apps and legacy "
-            "packaged apps, and this is a packaged app."),
+        "'background' is only allowed for extensions, hosted apps, and legacy "
+            "packaged apps, but this is a packaged app."),
     Testcase(
         "init_invalid_platform_app_5.json",
-        "'background' is only allowed for extensions, hosted apps and legacy "
-            "packaged apps, and this is a packaged app."),
+        "'background' is only allowed for extensions, hosted apps, and legacy "
+            "packaged apps, but this is a packaged app."),
     Testcase("incognito_invalid_platform_app.json",
         "'incognito' is only allowed for extensions and legacy packaged apps, "
-            "and this is a packaged app."),
+            "but this is a packaged app."),
   };
   RunTestcases(
       warning_testcases, arraysize(warning_testcases), EXPECT_TYPE_WARNING);
@@ -71,7 +71,7 @@ TEST_F(PlatformAppsManifestTest, PlatformAppContentSecurityPolicy) {
     Testcase(
         "init_platform_app_csp_warning_1.json",
         "'content_security_policy' is only allowed for extensions and legacy "
-            "packaged apps, and this is a packaged app."),
+            "packaged apps, but this is a packaged app."),
     Testcase(
         "init_platform_app_csp_warning_2.json",
         "'app.content_security_policy' is not allowed for specified extension "

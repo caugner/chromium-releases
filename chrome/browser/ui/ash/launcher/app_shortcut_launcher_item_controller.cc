@@ -4,7 +4,9 @@
 
 #include "chrome/browser/ui/ash/launcher/app_shortcut_launcher_item_controller.h"
 
-#include "apps/native_app_window.h"
+#include "apps/ui/native_app_window.h"
+#include "ash/launcher/launcher_model.h"
+#include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -12,6 +14,8 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item_tab.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/ash/launcher/launcher_application_menu_item_model.h"
+#include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
 #include "chrome/browser/ui/ash/launcher/launcher_item_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -24,6 +28,10 @@
 #include "ui/aura/window.h"
 #include "ui/events/event.h"
 #include "ui/views/corewm/window_animations.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/default_pinned_apps_field_trial.h"
+#endif
 
 using extensions::Extension;
 
@@ -54,10 +62,6 @@ AppShortcutLauncherItemController::AppShortcutLauncherItemController(
 }
 
 AppShortcutLauncherItemController::~AppShortcutLauncherItemController() {
-}
-
-string16 AppShortcutLauncherItemController::GetTitle() {
-  return GetAppTitle();
 }
 
 bool AppShortcutLauncherItemController::IsCurrentlyShownInWindow(
@@ -92,11 +96,12 @@ bool AppShortcutLauncherItemController::IsVisible() const {
   return false;
 }
 
-void AppShortcutLauncherItemController::Launch(int event_flags) {
-  launcher_controller()->LaunchApp(app_id(), event_flags);
+void AppShortcutLauncherItemController::Launch(ash::LaunchSource source,
+                                               int event_flags) {
+  launcher_controller()->LaunchApp(app_id(), source, event_flags);
 }
 
-void AppShortcutLauncherItemController::Activate() {
+void AppShortcutLauncherItemController::Activate(ash::LaunchSource source) {
   content::WebContents* content = GetLRUApplication();
   if (!content) {
     if (IsV2App()) {
@@ -109,7 +114,7 @@ void AppShortcutLauncherItemController::Activate() {
       if (!AllowNextLaunchAttempt())
         return;
     }
-    Launch(ui::EF_NONE);
+    Launch(source, ui::EF_NONE);
     return;
   }
   ActivateContent(content);
@@ -121,28 +126,13 @@ void AppShortcutLauncherItemController::Close() {
       launcher_controller()->GetV1ApplicationsFromAppId(app_id());
   for (size_t i = 0; i < content.size(); i++) {
     Browser* browser = chrome::FindBrowserWithWebContents(content[i]);
-    if (!browser)
+    if (!browser || !launcher_controller()->IsBrowserFromActiveUser(browser))
       continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
     int index = tab_strip->GetIndexOfWebContents(content[i]);
     DCHECK(index != TabStripModel::kNoTab);
     tab_strip->CloseWebContentsAt(index, TabStripModel::CLOSE_NONE);
   }
-}
-
-void AppShortcutLauncherItemController::Clicked(const ui::Event& event) {
-  // In case of a keyboard event, we were called by a hotkey. In that case we
-  // activate the next item in line if an item of our list is already active.
-  if (event.type() == ui::ET_KEY_RELEASED) {
-    if (AdvanceToNextApp())
-      return;
-  }
-  Activate();
-}
-
-void AppShortcutLauncherItemController::OnRemoved() {
-  // AppShortcutLauncherItemController is unowned; delete on removal.
-  delete this;
 }
 
 ChromeLauncherAppMenuItems
@@ -188,6 +178,8 @@ AppShortcutLauncherItemController::GetRunningApplications() {
   for (BrowserList::const_iterator it = ash_browser_list->begin();
        it != ash_browser_list->end(); ++it) {
     Browser* browser = *it;
+    if (!launcher_controller()->IsBrowserFromActiveUser(browser))
+      continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(index);
@@ -196,6 +188,44 @@ AppShortcutLauncherItemController::GetRunningApplications() {
     }
   }
   return items;
+}
+
+void AppShortcutLauncherItemController::ItemSelected(const ui::Event& event) {
+#if defined(OS_CHROMEOS)
+  if (!app_id().empty())
+    chromeos::default_pinned_apps_field_trial::RecordShelfAppClick(app_id());
+#endif
+  // In case of a keyboard event, we were called by a hotkey. In that case we
+  // activate the next item in line if an item of our list is already active.
+  if (event.type() == ui::ET_KEY_RELEASED) {
+    if (AdvanceToNextApp())
+      return;
+  }
+  Activate(ash::LAUNCH_FROM_UNKNOWN);
+}
+
+base::string16 AppShortcutLauncherItemController::GetTitle() {
+  return GetAppTitle();
+}
+
+ui::MenuModel* AppShortcutLauncherItemController::CreateContextMenu(
+    aura::Window* root_window) {
+  ash::LauncherItem item =
+      *(launcher_controller()->model()->ItemByID(launcher_id()));
+  return new LauncherContextMenu(launcher_controller(), &item, root_window);
+}
+
+ash::LauncherMenuModel*
+AppShortcutLauncherItemController::CreateApplicationMenu(int event_flags) {
+  return new LauncherApplicationMenuItemModel(GetApplicationList(event_flags));
+}
+
+bool AppShortcutLauncherItemController::IsDraggable() {
+  return true;
+}
+
+bool AppShortcutLauncherItemController::ShouldShowTooltip() {
+  return true;
 }
 
 content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
@@ -220,6 +250,8 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
        it = ash_browser_list->begin_last_active();
        it != ash_browser_list->end_last_active(); ++it) {
     Browser* browser = *it;
+    if (!launcher_controller()->IsBrowserFromActiveUser(browser))
+      continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
     // We start to enumerate from the active index.
     int active_index = tab_strip->active_index();
@@ -236,6 +268,8 @@ content::WebContents* AppShortcutLauncherItemController::GetLRUApplication() {
   for (BrowserList::const_iterator it = ash_browser_list->begin();
        it != ash_browser_list->end(); ++it) {
     Browser* browser = *it;
+    if (!launcher_controller()->IsBrowserFromActiveUser(browser))
+      continue;
     TabStripModel* tab_strip = browser->tab_strip_model();
     for (int index = 0; index < tab_strip->count(); index++) {
       content::WebContents* web_contents = tab_strip->GetWebContentsAt(index);

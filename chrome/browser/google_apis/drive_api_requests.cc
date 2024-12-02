@@ -20,7 +20,6 @@ namespace google_apis {
 namespace {
 
 const char kContentTypeApplicationJson[] = "application/json";
-const char kDirectoryMimeType[] = "application/vnd.google-apps.folder";
 const char kParentLinkKind[] = "drive#fileLink";
 
 // Parses the JSON value to a resource typed |T| and runs |callback| on the UI
@@ -306,6 +305,9 @@ bool FilesCopyRequest::GetContentData(std::string* upload_content_type,
   *upload_content_type = kContentTypeApplicationJson;
 
   base::DictionaryValue root;
+
+  if (!modified_date_.is_null())
+    root.SetString("modifiedDate", util::FormatTimeAsString(modified_date_));
 
   if (!parents_.empty()) {
     base::ListValue* parents_value = new base::ListValue;

@@ -60,6 +60,10 @@ class PrivetRegisterOperationImpl
                             const base::DictionaryValue* value,
                             bool has_error) OVERRIDE;
 
+  virtual void OnNeedPrivetToken(
+      PrivetURLFetcher* fetcher,
+      const PrivetURLFetcher::TokenCallback& callback) OVERRIDE;
+
   virtual void OnPrivetInfoDone(PrivetInfoOperation* operation,
                                 int http_code,
                                 const base::DictionaryValue* value) OVERRIDE;
@@ -89,20 +93,12 @@ class PrivetRegisterOperationImpl
   typedef base::Callback<void(const base::DictionaryValue&)>
       ResponseHandler;
 
+  void StartInfoOperation();
   void StartResponse(const base::DictionaryValue& value);
   void GetClaimTokenResponse(const base::DictionaryValue& value);
   void CompleteResponse(const base::DictionaryValue& value);
 
-  void StartInfoOperation();
-
   void SendRequest(const std::string& action);
-
-  bool PrivetErrorTransient(const std::string& error);
-
-  static GURL GetURLForActionAndUser(
-      PrivetHTTPClientImpl* privet_client,
-      const std::string& action,
-      const std::string& user);
 
   std::string user_;
   std::string current_action_;
@@ -113,10 +109,114 @@ class PrivetRegisterOperationImpl
   // Required to ensure destroying completed register operations doesn't cause
   // extraneous cancelations.
   bool ongoing_;
+
+  scoped_ptr<PrivetInfoOperation> info_operation_;
+  std::string expected_id_;
+};
+
+// TODO(noamsml): Factor out some of this code into a PrivetBaseOperation
+class PrivetCapabilitiesOperationImpl : public PrivetCapabilitiesOperation,
+                                        public PrivetURLFetcher::Delegate {
+ public:
+  PrivetCapabilitiesOperationImpl(
+      PrivetHTTPClientImpl* privet_client,
+      PrivetCapabilitiesOperation::Delegate* delegate);
+  virtual ~PrivetCapabilitiesOperationImpl();
+  virtual void Start() OVERRIDE;
+
+  virtual PrivetHTTPClient* GetHTTPClient() OVERRIDE;
+
+  virtual void OnError(PrivetURLFetcher* fetcher,
+                       PrivetURLFetcher::ErrorType error) OVERRIDE;
+  virtual void OnParsedJson(PrivetURLFetcher* fetcher,
+                            const base::DictionaryValue* value,
+                            bool has_error) OVERRIDE;
+  virtual void OnNeedPrivetToken(
+      PrivetURLFetcher* fetcher,
+      const PrivetURLFetcher::TokenCallback& callback) OVERRIDE;
+
+ private:
+  PrivetHTTPClientImpl* privet_client_;
+  PrivetCapabilitiesOperation::Delegate* delegate_;
+
+  scoped_ptr<PrivetURLFetcher> url_fetcher_;
   scoped_ptr<PrivetInfoOperation> info_operation_;
 };
 
-class PrivetHTTPClientImpl : public PrivetHTTPClient {
+class PrivetLocalPrintOperationImpl
+    : public PrivetLocalPrintOperation,
+      public PrivetURLFetcher::Delegate,
+      public PrivetInfoOperation::Delegate {
+ public:
+  PrivetLocalPrintOperationImpl(
+      PrivetHTTPClientImpl* privet_client,
+      PrivetLocalPrintOperation::Delegate* delegate);
+
+  virtual ~PrivetLocalPrintOperationImpl();
+  virtual void Start() OVERRIDE;
+
+  virtual void SendData(const std::string& data) OVERRIDE;
+
+  virtual void SetTicket(const std::string& ticket) OVERRIDE;
+
+  virtual void SetUsername(const std::string& user) OVERRIDE;
+
+  virtual void SetJobname(const std::string& jobname) OVERRIDE;
+
+  virtual  void SetOffline(bool offline) OVERRIDE;
+
+  virtual PrivetHTTPClient* GetHTTPClient() OVERRIDE;
+
+  virtual void OnError(PrivetURLFetcher* fetcher,
+                       PrivetURLFetcher::ErrorType error) OVERRIDE;
+  virtual void OnParsedJson(PrivetURLFetcher* fetcher,
+                            const base::DictionaryValue* value,
+                            bool has_error) OVERRIDE;
+  virtual void OnNeedPrivetToken(
+      PrivetURLFetcher* fetcher,
+      const PrivetURLFetcher::TokenCallback& callback) OVERRIDE;
+
+  virtual void OnPrivetInfoDone(PrivetInfoOperation* operation,
+                                int http_code,
+                                const base::DictionaryValue* value) OVERRIDE;
+ private:
+  typedef base::Callback<void(const base::DictionaryValue* value)>
+      ResponseCallback;
+
+  void StartCurrentRequest();
+
+  void StartInitialRequest();
+  void GetCapabilities();
+  // TODO(noamsml): void DoCreatejob();
+  void DoSubmitdoc();
+
+  void OnCapabilities(const base::DictionaryValue* value);
+  void OnSubmitdocResponse(const base::DictionaryValue* value);
+
+  PrivetHTTPClientImpl* privet_client_;
+  PrivetLocalPrintOperation::Delegate* delegate_;
+
+  base::Closure current_request_;
+  ResponseCallback current_response_;
+
+  std::string ticket_;
+  std::string data_;
+
+  bool use_pdf_;
+  bool has_capabilities_;
+  bool has_extended_workflow_;
+  bool started_;
+  bool offline_;
+
+  std::string user_;
+  std::string jobname_;
+
+  scoped_ptr<PrivetURLFetcher> url_fetcher_;
+  scoped_ptr<PrivetInfoOperation> info_operation_;
+};
+
+class PrivetHTTPClientImpl : public PrivetHTTPClient,
+                             public PrivetInfoOperation::Delegate {
  public:
   PrivetHTTPClientImpl(
       const std::string& name,
@@ -133,20 +233,39 @@ class PrivetHTTPClientImpl : public PrivetHTTPClient {
   virtual scoped_ptr<PrivetInfoOperation> CreateInfoOperation(
       PrivetInfoOperation::Delegate* delegate) OVERRIDE;
 
+  virtual scoped_ptr<PrivetCapabilitiesOperation> CreateCapabilitiesOperation(
+      PrivetCapabilitiesOperation::Delegate* delegate) OVERRIDE;
+
+  virtual scoped_ptr<PrivetLocalPrintOperation> CreateLocalPrintOperation(
+      PrivetLocalPrintOperation::Delegate* delegate) OVERRIDE;
+
   virtual const std::string& GetName() OVERRIDE;
 
-  const PrivetURLFetcherFactory& fetcher_factory() const {
-    return fetcher_factory_;
-  }
-  const net::HostPortPair& host_port() const { return host_port_; }
+  scoped_ptr<PrivetURLFetcher> CreateURLFetcher(
+      const GURL& url,
+      net::URLFetcher::RequestType request_type,
+      PrivetURLFetcher::Delegate* delegate) const;
 
   void CacheInfo(const base::DictionaryValue* cached_info);
 
+  bool HasToken() const;
+
+  void RefreshPrivetToken(
+      const PrivetURLFetcher::TokenCallback& token_callback);
+
+  virtual void OnPrivetInfoDone(PrivetInfoOperation* operation,
+                                int http_code,
+                                const base::DictionaryValue* value) OVERRIDE;
+
  private:
+  typedef std::vector<PrivetURLFetcher::TokenCallback> TokenCallbackVector;
   std::string name_;
   PrivetURLFetcherFactory fetcher_factory_;
   net::HostPortPair host_port_;
   scoped_ptr<base::DictionaryValue> cached_info_;
+
+  scoped_ptr<PrivetInfoOperation> info_operation_;
+  TokenCallbackVector token_callbacks_;
 };
 
 }  // namespace local_discovery

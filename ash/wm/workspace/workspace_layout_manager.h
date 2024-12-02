@@ -57,8 +57,12 @@ class ASH_EXPORT WorkspaceLayoutManager : public BaseLayoutManager {
                                        intptr_t old) OVERRIDE;
 
   // ash::WindowSettings::Observer overrides:
-  virtual void OnTrackedByWorkspaceChanged(aura::Window* window,
+  virtual void OnTrackedByWorkspaceChanged(wm::WindowState* window_state,
                                            bool old) OVERRIDE;
+
+  // WindowStateObserver overrides:
+  virtual void OnWindowShowTypeChanged(wm::WindowState* window_state,
+                                       wm::WindowShowType old_type) OVERRIDE;
 
  private:
   // Overridden from BaseLayoutManager:
@@ -88,7 +92,7 @@ class ASH_EXPORT WorkspaceLayoutManager : public BaseLayoutManager {
 
   // The work area. Cached to avoid unnecessarily moving windows during a
   // workspace switch.
-  gfx::Rect work_area_;
+  gfx::Rect work_area_in_parent_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkspaceLayoutManager);
 };

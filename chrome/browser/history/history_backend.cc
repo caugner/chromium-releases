@@ -80,29 +80,25 @@ namespace history {
 // This value needs to be greater or equal to
 // MostVisitedModel::kMostVisitedScope but we don't want to introduce a direct
 // dependency between MostVisitedModel and the history backend.
-static const int kSegmentDataRetention = 90;
+const int kSegmentDataRetention = 90;
 
 // How long we'll wait to do a commit, so that things are batched together.
-static const int kCommitIntervalSeconds = 10;
+const int kCommitIntervalSeconds = 10;
 
 // The amount of time before we re-fetch the favicon.
-static const int kFaviconRefetchDays = 7;
-
-// GetSessionTabs returns all open tabs, or tabs closed kSessionCloseTimeWindow
-// seconds ago.
-static const int kSessionCloseTimeWindowSecs = 10;
+const int kFaviconRefetchDays = 7;
 
 // The maximum number of items we'll allow in the redirect list before
 // deleting some.
-static const int kMaxRedirectCount = 32;
+const int kMaxRedirectCount = 32;
 
 // The number of days old a history entry can be before it is considered "old"
 // and is archived.
-static const int kArchiveDaysThreshold = 90;
+const int kArchiveDaysThreshold = 90;
 
 #if defined(OS_ANDROID)
 // The maximum number of top sites to track when recording top page visit stats.
-static const size_t kPageVisitStatsMaxTopSites = 50;
+const size_t kPageVisitStatsMaxTopSites = 50;
 #endif
 
 // Converts from PageUsageData to MostVisitedURL. |redirects| is a
@@ -637,9 +633,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   // renaming "thumbnail" references to "favicons" or something of the
   // sort.
   thumbnail_db_.reset(new ThumbnailDatabase());
-  if (thumbnail_db_->Init(thumbnail_name,
-                          history_publisher_.get(),
-                          db_.get()) != sql::INIT_OK) {
+  if (thumbnail_db_->Init(thumbnail_name) != sql::INIT_OK) {
     // Unlike the main database, we don't error out when the database is too
     // new because this error is much less severe. Generally, this shouldn't
     // happen since the thumbnail and main database versions should be in sync.
@@ -1172,22 +1166,18 @@ void HistoryBackend::SetKeywordSearchTermsForURL(const GURL& url,
     return;
 
   // Get the ID for this URL.
-  URLRow url_row;
-  if (!db_->GetRowForURL(url, &url_row)) {
+  URLID url_id = db_->GetRowForURL(url, NULL);
+  if (!url_id) {
     // There is a small possibility the url was deleted before the keyword
     // was added. Ignore the request.
     return;
   }
 
-  db_->SetKeywordSearchTermsForURL(url_row.id(), keyword_id, term);
+  db_->SetKeywordSearchTermsForURL(url_id, keyword_id, term);
 
-  // details is deleted by BroadcastNotifications.
-  KeywordSearchTermDetails* details = new KeywordSearchTermDetails;
-  details->url = url;
-  details->keyword_id = keyword_id;
-  details->term = term;
   BroadcastNotifications(
-      chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED, details);
+      chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
+      new KeywordSearchUpdatedDetails(url, keyword_id, term));
   ScheduleCommit();
 }
 
@@ -1214,6 +1204,21 @@ void HistoryBackend::GetMostRecentKeywordSearchTerms(
                                          &(request->value));
   }
   request->ForwardResult(request->handle(), &request->value);
+}
+
+void HistoryBackend::DeleteKeywordSearchTermForURL(const GURL& url) {
+  if (!db_)
+    return;
+
+  URLID url_id = db_->GetRowForURL(url, NULL);
+  if (!url_id)
+    return;
+  db_->DeleteKeywordSearchTermForURL(url_id);
+
+  BroadcastNotifications(
+      chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_DELETED,
+      new KeywordSearchDeletedDetails(url));
+  ScheduleCommit();
 }
 
 // Downloads -------------------------------------------------------------------
@@ -1386,7 +1391,7 @@ void HistoryBackend::QueryHistoryText(URLDatabase* url_db,
   for (size_t i = 0; i < text_matches.size(); i++) {
     const URLRow& text_match = text_matches[i];
     // Get all visits for given URL match.
-    visit_db->GetVisitsForURLWithOptions(text_match.id(), options, &visits);
+    visit_db->GetVisibleVisitsForURL(text_match.id(), options, &visits);
     for (size_t j = 0; j < visits.size(); j++) {
       URLResult url_result(text_match);
       url_result.set_visit_time(visits[j].visit_time);
@@ -1700,6 +1705,100 @@ void HistoryBackend::GetFavicons(
   UpdateFaviconMappingsAndFetchImpl(NULL, icon_urls, icon_types,
                                     desired_size_in_dip, desired_scale_factors,
                                     bitmap_results);
+}
+
+void HistoryBackend::GetLargestFaviconForURL(
+      const GURL& page_url,
+      const std::vector<int>& icon_types,
+      int minimum_size_in_pixels,
+      chrome::FaviconBitmapResult* favicon_bitmap_result) {
+  DCHECK(favicon_bitmap_result);
+
+  if (!db_ || !thumbnail_db_)
+    return;
+
+  TimeTicks beginning_time = TimeTicks::Now();
+
+  std::vector<IconMapping> icon_mappings;
+  if (!thumbnail_db_->GetIconMappingsForPageURL(page_url, &icon_mappings) ||
+      icon_mappings.empty())
+    return;
+
+  int required_icon_types = 0;
+  for (std::vector<int>::const_iterator i = icon_types.begin();
+       i != icon_types.end(); ++i) {
+    required_icon_types |= *i;
+  }
+
+  // Find the largest bitmap for each IconType placing in
+  // |largest_favicon_bitmaps|.
+  std::map<chrome::IconType, FaviconBitmap> largest_favicon_bitmaps;
+  for (std::vector<IconMapping>::const_iterator i = icon_mappings.begin();
+       i != icon_mappings.end(); ++i) {
+    if (!(i->icon_type & required_icon_types))
+      continue;
+    std::vector<FaviconBitmapIDSize> bitmap_id_sizes;
+    thumbnail_db_->GetFaviconBitmapIDSizes(i->icon_id, &bitmap_id_sizes);
+    FaviconBitmap& largest = largest_favicon_bitmaps[i->icon_type];
+    for (std::vector<FaviconBitmapIDSize>::const_iterator j =
+             bitmap_id_sizes.begin(); j != bitmap_id_sizes.end(); ++j) {
+      if (largest.bitmap_id == 0 ||
+          (largest.pixel_size.width() < j->pixel_size.width() &&
+           largest.pixel_size.height() < j->pixel_size.height())) {
+        largest.icon_id = i->icon_id;
+        largest.bitmap_id = j->bitmap_id;
+        largest.pixel_size = j->pixel_size;
+      }
+    }
+  }
+  if (largest_favicon_bitmaps.empty())
+    return;
+
+  // Find an icon which is larger than minimum_size_in_pixels in the order of
+  // icon_types.
+  FaviconBitmap largest_icon;
+  for (std::vector<int>::const_iterator t = icon_types.begin();
+       t != icon_types.end(); ++t) {
+    for (std::map<chrome::IconType, FaviconBitmap>::const_iterator f =
+            largest_favicon_bitmaps.begin(); f != largest_favicon_bitmaps.end();
+        ++f) {
+      if (f->first & *t &&
+          (largest_icon.bitmap_id == 0 ||
+           (largest_icon.pixel_size.height() < f->second.pixel_size.height() &&
+            largest_icon.pixel_size.width() < f->second.pixel_size.width()))) {
+        largest_icon = f->second;
+      }
+    }
+    if (largest_icon.pixel_size.width() > minimum_size_in_pixels &&
+        largest_icon.pixel_size.height() > minimum_size_in_pixels)
+      break;
+  }
+
+  GURL icon_url;
+  chrome::IconType icon_type;
+  if (!thumbnail_db_->GetFaviconHeader(largest_icon.icon_id, &icon_url,
+                                       &icon_type)) {
+    return;
+  }
+
+  base::Time last_updated;
+  chrome::FaviconBitmapResult bitmap_result;
+  bitmap_result.icon_url = icon_url;
+  bitmap_result.icon_type = icon_type;
+  if (!thumbnail_db_->GetFaviconBitmap(largest_icon.bitmap_id,
+                                       &last_updated,
+                                       &bitmap_result.bitmap_data,
+                                       &bitmap_result.pixel_size)) {
+    return;
+  }
+
+  bitmap_result.expired = (Time::Now() - last_updated) >
+      TimeDelta::FromDays(kFaviconRefetchDays);
+  if (bitmap_result.is_valid())
+    *favicon_bitmap_result = bitmap_result;
+
+  HISTOGRAM_TIMES("History.GetLargestFaviconForURL",
+                  TimeTicks::Now() - beginning_time);
 }
 
 void HistoryBackend::GetFaviconsForURL(

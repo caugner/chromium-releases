@@ -55,6 +55,7 @@
 #if defined(OS_WIN)
 #include "ui/gfx/win/hwnd_util.h"
 #include "ui/views/widget/monitor_win.h"
+#include "ui/views/win/hwnd_util.h"
 #include "win8/util/win8_util.h"
 #endif
 
@@ -95,8 +96,10 @@ static const int kMaxStackedCount = 4;
 static const int kStackedPadding = 6;
 
 // See UpdateLayoutTypeFromMouseEvent() for a description of these.
+#if !defined(USE_ASH)
 const int kMouseMoveTimeMS = 200;
 const int kMouseMoveCountBeforeConsiderReal = 3;
+#endif
 
 // Amount of time we delay before resizing after a close from a touch.
 const int kTouchResizeLayoutTimeMS = 2000;
@@ -306,8 +309,9 @@ class NewTabButton : public views::ImageButton {
  protected:
   // Overridden from views::View:
   virtual bool HasHitTestMask() const OVERRIDE;
-  virtual void GetHitTestMask(gfx::Path* path) const OVERRIDE;
-#if defined(OS_WIN) && !defined(USE_AURA)
+  virtual void GetHitTestMask(HitTestSource source,
+                              gfx::Path* path) const OVERRIDE;
+#if defined(OS_WIN)
   virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
 #endif
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
@@ -353,7 +357,7 @@ bool NewTabButton::HasHitTestMask() const {
   return !tab_strip_->SizeTabButtonToTopOfTabStrip();
 }
 
-void NewTabButton::GetHitTestMask(gfx::Path* path) const {
+void NewTabButton::GetHitTestMask(HitTestSource source, gfx::Path* path) const {
   DCHECK(path);
 
   SkScalar w = SkIntToScalar(width());
@@ -374,14 +378,14 @@ void NewTabButton::GetHitTestMask(gfx::Path* path) const {
   path->close();
 }
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
 void NewTabButton::OnMouseReleased(const ui::MouseEvent& event) {
   if (event.IsOnlyRightMouseButton()) {
     gfx::Point point = event.location();
     views::View::ConvertPointToScreen(this, &point);
     bool destroyed = false;
     destroyed_ = &destroyed;
-    gfx::ShowSystemMenuAtPoint(GetWidget()->GetNativeView(), point);
+    gfx::ShowSystemMenuAtPoint(views::HWNDForView(this), point);
     if (destroyed)
       return;
 
@@ -394,7 +398,8 @@ void NewTabButton::OnMouseReleased(const ui::MouseEvent& event) {
 #endif
 
 void NewTabButton::OnPaint(gfx::Canvas* canvas) {
-  gfx::ImageSkia image = GetImageForScale(canvas->scale_factor());
+  gfx::ImageSkia image =
+      GetImageForScale(ui::GetSupportedScaleFactor(canvas->image_scale()));
   canvas->DrawImageInt(image, 0, height() - image.height());
 }
 
@@ -444,12 +449,12 @@ gfx::ImageSkia NewTabButton::GetBackgroundImage(
       GetThemeProvider()->GetImageSkiaNamed(IDR_NEWTAB_BUTTON_MASK);
   int height = mask->height();
   int width = mask->width();
-
+  float scale = ui::GetImageScale(scale_factor);
   // The canvas and mask has to use the same scale factor.
-  if (!mask->HasRepresentation(scale_factor))
+  if (!mask->HasRepresentation(scale))
     scale_factor = ui::SCALE_FACTOR_100P;
 
-  gfx::Canvas canvas(gfx::Size(width, height), scale_factor, false);
+  gfx::Canvas canvas(gfx::Size(width, height), scale, false);
 
   // For custom images the background starts at the top of the tab strip.
   // Otherwise the background starts at the top of the frame.
@@ -495,7 +500,9 @@ gfx::ImageSkia NewTabButton::GetImageForState(
   gfx::ImageSkia* overlay = GetThemeProvider()->GetImageSkiaNamed(overlay_id);
 
   gfx::Canvas canvas(
-      gfx::Size(overlay->width(), overlay->height()), scale_factor, false);
+      gfx::Size(overlay->width(), overlay->height()),
+      ui::GetImageScale(scale_factor),
+      false);
   canvas.DrawImageInt(GetBackgroundImage(state, scale_factor), 0, 0);
 
   // Draw the button border with a slight alpha.
@@ -1551,6 +1558,8 @@ void TabStrip::OnMouseEntered(const ui::MouseEvent& event) {
 void TabStrip::OnGestureEvent(ui::GestureEvent* event) {
   SetResetToShrinkOnExit(false);
   switch (event->type()) {
+    case ui::ET_GESTURE_SCROLL_END:
+    case ui::ET_SCROLL_FLING_START:
     case ui::ET_GESTURE_END:
       EndDrag(END_DRAG_COMPLETE);
       if (adjust_layout_) {

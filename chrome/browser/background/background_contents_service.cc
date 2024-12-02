@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_delegate.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -409,8 +409,8 @@ void BackgroundContentsService::Observe(
       if (!extension)
         break;
 
-      const bool force_installed = extension->location() ==
-          extensions::Manifest::EXTERNAL_POLICY_DOWNLOAD;
+      const bool force_installed =
+          extensions::Manifest::IsPolicyLocation(extension->location());
       if (!force_installed) {
         // When an extension crashes, EXTENSION_PROCESS_TERMINATED is followed
         // by an EXTENSION_UNLOADED notification. This UNLOADED signal causes
@@ -428,16 +428,16 @@ void BackgroundContentsService::Observe(
     }
     case chrome::NOTIFICATION_EXTENSION_UNLOADED:
       switch (content::Details<UnloadedExtensionInfo>(details)->reason) {
-        case extension_misc::UNLOAD_REASON_DISABLE:    // Fall through.
-        case extension_misc::UNLOAD_REASON_TERMINATE:  // Fall through.
-        case extension_misc::UNLOAD_REASON_UNINSTALL:  // Fall through.
-        case extension_misc::UNLOAD_REASON_BLACKLIST:
+        case UnloadedExtensionInfo::REASON_DISABLE:    // Fall through.
+        case UnloadedExtensionInfo::REASON_TERMINATE:  // Fall through.
+        case UnloadedExtensionInfo::REASON_UNINSTALL:  // Fall through.
+        case UnloadedExtensionInfo::REASON_BLACKLIST:
           ShutdownAssociatedBackgroundContents(
               ASCIIToUTF16(content::Details<UnloadedExtensionInfo>(details)->
                   extension->id()));
           SendChangeNotification(content::Source<Profile>(source).ptr());
           break;
-        case extension_misc::UNLOAD_REASON_UPDATE: {
+        case UnloadedExtensionInfo::REASON_UPDATE: {
           // If there is a manifest specified background page, then shut it down
           // here, since if the updated extension still has the background page,
           // then it will be loaded from LOADED callback. Otherwise, leave

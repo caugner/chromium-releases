@@ -16,16 +16,14 @@
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
-#include "chrome/browser/media_galleries/mtp_device_delegate_impl.h"
 #include "chrome/browser/storage_monitor/removable_storage_observer.h"
 
 class ExtensionGalleriesHost;
 class MediaFileSystemContext;
 class MediaGalleriesPreferences;
 class Profile;
-class ScopedMTPDeviceMapEntry;
-
 
 namespace content {
 class RenderViewHost;
@@ -39,6 +37,9 @@ namespace fileapi {
 class IsolatedContext;
 }
 
+// Contains information about a particular filesystem being provided to a
+// client, including metadata like the name and ID, and API handles like the
+// fsid (filesystem ID) used to hook up the API objects.
 struct MediaFileSystemInfo {
   MediaFileSystemInfo(const string16& fs_name,
                       const base::FilePath& fs_path,
@@ -62,6 +63,8 @@ struct MediaFileSystemInfo {
 typedef base::Callback<void(const std::vector<MediaFileSystemInfo>&)>
     MediaFileSystemsCallback;
 
+// Tracks usage of filesystems by extensions.
+// This object lives on the UI thread.
 class MediaFileSystemRegistry
     : public RemovableStorageObserver,
       public MediaGalleriesPreferences::GalleryChangeObserver {
@@ -70,28 +73,26 @@ class MediaFileSystemRegistry
   virtual ~MediaFileSystemRegistry();
 
   // Passes to |callback| the list of media filesystem IDs and paths for a
-  // given RVH. Called on the UI thread.
+  // given RVH.
   void GetMediaFileSystemsForExtension(
       const content::RenderViewHost* rvh,
       const extensions::Extension* extension,
       const MediaFileSystemsCallback& callback);
 
-  // Returns the initialized media galleries preferences for the specified
-  // |profile|. This method should be used instead of calling
-  // MediaGalleriesPreferences directly because this method also ensures that
-  // currently attached removable devices are added to the preferences.
-  // Called on the UI thread.
-  // Note: Caller must ensure that the storage monitor is initialized before
-  // calling this method.
+  // Returns the media galleries preferences for the specified |profile|.
+  // Caller is responsible for ensuring that the preferences are initialized
+  // before use.
   MediaGalleriesPreferences* GetPreferences(Profile* profile);
 
   // RemovableStorageObserver implementation.
   virtual void OnRemovableStorageDetached(const StorageInfo& info) OVERRIDE;
 
  private:
+  class MediaFileSystemContextImpl;
+
+  friend class MediaFileSystemContextImpl;
   friend class MediaFileSystemRegistryTest;
   friend class TestMediaFileSystemContext;
-  class MediaFileSystemContextImpl;
 
   // Map an extension to the ExtensionGalleriesHost.
   typedef std::map<std::string /*extension_id*/,
@@ -99,36 +100,17 @@ class MediaFileSystemRegistry
   // Map a profile and extension to the ExtensionGalleriesHost.
   typedef std::map<Profile*, ExtensionHostMap> ExtensionGalleriesHostMap;
 
-  // Map a MTP or PTP device location to the raw pointer of
-  // ScopedMTPDeviceMapEntry. It is safe to store a raw pointer in this
-  // map.
-  typedef std::map<const base::FilePath::StringType, ScopedMTPDeviceMapEntry*>
-      MTPDeviceDelegateMap;
-
   virtual void OnPermissionRemoved(MediaGalleriesPreferences* pref,
                                    const std::string& extension_id,
                                    MediaGalleryPrefId pref_id) OVERRIDE;
   virtual void OnGalleryRemoved(MediaGalleriesPreferences* pref,
                                 MediaGalleryPrefId pref_id) OVERRIDE;
 
-  // Returns ScopedMTPDeviceMapEntry object for the given |device_location|.
-  scoped_refptr<ScopedMTPDeviceMapEntry> GetOrCreateScopedMTPDeviceMapEntry(
-      const base::FilePath::StringType& device_location);
-
-  // Removes the ScopedMTPDeviceMapEntry associated with the given
-  // |device_location|.
-  void RemoveScopedMTPDeviceMapEntry(
-      const base::FilePath::StringType& device_location);
-
   void OnExtensionGalleriesHostEmpty(Profile* profile,
                                      const std::string& extension_id);
 
-  // Only accessed on the UI thread. This map owns all the
-  // ExtensionGalleriesHost objects created.
+  // This map owns all the ExtensionGalleriesHost objects created.
   ExtensionGalleriesHostMap extension_hosts_map_;
-
-  // Only accessed on the UI thread.
-  MTPDeviceDelegateMap mtp_device_delegate_map_;
 
   scoped_ptr<MediaFileSystemContext> file_system_context_;
 

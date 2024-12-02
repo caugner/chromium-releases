@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
 
+#include "base/guid.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
@@ -119,19 +120,20 @@ bool ResourceMetadata::SetUpDefaultEntries() {
     ResourceEntry root;
     root.mutable_file_info()->set_is_directory(true);
     root.set_resource_id(util::kDriveGrandRootSpecialResourceId);
+    root.set_local_id(util::kDriveGrandRootSpecialResourceId);
     root.set_title(util::kDriveGrandRootDirName);
     SetBaseNameFromTitle(&root);
-    if (!storage_->PutEntry(util::kDriveGrandRootSpecialResourceId, root))
+    if (!storage_->PutEntry(root))
       return false;
   }
   if (!storage_->GetEntry(util::kDriveOtherDirSpecialResourceId, &entry)) {
     ResourceEntry other_dir;
     other_dir.mutable_file_info()->set_is_directory(true);
     other_dir.set_resource_id(util::kDriveOtherDirSpecialResourceId);
+    other_dir.set_local_id(util::kDriveOtherDirSpecialResourceId);
     other_dir.set_parent_local_id(util::kDriveGrandRootSpecialResourceId);
     other_dir.set_title(util::kDriveOtherDirName);
-    if (!PutEntryUnderDirectory(util::kDriveOtherDirSpecialResourceId,
-                                other_dir))
+    if (!PutEntryUnderDirectory(other_dir))
       return false;
   }
   return true;
@@ -160,26 +162,32 @@ FileError ResourceMetadata::SetLargestChangestamp(int64 value) {
 FileError ResourceMetadata::AddEntry(const ResourceEntry& entry,
                                      std::string* out_id) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(entry.local_id().empty());
 
   if (!EnoughDiskSpaceIsAvailableForDBOperation(storage_->directory_path()))
     return FILE_ERROR_NO_LOCAL_SPACE;
-
-  // Multiple entries with the same resource ID should not be present.
-  std::string existing_entry_id;
-  if (!entry.resource_id().empty() &&
-      GetIdByResourceId(entry.resource_id(),
-                        &existing_entry_id) == FILE_ERROR_OK)
-    return FILE_ERROR_EXISTS;
 
   ResourceEntry parent;
   if (!storage_->GetEntry(entry.parent_local_id(), &parent) ||
       !parent.file_info().is_directory())
     return FILE_ERROR_NOT_FOUND;
 
-  // TODO(hashimoto): Generate local ID here. crbug.com/26051
-  const std::string local_id = entry.resource_id();
+  // Multiple entries with the same resource ID should not be present.
+  std::string local_id;
+  ResourceEntry existing_entry;
+  if (!entry.resource_id().empty() &&
+      storage_->GetIdByResourceId(entry.resource_id(), &local_id) &&
+      storage_->GetEntry(local_id, &existing_entry))
+    return FILE_ERROR_EXISTS;
 
-  if (!PutEntryUnderDirectory(local_id, entry))
+  // Generate unique local ID when needed.
+  while (local_id.empty() || storage_->GetEntry(local_id, &existing_entry))
+    local_id = base::GenerateGUID();
+
+  ResourceEntry new_entry(entry);
+  new_entry.set_local_id(local_id);
+
+  if (!PutEntryUnderDirectory(new_entry))
     return FILE_ERROR_FAILED;
 
   *out_id = local_id;
@@ -203,24 +211,6 @@ FileError ResourceMetadata::RemoveEntry(const std::string& id) {
   if (!RemoveEntryRecursively(id))
     return FILE_ERROR_FAILED;
   return FILE_ERROR_OK;
-}
-
-void ResourceMetadata::GetResourceEntryByIdOnUIThread(
-    const std::string& id,
-    const GetResourceEntryCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  scoped_ptr<ResourceEntry> entry(new ResourceEntry);
-  ResourceEntry* entry_ptr = entry.get();
-  base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&ResourceMetadata::GetResourceEntryById,
-                 base::Unretained(this),
-                 id,
-                 entry_ptr),
-      base::Bind(&RunGetResourceEntryCallback, callback, base::Passed(&entry)));
 }
 
 FileError ResourceMetadata::GetResourceEntryById(const std::string& id,
@@ -313,8 +303,7 @@ FileError ResourceMetadata::ReadDirectoryByPath(
   return FILE_ERROR_OK;
 }
 
-FileError ResourceMetadata::RefreshEntry(const std::string& id,
-                                         const ResourceEntry& entry) {
+FileError ResourceMetadata::RefreshEntry(const ResourceEntry& entry) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
   // TODO(hashimoto): Return an error if the operation will result in having
   // multiple entries with the same resource ID.
@@ -323,7 +312,7 @@ FileError ResourceMetadata::RefreshEntry(const std::string& id,
     return FILE_ERROR_NO_LOCAL_SPACE;
 
   ResourceEntry old_entry;
-  if (!storage_->GetEntry(id, &old_entry))
+  if (!storage_->GetEntry(entry.local_id(), &old_entry))
     return FILE_ERROR_NOT_FOUND;
 
   if (old_entry.parent_local_id().empty() ||  // Reject root.
@@ -340,7 +329,7 @@ FileError ResourceMetadata::RefreshEntry(const std::string& id,
     return FILE_ERROR_NOT_A_DIRECTORY;
 
   // Remove from the old parent and add it to the new parent with the new data.
-  if (!PutEntryUnderDirectory(id, entry))
+  if (!PutEntryUnderDirectory(entry))
     return FILE_ERROR_FAILED;
   return FILE_ERROR_OK;
 }
@@ -413,18 +402,14 @@ FileError ResourceMetadata::GetIdByResourceId(const std::string& resource_id,
                                               std::string* out_local_id) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
 
-  // TODO(hashimoto): Implement the real resource ID to local ID look up.
-  // crbug.com/260514
-  ResourceEntry entry;
-  FileError error = GetResourceEntryById(resource_id, &entry);
-  if (error == FILE_ERROR_OK)
-    *out_local_id = resource_id;
-  return error;
+  return storage_->GetIdByResourceId(resource_id, out_local_id) ?
+      FILE_ERROR_OK : FILE_ERROR_NOT_FOUND;
 }
 
-bool ResourceMetadata::PutEntryUnderDirectory(const std::string& id,
-                                              const ResourceEntry& entry) {
+bool ResourceMetadata::PutEntryUnderDirectory(const ResourceEntry& entry) {
   DCHECK(blocking_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(!entry.local_id().empty());
+  DCHECK(!entry.parent_local_id().empty());
 
   ResourceEntry updated_entry(entry);
 
@@ -440,7 +425,7 @@ bool ResourceMetadata::PutEntryUnderDirectory(const std::string& id,
   while (true) {
     const std::string existing_entry_id =
         storage_->GetChild(entry.parent_local_id(), new_base_name);
-    if (existing_entry_id.empty() || existing_entry_id == id)
+    if (existing_entry_id.empty() || existing_entry_id == entry.local_id())
       break;
 
     base::FilePath new_path =
@@ -454,7 +439,7 @@ bool ResourceMetadata::PutEntryUnderDirectory(const std::string& id,
   updated_entry.set_base_name(new_base_name);
 
   // Add the entry to resource map.
-  return storage_->PutEntry(id, updated_entry);
+  return storage_->PutEntry(updated_entry);
 }
 
 bool ResourceMetadata::RemoveEntryRecursively(const std::string& id) {

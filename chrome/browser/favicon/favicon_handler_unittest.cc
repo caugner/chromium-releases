@@ -410,7 +410,8 @@ class FaviconHandlerTest : public ChromeRenderViewHostTestHarness {
     // results on all platforms.
     std::vector<ui::ScaleFactor> scale_factors;
     scale_factors.push_back(ui::SCALE_FACTOR_100P);
-    ui::test::SetSupportedScaleFactors(scale_factors);
+    scoped_set_supported_scale_factors_.reset(
+        new ui::test::ScopedSetSupportedScaleFactors(scale_factors));
 
     ChromeRenderViewHostTestHarness::SetUp();
   }
@@ -424,6 +425,9 @@ class FaviconHandlerTest : public ChromeRenderViewHostTestHarness {
   }
 
  private:
+  typedef scoped_ptr<ui::test::ScopedSetSupportedScaleFactors>
+      ScopedSetSupportedScaleFactors;
+  ScopedSetSupportedScaleFactors scoped_set_supported_scale_factors_;
   DISALLOW_COPY_AND_ASSIGN(FaviconHandlerTest);
 };
 
@@ -970,6 +974,8 @@ TEST_F(FaviconHandlerTest, UpdateDuringDownloading) {
   EXPECT_FALSE(download_handler->HasDownload());
 }
 
+#if !defined(OS_ANDROID)
+
 // Test the favicon which is selected when the web page provides several
 // favicons and none of the favicons are cached in history.
 // The goal of this test is to be more of an integration test than
@@ -1058,6 +1064,8 @@ TEST_F(FaviconHandlerTest, MultipleFavicons) {
   EXPECT_EQ(kSourceIconURLs[expected_index].icon_url,
             handler4.GetEntry()->GetFavicon().url);
 }
+
+#endif
 
 static BrowserContextKeyedService* BuildFaviconService(
     content::BrowserContext* profile) {

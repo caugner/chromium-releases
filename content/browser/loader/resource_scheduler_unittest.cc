@@ -17,6 +17,7 @@
 #include "content/public/browser/resource_throttle.h"
 #include "content/public/common/process_type.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/request_priority.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
@@ -139,8 +140,7 @@ class ResourceSchedulerTest : public testing::Test {
       net::RequestPriority priority,
       int route_id) {
     scoped_ptr<net::URLRequest> url_request(
-        context_.CreateRequest(GURL(url), NULL));
-    url_request->SetPriority(priority);
+        context_.CreateRequest(GURL(url), priority, NULL));
     ResourceRequestInfoImpl* info = new ResourceRequestInfoImpl(
         PROCESS_TYPE_RENDERER,             // process_type
         kChildId,                          // child_id
@@ -159,6 +159,7 @@ class ResourceSchedulerTest : public testing::Test {
         false,                             // has_user_gesture
         WebKit::WebReferrerPolicyDefault,  // referrer_policy
         NULL,                              // context
+        base::WeakPtr<ResourceMessageFilter>(),  // filter
         true);                             // is_async
     info->AssociateWithRequest(url_request.get());
     return url_request.Pass();
@@ -427,6 +428,16 @@ TEST_F(ResourceSchedulerTest, ReprioritizedRequestGoesToBackOfQueue) {
   scheduler_.OnWillInsertBody(kChildId, kRouteId);
   EXPECT_FALSE(request->started());
   EXPECT_FALSE(idle->started());
+}
+
+TEST_F(ResourceSchedulerTest, NonHTTPSchedulesImmediately) {
+  // Dummies to enforce scheduling.
+  scoped_ptr<TestRequest> high(NewRequest("http://host/high", net::HIGHEST));
+  scoped_ptr<TestRequest> low(NewRequest("http://host/high", net::LOWEST));
+
+  scoped_ptr<TestRequest> request(
+      NewRequest("chrome-extension://req", net::LOWEST));
+  EXPECT_TRUE(request->started());
 }
 
 }  // unnamed namespace

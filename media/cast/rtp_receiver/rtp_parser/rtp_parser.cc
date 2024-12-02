@@ -12,8 +12,8 @@
 namespace media {
 namespace cast {
 
-static const int kRtpCommonHeaderLength = 12;
-static const int kRtpCastHeaderLength = 7;
+static const size_t kRtpCommonHeaderLength = 12;
+static const size_t kRtpCastHeaderLength = 7;
 static const uint8 kCastKeyFrameBitMask = 0x80;
 static const uint8 kCastReferenceFrameIdBitMask = 0x40;
 
@@ -26,7 +26,7 @@ RtpParser::RtpParser(RtpData* incoming_payload_callback,
 RtpParser::~RtpParser() {
 }
 
-bool RtpParser::ParsePacket(const uint8* packet, int length,
+bool RtpParser::ParsePacket(const uint8* packet, size_t length,
                             RtpCastHeader* rtp_header) {
   if (length == 0) return false;
   // Get RTP general header.
@@ -41,7 +41,7 @@ bool RtpParser::ParsePacket(const uint8* packet, int length,
 }
 
 bool RtpParser::ParseCommon(const uint8* packet,
-                            int length,
+                            size_t length,
                             RtpCastHeader* rtp_header) {
   if (length < kRtpCommonHeaderLength) return false;
   uint8 version = packet[0] >> 6;
@@ -52,10 +52,12 @@ bool RtpParser::ParseCommon(const uint8* packet,
 
   uint16 sequence_number;
   uint32 rtp_timestamp, ssrc;
-  net::BigEndianReader big_endian_reader(packet + 2, 80);
+  net::BigEndianReader big_endian_reader(packet + 2, 10);
   big_endian_reader.ReadU16(&sequence_number);
   big_endian_reader.ReadU32(&rtp_timestamp);
   big_endian_reader.ReadU32(&ssrc);
+
+  if (ssrc != parser_config_.ssrc) return false;
 
   rtp_header->webrtc.header.markerBit      = marker;
   rtp_header->webrtc.header.payloadType    = payload_type;
@@ -69,21 +71,23 @@ bool RtpParser::ParseCommon(const uint8* packet,
   rtp_header->webrtc.header.headerLength = kRtpCommonHeaderLength + csrc_octs;
   rtp_header->webrtc.type.Audio.isCNG = false;
   rtp_header->webrtc.type.Audio.channel = parser_config_.audio_channels;
+  // TODO(pwestin): look at x bit and skip data.
   return true;
 }
 
 bool RtpParser::ParseCast(const uint8* packet,
-                          int length,
+                          size_t length,
                           RtpCastHeader* rtp_header) {
   if (length < kRtpCastHeaderLength) return false;
+
   // Extract header.
   const uint8* data_ptr = packet;
-  int data_length = length;
+  size_t data_length = length;
   rtp_header->is_key_frame = (data_ptr[0] & kCastKeyFrameBitMask);
   rtp_header->is_reference = (data_ptr[0] & kCastReferenceFrameIdBitMask);
   rtp_header->frame_id = data_ptr[1];
 
-  net::BigEndianReader big_endian_reader(data_ptr + 2, 32);
+  net::BigEndianReader big_endian_reader(data_ptr + 2, 4);
   big_endian_reader.ReadU16(&rtp_header->packet_id);
   big_endian_reader.ReadU16(&rtp_header->max_packet_id);
 
@@ -96,9 +100,8 @@ bool RtpParser::ParseCast(const uint8* packet,
     data_length -= kRtpCastHeaderLength - 1;
   }
 
-  if (rtp_header->max_packet_id < rtp_header->packet_id) {
-    return false;
-  }
+  if (rtp_header->max_packet_id < rtp_header->packet_id) return false;
+
   data_callback_->OnReceivedPayloadData(data_ptr, data_length, rtp_header);
   return true;
 }

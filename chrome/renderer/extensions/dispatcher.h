@@ -19,7 +19,10 @@
 #include "chrome/renderer/resource_bundle_source_map.h"
 #include "content/public/renderer/render_process_observer.h"
 #include "extensions/common/event_filter.h"
+#include "extensions/common/extensions_client.h"
 #include "extensions/common/features/feature.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
 #include "v8/include/v8.h"
 
 class ChromeRenderViewTest;
@@ -49,6 +52,7 @@ class Extension;
 class FilteredEventRouter;
 class RequestSender;
 class UserScriptSlave;
+struct Message;
 
 // Dispatches extension control messages sent to the renderer and stores
 // renderer extension related state.
@@ -96,6 +100,11 @@ class Dispatcher : public content::RenderProcessObserver {
                                 int world_id);
 
   void DidCreateDocumentElement(WebKit::WebFrame* frame);
+
+  void DidMatchCSS(
+      WebKit::WebFrame* frame,
+      const WebKit::WebVector<WebKit::WebString>& newly_matching_selectors,
+      const WebKit::WebVector<WebKit::WebString>& stopped_matching_selectors);
 
   // TODO(mpcomplete): remove. http://crbug.com/100411
   bool IsAdblockWithWebRequestInstalled() const {
@@ -154,8 +163,9 @@ class Dispatcher : public content::RenderProcessObserver {
   void OnDispatchOnConnect(int target_port_id,
                            const std::string& channel_name,
                            const base::DictionaryValue& source_tab,
-                           const ExtensionMsg_ExternalConnectionInfo& info);
-  void OnDeliverMessage(int target_port_id, const std::string& message);
+                           const ExtensionMsg_ExternalConnectionInfo& info,
+                           const std::string& tls_channel_id);
+  void OnDeliverMessage(int target_port_id, const Message& message);
   void OnDispatchOnDisconnect(int port_id, const std::string& error_message);
   void OnSetFunctionNames(const std::vector<std::string>& names);
   void OnSetSystemFont(const std::string& font_family,
@@ -165,7 +175,7 @@ class Dispatcher : public content::RenderProcessObserver {
   void OnLoadedInternal(scoped_refptr<const Extension> extension);
   void OnUnloaded(const std::string& id);
   void OnSetScriptingWhitelist(
-      const Extension::ScriptingWhitelist& extension_ids);
+      const ExtensionsClient::ScriptingWhitelist& extension_ids);
   void OnPageActionsUpdated(const std::string& extension_id,
       const std::vector<std::string>& page_actions);
   void OnActivateExtension(const std::string& extension_id);

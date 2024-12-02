@@ -35,7 +35,7 @@ podrow.images-loading {
 
 .pod {
   -webkit-tap-highlight-color: transparent;
-  -webkit-transform: scale(0.9);
+  -webkit-transform: scale3d(0.9, 0.9, 0.9);
   -webkit-transition: all 180ms ease;
   background-color: white;
   border-radius: 2px;
@@ -59,13 +59,13 @@ podrow.images-loading {
 }
 
 podrow[ncolumns='6'] .pod {
-  -webkit-transform: scale(0.8);
+  -webkit-transform: scale3d(0.8, 0.8, 0.8);
   margin: 0 6px;
 }
 
 .pod.focused {
   /* Focused pod has the same size no matter how many pods. */
-  -webkit-transform: scale(1.0) !important;
+  -webkit-transform: scale3d(1, 1, 1) !important;
   cursor: default;
   z-index: 1;
 }
@@ -85,7 +85,7 @@ podrow[ncolumns='6'] .pod {
 }
 
 .pod.init {
-  -webkit-transform: scale(2.4);
+  -webkit-transform: scale3d(2.4, 2.4, 2.4);
   opacity: 0;
 }
 
@@ -100,7 +100,7 @@ podrow[ncolumns='6'] .pod {
 }
 
 .pod.zoom {
-  -webkit-transform: scale(2.2);
+  -webkit-transform: scale3d(2.2, 2.2, 2.2);
   opacity: 0;
 }
 
@@ -349,7 +349,10 @@ html[oobe=old] .pod.focused .action-box-area {
 .pod.public-account .name,
 .side-pane-name {
   -webkit-padding-end: 16px;
+  max-height: 42px;
   outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .learn-more,

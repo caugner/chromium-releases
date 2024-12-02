@@ -10,6 +10,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/cloud/cloud_policy_constants.h"
 #include "chrome/browser/policy/cloud/device_management_service.h"
+#include "chrome/browser/policy/cloud/mock_device_management_service.h"
 #include "chrome/browser/policy/cloud/test_request_interceptor.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -97,7 +98,9 @@ class DeviceManagementServiceIntegrationTest
                                const em::DeviceManagementResponse&));
 
   std::string InitCannedResponse() {
-    interceptor_.reset(new TestRequestInterceptor("localhost"));
+    interceptor_.reset(new TestRequestInterceptor(
+        "localhost",
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
     return "http://localhost";
   }
 
@@ -140,9 +143,9 @@ class DeviceManagementServiceIntegrationTest
   virtual void SetUpOnMainThread() OVERRIDE {
     std::string service_url((this->*(GetParam()))());
     service_.reset(new DeviceManagementService(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-        g_browser_process->system_request_context(),
-        service_url));
+        scoped_ptr<DeviceManagementService::Configuration>(
+            new MockDeviceManagementServiceConfiguration(service_url)),
+        g_browser_process->system_request_context()));
     service_->ScheduleInitialization(0);
   }
 

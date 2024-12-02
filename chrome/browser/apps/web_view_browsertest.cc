@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "apps/native_app_window.h"
+#include "apps/ui/native_app_window.h"
+#include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
@@ -24,6 +25,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/fake_speech_recognition_manager.h"
+#include "extensions/common/extensions_client.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -42,6 +44,15 @@ const char kEmptyResponsePath[] = "/close-socket";
 const char kRedirectResponsePath[] = "/server-redirect";
 const char kRedirectResponseFullPath[] =
     "/extensions/platform_apps/web_view/shim/guest_redirect.html";
+
+// Platform-specific filename relative to the chrome executable.
+#if defined(OS_WIN)
+const wchar_t library_name[] = L"ppapi_tests.dll";
+#elif defined(OS_MACOSX)
+const char library_name[] = "ppapi_tests.plugin";
+#elif defined(OS_POSIX)
+const char library_name[] = "libppapi_tests.so";
+#endif
 
 class EmptyHttpResponse : public net::test_server::HttpResponse {
  public:
@@ -220,17 +231,14 @@ class MockDownloadWebContentsDelegate : public content::WebContentsDelegate {
 class WebViewTest : public extensions::PlatformAppBrowserTest {
  protected:
   virtual void SetUp() OVERRIDE {
-    const testing::TestInfo* const test_info =
-        testing::UnitTest::GetInstance()->current_test_info();
-
-    // SpeechRecognition test specific SetUp.
-    if (!strcmp(test_info->name(), "SpeechRecognition")) {
+    if (UsesFakeSpeech()) {
+      // SpeechRecognition test specific SetUp.
       fake_speech_recognition_manager_.reset(
           new content::FakeSpeechRecognitionManager());
       fake_speech_recognition_manager_->set_should_send_fake_response(true);
       // Inject the fake manager factory so that the test result is returned to
       // the web page.
-      content::SpeechRecognitionManager::SetManagerForTests(
+      content::SpeechRecognitionManager::SetManagerForTesting(
           fake_speech_recognition_manager_.get());
     }
 
@@ -241,11 +249,10 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   }
 
   virtual void TearDown() OVERRIDE {
-    // SpeechRecognition test specific TearDown.
-    const testing::TestInfo* const test_info =
-        testing::UnitTest::GetInstance()->current_test_info();
-    if (!strcmp(test_info->name(), "SpeechRecognition"))
-      content::SpeechRecognitionManager::SetManagerForTests(NULL);
+    if (UsesFakeSpeech()) {
+      // SpeechRecognition test specific TearDown.
+      content::SpeechRecognitionManager::SetManagerForTesting(NULL);
+    }
 
     extensions::PlatformAppBrowserTest::TearDown();
   }
@@ -567,6 +574,16 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   }
 
  private:
+  bool UsesFakeSpeech() {
+    const testing::TestInfo* const test_info =
+        testing::UnitTest::GetInstance()->current_test_info();
+
+    // SpeechRecognition test specific SetUp.
+    return !strcmp(test_info->name(), "SpeechRecognition") ||
+           !strcmp(test_info->name(),
+                   "SpeechRecognitionAPI_HasPermissionAllow");
+  }
+
   scoped_ptr<content::FakeSpeechRecognitionManager>
       fake_speech_recognition_manager_;
 };
@@ -581,6 +598,12 @@ IN_PROC_BROWSER_TEST_F(WebViewTest,
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, AutoSize) {
+#if defined(OS_WIN)
+  // Flaky on XP bot http://crbug.com/299507
+  if (base::win::GetVersion() <= base::win::VERSION_XP)
+    return;
+#endif
+
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/autosize"))
       << message_;
 }
@@ -589,18 +612,17 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, AutoSize) {
 // This test ensures <webview> doesn't crash in SW rendering when autosize is
 // turned on.
 IN_PROC_BROWSER_TEST_F(WebViewTest, AutoSizeSW) {
+#if defined(OS_WIN)
+  // Flaky on XP bot http://crbug.com/299507
+  if (base::win::GetVersion() <= base::win::VERSION_XP)
+    return;
+#endif
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/autosize"))
       << message_;
 }
 #endif
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeAfterNavigation) {
-#if defined(USE_AURA)
-  // TODO(gab): Fix this test in software compositing mode:
-  // http://crbug.com/295801.
-  if (!content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor())
-    return;
-#endif
   TestHelper("testAutosizeAfterNavigation",
              "DoneShimTest.PASSED",
              "DoneShimTest.FAILED",
@@ -608,24 +630,12 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeAfterNavigation) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeBeforeNavigation) {
-#if defined(USE_AURA)
-  // TODO(gab): Fix this test in software compositing mode:
-  // http://crbug.com/295801.
-  if (!content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor())
-    return;
-#endif
   TestHelper("testAutosizeBeforeNavigation",
              "DoneShimTest.PASSED",
              "DoneShimTest.FAILED",
              "web_view/shim");
 }
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeRemoveAttributes) {
-#if defined(USE_AURA)
-  // TODO(gab): Fix this test in software compositing mode:
-  // http://crbug.com/295801.
-  if (!content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor())
-    return;
-#endif
   TestHelper("testAutosizeRemoveAttributes",
              "DoneShimTest.PASSED",
              "DoneShimTest.FAILED",
@@ -642,12 +652,6 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeRemoveAttributes) {
 #endif
 IN_PROC_BROWSER_TEST_F(WebViewTest,
                        MAYBE_Shim_TestAutosizeWithPartialAttributes) {
-#if defined(USE_AURA)
-  // TODO(gab): Fix this test in software compositing mode:
-  // http://crbug.com/295801.
-  if (!content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor())
-    return;
-#endif
   TestHelper("testAutosizeWithPartialAttributes",
              "DoneShimTest.PASSED",
              "DoneShimTest.FAILED",
@@ -665,6 +669,27 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAPIMethodExistence) {
 // object, on the webview element, and hanging directly off webview.
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestWebRequestAPIExistence) {
   TestHelper("testWebRequestAPIExistence",
+             "DoneShimTest.PASSED",
+             "DoneShimTest.FAILED",
+             "web_view/shim");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestChromeExtensionURL) {
+  TestHelper("testChromeExtensionURL",
+             "DoneShimTest.PASSED",
+             "DoneShimTest.FAILED",
+             "web_view/shim");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestChromeExtensionRelativePath) {
+  TestHelper("testChromeExtensionRelativePath",
+             "DoneShimTest.PASSED",
+             "DoneShimTest.FAILED",
+             "web_view/shim");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestInvalidChromeExtensionURL) {
+  TestHelper("testInvalidChromeExtensionURL",
              "DoneShimTest.PASSED",
              "DoneShimTest.FAILED",
              "web_view/shim");
@@ -845,8 +870,17 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestWebRequestAPIGoogleProperty) {
              "web_view/shim");
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewTest,
-                       Shim_TestWebRequestListenerSurvivesReparenting) {
+// This test is disabled due to being flaky. http://crbug.com/309451
+#if defined(OS_WIN)
+#define MAYBE_Shim_TestWebRequestListenerSurvivesReparenting \
+    DISABLED_Shim_TestWebRequestListenerSurvivesReparenting
+#else
+#define MAYBE_Shim_TestWebRequestListenerSurvivesReparenting \
+    Shim_TestWebRequestListenerSurvivesReparenting
+#endif
+IN_PROC_BROWSER_TEST_F(
+    WebViewTest,
+    MAYBE_Shim_TestWebRequestListenerSurvivesReparenting) {
   TestHelper("testWebRequestListenerSurvivesReparenting",
              "DoneShimTest.PASSED",
              "DoneShimTest.FAILED",
@@ -855,6 +889,14 @@ IN_PROC_BROWSER_TEST_F(WebViewTest,
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestLoadStartLoadRedirect) {
   TestHelper("testLoadStartLoadRedirect",
+             "DoneShimTest.PASSED",
+             "DoneShimTest.FAILED",
+             "web_view/shim");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       Shim_TestLoadAbortChromeExtensionURLWrongPartition) {
+  TestHelper("testLoadAbortChromeExtensionURLWrongPartition",
              "DoneShimTest.PASSED",
              "DoneShimTest.FAILED",
              "web_view/shim");
@@ -940,9 +982,8 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestRemoveWebviewOnExit) {
 
   ASSERT_TRUE(guest_loaded_listener.WaitUntilSatisfied());
 
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-      content::Source<content::WebContents>(source->GetWebContents()));
+  content::WebContentsDestroyedWatcher destroyed_watcher(
+      source->GetWebContents());
 
   // Tell the embedder to kill the guest.
   EXPECT_TRUE(content::ExecuteScript(
@@ -950,7 +991,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestRemoveWebviewOnExit) {
                   "removeWebviewOnExitDoCrash();"));
 
   // Wait until the guest WebContents is destroyed.
-  observer.Wait();
+  destroyed_watcher.Wait();
 }
 
 // Remove <webview> immediately after navigating it.
@@ -970,12 +1011,6 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestNavigationToExternalProtocol) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestResizeWebviewResizesContent) {
-#if defined(USE_AURA)
-  // TODO(gab): Fix this test in software compositing mode:
-  // http://crbug.com/295801.
-  if (!content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor())
-    return;
-#endif
   TestHelper("testResizeWebviewResizesContent",
              "DoneShimTest.PASSED",
              "DoneShimTest.FAILED",
@@ -984,13 +1019,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestResizeWebviewResizesContent) {
 
 // This test makes sure we do not crash if app is closed while interstitial
 // page is being shown in guest.
-// Test flaky on windows; http://crbug.com/297014 .
-#if defined(OS_WIN)
-#define MAYBE_InterstitialTeardown DISABLED_InterstitialTeardown
-#else
-#define MAYBE_InterstitialTeardown InterstitialTeardown
-#endif
-IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_InterstitialTeardown) {
+IN_PROC_BROWSER_TEST_F(WebViewTest, InterstitialTeardown) {
   // Start a HTTPS server so we can load an interstitial page inside guest.
   net::SpawnedTestServer::SSLOptions ssl_options;
   ssl_options.server_certificate =
@@ -1566,7 +1595,13 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, SpeechRecognition) {
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewTest, TearDownTest) {
+// Flaky on Windows. http://crbug.com/303966
+#if defined(OS_WIN)
+#define MAYBE_TearDownTest DISABLED_TearDownTest
+#else
+#define MAYBE_TearDownTest TearDownTest
+#endif
+IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_TearDownTest) {
   ExtensionTestMessageListener first_loaded_listener("guest-loaded", false);
   const extensions::Extension* extension =
       LoadAndLaunchPlatformApp("web_view/teardown");
@@ -1645,7 +1680,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPICancelGeolocation) {
         "platform_apps/web_view/geolocation/cancel_request")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationRequestGone) {
+IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_GeolocationRequestGone) {
   ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
   ASSERT_TRUE(RunPlatformAppTest(
         "platform_apps/web_view/geolocation/geolocation_request_gone"))
@@ -1714,10 +1749,10 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, DownloadPermission) {
 // extension which has content script whitelisted/forced.
 IN_PROC_BROWSER_TEST_F(WebViewTest, WhitelistedContentScript) {
   // Whitelist the extension for running content script we are going to load.
-  extensions::Extension::ScriptingWhitelist whitelist;
+  extensions::ExtensionsClient::ScriptingWhitelist whitelist;
   const std::string extension_id = "imeongpbjoodlnmlakaldhlcmijmhpbb";
   whitelist.push_back(extension_id);
-  extensions::Extension::SetScriptingWhitelist(whitelist);
+  extensions::ExtensionsClient::Get()->SetScriptingWhitelist(whitelist);
 
   // Load the extension.
   const extensions::Extension* content_script_whitelisted_extension =
@@ -1739,6 +1774,39 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, SetPropertyOnDocumentReady) {
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, SetPropertyOnDocumentInteractive) {
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/document_interactive"))
+                  << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, SpeechRecognitionAPI_HasPermissionAllow) {
+  ASSERT_TRUE(
+      RunPlatformAppTestWithArg("platform_apps/web_view/speech_recognition_api",
+                                "allowTest"))
+          << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, SpeechRecognitionAPI_HasPermissionDeny) {
+  ASSERT_TRUE(
+      RunPlatformAppTestWithArg("platform_apps/web_view/speech_recognition_api",
+                                "denyTest"))
+          << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, SpeechRecognitionAPI_NoPermission) {
+  ASSERT_TRUE(
+      RunPlatformAppTestWithArg("platform_apps/web_view/common",
+                                "speech_recognition_api_no_permission"))
+          << message_;
+}
+
+// Tests overriding user agent.
+IN_PROC_BROWSER_TEST_F(WebViewTest, UserAgent) {
+  ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
+  ASSERT_TRUE(RunPlatformAppTestWithArg(
+              "platform_apps/web_view/common", "useragent")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, NoPermission) {
+  ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/nopermission"))
                   << message_;
 }
 
@@ -1770,6 +1838,8 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Dialog_TestConfirmDialogDefaultCancel) {
              "web_view/dialog");
 }
 
+// TODO(fsamuel): This test consistently times out when run in parallel with
+// other tests, but consistently passes when retried http://crbug.com/314809
 IN_PROC_BROWSER_TEST_F(WebViewTest, Dialog_TestConfirmDialogDefaultGCCancel) {
   TestHelper("testConfirmDialogDefaultGCCancel",
              "DoneDialogTest.PASSED",
@@ -1783,3 +1853,32 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Dialog_TestPromptDialog) {
              "DoneDialogTest.FAILED",
              "web_view/dialog");
 }
+
+#if defined(ENABLE_PLUGINS)
+class WebViewPluginTest : public WebViewTest {
+ protected:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    WebViewTest::SetUpCommandLine(command_line);
+
+    // Append the switch to register the pepper plugin.
+    // library name = <out dir>/<test_name>.<library_extension>
+    // MIME type = application/x-ppapi-<test_name>
+    base::FilePath plugin_dir;
+    EXPECT_TRUE(PathService::Get(base::DIR_MODULE, &plugin_dir));
+
+    base::FilePath plugin_lib = plugin_dir.Append(library_name);
+    EXPECT_TRUE(base::PathExists(plugin_lib));
+    base::FilePath::StringType pepper_plugin = plugin_lib.value();
+    pepper_plugin.append(FILE_PATH_LITERAL(";application/x-ppapi-tests"));
+    command_line->AppendSwitchNative(switches::kRegisterPepperPlugins,
+                                     pepper_plugin);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WebViewPluginTest, TestLoadPluginEvent) {
+  TestHelper("testPluginLoadPermission",
+             "DoneShimTest.PASSED",
+             "DoneShimTest.FAILED",
+             "web_view/shim");
+}
+#endif  // defined(ENABLE_PLUGINS)

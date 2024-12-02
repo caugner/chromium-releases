@@ -96,8 +96,6 @@ using syncable::kEncryptedString;
 
 namespace {
 
-const char kTestChromeVersion[] = "test chrome version";
-
 void ExpectInt64Value(int64 expected_value,
                       const base::DictionaryValue& value,
                       const std::string& key) {
@@ -837,7 +835,6 @@ class SyncManagerTest : public testing::Test,
         scoped_ptr<UnrecoverableErrorHandler>(
             new TestUnrecoverableErrorHandler).Pass(),
         NULL,
-        false,
         &cancelation_signal_);
 
     sync_manager_.GetEncryptionHandler()->AddObserver(&encryption_observer_);
@@ -987,9 +984,7 @@ class SyncManagerTest : public testing::Test,
     DCHECK(sync_manager_.thread_checker_.CalledOnValidThread());
     ObjectIdSet id_set = ModelTypeSetToObjectIdSet(model_types);
     ObjectIdInvalidationMap invalidation_map =
-        ObjectIdSetToInvalidationMap(id_set,
-                                     Invalidation::kUnknownVersion,
-                                     std::string());
+        ObjectIdInvalidationMap::InvalidateAll(id_set);
     sync_manager_.OnIncomingInvalidation(invalidation_map);
   }
 

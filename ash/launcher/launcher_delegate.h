@@ -8,6 +8,10 @@
 #include "ash/ash_export.h"
 #include "ash/launcher/launcher_types.h"
 
+namespace aura {
+class Window;
+}
+
 namespace ash {
 class Launcher;
 
@@ -21,6 +25,7 @@ class ASH_EXPORT LauncherDelegate {
   // there isn't one.
   // Note: Windows of tabbed browsers will return the |LauncherID| of the
   // currently active tab or selected tab.
+  // TODO(simon.hong81): Remove this and handle in LauncherItemDelegateManager.
   virtual LauncherID GetIDByWindow(aura::Window* window) = 0;
 
   // Callback used to allow delegate to perform initialization actions that
