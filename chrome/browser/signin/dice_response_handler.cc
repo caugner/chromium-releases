@@ -362,10 +362,10 @@ void DiceResponseHandler::ProcessDiceHeader(
       ProcessDiceSignoutHeader(dice_params.signout_info->account_infos);
       return;
     case signin::DiceAction::NONE:
-      NOTREACHED() << "Invalid Dice response parameters.";
+      NOTREACHED_IN_MIGRATION() << "Invalid Dice response parameters.";
       return;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 size_t DiceResponseHandler::GetPendingDiceTokenFetchersCountForTesting() const {
@@ -402,8 +402,9 @@ void DiceResponseHandler::ProcessDiceSigninHeader(
         "Missing authorization code due to OAuth outage in Dice.");
     if (!timer_) {
       timer_ = std::make_unique<base::OneShotTimer>();
-      if (task_runner_)
+      if (task_runner_) {
         timer_->SetTaskRunner(task_runner_);
+      }
     }
     // If there is already another lock, the timer will be reset and
     // we'll wait another full timeout.
@@ -530,7 +531,7 @@ void DiceResponseHandler::DeleteTokenFetcher(DiceTokenFetcher* token_fetcher) {
       return;
     }
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 void DiceResponseHandler::OnTokenExchangeSuccess(
@@ -551,27 +552,11 @@ void DiceResponseHandler::OnTokenExchangeSuccess(
   bool is_new_account =
       !identity_manager_->HasAccountWithRefreshToken(account_id);
 
-  // If this is a reauth, do not update the access point.
-  signin_metrics::AccessPoint access_point =
-      is_new_account ? token_fetcher->delegate()->GetAccessPoint()
-                     : signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN;
-  // Specifically set the token operation source in case the error was updated
-  // through a sign in from a password sign in promo, as this will indicate
-  // whether to move the password to account storage or not.
-  // TODO(crbug.com/339157240): Change the way this is implemented to not use
-  // SourceForRefreshTokenOperation as an indicator of the reauthentication
-  // source.
-  signin_metrics::SourceForRefreshTokenOperation token_operation_source =
-      token_fetcher->delegate()->GetAccessPoint() ==
-              signin_metrics::AccessPoint::ACCESS_POINT_PASSWORD_BUBBLE
-          ? signin_metrics::SourceForRefreshTokenOperation::
-                kDiceResponseHandler_PasswordPromoSignin
-          : signin_metrics::SourceForRefreshTokenOperation::
-                kDiceResponseHandler_Signin;
-
   identity_manager_->GetAccountsMutator()->AddOrUpdateAccount(
-      gaia_id, email, refresh_token, is_under_advanced_protection, access_point,
-      token_operation_source
+      gaia_id, email, refresh_token, is_under_advanced_protection,
+      token_fetcher->delegate()->GetAccessPoint(),
+      signin_metrics::SourceForRefreshTokenOperation::
+          kDiceResponseHandler_Signin
 #if BUILDFLAG(ENABLE_BOUND_SESSION_CREDENTIALS)
       ,
       wrapped_binding_key

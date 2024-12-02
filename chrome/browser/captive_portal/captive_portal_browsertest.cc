@@ -31,6 +31,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/captive_portal/captive_portal_service_factory.h"
+#include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/net/secure_dns_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -68,6 +69,7 @@
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/prerender_test_util.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
@@ -1622,7 +1624,20 @@ void CaptivePortalBrowserTest::Login(Browser* captive_portal_browser,
   int login_tab_index = tab_strip_model->active_index();
   EXPECT_EQ(captive_portal::CaptivePortalTabReloader::STATE_NONE,
             GetStateOfTabReloaderAt(captive_portal_browser, login_tab_index));
-  ASSERT_TRUE(IsLoginTab(tab_strip_model->GetWebContentsAt(login_tab_index)));
+  content::WebContents* login_tab =
+      tab_strip_model->GetWebContentsAt(login_tab_index);
+  ASSERT_TRUE(IsLoginTab(login_tab));
+
+  // If an HTTP interstitial is showing, click through that first so the login
+  // page is shown. (In testing, one case where this can occur is when
+  // HTTPS-First Mode is enabled in Incognito windows by default.)
+  if (chrome_browser_interstitials::IsShowingHttpsFirstModeInterstitial(
+          login_tab)) {
+    content::TestNavigationObserver nav_observer(login_tab, 1);
+    std::string javascript = "window.certificateErrorPageController.proceed();";
+    ASSERT_TRUE(content::ExecJs(login_tab, javascript));
+    nav_observer.Wait();
+  }
 
   // Trigger a navigation.
   content::ExecuteScriptAsync(tab_strip_model->GetActiveWebContents(),
@@ -2931,7 +2946,13 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
             GetInterstitialType(broken_tab_contents));
 }
 
-IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, SecureDnsCaptivePortal) {
+// TODO(crbug.com/339524384) Flaky on Windows.
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_SecureDnsCaptivePortal DISABLED_SecureDnsCaptivePortal
+#else
+#define MAYBE_SecureDnsCaptivePortal SecureDnsCaptivePortal
+#endif
+IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, MAYBE_SecureDnsCaptivePortal) {
   PrefService* local_state = g_browser_process->local_state();
   local_state->SetString(prefs::kDnsOverHttpsMode,
                          SecureDnsConfig::kModeSecure);
@@ -2969,7 +2990,14 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, SecureDnsCaptivePortal) {
 // An HTTP load results in a secure DNS error, which triggers a captive portal
 // probe that fails. After logging in, the secure DNS error happens again,
 // triggering a captive portal probe that now succeeds.
-IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, SecureDnsErrorTriggersCheck) {
+// TODO(crbug.com/339524384) Flaky on Windows.
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_SecureDnsErrorTriggersCheck DISABLED_SecureDnsErrorTriggersCheck
+#else
+#define MAYBE_SecureDnsErrorTriggersCheck SecureDnsErrorTriggersCheck
+#endif
+IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
+                       MAYBE_SecureDnsErrorTriggersCheck) {
   PrefService* local_state = g_browser_process->local_state();
   local_state->SetString(prefs::kDnsOverHttpsTemplates,
                          "https://bar.test/dns-query{?dns}");
@@ -3008,8 +3036,16 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, SecureDnsErrorTriggersCheck) {
 // which finds a captive portal. The HTTPS load finally completes with a secure
 // DNS error, which does not trigger another captive portal check. Only one
 // login tab should exist.
+// TODO(crbug.com/339524384) Flaky on Windows.
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_SlowLoadSecureDnsErrorWithCaptivePortal \
+  DISABLED_SlowLoadSecureDnsErrorWithCaptivePortal
+#else
+#define MAYBE_SlowLoadSecureDnsErrorWithCaptivePortal \
+  SlowLoadSecureDnsErrorWithCaptivePortal
+#endif
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
-                       SlowLoadSecureDnsErrorWithCaptivePortal) {
+                       MAYBE_SlowLoadSecureDnsErrorWithCaptivePortal) {
   PrefService* local_state = g_browser_process->local_state();
   local_state->SetString(prefs::kDnsOverHttpsTemplates,
                          "https://bar.test/dns-query{?dns}");
@@ -3037,8 +3073,15 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
 // which finds a captive portal. After logging in, the HTTPS load finally
 // completes with a secure DNS error, which triggers another captive portal
 // check that should succeed.
+// TODO(crbug.com/339524384) Flaky on Windows.
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_SlowLoadSecureDnsErrorAfterLogin \
+  DISABLED_SlowLoadSecureDnsErrorAfterLogin
+#else
+#define MAYBE_SlowLoadSecureDnsErrorAfterLogin SlowLoadSecureDnsErrorAfterLogin
+#endif
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
-                       SlowLoadSecureDnsErrorAfterLogin) {
+                       MAYBE_SlowLoadSecureDnsErrorAfterLogin) {
   PrefService* local_state = g_browser_process->local_state();
   local_state->SetString(prefs::kDnsOverHttpsTemplates,
                          "https://bar.test/dns-query{?dns}");

@@ -386,7 +386,7 @@ std::pair<Browser*, int> GetBrowserAndTabForDisposition(
     case WindowOpenDisposition::IGNORE_ACTION:
       return {nullptr, -1};
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
   return {nullptr, -1};
 }
@@ -627,6 +627,11 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
     params->initiating_profile = source_browser->profile();
   }
   DCHECK(params->initiating_profile);
+
+  if (params->initiating_profile->ShutdownStarted()) {
+    // Don't navigate when the profile is shutting down.
+    return nullptr;
+  }
 
   if (source_browser &&
       platform_util::IsBrowserLockedFullscreen(source_browser)) {
@@ -906,13 +911,6 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
     // navigation happens in a different tab to the link click.
     apps::SetLinkCapturingSourceDisposition(contents_to_insert.get(),
                                             params->disposition);
-#if BUILDFLAG(IS_CHROMEOS)
-    if (source_browser && source_browser != params->browser &&
-        source_browser->app_controller()) {
-      apps::SetLinkCapturingSourceAppId(
-          contents_to_insert.get(), source_browser->app_controller()->app_id());
-    }
-#endif  // BUILDFLAG(IS_CHROMEOS)
   }
 
   if (params->source_contents == contents_to_navigate_or_insert) {

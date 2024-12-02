@@ -35,8 +35,8 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
+#include "chrome/browser/ui/lens/lens_overlay_controller.h"
 #include "chrome/browser/ui/omnibox/clipboard_utils.h"
-#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -46,6 +46,7 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_bubble_controller.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/lens/lens_features.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_client.h"
@@ -90,7 +91,6 @@
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/compositor/layer.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
@@ -191,11 +191,9 @@ OmniboxViewViews::OmniboxViewViews(std::unique_ptr<OmniboxClient> client,
         base::BindRepeating(&OmniboxViewViews::Update, base::Unretained(this)));
   }
 
-  if (features::IsChromeRefresh2023()) {
-    // Remove the default textfield hover effect. Omnibox has a custom hover
-    // effect over the entire location bar.
-    RemoveHoverEffect();
-  }
+  // Remove the default textfield hover effect. Omnibox has a custom hover
+  // effect over the entire location bar.
+  RemoveHoverEffect();
 
   // Sometimes there are additional ignored views, such as a View representing
   // the cursor, inside the address bar's text field. These should always be
@@ -525,6 +523,7 @@ void OmniboxViewViews::ExecuteCommand(int command_id, int event_flags) {
       model()->PasteAndGo(GetClipboardText(/*notify_if_restricted=*/true));
       return;
     case IDC_SHOW_FULL_URLS:
+    case IDC_SHOW_GOOGLE_LENS_SHORTCUT:
     case IDC_EDIT_SEARCH_ENGINES:
       location_bar_view_->command_updater()->ExecuteCommand(command_id);
       return;
@@ -1252,9 +1251,8 @@ void OmniboxViewViews::GetAccessibleNodeData(ui::AXNodeData* node_data) {
                                 "both");
 // Expose keyboard shortcut where it makes sense.
 #if BUILDFLAG(IS_MAC)
-  // Use cloverleaf symbol for command key.
   node_data->AddStringAttribute(ax::mojom::StringAttribute::kKeyShortcuts,
-                                base::WideToUTF8(L"\u2318L"));
+                                "⌘L");
 #else
   node_data->AddStringAttribute(ax::mojom::StringAttribute::kKeyShortcuts,
                                 "Ctrl+L");
@@ -1456,9 +1454,11 @@ bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
                GetClipboardText(/*notify_if_restricted=*/false));
   }
 
-  // Menu item is only shown when it is valid.
-  if (command_id == IDC_SHOW_FULL_URLS)
+  // These menu items are only shown when they are valid.
+  if (command_id == IDC_SHOW_FULL_URLS ||
+      command_id == IDC_SHOW_GOOGLE_LENS_SHORTCUT) {
     return true;
+  }
 
   return Textfield::IsCommandIdEnabled(command_id) ||
          (location_bar_view_ &&
@@ -1843,12 +1843,23 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
     menu_contents->AddCheckItemWithStringId(IDC_SHOW_FULL_URLS,
                                             IDS_CONTEXT_MENU_SHOW_FULL_URLS);
   }
+
+  if (lens::features::IsOmniboxEntryPointEnabled() &&
+      LensOverlayController::IsEnabled(location_bar_view_->browser())) {
+    menu_contents->AddCheckItemWithStringId(
+        IDC_SHOW_GOOGLE_LENS_SHORTCUT,
+        IDS_CONTEXT_MENU_SHOW_GOOGLE_LENS_SHORTCUT);
+  }
 }
 
 bool OmniboxViewViews::IsCommandIdChecked(int id) const {
   if (id == IDC_SHOW_FULL_URLS) {
     return location_bar_view_->profile()->GetPrefs()->GetBoolean(
         omnibox::kPreventUrlElisionsInOmnibox);
+  }
+  if (id == IDC_SHOW_GOOGLE_LENS_SHORTCUT) {
+    return location_bar_view_->profile()->GetPrefs()->GetBoolean(
+        omnibox::kShowGoogleLensShortcut);
   }
   return false;
 }

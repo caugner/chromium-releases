@@ -111,6 +111,8 @@ class ASH_EXPORT OverviewWindowDragController {
 
   ~OverviewWindowDragController();
 
+  static base::AutoReset<bool> SkipNewDeskButtonScaleUpDurationForTesting();
+
   OverviewItemBase* item() { return item_; }
 
   bool is_touch_dragging() const { return is_touch_dragging_; }
@@ -133,10 +135,6 @@ class ASH_EXPORT OverviewWindowDragController {
   // we need to reset |overview_session_| to nullptr to avoid null pointer
   // dereference.
   void ResetOverviewSession();
-
-  // Called by `float_drag_helper_` to destroy itself as it may need to live
-  // after a gesture is completed if there is an animation.
-  void DestroyFloatDragHelper();
 
   DragBehavior current_drag_behavior_for_testing() const {
     return current_drag_behavior_;
@@ -225,14 +223,14 @@ class ASH_EXPORT OverviewWindowDragController {
 
   // The original size of the dragged item after we scale it up when we start
   // dragging it. The item is restored to this size once it no longer intersects
-  // with the LegacyDeskBarView.
+  // with the OverviewDeskBarView.
   gfx::SizeF original_scaled_size_;
 
   // Track the per-overview-grid desks bar data used to perform the window
   // sizing operations when it is moved towards or on the desks bar.
   struct GridDesksBarData {
     // The scaled-down size of the dragged item once the drag location is on the
-    // LegacyDeskBarView of the corresponding grid. We size the item down so
+    // OverviewDeskBarView of the corresponding grid. We size the item down so
     // that it fits inside the desks' preview view.
     gfx::SizeF on_desks_bar_item_size;
 

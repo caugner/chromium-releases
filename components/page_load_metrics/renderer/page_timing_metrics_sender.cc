@@ -42,7 +42,7 @@ mojom::UserInteractionType UserInteractionTypeForMojom(
   }
   // mojom::UserInteractionType should have the same interaction types as
   // blink::UserInteractionType does.
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return mojom::UserInteractionType::kMinValue;
 }
 
@@ -281,6 +281,15 @@ void PageTimingMetricsSender::UpdateSoftNavigationMetrics(
   soft_navigation_metrics_ = std::move(soft_navigation_metrics);
 
   EnsureSendTimer(true);
+}
+
+void PageTimingMetricsSender::SendCustomUserTimingMark(
+    mojom::CustomUserTimingMarkPtr custom_timing) {
+  // `custom_timing` is sent to the browser to clarify when the abandoned
+  // navigation happens. When the navigation is abandoned, the renderer may be
+  // busy, so it's important to start IPC and report UMA immediately.
+  CHECK(custom_timing);
+  sender_->SendCustomUserTiming(std::move(custom_timing));
 }
 
 void PageTimingMetricsSender::SendLatest() {

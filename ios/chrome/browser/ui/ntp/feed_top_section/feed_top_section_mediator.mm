@@ -92,6 +92,14 @@ using base::UserMetricsAction;
   self.prefService = nullptr;
 }
 
+// Handles closing the promo, and the NTP and Feed Top Section layout when the
+// promo is closed.
+- (void)updateFeedTopSectionWhenClosed {
+  [self.NTPDelegate handleFeedTopSectionClosed];
+  [self.consumer hidePromo];
+  [self.NTPDelegate updateFeedLayout];
+}
+
 #pragma mark - FeedTopSectionViewControllerDelegate
 
 - (SigninPromoViewConfigurator*)signinPromoConfigurator {
@@ -184,18 +192,9 @@ using base::UserMetricsAction;
   [self logHistogramForAction:ContentNotificationTopOfFeedPromoAction::
                                   kMainButtonTapped];
   [self.presenter presentPushNotificationPermissionAlert];
-  [self updateFeedTopSectionWhenClosed];
 }
 
 #pragma mark - Private
-
-// Handles closing the promo, and the NTP and Feed Top Section layout when the
-// promo is closed.
-- (void)updateFeedTopSectionWhenClosed {
-  [self.NTPDelegate handleFeedTopSectionClosed];
-  [self.consumer hidePromo];
-  [self.NTPDelegate updateFeedLayout];
-}
 
 - (BOOL)isUserSignedIn {
   return self.identityManager->HasPrimaryAccount(signin::ConsentLevel::kSignin);
@@ -233,7 +232,8 @@ using base::UserMetricsAction;
     return true;
   }
 
-  if (!IsContentNotificationPromoEnabled([self isUserSignedIn],
+  if (!IsContentNotificationExperimentEnabled() ||
+      !IsContentNotificationPromoEnabled([self isUserSignedIn],
                                          self.isDefaultSearchEngine,
                                          self.prefService)) {
     return false;
@@ -327,6 +327,8 @@ using base::UserMetricsAction;
   if ([self shouldShowNotificationsPromo]) {
     self.consumer.visiblePromoViewType = PromoViewTypeNotifications;
     [self.consumer showPromo];
+    [self logHistogramForAction:ContentNotificationTopOfFeedPromoAction::
+                                    kDisplayed];
     return;
   }
 }

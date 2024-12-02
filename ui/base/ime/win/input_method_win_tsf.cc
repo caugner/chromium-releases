@@ -57,7 +57,8 @@ InputMethodWinTSF::~InputMethodWinTSF() {
   //
   // See crbug.com/41488962
   if (ui::TSFBridge::GetInstance()) {
-    ui::TSFBridge::GetInstance()->RemoveImeKeyEventDispatcher();
+    ui::TSFBridge::GetInstance()->RemoveImeKeyEventDispatcher(
+        InputMethodBase::ime_key_event_dispatcher());
   }
 }
 
@@ -80,7 +81,8 @@ void InputMethodWinTSF::OnBlur() {
     return;
   }
   tsf_event_router_->SetManager(nullptr);
-  ui::TSFBridge::GetInstance()->RemoveImeKeyEventDispatcher();
+  ui::TSFBridge::GetInstance()->RemoveImeKeyEventDispatcher(
+      InputMethodBase::ime_key_event_dispatcher());
 }
 
 bool InputMethodWinTSF::OnUntranslatedIMEMessage(

@@ -8,6 +8,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "cc/input/browser_controls_offset_tags_info.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
@@ -699,15 +700,15 @@ void LocalFrameMojoHandler::MediaPlayerActionAt(
                                            action->enable);
 }
 
-void LocalFrameMojoHandler::RequestVideoFrameAt(
+void LocalFrameMojoHandler::RequestVideoFrameAtWithBoundsDiagnostics(
     const gfx::Point& window_point,
     const gfx::Size& max_size,
     int max_area,
-    RequestVideoFrameAtCallback callback) {
+    RequestVideoFrameAtWithBoundsDiagnosticsCallback callback) {
   gfx::Point viewport_position =
       frame_->GetWidgetForLocalRoot()->DIPsToRoundedBlinkSpace(window_point);
-  frame_->RequestVideoFrameAt(viewport_position, max_size, max_area,
-                              std::move(callback));
+  frame_->RequestVideoFrameAtWithBoundsDiagnostics(
+      viewport_position, max_size, max_area, std::move(callback));
 }
 
 void LocalFrameMojoHandler::AdvanceFocusInFrame(
@@ -1268,7 +1269,7 @@ void LocalFrameMojoHandler::PluginActionAt(
           WebPlugin::RotationType::k90Counterclockwise);
       return;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 void LocalFrameMojoHandler::SetInitialFocus(bool reverse) {
@@ -1302,7 +1303,8 @@ void LocalFrameMojoHandler::InstallCoopAccessMonitor(
 void LocalFrameMojoHandler::UpdateBrowserControlsState(
     cc::BrowserControlsState constraints,
     cc::BrowserControlsState current,
-    bool animate) {
+    bool animate,
+    const std::optional<cc::BrowserControlsOffsetTagsInfo>& offset_tags_info) {
   DCHECK(frame_->IsOutermostMainFrame());
   TRACE_EVENT2("renderer", "LocalFrame::UpdateBrowserControlsState",
                "Constraint", static_cast<int>(constraints), "Current",
@@ -1310,8 +1312,8 @@ void LocalFrameMojoHandler::UpdateBrowserControlsState(
   TRACE_EVENT_INSTANT1("renderer", "is_animated", TRACE_EVENT_SCOPE_THREAD,
                        "animated", animate);
 
-  frame_->GetWidgetForLocalRoot()->UpdateBrowserControlsState(constraints,
-                                                              current, animate);
+  frame_->GetWidgetForLocalRoot()->UpdateBrowserControlsState(
+      constraints, current, animate, offset_tags_info);
 }
 
 void LocalFrameMojoHandler::SetV8CompileHints(

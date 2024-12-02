@@ -132,6 +132,8 @@ class WaylandDataDragController : public WaylandDataDevice::DragDelegate,
   // Returns false iff the data is for a window dragging session.
   bool ShouldReleaseCaptureForDrag(ui::OSExchangeData* data) const;
 
+  bool IsWindowDragSessionRunning() const;
+
   void DumpState(std::ostream& out) const;
 
  private:
@@ -152,6 +154,8 @@ class WaylandDataDragController : public WaylandDataDevice::DragDelegate,
                            SuppressPointerButtonReleasesAfterEnter);
   FRIEND_TEST_ALL_PREFIXES(WaylandDataDragControllerTest,
                            StartDragWithWrongMimeType);
+  FRIEND_TEST_ALL_PREFIXES(WaylandDataDragControllerTest,
+                           OutgoingSessionWithoutDndFinished);
 
   enum class DragResult {
     kCancelled,
@@ -176,6 +180,8 @@ class WaylandDataDragController : public WaylandDataDevice::DragDelegate,
   void OnDataSourceFinish(WaylandDataSource* source,
                           base::TimeTicks timestamp,
                           bool completed) override;
+  void OnDataSourceDropPerformed(WaylandDataSource* source,
+                                 base::TimeTicks timestamp) override;
   void OnDataSourceSend(WaylandDataSource* source,
                         const std::string& mime_type,
                         std::string* contents) override;
@@ -196,9 +202,14 @@ class WaylandDataDragController : public WaylandDataDevice::DragDelegate,
       std::unique_ptr<ui::OSExchangeData> received_data);
   void CancelDataFetchingIfNeeded();
 
-  // Completes/cancels the drag session and resets everything to idle state.
-  // Does nothing if the current state is already `kIdle`.
-  void Reset(DragResult result, base::TimeTicks timestamp);
+  // Resets everything to idle state. Does nothing if the current state is
+  // already `kIdle`.
+  void Reset();
+
+  // Perform steps required when ending a drag session. e.g: quit the nested
+  // drag loop (if any), remove the event dispatcher override, and notify the
+  // drag/drop handlers based on `result`.
+  void HandleDragEnd(DragResult result, base::TimeTicks timestamp);
 
   std::optional<wl::Serial> GetAndValidateSerialForDrag(
       mojom::DragEventSource source);

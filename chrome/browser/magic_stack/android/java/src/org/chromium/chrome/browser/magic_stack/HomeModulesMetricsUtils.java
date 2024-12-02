@@ -16,12 +16,15 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.magic_stack.ModuleDelegate.ModuleType;
 import org.chromium.chrome.browser.util.BrowserUiUtils;
 import org.chromium.chrome.browser.util.BrowserUiUtils.HostSurface;
+import org.chromium.chrome.browser.util.BrowserUiUtils.ModuleTypeOnStartAndNtp;
 
 /** The utility class for magic stack. */
 public class HomeModulesMetricsUtils {
     @VisibleForTesting static final String HISTOGRAM_OS_PREFIX = "MagicStack.Clank.";
     @VisibleForTesting static final String HISTOGRAM_MAGIC_STACK_MODULE_CLICK = ".Module.Click";
     @VisibleForTesting static final String HISTOGRAM_MAGIC_STACK_MODULE = ".Module.";
+    @VisibleForTesting static final String HISTOGRAM_MAGIC_STACK_HOST_SURFACE_REGULAR = ".Regular";
+    @VisibleForTesting static final String HISTOGRAM_MAGIC_STACK_HOST_SURFACE_STARTUP = ".Startup";
 
     @VisibleForTesting
     static final String HISTOGRAM_MAGIC_STACK_MODULE_CLICK_WITH_POSITION = ".Click";
@@ -80,8 +83,6 @@ public class HomeModulesMetricsUtils {
     @VisibleForTesting
     static final String HISTOGRAM_CONFIGURATION_TURN_OFF_MODULE = "Settings.TurnOffModule";
 
-    private static final String FRESHNESS_INPUT_CONTEXT_SUFFIX = "_freshness";
-
     private static final String SINGLE_TAB_FRESHNESS_INPUT_CONTEXT = "single_tab_freshness";
 
     private static final String PRICE_CHANGE_FRESHNESS_INPUT_CONTEXT = "price_change_freshness";
@@ -95,10 +96,12 @@ public class HomeModulesMetricsUtils {
                     HOME_MODULES_SHOW_ALL_MODULES_PARAM,
                     false);
 
-    private static final String HOME_MODULES_COMBINE_TABS_PARAM = "show_tabs_in_one_module";
-    public static final BooleanCachedFieldTrialParameter HOME_MODULES_COMBINE_TABS =
+    private static final String TAB_RESUMPTION_COMBINE_TABS_PARAM = "show_tabs_in_one_module";
+    public static final BooleanCachedFieldTrialParameter TAB_RESUMPTION_COMBINE_TABS =
             ChromeFeatureList.newBooleanCachedFieldTrialParameter(
-                    ChromeFeatureList.MAGIC_STACK_ANDROID, HOME_MODULES_COMBINE_TABS_PARAM, false);
+                    ChromeFeatureList.TAB_RESUMPTION_MODULE_ANDROID,
+                    TAB_RESUMPTION_COMBINE_TABS_PARAM,
+                    false);
 
     /**
      * Returns a string name of a module. Remember to update the variant ModuleType in
@@ -157,15 +160,20 @@ public class HomeModulesMetricsUtils {
      * @param hostSurface The type of the host surface of the magic stack.
      * @param moduleType The type of module.
      * @param modulePosition The position of the module on the recyclerview.
+     * @param isShownAtStartup Whether the host surface is a home surface which is shown at startup.
      */
     public static void recordModuleShown(
-            @HostSurface int hostSurface, @ModuleType int moduleType, int modulePosition) {
+            @HostSurface int hostSurface,
+            @ModuleType int moduleType,
+            int modulePosition,
+            boolean isShownAtStartup) {
         recordUma(hostSurface, moduleType, HISTOGRAM_MAGIC_STACK_MODULE_IMPRESSION);
         recordUmaWithPosition(
                 hostSurface,
                 HISTOGRAM_MAGIC_STACK_MODULE_IMPRESSION_WITH_POSITION,
                 moduleType,
-                modulePosition);
+                modulePosition,
+                isShownAtStartup);
     }
 
     /**
@@ -328,15 +336,21 @@ public class HomeModulesMetricsUtils {
      * @param hostSurface The type of the host surface of the magic stack.
      * @param moduleType The type of module.
      * @param modulePosition The position of the module which got clicked.
+     * @param isShownAtStartup Whether the host surface is a home surface which is shown at startup.
      */
     public static void recordModuleClicked(
-            @HostSurface int hostSurface, @ModuleType int moduleType, int modulePosition) {
+            @HostSurface int hostSurface,
+            @ModuleType int moduleType,
+            int modulePosition,
+            boolean isShownAtStartup) {
+        BrowserUiUtils.recordModuleClickHistogram(hostSurface, ModuleTypeOnStartAndNtp.MAGIC_STACK);
         recordUma(hostSurface, moduleType, HISTOGRAM_MAGIC_STACK_MODULE_CLICK);
         recordUmaWithPosition(
                 hostSurface,
                 HISTOGRAM_MAGIC_STACK_MODULE_CLICK_WITH_POSITION,
                 moduleType,
-                modulePosition);
+                modulePosition,
+                isShownAtStartup);
     }
 
     /**
@@ -346,11 +360,19 @@ public class HomeModulesMetricsUtils {
      * @param hostSurface The type of the host surface of the magic stack.
      * @param moduleType The type of module.
      * @param modulePosition The position of the module when it is built in home modules.
+     * @param isShownAtStartup Whether the host surface is a home surface which is shown at startup.
      */
     public static void recordModuleBuiltPosition(
-            @HostSurface int hostSurface, @ModuleType int moduleType, int modulePosition) {
+            @HostSurface int hostSurface,
+            @ModuleType int moduleType,
+            int modulePosition,
+            boolean isShownAtStartup) {
         recordUmaWithPosition(
-                hostSurface, HISTOGRAM_MAGIC_STACK_MODULE_BUILD, moduleType, modulePosition);
+                hostSurface,
+                HISTOGRAM_MAGIC_STACK_MODULE_BUILD,
+                moduleType,
+                modulePosition,
+                isShownAtStartup);
     }
 
     /**
@@ -370,15 +392,22 @@ public class HomeModulesMetricsUtils {
                 HISTOGRAM_OS_PREFIX + umaName, moduleType, ModuleType.NUM_ENTRIES);
     }
 
+    // TODO(b/340578084): Clean up all deprecated metrics.
     private static void recordUmaWithPosition(
             @HostSurface int hostSurface,
             String umaName,
             @ModuleType int moduleType,
-            int modulePosition) {
+            int modulePosition,
+            boolean isShownAtStartup) {
         assert 0 <= modulePosition && modulePosition < ModuleType.NUM_ENTRIES;
         StringBuilder builder = new StringBuilder();
         builder.append(HISTOGRAM_OS_PREFIX);
         builder.append(BrowserUiUtils.getHostName(hostSurface));
+        if (isShownAtStartup) {
+            builder.append(HISTOGRAM_MAGIC_STACK_HOST_SURFACE_STARTUP);
+        } else {
+            builder.append(HISTOGRAM_MAGIC_STACK_HOST_SURFACE_REGULAR);
+        }
         builder.append(HISTOGRAM_MAGIC_STACK_MODULE);
         builder.append(getModuleName(moduleType));
         builder.append(umaName);

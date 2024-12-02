@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.customtabs;
 
+import static org.chromium.chrome.browser.privacy_sandbox.ActivityTypeMapper.INVALID_ACTIVITY_TYPE;
+
 import android.content.Intent;
 import android.graphics.Rect;
 import android.text.TextUtils;
@@ -67,6 +69,8 @@ import org.chromium.chrome.browser.page_insights.PageInsightsConfigRequest;
 import org.chromium.chrome.browser.page_insights.PageInsightsCoordinator;
 import org.chromium.chrome.browser.page_insights.proto.Config.PageInsightsConfig;
 import org.chromium.chrome.browser.page_insights.proto.IntentParams.PageInsightsIntentParams;
+import org.chromium.chrome.browser.privacy_sandbox.ActivityTypeMapper;
+import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxBridge;
 import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxDialogController;
 import org.chromium.chrome.browser.privacy_sandbox.TrackingProtectionSnackbarController;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -149,7 +153,6 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
      * @param snackbarManagerSupplier Supplies the {@link SnackbarManager}.
      * @param activityType The {@link ActivityType} for the activity.
      * @param isInOverviewModeSupplier Supplies whether the app is in overview mode.
-     * @param isWarmOnResumeSupplier Supplies whether the app was warm on resume.
      * @param appMenuDelegate The app menu delegate.
      * @param statusBarColorProvider Provides the status bar color.
      * @param intentRequestTracker Tracks intent requests.
@@ -191,7 +194,6 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
             @NonNull ObservableSupplierImpl<EdgeToEdgeController> edgeToEdgeControllerSupplier,
             @ActivityType int activityType,
             @NonNull Supplier<Boolean> isInOverviewModeSupplier,
-            @NonNull Supplier<Boolean> isWarmOnResumeSupplier,
             @NonNull AppMenuDelegate appMenuDelegate,
             @NonNull StatusBarColorProvider statusBarColorProvider,
             @NonNull IntentRequestTracker intentRequestTracker,
@@ -238,7 +240,6 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                 edgeToEdgeControllerSupplier,
                 activityType,
                 isInOverviewModeSupplier,
-                isWarmOnResumeSupplier,
                 appMenuDelegate,
                 statusBarColorProvider,
                 intentRequestTracker,
@@ -254,7 +255,7 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
         mIntentDataProvider = intentDataProvider;
         if (intentDataProvider.get().getActivityType() == ActivityType.CUSTOM_TAB
                 && !intentDataProvider.get().isOpenedByChrome()
-                && !intentDataProvider.get().isIncognito()) {
+                && !intentDataProvider.get().isIncognitoBranded()) {
             String appId = mIntentDataProvider.get().getClientPackageName();
             if (TextUtils.isEmpty(appId)) {
                 appId = CustomTabIntentDataProvider.getAppIdFromReferrer(activity);
@@ -332,6 +333,11 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
 
         maybeCreatePageInsightsComponent();
 
+        mGoogleBottomBarCoordinator = getGoogleBottomBarCoordinator();
+        if (mGoogleBottomBarCoordinator != null) {
+            mGoogleBottomBarCoordinator.onFinishNativeInitialization();
+        }
+
         new OneShotCallback<>(
                 mProfileSupplier,
                 mCallbackController.makeCancelable(
@@ -359,9 +365,21 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                         }));
 
         SupplierUtils.waitForAll(
-                this::initializeTrackingProtectionSnackbarController,
+                () -> initializeTrackingProtectionSnackbarController(),
                 mActivityTabProvider,
                 mProfileSupplier);
+    }
+
+    @Override
+    protected void initProfileDependentFeatures(Profile currentlySelectedProfile) {
+        super.initProfileDependentFeatures(currentlySelectedProfile);
+
+        GoogleBottomBarCoordinator googleBottomBarCoordinator = getGoogleBottomBarCoordinator();
+
+        if (googleBottomBarCoordinator != null) {
+            googleBottomBarCoordinator.initDefaultSearchEngine(
+                    currentlySelectedProfile.getOriginalProfile());
+        }
     }
 
     private void initializeTrackingProtectionSnackbarController() {
@@ -424,6 +442,7 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                         mWindowAndroid.getApplicationBottomInsetSupplier(),
                         getPageInsightsIntentParams(),
                         this::isPageInsightsHubEnabled,
+                        this::isGoogleBottomBarEnabled,
                         this::getPageInsightsConfig);
 
         if (mContextualSearchManagerSupplier.get() != null) {
@@ -461,16 +480,8 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
             BrowserServicesIntentDataProvider intentDataProvider,
             ObservableSupplier<Profile> profileSupplier,
             PageInsightsConfigRequest request) {
-        PageInsightsConfig pageInsightsConfig =
-                CustomTabsConnection.getInstance()
-                        .getPageInsightsConfig(request, intentDataProvider, profileSupplier);
-
-        // When GoogleBottomBar is enabled, Page Insights shouldn't peek
-        return isGoogleBottomBarEnabled(intentDataProvider)
-                ? PageInsightsConfig.newBuilder(pageInsightsConfig)
-                        .setShouldAutoTrigger(false)
-                        .build()
-                : pageInsightsConfig;
+        return CustomTabsConnection.getInstance()
+                .getPageInsightsConfig(request, intentDataProvider, profileSupplier);
     }
 
     private PageInsightsIntentParams getPageInsightsIntentParams() {
@@ -488,25 +499,30 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
     }
 
     // Google Bottom bar
-    private @Nullable GoogleBottomBarCoordinator maybeCreateGoogleBottomBarComponents(
-            BrowserServicesIntentDataProvider intentDataProvider) {
-        if (!isGoogleBottomBarEnabled(intentDataProvider)) {
+    private @Nullable GoogleBottomBarCoordinator maybeCreateGoogleBottomBarComponents() {
+        if (!isGoogleBottomBarEnabled()) {
             return null;
         }
 
         return new GoogleBottomBarCoordinator(
                 mActivity,
+                mActivityTabProvider,
+                mShareDelegateSupplier,
+                this::getPageInsightsCoordinator,
                 CustomTabsConnection.getInstance()
-                        .getGoogleBottomBarIntentParams(intentDataProvider),
-                intentDataProvider.getCustomButtonsOnGoogleBottomBar());
+                        .getGoogleBottomBarIntentParams(mIntentDataProvider.get()),
+                mIntentDataProvider.get().getCustomButtonsOnGoogleBottomBar());
     }
 
     public @Nullable GoogleBottomBarCoordinator getGoogleBottomBarCoordinator() {
         if (mGoogleBottomBarCoordinator == null) {
-            mGoogleBottomBarCoordinator =
-                    maybeCreateGoogleBottomBarComponents(mIntentDataProvider.get());
+            mGoogleBottomBarCoordinator = maybeCreateGoogleBottomBarComponents();
         }
         return mGoogleBottomBarCoordinator;
+    }
+
+    private boolean isGoogleBottomBarEnabled() {
+        return isGoogleBottomBarEnabled(mIntentDataProvider.get());
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
@@ -517,7 +533,9 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
     }
 
     @Override
-    protected IncognitoReauthCoordinatorFactory getIncognitoReauthCoordinatorFactory() {
+    protected IncognitoReauthCoordinatorFactory getIncognitoReauthCoordinatorFactory(
+            Profile profile) {
+        // TODO(crbug.com/335609494): Disable this for ephemeral CCTs.
         Intent showRegularOverviewIntent = new Intent(Intent.ACTION_MAIN);
         showRegularOverviewIntent.setClass(mActivity, ChromeLauncherActivity.class);
         showRegularOverviewIntent.putExtra(IntentHandler.EXTRA_OPEN_REGULAR_OVERVIEW_MODE, true);
@@ -527,7 +545,7 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                 mActivity,
                 mTabModelSelectorSupplier.get(),
                 mModalDialogManagerSupplier.get(),
-                new IncognitoReauthManager(),
+                new IncognitoReauthManager(mActivity, profile),
                 new SettingsLauncherImpl(),
                 /* incognitoReauthTopToolbarDelegate= */ null,
                 /* layoutManager= */ null,
@@ -764,6 +782,25 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                                 mTrackingProtectionSnackbarController.showSnackbar();
                             }
                         }));
+        SupplierUtils.waitForAll(
+                () -> maybeRecordPrivacySandboxActivityType(),
+                mIntentDataProvider,
+                mProfileSupplier);
+    }
+
+    private void maybeRecordPrivacySandboxActivityType() {
+        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.PRIVACY_SANDBOX_ACTIVITY_TYPE_STORAGE)) {
+            return;
+        }
+
+        int privacySandboxStorageActivityType =
+                ActivityTypeMapper.toPrivacySandboxStorageActivityType(
+                        mActivityType, mIntentDataProvider.get());
+        if (privacySandboxStorageActivityType == INVALID_ACTIVITY_TYPE) return;
+
+        PrivacySandboxBridge privacySandboxBridge =
+                new PrivacySandboxBridge(mProfileSupplier.get());
+        privacySandboxBridge.recordActivityType(privacySandboxStorageActivityType);
     }
 
     private Runnable getPageInfoSnackbarOnAction() {

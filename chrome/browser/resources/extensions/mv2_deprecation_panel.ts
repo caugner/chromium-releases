@@ -50,6 +50,11 @@ export class ExtensionsMv2DeprecationPanelElement extends PolymerElement {
       },
 
       /**
+       * Whether the panel title should be shown.
+       */
+      showTitle: Boolean,
+
+      /**
        * The string for the panel's header.
        */
       headerString_: String,
@@ -72,6 +77,7 @@ export class ExtensionsMv2DeprecationPanelElement extends PolymerElement {
 
   extensions: chrome.developerPrivate.ExtensionInfo[];
   delegate: ItemDelegate&Mv2DeprecationPanelDelegate;
+  showTitle: boolean;
   private headerString_: string;
   private subtitleString_: string;
   private extensionWithActionMenuOpened_: chrome.developerPrivate.ExtensionInfo;
@@ -100,6 +106,8 @@ export class ExtensionsMv2DeprecationPanelElement extends PolymerElement {
    * Triggers the panel dismissal when the dismiss button is clicked.
    */
   private onDismissButtonClick_() {
+    chrome.metricsPrivate.recordUserAction(
+        'Extensions.Mv2Deprecation.Warning.Dismissed');
     this.delegate.dismissMv2DeprecationWarning();
   }
 
@@ -109,6 +117,8 @@ export class ExtensionsMv2DeprecationPanelElement extends PolymerElement {
    */
   private onFindAlternativeButtonClick_(
       event: DomRepeatEvent<chrome.developerPrivate.ExtensionInfo>): void {
+    chrome.metricsPrivate.recordUserAction(
+        'Extensions.Mv2Deprecation.Warning.FindAlternativeForExtension');
     const recommendationsUrl: string|undefined =
         event.model.item.recommendationsUrl;
     assert(!!recommendationsUrl);
@@ -130,6 +140,8 @@ export class ExtensionsMv2DeprecationPanelElement extends PolymerElement {
    * extension.
    */
   private onRemoveExtensionActionClicked_(): void {
+    chrome.metricsPrivate.recordUserAction(
+        'Extensions.Mv2Deprecation.Warning.RemoveExtension');
     this.$.actionMenu.close();
     this.delegate.deleteItem(this.extensionWithActionMenuOpened_.id);
   }
@@ -138,6 +150,8 @@ export class ExtensionsMv2DeprecationPanelElement extends PolymerElement {
    * Dismisses the warning for a given extension. It will not be shown again.
    */
   private onKeepExtensionActionClick_(): void {
+    chrome.metricsPrivate.recordUserAction(
+        'Extensions.Mv2Deprecation.Warning.DismissedForExtension');
     this.$.actionMenu.close();
     this.delegate.dismissMv2DeprecationWarningForExtension(
         this.extensionWithActionMenuOpened_.id);

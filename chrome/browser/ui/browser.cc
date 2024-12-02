@@ -93,6 +93,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/breadcrumb_manager_browser_agent.h"
+#include "chrome/browser/ui/browser_actions.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
@@ -109,7 +110,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_ui_prefs.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
@@ -138,11 +139,11 @@
 #include "chrome/browser/ui/tabs/tab_group_deletion_dialog_controller.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
+#include "chrome/browser/ui/tabs/tab_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/unload_controller.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/contents_web_view.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
@@ -185,6 +186,7 @@
 #include "components/paint_preview/buildflags/buildflags.h"
 #include "components/permissions/permission_request_manager.h"
 #include "components/prefs/pref_service.h"
+#include "components/saved_tab_groups/features.h"
 #include "components/search/search.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/sessions/core/session_types.h"
@@ -282,7 +284,6 @@
 #endif
 
 #if BUILDFLAG(IS_MAC)
-#include "chrome/browser/ui/color_chooser.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/display/types/display_constants.h"
@@ -293,7 +294,6 @@
 #endif
 
 using base::UserMetricsAction;
-using content::NativeWebKeyboardEvent;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
@@ -303,6 +303,7 @@ using content::SiteInstance;
 using content::WebContents;
 using custom_handlers::ProtocolHandler;
 using extensions::Extension;
+using input::NativeWebKeyboardEvent;
 using ui::WebDialogDelegate;
 using web_modal::WebContentsModalDialogManager;
 
@@ -394,6 +395,26 @@ bool ShouldShowCookieMigrationNoticeForBrowser(const Browser& browser) {
 
   auto [last_window, last_window_for_profile] = IsLastWindow(browser);
   return last_window_for_profile;
+}
+
+void UpdateTabGroupSessionMetadata(
+    Browser* browser,
+    const tab_groups::TabGroupId& group_id,
+    const std::optional<std::string> saved_group_id) {
+  SessionService* const session_service =
+      SessionServiceFactory::GetForProfile(browser->profile());
+  if (!session_service) {
+    return;
+  }
+
+  const tab_groups::TabGroupVisualData* visual_data =
+      browser->tab_strip_model()
+          ->group_model()
+          ->GetTabGroup(group_id)
+          ->visual_data();
+
+  session_service->SetTabGroupMetadata(browser->session_id(), group_id,
+                                       visual_data, saved_group_id);
 }
 
 }  // namespace
@@ -547,6 +568,7 @@ Browser::Browser(const CreateParams& params)
       synced_window_delegate_(new BrowserSyncedWindowDelegate(this)),
       app_controller_(web_app::MaybeCreateAppBrowserController(this)),
       bookmark_bar_state_(BookmarkBar::HIDDEN),
+      browser_actions_(new BrowserActions(*this)),
       command_controller_(new chrome::BrowserCommandController(this)),
       tab_group_deletion_dialog_controller_(
           std::make_unique<tab_groups::DeletionDialogController>(this)),
@@ -567,6 +589,8 @@ Browser::Browser(const CreateParams& params)
       overscroll_pref_manager_(std::make_unique<OverscrollPrefManager>(this))
 #endif
 {
+  browser_actions_->InitializeBrowserActions();
+
   if (!profile_->IsOffTheRecord()) {
     profile_keep_alive_ = std::make_unique<ScopedProfileKeepAlive>(
         params.profile->GetOriginalProfile(),
@@ -574,6 +598,16 @@ Browser::Browser(const CreateParams& params)
   }
 
   tab_strip_model_->AddObserver(this);
+
+  if (tab_groups::IsTabGroupsSaveV2Enabled() &&
+      tab_strip_model_->SupportsTabGroups() && is_type_normal()) {
+    auto* saved_tab_group_keyed_service =
+        tab_groups::SavedTabGroupServiceFactory::GetForProfile(profile_);
+    if (saved_tab_group_keyed_service) {
+      saved_tab_group_observation_.Observe(
+          saved_tab_group_keyed_service->model());
+    }
+  }
 
   ThemeServiceFactory::GetForProfile(profile_)->AddObserver(this);
 
@@ -631,10 +665,22 @@ Browser::Browser(const CreateParams& params)
         ->ListenToFullScreenChanges();
   }
 
+  // Initialize the browser features that rely on the browser window now that it
+  // is initialized.
+  features_->InitPostWindowConstruction(this);
+
   BrowserList::AddBrowser(this);
 }
 
 Browser::~Browser() {
+  // Tear down `BrowserWindowFeatures` and `BrowserUserData`s now to avoid
+  // exposing them to Browser in a partially-destroyed state. Eventually,
+  // all BrowserUserData should be converted to features. Until then,
+  // destroy `features_` because that's what breaks things the least :)
+  features_.reset();
+
+  saved_tab_group_observation_.Reset();
+
   // Stop observing notifications and destroy the tab monitor before continuing
   // with destruction. Profile destruction will unload extensions and reentrant
   // calls to Browser:: should be avoided while it is being torn down.
@@ -1064,6 +1110,31 @@ void Browser::OpenURL(const GURL& gurl, WindowOpenDisposition disposition) {
           /*navigation_handle_callback=*/{});
 }
 
+const SessionID& Browser::GetSessionID() {
+  return session_id_;
+}
+
+bool Browser::IsTabStripVisible() {
+  return window_->IsToolbarShowing();
+}
+
+views::View* Browser::TopContainer() {
+  return window_->GetTopContainer();
+}
+
+tabs::TabInterface* Browser::GetActiveTabInterface() {
+  return tab_strip_model_->GetActiveTab();
+}
+
+BrowserWindowFeatures& Browser::GetFeatures() {
+  return *features_.get();
+}
+
+web_modal::WebContentsModalDialogHost*
+Browser::GetWebContentsModalDialogHostForWindow() {
+  return window_->GetWebContentsModalDialogHost();
+}
+
 void Browser::OnWindowClosing() {
   if (const auto closing_status = HandleBeforeClose();
       closing_status != BrowserClosingStatus::kPermitted) {
@@ -1371,29 +1442,19 @@ void Browser::OnTabGroupChanged(const TabGroupChange& change) {
   DCHECK(!IsRelevantToAppSessionService(type_));
   DCHECK(tab_strip_model_->group_model());
   if (change.type == TabGroupChange::kVisualsChanged) {
-    SessionService* const session_service =
-        SessionServiceFactory::GetForProfile(profile_);
-    if (session_service) {
-      const tab_groups::TabGroupVisualData* visual_data =
-          tab_strip_model_->group_model()
-              ->GetTabGroup(change.group)
-              ->visual_data();
-      const tab_groups::SavedTabGroupKeyedService* const
-          saved_tab_group_keyed_service =
-              tab_groups::SavedTabGroupServiceFactory::GetForProfile(profile_);
-      std::optional<std::string> saved_guid;
+    std::optional<std::string> saved_guid;
 
-      if (saved_tab_group_keyed_service) {
-        const tab_groups::SavedTabGroup* const saved_group =
-            saved_tab_group_keyed_service->model()->Get(change.group);
-        if (saved_group) {
-          saved_guid = saved_group->saved_guid().AsLowercaseString();
-        }
+    const tab_groups::SavedTabGroupKeyedService* const
+        saved_tab_group_keyed_service =
+            tab_groups::SavedTabGroupServiceFactory::GetForProfile(profile_);
+    if (saved_tab_group_keyed_service) {
+      const tab_groups::SavedTabGroup* const saved_group =
+          saved_tab_group_keyed_service->model()->Get(change.group);
+      if (saved_group) {
+        saved_guid = saved_group->saved_guid().AsLowercaseString();
       }
-
-      session_service->SetTabGroupMetadata(session_id(), change.group,
-                                           visual_data, std::move(saved_guid));
     }
+    UpdateTabGroupSessionMetadata(this, change.group, std::move(saved_guid));
   } else if (change.type == TabGroupChange::kClosed) {
     sessions::TabRestoreService* tab_restore_service =
         TabRestoreServiceFactory::GetForProfile(profile());
@@ -1444,6 +1505,48 @@ void Browser::TabStripEmpty() {
   // Instant may have visible WebContents that need to be detached before the
   // window system closes.
   instant_controller_.reset();
+}
+
+void Browser::SavedTabGroupAddedLocally(const base::Uuid& guid) {
+  // See comment in Browser::OnTabGroupChanged
+  DCHECK(!IsRelevantToAppSessionService(type_));
+  DCHECK(tab_strip_model_->group_model());
+
+  const tab_groups::SavedTabGroupKeyedService* const
+      saved_tab_group_keyed_service =
+          tab_groups::SavedTabGroupServiceFactory::GetForProfile(profile_);
+  CHECK(saved_tab_group_keyed_service);
+
+  const tab_groups::SavedTabGroup* const added_group =
+      saved_tab_group_keyed_service->model()->Get(guid);
+  CHECK(added_group);
+
+  if (!added_group->local_group_id().has_value()) {
+    return;
+  }
+
+  if (tab_strip_model()->group_model()->ContainsTabGroup(
+          added_group->local_group_id().value())) {
+    UpdateTabGroupSessionMetadata(this, added_group->local_group_id().value(),
+                                  guid.AsLowercaseString());
+  }
+}
+
+void Browser::SavedTabGroupRemovedLocally(
+    const tab_groups::SavedTabGroup* removed_group) {
+  // See comment in Browser::OnTabGroupChanged
+  DCHECK(!IsRelevantToAppSessionService(type_));
+  DCHECK(tab_strip_model_->group_model());
+
+  if (!removed_group->local_group_id().has_value()) {
+    return;
+  }
+
+  if (tab_strip_model()->group_model()->ContainsTabGroup(
+          removed_group->local_group_id().value())) {
+    UpdateTabGroupSessionMetadata(this, removed_group->local_group_id().value(),
+                                  std::nullopt);
+  }
 }
 
 void Browser::SetTopControlsShownRatio(content::WebContents* web_contents,
@@ -1606,7 +1709,7 @@ void Browser::ExitPictureInPicture() {
   PictureInPictureWindowManager::GetInstance()->ExitPictureInPicture();
 }
 
-bool Browser::IsBackForwardCacheSupported() {
+bool Browser::IsBackForwardCacheSupported(content::WebContents& web_contents) {
   return true;
 }
 
@@ -2053,15 +2156,6 @@ bool Browser::GuestSaveFrame(content::WebContents* guest_web_contents) {
       extensions::MimeHandlerViewGuest::FromWebContents(guest_web_contents);
   return guest_view && guest_view->PluginDoSave();
 }
-
-#if BUILDFLAG(IS_MAC)
-std::unique_ptr<content::ColorChooser> Browser::OpenColorChooser(
-    WebContents* web_contents,
-    SkColor initial_color,
-    const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions) {
-  return chrome::ShowColorChooser(web_contents, initial_color);
-}
-#endif  // BUILDFLAG(IS_MAC)
 
 std::unique_ptr<content::EyeDropper> Browser::OpenEyeDropper(
     content::RenderFrameHost* frame,

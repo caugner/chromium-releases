@@ -503,7 +503,7 @@ void LockContentsView::ShowEnterpriseDomainManager(
   bottom_status_indicator_->SetText(l10n_util::GetStringFUTF16(
       IDS_ASH_LOGIN_MANAGED_DEVICE_INDICATOR, ui::GetChromeOSDeviceName(),
       base::UTF8ToUTF16(entreprise_domain_manager)));
-  bottom_status_indicator_->set_role_for_accessibility(
+  bottom_status_indicator_->GetViewAccessibility().SetRole(
       ax::mojom::Role::kButton);
   bottom_status_indicator_state_ = BottomIndicatorState::kManagedDevice;
   UpdateBottomStatusIndicatorColors();
@@ -513,7 +513,7 @@ void LockContentsView::ShowEnterpriseDomainManager(
 void LockContentsView::ShowAdbEnabled() {
   bottom_status_indicator_->SetText(
       l10n_util::GetStringUTF16(IDS_ASH_LOGIN_SCREEN_UNVERIFIED_CODE_WARNING));
-  bottom_status_indicator_->set_role_for_accessibility(
+  bottom_status_indicator_->GetViewAccessibility().SetRole(
       ax::mojom::Role::kStaticText);
   bottom_status_indicator_state_ = BottomIndicatorState::kAdbSideLoadingEnabled;
   UpdateBottomStatusIndicatorColors();
@@ -710,6 +710,8 @@ void LockContentsView::ApplyUserChanges(
         main_view_->AddChildView(std::make_unique<LoginCameraTimeoutView>(
             base::BindRepeating(&LockContentsView::OnBackToSigninButtonTapped,
                                 weak_ptr_factory_.GetWeakPtr())));
+    // TODO(b/333882432): Remove this log after the bug fixed.
+    LOG(WARNING) << " b/333882432: LockContentsView::ApplyUserChanges";
     Shell::Get()->login_screen_controller()->ShowGaiaSignin(
         /*prefilled_account=*/EmptyAccountId());
     return;
@@ -2317,6 +2319,18 @@ void LockContentsView::OnBottomStatusIndicatorTapped() {
 }
 
 void LockContentsView::OnBackToSigninButtonTapped() {
+  // TODO(b/333882432): Remove this log after the bug fixed.
+  LOG(WARNING) << "b/333882432: LockContentsView::OnBackToSigninButtonTapped";
+  // Prevent starting a gaia signin in a transition state.
+  session_manager::SessionState current_state =
+      Shell::Get()->session_controller()->GetSessionState();
+  if (current_state != session_manager::SessionState::OOBE &&
+      current_state != session_manager::SessionState::LOGIN_PRIMARY) {
+    LOG(WARNING) << "Back to signin button was called in an unexpected state: "
+                 << static_cast<int>(current_state)
+                 << " skip to call ShowGaiaSignin.";
+    return;
+  }
   Shell::Get()->login_screen_controller()->ShowGaiaSignin(
       /*prefilled_account=*/EmptyAccountId());
 }

@@ -22,6 +22,11 @@ chromium-metrics-reviews@google.com.
 
 <histograms>
 
+<variants name="HostSurfaceState">
+  <variant name="Regular"/>
+  <variant name="Startup"/>
+</variants>
+
 <variants name="ModuleDelegateHost">
   <variant name="NewTabPage"/>
   <variant name="StartSurface"/>
@@ -63,6 +68,16 @@ chromium-metrics-reviews@google.com.
     when the magic stack is customizable, Android-only.
   </summary>
   <token key="ToggleState" variants="ToggleState"/>
+</histogram>
+
+<histogram name="MagicStack.Clank.SingleTab.SeeMoreLinkClicked" enum="Boolean"
+    expires_after="2024-11-03">
+  <owner>hanxi@google.com</owner>
+  <owner>huangs@google.com</owner>
+  <summary>
+    Records each time the Single Tab Card's &quot;See more&quot; link is
+    clicked, Android-only.
+  </summary>
 </histogram>
 
 <histogram name="MagicStack.Clank.TabResumption.ClickInfo"
@@ -136,6 +151,26 @@ chromium-metrics-reviews@google.com.
     duration incorporates network delay, computation, and rendering. The metric
     excludes the case where the module quickly renders suggestions from cached
     data. Android-only.
+  </summary>
+</histogram>
+
+<histogram name="MagicStack.Clank.TabResumption.TabRecency.Click" units="ms"
+    expires_after="2024-11-03">
+  <owner>huangs@google.com</owner>
+  <owner>hanxi@google.com</owner>
+  <summary>
+    Records each clicked tile's recency in the Tab Resumption Module.
+    Android-only.
+  </summary>
+</histogram>
+
+<histogram name="MagicStack.Clank.TabResumption.TabRecency.Show" units="ms"
+    expires_after="2024-11-03">
+  <owner>huangs@google.com</owner>
+  <owner>hanxi@google.com</owner>
+  <summary>
+    Records each shown tile's recency in the Tab Resumption Module.
+    Android-only.
   </summary>
 </histogram>
 
@@ -387,6 +422,10 @@ chromium-metrics-reviews@google.com.
   <summary>
     Records the type and position of a module when it is added to the magic
     stack of a {ModuleDelegateHost}, Android-only.
+
+    Deprecated on 2024-05-14; prefer
+    MagicStack.Clank.{ModuleDelegateHost}.Regular.Module.{ModuleType}.Build and
+    MagicStack.Clank.{ModuleDelegateHost}.Startup.Module.{ModuleType}.Build.
   </summary>
   <token key="ModuleDelegateHost" variants="ModuleDelegateHost"/>
   <token key="ModuleType" variants="ModuleType"/>
@@ -400,6 +439,10 @@ chromium-metrics-reviews@google.com.
   <summary>
     Records the type and position of a module when it is clicked by users on the
     magic stack of a {ModuleDelegateHost}, Android-only.
+
+    Deprecated on 2024-05-14; prefer
+    MagicStack.Clank.{ModuleDelegateHost}.Regular.Module.{ModuleType}.Click and
+    MagicStack.Clank.{ModuleDelegateHost}.Startup.Module.{ModuleType}.Click.
   </summary>
   <token key="ModuleDelegateHost" variants="ModuleDelegateHost"/>
   <token key="ModuleType" variants="ModuleType"/>
@@ -414,6 +457,11 @@ chromium-metrics-reviews@google.com.
     Records the type and position of a module when it is visible to users on the
     magic stack of a {ModuleDelegateHost}. The histogram is logged on
     Android-only.
+
+    Deprecated on 2024-05-14; prefer
+    MagicStack.Clank.{ModuleDelegateHost}.Regular.Module.{ModuleType}.Impression
+    and
+    MagicStack.Clank.{ModuleDelegateHost}.Startup.Module.{ModuleType}.Impression.
   </summary>
   <token key="ModuleDelegateHost" variants="ModuleDelegateHost"/>
   <token key="ModuleType" variants="ModuleType"/>
@@ -456,6 +504,54 @@ chromium-metrics-reviews@google.com.
     magic stack on {ModuleDelegateHost}, Android-only.
   </summary>
   <token key="ModuleDelegateHost" variants="ModuleDelegateHost"/>
+</histogram>
+
+<histogram
+    name="MagicStack.Clank.{ModuleDelegateHost}.{HostSurfaceState}.Module.{ModuleType}.Build"
+    enum="ModulePosition" expires_after="2024-11-14">
+  <owner>hanxi@chromium.org</owner>
+  <owner>xinyiji@chromium.org</owner>
+  <summary>
+    Records the type and position of a module when it is added to the magic
+    stack of a {ModuleDelegateHost}. {HostSurfaceState} indicates whether the
+    histogram is logged at startup, or when the user opens a new Tab.
+    Android-only.
+  </summary>
+  <token key="ModuleDelegateHost" variants="ModuleDelegateHost"/>
+  <token key="HostSurfaceState" variants="HostSurfaceState"/>
+  <token key="ModuleType" variants="ModuleType"/>
+</histogram>
+
+<histogram
+    name="MagicStack.Clank.{ModuleDelegateHost}.{HostSurfaceState}.Module.{ModuleType}.Click"
+    enum="ModulePosition" expires_after="2024-11-14">
+  <owner>hanxi@chromium.org</owner>
+  <owner>xinyiji@chromium.org</owner>
+  <summary>
+    Records the type and position of a module when it is clicked by users on the
+    magic stack of a {ModuleDelegateHost}. {HostSurfaceState} indicates whether
+    the histogram is logged at startup, or when the user opens a new Tab.
+    Android-only.
+  </summary>
+  <token key="ModuleDelegateHost" variants="ModuleDelegateHost"/>
+  <token key="HostSurfaceState" variants="HostSurfaceState"/>
+  <token key="ModuleType" variants="ModuleType"/>
+</histogram>
+
+<histogram
+    name="MagicStack.Clank.{ModuleDelegateHost}.{HostSurfaceState}.Module.{ModuleType}.Impression"
+    enum="ModulePosition" expires_after="2024-11-14">
+  <owner>hanxi@chromium.org</owner>
+  <owner>xinyiji@chromium.org</owner>
+  <summary>
+    Records the type and position of a module when it is visible to users on the
+    magic stack of a {ModuleDelegateHost}. {HostSurfaceState} indicates whether
+    the histogram is logged at startup, or when the user opens a new Tab. The
+    histogram is logged on Android-only.
+  </summary>
+  <token key="ModuleDelegateHost" variants="ModuleDelegateHost"/>
+  <token key="HostSurfaceState" variants="HostSurfaceState"/>
+  <token key="ModuleType" variants="ModuleType"/>
 </histogram>
 
 </histograms>

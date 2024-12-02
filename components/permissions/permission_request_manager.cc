@@ -240,12 +240,12 @@ void PermissionRequestManager::AddRequest(
   bool is_main_frame =
       url::IsSameOriginWith(main_frame_origin, request->requesting_origin());
 
-  std::optional<url::Origin> auto_approval_origin =
-      PermissionsClient::Get()->GetAutoApprovalOrigin(
-          web_contents()->GetBrowserContext());
-  if (auto_approval_origin) {
-    if (url::Origin::Create(request->requesting_origin()) ==
-        auto_approval_origin.value()) {
+  std::optional<PermissionAction> should_auto_approve_request =
+      PermissionsClient::Get()->GetAutoApprovalStatus(
+          web_contents()->GetBrowserContext(), request->requesting_origin());
+
+  if (should_auto_approve_request) {
+    if (should_auto_approve_request == PermissionAction::GRANTED) {
       request->PermissionGranted(/*is_one_time=*/false);
     }
     request->RequestFinished();
@@ -1144,9 +1144,6 @@ void PermissionRequestManager::CurrentRequestsDecided(
         browser_context, request, permission_action));
   }
 
-  // IGNORED is not a decision on the prompt and it occurs because of external
-  // factors (e.g. tab switching). Therefore |ShouldFinalizeRequestAfterDecided|
-  // does not take effect when the action is IGNORED.
   if (ShouldFinalizeRequestAfterDecided(permission_action)) {
     FinalizeCurrentRequests();
   }
@@ -1544,7 +1541,7 @@ void PermissionRequestManager::DoAutoResponseForTesting() {
       Dismiss();
       break;
     case NONE:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
 }
 

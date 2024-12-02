@@ -14,6 +14,7 @@
 #include "base/functional/callback.h"
 #include "base/json/json_reader.h"
 #include "base/process/process.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
@@ -32,6 +33,7 @@
 #include "components/trusted_vault/proto/vault.pb.h"
 #include "components/trusted_vault/proto_string_bytes_conversion.h"
 #include "components/trusted_vault/securebox.h"
+#include "components/trusted_vault/trusted_vault_connection.h"
 #include "components/trusted_vault/trusted_vault_server_constants.h"
 #include "crypto/scoped_fake_user_verifying_key_provider.h"
 #include "crypto/scoped_mock_unexportable_key_provider.h"
@@ -338,16 +340,30 @@ class EnclaveManagerTest : public testing::Test, EnclaveManager::Observer {
     }
   }
 
-  void DoAssertion(std::unique_ptr<sync_pb::WebauthnCredentialSpecifics> entity,
-                   std::unique_ptr<enclave::ClaimedPIN> claimed_pin) {
-    auto ui_request = std::make_unique<enclave::CredentialRequest>();
-    ui_request->signing_callback = manager_.HardwareKeySigningCallback();
-    ui_request->wrapped_secret =
-        *manager_.GetWrappedSecret(/*version=*/kSecretVersion);
-    ui_request->entity = std::move(entity);
-    ui_request->claimed_pin = std::move(claimed_pin);
-    ui_request->save_passkey_callback = base::BindOnce(
-        [](sync_pb::WebauthnCredentialSpecifics) { NOTREACHED(); });
+  struct GetAssertionResponseExpectation {
+    device::CtapDeviceResponseCode result =
+        device::CtapDeviceResponseCode::kSuccess;
+    uint32_t size = 1;
+  };
+
+  void DoAssertion(
+      std::unique_ptr<sync_pb::WebauthnCredentialSpecifics> entity,
+      std::unique_ptr<enclave::ClaimedPIN> claimed_pin,
+      GetAssertionResponseExpectation expected_response,
+      std::unique_ptr<enclave::CredentialRequest> custom_ui_request = nullptr) {
+    std::unique_ptr<enclave::CredentialRequest> ui_request;
+    if (custom_ui_request) {
+      ui_request = std::move(custom_ui_request);
+    } else {
+      ui_request = std::make_unique<enclave::CredentialRequest>();
+      ui_request->signing_callback = manager_.HardwareKeySigningCallback();
+      ui_request->wrapped_secret =
+          *manager_.GetWrappedSecret(/*version=*/kSecretVersion);
+      ui_request->entity = std::move(entity);
+      ui_request->claimed_pin = std::move(claimed_pin);
+      ui_request->save_passkey_callback = base::BindOnce(
+          [](sync_pb::WebauthnCredentialSpecifics) { NOTREACHED_NORETURN(); });
+    }
 
     enclave::EnclaveAuthenticator authenticator(
         std::move(ui_request), /*network_context_factory=*/
@@ -386,8 +402,8 @@ class EnclaveManagerTest : public testing::Test, EnclaveManager::Observer {
 
     ASSERT_TRUE(status.has_value());
     ASSERT_TRUE(true);
-    ASSERT_EQ(status, device::CtapDeviceResponseCode::kSuccess);
-    ASSERT_EQ(responses.size(), 1u);
+    ASSERT_EQ(status, expected_response.result);
+    ASSERT_EQ(responses.size(), expected_response.size);
   }
 
   bool Register() {
@@ -474,7 +490,8 @@ TEST_F(EnclaveManagerTest, Basic) {
   EXPECT_EQ(security_domain_service_->num_pin_members(), 0u);
 
   DoCreate(/*claimed_pin=*/nullptr, /*out_specifics=*/nullptr);
-  DoAssertion(GetTestEntity(), /*claimed_pin=*/nullptr);
+  DoAssertion(GetTestEntity(), /*claimed_pin=*/nullptr,
+              GetAssertionResponseExpectation());
 }
 
 TEST_F(EnclaveManagerTest, SecretsArriveBeforeRegistrationRequested) {
@@ -707,7 +724,8 @@ TEST_F(EnclaveManagerTest, SetupWithPIN) {
       EnclaveManager::MakeClaimedPINSlowly(pin, manager_.GetWrappedPIN());
   std::unique_ptr<sync_pb::WebauthnCredentialSpecifics> entity;
   DoCreate(/*claimed_pin=*/nullptr, &entity);
-  DoAssertion(std::move(entity), std::move(claimed_pin));
+  DoAssertion(std::move(entity), std::move(claimed_pin),
+              GetAssertionResponseExpectation());
 }
 
 TEST_F(EnclaveManagerTest, SetupWithPIN_CertXMLFailure) {
@@ -761,7 +779,8 @@ TEST_F(EnclaveManagerTest, AddDeviceAndPINToAccount) {
       EnclaveManager::MakeClaimedPINSlowly(pin, manager_.GetWrappedPIN());
   std::unique_ptr<sync_pb::WebauthnCredentialSpecifics> entity;
   DoCreate(/*claimed_pin=*/nullptr, &entity);
-  DoAssertion(std::move(entity), std::move(claimed_pin));
+  DoAssertion(std::move(entity), std::move(claimed_pin),
+              GetAssertionResponseExpectation());
 }
 
 TEST_F(EnclaveManagerTest, ChangePIN) {
@@ -802,7 +821,8 @@ TEST_F(EnclaveManagerTest, ChangePIN) {
       EnclaveManager::MakeClaimedPINSlowly(new_pin, manager_.GetWrappedPIN());
   std::unique_ptr<sync_pb::WebauthnCredentialSpecifics> entity;
   DoCreate(/*claimed_pin=*/nullptr, &entity);
-  DoAssertion(std::move(entity), std::move(claimed_pin));
+  DoAssertion(std::move(entity), std::move(claimed_pin),
+              GetAssertionResponseExpectation());
 }
 
 TEST_F(EnclaveManagerTest, EnclaveForgetsClient_SetupWithPIN) {
@@ -877,6 +897,61 @@ TEST_F(EnclaveManagerTest, RenewPIN) {
                                     *recovery_key_store_);
   CHECK(security_domain_secret.has_value());
   EXPECT_EQ(manager_.TakeSecret()->second, *security_domain_secret);
+}
+
+TEST_F(EnclaveManagerTest, EpochChanged) {
+  ASSERT_TRUE(Register());
+
+  BoolCallback setup_callback;
+  manager_.SetupWithPIN("123456", setup_callback.callback());
+  setup_callback.WaitForCallback();
+  EXPECT_TRUE(manager_.is_ready());
+
+  trusted_vault::DownloadAuthenticationFactorsRegistrationStateResult state;
+  state.state = trusted_vault::
+      DownloadAuthenticationFactorsRegistrationStateResult::State::kRecoverable;
+  state.key_version = kSecretVersion;
+
+  EXPECT_TRUE(manager_.ConsiderSecurityDomainState(state, base::DoNothing()));
+  EXPECT_TRUE(manager_.is_idle());
+
+  BoolCallback update_callback;
+  state.key_version = kSecretVersion + 1;
+  EXPECT_FALSE(
+      manager_.ConsiderSecurityDomainState(state, update_callback.callback()));
+  update_callback.WaitForCallback();
+  EXPECT_FALSE(manager_.is_ready());
+}
+
+TEST_F(EnclaveManagerTest, PINChanged) {
+  ASSERT_TRUE(Register());
+
+  BoolCallback setup_callback;
+  manager_.SetupWithPIN("123456", setup_callback.callback());
+  setup_callback.WaitForCallback();
+  EXPECT_TRUE(manager_.is_ready());
+
+  const webauthn_pb::EnclaveLocalState::User& user =
+      manager_.local_state_for_testing().users().begin()->second;
+  webauthn_pb::EnclaveLocalState::WrappedPIN wrapped_pin = user.wrapped_pin();
+  wrapped_pin.set_generation(wrapped_pin.generation() + 1);
+
+  trusted_vault::DownloadAuthenticationFactorsRegistrationStateResult state;
+  state.state = trusted_vault::
+      DownloadAuthenticationFactorsRegistrationStateResult::State::kRecoverable;
+  state.key_version = kSecretVersion;
+  state.gpm_pin_metadata.emplace(user.pin_public_key(),
+                                 wrapped_pin.SerializeAsString(),
+                                 /*expiry=*/base::Time::FromTimeT(1));
+
+  BoolCallback update_callback;
+  EXPECT_TRUE(
+      manager_.ConsiderSecurityDomainState(state, update_callback.callback()));
+  update_callback.WaitForCallback();
+  EXPECT_TRUE(manager_.is_ready());
+  const webauthn_pb::EnclaveLocalState::User& updated_user =
+      manager_.local_state_for_testing().users().begin()->second;
+  EXPECT_EQ(updated_user.wrapped_pin().generation(), wrapped_pin.generation());
 }
 
 TEST_F(EnclaveManagerTest, SigningFails) {
@@ -1147,8 +1222,13 @@ class EnclaveUVTest : public EnclaveManagerTest {
     fake_provider_.emplace<crypto::ScopedNullUserVerifyingKeyProvider>();
   }
 
+  void UseFailingUVKeySupport() {
+    fake_provider_.emplace<crypto::ScopedFailingUserVerifyingKeyProvider>();
+  }
+
   absl::variant<crypto::ScopedFakeUserVerifyingKeyProvider,
-                crypto::ScopedNullUserVerifyingKeyProvider>
+                crypto::ScopedNullUserVerifyingKeyProvider,
+                crypto::ScopedFailingUserVerifyingKeyProvider>
       fake_provider_;
 
 #if BUILDFLAG(IS_MAC)
@@ -1412,6 +1492,68 @@ TEST_F(EnclaveUVTest, DeferredUVKeyCreation) {
   EXPECT_FALSE(user_state.deferred_uv_key_creation());
   EXPECT_FALSE(user_state.wrapped_uv_private_key().empty());
 }
+
+TEST_F(EnclaveUVTest, UnregisterOnFailedDeferredUVKeyCreation) {
+  security_domain_service_->pretend_there_are_members();
+  NoArgCallback loaded_callback;
+  manager_.Load(loaded_callback.callback());
+  loaded_callback.WaitForCallback();
+
+  BoolCallback register_callback;
+  manager_.RegisterIfNeeded(register_callback.callback());
+  ASSERT_FALSE(manager_.is_idle());
+  register_callback.WaitForCallback();
+
+  std::vector<uint8_t> key(kTestKey.begin(), kTestKey.end());
+  ASSERT_FALSE(manager_.has_pending_keys());
+  manager_.StoreKeys(gaia_id_, {std::move(key)},
+                     /*last_key_version=*/kSecretVersion);
+  ASSERT_TRUE(manager_.is_idle());
+  ASSERT_TRUE(manager_.has_pending_keys());
+
+  BoolCallback add_callback;
+  ASSERT_TRUE(manager_.AddDeviceToAccount(
+      /*pin_metadata=*/std::nullopt, add_callback.callback()));
+  ASSERT_FALSE(manager_.is_idle());
+  add_callback.WaitForCallback();
+
+  EXPECT_EQ(manager_.uv_key_state(),
+            EnclaveManager::UvKeyState::kUsesSystemUIDeferredCreation);
+  const auto& user_state =
+      manager_.local_state_for_testing().users().find(gaia_id_)->second;
+  EXPECT_TRUE(user_state.deferred_uv_key_creation());
+  EXPECT_TRUE(user_state.wrapped_uv_private_key().empty());
+
+  UseFailingUVKeySupport();
+  EnclaveManager::EnableInvariantChecksForTesting(false);
+
+  base::RunLoop run_loop;
+  auto ui_request = std::make_unique<enclave::CredentialRequest>();
+  ui_request->signing_callback = manager_.HardwareKeySigningCallback();
+  ui_request->wrapped_secret =
+      *manager_.GetWrappedSecret(/*version=*/kSecretVersion);
+  ui_request->entity = GetTestEntity();
+  ui_request->claimed_pin = nullptr;
+  ui_request->save_passkey_callback = base::BindOnce(
+      [](sync_pb::WebauthnCredentialSpecifics) { NOTREACHED_NORETURN(); });
+  ui_request->user_verified = true;
+  ui_request->uv_key_creation_callback =
+      manager_.UserVerifyingKeyCreationCallback();
+  ui_request->unregister_callback =
+      base::BindOnce(&EnclaveManager::Unenroll, manager_.GetWeakPtr(),
+                     base::BindLambdaForTesting(
+                         [&run_loop](bool) { run_loop.QuitWhenIdle(); }));
+
+  GetAssertionResponseExpectation expected_response;
+  expected_response.result = device::CtapDeviceResponseCode::kCtap2ErrOther;
+  expected_response.size = 0;
+  DoAssertion(GetTestEntity(), /*claimed_pin=*/nullptr, expected_response,
+              std::move(ui_request));
+  run_loop.Run();
+
+  EXPECT_FALSE(manager_.is_registered());
+}
+
 #endif  // BUILDFLAG(IS_WIN)
 
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)

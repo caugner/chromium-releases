@@ -56,6 +56,7 @@
 #include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/animation/ink_drop.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
@@ -87,13 +88,11 @@ class OmniboxRemoveSuggestionButton : public views::ImageButton {
         base::TimeDelta());
 
     SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
-  }
 
-  void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
     // Although this appears visually as a button, expose as a list box option
     // so that it matches the other options within its list box container.
-    node_data->role = ax::mojom::Role::kListBoxOption;
-    node_data->SetNameChecked(
+    GetViewAccessibility().SetRole(ax::mojom::Role::kListBoxOption);
+    GetViewAccessibility().SetName(
         l10n_util::GetStringUTF16(IDS_ACC_REMOVE_SUGGESTION_BUTTON));
   }
 };
@@ -358,11 +357,9 @@ void OmniboxResultView::ApplyThemeAndRefreshIcons(bool force_reapply_styles) {
     suggestion_view_->content()->ApplyTextColor(default_id);
     suggestion_view_->description()->ApplyTextColor(dimmed_id);
   } else if (match_.type == AutocompleteMatchType::NULL_RESULT_MESSAGE) {
-    bool is_iph = OmniboxFieldTrial::IsStarterPackIPHEnabled() &&
-                  match_.provider->type() ==
-                      AutocompleteProvider::Type::TYPE_FEATURED_SEARCH;
     suggestion_view_->content()->ApplyTextColor(
-        is_iph ? kColorOmniboxResultsTextDimmed : kColorOmniboxText);
+        match_.IsIPHSuggestion() ? kColorOmniboxResultsTextDimmed
+                                 : kColorOmniboxText);
   } else if (prefers_contrast || force_reapply_styles) {
     // Normally, OmniboxTextView caches its appearance, but in high contrast,
     // selected-ness changes the text colors, so the styling of the text part of
@@ -565,12 +562,23 @@ void OmniboxResultView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
         autocomplete_controller->result().match_at(model_index_);
     // The selected match can have a special name, e.g. when is one or more
     // buttons that can be tabbed to.
-    std::u16string label =
-        is_selected ? popup_view_->model()
-                          ->GetPopupAccessibilityLabelForCurrentSelection(
-                              raw_match.contents, false)
-                    : AutocompleteMatchType::ToAccessibilityLabel(
-                          raw_match, raw_match.contents);
+    std::u16string label;
+    if (is_selected) {
+      // The selected match can have a special name, e.g. when is one or more
+      // buttons that can be tabbed to.
+      label =
+          popup_view_->model()->GetPopupAccessibilityLabelForCurrentSelection(
+              raw_match.contents, false);
+
+      // If the line immediately after the current selection is the
+      // informational IPH row, append its accessibility label at the end of
+      // this selection's accessibility label.
+      label +=
+          popup_view_->model()->GetPopupAccessibilityLabelForIPHSuggestion();
+    } else {
+      label = AutocompleteMatchType::ToAccessibilityLabel(raw_match,
+                                                          raw_match.contents);
+    }
     node_data->SetName(label);
   }
 

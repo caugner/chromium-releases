@@ -147,7 +147,7 @@ const std::vector<std::tuple<PasswordFillingParams, SubmissionReadinessState>>
              /*password_field_index=*/2,
              /*focused_field_renderer_id_=*/autofill::FieldRendererId(),
              SubmissionReadinessState::kNoInformation),
-         SubmissionReadinessState::kTwoFields},
+         SubmissionReadinessState::kFieldAfterPasswordField},
         // There is a checkbox field after the password field.
         {PasswordFillingParams(
              PrepareFormData({FormFieldFocusabilityType::kFocusableInput,
@@ -244,6 +244,14 @@ TEST_P(PasswordCredentialFillerTest,
   EXPECT_CALL(driver(), FillSuggestion(kUsername, kPassword));
   EXPECT_CALL(driver(), TriggerFormSubmission).Times(0);
 
+  filler.FillUsernameAndPassword(kUsername, kPassword);
+}
+
+TEST_P(PasswordCredentialFillerTest, FillWithNullDriver) {
+  PasswordCredentialFillerImpl filler(
+      nullptr, PasswordFillingParams(FormData(), 0, 0,
+                                     autofill::FieldRendererId(), GetParam()));
+  // Should not crash.
   filler.FillUsernameAndPassword(kUsername, kPassword);
 }
 

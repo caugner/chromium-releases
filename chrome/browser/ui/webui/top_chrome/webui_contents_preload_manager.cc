@@ -4,49 +4,79 @@
 
 #include "chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.h"
 
+#include <memory>
+#include <optional>
+#include <string>
+
+#include "base/auto_reset.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
+#include "base/scoped_observation.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/web_contents_tags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/webui/top_chrome/per_profile_webui_tracker.h"
+#include "chrome/browser/ui/webui/top_chrome/preload_context.h"
+#include "chrome/browser/ui/webui/top_chrome/profile_preload_candidate_selector.h"
 #include "chrome/browser/ui/webui/top_chrome/top_chrome_web_ui_controller.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
-#include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
 #include "content/public/browser/navigation_controller.h"
 #include "ui/base/models/menu_model.h"
 
 namespace {
 
-// This factory is used to get notification for the browser context shutdown.
-class BrowserContextShutdownNotifierFactory
-    : public BrowserContextKeyedServiceShutdownNotifierFactory {
- public:
-  BrowserContextShutdownNotifierFactory(
-      const BrowserContextShutdownNotifierFactory&) = delete;
-  BrowserContextShutdownNotifierFactory& operator=(
-      const BrowserContextShutdownNotifierFactory&) = delete;
+// Enum class representing the results of attempting to use a preloaded WebUI
+// when WebUIContentsPreloadedManager::MakeContents() is called.
+// The description of each value is also in tools/metrics/histograms/enums.xml.
+enum class WebUIPreloadResult {
+  // No preloaded WebUI is available when a WebUI is requested.
+  kNoPreload = 0,
+  // The preloaded WebUI matches the requested WebUI.
+  kHit = 1,
+  // The preloaded WebUI is redirected to the requested WebUI.
+  kHitRedirected = 2,
+  // The preloaded WebUI does not match the requested WebUI and cannot be
+  // redirected.
+  kMiss = 3,
+  kMaxValue = kMiss,
+};
 
-  static BrowserContextShutdownNotifierFactory* GetInstance() {
-    static base::NoDestructor<BrowserContextShutdownNotifierFactory> s_factory;
-    return s_factory.get();
+// A candidate selector that always preloads a fixed WebUI.
+class FixedCandidateSelector : public webui::PreloadCandidateSelector {
+ public:
+  explicit FixedCandidateSelector(GURL webui_url) : webui_url_(webui_url) {}
+  FixedCandidateSelector(const FixedCandidateSelector&) = default;
+  FixedCandidateSelector(FixedCandidateSelector&&) = default;
+  FixedCandidateSelector& operator=(const FixedCandidateSelector&) = default;
+  FixedCandidateSelector& operator=(FixedCandidateSelector&&) = default;
+
+  // webui::PreloadCandidateSelector:
+  void Init(const std::vector<GURL>& preloadable_urls) override {
+    DCHECK(base::Contains(preloadable_urls, webui_url_));
+  }
+  std::optional<GURL> GetURLToPreload(
+      const webui::PreloadContext& context) const override {
+    return webui_url_;
   }
 
  private:
-  friend class base::NoDestructor<BrowserContextShutdownNotifierFactory>;
-  BrowserContextShutdownNotifierFactory()
-      : BrowserContextKeyedServiceShutdownNotifierFactory(
-            "WebUIContentsPreloadManager") {}
+  GURL webui_url_;
 };
 
 bool IsFeatureEnabled() {
   return base::FeatureList::IsEnabled(features::kPreloadTopChromeWebUI);
+}
+
+bool IsSmartPreloadEnabled() {
+  return IsFeatureEnabled() &&
+         features::kPreloadTopChromeWebUISmartPreload.Get();
 }
 
 content::WebContents::CreateParams GetWebContentsCreateParams(
@@ -75,29 +105,17 @@ content::WebUIController* GetWebUIController(
   return webui->GetController();
 }
 
-// Enum class representing the results of attempting to use a preloaded WebUI
-// when WebUIContentsPreloadedManager::MakeContents() is called.
-// The description of each value is also in tools/metrics/histograms/enums.xml.
-enum class WebUIPreloadResult {
-  // No preloaded WebUI is available when a WebUI is requested.
-  kNoPreload = 0,
-  // The preloaded WebUI matches the requested WebUI.
-  kHit = 1,
-  // The preloaded WebUI is redirected to the requested WebUI.
-  kHitRedirected = 2,
-  // The preloaded WebUI does not match the requested WebUI and cannot be
-  // redirected.
-  kMiss = 3,
-  kMaxValue = kMiss,
-};
+std::vector<GURL> GetAllPreloadableWebUIURLs() {
+  // Top 3 most used Top Chrome WebUIs.
+  // TODO(crbug.com/40168622): add more Top Chrome WebUIs.
+  static const base::NoDestructor<std::vector<GURL>> s_preloadable_webui_urls(
+      {GURL(chrome::kChromeUITabSearchURL),
+       GURL(chrome::kChromeUIHistoryClustersSidePanelURL),
+       GURL(chrome::kChromeUIBookmarksSidePanelURL)});
+  return *s_preloadable_webui_urls;
+}
 
 }  // namespace
-
-// Currently we preloads Tab Search. In practice, this also benefits other
-// WebUIs. This is likely due to reused render processes that increase cache
-// hits and reduce re-creation of common structs.
-const char* const WebUIContentsPreloadManager::kPreloadedWebUIURL =
-    chrome::kChromeUITabSearchURL;
 
 // A stub WebUI page embdeder that captures the ready-to-show signal.
 class WebUIContentsPreloadManager::WebUIControllerEmbedderStub final
@@ -133,6 +151,10 @@ class WebUIContentsPreloadManager::WebUIControllerEmbedderStub final
 
   // Detach from the previously attached `web_contents`.
   void Detach() {
+    if (!web_contents_) {
+      return;
+    }
+
     content::WebUIController* webui_controller =
         GetWebUIController(web_contents_);
     if (!webui_controller) {
@@ -165,11 +187,26 @@ MakeContentsResult::MakeContentsResult(MakeContentsResult&&) = default;
 MakeContentsResult& MakeContentsResult::operator=(MakeContentsResult&&) =
     default;
 
-WebUIContentsPreloadManager::WebUIContentsPreloadManager()
-    : preload_mode_(
-          static_cast<PreloadMode>(features::kPreloadTopChromeWebUIMode.Get())),
-      webui_controller_embedder_stub_(
-          std::make_unique<WebUIControllerEmbedderStub>()) {}
+WebUIContentsPreloadManager::WebUIContentsPreloadManager() {
+  preload_mode_ =
+      static_cast<PreloadMode>(features::kPreloadTopChromeWebUIMode.Get());
+  webui_controller_embedder_stub_ =
+      std::make_unique<WebUIControllerEmbedderStub>();
+
+  webui_tracker_ = PerProfileWebUITracker::Create();
+  webui_tracker_observation_.Observe(webui_tracker_.get());
+  if (IsSmartPreloadEnabled()) {
+    // Use ProfilePreloadCandidateSelector to find the WebUI with the
+    // highest engagement score and is not present under the current profile.
+    SetPreloadCandidateSelector(
+        std::make_unique<webui::ProfilePreloadCandidateSelector>(
+            webui_tracker_.get()));
+  } else {
+    // Old behavior always preloads Tab Search.
+    SetPreloadCandidateSelector(std::make_unique<FixedCandidateSelector>(
+        GURL(chrome::kChromeUITabSearchURL)));
+  }
+}
 
 WebUIContentsPreloadManager::~WebUIContentsPreloadManager() = default;
 
@@ -177,14 +214,6 @@ WebUIContentsPreloadManager::~WebUIContentsPreloadManager() = default;
 WebUIContentsPreloadManager* WebUIContentsPreloadManager::GetInstance() {
   static base::NoDestructor<WebUIContentsPreloadManager> s_instance;
   return s_instance.get();
-}
-
-// static
-void WebUIContentsPreloadManager::EnsureFactoryBuilt() {
-  // Ensure that the shutdown notifier factory is built.
-  // The profile service's dependency manager requires the service factory
-  // be registered at an early stage of browser lifetime.
-  BrowserContextShutdownNotifierFactory::GetInstance();
 }
 
 void WebUIContentsPreloadManager::WarmupForBrowser(Browser* browser) {
@@ -199,34 +228,88 @@ void WebUIContentsPreloadManager::WarmupForBrowser(Browser* browser) {
   }
 
   CHECK_EQ(preload_mode_, PreloadMode::kPreloadOnWarmup);
-  PreloadForBrowserContext(browser->profile());
+  MaybePreloadForBrowserContext(browser->profile());
 }
 
-void WebUIContentsPreloadManager::PreloadForBrowserContextForTesting(
+void WebUIContentsPreloadManager::MaybePreloadForBrowserContextForTesting(
     content::BrowserContext* browser_context) {
-  PreloadForBrowserContext(browser_context);
+  MaybePreloadForBrowserContext(browser_context);
 }
 
-void WebUIContentsPreloadManager::PreloadForBrowserContext(
+std::optional<GURL>
+WebUIContentsPreloadManager::GetNextWebUIURLToPreloadForTesting(
+    content::BrowserContext* browser_context) const {
+  return GetNextWebUIURLToPreload(browser_context);
+}
+
+std::optional<GURL> WebUIContentsPreloadManager::GetNextWebUIURLToPreload(
+    content::BrowserContext* browser_context) const {
+  return preload_candidate_selector_->GetURLToPreload(
+      webui::PreloadContext::From(
+          Profile::FromBrowserContext(browser_context)));
+}
+
+// static
+std::vector<GURL>
+WebUIContentsPreloadManager::GetAllPreloadableWebUIURLsForTesting() {
+  return GetAllPreloadableWebUIURLs();
+}
+
+void WebUIContentsPreloadManager::SetPreloadCandidateSelectorForTesting(
+    std::unique_ptr<webui::PreloadCandidateSelector>
+        preload_candidate_selector) {
+  SetPreloadCandidateSelector(std::move(preload_candidate_selector));
+}
+
+void WebUIContentsPreloadManager::SetPreloadCandidateSelector(
+    std::unique_ptr<webui::PreloadCandidateSelector>
+        preload_candidate_selector) {
+  preload_candidate_selector_ = std::move(preload_candidate_selector);
+  if (preload_candidate_selector_) {
+    preload_candidate_selector_->Init(GetAllPreloadableWebUIURLs());
+  }
+}
+
+void WebUIContentsPreloadManager::MaybePreloadForBrowserContext(
     content::BrowserContext* browser_context) {
   if (!ShouldPreloadForBrowserContext(browser_context)) {
     return;
   }
 
-  SetPreloadedContents(CreateNewContents(browser_context));
+  // Usually destroying a WebContents may trigger preload, but if the
+  // destroy is caused by setting new preload contents, ignore it.
+  if (is_setting_preloaded_web_contents_) {
+    return;
+  }
+
+  std::optional<GURL> preload_url = GetNextWebUIURLToPreload(browser_context);
+  if (!preload_url.has_value()) {
+    return;
+  }
+
+  // Don't preload if already preloaded for this `browser_context`.
+  if (preloaded_web_contents_ &&
+      preloaded_web_contents_->GetBrowserContext() == browser_context &&
+      preloaded_web_contents_->GetVisibleURL().GetWithEmptyPath() ==
+          preload_url->GetWithEmptyPath()) {
+    return;
+  }
+
+  SetPreloadedContents(CreateNewContents(browser_context, *preload_url));
 }
 
 void WebUIContentsPreloadManager::SetPreloadedContents(
     std::unique_ptr<content::WebContents> web_contents) {
-  if (preloaded_web_contents_) {
-    webui_controller_embedder_stub_->Detach();
-    StopObserveBrowserContextShutdown();
-  }
+  webui_controller_embedder_stub_->Detach();
+  profile_observation_.Reset();
 
+  base::AutoReset<bool> is_setting_preloaded_web_contents(
+      &is_setting_preloaded_web_contents_, true);
   preloaded_web_contents_ = std::move(web_contents);
   if (preloaded_web_contents_) {
     webui_controller_embedder_stub_->AttachTo(preloaded_web_contents_.get());
-    ObserveBrowserContextShutdown();
+    profile_observation_.Observe(Profile::FromBrowserContext(
+        preloaded_web_contents_->GetBrowserContext()));
   }
 }
 
@@ -249,7 +332,7 @@ MakeContentsResult WebUIContentsPreloadManager::MakeContents(
        webui_url.IsAboutBlank())) {
     preload_result = WebUIPreloadResult::kHit;
     // Redirect if requested a different URL.
-    if (preloaded_web_contents_->GetURL().host() != webui_url.host()) {
+    if (!url::IsSameOriginWith(preloaded_web_contents_->GetURL(), webui_url)) {
       preload_result = WebUIPreloadResult::kHitRedirected;
       LoadURLForContents(preloaded_web_contents_.get(), webui_url);
     }
@@ -261,13 +344,18 @@ MakeContentsResult WebUIContentsPreloadManager::MakeContents(
     is_ready_to_show = false;
   }
 
+  // Navigate to path if the request URL has a different path.
+  if (!is_navigation_disabled_for_test_ &&
+      webui_url.path() != web_contents_ret->GetURL().path()) {
+    CHECK(url::IsSameOriginWith(webui_url, web_contents_ret->GetURL()));
+    LoadURLForContents(web_contents_ret.get(), webui_url);
+  }
+
   base::UmaHistogramEnumeration("WebUI.TopChrome.Preload.Result",
                                 preload_result);
 
-  if (ShouldPreloadForBrowserContext(browser_context)) {
-    // Preloads a new contents.
-    SetPreloadedContents(CreateNewContents(browser_context));
-  }
+  // Preload a new contents.
+  MaybePreloadForBrowserContext(browser_context);
 
   task_manager::WebContentsTags::ClearTag(web_contents_ret.get());
 
@@ -277,8 +365,12 @@ MakeContentsResult WebUIContentsPreloadManager::MakeContents(
   return result;
 }
 
-GURL WebUIContentsPreloadManager::GetPreloadedURLForTesting() const {
-  return GURL(kPreloadedWebUIURL);
+std::optional<GURL> WebUIContentsPreloadManager::GetPreloadedURLForTesting()
+    const {
+  if (!preloaded_web_contents_) {
+    return std::nullopt;
+  }
+  return preloaded_web_contents_->GetVisibleURL();
 }
 
 void WebUIContentsPreloadManager::DisableNavigationForTesting() {
@@ -302,6 +394,8 @@ WebUIContentsPreloadManager::CreateNewContents(
 
   LoadURLForContents(web_contents.get(), url);
 
+  webui_tracker_->AddWebContents(web_contents.get());
+
   return web_contents;
 }
 
@@ -324,9 +418,7 @@ bool WebUIContentsPreloadManager::ShouldPreloadForBrowserContext(
     return false;
   }
 
-  // Don't preload if already preloaded for this `browser_context`.
-  if (preloaded_web_contents_ &&
-      preloaded_web_contents_->GetBrowserContext() == browser_context) {
+  if (browser_context->ShutdownStarted()) {
     return false;
   }
 
@@ -341,30 +433,21 @@ bool WebUIContentsPreloadManager::ShouldPreloadForBrowserContext(
   return true;
 }
 
-void WebUIContentsPreloadManager::ObserveBrowserContextShutdown() {
-  CHECK(preloaded_web_contents_);
-  // Cleans up the preloaded contents on browser context shutdown.
-  content::BrowserContext* browser_context =
-      preloaded_web_contents_->GetBrowserContext();
-  browser_context_shutdown_subscription_ =
-      BrowserContextShutdownNotifierFactory::GetInstance()
-          ->Get(browser_context)
-          ->Subscribe(base::BindRepeating(
-              &WebUIContentsPreloadManager::OnBrowserContextShutdown,
-              base::Unretained(this), browser_context));
-}
-
-void WebUIContentsPreloadManager::StopObserveBrowserContextShutdown() {
-  browser_context_shutdown_subscription_ = {};
-}
-
-void WebUIContentsPreloadManager::OnBrowserContextShutdown(
-    content::BrowserContext* browser_context) {
+void WebUIContentsPreloadManager::OnProfileWillBeDestroyed(Profile* profile) {
+  profile_observation_.Reset();
   if (!preloaded_web_contents_) {
     return;
   }
 
   webui_controller_embedder_stub_->Detach();
-  CHECK_EQ(preloaded_web_contents_->GetBrowserContext(), browser_context);
+  CHECK_EQ(preloaded_web_contents_->GetBrowserContext(), profile);
   preloaded_web_contents_.reset();
+}
+
+void WebUIContentsPreloadManager::OnWebContentsDestroyed(
+    content::WebContents* web_contents) {
+  // Triggers preloading when a WebUI is destroyed. Without this step, the
+  // preloaded content would only be the second highest engaged WebUI for
+  // the most time.
+  MaybePreloadForBrowserContext(web_contents->GetBrowserContext());
 }

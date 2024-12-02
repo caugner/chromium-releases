@@ -68,6 +68,7 @@ void TabBasedIPHBrowserAgent::NotifyMultiGestureRefreshEvent() {
 }
 
 void TabBasedIPHBrowserAgent::NotifyBackForwardButtonTap() {
+  ResetFeatureStatesAndRemoveIPHViews();
   engagement_tracker_->NotifyEvent(
       feature_engagement::events::kIOSBackForwardButtonTapped);
   back_forward_button_tapped_ = true;
@@ -124,7 +125,8 @@ void TabBasedIPHBrowserAgent::NewTabDidLoadUrl(const GURL& url,
 void TabBasedIPHBrowserAgent::DidStartNavigation(
     web::WebState* web_state,
     web::NavigationContext* navigation_context) {
-  if (navigation_context->IsSameDocument()) {
+  if (navigation_context->IsSameDocument() &&
+      !navigation_context->HasUserGesture()) {
     return;
   }
   // `multi_gesture_refresh_` would be set to `false` immediately after the

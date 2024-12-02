@@ -200,6 +200,12 @@ class WebFrameWidget : public WebWidget {
   // If the widget is currently selecting a range.
   virtual bool HandlingSelectRange() = 0;
 
+  // Calculates the selection bounds in the root frame. Returns bounds unchanged
+  // when there is no focused frame. Returns the caret bounds if the selection
+  // range is empty.
+  virtual void CalculateSelectionBounds(gfx::Rect& anchor_in_root_frame,
+                                        gfx::Rect& focus_in_root_frame) = 0;
+
   // Returns true if a pinch gesture is currently active in main frame.
   virtual bool PinchGestureActiveInMainFrame() = 0;
 
@@ -235,6 +241,16 @@ class WebFrameWidget : public WebWidget {
   // This should be called for the local root frame before calling the final
   // UpdateAllLifecyclePhases() just before dumping pixels.
   virtual void PrepareForFinalLifecyclUpdateForTesting() = 0;
+
+  // Returns the current zoom level.  0 is "original size", and each increment
+  // above or below represents zooming 20% larger or smaller to default limits
+  // of 300% and 50% of original size, respectively.  Only plugins use
+  // non whole-numbers, since they might choose to have specific zoom level so
+  // that fixed-width content is fit-to-page-width, for example.
+  virtual double GetZoomLevel() = 0;
+  // Changes the zoom level to the specified level, clamping at the limits
+  // defined by the associated `webView`.
+  virtual void SetZoomLevel(double zoom_level) = 0;
 
  private:
   // This is a private virtual method so we don't expose cc::LayerTreeHost

@@ -5,10 +5,12 @@
 #include "chrome/browser/ui/views/commerce/product_specifications_button.h"
 
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/commerce/product_specifications/product_specifications_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/commerce/product_specifications_entry_point_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_prefs.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
 #include "chrome/browser/ui/views/tabs/tab_search_button.h"
@@ -42,6 +44,11 @@ class ProductSpecificationsButtonBrowserTest : public InProcessBrowserTest {
  public:
   ProductSpecificationsButtonBrowserTest() {
     feature_list_.InitAndEnableFeature(commerce::kProductSpecifications);
+    dependency_manager_subscription_ =
+        BrowserContextDependencyManager::GetInstance()
+            ->RegisterCreateServicesCallbackForTesting(base::BindRepeating(
+                &ProductSpecificationsButtonBrowserTest::SetTestingFactory,
+                base::Unretained(this)));
   }
 
   void SetUpOnMainThread() override {
@@ -50,6 +57,15 @@ class ProductSpecificationsButtonBrowserTest : public InProcessBrowserTest {
             browser());
     product_specifications_button()->SetEntryPointControllerForTesting(
         controller_.get());
+  }
+
+  void SetTestingFactory(content::BrowserContext* context) {
+    commerce::ProductSpecificationsServiceFactory::GetInstance()
+        ->SetTestingFactory(
+            context, base::BindRepeating([](content::BrowserContext* context)
+                                             -> std::unique_ptr<KeyedService> {
+              return nullptr;
+            }));
   }
 
   BrowserView* browser_view() {
@@ -71,7 +87,7 @@ class ProductSpecificationsButtonBrowserTest : public InProcessBrowserTest {
   }
 
   bool GetRenderTabSearchBeforeTabStrip() {
-    return TabSearchBubbleHost::ShouldTabSearchRenderBeforeTabStrip();
+    return !tabs::GetTabSearchTrailingTabstrip(browser()->profile());
   }
 
   void SetLockedExpansionModeForTesting(LockedExpansionMode mode) {
@@ -87,6 +103,7 @@ class ProductSpecificationsButtonBrowserTest : public InProcessBrowserTest {
   void OnTimeout() { product_specifications_button()->OnTimeout(); }
 
  private:
+  base::CallbackListSubscription dependency_manager_subscription_;
   base::test::ScopedFeatureList feature_list_;
   std::unique_ptr<MockProductSpecificationsEntryPointController> controller_;
 };

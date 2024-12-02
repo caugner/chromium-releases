@@ -36,9 +36,6 @@ class DefaultSearchManager {
   static constexpr char kDefaultSearchProviderDataPrefName[] =
       "default_search_provider_data.template_url_data";
 
-  static constexpr char kDefaultSearchProviderChoiceLocationPrefName[] =
-      "default_search_provider_data.choice_location";
-
   static const char kID[];
   static const char kShortName[];
   static const char kKeyword[];
@@ -84,6 +81,12 @@ class DefaultSearchManager {
   static const char kIsActive[];
   static const char kStarterPackId[];
   static const char kEnforcedByPolicy[];
+
+  // This value is not read / written using `TemplateURLDataToDictionary` and
+  // `TemplateURLDataFromDictionary` as it's related to the default search
+  // engine state and not the template url one.
+  // It is only written when `SetUserSelectedDefaultSearchEngine` is called.
+  static const char kChoiceLocation[];
 
   enum Source {
     // Default search engine chosen either from prepopulated engines set for
@@ -172,7 +175,7 @@ class DefaultSearchManager {
   void OnDefaultSearchPrefChanged();
 
   // Handles changes to kSearchProviderOverrides pref. Calls
-  // LoadPrepopulatedDefaultSearch() and NotifyObserver() if the effective DSE
+  // LoadPrepopulatedFallbackSearch() and NotifyObserver() if the effective DSE
   // might have changed.
   void OnOverridesPrefChanged();
 
@@ -189,7 +192,7 @@ class DefaultSearchManager {
   // Reads pre-populated search providers, which will be built-in or overridden
   // by kSearchProviderOverrides. Updates |fallback_default_search_|. Invoke
   // MergePrefsDataWithPrepopulated().
-  void LoadPrepopulatedDefaultSearch();
+  void LoadPrepopulatedFallbackSearch();
 
   // Invokes |change_observer_| if it is not NULL.
   void NotifyObserver();

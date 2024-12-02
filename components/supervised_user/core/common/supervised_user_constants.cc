@@ -44,7 +44,7 @@ int GetHistogramValueForTransitionType(ui::PageTransition transition_type) {
   if (0 <= value && value <= kHistogramPageTransitionMaxKnownValue) {
     return value;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return kHistogramPageTransitionFallbackValue;
 }
 
@@ -109,6 +109,12 @@ const char kFamilyLinkUserLogSegmentHistogramName[] =
 
 const char kFamilyLinkUserLogSegmentWebFilterHistogramName[] =
     "FamilyUser.WebFilterType.PerRecord";
+
+extern const char kSitesMayRequestCameraMicLocationHistogramName[] =
+    "SupervisedUsers.SitesMayRequestCameraMicLocation.PerRecord";
+
+const char kSkipParentApprovalToInstallExtensionsHistogramName[] =
+    "SupervisedUsers.SkipParentApprovalToInstallExtensions.PerRecord";
 
 const char kSupervisedUserURLFilteringResultHistogramName[] =
     "ManagedUsers.FilteringResult";

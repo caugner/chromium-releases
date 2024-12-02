@@ -63,7 +63,7 @@
 <translation id="1497522201463361063">"<ph name="FILE_NAME" />" kann nicht umbenannt werden. <ph name="ERROR_MESSAGE" /></translation>
 <translation id="1499943022354839699">Englisch (USA) mit Dvorak-Tastatur</translation>
 <translation id="1515909359182093592"><ph name="INPUT_LABEL" /> – Host</translation>
-<translation id="1521655867290435174">Google Tabellen</translation>
+<translation id="1521655867290435174">Google Sheets</translation>
 <translation id="1547964879613821194">Kanadisches Englisch</translation>
 <translation id="1556189134700913550">Auf alle anwenden</translation>
 <translation id="1561842594491319104">Chrome-Geräte</translation>
@@ -193,7 +193,7 @@
 <translation id="2500392669976258912">Gujarati (phonetisch)</translation>
 <translation id="2515586267016047495">Alt</translation>
 <translation id="2517472476991765520">Scannen</translation>
-<translation id="252641322760726369">Berühre und halte eine Datei und tippe auf <ph name="ICON" /> und wähle „<ph name="PIN_COMMAND" />“ aus, um schnell auf die Datei in der Ablage zugreifen zu können.</translation>
+<translation id="252641322760726369">Halte eine Datei gedrückt, tippe auf <ph name="ICON" /> und wähle „<ph name="PIN_COMMAND" />“ aus, um schnell auf die Datei in der Ablage zugreifen zu können.</translation>
 <translation id="2534460670861217804">Sicherer HTTP-Proxy</translation>
 <translation id="2541377937973966830">Inhalte in diesem Ordner sind schreibgeschützt. Einige Aktionen werden nicht unterstützt.</translation>
 <translation id="2542049655219295786">Google-Tabelle</translation>
@@ -257,7 +257,6 @@
 <translation id="3083975830683400843">Chromebits</translation>
 <translation id="3085752524577180175">SOCKS-Host</translation>
 <translation id="3104793765551262433">Netzwerk <ph name="NETWORK_INDEX" /> von <ph name="NETWORK_COUNT" />, <ph name="NETWORK_NAME" />, <ph name="SECURITY_STATUS" />, <ph name="CONNECTION_STATUS" />, Signalstärke <ph name="SIGNAL_STRENGTH" /> %, vom Administrator blockiert, Details</translation>
-<translation id="3113153474486991170">„<ph name="PATH" />“ konnte an diesem Ort nicht geöffnet werden. Kopiere die Datei zum Öffnen in „Meine Dateien“.</translation>
 <translation id="3113592018909187986">Du hast noch 1 Versuch. Du kannst dieses Mobilfunknetz erst verwenden, wenn du eine neue PIN festlegst.</translation>
 <translation id="3124404833828281817">Person beim Tagträumen</translation>
 <translation id="3126026824346185272">Strg</translation>

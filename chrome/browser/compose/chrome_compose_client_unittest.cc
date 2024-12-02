@@ -9,6 +9,7 @@
 
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "base/test/bind.h"
 #include "base/test/gmock_callback_support.h"
@@ -19,14 +20,28 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_future.h"
+#include "base/time/time.h"
 #include "chrome/browser/compose/compose_enabling.h"
+#include "chrome/browser/segmentation_platform/segmentation_platform_service_factory.h"
 #include "chrome/common/compose/compose.mojom.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/autofill/content/browser/content_autofill_client.h"
+#include "components/autofill/content/browser/content_autofill_driver.h"
+#include "components/autofill/content/browser/test_autofill_client_injector.h"
+#include "components/autofill/content/browser/test_autofill_manager_injector.h"
+#include "components/autofill/content/browser/test_content_autofill_client.h"
+#include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/filling_product.h"
+#include "components/autofill/core/browser/test_autofill_manager_waiter.h"
+#include "components/autofill/core/browser/test_browser_autofill_manager.h"
+#include "components/autofill/core/browser/ui/suggestion.h"
+#include "components/autofill/core/browser/ui/suggestion_type.h"
 #include "components/autofill/core/common/aliases.h"
 #include "components/autofill/core/common/autofill_test_utils.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/unique_ids.h"
 #include "components/compose/core/browser/compose_features.h"
 #include "components/compose/core/browser/compose_metrics.h"
@@ -38,6 +53,8 @@
 #include "components/optimization_guide/proto/features/compose.pb.h"
 #include "components/optimization_guide/proto/model_execution.pb.h"
 #include "components/optimization_guide/proto/model_quality_service.pb.h"
+#include "components/segmentation_platform/public/constants.h"
+#include "components/segmentation_platform/public/testing/mock_segmentation_platform_service.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "components/unified_consent/pref_names.h"
 #include "content/public/browser/navigation_entry.h"
@@ -61,11 +78,14 @@ using optimization_guide::
     OptimizationGuideModelExecutionResultStreamingCallback;
 using optimization_guide::OptimizationGuideModelStreamingExecutionResult;
 using optimization_guide::StreamingResponse;
+using segmentation_platform::MockSegmentationPlatformService;
 
 namespace {
 
 const uint64_t kSessionIdHigh = 1234;
 const uint64_t kSessionIdLow = 5678;
+const segmentation_platform::TrainingRequestId kTrainingRequestId =
+    segmentation_platform::TrainingRequestId(456);
 constexpr char kTypeURL[] =
     "type.googleapis.com/optimization_guide.proto.ComposeResponse";
 
@@ -157,9 +177,22 @@ class MockComposeDialog : public compose::mojom::ComposeUntrustedDialog {
 
 class ChromeComposeClientTest : public BrowserWithTestWindowTest {
  public:
+  ChromeComposeClientTest()
+      : BrowserWithTestWindowTest(
+            base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
+
   void SetUp() override {
     scoped_compose_enabled_ = ComposeEnabling::ScopedEnableComposeForTesting();
     BrowserWithTestWindowTest::SetUp();
+
+    segmentation_platform::SegmentationPlatformServiceFactory::GetInstance()
+        ->SetTestingFactory(
+            GetProfile(),
+            base::BindLambdaForTesting([](content::BrowserContext* context) {
+              std::unique_ptr<KeyedService> result =
+                  std::make_unique<MockSegmentationPlatformService>();
+              return result;
+            }));
 
     scoped_feature_list_.InitWithFeatures(
         {compose::features::kEnableCompose,
@@ -211,10 +244,26 @@ class ChromeComposeClientTest : public BrowserWithTestWindowTest {
                                                    LogAiDataRequest>(),
                               nullptr))));
             })));
+
+    ON_CALL(GetSegmentationPlatformService(),
+            GetClassificationResult(_, _, _, _))
+        .WillByDefault(testing::WithArg<3>(testing::Invoke(
+            [](segmentation_platform::ClassificationResultCallback callback) {
+              auto result = segmentation_platform::ClassificationResult(
+                  segmentation_platform::PredictionStatus::kSucceeded);
+              result.request_id = kTrainingRequestId;
+              result.ordered_labels = {
+                  segmentation_platform::kComposePrmotionLabelShow};
+              base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+                  FROM_HERE, base::BindOnce(std::move(callback), result));
+            })));
+
     test_timer_ = std::make_unique<base::ScopedMockElapsedTimersForTest>();
   }
 
   void TearDown() override {
+    // Clear default actions for safe teardown.
+    testing::Mock::VerifyAndClear(&GetSegmentationPlatformService());
     client_ = nullptr;
     scoped_feature_list_.Reset();
     ukm_recorder_.reset();
@@ -327,6 +376,12 @@ class ChromeComposeClientTest : public BrowserWithTestWindowTest {
     field_data().set_selected_text(selection.substr(0, max_length));
   }
 
+  MockSegmentationPlatformService& GetSegmentationPlatformService() {
+    return *static_cast<MockSegmentationPlatformService*>(
+        segmentation_platform::SegmentationPlatformServiceFactory::
+            GetForProfile(GetProfile()));
+  }
+
  protected:
   optimization_guide::proto::ComposePageMetadata ComposePageMetadata() {
     optimization_guide::proto::ComposePageMetadata page_metadata;
@@ -401,6 +456,14 @@ class ChromeComposeClientTest : public BrowserWithTestWindowTest {
             }));
   }
 
+  autofill::TestBrowserAutofillManager* autofill_manager() {
+    return autofill_manager_injector_[web_contents()];
+  }
+
+  autofill::TestContentAutofillClient* autofill_client() {
+    return autofill_client_injector_[web_contents()];
+  }
+
   base::test::ScopedFeatureList scoped_feature_list_;
 
  private:
@@ -415,6 +478,10 @@ class ChromeComposeClientTest : public BrowserWithTestWindowTest {
   base::HistogramTester histogram_tester_;
   base::UserActionTester user_action_tester_;
   autofill::test::AutofillUnitTestEnvironment autofill_test_environment_;
+  autofill::TestAutofillClientInjector<autofill::TestContentAutofillClient>
+      autofill_client_injector_;
+  autofill::TestAutofillManagerInjector<autofill::TestBrowserAutofillManager>
+      autofill_manager_injector_;
 
   std::unique_ptr<mojo::Receiver<compose::mojom::ComposeUntrustedDialog>>
       callback_router_;
@@ -493,10 +560,22 @@ TEST_F(ChromeComposeClientTest, TestCompose) {
   // Check Compose Session Event Counts.
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
   histograms().ExpectBucketCount(
       "Compose.Server.Session.EventCounts",
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
+  histograms().ExpectBucketCount(
+      "Compose.OnDevice.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kMainDialogShown, 0);
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 1);
+  histograms().ExpectBucketCount(
+      "Compose.Server.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 1);
+  histograms().ExpectBucketCount(
+      "Compose.OnDevice.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 0);
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
       compose::ComposeSessionEventTypes::kCreateClicked, 1);
@@ -611,6 +690,25 @@ TEST_F(ChromeComposeClientTest, TestComposeServerAndOnDeviceResponses) {
   histograms().ExpectUniqueSample("Compose.OnDevice.Request.Reason",
                                   compose::ComposeRequestReason::kRetryRequest,
                                   1);
+  // Check that only the location agnostic metrics are recorded.
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
+  histograms().ExpectBucketCount(
+      "Compose.Server.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kMainDialogShown, 0);
+  histograms().ExpectBucketCount(
+      "Compose.OnDevice.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kMainDialogShown, 0);
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 1);
+  histograms().ExpectBucketCount(
+      "Compose.Server.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 0);
+  histograms().ExpectBucketCount(
+      "Compose.OnDevice.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 0);
 }
 
 TEST_F(ChromeComposeClientTest, TestComposeOnDeviceSessionHistograms) {
@@ -645,6 +743,24 @@ TEST_F(ChromeComposeClientTest, TestComposeOnDeviceSessionHistograms) {
       base::ScopedMockElapsedTimersForTest::kMockElapsedTime, 1);
   histograms().ExpectUniqueSample(
       "Compose.OnDevice.Session.DialogShownCount.Accepted", 1, 1);
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
+  histograms().ExpectBucketCount(
+      "Compose.Server.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kMainDialogShown, 0);
+  histograms().ExpectBucketCount(
+      "Compose.OnDevice.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 1);
+  histograms().ExpectBucketCount(
+      "Compose.Server.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 0);
+  histograms().ExpectBucketCount(
+      "Compose.OnDevice.Session.EventCounts",
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 1);
 }
 
 TEST_F(ChromeComposeClientTest, TestComposeEmptySession) {
@@ -656,6 +772,12 @@ TEST_F(ChromeComposeClientTest, TestComposeEmptySession) {
 
   histograms().ExpectUniqueSample("Compose.Session.EvalLocation",
                                   compose::SessionEvalLocation::kNone, 1);
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 1);
 }
 
 TEST_F(ChromeComposeClientTest, TestComposeShowContextMenu) {
@@ -720,7 +842,8 @@ TEST_F(ChromeComposeClientTest, TestComposeShowContextMenuAndDialog) {
   auto ukm_entries = ukm_recorder().GetEntries(
       ukm::builders::Compose_PageEvents::kEntryName,
       {ukm::builders::Compose_PageEvents::kMenuItemShownName,
-       ukm::builders::Compose_PageEvents::kComposeTextInsertedName});
+       ukm::builders::Compose_PageEvents::kComposeTextInsertedName,
+       ukm::builders::Compose_PageEvents::kProactiveNudgeShownName});
 
   EXPECT_EQ(ukm_entries.size(), 1UL);
 
@@ -730,12 +853,163 @@ TEST_F(ChromeComposeClientTest, TestComposeShowContextMenuAndDialog) {
           testing::Pair(ukm::builders::Compose_PageEvents::kMenuItemShownName,
                         1),
           testing::Pair(
-              ukm::builders::Compose_PageEvents::kComposeTextInsertedName, 0)));
+              ukm::builders::Compose_PageEvents::kComposeTextInsertedName, 0),
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kProactiveNudgeShownName, 0)));
+
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
+  histograms().ExpectBucketCount(
+      compose::kComposeSessionEventCounts,
+      compose::ComposeSessionEventTypes::kComposeDialogOpened, 1);
+}
+
+TEST_F(ChromeComposeClientTest, TestProactiveNudgeEngagementIsRecorded) {
+  // Enable and trigger the proactive nudge.
+  compose::Config& config = compose::GetMutableConfigForTesting();
+  config.proactive_nudge_enabled = true;
+  config.proactive_nudge_show_probability = 1.0;
+  config.proactive_nudge_delay = base::Microseconds(1);
+  config.proactive_nudge_segmentation = true;
+  config.proactive_nudge_always_collect_training_data = true;
+
+  autofill::FormData form_data;
+  form_data.set_url(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL());
+  form_data.fields = {autofill::test::CreateTestFormField(
+      "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
+
+  autofill::FormFieldData selected_field_data = form_data.fields[0];
+  selected_field_data.set_origin(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedOrigin());
+  const autofill::AutofillSuggestionTriggerSource trigger_source =
+      autofill::AutofillSuggestionTriggerSource::kTextFieldDidChange;
+
+  ASSERT_FALSE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                           trigger_source));
+
+  task_environment()->FastForwardBy(config.proactive_nudge_delay);
+
+  ASSERT_TRUE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                          trigger_source));
+
+  // Simulate clicking on the nudge to open compose.
+  ShowDialogAndBindMojoWithFieldData(
+      selected_field_data, base::NullCallback(),
+      autofill::AutofillComposeDelegate::UiEntryPoint::kAutofillPopup);
+
+  base::test::TestFuture<segmentation_platform::TrainingLabels> training_labels;
+  EXPECT_CALL(GetSegmentationPlatformService(),
+              CollectTrainingData(
+                  segmentation_platform::proto::SegmentId::
+                      OPTIMIZATION_TARGET_SEGMENTATION_COMPOSE_PROMOTION,
+                  kTrainingRequestId, _, _))
+      .Times(1)
+      .WillOnce(testing::WithArg<2>(testing::Invoke(
+          [&](auto labels) { training_labels.SetValue(labels); })));
+
+  client().CloseUI(compose::mojom::CloseReason::kInsertButton);
+
+  // Trigger session deletion and verify that the engagement is recorded.
+  NavigateAndCommitActiveTab(GURL("about:blank"));
+  EXPECT_EQ(training_labels.Get().output_metric,
+            std::make_pair("Compose.ProactiveNudge.DerivedEngagement",
+                           static_cast<base::HistogramBase::Sample>(
+                               compose::ProactiveNudgeDerivedEngagement::
+                                   kAcceptedComposeSuggestion)));
+}
+
+TEST_F(ChromeComposeClientTest,
+       TestShouldTriggerProactiveNudgeBlockedBySegmentation) {
+  // Enable and trigger the proactive nudge.
+  compose::Config& config = compose::GetMutableConfigForTesting();
+  config.proactive_nudge_enabled = true;
+  config.proactive_nudge_show_probability = 1.0;
+  config.proactive_nudge_delay = base::Microseconds(1);
+  config.proactive_nudge_segmentation = true;
+
+  autofill::FormData form_data;
+  form_data.set_url(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL());
+  form_data.fields = {autofill::test::CreateTestFormField(
+      "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
+
+  autofill::FormFieldData selected_field_data = form_data.fields[0];
+  selected_field_data.set_origin(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedOrigin());
+
+  EXPECT_CALL(GetSegmentationPlatformService(),
+              GetClassificationResult(_, _, _, _))
+      .WillOnce(testing::WithArg<3>(testing::Invoke(
+          [](segmentation_platform::ClassificationResultCallback callback) {
+            auto result = segmentation_platform::ClassificationResult(
+                segmentation_platform::PredictionStatus::kSucceeded);
+            result.request_id = kTrainingRequestId;
+            result.ordered_labels = {
+                segmentation_platform::kComposePrmotionLabelDontShow};
+            base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+                FROM_HERE, base::BindOnce(std::move(callback), result));
+          })));
+
+  // The initial trigger request comes from a text field change.
+  EXPECT_FALSE(client().ShouldTriggerPopup(
+      form_data, selected_field_data,
+      autofill::AutofillSuggestionTriggerSource::kTextFieldDidChange));
+
+  task_environment()->FastForwardBy(config.proactive_nudge_delay);
+
+  // All remaining popup trigger requests come from the delayed nudge.
+  const autofill::AutofillSuggestionTriggerSource trigger_source =
+      autofill::AutofillSuggestionTriggerSource::kComposeDelayedProactiveNudge;
+
+  ASSERT_FALSE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                           trigger_source));
+  histograms().ExpectBucketCount(
+      compose::kComposeProactiveNudgeShowStatus,
+      compose::ComposeShowStatus::kProactiveNudgeBlockedBySegmentationPlatform,
+      1);
+
+  // Commit metrics on page navigation.
+  NavigateAndCommitActiveTab(GURL("about:blank"));
+
+  // Check that the proactive nudge UKM was still captured.
+  auto ukm_entries = ukm_recorder().GetEntries(
+      ukm::builders::Compose_PageEvents::kEntryName,
+      {ukm::builders::Compose_PageEvents::kMenuItemShownName,
+       ukm::builders::Compose_PageEvents::kComposeTextInsertedName,
+       ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName,
+       ukm::builders::Compose_PageEvents::kProactiveNudgeShownName});
+
+  ASSERT_EQ(ukm_entries.size(), 1UL);
+
+  EXPECT_THAT(
+      ukm_entries[0].metrics,
+      testing::UnorderedElementsAre(
+          testing::Pair(ukm::builders::Compose_PageEvents::kMenuItemShownName,
+                        0),
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kComposeTextInsertedName, 0),
+
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName,
+              1),
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kProactiveNudgeShownName, 0)));
+
+  // Check that even after a second call only one show status UMA was recorded.
+  EXPECT_FALSE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                           trigger_source));
+  histograms().ExpectBucketCount(
+      compose::kComposeProactiveNudgeShowStatus,
+      compose::ComposeShowStatus::kProactiveNudgeBlockedBySegmentationPlatform,
+      1);
 }
 
 TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeDisabledUKM) {
   autofill::FormData form_data;
-  form_data.url = web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL();
+  form_data.set_url(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL());
   form_data.fields = {autofill::test::CreateTestFormField(
       "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
 
@@ -746,8 +1020,8 @@ TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeDisabledUKM) {
       autofill::AutofillSuggestionTriggerSource::kTextFieldDidChange;
 
   // By default the proactive nudge is disabled.
-  EXPECT_FALSE(
-      client().ShouldTriggerPopup(selected_field_data, trigger_source));
+  EXPECT_FALSE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                           trigger_source));
 
   // Commit metrics on page navigation.
   NavigateAndCommitActiveTab(GURL("about:blank"));
@@ -757,7 +1031,8 @@ TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeDisabledUKM) {
       ukm::builders::Compose_PageEvents::kEntryName,
       {ukm::builders::Compose_PageEvents::kMenuItemShownName,
        ukm::builders::Compose_PageEvents::kComposeTextInsertedName,
-       ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName});
+       ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName,
+       ukm::builders::Compose_PageEvents::kProactiveNudgeShownName});
 
   ASSERT_EQ(ukm_entries.size(), 1UL);
 
@@ -771,18 +1046,21 @@ TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeDisabledUKM) {
 
           testing::Pair(
               ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName,
-              1)));
+              1),
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kProactiveNudgeShownName, 0)));
 }
 
-TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeEnabledUKM) {
+TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeEnabled) {
   // Enable proactive nudge.
   compose::Config& config = compose::GetMutableConfigForTesting();
   config.proactive_nudge_enabled = true;
-  config.proactive_nudge_show_probability = 1.0;
   config.proactive_nudge_delay = base::Seconds(0);
+  config.proactive_nudge_segmentation = false;
 
   autofill::FormData form_data;
-  form_data.url = web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL();
+  form_data.set_url(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL());
   form_data.fields = {autofill::test::CreateTestFormField(
       "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
 
@@ -792,7 +1070,8 @@ TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeEnabledUKM) {
   const autofill::AutofillSuggestionTriggerSource trigger_source =
       autofill::AutofillSuggestionTriggerSource::kTextFieldDidChange;
 
-  EXPECT_TRUE(client().ShouldTriggerPopup(selected_field_data, trigger_source));
+  EXPECT_TRUE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                          trigger_source));
 
   // Commit metrics on page navigation.
   NavigateAndCommitActiveTab(GURL("about:blank"));
@@ -802,7 +1081,8 @@ TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeEnabledUKM) {
       ukm::builders::Compose_PageEvents::kEntryName,
       {ukm::builders::Compose_PageEvents::kMenuItemShownName,
        ukm::builders::Compose_PageEvents::kComposeTextInsertedName,
-       ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName});
+       ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName,
+       ukm::builders::Compose_PageEvents::kProactiveNudgeShownName});
 
   ASSERT_EQ(ukm_entries.size(), 1UL);
 
@@ -816,7 +1096,9 @@ TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeEnabledUKM) {
 
           testing::Pair(
               ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName,
-              1)));
+              1),
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kProactiveNudgeShownName, 1)));
 
   // Check Compose.ProactiveNudge.CTR metrics.
   histograms().ExpectBucketCount(
@@ -827,7 +1109,7 @@ TEST_F(ChromeComposeClientTest, TestShouldTriggerProactiveNudgeEnabledUKM) {
 TEST_F(ChromeComposeClientTest,
        TestShouldTriggerProactiveNudgePageChecksFailUKM) {
   autofill::FormData form_data;
-  form_data.url = GURL("www.example.com");
+  form_data.set_url(GURL("www.example.com"));
   form_data.fields = {autofill::test::CreateTestFormField(
       "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
 
@@ -836,8 +1118,8 @@ TEST_F(ChromeComposeClientTest,
       autofill::AutofillSuggestionTriggerSource::kTextFieldDidChange;
 
   // Will fail because field origin does not match page origin.
-  EXPECT_FALSE(
-      client().ShouldTriggerPopup(selected_field_data, trigger_source));
+  EXPECT_FALSE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                           trigger_source));
 
   // Commit metrics on page navigation.
   NavigateAndCommitActiveTab(GURL("about:blank"));
@@ -845,9 +1127,7 @@ TEST_F(ChromeComposeClientTest,
   // Check that the proactive nudge UKM was not captured.
   auto ukm_entries = ukm_recorder().GetEntries(
       ukm::builders::Compose_PageEvents::kEntryName,
-      {ukm::builders::Compose_PageEvents::kMenuItemShownName,
-       ukm::builders::Compose_PageEvents::kComposeTextInsertedName,
-       ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName});
+      {ukm::builders::Compose_PageEvents::kProactiveNudgeShouldShowName});
 
   ASSERT_EQ(ukm_entries.size(), 0UL);
 }
@@ -855,7 +1135,8 @@ TEST_F(ChromeComposeClientTest,
 TEST_F(ChromeComposeClientTest, TestProactiveNudgeMSBBDisabled) {
   SetPrefsForComposeMSBBState(false);
   autofill::FormData form_data;
-  form_data.url = web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL();
+  form_data.set_url(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL());
   form_data.fields = {autofill::test::CreateTestFormField(
       "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
 
@@ -866,17 +1147,94 @@ TEST_F(ChromeComposeClientTest, TestProactiveNudgeMSBBDisabled) {
       autofill::AutofillSuggestionTriggerSource::kTextFieldDidChange;
 
   // Will fail because MSBB is not set
-  EXPECT_FALSE(
-      client().ShouldTriggerPopup(selected_field_data, trigger_source));
+  EXPECT_FALSE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                           trigger_source));
 
   histograms().ExpectBucketCount(
       compose::kComposeProactiveNudgeShowStatus,
       compose::ComposeShowStatus::kProactiveNudgeDisabledByMSBB, 1);
 }
 
+TEST_F(ChromeComposeClientTest, TestCaretMovementExtendsNudgeDelay) {
+  using Observer = autofill::AutofillManager::Observer;
+
+  compose::Config& config = compose::GetMutableConfigForTesting();
+  config.proactive_nudge_enabled = true;
+  config.proactive_nudge_show_probability = 1.0;
+  config.proactive_nudge_delay = base::Microseconds(4);
+  config.proactive_nudge_segmentation = false;
+
+  autofill::FormData form_data;
+  form_data.set_url(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL());
+  form_data.fields = {autofill::test::CreateTestFormField(
+      "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
+
+  autofill::FormFieldData field_data = form_data.fields[0];
+  field_data.set_origin(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedOrigin());
+  field_data.set_host_frame(form_data.host_frame());
+  field_data.set_host_form_id(form_data.renderer_id());
+
+  autofill::ContentAutofillDriver* autofill_driver =
+      autofill::ContentAutofillClient::FromWebContents(web_contents())
+          ->GetAutofillDriverFactory()
+          ->DriverForFrame(web_contents()->GetPrimaryMainFrame());
+  ASSERT_TRUE(autofill_driver);
+
+  {
+    autofill::TestAutofillManagerWaiter waiter(
+        autofill_driver->GetAutofillManager(),
+        {autofill::AutofillManagerEvent::kFormsSeen});
+    autofill_driver->renderer_events().FormsSeen(/*updated_forms=*/{form_data},
+                                                 /*removed_forms=*/{});
+    ASSERT_TRUE(waiter.Wait(/*num_awaiting_calls=*/1));
+  }
+
+  // The first call to ShouldTriggerPopup starts the nudge tracker timers.
+  ASSERT_FALSE(client().ShouldTriggerPopup(
+      form_data, field_data,
+      autofill::AutofillSuggestionTriggerSource::kTextFieldDidChange));
+
+  task_environment()->FastForwardBy(base::Microseconds(3));
+  ASSERT_TRUE(client().IsPopupTimerRunning());
+
+  // Should trigger will fail since not enough time has passed.
+  ASSERT_FALSE(
+      client().ShouldTriggerPopup(form_data, field_data,
+                                  autofill::AutofillSuggestionTriggerSource::
+                                      kComposeDelayedProactiveNudge));
+
+  // Signal that a the caret moved in the field with no selection.
+  autofill_driver->GetAutofillManager().NotifyObservers(
+      &Observer::OnAfterCaretMovedInFormField, form_data.global_id(),
+      field_data.global_id(), /*selected_text=*/u"",
+      /*caret_bounds=*/gfx::Rect());
+
+  // Moving the caret should extend the timer so it is still running.
+  task_environment()->FastForwardBy(base::Microseconds(3));
+  ASSERT_TRUE(client().IsPopupTimerRunning());
+
+  // Should trigger will fail since not enough time has passed.
+  ASSERT_FALSE(
+      client().ShouldTriggerPopup(form_data, field_data,
+                                  autofill::AutofillSuggestionTriggerSource::
+                                      kComposeDelayedProactiveNudge));
+
+  // Move forward until timer should expire.
+  task_environment()->FastForwardBy(base::Microseconds(2));
+  ASSERT_FALSE(client().IsPopupTimerRunning());
+
+  // Should trigger will now succeed.
+  ASSERT_TRUE(
+      client().ShouldTriggerPopup(form_data, field_data,
+                                  autofill::AutofillSuggestionTriggerSource::
+                                      kComposeDelayedProactiveNudge));
+}
+
 TEST_F(ChromeComposeClientTest, TestComposeShouldTriggerSavedStateNudgeUKM) {
   autofill::FormData form_data;
-  form_data.url = GetPageUrl();
+  form_data.set_url(GetPageUrl());
   form_data.fields = {autofill::test::CreateTestFormField(
       "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
 
@@ -888,7 +1246,8 @@ TEST_F(ChromeComposeClientTest, TestComposeShouldTriggerSavedStateNudgeUKM) {
   ShowDialogAndBindMojoWithFieldData(selected_field_data);
 
   // By default the saved state nudge is shown.
-  EXPECT_TRUE(client().ShouldTriggerPopup(selected_field_data, trigger_source));
+  EXPECT_TRUE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                          trigger_source));
 
   // Commit metrics on page navigation.
   NavigateAndCommitActiveTab(GURL("about:blank"));
@@ -1203,6 +1562,26 @@ TEST_F(ChromeComposeClientTest, TestComposeGenericServerError) {
       quality_result->quality_data<optimization_guide::ComposeFeatureTypeMap>()
           ->session_id()
           .low());
+
+  // Check the expected event count metrics.
+  std::vector<std::pair<compose::ComposeSessionEventTypes, int>> event_counts =
+      {
+          {compose::ComposeSessionEventTypes::kComposeDialogOpened, 1},
+          {compose::ComposeSessionEventTypes::kMainDialogShown, 1},
+          {compose::ComposeSessionEventTypes::kFREShown, 0},
+          {compose::ComposeSessionEventTypes::kMSBBShown, 0},
+          {compose::ComposeSessionEventTypes::kCreateClicked, 1},
+          {compose::ComposeSessionEventTypes::kFailedRequest, 1},
+      };
+
+  for (auto [event_type, count] : event_counts) {
+    histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.Server.Session.EventCounts",
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.OnDevice.Session.EventCounts",
+                                   event_type, 0);
+  }
 }
 
 TEST_F(ChromeComposeClientTest, TestComposeSetTriggeredFromModifierOnError) {
@@ -1515,7 +1894,7 @@ TEST_F(ChromeComposeClientTest, TestOpenDialogWithSelectedText) {
   // Check Compose Session Event Counts.
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
       compose::ComposeSessionEventTypes::kStartedWithSelection, 1);
@@ -1546,7 +1925,7 @@ TEST_F(ChromeComposeClientTest,
   // Check Compose Session Event Counts.
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
       compose::ComposeSessionEventTypes::kStartedWithSelection, 1);
@@ -1669,6 +2048,26 @@ TEST_F(ChromeComposeClientTest,
   EXPECT_FALSE(
       quality_result->quality_data<optimization_guide::ComposeFeatureTypeMap>()
           ->started_with_proactive_nudge());
+
+  // Force reporting of page events UKM.
+  NavigateAndCommitActiveTab(GURL("about:blank"));
+
+  // Check that page events UKM is recorded for opening from the nudge.
+  auto ukm_entries = ukm_recorder().GetEntries(
+      ukm::builders::Compose_PageEvents::kEntryName,
+      {ukm::builders::Compose_PageEvents::kComposeTextInsertedName,
+       ukm::builders::Compose_PageEvents::kProactiveNudgeOpenedName});
+
+  EXPECT_EQ(ukm_entries.size(), 1UL);
+
+  EXPECT_THAT(
+      ukm_entries[0].metrics,
+      testing::UnorderedElementsAre(
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kComposeTextInsertedName, 1),
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kProactiveNudgeOpenedName,
+              0)));
 }
 
 TEST_F(ChromeComposeClientTest, TestProactiveNudgeRecordedInQualityLogs) {
@@ -1698,6 +2097,26 @@ TEST_F(ChromeComposeClientTest, TestProactiveNudgeRecordedInQualityLogs) {
   EXPECT_TRUE(
       quality_result->quality_data<optimization_guide::ComposeFeatureTypeMap>()
           ->started_with_proactive_nudge());
+
+  // Force reporting of page events UKM.
+  NavigateAndCommitActiveTab(GURL("about:blank"));
+
+  // Check that page events UKM does not record opening the proactive nudge.
+  auto ukm_entries = ukm_recorder().GetEntries(
+      ukm::builders::Compose_PageEvents::kEntryName,
+      {ukm::builders::Compose_PageEvents::kComposeTextInsertedName,
+       ukm::builders::Compose_PageEvents::kProactiveNudgeOpenedName});
+
+  EXPECT_EQ(ukm_entries.size(), 1UL);
+
+  EXPECT_THAT(
+      ukm_entries[0].metrics,
+      testing::UnorderedElementsAre(
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kComposeTextInsertedName, 1),
+          testing::Pair(
+              ukm::builders::Compose_PageEvents::kProactiveNudgeOpenedName,
+              1)));
 }
 
 // Checks proper propagation of Compose config params.
@@ -1796,7 +2215,7 @@ TEST_F(ChromeComposeClientTest, TestComposeTwiceThenUpdateWebUIStateThenUndo) {
   // Check Compose Session Event Counts.
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
       compose::ComposeSessionEventTypes::kUndoClicked, 1);
@@ -2092,8 +2511,34 @@ TEST_F(ChromeComposeClientTest, CloseButtonHistogramTest) {
       base::ScopedMockElapsedTimersForTest::kMockElapsedTime, 1);
   histograms().ExpectUniqueSample(compose::kComposeSessionOverOneDay, 0, 1);
 
+  // Check the expected event count metrics.
+  std::vector<std::pair<compose::ComposeSessionEventTypes, int>> event_counts =
+      {
+          {compose::ComposeSessionEventTypes::kComposeDialogOpened, 1},
+          {compose::ComposeSessionEventTypes::kMainDialogShown, 1},
+          {compose::ComposeSessionEventTypes::kFREShown, 0},
+          {compose::ComposeSessionEventTypes::kCreateClicked, 1},
+          {compose::ComposeSessionEventTypes::kSuccessfulRequest, 1},
+          {compose::ComposeSessionEventTypes::kUpdateClicked, 1},
+          {compose::ComposeSessionEventTypes::kUndoClicked, 1},
+          {compose::ComposeSessionEventTypes::kAnyModifierUsed, 0},
+          {compose::ComposeSessionEventTypes::kFailedRequest, 0},
+      };
+
+  for (auto [event_type, count] : event_counts) {
+    histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.Server.Session.EventCounts",
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.OnDevice.Session.EventCounts",
+                                   event_type, 0);
+  }
+
   // No FRE related close reasons should have been recorded.
   histograms().ExpectTotalCount(compose::kComposeFirstRunSessionCloseReason, 0);
+
+  // No MSBB related close reasons should have been recorded.
+  histograms().ExpectTotalCount(compose::kComposeMSBBSessionCloseReason, 0);
 }
 
 TEST_F(ChromeComposeClientTest, CloseButtonMSBBHistogramTest) {
@@ -2124,6 +2569,26 @@ TEST_F(ChromeComposeClientTest, CloseButtonMSBBHistogramTest) {
   histograms().ExpectTotalCount(
       compose::kComposeSessionDuration + std::string(".Inserted"), 0);
   histograms().ExpectUniqueSample(compose::kComposeSessionOverOneDay, 0, 1);
+
+  // Check the expected event count metrics.
+  std::vector<std::pair<compose::ComposeSessionEventTypes, int>> event_counts =
+      {
+          {compose::ComposeSessionEventTypes::kComposeDialogOpened, 1},
+          {compose::ComposeSessionEventTypes::kMainDialogShown, 0},
+          {compose::ComposeSessionEventTypes::kFREShown, 0},
+          {compose::ComposeSessionEventTypes::kMSBBShown, 1},
+          {compose::ComposeSessionEventTypes::kFREAccepted, 0},
+          {compose::ComposeSessionEventTypes::kMSBBEnabled, 0},
+      };
+
+  for (auto [event_type, count] : event_counts) {
+    histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.Server.Session.EventCounts",
+                                   event_type, 0);
+    histograms().ExpectBucketCount("Compose.OnDevice.Session.EventCounts",
+                                   event_type, 0);
+  }
 }
 
 TEST_F(ChromeComposeClientTest,
@@ -2159,25 +2624,27 @@ TEST_F(ChromeComposeClientTest,
   // No FRE related close reasons should have been recorded.
   histograms().ExpectTotalCount(compose::kComposeFirstRunSessionCloseReason, 0);
 
-  // Check Compose Session Event Counts
-  histograms().ExpectBucketCount(
-      compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
-  histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
-                                 compose::ComposeSessionEventTypes::kFREShown,
-                                 0);
-  histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
-                                 compose::ComposeSessionEventTypes::kMSBBShown,
-                                 1);
-  histograms().ExpectBucketCount(
-      compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kMSBBEnabled, 1);
-  histograms().ExpectBucketCount(
-      compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kInsertClicked, 0);
-  histograms().ExpectBucketCount(
-      compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kCloseClicked, 1);
+  // Check the expected event count metrics.
+  std::vector<std::pair<compose::ComposeSessionEventTypes, int>> event_counts =
+      {
+          {compose::ComposeSessionEventTypes::kComposeDialogOpened, 1},
+          {compose::ComposeSessionEventTypes::kMainDialogShown, 1},
+          {compose::ComposeSessionEventTypes::kFREShown, 0},
+          {compose::ComposeSessionEventTypes::kFREAccepted, 0},
+          {compose::ComposeSessionEventTypes::kMSBBShown, 1},
+          {compose::ComposeSessionEventTypes::kMSBBEnabled, 1},
+          {compose::ComposeSessionEventTypes::kInsertClicked, 0},
+          {compose::ComposeSessionEventTypes::kCloseClicked, 1},
+      };
+
+  for (auto [event_type, count] : event_counts) {
+    histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.Server.Session.EventCounts",
+                                   event_type, 0);
+    histograms().ExpectBucketCount("Compose.OnDevice.Session.EventCounts",
+                                   event_type, 0);
+  }
 }
 
 TEST_F(ChromeComposeClientTest, FirstRunCloseDialogHistogramTest) {
@@ -2205,6 +2672,26 @@ TEST_F(ChromeComposeClientTest, FirstRunCloseDialogHistogramTest) {
       compose::kComposeSessionDuration + std::string(".Ignored"), 0);
   histograms().ExpectTotalCount("Compose.Server.Session.Duration.Ignored", 0);
   histograms().ExpectUniqueSample(compose::kComposeSessionOverOneDay, 0, 1);
+
+  // Check the expected event count metrics.
+  std::vector<std::pair<compose::ComposeSessionEventTypes, int>> event_counts =
+      {
+          {compose::ComposeSessionEventTypes::kComposeDialogOpened, 1},
+          {compose::ComposeSessionEventTypes::kMainDialogShown, 0},
+          {compose::ComposeSessionEventTypes::kFREShown, 1},
+          {compose::ComposeSessionEventTypes::kFREAccepted, 0},
+          {compose::ComposeSessionEventTypes::kMSBBShown, 0},
+          {compose::ComposeSessionEventTypes::kMSBBEnabled, 0},
+      };
+
+  for (auto [event_type, count] : event_counts) {
+    histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.Server.Session.EventCounts",
+                                   event_type, 0);
+    histograms().ExpectBucketCount("Compose.OnDevice.Session.EventCounts",
+                                   event_type, 0);
+  }
 
   // Show the FRE dialog and end the session by re-opening with selection.
   ShowDialogAndBindMojo();
@@ -2259,6 +2746,26 @@ TEST_F(ChromeComposeClientTest, FirstRunCompletedHistogramTest) {
       compose::kComposeSessionDialogShownCount + std::string(".Ignored"),
       1,  // The dialog was only shown once after having proceeded past FRE.
       1);
+
+  // Check the expected event count metrics.
+  std::vector<std::pair<compose::ComposeSessionEventTypes, int>> event_counts =
+      {
+          {compose::ComposeSessionEventTypes::kComposeDialogOpened, 1},
+          {compose::ComposeSessionEventTypes::kMainDialogShown, 1},
+          {compose::ComposeSessionEventTypes::kFREShown, 1},
+          {compose::ComposeSessionEventTypes::kFREAccepted, 1},
+          {compose::ComposeSessionEventTypes::kMSBBShown, 0},
+          {compose::ComposeSessionEventTypes::kMSBBEnabled, 0},
+      };
+
+  for (auto [event_type, count] : event_counts) {
+    histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.Server.Session.EventCounts",
+                                   event_type, 0);
+    histograms().ExpectBucketCount("Compose.OnDevice.Session.EventCounts",
+                                   event_type, 0);
+  }
 }
 
 TEST_F(ChromeComposeClientTest,
@@ -2276,22 +2783,27 @@ TEST_F(ChromeComposeClientTest,
                                       kFirstRunDisclaimerAcknowledgedWithInsert,
                                   1);
 
-  // Check Compose Session Event Counts.
-  histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
-                                 compose::ComposeSessionEventTypes::kFREShown,
-                                 1);
-  histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
-                                 compose::ComposeSessionEventTypes::kMSBBShown,
-                                 0);
-  histograms().ExpectBucketCount(
-      compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
-  histograms().ExpectBucketCount(
-      compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kStartedWithSelection, 0);
-  histograms().ExpectBucketCount(
-      compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kInsertClicked, 1);
+  // Check the expected session event count metrics.
+  std::vector<std::pair<compose::ComposeSessionEventTypes, int>> event_counts =
+      {
+          {compose::ComposeSessionEventTypes::kComposeDialogOpened, 1},
+          {compose::ComposeSessionEventTypes::kMainDialogShown, 1},
+          {compose::ComposeSessionEventTypes::kFREShown, 1},
+          {compose::ComposeSessionEventTypes::kFREAccepted, 1},
+          {compose::ComposeSessionEventTypes::kMSBBShown, 0},
+          {compose::ComposeSessionEventTypes::kMSBBEnabled, 0},
+          {compose::ComposeSessionEventTypes::kStartedWithSelection, 0},
+          {compose::ComposeSessionEventTypes::kInsertClicked, 1},
+      };
+
+  for (auto [event_type, count] : event_counts) {
+    histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.Server.Session.EventCounts",
+                                   event_type, 0);
+    histograms().ExpectBucketCount("Compose.OnDevice.Session.EventCounts",
+                                   event_type, 0);
+  }
 }
 
 TEST_F(ChromeComposeClientTest, CompleteFirstRunTest) {
@@ -2303,6 +2815,30 @@ TEST_F(ChromeComposeClientTest, CompleteFirstRunTest) {
   client().CompleteFirstRun();
 
   EXPECT_TRUE(prefs->GetBoolean(prefs::kPrefHasCompletedComposeFRE));
+
+  // Make sure the async calls complete before naviagating away.
+  FlushMojo();
+  // Navigate page away to upload session close metrics.
+  NavigateAndCommitActiveTab(GURL("about:blank"));
+
+  // Check the expected event count metrics.
+  std::vector<std::pair<compose::ComposeSessionEventTypes, int>> event_counts =
+      {
+          {compose::ComposeSessionEventTypes::kComposeDialogOpened, 1},
+          {compose::ComposeSessionEventTypes::kMainDialogShown, 1},
+          {compose::ComposeSessionEventTypes::kFREShown, 1},
+          {compose::ComposeSessionEventTypes::kMSBBShown, 0},
+          {compose::ComposeSessionEventTypes::kCreateClicked, 0},
+      };
+
+  for (auto [event_type, count] : event_counts) {
+    histograms().ExpectBucketCount(compose::kComposeSessionEventCounts,
+                                   event_type, count);
+    histograms().ExpectBucketCount("Compose.Server.Session.EventCounts",
+                                   event_type, 0);
+    histograms().ExpectBucketCount("Compose.OnDevice.Session.EventCounts",
+                                   event_type, 0);
+  }
 }
 
 TEST_F(ChromeComposeClientTest,
@@ -2311,6 +2847,7 @@ TEST_F(ChromeComposeClientTest,
   config.proactive_nudge_enabled = true;
   config.proactive_nudge_show_probability = 1.0;
   config.proactive_nudge_delay = base::Seconds(0);
+  config.proactive_nudge_segmentation = false;
 
   PrefService* prefs = GetProfile()->GetPrefs();
 
@@ -2318,7 +2855,7 @@ TEST_F(ChromeComposeClientTest,
   auto test_origin = url::Origin::Create(test_url);
 
   autofill::FormData form_data;
-  form_data.url = test_url;
+  form_data.set_url(test_url);
   form_data.fields = {autofill::test::CreateTestFormField(
       "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
 
@@ -2329,14 +2866,58 @@ TEST_F(ChromeComposeClientTest,
 
   EXPECT_FALSE(prefs->GetDict(prefs::kProactiveNudgeDisabledSitesWithTime)
                    .Find(test_origin.Serialize()));
-  EXPECT_TRUE(client().ShouldTriggerPopup(selected_field_data, trigger_source));
+  EXPECT_TRUE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                          trigger_source));
 
   client().AddSiteToNeverPromptList(test_origin);
 
   EXPECT_TRUE(prefs->GetDict(prefs::kProactiveNudgeDisabledSitesWithTime)
                   .Find(test_origin.Serialize()));
-  EXPECT_FALSE(
-      client().ShouldTriggerPopup(selected_field_data, trigger_source));
+  EXPECT_FALSE(client().ShouldTriggerPopup(form_data, selected_field_data,
+                                           trigger_source));
+}
+
+TEST_F(ChromeComposeClientTest, TextFieldChangeThresholdHidesProactiveNudge) {
+  compose::Config& config = compose::GetMutableConfigForTesting();
+  config.proactive_nudge_enabled = true;
+  config.proactive_nudge_show_probability = 1.0;
+  config.proactive_nudge_delay = base::Seconds(0);
+  config.proactive_nudge_segmentation = false;
+
+  client().field_change_observer_.SetSkipSuggestionTypeForTest(true);
+
+  autofill::FormData form_data;
+  form_data.set_url(
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedURL());
+  form_data.fields = {autofill::test::CreateTestFormField(
+      "label0", "name0", "value0", autofill::FormControlType::kTextArea)};
+
+  // Simulate an Autofill popup being shown.
+  autofill::AutofillClient::PopupOpenArgs args;
+  args.suggestions = {
+      autofill::Suggestion(autofill::SuggestionType::kComposeProactiveNudge)};
+  autofill_client()->ShowAutofillSuggestions(args, /*delegate=*/nullptr);
+  EXPECT_TRUE(autofill_client()->IsShowingAutofillPopup());
+
+  // Simulate field change events up to limit specified by config.
+  std::u16string text_value = u"a";
+  unsigned int max = config.nudge_field_change_event_max;
+  for (size_t i = 1; i < max; i++) {
+    client().field_change_observer_.OnAfterTextFieldDidChange(
+        *autofill_manager(), form_data.global_id(),
+        form_data.fields[0].global_id(), text_value);
+    EXPECT_EQ(i,
+              client().field_change_observer_.text_field_change_event_count_);
+    text_value = text_value + u"a";
+  }
+
+  // Reaching the event threshold resets the event count and hides the Autofill
+  // popup.
+  client().field_change_observer_.OnAfterTextFieldDidChange(
+      *autofill_manager(), form_data.global_id(),
+      form_data.fields[0].global_id(), text_value);
+  EXPECT_EQ(0U, client().field_change_observer_.text_field_change_event_count_);
+  EXPECT_FALSE(autofill_client()->IsShowingAutofillPopup());
 }
 
 TEST_F(ChromeComposeClientTest, AcceptSuggestionHistogramTest) {
@@ -3274,7 +3855,7 @@ TEST_F(ChromeComposeClientTest, TestRegenerate) {
   // Check Compose Session Event Counts.
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
       compose::ComposeSessionEventTypes::kRetryClicked, 1);
@@ -3382,7 +3963,7 @@ TEST_F(ChromeComposeClientTest, TestToneChange) {
   // Check Compose Session Event Counts.
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
       compose::ComposeSessionEventTypes::kFormalClicked, 1);
@@ -3499,7 +4080,7 @@ TEST_F(ChromeComposeClientTest, TestLengthChange) {
   // Check Compose Session Event Counts.
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
-      compose::ComposeSessionEventTypes::kDialogShown, 1);
+      compose::ComposeSessionEventTypes::kMainDialogShown, 1);
   histograms().ExpectBucketCount(
       compose::kComposeSessionEventCounts,
       compose::ComposeSessionEventTypes::kFormalClicked, 0);
@@ -3655,6 +4236,20 @@ TEST_F(ChromeComposeClientTest, TestCloseReasonCanceledWhileWaiting) {
   histograms().ExpectUniqueSample(
       compose::kComposeSessionCloseReason,
       compose::ComposeSessionCloseReason::kCanceledBeforeResponseReceived, 1);
+}
+
+TEST_F(ChromeComposeClientTest, TestShowNudgeAtCursorFeatureFlag) {
+  // Showing nudge at cursor is disabled by default
+  EXPECT_FALSE(compose::GetMutableConfigForTesting().is_nudge_shown_at_cursor);
+
+  scoped_feature_list_.Reset();
+  scoped_feature_list_.InitWithFeatures(
+      /*enabled_features=*/{compose::features::kEnableComposeNudgeAtCursor},
+      /*disabled_features=*/{});
+  // Needed for feature params to apply.
+  compose::ResetConfigForTesting();
+
+  EXPECT_TRUE(compose::GetMutableConfigForTesting().is_nudge_shown_at_cursor);
 }
 
 #if defined(GTEST_HAS_DEATH_TEST)

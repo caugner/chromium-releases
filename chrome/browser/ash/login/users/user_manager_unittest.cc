@@ -17,6 +17,8 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/values.h"
 #include "chrome/browser/ash/login/users/avatar/user_image_manager_impl.h"
 #include "chrome/browser/ash/login/users/avatar/user_image_manager_registry.h"
@@ -37,6 +39,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/ash/components/cryptohome/system_salt_getter.h"
 #include "chromeos/ash/components/dbus/concierge/concierge_client.h"
+#include "chromeos/ash/components/dbus/userdataauth/userdataauth_client.h"
 #include "chromeos/ash/components/settings/cros_settings_names.h"
 #include "chromeos/ash/components/system/fake_statistics_provider.h"
 #include "components/account_id/account_id.h"
@@ -59,7 +62,7 @@ namespace ash {
 namespace {
 
 AccountId CreateDeviceLocalAccountId(const std::string& account_id,
-                                     policy::DeviceLocalAccount::Type type) {
+                                     policy::DeviceLocalAccountType type) {
   return AccountId::FromUserEmail(
       policy::GenerateDeviceLocalAccountUserId(account_id, type));
 }
@@ -74,7 +77,7 @@ const AccountId kAccountId1 =
     AccountId::FromUserEmailGaiaId("user1@example.com", "9012345678");
 const AccountId kKioskAccountId =
     CreateDeviceLocalAccountId(kDeviceLocalAccountId,
-                               policy::DeviceLocalAccount::TYPE_KIOSK_APP);
+                               policy::DeviceLocalAccountType::kKioskApp);
 }  // namespace
 
 class UserManagerObserverTest : public user_manager::UserManager::Observer {
@@ -132,6 +135,8 @@ class UserManagerTest : public testing::Test {
     command_line.AppendSwitch(::switches::kTestType);
     command_line.AppendSwitch(switches::kIgnoreUserProfileMappingForTests);
 
+    UserDataAuthClient::InitializeFake();
+
     UserImageManagerImpl::SkipDefaultUserImageDownloadForTesting();
     UserImageManagerImpl::SkipProfileImageDownloadForTesting();
 
@@ -175,6 +180,8 @@ class UserManagerTest : public testing::Test {
 
     base::RunLoop().RunUntilIdle();
     ConciergeClient::Shutdown();
+
+    UserDataAuthClient::Shutdown();
   }
 
   bool IsEphemeralAccountId(const AccountId& account_id) const {
@@ -204,6 +211,7 @@ class UserManagerTest : public testing::Test {
     user_manager_.Reset(ChromeUserManagerImpl::CreateChromeUserManager());
     user_image_manager_registry_ =
         std::make_unique<ash::UserImageManagerRegistry>(user_manager_.Get());
+
     wallpaper_controller_client_ = std::make_unique<
         WallpaperControllerClientImpl>(
         std::make_unique<wallpaper_handlers::TestWallpaperFetcherDelegate>());
@@ -212,10 +220,6 @@ class UserManagerTest : public testing::Test {
     // ChromeUserManagerImpl ctor posts a task to reload policies.
     // Also ensure that all existing ongoing user manager tasks are completed.
     task_environment_.RunUntilIdle();
-  }
-
-  std::unique_ptr<MockRemoveUserManager> CreateMockRemoveUserManager() const {
-    return std::make_unique<MockRemoveUserManager>();
   }
 
   void SetDeviceSettings(bool ephemeral_users_enabled,
@@ -227,15 +231,14 @@ class UserManagerTest : public testing::Test {
 
   void SetKioskAccountPrefs(
       policy::DeviceLocalAccount::EphemeralMode ephemeral_mode,
-      const std::string& account_id = kDeviceLocalAccountId) {
+      const std::string& account_id = kDeviceLocalAccountId,
+      int type = static_cast<int>(policy::DeviceLocalAccountType::kKioskApp)) {
     settings_helper_.Set(
         kAccountsPrefDeviceLocalAccounts,
         base::Value(base::Value::List().Append(
             base::Value::Dict()
                 .Set(kAccountsPrefDeviceLocalAccountsKeyId, account_id)
-                .Set(kAccountsPrefDeviceLocalAccountsKeyType,
-                     static_cast<int>(
-                         policy::DeviceLocalAccount::TYPE_KIOSK_APP))
+                .Set(kAccountsPrefDeviceLocalAccountsKeyType, type)
                 .Set(kAccountsPrefDeviceLocalAccountsKeyEphemeralMode,
                      static_cast<int>(ephemeral_mode))
                 .Set(kAccountsPrefDeviceLocalAccountsKeyKioskAppId, ""))));
@@ -245,7 +248,7 @@ class UserManagerTest : public testing::Test {
   // `TYPE_SAML_PUBLIC_SESSION` types.
   void SetDeviceLocalPublicAccount(
       const std::string& account_id,
-      policy::DeviceLocalAccount::Type type,
+      policy::DeviceLocalAccountType type,
       policy::DeviceLocalAccount::EphemeralMode ephemeral_mode) {
     settings_helper_.Set(
         kAccountsPrefDeviceLocalAccounts,
@@ -256,6 +259,30 @@ class UserManagerTest : public testing::Test {
                      static_cast<int>(type))
                 .Set(kAccountsPrefDeviceLocalAccountsKeyEphemeralMode,
                      static_cast<int>(ephemeral_mode)))));
+  }
+
+  void SetUpArcKioskAccountPersistentPrefs() {
+    const std::string email = std::string("test@") + kArcKioskDomain;
+
+    SetKioskAccountPrefs(policy::DeviceLocalAccount::EphemeralMode::kDisable,
+                         /* account_id= */ email, /* type=kArcKiosk */ 2);
+    local_state_->Get()->Set(
+        user_manager::prefs::kDeviceLocalAccountsWithSavedData,
+        base::Value(base::Value::List().Append(email)));
+    user_manager::KnownUser(local_state_->Get())
+        .SaveKnownUser(AccountId::FromUserEmailGaiaId(email, "fake_gaia_id"));
+  }
+
+  size_t GetArcKioskAccountsWithSavedDataCount() {
+    return local_state_->Get()
+        ->GetList(user_manager::prefs::kDeviceLocalAccountsWithSavedData)
+        .size();
+  }
+
+  size_t GetKnownUsersCount() {
+    return user_manager::KnownUser(local_state_->Get())
+        .GetKnownAccountIds()
+        .size();
   }
 
   void RetrieveTrustedDevicePolicies() {
@@ -372,12 +399,12 @@ TEST_F(UserManagerTest, IsEphemeralAccountIdTrueForPublicAccountId) {
       /* ephemeral_users_enabled= */ false,
       /* owner= */ kOwnerAccountId.GetUserEmail());
   SetDeviceLocalPublicAccount(
-      kDeviceLocalAccountId, policy::DeviceLocalAccount::TYPE_PUBLIC_SESSION,
+      kDeviceLocalAccountId, policy::DeviceLocalAccountType::kPublicSession,
       policy::DeviceLocalAccount::EphemeralMode::kDisable);
   RetrieveTrustedDevicePolicies();
 
   const AccountId public_accout_id = CreateDeviceLocalAccountId(
-      kDeviceLocalAccountId, policy::DeviceLocalAccount::TYPE_PUBLIC_SESSION);
+      kDeviceLocalAccountId, policy::DeviceLocalAccountType::kPublicSession);
   EXPECT_TRUE(IsEphemeralAccountId(public_accout_id));
 }
 
@@ -390,14 +417,13 @@ TEST_F(UserManagerTest, IsEphemeralAccountIdTrueForSamlPublicAccountId) {
       /* ephemeral_users_enabled= */ false,
       /* owner= */ kOwnerAccountId.GetUserEmail());
   SetDeviceLocalPublicAccount(
-      kDeviceLocalAccountId,
-      policy::DeviceLocalAccount::TYPE_SAML_PUBLIC_SESSION,
+      kDeviceLocalAccountId, policy::DeviceLocalAccountType::kSamlPublicSession,
       policy::DeviceLocalAccount::EphemeralMode::kDisable);
   RetrieveTrustedDevicePolicies();
 
   const AccountId saml_public_accout_id = CreateDeviceLocalAccountId(
       kDeviceLocalAccountId,
-      policy::DeviceLocalAccount::TYPE_SAML_PUBLIC_SESSION);
+      policy::DeviceLocalAccountType::kSamlPublicSession);
   EXPECT_TRUE(IsEphemeralAccountId(saml_public_accout_id));
 }
 
@@ -519,8 +545,7 @@ TEST_F(UserManagerTest, DoNotSaveKioskAccountsToKRegularUsersPref) {
 }
 
 TEST_F(UserManagerTest, RemoveUser) {
-  std::unique_ptr<MockRemoveUserManager> user_manager =
-      CreateMockRemoveUserManager();
+  auto user_manager = ChromeUserManagerImpl::CreateChromeUserManager();
 
   // Create owner account and login in.
   user_manager->UserLoggedIn(kOwnerAccountId, kOwnerAccountId.GetUserEmail(),
@@ -538,7 +563,7 @@ TEST_F(UserManagerTest, RemoveUser) {
   EXPECT_EQ(2U, user_manager->GetUsers().size());
 
   // Recreate the user manager to log out all accounts.
-  user_manager = CreateMockRemoveUserManager();
+  user_manager = ChromeUserManagerImpl::CreateChromeUserManager();
   UserManagerObserverTest observer_test;
   user_manager->AddObserver(&observer_test);
   ASSERT_EQ(2U, user_manager->GetUsers().size());
@@ -555,24 +580,18 @@ TEST_F(UserManagerTest, RemoveUser) {
   ASSERT_TRUE(user_to_remove);
   ASSERT_EQ(kAccountId0, user_to_remove->GetAccountId());
 
-  // Removing non-owner account is acceptable.
-  EXPECT_CALL(*user_manager, AsyncRemoveCryptohome(kAccountId0)).Times(1);
-
   // Pass the account id of the user to be removed from the user list to verify
   // that a reference to the account id will not be used after user removal.
   user_manager->RemoveUser(kAccountId0,
                            user_manager::UserRemovalReason::UNKNOWN);
-  testing::Mock::VerifyAndClearExpectations(user_manager.get());
   EXPECT_EQ(1, observer_test.OnUserToBeRemovedCallCount());
   EXPECT_EQ(1, observer_test.OnUserRemovedCallCount());
   EXPECT_EQ(1U, user_manager->GetUsers().size());
 
   // Removing owner account is unacceptable.
-  EXPECT_CALL(*user_manager, AsyncRemoveCryptohome(kOwnerAccountId)).Times(0);
   observer_test.ResetCallCounts();
   user_manager->RemoveUser(kOwnerAccountId,
                            user_manager::UserRemovalReason::UNKNOWN);
-  testing::Mock::VerifyAndClearExpectations(user_manager.get());
   EXPECT_EQ(0, observer_test.OnUserToBeRemovedCallCount());
   EXPECT_EQ(0, observer_test.OnUserRemovedCallCount());
   EXPECT_EQ(1U, user_manager->GetUsers().size());
@@ -695,6 +714,44 @@ TEST_F(UserManagerTest, RecordOwner) {
   owner = user_manager::UserManager::Get()->GetOwnerEmail();
   ASSERT_TRUE(owner.has_value());
   EXPECT_EQ(owner.value(), kOwnerAccountId.GetUserEmail());
+}
+
+TEST_F(UserManagerTest, RemoveDeprecatedArcKioskAccountOnStartUpByDefault) {
+  base::HistogramTester histogram_tester;
+  SetUpArcKioskAccountPersistentPrefs();
+
+  ResetUserManager();
+
+  EXPECT_EQ(0U, GetArcKioskAccountsWithSavedDataCount());
+  EXPECT_EQ(0U, GetKnownUsersCount());
+  histogram_tester.ExpectTotalCount(
+      ChromeUserManagerImpl::kDeprecatedArcKioskUsersHistogramName, 1);
+  histogram_tester.ExpectBucketCount(
+      ChromeUserManagerImpl::kDeprecatedArcKioskUsersHistogramName,
+      ChromeUserManagerImpl::DeprecatedArcKioskUserStatus::kDeleted,
+      /* expected_count= */ 1);
+}
+
+TEST_F(UserManagerTest,
+       HideDeprecatedArcKioskAccountOnStartUpWhenTheFeatureDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      kRemoveDeprecatedArcKioskUsersOnStartup);
+
+  base::HistogramTester histogram_tester;
+  SetUpArcKioskAccountPersistentPrefs();
+
+  ResetUserManager();
+
+  EXPECT_EQ(0U, GetArcKioskAccountsWithSavedDataCount());
+  // The ARC kiosk user has not been removed, just hidden.
+  EXPECT_EQ(1U, GetKnownUsersCount());
+  histogram_tester.ExpectTotalCount(
+      ChromeUserManagerImpl::kDeprecatedArcKioskUsersHistogramName, 1);
+  histogram_tester.ExpectBucketCount(
+      ChromeUserManagerImpl::kDeprecatedArcKioskUsersHistogramName,
+      ChromeUserManagerImpl::DeprecatedArcKioskUserStatus::kHidden,
+      /* expected_count= */ 1);
 }
 
 }  // namespace ash

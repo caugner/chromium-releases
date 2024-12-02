@@ -5,6 +5,7 @@
 #include "components/password_manager/core/browser/password_credential_filler_impl.h"
 
 #include <string>
+
 #include "base/check.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom-shared.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
@@ -84,7 +85,12 @@ SubmissionReadinessState CalculateSubmissionReadiness(
   }
 
   for (size_t i = password_index + 1; i < number_of_elements; ++i) {
-    if (!ShouldIgnoreField(form_data.fields[i])) {
+    // Skip the checkboxes following after the password field as it's most
+    // probably a "remember me" checkmark. But CAPTCHAs often look like
+    // non-focusable text area fields and they should not be skipped (this is
+    // the reason why `ShouldIgnoreField` is not used here).
+    if (form_data.fields[i].form_control_type() !=
+        autofill::FormControlType::kInputCheckbox) {
       return SubmissionReadinessState::kFieldAfterPasswordField;
     }
   }
@@ -126,7 +132,19 @@ PasswordCredentialFillerImpl::~PasswordCredentialFillerImpl() = default;
 void PasswordCredentialFillerImpl::FillUsernameAndPassword(
     const std::u16string& username,
     const std::u16string& password) {
-  CHECK(driver_);
+  if (!driver_) {
+    // If `driver_` (per frame) was destroyed, it means a navigation happened
+    // and the filling data doesn't apply to the new page. The correct behavior
+    // in this case is to hide the filling UI, meaning this code path is
+    // unreachable. *However*, if the UI wasn't hidden due to a bug, simply
+    // ignore the click here. That's better than:
+    //   a) Proceeding, which will cause a nullptr deref below.
+    //   b) CHECK(driver_), which would crash.
+    // Supposedly, the user can still dismiss the UI to get out of the broken
+    // state. See crbug.com/349073346.
+    return;
+  }
+
   if (!base::FeatureList::IsEnabled(
           features::kPasswordSuggestionBottomSheetV2)) {
     driver_->KeyboardReplacingSurfaceClosed(ToShowVirtualKeyboard(false));

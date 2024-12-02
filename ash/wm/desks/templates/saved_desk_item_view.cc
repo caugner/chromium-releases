@@ -41,6 +41,7 @@
 #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/geometry/insets.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/animation/animation_builder.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/focus_ring.h"
@@ -249,6 +250,7 @@ SavedDeskItemView::SavedDeskItemView(std::unique_ptr<DeskTemplate> saved_desk)
       l10n_util::GetStringUTF16(button_text_id),
       PillButton::Type::kDefaultWithoutIcon,
       /*icon=*/nullptr));
+  launch_button_->SetFocusBehavior(views::View::FocusBehavior::ACCESSIBLE_ONLY);
 
   // Users cannot delete admin templates.
   if (!is_admin_managed) {
@@ -261,6 +263,8 @@ SavedDeskItemView::SavedDeskItemView(std::unique_ptr<DeskTemplate> saved_desk)
             /*has_border=*/false));
     delete_button_->SetTooltipText(l10n_util::GetStringUTF16(
         IDS_ASH_DESKS_TEMPLATES_DELETE_DIALOG_CONFIRM_BUTTON));
+    delete_button_->SetFocusBehavior(
+        views::View::FocusBehavior::ACCESSIBLE_ONLY);
   }
 
   // Use a border to create spacing between `name_view_`s background (set in
@@ -280,12 +284,14 @@ SavedDeskItemView::SavedDeskItemView(std::unique_ptr<DeskTemplate> saved_desk)
 
   views::FocusRing* focus_ring =
       StyleUtil::SetUpFocusRingForView(this, kWindowMiniViewFocusRingHaloInset);
-  focus_ring->SetHasFocusPredicate(
-      base::BindRepeating([](const views::View* view) {
-        const auto* v = views::AsViewClass<SavedDeskItemView>(view);
-        CHECK(v);
-        return v->is_focused();
-      }));
+  if (!features::IsOverviewNewFocusEnabled()) {
+    focus_ring->SetHasFocusPredicate(
+        base::BindRepeating([](const views::View* view) {
+          const auto* v = views::AsViewClass<SavedDeskItemView>(view);
+          CHECK(v);
+          return v->is_focused();
+        }));
+  }
   focus_ring->SetColorId(cros_tokens::kCrosSysFocusRing);
 
   SetEventTargeter(std::make_unique<views::ViewTargeter>(this));
@@ -298,6 +304,10 @@ SavedDeskItemView::SavedDeskItemView(std::unique_ptr<DeskTemplate> saved_desk)
 
   hover_container_->layer()->SetOpacity(0.0f);
   icon_container_view_->layer()->SetOpacity(1.0f);
+
+  AddAccelerator(ui::Accelerator(ui::VKEY_W, ui::EF_CONTROL_DOWN));
+
+  GetViewAccessibility().SetRole(ax::mojom::Role::kButton);
 }
 
 SavedDeskItemView::~SavedDeskItemView() {
@@ -395,8 +405,12 @@ void SavedDeskItemView::UpdateSavedDesk(
 }
 
 void SavedDeskItemView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  node_data->role = ax::mojom::Role::kButton;
-  node_data->SetName(ComputeAccessibleName());
+  // We must set the updated accessible name directly in the cache to override
+  // the one set in `LabelButton::SetText`. This is temporary.
+  //
+  // TODO(crbug.com/325137417): Remove this once the accessible name is set in
+  // the cache as soon as the name is updated.
+  GetViewAccessibility().SetName(ComputeAccessibleName());
 
   node_data->AddStringAttribute(
       ax::mojom::StringAttribute::kDescription,
@@ -451,7 +465,7 @@ void SavedDeskItemView::OnViewFocused(views::View* observed_view) {
                            ->overview_controller()
                            ->overview_session()
                            ->focus_cycler_old();
-  if (focus_cycler->IsFocusVisible()) {
+  if (focus_cycler && focus_cycler->IsFocusVisible()) {
     focus_cycler->MoveFocusToView(name_view_);
 
     // Update a11y focus window.
@@ -557,6 +571,18 @@ views::Button::KeyClickAction SavedDeskItemView::GetKeyClickActionForEvent(
   }
 
   return Button::GetKeyClickActionForEvent(event);
+}
+
+bool SavedDeskItemView::AcceleratorPressed(const ui::Accelerator& accelerator) {
+  if (accelerator.IsCtrlDown() && accelerator.key_code() == ui::VKEY_W) {
+    OnDeleteButtonPressed();
+    return true;
+  }
+  return views::Button::AcceleratorPressed(accelerator);
+}
+
+bool SavedDeskItemView::CanHandleAccelerators() const {
+  return HasFocus() && views::Button::CanHandleAccelerators();
 }
 
 void SavedDeskItemView::UpdateSavedDeskName() {

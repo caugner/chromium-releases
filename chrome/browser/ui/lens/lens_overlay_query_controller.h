@@ -8,10 +8,15 @@
 #include "base/functional/callback.h"
 #include "chrome/browser/lens/core/mojom/overlay_object.mojom.h"
 #include "chrome/browser/lens/core/mojom/text.mojom.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/lens/lens_overlay_invocation_source.h"
 #include "chrome/browser/ui/lens/lens_overlay_request_id_generator.h"
+#include "chrome/browser/ui/lens/lens_overlay_url_builder.h"
 #include "components/endpoint_fetcher/endpoint_fetcher.h"
 #include "components/lens/proto/server/lens_overlay_response.pb.h"
+#include "services/network/public/cpp/simple_url_loader.h"
 #include "third_party/lens_server_proto/lens_overlay_client_context.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_client_logs.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_cluster_info.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_image_crop.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_image_data.pb.h"
@@ -21,6 +26,8 @@
 #include "third_party/lens_server_proto/lens_overlay_service_deps.pb.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
+
+class Profile;
 
 namespace signin {
 class IdentityManager;
@@ -35,7 +42,8 @@ namespace lens {
 // Callback type alias for the lens overlay full image response.
 using LensOverlayFullImageResponseCallback =
     base::RepeatingCallback<void(std::vector<lens::mojom::OverlayObjectPtr>,
-                                 lens::mojom::TextPtr)>;
+                                 lens::mojom::TextPtr,
+                                 bool)>;
 // Callback type alias for the lens overlay url response.
 using LensOverlayUrlResponseCallback =
     base::RepeatingCallback<void(lens::proto::LensOverlayUrlResponse)>;
@@ -54,41 +62,47 @@ class LensOverlayQueryController {
       LensOverlayInteractionResponseCallback interaction_data_callback,
       LensOverlayThumbnailCreatedCallback thumbnail_created_callback,
       variations::VariationsClient* variations_client,
-      signin::IdentityManager* identity_manager);
+      signin::IdentityManager* identity_manager,
+      Profile* profile,
+      lens::LensOverlayInvocationSource invocation_source,
+      bool use_dark_mode);
   virtual ~LensOverlayQueryController();
 
   // Starts a query flow by sending a request to Lens using the screenshot,
   // returning the response to the full image callback. Should be called
   // exactly once. Override these methods to stub out network requests for
   // testing.
-  virtual void StartQueryFlow(const SkBitmap& screenshot,
-                              std::optional<GURL> page_url,
-                              std::optional<std::string> page_title);
+  virtual void StartQueryFlow(
+      const SkBitmap& screenshot,
+      std::optional<GURL> page_url,
+      std::optional<std::string> page_title,
+      std::vector<lens::mojom::CenterRotatedBoxPtr> significant_region_boxes,
+      float ui_scale_factor);
 
   // Clears the state and resets stored values.
   void EndQuery();
 
-  // Sends a region search interaction. Expected to be called multiple times.
-  void SendRegionSearch(
+  // Sends a region search interaction. Expected to be called multiple times. If
+  // region_bytes are included, those will be sent to Lens instead of cropping
+  // the region out of the screenshot. This should be used to provide a higher
+  // definition image than image cropping would provide.
+  virtual void SendRegionSearch(
       lens::mojom::CenterRotatedBoxPtr region,
-      std::map<std::string, std::string> additional_search_query_params);
-
-  // Sends an object selection interaction. Expected to be called multiple
-  // times.
-  void SendObjectSelection(
-      const std::string& object_id,
-      std::map<std::string, std::string> additional_search_query_params);
+      lens::LensOverlaySelectionType lens_selection_type,
+      std::map<std::string, std::string> additional_search_query_params,
+      std::optional<SkBitmap> region_bytes);
 
   // Sends a text-only interaction. Expected to be called multiple times.
   void SendTextOnlyQuery(
       const std::string& query_text,
+      TextOnlyQueryType text_only_query_type,
       std::map<std::string, std::string> additional_search_query_params);
 
   // Sends a multimodal interaction. Expected to be called multiple times.
-  void SendMultimodalRequest(
+  virtual void SendMultimodalRequest(
       lens::mojom::CenterRotatedBoxPtr region,
       const std::string& query_text,
-      lens::LensOverlaySelectionType multimodal_selection_type,
+      lens::LensOverlaySelectionType lens_selection_type,
       std::map<std::string, std::string> additional_search_query_params);
 
  protected:
@@ -99,6 +113,9 @@ class LensOverlayQueryController {
       base::OnceCallback<void(std::unique_ptr<EndpointFetcher>)>
           fetcher_created_callback,
       EndpointFetcherCallback fetched_response_callback);
+
+  // Sends a latency Gen204 ping if enabled.
+  virtual void SendLatencyGen204IfEnabled(int64_t latency_ms);
 
   // The callback for full image requests, including upon query flow start
   // and interaction retries.
@@ -112,13 +129,17 @@ class LensOverlayQueryController {
 
  private:
   enum class QueryControllerState {
-    // StartQueryFlow has not been called and the query controller is inactive.
+    // StartQueryFlow has not been called and the query controller is
+    // inactive.
     kOff = 0,
     // The full image response has not been received, or is no longer valid.
     kAwaitingFullImageResponse = 1,
     // The full image response has been received and the query controller can
     // send interaction requests.
     kReceivedFullImageResponse = 2,
+    // The full image response has been received and resulted in an error
+    // response.
+    kReceivedFullImageErrorResponse = 3,
   };
 
   // Processes the screenshot and fetches a full image request.
@@ -140,16 +161,22 @@ class LensOverlayQueryController {
       std::optional<std::string> query_text,
       std::optional<std::string> object_id,
       lens::LensOverlaySelectionType selection_type,
-      std::map<std::string, std::string> additional_search_query_params);
+      std::map<std::string, std::string> additional_search_query_params,
+      std::optional<SkBitmap> region_bytes);
 
   // Fetches the endpoint using the initial image data.
   void FetchFullImageRequest(
       std::unique_ptr<lens::LensOverlayRequestId> request_id,
-      lens::ImageData image_data);
+      lens::ImageData image_data,
+      lens::LensOverlayClientLogs client_logs);
 
   // Handles the endpoint fetch response for the initial request.
   void FullImageFetchResponseHandler(
+      int64_t query_start_time_ms,
       std::unique_ptr<EndpointResponse> response);
+
+  // Handles the response from a gen204 request.
+  void OnGen204LoaderComplete(std::unique_ptr<std::string> response_body);
 
   // Runs the full image callback with empty response data, for errors.
   void RunFullImageCallbackForError();
@@ -164,8 +191,8 @@ class LensOverlayQueryController {
   // Helper to gate interaction fetches on whether or not the cluster
   // info has been received. If it has not been received, this function
   // sets the cluster info received callback to fetch the interaction.
-  // Additionally, invokes `thumbnail_created_callback_` and passes the data in
-  // `image_crop`.
+  // Additionally, invokes `thumbnail_created_callback_` and passes the data
+  // in `image_crop`.
   void FetchInteractionRequestAndGenerateUrlIfClusterInfoReady(
       int request_index,
       lens::mojom::CenterRotatedBoxPtr region,
@@ -173,7 +200,8 @@ class LensOverlayQueryController {
       std::optional<std::string> object_id,
       lens::LensOverlaySelectionType selection_type,
       std::map<std::string, std::string> additional_search_query_params,
-      std::optional<lens::ImageCrop> image_crop);
+      std::optional<lens::ImageCrop> image_crop,
+      lens::LensOverlayClientLogs client_logs);
 
   // Fetches the endpoint for an interaction request and creates a Lens search
   // url if the request is the most recent request.
@@ -185,6 +213,7 @@ class LensOverlayQueryController {
       lens::LensOverlaySelectionType selection_type,
       std::map<std::string, std::string> additional_search_query_params,
       std::optional<lens::ImageCrop> image_crop,
+      lens::LensOverlayClientLogs client_logs,
       lens::LensOverlayClusterInfo cluster_info);
 
   // Creates the metadata for an interaction request using the latest
@@ -194,10 +223,11 @@ class LensOverlayQueryController {
       std::optional<std::string> query_text,
       std::optional<std::string> object_id,
       std::optional<lens::ImageCrop> image_crop,
+      lens::LensOverlayClientLogs client_logs,
       std::unique_ptr<lens::LensOverlayRequestId> request_id);
 
-  // Resets the request flow state.
-  void ResetRequestFlowState();
+  // Resets the request cluster info state.
+  void ResetRequestClusterInfoState();
 
   // Callback for when the full image endpoint fetcher is created.
   void OnFullImageEndpointFetcherCreated(
@@ -225,6 +255,14 @@ class LensOverlayQueryController {
 
   // The page title, if it is allowed to be shared.
   std::optional<std::string> page_title_;
+
+  // Bounding boxes for significant regions identified in the original
+  // screenshot image.
+  std::vector<lens::mojom::CenterRotatedBoxPtr> significant_region_boxes_;
+
+  // The UI Scaling Factor of the underlying page, if it has been passed in.
+  // Else 0.
+  float ui_scale_factor_ = 0;
 
   // The current state.
   QueryControllerState query_controller_state_ = QueryControllerState::kOff;
@@ -254,6 +292,9 @@ class LensOverlayQueryController {
   // earlier unfinished requests.
   std::unique_ptr<EndpointFetcher> interaction_endpoint_fetcher_;
 
+  // Loader used for gen204 requests.
+  std::unique_ptr<network::SimpleURLLoader> gen204_loader_;
+
   // Owned by Profile, and thus guaranteed to outlive this instance.
   raw_ptr<variations::VariationsClient> variations_client_;
 
@@ -261,12 +302,26 @@ class LensOverlayQueryController {
   // incognito profiles.
   raw_ptr<signin::IdentityManager> identity_manager_;
 
-  // The request counter, used to make sure requests are not sent out of order.
+  raw_ptr<Profile> profile_;
+
+  // The request counter, used to make sure requests are not sent out of
+  // order.
   int request_counter_ = 0;
 
   // Whether or not the parent interaction query has been sent. This should
   // always be the first interaction in a query flow.
   bool parent_query_sent_ = false;
+
+  // The invocation source that triggered the query flow.
+  lens::LensOverlayInvocationSource invocation_source_;
+
+  // Whether or not to use dark mode in search urls. This is only calculated
+  // once per session because the search box theme is also only set once
+  // per session.
+  bool use_dark_mode_;
+
+  // The current gen204 id for logging, set on each overlay invocation.
+  uint64_t gen204_id_;
 
   base::WeakPtrFactory<LensOverlayQueryController> weak_ptr_factory_{this};
 };

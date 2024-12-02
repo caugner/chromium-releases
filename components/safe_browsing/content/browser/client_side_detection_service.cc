@@ -111,7 +111,22 @@ ClientSideDetectionService::ClientSideDetectionService(
       prefs::kSafeBrowsingScoutReportingEnabled,
       base::BindRepeating(&ClientSideDetectionService::OnPrefsUpdated,
                           base::Unretained(this)));
-  // Do an initial check of the prefs.
+
+  // If we fail to load the report times, we will not know how many pings the
+  // user has sent already. In this case, we will assume the user has sent
+  // enough pings and skip the phishing URL check.
+  // TODO: (andysjlim): clean up the ifs and logs if the uma never logs false.
+  if (LoadPhishingReportTimesFromPrefs()) {
+    skip_phishing_request_check_ = false;
+    base::UmaHistogramBoolean(
+        "SBClientPhishing.LoadReportTimesFromPrefAtServiceCreationSuccessful",
+        true);
+  } else {
+    base::UmaHistogramBoolean(
+        "SBClientPhishing.LoadReportTimesFromPrefAtServiceCreationSuccessful",
+        false);
+  }
+  //  Do an initial check of the prefs.
   OnPrefsUpdated();
 }
 
@@ -249,6 +264,16 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
     return;
   }
 
+  // Record that we made a request. Logged before the request is made
+  // to ensure it gets recorded. If this returns false due to being at ping cap
+  // or prefs are null, abandon the request.
+  if (!AddPhishingReport(base::Time::Now())) {
+    if (!callback.is_null()) {
+      std::move(callback).Run(GURL(request->url()), false, std::nullopt);
+    }
+    return;
+  }
+
   std::string request_data;
   request->SerializeToString(&request_data);
 
@@ -303,6 +328,7 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
   resource_request->url = GetClientReportUrl(kClientReportPhishingUrl);
   resource_request->method = "POST";
   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
+
   auto loader = network::SimpleURLLoader::Create(std::move(resource_request),
                                                  traffic_annotation);
   loader->AttachStringForUpload(request_data, "application/octet-stream");
@@ -318,9 +344,6 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
   info->callback = std::move(callback);
   info->phishing_url = GURL(request->url());
   client_phishing_reports_[loader_ptr] = std::move(info);
-
-  // Record that we made a request
-  AddPhishingReport(base::Time::Now());
 
   // The following is to log this ClientPhishingRequest on any open
   // chrome://safe-browsing pages. If no such page is open, the request is
@@ -416,24 +439,30 @@ void ClientSideDetectionService::UpdateCache() {
   }
 }
 
-bool ClientSideDetectionService::OverPhishingReportLimit() {
+bool ClientSideDetectionService::AtPhishingReportLimit() {
+  base::UmaHistogramBoolean("SBClientPhishing.SkipPhishingRequestCheck",
+                            skip_phishing_request_check_);
+  // If |skip_phishing_request_check_| is true, that means we failed to load the
+  // report times from prefs before from class initialization.
+  if (skip_phishing_request_check_) {
+    return true;
+  }
+
   // `delegate_` and prefs can be null in unit tests.
   if (base::FeatureList::IsEnabled(kSafeBrowsingDailyPhishingReportsLimit) &&
       (delegate_ && delegate_->GetPrefs()) &&
       IsEnhancedProtectionEnabled(*delegate_->GetPrefs())) {
-    return GetPhishingNumReports() >
+    return GetPhishingNumReports() >=
            kSafeBrowsingDailyPhishingReportsLimitESB.Get();
   }
-  return GetPhishingNumReports() > kMaxReportsPerInterval;
+  return GetPhishingNumReports() >= kMaxReportsPerInterval;
 }
 
 int ClientSideDetectionService::GetPhishingNumReports() {
   return phishing_report_times_.size();
 }
 
-void ClientSideDetectionService::AddPhishingReport(base::Time timestamp) {
-  phishing_report_times_.push_back(timestamp);
-
+bool ClientSideDetectionService::AddPhishingReport(base::Time timestamp) {
   base::Time cutoff = base::Time::Now() - base::Days(kReportsIntervalDays);
 
   // Erase items older than cutoff because we will never care about them again.
@@ -442,9 +471,26 @@ void ClientSideDetectionService::AddPhishingReport(base::Time timestamp) {
     phishing_report_times_.pop_front();
   }
 
-  if (!delegate_ || !delegate_->GetPrefs()) {
-    return;
+  // We should not be adding a report when we are at the limit when this
+  // function calls, but in case it does, we want to track how far back the
+  // last report was prior to the current report and exit the function early.
+  // Each classification request is made on the tab level, which may not have
+  // had |phishing_report_times_| updated because the service class, that's on
+  // the profile level, was processing a different request. Therefore, we check
+  // one last time before we log the request.
+  if (AtPhishingReportLimit()) {
+    base::UmaHistogramMediumTimes("SBClientPhishing.TimeSinceLastReportAtLimit",
+                                  timestamp - phishing_report_times_.back());
+    return false;
   }
+
+  if (!delegate_ || !delegate_->GetPrefs()) {
+    base::UmaHistogramBoolean("SBClientPhishing.AddPhishingReportSuccessful",
+                              false);
+    return false;
+  }
+
+  phishing_report_times_.push_back(timestamp);
 
   base::Value::List time_list;
   for (const base::Time& report_time : phishing_report_times_) {
@@ -452,11 +498,16 @@ void ClientSideDetectionService::AddPhishingReport(base::Time timestamp) {
   }
   delegate_->GetPrefs()->SetList(prefs::kSafeBrowsingCsdPingTimestamps,
                                  std::move(time_list));
+  base::UmaHistogramBoolean("SBClientPhishing.AddPhishingReportSuccessful",
+                            true);
+
+  return true;
 }
 
-void ClientSideDetectionService::LoadPhishingReportTimesFromPrefs() {
+bool ClientSideDetectionService::LoadPhishingReportTimesFromPrefs() {
+  // delegate and prefs can be null in unit tests.
   if (!delegate_ || !delegate_->GetPrefs()) {
-    return;
+    return false;
   }
 
   phishing_report_times_.clear();
@@ -465,6 +516,8 @@ void ClientSideDetectionService::LoadPhishingReportTimesFromPrefs() {
     phishing_report_times_.push_back(
         base::Time::FromSecondsSinceUnixEpoch(timestamp.GetDouble()));
   }
+
+  return true;
 }
 
 // static

@@ -155,11 +155,17 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
           can_cache_policy ? sandbox::SandboxCompiler::Target::kCompiled
                            : sandbox::SandboxCompiler::Target::kSource);
       compiler.SetProfile(sandbox::policy::GetSandboxProfile(sandbox_type));
-      SetupSandboxParameters(sandbox_type, *command_line_.get(),
+      const bool sandbox_ok =
+          SetupSandboxParameters(sandbox_type, *command_line_.get(),
 #if BUILDFLAG(ENABLE_PPAPI)
-                             plugins_,
+                                 plugins_,
 #endif
-                             &compiler);
+                                 &compiler);
+
+      if (!sandbox_ok) {
+        LOG(ERROR) << "Sandbox setup failed.";
+        return false;
+      }
 
       std::string error;
       if (!compiler.CompilePolicyToProto(policy_, error)) {
@@ -255,7 +261,7 @@ base::File OpenFileToShare(const base::FilePath& path,
                            base::MemoryMappedFile::Region* region) {
   // Not used yet (until required files are described in the service manifest on
   // Mac).
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return base::File();
 }
 

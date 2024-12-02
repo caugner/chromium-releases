@@ -60,7 +60,7 @@ CookieControlsIconView::CookieControlsIconView(
       browser_(browser) {
   CHECK(browser_);
   SetUpForInOutAnimation(/*duration=*/base::Seconds(12));
-  SetPaintLabelOverSolidBackground(true);
+  SetBackgroundVisibility(BackgroundVisibility::kWithLabel);
   SetProperty(views::kElementIdentifierKey, kCookieControlsIconElementId);
   bubble_coordinator_ = std::make_unique<CookieControlsBubbleCoordinator>();
 }
@@ -77,7 +77,15 @@ void CookieControlsIconView::SetCoordinatorForTesting(
   bubble_coordinator_ = std::move(coordinator);
 }
 
+void CookieControlsIconView::DisableUpdatesForTesting() {
+  disable_updates_for_testing_ = true;
+}
+
 void CookieControlsIconView::UpdateImpl() {
+  if (disable_updates_for_testing_) {
+    return;
+  }
+
   auto* web_contents = delegate()->GetWebContentsForPageActionIconView();
   if (web_contents) {
     if (!controller_) {
@@ -253,14 +261,17 @@ bool CookieControlsIconView::GetAssociatedBubble() const {
 }
 
 void CookieControlsIconView::ShowCookieControlsBubble() {
-  bubble_coordinator_->ShowBubble(
-      delegate()->GetWebContentsForPageActionIconView(), controller_.get());
   CHECK(browser_->window());
-  CHECK(ShouldBeVisible());
+  // Need to close IPH before opening bubble view, as on some platforms closing
+  // the IPH bubble can cause activation to move between windows, and cookie
+  // control bubble is close-on-deactivate.
   browser_->window()->CloseFeaturePromo(
       feature_engagement::kIPHCookieControlsFeature);
   browser_->window()->NotifyFeatureEngagementEvent(
       feature_engagement::events::kCookieControlsBubbleShown);
+  bubble_coordinator_->ShowBubble(
+      delegate()->GetWebContentsForPageActionIconView(), controller_.get());
+  CHECK(ShouldBeVisible());
   RecordOpenedAction(icon_visible_, protections_on_);
   if (did_animate_) {
     base::RecordAction(base::UserMetricsAction(

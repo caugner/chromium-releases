@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "components/user_education/common/feature_promo_controller.h"
 #include "components/user_education/common/feature_promo_handle.h"
+#include "components/user_education/common/new_badge_controller.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/color/color_provider_key.h"
@@ -194,12 +195,12 @@ ExtensionsContainer* TestBrowserWindow::GetExtensionsContainer() {
 
 content::KeyboardEventProcessingResult
 TestBrowserWindow::PreHandleKeyboardEvent(
-    const content::NativeWebKeyboardEvent& event) {
+    const input::NativeWebKeyboardEvent& event) {
   return content::KeyboardEventProcessingResult::NOT_HANDLED;
 }
 
 bool TestBrowserWindow::HandleKeyboardEvent(
-    const content::NativeWebKeyboardEvent& event) {
+    const input::NativeWebKeyboardEvent& event) {
   return false;
 }
 
@@ -312,6 +313,9 @@ bool TestBrowserWindow::IsDownloadShelfVisible() const {
 DownloadShelf* TestBrowserWindow::GetDownloadShelf() {
   return &download_shelf_;
 }
+views::View* TestBrowserWindow::GetTopContainer() {
+  return nullptr;
+}
 
 DownloadBubbleUIController* TestBrowserWindow::GetDownloadBubbleUIController() {
   return nullptr;
@@ -408,9 +412,9 @@ void TestBrowserWindow::NotifyFeatureEngagementEvent(const char* event_name) {}
 
 void TestBrowserWindow::NotifyPromoFeatureUsed(const base::Feature& feature) {}
 
-bool TestBrowserWindow::MaybeShowNewBadgeFor(
+user_education::DisplayNewBadge TestBrowserWindow::MaybeShowNewBadgeFor(
     const base::Feature& new_badge_feature) {
-  return false;
+  return user_education::DisplayNewBadge();
 }
 
 user_education::FeaturePromoController*

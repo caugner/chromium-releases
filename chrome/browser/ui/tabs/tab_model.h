@@ -95,6 +95,11 @@ class TabModel final : public SupportsHandles<const TabModel>,
   // TabStripModel). Not called if TabStripModel is being destroyed.
   void WillEnterBackground(base::PassKey<TabStripModel>);
 
+  // Called by TabStripModel when a tab is going to be detached for reinsertion
+  // into a different tab strip.
+  void WillDetach(base::PassKey<TabStripModel>,
+                  tabs::TabInterface::DetachReason reason);
+
   // TabInterface overrides:
   content::WebContents* GetContents() const override;
   base::CallbackListSubscription RegisterWillDiscardContents(
@@ -104,10 +109,13 @@ class TabModel final : public SupportsHandles<const TabModel>,
       TabInterface::DidEnterForegroundCallback callback) override;
   base::CallbackListSubscription RegisterWillEnterBackground(
       TabInterface::WillEnterBackgroundCallback callback) override;
+  base::CallbackListSubscription RegisterWillDetach(
+      TabInterface::WillDetach callback) override;
   bool CanShowModalUI() const override;
   std::unique_ptr<ScopedTabModalUI> ShowModalUI() override;
   bool IsInNormalWindow() const override;
   BrowserWindowInterface* GetBrowserWindowInterface() override;
+  tabs::TabFeatures* GetTabFeatures() override;
 
  private:
   // Overridden from TabStripModelObserver:
@@ -157,6 +165,11 @@ class TabModel final : public SupportsHandles<const TabModel>,
   using WillEnterBackgroundCallbackList =
       base::RepeatingCallbackList<void(TabInterface*)>;
   WillEnterBackgroundCallbackList will_enter_background_callback_list_;
+
+  using WillDetachCallbackList =
+      base::RepeatingCallbackList<void(TabInterface*,
+                                       tabs::TabInterface::DetachReason)>;
+  WillDetachCallbackList will_detach_callback_list_;
 
   // Tracks whether a modal UI is showing.
   bool showing_modal_ui_ = false;

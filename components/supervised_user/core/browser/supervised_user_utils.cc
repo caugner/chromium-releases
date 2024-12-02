@@ -23,6 +23,28 @@ namespace supervised_user {
 
 namespace {
 
+// A templated function to merge multiple values of the same type into either:
+// * An empty optional if none of the values are set
+// * A non-empty optional if all the set values are equal
+// * An optional containing |mixed_value| if there are multiple different
+// values.
+template <class T>
+std::optional<T> GetMergedRecord(const std::vector<std::optional<T>> records,
+                                 T mixed_value) {
+  std::optional<T> merged_record;
+  for (const std::optional<T> record : records) {
+    if (!record.has_value()) {
+      continue;
+    }
+
+    if (merged_record.has_value() && merged_record.value() != record.value()) {
+      return mixed_value;
+    }
+    merged_record = record;
+  }
+  return merged_record;
+}
+
 std::optional<FamilyLinkUserLogRecord::Segment> GetLogSegmentForHistogram(
     const std::vector<FamilyLinkUserLogRecord>& records) {
   std::optional<FamilyLinkUserLogRecord::Segment> merged_log_segment;
@@ -40,22 +62,33 @@ std::optional<FamilyLinkUserLogRecord::Segment> GetLogSegmentForHistogram(
 
 std::optional<WebFilterType> GetWebFilterForHistogram(
     const std::vector<FamilyLinkUserLogRecord>& records) {
-  std::optional<WebFilterType> merged_log_segment;
+  std::vector<std::optional<WebFilterType>> filter_types;
   for (const FamilyLinkUserLogRecord& record : records) {
-    std::optional<WebFilterType> web_filter =
-        record.GetWebFilterTypeForPrimaryAccount();
-    if (!web_filter.has_value()) {
-      continue;
-    }
-
-    if (merged_log_segment.has_value() &&
-        merged_log_segment.value() != web_filter) {
-      return WebFilterType::kMixed;
-    }
-    merged_log_segment = web_filter;
+    filter_types.push_back(record.GetWebFilterTypeForPrimaryAccount());
   }
-  return merged_log_segment;
+  return GetMergedRecord(filter_types, WebFilterType::kMixed);
 }
+
+std::optional<ToggleState> GetPermissionsToggleStateForHistogram(
+    const std::vector<FamilyLinkUserLogRecord>& records) {
+  std::vector<std::optional<ToggleState>> permissions_toggle_states;
+  for (const FamilyLinkUserLogRecord& record : records) {
+    permissions_toggle_states.push_back(
+        record.GetPermissionsToggleStateForPrimaryAccount());
+  }
+  return GetMergedRecord(permissions_toggle_states, ToggleState::kMixed);
+}
+
+std::optional<ToggleState> GetExtensionsToggleStateForHistogram(
+    const std::vector<FamilyLinkUserLogRecord>& records) {
+  std::vector<std::optional<ToggleState>> extensions_toggle_states;
+  for (const FamilyLinkUserLogRecord& record : records) {
+    extensions_toggle_states.push_back(
+        record.GetExtensionsToggleStateForPrimaryAccount());
+  }
+  return GetMergedRecord(extensions_toggle_states, ToggleState::kMixed);
+}
+
 }  // namespace
 
 std::string FamilyRoleToString(kidsmanagement::FamilyRole role) {
@@ -109,6 +142,7 @@ bool AreWebFilterPrefsDefault(const PrefService& pref_service) {
 bool EmitLogRecordHistograms(
     const std::vector<FamilyLinkUserLogRecord>& records) {
   bool did_emit_histogram = false;
+
   std::optional<FamilyLinkUserLogRecord::Segment> segment =
       GetLogSegmentForHistogram(records);
   if (segment.has_value()) {
@@ -116,12 +150,32 @@ bool EmitLogRecordHistograms(
                                   segment.value());
     did_emit_histogram = true;
   }
+
   std::optional<WebFilterType> web_filter = GetWebFilterForHistogram(records);
   if (web_filter.has_value()) {
     base::UmaHistogramEnumeration(
         kFamilyLinkUserLogSegmentWebFilterHistogramName, web_filter.value());
     did_emit_histogram = true;
   }
+
+  std::optional<ToggleState> permissions_toggle_state =
+      GetPermissionsToggleStateForHistogram(records);
+  if (permissions_toggle_state.has_value()) {
+    base::UmaHistogramEnumeration(
+        kSitesMayRequestCameraMicLocationHistogramName,
+        permissions_toggle_state.value());
+    did_emit_histogram = true;
+  }
+
+  std::optional<ToggleState> extensions_toggle_state =
+      GetExtensionsToggleStateForHistogram(records);
+  if (extensions_toggle_state.has_value()) {
+    base::UmaHistogramEnumeration(
+        kSkipParentApprovalToInstallExtensionsHistogramName,
+        extensions_toggle_state.value());
+    did_emit_histogram = true;
+  }
+
   return did_emit_histogram;
 }
 

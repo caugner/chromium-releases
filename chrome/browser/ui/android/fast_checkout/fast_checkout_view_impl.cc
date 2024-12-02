@@ -11,12 +11,14 @@
 #include "base/android/jni_string.h"
 #include "base/android/locale_utils.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/ui/android/fast_checkout/internal/jni/FastCheckoutBridge_jni.h"
 #include "chrome/browser/ui/android/fast_checkout/ui_view_android_utils.h"
 #include "chrome/browser/ui/fast_checkout/fast_checkout_controller.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
 #include "ui/android/window_android.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "chrome/browser/ui/android/fast_checkout/internal/jni/FastCheckoutBridge_jni.h"
 
 using base::android::AttachCurrentThread;
 
@@ -53,7 +55,7 @@ void FastCheckoutViewImpl::OnDismiss(JNIEnv* env) {
 }
 
 void FastCheckoutViewImpl::Show(
-    const std::vector<autofill::AutofillProfile*>& autofill_profiles,
+    const std::vector<const autofill::AutofillProfile*>& autofill_profiles,
     const std::vector<autofill::CreditCard*>& credit_cards) {
   if (!RecreateJavaObjectIfNecessary()) {
     // It's possible that the constructor cannot access the bottom sheet clank
@@ -75,7 +77,7 @@ void FastCheckoutViewImpl::Show(
   std::vector<base::android::ScopedJavaLocalRef<jobject>> credit_cards_array;
   credit_cards_array.reserve(credit_cards.size());
   for (const autofill::CreditCard* card : credit_cards) {
-    autofill_profiles_array.push_back(CreateFastCheckoutCreditCard(
+    credit_cards_array.push_back(CreateFastCheckoutCreditCard(
         env, *card, g_browser_process->GetApplicationLocale()));
   }
 

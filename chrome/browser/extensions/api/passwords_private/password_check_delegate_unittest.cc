@@ -280,6 +280,9 @@ class PasswordCheckDelegateTest : public ::testing::Test {
   PasswordCheckDelegateTest() {
     prefs_.registry()->RegisterDoublePref(kLastTimePasswordCheckCompleted, 0.0);
     presenter_.Init();
+    delegate_ = std::make_unique<PasswordCheckDelegate>(
+        profile_.get(), &presenter_, &credential_id_generator_,
+        PasswordsPrivateEventRouterFactory::GetForProfile(profile_.get()));
   }
 
   void RunUntilIdle() { task_env_.RunUntilIdle(); }
@@ -312,11 +315,16 @@ class PasswordCheckDelegateTest : public ::testing::Test {
         SyncServiceFactory::GetForProfile(profile_.get()));
   }
   SavedPasswordsPresenter& presenter() { return presenter_; }
-  PasswordCheckDelegate& delegate() { return delegate_; }
+  PasswordCheckDelegate& delegate() { return *delegate_; }
 
   PasswordCheckDelegate CreateDelegate(SavedPasswordsPresenter* presenter) {
     return PasswordCheckDelegate(profile_.get(), presenter,
                                  &credential_id_generator_);
+  }
+
+  void ResetWithoutEventRouter() {
+    delegate_ = std::make_unique<PasswordCheckDelegate>(
+        profile_.get(), &presenter_, &credential_id_generator_, nullptr);
   }
 
  private:
@@ -336,8 +344,7 @@ class PasswordCheckDelegateTest : public ::testing::Test {
                                      AccountPasswordStoreFactory::GetForProfile(
                                          profile_.get(),
                                          ServiceAccessType::EXPLICIT_ACCESS)};
-  PasswordCheckDelegate delegate_{profile_.get(), &presenter_,
-                                  &credential_id_generator_};
+  std::unique_ptr<PasswordCheckDelegate> delegate_;
 };
 
 }  // namespace
@@ -664,7 +671,8 @@ TEST_F(PasswordCheckDelegateTest, UnmuteInsecureCredentialIdMismatch) {
 // Tests that we don't create an entry in the database if there is no matching
 // saved password.
 TEST_F(PasswordCheckDelegateTest, OnLeakFoundDoesNotCreateCredential) {
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   PasswordForm form = MakeSavedPassword(kExampleCom, kUsername1, kPassword1);
   store().AddLogin(form);
   RunUntilIdle();
@@ -682,7 +690,8 @@ TEST_F(PasswordCheckDelegateTest, OnLeakFoundDoesNotCreateCredential) {
 // Test that we don't create an entry in the password store if IsLeaked is
 // false.
 TEST_F(PasswordCheckDelegateTest, NoLeakedFound) {
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   PasswordForm form = MakeSavedPassword(kExampleCom, kUsername1, kPassword1);
   store().AddLogin(form);
   RunUntilIdle();
@@ -700,7 +709,8 @@ TEST_F(PasswordCheckDelegateTest, NoLeakedFound) {
 // Test that a found leak creates a compromised credential in the password
 // store.
 TEST_F(PasswordCheckDelegateTest, OnLeakFoundCreatesCredential) {
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   PasswordForm form = MakeSavedPassword(kExampleCom, kUsername1, kPassword1);
   store().AddLogin(form);
   RunUntilIdle();
@@ -743,7 +753,8 @@ TEST_F(PasswordCheckDelegateTest, OnLeakFoundCreatesMultipleCredential) {
 
   RunUntilIdle();
 
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   delegate().StartPasswordCheck(
       password_manager::LeakDetectionInitiator::kBulkSyncedPasswordsCheck);
   static_cast<BulkLeakCheckDelegateInterface*>(service())->OnFinishedCredential(
@@ -806,7 +817,8 @@ TEST_F(PasswordCheckDelegateTest, GetPasswordCheckStatusSignedOut) {
 // Verifies that the case where the check is running is reported correctly and
 // the progress indicator matches expectations.
 TEST_F(PasswordCheckDelegateTest, GetPasswordCheckStatusRunning) {
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   store().AddLogin(MakeSavedPassword(kExampleCom, kUsername1));
   RunUntilIdle();
 
@@ -831,7 +843,8 @@ TEST_F(PasswordCheckDelegateTest, GetPasswordCheckStatusRunning) {
 // Verifies that the total password count is reported accurately.
 // Regression test for crbug.com/1432734.
 TEST_F(PasswordCheckDelegateTest, GetPasswordCheckStatusCount) {
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   store().AddLogin(MakeSavedPassword(kExampleCom, kUsername1, kPassword1));
   store().AddLogin(MakeSavedPassword(kExampleCom, kUsername2, kPassword2));
   store().AddLogin(MakeSavedFederatedCredential(kExampleCom, kUsername3));
@@ -845,7 +858,8 @@ TEST_F(PasswordCheckDelegateTest, GetPasswordCheckStatusCount) {
 
 // Verifies that the case where the user is offline is reported correctly.
 TEST_F(PasswordCheckDelegateTest, GetPasswordCheckStatusOffline) {
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   store().AddLogin(MakeSavedPassword(kExampleCom, kUsername1));
   RunUntilIdle();
 
@@ -861,7 +875,8 @@ TEST_F(PasswordCheckDelegateTest, GetPasswordCheckStatusOffline) {
 // Verifies that the case where the user hits another error (e.g. invalid
 // credentials) is reported correctly.
 TEST_F(PasswordCheckDelegateTest, GetPasswordCheckStatusOther) {
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   store().AddLogin(MakeSavedPassword(kExampleCom, kUsername1));
   RunUntilIdle();
 
@@ -962,7 +977,8 @@ TEST_F(PasswordCheckDelegateTest, OnCredentialDoneUpdatesProgress) {
   const char* const kEventName =
       api::passwords_private::OnPasswordCheckStatusChanged::kEventName;
 
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   store().AddLogin(MakeSavedPassword(kExampleCom, kUsername1, kPassword1));
   store().AddLogin(MakeSavedPassword(kExampleCom, kUsername2, kPassword2));
   store().AddLogin(MakeSavedPassword(kExampleOrg, kUsername1, kPassword1));
@@ -1005,7 +1021,8 @@ TEST_F(PasswordCheckDelegateTest, OnCredentialDoneUpdatesProgress) {
 // Tests that pending callbacks get invoked once initialization finishes.
 TEST_F(PasswordCheckDelegateTest,
        StartPasswordCheckRunsCallbacksAfterInitialization) {
-  identity_test_env().MakeAccountAvailable(kTestEmail);
+  identity_test_env().MakePrimaryAccountAvailable(
+      kTestEmail, signin::ConsentLevel::kSignin);
   store().AddLogin(MakeSavedPassword(kExampleCom, kUsername1));
   RunUntilIdle();
 
@@ -1117,6 +1134,22 @@ TEST_F(PasswordCheckDelegateTest,
   RunUntilIdle();
 
   EXPECT_THAT(delegate().GetCredentialsWithReusedPassword(), IsEmpty());
+}
+
+// Verify that computation of weak credentials notifies observers.
+TEST_F(PasswordCheckDelegateTest, NoNotificationsWithoutRouter) {
+  ResetWithoutEventRouter();
+  const char* const kEventName =
+      api::passwords_private::OnInsecureCredentialsChanged::kEventName;
+
+  // Verify that the event was not fired during construction.
+  EXPECT_FALSE(base::Contains(event_router_observer().events(), kEventName));
+
+  // Verify that the event gets fired after weak check is complete.
+  delegate().StartPasswordCheck(
+      password_manager::LeakDetectionInitiator::kBulkSyncedPasswordsCheck);
+  RunUntilIdle();
+  EXPECT_FALSE(base::Contains(event_router_observer().events(), kEventName));
 }
 
 }  // namespace extensions

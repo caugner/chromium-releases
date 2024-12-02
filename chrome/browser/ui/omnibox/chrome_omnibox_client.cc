@@ -156,9 +156,7 @@ bool ChromeOmniboxClient::IsDefaultSearchProviderEnabled() const {
 }
 
 SessionID ChromeOmniboxClient::GetSessionID() const {
-  return sessions::SessionTabHelper::FromWebContents(
-             location_bar_->GetWebContents())
-      ->session_id();
+  return sessions::SessionTabHelper::IdForTab(location_bar_->GetWebContents());
 }
 
 PrefService* ChromeOmniboxClient::GetPrefs() {
@@ -576,7 +574,8 @@ void ChromeOmniboxClient::DoPreconnect(const AutocompleteMatch& match) {
       predictors::LoadingPredictorFactory::GetForProfile(profile_);
   if (loading_predictor) {
     loading_predictor->PrepareForPageLoad(
-        match.destination_url, predictors::HintOrigin::OMNIBOX,
+        /*initiator_origin=*/std::nullopt, match.destination_url,
+        predictors::HintOrigin::OMNIBOX,
         predictors::AutocompleteActionPredictor::IsPreconnectable(match));
   }
   // We could prefetch the alternate nav URL, if any, but because there

@@ -77,6 +77,10 @@ inline constexpr char kKeywordSpaceTriggeringEnabled[] =
 inline constexpr char kSuggestionGroupVisibility[] =
     "omnibox.suggestionGroupVisibility";
 
+// Boolean that specifies whether to show the LensOverlay entry point.
+inline constexpr char kShowGoogleLensShortcut[] =
+    "omnibox.show_google_lens_shortcut";
+
 // Boolean that specifies whether to always show full URLs in the omnibox.
 inline constexpr char kPreventUrlElisionsInOmnibox[] =
     "omnibox.prevent_url_elisions";
@@ -89,6 +93,17 @@ inline constexpr char kZeroSuggestCachedResults[] = "zerosuggest.cachedresults";
 // into a string keyed off the page URL.
 inline constexpr char kZeroSuggestCachedResultsWithURL[] =
     "zerosuggest.cachedresults_with_url";
+
+// Boolean that specifies whether to show the "Type @gemini to Chat with Gemini"
+// IPH suggestion at the bottom of the Omnibox in ZPS. This is true until a
+// user deletes (presses the X button on) the suggestion.
+inline constexpr char kShowGeminiIPH[] = "omnibox.show_gemini_iph";
+
+// Boolean that specifies whether to show the featured Enterprise search IPH
+// suggestion at the bottom of the Omnibox in ZPS. This is true until a user
+// deletes (presses the X button on) the suggestion.
+inline constexpr char kShowFeaturedEnterpriseSiteSearchIPHPrefName[] =
+    "omnibox.show_featured_enterprise_search_iph";
 
 void RegisterProfilePrefs(PrefRegistrySimple* registry);
 

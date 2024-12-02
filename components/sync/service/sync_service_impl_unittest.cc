@@ -136,6 +136,14 @@ class SyncServiceImplTest : public ::testing::Test {
     ShutdownAndReleaseService();
   }
 
+  signin::GaiaIdHash gaia_id_hash() {
+    return signin::GaiaIdHash::FromGaiaId(
+        identity_test_env()
+            ->identity_manager()
+            ->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin)
+            .gaia);
+  }
+
   void SignInWithoutSyncConsent() {
     identity_test_env()->MakePrimaryAccountAvailable(
         kTestUser, signin::ConsentLevel::kSignin);
@@ -578,7 +586,8 @@ TEST_F(SyncServiceImplTest,
   ASSERT_TRUE(
       service()->GetUserSettings()->IsInitialSyncFeatureSetupComplete());
   ASSERT_EQ(SyncService::DisableReasonSet(), service()->GetDisableReasons());
-  ASSERT_TRUE(component_factory()->HasTransportDataIncludingFirstSync());
+  ASSERT_TRUE(
+      component_factory()->HasTransportDataIncludingFirstSync(gaia_id_hash()));
 
   // Sign-out.
   signin::PrimaryAccountMutator* account_mutator =
@@ -593,7 +602,8 @@ TEST_F(SyncServiceImplTest,
   EXPECT_EQ(SyncService::DisableReasonSet(
                 {SyncService::DISABLE_REASON_NOT_SIGNED_IN}),
             service()->GetDisableReasons());
-  EXPECT_FALSE(component_factory()->HasTransportDataIncludingFirstSync());
+  EXPECT_FALSE(
+      component_factory()->HasTransportDataIncludingFirstSync(gaia_id_hash()));
 }
 
 TEST_F(SyncServiceImplTest,
@@ -619,7 +629,8 @@ TEST_F(SyncServiceImplTest,
   // Wait for SyncServiceImpl to be notified.
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_FALSE(component_factory()->HasTransportDataIncludingFirstSync());
+  EXPECT_FALSE(
+      component_factory()->HasTransportDataIncludingFirstSync(gaia_id_hash()));
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
@@ -924,11 +935,13 @@ TEST_F(SyncServiceImplTest, StopAndClearWillClearDataAndSwitchToTransportMode) {
 
   ASSERT_EQ(SyncService::TransportState::ACTIVE,
             service()->GetTransportState());
-  ASSERT_TRUE(component_factory()->HasTransportDataIncludingFirstSync());
+  ASSERT_TRUE(
+      component_factory()->HasTransportDataIncludingFirstSync(gaia_id_hash()));
 
   service()->StopAndClear();
 
-  EXPECT_FALSE(component_factory()->HasTransportDataIncludingFirstSync());
+  EXPECT_FALSE(
+      component_factory()->HasTransportDataIncludingFirstSync(gaia_id_hash()));
 
   // Even though Sync-the-feature is disabled, there's still an (unconsented)
   // signed-in account, so Sync-the-transport should still be running.
@@ -964,12 +977,14 @@ TEST_F(SyncServiceImplTest, ClearTransportDataOnInitializeWhenSignedOut) {
   // loading the list of accounts, so wait for it to complete.
   identity_test_env()->WaitForRefreshTokensLoaded();
 
-  ASSERT_TRUE(component_factory()->HasTransportDataIncludingFirstSync());
+  ASSERT_TRUE(
+      component_factory()->HasTransportDataIncludingFirstSync(gaia_id_hash()));
 
   // Don't sign-in before creating the service.
   InitializeService();
 
-  EXPECT_FALSE(component_factory()->HasTransportDataIncludingFirstSync());
+  EXPECT_FALSE(
+      component_factory()->HasTransportDataIncludingFirstSync(gaia_id_hash()));
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
@@ -1332,7 +1347,7 @@ TEST_F(SyncServiceImplTest, DisableSyncOnClientClearsPassphrasePrefForAccount) {
   const PassphraseType kPassphraseType = PassphraseType::kCustomPassphrase;
 
   SignInWithoutSyncConsent();
-  InitializeService({{AUTOFILL, false}, {AUTOFILL_WALLET_DATA, false}});
+  InitializeService({{AUTOFILL, false}, {AUTOFILL_WALLET_DATA, true}});
   base::RunLoop().RunUntilIdle();
 
   // This call represents the initial passphrase type coming in from the server.
@@ -1367,7 +1382,7 @@ TEST_F(SyncServiceImplTest,
 
   PopulatePrefsForInitialSyncFeatureSetupComplete();
   SignInWithSyncConsent();
-  InitializeService({{AUTOFILL, false}, {AUTOFILL_WALLET_DATA, false}});
+  InitializeService({{AUTOFILL, false}, {AUTOFILL_WALLET_DATA, true}});
   base::RunLoop().RunUntilIdle();
 
   // This call represents the initial passphrase type coming in from the server.
@@ -1400,7 +1415,7 @@ TEST_F(SyncServiceImplTest, EncryptionObsoleteClearsPassphrasePrefForAccount) {
   const PassphraseType kPassphraseType = PassphraseType::kCustomPassphrase;
 
   SignInWithoutSyncConsent();
-  InitializeService({{AUTOFILL, false}, {AUTOFILL_WALLET_DATA, false}});
+  InitializeService({{AUTOFILL, false}, {AUTOFILL_WALLET_DATA, true}});
   base::RunLoop().RunUntilIdle();
 
   // This call represents the initial passphrase type coming in from the server.
@@ -2101,14 +2116,14 @@ TEST_F(SyncServiceImplTest,
   // Only DEVICE_INFO datatype is enabled for transport mode.
   InitializeService(
       /*registered_types_and_transport_mode_support=*/
-      {{DEVICE_INFO, true}, {AUTOFILL_WALLET_DATA, false}});
+      {{DEVICE_INFO, true}, {AUTOFILL, false}});
   base::RunLoop().RunUntilIdle();
 
   ASSERT_EQ(service()->GetActiveDataTypes(),
             ModelTypeSet({NIGORI, DEVICE_INFO}));
 
-  // DEVICE_INFO and AUTOFILL_WALLET_DATA are queried from the sync service.
-  ModelTypeSet requested_types{DEVICE_INFO, AUTOFILL_WALLET_DATA};
+  // DEVICE_INFO and AUTOFILL are queried from the sync service.
+  ModelTypeSet requested_types{DEVICE_INFO, AUTOFILL};
   // Only DEVICE_INFO is queried from the sync client.
   EXPECT_CALL(*sync_client(), GetLocalDataDescriptions(
                                   ModelTypeSet{DEVICE_INFO}, ::testing::_));
@@ -2208,16 +2223,16 @@ TEST_F(SyncServiceImplTest,
   SignInWithoutSyncConsent();
   InitializeService(
       /*registered_types_and_transport_mode_support=*/
-      {{DEVICE_INFO, true}, {AUTOFILL_WALLET_DATA, false}});
+      {{DEVICE_INFO, true}, {AUTOFILL, false}});
   base::RunLoop().RunUntilIdle();
 
-  // Only DEVICE_INFO is enabled since AUTOFILL_WALLET_DATA is not supported in
+  // Only DEVICE_INFO is enabled since AUTOFILL is not supported in
   // transport-only mode.
   ASSERT_EQ(service()->GetActiveDataTypes(),
             ModelTypeSet({NIGORI, DEVICE_INFO}));
 
-  // DEVICE_INFO and AUTOFILL_WALLET_DATA is queried from the sync service.
-  ModelTypeSet requested_types{DEVICE_INFO, AUTOFILL_WALLET_DATA};
+  // DEVICE_INFO and AUTOFILL are queried from the sync service.
+  ModelTypeSet requested_types{DEVICE_INFO, AUTOFILL};
   // Only DEVICE_INFO is queried from the sync client.
   EXPECT_CALL(*sync_client(),
               TriggerLocalDataMigration(ModelTypeSet{DEVICE_INFO}));
@@ -2325,8 +2340,8 @@ TEST_F(SyncServiceImplTest, ShouldNotifyOnManagedPrefDisabled) {
 }
 
 TEST_F(SyncServiceImplTest, ShouldCacheTrustedVaultAutoUpgradeDebugInfo) {
-  const int kTestCohortId1 = 11;
-  const int kTestCohortId2 = 22;
+  const int kTestCohort1 = 11;
+  const int kTestCohort2 = 22;
 
   component_factory()->AllowFakeEngineInitCompletion(false);
   InitializeService();
@@ -2349,11 +2364,12 @@ TEST_F(SyncServiceImplTest, ShouldCacheTrustedVaultAutoUpgradeDebugInfo) {
 
   {
     SyncStatus sync_status;
-    sync_status.trusted_vault_debug_info.mutable_auto_upgrade_debug_info()
-        ->set_auto_upgrade_cohort_id(kTestCohortId1);
-    sync_status.trusted_vault_debug_info.mutable_auto_upgrade_debug_info()
-        ->set_auto_upgrade_experiment_group(
-            sync_pb::NigoriSpecifics::AutoUpgradeDebugInfo::CONTROL);
+    sync_status.trusted_vault_debug_info
+        .mutable_auto_upgrade_experiment_group()
+        ->set_cohort(kTestCohort1);
+    sync_status.trusted_vault_debug_info
+        .mutable_auto_upgrade_experiment_group()
+        ->set_type(sync_pb::TrustedVaultAutoUpgradeExperimentGroup::CONTROL);
     engine()->SetDetailedStatus(sync_status);
   }
 
@@ -2361,7 +2377,7 @@ TEST_F(SyncServiceImplTest, ShouldCacheTrustedVaultAutoUpgradeDebugInfo) {
   // registration.
   EXPECT_CALL(*sync_client(),
               RegisterTrustedVaultAutoUpgradeSyntheticFieldTrial(
-                  IsValidFieldTrialGroupWithName("Control_11")));
+                  IsValidFieldTrialGroupWithName("Cohort11_Control")));
 
   base::RunLoop().RunUntilIdle();
   engine()->TriggerInitializationCompletion(/*success=*/true);
@@ -2374,37 +2390,41 @@ TEST_F(SyncServiceImplTest, ShouldCacheTrustedVaultAutoUpgradeDebugInfo) {
   // Verify that the debug info has been cached in prefs.
   SyncPrefs sync_prefs(prefs());
   EXPECT_TRUE(
-      sync_prefs.GetCachedTrustedVaultAutoUpgradeDebugInfo().has_value());
-  EXPECT_EQ(sync_pb::NigoriSpecifics::AutoUpgradeDebugInfo::CONTROL,
-            sync_prefs.GetCachedTrustedVaultAutoUpgradeDebugInfo()
-                .value_or(sync_pb::NigoriSpecifics::AutoUpgradeDebugInfo())
-                .auto_upgrade_experiment_group());
-  EXPECT_EQ(kTestCohortId1,
-            sync_prefs.GetCachedTrustedVaultAutoUpgradeDebugInfo()
-                .value_or(sync_pb::NigoriSpecifics::AutoUpgradeDebugInfo())
-                .auto_upgrade_cohort_id());
+      sync_prefs.GetCachedTrustedVaultAutoUpgradeExperimentGroup().has_value());
+  EXPECT_EQ(kTestCohort1,
+            sync_prefs.GetCachedTrustedVaultAutoUpgradeExperimentGroup()
+                .value_or(sync_pb::TrustedVaultAutoUpgradeExperimentGroup())
+                .cohort());
+  EXPECT_EQ(sync_pb::TrustedVaultAutoUpgradeExperimentGroup::CONTROL,
+            sync_prefs.GetCachedTrustedVaultAutoUpgradeExperimentGroup()
+                .value_or(sync_pb::TrustedVaultAutoUpgradeExperimentGroup())
+                .type());
+  EXPECT_EQ(0, sync_prefs.GetCachedTrustedVaultAutoUpgradeExperimentGroup()
+                   .value_or(sync_pb::TrustedVaultAutoUpgradeExperimentGroup())
+                   .type_index());
 
   // The SyncClient API should not be invoked for the second time.
   EXPECT_CALL(*sync_client(),
               RegisterTrustedVaultAutoUpgradeSyntheticFieldTrial)
       .Times(0);
 
-  // Mimic another sync cycle that mutates the debug info.
+  // Mimic another sync cycle that mutates the experiment group.
   {
     SyncStatus sync_status;
-    sync_status.trusted_vault_debug_info.mutable_auto_upgrade_debug_info()
-        ->set_auto_upgrade_cohort_id(kTestCohortId2);
-    sync_status.trusted_vault_debug_info.mutable_auto_upgrade_debug_info()
-        ->set_auto_upgrade_experiment_group(
-            sync_pb::NigoriSpecifics::AutoUpgradeDebugInfo::CONTROL);
+    sync_status.trusted_vault_debug_info
+        .mutable_auto_upgrade_experiment_group()
+        ->set_cohort(kTestCohort2);
+    sync_status.trusted_vault_debug_info
+        .mutable_auto_upgrade_experiment_group()
+        ->set_type(sync_pb::TrustedVaultAutoUpgradeExperimentGroup::CONTROL);
     engine()->SetDetailedStatus(sync_status);
     service()->OnSyncCycleCompleted(MakeDefaultSyncCycleSnapshot());
   }
 
-  EXPECT_EQ(kTestCohortId2,
-            sync_prefs.GetCachedTrustedVaultAutoUpgradeDebugInfo()
-                .value_or(sync_pb::NigoriSpecifics::AutoUpgradeDebugInfo())
-                .auto_upgrade_cohort_id());
+  EXPECT_EQ(kTestCohort2,
+            sync_prefs.GetCachedTrustedVaultAutoUpgradeExperimentGroup()
+                .value_or(sync_pb::TrustedVaultAutoUpgradeExperimentGroup())
+                .cohort());
 }
 
 }  // namespace

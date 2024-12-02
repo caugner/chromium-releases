@@ -104,7 +104,7 @@ PrefetchStatus PrefetchStatusFromIneligibleReason(
     case PreloadingEligibility::kEligible:
     default:
       // Other ineligible cases are not used in `PrefetchService`.
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return PrefetchStatus::kPrefetchIneligiblePreloadingDisabled;
   }
 }
@@ -530,6 +530,18 @@ PrefetchContainer::~PrefetchContainer() {
   if (prefetch_document_manager_) {
     prefetch_document_manager_->PrefetchWillBeDestroyed(this);
   }
+
+  if (base::FeatureList::IsEnabled(features::kPrefetchUnblockOnCancel)) {
+    // Make this object appear to be dead from the perspective of other code.
+    // In particular, the on_received_head_callback_ checks a WeakPtr to this
+    // object.
+    weak_method_factory_.InvalidateWeakPtrs();
+
+    // If anything was blocked on head, it no longer is.
+    if (on_received_head_callback_) {
+      std::move(on_received_head_callback_).Run();
+    }
+  }
 }
 
 PrefetchContainer::Key::Key(
@@ -670,7 +682,7 @@ PrefetchDocumentManager* PrefetchContainer::GetPrefetchDocumentManager() const {
 void PrefetchContainer::SetLoadState(LoadState new_load_state) {
   switch (new_load_state) {
     case LoadState::kNotStarted:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       break;
 
     case LoadState::kEligible:
@@ -953,6 +965,17 @@ PrefetchRequestHandler PrefetchContainer::Reader::CreateRequestHandler() {
   AdvanceCurrentURLToServe();
 
   return handler;
+}
+
+bool PrefetchContainer::Reader::VariesOnCookieIndices() const {
+  return GetCurrentSinglePrefetchToServe()
+      .response_reader_->VariesOnCookieIndices();
+}
+
+bool PrefetchContainer::Reader::MatchesCookieIndices(
+    base::span<const std::pair<std::string, std::string>> cookies) const {
+  return GetCurrentSinglePrefetchToServe()
+      .response_reader_->MatchesCookieIndices(cookies);
 }
 
 void PrefetchContainer::CancelStreamingURLLoaderIfNotServing() {
@@ -1390,6 +1413,8 @@ void PrefetchContainer::MakeResourceRequest(
   request->credentials_mode = network::mojom::CredentialsMode::kInclude;
   request->headers.MergeFrom(additional_headers);
   request->headers.SetHeader(kCorsExemptPurposeHeaderName, "prefetch");
+  // TODO(https://crbug.com/342089492): Use `Sec-Purpose: prefetch;prerender`
+  // for prefetch ahead of prerender.
   request->headers.SetHeader("Sec-Purpose", IsProxyRequiredForURL(url)
                                                 ? "prefetch;anonymous-client-ip"
                                                 : "prefetch");

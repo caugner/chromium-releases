@@ -35,7 +35,6 @@ extern const char kSearchEngineChoiceRepromptHistogram[];
 extern const char kSearchEngineChoiceRepromptWildcardHistogram[];
 extern const char kSearchEngineChoiceRepromptSpecificCountryHistogram[];
 extern const char kSearchEngineChoiceUnexpectedIdHistogram[];
-extern const char kSearchEngineChoiceIsDefaultProviderAddedToChoicesHistogram[];
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
@@ -80,6 +79,7 @@ enum class SearchEngineChoiceScreenConditions {
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
+// LINT.IfChange(SearchEngineChoiceScreenEvents)
 enum class SearchEngineChoiceScreenEvents {
   kUnknown = 0,
   // The non-FRE version of the choice screen was displayed.
@@ -102,8 +102,15 @@ enum class SearchEngineChoiceScreenEvents {
   // The "Learn more" screen was displayed on the profile creation specific
   // screen.
   kProfileCreationLearnMoreDisplayed = 9,
-  kMaxValue = kProfileCreationLearnMoreDisplayed,
+  // The "More" button was clicked on the modal dialog.
+  kMoreButtonClicked = 10,
+  // The "More" button was clicked on the FRE-specific screen.
+  kFreMoreButtonClicked = 11,
+  // The "More" button was clicked on the profile creation specific screen.
+  kProfileCreationMoreButtonClicked = 12,
+  kMaxValue = kProfileCreationMoreButtonClicked,
 };
+// LINT.ThenChange(/tools/metrics/histograms/enums.xml:SearchEngineChoiceScreenEvents)
 
 enum class ChoicePromo {
   // Any path of getting the choice screen.
@@ -148,8 +155,10 @@ enum class RepromptResult {
   kChromeTooOld = 4,
   // The choice was made recently enough.
   kRecentChoice = 5,
+  // Do not reprompt the users.
+  kNoReprompt = 6,
 
-  kMaxValue = kRecentChoice,
+  kMaxValue = kNoReprompt,
 };
 
 struct ChoiceScreenDisplayState {
@@ -157,7 +166,6 @@ struct ChoiceScreenDisplayState {
   ChoiceScreenDisplayState(
       std::vector<SearchEngineType> search_engines,
       int country_id,
-      bool list_is_modified_by_current_default,
       std::optional<int> selected_engine_index = std::nullopt);
   ChoiceScreenDisplayState(const ChoiceScreenDisplayState& other);
   ~ChoiceScreenDisplayState();
@@ -182,12 +190,6 @@ struct ChoiceScreenDisplayState {
   // used to determine the set of search engines to show for the current
   // profile.
   const int country_id;
-
-  // Whether the current default search engine was inserted in the list or
-  // affected it in another way. It indicates that we are in some sub-optimal
-  // and not fully supported state. Ideally the choice screen should not have
-  // been triggered at all.
-  const bool list_is_modified_by_current_default;
 };
 
 // Contains basic information about the search engine choice screen, notably
@@ -197,7 +199,6 @@ class ChoiceScreenData {
  public:
   ChoiceScreenData(TemplateURL::OwnedTemplateURLVector owned_template_urls,
                    int country_id,
-                   bool list_is_modified_by_current_default,
                    const SearchTermsData& search_terms_data);
 
   ChoiceScreenData(const ChoiceScreenData&) = delete;
@@ -282,10 +283,6 @@ void RecordChoiceScreenPositionsCountryMismatch(bool has_mismatch);
 // For debugging purposes, record the ID of the current default search engine
 // that does not exist in the prepopulated search providers data.
 void RecordUnexpectedSearchProvider(const TemplateURLData& data);
-
-// For debugging purposes, record whether the current default search engine
-// was inserted in the list of search engines to show in the choice screen.
-void RecordIsDefaultProviderAddedToChoices(bool inserted_default);
 
 // Clears the search engine choice prefs, such as the timestamp and the Chrome
 // version, to ensure the choice screen is shown again.

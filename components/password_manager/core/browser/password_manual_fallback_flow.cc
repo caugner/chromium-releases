@@ -5,6 +5,7 @@
 #include "components/password_manager/core/browser/password_manual_fallback_flow.h"
 
 #include "base/functional/bind.h"
+#include "components/autofill/core/browser/ui/popup_open_enums.h"
 #include "components/password_manager/core/browser/form_fetcher_impl.h"
 #include "components/password_manager/core/browser/form_parsing/form_data_parser.h"
 #include "components/password_manager/core/browser/manage_passwords_referrer.h"
@@ -141,7 +142,7 @@ void PasswordManualFallbackFlow::DidSelectSuggestion(
   switch (suggestion.type) {
     case autofill::SuggestionType::kPasswordEntry:
       password_manager_driver_->PreviewSuggestion(
-          GetUsernameFromLabel(suggestion.additional_label),
+          GetUsernameFromLabel(suggestion.labels[0][0].value),
           suggestion.GetPayload<Suggestion::PasswordSuggestionDetails>()
               .password);
       break;
@@ -172,7 +173,7 @@ void PasswordManualFallbackFlow::DidAcceptSuggestion(
       MaybeAuthenticateBeforeFilling(base::BindOnce(
           &PasswordManagerDriver::FillSuggestion,
           base::Unretained(password_manager_driver_),
-          GetUsernameFromLabel(suggestion.additional_label),
+          GetUsernameFromLabel(suggestion.labels[0][0].value),
           suggestion.GetPayload<Suggestion::PasswordSuggestionDetails>()
               .password));
       break;
@@ -263,7 +264,7 @@ void PasswordManualFallbackFlow::RunFlowImpl(
   autofill::AutofillClient::PopupOpenArgs open_args(
       bounds, text_direction, std::move(suggestions),
       autofill::AutofillSuggestionTriggerSource::kManualFallbackPasswords,
-      /*form_control_ax_id=*/0);
+      /*form_control_ax_id=*/0, autofill::PopupAnchorType::kField);
   autofill_client_->ShowAutofillSuggestions(open_args,
                                             weak_ptr_factory_.GetWeakPtr());
 }

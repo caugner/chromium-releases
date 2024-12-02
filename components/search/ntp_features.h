@@ -125,6 +125,8 @@ extern const char kNtpModuleIgnoredCriteriaThreshold[];
 extern const char kNtpModulesLoadTimeoutMillisecondsParam[];
 // Parameter determining the module order.
 extern const char kNtpModulesOrderParam[];
+// Parameter determining the type of calendar data used to render module.
+extern const char kNtpCalendarModuleDataParam[];
 // Parameter determining the type of cart data used to render module.
 extern const char kNtpChromeCartModuleDataParam[];
 // Parameter for enabling the abandoned cart discount.
@@ -218,6 +220,9 @@ extern const char kNtpRealboxWidthBehaviorParam[];
 extern const char kNtpTabResumptionModuleCategoriesBlocklistParam[];
 extern const char kNtpMostRelevantTabResumptionModuleDataParam[];
 extern const char kNtpTabResumptionModuleDataParam[];
+// Parameter determining what types result types to request when fetching URL
+// visit aggregate data.
+extern const char kNtpTabResumptionModuleResultTypesParam[];
 // Parameter determining the recency of tabs in the Tab Resumption module.
 extern const char kNtpTabResumptionModuleTimeLimitParam[];
 extern const char kNtpTabResumptionModuleVisibilityThresholdDataParam[];

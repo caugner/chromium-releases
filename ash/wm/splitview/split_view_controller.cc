@@ -180,13 +180,6 @@ WindowStateType GetStateTypeFromSnapPosition(SnapPosition snap_position) {
   }
 }
 
-// Returns true if |window| is currently snapped.
-bool IsSnapped(aura::Window* window) {
-  if (!window)
-    return false;
-  return WindowState::Get(window)->IsSnapped();
-}
-
 void RemoveSnappingWindowFromOverviewIfApplicable(
     OverviewSession* overview_session,
     aura::Window* window) {
@@ -965,12 +958,19 @@ void SplitViewController::EndSplitView(EndReason end_reason) {
   auto_snap_controller_.reset();
 
   if (end_reason != EndReason::kRootWindowDestroyed) {
+    // TODO(http://b/343542206): Break down the
+    // `SplitViewOverviewSessionExitPoint` enum in
+    // `SplitViewController::EndSplitView()`.
+    const SplitViewOverviewSessionExitPoint exit_point =
+        end_reason == EndReason::kSnapGroups
+            ? SplitViewOverviewSessionExitPoint::kCompleteByActivating
+            : SplitViewOverviewSessionExitPoint::kShutdown;
+
     // `EndSplitView()` is also called upon `~RootWindowController()` and
     // `~SplitViewController()`, during which `root_window_` would have been
     // destroyed.
     RootWindowController::ForWindow(root_window_)
-        ->EndSplitViewOverviewSession(
-            SplitViewOverviewSessionExitPoint::kShutdown);
+        ->EndSplitViewOverviewSession(exit_point);
   }
 
   StopObserving(SnapPosition::kPrimary);
@@ -1567,7 +1567,7 @@ void SplitViewController::OnWindowActivated(ActivationReason reason,
   }
 }
 
-aura::Window* SplitViewController::GetRootWindow() {
+aura::Window* SplitViewController::GetRootWindow() const {
   return root_window_;
 }
 
@@ -1581,51 +1581,10 @@ void SplitViewController::StartResizeWithDivider(
         kTabletSplitViewResizeMultiMaxLatencyHistogram);
     return;
   }
-  // TODO(b/337283677): Remove these crash logs when the crash is fixed.
-  SCOPED_CRASH_KEY_NUMBER("b337283677", "state", base::to_underlying(state_));
-  SCOPED_CRASH_KEY_BOOL("b337283677", "in_overview_session",
-                        IsInOverviewSession());
-  SCOPED_CRASH_KEY_BOOL(
-      "b337283677", "is_overview_shutting_down",
-      GetOverviewSession() && GetOverviewSession()->is_shutting_down());
-  SCOPED_CRASH_KEY_BOOL("b337283677", "is_divider_animating",
-                        IsDividerAnimating());
-
-  std::string primary_title =
-      primary_window_ ? base::UTF16ToUTF8(primary_window_->GetTitle())
-                      : std::string();
-  std::string secondary_title =
-      secondary_window_ ? base::UTF16ToUTF8(secondary_window_->GetTitle())
-                        : std::string();
-  SCOPED_CRASH_KEY_STRING256("b337283677", "primary_title", primary_title);
-  SCOPED_CRASH_KEY_STRING256("b337283677", "secondary_title", secondary_title);
-
-  auto primary_state_type =
-      primary_window_ ? base::to_underlying(
-                            WindowState::Get(primary_window_)->GetStateType())
-                      : -1;
-  auto secondary_state_type =
-      secondary_window_
-          ? base::to_underlying(
-                WindowState::Get(secondary_window_)->GetStateType())
-          : -1;
-  SCOPED_CRASH_KEY_NUMBER("b337283677", "primary_state_type",
-                          primary_state_type);
-  SCOPED_CRASH_KEY_NUMBER("b337283677", "secondary_state_type",
-                          secondary_state_type);
-
-  chromeos::AppType primary_window_type =
-      primary_window_ ? primary_window_->GetProperty(chromeos::kAppTypeKey)
-                      : chromeos::AppType::NON_APP;
-  chromeos::AppType secondary_window_type =
-      secondary_window_ ? secondary_window_->GetProperty(chromeos::kAppTypeKey)
-                        : chromeos::AppType::NON_APP;
-  SCOPED_CRASH_KEY_NUMBER("b337283677", "primary_window_type",
-                          static_cast<int>(primary_window_type));
-  SCOPED_CRASH_KEY_NUMBER("b337283677", "secondary_window_type",
-                          static_cast<int>(secondary_window_type));
-
-  CHECK(IsInOverviewSession());
+  // An ARC++ window may have snapped window state but not started overview yet.
+  if (!IsInOverviewSession()) {
+    return;
+  }
   if (GetOverviewSession()->GetGridWithRootWindow(root_window_)->empty()) {
     presentation_time_recorder_ = CreatePresentationTimeHistogramRecorder(
         split_view_divider_.divider_widget()->GetCompositor(),
@@ -1919,7 +1878,7 @@ bool SplitViewController::MaybeCreateSnapGroup() {
     // TODO(b/286963080): Move this to SnapGroupController.
     if (snap_group_controller->AddSnapGroup(
             primary_window_, secondary_window_, /*replace=*/false,
-            /*sticky_creation_time=*/std::nullopt)) {
+            /*carry_over_creation_time=*/std::nullopt)) {
       // Ending split view will call `UpdateStateAndNotifyObservers()` that
       // state is now `kNoSnap` and end overview in
       // `OverviewGrid::OnSplitViewStateChanged()`.
@@ -1939,8 +1898,7 @@ void SplitViewController::UpdateBlackScrim(
     black_scrim_layer_ = std::make_unique<ui::Layer>(ui::LAYER_SOLID_COLOR);
     black_scrim_layer_->SetColor(AshColorProvider::Get()->GetBackgroundColor());
     // Set the black scrim layer underneath split view divider.
-    auto* divider_layer =
-        split_view_divider_.divider_widget()->GetNativeWindow()->layer();
+    auto* divider_layer = split_view_divider_.GetDividerWindow()->layer();
     auto* divider_parent_layer = divider_layer->parent();
     divider_parent_layer->Add(black_scrim_layer_.get());
     divider_parent_layer->StackBelow(black_scrim_layer_.get(), divider_layer);
@@ -2021,8 +1979,7 @@ void SplitViewController::UpdateSnappedWindowBounds(aura::Window* window) {
   DCHECK(IsWindowInSplitView(window));
   WindowState* window_state = WindowState::Get(window);
   if (InTabletMode()) {
-    if (window->GetProperty(chromeos::kAppTypeKey) ==
-        chromeos::AppType::ARC_APP) {
+    if (window_state->is_client_controlled()) {
       // TODO(b/264962634): Remove this workaround. Probably, we can rewrite
       // `TabletModeWindowState::UpdateWindowPosition` to include this logic.
       const gfx::Rect requested_bounds =
@@ -2251,8 +2208,13 @@ void SplitViewController::OnWindowSnapped(
     }
   }
 
+  //  Early return if `snap_action_source` originates from
+  //  `kDragOrSelectOverviewWindowToSnap` to avoid snap-to-replace within
+  //  another snap group in Overview;
   if (auto* snap_group_controller = SnapGroupController::Get();
       snap_group_controller &&
+      snap_action_source !=
+          WindowSnapActionSource::kDragOrSelectOverviewWindowToSnap &&
       snap_group_controller->OnSnappingWindow(window, snap_action_source)) {
     // End split view is needed due to the inconsistent checks between
     // `ShouldConsiderWindowForFasterSplitView()` and
@@ -2290,7 +2252,7 @@ void SplitViewController::OnWindowSnapped(
       snap_action_source !=
           WindowSnapActionSource::kSnapByClamshellTabletTransition) {
     base::RecordAction(
-        base::UserMetricsAction("SnapGroups_SkipPartialOverviewAndSnapGroup"));
+        base::UserMetricsAction("SnapGroups_SkipFormSnapGroupAfterSnapping"));
     EndSplitView(EndReason::kNormal);
     return;
   }

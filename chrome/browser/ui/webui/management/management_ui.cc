@@ -57,6 +57,7 @@ content::WebUIDataSource* CreateAndAddManagementUIHtmlSource(Profile* profile) {
 #if BUILDFLAG(IS_CHROMEOS)
       {"learnMore", IDS_LEARN_MORE},
       {"localTrustRoots", IDS_MANAGEMENT_LOCAL_TRUST_ROOTS},
+      {"filesCloudUpload", IDS_MANAGEMENT_FILES_CLOUD_UPLOAD},
       {"managementTrustRootsConfigured", IDS_MANAGEMENT_TRUST_ROOTS_CONFIGURED},
       {"deviceConfiguration", IDS_MANAGEMENT_DEVICE_CONFIGURATION},
       {"deviceReporting", IDS_MANAGEMENT_DEVICE_REPORTING},
@@ -161,6 +162,14 @@ content::WebUIDataSource* CreateAndAddManagementUIHtmlSource(Profile* profile) {
       {kManagementOnPageVisitedVisibleData,
        IDS_MANAGEMENT_PAGE_VISITED_VISIBLE_DATA},
       {kManagementLegacyTechReport, IDS_MANAGEMENT_LEGACY_TECH_REPORT},
+      // Profile reporting messages
+      {kProfileReportingExplanation,
+       IDS_MANAGEMENT_PROFILE_REPORTING_EXPLANATION},
+      {kProfileReportingOverview, IDS_MANAGEMENT_PROFILE_REPORTING_OVERVIEW},
+      {kProfileReportingUsername, IDS_MANAGEMENT_PROFILE_REPORTING_USERNAME},
+      {kProfileReportingBrowser, IDS_MANAGEMENT_PROFILE_REPORTING_BROWSER},
+      {kProfileReportingExtension, IDS_MANAGEMENT_PROFILE_REPORTING_EXTENSION},
+      {kProfileReportingPolicy, IDS_MANAGEMENT_PROFILE_REPORTING_POLICY},
   };
 
   source->AddLocalizedStrings(kLocalizedStrings);

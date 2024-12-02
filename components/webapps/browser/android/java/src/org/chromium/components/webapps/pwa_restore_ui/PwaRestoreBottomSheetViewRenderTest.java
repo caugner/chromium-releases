@@ -7,6 +7,7 @@ package org.chromium.components.webapps.pwa_restore_ui;
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -83,6 +84,12 @@ public class PwaRestoreBottomSheetViewRenderTest {
         MockitoAnnotations.initMocks(this);
         mocker.mock(PwaRestoreBottomSheetMediatorJni.TEST_HOOKS, mNativeMock);
         Mockito.when(mNativeMock.initialize(Mockito.any())).thenReturn(0L);
+
+        // Avoid runtime error during test: 'Can't create handler inside thread that has not called
+        // Looper.prepare()'.
+        if (Looper.myLooper() == null) {
+            Looper.prepare();
+        }
     }
 
     public PwaRestoreBottomSheetViewRenderTest(boolean nightModeEnabled) {
@@ -126,7 +133,7 @@ public class PwaRestoreBottomSheetViewRenderTest {
                 () -> {
                     LinearLayout content = new LinearLayout(sActivity);
                     sActivity.setContentView(content);
-                    View view = mCoordinator.getBottomSheetToolbarViewForTesting();
+                    View view = mCoordinator.getBottomSheetViewForTesting();
                     View root = view.getRootView();
                     root.setBackgroundColor(mNightModeEnabled ? Color.BLACK : Color.WHITE);
 
@@ -143,7 +150,6 @@ public class PwaRestoreBottomSheetViewRenderTest {
     @Feature({"RenderTest"})
     public void testPeeking() throws Exception {
         initializeBottomSheet();
-        mRenderTestRule.render(
-                mCoordinator.getBottomSheetToolbarViewForTesting(), "pwa_restore_peeking");
+        mRenderTestRule.render(mCoordinator.getBottomSheetViewForTesting(), "pwa_restore_peeking");
     }
 }

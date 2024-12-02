@@ -132,6 +132,11 @@ class ContentAnalysisDelegate : public ContentAnalysisDelegateBase {
     // analysis.
     ContentAnalysisRequest::Reason reason = ContentAnalysisRequest::UNKNOWN;
 
+    // The clipboard source of data being pasted into the browser. Empty for
+    // non-clipboard pastes, and clipboard pastes in special cases (ex. OTR).
+    // TODO: Update description if special values are used
+    std::string clipboard_source;
+
     // The settings to use for the analysis of the data in this struct.
     AnalysisSettings settings;
   };
@@ -343,6 +348,9 @@ class ContentAnalysisDelegate : public ContentAnalysisDelegateBase {
   // LCAC cannot establish connection with local client.
   bool ShouldFailOpenWithoutLocalClient(bool should_allow_by_default);
 
+  // Helper function to decide if the page request should be terminated early.
+  bool ShouldNotUploadLargePage(size_t page_size);
+
   // Prepares an upload request for the text in `data_`. If `data_.text` is
   // empty, this method does nothing.
   // TODO(crbug.com/40839522): Move to TextRequestHandler.
@@ -405,6 +413,10 @@ class ContentAnalysisDelegate : public ContentAnalysisDelegateBase {
   // Send an acknowledgement to the service provider of the final result
   // for the requests of this ContentAnalysisDelegate instance.
   void AckAllRequests();
+
+  void FinishLargeDataRequestEarly(
+      std::unique_ptr<safe_browsing::BinaryUploadService::Request> request,
+      safe_browsing::BinaryUploadService::Result result);
 
   // Returns the BinaryUploadService used to upload content for deep scanning.
   // Virtual to override in tests.

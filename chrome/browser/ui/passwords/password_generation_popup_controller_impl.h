@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_PASSWORDS_PASSWORD_GENERATION_POPUP_CONTROLLER_IMPL_H_
 
 #include <stddef.h>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/autofill/popup_controller_common.h"
 #include "chrome/browser/ui/passwords/password_generation_popup_controller.h"
+#include "components/autofill/core/browser/ui/popup_open_enums.h"
 #include "components/autofill/core/common/signatures.h"
 #include "components/autofill/core/common/unique_ids.h"
 #include "components/password_manager/core/browser/password_form.h"
@@ -30,9 +32,12 @@
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 namespace content {
-struct NativeWebKeyboardEvent;
 class WebContents;
 }  // namespace content
+
+namespace input {
+struct NativeWebKeyboardEvent;
+}  // namespace input
 
 namespace password_manager {
 class PasswordManagerDriver;
@@ -41,6 +46,7 @@ class PasswordManagerDriver;
 namespace autofill {
 struct FormData;
 namespace password_generation {
+enum class PasswordGenerationType;
 struct PasswordGenerationUIData;
 }  // namespace password_generation
 }  // namespace autofill
@@ -88,6 +94,10 @@ class PasswordGenerationPopupControllerImpl
       const PasswordGenerationPopupControllerImpl&) = delete;
 
   ~PasswordGenerationPopupControllerImpl() override;
+
+  // Generate the password string and store it in `current_generated_password_`.
+  void GeneratePasswordValue(
+      autofill::password_generation::PasswordGenerationType generation_type);
 
   // Create a PasswordGenerationPopupView if one doesn't already exist.
   void Show(GenerationUIState state);
@@ -160,6 +170,7 @@ class PasswordGenerationPopupControllerImpl
   gfx::NativeView container_view() const override;
   content::WebContents* GetWebContents() const override;
   const gfx::RectF& element_bounds() const override;
+  autofill::PopupAnchorType anchor_type() const override;
   base::i18n::TextDirection GetElementTextDirection() const override;
 
   // PasswordGenerationPopupController implementation:
@@ -183,7 +194,7 @@ class PasswordGenerationPopupControllerImpl
 
   void HideImpl();
 
-  bool HandleKeyPressEvent(const content::NativeWebKeyboardEvent& event);
+  bool HandleKeyPressEvent(const input::NativeWebKeyboardEvent& event);
 
   // Whether the elements of popup are selectable (true in generation state).
   bool IsSelectable() const;

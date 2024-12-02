@@ -4,26 +4,31 @@
 
 #include "chrome/browser/ui/lens/lens_overlay_side_panel_coordinator.h"
 
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/lens/lens_overlay_controller.h"
+#include "chrome/browser/ui/lens/lens_overlay_dismissal_source.h"
+#include "chrome/browser/ui/lens/lens_overlay_invocation_source.h"
+#include "chrome/browser/ui/lens/lens_overlay_side_panel_web_view.h"
 #include "chrome/browser/ui/lens/lens_overlay_url_builder.h"
 #include "chrome/browser/ui/lens/lens_untrusted_ui.h"
-#include "chrome/browser/ui/side_panel/side_panel_ui.h"
+#include "chrome/browser/ui/tabs/public/tab_interface.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_content_proxy.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_registry.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_util.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_web_ui_view.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/google/core/common/google_util.h"
 #include "components/lens/lens_features.h"
 #include "components/vector_icons/vector_icons.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/common/referrer.h"
+#include "net/base/network_change_notifier.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/image_model.h"
@@ -31,15 +36,14 @@
 #include "ui/views/vector_icons.h"
 #include "ui/views/view_class_properties.h"
 
-using SidePanelWebUIViewT_LensUntrustedUI =
-    SidePanelWebUIViewT<lens::LensUntrustedUI>;
-BEGIN_TEMPLATE_METADATA(SidePanelWebUIViewT_LensUntrustedUI,
-                        SidePanelWebUIViewT)
-END_METADATA
-
 namespace lens {
 
 namespace {
+
+inline constexpr char kChromeSideSearchVersionHeaderName[] =
+    "X-Chrome-Side-Search-Version";
+inline constexpr char kChromeSideSearchVersionHeaderValue[] = "1";
+
 bool IsSiteTrusted(const GURL& url) {
   if (google_util::IsGoogleDomainUrl(
           url, google_util::ALLOW_SUBDOMAIN,
@@ -60,68 +64,82 @@ bool IsSiteTrusted(const GURL& url) {
   return false;
 }
 
+SidePanelUI* GetSidePanelUI(LensOverlayController* controller) {
+  return controller->GetTabInterface()
+      ->GetBrowserWindowInterface()
+      ->GetFeatures()
+      .side_panel_ui();
+}
+
 }  // namespace
 
 LensOverlaySidePanelCoordinator::LensOverlaySidePanelCoordinator(
-    Browser* browser,
-    LensOverlayController* lens_overlay_controller,
-    SidePanelUI* side_panel_ui,
-    content::WebContents* web_contents)
-    : tab_browser_(browser),
-      lens_overlay_controller_(lens_overlay_controller),
-      side_panel_ui_(side_panel_ui),
-      tab_web_contents_(web_contents->GetWeakPtr()) {}
+    LensOverlayController* lens_overlay_controller)
+    : lens_overlay_controller_(lens_overlay_controller) {}
 
 LensOverlaySidePanelCoordinator::~LensOverlaySidePanelCoordinator() {
-  DeregisterEntry();
-}
+  // If the coordinator is destroyed before the web view, clear the reference
+  // from the web view.
+  if (side_panel_web_view_) {
+    side_panel_web_view_->ClearCoordinator();
+    side_panel_web_view_ = nullptr;
+  }
 
-// static
-actions::ActionItem::InvokeActionCallback
-LensOverlaySidePanelCoordinator::CreateSidePanelActionCallback(
-    Browser* browser) {
-  return base::BindRepeating(
-      [](Browser* browser, actions::ActionItem* item,
-         actions::ActionInvocationContext context) {
-        LensOverlayController* controller =
-            LensOverlayController::GetController(
-                browser->tab_strip_model()->GetActiveWebContents());
-        DCHECK(controller);
+  auto* registry = SidePanelRegistry::Get(
+      lens_overlay_controller_->GetTabInterface()->GetContents());
+  CHECK(registry);
 
-        // Toggle the Lens overlay. There's no need to show or hide the side
-        // panel as the overlay controller will handle that.
-        if (controller->IsOverlayShowing()) {
-          controller->CloseUIAsync(
-              LensOverlayController::DismissalSource::kToolbar);
-        } else {
-          controller->ShowUI(LensOverlayController::InvocationSource::kToolbar);
-        }
-      },
-      browser);
+  // Remove the side panel entry observer if it is present.
+  auto* registered_entry = registry->GetEntryForKey(
+      SidePanelEntry::Key(SidePanelEntry::Id::kLensOverlayResults));
+  if (registered_entry) {
+    registered_entry->RemoveObserver(this);
+  }
+
+  // This is a no-op if the entry does not exist.
+  registry->Deregister(
+      SidePanelEntry::Key(SidePanelEntry::Id::kLensOverlayResults));
 }
 
 void LensOverlaySidePanelCoordinator::RegisterEntryAndShow() {
   RegisterEntry();
-  side_panel_ui_->Show(SidePanelEntry::Id::kLensOverlayResults);
+  GetSidePanelUI(lens_overlay_controller_)
+      ->Show(SidePanelEntry::Id::kLensOverlayResults);
   lens_overlay_controller_->NotifyResultsPanelOpened();
 }
 
 void LensOverlaySidePanelCoordinator::OnEntryHidden(SidePanelEntry* entry) {
-  // Only deregister the entry if the overlay is showing. This prevents the
-  // side panel entry closing while the overlay is open on a backgrounded tab.
-  if (lens_overlay_controller_->IsOverlayShowing()) {
-    DeregisterEntry();
+  // We cannot distinguish between:
+  //   (1) A teardown during the middle of the async close process from
+  //   LensOverlayController.
+  //   (2) The user clicked the 'x' button while the overlay is showing.
+  //   (3) The side panel naturally went away after a tab switch.
+  // Forward to LensOverlayController to have it disambiguate.
+  lens_overlay_controller_->OnSidePanelHidden();
+}
+
+void LensOverlaySidePanelCoordinator::WebViewClosing() {
+  // This is called from the destructor of the WebView. Synchronously clear all
+  // state associated with the WebView.
+  if (side_panel_web_view_) {
+    lens_overlay_controller_->ResetSearchboxHandler();
+    lens_overlay_controller_->RemoveGlueForWebView(side_panel_web_view_);
+    side_panel_web_view_ = nullptr;
   }
 }
 
 content::WebContents*
 LensOverlaySidePanelCoordinator::GetSidePanelWebContents() {
-  return side_panel_web_view_->GetWebContents();
+  if (side_panel_web_view_) {
+    return side_panel_web_view_->GetWebContents();
+  }
+  return nullptr;
 }
 
 bool LensOverlaySidePanelCoordinator::IsEntryShowing() {
-  return side_panel_ui_->IsSidePanelEntryShowing(
-      SidePanelEntry::Key(SidePanelEntry::Id::kLensOverlayResults));
+  return GetSidePanelUI(lens_overlay_controller_)
+      ->IsSidePanelEntryShowing(
+          SidePanelEntry::Key(SidePanelEntry::Id::kLensOverlayResults));
 }
 
 // This method is called when the WebContents wants to open a link in a new
@@ -161,15 +179,20 @@ void LensOverlaySidePanelCoordinator::DidOpenRequestedURL(
   // https://issuetracker.google.com/285038653
   content::OpenURLParams params(url, referrer, disposition, transition,
                                 /*is_renderer_initiated=*/false);
-  Browser* browser = chrome::FindBrowserWithTab(GetTabWebContents());
-  if (!browser) {
-    return;
-  }
-  browser->OpenURL(params, /*navigation_handle_callback=*/{});
+
+  // We can't open a new tab while the observer is running because it might
+  // destroy this WebContents. Post as task instead.
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&LensOverlaySidePanelCoordinator::OpenURLInBrowser,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(params)));
 }
 
 void LensOverlaySidePanelCoordinator::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
+  // Focus the web contents immediately, so that hotkey presses (i.e. escape)
+  // are handled.
+  GetSidePanelWebContents()->Focus();
   // We only care about the navigation if it is the results frame, is HTTPS,
   // renderer initiated and NOT a same document navigation.
   if (!navigation_handle->IsRendererInitiated() ||
@@ -186,21 +209,23 @@ void LensOverlaySidePanelCoordinator::DidStartNavigation(
   // certain navigations before they result in an error page, we should make
   // sure these error pages don't commit and instead open these URLs in a new
   // tab.
-  if (!lens::IsValidSearchResultsUrl(navigation_handle->GetURL())) {
-    auto params =
-        content::OpenURLParams::FromNavigationHandle(navigation_handle);
-    params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-    Browser* browser = chrome::FindBrowserWithTab(GetTabWebContents());
-    if (!browser) {
-      return;
-    }
+  if (!lens::IsValidSearchResultsUrl(navigation_handle->GetURL()) &&
+      lens::GetSearchResultsUrlFromRedirectUrl(navigation_handle->GetURL())
+          .is_empty()) {
     navigation_handle->SetSilentlyIgnoreErrors();
-    browser->OpenURL(params, /*navigation_handle_callback=*/{});
+    lens_overlay_controller_->GetTabInterface()
+        ->GetBrowserWindowInterface()
+        ->OpenURL(navigation_handle->GetURL(),
+                  WindowOpenDisposition::NEW_FOREGROUND_TAB);
     return;
   }
 
   // If we expect to load this URL in the side panel, show the loading
-  // page.
+  // page and any feature-specific request headers.
+  navigation_handle->SetRequestHeader(kChromeSideSearchVersionHeaderName,
+                                      kChromeSideSearchVersionHeaderValue);
+  lens_overlay_controller_->SetSidePanelShowErrorPage(
+      net::NetworkChangeNotifier::IsOffline());
   lens_overlay_controller_->SetSidePanelIsLoadingResults(true);
 }
 
@@ -216,8 +241,23 @@ void LensOverlaySidePanelCoordinator::DOMContentLoaded(
   lens_overlay_controller_->SetSidePanelIsLoadingResults(false);
 }
 
+web_modal::WebContentsModalDialogHost*
+LensOverlaySidePanelCoordinator::GetWebContentsModalDialogHost() {
+  return lens_overlay_controller_->GetTabInterface()
+      ->GetBrowserWindowInterface()
+      ->GetWebContentsModalDialogHostForWindow();
+}
+
+void LensOverlaySidePanelCoordinator::OpenURLInBrowser(
+    const content::OpenURLParams& params) {
+  lens_overlay_controller_->GetTabInterface()
+      ->GetBrowserWindowInterface()
+      ->OpenURL(params.url, params.disposition);
+}
+
 void LensOverlaySidePanelCoordinator::RegisterEntry() {
-  auto* registry = SidePanelRegistry::Get(GetTabWebContents());
+  auto* registry = SidePanelRegistry::Get(
+      lens_overlay_controller_->GetTabInterface()->GetContents());
   CHECK(registry);
 
   // If the entry is already registered, don't register it again.
@@ -226,16 +266,13 @@ void LensOverlaySidePanelCoordinator::RegisterEntry() {
     // TODO(b/328295358): Change title and icon when available.
     auto entry = std::make_unique<SidePanelEntry>(
         SidePanelEntry::Id::kLensOverlayResults,
-        l10n_util::GetStringUTF16(IDS_SIDE_PANEL_COMPANION_TITLE),
-        ui::ImageModel::FromVectorIcon(vector_icons::kSearchIcon,
-                                       ui::kColorIcon,
-                                       /*icon_size=*/16),
         base::BindRepeating(
             &LensOverlaySidePanelCoordinator::CreateLensOverlayResultsView,
             base::Unretained(this)),
         base::BindRepeating(
             &LensOverlaySidePanelCoordinator::GetOpenInNewTabUrl,
             base::Unretained(this)));
+    entry->SetProperty(kShouldShowTitleInSidePanelHeaderKey, false);
     registry->Register(std::move(entry));
 
     // Observe the side panel entry.
@@ -245,48 +282,28 @@ void LensOverlaySidePanelCoordinator::RegisterEntry() {
   }
 }
 
-void LensOverlaySidePanelCoordinator::DeregisterEntry() {
-  auto* registry = SidePanelRegistry::Get(GetTabWebContents());
-  CHECK(registry);
-  // If the side panel web view was created, then we need to release the
-  // associated searchbox handler and remove the glue to the overlay controller
-  // if it is present.
-  if (side_panel_web_view_) {
-    lens_overlay_controller_->ResetSearchboxHandler();
-    lens_overlay_controller_->RemoveGlueForWebView(side_panel_web_view_);
-    side_panel_web_view_ = nullptr;
-  }
-
-  // Remove the side panel entry observer if it is present.
-  auto* registered_entry = registry->GetEntryForKey(
-      SidePanelEntry::Key(SidePanelEntry::Id::kLensOverlayResults));
-  if (registered_entry) {
-    registered_entry->RemoveObserver(this);
-  }
-
-  // Notifies the Lens overlay to handle the entry deregistering.
-  lens_overlay_controller_->OnSidePanelEntryDeregistered();
-
-  // This is a no-op if the entry does not exist.
-  registry->Deregister(
-      SidePanelEntry::Key(SidePanelEntry::Id::kLensOverlayResults));
-}
-
 std::unique_ptr<views::View>
 LensOverlaySidePanelCoordinator::CreateLensOverlayResultsView() {
   // TODO(b/328295358): Change task manager string ID in view creation when
   // available.
-  auto view = std::make_unique<SidePanelWebUIViewT<lens::LensUntrustedUI>>(
-      base::RepeatingClosure(), base::RepeatingClosure(),
-      std::make_unique<WebUIContentsWrapperT<lens::LensUntrustedUI>>(
-          GURL(chrome::kChromeUILensUntrustedSidePanelURL),
-          tab_browser_->profile(), IDS_SIDE_PANEL_COMPANION_TITLE,
-          /*webui_resizes_host=*/false,
-          /*esc_closes_ui=*/false));
+  auto view = std::make_unique<LensOverlaySidePanelWebView>(
+      lens_overlay_controller_->GetTabInterface()
+          ->GetContents()
+          ->GetBrowserContext(),
+      this);
   view->SetProperty(views::kElementIdentifierKey,
                     LensOverlayController::kOverlaySidePanelWebViewId);
   side_panel_web_view_ = view.get();
   Observe(GetSidePanelWebContents());
+
+  // Register the modal dialog manager for this side panel web contents so
+  // browser dialogs can open when requested by the side panel WebUI.
+  web_modal::WebContentsModalDialogManager::CreateForWebContents(
+      GetSidePanelWebContents());
+  web_modal::WebContentsModalDialogManager::FromWebContents(
+      GetSidePanelWebContents())
+      ->SetDelegate(this);
+
   // Important safety note: creating the SidePanelWebUIViewT can result in
   // synchronous construction of the WebUIController. Until
   // "CreateGlueForWebView" is called below, the WebUIController will not be
@@ -299,12 +316,6 @@ LensOverlaySidePanelCoordinator::CreateLensOverlayResultsView() {
 
 GURL LensOverlaySidePanelCoordinator::GetOpenInNewTabUrl() {
   return GURL();
-}
-
-content::WebContents* LensOverlaySidePanelCoordinator::GetTabWebContents() {
-  content::WebContents* tab_contents = tab_web_contents_.get();
-  CHECK(tab_contents);
-  return tab_contents;
 }
 
 }  // namespace lens

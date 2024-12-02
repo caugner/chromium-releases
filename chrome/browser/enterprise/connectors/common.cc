@@ -191,18 +191,16 @@ std::vector<std::pair<gfx::Range, GURL>> GetCustomRuleStyles(
     size_t offset) {
   std::vector<std::pair<gfx::Range, GURL>> linked_ranges;
   for (const auto& custom_segment : custom_rule_message.message_segments()) {
+    std::u16string unescaped_segment =
+        base::UnescapeForHTML(base::UTF8ToUTF16(custom_segment.text()));
     if (custom_segment.has_link()) {
       GURL url(custom_segment.link());
       if (url.is_valid()) {
         linked_ranges.emplace_back(
-            gfx::Range(offset,
-                       offset + base::UnescapeForHTML(
-                                    base::UTF8ToUTF16(custom_segment.text()))
-                                    .length()),
-            url);
+            gfx::Range(offset, offset + unescaped_segment.length()), url);
       }
     }
-    offset += custom_segment.text().length();
+    offset += unescaped_segment.length();
   }
   return linked_ranges;
 }
@@ -262,7 +260,7 @@ const char* ConnectorPref(AnalysisConnector connector) {
       return kOnFileTransferPref;
 #endif
     case AnalysisConnector::ANALYSIS_CONNECTOR_UNSPECIFIED:
-      NOTREACHED() << "Using unspecified analysis connector";
+      NOTREACHED_IN_MIGRATION() << "Using unspecified analysis connector";
       return "";
   }
 }
@@ -289,7 +287,7 @@ const char* ConnectorScopePref(AnalysisConnector connector) {
       return kOnFileTransferScopePref;
 #endif
     case AnalysisConnector::ANALYSIS_CONNECTOR_UNSPECIFIED:
-      NOTREACHED() << "Using unspecified analysis connector";
+      NOTREACHED_IN_MIGRATION() << "Using unspecified analysis connector";
       return "";
   }
 }
@@ -345,7 +343,7 @@ TriggeredRule::Action GetHighestPrecedenceAction(
       action_2 == TriggeredRule::ACTION_UNSPECIFIED) {
     return TriggeredRule::ACTION_UNSPECIFIED;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return TriggeredRule::ACTION_UNSPECIFIED;
 }
 
@@ -376,7 +374,7 @@ ContentAnalysisAcknowledgement::FinalAction GetHighestPrecedenceAction(
       action_2 == ContentAnalysisAcknowledgement::ACTION_UNSPECIFIED) {
     return ContentAnalysisAcknowledgement::ACTION_UNSPECIFIED;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return ContentAnalysisAcknowledgement::ACTION_UNSPECIFIED;
 }
 

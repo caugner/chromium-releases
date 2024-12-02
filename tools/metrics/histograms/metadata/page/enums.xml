@@ -223,6 +223,7 @@ chromium-metrics-reviews@google.com.
   <int value="26" label="Price Insights"/>
   <int value="27" label="Read Anything"/>
   <int value="28" label="Product Specifications"/>
+  <int value="29" label="Lens Overlay"/>
 </enum>
 
 <enum name="PageActionPageEvent">
@@ -390,6 +391,10 @@ chromium-metrics-reviews@google.com.
       label="kAllowBy3PCDMetadataSourceGovEduTld: Allowed by government and
              education TLD entries within the 3PCD metadata grants content
              settings (Global Allowlist)."/>
+  <int value="19" label="kAllowByScheme: Allowed by the top-level scheme."/>
+  <int value="20"
+      label="kAllowByTrackingProtectionException: Allowed by explicit
+             tracking protection content setting."/>
 </enum>
 
 </enums>

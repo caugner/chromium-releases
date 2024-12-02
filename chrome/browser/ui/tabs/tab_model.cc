@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/tabs/tab_model.h"
 
-#include "chrome/browser/ui/tabs/tab_features.h"
+#include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -81,6 +81,11 @@ void TabModel::WillEnterBackground(base::PassKey<TabStripModel>) {
   will_enter_background_callback_list_.Notify(this);
 }
 
+void TabModel::WillDetach(base::PassKey<TabStripModel>,
+                          tabs::TabInterface::DetachReason reason) {
+  will_detach_callback_list_.Notify(this, reason);
+}
+
 content::WebContents* TabModel::GetContents() const {
   return contents();
 }
@@ -104,6 +109,11 @@ base::CallbackListSubscription TabModel::RegisterWillEnterBackground(
   return will_enter_background_callback_list_.Add(std::move(callback));
 }
 
+base::CallbackListSubscription TabModel::RegisterWillDetach(
+    TabInterface::WillDetach callback) {
+  return will_detach_callback_list_.Add(std::move(callback));
+}
+
 bool TabModel::CanShowModalUI() const {
   return !showing_modal_ui_;
 }
@@ -118,6 +128,10 @@ bool TabModel::IsInNormalWindow() const {
 
 BrowserWindowInterface* TabModel::GetBrowserWindowInterface() {
   return owning_model_->delegate()->GetBrowserWindowInterface();
+}
+
+tabs::TabFeatures* TabModel::GetTabFeatures() {
+  return tab_features_.get();
 }
 
 void TabModel::OnTabStripModelChanged(

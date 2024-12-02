@@ -31,10 +31,6 @@ namespace gpu {
 class CommandBufferStub;
 }  // namespace gpu
 
-namespace gfx {
-struct GpuFenceHandle;
-}  // namespace gfx
-
 namespace media {
 
 // This class is used for converting DMA buffer-backed FrameResources to
@@ -58,27 +54,16 @@ class MEDIA_GPU_EXPORT MailboxVideoFrameConverter {
 
     virtual bool Initialize() = 0;
     virtual std::optional<gpu::SharedImageCapabilities> GetCapabilities() = 0;
-    virtual gpu::SharedImageStub::SharedImageDestructionCallback
-    CreateSharedImage(const gpu::Mailbox& mailbox,
-                      gfx::GpuMemoryBufferHandle handle,
-                      gfx::BufferFormat format,
-                      gfx::BufferPlane plane,
-                      const gfx::Size& size,
-                      const gfx::ColorSpace& color_space,
-                      GrSurfaceOrigin surface_origin,
-                      SkAlphaType alpha_type,
-                      uint32_t usage) = 0;
-    virtual gpu::SharedImageStub::SharedImageDestructionCallback
-    CreateSharedImage(const gpu::Mailbox& mailbox,
-                      gfx::GpuMemoryBufferHandle handle,
-                      viz::SharedImageFormat format,
-                      const gfx::Size& size,
-                      const gfx::ColorSpace& color_space,
-                      GrSurfaceOrigin surface_origin,
-                      SkAlphaType alpha_type,
-                      uint32_t usage) = 0;
-    virtual bool UpdateSharedImage(const gpu::Mailbox& mailbox,
-                                   gfx::GpuFenceHandle in_fence_handle) = 0;
+    virtual scoped_refptr<gpu::ClientSharedImage> CreateSharedImage(
+        gfx::GpuMemoryBufferHandle handle,
+        viz::SharedImageFormat format,
+        const gfx::Size& size,
+        const gfx::ColorSpace& color_space,
+        GrSurfaceOrigin surface_origin,
+        SkAlphaType alpha_type,
+        uint32_t usage) = 0;
+    virtual std::optional<gpu::SyncToken> UpdateSharedImage(
+        const gpu::Mailbox& mailbox) = 0;
     virtual bool WaitOnSyncTokenAndReleaseFrame(
         scoped_refptr<FrameResource> frame,
         const gpu::SyncToken& sync_token) = 0;
@@ -147,11 +132,13 @@ class MEDIA_GPU_EXPORT MailboxVideoFrameConverter {
   // TODO(crbug.com/998279): replace s/OnGPUThread/OnGPUTaskRunner/.
   bool InitializeOnGPUThread();
 
-  // Wraps |mailbox| and |frame| into a new VideoFrameResource and sends it via
-  // |output_cb_|.
-  void WrapMailboxAndVideoFrameAndOutput(FrameResource* origin_frame,
-                                         scoped_refptr<FrameResource> frame,
-                                         const gpu::Mailbox& mailbox);
+  // Wraps |shared_image| and |frame| into a new VideoFrameResource and sends it
+  // via |output_cb_|.
+  void WrapSharedImageAndVideoFrameAndOutput(
+      FrameResource* origin_frame,
+      scoped_refptr<FrameResource> frame,
+      scoped_refptr<gpu::ClientSharedImage> shared_image,
+      const gpu::SyncToken& sync_token);
 
   // ConvertFrame() delegates to this method to GenerateSharedImageOnGPUThread()
   // or just UpdateSharedImageOnGPUThread(), then to jump back to
@@ -184,9 +171,10 @@ class MEDIA_GPU_EXPORT MailboxVideoFrameConverter {
       UniqueID origin_frame_id,
       std::unique_ptr<ScopedSharedImage> scoped_shared_image);
 
-  // Updates the SharedImage associated to |mailbox|. Returns true if the update
-  // could be carried out, false otherwise.
-  bool UpdateSharedImageOnGPUThread(const gpu::Mailbox& mailbox);
+  // Updates the SharedImage associated to |mailbox|. Returns a sync token if
+  // the update could be carried out, or nullopt otherwise.
+  std::optional<gpu::SyncToken> UpdateSharedImageOnGPUThread(
+      const gpu::Mailbox& mailbox);
 
   // Waits on |sync_token|, keeping |frame| alive until it is signalled. It
   // trampolines threads to |gpu_task_runner| if necessary.

@@ -54,7 +54,6 @@
 #include "third_party/blink/public/common/permissions/permission_utils.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/metadata/metadata_header_macros.h"
-#include "ui/base/models/simple_menu_model.h"
 #include "ui/base/pointer/touch_ui_controller.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/controls/button/button.h"
@@ -601,6 +600,7 @@ class BrowserView : public BrowserWindow,
   void SetDownloadShelfVisible(bool visible);
   bool IsDownloadShelfVisible() const override;
   DownloadShelf* GetDownloadShelf() override;
+  views::View* GetTopContainer() override;
   DownloadBubbleUIController* GetDownloadBubbleUIController() override;
   void ConfirmBrowserCloseWithPendingDownloads(
       int download_count,
@@ -609,9 +609,8 @@ class BrowserView : public BrowserWindow,
   void UserChangedTheme(BrowserThemeChangeType theme_change_type) override;
   void ShowAppMenu() override;
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event) override;
-  bool HandleKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event) override;
+      const input::NativeWebKeyboardEvent& event) override;
+  bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) override;
   void CutCopyPaste(int command_id) override;
   std::unique_ptr<FindBar> CreateFindBar() override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
@@ -655,7 +654,8 @@ class BrowserView : public BrowserWindow,
       const base::Feature& iph_feature) override;
   void NotifyFeatureEngagementEvent(const char* event_name) override;
   void NotifyPromoFeatureUsed(const base::Feature& feature) override;
-  bool MaybeShowNewBadgeFor(const base::Feature& feature) override;
+  user_education::DisplayNewBadge MaybeShowNewBadgeFor(
+      const base::Feature& feature) override;
 
   void ShowIncognitoClearBrowsingDataDialog() override;
 
@@ -724,10 +724,9 @@ class BrowserView : public BrowserWindow,
 
   // content::WebContentsObserver:
   void DidFirstVisuallyNonEmptyPaint() override;
-#if BUILDFLAG(ENTERPRISE_WATERMARK)
-  void DidStartNavigation(
-      content::NavigationHandle* navigation_handle) override;
 
+#if BUILDFLAG(ENTERPRISE_WATERMARK) || \
+    BUILDFLAG(ENTERPRISE_SCREENSHOT_PROTECTION)
   // TODO: b/330960313 - DocumentOnLoad is not the best signal to use for
   // determining when a data protections should be enabled, FCP is a better
   // signal.
@@ -850,6 +849,20 @@ class BrowserView : public BrowserWindow,
   // TopContainerBackground::PaintThemeCustomImage for details.
   gfx::Point GetThemeOffsetFromBrowserView() const;
 
+  // Applies data protection settings if there are any to apply, otherwise
+  // delay clearing the data protection settings until the page loads.
+  //
+  // This is called from a finish navigation event to handle the case where the
+  // browser view is switching from a tab with data protections enabled to one
+  // without.  At the end of the navigation, the existing page is still visible
+  // to the user since the UI has not yet refreshed.  In this case the
+  // protections should remain in place.  Once the document finishes loading,
+  // `ApplyDataProtectionSettings()` will be called.  See
+  // `DocumentOnLoadCompletedInPrimaryMainFrame()`.
+  void DelayApplyDataProtectionSettingsIfEmpty(
+      base::WeakPtr<content::WebContents> expected_web_contents,
+      const enterprise_data_protection::UrlSettings& settings);
+
  protected:
   // Enumerates where the devtools are docked relative to the browser's main
   // web contents.
@@ -948,13 +961,10 @@ class BrowserView : public BrowserWindow,
   // so we
   // ask the window to change its fullscreen node_data, then when we get
   // notification that it succeeded this method is invoked.
-  // If |url| is not empty, it is the URL of the page that requested fullscreen
-  // (via the fullscreen JS API).
   // If the Window Placement experiment is enabled, fullscreen may be requested
   // on a particular display. In that case, |display_id| is the display's id;
   // otherwise, display::kInvalidDisplayId indicates no display is specified.
   void ProcessFullscreen(bool fullscreen,
-                         const GURL& url,
                          int64_t display_id);
 
   // Request the underlying platform to make the window fullscreen.
@@ -962,11 +972,6 @@ class BrowserView : public BrowserWindow,
 
   void SynchronizeRenderWidgetHostVisualPropertiesForMainFrame();
   void NotifyWidgetSizeConstraintsChanged();
-
-  // Returns whether immmersive fullscreen should replace fullscreen. This
-  // should only occur for "browser-fullscreen" for tabbed-typed windows (not
-  // for tab-fullscreen and not for app/popup type windows).
-  bool ShouldUseImmersiveFullscreenForUrl(const GURL& url) const;
 
   // Copy the accelerator table from the app resources into something we can
   // use.
@@ -1074,26 +1079,24 @@ class BrowserView : public BrowserWindow,
   // when it should not be able to.
   void UpdateFullscreenAllowedFromPolicy(bool allowed_without_policy);
 
+#if BUILDFLAG(ENTERPRISE_WATERMARK) || \
+    BUILDFLAG(ENTERPRISE_SCREENSHOT_PROTECTION)
   // Applies data protection settings based on the verdict received by
   // safe-browsing's realtime to `watermark_view_`.
   void ApplyDataProtectionSettings(
       base::WeakPtr<content::WebContents> expected_web_contents,
       const enterprise_data_protection::UrlSettings& settings);
-  void ApplyWatermarkSettings(const std::string& watermark_text);
 
-  // Applies data protection settings if there are any to apply, otherwise
-  // delay clearing the data protection settings until the page loads.
-  //
-  // This is called from a finish navigation event to handle the case where the
-  // browser view is switching from a tab with data protections enabled to one
-  // without.  At the end of the navigation, the existing page is still visible
-  // to the user since the UI has not yet refreshed.  In this case the
-  // protections should remain in place.  Once the document finishes loading,
-  // `ApplyDataProtectionSettings()` will be called.  See
-  // `DocumentOnLoadCompletedInPrimaryMainFrame()`.
-  void DelayApplyDataProtectionSettingsIfEmpty(
-      base::WeakPtr<content::WebContents> expected_web_contents,
-      const enterprise_data_protection::UrlSettings& settings);
+#if BUILDFLAG(ENTERPRISE_WATERMARK)
+  void ApplyWatermarkSettings(const std::string& watermark_text);
+#endif
+
+#if BUILDFLAG(ENTERPRISE_SCREENSHOT_PROTECTION)
+  void ApplyScreenshotSettings(bool allow);
+#endif
+
+#endif  // BUILDFLAG(ENTERPRISE_WATERMARK) ||
+        // BUILDFLAG(ENTERPRISE_SCREENSHOT_PROTECTION)
 
   // The BrowserFrame that hosts this view.
   raw_ptr<BrowserFrame, DanglingUntriaged> frame_ = nullptr;
@@ -1218,8 +1221,15 @@ class BrowserView : public BrowserWindow,
   raw_ptr<views::WebView, AcrossTasksDanglingUntriaged> devtools_web_view_ =
       nullptr;
 
-  // Clear watermark text once the page loads.
+  // Clear data protections once the page loads.
+  // TODO(b/330960313): These bools can be removed once FCP is used as the
+  // signal to set the data protections for the current tab.
+#if BUILDFLAG(ENTERPRISE_WATERMARK)
   bool clear_watermark_text_on_page_load_ = false;
+#endif
+#if BUILDFLAG(ENTERPRISE_SCREENSHOT_PROTECTION)
+  bool clear_screenshot_protection_on_page_load_ = false;
+#endif
 
   // The view that overlays a watermark on the contents container.
   raw_ptr<enterprise_watermark::WatermarkView> watermark_view_ = nullptr;

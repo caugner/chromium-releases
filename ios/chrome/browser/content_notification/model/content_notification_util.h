@@ -7,23 +7,18 @@
 
 #import <Foundation/Foundation.h>
 
+class ChromeBrowserState;
 class PrefService;
 
 // True if any type of content notification is enabled with user visible UI.
-// `user_signed_in` is true if the user has signed in. `default_search_engine`
-// is true if the user is using Google as default search engine. `pref_service`
-// is the Pref Service.
-bool IsContentNotificationEnabled(bool user_signed_in,
-                                  bool default_search_engine,
-                                  PrefService* pref_service);
+// This method is a util function for classes which own a browser state object
+// checking if content notifications are enabled.
+// `browser_state` is the browser state.
+bool IsContentNotificationEnabled(ChromeBrowserState* browser_state);
 
 // True if any type of content notification is registered without user visible
-// UI. `user_signed_in` is true if the user has signed in.
-// `default_search_engine` is true if the user is using Google as default search
-// engine. `pref_service` is the Pref Service.
-bool IsContentNotificationRegistered(bool user_signed_in,
-                                     bool default_search_engine,
-                                     PrefService* pref_service);
+// UI. `browser_state` is the browser state.
+bool IsContentNotificationRegistered(ChromeBrowserState* browser_state);
 
 // True if content notification promo is enabled with user visible UI.
 // `user_signed_in` is true if the user has signed in. `default_search_engine`
