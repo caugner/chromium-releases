@@ -51,6 +51,10 @@ class TouchInjector : public ui::EventRewriter {
   ~TouchInjector() override;
 
   aura::Window* target_window() { return target_window_; }
+  const gfx::RectF& content_bounds() { return content_bounds_; }
+  const gfx::Transform* rotation_transform() {
+    return rotation_transform_.get();
+  }
   const std::vector<std::unique_ptr<Action>>& actions() const {
     return actions_;
   }
@@ -71,11 +75,6 @@ class TouchInjector : public ui::EventRewriter {
 
   bool show_nudge() const { return show_nudge_; }
   void set_show_nudge(bool show_nudge) { show_nudge_ = show_nudge; }
-
-  bool data_reading_finished() const { return data_reading_finished_; }
-  void set_data_reading_finished(bool finished) {
-    data_reading_finished_ = finished;
-  }
 
   void set_display_mode(DisplayMode mode) { display_mode_ = mode; }
   void set_display_overlay_controller(DisplayOverlayController* controller) {
@@ -127,6 +126,11 @@ class TouchInjector : public ui::EventRewriter {
   // Save the input menu state when the menu is closed.
   void OnInputMenuViewRemoved();
   void NotifyFirstTimeLaunch();
+
+  // Update |content_bounds_| and touch positions for each |actions_| for
+  // different reasons.
+  void UpdateForDisplayMetricsChanged();
+  void UpdateForWindowBoundsChanged();
 
   // UMA stats.
   void RecordMenuStateOnLaunch();
@@ -204,6 +208,7 @@ class TouchInjector : public ui::EventRewriter {
   DisplayOverlayController* GetControllerForTesting();
 
   raw_ptr<aura::Window> target_window_;
+  gfx::RectF content_bounds_;
   base::WeakPtr<ui::EventRewriterContinuation> continuation_;
   std::vector<std::unique_ptr<Action>> actions_;
   base::ScopedObservation<ui::EventSource,
@@ -238,8 +243,6 @@ class TouchInjector : public ui::EventRewriter {
   // Check whether to show the nudge view. We only show the nudge view for the
   // first time launch and before it is dismissed.
   bool show_nudge_ = false;
-  // Data reading is finished after launching if the value is true.
-  bool data_reading_finished_ = false;
 
   // TODO(cuicuiruan): It can be removed after the mouse lock is enabled for
   // post MVP.

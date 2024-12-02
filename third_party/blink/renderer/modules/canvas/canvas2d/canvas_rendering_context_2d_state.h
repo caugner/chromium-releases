@@ -280,6 +280,7 @@ class CanvasRenderingContext2DState final
   mutable sk_sp<PaintFilter> shadow_and_foreground_image_filter_;
 
   double global_alpha_;
+  sk_sp<PaintFilter> global_alpha_filter_;
   TransformationMatrix transform_;
   Vector<double> line_dash_;
   double line_dash_offset_;
@@ -338,7 +339,7 @@ class CanvasRenderingContext2DState final
 };
 
 ALWAYS_INLINE bool CanvasRenderingContext2DState::ShouldDrawShadows() const {
-  return AlphaChannel(shadow_color_) &&
+  return SkColorGetA(shadow_color_) &&
          (shadow_blur_ || !shadow_offset_.IsZero());
 }
 

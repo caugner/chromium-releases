@@ -49,16 +49,6 @@ base::TimeDelta GetAccessCodeDeviceDurationPref(Profile* profile) {
     return base::Seconds(0);
   }
 
-  // Check to see if the command line was used to set the value.
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (IsCommandLineSwitchSupported() &&
-      command_line->HasSwitch(switches::kAccessCodeCastDeviceDurationSwitch)) {
-    int value;
-    base::StringToInt(command_line->GetSwitchValueASCII(
-                          switches::kAccessCodeCastDeviceDurationSwitch),
-                      &value);
-    return base::Seconds(value);
-  }
   // Return the value set by the policy pref.
   return base::Seconds(
       profile->GetPrefs()->GetInteger(prefs::kAccessCodeCastDeviceDuration));
