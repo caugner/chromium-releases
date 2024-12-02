@@ -7,6 +7,7 @@
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "net/base/connection_type_histograms.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
@@ -14,13 +15,18 @@
 #include "net/http/http_basic_stream.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_proxy_client_socket.h"
+#include "net/http/http_proxy_client_socket_pool.h"
 #include "net/http/http_request_info.h"
-#include "net/http/http_stream_handle.h"
+#include "net/socket/client_socket_handle.h"
+#include "net/socket/client_socket_handle.h"
+#include "net/socket/socks_client_socket_pool.h"
+#include "net/socket/ssl_client_socket.h"
+#include "net/socket/ssl_client_socket.h"
+#include "net/socket/ssl_client_socket_pool.h"
+#include "net/socket/tcp_client_socket_pool.h"
 #include "net/spdy/spdy_http_stream.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
-#include "net/socket/client_socket_handle.h"
-#include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
@@ -48,7 +54,6 @@ HttpStreamRequest::HttpStreamRequest(
       session_(session),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           io_callback_(this, &HttpStreamRequest::OnIOComplete)),
-      connection_(new ClientSocketHandle),
       factory_(factory),
       delegate_(NULL),
       next_state_(STATE_NONE),
@@ -85,6 +90,7 @@ HttpStreamRequest::~HttpStreamRequest() {
 void HttpStreamRequest::Start(const HttpRequestInfo* request_info,
                               SSLConfig* ssl_config,
                               ProxyInfo* proxy_info,
+                              ClientSocketHandle* connection,
                               StreamFactory::StreamRequestDelegate* delegate,
                               const BoundNetLog& net_log) {
   CHECK_EQ(STATE_NONE, next_state_);
@@ -95,7 +101,15 @@ void HttpStreamRequest::Start(const HttpRequestInfo* request_info,
   proxy_info_ = proxy_info;
   delegate_ = delegate;
   net_log_ = net_log;
-  next_state_ = STATE_RESOLVE_PROXY;
+  if (connection) {
+    DCHECK(!using_spdy_);
+    DCHECK(connection->is_initialized());
+    connection_.reset(connection);
+    next_state_ = STATE_CREATE_STREAM;
+  } else {
+    connection_.reset(new ClientSocketHandle);
+    next_state_ = STATE_RESOLVE_PROXY;
+  }
   int rv = RunLoop(OK);
   DCHECK_EQ(ERR_IO_PENDING, rv);
 }
@@ -178,7 +192,7 @@ SSLConfig* HttpStreamRequest::ssl_config() const {
   return ssl_config_;
 }
 
-void HttpStreamRequest::OnStreamReadyCallback(HttpStreamHandle* stream) {
+void HttpStreamRequest::OnStreamReadyCallback(HttpStream* stream) {
   if (cancelled_) {
     // The delegate is gone.  We need to cleanup the stream.
     delete stream;
@@ -232,7 +246,8 @@ int HttpStreamRequest::RunLoop(int result) {
     GetSSLInfo();
 
     next_state_ = STATE_WAITING_USER_ACTION;
-    MessageLoop::current()->PostTask(FROM_HERE,
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
         NewRunnableMethod(this,
         &HttpStreamRequest::OnCertificateErrorCallback,
         result, ssl_info_));
@@ -252,7 +267,8 @@ int HttpStreamRequest::RunLoop(int result) {
             http_proxy_socket->GetResponseInfo();
 
         next_state_ = STATE_WAITING_USER_ACTION;
-        MessageLoop::current()->PostTask(FROM_HERE,
+        MessageLoop::current()->PostTask(
+            FROM_HERE,
             NewRunnableMethod(this,
                 &HttpStreamRequest::OnNeedsProxyAuthCallback,
                 *tunnel_auth_response,
@@ -261,7 +277,8 @@ int HttpStreamRequest::RunLoop(int result) {
       return ERR_IO_PENDING;
 
     case ERR_SSL_CLIENT_AUTH_CERT_NEEDED:
-      MessageLoop::current()->PostTask(FROM_HERE,
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
           NewRunnableMethod(this,
           &HttpStreamRequest::OnNeedsClientAuthCallback,
           connection_->ssl_error_response_info().cert_request_info));
@@ -271,14 +288,16 @@ int HttpStreamRequest::RunLoop(int result) {
       break;
 
     case OK:
-      MessageLoop::current()->PostTask(FROM_HERE,
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
           NewRunnableMethod(this,
           &HttpStreamRequest::OnStreamReadyCallback,
           stream_.release()));
       return ERR_IO_PENDING;
 
     default:
-      MessageLoop::current()->PostTask(FROM_HERE,
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
           NewRunnableMethod(this,
           &HttpStreamRequest::OnStreamFailedCallback,
           result));
@@ -446,7 +465,7 @@ int HttpStreamRequest::DoInitConnection() {
   DCHECK(!connection_group.empty());
 
   if (using_ssl_)
-    connection_group = StringPrintf("ssl/%s", connection_group.c_str());
+    connection_group = base::StringPrintf("ssl/%s", connection_group.c_str());
 
   // If the user is refreshing the page, bypass the host cache.
   bool disable_resolver_cache =
@@ -494,16 +513,20 @@ int HttpStreamRequest::DoInitConnection() {
         // Set ssl_params, and unset proxy_tcp_params
         ssl_params = GenerateSslParams(proxy_tcp_params, NULL, NULL,
                                        ProxyServer::SCHEME_DIRECT,
+                                       proxy_host_port->host(),
                                        want_spdy_over_npn);
         proxy_tcp_params = NULL;
       }
 
-      http_proxy_params = new HttpProxySocketParams(proxy_tcp_params,
-                                                    ssl_params,
-                                                    authentication_url,
-                                                    user_agent,
-                                                    endpoint_,
-                                                    session_, using_ssl_);
+      http_proxy_params =
+          new HttpProxySocketParams(proxy_tcp_params,
+                                    ssl_params,
+                                    authentication_url,
+                                    user_agent,
+                                    endpoint_,
+                                    session_->auth_cache(),
+                                    session_->http_auth_handler_factory(),
+                                    using_ssl_);
     } else {
       DCHECK(proxy_info()->is_socks());
       char socks_version;
@@ -511,8 +534,8 @@ int HttpStreamRequest::DoInitConnection() {
         socks_version = '5';
       else
         socks_version = '4';
-      connection_group =
-          StringPrintf("socks%c/%s", socks_version, connection_group.c_str());
+      connection_group = base::StringPrintf(
+          "socks%c/%s", socks_version, connection_group.c_str());
 
       socks_params = new SOCKSSocketParams(proxy_tcp_params,
                                            socks_version == '5',
@@ -527,8 +550,9 @@ int HttpStreamRequest::DoInitConnection() {
     scoped_refptr<SSLSocketParams> ssl_params =
         GenerateSslParams(tcp_params, http_proxy_params, socks_params,
                           proxy_info()->proxy_server().scheme(),
+                          request_info().url.HostNoBrackets(),
                           want_spdy_over_npn);
-    scoped_refptr<SSLClientSocketPool> ssl_pool;
+    SSLClientSocketPool* ssl_pool = NULL;
     if (proxy_info()->is_direct())
       ssl_pool = session_->ssl_socket_pool();
     else
@@ -673,16 +697,14 @@ int HttpStreamRequest::DoCreateStream() {
     SetSocketMotivation();
 
   if (!using_spdy_) {
-    HttpBasicStream* stream = new HttpBasicStream(connection_.get());
-    stream_.reset(new HttpStreamHandle(connection_.release(), stream));
+    stream_.reset(new HttpBasicStream(connection_.release()));
     return OK;
   }
 
   CHECK(!stream_.get());
 
   bool direct = true;
-  const scoped_refptr<SpdySessionPool> spdy_pool =
-      session_->spdy_session_pool();
+  SpdySessionPool* spdy_pool = session_->spdy_session_pool();
   scoped_refptr<SpdySession> spdy_session;
 
   const ProxyServer& proxy_server = proxy_info()->proxy_server();
@@ -691,13 +713,14 @@ int HttpStreamRequest::DoCreateStream() {
     // We have a SPDY session to the origin server.  This might be a direct
     // connection, or it might be a SPDY session through an HTTP or HTTPS proxy.
     spdy_session =
-        spdy_pool->Get(pair, session_, net_log_);
+        spdy_pool->Get(pair, session_->mutable_spdy_settings(), net_log_);
   } else if (proxy_info()->is_https()) {
     // If we don't have a direct SPDY session, and we're using an HTTPS
     // proxy, then we might have a SPDY session to the proxy
     pair = HostPortProxyPair(proxy_server.host_port_pair(), proxy_server);
     if (spdy_pool->HasSession(pair)) {
-      spdy_session = spdy_pool->Get(pair, session_, net_log_);
+      spdy_session =
+          spdy_pool->Get(pair, session_->mutable_spdy_settings(), net_log_);
     }
     direct = false;
   }
@@ -708,8 +731,8 @@ int HttpStreamRequest::DoCreateStream() {
     // contain an SSLClientSocket.
     CHECK(connection_->socket());
     int error = spdy_pool->GetSpdySessionFromSocket(
-        pair, session_, connection_.release(), net_log_,
-        spdy_certificate_error_, &spdy_session, using_ssl_);
+        pair, session_->mutable_spdy_settings(), connection_.release(),
+        net_log_, spdy_certificate_error_, &spdy_session, using_ssl_);
     if (error != OK)
       return error;
   }
@@ -717,8 +740,7 @@ int HttpStreamRequest::DoCreateStream() {
   if (spdy_session->IsClosed())
     return ERR_CONNECTION_CLOSED;
 
-  SpdyHttpStream* stream = new SpdyHttpStream(spdy_session, direct);
-  stream_.reset(new HttpStreamHandle(NULL, stream));
+  stream_.reset(new SpdyHttpStream(spdy_session, direct));
   return OK;
 }
 
@@ -772,6 +794,7 @@ scoped_refptr<SSLSocketParams> HttpStreamRequest::GenerateSslParams(
     scoped_refptr<HttpProxySocketParams> http_proxy_params,
     scoped_refptr<SOCKSSocketParams> socks_params,
     ProxyServer::Scheme proxy_scheme,
+    std::string hostname,
     bool want_spdy_over_npn) {
 
   if (factory_->IsTLSIntolerantServer(request_info().url)) {
@@ -796,8 +819,8 @@ scoped_refptr<SSLSocketParams> HttpStreamRequest::GenerateSslParams(
     }
 
   scoped_refptr<SSLSocketParams> ssl_params =
-      new SSLSocketParams(tcp_params, http_proxy_params, socks_params,
-                          proxy_scheme, request_info().url.HostNoBrackets(),
+      new SSLSocketParams(tcp_params, socks_params, http_proxy_params,
+                          proxy_scheme, hostname,
                           *ssl_config(), load_flags,
                           force_spdy_always_ && force_spdy_over_ssl_,
                           want_spdy_over_npn);
@@ -839,6 +862,7 @@ int HttpStreamRequest::ReconsiderProxyAfterError(int error) {
   // now exists that corresponds to a proxy server that could load the URL.
   //
   switch (error) {
+    case ERR_PROXY_CONNECTION_FAILED:
     case ERR_NAME_NOT_RESOLVED:
     case ERR_INTERNET_DISCONNECTED:
     case ERR_ADDRESS_UNREACHABLE:

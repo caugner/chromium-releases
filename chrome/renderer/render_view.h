@@ -16,7 +16,6 @@
 #include "app/surface/transport_dib.h"
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/id_map.h"
 #include "base/linked_ptr.h"
 #include "base/timer.h"
 #include "base/weak_ptr.h"
@@ -28,9 +27,6 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/common/view_types.h"
-#include "chrome/renderer/automation/dom_automation_controller.h"
-#include "chrome/renderer/dom_ui_bindings.h"
-#include "chrome/renderer/external_host_bindings.h"
 #include "chrome/renderer/pepper_plugin_delegate_impl.h"
 #include "chrome/renderer/render_widget.h"
 #include "chrome/renderer/renderer_webcookiejar_impl.h"
@@ -59,6 +55,9 @@ class DictionaryValue;
 class DeviceOrientationDispatcher;
 class DevToolsAgent;
 class DevToolsClient;
+class DomAutomationController;
+class DOMUIBindings;
+class ExternalHostBindings;
 class FilePath;
 class GeolocationDispatcher;
 class GURL;
@@ -88,6 +87,11 @@ class WaitableEvent;
 namespace gfx {
 class Point;
 class Rect;
+}
+
+namespace pepper {
+class PluginInstance;
+class FullscreenContainer;
 }
 
 namespace webkit_glue {
@@ -217,16 +221,22 @@ class RenderView : public RenderWidget,
 
   // Called from JavaScript window.external.AddSearchProvider() to add a
   // keyword for a provider described in the given OpenSearch document.
-  void AddSearchProvider(const std::string& url);
+  void AddSearchProvider(const std::string& url,
+                         const ViewHostMsg_PageHasOSDD_Type& provider_type);
 
   // Returns the install state for the given search provider url.
   ViewHostMsg_GetSearchProviderInstallState_Params
       GetSearchProviderInstallState(WebKit::WebFrame* frame,
                                     const std::string& url);
 
+  // Sends ViewHostMsg_SetSuggestResult to the browser.
+  void SetSuggestResult(const std::string& suggest);
+
   // Evaluates a string of JavaScript in a particular frame.
-  void EvaluateScript(const std::wstring& frame_xpath,
-                      const std::wstring& jscript);
+  void EvaluateScript(const string16& frame_xpath,
+                      const string16& jscript,
+                      int id,
+                      bool notify_result);
 
   // Adds the given file chooser request to the file_chooser_completion_ queue
   // (see that var for more) and requests the chooser be displayed if there are
@@ -279,6 +289,10 @@ class RenderView : public RenderWidget,
   // the plugin.
   void OnPepperPluginDestroy(WebPluginDelegatePepper* pepper_plugin);
 
+  // Creates a fullscreen container for a pepper plugin instance.
+  pepper::FullscreenContainer* CreatePepperFullscreenContainer(
+      pepper::PluginInstance* plugin);
+
   // Create a new plugin without checking the content settings.
   WebKit::WebPlugin* CreatePluginNoCheck(WebKit::WebFrame* frame,
                                          const WebKit::WebPluginParams& params);
@@ -290,7 +304,10 @@ class RenderView : public RenderWidget,
   uint32 GetCPBrowsingContext();
 
 #if defined(OS_MACOSX)
-  // Helper routines for GPU plugin support. Used by the
+  // Enables/disabled plugin IME for the given plugin.
+  void SetPluginImeEnabled(bool enabled, int plugin_id);
+
+  // Helper routines for accelerated plugin support. Used by the
   // WebPluginDelegateProxy, which has a pointer to the RenderView.
   gfx::PluginWindowHandle AllocateFakePluginWindowHandle(bool opaque,
                                                          bool root);
@@ -306,10 +323,10 @@ class RenderView : public RenderWidget,
                                          int32 height,
                                          TransportDIB::Handle transport_dib);
   void AcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window);
+#endif
 
   void RegisterPluginDelegate(WebPluginDelegateProxy* delegate);
   void UnregisterPluginDelegate(WebPluginDelegateProxy* delegate);
-#endif
 
   // IPC::Channel::Listener implementation -------------------------------------
 
@@ -400,12 +417,9 @@ class RenderView : public RenderWidget,
   virtual void navigateBackForwardSoon(int offset);
   virtual int historyBackListCount();
   virtual int historyForwardListCount();
-  virtual void focusAccessibilityObject(
-      const WebKit::WebAccessibilityObject& acc_obj);
-  virtual void didChangeAccessibilityObjectState(
-      const WebKit::WebAccessibilityObject& acc_obj);
-  virtual void didChangeAccessibilityObjectChildren(
-      const WebKit::WebAccessibilityObject& acc_obj);
+  virtual void postAccessibilityNotification(
+      const WebKit::WebAccessibilityObject& obj,
+      WebKit::WebAccessibilityNotification notification);
   virtual void didUpdateInspectorSetting(const WebKit::WebString& key,
                                          const WebKit::WebString& value);
   virtual void queryAutofillSuggestions(const WebKit::WebNode& node,
@@ -429,6 +443,8 @@ class RenderView : public RenderWidget,
   virtual WebKit::WebSpeechInputController* speechInputController(
       WebKit::WebSpeechInputListener* listener);
   virtual WebKit::WebDeviceOrientationClient* deviceOrientationClient();
+  virtual void zoomLimitsChanged(double minimum_level, double maximum_level);
+  virtual void zoomLevelChanged();
 
   // WebKit::WebFrameClient implementation -------------------------------------
 
@@ -542,6 +558,9 @@ class RenderView : public RenderWidget,
   virtual void didCreateScriptContext(WebKit::WebFrame* frame);
   virtual void didDestroyScriptContext(WebKit::WebFrame* frame);
   virtual void didCreateIsolatedScriptContext(WebKit::WebFrame* frame);
+  virtual bool allowScriptExtension(WebKit::WebFrame*,
+                                    const WebKit::WebString& extension_name,
+                                    int extensionGroup);
   virtual void logCrossFramePropertyAccess(
       WebKit::WebFrame* frame,
       WebKit::WebFrame* target,
@@ -597,11 +616,15 @@ class RenderView : public RenderWidget,
                         const gfx::Rect& resizer_rect);
   virtual void DidInitiatePaint();
   virtual void DidFlushPaint();
+  virtual bool GetBitmapForOptimizedPluginPaint(
+      const gfx::Rect& paint_bounds,
+      TransportDIB** dib,
+      gfx::Rect* location,
+      gfx::Rect* clip);
   virtual void DidHandleKeyEvent();
   virtual void DidHandleMouseEvent(const WebKit::WebMouseEvent& event);
-
-#if OS_MACOSX
   virtual void OnSetFocus(bool enable);
+#if OS_MACOSX
   virtual void OnWasHidden();
   virtual void OnWasRestored(bool needs_repainting);
 #endif
@@ -626,7 +649,7 @@ class RenderView : public RenderWidget,
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, UpdateTargetURLWithInvalidURL);
 
   typedef std::map<GURL, ContentSettings> HostContentSettings;
-  typedef std::map<GURL, int> HostZoomLevels;
+  typedef std::map<GURL, double> HostZoomLevels;
 
   enum ErrorPageType {
     DNS_ERROR,
@@ -705,7 +728,8 @@ class RenderView : public RenderWidget,
 
   // Adds search provider from the given OpenSearch description URL as a
   // keyword search.
-  void AddGURLSearchProvider(const GURL& osd_url, bool autodetected);
+  void AddGURLSearchProvider(const GURL& osd_url,
+                             const ViewHostMsg_PageHasOSDD_Type& provider_type);
 
   // Called in a posted task by textFieldDidChange() to work-around a WebKit bug
   // http://bugs.webkit.org/show_bug.cgi?id=16976
@@ -717,7 +741,7 @@ class RenderView : public RenderWidget,
   // render_messages_internal.h for the message that the function is handling.
 
   void OnAccessibilityDoDefaultAction(int acc_obj_id);
-  void OnAccessibilityObjectChildrenChangeAck();
+  void OnAccessibilityNotificationsAck();
   void OnAllowBindings(int enabled_bindings_flags);
   void OnAddMessageToConsole(const string16& frame_xpath,
                              const string16& message,
@@ -778,12 +802,12 @@ class RenderView : public RenderWidget,
   void OnExecuteEditCommand(const std::string& name, const std::string& value);
   void OnExtensionMessageInvoke(const std::string& function_name,
                                 const ListValue& args,
-                                bool requires_incognito_access,
+                                bool cross_incognito,
                                 const GURL& event_url);
   void OnFileChooserResponse(const std::vector<FilePath>& paths);
   void OnFind(int request_id, const string16&, const WebKit::WebFindOptions&);
   void OnFindReplyAck();
-  void OnGetAccessibilityTree();
+  void OnEnableAccessibility();
   void OnGetAllSavableResourceLinksForCurrentPage(const GURL& page_url);
   void OnGetApplicationInfo(int page_id);
   void OnGetSerializedHtmlDataForCurrentPageWithLocalLinks(
@@ -802,11 +826,10 @@ class RenderView : public RenderWidget,
   void OnNotifyRendererViewType(ViewType::Type view_type);
   void OnFillPasswordForm(
       const webkit_glue::PasswordFormFillData& form_data);
-  void OnOpenFileSystemRequestComplete(int request_id,
-                                       bool accepted,
-                                       const string16& name,
-                                       const string16& root_path);
   void OnPaste();
+#if defined(OS_MACOSX)
+  void OnPluginImeCompositionConfirmed(const string16& text, int plugin_id);
+#endif
   void OnPrintingDone(int document_cookie, bool success);
   void OnPrintPages();
   void OnRedo();
@@ -815,8 +838,10 @@ class RenderView : public RenderWidget,
   void OnReservePageIDRange(int size_of_range);
   void OnResetPageEncodingToDefault();
   void OnRevertTranslation(int page_id);
-  void OnScriptEvalRequest(const std::wstring& frame_xpath,
-                           const std::wstring& jscript);
+  void OnScriptEvalRequest(const string16& frame_xpath,
+                           const string16& jscript,
+                           int id,
+                           bool notify_result);
   void OnSelectAll();
   void OnSetAccessibilityFocus(int acc_obj_id);
   void OnSetActive(bool active);
@@ -834,7 +859,7 @@ class RenderView : public RenderWidget,
 #if defined(OS_MACOSX)
   void OnSetWindowVisibility(bool visible);
 #endif
-  void OnSetZoomLevelForLoadingURL(const GURL& url, int zoom_level);
+  void OnSetZoomLevelForLoadingURL(const GURL& url, double zoom_level);
   void OnShouldClose();
   void OnStop();
   void OnStopFinding(const ViewMsg_StopFinding_Params& params);
@@ -854,6 +879,10 @@ class RenderView : public RenderWidget,
                             const gfx::Rect& view_frame);
 #endif
   void OnZoom(PageZoom::Function function);
+
+  void OnAsyncFileOpened(base::PlatformFileError error_code,
+                         IPC::PlatformFileForTransit file_for_transit,
+                         int message_id);
 
   // Adding a new message handler? Please add it in alphabetical order above
   // and put it in the same position in the .cc file.
@@ -895,8 +924,7 @@ class RenderView : public RenderWidget,
                                         const FilePath& path,
                                         pepper::PluginModule* pepper_module);
 
-  // Create a new placeholder for a blocked plugin.
-  WebKit::WebPlugin* CreatePluginPlaceholder(
+  WebKit::WebPlugin* CreateOutdatedPluginPlaceholder(
       WebKit::WebFrame* frame,
       const WebKit::WebPluginParams& params,
       PluginGroup* group);
@@ -943,6 +971,10 @@ class RenderView : public RenderWidget,
 
   // Locates a sub frame with given xpath
   WebKit::WebFrame* GetChildFrame(const std::wstring& frame_xpath) const;
+
+  DOMUIBindings* GetDOMUIBindings();
+
+  ExternalHostBindings* GetExternalHostBindings();
 
   // Should only be called if this object wraps a PluginDocument.
   WebKit::WebPlugin* GetWebPluginFromPluginDocument();
@@ -1191,6 +1223,13 @@ class RenderView : public RenderWidget,
   // https://bugs.webkit.org/show_bug.cgi?id=32807.
   base::RepeatingTimer<RenderView> preferred_size_change_timer_;
 
+#if defined(OS_MACOSX)
+  // Track the fake plugin window handles allocated on the browser side for
+  // the accelerated compositor and (currently) accelerated plugins so that
+  // we can discard them when the view goes away.
+  std::set<gfx::PluginWindowHandle> fake_plugin_window_handles_;
+#endif
+
   // Plugins -------------------------------------------------------------------
 
   // Remember the first uninstalled plugin, so that we can ask the plugin
@@ -1199,12 +1238,10 @@ class RenderView : public RenderWidget,
 
   PepperPluginDelegateImpl pepper_delegate_;
 
-#if defined(OS_MACOSX)
   // All the currently active plugin delegates for this RenderView; kept so that
   // we can enumerate them to send updates about things like window location
   // or tab focus and visibily. These are non-owning references.
   std::set<WebPluginDelegateProxy*> plugin_delegates_;
-#endif
 
   // A list of all Pepper v1 plugins that we've created that haven't been
   // destroyed yet. Pepper v2 plugins are tracked by the pepper_delegate_.
@@ -1256,7 +1293,10 @@ class RenderView : public RenderWidget,
   // maintains the cache and other features of the accessibility tree.
   scoped_ptr<WebKit::WebAccessibilityCache> accessibility_;
 
-  std::vector<webkit_glue::WebAccessibility> accessibility_changes_;
+  // Collect renderer accessibility notifications until they are ready to be
+  // sent to the browser.
+  std::vector<ViewHostMsg_AccessibilityNotification_Params>
+      pending_accessibility_notifications_;
 
   // The speech dispatcher attached to this view, lazily initialized.
   scoped_ptr<SpeechInputDispatcher> speech_input_dispatcher_;
@@ -1310,19 +1350,14 @@ class RenderView : public RenderWidget,
 
   // Allows JS to access DOM automation. The JS object is only exposed when the
   // DOM automation bindings are enabled.
-  DomAutomationController dom_automation_controller_;
+  scoped_ptr<DomAutomationController> dom_automation_controller_;
 
   // Allows DOM UI pages (new tab page, etc.) to talk to the browser. The JS
   // object is only exposed when DOM UI bindings are enabled.
-  DOMUIBindings dom_ui_bindings_;
+  scoped_ptr<DOMUIBindings> dom_ui_bindings_;
 
   // External host exposed through automation controller.
-  ExternalHostBindings external_host_bindings_;
-
-  // Pending openFileSystem completion objects.
-  struct PendingOpenFileSystem;
-  IDMap<PendingOpenFileSystem, IDMapOwnPointer>
-      pending_file_system_requests_;
+  scoped_ptr<ExternalHostBindings> external_host_bindings_;
 
   // ---------------------------------------------------------------------------
   // ADDING NEW DATA? Please see if it fits appropriately in one of the above

@@ -68,6 +68,9 @@ class BrowserActionButton : public views::MenuButton,
   // Returns the default icon, if any.
   const SkBitmap& default_icon() const { return default_icon_; }
 
+  // Overridden from views::View:
+  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
+
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
@@ -154,7 +157,7 @@ class BrowserActionView : public views::View {
   gfx::Canvas* GetIconWithBadge();
 
   // Accessibility accessors, overridden from View.
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual AccessibilityTypes::Role GetAccessibleRole();
 
  private:
   virtual void Layout();
@@ -322,7 +325,7 @@ class BrowserActionsContainer
   virtual void OnDragExited();
   virtual int OnPerformDrop(const views::DropTargetEvent& event);
   virtual void OnThemeChanged();
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual AccessibilityTypes::Role GetAccessibleRole();
 
   // Overridden from views::ViewMenuDelegate:
   virtual void RunMenu(View* source, const gfx::Point& pt);

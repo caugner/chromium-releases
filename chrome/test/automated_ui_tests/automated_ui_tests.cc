@@ -14,6 +14,7 @@
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -731,11 +732,7 @@ FilePath AutomatedUITest::GetMostRecentCrashDump() {
 }
 
 bool AutomatedUITest::DidCrash(bool update_total_crashes) {
-  FilePath crash_dump_path;
-  PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dump_path);
-  // Each crash creates two dump files, so we divide by two here.
-  int actual_crashes = file_util::CountFilesCreatedAfter(
-    crash_dump_path, test_start_time_) / 2;
+  int actual_crashes = GetCrashCount();
 
   // If there are more crash dumps than the total dumps which we have recorded
   // then this is a new crash.

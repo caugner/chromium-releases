@@ -555,7 +555,7 @@ class View : public AcceleratorTarget {
   virtual bool HasFocus();
 
   // Accessibility support
-  // TODO(klink): Move all this out to a AccessibleInfo wrapper class.
+  // TODO(ctguil): Move all this out to a AccessibleInfo wrapper class.
 
   // Notify the platform specific accessibility client of changes in the user
   // interface.  This will always raise native notifications.
@@ -569,17 +569,13 @@ class View : public AcceleratorTarget {
   // Returns the MSAA default action of the current view. The string returned
   // describes the default action that will occur when executing
   // IAccessible::DoDefaultAction. For instance, default action of a button is
-  // 'Press'. Sets the input string appropriately, and returns true if
-  // successful.
-  virtual bool GetAccessibleDefaultAction(std::wstring* action) {
-    return false;
-  }
+  // 'Press'.
+  virtual std::wstring GetAccessibleDefaultAction() { return std::wstring(); }
 
   // Returns a string containing the mnemonic, or the keyboard shortcut, for a
-  // given control. Sets the input string appropriately, and returns true if
-  // successful.
-  virtual bool GetAccessibleKeyboardShortcut(std::wstring* shortcut) {
-    return false;
+  // given control.
+  virtual std::wstring GetAccessibleKeyboardShortcut() {
+    return std::wstring();
   }
 
   // Returns a brief, identifying string, containing a unique, readable name of
@@ -589,26 +585,21 @@ class View : public AcceleratorTarget {
 
   // Returns the accessibility role of the current view. The role is what
   // assistive technologies (ATs) use to determine what behavior to expect from
-  // a given control. Sets the input Role appropriately, and returns true if
-  // successful.
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  // a given control.
+  virtual AccessibilityTypes::Role GetAccessibleRole();
 
-  // Returns the accessibility state of the current view. Sets the input State
-  // appropriately, and returns true if successful.
-  virtual bool GetAccessibleState(AccessibilityTypes::State* state) {
-    return false;
+  // Returns the accessibility state of the current view.
+  virtual AccessibilityTypes::State GetAccessibleState() {
+    return 0;
   }
 
-  // Returns the current value associated with a view. Sets the input string
-  // appropriately, and returns true if successful.
-  virtual bool GetAccessibleValue(std::wstring* value) { return false; }
+  // Returns the current value associated with a view.
+  virtual std::wstring GetAccessibleValue() { return std::wstring(); }
 
   // Assigns a string name to the given control. Needed as a View does not know
   // which name will be associated with it until it is created to be a
   // certain type.
   void SetAccessibleName(const std::wstring& name);
-
-  void SetAccessibleRole(const AccessibilityTypes::Role role);
 
   // Returns an instance of a wrapper class implementing the (platform-specific)
   // accessibility interface for a given View. If one exists, it will be
@@ -705,6 +696,12 @@ class View : public AcceleratorTarget {
   // Default implementation does nothing. Override as needed.
   virtual void OnMouseExited(const MouseEvent& event);
 
+#if defined(TOUCH_UI)
+  // This method is invoked for each touch event. Default implementation
+  // does nothing. Override as needed.
+  virtual bool OnTouchEvent(const TouchEvent& event);
+#endif
+
   // Set the MouseHandler for a drag session.
   //
   // A drag session is a stream of mouse events starting
@@ -712,7 +709,7 @@ class View : public AcceleratorTarget {
   // events and finishing with a MouseReleased event.
   //
   // This method should be only invoked while processing a
-  // MouseDragged or MouseReleased event.
+  // MouseDragged or MousePressed event.
   //
   // All further mouse dragged and mouse up events will be sent
   // the MouseHandler, even if it is reparented to another window.
@@ -1160,6 +1157,13 @@ class View : public AcceleratorTarget {
   bool ProcessMouseDragged(const MouseEvent& e, DragInfo* drop_info);
   void ProcessMouseReleased(const MouseEvent& e, bool canceled);
 
+#if defined(TOUCH_UI)
+  // RootView will invoke this with incoming TouchEvents. Returns the
+  // the result of OnTouchEvent: true if the event was handled by the
+  // callee.
+  bool ProcessTouchEvent(const TouchEvent& e);
+#endif
+
   // Starts a drag and drop operation originating from this view. This invokes
   // WriteDragData to write the data and GetDragOperations to determine the
   // supported drag operations. When done, OnDragDone is invoked.
@@ -1291,9 +1295,6 @@ class View : public AcceleratorTarget {
 
   // Name for this view, which can be retrieved by accessibility APIs.
   std::wstring accessible_name_;
-
-  // Role for this view, which can be retrieved by accessibility APIs.
-  AccessibilityTypes::Role accessible_role_;
 
   // Next view to be focused when the Tab key is pressed.
   View* next_focusable_view_;

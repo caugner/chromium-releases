@@ -31,7 +31,6 @@
 #include "base/platform_file.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
-#include "base/time.h"
 
 #if defined(OS_POSIX)
 #include "base/eintr_wrapper.h"
@@ -282,14 +281,6 @@ bool CreateTemporaryDirInDir(const FilePath& base_dir,
 // already exists.  The directory is only readable by the current user.
 bool CreateDirectory(const FilePath& full_path);
 
-#if defined(OS_WIN)
-// Added for debugging an issue where CreateDirectory() fails.  LOG(*) does
-// not work, because the failure happens in a sandboxed process.
-// TODO(skerner): Remove once crbug/35198 is resolved.
-bool CreateDirectoryExtraLogging(const FilePath& full_path,
-                                 std::ostream& error);
-#endif  // defined (OS_WIN)
-
 // Returns the file size. Returns true on success.
 bool GetFileSize(const FilePath& file_path, int64* file_size);
 
@@ -318,8 +309,14 @@ bool NormalizeToNativeFilePath(const FilePath& path, FilePath* nt_path);
 // Returns information about the given file path.
 bool GetFileInfo(const FilePath& file_path, base::PlatformFileInfo* info);
 
+// Sets the time of the last access and the time of the last modification.
+bool TouchFile(const FilePath& path,
+               const base::Time& last_accessed,
+               const base::Time& last_modified);
+
 // Set the time of the last modification. Useful for unit tests.
-bool SetLastModifiedTime(const FilePath& file_path, base::Time last_modified);
+bool SetLastModifiedTime(const FilePath& path,
+                         const base::Time& last_modified);
 
 #if defined(OS_POSIX)
 // Store inode number of |path| in |inode|. Return true on success.

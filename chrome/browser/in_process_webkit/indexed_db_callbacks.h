@@ -7,7 +7,6 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "chrome/common/indexed_db_key.h"
@@ -15,8 +14,9 @@
 #include "chrome/common/serialized_script_value.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebIDBCallbacks.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebIDBCursor.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebIDBDatabaseError.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBTransaction.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
 
 // Template magic to figure out what message to send to the renderer based on
 // which (overloaded) onSuccess method we expect to be called.
@@ -29,6 +29,9 @@ template <> struct WebIDBToMsgHelper<WebKit::WebIDBIndex> {
 };
 template <> struct WebIDBToMsgHelper<WebKit::WebIDBObjectStore> {
   typedef ViewMsg_IDBCallbacksSuccessIDBObjectStore MsgType;
+};
+template <> struct WebIDBToMsgHelper<WebKit::WebIDBTransaction> {
+  typedef ViewMsg_IDBCallbacksSuccessIDBTransaction MsgType;
 };
 
 // The code the following two classes share.
@@ -89,7 +92,7 @@ class IndexedDBCallbacks<WebKit::WebIDBCursor>
   virtual void onSuccess(WebKit::WebIDBCursor* idb_object) {
     int32 object_id = dispatcher_host()->Add(idb_object);
     dispatcher_host()->Send(
-        new ViewMsg_IDBCallbackSuccessOpenCursor(response_id(), object_id));
+        new ViewMsg_IDBCallbacksSuccessIDBCursor(response_id(), object_id));
   }
 
   virtual void onSuccess() {
@@ -161,25 +164,31 @@ class IndexedDBCallbacks<void> : public IndexedDBCallbacksBase {
 
 class IndexedDBTransactionCallbacks
     : public WebKit::WebIDBTransactionCallbacks {
-public:
-  IndexedDBTransactionCallbacks(
-      IndexedDBDispatcherHost* dispatcher_host, int transaction_id)
-      : dispatcher_host_(dispatcher_host), transaction_id_(transaction_id) {
+ public:
+  IndexedDBTransactionCallbacks(IndexedDBDispatcherHost* dispatcher_host,
+                                int transaction_id)
+      : dispatcher_host_(dispatcher_host),
+        transaction_id_(transaction_id) {
   }
 
   virtual void onAbort() {
-    dispatcher_host_->Send(new ViewMsg_IDBTransactionCallbacksAbort(
-        transaction_id_));
+    dispatcher_host_->Send(
+        new ViewMsg_IDBTransactionCallbacksAbort(transaction_id_));
   }
 
-  virtual int id() const {
-    return transaction_id_;
+  virtual void onComplete() {
+    dispatcher_host_->Send(
+        new ViewMsg_IDBTransactionCallbacksComplete(transaction_id_));
   }
 
-private:
+  virtual void onTimeout() {
+    dispatcher_host_->Send(
+        new ViewMsg_IDBTransactionCallbacksTimeout(transaction_id_));
+  }
+
+ private:
   scoped_refptr<IndexedDBDispatcherHost> dispatcher_host_;
   int transaction_id_;
 };
 
 #endif  // CHROME_BROWSER_IN_PROCESS_WEBKIT_INDEXED_DB_CALLBACKS_H_
-

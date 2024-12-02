@@ -31,12 +31,13 @@ class KeyboardAccessTest : public UITest {
   //
   // If alternate_key_sequence is true, use "Alt" instead of "F10" to
   // open the menu bar, and "Down" instead of "Enter" to open a menu.
-  void TestMenuKeyboardAccess(bool alternate_key_sequence);
+  void TestMenuKeyboardAccess(bool alternate_key_sequence, int modifiers);
 
   DISALLOW_COPY_AND_ASSIGN(KeyboardAccessTest);
 };
 
-void KeyboardAccessTest::TestMenuKeyboardAccess(bool alternate_key_sequence) {
+void KeyboardAccessTest::TestMenuKeyboardAccess(bool alternate_key_sequence,
+                                                int modifiers) {
   scoped_refptr<BrowserProxy> browser = automation()->GetBrowserWindow(0);
   ASSERT_TRUE(browser.get());
   scoped_refptr<WindowProxy> window = browser->GetWindow();
@@ -66,7 +67,17 @@ void KeyboardAccessTest::TestMenuKeyboardAccess(bool alternate_key_sequence) {
   // menu key there.
   menu_key = app::VKEY_MENU;
 #endif
-  ASSERT_TRUE(window->SimulateOSKeyPress(menu_key, 0));
+  ASSERT_TRUE(window->SimulateOSKeyPress(menu_key, modifiers));
+
+  if (modifiers) {
+    // Verify Chrome does not move the view focus. We should not move the view
+    // focus when typing a menu key with modifier keys, such as shift keys or
+    // control keys.
+    int new_view_id = -1;
+    ASSERT_TRUE(window->GetFocusedViewID(&new_view_id));
+    ASSERT_EQ(original_view_id, new_view_id);
+    return;
+  }
 
   int new_view_id = -1;
   ASSERT_TRUE(window->WaitForFocusedViewIDToChange(
@@ -87,7 +98,7 @@ void KeyboardAccessTest::TestMenuKeyboardAccess(bool alternate_key_sequence) {
   ASSERT_TRUE(window->SimulateOSKeyPress(app::VKEY_RETURN, 0));
 
   // Wait for the new tab to appear.
-  ASSERT_TRUE(browser->WaitForTabCountToBecome(2, action_timeout_ms()));
+  ASSERT_TRUE(browser->WaitForTabCountToBecome(2));
 
   // Make sure that the new tab index is 1.
   ASSERT_TRUE(browser->GetActiveTabIndex(&tab_index));
@@ -95,15 +106,28 @@ void KeyboardAccessTest::TestMenuKeyboardAccess(bool alternate_key_sequence) {
 }
 
 TEST_F(KeyboardAccessTest, TestMenuKeyboardAccess) {
-  TestMenuKeyboardAccess(false);
+  TestMenuKeyboardAccess(false, 0);
 }
 
 TEST_F(KeyboardAccessTest, TestAltMenuKeyboardAccess) {
-  TestMenuKeyboardAccess(true);
+  TestMenuKeyboardAccess(true, 0);
 }
 
-// Fails, http://crbug.com/50760.
-TEST_F(KeyboardAccessTest, FAILS_ReserveKeyboardAccelerators) {
+TEST_F(KeyboardAccessTest, TestShiftAltMenuKeyboardAccess) {
+  TestMenuKeyboardAccess(true, views::Event::EF_SHIFT_DOWN);
+}
+
+// TODO(isherman): This test times out on ChromeOS.  We should merge it with
+// BrowserKeyEventsTest.ReservedAccelerators, but just disable for now.
+#if defined(OS_CHROMEOS)
+#define MAYBE_ReserveKeyboardAccelerators DISABLED_ReserveKeyboardAccelerators
+#else
+#define MAYBE_ReserveKeyboardAccelerators ReserveKeyboardAccelerators
+#endif
+
+// Test that JavaScript cannot intercept reserved keyboard accelerators like
+// ctrl-t to open a new tab or ctrl-f4 to close a tab.
+TEST_F(KeyboardAccessTest, MAYBE_ReserveKeyboardAccelerators) {
   const std::string kBadPage =
       "<html><script>"
       "document.onkeydown = function() {"
@@ -132,7 +156,7 @@ TEST_F(KeyboardAccessTest, FAILS_ReserveKeyboardAccelerators) {
   ASSERT_TRUE(browser->ActivateTab(1));
   ASSERT_TRUE(window->SimulateOSKeyPress(
       app::VKEY_F4, views::Event::EF_CONTROL_DOWN));
-  ASSERT_TRUE(browser->WaitForTabCountToBecome(1, action_max_timeout_ms()));
+  ASSERT_TRUE(browser->WaitForTabCountToBecome(1));
 #endif
 }
 

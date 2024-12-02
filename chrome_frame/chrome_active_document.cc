@@ -43,9 +43,6 @@
 #include "chrome_frame/crash_reporting/crash_metrics.h"
 #include "chrome_frame/utils.h"
 
-static const wchar_t kUseChromeNetworking[] = L"UseChromeNetworking";
-static const wchar_t kHandleTopLevelRequests[] = L"HandleTopLevelRequests";
-
 DEFINE_GUID(CGID_DocHostCmdPriv, 0x000214D4L, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0,
             0x46);
 
@@ -96,10 +93,7 @@ HRESULT ChromeActiveDocument::FinalConstruct() {
       return hr;
   }
 
-  bool chrome_network = GetConfigBool(false, kUseChromeNetworking);
-  bool top_level_requests = GetConfigBool(true, kHandleTopLevelRequests);
-  automation_client_->set_use_chrome_network(chrome_network);
-  automation_client_->set_handle_top_level_requests(top_level_requests);
+  InitializeAutomationSettings();
 
   find_dialog_.Init(automation_client_.get());
 
@@ -266,14 +260,19 @@ STDMETHODIMP ChromeActiveDocument::Load(BOOL fully_avalable,
   }
 
   std::string referrer(mgr ? mgr->referrer() : EmptyString());
+  RendererType renderer_type = cf_url.is_chrome_protocol() ?
+      RENDERER_TYPE_CHROME_GCF_PROTOCOL : RENDERER_TYPE_UNDETERMINED;
 
   // With CTransaction patch we have more robust way to grab the referrer for
   // each top-level-switch-to-CF request by peeking at our sniffing data
-  // object that lives inside the bind context.
+  // object that lives inside the bind context.  We also remember the reason
+  // we're rendering the document in Chrome.
   if (g_patch_helper.state() == PatchHelper::PATCH_PROTOCOL && info) {
     scoped_refptr<ProtData> prot_data = info->get_prot_data();
-    if (prot_data)
+    if (prot_data) {
       referrer = prot_data->referrer();
+      renderer_type = prot_data->renderer_type();
+    }
   }
 
   // For gcf: URLs allow only about and view-source schemes to pass through for
@@ -294,9 +293,14 @@ STDMETHODIMP ChromeActiveDocument::Load(BOOL fully_avalable,
   if (!cf_url.is_chrome_protocol() && !cf_url.attach_to_external_tab())
     url_fetcher_->SetInfoForUrl(url.c_str(), moniker_name, bind_context);
 
-  THREAD_SAFE_UMA_HISTOGRAM_CUSTOM_COUNTS("ChromeFrame.FullTabLaunchType",
-                                          cf_url.is_chrome_protocol(),
-                                          0, 1, 2);
+  // Log a metric indicating why GCF is rendering in Chrome.
+  // (Note: we only track the renderer type when using the CTransaction patch.
+  // When the code for the browser service patch and for the moniker patch is
+  // removed, this conditional can also go away.)
+  if (RENDERER_TYPE_UNDETERMINED != renderer_type) {
+    THREAD_SAFE_UMA_LAUNCH_TYPE_COUNT(renderer_type);
+  }
+
   return S_OK;
 }
 
@@ -697,9 +701,6 @@ void ChromeActiveDocument::UpdateNavigationState(
   if (is_ssl_state_changed) {
     int lock_status = SECURELOCK_SET_UNSECURE;
     switch (new_navigation_info.security_style) {
-      case SECURITY_STYLE_AUTHENTICATION_BROKEN:
-        lock_status = SECURELOCK_SET_SECUREUNKNOWNBIT;
-        break;
       case SECURITY_STYLE_AUTHENTICATED:
         lock_status = new_navigation_info.displayed_insecure_content ?
             SECURELOCK_SET_MIXED : SECURELOCK_SET_SECUREUNKNOWNBIT;
@@ -885,6 +886,19 @@ void ChromeActiveDocument::OnSetZoomRange(const GUID* cmd_group_guid,
   }
 }
 
+void ChromeActiveDocument::OnUnload(const GUID* cmd_group_guid,
+                                    DWORD command_id,
+                                    DWORD cmd_exec_opt,
+                                    VARIANT* in_args,
+                                    VARIANT* out_args) {
+  if (IsValid() && out_args) {
+    bool should_unload = true;
+    automation_client_->OnUnload(&should_unload);
+    out_args->vt = VT_BOOL;
+    out_args->boolVal = should_unload ? VARIANT_TRUE : VARIANT_FALSE;
+  }
+}
+
 void ChromeActiveDocument::OnOpenURL(int tab_handle,
                                      const GURL& url_to_open,
                                      const GURL& referrer,
@@ -917,8 +931,8 @@ void ChromeActiveDocument::OnAttachExternalTab(int tab_handle,
 
   HRESULT hr = S_OK;
   if (popup_manager_) {
-    LPCWSTR popup_wnd_url = UTF8ToWide(params.url.spec()).c_str();
-    hr = popup_manager_->EvaluateNewWindow(popup_wnd_url, NULL, url_,
+    const std::wstring& url_wide = UTF8ToWide(params.url.spec());
+    hr = popup_manager_->EvaluateNewWindow(url_wide.c_str(), NULL, url_,
         NULL, FALSE, flags, 0);
   }
   // Allow popup
@@ -1023,8 +1037,13 @@ bool ChromeActiveDocument::LaunchUrl(const ChromeFrameUrl& cf_url,
   if (launch_params_) {
     return automation_client_->Initialize(this, launch_params_);
   } else {
-    return InitializeAutomation(GetHostProcessName(false), L"", IsIEInPrivate(),
-                                false, cf_url.gurl(), GURL(referrer));
+    std::wstring profile = UTF8ToWide(cf_url.profile_name());
+    // If no profile was given, then make use of the host process's name.
+    if (profile.empty())
+      profile = GetHostProcessName(false);
+    return InitializeAutomation(profile, L"", IsIEInPrivate(),
+                                false, cf_url.gurl(), GURL(referrer),
+                                false);
   }
 }
 

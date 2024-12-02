@@ -37,6 +37,7 @@ class ChromeURLRequestContext;
 class DatabaseDispatcherHost;
 class DOMStorageDispatcherHost;
 class FileSystemDispatcherHost;
+class FileUtilitiesDispatcherHost;
 struct FontDescriptor;
 class GeolocationDispatcherHost;
 class HostZoomMap;
@@ -130,8 +131,6 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
  private:
   friend class ChromeThread;
   friend class DeleteTask<ResourceMessageFilter>;
-  typedef void (*FileInfoWriteFunc)(IPC::Message* reply_msg,
-                                    const base::PlatformFileInfo& file_info);
 
   virtual ~ResourceMessageFilter();
 
@@ -183,13 +182,18 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void OnGetPluginInfo(const GURL& url,
                        const GURL& policy_url,
                        const std::string& mime_type,
-                       bool* found,
-                       WebPluginInfo* info,
-                       ContentSetting* setting,
-                       std::string* actual_mime_type);
+                       IPC::Message* reply_msg);
+  void OnGetPluginInfoOnFileThread(const GURL& url,
+                                   const GURL& policy_url,
+                                   const std::string& mime_type,
+                                   IPC::Message* reply_msg);
+  void OnGotPluginInfo(bool found,
+                       WebPluginInfo info,
+                       const std::string& actual_mime_type,
+                       const GURL& policy_url,
+                       IPC::Message* reply_msg);
   void OnOpenChannelToPlugin(const GURL& url,
                              const std::string& mime_type,
-                             const std::string& locale,
                              IPC::Message* reply_msg);
   void OnLaunchNaCl(const std::wstring& url,
                     int channel_descriptor,
@@ -286,8 +290,15 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                                       int v8_memory_used,
                                       base::ProcessId renderer_id);
 
-  void OnDidZoomURL(const GURL& url, int zoom_level);
-  void UpdateHostZoomLevelsOnUIThread(const GURL& url, int zoom_level);
+  void OnDidZoomURL(const IPC::Message& message,
+                    double zoom_level,
+                    bool remember,
+                    const GURL& url);
+  void UpdateHostZoomLevelsOnUIThread(double zoom_level,
+                                      bool remember,
+                                      const GURL& url,
+                                      int render_process_id,
+                                      int render_view_id);
 
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
 
@@ -303,7 +314,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void OnGetDefaultPrintSettingsReply(
       scoped_refptr<printing::PrinterQuery> printer_query,
       IPC::Message* reply_msg);
-#if defined(OS_WIN) || defined(OS_MACOSX)
+
   // A javascript code requested to print the current page. The renderer host
   // have to show to the user the print dialog and returns the selected print
   // settings.
@@ -313,7 +324,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
       scoped_refptr<printing::PrinterQuery> printer_query,
       int routing_id,
       IPC::Message* reply_msg);
-#endif
+
   // Browser side transport DIB allocation
   void OnAllocTransportDIB(size_t size,
                            bool cache_in_browser,
@@ -345,15 +356,6 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                                     double expected_response_time,
                                     const std::vector<char>& data);
   void OnEnableSpdy(bool enable);
-  void OnGetFileSize(const FilePath& path, IPC::Message* reply_msg);
-  void OnGetFileModificationTime(const FilePath& path, IPC::Message* reply_msg);
-  void OnGetFileInfoOnFileThread(const FilePath& path,
-                                 IPC::Message* reply_msg,
-                                 FileInfoWriteFunc write_func);
-  void OnOpenFile(const FilePath& path, int mode,IPC::Message* reply_msg);
-  void OnOpenFileOnFileThread(const FilePath& path,
-                              int mode,
-                              IPC::Message* reply_msg);
   void OnKeygen(uint32 key_size_index, const std::string& challenge_string,
                 const GURL& url, IPC::Message* reply_msg);
   void OnKeygenOnWorkerThread(
@@ -370,6 +372,15 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
       IPC::Message* reply_msg);
   void OnEstablishGpuChannel();
   void OnSynchronizeGpu(IPC::Message* reply);
+
+  void OnAsyncOpenFile(const IPC::Message& msg,
+                       const FilePath& path,
+                       int flags,
+                       int message_id);
+  void AsyncOpenFileOnFileThread(const FilePath& path,
+                                 int flags,
+                                 int message_id,
+                                 int routing_id);
 
 #if defined(USE_X11)
   void SendDelayedReply(IPC::Message* reply_msg);
@@ -483,6 +494,9 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
 
   // Handles blob related messages.
   scoped_ptr<BlobDispatcherHost> blob_dispatcher_host_;
+
+  // Handles file utilities messages.
+  scoped_refptr<FileUtilitiesDispatcherHost> file_utilities_dispatcher_host_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceMessageFilter);
 };

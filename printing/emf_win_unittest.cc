@@ -13,6 +13,8 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_handle_win.h"
+#include "base/scoped_ptr.h"
+#include "base/scoped_temp_dir.h"
 #include "printing/printing_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,11 +35,11 @@ class EmfPrintingTest : public testing::Test {
   }
 };
 
+const uint32 EMF_HEADER_SIZE = 128;
+
 }  // namespace
 
 TEST(EmfTest, DC) {
-  static const uint32 EMF_HEADER_SIZE = 128;
-
   // Simplest use case.
   printing::Emf emf;
   RECT rect = {100, 100, 200, 200};
@@ -58,7 +60,7 @@ TEST(EmfTest, DC) {
   // Playback the data.
   hdc = CreateCompatibleDC(NULL);
   EXPECT_TRUE(hdc);
-  EXPECT_TRUE(emf.CreateFromData(&data.front(), size));
+  EXPECT_TRUE(emf.Init(&data.front(), size));
   RECT output_rect = {0, 0, 10, 10};
   EXPECT_TRUE(emf.Playback(hdc, &output_rect));
   EXPECT_TRUE(DeleteDC(hdc));
@@ -75,8 +77,9 @@ TEST_F(EmfPrintingTest, Enumerate) {
   settings.set_device_name(L"UnitTest Printer");
 
   // Initialize it.
-  printing::PrintingContext context;
-  EXPECT_EQ(context.InitWithSettings(settings), printing::PrintingContext::OK);
+  scoped_ptr<printing::PrintingContext> context(
+      printing::PrintingContext::Create());
+  EXPECT_EQ(context->InitWithSettings(settings), printing::PrintingContext::OK);
 
   FilePath emf_file;
   EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &emf_file));
@@ -89,16 +92,16 @@ TEST_F(EmfPrintingTest, Enumerate) {
   std::string emf_data;
   file_util::ReadFileToString(emf_file, &emf_data);
   ASSERT_TRUE(emf_data.size());
-  EXPECT_TRUE(emf.CreateFromData(&emf_data[0], emf_data.size()));
+  EXPECT_TRUE(emf.Init(&emf_data[0], emf_data.size()));
 
   // This will print to file. The reason is that when running inside a
   // unit_test, printing::PrintingContext automatically dumps its files to the
   // current directory.
   // TODO(maruel):  Clean the .PRN file generated in current directory.
-  context.NewDocument(L"EmfTest.Enumerate");
-  context.NewPage();
+  context->NewDocument(L"EmfTest.Enumerate");
+  context->NewPage();
   // Process one at a time.
-  printing::Emf::Enumerator emf_enum(emf, context.context(),
+  printing::Emf::Enumerator emf_enum(emf, context->context(),
                                 &emf.GetBounds().ToRECT());
   for (printing::Emf::Enumerator::const_iterator itr = emf_enum.begin();
        itr != emf_enum.end();
@@ -111,8 +114,8 @@ TEST_F(EmfPrintingTest, Enumerate) {
     EXPECT_TRUE(itr->SafePlayback(NULL)) <<
         " index: " << index << " type: " << itr->record()->iType;
   }
-  context.PageDone();
-  context.DocumentDone();
+  context->PageDone();
+  context->DocumentDone();
 }
 
 // Disabled if no "UnitTest printer" exists.
@@ -142,7 +145,7 @@ TEST_F(EmfPrintingTest, PageBreak) {
   di.cbSize = sizeof(DOCINFO);
   di.lpszDocName = L"Test Job";
   int job_id = ::StartDoc(dc.Get(), &di);
-  EXPECT_TRUE(emf.CreateFromData(&data.front(), size));
+  EXPECT_TRUE(emf.Init(&data.front(), size));
   EXPECT_TRUE(emf.SafePlayback(dc.Get()));
   ::EndDoc(dc.Get());
   // Since presumably the printer is not real, let us just delete the job from
@@ -152,5 +155,42 @@ TEST_F(EmfPrintingTest, PageBreak) {
     ::SetJob(printer, job_id, 0, NULL, JOB_CONTROL_DELETE);
     ClosePrinter(printer);
   }
+}
+
+TEST(EmfTest, FileBackedDC) {
+  // Simplest use case.
+  printing::Emf emf;
+  RECT rect = {100, 100, 200, 200};
+  HDC hdc = CreateCompatibleDC(NULL);
+  EXPECT_TRUE(hdc != NULL);
+  ScopedTempDir scratch_metafile_dir;
+  ASSERT_TRUE(scratch_metafile_dir.CreateUniqueTempDir());
+  FilePath metafile_path;
+  EXPECT_TRUE(file_util::CreateTemporaryFileInDir(scratch_metafile_dir.path(),
+                                                  &metafile_path));
+  EXPECT_TRUE(emf.CreateFileBackedDc(hdc, &rect, metafile_path));
+  EXPECT_TRUE(emf.hdc() != NULL);
+  // In theory, you'd use the HDC with GDI functions here.
+  EXPECT_TRUE(emf.CloseDc());
+
+  uint32 size = emf.GetDataSize();
+  EXPECT_EQ(size, EMF_HEADER_SIZE);
+  std::vector<BYTE> data;
+  EXPECT_TRUE(emf.GetData(&data));
+  EXPECT_EQ(data.size(), size);
+  emf.CloseEmf();
+  int64 file_size = 0;
+  file_util::GetFileSize(metafile_path, &file_size);
+  EXPECT_EQ(size, file_size);
+  EXPECT_TRUE(DeleteDC(hdc));
+
+  // Playback the data.
+  hdc = CreateCompatibleDC(NULL);
+  EXPECT_TRUE(hdc);
+  EXPECT_TRUE(emf.CreateFromFile(metafile_path));
+  RECT output_rect = {0, 0, 10, 10};
+  EXPECT_TRUE(emf.Playback(hdc, &output_rect));
+  EXPECT_TRUE(DeleteDC(hdc));
+  emf.CloseEmf();
 }
 

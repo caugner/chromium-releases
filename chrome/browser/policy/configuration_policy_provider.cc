@@ -5,83 +5,20 @@
 #include "chrome/browser/policy/configuration_policy_provider.h"
 
 #include "base/values.h"
-#include "chrome/common/policy_constants.h"
 #include "chrome/common/notification_service.h"
 
-namespace {
+namespace policy {
 
-// TODO(avi): Use this mapping to auto-generate MCX manifests and Windows
-// ADM/ADMX files. http://crbug.com/49316
-
-struct InternalPolicyValueMapEntry {
-  ConfigurationPolicyStore::PolicyType policy_type;
-  Value::ValueType value_type;
-  const char* name;
-};
-
-const InternalPolicyValueMapEntry kPolicyValueMap[] = {
-  { ConfigurationPolicyStore::kPolicyHomePage,
-      Value::TYPE_STRING, policy::key::kHomepageLocation },
-  { ConfigurationPolicyStore::kPolicyHomepageIsNewTabPage,
-      Value::TYPE_BOOLEAN, policy::key::kHomepageIsNewTabPage },
-  { ConfigurationPolicyStore::kPolicyRestoreOnStartup,
-      Value::TYPE_INTEGER, policy::key::kRestoreOnStartup },
-  { ConfigurationPolicyStore::kPolicyURLsToRestoreOnStartup,
-      Value::TYPE_LIST, policy::key::kURLsToRestoreOnStartup },
-  { ConfigurationPolicyStore::kPolicyProxyServerMode,
-      Value::TYPE_INTEGER, policy::key::kProxyServerMode },
-  { ConfigurationPolicyStore::kPolicyProxyServer,
-      Value::TYPE_STRING, policy::key::kProxyServer },
-  { ConfigurationPolicyStore::kPolicyProxyPacUrl,
-      Value::TYPE_STRING, policy::key::kProxyPacUrl },
-  { ConfigurationPolicyStore::kPolicyProxyBypassList,
-      Value::TYPE_STRING, policy::key::kProxyBypassList },
-  { ConfigurationPolicyStore::kPolicyAlternateErrorPagesEnabled,
-      Value::TYPE_BOOLEAN, policy::key::kAlternateErrorPagesEnabled },
-  { ConfigurationPolicyStore::kPolicySearchSuggestEnabled,
-      Value::TYPE_BOOLEAN, policy::key::kSearchSuggestEnabled },
-  { ConfigurationPolicyStore::kPolicyDnsPrefetchingEnabled,
-      Value::TYPE_BOOLEAN, policy::key::kDnsPrefetchingEnabled },
-  { ConfigurationPolicyStore::kPolicySafeBrowsingEnabled,
-      Value::TYPE_BOOLEAN, policy::key::kSafeBrowsingEnabled },
-  { ConfigurationPolicyStore::kPolicyMetricsReportingEnabled,
-      Value::TYPE_BOOLEAN, policy::key::kMetricsReportingEnabled },
-  { ConfigurationPolicyStore::kPolicyPasswordManagerEnabled,
-      Value::TYPE_BOOLEAN, policy::key::kPasswordManagerEnabled },
-  { ConfigurationPolicyStore::kPolicyAutoFillEnabled,
-      Value::TYPE_BOOLEAN, policy::key::kAutoFillEnabled },
-  { ConfigurationPolicyStore::kPolicyDisabledPlugins,
-      Value::TYPE_LIST, policy::key::kDisabledPlugins },
-  { ConfigurationPolicyStore::kPolicyApplicationLocale,
-      Value::TYPE_STRING, policy::key::kApplicationLocaleValue },
-  { ConfigurationPolicyStore::kPolicySyncDisabled,
-      Value::TYPE_BOOLEAN, policy::key::kSyncDisabled },
-  { ConfigurationPolicyStore::kPolicyExtensionInstallAllowList,
-      Value::TYPE_LIST, policy::key::kExtensionInstallAllowList },
-  { ConfigurationPolicyStore::kPolicyExtensionInstallDenyList,
-      Value::TYPE_LIST, policy::key::kExtensionInstallDenyList },
-  { ConfigurationPolicyStore::kPolicyShowHomeButton,
-      Value::TYPE_BOOLEAN, policy::key::kShowHomeButton },
-};
-
-}  // namespace
-
-/* static */
-const ConfigurationPolicyProvider::PolicyValueMap*
-    ConfigurationPolicyProvider::PolicyValueMapping() {
-  static PolicyValueMap* mapping;
-  if (!mapping) {
-    mapping = new PolicyValueMap();
-    for (size_t i = 0; i < arraysize(kPolicyValueMap); ++i) {
-      const InternalPolicyValueMapEntry& internal_entry = kPolicyValueMap[i];
-      PolicyValueMapEntry entry;
-      entry.policy_type = internal_entry.policy_type;
-      entry.value_type = internal_entry.value_type;
-      entry.name = std::string(internal_entry.name);
-      mapping->push_back(entry);
-    }
+ConfigurationPolicyProvider::ConfigurationPolicyProvider(
+    const StaticPolicyValueMap& policy_map) {
+  for (size_t i = 0; i < policy_map.entry_count; ++i) {
+    PolicyValueMapEntry entry = {
+      policy_map.entries[i].policy_type,
+      policy_map.entries[i].value_type,
+      std::string(policy_map.entries[i].name)
+    };
+    policy_value_map_.push_back(entry);
   }
-  return mapping;
 }
 
 void ConfigurationPolicyProvider::NotifyStoreOfPolicyChange() {
@@ -90,3 +27,5 @@ void ConfigurationPolicyProvider::NotifyStoreOfPolicyChange() {
       Source<ConfigurationPolicyProvider>(this),
       NotificationService::NoDetails());
 }
+
+}  // namespace policy

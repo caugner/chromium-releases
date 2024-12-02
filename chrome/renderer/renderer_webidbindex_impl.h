@@ -17,8 +17,28 @@ class RendererWebIDBIndexImpl : public WebKit::WebIDBIndex {
 
   // WebKit::WebIDBIndex
   virtual WebKit::WebString name() const;
+  virtual WebKit::WebString storeName() const;
   virtual WebKit::WebString keyPath() const;
   virtual bool unique() const;
+
+  virtual void openObjectCursor(const WebKit::WebIDBKeyRange& range,
+                                unsigned short direction,
+                                WebKit::WebIDBCallbacks* callbacks,
+                                const WebKit::WebIDBTransaction& transaction,
+                                WebKit::WebExceptionCode& ec);
+  virtual void openKeyCursor(const WebKit::WebIDBKeyRange& range,
+                             unsigned short direction,
+                             WebKit::WebIDBCallbacks* callbacks,
+                             const WebKit::WebIDBTransaction& transaction,
+                             WebKit::WebExceptionCode& ec);
+  virtual void getObject(const WebKit::WebIDBKey& key,
+                         WebKit::WebIDBCallbacks* callbacks,
+                         const WebKit::WebIDBTransaction& transaction,
+                         WebKit::WebExceptionCode& ec);
+  virtual void getKey(const WebKit::WebIDBKey& key,
+                      WebKit::WebIDBCallbacks* callbacks,
+                      const WebKit::WebIDBTransaction& transaction,
+                      WebKit::WebExceptionCode& ec);
 
  private:
   int32 idb_index_id_;

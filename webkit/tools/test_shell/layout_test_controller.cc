@@ -8,16 +8,21 @@
 
 #include "webkit/tools/test_shell/layout_test_controller.h"
 
+#include "base/base64.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "net/base/net_util.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAnimationController.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDeviceOrientation.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
@@ -25,7 +30,9 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSettings.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputControllerMock.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/dom_operations.h"
@@ -60,6 +67,7 @@ bool LayoutTestController::dump_as_text_ = false;
 bool LayoutTestController::dump_editing_callbacks_ = false;
 bool LayoutTestController::dump_frame_load_callbacks_ = false;
 bool LayoutTestController::dump_resource_load_callbacks_ = false;
+bool LayoutTestController::dump_resource_response_mime_types_ = false;
 bool LayoutTestController::dump_back_forward_list_ = false;
 bool LayoutTestController::dump_child_frame_scroll_positions_ = false;
 bool LayoutTestController::dump_child_frames_as_text_ = false;
@@ -98,6 +106,7 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindMethod("dumpBackForwardList", &LayoutTestController::dumpBackForwardList);
   BindMethod("dumpFrameLoadCallbacks", &LayoutTestController::dumpFrameLoadCallbacks);
   BindMethod("dumpResourceLoadCallbacks", &LayoutTestController::dumpResourceLoadCallbacks);
+  BindMethod("dumpResourceResponseMIMETypes", &LayoutTestController::dumpResourceResponseMIMETypes);
   BindMethod("dumpStatusCallbacks", &LayoutTestController::dumpWindowStatusChanges);
   BindMethod("dumpTitleChanges", &LayoutTestController::dumpTitleChanges);
   BindMethod("setAcceptsEditing", &LayoutTestController::setAcceptsEditing);
@@ -157,6 +166,8 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindMethod("numberOfPages", &LayoutTestController::numberOfPages);
   BindMethod("dumpSelectionRect", &LayoutTestController::dumpSelectionRect);
   BindMethod("grantDesktopNotificationPermission", &LayoutTestController::grantDesktopNotificationPermission);
+  BindMethod("setDomainRelaxationForbiddenForURLScheme", &LayoutTestController::setDomainRelaxationForbiddenForURLScheme);
+  BindMethod("sampleSVGAnimationForElementAtTime", &LayoutTestController::sampleSVGAnimationForElementAtTime);
 
   // The following are stubs.
   BindMethod("dumpAsWebArchive", &LayoutTestController::dumpAsWebArchive);
@@ -185,12 +196,16 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindMethod("setTimelineProfilingEnabled", &LayoutTestController::setTimelineProfilingEnabled);
   BindMethod("evaluateInWebInspector", &LayoutTestController::evaluateInWebInspector);
   BindMethod("forceRedSelectionColors", &LayoutTestController::forceRedSelectionColors);
+  BindMethod("setEditingBehavior", &LayoutTestController::setEditingBehavior);
 
   BindMethod("setGeolocationPermission", &LayoutTestController::setGeolocationPermission);
   BindMethod("setMockGeolocationPosition", &LayoutTestController::setMockGeolocationPosition);
   BindMethod("setMockGeolocationError", &LayoutTestController::setMockGeolocationError);
 
   BindMethod("markerTextForListItem", &LayoutTestController::markerTextForListItem);
+
+  BindMethod("setMockDeviceOrientation", &LayoutTestController::setMockDeviceOrientation);
+  BindMethod("setMockSpeechInputResult", &LayoutTestController::setMockSpeechInputResult);
 
   // The fallback method is called when an unknown method is invoked.
   BindFallbackMethod(&LayoutTestController::fallbackMethod);
@@ -292,6 +307,12 @@ void LayoutTestController::dumpFrameLoadCallbacks(
 void LayoutTestController::dumpResourceLoadCallbacks(
     const CppArgumentList& args, CppVariant* result) {
   dump_resource_load_callbacks_ = true;
+  result->SetNull();
+}
+
+void LayoutTestController::dumpResourceResponseMIMETypes(
+    const CppArgumentList& args, CppVariant* result) {
+  dump_resource_response_mime_types_ = true;
   result->SetNull();
 }
 
@@ -497,12 +518,27 @@ void LayoutTestController::Reset() {
         0xff1e90ff, 0xff000000, 0xffc8c8c8, 0xff323232);
 #endif  // defined(TOOLKIT_GTK)
     shell_->webView()->removeAllUserContent();
+
+    // Reset editingBehavior to a reasonable default between tests
+    // see http://trac.webkit.org/changeset/60158
+    // DumpRenderTree resets this in TestShell::resetWebSettings()
+    // called in TestShell::resetTestController().
+    // test_shell doesn't have ResetWebSettings(), so do this here,
+    // which is also called in TestShell::ResetTestController().
+#if defined(OS_MACOSX)
+    shell_->webView()->settings()->setEditingBehavior(
+        WebKit::WebSettings::EditingBehaviorMac);
+#else
+    shell_->webView()->settings()->setEditingBehavior(
+        WebKit::WebSettings::EditingBehaviorWin);
+#endif
   }
   generate_pixel_results_ = true;
   dump_as_text_ = false;
   dump_editing_callbacks_ = false;
   dump_frame_load_callbacks_ = false;
   dump_resource_load_callbacks_ = false;
+  dump_resource_response_mime_types_ = false;
   dump_back_forward_list_ = false;
   dump_child_frame_scroll_positions_ = false;
   dump_child_frames_as_text_ = false;
@@ -635,12 +671,28 @@ void LayoutTestController::setUserStyleSheetEnabled(
 
 void LayoutTestController::setUserStyleSheetLocation(
     const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
   if (args.size() > 0 && args[0].isString()) {
     GURL location(TestShell::RewriteLocalUrl(args[0].ToString()));
+
+    FilePath local_path;
+    if (!net::FileURLToFilePath(location, &local_path))
+      return;
+
+    std::string contents;
+    if (!file_util::ReadFileToString(local_path, &contents))
+      return;
+
+    std::string contents_base64;
+    if (!base::Base64Encode(contents, &contents_base64))
+      return;
+
+    const char kDataUrlPrefix[] = "data:text/css;charset=utf-8;base64,";
+    location = GURL(kDataUrlPrefix + contents_base64);
+
     shell_->delegate()->SetUserStyleSheetLocation(location);
   }
-
-  result->SetNull();
 }
 
 void LayoutTestController::setAuthorAndUserStylesEnabled(
@@ -853,7 +905,7 @@ void LayoutTestController::suspendAnimations(
 
   WebKit::WebAnimationController* controller = web_frame->animationController();
   if (!controller)
-    return;  
+    return;
   controller->suspendAnimations();
 }
 
@@ -917,6 +969,28 @@ void LayoutTestController::grantDesktopNotificationPermission(
   std::string origin = args[0].ToString();
   shell_->notification_presenter()->grantPermission(origin);
   result->Set(true);
+}
+
+void LayoutTestController::setDomainRelaxationForbiddenForURLScheme(
+    const CppArgumentList& args, CppVariant* result) {
+  if (args.size() != 2 || !args[0].isBool() || !args[1].isString())
+    return;
+
+  shell_->webView()->setDomainRelaxationForbidden(
+      CppVariantToBool(args[0]), WebString::fromUTF8(args[1].ToString()));
+}
+
+void LayoutTestController::sampleSVGAnimationForElementAtTime(
+    const CppArgumentList& args, CppVariant* result) {
+  if (args.size() != 3) {
+    result->SetNull();
+    return;
+  }
+  bool success = shell_->webView()->mainFrame()->pauseSVGAnimation(
+      WebString::fromUTF8(args[0].ToString()),
+      args[1].ToDouble(),
+      WebString::fromUTF8(args[2].ToString()));
+  result->Set(success);
 }
 
 //
@@ -1051,6 +1125,15 @@ void LayoutTestController::setAllowFileAccessFromFileURLs(
   result->SetNull();
 }
 
+void LayoutTestController::setMockSpeechInputResult(const CppArgumentList& args,
+                                                    CppVariant* result) {
+  if (args.size() > 0 && args[0].isString()) {
+    shell_->speech_input_controller_mock()->setMockRecognitionResult(
+        WebString::fromUTF8(args[0].ToString()));
+  }
+  result->SetNull();
+}
+
 // Need these conversions because the format of the value for booleans
 // may vary - for example, on mac "1" and "0" are used for boolean.
 bool LayoutTestController::CppVariantToBool(const CppVariant& value) {
@@ -1152,6 +1235,10 @@ void LayoutTestController::overridePreference(
       preferences->tabs_to_links = CppVariantToBool(value);
     else if (key == "WebKitWebGLEnabled")
       preferences->experimental_webgl_enabled = CppVariantToBool(value);
+    else if (key == "WebKitEnableCaretBrowsing")
+      preferences->caret_browsing_enabled = CppVariantToBool(value);
+    else if (key == "WebKitHyperlinkAuditingEnabled")
+      preferences->hyperlink_auditing_enabled = CppVariantToBool(value);
     else {
       std::string message("Invalid name for preference: ");
       message.append(key);
@@ -1345,18 +1432,48 @@ void LayoutTestController::forceRedSelectionColors(const CppArgumentList& args,
 void LayoutTestController::addUserScript(const CppArgumentList& args,
                                          CppVariant* result) {
   result->SetNull();
-  if (args.size() < 2 || !args[0].isString() || !args[1].isBool())
+  if (args.size() < 3 || !args[0].isString() || !args[1].isBool() ||
+      !args[2].isBool())
     return;
-  shell_->webView()->addUserScript(WebString::fromUTF8(args[0].ToString()),
-                                   args[1].ToBoolean());
+  WebKit::WebView::addUserScript(
+      WebString::fromUTF8(args[0].ToString()),
+      WebKit::WebVector<WebString>(),
+      args[1].ToBoolean() ?
+          WebKit::WebView::UserScriptInjectAtDocumentStart :
+          WebKit::WebView::UserScriptInjectAtDocumentEnd,
+      args[2].ToBoolean() ?
+          WebKit::WebView::UserContentInjectInAllFrames :
+          WebKit::WebView::UserContentInjectInTopFrameOnly);
 }
 
 void LayoutTestController::addUserStyleSheet(const CppArgumentList& args,
                                              CppVariant* result) {
   result->SetNull();
-  if (args.size() < 1 || !args[0].isString())
+  if (args.size() < 2 || !args[0].isString() || !args[1].isBool())
     return;
-  shell_->webView()->addUserStyleSheet(WebString::fromUTF8(args[0].ToString()));
+  WebKit::WebView::addUserStyleSheet(
+      WebString::fromUTF8(args[0].ToString()),
+      WebKit::WebVector<WebString>(),
+      args[1].ToBoolean() ?
+          WebKit::WebView::UserContentInjectInAllFrames :
+          WebKit::WebView::UserContentInjectInTopFrameOnly,
+      WebKit::WebView::UserStyleInjectInExistingDocuments);
+}
+
+void LayoutTestController::setEditingBehavior(const CppArgumentList& args,
+                                              CppVariant* result) {
+  result->SetNull();
+  WebString key = WebString::fromUTF8(args[0].ToString());
+  if (key == "mac") {
+    shell_->webView()->settings()->setEditingBehavior(
+        WebKit::WebSettings::EditingBehaviorMac);
+  } else if (key == "win") {
+    shell_->webView()->settings()->setEditingBehavior(
+        WebKit::WebSettings::EditingBehaviorWin);
+  } else {
+    LogErrorToConsole("Passed invalid editing bahavior. "
+                      "Should be 'mac' or 'win'.");
+  }
 }
 
 void LayoutTestController::setGeolocationPermission(const CppArgumentList& args,
@@ -1392,4 +1509,21 @@ void LayoutTestController::markerTextForListItem(const CppArgumentList& args,
   else
     result->Set(
         element.document().frame()->markerTextForListItem(element).utf8());
+}
+
+void LayoutTestController::setMockDeviceOrientation(const CppArgumentList& args,
+                                                    CppVariant* result) {
+  if (args.size() < 6 ||
+      !args[0].isBool() || !args[1].isNumber() ||
+      !args[2].isBool() || !args[3].isNumber() ||
+      !args[4].isBool() || !args[5].isNumber())
+    return;
+  WebKit::WebDeviceOrientation orientation(args[0].ToBoolean(),
+                                           args[1].ToDouble(),
+                                           args[2].ToBoolean(),
+                                           args[3].ToDouble(),
+                                           args[4].ToBoolean(),
+                                           args[5].ToDouble());
+
+  shell_->device_orientation_client_mock()->setOrientation(orientation);
 }

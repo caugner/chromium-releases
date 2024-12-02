@@ -59,6 +59,12 @@ struct IsEnclosedBy {
 
 namespace net {
 
+HttpAuthCache::HttpAuthCache() {
+}
+
+HttpAuthCache::~HttpAuthCache() {
+}
+
 // Performance: O(n), where n is the number of realm entries.
 HttpAuthCache::Entry* HttpAuthCache::Lookup(const GURL& origin,
                                             const std::string& realm,
@@ -134,6 +140,9 @@ HttpAuthCache::Entry* HttpAuthCache::Add(const GURL& origin,
   return entry;
 }
 
+HttpAuthCache::Entry::~Entry() {
+}
+
 HttpAuthCache::Entry::Entry()
     : nonce_count_(0) {
 }
@@ -166,6 +175,12 @@ bool HttpAuthCache::Entry::HasEnclosingPath(const std::string& dir) {
   return false;
 }
 
+void HttpAuthCache::Entry::UpdateStaleChallenge(
+    const std::string& auth_challenge) {
+  auth_challenge_ = auth_challenge;
+  nonce_count_ = 1;
+}
+
 bool HttpAuthCache::Remove(const GURL& origin,
                            const std::string& realm,
                            const std::string& scheme,
@@ -182,6 +197,17 @@ bool HttpAuthCache::Remove(const GURL& origin,
     }
   }
   return false;
+}
+
+bool HttpAuthCache::UpdateStaleChallenge(const GURL& origin,
+                                         const std::string& realm,
+                                         const std::string& scheme,
+                                         const std::string& auth_challenge) {
+  HttpAuthCache::Entry* entry = Lookup(origin, realm, scheme);
+  if (!entry)
+    return false;
+  entry->UpdateStaleChallenge(auth_challenge);
+  return true;
 }
 
 }  // namespace net

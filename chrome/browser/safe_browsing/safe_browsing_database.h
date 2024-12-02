@@ -91,6 +91,27 @@ class SafeBrowsingDatabase {
 
   // The name of the bloom-filter file for the given database file.
   static FilePath BloomFilterForFilename(const FilePath& db_filename);
+
+  // Enumerate failures for histogramming purposes.  DO NOT CHANGE THE
+  // ORDERING OF THESE VALUES.
+  enum FailureType {
+    FAILURE_DATABASE_CORRUPT,
+    FAILURE_DATABASE_CORRUPT_HANDLER,
+    FAILURE_DATABASE_UPDATE_BEGIN,
+    FAILURE_DATABASE_UPDATE_FINISH,
+    FAILURE_DATABASE_FILTER_MISSING,
+    FAILURE_DATABASE_FILTER_READ,
+    FAILURE_DATABASE_FILTER_WRITE,
+    FAILURE_DATABASE_FILTER_DELETE,
+    FAILURE_DATABASE_STORE_MISSING,
+    FAILURE_DATABASE_STORE_DELETE,
+
+    // Histogram space is determined by the max.  If this is exceeded,
+    // simply start a new histogram.
+    FAILURE_MAX = 50
+  };
+
+  static void RecordFailure(FailureType failure_type);
 };
 
 class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
@@ -135,9 +156,12 @@ class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
   void WriteBloomFilter();
 
   // Helpers for handling database corruption.
-  // OnHandleCorruptDatabase() runs ResetDatabase(),
-  // HandleCorruptDatabase() posts OnHandleCorruptDatabase() to the
-  // current thread.
+  // |OnHandleCorruptDatabase()| runs |ResetDatabase()| and sets
+  // |corruption_detected_|, |HandleCorruptDatabase()| posts
+  // |OnHandleCorruptDatabase()| to the current thread, to be run
+  // after the current task completes.
+  // TODO(shess): Wire things up to entirely abort the update
+  // transaction when this happens.
   void HandleCorruptDatabase();
   void OnHandleCorruptDatabase();
 
@@ -178,6 +202,11 @@ class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
 
   // Used to schedule resetting the database because of corruption.
   ScopedRunnableMethodFactory<SafeBrowsingDatabaseNew> reset_factory_;
+
+  // Set if corruption is detected during the course of an update.
+  // Causes the update functions to fail with no side effects, until
+  // the next call to |UpdateStarted()|.
+  bool corruption_detected_;
 };
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_DATABASE_H_

@@ -22,6 +22,7 @@
 #include "base/scoped_comptr_win.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "base/win_util.h"
 #include "chrome/browser/extensions/extensions_service.h"
@@ -30,6 +31,7 @@
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/views/first_run_search_engine_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
@@ -83,6 +85,7 @@ bool InvokeGoogleUpdateForRename() {
                                        google_update::kRegRenameCmdField,
                                        id, &phandle))) {
       HANDLE handle = HANDLE(phandle);
+      WaitForSingleObject(handle, INFINITE);
       DWORD exit_code;
       ::GetExitCodeProcess(handle, &exit_code);
       ::CloseHandle(handle);
@@ -293,20 +296,7 @@ bool Upgrade::SwapNewChromeExeIfPresent() {
   }
 
   // Rename didn't work so try to rename by calling Google Update
-  if (InvokeGoogleUpdateForRename())
-    return true;
-
-  // Rename still didn't work so just try to rename exe ourselves (for
-  // backward compatibility, can be deleted once the new process works).
-  std::wstring backup_exe;
-  if (!GetBackupChromeFile(&backup_exe))
-    return false;
-  if (::ReplaceFileW(curr_chrome_exe.c_str(), new_chrome_exe.value().c_str(),
-                     backup_exe.c_str(), REPLACEFILE_IGNORE_MERGE_ERRORS,
-                     NULL, NULL)) {
-    return true;
-  }
-  return false;
+  return InvokeGoogleUpdateForRename();
 }
 
 // static
@@ -464,6 +454,12 @@ bool FirstRun::IsOrganic() {
 // static
 void FirstRun::ShowFirstRunDialog(Profile* profile,
                                   bool randomize_search_engine_experiment) {
+  // If the default search is managed via policy, we don't ask the user to
+  // choose.
+  TemplateURLModel* model = profile->GetTemplateURLModel();
+  if (NULL == model || model->is_default_search_managed())
+    return;
+
   views::Window* search_engine_dialog = views::Window::CreateChromeWindow(
       NULL,
       gfx::Rect(),
@@ -610,8 +606,9 @@ const wchar_t kHelpCenterUrl[] =
 class TryChromeDialog : public views::ButtonListener,
                         public views::LinkController {
  public:
-  TryChromeDialog()
-      : popup_(NULL),
+  explicit TryChromeDialog(size_t version)
+      : version_(version),
+        popup_(NULL),
         try_chrome_(NULL),
         kill_chrome_(NULL),
         result_(Upgrade::TD_LAST_ENUM) {
@@ -699,11 +696,17 @@ class TryChromeDialog : public views::ButtonListener,
     // The heading has two flavors of text, the alt one features extensions but
     // we only use it in the US until some international issues are fixed.
     const std::string app_locale = g_browser_process->GetApplicationLocale();
-    const std::wstring heading = (app_locale == "en-US") ?
-        l10n_util::GetString(IDS_TRY_TOAST_ALT_HEADING) :
-        l10n_util::GetString(IDS_TRY_TOAST_HEADING);
-    views::Label* label =
-        new views::Label(heading);
+    std::wstring heading;
+    switch (version_) {
+      case 0: heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING); break;
+      case 1: heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING2); break;
+      case 2: heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING3); break;
+      case 3: heading = l10n_util::GetString(IDS_TRY_TOAST_HEADING4); break;
+      default:
+        NOTREACHED() << "Cannot determine which headline to show.";
+        return Upgrade::TD_DIALOG_ERROR;
+    }
+    views::Label* label = new views::Label(heading);
     label->SetFont(rb.GetFont(ResourceBundle::MediumBoldFont));
     label->SetMultiLine(true);
     label->SizeToFit(200);
@@ -860,6 +863,6 @@ Upgrade::TryResult Upgrade::ShowTryChromeDialog(size_t version) {
     // returning this early. See EarlyReturnTest test harness.
     return Upgrade::TD_NOT_NOW;
   }
-  TryChromeDialog td;
+  TryChromeDialog td(version);
   return td.ShowModal();
 }

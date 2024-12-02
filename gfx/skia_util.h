@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef APP_GFX_SKIA_UTIL_H_
-#define APP_GFX_SKIA_UTIL_H_
+#ifndef GFX_SKIA_UTIL_H_
+#define GFX_SKIA_UTIL_H_
 #pragma once
 
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRect.h"
 
+class SkBitmap;
 class SkShader;
 
 namespace gfx {
@@ -21,15 +22,18 @@ gfx::Rect SkRectToRect(const SkRect& rect);
 
 // Creates a vertical gradient shader. The caller owns the shader.
 // Example usage to avoid leaks:
-//   paint.setShader(gfx::CreateGradientShader(0, 10, red, blue))->safeUnref();
+//   SkSafeUnref(paint.setShader(gfx::CreateGradientShader(0, 10, red, blue)));
 //
-// (The old shader in the paint, if any, needs to be freed, and safeUnref will
+// (The old shader in the paint, if any, needs to be freed, and SkSafeUnref will
 // handle the NULL case.)
 SkShader* CreateGradientShader(int start_point,
                                int end_point,
                                SkColor start_color,
                                SkColor end_color);
 
+// Returns true if the two bitmaps contain the same pixels.
+bool BitmapsAreEqual(const SkBitmap& bitmap1, const SkBitmap& bitmap2);
+
 }  // namespace gfx;
 
-#endif  // APP_GFX_SKIA_UTIL_H_
+#endif  // GFX_SKIA_UTIL_H_

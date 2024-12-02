@@ -21,9 +21,25 @@
 // from there.
 class ExtensionPrefs {
  public:
+  // Key name for a preference that keeps track of per-extension settings. This
+  // is a dictionary object read from the Preferences file, keyed off of
+  // extension ids.
+  static const char kExtensionsPref[];
+
   typedef std::vector<linked_ptr<ExtensionInfo> > ExtensionsInfo;
 
+  // This enum is used for the launch type the user wants to use for an
+  // application.
+  // Do not remove items or re-order this enum as it is used in preferences
+  // and histograms.
+  enum LaunchType {
+    LAUNCH_PINNED,
+    LAUNCH_REGULAR,
+    LAUNCH_FULLSCREEN
+  };
+
   explicit ExtensionPrefs(PrefService* prefs, const FilePath& root_dir_);
+  ~ExtensionPrefs();
 
   // Returns a copy of the Extensions prefs.
   // TODO(erikkay) Remove this so that external consumers don't need to be
@@ -116,6 +132,9 @@ class ExtensionPrefs {
   bool AllowFileAccess(const std::string& extension_id);
   void SetAllowFileAccess(const std::string& extension_id, bool allow);
 
+  ExtensionPrefs::LaunchType GetLaunchType(const std::string& extension_id);
+  void SetLaunchType(const std::string& extension_id, LaunchType launch_type);
+
   // Saves ExtensionInfo for each installed extension with the path to the
   // version directory and the location. Blacklisted extensions won't be saved
   // and neither will external extensions the user has explicitly uninstalled.
@@ -155,6 +174,19 @@ class ExtensionPrefs {
   bool GetWebStoreLogin(std::string* result);
   void SetWebStoreLogin(const std::string& login);
 
+  // Get the application launch index for an extension with |extension_id|. This
+  // determines the order of which the applications appear on the New Tab Page.
+  // A value of 0 generally indicates top left. If the extension has no launch
+  // index a -1 value is returned.
+  int GetAppLaunchIndex(const std::string& extension_id);
+
+  // Sets a specific launch index for an extension with |extension_id|.
+  void SetAppLaunchIndex(const std::string& extension_id, int index);
+
+  // Gets the next available application launch index. This is 1 higher than the
+  // highest current application launch index found.
+  int GetNextAppLaunchIndex();
+
   static void RegisterUserPrefs(PrefService* prefs);
 
   // The underlying PrefService.
@@ -185,11 +217,29 @@ class ExtensionPrefs {
   bool ReadExtensionPrefBoolean(const std::string& extension_id,
                                 const std::string& pref_key);
 
+  // Reads an integer pref from |ext| with key |pref_key|.
+  // Return false if the value does not exist.
+  bool ReadIntegerFromPref(DictionaryValue* ext, const std::string& pref_key,
+                           int* out_value);
+
+  // Reads an integer pref |pref_key| from extension with id |extension_id|.
+  bool ReadExtensionPrefInteger(const std::string& extension_id,
+                                const std::string& pref_key,
+                                int* out_value);
+
   // Ensures and returns a mutable dictionary for extension |id|'s prefs.
   DictionaryValue* GetOrCreateExtensionPref(const std::string& id);
 
   // Same as above, but returns NULL if it doesn't exist.
   DictionaryValue* GetExtensionPref(const std::string& id) const;
+
+  // Serializes the data and schedules a persistent save via the |PrefService|.
+  // Additionally fires a PREF_CHANGED notification with the top-level
+  // |kExtensionsPref| path set.
+  // TODO(andybons): Switch this to EXTENSION_PREF_CHANGED to be more granular.
+  // TODO(andybons): Use a ScopedPrefUpdate to update observers on changes to
+  // the mutable extension dictionary.
+  void SavePrefsAndNotify();
 
   // Checks if kPrefBlacklist is set to true in the DictionaryValue.
   // Return false if the value is false or kPrefBlacklist does not exist.

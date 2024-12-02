@@ -6,6 +6,7 @@
 
 #include "app/l10n_util.h"
 #include "base/callback.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -156,7 +157,13 @@ void NewTabPageSyncHandler::HandleSyncLinkClicked(const ListValue* args) {
     if (sync_service_->GetAuthError().state() ==
         GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
         sync_service_->GetAuthError().state() ==
-        GoogleServiceAuthError::CAPTCHA_REQUIRED) {
+        GoogleServiceAuthError::CAPTCHA_REQUIRED ||
+        sync_service_->GetAuthError().state() ==
+        GoogleServiceAuthError::ACCOUNT_DELETED ||
+        sync_service_->GetAuthError().state() ==
+        GoogleServiceAuthError::ACCOUNT_DISABLED ||
+        sync_service_->GetAuthError().state() ==
+        GoogleServiceAuthError::SERVICE_UNAVAILABLE) {
       sync_service_->ShowLoginDialog(NULL);
       return;
     }
@@ -168,7 +175,7 @@ void NewTabPageSyncHandler::HandleSyncLinkClicked(const ListValue* args) {
   } else {
     // User clicked the 'Start now' link to begin syncing.
     ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_NTP);
-    sync_service_->EnableForUser(NULL);
+    sync_service_->ShowLoginDialog(NULL);
   }
 }
 

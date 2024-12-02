@@ -4,10 +4,38 @@
 
 #include "chrome/service/cloud_print/cloud_print_proxy.h"
 
+#include "base/command_line.h"
+#include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/values.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/service/cloud_print/cloud_print_consts.h"
+#include "chrome/service/service_process.h"
+
+// This method is invoked on the IO thread to launch the browser process to
+// display a desktop notification that the Cloud Print token is invalid and
+// needs re-authentication.
+static void ShowTokenExpiredNotificationInBrowser() {
+  DCHECK(g_service_process->io_thread()->message_loop_proxy()->
+      BelongsToCurrentThread());
+  FilePath exe_path;
+  PathService::Get(base::FILE_EXE, &exe_path);
+  if (exe_path.empty()) {
+    NOTREACHED() << "Unable to get browser process binary name.";
+  }
+  CommandLine cmd_line(exe_path);
+
+  const CommandLine& process_command_line = *CommandLine::ForCurrentProcess();
+  FilePath user_data_dir =
+      process_command_line.GetSwitchValuePath(switches::kUserDataDir);
+  if (!user_data_dir.empty())
+    cmd_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
+  cmd_line.AppendSwitch(switches::kNotifyCloudPrintTokenExpired);
+
+  base::LaunchApp(cmd_line, false, false, NULL);
+}
 
 CloudPrintProxy::CloudPrintProxy() {
 }
@@ -66,12 +94,11 @@ void CloudPrintProxy::EnableForUser(const std::string& lsid) {
     service_prefs_->prefs()->GetString(prefs::kCloudPrintXMPPAuthToken,
                                        &cloud_print_xmpp_token);
     DCHECK(!cloud_print_xmpp_token.empty());
-    std::string cloud_print_email;
     service_prefs_->prefs()->GetString(prefs::kCloudPrintEmail,
-                                       &cloud_print_email);
-    DCHECK(!cloud_print_email.empty());
+                                       &cloud_print_email_);
+    DCHECK(!cloud_print_email_.empty());
     backend_->InitializeWithToken(cloud_print_token, cloud_print_xmpp_token,
-                                  cloud_print_email, proxy_id);
+                                  cloud_print_email_, proxy_id);
   }
   if (client_) {
     client_->OnCloudPrintProxyEnabled();
@@ -80,10 +107,19 @@ void CloudPrintProxy::EnableForUser(const std::string& lsid) {
 
 void CloudPrintProxy::DisableForUser() {
   DCHECK(CalledOnValidThread());
+  cloud_print_email_.clear();
   Shutdown();
   if (client_) {
     client_->OnCloudPrintProxyDisabled();
   }
+}
+
+bool CloudPrintProxy::IsEnabled(std::string* email) const {
+  bool enabled = !cloud_print_email().empty();
+  if (enabled && email) {
+    *email = cloud_print_email();
+  }
+  return enabled;
 }
 
 void CloudPrintProxy::Shutdown() {
@@ -107,11 +143,22 @@ void CloudPrintProxy::OnAuthenticated(
     const std::string& cloud_print_xmpp_token,
     const std::string& email) {
   DCHECK(CalledOnValidThread());
+  cloud_print_email_ = email;
   service_prefs_->prefs()->SetString(prefs::kCloudPrintAuthToken,
                                      cloud_print_token);
   service_prefs_->prefs()->SetString(prefs::kCloudPrintXMPPAuthToken,
                                      cloud_print_xmpp_token);
   service_prefs_->prefs()->SetString(prefs::kCloudPrintEmail, email);
   service_prefs_->WritePrefs();
+}
+
+void CloudPrintProxy::OnAuthenticationFailed() {
+  DCHECK(CalledOnValidThread());
+  // If authenticated failed, we will disable the cloud print proxy.
+  DisableForUser();
+  // Launch the browser to display a notification that the credentials have
+  // expired.
+  g_service_process->io_thread()->message_loop_proxy()->PostTask(
+      FROM_HERE, NewRunnableFunction(&ShowTokenExpiredNotificationInBrowser));
 }
 

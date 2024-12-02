@@ -16,6 +16,7 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/oobe_progress_bar.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/status/clock_menu_button.h"
 #include "chrome/browser/chromeos/status/feedback_menu_button.h"
 #include "chrome/browser/chromeos/status/language_menu_button.h"
@@ -93,6 +94,7 @@ BackgroundView::BackgroundView()
       progress_bar_(NULL),
       go_incognito_button_(NULL),
       did_paint_(false),
+      delegate_(NULL),
       background_area_(NULL) {
 }
 
@@ -114,13 +116,18 @@ void BackgroundView::Init(const GURL& background_url) {
 // static
 views::Widget* BackgroundView::CreateWindowContainingView(
     const gfx::Rect& bounds,
+    const GURL& background_url,
     BackgroundView** view) {
   ResetXCursor();
 
   WidgetGtk* window = new WidgetGtk(WidgetGtk::TYPE_WINDOW);
   window->Init(NULL, bounds);
   *view = new BackgroundView();
-  (*view)->Init(GURL());
+  (*view)->Init(background_url);
+
+  if ((*view)->ScreenSaverEnabled())
+    (*view)->ShowScreenSaver();
+
   window->SetContentsView(*view);
 
   (*view)->UpdateWindowType();
@@ -187,6 +194,17 @@ bool BackgroundView::IsScreenSaverVisible() {
 
 bool BackgroundView::ScreenSaverEnabled() {
   return background_area_ != NULL;
+}
+
+void BackgroundView::OnOwnerChanged() {
+  delegate_ = NULL;
+  if (go_incognito_button_) {
+    // BackgroundView is passed among multiple controllers, so they should
+    // explicitly enable "Go incognito" button if needed.
+    RemoveChildView(go_incognito_button_);
+    delete go_incognito_button_;
+    go_incognito_button_ = NULL;
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -344,7 +362,8 @@ void BackgroundView::InitProgressBar() {
 #endif
   steps.push_back(IDS_OOBE_SIGNIN);
 #if defined(OFFICIAL_BUILD)
-  steps.push_back(IDS_OOBE_REGISTRATION);
+  if (WizardController::IsRegisterScreenDefined())
+    steps.push_back(IDS_OOBE_REGISTRATION);
 #endif
   steps.push_back(IDS_OOBE_PICTURE);
   progress_bar_ = new OobeProgressBar(steps);
@@ -390,8 +409,10 @@ void BackgroundView::InitGoIncognitoButton() {
 }
 
 void BackgroundView::UpdateLocalizedStrings() {
-  go_incognito_button_->SetText(
-      UTF8ToWide(l10n_util::GetStringUTF8(IDS_GO_INCOGNITO_BUTTON)));
+  if (go_incognito_button_) {
+    go_incognito_button_->SetText(
+        UTF8ToWide(l10n_util::GetStringUTF8(IDS_GO_INCOGNITO_BUTTON)));
+  }
 }
 
 void BackgroundView::UpdateWindowType() {

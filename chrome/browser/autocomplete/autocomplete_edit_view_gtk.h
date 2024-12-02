@@ -29,6 +29,11 @@ class AutocompleteEditModel;
 class AutocompletePopupView;
 class Profile;
 class TabContents;
+
+namespace gfx{
+class Font;
+}
+
 namespace views {
 class View;
 }
@@ -70,9 +75,17 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   // Initialize, create the underlying widgets, etc.
   void Init();
 
-  // Returns the width, in pixels, needed to display the current text. The
-  // returned value includes margins and borders.
+  // Returns the width in pixels needed to display the current text. The
+  // returned value includes margins.
   int TextWidth();
+
+  // Returns the width in pixels needed to display the text from one character
+  // before the caret to the end of the string. See comments in
+  // LocationBarView::Layout as to why this uses -1.
+  int WidthOfTextAfterCursor();
+
+  // Returns the font.
+  gfx::Font GetFont();
 
   // Implement the AutocompleteEditView interface.
   virtual AutocompleteEditModel* model() { return model_.get(); }
@@ -94,9 +107,7 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   virtual bool IsEditingOrEmpty() const;
   virtual int GetIcon() const;
 
-  virtual void SetUserText(const std::wstring& text) {
-    SetUserText(text, text, true);
-  }
+  virtual void SetUserText(const std::wstring& text);
   virtual void SetUserText(const std::wstring& text,
                            const std::wstring& display_text,
                            bool update_popup);
@@ -107,6 +118,8 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   virtual void SetForcedQuery();
 
   virtual bool IsSelectAll();
+  virtual void GetSelectionBounds(std::wstring::size_type* start,
+                                  std::wstring::size_type* end);
   virtual void SelectAll(bool reversed);
   virtual void RevertAll();
 
@@ -191,6 +204,8 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
                        GdkEventExpose*);
   CHROMEGTK_CALLBACK_1(AutocompleteEditViewGtk, void,
                        HandleWidgetDirectionChanged, GtkTextDirection);
+  CHROMEGTK_CALLBACK_2(AutocompleteEditViewGtk, void,
+                       HandleDeleteFromCursor, GtkDeleteType, gint);
 
   // Callback for the PRIMARY selection clipboard.
   static void ClipboardGetSelectionThunk(GtkClipboard* clipboard,
@@ -389,6 +404,10 @@ class AutocompleteEditViewGtk : public AutocompleteEditView,
   // default and will only be set to false if the location bar view is not able
   // to show the tab to search hint.
   bool enable_tab_to_search_;
+
+  // Indicates if the selected text is suggested text or not. If the selection
+  // is not suggested text, that means the user manually made the selection.
+  bool selection_suggested_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteEditViewGtk);
 };

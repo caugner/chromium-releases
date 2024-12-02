@@ -55,6 +55,8 @@ struct WebPreferences {
   bool databases_enabled;
   bool application_cache_enabled;
   bool tabs_to_links;
+  bool caret_browsing_enabled;
+  bool hyperlink_auditing_enabled;
 
   bool user_style_sheet_enabled;
   GURL user_style_sheet_location;
@@ -103,6 +105,8 @@ struct WebPreferences {
         databases_enabled(false),
         application_cache_enabled(false),
         tabs_to_links(true),
+        caret_browsing_enabled(false),
+        hyperlink_auditing_enabled(true),
         user_style_sheet_enabled(false),
         author_and_user_styles_enabled(true),
         allow_universal_access_from_file_urls(false),

@@ -12,11 +12,16 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "build/build_config.h"
+#include "chrome/common/dx_diag_node.h"
 
 class GPUInfo {
  public:
   GPUInfo();
   ~GPUInfo() {}
+
+  // Returns whether this GPUInfo has been initialized with information
+  bool initialized() const;
 
   // Return the DWORD (uint32) representing the graphics card vendor id.
   uint32 vendor_id() const;
@@ -46,19 +51,38 @@ class GPUInfo {
   // D3D instead.
   uint32 gl_version() const;
 
+  // Return the device semantics, i.e. whether the Vista and Windows 7 specific
+  // semantics are available.
+  bool can_lose_context() const;
+
   // Populate variables with passed in values
   void SetGraphicsInfo(uint32 vendor_id, uint32 device_id,
                        const std::wstring& driver_version,
                        uint32 pixel_shader_version,
                        uint32 vertex_shader_version,
-                       uint32 gl_version);
+                       uint32 gl_version,
+                       bool can_lose_context);
+
+#if defined(OS_WIN)
+  // The information returned by the DirectX Diagnostics Tool.
+  const DxDiagNode& dx_diagnostics() const;
+
+  void SetDxDiagnostics(const DxDiagNode& dx_diagnostics);
+#endif
+
  private:
+  bool initialized_;
   uint32 vendor_id_;
   uint32 device_id_;
   std::wstring driver_version_;
   uint32 pixel_shader_version_;
   uint32 vertex_shader_version_;
   uint32 gl_version_;
+  bool can_lose_context_;
+
+#if defined(OS_WIN)
+  DxDiagNode dx_diagnostics_;
+#endif
 };
 
 #endif  // CHROME_COMMON_GPU_INFO_H__

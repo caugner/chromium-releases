@@ -88,9 +88,10 @@ SafeBrowsingProtocolManager::~SafeBrowsingProtocolManager() {
                                       hash_requests_.end());
   hash_requests_.clear();
 
-  // Delete in-progress malware reports.
-  STLDeleteContainerPointers(malware_reports_.begin(), malware_reports_.end());
-  malware_reports_.clear();
+  // Delete in-progress safebrowsing reports.
+  STLDeleteContainerPointers(safebrowsing_reports_.begin(),
+                             safebrowsing_reports_.end());
+  safebrowsing_reports_.clear();
 }
 
 // Public API used by the SafeBrowsingService ----------------------------------
@@ -159,12 +160,13 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
   bool parsed_ok = true;
   bool must_back_off = false;  // Reduce SafeBrowsing service query frequency.
 
-  // See if this is a malware report fetcher. We don't take any action for
+  // See if this is a safebrowsing report fetcher. We don't take any action for
   // the response to those.
-  std::set<const URLFetcher*>::iterator mit = malware_reports_.find(source);
-  if (mit != malware_reports_.end()) {
-    const URLFetcher* report = *mit;
-    malware_reports_.erase(mit);
+  std::set<const URLFetcher*>::iterator sit = safebrowsing_reports_.find(
+      source);
+  if (sit != safebrowsing_reports_.end()) {
+    const URLFetcher* report = *sit;
+    safebrowsing_reports_.erase(sit);
     delete report;
     return;
   }
@@ -402,8 +404,8 @@ bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
 
       client_key_ = client_key;
       wrapped_key_ = wrapped_key;
-      ChromeThread::PostTask(
-          ChromeThread::UI, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
           NewRunnableMethod(
               sb_service_, &SafeBrowsingService::OnNewMacKeys, client_key_,
               wrapped_key_));
@@ -586,17 +588,20 @@ void SafeBrowsingProtocolManager::OnChunkInserted() {
   }
 }
 
-void SafeBrowsingProtocolManager::ReportMalware(const GURL& malware_url,
-                                                const GURL& page_url,
-                                                const GURL& referrer_url,
-                                                bool is_subresource) {
-  GURL report_url = MalwareReportUrl(malware_url, page_url, referrer_url,
-                                     is_subresource);
+void SafeBrowsingProtocolManager::ReportSafeBrowsingHit(
+    const GURL& malicious_url,
+    const GURL& page_url,
+    const GURL& referrer_url,
+    bool is_subresource,
+    SafeBrowsingService::UrlCheckResult threat_type) {
+  GURL report_url = SafeBrowsingReportUrl(malicious_url, page_url,
+                                          referrer_url, is_subresource,
+                                          threat_type);
   URLFetcher* report = new URLFetcher(report_url, URLFetcher::GET, this);
   report->set_load_flags(net::LOAD_DISABLE_CACHE);
   report->set_request_context(request_context_getter_);
   report->Start();
-  malware_reports_.insert(report);
+  safebrowsing_reports_.insert(report);
 }
 
 // static
@@ -649,6 +654,8 @@ std::string SafeBrowsingProtocolManager::ComposeUrl(
                                  prefix.c_str(), method.c_str(),
                                  client_name.c_str(), version.c_str());
   if (!additional_query.empty()) {
+    DCHECK(url.find("?") != std::string::npos);
+    url.append("&");
     url.append(additional_query);
   }
   return url;
@@ -679,13 +686,19 @@ GURL SafeBrowsingProtocolManager::MacKeyUrl() const {
                          additional_query_));
 }
 
-GURL SafeBrowsingProtocolManager::MalwareReportUrl(
-    const GURL& malware_url, const GURL& page_url,
-    const GURL& referrer_url, bool is_subresource) const {
+GURL SafeBrowsingProtocolManager::SafeBrowsingReportUrl(
+    const GURL& malicious_url, const GURL& page_url,
+    const GURL& referrer_url, bool is_subresource,
+    SafeBrowsingService::UrlCheckResult threat_type) const {
+  DCHECK(threat_type == SafeBrowsingService::URL_MALWARE ||
+         threat_type == SafeBrowsingService::URL_PHISHING);
   std::string url = ComposeUrl(info_url_prefix_, "report", client_name_,
                                version_, additional_query_);
-  return GURL(StringPrintf("%s&evts=malblhit&evtd=%s&evtr=%s&evhr=%s&evtb=%d",
-      url.c_str(), EscapeQueryParamValue(malware_url.spec(), true).c_str(),
+  return GURL(StringPrintf("%s&evts=%s&evtd=%s&evtr=%s&evhr=%s&evtb=%d",
+      url.c_str(),
+      (threat_type == SafeBrowsingService::URL_MALWARE) ?
+                           "malblhit" : "phishblhit",
+      EscapeQueryParamValue(malicious_url.spec(), true).c_str(),
       EscapeQueryParamValue(page_url.spec(), true).c_str(),
       EscapeQueryParamValue(referrer_url.spec(), true).c_str(),
       is_subresource));
@@ -695,11 +708,18 @@ GURL SafeBrowsingProtocolManager::NextChunkUrl(const std::string& url) const {
   std::string next_url;
   if (!StartsWithASCII(url, "http://", false) &&
       !StartsWithASCII(url, "https://", false)) {
-    next_url = "http://" + url;
+    next_url.append("http://");
+    next_url.append(url);
   } else {
     next_url = url;
   }
-  if (!additional_query_.empty())
-    next_url += additional_query_;
+  if (!additional_query_.empty()) {
+    if (next_url.find("?") != std::string::npos) {
+      next_url.append("&");
+    } else {
+      next_url.append("?");
+    }
+    next_url.append(additional_query_);
+  }
   return GURL(next_url);
 }

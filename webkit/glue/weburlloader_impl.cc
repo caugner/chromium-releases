@@ -18,6 +18,7 @@
 #include "net/base/net_util.h"
 #include "net/http/http_response_headers.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebHTTPHeaderVisitor.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebResourceRawHeaders.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
@@ -36,6 +37,7 @@ using base::TimeDelta;
 using WebKit::WebData;
 using WebKit::WebHTTPBody;
 using WebKit::WebHTTPHeaderVisitor;
+using WebKit::WebResourceRawHeaders;
 using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
 using WebKit::WebURL;
@@ -142,7 +144,7 @@ ResourceType::Type FromTargetType(WebURLRequest::TargetType type) {
 
 // Extracts the information from a data: url.
 bool GetInfoFromDataURL(const GURL& url,
-                        ResourceLoaderBridge::ResponseInfo* info,
+                        ResourceResponseInfo* info,
                         std::string* data, URLRequestStatus* status) {
   std::string mime_type;
   std::string charset;
@@ -163,9 +165,11 @@ bool GetInfoFromDataURL(const GURL& url,
   return false;
 }
 
+typedef ResourceDevToolsInfo::HeadersVector HeadersVector;
+
 void PopulateURLResponse(
     const GURL& url,
-    const ResourceLoaderBridge::ResponseInfo& info,
+    const ResourceResponseInfo& info,
     WebURLResponse* response) {
   response->setURL(url);
   response->setResponseTime(info.response_time.ToDoubleT());
@@ -188,7 +192,7 @@ void PopulateURLResponse(
 
   WebURLLoadTiming timing;
   timing.initialize();
-  const ResourceLoaderBridge::LoadTimingInfo& timing_info = info.load_timing;
+  const ResourceLoadTimingInfo& timing_info = info.load_timing;
   timing.setRequestTime(timing_info.base_time.ToDoubleT());
   timing.setProxyStart(timing_info.proxy_start);
   timing.setProxyEnd(timing_info.proxy_end);
@@ -202,6 +206,25 @@ void PopulateURLResponse(
   timing.setSendEnd(timing_info.send_end);
   timing.setReceiveHeadersEnd(timing_info.receive_headers_end);
   response->setLoadTiming(timing);
+
+  if (info.devtools_info.get()) {
+    WebResourceRawHeaders rawHeaders;
+
+    const HeadersVector& request_headers = info.devtools_info->request_headers;
+    for (HeadersVector::const_iterator it = request_headers .begin();
+         it != request_headers.end(); ++it) {
+      rawHeaders.addRequestHeader(WebString::fromUTF8(it->first),
+          WebString::fromUTF8(it->second));
+    }
+    const HeadersVector& response_headers =
+        info.devtools_info->response_headers;
+    for (HeadersVector::const_iterator it = response_headers.begin();
+         it != response_headers.end(); ++it) {
+      rawHeaders.addResponseHeader(WebString::fromUTF8(it->first),
+          WebString::fromUTF8(it->second));
+    }
+    response->setResourceRawHeaders(rawHeaders);
+  }
 
   const net::HttpResponseHeaders* headers = info.headers;
   if (!headers)
@@ -258,16 +281,18 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   virtual void OnUploadProgress(uint64 position, uint64 size);
   virtual bool OnReceivedRedirect(
       const GURL& new_url,
-      const ResourceLoaderBridge::ResponseInfo& info,
+      const ResourceResponseInfo& info,
       bool* has_new_first_party_for_cookies,
       GURL* new_first_party_for_cookies);
   virtual void OnReceivedResponse(
-      const ResourceLoaderBridge::ResponseInfo& info, bool content_filtered);
+      const ResourceResponseInfo& info, bool content_filtered);
   virtual void OnDownloadedData(int len);
   virtual void OnReceivedData(const char* data, int len);
   virtual void OnReceivedCachedMetadata(const char* data, int len);
   virtual void OnCompletedRequest(
-      const URLRequestStatus& status, const std::string& security_info);
+      const URLRequestStatus& status,
+      const std::string& security_info,
+      const base::Time& completion_time);
   virtual GURL GetURLForDebugging() const;
 
  private:
@@ -282,6 +307,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   scoped_ptr<ResourceLoaderBridge> bridge_;
   scoped_ptr<FtpDirectoryListingResponseDelegate> ftp_listing_delegate_;
   scoped_ptr<MultipartResponseDelegate> multipart_delegate_;
+  scoped_ptr<ResourceLoaderBridge> completed_bridge_;
 
   // TODO(japhet): Storing this is a temporary hack for site isolation logging.
   WebURL response_url_;
@@ -361,6 +387,8 @@ void WebURLLoaderImpl::Context::Start(
     load_flags |= net::LOAD_ENABLE_UPLOAD_PROGRESS;
   if (request.reportLoadTiming())
     load_flags |= net::LOAD_ENABLE_LOAD_TIMING;
+  if (request.reportRawHeaders())
+    load_flags |= net::LOAD_REPORT_RAW_HEADERS;
 
   if (!request.allowCookies() || !request.allowStoredCredentials()) {
     load_flags |= net::LOAD_DO_NOT_SAVE_COOKIES;
@@ -369,7 +397,6 @@ void WebURLLoaderImpl::Context::Start(
 
   if (!request.allowStoredCredentials())
     load_flags |= net::LOAD_DO_NOT_SEND_AUTH_DATA;
-
 
   // TODO(jcampan): in the non out-of-process plugin case the request does not
   // have a requestor_pid. Find a better place to set this.
@@ -429,7 +456,7 @@ void WebURLLoaderImpl::Context::Start(
                 WebStringToFilePath(element.filePath),
                 static_cast<uint64>(element.fileStart),
                 static_cast<uint64>(element.fileLength),
-                base::Time::FromDoubleT(element.fileInfo.modificationTime));
+                base::Time::FromDoubleT(element.modificationTime));
           }
           break;
         case WebHTTPBody::Element::TypeBlob:
@@ -461,7 +488,7 @@ void WebURLLoaderImpl::Context::OnUploadProgress(uint64 position, uint64 size) {
 
 bool WebURLLoaderImpl::Context::OnReceivedRedirect(
     const GURL& new_url,
-    const ResourceLoaderBridge::ResponseInfo& info,
+    const ResourceResponseInfo& info,
     bool* has_new_first_party_for_cookies,
     GURL* new_first_party_for_cookies) {
   if (!client_)
@@ -475,6 +502,7 @@ bool WebURLLoaderImpl::Context::OnReceivedRedirect(
   // request that resulted from the redirect.
   WebURLRequest new_request(new_url);
   new_request.setFirstPartyForCookies(request_.firstPartyForCookies());
+  new_request.setDownloadToFile(request_.downloadToFile());
 
   WebString referrer_string = WebString::fromUTF8("Referer");
   WebString referrer = request_.httpHeaderField(referrer_string);
@@ -500,7 +528,7 @@ bool WebURLLoaderImpl::Context::OnReceivedRedirect(
 }
 
 void WebURLLoaderImpl::Context::OnReceivedResponse(
-    const ResourceLoaderBridge::ResponseInfo& info,
+    const ResourceResponseInfo& info,
     bool content_filtered) {
   if (!client_)
     return;
@@ -586,7 +614,8 @@ void WebURLLoaderImpl::Context::OnReceivedCachedMetadata(
 
 void WebURLLoaderImpl::Context::OnCompletedRequest(
     const URLRequestStatus& status,
-    const std::string& security_info) {
+    const std::string& security_info,
+    const base::Time& completion_time) {
   if (ftp_listing_delegate_.get()) {
     ftp_listing_delegate_->OnCompletedRequest();
     ftp_listing_delegate_.reset(NULL);
@@ -595,8 +624,10 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
     multipart_delegate_.reset(NULL);
   }
 
-  // Prevent any further IPC to the browser now that we're complete.
-  bridge_.reset();
+  // Prevent any further IPC to the browser now that we're complete, but
+  // don't delete it to keep any downloaded temp files alive.
+  DCHECK(!completed_bridge_.get());
+  completed_bridge_.swap(bridge_);
 
   if (client_) {
     if (status.status() != URLRequestStatus::SUCCESS) {
@@ -614,7 +645,7 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
       error.unreachableURL = request_.url();
       client_->didFail(loader_, error);
     } else {
-      client_->didFinishLoading(loader_);
+      client_->didFinishLoading(loader_, completion_time.ToDoubleT());
     }
   }
 
@@ -632,7 +663,7 @@ GURL WebURLLoaderImpl::Context::GetURLForDebugging() const {
 }
 
 void WebURLLoaderImpl::Context::HandleDataURL() {
-  ResourceLoaderBridge::ResponseInfo info;
+  ResourceResponseInfo info;
   URLRequestStatus status;
   std::string data;
 
@@ -642,7 +673,7 @@ void WebURLLoaderImpl::Context::HandleDataURL() {
       OnReceivedData(data.data(), data.size());
   }
 
-  OnCompletedRequest(status, info.security_info);
+  OnCompletedRequest(status, info.security_info, base::Time::Now());
 }
 
 // WebURLLoaderImpl -----------------------------------------------------------

@@ -4,9 +4,10 @@
 
 #include "chrome/browser/chromeos/login/login_html_dialog.h"
 
+#include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/profile_manager.h"
-#include "chrome/browser/views/browser_dialogs.h"
+#include "chrome/browser/views/html_dialog_view.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/rect.h"
 #include "gfx/size.h"
@@ -18,6 +19,22 @@ namespace {
 // Default width/height ratio of screen size.
 const float kDefaultWidthRatio = 0.8;
 const float kDefaultHeightRatio = 0.8;
+
+// Custom HtmlDialogView with disabled context menu.
+class HtmlDialogWithoutContextMenuView : public HtmlDialogView {
+ public:
+  HtmlDialogWithoutContextMenuView(Profile* profile,
+                                   HtmlDialogUIDelegate* delegate)
+      : HtmlDialogView(profile, delegate) {}
+  virtual ~HtmlDialogWithoutContextMenuView() {}
+
+  // TabContentsDelegate implementation.
+  bool HandleContextMenu(const ContextMenuParams& params) {
+    // Disable context menu.
+    return true;
+  }
+};
+
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -26,12 +43,14 @@ const float kDefaultHeightRatio = 0.8;
 LoginHtmlDialog::LoginHtmlDialog(Delegate* delegate,
                                  gfx::NativeWindow parent_window,
                                  const std::wstring& title,
-                                 const GURL& url)
-    : delegate_(delegate),
+                                 const GURL& url,
+                                 Style style)
+    : style_(style),
+      delegate_(delegate),
       parent_window_(parent_window),
       title_(title),
       url_(url) {
-  gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size(0, 0)));
+  gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
   width_ = static_cast<int>(kDefaultWidthRatio * screen_bounds.width());
   height_ = static_cast<int>(kDefaultHeightRatio * screen_bounds.height());
 }
@@ -41,9 +60,20 @@ LoginHtmlDialog::~LoginHtmlDialog() {
 }
 
 void LoginHtmlDialog::Show() {
-  browser::ShowHtmlDialogView(parent_window_,
-                              ProfileManager::GetDefaultProfile(),
-                              this);
+  HtmlDialogWithoutContextMenuView* html_view =
+      new HtmlDialogWithoutContextMenuView(ProfileManager::GetDefaultProfile(),
+                                           this);
+  switch (style_) {
+    case STYLE_BUBBLE:
+      chromeos::BubbleWindow::Create(parent_window_, gfx::Rect(), html_view);
+      break;
+    case STYLE_GENERIC:
+    default:
+      views::Window::CreateChromeWindow(parent_window_, gfx::Rect(), html_view);
+      break;
+  }
+  html_view->InitDialog();
+  html_view->window()->Show();
 }
 
 void LoginHtmlDialog::SetDialogSize(int width, int height) {

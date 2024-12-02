@@ -4,14 +4,14 @@
 
 #include "chrome/browser/chromeos/network_state_notifier.h"
 
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/notification_registrar.h"
-#include "testing/gtest/include/gtest/gtest.h"
-#include "testing/gmock/include/gmock/gmock.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/test/ui_test_utils.h"
+#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
 
@@ -43,7 +43,7 @@ class NetworkStateNotifierTest : public CrosInProcessBrowserTest,
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    EXPECT_TRUE(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
     EXPECT_TRUE(NotificationType::NETWORK_STATE_CHANGED == type);
     chromeos::NetworkStateDetails* state_details =
         Details<chromeos::NetworkStateDetails>(details).ptr();

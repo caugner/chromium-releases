@@ -58,9 +58,7 @@ TEST_F(ContentSettingsDialogControllerTest, CookieSetting) {
 
   settingsMap_->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES,
                                          CONTENT_SETTING_BLOCK);
-  // Since the cookie prompt is disabled per default, the index of the block
-  // radio is actually 1 == kCookieAskIndex.
-  EXPECT_EQ([controller_ cookieSettingIndex], kCookieAskIndex);
+  EXPECT_EQ([controller_ cookieSettingIndex], kCookieDisabledIndex);
 
   // Change dialog property, check setting.
   NSInteger setting;
@@ -69,9 +67,7 @@ TEST_F(ContentSettingsDialogControllerTest, CookieSetting) {
       settingsMap_->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES);
   EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
 
-  // Since the cookie prompt is disabled per default, the index of the block
-  // radio is actually 1 == kCookieAskIndex.
-  [controller_ setCookieSettingIndex:kCookieAskIndex];
+  [controller_ setCookieSettingIndex:kCookieDisabledIndex];
   setting =
       settingsMap_->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES);
   EXPECT_EQ(setting, CONTENT_SETTING_BLOCK);
@@ -162,23 +158,32 @@ TEST_F(ContentSettingsDialogControllerTest, PluginsSetting) {
   // Change setting, check dialog property.
   settingsMap_->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
                                          CONTENT_SETTING_ALLOW);
-  EXPECT_EQ([controller_ pluginsEnabledIndex], kContentSettingsEnabledIndex);
+  EXPECT_EQ(kPluginsAllowIndex, [controller_ pluginsEnabledIndex]);
 
   settingsMap_->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
                                          CONTENT_SETTING_BLOCK);
-  EXPECT_EQ([controller_ pluginsEnabledIndex], kContentSettingsDisabledIndex);
+  EXPECT_EQ(kPluginsBlockIndex, [controller_ pluginsEnabledIndex]);
+
+  settingsMap_->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
+                                         CONTENT_SETTING_ASK);
+  EXPECT_EQ(kPluginsAskIndex, [controller_ pluginsEnabledIndex]);
 
   // Change dialog property, check setting.
   NSInteger setting;
-  [controller_ setPluginsEnabledIndex:kContentSettingsEnabledIndex];
+  [controller_ setPluginsEnabledIndex:kPluginsAllowIndex];
   setting =
       settingsMap_->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS);
-  EXPECT_EQ(setting, CONTENT_SETTING_ALLOW);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW, setting);
 
-  [controller_ setPluginsEnabledIndex:kContentSettingsDisabledIndex];
+  [controller_ setPluginsEnabledIndex:kPluginsBlockIndex];
   setting =
       settingsMap_->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS);
-  EXPECT_EQ(setting, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK, setting);
+
+  [controller_ setPluginsEnabledIndex:kPluginsAskIndex];
+  setting =
+      settingsMap_->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS);
+  EXPECT_EQ(CONTENT_SETTING_ASK, setting);
 }
 
 TEST_F(ContentSettingsDialogControllerTest, PopupsSetting) {

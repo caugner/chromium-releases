@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/file_path.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -18,9 +19,12 @@
 #include "ipc/ipc_channel.h"
 
 class AppCacheDispatcherHost;
+class BlobDispatcherHost;
 class ChromeURLRequestContext;
 class ChromeURLRequestContextGetter;
 class DatabaseDispatcherHost;
+class FileSystemDispatcherHost;
+class FileUtilitiesDispatcherHost;
 namespace webkit_database {
 class DatabaseTracker;
 }  // namespace webkit_database
@@ -48,6 +52,7 @@ class WorkerProcessHost : public BrowserChildProcessHost {
                    int parent_appcache_host_id,
                    int64 main_resource_appcache_id,
                    ChromeURLRequestContext* request_context);
+    ~WorkerInstance();
 
     // Unique identifier for a worker client.
     typedef std::pair<IPC::Message::Sender*, int> SenderInfo;
@@ -189,11 +194,21 @@ class WorkerProcessHost : public BrowserChildProcessHost {
   void OnCancelCreateDedicatedWorker(int route_id);
   void OnForwardToWorker(const IPC::Message& message);
 
+  void OnGetMimeTypeFromExtension(
+      const FilePath::StringType& ext, std::string* mime_type);
+  void OnGetMimeTypeFromFile(
+      const FilePath& file_path, std::string* mime_type);
+  void OnGetPreferredExtensionForMimeType(
+      const std::string& mime_type, FilePath::StringType* ext);
+
   Instances instances_;
 
   scoped_refptr<ChromeURLRequestContext> request_context_;
   scoped_ptr<AppCacheDispatcherHost> appcache_dispatcher_host_;
   scoped_refptr<DatabaseDispatcherHost> db_dispatcher_host_;
+  scoped_ptr<BlobDispatcherHost> blob_dispatcher_host_;
+  scoped_refptr<FileSystemDispatcherHost> file_system_dispatcher_host_;
+  scoped_refptr<FileUtilitiesDispatcherHost> file_utilities_dispatcher_host_;
 
   // A callback to create a routing id for the associated worker process.
   scoped_ptr<CallbackWithReturnValue<int>::Type> next_route_id_callback_;

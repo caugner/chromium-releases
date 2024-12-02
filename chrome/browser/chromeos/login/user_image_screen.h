@@ -29,11 +29,16 @@ class UserImageScreen: public ViewScreen<UserImageView>,
   virtual UserImageView* AllocateView();
 
   // Camera::Delegate implementation:
-  virtual void OnVideoFrameCaptured(const SkBitmap& frame);
+  virtual void OnInitializeSuccess();
+  virtual void OnInitializeFailure();
+  virtual void OnStartCapturingSuccess();
+  virtual void OnStartCapturingFailure();
+  virtual void OnCaptureSuccess(const SkBitmap& frame);
+  virtual void OnCaptureFailure();
 
   // UserImageView::Delegate implementation:
   virtual void OnOK(const SkBitmap& image);
-  virtual void OnCancel();
+  virtual void OnSkip();
 
   // NotificationObserver implementation:
   virtual void Observe(NotificationType type,
@@ -42,7 +47,10 @@ class UserImageScreen: public ViewScreen<UserImageView>,
 
  private:
   // Object that handles video capturing.
-  scoped_ptr<Camera> camera_;
+  scoped_refptr<Camera> camera_;
+
+  // Indicates if camera is initialized.
+  bool camera_initialized_;
 
   NotificationRegistrar registrar_;
 

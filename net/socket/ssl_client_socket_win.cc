@@ -38,31 +38,64 @@ static int MapSecurityError(SECURITY_STATUS err) {
     case SEC_E_WRONG_PRINCIPAL:  // Schannel
     case CERT_E_CN_NO_MATCH:  // CryptoAPI
       return ERR_CERT_COMMON_NAME_INVALID;
-    case SEC_E_UNTRUSTED_ROOT:  // Schannel
+    case SEC_E_UNTRUSTED_ROOT:  // Schannel - unknown_ca alert
     case CERT_E_UNTRUSTEDROOT:  // CryptoAPI
       return ERR_CERT_AUTHORITY_INVALID;
-    case SEC_E_CERT_EXPIRED:  // Schannel
+    case SEC_E_CERT_EXPIRED:  // Schannel - certificate_expired alert
     case CERT_E_EXPIRED:  // CryptoAPI
       return ERR_CERT_DATE_INVALID;
     case CRYPT_E_NO_REVOCATION_CHECK:
       return ERR_CERT_NO_REVOCATION_MECHANISM;
     case CRYPT_E_REVOCATION_OFFLINE:
       return ERR_CERT_UNABLE_TO_CHECK_REVOCATION;
-    case CRYPT_E_REVOKED:  // Schannel and CryptoAPI
+    case CRYPT_E_REVOKED:  // CryptoAPI and Schannel certificate_revoked alert
       return ERR_CERT_REVOKED;
+
+    // We received one of the following alert messages from the server:
+    //   bad_certificate
+    //   unsupported_certificate
+    //   certificate_unknown
     case SEC_E_CERT_UNKNOWN:
     case CERT_E_ROLE:
       return ERR_CERT_INVALID;
+
     // We received one of the following alert messages from the server:
+    //   decode_error
+    //   export_restriction
     //   handshake_failure
     //   illegal_parameter
+    //   record_overflow
     //   unexpected_message
+    // and all other TLS alerts not explicitly specified elsewhere.
     case SEC_E_ILLEGAL_MESSAGE:
+    // We received one of the following alert messages from the server:
+    //   decrypt_error
+    //   decryption_failed
+    case SEC_E_DECRYPT_FAILURE:
+    // We received one of the following alert messages from the server:
+    //   bad_record_mac
+    //   decompression_failure
+    case SEC_E_MESSAGE_ALTERED:
+    // TODO(rsleevi): Add SEC_E_INTERNAL_ERROR, which corresponds to an
+    // internal_error alert message being received. However, it is also used
+    // by Schannel for authentication errors that happen locally, so it has
+    // been omitted to prevent masking them as protocol errors.
       return ERR_SSL_PROTOCOL_ERROR;
-    case SEC_E_ALGORITHM_MISMATCH:
+
+    // TODO(rsleevi): Add a new error code for access_denied - the peer has
+    // accepted the certificate as valid, but denied access to the requested
+    // resource. Returning ERR_BAD_SSL_CLIENT_AUTH simply gives the user a
+    // chance to select a new certificate, if they have one, and try again.
+    case SEC_E_LOGON_DENIED:  // Received a access_denied alert.
+      return ERR_BAD_SSL_CLIENT_AUTH_CERT;
+
+    case SEC_E_UNSUPPORTED_FUNCTION:  // Received a protocol_version alert.
+    case SEC_E_ALGORITHM_MISMATCH:  // Received an insufficient_security alert.
       return ERR_SSL_VERSION_OR_CIPHER_MISMATCH;
+
     case SEC_E_INVALID_HANDLE:
     case SEC_E_INVALID_TOKEN:
+      LOG(ERROR) << "Unexpected error " << err;
       return ERR_UNEXPECTED;
     case SEC_E_OK:
       return OK;
@@ -88,12 +121,11 @@ enum {
 class CredHandleClass : public CredHandle {
  public:
   CredHandleClass() {
-    dwLower = 0;
-    dwUpper = 0;
+    SecInvalidateHandle(this);
   }
 
   ~CredHandleClass() {
-    if (dwLower || dwUpper) {
+    if (SecIsValidHandle(this)) {
       SECURITY_STATUS status = FreeCredentialsHandle(this);
       DCHECK(status == SEC_E_OK);
     }
@@ -127,7 +159,7 @@ class CredHandleTable {
     } else {
       handle = &anonymous_creds_[ssl_version_mask];
     }
-    if (!handle->dwLower && !handle->dwUpper)
+    if (!SecIsValidHandle(handle))
       InitializeHandle(handle, client_cert, ssl_version_mask);
     return handle;
   }
@@ -223,7 +255,7 @@ void CredHandleTable::InitializeHandle(CredHandle* handle,
       handle,
       &expiry);  // Optional
   if (status != SEC_E_OK) {
-    DLOG(ERROR) << "AcquireCredentialsHandle failed: " << status;
+    LOG(ERROR) << "AcquireCredentialsHandle failed: " << status;
     // GetHandle will return a pointer to an uninitialized CredHandle, which
     // will cause InitializeSecurityContext to fail with SEC_E_INVALID_HANDLE.
   }
@@ -563,7 +595,7 @@ int SSLClientSocketWin::InitializeSSLContext() {
       const_cast<wchar_t*>(ASCIIToWide(hostname_).c_str()),
       flags,
       0,  // Reserved
-      SECURITY_NATIVE_DREP,  // TODO(wtc): MSDN says this should be set to 0.
+      0,  // Not used with Schannel.
       NULL,  // NULL on the first call
       0,  // Reserved
       &ctxt_,  // Receives the new context handle
@@ -571,7 +603,17 @@ int SSLClientSocketWin::InitializeSSLContext() {
       &out_flags,
       &expiry);
   if (status != SEC_I_CONTINUE_NEEDED) {
-    DLOG(ERROR) << "InitializeSecurityContext failed: " << status;
+    LOG(ERROR) << "InitializeSecurityContext failed: " << status;
+    if (status == SEC_E_INVALID_HANDLE) {
+      // The only handle we passed to this InitializeSecurityContext call is
+      // creds_, so print its contents to figure out why it's invalid.
+      if (creds_) {
+        LOG(ERROR) << "creds_->dwLower = " << creds_->dwLower
+                   << "; creds_->dwUpper = " << creds_->dwUpper;
+      } else {
+        LOG(ERROR) << "creds_ is NULL";
+      }
+    }
     return MapSecurityError(status);
   }
 
@@ -589,9 +631,9 @@ void SSLClientSocketWin::Disconnect() {
 
   if (send_buffer_.pvBuffer)
     FreeSendBuffer();
-  if (ctxt_.dwLower || ctxt_.dwUpper) {
+  if (SecIsValidHandle(&ctxt_)) {
     DeleteSecurityContext(&ctxt_);
-    memset(&ctxt_, 0, sizeof(ctxt_));
+    SecInvalidateHandle(&ctxt_);
   }
   if (server_cert_)
     server_cert_ = NULL;
@@ -814,7 +856,7 @@ int SSLClientSocketWin::DoLoop(int last_io_result) {
         return rv;
       default:
         rv = ERR_UNEXPECTED;
-        NOTREACHED() << "unexpected state";
+        LOG(DFATAL) << "unexpected state " << state;
         break;
     }
   } while (rv != ERR_IO_PENDING && next_state_ != STATE_NONE);
@@ -830,7 +872,7 @@ int SSLClientSocketWin::DoHandshakeRead() {
   int buf_len = kRecvBufferSize - bytes_received_;
 
   if (buf_len <= 0) {
-    NOTREACHED() << "Receive buffer is too small!";
+    LOG(DFATAL) << "Receive buffer is too small!";
     return ERR_UNEXPECTED;
   }
 
@@ -905,7 +947,7 @@ int SSLClientSocketWin::DoHandshakeReadComplete(int result) {
       NULL,
       flags,
       0,
-      SECURITY_NATIVE_DREP,
+      0,
       &in_buffer_desc,
       0,
       NULL,
@@ -949,6 +991,7 @@ int SSLClientSocketWin::DidCallInitializeSecurityContext() {
   }
 
   if (FAILED(isc_status_)) {
+    LOG(ERROR) << "InitializeSecurityContext failed: " << isc_status_;
     int result = MapSecurityError(isc_status_);
     // We told Schannel to not verify the server certificate
     // (SCH_CRED_MANUAL_CRED_VALIDATION), so any certificate error returned by
@@ -1023,8 +1066,10 @@ int SSLClientSocketWin::DoHandshakeWriteComplete(int result) {
     bool overflow = (bytes_sent_ > static_cast<int>(send_buffer_.cbBuffer));
     FreeSendBuffer();
     bytes_sent_ = 0;
-    if (overflow)  // Bug!
+    if (overflow) {  // Bug!
+      LOG(DFATAL) << "overflow";
       return ERR_UNEXPECTED;
+    }
     if (writing_first_token_) {
       writing_first_token_ = false;
       DCHECK(bytes_received_ == 0);
@@ -1185,6 +1230,7 @@ int SSLClientSocketWin::DoPayloadDecrypt() {
 
     if (status != SEC_E_OK && status != SEC_I_RENEGOTIATE) {
       DCHECK(status != SEC_E_MESSAGE_ALTERED);
+      LOG(ERROR) << "DecryptMessage failed: " << status;
       return MapSecurityError(status);
     }
 
@@ -1312,8 +1358,10 @@ int SSLClientSocketWin::DoPayloadEncrypt() {
 
   SECURITY_STATUS status = EncryptMessage(&ctxt_, 0, &buffer_desc, 0);
 
-  if (FAILED(status))
+  if (FAILED(status)) {
+    LOG(ERROR) << "EncryptMessage failed: " << status;
     return MapSecurityError(status);
+  }
 
   payload_send_buffer_len_ = buffers[0].cbBuffer +
                              buffers[1].cbBuffer +
@@ -1358,8 +1406,10 @@ int SSLClientSocketWin::DoPayloadWriteComplete(int result) {
     payload_send_buffer_.reset();
     payload_send_buffer_len_ = 0;
     bytes_sent_ = 0;
-    if (overflow)  // Bug!
+    if (overflow) {  // Bug!
+      LOG(DFATAL) << "overflow";
       return ERR_UNEXPECTED;
+    }
     // Done
     return user_write_buf_len_;
   }
@@ -1381,7 +1431,7 @@ int SSLClientSocketWin::DidCompleteHandshake() {
   SECURITY_STATUS status = QueryContextAttributes(
       &ctxt_, SECPKG_ATTR_STREAM_SIZES, &stream_sizes_);
   if (status != SEC_E_OK) {
-    DLOG(ERROR) << "QueryContextAttributes (stream sizes) failed: " << status;
+    LOG(ERROR) << "QueryContextAttributes (stream sizes) failed: " << status;
     return MapSecurityError(status);
   }
   DCHECK(!server_cert_ || renegotiating_);
@@ -1389,7 +1439,7 @@ int SSLClientSocketWin::DidCompleteHandshake() {
   status = QueryContextAttributes(
       &ctxt_, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &server_cert_handle);
   if (status != SEC_E_OK) {
-    DLOG(ERROR) << "QueryContextAttributes (remote cert) failed: " << status;
+    LOG(ERROR) << "QueryContextAttributes (remote cert) failed: " << status;
     return MapSecurityError(status);
   }
   if (renegotiating_ &&

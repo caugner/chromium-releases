@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/ref_counted.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/common/notification_registrar.h"
 #include "webkit/appcache/appcache_policy.h"
@@ -26,7 +26,7 @@ class FilePath;
 // the IO thread (unless specifically called out in doc comments).
 class ChromeAppCacheService
     : public base::RefCountedThreadSafe<ChromeAppCacheService,
-                                        ChromeThread::DeleteOnIOThread>,
+                                        BrowserThread::DeleteOnIOThread>,
       public appcache::AppCacheService,
       public appcache::AppCachePolicy,
       public NotificationObserver {
@@ -48,21 +48,12 @@ class ChromeAppCacheService
   friend class ChromeThread;
   friend class DeleteTask<ChromeAppCacheService>;
 
-  class PromptDelegate;
-
   virtual ~ChromeAppCacheService();
 
   // AppCachePolicy overrides
   virtual bool CanLoadAppCache(const GURL& manifest_url);
   virtual int CanCreateAppCache(const GURL& manifest_url,
                                 net::CompletionCallback* callback);
-
-  // The DoPrompt and DidPrrompt methods are called on the UI thread, and
-  // the following CallCallback method is called on the IO thread.
-  void DoPrompt(const GURL& manifest_url, net::CompletionCallback* callback);
-  void DidPrompt(int rv, const GURL& manifest_url,
-                 net::CompletionCallback* callback);
-  void CallCallback(int rv, net::CompletionCallback* callback);
 
   // NotificationObserver override
   virtual void Observe(NotificationType type,

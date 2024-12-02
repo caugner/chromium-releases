@@ -17,8 +17,11 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/chromeos/cros/input_method_library.h"
+#include "chrome/browser/chromeos/cros/keyboard_library.h"
+#include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/screen_lock_library.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
@@ -72,6 +75,7 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
   }
 
   virtual void LockScreen(chromeos::ScreenLockLibrary* obj) {
+    LOG(INFO) << "In: ScreenLockObserver::LockScreen";
     SetupInputMethodsForScreenLocker();
     chromeos::ScreenLocker::Show();
   }
@@ -97,10 +101,20 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
         saved_active_input_method_list_.empty()) {
       chromeos::InputMethodLibrary* language =
           chromeos::CrosLibrary::Get()->GetInputMethodLibrary();
+      chromeos::KeyboardLibrary* keyboard =
+          chromeos::CrosLibrary::Get()->GetKeyboardLibrary();
+
       saved_previous_input_method_id_ = language->previous_input_method().id;
       saved_current_input_method_id_ = language->current_input_method().id;
       scoped_ptr<chromeos::InputMethodDescriptors> active_input_method_list(
           language->GetActiveInputMethods());
+
+      const std::string hardware_keyboard =
+          keyboard->GetHardwareKeyboardLayoutName();  // e.g. "xkb:us::eng"
+      // We'll add the hardware keyboard if it's not included in
+      // |active_input_method_list| so that the user can always use the hardware
+      // keyboard on the screen locker.
+      bool should_add_hardware_keyboard = true;
 
       chromeos::ImeConfigValue value;
       value.type = chromeos::ImeConfigValue::kValueTypeStringList;
@@ -112,9 +126,12 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
         if (!StartsWithASCII(input_method_id, kValidInputMethodPrefix, true))
           continue;
         value.string_list_value.push_back(input_method_id);
+        if (input_method_id == hardware_keyboard) {
+          should_add_hardware_keyboard = false;
+        }
       }
-      if (value.string_list_value.empty()) {
-        value.string_list_value.push_back(kFallbackInputMethodId);  // US qwerty
+      if (should_add_hardware_keyboard) {
+        value.string_list_value.push_back(hardware_keyboard);
       }
       language->SetImeConfig(
           chromeos::language_prefs::kGeneralSectionName,
@@ -424,7 +441,7 @@ class InputEventObserver : public MessageLoopForUI::Observer {
       activated_ = true;
       std::string not_used_string;
       GaiaAuthConsumer::ClientLoginResult not_used;
-      screen_locker_->OnLoginSuccess(not_used_string, not_used);
+      screen_locker_->OnLoginSuccess(not_used_string, not_used, false);
     }
   }
 
@@ -487,7 +504,8 @@ ScreenLocker::ScreenLocker(const UserManager::User& user)
       input_grabbed_(false),
       // TODO(oshima): support auto login mode (this is not implemented yet)
       // http://crosbug.com/1881
-      unlock_on_input_(user_.email().empty()) {
+      unlock_on_input_(user_.email().empty()),
+      locked_(false) {
   DCHECK(!screen_locker_);
   screen_locker_ = this;
 }
@@ -510,6 +528,7 @@ void ScreenLocker::Init() {
   if (!unlock_on_input_) {
     screen_lock_view_ = new ScreenLockView(this);
     screen_lock_view_->Init();
+    screen_lock_view_->SetEnabled(false);
     size = screen_lock_view_->GetPreferredSize();
   } else {
     input_event_observer_.reset(new InputEventObserver(this));
@@ -521,17 +540,16 @@ void ScreenLocker::Init() {
   lock_widget_->InitWithWidget(lock_window_, gfx::Rect(size));
   if (screen_lock_view_)
     lock_widget_->SetContentsView(screen_lock_view_);
-  lock_widget_->GetRootView()->SetVisible(false);
   lock_widget_->Show();
 
   // Configuring the background url.
-  std::string url_string = std::string();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kScreenSaverUrl)) {
-    url_string = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-        switches::kScreenSaverUrl);
-  }
+  std::string url_string =
+      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kScreenSaverUrl);
   background_view_ = new ScreenLockerBackgroundView(lock_widget_);
   background_view_->Init(GURL(url_string));
+  if (background_view_->ScreenSaverEnabled())
+    StartScreenSaver();
 
   DCHECK(GTK_WIDGET_REALIZED(lock_window_->GetNativeView()));
   WmIpc::instance()->SetWindowType(
@@ -591,8 +609,10 @@ void ScreenLocker::OnLoginFailure(const LoginFailure& error) {
   MessageLoopForUI::current()->AddObserver(mouse_event_relay_.get());
 }
 
-void ScreenLocker::OnLoginSuccess(const std::string& username,
-    const GaiaAuthConsumer::ClientLoginResult& unused) {
+void ScreenLocker::OnLoginSuccess(
+    const std::string& username,
+    const GaiaAuthConsumer::ClientLoginResult& unused,
+    bool pending_requests) {
   LOG(INFO) << "OnLoginSuccess: Sending Unlock request.";
   if (CrosLibrary::Get()->EnsureLoaded())
     CrosLibrary::Get()->GetScreenLockLibrary()->NotifyScreenUnlockRequested();
@@ -611,8 +631,8 @@ void ScreenLocker::InfoBubbleClosing(InfoBubble* info_bubble,
 void ScreenLocker::Authenticate(const string16& password) {
   screen_lock_view_->SetEnabled(false);
   screen_lock_view_->SetSignoutEnabled(false);
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(authenticator_.get(),
                         &Authenticator::AuthenticateToUnlock,
                         user_.email(),
@@ -636,7 +656,9 @@ void ScreenLocker::EnableInput() {
 void ScreenLocker::Signout() {
   if (!error_info_) {
     // TODO(oshima): record this action in user metrics.
-    BrowserList::CloseAllBrowsersAndExit();
+    if (CrosLibrary::Get()->EnsureLoaded()) {
+      CrosLibrary::Get()->GetLoginLibrary()->StopSession("");
+    }
 
     // Don't hide yet the locker because the chrome screen may become visible
     // briefly.
@@ -652,12 +674,14 @@ void ScreenLocker::OnGrabInputs() {
 
 // static
 void ScreenLocker::Show() {
+  LOG(INFO) << "In ScreenLocker::Show";
   DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
 
   // Exit fullscreen.
   Browser* browser = BrowserList::GetLastActive();
-  DCHECK(browser);
-  if (browser->window()->IsFullscreen()) {
+  // browser can be NULL if we receive a lock request before the first browser
+  // window is shown.
+  if (browser && browser->window()->IsFullscreen()) {
     browser->ToggleFullscreenMode();
   }
 
@@ -746,16 +770,15 @@ void ScreenLocker::SetAuthenticator(Authenticator* authenticator) {
 
 void ScreenLocker::ScreenLockReady() {
   LOG(INFO) << "ScreenLockReady: sending completed signal to power manager.";
-  // Don't show the password field until we grab all inputs.
-  lock_widget_->GetRootView()->SetVisible(true);
+  locked_ = true;
   if (background_view_->ScreenSaverEnabled()) {
     lock_widget_->GetFocusManager()->RegisterAccelerator(
         views::Accelerator(app::VKEY_ESCAPE, false, false, false), this);
     locker_input_event_observer_.reset(new LockerInputEventObserver(this));
     MessageLoopForUI::current()->AddObserver(
         locker_input_event_observer_.get());
-    StartScreenSaver();
   } else {
+    // Don't enable the password field until we grab all inputs.
     EnableInput();
   }
 

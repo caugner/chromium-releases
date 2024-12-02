@@ -9,7 +9,7 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/common/net/url_fetcher.h"
 
@@ -26,7 +26,7 @@ ImageDownloader::ImageDownloader(ImageDecoder::Delegate* delegate,
                                  const GURL& image_url,
                                  const std::string& auth_token)
     : delegate_(delegate) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   image_fetcher_.reset(new URLFetcher(GURL(image_url), URLFetcher::GET, this));
   image_fetcher_->set_request_context(
       ProfileManager::GetDefaultProfile()->GetRequestContext());
@@ -43,7 +43,7 @@ void ImageDownloader::OnURLFetchComplete(const URLFetcher* source,
                                          int response_code,
                                          const ResponseCookies& cookies,
                                          const std::string& data) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (response_code != 200) {
     LOG(ERROR) << "Response code is " << response_code;
     LOG(ERROR) << "Url is " << url.spec();

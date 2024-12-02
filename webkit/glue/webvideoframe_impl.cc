@@ -42,10 +42,8 @@ COMPILE_ASSERT_MATCHING_ENUM(FormatEmpty, EMPTY);
 COMPILE_ASSERT_MATCHING_ENUM(FormatASCII, ASCII);
 
 COMPILE_ASSERT_MATCHING_ENUM(SurfaceTypeSystemMemory, TYPE_SYSTEM_MEMORY);
-COMPILE_ASSERT_MATCHING_ENUM(SurfaceTypeOMXBufferHead, TYPE_OMXBUFFERHEAD);
-COMPILE_ASSERT_MATCHING_ENUM(SurfaceTypeEGLImage, TYPE_EGL_IMAGE);
-COMPILE_ASSERT_MATCHING_ENUM(SurfaceTypeMFBuffer, TYPE_MFBUFFER);
-COMPILE_ASSERT_MATCHING_ENUM(SurfaceTypeDirect3DSurface, TYPE_DIRECT3DSURFACE);
+// TODO(hclam): Add checks for newly added surface types like GL texture and
+// D3D texture.
 
 WebVideoFrame::SurfaceType WebVideoFrameImpl::surfaceType() const {
   if (video_frame_.get())
@@ -62,31 +60,37 @@ WebVideoFrame::Format WebVideoFrameImpl::format() const {
 unsigned WebVideoFrameImpl::width() const {
   if (video_frame_.get())
     return video_frame_->width();
-  return NULL;
+  return 0;
 }
 
 unsigned WebVideoFrameImpl::height() const {
   if (video_frame_.get())
     return video_frame_->height();
-  return NULL;
+  return 0;
 }
 
 unsigned WebVideoFrameImpl::planes() const {
   if (video_frame_.get())
     return video_frame_->planes();
-  return NULL;
+  return 0;
 }
 
 int WebVideoFrameImpl::stride(unsigned plane) const {
   if (video_frame_.get())
     return static_cast<int>(video_frame_->stride(plane));
-  return NULL;
+  return 0;
 }
 
 const void* WebVideoFrameImpl::data(unsigned plane) const {
   if (video_frame_.get())
     return static_cast<const void*>(video_frame_->data(plane));
   return NULL;
+}
+
+unsigned WebVideoFrameImpl::texture(unsigned plane) const {
+  if (video_frame_.get())
+    return video_frame_->gl_texture(plane);
+  return 0;
 }
 
 }  // namespace webkit_glue

@@ -55,21 +55,23 @@ class MockNotificationObserver : public NotificationObserver {
 // the DB thread.
 class DBThreadObserverHelper :
     public base::RefCountedThreadSafe<DBThreadObserverHelper,
-                                      ChromeThread::DeleteOnDBThread> {
+                                      BrowserThread::DeleteOnDBThread> {
  public:
   DBThreadObserverHelper() : done_event_(true, false) {}
 
-  void Init() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-    ChromeThread::PostTask(
-        ChromeThread::DB,
+  void Init(PasswordStore* password_store) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    BrowserThread::PostTask(
+        BrowserThread::DB,
         FROM_HERE,
-        NewRunnableMethod(this, &DBThreadObserverHelper::AddObserverTask));
+        NewRunnableMethod(this,
+                          &DBThreadObserverHelper::AddObserverTask,
+                          password_store));
     done_event_.Wait();
   }
 
   virtual ~DBThreadObserverHelper() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
     registrar_.RemoveAll();
   }
 
@@ -80,11 +82,11 @@ class DBThreadObserverHelper :
  protected:
   friend class base::RefCountedThreadSafe<DBThreadObserverHelper>;
 
-  void AddObserverTask() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+  void AddObserverTask(PasswordStore* password_store) {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
     registrar_.Add(&observer_,
                    NotificationType::LOGINS_CHANGED,
-                   NotificationService::AllSources());
+                   Source<PasswordStore>(password_store));
     done_event_.Signal();
   }
 
@@ -100,8 +102,8 @@ typedef std::vector<PasswordForm*> VectorOfForms;
 class PasswordStoreDefaultTest : public testing::Test {
  protected:
   PasswordStoreDefaultTest()
-      : ui_thread_(ChromeThread::UI, &message_loop_),
-        db_thread_(ChromeThread::DB) {
+      : ui_thread_(BrowserThread::UI, &message_loop_),
+        db_thread_(BrowserThread::DB) {
   }
 
   virtual void SetUp() {
@@ -126,8 +128,8 @@ class PasswordStoreDefaultTest : public testing::Test {
   }
 
   MessageLoopForUI message_loop_;
-  ChromeThread ui_thread_;
-  ChromeThread db_thread_;  // PasswordStore, WDS schedule work on this thread.
+  BrowserThread ui_thread_;
+  BrowserThread db_thread_;  // PasswordStore, WDS schedule work on this thread.
 
   scoped_ptr<LoginDatabase> login_db_;
   scoped_ptr<TestingProfile> profile_;
@@ -140,13 +142,71 @@ ACTION(STLDeleteElements0) {
 }
 
 ACTION(QuitUIMessageLoop) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   MessageLoop::current()->Quit();
 }
 
 MATCHER(EmptyWDResult, "") {
   return static_cast<const WDResult<std::vector<PasswordForm*> >*>(
       arg)->GetValue().empty();
+}
+
+TEST_F(PasswordStoreDefaultTest, NonASCIIData) {
+  // Prentend that the migration has already taken place.
+  profile_->GetPrefs()->RegisterBooleanPref(prefs::kLoginDatabaseMigrated,
+                                            true);
+
+  // Initializing the PasswordStore shouldn't trigger a migration.
+  scoped_refptr<PasswordStoreDefault> store(
+      new PasswordStoreDefault(login_db_.release(), profile_.get(),
+                               wds_.get()));
+  store->Init();
+
+  // Some non-ASCII password form data.
+  PasswordFormData form_data[] = {
+    { PasswordForm::SCHEME_HTML,
+      "http://foo.example.com",
+      "http://foo.example.com/origin",
+      "http://foo.example.com/action",
+      L"มีสีสัน",
+      L"お元気ですか?",
+      L"盆栽",
+      L"أحب كرة",
+      L"£éä국수çà",
+      true, false, 1 },
+  };
+
+  // Build the expected forms vector and add the forms to the store.
+  VectorOfForms expected_forms;
+  for (unsigned int i = 0; i < ARRAYSIZE_UNSAFE(form_data); ++i) {
+    PasswordForm* form = CreatePasswordFormFromData(form_data[i]);
+    expected_forms.push_back(form);
+    store->AddLogin(*form);
+  }
+
+  // The PasswordStore schedules tasks to run on the DB thread so we schedule
+  // yet another task to notify us that it's safe to carry on with the test.
+  WaitableEvent done(false, false);
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
+  done.Wait();
+
+  MockPasswordStoreConsumer consumer;
+
+  // Make sure we quit the MessageLoop even if the test fails.
+  ON_CALL(consumer, OnPasswordStoreRequestDone(_, _))
+      .WillByDefault(QuitUIMessageLoop());
+
+  // We expect to get the same data back, even though it's not all ASCII.
+  EXPECT_CALL(consumer,
+      OnPasswordStoreRequestDone(_,
+          ContainsAllPasswordForms(expected_forms)))
+      .WillOnce(DoAll(WithArg<1>(STLDeleteElements0()), QuitUIMessageLoop()));
+
+  store->GetAutofillableLogins(&consumer);
+  MessageLoop::current()->Run();
+
+  STLDeleteElements(&expected_forms);
 }
 
 TEST_F(PasswordStoreDefaultTest, Migration) {
@@ -205,32 +265,25 @@ TEST_F(PasswordStoreDefaultTest, Migration) {
       false, false, 2 },
   };
 
+  // Build the expected forms vectors and populate the WDS with logins.
   VectorOfForms expected_autofillable;
   for (unsigned int i = 0; i < ARRAYSIZE_UNSAFE(autofillable_data); ++i) {
-    expected_autofillable.push_back(
-        CreatePasswordFormFromData(autofillable_data[i]));
+    PasswordForm* form = CreatePasswordFormFromData(autofillable_data[i]);
+    expected_autofillable.push_back(form);
+    wds_->AddLogin(*form);
   }
-
   VectorOfForms expected_blacklisted;
   for (unsigned int i = 0; i < ARRAYSIZE_UNSAFE(blacklisted_data); ++i) {
-    expected_blacklisted.push_back(
-        CreatePasswordFormFromData(blacklisted_data[i]));
-  }
-
-  // Populate the WDS with logins that should be migrated.
-  for (VectorOfForms::iterator it = expected_autofillable.begin();
-       it != expected_autofillable.end(); ++it) {
-    wds_->AddLogin(**it);
-  }
-  for (VectorOfForms::iterator it = expected_blacklisted.begin();
-       it != expected_blacklisted.end(); ++it) {
-    wds_->AddLogin(**it);
+    PasswordForm* form = CreatePasswordFormFromData(blacklisted_data[i]);
+    expected_blacklisted.push_back(form);
+    wds_->AddLogin(*form);
   }
 
   // The WDS schedules tasks to run on the DB thread so we schedule yet another
   // task to notify us that it's safe to carry on with the test.
   WaitableEvent done(false, false);
-  ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new SignalingTask(&done));
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
   done.Wait();
 
   // Initializing the PasswordStore should trigger a migration.
@@ -245,7 +298,8 @@ TEST_F(PasswordStoreDefaultTest, Migration) {
 
   // Again, the WDS schedules tasks to run on the DB thread, so schedule a task
   // to signal us when it is safe to continue.
-  ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new SignalingTask(&done));
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
   done.Wait();
 
   // Let the WDS callbacks proceed so the logins can be migrated.
@@ -289,7 +343,8 @@ TEST_F(PasswordStoreDefaultTest, Migration) {
   wds_->GetAutofillableLogins(&wds_consumer);
 
   // Wait for the WDS methods to execute on the DB thread.
-  ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new SignalingTask(&done));
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
   done.Wait();
 
   // Handle the callback from the WDS.
@@ -302,7 +357,8 @@ TEST_F(PasswordStoreDefaultTest, Migration) {
   wds_->GetBlacklistLogins(&wds_consumer);
 
   // Wait for the WDS methods to execute on the DB thread.
-  ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new SignalingTask(&done));
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
   done.Wait();
 
   // Handle the callback from the WDS.
@@ -326,22 +382,19 @@ TEST_F(PasswordStoreDefaultTest, MigrationAlreadyDone) {
       true, false, 1 },
   };
 
+  // Build the expected forms vector and populate the WDS with logins.
   VectorOfForms unexpected_autofillable;
   for (unsigned int i = 0; i < ARRAYSIZE_UNSAFE(wds_data); ++i) {
-    unexpected_autofillable.push_back(
-        CreatePasswordFormFromData(wds_data[i]));
-  }
-
-  // Populate the WDS with logins that should be migrated.
-  for (VectorOfForms::iterator it = unexpected_autofillable.begin();
-       it != unexpected_autofillable.end(); ++it) {
-    wds_->AddLogin(**it);
+    PasswordForm* form = CreatePasswordFormFromData(wds_data[i]);
+    unexpected_autofillable.push_back(form);
+    wds_->AddLogin(*form);
   }
 
   // The WDS schedules tasks to run on the DB thread so we schedule yet another
   // task to notify us that it's safe to carry on with the test.
   WaitableEvent done(false, false);
-  ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new SignalingTask(&done));
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
   done.Wait();
 
   // Prentend that the migration has already taken place.
@@ -397,7 +450,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
   scoped_ptr<PasswordForm> form(CreatePasswordFormFromData(form_data));
 
   scoped_refptr<DBThreadObserverHelper> helper = new DBThreadObserverHelper;
-  helper->Init();
+  helper->Init(store);
 
   const PasswordStoreChange expected_add_changes[] = {
     PasswordStoreChange(PasswordStoreChange::ADD, *form),
@@ -405,7 +458,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
 
   EXPECT_CALL(helper->observer(),
               Observe(NotificationType(NotificationType::LOGINS_CHANGED),
-                      NotificationService::AllSources(),
+                      Source<PasswordStore>(store),
                       Property(&Details<const PasswordStoreChangeList>::ptr,
                                Pointee(ElementsAreArray(
                                    expected_add_changes)))));
@@ -416,7 +469,8 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
   // The PasswordStore schedules tasks to run on the DB thread so we schedule
   // yet another task to notify us that it's safe to carry on with the test.
   WaitableEvent done(false, false);
-  ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new SignalingTask(&done));
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
   done.Wait();
 
   // Change the password.
@@ -428,7 +482,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
 
   EXPECT_CALL(helper->observer(),
               Observe(NotificationType(NotificationType::LOGINS_CHANGED),
-                      NotificationService::AllSources(),
+                      Source<PasswordStore>(store),
                       Property(&Details<const PasswordStoreChangeList>::ptr,
                                Pointee(ElementsAreArray(
                                    expected_update_changes)))));
@@ -437,7 +491,8 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
   store->UpdateLogin(*form);
 
   // Wait for PasswordStore to send the notification.
-  ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new SignalingTask(&done));
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
   done.Wait();
 
   const PasswordStoreChange expected_delete_changes[] = {
@@ -446,7 +501,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
 
   EXPECT_CALL(helper->observer(),
               Observe(NotificationType(NotificationType::LOGINS_CHANGED),
-                      NotificationService::AllSources(),
+                      Source<PasswordStore>(store),
                       Property(&Details<const PasswordStoreChangeList>::ptr,
                                Pointee(ElementsAreArray(
                                    expected_delete_changes)))));
@@ -455,6 +510,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
   store->RemoveLogin(*form);
 
   // Wait for PasswordStore to send the notification.
-  ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new SignalingTask(&done));
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+      new SignalingTask(&done));
   done.Wait();
 }

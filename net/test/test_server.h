@@ -12,6 +12,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/process_util.h"
 #include "net/base/host_port_pair.h"
 
@@ -51,12 +52,6 @@ class TestServer {
   // Stop the server started by Start().
   bool Stop();
 
-  // If you access the server's Kill url, it will exit by itself
-  // without a call to Stop().
-  // WaitToFinish is handy in that case.
-  // It returns true if the server exited cleanly.
-  bool WaitToFinish(int milliseconds) WARN_UNUSED_RESULT;
-
   const FilePath& document_root() const { return document_root_; }
   const HostPortPair& host_port_pair() const { return host_port_pair_; }
   std::string GetScheme() const;
@@ -72,9 +67,6 @@ class TestServer {
                                  const std::string& password);
 
  private:
-  // Appends |dir| to PYTHONPATH.
-  static void AppendToPythonPath(const FilePath& dir);
-
   // Modify PYTHONPATH to contain libraries we need.
   bool SetPythonPath() WARN_UNUSED_RESULT;
 
@@ -112,6 +104,15 @@ class TestServer {
 #if defined(OS_WIN)
   // JobObject used to clean up orphaned child processes.
   ScopedHandle job_handle_;
+
+  // The file handle the child writes to when it starts.
+  ScopedHandle child_fd_;
+#endif
+
+#if defined(OS_POSIX)
+  // The file descriptor the child writes to when it starts.
+  int child_fd_;
+  file_util::ScopedFD child_fd_closer_;
 #endif
 
 #if defined(USE_NSS)

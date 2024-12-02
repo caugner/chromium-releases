@@ -53,7 +53,7 @@ void SetUIMode() {
 bool WasLaunchedAsLoginItem() {
   ProcessSerialNumber psn = { 0, kCurrentProcess };
 
-  scoped_nsobject<NSDictionary> process_info(
+  scoped_nsobject<const NSDictionary> process_info(
       reinterpret_cast<const NSDictionary*>(
           ProcessInformationCopyDictionary(&psn,
               kProcessDictionaryIncludeAllInformationMask)));
@@ -62,7 +62,7 @@ bool WasLaunchedAsLoginItem() {
   ProcessSerialNumber parent_psn =
       { (temp >> 32) & 0x00000000FFFFFFFFLL, temp & 0x00000000FFFFFFFFLL };
 
-  scoped_nsobject<NSDictionary> parent_info(
+  scoped_nsobject<const NSDictionary> parent_info(
       reinterpret_cast<const NSDictionary*>(
           ProcessInformationCopyDictionary(&parent_psn,
               kProcessDictionaryIncludeAllInformationMask)));
@@ -86,8 +86,9 @@ LSSharedFileListItemRef GetLoginItemForApp() {
     return NULL;
   }
 
-  scoped_nsobject<NSArray> login_items_array(reinterpret_cast<const NSArray*>(
-      LSSharedFileListCopySnapshot(login_items, NULL)));
+  scoped_nsobject<const NSArray> login_items_array(
+      reinterpret_cast<const NSArray*>(
+        LSSharedFileListCopySnapshot(login_items, NULL)));
 
   NSURL* url = [NSURL fileURLWithPath:[[NSBundle mainBundle] bundlePath]];
 
@@ -108,11 +109,14 @@ LSSharedFileListItemRef GetLoginItemForApp() {
   return NULL;
 }
 
+#if !defined(MAC_OS_X_VERSION_10_6) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
 // kLSSharedFileListLoginItemHidden is supported on
 // 10.5, but missing from the 10.5 headers.
 // http://openradar.appspot.com/6482251
 static NSString* kLSSharedFileListLoginItemHidden =
     @"com.apple.loginitem.HideOnLaunch";
+#endif
 
 bool IsHiddenLoginItem(LSSharedFileListItemRef item) {
   scoped_cftyperef<CFBooleanRef> hidden(reinterpret_cast<CFBooleanRef>(
@@ -144,15 +148,17 @@ bool AmIBundled() {
   ProcessSerialNumber psn = {0, kCurrentProcess};
 
   FSRef fsref;
-  if (GetProcessBundleLocation(&psn, &fsref) != noErr) {
-    LOG(ERROR) << "GetProcessBundleLocation failed, returning false";
+  OSStatus pbErr;
+  if ((pbErr = GetProcessBundleLocation(&psn, &fsref)) != noErr) {
+    LOG(ERROR) << "GetProcessBundleLocation failed: error " << pbErr;
     return false;
   }
 
   FSCatalogInfo info;
-  if (FSGetCatalogInfo(&fsref, kFSCatInfoNodeFlags, &info,
-                       NULL, NULL, NULL) != noErr) {
-    LOG(ERROR) << "FSGetCatalogInfo failed, returning false";
+  OSErr fsErr;
+  if ((fsErr = FSGetCatalogInfo(&fsref, kFSCatInfoNodeFlags, &info,
+                                NULL, NULL, NULL)) != noErr) {
+    LOG(ERROR) << "FSGetCatalogInfo failed: error " << fsErr;
     return false;
   }
 
@@ -622,8 +628,9 @@ void AddToLoginItems(bool hide_on_startup) {
 
   BOOL hide = hide_on_startup ? YES : NO;
   NSDictionary* properties =
-      [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:hide]
-                                  forKey:kLSSharedFileListLoginItemHidden];
+      [NSDictionary
+        dictionaryWithObject:[NSNumber numberWithBool:hide]
+                      forKey:(NSString*)kLSSharedFileListLoginItemHidden];
 
   scoped_cftyperef<LSSharedFileListItemRef> new_item;
   new_item.reset(LSSharedFileListInsertItemURL(
@@ -662,6 +669,16 @@ bool WasLaunchedAsHiddenLoginItem() {
     return false;
   }
   return IsHiddenLoginItem(item);
+}
+
+void NSObjectRetain(void* obj) {
+  id<NSObject> nsobj = static_cast<id<NSObject> >(obj);
+  [nsobj retain];
+}
+
+void NSObjectRelease(void* obj) {
+  id<NSObject> nsobj = static_cast<id<NSObject> >(obj);
+  [nsobj release];
 }
 
 }  // namespace mac_util

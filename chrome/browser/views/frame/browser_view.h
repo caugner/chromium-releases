@@ -16,7 +16,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/views/frame/browser_bubble_host.h"
 #include "chrome/browser/views/frame/browser_frame.h"
 #include "chrome/browser/views/infobars/infobar_container.h"
@@ -43,6 +43,7 @@ class BookmarkBarView;
 class Browser;
 class BrowserBubble;
 class BrowserViewLayout;
+class ContentsContainer;
 class DownloadShelfView;
 class EncodingMenuModel;
 class FullscreenExitBubble;
@@ -52,6 +53,7 @@ class LocationBarView;
 class SideTabStrip;
 class StatusBubbleViews;
 class TabContentsContainer;
+class TabStripModel;
 class ToolbarView;
 class ZoomMenuModel;
 
@@ -278,8 +280,12 @@ class BrowserView : public BrowserBubbleHost,
   virtual bool IsToolbarVisible() const;
   virtual gfx::Rect GetRootWindowResizerRect() const;
   virtual void DisableInactiveFrame();
+  virtual void ConfirmSetDefaultSearchProvider(
+      TabContents* tab_contents,
+      TemplateURL* template_url,
+      TemplateURLModel* template_url_model);
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
-                                      Profile* profile);
+                                        Profile* profile);
   virtual void ToggleBookmarkBar();
   virtual views::Window* ShowAboutChromeDialog();
   virtual void ShowUpdateChromeDialog();
@@ -319,6 +325,9 @@ class BrowserView : public BrowserBubbleHost,
   virtual void Copy();
   virtual void Paste();
   virtual void ToggleTabStripMode();
+  virtual void ShowInstant(TabContents* preview_contents);
+  virtual void HideInstant();
+  virtual gfx::Rect GetInstantBounds();
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const;
@@ -341,8 +350,7 @@ class BrowserView : public BrowserBubbleHost,
                              bool user_gesture);
   virtual void TabReplacedAt(TabContents* old_contents,
                              TabContents* new_contents,
-                             int index,
-                             TabStripModelObserver::TabReplaceType type);
+                             int index);
   virtual void TabStripEmpty();
 
   // Overridden from menus::SimpleMenuModel::Delegate:
@@ -359,6 +367,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual bool CanMaximize() const;
   virtual bool IsModal() const;
   virtual std::wstring GetWindowTitle() const;
+  virtual std::wstring GetAccessibleWindowTitle() const;
   virtual views::View* GetInitiallyFocusedView();
   virtual bool ShouldShowWindowTitle() const;
   virtual SkBitmap GetWindowAppIcon();
@@ -402,7 +411,7 @@ class BrowserView : public BrowserBubbleHost,
                                     views::View* parent,
                                     views::View* child);
   virtual void ChildPreferredSizeChanged(View* child);
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual AccessibilityTypes::Role GetAccessibleRole();
 
   // Factory Methods.
   // Returns a new LayoutManager for this browser view. A subclass may
@@ -420,8 +429,6 @@ class BrowserView : public BrowserBubbleHost,
  private:
   friend class BrowserViewLayout;
 
-  class ContentsContainer;
-
 #if defined(OS_WIN)
   // Creates the system menu.
   void InitSystemMenu();
@@ -431,7 +438,7 @@ class BrowserView : public BrowserBubbleHost,
   BrowserViewLayout* GetBrowserViewLayout() const;
 
   // Layout the Status Bubble.
-  void LayoutStatusBubble(int top);
+  void LayoutStatusBubble();
 
   // Prepare to show the Bookmark Bar for the specified TabContents. Returns
   // true if the Bookmark Bar can be shown (i.e. it's supported for this
@@ -493,13 +500,7 @@ class BrowserView : public BrowserBubbleHost,
   // Initialize the hung plugin detector.
   void InitHangMonitor();
 
-  // Shows the match preview for the selected tab contents.
-  void ShowMatchPreview();
-
-  // Hides the match preview for the selected tab contents.
-  void HideMatchPreview();
-
-  // Invoked from TabSelectedAt or when the match preview is made active.  Is
+  // Invoked from TabSelectedAt or when instant is made active.  Is
   // |change_tab_contents| is true, |new_contents| is added to the view
   // hierarchy, if |change_tab_contents| is false, it's assumed |new_contents|
   // has already been added to the view hierarchy.
@@ -521,13 +522,13 @@ class BrowserView : public BrowserBubbleHost,
   // |         |--------------------------------------------------------------|
   // |         | Navigation buttons, menus and the address bar (toolbar_)     |
   // |         |--------------------------------------------------------------|
-  // |         | All infobars (infobar_container_)                            |
+  // |         | All infobars (infobar_container_) *                          |
   // |         |--------------------------------------------------------------|
-  // |         | Bookmarks (bookmark_bar_view_)                               |
+  // |         | Bookmarks (bookmark_bar_view_) *                             |
   // |         |--------------------------------------------------------------|
   // |         |Page content (contents_)              ||                      |
   // |         |--------------------------------------|| Sidebar content      |
-  // |         || contents_container_ or             ||| (sidebar_container_) |
+  // |         || contents_container_ and/or         ||| (sidebar_container_) |
   // |         || preview_container_                 |||                      |
   // |         ||                                    |(3)                     |
   // | Tabs (2)||                                    |||                      |
@@ -549,6 +550,11 @@ class BrowserView : public BrowserBubbleHost,
   // (2) - tabstrip_, position when side tabs are enabled
   // (3) - sidebar_split_
   // (4) - contents_split_
+  //
+  // * - The bookmark bar and info bar are swapped when on the new tab page.
+  //     Additionally contents_ is positioned on top of the bookmark bar when
+  //     the bookmark bar is detached. This is done to allow the
+  //     preview_container_ to appear over the bookmark bar.
 
   // Tool/Info bars that we are currently showing. Used for layout.
   // active_bookmark_bar_ is either NULL, if the bookmark bar isn't showing,
@@ -582,7 +588,7 @@ class BrowserView : public BrowserBubbleHost,
   // The view that contains devtools window for the selected TabContents.
   TabContentsContainer* devtools_container_;
 
-  // The view that contains the match preview TabContents.
+  // The view that contains instant's TabContents.
   TabContentsContainer* preview_container_;
 
   // The view managing both the contents_container_ and preview_container_.

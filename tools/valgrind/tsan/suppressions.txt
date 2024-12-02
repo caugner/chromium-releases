@@ -23,6 +23,7 @@
 {
   bug_41314
   ThreadSanitizer:Race
+  ...
   fun:base::LaunchApp*
   fun:ChildProcessLauncher::Context::LaunchInternal*
 }
@@ -37,6 +38,21 @@
   bug_46642b
   ThreadSanitizer:Race
   fun:*media*PipelineImpl*GetCurrentTime*
+}
+
+{
+  bug_57266a
+  ThreadSanitizer:Race
+  ...
+  fun:*vp8*_*
+}
+
+{
+  bug_57266b
+  ThreadSanitizer:Race
+  ...
+  obj:*libffmpegsumo.*
+  fun:ThreadSanitizerStartThread
 }
 
 ############################

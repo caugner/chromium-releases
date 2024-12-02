@@ -427,8 +427,6 @@ int DeterministicMockTCPClientSocket::CompleteRead() {
     DCHECK(read_data_.data);
     result = std::min(read_buf_len_, read_data_.data_len);
     memcpy(read_buf_->data(), read_data_.data, result);
-  } else {
-    result = 0;
   }
 
   if (read_pending_) {
@@ -794,29 +792,31 @@ DeterministicSocketData::DeterministicSocketData(MockRead* reads,
       sequence_number_(0),
       current_read_(),
       current_write_(),
-      next_read_seq_(0),
-      stopping_sequence_number_(1<<31),
+      stopping_sequence_number_(0),
       stopped_(false),
       print_debug_(false) {}
 
 MockRead DeterministicSocketData::GetNextRead() {
-  const MockRead& next_read = StaticSocketDataProvider::PeekRead();
-  EXPECT_LE(sequence_number_, next_read.sequence_number);
-  current_read_ = next_read;
-  next_read_seq_ = current_read_.sequence_number;
-  if (sequence_number_ >= stopping_sequence_number_) {
-    SetStopped(true);
-    NET_TRACE(INFO, "  *** ") << "Force Stop. I/O Pending on read. Stage "
-                              << sequence_number_;
-    MockRead result = MockRead(false, ERR_IO_PENDING);
-    if (print_debug_)
-      DumpMockRead(result);
-    return result;
+  current_read_ = StaticSocketDataProvider::PeekRead();
+  EXPECT_LE(sequence_number_, current_read_.sequence_number);
+
+  // Synchronous read while stopped is an error
+  if (stopped() && !current_read_.async) {
+    LOG(ERROR) << "Unable to perform synchronous IO while stopped";
+    return MockRead(false, ERR_UNEXPECTED);
   }
-  if (sequence_number_ < next_read.sequence_number) {
+
+  // Async read which will be called back in a future step.
+  if (sequence_number_ < current_read_.sequence_number) {
     NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_
                               << ": I/O Pending";
     MockRead result = MockRead(false, ERR_IO_PENDING);
+    if (!current_read_.async) {
+      LOG(ERROR) << "Unable to perform synchronous read: "
+          << current_read_.sequence_number
+          << " at stage: " << sequence_number_;
+      result = MockRead(false, ERR_UNEXPECTED);
+    }
     if (print_debug_)
       DumpMockRead(result);
     return result;
@@ -825,31 +825,55 @@ MockRead DeterministicSocketData::GetNextRead() {
   NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_
                             << ": Read " << read_index();
   if (print_debug_)
-    DumpMockRead(next_read);
-  sequence_number_++;
+    DumpMockRead(current_read_);
+
+  // Increment the sequence number if IO is complete
+  if (!current_read_.async)
+    NextStep();
+
+  DCHECK_NE(ERR_IO_PENDING, current_read_.result);
   StaticSocketDataProvider::GetNextRead();
-  if (current_read_.result == ERR_IO_PENDING)
-    current_read_ = StaticSocketDataProvider::GetNextRead();
 
-  if (!at_read_eof())
-    next_read_seq_ = PeekRead().sequence_number;
-
-  return next_read;
+  return current_read_;
 }
 
 MockWriteResult DeterministicSocketData::OnWrite(const std::string& data) {
-  NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_
-                            << ": Write " << write_index();
   const MockWrite& next_write = StaticSocketDataProvider::PeekWrite();
-  DCHECK_LE(next_write.sequence_number, sequence_number_);
+  current_write_ = next_write;
+
+  // Synchronous write while stopped is an error
+  if (stopped() && !next_write.async) {
+    LOG(ERROR) << "Unable to perform synchronous IO while stopped";
+    return MockWriteResult(false, ERR_UNEXPECTED);
+  }
+
+  // Async write which will be called back in a future step.
+  if (sequence_number_ < next_write.sequence_number) {
+    NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_
+                              << ": I/O Pending";
+    if (!next_write.async) {
+      LOG(ERROR) << "Unable to perform synchronous write: "
+          << next_write.sequence_number << " at stage: " << sequence_number_;
+      return MockWriteResult(false, ERR_UNEXPECTED);
+    }
+  } else {
+    NET_TRACE(INFO, "  *** ") << "Stage " << sequence_number_
+                              << ": Write " << write_index();
+  }
+
   if (print_debug_)
     DumpMockRead(next_write);
-  ++sequence_number_;
-  current_write_ = next_write;
+
+  // Move to the next step if I/O is synchronous, since the operation will
+  // complete when this method returns.
+  if (!next_write.async)
+    NextStep();
+
+  // This is either a sync write for this step, or an async write.
   return StaticSocketDataProvider::OnWrite(data);
 }
 
-void DeterministicSocketData::Reset(){
+void DeterministicSocketData::Reset() {
   NET_TRACE(INFO, "  *** ") << "Stage "
                             << sequence_number_ << ": Reset()";
   sequence_number_ = 0;
@@ -857,19 +881,25 @@ void DeterministicSocketData::Reset(){
   NOTREACHED();
 }
 
-void DeterministicSocketData::Run(){
+void DeterministicSocketData::RunFor(int steps) {
+  StopAfter(steps);
+  Run();
+}
+
+void DeterministicSocketData::Run() {
+  SetStopped(false);
   int counter = 0;
   // Continue to consume data until all data has run out, or the stopped_ flag
   // has been set. Consuming data requires two separate operations -- running
   // the tasks in the message loop, and explicitly invoking the read/write
   // callbacks (simulating network I/O). We check our conditions between each,
   // since they can change in either.
-  while ((!at_write_eof() || !at_read_eof()) &&
-      !stopped()) {
+  while ((!at_write_eof() || !at_read_eof()) && !stopped()) {
     if (counter % 2 == 0)
       MessageLoop::current()->RunAllPending();
-    if (counter % 2 == 1)
+    if (counter % 2 == 1) {
       InvokeCallbacks();
+    }
     counter++;
   }
   // We're done consuming new data, but it is possible there are still some
@@ -882,18 +912,29 @@ void DeterministicSocketData::Run(){
   SetStopped(false);
 }
 
-void DeterministicSocketData::InvokeCallbacks(){
+void DeterministicSocketData::InvokeCallbacks() {
   if (socket_ && socket_->write_pending() &&
       (current_write().sequence_number == sequence_number())) {
     socket_->CompleteWrite();
+    NextStep();
     return;
   }
   if (socket_ && socket_->read_pending() &&
-      (next_read_seq() == sequence_number())) {
+      (current_read().sequence_number == sequence_number())) {
     socket_->CompleteRead();
+    NextStep();
     return;
   }
 }
+
+void DeterministicSocketData::NextStep() {
+  // Invariant: Can never move *past* the stopping step.
+  DCHECK_LT(sequence_number_, stopping_sequence_number_);
+  sequence_number_++;
+  if (sequence_number_ == stopping_sequence_number_)
+    SetStopped(true);
+}
+
 
 void MockClientSocketFactory::AddSocketDataProvider(
     SocketDataProvider* data) {
@@ -989,6 +1030,18 @@ SSLClientSocket* DeterministicMockClientSocketFactory::CreateSSLClientSocket(
   return socket;
 }
 
+TestSocketRequest::TestSocketRequest(
+    std::vector<TestSocketRequest*>* request_order,
+    size_t* completion_count)
+    : request_order_(request_order),
+      completion_count_(completion_count) {
+  DCHECK(request_order);
+  DCHECK(completion_count);
+}
+
+TestSocketRequest::~TestSocketRequest() {
+}
+
 int TestSocketRequest::WaitForResult() {
   return callback_.WaitForResult();
 }
@@ -1005,26 +1058,10 @@ const int ClientSocketPoolTest::kIndexOutOfBounds = -1;
 // static
 const int ClientSocketPoolTest::kRequestNotFound = -2;
 
-void ClientSocketPoolTest::SetUp() {
-  completion_count_ = 0;
-}
+ClientSocketPoolTest::ClientSocketPoolTest() : completion_count_(0) {}
+ClientSocketPoolTest::~ClientSocketPoolTest() {}
 
-void ClientSocketPoolTest::TearDown() {
-  // The tests often call Reset() on handles at the end which may post
-  // DoReleaseSocket() tasks.
-  // Pending tasks created by client_socket_pool_base_unittest.cc are
-  // posted two milliseconds into the future and thus won't become
-  // scheduled until that time.
-  // We wait a few milliseconds to make sure that all such future tasks
-  // are ready to run, before calling RunAllPending(). This will work
-  // correctly even if Sleep() finishes late (and it should never finish
-  // early), as all we have to ensure is that actual wall-time has progressed
-  // past the scheduled starting time of the pending task.
-  PlatformThread::Sleep(10);
-  MessageLoop::current()->RunAllPending();
-}
-
-int ClientSocketPoolTest::GetOrderOfRequest(size_t index) {
+int ClientSocketPoolTest::GetOrderOfRequest(size_t index) const {
   index--;
   if (index >= requests_.size())
     return kIndexOutOfBounds;
@@ -1108,7 +1145,7 @@ void MockTCPClientSocketPool::MockConnectJob::OnConnect(int rv) {
 MockTCPClientSocketPool::MockTCPClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
-    const scoped_refptr<ClientSocketPoolHistograms>& histograms,
+    ClientSocketPoolHistograms* histograms,
     ClientSocketFactory* socket_factory)
     : TCPClientSocketPool(max_sockets, max_sockets_per_group, histograms,
                           NULL, NULL, NULL),
@@ -1154,8 +1191,8 @@ MockTCPClientSocketPool::~MockTCPClientSocketPool() {}
 MockSOCKSClientSocketPool::MockSOCKSClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
-    const scoped_refptr<ClientSocketPoolHistograms>& histograms,
-    const scoped_refptr<TCPClientSocketPool>& tcp_pool)
+    ClientSocketPoolHistograms* histograms,
+    TCPClientSocketPool* tcp_pool)
     : SOCKSClientSocketPool(max_sockets, max_sockets_per_group, histograms,
                             NULL, tcp_pool, NULL),
       tcp_pool_(tcp_pool) {
@@ -1201,14 +1238,12 @@ const int kSOCKS5OkResponseLength = arraysize(kSOCKS5OkResponse);
 MockSSLClientSocketPool::MockSSLClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
-    const scoped_refptr<ClientSocketPoolHistograms>& histograms,
-    ClientSocketFactory* socket_factory)
+    ClientSocketPoolHistograms* histograms,
+    ClientSocketFactory* socket_factory,
+    TCPClientSocketPool* tcp_pool)
     : SSLClientSocketPool(max_sockets, max_sockets_per_group, histograms,
-                          NULL, socket_factory,
-                          new MockTCPClientSocketPool(max_sockets,
-                                                      max_sockets_per_group,
-                                                      histograms,
-                                                      socket_factory),
+                          NULL, NULL, socket_factory,
+                          tcp_pool,
                           NULL, NULL, NULL, NULL),
       client_socket_factory_(socket_factory),
       release_count_(0),

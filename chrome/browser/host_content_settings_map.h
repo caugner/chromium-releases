@@ -18,6 +18,7 @@
 #include "base/lock.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -30,7 +31,7 @@ class Profile;
 class HostContentSettingsMap
     : public NotificationObserver,
       public base::RefCountedThreadSafe<HostContentSettingsMap,
-                                        ChromeThread::DeleteOnUIThread> {
+                                        BrowserThread::DeleteOnUIThread> {
  public:
   // A hostname pattern. See |IsValid| for a description of possible patterns.
   class Pattern {
@@ -106,7 +107,6 @@ class HostContentSettingsMap
     ContentSettingsType type_;
     std::string resource_identifier_;
   };
-
 
   typedef std::pair<Pattern, ContentSetting> PatternSettingPair;
   typedef std::vector<PatternSettingPair> SettingsForOneType;
@@ -219,13 +219,16 @@ class HostContentSettingsMap
   // This should only be called on the UI thread.
   void SetBlockThirdPartyCookies(bool block);
 
+  bool GetBlockNonsandboxedPlugins() const {
+    return block_nonsandboxed_plugins_;
+  }
+
+  void SetBlockNonsandboxedPlugins(bool block);
+
   // Resets all settings levels.
   //
   // This should only be called on the UI thread.
   void ResetToDefaults();
-
-  // Whether this settings map is associated with an OTR session.
-  bool IsOffTheRecord();
 
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
@@ -282,6 +285,7 @@ class HostContentSettingsMap
   Profile* profile_;
 
   NotificationRegistrar notification_registrar_;
+  PrefChangeRegistrar pref_change_registrar_;
 
   // Copies of the pref data, so that we can read it on the IO thread.
   ContentSettings default_content_settings_;
@@ -293,6 +297,7 @@ class HostContentSettingsMap
 
   // Misc global settings.
   bool block_third_party_cookies_;
+  bool block_nonsandboxed_plugins_;
 
   // Used around accesses to the settings objects to guarantee thread safety.
   mutable Lock lock_;

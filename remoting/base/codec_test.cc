@@ -8,9 +8,10 @@
 #include "gfx/rect.h"
 #include "media/base/video_frame.h"
 #include "remoting/base/codec_test.h"
+#include "remoting/base/decoder.h"
 #include "remoting/base/encoder.h"
 #include "remoting/base/mock_objects.h"
-#include "remoting/base/protocol_util.h"
+#include "remoting/base/util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 static const int kWidth = 320;
@@ -78,9 +79,10 @@ class EncoderMessageTester {
 
   ~EncoderMessageTester() {
     EXPECT_EQ(begin_rect_, end_rect_);
+    EXPECT_GT(begin_rect_, 0);
     EXPECT_EQ(kWaitingForBeginRect, state_);
-    if (strict_){
-      EXPECT_EQ(begin_rect_, added_rects_);
+    if (strict_) {
+      EXPECT_EQ(added_rects_, begin_rect_);
     }
   }
 
@@ -164,15 +166,15 @@ class DecoderTester {
 
   void ReceivedMessage(ChromotingHostMessage* message) {
     if (message->has_update_stream_packet()) {
-      decoder_->PartialDecode(message);
+      EXPECT_TRUE(decoder_->PartialDecode(message));
       return;
     }
 
     if (message->has_begin_update_stream()) {
-      decoder_->BeginDecode(
+      EXPECT_TRUE(decoder_->BeginDecode(
           frame_, &update_rects_,
           NewRunnableMethod(this, &DecoderTester::OnPartialDecodeDone),
-          NewRunnableMethod(this, &DecoderTester::OnDecodeDone));
+          NewRunnableMethod(this, &DecoderTester::OnDecodeDone)));
     }
 
     if (message->has_end_update_stream()) {
@@ -251,6 +253,8 @@ class DecoderTester {
   DISALLOW_COPY_AND_ASSIGN(DecoderTester);
 };
 
+// The EncoderTester provides a hook for retrieving the data, and passing the
+// message to other subprograms for validaton.
 class EncoderTester {
  public:
   EncoderTester(EncoderMessageTester* message_tester,

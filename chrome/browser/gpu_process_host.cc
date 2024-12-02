@@ -14,10 +14,12 @@
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/gpu_info.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/common/render_messages.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_switches.h"
+#include "media/base/media_switches.h"
 
 #if defined(OS_LINUX)
 #include "gfx/gtk_native_view_id_manager.h"
@@ -28,17 +30,14 @@ namespace {
 // Tasks used by this file
 class RouteOnUIThreadTask : public Task {
  public:
-  explicit RouteOnUIThreadTask(const IPC::Message& msg) {
-    msg_ = new IPC::Message(msg);
+  explicit RouteOnUIThreadTask(const IPC::Message& msg) : msg_(msg) {
   }
 
  private:
   void Run() {
-    GpuProcessHostUIShim::Get()->OnMessageReceived(*msg_);
-    delete msg_;
-    msg_ = NULL;
+    GpuProcessHostUIShim::Get()->OnMessageReceived(msg_);
   }
-  IPC::Message* msg_;
+  IPC::Message msg_;
 };
 
 // Global GpuProcessHost instance.
@@ -93,7 +92,9 @@ bool GpuProcessHost::Init() {
   // Propagate relevant command line switches.
   static const char* const kSwitchNames[] = {
     switches::kUseGL,
+    switches::kDisableGpuVsync,
     switches::kDisableLogging,
+    switches::kEnableAcceleratedDecoding,
     switches::kEnableLogging,
     switches::kGpuStartupDialog,
     switches::kLoggingLevel,
@@ -124,6 +125,16 @@ GpuProcessHost* GpuProcessHost::Get() {
   return sole_instance_;
 }
 
+// static
+void GpuProcessHost::SendAboutGpuCrash() {
+  Get()->Send(new GpuMsg_Crash());
+}
+
+// static
+void GpuProcessHost::SendAboutGpuHang() {
+  Get()->Send(new GpuMsg_Hang());
+}
+
 bool GpuProcessHost::Send(IPC::Message* msg) {
   if (!EnsureInitialized())
     return false;
@@ -137,9 +148,9 @@ void GpuProcessHost::OnMessageReceived(const IPC::Message& message) {
   } else {
     // Need to transfer this message to the UI thread and the
     // GpuProcessHostUIShim for dispatching via its message router.
-    ChromeThread::PostTask(ChromeThread::UI,
-                           FROM_HERE,
-                           new RouteOnUIThreadTask(message));
+    BrowserThread::PostTask(BrowserThread::UI,
+                            FROM_HERE,
+                            new RouteOnUIThreadTask(message));
   }
 }
 
@@ -148,7 +159,7 @@ void GpuProcessHost::EstablishGpuChannel(int renderer_id,
   if (Send(new GpuMsg_EstablishChannel(renderer_id))) {
     sent_requests_.push(ChannelRequest(filter));
   } else {
-    ReplyToRenderer(IPC::ChannelHandle(), filter);
+    ReplyToRenderer(IPC::ChannelHandle(), GPUInfo(), filter);
   }
 }
 
@@ -166,8 +177,10 @@ void GpuProcessHost::OnControlMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(GpuProcessHost, message)
     IPC_MESSAGE_HANDLER(GpuHostMsg_ChannelEstablished, OnChannelEstablished)
     IPC_MESSAGE_HANDLER(GpuHostMsg_SynchronizeReply, OnSynchronizeReply)
+    IPC_MESSAGE_HANDLER(GpuHostMsg_GraphicsInfoCollected,
+                        OnGraphicsInfoCollected)
 #if defined(OS_LINUX)
-    IPC_MESSAGE_HANDLER(GpuHostMsg_GetViewXID, OnGetViewXID)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuHostMsg_GetViewXID, OnGetViewXID)
 #elif defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceSetIOSurface,
                         OnAcceleratedSurfaceSetIOSurface)
@@ -182,7 +195,7 @@ void GpuProcessHost::OnChannelEstablished(
     const IPC::ChannelHandle& channel_handle,
     const GPUInfo& gpu_info) {
   const ChannelRequest& request = sent_requests_.front();
-  ReplyToRenderer(channel_handle, request.filter);
+  ReplyToRenderer(channel_handle, gpu_info, request.filter);
   sent_requests_.pop();
   gpu_info_ = gpu_info;
   child_process_logging::SetGpuInfo(gpu_info);
@@ -195,13 +208,43 @@ void GpuProcessHost::OnSynchronizeReply() {
   queued_synchronization_replies_.pop();
 }
 
+void GpuProcessHost::OnGraphicsInfoCollected(const GPUInfo& gpu_info) {
+  gpu_info_ = gpu_info;
+}
+
 #if defined(OS_LINUX)
-void GpuProcessHost::OnGetViewXID(gfx::NativeViewId id, unsigned long* xid) {
+
+namespace {
+
+void SendDelayedReply(IPC::Message* reply_msg) {
+  GpuProcessHost::Get()->Send(reply_msg);
+}
+
+void GetViewXIDDispatcher(gfx::NativeViewId id, IPC::Message* reply_msg) {
+  unsigned long xid;
+
   GtkNativeViewManager* manager = Singleton<GtkNativeViewManager>::get();
-  if (!manager->GetXIDForId(xid, id)) {
+  if (!manager->GetPermanentXIDForId(&xid, id)) {
     DLOG(ERROR) << "Can't find XID for view id " << id;
-    *xid = 0;
+    xid = 0;
   }
+
+  GpuHostMsg_GetViewXID::WriteReplyParams(reply_msg, xid);
+
+  // Have to reply from IO thread.
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      NewRunnableFunction(&SendDelayedReply, reply_msg));
+}
+
+}
+
+void GpuProcessHost::OnGetViewXID(gfx::NativeViewId id,
+                                  IPC::Message *reply_msg) {
+  // Have to request a permanent overlay from UI thread.
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableFunction(&GetViewXIDDispatcher, id, reply_msg));
 }
 
 #elif defined(OS_MACOSX)
@@ -239,8 +282,8 @@ class SetIOSurfaceDispatcher : public Task {
 
 void GpuProcessHost::OnAcceleratedSurfaceSetIOSurface(
     const GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params& params) {
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
       new SetIOSurfaceDispatcher(params));
 }
 
@@ -280,17 +323,18 @@ void GpuProcessHost::OnAcceleratedSurfaceBuffersSwapped(
     int32 renderer_id,
     int32 render_view_id,
     gfx::PluginWindowHandle window) {
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
       new BuffersSwappedDispatcher(renderer_id, render_view_id, window));
 }
 #endif
 
 void GpuProcessHost::ReplyToRenderer(
     const IPC::ChannelHandle& channel,
+    const GPUInfo& gpu_info,
     ResourceMessageFilter* filter) {
   ViewMsg_GpuChannelEstablished* message =
-      new ViewMsg_GpuChannelEstablished(channel);
+      new ViewMsg_GpuChannelEstablished(channel, gpu_info);
   // If the renderer process is performing synchronous initialization,
   // it needs to handle this message before receiving the reply for
   // the synchronous ViewHostMsg_SynchronizeGpu message.

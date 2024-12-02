@@ -39,13 +39,16 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/chrome_thread.h"
+#include "base/weak_ptr.h"
+#include "chrome/browser/browser_thread.h"
+#include "chrome/browser/download/download_status_updater_delegate.h"
 #include "chrome/browser/shell_dialogs.h"
 
 class DownloadFileManager;
 class DownloadHistory;
 class DownloadItem;
 class DownloadPrefs;
+class DownloadStatusUpdater;
 class GURL;
 class Profile;
 class ResourceDispatcherHost;
@@ -57,14 +60,18 @@ struct DownloadSaveInfo;
 // Browser's download manager: manages all downloads and destination view.
 class DownloadManager
     : public base::RefCountedThreadSafe<DownloadManager,
-                                        ChromeThread::DeleteOnUIThread>,
+                                        BrowserThread::DeleteOnUIThread>,
+      public DownloadStatusUpdaterDelegate,
       public SelectFileDialog::Listener {
   // For testing.
   friend class DownloadManagerTest;
   friend class MockDownloadManager;
 
  public:
-  DownloadManager();
+  explicit DownloadManager(DownloadStatusUpdater* status_updater);
+
+  // Shutdown the download manager. Must be called before destruction.
+  void Shutdown();
 
   // Interface to implement for observers that wish to be informed of changes
   // to the DownloadManager's collection of downloads.
@@ -107,7 +114,7 @@ class DownloadManager
   // Notifications sent from the download thread to the UI thread
   void StartDownload(DownloadCreateInfo* info);
   void UpdateDownload(int32 download_id, int64 size);
-  void DownloadFinished(int32 download_id, int64 size);
+  void OnAllDataSaved(int32 download_id, int64 size);
 
   // Called from a view when a user clicks a UI button or link.
   void DownloadCancelled(int32 download_id);
@@ -131,6 +138,10 @@ class DownloadManager
   // Remove all downloads will delete all downloads. The number of downloads
   // deleted is returned back to the caller.
   int RemoveAllDownloads();
+
+  // Called when a Save Page As download is started. Transfers ownership
+  // of |download_item| to the DownloadManager.
+  void SavePageAsDownloadStarted(DownloadItem* download_item);
 
   // Download the object at the URL. Used in cases such as "Save Link As..."
   void DownloadUrl(const GURL& url,
@@ -162,14 +173,6 @@ class DownloadManager
   void ShowDownloadInBrowser(const DownloadCreateInfo& info,
                              DownloadItem* download);
 
-  // Opens a download. For Chrome extensions call
-  // ExtensionsServices::InstallExtension, for everything else call
-  // OpenDownloadInShell.
-  void OpenDownload(DownloadItem* download, gfx::NativeView parent_window);
-
-  // Show a download via the Windows shell.
-  void ShowDownloadInShell(const DownloadItem* download);
-
   // The number of in progress (including paused) downloads.
   int in_progress_count() const {
     return static_cast<int>(in_progress_.size());
@@ -186,6 +189,12 @@ class DownloadManager
 
   // Tests if a file type should be opened automatically.
   bool ShouldOpenFileBasedOnExtension(const FilePath& path) const;
+
+  // Overridden from DownloadStatusUpdaterDelegate:
+  virtual bool IsDownloadProgressKnown();
+  virtual int64 GetInProgressDownloadCount();
+  virtual int64 GetReceivedDownloadBytes();
+  virtual int64 GetTotalDownloadBytes();
 
   // Overridden from SelectFileDialog::Listener:
   virtual void FileSelected(const FilePath& path, int index, void* params);
@@ -222,17 +231,11 @@ class DownloadManager
 
   ~DownloadManager();
 
-  // Opens a download via the Windows shell.
-  void OpenDownloadInShell(DownloadItem* download,
-                           gfx::NativeView parent_window);
-
-  // Shutdown the download manager.  This call is needed only after Init.
-  void Shutdown();
-
   // Called on the download thread to check whether the suggested file path
   // exists.  We don't check if the file exists on the UI thread to avoid UI
   // stalls from interacting with the file system.
-  void CheckIfSuggestedPathExists(DownloadCreateInfo* info);
+  void CheckIfSuggestedPathExists(DownloadCreateInfo* info,
+                                  const FilePath& default_path);
 
   // Called on the UI thread once the DownloadManager has determined whether the
   // suggested file path exists.
@@ -241,8 +244,8 @@ class DownloadManager
   // Called back after a target path for the file to be downloaded to has been
   // determined, either automatically based on the suggested file name, or by
   // the user in a Save As dialog box.
-  void ContinueStartDownload(DownloadCreateInfo* info,
-                             const FilePath& target_path);
+  void CreateDownloadItem(DownloadCreateInfo* info,
+                          const FilePath& target_path);
 
   // Download cancel helper function.
   void DownloadCancelledInternal(int download_id,
@@ -254,8 +257,7 @@ class DownloadManager
   // dangerous downloads are downloaded to temporary files that need to be
   // renamed on the file thread first.
   // Invoked on the UI thread.
-  // Marked virtual for testing.
-  virtual void ContinueDownloadFinished(DownloadItem* download);
+  void ContinueDownloadFinished(DownloadItem* download);
 
   // Renames a finished dangerous download from its temporary file name to its
   // real file name.
@@ -271,8 +273,7 @@ class DownloadManager
                                 int new_path_uniquifier);
 
   // Updates the app icon about the overall download progress.
-  // Marked virtual for testing.
-  virtual void UpdateAppIcon();
+  void UpdateAppIcon();
 
   // Changes the paths and file name of the specified |download|, propagating
   // the change to the history system.
@@ -319,6 +320,10 @@ class DownloadManager
   DownloadMap in_progress_;
   DownloadMap dangerous_finished_;
 
+  // Collection of all save-page-as downloads in this profile.
+  // It owns the DownloadItems.
+  std::vector<DownloadItem*> save_page_downloads_;
+
   // True if the download manager has been initialized and requires a shutdown.
   bool shutdown_needed_;
 
@@ -335,6 +340,9 @@ class DownloadManager
 
   // Non-owning pointer for handling file writing on the download_thread_.
   DownloadFileManager* file_manager_;
+
+  // Non-owning pointer for updating the download status.
+  base::WeakPtr<DownloadStatusUpdater> status_updater_;
 
   // The user's last choice for download directory. This is only used when the
   // user wants us to prompt for a save location for each download.

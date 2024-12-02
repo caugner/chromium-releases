@@ -12,16 +12,14 @@
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/stringprintf.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "net/base/connection_type_histograms.h"
-#include "net/base/load_flags.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/http/http_network_session.h"
-#include "net/socket/client_socket.h"
-#include "net/socket/client_socket_factory.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/spdy_frame_builder.h"
 #include "net/spdy/spdy_protocol.h"
@@ -32,13 +30,7 @@ namespace net {
 
 namespace {
 
-#ifdef WIN32
-// We use an artificially small buffer size on windows because the async IO
-// system will artifiially delay IO completions when we use large buffers.
-const int kReadBufferSize = 2 * 1024;
-#else
 const int kReadBufferSize = 8 * 1024;
-#endif
 
 void AdjustSocketBufferSizes(ClientSocket* socket) {
   // Adjust socket buffer sizes.
@@ -78,9 +70,8 @@ class NetLogSpdySynParameter : public NetLog::EventParameters {
     ListValue* headers_list = new ListValue();
     for (spdy::SpdyHeaderBlock::const_iterator it = headers_->begin();
          it != headers_->end(); ++it) {
-      headers_list->Append(new StringValue(StringPrintf("%s: %s",
-                                                        it->first.c_str(),
-                                                        it->second.c_str())));
+      headers_list->Append(new StringValue(base::StringPrintf(
+          "%s: %s", it->first.c_str(), it->second.c_str())));
     }
     dict->SetInteger("flags", flags_);
     dict->Set("headers", headers_list);
@@ -109,7 +100,7 @@ class NetLogSpdySettingsParameter : public NetLog::EventParameters {
     for (spdy::SpdySettings::const_iterator it = settings_.begin();
          it != settings_.end(); ++it) {
       settings->Append(new StringValue(
-          StringPrintf("[%u:%u]", it->first.id(), it->second)));
+          base::StringPrintf("[%u:%u]", it->first.id(), it->second)));
     }
     dict->Set("settings", settings);
     return dict;
@@ -226,18 +217,17 @@ bool SpdySession::use_ssl_ = true;
 bool SpdySession::use_flow_control_ = false;
 
 SpdySession::SpdySession(const HostPortProxyPair& host_port_proxy_pair,
-                         HttpNetworkSession* session,
+                         SpdySessionPool* spdy_session_pool,
+                         SpdySettingsStorage* spdy_settings,
                          NetLog* net_log)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
-          connect_callback_(this, &SpdySession::OnTCPConnect)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          ssl_connect_callback_(this, &SpdySession::OnSSLConnect)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
           read_callback_(this, &SpdySession::OnReadComplete)),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           write_callback_(this, &SpdySession::OnWriteComplete)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
       host_port_proxy_pair_(host_port_proxy_pair),
-      session_(session),
+      spdy_session_pool_(spdy_session_pool),
+      spdy_settings_(spdy_settings),
       connection_(new ClientSocketHandle),
       read_buffer_(new IOBuffer(kReadBufferSize)),
       read_pending_(false),
@@ -256,7 +246,6 @@ SpdySession::SpdySession(const HostPortProxyPair& host_port_proxy_pair,
       frames_received_(0),
       sent_settings_(false),
       received_settings_(false),
-      in_session_pool_(true),
       initial_send_window_size_(spdy::kInitialWindowSize),
       initial_recv_window_size_(spdy::kInitialWindowSize),
       net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SPDY_SESSION)) {
@@ -267,8 +256,6 @@ SpdySession::SpdySession(const HostPortProxyPair& host_port_proxy_pair,
   // TODO(mbelshe): consider randomization of the stream_hi_water_mark.
 
   spdy_framer_.set_visitor(this);
-
-  session_->ssl_config_service()->GetSSLConfig(&ssl_config_);
 
   SendSettings();
 }
@@ -316,34 +303,6 @@ net::Error SpdySession::InitializeWithSocket(
   return error;
 }
 
-net::Error SpdySession::Connect(
-    const std::string& group_name,
-    const scoped_refptr<TCPSocketParams>& destination,
-    RequestPriority priority) {
-  DCHECK(priority >= net::HIGHEST && priority < net::NUM_PRIORITIES);
-
-  // If the connect process is started, let the caller continue.
-  if (state_ > IDLE)
-    return net::OK;
-
-  state_ = CONNECTING;
-
-  static StatsCounter spdy_sessions("spdy.sessions");
-  spdy_sessions.Increment();
-
-  int rv = connection_->Init(group_name, destination, priority,
-                             &connect_callback_, session_->tcp_socket_pool(),
-                             net_log_);
-  DCHECK(rv <= 0);
-
-  // If the connect is pending, we still return ok.  The APIs enqueue
-  // work until after the connect completes asynchronously later.
-  if (rv == net::ERR_IO_PENDING)
-    return net::OK;
-  OnTCPConnect(rv);
-  return static_cast<net::Error>(rv);
-}
-
 int SpdySession::GetPushStream(
     const GURL& url,
     scoped_refptr<SpdyStream>* stream,
@@ -369,7 +328,7 @@ int SpdySession::GetPushStream(
     streams_pushed_and_claimed_count_++;
     return OK;
   }
-  return NULL;
+  return 0;
 }
 
 int SpdySession::CreateStream(
@@ -396,14 +355,18 @@ void SpdySession::ProcessPendingCreateStreams() {
     bool no_pending_create_streams = true;
     for (int i = 0;i < NUM_PRIORITIES;++i) {
       if (!create_stream_queues_[i].empty()) {
-        PendingCreateStream& pending_create = create_stream_queues_[i].front();
+        PendingCreateStream pending_create = create_stream_queues_[i].front();
+        create_stream_queues_[i].pop();
         no_pending_create_streams = false;
         int error = CreateStreamImpl(*pending_create.url,
                                      pending_create.priority,
                                      pending_create.spdy_stream,
                                      *pending_create.stream_net_log);
-        pending_create.callback->Run(error);
-        create_stream_queues_[i].pop();
+        MessageLoop::current()->PostTask(
+            FROM_HERE,
+            method_factory_.NewRunnableMethod(
+                &SpdySession::InvokeUserStreamCreationCallback,
+                pending_create.callback, error));
         break;
       }
     }
@@ -418,10 +381,10 @@ void SpdySession::CancelPendingCreateStreams(
     PendingCreateStreamQueue tmp;
     // Make a copy removing this trans
     while (!create_stream_queues_[i].empty()) {
-      PendingCreateStream& pending_create = create_stream_queues_[i].front();
+      PendingCreateStream pending_create = create_stream_queues_[i].front();
+      create_stream_queues_[i].pop();
       if (pending_create.spdy_stream != spdy_stream)
         tmp.push(pending_create);
-      create_stream_queues_[i].pop();
     }
     // Now copy it back
     while (!tmp.empty()) {
@@ -597,65 +560,6 @@ LoadState SpdySession::GetLoadState() const {
   return LOAD_STATE_IDLE;
 }
 
-void SpdySession::OnTCPConnect(int result) {
-  // We shouldn't be coming through this path if we didn't just open a fresh
-  // socket (or have an error trying to do so).
-  DCHECK(!connection_->socket() || !connection_->is_reused());
-
-  if (result != net::OK) {
-    DCHECK_LT(result, 0);
-    CloseSessionOnError(static_cast<net::Error>(result), true);
-    return;
-  } else {
-    UpdateConnectionTypeHistograms(CONNECTION_SPDY);
-  }
-
-  AdjustSocketBufferSizes(connection_->socket());
-
-  if (use_ssl_) {
-    // Add a SSL socket on top of our existing transport socket.
-    ClientSocket* socket = connection_->release_socket();
-    // TODO(mbelshe): Fix the hostname.  This is BROKEN without having
-    //                a real hostname.
-    socket = session_->socket_factory()->CreateSSLClientSocket(
-        socket, "" /* request_->url.HostNoBrackets() */ , ssl_config_);
-    connection_->set_socket(socket);
-    is_secure_ = true;
-    int status = connection_->socket()->Connect(&ssl_connect_callback_);
-    if (status != ERR_IO_PENDING)
-      OnSSLConnect(status);
-  } else {
-    DCHECK_EQ(state_, CONNECTING);
-    state_ = CONNECTED;
-
-    // Make sure we get any pending data sent.
-    WriteSocketLater();
-    // Start reading
-    ReadSocket();
-  }
-}
-
-void SpdySession::OnSSLConnect(int result) {
-  // TODO(mbelshe): We need to replicate the functionality of
-  //   HttpNetworkTransaction::DoSSLConnectComplete here, where it calls
-  //   HandleCertificateError() and such.
-  if (IsCertificateError(result))
-    result = OK;   // TODO(mbelshe): pretend we're happy anyway.
-
-  if (result == OK) {
-    DCHECK_EQ(state_, CONNECTING);
-    state_ = CONNECTED;
-
-    // After we've connected, send any data to the server, and then issue
-    // our read.
-    WriteSocketLater();
-    ReadSocket();
-  } else {
-    DCHECK_LT(result, 0);  // It should be an error, not a byte count.
-    CloseSessionOnError(static_cast<net::Error>(result), true);
-  }
-}
-
 void SpdySession::OnReadComplete(int bytes_read) {
   // Parse a frame.  For now this code requires that the frame fit into our
   // buffer (32KB).
@@ -770,8 +674,10 @@ net::Error SpdySession::ReadSocket() {
       // Schedule the work through the message loop to avoid recursive
       // callbacks.
       read_pending_ = true;
-      MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-          this, &SpdySession::OnReadComplete, bytes_read));
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          method_factory_.NewRunnableMethod(
+              &SpdySession::OnReadComplete, bytes_read));
       break;
   }
   return OK;
@@ -785,8 +691,9 @@ void SpdySession::WriteSocketLater() {
     return;
 
   delayed_write_pending_ = true;
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &SpdySession::WriteSocket));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(&SpdySession::WriteSocket));
 }
 
 void SpdySession::WriteSocket() {
@@ -872,9 +779,9 @@ void SpdySession::CloseAllStreams(net::Error status) {
 
   for (int i = 0;i < NUM_PRIORITIES;++i) {
     while (!create_stream_queues_[i].empty()) {
-      PendingCreateStream& pending_create = create_stream_queues_[i].front();
-      pending_create.callback->Run(ERR_ABORTED);
+      PendingCreateStream pending_create = create_stream_queues_[i].front();
       create_stream_queues_[i].pop();
+      pending_create.callback->Run(ERR_ABORTED);
     }
   }
 
@@ -969,9 +876,9 @@ void SpdySession::DeleteStream(spdy::SpdyStreamId id, int status) {
 }
 
 void SpdySession::RemoveFromPool() {
-  if (in_session_pool_) {
-    session_->spdy_session_pool()->Remove(this);
-    in_session_pool_ = false;
+  if (spdy_session_pool_) {
+    spdy_session_pool_->Remove(this);
+    spdy_session_pool_ = NULL;
   }
 }
 
@@ -1261,8 +1168,7 @@ void SpdySession::OnSettings(const spdy::SpdySettingsControlFrame& frame) {
   spdy::SpdySettings settings;
   if (spdy_framer_.ParseSettings(&frame, &settings)) {
     HandleSettings(settings);
-    SpdySettingsStorage* settings_storage = session_->mutable_spdy_settings();
-    settings_storage->Set(host_port_pair(), settings);
+    spdy_settings_->Set(host_port_pair(), settings);
   }
 
   received_settings_ = true;
@@ -1320,8 +1226,7 @@ void SpdySession::SendWindowUpdate(spdy::SpdyStreamId stream_id,
 }
 
 void SpdySession::SendSettings() {
-  const SpdySettingsStorage& settings_storage = session_->spdy_settings();
-  const spdy::SpdySettings& settings = settings_storage.Get(host_port_pair());
+  const spdy::SpdySettings& settings = spdy_settings_->Get(host_port_pair());
   if (settings.empty())
     return;
   HandleSettings(settings);
@@ -1371,8 +1276,7 @@ void SpdySession::RecordHistograms() {
 
   if (received_settings_) {
     // Enumerate the saved settings, and set histograms for it.
-    const SpdySettingsStorage& settings_storage = session_->spdy_settings();
-    const spdy::SpdySettings& settings = settings_storage.Get(host_port_pair());
+    const spdy::SpdySettings& settings = spdy_settings_->Get(host_port_pair());
 
     spdy::SpdySettings::const_iterator it;
     for (it = settings.begin(); it != settings.end(); ++it) {
@@ -1396,6 +1300,11 @@ void SpdySession::RecordHistograms() {
       }
     }
   }
+}
+
+void SpdySession::InvokeUserStreamCreationCallback(
+    CompletionCallback* callback, int rv) {
+  callback->Run(rv);
 }
 
 }  // namespace net

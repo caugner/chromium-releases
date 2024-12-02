@@ -57,13 +57,12 @@ ExternalTabContainer::ExternalTabContainer(
       handle_top_level_requests_(false),
       external_method_factory_(this),
       enabled_extension_automation_(false),
-      waiting_for_unload_event_(false),
       pending_(false),
       infobars_enabled_(true),
       focus_manager_(NULL),
       external_tab_view_(NULL),
-      notification_window_(NULL),
-      notification_message_(NULL) {
+      unload_reply_message_(NULL),
+      route_all_top_level_navigations_(false) {
 }
 
 ExternalTabContainer::~ExternalTabContainer() {
@@ -79,7 +78,8 @@ bool ExternalTabContainer::Init(Profile* profile,
                                 TabContents* existing_contents,
                                 const GURL& initial_url,
                                 const GURL& referrer,
-                                bool infobars_enabled) {
+                                bool infobars_enabled,
+                                bool route_all_top_level_navigations) {
   if (IsWindow()) {
     NOTREACHED();
     return false;
@@ -88,6 +88,7 @@ bool ExternalTabContainer::Init(Profile* profile,
   load_requests_via_automation_ = load_requests_via_automation;
   handle_top_level_requests_ = handle_top_level_requests;
   infobars_enabled_ = infobars_enabled;
+  route_all_top_level_navigations_ = route_all_top_level_navigations;
 
   set_window_style(WS_POPUP | WS_CLIPCHILDREN);
   views::WidgetWin::Init(NULL, bounds);
@@ -358,8 +359,22 @@ void ExternalTabContainer::AddNewContents(TabContents* source,
     return;
   }
 
-  scoped_refptr<ExternalTabContainer> new_container =
-      new ExternalTabContainer(NULL, NULL);
+  scoped_refptr<ExternalTabContainer> new_container;
+  // If the host is a browser like IE8, then the URL being navigated to in the
+  // new tab contents could potentially navigate back to Chrome from a new
+  // IE process. We support full tab mode only for IE and hence we use that as
+  // a determining factor in whether the new ExternalTabContainer instance is
+  // created as pending or not.
+  if (!route_all_top_level_navigations_) {
+    new_container = new ExternalTabContainer(NULL, NULL);
+  } else {
+    // Reuse the same tab handle here as the new container instance is a dummy
+    // instance which does not have an automation client connected at the other
+    // end.
+    new_container = new TemporaryPopupExternalTabContainer(
+        automation_, automation_resource_message_filter_.get());
+    new_container->SetTabHandle(tab_handle_);
+  }
 
   // Make sure that ExternalTabContainer instance is initialized with
   // an unwrapped Profile.
@@ -373,9 +388,13 @@ void ExternalTabContainer::AddNewContents(TabContents* source,
       new_contents,
       GURL(),
       GURL(),
-      true);
+      true,
+      route_all_top_level_navigations_);
 
   if (result) {
+    if (route_all_top_level_navigations_) {
+      return;
+    }
     uintptr_t cookie = reinterpret_cast<uintptr_t>(new_container.get());
     pending_tabs_.Get()[cookie] = new_container;
     new_container->set_pending(true);
@@ -384,6 +403,8 @@ void ExternalTabContainer::AddNewContents(TabContents* source,
     attach_params_.dimensions = initial_pos;
     attach_params_.user_gesture = user_gesture;
     attach_params_.disposition = disposition;
+    attach_params_.profile_name = WideToUTF8(
+        tab_contents()->profile()->GetPath().DirName().BaseName().value());
     automation_->Send(new AutomationMsg_AttachExternalTab(0,
         tab_handle_, attach_params_));
   } else {
@@ -415,15 +436,16 @@ void ExternalTabContainer::LoadingStateChanged(TabContents* source) {
 }
 
 void ExternalTabContainer::CloseContents(TabContents* source) {
-  static const int kExternalTabCloseContentsDelayMS = 100;
+  if (!automation_)
+    return;
 
-  if (waiting_for_unload_event_) {
-    PostMessage(notification_window_, notification_message_, 0, 0);
-    waiting_for_unload_event_ = false;
+  if (unload_reply_message_) {
+    AutomationMsg_RunUnloadHandlers::WriteReplyParams(unload_reply_message_,
+                                                      true);
+    automation_->Send(unload_reply_message_);
+    unload_reply_message_ = NULL;
   } else {
-    if (automation_) {
-      automation_->Send(new AutomationMsg_CloseExternalTab(0, tab_handle_));
-    }
+    automation_->Send(new AutomationMsg_CloseExternalTab(0, tab_handle_));
   }
 }
 
@@ -461,6 +483,10 @@ void ExternalTabContainer::ForwardMessageToExternalHost(
   }
 }
 
+bool ExternalTabContainer::IsExternalTabContainer() const {
+  return true;
+}
+
 gfx::NativeWindow ExternalTabContainer::GetFrameNativeWindow() {
   return hwnd();
 }
@@ -480,7 +506,7 @@ bool ExternalTabContainer::CanDownload(int request_id) {
       // In case the host needs to show UI that needs to take the focus.
       ::AllowSetForegroundWindow(ASFW_ANY);
 
-      ChromeThread::PostTask(ChromeThread::IO, FROM_HERE,
+      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
           NewRunnableMethod(automation_resource_message_filter_.get(),
               &AutomationResourceMessageFilter::SendDownloadRequestToHost,
               0, tab_handle_, request_id));
@@ -540,7 +566,6 @@ bool ExternalTabContainer::HandleContextMenu(const ContextMenuParams& params) {
     NOTREACHED();
     return false;
   }
-
   external_context_menu_.reset(
       new RenderViewContextMenuViews(tab_contents(), params));
   external_context_menu_->SetExternal();
@@ -602,12 +627,34 @@ void ExternalTabContainer::HandleKeyboardEvent(
 void ExternalTabContainer::ShowHtmlDialog(HtmlDialogUIDelegate* delegate,
                                           gfx::NativeWindow parent_window) {
   if (!browser_.get()) {
-    browser_.reset(Browser::CreateForPopup(tab_contents_->profile()));
+    browser_.reset(Browser::CreateForType(Browser::TYPE_POPUP,
+                                          tab_contents_->profile()));
   }
 
   gfx::NativeWindow parent = parent_window ? parent_window
                                            : GetParent();
   browser_->window()->ShowHTMLDialog(delegate, parent);
+}
+
+void ExternalTabContainer::BeforeUnloadFired(TabContents* tab,
+                                             bool proceed,
+                                             bool* proceed_to_fire_unload) {
+  DCHECK(unload_reply_message_);
+  *proceed_to_fire_unload = true;
+
+  if (!automation_) {
+    delete unload_reply_message_;
+    unload_reply_message_ = NULL;
+    return;
+  }
+
+  if (!proceed) {
+    AutomationMsg_RunUnloadHandlers::WriteReplyParams(unload_reply_message_,
+                                                      false);
+    automation_->Send(unload_reply_message_);
+    unload_reply_message_ = NULL;
+    *proceed_to_fire_unload = false;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -715,20 +762,24 @@ void ExternalTabContainer::OnFinalMessage(HWND window) {
   Release();
 }
 
-void ExternalTabContainer::RunUnloadHandlers(
-    gfx::NativeWindow notification_window,
-    int notification_message) {
-  DCHECK(::IsWindow(notification_window));
-  if (tab_contents_) {
-    notification_window_ = notification_window;
-    notification_message_ = notification_message;
-
-    if (Browser::RunUnloadEventsHelper(tab_contents_)) {
-      waiting_for_unload_event_ = true;
-    }
+void ExternalTabContainer::RunUnloadHandlers(IPC::Message* reply_message) {
+  if (!automation_) {
+    delete reply_message;
+    return;
   }
-  if (!waiting_for_unload_event_) {
-    PostMessage(notification_window, notification_message, 0, 0);
+
+  // If we have a pending unload message, then just respond back to this
+  // request and continue processing the previous unload message.
+  if (unload_reply_message_) {
+     AutomationMsg_RunUnloadHandlers::WriteReplyParams(reply_message, true);
+     automation_->Send(reply_message);
+     return;
+  }
+  if (tab_contents_ && Browser::RunUnloadEventsHelper(tab_contents_)) {
+    unload_reply_message_ = reply_message;
+  } else {
+    AutomationMsg_RunUnloadHandlers::WriteReplyParams(reply_message, true);
+    automation_->Send(reply_message);
   }
 }
 
@@ -989,4 +1040,30 @@ void ExternalTabContainer::SetupExternalTabView() {
   SetContentsView(external_tab_view_);
   // Note that SetTabContents must be called after AddChildView is called
   tab_contents_container_->ChangeTabContents(tab_contents_);
+}
+
+TemporaryPopupExternalTabContainer::TemporaryPopupExternalTabContainer(
+    AutomationProvider* automation,
+    AutomationResourceMessageFilter* filter)
+    : ExternalTabContainer(automation, filter) {
+}
+
+TemporaryPopupExternalTabContainer::~TemporaryPopupExternalTabContainer() {
+  DLOG(INFO) << __FUNCTION__;
+}
+
+void TemporaryPopupExternalTabContainer::OpenURLFromTab(
+    TabContents* source, const GURL& url, const GURL& referrer,
+    WindowOpenDisposition disposition, PageTransition::Type transition) {
+  if (!automation_)
+    return;
+
+  if (disposition == CURRENT_TAB) {
+    DCHECK(route_all_top_level_navigations_);
+    disposition = NEW_FOREGROUND_TAB;
+  }
+  ExternalTabContainer::OpenURLFromTab(source, url, referrer, disposition,
+                                       transition);
+  // support only one navigation for a dummy tab before it is killed.
+  ::DestroyWindow(GetNativeView());
 }

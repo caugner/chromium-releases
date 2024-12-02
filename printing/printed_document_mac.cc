@@ -24,6 +24,8 @@ void PrintedDocument::RenderPrintedPage(
   }
 #endif
 
+  DCHECK(context);
+
   const printing::PageSetup& page_setup(
       immutable_.settings_.page_setup_device_units());
   gfx::Rect content_area;
@@ -36,6 +38,12 @@ void PrintedDocument::RenderPrintedPage(
                        true, false, false, false);
 
   // TODO(stuartmorgan): Print the header and footer.
+}
+
+void PrintedDocument::DrawHeaderFooter(gfx::NativeDrawingContext context,
+                                       std::wstring text,
+                                       gfx::Rect bounds) const {
+  NOTIMPLEMENTED();
 }
 
 }  // namespace printing

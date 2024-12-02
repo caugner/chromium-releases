@@ -16,23 +16,14 @@ class MockWriter(TemplateWriter):
   def WritePolicy(self, policy):
     pass
 
-  def BeginPolicyGroup(self, group):
-    pass
-
-  def EndPolicyGroup(self):
-    pass
-
   def BeginTemplate(self):
-    pass
-
-  def EndTemplate(self):
-    pass
-
-  def Prepare(self):
     pass
 
   def GetTemplateText(self):
     pass
+
+  def IsPolicySupported(self, policy):
+    return True
 
   def Test(self):
     pass

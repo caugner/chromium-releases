@@ -5,7 +5,7 @@
 #include "chrome/browser/device_orientation/provider.h"
 
 #include "base/logging.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/device_orientation/accelerometer_mac.h"
@@ -18,7 +18,7 @@ namespace device_orientation {
 
 Provider* Provider::GetInstance() {
   if (!instance_) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     const ProviderImpl::DataFetcherFactory default_factories[] = {
 #if defined(OS_MACOSX)
       AccelerometerMac::Create,
@@ -38,6 +38,14 @@ void Provider::SetInstanceForTests(Provider* provider) {
 
 Provider* Provider::GetInstanceForTests() {
   return instance_;
+}
+
+Provider::Provider() {
+}
+
+Provider::~Provider() {
+  DCHECK(instance_ == this);
+  instance_ = NULL;
 }
 
 Provider* Provider::instance_ = NULL;

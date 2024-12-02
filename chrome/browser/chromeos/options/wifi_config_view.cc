@@ -9,6 +9,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -82,9 +83,28 @@ void WifiConfigView::UpdateCanLogin(void) {
   }
 }
 
+void WifiConfigView::UpdateCanViewPassword() {
+  if (!passphrase_visible_button_->IsVisible() &&
+      passphrase_textfield_->text().empty()) {
+    // Once initial password has been deleted, it's safe to show field content.
+    passphrase_visible_button_->SetVisible(true);
+  }
+}
+
 void WifiConfigView::ContentsChanged(views::Textfield* sender,
                                      const string16& new_contents) {
   UpdateCanLogin();
+  UpdateCanViewPassword();
+}
+
+bool WifiConfigView::HandleKeystroke(
+    views::Textfield* sender,
+    const views::Textfield::Keystroke& keystroke) {
+  if (sender == passphrase_textfield_ &&
+      keystroke.GetKeyboardCode() == app::VKEY_RETURN) {
+    parent_->GetDialogClientView()->AcceptWindow();
+  }
+  return false;
 }
 
 void WifiConfigView::ButtonPressed(views::Button* sender,
@@ -124,7 +144,7 @@ bool WifiConfigView::Login() {
     CrosLibrary::Get()->GetNetworkLibrary()->ConnectToWifiNetwork(
         GetSSID(), GetPassphrase(),
         identity_string, certificate_path_,
-        autoconnect_checkbox_->checked());
+        autoconnect_checkbox_ ? autoconnect_checkbox_->checked() : true);
   } else {
     Save();
     CrosLibrary::Get()->GetNetworkLibrary()->ConnectToWifiNetwork(
@@ -139,10 +159,12 @@ bool WifiConfigView::Save() {
   if (!other_network_) {
     bool changed = false;
 
-    bool auto_connect = autoconnect_checkbox_->checked();
-    if (auto_connect != wifi_.auto_connect()) {
-      wifi_.set_auto_connect(auto_connect);
-      changed = true;
+    if (autoconnect_checkbox_) {
+      bool auto_connect = autoconnect_checkbox_->checked();
+      if (auto_connect != wifi_.auto_connect()) {
+        wifi_.set_auto_connect(auto_connect);
+        changed = true;
+      }
     }
 
     if (passphrase_textfield_) {
@@ -183,23 +205,6 @@ void WifiConfigView::FocusFirstField() {
     passphrase_textfield_->RequestFocus();
 }
 
-// Parse 'path' to determine if the certificate is stored in a pkcs#11 device.
-// flimflam recognizes the string "SETTINGS:" to specify authentication
-// parameters. 'key_id=' indicates that the certificate is stored in a pkcs#11
-// device. See src/third_party/flimflam/files/doc/service-api.txt.
-static bool is_certificate_in_pkcs11(const std::string& path) {
-  static const std::string settings_string("SETTINGS:");
-  static const std::string pkcs11_key("key_id");
-  if (path.find(settings_string) == 0) {
-    std::string::size_type idx = path.find(pkcs11_key);
-    if (idx != std::string::npos)
-      idx = path.find_first_not_of(kWhitespaceASCII, idx + pkcs11_key.length());
-    if (idx != std::string::npos && path[idx] == '=')
-      return true;
-  }
-  return false;
-}
-
 void WifiConfigView::Init() {
   views::GridLayout* layout = CreatePanelGridLayout(this);
   SetLayoutManager(layout);
@@ -230,9 +235,9 @@ void WifiConfigView::Init() {
   }
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
-  // Certificates stored in a pkcs11 device can not be browsed
-  // and do not require a passphrase.
-  bool certificate_in_pkcs11 = false;
+  // Loaded certificates (i.e. stored in a pkcs11 device) do not require
+  // a passphrase.
+  bool certificate_loaded = false;
 
   // Add ID and cert password if we're using 802.1x
   // XXX we're cheating and assuming 802.1x means EAP-TLS - not true
@@ -255,9 +260,9 @@ void WifiConfigView::Init() {
         IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT)));
     if (!wifi_.cert_path().empty()) {
       certificate_path_ = wifi_.cert_path();
-      certificate_in_pkcs11 = is_certificate_in_pkcs11(certificate_path_);
+      certificate_loaded = wifi_.IsCertificateLoaded();
     }
-    if (certificate_in_pkcs11) {
+    if (certificate_loaded) {
       std::wstring label = l10n_util::GetString(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_INSTALLED);
       views::Label* cert_text = new views::Label(label);
@@ -277,7 +282,7 @@ void WifiConfigView::Init() {
   }
 
   // Add passphrase if other_network or wifi is encrypted.
-  if (other_network_ || (wifi_.encrypted() && !certificate_in_pkcs11)) {
+  if (other_network_ || (wifi_.encrypted() && !certificate_loaded)) {
     layout->StartRow(0, column_view_set_id);
     int label_text_id;
     if (wifi_.encryption() == SECURITY_8021X)
@@ -299,6 +304,11 @@ void WifiConfigView::Init() {
         GetBitmapNamed(IDR_STATUSBAR_NETWORK_SECURE));
     passphrase_visible_button_->SetImageAlignment(
         views::ImageButton::ALIGN_CENTER, views::ImageButton::ALIGN_MIDDLE);
+    // Disable viewing password by unauthenticated user.
+    if (!wifi_.passphrase().empty() &&
+        chromeos::UserManager::Get()->logged_in_user().email().empty()) {
+      passphrase_visible_button_->SetVisible(false);
+    }
     layout->AddView(passphrase_visible_button_);
     layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   }
@@ -320,14 +330,17 @@ void WifiConfigView::Init() {
   }
 
   // Autoconnect checkbox
-  autoconnect_checkbox_ = new views::Checkbox(
-      l10n_util::GetString(IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_AUTO_CONNECT));
-  // For other network, default to autoconnect.
-  bool autoconnect = other_network_ || wifi_.auto_connect();
-  autoconnect_checkbox_->SetChecked(autoconnect);
-  layout->StartRow(0, column_view_set_id);
-  layout->AddView(autoconnect_checkbox_, 3, 1);
-  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  // Only show if this network is already remembered (a favorite).
+  if (wifi_.favorite()) {
+    autoconnect_checkbox_ = new views::Checkbox(l10n_util::GetString(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_AUTO_CONNECT));
+    // For other network, default to autoconnect.
+    bool autoconnect = other_network_ || wifi_.auto_connect();
+    autoconnect_checkbox_->SetChecked(autoconnect);
+    layout->StartRow(0, column_view_set_id);
+    layout->AddView(autoconnect_checkbox_, 3, 1);
+    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  }
 }
 
 }  // namespace chromeos

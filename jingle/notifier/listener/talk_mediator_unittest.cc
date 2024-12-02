@@ -6,6 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
+#include "jingle/notifier/base/notifier_options.h"
 #include "jingle/notifier/listener/mediator_thread_mock.h"
 #include "jingle/notifier/listener/mediator_thread_impl.h"
 #include "jingle/notifier/listener/talk_mediator_impl.h"
@@ -37,24 +38,10 @@ class TalkMediatorImplTest : public testing::Test {
   TalkMediatorImplTest() {}
   virtual ~TalkMediatorImplTest() {}
 
-  TalkMediatorImpl* NewTalkMediator() {
-    const bool kUseChromeAsyncSocket = false;
-    const bool kTrySslTcpFirst = false;
-    const bool kInitializeSsl = true;
-    const bool kConnectImmediately = false;
-    const bool kInvalidateXmppAuthToken = false;
-    return new TalkMediatorImpl(
-        new MediatorThreadImpl(kUseChromeAsyncSocket, kTrySslTcpFirst),
-        kInitializeSsl, kConnectImmediately, kInvalidateXmppAuthToken);
-  }
-
   TalkMediatorImpl* NewMockedTalkMediator(
       MockMediatorThread* mock_mediator_thread) {
-    const bool kInitializeSsl = false;
-    const bool kConnectImmediately = true;
     const bool kInvalidateXmppAuthToken = false;
     return new TalkMediatorImpl(mock_mediator_thread,
-                                kInitializeSsl, kConnectImmediately,
                                 kInvalidateXmppAuthToken);
   }
 
@@ -66,11 +53,6 @@ class TalkMediatorImplTest : public testing::Test {
 
   DISALLOW_COPY_AND_ASSIGN(TalkMediatorImplTest);
 };
-
-TEST_F(TalkMediatorImplTest, ConstructionOfTheClass) {
-  // Constructing a single talk mediator enables SSL through the singleton.
-  scoped_ptr<TalkMediatorImpl> talk1(NewTalkMediator());
-}
 
 TEST_F(TalkMediatorImplTest, SetAuthTokenWithBadInput) {
   scoped_ptr<TalkMediatorImpl> talk1(

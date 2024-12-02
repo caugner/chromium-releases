@@ -8,12 +8,14 @@
 #include "third_party/ppapi/c/pp_completion_callback.h"
 #include "third_party/ppapi/c/pp_errors.h"
 #include "third_party/ppapi/c/dev/ppb_url_loader_dev.h"
+#include "third_party/ppapi/c/dev/ppb_url_loader_trusted_dev.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
@@ -38,12 +40,11 @@ namespace pepper {
 namespace {
 
 PP_Resource Create(PP_Instance instance_id) {
-  PluginInstance* instance = PluginInstance::FromPPInstance(instance_id);
+  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
   if (!instance)
     return 0;
 
-  URLLoader* loader = new URLLoader(instance);
-
+  URLLoader* loader = new URLLoader(instance, false);
   return loader->GetReference();
 }
 
@@ -152,11 +153,24 @@ const PPB_URLLoader_Dev ppb_urlloader = {
   &Close
 };
 
+void GrantUniversalAccess(PP_Resource loader_id) {
+  scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
+  if (!loader)
+    return;
+
+  loader->GrantUniversalAccess();
+}
+
+const PPB_URLLoaderTrusted_Dev ppb_urlloadertrusted = {
+  &GrantUniversalAccess
+};
+
 }  // namespace
 
-URLLoader::URLLoader(PluginInstance* instance)
+URLLoader::URLLoader(PluginInstance* instance, bool main_document_loader)
     : Resource(instance->module()),
       instance_(instance),
+      main_document_loader_(main_document_loader),
       pending_callback_(),
       bytes_sent_(0),
       total_bytes_to_be_sent_(-1),
@@ -164,7 +178,8 @@ URLLoader::URLLoader(PluginInstance* instance)
       total_bytes_to_be_received_(-1),
       user_buffer_(NULL),
       user_buffer_size_(0),
-      done_status_(PP_ERROR_WOULDBLOCK) {
+      done_status_(PP_ERROR_WOULDBLOCK),
+      has_universal_access_(false) {
 }
 
 URLLoader::~URLLoader() {
@@ -173,6 +188,11 @@ URLLoader::~URLLoader() {
 // static
 const PPB_URLLoader_Dev* URLLoader::GetInterface() {
   return &ppb_urlloader;
+}
+
+// static
+const PPB_URLLoaderTrusted_Dev* URLLoader::GetTrustedInterface() {
+  return &ppb_urlloadertrusted;
 }
 
 int32_t URLLoader::Open(URLRequestInfo* request,
@@ -188,13 +208,17 @@ int32_t URLLoader::Open(URLRequestInfo* request,
   if (!frame)
     return PP_ERROR_FAILED;
   WebURLRequest web_request(request->ToWebURLRequest(frame));
+
+  // Check if we are allowed to access this URL.
+  if (!has_universal_access_ &&
+      !frame->securityOrigin().canRequest(web_request.url()))
+    return PP_ERROR_NOACCESS;
+
   frame->dispatchWillSendRequest(web_request);
 
   loader_.reset(WebKit::webKitClient()->createURLLoader());
-  if (!loader_.get()) {
-    loader_.reset();
+  if (!loader_.get())
     return PP_ERROR_FAILED;
-  }
   loader_->loadAsynchronously(web_request, this);
 
   pending_callback_ = callback;
@@ -254,7 +278,16 @@ int32_t URLLoader::FinishStreamingToFile(PP_CompletionCallback callback) {
 }
 
 void URLLoader::Close() {
-  NOTIMPLEMENTED();  // TODO(darin): Implement me.
+  if (loader_.get()) {
+    loader_->cancel();
+  } else if (main_document_loader_) {
+    WebFrame* frame = instance_->container()->element().document().frame();
+    frame->stopLoading();
+  }
+}
+
+void URLLoader::GrantUniversalAccess() {
+  has_universal_access_ = true;
 }
 
 void URLLoader::willSendRequest(WebURLLoader* loader,
@@ -301,7 +334,7 @@ void URLLoader::didReceiveData(WebURLLoader* loader,
   }
 }
 
-void URLLoader::didFinishLoading(WebURLLoader* loader) {
+void URLLoader::didFinishLoading(WebURLLoader* loader, double finish_time) {
   done_status_ = PP_OK;
   RunCallback(done_status_);
 }

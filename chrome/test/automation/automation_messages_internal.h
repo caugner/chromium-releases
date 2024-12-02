@@ -1413,12 +1413,8 @@ IPC_BEGIN_MESSAGES(Automation)
   // runs unload handlers if any on the current page.
   // Request:
   //   -int: Tab handle
-  //   -gfx::NativeWindow: notification window
-  //   -int: notification message.
-  // Response:
-  //   None expected
-  IPC_MESSAGE_ROUTED3(AutomationMsg_RunUnloadHandlers, int, gfx::NativeWindow,
-                      int)
+  //   -bool: result: true->unload, false->don't unload
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_RunUnloadHandlers, int, bool)
 
   // This message sets the current zoom level on the tab
   // Request:
@@ -1427,5 +1423,22 @@ IPC_BEGIN_MESSAGES(Automation)
   // Response:
   //   None expected
   IPC_MESSAGE_ROUTED2(AutomationMsg_SetZoomLevel, int, int)
+
+  // Waits for tab count to reach target value.
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_WaitForTabCountToBecome,
+                             int /* browser handle */,
+                             int /* target tab count */,
+                             bool /* success */)
+
+  // Waits for the infobar count to reach given number.
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_WaitForInfoBarCount,
+                             int /* tab handle */,
+                             int /* target count */,
+                             bool /* success */)
+
+  // Waits for the autocomplete edit to receive focus.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_WaitForAutocompleteEditFocus,
+                             int /* autocomplete edit handle */,
+                             bool /* success */)
 
 IPC_END_MESSAGES(Automation)

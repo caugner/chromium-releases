@@ -7,15 +7,17 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/process_util.h"
+#include "base/scoped_nsautorelease_pool.h"
+#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/test/test_suite.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/test_launcher/test_runner.h"
 #include "chrome/test/unit/chrome_test_suite.h"
 
 #if defined(OS_WIN)
 #include "base/base_switches.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/sandbox_policy.h"
 #include "sandbox/src/dep.h"
 #include "sandbox/src/sandbox_factory.h"
@@ -41,9 +43,9 @@ const char kTestTerminateTimeoutFlag[] = "test-terminate-timeout";
 const char kChildProcessFlag[]   = "child";
 const char kHelpFlag[]   = "help";
 
-// This value was changed from 30000 (30sec) to 45000 due to
-// http://crbug.com/43862.
-const int64 kDefaultTestTimeoutMs = 45000;
+// How long we wait for the subprocess to exit (with a success/failure code).
+// See http://crbug.com/43862 for some discussion of the value.
+const int64 kDefaultTestTimeoutMs = 20000;
 
 class OutOfProcTestRunner : public tests::TestRunner {
  public:
@@ -59,6 +61,10 @@ class OutOfProcTestRunner : public tests::TestRunner {
 
   // Returns true if the test succeeded, false if it failed.
   bool RunTest(const std::string& test_name) {
+    // Some of the below method calls will leak objects if there is no
+    // autorelease pool in place.
+    base::ScopedNSAutoreleasePool pool;
+
     const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
     CommandLine new_cmd_line(cmd_line->GetProgram());
     CommandLine::SwitchMap switches = cmd_line->GetSwitches();
@@ -72,6 +78,9 @@ class OutOfProcTestRunner : public tests::TestRunner {
     // process (restarting the browser in the same process is illegal after it
     // has been shut down and will actually crash).
     switches.erase(kGTestRepeatFlag);
+
+    // Strip out user-data-dir if present.  We will add it back in again later.
+    switches.erase(switches::kUserDataDir);
 
     for (CommandLine::SwitchMap::const_iterator iter = switches.begin();
          iter != switches.end(); ++iter) {
@@ -88,8 +97,27 @@ class OutOfProcTestRunner : public tests::TestRunner {
     // failure status back to the parent.
     new_cmd_line.AppendSwitch(base::TestSuite::kStrictFailureHandling);
 
+    // Create a new user data dir and pass it to the child.
+    ScopedTempDir temp_dir;
+    if (!temp_dir.CreateUniqueTempDir() || !temp_dir.IsValid()) {
+      LOG(ERROR) << "Error creating temp profile directory";
+      return false;
+    }
+    new_cmd_line.AppendSwitchPath(switches::kUserDataDir, temp_dir.path());
+
     base::ProcessHandle process_handle;
+#if defined(OS_POSIX)
+    // On POSIX, we launch the test in a new process group with pgid equal to
+    // its pid. Any child processes that the test may create will inherit the
+    // same pgid. This way, if the test is abruptly terminated, we can clean up
+    // any orphaned child processes it may have left behind.
+    base::environment_vector no_env;
+    base::file_handle_mapping_vector no_files;
+    if (!base::LaunchAppInNewProcessGroup(new_cmd_line.argv(), no_env, no_files,
+                                          false, &process_handle))
+#else
     if (!base::LaunchApp(new_cmd_line, false, false, &process_handle))
+#endif
       return false;
 
     int test_terminate_timeout_ms = kDefaultTestTimeoutMs;
@@ -112,6 +140,16 @@ class OutOfProcTestRunner : public tests::TestRunner {
       // Ensure that the process terminates.
       base::KillProcess(process_handle, -1, true);
     }
+
+#if defined(OS_POSIX)
+    if (exit_code != 0) {
+      // On POSIX, in case the test does not exit cleanly, either due to a crash
+      // or due to it timing out, we need to clean up any child processes that
+      // it might have created. On Windows, child processes are automatically
+      // cleaned up using JobObjects.
+      base::KillProcessGroup(process_handle);
+    }
+#endif
 
     return exit_code == 0;
   }

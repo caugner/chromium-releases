@@ -17,22 +17,25 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/observer_list.h"
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
 #include "chrome/browser/autofill/field_types.h"
-#include "chrome/browser/browser_list.h"
-#include "chrome/browser/history/history.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/content_settings.h"
-#include "chrome/common/notification_registrar.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/test/automation/automation_constants.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_channel.h"
 #if defined(OS_WIN)
+#include "gfx/native_widget_types.h"
 #include "views/event.h"
 #endif  // defined(OS_WIN)
 
 struct AutomationMsg_Find_Params;
 class PopupMenuWaiter;
+class TabContents;
 
 namespace IPC {
 struct Reposition_Params;
@@ -47,12 +50,15 @@ class AutomationExtensionTracker;
 class AutomationResourceMessageFilter;
 class AutomationTabTracker;
 class AutomationWindowTracker;
+class Browser;
 class CreditCard;
 class DictionaryValue;
+class DownloadItem;
 class Extension;
 class ExtensionPortContainer;
 class ExtensionTestResultNotificationObserver;
 class ExternalTabContainer;
+class FilePath;
 class InitialLoadObserver;
 class ListValue;
 class LoginHandler;
@@ -60,6 +66,8 @@ class MetricEventDurationObserver;
 class NavigationController;
 class NavigationControllerRestoredObserver;
 class Profile;
+class RenderViewHost;
+class TabContents;
 struct AutocompleteMatchData;
 
 namespace gfx {
@@ -191,9 +199,20 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // Consumer for asynchronous history queries.
   CancelableRequestConsumer consumer_;
 
+  // Sends a find request for a given query.
+  void SendFindRequest(
+      TabContents* tab_contents,
+      bool with_json,
+      const string16& search_string,
+      bool forward,
+      bool match_case,
+      bool find_next,
+      IPC::Message* reply_message);
+
  private:
+  void OnUnhandledMessage();
+
   // IPC Message callbacks.
-  void ShutdownSessionService(int handle, bool* result);
   void WindowSimulateDrag(int handle,
                           std::vector<gfx::Point> drag_path,
                           int flags,
@@ -208,11 +227,6 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void SetFilteredInet(const IPC::Message& message, bool enabled);
   void GetFilteredInetHitCount(int* hit_count);
   void SetProxyConfig(const std::string& new_proxy_config);
-  void SetContentSetting(int handle,
-                         const std::string& host,
-                         ContentSettingsType content_type,
-                         ContentSetting setting,
-                         bool* success);
 
   // Responds to the FindInPage request, retrieves the search query parameters,
   // launches an observer to listen for results and issues a StartFind request.
@@ -265,12 +279,6 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 
   // Asynchronous request for printing the current tab.
   void PrintAsync(int tab_handle);
-
-  // Resets to the default theme.
-  void ResetToDefaultTheme();
-
-  // Gets the current used encoding name of the page in the specified tab.
-  void GetPageCurrentEncoding(int tab_handle, std::string* current_encoding);
 
   // Uses the specified encoding to override the encoding of the page in the
   // specified tab.
@@ -371,8 +379,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 
   void OnBrowserMoved(int handle);
 
-  void OnRunUnloadHandlers(int handle, gfx::NativeWindow notification_window,
-                           int notification_message);
+  void OnRunUnloadHandlers(int handle, IPC::Message* reply_message);
 
   void OnSetZoomLevel(int handle, int zoom_level);
 

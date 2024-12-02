@@ -34,8 +34,15 @@ class CloudPrintProxy : public CloudPrintProxyFrontend,
   void Initialize(JsonPrefStore* service_prefs, Client* client);
 
   // Enables/disables cloud printing for the user
-  virtual void EnableForUser(const std::string& lsid);
-  virtual void DisableForUser();
+  void EnableForUser(const std::string& lsid);
+  void DisableForUser();
+  // Returns the enabled stata of the proxy. If enabled, the email address used
+  // for authentication is also returned in the optional |email| argument.
+  bool IsEnabled(std::string* email) const;
+
+  const std::string& cloud_print_email() const {
+    return cloud_print_email_;
+  }
 
   // Notification methods from the backend. Called on UI thread.
   virtual void OnPrinterListAvailable(
@@ -43,6 +50,7 @@ class CloudPrintProxy : public CloudPrintProxyFrontend,
   virtual void OnAuthenticated(const std::string& cloud_print_token,
                                const std::string& cloud_print_xmpp_token,
                                const std::string& email);
+  virtual void OnAuthenticationFailed();
 
  protected:
   void Shutdown();
@@ -56,6 +64,9 @@ class CloudPrintProxy : public CloudPrintProxyFrontend,
   // This class does not own this. If non-NULL, It is guaranteed to remain
   // valid for the lifetime of this class.
   Client* client_;
+  // The email address of the account used to authenticate to the Cloud Print
+  // service.
+  std::string cloud_print_email_;
 
   DISALLOW_COPY_AND_ASSIGN(CloudPrintProxy);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 
 // An object to handle calculation of MD5 sums.
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/md5.h"
 #include "base/port.h"
 
@@ -23,13 +22,13 @@ class MD5Calculator {
   void CalcDigest();
  public:
   MD5Calculator();
-  ~MD5Calculator() {}
+  ~MD5Calculator();
   void AddData(const uint8* data, int length);
   void AddData(const char* data, int length) {
     AddData(reinterpret_cast<const uint8*>(data), length);
   }
   std::string GetHexDigest();
-  std::vector<uint8> GetDigest();
+  const std::vector<uint8>& GetDigest();
  private:
   DISALLOW_COPY_AND_ASSIGN(MD5Calculator);
 };

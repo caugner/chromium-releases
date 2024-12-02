@@ -304,11 +304,8 @@ bool BaseTab::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
   return false;
 }
 
-bool BaseTab::GetAccessibleRole(AccessibilityTypes::Role* role) {
-  DCHECK(role);
-
-  *role = AccessibilityTypes::ROLE_PAGETAB;
-  return true;
+AccessibilityTypes::Role BaseTab::GetAccessibleRole() {
+  return AccessibilityTypes::ROLE_PAGETAB;
 }
 
 ThemeProvider* BaseTab::GetThemeProvider() {
@@ -345,7 +342,7 @@ void BaseTab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
   }
 
   if (state != TabRendererData::NETWORK_STATE_NONE) {
-    loading_animation_frame_ = ++loading_animation_frame_ %
+    loading_animation_frame_ = (loading_animation_frame_ + 1) %
         ((state == TabRendererData::NETWORK_STATE_WAITING) ?
             waiting_animation_frame_count : loading_animation_frame_count);
   } else {

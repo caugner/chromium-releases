@@ -301,6 +301,7 @@ struct AutomationURLRequest {
   std::string referrer;
   std::string extra_request_headers;
   scoped_refptr<net::UploadData> upload_data;
+  int resource_type;  // see webkit/glue/resource_type.h
 };
 
 // Traits for AutomationURLRequest structure to pack/unpack.
@@ -313,13 +314,15 @@ struct ParamTraits<AutomationURLRequest> {
     WriteParam(m, p.referrer);
     WriteParam(m, p.extra_request_headers);
     WriteParam(m, p.upload_data);
+    WriteParam(m, p.resource_type);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return ReadParam(m, iter, &p->url) &&
            ReadParam(m, iter, &p->method) &&
            ReadParam(m, iter, &p->referrer) &&
            ReadParam(m, iter, &p->extra_request_headers) &&
-           ReadParam(m, iter, &p->upload_data);
+           ReadParam(m, iter, &p->upload_data) &&
+           ReadParam(m, iter, &p->resource_type);
   }
   static void Log(const param_type& p, std::string* l) {
     l->append("(");
@@ -332,6 +335,8 @@ struct ParamTraits<AutomationURLRequest> {
     LogParam(p.extra_request_headers, l);
     l->append(", ");
     LogParam(p.upload_data, l);
+    l->append(", ");
+    LogParam(p.resource_type, l);
     l->append(")");
   }
 };
@@ -392,6 +397,7 @@ struct ExternalTabSettings {
   GURL initial_url;
   GURL referrer;
   bool infobars_enabled;
+  bool route_all_top_level_navigations;
 };
 
 // Traits for ExternalTabSettings structure to pack/unpack.
@@ -408,6 +414,7 @@ struct ParamTraits<ExternalTabSettings> {
     WriteParam(m, p.initial_url);
     WriteParam(m, p.referrer);
     WriteParam(m, p.infobars_enabled);
+    WriteParam(m, p.route_all_top_level_navigations);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return ReadParam(m, iter, &p->parent) &&
@@ -418,7 +425,8 @@ struct ParamTraits<ExternalTabSettings> {
            ReadParam(m, iter, &p->handle_top_level_requests) &&
            ReadParam(m, iter, &p->initial_url) &&
            ReadParam(m, iter, &p->referrer) &&
-           ReadParam(m, iter, &p->infobars_enabled);
+           ReadParam(m, iter, &p->infobars_enabled) &&
+           ReadParam(m, iter, &p->route_all_top_level_navigations);
   }
   static void Log(const param_type& p, std::string* l) {
     l->append("(");
@@ -439,6 +447,8 @@ struct ParamTraits<ExternalTabSettings> {
     LogParam(p.referrer, l);
     l->append(", ");
     LogParam(p.infobars_enabled, l);
+    l->append(", ");
+    LogParam(p.route_all_top_level_navigations, l);
     l->append(")");
   }
 };
@@ -580,6 +590,7 @@ struct AttachExternalTabParams {
   gfx::Rect dimensions;
   int disposition;
   bool user_gesture;
+  std::string profile_name;
 };
 
 template <>
@@ -591,6 +602,7 @@ struct ParamTraits<AttachExternalTabParams> {
     WriteParam(m, p.dimensions);
     WriteParam(m, p.disposition);
     WriteParam(m, p.user_gesture);
+    WriteParam(m, p.profile_name);
   }
 
   static bool Read(const Message* m, void** iter, param_type* p) {
@@ -598,7 +610,8 @@ struct ParamTraits<AttachExternalTabParams> {
         ReadParam(m, iter, &p->url) &&
         ReadParam(m, iter, &p->dimensions) &&
         ReadParam(m, iter, &p->disposition) &&
-        ReadParam(m, iter, &p->user_gesture);
+        ReadParam(m, iter, &p->user_gesture) &&
+        ReadParam(m, iter, &p->profile_name);
   }
 
   static void Log(const param_type& p, std::string* l) {
@@ -612,6 +625,8 @@ struct ParamTraits<AttachExternalTabParams> {
     LogParam(p.disposition, l);
     l->append(", ");
     LogParam(p.user_gesture, l);
+    l->append(",");
+    LogParam(p.profile_name, l);
     l->append(")");
   }
 };

@@ -12,23 +12,13 @@
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "base/ref_counted.h"
+#include "net/base/cert_type.h"
 
 namespace net {
 
 class X509Certificate;
 typedef std::vector<scoped_refptr<X509Certificate> > CertificateList;
 
-// Constants to classify the type of a certificate.
-// This is only used in the context of CertDatabase, but is defined outside to
-// avoid an awkwardly long type name.
-enum CertType {
-  UNKNOWN_CERT,
-  CA_CERT,
-  USER_CERT,
-  EMAIL_CERT,
-  SERVER_CERT,
-  NUM_CERT_TYPES
-};
 
 // This class provides functions to manipulate the local
 // certificate store.
@@ -40,6 +30,14 @@ enum CertType {
 class CertDatabase {
  public:
   // Constants that define which usages a certificate is trusted for.
+  // They are used in combination with CertType to specify trust for each type
+  // of certificate.
+  // For a CA_CERT, they specify that the CA is trusted for issuing server and
+  // client certs of each type.
+  // For SERVER_CERT, only TRUSTED_SSL makes sense, and specifies the cert is
+  // trusted as a server.
+  // For EMAIL_CERT, only TRUSTED_EMAIL makes sense, and specifies the cert is
+  // trusted for email.
   enum {
     UNTRUSTED        =      0,
     TRUSTED_SSL      = 1 << 0,
@@ -47,15 +45,16 @@ class CertDatabase {
     TRUSTED_OBJ_SIGN = 1 << 2,
   };
 
-  // Stores per-certificate import results.
-  struct ImportCertResult {
+  // Stores per-certificate error codes for import failures.
+  struct ImportCertFailure {
    public:
-    ImportCertResult(X509Certificate* cert, int err);
+    ImportCertFailure(X509Certificate* cert, int err);
+    ~ImportCertFailure();
 
     scoped_refptr<X509Certificate> certificate;
     int net_error;
   };
-  typedef std::vector<ImportCertResult> ImportCertResultList;
+  typedef std::vector<ImportCertFailure> ImportCertFailureList;
 
   CertDatabase();
 
@@ -82,13 +81,13 @@ class CertDatabase {
   // storing into |output|.
   // Returns the number of certificates successfully exported.
   int ExportToPKCS12(const CertificateList& certs, const string16& password,
-                     std::string* output);
+                     std::string* output) const;
 
   // Uses similar logic to nsNSSCertificateDB::handleCACertDownload to find the
   // root.  Assumes the list is an ordered hierarchy with the root being either
   // the first or last element.
   // TODO(mattm): improve this to handle any order.
-  X509Certificate* FindRootInList(const CertificateList& certificates);
+  X509Certificate* FindRootInList(const CertificateList& certificates) const;
 
   // Import CA certificates.
   // Tries to import all the certificates given.  The root will be trusted
@@ -99,7 +98,21 @@ class CertDatabase {
   // imported.
   bool ImportCACerts(const CertificateList& certificates,
                      unsigned int trust_bits,
-                     ImportCertResultList* not_imported);
+                     ImportCertFailureList* not_imported);
+
+  // Import server certificate.  The first cert should be the server cert.  Any
+  // additional certs should be intermediate/CA certs and will be imported but
+  // not given any trust.
+  // Any certificates that could not be imported will be listed in
+  // |not_imported|.
+  // Returns false if there is an internal error, otherwise true is returned and
+  // |not_imported| should be checked for any certificates that were not
+  // imported.
+  bool ImportServerCert(const CertificateList& certificates,
+                        ImportCertFailureList* not_imported);
+
+  // Get trust bits for certificate.
+  unsigned int GetCertTrust(const X509Certificate* cert, CertType type) const;
 
   // Set trust values for certificate.
   // Returns true on success or false on failure.
@@ -109,6 +122,7 @@ class CertDatabase {
 
   // Delete certificate and associated private key (if one exists).
   // Returns true on success or false on failure.
+  // |cert| is still valid when this function returns.
   bool DeleteCertAndKey(const X509Certificate* cert);
 #endif
 

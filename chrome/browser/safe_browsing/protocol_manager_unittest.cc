@@ -19,7 +19,7 @@ static const char kClientKey[] = "SCg9lcLHd0dfksXgYsacwQ==";
 static const char kWrappedKey[] =
     "AKEgNisjLl7iRYrjWHmpd_XwCiilxrw8nNaYH47tiQ7pDe9cEErjVHGZaPPUau5h61tbXSDqA"
     "BiJZnDFByc_g8B5vTwxkhBf9g==";
-static const char kAdditionalQuery[] = "&additional_query";
+static const char kAdditionalQuery[] = "additional_query";
 
 class SafeBrowsingProtocolManagerTest : public testing::Test {
 };
@@ -162,7 +162,7 @@ TEST_F(SafeBrowsingProtocolManagerTest, TestGetHashUrl) {
             "ErjVHGZaPPUau5h61tbXSDqABiJZnDFByc_g8B5vTwxkhBf9g==",
             pm.GetHashUrl(true).spec());
 
-  pm.set_additional_query("&additional_query");
+  pm.set_additional_query(kAdditionalQuery);
   EXPECT_EQ("http://info.prefix.com/foo/gethash?client=unittest&appver=1.0&"
             "pver=2.2&additional_query",
             pm.GetHashUrl(false).spec());
@@ -184,7 +184,7 @@ TEST_F(SafeBrowsingProtocolManagerTest, TestUpdateUrl) {
             "ErjVHGZaPPUau5h61tbXSDqABiJZnDFByc_g8B5vTwxkhBf9g==",
             pm.UpdateUrl(true).spec());
 
-  pm.set_additional_query("&additional_query");
+  pm.set_additional_query(kAdditionalQuery);
   EXPECT_EQ("http://info.prefix.com/foo/downloads?client=unittest&appver=1.0&"
             "pver=2.2&additional_query", pm.UpdateUrl(false).spec());
   EXPECT_EQ("http://info.prefix.com/foo/downloads?client=unittest&appver=1.0&"
@@ -193,29 +193,31 @@ TEST_F(SafeBrowsingProtocolManagerTest, TestUpdateUrl) {
             "9g==", pm.UpdateUrl(true).spec());
 }
 
-TEST_F(SafeBrowsingProtocolManagerTest, TestMalwareReportUrl) {
+TEST_F(SafeBrowsingProtocolManagerTest, TestSafeBrowsingReportUrl) {
   SafeBrowsingProtocolManager pm(NULL, kClient, kClientKey, kWrappedKey, NULL,
                                  kInfoUrlPrefix, kMacKeyUrlPrefix, false);
   pm.version_ = kAppVer;
 
-  GURL malware_url("http://malware.url.com");
+  GURL malicious_url("http://malicious.url.com");
   GURL page_url("http://page.url.com");
   GURL referrer_url("http://referrer.url.com");
   EXPECT_EQ("http://info.prefix.com/foo/report?client=unittest&appver=1.0&"
-            "pver=2.2&evts=malblhit&evtd=http%3A%2F%2Fmalware.url.com%2F&"
+            "pver=2.2&evts=malblhit&evtd=http%3A%2F%2Fmalicious.url.com%2F&"
             "evtr=http%3A%2F%2Fpage.url.com%2F&evhr=http%3A%2F%2Freferrer."
             "url.com%2F&evtb=1",
-            pm.MalwareReportUrl(malware_url, page_url, referrer_url,
-                                true).spec());
+            pm.SafeBrowsingReportUrl(
+                malicious_url, page_url, referrer_url,
+                true, SafeBrowsingService::URL_MALWARE).spec());
 
-  pm.set_additional_query("&additional_query");
+  pm.set_additional_query(kAdditionalQuery);
   EXPECT_EQ("http://info.prefix.com/foo/report?client=unittest&appver=1.0&"
-            "pver=2.2&additional_query&evts=malblhit&"
-            "evtd=http%3A%2F%2Fmalware.url.com%2F&"
+            "pver=2.2&additional_query&evts=phishblhit&"
+            "evtd=http%3A%2F%2Fmalicious.url.com%2F&"
             "evtr=http%3A%2F%2Fpage.url.com%2F&evhr=http%3A%2F%2Freferrer."
             "url.com%2F&evtb=0",
-            pm.MalwareReportUrl(malware_url, page_url, referrer_url,
-                                false).spec());
+            pm.SafeBrowsingReportUrl(
+                malicious_url, page_url, referrer_url,
+                false, SafeBrowsingService::URL_PHISHING).spec());
 }
 
 TEST_F(SafeBrowsingProtocolManagerTest, TestMacKeyUrl) {
@@ -226,7 +228,7 @@ TEST_F(SafeBrowsingProtocolManagerTest, TestMacKeyUrl) {
   EXPECT_EQ("https://key.prefix.com/bar/newkey?client=unittest&appver=1.0&"
             "pver=2.2", pm.MacKeyUrl().spec());
 
-  pm.set_additional_query("&additional_query");
+  pm.set_additional_query(kAdditionalQuery);
   EXPECT_EQ("https://key.prefix.com/bar/newkey?client=unittest&appver=1.0&"
             "pver=2.2&additional_query", pm.MacKeyUrl().spec());
 }
@@ -239,6 +241,7 @@ TEST_F(SafeBrowsingProtocolManagerTest, TestNextChunkUrl) {
   std::string url_partial = "localhost:1234/foo/bar?foo";
   std::string url_http_full = "http://localhost:1234/foo/bar?foo";
   std::string url_https_full = "https://localhost:1234/foo/bar?foo";
+  std::string url_https_no_query = "https://localhost:1234/foo/bar";
 
   EXPECT_EQ("http://localhost:1234/foo/bar?foo",
             pm.NextChunkUrl(url_partial).spec());
@@ -246,12 +249,16 @@ TEST_F(SafeBrowsingProtocolManagerTest, TestNextChunkUrl) {
             pm.NextChunkUrl(url_http_full).spec());
   EXPECT_EQ("https://localhost:1234/foo/bar?foo",
             pm.NextChunkUrl(url_https_full).spec());
+  EXPECT_EQ("https://localhost:1234/foo/bar",
+            pm.NextChunkUrl(url_https_no_query).spec());
 
-  pm.set_additional_query("&additional_query");
+  pm.set_additional_query(kAdditionalQuery);
   EXPECT_EQ("http://localhost:1234/foo/bar?foo&additional_query",
             pm.NextChunkUrl(url_partial).spec());
   EXPECT_EQ("http://localhost:1234/foo/bar?foo&additional_query",
             pm.NextChunkUrl(url_http_full).spec());
   EXPECT_EQ("https://localhost:1234/foo/bar?foo&additional_query",
             pm.NextChunkUrl(url_https_full).spec());
+  EXPECT_EQ("https://localhost:1234/foo/bar?additional_query",
+            pm.NextChunkUrl(url_https_no_query).spec());
 }

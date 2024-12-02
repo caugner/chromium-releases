@@ -22,7 +22,6 @@
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebData;
-using WebKit::WebFileInfo;
 using WebKit::WebHTTPBody;
 using WebKit::WebString;
 using WebKit::WebFrame;
@@ -48,7 +47,7 @@ bool IsIgnoredRequestHeader(const std::string& name) {
 }
 
 PP_Resource Create(PP_Module module_id) {
-  PluginModule* module = PluginModule::FromPPModule(module_id);
+  PluginModule* module = ResourceTracker::Get()->GetModule(module_id);
   if (!module)
     return 0;
 
@@ -72,23 +71,22 @@ bool SetProperty(PP_Resource request_id,
   if (var.type == PP_VARTYPE_BOOL)
     return request->SetBooleanProperty(property, var.value.as_bool);
 
-  if (var.type == PP_VARTYPE_STRING)
-    return request->SetStringProperty(property, GetString(var)->value());
+  if (var.type == PP_VARTYPE_STRING) {
+    scoped_refptr<StringVar> string(StringVar::FromPPVar(var));
+    if (string)
+      return request->SetStringProperty(property, string->value());
+  }
 
   return false;
 }
 
-bool AppendDataToBody(PP_Resource request_id, PP_Var var) {
+bool AppendDataToBody(PP_Resource request_id, const char* data, uint32_t len) {
   scoped_refptr<URLRequestInfo> request(
       Resource::GetAs<URLRequestInfo>(request_id));
   if (!request)
     return false;
 
-  String* data = GetString(var);
-  if (!data)
-    return false;
-
-  return request->AppendDataToBody(data->value());
+  return request->AppendDataToBody(std::string(data, len));
 }
 
 bool AppendFileToBody(PP_Resource request_id,
@@ -120,6 +118,31 @@ const PPB_URLRequestInfo_Dev ppb_urlrequestinfo = {
 };
 
 }  // namespace
+
+struct URLRequestInfo::BodyItem {
+  BodyItem(const std::string& data)
+      : data(data),
+        start_offset(0),
+        number_of_bytes(-1),
+        expected_last_modified_time(0.0) {
+  }
+
+  BodyItem(FileRef* file_ref,
+           int64_t start_offset,
+           int64_t number_of_bytes,
+           PP_Time expected_last_modified_time)
+      : file_ref(file_ref),
+        start_offset(start_offset),
+        number_of_bytes(number_of_bytes),
+        expected_last_modified_time(expected_last_modified_time) {
+  }
+
+  std::string data;
+  scoped_refptr<FileRef> file_ref;
+  int64_t start_offset;
+  int64_t number_of_bytes;
+  PP_Time expected_last_modified_time;
+};
 
 URLRequestInfo::URLRequestInfo(PluginModule* module)
     : Resource(module),
@@ -214,13 +237,11 @@ WebURLRequest URLRequestInfo::ToWebURLRequest(WebFrame* frame) const {
     http_body.initialize();
     for (size_t i = 0; i < body_.size(); ++i) {
       if (body_[i].file_ref) {
-        WebFileInfo file_info;
-        file_info.modificationTime = body_[i].expected_last_modified_time;
         http_body.appendFileRange(
             webkit_glue::FilePathToWebString(body_[i].file_ref->system_path()),
             body_[i].start_offset,
             body_[i].number_of_bytes,
-            file_info);
+            body_[i].expected_last_modified_time);
       } else {
         DCHECK(!body_[i].data.empty());
         http_body.appendData(WebData(body_[i].data));

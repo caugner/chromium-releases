@@ -4,10 +4,14 @@
 
 #include "webkit/glue/plugins/pepper_webplugin_impl.h"
 
+#include <cmath>
+
 #include "base/message_loop.h"
 #include "third_party/ppapi/c/pp_var.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/pepper_plugin_module.h"
 #include "webkit/glue/plugins/pepper_url_loader.h"
@@ -16,9 +20,12 @@
 using WebKit::WebCanvas;
 using WebKit::WebPluginContainer;
 using WebKit::WebPluginParams;
+using WebKit::WebPoint;
 using WebKit::WebRect;
 using WebKit::WebString;
+using WebKit::WebURL;
 using WebKit::WebVector;
+using WebKit::WebView;
 
 namespace pepper {
 
@@ -73,11 +80,16 @@ void WebPluginImpl::destroy() {
 }
 
 NPObject* WebPluginImpl::scriptableObject() {
-  return GetNPObject(instance_->GetInstanceObject());
+  scoped_refptr<ObjectVar> object(
+      ObjectVar::FromPPVar(instance_->GetInstanceObject()));
+  if (object)
+    return object->np_object();
+  return NULL;
 }
 
 void WebPluginImpl::paint(WebCanvas* canvas, const WebRect& rect) {
-  instance_->Paint(canvas, plugin_rect_, rect);
+  if (!instance_->IsFullscreen())
+    instance_->Paint(canvas, plugin_rect_, rect);
 }
 
 void WebPluginImpl::updateGeometry(
@@ -86,10 +98,12 @@ void WebPluginImpl::updateGeometry(
     const WebVector<WebRect>& cut_outs_rects,
     bool is_visible) {
   plugin_rect_ = window_rect;
-  instance_->ViewChanged(plugin_rect_, clip_rect);
+  if (!instance_->IsFullscreen())
+    instance_->ViewChanged(plugin_rect_, clip_rect);
 }
 
 void WebPluginImpl::updateFocus(bool focused) {
+  instance_->SetWebKitFocus(focused);
 }
 
 void WebPluginImpl::updateVisibility(bool visible) {
@@ -101,6 +115,8 @@ bool WebPluginImpl::acceptsInputEvents() {
 
 bool WebPluginImpl::handleInputEvent(const WebKit::WebInputEvent& event,
                                      WebKit::WebCursorInfo& cursor_info) {
+  if (instance_->IsFullscreen())
+    return false;
   return instance_->HandleInputEvent(event, &cursor_info);
 }
 
@@ -108,7 +124,7 @@ void WebPluginImpl::didReceiveResponse(
     const WebKit::WebURLResponse& response) {
   DCHECK(!document_loader_);
 
-  document_loader_ = new URLLoader(instance_);
+  document_loader_ = new URLLoader(instance_, true);
   document_loader_->didReceiveResponse(NULL, response);
 
   if (!instance_->HandleDocumentLoad(document_loader_))
@@ -122,7 +138,7 @@ void WebPluginImpl::didReceiveData(const char* data, int data_length) {
 
 void WebPluginImpl::didFinishLoading() {
   if (document_loader_) {
-    document_loader_->didFinishLoading(NULL);
+    document_loader_->didFinishLoading(NULL, 0);
     document_loader_ = NULL;
   }
 }
@@ -148,16 +164,20 @@ bool WebPluginImpl::hasSelection() const {
   return !selectionAsText().isEmpty();
 }
 
-WebKit::WebString WebPluginImpl::selectionAsText() const {
+WebString WebPluginImpl::selectionAsText() const {
   return instance_->GetSelectedText(false);
 }
 
-WebKit::WebString WebPluginImpl::selectionAsMarkup() const {
+WebString WebPluginImpl::selectionAsMarkup() const {
   return instance_->GetSelectedText(true);
 }
 
-void WebPluginImpl::setZoomFactor(float scale, bool text_only) {
-  instance_->Zoom(scale, text_only);
+WebURL WebPluginImpl::linkAtPosition(const WebPoint& position) const {
+  return GURL(instance_->GetLinkAtPosition(position));
+}
+
+void WebPluginImpl::setZoomLevel(double level, bool text_only) {
+  instance_->Zoom(WebView::zoomLevelToZoomFactor(level), text_only);
 }
 
 bool WebPluginImpl::startFind(const WebKit::WebString& search_text,

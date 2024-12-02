@@ -23,7 +23,6 @@
     'chromium_dependencies': [
       'common',
       'browser',
-      'debugger',
       'chrome_gpu',
       'profile_import',
       'renderer',
@@ -515,7 +514,7 @@
             }
           ],
         }],
-        ['OS=="linux" and chromeos==1', {
+        ['OS=="linux" and chromeos==1 and branding=="Chrome"', {
           'copies': [
             {
               'destination': '<(PRODUCT_DIR)/extensions',
@@ -553,6 +552,8 @@
         'browser/debugger/devtools_http_protocol_handler.h',
         'browser/debugger/devtools_manager.cc',
         'browser/debugger/devtools_manager.h',
+        'browser/debugger/devtools_netlog_observer.cc',
+        'browser/debugger/devtools_netlog_observer.h',
         'browser/debugger/devtools_protocol_handler.cc',
         'browser/debugger/devtools_protocol_handler.h',
         'browser/debugger/devtools_remote.h',
@@ -620,6 +621,8 @@
         'plugin/plugin_main_mac.mm',
         'plugin/plugin_thread.cc',
         'plugin/plugin_thread.h',
+        'plugin/webplugin_accelerated_surface_proxy_mac.cc',
+        'plugin/webplugin_accelerated_surface_proxy_mac.h',
         'plugin/webplugin_delegate_stub.cc',
         'plugin/webplugin_delegate_stub.h',
         'plugin/webplugin_proxy.cc',
@@ -694,6 +697,7 @@
         '../app/app.gyp:app_base',
         '../base/base.gyp:base',
         'common',
+        '../media/media.gyp:media',
         '../skia/skia.gyp:skia',
       ],
       'sources': [
@@ -704,6 +708,7 @@
         'gpu/gpu_command_buffer_stub.cc',
         'gpu/gpu_command_buffer_stub.h',
         'gpu/gpu_config.h',
+        'gpu/gpu_dx_diagnostics_win.cc',
         'gpu/gpu_info_collector_linux.cc',
         'gpu/gpu_info_collector_mac.mm',
         'gpu/gpu_info_collector_win.cc',
@@ -719,6 +724,11 @@
         'gpu/gpu_video_service.h',
         'gpu/gpu_view_win.cc',
         'gpu/gpu_view_win.h',
+        'gpu/media/gpu_video_device.h',
+        'gpu/media/fake_gl_video_decode_engine.cc',
+        'gpu/media/fake_gl_video_decode_engine.h',
+        'gpu/media/fake_gl_video_device.cc',
+        'gpu/media/fake_gl_video_device.h',
       ],
       'include_dirs': [
         '..',
@@ -726,6 +736,8 @@
       'conditions': [
         ['OS=="win"', {
           'include_dirs': [
+            '<(DEPTH)/third_party/angle/include',
+            '<(DEPTH)/third_party/angle/src',
             '<(DEPTH)/third_party/wtl/include',
           ],
           'dependencies': [
@@ -775,6 +787,10 @@
                 '<(PRODUCT_DIR)',
               ],
             },
+          ],
+          'sources': [
+            'gpu/media/mft_angle_video_device.cc',
+            'gpu/media/mft_angle_video_device.h',
           ],
         }],
         ['OS=="linux" and target_arch!="arm"', {
@@ -901,10 +917,6 @@
         'browser/sync/engine/all_status.h',
         'browser/sync/engine/apply_updates_command.cc',
         'browser/sync/engine/apply_updates_command.h',
-        'browser/sync/engine/auth_watcher.cc',
-        'browser/sync/engine/auth_watcher.h',
-        'browser/sync/engine/authenticator.cc',
-        'browser/sync/engine/authenticator.h',
         'browser/sync/engine/build_and_process_conflict_sets_command.cc',
         'browser/sync/engine/build_and_process_conflict_sets_command.h',
         'browser/sync/engine/build_commit_command.cc',
@@ -913,6 +925,8 @@
         'browser/sync/engine/change_reorder_buffer.h',
         'browser/sync/engine/cleanup_disabled_types_command.cc',
         'browser/sync/engine/cleanup_disabled_types_command.h',
+        'browser/sync/engine/clear_data_command.cc',
+        'browser/sync/engine/clear_data_command.h',
         'browser/sync/engine/conflict_resolver.cc',
         'browser/sync/engine/conflict_resolver.h',
         'browser/sync/engine/download_updates_command.cc',
@@ -969,6 +983,7 @@
         'browser/sync/sessions/status_controller.h',
         'browser/sync/sessions/sync_session.cc',
         'browser/sync/sessions/sync_session.h',
+        'browser/sync/sessions/sync_session_context.cc',
         'browser/sync/sessions/sync_session_context.h',
         'browser/sync/syncable/blob.h',
         'browser/sync/syncable/dir_open_result.h',
@@ -998,7 +1013,6 @@
         'browser/sync/util/fast_dump.h',
         'browser/sync/util/nigori.cc',
         'browser/sync/util/nigori.h',
-        'browser/sync/util/sync_types.h',
         'browser/sync/util/user_settings.cc',
         'browser/sync/util/user_settings.h',
         'browser/sync/util/user_settings_posix.cc',
@@ -1014,12 +1028,13 @@
         '_USE_32BIT_TIME_T',
       ],
       'dependencies': [
+        'common',
         '../skia/skia.gyp:skia',
         '../third_party/libjingle/libjingle.gyp:libjingle',
         'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
         # TODO(akalin): Change back to protobuf_lite once it supports
         # preserving unknown fields.
-        '../third_party/protobuf2/protobuf.gyp:protobuf#target',
+        '../third_party/protobuf/protobuf.gyp:protobuf#target',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -1070,6 +1085,7 @@
         'browser/sync/notifier/registration_manager.h',
         'browser/sync/notifier/server_notifier_thread.cc',
         'browser/sync/notifier/server_notifier_thread.h',
+        'browser/sync/notifier/state_writer.h',
       ],
       'include_dirs': [
         '..',
@@ -1559,6 +1575,29 @@
                 '../breakpad/breakpad.gyp:dump_syms',
               ],
             }],
+            ['linux_strip_reliability_tests==1', {
+              'actions': [
+                {
+                  'action_name': 'strip_reliability_tests',
+                  'inputs': [
+                    '<(PRODUCT_DIR)/automated_ui_tests',
+                    '<(PRODUCT_DIR)/reliability_tests',
+                    '<(PRODUCT_DIR)/lib.target/_pyautolib.so',
+                  ],
+                  'outputs': [
+                    '<(PRODUCT_DIR)/strip_reliability_tests.stamp',
+                  ],
+                  'action': ['strip',
+                             '-g',
+                             '<@(_inputs)'],
+                  'message': 'Stripping reliability tests',
+                },
+              ],
+              'dependencies': [
+                'automated_ui_tests',
+                'reliability_tests',
+              ],
+            }],
           ],
         }
       ],
@@ -1590,6 +1629,7 @@
             '../third_party/codesighs/codesighs.gyp:*',
             '../third_party/icu/icu.gyp:*',
             '../third_party/libjpeg/libjpeg.gyp:*',
+            '../third_party/libwebp/libwebp.gyp:*',
             '../third_party/libpng/libpng.gyp:*',
             '../third_party/libxslt/libxslt.gyp:*',
             '../third_party/lzma_sdk/lzma_sdk.gyp:*',
@@ -1786,7 +1826,6 @@
           'msvs_guid': '2E969AE9-7B12-4EDB-8E8B-48C7AE7BE357',
           'dependencies': [
             'browser',
-            'debugger',
             'renderer',
             'syncapi',
             '../base/base.gyp:base',
@@ -1829,11 +1868,16 @@
           # the rules of chrome_strings
           'target_name': 'policy_templates',
           'type': 'none',
+          'variables': {
+            'grd_path': 'app/policy/policy_templates.grd',
+            'template_files': [
+              '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(grd_path))'
+            ]
+          },
           'actions': [
             {
               'action_name': 'policy_templates',
               'variables': {
-                'input_path': 'app/policy/policy_templates.grd',
                 'conditions': [
                   ['branding=="Chrome"', {
                     # TODO(mmoss) The .grd files look for _google_chrome, but for
@@ -1846,14 +1890,14 @@
                 ],
               },
               'inputs': [
-                '<!@(<(grit_info_cmd) --inputs <(input_path))',
+                '<!@(<(grit_info_cmd) --inputs <(grd_path))',
               ],
               'outputs': [
-                '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(input_path))',
+                '<@(template_files)'
               ],
               'action': [
                 '<@(grit_cmd)',
-                '-i', '<(input_path)', 'build',
+                '-i', '<(grd_path)', 'build',
                 '-o', '<(grit_out_dir)',
                 '-D', '<(chrome_build)'
               ],
@@ -1868,7 +1912,7 @@
                   'action': ['-D', 'mac_bundle_id=<(mac_bundle_id)'],
                 }],
               ],
-              'message': 'Generating policy templates from <(input_path)',
+              'message': 'Generating policy templates from <(grd_path)',
             },
           ],
           'direct_dependent_settings': {
@@ -1877,6 +1921,34 @@
             ],
           },
           'conditions': [
+            ['OS=="win"', {
+              'actions': [
+                {
+                  # Add all the templates generated at the previous step into
+                  # a zip archive.
+                  'action_name': 'pack_templates',
+                  'variables': {
+                    'zip_script':
+                        'tools/build/win/make_zip_with_relative_entries.py'
+                  },
+                  'inputs': [
+                    '<@(template_files)',
+                    '<(zip_script)'
+                  ],
+                  'outputs': [
+                    '<(PRODUCT_DIR)/policy_templates.zip'
+                  ],
+                  'action': [
+                    'python',
+                    '<(zip_script)',
+                    '<@(_outputs)',
+                    '<(grit_out_dir)/app/policy',
+                    '<@(template_files)'
+                  ],
+                  'message': 'Packing generated templates into <(_outputs)',
+                }
+              ]
+            }],
             ['OS=="win"', {
               'dependencies': ['../build/win/system.gyp:cygwin'],
             }],

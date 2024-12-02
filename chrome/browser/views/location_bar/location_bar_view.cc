@@ -16,13 +16,15 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/alternate_nav_url_fetcher.h"
+#include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/tab_contents/match_preview.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/browser_dialogs.h"
 #include "chrome/browser/views/location_bar/content_setting_image_view.h"
@@ -38,6 +40,7 @@
 #include "gfx/skia_util.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "views/controls/label.h"
 #include "views/drag_utils.h"
 
 #if defined(OS_WIN)
@@ -91,12 +94,14 @@ LocationBarView::LocationBarView(Profile* profile,
       ev_bubble_view_(NULL),
       location_entry_view_(NULL),
       selected_keyword_view_(NULL),
+      suggested_text_view_(NULL),
       keyword_hint_view_(NULL),
       star_view_(NULL),
       mode_(mode),
       show_focus_rect_(false),
       bubble_type_(FirstRun::MINIMAL_BUBBLE),
-      template_url_model_(NULL) {
+      template_url_model_(NULL),
+      update_instant_(true) {
   DCHECK(profile_);
   SetID(VIEW_ID_LOCATION_BAR);
   SetFocusable(true);
@@ -578,6 +583,35 @@ void LocationBarView::Layout() {
     }
   }
 
+  // Layout out the suggested text view right aligned to the location
+  // entry. Only show the suggested text if we can fit the text from one
+  // character before the end of the selection to the end of the text and the
+  // suggested text. If we can't it means either the suggested text is too big,
+  // or the user has scrolled.
+
+  // TODO(sky): We could potentially combine this with the previous step to
+  // force using minimum size if necessary, but currently the chance of showing
+  // keyword hints and suggested text is minimal and we're not confident this
+  // is the right approach for suggested text.
+  if (suggested_text_view_) {
+    // TODO(sky): need to layout when the user changes caret position.
+    int suggested_text_width = suggested_text_view_->GetPreferredSize().width();
+    int vis_text_width = location_entry_->WidthOfTextAfterCursor();
+    if (vis_text_width + suggested_text_width > entry_width) {
+      // Hide the suggested text if the user has scrolled or we can't fit all
+      // the suggested text.
+      suggested_text_view_->SetBounds(0, 0, 0, 0);
+    } else {
+      int location_needed_width = location_entry_->TextWidth();
+      location_bounds.set_width(std::min(location_needed_width,
+                                         entry_width - suggested_text_width));
+      suggested_text_view_->SetBounds(location_bounds.right(),
+                                      location_bounds.y(),
+                                      suggested_text_width,
+                                      location_bounds.height());
+    }
+  }
+
   location_entry_view_->SetBounds(location_bounds);
 }
 
@@ -638,6 +672,10 @@ void LocationBarView::SetShowFocusRect(bool show) {
   SchedulePaint();
 }
 
+void LocationBarView::SelectAll() {
+  location_entry_->SelectAll(true);
+}
+
 #if defined(OS_WIN)
 bool LocationBarView::OnMousePressed(const views::MouseEvent& event) {
   UINT msg;
@@ -683,13 +721,61 @@ void LocationBarView::OnMouseReleased(const views::MouseEvent& event,
 #endif
 
 void LocationBarView::OnAutocompleteWillClosePopup() {
+  if (!update_instant_)
+    return;
+
+  InstantController* instant = delegate_->GetInstant();
+  if (instant && !instant->commit_on_mouse_up())
+    instant->DestroyPreviewContents();
 }
 
 void LocationBarView::OnAutocompleteLosingFocus(
     gfx::NativeView view_gaining_focus) {
+  SetSuggestedText(string16());
+
+  InstantController* instant = delegate_->GetInstant();
+  if (!instant)
+    return;
+
+  if (!instant->is_active() || !instant->GetPreviewContents())
+    return;
+
+  switch (GetCommitType(view_gaining_focus)) {
+    case COMMIT_INSTANT_IMMEDIATELY:
+      instant->CommitCurrentPreview(INSTANT_COMMIT_FOCUS_LOST);
+      break;
+    case COMMIT_INSTANT_ON_MOUSE_UP:
+      instant->SetCommitOnMouseUp();
+      break;
+    case REVERT_INSTANT:
+      instant->DestroyPreviewContents();
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 void LocationBarView::OnAutocompleteWillAccept() {
+  update_instant_ = false;
+}
+
+bool LocationBarView::OnCommitSuggestedText(const std::wstring& typed_text) {
+  InstantController* instant = delegate_->GetInstant();
+  if (!instant || !suggested_text_view_ ||
+      suggested_text_view_->size().IsEmpty() ||
+      suggested_text_view_->GetText().empty()) {
+    return false;
+  }
+  // TODO(sky): I may need to route this through InstantController so that we
+  // don't fetch suggestions for the new combined text.
+  location_entry_->SetUserText(typed_text + suggested_text_view_->GetText());
+  return true;
+}
+
+void LocationBarView::OnPopupBoundsChanged(const gfx::Rect& bounds) {
+  InstantController* instant = delegate_->GetInstant();
+  if (instant)
+    instant->SetOmniboxBounds(bounds);
 }
 
 void LocationBarView::OnAutocompleteAccept(
@@ -697,34 +783,39 @@ void LocationBarView::OnAutocompleteAccept(
     WindowOpenDisposition disposition,
     PageTransition::Type transition,
     const GURL& alternate_nav_url) {
-  if (!url.is_valid())
-    return;
+  // WARNING: don't add an early return here. The calls after the if must
+  // happen.
+  if (url.is_valid()) {
+    location_input_ = UTF8ToWide(url.spec());
+    disposition_ = disposition;
+    transition_ = transition;
 
-  location_input_ = UTF8ToWide(url.spec());
-  disposition_ = disposition;
-  transition_ = transition;
-
-  if (command_updater_) {
-    if (!alternate_nav_url.is_valid()) {
-      command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
-      return;
-    }
-
-    AlternateNavURLFetcher* fetcher =
-        new AlternateNavURLFetcher(alternate_nav_url);
-    // The AlternateNavURLFetcher will listen for the pending navigation
-    // notification that will be issued as a result of the "open URL." It
-    // will automatically install itself into that navigation controller.
-    command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
-    if (fetcher->state() == AlternateNavURLFetcher::NOT_STARTED) {
-      // I'm not sure this should be reachable, but I'm not also sure enough
-      // that it shouldn't to stick in a NOTREACHED().  In any case, this is
-      // harmless.
-      delete fetcher;
-    } else {
-      // The navigation controller will delete the fetcher.
+    if (command_updater_) {
+      if (!alternate_nav_url.is_valid()) {
+        command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
+      } else {
+        AlternateNavURLFetcher* fetcher =
+            new AlternateNavURLFetcher(alternate_nav_url);
+        // The AlternateNavURLFetcher will listen for the pending navigation
+        // notification that will be issued as a result of the "open URL." It
+        // will automatically install itself into that navigation controller.
+        command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
+        if (fetcher->state() == AlternateNavURLFetcher::NOT_STARTED) {
+          // I'm not sure this should be reachable, but I'm not also sure enough
+          // that it shouldn't to stick in a NOTREACHED().  In any case, this is
+          // harmless.
+          delete fetcher;
+        } else {
+          // The navigation controller will delete the fetcher.
+        }
+      }
     }
   }
+
+  if (delegate_->GetInstant())
+    delegate_->GetInstant()->DestroyPreviewContents();
+
+  update_instant_ = true;
 }
 
 void LocationBarView::OnChanged() {
@@ -734,13 +825,21 @@ void LocationBarView::OnChanged() {
   Layout();
   SchedulePaint();
 
-  if (MatchPreview::IsEnabled() && GetTabContents() &&
-      !profile_->IsOffTheRecord()) {
-    PageTransition::Type transition_type;
-    GURL url = location_entry_->model()->user_input_in_progress() ?
-        location_entry_->model()->CurrentURL(&transition_type) : GURL();
-    GetTabContents()->match_preview()->Update(url);
+  InstantController* instant = delegate_->GetInstant();
+  string16 suggested_text;
+  if (update_instant_ && instant && GetTabContents()) {
+    if (location_entry_->model()->user_input_in_progress() &&
+        location_entry_->model()->popup_model()->IsOpen()) {
+      instant->Update(GetTabContents(),
+                      location_entry_->model()->CurrentMatch(),
+                      WideToUTF16(location_entry_->GetText()),
+                      &suggested_text);
+    } else {
+      instant->DestroyPreviewContents();
+    }
   }
+
+  SetSuggestedText(suggested_text);
 }
 
 void LocationBarView::OnInputInProgress(bool in_progress) {
@@ -772,17 +871,9 @@ std::wstring LocationBarView::GetTitle() const {
 }
 
 int LocationBarView::AvailableWidth(int location_bar_width) {
-#if defined(OS_WIN)
-  // Use font_.GetStringWidth() instead of
-  // PosFromChar(location_entry_->GetTextLength()) because PosFromChar() is
-  // apparently buggy. In both LTR UI and RTL UI with left-to-right layout,
-  // PosFromChar(i) might return 0 when i is greater than 1.
-  return std::max(
-      location_bar_width - font_.GetStringWidth(location_entry_->GetText()), 0);
-#else
   return location_bar_width - location_entry_->TextWidth();
-#endif
 }
+
 void LocationBarView::LayoutView(views::View* view,
                                  int padding,
                                  int available_width,
@@ -950,13 +1041,9 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
 #endif
 }
 
-bool LocationBarView::GetAccessibleRole(AccessibilityTypes::Role* role) {
-  DCHECK(role);
-
-  *role = AccessibilityTypes::ROLE_GROUPING;
-  return true;
+AccessibilityTypes::Role LocationBarView::GetAccessibleRole() {
+  return AccessibilityTypes::ROLE_GROUPING;
 }
-
 
 void LocationBarView::WriteDragData(views::View* sender,
                                     const gfx::Point& press_pt,
@@ -999,6 +1086,33 @@ void LocationBarView::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
     return;
   }
   ShowFirstRunBubbleInternal(bubble_type);
+}
+
+void LocationBarView::SetSuggestedText(const string16& text) {
+  if (!text.empty()) {
+    if (!suggested_text_view_) {
+      suggested_text_view_ = new views::Label();
+      suggested_text_view_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+      suggested_text_view_->SetColor(
+          GetColor(ToolbarModel::NONE,
+                   LocationBarView::DEEMPHASIZED_TEXT));
+      suggested_text_view_->SetText(UTF16ToWide(text));
+      suggested_text_view_->SetFont(location_entry_->GetFont());
+      AddChildView(suggested_text_view_);
+    } else if (suggested_text_view_->GetText() == UTF16ToWide(text)) {
+      return;
+    } else {
+      suggested_text_view_->SetText(UTF16ToWide(text));
+    }
+  } else if (suggested_text_view_) {
+    delete suggested_text_view_;
+    suggested_text_view_ = NULL;
+  } else {
+    return;
+  }
+
+  Layout();
+  SchedulePaint();
 }
 
 std::wstring LocationBarView::GetInputString() const {
@@ -1091,3 +1205,44 @@ void LocationBarView::OnTemplateURLModelChanged() {
   ShowFirstRunBubble(bubble_type_);
 }
 
+LocationBarView::InstantCommitType LocationBarView::GetCommitType(
+    gfx::NativeView view_gaining_focus) {
+  // The InstantController is active. Destroy it if the user didn't click on the
+  // TabContents (or one of its children).
+#if defined(OS_WIN)
+  InstantController* instant = delegate_->GetInstant();
+  RenderWidgetHostView* rwhv =
+      instant->GetPreviewContents()->GetRenderWidgetHostView();
+  if (!view_gaining_focus || !rwhv)
+    return REVERT_INSTANT;
+
+  gfx::NativeView tab_view = instant->GetPreviewContents()->GetNativeView();
+  if (rwhv->GetNativeView() == view_gaining_focus ||
+      tab_view == view_gaining_focus) {
+    // Focus is going to the renderer. Only commit instant if the mouse is
+    // down. If the mouse isn't down it means someone else moved focus and we
+    // shouldn't commit.
+    if (instant->IsMouseDownFromActivate()) {
+      if (instant->IsShowingInstant()) {
+        // We're showing instant results. As instant results may shift when
+        // committing we commit on the mouse up. This way a slow click still
+        // works fine.
+        return COMMIT_INSTANT_ON_MOUSE_UP;
+      }
+      return COMMIT_INSTANT_IMMEDIATELY;
+    }
+    return REVERT_INSTANT;
+  }
+  gfx::NativeView view_gaining_focus_ancestor = view_gaining_focus;
+  while (view_gaining_focus_ancestor &&
+         view_gaining_focus_ancestor != tab_view) {
+    view_gaining_focus_ancestor = ::GetParent(view_gaining_focus_ancestor);
+  }
+  return view_gaining_focus_ancestor != NULL ?
+      COMMIT_INSTANT_IMMEDIATELY : REVERT_INSTANT;
+#else
+  // TODO: implement me.
+  NOTIMPLEMENTED();
+  return REVERT_INSTANT;
+#endif
+}

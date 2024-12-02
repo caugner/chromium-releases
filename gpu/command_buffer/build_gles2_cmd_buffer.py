@@ -16,7 +16,7 @@ _SIZE_OF_UINT32 = 4
 _SIZE_OF_COMMAND_HEADER = 4
 _FIRST_SPECIFIC_COMMAND_ID = 256
 
-_LICENSE = """// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+_LICENSE = """// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,25 @@ _LICENSE = """// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 #
 # *) All GLenums have been changed to GLenumTypeOfEnum
 #
+_GL_TYPES = {
+  'GLenum': 'unsigned int',
+  'GLboolean': 'unsigned char',
+  'GLbitfield': 'unsigned int',
+  'GLbyte': 'signed char',
+  'GLshort': 'short',
+  'GLint': 'int',
+  'GLsizei': 'int',
+  'GLubyte': 'unsigned char',
+  'GLushort': 'unsigned short',
+  'GLuint': 'unsigned int',
+  'GLfloat': 'float',
+  'GLclampf': 'float',
+  'GLvoid': 'void',
+  'GLfixed': 'int',
+  'GLclampx': 'int',
+  'GLintptr': 'khronos_intptr_t',
+  'GLsizeiptr': 'khronos_ssize_t',
+}
 _GL_FUNCTIONS = """
 GL_APICALL void         GL_APIENTRY glActiveTexture (GLenum texture);
 GL_APICALL void         GL_APIENTRY glAttachShader (GLidProgram program, GLidShader shader);
@@ -1142,11 +1161,7 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoEnableVertexAttribArray',
     'impl_decl': False,
   },
-  'Finish': {
-    'impl_func': False,
-    'decoder_func': 'glFlush',
-    'gl_test_func': 'glFlush',
-  },
+  'Finish': {'impl_func': False},
   'Flush': {'impl_func': False},
   'FramebufferRenderbuffer': {
     'decoder_func': 'DoFramebufferRenderbuffer',
@@ -1214,7 +1229,7 @@ _FUNCTION_INFO = {
     'type': 'GETn',
     'result': ['SizedResult<GLboolean>'],
     'decoder_func': 'DoGetBooleanv',
-    'gl_test_func': 'glGetIntegerv',
+    'gl_test_func': 'glGetBooleanv',
   },
   'GetBufferParameteriv': {'type': 'GETn', 'result': ['SizedResult<GLint>']},
   'GetError': {
@@ -1227,7 +1242,7 @@ _FUNCTION_INFO = {
     'type': 'GETn',
     'result': ['SizedResult<GLfloat>'],
     'decoder_func': 'DoGetFloatv',
-    'gl_test_func': 'glGetIntegerv',
+    'gl_test_func': 'glGetFloatv',
   },
   'GetFramebufferAttachmentParameteriv': {
     'type': 'GETn',
@@ -1594,12 +1609,17 @@ class CWriter(object):
     splitter = string.find('=')
     if splitter >= 0 and not string[splitter + 1] == '=' and splitter < 80:
       return splitter
-    parts = string.split('(')
+    # parts = string.split('(')
+    parts = re.split("(?<=[^\"])\(", string)
+    fptr = re.compile('\*\w*\)')
     if len(parts) > 1:
       splitter = len(parts[0])
       for ii in range(1, len(parts)):
+        # Don't split on the dot in "if (.condition)".
         if (not parts[ii - 1][-3:] == "if " and
-            (len(parts[ii]) > 0 and not parts[ii][0] == ")")
+            # Don't split "(.)" or "(.*fptr)".
+            (len(parts[ii]) > 0 and
+                not parts[ii][0] == ")" and not fptr.match(parts[ii]))
             and splitter < 80):
           return splitter
         splitter += len(parts[ii]) + 1
@@ -1608,7 +1628,7 @@ class CWriter(object):
     last_splitter = -1
     while not done:
       splitter = string[0:end].rfind(',')
-      if splitter < 0:
+      if splitter < 0 or (splitter > 0 and string[splitter - 1] == '"'):
         return last_splitter
       elif splitter >= 80:
         end = splitter
@@ -1651,10 +1671,13 @@ class CHeaderWriter(CWriter):
 
   _non_alnum_re = re.compile(r'[^a-zA-Z0-9]')
 
-  def __init__(self, filename, file_comment = None):
+  def __init__(self, filename, file_comment = None, guard_depth = 3):
     CWriter.__init__(self, filename)
-    base = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    base = os.path.dirname(os.path.abspath(filename))
+    for i in range(guard_depth):
+      base = os.path.dirname(base)
+
     hpath = os.path.abspath(filename)[len(base) + 1:]
     self.guard = self._non_alnum_re.sub('_', hpath).upper() + '_'
 
@@ -4425,10 +4448,10 @@ class Function(object):
         ["%s %s%s" % (arg.type, prefix, arg.name) for arg in args])
     return self.__GetArgList(arg_string, add_comma)
 
-  def MakeOriginalArgString(self, prefix, add_comma = False):
+  def MakeOriginalArgString(self, prefix, add_comma = False, separator = ", "):
     """Gets the list of arguments as they are in GL."""
     args = self.GetOriginalArgs()
-    arg_string = ", ".join(
+    arg_string = separator.join(
         ["%s%s" % (prefix, arg.name) for arg in args])
     return self.__GetArgList(arg_string, add_comma)
 
@@ -5021,12 +5044,23 @@ class GLGenerator(object):
       file.Write("%s GLES2%s(%s) {\n" %
                  (func.return_type, func.name,
                   func.MakeTypedOriginalArgString("")))
-      return_string = "return "
+      comma = ""
+      if len(func.GetOriginalArgs()):
+        comma = " << "
+      file.Write(
+          '  GPU_CLIENT_LOG("%s" << "("%s%s << ")");\n' %
+          (func.original_name, comma, func.MakeOriginalArgString(
+              "", separator=' << ", " << ')))
+      result_string = "%s result = " % func.return_type
+      return_string = (
+          '  GPU_CLIENT_LOG("return:" << result)\n  return result;\n')
       if func.return_type == "void":
+        result_string = ""
         return_string = ""
       file.Write("  %sgles2::GetGLContext()->%s(%s);\n" %
-                 (return_string, func.original_name,
+                 (result_string, func.original_name,
                   func.MakeOriginalArgString("")))
+      file.Write(return_string)
       file.Write("}\n")
 
     file.Write("\n")
@@ -5085,9 +5119,83 @@ class GLGenerator(object):
           'post': post,
         })
       pre = '  '
-    file.Write("}\n");
+    file.Write("}\n\n");
     file.Close()
 
+  def WritePepperGLES2Interface(self, filename):
+    """Writes the Pepper OpenGLES interface definition."""
+    file = CHeaderWriter(
+        filename,
+        "// This interface is used to access common and lite profile OpenGL ES "
+        "2.0\n// functions.\n",
+        2)
+
+    file.Write("#include \"../GLES2/khrplatform.h\"\n\n")
+
+    file.Write("#define PPB_OPENGLES_INTERFACE \"PPB_OpenGLES;2.0\"\n\n")
+
+    for (k, v) in _GL_TYPES.iteritems():
+      file.Write("typedef %s %s;\n" % (v, k))
+
+    file.Write("\ntypedef struct _ppb_OpenGLES {\n")
+    for func in self.original_functions:
+      if func.name[-3:] == "EXT":
+        continue
+      file.Write("  %s (*%s)(%s);\n" %
+                 (func.return_type, func.name,
+                  func.MakeTypedOriginalArgString("")))
+    file.Write("} PPB_OpenGLES;\n\n")
+
+    file.Close()
+
+  def WritePepperGLES2Implementation(self, filename):
+    """Writes the Pepper OpenGLES interface implementation."""
+
+    file = CWriter(filename)
+    file.Write(_LICENSE)
+    file.Write("// This file is auto-generated. DO NOT EDIT!\n\n")
+
+    file.Write("#include \"webkit/glue/plugins/pepper_graphics_3d.h\"\n\n")
+
+    file.Write("#include \"gpu/command_buffer/client/gles2_implementation.h\"")
+    file.Write("\n#include \"third_party/ppapi/c/ppb_opengles.h\"\n\n")
+
+    file.Write("namespace pepper {\n\n")
+    file.Write("namespace {\n\n")
+
+    for func in self.original_functions:
+      if func.name[-3:] == "EXT":
+        continue
+      file.Write("%s %s(%s) {\n" %
+                 (func.return_type, func.name,
+                  func.MakeTypedOriginalArgString("")))
+      return_string = "return "
+      if func.return_type == "void":
+        return_string = ""
+      file.Write("  %sGraphics3D::GetCurrent()->impl()->%s(%s);\n" %
+                 (return_string, func.original_name,
+                  func.MakeOriginalArgString("")))
+      file.Write("}\n")
+
+    file.Write("\nconst PPB_OpenGLES ppb_opengles = {\n")
+
+    file.Write("  &")
+    file.Write(",\n  &".join(
+      f.name for f in self.original_functions if f.name[-3:] != "EXT"))
+    file.Write("\n")
+
+    file.Write("};\n\n")
+    file.Write("}  // namespace\n")
+
+    file.Write("""
+const PPB_OpenGLES* Graphics3D::GetOpenGLESInterface() {
+  return &ppb_opengles;
+}
+
+""")
+    file.Write("}  // namespace pepper\n\n")
+
+    file.Close()
 
 def main(argv):
   """This is the main function."""
@@ -5102,6 +5210,13 @@ def main(argv):
       "--generate-docs", action="store_true",
       help="generate a docs friendly version of the command formats.")
   parser.add_option(
+      "--alternate-mode", type="choice",
+      choices=("ppapi", "chrome_ppapi", "ppapi_gles2"),
+      help="generate files for other projects. \"ppapi\" must be run from the "
+      "directory containing the ppapi directory, and will generate ppapi "
+      "bindings. \"chrome_ppapi\" must be run from chrome src directory and "
+      "will generate chrome plumbing for ppapi.")
+  parser.add_option(
       "-v", "--verbose", action="store_true",
       help="prints more output.")
 
@@ -5109,23 +5224,32 @@ def main(argv):
 
   gen = GLGenerator(options.verbose)
   gen.ParseGLH("common/GLES2/gl2.h")
-  gen.WriteCommandIds("common/gles2_cmd_ids_autogen.h")
-  gen.WriteFormat("common/gles2_cmd_format_autogen.h")
-  gen.WriteFormatTest("common/gles2_cmd_format_test_autogen.h")
-  gen.WriteGLES2ImplementationHeader("client/gles2_implementation_autogen.h")
-  gen.WriteGLES2CLibImplementation("client/gles2_c_lib_autogen.h")
-  gen.WriteCmdHelperHeader("client/gles2_cmd_helper_autogen.h")
-  gen.WriteServiceImplementation("service/gles2_cmd_decoder_autogen.h")
-  gen.WriteServiceUnitTests("service/gles2_cmd_decoder_unittest_%d_autogen.h")
-  gen.WriteServiceUtilsHeader("service/gles2_cmd_validation_autogen.h")
-  gen.WriteServiceUtilsImplementation(
-      "service/gles2_cmd_validation_implementation_autogen.h")
 
-  if options.generate_command_id_tests:
-    gen.WriteCommandIdTest("common/gles2_cmd_id_test_autogen.h")
+  if options.alternate_mode == "ppapi":
+    gen.WritePepperGLES2Interface("ppapi/c/ppb_opengles.h")
 
-  if options.generate_docs:
-    gen.WriteDocs("docs/gles2_cmd_format_docs_autogen.h")
+  elif options.alternate_mode == "chrome_ppapi":
+    gen.WritePepperGLES2Implementation(
+        "webkit/glue/plugins/pepper_graphics_3d_gl.cc")
+
+  else:
+    gen.WriteCommandIds("common/gles2_cmd_ids_autogen.h")
+    gen.WriteFormat("common/gles2_cmd_format_autogen.h")
+    gen.WriteFormatTest("common/gles2_cmd_format_test_autogen.h")
+    gen.WriteGLES2ImplementationHeader("client/gles2_implementation_autogen.h")
+    gen.WriteGLES2CLibImplementation("client/gles2_c_lib_autogen.h")
+    gen.WriteCmdHelperHeader("client/gles2_cmd_helper_autogen.h")
+    gen.WriteServiceImplementation("service/gles2_cmd_decoder_autogen.h")
+    gen.WriteServiceUnitTests("service/gles2_cmd_decoder_unittest_%d_autogen.h")
+    gen.WriteServiceUtilsHeader("service/gles2_cmd_validation_autogen.h")
+    gen.WriteServiceUtilsImplementation(
+        "service/gles2_cmd_validation_implementation_autogen.h")
+
+    if options.generate_command_id_tests:
+      gen.WriteCommandIdTest("common/gles2_cmd_id_test_autogen.h")
+
+    if options.generate_docs:
+      gen.WriteDocs("docs/gles2_cmd_format_docs_autogen.h")
 
   if gen.errors > 0:
     print "%d errors" % gen.errors

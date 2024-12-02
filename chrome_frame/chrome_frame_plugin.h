@@ -15,7 +15,6 @@
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome_frame/simple_resource_loader.h"
 #include "chrome_frame/utils.h"
-
 #include "grit/chromium_strings.h"
 
 #define IDC_ABOUT_CHROME_FRAME 40018
@@ -62,7 +61,8 @@ END_MSG_MAP()
   bool InitializeAutomation(const std::wstring& profile_name,
                             const std::wstring& extra_chrome_arguments,
                             bool incognito, bool is_widget_mode,
-                            const GURL& url, const GURL& referrer) {
+                            const GURL& url, const GURL& referrer,
+                            bool route_all_top_level_navigations) {
     DCHECK(IsValid());
     DCHECK(launch_params_ == NULL);
     // We don't want to do incognito when privileged, since we're
@@ -70,8 +70,13 @@ END_MSG_MAP()
     bool incognito_mode = !is_privileged_ && incognito;
     FilePath profile_path;
     GetProfilePath(profile_name, &profile_path);
+    // The profile name could change based on the browser version. For e.g. for
+    // IE6/7 the profile is created in a different folder whose last component
+    // is Google Chrome Frame.
+    FilePath actual_profile_name = profile_path.BaseName();
     launch_params_ = new ChromeFrameLaunchParams(url, referrer, profile_path,
-        profile_name, extra_chrome_arguments, incognito_mode, is_widget_mode);
+        actual_profile_name.value(), extra_chrome_arguments, incognito_mode,
+        is_widget_mode, route_all_top_level_navigations);
     return automation_client_->Initialize(this, launch_params_);
   }
 
@@ -178,7 +183,14 @@ END_MSG_MAP()
         // browser that we now have the focus.
         HWND focus = ::GetFocus();
         HWND plugin_window = GetWindow();
-        if (focus != plugin_window && !IsChild(plugin_window, focus)) {
+
+        // The Chrome-Frame instance may have launched a popup which currently
+        // has focus.  Because experimental extension popups are top-level
+        // windows, we have to check that the focus has shifted to a window
+        // that does not share the same GA_ROOTOWNER as the plugin.
+        if (focus != plugin_window &&
+            ::GetAncestor(plugin_window, GA_ROOTOWNER) !=
+                ::GetAncestor(focus, GA_ROOTOWNER)) {
           ignore_setfocus_ = true;
           SetFocus(plugin_window);
           ignore_setfocus_ = false;

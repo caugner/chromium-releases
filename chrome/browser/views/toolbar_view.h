@@ -10,6 +10,7 @@
 
 #include "app/menus/accelerator.h"
 #include "app/slide_animation.h"
+#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/back_forward_menu_model.h"
 #include "chrome/browser/command_updater.h"
@@ -26,7 +27,13 @@
 class BrowserActionsContainer;
 class Browser;
 class Profile;
+#if defined(OS_CHROMEOS)
+namespace views {
+class Menu2;
+}  // namespace views
+#else
 class WrenchMenu;
+#endif
 
 // The Browser Window's toolbar.
 class ToolbarView : public AccessibleToolbarView,
@@ -64,6 +71,9 @@ class ToolbarView : public AccessibleToolbarView,
   // to the ViewStorage with id |view_storage_id| if the user escapes.
   void SetToolbarFocusAndFocusAppMenu(int view_storage_id);
 
+  // Returns true if the app menu is focused.
+  bool IsAppMenuFocused();
+
   // Add a listener to receive a callback when the menu opens.
   void AddMenuListener(views::MenuListener* listener);
 
@@ -88,6 +98,7 @@ class ToolbarView : public AccessibleToolbarView,
 
   // Overridden from LocationBarView::Delegate:
   virtual TabContents* GetTabContents();
+  virtual InstantController* GetInstant();
   virtual void OnInputInProgress(bool in_progress);
 
   // Overridden from AnimationDelegate:
@@ -128,6 +139,9 @@ class ToolbarView : public AccessibleToolbarView,
   virtual void RemoveToolbarFocus();
 
  private:
+  // Returns true if we should show the upgrade recommended dot.
+  bool IsUpgradeRecommended();
+
   // Returns the number of pixels above the location bar in non-normal display.
   int PopupTopSpacing() const;
 
@@ -184,12 +198,19 @@ class ToolbarView : public AccessibleToolbarView,
   // The contents of the wrench menu.
   scoped_ptr<menus::SimpleMenuModel> wrench_menu_model_;
 
+#if defined(OS_CHROMEOS)
   // Wrench menu.
-  scoped_ptr<WrenchMenu> wrench_menu_;
+  scoped_ptr<views::Menu2> wrench_menu_;
+
+  // MenuLister is managed by Menu2 on chromeos.
+
+#else
+  // Wrench menu.
+  scoped_refptr<WrenchMenu> wrench_menu_;
 
   // Vector of listeners to receive callbacks when the menu opens.
   std::vector<views::MenuListener*> menu_listeners_;
-
+#endif
   // The animation that makes the update reminder pulse.
   scoped_ptr<SlideAnimation> update_reminder_animation_;
 

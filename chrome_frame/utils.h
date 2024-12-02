@@ -28,6 +28,7 @@ extern const wchar_t kChromeContentPrefix[];
 extern const char kGCFProtocol[];
 extern const wchar_t kChromeProtocolPrefix[];
 extern const wchar_t kChromeFrameHeadlessMode[];
+extern const wchar_t kChromeFrameAccessibleMode[];
 extern const wchar_t kChromeFrameUnpinnedMode[];
 extern const wchar_t kAllowUnsafeURLs[];
 extern const wchar_t kEnableBuggyBhoIntercept[];
@@ -179,7 +180,35 @@ typedef enum IEVersion {
   IE_6,
   IE_7,
   IE_8,
+  IE_9,
 };
+
+// The renderer to be used for a page.  Values for Chrome also convey the
+// reason why Chrome is used.
+enum RendererType {
+  RENDERER_TYPE_UNDETERMINED = 0,
+  RENDERER_TYPE_CHROME_MIN,
+  // NOTE: group all _CHROME_ values together below here, as they are used for
+  // generating metrics reported via UMA (adjust MIN/MAX as needed).
+  RENDERER_TYPE_CHROME_GCF_PROTOCOL = RENDERER_TYPE_CHROME_MIN,
+  RENDERER_TYPE_CHROME_HTTP_EQUIV,
+  RENDERER_TYPE_CHROME_RESPONSE_HEADER,
+  RENDERER_TYPE_CHROME_DEFAULT_RENDERER,
+  RENDERER_TYPE_CHROME_OPT_IN_URL,
+  RENDERER_TYPE_CHROME_WIDGET,
+  // NOTE: all _CHOME_ values must go above here (adjust MIN/MAX as needed).
+  RENDERER_TYPE_CHROME_MAX = RENDERER_TYPE_CHROME_WIDGET,
+  RENDERER_TYPE_OTHER,
+};
+
+// Returns true if the given RendererType represents Chrome.
+bool IsChrome(RendererType renderer_type);
+
+// Convenience macro for logging a sample for the launch type metric.
+#define THREAD_SAFE_UMA_LAUNCH_TYPE_COUNT(sample) \
+  THREAD_SAFE_UMA_HISTOGRAM_CUSTOM_COUNTS("ChromeFrame.LaunchType", sample, \
+  RENDERER_TYPE_CHROME_MIN, RENDERER_TYPE_CHROME_MAX, \
+  RENDERER_TYPE_CHROME_MAX + 1 - RENDERER_TYPE_CHROME_MIN)
 
 // To get the IE version when Chrome Frame is hosted in IE.  Make sure that
 // the hosting browser is IE before calling this function, otherwise NON_IE
@@ -239,6 +268,10 @@ bool DeleteConfigValue(const wchar_t* value_name);
 // gather crash dumps, etc to send them to the crash server.
 bool IsHeadlessMode();
 
+// Returns true if we are running in accessible mode in which we need to enable
+// renderer accessibility for use in automation.
+bool IsAccessibleMode();
+
 // Returns true if we are running in unpinned mode in which case DLL
 // eviction should be possible.
 bool IsUnpinnedMode();
@@ -247,7 +280,11 @@ bool IsUnpinnedMode();
 bool IsGcfDefaultRenderer();
 
 // Check if this url is opting into Chrome Frame based on static settings.
-bool IsOptInUrl(const wchar_t* url);
+// Returns one of:
+// - RENDERER_TYPE_UNDETERMINED if not opt-in or if explicit opt-out
+// - RENDERER_TYPE_CHROME_DEFAULT_RENDERER
+// - RENDERER_TYPE_CHROME_OPT_IN_URL
+RendererType RendererTypeForUrl(const std::wstring& url);
 
 // A shortcut for QueryService
 template <typename T>
@@ -517,6 +554,10 @@ class ChromeFrameUrl {
     return parsed_url_;
   }
 
+  const std::string& profile_name() const {
+    return profile_name_;
+  }
+
  private:
   // If we are attaching to an existing external tab, this function parses the
   // suffix portion of the URL which contains the attach_external_tab prefix.
@@ -532,6 +573,7 @@ class ChromeFrameUrl {
   int disposition_;
 
   GURL parsed_url_;
+  std::string profile_name_;
 };
 
 // Returns true if we can navigate to this URL.
@@ -544,5 +586,14 @@ bool CanNavigate(const GURL& url, IInternetSecurityManager* security_manager,
 // Utility function that prevents the current module from ever being unloaded.
 // Call if you make irreversible patches.
 void PinModule();
+
+// Helper function to spin a message loop and dispatch messages while waiting
+// for a handle to be signaled.
+void WaitWithMessageLoop(HANDLE* handles, int count, DWORD timeout);
+
+// Enumerates values in a key and adds them to an array.
+// The names of the values are not returned.
+void EnumerateKeyValues(HKEY parent_key, const wchar_t* sub_key_name,
+                        std::vector<std::wstring>* values);
 
 #endif  // CHROME_FRAME_UTILS_H_

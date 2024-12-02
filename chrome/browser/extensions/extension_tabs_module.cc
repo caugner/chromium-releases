@@ -7,6 +7,7 @@
 #include "base/base64.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/window_sizer.h"
@@ -189,7 +191,8 @@ bool ExtensionTabUtil::GetTabById(int tab_id, Profile* profile,
   TabStripModel* target_tab_strip;
   TabContents* target_contents;
   Profile* incognito_profile =
-      include_incognito ? profile->GetOffTheRecordProfile() : NULL;
+      include_incognito && profile->HasOffTheRecordProfile() ?
+          profile->GetOffTheRecordProfile() : NULL;
   for (BrowserList::const_iterator iter = BrowserList::begin();
        iter != BrowserList::end(); ++iter) {
     target_browser = *iter;
@@ -268,7 +271,8 @@ bool GetAllWindowsFunction::RunImpl() {
 
   result_.reset(new ListValue());
   Profile* incognito_profile =
-      include_incognito() ? profile()->GetOffTheRecordProfile() : NULL;
+      include_incognito() && profile()->HasOffTheRecordProfile() ?
+          profile()->GetOffTheRecordProfile() : NULL;
   for (BrowserList::const_iterator browser = BrowserList::begin();
     browser != BrowserList::end(); ++browser) {
       // Only examine browsers in the current profile that have windows.
@@ -306,17 +310,24 @@ bool CreateWindowFunction::RunImpl() {
   }
 
   // Try to position the new browser relative its originating browser window.
-  gfx::Rect empty_bounds;
-  gfx::Rect bounds;
+  gfx::Rect  window_bounds;
   bool maximized;
   // The call offsets the bounds by kWindowTilePixels (defined in WindowSizer to
   // be 10)
   //
   // NOTE(rafaelw): It's ok if GetCurrentBrowser() returns NULL here.
   // GetBrowserWindowBounds will default to saved "default" values for the app.
-  WindowSizer::GetBrowserWindowBounds(std::string(), empty_bounds,
-                                      GetCurrentBrowser(), &bounds,
+  WindowSizer::GetBrowserWindowBounds(std::string(), gfx::Rect(),
+                                      GetCurrentBrowser(), &window_bounds,
                                       &maximized);
+
+  // Calculate popup bounds separately. In ChromiumOS the default is 0x0 which
+  // indicates default window sizes in PanelBrowserView. In other OSs popups
+  // use the same default bounds as windows.
+  gfx::Rect popup_bounds;
+#if !defined(OS_CHROMEOS)
+  popup_bounds = window_bounds;  // Use window size as default for popups
+#endif
 
   Profile* window_profile = profile();
   Browser::Type window_type = Browser::TYPE_NORMAL;
@@ -327,25 +338,29 @@ bool CreateWindowFunction::RunImpl() {
     if (args->HasKey(keys::kLeftKey)) {
       EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kLeftKey,
                                                    &bounds_val));
-      bounds.set_x(bounds_val);
+      window_bounds.set_x(bounds_val);
+      popup_bounds.set_x(bounds_val);
     }
 
     if (args->HasKey(keys::kTopKey)) {
       EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kTopKey,
                                                    &bounds_val));
-      bounds.set_y(bounds_val);
+      window_bounds.set_y(bounds_val);
+      popup_bounds.set_y(bounds_val);
     }
 
     if (args->HasKey(keys::kWidthKey)) {
       EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kWidthKey,
                                                    &bounds_val));
-      bounds.set_width(bounds_val);
+      window_bounds.set_width(bounds_val);
+      popup_bounds.set_width(bounds_val);
     }
 
     if (args->HasKey(keys::kHeightKey)) {
       EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kHeightKey,
                                                    &bounds_val));
-      bounds.set_height(bounds_val);
+      window_bounds.set_height(bounds_val);
+      popup_bounds.set_height(bounds_val);
     }
 
     bool incognito = false;
@@ -363,20 +378,19 @@ bool CreateWindowFunction::RunImpl() {
       if (type_str == keys::kWindowTypeValueNormal) {
         window_type = Browser::TYPE_NORMAL;
       } else if (type_str == keys::kWindowTypeValuePopup) {
-        window_type = Browser::TYPE_POPUP;
+        window_type = Browser::TYPE_APP_POPUP;
       } else {
         EXTENSION_FUNCTION_VALIDATE(false);
       }
     }
   }
 
-  Browser* new_window = new Browser(window_type, window_profile);
-  new_window->CreateBrowserWindow();
-  new_window->AddTabWithURL(url, GURL(), PageTransition::LINK, -1,
-                            TabStripModel::ADD_SELECTED, NULL, std::string(),
-                            &new_window);
-
-  new_window->window()->SetBounds(bounds);
+  Browser* new_window = Browser::CreateForType(window_type, window_profile);
+  new_window->AddSelectedTabWithURL(url, PageTransition::LINK);
+  if (window_type & Browser::TYPE_POPUP)
+    new_window->window()->SetBounds(popup_bounds);
+  else
+    new_window->window()->SetBounds(window_bounds);
   new_window->window()->Show();
 
   if (new_window->profile()->IsOffTheRecord() && !include_incognito()) {
@@ -433,8 +447,18 @@ bool UpdateWindowFunction::RunImpl() {
         &bounds_val));
     bounds.set_height(bounds_val);
   }
-
   browser->window()->SetBounds(bounds);
+
+  bool selected_val = false;
+  if (update_props->HasKey(keys::kFocusedKey)) {
+    EXTENSION_FUNCTION_VALIDATE(update_props->GetBoolean(
+        keys::kFocusedKey, &selected_val));
+    if (selected_val)
+      browser->window()->Activate();
+    else
+      browser->window()->Deactivate();
+  }
+
   result_.reset(ExtensionTabUtil::CreateWindowValue(browser, false));
 
   return true;
@@ -548,12 +572,6 @@ bool CreateTabFunction::RunImpl() {
   if (args->HasKey(keys::kSelectedKey))
     EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kSelectedKey,
                                                  &selected));
-  // If index is specified, honor the value, but keep it bound to
-  // 0 <= index <= tab_strip->count()
-  int index = -1;
-  if (args->HasKey(keys::kIndexKey))
-    EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kIndexKey,
-                                                 &index));
 
   // We can't load extension URLs into incognito windows. Special case to
   // fall back to a normal window.
@@ -568,25 +586,27 @@ bool CreateTabFunction::RunImpl() {
     }
   }
 
+  // If index is specified, honor the value, but keep it bound to
+  // -1 <= index <= tab_strip->count() where -1 invokes the default behavior.
+  int index = -1;
+  if (args->HasKey(keys::kIndexKey))
+    EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kIndexKey, &index));
+
   TabStripModel* tab_strip = browser->tabstrip_model();
 
-  if (index < 0) {
-    // Default insert behavior.
-    index = -1;
-  }
-  if (index > tab_strip->count()) {
-    index = tab_strip->count();
-  }
+  index = std::min(std::max(index, -1), tab_strip->count());
 
   int add_types = selected ? TabStripModel::ADD_SELECTED :
                              TabStripModel::ADD_NONE;
   add_types |= TabStripModel::ADD_FORCE_INDEX;
-  TabContents* contents = browser->AddTabWithURL(url, GURL(),
-      PageTransition::LINK, index, add_types, NULL, std::string(), &browser);
+  Browser::AddTabWithURLParams params(url, PageTransition::LINK);
+  params.index = index;
+  params.add_types = add_types;
+  TabContents* contents = browser->AddTabWithURL(&params);
   index = browser->tabstrip_model()->GetIndexOfTabContents(contents);
 
   if (selected)
-    contents->Focus();
+    contents->view()->SetInitialFocus();
 
   // Return data about the newly created tab.
   if (has_callback())
@@ -658,9 +678,17 @@ bool UpdateTabFunction::RunImpl() {
     // JavaScript URLs can do the same kinds of things as cross-origin XHR, so
     // we need to check host permissions before allowing them.
     if (url.SchemeIs(chrome::kJavaScriptScheme)) {
-      if (!profile()->GetExtensionsService()->CanExecuteScriptOnHost(
-          GetExtension(), contents->GetURL(), &error_))
+      Extension* extension = GetExtension();
+      const std::vector<URLPattern> host_permissions =
+          extension->host_permissions();
+      if (!Extension::CanExecuteScriptOnPage(
+              contents->GetURL(),
+              extension->CanExecuteScriptEverywhere(),
+              &host_permissions,
+              NULL,
+              &error_)) {
         return false;
+      }
 
       // TODO(aa): How does controller queue URLs? Is there any chance that this
       // JavaScript URL will end up applying to something other than
@@ -796,13 +824,6 @@ bool RemoveTabFunction::RunImpl() {
   if (!GetTabById(tab_id, profile(), include_incognito(),
                   &browser, NULL, &contents, NULL, &error_))
     return false;
-
-  int tab_index = browser->GetIndexOfController(&contents->controller());
-  if (browser->tabstrip_model()->IsPhantomTab(tab_index)) {
-    // Don't allow closing phantom tabs.
-    error_ = keys::kCannotRemovePhantomTab;
-    return false;
-  }
 
   // Close the tab in this convoluted way, since there's a chance that the tab
   // is being dragged, or we're in some other nested event loop. This code path
@@ -969,7 +990,8 @@ void CaptureVisibleTabFunction::SendResultFromBitmap(
       image_data->data.size());
 
   base::Base64Encode(stream_as_string, &base64_result);
-  base64_result.insert(0, StringPrintf("data:%s;base64,", mime_type.c_str()));
+  base64_result.insert(0, base::StringPrintf("data:%s;base64,",
+                                             mime_type.c_str()));
   result_.reset(new StringValue(base64_result));
   SendResponse(true);
 }
@@ -999,8 +1021,7 @@ bool DetectTabLanguageFunction::RunImpl() {
   }
 
   if (contents->controller().needs_reload()) {
-    // If the tab hasn't been loaded, such as happens with phantom tabs, don't
-    // wait for the tab to load, instead return.
+    // If the tab hasn't been loaded, don't wait for the tab to load.
     error_ = keys::kCannotDetermineLanguageOfUnloadedTab;
     return false;
   }
@@ -1054,7 +1075,8 @@ static Browser* GetBrowserInProfileWithId(Profile* profile,
                                           bool include_incognito,
                                           std::string* error_message) {
   Profile* incognito_profile =
-      include_incognito ? profile->GetOffTheRecordProfile() : NULL;
+      include_incognito && profile->HasOffTheRecordProfile() ?
+          profile->GetOffTheRecordProfile() : NULL;
   for (BrowserList::const_iterator browser = BrowserList::begin();
        browser != BrowserList::end(); ++browser) {
     if (((*browser)->profile() == profile ||
@@ -1089,11 +1111,11 @@ static bool GetTabById(int tab_id, Profile* profile,
 }
 
 static std::string GetWindowTypeText(Browser::Type type) {
-  // Note: for app popups, we report "app".
-  if ((type & Browser::TYPE_APP) != 0 || type == Browser::TYPE_EXTENSION_APP)
-    return keys::kWindowTypeValueApp;
-  if ((type & Browser::TYPE_POPUP) != 0)
+  if ((type & Browser::TYPE_POPUP) == Browser::TYPE_POPUP)
     return keys::kWindowTypeValuePopup;
+
+  if ((type & Browser::TYPE_APP) == Browser::TYPE_APP)
+    return keys::kWindowTypeValueApp;
 
   DCHECK(type == Browser::TYPE_NORMAL);
   return keys::kWindowTypeValueNormal;

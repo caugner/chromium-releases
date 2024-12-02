@@ -7,6 +7,7 @@
 #include "app/text_elider.h"
 #include "base/file_path.h"
 #include "base/i18n/rtl.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -39,9 +40,8 @@ std::wstring CutString(const std::wstring& text,
 }
 
 // TODO(tony): Get rid of wstrings.
-std::wstring GetDisplayStringInLTRDirectionality(const std::wstring& text) {
-  return UTF16ToWide(base::i18n::GetDisplayStringInLTRDirectionality(
-      WideToUTF16(text)));
+string16 GetDisplayStringInLTRDirectionality(const std::wstring& text) {
+  return base::i18n::GetDisplayStringInLTRDirectionality(WideToUTF16(text));
 }
 
 }  // namespace
@@ -286,9 +286,9 @@ std::wstring ElideUrl(const GURL& url,
   return ElideText(final_elided_url_string, font, available_pixel_width, false);
 }
 
-std::wstring ElideFilename(const FilePath& filename,
-                           const gfx::Font& font,
-                           int available_pixel_width) {
+string16 ElideFilename(const FilePath& filename,
+                       const gfx::Font& font,
+                       int available_pixel_width) {
   int full_width = font.GetStringWidth(filename.ToWStringHack());
   if (full_width <= available_pixel_width) {
     std::wstring elided_name = filename.ToWStringHack();
@@ -384,7 +384,7 @@ SortedDisplayURL::SortedDisplayURL(const GURL& url,
   std::wstring host;
   net::AppendFormattedHost(url, languages, &host, NULL, NULL);
   sort_host_ = WideToUTF16Hack(host);
-  string16 host_minus_www = WideToUTF16Hack(net::StripWWW(host));
+  string16 host_minus_www = net::StripWWW(WideToUTF16Hack(host));
   url_parse::Parsed parsed;
   display_url_ = net::FormatUrl(url, WideToUTF8(languages),
       net::kFormatUrlOmitAll, UnescapeRule::SPACES, &parsed, &prefix_end_,
@@ -393,6 +393,12 @@ SortedDisplayURL::SortedDisplayURL(const GURL& url,
     prefix_end_ += sort_host_.length() - host_minus_www.length();
     sort_host_.swap(host_minus_www);
   }
+}
+
+SortedDisplayURL::SortedDisplayURL() {
+}
+
+SortedDisplayURL::~SortedDisplayURL() {
 }
 
 int SortedDisplayURL::Compare(const SortedDisplayURL& other,

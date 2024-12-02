@@ -20,7 +20,7 @@ using browser_sync::DataTypeController;
 class ProfileSyncFactoryImplTest : public testing::Test {
  protected:
   ProfileSyncFactoryImplTest()
-      : ui_thread_(ChromeThread::UI, &message_loop_) {}
+      : ui_thread_(BrowserThread::UI, &message_loop_) {}
 
   virtual void SetUp() {
     profile_.reset(new TestingProfile());
@@ -31,7 +31,7 @@ class ProfileSyncFactoryImplTest : public testing::Test {
   }
 
   MessageLoop message_loop_;
-  ChromeThread ui_thread_;
+  BrowserThread ui_thread_;
   scoped_ptr<Profile> profile_;
   scoped_ptr<CommandLine> command_line_;
   scoped_ptr<ProfileSyncFactoryImpl> profile_sync_service_factory_;
@@ -39,7 +39,7 @@ class ProfileSyncFactoryImplTest : public testing::Test {
 
 TEST_F(ProfileSyncFactoryImplTest, CreatePSSDefault) {
   scoped_ptr<ProfileSyncService> pss;
-  pss.reset(profile_sync_service_factory_->CreateProfileSyncService());
+  pss.reset(profile_sync_service_factory_->CreateProfileSyncService(""));
   DataTypeController::StateMap controller_states;
   DataTypeController::StateMap* controller_states_ptr = &controller_states;
   pss->GetDataTypeControllerStates(controller_states_ptr);
@@ -55,7 +55,7 @@ TEST_F(ProfileSyncFactoryImplTest, CreatePSSDefault) {
 TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableAutofill) {
   command_line_->AppendSwitch(switches::kDisableSyncAutofill);
   scoped_ptr<ProfileSyncService> pss;
-  pss.reset(profile_sync_service_factory_->CreateProfileSyncService());
+  pss.reset(profile_sync_service_factory_->CreateProfileSyncService(""));
   DataTypeController::StateMap controller_states;
   DataTypeController::StateMap* controller_states_ptr = &controller_states;
   pss->GetDataTypeControllerStates(controller_states_ptr);
@@ -71,7 +71,7 @@ TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableAutofill) {
 TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableBookmarks) {
   command_line_->AppendSwitch(switches::kDisableSyncBookmarks);
   scoped_ptr<ProfileSyncService> pss;
-  pss.reset(profile_sync_service_factory_->CreateProfileSyncService());
+  pss.reset(profile_sync_service_factory_->CreateProfileSyncService(""));
   DataTypeController::StateMap controller_states;
   DataTypeController::StateMap* controller_states_ptr = &controller_states;
   pss->GetDataTypeControllerStates(controller_states_ptr);
@@ -87,7 +87,7 @@ TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableBookmarks) {
 TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisablePreferences) {
   command_line_->AppendSwitch(switches::kDisableSyncPreferences);
   scoped_ptr<ProfileSyncService> pss;
-  pss.reset(profile_sync_service_factory_->CreateProfileSyncService());
+  pss.reset(profile_sync_service_factory_->CreateProfileSyncService(""));
   DataTypeController::StateMap controller_states;
   DataTypeController::StateMap* controller_states_ptr = &controller_states;
   pss->GetDataTypeControllerStates(controller_states_ptr);
@@ -103,7 +103,7 @@ TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisablePreferences) {
 TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableThemes) {
   command_line_->AppendSwitch(switches::kDisableSyncThemes);
   scoped_ptr<ProfileSyncService> pss;
-  pss.reset(profile_sync_service_factory_->CreateProfileSyncService());
+  pss.reset(profile_sync_service_factory_->CreateProfileSyncService(""));
   DataTypeController::StateMap controller_states;
   DataTypeController::StateMap* controller_states_ptr = &controller_states;
   pss->GetDataTypeControllerStates(controller_states_ptr);
@@ -119,7 +119,7 @@ TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableThemes) {
 TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableExtensions) {
   command_line_->AppendSwitch(switches::kDisableSyncExtensions);
   scoped_ptr<ProfileSyncService> pss;
-  pss.reset(profile_sync_service_factory_->CreateProfileSyncService());
+  pss.reset(profile_sync_service_factory_->CreateProfileSyncService(""));
   DataTypeController::StateMap controller_states;
   DataTypeController::StateMap* controller_states_ptr = &controller_states;
   pss->GetDataTypeControllerStates(controller_states_ptr);
@@ -135,7 +135,7 @@ TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableExtensions) {
 TEST_F(ProfileSyncFactoryImplTest, CreatePSSDisableApps) {
   command_line_->AppendSwitch(switches::kDisableSyncApps);
   scoped_ptr<ProfileSyncService> pss;
-  pss.reset(profile_sync_service_factory_->CreateProfileSyncService());
+  pss.reset(profile_sync_service_factory_->CreateProfileSyncService(""));
   DataTypeController::StateMap controller_states;
   DataTypeController::StateMap* controller_states_ptr = &controller_states;
   pss->GetDataTypeControllerStates(controller_states_ptr);

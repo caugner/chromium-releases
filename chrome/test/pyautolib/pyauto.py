@@ -398,6 +398,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       windex: the index of the browser window to work on.
               Default: 0 (first window)
     """
+    # Ensure that keyword data is loaded from the profile.
+    # This would normally be triggered by the user inputting this text.
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
     cmd_dict = {
         'command': 'SetOmniboxText',
         'text': text,
@@ -446,6 +449,100 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'command': 'OmniboxAcceptInput',
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def GetSearchEngineInfo(self):
+    """Return info about search engines.
+
+    Returns:
+      An ordered list of dictionaries describing info about each search engine.
+
+      Example:
+        [ { u'description': u'',
+            u'display_url': u'{google:baseURL}search?q=%s',
+            u'host': u'www.google.com',
+            u'in_default_list': True,
+            u'is_default': True,
+            u'is_valid': True,
+            u'keyword': u'google.com',
+            u'path': u'/search',
+            u'short_name': u'Google',
+            u'supports_replacement': True,
+            u'url': u'{google:baseURL}search?q={searchTerms}'},
+          { u'description': u'',
+            u'display_url': u'http://search.yahoo.com/search?p=%s',
+            u'host': u'search.yahoo.com',
+            u'in_default_list': True,
+            u'is_default': False,
+            u'is_valid': True,
+            u'keyword': u'yahoo.com',
+            u'path': u'/search',
+            u'short_name': u'Yahoo!',
+            u'supports_replacement': True,
+            u'url': u'http://search.yahoo.com/search?p={searchTerms}'},
+    """
+    # Ensure that the search engine profile is loaded into data model.
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
+    cmd_dict = {'command': 'GetSearchEngineInfo'}
+    return self._GetResultFromJSONRequest(cmd_dict)['search_engines']
+
+  def AddSearchEngine(self, title, keyword, url):
+    """Add a search engine, as done through the search engines UI.
+
+    Args:
+      title: name for search engine.
+      keyword: keyword, used to initiate a custom search from omnibox.
+      url: url template for this search engine's query.
+           '%s' is replaced by search query string when used to search.
+    """
+    # Ensure that the search engine profile is loaded into data model.
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
+    cmd_dict = {'command': 'AddOrEditSearchEngine',
+                'new_title': title,
+                'new_keyword': keyword,
+                'new_url': url}
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def EditSearchEngine(self, keyword, new_title, new_keyword, new_url):
+    """Edit info for existing search engine.
+
+    Args:
+      keyword: existing search engine keyword.
+      new_title: new name for this search engine.
+      new_keyword: new keyword for this search engine.
+      new_url: new url for this search engine.
+    """
+    # Ensure that the search engine profile is loaded into data model.
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
+    cmd_dict = {'command': 'AddOrEditSearchEngine',
+                'keyword': keyword,
+                'new_title': new_title,
+                'new_keyword': new_keyword,
+                'new_url': new_url}
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def DeleteSearchEngine(self, keyword):
+    """Delete search engine with given keyword.
+
+    Args:
+      keyword: the keyword string of the search engine to delete.
+    """
+    # Ensure that the search engine profile is loaded into data model.
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
+    cmd_dict = {'command': 'PerformActionOnSearchEngine', 'keyword': keyword,
+                'action': 'delete'}
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def MakeSearchEngineDefault(self, keyword):
+    """Make search engine with given keyword the default search.
+
+    Args:
+      keyword: the keyword string of the search engine to make default.
+    """
+    # Ensure that the search engine profile is loaded into data model.
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
+    cmd_dict = {'command': 'PerformActionOnSearchEngine', 'keyword': keyword,
+                'action': 'default'}
+    self._GetResultFromJSONRequest(cmd_dict)
 
   def GetPrefsInfo(self):
     """Return info about preferences.
@@ -1001,42 +1098,39 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       profiles: (optional) a list of dictionaries representing each profile to
       add. Example:
       [{
-        'label': 'Profile 1', # Note: 'label' must be present
         'NAME_FIRST': 'Bob',
         'NAME_LAST': 'Smith',
         'ADDRESS_HOME_ZIP': '94043',
       },
       {
-        'label': 'Profile 2',
         'EMAIL_ADDRESS': 'sue@example.com',
         'COMPANY_NAME': 'Company X',
       }]
 
-      Each dictionary must have a key 'label'. Other possible keys are:
+      Other possible keys are:
       'NAME_FIRST', 'NAME_MIDDLE', 'NAME_LAST', 'EMAIL_ADDRESS',
       'COMPANY_NAME', 'ADDRESS_HOME_LINE1', 'ADDRESS_HOME_LINE2',
       'ADDRESS_HOME_CITY', 'ADDRESS_HOME_STATE', 'ADDRESS_HOME_ZIP',
-      'ADDRESS_HOME_COUNTRY', 'PHONE_HOME_NUMBER', 'PHONE_FAX_NUMBER'
+      'ADDRESS_HOME_COUNTRY', 'PHONE_HOME_WHOLE_NUMBER',
+      'PHONE_FAX_WHOLE_NUMBER'
 
       All values must be strings.
 
       credit_cards: (optional) a list of dictionaries representing each credit
       card to add. Example:
       [{
-        'label': 'Personal Credit Card', # Note: 'label' must be present
         'CREDIT_CARD_NAME': 'Bob C. Smith',
         'CREDIT_CARD_NUMBER': '5555555555554444',
         'CREDIT_CARD_EXP_MONTH': '12',
         'CREDIT_CARD_EXP_4_DIGIT_YEAR': '2011'
       },
       {
-        'label': 'Work Credit Card',
         'CREDIT_CARD_NAME': 'Bob C. Smith',
         'CREDIT_CARD_NUMBER': '4111111111111111',
         'CREDIT_CARD_TYPE': 'Visa'
       }
 
-      Each dictionary must have a key 'label'. Other possible keys are:
+      Other possible keys are:
       'CREDIT_CARD_NAME', 'CREDIT_CARD_NUMBER', 'CREDIT_CARD_EXP_MONTH',
       'CREDIT_CARD_EXP_4_DIGIT_YEAR'
 
@@ -1055,14 +1149,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'profiles': profiles,
       'credit_cards': credit_cards
     }
-    if profiles:
-      for profile in profiles:
-        if not 'label' in profile:
-          raise JSONInterfaceError('must specify label for all profiles')
-    if credit_cards:
-      for credit_card in credit_cards:
-        if not 'label' in credit_card:
-          raise JSONInterfaceError('must specify label for all credit cards')
     self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
 
   def GetAutoFillProfile(self, tab_index=0, window_index=0):
@@ -1296,6 +1382,37 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict)['passwords']
 
+  def GetBlockedPopupsInfo(self, tab_index=0, windex=0):
+    """Get info about blocked popups in a tab.
+
+    Args:
+      tab_index: 0-based tab index. Default: 0
+      windex: 0-based window index. Default: 0
+
+    Returns:
+      [a list of property dictionaries for each blocked popup]
+      Property dictionary contains: title, url
+    """
+    cmd_dict = {
+      'command': 'GetBlockedPopupsInfo',
+      'tab_index': tab_index,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict,
+                                          windex=windex)['blocked_popups']
+
+  def UnblockAndLaunchBlockedPopup(self, popup_index, tab_index=0, windex=0):
+    """Unblock/launch a poup at the given index.
+
+    This is equivalent to clicking on a blocked popup in the UI available
+    from the omnibox.
+    """
+    cmd_dict = {
+      'command': 'UnblockAndLaunchBlockedPopup',
+      'popup_index': popup_index,
+      'tab_index': tab_index,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
   def SetTheme(self, crx_file_path):
     """Installs the given theme synchronously.
 
@@ -1367,6 +1484,42 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'command': 'GetThemeInfo',
     }
     return self._GetResultFromJSONRequest(cmd_dict)
+
+  def FindInPage(self, search_string, forward=True,
+                 match_case=False, find_next=False,
+                 tab_index=0, windex=0):
+    """Find the match count for the given search string and search parameters.
+    This is equivalent to using the find box
+
+    Args:
+      search_string: The string to find on the page.
+      forward: Boolean to set if the search direction is forward or backwards
+      match_case: Boolean to set for case sensitive search.
+      find_next: Boolean to set to continue the search or start from beginning.
+      tab_index: The tab index, default is 0.
+      window_index: The window index, default is 0.
+
+    Returns:
+      number of matches found for the given search string and parameters
+    SAMPLE:
+    { u'match_count': 10,
+      u'match_left': 100,
+      u'match_top': 100,
+      u'match_right': 200,
+      u'match_bottom': 200}
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'FindInPage',
+      'tab_index' : tab_index,
+      'search_string' : search_string,
+      'forward' : forward,
+      'match_case' : match_case,
+      'find_next' : find_next,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
 
 class PyUITestSuite(pyautolib.PyUITestSuiteBase, unittest.TestSuite):
@@ -1655,18 +1808,14 @@ class Main(object):
 
     suite_args = [sys.argv[0]]
     chrome_flags = self._options.chrome_flags
-    # Enable crash reporter by default on posix.
-    # On windows, the choice to enable/disable crash reporting is made when
-    # downloading the installer.
-    # TODO(nirnimesh): Figure out a way to control this from here on Win too.
-    if PyUITest.IsPosix():
-      chrome_flags += ' --enable-crash-reporter'
-
-    # We add this so that pyauto can execute javascript in the renderer and
-    # read values back out.
-    chrome_flags += ' --dom-automation'
+    # Set CHROME_HEADLESS. It enables crash reporter on posix.
+    os.putenv('CHROME_HEADLESS', '1')
+    # --dom-automation added in PyUITestBase::PyUITestBase()
 
     suite_args.append('--extra-chrome-flags=%s' % chrome_flags)
+    # Note: The suite_args passed here are ignored on windows since it
+    # overrides to obtain the command line for the current process directly.
+    # Refer CommandLine::Init().
     pyauto_suite = PyUITestSuite(suite_args)
     loaded_tests = self._LoadTests(self._args)
     pyauto_suite.addTests(loaded_tests)

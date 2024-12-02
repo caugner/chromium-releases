@@ -11,6 +11,7 @@ namespace gpu {
 
 bool GPUProcessor::Initialize(gfx::PluginWindowHandle window,
                               const gfx::Size& size,
+                              const std::vector<int32>& attribs,
                               GPUProcessor* parent,
                               uint32 parent_texture_id) {
   // Get the parent decoder and the GLContext to share IDs with, if any.
@@ -42,6 +43,8 @@ bool GPUProcessor::Initialize(gfx::PluginWindowHandle window,
     // not hold on to the reference. It simply extracts the underlying GL
     // context in order to share the namespace with another context.
     if (!surface_->Initialize(context.get(), false)) {
+      LOG(ERROR) << "GPUProcessor::Initialize failed to "
+                 << "initialize AcceleratedSurface.";
       Destroy();
       return false;
     }
@@ -49,6 +52,7 @@ bool GPUProcessor::Initialize(gfx::PluginWindowHandle window,
 
   return InitializeCommon(context.release(),
                           size,
+                          attribs,
                           parent_decoder,
                           parent_texture_id);
 }
@@ -63,8 +67,14 @@ void GPUProcessor::Destroy() {
 }
 
 uint64 GPUProcessor::SetWindowSizeForIOSurface(const gfx::Size& size) {
+  // This is called from an IPC handler, so it's undefined which context is
+  // current. Make sure the right one is.
+  decoder_->GetGLContext()->MakeCurrent();
+
   ResizeOffscreenFrameBuffer(size);
   decoder_->UpdateOffscreenFrameBufferSize();
+
+  // Note: The following line changes the current context again.
   return surface_->SetSurfaceSize(size);
 }
 
@@ -96,4 +106,3 @@ void GPUProcessor::WillSwapBuffers() {
 }
 
 }  // namespace gpu
-

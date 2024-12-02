@@ -9,10 +9,12 @@
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
+#include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "googleurl/src/gurl.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
@@ -23,8 +25,14 @@ using WebKit::WebURLError;
 
 namespace {
 
-static const char* kRedirectLoopLearnMoreUrl =
+static const char kRedirectLoopLearnMoreUrl[] =
     "http://www.google.com/support/chrome/bin/answer.py?answer=95626";
+static const char kWeakDHKeyLearnMoreUrl[] =
+    "http://sites.google.com/a/chromium.org/dev/err_ssl_weak_server_ephemeral_dh_key";
+static const char kESETLearnMoreUrl[] =
+    "http://sites.google.com/a/chromium.org/dev/err_eset_anti_virus_ssl_interception";
+static const char kNetNannyLearnMoreUrl[] =
+    "http://sites.google.com/a/chromium.org/dev/err_netnanny_ssl_interception";
 
 enum NAV_SUGGESTIONS {
   SUGGEST_NONE     = 0,
@@ -33,16 +41,16 @@ enum NAV_SUGGESTIONS {
   SUGGEST_LEARNMORE = 1 << 2,
 };
 
-struct WebErrorNetErrorMap {
-  const int error_code;
-  const unsigned int title_resource_id;
-  const unsigned int heading_resource_id;
-  const unsigned int summary_resource_id;
-  const unsigned int details_resource_id;
-  const int suggestions;  // Bitmap of SUGGEST_* values.
+struct LocalizedErrorMap {
+  int error_code;
+  unsigned int title_resource_id;
+  unsigned int heading_resource_id;
+  unsigned int summary_resource_id;
+  unsigned int details_resource_id;
+  int suggestions;  // Bitmap of SUGGEST_* values.
 };
 
-WebErrorNetErrorMap net_error_options[] = {
+const LocalizedErrorMap net_error_options[] = {
   {net::ERR_TIMED_OUT,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
    IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
@@ -69,13 +77,6 @@ WebErrorNetErrorMap net_error_options[] = {
    IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
    IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
    IDS_ERRORPAGES_DETAILS_NAME_NOT_RESOLVED,
-   SUGGEST_RELOAD,
-  },
-  {net::ERR_INTERNET_DISCONNECTED,
-   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
-   IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
-   IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
-   IDS_ERRORPAGES_DETAILS_DISCONNECTED,
    SUGGEST_RELOAD,
   },
   {net::ERR_FILE_NOT_FOUND,
@@ -113,7 +114,187 @@ WebErrorNetErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_BAD_SSL_CLIENT_AUTH_CERT,
    SUGGEST_NONE,
   },
+  {net::ERR_SSL_WEAK_SERVER_EPHEMERAL_DH_KEY,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_WEAK_SERVER_EPHEMERAL_DH_KEY,
+   IDS_ERRORPAGES_SUMMARY_WEAK_SERVER_EPHEMERAL_DH_KEY,
+   IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
+   SUGGEST_LEARNMORE,
+  },
+  {net::ERR_PROXY_CONNECTION_FAILED,
+   IDS_ERRORPAGES_TITLE_PROXY_CONNECTION_FAILED,
+   IDS_ERRORPAGES_HEADING_PROXY_CONNECTION_FAILED,
+   IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED,
+   IDS_ERRORPAGES_DETAILS_PROXY_CONNECTION_FAILED,
+   SUGGEST_NONE,
+  },
+  {net::ERR_ESET_ANTI_VIRUS_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_ESET_ANTI_VIRUS_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_SUMMARY_ESET_ANTI_VIRUS_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
+   SUGGEST_LEARNMORE,
+  },
+  {net::ERR_NETNANNY_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_NETNANNY_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_SUMMARY_NETNANNY_SSL_INTERCEPTION,
+   IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
+   SUGGEST_LEARNMORE,
+  },
+  // TODO(mmenke): Once Linux-specific instructions are added, remove this
+  // conditional, and the one further down as well.
+#if defined(OS_MACOSX) || defined(OS_WIN)
+  {net::ERR_INTERNET_DISCONNECTED,
+   IDS_ERRORPAGES_TITLE_INTERNET_DISCONNECTED,
+   IDS_ERRORPAGES_HEADING_INTERNET_DISCONNECTED,
+   IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED,
+   IDS_ERRORPAGES_DETAILS_INTERNET_DISCONNECTED,
+   SUGGEST_NONE,
+  },
+#else
+  {net::ERR_INTERNET_DISCONNECTED,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
+   IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
+   IDS_ERRORPAGES_DETAILS_INTERNET_DISCONNECTED,
+   SUGGEST_NONE,
+  },
+#endif
 };
+
+const LocalizedErrorMap http_error_options[] = {
+  {403,
+   IDS_ERRORPAGES_TITLE_ACCESS_DENIED,
+   IDS_ERRORPAGES_HEADING_ACCESS_DENIED,
+   IDS_ERRORPAGES_SUMMARY_FORBIDDEN,
+   IDS_ERRORPAGES_DETAILS_FORBIDDEN,
+   SUGGEST_NONE,
+  },
+  {410,
+   IDS_ERRORPAGES_TITLE_NOT_FOUND,
+   IDS_ERRORPAGES_HEADING_NOT_FOUND,
+   IDS_ERRORPAGES_SUMMARY_GONE,
+   IDS_ERRORPAGES_DETAILS_GONE,
+   SUGGEST_NONE,
+  },
+
+  {500,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_HTTP_SERVER_ERROR,
+   IDS_ERRORPAGES_SUMMARY_INTERNAL_SERVER_ERROR,
+   IDS_ERRORPAGES_DETAILS_INTERNAL_SERVER_ERROR,
+   SUGGEST_RELOAD,
+  },
+  {501,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_HTTP_SERVER_ERROR,
+   IDS_ERRORPAGES_SUMMARY_WEBSITE_CANNOT_HANDLE,
+   IDS_ERRORPAGES_DETAILS_NOT_IMPLEMENTED,
+   SUGGEST_NONE,
+  },
+  {502,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_HTTP_SERVER_ERROR,
+   IDS_ERRORPAGES_SUMMARY_BAD_GATEWAY,
+   IDS_ERRORPAGES_DETAILS_BAD_GATEWAY,
+   SUGGEST_RELOAD,
+  },
+  {503,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_HTTP_SERVER_ERROR,
+   IDS_ERRORPAGES_SUMMARY_SERVICE_UNAVAILABLE,
+   IDS_ERRORPAGES_DETAILS_SERVICE_UNAVAILABLE,
+   SUGGEST_RELOAD,
+  },
+  {504,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_HTTP_SERVER_ERROR,
+   IDS_ERRORPAGES_SUMMARY_GATEWAY_TIMEOUT,
+   IDS_ERRORPAGES_DETAILS_GATEWAY_TIMEOUT,
+   SUGGEST_RELOAD,
+  },
+  {505,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_HTTP_SERVER_ERROR,
+   IDS_ERRORPAGES_SUMMARY_WEBSITE_CANNOT_HANDLE,
+   IDS_ERRORPAGES_DETAILS_HTTP_VERSION_NOT_SUPPORTED,
+   SUGGEST_NONE,
+  },
+};
+
+const char* HttpErrorToString(int status_code) {
+  switch (status_code) {
+  case 403:
+    return "Forbidden";
+  case 410:
+    return "Gone";
+  case 500:
+    return "Internal Server Error";
+  case 501:
+    return "Not Implemented";
+  case 502:
+    return "Bad Gateway";
+  case 503:
+    return "Service Unavailable";
+  case 504:
+    return "Gateway Timeout";
+  case 505:
+    return "HTTP Version Not Supported";
+  default:
+    return "";
+  }
+}
+
+string16 GetErrorDetailsString(const std::string& error_domain,
+                               int error_code,
+                               const string16& details) {
+  int error_page_template;
+  const char* error_string;
+  if (error_domain == net::kErrorDomain) {
+    error_page_template = IDS_ERRORPAGES_DETAILS_TEMPLATE;
+    error_string = net::ErrorToString(error_code);
+    DCHECK(error_code < 0);  // Net error codes are negative.
+    error_code = -error_code;
+  } else if (error_domain == LocalizedError::kHttpErrorDomain) {
+    error_page_template = IDS_ERRORPAGES_HTTP_DETAILS_TEMPLATE;
+    error_string = HttpErrorToString(error_code);
+  } else {
+    NOTREACHED();
+    return string16();
+  }
+  return l10n_util::GetStringFUTF16(
+      error_page_template,
+      base::IntToString16(error_code),
+      ASCIIToUTF16(error_string),
+      details);
+}
+
+const LocalizedErrorMap* FindErrorMapInArray(const LocalizedErrorMap* maps,
+                                                   size_t num_maps,
+                                                   int error_code) {
+  for (size_t i = 0; i < num_maps; ++i) {
+    if (maps[i].error_code == error_code)
+      return &maps[i];
+  }
+  return NULL;
+}
+
+const LocalizedErrorMap* LookupErrorMap(const std::string& error_domain,
+                                        int error_code) {
+  if (error_domain == net::kErrorDomain) {
+    return FindErrorMapInArray(net_error_options,
+                               arraysize(net_error_options),
+                               error_code);
+  } else if (error_domain == LocalizedError::kHttpErrorDomain) {
+    return FindErrorMapInArray(http_error_options,
+                               arraysize(http_error_options),
+                               error_code);
+  } else {
+    NOTREACHED();
+    return NULL;
+  }
+}
 
 bool LocaleIsRTL() {
 #if defined(TOOLKIT_GTK)
@@ -127,8 +308,10 @@ bool LocaleIsRTL() {
 
 }  // namespace
 
-void GetLocalizedErrorValues(const WebURLError& error,
-                             DictionaryValue* error_strings) {
+const char LocalizedError::kHttpErrorDomain[] = "http";
+
+void LocalizedError::GetStrings(const WebKit::WebURLError& error,
+                                DictionaryValue* error_strings) {
   bool rtl = LocaleIsRTL();
   error_strings->SetString("textdirection", rtl ? "rtl" : "ltr");
 
@@ -140,7 +323,7 @@ void GetLocalizedErrorValues(const WebURLError& error,
 
   // Grab the strings and settings that depend on the error type.  Init
   // options with default values.
-  WebErrorNetErrorMap options = {
+  LocalizedErrorMap options = {
     0,
     IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
     IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
@@ -148,13 +331,13 @@ void GetLocalizedErrorValues(const WebURLError& error,
     IDS_ERRORPAGES_DETAILS_UNKNOWN,
     SUGGEST_NONE,
   };
+
+  const std::string error_domain = error.domain.utf8();
   int error_code = error.reason;
-  for (size_t i = 0; i < arraysize(net_error_options); ++i) {
-    if (net_error_options[i].error_code == error_code) {
-      memcpy(&options, &net_error_options[i], sizeof(WebErrorNetErrorMap));
-      break;
-    }
-  }
+  const LocalizedErrorMap* error_map =
+      LookupErrorMap(error_domain, error_code);
+  if (error_map)
+    options = *error_map;
 
   string16 suggestions_heading;
   if (options.suggestions != SUGGEST_NONE) {
@@ -177,16 +360,51 @@ void GetLocalizedErrorValues(const WebURLError& error,
       l10n_util::GetStringUTF16(options.summary_resource_id));
   // TODO(tc): we want the unicode url here since it's being displayed
   summary->SetString("failedUrl", failed_url);
+  summary->SetString("productName",
+                     l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
   error_strings->Set("summary", summary);
 
-  // Error codes are expected to be negative
-  DCHECK(error_code < 0);
   string16 details = l10n_util::GetStringUTF16(options.details_resource_id);
   error_strings->SetString("details",
-      l10n_util::GetStringFUTF16(IDS_ERRORPAGES_DETAILS_TEMPLATE,
-                                 base::IntToString16(-error_code),
-                                 ASCIIToUTF16(net::ErrorToString(error_code)),
-                                 details));
+      GetErrorDetailsString(error_domain, error_code, details));
+
+  // Any special case processing that needs to happen for particular
+  // errors (hack).
+  if (error_domain == net::kErrorDomain &&
+      error_code == net::ERR_PROXY_CONNECTION_FAILED) {
+    // Suffix the platform dependent portion of the summary section.
+    summary->SetString("msg",
+        l10n_util::GetStringFUTF16(options.summary_resource_id,
+            l10n_util::GetStringUTF16(
+                IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED_PLATFORM)));
+  }
+
+#if defined(OS_MACOSX) || defined(OS_WIN)
+  if (error_domain == net::kErrorDomain &&
+      error_code == net::ERR_INTERNET_DISCONNECTED) {
+    int platform_string_id =
+        IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM;
+#if defined(OS_WIN)
+    // Different versions of Windows have different instructions.
+    int32 major_version, minor_version, bugfix_version;
+    base::SysInfo::OperatingSystemVersionNumbers(
+        &major_version, &minor_version, &bugfix_version);
+    if (major_version < 6) {
+      // XP, XP64, and Server 2003.
+      platform_string_id =
+          IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM_XP;
+    } else if (major_version == 6 && minor_version == 0) {
+      // Vista
+      platform_string_id =
+          IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM_VISTA;
+    }
+#endif  // defined(OS_WIN)
+    // Suffix the platform dependent portion of the summary section.
+    summary->SetString("msg",
+        l10n_util::GetStringFUTF16(options.summary_resource_id,
+            l10n_util::GetStringUTF16(platform_string_id)));
+  }
+#endif  // defined(OS_MACOSX) || defined(OS_WIN)
 
   if (options.suggestions & SUGGEST_RELOAD) {
     DictionaryValue* suggest_reload = new DictionaryValue;
@@ -220,6 +438,15 @@ void GetLocalizedErrorValues(const WebURLError& error,
       case net::ERR_TOO_MANY_REDIRECTS:
         learn_more_url = GURL(kRedirectLoopLearnMoreUrl);
         break;
+      case net::ERR_SSL_WEAK_SERVER_EPHEMERAL_DH_KEY:
+        learn_more_url = GURL(kWeakDHKeyLearnMoreUrl);
+        break;
+      case net::ERR_ESET_ANTI_VIRUS_SSL_INTERCEPTION:
+        learn_more_url = GURL(kESETLearnMoreUrl);
+        break;
+      case net::ERR_NETNANNY_SSL_INTERCEPTION:
+        learn_more_url = GURL(kNetNannyLearnMoreUrl);
+        break;
       default:
         break;
     }
@@ -241,8 +468,13 @@ void GetLocalizedErrorValues(const WebURLError& error,
   }
 }
 
-void GetFormRepostErrorValues(const GURL& display_url,
-                              DictionaryValue* error_strings) {
+bool LocalizedError::HasStrings(const std::string& error_domain,
+                                int error_code) {
+  return LookupErrorMap(error_domain, error_code) != NULL;
+}
+
+void LocalizedError::GetFormRepostStrings(const GURL& display_url,
+                                          DictionaryValue* error_strings) {
   bool rtl = LocaleIsRTL();
   error_strings->SetString("textdirection", rtl ? "rtl" : "ltr");
 
@@ -262,10 +494,10 @@ void GetFormRepostErrorValues(const GURL& display_url,
   error_strings->Set("summary", summary);
 }
 
-void GetAppErrorValues(const WebURLError& error,
-                       const GURL& display_url,
-                       const ExtensionRendererInfo* app,
-                       DictionaryValue* error_strings) {
+void LocalizedError::GetAppErrorStrings(const WebURLError& error,
+                                        const GURL& display_url,
+                                        const ExtensionRendererInfo* app,
+                                        DictionaryValue* error_strings) {
   DCHECK(app);
 
   bool rtl = LocaleIsRTL();

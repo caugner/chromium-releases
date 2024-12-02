@@ -2,22 +2,35 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <cmath>
+
 #include "chrome/renderer/pepper_plugin_delegate_impl.h"
 
+#include "app/l10n_util.h"
 #include "app/surface/transport_dib.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
+#include "base/string_split.h"
 #include "base/task.h"
+#include "base/time.h"
+#include "chrome/common/child_thread.h"
+#include "chrome/common/file_system/file_system_dispatcher.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/renderer/audio_message_filter.h"
 #include "chrome/renderer/command_buffer_proxy.h"
+#include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/webplugin_delegate_proxy.h"
+#include "grit/locale_settings.h"
 #include "third_party/ppapi/c/dev/pp_video_dev.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileChooserCompletion.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileChooserParams.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "webkit/fileapi/file_system_callback_dispatcher.h"
+#include "webkit/glue/plugins/pepper_file_io.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/webplugin.h"
 
@@ -25,6 +38,8 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_thread.h"
 #endif
+
+using WebKit::WebView;
 
 namespace {
 
@@ -46,6 +61,10 @@ class PlatformImage2DImpl : public pepper::PluginDelegate::PlatformImage2D {
 
   virtual intptr_t GetSharedMemoryHandle() const {
     return reinterpret_cast<intptr_t>(dib_.get());
+  }
+
+  virtual TransportDIB* GetTransportDIB() const {
+    return dib_.get();
   }
 
  private:
@@ -230,8 +249,7 @@ class PlatformAudioImpl
   virtual void ShutDown();
 
  private:
-  virtual void OnRequestPacket(uint32 bytes_in_buffer,
-                               const base::Time& message_timestamp) {
+  virtual void OnRequestPacket(AudioBuffersState buffers_state) {
     LOG(FATAL) << "Should never get OnRequestPacket in PlatformAudioImpl";
   }
 
@@ -472,7 +490,8 @@ class PlatformVideoDecoderImpl
 }  // namespace
 
 PepperPluginDelegateImpl::PepperPluginDelegateImpl(RenderView* render_view)
-    : render_view_(render_view) {
+    : render_view_(render_view),
+      id_generator_(0) {
 }
 
 void PepperPluginDelegateImpl::ViewInitiatedPaint() {
@@ -514,9 +533,28 @@ void PepperPluginDelegateImpl::ViewFlushedPaint() {
   }
 }
 
+bool PepperPluginDelegateImpl::GetBitmapForOptimizedPluginPaint(
+    const gfx::Rect& paint_bounds,
+    TransportDIB** dib,
+    gfx::Rect* location,
+    gfx::Rect* clip) {
+  for (std::set<pepper::PluginInstance*>::iterator i =
+           active_instances_.begin();
+       i != active_instances_.end(); ++i) {
+    pepper::PluginInstance* instance = *i;
+    if (instance->GetBitmapForOptimizedPluginPaint(
+            paint_bounds, dib, location, clip))
+      return true;
+  }
+  return false;
+}
+
 void PepperPluginDelegateImpl::InstanceCreated(
     pepper::PluginInstance* instance) {
   active_instances_.insert(instance);
+
+  // Set the initial focus.
+  instance->SetContentAreaFocus(render_view_->has_focus());
 }
 
 void PepperPluginDelegateImpl::InstanceDeleted(
@@ -580,14 +618,14 @@ PepperPluginDelegateImpl::CreateVideoDecoder(
   return decoder.release();
 }
 
-void PepperPluginDelegateImpl::DidChangeNumberOfFindResults(int identifier,
-                                                           int total,
-                                                           bool final_result) {
+void PepperPluginDelegateImpl::NumberOfFindResultsChanged(int identifier,
+                                                          int total,
+                                                          bool final_result) {
   render_view_->reportFindInPageMatchCount(identifier, total, final_result);
 }
 
-void PepperPluginDelegateImpl::DidChangeSelectedFindResult(int identifier,
-                                                          int index) {
+void PepperPluginDelegateImpl::SelectedFindResultChanged(int identifier,
+                                                         int index) {
   render_view_->reportFindInPageSelection(
       identifier, index + 1, WebKit::WebRect());
 }
@@ -608,4 +646,127 @@ bool PepperPluginDelegateImpl::RunFileChooser(
     const WebKit::WebFileChooserParams& params,
     WebKit::WebFileChooserCompletion* chooser_completion) {
   return render_view_->runFileChooser(params, chooser_completion);
+}
+
+bool PepperPluginDelegateImpl::AsyncOpenFile(const FilePath& path,
+                                             int flags,
+                                             AsyncOpenFileCallback* callback) {
+  int message_id = id_generator_++;
+  DCHECK(!messages_waiting_replies_.Lookup(message_id));
+  messages_waiting_replies_.AddWithID(callback, message_id);
+  IPC::Message* msg = new ViewHostMsg_AsyncOpenFile(
+      render_view_->routing_id(), path, flags, message_id);
+  return render_view_->Send(msg);
+}
+
+void PepperPluginDelegateImpl::OnAsyncFileOpened(
+    base::PlatformFileError error_code,
+    base::PlatformFile file,
+    int message_id) {
+  AsyncOpenFileCallback* callback =
+      messages_waiting_replies_.Lookup(message_id);
+  DCHECK(callback);
+  messages_waiting_replies_.Remove(message_id);
+  callback->Run(error_code, file);
+  delete callback;
+}
+
+void PepperPluginDelegateImpl::OnSetFocus(bool has_focus) {
+  for (std::set<pepper::PluginInstance*>::iterator i =
+         active_instances_.begin();
+       i != active_instances_.end(); ++i)
+    (*i)->SetContentAreaFocus(has_focus);
+}
+
+bool PepperPluginDelegateImpl::MakeDirectory(
+    const FilePath& path,
+    bool recursive,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  FileSystemDispatcher* file_system_dispatcher =
+      ChildThread::current()->file_system_dispatcher();
+  return file_system_dispatcher->Create(
+      path, false, true, recursive, dispatcher);
+}
+
+bool PepperPluginDelegateImpl::Query(
+    const FilePath& path,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  FileSystemDispatcher* file_system_dispatcher =
+      ChildThread::current()->file_system_dispatcher();
+  return file_system_dispatcher->ReadMetadata(path, dispatcher);
+}
+
+bool PepperPluginDelegateImpl::Touch(
+    const FilePath& path,
+    const base::Time& last_access_time,
+    const base::Time& last_modified_time,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  FileSystemDispatcher* file_system_dispatcher =
+      ChildThread::current()->file_system_dispatcher();
+  return file_system_dispatcher->TouchFile(path, last_access_time,
+                                           last_modified_time, dispatcher);
+}
+
+bool PepperPluginDelegateImpl::Delete(
+    const FilePath& path,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  FileSystemDispatcher* file_system_dispatcher =
+      ChildThread::current()->file_system_dispatcher();
+  return file_system_dispatcher->Remove(path, false /* recursive */,
+                                        dispatcher);
+}
+
+bool PepperPluginDelegateImpl::Rename(
+    const FilePath& file_path,
+    const FilePath& new_file_path,
+    fileapi::FileSystemCallbackDispatcher* dispatcher) {
+  FileSystemDispatcher* file_system_dispatcher =
+      ChildThread::current()->file_system_dispatcher();
+  return file_system_dispatcher->Move(file_path, new_file_path, dispatcher);
+}
+
+scoped_refptr<base::MessageLoopProxy>
+PepperPluginDelegateImpl::GetFileThreadMessageLoopProxy() {
+  return RenderThread::current()->GetFileThreadMessageLoopProxy();
+}
+
+pepper::FullscreenContainer*
+PepperPluginDelegateImpl::CreateFullscreenContainer(
+    pepper::PluginInstance* instance) {
+  return render_view_->CreatePepperFullscreenContainer(instance);
+}
+
+std::string PepperPluginDelegateImpl::GetDefaultEncoding() {
+  // TODO(brettw) bug 56615: Somehow get the preference for the default
+  // encoding here rather than using the global default for the UI language.
+  return l10n_util::GetStringUTF8(IDS_DEFAULT_ENCODING);
+}
+
+void PepperPluginDelegateImpl::ZoomLimitsChanged(double minimum_factor,
+                                                 double maximum_factor) {
+  double minimum_level = WebView::zoomFactorToZoomLevel(minimum_factor);
+  double maximum_level = WebView::zoomFactorToZoomLevel(maximum_factor);
+  render_view_->webview()->zoomLimitsChanged(minimum_level, maximum_level);
+}
+
+std::string PepperPluginDelegateImpl::ResolveProxy(const GURL& url) {
+  int net_error;
+  std::string proxy_result;
+  IPC::Message* msg =
+      new ViewHostMsg_ResolveProxy(url, &net_error, &proxy_result);
+  RenderThread::current()->Send(msg);
+  return proxy_result;
+}
+
+void PepperPluginDelegateImpl::DidStartLoading() {
+  render_view_->DidStartLoadingForPlugin();
+}
+
+void PepperPluginDelegateImpl::DidStopLoading() {
+  render_view_->DidStopLoadingForPlugin();
+}
+
+void PepperPluginDelegateImpl::SetContentRestriction(int restrictions) {
+  render_view_->Send(new ViewHostMsg_UpdateContentRestrictions(
+      render_view_->routing_id(), restrictions));
 }

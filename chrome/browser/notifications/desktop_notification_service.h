@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "chrome/browser/notifications/notification.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -82,10 +83,19 @@ class DesktopNotificationService : public NotificationObserver {
                                 const string16& body,
                                 WebKit::WebTextDirection dir);
 
+  // Creates a data:xxxx URL which contains the full HTML for a notification
+  // using resource template which contains the standard formatting for
+  // notifications.
+  static string16 CreateDataUrl(int resource,
+                                const std::vector<std::string>& subst);
+
   // The default content setting determines how to handle origins that haven't
   // been allowed or denied yet.
   ContentSetting GetDefaultContentSetting();
   void SetDefaultContentSetting(ContentSetting setting);
+
+  // NOTE: This should only be called on the UI thread.
+  void ResetToDefaultContentSetting();
 
   // Returns all origins that explicitly have been allowed.
   std::vector<GURL> GetAllowedOrigins();
@@ -132,6 +142,8 @@ class DesktopNotificationService : public NotificationObserver {
   // Non-owned pointer to the notification manager which manages the
   // UI for desktop toasts.
   NotificationUIManager* ui_manager_;
+
+  PrefChangeRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopNotificationService);
 };

@@ -32,6 +32,10 @@ GL_FUNCTIONS = [
     'GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, '
     'GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, '
     'GLbitfield mask, GLenum filter'],
+['void', ['glBlitFramebufferANGLE', 'BlitFramebuffer'],
+    'GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, '
+    'GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, '
+    'GLbitfield mask, GLenum filter'],
 ['void', ['glBufferData'],
     'GLenum target, GLsizei size, const void* data, GLenum usage'],
 ['void', ['glBufferSubData'],
@@ -159,6 +163,10 @@ GL_FUNCTIONS = [
     'GLenum type, void* pixels'],
 ['void', ['glReleaseShaderCompiler'], 'void'],
 ['void', ['glRenderbufferStorageMultisampleEXT',
+    'glRenderbufferStorageMultisample'],
+    'GLenum target, GLsizei samples, GLenum internalformat, '
+    'GLsizei width, GLsizei height'],
+['void', ['glRenderbufferStorageMultisampleANGLE',
     'glRenderbufferStorageMultisample'],
     'GLenum target, GLsizei samples, GLenum internalformat, '
     'GLsizei width, GLsizei height'],
@@ -324,6 +332,7 @@ WGL_FUNCTIONS = [
 ['HDC', ['wglGetCurrentDC'], ''],
 ['BOOL', ['wglMakeCurrent'], 'HDC hdc, HGLRC hglrc'],
 ['BOOL', ['wglShareLists'], 'HGLRC hglrc1, HGLRC hglrc2'],
+['BOOL', ['wglSwapIntervalEXT'], 'int interval'],
 ['BOOL', ['wglSwapLayerBuffers'], 'HDC hdc, UINT fuPlanes'],
 ['const char*', ['wglGetExtensionsStringARB', 'wglGetExtensionsStringEXT'],
     'HDC hDC'],
@@ -399,6 +408,8 @@ GLX_FUNCTIONS = [
     'Display* dpy, GLXDrawable drawable, unsigned long mask'],
 ['void', ['glXGetSelectedEvent'],
     'Display* dpy, GLXDrawable drawable, unsigned long* mask'],
+['void', ['glXSwapIntervalEXT'],
+    'Display* dpy, GLXDrawable drawable, int interval'],
 ]
 
 FUNCTION_SETS = [

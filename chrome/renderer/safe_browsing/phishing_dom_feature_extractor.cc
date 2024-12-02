@@ -174,7 +174,7 @@ void PhishingDOMFeatureExtractor::ExtractFeaturesWithTimeout() {
       // and advance to the first element.
       if (!ResetFrameData()) {
         // Nothing in this frame, move on to the next one.
-        LOG(WARNING) << "No content in frame, skipping";
+        DLOG(WARNING) << "No content in frame, skipping";
         continue;
       }
       cur_node = cur_frame_data_->elements.firstItem();
@@ -421,7 +421,6 @@ bool PhishingDOMFeatureExtractor::IsExternalDomain(const GURL& url,
 
 void PhishingDOMFeatureExtractor::InsertFeatures() {
   DCHECK(page_feature_state_.get());
-  features_->Clear();
 
   if (page_feature_state_->total_links > 0) {
     // Add a feature for the fraction of times the page links to an external

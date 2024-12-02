@@ -26,10 +26,16 @@ class LoginHtmlDialog : public HtmlDialogUIDelegate {
     virtual void OnDialogClosed() = 0;
   };
 
+  enum Style {
+    STYLE_GENERIC, // Use generic CreateChromeWindow as a host.
+    STYLE_BUBBLE   // Use chromeos::BubbleWindow as a host.
+  } style_;
+
   LoginHtmlDialog(Delegate* delegate,
                   gfx::NativeWindow parent_window,
                   const std::wstring& title,
-                  const GURL& url);
+                  const GURL& url,
+                  Style style);
   ~LoginHtmlDialog();
 
   // Shows created dialog.
@@ -37,6 +43,8 @@ class LoginHtmlDialog : public HtmlDialogUIDelegate {
 
   // Overrides default width/height for dialog.
   void SetDialogSize(int width, int height);
+
+  void set_url(const GURL& url) { url_ = url; }
 
  protected:
   // HtmlDialogUIDelegate implementation.

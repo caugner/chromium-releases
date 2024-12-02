@@ -35,7 +35,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/history/download_types.h"
+#include "chrome/browser/history/download_create_info.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_types.h"
@@ -117,7 +117,7 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
 // static
 const history::StarID HistoryService::kBookmarkBarID = 1;
 
-// The history thread is intentionally not a ChromeThread because the
+// The history thread is intentionally not a BrowserThread because the
 // sync integration unit tests depend on being able to create more than one
 // history thread.
 HistoryService::HistoryService()
@@ -658,7 +658,7 @@ void HistoryService::ScheduleAutocomplete(HistoryURLProvider* provider,
 
 void HistoryService::ScheduleTask(SchedulePriority priority,
                                   Task* task) {
-  // FIXME(brettw) do prioritization.
+  // TODO(brettw): do prioritization.
   thread_->message_loop()->PostTask(FROM_HERE, task);
 }
 
@@ -757,7 +757,6 @@ void HistoryService::LoadBackendIfNecessary() {
 }
 
 void HistoryService::OnDBLoaded() {
-  LOG(INFO) << "History backend finished loading";
   backend_loaded_ = true;
   NotificationService::current()->Notify(NotificationType::HISTORY_LOADED,
                                          Source<Profile>(profile_),
@@ -765,8 +764,10 @@ void HistoryService::OnDBLoaded() {
 }
 
 void HistoryService::StartTopSitesMigration() {
-  history::TopSites* ts = profile_->GetTopSites();
-  ts->StartMigration();
+  if (history::TopSites::IsEnabled()) {
+    history::TopSites* ts = profile_->GetTopSites();
+    ts->StartMigration();
+  }
 }
 
 void HistoryService::OnTopSitesReady() {

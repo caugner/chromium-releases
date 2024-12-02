@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/histogram.h"
 #include "base/message_loop.h"
+#include "chrome/browser/accessibility/browser_accessibility_state.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/backing_store.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
@@ -64,15 +65,13 @@ static const int kHungRendererDelayMs = 20000;
 // in trailing scrolls after the user ends their input.
 static const int kMaxTimeBetweenWheelMessagesMs = 250;
 
-// static
-bool RenderWidgetHost::renderer_accessible_ = false;
-
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHost
 
 RenderWidgetHost::RenderWidgetHost(RenderProcessHost* process,
                                    int routing_id)
     : renderer_initialized_(false),
+      renderer_accessible_(false),
       view_(NULL),
       process_(process),
       painting_observer_(NULL),
@@ -100,6 +99,12 @@ RenderWidgetHost::RenderWidgetHost(RenderProcessHost* process,
   // Because the widget initializes as is_hidden_ == false,
   // tell the process host that we're alive.
   process_->WidgetRestored();
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kForceRendererAccessibility) ||
+      Singleton<BrowserAccessibilityState>()->IsAccessibleBrowser()) {
+    EnableRendererAccessibility();
+  }
 }
 
 RenderWidgetHost::~RenderWidgetHost() {
@@ -163,6 +168,8 @@ void RenderWidgetHost::OnMessageReceived(const IPC::Message &msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetScreenInfo, OnMsgGetScreenInfo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnMsgGetWindowRect)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnMsgGetRootWindowRect)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_SetPluginImeEnabled,
+                        OnMsgSetPluginImeEnabled)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AllocateFakePluginWindowHandle,
                         OnAllocateFakePluginWindowHandle)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DestroyFakePluginWindowHandle,
@@ -369,7 +376,34 @@ void RenderWidgetHost::DonePaintingToBackingStore() {
   Send(new ViewMsg_UpdateRect_ACK(routing_id()));
 }
 
+void RenderWidgetHost::ScheduleComposite() {
+  DCHECK(!is_hidden_ || !is_gpu_rendering_active_) <<
+      "ScheduleCompositeAndSync called while hidden!";
+
+  // Send out a request to the renderer to paint the view if required.
+  if (!repaint_ack_pending_ && !resize_ack_pending_ && !view_being_painted_) {
+    repaint_start_time_ = TimeTicks::Now();
+    repaint_ack_pending_ = true;
+    Send(new ViewMsg_Repaint(routing_id_, current_size_));
+  }
+
+  // When we have asked the RenderWidget to resize, and we are still waiting on
+  // a response, block for a little while to see if we can't get a response.
+  // We always block on response because we do not have a backing store.
+  IPC::Message msg;
+  TimeDelta max_delay = TimeDelta::FromMilliseconds(kPaintMsgTimeoutMS);
+  if (process_->WaitForUpdateMsg(routing_id_, max_delay, &msg)) {
+    ViewHostMsg_UpdateRect::Dispatch(
+        &msg, this, &RenderWidgetHost::OnMsgUpdateRect);
+  }
+}
+
 void RenderWidgetHost::StartHangMonitorTimeout(TimeDelta delay) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableHangMonitor)) {
+    return;
+  }
+
   // If we already have a timer that will expire at or before the given delay,
   // then we have nothing more to do now.  If we have set our end time to null
   // by calling StopHangMonitorTimeout, though, we will need to restart the
@@ -425,6 +459,9 @@ void RenderWidgetHost::ForwardMouseEvent(const WebMouseEvent& mouse_event) {
   }
 
   ForwardInputEvent(mouse_event, sizeof(WebMouseEvent), false);
+}
+
+void RenderWidgetHost::OnMouseActivate() {
 }
 
 void RenderWidgetHost::ForwardWheelEvent(
@@ -487,21 +524,24 @@ void RenderWidgetHost::ForwardKeyboardEvent(
       suppress_next_char_events_ = false;
     }
 
-    // We need to set |suppress_next_char_events_| to true if
-    // PreHandleKeyboardEvent() returns true, but |this| may already be
-    // destroyed at that time. So set |suppress_next_char_events_| true here,
-    // then revert it afterwards when necessary.
-    if (key_event.type == WebKeyboardEvent::RawKeyDown)
-      suppress_next_char_events_ = true;
-
     bool is_keyboard_shortcut = false;
-    // Tab switching/closing accelerators aren't sent to the renderer to avoid a
-    // hung/malicious renderer from interfering.
-    if (PreHandleKeyboardEvent(key_event, &is_keyboard_shortcut))
-      return;
+    // Only pre-handle the key event if it's not handled by the input method.
+    if (!key_event.skip_in_browser) {
+      // We need to set |suppress_next_char_events_| to true if
+      // PreHandleKeyboardEvent() returns true, but |this| may already be
+      // destroyed at that time. So set |suppress_next_char_events_| true here,
+      // then revert it afterwards when necessary.
+      if (key_event.type == WebKeyboardEvent::RawKeyDown)
+        suppress_next_char_events_ = true;
 
-    if (key_event.type == WebKeyboardEvent::RawKeyDown)
-      suppress_next_char_events_ = false;
+      // Tab switching/closing accelerators aren't sent to the renderer to avoid
+      // a hung/malicious renderer from interfering.
+      if (PreHandleKeyboardEvent(key_event, &is_keyboard_shortcut))
+        return;
+
+      if (key_event.type == WebKeyboardEvent::RawKeyDown)
+        suppress_next_char_events_ = false;
+    }
 
     // Don't add this key to the queue if we have no way to send the message...
     if (!process_->HasConnection())
@@ -804,7 +844,7 @@ void RenderWidgetHost::OnMsgUpdateRect(
     // which attempts to move the plugin windows and in the process could
     // dispatch other window messages which could cause the view to be
     // destroyed.
-    if (view_) {
+    if (view_ && !is_gpu_rendering_active_) {
       view_being_painted_ = true;
       view_->DidUpdateBackingStore(params.scroll_rect, params.dx, params.dy,
                                    params.copy_rects);
@@ -968,6 +1008,10 @@ void RenderWidgetHost::OnMsgGetRootWindowRect(gfx::NativeViewId window_id,
   }
 }
 
+void RenderWidgetHost::OnMsgSetPluginImeEnabled(bool enabled, int plugin_id) {
+  view_->SetPluginImeEnabled(enabled, plugin_id);
+}
+
 void RenderWidgetHost::OnAllocateFakePluginWindowHandle(
     bool opaque,
     bool root,
@@ -1125,22 +1169,6 @@ void RenderWidgetHost::AdvanceToNextMisspelling() {
   Send(new ViewMsg_AdvanceToNextMisspelling(routing_id_));
 }
 
-void RenderWidgetHost::RequestAccessibilityTree() {
-  Send(new ViewMsg_GetAccessibilityTree(routing_id()));
-}
-
-void RenderWidgetHost::SetDocumentLoaded(bool document_loaded) {
-  document_loaded_ = document_loaded;
-
-  if (!document_loaded_)
-    requested_accessibility_tree_ = false;
-
-  if (renderer_accessible_ && document_loaded_) {
-    RequestAccessibilityTree();
-    requested_accessibility_tree_ = true;
-  }
-}
-
 void RenderWidgetHost::EnableRendererAccessibility() {
   if (renderer_accessible_)
     return;
@@ -1152,9 +1180,9 @@ void RenderWidgetHost::EnableRendererAccessibility() {
 
   renderer_accessible_ = true;
 
-  if (document_loaded_ && !requested_accessibility_tree_) {
-    RequestAccessibilityTree();
-    requested_accessibility_tree_ = true;
+  if (process_->HasConnection()) {
+    // Renderer accessibility wasn't enabled on process launch. Enable it now.
+    Send(new ViewMsg_EnableAccessibility(routing_id()));
   }
 }
 
@@ -1166,8 +1194,8 @@ void RenderWidgetHost::AccessibilityDoDefaultAction(int acc_obj_id) {
   Send(new ViewMsg_AccessibilityDoDefaultAction(routing_id(), acc_obj_id));
 }
 
-void RenderWidgetHost::AccessibilityObjectChildrenChangeAck() {
-  Send(new ViewMsg_AccessibilityObjectChildrenChange_ACK(routing_id()));
+void RenderWidgetHost::AccessibilityNotificationsAck() {
+  Send(new ViewMsg_AccessibilityNotifications_ACK(routing_id()));
 }
 
 void RenderWidgetHost::ProcessKeyboardEventAck(int type, bool processed) {
@@ -1186,6 +1214,11 @@ void RenderWidgetHost::ProcessKeyboardEventAck(int type, bool processed) {
   } else {
     NativeWebKeyboardEvent front_item = key_queue_.front();
     key_queue_.pop_front();
+
+#if defined(OS_MACOSX)
+    if (!is_hidden_ && view_->PostProcessEventForPluginIme(front_item))
+      return;
+#endif
 
     // We only send unprocessed key event upwards if we are not hidden,
     // because the user has moved away from us and no longer expect any effect

@@ -84,6 +84,10 @@ const char kProfiler[] = "profiler";
 // Make functions of the HeapProfiler class available in javascript
 const char kHeapProfiler[] = "heap-profiler";
 
-const char kAllowExternalPages[] = "allow-external-pages";    
+const char kAllowExternalPages[] = "allow-external-pages";
+
+const char kEnableAccel2DCanvas[] = "enable-accelerated-2d-canvas";
+
+const char kEnableAccelCompositing[] = "enable-accelerated-compositing";
 
 }  // namespace test_shell

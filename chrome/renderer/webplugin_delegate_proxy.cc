@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/ref_counted.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
@@ -204,10 +205,8 @@ void WebPluginDelegateProxy::PluginDestroyed() {
   if (window_)
     WillDestroyWindow();
 
-#if defined(OS_MACOSX)
   if (render_view_)
     render_view_->UnregisterPluginDelegate(this);
-#endif
 
   if (channel_host_) {
     Send(new PluginMsg_DestroyInstance(instance_id_));
@@ -275,8 +274,7 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
     bool load_manually) {
   IPC::ChannelHandle channel_handle;
   if (!RenderThread::current()->Send(new ViewHostMsg_OpenChannelToPlugin(
-          url, mime_type_, webkit_glue::GetWebKitLocale(),
-          &channel_handle, &info_))) {
+          url, mime_type_, &channel_handle, &info_))) {
     return false;
   }
 
@@ -384,9 +382,7 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
   IPC::Message* msg = new PluginMsg_Init(instance_id_, params, &result);
   Send(msg);
 
-#if defined(OS_MACOSX)
   render_view_->RegisterPluginDelegate(this);
-#endif
 
   return result;
 }
@@ -476,6 +472,8 @@ void WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
                         OnDeferResourceLoading)
 
 #if defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(PluginHostMsg_SetImeEnabled,
+                        OnSetImeEnabled);
     IPC_MESSAGE_HANDLER(PluginHostMsg_BindFakePluginWindowHandle,
                         OnBindFakePluginWindowHandle);
     IPC_MESSAGE_HANDLER(PluginHostMsg_UpdateGeometry_ACK,
@@ -925,7 +923,7 @@ void WebPluginDelegateProxy::Print(gfx::NativeDrawingContext context) {
 
 #if defined(OS_WIN)
   printing::NativeMetafile metafile;
-  if (!metafile.CreateFromData(memory.memory(), size)) {
+  if (!metafile.Init(memory.memory(), size)) {
     NOTREACHED();
     return;
   }
@@ -983,19 +981,19 @@ int WebPluginDelegateProxy::GetProcessId() {
   return channel_host_->peer_pid();
 }
 
-#if defined(OS_MACOSX)
-void WebPluginDelegateProxy::SetWindowFocus(bool window_has_focus) {
-  IPC::Message* msg = new PluginMsg_SetWindowFocus(instance_id_,
-                                                   window_has_focus);
+void WebPluginDelegateProxy::SetContentAreaFocus(bool has_focus) {
+  IPC::Message* msg = new PluginMsg_SetContentAreaFocus(instance_id_,
+                                                        has_focus);
   // Make sure focus events are delivered in the right order relative to
   // sync messages they might interact with (Paint, HandleEvent, etc.).
   msg->set_unblock(true);
   Send(msg);
 }
 
-void WebPluginDelegateProxy::SetContentAreaFocus(bool has_focus) {
-  IPC::Message* msg = new PluginMsg_SetContentAreaFocus(instance_id_,
-                                                        has_focus);
+#if defined(OS_MACOSX)
+void WebPluginDelegateProxy::SetWindowFocus(bool window_has_focus) {
+  IPC::Message* msg = new PluginMsg_SetWindowFocus(instance_id_,
+                                                   window_has_focus);
   // Make sure focus events are delivered in the right order relative to
   // sync messages they might interact with (Paint, HandleEvent, etc.).
   msg->set_unblock(true);
@@ -1026,6 +1024,18 @@ void WebPluginDelegateProxy::WindowFrameChanged(gfx::Rect window_frame,
                                                        view_frame);
   // Make sure frame events are delivered in the right order relative to
   // sync messages they might interact with (e.g., HandleEvent).
+  msg->set_unblock(true);
+  Send(msg);
+}
+void WebPluginDelegateProxy::ImeCompositionConfirmed(const string16& text,
+                                                     int plugin_id) {
+  // If the text isn't intended for this plugin, there's nothing to do.
+  if (instance_id_ != plugin_id)
+    return;
+
+  IPC::Message* msg = new PluginMsg_ImeCompositionConfirmed(instance_id_,
+                                                            text);
+  // Order relative to other key events is important.
   msg->set_unblock(true);
   Send(msg);
 }
@@ -1145,7 +1155,7 @@ void WebPluginDelegateProxy::OnShowModalHTMLDialog(
 static void EncodeDragData(const WebDragData& data, bool add_data,
                            NPVariant* drag_type, NPVariant* drag_data) {
   const NPString* np_drag_type;
-  if (data.hasFileNames()) {
+  if (data.containsFilenames()) {
     static const NPString kFiles = { "Files", 5 };
     np_drag_type = &kFiles;
   } else {
@@ -1163,7 +1173,7 @@ static void EncodeDragData(const WebDragData& data, bool add_data,
   }
 
   WebVector<WebString> files;
-  data.fileNames(files);
+  data.filenames(files);
 
   static std::string utf8;
   utf8.clear();
@@ -1377,6 +1387,11 @@ WebPluginDelegateProxy::CreateSeekableResourceClient(
 }
 
 #if defined(OS_MACOSX)
+void WebPluginDelegateProxy::OnSetImeEnabled(bool enabled) {
+  if (render_view_)
+    render_view_->SetPluginImeEnabled(enabled, instance_id_);
+}
+
 void WebPluginDelegateProxy::OnBindFakePluginWindowHandle(bool opaque) {
   BindFakePluginWindowHandle(opaque);
 }

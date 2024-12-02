@@ -14,6 +14,7 @@
 #import "chrome/browser/cocoa/floating_bar_backing_view.h"
 #import "chrome/browser/cocoa/framed_browser_window.h"
 #import "chrome/browser/cocoa/fullscreen_controller.h"
+#import "chrome/browser/cocoa/previewable_contents_controller.h"
 #import "chrome/browser/cocoa/side_tab_strip_controller.h"
 #import "chrome/browser/cocoa/tab_strip_controller.h"
 #import "chrome/browser/cocoa/tab_strip_view.h"
@@ -50,10 +51,13 @@ const CGFloat kLocBarBottomInset = 1;
   if ([self useVerticalTabs])
     factory = [SideTabStripController class];
 
+  DCHECK([previewableContentsController_ activeContainer]);
+  DCHECK([[previewableContentsController_ activeContainer] window]);
   tabStripController_.reset([[factory alloc]
-                              initWithView:[self tabStripView]
-                                switchView:[self tabContentArea]
-                                   browser:browser_.get()]);
+      initWithView:[self tabStripView]
+        switchView:[previewableContentsController_ activeContainer]
+           browser:browser_.get()
+          delegate:self]);
 }
 
 - (void)saveWindowPositionIfNeeded {
@@ -228,9 +232,6 @@ willPositionSheet:(NSWindow*)sheet
   // Finally, the content area takes up all of the remaining space.
   NSRect contentAreaRect = NSMakeRect(minX, minY, width, maxY - minY);
   [self layoutTabContentArea:contentAreaRect];
-
-  // Place the status bubble at the bottom of the content area.
-  verticalOffsetForStatusBubble_ = minY;
 
   // Normally, we don't need to tell the toolbar whether or not to show the
   // divider, but things break down during animation.
@@ -449,7 +450,9 @@ willPositionSheet:(NSWindow*)sheet
 - (BOOL)shouldShowDetachedBookmarkBar {
   DCHECK(browser_.get());
   TabContents* contents = browser_->GetSelectedTabContents();
-  return (contents && contents->ShouldShowBookmarkBar()) ? YES : NO;
+  return (contents &&
+          contents->ShouldShowBookmarkBar() &&
+          ![previewableContentsController_ isShowingPreview]);
 }
 
 - (void)adjustToolbarAndBookmarkBarForCompression:(CGFloat)compression {

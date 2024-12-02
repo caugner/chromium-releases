@@ -95,12 +95,6 @@ class InProcessBrowserTest : public testing::Test {
   // main thread before the browser is torn down.
   virtual void CleanUpOnMainThread() {}
 
-  // Invoked when a test is not finishing in a timely manner.
-  void TimedOut();
-
-  // Sets Initial Timeout value.
-  void SetInitialTimeoutInMS(int initial_timeout);
-
   // Returns the testing server. Guaranteed to be non-NULL.
   net::TestServer* test_server() { return &test_server_; }
 
@@ -109,6 +103,10 @@ class InProcessBrowserTest : public testing::Test {
   //
   // This is invoked from Setup.
   virtual Browser* CreateBrowser(Profile* profile);
+
+  // Creates a browser for a popup window with a single tab (about:blank), waits
+  // for the tab to finish loading, and shows the browser.
+  Browser* CreateBrowserForPopup(Profile* profile);
 
   // Returns the host resolver being used for the tests. Subclasses might want
   // to configure it inside tests.
@@ -157,9 +155,6 @@ class InProcessBrowserTest : public testing::Test {
 
   // Saved to restore the value of RenderProcessHost::run_renderer_in_process.
   bool original_single_process_;
-
-  // Initial timeout value in ms.
-  int initial_timeout_;
 
   // Host resolver to use during the test.
   scoped_refptr<net::RuleBasedHostResolverProc> host_resolver_;

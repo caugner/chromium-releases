@@ -10,12 +10,13 @@
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_util.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/history/download_types.h"
+#include "chrome/browser/history/download_create_info.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/extensions/extension.h"
@@ -27,7 +28,7 @@ namespace {
 const int kUpdateTimeMs = 1000;
 
 void DeleteDownloadedFile(const FilePath& path) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   // Make sure we only delete files.
   if (!file_util::DirectoryExists(path))
@@ -188,17 +189,35 @@ void DownloadItem::OpenDownload() {
   if (state() == DownloadItem::IN_PROGRESS) {
     open_when_complete_ = !open_when_complete_;
   } else if (state() == DownloadItem::COMPLETE) {
-    download_manager_->OpenDownload(this, NULL);
+    opened_ = true;
+    FOR_EACH_OBSERVER(Observer, observers_, OnDownloadOpened(this));
+    if (is_extension_install()) {
+      download_util::OpenChromeExtension(download_manager_->profile(),
+                                         download_manager_,
+                                         *this);
+      return;
+    }
+#if defined(OS_MACOSX)
+    // Mac OS X requires opening downloads on the UI thread.
+    platform_util::OpenItem(full_path());
+#else
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        NewRunnableFunction(&platform_util::OpenItem, full_path()));
+#endif
   }
 }
 
-void DownloadItem::Opened() {
-  opened_ = true;
-  FOR_EACH_OBSERVER(Observer, observers_, OnDownloadOpened(this));
-}
-
 void DownloadItem::ShowDownloadInShell() {
-  download_manager_->ShowDownloadInShell(this);
+#if defined(OS_MACOSX)
+  // Mac needs to run this operation on the UI thread.
+  platform_util::ShowItemInFolder(full_path());
+#else
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      NewRunnableFunction(&platform_util::ShowItemInFolder,
+                          full_path()));
+#endif
 }
 
 void DownloadItem::DangerousDownloadValidated() {
@@ -248,18 +267,48 @@ void DownloadItem::Cancel(bool update_history) {
     download_manager_->DownloadCancelled(id_);
 }
 
-void DownloadItem::Finished(int64 size) {
+void DownloadItem::OnAllDataSaved(int64 size) {
   state_ = COMPLETE;
   UpdateSize(size);
   StopProgressTimer();
+}
+
+void DownloadItem::Finished() {
+  // Handle chrome extensions explicitly and skip the shell execute.
+  if (is_extension_install()) {
+    download_util::OpenChromeExtension(download_manager_->profile(),
+                                       download_manager_,
+                                       *this);
+    auto_opened_ = true;
+  } else if (open_when_complete() ||
+             download_manager_->ShouldOpenFileBasedOnExtension(full_path()) ||
+             is_temporary()) {
+    // If the download is temporary, like in drag-and-drop, do not open it but
+    // we still need to set it auto-opened so that it can be removed from the
+    // download shelf.
+    if (!is_temporary())
+      OpenDownload();
+    auto_opened_ = true;
+  }
+
+  // Notify our observers that we are complete (the call to OnAllDataSaved()
+  // set the state to complete but did not notify).
+  UpdateObservers();
+
+  // The download file is meant to be completed if both the filename is
+  // finalized and the file data is downloaded. The ordering of these two
+  // actions is indeterministic. Thus, if the filename is not finalized yet,
+  // delay the notification.
+  if (name_finalized())
+    NotifyObserversDownloadFileCompleted();
 }
 
 void DownloadItem::Remove(bool delete_on_disk) {
   Cancel(true);
   state_ = REMOVING;
   if (delete_on_disk) {
-    ChromeThread::PostTask(
-        ChromeThread::FILE, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
         NewRunnableFunction(&DeleteDownloadedFile, full_path_));
   }
   download_manager_->RemoveDownload(db_handle_);

@@ -91,8 +91,7 @@ TEST_F(PPAPITest, FAILS_Instance) {
   RunTest("Instance");
 }
 
-// http://crbug.com/54150
-TEST_F(PPAPITest, FLAKY_Graphics2D) {
+TEST_F(PPAPITest, Graphics2D) {
   RunTest("Graphics2D");
 }
 
@@ -106,8 +105,8 @@ TEST_F(PPAPITest, Buffer) {
   RunTest("Buffer");
 }
 
-// TODO(brettw) bug 51345: this failed consistently on one of the bots.
-TEST_F(PPAPITest, FAILS_URLLoader) {
+// http://bugs.chromium.org/51345
+TEST_F(PPAPITest, DISABLED_URLLoader) {
   RunTestViaHTTP("URLLoader");
 }
 
@@ -116,12 +115,8 @@ TEST_F(PPAPITest, FLAKY_PaintAggregator) {
   RunTestViaHTTP("PaintAggregator");
 }
 
-#if defined(OS_WIN)
-TEST_F(PPAPITest, Scrollbar) {
-#else
 // Flaky, http://crbug.com/48544.
 TEST_F(PPAPITest, FLAKY_Scrollbar) {
-#endif
   RunTest("Scrollbar");
 }
 
@@ -131,4 +126,8 @@ TEST_F(PPAPITest, UrlUtil) {
 
 TEST_F(PPAPITest, CharSet) {
   RunTest("CharSet");
+}
+
+TEST_F(PPAPITest, Var) {
+  RunTest("Var");
 }

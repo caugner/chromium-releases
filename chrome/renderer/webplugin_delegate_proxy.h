@@ -78,16 +78,18 @@ class WebPluginDelegateProxy
                                 WebKit::WebCursorInfo* cursor);
   virtual int GetProcessId();
 
-#if defined(OS_MACOSX)
-  // Informs the plugin that its enclosing window has gained or lost focus.
-  virtual void SetWindowFocus(bool window_has_focus);
   // Informs the plugin that its containing content view has gained or lost
   // first responder status.
   virtual void SetContentAreaFocus(bool has_focus);
+#if defined(OS_MACOSX)
+  // Informs the plugin that its enclosing window has gained or lost focus.
+  virtual void SetWindowFocus(bool window_has_focus);
   // Informs the plugin that its container (window/tab) has changed visibility.
   virtual void SetContainerVisibility(bool is_visible);
   // Informs the plugin that its enclosing window's frame has changed.
   virtual void WindowFrameChanged(gfx::Rect window_frame, gfx::Rect view_frame);
+  // Informs the plugin that text is avaiable from plugin IME.
+  virtual void ImeCompositionConfirmed(const string16& text, int plugin_id);
 #endif
 
   // IPC::Channel::Listener implementation:
@@ -160,6 +162,7 @@ class WebPluginDelegateProxy
   void OnDeferResourceLoading(unsigned long resource_id, bool defer);
 
 #if defined(OS_MACOSX)
+  void OnSetImeEnabled(bool enabled);
   void OnBindFakePluginWindowHandle(bool opaque);
   void OnUpdateGeometry_ACK(int ack_key);
   void OnAcceleratedSurfaceSetIOSurface(gfx::PluginWindowHandle window,

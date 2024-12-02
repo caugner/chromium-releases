@@ -549,7 +549,7 @@ void EventSendingController::keyDown(
     } else if (L"insert" == code_str) {
       code = app::VKEY_INSERT;
     } else if (L"delete" == code_str) {
-      code = app::VKEY_BACK;
+      code = app::VKEY_DELETE;
     } else if (L"pageUp" == code_str) {
       code = app::VKEY_PRIOR;
     } else if (L"pageDown" == code_str) {
@@ -812,7 +812,7 @@ void EventSendingController::beginDragWithFiles(
   for (size_t i = 0; i < files.size(); ++i) {
     FilePath file_path = FilePath::FromWStringHack(files[i]);
     file_util::AbsolutePath(&file_path);
-    current_drag_data.appendToFileNames(
+    current_drag_data.appendToFilenames(
         webkit_glue::FilePathStringToWebString(file_path.value()));
   }
   current_drag_effects_allowed = WebKit::WebDragOperationCopy;

@@ -7,10 +7,10 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "jingle/notifier/communicator/gaia_token_pre_xmpp_auth.h"
-#include "jingle/notifier/communicator/xmpp_socket_adapter.h"
 #include "remoting/jingle_glue/iq_request.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/relay_port_allocator.h"
+#include "remoting/jingle_glue/xmpp_socket_adapter.h"
 #include "third_party/libjingle/source/talk/base/asyncsocket.h"
 #include "third_party/libjingle/source/talk/base/ssladapter.h"
 #include "third_party/libjingle/source/talk/p2p/base/sessionmanager.h"
@@ -35,7 +35,7 @@ class LocalTunnelSessionClient : public cricket::TunnelSessionClient {
   virtual cricket::TunnelSession* MakeTunnelSession(
       cricket::Session* session, talk_base::Thread* stream_thread,
       cricket::TunnelSessionRole role) {
-    session->transport()->set_allow_local_ips(true);
+    session->set_allow_local_ips(true);
     return new cricket::TunnelSession(this, session, stream_thread);
   }
 };
@@ -94,7 +94,7 @@ void JingleClient::DoInitialize(const std::string& username,
   client_->SignalStateChange.connect(
       this, &JingleClient::OnConnectionStateChanged);
 
-  buzz::AsyncSocket* socket = new notifier::XmppSocketAdapter(settings, false);
+  buzz::AsyncSocket* socket = new XmppSocketAdapter(settings, false);
 
   client_->Connect(settings, "", socket, CreatePreXmppAuth(settings));
   client_->Start();
@@ -200,6 +200,11 @@ MessageLoop* JingleClient::message_loop() {
   return thread_->message_loop();
 }
 
+cricket::SessionManager* JingleClient::session_manager() {
+  DCHECK_EQ(message_loop(), MessageLoop::current());
+  return session_manager_.get();
+}
+
 void JingleClient::OnConnectionStateChanged(buzz::XmppEngine::State state) {
   switch (state) {
     case buzz::XmppEngine::STATE_START:
@@ -209,10 +214,7 @@ void JingleClient::OnConnectionStateChanged(buzz::XmppEngine::State state) {
       UpdateState(CONNECTING);
       break;
     case buzz::XmppEngine::STATE_OPEN:
-      {
-        AutoLock auto_lock(full_jid_lock_);
-        full_jid_ = client_->jid().Str();
-      }
+      SetFullJid(client_->jid().Str());
       UpdateState(CONNECTED);
       break;
     case buzz::XmppEngine::STATE_CLOSED:
@@ -248,10 +250,17 @@ void JingleClient::OnIncomingTunnel(
   }
 }
 
+void JingleClient::SetFullJid(const std::string& full_jid) {
+  AutoLock auto_lock(full_jid_lock_);
+  full_jid_ = full_jid;
+}
+
 void JingleClient::UpdateState(State new_state) {
   if (new_state != state_) {
     state_ = new_state;
     {
+      // We have to have the lock held, otherwise we cannot be sure that
+      // the client hasn't been closed when we call the callback.
       AutoLock auto_lock(state_lock_);
       if (!closed_)
         callback_->OnStateChange(this, new_state);

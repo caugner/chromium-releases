@@ -273,14 +273,16 @@ void FactoryRegistry::ResetFunctions() {
 
   // Management.
   RegisterFunction<GetAllExtensionsFunction>();
+  RegisterFunction<LaunchAppFunction>();
   RegisterFunction<SetEnabledFunction>();
-  RegisterFunction<InstallFunction>();
   RegisterFunction<UninstallFunction>();
 
   // WebstorePrivate.
-  RegisterFunction<GetSyncLoginFunction>();
+  RegisterFunction<GetBrowserLoginFunction>();
   RegisterFunction<GetStoreLoginFunction>();
+  RegisterFunction<InstallFunction>();
   RegisterFunction<SetStoreLoginFunction>();
+  RegisterFunction<PromptBrowserLoginFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -378,8 +380,8 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
   // ChromeURLDataManager.
   if (extension->HasHostPermission(GURL(chrome::kChromeUIFavIconURL))) {
     DOMUIFavIconSource* favicon_source = new DOMUIFavIconSource(profile_);
-    ChromeThread::PostTask(
-        ChromeThread::IO, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
                           &ChromeURLDataManager::AddDataSource,
                           make_scoped_refptr(favicon_source)));
@@ -455,13 +457,8 @@ void ExtensionFunctionDispatcher::HandleRequest(
   function->set_include_incognito(service->IsIncognitoEnabled(extension) &&
                                   !extension->incognito_split_mode());
 
-  std::string permission_name = function->name();
-  size_t separator = permission_name.find_first_of("./");
-  if (separator != std::string::npos)
-    permission_name = permission_name.substr(0, separator);
-
   if (!service->ExtensionBindingsAllowed(function->source_url()) ||
-      !extension->HasApiPermission(permission_name)) {
+      !extension->HasApiPermission(function->name())) {
     render_view_host_->BlockExtensionRequest(function->request_id());
     return;
   }

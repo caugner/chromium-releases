@@ -10,14 +10,16 @@
 
 #include "base/basictypes.h"
 #include "base/observer_list.h"
-#include "chrome/browser/profile.h"
-
+#include "base/ref_counted.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_setup_flow.h"
 
 class Profile;
 
 // Layer between the browser user interface and the cloud print proxy code
 // running in the service process.
-class CloudPrintProxyService {
+class CloudPrintProxyService
+    : public CloudPrintSetupFlow::Delegate,
+      public base::RefCountedThreadSafe<CloudPrintProxyService> {
  public:
   explicit CloudPrintProxyService(Profile* profile);
   virtual ~CloudPrintProxyService();
@@ -27,11 +29,43 @@ class CloudPrintProxyService {
   void Initialize();
 
   // Enables/disables cloud printing for the user
-  virtual void EnableForUser(const std::string& auth_token);
+  virtual void EnableForUser(const std::string& lsid, const std::string& email);
   virtual void DisableForUser();
 
- protected:
-  void Shutdown();
+  // Query the service process for the status of the cloud print proxy and
+  // update the browser prefs.
+  void RefreshStatusFromService();
+
+  bool ShowTokenExpiredNotification();
+
+  // CloudPrintSetupFlow::Delegate implementation.
+  virtual void OnDialogClosed();
+
+ private:
+  // NotificationDelegate implementation for the token expired notification.
+  class TokenExpiredNotificationDelegate;
+  friend class TokenExpiredNotificationDelegate;
+
+  Profile* profile_;
+  scoped_refptr<TokenExpiredNotificationDelegate> token_expired_delegate_;
+
+  // Methods that send an IPC to the service.
+  void RefreshCloudPrintProxyStatus();
+  void EnableCloudPrintProxy(const std::string& lsid, const std::string& email);
+  void DisableCloudPrintProxy();
+
+  // Callback that gets the cloud print proxy status.
+  void StatusCallback(bool enabled, std::string email);
+  // Invoke a task that gets run after the service process successfully
+  // launches. The task typically involves sending an IPC to the service
+  // process.
+  bool InvokeServiceTask(Task* task);
+
+  void OnTokenExpiredNotificationError();
+  void OnTokenExpiredNotificationClosed(bool by_user);
+  void OnTokenExpiredNotificationClick();
+  void TokenExpiredNotificationDone(bool keep_alive);
+
 
   DISALLOW_COPY_AND_ASSIGN(CloudPrintProxyService);
 };

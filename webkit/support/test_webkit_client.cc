@@ -14,17 +14,20 @@
 #include "media/base/media.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebIDBFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBKey.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBKeyPath.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSerializedScriptValue.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageArea.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebThemeEngine.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/database/vfs_backend.h"
@@ -39,6 +42,7 @@
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
 #include "webkit/tools/test_shell/simple_database_system.h"
+#include "webkit/tools/test_shell/simple_file_system.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/simple_webcookiejar_impl.h"
 #include "webkit/tools/test_shell/test_shell_request_context.h"
@@ -46,9 +50,11 @@
 #include "v8/include/v8.h"
 
 #if defined(OS_WIN)
+#include "third_party/WebKit/WebKit/chromium/public/win/WebThemeEngine.h"
 #include "webkit/tools/test_shell/test_shell_webthemeengine.h"
-#endif
-#if defined(OS_MACOSX)
+#elif defined(OS_LINUX)
+#include "third_party/WebKit/WebKit/chromium/public/linux/WebThemeEngine.h"
+#elif defined(OS_MACOSX)
 #include "base/mac_util.h"
 #endif
 
@@ -158,6 +164,10 @@ WebKit::WebBlobRegistry* TestWebKitClient::blobRegistry() {
   return blob_registry_.get();
 }
 
+WebKit::WebFileSystem* TestWebKitClient::fileSystem() {
+  return &file_system_;
+}
+
 bool TestWebKitClient::sandboxEnabled() {
   return true;
 }
@@ -245,6 +255,18 @@ void TestWebKitClient::dispatchStorageEvent(const WebKit::WebString& key,
 
 WebKit::WebIDBFactory* TestWebKitClient::idbFactory() {
   return WebKit::WebIDBFactory::create();
+}
+
+void TestWebKitClient::createIDBKeysFromSerializedValuesAndKeyPath(
+      const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
+      const WebKit::WebString& keyPath,
+      WebKit::WebVector<WebKit::WebIDBKey>& keys_out) {
+  WebKit::WebVector<WebKit::WebIDBKey> keys(values.size());
+  for (size_t i = 0; i < values.size(); ++i) {
+    keys[i] = WebKit::WebIDBKey::createFromValueAndKeyPath(
+        values[i], WebKit::WebIDBKeyPath::create(keyPath));
+  }
+  keys_out.swap(keys);
 }
 
 #if defined(OS_WIN)

@@ -15,11 +15,12 @@
 #include "remoting/client/chromoting_client.h"
 #include "remoting/client/host_connection.h"
 #include "remoting/client/jingle_host_connection.h"
+#include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/client/plugin/chromoting_scriptable_object.h"
 #include "remoting/client/plugin/pepper_input_handler.h"
 #include "remoting/client/plugin/pepper_view.h"
 #include "remoting/jingle_glue/jingle_thread.h"
-#include "third_party/ppapi/c/pp_event.h"
+#include "third_party/ppapi/c/pp_input_event.h"
 #include "third_party/ppapi/cpp/completion_callback.h"
 #include "third_party/ppapi/cpp/rect.h"
 
@@ -67,7 +68,9 @@ bool ChromotingInstance::Init(uint32_t argc,
 
   // Create the chromoting objects.
   host_connection_.reset(new JingleHostConnection(&context_));
-  view_.reset(new PepperView(this));
+  view_.reset(new PepperView(this, &context_));
+  rectangle_decoder_.reset(
+      new RectangleUpdateDecoder(context_.decode_message_loop(), view_.get()));
   input_handler_.reset(new PepperInputHandler(&context_, host_connection_.get(),
                                               view_.get()));
 
@@ -84,15 +87,29 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
                                      &context_,
                                      host_connection_.get(),
                                      view_.get(),
+                                     rectangle_decoder_.get(),
                                      input_handler_.get(),
                                      NULL));
 
   // Kick off the connection.
   client_->Start();
+
+  GetScriptableObject()->SetConnectionInfo(STATUS_INITIALIZING,
+                                           QUALITY_UNKNOWN);
+}
+
+void ChromotingInstance::Disconnect() {
+  DCHECK(CurrentlyOnPluginThread());
+
+  if (client_.get()) {
+    client_->Stop();
+  }
+
+  GetScriptableObject()->SetConnectionInfo(STATUS_CLOSED, QUALITY_UNKNOWN);
 }
 
 void ChromotingInstance::ViewChanged(const pp::Rect& position,
-                                   const pp::Rect& clip) {
+                                     const pp::Rect& clip) {
   DCHECK(CurrentlyOnPluginThread());
 
   // TODO(ajwong): This is going to be a race condition when the view changes
@@ -112,29 +129,36 @@ bool ChromotingInstance::CurrentlyOnPluginThread() const {
   return pepper_main_loop_dont_post_to_me_ == MessageLoop::current();
 }
 
-bool ChromotingInstance::HandleEvent(const PP_Event& event) {
+bool ChromotingInstance::HandleInputEvent(const PP_InputEvent& event) {
   DCHECK(CurrentlyOnPluginThread());
 
   PepperInputHandler* pih
       = static_cast<PepperInputHandler*>(input_handler_.get());
 
   switch (event.type) {
-    case PP_EVENT_TYPE_MOUSEDOWN:
+    case PP_INPUTEVENT_TYPE_MOUSEDOWN:
       pih->HandleMouseButtonEvent(true, event.u.mouse);
-      break;
-    case PP_EVENT_TYPE_MOUSEUP:
-      pih->HandleMouseButtonEvent(false, event.u.mouse);
-      break;
-    case PP_EVENT_TYPE_MOUSEMOVE:
-    case PP_EVENT_TYPE_MOUSEENTER:
-    case PP_EVENT_TYPE_MOUSELEAVE:
-      pih->HandleMouseMoveEvent(event.u.mouse);
-      break;
+      return true;
 
-    case PP_EVENT_TYPE_KEYDOWN:
-    case PP_EVENT_TYPE_CHAR:
-      // client_->handle_char_event(npevent);
-      break;
+    case PP_INPUTEVENT_TYPE_MOUSEUP:
+      pih->HandleMouseButtonEvent(false, event.u.mouse);
+      return true;
+
+    case PP_INPUTEVENT_TYPE_MOUSEMOVE:
+    case PP_INPUTEVENT_TYPE_MOUSEENTER:
+    case PP_INPUTEVENT_TYPE_MOUSELEAVE:
+      pih->HandleMouseMoveEvent(event.u.mouse);
+      return true;
+
+    case PP_INPUTEVENT_TYPE_KEYDOWN:
+    case PP_INPUTEVENT_TYPE_KEYUP:
+      pih->HandleKeyEvent(event.type == PP_INPUTEVENT_TYPE_KEYDOWN,
+                          event.u.key);
+      return true;
+
+    case PP_INPUTEVENT_TYPE_CHAR:
+      pih->HandleCharacterEvent(event.u.character);
+      return true;
 
     default:
       break;
@@ -143,13 +167,22 @@ bool ChromotingInstance::HandleEvent(const PP_Event& event) {
   return false;
 }
 
+ChromotingScriptableObject* ChromotingInstance::GetScriptableObject() {
+  pp::Var object = GetInstanceObject();
+  if (!object.is_undefined()) {
+    pp::deprecated::ScriptableObject* so = object.AsScriptableObject();
+    DCHECK(so != NULL);
+    return static_cast<ChromotingScriptableObject*>(so);
+  }
+  LOG(ERROR) << "Unable to get ScriptableObject for Chromoting plugin.";
+  return NULL;
+}
+
 pp::Var ChromotingInstance::GetInstanceObject() {
-  LOG(ERROR) << "Getting instance object.";
-  if (instance_object_.is_void()) {
+  if (instance_object_.is_undefined()) {
     ChromotingScriptableObject* object = new ChromotingScriptableObject(this);
     object->Init();
 
-    LOG(ERROR) << "Object initted.";
     // The pp::Var takes ownership of object here.
     instance_object_ = pp::Var(object);
   }

@@ -51,16 +51,17 @@ typedef pthread_mutex_t* MutexHandle;
 #include "base/process_util.h"
 #include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
+#include "base/vlog.h"
 
 namespace logging {
 
 bool g_enable_dcheck = false;
+VlogInfo* g_vlog_info = NULL;
 
 const char* const log_severity_names[LOG_NUM_SEVERITIES] = {
   "INFO", "WARNING", "ERROR", "ERROR_REPORT", "FATAL" };
 
 int min_log_level = 0;
-LogLockingState lock_log_file = LOCK_LOG_FILE;
 
 // The default set here for logging_destination will only be used if
 // InitLogging is not called.  On Windows, use a file next to the exe;
@@ -71,9 +72,6 @@ LoggingDestination logging_destination = LOG_ONLY_TO_FILE;
 #elif defined(OS_POSIX)
 LoggingDestination logging_destination = LOG_ONLY_TO_SYSTEM_DEBUG_LOG;
 #endif
-
-const int kMaxFilteredLogLevel = LOG_WARNING;
-std::string* log_filter_prefix;
 
 // For LOG_ERROR and above, always print to stderr.
 const int kAlwaysPrintErrorLevel = LOG_ERROR;
@@ -108,19 +106,6 @@ LogAssertHandlerFunction log_assert_handler = NULL;
 LogReportHandlerFunction log_report_handler = NULL;
 // A log message handler that gets notified of every log message we process.
 LogMessageHandlerFunction log_message_handler = NULL;
-
-// The lock is used if log file locking is false. It helps us avoid problems
-// with multiple threads writing to the log file at the same time.  Use
-// LockImpl directly instead of using Lock, because Lock makes logging calls.
-static LockImpl* log_lock = NULL;
-
-// When we don't use a lock, we are using a global mutex. We need to do this
-// because LockFileEx is not thread safe.
-#if defined(OS_WIN)
-MutexHandle log_mutex = NULL;
-#elif defined(OS_POSIX)
-pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
-#endif
 
 // Helper functions to wrap platform differences.
 
@@ -178,6 +163,138 @@ void DeleteFilePath(const PathString& log_name) {
 #endif
 }
 
+PathString GetDefaultLogFile() {
+#if defined(OS_WIN)
+  // On Windows we use the same path as the exe.
+  wchar_t module_name[MAX_PATH];
+  GetModuleFileName(NULL, module_name, MAX_PATH);
+
+  PathString log_file = module_name;
+  PathString::size_type last_backslash =
+      log_file.rfind('\\', log_file.size());
+  if (last_backslash != PathString::npos)
+    log_file.erase(last_backslash + 1);
+  log_file += L"debug.log";
+  return log_file;
+#elif defined(OS_POSIX)
+  // On other platforms we just use the current directory.
+  return PathString("debug.log");
+#endif
+}
+
+// This class acts as a wrapper for locking the logging files.
+// LoggingLock::Init() should be called from the main thread before any logging
+// is done. Then whenever logging, be sure to have a local LoggingLock
+// instance on the stack. This will ensure that the lock is unlocked upon
+// exiting the frame.
+// LoggingLocks can not be nested.
+class LoggingLock {
+ public:
+  LoggingLock() {
+    LockLogging();
+  }
+
+  ~LoggingLock() {
+    UnlockLogging();
+  }
+
+  static void Init(LogLockingState lock_log, const PathChar* new_log_file) {
+    if (initialized)
+      return;
+    lock_log_file = lock_log;
+    if (lock_log_file == LOCK_LOG_FILE) {
+#if defined(OS_WIN)
+      if (!log_mutex) {
+        std::wstring safe_name;
+        if (new_log_file)
+          safe_name = new_log_file;
+        else
+          safe_name = GetDefaultLogFile();
+        // \ is not a legal character in mutex names so we replace \ with /
+        std::replace(safe_name.begin(), safe_name.end(), '\\', '/');
+        std::wstring t(L"Global\\");
+        t.append(safe_name);
+        log_mutex = ::CreateMutex(NULL, FALSE, t.c_str());
+
+        if (log_mutex == NULL) {
+#if DEBUG
+          // Keep the error code for debugging
+          int error = GetLastError();  // NOLINT
+          DebugUtil::BreakDebugger();
+#endif
+          // Return nicely without putting initialized to true.
+          return;
+        }
+      }
+#endif
+    } else {
+      log_lock = new LockImpl();
+    }
+    initialized = true;
+  }
+
+ private:
+  static void LockLogging() {
+    if (lock_log_file == LOCK_LOG_FILE) {
+#if defined(OS_WIN)
+      ::WaitForSingleObject(log_mutex, INFINITE);
+      // WaitForSingleObject could have returned WAIT_ABANDONED. We don't
+      // abort the process here. UI tests might be crashy sometimes,
+      // and aborting the test binary only makes the problem worse.
+      // We also don't use LOG macros because that might lead to an infinite
+      // loop. For more info see http://crbug.com/18028.
+#elif defined(OS_POSIX)
+      pthread_mutex_lock(&log_mutex);
+#endif
+    } else {
+      // use the lock
+      log_lock->Lock();
+    }
+  }
+
+  static void UnlockLogging() {
+    if (lock_log_file == LOCK_LOG_FILE) {
+#if defined(OS_WIN)
+      ReleaseMutex(log_mutex);
+#elif defined(OS_POSIX)
+      pthread_mutex_unlock(&log_mutex);
+#endif
+    } else {
+      log_lock->Unlock();
+    }
+  }
+
+  // The lock is used if log file locking is false. It helps us avoid problems
+  // with multiple threads writing to the log file at the same time.  Use
+  // LockImpl directly instead of using Lock, because Lock makes logging calls.
+  static LockImpl* log_lock;
+
+  // When we don't use a lock, we are using a global mutex. We need to do this
+  // because LockFileEx is not thread safe.
+#if defined(OS_WIN)
+  static MutexHandle log_mutex;
+#elif defined(OS_POSIX)
+  static pthread_mutex_t log_mutex;
+#endif
+
+  static bool initialized;
+  static LogLockingState lock_log_file;
+};
+
+// static
+bool LoggingLock::initialized = false;
+// static
+LockImpl* LoggingLock::log_lock = NULL;
+// static
+LogLockingState LoggingLock::lock_log_file = LOCK_LOG_FILE;
+
+#if defined(OS_WIN)
+// static
+MutexHandle LoggingLock::log_mutex = NULL;
+#elif defined(OS_POSIX)
+pthread_mutex_t LoggingLock::log_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
 // Called by logging functions to ensure that debug_file is initialized
 // and can be used for writing. Returns false if the file could not be
 // initialized. debug_file will be NULL in this case.
@@ -188,20 +305,7 @@ bool InitializeLogFileHandle() {
   if (!log_file_name) {
     // Nobody has called InitLogging to specify a debug log file, so here we
     // initialize the log file name to a default.
-#if defined(OS_WIN)
-    // On Windows we use the same path as the exe.
-    wchar_t module_name[MAX_PATH];
-    GetModuleFileName(NULL, module_name, MAX_PATH);
-    log_file_name = new std::wstring(module_name);
-    std::wstring::size_type last_backslash =
-        log_file_name->rfind('\\', log_file_name->size());
-    if (last_backslash != std::wstring::npos)
-      log_file_name->erase(last_backslash + 1);
-    *log_file_name += L"debug.log";
-#elif defined(OS_POSIX)
-    // On other platforms we just use the current directory.
-    log_file_name = new std::string("debug.log");
-#endif
+    log_file_name = new PathString(GetDefaultLogFile());
   }
 
   if (logging_destination == LOG_ONLY_TO_FILE ||
@@ -231,27 +335,27 @@ bool InitializeLogFileHandle() {
   return true;
 }
 
-void InitLogMutex() {
-#if defined(OS_WIN)
-  if (!log_mutex) {
-    // \ is not a legal character in mutex names so we replace \ with /
-    std::wstring safe_name(*log_file_name);
-    std::replace(safe_name.begin(), safe_name.end(), '\\', '/');
-    std::wstring t(L"Global\\");
-    t.append(safe_name);
-    log_mutex = ::CreateMutex(NULL, FALSE, t.c_str());
-  }
-#elif defined(OS_POSIX)
-  // statically initialized
-#endif
-}
-
 void BaseInitLoggingImpl(const PathChar* new_log_file,
                          LoggingDestination logging_dest,
                          LogLockingState lock_log,
                          OldFileDeletionState delete_old) {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
   g_enable_dcheck =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableDCHECK);
+      command_line->HasSwitch(switches::kEnableDCHECK);
+  delete g_vlog_info;
+  g_vlog_info = NULL;
+  // Don't bother initializing g_vlog_info unless we use one of the
+  // vlog switches.
+  if (command_line->HasSwitch(switches::kV) ||
+      command_line->HasSwitch(switches::kVModule)) {
+    g_vlog_info =
+        new VlogInfo(command_line->GetSwitchValueASCII(switches::kV),
+                     command_line->GetSwitchValueASCII(switches::kVModule));
+  }
+
+  LoggingLock::Init(lock_log, new_log_file);
+
+  LoggingLock logging_lock;
 
   if (log_file) {
     // calling InitLogging twice or after some log call has already opened the
@@ -260,7 +364,6 @@ void BaseInitLoggingImpl(const PathChar* new_log_file,
     log_file = NULL;
   }
 
-  lock_log_file = lock_log;
   logging_destination = logging_dest;
 
   // ignore file options if logging is disabled or only to system
@@ -274,12 +377,6 @@ void BaseInitLoggingImpl(const PathChar* new_log_file,
   if (delete_old == DELETE_OLD_LOG_FILE)
     DeleteFilePath(*log_file_name);
 
-  if (lock_log_file == LOCK_LOG_FILE) {
-    InitLogMutex();
-  } else if (!log_lock) {
-    log_lock = new LockImpl();
-  }
-
   InitializeLogFileHandle();
 }
 
@@ -291,14 +388,11 @@ int GetMinLogLevel() {
   return min_log_level;
 }
 
-void SetLogFilterPrefix(const char* filter)  {
-  if (log_filter_prefix) {
-    delete log_filter_prefix;
-    log_filter_prefix = NULL;
-  }
-
-  if (filter)
-    log_filter_prefix = new std::string(filter);
+int GetVlogLevelHelper(const char* file, size_t N) {
+  DCHECK_GT(N, 0U);
+  return g_vlog_info ?
+      g_vlog_info->GetVlogLevel(base::StringPiece(file, N - 1)) :
+      VlogInfo::kDefaultVlogLevel;
 }
 
 void SetLogItems(bool enable_process_id, bool enable_thread_id,
@@ -325,6 +419,20 @@ void SetLogMessageHandler(LogMessageHandlerFunction handler) {
   log_message_handler = handler;
 }
 
+// MSVC doesn't like complex extern templates and DLLs.
+#if !defined(COMPILER_MSVC)
+// Explicit instantiations for commonly used comparisons.
+template std::string* MakeCheckOpString<int, int>(
+    const int&, const int&, const char* names);
+template std::string* MakeCheckOpString<unsigned long, unsigned long>(
+    const unsigned long&, const unsigned long&, const char* names);
+template std::string* MakeCheckOpString<unsigned long, unsigned int>(
+    const unsigned long&, const unsigned int&, const char* names);
+template std::string* MakeCheckOpString<unsigned int, unsigned long>(
+    const unsigned int&, const unsigned long&, const char* names);
+template std::string* MakeCheckOpString<std::string, std::string>(
+    const std::string&, const std::string&, const char* name);
+#endif
 
 // Displays a message box to the user with the error message in it.
 // Used for fatal messages, where we close the app simultaneously.
@@ -463,8 +571,9 @@ void LogMessage::Init(const char* file, int line) {
 }
 
 LogMessage::~LogMessage() {
-  // TODO(brettw) modify the macros so that nothing is executed when the log
-  // level is too high.
+  // The macros in logging.h should already avoid creating LogMessages
+  // when this holds, but it's possible that users create LogMessages
+  // directly (e.g., using LOG_STREAM() directly).
   if (severity_ < min_log_level)
     return;
 
@@ -483,32 +592,13 @@ LogMessage::~LogMessage() {
   if (log_message_handler && log_message_handler(severity_, str_newline))
     return;
 
-  if (log_filter_prefix && severity_ <= kMaxFilteredLogLevel &&
-      str_newline.compare(message_start_, log_filter_prefix->size(),
-                          log_filter_prefix->data()) != 0) {
-    return;
-  }
-
   if (logging_destination == LOG_ONLY_TO_SYSTEM_DEBUG_LOG ||
       logging_destination == LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG) {
 #if defined(OS_WIN)
     OutputDebugStringA(str_newline.c_str());
-    if (severity_ >= kAlwaysPrintErrorLevel) {
-#else
-    {
 #endif
-      // TODO(erikkay): this interferes with the layout tests since it grabs
-      // stderr and stdout and diffs them against known data. Our info and warn
-      // logs add noise to that.  Ideally, the layout tests would set the log
-      // level to ignore anything below error.  When that happens, we should
-      // take this fprintf out of the #else so that Windows users can benefit
-      // from the output when running tests from the command-line.  In the
-      // meantime, we leave this in for Mac and Linux, but until this is fixed
-      // they won't be able to pass any layout tests that have info or warn
-      // logs.  See http://b/1343647
-      fprintf(stderr, "%s", str_newline.c_str());
-      fflush(stderr);
-    }
+    fprintf(stderr, "%s", str_newline.c_str());
+    fflush(stderr);
   } else if (severity_ >= kAlwaysPrintErrorLevel) {
     // When we're only outputting to a log file, above a certain log level, we
     // should still output to stderr so that we can better detect and diagnose
@@ -517,61 +607,31 @@ LogMessage::~LogMessage() {
     fflush(stderr);
   }
 
+  // We can have multiple threads and/or processes, so try to prevent them
+  // from clobbering each other's writes.
+  // If the client app did not call InitLogging, and the lock has not
+  // been created do it now. We do this on demand, but if two threads try
+  // to do this at the same time, there will be a race condition to create
+  // the lock. This is why InitLogging should be called from the main
+  // thread at the beginning of execution.
+  LoggingLock::Init(LOCK_LOG_FILE, NULL);
   // write to log file
   if (logging_destination != LOG_NONE &&
-      logging_destination != LOG_ONLY_TO_SYSTEM_DEBUG_LOG &&
-      InitializeLogFileHandle()) {
-    // We can have multiple threads and/or processes, so try to prevent them
-    // from clobbering each other's writes.
-    if (lock_log_file == LOCK_LOG_FILE) {
-      // Ensure that the mutex is initialized in case the client app did not
-      // call InitLogging. This is not thread safe. See below.
-      InitLogMutex();
-
+      logging_destination != LOG_ONLY_TO_SYSTEM_DEBUG_LOG) {
+    LoggingLock logging_lock;
+    if (InitializeLogFileHandle()) {
 #if defined(OS_WIN)
-      ::WaitForSingleObject(log_mutex, INFINITE);
-      // WaitForSingleObject could have returned WAIT_ABANDONED. We don't
-      // abort the process here. UI tests might be crashy sometimes,
-      // and aborting the test binary only makes the problem worse.
-      // We also don't use LOG macros because that might lead to an infinite
-      // loop. For more info see http://crbug.com/18028.
-#elif defined(OS_POSIX)
-      pthread_mutex_lock(&log_mutex);
-#endif
-    } else {
-      // use the lock
-      if (!log_lock) {
-        // The client app did not call InitLogging, and so the lock has not
-        // been created. We do this on demand, but if two threads try to do
-        // this at the same time, there will be a race condition to create
-        // the lock. This is why InitLogging should be called from the main
-        // thread at the beginning of execution.
-        log_lock = new LockImpl();
-      }
-      log_lock->Lock();
-    }
-
-#if defined(OS_WIN)
-    SetFilePointer(log_file, 0, 0, SEEK_END);
-    DWORD num_written;
-    WriteFile(log_file,
-              static_cast<const void*>(str_newline.c_str()),
-              static_cast<DWORD>(str_newline.length()),
-              &num_written,
-              NULL);
+      SetFilePointer(log_file, 0, 0, SEEK_END);
+      DWORD num_written;
+      WriteFile(log_file,
+                static_cast<const void*>(str_newline.c_str()),
+                static_cast<DWORD>(str_newline.length()),
+                &num_written,
+                NULL);
 #else
-    fprintf(log_file, "%s", str_newline.c_str());
-    fflush(log_file);
+      fprintf(log_file, "%s", str_newline.c_str());
+      fflush(log_file);
 #endif
-
-    if (lock_log_file == LOCK_LOG_FILE) {
-#if defined(OS_WIN)
-      ReleaseMutex(log_mutex);
-#elif defined(OS_POSIX)
-      pthread_mutex_unlock(&log_mutex);
-#endif
-    } else {
-      log_lock->Unlock();
     }
   }
 
@@ -695,6 +755,8 @@ ErrnoLogMessage::~ErrnoLogMessage() {
 #endif  // OS_WIN
 
 void CloseLogFile() {
+  LoggingLock logging_lock;
+
   if (!log_file)
     return;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,10 @@
 #include "base/ref_counted_memory.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/dom_ui/shown_sections_handler.h"
 #include "chrome/browser/google/google_util.h"
@@ -46,6 +47,8 @@
 #elif defined(OS_POSIX)
 #include "chrome/browser/gtk/bookmark_bar_gtk.h"
 #endif
+
+using base::Time;
 
 namespace {
 
@@ -128,21 +131,17 @@ std::string GetNewTabBackgroundTilingCSS(const ThemeProvider* theme_provider) {
 NTPResourceCache::NTPResourceCache(Profile* profile) : profile_(profile) {
   registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
                  NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::WEB_RESOURCE_AVAILABLE,
+                 NotificationService::AllSources());
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
-  PrefService* pref_service = profile_->GetPrefs();
-  pref_service->AddPrefObserver(prefs::kShowBookmarkBar, this);
-  pref_service->AddPrefObserver(prefs::kNTPShownSections, this);
-}
-
-NTPResourceCache::~NTPResourceCache() {
-  PrefService* pref_service = profile_->GetPrefs();
-  pref_service->RemovePrefObserver(prefs::kShowBookmarkBar, this);
-  pref_service->RemovePrefObserver(prefs::kNTPShownSections, this);
+  pref_change_registrar_.Init(profile_->GetPrefs());
+  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
+  pref_change_registrar_.Add(prefs::kNTPShownSections, this);
 }
 
 RefCountedBytes* NTPResourceCache::GetNewTabHTML(bool is_off_the_record) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (is_off_the_record) {
     if (!new_tab_incognito_html_.get())
       CreateNewTabIncognitoHTML();
@@ -155,7 +154,7 @@ RefCountedBytes* NTPResourceCache::GetNewTabHTML(bool is_off_the_record) {
 }
 
 RefCountedBytes* NTPResourceCache::GetNewTabCSS(bool is_off_the_record) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (is_off_the_record) {
     if (!new_tab_incognito_css_.get())
       CreateNewTabIncognitoCSS();
@@ -170,7 +169,8 @@ RefCountedBytes* NTPResourceCache::GetNewTabCSS(bool is_off_the_record) {
 void NTPResourceCache::Observe(NotificationType type,
     const NotificationSource& source, const NotificationDetails& details) {
   // Invalidate the cache.
-  if (NotificationType::BROWSER_THEME_CHANGED == type) {
+  if (NotificationType::BROWSER_THEME_CHANGED == type ||
+      NotificationType::WEB_RESOURCE_AVAILABLE == type) {
     new_tab_incognito_html_ = NULL;
     new_tab_html_ = NULL;
     new_tab_incognito_css_ = NULL;
@@ -271,11 +271,11 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_TIPS));
   localized_strings.SetString("close", l10n_util::GetStringUTF16(IDS_CLOSE));
   localized_strings.SetString("history",
-                              l10n_util::GetStringUTF16(IDS_NEW_TAB_HISTORY));
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_HISTORY));
   localized_strings.SetString("downloads",
-                              l10n_util::GetStringUTF16(IDS_NEW_TAB_DOWNLOADS));
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_DOWNLOADS));
   localized_strings.SetString("help",
-                              l10n_util::GetStringUTF16(IDS_NEW_TAB_HELP));
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_HELP));
   localized_strings.SetString("helpurl",
       GetUrlWithLang(GURL(kHelpContentUrl)));
   localized_strings.SetString("appsettings",
@@ -284,10 +284,24 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_UNINSTALL));
   localized_strings.SetString("appoptions",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_OPTIONS));
+  localized_strings.SetString("applaunchtypepinned",
+      l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_PINNED));
+  localized_strings.SetString("applaunchtyperegular",
+      l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_REGULAR));
+  localized_strings.SetString("applaunchtypefullscreen",
+      l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_FULLSCREEN));
   localized_strings.SetString("web_store_title",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
   localized_strings.SetString("web_store_url",
-      GetUrlWithLang(GURL(Extension::ChromeStoreURL())));
+      GetUrlWithLang(GURL(Extension::ChromeStoreLaunchURL())));
+  localized_strings.SetString("appspromohide",
+      l10n_util::GetStringUTF16(IDS_APPS_PROMO_HIDE));
+  localized_strings.SetString("appspromoheader",
+      l10n_util::GetStringUTF16(IDS_APPS_PROMO_HEADER));
+  localized_strings.SetString("appspromotext1",
+      l10n_util::GetStringUTF16(IDS_APPS_PROMO_TEXT_1));
+  localized_strings.SetString("appspromotext2",
+      l10n_util::GetStringUTF16(IDS_APPS_PROMO_TEXT_2));
 
   // Don't initiate the sync related message passing with the page if the sync
   // code is not present.
@@ -307,6 +321,21 @@ void NTPResourceCache::CreateNewTabHTML() {
   const int shown_sections = ShownSectionsHandler::GetShownSections(
       profile_->GetPrefs());
   localized_strings.SetInteger("shown_sections", shown_sections);
+
+  // If the user has preferences for a start and end time for a custom logo,
+  // and the time now is between these two times, show the custom logo.
+  if (profile_->GetPrefs()->FindPreference(prefs::kNTPCustomLogoStart) &&
+      profile_->GetPrefs()->FindPreference(prefs::kNTPCustomLogoEnd)) {
+    Time start_time = Time::FromDoubleT(
+        profile_->GetPrefs()->GetReal(prefs::kNTPCustomLogoStart));
+    Time end_time = Time::FromDoubleT(
+        profile_->GetPrefs()->GetReal(prefs::kNTPCustomLogoEnd));
+    localized_strings.SetString("customlogo",
+        (start_time < Time::Now() && end_time > Time::Now()) ?
+        "true" : "false");
+  } else {
+    localized_strings.SetString("customlogo", "false");
+  }
 
   base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
       GetRawDataResource(IDR_NEW_NEW_TAB_HTML));
@@ -401,6 +430,8 @@ void NTPResourceCache::CreateNewTabCSS() {
       tp->GetColor(BrowserThemeProvider::COLOR_NTP_SECTION_HEADER_RULE);
   SkColor color_section_header_rule_light =
       tp->GetColor(BrowserThemeProvider::COLOR_NTP_SECTION_HEADER_RULE_LIGHT);
+  SkColor color_text_light =
+      tp->GetColor(BrowserThemeProvider::COLOR_NTP_TEXT_LIGHT);
 
   SkColor color_header =
       tp->GetColor(BrowserThemeProvider::COLOR_NTP_HEADER);
@@ -456,6 +487,7 @@ void NTPResourceCache::CreateNewTabCSS() {
       color_section_header_rule_light));  // $$$1
   subst3.push_back(SkColorToRGBAString(
       SkColorSetA(color_section_header_rule, 0)));  // $$$2
+  subst3.push_back(SkColorToRGBAString(color_text_light));  // $$$3
 
 
   // Get our template.

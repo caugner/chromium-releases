@@ -11,17 +11,29 @@
 #include "views/controls/button/button.h"
 #include "views/controls/combobox/combobox.h"
 
+namespace gfx {
+class Size;
+}  // namespace gfx
+
 namespace chromeos {
 
+class KeyboardSwitchMenu;
 class LanguageSwitchMenu;
 
 // Interface that NetworkScreen exposes to the NetworkSelectionView.
-class NetworkScreenDelegate : public ComboboxModel,
-                              public views::Combobox::Listener,
-                              public views::ButtonListener,
+class NetworkScreenDelegate : public views::ButtonListener,
                               public NetworkLibrary::Observer {
  public:
+  // Cleares all error notifications.
+  virtual void ClearErrors() = 0;
+
+  // True is MessageBubble with error message is shown.
+  virtual bool is_error_shown() = 0;
+
   virtual LanguageSwitchMenu* language_switch_menu() = 0;
+  virtual KeyboardSwitchMenu* keyboard_switch_menu() = 0;
+
+  virtual gfx::Size size() const = 0;
 
  protected:
   virtual ~NetworkScreenDelegate() {}

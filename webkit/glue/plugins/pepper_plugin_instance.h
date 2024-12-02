@@ -24,11 +24,16 @@
 struct PP_Var;
 struct PPB_Instance;
 struct PPB_Find_Dev;
+struct PPB_Fullscreen_Dev;
+struct PPB_Zoom_Dev;
 struct PPP_Find_Dev;
 struct PPP_Instance;
+struct PPP_Private;
+struct PPP_Selection_Dev;
 struct PPP_Zoom_Dev;
 
 class SkBitmap;
+class TransportDIB;
 
 namespace gfx {
 class Rect;
@@ -47,7 +52,12 @@ class ImageData;
 class PluginDelegate;
 class PluginModule;
 class URLLoader;
+class FullscreenContainer;
 
+// Represents one time a plugin appears on one web page.
+//
+// Note: to get from a PP_Instance to a PluginInstance*, use the
+// ResourceTracker.
 class PluginInstance : public base::RefCounted<PluginInstance> {
  public:
   PluginInstance(PluginDelegate* delegate,
@@ -57,12 +67,11 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   static const PPB_Instance* GetInterface();
 
-  // Converts the given instance ID to an actual instance object.
-  static PluginInstance* FromPPInstance(PP_Instance instance);
-
   // Returns a pointer to the interface implementing PPB_Find that is
   // exposed to the plugin.
   static const PPB_Find_Dev* GetFindInterface();
+  static const PPB_Fullscreen_Dev* GetFullscreenInterface();
+  static const PPB_Zoom_Dev* GetZoomInterface();
 
   PluginDelegate* delegate() const { return delegate_; }
   PluginModule* module() const { return module_.get(); }
@@ -74,7 +83,11 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   int find_identifier() const { return find_identifier_; }
 
-  PP_Instance GetPPInstance();
+  void set_always_on_top(bool on_top) { always_on_top_ = on_top; }
+
+  // Returns the PP_Instance uniquely identifying this instance. Guaranteed
+  // nonzero.
+  PP_Instance pp_instance() const { return pp_instance_; }
 
   // Paints the current backing store to the web page.
   void Paint(WebKit::WebCanvas* canvas,
@@ -107,14 +120,29 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   PP_Var GetInstanceObject();
   void ViewChanged(const gfx::Rect& position, const gfx::Rect& clip);
 
+  // Notifications about focus changes, see has_webkit_focus_ below.
+  void SetWebKitFocus(bool has_focus);
+  void SetContentAreaFocus(bool has_focus);
+
   // Notifications that the view has rendered the page and that it has been
   // flushed to the screen. These messages are used to send Flush callbacks to
   // the plugin for DeviceContext2D.
   void ViewInitiatedPaint();
   void ViewFlushedPaint();
 
+  // If this plugin can be painted merely by copying the backing store to the
+  // screen, and the plugin bounds encloses the given paint bounds, returns
+  // true. In this case, the location, clipping, and ID of the backing store
+  // will be filled into the given output parameters.
+  bool GetBitmapForOptimizedPluginPaint(
+      const gfx::Rect& paint_bounds,
+      TransportDIB** dib,
+      gfx::Rect* dib_bounds,
+      gfx::Rect* clip);
+
   string16 GetSelectedText(bool html);
-  void Zoom(float factor, bool text_only);
+  string16 GetLinkAtPosition(const gfx::Point& point);
+  void Zoom(double factor, bool text_only);
   bool StartFind(const string16& search_text,
                  bool case_sensitive,
                  int identifier);
@@ -128,9 +156,19 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   void Graphics3DContextLost();
 
+  // Implementation of PPB_Fullscreen_Dev.
+  bool IsFullscreen();
+  bool SetFullscreen(bool fullscreen);
+
  private:
   bool LoadFindInterface();
+  bool LoadPrivateInterface();
+  bool LoadSelectionInterface();
   bool LoadZoomInterface();
+
+  // Determines if we think the plugin has focus, both content area and webkit
+  // (see has_webkit_focus_ below).
+  bool PluginHasFocus() const;
 
   // Queries the plugin for supported print formats and sets |format| to the
   // best format to use. Returns false if the plugin does not support any
@@ -153,6 +191,8 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   scoped_refptr<PluginModule> module_;
   const PPP_Instance* instance_interface_;
 
+  PP_Instance pp_instance_;
+
   // NULL until we have been initialized.
   WebKit::WebPluginContainer* container_;
 
@@ -170,14 +210,23 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // be (0, 0, w, h) regardless of scroll position.
   gfx::Rect clip_;
 
+  // We track two types of focus, one from WebKit, which is the focus among
+  // all elements of the page, one one from the browser, which is whether the
+  // tab/window has focus. We tell the plugin it has focus only when both of
+  // these values are set to true.
+  bool has_webkit_focus_;
+  bool has_content_area_focus_;
+
   // The current device context for painting in 2D.
   scoped_refptr<Graphics2D> bound_graphics_2d_;
 
   // The id of the current find operation, or -1 if none is in process.
   int find_identifier_;
 
-  // The plugin find and zoom interfaces.
+  // The plugin-provided interfaces.
   const PPP_Find_Dev* plugin_find_interface_;
+  const PPP_Private* plugin_private_interface_;
+  const PPP_Selection_Dev* plugin_selection_interface_;
   const PPP_Zoom_Dev* plugin_zoom_interface_;
 
   // This is only valid between a successful PrintBegin call and a PrintEnd
@@ -209,6 +258,13 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   // Containes the cursor if it's set by the plugin.
   scoped_ptr<WebKit::WebCursorInfo> cursor_;
+
+  // Set to true if this plugin thinks it will always be on top. This allows us
+  // to use a more optimized painting path in some cases.
+  bool always_on_top_;
+
+  // Plugin container for fullscreen mode. NULL if not in fullscreen mode.
+  FullscreenContainer* fullscreen_container_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginInstance);
 };

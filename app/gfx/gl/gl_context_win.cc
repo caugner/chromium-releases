@@ -24,9 +24,16 @@ namespace gfx {
 typedef HGLRC GLContextHandle;
 typedef HPBUFFERARB PbufferHandle;
 
+class BaseWinGLContext : public GLContext {
+ public:
+  virtual std::string GetExtensions();
+
+  virtual HDC GetDC() = 0;
+};
+
 // This class is a wrapper around a GL context that renders directly to a
 // window.
-class NativeViewGLContext : public GLContext {
+class NativeViewGLContext : public BaseWinGLContext {
  public:
   explicit NativeViewGLContext(gfx::PluginWindowHandle window)
       : window_(window),
@@ -42,9 +49,12 @@ class NativeViewGLContext : public GLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
+
+  virtual HDC GetDC();
 
  private:
   gfx::PluginWindowHandle window_;
@@ -71,9 +81,10 @@ class OSMesaViewGLContext : public GLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
 
  private:
   void UpdateSize();
@@ -103,9 +114,12 @@ class PbufferGLContext : public GLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
+
+  virtual HDC GetDC();
 
  private:
   GLContextHandle context_;
@@ -166,6 +180,7 @@ bool GLContext::InitializeOneOff() {
   if (!InitializeBestGLBindings(
            kAllowedGLImplementations,
            kAllowedGLImplementations + arraysize(kAllowedGLImplementations))) {
+    LOG(ERROR) << "InitializeBestGLBinding failed.";
     return false;
   }
 
@@ -177,6 +192,7 @@ bool GLContext::InitializeOneOff() {
                            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                            reinterpret_cast<wchar_t*>(IntermediateWindowProc),
                            &module_handle)) {
+    LOG(ERROR) << "GetModuleHandleEx failed.";
     return false;
   }
 
@@ -194,6 +210,7 @@ bool GLContext::InitializeOneOff() {
 
   ATOM class_registration = ::RegisterClass(&intermediate_class);
   if (!class_registration) {
+    LOG(ERROR) << "RegisterClass failed.";
     return false;
   }
 
@@ -211,6 +228,7 @@ bool GLContext::InitializeOneOff() {
   if (!g_window) {
     ::UnregisterClass(reinterpret_cast<wchar_t*>(class_registration),
                       module_handle);
+    LOG(ERROR) << "CreateWindow failed.";
     return false;
   }
 
@@ -221,7 +239,7 @@ bool GLContext::InitializeOneOff() {
       g_regular_pixel_format = ::ChoosePixelFormat(intermediate_dc,
                                                    &kPixelFormatDescriptor);
       if (g_regular_pixel_format == 0) {
-        DLOG(ERROR) << "Unable to get the pixel format for GL context.";
+        LOG(ERROR) << "Unable to get the pixel format for GL context.";
         ::ReleaseDC(g_window, intermediate_dc);
         ::DestroyWindow(g_window);
         ::UnregisterClass(reinterpret_cast<wchar_t*>(class_registration),
@@ -230,7 +248,7 @@ bool GLContext::InitializeOneOff() {
       }
       if (!::SetPixelFormat(intermediate_dc, g_regular_pixel_format,
                             &kPixelFormatDescriptor)) {
-        DLOG(ERROR) << "Unable to set the pixel format for GL context.";
+        LOG(ERROR) << "Unable to set the pixel format for GL context.";
         ::ReleaseDC(g_window, intermediate_dc);
         ::DestroyWindow(g_window);
         ::UnregisterClass(reinterpret_cast<wchar_t*>(class_registration),
@@ -295,8 +313,10 @@ bool GLContext::InitializeOneOff() {
       break;
     }
     case kGLImplementationEGLGLES2:
-      if (!BaseEGLContext::InitializeOneOff())
+      if (!BaseEGLContext::InitializeOneOff()) {
+        LOG(ERROR) << "BaseEGLContext::InitializeOneOff failed.";
         return false;
+      }
       break;
   }
 
@@ -304,33 +324,47 @@ bool GLContext::InitializeOneOff() {
   return true;
 }
 
+
+std::string BaseWinGLContext::GetExtensions() {
+  if (wglGetExtensionsStringARB) {
+    const char* extensions = wglGetExtensionsStringARB(GetDC());
+    if (extensions) {
+      return GLContext::GetExtensions() + " " + extensions;
+    }
+  }
+
+  return GetExtensions();
+}
+
 bool NativeViewGLContext::Initialize(bool multisampled) {
   // The GL context will render to this window.
-  device_context_ = GetDC(window_);
+  device_context_ = ::GetDC(window_);
 
   int pixel_format =
       multisampled ? g_multisampled_pixel_format : g_regular_pixel_format;
   if (!SetPixelFormat(device_context_,
                       pixel_format,
                       &kPixelFormatDescriptor)) {
-    DLOG(ERROR) << "Unable to set the pixel format for GL context.";
+    LOG(ERROR) << "Unable to set the pixel format for GL context.";
     Destroy();
     return false;
   }
 
   context_ = wglCreateContext(device_context_);
   if (!context_) {
-    DLOG(ERROR) << "Failed to create GL context.";
+    LOG(ERROR) << "Failed to create GL context.";
     Destroy();
     return false;
   }
 
   if (!MakeCurrent()) {
+    LOG(ERROR) << "MakeCurrent failed.";
     Destroy();
     return false;
   }
 
   if (!InitializeCommon()) {
+    LOG(ERROR) << "GLContext::InitializeCommon failed.";
     Destroy();
     return false;
   }
@@ -356,7 +390,7 @@ bool NativeViewGLContext::MakeCurrent() {
     return true;
   }
   if (!wglMakeCurrent(device_context_, context_)) {
-    DLOG(ERROR) << "Unable to make gl context current.";
+    LOG(ERROR) << "Unable to make gl context current.";
     return false;
   }
 
@@ -372,9 +406,9 @@ bool NativeViewGLContext::IsOffscreen() {
   return false;
 }
 
-void NativeViewGLContext::SwapBuffers() {
+bool NativeViewGLContext::SwapBuffers() {
   DCHECK(device_context_);
-  ::SwapBuffers(device_context_);
+  return ::SwapBuffers(device_context_) == TRUE;
 }
 
 gfx::Size NativeViewGLContext::GetSize() {
@@ -387,11 +421,23 @@ void* NativeViewGLContext::GetHandle() {
   return context_;
 }
 
+void NativeViewGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  if (HasExtension("WGL_EXT_swap_control") && wglSwapIntervalEXT) {
+    wglSwapIntervalEXT(interval);
+  }
+}
+
+HDC NativeViewGLContext::GetDC() {
+  return device_context_;
+}
+
 bool OSMesaViewGLContext::Initialize() {
   // The GL context will render to this window.
   device_context_ = GetDC(window_);
 
   if (!osmesa_context_.Initialize(OSMESA_RGBA, NULL)) {
+    LOG(ERROR) << "OSMesaGLContext::Initialize failed.";
     Destroy();
     return false;
   }
@@ -427,7 +473,7 @@ bool OSMesaViewGLContext::IsOffscreen() {
   return false;
 }
 
-void OSMesaViewGLContext::SwapBuffers() {
+bool OSMesaViewGLContext::SwapBuffers() {
   DCHECK(device_context_);
 
   // Update the size before blitting so that the blit size is exactly the same
@@ -450,13 +496,13 @@ void OSMesaViewGLContext::SwapBuffers() {
   info.bV4AlphaMask = 0x000000FF;
 
   // Copy the back buffer to the window's device context.
-  StretchDIBits(device_context_,
-                0, 0, size.width(), size.height(),
-                0, 0, size.width(), size.height(),
-                osmesa_context_.buffer(),
-                reinterpret_cast<BITMAPINFO*>(&info),
-                DIB_RGB_COLORS,
-                SRCCOPY);
+  return StretchDIBits(device_context_,
+                       0, 0, size.width(), size.height(),
+                       0, 0, size.width(), size.height(),
+                       osmesa_context_.buffer(),
+                       reinterpret_cast<BITMAPINFO*>(&info),
+                       DIB_RGB_COLORS,
+                       SRCCOPY) != 0;
 }
 
 gfx::Size OSMesaViewGLContext::GetSize() {
@@ -465,6 +511,12 @@ gfx::Size OSMesaViewGLContext::GetSize() {
 
 void* OSMesaViewGLContext::GetHandle() {
   return osmesa_context_.GetHandle();
+}
+
+void OSMesaViewGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  // Fail silently. It is legitimate to set the swap interval on a view context
+  // but GDI does not have those semantics.
 }
 
 void OSMesaViewGLContext::UpdateSize() {
@@ -524,21 +576,21 @@ bool PbufferGLContext::Initialize(GLContext* shared_context) {
                                  kNoAttributes);
   ::DeleteDC(display_device_context);
   if (!pbuffer_) {
-    DLOG(ERROR) << "Unable to create pbuffer.";
+    LOG(ERROR) << "Unable to create pbuffer.";
     Destroy();
     return false;
   }
 
   device_context_ = wglGetPbufferDCARB(pbuffer_);
   if (!device_context_) {
-    DLOG(ERROR) << "Unable to get pbuffer device context.";
+    LOG(ERROR) << "Unable to get pbuffer device context.";
     Destroy();
     return false;
   }
 
   context_ = wglCreateContext(device_context_);
   if (!context_) {
-    DLOG(ERROR) << "Failed to create GL context.";
+    LOG(ERROR) << "Failed to create GL context.";
     Destroy();
     return false;
   }
@@ -546,18 +598,20 @@ bool PbufferGLContext::Initialize(GLContext* shared_context) {
   if (shared_context) {
     if (!wglShareLists(
         static_cast<GLContextHandle>(shared_context->GetHandle()), context_)) {
-      DLOG(ERROR) << "Could not share GL contexts.";
+      LOG(ERROR) << "Could not share GL contexts.";
       Destroy();
       return false;
     }
   }
 
   if (!MakeCurrent()) {
+    LOG(ERROR) << "MakeCurrent failed.";
     Destroy();
     return false;
   }
 
   if (!InitializeCommon()) {
+    LOG(ERROR) << "GLContext::InitializeCommon failed.";
     Destroy();
     return false;
   }
@@ -587,7 +641,7 @@ bool PbufferGLContext::MakeCurrent() {
     return true;
   }
   if (!wglMakeCurrent(device_context_, context_)) {
-    DLOG(ERROR) << "Unable to make gl context current.";
+    LOG(ERROR) << "Unable to make gl context current.";
     return false;
   }
 
@@ -603,8 +657,9 @@ bool PbufferGLContext::IsOffscreen() {
   return true;
 }
 
-void PbufferGLContext::SwapBuffers() {
+bool PbufferGLContext::SwapBuffers() {
   NOTREACHED() << "Attempted to call SwapBuffers on a pbuffer.";
+  return false;
 }
 
 gfx::Size PbufferGLContext::GetSize() {
@@ -614,6 +669,15 @@ gfx::Size PbufferGLContext::GetSize() {
 
 void* PbufferGLContext::GetHandle() {
   return context_;
+}
+
+void PbufferGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  NOTREACHED() << "Attempt to call SetSwapInterval on a PbufferGLContext.";
+}
+
+HDC PbufferGLContext::GetDC() {
+  return device_context_;
 }
 
 GLContext* GLContext::CreateOffscreenGLContext(GLContext* shared_context) {

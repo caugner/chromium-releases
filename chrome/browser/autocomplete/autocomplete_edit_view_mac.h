@@ -49,9 +49,7 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   virtual bool IsEditingOrEmpty() const;
   virtual int GetIcon() const;
 
-  virtual void SetUserText(const std::wstring& text) {
-    SetUserText(text, text, true);
-  }
+  virtual void SetUserText(const std::wstring& text);
   virtual void SetUserText(const std::wstring& text,
                            const std::wstring& display_text,
                            bool update_popup);
@@ -62,6 +60,8 @@ class AutocompleteEditViewMac : public AutocompleteEditView,
   virtual void SetForcedQuery();
 
   virtual bool IsSelectAll();
+  virtual void GetSelectionBounds(std::wstring::size_type* start,
+                                  std::wstring::size_type* end);
 
   virtual void SelectAll(bool reversed);
   virtual void RevertAll();

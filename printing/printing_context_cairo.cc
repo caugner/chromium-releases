@@ -2,45 +2,58 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "printing/printing_context.h"
+#include "printing/printing_context_cairo.h"
+
+#include <gtk/gtk.h>
+#include <gtk/gtkprintunixdialog.h>
 
 #include "base/logging.h"
 
 namespace printing {
 
-PrintingContext::PrintingContext()
-    :
-#ifndef NDEBUG
-      page_number_(-1),
-#endif
-      dialog_box_dismissed_(false),
-      in_print_job_(false),
-      abort_printing_(false) {
+// static
+PrintingContext* PrintingContext::Create() {
+  return static_cast<PrintingContext*>(new PrintingContextCairo);
 }
 
-PrintingContext::~PrintingContext() {
-  ResetSettings();
+PrintingContextCairo::PrintingContextCairo() : PrintingContext() {
 }
 
-PrintingContext::Result PrintingContext::AskUserForSettings(
+PrintingContextCairo::~PrintingContextCairo() {
+  ReleaseContext();
+}
+
+void PrintingContextCairo::AskUserForSettings(
     gfx::NativeView parent_view,
     int max_pages,
-    bool has_selection) {
-
+    bool has_selection,
+    PrintSettingsCallback* callback) {
   NOTIMPLEMENTED();
-
-  return FAILED;
+  callback->Run(OK);
 }
 
-PrintingContext::Result PrintingContext::UseDefaultSettings() {
+PrintingContext::Result PrintingContextCairo::UseDefaultSettings() {
   DCHECK(!in_print_job_);
 
-  NOTIMPLEMENTED();
+  ResetSettings();
 
-  return FAILED;
+  GtkWidget* dialog = gtk_print_unix_dialog_new(NULL, NULL);
+  GtkPrintSettings* settings =
+      gtk_print_unix_dialog_get_settings(GTK_PRINT_UNIX_DIALOG(dialog));
+  GtkPageSetup* page_setup =
+      gtk_print_unix_dialog_get_page_setup(GTK_PRINT_UNIX_DIALOG(dialog));
+
+  PageRanges ranges_vector;  // Nothing to initialize for default settings.
+  settings_.Init(settings, page_setup, ranges_vector, false);
+
+  g_object_unref(settings);
+  // |page_setup| is owned by dialog, so it does not need to be unref'ed.
+  gtk_widget_destroy(dialog);
+
+  return OK;
 }
 
-PrintingContext::Result PrintingContext::InitWithSettings(
+PrintingContext::Result PrintingContextCairo::InitWithSettings(
     const PrintSettings& settings) {
   DCHECK(!in_print_job_);
   settings_ = settings;
@@ -50,43 +63,16 @@ PrintingContext::Result PrintingContext::InitWithSettings(
   return FAILED;
 }
 
-void PrintingContext::ResetSettings() {
-#ifndef NDEBUG
-  page_number_ = -1;
-#endif
-  dialog_box_dismissed_ = false;
-  abort_printing_ = false;
-  in_print_job_ = false;
-}
-
-PrintingContext::Result PrintingContext::NewDocument(
-    const std::wstring& document_name) {
+PrintingContext::Result PrintingContextCairo::NewDocument(
+    const string16& document_name) {
   DCHECK(!in_print_job_);
 
   NOTIMPLEMENTED();
 
-#ifndef NDEBUG
-  page_number_ = 0;
-#endif
-
   return FAILED;
 }
 
-PrintingContext::Result PrintingContext::NewPage() {
-  if (abort_printing_)
-    return CANCEL;
-  DCHECK(in_print_job_);
-
-  NOTIMPLEMENTED();
-
-#ifndef NDEBUG
-  ++page_number_;
-#endif
-
-  return FAILED;
-}
-
-PrintingContext::Result PrintingContext::PageDone() {
+PrintingContext::Result PrintingContextCairo::NewPage() {
   if (abort_printing_)
     return CANCEL;
   DCHECK(in_print_job_);
@@ -96,7 +82,17 @@ PrintingContext::Result PrintingContext::PageDone() {
   return FAILED;
 }
 
-PrintingContext::Result PrintingContext::DocumentDone() {
+PrintingContext::Result PrintingContextCairo::PageDone() {
+  if (abort_printing_)
+    return CANCEL;
+  DCHECK(in_print_job_);
+
+  NOTIMPLEMENTED();
+
+  return FAILED;
+}
+
+PrintingContext::Result PrintingContextCairo::DocumentDone() {
   if (abort_printing_)
     return CANCEL;
   DCHECK(in_print_job_);
@@ -107,20 +103,23 @@ PrintingContext::Result PrintingContext::DocumentDone() {
   return FAILED;
 }
 
-void PrintingContext::Cancel() {
+void PrintingContextCairo::Cancel() {
   abort_printing_ = true;
   in_print_job_ = false;
 
   NOTIMPLEMENTED();
 }
 
-void PrintingContext::DismissDialog() {
+void PrintingContextCairo::DismissDialog() {
   NOTIMPLEMENTED();
 }
 
-PrintingContext::Result PrintingContext::OnError() {
-  ResetSettings();
-  return abort_printing_ ? CANCEL : FAILED;
+void PrintingContextCairo::ReleaseContext() {
+  // Nothing to do yet.
+}
+
+gfx::NativeDrawingContext PrintingContextCairo::context() const {
+  return NULL;
 }
 
 }  // namespace printing

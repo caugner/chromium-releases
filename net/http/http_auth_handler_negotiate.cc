@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/address_family.h"
 #include "net/base/host_resolver.h"
@@ -95,16 +96,19 @@ bool HttpAuthHandlerNegotiate::Init(HttpAuth::ChallengeTokenizer* challenge) {
   scheme_ = "negotiate";
   score_ = 4;
   properties_ = ENCRYPTS_IDENTITY | IS_CONNECTION_BASED;
+  HttpAuth::AuthorizationResult auth_result =
+      auth_system_.ParseChallenge(challenge);
+  return (auth_result == HttpAuth::AUTHORIZATION_RESULT_ACCEPT);
+}
+
+HttpAuth::AuthorizationResult HttpAuthHandlerNegotiate::HandleAnotherChallenge(
+    HttpAuth::ChallengeTokenizer* challenge) {
   return auth_system_.ParseChallenge(challenge);
 }
 
 // Require identity on first pass instead of second.
 bool HttpAuthHandlerNegotiate::NeedsIdentity() {
   return auth_system_.NeedsIdentity();
-}
-
-bool HttpAuthHandlerNegotiate::IsFinalRound() {
-  return auth_system_.IsFinalRound();
 }
 
 bool HttpAuthHandlerNegotiate::AllowsDefaultCredentials() {
@@ -165,10 +169,11 @@ std::wstring HttpAuthHandlerNegotiate::CreateSPN(
   static const char kSpnSeparator = '@';
 #endif
   if (port != 80 && port != 443 && use_port_) {
-    return ASCIIToWide(StringPrintf("HTTP%c%s:%d", kSpnSeparator,
-                                    server.c_str(), port));
+    return ASCIIToWide(base::StringPrintf("HTTP%c%s:%d", kSpnSeparator,
+                                          server.c_str(), port));
   } else {
-    return ASCIIToWide(StringPrintf("HTTP%c%s", kSpnSeparator, server.c_str()));
+    return ASCIIToWide(base::StringPrintf("HTTP%c%s", kSpnSeparator,
+                                          server.c_str()));
   }
 }
 
@@ -206,12 +211,12 @@ int HttpAuthHandlerNegotiate::DoLoop(int result) {
 
 int HttpAuthHandlerNegotiate::DoResolveCanonicalName() {
   next_state_ = STATE_RESOLVE_CANONICAL_NAME_COMPLETE;
-  if (disable_cname_lookup_)
+  if (disable_cname_lookup_ || !resolver_)
     return OK;
 
   // TODO(cbentzel): Add reverse DNS lookup for numeric addresses.
   DCHECK(!single_resolve_.get());
-  HostResolver::RequestInfo info(origin_.host(), 0);
+  HostResolver::RequestInfo info(HostPortPair(origin_.host(), 0));
   info.set_host_resolver_flags(HOST_RESOLVER_CANONNAME);
   single_resolve_.reset(new SingleRequestHostResolver(resolver_));
   return single_resolve_->Resolve(info, &address_list_, &io_callback_,

@@ -8,15 +8,17 @@
 
 #include <string>
 
-#include "base/histogram.h"
+#include "base/time.h"
 #include "base/ref_counted.h"
+
+class Histogram;
 
 namespace net {
 
-class ClientSocketPoolHistograms
-    : public base::RefCounted<ClientSocketPoolHistograms> {
+class ClientSocketPoolHistograms {
  public:
   ClientSocketPoolHistograms(const std::string& pool_name);
+  ~ClientSocketPoolHistograms();
 
   void AddSocketType(int socket_reuse_type) const;
   void AddRequestTime(base::TimeDelta time) const;
@@ -24,9 +26,6 @@ class ClientSocketPoolHistograms
   void AddReusedIdleTime(base::TimeDelta time) const;
 
  private:
-  friend class base::RefCounted<ClientSocketPoolHistograms>;
-  ~ClientSocketPoolHistograms() {}
-
   scoped_refptr<Histogram> socket_type_;
   scoped_refptr<Histogram> request_time_;
   scoped_refptr<Histogram> unused_idle_time_;
@@ -34,6 +33,8 @@ class ClientSocketPoolHistograms
 
   bool is_http_proxy_connection_;
   bool is_socks_connection_;
+
+  DISALLOW_COPY_AND_ASSIGN(ClientSocketPoolHistograms);
 };
 
 }  // namespace net

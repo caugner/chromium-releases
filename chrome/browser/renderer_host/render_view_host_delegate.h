@@ -47,6 +47,7 @@ struct ThumbnailScore;
 struct ViewHostMsg_DidPrintPage_Params;
 struct ViewHostMsg_DomMessage_Params;
 struct ViewHostMsg_FrameNavigate_Params;
+struct ViewHostMsg_PageHasOSDD_Type;
 struct ViewHostMsg_RunFileChooser_Params;
 struct WebDropData;
 class WebKeyboardEvent;
@@ -165,6 +166,9 @@ class RenderViewHostDelegate {
     // retrieved by doing a Shift-Tab.
     virtual void TakeFocus(bool reverse) = 0;
 
+    // Notification that the view has lost capture.
+    virtual void LostCapture() = 0;
+
     // The page wants the hosting window to activate/deactivate itself (it
     // called the JavaScript window.focus()/blur() method).
     virtual void Activate() = 0;
@@ -188,9 +192,15 @@ class RenderViewHostDelegate {
     virtual void HandleMouseMove() = 0;
     virtual void HandleMouseDown() = 0;
     virtual void HandleMouseLeave() = 0;
+    virtual void HandleMouseUp() = 0;
+    virtual void HandleMouseActivate() = 0;
 
     // The contents' preferred size changed.
     virtual void UpdatePreferredSize(const gfx::Size& pref_size) = 0;
+
+    // Called to determine whether the render view needs to draw a drop shadow
+    // at the top (currently used for infobars).
+    virtual bool ShouldDrawDropShadow();
 
    protected:
     virtual ~View() {}
@@ -281,6 +291,10 @@ class RenderViewHostDelegate {
                                   const std::string& translated_lang,
                                   TranslateErrors::Type error_type) = 0;
 
+    // Notification that the page has a suggest result.
+    virtual void OnSetSuggestResult(int32 page_id,
+                                    const std::string& result) = 0;
+
    protected:
     virtual ~BrowserIntegration() {}
   };
@@ -293,6 +307,7 @@ class RenderViewHostDelegate {
     // The RenderView is starting a provisional load.
     virtual void DidStartProvisionalLoadForFrame(
         RenderViewHost* render_view_host,
+        long long frame_id,
         bool is_main_frame,
         const GURL& url) = 0;
 
@@ -332,6 +347,7 @@ class RenderViewHostDelegate {
     // The RenderView failed a provisional load with an error.
     virtual void DidFailProvisionalLoadWithError(
         RenderViewHost* render_view_host,
+        long long frame_id,
         bool is_main_frame,
         int error_code,
         const GURL& url,
@@ -361,6 +377,15 @@ class RenderViewHostDelegate {
     virtual void OnCookieAccessed(const GURL& url,
                                   const std::string& cookie_line,
                                   bool blocked_by_policy) = 0;
+
+    // Called when a specific indexed db factory in the current page was
+    // accessed. If access was blocked due to the user's content settings,
+    // |blocked_by_policy| should be true, and this function should invoke
+    // OnContentBlocked.
+    virtual void OnIndexedDBAccessed(const GURL& url,
+                                     const string16& name,
+                                     const string16& description,
+                                     bool blocked_by_policy) = 0;
 
     // Called when a specific local storage area in the current page was
     // accessed. If access was blocked due to the user's content settings,
@@ -524,8 +549,6 @@ class RenderViewHostDelegate {
     // RenderViewHost::AutoFillFormDataFilled has been called.
     virtual bool FillAutoFillFormData(int query_id,
                                       const webkit_glue::FormData& form,
-                                      const string16& value,
-                                      const string16& label,
                                       int unique_id) = 0;
 
     // Called when the user selects the 'AutoFill Options...' suggestions in the
@@ -605,6 +628,7 @@ class RenderViewHostDelegate {
    public:
     // A file chooser should be shown.
     virtual void RunFileChooser(
+        RenderViewHost* render_view_host,
         const ViewHostMsg_RunFileChooser_Params& params) = 0;
 
    protected:
@@ -716,7 +740,8 @@ class RenderViewHostDelegate {
 
   // The onload handler in the RenderView's main frame has completed.
   virtual void DocumentOnLoadCompletedInMainFrame(
-      RenderViewHost* render_view_host) {}
+      RenderViewHost* render_view_host,
+      int32 page_id) {}
 
   // The page wants to open a URL with the specified disposition.
   virtual void RequestOpenURL(const GURL& url,
@@ -766,7 +791,7 @@ class RenderViewHostDelegate {
   // Notification that the page has an OpenSearch description document.
   virtual void PageHasOSDD(RenderViewHost* render_view_host,
                            int32 page_id, const GURL& doc_url,
-                           bool autodetected) {}
+                           const ViewHostMsg_PageHasOSDD_Type& provider_type) {}
 
   // |url| is assigned to a server that can provide alternate error pages.  If
   // the returned URL is empty, the default error page built into WebKit will
@@ -817,8 +842,13 @@ class RenderViewHostDelegate {
   // A different node in the page got focused.
   virtual void FocusedNodeChanged() {}
 
-  // The content being displayed is a PDF.
-  virtual void SetDisplayingPDFContent() {}
+  // Updates the minimum and maximum zoom percentages.
+  virtual void UpdateZoomLimits(int minimum_percent,
+                                int maximum_percent,
+                                bool remember) {}
+
+  // Update the content restrictions, i.e. disable print/copy.
+  virtual void UpdateContentRestrictions(int restrictions) {}
 
  protected:
   virtual ~RenderViewHostDelegate() {}

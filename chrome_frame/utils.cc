@@ -21,6 +21,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/thread_local.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths_internal.h"
@@ -28,12 +29,14 @@
 #include "chrome/installer/util/chrome_frame_distribution.h"
 #include "chrome_frame/extra_system_apis.h"
 #include "chrome_frame/html_utils.h"
+#include "chrome_frame/policy_settings.h"
 #include "chrome_frame/simple_resource_loader.h"
 #include "chrome_frame/utils.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_canon.h"
 
 #include "grit/chromium_strings.h"
+#include "net/base/escape.h"
 #include "net/http/http_util.h"
 
 // Note that these values are all lower case and are compared to
@@ -71,6 +74,10 @@ const char kAttachExternalTabPrefix[] = "attach_external_tab";
 // Indicates that we are running in a test environment, where execptions, etc
 // are handled by the chrome test crash server.
 const wchar_t kChromeFrameHeadlessMode[] = L"ChromeFrameHeadlessMode";
+
+// Indicates that we are running in an environment that expects chrome renderer
+// accessibility to be enabled for use in automation tests.
+const wchar_t kChromeFrameAccessibleMode[] = L"ChromeFrameAccessibleMode";
 
 // Indicates that we are running in an environment that wishes to avoid
 // DLL pinning, such as the perf tests.
@@ -318,10 +325,10 @@ void DisplayVersionMismatchWarning(HWND parent,
   }
   std::wstring title = SimpleResourceLoader::Get(IDS_VERSIONMISMATCH_HEADER);
   std::wstring message;
-  SStringPrintf(&message,
-                SimpleResourceLoader::Get(IDS_VERSIONMISMATCH).c_str(),
-                wide_server_version.c_str(),
-                version_string.c_str());
+  base::SStringPrintf(&message,
+                      SimpleResourceLoader::Get(IDS_VERSIONMISMATCH).c_str(),
+                      wide_server_version.c_str(),
+                      version_string.c_str());
 
   ::MessageBox(parent, message.c_str(), title.c_str(), MB_OK);
 }
@@ -350,6 +357,13 @@ AddRefModule::AddRefModule() {
 
 AddRefModule::~AddRefModule() {
   _pAtlModule->Unlock();
+}
+
+bool IsChrome(RendererType renderer_type) {
+  DCHECK_GE(renderer_type, RENDERER_TYPE_UNDETERMINED);
+  DCHECK_LE(renderer_type, RENDERER_TYPE_OTHER);
+  return renderer_type >= RENDERER_TYPE_CHROME_MIN &&
+    renderer_type <= RENDERER_TYPE_CHROME_MAX;
 }
 
 namespace {
@@ -414,8 +428,11 @@ IEVersion GetIEVersion() {
           case 7:
             ie_version = IE_7;
             break;
+          case 8:
+            ie_version = IE_8;
+            break;
           default:
-            ie_version = HIWORD(high) >= 8 ? IE_8 : IE_UNSUPPORTED;
+            ie_version = HIWORD(high) >= 9 ? IE_9 : IE_UNSUPPORTED;
             break;
         }
       } else {
@@ -685,24 +702,45 @@ bool DeleteConfigValue(const wchar_t* value_name) {
 }
 
 bool IsGcfDefaultRenderer() {
-  // TODO(tommi): Implement caching for this config value as it gets
-  // checked frequently.
   DWORD is_default = 0;  // NOLINT
-  RegKey config_key;
-  if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_READ)) {
-    config_key.ReadValueDW(kEnableGCFRendererByDefault, &is_default);
+
+  // First check policy settings
+  Singleton<PolicySettings> policy;
+  PolicySettings::RendererForUrl renderer = policy->default_renderer();
+  if (renderer != PolicySettings::RENDERER_NOT_SPECIFIED) {
+    is_default = (renderer == PolicySettings::RENDER_IN_CHROME_FRAME);
+  } else {
+    // TODO(tommi): Implement caching for this config value as it gets
+    // checked frequently.
+    RegKey config_key;
+    if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_READ)) {
+      config_key.ReadValueDW(kEnableGCFRendererByDefault, &is_default);
+    }
   }
 
   return is_default != 0;
 }
 
-bool IsOptInUrl(const wchar_t* url) {
-  // TODO(tommi): Unit test.
+RendererType RendererTypeForUrl(const std::wstring& url) {
+  // First check if the default renderer settings are specified by policy.
+  // If so, then that overrides the user settings.
+  Singleton<PolicySettings> policy;
+  PolicySettings::RendererForUrl renderer = policy->GetRendererForUrl(
+      url.c_str());
+  if (renderer != PolicySettings::RENDERER_NOT_SPECIFIED) {
+    // We may know at this point that policy says do NOT render in Chrome Frame.
+    // To maintain consistency, we return RENDERER_TYPE_UNDETERMINED so that
+    // content sniffing, etc. still take place.
+    // TODO(tommi): Clarify the intent here.
+    return (renderer == PolicySettings::RENDER_IN_CHROME_FRAME) ?
+        RENDERER_TYPE_CHROME_OPT_IN_URL : RENDERER_TYPE_UNDETERMINED;
+  }
+
   RegKey config_key;
   if (!config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_READ))
-    return false;
+    return RENDERER_TYPE_UNDETERMINED;
 
-  bool load_in_chrome_frame = false;
+  RendererType renderer_type = RENDERER_TYPE_UNDETERMINED;
 
   const wchar_t* url_list_name = NULL;
   int render_in_cf_by_default = FALSE;
@@ -710,7 +748,7 @@ bool IsOptInUrl(const wchar_t* url) {
                          reinterpret_cast<DWORD*>(&render_in_cf_by_default));
   if (render_in_cf_by_default) {
     url_list_name = kRenderInHostUrlList;
-    load_in_chrome_frame = true;  // change the default to true.
+    renderer_type = RENDERER_TYPE_CHROME_DEFAULT_RENDERER;
   } else {
     url_list_name = kRenderInGCFUrlList;
   }
@@ -718,7 +756,7 @@ bool IsOptInUrl(const wchar_t* url) {
   bool match_found = false;
   RegistryValueIterator url_list(config_key.Handle(), url_list_name);
   while (!match_found && url_list.Valid()) {
-    if (MatchPatternWide(url, url_list.Name())) {
+    if (MatchPattern(url, url_list.Name())) {
       match_found = true;
     } else {
       ++url_list;
@@ -726,11 +764,12 @@ bool IsOptInUrl(const wchar_t* url) {
   }
 
   if (match_found) {
-    // The lists are there to opt out of whatever is the default.
-    load_in_chrome_frame = !load_in_chrome_frame;
+    renderer_type = render_in_cf_by_default ?
+      RENDERER_TYPE_UNDETERMINED :
+      RENDERER_TYPE_CHROME_OPT_IN_URL;
   }
 
-  return load_in_chrome_frame;
+  return renderer_type;
 }
 
 HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
@@ -744,7 +783,8 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
   HRESULT hr = DoQueryService(SID_SWebBrowserApp, browser,
                               web_browser2.Receive());
   DCHECK(web_browser2);
-  DLOG_IF(WARNING, FAILED(hr)) << StringPrintf(L"SWebBrowserApp 0x%08X", hr);
+  DLOG_IF(WARNING, FAILED(hr)) << base::StringPrintf(L"SWebBrowserApp 0x%08X",
+                                                     hr);
   if (FAILED(hr))
     return hr;
 
@@ -797,7 +837,7 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
                                                headers_var.AsInput(), bind_ctx,
                                                const_cast<wchar_t*>(fragment));
       DLOG_IF(WARNING, FAILED(hr))
-          << StringPrintf(L"NavigateWithBindCtx2 0x%08X", hr);
+          << base::StringPrintf(L"NavigateWithBindCtx2 0x%08X", hr);
     }
   } else {
     // IE6
@@ -827,13 +867,13 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
                                                bind_ctx,
                                                const_cast<wchar_t*>(fragment));
         DLOG_IF(WARNING, FAILED(hr))
-            << StringPrintf(L"NavigateWithBindCtx 0x%08X", hr);
+            << base::StringPrintf(L"NavigateWithBindCtx 0x%08X", hr);
       } else {
         NOTREACHED();
       }
       ::CoTaskMemFree(url);
     } else {
-      DLOG(ERROR) << StringPrintf("GetDisplayName: 0x%08X", hr);
+      DLOG(ERROR) << base::StringPrintf("GetDisplayName: 0x%08X", hr);
     }
   }
 
@@ -941,6 +981,11 @@ bool IsSubFrameRequest(IUnknown* service_provider) {
 bool IsHeadlessMode() {
   bool headless = GetConfigBool(false, kChromeFrameHeadlessMode);
   return headless;
+}
+
+bool IsAccessibleMode() {
+  bool accessible = GetConfigBool(false, kChromeFrameAccessibleMode);
+  return accessible;
 }
 
 bool IsUnpinnedMode() {
@@ -1205,7 +1250,7 @@ std::string BindStatus2Str(ULONG bind_status) {
   if (bind_status >= 1 && bind_status <= BINDSTATUS_64BIT_PROGRESS)
     s = bindstatus_txt[bind_status - 1];
   else
-    s = StringPrintf("UnDoc[%#x]", bind_status);
+    s = base::StringPrintf("UnDoc[%#x]", bind_status);
   return s;
 }
 
@@ -1234,7 +1279,7 @@ std::string PiFlags2Str(DWORD flags) {
   ADD_PI_FLAG(PI_PREFERDEFAULTHANDLER);
 
   if (flags)
-    s += StringPrintf("+UnDoc[%#x]", flags);
+    s += base::StringPrintf("+UnDoc[%#x]", flags);
   return s;
 #undef ADD_PI_FLAG
 }
@@ -1256,7 +1301,7 @@ std::string Bscf2Str(DWORD flags) {
   ADD_BSCF_FLAG(BSCF_64BITLENGTHDOWNLOAD)
 
   if (flags)
-    s += StringPrintf("+UnDoc[%#x]", flags);
+    s += base::StringPrintf("+UnDoc[%#x]", flags);
   return s;
 #undef ADD_BSCF_FLAG
 }
@@ -1355,6 +1400,16 @@ bool ChromeFrameUrl::ParseAttachExternalTabUrl() {
   } else {
     return false;
   }
+
+  if (tokenizer.GetNext()) {
+    profile_name_ = tokenizer.token();
+    // Escape out special characters like %20, etc.
+    profile_name_ = UnescapeURLComponent(profile_name_,
+        UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
+  } else {
+    return false;
+  }
+
   return true;
 }
 
@@ -1364,6 +1419,7 @@ void ChromeFrameUrl::Reset() {
   cookie_ = 0;
   dimensions_.SetRect(0, 0, 0, 0);
   disposition_ = 0;
+  profile_name_.clear();
 }
 
 bool CanNavigate(const GURL& url, IInternetSecurityManager* security_manager,
@@ -1423,6 +1479,49 @@ void PinModule() {
     } else {
       NOTREACHED() << "Could not get module path.";
     }
+  }
+}
+
+void WaitWithMessageLoop(HANDLE* handles, int count, DWORD timeout) {
+  base::Time now = base::Time::Now();
+  base::Time wait_until = now + base::TimeDelta::FromMilliseconds(timeout);
+
+  while (wait_until >= now) {
+    base::TimeDelta wait_time = wait_until - now;
+    DWORD wait = MsgWaitForMultipleObjects(
+        count, handles, FALSE, static_cast<DWORD>(wait_time.InMilliseconds()),
+        QS_ALLINPUT);
+    switch (wait) {
+      case WAIT_OBJECT_0:
+      case WAIT_TIMEOUT:
+       return;
+
+      case WAIT_OBJECT_0 + 1: {
+        MSG msg = {0};
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+          TranslateMessage(&msg);
+          DispatchMessage(&msg);
+        }
+        break;
+      }
+
+      default: {
+        NOTREACHED() << "Unexpected return from MsgWaitForMultipleObjects :"
+                     << wait;
+        return;
+      }
+    }
+    now = base::Time::Now();
+  }
+}
+
+void EnumerateKeyValues(HKEY parent_key, const wchar_t* sub_key_name,
+                        std::vector<std::wstring>* values) {
+  DCHECK(values);
+  RegistryValueIterator url_list(parent_key, sub_key_name);
+  while (url_list.Valid()) {
+    values->push_back(url_list.Value());
+    ++url_list;
   }
 }
 

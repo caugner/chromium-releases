@@ -16,6 +16,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
+#include "net/base/network_change_notifier.h"
 #include "net/base/sys_addrinfo.h"
 #include "net/base/winsock_init.h"
 
@@ -78,20 +79,20 @@ int MapWinsockError(int os_error) {
       return ERR_CONNECTION_ABORTED;
     case WSAECONNREFUSED:
       return ERR_CONNECTION_REFUSED;
+    case WSA_IO_INCOMPLETE:
     case WSAEDISCON:
-      // Returned by WSARecv or WSARecvFrom for message-oriented sockets (where
-      // a return value of zero means a zero-byte message) to indicate graceful
-      // connection shutdown.  We should not ever see this error code for TCP
-      // sockets, which are byte stream oriented.
-      NOTREACHED();
-      return ERR_CONNECTION_CLOSED;
+      // WSAEDISCON is returned by WSARecv or WSARecvFrom for message-oriented
+      // sockets (where a return value of zero means a zero-byte message) to
+      // indicate graceful connection shutdown.  We should not ever see this
+      // error code for TCP sockets, which are byte stream oriented.
+      LOG(DFATAL) << "Unexpected error " << os_error
+                  << " mapped to net::ERR_UNEXPECTED";
+      return ERR_UNEXPECTED;
     case WSAEHOSTUNREACH:
     case WSAENETUNREACH:
       return ERR_ADDRESS_UNREACHABLE;
     case WSAEADDRNOTAVAIL:
       return ERR_ADDRESS_INVALID;
-    case WSA_IO_INCOMPLETE:
-      return ERR_UNEXPECTED;
     case ERROR_SUCCESS:
       return OK;
     default:
@@ -109,6 +110,13 @@ int MapConnectError(int os_error) {
       int net_error = MapWinsockError(os_error);
       if (net_error == ERR_FAILED)
         return ERR_CONNECTION_FAILED;  // More specific than ERR_FAILED.
+
+      // Give a more specific error when the user is offline.
+      if (net_error == ERR_ADDRESS_UNREACHABLE &&
+          NetworkChangeNotifier::IsOffline()) {
+        return ERR_INTERNET_DISCONNECTED;
+      }
+
       return net_error;
     }
   }
@@ -342,7 +350,7 @@ int TCPClientSocketWin::DoConnectLoop(int result) {
         rv = DoConnectComplete(rv);
         break;
       default:
-        LOG(DFATAL) << "bad state";
+        LOG(DFATAL) << "bad state " << state;
         rv = ERR_UNEXPECTED;
         break;
     }
@@ -510,8 +518,8 @@ bool TCPClientSocketWin::IsConnectedAndIdle() const {
 int TCPClientSocketWin::GetPeerAddress(AddressList* address) const {
   DCHECK(CalledOnValidThread());
   DCHECK(address);
-  if (!current_ai_)
-    return ERR_FAILED;
+  if (!IsConnected())
+    return ERR_SOCKET_NOT_CONNECTED;
   address->Copy(current_ai_, false);
   return OK;
 }

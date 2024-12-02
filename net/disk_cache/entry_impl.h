@@ -144,6 +144,9 @@ class EntryImpl : public Entry, public base::RefCounted<EntryImpl> {
   bool CreateBlock(int size, Addr* address);
 
   // Deletes the data pointed by address, maybe backed by files_[index].
+  // Note that most likely the caller should delete (and store) the reference to
+  // |address| *before* calling this method because we don't want to have an
+  // entry using an address that is already free.
   void DeleteData(Addr address, int index);
 
   // Updates ranking information.
@@ -176,8 +179,9 @@ class EntryImpl : public Entry, public base::RefCounted<EntryImpl> {
   // bytes to |offset|.
   bool PrepareBuffer(int index, int offset, int buf_len);
 
-  // Flushes the in-memory data to the backing storage.
-  bool Flush(int index);
+  // Flushes the in-memory data to the backing storage. The data destination
+  // is determined based on the current data length and |min_len|.
+  bool Flush(int index, int min_len);
 
   // Updates the size of a given data stream.
   void UpdateSize(int index, int old_size, int new_size);

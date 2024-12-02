@@ -14,6 +14,7 @@
 #include "net/base/x509_certificate.h"
 #endif
 
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/leak_annotations.h"
 #include "base/logging.h"
@@ -26,7 +27,7 @@
 #include "net/base/host_resolver.h"
 #include "net/base/test_completion_callback.h"
 #include "net/socket/tcp_client_socket.h"
-#include "net/socket/tcp_pinger.h"
+#include "net/test/python_utils.h"
 #include "testing/platform_test.h"
 
 namespace {
@@ -37,22 +38,44 @@ const int kServerConnectionAttempts = 10;
 // Connection timeout in milliseconds for tests.
 const int kServerConnectionTimeoutMs = 1000;
 
-int GetPort(net::TestServer::Type type) {
+const char kTestServerShardFlag[] = "test-server-shard";
+
+int GetPortBase(net::TestServer::Type type) {
   switch (type) {
     case net::TestServer::TYPE_FTP:
-      return 1338;
+      return 3117;
     case net::TestServer::TYPE_HTTP:
       return 1337;
     case net::TestServer::TYPE_HTTPS:
-    case net::TestServer::TYPE_HTTPS_CLIENT_AUTH:
-    case net::TestServer::TYPE_HTTPS_EXPIRED_CERTIFICATE:
       return 9443;
-    case net::TestServer::TYPE_HTTPS_MISMATCHED_HOSTNAME:
+    case net::TestServer::TYPE_HTTPS_CLIENT_AUTH:
+      return 9543;
+    case net::TestServer::TYPE_HTTPS_EXPIRED_CERTIFICATE:
+      // TODO(phajdan.jr): Some tests rely on this hardcoded value.
+      // Some uses of this are actually in .html/.js files.
       return 9666;
+    case net::TestServer::TYPE_HTTPS_MISMATCHED_HOSTNAME:
+      return 9643;
     default:
       NOTREACHED();
   }
   return -1;
+}
+
+int GetPort(net::TestServer::Type type) {
+  int port = GetPortBase(type);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(kTestServerShardFlag)) {
+    std::string shard_str(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+                              kTestServerShardFlag));
+    int shard = -1;
+    if (base::StringToInt(shard_str, &shard)) {
+      port += shard;
+    } else {
+      LOG(FATAL) << "Got invalid " << kTestServerShardFlag << " flag value. "
+                 << "An integer is expected.";
+    }
+  }
+  return port;
 }
 
 std::string GetHostname(net::TestServer::Type type) {
@@ -147,20 +170,6 @@ bool TestServer::Stop() {
   return ret;
 }
 
-bool TestServer::WaitToFinish(int timeout_ms) {
-  if (!process_handle_)
-    return true;
-
-  bool ret = base::WaitForSingleProcess(process_handle_, timeout_ms);
-  if (ret) {
-    base::CloseProcessHandle(process_handle_);
-    process_handle_ = base::kNullProcessHandle;
-  } else {
-    LOG(ERROR) << "Timed out.";
-  }
-  return ret;
-}
-
 std::string TestServer::GetScheme() const {
   switch (type_) {
     case TYPE_FTP:
@@ -181,10 +190,9 @@ std::string TestServer::GetScheme() const {
 bool TestServer::GetAddressList(AddressList* address_list) const {
   DCHECK(address_list);
 
-  scoped_refptr<HostResolver> resolver(
+  scoped_ptr<HostResolver> resolver(
       CreateSystemHostResolver(HostResolver::kDefaultParallelism, NULL));
-  HostResolver::RequestInfo info(host_port_pair_.host(),
-                                 host_port_pair_.port());
+  HostResolver::RequestInfo info(host_port_pair_);
   int rv = resolver->Resolve(info, address_list, NULL, NULL, BoundNetLog());
   if (rv != net::OK) {
     LOG(ERROR) << "Failed to resolve hostname: " << host_port_pair_.host();
@@ -235,22 +243,6 @@ bool TestServer::SetPythonPath() {
   AppendToPythonPath(generated_code_dir.Append(FILE_PATH_LITERAL("sync_pb")));
 
   return true;
-}
-
-bool TestServer::WaitToStart() {
-  net::AddressList addr;
-  if (!GetAddressList(&addr))
-    return false;
-
-  net::TCPPinger pinger(addr);
-  int rv = pinger.Ping(
-      base::TimeDelta::FromMilliseconds(kServerConnectionTimeoutMs),
-      kServerConnectionAttempts);
-  bool result = (rv == net::OK);
-  if (!result) {
-    LOG(ERROR) << "Failed to connect to server";
-  }
-  return result;
 }
 
 FilePath TestServer::GetRootCertificatePath() {

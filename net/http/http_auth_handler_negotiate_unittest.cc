@@ -32,7 +32,7 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest {
  public:
   virtual void SetUp() {
     auth_library_.reset(new MockAuthLibrary());
-    resolver_ = new MockHostResolver();
+    resolver_.reset(new MockHostResolver());
     resolver_->rules()->AddIPLiteralRule("alias", "10.0.0.2",
                                            "canonical.example.com");
 
@@ -40,7 +40,7 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest {
     factory_.reset(new HttpAuthHandlerNegotiate::Factory());
     factory_->set_url_security_manager(url_security_manager_.get());
     factory_->set_library(auth_library_.get());
-    factory_->set_host_resolver(resolver_);
+    factory_->set_host_resolver(resolver_.get());
   }
 
   void SetupMocks(MockAuthLibrary* mock_library) {
@@ -212,7 +212,7 @@ class HttpAuthHandlerNegotiateTest : public PlatformTest {
   scoped_ptr<SecPkgInfoW> security_package_;
 #endif
   scoped_ptr<MockAuthLibrary> auth_library_;
-  scoped_refptr<MockHostResolver> resolver_;
+  scoped_ptr<MockHostResolver> resolver_;
   scoped_ptr<URLSecurityManager> url_security_manager_;
   scoped_ptr<HttpAuthHandlerNegotiate::Factory> factory_;
 };
@@ -227,9 +227,7 @@ TEST_F(HttpAuthHandlerNegotiateTest, DisableCname) {
   TestCompletionCallback callback;
   HttpRequestInfo request_info;
   std::string token;
-  string16 username = ASCIIToUTF16("foo");
-  string16 password = ASCIIToUTF16("bar");
-  EXPECT_EQ(OK, auth_handler->GenerateAuthToken(&username, &password,
+  EXPECT_EQ(OK, auth_handler->GenerateAuthToken(NULL, NULL,
                                                 &request_info,
                                                 &callback, &token));
 #if defined(OS_WIN)
@@ -248,9 +246,7 @@ TEST_F(HttpAuthHandlerNegotiateTest, DisableCnameStandardPort) {
   TestCompletionCallback callback;
   HttpRequestInfo request_info;
   std::string token;
-  string16 username = ASCIIToUTF16("foo");
-  string16 password = ASCIIToUTF16("bar");
-  EXPECT_EQ(OK, auth_handler->GenerateAuthToken(&username, &password,
+  EXPECT_EQ(OK, auth_handler->GenerateAuthToken(NULL, NULL,
                                                 &request_info,
                                                 &callback, &token));
 #if defined(OS_WIN)
@@ -269,9 +265,7 @@ TEST_F(HttpAuthHandlerNegotiateTest, DisableCnameNonstandardPort) {
   TestCompletionCallback callback;
   HttpRequestInfo request_info;
   std::string token;
-  string16 username = ASCIIToUTF16("foo");
-  string16 password = ASCIIToUTF16("bar");
-  EXPECT_EQ(OK, auth_handler->GenerateAuthToken(&username, &password,
+  EXPECT_EQ(OK, auth_handler->GenerateAuthToken(NULL, NULL,
                                                 &request_info,
                                                 &callback, &token));
 #if defined(OS_WIN)
@@ -290,9 +284,7 @@ TEST_F(HttpAuthHandlerNegotiateTest, CnameSync) {
   TestCompletionCallback callback;
   HttpRequestInfo request_info;
   std::string token;
-  string16 username = ASCIIToUTF16("foo");
-  string16 password = ASCIIToUTF16("bar");
-  EXPECT_EQ(OK, auth_handler->GenerateAuthToken(&username, &password,
+  EXPECT_EQ(OK, auth_handler->GenerateAuthToken(NULL, NULL,
                                                 &request_info,
                                                 &callback, &token));
 #if defined(OS_WIN)
@@ -311,10 +303,8 @@ TEST_F(HttpAuthHandlerNegotiateTest, CnameAsync) {
   TestCompletionCallback callback;
   HttpRequestInfo request_info;
   std::string token;
-  string16 username = ASCIIToUTF16("foo");
-  string16 password = ASCIIToUTF16("bar");
   EXPECT_EQ(ERR_IO_PENDING, auth_handler->GenerateAuthToken(
-      &username, &password, &request_info, &callback, &token));
+      NULL, NULL, &request_info, &callback, &token));
   EXPECT_EQ(OK, callback.WaitForResult());
 #if defined(OS_WIN)
   EXPECT_EQ(L"HTTP/canonical.example.com", auth_handler->spn());

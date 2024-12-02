@@ -62,9 +62,9 @@ class IFrameLoader : public NotificationObserver {
     script = StringPrintf(
         "window.domAutomationController.send(getIFrameSrc(%d))", iframe_id);
     std::string iframe_src;
-    ui_test_utils::ExecuteJavaScriptAndExtractString(
+    EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
         browser->GetSelectedTabContents()->render_view_host(),
-        L"", UTF8ToWide(script), &iframe_src);
+        L"", UTF8ToWide(script), &iframe_src));
     iframe_url_ = GURL(iframe_src);
   }
 
@@ -171,11 +171,10 @@ class GeolocationNotificationObserver : public NotificationObserver {
   std::string javascript_response_;
 };
 
-void NotifyGeopositionOnIOThread(const Geoposition& geoposition) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+void NotifyGeoposition(const Geoposition& geoposition) {
   DCHECK(MockLocationProvider::instance_);
   MockLocationProvider::instance_->position_ = geoposition;
-  MockLocationProvider::instance_->UpdateListeners();
+  MockLocationProvider::instance_->HandlePositionChanged();
   LOG(WARNING) << "MockLocationProvider listeners updated";
 }
 
@@ -321,9 +320,9 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
     std::string script = StringPrintf(
         "window.domAutomationController.send(%s)", function.c_str());
     std::string result;
-    ui_test_utils::ExecuteJavaScriptAndExtractString(
+    ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
         tab_contents->render_view_host(),
-        iframe_xpath_, UTF8ToWide(script), &result);
+        iframe_xpath_, UTF8ToWide(script), &result));
     EXPECT_EQ(expected, result);
   }
 
@@ -371,9 +370,13 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, ErrorOnPermissionDenied) {
   CheckStringValueFromJavascript("1", "geoGetLastError()");
 }
 
-// TODO(bulach): investigate why this fails on mac. It may be related to:
-// http://crbug.com/29424. This also fails on Vista: http://crbug.com/44589
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, DISABLED_NoInfobarForSecondTab) {
+// http://crbug.com/44589. Hangs on Mac, crashes on Windows
+#if defined(OS_MACOSX) || defined(OS_WINDOWS)
+#define MAYBE_NoInfobarForSecondTab DISABLED_NoInfobarForSecondTab
+#else
+#define MAYBE_NoInfobarForSecondTab NoInfobarForSecondTab
+#endif
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_NoInfobarForSecondTab) {
   ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   AddGeolocationWatch(true);
   SetInfobarResponse(current_url_, true);
@@ -386,13 +389,12 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, DISABLED_NoInfobarForSecondTab) {
   CheckGeoposition(MockLocationProvider::instance_->position_);
 }
 
-#if defined(OS_MACOSX)
-// Fails sometimes on mac: http://crbug.com/47053
-#define MAYBE_NoInfobarForDeniedOrigin FLAKY_NoInfobarForDeniedOrigin
+// http://crbug.com/44589. Hangs on Mac, crashes on Windows
+#if defined(OS_MACOSX) || defined(OS_WINDOWS)
+#define MAYBE_NoInfobarForDeniedOrigin DISABLED_NoInfobarForDeniedOrigin
 #else
 #define MAYBE_NoInfobarForDeniedOrigin NoInfobarForDeniedOrigin
 #endif
-
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_NoInfobarForDeniedOrigin) {
   ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   current_browser_->profile()->GetGeolocationContentSettingsMap()->
@@ -415,8 +417,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoInfobarForAllowedOrigin) {
   CheckGeoposition(MockLocationProvider::instance_->position_);
 }
 
-// http://crbug.com/52518
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_NoInfobarForOffTheRecord) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoInfobarForOffTheRecord) {
   // First, check infobar will be created for regular profile
   ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   AddGeolocationWatch(true);
@@ -431,8 +432,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_NoInfobarForOffTheRecord) {
   CheckGeoposition(MockLocationProvider::instance_->position_);
 }
 
-// http://crbug.com/52518
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_IFramesWithFreshPosition) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithFreshPosition) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
   ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
   LOG(WARNING) << "frames loaded";
@@ -455,8 +455,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_IFramesWithFreshPosition) {
   // MockLocationProvider must have been created.
   ASSERT_TRUE(MockLocationProvider::instance_);
   Geoposition fresh_position = GeopositionFromLatLong(3.17, 4.23);
-  ChromeThread::PostTask(ChromeThread::IO, FROM_HERE, NewRunnableFunction(
-      &NotifyGeopositionOnIOThread, fresh_position));
+  NotifyGeoposition(fresh_position);
   WaitForJSPrompt();
   CheckGeoposition(fresh_position);
 
@@ -471,9 +470,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_IFramesWithFreshPosition) {
 }
 
 
-// http://crbug.com/52518
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       FLAKY_IFramesWithCachedPosition) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, IFramesWithCachedPosition) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
   ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
 
@@ -487,8 +484,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   // MockLocationProvider must have been created.
   ASSERT_TRUE(MockLocationProvider::instance_);
   Geoposition cached_position = GeopositionFromLatLong(5.67, 8.09);
-  ChromeThread::PostTask(ChromeThread::IO, FROM_HERE, NewRunnableFunction(
-      &NotifyGeopositionOnIOThread, cached_position));
+  NotifyGeoposition(cached_position);
   WaitForJSPrompt();
   CheckGeoposition(cached_position);
 
@@ -506,7 +502,9 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   CheckGeoposition(cached_position);
 }
 
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, CancelPermissionForFrame) {
+// See http://crbug.com/56033
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
+                       FLAKY_CancelPermissionForFrame) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
   ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
   LOG(WARNING) << "frames loaded";
@@ -532,8 +530,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, CancelPermissionForFrame) {
   EXPECT_EQ(num_infobars_before_cancel, num_infobars_after_cancel + 1);
 }
 
-// http://crbug.com/52518
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_InvalidUrlRequest) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, InvalidUrlRequest) {
   // Tests that an invalid URL (e.g. from a popup window) is rejected
   // correctly. Also acts as a regression test for http://crbug.com/40478
   html_for_tests_ = "files/geolocation/invalid_request_url.html";
@@ -543,8 +540,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_InvalidUrlRequest) {
   CheckStringValueFromJavascriptForTab("1", "isAlive()", original_tab);
 }
 
-// http://crbug.com/52518
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_NoInfoBarBeforeStart) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoInfoBarBeforeStart) {
   // See http://crbug.com/42789
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
   ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
@@ -567,8 +563,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_NoInfoBarBeforeStart) {
   CheckGeoposition(MockLocationProvider::instance_->position_);
 }
 
-// http://crbug.com/52518
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_TwoWatchesInOneFrame) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, TwoWatchesInOneFrame) {
   html_for_tests_ = "files/geolocation/two_watches.html";
   ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   // First, set the JavaScript to popup an alert when it receives
@@ -590,8 +585,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, FLAKY_TwoWatchesInOneFrame) {
 
   // The second watch will now have cancelled. Ensure an update still makes
   // its way through to the first watcher.
-  ChromeThread::PostTask(ChromeThread::IO, FROM_HERE, NewRunnableFunction(
-      &NotifyGeopositionOnIOThread, final_position));
+  NotifyGeoposition(final_position);
   WaitForJSPrompt();
   CheckGeoposition(final_position);
 }

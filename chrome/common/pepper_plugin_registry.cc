@@ -8,14 +8,23 @@
 #include "base/file_util.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "remoting/client/plugin/pepper_entrypoints.h"
 
+const char* PepperPluginRegistry::kPDFPluginName = "Chrome PDF Viewer";
+const char* PepperPluginRegistry::kPDFPluginMimeType = "application/pdf";
+const char* PepperPluginRegistry::kPDFPluginExtension = "pdf";
+const char* PepperPluginRegistry::kPDFPluginDescription =
+    "Portable Document Format";
+
 PepperPluginInfo::PepperPluginInfo() : is_internal(false) {
 }
+
+PepperPluginInfo::~PepperPluginInfo() {}
 
 // static
 PepperPluginRegistry* PepperPluginRegistry::GetInstance() {
@@ -112,10 +121,10 @@ void PepperPluginRegistry::GetExtraPlugins(
     if (skip_pdf_file_check || file_util::PathExists(path)) {
       PepperPluginInfo pdf;
       pdf.path = path;
-      pdf.name = "Chrome PDF Viewer";
-      pdf.mime_types.push_back("application/pdf");
-      pdf.file_extensions = "pdf";
-      pdf.type_descriptions = "Portable Document Format";
+      pdf.name = kPDFPluginName;
+      pdf.mime_types.push_back(kPDFPluginMimeType);
+      pdf.file_extensions = kPDFPluginExtension;
+      pdf.type_descriptions = kPDFPluginDescription;
       plugins->push_back(pdf);
 
       skip_pdf_file_check = true;
@@ -166,6 +175,8 @@ pepper::PluginModule* PepperPluginRegistry::GetModule(
     return NULL;
   return it->second;
 }
+
+PepperPluginRegistry::~PepperPluginRegistry() {}
 
 PepperPluginRegistry::PepperPluginRegistry() {
   InternalPluginInfoList internal_plugin_info;

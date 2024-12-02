@@ -128,6 +128,9 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   void FailNextPostBufferToPathCall() { fail_next_postbuffer_ = true; }
 
+  void SetClearUserDataResponseStatus(
+      sync_pb::ClientToServerResponse::ErrorType errortype);
+
   // A visitor class to allow a test to change some monitoring state atomically
   // with the action of overriding the response codes sent back to the Syncer
   // (for example, so you can say "ThrottleNextRequest, and assert no more
@@ -185,6 +188,9 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   }
 
   void set_store_birthday(string new_birthday) {
+    // Multiple threads can set store_birthday_ in our tests, need to lock it to
+    // ensure atomic read/writes and avoid race conditions.
+    AutoLock lock(store_birthday_lock_);
     store_birthday_ = new_birthday;
   }
 
@@ -209,7 +215,12 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   void SetServerNotReachable();
 
-  std::string store_birthday() { return store_birthday_; }
+  // Const necessary to avoid any hidden copy-on-write issues that would break
+  // in multithreaded scenarios (see |set_store_birthday|).
+  const std::string& store_birthday() {
+    AutoLock lock(store_birthday_lock_);
+    return store_birthday_;
+  }
 
   // Locate the most recent update message for purpose of alteration.
   sync_pb::SyncEntity* GetMutableLastUpdate();
@@ -230,7 +241,8 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
                            const std::string& auth_token);
   void ProcessCommit(sync_pb::ClientToServerMessage* csm,
                      sync_pb::ClientToServerResponse* response_buffer);
-
+  void ProcessClearData(sync_pb::ClientToServerMessage* csm,
+                        sync_pb::ClientToServerResponse* response);
   void AddDefaultBookmarkData(sync_pb::SyncEntity* entity, bool is_folder);
 
   // Determine if one entry in a commit should be rejected with a conflict.
@@ -265,6 +277,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   // The store birthday we send to the client.
   string store_birthday_;
+  Lock store_birthday_lock_;
   bool store_birthday_sent_;
   bool client_stuck_;
   string commit_time_rename_prepended_string_;
@@ -280,6 +293,10 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   sync_pb::GetUpdatesResponse updates_;
   scoped_ptr<Callback0::Type> mid_commit_callback_;
   MidCommitObserver* mid_commit_observer_;
+
+  // The clear data response we'll return in the next response
+  sync_pb::ClientToServerResponse::ErrorType
+      clear_user_data_response_errortype_;
 
   // The AUTHENTICATE response we'll return for auth requests.
   sync_pb::AuthenticateResponse auth_response_;

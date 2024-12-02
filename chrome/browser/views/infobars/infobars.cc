@@ -124,11 +124,8 @@ InfoBar::~InfoBar() {
 
 // InfoBar, views::View overrides: ---------------------------------------------
 
-bool InfoBar::GetAccessibleRole(AccessibilityTypes::Role* role) {
-  DCHECK(role);
-
-  *role = AccessibilityTypes::ROLE_PANE;
-  return true;
+AccessibilityTypes::Role InfoBar::GetAccessibleRole() {
+  return AccessibilityTypes::ROLE_ALERT;
 }
 
 gfx::Size InfoBar::GetPreferredSize() {
@@ -151,6 +148,19 @@ void InfoBar::ViewHierarchyChanged(bool is_add, views::View* parent,
     } else {
       InfoBarRemoved();
     }
+  }
+
+  if (GetWidget() && GetWidget()->IsAccessibleWidget()) {
+    // For accessibility, make the close button the last child view.
+    if (parent == this && child != close_button_ &&
+        HasChildView(close_button_) &&
+        GetChildViewAt(GetChildViewCount() - 1) != close_button_) {
+      RemoveChildView(close_button_);
+      AddChildView(close_button_);
+    }
+
+    // Allow screen reader users to focus the close button.
+    close_button_->SetFocusable(true);
   }
 }
 
@@ -182,6 +192,17 @@ void InfoBar::ButtonPressed(views::Button* sender, const views::Event& event) {
     if (delegate_)
       delegate_->InfoBarDismissed();
     RemoveInfoBar();
+  }
+}
+
+// InfoBar, views::FocusChangeListener implementation: ------------------
+
+void InfoBar::FocusWillChange(View* focused_before, View* focused_now) {
+  // This will trigger some screen readers to read the entire contents of this
+  // infobar.
+  if (focused_before && focused_now &&
+      !this->IsParentOf(focused_before) && this->IsParentOf(focused_now)) {
+    NotifyAccessibilityEvent(AccessibilityTypes::EVENT_ALERT);
   }
 }
 
@@ -253,6 +274,11 @@ void InfoBar::InfoBarAdded() {
                                                          GetFocusManager()));
   }
 #endif
+
+  if (GetFocusManager())
+    GetFocusManager()->AddFocusChangeListener(this);
+
+  NotifyAccessibilityEvent(AccessibilityTypes::EVENT_ALERT);
 }
 
 void InfoBar::InfoBarRemoved() {
@@ -265,6 +291,9 @@ void InfoBar::InfoBarRemoved() {
   // since no-one refers to us now.
   MessageLoop::current()->PostTask(FROM_HERE,
       delete_factory_.NewRunnableMethod(&InfoBar::DeleteSelf));
+
+  if (GetFocusManager())
+    GetFocusManager()->RemoveFocusChangeListener(this);
 }
 
 void InfoBar::DestroyFocusTracker(bool restore_focus) {
@@ -527,11 +556,11 @@ void ConfirmInfoBar::Layout() {
 void ConfirmInfoBar::ViewHierarchyChanged(bool is_add,
                                           views::View* parent,
                                           views::View* child) {
-  InfoBar::ViewHierarchyChanged(is_add, parent, child);
   if (is_add && child == this && !initialized_) {
     Init();
     initialized_ = true;
   }
+  InfoBar::ViewHierarchyChanged(is_add, parent, child);
 }
 
 // ConfirmInfoBar, views::ButtonListener implementation: ---------------

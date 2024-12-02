@@ -25,7 +25,11 @@ namespace net {
 
 class AddressList;
 class ClientSocketHandle;
+class GrowableIOBuffer;
+class HttpAuthCache;
+class HttpAuthHandleFactory;
 class HttpStream;
+class HttpStreamParser;
 class IOBuffer;
 
 class HttpProxyClientSocket : public ClientSocket {
@@ -38,7 +42,8 @@ class HttpProxyClientSocket : public ClientSocket {
                         const std::string& user_agent,
                         const HostPortPair& endpoint,
                         const HostPortPair& proxy_server,
-                        const scoped_refptr<HttpNetworkSession>& session,
+                        HttpAuthCache* http_auth_cache,
+                        HttpAuthHandlerFactory* http_auth_handler_factory,
                         bool tunnel,
                         bool using_spdy);
 
@@ -102,7 +107,7 @@ class HttpProxyClientSocket : public ClientSocket {
   // The size in bytes of the buffer we use to drain the response body that
   // we want to throw away.  The response body is typically a small error
   // page just a few hundred bytes long.
-  enum { kDrainBodyBufferSize = 1024 };
+  static const int kDrainBodyBufferSize = 1024;
 
   int PrepareForAuthRestart();
   int DidDrainBodyForAuthRestart(bool keep_alive);
@@ -135,7 +140,8 @@ class HttpProxyClientSocket : public ClientSocket {
   HttpRequestInfo request_;
   HttpResponseInfo response_;
 
-  scoped_ptr<HttpStream> http_stream_;
+  scoped_refptr<GrowableIOBuffer> parser_buf_;
+  scoped_ptr<HttpStreamParser> http_stream_parser_;
   scoped_refptr<IOBuffer> drain_buf_;
 
   // Stores the underlying socket.

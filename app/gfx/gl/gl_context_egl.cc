@@ -35,11 +35,15 @@ bool BaseEGLContext::InitializeOneOff() {
   EGLNativeDisplayType native_display = EGL_DEFAULT_DISPLAY;
 #endif
   g_display = eglGetDisplay(native_display);
-  if (!g_display)
+  if (!g_display) {
+    LOG(ERROR) << "eglGetDisplay failed.";
     return false;
+  }
 
-  if (!eglInitialize(g_display, NULL, NULL) == EGL_TRUE)
+  if (!eglInitialize(g_display, NULL, NULL)) {
+    LOG(ERROR) << "eglInitialize failed.";
     return false;
+  }
 
   // Choose an EGL configuration.
   static const EGLint kConfigAttribs[] = {
@@ -64,11 +68,14 @@ bool BaseEGLContext::InitializeOneOff() {
                        NULL,
                        0,
                        &num_configs)) {
+    LOG(ERROR) << "eglChooseConfig failed.";
     return false;
   }
 
-  if (num_configs == 0)
+  if (num_configs == 0) {
+    LOG(ERROR) << "No suitable EGL configs found.";
     return false;
+  }
 
   scoped_array<EGLConfig> configs(new EGLConfig[num_configs]);
   if (!eglChooseConfig(g_display,
@@ -76,6 +83,7 @@ bool BaseEGLContext::InitializeOneOff() {
                        configs.get(),
                        num_configs,
                        &num_configs)) {
+    LOG(ERROR) << "eglChooseConfig failed.";
     return false;
   }
 
@@ -83,6 +91,18 @@ bool BaseEGLContext::InitializeOneOff() {
 
   initialized = true;
   return true;
+}
+
+EGLDisplay BaseEGLContext::GetDisplay() {
+  return g_display;
+}
+
+std::string BaseEGLContext::GetExtensions() {
+  const char* extensions = eglQueryString(g_display, EGL_EXTENSIONS);
+  if (!extensions)
+    return GLContext::GetExtensions();
+
+  return GLContext::GetExtensions() + " " + extensions;
 }
 
 NativeViewEGLContext::NativeViewEGLContext(void* window)
@@ -104,6 +124,7 @@ bool NativeViewEGLContext::Initialize() {
   surface_ = eglCreateWindowSurface(g_display, g_config, native_window, NULL);
 
   if (!surface_) {
+    LOG(ERROR) << "eglCreateWindowSurface failed.";
     Destroy();
     return false;
   }
@@ -111,16 +132,19 @@ bool NativeViewEGLContext::Initialize() {
   // Create a context.
   context_ = eglCreateContext(g_display, g_config, NULL, NULL);
   if (!context_) {
+    LOG(ERROR) << "eglCreateContext failed.";
     Destroy();
     return false;
   }
 
   if (!MakeCurrent()) {
+    LOG(ERROR) << "MakeCurrent failed.";
     Destroy();
     return false;
   }
 
   if (!InitializeCommon()) {
+    LOG(ERROR) << "GLContext::InitializeCommon failed.";
     Destroy();
     return false;
   }
@@ -156,14 +180,18 @@ bool NativeViewEGLContext::IsOffscreen() {
   return false;
 }
 
-void NativeViewEGLContext::SwapBuffers() {
-  eglSwapBuffers(g_display, surface_);
+bool NativeViewEGLContext::SwapBuffers() {
+  return eglSwapBuffers(g_display, surface_) == EGL_TRUE;
 }
 
 gfx::Size NativeViewEGLContext::GetSize() {
 #if defined(OS_WIN)
   RECT rect;
-  CHECK(GetClientRect(static_cast<HWND>(window_), &rect));
+  if (!GetClientRect(static_cast<HWND>(window_), &rect)) {
+    DCHECK(false) << "GetClientRect failed.";
+    return gfx::Size();
+  }
+
   return gfx::Size(rect.right - rect.left, rect.bottom - rect.top);
 #else
   // TODO(piman): This doesn't work correctly on Windows yet, the size doesn't
@@ -178,6 +206,11 @@ gfx::Size NativeViewEGLContext::GetSize() {
 
 void* NativeViewEGLContext::GetHandle() {
   return context_;
+}
+
+void NativeViewEGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  eglSwapInterval(g_display, interval);
 }
 
 EGLSurface NativeViewEGLContext::GetSurface() {
@@ -273,8 +306,9 @@ bool SecondaryEGLContext::IsOffscreen() {
   return true;
 }
 
-void SecondaryEGLContext::SwapBuffers() {
+bool SecondaryEGLContext::SwapBuffers() {
   NOTREACHED() << "Attempted to call SwapBuffers on a SecondaryEGLContext.";
+  return false;
 }
 
 gfx::Size SecondaryEGLContext::GetSize() {
@@ -284,6 +318,11 @@ gfx::Size SecondaryEGLContext::GetSize() {
 
 void* SecondaryEGLContext::GetHandle() {
   return context_;
+}
+
+void SecondaryEGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  NOTREACHED() << "Attempt to call SetSwapInterval on a SecondaryEGLContext.";
 }
 
 EGLSurface SecondaryEGLContext::GetSurface() {

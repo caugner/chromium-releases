@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -256,7 +257,7 @@ void ResetBeforeTestRun(WebView* view) {
 // code here what that would have inlined.
 void DumpLeakedObject(const char* file, int line, const char* object,
                       int count) {
-  std::string msg = StringPrintf("%s LEAKED %d TIMES", object, count);
+  std::string msg = base::StringPrintf("%s LEAKED %d TIMES", object, count);
   AppendToLog(file, line, msg.c_str());
 }
 #endif
@@ -312,6 +313,32 @@ WebString FilePathToWebString(const FilePath& file_path) {
   return FilePathStringToWebString(file_path.value());
 }
 
+WebKit::WebFileError PlatformFileErrorToWebFileError(
+    base::PlatformFileError error_code) {
+  switch (error_code) {
+    case base::PLATFORM_FILE_ERROR_NOT_FOUND:
+      return WebKit::WebFileErrorNotFound;
+    case base::PLATFORM_FILE_ERROR_INVALID_OPERATION:
+    case base::PLATFORM_FILE_ERROR_EXISTS:
+    case base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY:
+    case base::PLATFORM_FILE_ERROR_NOT_A_FILE:
+    case base::PLATFORM_FILE_ERROR_NOT_EMPTY:
+      return WebKit::WebFileErrorInvalidModification;
+    case base::PLATFORM_FILE_ERROR_ACCESS_DENIED:
+      return WebKit::WebFileErrorNoModificationAllowed;
+    case base::PLATFORM_FILE_ERROR_FAILED:
+      return WebKit::WebFileErrorInvalidState;
+    case base::PLATFORM_FILE_ERROR_ABORT:
+      return WebKit::WebFileErrorAbort;
+    case base::PLATFORM_FILE_ERROR_SECURITY:
+      return WebKit::WebFileErrorSecurity;
+    case base::PLATFORM_FILE_ERROR_NO_SPACE:
+      return WebKit::WebFileErrorQuotaExceeded;
+    default:
+      return WebKit::WebFileErrorInvalidModification;
+  }
+}
+
 namespace {
 
 struct UserAgentState {
@@ -354,7 +381,7 @@ const std::string& GetUserAgent(const GURL& url) {
   if (!g_user_agent->user_agent_is_overridden) {
     // Workarounds for sites that use misguided UA sniffing.
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-    if (MatchPatternASCII(url.host(), "*.mail.yahoo.com")) {
+    if (MatchPattern(url.host(), "*.mail.yahoo.com")) {
       // mail.yahoo.com is ok with Windows Chrome but not Linux Chrome.
       // http://bugs.chromium.org/11136
       // TODO(evanm): remove this if Yahoo fixes their sniffing.

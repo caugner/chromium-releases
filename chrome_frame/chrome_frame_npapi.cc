@@ -7,7 +7,9 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome_frame/ff_privilege_check.h"
@@ -245,6 +247,11 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
       automation_client_->set_use_chrome_network(chrome_network_arg);
   }
 
+  static const wchar_t kHandleTopLevelRequests[] = L"HandleTopLevelRequests";
+  bool top_level_requests = GetConfigBool(true, kHandleTopLevelRequests);
+  automation_client_->set_handle_top_level_requests(top_level_requests);
+  automation_client_->set_route_all_top_level_navigations(true);
+
   // Setup Url fetcher.
   url_fetcher_.set_NPPInstance(instance_);
   url_fetcher_.set_frame_busting(!is_privileged_);
@@ -274,7 +281,7 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
   // host's in-private mode.
   return InitializeAutomation(profile_name, extra_arguments,
                               GetBrowserIncognitoMode(), true,
-                              GURL(src_), GURL());
+                              GURL(src_), GURL(), true);
 }
 
 void ChromeFrameNPAPI::Uninitialize() {
@@ -419,7 +426,7 @@ void ChromeFrameNPAPI::UrlNotify(const char* url, NPReason reason,
 void ChromeFrameNPAPI::OnAcceleratorPressed(int tab_handle,
                                             const MSG& accel_message) {
   DLOG(INFO) << __FUNCTION__ << " msg:"
-      << StringPrintf("0x%04X", accel_message.message) << " key:"
+      << base::StringPrintf("0x%04X", accel_message.message) << " key:"
       << accel_message.wParam;
 
   // The host browser does call TranslateMessage on messages like WM_KEYDOWN
@@ -465,7 +472,9 @@ void ChromeFrameNPAPI::OnTabbedOut(int tab_handle, bool reverse) {
 }
 
 void ChromeFrameNPAPI::OnOpenURL(int tab_handle,
-                                 const GURL& url, int open_disposition) {
+                                 const GURL& url,
+                                 const GURL& referrer,
+                                 int open_disposition) {
   std::string target;
   switch (open_disposition) {
     case NEW_FOREGROUND_TAB:
@@ -1429,6 +1438,16 @@ bool ChromeFrameNPAPI::GetBrowserIncognitoMode() {
   }
 
   return incognito_mode;
+}
+
+bool ChromeFrameNPAPI::PreProcessContextMenu(HMENU menu) {
+  // TODO: Remove this overridden method once HandleContextMenuCommand
+  // implements "About Chrome Frame" handling.
+  if (!is_privileged_) {
+    // Call base class (adds 'About' item).
+    return ChromeFramePlugin::PreProcessContextMenu(menu);
+  }
+  return true;
 }
 
 bool ChromeFrameNPAPI::HandleContextMenuCommand(UINT cmd,

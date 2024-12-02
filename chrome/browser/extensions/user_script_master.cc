@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,7 +45,7 @@ static bool GetDeclarationValue(const base::StringPiece& line,
 
 UserScriptMaster::ScriptReloader::ScriptReloader(UserScriptMaster* master)
     : master_(master) {
-  CHECK(ChromeThread::GetCurrentThreadIdentifier(&master_thread_id_));
+  CHECK(BrowserThread::GetCurrentThreadIdentifier(&master_thread_id_));
 }
 
 // static
@@ -88,7 +88,7 @@ bool UserScriptMaster::ScriptReloader::ParseMetadataHeader(
 
       std::string value;
       if (GetDeclarationValue(line, kIncludeDeclaration, &value)) {
-        // We escape some characters that MatchPatternASCII() considers special.
+        // We escape some characters that MatchPattern() considers special.
         ReplaceSubstringsAfterOffset(&value, 0, "\\", "\\\\");
         ReplaceSubstringsAfterOffset(&value, 0, "?", "\\?");
         script->add_glob(value);
@@ -137,8 +137,8 @@ void UserScriptMaster::ScriptReloader::StartScan(
   // Add a reference to ourselves to keep ourselves alive while we're running.
   // Balanced by NotifyMaster().
   AddRef();
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(
           this, &UserScriptMaster::ScriptReloader::RunScan, script_dir,
           lone_scripts));
@@ -174,7 +174,6 @@ static bool LoadScriptContent(UserScript::File* script_file) {
     script_file->set_content(content);
   }
 
-  LOG(INFO) << "Loaded user script file: " << path.value();
   return true;
 }
 
@@ -254,7 +253,7 @@ static base::SharedMemory* Serialize(const UserScriptList& scripts) {
   // Create the shared memory object.
   scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory());
 
-  if (!shared_memory->Create(std::wstring(),  // anonymous
+  if (!shared_memory->Create(std::string(),  // anonymous
                              false,  // read-only
                              false,  // open existing
                              pickle.size()))
@@ -288,7 +287,7 @@ void UserScriptMaster::ScriptReloader::RunScan(
   // Scripts now contains list of up-to-date scripts. Load the content in the
   // shared memory and let the master know it's ready. We need to post the task
   // back even if no scripts ware found to balance the AddRef/Release calls
-  ChromeThread::PostTask(
+  BrowserThread::PostTask(
       master_thread_id_, FROM_HERE,
       NewRunnableMethod(
           this, &ScriptReloader::NotifyMaster, Serialize(scripts)));

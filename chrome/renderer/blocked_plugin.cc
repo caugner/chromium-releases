@@ -10,7 +10,6 @@
 #include "base/values.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/plugin_group.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_view.h"
 #include "grit/generated_resources.h"
@@ -18,65 +17,55 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginContainer.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "webkit/glue/plugins/plugin_group.h"
 #include "webkit/glue/plugins/webview_plugin.h"
+#include "webkit/glue/webpreferences.h"
 
-using WebKit::WebCursorInfo;
 using WebKit::WebFrame;
 using WebKit::WebPlugin;
 using WebKit::WebPluginContainer;
 using WebKit::WebPluginParams;
-using WebKit::WebURL;
-using WebKit::WebView;
 
 static const char* const kBlockedPluginDataURL = "chrome://blockedplugindata/";
 
 BlockedPlugin::BlockedPlugin(RenderView* render_view,
                              WebFrame* frame,
                              const WebPluginParams& params,
-                             PluginGroup* group)
+                             const WebPreferences& preferences,
+                             int template_id,
+                             const string16& message)
     : render_view_(render_view),
       frame_(frame),
       plugin_params_(params) {
-  plugin_ = new WebViewPlugin(this);
-
-  WebView* web_view = plugin_->web_view();
-  web_view->mainFrame()->setCanHaveScrollbars(false);
-
-  int resource_id = IDR_BLOCKED_PLUGIN_HTML;
   const base::StringPiece template_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id));
+      ResourceBundle::GetSharedInstance().GetRawDataResource(template_id));
 
   DCHECK(!template_html.empty()) << "unable to load template. ID: "
-                                 << resource_id;
+                                 << template_id;
 
   DictionaryValue values;
-  values.SetString("loadPlugin",
-      l10n_util::GetStringUTF16(IDS_PLUGIN_LOAD));
-  values.SetString("updatePlugin",
-      l10n_util::GetStringUTF16(IDS_PLUGIN_UPDATE));
-  values.SetString("message",
-      l10n_util::GetStringUTF16(IDS_BLOCKED_PLUGINS_MESSAGE));
-  if (group)
-    values.Set("pluginGroup", group->GetDataForUI());
+  values.SetString("message", message);
 
   // "t" is the id of the templates root node.
-  std::string htmlData = jstemplate_builder::GetTemplatesHtml(
+  std::string html_data = jstemplate_builder::GetTemplatesHtml(
       template_html, &values, "t");
 
-  web_view->mainFrame()->loadHTMLString(htmlData,
-                                        GURL(kBlockedPluginDataURL));
+  plugin_ = WebViewPlugin::Create(this,
+                                  preferences,
+                                  html_data,
+                                  GURL(kBlockedPluginDataURL));
 
   registrar_.Add(this,
                  NotificationType::SHOULD_LOAD_PLUGINS,
                  NotificationService::AllSources());
 }
 
+BlockedPlugin::~BlockedPlugin() {}
+
 void BlockedPlugin::BindWebFrame(WebFrame* frame) {
   BindToJavascript(frame, L"plugin");
   BindMethod("load", &BlockedPlugin::Load);
-  BindMethod("update", &BlockedPlugin::Update);
 }
 
 void BlockedPlugin::WillDestroyPlugin() {
@@ -95,23 +84,6 @@ void BlockedPlugin::Observe(NotificationType type,
 
 void BlockedPlugin::Load(const CppArgumentList& args, CppVariant* result) {
   LoadPlugin();
-}
-
-void BlockedPlugin::Update(const CppArgumentList& args, CppVariant* result) {
-  if (args.size() > 0) {
-    CppVariant arg(args[0]);
-    if (arg.isString()) {
-      GURL url(arg.ToString());
-      OpenURL(url);
-    }
-  }
-}
-
-void BlockedPlugin::OpenURL(GURL& url) {
-  render_view_->Send(new ViewHostMsg_OpenURL(render_view_->routing_id(),
-                                             url,
-                                             GURL(),
-                                             CURRENT_TAB));
 }
 
 void BlockedPlugin::LoadPlugin() {

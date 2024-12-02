@@ -73,7 +73,8 @@ class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
 
   // These methods must be called on the UI thread, as they make DBus calls
   // and also call back to the login UI.
-  void OnLoginSuccess(const GaiaAuthConsumer::ClientLoginResult& credentials);
+  void OnLoginSuccess(const GaiaAuthConsumer::ClientLoginResult& credentials,
+                      bool request_pending);
   void CheckOffline(const LoginFailure& error);
   void CheckLocalaccount(const LoginFailure& error);
   void OnLoginFailure(const LoginFailure& error);
@@ -84,12 +85,11 @@ class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
       const GaiaAuthConsumer::ClientLoginResult& credentials);
   void ResyncEncryptedData(
       const GaiaAuthConsumer::ClientLoginResult& credentials);
-
-  // Perform basic canonicalization of |email_address|, taking into account
-  // that gmail does not consider '.' or caps inside a username to matter.
-  // For example, c.masone@gmail.com == cMaSone@gmail.com, per
-  // http://mail.google.com/support/bin/answer.py?hl=en&ctx=mail&answer=10313#
-  static std::string Canonicalize(const std::string& email_address);
+  void RetryAuth(Profile* profile,
+                 const std::string& username,
+                 const std::string& password,
+                 const std::string& login_token,
+                 const std::string& login_captcha);
 
   // Callbacks from GaiaAuthenticator2
   virtual void OnClientLoginFailure(

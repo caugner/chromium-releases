@@ -57,8 +57,8 @@ class SOCKSConnectJob : public ConnectJob {
   SOCKSConnectJob(const std::string& group_name,
                   const scoped_refptr<SOCKSSocketParams>& params,
                   const base::TimeDelta& timeout_duration,
-                  const scoped_refptr<TCPClientSocketPool>& tcp_pool,
-                  const scoped_refptr<HostResolver> &host_resolver,
+                  TCPClientSocketPool* tcp_pool,
+                  HostResolver* host_resolver,
                   Delegate* delegate,
                   NetLog* net_log);
   virtual ~SOCKSConnectJob();
@@ -68,11 +68,11 @@ class SOCKSConnectJob : public ConnectJob {
 
  private:
   enum State {
-    kStateTCPConnect,
-    kStateTCPConnectComplete,
-    kStateSOCKSConnect,
-    kStateSOCKSConnectComplete,
-    kStateNone,
+    STATE_TCP_CONNECT,
+    STATE_TCP_CONNECT_COMPLETE,
+    STATE_SOCKS_CONNECT,
+    STATE_SOCKS_CONNECT_COMPLETE,
+    STATE_NONE,
   };
 
   // Begins the tcp connection and the SOCKS handshake.  Returns OK on success
@@ -91,8 +91,8 @@ class SOCKSConnectJob : public ConnectJob {
   int DoSOCKSConnectComplete(int result);
 
   scoped_refptr<SOCKSSocketParams> socks_params_;
-  const scoped_refptr<TCPClientSocketPool> tcp_pool_;
-  const scoped_refptr<HostResolver> resolver_;
+  TCPClientSocketPool* const tcp_pool_;
+  HostResolver* const resolver_;
 
   State next_state_;
   CompletionCallbackImpl<SOCKSConnectJob> callback_;
@@ -107,10 +107,12 @@ class SOCKSClientSocketPool : public ClientSocketPool {
   SOCKSClientSocketPool(
       int max_sockets,
       int max_sockets_per_group,
-      const scoped_refptr<ClientSocketPoolHistograms>& histograms,
-      const scoped_refptr<HostResolver>& host_resolver,
-      const scoped_refptr<TCPClientSocketPool>& tcp_pool,
+      ClientSocketPoolHistograms* histograms,
+      HostResolver* host_resolver,
+      TCPClientSocketPool* tcp_pool,
       NetLog* net_log);
+
+  virtual ~SOCKSClientSocketPool();
 
   // ClientSocketPool methods:
   virtual int RequestSocket(const std::string& group_name,
@@ -140,28 +142,24 @@ class SOCKSClientSocketPool : public ClientSocketPool {
   virtual LoadState GetLoadState(const std::string& group_name,
                                  const ClientSocketHandle* handle) const;
 
-  virtual Value* GetInfoAsValue(const std::string& name,
-                                const std::string& type) const {
-    return base_.GetInfoAsValue(name, type);
-  }
+  virtual DictionaryValue* GetInfoAsValue(const std::string& name,
+                                          const std::string& type,
+                                          bool include_nested_pools) const;
 
   virtual base::TimeDelta ConnectionTimeout() const {
     return base_.ConnectionTimeout();
   }
 
-  virtual scoped_refptr<ClientSocketPoolHistograms> histograms() const {
+  virtual ClientSocketPoolHistograms* histograms() const {
     return base_.histograms();
   };
-
- protected:
-  virtual ~SOCKSClientSocketPool();
 
  private:
   typedef ClientSocketPoolBase<SOCKSSocketParams> PoolBase;
 
   class SOCKSConnectJobFactory : public PoolBase::ConnectJobFactory {
    public:
-    SOCKSConnectJobFactory(const scoped_refptr<TCPClientSocketPool>& tcp_pool,
+    SOCKSConnectJobFactory(TCPClientSocketPool* tcp_pool,
                            HostResolver* host_resolver,
                            NetLog* net_log)
         : tcp_pool_(tcp_pool),
@@ -179,13 +177,14 @@ class SOCKSClientSocketPool : public ClientSocketPool {
     virtual base::TimeDelta ConnectionTimeout() const;
 
    private:
-    const scoped_refptr<TCPClientSocketPool> tcp_pool_;
-    const scoped_refptr<HostResolver> host_resolver_;
+    TCPClientSocketPool* const tcp_pool_;
+    HostResolver* const host_resolver_;
     NetLog* net_log_;
 
     DISALLOW_COPY_AND_ASSIGN(SOCKSConnectJobFactory);
   };
 
+  TCPClientSocketPool* const tcp_pool_;
   PoolBase base_;
 
   DISALLOW_COPY_AND_ASSIGN(SOCKSClientSocketPool);

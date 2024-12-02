@@ -99,8 +99,7 @@ are exported to translation interchange files (e.g. XMB files), etc.
                       (self.output_directory,
                        os.path.abspath(self.output_directory)))
     self.res = grd_reader.Parse(opts.input, first_id_filename=first_id_filename,
-                                debug=opts.extra_verbose)
-    self.res.SetDefines(self.defines)
+                                debug=opts.extra_verbose, defines=self.defines)
     self.res.RunGatherers(recursive = True)
     self.Process()
     return 0
@@ -182,7 +181,8 @@ are exported to translation interchange files (e.g. XMB files), etc.
       if output.GetType() in ('rc_header', 'resource_map_header',
           'resource_map_source', 'resource_file_map_source'):
         encoding = 'cp1252'
-      elif output.GetType() in ['js_map_format', 'plist', 'plist_strings']:
+      elif output.GetType() in ('js_map_format', 'plist', 'plist_strings',
+          'doc'):
         encoding = 'utf_8'
       else:
         # TODO(gfeher) modify here to set utf-8 encoding for admx/adml

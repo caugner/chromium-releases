@@ -39,15 +39,19 @@ int HttpAuthHandlerFactory::CreatePreemptiveAuthHandlerFromString(
 }
 
 // static
-HttpAuthHandlerRegistryFactory* HttpAuthHandlerFactory::CreateDefault() {
+HttpAuthHandlerRegistryFactory* HttpAuthHandlerFactory::CreateDefault(
+    HostResolver* host_resolver) {
+  DCHECK(host_resolver);
   HttpAuthHandlerRegistryFactory* registry_factory =
       new HttpAuthHandlerRegistryFactory();
   registry_factory->RegisterSchemeFactory(
       "basic", new HttpAuthHandlerBasic::Factory());
   registry_factory->RegisterSchemeFactory(
       "digest", new HttpAuthHandlerDigest::Factory());
-  registry_factory->RegisterSchemeFactory(
-      "negotiate", new HttpAuthHandlerNegotiate::Factory());
+  HttpAuthHandlerNegotiate::Factory* negotiate_factory =
+      new HttpAuthHandlerNegotiate::Factory();
+  negotiate_factory->set_host_resolver(host_resolver);
+  registry_factory->RegisterSchemeFactory("negotiate", negotiate_factory);
   registry_factory->RegisterSchemeFactory(
       "ntlm", new HttpAuthHandlerNTLM::Factory());
   return registry_factory;
@@ -89,7 +93,7 @@ HttpAuthHandlerRegistryFactory* HttpAuthHandlerRegistryFactory::Create(
     HttpAuthHandlerNegotiate::Factory* negotiate_factory =
         new HttpAuthHandlerNegotiate::Factory();
     negotiate_factory->set_url_security_manager(security_manager);
-    DCHECK(host_resolver != NULL || negotiate_disable_cname_lookup);
+    DCHECK(host_resolver || negotiate_disable_cname_lookup);
     negotiate_factory->set_host_resolver(host_resolver);
     negotiate_factory->set_disable_cname_lookup(negotiate_disable_cname_lookup);
     negotiate_factory->set_use_port(negotiate_enable_port);
@@ -137,11 +141,12 @@ int HttpAuthHandlerRegistryFactory::CreateAuthHandler(
     int digest_nonce_count,
     const BoundNetLog& net_log,
     scoped_ptr<HttpAuthHandler>* handler) {
-  if (!challenge->valid()) {
+  std::string scheme = challenge->scheme();
+  if (scheme.empty()) {
     handler->reset();
     return ERR_INVALID_RESPONSE;
   }
-  std::string lower_scheme = StringToLowerASCII(challenge->scheme());
+  std::string lower_scheme = StringToLowerASCII(scheme);
   FactoryMap::iterator it = factory_map_.find(lower_scheme);
   if (it == factory_map_.end()) {
     handler->reset();
