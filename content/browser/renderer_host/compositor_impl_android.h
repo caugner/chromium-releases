@@ -97,10 +97,12 @@ class CONTENT_EXPORT CompositorImpl
   }
 
  private:
+  class AndroidHostDisplayClient;
+
   // Compositor implementation.
   void SetRootWindow(gfx::NativeWindow root_window) override;
   void SetRootLayer(scoped_refptr<cc::Layer> root) override;
-  void SetSurface(jobject surface) override;
+  void SetSurface(jobject surface, bool backed_by_surface_texture) override;
   void SetBackgroundColor(int color) override;
   void SetWindowBounds(const gfx::Size& size) override;
   void SetRequiresAlphaChannel(bool flag) override;
@@ -111,6 +113,7 @@ class CONTENT_EXPORT CompositorImpl
   // LayerTreeHostClient implementation.
   void WillBeginMainFrame() override {}
   void DidBeginMainFrame() override {}
+  void WillUpdateLayers() override {}
   void DidUpdateLayers() override;
   void BeginMainFrame(const viz::BeginFrameArgs& args) override {}
   void BeginMainFrameNotExpectedSoon() override {}
@@ -159,6 +162,8 @@ class CONTENT_EXPORT CompositorImpl
   bool IsDrawingFirstVisibleFrame() const override;
   void SetVSyncPaused(bool paused) override;
   void OnUpdateRefreshRate(float refresh_rate) override;
+  void OnUpdateSupportedRefreshRates(
+      const std::vector<float>& supported_refresh_rates) override;
 
   // viz::HostFrameSinkClient implementation.
   void OnFirstSurfaceActivation(const viz::SurfaceInfo& surface_info) override;
@@ -230,6 +235,7 @@ class CONTENT_EXPORT CompositorImpl
 
   ANativeWindow* window_;
   gpu::SurfaceHandle surface_handle_;
+  bool backed_by_surface_texture_ = false;
 
   CompositorClient* client_;
 

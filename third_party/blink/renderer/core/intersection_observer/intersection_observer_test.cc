@@ -109,15 +109,15 @@ TEST_F(IntersectionObserverTest, NotificationSentWhenRootRemoved) {
   SimRequest main_resource("https://example.com/", "text/html");
   LoadURL("https://example.com/");
   main_resource.Complete(R"HTML(
-<style>
-#target {
-  width: 100px;
-  height: 100px;
-}
-</style>
-<div id='root'>
-  <div id='target'></div>
-</div>
+    <style>
+    #target {
+      width: 100px;
+      height: 100px;
+    }
+    </style>
+    <div id='root'>
+      <div id='target'></div>
+    </div>
   )HTML");
 
   Element* root = GetDocument().getElementById("root");
@@ -421,6 +421,43 @@ TEST_F(IntersectionObserverTest, RootIntersectionWithForceZeroLayoutHeight) {
   EXPECT_TRUE(observer_delegate->LastIntersectionRect().IsEmpty());
 }
 
+TEST_F(IntersectionObserverTest, TrackedTargetBookkeeping) {
+  SimRequest main_resource("https://example.com/", "text/html");
+  LoadURL("https://example.com/");
+  main_resource.Complete(R"HTML(
+    <style>
+    </style>
+    <div id='target'></div>
+  )HTML");
+
+  Element* target = GetDocument().getElementById("target");
+  ASSERT_TRUE(target);
+  IntersectionObserverInit* observer_init = IntersectionObserverInit::Create();
+  DummyExceptionStateForTesting exception_state;
+  TestIntersectionObserverDelegate* observer_delegate =
+      MakeGarbageCollected<TestIntersectionObserverDelegate>(GetDocument());
+  IntersectionObserver* observer1 = IntersectionObserver::Create(
+      observer_init, *observer_delegate, exception_state);
+  ASSERT_FALSE(exception_state.HadException());
+  observer1->observe(target, exception_state);
+  ASSERT_FALSE(exception_state.HadException());
+  IntersectionObserver* observer2 = IntersectionObserver::Create(
+      observer_init, *observer_delegate, exception_state);
+  ASSERT_FALSE(exception_state.HadException());
+  observer2->observe(target, exception_state);
+  ASSERT_FALSE(exception_state.HadException());
+
+  IntersectionObserverController& controller =
+      GetDocument().EnsureIntersectionObserverController();
+  EXPECT_EQ(controller.GetTrackedTargetCountForTesting(), 1u);
+  observer1->unobserve(target, exception_state);
+  ASSERT_FALSE(exception_state.HadException());
+  EXPECT_EQ(controller.GetTrackedTargetCountForTesting(), 1u);
+  observer2->unobserve(target, exception_state);
+  ASSERT_FALSE(exception_state.HadException());
+  EXPECT_EQ(controller.GetTrackedTargetCountForTesting(), 0u);
+}
+
 TEST_F(IntersectionObserverV2Test, TrackVisibilityInit) {
   IntersectionObserverInit* observer_init = IntersectionObserverInit::Create();
   DummyExceptionStateForTesting exception_state;
@@ -492,7 +529,7 @@ TEST_F(IntersectionObserverV2Test, BasicOcclusion) {
   EXPECT_TRUE(observer_delegate->LastEntry()->isIntersecting());
   EXPECT_TRUE(observer_delegate->LastEntry()->isVisible());
 
-  occluder->SetInlineStyleProperty(CSSPropertyMarginTop, "-10px");
+  occluder->SetInlineStyleProperty(CSSPropertyID::kMarginTop, "-10px");
   Compositor().BeginFrame();
   test::RunPendingTasks();
   ASSERT_FALSE(Compositor().NeedsBeginFrame());
@@ -502,7 +539,7 @@ TEST_F(IntersectionObserverV2Test, BasicOcclusion) {
   EXPECT_FALSE(observer_delegate->LastEntry()->isVisible());
 
   // Zero-opacity objects should not count as occluding.
-  occluder->SetInlineStyleProperty(CSSPropertyOpacity, "0");
+  occluder->SetInlineStyleProperty(CSSPropertyID::kOpacity, "0");
   Compositor().BeginFrame();
   test::RunPendingTasks();
   ASSERT_FALSE(Compositor().NeedsBeginFrame());
@@ -551,7 +588,7 @@ TEST_F(IntersectionObserverV2Test, BasicOpacity) {
   EXPECT_TRUE(observer_delegate->LastEntry()->isIntersecting());
   EXPECT_TRUE(observer_delegate->LastEntry()->isVisible());
 
-  transparent->SetInlineStyleProperty(CSSPropertyOpacity, "0.99");
+  transparent->SetInlineStyleProperty(CSSPropertyID::kOpacity, "0.99");
   Compositor().BeginFrame();
   test::RunPendingTasks();
   ASSERT_FALSE(Compositor().NeedsBeginFrame());
@@ -602,7 +639,7 @@ TEST_F(IntersectionObserverV2Test, BasicTransform) {
 
   // 2D translations and proportional upscaling is permitted.
   transformed->SetInlineStyleProperty(
-      CSSPropertyTransform, "translateX(10px) translateY(20px) scale(2)");
+      CSSPropertyID::kTransform, "translateX(10px) translateY(20px) scale(2)");
   Compositor().BeginFrame();
   test::RunPendingTasks();
   ASSERT_FALSE(Compositor().NeedsBeginFrame());
@@ -610,7 +647,8 @@ TEST_F(IntersectionObserverV2Test, BasicTransform) {
   EXPECT_EQ(observer_delegate->EntryCount(), 1);
 
   // Any other transform is not permitted.
-  transformed->SetInlineStyleProperty(CSSPropertyTransform, "skewX(10deg)");
+  transformed->SetInlineStyleProperty(CSSPropertyID::kTransform,
+                                      "skewX(10deg)");
   Compositor().BeginFrame();
   test::RunPendingTasks();
   ASSERT_FALSE(Compositor().NeedsBeginFrame());
