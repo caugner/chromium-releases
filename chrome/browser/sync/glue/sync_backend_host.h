@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,13 +17,13 @@
 #include "base/thread.h"
 #include "base/timer.h"
 #include "chrome/browser/google_service_auth_error.h"
-#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/sync/notification_method.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/ui_model_worker.h"
 #include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
 
 class CancelableTask;
@@ -57,6 +57,10 @@ class SyncFrontend {
   // The backend encountered an authentication problem and requests new
   // credentials to be provided. See SyncBackendHost::Authenticate for details.
   virtual void OnAuthError() = 0;
+
+  // We are no longer permitted to communicate with the server. Sync should
+  // be disabled and state cleaned up at once.
+  virtual void OnStopSyncingPermanently() = 0;
 
  protected:
   // Don't delete through SyncFrontend interface.
@@ -101,11 +105,21 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
                   bool delete_sync_data_folder,
                   bool invalidate_sync_login,
                   bool invalidate_sync_xmpp_login,
+                  bool use_chrome_async_socket,
                   NotificationMethod notification_method);
 
   // Called on |frontend_loop_| to kick off asynchronous authentication.
   void Authenticate(const std::string& username, const std::string& password,
                     const std::string& captcha);
+
+  // This starts the SyncerThread running a Syncer object to communicate with
+  // sync servers.  Until this is called, no changes will leave or enter this
+  // browser from the cloud / sync servers.
+  // Called on |frontend_loop_|.
+  virtual void StartSyncingWithServer();
+
+  // Called on |frontend_loop_| to asynchronously set the passphrase.
+  void SetPassphrase(const std::string& passphrase);
 
   // Called on |frontend_loop_| to kick off shutdown.
   // |sync_disabled| indicates if syncing is being disabled or not.
@@ -180,6 +194,8 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
     registrar_.routing_info[syncable::AUTOFILL] = GROUP_PASSIVE;
     registrar_.routing_info[syncable::THEMES] = GROUP_PASSIVE;
     registrar_.routing_info[syncable::TYPED_URLS] = GROUP_PASSIVE;
+    registrar_.routing_info[syncable::NIGORI] = GROUP_PASSIVE;
+    registrar_.routing_info[syncable::PASSWORDS] = GROUP_PASSIVE;
 
     core_thread_.message_loop()->PostTask(FROM_HERE,
         NewRunnableMethod(core_.get(),
@@ -191,8 +207,12 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
         notification_method));
   }
 #endif
+ protected:
+  // InitializationComplete passes through the SyncBackendHost to forward
+  // on to |frontend_|, and so that tests can intercept here if they need to
+  // set up initial conditions.
+  virtual void HandleInitializationCompletedOnFrontendLoop();
 
- private:
   // The real guts of SyncBackendHost, to keep the public client API clean.
   class Core : public base::RefCountedThreadSafe<SyncBackendHost::Core>,
                public sync_api::SyncManager::Observer {
@@ -211,8 +231,11 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
         const sessions::SyncSessionSnapshot* snapshot);
     virtual void OnInitializationComplete();
     virtual void OnAuthError(const GoogleServiceAuthError& auth_error);
+    virtual void OnPassphraseRequired();
+    virtual void OnPassphraseAccepted();
     virtual void OnPaused();
     virtual void OnResumed();
+    virtual void OnStopSyncingPermanently();
 
     struct DoInitializeOptions {
       DoInitializeOptions(
@@ -224,6 +247,7 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
           bool delete_sync_data_folder,
           bool invalidate_sync_login,
           bool invalidate_sync_xmpp_login,
+          bool use_chrome_async_socket,
           NotificationMethod notification_method)
           : service_url(service_url),
             attempt_last_user_authentication(attempt_last_user_authentication),
@@ -233,6 +257,7 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
             delete_sync_data_folder(delete_sync_data_folder),
             invalidate_sync_login(invalidate_sync_login),
             invalidate_sync_xmpp_login(invalidate_sync_xmpp_login),
+            use_chrome_async_socket(use_chrome_async_socket),
             notification_method(notification_method) {}
 
       GURL service_url;
@@ -243,6 +268,7 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
       bool delete_sync_data_folder;
       bool invalidate_sync_login;
       bool invalidate_sync_xmpp_login;
+      bool use_chrome_async_socket;
       NotificationMethod notification_method;
     };
 
@@ -261,6 +287,20 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
     void DoAuthenticate(const std::string& username,
                         const std::string& password,
                         const std::string& captcha);
+
+    // Called on the SyncBackendHost core_thread_ to tell the syncapi to start
+    // syncing (generally after initialization and authentication).
+    void DoStartSyncing();
+
+    // Called on the SyncBackendHost core_thread_ to nudge/pause/resume the
+    // syncer.
+    void DoRequestNudge();
+    void DoRequestPause();
+    void DoRequestResume();
+
+    // Called on our SyncBackendHost's |core_thread_| to set the passphrase
+    // on behalf of SyncBackendHost::SupplyPassphrase.
+    void DoSetPassphrase(const std::string& passphrase);
 
     // The shutdown order is a bit complicated:
     // 1) From |core_thread_|, invoke the syncapi Shutdown call to do a final
@@ -293,11 +333,10 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
                              sync_api::HttpPostProviderFactory* auth_factory,
                              bool delete_sync_data_folder,
                              NotificationMethod notification_method) {
-      DoInitialize(
-          DoInitializeOptions(GURL(), false, factory, auth_factory,
-                              std::string(), delete_sync_data_folder,
-                              false, false,
-                              notification_method));
+      DoInitialize(DoInitializeOptions(GURL(), false, factory, auth_factory,
+                                       std::string(), delete_sync_data_folder,
+                                       false, false, false,
+                                       notification_method));
         syncapi_->SetupForTestMode(test_user);
     }
 #endif
@@ -334,10 +373,18 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
     void HandleAuthErrorEventOnFrontendLoop(
         const GoogleServiceAuthError& new_auth_error);
 
+    // Invoked when a passphrase is required to decrypt a set of Nigori keys.
+    void NotifyPassphraseRequired();
+
+    // Invoked when the passphrase provided by the user has been accepted.
+    void NotifyPassphraseAccepted();
+
     // Called from Core::OnSyncCycleCompleted to handle updating frontend
     // thread components.
     void HandleSyncCycleCompletedOnFrontendLoop(
         sessions::SyncSessionSnapshot* snapshot);
+
+    void HandleStopSyncingPermanentlyOnFrontendLoop();
 
     // Called from Core::OnInitializationComplete to handle updating
     // frontend thread components.
@@ -358,15 +405,17 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
     DISALLOW_COPY_AND_ASSIGN(Core);
   };
 
+  // Our core, which communicates directly to the syncapi.
+  scoped_refptr<Core> core_;
+
+ private:
+
   UIModelWorker* ui_worker();
 
   // A thread we dedicate for use by our Core to perform initialization,
   // authentication, handle messages from the syncapi, and periodically tell
   // the syncapi to persist itself.
   base::Thread core_thread_;
-
-  // Our core, which communicates directly to the syncapi.
-  scoped_refptr<Core> core_;
 
   // A reference to the MessageLoop used to construct |this|, so we know how
   // to safely talk back to the SyncFrontend.

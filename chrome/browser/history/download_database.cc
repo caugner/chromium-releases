@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,10 @@
 
 #include "app/sql/connection.h"
 #include "app/sql/statement.h"
+#include "base/file_path.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/history/download_types.h"
 
 // Download schema:
@@ -122,7 +123,7 @@ bool DownloadDatabase::UpdateDownload(int64 received_bytes,
   return statement.Run();
 }
 
-bool DownloadDatabase::UpdateDownloadPath(const std::wstring& path,
+bool DownloadDatabase::UpdateDownloadPath(const FilePath& path,
                                           DownloadID db_handle) {
   DCHECK(db_handle > 0);
   sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
@@ -130,8 +131,18 @@ bool DownloadDatabase::UpdateDownloadPath(const std::wstring& path,
   if (!statement)
     return false;
 
-  statement.BindString(0, WideToUTF8(path));
+  BindFilePath(statement, path, 0);
   statement.BindInt64(1, db_handle);
+  return statement.Run();
+}
+
+bool DownloadDatabase::CleanUpInProgressEntries() {
+  sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
+      "UPDATE downloads SET state=? WHERE state=?"));
+  if (!statement)
+    return false;
+  statement.BindInt(0, DownloadItem::CANCELLED);
+  statement.BindInt(1, DownloadItem::IN_PROGRESS);
   return statement.Run();
 }
 
@@ -187,7 +198,7 @@ void DownloadDatabase::RemoveDownloadsBetween(base::Time delete_begin,
 }
 
 void DownloadDatabase::SearchDownloads(std::vector<int64>* results,
-                                       const std::wstring& search_text) {
+                                       const string16& search_text) {
   sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
       "SELECT id FROM downloads WHERE url LIKE ? "
       "OR full_path LIKE ? ORDER BY id"));
@@ -195,7 +206,7 @@ void DownloadDatabase::SearchDownloads(std::vector<int64>* results,
     return;
 
   std::string text("%");
-  text.append(WideToUTF8(search_text));
+  text.append(UTF16ToUTF8(search_text));
   text.push_back('%');
   statement.BindString(0, text);
   statement.BindString(1, text);

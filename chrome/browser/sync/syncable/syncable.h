@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/atomicops.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/lock.h"
 #include "base/time.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
@@ -26,11 +27,10 @@
 #include "chrome/browser/sync/syncable/path_name_cmp.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
 #include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/browser/sync/util/channel.h"
 #include "chrome/browser/sync/util/dbgq.h"
-#include "chrome/browser/sync/util/event_sys.h"
-#include "chrome/browser/sync/util/row_iterator.h"
 #include "chrome/browser/sync/util/sync_types.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
+#include "chrome/common/deprecated/event_sys.h"
 
 struct PurgeInfo;
 
@@ -181,7 +181,6 @@ class WriteTransaction;
 class ReadTransaction;
 class Directory;
 class ScopedDirLookup;
-class ExtendedAttribute;
 
 // Instead of:
 //   Entry e = transaction.GetById(id);
@@ -217,6 +216,8 @@ enum CreateNewUpdateItem {
 
 typedef std::set<std::string> AttributeKeySet;
 
+typedef std::set<int64> MetahandleSet;
+
 // Why the singular enums?  So the code compile-time dispatches instead of
 // runtime dispatches as it would with a single enum and an if() statement.
 
@@ -231,11 +232,27 @@ struct EntryKernel {
   std::bitset<BIT_TEMPS_COUNT> bit_temps;
 
  public:
-  inline void mark_dirty() {
+  EntryKernel() : dirty_(false) {}
+
+  // Set the dirty bit, and optionally add this entry's metahandle to
+  // a provided index on dirty bits in |dirty_index|. Parameter may be null,
+  // and will result only in setting the dirty bit of this entry.
+  inline void mark_dirty(syncable::MetahandleSet* dirty_index) {
+    if (!dirty_ && dirty_index) {
+      DCHECK_NE(0, ref(META_HANDLE));
+      dirty_index->insert(ref(META_HANDLE));
+    }
     dirty_ = true;
   }
 
-  inline void clear_dirty() {
+  // Clear the dirty bit, and optionally remove this entry's metahandle from
+  // a provided index on dirty bits in |dirty_index|. Parameter may be null,
+  // and will result only in clearing dirty bit of this entry.
+  inline void clear_dirty(syncable::MetahandleSet* dirty_index) {
+    if (dirty_ && dirty_index) {
+      DCHECK_NE(0, ref(META_HANDLE));
+      dirty_index->erase(ref(META_HANDLE));
+    }
     dirty_ = false;
   }
 
@@ -317,6 +334,7 @@ struct EntryKernel {
   inline Id& mutable_ref(IdField field) {
     return id_fields[field - ID_FIELDS_BEGIN];
   }
+
  private:
   // Tracks whether this entry needs to be saved to the database.
   bool dirty_;
@@ -397,19 +415,11 @@ class Entry {
     return kernel_->ref(ID).IsRoot();
   }
 
-  void GetAllExtendedAttributes(BaseTransaction* trans,
-                                std::set<ExtendedAttribute>* result);
-  void GetExtendedAttributesList(BaseTransaction* trans,
-                                 AttributeKeySet* result);
-  // Flags all extended attributes for deletion on the next SaveChanges.
-  void DeleteAllExtendedAttributes(WriteTransaction *trans);
-
   Directory* dir() const;
 
   const EntryKernel GetKernelCopy() const {
     return *kernel_;
   }
-
 
  protected:  // Don't allow creation on heap, except by sync API wrappers.
   friend class sync_api::ReadNode;
@@ -440,6 +450,7 @@ class MutableEntry : public Entry {
   MutableEntry(WriteTransaction* trans, GetByHandle, int64);
   MutableEntry(WriteTransaction* trans, GetById, const Id&);
   MutableEntry(WriteTransaction* trans, GetByClientTag, const std::string& tag);
+  MutableEntry(WriteTransaction* trans, GetByServerTag, const std::string& tag);
 
   inline WriteTransaction* write_transaction() const {
     return write_transaction_;
@@ -466,16 +477,7 @@ class MutableEntry : public Entry {
   bool Put(StringField field, const std::string& value);
   bool Put(BaseVersion field, int64 value);
 
-  inline bool Put(ProtoField field, const sync_pb::EntitySpecifics& value) {
-    DCHECK(kernel_);
-    // TODO(ncarter): This is unfortunately heavyweight.  Can we do
-    // better?
-    if (kernel_->ref(field).SerializeAsString() != value.SerializeAsString()) {
-      kernel_->put(field, value);
-      kernel_->mark_dirty();
-    }
-    return true;
-  }
+  bool Put(ProtoField field, const sync_pb::EntitySpecifics& value);
   inline bool Put(BitField field, bool value) {
     return PutField(field, value);
   }
@@ -495,12 +497,14 @@ class MutableEntry : public Entry {
   }
 
  protected:
+  syncable::MetahandleSet* GetDirtyIndexHelper();
+
   template <typename FieldType, typename ValueType>
   inline bool PutField(FieldType field, const ValueType& value) {
     DCHECK(kernel_);
     if (kernel_->ref(field) != value) {
       kernel_->put(field, value);
-      kernel_->mark_dirty();
+      kernel_->mark_dirty(GetDirtyIndexHelper());
     }
     return true;
   }
@@ -564,7 +568,13 @@ struct MultiTypeTimeStamp {
 // the write. This is defined up here since DirectoryChangeEvent also contains
 // one.
 enum WriterTag {
-  INVALID, SYNCER, AUTHWATCHER, UNITTEST, VACUUM_AFTER_SAVE, SYNCAPI
+  INVALID,
+  SYNCER,
+  AUTHWATCHER,
+  UNITTEST,
+  VACUUM_AFTER_SAVE,
+  PURGE_ENTRIES,
+  SYNCAPI
 };
 
 // A separate Event type and channel for very frequent changes, caused
@@ -576,6 +586,10 @@ struct DirectoryChangeEvent {
     // callbacks or attempt to lock anything because a
     // WriteTransaction is being held until the listener returns.
     CALCULATE_CHANGES,
+    // Means the WriteTransaction is ending, and this is the absolute
+    // last chance to perform any read operations in the current transaction.
+    // It is not recommended that the listener perform any writes.
+    TRANSACTION_ENDING,
     // Means the WriteTransaction has been released and the listener
     // can now take action on the changes it calculated.
     TRANSACTION_COMPLETE,
@@ -584,36 +598,13 @@ struct DirectoryChangeEvent {
   } todo;
   // These members are only valid for CALCULATE_CHANGES.
   const OriginalEntries* originals;
-  BaseTransaction* trans;
+  BaseTransaction* trans;  // This is valid also for TRANSACTION_ENDING
   WriterTag writer;
   typedef DirectoryChangeEvent EventType;
   static inline bool IsChannelShutdownEvent(const EventType& e) {
     return SHUTDOWN == e.todo;
   }
 };
-
-struct ExtendedAttributeKey {
-  int64 metahandle;
-  std::string key;
-  inline bool operator < (const ExtendedAttributeKey& x) const {
-    if (metahandle != x.metahandle)
-      return metahandle < x.metahandle;
-    return key.compare(x.key) < 0;
-  }
-  ExtendedAttributeKey(int64 metahandle, const std::string& key)
-      : metahandle(metahandle), key(key) {  }
-};
-
-struct ExtendedAttributeValue {
-  Blob value;
-  bool is_deleted;
-  bool dirty;
-};
-
-typedef std::map<ExtendedAttributeKey, ExtendedAttributeValue>
-    ExtendedAttributes;
-
-typedef std::set<int64> MetahandleSet;
 
 // A list of metahandles whose metadata should not be purged.
 typedef std::multiset<int64> Pegs;
@@ -649,19 +640,24 @@ struct PathMatcher;
 class Directory {
   friend class BaseTransaction;
   friend class Entry;
-  friend class ExtendedAttribute;
   friend class MutableEntry;
-  friend class MutableExtendedAttribute;
   friend class ReadTransaction;
   friend class ReadTransactionWithoutDB;
   friend class ScopedKernelLock;
   friend class ScopedKernelUnlock;
   friend class WriteTransaction;
   friend class SyncableDirectoryTest;
-  FRIEND_TEST(SyncableDirectoryTest, TakeSnapshotGetsAllDirtyHandlesTest);
-  FRIEND_TEST(SyncableDirectoryTest, TakeSnapshotGetsOnlyDirtyHandlesTest);
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
+                           TakeSnapshotGetsAllDirtyHandlesTest);
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
+                           TakeSnapshotGetsOnlyDirtyHandlesTest);
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest, TestPurgeEntriesWithTypeIn);
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
+                           TakeSnapshotGetsMetahandlesToPurge);
 
  public:
+  class EventListenerHookup;
+
   // Various data that the Directory::Kernel we are backing (persisting data
   // for) needs saved across runs of the application.
   struct PersistedKernelInfo {
@@ -706,7 +702,7 @@ class Directory {
     KernelShareInfoStatus kernel_info_status;
     PersistedKernelInfo kernel_info;
     OriginalEntries dirty_metas;
-    ExtendedAttributes dirty_xattrs;
+    MetahandleSet metahandles_to_purge;
     SaveChangesSnapshot() : kernel_info_status(KERNEL_SHARE_INFO_INVALID) {
     }
   };
@@ -770,6 +766,9 @@ class Directory {
   // Unique to each account / client pair.
   std::string cache_guid() const;
 
+  browser_sync::ChannelHookup<DirectoryChangeEvent>* AddChangeObserver(
+      browser_sync::ChannelEventHandler<DirectoryChangeEvent>* observer);
+
  protected:  // for friends, mainly used by Entry constructors
   EntryKernel* GetEntryByHandle(const int64 handle);
   EntryKernel* GetEntryByHandle(const int64 metahandle, ScopedKernelLock* lock);
@@ -779,13 +778,15 @@ class Directory {
   EntryKernel* GetRootEntry();
   bool ReindexId(EntryKernel* const entry, const Id& new_id);
   void ReindexParentId(EntryKernel* const entry, const Id& new_parent_id);
-  void AddToDirtyMetahandles(int64 handle);
   void ClearDirtyMetahandles();
 
   // These don't do semantic checking.
   // The semantic checking is implemented higher up.
   void Undelete(EntryKernel* const entry);
   void Delete(EntryKernel* const entry);
+  void UnlinkEntryFromOrder(EntryKernel* entry,
+                            WriteTransaction* trans,
+                            ScopedKernelLock* lock);
 
   // Overridden by tests.
   virtual DirectoryBackingStore* CreateBackingStore(
@@ -807,7 +808,6 @@ class Directory {
   };
  public:
   typedef EventChannel<DirectoryEventTraits, Lock> Channel;
-  typedef EventChannel<DirectoryChangeEvent, Lock> ChangesChannel;
   typedef std::vector<int64> ChildHandles;
 
   // Returns the child meta handles for given parent id.
@@ -848,20 +848,9 @@ class Directory {
   void GetUnappliedUpdateMetaHandles(BaseTransaction* trans,
                                      UnappliedUpdateMetaHandles* result);
 
-  void GetAllExtendedAttributes(BaseTransaction* trans, int64 metahandle,
-                                std::set<ExtendedAttribute>* result);
-  // Get all extended attribute keys associated with a metahandle
-  void GetExtendedAttributesList(BaseTransaction* trans, int64 metahandle,
-                                 AttributeKeySet* result);
-  // Flags all extended attributes for deletion on the next SaveChanges.
-  void DeleteAllExtendedAttributes(WriteTransaction* trans, int64 metahandle);
-
   // Get the channel for post save notification, used by the syncer.
   inline Channel* channel() const {
     return kernel_->channel;
-  }
-  inline ChangesChannel* changes_channel() const {
-    return kernel_->changes_channel;
   }
 
   // Checks tree metadata consistency.
@@ -879,6 +868,15 @@ class Directory {
   void CheckTreeInvariants(syncable::BaseTransaction* trans,
                            const MetahandleSet& handles,
                            const IdFilter& idfilter);
+
+  // Purges all data associated with any entries whose ModelType or
+  // ServerModelType is found in |types|, from _both_ memory and disk.
+  // Only  valid, "real" model types are allowed in |types| (see model_type.h
+  // for definitions).  "Purge" is just meant to distinguish from "deleting"
+  // entries, which means something different in the syncable namespace.
+  // WARNING! This can be real slow, as it iterates over all entries.
+  // WARNING! Performs synchronous I/O.
+  virtual void PurgeEntriesWithTypeIn(const std::set<ModelType>& types);
 
  private:
   // Helper to prime ids_index, parent_id_and_names_index, unsynced_metahandles
@@ -905,13 +903,18 @@ class Directory {
 
   // Used by CheckTreeInvariants
   void GetAllMetaHandles(BaseTransaction* trans, MetahandleSet* result);
-
-  static bool SafeToPurgeFromMemory(const EntryKernel* const entry);
+  bool SafeToPurgeFromMemory(const EntryKernel* const entry) const;
 
   // Helper method used to implement GetFirstChildId/GetLastChildId.
   Id GetChildWithNullIdField(IdField field,
                              BaseTransaction* trans,
                              const Id& parent_id);
+
+  // Internal setters that do not acquire a lock internally.  These are unsafe
+  // on their own; caller must guarantee exclusive access manually by holding
+  // a ScopedKernelLock.
+  void set_initial_sync_ended_for_type_unsafe(ModelType type, bool x);
+  void set_last_download_timestamp_unsafe(ModelType model_type, int64 x);
 
   Directory& operator = (const Directory&);
 
@@ -936,7 +939,10 @@ class Directory {
   // violation. ID reassociation would fail after an attempted commit.
   typedef std::set<EntryKernel*,
                    LessField<StringField, UNIQUE_CLIENT_TAG> > ClientTagIndex;
-  typedef std::vector<int64> MetahandlesToPurge;
+
+ protected:
+  // Used by tests.
+  void init_kernel(const std::string& name);
 
  private:
 
@@ -974,7 +980,6 @@ class Directory {
     // So we don't have to create an EntryKernel every time we want to
     // look something up in an index.  Needle in haystack metaphor.
     EntryKernel needle;
-    ExtendedAttributes* const extended_attributes;
 
     // 3 in-memory indices on bits used extremely frequently by the syncer.
     MetahandleSet* const unapplied_update_metahandles;
@@ -983,13 +988,18 @@ class Directory {
     // necessarily).  Dirtyness is confirmed in TakeSnapshotForSaveChanges().
     MetahandleSet* const dirty_metahandles;
 
+    // When a purge takes place, we remove items from all our indices and stash
+    // them in here so that SaveChanges can persist their permanent deletion.
+    MetahandleSet* const metahandles_to_purge;
+
     // TODO(ncarter): Figure out what the hell this is, and comment it.
     Channel* const channel;
 
     // The changes channel mutex is explicit because it must be locked
     // while holding the transaction mutex and released after
     // releasing the transaction mutex.
-    ChangesChannel* const changes_channel;
+    browser_sync::Channel<DirectoryChangeEvent> changes_channel;
+
     Lock changes_channel_mutex;
     KernelShareInfoStatus info_status;
 
@@ -1038,6 +1048,8 @@ class BaseTransaction {
   inline Directory* directory() const { return directory_; }
   inline Id root_id() const { return Id(); }
 
+  virtual ~BaseTransaction();
+
  protected:
   BaseTransaction(Directory* directory, const char* name,
                   const char* source_file, int line, WriterTag writer);
@@ -1066,7 +1078,7 @@ class ReadTransaction : public BaseTransaction {
   ReadTransaction(const ScopedDirLookup& scoped_dir,
                   const char* source_file, int line);
 
-  ~ReadTransaction();
+  virtual ~ReadTransaction();
 
  protected:  // Don't allow creation on heap, except by sync API wrapper.
   friend class sync_api::ReadTransaction;
@@ -1105,54 +1117,6 @@ int ComparePathNames16(void*, int a_bytes, const void* a, int b_bytes,
                        const void* b);
 
 int64 Now();
-
-class ExtendedAttribute {
- public:
-  ExtendedAttribute(BaseTransaction* trans, GetByHandle,
-                    const ExtendedAttributeKey& key);
-  int64 metahandle() const { return i_->first.metahandle; }
-  const std::string& key() const { return i_->first.key; }
-  const Blob& value() const { return i_->second.value; }
-  bool is_deleted() const { return i_->second.is_deleted; }
-  bool good() const { return good_; }
-  bool operator < (const ExtendedAttribute& x) const {
-    return i_->first < x.i_->first;
-  }
- protected:
-  bool Init(BaseTransaction* trans,
-            Directory::Kernel* const kernel,
-            ScopedKernelLock* lock,
-            const ExtendedAttributeKey& key);
-  ExtendedAttribute() { }
-  ExtendedAttributes::iterator i_;
-  bool good_;
-};
-
-class MutableExtendedAttribute : public ExtendedAttribute {
- public:
-  MutableExtendedAttribute(WriteTransaction* trans, GetByHandle,
-                           const ExtendedAttributeKey& key);
-  MutableExtendedAttribute(WriteTransaction* trans, Create,
-                           const ExtendedAttributeKey& key);
-
-  Blob* mutable_value() {
-    i_->second.dirty = true;
-    i_->second.is_deleted = false;
-    return &(i_->second.value);
-  }
-
-  void delete_attribute() {
-    i_->second.dirty = true;
-    i_->second.is_deleted = true;
-  }
-};
-
-// Get an extended attribute from an Entry by name. Returns a pointer
-// to a const Blob containing the attribute data, or NULL if there is
-// no attribute with the given name. The pointer is valid for the
-// duration of the Entry's transaction.
-const Blob* GetExtendedAttributeValue(const Entry& e,
-                                      const std::string& attribute_name);
 
 // This function sets only the flags needed to get this entry to sync.
 void MarkForSyncing(syncable::MutableEntry* e);

@@ -1,8 +1,9 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/callback.h"
+#include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/thread.h"
 #include "chrome/browser/sync/engine/syncapi.h"
@@ -44,7 +45,7 @@ class Syncer {
   ~Syncer() {}
 
   void SyncShare(UIModelWorkerVisitor* visitor) {
-    scoped_ptr<Closure> c(NewCallback(visitor,
+    scoped_ptr<Callback0::Type> c(NewCallback(visitor,
         &UIModelWorkerVisitor::DoWork));
     worker_->DoWorkAndWaitUntilDone(c.get());
   }

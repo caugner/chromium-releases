@@ -70,6 +70,9 @@
 #include "core/cross/texture.h"
 #include "plugin/cross/main_thread_task_poster.h"
 #include "plugin/cross/np_v8_bridge.h"
+#ifdef OS_MACOSX
+#include "plugin/mac/fullscreen_window_mac.h"
+#endif
 #include "client_glue.h"
 #include "third_party/nixysa/static_glue/npapi/common.h"
 
@@ -134,6 +137,9 @@ using o3d::RenderSurface;
 using o3d::RenderDepthStencilSurface;
 using o3d::ServiceLocator;
 using o3d::Texture2D;
+#ifdef OS_MACOSX
+using o3d::FullscreenWindowMac;
+#endif
 
 class NPAPIObject: public NPObject {
   NPP npp_;
@@ -233,22 +239,16 @@ class PluginObject: public NPObject {
                        GdkEvent *configure);
   void SetDisplay(Display *display);
 #elif defined(OS_MACOSX)
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-  void SetFullscreenOverlayMacWindow(WindowRef window) {
-    mac_fullscreen_overlay_window_ = window;
+  FullscreenWindowMac* GetFullscreenMacWindow() {
+    return mac_fullscreen_window_;
   }
 
-  WindowRef GetFullscreenOverlayMacWindow() {
-    return mac_fullscreen_overlay_window_;
-  }
-#endif
-
-  void SetFullscreenMacWindow(WindowRef window) {
+  void SetFullscreenMacWindow(FullscreenWindowMac* window) {
     mac_fullscreen_window_ = window;
   }
 
-  WindowRef GetFullscreenMacWindow() {
-    return mac_fullscreen_window_;
+  WindowRef GetMacWindow() {
+    return mac_window_;
   }
 
   bool ScrollIsInProgress() { return scroll_is_in_progress_; }
@@ -258,6 +258,21 @@ class PluginObject: public NPObject {
   bool RendererIsSoftware() {return renderer_is_software_;}
   bool SetRendererIsSoftware(bool state);
   bool renderer_is_software_;
+
+  AGLContext GetMacAGLContext() {
+    return mac_agl_context_;
+  }
+
+  CGLContextObj GetMacCGLContext() {
+    return mac_cgl_context_;
+  }
+
+  void SetMacCGLContext(CGLContextObj obj);
+
+  CGLContextObj GetFullscreenShareContext();
+  CGLPixelFormatObj GetFullscreenCGLPixelFormatObj();
+  void* GetFullscreenNSOpenGLContext();
+  void CleanupFullscreenOpenGLContext();
 
   NPDrawingModel drawing_model_;
   NPEventModel event_model_;
@@ -275,24 +290,31 @@ class PluginObject: public NPObject {
   // either can be NULL depending on drawing_model
   AGLContext mac_agl_context_;
   CGLContextObj mac_cgl_context_;
+  void *gl_layer_;
   // If in Chrome, we actually do all of our rendering offscreen, and
   // bootstrap off a 1x1 pbuffer
   CGLPBufferObj mac_cgl_pbuffer_;
 
   // Fullscreen related stuff.
-
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-  // FullscreenIdle gets repeatedly called while we are in fullscreen mode.
-  // Currently its only task is to hide the fullscreen message at the right
-  // time.
-  void FullscreenIdle();
-  double time_to_hide_overlay_;
-#endif
-  WindowRef mac_fullscreen_window_;  // NULL if not in fullscreen modee
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-  WindowRef mac_fullscreen_overlay_window_;  // NULL if not in fullscreen mode
-#endif
-  Ptr mac_fullscreen_state_;
+  // NULL if not in fullscreen mode.
+  // Must not be a scoped_ptr due to reentrancy during termination.
+  FullscreenWindowMac* mac_fullscreen_window_;
+  // When rendering using CGL, we need to use an NSOpenGLContext to
+  // implement full-screen support. In order to share textures and
+  // other resources between the core CGL context and the full-screen
+  // one, we need to allocate the NSOpenGLContext first, because with
+  // pre-10.6 APIs it isn't possible to make an NSOpenGLContext share
+  // resources with a preexisting CGLContextObj.
+  void* mac_fullscreen_nsopenglcontext_;
+  // On 10.5 (Core Graphics drawing model) it appears that we need to
+  // forcibly reuse the CGLContextObj from the NSOpenGLPixelFormat
+  // that we use to create the NSOpenGLContext for full-screen, or
+  // the share context is reported invalid.
+  void* mac_fullscreen_nsopenglpixelformat_;
+  // Indication when we transition to full-screen mode of whether we
+  // were using off-screen rendering (Core Graphics drawing model, in
+  // particular).
+  bool was_offscreen_;
 
 #endif  //  OS_MACOSX
 #ifdef OS_LINUX
@@ -434,10 +456,6 @@ class PluginObject: public NPObject {
     return user_agent_.find("MSIE") != user_agent_.npos;
   }
 
-  v8::Handle<v8::Context> script_context() {
-    return np_v8_bridge_.script_context();
-  }
-
   o3d::NPV8Bridge* np_v8_bridge() { return &np_v8_bridge_; }
 
   // Creates the renderer.
@@ -499,6 +517,12 @@ class PluginObject: public NPObject {
   Bitmap::Ref GetOffscreenBitmap() const;
 
  private:
+  // Called through the browser's NPN_PluginThreadAsyncCall
+  static void TickPluginObject(void* data);
+
+  // Completes the work of an AsyncTick().
+  void ExecuteAsyncTick();
+
   bool fullscreen_region_valid_;
   int fullscreen_region_x_;
   int fullscreen_region_y_;

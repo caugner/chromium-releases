@@ -10,6 +10,7 @@
 #ifndef NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
 #define NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
 
+#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "net/base/cookie_store.h"
@@ -24,19 +25,23 @@ namespace net {
 class CookiePolicy;
 class FtpTransactionFactory;
 class HttpAuthHandlerFactory;
+class HttpNetworkDelegate;
 class HttpTransactionFactory;
 class SocketStream;
 }
 class URLRequest;
 
 // Subclass to provide application-specific context for URLRequest instances.
-class URLRequestContext :
-    public base::RefCountedThreadSafe<URLRequestContext> {
+class URLRequestContext
+    : public base::RefCountedThreadSafe<URLRequestContext>,
+      public NonThreadSafe {
  public:
   URLRequestContext()
       : net_log_(NULL),
         http_transaction_factory_(NULL),
         ftp_transaction_factory_(NULL),
+        http_auth_handler_factory_(NULL),
+        network_delegate_(NULL),
         cookie_policy_(NULL),
         transport_security_state_(NULL) {
   }
@@ -109,20 +114,6 @@ class URLRequestContext :
     referrer_charset_ = charset;
   }
 
-  // Called before adding cookies to requests. Returns true if cookie can
-  // be added to the request. The cookie might still be modified though.
-  virtual bool InterceptRequestCookies(const URLRequest* request,
-                                       const std::string& cookies) const {
-    return true;
-  }
-
-  // Called before adding cookies from respones to the cookie monster. Returns
-  // true if the cookie can be added. The cookie might still be modified though.
-  virtual bool InterceptResponseCookie(const URLRequest* request,
-                                       const std::string& cookie) const {
-    return true;
-  }
-
  protected:
   friend class base::RefCountedThreadSafe<URLRequestContext>;
 
@@ -137,6 +128,7 @@ class URLRequestContext :
   net::HttpTransactionFactory* http_transaction_factory_;
   net::FtpTransactionFactory* ftp_transaction_factory_;
   net::HttpAuthHandlerFactory* http_auth_handler_factory_;
+  net::HttpNetworkDelegate* network_delegate_;
   scoped_refptr<net::CookieStore> cookie_store_;
   net::CookiePolicy* cookie_policy_;
   scoped_refptr<net::TransportSecurityState> transport_security_state_;

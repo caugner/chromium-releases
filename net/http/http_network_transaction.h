@@ -12,7 +12,6 @@
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "net/base/address_list.h"
-#include "net/base/host_resolver.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_states.h"
@@ -20,6 +19,7 @@
 #include "net/base/ssl_config_service.h"
 #include "net/http/http_alternate_protocols.h"
 #include "net/http/http_auth.h"
+#include "net/http/http_auth_controller.h"
 #include "net/http/http_auth_handler.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_transaction.h"
@@ -31,16 +31,21 @@ namespace net {
 
 class ClientSocketFactory;
 class ClientSocketHandle;
-class SpdyStream;
 class HttpNetworkSession;
 class HttpRequestHeaders;
 class HttpStream;
+class SpdyHttpStream;
 
 class HttpNetworkTransaction : public HttpTransaction {
  public:
   explicit HttpNetworkTransaction(HttpNetworkSession* session);
 
   virtual ~HttpNetworkTransaction();
+
+  static void SetHostMappingRules(const std::string& rules);
+
+  // Controls whether or not we use the Alternate-Protocol header.
+  static void SetUseAlternateProtocols(bool value);
 
   // Sets the next protocol negotiation value used during the SSL handshake.
   static void SetNextProtos(const std::string& next_protos);
@@ -78,18 +83,20 @@ class HttpNetworkTransaction : public HttpTransaction {
     STATE_RESOLVE_PROXY_COMPLETE,
     STATE_INIT_CONNECTION,
     STATE_INIT_CONNECTION_COMPLETE,
-    STATE_SSL_CONNECT,
-    STATE_SSL_CONNECT_COMPLETE,
+    STATE_GENERATE_PROXY_AUTH_TOKEN,
+    STATE_GENERATE_PROXY_AUTH_TOKEN_COMPLETE,
+    STATE_GENERATE_SERVER_AUTH_TOKEN,
+    STATE_GENERATE_SERVER_AUTH_TOKEN_COMPLETE,
     STATE_SEND_REQUEST,
     STATE_SEND_REQUEST_COMPLETE,
     STATE_READ_HEADERS,
     STATE_READ_HEADERS_COMPLETE,
-    STATE_RESOLVE_CANONICAL_NAME,
-    STATE_RESOLVE_CANONICAL_NAME_COMPLETE,
     STATE_READ_BODY,
     STATE_READ_BODY_COMPLETE,
     STATE_DRAIN_BODY_FOR_AUTH_RESTART,
     STATE_DRAIN_BODY_FOR_AUTH_RESTART_COMPLETE,
+    STATE_SPDY_GET_STREAM,
+    STATE_SPDY_GET_STREAM_COMPLETE,
     STATE_SPDY_SEND_REQUEST,
     STATE_SPDY_SEND_REQUEST_COMPLETE,
     STATE_SPDY_READ_HEADERS,
@@ -97,13 +104,6 @@ class HttpNetworkTransaction : public HttpTransaction {
     STATE_SPDY_READ_BODY,
     STATE_SPDY_READ_BODY_COMPLETE,
     STATE_NONE
-  };
-
-  enum ProxyMode {
-    kDirectConnection,  // If using a direct connection
-    kHTTPProxy,  // If using a proxy for HTTP (not HTTPS)
-    kHTTPProxyUsingTunnel,  // If using a tunnel for HTTPS
-    kSOCKSProxy,  // If using a SOCKS proxy
   };
 
   enum AlternateProtocolMode {
@@ -126,18 +126,20 @@ class HttpNetworkTransaction : public HttpTransaction {
   int DoResolveProxyComplete(int result);
   int DoInitConnection();
   int DoInitConnectionComplete(int result);
-  int DoSSLConnect();
-  int DoSSLConnectComplete(int result);
+  int DoGenerateProxyAuthToken();
+  int DoGenerateProxyAuthTokenComplete(int result);
+  int DoGenerateServerAuthToken();
+  int DoGenerateServerAuthTokenComplete(int result);
   int DoSendRequest();
   int DoSendRequestComplete(int result);
   int DoReadHeaders();
   int DoReadHeadersComplete(int result);
-  int DoResolveCanonicalName();
-  int DoResolveCanonicalNameComplete(int result);
   int DoReadBody();
   int DoReadBodyComplete(int result);
   int DoDrainBodyForAuthRestart();
   int DoDrainBodyForAuthRestartComplete(int result);
+  int DoSpdyGetStream();
+  int DoSpdyGetStreamComplete(int result);
   int DoSpdySendRequest();
   int DoSpdySendRequestComplete(int result);
   int DoSpdyReadHeaders();
@@ -149,7 +151,7 @@ class HttpNetworkTransaction : public HttpTransaction {
   static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);
 
   // Record histogram of time until first byte of header is received.
-  void LogTransactionConnectedMetrics() const;
+  void LogTransactionConnectedMetrics();
 
   // Record histogram of latency (durations until last byte received).
   void LogTransactionMetrics() const;
@@ -219,74 +221,28 @@ class HttpNetworkTransaction : public HttpTransaction {
   // Returns true if we should try to add an Authorization header.
   bool ShouldApplyServerAuth() const;
 
-  // Adds either the proxy auth header, or the origin server auth header,
-  // as specified by |target|.
-  void AddAuthorizationHeader(
-      HttpAuth::Target target, HttpRequestHeaders* authorization_headers) const;
-
-  // Returns a log message for all the response headers related to the auth
-  // challenge.
-  std::string AuthChallengeLogMessage() const;
-
   // Handles HTTP status code 401 or 407.
   // HandleAuthChallenge() returns a network error code, or OK on success.
   // May update |pending_auth_target_| or |response_.auth_challenge|.
   int HandleAuthChallenge();
 
-  // Populates response_.auth_challenge with the challenge information, so that
-  // URLRequestHttpJob can prompt for a username/password.
-  void PopulateAuthChallenge(HttpAuth::Target target,
-                             const GURL& auth_origin);
-
-  // Invalidates any auth cache entries after authentication has failed.
-  // The identity that was rejected is auth_identity_[target].
-  void InvalidateRejectedAuthFromCache(HttpAuth::Target target,
-                                       const GURL& auth_origin);
-
-  // Sets auth_identity_[target] to the next identity that the transaction
-  // should try. It chooses candidates by searching the auth cache
-  // and the URL for a username:password. Returns true if an identity
-  // was found.
-  bool SelectNextAuthIdentityToTry(HttpAuth::Target target,
-                                   const GURL& auth_origin);
-
-  // Searches the auth cache for an entry that encompasses the request's path.
-  // If such an entry is found, updates auth_identity_[target] and
-  // auth_handler_[target] with the cache entry's data and returns true.
-  bool SelectPreemptiveAuth(HttpAuth::Target target);
-
   bool HaveAuth(HttpAuth::Target target) const {
-    return auth_handler_[target].get() && !auth_identity_[target].invalid;
+    return auth_controllers_[target].get() &&
+         auth_controllers_[target]->HaveAuth();
   }
 
-  // Get the {scheme, host, port} for the authentication target
-  GURL AuthOrigin(HttpAuth::Target target) const;
-
-  // Get the absolute path of the resource needing authentication.
-  // For proxy authentication the path is always empty string.
-  std::string AuthPath(HttpAuth::Target target) const;
+  // Get the {scheme, host, path, port} for the authentication target
+  GURL AuthURL(HttpAuth::Target target) const;
 
   void MarkBrokenAlternateProtocolAndFallback();
 
-  // Returns a string representation of a HttpAuth::Target value that can be
-  // used in log messages.
-  static std::string AuthTargetString(HttpAuth::Target target);
+  // Debug helper.
+  static std::string DescribeState(State state);
 
   static bool g_ignore_certificate_errors;
 
-  // The following three auth members are arrays of size two -- index 0 is
-  // for the proxy server, and index 1 is for the origin server.
-  // Use the enum HttpAuth::Target to index into them.
-
-  // auth_handler encapsulates the logic for the particular auth-scheme.
-  // This includes the challenge's parameters. If NULL, then there is no
-  // associated auth handler.
-  scoped_refptr<HttpAuthHandler> auth_handler_[2];
-
-  // auth_identity_ holds the (username/password) that should be used by
-  // the auth_handler_ to generate credentials. This identity can come from
-  // a number of places (url, cache, prompt).
-  HttpAuth::Identity auth_identity_[2];
+  scoped_refptr<HttpAuthController>
+      auth_controllers_[HttpAuth::AUTH_NUM_TARGETS];
 
   // Whether this transaction is waiting for proxy auth, server auth, or is
   // not waiting for any auth at all. |pending_auth_target_| is read and
@@ -307,7 +263,7 @@ class HttpNetworkTransaction : public HttpTransaction {
 
   scoped_ptr<ClientSocketHandle> connection_;
   scoped_ptr<HttpStream> http_stream_;
-  scoped_refptr<SpdyStream> spdy_stream_;
+  scoped_ptr<SpdyHttpStream> spdy_http_stream_;
   bool reused_socket_;
 
   // True if we've validated the headers that the stream parser has returned.
@@ -316,34 +272,20 @@ class HttpNetworkTransaction : public HttpTransaction {
   // True if we've logged the time of the first response byte.  Used to
   // prevent logging across authentication activity where we see multiple
   // responses.
-  bool logged_response_time;
+  bool logged_response_time_;
 
   bool using_ssl_;     // True if handling a HTTPS request
-  ProxyMode proxy_mode_;
-
-  // True while establishing a tunnel.  This allows the HTTP CONNECT
-  // request/response to reuse the STATE_SEND_REQUEST,
-  // STATE_SEND_REQUEST_COMPLETE, STATE_READ_HEADERS, and
-  // STATE_READ_HEADERS_COMPLETE states and allows us to tell them apart from
-  // the real request/response of the transaction.
-  bool establishing_tunnel_;
 
   // True if this network transaction is using SPDY instead of HTTP.
   bool using_spdy_;
+
+  // The certificate error while using SPDY over SSL for insecure URLs.
+  int spdy_certificate_error_;
 
   AlternateProtocolMode alternate_protocol_mode_;
 
   // Only valid if |alternate_protocol_mode_| == kUsingAlternateProtocol.
   HttpAlternateProtocols::Protocol alternate_protocol_;
-
-  // True if we've used the username/password embedded in the URL.  This
-  // makes sure we use the embedded identity only once for the transaction,
-  // preventing an infinite auth restart loop.
-  bool embedded_identity_used_;
-
-  // True if default credentials have already been tried for this transaction
-  // in response to an HTTP authentication challenge.
-  bool default_credentials_used_;
 
   SSLConfig ssl_config_;
 
@@ -361,11 +303,18 @@ class HttpNetworkTransaction : public HttpTransaction {
   // The time the Start method was called.
   base::Time start_time_;
 
-  // The time the DoSSLConnect() method was called (if it got called).
-  base::TimeTicks ssl_connect_start_time_;
-
   // The next state in the state machine.
   State next_state_;
+
+  // The hostname and port of the endpoint.  This is not necessarily the one
+  // specified by the URL, due to Alternate-Protocol or fixed testing ports.
+  HostPortPair endpoint_;
+
+  // True when the tunnel is in the process of being established - we can't
+  // read from the socket until the tunnel is done.
+  bool establishing_tunnel_;
+
+  DISALLOW_COPY_AND_ASSIGN(HttpNetworkTransaction);
 };
 
 }  // namespace net

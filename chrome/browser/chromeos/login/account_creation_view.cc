@@ -4,17 +4,7 @@
 
 #include "chrome/browser/chromeos/login/account_creation_view.h"
 
-#include "base/callback.h"
 #include "base/string_util.h"
-#include "base/values.h"
-#include "chrome/browser/child_process_security_policy.h"
-#include "chrome/browser/chromeos/login/rounded_rect_painter.h"
-#include "chrome/browser/dom_ui/dom_ui.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/bindings_policy.h"
-#include "gfx/canvas.h"
-#include "ipc/ipc_message.h"
-#include "views/border.h"
 #include "webkit/glue/form_data.h"
 
 using webkit_glue::FormData;
@@ -25,13 +15,14 @@ const char kCreateAccountFormName[] = "createaccount";
 const char kEmailFieldName[] = "Email";
 const char kDomainFieldName[] = "edk";
 
-class AccountCreationTabContents : public TabContents,
+class AccountCreationTabContents : public WizardWebPageViewTabContents,
                                    public RenderViewHostDelegate::AutoFill {
  public:
   AccountCreationTabContents(Profile* profile,
                              SiteInstance* site_instance,
-                             AccountCreationViewDelegate* delegate)
-      : TabContents(profile, site_instance, MSG_ROUTING_NONE, NULL),
+                             AccountCreationViewDelegate* delegate,
+                             WebPageDelegate* page_delegate)
+      : WizardWebPageViewTabContents(profile, site_instance, page_delegate),
         delegate_(delegate) {
   }
 
@@ -53,8 +44,8 @@ class AccountCreationTabContents : public TabContents,
       }
       if (!user_name.empty()) {
         // We don't have password here because all password fields were
-        // stripped. Overriding TabContents::PasswordFormsSeen also has no sense
-        // becuase password value is always empty for account create page.
+        // stripped. Overriding TabContents::PasswordFormsFound also makes no
+        // sense because password value is always empty for account create page.
         delegate_->OnUserCreated(user_name + "@" + domain, "");
       }
     }
@@ -64,37 +55,19 @@ class AccountCreationTabContents : public TabContents,
   }
 
   virtual bool GetAutoFillSuggestions(
-      int query_id, const webkit_glue::FormField& field) {
+      int query_id, bool form_autofilled, const webkit_glue::FormField& field) {
     return false;
   }
 
   virtual bool FillAutoFillFormData(int query_id,
                                     const webkit_glue::FormData& form,
                                     const string16& name,
-                                    const string16& label) {
+                                    const string16& label,
+                                    int unique_id) {
     return false;
   }
 
-  virtual void DidFailProvisionalLoadWithError(
-      RenderViewHost* render_view_host,
-      bool is_main_frame,
-      int error_code,
-      const GURL& url,
-      bool showing_repost_interstitial) {
-    delegate_->OnPageLoadFailed(url.spec());
-  }
-
-  virtual void DidDisplayInsecureContent() {
-    delegate_->OnPageLoadFailed("");
-  }
-
-  virtual void DidRunInsecureContent(const std::string& security_origin) {
-    delegate_->OnPageLoadFailed(security_origin);
-  }
-
-  virtual void OnContentBlocked(ContentSettingsType type) {
-    delegate_->OnPageLoadFailed("");
-  }
+  virtual void ShowAutoFillDialog() {}
 
  private:
   AccountCreationViewDelegate* delegate_;
@@ -103,45 +76,43 @@ class AccountCreationTabContents : public TabContents,
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// AccountCreationView, public:
-AccountCreationView::AccountCreationView()  : delegate_(NULL) {
+// AccountCreationDomView, public:
+
+AccountCreationDomView::AccountCreationDomView() : delegate_(NULL) {
 }
 
-AccountCreationView::~AccountCreationView() {
+AccountCreationDomView::~AccountCreationDomView() {
 }
 
-void AccountCreationView::Init() {
-  // Use rounded rect background.
-  views::Border* border = chromeos::CreateWizardBorder(
-      &chromeos::BorderDefinition::kScreenBorder);
-  set_border(border);
-}
-
-void AccountCreationView::InitDOM(Profile* profile,
-                                  SiteInstance* site_instance) {
-  DOMView::Init(profile, site_instance);
-}
-
-TabContents* AccountCreationView::CreateTabContents(Profile* profile,
-                                                    SiteInstance* instance) {
-  return new AccountCreationTabContents(profile, instance, delegate_);
-}
-
-void AccountCreationView::SetTabContentsDelegate(
-    TabContentsDelegate* delegate) {
-  tab_contents_->set_delegate(delegate);
-}
-
-void AccountCreationView::SetAccountCreationViewDelegate(
+void AccountCreationDomView::SetAccountCreationViewDelegate(
     AccountCreationViewDelegate* delegate) {
   delegate_ = delegate;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// AccountCreationView, views::View implementation:
-void AccountCreationView::Paint(gfx::Canvas* canvas) {
-  PaintBorder(canvas);
-  DOMView::Paint(canvas);
+// AccountCreationDomView, DOMView implementation:
+
+TabContents* AccountCreationDomView::CreateTabContents(Profile* profile,
+                                                       SiteInstance* instance) {
+  return new AccountCreationTabContents(profile,
+                                        instance,
+                                        delegate_,
+                                        page_delegate_);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// AccountCreationView, public:
+
+AccountCreationView::AccountCreationView()
+    : dom_view_(new AccountCreationDomView()) {
+}
+
+AccountCreationView::~AccountCreationView() {
+}
+
+void AccountCreationView::SetAccountCreationViewDelegate(
+    AccountCreationViewDelegate* delegate) {
+  dom_view_->SetAccountCreationViewDelegate(delegate);
 }
 
 }  // namespace chromeos

@@ -5,7 +5,7 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
-#include "gpu/command_buffer/service/gl_context.h"
+#include "app/gfx/gl/gl_context.h"
 #include "gpu/command_buffer/service/gpu_processor.h"
 
 using ::base::SharedMemory;
@@ -37,11 +37,11 @@ GPUProcessor::~GPUProcessor() {
   Destroy();
 }
 
-bool GPUProcessor::InitializeCommon(const gfx::Size& size,
+bool GPUProcessor::InitializeCommon(gfx::GLContext* context,
+                                    const gfx::Size& size,
                                     gles2::GLES2Decoder* parent_decoder,
                                     uint32 parent_texture_id) {
-  // Context should have been created by platform specific Initialize().
-  DCHECK(context_.get());
+  DCHECK(context);
 
   // Map the ring buffer and create the parser.
   Buffer ring_buffer = command_buffer_->GetRingBuffer();
@@ -58,7 +58,7 @@ bool GPUProcessor::InitializeCommon(const gfx::Size& size,
   }
 
   // Initialize the decoder with either the view or pbuffer GLContext.
-  if (!decoder_->Initialize(context_.get(),
+  if (!decoder_->Initialize(context,
                             size,
                             parent_decoder,
                             parent_texture_id)) {
@@ -69,16 +69,15 @@ bool GPUProcessor::InitializeCommon(const gfx::Size& size,
   return true;
 }
 
-void GPUProcessor::Destroy() {
+void GPUProcessor::DestroyCommon() {
+  bool have_context = false;
   if (decoder_.get()) {
+    have_context = decoder_->MakeCurrent();
     decoder_->Destroy();
     decoder_.reset();
   }
 
-  if (context_.get()) {
-    context_->Destroy();
-    context_.reset();
-  }
+  group_.Destroy(have_context);
 
   parser_.reset();
 }
@@ -141,7 +140,10 @@ void GPUProcessor::ResizeOffscreenFrameBuffer(const gfx::Size& size) {
 
 void GPUProcessor::SetSwapBuffersCallback(
     Callback0::Type* callback) {
-  decoder_->SetSwapBuffersCallback(callback);
+  wrapped_swap_buffers_callback_.reset(callback);
+  decoder_->SetSwapBuffersCallback(
+      NewCallback(this,
+                  &GPUProcessor::WillSwapBuffers));
 }
 
 }  // namespace gpu

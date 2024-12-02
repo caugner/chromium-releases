@@ -130,11 +130,8 @@ class TabContentsView : public RenderViewHostDelegate::View {
   virtual void HandleMouseEvent() {}
   virtual void HandleMouseLeave() {}
 
-  // Set and return the content's intrinsic width.
+  // Notification that the preferred size of the contents has changed.
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
-  int preferred_width() const {
-    return preferred_width_;
-  }
 
   // If we try to close the tab while a drag is in progress, we crash.  These
   // methods allow the tab contents to determine if a drag is in progress and
@@ -179,7 +176,10 @@ class TabContentsView : public RenderViewHostDelegate::View {
   // We implement these functions on RenderViewHostDelegate::View directly and
   // do some book-keeping associated with the request. The request is then
   // forwarded to *Internal which does platform-specific work.
-  virtual void CreateNewWindow(int route_id);
+  virtual void CreateNewWindow(
+      int route_id,
+      WindowContainerType window_container_type,
+      const string16& frame_name);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
@@ -199,9 +199,6 @@ class TabContentsView : public RenderViewHostDelegate::View {
   // renderer that haven't shown yet.
   typedef std::map<int, RenderWidgetHostView*> PendingWidgetViews;
   PendingWidgetViews pending_widget_views_;
-
-  // The page content's intrinsic width.
-  int preferred_width_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsView);
 };

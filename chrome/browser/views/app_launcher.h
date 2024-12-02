@@ -5,29 +5,16 @@
 #ifndef CHROME_BROWSER_VIEWS_APP_LAUNCHER_H_
 #define CHROME_BROWSER_VIEWS_APP_LAUNCHER_H_
 
+#include <string>
+
+#include "app/slide_animation.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
-#include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
+#include "base/task.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
-#include "chrome/browser/views/info_bubble.h"
-#include "chrome/common/renderer_preferences.h"
-#include "views/view.h"
+#include "chrome/browser/views/pinned_contents_info_bubble.h"
 
 class Browser;
-class SiteInstance;
-
-namespace gfx {
-class Size;
-}
-namespace views {
-class NativeViewHost;
-class View;
-class WidgetGtk;
-}
-
 class InfoBubbleContentsView;
-class NavigationBar;
-class TabContentsDelegateImpl;
 
 // AppLauncher manages showing the application launcher and optionally the
 // navigation bar in compact navigation bar mode. The app launcher is
@@ -39,86 +26,77 @@ class TabContentsDelegateImpl;
 //
 // To show the app launcher invoke Show.
 //
-// AppLauncher creates a RenderViewHost and corresponding RenderWidgetHostView
-// to display the html page. AppLauncher acts as the RenderViewHostDelegate for
-// the RenderViewHost. Clicking on a link results in creating a new
-// TabContents (assigned to pending_contents_). One of two things can then
-// happen:
-// . If the page is a popup (ShowCreatedWindow passed NEW_POPUP), the
-//   TabContents is added to the Browser.
-// . If the page requests a URL to be open (OpenURLFromTab), OpenURL is
-//   invoked on the browser.
-//
 // When a new url is opened, or the user clicks outsides the bounds of the
 // widget the app launcher is closed.
-class AppLauncher : public InfoBubbleDelegate,
-                    public RenderViewHostDelegate,
-                    public RenderViewHostDelegate::View {
+class AppLauncher : public AnimationDelegate,
+                    public InfoBubbleDelegate,
+                    public TabContentsDelegate {
  public:
   // Shows an application launcher bubble pointing to the |bounds| (which should
-  // be in screen coordinates).
+  // be in screen coordinates). |bubble_anchor| specifies at which coordinates
+  // the bubble contents should appear (in screen coordinates). The bubble will
+  // be moved accordingly. Any |hash_params| are appended to the hash of the URL
+  // that is opened in the launcher.
+  //
   // The caller DOES NOT OWN the AppLauncher returned.  It is deleted
   // automatically when the AppLauncher is closed.
-  static AppLauncher* Show(Browser* browser, const gfx::Rect& bounds);
+  static AppLauncher* Show(Browser* browser,
+                           const gfx::Rect& bounds,
+                           const gfx::Point& bubble_anchor,
+                           const std::string& hash_params);
 
   // Shows an application launcher bubble pointing to the new tab button.
-  // The caller DOES NOT OWN the AppLauncher returned.  It is deleted
+  // Any |hash_params| are appended to the hash of the URL that is opened in
+  // the launcher.
+  //
+  // The caller DOES NOT OWN the AppLauncher returned. It is deleted
   // automatically when the AppLauncher is closed.
-  static AppLauncher* ShowForNewTab(Browser* browser);
+  static AppLauncher* ShowForNewTab(Browser* browser,
+                                    const std::string& hash_params);
 
   // Returns the browser this AppLauncher is associated with.
   Browser* browser() const { return browser_; }
 
+  // Returns any hash params for the page to open.
+  const std::string& hash_params() const { return hash_params_; }
+
   // Hides the app launcher.
   void Hide();
+
+  // AnimationDelegate overrides:
+  virtual void AnimationProgressed(const Animation* animation);
 
   // InfoBubbleDelegate overrides.
   virtual void InfoBubbleClosing(InfoBubble* info_bubble,
                                  bool closed_by_escape);
   virtual bool CloseOnEscape() { return true; }
+  virtual bool FadeInOnShow() { return false; }
 
-  // RenderViewHostDelegate overrides.
-  virtual int GetBrowserWindowID() const {
-    return -1;
-  }
-  virtual ViewType::Type GetRenderViewType() const {
-    return ViewType::INVALID;
-  }
-  virtual RenderViewHostDelegate::View* GetViewDelegate() {
-    return this;
-  }
-  virtual void RequestMove(const gfx::Rect& new_bounds);
-  virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
-
-  // RenderViewHostDelegate::View overrides.
-  virtual void CreateNewWindow(int route_id);
-  virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type) {}
-  virtual void ShowCreatedWindow(int route_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
-                                 bool user_gesture);
-  virtual void ShowCreatedWidget(int route_id,
-                                 const gfx::Rect& initial_pos) {}
-  virtual void ShowContextMenu(const ContextMenuParams& params) {}
-  virtual void StartDragging(const WebDropData& drop_data,
-                             WebKit::WebDragOperationsMask allowed_ops,
-                             const SkBitmap& image,
-                             const gfx::Point& image_offset);
-  virtual void UpdateDragCursor(WebKit::WebDragOperation operation) {}
-  virtual void GotFocus() {}
-  virtual void TakeFocus(bool reverse) {}
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut) {
-    return false;
-  }
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
-  virtual void HandleMouseEvent() {}
-  virtual void HandleMouseLeave() {}
-  virtual void UpdatePreferredSize(const gfx::Size& pref_size) {}
+  // TabContentsDelegate.
+  virtual void OpenURLFromTab(TabContents* source,
+                              const GURL& url, const GURL& referrer,
+                              WindowOpenDisposition disposition,
+                              PageTransition::Type transition);
+  virtual void NavigationStateChanged(const TabContents* source,
+                                      unsigned changed_flags) {}
+  virtual void AddNewContents(TabContents* source,
+                              TabContents* new_contents,
+                              WindowOpenDisposition disposition,
+                              const gfx::Rect& initial_pos,
+                              bool user_gesture);
+  virtual void ActivateContents(TabContents* contents) {}
+  virtual void LoadingStateChanged(TabContents* source) {}
+  virtual void CloseContents(TabContents* source) {}
+  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
+  virtual bool IsPopup(TabContents* source) { return false; }
+  virtual void ToolbarSizeChanged(TabContents* source, bool is_animating) {}
+  virtual void URLStarredChanged(TabContents* source, bool starred) {}
+  virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
+  virtual bool ShouldEnablePreferredSizeNotifications() { return true; }
+  virtual void UpdatePreferredSize(const gfx::Size& pref_size);
 
  private:
   friend class DeleteTask<AppLauncher>;
-  friend class NavigationBar;
   friend class InfoBubbleContentsView;
 
   explicit AppLauncher(Browser* browser);
@@ -126,32 +104,33 @@ class AppLauncher : public InfoBubbleDelegate,
 
   void AddTabWithURL(const GURL& url, PageTransition::Type transition);
 
+  // Resizes the bubble so it matches its contents's size |contents_size|.
+  void Resize(const gfx::Size& contents_size);
+
   // The currently active browser. We use this to open urls.
   Browser* browser_;
 
-  // The InfoBubble displaying the omnibox and app contents.
-  InfoBubble* info_bubble_;
-
-  // SiteInstance for the RenderViewHosts we create.
-  scoped_refptr<SiteInstance> site_instance_;
-
-  // RenderViewHost for the contents.
-  RenderViewHost* contents_rvh_;
-
-  // RenderWidgetHostView from the contents_rvh_.
-  RenderWidgetHostView* rwhv_;
-
-  // Handles creating the child TabContents.
-  RenderViewHostDelegateViewHelper helper_;
-
-  // Delegate of the TabContents created by helper_.
-  scoped_ptr<TabContentsDelegateImpl> tab_contents_delegate_;
-
-  // TabContents created when the user clicks a link.
-  scoped_ptr<TabContents> pending_contents_;
+  // The InfoBubble displaying the Omnibox and app contents.
+  PinnedContentsInfoBubble* info_bubble_;
 
   // The view with the navigation bar and render view, shown in the info-bubble.
   InfoBubbleContentsView* info_bubble_content_;
+
+  // An optional string containing querystring-encoded name/value pairs to be
+  // sent into the launcher's HTML page via its hash.
+  std::string hash_params_;
+
+  // The preferred size of the DOM contents.
+  gfx::Size contents_pref_size_;
+
+  // The previous preferred size of the DOM contents.
+  gfx::Size previous_contents_pref_size_;
+
+  // Whether we should use an animation when showing the info-bubble.
+  bool animate_;
+
+  // The animation that grows the info-bubble.
+  scoped_ptr<SlideAnimation> animation_;
 
   DISALLOW_COPY_AND_ASSIGN(AppLauncher);
 };

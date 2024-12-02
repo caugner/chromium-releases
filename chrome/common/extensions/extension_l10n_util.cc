@@ -79,10 +79,6 @@ static bool LocalizeManifestValue(const std::wstring& key,
 bool LocalizeManifest(const ExtensionMessageBundle& messages,
                       DictionaryValue* manifest,
                       std::string* error) {
-  // Don't localize themes.
-  if (manifest->HasKey(keys::kTheme))
-    return true;
-
   // Initialize name.
   std::string result;
   if (!manifest->GetString(keys::kName, &result)) {
@@ -283,7 +279,7 @@ ExtensionMessageBundle* LoadMessageCatalogs(
     if (!catalog.get()) {
       // If locale is valid, but messages.json is corrupted or missing, return
       // an error.
-      return false;
+      return NULL;
     } else {
       catalogs.push_back(catalog);
     }

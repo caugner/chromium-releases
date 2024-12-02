@@ -11,6 +11,7 @@
 #include "chrome/browser/dom_ui/dom_ui.h"
 #include "chrome/browser/extensions/extension_bookmark_manager_api.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/browser/favicon_service.h"
 #include "chrome/common/extensions/extension.h"
 
 class ListValue;
@@ -38,7 +39,7 @@ class ExtensionDOMUI
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual void RenderViewReused(RenderViewHost* render_view_host);
   virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const Value* content,
+                                   const ListValue* content,
                                    const GURL& source_url,
                                    int request_id,
                                    bool has_callback);
@@ -47,7 +48,7 @@ class ExtensionDOMUI
   virtual Browser* GetBrowser() const;
   virtual gfx::NativeView GetNativeViewOfHost();
   virtual gfx::NativeWindow GetCustomFrameNativeWindow();
-
+  virtual TabContents* associated_tab_contents() { return tab_contents(); }
   virtual Profile* GetProfile();
 
   virtual ExtensionBookmarkManagerEventRouter*
@@ -72,8 +73,10 @@ class ExtensionDOMUI
   // Called from BrowserPrefs
   static void RegisterUserPrefs(PrefService* prefs);
 
-  static RefCountedMemory* GetFaviconResourceBytes(Profile* profile,
-                                                   GURL page_url);
+  // Get the favicon for the extension by getting an icon from the manifest.
+  static void GetFaviconForURL(Profile* profile,
+                               FaviconService::GetFaviconRequest* request,
+                               const GURL& page_url);
 
  private:
   // Unregister the specified override, and if it's the currently active one,

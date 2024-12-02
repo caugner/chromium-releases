@@ -30,6 +30,10 @@ namespace gfx {
 class Rect;
 }
 
+namespace views {
+class Window;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserWindow interface
 //  An interface implemented by the "view" of the Browser window.
@@ -98,9 +102,6 @@ class BrowserWindow {
   // changed.
   virtual void UpdateDevTools() = 0;
 
-  // Tries to focus docked devtools window (when breakpoint is hit).
-  virtual void FocusDevTools() = 0;
-
   // Update any loading animations running in the window. |should_animate| is
   // true if there are tabs loading and the animations should continue, false
   // if there are no active loads and the animations should end.
@@ -132,8 +133,8 @@ class BrowserWindow {
   virtual void SetFocusToLocationBar(bool select_all) = 0;
 
   // Informs the view whether or not a load is in progress for the current tab.
-  // The view can use this notification to update the go/stop button.
-  virtual void UpdateStopGoState(bool is_loading, bool force) = 0;
+  // The view can use this notification to update the reload/stop button.
+  virtual void UpdateReloadStopState(bool is_loading, bool force) = 0;
 
   // Updates the toolbar with the state for the specified |contents|.
   virtual void UpdateToolbar(TabContents* contents,
@@ -142,10 +143,19 @@ class BrowserWindow {
   // Focuses the toolbar (for accessibility).
   virtual void FocusToolbar() = 0;
 
-  // Focuses the page and app menus like they were a menu bar.
+  // Focuses the app menu like it was a menu bar.
   //
   // Not used on the Mac, which has a "normal" menu bar.
-  virtual void FocusPageAndAppMenus() = 0;
+  virtual void FocusAppMenu() = 0;
+
+  // Focuses the bookmarks toolbar (for accessibility).
+  virtual void FocusBookmarksToolbar() = 0;
+
+  // Focuses the Chrome OS status view (for accessibility).
+  virtual void FocusChromeOSStatus() = 0;
+
+  // Moves keyboard focus to the next pane.
+  virtual void RotatePaneFocus(bool forwards) = 0;
 
   // Returns whether the bookmark bar is visible or not.
   virtual bool IsBookmarkBarVisible() const = 0;
@@ -180,13 +190,13 @@ class BrowserWindow {
   virtual void ToggleExtensionShelf() = 0;
 
   // Shows the About Chrome dialog box.
-  virtual void ShowAboutChromeDialog() = 0;
+  virtual views::Window* ShowAboutChromeDialog() = 0;
+
+  // Shows the Update Recommended dialog box.
+  virtual void ShowUpdateChromeDialog() = 0;
 
   // Shows the Task manager.
   virtual void ShowTaskManager() = 0;
-
-  // Shows the Bookmark Manager window.
-  virtual void ShowBookmarkManager() = 0;
 
   // Shows the Bookmark bubble. |url| is the URL being bookmarked,
   // |already_bookmarked| is true if the url is already bookmarked.
@@ -213,18 +223,15 @@ class BrowserWindow {
   // Shows the Password Manager dialog box.
   virtual void ShowPasswordManager() = 0;
 
-  // Shows the Select Profile dialog box.
-  virtual void ShowSelectProfileDialog() = 0;
-
-  // Shows the New Profile dialog box.
-  virtual void ShowNewProfileDialog() = 0;
-
   // Shows the repost form confirmation dialog box.
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) = 0;
 
   // Shows the Content Settings dialog box.
   virtual void ShowContentSettingsWindow(ContentSettingsType content_type,
                                          Profile* profile) = 0;
+
+  // Shows the collected cookies dialog box.
+  virtual void ShowCollectedCookiesDialog(TabContents* tab_contents) = 0;
 
   // Shows a dialog to the user that something is wrong with the profile.
   // |message_id| is the ID for a string in the string table which will be
@@ -276,9 +283,6 @@ class BrowserWindow {
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history) = 0;
 
-  // Shows the page menu (for accessibility).
-  virtual void ShowPageMenu() = 0;
-
   // Shows the app menu (for accessibility).
   virtual void ShowAppMenu() = 0;
 
@@ -297,15 +301,16 @@ class BrowserWindow {
   // Shows the create web app shortcut dialog box.
   virtual void ShowCreateShortcutsDialog(TabContents* tab_contents) = 0;
 
-#if defined(OS_CHROMEOS)
-  // Toggles compact navigation bar.
-  virtual void ToggleCompactNavigationBar() = 0;
-#endif
-
   // Clipboard commands applied to the whole browser window.
   virtual void Cut() = 0;
   virtual void Copy() = 0;
   virtual void Paste() = 0;
+
+  // Switches between available tabstrip display modes.
+  virtual void ToggleTabStripMode() = 0;
+
+  // Set whether the toolbar displays in collapsed mode.
+  virtual void SetToolbarCollapsedMode(bool val) = 0;
 
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);

@@ -33,6 +33,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <wtf/Platform.h>
 #include "PluginObject.h"
 
@@ -111,7 +112,7 @@ EXPORT void NPAPI NP_Shutdown(void)
 
 static void executeScript(const PluginObject* obj, const char* script);
 
-NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, char *argn[], char *argv[], NPSavedData *saved)
+NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16_t mode, int16_t argc, char *argn[], char *argv[], NPSavedData *saved)
 {
     if (browser->version >= 14) {
         PluginObject* obj = (PluginObject*)browser->createobject(instance, getPluginClass());
@@ -124,7 +125,7 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, ch
             else if (strcasecmp(argn[i], "onURLNotify") == 0 && !obj->onURLNotify)
                 obj->onURLNotify = strdup(argv[i]);
             else if (strcasecmp(argn[i], "logfirstsetwindow") == 0)
-                obj->logSetWindow = TRUE;
+                obj->logSetWindow = true;
             else if (strcasecmp(argn[i], "testnpruntime") == 0)
                 testNPRuntime(instance);
             else if (strcasecmp(argn[i], "logSrc") == 0) {
@@ -137,11 +138,23 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, ch
             } else if (strcasecmp(argn[i], "cleardocumentduringnew") == 0) {
                 executeScript(obj, "document.body.innerHTML = ''");
             } else if (strcasecmp(argn[i], "testdocumentopenindestroystream") == 0) {
-                obj->testDocumentOpenInDestroyStream = TRUE;
+                obj->testDocumentOpenInDestroyStream = true;
             } else if (strcasecmp(argn[i], "testwindowopen") == 0) {
-                obj->testWindowOpen = TRUE;
-            } else if (strcasecmp(argn[i], "src") == 0 && strstr(argv[i], "plugin-document-has-focus.pl"))
-                obj->testKeyboardFocusForPlugins = TRUE;
+                obj->testWindowOpen = true;
+            } else if (strcasecmp(argn[i], "src") == 0 && strstr(argv[i], "plugin-document-has-focus.pl")) {
+                obj->testKeyboardFocusForPlugins = true;
+            } else if (strcasecmp(argn[i], "evaluatescript") == 0) {
+                char* script = argv[i];
+                if (script == strstr(script, "mouse::")) {
+                    obj->mouseDownForEvaluateScript = true;
+                    obj->evaluateScriptOnMouseDownOrKeyDown = strdup(script + sizeof("mouse::") - 1);
+                } else if (script == strstr(script, "key::")) {
+                    obj->evaluateScriptOnMouseDownOrKeyDown = strdup(script + sizeof("key::") - 1);
+                }
+                // When testing evaluate script on mouse-down or key-down, allow event logging.
+                if (obj->evaluateScriptOnMouseDownOrKeyDown)
+                    obj->eventLogging = true;
+            }
         }
 
         instance->pdata = obj;
@@ -183,12 +196,12 @@ NPError NPP_SetWindow(NPP instance, NPWindow *window)
         if (obj->logSetWindow) {
             log(instance, "NPP_SetWindow: %d %d", (int)window->width, (int)window->height);
             fflush(stdout);
-            obj->logSetWindow = FALSE;
+            obj->logSetWindow = false;
         }
 
         if (obj->testWindowOpen) {
             testWindowOpen(instance);
-            obj->testWindowOpen = FALSE;
+            obj->testWindowOpen = false;
         }
 
         if (obj->testKeyboardFocusForPlugins) {
@@ -214,7 +227,7 @@ static void executeScript(const PluginObject* obj, const char* script)
     browser->releasevariantvalue(&browserResult);
 }
 
-NPError NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool seekable, uint16 *stype)
+NPError NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool seekable, uint16_t *stype)
 {
     PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
 
@@ -242,18 +255,18 @@ NPError NPP_DestroyStream(NPP instance, NPStream *stream, NPReason reason)
 
     if (obj->testDocumentOpenInDestroyStream) {
         testDocumentOpen(instance);
-        obj->testDocumentOpenInDestroyStream = FALSE;
+        obj->testDocumentOpenInDestroyStream = false;
     }
 
     return NPERR_NO_ERROR;
 }
 
-int32 NPP_WriteReady(NPP instance, NPStream *stream)
+int32_t NPP_WriteReady(NPP instance, NPStream *stream)
 {
     return 0;
 }
 
-int32 NPP_Write(NPP instance, NPStream *stream, int32 offset, int32 len, void *buffer)
+int32_t NPP_Write(NPP instance, NPStream *stream, int32_t offset, int32_t len, void *buffer)
 {
     return 0;
 }
@@ -266,7 +279,7 @@ void NPP_Print(NPP instance, NPPrint *platformPrint)
 {
 }
 
-int16 NPP_HandleEvent(NPP instance, void *event)
+int16_t NPP_HandleEvent(NPP instance, void *event)
 {
     PluginObject* obj = static_cast<PluginObject*>(instance->pdata);
     if (!obj->eventLogging)
@@ -287,6 +300,9 @@ int16 NPP_HandleEvent(NPP instance, void *event)
         case WM_MBUTTONDOWN:
         case WM_RBUTTONDOWN:
             log(instance, "mouseDown at (%d, %d)", x, y);
+            if (obj->evaluateScriptOnMouseDownOrKeyDown &&
+                obj->mouseDownForEvaluateScript)
+                executeScript(obj, obj->evaluateScriptOnMouseDownOrKeyDown);
             break;
         case WM_LBUTTONUP:
         case WM_MBUTTONUP:
@@ -303,7 +319,7 @@ int16 NPP_HandleEvent(NPP instance, void *event)
             log(instance, "keyUp '%c'", MapVirtualKey(evt->wParam, MAPVK_VK_TO_CHAR));
             if (obj->testKeyboardFocusForPlugins) {
                 obj->eventLogging = false;
-                obj->testKeyboardFocusForPlugins = FALSE;
+                obj->testKeyboardFocusForPlugins = false;
                 executeScript(obj, "layoutTestController.notifyDone();");
             }
             break;
@@ -311,6 +327,9 @@ int16 NPP_HandleEvent(NPP instance, void *event)
             break;
         case WM_KEYDOWN:
             log(instance, "keyDown '%c'", MapVirtualKey(evt->wParam, MAPVK_VK_TO_CHAR));
+            if (obj->evaluateScriptOnMouseDownOrKeyDown &&
+                !obj->mouseDownForEvaluateScript)
+                executeScript(obj, obj->evaluateScriptOnMouseDownOrKeyDown);
             break;
         case WM_SETCURSOR:
             break;
@@ -333,6 +352,9 @@ int16 NPP_HandleEvent(NPP instance, void *event)
     switch (evt->type) {
         case ButtonPress:
             log(instance, "mouseDown at (%d, %d)", bpress_evt->x, bpress_evt->y);
+            if (obj->evaluateScriptOnMouseDownOrKeyDown &&
+                obj->mouseDownForEvaluateScript)
+                executeScript(obj, obj->evaluateScriptOnMouseDownOrKeyDown);
             break;
         case ButtonRelease:
             log(instance, "mouseUp at (%d, %d)", brelease_evt->x, brelease_evt->y);
@@ -340,6 +362,9 @@ int16 NPP_HandleEvent(NPP instance, void *event)
         case KeyPress:
             // TODO: extract key code
             log(instance, "NOTIMPLEMENTED: keyDown '%c'", ' ');
+            if (obj->evaluateScriptOnMouseDownOrKeyDown &&
+                !obj->mouseDownForEvaluateScript)
+                executeScript(obj, obj->evaluateScriptOnMouseDownOrKeyDown);
             break;
         case KeyRelease:
             // TODO: extract key code
@@ -381,6 +406,9 @@ int16 NPP_HandleEvent(NPP instance, void *event)
         case mouseDown:
             GlobalToLocal(&pt);
             log(instance, "mouseDown at (%d, %d)", pt.h, pt.v);
+            if (obj->evaluateScriptOnMouseDownOrKeyDown &&
+                obj->mouseDownForEvaluateScript)
+                executeScript(obj, obj->evaluateScriptOnMouseDownOrKeyDown);
             break;
         case mouseUp:
             GlobalToLocal(&pt);
@@ -388,6 +416,9 @@ int16 NPP_HandleEvent(NPP instance, void *event)
             break;
         case keyDown:
             log(instance, "keyDown '%c'", (char)(evt->message & 0xFF));
+            if (obj->evaluateScriptOnMouseDownOrKeyDown &&
+                !obj->mouseDownForEvaluateScript)
+                executeScript(obj, obj->evaluateScriptOnMouseDownOrKeyDown);
             break;
         case keyUp:
             log(instance, "keyUp '%c'", (char)(evt->message & 0xFF));
@@ -461,7 +492,7 @@ NPError NPP_GetValue(NPP instance, NPPVariable variable, void *value)
             *((const char **)value) = "Simple Netscape plug-in that handles test content for WebKit";
             break;
         case NPPVpluginNeedsXEmbed:
-            *((NPBool *)value) = TRUE;
+            *((NPBool *)value) = true;
             break;
 #endif
         case NPPVpluginScriptableNPObject: {

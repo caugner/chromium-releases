@@ -156,9 +156,15 @@ bool PyUITestBase::OpenNewBrowserWindow(bool show) {
   return automation()->OpenNewBrowserWindow(Browser::TYPE_NORMAL, show);
 }
 
-bool PyUITestBase::InstallExtension(const FilePath& crx_file) {
+int PyUITestBase::GetBrowserWindowCount() {
+  int num_windows = 0;
+  EXPECT_TRUE(automation()->GetBrowserWindowCount(&num_windows));
+  return num_windows;
+}
+
+bool PyUITestBase::InstallExtension(const FilePath& crx_file, bool with_ui) {
   scoped_refptr<ExtensionProxy> proxy =
-      automation()->InstallExtension(crx_file);
+      automation()->InstallExtension(crx_file, with_ui);
   return proxy.get() != NULL;
 }
 
@@ -287,4 +293,40 @@ std::string PyUITestBase::_SendJSONRequest(int window_index,
     EXPECT_TRUE(browser_proxy->SendJSONRequest(request, &response));
   }
   return response;
+}
+
+bool PyUITestBase::ResetToDefaultTheme() {
+  return automation()->ResetToDefaultTheme();
+}
+
+bool PyUITestBase::SetCookie(const GURL& cookie_url,
+                             const std::string& value,
+                             int window_index,
+                             int tab_index) {
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
+  EXPECT_TRUE(browser_proxy.get());
+  if (!browser_proxy.get())
+    return false;
+  scoped_refptr<TabProxy> tab_proxy = browser_proxy->GetTab(tab_index);
+  EXPECT_TRUE(tab_proxy.get());
+  if (!tab_proxy.get())
+    return false;
+  return tab_proxy->SetCookie(cookie_url, value);
+}
+
+std::string PyUITestBase::GetCookie(const GURL& cookie_url,
+                                    int window_index,
+                                    int tab_index) {
+  std::string cookie_val;
+  scoped_refptr<BrowserProxy> browser_proxy = GetBrowserWindow(window_index);
+  EXPECT_TRUE(browser_proxy.get());
+  // TODO(phadjan.jr): figure out a way to unambiguously report error.
+  if (!browser_proxy.get())
+    return cookie_val;
+  scoped_refptr<TabProxy> tab_proxy = browser_proxy->GetTab(tab_index);
+  EXPECT_TRUE(tab_proxy.get());
+  if (!tab_proxy.get())
+    return cookie_val;
+  EXPECT_TRUE(tab_proxy->GetCookies(cookie_url, &cookie_val));
+  return cookie_val;
 }

@@ -4,8 +4,6 @@
 
 #include "chrome/browser/history/text_database_manager.h"
 
-#include <string>
-
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/histogram.h"
@@ -28,10 +26,9 @@ namespace {
 // The number of database files we will be attached to at once.
 const int kCacheDBSize = 5;
 
-std::string ConvertStringForIndexer(
-    const std::wstring& input) {
+std::string ConvertStringForIndexer(const string16& input) {
   // TODO(evanm): other transformations here?
-  return WideToUTF8(CollapseWhitespace(input, false));
+  return UTF16ToUTF8(CollapseWhitespace(input, false));
 }
 
 // Data older than this will be committed to the full text index even if we
@@ -51,16 +48,16 @@ TextDatabaseManager::PageInfo::PageInfo(URLID url_id,
   added_time_ = TimeTicks::Now();
 }
 
-void TextDatabaseManager::PageInfo::set_title(const std::wstring& ttl) {
+void TextDatabaseManager::PageInfo::set_title(const string16& ttl) {
   if (ttl.empty())  // Make the title nonempty when we set it for EverybodySet.
-    title_ = L" ";
+    title_ = ASCIIToUTF16(" ");
   else
     title_ = ttl;
 }
 
-void TextDatabaseManager::PageInfo::set_body(const std::wstring& bdy) {
+void TextDatabaseManager::PageInfo::set_body(const string16& bdy) {
   if (bdy.empty())  // Make the body nonempty when we set it for EverybodySet.
-    body_ = L" ";
+    body_ = ASCIIToUTF16(" ");
   else
     body_ = bdy;
 }
@@ -178,7 +175,7 @@ void TextDatabaseManager::AddPageURL(const GURL& url,
 }
 
 void TextDatabaseManager::AddPageTitle(const GURL& url,
-                                       const std::wstring& title) {
+                                       const string16& title) {
   RecentChangeList::iterator found = recent_changes_.Peek(url);
   if (found == recent_changes_.end()) {
     // This page is not in our cache of recent pages. This is very much an edge
@@ -209,7 +206,7 @@ void TextDatabaseManager::AddPageTitle(const GURL& url,
     }
 
     AddPageData(url, url_row.id(), visit.visit_id, visit.visit_time,
-                title, std::wstring());
+                title, string16());
     return;  // We don't know about this page, give up.
   }
 
@@ -226,7 +223,7 @@ void TextDatabaseManager::AddPageTitle(const GURL& url,
 }
 
 void TextDatabaseManager::AddPageContents(const GURL& url,
-                                          const std::wstring& body) {
+                                          const string16& body) {
   RecentChangeList::iterator found = recent_changes_.Peek(url);
   if (found == recent_changes_.end()) {
     // This page is not in our cache of recent pages. This means that the page
@@ -265,8 +262,8 @@ bool TextDatabaseManager::AddPageData(const GURL& url,
                                       URLID url_id,
                                       VisitID visit_id,
                                       Time visit_time,
-                                      const std::wstring& title,
-                                      const std::wstring& body) {
+                                      const string16& title,
+                                      const string16& body) {
   TextDatabase* db = GetDBForTime(visit_time, true);
   if (!db)
     return false;
@@ -405,7 +402,7 @@ void TextDatabaseManager::OptimizeChangedDatabases(
 }
 
 void TextDatabaseManager::GetTextMatches(
-    const std::wstring& query,
+    const string16& query,
     const QueryOptions& options,
     std::vector<TextDatabase::Match>* results,
     Time* first_time_searched) {
@@ -419,9 +416,9 @@ void TextDatabaseManager::GetTextMatches(
   }
 
   // Get the query into the proper format for the individual DBs.
-  std::wstring fts_query_wide;
-  query_parser_.ParseQuery(query, &fts_query_wide);
-  std::string fts_query = WideToUTF8(fts_query_wide);
+  string16 fts_query16;
+  query_parser_.ParseQuery(query, &fts_query16);
+  std::string fts_query = UTF16ToUTF8(fts_query16);
 
   // Need a copy of the options so we can modify the max count for each call
   // to the individual databases.

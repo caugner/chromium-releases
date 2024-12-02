@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,12 @@
 #include "base/file_version_info.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/platform_util.h"
+#include "chrome/browser/views/accessible_view_helper.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/platform_util.h"
 #include "chrome/common/url_constants.h"
 #include "gfx/canvas.h"
 #include "grit/chromium_strings.h"
@@ -68,13 +70,17 @@ std::wstring StringSubRange(const std::wstring& text, size_t start,
 
 namespace browser {
 
-// Declared in browser_dialogs.h so that others don't need to depend on our .h.
-void ShowAboutChromeView(gfx::NativeWindow parent,
-                         Profile* profile) {
-  views::Window::CreateChromeWindow(parent,
-                                    gfx::Rect(),
-                                    new AboutChromeView(profile))->Show();
-}
+  // Declared in browser_dialogs.h so that others don't
+  // need to depend on our .h.
+  views::Window* ShowAboutChromeView(gfx::NativeWindow parent,
+                                     Profile* profile) {
+      views::Window* about_chrome_window =
+        views::Window::CreateChromeWindow(parent,
+        gfx::Rect(),
+        new AboutChromeView(profile));
+      about_chrome_window->Show();
+      return about_chrome_window;
+  }
 
 }  // namespace browser
 
@@ -130,7 +136,7 @@ void AboutChromeView::Init() {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
   scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+      chrome_app::GetChromeVersionInfo());
   if (version_info.get() == NULL) {
     NOTREACHED() << L"Failed to initialize about window";
     return;
@@ -176,11 +182,8 @@ void AboutChromeView::Init() {
   // LTR UIs and one for RTL UIs. We load the correct bitmap based on the UI
   // layout of the view.
   about_dlg_background_logo_ = new views::ImageView();
-  SkBitmap* about_background_logo;
-  if (UILayoutIsRightToLeft())
-    about_background_logo = rb.GetBitmapNamed(IDR_ABOUT_BACKGROUND_RTL);
-  else
-    about_background_logo = rb.GetBitmapNamed(IDR_ABOUT_BACKGROUND);
+  SkBitmap* about_background_logo = rb.GetBitmapNamed(base::i18n::IsRTL() ?
+      IDR_ABOUT_BACKGROUND_RTL : IDR_ABOUT_BACKGROUND);
 
   about_dlg_background_logo_->SetImage(*about_background_logo);
   AddChildView(about_dlg_background_logo_);
@@ -205,7 +208,7 @@ void AboutChromeView::Init() {
   AddChildView(version_label_);
 
 #if defined(OS_CHROMEOS)
-  os_version_label_ = new views::Textfield();
+  os_version_label_ = new views::Textfield(views::Textfield::STYLE_MULTILINE);
   os_version_label_->SetReadOnly(true);
   os_version_label_->RemoveBorder();
   os_version_label_->SetTextColor(SK_ColorBLACK);
@@ -407,6 +410,10 @@ void AboutChromeView::Layout() {
                           throbber_topleft_y + 1,
                           parent_bounds.width() - update_label_x,
                           sz.height());
+
+  if (!accessible_view_helper_.get())
+    accessible_view_helper_.reset(
+        new AccessibleViewHelper(GetParent(), profile_));
 }
 
 
@@ -556,6 +563,10 @@ std::wstring AboutChromeView::GetDialogButtonLabel(
   return L"";
 }
 
+std::wstring AboutChromeView::GetWindowTitle() const {
+  return l10n_util::GetString(IDS_ABOUT_CHROME_TITLE);
+}
+
 bool AboutChromeView::IsDialogButtonEnabled(
     MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK &&
@@ -576,6 +587,14 @@ bool AboutChromeView::IsDialogButtonVisible(
   return true;
 }
 
+// (on ChromeOS) the default focus is ending up in the version field when
+// the update button is hidden. This forces the focus to always be on the
+// OK button (which is the dialog cancel button, see GetDialogButtonLabel
+// above).
+int AboutChromeView::GetDefaultDialogButton() const {
+  return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+}
+
 bool AboutChromeView::CanResize() const {
   return false;
 }
@@ -594,10 +613,6 @@ bool AboutChromeView::HasAlwaysOnTopMenu() const {
 
 bool AboutChromeView::IsModal() const {
   return true;
-}
-
-std::wstring AboutChromeView::GetWindowTitle() const {
-  return l10n_util::GetString(IDS_ABOUT_CHROME_TITLE);
 }
 
 bool AboutChromeView::Accept() {
@@ -648,6 +663,14 @@ void AboutChromeView::LinkActivated(views::Link* source,
 void AboutChromeView::OnOSVersion(
     chromeos::VersionLoader::Handle handle,
     std::string version) {
+
+  // This is a hack to "wrap" the very long Test Build version after
+  // the version number, the remaining text won't be visible but can
+  // be selected, copied, pasted.
+  std::string::size_type pos = version.find(" (Test Build");
+  if (pos != std::string::npos)
+    version.replace(pos, 1, "\n");
+
   os_version_label_->SetText(UTF8ToUTF16(version));
 }
 #endif
@@ -727,10 +750,16 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
         UserMetrics::RecordAction(
             UserMetricsAction("UpgradeCheck_AlreadyUpToDate"), profile_);
         check_button_status_ = CHECKBUTTON_HIDDEN;
+#if defined(OS_CHROMEOS)
+        std::wstring update_label_text =
+            l10n_util::GetStringF(IDS_UPGRADE_ALREADY_UP_TO_DATE,
+                                  l10n_util::GetString(IDS_PRODUCT_NAME));
+#else
         std::wstring update_label_text =
             l10n_util::GetStringF(IDS_UPGRADE_ALREADY_UP_TO_DATE,
                                   l10n_util::GetString(IDS_PRODUCT_NAME),
                                   current_version_);
+#endif
         if (base::i18n::IsRTL()) {
           update_label_text.push_back(
               static_cast<wchar_t>(base::i18n::kLeftToRightMark));
@@ -759,7 +788,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
                                   new_version_available_);
       update_label_.SetText(update_string);
       show_success_indicator = true;
-      // TODO (seanparent) : Need to see if this code needs to change to
+      // TODO(seanparent): Need to see if this code needs to change to
       // force a machine restart.
 #if defined(OS_WIN)
       RestartMessageBox::ShowMessageBox(window()->GetNativeWindow());

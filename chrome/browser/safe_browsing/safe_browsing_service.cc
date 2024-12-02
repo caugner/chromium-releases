@@ -6,11 +6,11 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
@@ -18,8 +18,11 @@
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "net/base/registry_controlled_domain.h"
@@ -30,6 +33,15 @@
 
 using base::Time;
 using base::TimeDelta;
+
+// The default URL prefix where browser fetches chunk updates, hashes,
+// and reports malware.
+static const char* const kSbDefaultInfoURLPrefix =
+    "http://safebrowsing.clients.google.com/safebrowsing";
+
+// The default URL prefix where browser fetches MAC client key.
+static const char* const kSbDefaultMacKeyURLPrefix =
+    "https://sb-ssl.google.com/safebrowsing";
 
 static Profile* GetDefaultProfile() {
   FilePath user_data_dir;
@@ -232,6 +244,11 @@ void SafeBrowsingService::UpdateFinished(bool update_succeeded) {
   }
 }
 
+bool SafeBrowsingService::IsUpdateInProgress() const {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  return update_in_progress_;
+}
+
 void SafeBrowsingService::OnBlockingPageDone(
     const std::vector<UnsafeResource>& resources,
     bool proceed) {
@@ -257,8 +274,8 @@ void SafeBrowsingService::OnNewMacKeys(const std::string& client_key,
                                        const std::string& wrapped_key) {
   PrefService* prefs = g_browser_process->local_state();
   if (prefs) {
-    prefs->SetString(prefs::kSafeBrowsingClientKey, ASCIIToWide(client_key));
-    prefs->SetString(prefs::kSafeBrowsingWrappedKey, ASCIIToWide(wrapped_key));
+    prefs->SetString(prefs::kSafeBrowsingClientKey, client_key);
+    prefs->SetString(prefs::kSafeBrowsingWrappedKey, wrapped_key);
   }
 }
 
@@ -271,8 +288,8 @@ void SafeBrowsingService::OnEnable(bool enabled) {
 
 // static
 void SafeBrowsingService::RegisterPrefs(PrefService* prefs) {
-  prefs->RegisterStringPref(prefs::kSafeBrowsingClientKey, L"");
-  prefs->RegisterStringPref(prefs::kSafeBrowsingWrappedKey, L"");
+  prefs->RegisterStringPref(prefs::kSafeBrowsingClientKey, "");
+  prefs->RegisterStringPref(prefs::kSafeBrowsingWrappedKey, "");
 }
 
 void SafeBrowsingService::CloseDatabase() {
@@ -344,12 +361,25 @@ void SafeBrowsingService::OnIOInitialize(
   std::string client_name("chromium");
 #endif
 #endif
+  CommandLine* cmdline = CommandLine::ForCurrentProcess();
+  bool disable_auto_update = cmdline->HasSwitch(switches::kSbDisableAutoUpdate);
+  std::string info_url_prefix =
+      cmdline->HasSwitch(switches::kSbInfoURLPrefix) ?
+      cmdline->GetSwitchValueASCII(switches::kSbInfoURLPrefix) :
+      kSbDefaultInfoURLPrefix;
+  std::string mackey_url_prefix =
+      cmdline->HasSwitch(switches::kSbMacKeyURLPrefix) ?
+      cmdline->GetSwitchValueASCII(switches::kSbMacKeyURLPrefix) :
+      kSbDefaultMacKeyURLPrefix;
 
   protocol_manager_ = new SafeBrowsingProtocolManager(this,
                                                       client_name,
                                                       client_key,
                                                       wrapped_key,
-                                                      request_context_getter);
+                                                      request_context_getter,
+                                                      info_url_prefix,
+                                                      mackey_url_prefix,
+                                                      disable_auto_update);
 
   // Balance the reference added by Start().
   request_context_getter->Release();
@@ -603,9 +633,9 @@ void SafeBrowsingService::Start() {
   std::string client_key, wrapped_key;
   if (local_state) {
     client_key =
-      WideToASCII(local_state->GetString(prefs::kSafeBrowsingClientKey));
+      local_state->GetString(prefs::kSafeBrowsingClientKey);
     wrapped_key =
-      WideToASCII(local_state->GetString(prefs::kSafeBrowsingWrappedKey));
+      local_state->GetString(prefs::kSafeBrowsingWrappedKey);
   }
 
   // We will issue network fetches using the default profile's request context.

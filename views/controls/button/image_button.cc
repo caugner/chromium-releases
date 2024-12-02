@@ -19,7 +19,8 @@ static const int kDefaultHeight = 14;  // Default button height if no theme.
 ImageButton::ImageButton(ButtonListener* listener)
     : CustomButton(listener),
       h_alignment_(ALIGN_LEFT),
-      v_alignment_(ALIGN_TOP) {
+      v_alignment_(ALIGN_TOP),
+      preferred_size_(kDefaultWidth, kDefaultHeight) {
   // By default, we request that the gfx::Canvas passed to our View::Paint()
   // implementation is flipped horizontally so that the button's bitmaps are
   // mirrored when the UI directionality is right-to-left.
@@ -29,13 +30,14 @@ ImageButton::ImageButton(ButtonListener* listener)
 ImageButton::~ImageButton() {
 }
 
-void ImageButton::SetImage(ButtonState aState, SkBitmap* anImage) {
+void ImageButton::SetImage(ButtonState aState, const SkBitmap* anImage) {
   images_[aState] = anImage ? *anImage : SkBitmap();
+  PreferredSizeChanged();
 }
 
 void ImageButton::SetBackground(SkColor color,
-                                SkBitmap* image,
-                                SkBitmap* mask) {
+                                const SkBitmap* image,
+                                const SkBitmap* mask) {
   if (!image || !mask) {
     background_image_.reset();
     return;
@@ -58,7 +60,7 @@ void ImageButton::SetImageAlignment(HorizontalAlignment h_align,
 gfx::Size ImageButton::GetPreferredSize() {
   if (!images_[BS_NORMAL].isNull())
     return gfx::Size(images_[BS_NORMAL].width(), images_[BS_NORMAL].height());
-  return gfx::Size(kDefaultWidth, kDefaultHeight);
+  return preferred_size_;
 }
 
 void ImageButton::Paint(gfx::Canvas* canvas) {
@@ -93,7 +95,7 @@ void ImageButton::Paint(gfx::Canvas* canvas) {
 SkBitmap ImageButton::GetImageToPaint() {
   SkBitmap img;
 
-  if (!images_[BS_HOT].isNull() && hover_animation_->IsAnimating()) {
+  if (!images_[BS_HOT].isNull() && hover_animation_->is_animating()) {
     img = SkBitmapOperations::CreateBlendedBitmap(images_[BS_NORMAL],
         images_[BS_HOT], hover_animation_->GetCurrentValue());
   } else {
@@ -127,7 +129,8 @@ void ToggleImageButton::SetToggled(bool toggled) {
   SchedulePaint();
 }
 
-void ToggleImageButton::SetToggledImage(ButtonState state, SkBitmap* image) {
+void ToggleImageButton::SetToggledImage(ButtonState state,
+                                        const SkBitmap* image) {
   if (toggled_) {
     images_[state] = image ? *image : SkBitmap();
     if (state_ == state)
@@ -144,7 +147,7 @@ void ToggleImageButton::SetToggledTooltipText(const std::wstring& tooltip) {
 ////////////////////////////////////////////////////////////////////////////////
 // ToggleImageButton, ImageButton overrides:
 
-void ToggleImageButton::SetImage(ButtonState state, SkBitmap* image) {
+void ToggleImageButton::SetImage(ButtonState state, const SkBitmap* image) {
   if (toggled_) {
     alternate_images_[state] = image ? *image : SkBitmap();
   } else {
@@ -152,6 +155,7 @@ void ToggleImageButton::SetImage(ButtonState state, SkBitmap* image) {
     if (state_ == state)
       SchedulePaint();
   }
+  PreferredSizeChanged();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

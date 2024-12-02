@@ -39,7 +39,7 @@
  * 1)  If both a color and depth surface is bound, then they must be of
  *     matching dimensions.
  * 2)  At least one of render_surface and render_depth_surface must non-null.
- * 
+ *
  * @param {o3d.RenderSurface} opt_renderSurface The render surface to set.
  * @param {o3d.RenderDepthStencilSurface} opt_renderDepthStencilSurface The
  *     depth stencil render surface to set.
@@ -48,28 +48,30 @@
 o3d.RenderSurfaceSet =
     function(opt_renderSurface, opt_renderDepthStencilSurface) {
   o3d.RenderNode.call(this);
-  o3d.RenderSurfaceSet.prototype.renderSurface =
-      opt_renderSurface;
-  o3d.RenderSurfaceSet.prototype.renderDepthStencilSurface =
-      opt_renderDepthStencilSurface;
+
+  /**
+   * The render surface to which the color contents of all RenderNode children
+   * should be drawn.
+   * @type {o3d.RenderSurface}
+   */
+  this.renderSurface = opt_renderSurface || null;
+
+
+  /**
+   * The render depth stencil surface to which the depth contents of all
+   * RenderNode children should be drawn.
+   * @type {o3d.RenderDepthStencilSurface}
+   */
+  this.renderDepthStencilSurface = opt_renderDepthStencilSurface || null;
 };
 o3d.inherit('RenderSurfaceSet', 'RenderNode');
 
 
-/**
- * The render surface to which the color contents of all RenderNode children
- * should be drawn.
- * @type {o3d.RenderSurface}
- */
-o3d.RenderSurfaceSet.prototype.renderSurface = null;
-
-
-/**
- * The render depth stencil surface to which the depth contents of all
- * RenderNode children should be drawn.
- * @type {o3d.RenderDepthStencilSurface}
- */
-o3d.RenderSurfaceSet.prototype.renderDepthStencilSurface = null;
+o3d.ParamObject.setUpO3DParam_(o3d.RenderSurfaceSet,
+                               'renderSurface', 'ParamRenderSurface');
+o3d.ParamObject.setUpO3DParam_(o3d.RenderSurfaceSet,
+                               'renderDepthStencilSurface',
+                               'ParamRenderDepthStencilSurface');
 
 /**
  * Helper function to set the framebuffer back to the default one.
@@ -84,15 +86,15 @@ o3d.RenderSurfaceSet.prototype.clearFramebufferObjects_ =
       this.gl.FRAMEBUFFER,
       this.gl.COLOR_ATTACHMENT0,
       this.gl.RENDERBUFFER,
-      0);
+      null);
 
   this.gl.framebufferRenderbuffer(
       this.gl.FRAMEBUFFER,
       this.gl.DEPTH_ATTACHMENT,
       this.gl.RENDERBUFFER,
-      0);
+      null);
 
-  this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, 0);
+  this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
 };
 
 
@@ -147,8 +149,10 @@ o3d.RenderSurfaceSet.prototype.before = function() {
   this.installFramebufferObjects_();
   this.previousHeight = this.gl.displayInfo.height;
   this.previousWidth = this.gl.displayInfo.width;
+  this.previousRenderSurfaceSet = this.gl.currentRenderSurfaceSet;
   this.gl.displayInfo.height = this.renderSurface.height;
   this.gl.displayInfo.width = this.renderSurface.width;
+  this.gl.currentRenderSurfaceSet = this;
 };
 
 
@@ -160,6 +164,8 @@ o3d.RenderSurfaceSet.prototype.after = function() {
   this.clearFramebufferObjects_();
   this.gl.displayInfo.height = this.previousHeight;
   this.gl.displayInfo.width = this.previousWidth;
+  // This is consumed in effect.js.
+  this.gl.currentRenderSurfaceSet = this.previousRenderSurfaceSet;
 };
 
 

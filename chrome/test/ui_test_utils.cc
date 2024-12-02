@@ -16,6 +16,7 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/dom_operation_notification_details.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -28,6 +29,7 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
+#include "chrome/test/bookmark_load_observer.h"
 #if defined(TOOLKIT_VIEWS)
 #include "views/focus/accelerator_handler.h"
 #endif
@@ -213,32 +215,6 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
   bool waiting_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadsCompleteObserver);
-};
-
-class LanguageDetectionNotificationObserver : public NotificationObserver {
- public:
-  explicit LanguageDetectionNotificationObserver(TabContents* tab) {
-    registrar_.Add(this, NotificationType::TAB_LANGUAGE_DETERMINED,
-                  Source<TabContents>(tab));
-    ui_test_utils::RunMessageLoop();
-  }
-
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    language_ = *(Details<std::string>(details).ptr());
-    MessageLoopForUI::current()->Quit();
-  }
-
-  std::string language() const {
-    return language_;
-  }
-
- private:
-  NotificationRegistrar registrar_;
-  std::string language_;
-
-  DISALLOW_COPY_AND_ASSIGN(LanguageDetectionNotificationObserver);
 };
 
 class FindInPageNotificationObserver : public NotificationObserver {
@@ -430,9 +406,9 @@ DOMElementProxyRef GetActiveDOMDocument(Browser* browser) {
   JavaScriptExecutionController* executor =
       new InProcessJavaScriptExecutionController(
           browser->GetSelectedTabContents()->render_view_host());
-  DOMElementProxy* main_doc = NULL;
-  executor->ExecuteJavaScriptAndParse("document;", &main_doc);
-  return main_doc;
+  int element_handle;
+  executor->ExecuteJavaScriptAndGetReturn("document;", &element_handle);
+  return executor->GetObjectProxy<DOMElementProxy>(element_handle);
 }
 
 Value* ExecuteJavaScript(RenderViewHost* render_view_host,
@@ -543,11 +519,6 @@ void WaitForFocusInBrowser(Browser* browser) {
                   Source<Browser>(browser));
 }
 
-std::string WaitForLanguageDetection(TabContents* tab) {
-  LanguageDetectionNotificationObserver observer(tab);
-  return observer.language();
-}
-
 int FindInPage(TabContents* tab_contents, const string16& search_string,
                bool forward, bool match_case, int* ordinal) {
   tab_contents->StartFinding(search_string, forward, match_case);
@@ -568,6 +539,16 @@ void RegisterAndWait(NotificationObserver* observer,
   NotificationRegistrar registrar;
   registrar.Add(observer, type, source);
   RunMessageLoop();
+}
+
+void WaitForBookmarkModelToLoad(BookmarkModel* model) {
+  if (model->IsLoaded())
+    return;
+  BookmarkLoadObserver observer;
+  model->AddObserver(&observer);
+  RunMessageLoop();
+  model->RemoveObserver(&observer);
+  ASSERT_TRUE(model->IsLoaded());
 }
 
 TimedMessageLoopRunner::TimedMessageLoopRunner()
@@ -608,7 +589,7 @@ void AppendToPythonPath(const FilePath& dir) {
     ::SetEnvironmentVariableW(kPythonPath, dir.value().c_str());
   } else if (!wcsstr(oldpath, dir.value().c_str())) {
     std::wstring newpath(oldpath);
-    newpath.append(L":");
+    newpath.append(L";");
     newpath.append(dir.value());
     SetEnvironmentVariableW(kPythonPath, newpath.c_str());
   }
@@ -631,6 +612,7 @@ void AppendToPythonPath(const FilePath& dir) {
 TestWebSocketServer::TestWebSocketServer(const FilePath& root_directory) {
   scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
   cmd_line->AppendSwitchWithValue("server", "start");
+  cmd_line->AppendSwitch("chromium");
   cmd_line->AppendSwitch("register_cygwin");
   cmd_line->AppendSwitchWithValue("root", root_directory.ToWStringHack());
   temp_dir_.CreateUniqueTempDir();
@@ -642,19 +624,7 @@ TestWebSocketServer::TestWebSocketServer(const FilePath& root_directory) {
 }
 
 CommandLine* TestWebSocketServer::CreatePythonCommandLine() {
-#if defined(OS_WIN)
-  // Get path to python interpreter
-  FilePath python_runtime;
-  if (!PathService::Get(base::DIR_SOURCE_ROOT, &python_runtime))
-    return NULL;
-  python_runtime = python_runtime
-    .Append(FILE_PATH_LITERAL("third_party"))
-    .Append(FILE_PATH_LITERAL("python_24"))
-    .Append(FILE_PATH_LITERAL("python.exe"));
-  return new CommandLine(python_runtime);
-#elif defined(OS_POSIX)
-  return new CommandLine(FilePath("python"));
-#endif
+  return new CommandLine(FilePath(FILE_PATH_LITERAL("python")));
 }
 
 void TestWebSocketServer::SetPythonPath() {
@@ -679,10 +649,7 @@ CommandLine* TestWebSocketServer::CreateWebSocketServerCommandLine() {
   script_path = script_path.AppendASCII("WebKit");
   script_path = script_path.AppendASCII("WebKitTools");
   script_path = script_path.AppendASCII("Scripts");
-  script_path = script_path.AppendASCII("webkitpy");
-  script_path = script_path.AppendASCII("layout_tests");
-  script_path = script_path.AppendASCII("port");
-  script_path = script_path.AppendASCII("websocket_server.py");
+  script_path = script_path.AppendASCII("new-run-webkit-websocketserver");
 
   CommandLine* cmd_line = CreatePythonCommandLine();
   cmd_line->AppendLooseValue(script_path.ToWStringHack());
@@ -692,6 +659,7 @@ CommandLine* TestWebSocketServer::CreateWebSocketServerCommandLine() {
 TestWebSocketServer::~TestWebSocketServer() {
   scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
   cmd_line->AppendSwitchWithValue("server", "stop");
+  cmd_line->AppendSwitch("chromium");
   cmd_line->AppendSwitchWithValue("pidfile",
                                   websocket_pid_file_.ToWStringHack());
   base::LaunchApp(*cmd_line.get(), true, false, NULL);

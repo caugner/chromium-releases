@@ -18,16 +18,6 @@ bool PathProvider(int key, FilePath* result) {
 
   FilePath cur;
   switch (key) {
-#if !defined(OS_MACOSX)
-    // These are not "themes" that are user-created, but rather the dlls and
-    // pak files. On the Mac, we keep the pak files in the lproj folders.
-    case app::DIR_THEMES:
-      if (!PathService::Get(base::DIR_MODULE, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("themes"));
-      create_dir = true;
-      break;
-#endif
     case app::DIR_LOCALES:
       if (!PathService::Get(base::DIR_MODULE, &cur))
         return false;
@@ -53,6 +43,16 @@ bool PathProvider(int key, FilePath* result) {
 #else
       cur = cur.Append(FILE_PATH_LITERAL("extensions"));
       create_dir = true;
+#endif
+      break;
+    case app::FILE_RESOURCES_PAK:
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+      if (!PathService::Get(base::DIR_EXE, &cur))
+        return false;
+      // TODO(tony): We shouldn't be referencing chrome here.
+      cur = cur.AppendASCII("chrome.pak");
+#else
+      NOTREACHED();
 #endif
       break;
     // The following are only valid in the development environment, and

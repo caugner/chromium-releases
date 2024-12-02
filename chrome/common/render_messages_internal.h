@@ -14,6 +14,7 @@
 
 #include "base/file_path.h"
 #include "base/nullable_string16.h"
+#include "base/platform_file.h"
 #include "base/sync_socket.h"
 #include "base/time.h"
 #include "base/values.h"
@@ -24,6 +25,7 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/common/page_zoom.h"
 #include "chrome/common/translate_errors.h"
+#include "chrome/common/window_container_type.h"
 #include "gfx/rect.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message.h"
@@ -35,6 +37,10 @@
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "chrome/common/font_descriptor_mac.h"
 #endif
 
 // TODO(mpcomplete): rename ViewMsg and ViewHostMsg to something that makes
@@ -140,6 +146,20 @@ IPC_BEGIN_MESSAGES(View)
   // should only result in purging objects we can recalculate, e.g. caches or
   // JS garbage, not in purging irreplaceable objects.
   IPC_MESSAGE_CONTROL0(ViewMsg_PurgeMemory)
+
+  // Sent to render the view into the supplied transport DIB, resize
+  // the web widget to match the |page_size|, scale it by the
+  // appropriate scale to make it fit the |desired_size|, and return
+  // it.  In response to this message, the host generates a
+  // ViewHostMsg_PaintAtSize_ACK message.  Note that the DIB *must* be
+  // the right size to receive an RGBA image at the |desired_size|.
+  // |tag| is sent along with ViewHostMsg_PaintAtSize_ACK unmodified to
+  // identify the PaintAtSize message the ACK belongs to.
+  IPC_MESSAGE_ROUTED4(ViewMsg_PaintAtSize,
+                      TransportDIB::Handle /* dib_handle */,
+                      int /* tag */,
+                      gfx::Size /* page_size */,
+                      gfx::Size /* desired_size */)
 
   // Tells the render view that a ViewHostMsg_UpdateRect message was processed.
   // This signals the render view that it can send another UpdateRect message.
@@ -263,6 +283,11 @@ IPC_BEGIN_MESSAGES(View)
                       int /* request_id */,
                       ResourceResponseHead)
 
+  // Sent when cached metadata from a resource request is ready.
+  IPC_MESSAGE_ROUTED2(ViewMsg_Resource_ReceivedCachedMetadata,
+                      int /* request_id */,
+                      std::vector<char> /* data */)
+
   // Sent as download progress is being made, size of the resource may be
   // unknown, in that case |size| is -1.
   IPC_MESSAGE_ROUTED3(ViewMsg_Resource_DownloadProgress,
@@ -345,29 +370,29 @@ IPC_BEGIN_MESSAGES(View)
   IPC_MESSAGE_ROUTED0(ViewMsg_SetupDevToolsClient)
 
   // Change the zoom level for the current main frame.  If the level actually
-  // changes, a ViewHostMsg_DidZoomHost message will be sent back to the browser
-  // telling it what host got zoomed and what its current zoom level is.
+  // changes, a ViewHostMsg_DidZoomURL message will be sent back to the browser
+  // telling it what url got zoomed and what its current zoom level is.
   IPC_MESSAGE_ROUTED1(ViewMsg_Zoom,
                       PageZoom::Function /* function */)
 
-  // Set the zoom level for a particular hostname that the renderer is in the
+  // Set the zoom level for a particular url that the renderer is in the
   // process of loading.  This will be stored, to be used if the load commits
   // and ignored otherwise.
-  IPC_MESSAGE_ROUTED2(ViewMsg_SetZoomLevelForLoadingHost,
-                      std::string /* host */,
+  IPC_MESSAGE_ROUTED2(ViewMsg_SetZoomLevelForLoadingURL,
+                      GURL /* url */,
                       int /* zoom_level */)
 
-  // Set the zoom level for a particular hostname, so all render views
-  // displaying this host can update their zoom levels to match.
-  IPC_MESSAGE_CONTROL2(ViewMsg_SetZoomLevelForCurrentHost,
-                       std::string /* host */,
+  // Set the zoom level for a particular url, so all render views
+  // displaying this url can update their zoom levels to match.
+  IPC_MESSAGE_CONTROL2(ViewMsg_SetZoomLevelForCurrentURL,
+                       GURL /* url */,
                        int /* zoom_level */)
 
-  // Set the content settings for a particular hostname that the renderer is in
-  // the process of loading.  This will be stored, to be used if the load
-  // commits and ignored otherwise.
-  IPC_MESSAGE_ROUTED2(ViewMsg_SetContentSettingsForLoadingHost,
-                      std::string /* host */,
+  // Set the content settings for a particular url that the renderer is in the
+  // process of loading.  This will be stored, to be used if the load commits
+  // and ignored otherwise.
+  IPC_MESSAGE_ROUTED2(ViewMsg_SetContentSettingsForLoadingURL,
+                      GURL /* url */,
                       ContentSettings /* content_settings */)
 
   // Set the content settings for a particular url, so all render views
@@ -394,7 +419,7 @@ IPC_BEGIN_MESSAGES(View)
   // Fill a password form and prepare field autocomplete for multiple
   // matching logins.
   IPC_MESSAGE_ROUTED1(ViewMsg_FillPasswordForm,
-                      webkit_glue::PasswordFormDomManager::FillData)
+                      webkit_glue::PasswordFormFillData)
 
   // D&d drop target messages.
   IPC_MESSAGE_ROUTED4(ViewMsg_DragTargetDragEnter,
@@ -434,43 +459,30 @@ IPC_BEGIN_MESSAGES(View)
                       std::string /* property_name */,
                       std::string /* property_value_json */)
 
-  // This message starts/stop monitoring the status of the focused edit
-  // control of a renderer process.
+  // This message starts/stop monitoring the input method status of the focused
+  // edit control of a renderer process.
   // Parameters
   // * is_active (bool)
-  //   Represents whether or not the IME is active in a browser process.
+  //   Indicates if an input method is active in the browser process.
   //   The possible actions when a renderer process receives this message are
   //   listed below:
   //     Value Action
-  //     true  Start sending IPC messages, ViewHostMsg_ImeUpdateStatus
-  //           to notify the status of the focused edit control.
-  //     false Stop sending IPC messages, ViewHostMsg_ImeUpdateStatus.
-  IPC_MESSAGE_ROUTED1(ViewMsg_ImeSetInputMode,
+  //     true  Start sending IPC message ViewHostMsg_ImeUpdateTextInputState
+  //           to notify the input method status of the focused edit control.
+  //     false Stop sending IPC message ViewHostMsg_ImeUpdateTextInputState.
+  IPC_MESSAGE_ROUTED1(ViewMsg_SetInputMethodActive,
                       bool /* is_active */)
 
-  // This message sends a string being composed with IME.
-  // Parameters
-  // * string_type (int)
-  //   Represents the type of the 'ime_string' parameter.
-  //   Its possible values and description are listed below:
-  //     Value         Description
-  //     -1            The parameter is not used.
-  //     1             The parameter represents a result string.
-  //     0             The parameter represents a composition string.
-  // * cursor_position (int)
-  //   Represents the position of the cursor
-  // * target_start (int)
-  //   Represents the position of the beginning of the selection
-  // * target_end (int)
-  //   Represents the position of the end of the selection
-  // * ime_string (std::wstring)
-  //   Represents the string retrieved from IME (Input Method Editor)
-  IPC_MESSAGE_ROUTED5(ViewMsg_ImeSetComposition,
-                      WebKit::WebCompositionCommand, /* command */
-                      int, /* cursor_position */
-                      int, /* target_start */
-                      int, /* target_end */
-                      string16 /* ime_string */ )
+  // This message sends a string being composed with an input method.
+  IPC_MESSAGE_ROUTED4(
+      ViewMsg_ImeSetComposition,
+      string16, /* text */
+      std::vector<WebKit::WebCompositionUnderline>, /* underlines */
+      int, /* selectiont_start */
+      int /* selection_end */)
+
+  // This message confirms an ongoing composition.
+  IPC_MESSAGE_ROUTED0(ViewMsg_ImeConfirmComposition)
 
   // This passes a set of webkit preferences down to the renderer.
   IPC_MESSAGE_ROUTED1(ViewMsg_UpdateWebPreferences, WebPreferences)
@@ -501,20 +513,6 @@ IPC_BEGIN_MESSAGES(View)
 
   // Used to instruct the RenderView to go into "view source" mode.
   IPC_MESSAGE_ROUTED0(ViewMsg_EnableViewSourceMode)
-
-  // Retreive information from the MSAA DOM subtree, for accessibility purposes.
-  IPC_SYNC_MESSAGE_ROUTED1_1(ViewMsg_GetAccessibilityInfo,
-                             webkit_glue::WebAccessibility::InParams
-                             /* input parameters */,
-                             webkit_glue::WebAccessibility::OutParams
-                             /* output parameters */)
-
-  // Requests the renderer to clear cashed accessibility information. Takes an
-  // id to clear a specific hashmap entry, and a bool; true clears all, false
-  // does not.
-  IPC_MESSAGE_ROUTED2(ViewMsg_ClearAccessibilityInfo,
-                      int  /* accessibility object id */,
-                      bool /* clear_all */)
 
   // Get all savable resource links from current webpage, include main
   // frame and sub-frame.
@@ -612,32 +610,42 @@ IPC_BEGIN_MESSAGES(View)
                        std::vector<int> /* host_ids */,
                        appcache::Status)
 
-  // Notifies the renderer of an AppCache event.
+  // Notifies the renderer of an AppCache event other than the
+  // progress event which has a seperate message.
   IPC_MESSAGE_CONTROL2(AppCacheMsg_EventRaised,
                        std::vector<int> /* host_ids */,
                        appcache::EventID)
 
-  // Notifies the renderer of the fact that AppCache access was blocked.
-  IPC_MESSAGE_CONTROL1(AppCacheMsg_ContentBlocked,
-                       int /* host_id */)
+  // Notifies the renderer of an AppCache progress event.
+  IPC_MESSAGE_CONTROL4(AppCacheMsg_ProgressEventRaised,
+                       std::vector<int> /* host_ids */,
+                       GURL /* url being processed */,
+                       int /* total */,
+                       int /* complete */)
 
-  // Reply to the ViewHostMsg_QueryFormFieldAutofill message with the
-  // autofill suggestions.
+  // Notifies the renderer of an AppCache error event.
+  IPC_MESSAGE_CONTROL2(AppCacheMsg_ErrorEventRaised,
+                       std::vector<int> /* host_ids */,
+                       std::string /* error_message */)
+
+  // Notifies the renderer of an AppCache logging message.
+  IPC_MESSAGE_CONTROL3(AppCacheMsg_LogMessage,
+                       int /* host_id */,
+                       int /* log_level */,
+                       std::string /* message */)
+
+  // Notifies the renderer of the fact that AppCache access was blocked.
+  IPC_MESSAGE_CONTROL2(AppCacheMsg_ContentBlocked,
+                       int /* host_id */,
+                       GURL /* manifest_url */)
+
+  // Reply to the ViewHostMsg_QueryFormFieldAutoFill message with the
+  // AutoFill suggestions.
   IPC_MESSAGE_ROUTED4(ViewMsg_AutoFillSuggestionsReturned,
                       int /* id of the request message */,
                       std::vector<string16> /* names */,
                       std::vector<string16> /* labels */,
-                      int /* index of default suggestion */)
-
-  IPC_MESSAGE_ROUTED1(ViewMsg_AutoFillForms,
-                      std::vector<webkit_glue::FormData> /* forms */)
-
-  // Reply to the ViewHostMsg_QueryFormFieldAutofill message with the
-  // autocomplete suggestions.
-  IPC_MESSAGE_ROUTED3(ViewMsg_AutocompleteSuggestionsReturned,
-                      int /* id of the request message */,
-                      std::vector<string16> /* suggestions */,
-                      int /* index of default suggestion */)
+                      std::vector<int> /* unique_ids */)
 
   // Reply to the ViewHostMsg_FillAutoFillFormData message with the
   // AutoFill form data.
@@ -645,11 +653,11 @@ IPC_BEGIN_MESSAGES(View)
                       int /* id of the request message */,
                       webkit_glue::FormData /* form data */)
 
-  // Sent by the Browser process to alert a window about whether a blocked
-  // popup notification is visible. The renderer assumes every new window is a
+  // Sent by the Browser process to alert a window about whether a it should
+  // allow a scripted window.close(). The renderer assumes every new window is a
   // blocked popup until notified otherwise.
-  IPC_MESSAGE_ROUTED1(ViewMsg_PopupNotificationVisibilityChanged,
-                      bool /* Whether it is visible */)
+  IPC_MESSAGE_ROUTED1(ViewMsg_AllowScriptToClose,
+                      bool /* script_can_close */)
 
   // Sent by AudioRendererHost to renderer to request an audio packet.
   IPC_MESSAGE_ROUTED3(ViewMsg_RequestAudioPacket,
@@ -708,10 +716,11 @@ IPC_BEGIN_MESSAGES(View)
   // target process.  If routed, it will be restricted to the contexts that
   // are part of the target RenderView.
   // |args| is a list of primitive Value types that are passed to the function.
-  IPC_MESSAGE_ROUTED3(ViewMsg_ExtensionMessageInvoke,
+  IPC_MESSAGE_ROUTED4(ViewMsg_ExtensionMessageInvoke,
                       std::string /* function_name */,
                       ListValue /* args */,
-                      bool /* requires incognito access */)
+                      bool /* requires incognito access */,
+                      GURL /* event URL */)
 
   // Tell the renderer process all known extension function names.
   IPC_MESSAGE_CONTROL1(ViewMsg_Extension_SetFunctionNames,
@@ -761,7 +770,7 @@ IPC_BEGIN_MESSAGES(View)
   IPC_MESSAGE_ROUTED0(ViewMsg_Move_ACK)
 
   // Used to instruct the RenderView to send back updates to the preferred size.
-  IPC_MESSAGE_ROUTED0(ViewMsg_EnablePreferredSizeChangedMode)
+  IPC_MESSAGE_ROUTED1(ViewMsg_EnablePreferredSizeChangedMode, int /*flags*/)
 
   // Used to tell the renderer not to add scrollbars with height and
   // width below a threshold.
@@ -835,6 +844,29 @@ IPC_BEGIN_MESSAGES(View)
   // Storage events are broadcast to renderer processes.
   IPC_MESSAGE_CONTROL1(ViewMsg_DOMStorageEvent,
                        ViewMsg_DOMStorageEvent_Params)
+
+  // IDBCallback message handlers.
+  IPC_MESSAGE_CONTROL1(ViewMsg_IDBCallbacksSuccessNull,
+                       int32 /* response_id */)
+  IPC_MESSAGE_CONTROL2(ViewMsg_IDBCallbacksSuccessIDBDatabase,
+                       int32 /* response_id */,
+                       int32 /* idb_database_id */)
+  IPC_MESSAGE_CONTROL2(ViewMsg_IDBCallbacksSuccessIndexedDBKey,
+                       int32 /* response_id */,
+                       IndexedDBKey /* indexed_db_key */)
+  IPC_MESSAGE_CONTROL2(ViewMsg_IDBCallbacksSuccessIDBObjectStore,
+                       int32 /* response_id */,
+                       int32 /* idb_object_store_id */)
+  IPC_MESSAGE_CONTROL2(ViewMsg_IDBCallbacksSuccessIDBIndex,
+                       int32 /* response_id */,
+                       int32 /* idb_index_id */)
+  IPC_MESSAGE_CONTROL2(ViewMsg_IDBCallbacksSuccessSerializedScriptValue,
+                       int32 /* response_id */,
+                       SerializedScriptValue /* serialized_script_value */)
+  IPC_MESSAGE_CONTROL3(ViewMsg_IDBCallbacksError,
+                       int32 /* response_id */,
+                       int /* code */,
+                       string16 /* message */)
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
   // Tell the renderer process to begin or end IPC message logging.
@@ -914,20 +946,31 @@ IPC_BEGIN_MESSAGES(View)
                       bool /* is_allowed */)
 
   // Sent after ViewHostMsg_Geolocation_StartUpdating iff the user has granted
-  // permission and we have a position available.
+  // permission and we have a position available or an error occurs (such as
+  // permission denied, position unavailable, etc.)
   IPC_MESSAGE_ROUTED1(ViewMsg_Geolocation_PositionUpdated,
                       Geoposition /* geoposition */)
-
-  // Sent after ViewHostMsg_Geolocation_StartUpdating in case of error (such as
-  // permission denied, position unavailable, etc.).
-  IPC_MESSAGE_ROUTED2(ViewMsg_Geolocation_Error,
-                      int /* code */,
-                      std::string /* message */)
 
   // Sent on process startup to indicate whether this process is running in
   // incognito mode.
   IPC_MESSAGE_CONTROL1(ViewMsg_SetIsIncognitoProcess,
                        bool /* is_incognito_processs */)
+
+  // Notification that the list of extensions with web extents has been updated.
+  IPC_MESSAGE_CONTROL1(ViewMsg_ExtensionExtentsUpdated,
+                       ViewMsg_ExtensionExtentsUpdated_Params)
+
+  // Request a tree of Accessibility data from the render process.
+  IPC_MESSAGE_ROUTED0(ViewMsg_GetAccessibilityTree)
+
+  // Relay a request from assistive technology to set focus to a given node.
+  IPC_MESSAGE_ROUTED1(ViewMsg_SetAccessibilityFocus,
+                      int /* object id */)
+
+  // Relay a request from assistive technology to perform the default action
+  // on a given node.
+  IPC_MESSAGE_ROUTED1(ViewMsg_AccessibilityDoDefaultAction,
+                      int /* object id */)
 
 IPC_END_MESSAGES(View)
 
@@ -940,10 +983,8 @@ IPC_BEGIN_MESSAGES(ViewHost)
   // Sent by the renderer when it is creating a new window.  The browser creates
   // a tab for it and responds with a ViewMsg_CreatingNew_ACK.  If route_id is
   // MSG_ROUTING_NONE, the view couldn't be created.
-  IPC_SYNC_MESSAGE_CONTROL3_2(ViewHostMsg_CreateWindow,
-                              int /* opener_id */,
-                              bool /* user_gesture */,
-                              int64 /* session_storage_namespace_id */,
+  IPC_SYNC_MESSAGE_CONTROL1_2(ViewHostMsg_CreateWindow,
+                              ViewHostMsg_CreateWindow_Params,
                               int /* route_id */,
                               int64 /* cloned_session_storage_namespace_id */)
 
@@ -1023,6 +1064,9 @@ IPC_BEGIN_MESSAGES(ViewHost)
   // TODO(darin): use a UTF-8 string to reduce data size
   IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateTitle, int32, std::wstring)
 
+  // Changes the icon url for the page in the UI.
+  IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateIconURL, int32, GURL)
+
   // Change the encoding name of the page in UI when the page has detected
   // proper encoding name.
   IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateEncoding,
@@ -1045,6 +1089,10 @@ IPC_BEGIN_MESSAGES(ViewHost)
   // happens after the page starts loading, but before all resources are
   // finished.
   IPC_MESSAGE_ROUTED0(ViewHostMsg_DocumentAvailableInMainFrame)
+
+  // Sent when after the onload handler has been invoked for the document
+  // in the toplevel frame.
+  IPC_MESSAGE_ROUTED0(ViewHostMsg_DocumentOnLoadCompletedInMainFrame)
 
   // Sent when the renderer loads a resource from its memory cache.
   // The security info is non empty if the resource was originally loaded over
@@ -1077,6 +1125,13 @@ IPC_BEGIN_MESSAGES(ViewHost)
                               navigating to a POST again and we're going to
                               show the POST interstitial */ )
 
+  // Tells the render view that a ViewHostMsg_PaintAtSize message was
+  // processed, and the DIB is ready for use. |tag| has the same value that
+  // the tag sent along with ViewMsg_PaintAtSize.
+  IPC_MESSAGE_ROUTED2(ViewHostMsg_PaintAtSize_ACK,
+                      int /* tag */,
+                      gfx::Size /* size */)
+
   // Sent to update part of the view.  In response to this message, the host
   // generates a ViewMsg_UpdateRect_ACK message.
   IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateRect,
@@ -1089,6 +1144,11 @@ IPC_BEGIN_MESSAGES(ViewHost)
                       TransportDIB::Id /* bitmap */,
                       gfx::Rect /* bitmap_rect */)
   IPC_MESSAGE_ROUTED0(ViewHostMsg_DestroyVideo)
+
+  // Sent by the renderer when GPU compositing is enabled or disabled to notify
+  // the browser whether or not is should do paiting.
+  IPC_MESSAGE_ROUTED1(ViewHostMsg_GpuRenderingActivated,
+                      bool /* true if the GPU process renders to window */)
 
   // Acknowledges receipt of a ViewMsg_HandleInputEvent message.
   // Payload is a WebInputEvent::Type which is the type of the event, followed
@@ -1221,6 +1281,21 @@ IPC_BEGIN_MESSAGES(ViewHost)
   IPC_MESSAGE_ROUTED1(ViewHostMsg_ContentBlocked,
                       ContentSettingsType /* type of blocked content */)
 
+  // Tells the browser that  a specific Appcache manifest in the current page
+  // was accessed.
+  IPC_MESSAGE_ROUTED2(ViewHostMsg_AppCacheAccessed,
+                      GURL /* manifest url */,
+                      bool /* blocked by policy */)
+
+  // Tells the browser that a specific Web database in the current page was
+  // accessed.
+  IPC_MESSAGE_ROUTED5(ViewHostMsg_WebDatabaseAccessed,
+                      GURL /* origin url */,
+                      string16 /* database name */,
+                      string16 /* database display name */,
+                      unsigned long /* estimated size */,
+                      bool /* blocked by policy */)
+
   // Initiates a download based on user actions like 'ALT+click'.
   IPC_MESSAGE_ROUTED2(ViewHostMsg_DownloadUrl,
                       GURL /* url */,
@@ -1240,11 +1315,12 @@ IPC_BEGIN_MESSAGES(ViewHost)
                              std::wstring /* out - prompt field */)
 
   // Provides the contents for the given page that was loaded recently.
-  IPC_MESSAGE_ROUTED4(ViewHostMsg_PageContents,
+  IPC_MESSAGE_ROUTED5(ViewHostMsg_PageContents,
                       GURL         /* URL of the page */,
                       int32        /* page id */,
-                      std::wstring /* page contents */,
-                      std::string  /* page ISO639_1 language code */)
+                      string16     /* page contents */,
+                      std::string  /* page ISO639_1 language code */,
+                      bool         /* whether the page can be translated */)
 
   // Used to get the extension message bundle.
   IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_GetExtensionMessageBundle,
@@ -1377,15 +1453,37 @@ IPC_BEGIN_MESSAGES(ViewHost)
                               string16 /* markup */,
                               GURL /* url */)
 
+  IPC_SYNC_MESSAGE_CONTROL1_3(ViewHostMsg_ClipboardReadAvailableTypes,
+                              Clipboard::Buffer /* buffer */,
+                              bool /* result */,
+                              std::vector<string16> /* types */,
+                              bool /* contains filenames */)
+  IPC_SYNC_MESSAGE_CONTROL2_3(ViewHostMsg_ClipboardReadData,
+                              Clipboard::Buffer /* buffer */,
+                              string16 /* type */,
+                              bool /* succeeded */,
+                              string16 /* data */,
+                              string16 /* metadata */)
+  IPC_SYNC_MESSAGE_CONTROL1_2(ViewHostMsg_ClipboardReadFilenames,
+                              Clipboard::Buffer /* buffer */,
+                              bool /* result */,
+                              std::vector<string16> /* filenames */)
+
 #if defined(OS_MACOSX)
   IPC_MESSAGE_CONTROL1(ViewHostMsg_ClipboardFindPboardWriteStringAsync,
       string16 /* text */)
+
+  // Request that the browser load a font into shared memory for us.
+  IPC_SYNC_MESSAGE_CONTROL1_2(ViewHostMsg_LoadFont,
+                             FontDescriptor /* font to load */,
+                             uint32 /* buffer size */,
+                             base::SharedMemoryHandle /* font data */)
 #endif
 
 #if defined(OS_WIN)
-  // Request that the given font be loaded by the browser.
-  // Please see ResourceMessageFilter::OnLoadFont for details.
-  IPC_SYNC_MESSAGE_CONTROL1_0(ViewHostMsg_LoadFont,
+  // Request that the given font be loaded by the browser so it's cached by the
+  // OS. Please see ChildProcessHost::PreCacheFont for details.
+  IPC_SYNC_MESSAGE_CONTROL1_0(ViewHostMsg_PreCacheFont,
                               LOGFONT /* font data */)
 #endif  // defined(OS_WIN)
 
@@ -1417,7 +1515,12 @@ IPC_BEGIN_MESSAGES(ViewHost)
 
   // Notification that password forms have been seen that are candidates for
   // filling/submitting by the password manager.
-  IPC_MESSAGE_ROUTED1(ViewHostMsg_PasswordFormsSeen,
+  IPC_MESSAGE_ROUTED1(ViewHostMsg_PasswordFormsFound,
+                      std::vector<webkit_glue::PasswordForm> /* forms */)
+
+  // Notification that initial layout has occurred and the following password
+  // forms are visible on the page (e.g. not set to display:none.)
+  IPC_MESSAGE_ROUTED1(ViewHostMsg_PasswordFormsVisible,
                       std::vector<webkit_glue::PasswordForm> /* forms */)
 
   // Notification that a form has been submitted.  The user hit the button.
@@ -1450,44 +1553,20 @@ IPC_BEGIN_MESSAGES(ViewHost)
                       GURL /* url of OS description document */,
                       bool /* autodetected */)
 
-  // required for synchronizing IME windows.
-  // Parameters
-  // * control (ViewHostMsg_ImeControl)
-  //   It specifies the code for controlling the IME attached to
-  //   the browser process. This parameter should be one of the values
-  //   listed below.
-  //     + IME_DISABLE
-  //       Deactivate the IME attached to a browser process.
-  //       This code is typically used for notifying a renderer process
-  //       moves its input focus to a password input. A browser process
-  //       finishes the current composition and deactivate IME.
-  //       If a renderer process sets its input focus to another edit
-  //       control which is not a password input, it needs to re-activate
-  //       IME, it has to send another message with this code IME_MOVE_WINDOWS
-  //       and set the new caret position.
-  //     + IME_MOVE_WINDOWS
-  //       Activate the IME attached to a browser process and set the position
-  //       of its IME windows.
-  //       This code is typically used for the following cases:
-  //         - Notifying a renderer process moves the caret position of the
-  //           focused edit control, or;
-  //         - Notifying a renderer process moves its input focus from a
-  //           password input to an editable control which is NOT a password
-  //           input.
-  //           A renderer process also has to set caret_rect and
-  //           specify the new caret rectangle.
-  //     + IME_COMPLETE_COMPOSITION
-  //       Finish the current composition.
-  //       This code is used for notifying a renderer process moves its
-  //       input focus from an editable control being composed to another one
-  //       which is NOT a password input. A browser process closes its IME
-  //       windows without changing the activation status of its IME, i.e. it
-  //       keeps activating its IME.
-  // * caret_rect (gfx::Rect)
-  //   They specify the rectangle of the input caret.
-  IPC_MESSAGE_ROUTED2(ViewHostMsg_ImeUpdateStatus,
-                      ViewHostMsg_ImeControl, /* control */
+  // Find out if the given url's security origin is installed as a search
+  // provider.
+  IPC_SYNC_MESSAGE_ROUTED1_1(
+      ViewHostMsg_GetSearchProviderInstallState,
+      GURL,
+      ViewHostMsg_GetSearchProviderInstallState_Params /* install */)
+
+  // Required for updating text input state.
+  IPC_MESSAGE_ROUTED2(ViewHostMsg_ImeUpdateTextInputState,
+                      WebKit::WebTextInputType, /* text_input_type */
                       gfx::Rect /* caret_rect */)
+
+  // Required for cancelling an ongoing input method composition.
+  IPC_MESSAGE_ROUTED0(ViewHostMsg_ImeCancelComposition)
 
   // Tells the browser that the renderer is done calculating the number of
   // rendered pages according to the specified settings.
@@ -1513,7 +1592,7 @@ IPC_BEGIN_MESSAGES(ViewHost)
   IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_ScriptedPrint,
                              ViewHostMsg_ScriptedPrint_Params,
                              ViewMsg_PrintPages_Params
-                                 /* settings choosen by the user*/)
+                                 /* settings chosen by the user*/)
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
   // WebKit and JavaScript error messages to log to the console
@@ -1523,9 +1602,10 @@ IPC_BEGIN_MESSAGES(ViewHost)
                       int32, /* line number */
                       std::wstring /* source id */)
 
-  // Stores new inspector settings in the profile.
-  IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateInspectorSettings,
-                      std::string  /* raw_settings */)
+  // Stores new inspector setting in the profile.
+  IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateInspectorSetting,
+                      std::string,  /* key */
+                      std::string /* value */)
 
   // Wraps an IPC message that's destined to the DevToolsClient on
   // DevToolsAgent->browser hop.
@@ -1678,10 +1758,10 @@ IPC_BEGIN_MESSAGES(ViewHost)
   IPC_MESSAGE_ROUTED1(ViewHostMsg_UploadProgress_ACK,
                       int /* request_id */)
 
-  // Sent when the renderer changes the zoom level for a particular host, so the
+  // Sent when the renderer changes the zoom level for a particular url, so the
   // browser can update its records.
-  IPC_MESSAGE_CONTROL2(ViewHostMsg_DidZoomHost,
-                       std::string /* host */,
+  IPC_MESSAGE_CONTROL2(ViewHostMsg_DidZoomURL,
+                       GURL /* url */,
                        int /* zoom_level */)
 
 #if defined(OS_WIN)
@@ -1757,6 +1837,15 @@ IPC_BEGIN_MESSAGES(ViewHost)
                        int64 /* appcache_document_was_loaded_from */,
                        GURL  /* opt_manifest_url */)
 
+  // Initiates worker specific cache selection algorithm for the given host.
+  IPC_MESSAGE_CONTROL3(AppCacheMsg_SelectCacheForWorker,
+                       int /* host_id */,
+                       int /* parent_process_id */,
+                       int /* parent_host_id */)
+  IPC_MESSAGE_CONTROL2(AppCacheMsg_SelectCacheForSharedWorker,
+                       int /* host_id */,
+                       int64 /* appcache_id */)
+
   // Informs the browser of a 'foreign' entry in an appcache.
   IPC_MESSAGE_CONTROL3(AppCacheMsg_MarkAsForeignEntry,
                        int /* host_id */,
@@ -1778,30 +1867,35 @@ IPC_BEGIN_MESSAGES(ViewHost)
                               int /* host_id */,
                               bool /* success */)
 
-  // Returns the resizer box location in the window this widget is embeded.
+  // Returns the resizer box location in the window this widget is embedded.
   // Important for Mac OS X, but not Win or Linux.
   IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_GetRootWindowResizerRect,
                              gfx::NativeViewId /* window */,
                              gfx::Rect /* Out: Window location */)
 
-  // Queries the browser for suggestion for autofill in a form input field.
-  IPC_MESSAGE_ROUTED2(ViewHostMsg_QueryFormFieldAutofill,
+  // Queries the browser for AutoFill suggestions for a form input field.
+  IPC_MESSAGE_ROUTED3(ViewHostMsg_QueryFormFieldAutoFill,
                       int /* id of this message */,
+                      bool /* form_autofilled */,
                       webkit_glue::FormField /* the form field */)
 
   // Instructs the browser to fill in the values for a form using AutoFill
   // profile data.
-  IPC_MESSAGE_ROUTED4(ViewHostMsg_FillAutoFillFormData,
+  IPC_MESSAGE_ROUTED5(ViewHostMsg_FillAutoFillFormData,
                       int /* id of this message */,
                       webkit_glue::FormData /* the form  */,
                       string16 /* profile name */,
-                      string16 /* profile label */)
+                      string16 /* profile label */,
+                      int /* profile unique ID */)
 
-  // Instructs the browser to remove the specified autofill-entry from the
+  // Instructs the browser to remove the specified Autocomplete entry from the
   // database.
-  IPC_MESSAGE_ROUTED2(ViewHostMsg_RemoveAutofillEntry,
+  IPC_MESSAGE_ROUTED2(ViewHostMsg_RemoveAutocompleteEntry,
                       string16 /* field name */,
                       string16 /* value */)
+
+  // Instructs the browser to show the AutoFill dialog.
+  IPC_MESSAGE_ROUTED0(ViewHostMsg_ShowAutoFillDialog)
 
   // Get the list of proxies to use for |url|, as a semicolon delimited list
   // of "<TYPE> <HOST>:<PORT>" | "DIRECT". See also
@@ -1854,7 +1948,7 @@ IPC_BEGIN_MESSAGES(ViewHost)
   // request. The browser will always respond with a ViewMsg_ExtensionResponse.
   IPC_MESSAGE_ROUTED5(ViewHostMsg_ExtensionRequest,
                       std::string /* name */,
-                      ListValue /* argument */,
+                      ListValue /* arguments */,
                       GURL /* source_url */,
                       int /* callback id */,
                       bool /* has_callback */)
@@ -1893,8 +1987,10 @@ IPC_BEGIN_MESSAGES(ViewHost)
   // This is sent from the renderer to the browser to allocate a fake
   // PluginWindowHandle on the browser side which is used to identify
   // the plugin to the browser later when backing store is allocated
-  // or reallocated.
-  IPC_SYNC_MESSAGE_ROUTED0_1(ViewHostMsg_AllocateFakePluginWindowHandle,
+  // or reallocated. |opaque| indicates whether the plugin's output is
+  // considered to be opaque, as opposed to translucent.
+  IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_AllocateFakePluginWindowHandle,
+                             bool /* opaque */,
                              gfx::PluginWindowHandle /* id */)
 
   // Destroys a fake window handle previously allocated using
@@ -1965,16 +2061,8 @@ IPC_BEGIN_MESSAGES(ViewHost)
 
   // A message sent to the browser on behalf of a renderer which wants to show
   // a desktop notification.
-  IPC_MESSAGE_ROUTED3(ViewHostMsg_ShowDesktopNotification,
-                      GURL /* origin */,
-                      GURL /* contents_url */,
-                      int /* notification_id */)
-  IPC_MESSAGE_ROUTED5(ViewHostMsg_ShowDesktopNotificationText,
-                      GURL /* origin */,
-                      GURL /* icon_url */,
-                      string16 /* title */,
-                      string16 /* text */,
-                      int /* notification_id */)
+  IPC_MESSAGE_ROUTED1(ViewHostMsg_ShowDesktopNotification,
+                      ViewHostMsg_ShowNotification_Params)
   IPC_MESSAGE_ROUTED1(ViewHostMsg_CancelDesktopNotification,
                       int /* notification_id */ )
   IPC_MESSAGE_ROUTED2(ViewHostMsg_RequestNotificationPermission,
@@ -2045,9 +2133,21 @@ IPC_BEGIN_MESSAGES(ViewHost)
   IPC_MESSAGE_CONTROL0(ViewHostMsg_CloseCurrentConnections)
 
   // Message sent from the renderer to the browser to request that the browser
-  // close all idle sockets.  Used for debugging/testing.
+  // enable or disable the cache.  Used for debugging/testing.
   IPC_MESSAGE_CONTROL1(ViewHostMsg_SetCacheMode,
                        bool /* enabled */)
+
+  // Message sent from the renderer to the browser to request that the browser
+  // clear the cache.  Used for debugging/testing.
+  IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_ClearCache,
+                              int /* result */)
+
+  // Message sent from the renderer to the browser to request that the browser
+  // cache |data| associated with |url|.
+  IPC_MESSAGE_CONTROL3(ViewHostMsg_DidGenerateCacheableMetadata,
+                       GURL /* url */,
+                       double /* expected_response_time */,
+                       std::vector<char> /* data */)
 
   // Get the storage area id for a particular origin within a namespace.
   IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_DOMStorageStorageAreaId,
@@ -2094,6 +2194,127 @@ IPC_BEGIN_MESSAGES(ViewHost)
                               GURL /* url */,
                               bool /* something_cleared */)
 
+  // WebIndexedDatabase::open() message.
+  IPC_MESSAGE_CONTROL1(ViewHostMsg_IndexedDatabaseOpen,
+                       ViewHostMsg_IndexedDatabaseOpen_Params)
+
+  // WebIDBDatabase::name() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBDatabaseName,
+                              int32, /* idb_database_id */
+                              string16 /* name */)
+
+  // WebIDBDatabase::description() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBDatabaseDescription,
+                              int32, /* idb_database_id */
+                              string16 /* description */)
+
+  // WebIDBDatabase::version() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBDatabaseVersion,
+                              int32, /* idb_database_id */
+                              string16 /* vesion */)
+
+  // WebIDBDatabase::objectStores() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBDatabaseObjectStores,
+                              int32, /* idb_database_id */
+                              std::vector<string16> /* objectStores */)
+
+  // WebIDBDatabase::createObjectStore() message.
+  IPC_MESSAGE_CONTROL1(ViewHostMsg_IDBDatabaseCreateObjectStore,
+                       ViewHostMsg_IDBDatabaseCreateObjectStore_Params)
+
+  // WebIDBDatabase::objectStore() message.
+  IPC_SYNC_MESSAGE_CONTROL3_2(ViewHostMsg_IDBDatabaseObjectStore,
+                              int32, /* idb_database_id */
+                              string16, /* name */
+                              int32, /* mode */
+                              bool, /* success */
+                              int32 /* idb_object_store_id */)
+
+  // WebIDBDatabase::removeObjectStore() message.
+  IPC_MESSAGE_CONTROL3(ViewHostMsg_IDBDatabaseRemoveObjectStore,
+                       int32, /* idb_database_id */
+                       int32, /* response_id */
+                       string16 /* name */)
+
+  // WebIDBDatabase::~WebIDBDatabase() message.
+  IPC_MESSAGE_CONTROL1(ViewHostMsg_IDBDatabaseDestroyed,
+                       int32 /* idb_database_id */)
+
+  // WebIDBIndex::name() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBIndexName,
+                              int32, /* idb_index_id */
+                              string16 /* name */)
+
+  // WebIDBIndex::keyPath() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBIndexKeyPath,
+                              int32, /* idb_index_id */
+                              NullableString16 /* key_path */)
+
+  // WebIDBIndex::unique() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBIndexUnique,
+                              int32, /* idb_unique_id */
+                              bool /* unique */)
+
+  // WebIDBIndex::~WebIDBIndex() message.
+  IPC_MESSAGE_CONTROL1(ViewHostMsg_IDBIndexDestroyed,
+                       int32 /* idb_index_id */)
+
+  // WebIDBObjectStore::name() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBObjectStoreName,
+                              int32, /* idb_object_store_id */
+                              string16 /* name */)
+
+  // WebIDBObjectStore::keyPath() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBObjectStoreKeyPath,
+                              int32, /* idb_object_store_id */
+                              NullableString16 /* keyPath */)
+
+  // WebIDBObjectStore::indexNames() message.
+  IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_IDBObjectStoreIndexNames,
+                              int32, /* idb_object_store_id */
+                              std::vector<string16> /* index_names */)
+
+  // WebIDBObjectStore::get() message.
+  IPC_MESSAGE_CONTROL3(ViewHostMsg_IDBObjectStoreGet,
+                       int32, /* idb_object_store_id */
+                       int32, /* response_id */
+                       IndexedDBKey /* key */)
+
+  // WebIDBObjectStore::put() message.
+  IPC_MESSAGE_CONTROL5(ViewHostMsg_IDBObjectStorePut,
+                       int32, /* idb_object_store_id */
+                       int32, /* response_id */
+                       SerializedScriptValue, /* serialized_value */
+                       IndexedDBKey, /* key */
+                       bool /* add_only */)
+
+  // WebIDBObjectStore::remove() message.
+  IPC_MESSAGE_CONTROL3(ViewHostMsg_IDBObjectStoreRemove,
+                       int32, /* idb_object_store_id */
+                       int32, /* response_id */
+                       IndexedDBKey /* key */)
+
+  // WebIDBObjectStore::createIndex() message.
+  IPC_MESSAGE_CONTROL1(ViewHostMsg_IDBObjectStoreCreateIndex,
+                       ViewHostMsg_IDBObjectStoreCreateIndex_Params)
+
+  // WebIDBObjectStore::index() message.
+  IPC_SYNC_MESSAGE_CONTROL2_2(ViewHostMsg_IDBObjectStoreIndex,
+                              int32, /* idb_object_store_id */
+                              string16, /* name */
+                              bool, /* success */
+                              int32 /* idb_index_id */)
+
+  // WebIDBObjectStore::removeIndex() message.
+  IPC_MESSAGE_CONTROL3(ViewHostMsg_IDBObjectStoreRemoveIndex,
+                       int32, /* idb_object_store_id */
+                       int32, /* response_id */
+                       string16 /* name */)
+
+  // WebIDBObjectStore::~WebIDBObjectStore() message.
+  IPC_MESSAGE_CONTROL1(ViewHostMsg_IDBObjectStoreDestroyed,
+                       int32 /* idb_object_store_id */)
+
   // Get file size in bytes. Set result to -1 if failed to get the file size.
   IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_GetFileSize,
                               FilePath /* path */,
@@ -2104,6 +2325,12 @@ IPC_BEGIN_MESSAGES(ViewHost)
   IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_GetFileModificationTime,
                               FilePath /* path */,
                               base::Time /* result */)
+
+  // Open the file.
+  IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_OpenFile,
+                              FilePath /* path */,
+                              int /* mode */,
+                              IPC::PlatformFileForTransit /* result */)
 
   // Sent by the renderer process to acknowledge receipt of a
   // ViewMsg_CSSInsertRequest message and css has been inserted into the frame.
@@ -2119,18 +2346,10 @@ IPC_BEGIN_MESSAGES(ViewHost)
                              bool /* result */)
 
   // Asks the browser process to open a DB file with the given name.
-#if defined (OS_WIN)
   IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_DatabaseOpenFile,
                               string16 /* vfs file name */,
                               int /* desired flags */,
                               IPC::PlatformFileForTransit /* file_handle */)
-#elif defined(OS_POSIX)
-  IPC_SYNC_MESSAGE_CONTROL2_2(ViewHostMsg_DatabaseOpenFile,
-                       string16 /* vfs file name */,
-                       int /* desired flags */,
-                              IPC::PlatformFileForTransit /* file_handle */,
-                              base::FileDescriptor /* dir_handle */)
-#endif
 
   // Asks the browser process to delete a DB file
   IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_DatabaseDeleteFile,
@@ -2300,5 +2519,10 @@ IPC_BEGIN_MESSAGES(ViewHost)
   IPC_MESSAGE_CONTROL2(ViewHostMsg_Geolocation_Resume,
                        int /* render_view_id */,
                        int /* bridge_id */)
+
+  // Send the tree of accessibility data to the browser, where it's cached
+  // in order to respond to OS accessibility queries immediately.
+  IPC_MESSAGE_ROUTED1(ViewHostMsg_AccessibilityTree,
+                      webkit_glue::WebAccessibility)
 
 IPC_END_MESSAGES(ViewHost)

@@ -2,15 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <build/build_config.h>
+#include "gpu/pgl/pgl.h"
 
+#include "build/build_config.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/thread_local.h"
 #include "gpu/pgl/command_buffer_pepper.h"
-#include "gpu/pgl/pgl.h"
 
 namespace {
 const int32 kTransferBufferSize = 512 * 1024;
@@ -18,8 +18,8 @@ const int32 kTransferBufferSize = 512 * 1024;
 class PGLContextImpl {
  public:
   PGLContextImpl(NPP npp,
-              NPDevice* device,
-              NPDeviceContext3D* device_context);
+                 NPDevice* device,
+                 NPDeviceContext3D* device_context);
   ~PGLContextImpl();
 
   // Initlaize a PGL context with a transfer buffer of a particular size.
@@ -74,7 +74,8 @@ PGLBoolean PGLContextImpl::Initialize(int32 transfer_buffer_size) {
   command_buffer_ = new CommandBufferPepper(
       npp_, device_, device_context_);
   gles2_helper_ = new gpu::gles2::GLES2CmdHelper(command_buffer_);
-  if (gles2_helper_->Initialize()) {
+  gpu::Buffer buffer = command_buffer_->GetRingBuffer();
+  if (gles2_helper_->Initialize(buffer.size)) {
     transfer_buffer_id_ =
         command_buffer_->CreateTransferBuffer(kTransferBufferSize);
     gpu::Buffer transfer_buffer =
@@ -84,7 +85,8 @@ PGLBoolean PGLContextImpl::Initialize(int32 transfer_buffer_size) {
           gles2_helper_,
           transfer_buffer.size,
           transfer_buffer.ptr,
-          transfer_buffer_id_);
+          transfer_buffer_id_,
+          false);
       return PGL_TRUE;
     }
   }
@@ -123,10 +125,14 @@ PGLBoolean PGLContextImpl::MakeCurrent(PGLContextImpl* pgl_context) {
     // TODO(apatrick): I'm not sure if this should actually change the
     // current context if it fails. For now it gets changed even if it fails
     // becuase making GL calls with a NULL context crashes.
+#if defined(ENABLE_NEW_NPDEVICE_API)
+    if (pgl_context->command_buffer_->GetCachedError() != gpu::error::kNoError)
+      return PGL_FALSE;
+#else
     if (pgl_context->device_context_->error != NPDeviceContext3DError_NoError)
       return PGL_FALSE;
-  }
-  else {
+#endif
+  } else {
     gles2::SetGLContext(NULL);
   }
 
@@ -136,8 +142,13 @@ PGLBoolean PGLContextImpl::MakeCurrent(PGLContextImpl* pgl_context) {
 PGLBoolean PGLContextImpl::SwapBuffers() {
   // Don't request latest error status from service. Just use the locally cached
   // information from the last flush.
+#if defined(ENABLE_NEW_NPDEVICE_API)
+  if (command_buffer_->GetCachedError() != gpu::error::kNoError)
+    return PGL_FALSE;
+#else
   if (device_context_->error != NPDeviceContext3DError_NoError)
     return PGL_FALSE;
+#endif
 
   gles2_implementation_->SwapBuffers();
   return PGL_TRUE;
@@ -156,7 +167,6 @@ PGLInt PGLContextImpl::GetError() {
 }  // namespace anonymous
 
 extern "C" {
-
 PGLBoolean pglInitialize() {
   if (g_pgl_context_key_allocated)
     return PGL_TRUE;

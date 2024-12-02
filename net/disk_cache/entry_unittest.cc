@@ -39,6 +39,7 @@ class DiskCacheEntryTest : public DiskCacheTestWithCache {
   void BasicSparseIO(bool async);
   void HugeSparseIO(bool async);
   void GetAvailableRange();
+  void CouldBeSparse();
   void DoomSparseEntry();
   void PartialSparseEntry();
 };
@@ -81,10 +82,12 @@ void DiskCacheEntryTest::InternalSyncIO() {
 
   entry1->Doom();
   entry1->Close();
+  FlushQueueForTest();
   EXPECT_EQ(0, cache_->GetEntryCount());
 }
 
 TEST_F(DiskCacheEntryTest, InternalSyncIO) {
+  SetDirectMode();
   InitCache();
   InternalSyncIO();
 }
@@ -222,10 +225,12 @@ void DiskCacheEntryTest::InternalAsyncIO() {
 
   entry1->Doom();
   entry1->Close();
+  FlushQueueForTest();
   EXPECT_EQ(0, cache_->GetEntryCount());
 }
 
 TEST_F(DiskCacheEntryTest, InternalAsyncIO) {
+  SetDirectMode();
   InitCache();
   InternalAsyncIO();
 }
@@ -268,10 +273,12 @@ void DiskCacheEntryTest::ExternalSyncIO() {
 
   entry1->Doom();
   entry1->Close();
+  FlushQueueForTest();
   EXPECT_EQ(0, cache_->GetEntryCount());
 }
 
 TEST_F(DiskCacheEntryTest, ExternalSyncIO) {
+  SetDirectMode();
   InitCache();
   ExternalSyncIO();
 }
@@ -366,19 +373,21 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
   EXPECT_TRUE(17000 == ret || net::ERR_IO_PENDING == ret);
   if (net::ERR_IO_PENDING == ret)
     expected++;
-  EXPECT_EQ(37000, entry1->GetDataSize(1));
 
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
+  EXPECT_EQ(37000, entry1->GetDataSize(1));
 
   EXPECT_FALSE(g_cache_tests_error);
   EXPECT_EQ(expected, g_cache_tests_received);
 
   entry1->Doom();
   entry1->Close();
+  FlushQueueForTest();
   EXPECT_EQ(0, cache_->GetEntryCount());
 }
 
 TEST_F(DiskCacheEntryTest, ExternalAsyncIO) {
+  SetDirectMode();
   InitCache();
   ExternalAsyncIO();
 }
@@ -787,10 +796,12 @@ void DiskCacheEntryTest::DoomNormalEntry() {
   entry1->Doom();
   entry1->Close();
 
+  FlushQueueForTest();
   EXPECT_EQ(0, cache_->GetEntryCount());
 }
 
 TEST_F(DiskCacheEntryTest, DoomEntry) {
+  SetDirectMode();
   InitCache();
   DoomNormalEntry();
 }
@@ -808,6 +819,7 @@ void DiskCacheEntryTest::DoomedEntry() {
   ASSERT_EQ(net::OK, CreateEntry(key, &entry));
   entry->Doom();
 
+  FlushQueueForTest();
   EXPECT_EQ(0, cache_->GetEntryCount());
   Time initial = Time::Now();
   PlatformThread::Sleep(20);
@@ -830,6 +842,7 @@ void DiskCacheEntryTest::DoomedEntry() {
 }
 
 TEST_F(DiskCacheEntryTest, DoomedEntry) {
+  SetDirectMode();
   InitCache();
   DoomedEntry();
 }
@@ -1025,28 +1038,37 @@ void DiskCacheEntryTest::GetAvailableRange() {
 
   // We stop at the first empty block.
   int64 start;
-  EXPECT_EQ(kSize, entry->GetAvailableRange(0x20F0000, kSize * 2, &start));
+  TestCompletionCallback cb;
+  int rv = entry->GetAvailableRange(0x20F0000, kSize * 2, &start, &cb);
+  EXPECT_EQ(kSize, cb.GetResult(rv));
   EXPECT_EQ(0x20F0000, start);
 
   start = 0;
-  EXPECT_EQ(0, entry->GetAvailableRange(0, kSize, &start));
-  EXPECT_EQ(0, entry->GetAvailableRange(0x20F0000 - kSize, kSize, &start));
-  EXPECT_EQ(kSize, entry->GetAvailableRange(0, 0x2100000, &start));
+  rv = entry->GetAvailableRange(0, kSize, &start, &cb);
+  EXPECT_EQ(0, cb.GetResult(rv));
+  rv = entry->GetAvailableRange(0x20F0000 - kSize, kSize, &start, &cb);
+  EXPECT_EQ(0, cb.GetResult(rv));
+  rv = entry->GetAvailableRange(0, 0x2100000, &start, &cb);
+  EXPECT_EQ(kSize, cb.GetResult(rv));
   EXPECT_EQ(0x20F0000, start);
 
   // We should be able to Read based on the results of GetAvailableRange.
   start = -1;
-  EXPECT_EQ(0, entry->GetAvailableRange(0x2100000, kSize, &start));
-  EXPECT_EQ(0, entry->ReadSparseData(start, buf, kSize, NULL));
+  rv = entry->GetAvailableRange(0x2100000, kSize, &start, &cb);
+  EXPECT_EQ(0, cb.GetResult(rv));
+  rv = entry->ReadSparseData(start, buf, kSize, &cb);
+  EXPECT_EQ(0, cb.GetResult(rv));
 
   start = 0;
-  EXPECT_EQ(0x2000, entry->GetAvailableRange(0x20F2000, kSize, &start));
+  rv = entry->GetAvailableRange(0x20F2000, kSize, &start, &cb);
+  EXPECT_EQ(0x2000, cb.GetResult(rv));
   EXPECT_EQ(0x20F2000, start);
   EXPECT_EQ(0x2000, entry->ReadSparseData(start, buf, kSize, NULL));
 
   // Make sure that we respect the |len| argument.
   start = 0;
-  EXPECT_EQ(1, entry->GetAvailableRange(0x20F0001 - kSize, kSize, &start));
+  rv = entry->GetAvailableRange(0x20F0001 - kSize, kSize, &start, &cb);
+  EXPECT_EQ(1, cb.GetResult(rv));
   EXPECT_EQ(0x20F0000, start);
 
   entry->Close();
@@ -1061,6 +1083,53 @@ TEST_F(DiskCacheEntryTest, MemoryOnlyGetAvailableRange) {
   SetMemoryOnlyMode();
   InitCache();
   GetAvailableRange();
+}
+
+void DiskCacheEntryTest::CouldBeSparse() {
+  std::string key("the first key");
+  disk_cache::Entry* entry;
+  ASSERT_EQ(net::OK, CreateEntry(key, &entry));
+
+  const int kSize = 16 * 1024;
+  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf->data(), kSize, false);
+
+  // Write at offset 0x20F0000 (33 MB - 64 KB).
+  EXPECT_EQ(kSize, entry->WriteSparseData(0x20F0000, buf, kSize, NULL));
+
+  EXPECT_TRUE(entry->CouldBeSparse());
+  entry->Close();
+
+  ASSERT_EQ(net::OK, OpenEntry(key, &entry));
+  EXPECT_TRUE(entry->CouldBeSparse());
+  entry->Close();
+
+  // Now verify a regular entry.
+  key.assign("another key");
+  ASSERT_EQ(net::OK, CreateEntry(key, &entry));
+  EXPECT_FALSE(entry->CouldBeSparse());
+
+  EXPECT_EQ(kSize, entry->WriteData(0, 0, buf, kSize, NULL, false));
+  EXPECT_EQ(kSize, entry->WriteData(1, 0, buf, kSize, NULL, false));
+  EXPECT_EQ(kSize, entry->WriteData(2, 0, buf, kSize, NULL, false));
+
+  EXPECT_FALSE(entry->CouldBeSparse());
+  entry->Close();
+
+  ASSERT_EQ(net::OK, OpenEntry(key, &entry));
+  EXPECT_FALSE(entry->CouldBeSparse());
+  entry->Close();
+}
+
+TEST_F(DiskCacheEntryTest, CouldBeSparse) {
+  InitCache();
+  CouldBeSparse();
+}
+
+TEST_F(DiskCacheEntryTest, MemoryCouldBeSparse) {
+  SetMemoryOnlyMode();
+  InitCache();
+  CouldBeSparse();
 }
 
 TEST_F(DiskCacheEntryTest, MemoryOnlyMisalignedSparseIO) {
@@ -1115,31 +1184,38 @@ TEST_F(DiskCacheEntryTest, MemoryOnlyMisalignedGetAvailableRange) {
   EXPECT_EQ(8192, entry->WriteSparseData(50000, buf, 8192, NULL));
 
   int64 start;
+  TestCompletionCallback cb;
   // Test that we stop at a discontinuous child at the second block.
-  EXPECT_EQ(1024, entry->GetAvailableRange(0, 10000, &start));
+  int rv = entry->GetAvailableRange(0, 10000, &start, &cb);
+  EXPECT_EQ(1024, cb.GetResult(rv));
   EXPECT_EQ(0, start);
 
   // Test that number of bytes is reported correctly when we start from the
   // middle of a filled region.
-  EXPECT_EQ(512, entry->GetAvailableRange(512, 10000, &start));
+  rv = entry->GetAvailableRange(512, 10000, &start, &cb);
+  EXPECT_EQ(512, cb.GetResult(rv));
   EXPECT_EQ(512, start);
 
   // Test that we found bytes in the child of next block.
-  EXPECT_EQ(1024, entry->GetAvailableRange(1024, 10000, &start));
+  rv = entry->GetAvailableRange(1024, 10000, &start, &cb);
+  EXPECT_EQ(1024, cb.GetResult(rv));
   EXPECT_EQ(5120, start);
 
   // Test that the desired length is respected. It starts within a filled
   // region.
-  EXPECT_EQ(512, entry->GetAvailableRange(5500, 512, &start));
+  rv = entry->GetAvailableRange(5500, 512, &start, &cb);
+  EXPECT_EQ(512, cb.GetResult(rv));
   EXPECT_EQ(5500, start);
 
   // Test that the desired length is respected. It starts before a filled
   // region.
-  EXPECT_EQ(500, entry->GetAvailableRange(5000, 620, &start));
+  rv = entry->GetAvailableRange(5000, 620, &start, &cb);
+  EXPECT_EQ(500, cb.GetResult(rv));
   EXPECT_EQ(5120, start);
 
   // Test that multiple blocks are scanned.
-  EXPECT_EQ(8192, entry->GetAvailableRange(40000, 20000, &start));
+  rv = entry->GetAvailableRange(40000, 20000, &start, &cb);
+  EXPECT_EQ(8192, cb.GetResult(rv));
   EXPECT_EQ(50000, start);
 
   entry->Close();
@@ -1199,6 +1275,8 @@ void DiskCacheEntryTest::DoomSparseEntry() {
 }
 
 TEST_F(DiskCacheEntryTest, DoomSparseEntry) {
+  SetDirectMode();
+  UseCurrentThread();
   InitCache();
   DoomSparseEntry();
 }
@@ -1244,37 +1322,48 @@ void DiskCacheEntryTest::PartialSparseEntry() {
   EXPECT_EQ(500, entry->ReadSparseData(kSize, buf2, kSize, NULL));
   EXPECT_EQ(0, entry->ReadSparseData(499, buf2, kSize, NULL));
 
+  int rv;
   int64 start;
+  TestCompletionCallback cb;
   if (memory_only_) {
-    EXPECT_EQ(100, entry->GetAvailableRange(0, 600, &start));
+    rv = entry->GetAvailableRange(0, 600, &start, &cb);
+    EXPECT_EQ(100, cb.GetResult(rv));
     EXPECT_EQ(500, start);
   } else {
-    EXPECT_EQ(1024, entry->GetAvailableRange(0, 2048, &start));
+    rv = entry->GetAvailableRange(0, 2048, &start, &cb);
+    EXPECT_EQ(1024, cb.GetResult(rv));
     EXPECT_EQ(1024, start);
   }
-  EXPECT_EQ(500, entry->GetAvailableRange(kSize, kSize, &start));
+  rv = entry->GetAvailableRange(kSize, kSize, &start, &cb);
+  EXPECT_EQ(500, cb.GetResult(rv));
   EXPECT_EQ(kSize, start);
-  EXPECT_EQ(3616, entry->GetAvailableRange(20 * 1024, 10000, &start));
+  rv = entry->GetAvailableRange(20 * 1024, 10000, &start, &cb);
+  EXPECT_EQ(3616, cb.GetResult(rv));
   EXPECT_EQ(20 * 1024, start);
 
   // 1. Query before a filled 1KB block.
   // 2. Query within a filled 1KB block.
   // 3. Query beyond a filled 1KB block.
   if (memory_only_) {
-    EXPECT_EQ(3496, entry->GetAvailableRange(19400, kSize, &start));
+    rv = entry->GetAvailableRange(19400, kSize, &start, &cb);
+    EXPECT_EQ(3496, cb.GetResult(rv));
     EXPECT_EQ(20000, start);
   } else {
-    EXPECT_EQ(3016, entry->GetAvailableRange(19400, kSize, &start));
+    rv = entry->GetAvailableRange(19400, kSize, &start, &cb);
+    EXPECT_EQ(3016, cb.GetResult(rv));
     EXPECT_EQ(20480, start);
   }
-  EXPECT_EQ(1523, entry->GetAvailableRange(3073, kSize, &start));
+  rv = entry->GetAvailableRange(3073, kSize, &start, &cb);
+  EXPECT_EQ(1523, cb.GetResult(rv));
   EXPECT_EQ(3073, start);
-  EXPECT_EQ(0, entry->GetAvailableRange(4600, kSize, &start));
+  rv = entry->GetAvailableRange(4600, kSize, &start, &cb);
+  EXPECT_EQ(0, cb.GetResult(rv));
   EXPECT_EQ(4600, start);
 
   // Now make another write and verify that there is no hole in between.
   EXPECT_EQ(kSize, entry->WriteSparseData(500 + kSize, buf1, kSize, NULL));
-  EXPECT_EQ(7 * 1024 + 500, entry->GetAvailableRange(1024, 10000, &start));
+  rv = entry->GetAvailableRange(1024, 10000, &start, &cb);
+  EXPECT_EQ(7 * 1024 + 500, cb.GetResult(rv));
   EXPECT_EQ(1024, start);
   EXPECT_EQ(kSize, entry->ReadSparseData(kSize, buf2, kSize, NULL));
   EXPECT_EQ(0, memcmp(buf2->data(), buf1->data() + kSize - 500, 500));
@@ -1346,6 +1435,7 @@ TEST_F(DiskCacheEntryTest, CleanupSparseEntry) {
 }
 
 TEST_F(DiskCacheEntryTest, CancelSparseIO) {
+  UseCurrentThread();
   InitCache();
   std::string key("the first key");
   disk_cache::Entry* entry;
@@ -1355,24 +1445,19 @@ TEST_F(DiskCacheEntryTest, CancelSparseIO) {
   scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(kSize);
   CacheTestFillBuffer(buf->data(), kSize, false);
 
-  TestCompletionCallback cb1, cb2, cb3, cb4;
-  int64 offset = 0;
-  int tries = 0;
-  const int maxtries = 100;   // Avoid hang on infinitely fast disks.
-  for (int ret = 0; ret != net::ERR_IO_PENDING; offset += kSize * 4) {
-    ret = entry->WriteSparseData(offset, buf, kSize, &cb1);
-    if (++tries > maxtries) {
-       LOG(ERROR) << "Data writes never come back PENDING; skipping test";
-       entry->Close();
-       return;
-    }
-  }
+  // This will open and write two "real" entries.
+  TestCompletionCallback cb1, cb2, cb3, cb4, cb5;
+  int rv = entry->WriteSparseData(1024 * 1024 - 4096, buf, kSize, &cb1);
+  EXPECT_EQ(net::ERR_IO_PENDING, rv);
 
-  // Cannot use the entry at this point.
-  offset = 0;
-  EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
-            entry->GetAvailableRange(offset, kSize, &offset));
-  EXPECT_EQ(net::OK, entry->ReadyForSparseIO(&cb2));
+  int64 offset = 0;
+  rv = entry->GetAvailableRange(offset, kSize, &offset, &cb5);
+  rv = cb5.GetResult(rv);
+  if (!cb1.have_result()) {
+    // We may or may not have finished writing to the entry. If we have not,
+    // we cannot start another operation at this time.
+    EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED, rv);
+  }
 
   // We cancel the pending operation, and register multiple notifications.
   entry->CancelSparseIO();
@@ -1381,21 +1466,22 @@ TEST_F(DiskCacheEntryTest, CancelSparseIO) {
   entry->CancelSparseIO();  // Should be a no op at this point.
   EXPECT_EQ(net::ERR_IO_PENDING, entry->ReadyForSparseIO(&cb4));
 
-  offset = 0;
-  EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
-            entry->GetAvailableRange(offset, kSize, &offset));
-  EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
-            entry->ReadSparseData(offset, buf, kSize, NULL));
-  EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
-            entry->WriteSparseData(offset, buf, kSize, NULL));
+  if (!cb1.have_result()) {
+    EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
+              entry->ReadSparseData(offset, buf, kSize, NULL));
+    EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
+              entry->WriteSparseData(offset, buf, kSize, NULL));
+  }
 
-  // Now see if we receive all notifications.
-  EXPECT_EQ(kSize, cb1.GetResult(net::ERR_IO_PENDING));
-  EXPECT_EQ(net::OK, cb2.GetResult(net::ERR_IO_PENDING));
-  EXPECT_EQ(net::OK, cb3.GetResult(net::ERR_IO_PENDING));
-  EXPECT_EQ(net::OK, cb4.GetResult(net::ERR_IO_PENDING));
+  // Now see if we receive all notifications. Note that we should not be able
+  // to write everything (unless the timing of the system is really weird).
+  rv = cb1.WaitForResult();
+  EXPECT_TRUE(rv == 4096 || rv == kSize);
+  EXPECT_EQ(net::OK, cb2.WaitForResult());
+  EXPECT_EQ(net::OK, cb3.WaitForResult());
+  EXPECT_EQ(net::OK, cb4.WaitForResult());
 
-  EXPECT_EQ(kSize, entry->GetAvailableRange(offset, kSize, &offset));
-  EXPECT_EQ(net::OK, entry->ReadyForSparseIO(&cb2));
+  rv = entry->GetAvailableRange(offset, kSize, &offset, &cb5);
+  EXPECT_EQ(0, cb5.GetResult(rv));
   entry->Close();
 }

@@ -24,25 +24,12 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
-namespace {
-class GpuReleaseTask : public Task {
- public:
-  void Run() {
-    ChildProcess::current()->ReleaseProcess();
-  }
-};
-
-// How long we wait before releasing the GPU process.
-const int kGpuReleaseTimeMS = 10000;
-}  // namespace anonymous
-
 GpuChannel::GpuChannel(int renderer_id)
     : renderer_id_(renderer_id)
 #if defined(OS_POSIX)
     , renderer_fd_(-1)
 #endif
 {
-  ChildProcess::current()->AddRefProcess();
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   log_messages_ = command_line->HasSwitch(switches::kLogPluginMessages);
 }
@@ -54,10 +41,6 @@ GpuChannel::~GpuChannel() {
     close(renderer_fd_);
   }
 #endif
-  ChildProcess::current()->io_message_loop()->PostDelayedTask(
-      FROM_HERE,
-      new GpuReleaseTask(),
-      kGpuReleaseTimeMS);
 }
 
 void GpuChannel::OnChannelConnected(int32 peer_pid) {
@@ -82,22 +65,7 @@ void GpuChannel::OnMessageReceived(const IPC::Message& message) {
 }
 
 void GpuChannel::OnChannelError() {
-  // Destroy channel. This will cause the channel to be recreated if another
-  // attempt is made to establish a connection from the corresponding renderer.
-  channel_.reset();
-
-  // Close renderer process handle.
-  renderer_process_.Close();
-
-#if defined(ENABLE_GPU)
-  // Destroy all the stubs on this channel.
-  for (StubMap::const_iterator iter = stubs_.begin();
-       iter != stubs_.end();
-       ++iter) {
-    router_.RemoveRoute(iter->second->route_id());
-  }
-  stubs_.clear();
-#endif
+  static_cast<GpuThread*>(ChildThread::current())->RemoveChannel(renderer_id_);
 }
 
 bool GpuChannel::Send(IPC::Message* message) {
@@ -137,6 +105,7 @@ void GpuChannel::OnCreateViewCommandBuffer(gfx::NativeViewId view_id,
 
 #if defined(ENABLE_GPU)
 
+  gfx::PluginWindowHandle handle = NULL;
 #if defined(OS_WIN)
   gfx::NativeView view = gfx::NativeViewFromId(view_id);
 
@@ -146,19 +115,27 @@ void GpuChannel::OnCreateViewCommandBuffer(gfx::NativeViewId view_id,
       GetProp(view, chrome::kChromiumRendererIdProperty));
   if (view_renderer_id != renderer_id_)
     return;
+  handle = view;
+#elif defined(OS_LINUX)
+  ChildThread* gpu_thread = ChildThread::current();
+  // Ask the browser for the view's XID.
+  // TODO(piman): This assumes that it doesn't change. It can change however
+  // when tearing off tabs. This needs a fix in the browser UI code. A possible
+  // alternative would be to add a socket/plug pair like with plugins but that
+  // has issues with events and focus.
+  gpu_thread->Send(new GpuHostMsg_GetViewXID(view_id, &handle));
 #else
   // TODO(apatrick): This needs to be something valid for mac and linux.
   // Offscreen rendering will work on these platforms but not rendering to the
   // window.
   DCHECK_EQ(view_id, 0);
-  gfx::NativeView view = 0;
 #endif
 
   *route_id = GenerateRouteID();
-  scoped_refptr<GpuCommandBufferStub> stub = new GpuCommandBufferStub(
-      this, view, NULL, gfx::Size(), 0, *route_id);
-  router_.AddRoute(*route_id, stub);
-  stubs_[*route_id] = stub;
+  scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
+      this, handle, NULL, gfx::Size(), 0, *route_id));
+  router_.AddRoute(*route_id, stub.get());
+  stubs_.AddWithID(stub.release(), *route_id);
 #endif  // ENABLE_GPU
 }
 
@@ -168,22 +145,19 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(int32 parent_route_id,
                                                 int32* route_id) {
 #if defined(ENABLE_GPU)
   *route_id = GenerateRouteID();
-  scoped_refptr<GpuCommandBufferStub> parent_stub;
-  if (parent_route_id != 0) {
-    StubMap::iterator it = stubs_.find(parent_route_id);
-    DCHECK(it != stubs_.end());
-    parent_stub = it->second;
-  }
+  GpuCommandBufferStub* parent_stub = NULL;
+  if (parent_route_id != 0)
+    parent_stub = stubs_.Lookup(parent_route_id);
 
-  scoped_refptr<GpuCommandBufferStub> stub = new GpuCommandBufferStub(
+  scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
       this,
       NULL,
-      parent_stub.get(),
+      parent_stub,
       size,
       parent_texture_id,
-      *route_id);
-  router_.AddRoute(*route_id, stub);
-  stubs_[*route_id] = stub;
+      *route_id));
+  router_.AddRoute(*route_id, stub.get());
+  stubs_.AddWithID(stub.release(), *route_id);
 #else
   *route_id = 0;
 #endif
@@ -191,10 +165,8 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(int32 parent_route_id,
 
 void GpuChannel::OnDestroyCommandBuffer(int32 route_id) {
 #if defined(ENABLE_GPU)
-  StubMap::iterator it = stubs_.find(route_id);
-  DCHECK(it != stubs_.end());
-  stubs_.erase(it);
   router_.RemoveRoute(route_id);
+  stubs_.Remove(route_id);
 #endif
 }
 

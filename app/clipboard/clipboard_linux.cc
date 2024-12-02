@@ -13,7 +13,7 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
-#include "base/linux_util.h"
+#include "app/gtk_util.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/size.h"
 
@@ -22,7 +22,7 @@ namespace {
 const char kMimeBmp[] = "image/bmp";
 const char kMimeHtml[] = "text/html";
 const char kMimeText[] = "text/plain";
-const char kMimeURI[] = "text/uri-list";
+const char kMimeMozillaUrl[] = "text/x-moz-url";
 const char kMimeWebkitSmartPaste[] = "chromium/x-webkit-paste";
 
 std::string GdkAtomToString(const GdkAtom& atom) {
@@ -54,11 +54,6 @@ void GetData(GtkClipboard* clipboard,
   if (target_string == kMimeBmp) {
     gtk_selection_data_set_pixbuf(selection_data,
         reinterpret_cast<GdkPixbuf*>(iter->second.first));
-  } else if (target_string == kMimeURI) {
-    gchar* uri_list[2];
-    uri_list[0] = reinterpret_cast<gchar*>(iter->second.first);
-    uri_list[1] = NULL;
-    gtk_selection_data_set_uris(selection_data, uri_list);
   } else {
     gtk_selection_data_set(selection_data, selection_data->target, 8,
                            reinterpret_cast<guchar*>(iter->second.first),
@@ -153,9 +148,8 @@ void Clipboard::SetGtkClipboard() {
 }
 
 void Clipboard::WriteText(const char* text_data, size_t text_len) {
-  char* data = new char[text_len + 1];
+  char* data = new char[text_len];
   memcpy(data, text_data, text_len);
-  data[text_len] = '\0';
 
   InsertMapping(kMimeText, data, text_len);
   InsertMapping("TEXT", data, text_len);
@@ -177,6 +171,7 @@ void Clipboard::WriteHTML(const char* markup_data,
   char* data = new char[total_len];
   snprintf(data, total_len, "%s", html_prefix);
   memcpy(data + html_prefix_len, markup_data, markup_len);
+  // Some programs expect NULL-terminated data. See http://crbug.com/42624
   data[total_len - 1] = '\0';
 
   InsertMapping(kMimeHtml, data, total_len);
@@ -191,8 +186,9 @@ void Clipboard::WriteWebSmartPaste() {
 void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
   const gfx::Size* size = reinterpret_cast<const gfx::Size*>(size_data);
 
-  guchar* data = base::BGRAToRGBA(reinterpret_cast<const uint8_t*>(pixel_data),
-                                  size->width(), size->height(), 0);
+  guchar* data =
+      gtk_util::BGRAToRGBA(reinterpret_cast<const uint8_t*>(pixel_data),
+                           size->width(), size->height(), 0);
 
   GdkPixbuf* pixbuf =
       gdk_pixbuf_new_from_data(data, GDK_COLORSPACE_RGB, TRUE,
@@ -206,22 +202,26 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
 
 void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
                               const char* url_data, size_t url_len) {
-  // Write as a URI.
-  char* data = new char[url_len + 1];
-  memcpy(data, url_data, url_len);
-  data[url_len] = '\0';
-  InsertMapping(kMimeURI, data, url_len + 1);
+  // Write as a mozilla url (UTF16: URL, newline, title).
+  string16 url = UTF8ToUTF16(std::string(url_data, url_len) + "\n");
+  string16 title = UTF8ToUTF16(std::string(title_data, title_len));
+  int data_len = 2 * (title.length() + url.length());
+
+  char* data = new char[data_len];
+  memcpy(data, url.data(), 2 * url.length());
+  memcpy(data + 2 * url.length(), title.data(), 2 * title.length());
+  InsertMapping(kMimeMozillaUrl, data, data_len);
 }
 
 void Clipboard::WriteData(const char* format_name, size_t format_len,
                           const char* data_data, size_t data_len) {
-  char* data = new char[data_len];
-  memcpy(data, data_data, data_len);
   std::string format(format_name, format_len);
   // We assume that certain mapping types are only written by trusted code.
   // Therefore we must upkeep their integrity.
-  if (format == kMimeBmp || format == kMimeURI)
+  if (format == kMimeBmp)
     return;
+  char* data = new char[data_len];
+  memcpy(data, data_data, data_len);
   InsertMapping(format.c_str(), data, data_len);
 }
 
@@ -348,6 +348,10 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
   } else {
     UTF8ToUTF16(reinterpret_cast<char*>(data->data), data->length, markup);
   }
+
+  // If there is a terminating NULL, drop it.
+  if (markup->at(markup->length() - 1) == '\0')
+    markup->resize(markup->length() - 1);
 
   gtk_selection_data_free(data);
 }

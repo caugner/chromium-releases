@@ -5,10 +5,9 @@
 {
   'includes': [
     '../../../build/common.gypi',
+    '../../../build/version.gypi',
   ],
   'variables': {
-    'O3D_PLUGIN_VERSION':
-        '<!(python ../../../plugin/version_info.py --version)',
     'INSTALLER_DIR': '<(PRODUCT_DIR)/installer',
     'DEBIAN_DIR': '<(INSTALLER_DIR)/debian',
   },
@@ -57,7 +56,7 @@
           'action': [
             'python',
             'mk_changelog.py',
-            '--version=<(O3D_PLUGIN_VERSION)',
+            '--version=<(plugin_version)',
             '--out=<(DEBIAN_DIR)/changelog',
             '--in=changelog.in',
           ],
@@ -78,22 +77,21 @@
             '<(DEBIAN_DIR)/rules',
           ],
           'action': [
-            'cd',
-            '<(INSTALLER_DIR)',
-            '&&',
-            'dpkg-buildpackage',
-            '-uc', # Don't sign the changes file
-            '-tc', # Clean the tree
-            '-b', # Don't produce a source build
-            '-a<(ARCH)',
-            '-D', # -a suppresses build-dep checking, so turn it back on
-            '-rfakeroot',
+            'sh',
+            '-c',
+            'cd "<(INSTALLER_DIR)" && dpkg-buildpackage '
+                '-uc '  # Don't sign the changes file
+                '-tc '  # Clean the tree
+                '-b '   # Don't produce a source build
+                '-a<(ARCH) '
+                '-D '   # -a suppresses build-dep checking, so turn it back on
+                '-rfakeroot'
           ],
           'outputs': [
-            '<(PRODUCT_DIR)/google-o3d_<(O3D_PLUGIN_VERSION)_<(ARCH).changes',
-            '<(PRODUCT_DIR)/google-o3d_<(O3D_PLUGIN_VERSION)_<(ARCH).deb',
+            '<(PRODUCT_DIR)/google-o3d_<(plugin_version)_<(ARCH).changes',
+            '<(PRODUCT_DIR)/google-o3d_<(plugin_version)_<(ARCH).deb',
             '<(PRODUCT_DIR)/' +
-                'google-o3d-dbgsym_<(O3D_PLUGIN_VERSION)_<(ARCH).deb',
+                'google-o3d-dbgsym_<(plugin_version)_<(ARCH).deb',
           ],
         },
       ],

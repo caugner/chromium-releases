@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,10 +38,6 @@ class MenuButton : public TextButton {
              bool show_menu_marker);
   virtual ~MenuButton();
 
-  void set_menu_delegate(ViewMenuDelegate* delegate) {
-    menu_delegate_ = delegate;
-  }
-
   void set_menu_marker(const SkBitmap* menu_marker) {
     menu_marker_ = menu_marker;
   }
@@ -57,8 +53,9 @@ class MenuButton : public TextButton {
   // behavior
   virtual bool OnMousePressed(const MouseEvent& e);
   virtual void OnMouseReleased(const MouseEvent& e, bool canceled);
-  virtual bool OnKeyReleased(const KeyEvent& e);
   virtual void OnMouseExited(const MouseEvent& event);
+  virtual bool OnKeyPressed(const KeyEvent& e);
+  virtual bool OnKeyReleased(const KeyEvent& e);
 
   // Accessibility accessors, overridden from View.
   virtual bool GetAccessibleDefaultAction(std::wstring* action);
@@ -96,6 +93,10 @@ class MenuButton : public TextButton {
   // The down arrow used to differentiate the menu button from normal
   // text buttons.
   const SkBitmap* menu_marker_;
+
+  // If non-null the destuctor sets this to true. This is set while the menu is
+  // showing and used to detect if the menu was deleted while running.
+  bool* destroyed_flag_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuButton);
 };

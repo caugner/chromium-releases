@@ -63,13 +63,17 @@
           currentTab_->controller().GetActiveEntry()->url().spec())];
       [self setPageTitle:base::SysUTF16ToNSString(currentTab_->GetTitle())];
       mac_util::GrabWindowSnapshot(
-          currentTab_->view()->GetTopLevelNativeWindow(), &pngData_);
+          currentTab_->view()->GetTopLevelNativeWindow(), &pngData_,
+          &pngWidth_, &pngHeight_);
     } else {
       // If no current tab exists, create a menu without the "broken page"
       // options, with page URL and title empty, and screenshot disabled.
       [self setSendScreenshot:NO];
       [self setDisableScreenshotCheckbox:YES];
     }
+
+    pngHeight_ = 0;
+    pngWidth_ = 0;
   }
   return self;
 }
@@ -109,10 +113,11 @@
         base::SysNSStringToUTF8(pageTitle_),
         [self bugTypeFromIndex],
         base::SysNSStringToUTF8(pageURL_),
+        std::string(),
         base::SysNSStringToUTF8(bugDescription_),
         sendScreenshot_ && !pngData_.empty() ?
             reinterpret_cast<const char *>(&(pngData_[0])) : NULL,
-        pngData_.size());
+        pngData_.size(), pngWidth_, pngHeight_);
   }
   [self closeDialog];
 }

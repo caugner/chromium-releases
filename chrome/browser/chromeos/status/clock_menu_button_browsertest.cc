@@ -7,8 +7,10 @@
 #include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/system_library.h"
 #include "chrome/browser/chromeos/frame/browser_view.h"
-#include "chrome/browser/chromeos/status/browser_status_area_view.h"
+#include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/pref_member.h"
 #include "chrome/browser/profile.h"
@@ -25,7 +27,7 @@ class ClockMenuButtonTest : public InProcessBrowserTest {
   ClockMenuButtonTest() : InProcessBrowserTest() {}
   ClockMenuButton* GetClockMenuButton() {
     BrowserView* view = static_cast<BrowserView*>(browser()->window());
-    return static_cast<BrowserStatusAreaView*>(view->
+    return static_cast<StatusAreaView*>(view->
         GetViewByID(VIEW_ID_STATUS_AREA))->clock_view();
   }
 };
@@ -33,18 +35,13 @@ class ClockMenuButtonTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(ClockMenuButtonTest, TimezoneTest) {
   ClockMenuButton* clock = GetClockMenuButton();
   ASSERT_TRUE(clock != NULL);
-  // Make sure clock has a calendar.
-  ASSERT_TRUE(clock->calendar() != NULL);
-  // Update timezone and make sure clock timezone changes.
-  icu::UnicodeString id;
-  clock->calendar()->getTimeZone().getID(id);
-  UErrorCode error = U_ZERO_ERROR;
-  int zone_offset = clock->calendar()->get(UCAL_ZONE_OFFSET, error);
-  StringPrefMember timezone;
-  timezone.Init(prefs::kTimeZone, browser()->profile()->GetPrefs(), NULL);
-  timezone.SetValue(ASCIIToWide("Asia/Hong_Kong"));
-  int zone_offset_after = clock->calendar()->get(UCAL_ZONE_OFFSET, error);
-  EXPECT_NE(zone_offset, zone_offset_after);
+  // Update timezone and make sure clock text changes.
+  std::wstring text_before = clock->text();
+  scoped_ptr<icu::TimeZone> timezone(icu::TimeZone::createTimeZone(
+      icu::UnicodeString::fromUTF8("Asia/Hong_Kong")));
+  CrosLibrary::Get()->GetSystemLibrary()->SetTimezone(timezone.get());
+  std::wstring text_after = clock->text();
+  EXPECT_NE(text_before, text_after);
 }
 
 }  // namespace chromeos

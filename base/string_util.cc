@@ -483,6 +483,42 @@ bool TrimString(const std::string& input,
   return TrimStringT(input, trim_chars, TRIM_ALL, output) != TRIM_NONE;
 }
 
+void TruncateUTF8ToByteSize(const std::string& input,
+                            const size_t byte_size,
+                            std::string* output) {
+  DCHECK(output);
+  if (byte_size > input.length()) {
+    *output = input;
+    return;
+  }
+  DCHECK_LE(byte_size, static_cast<uint32>(kint32max));
+  // Note: This cast is necessary because CBU8_NEXT uses int32s.
+  int32 truncation_length = static_cast<int32>(byte_size);
+  int32 char_index = truncation_length - 1;
+  const char* data = input.data();
+
+  // Using CBU8, we will move backwards from the truncation point
+  // to the beginning of the string looking for a valid UTF8
+  // character.  Once a full UTF8 character is found, we will
+  // truncate the string to the end of that character.
+  while (char_index >= 0) {
+    int32 prev = char_index;
+    uint32 code_point = 0;
+    CBU8_NEXT(data, char_index, truncation_length, code_point);
+    if (!base::IsValidCharacter(code_point) ||
+        !base::IsValidCodepoint(code_point)) {
+      char_index = prev - 1;
+    } else {
+      break;
+    }
+  }
+
+  if (char_index >= 0 )
+    *output = input.substr(0, char_index);
+  else
+    output->clear();
+}
+
 TrimPositions TrimWhitespace(const std::wstring& input,
                              TrimPositions positions,
                              std::wstring* output) {
@@ -887,19 +923,13 @@ std::wstring FormatBytesInternal(int64 bytes,
   for (int i = 0; i < units; ++i)
     unit_amount /= 1024.0;
 
-  wchar_t tmp[64];
-  // If the first decimal digit is 0, don't show it.
-  double int_part;
-  double fractional_part = modf(unit_amount, &int_part);
-  modf(fractional_part * 10, &int_part);
-  if (int_part == 0) {
-    base::swprintf(tmp, arraysize(tmp),
-                   L"%lld", static_cast<int64>(unit_amount));
-  } else {
-    base::swprintf(tmp, arraysize(tmp), L"%.1lf", unit_amount);
-  }
+  wchar_t buf[64];
+  if (bytes != 0 && units != DATA_UNITS_BYTE && unit_amount < 100)
+    base::swprintf(buf, arraysize(buf), L"%.1lf", unit_amount);
+  else
+    base::swprintf(buf, arraysize(buf), L"%.0lf", unit_amount);
 
-  std::wstring ret(tmp);
+  std::wstring ret(buf);
   if (show_units) {
     ret += L" ";
     ret += suffix[units];
@@ -1358,20 +1388,6 @@ void SplitStringUsingSubstr(const std::string& str,
   SplitStringUsingSubstrT(str, s, r);
 }
 
-std::vector<string16> SplitStringUsingSubstr(const string16& str,
-                                             const string16& s) {
-  std::vector<string16> result;
-  SplitStringUsingSubstr(str, s, &result);
-  return result;
-}
-
-std::vector<std::string> SplitStringUsingSubstr(const std::string& str,
-                                                const std::string& s) {
-  std::vector<std::string> result;
-  SplitStringUsingSubstr(str, s, &result);
-  return result;
-}
-
 template<typename STR>
 static size_t TokenizeT(const STR& str,
                         const STR& delimiters,
@@ -1410,6 +1426,12 @@ size_t Tokenize(const string16& str,
 size_t Tokenize(const std::string& str,
                 const std::string& delimiters,
                 std::vector<std::string>* tokens) {
+  return TokenizeT(str, delimiters, tokens);
+}
+
+size_t Tokenize(const base::StringPiece& str,
+                const base::StringPiece& delimiters,
+                std::vector<base::StringPiece>* tokens) {
   return TokenizeT(str, delimiters, tokens);
 }
 

@@ -75,11 +75,19 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
   }
 };
 
+// Crashes on Vista (dbg): http://crbug.com/44991
+#if defined(OS_WIN)
+#define ShutdownWhileOpen DISABLED_ShutdownWhileOpen
+#endif
 // Regression test for http://crbug.com/13361
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, ShutdownWhileOpen) {
   browser()->window()->ShowTaskManager();
 }
 
+// Times out on Vista; disabled to keep tests fast. http://crbug.com/44991
+#if defined(OS_WIN)
+#define NoticeTabContentsChanges DISABLED_NoticeTabContentsChanges
+#endif
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeTabContentsChanges) {
   EXPECT_EQ(0, model()->ResourceCount());
 
@@ -93,8 +101,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeTabContentsChanges) {
   // Open a new tab and make sure we notice that.
   GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
                                      FilePath(kTitle1File)));
-  browser()->AddTabWithURL(url, GURL(), PageTransition::TYPED,
-                           true, 0, false, NULL);
+  browser()->AddTabWithURL(url, GURL(), PageTransition::TYPED, 0,
+                           TabStripModel::ADD_SELECTED, NULL, std::string());
   WaitForResourceChange(3);
 
   // Close the tab and verify that we notice.
@@ -131,6 +139,10 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeExtensionChanges) {
   WaitForResourceChange(4);
 }
 
+// Times out on Vista; disabled to keep tests fast. http://crbug.com/44991
+#if defined(OS_WIN)
+#define KillExtension DISABLED_KillExtension
+#endif
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillExtension) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
@@ -152,6 +164,10 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillExtension) {
   WaitForResourceChange(2);
 }
 
+// Times out on Vista; disabled to keep tests fast. http://crbug.com/44991
+#if defined(OS_WIN)
+#define KillExtensionAndReload DISABLED_KillExtensionAndReload
+#endif
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillExtensionAndReload) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
@@ -186,7 +202,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillExtensionAndReload) {
 }
 
 // Regression test for http://crbug.com/18693.
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, ReloadExtension) {
+// Crashy, http://crbug.com/42315.
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DISABLED_ReloadExtension) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
   browser()->window()->ShowTaskManager();
@@ -218,7 +235,9 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, ReloadExtension) {
   WaitForResourceChange(3);
 }
 
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, PopulateWebCacheFields) {
+// Crashy, http://crbug.com/42301.
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
+                       DISABLED_PopulateWebCacheFields) {
   EXPECT_EQ(0, model()->ResourceCount());
 
   // Show the task manager. This populates the model, and helps with debugging
@@ -231,8 +250,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, PopulateWebCacheFields) {
   // Open a new tab and make sure we notice that.
   GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
                                      FilePath(kTitle1File)));
-  browser()->AddTabWithURL(url, GURL(), PageTransition::TYPED,
-                           true, 0, false, NULL);
+  browser()->AddTabWithURL(url, GURL(), PageTransition::TYPED, 0,
+                           TabStripModel::ADD_SELECTED, NULL, std::string());
   WaitForResourceChange(3);
 
   // Check that we get some value for the cache columns.

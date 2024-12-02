@@ -86,3 +86,4 @@ void MockWebClipboardImpl::writeImage(const WebKit::WebImage& image,
     m_writeSmartPaste = false;
   }
 }
+

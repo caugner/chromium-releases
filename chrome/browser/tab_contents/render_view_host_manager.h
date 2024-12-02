@@ -170,6 +170,7 @@ class RenderViewHostManager
 
  private:
   friend class TestTabContents;
+  friend class RenderViewHostManagerTest;
 
   // Returns whether this tab should transition to a new renderer for
   // cross-site URLs.  Enabled unless we see the --process-per-tab command line
@@ -194,7 +195,13 @@ class RenderViewHostManager
 
   // Helper method to create a pending RenderViewHost for a cross-site
   // navigation.
-  bool CreatePendingRenderView(SiteInstance* instance);
+  bool CreatePendingRenderView(const NavigationEntry& entry,
+                               SiteInstance* instance);
+
+  // Sets up the necessary state for a new RenderViewHost navigating to the
+  // given entry.
+  bool InitRenderView(RenderViewHost* render_view_host,
+                      const NavigationEntry& entry);
 
   // Sets the pending RenderViewHost/DOMUI to be the active one. Note that this
   // doesn't require the pending render_view_host_ pointer to be non-NULL, since

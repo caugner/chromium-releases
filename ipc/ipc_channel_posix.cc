@@ -93,7 +93,8 @@ class PipeMap {
 
     ChannelToFDMap::iterator i = map_.find(channel_id);
     if (i != map_.end()) {
-      HANDLE_EINTR(close(i->second));
+      if (HANDLE_EINTR(close(i->second)) < 0)
+        PLOG(ERROR) << "close";
       map_.erase(i);
     }
   }
@@ -155,7 +156,8 @@ bool CreateServerFifo(const std::string& pipe_name, int* server_listen_fd) {
 
   // Make socket non-blocking
   if (fcntl(fd, F_SETFL, O_NONBLOCK) == -1) {
-    HANDLE_EINTR(close(fd));
+    if (HANDLE_EINTR(close(fd)) < 0)
+      PLOG(ERROR) << "close";
     return false;
   }
 
@@ -173,14 +175,16 @@ bool CreateServerFifo(const std::string& pipe_name, int* server_listen_fd) {
   // Bind the socket.
   if (bind(fd, reinterpret_cast<const sockaddr*>(&unix_addr),
            unix_addr_len) != 0) {
-    HANDLE_EINTR(close(fd));
+    if (HANDLE_EINTR(close(fd)) < 0)
+      PLOG(ERROR) << "close";
     return false;
   }
 
   // Start listening on the socket.
   const int listen_queue_length = 1;
   if (listen(fd, listen_queue_length) != 0) {
-    HANDLE_EINTR(close(fd));
+    if (HANDLE_EINTR(close(fd)) < 0)
+      PLOG(ERROR) << "close";
     return false;
   }
 
@@ -196,7 +200,8 @@ bool ServerAcceptFifoConnection(int server_listen_fd, int* server_socket) {
   if (accept_fd < 0)
     return false;
   if (fcntl(accept_fd, F_SETFL, O_NONBLOCK) == -1) {
-    HANDLE_EINTR(close(accept_fd));
+    if (HANDLE_EINTR(close(accept_fd)) < 0)
+      PLOG(ERROR) << "close";
     return false;
   }
 
@@ -218,7 +223,8 @@ bool ClientConnectToFifo(const std::string &pipe_name, int* client_socket) {
   // Make socket non-blocking
   if (fcntl(fd, F_SETFL, O_NONBLOCK) == -1) {
     LOG(ERROR) << "fcntl failed";
-    HANDLE_EINTR(close(fd));
+    if (HANDLE_EINTR(close(fd)) < 0)
+      PLOG(ERROR) << "close";
     return false;
   }
 
@@ -233,7 +239,8 @@ bool ClientConnectToFifo(const std::string &pipe_name, int* client_socket) {
 
   if (HANDLE_EINTR(connect(fd, reinterpret_cast<sockaddr*>(&server_unix_addr),
                            server_unix_addr_len)) != 0) {
-    HANDLE_EINTR(close(fd));
+    if (HANDLE_EINTR(close(fd)) < 0)
+      PLOG(ERROR) << "close";
     return false;
   }
 
@@ -273,7 +280,7 @@ Channel::ChannelImpl::ChannelImpl(const std::string& channel_id, Mode mode,
       server_listen_pipe_(-1),
       pipe_(-1),
       client_pipe_(-1),
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
       fd_pipe_(-1),
       remote_fd_pipe_(-1),
 #endif
@@ -315,8 +322,10 @@ bool SocketPair(int* fd1, int* fd2) {
   if (fcntl(pipe_fds[0], F_SETFL, O_NONBLOCK) == -1 ||
       fcntl(pipe_fds[1], F_SETFL, O_NONBLOCK) == -1) {
     PLOG(ERROR) << "fcntl(O_NONBLOCK)";
-    HANDLE_EINTR(close(pipe_fds[0]));
-    HANDLE_EINTR(close(pipe_fds[1]));
+    if (HANDLE_EINTR(close(pipe_fds[0])) < 0)
+      PLOG(ERROR) << "close";
+    if (HANDLE_EINTR(close(pipe_fds[1])) < 0)
+      PLOG(ERROR) << "close";
     return false;
   }
 
@@ -384,7 +393,7 @@ bool Channel::ChannelImpl::CreatePipe(const std::string& channel_id,
   scoped_ptr<Message> msg(new Message(MSG_ROUTING_NONE,
                                       HELLO_MESSAGE_TYPE,
                                       IPC::Message::PRIORITY_NORMAL));
-  #if defined(OS_LINUX)
+  #if !defined(OS_MACOSX)
   if (!uses_fifo_) {
     // On Linux, the seccomp sandbox makes it very expensive to call
     // recvmsg() and sendmsg(). Often, we are perfectly OK with resorting to
@@ -460,7 +469,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
       // Read from pipe.
       // recvmsg() returns 0 if the connection has closed or EAGAIN if no data
       // is waiting on the pipe.
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
       if (fd_pipe_ >= 0) {
         bytes_read = HANDLE_EINTR(read(pipe_, input_buf_,
                                        Channel::kReadBufferSize));
@@ -534,7 +543,8 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
                        << " cmsg_len:" << cmsg->cmsg_len
                        << " fd:" << pipe_;
             for (unsigned i = 0; i < num_wire_fds; ++i)
-              HANDLE_EINTR(close(wire_fds[i]));
+              if (HANDLE_EINTR(close(wire_fds[i])) < 0)
+                PLOG(ERROR) << "close" << i;
             return false;
           }
           break;
@@ -592,7 +602,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
           if (m.header()->num_fds > num_fds - fds_i) {
             // the message has been completely received, but we didn't get
             // enough file descriptors.
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
             if (!uses_fifo_) {
               char dummy;
               struct iovec fd_pipe_iov = { &dummy, 1 };
@@ -614,7 +624,8 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
                                  << " cmsg_len:" << cmsg->cmsg_len
                                  << " fd:" << pipe_;
                       for (unsigned i = 0; i < num_wire_fds; ++i)
-                        HANDLE_EINTR(close(wire_fds[i]));
+                        if (HANDLE_EINTR(close(wire_fds[i])) < 0)
+                          PLOG(ERROR) << "close" << i;
                       return false;
                     }
                     break;
@@ -653,9 +664,15 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
                          << " header()->num_fds:" << m.header()->num_fds
                          << " num_fds:" << num_fds
                          << " fds_i:" << fds_i;
+#if defined(CHROMIUM_SELINUX)
+            LOG(WARNING) << "In the case of SELinux this can be caused when "
+                            "using a --user-data-dir to which the default "
+                            "policy doesn't give the renderer access to. ";
+#endif
             // close the existing file descriptors so that we don't leak them
             for (unsigned i = fds_i; i < num_fds; ++i)
-              HANDLE_EINTR(close(fds[i]));
+              if (HANDLE_EINTR(close(fds[i])) < 0)
+                PLOG(ERROR) << "close" << i;
             input_overflow_fds_.clear();
             // abort the connection
             return false;
@@ -677,9 +694,9 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
           if (!m.ReadInt(&iter, &pid)) {
             NOTREACHED();
           }
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
           if (mode_ == MODE_SERVER && !uses_fifo_) {
-            // On Linux, the Hello message from the client to the server
+            // On non-Mac, the Hello message from the client to the server
             // also contains the fd_pipe_, which  will be used for all
             // subsequent file descriptor passing.
             DCHECK_EQ(m.file_descriptor_set()->size(), 1);
@@ -740,7 +757,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
   while (!output_queue_.empty()) {
     Message* msg = output_queue_.front();
 
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
     scoped_ptr<Message> hello;
     if (remote_fd_pipe_ != -1 &&
         msg->routing_id() == MSG_ROUTING_NONE &&
@@ -786,6 +803,15 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
       const unsigned num_fds = msg->file_descriptor_set()->size();
 
       DCHECK_LE(num_fds, FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE);
+      if (msg->file_descriptor_set()->ContainsDirectoryDescriptor()) {
+        LOG(FATAL) << "Panic: attempting to transport directory descriptor over"
+                      " IPC. Aborting to maintain sandbox isolation.";
+        // If you have hit this then something tried to send a file descriptor
+        // to a directory over an IPC channel. Since IPC channels span
+        // sandboxes this is very bad: the receiving process can use openat
+        // with ".." elements in the path in order to reach the real
+        // filesystem.
+      }
 
       msgh.msg_control = buf;
       msgh.msg_controllen = CMSG_SPACE(sizeof(int) * num_fds);
@@ -801,7 +827,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
       // num_fds < MAX_DESCRIPTORS_PER_MESSAGE so no danger of overflow.
       msg->header()->num_fds = static_cast<uint16>(num_fds);
 
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
       if (!uses_fifo_ &&
           (msg->routing_id() != MSG_ROUTING_NONE ||
            msg->type() != HELLO_MESSAGE_TYPE)) {
@@ -823,7 +849,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
 
     if (bytes_written == 1) {
       fd_written = pipe_;
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
       if (mode_ != MODE_SERVER && !uses_fifo_ &&
           msg->routing_id() == MSG_ROUTING_NONE &&
           msg->type() == HELLO_MESSAGE_TYPE) {
@@ -979,7 +1005,8 @@ void Channel::ChannelImpl::Close() {
   server_listen_connection_watcher_.StopWatchingFileDescriptor();
 
   if (server_listen_pipe_ != -1) {
-    HANDLE_EINTR(close(server_listen_pipe_));
+    if (HANDLE_EINTR(close(server_listen_pipe_)) < 0)
+      PLOG(ERROR) << "close";
     server_listen_pipe_ = -1;
   }
 
@@ -987,20 +1014,23 @@ void Channel::ChannelImpl::Close() {
   read_watcher_.StopWatchingFileDescriptor();
   write_watcher_.StopWatchingFileDescriptor();
   if (pipe_ != -1) {
-    HANDLE_EINTR(close(pipe_));
+    if (HANDLE_EINTR(close(pipe_)) < 0)
+      PLOG(ERROR) << "close";
     pipe_ = -1;
   }
   if (client_pipe_ != -1) {
     Singleton<PipeMap>()->RemoveAndClose(pipe_name_);
     client_pipe_ = -1;
   }
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
   if (fd_pipe_ != -1) {
-    HANDLE_EINTR(close(fd_pipe_));
+    if (HANDLE_EINTR(close(fd_pipe_)) < 0)
+      PLOG(ERROR) << "close";
     fd_pipe_ = -1;
   }
   if (remote_fd_pipe_ != -1) {
-    HANDLE_EINTR(close(remote_fd_pipe_));
+    if (HANDLE_EINTR(close(remote_fd_pipe_)) < 0)
+      PLOG(ERROR) << "close";
     remote_fd_pipe_ = -1;
   }
 #endif
@@ -1019,7 +1049,8 @@ void Channel::ChannelImpl::Close() {
   // Close any outstanding, received file descriptors
   for (std::vector<int>::iterator
        i = input_overflow_fds_.begin(); i != input_overflow_fds_.end(); ++i) {
-    HANDLE_EINTR(close(*i));
+    if (HANDLE_EINTR(close(*i)) < 0)
+      PLOG(ERROR) << "close";
   }
   input_overflow_fds_.clear();
 }

@@ -37,6 +37,9 @@ class HostContentSettingsMap
     // Returns a pattern that matches the host of this URL and all subdomains.
     static Pattern FromURL(const GURL& url);
 
+    // Returns a pattern that matches exactly this URL.
+    static Pattern FromURLNoWildcard(const GURL& url);
+
     Pattern() {}
 
     explicit Pattern(const std::string& pattern) : pattern_(pattern) {}
@@ -114,14 +117,17 @@ class HostContentSettingsMap
   ContentSettings GetContentSettings(const GURL& url) const;
 
   // For a given content type, returns all patterns with a non-default setting,
-  // mapped to their actual settings, in lexicographical order.  |settings| must
-  // be a non-NULL outparam.
+  // mapped to their actual settings, in lexicographical order.  |settings|
+  // must be a non-NULL outparam. If this map was created for the
+  // off-the-record profile, it will only return those settings differing from
+  // the main map.
   //
   // This may be called on any thread.
   void GetSettingsForOneType(ContentSettingsType content_type,
                              SettingsForOneType* settings) const;
 
-  // Sets the default setting for a particular content type.
+  // Sets the default setting for a particular content type. This method must
+  // not be invoked on an off-the-record map.
   //
   // This should only be called on the UI thread.
   void SetDefaultContentSetting(ContentSettingsType content_type,
@@ -136,6 +142,13 @@ class HostContentSettingsMap
                          ContentSettingsType content_type,
                          ContentSetting setting);
 
+  // Convenience method to add a content setting for a given URL, making sure
+  // that there is no setting overriding it.
+  // This should only be called on the UI thread.
+  void AddExceptionForURL(const GURL& url,
+                          ContentSettingsType content_type,
+                          ContentSetting setting);
+
   // Clears all host-specific settings for one content type.
   //
   // This should only be called on the UI thread.
@@ -144,7 +157,8 @@ class HostContentSettingsMap
   // This setting trumps any host-specific settings.
   bool BlockThirdPartyCookies() const { return block_third_party_cookies_; }
 
-  // Sets whether we block all third-party cookies.
+  // Sets whether we block all third-party cookies. This method must not be
+  // invoked on an off-the-record map.
   //
   // This should only be called on the UI thread.
   void SetBlockThirdPartyCookies(bool block);
@@ -213,6 +227,10 @@ class HostContentSettingsMap
   // Copies of the pref data, so that we can read it on the IO thread.
   ContentSettings default_content_settings_;
   HostContentSettings host_content_settings_;
+
+  // Differences to the preference-stored host content settings for
+  // off-the-record settings.
+  HostContentSettings off_the_record_settings_;
 
   // Misc global settings.
   bool block_third_party_cookies_;

@@ -14,8 +14,10 @@
 #include "base/scoped_variant_win.h"
 #include "base/string_util.h"
 #include "chrome_tab.h" // NOLINT
+#include "chrome_frame/crash_reporting/crash_metrics.h"
 #include "chrome_frame/extra_system_apis.h"
 #include "chrome_frame/http_negotiate.h"
+#include "chrome_frame/metrics_service.h"
 #include "chrome_frame/protocol_sink_wrap.h"
 #include "chrome_frame/urlmon_moniker.h"
 #include "chrome_frame/utils.h"
@@ -42,6 +44,13 @@ _ATL_FUNC_INFO Bho::kBeforeNavigate2Info = {
 };
 
 _ATL_FUNC_INFO Bho::kNavigateComplete2Info = {
+  CC_STDCALL, VT_EMPTY, 2, {
+    VT_DISPATCH,
+    VT_VARIANT | VT_BYREF
+  }
+};
+
+_ATL_FUNC_INFO Bho::kDocumentCompleteInfo = {
   CC_STDCALL, VT_EMPTY, 2, {
     VT_DISPATCH,
     VT_VARIANT | VT_BYREF
@@ -84,6 +93,7 @@ STDMETHODIMP Bho::SetSite(IUnknown* site) {
     // information for a URL.
     AddRef();
     RegisterThreadInstance();
+    MetricsService::Start();
   } else {
     UnregisterThreadInstance();
     Release();
@@ -110,9 +120,11 @@ STDMETHODIMP Bho::BeforeNavigate2(IDispatch* dispatch, VARIANT* url,
   }
 
   DLOG(INFO) << "BeforeNavigate2: " << url->bstrVal;
+
   ScopedComPtr<IBrowserService> browser_service;
   DoQueryService(SID_SShellBrowser, web_browser2, browser_service.Receive());
   if (!browser_service || !CheckForCFNavigation(browser_service, false)) {
+    // TODO(tommi): Remove? Isn't this done below by calling set_referrer("")?
     referrer_.clear();
   }
 
@@ -121,7 +133,7 @@ STDMETHODIMP Bho::BeforeNavigate2(IDispatch* dispatch, VARIANT* url,
   if (is_top_level) {
     set_url(url->bstrVal);
     set_referrer("");
-    if (!MonikerPatchEnabled()) {
+    if (IsIBrowserServicePatchEnabled()) {
       ProcessOptInUrls(web_browser2, url->bstrVal);
     }
   }
@@ -130,6 +142,23 @@ STDMETHODIMP Bho::BeforeNavigate2(IDispatch* dispatch, VARIANT* url,
 
 STDMETHODIMP_(void) Bho::NavigateComplete2(IDispatch* dispatch, VARIANT* url) {
   DLOG(INFO) << __FUNCTION__;
+}
+
+STDMETHODIMP_(void) Bho::DocumentComplete(IDispatch* dispatch, VARIANT* url) {
+  DLOG(INFO) << __FUNCTION__;
+
+  ScopedComPtr<IWebBrowser2> web_browser2;
+  if (dispatch)
+    web_browser2.QueryFrom(dispatch);
+
+  if (web_browser2) {
+    VARIANT_BOOL is_top_level = VARIANT_FALSE;
+    web_browser2->get_TopLevelContainer(&is_top_level);
+    if (is_top_level) {
+      CrashMetricsReporter::GetInstance()->IncrementMetric(
+          CrashMetricsReporter::NAVIGATION_COUNT);
+    }
+  }
 }
 
 namespace {
@@ -313,17 +342,17 @@ bool PatchHelper::InitializeAndPatchProtocolsIfNeeded() {
     if (!IsUnpinnedMode())
       PinModule();
 
-    HttpNegotiatePatch::Initialize();
-
     ProtocolPatchMethod patch_method = GetPatchMethod();
     if (patch_method == PATCH_METHOD_INET_PROTOCOL) {
-      ProtocolSinkWrap::PatchProtocolHandlers();
+      g_trans_hooks.InstallHooks();
       state_ = PATCH_PROTOCOL;
     } else if (patch_method == PATCH_METHOD_IBROWSER) {
-        state_ =  PATCH_IBROWSER;
+      HttpNegotiatePatch::Initialize();
+      state_ =  PATCH_IBROWSER;
     } else {
       DCHECK(patch_method == PATCH_METHOD_MONIKER);
       state_ = PATCH_MONIKER;
+      HttpNegotiatePatch::Initialize();
       MonikerPatch::Initialize();
     }
 
@@ -345,13 +374,14 @@ void PatchHelper::PatchBrowserService(IBrowserService* browser_service) {
 
 void PatchHelper::UnpatchIfNeeded() {
   if (state_ == PATCH_PROTOCOL) {
-    ProtocolSinkWrap::UnpatchProtocolHandlers();
+    g_trans_hooks.RevertHooks();
   } else if (state_ == PATCH_IBROWSER) {
     vtable_patch::UnpatchInterfaceMethods(IBrowserService_PatchInfo);
     MonikerPatch::Uninitialize();
+    HttpNegotiatePatch::Uninitialize();
+  } else {
+    HttpNegotiatePatch::Uninitialize();
   }
-
-  HttpNegotiatePatch::Uninitialize();
 
   state_ = UNKNOWN;
 }

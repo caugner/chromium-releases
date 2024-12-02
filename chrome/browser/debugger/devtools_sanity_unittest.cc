@@ -19,13 +19,6 @@
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 
-#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
-// See http://crbug.com/40764 for details.
-#define MAYBE_TestResourceContentLength FLAKY_TestResourceContentLength
-#else
-#define MAYBE_TestResourceContentLength TestResourceContentLength
-#endif
-
 namespace {
 
 // Used to block until a dev tools client window's browser is closed.
@@ -52,31 +45,32 @@ class BrowserClosedObserver : public NotificationObserver {
 // action we take.
 const int kActionDelayMs = 500;
 
-const wchar_t kConsoleTestPage[] = L"files/devtools/console_test_page.html";
-const wchar_t kDebuggerTestPage[] = L"files/devtools/debugger_test_page.html";
-const wchar_t kEvalTestPage[] = L"files/devtools/eval_test_page.html";
-const wchar_t kJsPage[] = L"files/devtools/js_page.html";
-const wchar_t kPauseOnExceptionTestPage[] =
-    L"files/devtools/pause_on_exception.html";
-const wchar_t kPauseWhenLoadingDevTools[] =
-    L"files/devtools/pause_when_loading_devtools.html";
-const wchar_t kPauseWhenScriptIsRunning[] =
-    L"files/devtools/pause_when_script_is_running.html";
-const wchar_t kResourceContentLengthTestPage[] = L"files/devtools/image.html";
-const wchar_t kResourceTestPage[] = L"files/devtools/resource_test_page.html";
-const wchar_t kSimplePage[] = L"files/devtools/simple_page.html";
-const wchar_t kSyntaxErrorTestPage[] =
-    L"files/devtools/script_syntax_error.html";
-const wchar_t kDebuggerStepTestPage[] =
-    L"files/devtools/debugger_step.html";
-const wchar_t kDebuggerClosurePage[] =
-    L"files/devtools/debugger_closure.html";
-const wchar_t kDebuggerIntrinsicPropertiesPage[] =
-    L"files/devtools/debugger_intrinsic_properties.html";
-const wchar_t kCompletionOnPause[] =
-    L"files/devtools/completion_on_pause.html";
-const wchar_t kPageWithContentScript[] =
-    L"files/devtools/page_with_content_script.html";
+const char kConsoleTestPage[] = "files/devtools/console_test_page.html";
+const char kDebuggerTestPage[] = "files/devtools/debugger_test_page.html";
+const char kEvalTestPage[] = "files/devtools/eval_test_page.html";
+const char kJsPage[] = "files/devtools/js_page.html";
+const char kHeapProfilerPage[] = "files/devtools/heap_profiler.html";
+const char kPauseOnExceptionTestPage[] =
+    "files/devtools/pause_on_exception.html";
+const char kPauseWhenLoadingDevTools[] =
+    "files/devtools/pause_when_loading_devtools.html";
+const char kPauseWhenScriptIsRunning[] =
+    "files/devtools/pause_when_script_is_running.html";
+const char kResourceContentLengthTestPage[] = "files/devtools/image.html";
+const char kResourceTestPage[] = "files/devtools/resource_test_page.html";
+const char kSimplePage[] = "files/devtools/simple_page.html";
+const char kSyntaxErrorTestPage[] =
+    "files/devtools/script_syntax_error.html";
+const char kDebuggerStepTestPage[] =
+    "files/devtools/debugger_step.html";
+const char kDebuggerClosurePage[] =
+    "files/devtools/debugger_closure.html";
+const char kDebuggerIntrinsicPropertiesPage[] =
+    "files/devtools/debugger_intrinsic_properties.html";
+const char kCompletionOnPause[] =
+    "files/devtools/completion_on_pause.html";
+const char kPageWithContentScript[] =
+    "files/devtools/page_with_content_script.html";
 
 
 class DevToolsSanityTest : public InProcessBrowserTest {
@@ -87,7 +81,7 @@ class DevToolsSanityTest : public InProcessBrowserTest {
   }
 
  protected:
-  void RunTest(const std::string& test_name, const std::wstring& test_page) {
+  void RunTest(const std::string& test_name, const std::string& test_page) {
     OpenDevToolsWindow(test_page);
     std::string result;
 
@@ -117,9 +111,9 @@ class DevToolsSanityTest : public InProcessBrowserTest {
     CloseDevToolsWindow();
   }
 
-  void OpenDevToolsWindow(const std::wstring& test_page) {
+  void OpenDevToolsWindow(const std::string& test_page) {
     HTTPTestServer* server = StartHTTPServer();
-    GURL url = server->TestServerPageW(test_page);
+    GURL url = server->TestServerPage(test_page);
     ui_test_utils::NavigateToURL(browser(), url);
 
     inspected_rvh_ = GetInspectedTab()->render_view_host();
@@ -287,6 +281,13 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEnableResourcesTab) {
   RunTest("testEnableResourcesTab", kSimplePage);
 }
 
+// Fails after WebKit roll 59365:59477, http://crbug.com/44202.
+#if defined(OS_LINUX)
+#define MAYBE_TestResourceContentLength FLAKY_TestResourceContentLength
+#else
+#define MAYBE_TestResourceContentLength TestResourceContentLength
+#endif  // defined(OS_LINUX)
+
 // Tests resources have correct sizes.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestResourceContentLength) {
   RunTest("testResourceContentLength", kResourceContentLengthTestPage);
@@ -308,6 +309,11 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestProfilerTab) {
   RunTest("testProfilerTab", kJsPage);
 }
 
+// Tests heap profiler.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestHeapProfiler) {
+  RunTest("testHeapProfiler", kHeapProfilerPage);
+}
+
 // Tests scripts panel showing.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowScriptsTab) {
   RunTest("testShowScriptsTab", kDebuggerTestPage);
@@ -318,14 +324,12 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowScriptsTab) {
 // @see http://crbug.com/26312
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
                        TestScriptsTabIsPopulatedOnInspectedPageRefresh) {
-  // Reset inspector settings to defaults to ensure that Elements will be
+  // Clear inspector settings to ensure that Elements will be
   // current panel when DevTools window is open.
-  GetInspectedTab()->render_view_host()->delegate()->UpdateInspectorSettings(
-      WebPreferences().inspector_settings);
+  GetInspectedTab()->render_view_host()->delegate()->ClearInspectorSettings();
   RunTest("testScriptsTabIsPopulatedOnInspectedPageRefresh",
           kDebuggerTestPage);
 }
-
 
 // Tests that a content script is in the scripts list.
 // This test is disabled, see bug 28961.
@@ -368,18 +372,53 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEvalOnCallFrame) {
   RunTest("testEvalOnCallFrame", kDebuggerTestPage);
 }
 
+#if defined(OS_WIN) || defined(OS_LINUX)
+// Sometimes it times out.
+// See http://crbug.com/45080
+// See http://crbug.com/46299
+#define MAYBE_TestStepOver FLAKY_TestStepOver
+#else
+#define MAYBE_TestStepOver TestStepOver
+#endif
 // Tests step over functionality in the debugger.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestStepOver) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestStepOver) {
   RunTest("testStepOver", kDebuggerStepTestPage);
 }
 
+#if defined(OS_WIN) || defined(OS_LINUX)
+// Sometimes it times out.
+// See http://crbug.com/45080
+// See http://crbug.com/46299
+#define MAYBE_TestStepOut FLAKY_TestStepOut
+#elif defined(OS_CHROMEOS)
+// See http://crbug.com/43479
+#define MAYBE_TestStepOut FLAKY_TestStepOut
+#else
+#define MAYBE_TestStepOut TestStepOut
+#endif
 // Tests step out functionality in the debugger.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestStepOut) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestStepOut) {
   RunTest("testStepOut", kDebuggerStepTestPage);
 }
 
+#if defined(OS_WIN) || defined(OS_LINUX)
+// Sometimes it times out.
+// See http://crbug.com/45080
+// See http://crbug.com/46299
+#define MAYBE_TestStepIn FLAKY_TestStepIn
+#elif defined(OS_CHROMEOS)
+// See http://crbug.com/43479
+#define MAYBE_TestStepIn FLAKY_TestStepIn
+#else
+#define MAYBE_TestStepIn TestStepIn
+#endif
+// Disable TestStepIn completely while test expectations are not updated
+// in Webkit.  See http://crbug.com/46235
+#undef MAYBE_TestStepIn
+#define MAYBE_TestStepIn DISABLED_TestStepIn
+
 // Tests step in functionality in the debugger.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestStepIn) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestStepIn) {
   RunTest("testStepIn", kDebuggerStepTestPage);
 }
 
@@ -415,7 +454,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleEval) {
 }
 
 // Tests console log.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestConsoleLog) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleLog) {
   RunTest("testConsoleLog", kConsoleTestPage);
 }
 
@@ -429,5 +468,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowStoragePanel) {
   RunTest("testShowStoragePanel", kDebuggerTestPage);
 }
 
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestMessageLoopReentrant) {
+  RunTest("testMessageLoopReentrant", kDebuggerTestPage);
+}
 
 }  // namespace

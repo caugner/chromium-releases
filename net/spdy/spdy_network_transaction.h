@@ -22,7 +22,7 @@
 namespace net {
 
 class SpdySession;
-class SpdyStream;
+class SpdyHttpStream;
 class HttpNetworkSession;
 class HttpResponseInfo;
 class IOBuffer;
@@ -52,16 +52,12 @@ class SpdyNetworkTransaction : public HttpTransaction {
   virtual LoadState GetLoadState() const;
   virtual uint64 GetUploadProgress() const;
 
- protected:
-  friend class SpdyNetworkTransactionTest;
-
-  // Provide access to the session for testing.
-  SpdySession* GetSpdySession() { return spdy_.get(); }
-
  private:
   enum State {
     STATE_INIT_CONNECTION,
     STATE_INIT_CONNECTION_COMPLETE,
+    STATE_GET_STREAM,
+    STATE_GET_STREAM_COMPLETE,
     STATE_SEND_REQUEST,
     STATE_SEND_REQUEST_COMPLETE,
     STATE_READ_HEADERS,
@@ -83,6 +79,8 @@ class SpdyNetworkTransaction : public HttpTransaction {
   // next state method as the result arg.
   int DoInitConnection();
   int DoInitConnectionComplete(int result);
+  int DoGetStream();
+  int DoGetStreamComplete(int result);
   int DoSendRequest();
   int DoSendRequestComplete(int result);
   int DoReadHeaders();
@@ -112,7 +110,7 @@ class SpdyNetworkTransaction : public HttpTransaction {
   // The next state in the state machine.
   State next_state_;
 
-  scoped_refptr<SpdyStream> stream_;
+  scoped_ptr<SpdyHttpStream> stream_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdyNetworkTransaction);
 };

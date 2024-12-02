@@ -25,8 +25,7 @@
 #include "chrome/browser/net/resolve_proxy_msg_helper.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/nacl_types.h"
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/common/window_container_type.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/rect.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -39,12 +38,15 @@ class ChromeURLRequestContext;
 class DatabaseDispatcherHost;
 class DOMStorageDispatcherHost;
 class ExtensionMessageService;
+struct FontDescriptor;
 class GeolocationDispatcherHost;
 class HostZoomMap;
+class IndexedDBDispatcherHost;
 class NotificationsPrefsCache;
 class Profile;
 class RenderWidgetHelper;
 class URLRequestContextGetter;
+struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_CreateWorker_Params;
 struct WebPluginInfo;
 
@@ -61,10 +63,6 @@ namespace webkit_glue {
 struct WebCookie;
 }
 
-namespace WebKit {
-struct WebScreenInfo;
-}
-
 struct ViewHostMsg_ScriptedPrint_Params;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 struct ViewHostMsg_DidPrintPage_Params;
@@ -78,7 +76,6 @@ struct ViewHostMsg_DidPrintPage_Params;
 
 class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                               public ResourceDispatcherHost::Receiver,
-                              public NotificationObserver,
                               public ResolveProxyMsgHelper::Delegate {
  public:
   // Create the filter.
@@ -113,11 +110,6 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
     return next_route_id_callback_.get();
   }
 
-  // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
-
   // Returns either the extension URLRequestContext or regular URLRequestContext
   // depending on whether |url| is an extension URL.
   // Only call on the IO thread.
@@ -131,8 +123,8 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
 
   virtual ~ResourceMessageFilter();
 
-  void OnMsgCreateWindow(int opener_id, bool user_gesture,
-                         int64 session_storage_namespace_id, int* route_id,
+  void OnMsgCreateWindow(const ViewHostMsg_CreateWindow_Params& params,
+                         int* route_id,
                          int64* cloned_session_storage_namespace_id);
   void OnMsgCreateWidget(int opener_id,
                          WebKit::WebPopupType popup_type,
@@ -158,10 +150,16 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                           const std::wstring& filter,
                           uint32 user_data);
 
+#if defined(OS_MACOSX)
+  void OnLoadFont(const FontDescriptor& font,
+                  uint32* handle_size,
+                  base::SharedMemoryHandle* handle);
+#endif
+
 #if defined(OS_WIN)  // This hack is Windows-specific.
-  // Cache fonts for the renderer. See ResourceMessageFilter::OnLoadFont
-  // implementation for more details
-  void OnLoadFont(LOGFONT font);
+  // Cache fonts for the renderer. See ResourceMessageFilter::OnPreCacheFont
+  // implementation for more details.
+  void OnPreCacheFont(LOGFONT font);
 #endif
 
 #if !defined(OS_MACOSX)
@@ -222,6 +220,11 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
 #if defined(OS_MACOSX)
   void OnClipboardFindPboardWriteString(const string16& text);
 #endif
+  void OnClipboardReadAvailableTypes(Clipboard::Buffer buffer,
+                                     IPC::Message* reply);
+  void OnClipboardReadData(Clipboard::Buffer buffer, const string16& type,
+                           IPC::Message* reply);
+  void OnClipboardReadFilenames(Clipboard::Buffer buffer, IPC::Message* reply);
 
   void OnCheckNotificationPermission(const GURL& source_url,
                                      int* permission_level);
@@ -269,8 +272,8 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                                       int v8_memory_used,
                                       base::ProcessId renderer_id);
 
-  void OnDidZoomHost(const std::string& host, int zoom_level);
-  void UpdateHostZoomLevelsOnUIThread(const std::string& host, int zoom_level);
+  void OnDidZoomURL(const GURL& url, int zoom_level);
+  void UpdateHostZoomLevelsOnUIThread(const GURL& url, int zoom_level);
 
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
 
@@ -313,14 +316,25 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
 
   void OnCloseCurrentConnections();
   void OnSetCacheMode(bool enabled);
-
+  void OnClearCache(IPC::Message* reply_msg);
+  void OnCacheableMetadataAvailable(const GURL& url,
+                                    double expected_response_time,
+                                    const std::vector<char>& data);
   void OnGetFileSize(const FilePath& path, IPC::Message* reply_msg);
   void OnGetFileModificationTime(const FilePath& path, IPC::Message* reply_msg);
   void OnGetFileInfoOnFileThread(const FilePath& path,
                                  IPC::Message* reply_msg,
                                  FileInfoWriteFunc write_func);
+  void OnOpenFile(const FilePath& path, int mode,IPC::Message* reply_msg);
+  void OnOpenFileOnFileThread(const FilePath& path,
+                              int mode,
+                              IPC::Message* reply_msg);
   void OnKeygen(uint32 key_size_index, const std::string& challenge_string,
-                const GURL& url, std::string* signed_public_key);
+                const GURL& url, IPC::Message* reply_msg);
+  void OnKeygenOnWorkerThread(
+      int key_size_in_bits,
+      const std::string& challenge_string,
+      IPC::Message* reply_msg);
   void OnGetExtensionMessageBundle(const std::string& extension_id,
                                    IPC::Message* reply_msg);
   void OnGetExtensionMessageBundleOnFileThread(
@@ -343,18 +357,23 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void DoOnClipboardReadAsciiText(Clipboard::Buffer buffer,
                                   IPC::Message* reply_msg);
   void DoOnClipboardReadHTML(Clipboard::Buffer buffer, IPC::Message* reply_msg);
+  void DoOnClipboardReadAvailableTypes(Clipboard::Buffer buffer,
+                                       IPC::Message* reply_msg);
+  void DoOnClipboardReadData(Clipboard::Buffer buffer, const string16& type,
+                             IPC::Message* reply_msg);
+  void DoOnClipboardReadFilenames(Clipboard::Buffer buffer,
+                                  IPC::Message* reply_msg);
   void DoOnAllocateTempFileForPrinting(IPC::Message* reply_msg);
 #endif
 
-  bool CheckBenchmarkingEnabled();
+  bool CheckBenchmarkingEnabled() const;
+  bool CheckPreparsedJsCachingEnabled() const;
 
   // We have our own clipboard because we want to access the clipboard on the
   // IO thread instead of forwarding (possibly synchronous) messages to the UI
   // thread. This instance of the clipboard should be accessed only on the IO
   // thread.
   static Clipboard* GetClipboard();
-
-  NotificationRegistrar registrar_;
 
   // The channel associated with the renderer connection. This pointer is not
   // owned by this class.
@@ -398,6 +417,9 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   // Handles DOM Storage related messages.
   scoped_refptr<DOMStorageDispatcherHost> dom_storage_dispatcher_host_;
 
+  // Handles Indexed Database related messages.
+  scoped_refptr<IndexedDBDispatcherHost> indexed_db_dispatcher_host_;
+
   // Handles HTML5 DB related messages
   scoped_refptr<DatabaseDispatcherHost> db_dispatcher_host_;
 
@@ -410,6 +432,8 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
 
   // Whether this process is used for off the record tabs.
   bool off_the_record_;
+
+  bool cloud_print_enabled_;
 
   // A callback to create a routing id for the associated renderer process.
   scoped_ptr<CallbackWithReturnValue<int>::Type> next_route_id_callback_;

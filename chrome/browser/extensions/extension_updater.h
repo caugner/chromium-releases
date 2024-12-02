@@ -18,8 +18,8 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/net/url_fetcher.h"
 #include "chrome/common/extensions/update_manifest.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 
 class Extension;
@@ -110,7 +110,6 @@ class ManifestFetchesBuilder {
   void AddExtensionData(Extension::Location location,
                         const std::string& id,
                         const Version& version,
-                        bool converted_from_user_script,
                         bool is_theme,
                         GURL update_url);
 
@@ -219,9 +218,6 @@ class ExtensionUpdater
   // to be installed.
   void OnCRXFileWritten(const std::string& id, const FilePath& path,
                         const GURL& download_url);
-
-  // Callback for when ExtensionsService::Install is finished.
-  void OnExtensionInstallFinished(const FilePath& path, Extension* extension);
 
   // Verifies downloaded blacklist. Based on the blacklist, calls extension
   // service to unload blacklisted extensions and update pref.

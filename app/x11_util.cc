@@ -52,7 +52,25 @@ CachedPictFormats* get_cached_pict_formats() {
 // Maximum number of CachedPictFormats we keep around.
 const size_t kMaxCacheSize = 5;
 
+int X11ErrorHandler(Display* d, XErrorEvent* e) {
+  LOG(FATAL) << "X Error detected: serial " << e->serial
+             << " error_code " << static_cast<unsigned int>(e->error_code)
+             << " request_code " << static_cast<unsigned int>(e->request_code)
+             << " minor_code " << static_cast<unsigned int>(e->minor_code);
+  return 0;
+}
+
+int X11IOErrorHandler(Display* d) {
+  LOG(FATAL) << "X IO Error detected";
+  return 0;
+}
+
 }  // namespace
+
+void SetX11ErrorHandlers() {
+  XSetErrorHandler(X11ErrorHandler);
+  XSetIOErrorHandler(X11IOErrorHandler);
+}
 
 bool XDisplayExists() {
   return (gdk_display_get_default() != NULL);
@@ -141,6 +159,10 @@ XID GetX11RootWindow() {
   return GDK_WINDOW_XID(gdk_get_default_root_window());
 }
 
+bool GetCurrentDesktop(int* desktop) {
+  return GetIntProperty(GetX11RootWindow(), "_NET_CURRENT_DESKTOP", desktop);
+}
+
 XID GetX11WindowFromGtkWidget(GtkWidget* widget) {
   return GDK_WINDOW_XID(widget->window);
 }
@@ -174,7 +196,15 @@ int BitsPerPixelForPixmapDepth(Display* dpy, int depth) {
 bool IsWindowVisible(XID window) {
   XWindowAttributes win_attributes;
   XGetWindowAttributes(GetXDisplay(), window, &win_attributes);
-  return (win_attributes.map_state == IsViewable);
+  if (win_attributes.map_state != IsViewable)
+    return false;
+  // Some compositing window managers (notably kwin) do not actually unmap
+  // windows on desktop switch, so we also must check the current desktop.
+  int window_desktop, current_desktop;
+  return (!GetWindowDesktop(window, &window_desktop) ||
+          !GetCurrentDesktop(&current_desktop) ||
+          window_desktop == kAllDesktops ||
+          window_desktop == current_desktop);
 }
 
 bool GetWindowRect(XID window, gfx::Rect* rect) {
@@ -226,6 +256,44 @@ bool GetIntProperty(XID window, const std::string& property_name, int* value) {
 
   *value = *(reinterpret_cast<int*>(property));
   XFree(property);
+  return true;
+}
+
+bool GetIntArrayProperty(XID window,
+                         const std::string& property_name,
+                         std::vector<int>* value) {
+  Atom property_atom = gdk_x11_get_xatom_by_name_for_display(
+      gdk_display_get_default(), property_name.c_str());
+
+  Atom type = None;
+  int format = 0;  // size in bits of each item in 'property'
+  long unsigned int num_items = 0, remaining_bytes = 0;
+  unsigned char* properties = NULL;
+
+  int result = XGetWindowProperty(GetXDisplay(),
+                                  window,
+                                  property_atom,
+                                  0,      // offset into property data to read
+                                  (~0L),  // max length to get (all of them)
+                                  False,  // deleted
+                                  AnyPropertyType,
+                                  &type,
+                                  &format,
+                                  &num_items,
+                                  &remaining_bytes,
+                                  &properties);
+  if (result != Success)
+    return false;
+
+  if (format != 32) {
+    XFree(properties);
+    return false;
+  }
+
+  int* int_properties = reinterpret_cast<int*>(properties);
+  value->clear();
+  value->insert(value->begin(), int_properties, int_properties + num_items);
+  XFree(properties);
   return true;
 }
 
@@ -284,6 +352,10 @@ XID GetHighestAncestorWindow(XID window, XID root) {
       return window;
     window = parent;
   }
+}
+
+bool GetWindowDesktop(XID window, int* desktop) {
+  return GetIntProperty(window, "_NET_WM_DESKTOP", desktop);
 }
 
 // Returns true if |window| is a named window.
@@ -586,9 +658,9 @@ void PutARGBImage(Display* display, void* visual, int depth, XID pixmap,
               width, height);
     free(orig_bitmap16);
   } else {
-    CHECK(false) << "Sorry, we don't support your visual depth without "
-                    "Xrender support (depth:" << depth
-                 << " bpp:" << pixmap_bpp << ")";
+    LOG(FATAL) << "Sorry, we don't support your visual depth without "
+                  "Xrender support (depth:" << depth
+               << " bpp:" << pixmap_bpp << ")";
   }
 }
 
@@ -698,7 +770,7 @@ void GrabWindowSnapshot(GtkWindow* gtk_window,
   Display* display = GDK_WINDOW_XDISPLAY(gdk_window);
   XID win = GDK_WINDOW_XID(gdk_window);
   XWindowAttributes attr;
-  if (XGetWindowAttributes(display, win, &attr) != 0) {
+  if (XGetWindowAttributes(display, win, &attr) == 0) {
     LOG(ERROR) << "Couldn't get window attributes";
     return;
   }
@@ -731,7 +803,12 @@ void GrabWindowSnapshot(GtkWindow* gtk_window,
 
 bool ChangeWindowDesktop(XID window, XID destination) {
   int desktop;
-  if (!GetIntProperty(destination, "_NET_WM_DESKTOP", &desktop))
+  if (!GetWindowDesktop(destination, &desktop))
+    return false;
+
+  // If |window| is sticky, use the current desktop.
+  if (desktop == kAllDesktops &&
+      !GetCurrentDesktop(&desktop))
     return false;
 
   XEvent event;

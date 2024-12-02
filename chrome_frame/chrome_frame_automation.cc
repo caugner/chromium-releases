@@ -7,6 +7,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/trace_event.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/lock.h"
@@ -21,9 +22,10 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
-#include "chrome_frame/chrome_launcher.h"
+#include "chrome_frame/chrome_launcher_utils.h"
+#include "chrome_frame/crash_reporting/crash_metrics.h"
+#include "chrome_frame/custom_sync_call_context.h"
 #include "chrome_frame/utils.h"
-#include "chrome_frame/sync_msg_reply_dispatcher.h"
 
 #ifdef NDEBUG
 int64 kAutomationServerReasonableLaunchDelay = 1000;  // in milliseconds
@@ -97,27 +99,24 @@ class ChromeFrameAutomationProxyImpl::CFMsgDispatcher
   CFMsgDispatcher() : SyncMessageReplyDispatcher() {}
  protected:
   virtual bool HandleMessageType(const IPC::Message& msg,
-                                 const MessageSent& origin) {
-    switch (origin.type) {
+                                 SyncMessageCallContext* context) {
+    switch (context->message_type()) {
       case AutomationMsg_CreateExternalTab::ID:
       case AutomationMsg_ConnectExternalTab::ID:
-        InvokeCallback<Tuple3<HWND, HWND, int> >(msg, origin);
+        InvokeCallback<CreateExternalTabContext>(msg, context);
         break;
       case AutomationMsg_NavigateExternalTabAtIndex::ID:
       case AutomationMsg_NavigateInExternalTab::ID:
-        InvokeCallback<Tuple1<AutomationMsg_NavigationResponseValues> >(msg,
-              origin);
+        InvokeCallback<BeginNavigateContext>(msg, context);
         break;
       case AutomationMsg_InstallExtension::ID:
-        InvokeCallback<Tuple1<AutomationMsg_ExtensionResponseValues> >(msg,
-              origin);
+        InvokeCallback<InstallExtensionContext>(msg, context);
         break;
       case AutomationMsg_LoadExpandedExtension::ID:
-        InvokeCallback<Tuple1<AutomationMsg_ExtensionResponseValues> >(msg,
-              origin);
+        InvokeCallback<InstallExtensionContext>(msg, context);
         break;
       case AutomationMsg_GetEnabledExtensions::ID:
-        InvokeCallback<Tuple1<std::vector<FilePath> > >(msg, origin);
+        InvokeCallback<GetEnabledExtensionsContext>(msg, context);
         break;
       default:
         NOTREACHED();
@@ -129,6 +128,8 @@ class ChromeFrameAutomationProxyImpl::CFMsgDispatcher
 ChromeFrameAutomationProxyImpl::ChromeFrameAutomationProxyImpl(
     int launch_timeout)
     : AutomationProxy(launch_timeout) {
+  TRACE_EVENT_BEGIN("chromeframe.automationproxy", this, "");
+
   sync_ = new CFMsgDispatcher();
   message_filter_ = new TabProxyNotificationMessageFilter(tracker_.get());
   // Order of filters is not important.
@@ -137,11 +138,13 @@ ChromeFrameAutomationProxyImpl::ChromeFrameAutomationProxyImpl(
 }
 
 ChromeFrameAutomationProxyImpl::~ChromeFrameAutomationProxyImpl() {
+  TRACE_EVENT_END("chromeframe.automationproxy", this, "");
 }
 
-void ChromeFrameAutomationProxyImpl::SendAsAsync(IPC::SyncMessage* msg,
-                                                 void* callback, void* key) {
-  sync_->Push(msg, callback, key);
+void ChromeFrameAutomationProxyImpl::SendAsAsync(
+    IPC::SyncMessage* msg,
+    SyncMessageReplyDispatcher::SyncMessageCallContext* context, void* key) {
+  sync_->Push(msg, context, key);
   channel_->ChannelProxy::Send(msg);
 }
 
@@ -192,10 +195,7 @@ ProxyFactory::ProxyCacheEntry::ProxyCacheEntry(const std::wstring& profile)
   thread->Start();
 }
 
-template <> struct RunnableMethodTraits<ProxyFactory> {
-  void RetainCallee(ProxyFactory* obj) {}
-  void ReleaseCallee(ProxyFactory* obj) {}
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(ProxyFactory);
 
 ProxyFactory::ProxyFactory()
     : uma_send_interval_(0) {
@@ -215,6 +215,8 @@ ProxyFactory::~ProxyFactory() {
 void ProxyFactory::GetAutomationServer(
     LaunchDelegate* delegate, const ChromeFrameLaunchParams& params,
     void** automation_server_id) {
+  TRACE_EVENT_BEGIN("chromeframe.createproxy", this, "");
+
   ProxyCacheEntry* entry = NULL;
   // Find already existing launcher thread for given profile
   AutoLock lock(lock_);
@@ -246,9 +248,13 @@ void ProxyFactory::GetAutomationServer(
   entry->thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(this,
       &ProxyFactory::CreateProxy, entry, params, delegate));
 
-  entry->thread->message_loop()->PostDelayedTask(FROM_HERE,
-      NewRunnableMethod(this, &ProxyFactory::SendUMAData, entry),
-      uma_send_interval_);
+  // IE uses the chrome frame provided UMA data uploading scheme. NPAPI
+  // continues to use Chrome to upload UMA data.
+  if (!CrashMetricsReporter::GetInstance()->active()) {
+    entry->thread->message_loop()->PostDelayedTask(FROM_HERE,
+        NewRunnableMethod(this, &ProxyFactory::SendUMAData, entry),
+        uma_send_interval_);
+  }
 }
 
 void ProxyFactory::CreateProxy(ProxyFactory::ProxyCacheEntry* entry,
@@ -291,8 +297,6 @@ void ProxyFactory::CreateProxy(ProxyFactory::ProxyCacheEntry* entry,
 #ifndef NDEBUG
   command_line->AppendSwitch(switches::kNoErrorDialogs);
 #endif
-
-  command_line->AppendSwitch(switches::kEnableRendererAccessibility);
 
   // In headless mode runs like reliability test runs we want full crash dumps
   // from chrome.
@@ -349,6 +353,8 @@ void ProxyFactory::CreateProxy(ProxyFactory::ProxyCacheEntry* entry,
                                             AUTOMATION_CREATE_TAB_FAILED,
                                             AUTOMATION_CREATE_TAB_FAILED + 1);
   }
+
+  TRACE_EVENT_END("chromeframe.createproxy", this, "");
 
   // Finally set the proxy.
   entry->proxy = proxy;
@@ -416,6 +422,12 @@ void ProxyFactory::ReleaseProxy(ProxyCacheEntry* entry,
 Singleton<ProxyFactory> g_proxy_factory;
 
 void ProxyFactory::SendUMAData(ProxyCacheEntry* proxy_entry) {
+  // IE uses the chrome frame provided UMA data uploading scheme. NPAPI
+  // continues to use Chrome to upload UMA data.
+  if (CrashMetricsReporter::GetInstance()->active()) {
+    return;
+  }
+
   if (!proxy_entry) {
     NOTREACHED() << __FUNCTION__ << " Invalid proxy entry";
     return;
@@ -508,6 +520,9 @@ bool ChromeFrameAutomationClient::Initialize(
   // Mark our state as initializing.  We'll reach initialized once
   // InitializeComplete is called successfully.
   init_state_ = INITIALIZING;
+
+  if (chrome_launch_params_.url.is_valid())
+    navigate_after_initialization_ = false;
 
   if (!navigate_after_initialization_) {
     chrome_launch_params_.url = url_;
@@ -605,8 +620,8 @@ bool ChromeFrameAutomationClient::NavigateToIndex(int index) {
 
   IPC::SyncMessage* msg = new AutomationMsg_NavigateExternalTabAtIndex(
       0, tab_->handle(), index, NULL);
-  automation_server_->SendAsAsync(msg, NewCallback(this,
-      &ChromeFrameAutomationClient::BeginNavigateCompleted), this);
+  automation_server_->SendAsAsync(msg, new BeginNavigateContext(this),
+                                  this);
   return true;
 }
 
@@ -648,8 +663,7 @@ void ChromeFrameAutomationClient::BeginNavigate(const GURL& url,
   IPC::SyncMessage* msg =
       new AutomationMsg_NavigateInExternalTab(0, tab_->handle(), url,
                                               referrer, NULL);
-  automation_server_->SendAsAsync(msg, NewCallback(this,
-      &ChromeFrameAutomationClient::BeginNavigateCompleted), this);
+  automation_server_->SendAsAsync(msg, new BeginNavigateContext(this), this);
 
   RECT client_rect = {0};
   chrome_frame_delegate_->GetBounds(&client_rect);
@@ -685,32 +699,6 @@ void ChromeFrameAutomationClient::FindInPage(const std::wstring& search_string,
   automation_server_->SendAsAsync(msg, NULL, this);
 }
 
-// Class that maintains context during the async load/install extension
-// operation.  When done, InstallExtensionComplete is posted back to the UI
-// thread so that the users of ChromeFrameAutomationClient can be notified.
-class InstallExtensionContext {
- public:
-  InstallExtensionContext(ChromeFrameAutomationClient* client,
-      const FilePath& crx_path, void* user_data) : client_(client),
-      crx_path_(crx_path), user_data_(user_data) {
-  }
-
-  ~InstallExtensionContext() {
-  }
-
-  void InstallExtensionComplete(AutomationMsg_ExtensionResponseValues res) {
-    client_->PostTask(FROM_HERE, NewRunnableMethod(client_.get(),
-        &ChromeFrameAutomationClient::InstallExtensionComplete, crx_path_,
-        user_data_, res));
-    delete this;
-  }
-
- private:
-  scoped_refptr<ChromeFrameAutomationClient> client_;
-  FilePath crx_path_;
-  void* user_data_;
-};
-
 void ChromeFrameAutomationClient::InstallExtension(
     const FilePath& crx_path,
     void* user_data) {
@@ -728,8 +716,7 @@ void ChromeFrameAutomationClient::InstallExtension(
       new AutomationMsg_InstallExtension(0, crx_path, NULL);
 
   // The context will delete itself after it is called.
-  automation_server_->SendAsAsync(msg, NewCallback(ctx,
-      &InstallExtensionContext::InstallExtensionComplete), this);
+  automation_server_->SendAsAsync(msg, ctx, this);
 }
 
 void ChromeFrameAutomationClient::InstallExtensionComplete(
@@ -742,42 +729,6 @@ void ChromeFrameAutomationClient::InstallExtensionComplete(
     chrome_frame_delegate_->OnExtensionInstalled(crx_path, user_data, res);
   }
 }
-
-// Class that maintains context during the async retrieval of fetching the
-// list of enabled extensions.  When done, GetEnabledExtensionsComplete is
-// posted back to the UI thread so that the users of
-// ChromeFrameAutomationClient can be notified.
-class GetEnabledExtensionsContext {
- public:
-  GetEnabledExtensionsContext(
-      ChromeFrameAutomationClient* client, void* user_data) : client_(client),
-          user_data_(user_data) {
-    extension_directories_ = new std::vector<FilePath>();
-  }
-
-  ~GetEnabledExtensionsContext() {
-    // ChromeFrameAutomationClient::GetEnabledExtensionsComplete takes
-    // ownership of extension_directories_.
-  }
-
-  std::vector<FilePath>* extension_directories() {
-    return extension_directories_;
-  }
-
-  void GetEnabledExtensionsComplete(
-      std::vector<FilePath> result) {
-    (*extension_directories_) = result;
-    client_->PostTask(FROM_HERE, NewRunnableMethod(client_.get(),
-      &ChromeFrameAutomationClient::GetEnabledExtensionsComplete,
-      user_data_, extension_directories_));
-    delete this;
-  }
-
- private:
-  scoped_refptr<ChromeFrameAutomationClient> client_;
-  std::vector<FilePath>* extension_directories_;
-  void* user_data_;
-};
 
 void ChromeFrameAutomationClient::GetEnabledExtensions(void* user_data) {
     if (automation_server_ == NULL) {
@@ -792,8 +743,7 @@ void ChromeFrameAutomationClient::GetEnabledExtensions(void* user_data) {
         0, ctx->extension_directories());
 
     // The context will delete itself after it is called.
-    automation_server_->SendAsAsync(msg, NewCallback(ctx,
-        &GetEnabledExtensionsContext::GetEnabledExtensionsComplete), this);
+    automation_server_->SendAsAsync(msg, ctx, this);
 }
 
 void ChromeFrameAutomationClient::GetEnabledExtensionsComplete(
@@ -837,8 +787,7 @@ void ChromeFrameAutomationClient::LoadExpandedExtension(
       new AutomationMsg_LoadExpandedExtension(0, path, NULL);
 
   // The context will delete itself after it is called.
-  automation_server_->SendAsAsync(msg, NewCallback(ctx,
-      &InstallExtensionContext::InstallExtensionComplete), this);
+  automation_server_->SendAsAsync(msg, ctx, this);
 }
 
 void ChromeFrameAutomationClient::CreateExternalTab() {
@@ -869,17 +818,17 @@ void ChromeFrameAutomationClient::CreateExternalTab() {
 
   IPC::SyncMessage* message =
       new AutomationMsg_CreateExternalTab(0, settings, NULL, NULL, NULL);
-  automation_server_->SendAsAsync(message, NewCallback(this,
-      &ChromeFrameAutomationClient::CreateExternalTabComplete), this);
+  automation_server_->SendAsAsync(message, new CreateExternalTabContext(this),
+                                  this);
 }
 
-void ChromeFrameAutomationClient::CreateExternalTabComplete(HWND chrome_window,
-    HWND tab_window, int tab_handle) {
+AutomationLaunchResult ChromeFrameAutomationClient::CreateExternalTabComplete(
+    HWND chrome_window, HWND tab_window, int tab_handle) {
   if (!automation_server_) {
     // If we receive this notification while shutting down, do nothing.
     DLOG(ERROR) << "CreateExternalTabComplete called when automation server "
                 << "was null!";
-    return;
+    return AUTOMATION_CREATE_TAB_FAILED;
   }
 
   AutomationLaunchResult launch_result = AUTOMATION_SUCCESS;
@@ -892,9 +841,7 @@ void ChromeFrameAutomationClient::CreateExternalTabComplete(HWND chrome_window,
     tab_->AddObserver(this);
     tab_handle_ = tab_handle;
   }
-
-  PostTask(FROM_HERE, NewRunnableMethod(this,
-      &ChromeFrameAutomationClient::InitializeComplete, launch_result));
+  return launch_result;
 }
 
 void ChromeFrameAutomationClient::SetEnableExtensionAutomation(
@@ -939,9 +886,10 @@ void ChromeFrameAutomationClient::LaunchComplete(
         // ExternalTab.
         IPC::SyncMessage* message =
             new AutomationMsg_ConnectExternalTab(0, external_tab_cookie_, true,
-              NULL, NULL, NULL);
-        automation_server_->SendAsAsync(message, NewCallback(this,
-            &ChromeFrameAutomationClient::CreateExternalTabComplete), this);
+              m_hWnd, NULL, NULL, NULL);
+        automation_server_->SendAsAsync(message,
+                                        new CreateExternalTabContext(this),
+                                        this);
         DLOG(INFO) << __FUNCTION__ << ": sending CreateExternalTabComplete";
       }
     }
@@ -1160,19 +1108,21 @@ void ChromeFrameAutomationClient::ReleaseAutomationServer() {
     // calling ReleaseAutomationServer.  The reason we do this is that
     // we must cancel pending messages before we release the automation server.
     // Furthermore, while ReleaseAutomationServer is running, we could get
-    // a callback to LaunchComplete which is where we normally get our pointer
-    // to the automation server and there we check the server id for NULLness
-    // and do nothing if it is NULL.
+    // a callback to LaunchComplete which could cause an external tab to be
+    // created. Ideally the callbacks should be dropped.
+    // TODO(ananta)
+    // Refactor the ChromeFrameAutomationProxy code to not depend on
+    // AutomationProxy and simplify the whole mess.
     void* server_id = automation_server_id_;
     automation_server_id_ = NULL;
 
     if (automation_server_) {
       // Make sure to clean up any pending sync messages before we go away.
       automation_server_->CancelAsync(this);
-      automation_server_ = NULL;
     }
 
     proxy_factory_->ReleaseAutomationServer(server_id);
+    automation_server_ = NULL;
 
     // automation_server_ must not have been set to non NULL.
     // (if this regresses, start by looking at LaunchComplete()).
@@ -1260,7 +1210,8 @@ void ChromeFrameAutomationClient::AttachExternalTab(
 void ChromeFrameAutomationClient::BlockExternalTab(uint64 cookie) {
   // The host does not want this tab to be shown (due popup blocker).
   IPC::SyncMessage* message =
-      new AutomationMsg_ConnectExternalTab(0, cookie, false, NULL, NULL, NULL);
+      new AutomationMsg_ConnectExternalTab(0, cookie, false, m_hWnd,
+                                           NULL, NULL, NULL);
   automation_server_->SendAsAsync(message, NULL, this);
 }
 
@@ -1280,6 +1231,19 @@ void ChromeFrameAutomationClient::SetPageFontSize(
 void ChromeFrameAutomationClient::RemoveBrowsingData(int remove_mask) {
   automation_server_->Send(
       new AutomationMsg_RemoveBrowsingData(0, remove_mask));
+}
+
+void ChromeFrameAutomationClient::RunUnloadHandlers(HWND notification_window,
+                                                    int notification_message) {
+  if (automation_server_) {
+    automation_server_->Send(
+        new AutomationMsg_RunUnloadHandlers(0, tab_handle_,
+                                            notification_window,
+                                            notification_message));
+  } else {
+    // Post this message to ensure that the caller exits his message loop.
+    ::PostMessage(notification_window, notification_message, 0, 0);
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////

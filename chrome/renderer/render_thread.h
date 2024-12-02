@@ -18,6 +18,7 @@
 #include "chrome/common/child_thread.h"
 #include "chrome/common/css_colors.h"
 #include "chrome/common/dom_storage_common.h"
+#include "chrome/common/extensions/extension_extent.h"
 #include "chrome/renderer/gpu_channel_host.h"
 #include "chrome/renderer/renderer_histogram_snapshots.h"
 #include "chrome/renderer/visitedlink_slave.h"
@@ -30,10 +31,11 @@ class CookieMessageFilter;
 class DBMessageFilter;
 class DevToolsAgentFilter;
 class FilePath;
+class IndexedDBDispatcher;
 class ListValue;
 class NullableString16;
-class RenderDnsMaster;
 class RendererHistogram;
+class RendererNetPredictor;
 class RendererWebKitClientImpl;
 class SpellCheck;
 class SkBitmap;
@@ -44,6 +46,7 @@ class WebDatabaseObserverImpl;
 struct ContentSettings;
 struct RendererPreferences;
 struct ViewMsg_DOMStorageEvent_Params;
+struct ViewMsg_ExtensionExtentsUpdated_Params;
 struct ViewMsg_New_Params;
 struct WebPreferences;
 
@@ -55,11 +58,32 @@ class WebStorageEventDispatcher;
 // expects from a render thread. The interface basically abstracts a way to send
 // and receive messages.
 //
-// TODO(brettw) this should be refactored like RenderProcess/RenderProcessImpl:
-// This class should be named RenderThread and the implementation below should
-// be RenderThreadImpl. The ::current() getter on the impl should then be moved
-// here so we can provide another implementation of RenderThread for tests
-// without having to check for NULL all the time.
+// TODO(brettw): This has two different and opposing usage patterns which
+// make it confusing.
+//
+// In the first mode, callers call RenderThread::current() to get the one and
+// only global RenderThread (bug 10837: this should be renamed get()). Then
+// they access it. Since RenderThread is a concrete class, this can be NULL
+// during unit tests. Callers need to NULL check this every time. Some callers
+// don't happen to get called during unit tests and don't do the NULL checks,
+// which is also confusing since it's not clear if you need to or not.
+//
+// In the second mode, the abstract base class RenderThreadBase is passed to
+// RenderView and RenderWidget. Normally, this points to
+// RenderThread::current() so it's quite confusing which accessing mode should
+// be used. However, during unit testing, this class is replaced with a mock
+// to support testing functions, and is guaranteed non-NULL.
+//
+// It might be nice not to have the ::current() call and put all of the
+// functions on the abstract class so they can be mocked. However, there are
+// some standalone functions like in ChromiumBridge that are not associated
+// with a view that need to access the current thread to send messages to the
+// browser process. These need the ::current() paradigm. So instead, we should
+// probably remove the render_thread_ parameter to RenderView/Widget in
+// preference to just getting the global singleton. We can make it easier to
+// understand by moving everything to the abstract interface and saying that
+// there should never be a NULL RenderThread::current(). Tests would be
+// responsible for setting up the mock one.
 class RenderThreadBase {
  public:
   virtual ~RenderThreadBase() {}
@@ -77,6 +101,9 @@ class RenderThreadBase {
   // Called by a RenderWidget when it is hidden or restored.
   virtual void WidgetHidden() = 0;
   virtual void WidgetRestored() = 0;
+
+  // True if this process should be treated as an extension process.
+  virtual bool IsExtensionProcess() const = 0;
 };
 
 // The RenderThread class represents a background thread where RenderView
@@ -138,13 +165,17 @@ class RenderThread : public RenderThreadBase,
     return appcache_dispatcher_.get();
   }
 
+  IndexedDBDispatcher* indexed_db_dispatcher() const {
+    return indexed_db_dispatcher_.get();
+  }
+
   SpellCheck* spellchecker() const {
     return spellchecker_.get();
   }
 
   bool plugin_refresh_allowed() const { return plugin_refresh_allowed_; }
 
-  bool is_extension_process() const { return is_extension_process_; }
+  virtual bool IsExtensionProcess() const { return is_extension_process_; }
 
   bool is_incognito_process() const { return is_incognito_process_; }
 
@@ -164,6 +195,9 @@ class RenderThread : public RenderThreadBase,
   // Sends a message to the browser to enable or disable the disk cache.
   void SetCacheMode(bool enabled);
 
+  // Sends a message to the browser to clear the disk cache.
+  void ClearCache();
+
   // Update the list of active extensions that will be reported when we crash.
   void UpdateActiveExtensions();
 
@@ -182,7 +216,24 @@ class RenderThread : public RenderThreadBase,
   // has been lost.
   GpuChannelHost* GetGpuChannel();
 
+  // Returns the extension ID that the given URL is a part of, or empty if
+  // none. This includes web URLs that are part of an extension's web extent.
+  // TODO(mpcomplete): this doesn't feel like it belongs here. Find a better
+  // place.
+  std::string GetExtensionIdByURL(const GURL& url);
+
+  std::string GetExtensionIdByBrowseExtent(const GURL& url);
+
  private:
+  // Contains extension-related data that the renderer needs to know about.
+  // TODO(mpcomplete): this doesn't feel like it belongs here. Find a better
+  // place.
+  struct ExtensionInfo {
+    std::string extension_id;
+    ExtensionExtent web_extent;
+    ExtensionExtent browse_extent;
+  };
+
   virtual void OnControlMessageReceived(const IPC::Message& msg);
 
   void Init();
@@ -190,11 +241,13 @@ class RenderThread : public RenderThreadBase,
   void OnUpdateVisitedLinks(base::SharedMemoryHandle table);
   void OnAddVisitedLinks(const VisitedLinkSlave::Fingerprints& fingerprints);
   void OnResetVisitedLinks();
-  void OnSetZoomLevelForCurrentHost(const std::string& host, int zoom_level);
+  void OnSetZoomLevelForCurrentURL(const GURL& url, int zoom_level);
   void OnSetContentSettingsForCurrentURL(
       const GURL& url, const ContentSettings& content_settings);
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
   void OnSetExtensionFunctionNames(const std::vector<std::string>& names);
+  void OnExtensionExtentsUpdated(
+      const ViewMsg_ExtensionExtentsUpdated_Params& params);
   void OnPageActionsUpdated(const std::string& extension_id,
       const std::vector<std::string>& page_actions);
   void OnDOMStorageEvent(const ViewMsg_DOMStorageEvent_Params& params);
@@ -226,7 +279,8 @@ class RenderThread : public RenderThreadBase,
 
   void OnExtensionMessageInvoke(const std::string& function_name,
                                 const ListValue& args,
-                                bool requires_incognito_access);
+                                bool requires_incognito_access,
+                                const GURL& event_url);
   void OnPurgeMemory();
   void OnPurgePluginListCache(bool reload_pages);
 
@@ -238,6 +292,8 @@ class RenderThread : public RenderThreadBase,
   void OnSpellCheckEnableAutoSpellCorrect(bool enable);
 
   void OnGpuChannelEstablished(const IPC::ChannelHandle& channel_handle);
+
+  void OnGetAccessibilityTree();
 
   // Gather usage statistics from the in-memory cache and inform our host.
   // These functions should be call periodically so that the host can make
@@ -257,8 +313,9 @@ class RenderThread : public RenderThreadBase,
   scoped_ptr<ScopedRunnableMethodFactory<RenderThread> > task_factory_;
   scoped_ptr<VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<UserScriptSlave> user_script_slave_;
-  scoped_ptr<RenderDnsMaster> dns_master_;
+  scoped_ptr<RendererNetPredictor> renderer_net_predictor_;
   scoped_ptr<AppCacheDispatcher> appcache_dispatcher_;
+  scoped_ptr<IndexedDBDispatcher> indexed_db_dispatcher_;
   scoped_refptr<DevToolsAgentFilter> devtools_agent_filter_;
   scoped_ptr<RendererHistogramSnapshots> histogram_snapshots_;
   scoped_ptr<RendererWebKitClientImpl> webkit_client_;
@@ -298,7 +355,6 @@ class RenderThread : public RenderThreadBase,
 
   bool suspend_webkit_shared_timer_;
   bool notify_webkit_of_modal_loop_;
-  bool did_notify_webkit_of_modal_loop_;
 
   // Timer that periodically calls IdleHandler.
   base::RepeatingTimer<RenderThread> idle_timer_;
@@ -309,6 +365,10 @@ class RenderThread : public RenderThreadBase,
 
   // The channel from the renderer process to the GPU process.
   scoped_refptr<GpuChannelHost> gpu_channel_;
+
+  // A list of extension web extents, which tells us which URLs belong to an
+  // installed app.
+  std::vector<ExtensionInfo> extension_extents_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThread);
 };

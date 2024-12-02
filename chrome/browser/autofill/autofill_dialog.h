@@ -18,7 +18,9 @@ class Profile;
 class AutoFillDialogObserver {
  public:
   // The user has confirmed changes by clicking "Apply" or "OK".  Any of the
-  // parameters may be NULL.
+  // parameters may be NULL. A NULL parameter is treated as not changing the
+  // existing data. For example, |OnAutoFillDialogApply(new_profiles, NULL)|
+  // only sets the profiles and not the credit cards.
   virtual void OnAutoFillDialogApply(
       std::vector<AutoFillProfile>* profiles,
       std::vector<CreditCard>* credit_cards) = 0;
@@ -28,24 +30,17 @@ class AutoFillDialogObserver {
 };
 
 // Shows the AutoFill dialog, which allows the user to edit profile information.
-// |profile| is profile from which you can get vectors of of autofill profiles
-// that contains the current profile information and credit cards.
-// The dialog fills out the profile fields using this data. |observer| will be
-// notified by OnAutoFillDialogAccept when the user has applied changes.
+// |profile| is profile from which you can get vectors of autofill profiles that
+// contains the current profile information and credit cards.  The dialog fills
+// out the profile fields using this data.
 //
-// The PersonalDataManager owns the contents of these vectors.  The lifetime of
-// the contents is until the PersonalDataManager replaces them with new data
-// whenever the web database is updated.
-#if defined(OS_MACOSX)
-// TODO(dhollowa): update .mm files and remove this.
-void ShowAutoFillDialog(AutoFillDialogObserver* observer,
-                        const std::vector<AutoFillProfile*>& profiles,
-                        const std::vector<CreditCard*>& credit_cards,
-                        Profile* profile);
-#else
-void ShowAutoFillDialog(gfx::NativeWindow parent,
+// |observer| will be notified by OnAutoFillDialogAccept when the user has
+// applied changes.  May not be NULL.
+//
+// The |parent| parameter (currently only used on Windows) specifies the parent
+// view in the view hierarchy.  May be NULL on Mac and gtk.
+void ShowAutoFillDialog(gfx::NativeView parent,
                         AutoFillDialogObserver* observer,
                         Profile* profile);
-#endif
 
 #endif  // CHROME_BROWSER_AUTOFILL_AUTOFILL_DIALOG_H_

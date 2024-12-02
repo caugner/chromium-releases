@@ -16,14 +16,14 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/common/json_value_serializer.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/pref_names.h"
 
 namespace browser_sync {
 
 PreferenceModelAssociator::PreferenceModelAssociator(
-    ProfileSyncService* sync_service,
-    UnrecoverableErrorHandler* error_handler)
+    ProfileSyncService* sync_service)
     : sync_service_(sync_service),
-      error_handler_(error_handler),
       preferences_node_id_(sync_api::kInvalidId) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   DCHECK(sync_service_);
@@ -71,44 +71,56 @@ bool PreferenceModelAssociator::AssociateModels() {
         pref_service->FindPreference((*it).c_str());
     DCHECK(pref);
 
-    sync_api::ReadNode node(&trans);
+    sync_api::WriteNode node(&trans);
     if (node.InitByClientTagLookup(syncable::PREFERENCES, tag)) {
       const sync_pb::PreferenceSpecifics& preference(
           node.GetPreferenceSpecifics());
       DCHECK_EQ(tag, preference.name());
 
-      scoped_ptr<Value> value(
-          reader.JsonToValue(preference.value(), false, false));
-      std::wstring pref_name = UTF8ToWide(preference.name());
-      if (!value.get()) {
-        LOG(ERROR) << "Failed to deserialize preference value: "
-                   << reader.GetErrorMessage();
-        return false;
-      }
+      if (!pref->IsManaged()) {
+        scoped_ptr<Value> value(
+            reader.JsonToValue(preference.value(), false, false));
+        std::wstring pref_name = UTF8ToWide(preference.name());
+        if (!value.get()) {
+          LOG(ERROR) << "Failed to deserialize preference value: "
+                     << reader.GetErrorMessage();
+          return false;
+        }
 
-      // Update the local preference based on what we got from the sync server.
-      pref_service->Set(pref_name.c_str(), *value);
+        // Merge the server value of this preference with the local value.
+        scoped_ptr<Value> new_value(MergePreference(*pref, *value));
+
+        // Update the local preference based on what we got from the
+        // sync server.
+        if (!pref->GetValue()->Equals(new_value.get()))
+          pref_service->Set(pref_name.c_str(), *new_value);
+
+        AfterUpdateOperations(pref_name);
+
+        // If the merge resulted in an updated value, write it back to
+        // the sync node.
+        if (!value->Equals(new_value.get()) &&
+            !WritePreferenceToNode(pref->name(), *new_value, &node))
+          return false;
+      }
       Associate(pref, node.GetId());
-    } else {
-      sync_api::WriteNode node(&trans);
-      if (!node.InitUniqueByCreation(syncable::PREFERENCES, root, tag)) {
+    } else if (!pref->IsManaged()) {
+      // If there is no server value for this preference and it is
+      // currently its default value, don't create a new server node.
+      if (pref->IsDefaultValue())
+        continue;
+
+      sync_api::WriteNode write_node(&trans);
+      if (!write_node.InitUniqueByCreation(syncable::PREFERENCES, root, tag)) {
         LOG(ERROR) << "Failed to create preference sync node.";
         return false;
       }
 
       // Update the sync node with the local value for this preference.
-      std::string serialized;
-      JSONStringValueSerializer json(&serialized);
-      if (!json.Serialize(*(pref->GetValue()))) {
-        LOG(ERROR) << "Failed to serialize preference value.";
+      if (!WritePreferenceToNode(pref->name(), *pref->GetValue(), &write_node))
         return false;
-      }
-      sync_pb::PreferenceSpecifics preference;
-      preference.set_name(tag);
-      preference.set_value(serialized);
-      node.SetPreferenceSpecifics(preference);
-      node.SetTitle(*it);
-      Associate(pref, node.GetId());
+
+      Associate(pref, write_node.GetId());
     }
   }
   return true;
@@ -142,14 +154,6 @@ bool PreferenceModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
   // The sync model has user created nodes if the preferences folder has any
   // children.
   *has_nodes = sync_api::kInvalidId != preferences_node.GetFirstChildId();
-  return true;
-}
-
-bool PreferenceModelAssociator::ChromeModelHasUserCreatedNodes(
-    bool* has_nodes) {
-  DCHECK(has_nodes);
-  // Assume the preferences model always have user-created nodes.
-  *has_nodes = true;
   return true;
 }
 
@@ -188,6 +192,115 @@ bool PreferenceModelAssociator::GetSyncIdForTaggedNode(const std::string& tag,
     return false;
   *sync_id = sync_node.GetId();
   return true;
+}
+
+Value* PreferenceModelAssociator::MergePreference(
+    const PrefService::Preference& local_pref,
+    const Value& server_value) {
+  if (local_pref.name() == prefs::kURLsToRestoreOnStartup ||
+      local_pref.name() == prefs::kDesktopNotificationAllowedOrigins ||
+      local_pref.name() == prefs::kDesktopNotificationDeniedOrigins) {
+    return MergeListValues(*local_pref.GetValue(), server_value);
+  }
+
+  if (local_pref.name() == prefs::kContentSettingsPatterns ||
+      local_pref.name() == prefs::kGeolocationContentSettings) {
+    return MergeDictionaryValues(*local_pref.GetValue(), server_value);
+  }
+
+  // If this is not a specially handled preference, server wins.
+  return server_value.DeepCopy();
+}
+
+bool PreferenceModelAssociator::WritePreferenceToNode(
+    const std::wstring& name,
+    const Value& value,
+    sync_api::WriteNode* node) {
+  std::string serialized;
+  JSONStringValueSerializer json(&serialized);
+  if (!json.Serialize(value)) {
+    LOG(ERROR) << "Failed to serialize preference value.";
+    return false;
+  }
+
+  sync_pb::PreferenceSpecifics preference;
+  preference.set_name(WideToUTF8(name));
+  preference.set_value(serialized);
+  node->SetPreferenceSpecifics(preference);
+  node->SetTitle(name);
+  return true;
+}
+
+Value* PreferenceModelAssociator::MergeListValues(const Value& from_value,
+                                                  const Value& to_value) {
+  if (from_value.GetType() == Value::TYPE_NULL)
+    return to_value.DeepCopy();
+  if (to_value.GetType() == Value::TYPE_NULL)
+    return from_value.DeepCopy();
+
+  DCHECK(from_value.GetType() == Value::TYPE_LIST);
+  DCHECK(to_value.GetType() == Value::TYPE_LIST);
+  const ListValue& from_list_value = static_cast<const ListValue&>(from_value);
+  const ListValue& to_list_value = static_cast<const ListValue&>(to_value);
+  ListValue* result = static_cast<ListValue*>(to_list_value.DeepCopy());
+
+  for (ListValue::const_iterator i = from_list_value.begin();
+       i != from_list_value.end(); ++i) {
+    Value* value = (*i)->DeepCopy();
+    if (!result->AppendIfNotPresent(value))
+      delete value;
+  }
+  return result;
+}
+
+Value* PreferenceModelAssociator::MergeDictionaryValues(
+    const Value& from_value,
+    const Value& to_value) {
+  if (from_value.GetType() == Value::TYPE_NULL)
+    return to_value.DeepCopy();
+  if (to_value.GetType() == Value::TYPE_NULL)
+    return from_value.DeepCopy();
+
+  DCHECK(from_value.GetType() == Value::TYPE_DICTIONARY);
+  DCHECK(to_value.GetType() == Value::TYPE_DICTIONARY);
+  const DictionaryValue& from_dict_value =
+      static_cast<const DictionaryValue&>(from_value);
+  const DictionaryValue& to_dict_value =
+      static_cast<const DictionaryValue&>(to_value);
+  DictionaryValue* result =
+      static_cast<DictionaryValue*>(to_dict_value.DeepCopy());
+
+  for (DictionaryValue::key_iterator key = from_dict_value.begin_keys();
+       key != from_dict_value.end_keys(); ++key) {
+    Value* from_value;
+    bool success = from_dict_value.GetWithoutPathExpansion(*key, &from_value);
+    DCHECK(success);
+
+    Value* to_key_value;
+    if (result->GetWithoutPathExpansion(*key, &to_key_value)) {
+      if (to_key_value->GetType() == Value::TYPE_DICTIONARY) {
+        Value* merged_value = MergeDictionaryValues(*from_value, *to_key_value);
+        result->SetWithoutPathExpansion(*key, merged_value);
+      }
+      // Note that for all other types we want to preserve the "to"
+      // values so we do nothing here.
+    } else {
+      result->SetWithoutPathExpansion(*key, from_value->DeepCopy());
+    }
+  }
+  return result;
+}
+
+void PreferenceModelAssociator::AfterUpdateOperations(
+    const std::wstring& pref_name) {
+  // The bookmark bar visibility preference requires a special
+  // notification to update the UI.
+  if (0 == pref_name.compare(prefs::kShowBookmarkBar)) {
+    NotificationService::current()->Notify(
+        NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
+        Source<PreferenceModelAssociator>(this),
+        NotificationService::NoDetails());
+  }
 }
 
 }  // namespace browser_sync

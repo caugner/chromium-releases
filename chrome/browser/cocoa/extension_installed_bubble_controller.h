@@ -6,17 +6,17 @@
 #define CHROME_BROWSER_COCOA_EXTENSION_INSTALLED_BUBBLE_CONTROLLER_H_
 
 #import <Cocoa/Cocoa.h>
+
 #import "base/cocoa_protocols_mac.h"
 #include "base/scoped_ptr.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
-#import "chrome/browser/cocoa/info_bubble_view.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 class Browser;
 class Extension;
 class ExtensionLoadedNotificationObserver;
-
 @class HoverCloseButton;
+@class InfoBubbleView;
 
 namespace extension_installed_bubble {
 
@@ -71,8 +71,8 @@ typedef enum {
   IBOutlet NSTextField* extensionInstalledInfoMsg_;
 }
 
-@property (readonly) Extension* extension;
-@property BOOL pageActionRemoved;
+@property (nonatomic, readonly) Extension* extension;
+@property (nonatomic) BOOL pageActionRemoved;
 
 // Initialize the window, and then create observers to wait for the extension
 // to complete loading, or the browser window to close.

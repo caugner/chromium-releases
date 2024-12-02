@@ -15,8 +15,9 @@
 #include "base/string_util.h"
 #include "base/process_util.h"
 #include "base/thread.h"
+#include "chrome/app/chrome_version_info.h"
+#include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/process_info_snapshot.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
@@ -105,8 +106,8 @@ void MemoryDetails::CollectProcessData(
                                           NULL);
 
     while (const base::ProcessEntry* entry = process_it.NextProcessEntry()) {
-      pids_by_browser[index].push_back(entry->pid);
-      all_pids.push_back(entry->pid);
+      pids_by_browser[index].push_back(entry->pid());
+      all_pids.push_back(entry->pid());
     }
   }
 
@@ -116,8 +117,8 @@ void MemoryDetails::CollectProcessData(
     base::NamedProcessIterator helper_it(chrome::kHelperProcessExecutableName,
                                          NULL);
     while (const base::ProcessEntry* entry = helper_it.NextProcessEntry()) {
-      helper_pids.push_back(entry->pid);
-      all_pids.push_back(entry->pid);
+      helper_pids.push_back(entry->pid());
+      all_pids.push_back(entry->pid());
     }
   }
 
@@ -198,7 +199,7 @@ void MemoryDetails::CollectProcessDataChrome(
     info.type = ChildProcessInfo::UNKNOWN_PROCESS;
 
   scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+      chrome_app::GetChromeVersionInfo());
   if (version_info.get()) {
     info.product_name = version_info->product_name();
     info.version = version_info->product_version();

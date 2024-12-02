@@ -62,11 +62,6 @@ const char    kStatsFilename[] = "ChromiumStats2";
 #endif
 
 #if defined(OS_WIN)
-#if defined(GOOGLE_CHROME_BUILD)
-const wchar_t kBrowserAppID[] = L"Chrome";
-#else
-const wchar_t kBrowserAppID[] = L"Chromium";
-#endif
 const wchar_t kStatusTrayWindowClass[] = L"Chrome_StatusTrayWindow";
 #endif  // defined(OS_WIN)
 
@@ -89,6 +84,7 @@ const FilePath::CharType kChromePluginDataDirname[] = FPL("Plugin Data");
 const FilePath::CharType kThemePackFilename[] = FPL("Cached Theme.pak");
 const FilePath::CharType kCookieFilename[] = FPL("Cookies");
 const FilePath::CharType kExtensionsCookieFilename[] = FPL("Extension Cookies");
+const FilePath::CharType kFaviconsFilename[] = FPL("Favicons");
 const FilePath::CharType kHistoryFilename[] = FPL("History");
 const FilePath::CharType kLocalStateFilename[] = FPL("Local State");
 const FilePath::CharType kPreferencesFilename[] = FPL("Preferences");
@@ -99,10 +95,10 @@ const FilePath::CharType kSingletonSocketFilename[] = FPL("SingletonSocket");
 const FilePath::CharType kSingletonLockFilename[] = FPL("SingletonLock");
 const FilePath::CharType kThumbnailsFilename[] = FPL("Thumbnails");
 const FilePath::CharType kNewTabThumbnailsFilename[] = FPL("Top Thumbnails");
+const FilePath::CharType kTopSitesFilename[] = FPL("Top Sites");
 const wchar_t kUserDataDirname[] = L"User Data";
 const FilePath::CharType kUserScriptsDirname[] = FPL("User Scripts");
 const FilePath::CharType kWebDataFilename[] = FPL("Web Data");
-const FilePath::CharType kPrivacyBlacklistFileName[] = FPL("Privacy Blacklist");
 const FilePath::CharType kBookmarksFileName[] = FPL("Bookmarks");
 const FilePath::CharType kHistoryBookmarksFileName[] =
     FPL("Bookmarks From History");
@@ -111,6 +107,7 @@ const FilePath::CharType kCustomDictionaryFileName[] =
 const FilePath::CharType kLoginDataFileName[] = FPL("Login Data");
 const FilePath::CharType kJumpListIconDirname[] = FPL("JumpListIcons");
 const FilePath::CharType kWebAppDirname[] = FPL("Web Applications");
+const FilePath::CharType kServiceStateFileName[] = FPL("Service State");
 
 // This number used to be limited to 32 in the past (see b/535234).
 const unsigned int kMaxRendererProcessCount = 42;

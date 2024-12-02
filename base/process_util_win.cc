@@ -222,9 +222,11 @@ bool KillProcessById(ProcessId process_id, int exit_code, bool wait) {
   HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE,
                                FALSE,  // Don't inherit handle
                                process_id);
-  if (!process)
+  if (!process) {
+    DLOG(ERROR) << "Unable to open process " << process_id << " : "
+                << GetLastError();
     return false;
-
+  }
   bool ret = KillProcess(process, exit_code, wait);
   CloseHandle(process);
   return ret;
@@ -384,33 +386,17 @@ bool WaitForExitCodeWithTimeout(ProcessHandle handle, int* exit_code,
   return true;
 }
 
-NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,
-                                           const ProcessFilter* filter)
+ProcessIterator::ProcessIterator(const ProcessFilter* filter)
     : started_iteration_(false),
-      executable_name_(executable_name),
       filter_(filter) {
   snapshot_ = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 }
 
-NamedProcessIterator::~NamedProcessIterator() {
+ProcessIterator::~ProcessIterator() {
   CloseHandle(snapshot_);
 }
 
-
-const ProcessEntry* NamedProcessIterator::NextProcessEntry() {
-  bool result = false;
-  do {
-    result = CheckForNextProcess();
-  } while (result && !IncludeEntry());
-
-  if (result) {
-    return &entry_;
-  }
-
-  return NULL;
-}
-
-bool NamedProcessIterator::CheckForNextProcess() {
+bool ProcessIterator::CheckForNextProcess() {
   InitProcessEntry(&entry_);
 
   if (!started_iteration_) {
@@ -421,39 +407,15 @@ bool NamedProcessIterator::CheckForNextProcess() {
   return !!Process32Next(snapshot_, &entry_);
 }
 
-bool NamedProcessIterator::IncludeEntry() {
-  return _wcsicmp(executable_name_.c_str(), entry_.szExeFile) == 0 &&
-                  (!filter_ || filter_->Includes(entry_.th32ProcessID,
-                                                 entry_.th32ParentProcessID));
-}
-
-void NamedProcessIterator::InitProcessEntry(ProcessEntry* entry) {
+void ProcessIterator::InitProcessEntry(ProcessEntry* entry) {
   memset(entry, 0, sizeof(*entry));
   entry->dwSize = sizeof(*entry);
 }
 
-int GetProcessCount(const std::wstring& executable_name,
-                    const ProcessFilter* filter) {
-  int count = 0;
-
-  NamedProcessIterator iter(executable_name, filter);
-  while (iter.NextProcessEntry())
-    ++count;
-  return count;
-}
-
-bool KillProcesses(const std::wstring& executable_name, int exit_code,
-                   const ProcessFilter* filter) {
-  bool result = true;
-  const ProcessEntry* entry;
-
-  NamedProcessIterator iter(executable_name, filter);
-  while (entry = iter.NextProcessEntry()) {
-    if (!KillProcessById((*entry).th32ProcessID, exit_code, true))
-      result = false;
-  }
-
-  return result;
+bool NamedProcessIterator::IncludeEntry() {
+  // Case insensitive.
+  return _wcsicmp(executable_name_.c_str(), entry().exe_file()) == 0 &&
+         ProcessIterator::IncludeEntry();
 }
 
 bool WaitForProcessesToExit(const std::wstring& executable_name,
@@ -553,18 +515,29 @@ size_t ProcessMetrics::GetPeakWorkingSetSize() const {
   return 0;
 }
 
-size_t ProcessMetrics::GetPrivateBytes() const {
+bool ProcessMetrics::GetMemoryBytes(size_t* private_bytes,
+                                    size_t* shared_bytes) {
   // PROCESS_MEMORY_COUNTERS_EX is not supported until XP SP2.
   // GetProcessMemoryInfo() will simply fail on prior OS. So the requested
   // information is simply not available. Hence, we will return 0 on unsupported
   // OSes. Unlike most Win32 API, we don't need to initialize the "cb" member.
   PROCESS_MEMORY_COUNTERS_EX pmcx;
-  if (GetProcessMemoryInfo(process_,
-                          reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmcx),
-                          sizeof(pmcx))) {
-      return pmcx.PrivateUsage;
+  if (private_bytes &&
+      GetProcessMemoryInfo(process_,
+                           reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmcx),
+                           sizeof(pmcx))) {
+    *private_bytes = pmcx.PrivateUsage;
   }
-  return 0;
+
+  if (shared_bytes) {
+    WorkingSetKBytes ws_usage;
+    if (!GetWorkingSetKBytes(&ws_usage))
+      return false;
+
+    *shared_bytes = ws_usage.shared * 1024;
+  }
+
+  return true;
 }
 
 void ProcessMetrics::GetCommittedKBytes(CommittedKBytes* usage) const {
@@ -722,7 +695,7 @@ double ProcessMetrics::GetCPUUsage() {
   return cpu;
 }
 
-bool ProcessMetrics::GetIOCounters(base::IoCounters* io_counters) const {
+bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
   return GetProcessIoCounters(process_, io_counters) != FALSE;
 }
 

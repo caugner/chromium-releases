@@ -4,6 +4,7 @@
 
 #include "chrome/common/extensions/extension_unpacker.h"
 
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/scoped_handle.h"
 #include "base/scoped_temp_dir.h"
@@ -11,6 +12,7 @@
 #include "base/thread.h"
 #include "base/values.h"
 #include "net/base/file_stream.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/common_param_traits.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -26,18 +28,9 @@
 
 namespace errors = extension_manifest_errors;
 namespace keys = extension_manifest_keys;
+namespace filenames = extension_filenames;
 
 namespace {
-// The name of a temporary directory to install an extension into for
-// validation before finalizing install.
-const char kTempExtensionName[] = "TEMP_INSTALL";
-
-// The file to write our decoded images to, relative to the extension_path.
-const char kDecodedImagesFilename[] = "DECODED_IMAGES";
-
-// The file to write our decoded message catalogs to, relative to the
-// extension_path.
-const char kDecodedMessageCatalogsFilename[] = "DECODED_MESSAGE_CATALOGS";
 
 // Errors
 const char* kCouldNotCreateDirectoryError =
@@ -148,16 +141,35 @@ bool ExtensionUnpacker::Run() {
 
   // <profile>/Extensions/INSTALL_TEMP/<version>
   temp_install_dir_ =
-      extension_path_.DirName().AppendASCII(kTempExtensionName);
-  if (!file_util::CreateDirectory(temp_install_dir_)) {
+    extension_path_.DirName().AppendASCII(filenames::kTempExtensionName);
+
 #if defined(OS_WIN)
-    std::string dir_string = WideToUTF8(temp_install_dir_.value());
+  // To understand crbug/35198, allow users who can reproduce the issue
+  // to enable extra logging while unpacking.
+  bool extra_logging = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kIssue35198ExtraLogging);
+  LOG(INFO) << "Extra logging for issue 35198: " << extra_logging;
+
+  std::ostringstream log_stream;
+  std::string dir_string = WideToUTF8(temp_install_dir_.value());
+  log_stream << kCouldNotCreateDirectoryError << dir_string << std::endl;
+
+  if (!file_util::CreateDirectoryExtraLogging(temp_install_dir_, log_stream)) {
+    if (extra_logging) {
+      log_stream.flush();
+      SetError(log_stream.str());
+    } else {
+      SetError(kCouldNotCreateDirectoryError + dir_string);
+    }
+    return false;
+  }
 #else
+  if (!file_util::CreateDirectory(temp_install_dir_)) {
     std::string dir_string = temp_install_dir_.value();
-#endif
     SetError(kCouldNotCreateDirectoryError + dir_string);
     return false;
   }
+#endif
 
   if (!Unzip(extension_path_, temp_install_dir_)) {
     SetError(kCouldNotUnzipExtension);
@@ -209,7 +221,8 @@ bool ExtensionUnpacker::DumpImagesToFile() {
   IPC::Message pickle;  // We use a Message so we can use WriteParam.
   IPC::WriteParam(&pickle, decoded_images_);
 
-  FilePath path = extension_path_.DirName().AppendASCII(kDecodedImagesFilename);
+  FilePath path = extension_path_.DirName().AppendASCII(
+      filenames::kDecodedImagesFilename);
   if (!file_util::WriteFile(path, static_cast<const char*>(pickle.data()),
                             pickle.size())) {
     SetError("Could not write image data to disk.");
@@ -224,7 +237,7 @@ bool ExtensionUnpacker::DumpMessageCatalogsToFile() {
   IPC::WriteParam(&pickle, *parsed_catalogs_.get());
 
   FilePath path = extension_path_.DirName().AppendASCII(
-      kDecodedMessageCatalogsFilename);
+      filenames::kDecodedMessageCatalogsFilename);
   if (!file_util::WriteFile(path, static_cast<const char*>(pickle.data()),
                             pickle.size())) {
     SetError("Could not write message catalogs to disk.");
@@ -237,7 +250,7 @@ bool ExtensionUnpacker::DumpMessageCatalogsToFile() {
 // static
 bool ExtensionUnpacker::ReadImagesFromFile(const FilePath& extension_path,
                                            DecodedImages* images) {
-  FilePath path = extension_path.AppendASCII(kDecodedImagesFilename);
+  FilePath path = extension_path.AppendASCII(filenames::kDecodedImagesFilename);
   std::string file_str;
   if (!file_util::ReadFileToString(path, &file_str))
     return false;
@@ -250,7 +263,8 @@ bool ExtensionUnpacker::ReadImagesFromFile(const FilePath& extension_path,
 // static
 bool ExtensionUnpacker::ReadMessageCatalogsFromFile(
     const FilePath& extension_path, DictionaryValue* catalogs) {
-  FilePath path = extension_path.AppendASCII(kDecodedMessageCatalogsFilename);
+  FilePath path = extension_path.AppendASCII(
+      filenames::kDecodedMessageCatalogsFilename);
   std::string file_str;
   if (!file_util::ReadFileToString(path, &file_str))
     return false;

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "app/l10n_util.h"
 #include "base/i18n/rtl.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -70,13 +71,9 @@ std::wstring PasswordsTableModel::GetText(int row,
                                           int col_id) {
   switch (col_id) {
     case IDS_PASSWORDS_PAGE_VIEW_SITE_COLUMN: {  // Site.
-      const std::wstring& url = saved_signons_[row]->display_url.display_url();
       // Force URL to have LTR directionality.
-      if (base::i18n::IsRTL()) {
-        std::wstring localized_url = url;
-        base::i18n::WrapStringWithLTRFormatting(&localized_url);
-        return localized_url;
-      }
+      std::wstring url(saved_signons_[row]->display_url.display_url());
+      base::i18n::GetDisplayStringInLTRDirectionality(&url);
       return url;
     }
     case IDS_PASSWORDS_PAGE_VIEW_USERNAME_COLUMN: {  // Username.
@@ -116,7 +113,7 @@ void PasswordsTableModel::OnPasswordStoreRequestDone(
   STLDeleteElements<PasswordRows>(&saved_signons_);
   saved_signons_.resize(result.size(), NULL);
   std::wstring languages =
-      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
+      UTF8ToWide(profile_->GetPrefs()->GetString(prefs::kAcceptLanguages));
   for (size_t i = 0; i < result.size(); ++i) {
     saved_signons_[i] = new PasswordRow(
         gfx::SortedDisplayURL(result[i]->origin, languages), result[i]);

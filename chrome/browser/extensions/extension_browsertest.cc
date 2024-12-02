@@ -13,17 +13,21 @@
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/browser/extensions/crx_installer.h"
+#include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/extension_error_reporter.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/test/ui_test_utils.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/common/chrome_switches.h"
+#endif
 
 ExtensionBrowserTest::ExtensionBrowserTest()
     : target_page_action_count_(-1),
@@ -44,6 +48,17 @@ void ExtensionBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   // selectively enabling each of them, enable toolstrips for all extension
   // tests.
   command_line->AppendSwitch(switches::kEnableExtensionToolstrips);
+
+#if defined(OS_CHROMEOS)
+  // This makes sure that we create the Default profile first, with no
+  // ExtensionsService and then the real profile with one, as we do when
+  // running on chromeos.
+  command_line->AppendSwitchWithValue(
+      switches::kLoginUser, "TestUser@gmail.com");
+  command_line->AppendSwitchWithValue(switches::kLoginProfile, "user");
+  command_line->AppendSwitch(switches::kNoFirstRun);
+#endif
+
 }
 
 bool ExtensionBrowserTest::LoadExtensionImpl(const FilePath& path,
@@ -66,7 +81,8 @@ bool ExtensionBrowserTest::LoadExtensionImpl(const FilePath& path,
     // OnExtensionInstalled ensures the other extension prefs are set up with
     // the defaults.
     Extension* extension = service->extensions()->at(num_after - 1);
-    service->extension_prefs()->OnExtensionInstalled(extension);
+    service->extension_prefs()->OnExtensionInstalled(
+        extension, Extension::ENABLED, false);
     service->SetIsIncognitoEnabled(extension, true);
   }
 
@@ -97,13 +113,11 @@ class MockAbortExtensionInstallUI : public ExtensionInstallUI {
   virtual void OnInstallSuccess(Extension* extension) {}
 
   virtual void OnInstallFailure(const std::string& error) {}
-
-  virtual void OnOverinstallAttempted(Extension* extension) {}
 };
 
 bool ExtensionBrowserTest::InstallOrUpdateExtension(const std::string& id,
                                                     const FilePath& path,
-                                                    bool should_cancel,
+                                                    InstallUIType ui_type,
                                                     int expected_change) {
   ExtensionsService* service = browser()->profile()->GetExtensionsService();
   service->set_show_extensions_prompts(false);
@@ -115,16 +129,17 @@ bool ExtensionBrowserTest::InstallOrUpdateExtension(const std::string& id,
                   NotificationService::AllSources());
     registrar.Add(this, NotificationType::EXTENSION_UPDATE_DISABLED,
                   NotificationService::AllSources());
-    registrar.Add(this, NotificationType::EXTENSION_OVERINSTALL_ERROR,
-                  NotificationService::AllSources());
     registrar.Add(this, NotificationType::EXTENSION_INSTALL_ERROR,
                   NotificationService::AllSources());
 
+    ExtensionInstallUI* install_ui = NULL;
+    if (ui_type == INSTALL_UI_TYPE_CANCEL)
+      install_ui = new MockAbortExtensionInstallUI();
+    else if (ui_type == INSTALL_UI_TYPE_NORMAL)
+      install_ui = new ExtensionInstallUI(browser()->profile());
+
     scoped_refptr<CrxInstaller> installer(
-        new CrxInstaller(
-            service->install_directory(),
-            service,
-            should_cancel ? new MockAbortExtensionInstallUI() : NULL));
+        new CrxInstaller(service->install_directory(), service, install_ui));
     installer->set_expected_id(id);
     installer->InstallCrx(path);
 
@@ -158,7 +173,7 @@ void ExtensionBrowserTest::ReloadExtension(const std::string& extension_id) {
   ExtensionsService* service = browser()->profile()->GetExtensionsService();
   service->ReloadExtension(extension_id);
   ui_test_utils::RegisterAndWait(this,
-                                 NotificationType::EXTENSION_PROCESS_CREATED,
+                                 NotificationType::EXTENSION_LOADED,
                                  NotificationService::AllSources());
 }
 
@@ -295,11 +310,6 @@ void ExtensionBrowserTest::Observe(NotificationType type,
 
     case NotificationType::EXTENSION_INSTALL_ERROR:
       std::cout << "Got EXTENSION_INSTALL_ERROR notification.\n";
-      MessageLoopForUI::current()->Quit();
-      break;
-
-    case NotificationType::EXTENSION_OVERINSTALL_ERROR:
-      std::cout << "Got EXTENSION_OVERINSTALL_ERROR notification.\n";
       MessageLoopForUI::current()->Quit();
       break;
 

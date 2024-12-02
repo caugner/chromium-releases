@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,20 @@
 #include "chrome/browser/password_manager/password_store_mac_internal.h"
 
 #include <CoreServices/CoreServices.h>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/logging.h"
 #include "base/mac_util.h"
+#include "base/message_loop.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/keychain_mac.h"
 #include "chrome/browser/password_manager/login_database.h"
+#include "chrome/browser/password_manager/password_store_change.h"
 
 using webkit_glue::PasswordForm;
 
@@ -500,6 +504,20 @@ PasswordForm* MacKeychainPasswordFormAdapter::PasswordExactlyMatchingForm(
   return NULL;
 }
 
+bool MacKeychainPasswordFormAdapter::HasPasswordsMergeableWithForm(
+    const PasswordForm& query_form) {
+  std::string username = UTF16ToUTF8(query_form.username_value);
+  std::vector<SecKeychainItemRef> matches =
+      MatchingKeychainItems(query_form.signon_realm, query_form.scheme,
+                            NULL, username.c_str());
+  for (std::vector<SecKeychainItemRef>::iterator i = matches.begin();
+       i != matches.end(); ++i) {
+    keychain_->Free(*i);
+  }
+
+  return matches.size() != 0;
+}
+
 std::vector<PasswordForm*>
     MacKeychainPasswordFormAdapter::GetAllPasswordFormPasswords() {
   SecAuthenticationType supported_auth_types[] = {
@@ -715,64 +733,146 @@ PasswordStoreMac::PasswordStoreMac(MacKeychain* keychain,
   DCHECK(login_metadata_db_.get());
 }
 
-PasswordStoreMac::~PasswordStoreMac() {}
+PasswordStoreMac::~PasswordStoreMac() {
+  if (thread_.get()) {
+    thread_->message_loop()->DeleteSoon(FROM_HERE,
+                                        notification_service_.release());
+  }
+}
+
+bool PasswordStoreMac::Init() {
+  thread_.reset(new base::Thread("Chrome_PasswordStore_Thread"));
+
+  if (!thread_->Start()) {
+    thread_.reset(NULL);
+    return false;
+  }
+  ScheduleTask(NewRunnableMethod(this,
+                                 &PasswordStoreMac::CreateNotificationService));
+  return PasswordStore::Init();
+}
+
+void PasswordStoreMac::ScheduleTask(Task* task) {
+  if (thread_.get()) {
+    thread_->message_loop()->PostTask(FROM_HERE, task);
+  }
+}
+
+void PasswordStoreMac::ReportMetricsImpl() {
+  login_metadata_db_->ReportMetrics();
+}
 
 void PasswordStoreMac::AddLoginImpl(const PasswordForm& form) {
   if (AddToKeychainIfNecessary(form)) {
-    login_metadata_db_->AddLogin(form);
+    if (login_metadata_db_->AddLogin(form)) {
+      PasswordStoreChangeList changes;
+      changes.push_back(PasswordStoreChange(PasswordStoreChange::ADD, form));
+      NotificationService::current()->Notify(
+          NotificationType::LOGINS_CHANGED,
+          NotificationService::AllSources(),
+          Details<PasswordStoreChangeList>(&changes));
+    }
   }
 }
 
 void PasswordStoreMac::UpdateLoginImpl(const PasswordForm& form) {
+  int update_count = 0;
+  if (!login_metadata_db_->UpdateLogin(form, &update_count))
+    return;
+
+  MacKeychainPasswordFormAdapter keychain_adapter(keychain_.get());
+  if (update_count == 0 &&
+      !keychain_adapter.HasPasswordsMergeableWithForm(form)) {
+    // If the password isn't in either the DB or the keychain, then it must have
+    // been deleted after autofill happened, and should not be re-added.
+    return;
+  }
+
   // The keychain add will update if there is a collision and add if there
   // isn't, which is the behavior we want, so there's no separate update call.
   if (AddToKeychainIfNecessary(form)) {
-    int update_count = 0;
-    login_metadata_db_->UpdateLogin(form, &update_count);
-    // Update will catch any database entries that we already had, but we could
-    // also be updating a keychain-only form, in which case we need to add.
+    PasswordStoreChangeList changes;
     if (update_count == 0) {
-      login_metadata_db_->AddLogin(form);
+      if (login_metadata_db_->AddLogin(form)) {
+        changes.push_back(PasswordStoreChange(PasswordStoreChange::ADD,
+                                              form));
+      }
+    } else {
+      changes.push_back(PasswordStoreChange(PasswordStoreChange::UPDATE,
+                                            form));
+    }
+    if (!changes.empty()) {
+      NotificationService::current()->Notify(
+          NotificationType::LOGINS_CHANGED,
+          NotificationService::AllSources(),
+          Details<PasswordStoreChangeList>(&changes));
     }
   }
 }
 
 void PasswordStoreMac::RemoveLoginImpl(const PasswordForm& form) {
-  login_metadata_db_->RemoveLogin(form);
-
-  // See if we own a Keychain item associated with this item. We can do an exact
-  // search rather than messing around with trying to do fuzzy matching because
-  // passwords that we created will always have an exact-match database entry.
-  // (If a user does lose their profile but not their keychain we'll treat the
-  // entries we find like other imported entries anyway, so it's reasonable to
-  // handle deletes on them the way we would for an imported item.)
-  MacKeychainPasswordFormAdapter owned_keychain_adapter(keychain_.get());
-  owned_keychain_adapter.SetFindsOnlyOwnedItems(true);
-  PasswordForm* owned_password_form =
-      owned_keychain_adapter.PasswordExactlyMatchingForm(form);
-  if (owned_password_form) {
-    // If we don't have other forms using it (i.e., a form differing only by
-    // the names of the form elements), delete the keychain entry.
-    if (!DatabaseHasFormMatchingKeychainForm(form)) {
-      owned_keychain_adapter.RemovePassword(form);
+  if (login_metadata_db_->RemoveLogin(form)) {
+    // See if we own a Keychain item associated with this item. We can do an
+    // exact search rather than messing around with trying to do fuzzy matching
+    // because passwords that we created will always have an exact-match
+    // database entry.
+    // (If a user does lose their profile but not their keychain we'll treat the
+    // entries we find like other imported entries anyway, so it's reasonable to
+    // handle deletes on them the way we would for an imported item.)
+    MacKeychainPasswordFormAdapter owned_keychain_adapter(keychain_.get());
+    owned_keychain_adapter.SetFindsOnlyOwnedItems(true);
+    PasswordForm* owned_password_form =
+        owned_keychain_adapter.PasswordExactlyMatchingForm(form);
+    if (owned_password_form) {
+      // If we don't have other forms using it (i.e., a form differing only by
+      // the names of the form elements), delete the keychain entry.
+      if (!DatabaseHasFormMatchingKeychainForm(form)) {
+        owned_keychain_adapter.RemovePassword(form);
+      }
     }
+
+    PasswordStoreChangeList changes;
+    changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE, form));
+    NotificationService::current()->Notify(
+        NotificationType::LOGINS_CHANGED,
+        NotificationService::AllSources(),
+        Details<PasswordStoreChangeList>(&changes));
   }
 }
 
 void PasswordStoreMac::RemoveLoginsCreatedBetweenImpl(
     const base::Time& delete_begin, const base::Time& delete_end) {
-  login_metadata_db_->RemoveLoginsCreatedBetween(delete_begin, delete_end);
+  std::vector<PasswordForm*> forms;
+  if (login_metadata_db_->GetLoginsCreatedBetween(delete_begin, delete_end,
+                                                  &forms)) {
+    if (login_metadata_db_->RemoveLoginsCreatedBetween(delete_begin,
+                                                       delete_end)) {
+      // We can't delete from the Keychain by date because we may be sharing
+      // items with database entries that weren't in the delete range. Instead,
+      // we find all the Keychain items we own but aren't using any more and
+      // delete those.
+      std::vector<PasswordForm*> orphan_keychain_forms =
+          GetUnusedKeychainForms();
+      // This is inefficient, since we have to re-look-up each keychain item
+      // one at a time to delete it even though the search step already had a
+      // list of Keychain item references. If this turns out to be noticeably
+      // slow we'll need to rearchitect to allow the search and deletion steps
+      // to share.
+      RemoveKeychainForms(orphan_keychain_forms);
+      STLDeleteElements(&orphan_keychain_forms);
 
-  // We can't delete from the Keychain by date because we may be sharing items
-  // with database entries that weren't in the delete range. Instead, we find
-  // all the Keychain items we own but aren't using any more and delete those.
-  std::vector<PasswordForm*> orphan_keychain_forms = GetUnusedKeychainForms();
-  // This is inefficient, since we have to re-look-up each keychain item one at
-  // a time to delete it even though the search step already had a list of
-  // Keychain item references. If this turns out to be noticeably slow we'll
-  // need to rearchitect to allow the search and deletion steps to share.
-  RemoveKeychainForms(orphan_keychain_forms);
-  STLDeleteElements(&orphan_keychain_forms);
+      PasswordStoreChangeList changes;
+      for (std::vector<PasswordForm*>::const_iterator it = forms.begin();
+           it != forms.end(); ++it) {
+        changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE,
+                                              **it));
+      }
+      NotificationService::current()->Notify(
+          NotificationType::LOGINS_CHANGED,
+          NotificationService::AllSources(),
+          Details<PasswordStoreChangeList>(&changes));
+    }
+  }
 }
 
 void PasswordStoreMac::GetLoginsImpl(GetLoginsRequest* request,
@@ -807,11 +907,20 @@ void PasswordStoreMac::GetLoginsImpl(GetLoginsRequest* request,
 
 void PasswordStoreMac::GetBlacklistLoginsImpl(GetLoginsRequest* request) {
   std::vector<PasswordForm*> database_forms;
-  login_metadata_db_->GetBlacklistLogins(&database_forms);
+  FillBlacklistLogins(&database_forms);
   NotifyConsumer(request, database_forms);
 }
 
 void PasswordStoreMac::GetAutofillableLoginsImpl(GetLoginsRequest* request) {
+  std::vector<PasswordForm*> database_forms;
+  FillAutofillableLogins(&database_forms);
+  NotifyConsumer(request, database_forms);
+}
+
+bool PasswordStoreMac::FillAutofillableLogins(
+         std::vector<PasswordForm*>* forms) {
+  DCHECK(thread_->message_loop() == MessageLoop::current());
+
   std::vector<PasswordForm*> database_forms;
   login_metadata_db_->GetAutofillableLogins(&database_forms);
 
@@ -823,7 +932,14 @@ void PasswordStoreMac::GetAutofillableLoginsImpl(GetLoginsRequest* request) {
   RemoveDatabaseForms(database_forms);
   STLDeleteElements(&database_forms);
 
-  NotifyConsumer(request, merged_forms);
+  forms->insert(forms->end(), merged_forms.begin(), merged_forms.end());
+  return true;
+}
+
+bool PasswordStoreMac::FillBlacklistLogins(
+         std::vector<PasswordForm*>* forms) {
+  DCHECK(thread_->message_loop() == MessageLoop::current());
+  return login_metadata_db_->GetBlacklistLogins(forms);
 }
 
 bool PasswordStoreMac::AddToKeychainIfNecessary(const PasswordForm& form) {
@@ -888,4 +1004,8 @@ void PasswordStoreMac::RemoveKeychainForms(
        i != forms.end(); ++i) {
     owned_keychain_adapter.RemovePassword(**i);
   }
+}
+
+void PasswordStoreMac::CreateNotificationService() {
+  notification_service_.reset(new NotificationService);
 }

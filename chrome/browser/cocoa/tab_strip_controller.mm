@@ -57,6 +57,9 @@ const CGFloat kUseFullAvailableWidth = -1.0;
 // The amount by which tabs overlap.
 const CGFloat kTabOverlap = 20.0;
 
+// The width and height for a tab's icon.
+const CGFloat kIconWidthAndHeight = 16.0;
+
 // The amount by which the new tab button is offset (from the tabs).
 const CGFloat kNewTabButtonOffset = 8.0;
 
@@ -65,7 +68,7 @@ const CGFloat kNewTabButtonOffset = 8.0;
 const CGFloat kIncognitoBadgeTabStripShrink = 18;
 
 // Time (in seconds) in which tabs animate to their final position.
-const NSTimeInterval kAnimationDuration = 0.2;
+const NSTimeInterval kAnimationDuration = 0.125;
 
 // Helper class for doing NSAnimationContext calls that takes a bool to disable
 // all the work.  Useful for code that wants to conditionally animate.
@@ -240,7 +243,7 @@ private:
 // special need be done to handle "new tab" animation.
 //
 // This all goes out the window with the "close tab" animation. The animation
-// kicks off in |-tabDetachedWithContents:atIndex:| with the notifiation that
+// kicks off in |-tabDetachedWithContents:atIndex:| with the notification that
 // the tab has been removed from the model. The simplest solution at this
 // point would be to remove the views and controllers as well, however once
 // the TabView is removed from the view list, the tab z-order code takes care of
@@ -360,6 +363,35 @@ private:
     [[newTabButton_ cell]
         accessibilitySetOverrideValue:description
                          forAttribute:NSAccessibilityDescriptionAttribute];
+
+    // Controller may have been (re-)created by switching layout modes, which
+    // means the tab model is already fully formed with tabs. Need to walk the
+    // list and create the UI for each.
+    const int existingTabCount = tabStripModel_->count();
+    const TabContents* selection = tabStripModel_->GetSelectedTabContents();
+    for (int i = 0; i < existingTabCount; ++i) {
+      TabContents* currentContents = tabStripModel_->GetTabContentsAt(i);
+      [self insertTabWithContents:currentContents
+                          atIndex:i
+                     inForeground:NO];
+      if (selection == currentContents) {
+        // Must manually force a selection since the model won't send
+        // selection messages in this scenario.
+        [self selectTabWithContents:currentContents
+                   previousContents:NULL
+                            atIndex:i
+                        userGesture:NO];
+      }
+    }
+    // Don't lay out the tabs until after the controller has been fully
+    // constructed. The |verticalLayout_| flag has not been initialized by
+    // subclasses at this point, which would cause layout to potentially use
+    // the wrong mode.
+    if (existingTabCount) {
+      [self performSelectorOnMainThread:@selector(layoutTabs)
+                             withObject:nil
+                          waitUntilDone:NO];
+    }
   }
   return self;
 }
@@ -380,7 +412,7 @@ private:
 }
 
 + (CGFloat)defaultTabHeight {
-  return 24.0;
+  return 25.0;
 }
 
 + (CGFloat)defaultIndentForControls {
@@ -591,7 +623,10 @@ private:
       NSView* lastTab = [self viewAtIndex:numberOfOpenTabs - 1];
       availableResizeWidth_ = NSMaxX([lastTab frame]);
     }
-    tabStripModel_->CloseTabContentsAt(index);
+    tabStripModel_->CloseTabContentsAt(
+        index,
+        TabStripModel::CLOSE_USER_GESTURE |
+        TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
   } else {
     // Use the standard window close if this is the last tab
     // this prevents the tab from being removed from the model until after
@@ -655,6 +690,7 @@ private:
   const CGFloat kMinTabWidth = [TabController minTabWidth];
   const CGFloat kMinSelectedTabWidth = [TabController minSelectedTabWidth];
   const CGFloat kMiniTabWidth = [TabController miniTabWidth];
+  const CGFloat kAppTabWidth = [TabController appTabWidth];
 
   NSRect enclosingRect = NSZeroRect;
   ScopedNSAnimationContextGroup mainAnimationGroup(animate);
@@ -668,39 +704,47 @@ private:
   // mini-tabs have a fixed width. We may not be able to use the entire width
   // if the user is quickly closing tabs. This may be negative, but that's okay
   // (taken care of by |MAX()| when calculating tab sizes).
-  CGFloat availableWidth = 0;
-  if ([self inRapidClosureMode]) {
-    availableWidth = availableResizeWidth_;
+  CGFloat availableSpace = 0;
+  if (verticalLayout_) {
+    availableSpace = NSHeight([tabStripView_ bounds]);
   } else {
-    availableWidth = NSWidth([tabStripView_ frame]);
-    // Account for the new tab button and the incognito badge.
-    availableWidth -= NSWidth([newTabButton_ frame]) + kNewTabButtonOffset;
-    if (browser_->profile()->IsOffTheRecord())
-      availableWidth -= kIncognitoBadgeTabStripShrink;
+    if ([self inRapidClosureMode]) {
+      availableSpace = availableResizeWidth_;
+    } else {
+      availableSpace = NSWidth([tabStripView_ frame]);
+      // Account for the new tab button and the incognito badge.
+      availableSpace -= NSWidth([newTabButton_ frame]) + kNewTabButtonOffset;
+      if (browser_->profile()->IsOffTheRecord())
+        availableSpace -= kIncognitoBadgeTabStripShrink;
+    }
+    availableSpace -= [self indentForControls];
   }
-  availableWidth -= [self indentForControls];
 
   // This may be negative, but that's okay (taken care of by |MAX()| when
-  // calculating tab sizes).
-  CGFloat availableWidthForNonMini = availableWidth -
-      [self numberOfOpenMiniTabs] * (kMiniTabWidth - kTabOverlap);
+  // calculating tab sizes). "mini" tabs in horizontal mode just get a special
+  // section, they don't change size.
+  CGFloat availableSpaceForNonMini = availableSpace;
+  if (!verticalLayout_) {
+      availableSpaceForNonMini -=
+          [self numberOfOpenMiniTabs] * (kMiniTabWidth - kTabOverlap);
+  }
 
   // Initialize |nonMiniTabWidth| in case there aren't any non-mini-tabs; this
   // value shouldn't actually be used.
   CGFloat nonMiniTabWidth = kMaxTabWidth;
   const NSInteger numberOfOpenNonMiniTabs = [self numberOfOpenNonMiniTabs];
-  if (numberOfOpenNonMiniTabs) {  // Find the width of a non-mini-tab.
-    // Add in the amount we "get back" from the tabs overlapping.
-    availableWidthForNonMini += (numberOfOpenNonMiniTabs - 1) * kTabOverlap;
+  if (!verticalLayout_ && numberOfOpenNonMiniTabs) {
+    // Find the width of a non-mini-tab. This only applies to horizontal
+    // mode. Add in the amount we "get back" from the tabs overlapping.
+    availableSpaceForNonMini += (numberOfOpenNonMiniTabs - 1) * kTabOverlap;
 
     // Divide up the space between the non-mini-tabs.
-    nonMiniTabWidth = availableWidthForNonMini / numberOfOpenNonMiniTabs;
+    nonMiniTabWidth = availableSpaceForNonMini / numberOfOpenNonMiniTabs;
 
     // Clamp the width between the max and min.
     nonMiniTabWidth = MAX(MIN(nonMiniTabWidth, kMaxTabWidth), kMinTabWidth);
   }
 
-  const CGFloat minX = NSMinX(placeholderFrame_);
   BOOL visible = [[tabStripView_ window] isVisible];
 
   CGFloat offset = [self indentForControls];
@@ -714,9 +758,13 @@ private:
     BOOL isPlaceholder = [[tab view] isEqual:placeholderTab_];
     NSRect tabFrame = [[tab view] frame];
     tabFrame.size.height = [[self class] defaultTabHeight] + 1;
-    tabFrame.origin.y = 0;
-    tabFrame.origin.x = offset;
-
+    if (verticalLayout_) {
+      tabFrame.origin.y = availableSpace - tabFrame.size.height - offset;
+      tabFrame.origin.x = 0;
+    } else {
+      tabFrame.origin.y = 0;
+      tabFrame.origin.x = offset;
+    }
     // If the tab is hidden, we consider it a new tab. We make it visible
     // and animate it in.
     BOOL newTab = [[tab view] isHidden];
@@ -729,7 +777,10 @@ private:
       // We need a duration or else it doesn't cancel an inflight animation.
       ScopedNSAnimationContextGroup localAnimationGroup(animate);
       localAnimationGroup.SetCurrentContextShortestDuration();
-      tabFrame.origin.x = placeholderFrame_.origin.x;
+      if (verticalLayout_)
+        tabFrame.origin.y = availableSpace - tabFrame.size.height - offset;
+      else
+        tabFrame.origin.x = placeholderFrame_.origin.x;
       // TODO(alcor): reenable this
       //tabFrame.size.height += 10.0 * placeholderStretchiness_;
       id target = animate ? [[tab view] animator] : [tab view];
@@ -742,23 +793,38 @@ private:
       continue;
     }
 
-    // If our left edge is to the left of the placeholder's left, but our mid is
-    // to the right of it we should slide over to make space for it.
-    if (placeholderTab_ && !hasPlaceholderGap && NSMidX(tabFrame) > minX) {
-      hasPlaceholderGap = true;
-      offset += NSWidth(placeholderFrame_);
-      offset -= kTabOverlap;
-      tabFrame.origin.x = offset;
+    if (placeholderTab_ && !hasPlaceholderGap) {
+      const CGFloat placeholderMin =
+          verticalLayout_ ? NSMinY(placeholderFrame_) :
+                            NSMinX(placeholderFrame_);
+      if (verticalLayout_) {
+        if (NSMidY(tabFrame) > placeholderMin) {
+          hasPlaceholderGap = true;
+          offset += NSHeight(placeholderFrame_);
+          tabFrame.origin.y = availableSpace - tabFrame.size.height - offset;
+        }
+      } else {
+        // If the left edge is to the left of the placeholder's left, but the
+        // mid is to the right of it slide over to make space for it.
+        if (NSMidX(tabFrame) > placeholderMin) {
+          hasPlaceholderGap = true;
+          offset += NSWidth(placeholderFrame_);
+          offset -= kTabOverlap;
+          tabFrame.origin.x = offset;
+        }
+      }
     }
 
     // Set the width. Selected tabs are slightly wider when things get really
     // small and thus we enforce a different minimum width.
-    tabFrame.size.width = [tab mini] ? kMiniTabWidth : nonMiniTabWidth;
+    tabFrame.size.width = [tab mini] ?
+        ([tab app] ? kAppTabWidth : kMiniTabWidth) : nonMiniTabWidth;
     if ([tab selected])
       tabFrame.size.width = MAX(tabFrame.size.width, kMinSelectedTabWidth);
 
     // Animate a new tab in by putting it below the horizon unless told to put
     // it in a specific location (i.e., from a drop).
+    // TODO(pinkerton): figure out vertical tab animations.
     if (newTab && visible && animate) {
       if (NSEqualRects(droppedTabFrame_, NSZeroRect)) {
         [[tab view] setFrame:NSOffsetRect(tabFrame, 0, -NSHeight(tabFrame))];
@@ -781,8 +847,12 @@ private:
 
     enclosingRect = NSUnionRect(tabFrame, enclosingRect);
 
-    offset += NSWidth(tabFrame);
-    offset -= kTabOverlap;
+    if (verticalLayout_) {
+      offset += NSHeight(tabFrame);
+    } else {
+      offset += NSWidth(tabFrame);
+      offset -= kTabOverlap;
+    }
     i++;
   }
 
@@ -794,7 +864,7 @@ private:
   } else {
     NSRect newTabNewFrame = [newTabButton_ frame];
     // We've already ensured there's enough space for the new tab button
-    // so we don't have to check it against the available width. We do need
+    // so we don't have to check it against the available space. We do need
     // to make sure we put it after any placeholder.
     newTabNewFrame.origin = NSMakePoint(offset, 0);
     newTabNewFrame.origin.x = MAX(newTabNewFrame.origin.x,
@@ -855,9 +925,7 @@ private:
   if (contents)
     titleString = base::SysUTF16ToNSString(contents->GetTitle());
   if (![titleString length]) {
-    titleString =
-      base::SysWideToNSString(
-          l10n_util::GetString(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED));
+    titleString = l10n_util::GetNSString(IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED);
   }
   [tab setTitle:titleString];
 }
@@ -885,6 +953,8 @@ private:
   // Make a new tab and add it to the strip. Keep track of its controller.
   TabController* newController = [self newTab];
   [newController setMini:tabStripModel_->IsMiniTab(modelIndex)];
+  [newController setPinned:tabStripModel_->IsTabPinned(modelIndex)];
+  [newController setApp:tabStripModel_->IsAppTab(modelIndex)];
   [tabArray_ insertObject:newController atIndex:index];
   NSView* newView = [newController view];
 
@@ -1081,28 +1151,25 @@ private:
                     object:self];
 }
 
-// A helper routine for creating an NSImageView to hold the fav icon for
-// |contents|.
-- (NSImageView*)favIconImageViewForContents:(TabContents*)contents {
-  NSRect iconFrame = NSMakeRect(0, 0, 16, 16);
-  NSImageView* view = [[[NSImageView alloc] initWithFrame:iconFrame]
-                          autorelease];
-
+// A helper routine for creating an NSImageView to hold the fav icon or app icon
+// for |contents|.
+- (NSImageView*)iconImageViewForContents:(TabContents*)contents {
+  BOOL isApp = contents->is_app();
   NSImage* image = nil;
-
-  NavigationEntry* navEntry = contents->controller().GetLastCommittedEntry();
-  if (navEntry != NULL) {
-    NavigationEntry::FaviconStatus favIcon = navEntry->favicon();
-    const SkBitmap& bitmap = favIcon.bitmap();
-    if (favIcon.is_valid() && !bitmap.isNull())
-      image = gfx::SkBitmapToNSImage(bitmap);
+  if (isApp) {
+    SkBitmap* icon = contents->GetExtensionAppIcon();
+    if (icon)
+      image = gfx::SkBitmapToNSImage(*icon);
+  } else {
+    image = gfx::SkBitmapToNSImage(contents->GetFavIcon());
   }
 
   // Either we don't have a valid favicon or there was some issue converting it
   // from an SkBitmap. Either way, just show the default.
   if (!image)
     image = defaultFavIcon_.get();
-
+  NSRect frame = NSMakeRect(0, 0, kIconWidthAndHeight, kIconWidthAndHeight);
+  NSImageView* view = [[[NSImageView alloc] initWithFrame:frame] autorelease];
   [view setImage:image];
   return view;
 }
@@ -1165,15 +1232,17 @@ private:
     NSView* iconView = nil;
     if (newHasIcon) {
       if (newState == kTabDone) {
-        iconView = [self favIconImageViewForContents:contents];
+        iconView = [self iconImageViewForContents:contents];
       } else if (newState == kTabCrashed) {
-        NSImage* oldImage = [[self favIconImageViewForContents:contents] image];
-        NSRect frame = NSMakeRect(0, 0, 16, 16);
+        NSImage* oldImage = [[self iconImageViewForContents:contents] image];
+        NSRect frame =
+            NSMakeRect(0, 0, kIconWidthAndHeight, kIconWidthAndHeight);
         iconView = [ThrobberView toastThrobberViewWithFrame:frame
                                                 beforeImage:oldImage
                                                  afterImage:sadFaviconImage];
       } else {
-        NSRect frame = NSMakeRect(0, 0, 16, 16);
+        NSRect frame =
+            NSMakeRect(0, 0, kIconWidthAndHeight, kIconWidthAndHeight);
         iconView = [ThrobberView filmstripThrobberViewWithFrame:frame
                                                           image:throbberImage];
       }
@@ -1249,8 +1318,9 @@ private:
 
   TabController* tabController = [tabArray_ objectAtIndex:index];
   DCHECK([tabController isKindOfClass:[TabController class]]);
-  [tabController setMini:
-      (tabStripModel_->IsMiniTab(modelIndex) ? YES : NO)];
+  [tabController setMini:tabStripModel_->IsMiniTab(modelIndex)];
+  [tabController setPinned:tabStripModel_->IsTabPinned(modelIndex)];
+  [tabController setApp:tabStripModel_->IsAppTab(modelIndex)];
   [self updateFavIconForContents:contents atIndex:modelIndex];
   // If the tab is being restored and it's pinned, the mini state is set after
   // the tab has already been rendered, so re-layout the tabstrip. In all other
@@ -1336,8 +1406,9 @@ private:
 
   // Insert it into this tab strip. We want it in the foreground and to not
   // inherit the current tab's group.
-  tabStripModel_->InsertTabContentsAt(modelIndex, contents, true, false,
-                                      pinned);
+  tabStripModel_->InsertTabContentsAt(
+      modelIndex, contents,
+      TabStripModel::ADD_SELECTED | (pinned ? TabStripModel::ADD_PINNED : 0));
 }
 
 // Called when the tab strip view changes size. As we only registered for
@@ -1455,7 +1526,8 @@ private:
 // transitory subviews (tabs). |-regenerateSubviewList| must be called to
 // effectuate the addition.
 - (void)addSubviewToPermanentList:(NSView*)aView {
-  [permanentSubviews_ addObject:aView];
+  if (aView)
+    [permanentSubviews_ addObject:aView];
 }
 
 // Update the subviews, keeping the permanent ones (or, more correctly, putting
@@ -1574,8 +1646,10 @@ private:
     case NEW_FOREGROUND_TAB:
       UserMetrics::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"),
                                 browser_->profile());
-      browser_->AddTabWithURL(url, GURL(), PageTransition::TYPED, true, index,
-                              true, NULL);
+      browser_->AddTabWithURL(url, GURL(), PageTransition::TYPED, index,
+                              TabStripModel::ADD_SELECTED |
+                                  TabStripModel::ADD_FORCE_INDEX,
+                              NULL, std::string());
       break;
     case CURRENT_TAB:
       UserMetrics::RecordAction(UserMetricsAction("Tab_DropURLOnTab"),

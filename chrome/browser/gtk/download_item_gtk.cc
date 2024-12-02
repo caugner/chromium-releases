@@ -12,10 +12,12 @@
 #include "app/text_elider.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/histogram.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_shelf.h"
@@ -26,9 +28,8 @@
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/browser/gtk/nine_box.h"
-#include "chrome/browser/gtk/standard_menus.h"
 #include "chrome/common/notification_service.h"
-#include "gfx/canvas_paint.h"
+#include "gfx/canvas_skia_paint.h"
 #include "gfx/color_utils.h"
 #include "gfx/font.h"
 #include "gfx/skia_utils_gtk.h"
@@ -48,6 +49,9 @@ const int kDangerousElementPadding = 3;
 // Amount of space we allot to showing the filename. If the filename is too wide
 // it will be elided.
 const int kTextWidth = 140;
+
+// We only cap the size of the tooltip so we don't crash.
+const int kTooltipMaxWidth = 1000;
 
 // The minimum width we will ever draw the download item. Used as a lower bound
 // during animation. This number comes from the width of the images used to
@@ -147,17 +151,19 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
       download_model_(download_model),
       dangerous_prompt_(NULL),
       dangerous_label_(NULL),
-      icon_(NULL),
+      icon_small_(NULL),
+      icon_large_(NULL),
       creation_time_(base::Time::Now()) {
   LoadIcon();
 
   body_.Own(gtk_button_new());
   gtk_widget_set_app_paintable(body_.get(), TRUE);
+  UpdateTooltip();
 
   g_signal_connect(body_.get(), "expose-event",
-                   G_CALLBACK(OnExpose), this);
+                   G_CALLBACK(OnExposeThunk), this);
   g_signal_connect(body_.get(), "clicked",
-                   G_CALLBACK(OnClick), this);
+                   G_CALLBACK(OnClickThunk), this);
   GTK_WIDGET_UNSET_FLAGS(body_.get(), GTK_CAN_FOCUS);
   // Remove internal padding on the button.
   GtkRcStyle* no_padding_style = gtk_rc_style_new();
@@ -171,6 +177,8 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
   UpdateNameLabel();
 
   status_label_ = gtk_label_new(NULL);
+  g_signal_connect(status_label_, "destroy",
+                   G_CALLBACK(gtk_widget_destroyed), &status_label_);
   // Left align and vertically center the labels.
   gtk_misc_set_alignment(GTK_MISC(name_label_), 0, 0.5);
   gtk_misc_set_alignment(GTK_MISC(status_label_), 0, 0.5);
@@ -191,7 +199,7 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
       download_util::kSmallProgressIconSize);
   gtk_widget_set_app_paintable(progress_area_.get(), TRUE);
   g_signal_connect(progress_area_.get(), "expose-event",
-                   G_CALLBACK(OnProgressAreaExpose), this);
+                   G_CALLBACK(OnProgressAreaExposeThunk), this);
 
   // Put the download progress icon on the left of the labels.
   GtkWidget* body_hbox = gtk_hbox_new(FALSE, 0);
@@ -203,16 +211,16 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
   gtk_widget_set_app_paintable(menu_button_, TRUE);
   GTK_WIDGET_UNSET_FLAGS(menu_button_, GTK_CAN_FOCUS);
   g_signal_connect(menu_button_, "expose-event",
-                   G_CALLBACK(OnExpose), this);
+                   G_CALLBACK(OnExposeThunk), this);
   g_signal_connect(menu_button_, "button-press-event",
-                   G_CALLBACK(OnMenuButtonPressEvent), this);
+                   G_CALLBACK(OnMenuButtonPressEventThunk), this);
   g_object_set_data(G_OBJECT(menu_button_), "left-align-popup",
                     reinterpret_cast<void*>(true));
 
   GtkWidget* shelf_hbox = parent_shelf->GetHBox();
   hbox_.Own(gtk_hbox_new(FALSE, 0));
   g_signal_connect(hbox_.get(), "expose-event",
-                   G_CALLBACK(OnHboxExpose), this);
+                   G_CALLBACK(OnHboxExposeThunk), this);
   gtk_box_pack_start(GTK_BOX(hbox_.get()), body_.get(), FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(hbox_.get()), menu_button_, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(shelf_hbox), hbox_.get(), FALSE, FALSE, 0);
@@ -257,7 +265,7 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
     GtkWidget* dangerous_decline = gtk_button_new_with_label(
         l10n_util::GetStringUTF8(IDS_DISCARD_DOWNLOAD).c_str());
     g_signal_connect(dangerous_decline, "clicked",
-                     G_CALLBACK(OnDangerousDecline), this);
+                     G_CALLBACK(OnDangerousDeclineThunk), this);
     gtk_util::CenterWidgetInHBox(dangerous_hbox_, dangerous_decline, false, 0);
 
     // Create the ok button.
@@ -266,7 +274,7 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
             download_model->download()->is_extension_install() ?
                 IDS_CONTINUE_EXTENSION_DOWNLOAD : IDS_SAVE_DOWNLOAD).c_str());
     g_signal_connect(dangerous_accept, "clicked",
-                     G_CALLBACK(OnDangerousAccept), this);
+                     G_CALLBACK(OnDangerousAcceptThunk), this);
     gtk_util::CenterWidgetInHBox(dangerous_hbox_, dangerous_accept, false, 0);
 
     // Put it in an alignment so that padding will be added on the left and
@@ -280,7 +288,7 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
     gtk_widget_set_app_paintable(dangerous_prompt_, TRUE);
     gtk_widget_set_redraw_on_allocate(dangerous_prompt_, TRUE);
     g_signal_connect(dangerous_prompt_, "expose-event",
-                     G_CALLBACK(OnDangerousPromptExpose), this);
+                     G_CALLBACK(OnDangerousPromptExposeThunk), this);
     gtk_widget_show_all(dangerous_prompt_);
   }
 
@@ -310,6 +318,10 @@ DownloadItemGtk::~DownloadItemGtk() {
   hbox_.Destroy();
   progress_area_.Destroy();
   body_.Destroy();
+
+  // Make sure this widget has been destroyed and the pointer we hold to it
+  // NULLed.
+  DCHECK(!status_label_);
 }
 
 void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
@@ -332,6 +344,8 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
     // downloads. When the download is confirmed, the file is renamed on
     // another thread, so reload the icon if the download filename changes.
     LoadIcon();
+
+    UpdateTooltip();
   }
 
   switch (download->state()) {
@@ -350,11 +364,11 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
       StopDownloadProgress();
 
       // Set up the widget as a drag source.
-      DownloadItemDrag::SetSource(body_.get(), get_download());
+      DownloadItemDrag::SetSource(body_.get(), get_download(), icon_large_);
 
       complete_animation_.reset(new SlideAnimation(this));
       complete_animation_->SetSlideDuration(kCompleteAnimationDurationMs);
-      complete_animation_->SetTweenType(SlideAnimation::NONE);
+      complete_animation_->SetTweenType(Tween::LINEAR);
       complete_animation_->Show();
       break;
     case DownloadItem::IN_PROGRESS:
@@ -376,11 +390,10 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
   // Remove the status text label.
   if (status_text.empty()) {
     gtk_widget_destroy(status_label_);
-    status_label_ = NULL;
     return;
   }
 
-  UpdateStatusLabel(status_label_, status_text_);
+  UpdateStatusLabel(status_text_);
 }
 
 void DownloadItemGtk::AnimationProgressed(const Animation* animation) {
@@ -430,7 +443,7 @@ void DownloadItemGtk::Observe(NotificationType type,
     }
 
     UpdateNameLabel();
-    UpdateStatusLabel(status_label_, status_text_);
+    UpdateStatusLabel(status_text_);
     UpdateDangerWarning();
   }
 }
@@ -466,10 +479,16 @@ void DownloadItemGtk::StopDownloadProgress() {
 
 // Icon loading functions.
 
-void DownloadItemGtk::OnLoadIconComplete(IconManager::Handle handle,
-                                         SkBitmap* icon_bitmap) {
-  icon_ = icon_bitmap;
+void DownloadItemGtk::OnLoadSmallIconComplete(IconManager::Handle handle,
+                                              SkBitmap* icon_bitmap) {
+  icon_small_ = icon_bitmap;
   gtk_widget_queue_draw(progress_area_.get());
+}
+
+void DownloadItemGtk::OnLoadLargeIconComplete(IconManager::Handle handle,
+                                              SkBitmap* icon_bitmap) {
+  icon_large_ = icon_bitmap;
+  DownloadItemDrag::SetSource(body_.get(), get_download(), icon_large_);
 }
 
 void DownloadItemGtk::LoadIcon() {
@@ -478,7 +497,17 @@ void DownloadItemGtk::LoadIcon() {
   icon_filepath_ = get_download()->full_path();
   im->LoadIcon(icon_filepath_,
                IconLoader::SMALL, &icon_consumer_,
-               NewCallback(this, &DownloadItemGtk::OnLoadIconComplete));
+               NewCallback(this, &DownloadItemGtk::OnLoadSmallIconComplete));
+  im->LoadIcon(icon_filepath_,
+               IconLoader::LARGE, &icon_consumer_,
+               NewCallback(this, &DownloadItemGtk::OnLoadLargeIconComplete));
+}
+
+void DownloadItemGtk::UpdateTooltip() {
+  std::wstring elided_filename = gfx::ElideFilename(
+      get_download()->GetFileName(),
+      gfx::Font(), kTooltipMaxWidth);
+  gtk_widget_set_tooltip_text(body_.get(), WideToUTF8(elided_filename).c_str());
 }
 
 void DownloadItemGtk::UpdateNameLabel() {
@@ -498,9 +527,8 @@ void DownloadItemGtk::UpdateNameLabel() {
                      WideToUTF8(elided_filename).c_str());
 }
 
-void DownloadItemGtk::UpdateStatusLabel(GtkWidget* status_label,
-                                        const std::string& status_text) {
-  if (!status_label)
+void DownloadItemGtk::UpdateStatusLabel(const std::string& status_text) {
+  if (!status_label_)
     return;
 
   GdkColor text_color;
@@ -524,9 +552,9 @@ void DownloadItemGtk::UpdateStatusLabel(GtkWidget* status_label,
         color_utils::AlphaBlend(blend_color, color, 77));
   }
 
-  gtk_util::SetLabelColor(status_label, theme_provider_->UseGtkTheme() ?
+  gtk_util::SetLabelColor(status_label_, theme_provider_->UseGtkTheme() ?
                                         NULL : &text_color);
-  gtk_label_set_label(GTK_LABEL(status_label), status_text.c_str());
+  gtk_label_set_text(GTK_LABEL(status_label_), status_text.c_str());
 }
 
 void DownloadItemGtk::UpdateDangerWarning() {
@@ -561,8 +589,8 @@ void DownloadItemGtk::UpdateDangerWarning() {
       gtk_util::SetLabelColor(dangerous_label_, &color);
     }
 
-    gtk_label_set_label(GTK_LABEL(dangerous_label_),
-                        WideToUTF8(dangerous_warning).c_str());
+    gtk_label_set_text(GTK_LABEL(dangerous_label_),
+                       WideToUTF8(dangerous_warning).c_str());
 
     // Until we switch to vector graphics, force the font size.
     gtk_util::ForceFontSizePixels(dangerous_label_, kTextSize);
@@ -652,16 +680,15 @@ void DownloadItemGtk::InitNineBoxes() {
       IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM_NO_DD);
 }
 
-gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e,
-                                       DownloadItemGtk* download_item) {
-  if (download_item->theme_provider_->UseGtkTheme()) {
+gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
+  if (theme_provider_->UseGtkTheme()) {
     int border_width = GTK_CONTAINER(widget)->border_width;
     int x = widget->allocation.x + border_width;
     int y = widget->allocation.y + border_width;
     int width = widget->allocation.width - border_width * 2;
     int height = widget->allocation.height - border_width * 2;
 
-    if (download_item->IsDangerous()) {
+    if (IsDangerous()) {
       // Draw a simple frame around the area when we're displaying the warning.
       gtk_paint_shadow(widget->style, widget->window,
                        static_cast<GtkStateType>(widget->state),
@@ -676,36 +703,32 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e,
       // the button, we instruct GTK to draw the entire button...with a
       // doctored clip rectangle to the left part of the button sans
       // separator. We then repeat this for the right button.
-      GtkStyle* style = download_item->body_.get()->style;
+      GtkStyle* style = body_.get()->style;
 
-      GtkAllocation left_allocation = download_item->body_.get()->allocation;
+      GtkAllocation left_allocation = body_.get()->allocation;
       GdkRectangle left_clip = {
         left_allocation.x, left_allocation.y,
         left_allocation.width, left_allocation.height
       };
 
-      GtkAllocation right_allocation = download_item->menu_button_->allocation;
+      GtkAllocation right_allocation = menu_button_->allocation;
       GdkRectangle right_clip = {
         right_allocation.x, right_allocation.y,
         right_allocation.width, right_allocation.height
       };
 
       GtkShadowType body_shadow =
-          GTK_BUTTON(download_item->body_.get())->depressed ?
-          GTK_SHADOW_IN : GTK_SHADOW_OUT;
+          GTK_BUTTON(body_.get())->depressed ? GTK_SHADOW_IN : GTK_SHADOW_OUT;
       gtk_paint_box(style, widget->window,
-                    static_cast<GtkStateType>(
-                        GTK_WIDGET_STATE(download_item->body_.get())),
+                    static_cast<GtkStateType>(GTK_WIDGET_STATE(body_.get())),
                     body_shadow,
                     &left_clip, widget, "button",
                     x, y, width, height);
 
       GtkShadowType menu_shadow =
-          GTK_BUTTON(download_item->menu_button_)->depressed ?
-          GTK_SHADOW_IN : GTK_SHADOW_OUT;
+          GTK_BUTTON(menu_button_)->depressed ? GTK_SHADOW_IN : GTK_SHADOW_OUT;
       gtk_paint_box(style, widget->window,
-                    static_cast<GtkStateType>(
-                        GTK_WIDGET_STATE(download_item->menu_button_)),
+                    static_cast<GtkStateType>(GTK_WIDGET_STATE(menu_button_)),
                     menu_shadow,
                     &right_clip, widget, "button",
                     x, y, width, height);
@@ -714,7 +737,7 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e,
       // is hard and relies on copying GTK internals, so instead steal the
       // allocation of the gtk arrow which is close enough (and will error on
       // the conservative side).
-      GtkAllocation arrow_allocation = download_item->arrow_->allocation;
+      GtkAllocation arrow_allocation = arrow_->allocation;
       gtk_paint_vline(style, widget->window,
                       static_cast<GtkStateType>(GTK_WIDGET_STATE(widget)),
                       &e->area, widget, "button",
@@ -726,11 +749,9 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e,
   return FALSE;
 }
 
-// static
-gboolean DownloadItemGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
-                                   DownloadItemGtk* download_item) {
-  if (!download_item->theme_provider_->UseGtkTheme()) {
-    bool is_body = widget == download_item->body_.get();
+gboolean DownloadItemGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e) {
+  if (!theme_provider_->UseGtkTheme()) {
+    bool is_body = widget == body_.get();
 
     NineBox* nine_box = NULL;
     // If true, this widget is |body_|, otherwise it is |menu_button_|.
@@ -744,7 +765,7 @@ gboolean DownloadItemGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
     // When the button is showing, we want to draw it as active. We have to do
     // this explicitly because the button's state will be NORMAL while the menu
     // has focus.
-    if (!is_body && download_item->menu_showing_)
+    if (!is_body && menu_showing_)
       nine_box = menu_nine_box_active_;
 
     nine_box->RenderToWidget(widget);
@@ -757,12 +778,11 @@ gboolean DownloadItemGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
   return TRUE;
 }
 
-// static
-void DownloadItemGtk::OnClick(GtkWidget* widget, DownloadItemGtk* item) {
+void DownloadItemGtk::OnClick(GtkWidget* widget) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.open_download",
-                           base::Time::Now() - item->creation_time_);
+                           base::Time::Now() - creation_time_);
 
-  DownloadItem* download = item->get_download();
+  DownloadItem* download = get_download();
 
   if (download->state() == DownloadItem::IN_PROGRESS) {
     download->set_open_when_complete(
@@ -772,58 +792,53 @@ void DownloadItemGtk::OnClick(GtkWidget* widget, DownloadItemGtk* item) {
   }
 }
 
-// static
 gboolean DownloadItemGtk::OnProgressAreaExpose(GtkWidget* widget,
-    GdkEventExpose* event, DownloadItemGtk* download_item) {
+                                               GdkEventExpose* event) {
   // Create a transparent canvas.
-  gfx::CanvasPaint canvas(event, false);
-  if (download_item->complete_animation_.get()) {
-    if (download_item->complete_animation_->IsAnimating()) {
+  gfx::CanvasSkiaPaint canvas(event, false);
+  if (complete_animation_.get()) {
+    if (complete_animation_->is_animating()) {
       download_util::PaintDownloadComplete(&canvas,
           widget->allocation.x, widget->allocation.y,
-          download_item->complete_animation_->GetCurrentValue(),
+          complete_animation_->GetCurrentValue(),
           download_util::SMALL);
     }
-  } else if (download_item->get_download()->state() !=
+  } else if (get_download()->state() !=
              DownloadItem::CANCELLED) {
     download_util::PaintDownloadProgress(&canvas,
         widget->allocation.x, widget->allocation.y,
-        download_item->progress_angle_,
-        download_item->get_download()->PercentComplete(),
+        progress_angle_,
+        get_download()->PercentComplete(),
         download_util::SMALL);
   }
 
-  // |icon_| may be NULL if it is still loading. If the file is an unrecognized
-  // type then we will get back a generic system icon. Hence there is no need to
-  // use the chromium-specific default download item icon.
-  if (download_item->icon_) {
+  // |icon_small_| may be NULL if it is still loading. If the file is an
+  // unrecognized type then we will get back a generic system icon. Hence
+  // there is no need to use the chromium-specific default download item icon.
+  if (icon_small_) {
     const int offset = download_util::kSmallProgressIconOffset;
-    canvas.DrawBitmapInt(*download_item->icon_,
+    canvas.DrawBitmapInt(*icon_small_,
         widget->allocation.x + offset, widget->allocation.y + offset);
   }
 
   return TRUE;
 }
 
-// static
 gboolean DownloadItemGtk::OnMenuButtonPressEvent(GtkWidget* button,
-                                                 GdkEvent* event,
-                                                 DownloadItemGtk* item) {
+                                                 GdkEvent* event) {
   // Stop any completion animation.
-  if (item->complete_animation_.get() &&
-      item->complete_animation_->IsAnimating()) {
-    item->complete_animation_->End();
-  }
+  if (complete_animation_.get() && complete_animation_->is_animating())
+    complete_animation_->End();
 
   if (event->type == GDK_BUTTON_PRESS) {
     GdkEventButton* event_button = reinterpret_cast<GdkEventButton*>(event);
     if (event_button->button == 1) {
-      if (item->menu_.get() == NULL) {
-        item->menu_.reset(new DownloadShelfContextMenuGtk(
-                          item->download_model_.get(), item));
+      if (menu_.get() == NULL) {
+        menu_.reset(new DownloadShelfContextMenuGtk(
+            download_model_.get(), this));
       }
-      item->menu_->Popup(button, event);
-      item->menu_showing_ = true;
+      menu_->Popup(button, event);
+      menu_showing_ = true;
       gtk_widget_queue_draw(button);
     }
   }
@@ -831,31 +846,25 @@ gboolean DownloadItemGtk::OnMenuButtonPressEvent(GtkWidget* button,
   return FALSE;
 }
 
-// static
 gboolean DownloadItemGtk::OnDangerousPromptExpose(GtkWidget* widget,
-    GdkEventExpose* event, DownloadItemGtk* item) {
-  if (!item->theme_provider_->UseGtkTheme()) {
+                                                  GdkEventExpose* event) {
+  if (!theme_provider_->UseGtkTheme()) {
     // The hbox renderer will take care of the border when in GTK mode.
     dangerous_nine_box_->RenderToWidget(widget);
   }
   return FALSE;  // Continue propagation.
 }
 
-// static
-void DownloadItemGtk::OnDangerousAccept(GtkWidget* button,
-                                        DownloadItemGtk* item) {
+void DownloadItemGtk::OnDangerousAccept(GtkWidget* button) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
-                           base::Time::Now() - item->creation_time_);
-  item->get_download()->manager()->DangerousDownloadValidated(
-      item->get_download());
+                           base::Time::Now() - creation_time_);
+  get_download()->manager()->DangerousDownloadValidated(get_download());
 }
 
-// static
-void DownloadItemGtk::OnDangerousDecline(GtkWidget* button,
-                                         DownloadItemGtk* item) {
+void DownloadItemGtk::OnDangerousDecline(GtkWidget* button) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download",
-                           base::Time::Now() - item->creation_time_);
-  if (item->get_download()->state() == DownloadItem::IN_PROGRESS)
-    item->get_download()->Cancel(true);
-  item->get_download()->Remove(true);
+                           base::Time::Now() - creation_time_);
+  if (get_download()->state() == DownloadItem::IN_PROGRESS)
+    get_download()->Cancel(true);
+  get_download()->Remove(true);
 }

@@ -288,7 +288,7 @@ class SimpleWebServer : public ListenSocket::ListenSocketDelegate {
 
   // ListenSocketDelegate overrides.
   virtual void DidAccept(ListenSocket* server, ListenSocket* connection);
-  virtual void DidRead(ListenSocket* connection, const std::string& data);
+  virtual void DidRead(ListenSocket* connection, const char* data, int len);
   virtual void DidClose(ListenSocket* sock);
 
   const ConnectionList& connections() const {
@@ -319,6 +319,96 @@ class SimpleWebServer : public ListenSocket::ListenSocketDelegate {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SimpleWebServer);
+};
+
+// Simple class holding incoming HTTP request. Can send the HTTP response
+// at different rate - small chunks, on regular interval.
+class ConfigurableConnection : public base::RefCounted<ConfigurableConnection> {
+ public:
+  struct SendOptions {
+    enum Speed { IMMEDIATE, DELAYED, IMMEDIATE_HEADERS_DELAYED_CONTENT };
+    SendOptions() : speed_(IMMEDIATE), chunk_size_(0), timeout_(0) { }
+    SendOptions(Speed speed, int chunk_size, int64 timeout)
+        : speed_(speed), chunk_size_(chunk_size), timeout_(timeout) {
+    }
+
+    Speed speed_;
+    int chunk_size_;
+    int64 timeout_;
+  };
+
+  explicit ConfigurableConnection(ListenSocket* sock)
+    : socket_(sock), cur_pos_(0) { }
+
+  // Send HTTP response with provided |headers| and |content|. Appends
+  // "Context-Length:" header if the |content| is not empty.
+  void Send(const std::string& headers, const std::string& content);
+
+  // Send HTTP response with provided |headers| and |content|. Appends
+  // "Context-Length:" header if the |content| is not empty.
+  // Use the |options| to tweak the network speed behaviour.
+  void SendWithOptions(const std::string& headers, const std::string& content,
+                       const SendOptions& options);
+
+ private:
+  friend class HTTPTestServer;
+  // Sends a chunk of the response and queues itself as a task for sending
+  // next chunk of |data_|.
+  void SendChunk();
+
+  scoped_refptr<ListenSocket> socket_;
+  Request r_;
+  SendOptions options_;
+  std::string data_;
+  int cur_pos_;
+
+  DISALLOW_COPY_AND_ASSIGN(ConfigurableConnection);
+};
+
+// Simple class used as a base class for mock webserver.
+// Override virtual functions Get and Post and use passed ConfigurableConnection
+// instance to send the response.
+class HTTPTestServer : public ListenSocket::ListenSocketDelegate {
+ public:
+  explicit HTTPTestServer(int port, const std::wstring& address,
+                          FilePath root_dir);
+  virtual ~HTTPTestServer();
+
+  // HTTP GET request is received. Override in derived classes.
+  // |connection| can be used to send the response.
+  virtual void Get(ConfigurableConnection* connection,
+                   const std::wstring& path, const Request& r) = 0;
+
+  // HTTP POST request is received. Override in derived classes.
+  // |connection| can be used to send the response
+  virtual void Post(ConfigurableConnection* connection,
+                    const std::wstring& path, const Request& r) = 0;
+
+  // Return the appropriate url with the specified path for this server.
+  std::wstring Resolve(const std::wstring& path);
+
+  FilePath root_dir() { return root_dir_; }
+
+ protected:
+  int port_;
+  std::wstring address_;
+  FilePath root_dir_;
+
+ private:
+  typedef std::list<scoped_refptr<ConfigurableConnection> > ConnectionList;
+  ConnectionList::iterator FindConnection(const ListenSocket* socket);
+  scoped_refptr<ConfigurableConnection> ConnectionFromSocket(
+      const ListenSocket* socket);
+
+  // ListenSocketDelegate overrides.
+  virtual void DidAccept(ListenSocket* server, ListenSocket* socket);
+  virtual void DidRead(ListenSocket* socket, const char* data, int len);
+  virtual void DidClose(ListenSocket* socket);
+
+  scoped_refptr<ListenSocket> server_;
+  ConnectionList connection_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(HTTPTestServer);
 };
 
 }  // namespace test_server

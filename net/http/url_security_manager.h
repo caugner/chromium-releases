@@ -18,8 +18,8 @@ class HttpAuthFilter;
 // regarding URL actions (e.g., sending the default credentials to a server).
 class URLSecurityManager {
  public:
-   URLSecurityManager() {}
-   virtual ~URLSecurityManager() {}
+  URLSecurityManager() {}
+  virtual ~URLSecurityManager() {}
 
   // Creates a platform-dependent instance of URLSecurityManager.
   // The URLSecurityManager takes ownership of the HttpAuthFilter.
@@ -27,7 +27,7 @@ class URLSecurityManager {
 
   // Returns true if we can send the default credentials to the server at
   // |auth_origin| for HTTP NTLM or Negotiate authentication.
-  virtual bool CanUseDefaultCredentials(const GURL& auth_origin) const = 0;
+  virtual bool CanUseDefaultCredentials(const GURL& auth_origin) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(URLSecurityManager);
@@ -39,13 +39,29 @@ class URLSecurityManagerWhitelist : public URLSecurityManager {
   explicit URLSecurityManagerWhitelist(HttpAuthFilter* whitelist);
 
   // URLSecurityManager methods.
-  virtual bool CanUseDefaultCredentials(const GURL& auth_origin) const;
+  virtual bool CanUseDefaultCredentials(const GURL& auth_origin);
 
  private:
   scoped_ptr<HttpAuthFilter> whitelist_;
 
   DISALLOW_COPY_AND_ASSIGN(URLSecurityManagerWhitelist);
 };
+
+#if defined(UNIT_TEST)
+// An URLSecurityManager which always allows default credentials.
+class URLSecurityManagerAllow : public URLSecurityManager {
+ public:
+  URLSecurityManagerAllow() {}
+  virtual ~URLSecurityManagerAllow() {}
+
+  virtual bool CanUseDefaultCredentials(const GURL& auth_origin) {
+    return true;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(URLSecurityManagerAllow);
+};
+#endif  // defined(UNIT_TEST)
 
 }  // namespace net
 

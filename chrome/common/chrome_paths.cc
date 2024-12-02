@@ -34,13 +34,15 @@ const FilePath::CharType kInternalFlashPluginFileName[] =
 
 namespace chrome {
 
-// Gets the path for internal (or bundled) plugins.
+// Gets the path for internal plugins.
 bool GetInternalPluginsDirectory(FilePath* result) {
 #if defined(OS_MACOSX)
-  // If called from Chrome, get internal plugins from the versioned directory.
+  // If called from Chrome, get internal plugins from a subdirectory of the
+  // framework.
   if (mac_util::AmIBundled()) {
-    *result = chrome::GetVersionedDirectory();
+    *result = chrome::GetFrameworkBundlePath();
     DCHECK(!result->empty());
+    *result = result->Append("Internet Plug-Ins");
     return true;
   }
   // In tests, just look in the module directory (below).
@@ -151,20 +153,15 @@ bool PathProvider(int key, FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("resources"));
 #endif
       break;
-    case chrome::DIR_BOOKMARK_MANAGER:
+    case chrome::DIR_SHARED_RESOURCES:
       if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
         return false;
-      cur = cur.Append(FILE_PATH_LITERAL("bookmark_manager"));
+      cur = cur.Append(FILE_PATH_LITERAL("shared"));
       break;
     case chrome::DIR_INSPECTOR:
       if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("inspector"));
-      break;
-    case chrome::DIR_NET_INTERNALS:
-      if (!PathService::Get(chrome::DIR_RESOURCES, &cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("net_internals"));
       break;
     case chrome::DIR_APP_DICTIONARIES:
 #if defined(OS_LINUX) || defined(OS_MACOSX)
@@ -179,6 +176,12 @@ bool PathProvider(int key, FilePath* result) {
         return false;
 #endif
       cur = cur.Append(FILE_PATH_LITERAL("Dictionaries"));
+      create_dir = true;
+      break;
+    case chrome::DIR_USER_DATA_TEMP:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("Temp"));
       create_dir = true;
       break;
     case chrome::DIR_INTERNAL_PLUGINS:
@@ -226,16 +229,30 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       break;
     case chrome::FILE_PDF_PLUGIN:
-      if (!PathService::Get(base::DIR_MODULE, &cur))
+      if (!GetInternalPluginsDirectory(&cur))
         return false;
 #if defined(OS_WIN)
       cur = cur.Append(FILE_PATH_LITERAL("pdf.dll"));
-      if (!file_util::PathExists(cur))
-        return false;
-#else
-      // TODO: port
-      return false;
+#elif defined(OS_MACOSX)
+      cur = cur.Append(FILE_PATH_LITERAL("PDF.plugin"));
+#else  // Linux and Chrome OS
+      cur = cur.Append(FILE_PATH_LITERAL("libpdf.so"));
 #endif
+      break;
+    case chrome::FILE_RESOURCES_PACK:
+#if defined(OS_MACOSX)
+      if (mac_util::AmIBundled()) {
+        cur = mac_util::MainAppBundlePath();
+        cur = cur.Append(FILE_PATH_LITERAL("Resources"))
+                 .Append(FILE_PATH_LITERAL("resources.pak"));
+        break;
+      }
+      // If we're not bundled on mac, resources.pak should be next to the
+      // binary (e.g., for unit tests).
+#endif
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("resources.pak"));
       break;
 #if defined(OS_CHROMEOS)
     case chrome::FILE_CHROMEOS_API:
@@ -266,6 +283,18 @@ bool PathProvider(int key, FilePath* result) {
       if (!file_util::PathExists(cur))  // we don't want to create this
         return false;
       break;
+#if !defined(OS_MACOSX) && defined(OS_POSIX)
+    case chrome::DIR_POLICY_FILES: {
+#if defined(GOOGLE_CHROME_BUILD)
+      cur = FilePath(FILE_PATH_LITERAL("/etc/opt/chrome/policies"));
+#else
+      cur = FilePath(FILE_PATH_LITERAL("/etc/chromium/policies"));
+#endif
+      if (!file_util::PathExists(cur))  // we don't want to create this
+        return false;
+      break;
+    }
+#endif
     default:
       return false;
   }

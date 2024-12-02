@@ -52,6 +52,18 @@ class Point {
     y_ += delta_y;
   }
 
+  Point Add(const Point& other) const{
+    Point copy = *this;
+    copy.Offset(other.x_, other.y_);
+    return copy;
+  }
+
+  Point Subtract(const Point& other) const {
+    Point copy = *this;
+    copy.Offset(-other.x_, -other.y_);
+    return copy;
+  }
+
   bool operator==(const Point& rhs) const {
     return x_ == rhs.x_ && y_ == rhs.y_;
   }

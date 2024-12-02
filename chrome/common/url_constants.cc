@@ -22,9 +22,12 @@ const char kHttpsScheme[] = "https";
 const char kJavaScriptScheme[] = "javascript";
 const char kMailToScheme[] = "mailto";
 const char kMetadataScheme[] = "metadata";
-const char kPrintScheme[] = "print";
 const char kUserScriptScheme[] = "chrome-user-script";
 const char kViewSourceScheme[] = "view-source";
+
+#if defined(OS_CHROMEOS)
+const char kCrosScheme[] = "cros";
+#endif
 
 const char kStandardSchemeSeparator[] = "://";
 
@@ -34,6 +37,7 @@ const char* kSavableSchemes[] = {
   kFileScheme,
   kFtpScheme,
   kExtensionScheme,
+  kChromeUIScheme,
   NULL
 };
 
@@ -47,55 +51,66 @@ const char kAboutMemoryURL[] = "about:memory";
 const char kAboutNetInternalsURL[] = "about:net-internals";
 const char kAboutPluginsURL[] = "about:plugins";
 const char kAboutShorthangURL[] = "about:shorthang";
+const char kAboutSystemURL[] = "about:system";
 const char kAboutTermsURL[] = "about:terms";
+const char kAboutAboutURL[] = "about:about";
+const char kAboutDNSURL[] = "about:dns";
+const char kAboutHistogramsURL[] = "about:histograms";
+const char kAboutVersionURL[] = "about:version";
 
 // Use an obfuscated URL to make this nondiscoverable, we only want this
 // to be used for testing.
 const char kAboutBrowserCrash[] = "about:inducebrowsercrashforrealz";
 
-const char kChromeUIAppsURL[] = "chrome://apps/";
+const char kChromeUIAppLauncherURL[] = "chrome://newtab/#mode=app-launcher";
 const char kChromeUIBookmarksURL[] = "chrome://bookmarks/";
 const char kChromeUIDevToolsURL[] = "chrome://devtools/";
 const char kChromeUIDownloadsURL[] = "chrome://downloads/";
 const char kChromeUIExtensionsURL[] = "chrome://extensions/";
-const char kChromeUIHistoryURL[] = "chrome://history/";
-const char kChromeUIPluginsURL[] = "chrome://plugins/";
 const char kChromeUIFavIconURL[] = "chrome://favicon/";
 const char kChromeUIFileBrowseURL[] = "chrome://filebrowse/";
-const char kChromeUIMediaplayerURL[] = "chrome://mediaplayer/";
+const char kChromeUIHistoryURL[] = "chrome://history/";
+const char kChromeUIHistory2URL[] = "chrome://history2/";
 const char kChromeUIIPCURL[] = "chrome://about/ipc";
-const char kChromeUINetworkURL[] = "chrome://about/network";
+const char kChromeUIMediaplayerURL[] = "chrome://mediaplayer/";
 const char kChromeUINewTabURL[] = "chrome://newtab";
+const char kChromeUIOptionsURL[] = "chrome://options/";
+const char kChromeUIPluginsURL[] = "chrome://plugins/";
+const char kChromeUIPrintURL[] = "chrome://print/";
+const char kChromeUIRegisterPageURL[] = "chrome://register/";
+const char kChromeUISlideshowURL[] = "chrome://slideshow/";
 
-const char kChromeUIAppsHost[] = "apps";
 const char kChromeUIBookmarksHost[] = "bookmarks";
 const char kChromeUIDevToolsHost[] = "devtools";
 const char kChromeUIDialogHost[] = "dialog";
 const char kChromeUIDownloadsHost[] = "downloads";
 const char kChromeUIExtensionsHost[] = "extensions";
 const char kChromeUIFavIconHost[] = "favicon";
-const char kChromeUIHistoryHost[] = "history";
-const char kChromeUIPluginsHost[] = "plugins";
 const char kChromeUIFileBrowseHost[] = "filebrowse";
-const char kChromeUIMediaplayerHost[] = "mediaplayer";
+const char kChromeUIHistoryHost[] = "history";
+const char kChromeUIHistory2Host[] = "history2";
 const char kChromeUIInspectorHost[] = "inspector";
-// TODO(eroman): This value is temporary, while the page is being implemented.
-const char kChromeUINetInternalsHost[] = "net2";
+const char kChromeUIMediaplayerHost[] = "mediaplayer";
+const char kChromeUINetInternalsHost[] = "net-internals";
 const char kChromeUINewTabHost[] = "newtab";
-const char kChromeUIThumbnailPath[] = "thumb";
+const char kChromeUIOptionsHost[] = "options";
+const char kChromeUIPluginsHost[] = "plugins";
+const char kChromeUIPrintHost[] = "print";
+const char kChromeUIRegisterPageHost[] = "register";
+const char kChromeUIRemotingHost[] = "remoting";
+const char kChromeUIResourcesHost[] = "resources";
+const char kChromeUISlideshowHost[] = "slideshow";
+const char kChromeUISyncResourcesHost[] = "syncresources";
 const char kChromeUIThemePath[] = "theme";
-
-const char kSyncResourcesHost[] = "syncresources";
-const char kSyncGaiaLoginPath[] = "gaialogin";
-const char kSyncMergeAndSyncPath[] = "mergeandsync";
-const char kSyncThrobberPath[] = "throbber.png";
-const char kSyncSetupFlowPath[] = "setup";
-const char kSyncSetupDonePath[] = "setupdone";
+const char kChromeUIThumbnailPath[] = "thumb";
 
 const char kAppCacheViewInternalsURL[] = "chrome://appcache-internals/";
 
+const char kCloudPrintResourcesURL[] = "chrome://cloudprintresources/";
+const char kCloudPrintResourcesHost[] = "cloudprintresources";
+
 const char kNetworkViewInternalsURL[] = "chrome://net-internals/";
-const char kNetworkViewCacheURL[] = "chrome://net-internals/view-cache";
+const char kNetworkViewCacheURL[] = "chrome://view-http-cache/";
 
 void RegisterChromeSchemes() {
   // Don't need "chrome-internal" which was used in old versions of Chrome for
@@ -104,6 +119,9 @@ void RegisterChromeSchemes() {
   url_util::AddStandardScheme(kGearsScheme);
   url_util::AddStandardScheme(kExtensionScheme);
   url_util::AddStandardScheme(kMetadataScheme);
+#if defined(OS_CHROMEOS)
+  url_util::AddStandardScheme(kCrosScheme);
+#endif
 
   // Prevent future modification of the standard schemes list. This is to
   // prevent accidental creation of data races in the program. AddStandardScheme

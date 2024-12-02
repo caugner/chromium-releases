@@ -1,11 +1,14 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "app/resource_bundle.h"
 
+#include "base/data_pack.h"
+#include "base/lock.h"
 #include "base/logging.h"
 #include "base/string_piece.h"
+#include "build/build_config.h"
 #include "gfx/codec/png_codec.h"
 #include "gfx/font.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -16,9 +19,9 @@ ResourceBundle* ResourceBundle::g_shared_instance_ = NULL;
 // TODO(glen): Finish moving these into theme provider (dialogs still
 //    depend on these colors).
 const SkColor ResourceBundle::frame_color =
-     SkColorSetRGB(77, 139, 217);
+     SkColorSetRGB(66, 116, 201);
 const SkColor ResourceBundle::frame_color_inactive =
-     SkColorSetRGB(184, 209, 240);
+     SkColorSetRGB(161, 182, 228);
 const SkColor ResourceBundle::frame_color_app_panel =
      SK_ColorWHITE;
 const SkColor ResourceBundle::frame_color_app_panel_inactive =
@@ -38,7 +41,23 @@ std::string ResourceBundle::InitSharedInstance(
   DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
   g_shared_instance_ = new ResourceBundle();
 
-  return g_shared_instance_->LoadResources(pref_locale);
+  g_shared_instance_->LoadCommonResources();
+  return g_shared_instance_->LoadLocaleResources(pref_locale);
+}
+
+/* static */
+std::string ResourceBundle::ReloadSharedInstance(
+    const std::wstring& pref_locale) {
+  DCHECK(g_shared_instance_ != NULL) << "ResourceBundle not initialized";
+
+  g_shared_instance_->UnloadLocaleResources();
+  return g_shared_instance_->LoadLocaleResources(pref_locale);
+}
+
+/* static */
+void ResourceBundle::AddDataPackToSharedInstance(const FilePath& path) {
+  DCHECK(g_shared_instance_ != NULL) << "ResourceBundle not initialized";
+  g_shared_instance_->data_packs_.push_back(new LoadedDataPack(path));
 }
 
 /* static */
@@ -57,7 +76,8 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
 }
 
 ResourceBundle::ResourceBundle()
-    : resources_data_(NULL),
+    : lock_(new Lock),
+      resources_data_(NULL),
       locale_resources_data_(NULL) {
 }
 
@@ -85,19 +105,25 @@ SkBitmap* ResourceBundle::LoadBitmap(DataHandle data_handle, int resource_id) {
   return new SkBitmap(bitmap);
 }
 
-std::string ResourceBundle::GetDataResource(int resource_id) {
-  return GetRawDataResource(resource_id).as_string();
-}
-
 RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
     int resource_id) const {
-  return LoadResourceBytes(resources_data_, resource_id);
+  RefCountedStaticMemory* bytes =
+      LoadResourceBytes(resources_data_, resource_id);
+
+  // Check all our additional data packs for the resources if it wasn't loaded
+  // from our main source.
+  for (std::vector<LoadedDataPack*>::const_iterator it = data_packs_.begin();
+       !bytes && it != data_packs_.end(); ++it) {
+    bytes = (*it)->GetStaticMemory(resource_id);
+  }
+
+  return bytes;
 }
 
 SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
   // Check to see if we already have the Skia image in the cache.
   {
-    AutoLock lock_scope(lock_);
+    AutoLock lock_scope(*lock_);
     SkImageMap::const_iterator found = skia_images_.find(resource_id);
     if (found != skia_images_.end())
       return found->second;
@@ -109,7 +135,7 @@ SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
 
   if (bitmap.get()) {
     // We loaded successfully.  Cache the Skia version of the bitmap.
-    AutoLock lock_scope(lock_);
+    AutoLock lock_scope(*lock_);
 
     // Another thread raced us, and has already cached the skia image.
     if (skia_images_.count(resource_id))
@@ -124,7 +150,7 @@ SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
     LOG(WARNING) << "Unable to load bitmap with id " << resource_id;
     NOTREACHED();  // Want to assert in debug mode.
 
-    AutoLock lock_scope(lock_);  // Guard empty_bitmap initialization.
+    AutoLock lock_scope(*lock_);  // Guard empty_bitmap initialization.
 
     static SkBitmap* empty_bitmap = NULL;
     if (!empty_bitmap) {
@@ -140,7 +166,7 @@ SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
 }
 
 void ResourceBundle::LoadFontsIfNecessary() {
-  AutoLock lock_scope(lock_);
+  AutoLock lock_scope(*lock_);
   if (!base_font_.get()) {
     base_font_.reset(new gfx::Font());
 
@@ -179,4 +205,28 @@ const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
     default:
       return *base_font_;
   }
+}
+
+// LoadedDataPack implementation
+ResourceBundle::LoadedDataPack::LoadedDataPack(const FilePath& path)
+    : path_(path) {
+  // Always preload the data packs so we can maintain constness.
+  Load();
+}
+
+void ResourceBundle::LoadedDataPack::Load() {
+  DCHECK(!data_pack_.get());
+  data_pack_.reset(new base::DataPack);
+  bool success = data_pack_->Load(path_);
+  CHECK(success) << "Failed to load " << path_.value();
+}
+
+bool ResourceBundle::LoadedDataPack::GetStringPiece(
+    int resource_id, base::StringPiece* data) const {
+  return data_pack_->GetStringPiece(static_cast<uint32>(resource_id), data);
+}
+
+RefCountedStaticMemory* ResourceBundle::LoadedDataPack::GetStaticMemory(
+    int resource_id) const {
+  return data_pack_->GetStaticMemory(resource_id);
 }

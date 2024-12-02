@@ -217,14 +217,15 @@ void FakeExternalTab::Initialize() {
 
   RenderProcessHost::set_run_renderer_in_process(true);
 
-  Profile* profile = g_browser_process->profile_manager()->
-      GetDefaultProfile(FilePath(user_data()));
+  FilePath profile_path(ProfileManager::GetDefaultProfileDir(user_data()));
+  Profile* profile = g_browser_process->profile_manager()->GetProfile(
+      profile_path, false);
   PrefService* prefs = profile->GetPrefs();
   DCHECK(prefs != NULL);
-
   WebCacheManager::RegisterPrefs(prefs);
+
   PrefService* local_state = browser_process_->local_state();
-  local_state->RegisterStringPref(prefs::kApplicationLocale, L"");
+  local_state->RegisterStringPref(prefs::kApplicationLocale, "");
   local_state->RegisterBooleanPref(prefs::kMetricsReportingEnabled, false);
 
   browser::RegisterLocalState(local_state);
@@ -303,9 +304,11 @@ void CFUrlRequestUnittestRunner::Initialize() {
   // directly because it will attempt to initialize some things such as
   // ICU that have already been initialized for this process.
   InitializeLogging();
-  base::Time::UseHighResolutionTimer(true);
+  base::Time::EnableHighResolutionTimer(true);
 
-#if !defined(PURIFY) && defined(OS_WIN)
+  SuppressErrorDialogs();
+  DebugUtil::SuppressDialogs();
+#if !defined(PURIFY)
   logging::SetLogAssertHandler(UnitTestAssertHandler);
 #endif  // !defined(PURIFY)
 
@@ -438,8 +441,8 @@ void FilterDisabledTests() {
     "URLRequestTest.CookiePolicy_ForceSession",
     "URLRequestTest.DoNotSendCookies",
     "URLRequestTest.DoNotSendCookies_ViaPolicy_Async",
-    "URLRequestTest.CancelTest_During_OnGetCookiesBlocked",
-    "URLRequestTest.CancelTest_During_OnSetCookieBlocked",
+    "URLRequestTest.CancelTest_During_OnGetCookies",
+    "URLRequestTest.CancelTest_During_OnSetCookie",
 
     // These tests are disabled as the rely on functionality provided by
     // Chrome's HTTP stack like the ability to set the proxy for a URL, etc.

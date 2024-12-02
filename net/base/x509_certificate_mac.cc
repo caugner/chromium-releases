@@ -358,6 +358,20 @@ OSStatus CopyCertChain(SecCertificateRef cert_handle,
   return SecTrustGetResult(trust, &status, out_cert_chain, &status_chain);
 }
 
+// Returns true if |purpose| is listed as allowed in |usage|. This
+// function also considers the "Any" purpose. If the attribute is
+// present and empty, we return false.
+bool ExtendedKeyUsageAllows(const CE_ExtendedKeyUsage* usage,
+                            const CSSM_OID* purpose) {
+  for (unsigned p = 0; p < usage->numPurposes; ++p) {
+    if (CSSMOIDEqual(&usage->purposes[p], purpose))
+      return true;
+    if (CSSMOIDEqual(&usage->purposes[p], &CSSMOID_ExtendedKeyUsageAny))
+      return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 void X509Certificate::Initialize() {
@@ -446,6 +460,12 @@ int X509Certificate::Verify(const std::string& hostname, int flags,
   CFArrayAppendValue(cert_array, cert_handle_);
   for (size_t i = 0; i < intermediate_ca_certs_.size(); ++i)
     CFArrayAppendValue(cert_array, intermediate_ca_certs_[i]);
+
+  // From here on, only one thread can be active at a time. We have had a number
+  // of sporadic crashes in the SecTrustEvaluate call below, way down inside
+  // Apple's cert code, which we suspect are caused by a thread-safety issue.
+  // So as a speculative fix allow only one thread to use SecTrust on this cert.
+  AutoLock lock(verification_lock_);
 
   SecTrustRef trust_ref = NULL;
   status = SecTrustCreateWithCertificates(cert_array, ssl_policy, &trust_ref);
@@ -671,9 +691,9 @@ void X509Certificate::FreeOSCertHandle(OSCertHandle cert_handle) {
 }
 
 // static
-X509Certificate::Fingerprint X509Certificate::CalculateFingerprint(
+SHA1Fingerprint X509Certificate::CalculateFingerprint(
     OSCertHandle cert) {
-  Fingerprint sha1;
+  SHA1Fingerprint sha1;
   memset(sha1.data, 0, sizeof(sha1.data));
 
   CSSM_DATA cert_data;
@@ -693,25 +713,38 @@ bool X509Certificate::SupportsSSLClientAuth() const {
   CSSMFields fields;
   if (GetCertFields(cert_handle_, &fields) != noErr)
     return false;
+
+  // Gather the extensions we care about. We do not support
+  // CSSMOID_NetscapeCertType on OS X.
+  const CE_ExtendedKeyUsage* ext_key_usage = NULL;
+  const CE_KeyUsage* key_usage = NULL;
   for (unsigned f = 0; f < fields.num_of_fields; ++f) {
     const CSSM_FIELD& field = fields.fields[f];
     const CSSM_X509_EXTENSION* ext =
         reinterpret_cast<const CSSM_X509_EXTENSION*>(field.FieldValue.Data);
-    if (CSSMOIDEqual(&field.FieldOid, &CSSMOID_ExtendedKeyUsage)) {
-      const CE_ExtendedKeyUsage* usage =
+    if (CSSMOIDEqual(&field.FieldOid, &CSSMOID_KeyUsage)) {
+      key_usage = reinterpret_cast<const CE_KeyUsage*>(ext->value.parsedValue);
+    } else if (CSSMOIDEqual(&field.FieldOid, &CSSMOID_ExtendedKeyUsage)) {
+      ext_key_usage =
           reinterpret_cast<const CE_ExtendedKeyUsage*>(ext->value.parsedValue);
-      for (unsigned p = 0; p < usage->numPurposes; ++p) {
-        if (CSSMOIDEqual(&usage->purposes[p], &CSSMOID_ClientAuth))
-          return true;
-      }
-    } else if (CSSMOIDEqual(&field.FieldOid, &CSSMOID_NetscapeCertType)) {
-      uint16_t flags =
-          *reinterpret_cast<const uint16_t*>(ext->value.parsedValue);
-      if (flags & CE_NCT_SSL_Client)
-        return true;
     }
   }
-  return false;
+
+  // RFC5280 says to take the intersection of the two extensions.
+  //
+  // Our underlying crypto libraries don't expose
+  // ClientCertificateType, so for now we will not support fixed
+  // Diffie-Hellman mechanisms. For rsa_sign, we need the
+  // digitalSignature bit.
+  //
+  // In particular, if a key has the nonRepudiation bit and not the
+  // digitalSignature one, we will not offer it to the user.
+  if (key_usage && !((*key_usage) & CE_KU_DigitalSignature))
+    return false;
+  if (ext_key_usage && !ExtendedKeyUsageAllows(ext_key_usage,
+                                               &CSSMOID_ClientAuth))
+    return false;
+  return true;
 }
 
 bool X509Certificate::IsIssuedBy(
@@ -729,7 +762,6 @@ bool X509Certificate::IsIssuedBy(
   for (int i = 0; i < n; ++i) {
     SecCertificateRef cert_handle = reinterpret_cast<SecCertificateRef>(
         const_cast<void*>(CFArrayGetValueAtIndex(cert_chain, i)));
-    CFRetain(cert_handle);
     scoped_refptr<X509Certificate> cert = X509Certificate::CreateFromHandle(
         cert_handle,
         X509Certificate::SOURCE_LONE_CERT_IMPORT,
@@ -759,7 +791,7 @@ OSStatus X509Certificate::CreateSSLClientPolicy(SecPolicyRef* out_policy) {
 // static
 bool X509Certificate::GetSSLClientCertificates (
     const std::string& server_domain,
-    const std::vector<Principal>& valid_issuers,
+    const std::vector<CertPrincipal>& valid_issuers,
     std::vector<scoped_refptr<X509Certificate> >* certs) {
   scoped_cftyperef<SecIdentityRef> preferred_identity;
   if (!server_domain.empty()) {
@@ -789,16 +821,16 @@ bool X509Certificate::GetSSLClientCertificates (
     err = SecIdentityCopyCertificate(identity, &cert_handle);
     if (err != noErr)
       continue;
+    scoped_cftyperef<SecCertificateRef> scoped_cert_handle(cert_handle);
 
     scoped_refptr<X509Certificate> cert(
         CreateFromHandle(cert_handle, SOURCE_LONE_CERT_IMPORT,
                          OSCertHandles()));
-    // cert_handle is adoped by cert, so I don't need to release it myself.
     if (cert->HasExpired() || !cert->SupportsSSLClientAuth())
       continue;
 
     // Skip duplicates (a cert may be in multiple keychains).
-    X509Certificate::Fingerprint fingerprint = cert->fingerprint();
+    const SHA1Fingerprint& fingerprint = cert->fingerprint();
     unsigned i;
     for (i = 0; i < certs->size(); ++i) {
       if ((*certs)[i]->fingerprint().Equals(fingerprint))

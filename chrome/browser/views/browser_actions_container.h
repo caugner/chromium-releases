@@ -34,6 +34,10 @@ class ExtensionPopup;
 class PrefService;
 class Profile;
 
+namespace gfx {
+class CanvasSkia;
+}
+
 namespace views {
 class Menu2;
 }
@@ -89,6 +93,7 @@ class BrowserActionButton : public views::MenuButton,
   virtual void OnMouseReleased(const views::MouseEvent& e, bool canceled);
   virtual bool OnKeyReleased(const views::KeyEvent& e);
   virtual void OnMouseExited(const views::MouseEvent& event);
+  virtual void ShowContextMenu(const gfx::Point& p, bool is_mouse_gesture);
 
   // Does this button's action have a popup?
   virtual bool IsPopup();
@@ -253,10 +258,7 @@ class BrowserActionsContainer
     public ExtensionContextMenuModel::PopupDelegate,
     public ExtensionPopup::Observer {
  public:
-  // If |should_save_size| is false, container resizes will not persist across
-  // browser restarts.
-  BrowserActionsContainer(Browser* browser, views::View* owner_view,
-                          bool should_save_size);
+  BrowserActionsContainer(Browser* browser, views::View* owner_view);
   virtual ~BrowserActionsContainer();
 
   static void RegisterUserPrefs(PrefService* prefs);
@@ -350,7 +352,7 @@ class BrowserActionsContainer
   virtual void InspectPopup(ExtensionAction* action);
 
   // Overriden from ExtensionPopup::Delegate
-  virtual void ExtensionPopupClosed(ExtensionPopup* popup);
+  virtual void ExtensionPopupIsClosing(ExtensionPopup* popup);
 
   // Moves a browser action with |id| to |new_index|.
   void MoveBrowserAction(const std::string& extension_id, size_t new_index);
@@ -428,7 +430,7 @@ class BrowserActionsContainer
 
   // Animate to the target value (unless testing, in which case we go straight
   // to the target size).
-  void Animate(SlideAnimation::TweenType tween_type, int target_size);
+  void Animate(Tween::Type type, int target_size);
 
   // Returns true if this extension should be shown in this toolbar. This can
   // return false if we are in an incognito window and the extension is disabled
@@ -447,9 +449,6 @@ class BrowserActionsContainer
 
   // The view that owns us.
   views::View* owner_view_;
-
-  // True if we should save the size of the container to the global prefs.
-  bool should_save_size_;
 
   // The current popup and the button it came from.  NULL if no popup.
   ExtensionPopup* popup_;

@@ -6,10 +6,22 @@
 #define CHROME_UTILITY_UTILITY_THREAD_H_
 
 #include <string>
+#include <vector>
 
+#include "base/platform_file.h"
 #include "chrome/common/child_thread.h"
+#include "printing/native_metafile.h"
 
 class GURL;
+class SkBitmap;
+
+namespace gfx {
+class Rect;
+}  // namespace gfx
+
+namespace printing {
+struct PageRange;
+}  // namespace printing
 
 // This class represents the background thread where the utility task runs.
 class UtilityThread : public ChildThread {
@@ -32,6 +44,28 @@ class UtilityThread : public ChildThread {
 
   // IPC for parsing an extensions auto-update manifest xml file.
   void OnParseUpdateManifest(const std::string& xml);
+
+  // IPC for decoding an image.
+  void OnDecodeImage(const std::vector<unsigned char>& encoded_data);
+
+  // IPC to render a PDF into a platform metafile.
+  void OnRenderPDFPagesToMetafile(
+      base::PlatformFile pdf_file,
+      const gfx::Rect& render_area,
+      int render_dpi,
+      const std::vector<printing::PageRange>& page_ranges);
+
+#if defined(OS_WIN)
+  // Helper method for Windows.
+  // |highest_rendered_page_number| is set to -1 on failure to render any page.
+  bool RenderPDFToWinMetafile(
+    base::PlatformFile pdf_file,
+    const gfx::Rect& render_area,
+    int render_dpi,
+    const std::vector<printing::PageRange>& page_ranges,
+    printing::NativeMetafile* metafile,
+    int* highest_rendered_page_number);
+#endif   // defined(OS_WIN)
 
   DISALLOW_COPY_AND_ASSIGN(UtilityThread);
 };

@@ -6,7 +6,7 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_context.h"
 
@@ -65,7 +65,7 @@ void ResolveProxyMsgHelper::StartPendingRequest() {
   }
 
   int result = proxy_service_->ResolveProxy(
-      req.url, &proxy_info_, &callback_, &req.pac_req, NULL);
+      req.url, &proxy_info_, &callback_, &req.pac_req, net::BoundNetLog());
 
   // Completed synchronously.
   if (result != net::ERR_IO_PENDING)

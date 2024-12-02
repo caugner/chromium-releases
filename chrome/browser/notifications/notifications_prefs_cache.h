@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
 #define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATIONS_PREFS_CACHE_H_
 
 #include <set>
+#include <vector>
 
 #include "base/ref_counted.h"
+#include "chrome/common/content_settings.h"
 #include "googleurl/src/gurl.h"
 
 class ListValue;
@@ -19,8 +21,10 @@ class ListValue;
 class NotificationsPrefsCache
     : public base::RefCountedThreadSafe<NotificationsPrefsCache> {
  public:
-  NotificationsPrefsCache(const ListValue* allowed, const ListValue* denied);
+  NotificationsPrefsCache();
 
+  // Once is_initialized() is set, all accesses must happen on the IO thread.
+  // Before that, all accesses need to happen on the UI thread.
   void set_is_initialized(bool val) { is_initialized_ = val; }
   bool is_initialized() { return is_initialized_; }
 
@@ -32,6 +36,20 @@ class NotificationsPrefsCache
   // Updates the cache with a new origin allowed or denied.
   void CacheAllowedOrigin(const GURL& origin);
   void CacheDeniedOrigin(const GURL& origin);
+
+  // Set the cache to the supplied values.  This clears the current
+  // contents of the cache.
+  void SetCacheAllowedOrigins(const std::vector<GURL>& allowed);
+  void SetCacheDeniedOrigins(const std::vector<GURL>& denied);
+  void SetCacheDefaultContentSetting(ContentSetting setting);
+
+  static void ListValueToGurlVector(const ListValue& origin_list,
+                                    std::vector<GURL>* origin_vector);
+
+  // Exposed for testing.
+  ContentSetting CachedDefaultContentSetting() {
+    return default_content_setting_;
+  }
 
  private:
   friend class base::RefCountedThreadSafe<NotificationsPrefsCache>;
@@ -48,6 +66,10 @@ class NotificationsPrefsCache
   // Storage of the actual preferences.
   std::set<GURL> allowed_origins_;
   std::set<GURL> denied_origins_;
+
+  // The default setting, used for origins that are neither in
+  // |allowed_origins_| nor |denied_origins_|.
+  ContentSetting default_content_setting_;
 
   // Set to true once the initial cached settings have been completely read.
   // Once this is done, the class can no longer be accessed on the UI thread.

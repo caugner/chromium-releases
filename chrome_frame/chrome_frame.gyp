@@ -137,15 +137,23 @@
         'chrome_frame_histograms.cc',
         'chrome_frame_npapi_unittest.cc',
         'chrome_frame_unittest_main.cc',
+        'chrome_launcher.cc',
+        'chrome_launcher.h',
         'chrome_launcher_unittest.cc',
         'function_stub_unittest.cc',
+        'test/chrome_frame_test_utils.h',
+        'test/chrome_frame_test_utils.cc',
         'test/com_message_event_unittest.cc',
         'test/exception_barrier_unittest.cc',
         'test/html_util_unittests.cc',
         'test/http_negotiate_unittest.cc',
+        'test/simulate_input.h',
+        'test/simulate_input.cc',
         'test/urlmon_moniker_tests.h',
         'test/urlmon_moniker_unittest.cc',
         'test/util_unittests.cc',
+        'test/window_watchdog.h',
+        'test/window_watchdog.cc',
         'unittest_precompile.h',
         'unittest_precompile.cc',
         'urlmon_upload_data_stream.cc',
@@ -175,7 +183,7 @@
           'dependencies': [
             # TODO(slightlyoff): Get automation targets working on OS X
             '../chrome/chrome.gyp:automation',
-            '../chrome/installer/installer.gyp:installer_util',
+            '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
           ],
           'configurations': {
@@ -201,7 +209,6 @@
         '../net/net.gyp:net_test_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/libxslt/libxslt.gyp:libxslt',
         'chrome_frame_ie',
         'chrome_frame_npapi',
@@ -221,18 +228,23 @@
         'test/chrome_frame_automation_mock.h',
         'test/http_server.cc',
         'test/http_server.h',
+        'test/ie_event_sink.cc',
+        'test/ie_event_sink.h',
+        'test/mock_ie_event_sink_actions.h',
+        'test/mock_ie_event_sink_test.cc',
+        'test/mock_ie_event_sink_test.h',
+        'test/navigation_test.cc',
         'test/proxy_factory_mock.cc',
         'test/proxy_factory_mock.h',
         'test/run_all_unittests.cc',
         'test/simulate_input.cc',
         'test/simulate_input.h',
-        'test/test_mock_with_web_server.cc',
-        'test/test_mock_with_web_server.h',
         'test/test_server.cc',
         'test/test_server.h',
         'test/test_server_test.cc',
         'test/test_with_web_server.cc',
         'test/test_with_web_server.h',
+        'test/ui_test.cc',
         'test/urlmon_moniker_tests.h',
         'test/urlmon_moniker_integration_test.cc',
         'test/url_request_test.cc',
@@ -244,6 +256,7 @@
         'chrome_tab.h',
         'chrome_tab.idl',
         'com_message_event.cc',
+        'custom_sync_call_context.h',        
         'html_utils.cc',
         'http_negotiate.h',
         'http_negotiate.cc',
@@ -278,7 +291,7 @@
           },
           'dependencies': [
             '../chrome/chrome.gyp:automation',
-            '../chrome/installer/installer.gyp:installer_util',
+            '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
           ]
         }],
@@ -298,6 +311,8 @@
         '../testing/gtest.gyp:gtest',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/libxslt/libxslt.gyp:libxslt',
+        'chrome_frame_ie',
+        'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_frame_utils',
         'npchrome_frame',
@@ -313,12 +328,18 @@
         'chrome_tab.h',
         'chrome_tab.idl',
         'html_utils.cc',
+        'test/chrome_frame_test_utils.cc',
+        'test/chrome_frame_test_utils.h',
         'test/perf/chrome_frame_perftest.cc',
         'test/perf/chrome_frame_perftest.h',
         'test/perf/run_all.cc',
         'test/perf/silverlight.cc',
+        'test/simulate_input.cc',
+        'test/simulate_input.h',
         'test_utils.cc',
         'test_utils.h',
+        'test/window_watchdog.cc',
+        'test/window_watchdog.h',
         'utils.cc',
         'utils.h',
       ],
@@ -331,11 +352,10 @@
       'conditions': [
         ['OS=="win"', {
           'dependencies': [
-            '../chrome/chrome.gyp:automation',
             '../breakpad/breakpad.gyp:breakpad_handler',
-            '../chrome/installer/installer.gyp:installer_util',
+            '../chrome/chrome.gyp:automation',
+            '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
-            '../chrome/installer/installer.gyp:installer_util',
           ],
           'sources': [
             '../base/test/test_file_util_win.cc',
@@ -392,11 +412,16 @@
       ],
       'conditions': [
         ['OS=="win"', {
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'DelayLoadDLLs': ['prntvpt.dll'],
+            },
+          },
           'dependencies': [
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../chrome/chrome.gyp:automation',
             '../chrome/chrome.gyp:chrome_dll_version',
-            '../chrome/installer/installer.gyp:installer_util',
+            '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
           ],
           'configurations': {
@@ -417,13 +442,9 @@
       'type': 'executable',
       'msvs_guid': 'A1440368-4089-4E14-8864-D84D3C5714A7',
       'dependencies': [
-        '../base/allocator/allocator.gyp:allocator',
-        '../build/temp_gyp/googleurl.gyp:googleurl',
         '../chrome/chrome.gyp:browser',
-        '../chrome/chrome.gyp:common',
-        '../chrome/chrome.gyp:utility',
+        '../chrome/chrome.gyp:renderer',
         '../testing/gtest.gyp:gtest',
-        '../third_party/WebKit/WebKit/chromium/WebKit.gyp:webkit',
         'base_noicu',
         'chrome_frame_ie',
         'chrome_frame_npapi',
@@ -463,7 +484,7 @@
           'dependencies': [
             # TODO(slightlyoff): Get automation targets working on OS X
             '../chrome/chrome.gyp:automation',
-            '../chrome/installer/installer.gyp:installer_util',
+            '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
           ]
         }],
@@ -487,6 +508,7 @@
         'chrome_frame_plugin.h',
         'chrome_frame_npapi.cc',
         'chrome_frame_npapi.h',
+        'custom_sync_call_context.h',
         'ff_30_privilege_check.cc',
         'ff_privilege_check.h',
         'html_utils.cc',
@@ -511,40 +533,6 @@
         'utils.cc',
         'utils.h',
       ],
-    },
-    {
-      'target_name': 'chrome_launcher',
-      'type': 'executable',
-      'msvs_guid': 'B7E540C1-49D9-4350-ACBC-FB8306316D16',
-      'dependencies': [],
-      'sources': [
-        'chrome_launcher_main.cc',
-      ],
-      'msvs_settings': {
-        'VCLinkerTool': {
-          'OutputFile':
-              '$(OutDir)\\servers\\$(ProjectName).exe',
-          # Set /SUBSYSTEM:WINDOWS since this is not a command-line program.
-          'SubSystem': '2',
-          # We're going for minimal size, so no standard library (in release
-          # builds).
-          'IgnoreAllDefaultLibraries': "true",
-        },
-        'VCCLCompilerTool': {
-          # Requires standard library, so disable it.
-          'BufferSecurityCheck': "false",
-        },
-      },
-      'configurations': {
-        # Bring back the standard library in debug buidls.
-        'Debug_Base': {
-          'msvs_settings': {
-            'VCLinkerTool': {
-              'IgnoreAllDefaultLibraries': "false",
-            },
-          },
-        },
-      },
     },
     {
       'target_name': 'chrome_frame_strings',
@@ -607,7 +595,8 @@
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
         '../build/temp_gyp/googleurl.gyp:googleurl',
-
+        '../third_party/libxml/libxml.gyp:libxml',
+        '../third_party/bzip2/bzip2.gyp:bzip2',
       ],
       'sources': [
         'bho.cc',
@@ -628,8 +617,8 @@
         'chrome_frame_histograms.h',
         'chrome_frame_reporting.cc',
         'chrome_frame_reporting.h',
-        'chrome_launcher.cc',
-        'chrome_launcher.h',
+        'chrome_launcher_utils.cc',
+        'chrome_launcher_utils.h',
         'chrome_protocol.cc',
         'chrome_protocol.h',
         'chrome_protocol.rgs',
@@ -652,6 +641,8 @@
         'http_negotiate.h',
         'iids.cc',
         'in_place_menu.h',
+        'metrics_service.cc',
+        'metrics_service.h',
         'module_utils.cc',
         'module_utils.h',
         'ole_document_impl.h',
@@ -693,7 +684,7 @@
             # Make the archive build happy.
             '../chrome/chrome.gyp:syncapi',
             # Installer
-            '../chrome/installer/installer.gyp:installer_util',
+            '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
             # Crash Reporting
             'crash_reporting/crash_reporting.gyp:crash_report',
@@ -738,8 +729,10 @@
         'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_frame_utils',
-        'chrome_launcher',
         'xulrunner_sdk',
+        'chrome_frame_launcher.gyp:chrome_launcher',
+        '../chrome/chrome.gyp:chrome_version_info',
+        '../chrome/chrome.gyp:chrome_version_header',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
         '../build/temp_gyp/googleurl.gyp:googleurl',
@@ -756,7 +749,7 @@
         #   figure out something more gyp-ish.
         'resources/tlb_resource.rc',
         'chrome_tab.rgs',
-        'chrome_tab_version.rc.version',
+        'chrome_tab_version.rc',
         'resource.h',
       ],
       'include_dirs': [
@@ -781,7 +774,7 @@
             # Make the archive build happy.
             '../chrome/chrome.gyp:syncapi',
             # Installer
-            '../chrome/installer/installer.gyp:installer_util',
+            '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
             # Crash Reporting
             'crash_reporting/crash_reporting.gyp:crash_report',
@@ -803,51 +796,6 @@
             },
           },
         }],
-      ],
-      'rules': [
-        # Borrowed from chrome.gyp:chrome_dll_version, branding references
-        # removed
-        {
-          'rule_name': 'version',
-          'extension': 'version',
-          'variables': {
-            'version_py': '../chrome/tools/build/version.py',
-            'version_path': '../chrome/VERSION',
-            'lastchange_path':
-              '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
-            'template_input_path': 'chrome_tab_version.rc.version',
-          },
-          'conditions': [
-            [ 'branding == "Chrome"', {
-              'variables': {
-                 'branding_path': '../chrome/app/theme/google_chrome/BRANDING',
-              },
-            }, { # else branding!="Chrome"
-              'variables': {
-                 'branding_path': '../chrome/app/theme/chromium/BRANDING',
-              },
-            }],
-          ],
-          'inputs': [
-            '<(template_input_path)',
-            '<(version_path)',
-            '<(branding_path)',
-          ],
-          'outputs': [
-            '<(INTERMEDIATE_DIR)/chrome_tab_version.rc',
-          ],
-          'action': [
-            'python',
-            '<(version_py)',
-            '-f', '<(version_path)',
-            '-f', '<(branding_path)',
-            '-f', '<(lastchange_path)',
-            '<(template_input_path)',
-            '<@(_outputs)',
-          ],
-          'process_outputs_as_sources': 1,
-          'message': 'Generating version information in <(_outputs)'
-        },
       ],
     },
   ],

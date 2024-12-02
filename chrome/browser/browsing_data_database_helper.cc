@@ -14,7 +14,6 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "webkit/glue/webkit_glue.h"
 
 BrowsingDataDatabaseHelper::BrowsingDataDatabaseHelper(Profile* profile)
     : tracker_(profile->GetDatabaseTracker()),
@@ -63,9 +62,9 @@ void BrowsingDataDatabaseHelper::FetchDatabaseInfoInFileThread() {
         // Extension state is not considered browsing data.
         continue;
       }
-      scoped_ptr<WebKit::WebSecurityOrigin> web_security_origin(
+      WebKit::WebSecurityOrigin web_security_origin =
           WebKit::WebSecurityOrigin::createFromDatabaseIdentifier(
-              ori->GetOrigin()));
+              ori->GetOrigin());
       std::vector<string16> databases;
       ori->GetAllDatabaseNames(&databases);
       for (std::vector<string16>::const_iterator db = databases.begin();
@@ -74,10 +73,11 @@ void BrowsingDataDatabaseHelper::FetchDatabaseInfoInFileThread() {
         file_util::FileInfo file_info;
         if (file_util::GetFileInfo(file_path, &file_info)) {
           database_info_.push_back(DatabaseInfo(
-                web_security_origin->host().utf8(),
+                web_security_origin.host().utf8(),
                 UTF16ToUTF8(*db),
                 origin_identifier,
                 UTF16ToUTF8(ori->GetDatabaseDescription(*db)),
+                web_security_origin.toString().utf8(),
                 file_info.size,
                 file_info.last_modified));
         }
@@ -109,4 +109,45 @@ void BrowsingDataDatabaseHelper::DeleteDatabaseInFileThread(
   if (!tracker_.get())
     return;
   tracker_->DeleteDatabase(UTF8ToUTF16(origin), UTF8ToUTF16(name), NULL);
+}
+
+CannedBrowsingDataDatabaseHelper::CannedBrowsingDataDatabaseHelper(
+    Profile* profile)
+    : BrowsingDataDatabaseHelper(profile) {
+}
+
+void CannedBrowsingDataDatabaseHelper::AddDatabase(
+    const GURL& origin,
+    const std::string& name,
+    const std::string& description) {
+  WebKit::WebSecurityOrigin web_security_origin =
+      WebKit::WebSecurityOrigin::createFromString(
+          UTF8ToUTF16(origin.spec()));
+  std::string origin_identifier =
+      web_security_origin.databaseIdentifier().utf8();
+
+  for (std::vector<DatabaseInfo>::iterator database = database_info_.begin();
+       database != database_info_.end(); ++database) {
+    if (database->origin_identifier == origin_identifier &&
+        database->database_name == name)
+      return;
+  }
+
+  database_info_.push_back(DatabaseInfo(
+        web_security_origin.host().utf8(),
+        name,
+        origin_identifier,
+        description,
+        web_security_origin.toString().utf8(),
+        0,
+        base::Time()));
+}
+
+void CannedBrowsingDataDatabaseHelper::Reset() {
+  database_info_.clear();
+}
+
+void CannedBrowsingDataDatabaseHelper::StartFetching(
+    Callback1<const std::vector<DatabaseInfo>& >::Type* callback) {
+  callback->Run(database_info_);
 }

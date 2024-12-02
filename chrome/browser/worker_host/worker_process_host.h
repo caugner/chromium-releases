@@ -10,12 +10,15 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/child_process_host.h"
-#include "chrome/browser/host_content_settings_map.h"
+#include "chrome/browser/browser_child_process_host.h"
+#include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/worker_host/worker_document_set.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel.h"
 
+class AppCacheDispatcherHost;
+class ChromeURLRequestContext;
+class ChromeURLRequestContextGetter;
 class DatabaseDispatcherHost;
 namespace webkit_database {
 class DatabaseTracker;
@@ -27,8 +30,8 @@ struct ViewHostMsg_CreateWorker_Params;
 // the browser <-> worker communication channel. There will be one
 // WorkerProcessHost per worker process.  Currently each worker runs in its own
 // process, but that may change.  However, we do assume [by storing a
-// HostContentSettingsMap] that a WorkerProcessHost serves a single Profile.
-class WorkerProcessHost : public ChildProcessHost {
+// ChromeURLRequestContext] that a WorkerProcessHost serves a single Profile.
+class WorkerProcessHost : public BrowserChildProcessHost {
  public:
 
   // Contains information about each worker instance, needed to forward messages
@@ -39,7 +42,11 @@ class WorkerProcessHost : public ChildProcessHost {
                    bool shared,
                    bool off_the_record,
                    const string16& name,
-                   int worker_route_id);
+                   int worker_route_id,
+                   int parent_process_id,
+                   int parent_appcache_host_id,
+                   int64 main_resource_appcache_id,
+                   ChromeURLRequestContext* request_context);
 
     // Unique identifier for a worker client.
     typedef std::pair<IPC::Message::Sender*, int> SenderInfo;
@@ -78,8 +85,16 @@ class WorkerProcessHost : public ChildProcessHost {
     const GURL& url() const { return url_; }
     const string16 name() const { return name_; }
     int worker_route_id() const { return worker_route_id_; }
+    int parent_process_id() const { return parent_process_id_; }
+    int parent_appcache_host_id() const { return parent_appcache_host_id_; }
+    int64 main_resource_appcache_id() const {
+      return main_resource_appcache_id_;
+    }
     WorkerDocumentSet* worker_document_set() const {
       return worker_document_set_;
+    }
+    ChromeURLRequestContext* request_context() const {
+      return request_context_;
     }
 
    private:
@@ -90,13 +105,17 @@ class WorkerProcessHost : public ChildProcessHost {
     bool closed_;
     string16 name_;
     int worker_route_id_;
+    int parent_process_id_;
+    int parent_appcache_host_id_;
+    int64 main_resource_appcache_id_;
+    scoped_refptr<ChromeURLRequestContext> request_context_;
     SenderList senders_;
     scoped_refptr<WorkerDocumentSet> worker_document_set_;
   };
 
-  WorkerProcessHost(ResourceDispatcherHost* resource_dispatcher_host,
-      webkit_database::DatabaseTracker *db_tracker,
-      HostContentSettingsMap *host_content_settings_map);
+  WorkerProcessHost(
+      ResourceDispatcherHost* resource_dispatcher_host,
+      ChromeURLRequestContext* request_context);
   ~WorkerProcessHost();
 
   // Starts the process.  Returns true iff it succeeded.
@@ -116,10 +135,8 @@ class WorkerProcessHost : public ChildProcessHost {
   void DocumentDetached(IPC::Message::Sender* sender,
                         unsigned long long document_id);
 
-  webkit_database::DatabaseTracker* database_tracker() const;
-
-  HostContentSettingsMap *GetHostContentSettingsMap() const {
-    return host_content_settings_map_;
+  ChromeURLRequestContext* request_context() const {
+    return request_context_;
   }
 
  protected:
@@ -136,7 +153,7 @@ class WorkerProcessHost : public ChildProcessHost {
       const ViewHostMsg_Resource_Request& request_data);
 
   // Called when a message arrives from the worker process.
-  void OnMessageReceived(const IPC::Message& message);
+  virtual void OnMessageReceived(const IPC::Message& message);
 
   // Called when the process has been launched successfully.
   virtual void OnProcessLaunched();
@@ -173,9 +190,9 @@ class WorkerProcessHost : public ChildProcessHost {
 
   Instances instances_;
 
+  scoped_refptr<ChromeURLRequestContext> request_context_;
+  scoped_ptr<AppCacheDispatcherHost> appcache_dispatcher_host_;
   scoped_refptr<DatabaseDispatcherHost> db_dispatcher_host_;
-
-  scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
 
   // A callback to create a routing id for the associated worker process.
   scoped_ptr<CallbackWithReturnValue<int>::Type> next_route_id_callback_;

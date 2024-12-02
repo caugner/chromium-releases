@@ -6,6 +6,7 @@
 #include "base/logging.h"
 #include "base/time.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/sync/glue/theme_change_processor.h"
 #include "chrome/browser/sync/glue/theme_data_type_controller.h"
 #include "chrome/browser/sync/glue/theme_model_associator.h"
@@ -84,10 +85,12 @@ void ThemeDataTypeController::Stop() {
   state_ = NOT_RUNNING;
 }
 
-void ThemeDataTypeController::OnUnrecoverableError() {
+void ThemeDataTypeController::OnUnrecoverableError(
+    const tracked_objects::Location& from_here,
+    const std::string& message) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   UMA_HISTOGRAM_COUNTS("Sync.ThemeRunFailures", 1);
-  sync_service_->OnUnrecoverableError();
+  sync_service_->OnUnrecoverableError(from_here, message);
 }
 
 void ThemeDataTypeController::FinishStart(StartResult result) {

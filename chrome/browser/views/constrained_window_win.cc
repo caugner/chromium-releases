@@ -34,6 +34,7 @@
 #include "views/window/client_view.h"
 #include "views/window/non_client_view.h"
 #include "views/window/window_resources.h"
+#include "views/window/window_shape.h"
 
 using base::TimeDelta;
 
@@ -116,7 +117,7 @@ class XPWindowResources : public views::WindowResources {
 
   static SkBitmap* bitmaps_[FRAME_PART_BITMAP_COUNT];
 
-  DISALLOW_EVIL_CONSTRUCTORS(XPWindowResources);
+  DISALLOW_COPY_AND_ASSIGN(XPWindowResources);
 };
 
 class VistaWindowResources : public views::WindowResources {
@@ -146,7 +147,7 @@ class VistaWindowResources : public views::WindowResources {
 
   static SkBitmap* bitmaps_[FRAME_PART_BITMAP_COUNT];
 
-  DISALLOW_EVIL_CONSTRUCTORS(VistaWindowResources);
+  DISALLOW_COPY_AND_ASSIGN(VistaWindowResources);
 };
 
 SkBitmap* XPWindowResources::bitmaps_[];
@@ -237,7 +238,7 @@ class ConstrainedWindowFrameView
   // The font to be used to render the titlebar text.
   static gfx::Font* title_font_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ConstrainedWindowFrameView);
+  DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowFrameView);
 };
 
 gfx::Font* ConstrainedWindowFrameView::title_font_ = NULL;
@@ -349,24 +350,7 @@ int ConstrainedWindowFrameView::NonClientHitTest(const gfx::Point& point) {
 void ConstrainedWindowFrameView::GetWindowMask(const gfx::Size& size,
                                                gfx::Path* window_mask) {
   DCHECK(window_mask);
-
-  // Redefine the window visible region for the new size.
-  window_mask->moveTo(0, 3);
-  window_mask->lineTo(1, 2);
-  window_mask->lineTo(1, 1);
-  window_mask->lineTo(2, 1);
-  window_mask->lineTo(3, 0);
-
-  window_mask->lineTo(SkIntToScalar(size.width() - 3), 0);
-  window_mask->lineTo(SkIntToScalar(size.width() - 2), 1);
-  window_mask->lineTo(SkIntToScalar(size.width() - 1), 1);
-  window_mask->lineTo(SkIntToScalar(size.width() - 1), 2);
-  window_mask->lineTo(SkIntToScalar(size.width()), 3);
-
-  window_mask->lineTo(SkIntToScalar(size.width()),
-                      SkIntToScalar(size.height()));
-  window_mask->lineTo(0, SkIntToScalar(size.height()));
-  window_mask->close();
+  views::GetDefaultWindowMask(size, window_mask);
 }
 
 void ConstrainedWindowFrameView::EnableClose(bool enable) {

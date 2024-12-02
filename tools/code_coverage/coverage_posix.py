@@ -24,7 +24,9 @@ Linux:
 
 --directory=DIR: specify directory that contains gcda files, and where
   a "coverage" directory will be created containing the output html.
-  Example name:   ..../chromium/src/xcodebuild/Debug
+  Example name:   ..../chromium/src/xcodebuild/Debug.
+  If not specified (e.g. buildbot) we will try and figure it out based on
+  other options (e.g. --target and --build-dir; see below).
 
 --genhtml: generate html output.  If not specified only lcov is generated.
 
@@ -45,6 +47,42 @@ Linux:
   RunPythonCommandInBuildDir() command to avoid the need for this
   step.
 
+--timeout=SECS: if a subprocess doesn't have output within SECS,
+  assume it's a hang.  Kill it and give up.
+
+--bundles=BUNDLEFILE: a file containing a python list of coverage
+  bundles to be eval'd.  Example contents of the bundlefile:
+    ['../base/base.gyp:base_unittests']
+  This is used as part of the coverage bot.
+  If no other bundlefile-finding args are used (--target,
+  --build-dir), this is assumed to be an absolute path.
+  If those args are used, find BUNDLEFILE in a way consistent with
+  other scripts launched by buildbot.  Example of another script
+  launched by buildbot:
+  http://src.chromium.org/viewvc/chrome/trunk/tools/buildbot/scripts/slave/runtest.py
+
+--target=NAME: specify the build target (e.g. 'Debug' or 'Release').
+  This is used by buildbot scripts to help us find the output directory.
+  Must be used with --build-dir.
+
+--build-dir=DIR: According to buildbot comments, this is the name of
+  the directory within the buildbot working directory in which the
+  solution, Debug, and Release directories are found.
+  It's usually "src/build", but on mac it's $DIR/../xcodebuild and on
+  Linux it's $DIR/../sconsbuild or $DIR/sconsbuild or $DIR/out.
+  This is used by buildbot scripts to help us find the output directory.
+  Must be used with --target.
+
+--no_exclusions: Do NOT use the exclusion list.  This script keeps a
+  list of tests known to be problematic under coverage.  For example,
+  ProcessUtilTest.SpawnChild will crash inside __gcov_fork() when
+  using the MacOS 10.6 SDK.  Use of --no_exclusions prevents the use
+  of this exclusion list.
+
+--dont-clear-coverage-data: Normally we clear coverage data from
+  previous runs.  If this arg is used we do NOT clear the coverage
+  data.
+
 Strings after all options are considered tests to run.  Test names
 have all text before a ':' stripped to help with gyp compatibility.
 For example, ../base/base.gyp:base_unittests is interpreted as a test
@@ -55,22 +93,213 @@ import glob
 import logging
 import optparse
 import os
+import Queue
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import traceback
+
+
+"""Global list of child PIDs to kill when we die."""
+gChildPIDs = []
+
+"""Exclusion list.  Format is
+   { platform: { testname: (exclusion1, exclusion2, ... ), ... } }
+
+   Platform is a match for sys.platform and can be a list.
+   Matching code does an 'if sys.platform in (the key):'.
+   Similarly, matching does an 'if testname in thefulltestname:'
+
+   The Chromium convention has traditionally been to place the
+   exclusion list in a distinct file.  Unlike valgrind (which has
+   frequent changes when things break and are fixed), the expectation
+   here is that exclusions remain relatively constant (e.g. OS bugs).
+   If that changes, revisit the decision to place inclusions in this
+   script.
+
+   Details:
+     ProcessUtilTest.SpawnChild: chokes in __gcov_fork on 10.6
+"""
+gTestExclusions = {
+  'darwin2': { 'base_unittests': ('ProcessUtilTest.SpawnChild',) }
+}
+
+
+def TerminateSignalHandler(sig, stack):
+  """When killed, try and kill our child processes."""
+  signal.signal(sig, signal.SIG_DFL)
+  for pid in gChildPIDs:
+    if 'kill' in os.__all__:  # POSIX
+      os.kill(pid, sig)
+    else:
+      subprocess.call(['taskkill.exe', '/PID', str(pid)])
+  sys.exit(0)
+
+
+class RunTooLongException(Exception):
+  """Thrown when a command runs too long without output."""
+  pass
+
+
+class RunProgramThread(threading.Thread):
+  """A thread to run a subprocess.
+
+  We want to print the output of our subprocess in real time, but also
+  want a timeout if there has been no output for a certain amount of
+  time.  Normal techniques (e.g. loop in select()) aren't cross
+  platform enough. the function seems simple: "print output of child, kill it
+  if there is no output by timeout.  But it was tricky to get this right
+  in a x-platform way (see warnings about deadlock on the python
+  subprocess doc page).
+
+  """
+  # Constants in our queue
+  PROGRESS = 0
+  DONE = 1
+
+  def __init__(self, cmd):
+    super(RunProgramThread, self).__init__()
+    self._cmd = cmd
+    self._process = None
+    self._queue = Queue.Queue()
+    self._retcode = None
+
+  def run(self):
+    if sys.platform in ('win32', 'cygwin'):
+      return self._run_windows()
+    else:
+      self._run_posix()
+
+  def _run_windows(self):
+    # We need to save stdout to a temporary file because of a bug on the
+    # windows implementation of python which can deadlock while waiting
+    # for the IO to complete while writing to the PIPE and the pipe waiting
+    # on us and us waiting on the child process.
+    stdout_file = tempfile.TemporaryFile()
+    try:
+      self._process = subprocess.Popen(self._cmd,
+                                       stdin=subprocess.PIPE,
+                                       stdout=stdout_file,
+                                       stderr=subprocess.STDOUT)
+      gChildPIDs.append(self._process.pid)
+      try:
+        # To make sure that the buildbot don't kill us if we run too long
+        # without any activity on the console output, we look for progress in
+        # the length of the temporary file and we print what was accumulated so
+        # far to the output console to make the buildbot know we are making some
+        # progress.
+        previous_tell = 0
+        # We will poll the process until we get a non-None return code.
+        self._retcode = None
+        while self._retcode is None:
+          self._retcode = self._process.poll()
+          current_tell = stdout_file.tell()
+          if current_tell > previous_tell:
+            # Report progress to our main thread so we don't timeout.
+            self._queue.put(RunProgramThread.PROGRESS)
+            # And print what was accumulated to far.
+            stdout_file.seek(previous_tell)
+            print stdout_file.read(current_tell - previous_tell),
+            previous_tell = current_tell
+          # Don't be selfish, let other threads do stuff while we wait for
+          # the process to complete.
+          time.sleep(0.5)
+        # OK, the child process has exited, let's print its output to our
+        # console to create debugging logs in case they get to be needed.
+        stdout_file.flush()
+        stdout_file.seek(previous_tell)
+        print stdout_file.read(stdout_file.tell() - previous_tell)
+      except IOError, e:
+        logging.exception('%s', e)
+        pass
+    finally:
+      stdout_file.close()
+
+    # If we get here the process is done.
+    gChildPIDs.remove(self._process.pid)
+    self._queue.put(RunProgramThread.DONE)
+
+  def _run_posix(self):
+    """No deadlock problem so use the simple answer.  The windows solution
+    appears to add extra buffering which we don't want on other platforms."""
+    self._process = subprocess.Popen(self._cmd,
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+    gChildPIDs.append(self._process.pid)
+    try:
+      while True:
+        line = self._process.stdout.readline()
+        if not line:  # EOF
+          break
+        print line,
+        self._queue.put(RunProgramThread.PROGRESS, True)
+    except IOError:
+      pass
+    # If we get here the process is done.
+    gChildPIDs.remove(self._process.pid)
+    self._queue.put(RunProgramThread.DONE)
+
+  def stop(self):
+    self.kill()
+
+  def kill(self):
+    """Kill our running process if needed.  Wait for kill to complete.
+
+    Should be called in the PARENT thread; we do not self-kill.
+    Returns the return code of the process.
+    Safe to call even if the process is dead.
+    """
+    if not self._process:
+      return self.retcode()
+    if 'kill' in os.__all__:  # POSIX
+      os.kill(self._process.pid, signal.SIGKILL)
+    else:
+      subprocess.call(['taskkill.exe', '/PID', str(self._process.pid)])
+    return self.retcode()
+
+  def retcode(self):
+    """Return the return value of the subprocess.
+
+    Waits for process to die but does NOT kill it explicitly.
+    """
+    if self._retcode == None:  # must be none, not 0/False
+      self._retcode = self._process.wait()
+    return self._retcode
+
+  def RunUntilCompletion(self, timeout):
+    """Run thread until completion or timeout (in seconds).
+
+    Start the thread.  Let it run until completion, or until we've
+    spent TIMEOUT without seeing output.  On timeout throw
+    RunTooLongException.
+    """
+    self.start()
+    while True:
+      try:
+        x = self._queue.get(True, timeout)
+        if x == RunProgramThread.DONE:
+          return self.retcode()
+      except Queue.Empty, e:  # timed out
+        logging.info('TIMEOUT (%d seconds exceeded with no output): killing' %
+                     timeout)
+        self.kill()
+        raise RunTooLongException()
 
 
 class Coverage(object):
   """Doitall class for code coverage."""
 
-  def __init__(self, directory, options, args):
+  def __init__(self, options, args):
     super(Coverage, self).__init__()
     logging.basicConfig(level=logging.DEBUG)
-    self.directory = directory
+    self.directory = options.directory
     self.options = options
     self.args = args
+    self.ConfirmDirectory()
     self.directory_parent = os.path.dirname(self.directory)
     self.output_directory = os.path.join(self.directory, 'coverage')
     if not os.path.exists(self.output_directory):
@@ -122,19 +351,110 @@ class Coverage(object):
         sys.exit(1)
       self.programs = [self.perf, self.instrument, self.analyzer]
 
+  def PlatformBuildPrefix(self):
+    """Return a platform specific build directory prefix.
+
+    This prefix is prepended to the build target (Debug, Release) to
+    identify output as relative to the build directory.
+    These values are specific to Chromium's use of gyp.
+    """
+    if self.IsMac():
+      return '../xcodebuild'
+    if self.IsWindows():
+      return  ''
+    else:  # Linux
+      return '../out'  # assumes make, unlike runtest.py
+
+  def ConfirmDirectory(self):
+    """Confirm correctness of self.directory.
+
+    If it exists, happiness.  If not, try and figure it out in a
+    manner similar to FindBundlesFile().  The 'figure it out' case
+    happens with buildbot where the directory isn't specified
+    explicitly.
+    """
+    if (not self.directory and
+        not (self.options.target and self.options.build_dir)):
+      logging.fatal('Must use --directory or (--target and --build-dir)')
+      sys.exit(1)
+
+    if not self.directory:
+      self.directory = os.path.join(self.options.build_dir,
+                                    self.PlatformBuildPrefix(),
+                                    self.options.target)
+
+    if os.path.exists(self.directory):
+      logging.info('Directory: ' + self.directory)
+      return
+    else:
+      logging.fatal('Directory ' +
+                    self.directory + ' doesn\'t exist')
+      sys.exit(1)
+
+
+  def FindBundlesFile(self):
+    """Find the bundlesfile.
+
+    The 'bundles' file can be either absolute path, or (if we are run
+    from buildbot) we need to find it based on other hints (--target,
+    --build-dir, etc).
+    """
+    # If no bundle file, no problem!
+    if not self.options.bundles:
+      return
+    # If true, we're buildbot.  Form a path.
+    # Else assume absolute.
+    if self.options.target and self.options.build_dir:
+      fullpath = os.path.join(self.options.build_dir,
+                              self.PlatformBuildPrefix(),
+                              self.options.target,
+                              self.options.bundles)
+      self.options.bundles = fullpath
+
+    if os.path.exists(self.options.bundles):
+      logging.info('BundlesFile: ' + self.options.bundles)
+      return
+    else:
+      logging.fatal('bundlefile ' +
+                    self.options.bundles + ' doesn\'t exist')
+      sys.exit(1)
+
+
   def FindTests(self):
     """Find unit tests to run; set self.tests to this list.
 
     Assume all non-option items in the arg list are tests to be run.
     """
+    # Before we begin, find the bundles file if not an absolute path.
+    self.FindBundlesFile()
+
     # Small tests: can be run in the "chromium" directory.
     # If asked, run all we can find.
     if self.options.all_unittests:
       self.tests += glob.glob(os.path.join(self.directory, '*_unittests'))
 
+    # Tests can come in as args or as a file of bundles.
+    all_testnames = self.args[:]  # Copy since we might modify
+    tests_from_bundles = None
+    if self.options.bundles:
+      try:
+        tests_from_bundles = eval(open(self.options.bundles).read())
+      except IOError:
+        logging.fatal('IO error in bundle file ' +
+                      self.options.bundles + ' (doesn\'t exist?)')
+      except (NameError, SyntaxError):
+        logging.fatal('Parse or syntax error in bundle file ' +
+                      self.options.bundles)
+      if hasattr(tests_from_bundles, '__iter__'):
+        all_testnames += tests_from_bundles
+      else:
+        logging.fatal('Fatal error with bundle file; could not get list from' +
+                      self.options.bundles)
+        sys.exit(1)
+
     # If told explicit tests, run those (after stripping the name as
     # appropriate)
-    for testname in self.args:
+    for testname in all_testnames:
       if ':' in testname:
         self.tests += [os.path.join(self.directory, testname.split(':')[1])]
       else:
@@ -189,9 +509,22 @@ class Coverage(object):
 
   def Run(self, cmdlist, ignore_error=False, ignore_retcode=None,
           explanation=None):
-    """Run the command list; exit fatally on error."""
+    """Run the command list; exit fatally on error.
+
+    Args:
+      cmdlist: a list of commands (e.g. to pass to subprocess.call)
+      ignore_error: if True log an error; if False then exit.
+      ignore_retcode: if retcode is non-zero, exit unless we ignore.
+
+    Returns: process return code.
+    Throws: RunTooLongException if the process does not produce output
+    within TIMEOUT seconds; timeout is specified as a command line
+    option to the Coverage class and is set on init.
+    """
     logging.info('Running ' + str(cmdlist))
-    retcode = subprocess.call(cmdlist)
+    t = RunProgramThread(cmdlist)
+    retcode = t.RunUntilCompletion(self.options.timeout)
+
     if retcode:
       if ignore_error or retcode == ignore_retcode:
         logging.warning('COVERAGE: %s unhappy but errors ignored  %s' %
@@ -200,7 +533,7 @@ class Coverage(object):
         logging.fatal('COVERAGE:  %s failed; return code: %d' %
                       (str(cmdlist), retcode))
         sys.exit(retcode)
-
+    return retcode
 
   def IsPosix(self):
     """Return True if we are POSIX."""
@@ -218,6 +551,10 @@ class Coverage(object):
 
   def ClearData(self):
     """Clear old gcda files and old coverage info files."""
+    if self.options.dont_clear_coverage_data:
+      print 'Clearing of coverage data NOT performed.'
+      return
+    print 'Clearing coverage data from previous runs.'
     if os.path.exists(self.coverage_info_file):
       os.remove(self.coverage_info_file)
     if self.IsPosix():
@@ -249,6 +586,28 @@ class Coverage(object):
     if self.IsLinux() and self.options.xvfb:
       self.StartXvfb()
 
+  def GtestFilter(self, fulltest, excl=None):
+    """Return a --gtest_filter=BLAH for this test.
+
+    Args:
+      fulltest: full name of test executable
+      exclusions: the exclusions list.  Only set in a unit test;
+        else uses gTestExclusions.
+    Returns:
+      String of the form '--gtest_filter=BLAH', or None.
+    """
+    if self.options.no_exclusions:
+      return
+    exclusions = excl or gTestExclusions
+    excldict = exclusions.get(sys.platform)
+    if excldict:
+      for test in excldict.keys():
+        # example: if base_unittests in ../blah/blah/base_unittests.exe
+        if test in fulltest:
+          gfilter = '--gtest_filter=-' + ':-'.join(excldict[test])
+          return gfilter
+    return None
+
   def RunTests(self):
     """Run all unit tests and generate appropriate lcov files."""
     self.BeforeRunAllTests()
@@ -268,10 +627,18 @@ class Coverage(object):
         # cmdlist.append('--gtest_filter=CommandLine*')
         cmdlist.append('--gtest_filter=C*')
 
+      # Possibly add a test-specific --gtest_filter
+      filter = self.GtestFilter(fulltest)
+      if filter:
+        cmdlist.append(filter)
+
       self.BeforeRunOneTest(fulltest)
+
       logging.info('Running test ' + str(cmdlist))
       try:
-        retcode = subprocess.call(cmdlist)
+        retcode = self.Run(cmdlist, ignore_retcode=True)
+      except SystemExit:  # e.g. sys.exit() was called somewhere in here
+        raise
       except:  # can't "except WindowsError" since script runs on non-Windows
         logging.info('EXCEPTION while running a unit test')
         logging.info(traceback.format_exc())
@@ -352,16 +719,30 @@ class Coverage(object):
 
   def GenerateLcovPosix(self):
     """Convert profile data to lcov on Mac or Linux."""
+    start_dir = os.getcwd()
     if self.IsLinux():
-      # With Linux/make the current directory for this command is
-      # .../src/chrome but we need to be in .../src for the relative
-      # path of source files to be correct.  On Mac source files are
-      # compiled with abs paths so this isn't a problem.
-      start_dir = os.getcwd()
-      os.chdir('..')
+      # With Linux/make (e.g. the coverage_run target), the current
+      # directory for this command is .../build/src/chrome but we need
+      # to be in .../build/src for the relative path of source files
+      # to be correct.  However, when run from buildbot, the current
+      # directory is .../build.  Accommodate.
+      # On Mac source files are compiled with abs paths so this isn't
+      # a problem.
+      # This is a bit of a hack.  The best answer is to require this
+      # script be run in a specific directory for all cases (from
+      # Makefile or from buildbot).
+      if start_dir.endswith('chrome'):
+        print 'coverage_posix.py: doing a "cd .." to accomodate Linux/make PWD'
+        os.chdir('..')
+      elif start_dir.endswith('build'):
+        print 'coverage_posix.py: doing a "cd src" to accomodate buildbot PWD'
+        os.chdir('src')
+
     command = [self.mcov,
-               '--directory', self.directory_parent,
-               '--output', self.coverage_info_file]
+               '--directory',
+               os.path.join(start_dir, self.directory_parent),
+               '--output',
+               os.path.join(start_dir, self.coverage_info_file)]
     logging.info('Assembly command: ' + ' '.join(command))
     retcode = subprocess.call(command)
     if retcode:
@@ -371,6 +752,10 @@ class Coverage(object):
         sys.exit(retcode)
     if self.IsLinux():
       os.chdir(start_dir)
+    if not os.path.exists(self.coverage_info_file):
+      logging.fatal('%s was not created.  Coverage run failed.' %
+                    self.coverage_info_file)
+      sys.exit(1)
 
   def GenerateLcovWindows(self, testname=None):
     """Convert VSTS format to lcov.  Appends coverage data to sum file."""
@@ -382,6 +767,7 @@ class Coverage(object):
     cmdlist = [self.analyzer,
                '-sym_path=' + self.directory,
                '-src_root=' + self.src_root,
+               '-noxml',
                self.vsts_output]
     self.Run(cmdlist)
     if not os.path.exists(lcov_file):
@@ -417,10 +803,8 @@ class Coverage(object):
       if self.options.strict:
         sys.exit(retcode)
 
-def main():
-  # Print out the args to help someone do it by hand if needed
-  print >>sys.stderr, sys.argv
-
+def CoverageOptionParser():
+  """Return an optparse.OptionParser() suitable for Coverage object creation."""
   parser = optparse.OptionParser()
   parser.add_option('-d',
                     '--directory',
@@ -462,10 +846,51 @@ def main():
                     dest='xvfb',
                     default=True,
                     help='Use Xvfb for tests?  Default True.')
+  parser.add_option('-T',
+                    '--timeout',
+                    dest='timeout',
+                    default=5.0 * 60.0,
+                    type="int",
+                    help='Timeout before bailing if a subprocess has no output.'
+                    '  Default is 5min  (Buildbot is 10min.)')
+  parser.add_option('-B',
+                    '--bundles',
+                    dest='bundles',
+                    default=None,
+                    help='Filename of bundles for coverage.')
+  parser.add_option('--build-dir',
+                    dest='build_dir',
+                    default=None,
+                    help=('Working directory for buildbot build.'
+                          'used for finding bundlefile.'))
+  parser.add_option('--target',
+                    dest='target',
+                    default=None,
+                    help=('Buildbot build target; '
+                          'used for finding bundlefile (e.g. Debug)'))
+  parser.add_option('--no_exclusions',
+                    dest='no_exclusions',
+                    default=None,
+                    help=('Disable the exclusion list.'))
+  parser.add_option('--dont-clear-coverage-data',
+                    dest='dont_clear_coverage_data',
+                    default=False,
+                    action='store_true',
+                    help=('Turn off clearing of cov data from a prev run'))
+  return parser
+
+
+def main():
+  # Print out the args to help someone do it by hand if needed
+  print >>sys.stderr, sys.argv
+
+  # Try and clean up nice if we're killed by buildbot, Ctrl-C, ...
+  signal.signal(signal.SIGINT, TerminateSignalHandler)
+  signal.signal(signal.SIGTERM, TerminateSignalHandler)
+
+  parser = CoverageOptionParser()
   (options, args) = parser.parse_args()
-  if not options.directory:
-    parser.error('Directory not specified')
-  coverage = Coverage(options.directory, options, args)
+  coverage = Coverage(options, args)
   coverage.ClearData()
   coverage.FindTests()
   if options.trim:

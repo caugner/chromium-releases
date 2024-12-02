@@ -9,9 +9,9 @@
 
 #include "app/table_model_observer.h"
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "chrome/browser/search_engines/edit_search_engine_controller.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class AccessibleWidgetHelper;
 class KeywordEditorController;
@@ -31,7 +31,7 @@ class KeywordEditorView : public TableModelObserver,
   virtual void OnEditedKeyword(const TemplateURL* template_url,
                                const std::wstring& title,
                                const std::wstring& keyword,
-                               const std::wstring& url);
+                               const std::string& url);
  private:
   // Column ids for |list_store_|.
   enum {
@@ -104,7 +104,7 @@ class KeywordEditorView : public TableModelObserver,
                                     gpointer user_data);
 
   // Callback for when user selects something.
-  static void OnSelectionChanged(GtkTreeSelection *selection,
+  static void OnSelectionChanged(GtkTreeSelection* selection,
                                  KeywordEditorView* editor);
 
   // Callbacks for user actions modifying the table.
@@ -152,11 +152,11 @@ class KeywordEditorView : public TableModelObserver,
   scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
 
   friend class KeywordEditorViewTest;
-  FRIEND_TEST(KeywordEditorViewTest, Empty);
-  FRIEND_TEST(KeywordEditorViewTest, Add);
-  FRIEND_TEST(KeywordEditorViewTest, MakeDefault);
-  FRIEND_TEST(KeywordEditorViewTest, Remove);
-  FRIEND_TEST(KeywordEditorViewTest, Edit);
+  FRIEND_TEST_ALL_PREFIXES(KeywordEditorViewTest, Empty);
+  FRIEND_TEST_ALL_PREFIXES(KeywordEditorViewTest, Add);
+  FRIEND_TEST_ALL_PREFIXES(KeywordEditorViewTest, MakeDefault);
+  FRIEND_TEST_ALL_PREFIXES(KeywordEditorViewTest, Remove);
+  FRIEND_TEST_ALL_PREFIXES(KeywordEditorViewTest, Edit);
 
   DISALLOW_COPY_AND_ASSIGN(KeywordEditorView);
 };

@@ -15,15 +15,15 @@
 
 @interface FakeEditSearchEngineController : EditSearchEngineCocoaController {
 }
-@property (readonly) NSTextField* nameField;
-@property (readonly) NSTextField* keywordField;
-@property (readonly) NSTextField* urlField;
-@property (readonly) NSImageView* nameImage;
-@property (readonly) NSImageView* keywordImage;
-@property (readonly) NSImageView* urlImage;
-@property (readonly) NSButton* doneButton;
-@property (readonly) NSImage* goodImage;
-@property (readonly) NSImage* badImage;
+@property (nonatomic, readonly) NSTextField* nameField;
+@property (nonatomic, readonly) NSTextField* keywordField;
+@property (nonatomic, readonly) NSTextField* urlField;
+@property (nonatomic, readonly) NSImageView* nameImage;
+@property (nonatomic, readonly) NSImageView* keywordImage;
+@property (nonatomic, readonly) NSImageView* urlImage;
+@property (nonatomic, readonly) NSButton* doneButton;
+@property (nonatomic, readonly) NSImage* goodImage;
+@property (nonatomic, readonly) NSImage* badImage;
 @end
 
 @implementation FakeEditSearchEngineController
@@ -206,7 +206,7 @@ TEST_F(EditSearchEngineControllerTest, EditTemplateURL) {
   TemplateURL url;
   url.set_short_name(L"Foobar");
   url.set_keyword(L"keyword");
-  std::wstring urlString = TemplateURLRef::DisplayURLToURLRef(
+  std::string urlString = TemplateURLRef::DisplayURLToURLRef(
       L"http://foo-bar.com");
   url.SetURL(urlString, 0, 1);
   TestingProfile* profile = browser_helper_.profile();

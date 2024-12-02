@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/status/status_area_host.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/skbitmap_operations.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -34,7 +34,7 @@ NetworkMenuButton::NetworkMenuButton(StatusAreaHost* host)
       ALLOW_THIS_IN_INITIALIZER_LIST(network_menu_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(animation_connecting_(this)) {
   animation_connecting_.SetThrobDuration(kThrobDuration);
-  animation_connecting_.SetTweenType(SlideAnimation::NONE);
+  animation_connecting_.SetTweenType(Tween::LINEAR);
   NetworkChanged(CrosLibrary::Get()->GetNetworkLibrary());
   CrosLibrary::Get()->GetNetworkLibrary()->AddObserver(this);
 }
@@ -100,6 +100,7 @@ void NetworkMenuButton::ActivatedAt(int index) {
     cros->EnableOfflineMode(!cros->offline_mode());
   } else if (flags & FLAG_OTHER_NETWORK) {
     NetworkConfigView* view = new NetworkConfigView();
+    view->set_browser_mode(host_->IsBrowserMode());
     views::Window* window = views::Window::CreateChromeWindow(
         host_->GetNativeWindow(), gfx::Rect(), view);
     window->SetIsAlwaysOnTop(true);
@@ -108,31 +109,41 @@ void NetworkMenuButton::ActivatedAt(int index) {
   } else if (flags & FLAG_ETHERNET) {
     if (cros->ethernet_connected()) {
       NetworkConfigView* view = new NetworkConfigView(cros->ethernet_network());
+      view->set_browser_mode(host_->IsBrowserMode());
       views::Window* window = views::Window::CreateChromeWindow(
             host_->GetNativeWindow(), gfx::Rect(), view);
       window->SetIsAlwaysOnTop(true);
       window->Show();
     }
   } else if (flags & FLAG_WIFI) {
-    WifiNetwork wifi = menu_items_[index].wifi_network;
-
-    // If clicked on a network that we are already connected to or we are
-    // currently trying to connect to, then open config dialog.
-    if (wifi.ssid == cros->wifi_ssid()) {
+    WifiNetwork wifi;
+    bool wifi_exists = cros->FindWifiNetworkByPath(
+        menu_items_[index].wireless_path, &wifi);
+    if (!wifi_exists) {
+      // If we are attempting to connect to a network that no longer exists,
+      // display a notification.
+      // TODO(stevenjb): Show notification.
+    } else if (wifi.name() == cros->wifi_name()) {
       if (cros->wifi_connected()) {
+        // If we are already connected, open the config dialog.
         NetworkConfigView* view = new NetworkConfigView(wifi, false);
+        view->set_browser_mode(host_->IsBrowserMode());
         views::Window* window = views::Window::CreateChromeWindow(
             host_->GetNativeWindow(), gfx::Rect(), view);
         window->SetIsAlwaysOnTop(true);
         window->Show();
+      } else {
+        // TODO(stevenjb): Connection in progress. Show dialog?
       }
     } else {
       // If wifi network is not encrypted, then directly connect.
       // Otherwise, we open password dialog window.
-      if (!wifi.encrypted) {
-        cros->ConnectToWifiNetwork(wifi, string16());
+      if (!wifi.encrypted()) {
+        cros->ConnectToWifiNetwork(wifi, std::string(),
+                                   std::string(), std::string());
       } else {
         NetworkConfigView* view = new NetworkConfigView(wifi, true);
+        view->set_browser_mode(host_->IsBrowserMode());
         views::Window* window = views::Window::CreateChromeWindow(
             host_->GetNativeWindow(), gfx::Rect(), view);
         window->SetIsAlwaysOnTop(true);
@@ -141,17 +152,26 @@ void NetworkMenuButton::ActivatedAt(int index) {
       }
     }
   } else if (flags & FLAG_CELLULAR) {
-    CellularNetwork cellular = menu_items_[index].cellular_network;
+    CellularNetwork cellular;
+    bool cellular_exists = cros->FindCellularNetworkByPath(
+        menu_items_[index].wireless_path, &cellular);
 
-    // If clicked on a network that we are already connected to or we are
-    // currently trying to connect to, then open config dialog.
-    if (cellular.name == cros->cellular_name()) {
+    if (!cellular_exists) {
+      // If we are attempting to connect to a network that no longer exists,
+      // display a notification.
+      // TODO(stevenjb): Show notification.
+    } else if (cellular.name() == cros->cellular_name()) {
+      // If clicked on a network that we are already connected to or we are
+      // currently trying to connect to, then open config dialog.
       if (cros->cellular_connected()) {
         NetworkConfigView* view = new NetworkConfigView(cellular);
+        view->set_browser_mode(host_->IsBrowserMode());
         views::Window* window = views::Window::CreateChromeWindow(
             host_->GetNativeWindow(), gfx::Rect(), view);
         window->SetIsAlwaysOnTop(true);
         window->Show();
+      } else {
+        // TODO(stevenjb): Connection in progress. Show dialog?
       }
     } else {
       cros->ConnectToCellularNetwork(cellular);
@@ -185,7 +205,7 @@ void NetworkMenuButton::DrawPressed(gfx::Canvas* canvas) {
   // If ethernet connected and not current connecting, then show ethernet
   // pressed icon. Otherwise, show the bars pressed icon.
   if (CrosLibrary::Get()->GetNetworkLibrary()->ethernet_connected() &&
-      !animation_connecting_.IsAnimating())
+      !animation_connecting_.is_animating())
     canvas->DrawBitmapInt(IconForDisplay(
         *ResourceBundle::GetSharedInstance().
             GetBitmapNamed(IDR_STATUSBAR_NETWORK_WIRED_PRESSED), SkBitmap()),
@@ -230,19 +250,19 @@ void NetworkMenuButton::DrawIcon(gfx::Canvas* canvas) {
     // figure out if we are to also draw the extra image.
     int downloading_index = -1;
     int uploading_index = -1;
-    if (!animation_connecting_.IsAnimating()) {
+    if (!animation_connecting_.is_animating()) {
       // For network animation, we only show animation in one direction.
       // So when we are hiding, we just use 1 minus the value.
       // We have kNumWifiImages + 1 number of states. For the first state, where
       // we are not adding any images, we set the index to -1.
-      if (animation_downloading_.IsAnimating()) {
+      if (animation_downloading_.is_animating()) {
         double value_downloading = animation_downloading_.IsShowing() ?
             animation_downloading_.GetCurrentValue() :
             1.0 - animation_downloading_.GetCurrentValue();
         downloading_index = static_cast<int>(value_downloading *
               nextafter(static_cast<float>(kNumWifiImages + 1), 0)) - 1;
       }
-      if (animation_uploading_.IsAnimating()) {
+      if (animation_uploading_.is_animating()) {
         double value_uploading = animation_uploading_.IsShowing() ?
             animation_uploading_.GetCurrentValue() :
             1.0 - animation_uploading_.GetCurrentValue();
@@ -261,6 +281,53 @@ void NetworkMenuButton::DrawIcon(gfx::Canvas* canvas) {
     //   If value within the range of this image, draw at an opacity value
     //     between kMinOpacity and kMaxOpacity-1 relative to where in the range
     //     value is at.
+    // NOTE: Use an array rather than just calculating a resource number to
+    // avoid creating implicit ordering dependencies on the resource values.
+    static const int kWifiUpImages[kNumWifiImages] = {
+      IDR_STATUSBAR_WIFI_UP1,
+      IDR_STATUSBAR_WIFI_UP2,
+      IDR_STATUSBAR_WIFI_UP3,
+      IDR_STATUSBAR_WIFI_UP4,
+      IDR_STATUSBAR_WIFI_UP5,
+      IDR_STATUSBAR_WIFI_UP6,
+      IDR_STATUSBAR_WIFI_UP7,
+      IDR_STATUSBAR_WIFI_UP8,
+      IDR_STATUSBAR_WIFI_UP9,
+    };
+    static const int kWifiUpPImages[kNumWifiImages] = {
+      IDR_STATUSBAR_WIFI_UP1P,
+      IDR_STATUSBAR_WIFI_UP2P,
+      IDR_STATUSBAR_WIFI_UP3P,
+      IDR_STATUSBAR_WIFI_UP4P,
+      IDR_STATUSBAR_WIFI_UP5P,
+      IDR_STATUSBAR_WIFI_UP6P,
+      IDR_STATUSBAR_WIFI_UP7P,
+      IDR_STATUSBAR_WIFI_UP8P,
+      IDR_STATUSBAR_WIFI_UP9P,
+    };
+    static const int kWifiDownImages[kNumWifiImages] = {
+      IDR_STATUSBAR_WIFI_DOWN1,
+      IDR_STATUSBAR_WIFI_DOWN2,
+      IDR_STATUSBAR_WIFI_DOWN3,
+      IDR_STATUSBAR_WIFI_DOWN4,
+      IDR_STATUSBAR_WIFI_DOWN5,
+      IDR_STATUSBAR_WIFI_DOWN6,
+      IDR_STATUSBAR_WIFI_DOWN7,
+      IDR_STATUSBAR_WIFI_DOWN8,
+      IDR_STATUSBAR_WIFI_DOWN9,
+    };
+    static const int kWifiDownPImages[kNumWifiImages] = {
+      IDR_STATUSBAR_WIFI_DOWN1P,
+      IDR_STATUSBAR_WIFI_DOWN2P,
+      IDR_STATUSBAR_WIFI_DOWN3P,
+      IDR_STATUSBAR_WIFI_DOWN4P,
+      IDR_STATUSBAR_WIFI_DOWN5P,
+      IDR_STATUSBAR_WIFI_DOWN6P,
+      IDR_STATUSBAR_WIFI_DOWN7P,
+      IDR_STATUSBAR_WIFI_DOWN8P,
+      IDR_STATUSBAR_WIFI_DOWN9P,
+    };
+
     double value_per_image = 1.0 / kNumWifiImages;
     SkPaint paint;
     for (int i = 0; i < kNumWifiImages; i++) {
@@ -275,18 +342,19 @@ void NetworkMenuButton::DrawIcon(gfx::Canvas* canvas) {
         // So we set value to 0 here.
         value = 0;
       }
-      canvas->DrawBitmapInt(*rb.GetBitmapNamed(IDR_STATUSBAR_WIFI_UP1 + i),
-                            0, 0, paint);
-      canvas->DrawBitmapInt(*rb.GetBitmapNamed(IDR_STATUSBAR_WIFI_DOWN1 + i),
-                            0, 0, paint);
+      canvas->DrawBitmapInt(*rb.GetBitmapNamed(kWifiUpImages[i]), 0, 0, paint);
+      canvas->DrawBitmapInt(*rb.GetBitmapNamed(kWifiDownImages[i]), 0, 0,
+                            paint);
 
       // Draw network traffic downloading/uploading image if necessary.
-      if (i == downloading_index)
-        canvas->DrawBitmapInt(*rb.GetBitmapNamed(IDR_STATUSBAR_WIFI_DOWN1P + i),
-                              0, 0, paint);
-      if (i == uploading_index)
-        canvas->DrawBitmapInt(*rb.GetBitmapNamed(IDR_STATUSBAR_WIFI_UP1P + i),
-                              0, 0, paint);
+      if (i == downloading_index) {
+        canvas->DrawBitmapInt(*rb.GetBitmapNamed(kWifiDownPImages[i]), 0, 0,
+                              paint);
+      }
+      if (i == uploading_index) {
+        canvas->DrawBitmapInt(*rb.GetBitmapNamed(kWifiUpPImages[i]), 0, 0,
+                              paint);
+      }
     }
   }
 }
@@ -299,7 +367,7 @@ void NetworkMenuButton::NetworkChanged(NetworkLibrary* cros) {
   if (CrosLibrary::Get()->EnsureLoaded()) {
     if (cros->wifi_connecting() || cros->cellular_connecting()) {
       // Start the connecting animation if not running.
-      if (!animation_connecting_.IsAnimating()) {
+      if (!animation_connecting_.is_animating()) {
         animation_connecting_.Reset();
         animation_connecting_.StartThrobbing(std::numeric_limits<int>::max());
         SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS1));
@@ -359,15 +427,36 @@ void NetworkMenuButton::SetBadge(const SkBitmap& badge) {
 // static
 SkBitmap NetworkMenuButton::IconForNetworkStrength(int strength, bool black) {
   // Compose wifi icon by superimposing various icons.
+  // NOTE: Use an array rather than just calculating a resource number to avoid
+  // creating implicit ordering dependencies on the resource values.
+  static const int kBarsImages[kNumWifiImages] = {
+    IDR_STATUSBAR_NETWORK_BARS1,
+    IDR_STATUSBAR_NETWORK_BARS2,
+    IDR_STATUSBAR_NETWORK_BARS3,
+    IDR_STATUSBAR_NETWORK_BARS4,
+    IDR_STATUSBAR_NETWORK_BARS5,
+    IDR_STATUSBAR_NETWORK_BARS6,
+    IDR_STATUSBAR_NETWORK_BARS7,
+    IDR_STATUSBAR_NETWORK_BARS8,
+    IDR_STATUSBAR_NETWORK_BARS9,
+  };
+  static const int kBarsBlackImages[kNumWifiImages] = {
+    IDR_STATUSBAR_NETWORK_BARS1_BLACK,
+    IDR_STATUSBAR_NETWORK_BARS2_BLACK,
+    IDR_STATUSBAR_NETWORK_BARS3_BLACK,
+    IDR_STATUSBAR_NETWORK_BARS4_BLACK,
+    IDR_STATUSBAR_NETWORK_BARS5_BLACK,
+    IDR_STATUSBAR_NETWORK_BARS6_BLACK,
+    IDR_STATUSBAR_NETWORK_BARS7_BLACK,
+    IDR_STATUSBAR_NETWORK_BARS8_BLACK,
+    IDR_STATUSBAR_NETWORK_BARS9_BLACK,
+  };
+
   int index = static_cast<int>(strength / 100.0 *
       nextafter(static_cast<float>(kNumWifiImages), 0));
-  if (index < 0)
-    index = 0;
-  if (index >= kNumWifiImages)
-    index = kNumWifiImages - 1;
-  int base = black ? IDR_STATUSBAR_NETWORK_BARS1_BLACK :
-                     IDR_STATUSBAR_NETWORK_BARS1;
-  return *ResourceBundle::GetSharedInstance().GetBitmapNamed(base + index);
+  index = std::max(std::min(index, kNumWifiImages - 1), 0);
+  return *ResourceBundle::GetSharedInstance().GetBitmapNamed(
+      black ? kBarsBlackImages[index] : kBarsImages[index]);
 }
 
 // static
@@ -382,7 +471,7 @@ SkBitmap NetworkMenuButton::IconForDisplay(SkBitmap icon, SkBitmap badge) {
   static const int kBadgeX = 14;
   static const int kBadgeY = 14;
 
-  gfx::Canvas canvas(kIconWidth, kIconHeight, false);
+  gfx::CanvasSkia canvas(kIconWidth, kIconHeight, false);
   canvas.DrawBitmapInt(icon, kIconX, kIconY);
   if (!badge.empty())
     canvas.DrawBitmapInt(badge, kBadgeX, kBadgeY);
@@ -417,36 +506,35 @@ void NetworkMenuButton::InitMenuItems() {
   int flag = (cros->ethernet_connecting() || cros->ethernet_connected()) ?
       FLAG_ETHERNET | FLAG_ASSOCIATED : FLAG_ETHERNET;
   menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
-      IconForDisplay(icon, badge), WifiNetwork(), CellularNetwork(), flag));
+      IconForDisplay(icon, badge), std::string(), flag));
 
   // Wifi
   const WifiNetworkVector& wifi_networks = cros->wifi_networks();
   // Wifi networks ssids.
   for (size_t i = 0; i < wifi_networks.size(); ++i) {
-    label = ASCIIToUTF16(wifi_networks[i].ssid);
-    SkBitmap icon = IconForNetworkStrength(wifi_networks[i].strength, true);
-    SkBitmap badge = wifi_networks[i].encrypted ?
+    label = ASCIIToUTF16(wifi_networks[i].name());
+    SkBitmap icon = IconForNetworkStrength(wifi_networks[i].strength(), true);
+    SkBitmap badge = wifi_networks[i].encrypted() ?
         *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_SECURE) : SkBitmap();
-    flag = (wifi_networks[i].ssid == cros->wifi_ssid()) ?
+    flag = (wifi_networks[i].name() == cros->wifi_name()) ?
         FLAG_WIFI | FLAG_ASSOCIATED : FLAG_WIFI;
     menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
-        IconForDisplay(icon, badge), wifi_networks[i], CellularNetwork(),
-        flag));
+        IconForDisplay(icon, badge), wifi_networks[i].service_path(), flag));
   }
 
   // Cellular
   const CellularNetworkVector& cell_networks = cros->cellular_networks();
   // Cellular networks ssids.
   for (size_t i = 0; i < cell_networks.size(); ++i) {
-    label = ASCIIToUTF16(cell_networks[i].name);
-    SkBitmap icon = IconForNetworkStrength(cell_networks[i].strength, true);
+    label = ASCIIToUTF16(cell_networks[i].name());
+    SkBitmap icon = IconForNetworkStrength(cell_networks[i].strength(), true);
     // TODO(chocobo): Check cellular network 3g/edge.
     SkBitmap badge = *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_3G);
 //    SkBitmap badge = *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_EDGE);
-    flag = (cell_networks[i].name == cros->cellular_name()) ?
+    flag = (cell_networks[i].name() == cros->cellular_name()) ?
         FLAG_CELLULAR | FLAG_ASSOCIATED : FLAG_CELLULAR;
     menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
-        IconForDisplay(icon, badge), WifiNetwork(), cell_networks[i], flag));
+        IconForDisplay(icon, badge), cell_networks[i].service_path(), flag));
   }
 
   // No networks available message.
@@ -454,7 +542,7 @@ void NetworkMenuButton::InitMenuItems() {
     label = l10n_util::GetStringFUTF16(IDS_STATUSBAR_NETWORK_MENU_ITEM_INDENT,
                 l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_NETWORKS_MESSAGE));
     menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
-        SkBitmap(), WifiNetwork(), CellularNetwork(), FLAG_DISABLED));
+        SkBitmap(), std::string(), FLAG_DISABLED));
   }
 
   // Other networks
@@ -462,7 +550,7 @@ void NetworkMenuButton::InitMenuItems() {
       l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_NETWORKS),
       IconForDisplay(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0),
                      SkBitmap()),
-      WifiNetwork(), CellularNetwork(), FLAG_OTHER_NETWORK));
+      std::string(), FLAG_OTHER_NETWORK));
 
   if (cros->wifi_available() || cros->cellular_available()) {
     // Separator.
@@ -475,7 +563,7 @@ void NetworkMenuButton::InitMenuItems() {
       label = l10n_util::GetStringFUTF16(id,
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_WIFI));
       menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
-          SkBitmap(), WifiNetwork(), CellularNetwork(), FLAG_TOGGLE_WIFI));
+          SkBitmap(), std::string(), FLAG_TOGGLE_WIFI));
     }
 
     // Turn Cellular Off. (only if cellular available)
@@ -485,7 +573,7 @@ void NetworkMenuButton::InitMenuItems() {
       label = l10n_util::GetStringFUTF16(id,
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_CELLULAR));
       menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
-          SkBitmap(), WifiNetwork(), CellularNetwork(), FLAG_TOGGLE_CELLULAR));
+          SkBitmap(), std::string(), FLAG_TOGGLE_CELLULAR));
     }
   }
 
@@ -494,7 +582,7 @@ void NetworkMenuButton::InitMenuItems() {
 //  menu_items_.push_back(MenuItem(cros->offline_mode() ?
 //      menus::MenuModel::TYPE_CHECK : menus::MenuModel::TYPE_COMMAND,
 //      l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_OFFLINE_MODE),
-//      SkBitmap(), WifiNetwork(), CellularNetwork(), FLAG_TOGGLE_OFFLINE));
+//      SkBitmap(), std::string(), FLAG_TOGGLE_OFFLINE));
 
   if (cros->Connected() || host_->ShouldOpenButtonOptions(this)) {
     // Separator.
@@ -504,7 +592,7 @@ void NetworkMenuButton::InitMenuItems() {
     if (cros->Connected()) {
       menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND,
           ASCIIToUTF16(cros->IPAddress()), SkBitmap(),
-          WifiNetwork(), CellularNetwork(), FLAG_DISABLED));
+          std::string(), FLAG_DISABLED));
     }
 
     // Network settings.
@@ -512,7 +600,7 @@ void NetworkMenuButton::InitMenuItems() {
       label =
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_OPEN_OPTIONS_DIALOG);
       menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
-          SkBitmap(), WifiNetwork(), CellularNetwork(), FLAG_OPTIONS));
+          SkBitmap(), std::string(), FLAG_OPTIONS));
     }
   }
 }

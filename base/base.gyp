@@ -33,6 +33,8 @@
       'sources': [
         'i18n/file_util_icu.cc',
         'i18n/file_util_icu.h',
+        'i18n/icu_encoding_detection.cc',
+        'i18n/icu_encoding_detection.h',
         'i18n/icu_string_conversions.cc',
         'i18n/icu_string_conversions.h',
         'i18n/icu_util.cc',
@@ -74,6 +76,7 @@
         'data_pack_unittest.cc',
         'debug_util_unittest.cc',
         'dir_reader_posix_unittest.cc',
+	'env_var_unittest.cc',
         'event_trace_consumer_win_unittest.cc',
         'event_trace_controller_win_unittest.cc',
         'event_trace_provider_win_unittest.cc',
@@ -98,6 +101,7 @@
         'linked_list_unittest.cc',
         'linked_ptr_unittest.cc',
         'mac_util_unittest.mm',
+        'message_loop_proxy_impl_unittest.cc',
         'message_loop_unittest.cc',
         'message_pump_glib_unittest.cc',
         'object_watcher_unittest.cc',
@@ -139,6 +143,7 @@
         'time_win_unittest.cc',
         'timer_unittest.cc',
         'tools_sanity_unittest.cc',
+        'trace_event_win_unittest.cc',
         'tracked_objects_unittest.cc',
         'tuple_unittest.cc',
         'utf_offset_string_conversions_unittest.cc',
@@ -169,6 +174,9 @@
           'sources!': [
             'file_version_info_unittest.cc',
             'worker_pool_linux_unittest.cc',
+          ],
+          'sources': [
+            'xdg_util_unittest.cc',
           ],
           'dependencies': [
             '../build/linux/system.gyp:gtk',
@@ -202,6 +210,7 @@
             'scoped_variant_win_unittest.cc',
             'system_monitor_unittest.cc',
             'time_win_unittest.cc',
+            'trace_event_win_unittest.cc',
             'win_util_unittest.cc',
             'wmi_util_unittest.cc',
           ],
@@ -265,65 +274,6 @@
               'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
             },
           },
-        },
-      ],
-    }],
-    [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd" or OS == "solaris"', {
-      'targets': [
-        {
-          'target_name': 'linux_versioninfo',
-          'type': '<(library)',
-          'sources': [
-            'file_version_info_linux.cc',
-          ],
-          'include_dirs': [
-            '..',
-            '<(SHARED_INTERMEDIATE_DIR)',
-          ],
-          'actions': [
-            {
-              'action_name': 'linux_version',
-              'variables': {
-                'lastchange_path':
-                  '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
-                'version_py_path': '../chrome/tools/build/version.py',
-                'version_path': '../chrome/VERSION',
-                'template_input_path': 'file_version_info_linux.h.version',
-              },
-              'conditions': [
-                [ 'branding == "Chrome"', {
-                  'variables': {
-                     'branding_path':
-                       '../chrome/app/theme/google_chrome/BRANDING',
-                  },
-                }, { # else branding!="Chrome"
-                  'variables': {
-                     'branding_path':
-                       '../chrome/app/theme/chromium/BRANDING',
-                  },
-                }],
-              ],
-              'inputs': [
-                '<(template_input_path)',
-                '<(version_path)',
-                '<(branding_path)',
-                '<(lastchange_path)',
-              ],
-              'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/base/file_version_info_linux.h',
-              ],
-              'action': [
-                'python',
-                '<(version_py_path)',
-                '-f', '<(version_path)',
-                '-f', '<(branding_path)',
-                '-f', '<(lastchange_path)',
-                '<(template_input_path)',
-                '<@(_outputs)',
-              ],
-              'message': 'Generating version information',
-            },
-          ],
         },
       ],
     }],

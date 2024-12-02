@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/breakpad_win.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "googleurl/src/gurl.h"
@@ -23,6 +22,11 @@ typedef void (__cdecl *MainSetClientId)(const wchar_t*);
 // exported in breakpad_win.cc:
 // void __declspec(dllexport) __cdecl SetExtensionID.
 typedef void (__cdecl *MainSetExtensionID)(size_t, const wchar_t*);
+
+// exported in breakpad_win.cc: void __declspec(dllexport) __cdecl SetGpuInfo.
+typedef void (__cdecl *MainSetGpuInfo)(const wchar_t*, const wchar_t*,
+                                       const wchar_t*, const wchar_t*,
+                                       const wchar_t*);
 
 void SetActiveURL(const GURL& url) {
   static MainSetActiveURL set_active_url = NULL;
@@ -88,6 +92,24 @@ void SetActiveExtensions(const std::set<std::string>& extension_ids) {
       (set_extension_id)(i, L"");
     }
   }
+}
+
+void SetGpuInfo(const GPUInfo& gpu_info) {
+  static MainSetGpuInfo set_gpu_info = NULL;
+  if (!set_gpu_info) {
+    HMODULE exe_module = GetModuleHandle(chrome::kBrowserProcessExecutableName);
+    if (!exe_module)
+      return;
+    set_gpu_info = reinterpret_cast<MainSetGpuInfo>(
+        GetProcAddress(exe_module, "SetGpuInfo"));
+    if (!set_gpu_info)
+      return;
+  }
+  (set_gpu_info)(UintToWString(gpu_info.vendor_id()).c_str(),
+                 UintToWString(gpu_info.device_id()).c_str(),
+                 gpu_info.driver_version().c_str(),
+                 UintToWString(gpu_info.pixel_shader_version()).c_str(),
+                 UintToWString(gpu_info.vertex_shader_version()).c_str());
 }
 
 }  // namespace child_process_logging

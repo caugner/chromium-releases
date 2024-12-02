@@ -35,7 +35,6 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
     prefs::kTLS1Enabled,
 #endif
 #if defined(OS_CHROMEOS)
-    prefs::kTimeZone,
     prefs::kTapToClickEnabled,
     prefs::kVertEdgeScrollEnabled,
     prefs::kTouchpadSpeedFactor,
@@ -48,8 +47,6 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
     prefs::kAutoFillEnabled,
     prefs::kHomePage,
     prefs::kHomePageIsNewTabPage,
-    prefs::kMixedContentFiltering,
-    prefs::kPrivacyFilterRules,
     prefs::kPromptForDownload,
     prefs::kPasswordManagerEnabled,
     prefs::kRestoreOnStartup,
@@ -67,6 +64,7 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
     prefs::kWebKitPluginsEnabled,
     prefs::kWebKitSansSerifFontFamily,
     prefs::kWebKitSerifFontFamily,
+    prefs::kWebkitTabsToLinks,
   };
   profile->GetDownloadManager()->ResetAutoOpenFiles();
   profile->GetHostContentSettingsMap()->ResetToDefaults();

@@ -137,7 +137,6 @@
 <translation id="1486408090387743835"><ph name="PRODUCT_NAME"/> beschikt nu over <ph name="BEGIN_LINK"/>extensies<ph name="END_LINK"/> en <ph name="BEGIN_BUTTON"/>bladwijzersynchronisatie<ph name="END_BUTTON"/>.</translation>
 <translation id="4422347585044846479">Bladwijzer voor deze pagina bewerken</translation>
 <translation id="8546306075665861288">Cachegeheugen met afbeeldingen</translation>
-<translation id="3899346049825960202">Ondersteuning voor Linux-proxyconfiguratie</translation>
 <translation id="1399076603473531278">De aanmeldingsgegevens zijn verlopen.</translation>
 <translation id="3391060940042023865">De volgende plug-in is vastgelopen: <ph name="PLUGIN_NAME"/></translation>
 <translation id="5197255632782567636">Internet</translation>
@@ -147,7 +146,6 @@
 <translation id="1556537182262721003">Kan extensiedirectory niet verplaatsen naar profiel.</translation>
 <translation id="5866557323934807206">Deze instellingen wissen voor komende bezoeken</translation>
 <translation id="6370820475163108109"><ph name="ORGANIZATION_NAME"/> (<ph name="DOMAIN_NAME"/>)</translation>
-<translation id="763276826334024854">Wanneer u <ph name="PRODUCT_NAME"/> uitvoert via een ondersteunde bureaubladomgeving, worden de proxyinstellingen van het systeem gebruikt. Uw systeem wordt echter niet ondersteund of er is een probleem opgetreden met het activeren van uw systeemconfiguratie. Gebruik de volgende omgevingsvariabelen om uw proxyinstellingen te configureren:        <ph name="BEGIN_LIST"/>          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>auto_proxy<ph name="END_CODE"/><ph name="END_LIST_ITEM"/>          <ph name="BEGIN_LIST"/>            <ph name="BEGIN_LIST_ITEM"/>Gedefinieerd en leeg → autodetect<ph name="END_LIST_ITEM"/>            <ph name="BEGIN_LIST_ITEM"/>Niet leeg → geeft URL voor automatische configuratie op<ph name="END_LIST_ITEM"/>          <ph name="END_LIST"/>          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>all_proxy<ph name="END_CODE"/>: proxyserver gebruiken voor alle typen<ph name="END_LIST_ITEM"/>          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>http_proxy<ph name="END_CODE"/>: HTTP-proxyserver<ph name="END_LIST_ITEM"/>          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>https_proxy<ph name="END_CODE"/>: HTTPS-proxyserver<ph name="END_LIST_ITEM"/>          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>ftp_proxy<ph name="END_CODE"/>: FTP-proxyserver<ph name="END_LIST_ITEM"/>          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>SOCKS_SERVER<ph name="END_CODE"/>: SOCKS-proxyserver (wordt standaard ingesteld op SOCKS v4, geef ook op dat SOCKS_VERSION=5 SOCKS v5 gebruikt)<ph name="END_LIST_ITEM"/>          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>no_proxy<ph name="END_CODE"/>: CSV-lijst met hosts of patronen die de proxy moeten negeren<ph name="END_LIST_ITEM"/>        <ph name="END_LIST"/></translation>
 <translation id="2933933591993394296">Bladwijzersynchronisatie is uitgeschakeld voor deze computer. Als u <ph name="NAME_OF_EXTENSION"/> verwijdert, kunt u 'Mijn bladwijzers synchroniseren' opnieuw inschakelen. Selecteer hiervoor 'Synchronisatie instellen...' in het menu 'Gereedschap'.</translation>
 <translation id="8820817407110198400">Bladwijzers</translation>
 <translation id="5191625995327478163">&amp;Taalinstellingen...</translation>
@@ -155,7 +153,6 @@
 <translation id="5585645215698205895">&amp;Omlaag</translation>
 <translation id="6596816719288285829">IP-adres</translation>
 <translation id="1674989413181946727">SSL-instellingen voor hele computer:</translation>
-<translation id="1452199478873730826">Flikr</translation>
 <translation id="8703575177326907206">Uw verbinding met <ph name="DOMAIN"/> is niet gecodeerd.</translation>
 <translation id="4197577448076628265">Deze extensie heeft toegang tot uw browsegeschiedenis en privégegevens op <ph name="HOST"/>.</translation>
 <translation id="1644574205037202324">Geschiedenis</translation>
@@ -325,7 +322,6 @@
 <translation id="348620396154188443">Toestaan dat alle sites bureaubladmeldingen weergeven</translation>
 <translation id="8214489666383623925">Open bestand...</translation>
 <translation id="5230160809118287008">Goats Teleported</translation>
-<translation id="5296476177639202243">Er zijn geen bladwijzers die overeenkomen met de zoekopdracht '<ph name="SEARCH_TEXT"/>'.</translation>
 <translation id="4495419450179050807">Niet op deze pagina weergeven</translation>
 <translation id="939736085109172342">Nieuwe map</translation>
 <translation id="4933484234309072027">ingesloten in <ph name="URL"/></translation>
@@ -365,7 +361,6 @@
 <translation id="1684861821302948641">Pagina's sluiten</translation>
 <translation id="6802031077390104172"><ph name="USAGE"/> (<ph name="OID"/>)</translation>
 <translation id="857089571609443760">Synchronisatie werkt niet correct omdat er te veel verzoeken worden verzonden naar de server. <ph name="NAME_OF_EXTENSION"/> brengt te veel wijzigingen aan in uw bladwijzers.</translation>
-<translation id="5965640700983474726">Typ om te zoeken</translation>
 <translation id="40334469106837974">Pagina-indeling wijzigen</translation>
 <translation id="2142570832281562688">Een profielnaam opgeven</translation>
 <translation id="5904714272463161824">&amp;Fout of niet-bereikbare website melden...</translation>
@@ -383,7 +378,6 @@
 <translation id="2620436844016719705">Systeem</translation>
 <translation id="5362741141255528695">Selecteer een privésleutelbestand.</translation>
 <translation id="7012108905414904806">Deze pagina bevat echter andere bronnen die niet veilig zijn. Deze bronnen kunnen tijdens de overdracht door anderen worden bekeken, en hackers kunnen het uiterlijk of gedrag van de pagina wijzigen.</translation>
-<translation id="644318894204114995">Uitvoeren in incognitomodus bevestigen</translation>
 <translation id="7226140659422399856">Browsercrash... Vastgelopen</translation>
 <translation id="4515911410595374805">Sommige elementen op deze pagina zijn afkomstig van een ongeverifieerde bron en zijn niet weergegeven.</translation>
 <translation id="1195447618553298278">Onbekende fout</translation>
@@ -392,7 +386,6 @@
 <translation id="6610600335992778838">Wi-Fi</translation>
 <translation id="1087119889335281750">Gee&amp;n spellingsuggesties</translation>
 <translation id="5228309736894624122">Fout met SSL-protocol.</translation>
-<translation id="718141787353053227">Pagina-instelling...</translation>
 <translation id="5076340679995252485">&amp;Plakken</translation>
 <translation id="5097982659374947325">Alleen cookies accepteren van sites die ik bezoek</translation>
 <translation id="14171126816530869">De identiteit van <ph name="ORGANIZATION"/> op <ph name="LOCALITY"/> is geverifieerd door <ph name="ISSUER"/>.</translation>
@@ -419,7 +412,6 @@
 <translation id="6786747875388722282">Extensies</translation>
 <translation id="9053965862400494292">Er is een fout opgetreden bij het instellen van de synchronisatie.</translation>
 <translation id="4636930964841734540">Info</translation>
-<translation id="2815500128677761940">Bladwijzerbalk</translation>
 <translation id="4571852245489094179">Bladwijzers en instellingen importeren</translation>
 <translation id="6514771739083339959">Startpagina:</translation>
 <translation id="4421917670248123270">Sluiten en downloads annuleren</translation>
@@ -482,7 +474,6 @@
 <translation id="8425492902634685834">Vastzetten op taakbalk</translation>
 <translation id="3234408098842461169">Pijl-omlaag</translation>
 <translation id="825608351287166772">Certificaten hebben een geldigheidsduur, net als identiteitsbewijzen (zoals een paspoort) die u zelf heeft. Het certificaat dat aan de browser is geretourneerd, is nog niet geldig. Buiten de geldigheidsperiode hoeft voor een certificaat bepaalde informatie over de status van het certificaat (of het is ingetrokken en niet meer betrouwbaar is) niet bijgehouden te worden. Het is daarom niet mogelijk te verifiëren of dit certificaat betrouwbaar is. U kunt beter niet verder gaan.</translation>
-<translation id="8786172108436160456">Toestaan dat <ph name="EXTENSION_NAME"/> in incognitomodus wordt uitgevoerd?</translation>
 <translation id="5209518306177824490">SHA-1-vingerafdruk</translation>
 <translation id="7154150278819212687">Deze extensie heeft toegang tot uw browsegeschiedenis.</translation>
 <translation id="1553538517812678578">onbeperkt</translation>
@@ -493,13 +484,11 @@
 <translation id="4874539263382920044">De titel moet ten minste één teken bevatten</translation>
 <translation id="2963998720451829125"><ph name="NAME_OF_EXTENSION"/> is uitgeschakeld. Als u het synchroniseren van bladwijzers uitschakelt, kunt u deze extensie weer inschakelen op de pagina 'Extensies', beschikbaar via het menu 'Gereedschap'.</translation>
 <translation id="7344633671344536647">Browsegegevens:</translation>
-<translation id="2332311077028912338">Weet u zeker dat u deze extensie in incognitomodus wilt uitvoeren? <ph name="PRODUCT_NAME"/> kan niet voorkomen dat deze extensie uw browsegegevens opslaat.</translation>
 <translation id="4250680216510889253">Nee</translation>
 <translation id="6291953229176937411">&amp;Toon in Finder</translation>
 <translation id="7905536804357499080">Huidige gebruiken</translation>
 <translation id="8933960630081805351">&amp;Toon in Finder</translation>
 <translation id="3041612393474885105">Certificaatgegevens</translation>
-<translation id="7378810950367401542">/</translation>
 <translation id="3733127536501031542">SSL-server met step-up</translation>
 <translation id="954586097957006897">Achternaam</translation>
 <translation id="5849941564644911027"><ph name="PRODUCT_NAME"/> importeert nu uw bladwijzers en andere instellingen van <ph name="DEF_BROWSER"/> en maakt snelkoppelingen op uw computer.</translation>
@@ -554,7 +543,6 @@
 <translation id="39964277676607559">Kan JavaScript '<ph name="RELATIVE_PATH"/>' niet laden voor het inhoudsscript.</translation>
 <translation id="4378551569595875038">Er wordt verbinding gemaakt...</translation>
 <translation id="7029809446516969842">Wachtwoorden</translation>
-<translation id="8211437954284917092">Geef een zoekopdracht op in het bovenstaande tekstveld om uw bladwijzers te doorzoeken.</translation>
 <translation id="4528378725264562960">(Actief)</translation>
 <translation id="5958418293370246440"><ph name="SAVED_FILES"/> van <ph name="TOTAL_FILES"/> bestanden</translation>
 <translation id="2350172092385603347">Lokalisatie gebruikt, maar er is geen 'default_locale' opgegeven in het manifest.</translation>
@@ -603,7 +591,6 @@
 <translation id="149347756975725155">Kan extensiepictogram '<ph name="ICON"/>' niet laden.</translation>
 <translation id="3675321783533846350">Stel een proxy in om verbinding te maken met het netwerk.</translation>
 <translation id="1572103024875503863"><ph name="NUMBER_MANY"/> dagen</translation>
-<translation id="181952314179848438">Deze extensie heeft toegang nodig tot:</translation>
 <translation id="8453184121293348016">Geen intrekkingsmechanisme gevonden</translation>
 <translation id="3481915276125965083">De volgende pop-ups zijn op deze pagina geblokkeerd:</translation>
 <translation id="3468298837301810372">Label</translation>
@@ -632,7 +619,6 @@
 <translation id="7965010376480416255">Gedeeld geheugen</translation>
 <translation id="6248988683584659830">Zoekinstellingen</translation>
 <translation id="7053983685419859001">Blokkeren</translation>
-<translation id="3425080561288944889">Weet u zeker dat u '<ph name="BOOKMARK_TITLE"/>' wilt verwijderen?</translation>
 <translation id="2727712005121231835">Normaal</translation>
 <translation id="8887733174653581061">Altijd op de voorgrond</translation>
 <translation id="610886263749567451">JavaScript-melding</translation>
@@ -723,7 +709,6 @@
 <translation id="7629827748548208700">Tabblad: <ph name="TAB_NAME"/></translation>
 <translation id="8449008133205184768">Plakken en stijl aanpassen</translation>
 <translation id="8028993641010258682">Grootte</translation>
-<translation id="1383876407941801731">Zoeken</translation>
 <translation id="8398877366907290961">Toch doorgaan</translation>
 <translation id="6974053822202609517">Rechts naar links</translation>
 <translation id="290414493736480793">Dankbetuigingen</translation>
@@ -790,14 +775,12 @@
 <translation id="5552632479093547648">Malware en phishing gedetecteerd!</translation>
 <translation id="4988273303304146523"><ph name="NUMBER_DEFAULT"/> dagen geleden</translation>
 <translation id="1588343679702972132">Deze site vraagt u zich te identificeren via een certificaat:</translation>
-<translation id="7211994749225247711">Verwijderen...</translation>
 <translation id="2819994928625218237">Gee&amp;n spellingsuggesties</translation>
 <translation id="4316305410440790958">Frame openen op nieuw &amp;tabblad</translation>
 <translation id="9142623379911037913"><ph name="SITE"/> toestaan om bureaubladmeldingen weer te geven?</translation>
 <translation id="4196320913210960460">U kunt uw geïnstalleerde extensies beheren door te klikken op 'Extensies' in het gereedschapsmenu.</translation>
 <translation id="9118804773997839291">Hieronder vindt u een lijst van alle onveilige elementen op de pagina. Klik op de link voor meer diagnostische informatie over het gevaar van specifieke elementen.</translation>
 <translation id="7754704193130578113">Voorafgaand aan een download vragen waar een bestand moet worden opgeslagen</translation>
-<translation id="8155199869035534942">Geselecteerd item verwijderen</translation>
 <translation id="2497284189126895209">Alle bestanden</translation>
 <translation id="5360606537916580043">Afgelopen dag</translation>
 <translation id="1682548588986054654">Nieuw incognitovenster</translation>
@@ -950,7 +933,6 @@
 <translation id="7136984461011502314">Welkom bij <ph name="PRODUCT_NAME"/></translation>
 <translation id="1594030484168838125">Kiezen</translation>
 <translation id="204497730941176055">Sjabloonnaam van Microsoft-certificaat</translation>
-<translation id="4002066346123236978">Titel</translation>
 <translation id="4087089424473531098">De volgende extensie is gemaakt:
 
 <ph name="EXTENSION_FILE"/></translation>
@@ -1033,7 +1015,6 @@
 <translation id="4608500690299898628">&amp;Zoeken...</translation>
 <translation id="3574305903863751447"><ph name="CITY"/>, <ph name="STATE"/> <ph name="COUNTRY"/></translation>
 <translation id="8724859055372736596">&amp;Weergeven in map</translation>
-<translation id="5446294780224829982">Hangul IME:</translation>
 <translation id="5554489410841842733">Dit pictogram wordt weergegeven wanneer de extensie een actie kan uitvoeren op de huidige pagina.</translation>
 <translation id="4862642413395066333">OCSP-antwoorden ondertekenen</translation>
 <translation id="4756388243121344051">Gesc&amp;hiedenis</translation>
@@ -1055,7 +1036,6 @@
 <translation id="7631887513477658702">&amp;Altijd bestanden van dit type openen</translation>
 <translation id="8627795981664801467">Alleen beveiligde verbindingen</translation>
 <translation id="3921544830490870178">Instellingen voor invoegtoepassingen:</translation>
-<translation id="1387703718616631293">Toestaan dat deze extensie in de incognitomodus wordt uitgevoerd</translation>
 <translation id="2190355936436201913">(leeg)</translation>
 <translation id="5868426874618963178">Verzendingsbron van huidige pagina</translation>
 <translation id="5818003990515275822">Koreaans</translation>
@@ -1087,7 +1067,6 @@
 <translation id="8565745688101278215"><ph name="FIRSTNAME"/><ph name="SEPARATOR"/><ph name="LASTNAME"/></translation>
 <translation id="3927932062596804919">Weigeren</translation>
 <translation id="6484929352454160200">Nieuwe versie van <ph name="PRODUCT_NAME"/> beschikbaar</translation>
-<translation id="7035824132811506448">Recentelijk toegevoegd</translation>
 <translation id="5827266244928330802">Safari</translation>
 <translation id="778881183694837592">Een verplicht veld mag niet leeg zijn</translation>
 <translation id="6820686453637990663">CVC</translation>
@@ -1149,7 +1128,6 @@
 <translation id="2356070529366658676">Vragen</translation>
 <translation id="5731247495086897348">Pla&amp;kken en gaan</translation>
 <translation id="3413103074007669042">Deze pagina bevat bepaalde onveilige inhoud</translation>
-<translation id="3866320199958134961">Minder dan <ph name="MINUTES"/>.        Sluit de oplader aan.</translation>
 <translation id="7635741716790924709">Adresregel 1</translation>
 <translation id="5285267187067365830">Plug-ins installeren...</translation>
 <translation id="1166212789817575481">Tabbladen aan de rechterkant sluiten</translation>
@@ -1292,7 +1270,6 @@
 <translation id="1474307029659222435">&amp;Frame openen in nieuw venster</translation>
 <translation id="1522474541175464402">Sleutel-ID van certificeringsinstantie</translation>
 <translation id="5976160379964388480">Overige</translation>
-<translation id="3527085408025491307">Map</translation>
 <translation id="3413808618118019351">Bladwijzers en i&amp;nstellingen importeren...</translation>
 <translation id="2635276683026132559">Ondertekening</translation>
 <translation id="4835836146030131423">Fout bij aanmelden.</translation>
@@ -1341,7 +1318,6 @@
 <translation id="4701488924964507374"><ph name="SENTENCE1"/> <ph name="SENTENCE2"/></translation>
 <translation id="1163931534039071049">&amp;Framebron weergeven</translation>
 <translation id="7564847347806291057">Proces beëindigen</translation>
-<translation id="7851589172948533362">Geverifieerd door <ph name="ISSUER"/></translation>
 <translation id="7063412606254013905">Meer informatie over phishingfraude.</translation>
 <translation id="307767688111441685">Pagina ziet er vreemd uit</translation>
 <translation id="5295309862264981122">Navigatie bevestigen</translation>
@@ -1460,7 +1436,6 @@
 <translation id="4910619056351738551">Hier zijn enkele suggesties:</translation>
 <translation id="5489059749897101717">&amp;Spellingvenster weergeven</translation>
 <translation id="1232569758102978740">Naamloos</translation>
-<translation id="1851547963021150172">Een actie uitvoeren op het geselecteerde item</translation>
 <translation id="4362187533051781987">Stad/plaats</translation>
 <translation id="9149866541089851383">Bewerken...</translation>
 <translation id="7000311294523403548">Naamloze webpagina</translation>

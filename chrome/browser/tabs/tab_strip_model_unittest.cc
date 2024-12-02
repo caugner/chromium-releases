@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,11 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
@@ -19,10 +21,15 @@
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/tabs/tab_strip_model_order_controller.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/notification_observer_mock.h"
+#include "chrome/common/notification_registrar.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/property_bag.h"
 #include "chrome/common/url_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using testing::_;
 
 class TabStripDummyDelegate : public TabStripModelDelegate {
  public:
@@ -71,6 +78,9 @@ class TabStripDummyDelegate : public TabStripModelDelegate {
   virtual bool CanCloseContentsAt(int index) { return can_close_ ; }
   virtual bool CanBookmarkAllTabs() const { return false; }
   virtual void BookmarkAllTabs() {}
+  virtual bool UseVerticalTabs() const { return false; }
+  virtual void ToggleUseVerticalTabs() {}
+  virtual void SetToolbarVisibility(bool val) {}
 
  private:
   // A dummy TabContents we give to callers that expect us to actually build a
@@ -348,7 +358,7 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
   // Test InsertTabContentsAt, foreground tab.
   TabContents* contents2 = CreateTabContents();
   {
-    tabstrip.InsertTabContentsAt(1, contents2, true, false);
+    tabstrip.InsertTabContentsAt(1, contents2, TabStripModel::ADD_SELECTED);
 
     EXPECT_EQ(2, tabstrip.count());
     EXPECT_EQ(2, observer.GetStateCount());
@@ -364,7 +374,7 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
   // Test InsertTabContentsAt, background tab.
   TabContents* contents3 = CreateTabContents();
   {
-    tabstrip.InsertTabContentsAt(2, contents3, false, false);
+    tabstrip.InsertTabContentsAt(2, contents3, TabStripModel::ADD_NONE);
 
     EXPECT_EQ(3, tabstrip.count());
     EXPECT_EQ(1, observer.GetStateCount());
@@ -412,13 +422,13 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
   {
     // Let's test nothing happens when the delegate veto the close.
     delegate.set_can_close(false);
-    EXPECT_FALSE(tabstrip.CloseTabContentsAt(2));
+    EXPECT_FALSE(tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE));
     EXPECT_EQ(3, tabstrip.count());
     EXPECT_EQ(0, observer.GetStateCount());
 
     // Now let's close for real.
     delegate.set_can_close(true);
-    EXPECT_TRUE(tabstrip.CloseTabContentsAt(2));
+    EXPECT_TRUE(tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE));
     EXPECT_EQ(2, tabstrip.count());
 
     EXPECT_EQ(3, observer.GetStateCount());
@@ -529,11 +539,16 @@ TEST_F(TabStripModelTest, TestBasicOpenerAPI) {
 
   // We use |InsertTabContentsAt| here instead of AppendTabContents so that
   // openership relationships are preserved.
-  tabstrip.InsertTabContentsAt(tabstrip.count(), contents1, false, true);
-  tabstrip.InsertTabContentsAt(tabstrip.count(), contents2, false, true);
-  tabstrip.InsertTabContentsAt(tabstrip.count(), contents3, false, true);
-  tabstrip.InsertTabContentsAt(tabstrip.count(), contents4, false, true);
-  tabstrip.InsertTabContentsAt(tabstrip.count(), contents5, false, true);
+  tabstrip.InsertTabContentsAt(tabstrip.count(), contents1,
+                               TabStripModel::ADD_INHERIT_GROUP);
+  tabstrip.InsertTabContentsAt(tabstrip.count(), contents2,
+                               TabStripModel::ADD_INHERIT_GROUP);
+  tabstrip.InsertTabContentsAt(tabstrip.count(), contents3,
+                               TabStripModel::ADD_INHERIT_GROUP);
+  tabstrip.InsertTabContentsAt(tabstrip.count(), contents4,
+                               TabStripModel::ADD_INHERIT_GROUP);
+  tabstrip.InsertTabContentsAt(tabstrip.count(), contents5,
+                               TabStripModel::ADD_INHERIT_GROUP);
 
   // All the tabs should have the same opener.
   for (int i = 1; i < tabstrip.count(); ++i)
@@ -576,11 +591,11 @@ static void InsertTabContentses(TabStripModel* tabstrip,
                                 TabContents* contents2,
                                 TabContents* contents3) {
   tabstrip->InsertTabContentsAt(GetInsertionIndex(tabstrip, contents1),
-                                contents1, false, true);
+                                contents1, TabStripModel::ADD_INHERIT_GROUP);
   tabstrip->InsertTabContentsAt(GetInsertionIndex(tabstrip, contents2),
-                                contents2, false, true);
+                                contents2, TabStripModel::ADD_INHERIT_GROUP);
   tabstrip->InsertTabContentsAt(GetInsertionIndex(tabstrip, contents3),
-                                contents3, false, true);
+                                contents3, TabStripModel::ADD_INHERIT_GROUP);
 }
 
 // Tests opening background tabs.
@@ -601,6 +616,52 @@ TEST_F(TabStripModelTest, TestLTRInsertionOptions) {
   EXPECT_EQ(contents1, tabstrip.GetTabContentsAt(1));
   EXPECT_EQ(contents2, tabstrip.GetTabContentsAt(2));
   EXPECT_EQ(contents3, tabstrip.GetTabContentsAt(3));
+
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+// Tests inserting tabs with InsertAfter set to false.
+TEST_F(TabStripModelTest, InsertBefore) {
+  TabStripDummyDelegate delegate(NULL);
+  TabStripModel tabstrip(&delegate, profile());
+  tabstrip.SetInsertionPolicy(TabStripModel::INSERT_BEFORE);
+  EXPECT_TRUE(tabstrip.empty());
+
+  TabContents* contents1 = CreateTabContents();
+  TabContents* contents2 = CreateTabContents();
+  TabContents* contents3 = CreateTabContents();
+
+  InsertTabContentses(&tabstrip, contents1, contents2, contents3);
+
+  // The order should be reversed.
+  EXPECT_EQ(contents3, tabstrip.GetTabContentsAt(0));
+  EXPECT_EQ(contents2, tabstrip.GetTabContentsAt(1));
+  EXPECT_EQ(contents1, tabstrip.GetTabContentsAt(2));
+
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+// Tests opening background tabs with InsertAfter set to false.
+TEST_F(TabStripModelTest, InsertBeforeOpeners) {
+  TabStripDummyDelegate delegate(NULL);
+  TabStripModel tabstrip(&delegate, profile());
+  tabstrip.SetInsertionPolicy(TabStripModel::INSERT_BEFORE);
+  EXPECT_TRUE(tabstrip.empty());
+  TabContents* opener_contents = CreateTabContents();
+  tabstrip.AppendTabContents(opener_contents, true);
+
+  TabContents* contents1 = CreateTabContents();
+  TabContents* contents2 = CreateTabContents();
+  TabContents* contents3 = CreateTabContents();
+
+  InsertTabContentses(&tabstrip, contents1, contents2, contents3);
+
+  // The order should be reversed.
+  EXPECT_EQ(contents3, tabstrip.GetTabContentsAt(0));
+  EXPECT_EQ(contents2, tabstrip.GetTabContentsAt(1));
+  EXPECT_EQ(contents1, tabstrip.GetTabContentsAt(2));
 
   tabstrip.CloseAllTabs();
   EXPECT_TRUE(tabstrip.empty());
@@ -649,7 +710,9 @@ TEST_F(TabStripModelTest, TestInsertionIndexDetermination) {
   int insert_index = tabstrip.order_controller()->DetermineInsertionIndex(
       fg_link_contents, PageTransition::LINK, true);
   EXPECT_EQ(1, insert_index);
-  tabstrip.InsertTabContentsAt(insert_index, fg_link_contents, true, true);
+  tabstrip.InsertTabContentsAt(insert_index, fg_link_contents,
+                               TabStripModel::ADD_SELECTED |
+                               TabStripModel::ADD_INHERIT_GROUP);
   EXPECT_EQ(1, tabstrip.selected_index());
   EXPECT_EQ(fg_link_contents, tabstrip.GetSelectedTabContents());
 
@@ -663,7 +726,8 @@ TEST_F(TabStripModelTest, TestInsertionIndexDetermination) {
       fg_nonlink_contents, PageTransition::AUTO_BOOKMARK, true);
   EXPECT_EQ(tabstrip.count(), insert_index);
   // We break the opener relationship...
-  tabstrip.InsertTabContentsAt(insert_index, fg_nonlink_contents, false, false);
+  tabstrip.InsertTabContentsAt(insert_index, fg_nonlink_contents,
+                               TabStripModel::ADD_NONE);
   // Now select it, so that user_gesture == true causes the opener relationship
   // to be forgotten...
   tabstrip.SelectTabContentsAt(tabstrip.count() - 1, true);
@@ -741,22 +805,24 @@ TEST_F(TabStripModelTest, TestSelectOnClose) {
   EXPECT_EQ(0, tabstrip.selected_index());
   tabstrip.SelectTabContentsAt(2, false);
   EXPECT_EQ(2, tabstrip.selected_index());
-  tabstrip.CloseTabContentsAt(2);
+  tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(2, tabstrip.selected_index());
-  tabstrip.CloseTabContentsAt(2);
+  tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(1, tabstrip.selected_index());
-  tabstrip.CloseTabContentsAt(1);
+  tabstrip.CloseTabContentsAt(1, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(0, tabstrip.selected_index());
 
   // Finally test that when a tab has no "siblings" that the opener is
   // selected.
   TabContents* other_contents = CreateTabContents();
-  tabstrip.InsertTabContentsAt(1, other_contents, false, false);
+  tabstrip.InsertTabContentsAt(1, other_contents, TabStripModel::ADD_NONE);
   EXPECT_EQ(2, tabstrip.count());
   TabContents* opened_contents = CreateTabContents();
-  tabstrip.InsertTabContentsAt(2, opened_contents, true, true);
+  tabstrip.InsertTabContentsAt(2, opened_contents,
+                               TabStripModel::ADD_SELECTED |
+                               TabStripModel::ADD_INHERIT_GROUP);
   EXPECT_EQ(2, tabstrip.selected_index());
-  tabstrip.CloseTabContentsAt(2);
+  tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(0, tabstrip.selected_index());
 
   tabstrip.CloseAllTabs();
@@ -767,7 +833,6 @@ TEST_F(TabStripModelTest, TestSelectOnClose) {
 //  - Close Tab
 //  - Close Other Tabs
 //  - Close Tabs To Right
-//  - Close Tabs Opened By
 TEST_F(TabStripModelTest, TestContextMenuCloseCommands) {
   TabStripDummyDelegate delegate(NULL);
   TabStripModel tabstrip(&delegate, profile());
@@ -792,17 +857,6 @@ TEST_F(TabStripModelTest, TestContextMenuCloseCommands) {
 
   TabContents* dummy_contents = CreateTabContents();
   tabstrip.AppendTabContents(dummy_contents, false);
-
-  contents1 = CreateTabContents();
-  contents2 = CreateTabContents();
-  contents3 = CreateTabContents();
-  InsertTabContentses(&tabstrip, contents1, contents2, contents3);
-  EXPECT_EQ(5, tabstrip.count());
-
-  tabstrip.ExecuteContextMenuCommand(0,
-                                     TabStripModel::CommandCloseTabsOpenedBy);
-  EXPECT_EQ(2, tabstrip.count());
-  EXPECT_EQ(dummy_contents, tabstrip.GetTabContentsAt(1));
 
   contents1 = CreateTabContents();
   contents2 = CreateTabContents();
@@ -870,35 +924,6 @@ TEST_F(TabStripModelTest, GetIndicesClosedByCommand) {
   EXPECT_TRUE(tabstrip.empty());
 }
 
-// Tests GetIndicesClosedByCommand.
-TEST_F(TabStripModelTest, GetIndicesClosedByCommandWithOpener) {
-  TabStripDummyDelegate delegate(NULL);
-  TabStripModel tabstrip(&delegate, profile());
-  EXPECT_TRUE(tabstrip.empty());
-
-  TabContents* contents1 = CreateTabContents();
-  TabContents* contents2 = CreateTabContents();
-  TabContents* contents3 = CreateTabContents();
-  TabContents* contents4 = CreateTabContents();
-
-  tabstrip.AppendTabContents(contents1, true);
-  InsertTabContentses(&tabstrip, contents2, contents3, contents4);
-
-  EXPECT_EQ("3 2 1", GetIndicesClosedByCommandAsString(
-                tabstrip, 0, TabStripModel::CommandCloseTabsOpenedBy));
-
-  // Pin the first two tabs and make sure the index isn't returned when asking
-  // for the openner.
-  tabstrip.SetTabPinned(0, true);
-  tabstrip.SetTabPinned(1, true);
-
-  EXPECT_EQ("3 2", GetIndicesClosedByCommandAsString(
-                tabstrip, 0, TabStripModel::CommandCloseTabsOpenedBy));
-
-  tabstrip.CloseAllTabs();
-  EXPECT_TRUE(tabstrip.empty());
-}
-
 // Tests whether or not TabContentses are inserted in the correct position
 // using this "smart" function with a simulated middle click action on a series
 // of links on the home page.
@@ -910,12 +935,14 @@ TEST_F(TabStripModelTest, AddTabContents_MiddleClickLinksAndClose) {
   // Open the Home Page
   TabContents* homepage_contents = CreateTabContents();
   tabstrip.AddTabContents(
-      homepage_contents, -1, false, PageTransition::AUTO_BOOKMARK, true);
+      homepage_contents, -1, PageTransition::AUTO_BOOKMARK,
+      TabStripModel::ADD_SELECTED);
 
   // Open some other tab, by user typing.
   TabContents* typed_page_contents = CreateTabContents();
   tabstrip.AddTabContents(
-      typed_page_contents, -1, false, PageTransition::TYPED, true);
+      typed_page_contents, -1, PageTransition::TYPED,
+      TabStripModel::ADD_SELECTED);
 
   EXPECT_EQ(2, tabstrip.count());
 
@@ -926,13 +953,16 @@ TEST_F(TabStripModelTest, AddTabContents_MiddleClickLinksAndClose) {
   // page.
   TabContents* middle_click_contents1 = CreateTabContents();
   tabstrip.AddTabContents(
-    middle_click_contents1, -1, false, PageTransition::LINK, false);
+      middle_click_contents1, -1, PageTransition::LINK,
+      TabStripModel::ADD_NONE);
   TabContents* middle_click_contents2 = CreateTabContents();
   tabstrip.AddTabContents(
-    middle_click_contents2, -1, false, PageTransition::LINK, false);
+      middle_click_contents2, -1, PageTransition::LINK,
+      TabStripModel::ADD_NONE);
   TabContents* middle_click_contents3 = CreateTabContents();
   tabstrip.AddTabContents(
-    middle_click_contents3, -1, false, PageTransition::LINK, false);
+      middle_click_contents3, -1, PageTransition::LINK,
+      TabStripModel::ADD_NONE);
 
   EXPECT_EQ(5, tabstrip.count());
 
@@ -974,12 +1004,14 @@ TEST_F(TabStripModelTest, AddTabContents_LeftClickPopup) {
   // Open the Home Page
   TabContents* homepage_contents = CreateTabContents();
   tabstrip.AddTabContents(
-    homepage_contents, -1, false, PageTransition::AUTO_BOOKMARK, true);
+      homepage_contents, -1, PageTransition::AUTO_BOOKMARK,
+      TabStripModel::ADD_SELECTED);
 
   // Open some other tab, by user typing.
   TabContents* typed_page_contents = CreateTabContents();
   tabstrip.AddTabContents(
-    typed_page_contents, -1, false, PageTransition::TYPED, true);
+      typed_page_contents, -1, PageTransition::TYPED,
+      TabStripModel::ADD_SELECTED);
 
   EXPECT_EQ(2, tabstrip.count());
 
@@ -988,8 +1020,8 @@ TEST_F(TabStripModelTest, AddTabContents_LeftClickPopup) {
 
   // Open a tab by simulating a left click on a link that opens in a new tab.
   TabContents* left_click_contents = CreateTabContents();
-  tabstrip.AddTabContents(left_click_contents, -1, false, PageTransition::LINK,
-      true);
+  tabstrip.AddTabContents(left_click_contents, -1, PageTransition::LINK,
+                          TabStripModel::ADD_SELECTED);
 
   // Verify the state meets our expectations.
   EXPECT_EQ(3, tabstrip.count());
@@ -1022,12 +1054,14 @@ TEST_F(TabStripModelTest, AddTabContents_CreateNewBlankTab) {
   // Open the Home Page
   TabContents* homepage_contents = CreateTabContents();
   tabstrip.AddTabContents(
-    homepage_contents, -1, false, PageTransition::AUTO_BOOKMARK, true);
+      homepage_contents, -1, PageTransition::AUTO_BOOKMARK,
+      TabStripModel::ADD_SELECTED);
 
   // Open some other tab, by user typing.
   TabContents* typed_page_contents = CreateTabContents();
   tabstrip.AddTabContents(
-    typed_page_contents, -1, false, PageTransition::TYPED, true);
+      typed_page_contents, -1, PageTransition::TYPED,
+      TabStripModel::ADD_SELECTED);
 
   EXPECT_EQ(2, tabstrip.count());
 
@@ -1036,8 +1070,8 @@ TEST_F(TabStripModelTest, AddTabContents_CreateNewBlankTab) {
 
   // Open a new blank tab in the foreground.
   TabContents* new_blank_contents = CreateTabContents();
-  tabstrip.AddTabContents(new_blank_contents, -1, false, PageTransition::TYPED,
-      true);
+  tabstrip.AddTabContents(new_blank_contents, -1, PageTransition::TYPED,
+                          TabStripModel::ADD_SELECTED);
 
   // Verify the state of the tabstrip.
   EXPECT_EQ(3, tabstrip.count());
@@ -1048,10 +1082,12 @@ TEST_F(TabStripModelTest, AddTabContents_CreateNewBlankTab) {
   // Now open a couple more blank tabs in the background.
   TabContents* background_blank_contents1 = CreateTabContents();
   tabstrip.AddTabContents(
-      background_blank_contents1, -1, false, PageTransition::TYPED, false);
+      background_blank_contents1, -1, PageTransition::TYPED,
+      TabStripModel::ADD_NONE);
   TabContents* background_blank_contents2 = CreateTabContents();
   tabstrip.AddTabContents(
-      background_blank_contents2, -1, false, PageTransition::GENERATED, false);
+      background_blank_contents2, -1, PageTransition::GENERATED,
+      TabStripModel::ADD_NONE);
   EXPECT_EQ(5, tabstrip.count());
   EXPECT_EQ(homepage_contents, tabstrip.GetTabContentsAt(0));
   EXPECT_EQ(typed_page_contents, tabstrip.GetTabContentsAt(1));
@@ -1073,12 +1109,14 @@ TEST_F(TabStripModelTest, AddTabContents_ForgetOpeners) {
   // Open the Home Page
   TabContents* homepage_contents = CreateTabContents();
   tabstrip.AddTabContents(
-    homepage_contents, -1, false, PageTransition::AUTO_BOOKMARK, true);
+      homepage_contents, -1, PageTransition::AUTO_BOOKMARK,
+      TabStripModel::ADD_SELECTED);
 
   // Open some other tab, by user typing.
   TabContents* typed_page_contents = CreateTabContents();
   tabstrip.AddTabContents(
-    typed_page_contents, -1, false, PageTransition::TYPED, true);
+      typed_page_contents, -1, PageTransition::TYPED,
+      TabStripModel::ADD_SELECTED);
 
   EXPECT_EQ(2, tabstrip.count());
 
@@ -1089,13 +1127,16 @@ TEST_F(TabStripModelTest, AddTabContents_ForgetOpeners) {
   // page.
   TabContents* middle_click_contents1 = CreateTabContents();
   tabstrip.AddTabContents(
-    middle_click_contents1, -1, false, PageTransition::LINK, false);
+      middle_click_contents1, -1, PageTransition::LINK,
+      TabStripModel::ADD_NONE);
   TabContents* middle_click_contents2 = CreateTabContents();
   tabstrip.AddTabContents(
-    middle_click_contents2, -1, false, PageTransition::LINK, false);
+      middle_click_contents2, -1, PageTransition::LINK,
+      TabStripModel::ADD_NONE);
   TabContents* middle_click_contents3 = CreateTabContents();
   tabstrip.AddTabContents(
-    middle_click_contents3, -1, false, PageTransition::LINK, false);
+      middle_click_contents3, -1, PageTransition::LINK,
+      TabStripModel::ADD_NONE);
 
   // Break out of the context by selecting a tab in a different context.
   EXPECT_EQ(typed_page_contents, tabstrip.GetTabContentsAt(4));
@@ -1134,12 +1175,14 @@ TEST_F(TabStripModelTest, AppendContentsReselectionTest) {
   // Open the Home Page
   TabContents* homepage_contents = CreateTabContents();
   tabstrip.AddTabContents(
-    homepage_contents, -1, false, PageTransition::AUTO_BOOKMARK, true);
+      homepage_contents, -1, PageTransition::AUTO_BOOKMARK,
+      TabStripModel::ADD_SELECTED);
 
   // Open some other tab, by user typing.
   TabContents* typed_page_contents = CreateTabContents();
   tabstrip.AddTabContents(
-    typed_page_contents, -1, false, PageTransition::TYPED, false);
+      typed_page_contents, -1, PageTransition::TYPED,
+      TabStripModel::ADD_NONE);
 
   // The selected tab should still be the first.
   EXPECT_EQ(0, tabstrip.selected_index());
@@ -1149,7 +1192,7 @@ TEST_F(TabStripModelTest, AppendContentsReselectionTest) {
   TabContents* target_blank_contents = CreateTabContents();
   tabstrip.AppendTabContents(target_blank_contents, true);
   EXPECT_EQ(2, tabstrip.selected_index());
-  tabstrip.CloseTabContentsAt(2);
+  tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(0, tabstrip.selected_index());
 
   // clean up after ourselves
@@ -1164,15 +1207,16 @@ TEST_F(TabStripModelTest, ReselectionConsidersChildrenTest) {
   // Open page A
   TabContents* page_a_contents = CreateTabContents();
   strip.AddTabContents(
-      page_a_contents, -1, false, PageTransition::AUTO_BOOKMARK, true);
+      page_a_contents, -1, PageTransition::AUTO_BOOKMARK,
+      TabStripModel::ADD_SELECTED);
 
   // Simulate middle click to open page A.A and A.B
   TabContents* page_a_a_contents = CreateTabContents();
-  strip.AddTabContents(page_a_a_contents, -1, false, PageTransition::LINK,
-      false);
+  strip.AddTabContents(page_a_a_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
   TabContents* page_a_b_contents = CreateTabContents();
-  strip.AddTabContents(page_a_b_contents, -1, false, PageTransition::LINK,
-      false);
+  strip.AddTabContents(page_a_b_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
 
   // Select page A.A
   strip.SelectTabContentsAt(1, true);
@@ -1180,25 +1224,25 @@ TEST_F(TabStripModelTest, ReselectionConsidersChildrenTest) {
 
   // Simulate a middle click to open page A.A.A
   TabContents* page_a_a_a_contents = CreateTabContents();
-  strip.AddTabContents(page_a_a_a_contents, -1, false, PageTransition::LINK,
-      false);
+  strip.AddTabContents(page_a_a_a_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
 
   EXPECT_EQ(page_a_a_a_contents, strip.GetTabContentsAt(2));
 
   // Close page A.A
-  strip.CloseTabContentsAt(strip.selected_index());
+  strip.CloseTabContentsAt(strip.selected_index(), TabStripModel::CLOSE_NONE);
 
   // Page A.A.A should be selected, NOT A.B
   EXPECT_EQ(page_a_a_a_contents, strip.GetSelectedTabContents());
 
   // Close page A.A.A
-  strip.CloseTabContentsAt(strip.selected_index());
+  strip.CloseTabContentsAt(strip.selected_index(), TabStripModel::CLOSE_NONE);
 
   // Page A.B should be selected
   EXPECT_EQ(page_a_b_contents, strip.GetSelectedTabContents());
 
   // Close page A.B
-  strip.CloseTabContentsAt(strip.selected_index());
+  strip.CloseTabContentsAt(strip.selected_index(), TabStripModel::CLOSE_NONE);
 
   // Page A should be selected
   EXPECT_EQ(page_a_contents, strip.GetSelectedTabContents());
@@ -1213,31 +1257,34 @@ TEST_F(TabStripModelTest, AddTabContents_NewTabAtEndOfStripInheritsGroup) {
 
   // Open page A
   TabContents* page_a_contents = CreateTabContents();
-  strip.AddTabContents(page_a_contents, -1, false, PageTransition::START_PAGE,
-      true);
+  strip.AddTabContents(page_a_contents, -1, PageTransition::START_PAGE,
+                       TabStripModel::ADD_SELECTED);
 
   // Open pages B, C and D in the background from links on page A...
   TabContents* page_b_contents = CreateTabContents();
   TabContents* page_c_contents = CreateTabContents();
   TabContents* page_d_contents = CreateTabContents();
-  strip.AddTabContents(page_b_contents, -1, false, PageTransition::LINK, false);
-  strip.AddTabContents(page_c_contents, -1, false, PageTransition::LINK, false);
-  strip.AddTabContents(page_d_contents, -1, false, PageTransition::LINK, false);
+  strip.AddTabContents(page_b_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
+  strip.AddTabContents(page_c_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
+  strip.AddTabContents(page_d_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
 
   // Switch to page B's tab.
   strip.SelectTabContentsAt(1, true);
 
   // Open a New Tab at the end of the strip (simulate Ctrl+T)
   TabContents* new_tab_contents = CreateTabContents();
-  strip.AddTabContents(new_tab_contents, -1, false, PageTransition::TYPED,
-                       true);
+  strip.AddTabContents(new_tab_contents, -1, PageTransition::TYPED,
+                       TabStripModel::ADD_SELECTED);
 
   EXPECT_EQ(4, strip.GetIndexOfTabContents(new_tab_contents));
   EXPECT_EQ(4, strip.selected_index());
 
   // Close the New Tab that was just opened. We should be returned to page B's
   // Tab...
-  strip.CloseTabContentsAt(4);
+  strip.CloseTabContentsAt(4, TabStripModel::CLOSE_NONE);
 
   EXPECT_EQ(1, strip.selected_index());
 
@@ -1245,13 +1292,14 @@ TEST_F(TabStripModelTest, AddTabContents_NewTabAtEndOfStripInheritsGroup) {
   // This is like typing a URL in the address bar and pressing Alt+Enter. The
   // behavior should be the same as above.
   TabContents* page_e_contents = CreateTabContents();
-  strip.AddTabContents(page_e_contents, -1, false, PageTransition::TYPED, true);
+  strip.AddTabContents(page_e_contents, -1, PageTransition::TYPED,
+                       TabStripModel::ADD_SELECTED);
 
   EXPECT_EQ(4, strip.GetIndexOfTabContents(page_e_contents));
   EXPECT_EQ(4, strip.selected_index());
 
   // Close the Tab. Selection should shift back to page B's Tab.
-  strip.CloseTabContentsAt(4);
+  strip.CloseTabContentsAt(4, TabStripModel::CLOSE_NONE);
 
   EXPECT_EQ(1, strip.selected_index());
 
@@ -1260,14 +1308,14 @@ TEST_F(TabStripModelTest, AddTabContents_NewTabAtEndOfStripInheritsGroup) {
   // in New Tab". No opener relationship should be preserved between this Tab
   // and the one that was active when the gesture was performed.
   TabContents* page_f_contents = CreateTabContents();
-  strip.AddTabContents(page_f_contents, -1, false,
-                       PageTransition::AUTO_BOOKMARK, true);
+  strip.AddTabContents(page_f_contents, -1, PageTransition::AUTO_BOOKMARK,
+                       TabStripModel::ADD_SELECTED);
 
   EXPECT_EQ(4, strip.GetIndexOfTabContents(page_f_contents));
   EXPECT_EQ(4, strip.selected_index());
 
   // Close the Tab. The next-adjacent should be selected.
-  strip.CloseTabContentsAt(4);
+  strip.CloseTabContentsAt(4, TabStripModel::CLOSE_NONE);
 
   EXPECT_EQ(3, strip.selected_index());
 
@@ -1285,28 +1333,31 @@ TEST_F(TabStripModelTest, NavigationForgetsOpeners) {
 
   // Open page A
   TabContents* page_a_contents = CreateTabContents();
-  strip.AddTabContents(page_a_contents, -1, false, PageTransition::START_PAGE,
-      true);
+  strip.AddTabContents(page_a_contents, -1, PageTransition::START_PAGE,
+                       TabStripModel::ADD_SELECTED);
 
   // Open pages B, C and D in the background from links on page A...
   TabContents* page_b_contents = CreateTabContents();
   TabContents* page_c_contents = CreateTabContents();
   TabContents* page_d_contents = CreateTabContents();
-  strip.AddTabContents(page_b_contents, -1, false, PageTransition::LINK, false);
-  strip.AddTabContents(page_c_contents, -1, false, PageTransition::LINK, false);
-  strip.AddTabContents(page_d_contents, -1, false, PageTransition::LINK, false);
+  strip.AddTabContents(page_b_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
+  strip.AddTabContents(page_c_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
+  strip.AddTabContents(page_d_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
 
   // Open page E in a different opener group from page A.
   TabContents* page_e_contents = CreateTabContents();
-  strip.AddTabContents(page_e_contents, -1, false,
-                       PageTransition::START_PAGE, false);
+  strip.AddTabContents(page_e_contents, -1, PageTransition::START_PAGE,
+                       TabStripModel::ADD_NONE);
 
   // Tell the TabStripModel that we are navigating page D via a link click.
   strip.SelectTabContentsAt(3, true);
   strip.TabNavigating(page_d_contents, PageTransition::LINK);
 
   // Close page D, page C should be selected. (part of same group).
-  strip.CloseTabContentsAt(3);
+  strip.CloseTabContentsAt(3, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(2, strip.selected_index());
 
   // Tell the TabStripModel that we are navigating in page C via a bookmark.
@@ -1314,7 +1365,7 @@ TEST_F(TabStripModelTest, NavigationForgetsOpeners) {
 
   // Close page C, page E should be selected. (C is no longer part of the
   // A-B-C-D group, selection moves to the right).
-  strip.CloseTabContentsAt(2);
+  strip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(page_e_contents, strip.GetTabContentsAt(strip.selected_index()));
 
   strip.CloseAllTabs();
@@ -1331,15 +1382,18 @@ TEST_F(TabStripModelTest, NavigationForgettingDoesntAffectNewTab) {
   // Open a tab and several tabs from it, then select one of the tabs that was
   // opened.
   TabContents* page_a_contents = CreateTabContents();
-  strip.AddTabContents(page_a_contents, -1, false, PageTransition::START_PAGE,
-      true);
+  strip.AddTabContents(page_a_contents, -1, PageTransition::START_PAGE,
+                       TabStripModel::ADD_SELECTED);
 
   TabContents* page_b_contents = CreateTabContents();
   TabContents* page_c_contents = CreateTabContents();
   TabContents* page_d_contents = CreateTabContents();
-  strip.AddTabContents(page_b_contents, -1, false, PageTransition::LINK, false);
-  strip.AddTabContents(page_c_contents, -1, false, PageTransition::LINK, false);
-  strip.AddTabContents(page_d_contents, -1, false, PageTransition::LINK, false);
+  strip.AddTabContents(page_b_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
+  strip.AddTabContents(page_c_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
+  strip.AddTabContents(page_d_contents, -1, PageTransition::LINK,
+                       TabStripModel::ADD_NONE);
 
   strip.SelectTabContentsAt(2, true);
 
@@ -1349,12 +1403,12 @@ TEST_F(TabStripModelTest, NavigationForgettingDoesntAffectNewTab) {
 
   // Now simulate opening a new tab at the end of the TabStrip.
   TabContents* new_tab_contents1 = CreateTabContents();
-  strip.AddTabContents(new_tab_contents1, -1, false, PageTransition::TYPED,
-      true);
+  strip.AddTabContents(new_tab_contents1, -1, PageTransition::TYPED,
+                       TabStripModel::ADD_SELECTED);
 
   // At this point, if we close this tab the last selected one should be
   // re-selected.
-  strip.CloseTabContentsAt(strip.count() - 1);
+  strip.CloseTabContentsAt(strip.count() - 1, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(page_c_contents, strip.GetTabContentsAt(strip.selected_index()));
 
   // TEST 2: If the user is in a group of tabs and opens a new tab at the end
@@ -1363,8 +1417,8 @@ TEST_F(TabStripModelTest, NavigationForgettingDoesntAffectNewTab) {
 
   // Open a new tab again.
   TabContents* new_tab_contents2 = CreateTabContents();
-  strip.AddTabContents(new_tab_contents2, -1, false, PageTransition::TYPED,
-      true);
+  strip.AddTabContents(new_tab_contents2, -1, PageTransition::TYPED,
+                       TabStripModel::ADD_SELECTED);
 
   // Now select the first tab.
   strip.SelectTabContentsAt(0, true);
@@ -1373,7 +1427,7 @@ TEST_F(TabStripModelTest, NavigationForgettingDoesntAffectNewTab) {
   strip.SelectTabContentsAt(strip.count() - 1, true);
 
   // Now close the last tab. The next adjacent should be selected.
-  strip.CloseTabContentsAt(strip.count() - 1);
+  strip.CloseTabContentsAt(strip.count() - 1, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(page_d_contents, strip.GetTabContentsAt(strip.selected_index()));
 
   strip.CloseAllTabs();
@@ -1427,7 +1481,7 @@ TEST_F(TabStripModelTest, FastShutdown) {
     tabstrip.AppendTabContents(contents1, true);
     tabstrip.AppendTabContents(contents2, true);
 
-    tabstrip.CloseTabContentsAt(1);
+    tabstrip.CloseTabContentsAt(1, TabStripModel::CLOSE_NONE);
     EXPECT_FALSE(contents1->GetRenderProcessHost()->fast_shutdown_started());
     EXPECT_EQ(1, tabstrip.count());
 
@@ -1452,12 +1506,12 @@ TEST_F(TabStripModelTest, Apps) {
 #elif defined(OS_POSIX)
   FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
-  Extension app_extension(path);
-  app_extension.launch_web_url_ = "http://www.google.com";
+  Extension extension_app(path);
+  extension_app.launch_web_url_ = "http://www.google.com";
   TabContents* contents1 = CreateTabContents();
-  contents1->SetAppExtension(&app_extension);
+  contents1->SetExtensionApp(&extension_app);
   TabContents* contents2 = CreateTabContents();
-  contents2->SetAppExtension(&app_extension);
+  contents2->SetExtensionApp(&extension_app);
   TabContents* contents3 = CreateTabContents();
 
   SetID(contents1, 1);
@@ -1476,7 +1530,7 @@ TEST_F(TabStripModelTest, Apps) {
   // Attempt to insert tab1 (an app tab) at position 1. This isn't a legal
   // position and tab1 should end up at position 0.
   {
-    tabstrip.InsertTabContentsAt(1, contents1, false, false);
+    tabstrip.InsertTabContentsAt(1, contents1, TabStripModel::ADD_NONE);
 
     ASSERT_EQ(1, observer.GetStateCount());
     State state(contents1, 0, MockTabStripModelObserver::INSERT);
@@ -1490,7 +1544,7 @@ TEST_F(TabStripModelTest, Apps) {
 
   // Insert tab 2 at position 1.
   {
-    tabstrip.InsertTabContentsAt(1, contents2, false, false);
+    tabstrip.InsertTabContentsAt(1, contents2, TabStripModel::ADD_NONE);
 
     ASSERT_EQ(1, observer.GetStateCount());
     State state(contents2, 1, MockTabStripModelObserver::INSERT);
@@ -1546,7 +1600,7 @@ TEST_F(TabStripModelTest, Apps) {
     tabstrip.DetachTabContentsAt(2);
     observer.ClearStates();
 
-    tabstrip.InsertTabContentsAt(0, contents3, false, false);
+    tabstrip.InsertTabContentsAt(0, contents3, TabStripModel::ADD_NONE);
 
     ASSERT_EQ(1, observer.GetStateCount());
     State state(contents3, 2, MockTabStripModelObserver::INSERT);
@@ -1707,7 +1761,7 @@ TEST_F(TabStripModelTest, Pinning) {
   // Insert "4" between "1" and "3". As "1" and "4" are pinned, "4" should end
   // up after them.
   {
-    tabstrip.InsertTabContentsAt(1, contents4, false, false);
+    tabstrip.InsertTabContentsAt(1, contents4, TabStripModel::ADD_NONE);
 
     ASSERT_EQ(1, observer.GetStateCount());
     State state(contents4, 2, MockTabStripModelObserver::INSERT);
@@ -1721,6 +1775,9 @@ TEST_F(TabStripModelTest, Pinning) {
 
 // Tests various permutations of making a tab phantom.
 TEST_F(TabStripModelTest, Phantom) {
+  if (!browser_defaults::kPhantomTabsEnabled)
+    return;
+
   TabStripDummyDelegate delegate(NULL);
   TabStripModel tabstrip(&delegate, profile());
   MockTabStripModelObserver observer;
@@ -1755,7 +1812,7 @@ TEST_F(TabStripModelTest, Phantom) {
 
     observer.ClearStates();
 
-    tabstrip.CloseTabContentsAt(0);
+    tabstrip.CloseTabContentsAt(0, TabStripModel::CLOSE_NONE);
 
     // The tabcontents should have changed.
     TabContents* old_contents1 = contents1;
@@ -1790,7 +1847,7 @@ TEST_F(TabStripModelTest, Phantom) {
     observer.ClearStates();
 
     // Close the second tab, which should make it phantom.
-    tabstrip.CloseTabContentsAt(1);
+    tabstrip.CloseTabContentsAt(1, TabStripModel::CLOSE_NONE);
 
     // The tabcontents should have changed.
     TabContents* new_contents2 = tabstrip.GetTabContentsAt(1);
@@ -1812,7 +1869,7 @@ TEST_F(TabStripModelTest, Phantom) {
     observer.ClearStates();
 
     // Close the last tab, we should get a tabstrip empty notification.
-    tabstrip.CloseTabContentsAt(2);
+    tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE);
 
     // The tabcontents should have changed.
     TabContents* old_contents3 = contents3;
@@ -1840,4 +1897,39 @@ TEST_F(TabStripModelTest, Phantom) {
 
   // Clean up the phantom tabs.
   tabstrip.CloseAllTabs();
+}
+
+// Makes sure the TabStripModel deletes phantom TabContents from its destructor.
+TEST_F(TabStripModelTest, DeletePhantomTabContents) {
+  if (!browser_defaults::kPhantomTabsEnabled)
+    return;
+
+  TabStripDummyDelegate delegate(NULL);
+  scoped_ptr<TabStripModel> strip(new TabStripModel(&delegate, profile()));
+
+  strip->AddTabContents(CreateTabContents(), -1, PageTransition::TYPED,
+                        TabStripModel::ADD_PINNED);
+
+  // This will make the tab go phantom.
+  delete strip->GetTabContentsAt(0);
+
+  ASSERT_TRUE(strip->IsPhantomTab(0));
+
+  NotificationRegistrar registrar;
+  NotificationObserverMock notification_observer;
+  MockTabStripModelObserver tabstrip_observer;
+  registrar.Add(&notification_observer,
+                NotificationType::TAB_CONTENTS_DESTROYED,
+                NotificationService::AllSources());
+  strip->AddObserver(&tabstrip_observer);
+
+  // Deleting the strip should delete the phanton tabcontents and result in one
+  // TAB_CONTENTS_DESTROYED.
+  EXPECT_CALL(notification_observer, Observe(_, _, _)).Times(1);
+
+  // Delete the tabstrip.
+  strip.reset();
+
+  // And there should have been no methods sent to the TabStripModelObserver.
+  EXPECT_EQ(0, tabstrip_observer.GetStateCount());
 }

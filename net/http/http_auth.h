@@ -5,12 +5,16 @@
 #ifndef NET_HTTP_HTTP_AUTH_H_
 #define NET_HTTP_HTTP_AUTH_H_
 
+#include <set>
+
+#include "base/scoped_ptr.h"
 #include "net/http/http_util.h"
 
 template <class T> class scoped_refptr;
 
 namespace net {
 
+class BoundNetLog;
 class HttpAuthHandler;
 class HttpAuthHandlerFactory;
 class HttpResponseHeaders;
@@ -27,6 +31,7 @@ class HttpAuth {
     // in an array, so start from 0.
     AUTH_PROXY = 0,
     AUTH_SERVER = 1,
+    AUTH_NUM_TARGETS = 2,
   };
 
   // Describes where the identity used for authentication came from.
@@ -75,12 +80,18 @@ class HttpAuth {
   // (either Authorization or Proxy-Authorization).
   static std::string GetAuthorizationHeaderName(Target target);
 
+  // Returns a string representation of a Target value that can be used in log
+  // messages.
+  static std::string GetAuthTargetString(Target target);
+
   // Iterate through the challenge headers, and pick the best one that
   // we support. Obtains the implementation class for handling the challenge,
   // and passes it back in |*handler|. If the existing handler in |*handler|
   // should continue to be used (such as for the NTLM authentication scheme),
   // |*handler| is unchanged. If no supported challenge was found, |*handler|
   // is set to NULL.
+  //
+  // |disabled_schemes| is the set of schemes that we should not use.
   //
   // |origin| is used by the NTLM authentication scheme to construct the
   // service principal name.  It is ignored by other schemes.
@@ -93,7 +104,9 @@ class HttpAuth {
       const HttpResponseHeaders* headers,
       Target target,
       const GURL& origin,
-      scoped_refptr<HttpAuthHandler>* handler);
+      const std::set<std::string>& disabled_schemes,
+      const BoundNetLog& net_log,
+      scoped_ptr<HttpAuthHandler>* handler);
 
   // ChallengeTokenizer breaks up a challenge string into the the auth scheme
   // and parameter list, according to RFC 2617 Sec 1.2:
@@ -106,8 +119,14 @@ class HttpAuth {
    public:
     ChallengeTokenizer(std::string::const_iterator begin,
                        std::string::const_iterator end)
-        : props_(begin, end, ','), valid_(true), expect_base64_token_(false) {
+        : props_(begin, end, ','), valid_(true), begin_(begin), end_(end),
+          expect_base64_token_(false) {
       Init(begin, end);
+    }
+
+    // Get the original text.
+    std::string challenge_text() const {
+      return std::string(begin_, end_);
     }
 
     // Get the auth scheme of the challenge.
@@ -163,6 +182,9 @@ class HttpAuth {
 
     HttpUtil::ValuesIterator props_;
     bool valid_;
+
+    std::string::const_iterator begin_;
+    std::string::const_iterator end_;
 
     std::string::const_iterator scheme_begin_;
     std::string::const_iterator scheme_end_;

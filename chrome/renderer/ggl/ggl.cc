@@ -7,6 +7,7 @@
 #include "base/ref_counted.h"
 #include "base/singleton.h"
 #include "base/thread_local.h"
+#include "base/weak_ptr.h"
 #include "chrome/renderer/command_buffer_proxy.h"
 #include "chrome/renderer/ggl/ggl.h"
 #include "chrome/renderer/gpu_channel_host.h"
@@ -18,6 +19,7 @@
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/GLES2/gles2_command_buffer.h"
 #endif  // ENABLE_GPU
 
 namespace ggl {
@@ -50,7 +52,7 @@ class GLES2Initializer {
 }  // namespace anonymous
 
 // Manages a GL context.
-class Context {
+class Context : public base::SupportsWeakPtr<Context> {
  public:
   Context(GpuChannelHost* channel, Context* parent);
   ~Context();
@@ -82,9 +84,12 @@ class Context {
   // Get the current error code.
   Error GetError();
 
+  // TODO(gman): Remove this.
+  void DisableShaderTranslation();
+
  private:
   scoped_refptr<GpuChannelHost> channel_;
-  Context* parent_;
+  base::WeakPtr<Context> parent_;
   uint32 parent_texture_id_;
   CommandBufferProxy* command_buffer_;
   gpu::gles2::GLES2CmdHelper* gles2_helper_;
@@ -96,7 +101,7 @@ class Context {
 
 Context::Context(GpuChannelHost* channel, Context* parent)
     : channel_(channel),
-      parent_(parent),
+      parent_(parent ? parent->AsWeakPtr() : base::WeakPtr<Context>()),
       parent_texture_id_(0),
       command_buffer_(NULL),
       gles2_helper_(NULL),
@@ -112,15 +117,19 @@ Context::~Context() {
 bool Context::Initialize(gfx::NativeViewId view, const gfx::Size& size) {
   DCHECK(size.width() >= 0 && size.height() >= 0);
 
-  if (!channel_->ready())
+  if (channel_->state() != GpuChannelHost::CONNECTED)
     return false;
 
   // Ensure the gles2 library is initialized first in a thread safe way.
   Singleton<GLES2Initializer>::get();
 
   // Allocate a frame buffer ID with respect to the parent.
-  if (parent_) {
-    parent_->gles2_implementation_->MakeIds(1, &parent_texture_id_);
+  if (parent_.get()) {
+    // Flush any remaining commands in the parent context to make sure the
+    // texture id accounting stays consistent.
+    int32 token = parent_->gles2_helper_->InsertToken();
+    parent_->gles2_helper_->WaitForToken(token);
+    parent_texture_id_ = parent_->gles2_implementation_->MakeTextureId();
   }
 
   // Create a proxy to a command buffer in the GPU process.
@@ -128,7 +137,7 @@ bool Context::Initialize(gfx::NativeViewId view, const gfx::Size& size) {
     command_buffer_ = channel_->CreateViewCommandBuffer(view);
   } else {
     CommandBufferProxy* parent_command_buffer =
-        parent_ ? parent_->command_buffer_ : NULL;
+        parent_.get() ? parent_->command_buffer_ : NULL;
     command_buffer_ = channel_->CreateOffscreenCommandBuffer(
         parent_command_buffer,
         size,
@@ -147,7 +156,7 @@ bool Context::Initialize(gfx::NativeViewId view, const gfx::Size& size) {
 
   // Create the GLES2 helper, which writes the command buffer protocol.
   gles2_helper_ = new gpu::gles2::GLES2CmdHelper(command_buffer_);
-  if (!gles2_helper_->Initialize()) {
+  if (!gles2_helper_->Initialize(kCommandBufferSize)) {
     Destroy();
     return false;
   }
@@ -174,7 +183,8 @@ bool Context::Initialize(gfx::NativeViewId view, const gfx::Size& size) {
       gles2_helper_,
       transfer_buffer.size,
       transfer_buffer.ptr,
-      transfer_buffer_id_);
+      transfer_buffer_id_,
+      false);
 
   return true;
 }
@@ -185,8 +195,8 @@ void Context::ResizeOffscreen(const gfx::Size& size) {
 }
 
 void Context::Destroy() {
-  if (parent_ && parent_texture_id_ != 0)
-    parent_->gles2_implementation_->FreeIds(1, &parent_texture_id_);
+  if (parent_.get() && parent_texture_id_ != 0)
+    parent_->gles2_implementation_->FreeTextureId(parent_texture_id_);
 
   delete gles2_implementation_;
   gles2_implementation_ = NULL;
@@ -247,6 +257,11 @@ Error Context::GetError() {
   }
 }
 
+// TODO(gman): Remove This
+void Context::DisableShaderTranslation() {
+  gles2_implementation_->CommandBufferEnable(PEPPER3D_SKIP_GLSL_TRANSLATION);
+}
+
 #endif  // ENABLE_GPU
 
 Context* CreateViewContext(GpuChannelHost* channel, gfx::NativeViewId view) {
@@ -266,7 +281,7 @@ Context* CreateOffscreenContext(GpuChannelHost* channel,
                                 const gfx::Size& size) {
 #if defined(ENABLE_GPU)
   scoped_ptr<Context> context(new Context(channel, parent));
-  if (!context->Initialize(NULL, size))
+  if (!context->Initialize(0, size))
     return NULL;
 
   return context.release();
@@ -305,9 +320,8 @@ Context* GetCurrentContext() {
 #endif
 }
 
-bool SwapBuffers() {
+bool SwapBuffers(Context* context) {
 #if defined(ENABLE_GPU)
-  Context* context = GetCurrentContext();
   if (!context)
     return false;
 
@@ -344,4 +358,12 @@ Error GetError() {
 #endif
 }
 
+// TODO(gman): Remove This
+void DisableShaderTranslation(Context* context) {
+#if defined(ENABLE_GPU)
+  if (context) {
+    context->DisableShaderTranslation();
+  }
+#endif
+}
 }  // namespace ggl

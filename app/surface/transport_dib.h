@@ -73,6 +73,13 @@ class TransportDIB {
   // Returns a default, invalid handle, that is meant to indicate a missing
   // Transport DIB.
   static Handle DefaultHandleValue() { return NULL; }
+
+  // Returns a value that is ONLY USEFUL FOR TESTS WHERE IT WON'T BE
+  // ACTUALLY USED AS A REAL HANDLE.
+  static Handle GetFakeHandleForTest() {
+    static int fake_handle = 10;
+    return reinterpret_cast<Handle>(fake_handle++);
+  }
 #elif defined(OS_MACOSX)
   typedef base::SharedMemoryHandle Handle;
   // On Mac, the inode number of the backing file is used as an id.
@@ -81,6 +88,13 @@ class TransportDIB {
   // Returns a default, invalid handle, that is meant to indicate a missing
   // Transport DIB.
   static Handle DefaultHandleValue() { return Handle(); }
+
+  // Returns a value that is ONLY USEFUL FOR TESTS WHERE IT WON'T BE
+  // ACTUALLY USED AS A REAL HANDLE.
+  static Handle GetFakeHandleForTest() {
+    static int fake_handle = 10;
+    return Handle(fake_handle++, false);
+  }
 #elif defined(USE_X11)
   typedef int Handle;  // These two ints are SysV IPC shared memory keys
   typedef int Id;
@@ -88,6 +102,13 @@ class TransportDIB {
   // Returns a default, invalid handle, that is meant to indicate a missing
   // Transport DIB.
   static Handle DefaultHandleValue() { return -1; }
+
+  // Returns a value that is ONLY USEFUL FOR TESTS WHERE IT WON'T BE
+  // ACTUALLY USED AS A REAL HANDLE.
+  static Handle GetFakeHandleForTest() {
+    static int fake_handle = 10;
+    return fake_handle++;
+  }
 #endif
 
   // Create a new TransportDIB, returning NULL on failure.
@@ -101,7 +122,8 @@ class TransportDIB {
   // renderer.
   static TransportDIB* Create(size_t size, uint32 sequence_num);
 
-  // Map the referenced transport DIB. Returns NULL on failure.
+  // Map the referenced transport DIB.  The caller owns the returned object.
+  // Returns NULL on failure.
   static TransportDIB* Map(Handle transport_dib);
 
   // Returns true if the handle is valid.
@@ -110,6 +132,9 @@ class TransportDIB {
   // Returns a canvas using the memory of this TransportDIB. The returned
   // pointer will be owned by the caller. The bitmap will be of the given size,
   // which should fit inside this memory.
+  //
+  // Will return NULL on allocation failure. This could be because the image
+  // is too large to map into the current process' address space.
   skia::PlatformCanvas* GetPlatformCanvas(int w, int h);
 
   // Return a pointer to the shared memory

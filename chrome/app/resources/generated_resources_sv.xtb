@@ -139,7 +139,6 @@
 <translation id="1486408090387743835"><ph name="PRODUCT_NAME"/> har nu <ph name="BEGIN_LINK"/>tillägg<ph name="END_LINK"/> och <ph name="BEGIN_BUTTON"/>bokmärkessynkronisering<ph name="END_BUTTON"/>.</translation>
 <translation id="4422347585044846479">Redigera bokmärke för den här sidan</translation>
 <translation id="8546306075665861288">Cacheminne för bilder</translation>
-<translation id="3899346049825960202">Hjälp för Linux proxykonfiguration</translation>
 <translation id="1399076603473531278">Inloggningsuppgifterna är inte aktuella.</translation>
 <translation id="3391060940042023865">Följande plugin-program har upphört att fungera: <ph name="PLUGIN_NAME"/></translation>
 <translation id="5197255632782567636">Internet</translation>
@@ -149,20 +148,6 @@
 <translation id="1556537182262721003">Det gick inte att flytta tilläggskatalogen till profilen.</translation>
 <translation id="5866557323934807206">Rensa inställningarna för framtida besök</translation>
 <translation id="6370820475163108109"><ph name="ORGANIZATION_NAME"/> (<ph name="DOMAIN_NAME"/>)</translation>
-<translation id="763276826334024854">När <ph name="PRODUCT_NAME"/> körs i en skrivbordsmiljö som stöds används datorns proxyinställningar. Det kan hända att din dator inte stöds eller att det uppstod ett problem vid start av systemkonfigurationen. Du kan konfigurera din proxy med följande miljövariabler:
-        <ph name="BEGIN_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>auto_proxy<ph name="END_CODE"/><ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST"/>
-            <ph name="BEGIN_LIST_ITEM"/>Definierad och tom → autodetect<ph name="END_LIST_ITEM"/>
-            <ph name="BEGIN_LIST_ITEM"/>Inte tom → anger webbadress för autoconfig<ph name="END_LIST_ITEM"/>
-          <ph name="END_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>all_proxy<ph name="END_CODE"/>: proxyserver att anvädna för alla typer<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>http_proxy<ph name="END_CODE"/>: proxyserver för HTTP<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>https_proxy<ph name="END_CODE"/>: proxyserver för HTTPS<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>ftp_proxy<ph name="END_CODE"/>: proxyserver för FTP<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>SOCKS_SERVER<ph name="END_CODE"/>: proxyserver för SOCKS (standardvärde är SOCKS v4, ange SOCKS_VERSION=5 om du vill använda SOCKS v5)<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>no_proxy<ph name="END_CODE"/>: kommaavgränsad lista med värdenheter eller mönster som ska förbigå proxy<ph name="END_LIST_ITEM"/>
-        <ph name="END_LIST"/></translation>
 <translation id="2933933591993394296">Bokmärkessynkronisering har inaktiverats på den här datorn. Om du avinstallerar <ph name="NAME_OF_EXTENSION"/> kan du aktivera bokmärkessynkronisering igen genom att välja Konfigurera synkronisering... i menyn Verktyg.</translation>
 <translation id="8820817407110198400">Bokmärken</translation>
 <translation id="5191625995327478163">&amp;Språkinställningar...</translation>
@@ -170,7 +155,6 @@
 <translation id="5585645215698205895">&amp;Ned</translation>
 <translation id="6596816719288285829">IP-adress</translation>
 <translation id="1674989413181946727">Datoromfattande SSL-inställningar:</translation>
-<translation id="1452199478873730826">Flikr</translation>
 <translation id="8703575177326907206">Din anslutning till <ph name="DOMAIN"/> är inte krypterad.</translation>
 <translation id="4197577448076628265">Tillägget får åtkomst till din webbhistorik och privata data på <ph name="HOST"/>.</translation>
 <translation id="1644574205037202324">Historik</translation>
@@ -340,7 +324,6 @@
 <translation id="348620396154188443">Tillåt alla webbplatser att visa popup-fönster</translation>
 <translation id="8214489666383623925">Öppna fil...</translation>
 <translation id="5230160809118287008">Teleporterade getter</translation>
-<translation id="5296476177639202243">Inga bokmärken matchar sökfrågan &quot;<ph name="SEARCH_TEXT"/>&quot;.</translation>
 <translation id="4495419450179050807">Visa inte den här sidan</translation>
 <translation id="939736085109172342">Ny mapp</translation>
 <translation id="4933484234309072027">inbäddad på <ph name="URL"/></translation>
@@ -380,7 +363,6 @@
 <translation id="1684861821302948641">Stäng sidor</translation>
 <translation id="6802031077390104172"><ph name="USAGE"/> (<ph name="OID"/>)</translation>
 <translation id="857089571609443760">Synkroniseringen fungerar inte eftersom för många förfrågningar skickats till servern. Det verkar som om <ph name="NAME_OF_EXTENSION"/> gör för många ändringar i dina bokmärken.</translation>
-<translation id="5965640700983474726">Skriv sökord</translation>
 <translation id="40334469106837974">Ändra sidlayout</translation>
 <translation id="2142570832281562688">Ange ett profilnamn</translation>
 <translation id="5904714272463161824">&amp;Rapportera fel eller trasig webbplats...</translation>
@@ -398,7 +380,6 @@
 <translation id="2620436844016719705">System</translation>
 <translation id="5362741141255528695">Välj privat nyckelfil.</translation>
 <translation id="7012108905414904806">Den här sidan innehåller andra resurser som inte är säkra. Andra användare kan se sådana resurser medan de överförs och de kan manipuleras av bedragare som ändrar sidans utseende.</translation>
-<translation id="644318894204114995">Bekräfta körning i inkognitoläge</translation>
 <translation id="7226140659422399856">Webbläsaren har kraschat...</translation>
 <translation id="4515911410595374805">Vissa komponenter på sidan kommer från en obekräftad källa och visas därför inte.</translation>
 <translation id="1195447618553298278">Okänt fel.</translation>
@@ -407,7 +388,6 @@
 <translation id="6610600335992778838">WiFi</translation>
 <translation id="1087119889335281750">&amp;Inga stavningsförslag</translation>
 <translation id="5228309736894624122">SSL-protokollfel.</translation>
-<translation id="718141787353053227">Sidinställningar...</translation>
 <translation id="5076340679995252485">K&amp;listra in</translation>
 <translation id="5097982659374947325">Acceptera bara cookies från sidor jag besöker</translation>
 <translation id="14171126816530869">Identiteten hos <ph name="ORGANIZATION"/> på <ph name="LOCALITY"/> har verifierats av <ph name="ISSUER"/>.</translation>
@@ -434,7 +414,6 @@
 <translation id="6786747875388722282">Tillägg</translation>
 <translation id="9053965862400494292">Ett fel uppstod när synkronisering skulle ställas in.</translation>
 <translation id="4636930964841734540">Info</translation>
-<translation id="2815500128677761940">Bokmärkesfältet</translation>
 <translation id="4571852245489094179">Importera bokmärken och inställningar</translation>
 <translation id="6514771739083339959">Startsida:</translation>
 <translation id="4421917670248123270">Stäng och avbryt hämtningarna</translation>
@@ -497,7 +476,6 @@
 <translation id="8425492902634685834">Fäst i aktivitetsfältet</translation>
 <translation id="3234408098842461169">Nedpil</translation>
 <translation id="825608351287166772">Certifikat har en giltighetstid precis som alla andra identitetsdokument (t.ex. pass). Certifikatet som har angetts för webbläsaren är ännu inte giltigt. När giltighetsperioden för ett certifikat inte har infallit behöver certifikatets statusinformation inte uppdateras (huruvida det har återkallats och inte är tillförlitligt). Det är därför inte möjligt att bekräfta certifikatets tillförlitlighet. Du bör inte fortsätta.</translation>
-<translation id="8786172108436160456">Vill du tillåta att <ph name="EXTENSION_NAME"/> körs i inkognitoläge?</translation>
 <translation id="5209518306177824490">SHA-1-fingeravtryck</translation>
 <translation id="7154150278819212687">Tillägget får åtkomst till din webbhistorik.</translation>
 <translation id="1553538517812678578">obegränsad</translation>
@@ -508,13 +486,11 @@
 <translation id="4874539263382920044">Namnet måste bestå av minst ett tecken</translation>
 <translation id="2963998720451829125"><ph name="NAME_OF_EXTENSION"/> har inaktiverats. Om du slutar synkronisera dina bokmärken kan du aktivera tillägget igen på tilläggssidan som du hittar i menyn Verktyg.</translation>
 <translation id="7344633671344536647">Webbinformation:</translation>
-<translation id="2332311077028912338">Vill du tillåta att tillägget körs i inkognitoläge? <ph name="PRODUCT_NAME"/> kan inte förhindra att tillägget registrerar din webbinformation.</translation>
 <translation id="4250680216510889253">Nej</translation>
 <translation id="6291953229176937411">&amp;Visa i Finder</translation>
 <translation id="7905536804357499080">Använd aktuell</translation>
 <translation id="8933960630081805351">&amp;Visa i Finder</translation>
 <translation id="3041612393474885105">Certifikatinformation</translation>
-<translation id="7378810950367401542">/</translation>
 <translation id="3733127536501031542">SSL-server med uppgradering</translation>
 <translation id="954586097957006897">Efternamn</translation>
 <translation id="5849941564644911027"><ph name="PRODUCT_NAME"/> importerar nu dina bokmärken och andra inställningar från <ph name="DEF_BROWSER"/> och skapar genvägar i din dator.</translation>
@@ -569,7 +545,6 @@
 <translation id="39964277676607559">Det gick inte att läsa in JavaScript-filen <ph name="RELATIVE_PATH"/> för innehållsskriptet.</translation>
 <translation id="4378551569595875038">Ansluter...</translation>
 <translation id="7029809446516969842">Lösenord</translation>
-<translation id="8211437954284917092">Sök i dina bokmärken genom att ange en sökfråga i textfältet ovan.</translation>
 <translation id="4528378725264562960">(Pågår)</translation>
 <translation id="5958418293370246440"><ph name="SAVED_FILES"/> / <ph name="TOTAL_FILES"/> filer</translation>
 <translation id="2350172092385603347">Lokalisering används, men default_locale specificeras inte i manifestet.</translation>
@@ -618,7 +593,6 @@
 <translation id="149347756975725155">Det gick inte att läsa in tilläggsikonen <ph name="ICON"/>.</translation>
 <translation id="3675321783533846350">Ange en proxy vid anslutning till nätverket.</translation>
 <translation id="1572103024875503863"><ph name="NUMBER_MANY"/> dagar</translation>
-<translation id="181952314179848438">Tillägget behöver åtkomst till:</translation>
 <translation id="8453184121293348016">Ingen återkallningsmekanism har hittats</translation>
 <translation id="3481915276125965083">Följande popup-fönster blockerades på den här sidan:</translation>
 <translation id="3468298837301810372">Etikett</translation>
@@ -647,7 +621,6 @@
 <translation id="7965010376480416255">Delat minne</translation>
 <translation id="6248988683584659830">Sökinställningar</translation>
 <translation id="7053983685419859001">Blockera</translation>
-<translation id="3425080561288944889">Vill du ta bort <ph name="BOOKMARK_TITLE"/>?</translation>
 <translation id="2727712005121231835">Faktisk storlek</translation>
 <translation id="8887733174653581061">Alltid överst</translation>
 <translation id="610886263749567451">Javascript-varning</translation>
@@ -744,7 +717,6 @@
 <translation id="7629827748548208700">Flik: <ph name="TAB_NAME"/></translation>
 <translation id="8449008133205184768">Klistra in och matcha stilen</translation>
 <translation id="8028993641010258682">Storlek</translation>
-<translation id="1383876407941801731">Sökning</translation>
 <translation id="8398877366907290961">Fortsätt ändå</translation>
 <translation id="6974053822202609517">Höger till vänster</translation>
 <translation id="290414493736480793">Tack</translation>
@@ -811,14 +783,12 @@
 <translation id="5552632479093547648">Skadlig programvara och lösenordsfiske har upptäckts!</translation>
 <translation id="4988273303304146523">För <ph name="NUMBER_DEFAULT"/> dagar sedan</translation>
 <translation id="1588343679702972132">Den här webbplatsen begär att du identifierar dig med ett certifikat:</translation>
-<translation id="7211994749225247711">Ta bort...</translation>
 <translation id="2819994928625218237">&amp;Inga stavningsförslag</translation>
 <translation id="4316305410440790958">Öppna ram på ny &amp;flik</translation>
 <translation id="9142623379911037913">Tillåt att <ph name="SITE"/> visar meddelanden på skrivbordet?</translation>
 <translation id="4196320913210960460">Om du vill hantera dina installerade tillägg klickar du på Tillägg i menyn Verktyg.</translation>
 <translation id="9118804773997839291">Här nedan finns en lista med alla osäkra komponenter på sidan. Klicka på länken Diagnostik om du vill ha mer information om tråden för en given komponent.</translation>
 <translation id="7754704193130578113">Fråga var filerna ska sparas före nedladdning</translation>
-<translation id="8155199869035534942">Ta bort det markerade objektet</translation>
 <translation id="2497284189126895209">Alla filer</translation>
 <translation id="5360606537916580043">Senaste dagen</translation>
 <translation id="1682548588986054654">Nytt inkognitofönster</translation>
@@ -971,7 +941,6 @@
 <translation id="7136984461011502314">Välkommen till <ph name="PRODUCT_NAME"/></translation>
 <translation id="1594030484168838125">Välj</translation>
 <translation id="204497730941176055">Namn på Microsoft-certifikatmall</translation>
-<translation id="4002066346123236978">Namn</translation>
 <translation id="4087089424473531098">Skapade tillägget:
 
 <ph name="EXTENSION_FILE"/></translation>
@@ -1054,7 +1023,6 @@
 <translation id="4608500690299898628">&amp;Sök...</translation>
 <translation id="3574305903863751447"><ph name="CITY"/>, <ph name="STATE"/> <ph name="COUNTRY"/></translation>
 <translation id="8724859055372736596">Visa i &amp;mapp</translation>
-<translation id="5446294780224829982">Hangul IME:</translation>
 <translation id="5554489410841842733">Ikonen visas när tillägget kan agera på den aktuella sidan.</translation>
 <translation id="4862642413395066333">Signera OCSP-svar</translation>
 <translation id="4756388243121344051">&amp;Historik</translation>
@@ -1076,7 +1044,6 @@
 <translation id="7631887513477658702">Öppna &amp;alltid filer av denna typ</translation>
 <translation id="8627795981664801467">Endast säkra anslutningar</translation>
 <translation id="3921544830490870178">Inställningar för plugin-program:</translation>
-<translation id="1387703718616631293">Tillåt att tillägget körs i inkognitoläge</translation>
 <translation id="2190355936436201913">(tom)</translation>
 <translation id="5868426874618963178">Skicka källan till aktuell sida</translation>
 <translation id="5818003990515275822">Koreanskt</translation>
@@ -1108,7 +1075,6 @@
 <translation id="8565745688101278215"><ph name="FIRSTNAME"/><ph name="SEPARATOR"/><ph name="LASTNAME"/></translation>
 <translation id="3927932062596804919">Neka</translation>
 <translation id="6484929352454160200">En ny version av <ph name="PRODUCT_NAME"/> är tillgänglig</translation>
-<translation id="7035824132811506448">Nyligen tillagda</translation>
 <translation id="5827266244928330802">Safari</translation>
 <translation id="778881183694837592">Obligatoriska fält får inte vara tomma</translation>
 <translation id="6820686453637990663">CVC</translation>
@@ -1170,8 +1136,6 @@
 <translation id="2356070529366658676">Fråga</translation>
 <translation id="5731247495086897348">Kl&amp;istra in och öppna</translation>
 <translation id="3413103074007669042">På den här sidan finns innehåll som inte är säkert</translation>
-<translation id="3866320199958134961">Mindre än <ph name="MINUTES"/>.
-        Anslut laddare.</translation>
 <translation id="7635741716790924709">Adressrad 1</translation>
 <translation id="5285267187067365830">Installera plugin-program...</translation>
 <translation id="1166212789817575481">Stäng flikar till höger</translation>
@@ -1314,7 +1278,6 @@
 <translation id="1474307029659222435">Öppna ram i nytt fönster</translation>
 <translation id="1522474541175464402">Nyckel-ID för certifikatutfärdare</translation>
 <translation id="5976160379964388480">Övriga</translation>
-<translation id="3527085408025491307">Mapp</translation>
 <translation id="3413808618118019351">&amp;Importera bokmärken och inställningar...</translation>
 <translation id="2635276683026132559">Signering</translation>
 <translation id="4835836146030131423">Inloggningsfel.</translation>
@@ -1363,7 +1326,6 @@
 <translation id="4701488924964507374"><ph name="SENTENCE1"/> <ph name="SENTENCE2"/></translation>
 <translation id="1163931534039071049">&amp;Visa ramkälla</translation>
 <translation id="7564847347806291057">Avsluta process</translation>
-<translation id="7851589172948533362">Verifierad av <ph name="ISSUER"/></translation>
 <translation id="7063412606254013905">Läs mer om lösenordsfiske.</translation>
 <translation id="307767688111441685">Sidan ser konstig ut</translation>
 <translation id="5295309862264981122">Bekräfta navigering</translation>
@@ -1482,7 +1444,6 @@
 <translation id="4910619056351738551">Här följer några förslag:</translation>
 <translation id="5489059749897101717">&amp;Visa stavningspanel</translation>
 <translation id="1232569758102978740">Namnlös</translation>
-<translation id="1851547963021150172">Utför en åtgärd på det valda objektet</translation>
 <translation id="4362187533051781987">Ort</translation>
 <translation id="9149866541089851383">Redigera...</translation>
 <translation id="7000311294523403548">Namnlös webbsida</translation>

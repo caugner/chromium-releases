@@ -9,7 +9,7 @@
 #include "chrome/browser/sync/syncable/blob.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/test/sync/engine/mock_server_connection.h"
+#include "chrome/test/sync/engine/mock_connection_manager.h"
 #include "chrome/test/sync/engine/test_directory_setter_upper.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
@@ -87,11 +87,6 @@ TEST(SyncerProtoUtil, NameExtractionOneName) {
   const std::string name_a =
       SyncerProtoUtil::NameFromSyncEntity(one_name_entity);
   EXPECT_EQ(one_name_string, name_a);
-
-  const std::string name_b =
-      SyncerProtoUtil::NameFromCommitEntryResponse(one_name_response);
-  EXPECT_EQ(one_name_string, name_b);
-  EXPECT_TRUE(name_a == name_b);
 }
 
 TEST(SyncerProtoUtil, NameExtractionOneUniqueName) {
@@ -106,11 +101,6 @@ TEST(SyncerProtoUtil, NameExtractionOneUniqueName) {
   const std::string name_a =
       SyncerProtoUtil::NameFromSyncEntity(one_name_entity);
   EXPECT_EQ(one_name_string, name_a);
-
-  const std::string name_b =
-      SyncerProtoUtil::NameFromCommitEntryResponse(one_name_response);
-  EXPECT_EQ(one_name_string, name_b);
-  EXPECT_TRUE(name_a == name_b);
 }
 
 // Tests NameFromSyncEntity and NameFromCommitEntryResponse when both the name
@@ -132,12 +122,6 @@ TEST(SyncerProtoUtil, NameExtractionTwoNames) {
   const std::string name_a =
       SyncerProtoUtil::NameFromSyncEntity(two_name_entity);
   EXPECT_EQ(neuro, name_a);
-
-  const std::string name_b =
-      SyncerProtoUtil::NameFromCommitEntryResponse(two_name_response);
-  EXPECT_EQ(neuro, name_b);
-
-  EXPECT_TRUE(name_a == name_b);
 }
 
 class SyncerProtoUtilTest : public testing::Test {
@@ -175,6 +159,9 @@ TEST_F(SyncerProtoUtilTest, VerifyResponseBirthday) {
 
   // Doesn't match
   response.set_store_birthday("meat");
+  EXPECT_FALSE(SyncerProtoUtil::VerifyResponseBirthday(lookup, &response));
+
+  response.set_error_code(ClientToServerResponse::CLEAR_PENDING);
   EXPECT_FALSE(SyncerProtoUtil::VerifyResponseBirthday(lookup, &response));
 }
 
@@ -237,15 +224,15 @@ TEST_F(SyncerProtoUtilTest, PostAndProcessHeaders) {
 
   dcm.set_send_error(true);
   EXPECT_FALSE(SyncerProtoUtil::PostAndProcessHeaders(&dcm, NULL,
-      &msg, &response));
+      msg, &response));
 
   dcm.set_send_error(false);
   EXPECT_TRUE(SyncerProtoUtil::PostAndProcessHeaders(&dcm, NULL,
-      &msg, &response));
+      msg, &response));
 
   dcm.set_access_denied(true);
   EXPECT_FALSE(SyncerProtoUtil::PostAndProcessHeaders(&dcm, NULL,
-      &msg, &response));
+      msg, &response));
 }
 
 }  // namespace browser_sync

@@ -1,13 +1,12 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/child_process_logging.h"
 
-#include <string>
-
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "chrome/common/gpu_info.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "googleurl/src/gurl.h"
 
@@ -35,4 +34,9 @@ void SetClientId(const std::string& client_id) {
 void SetActiveExtensions(const std::set<std::string>& extension_ids) {
   // TODO(port)
 }
+
+void SetGpuInfo(const GPUInfo& gpu_info) {
+  // TODO(rlp): Bug 38737.
+}
+
 }  // namespace child_process_logging

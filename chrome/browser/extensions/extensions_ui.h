@@ -23,6 +23,7 @@ class Extension;
 class ExtensionsService;
 class FilePath;
 class PrefService;
+class RenderProcessHost;
 class UserScript;
 class Value;
 
@@ -148,6 +149,9 @@ class ExtensionsDOMHandler
   // Callback for "enableIncognito" message.
   void HandleEnableIncognitoMessage(const Value* value);
 
+  // Callback for "allowFileAcces" message.
+  void HandleAllowFileAccessMessage(const Value* value);
+
   // Callback for "uninstall" message.
   void HandleUninstallMessage(const Value* value);
 
@@ -169,6 +173,9 @@ class ExtensionsDOMHandler
   // Callback for "selectFilePath" message.
   void HandleSelectFilePathMessage(const Value* value);
 
+  // Forces a UI update if appropriate after a notification is received.
+  void MaybeUpdateAfterNotification();
+
   // SelectFileDialog::Listener
   virtual void FileSelected(const FilePath& path,
                             int index, void* params);
@@ -185,7 +192,8 @@ class ExtensionsDOMHandler
 
   // Helper that lists the current active html pages for an extension.
   std::vector<ExtensionPage> GetActivePagesForExtension(
-      const std::string& extension_id);
+      RenderProcessHost* process,
+      Extension* extension);
 
   // Returns the best icon to display in the UI for an extension, or an empty
   // ExtensionResource if no good icon exists.
@@ -221,16 +229,24 @@ class ExtensionsDOMHandler
   // incognito mode.
   scoped_ptr<ExtensionInstallUI> install_ui_;
 
+  // The id of the extension we are prompting the user about.
+  std::string extension_id_prompting_;
+
   // We monitor changes to the extension system so that we can reload when
   // necessary.
   NotificationRegistrar registrar_;
 
-  // The id of the extension we are prompting the user about.
-  std::string extension_id_prompting_;
+  // If true, we will ignore notifications in ::Observe(). This is needed
+  // to prevent reloading the page when we were the cause of the
+  // notification.
+  bool ignore_notifications_;
 
-  // The type of prompt that is open. Only ever uninstall or enable-incognito.
-  // Invalid if no prompt is open.
-  ExtensionInstallUI::PromptType ui_prompt_type_;
+  // The page may be refreshed in response to a RENDER_VIEW_HOST_DELETED,
+  // but the iteration over RenderViewHosts will include the host because the
+  // notification is sent when it is in the process of being deleted (and before
+  // it is removed from the process). Keep a pointer to it so we can exclude
+  // it from the active views.
+  RenderViewHost* deleting_rvh_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionsDOMHandler);
 };

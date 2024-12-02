@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,8 +75,7 @@ void HistoryContentsProvider::Start(const AutocompleteInput& input,
 
   // Change input type so matches will be marked up properly.
   input_type_ = input.type();
-  trim_http_ = !url_util::FindAndCompareScheme(WideToUTF8(input.text()),
-                                               chrome::kHttpScheme, NULL);
+  trim_http_ = !HasHTTPScheme(input.text());
 
   // Decide what to do about any previous query/results.
   if (!minimal_changes) {
@@ -121,7 +120,8 @@ void HistoryContentsProvider::Start(const AutocompleteInput& input,
       history::QueryOptions options;
       options.SetRecentDayRange(kDaysToSearch);
       options.max_count = kMaxMatchCount;
-      history->QueryHistory(input.text(), options, &request_consumer_,
+      history->QueryHistory(WideToUTF16(input.text()), options,
+          &request_consumer_,
           NewCallback(this, &HistoryContentsProvider::QueryComplete));
     }
   }
@@ -174,12 +174,12 @@ void HistoryContentsProvider::ConvertResults() {
   // This is done to avoid having the history search shortcut show
   // 'See 1 previously viewed ...'.
   //
-  // Note that AutocompleteResult::max_matches() (maximum size of the popup)
-  // is different than both max_matches (the provider's maximum) and
+  // Note that AutocompleteResult::kMaxMatches (maximum size of the popup)
+  // is different than both kMaxMatches (the provider's maximum) and
   // kMaxMatchCount (the number of items we want from the history).
-  size_t max_for_popup = std::min(AutocompleteResult::max_matches() + 1,
+  size_t max_for_popup = std::min(AutocompleteResult::kMaxMatches + 1,
                                   result_refs.size());
-  size_t max_for_provider = std::min(max_matches(), result_refs.size());
+  size_t max_for_provider = std::min(kMaxMatches, result_refs.size());
   std::partial_sort(result_refs.begin(), result_refs.begin() + max_for_popup,
                     result_refs.end(), &CompareMatchRelevance);
   matches_.clear();
@@ -207,14 +207,14 @@ AutocompleteMatch HistoryContentsProvider::ResultToMatch(
   // Also show star in popup.
   AutocompleteMatch match(this, score, false, MatchInTitle(result) ?
       AutocompleteMatch::HISTORY_TITLE : AutocompleteMatch::HISTORY_BODY);
-  match.fill_into_edit = StringForURLDisplay(result.url(), true);
+  match.contents = StringForURLDisplay(result.url(), true, trim_http_);
+  match.fill_into_edit =
+      AutocompleteInput::FormattedStringWithEquivalentMeaning(result.url(),
+                                                              match.contents);
   match.destination_url = result.url();
-  match.contents = match.fill_into_edit;
-  if (trim_http_)
-    TrimHttpPrefix(&match.contents);
   match.contents_class.push_back(
       ACMatchClassification(0, ACMatchClassification::URL));
-  match.description = result.title();
+  match.description = UTF16ToWide(result.title());
   match.starred =
       (profile_->GetBookmarkModel() &&
        profile_->GetBookmarkModel()->IsBookmarked(result.url()));
@@ -267,7 +267,7 @@ void HistoryContentsProvider::QueryBookmarks(const AutocompleteInput& input) {
 
   TimeTicks start_time = TimeTicks::Now();
   std::vector<bookmark_utils::TitleMatch> matches;
-  bookmark_model->GetBookmarksWithTitlesMatching(input.text(), max_matches(),
+  bookmark_model->GetBookmarksWithTitlesMatching(input.text(), kMaxMatches,
                                                  &matches);
   for (size_t i = 0; i < matches.size(); ++i)
     AddBookmarkTitleMatchToResults(matches[i]);
@@ -278,6 +278,6 @@ void HistoryContentsProvider::QueryBookmarks(const AutocompleteInput& input) {
 void HistoryContentsProvider::AddBookmarkTitleMatchToResults(
     const bookmark_utils::TitleMatch& match) {
   history::URLResult url_result(match.node->GetURL(), match.match_positions);
-  url_result.set_title(match.node->GetTitle());
+  url_result.set_title(WideToUTF16(match.node->GetTitle()));
   results_.AppendURLBySwapping(&url_result);
 }

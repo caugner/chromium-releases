@@ -9,7 +9,6 @@
 
 #include "base/file_path.h"
 #include "base/ref_counted.h"
-#include "base/task.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
@@ -83,11 +82,22 @@ class CrxInstaller
     allow_privilege_increase_ = val;
   }
 
-  bool force_web_origin_to_download_url() const {
-    return force_web_origin_to_download_url_;
+  bool limit_web_extent_to_download_host() const {
+    return limit_web_extent_to_download_host_;
   }
-  void set_force_web_origin_to_download_url(bool val) {
-    force_web_origin_to_download_url_ = val;
+  void set_limit_web_extent_to_download_host(bool val) {
+    limit_web_extent_to_download_host_ = val;
+  }
+
+  // If |apps_require_extension_mime_type_| is set to true, be sure to set
+  // |original_mime_type_| as well.
+  void set_apps_require_extension_mime_type(
+      bool apps_require_extension_mime_type) {
+    apps_require_extension_mime_type_ = apps_require_extension_mime_type;
+  }
+
+  void set_original_mime_type(const std::string& original_mime_type) {
+    original_mime_type_ = original_mime_type;
   }
 
  private:
@@ -113,8 +123,6 @@ class CrxInstaller
   // Result reporting.
   void ReportFailureFromFileThread(const std::string& error);
   void ReportFailureFromUIThread(const std::string& error);
-  void ReportOverinstallFromFileThread();
-  void ReportOverinstallFromUIThread();
   void ReportSuccessFromFileThread();
   void ReportSuccessFromUIThread();
 
@@ -153,9 +161,9 @@ class CrxInstaller
   // either. Defaults to false.
   bool allow_privilege_increase_;
 
-  // If true and the installed extension uses web content, the web origin will
-  // be forced to the origin of |original_url_|. Defaults to false.
-  bool force_web_origin_to_download_url_;
+  // Limits the web extent to the app being installed to the host of the
+  // download URL. If the crx being installed is not an app, this is a no-op.
+  bool limit_web_extent_to_download_host_;
 
   // Whether to create an app shortcut after successful installation. This is
   // set based on the user's selection in the UI and can only ever be true for
@@ -189,6 +197,14 @@ class CrxInstaller
   // The root of the unpacked extension directory. This is a subdirectory of
   // temp_dir_, so we don't have to delete it explicitly.
   FilePath unpacked_extension_root_;
+
+  // True when the CRX being installed was just downloaded.
+  // Used to trigger extra checks before installing.
+  bool apps_require_extension_mime_type_;
+
+  // The value of the content type header sent with the CRX.
+  // Ignorred unless |require_extension_mime_type_| is true.
+  std::string original_mime_type_;
 
   DISALLOW_COPY_AND_ASSIGN(CrxInstaller);
 };

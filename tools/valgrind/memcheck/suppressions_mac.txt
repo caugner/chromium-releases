@@ -54,7 +54,7 @@
    fun:_ZN16HALDefaultDevice10InitializeEv
    fun:_ZN9HALSystem16CheckOutInstanceEv
    fun:AudioObjectGetPropertyData
-   fun:_ZN15AudioManagerMac15HasAudioDevicesEv
+   fun:_ZN15AudioManagerMac*HasAudioOutputDevicesEv
 }
 {
    # Filed with Apple as rdar://6915060; see http://crbug.com/11270
@@ -131,7 +131,8 @@
    fun:get_glyphs_for_glyph_names
 }
 {
-   # Nasty invalid write. Reported to Apple as rdar://7240303.
+   # Nasty invalid write. Reported to Apple as rdar://7240303. Supposedly fixed
+   # in Snow Leopard; should be verified and removed if so.
    bug_18189
    Memcheck:Addr8
    fun:sseCGSFill8by1
@@ -177,16 +178,71 @@
 # 2. Intentional unit test errors, stuff that is somehow a false positive
 # in our own code, or stuff that is so trivial it's not worth fixing.
 {
-   # NSObject pointers in a static std::map; we do technically leak them, but
-   # only on shutdown, so it's not worth fixing.
-   static_theme_cache
+   # Plugins are deliberately not unloaded (on shutdown) on the Mac, in order to
+   # prevent crashes for those that don't unload cleanly.
+   plugin_unload
    Memcheck:Leak
-   fun:calloc
-   fun:_internal_class_createInstanceFromZone
-   fun:_internal_class_createInstance
-   fun:+[NSObject allocWithZone:]
-   fun:+[NSObject alloc]
-   fun:+[GTMTheme(BrowserThemeProviderInitialization) themeWithBrowserThemeProvider:isOffTheRecord:]
+   fun:_Znw*
+   fun:_ZN4base17LoadNativeLibraryERK8FilePath
+   fun:_ZN5NPAPI9PluginLib4LoadEv
+   fun:_ZN5NPAPI9PluginLib13NP_InitializeEv
+   fun:_ZN21WebPluginDelegateImpl6CreateERK8FilePathRKSsy
+   fun:_ZN19TestWebViewDelegate20CreatePluginDelegateERK8FilePathRKSs
+   fun:_ZN11webkit_glue13WebPluginImpl10initializeEPN6WebKit18WebPluginContainerE
+}
+{
+   # Mac Sandbox test cases are registered in a global map.  This code is only
+   # used in the unit test binary.
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN11sandboxtest8internal19RegisterSandboxTestIN12_GLOBAL__N_*MacSandboxed*TestCaseEEC2EPKc
+   fun:_ZN11sandboxtest8internal19RegisterSandboxTestIN12_GLOBAL__N_*MacSandboxed*TestCaseEEC1EPKc
+   fun:_Z41__static_initialization_and_destruction_0ii
+   fun:_GLOBAL__I__ZNSt3tr112_GLOBAL__N_16ignoreE
+   fun:_ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE
+   fun:_ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEj
+   fun:_ZN11ImageLoader15runInitializersERKNS_11LinkContextE
+   fun:_ZN4dyld24initializeMainExecutableEv
+   fun:_ZN4dyld5_mainEPK11mach_headermiPPKcS5_S5_
+   fun:_ZN13dyldbootstrap5startEPK11mach_headeriPPKcl
+   fun:_dyld_start
+   obj:*
+}
+{
+   # jrg thinks this is probably a bug in Cocoa but is harmless.  We
+   # can hit it by using --homepage=about:blank, which triggers a
+   # location bar focus earlier than normal (earlier than when a
+   # window is shown).  To "work around" the problem for valgrind, we
+   # could call for example call [NSWindow setInitialFirstResponder:]
+   # instead of [NSWindow makeFirstResponder:] if the window isn't
+   # visible.  However, these contortions are ugly.  since the
+   # needsDisplay region gets reset when the window is shown, it
+   # really doesn't matter what we do with it before then.
+   Memcheck:Cond
+   fun:NSIsEmptyRect
+   fun:-[NSRegion isEmpty]
+   fun:-[NSRegion subtractRegion:]
+   fun:-[NSWindow _subtractFromNeedsDisplayRegion:]
+   ...
+   fun:-[NSWindow makeKeyAndOrderFront:]
+   fun:_ZN18BrowserWindowCocoa4ShowEv
+   ...
+   fun:_ZN11BrowserInit17LaunchWithProfile17OpenURLsInBrowserEP7BrowserbRKSt6vectorI4GURLSaIS4_EE
+   ...
+   fun:ChromeMain
+   fun:main
+}
+{
+   # Same as above -- touching a region we'll throw away soon.
+   Memcheck:Cond
+   fun:NSUnionRect
+   fun:-[NSRegion addRect:]
+   ...
+   fun:-[AutocompleteTextField becomeFirstResponder]
+   fun:-[NSWindow makeFirstResponder:]
+   fun:_ZN23AutocompleteEditViewMac13FocusLocationEb
+   ...
+   fun:_ZN13TabStripModel14AddTabContentsEP11TabContentsiji
 }
 
 # 3. Suppressions for real chromium bugs that are not yet fixed.
@@ -232,10 +288,8 @@
    fun:-[NSCustomObject nibInstantiate]
    fun:-[NSIBObjectData instantiateObject:]
    fun:-[NSIBObjectData nibInstantiateWithOwner:topLevelObjects:]
-   fun:loadNib
-   fun:+[NSBundle(NSNibLoading) _loadNibFile:nameTable:withZone:ownerBundle:]
-   fun:+[NSBundle(NSNibLoading) loadNibFile:externalNameTable:withZone:]
-   fun:+[NSBundle(NSNibLoading) loadNibNamed:owner:]
+   fun:-[NSNib instantiateNibWithExternalNameTable:]
+   fun:-[NSNib instantiateNibWithOwner:topLevelObjects:]
    fun:_Z29WillInitializeMainMessageLoopRK18MainFunctionParams
 }
 {
@@ -548,33 +602,6 @@
    fun:_ZN13PluginService24FindOrStartPluginProcessERK8FilePath
 }
 {
-   bug_31586a
-   Memcheck:Leak
-   fun:_Znw*
-   ...
-   fun:_ZN3net13CookieMonster20InternalInsertCookieERKSsPNS0_15CanonicalCookieEb
-   fun:_ZN3net13CookieMonster36SetCookieWithCreationTimeWithOptionsERK4GURLRKSsRKN4base4TimeERKNS_13CookieOptionsE
-   fun:_ZN3net13CookieMonster20SetCookieWithOptionsERK4GURLRKSsRKNS_13CookieOptionsE
-   fun:_ZN3net13CookieMonster9SetCookieERK4GURLRKSs
-}
-{
-   bug_31586b
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN14TestingProfile20CreateRequestContextEv
-   fun:_ZN12_GLOBAL__N_127CookiesWindowControllerTest5SetUpEv
-}
-{
-   bug_31586c
-   Memcheck:Leak
-   fun:_Znw*
-   ...
-   fun:_ZN3net13CookieMonster20InternalInsertCookieERKSsPNS0_15CanonicalCookieEb
-   fun:_ZN3net13CookieMonster35SetCookieWithCreationTimeAndOptionsERK4GURLRKSsRKN4base4TimeERKNS_13CookieOptionsE
-   fun:_ZN3net13CookieMonster20SetCookieWithOptionsERK4GURLRKSsRKNS_13CookieOptionsE
-   fun:_ZN3net11CookieStore9SetCookieERK4GURLRKSs
-}
-{
    bug_31634a
    Memcheck:Leak
    fun:malloc_zone_malloc
@@ -780,6 +807,22 @@
    fun:-[NSWindow displayIfNeeded]
 }
 {
+   bug_35955_maybe
+   Memcheck:Addr4
+   ...
+   fun:_ZN2v88internal12Bootstrapper17CreateEnvironmentENS0_6HandleINS0_6ObjectEEENS_6HandleINS_14ObjectTemplateEEEPNS_22ExtensionConfigurationE
+   fun:_ZN2v87Context3NewEPNS_22ExtensionConfigurationENS_6HandleINS_14ObjectTemplateEEENS3_INS_5ValueEEE
+   fun:_ZN7WebCore27WorkerContextExecutionProxy19initContextIfNeededEv
+   fun:_ZN7WebCore27WorkerContextExecutionProxy8evaluateERKNS_6StringES3_iPNS_27WorkerContextExecutionStateE
+   fun:_ZN7WebCore22WorkerScriptController8evaluateERKNS_16ScriptSourceCodeEPNS_11ScriptValueE
+   fun:_ZN7WebCore22WorkerScriptController8evaluateERKNS_16ScriptSourceCodeE
+   fun:_ZN7WebCore12WorkerThread12workerThreadEv
+   fun:_ZN7WebCore12WorkerThread17workerThreadStartEPv
+   fun:_ZN3WTFL16threadEntryPointEPv
+   fun:_pthread_start
+   fun:thread_start
+}
+{
    bug_36605
    Memcheck:Leak
    fun:malloc
@@ -795,13 +838,6 @@
    fun:_ZN14HistoryService4InitERK8FilePathP15BookmarkServiceb
    fun:_ZN14TestingProfile20CreateHistoryServiceEbb
    fun:_ZN12_GLOBAL__N_127HistoryContentsProviderTest5SetUpEv
-   fun:_ZN7testing4Test3RunEv
-   fun:_ZN7testing8internal12TestInfoImpl3RunEv
-   fun:_ZN7testing8TestCase3RunEv
-   fun:_ZN7testing8internal12UnitTestImpl11RunAllTestsEv
-   fun:_ZN7testing8UnitTest3RunEv
-   fun:_ZN9TestSuite3RunEv
-   fun:main
 }
 {
    bug_39282
@@ -877,6 +913,58 @@
    fun:_decodeObject
 }
 {
+   bug_40429b
+   Memcheck:Leak
+   fun:calloc
+   fun:_internal_class_createInstanceFromZone
+   fun:_internal_class_createInstance
+   fun:+[NSObject allocWithZone:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSButtonCell initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSControl initWithCoder:]
+   fun:-[NSButton initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSNibConnector initWithCoder:]
+   fun:-[NSNibControlConnector initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:-[NSKeyedUnarchiver _decodeArrayOfObjectsForKey:]
+   fun:-[NSArray(NSArray) initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSIBObjectData initWithCoder:]
+   fun:_decodeObjectBinary
+}
+{
+   bug_40429c
+   Memcheck:Leak
+   fun:calloc
+   fun:_internal_class_createInstanceFromZone
+   fun:_internal_class_createInstance
+   fun:+[NSObject allocWithZone:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSButtonCell initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSControl initWithCoder:]
+   fun:-[NSButton initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:-[NSKeyedUnarchiver _decodeArrayOfObjectsForKey:]
+   fun:-[NSArray(NSArray) initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSView initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSResponder initWithCoder:]
+   fun:-[NSView initWithCoder:]
+   fun:-[NSControl initWithCoder:]
+}
+{
    bug_40585
    Memcheck:Param
    socketcall.sendmsg(msg.msg_iov[i])
@@ -893,6 +981,7 @@
   bug_40659
    Memcheck:Leak
    fun:_Znw*
+   ...
    fun:_ZN19extension_file_util13LoadExtensionERK8FilePathbPSs
    fun:_ZN12CrxInstaller15CompleteInstallEv
    fun:_Z16DispatchToMethodI12CrxInstallerMS0_FvvEEvPT_T0_RK6Tuple0
@@ -936,13 +1025,6 @@
    fun:_Znw*
    fun:_ZN25ActiveNotificationTracker20RegisterNotificationERKN6WebKit15WebNotificationE
    fun:_ZN53ActiveNotificationTrackerTest_TestLookupAndClear_Test8TestBodyEv
-   fun:_ZN7testing4Test3RunEv
-   fun:_ZN7testing8internal12TestInfoImpl3RunEv
-   fun:_ZN7testing8TestCase3RunEv
-   fun:_ZN7testing8internal12UnitTestImpl11RunAllTestsEv
-   fun:_ZN7testing8UnitTest3RunEv
-   fun:_ZN9TestSuite3RunEv
-   fun:main
 }
 {
    bug_40879
@@ -969,4 +1051,250 @@
    fun:_ZN11MessageLoop6DoWorkEv
    fun:_ZN4base19MessagePumpLibevent3RunEPNS_11MessagePump8DelegateE
    fun:_ZN11MessageLoop11RunInternalEv
+}
+# Maybe this needs to be moved up to section 1?
+{
+   bug_42593
+   Memcheck:Leak
+   fun:calloc
+   fun:_internal_class_createInstanceFromZone
+   fun:_internal_class_createInstance
+   fun:+[NSObject allocWithZone:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSButtonCell initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSControl initWithCoder:]
+   fun:-[NSButton initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSNibConnector initWithCoder:]
+   fun:-[NSNibOutletConnector initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:-[NSKeyedUnarchiver _decodeArrayOfObjectsForKey:]
+   fun:-[NSArray(NSArray) initWithCoder:]
+   fun:_decodeObjectBinary
+   fun:_decodeObject
+   fun:-[NSIBObjectData initWithCoder:]
+   fun:_decodeObjectBinary
+}
+{
+   bug_42622
+   Memcheck:Addr4
+   fun:_ZN3WTF11currentTimeEv
+   fun:_ZN7WebCore5EventC2ERKNS_12AtomicStringEbb
+   fun:_ZN7WebCore12MessageEventC2EN3WTF10PassRefPtrINS_21SerializedScriptValueEEERKNS_6StringES7_NS2_INS_9DOMWindowEEENS1_10PassOwnPtrINS1_6VectorINS1_6RefPtrINS_11MessagePortEEELm1EEEEE
+   fun:_ZN7WebCore12MessageEventC1EN3WTF10PassRefPtrINS_21SerializedScriptValueEEERKNS_6StringES7_NS2_INS_9DOMWindowEEENS1_10PassOwnPtrINS1_6VectorINS1_6RefPtrINS_11MessagePortEEELm1EEEEE
+   fun:_ZN7WebCore12MessageEvent6createEN3WTF10PassOwnPtrINS1_6VectorINS1_6RefPtrINS_11MessagePortEEELm1EEEEENS1_10PassRefPtrINS_21SerializedScriptValueEEERKNS_6StringESE_NS9_INS_9DOMWindowEEE
+   fun:_ZN7WebCore18createConnectEventEN3WTF10PassRefPtrINS_11MessagePortEEE
+   fun:_ZN6WebKit19WebSharedWorkerImpl11connectTaskEPN7WebCore22ScriptExecutionContextEPS0_N3WTF10PassOwnPtrINS1_18MessagePortChannelEEE
+   fun:_ZN7WebCore18GenericWorkerTask2IPN6WebKit19WebSharedWorkerImplES3_PNS_18MessagePortChannelEN3WTF10PassOwnPtrIS4_EEE11performTaskEPNS_22ScriptExecutionContextE
+   fun:_ZN7WebCore13WorkerRunLoop4Task11performTaskEPNS_22ScriptExecutionContextE
+   fun:_ZN7WebCore13WorkerRunLoop9runInModeEPNS_13WorkerContextERKNS_13ModePredicateE
+   fun:_ZN7WebCore13WorkerRunLoop3runEPNS_13WorkerContextE
+   fun:_ZN7WebCore12WorkerThread12runEventLoopEv
+   fun:_ZN7WebCore12WorkerThread12workerThreadEv
+   fun:_ZN7WebCore12WorkerThread17workerThreadStartEPv
+   fun:_ZN3WTFL16threadEntryPointEPv
+   fun:_pthread_start
+   fun:thread_start
+}
+{
+   bug_42704a
+   Memcheck:Addr4
+   fun:_ZN2v88internal15MemoryAllocator9ChunkInfo*
+   ...
+   fun:_ZN2v88internal9RelocInfo6VerifyEv
+   fun:_ZN2v88internal4Code10CodeVerifyEv
+   fun:_ZN2v88internal10HeapObject16HeapObjectVerifyEv
+   fun:_ZN2v88internal6Object6VerifyEv
+   fun:_ZN2v88internal4Heap10CreateCodeERKNS0_8CodeDescEPNS0_13ZoneScopeInfoENS0_4Code5FlagsENS0_6HandleINS0_6ObjectEEE
+}
+{
+   bug_42704b
+   Memcheck:Addr4
+   fun:_ZN2v88internal11HandleScope6ExtendEv
+   ...
+   fun:_ZN2v88internalL6InvokeEbNS0_6HandleINS0_10JSFunctionEEENS1_INS0_6ObjectEEEiPPPS4_Pb
+   fun:_ZN2v88internal9Execution4CallENS0_6HandleINS0_10JSFunctionEEENS2_INS0_6ObjectEEEiPPPS5_Pb
+}
+{
+   bug_42704c
+   Memcheck:Addr4
+   fun:_ZN2v88internal4List*
+   fun:_ZN2v88internal4List*
+   ...
+   fun:_ZN7WebCore27WorkerContextExecutionProxy8evaluateERKNS_6StringES3_iPNS_27WorkerContextExecutionStateE
+   fun:_ZN7WebCore22WorkerScriptController8evaluateERKNS_16ScriptSourceCodeEPNS_11ScriptValueE
+   fun:_ZN7WebCore22WorkerScriptController8evaluateERKNS_16ScriptSourceCodeE
+   fun:_ZN7WebCore12WorkerThread12workerThreadEv
+}
+{
+   bug_43109
+   Memcheck:Cond
+   fun:rips_f_DrawRing
+   fun:rips_f_BltShape
+   fun:ripc_Render
+   fun:ripc_DrawRects
+   fun:CGContextFillRects
+   fun:CGContextFillRect
+   fun:NSRectFill
+   fun:_ZN18FocusIndicationFix40currentOSHasSetFocusRingStyleInBitmapBugEv
+   fun:_ZN18FocusIndicationFix16swizzleFocusViewEv
+   fun:_ZN18FocusIndicationFix11ScopedFixerC2Ev
+   fun:_ZN18FocusIndicationFix11ScopedFixerC1Ev
+   fun:_ZN7WebCoreL11paintButtonENS_11ControlPartEjPNS_15GraphicsContextERKNS_7IntRectEfPNS_10ScrollViewE
+   fun:_ZNK7WebCore16ThemeChromiumMac5paintENS_11ControlPartEjPNS_15GraphicsContextERKNS_7IntRectEfPNS_10ScrollViewE
+   fun:_ZN7WebCore11RenderTheme5paintEPNS_12RenderObjectERKNS1_9PaintInfoERKNS_7IntRectE
+   fun:_ZN7WebCore9RenderBox27paintBoxDecorationsWithSizeERNS_12RenderObject9PaintInfoEiiii
+   fun:_ZN7WebCore9RenderBox19paintBoxDecorationsERNS_12RenderObject9PaintInfoEii
+   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_12RenderObject9PaintInfoEii
+   fun:_ZN7WebCore11RenderBlock5paintERNS_12RenderObject9PaintInfoEii
+   fun:_ZN7WebCore9InlineBox5paintERNS_12RenderObject9PaintInfoEii
+   fun:_ZN7WebCore13InlineFlowBox5paintERNS_12RenderObject9PaintInfoEii
+   fun:_ZN7WebCore13RootInlineBox5paintERNS_12RenderObject9PaintInfoEii
+   fun:_ZNK7WebCore17RenderLineBoxList5paintEPNS_20RenderBoxModelObjectERNS_12RenderObject9PaintInfoEii
+}
+{
+   bug_44393
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN9__gnu_cxx13new_allocatorISt13_Rb_tree_nodeISt4pairIKN3net9HostCache3KeyE13scoped_refptrINS4_5EntryEEEEE8allocateEmPKv
+   fun:_ZNSt8_Rb_treeIN3net9HostCache3KeyESt4pairIKS2_13scoped_refptrINS1_5EntryEEESt10_Select1stIS8_ESt4lessIS2_ESaIS8_EE11_M_get_nodeEv
+   fun:_ZNSt8_Rb_treeIN3net9HostCache3KeyESt4pairIKS2_13scoped_refptrINS1_5EntryEEESt10_Select1stIS8_ESt4lessIS2_ESaIS8_EE14_M_create_nodeERKS8_
+   fun:_ZNSt8_Rb_treeIN3net9HostCache3KeyESt4pairIKS2_13scoped_refptrINS1_5EntryEEESt10_Select1stIS8_ESt4lessIS2_ESaIS8_EE9_M_insertEPSt18_Rb_tree_node_baseSG_RKS8_
+   fun:_ZNSt8_Rb_treeIN3net9HostCache3KeyESt4pairIKS2_13scoped_refptrINS1_5EntryEEESt10_Select1stIS8_ESt4lessIS2_ESaIS8_EE13insert_uniqueERKS8_
+   fun:_ZNSt8_Rb_treeIN3net9HostCache3KeyESt4pairIKS2_13scoped_refptrINS1_5EntryEEESt10_Select1stIS8_ESt4lessIS2_ESaIS8_EE13insert_uniqueESt17_Rb_tree_iteratorIS8_ERKS8_
+   fun:_ZNSt3mapIN3net9HostCache3KeyE13scoped_refptrINS1_5EntryEESt4lessIS2_ESaISt4pairIKS2_S5_EEE6insertESt17_Rb_tree_iteratorISA_ERKSA_
+   fun:_ZNSt3mapIN3net9HostCache3KeyE13scoped_refptrINS1_5EntryEESt4lessIS2_ESaISt4pairIKS2_S5_EEEixERS9_
+   fun:_ZN3net9HostCache3SetERKNS0_3KeyEiNS_11AddressListEN4base9TimeTicksE
+   fun:_ZN3net16HostResolverImpl13OnJobCompleteEPNS0_3JobEiiRKNS_11AddressListE
+   fun:_ZN3net16HostResolverImpl3Job16OnLookupCompleteEv
+   fun:_Z16DispatchToMethodIN3net16HostResolverImpl3JobEMS2_FvvEEvPT_T0_RK6Tuple0
+   fun:_ZN14RunnableMethodIN3net16HostResolverImpl3JobEMS2_FvvE6Tuple0E3RunEv
+   fun:_ZN11MessageLoop7RunTaskEP4Task
+   fun:_ZN11MessageLoop21DeferOrRunPendingTaskERKNS_11PendingTaskE
+   fun:_ZN11MessageLoop6DoWorkEv
+   fun:_ZN4base19MessagePumpLibevent3RunEPNS_11MessagePump8DelegateE
+   fun:_ZN11MessageLoop11RunInternalEv
+   fun:_ZN11MessageLoop10RunHandlerEv
+}
+{
+   bug_44879
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZN12_GLOBAL__N_113ExtensionImpl12StartRequestERKN2v89ArgumentsE
+}
+{
+   bug_44946
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN11sandboxtest8internal19RegisterSandboxTestIN12_GLOBAL__N_119FontLoadingTestCaseEEC2EPKc
+   fun:_ZN11sandboxtest8internal19RegisterSandboxTestIN12_GLOBAL__N_119FontLoadingTestCaseEEC1EPKc
+   fun:_Z41__static_initialization_and_destruction_0ii
+   fun:_GLOBAL__I__ZNSt3tr112_GLOBAL__N_16ignoreE
+   fun:_ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE
+   fun:_ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEj
+   fun:_ZN11ImageLoader15runInitializersERKNS_11LinkContextE
+   fun:_ZN4dyld24initializeMainExecutableEv
+   fun:_ZN4dyld5_mainEPK11mach_headermiPPKcS5_S5_
+   fun:_ZN13dyldbootstrap5startEPK11mach_headeriPPKcl
+   fun:_dyld_start
+   obj:*
+}
+{
+   bug_46186
+   Memcheck:Leak
+   fun:malloc_zone_malloc
+   fun:_ZN4base12_GLOBAL__N_137oom_killer_cfallocator_system_defaultElmPv
+   fun:_CFRuntimeCreateInstance
+   fun:CFRunLoopSourceCreate
+   fun:MSHCreateMIGServerSource
+   fun:_ZN20HALCADClientListenerC2EPFlmmPK26AudioObjectPropertyAddressPvES3_
+   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
+   fun:_ZN16HALDefaultDevice22InstallServerListenersEv
+   fun:_ZN16HALDefaultDevice10InitializeEv
+   fun:_ZN9HALSystem16CheckOutInstanceEv
+   fun:AudioObjectAddPropertyListener
+   fun:_ZN10AQMEDeviceC2EmPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
+   fun:_Z11NewAQIONodembPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
+   fun:_ZN15AQIONodeManager13_FindAQIONodeEmbb
+   fun:_ZN15AQIONodeManager12FindAQIONodeEmbb
+   fun:_ZN16AudioQueueObject15DoIONodeConnectERK25AudioQueueStreamSpecifierPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
+   fun:_ZN16AudioQueueObject13EnqueueBufferEP16AudioQueueBufferjPK28AudioStreamPacketDescriptionjjjPK24AudioQueueParameterEventRK11AQTimeStampPS8_
+   fun:AQServer_EnqueueBuffer
+   fun:AudioQueueEnqueueBufferWithParameters
+   fun:AudioQueueEnqueueBuffer
+   fun:_ZN28PCMQueueOutAudioOutputStream5StartEPN17AudioOutputStream19AudioSourceCallbackE
+   fun:_ZN17AudioRendererHost14IPCAudioSource4PlayEv
+}
+{
+   bug_46678_v_b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN8remoting14SessionManager8DoEncodeE13scoped_refptrINS_8Capturer11CaptureDataEE
+   fun:_Z16DispatchToMethodIN8remoting14SessionManagerEMS1_Fv13scoped_refptrINS0_8Capturer11CaptureDataEEES5_EvPT_T0_RK6Tuple1IT1_E
+   fun:_ZN14RunnableMethodIN8remoting14SessionManagerEMS1_Fv13scoped_refptrINS0_8Capturer11CaptureDataEEE6Tuple1IS5_EE3RunEv
+   fun:_ZN11MessageLoop7RunTaskEP4Task
+   ...
+   fun:_ZN7testing8internal12UnitTestImpl11RunAllTestsEv
+}
+{
+   bug_46708
+   Memcheck:Addr1
+   obj:*
+   fun:dlsym
+   fun:_ZN14PlatformThread7SetNameEPKc
+   ...
+   fun:_pthread_start
+   fun:thread_start
+}
+{
+   bug_47330
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN4base17LoadNativeLibraryERK8FilePath
+   fun:_ZN5NPAPI9PluginLib4LoadEv
+   fun:_ZN5NPAPI9PluginLib13NP_InitializeEv
+   fun:_ZN21WebPluginDelegateImpl6CreateERK8FilePathRKSsy
+   fun:_ZN19TestWebViewDelegate20CreatePluginDelegateERK8FilePathRKSs
+   fun:_ZN11webkit_glue13WebPluginImpl10initializeEPN6WebKit18WebPluginContainerE
+   fun:_ZN6WebKit21FrameLoaderClientImpl12createPluginERKN7WebCore7IntSizeEPNS1_17HTMLPlugInElementERKNS1_4KURLERKN3WTF6VectorINS1_6StringELm0EEESF_RKSC_b
+   fun:_ZN7WebCore14SubframeLoader10loadPluginEPNS_20RenderEmbeddedObjectERKNS_4KURLERKNS_6StringERKN3WTF6VectorIS6_Lm0EEESD_b
+   fun:_ZN7WebCore14SubframeLoader13requestObjectEPNS_20RenderEmbeddedObjectERKNS_6StringERKNS_12AtomicStringES5_RKN3WTF6VectorIS3_Lm0EEESD_
+   fun:_ZN7WebCore20RenderEmbeddedObject12updateWidgetEb
+   fun:_ZN7WebCore9FrameView13updateWidgetsEv
+   fun:_ZN7WebCore9FrameView22performPostLayoutTasksEv
+   fun:_ZN7WebCore9FrameView6layoutEb
+   fun:_ZN7WebCore8Document13implicitCloseEv
+   fun:_ZN7WebCore11FrameLoader22checkCallImplicitCloseEv
+   fun:_ZN7WebCore11FrameLoader14checkCompletedEv
+   fun:_ZN7WebCore11FrameLoader15finishedParsingEv
+   fun:_ZN7WebCore8Document15finishedParsingEv
+   fun:_ZN7WebCore25LegacyHTMLTreeConstructor8finishedEv
+   fun:_ZN7WebCore16HTML5TreeBuilder8finishedEv
+   fun:_ZN7WebCore19HTML5DocumentParser3endEv
+}
+{
+   bug_47949
+   Memcheck:Cond
+   fun:rips_f_DrawRing
+   fun:rips_f_BltShape
+   fun:ripc_Render
+   fun:ripc_DrawRects
+   fun:CGContextFillRects
+   fun:CGContextFillRect
+   fun:NSRectFill
+   fun:_ZN18FocusIndicationFix40currentOSHasSetFocusRingStyleInBitmapBugEv
+}
+{
+   bug_49250
+   Memcheck:Cond
+   fun:gleUpdateFogData
+   fun:gleUpdateState
+   fun:_ZN8remoting11CapturerMac12CaptureRectsERKSt6vectorIN3gfx4RectESaIS3_EEP14CallbackRunnerI6Tuple1I13scoped_refptrINS_8Capturer11CaptureDataEEEE
+   fun:_ZN8remoting8Capturer19CaptureInvalidRectsEP14CallbackRunnerI6Tuple1I13scoped_refptrINS0_11CaptureDataEEEE
+   fun:_ZN8remoting28CapturerMacTest_Capture_Test8TestBodyEv
 }

@@ -8,6 +8,7 @@
 #include <map>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/string16.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFormElement.h"
 
@@ -28,7 +29,8 @@ class FormManager {
   enum RequirementsMask {
     REQUIRE_NONE = 0x0,             // No requirements.
     REQUIRE_AUTOCOMPLETE = 0x1,     // Require that autocomplete != off.
-    REQUIRE_ELEMENTS_ENABLED = 0x2  // Require that disabled attribute is off.
+    REQUIRE_ENABLED = 0x2,          // Require that disabled attribute is off.
+    REQUIRE_EMPTY = 0x4,            // Require that the fields are empty.
   };
 
   FormManager();
@@ -40,6 +42,11 @@ class FormManager {
       const WebKit::WebFormControlElement& element,
       bool get_value,
       webkit_glue::FormField* field);
+
+  // Returns the corresponding label for |element|.  WARNING: This method can
+  // potentially be very slow.  Do not use during any code paths where the page
+  // is loading.
+  static string16 LabelForElement(const WebKit::WebFormControlElement& element);
 
   // Fills out a FormData object from a given WebFormElement.  If |get_values|
   // is true, the fields in |form| will have the values filled out.  Returns
@@ -80,16 +87,32 @@ class FormManager {
 
   // Fills the form represented by |form|.  |form| should have the name set to
   // the name of the form to fill out, and the number of elements and values
-  // must match the number of stored elements in the form.
+  // must match the number of stored elements in the form. |node| is the form
+  // control element that initiated the auto-fill process.
   // TODO(jhawkins): Is matching on name alone good enough?  It's possible to
   // store multiple forms with the same names from different frames.
-  bool FillForm(const webkit_glue::FormData& form);
+  bool FillForm(const webkit_glue::FormData& form, const WebKit::WebNode& node);
 
-  // Fills all of the forms in the cache with form data from |forms|.
-  void FillForms(const std::vector<webkit_glue::FormData>& forms);
+  // Previews the form represented by |form|.  Same conditions as FillForm.
+  bool PreviewForm(const webkit_glue::FormData& form);
+
+  // Clears the values of all input elements in the form that contains |node|.
+  // Returns false if the form is not found.
+  bool ClearFormWithNode(const WebKit::WebNode& node);
+
+  // Clears the placeholder values and the auto-filled background for any fields
+  // in |form| that have been previewed.  Returns false if the form is not
+  // found.
+  bool ClearPreviewedForm(const webkit_glue::FormData& form);
 
   // Resets the stored set of forms.
   void Reset();
+
+  // Resets the forms for the specified |frame|.
+  void ResetFrame(const WebKit::WebFrame* frame);
+
+  // Returns true if |form| has any auto-filled fields.
+  bool FormWithNodeIsAutoFilled(const WebKit::WebNode& node);
 
  private:
   // Stores the WebFormElement and the form control elements for a form.
@@ -103,6 +126,10 @@ class FormManager {
   typedef std::map<const WebKit::WebFrame*, std::vector<FormElement*> >
       WebFrameFormElementMap;
 
+  // The callback type used by ForEachMatchingFormField().
+  typedef Callback2<WebKit::WebFormControlElement*,
+                    const webkit_glue::FormField*>::Type Callback;
+
   // Converts a FormElement to FormData storage.  Returns false if the form does
   // not meet all the requirements in the requirements mask.
   // TODO(jhawkins): Modify FormElement so we don't need |frame|.
@@ -111,17 +138,42 @@ class FormManager {
                                     RequirementsMask requirements,
                                     webkit_glue::FormData* form);
 
-  // Resets the forms for the specified |frame|.
-  void ResetFrame(const WebKit::WebFrame* frame);
-
-  // Returns the corresponding label for |element|.
-  static string16 LabelForElement(const WebKit::WebFormControlElement& element);
-
   // Infers corresponding label for |element| from surrounding context in the
-  // DOM.  Contents of preceeding <p> tag or preceeding text element found in
+  // DOM.  Contents of preceding <p> tag or preceding text element found in
   // the form.
   static string16 InferLabelForElement(
       const WebKit::WebFormControlElement& element);
+
+  // Finds the cached FormElement that contains |node|.
+  bool FindCachedFormElementWithNode(const WebKit::WebNode& node,
+                                     FormElement** form_element);
+
+  // Uses the data in |form| to find the cached FormElement.
+  bool FindCachedFormElement(const webkit_glue::FormData& form,
+                             FormElement** form_element);
+
+  // For each field in |data| that matches the corresponding field in |form|
+  // and meets the |requirements|, |callback| is called with the actual
+  // WebFormControlElement and the FormField data from |form|. The field that
+  // matches |node| is not required to be empty if |requirements| includes
+  // REQUIRE_EMPTY.  This method owns |callback|.
+  void ForEachMatchingFormField(FormElement* form,
+                                const WebKit::WebNode& node,
+                                RequirementsMask requirements,
+                                const webkit_glue::FormData& data,
+                                Callback* callback);
+
+  // A ForEachMatchingFormField() callback that sets |field|'s value using the
+  // value in |data|.  This method also sets the autofill attribute, causing the
+  // background to be yellow.
+  void FillFormField(WebKit::WebFormControlElement* field,
+                     const webkit_glue::FormField* data);
+
+  // A ForEachMatchingFormField() callback that sets |field|'s placeholder value
+  // using the value in |data|, causing the test to be greyed-out.  This method
+  // also sets the autofill attribute, causing the background to be yellow.
+  void PreviewFormField(WebKit::WebFormControlElement* field,
+                        const webkit_glue::FormField* data);
 
   // The map of form elements.
   WebFrameFormElementMap form_elements_map_;

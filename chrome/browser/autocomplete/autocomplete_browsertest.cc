@@ -18,6 +18,14 @@
 #include "chrome/test/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+// Basic test is crashy on Mac
+// http://crbug.com/49324
+#if defined(OS_MAC)
+#define MAYBE_Basic DISABLED_Basic
+#else
+#define MAYBE_Basic Basic
+#endif
+
 namespace {
 
 std::wstring AutocompleteResultAsString(const AutocompleteResult& result) {
@@ -53,7 +61,7 @@ class AutocompleteBrowserTest : public InProcessBrowserTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
+IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Basic) {
   LocationBar* location_bar = GetLocationBar();
 
   EXPECT_EQ(std::wstring(), location_bar->GetInputString());
@@ -134,8 +142,9 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
   EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL),
             location_bar->location_entry()->GetText());
   location_bar->location_entry()->SetUserText(L"");
-  browser()->AddTabWithURL(GURL(chrome::kAboutBlankURL), GURL(),
-                         PageTransition::START_PAGE, true, -1, false, NULL);
+  browser()->AddTabWithURL(
+      GURL(chrome::kAboutBlankURL), GURL(), PageTransition::START_PAGE,
+      -1, TabStripModel::ADD_SELECTED, NULL, std::string());
   ui_test_utils::WaitForNavigation(
       &browser()->GetSelectedTabContents()->controller());
   EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL),

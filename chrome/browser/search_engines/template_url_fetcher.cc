@@ -6,16 +6,17 @@
 
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 
-#include "chrome/browser/net/url_fetcher.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_parser.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
+#include "net/url_request/url_request_status.h"
 
 // RequestDelegate ------------------------------------------------------------
 class TemplateURLFetcher::RequestDelegate : public URLFetcher::Delegate,
@@ -93,8 +94,12 @@ void TemplateURLFetcher::RequestDelegate::OnURLFetchComplete(
     int response_code,
     const ResponseCookies& cookies,
     const std::string& data) {
-  // Make sure we can still replace the keyword.
-  if (response_code != 200) {
+  // Make sure we can still replace the keyword, i.e. the fetch was successful.
+  // If the OSDD file was loaded HTTP, we also have to check the response_code.
+  // For other schemes, e.g. when the OSDD file is bundled with an extension,
+  // the response_code is not applicable and should be -1.
+  if (!status.is_success() ||
+      ((response_code != -1) && (response_code != 200))) {
     fetcher_->RequestCompleted(this);
     // WARNING: RequestCompleted deletes us.
     return;
@@ -112,7 +117,7 @@ void TemplateURLFetcher::RequestDelegate::OnURLFetchComplete(
       // Previous keyword was generated from URL where OSDD was placed and
       // it gives wrong result when OSDD is located on third party site that
       // has nothing in common with search engine in OSDD.
-      GURL keyword_url(WideToUTF16Hack(template_url->url()->url()));
+      GURL keyword_url(template_url->url()->url());
       std::wstring new_keyword = TemplateURLModel::GenerateKeyword(
           keyword_url, false);
       if (!new_keyword.empty())
@@ -122,16 +127,20 @@ void TemplateURLFetcher::RequestDelegate::OnURLFetchComplete(
     const TemplateURL* existing_url;
     if (keyword_.empty() ||
         !model || !model->loaded() ||
-        !model->CanReplaceKeyword(keyword_, template_url->url()->url(),
+        !model->CanReplaceKeyword(keyword_, GURL(template_url->url()->url()),
                                   &existing_url)) {
-      // TODO(pamg): If we're coming from JS (not autodetected) and this URL
-      // already exists in the model, consider bringing up the
-      // EditKeywordController to edit it.  This would be helpful feedback in
+      if (autodetected_ || !model || !model->loaded()) {
+        fetcher_->RequestCompleted(this);
+        // WARNING: RequestCompleted deletes us.
+        return;
+      }
+      // If we're coming from JS (neither autodetected nor failure to load the
+      // template URL model) and this URL already exists in the model, we bring
+      // up the EditKeywordController to edit it.  This is helpful feedback in
       // the case of clicking a button twice, and annoying in the case of a
       // page that calls AddSearchProvider() in JS without a user action.
-      fetcher_->RequestCompleted(this);
-      // WARNING: RequestCompleted deletes us.
-      return;
+      keyword_.clear();
+      existing_url = NULL;
     }
 
     if (existing_url)

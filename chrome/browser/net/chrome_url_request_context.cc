@@ -5,6 +5,8 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 
 #include "base/command_line.h"
+#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
@@ -14,9 +16,7 @@
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/sqlite_persistent_cookie_store.h"
-#include "chrome/browser/net/dns_global.h"
-#include "chrome/browser/privacy_blacklist/blacklist.h"
-#include "chrome/browser/privacy_blacklist/blacklist_request_info.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -58,15 +58,14 @@ void CheckCurrentlyOnMainThread() {
 // ----------------------------------------------------------------------------
 
 net::ProxyConfigService* CreateProxyConfigService(
-    const CommandLine& command_line) {
+    const PrefService* pref_service) {
   // The linux gconf-based proxy settings getter relies on being initialized
   // from the UI thread.
   CheckCurrentlyOnMainThread();
 
-  scoped_ptr<net::ProxyConfig> proxy_config_from_cmd_line(
-      CreateProxyConfig(command_line));
+  scoped_ptr<net::ProxyConfig> proxy_config(CreateProxyConfig(pref_service));
 
-  if (!proxy_config_from_cmd_line.get()) {
+  if (!proxy_config.get()) {
     // Use system settings.
     // TODO(port): the IO and FILE message loops are only used by Linux.  Can
     // that code be moved to chrome/browser instead of being in net, so that it
@@ -77,12 +76,11 @@ net::ProxyConfigService* CreateProxyConfigService(
   }
 
   // Otherwise use the fixed settings from the command line.
-  return new net::ProxyConfigServiceFixed(*proxy_config_from_cmd_line.get());
+  return new net::ProxyConfigServiceFixed(*proxy_config.get());
 }
 
 // Create a proxy service according to the options on command line.
 net::ProxyService* CreateProxyService(
-    net::NetworkChangeNotifier* network_change_notifier,
     net::NetLog* net_log,
     URLRequestContext* context,
     net::ProxyConfigService* proxy_config_service,
@@ -98,11 +96,27 @@ net::ProxyService* CreateProxyService(
     use_v8 = false;  // Fallback to non-v8 implementation.
   }
 
+  size_t num_pac_threads = 0u;  // Use default number of threads.
+
+  // Check the command line for an override on the number of proxy resolver
+  // threads to use.
+  if (command_line.HasSwitch(switches::kNumPacThreads)) {
+    std::string s = command_line.GetSwitchValueASCII(switches::kNumPacThreads);
+
+    // Parse the switch (it should be a positive integer formatted as decimal).
+    int n;
+    if (StringToInt(s, &n) && n > 0) {
+      num_pac_threads = static_cast<size_t>(n);
+    } else {
+      LOG(ERROR) << "Invalid switch for number of PAC threads: " << s;
+    }
+  }
+
   return net::ProxyService::Create(
       proxy_config_service,
       use_v8,
+      num_pac_threads,
       context,
-      network_change_notifier,
       net_log,
       io_loop);
 }
@@ -211,9 +225,7 @@ class FactoryForOriginal : public ChromeURLRequestContextFactory {
         // We need to initialize the ProxyConfigService from the UI thread
         // because on linux it relies on initializing things through gconf,
         // and needs to be on the main thread.
-        proxy_config_service_(
-            CreateProxyConfigService(
-                *CommandLine::ForCurrentProcess())) {
+        proxy_config_service_(CreateProxyConfigService(profile->GetPrefs())) {
   }
 
   virtual ChromeURLRequestContext* Create();
@@ -230,28 +242,33 @@ ChromeURLRequestContext* FactoryForOriginal::Create() {
   ChromeURLRequestContext* context = new ChromeURLRequestContext;
   ApplyProfileParametersToContext(context);
 
+  IOThread::Globals* io_thread_globals = io_thread()->globals();
+
   // Global host resolver for the context.
-  context->set_host_resolver(io_thread()->globals()->host_resolver);
+  context->set_host_resolver(io_thread_globals->host_resolver);
   context->set_http_auth_handler_factory(
-      io_thread()->globals()->http_auth_handler_factory.get());
+      io_thread_globals->http_auth_handler_factory.get());
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
   context->set_proxy_service(
-      CreateProxyService(io_thread()->globals()->network_change_notifier.get(),
-                         io_thread()->globals()->net_log.get(),
+      CreateProxyService(io_thread_globals->net_log.get(),
                          context,
                          proxy_config_service_.release(),
                          command_line,
                          MessageLoop::current() /*io_loop*/));
 
+  net::HttpCache::DefaultBackend* backend = new net::HttpCache::DefaultBackend(
+      net::DISK_CACHE, disk_cache_path_, cache_size_,
+      ChromeThread::GetMessageLoopProxyForThread(ChromeThread::CACHE));
   net::HttpCache* cache =
-      new net::HttpCache(io_thread()->globals()->network_change_notifier.get(),
-                         context->host_resolver(),
+      new net::HttpCache(context->host_resolver(),
                          context->proxy_service(),
                          context->ssl_config_service(),
                          context->http_auth_handler_factory(),
-                         disk_cache_path_, cache_size_);
+                         &io_thread_globals->network_delegate,
+                         io_thread_globals->net_log.get(),
+                         backend);
 
   if (command_line.HasSwitch(switches::kDisableByteRangeSupport))
     cache->set_enable_range_support(false);
@@ -294,7 +311,7 @@ ChromeURLRequestContext* FactoryForOriginal::Create() {
   net::SetURLRequestContextForOCSP(context);
 #endif
 
-  context->set_net_log(io_thread()->globals()->net_log.get());
+  context->set_net_log(io_thread_globals->net_log.get());
   return context;
 }
 
@@ -316,6 +333,8 @@ ChromeURLRequestContext* FactoryForExtensions::Create() {
   ChromeURLRequestContext* context = new ChromeURLRequestContext;
   ApplyProfileParametersToContext(context);
 
+  IOThread::Globals* io_thread_globals = io_thread()->globals();
+
   // All we care about for extensions is the cookie store.
   DCHECK(!cookie_store_path_.empty());
 
@@ -330,7 +349,7 @@ ChromeURLRequestContext* FactoryForExtensions::Create() {
   context->set_cookie_store(cookie_monster);
   // TODO(cbentzel): How should extensions handle HTTP Authentication?
   context->set_http_auth_handler_factory(
-      io_thread()->globals()->http_auth_handler_factory.get());
+      io_thread_globals->http_auth_handler_factory.get());
 
   return context;
 }
@@ -358,6 +377,8 @@ ChromeURLRequestContext* FactoryForOffTheRecord::Create() {
   ChromeURLRequestContext* original_context =
       original_context_getter_->GetIOContext();
 
+  IOThread::Globals* io_thread_globals = io_thread()->globals();
+
   // Share the same proxy service, host resolver, and http_auth_handler_factory
   // as the original profile.
   context->set_host_resolver(original_context->host_resolver());
@@ -365,13 +386,17 @@ ChromeURLRequestContext* FactoryForOffTheRecord::Create() {
   context->set_http_auth_handler_factory(
       original_context->http_auth_handler_factory());
 
+  net::HttpCache::BackendFactory* backend =
+      net::HttpCache::DefaultBackend::InMemory(0);
+
   net::HttpCache* cache =
-      new net::HttpCache(io_thread()->globals()->network_change_notifier.get(),
-                         context->host_resolver(),
+      new net::HttpCache(context->host_resolver(),
                          context->proxy_service(),
                          context->ssl_config_service(),
                          context->http_auth_handler_factory(),
-                         0);
+                         &io_thread_globals->network_delegate,
+                         io_thread_globals->net_log.get(),
+                         backend);
   context->set_cookie_store(new net::CookieMonster(NULL,
       cookie_monster_delegate_));
   context->set_cookie_policy(
@@ -389,7 +414,7 @@ ChromeURLRequestContext* FactoryForOffTheRecord::Create() {
   context->set_appcache_service(
       new ChromeAppCacheService(profile_dir_path_, context));
 
-  context->set_net_log(io_thread()->globals()->net_log.get());
+  context->set_net_log(io_thread_globals->net_log.get());
   return context;
 }
 
@@ -426,6 +451,8 @@ ChromeURLRequestContext* FactoryForMedia::Create() {
   ChromeURLRequestContext* main_context =
       main_context_getter_->GetIOContext();
 
+  IOThread::Globals* io_thread_globals = io_thread()->globals();
+
   // Share the same proxy service of the common profile.
   context->set_proxy_service(main_context->proxy_service());
   context->set_http_auth_handler_factory(
@@ -438,6 +465,10 @@ ChromeURLRequestContext* FactoryForMedia::Create() {
 
   // Create a media cache with default size.
   // TODO(hclam): make the maximum size of media cache configurable.
+  net::HttpCache::DefaultBackend* backend = new net::HttpCache::DefaultBackend(
+      net::MEDIA_CACHE, disk_cache_path_, cache_size_,
+      ChromeThread::GetMessageLoopProxyForThread(ChromeThread::CACHE));
+
   net::HttpCache* main_cache =
       main_context->http_transaction_factory()->GetCache();
   net::HttpCache* cache;
@@ -446,31 +477,29 @@ ChromeURLRequestContext* FactoryForMedia::Create() {
     // HttpTransactionFactory (network_layer()) of HttpCache is implemented
     // by HttpNetworkLayer so we can reuse HttpNetworkSession within it. This
     // assumption will be invalid if the original HttpCache is constructed with
-    // HttpCache(HttpTransactionFactory*, disk_cache::Backend*) constructor.
+    // HttpCache(HttpTransactionFactory*, BackendFactory*) constructor.
     net::HttpNetworkLayer* main_network_layer =
         static_cast<net::HttpNetworkLayer*>(main_cache->network_layer());
-    cache = new net::HttpCache(main_network_layer->GetSession(),
-                               disk_cache_path_, cache_size_);
+    cache = new net::HttpCache(main_network_layer->GetSession(), backend);
     // TODO(eroman): Since this is poaching the session from the main
     // context, it should hold a reference to that context preventing the
     // session from getting deleted.
   } else {
     // If original HttpCache doesn't exist, simply construct one with a whole
     // new set of network stack.
-    cache = new net::HttpCache(
-        io_thread()->globals()->network_change_notifier.get(),
-        main_context->host_resolver(),
-        main_context->proxy_service(),
-        main_context->ssl_config_service(),
-        main_context->http_auth_handler_factory(),
-        disk_cache_path_, cache_size_);
+    cache = new net::HttpCache(main_context->host_resolver(),
+                               main_context->proxy_service(),
+                               main_context->ssl_config_service(),
+                               main_context->http_auth_handler_factory(),
+                               &io_thread_globals->network_delegate,
+                               io_thread_globals->net_log.get(),
+                               backend);
   }
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableByteRangeSupport))
     cache->set_enable_range_support(false);
 
-  cache->set_type(net::MEDIA_CACHE);
   context->set_http_transaction_factory(cache);
 
   // Use the same appcache service as the profile's main context.
@@ -525,6 +554,15 @@ URLRequestContext* ChromeURLRequestContextGetter::GetURLRequestContext() {
   return url_request_context_;
 }
 
+void ChromeURLRequestContextGetter::RegisterUserPrefs(
+    PrefService* pref_service) {
+  pref_service->RegisterBooleanPref(prefs::kNoProxyServer, false);
+  pref_service->RegisterBooleanPref(prefs::kProxyAutoDetect, false);
+  pref_service->RegisterStringPref(prefs::kProxyServer, "");
+  pref_service->RegisterStringPref(prefs::kProxyPacUrl, "");
+  pref_service->RegisterStringPref(prefs::kProxyBypassList, "");
+}
+
 net::CookieStore* ChromeURLRequestContextGetter::GetCookieStore() {
   // If we are running on the IO thread this is real easy.
   if (ChromeThread::CurrentlyOn(ChromeThread::IO))
@@ -547,6 +585,11 @@ net::CookieStore* ChromeURLRequestContextGetter::GetCookieStore() {
   completion.Wait();
   DCHECK(result);
   return result;
+}
+
+scoped_refptr<base::MessageLoopProxy>
+ChromeURLRequestContextGetter::GetIOMessageLoopProxy() {
+  return ChromeThread::GetMessageLoopProxyForThread(ChromeThread::IO);
 }
 
 // static
@@ -624,7 +667,7 @@ void ChromeURLRequestContextGetter::Observe(
     DCHECK(pref_name_in && prefs);
     if (*pref_name_in == prefs::kAcceptLanguages) {
       std::string accept_language =
-          WideToASCII(prefs->GetString(prefs::kAcceptLanguages));
+          prefs->GetString(prefs::kAcceptLanguages);
       ChromeThread::PostTask(
           ChromeThread::IO, FROM_HERE,
           NewRunnableMethod(
@@ -633,7 +676,7 @@ void ChromeURLRequestContextGetter::Observe(
               accept_language));
     } else if (*pref_name_in == prefs::kDefaultCharset) {
       std::string default_charset =
-          WideToASCII(prefs->GetString(prefs::kDefaultCharset));
+          prefs->GetString(prefs::kDefaultCharset);
       ChromeThread::PostTask(
           ChromeThread::IO, FROM_HERE,
           NewRunnableMethod(
@@ -728,6 +771,15 @@ ChromeURLRequestContext::~ChromeURLRequestContext() {
   cookie_policy_ = NULL;
 }
 
+std::string ChromeURLRequestContext::GetNameForExtension(
+    const std::string& id) {
+  ExtensionInfoMap::iterator iter = extension_info_.find(id);
+  if (iter != extension_info_.end())
+    return iter->second->name;
+  else
+    return std::string();
+}
+
 FilePath ChromeURLRequestContext::GetPathForExtension(const std::string& id) {
   ExtensionInfoMap::iterator iter = extension_info_.find(id);
   if (iter != extension_info_.end())
@@ -775,44 +827,6 @@ bool ChromeURLRequestContext::CheckURLAccessToExtensionPermission(
 const std::string& ChromeURLRequestContext::GetUserAgent(
     const GURL& url) const {
   return webkit_glue::GetUserAgent(url);
-}
-
-bool ChromeURLRequestContext::InterceptRequestCookies(
-    const URLRequest* request, const std::string& cookies) const {
-  return InterceptCookie(request, cookies);
-}
-
-bool ChromeURLRequestContext::InterceptResponseCookie(
-    const URLRequest* request, const std::string& cookie) const {
-  return InterceptCookie(request, cookie);
-}
-
-bool ChromeURLRequestContext::InterceptCookie(
-    const URLRequest* request, const std::string& cookie) const {
-  BlacklistRequestInfo* request_info =
-      BlacklistRequestInfo::FromURLRequest(request);
-  // Requests which don't go through ResourceDispatcherHost don't have privacy
-  // blacklist request data.
-  if (!request_info)
-    return true;
-  const Blacklist* blacklist = request_info->GetBlacklist();
-  // TODO(phajdan.jr): remove the NULL check when blacklists are stable.
-  if (!blacklist)
-    return true;
-  scoped_ptr<Blacklist::Match> match(blacklist->FindMatch(request->url()));
-  if (match.get() && (match->attributes() & Blacklist::kBlockCookies)) {
-    NotificationService::current()->Notify(
-        NotificationType::BLACKLIST_NONVISUAL_RESOURCE_BLOCKED,
-        Source<const ChromeURLRequestContext>(this),
-        Details<const URLRequest>(request));
-    return false;
-  }
-
-  return true;
-}
-
-const Blacklist* ChromeURLRequestContext::GetPrivacyBlacklist() const {
-  return privacy_blacklist_.get();
 }
 
 void ChromeURLRequestContext::OnNewExtensions(const std::string& id,
@@ -866,10 +880,10 @@ ChromeURLRequestContext::ChromeURLRequestContext(
   extension_info_ = other->extension_info_;
   user_script_dir_path_ = other->user_script_dir_path_;
   appcache_service_ = other->appcache_service_;
+  database_tracker_ = other->database_tracker_;
   chrome_cookie_policy_ = other->chrome_cookie_policy_;
   host_content_settings_map_ = other->host_content_settings_map_;
   host_zoom_map_ = other->host_zoom_map_;
-  privacy_blacklist_ = other->privacy_blacklist_;
   is_media_ = other->is_media_;
   is_off_the_record_ = other->is_off_the_record_;
 }
@@ -906,9 +920,8 @@ ChromeURLRequestContextFactory::ChromeURLRequestContextFactory(Profile* profile)
 
   // Set up Accept-Language and Accept-Charset header values
   accept_language_ = net::HttpUtil::GenerateAcceptLanguageHeader(
-      WideToASCII(prefs->GetString(prefs::kAcceptLanguages)));
-  std::string default_charset =
-      WideToASCII(prefs->GetString(prefs::kDefaultCharset));
+      prefs->GetString(prefs::kAcceptLanguages));
+  std::string default_charset = prefs->GetString(prefs::kDefaultCharset);
   accept_charset_ =
       net::HttpUtil::GenerateAcceptCharsetHeader(default_charset);
 
@@ -928,7 +941,6 @@ ChromeURLRequestContextFactory::ChromeURLRequestContextFactory(Profile* profile)
 
   host_content_settings_map_ = profile->GetHostContentSettingsMap();
   host_zoom_map_ = profile->GetHostZoomMap();
-  privacy_blacklist_ = profile->GetPrivacyBlacklist();
   transport_security_state_ = profile->GetTransportSecurityState();
 
   if (profile->GetExtensionsService()) {
@@ -939,6 +951,7 @@ ChromeURLRequestContextFactory::ChromeURLRequestContextFactory(Profile* profile)
       extension_info_[(*iter)->id()] =
           linked_ptr<ChromeURLRequestContext::ExtensionInfo>(
               new ChromeURLRequestContext::ExtensionInfo(
+                  (*iter)->name(),
                   (*iter)->path(),
                   (*iter)->default_locale(),
                   (*iter)->web_extent(),
@@ -954,6 +967,8 @@ ChromeURLRequestContextFactory::ChromeURLRequestContextFactory(Profile* profile)
   profile_dir_path_ = profile->GetPath();
 
   cookie_monster_delegate_ = new ChromeCookieMonsterDelegate(profile);
+
+  database_tracker_ = profile->GetDatabaseTracker();
 }
 
 ChromeURLRequestContextFactory::~ChromeURLRequestContextFactory() {
@@ -973,67 +988,60 @@ void ChromeURLRequestContextFactory::ApplyProfileParametersToContext(
   context->set_user_script_dir_path(user_script_dir_path_);
   context->set_host_content_settings_map(host_content_settings_map_);
   context->set_host_zoom_map(host_zoom_map_);
-  context->set_privacy_blacklist(privacy_blacklist_);
   context->set_transport_security_state(
       transport_security_state_);
   context->set_ssl_config_service(ssl_config_service_);
+  context->set_database_tracker(database_tracker_);
 }
 
 // ----------------------------------------------------------------------------
 
-net::ProxyConfig* CreateProxyConfig(const CommandLine& command_line) {
+net::ProxyConfig* CreateProxyConfig(const PrefService* pref_service) {
   // Scan for all "enable" type proxy switches.
-  static const char* proxy_switches[] = {
-    switches::kProxyServer,
-    switches::kProxyPacUrl,
-    switches::kProxyAutoDetect,
-    switches::kProxyBypassList
+  static const wchar_t* proxy_prefs[] = {
+    prefs::kProxyPacUrl,
+    prefs::kProxyServer,
+    prefs::kProxyBypassList,
+    prefs::kProxyAutoDetect
   };
 
-  bool found_enable_proxy_switch = false;
-  for (size_t i = 0; i < arraysize(proxy_switches); i++) {
-    if (command_line.HasSwitch(proxy_switches[i])) {
-      found_enable_proxy_switch = true;
+  bool found_enable_proxy_pref = false;
+  for (size_t i = 0; i < arraysize(proxy_prefs); i++) {
+    if (pref_service->HasPrefPath(proxy_prefs[i])) {
+      found_enable_proxy_pref = true;
       break;
     }
   }
 
-  if (!found_enable_proxy_switch &&
-      !command_line.HasSwitch(switches::kNoProxyServer)) {
+  if (!found_enable_proxy_pref &&
+      !pref_service->GetBoolean(prefs::kNoProxyServer)) {
     return NULL;
   }
 
   net::ProxyConfig* proxy_config = new net::ProxyConfig();
-  if (command_line.HasSwitch(switches::kNoProxyServer)) {
-    // Ignore (and warn about) all the other proxy config switches we get if
-    // the --no-proxy-server command line argument is present.
-    if (found_enable_proxy_switch) {
-      LOG(WARNING) << "Additional command line proxy switches found when --"
-                   << switches::kNoProxyServer << " was specified.";
-    }
+  if (pref_service->GetBoolean(prefs::kNoProxyServer)) {
+    // Ignore all the other proxy config preferences if the use of a proxy
+    // has been explicitly disabled.
     return proxy_config;
   }
 
-  if (command_line.HasSwitch(switches::kProxyServer)) {
-    const std::wstring& proxy_server =
-        command_line.GetSwitchValue(switches::kProxyServer);
-    proxy_config->proxy_rules().ParseFromString(WideToASCII(proxy_server));
+  if (pref_service->HasPrefPath(prefs::kProxyServer)) {
+    std::string proxy_server = pref_service->GetString(prefs::kProxyServer);
+    proxy_config->proxy_rules().ParseFromString(proxy_server);
   }
 
-  if (command_line.HasSwitch(switches::kProxyPacUrl)) {
-    proxy_config->set_pac_url(
-        GURL(WideToASCII(command_line.GetSwitchValue(
-            switches::kProxyPacUrl))));
+  if (pref_service->HasPrefPath(prefs::kProxyPacUrl)) {
+    std::string proxy_pac = pref_service->GetString(prefs::kProxyPacUrl);
+    proxy_config->set_pac_url(GURL(proxy_pac));
   }
 
-  if (command_line.HasSwitch(switches::kProxyAutoDetect)) {
-    proxy_config->set_auto_detect(true);
-  }
+  proxy_config->set_auto_detect(pref_service->GetBoolean(
+      prefs::kProxyAutoDetect));
 
-  if (command_line.HasSwitch(switches::kProxyBypassList)) {
-    proxy_config->proxy_rules().bypass_rules.ParseFromString(
-        WideToASCII(command_line.GetSwitchValue(
-            switches::kProxyBypassList)));
+  if (pref_service->HasPrefPath(prefs::kProxyBypassList)) {
+    std::string proxy_bypass =
+        pref_service->GetString(prefs::kProxyBypassList);
+    proxy_config->proxy_rules().bypass_rules.ParseFromString(proxy_bypass);
   }
 
   return proxy_config;

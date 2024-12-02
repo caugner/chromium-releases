@@ -14,7 +14,6 @@
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
-#include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/notification_service.h"
 
 namespace browser_sync {
@@ -189,17 +188,22 @@ void TypedUrlDataTypeController::StartFailed(StartResult result) {
   StartDone(result, NOT_RUNNING);
 }
 
-void TypedUrlDataTypeController::OnUnrecoverableError() {
+void TypedUrlDataTypeController::OnUnrecoverableError(
+    const tracked_objects::Location& from_here,
+    const std::string& message) {
   ChromeThread::PostTask(
     ChromeThread::UI, FROM_HERE,
     NewRunnableMethod(this,
-                      &TypedUrlDataTypeController::OnUnrecoverableErrorImpl));
+                      &TypedUrlDataTypeController::OnUnrecoverableErrorImpl,
+                      from_here, message));
 }
 
-void TypedUrlDataTypeController::OnUnrecoverableErrorImpl() {
+void TypedUrlDataTypeController::OnUnrecoverableErrorImpl(
+  const tracked_objects::Location& from_here,
+  const std::string& message) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   UMA_HISTOGRAM_COUNTS("Sync.TypedUrlRunFailures", 1);
-  sync_service_->OnUnrecoverableError();
+  sync_service_->OnUnrecoverableError(from_here, message);
 }
 
 }  // namespace browser_sync

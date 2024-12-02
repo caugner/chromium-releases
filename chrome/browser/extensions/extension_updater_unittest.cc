@@ -12,28 +12,20 @@
 #include "base/thread.h"
 #include "base/version.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/net/test_url_fetcher_factory.h"
+#include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_error_reporter.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/net/test_url_fetcher_factory.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "libxml/globals.h"
-
-#if defined(OS_MACOSX)
-// These tests crash frequently on Mac 10.5 Tests debug. http://crbug.com/26035.
-#define MAYBE_TestBlacklistDownloading DISABLED_TestBlacklistDownloading
-#define MAYBE_TestBlacklistUpdateCheckRequests DISABLED_TestBlacklistUpdateCheckRequests
-#else
-#define MAYBE_TestBlacklistDownloading TestBlacklistDownloading
-#define MAYBE_TestBlacklistUpdateCheckRequests TestBlacklistUpdateCheckRequests
-#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -41,7 +33,7 @@ using base::TimeDelta;
 static int expected_load_flags =
     net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
 
-// Do-nothing base class for further specialized test classes.
+// Base class for further specialized test classes.
 class MockService : public ExtensionUpdateService {
  public:
   MockService() {}
@@ -78,85 +70,42 @@ class MockService : public ExtensionUpdateService {
     return false;
   }
 
-  virtual void SetLastPingDay(const std::string& extension_id,
-                              const Time& time) {
-    last_ping_days_[extension_id] = time;
-  }
+  virtual ExtensionPrefs* extension_prefs() { return prefs_.prefs(); }
 
-  virtual Time LastPingDay(const std::string& extension_id) const {
-    std::map<std::string, Time>::const_iterator i =
-        last_ping_days_.find(extension_id);
-    if (i != last_ping_days_.end())
-      return i->second;
+  PrefService* pref_service() { return prefs_.pref_service(); }
 
-    return Time();
-  }
-
-  virtual void SetBlacklistLastPingDay(const Time& time) {
-    blacklist_last_ping_day_ = time;
-  }
-
-  virtual Time BlacklistLastPingDay() const {
-    return blacklist_last_ping_day_;
+  // Creates test extensions and inserts them into list. The name and
+  // version are all based on their index. If |update_url| is non-null, it
+  // will be used as the update_url for each extension.
+  void CreateTestExtensions(int count, ExtensionList *list,
+                            const std::string* update_url) {
+    for (int i = 1; i <= count; i++) {
+      DictionaryValue manifest;
+      manifest.SetString(extension_manifest_keys::kVersion,
+                         StringPrintf("%d.0.0.0", i));
+      manifest.SetString(extension_manifest_keys::kName,
+                         StringPrintf("Extension %d", i));
+      if (update_url)
+        manifest.SetString(extension_manifest_keys::kUpdateURL, *update_url);
+      Extension* e = prefs_.AddExtensionWithManifest(manifest);
+      ASSERT_TRUE(e != NULL);
+      list->push_back(e);
+    }
   }
 
  protected:
   PendingExtensionMap pending_extensions_;
+  TestExtensionPrefs prefs_;
 
  private:
-  std::map<std::string, Time> last_ping_days_;
-  Time blacklist_last_ping_day_;
   DISALLOW_COPY_AND_ASSIGN(MockService);
 };
 
-// Class that contains a PrefService and handles cleanup of a temporary file
-// backing it.
-class ScopedTempPrefService {
- public:
-  ScopedTempPrefService() {
-    // Make sure different tests won't use the same prefs file. It will cause
-    // problem when different tests are running in parallel.
-    temp_dir_.CreateUniqueTempDir();
-    FilePath pref_file = temp_dir_.path().AppendASCII("prefs");
-    prefs_.reset(new PrefService(pref_file));
-  }
 
-  ~ScopedTempPrefService() {}
-
-  PrefService* get() {
-    return prefs_.get();
-  }
-
- private:
-  // Ordering matters, we want |prefs_| to be destroyed before |temp_dir_|.
-  ScopedTempDir temp_dir_;
-  scoped_ptr<PrefService> prefs_;
-};
-
-// Creates test extensions and inserts them into list. The name and
-// version are all based on their index. If |update_url| is non-null, it
-// will be used as the update_url for each extension.
-void CreateTestExtensions(int count, ExtensionList *list,
-                          const std::string* update_url) {
-  for (int i = 1; i <= count; i++) {
-    DictionaryValue input;
-#if defined(OS_WIN)
-    FilePath path(StringPrintf(L"c:\\extension%i", i));
-#else
-    FilePath path(StringPrintf("/extension%i", i));
-#endif
-    Extension* e = new Extension(path);
-    e->set_location(Extension::INTERNAL);
-    input.SetString(extension_manifest_keys::kVersion,
-                    StringPrintf("%d.0.0.0", i));
-    input.SetString(extension_manifest_keys::kName,
-                    StringPrintf("Extension %d", i));
-    if (update_url)
-      input.SetString(extension_manifest_keys::kUpdateURL, *update_url);
-    std::string error;
-    EXPECT_TRUE(e->InitFromValue(input, false, &error));
-    list->push_back(e);
-  }
+std::string GenerateId(std::string input) {
+  std::string result;
+  EXPECT_TRUE(Extension::GenerateId(input, &result));
+  return result;
 }
 
 // Creates test pending extensions and inserts them into list. The
@@ -166,12 +115,12 @@ void CreateTestPendingExtensions(int count, const GURL& update_url,
   for (int i = 1; i <= count; i++) {
     bool is_theme = (i % 2) == 0;
     const bool kInstallSilently = true;
-    scoped_ptr<Version> version(
-        Version::GetVersionFromString(StringPrintf("%d.0.0.0", i)));
-    ASSERT_TRUE(version.get());
-    (*pending_extensions)[StringPrintf("extension%i", i)] =
-        PendingExtensionInfo(update_url, *version,
-                             is_theme, kInstallSilently);
+    const Extension::State kInitialState = Extension::ENABLED;
+    const bool kInitialIncognitoEnabled = false;
+    std::string id = GenerateId(StringPrintf("extension%i", i));
+    (*pending_extensions)[id] =
+        PendingExtensionInfo(update_url, is_theme, kInstallSilently,
+                             kInitialState, kInitialIncognitoEnabled);
   }
 }
 
@@ -335,7 +284,7 @@ class ExtensionUpdaterTest : public testing::Test {
       CreateTestPendingExtensions(1, GURL(update_url), &pending_extensions);
       service.set_pending_extensions(pending_extensions);
     } else {
-      CreateTestExtensions(1, &extensions, &update_url);
+      service.CreateTestExtensions(1, &extensions, &update_url);
       service.set_extensions(extensions);
     }
 
@@ -346,9 +295,8 @@ class ExtensionUpdaterTest : public testing::Test {
 
     TestURLFetcherFactory factory;
     URLFetcher::set_factory(&factory);
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), 60*60*24);
+        new ExtensionUpdater(&service, service.pref_service(), 60*60*24);
     updater->Start();
 
     // Tell the update that it's time to do update checks.
@@ -377,7 +325,7 @@ class ExtensionUpdaterTest : public testing::Test {
     ExtractParameters(decoded, &params);
     if (pending) {
       EXPECT_EQ(pending_extensions.begin()->first, params["id"]);
-      EXPECT_EQ("1.0.0.0", params["v"]);
+      EXPECT_EQ("0.0.0.0", params["v"]);
     } else {
       EXPECT_EQ(extensions[0]->id(), params["id"]);
       EXPECT_EQ(extensions[0]->VersionString(), params["v"]);
@@ -399,9 +347,8 @@ class ExtensionUpdaterTest : public testing::Test {
 
     TestURLFetcherFactory factory;
     URLFetcher::set_factory(&factory);
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), 60*60*24);
+        new ExtensionUpdater(&service, service.pref_service(), 60*60*24);
     updater->Start();
 
     // Tell the updater that it's time to do update checks.
@@ -448,13 +395,13 @@ class ExtensionUpdaterTest : public testing::Test {
     // Create a set of test extensions
     ServiceForManifestTests service;
     ExtensionList tmp;
-    CreateTestExtensions(3, &tmp, NULL);
+    service.CreateTestExtensions(3, &tmp, NULL);
     service.set_extensions(tmp);
 
     MessageLoop message_loop;
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), kUpdateFrequencySecs);
+        new ExtensionUpdater(&service, service.pref_service(),
+                             kUpdateFrequencySecs);
 
     // Check passing an empty list of parse results to DetermineUpdates
     ManifestFetchData fetch_data(GURL("http://localhost/foo"));
@@ -490,24 +437,23 @@ class ExtensionUpdaterTest : public testing::Test {
     service.set_pending_extensions(pending_extensions);
 
     MessageLoop message_loop;
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), kUpdateFrequencySecs);
+        new ExtensionUpdater(&service, service.pref_service(),
+                             kUpdateFrequencySecs);
 
     ManifestFetchData fetch_data(GURL("http://localhost/foo"));
     UpdateManifest::Results updates;
     for (PendingExtensionMap::const_iterator it = pending_extensions.begin();
          it != pending_extensions.end(); ++it) {
-      fetch_data.AddExtension(it->first,
-                              it->second.version.GetString(),
+      fetch_data.AddExtension(it->first, "1.0.0.0",
                               ManifestFetchData::kNeverPinged);
       AddParseResult(it->first,
                      "1.1", "http://localhost/e1_1.1.crx", &updates);
     }
     std::vector<int> updateable =
         updater->DetermineUpdates(fetch_data, updates);
-    // Only the first one is updateable.
-    EXPECT_EQ(1u, updateable.size());
+    // All the apps should be updateable.
+    EXPECT_EQ(3u, updateable.size());
     for (std::vector<int>::size_type i = 0; i < updateable.size(); ++i) {
       EXPECT_EQ(static_cast<int>(i), updateable[i]);
     }
@@ -525,9 +471,9 @@ class ExtensionUpdaterTest : public testing::Test {
     TestURLFetcher* fetcher = NULL;
     URLFetcher::set_factory(&factory);
     ServiceForDownloadTests service;
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), kUpdateFrequencySecs);
+        new ExtensionUpdater(&service, service.pref_service(),
+                             kUpdateFrequencySecs);
 
     GURL url1("http://localhost/manifest1");
     GURL url2("http://localhost/manifest2");
@@ -589,9 +535,9 @@ class ExtensionUpdaterTest : public testing::Test {
     TestURLFetcher* fetcher = NULL;
     URLFetcher::set_factory(&factory);
     ServiceForDownloadTests service;
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), kUpdateFrequencySecs);
+        new ExtensionUpdater(&service, service.pref_service(),
+                             kUpdateFrequencySecs);
 
     GURL test_url("http://localhost/extension.crx");
 
@@ -604,10 +550,12 @@ class ExtensionUpdaterTest : public testing::Test {
     if (pending) {
       const bool kIsTheme = false;
       const bool kInstallSilently = true;
+      const Extension::State kInitialState = Extension::ENABLED;
+      const bool kInitialIncognitoEnabled = false;
       PendingExtensionMap pending_extensions;
       pending_extensions[id] =
-          PendingExtensionInfo(test_url, *version,
-                               kIsTheme, kInstallSilently);
+          PendingExtensionInfo(test_url, kIsTheme, kInstallSilently,
+                               kInitialState, kInitialIncognitoEnabled);
       service.set_pending_extensions(pending_extensions);
     }
 
@@ -647,11 +595,11 @@ class ExtensionUpdaterTest : public testing::Test {
     TestURLFetcher* fetcher = NULL;
     URLFetcher::set_factory(&factory);
     ServiceForBlacklistTests service;
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), kUpdateFrequencySecs);
-    prefs.get()->
-      RegisterStringPref(prefs::kExtensionBlacklistUpdateVersion, L"0");
+        new ExtensionUpdater(&service, service.pref_service(),
+                             kUpdateFrequencySecs);
+    service.pref_service()->
+      RegisterStringPref(prefs::kExtensionBlacklistUpdateVersion, "0");
     GURL test_url("http://localhost/extension.crx");
 
     std::string id = "com.google.crx.blacklist";
@@ -660,7 +608,6 @@ class ExtensionUpdaterTest : public testing::Test {
       "2CE109E9D0FAF820B2434E166297934E6177B65AB9951DBC3E204CAD4689B39C";
 
     std::string version = "0.0.1";
-
     updater->FetchUpdatedExtension(id, test_url, hash, version);
 
     // Call back the ExtensionUpdater with a 200 response and some test data
@@ -678,8 +625,8 @@ class ExtensionUpdaterTest : public testing::Test {
     // blacklist.
     EXPECT_TRUE(service.processed_blacklist());
 
-    EXPECT_EQ(version, WideToASCII(prefs.get()->
-      GetString(prefs::kExtensionBlacklistUpdateVersion)));
+    EXPECT_EQ(version, service.pref_service()->
+      GetString(prefs::kExtensionBlacklistUpdateVersion));
 
     URLFetcher::set_factory(NULL);
   }
@@ -695,9 +642,9 @@ class ExtensionUpdaterTest : public testing::Test {
     TestURLFetcher* fetcher = NULL;
     URLFetcher::set_factory(&factory);
     ServiceForDownloadTests service;
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), kUpdateFrequencySecs);
+        new ExtensionUpdater(&service, service.pref_service(),
+                             kUpdateFrequencySecs);
 
     GURL url1("http://localhost/extension1.crx");
     GURL url2("http://localhost/extension2.crx");
@@ -764,24 +711,25 @@ class ExtensionUpdaterTest : public testing::Test {
     ExtensionList tmp;
     GURL url1("http://clients2.google.com/service/update2/crx");
     GURL url2("http://www.somewebsite.com");
-    CreateTestExtensions(1, &tmp, &url1.possibly_invalid_spec());
-    CreateTestExtensions(1, &tmp, &url2.possibly_invalid_spec());
+    service.CreateTestExtensions(1, &tmp, &url1.possibly_invalid_spec());
+    service.CreateTestExtensions(1, &tmp, &url2.possibly_invalid_spec());
     EXPECT_EQ(2u, tmp.size());
     service.set_extensions(tmp);
 
     Time now = Time::Now();
     if (ping_days == 0) {
-      service.SetLastPingDay(tmp[0]->id(), now - TimeDelta::FromSeconds(15));
+      service.extension_prefs()->SetLastPingDay(
+          tmp[0]->id(), now - TimeDelta::FromSeconds(15));
     } else if (ping_days > 0) {
       Time last_ping_day =
           now - TimeDelta::FromDays(ping_days) - TimeDelta::FromSeconds(15);
-      service.SetLastPingDay(tmp[0]->id(), last_ping_day);
+      service.extension_prefs()->SetLastPingDay(tmp[0]->id(), last_ping_day);
     }
 
     MessageLoop message_loop;
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-      new ExtensionUpdater(&service, prefs.get(), kUpdateFrequencySecs);
+      new ExtensionUpdater(&service, service.pref_service(),
+                           kUpdateFrequencySecs);
     updater->set_blacklist_checks_enabled(false);
 
     // Make the updater do manifest fetching, and note the urls it tries to
@@ -833,13 +781,13 @@ class ExtensionUpdaterTest : public testing::Test {
   // >= 1 day for the extension.
   static void TestHandleManifestResults() {
     ServiceForManifestTests service;
-    ScopedTempPrefService prefs;
     scoped_refptr<ExtensionUpdater> updater =
-        new ExtensionUpdater(&service, prefs.get(), kUpdateFrequencySecs);
+        new ExtensionUpdater(&service, service.pref_service(),
+                             kUpdateFrequencySecs);
 
     GURL update_url("http://www.google.com/manifest");
     ExtensionList tmp;
-    CreateTestExtensions(1, &tmp, &update_url.spec());
+    service.CreateTestExtensions(1, &tmp, &update_url.spec());
     service.set_extensions(tmp);
 
     ManifestFetchData fetch_data(update_url);
@@ -850,7 +798,8 @@ class ExtensionUpdaterTest : public testing::Test {
     results.daystart_elapsed_seconds = 750;
 
     updater->HandleManifestResults(fetch_data, results);
-    Time last_ping_day = service.LastPingDay(extension->id());
+    Time last_ping_day =
+        service.extension_prefs()->LastPingDay(extension->id());
     EXPECT_FALSE(last_ping_day.is_null());
     int64 seconds_diff = (Time::Now() - last_ping_day).InSeconds();
     EXPECT_LT(seconds_diff - results.daystart_elapsed_seconds, 5);
@@ -872,7 +821,7 @@ TEST(ExtensionUpdaterTest, TestExtensionUpdateCheckRequestsPending) {
 }
 
 // This test is disabled on Mac, see http://crbug.com/26035.
-TEST(ExtensionUpdaterTest, MAYBE_TestBlacklistUpdateCheckRequests) {
+TEST(ExtensionUpdaterTest, TestBlacklistUpdateCheckRequests) {
   ExtensionUpdaterTest::TestBlacklistUpdateCheckRequests();
 }
 
@@ -897,7 +846,7 @@ TEST(ExtensionUpdaterTest, TestSingleExtensionDownloadingPending) {
 }
 
 // This test is disabled on Mac, see http://crbug.com/26035.
-TEST(ExtensionUpdaterTest, MAYBE_TestBlacklistDownloading) {
+TEST(ExtensionUpdaterTest, TestBlacklistDownloading) {
   ExtensionUpdaterTest::TestBlacklistDownloading();
 }
 
@@ -923,7 +872,7 @@ TEST(ExtensionUpdaterTest, TestManifestFetchesBuilderAddExtension) {
   // Non-internal non-external extensions should be rejected.
   {
     ExtensionList extensions;
-    CreateTestExtensions(1, &extensions, NULL);
+    service.CreateTestExtensions(1, &extensions, NULL);
     ASSERT_FALSE(extensions.empty());
     extensions[0]->set_location(Extension::INVALID);
     builder.AddExtension(*extensions[0]);
@@ -931,27 +880,22 @@ TEST(ExtensionUpdaterTest, TestManifestFetchesBuilderAddExtension) {
     STLDeleteElements(&extensions);
   }
 
-  scoped_ptr<Version> version(Version::GetVersionFromString("0"));
-  ASSERT_TRUE(version.get());
-
   // Extensions with invalid update URLs should be rejected.
   builder.AddPendingExtension(
-      "id", PendingExtensionInfo(GURL("http:google.com:foo"),
-                                 *version, false, false));
+      GenerateId("foo"), PendingExtensionInfo(GURL("http:google.com:foo"),
+                                              false, false, true, false));
   EXPECT_TRUE(builder.GetFetches().empty());
 
   // Extensions with empty IDs should be rejected.
   builder.AddPendingExtension(
-      "", PendingExtensionInfo(GURL(), *version, false, false));
+      "", PendingExtensionInfo(GURL(), false, false, true, false));
   EXPECT_TRUE(builder.GetFetches().empty());
-
-  // TODO(akalin): Test that extensions with empty update URLs
-  // converted from user scripts are rejected.
 
   // Extensions with empty update URLs should have a default one
   // filled in.
   builder.AddPendingExtension(
-      "id", PendingExtensionInfo(GURL(), *version, false, false));
+      GenerateId("foo"), PendingExtensionInfo(GURL(),
+                                              false, false, true, false));
   std::vector<ManifestFetchData*> fetches = builder.GetFetches();
   ASSERT_EQ(1u, fetches.size());
   scoped_ptr<ManifestFetchData> fetch(fetches[0]);

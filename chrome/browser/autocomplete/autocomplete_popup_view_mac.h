@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include <string>
+#include <map>
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
@@ -20,7 +21,9 @@
 class AutocompletePopupModel;
 class AutocompleteEditModel;
 class AutocompleteEditViewMac;
+@class NSImage;
 class Profile;
+class SkBitmap;
 
 // Implements AutocompletePopupView using a raw NSWindow containing an
 // NSTableView.
@@ -32,7 +35,6 @@ class AutocompletePopupViewMac : public AutocompletePopupView {
  public:
   AutocompletePopupViewMac(AutocompleteEditViewMac* edit_view,
                            AutocompleteEditModel* edit_model,
-                           const BubblePositioner* bubble_positioner,
                            Profile* profile,
                            NSTextField* field);
   virtual ~AutocompletePopupViewMac();
@@ -107,13 +109,24 @@ class AutocompletePopupViewMac : public AutocompletePopupView {
   // Create the popup_ instance if needed.
   void CreatePopupIfNeeded();
 
+  // Calculate the appropriate position for the popup based on the
+  // field's screen position and the given target for the matrix
+  // height, and makes the popup visible.  Animates to the new frame
+  // if the popup shrinks, snaps to the new frame if the popup grows,
+  // allows existing animations to continue if the size doesn't
+  // change.
+  void PositionPopup(const CGFloat matrixHeight);
+
+  // Returns the NSImage that should be used as an icon for the given match.
+  NSImage* ImageForMatch(const AutocompleteMatch& match);
+
   scoped_ptr<AutocompletePopupModel> model_;
   AutocompleteEditViewMac* edit_view_;
-  const BubblePositioner* bubble_positioner_;  // owned by toolbar controller
   NSTextField* field_;  // owned by tab controller
 
   // Child window containing a matrix which implements the popup.
   scoped_nsobject<NSWindow> popup_;
+  NSRect targetPopupFrame_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompletePopupViewMac);
 };

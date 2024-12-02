@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,14 @@
 #include "net/base/net_log.h"
 #include "net/base/nss_memio.h"
 #include "net/base/ssl_config_service.h"
+#include "net/base/x509_certificate.h"
 #include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
 class BoundNetLog;
 class CertVerifier;
+class ClientSocketHandle;
 class X509Certificate;
 
 // An SSL client socket implemented with Mozilla NSS.
@@ -34,7 +36,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // The given hostname will be compared with the name(s) in the server's
   // certificate during the SSL handshake.  ssl_config specifies the SSL
   // settings.
-  SSLClientSocketNSS(ClientSocket* transport_socket,
+  SSLClientSocketNSS(ClientSocketHandle* transport_socket,
                      const std::string& hostname,
                      const SSLConfig& ssl_config);
   ~SSLClientSocketNSS();
@@ -45,11 +47,12 @@ class SSLClientSocketNSS : public SSLClientSocket {
   virtual NextProtoStatus GetNextProto(std::string* proto);
 
   // ClientSocket methods:
-  virtual int Connect(CompletionCallback* callback, const BoundNetLog& net_log);
+  virtual int Connect(CompletionCallback* callback);
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
   virtual int GetPeerAddress(AddressList* address) const;
+  virtual const BoundNetLog& NetLog() const { return net_log_; }
 
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
@@ -64,6 +67,10 @@ class SSLClientSocketNSS : public SSLClientSocket {
   int InitializeSSLOptions();
 
   void InvalidateSessionIfBadCertificate();
+#if defined(OS_MACOSX) || defined(OS_WIN)
+  // Creates an OS certificate from a DER-encoded certificate.
+  static X509Certificate::OSCertHandle CreateOSCert(const SECItem& der_cert);
+#endif
   X509Certificate* UpdateServerCert();
   void CheckSecureRenegotiation() const;
   void DoReadCallback(int result);
@@ -111,7 +118,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   scoped_refptr<IOBuffer> recv_buffer_;
 
   CompletionCallbackImpl<SSLClientSocketNSS> handshake_io_callback_;
-  scoped_ptr<ClientSocket> transport_;
+  scoped_ptr<ClientSocketHandle> transport_;
   std::string hostname_;
   SSLConfig ssl_config_;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,8 +32,7 @@
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/syncable/directory_backing_store.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/util/closure.h"
-#include "chrome/browser/sync/util/event_sys-inl.h"
+#include "chrome/common/deprecated/event_sys-inl.h"
 #include "chrome/test/sync/engine/test_id_factory.h"
 #include "chrome/test/sync/engine/test_syncable_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -47,28 +46,27 @@ using std::string;
 namespace syncable {
 
 namespace {
-// A lot of these tests were written expecting to be able to read and write
-// object data on entries.  However, the design has changed.
-void PutDataAsExtendedAttribute(WriteTransaction* wtrans,
-                                MutableEntry* e,
-                                const char* bytes,
-                                size_t bytes_length) {
-  ExtendedAttributeKey key(e->Get(META_HANDLE), "DATA");
-  MutableExtendedAttribute attr(wtrans, CREATE, key);
-  Blob bytes_blob(bytes, bytes + bytes_length);
-  attr.mutable_value()->swap(bytes_blob);
+void PutDataAsBookmarkFavicon(WriteTransaction* wtrans,
+                              MutableEntry* e,
+                              const char* bytes,
+                              size_t bytes_length) {
+  sync_pb::EntitySpecifics specifics;
+  specifics.MutableExtension(sync_pb::bookmark)->set_url("http://demo/");
+  specifics.MutableExtension(sync_pb::bookmark)->set_favicon(bytes,
+      bytes_length);
+  e->Put(SPECIFICS, specifics);
 }
 
-void ExpectDataFromExtendedAttributeEquals(BaseTransaction* trans,
-                                           Entry* e,
-                                           const char* bytes,
-                                           size_t bytes_length) {
+void ExpectDataFromBookmarkFaviconEquals(BaseTransaction* trans,
+                                         Entry* e,
+                                         const char* bytes,
+                                         size_t bytes_length) {
   ASSERT_TRUE(e->good());
-  Blob expected_value(bytes, bytes + bytes_length);
-  ExtendedAttributeKey key(e->Get(META_HANDLE), "DATA");
-  ExtendedAttribute attr(trans, GET_BY_HANDLE, key);
-  EXPECT_FALSE(attr.is_deleted());
-  EXPECT_EQ(expected_value, attr.value());
+  ASSERT_TRUE(e->Get(SPECIFICS).HasExtension(sync_pb::bookmark));
+  ASSERT_EQ("http://demo/",
+      e->Get(SPECIFICS).GetExtension(sync_pb::bookmark).url());
+  ASSERT_EQ(std::string(bytes, bytes_length),
+      e->Get(SPECIFICS).GetExtension(sync_pb::bookmark).favicon());
 }
 }  // namespace
 
@@ -138,7 +136,7 @@ TEST_F(SyncableGeneralTest, General) {
     WriteTransaction trans(&dir, UNITTEST, __FILE__, __LINE__);
     MutableEntry e(&trans, GET_BY_HANDLE, written_metahandle);
     ASSERT_TRUE(e.good());
-    PutDataAsExtendedAttribute(&trans, &e, s, sizeof(s));
+    PutDataAsBookmarkFavicon(&trans, &e, s, sizeof(s));
   }
 
   // Test reading back the contents that we just wrote.
@@ -146,7 +144,7 @@ TEST_F(SyncableGeneralTest, General) {
     WriteTransaction trans(&dir, UNITTEST, __FILE__, __LINE__);
     MutableEntry e(&trans, GET_BY_HANDLE, written_metahandle);
     ASSERT_TRUE(e.good());
-    ExpectDataFromExtendedAttributeEquals(&trans, &e, s, sizeof(s));
+    ExpectDataFromBookmarkFaviconEquals(&trans, &e, s, sizeof(s));
   }
 
   // Verify it exists in the folder.
@@ -286,11 +284,52 @@ class SyncableDirectoryTest : public testing::Test {
     file_util::Delete(file_path_, true);
   }
 
-  void SaveAndReloadDir() {
-    dir_->SaveChanges();
+  void ReloadDir() {
     dir_.reset(new Directory());
     ASSERT_TRUE(dir_.get());
     ASSERT_TRUE(OPENED == dir_->Open(file_path_, kName));
+  }
+
+  void SaveAndReloadDir() {
+    dir_->SaveChanges();
+    ReloadDir();
+  }
+
+  bool IsInDirtyMetahandles(int64 metahandle) {
+    return 1 == dir_->kernel_->dirty_metahandles->count(metahandle);
+  }
+
+  bool IsInMetahandlesToPurge(int64 metahandle) {
+    return 1 == dir_->kernel_->metahandles_to_purge->count(metahandle);
+  }
+
+  void CheckPurgeEntriesWithTypeInSucceeded(const ModelTypeSet& types_to_purge,
+                                            bool before_reload) {
+    SCOPED_TRACE(testing::Message("Before reload: ") << before_reload);
+    {
+      ReadTransaction trans(dir_.get(), __FILE__, __LINE__);
+      MetahandleSet all_set;
+      dir_->GetAllMetaHandles(&trans, &all_set);
+      EXPECT_EQ(3U, all_set.size());
+      if (before_reload)
+        EXPECT_EQ(4U, dir_->kernel_->metahandles_to_purge->size());
+      for (MetahandleSet::iterator iter = all_set.begin();
+           iter != all_set.end(); ++iter) {
+        Entry e(&trans, GET_BY_HANDLE, *iter);
+        if ((types_to_purge.count(e.GetModelType()) ||
+             types_to_purge.count(e.GetServerModelType()))) {
+          FAIL() << "Illegal type should have been deleted.";
+        }
+      }
+    }
+
+    EXPECT_FALSE(dir_->initial_sync_ended_for_type(PREFERENCES));
+    EXPECT_FALSE(dir_->initial_sync_ended_for_type(AUTOFILL));
+    EXPECT_TRUE(dir_->initial_sync_ended_for_type(BOOKMARKS));
+
+    EXPECT_EQ(0, dir_->last_download_timestamp(PREFERENCES));
+    EXPECT_EQ(0, dir_->last_download_timestamp(AUTOFILL));
+    EXPECT_EQ(1, dir_->last_download_timestamp(BOOKMARKS));
   }
 
   scoped_ptr<Directory> dir_;
@@ -319,6 +358,49 @@ class SyncableDirectoryTest : public testing::Test {
       string name, string server_name, int64 version,
       bool set_server_fields, bool is_dir, bool add_to_lru, int64 *meta_handle);
 };
+
+TEST_F(SyncableDirectoryTest, TakeSnapshotGetsMetahandlesToPurge) {
+  const int metas_to_create = 50;
+  MetahandleSet expected_purges;
+  MetahandleSet all_handles;
+  {
+    WriteTransaction trans(dir_.get(), UNITTEST, __FILE__, __LINE__);
+    for (int i = 0; i < metas_to_create; i++) {
+      MutableEntry e(&trans, CREATE, trans.root_id(), "foo");
+      e.Put(IS_UNSYNCED, true);
+      sync_pb::EntitySpecifics specs;
+      if (i % 2 == 0) {
+        AddDefaultExtensionValue(BOOKMARKS, &specs);
+        expected_purges.insert(e.Get(META_HANDLE));
+        all_handles.insert(e.Get(META_HANDLE));
+      } else {
+        AddDefaultExtensionValue(PREFERENCES, &specs);
+        all_handles.insert(e.Get(META_HANDLE));
+      }
+      e.Put(SPECIFICS, specs);
+      e.Put(SERVER_SPECIFICS, specs);
+    }
+  }
+
+  ModelTypeSet to_purge;
+  to_purge.insert(BOOKMARKS);
+  dir_->PurgeEntriesWithTypeIn(to_purge);
+
+  Directory::SaveChangesSnapshot snapshot1;
+  AutoLock scoped_lock(dir_->kernel_->save_changes_mutex);
+  dir_->TakeSnapshotForSaveChanges(&snapshot1);
+  EXPECT_TRUE(expected_purges == snapshot1.metahandles_to_purge);
+
+  to_purge.clear();
+  to_purge.insert(PREFERENCES);
+  dir_->PurgeEntriesWithTypeIn(to_purge);
+
+  dir_->HandleSaveChangesFailure(snapshot1);
+
+  Directory::SaveChangesSnapshot snapshot2;
+  dir_->TakeSnapshotForSaveChanges(&snapshot2);
+  EXPECT_TRUE(all_handles == snapshot2.metahandles_to_purge);
+}
 
 TEST_F(SyncableDirectoryTest, TakeSnapshotGetsAllDirtyHandlesTest) {
   const int metahandles_to_create = 100;
@@ -380,9 +462,88 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsAllDirtyHandlesTest) {
   }
 }
 
+TEST_F(SyncableDirectoryTest, TestPurgeEntriesWithTypeIn) {
+  sync_pb::EntitySpecifics bookmark_specs;
+  sync_pb::EntitySpecifics autofill_specs;
+  sync_pb::EntitySpecifics preference_specs;
+  AddDefaultExtensionValue(BOOKMARKS, &bookmark_specs);
+  AddDefaultExtensionValue(PREFERENCES, &preference_specs);
+  AddDefaultExtensionValue(AUTOFILL, &autofill_specs);
+  dir_->set_initial_sync_ended_for_type(BOOKMARKS, true);
+  dir_->set_last_download_timestamp(BOOKMARKS, 1);
+  dir_->set_initial_sync_ended_for_type(PREFERENCES, true);
+  dir_->set_last_download_timestamp(PREFERENCES, 1);
+  dir_->set_initial_sync_ended_for_type(AUTOFILL, true);
+  dir_->set_last_download_timestamp(AUTOFILL, 1);
+
+
+  std::set<ModelType> types_to_purge;
+  types_to_purge.insert(PREFERENCES);
+  types_to_purge.insert(AUTOFILL);
+
+  TestIdFactory id_factory;
+  // Create some items for each type.
+  {
+    WriteTransaction trans(dir_.get(), UNITTEST, __FILE__, __LINE__);
+    MutableEntry item1(&trans, CREATE, trans.root_id(), "Item");
+    ASSERT_TRUE(item1.good());
+    item1.Put(SPECIFICS, bookmark_specs);
+    item1.Put(SERVER_SPECIFICS, bookmark_specs);
+    item1.Put(IS_UNSYNCED, true);
+
+    MutableEntry item2(&trans, CREATE_NEW_UPDATE_ITEM,
+                       id_factory.NewServerId());
+    ASSERT_TRUE(item2.good());
+    item2.Put(SERVER_SPECIFICS, bookmark_specs);
+    item2.Put(IS_UNAPPLIED_UPDATE, true);
+
+    MutableEntry item3(&trans, CREATE, trans.root_id(), "Item");
+    ASSERT_TRUE(item3.good());
+    item3.Put(SPECIFICS, preference_specs);
+    item3.Put(SERVER_SPECIFICS, preference_specs);
+    item3.Put(IS_UNSYNCED, true);
+
+    MutableEntry item4(&trans, CREATE_NEW_UPDATE_ITEM,
+                       id_factory.NewServerId());
+    ASSERT_TRUE(item4.good());
+    item4.Put(SERVER_SPECIFICS, preference_specs);
+    item4.Put(IS_UNAPPLIED_UPDATE, true);
+
+    MutableEntry item5(&trans, CREATE, trans.root_id(), "Item");
+    ASSERT_TRUE(item5.good());
+    item5.Put(SPECIFICS, autofill_specs);
+    item5.Put(SERVER_SPECIFICS, autofill_specs);
+    item5.Put(IS_UNSYNCED, true);
+
+    MutableEntry item6(&trans, CREATE_NEW_UPDATE_ITEM,
+      id_factory.NewServerId());
+    ASSERT_TRUE(item6.good());
+    item6.Put(SERVER_SPECIFICS, autofill_specs);
+    item6.Put(IS_UNAPPLIED_UPDATE, true);
+  }
+
+  dir_->SaveChanges();
+  {
+    ReadTransaction trans(dir_.get(), __FILE__, __LINE__);
+    MetahandleSet all_set;
+    dir_->GetAllMetaHandles(&trans, &all_set);
+    ASSERT_EQ(7U, all_set.size());
+  }
+
+  dir_->PurgeEntriesWithTypeIn(types_to_purge);
+
+  // We first query the in-memory data, and then reload the directory (without
+  // saving) to verify that disk does not still have the data.
+  CheckPurgeEntriesWithTypeInSucceeded(types_to_purge, true);
+  SaveAndReloadDir();
+  CheckPurgeEntriesWithTypeInSucceeded(types_to_purge, false);
+}
+
 TEST_F(SyncableDirectoryTest, TakeSnapshotGetsOnlyDirtyHandlesTest) {
   const int metahandles_to_create = 100;
-  const unsigned int number_changed = 100u;  // half of 2 * metahandles_to_create
+
+  // half of 2 * metahandles_to_create
+  const unsigned int number_changed = 100u;
   std::vector<int64> expected_dirty_metahandles;
   {
     WriteTransaction trans(dir_.get(), UNITTEST, __FILE__, __LINE__);
@@ -968,6 +1129,7 @@ TEST_F(SyncableDirectoryTest, TestSaveChangesFailure) {
     e1.Put(IS_DIR, true);
     e1.Put(ID, TestIdFactory::FromNumber(101));
     EXPECT_TRUE(e1.GetKernelCopy().is_dirty());
+    EXPECT_TRUE(IsInDirtyMetahandles(handle1));
   }
   ASSERT_TRUE(dir_->SaveChanges());
 
@@ -982,6 +1144,7 @@ TEST_F(SyncableDirectoryTest, TestSaveChangesFailure) {
     EXPECT_EQ(aguilera.Get(NON_UNIQUE_NAME), "aguilera");
     aguilera.Put(NON_UNIQUE_NAME, "overwritten");
     EXPECT_TRUE(aguilera.GetKernelCopy().is_dirty());
+    EXPECT_TRUE(IsInDirtyMetahandles(handle1));
   }
   ASSERT_TRUE(dir_->SaveChanges());
 
@@ -1000,8 +1163,10 @@ TEST_F(SyncableDirectoryTest, TestSaveChangesFailure) {
     EXPECT_FALSE(aguilera.GetKernelCopy().is_dirty());
     EXPECT_EQ(aguilera.Get(NON_UNIQUE_NAME), "overwritten");
     EXPECT_FALSE(aguilera.GetKernelCopy().is_dirty());
+    EXPECT_FALSE(IsInDirtyMetahandles(handle1));
     aguilera.Put(NON_UNIQUE_NAME, "christina");
     EXPECT_TRUE(aguilera.GetKernelCopy().is_dirty());
+    EXPECT_TRUE(IsInDirtyMetahandles(handle1));
 
     // New item.
     MutableEntry kids_on_block(&trans, CREATE, trans.root_id(), "kids");
@@ -1011,6 +1176,7 @@ TEST_F(SyncableDirectoryTest, TestSaveChangesFailure) {
     kids_on_block.Put(IS_DIR, true);
     kids_on_block.Put(ID, TestIdFactory::FromNumber(102));
     EXPECT_TRUE(kids_on_block.GetKernelCopy().is_dirty());
+    EXPECT_TRUE(IsInDirtyMetahandles(handle2));
   }
 
   // We are using an unsaveable directory, so this can't succeed.  However,
@@ -1026,8 +1192,48 @@ TEST_F(SyncableDirectoryTest, TestSaveChangesFailure) {
      Entry kids(&trans, GET_BY_HANDLE, handle2);
      ASSERT_TRUE(kids.good());
      EXPECT_TRUE(kids.GetKernelCopy().is_dirty());
+     EXPECT_TRUE(IsInDirtyMetahandles(handle2));
      EXPECT_TRUE(aguilera.is_dirty());
+     EXPECT_TRUE(IsInDirtyMetahandles(handle1));
   }
+}
+
+TEST_F(SyncableDirectoryTest, TestSaveChangesFailureWithPurge) {
+  int64 handle1 = 0;
+  // Set up an item using a regular, saveable directory.
+  {
+    WriteTransaction trans(dir_.get(), UNITTEST, __FILE__, __LINE__);
+
+    MutableEntry e1(&trans, CREATE, trans.root_id(), "aguilera");
+    ASSERT_TRUE(e1.good());
+    EXPECT_TRUE(e1.GetKernelCopy().is_dirty());
+    handle1 = e1.Get(META_HANDLE);
+    e1.Put(BASE_VERSION, 1);
+    e1.Put(IS_DIR, true);
+    e1.Put(ID, TestIdFactory::FromNumber(101));
+    sync_pb::EntitySpecifics bookmark_specs;
+    AddDefaultExtensionValue(BOOKMARKS, &bookmark_specs);
+    e1.Put(SPECIFICS, bookmark_specs);
+    e1.Put(SERVER_SPECIFICS, bookmark_specs);
+    e1.Put(ID, TestIdFactory::FromNumber(101));
+    EXPECT_TRUE(e1.GetKernelCopy().is_dirty());
+    EXPECT_TRUE(IsInDirtyMetahandles(handle1));
+  }
+  ASSERT_TRUE(dir_->SaveChanges());
+
+  // Now do some operations using a directory for which SaveChanges will
+  // always fail.
+  dir_.reset(new TestUnsaveableDirectory());
+  ASSERT_TRUE(dir_.get());
+  ASSERT_TRUE(OPENED == dir_->Open(FilePath(kFilePath), kName));
+  ASSERT_TRUE(dir_->good());
+
+  ModelTypeSet set;
+  set.insert(BOOKMARKS);
+  dir_->PurgeEntriesWithTypeIn(set);
+  EXPECT_TRUE(IsInMetahandlesToPurge(handle1));
+  ASSERT_FALSE(dir_->SaveChanges());
+  EXPECT_TRUE(IsInMetahandlesToPurge(handle1));
 }
 
 // Create items of each model type, and check that GetModelType and
@@ -1284,7 +1490,7 @@ class DirectoryKernelStalenessBugDelegate : public ThreadBugDelegate {
           MutableEntry me(&trans, CREATE, trans.root_id(), "Jeff");
           me.Put(BASE_VERSION, 1);
           me.Put(ID, jeff_id);
-          PutDataAsExtendedAttribute(&trans, &me, test_bytes,
+          PutDataAsBookmarkFavicon(&trans, &me, test_bytes,
                                      sizeof(test_bytes));
         }
         {
@@ -1313,7 +1519,7 @@ class DirectoryKernelStalenessBugDelegate : public ThreadBugDelegate {
           CHECK(dir.good());
           ReadTransaction trans(dir, __FILE__, __LINE__);
           Entry e(&trans, GET_BY_ID, jeff_id);
-          ExpectDataFromExtendedAttributeEquals(&trans, &e, test_bytes,
+          ExpectDataFromBookmarkFaviconEquals(&trans, &e, test_bytes,
                                                 sizeof(test_bytes));
         }
         // Same result as CloseAllDirectories, but more code coverage.
@@ -1449,26 +1655,6 @@ void FakeSync(MutableEntry* e, const char* fake_id) {
   e->Put(IS_UNSYNCED, false);
   e->Put(BASE_VERSION, 2);
   e->Put(ID, Id::CreateFromServerId(fake_id));
-}
-
-TEST_F(SyncableDirectoryTest, Bug1509232) {
-  const string a = "alpha";
-  const Id entry_id = dir_.get()->NextId();
-  CreateEntry(a, entry_id);
-  {
-    WriteTransaction trans(dir_.get(), UNITTEST, __FILE__, __LINE__);
-    MutableEntry e(&trans, GET_BY_ID, entry_id);
-    ASSERT_TRUE(e.good());
-    ExtendedAttributeKey key(e.Get(META_HANDLE), "resourcefork");
-    MutableExtendedAttribute ext(&trans, CREATE, key);
-    ASSERT_TRUE(ext.good());
-    const char value[] = "stuff";
-    Blob value_blob(value, value + arraysize(value));
-    ext.mutable_value()->swap(value_blob);
-    ext.delete_attribute();
-  }
-  // This call to SaveChanges used to CHECK fail.
-  dir_.get()->SaveChanges();
 }
 
 class SyncableClientTagTest : public SyncableDirectoryTest {

@@ -18,7 +18,7 @@ void VideoFrame::CreateFrame(VideoFrame::Format format,
   DCHECK(frame_out);
   bool alloc_worked = false;
   scoped_refptr<VideoFrame> frame =
-      new VideoFrame(format, width, height);
+      new VideoFrame(VideoFrame::TYPE_SYSTEM_MEMORY, format, width, height);
   if (frame) {
     frame->SetTimestamp(timestamp);
     frame->SetDuration(duration);
@@ -38,6 +38,9 @@ void VideoFrame::CreateFrame(VideoFrame::Format format,
       case VideoFrame::YV16:
         alloc_worked = frame->AllocateYUV();
         break;
+      case VideoFrame::ASCII:
+        alloc_worked = frame->AllocateRGB(1u);
+        break;
       default:
         NOTREACHED();
         alloc_worked = false;
@@ -47,9 +50,33 @@ void VideoFrame::CreateFrame(VideoFrame::Format format,
   *frame_out = alloc_worked ? frame : NULL;
 }
 
+void VideoFrame::CreateFrameExternal(VideoFrame::Format format,
+                                     size_t width,
+                                     size_t height,
+                                     uint8* const data[kMaxPlanes],
+                                     const int32 strides[kMaxPlanes],
+                                     base::TimeDelta timestamp,
+                                     base::TimeDelta duration,
+                                     scoped_refptr<VideoFrame>* frame_out) {
+  DCHECK(frame_out);
+  scoped_refptr<VideoFrame> frame =
+      new VideoFrame(VideoFrame::TYPE_SYSTEM_MEMORY, format, width, height);
+  if (frame) {
+    frame->SetTimestamp(timestamp);
+    frame->SetDuration(duration);
+    frame->external_memory_ = true;
+    for (size_t i = 0; i < kMaxPlanes; ++i) {
+      frame->data_[i] = data[i];
+      frame->strides_[i] = strides[i];
+    }
+  }
+  *frame_out = frame;
+}
+
 // static
 void VideoFrame::CreateEmptyFrame(scoped_refptr<VideoFrame>* frame_out) {
-  *frame_out = new VideoFrame(VideoFrame::EMPTY, 0, 0);
+  *frame_out = new VideoFrame(VideoFrame::TYPE_SYSTEM_MEMORY,
+                              VideoFrame::EMPTY, 0, 0);
 }
 
 // static
@@ -87,6 +114,26 @@ void VideoFrame::CreateBlackFrame(int width, int height,
   }
 
   // Success!
+  *frame_out = frame;
+}
+
+// static
+void VideoFrame::CreatePrivateFrame(VideoFrame::SurfaceType type,
+                                    VideoFrame::Format format,
+                                    size_t width,
+                                    size_t height,
+                                    base::TimeDelta timestamp,
+                                    base::TimeDelta duration,
+                                    void* private_buffer,
+                                    scoped_refptr<VideoFrame>* frame_out) {
+  DCHECK(frame_out);
+  scoped_refptr<VideoFrame> frame =
+      new VideoFrame(type, format, width, height);
+  if (frame) {
+    frame->SetTimestamp(timestamp);
+    frame->SetDuration(duration);
+    frame->private_buffer_ = private_buffer;
+  }
   *frame_out = frame;
 }
 
@@ -147,22 +194,27 @@ bool VideoFrame::AllocateYUV() {
   return false;
 }
 
-VideoFrame::VideoFrame(VideoFrame::Format format,
+VideoFrame::VideoFrame(VideoFrame::SurfaceType type,
+                       VideoFrame::Format format,
                        size_t width,
                        size_t height) {
+  type_ = type;
   format_ = format;
   width_ = width;
   height_ = height;
   planes_ = 0;
   memset(&strides_, 0, sizeof(strides_));
   memset(&data_, 0, sizeof(data_));
+  external_memory_ = false;
+  private_buffer_ = NULL;
 }
 
 VideoFrame::~VideoFrame() {
   // In multi-plane allocations, only a single block of memory is allocated
   // on the heap, and other |data| pointers point inside the same, single block
   // so just delete index 0.
-  delete[] data_[0];
+  if (!external_memory_)
+    delete[] data_[0];
 }
 
 bool VideoFrame::IsEndOfStream() const {

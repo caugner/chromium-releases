@@ -8,10 +8,12 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "chrome/browser/chromeos/notifications/balloon_collection_impl.h"
 #include "chrome/browser/chromeos/notifications/balloon_view.h"
 #include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "views/background.h"
+#include "views/controls/native/native_view_host.h"
 #include "views/controls/scroll_view.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
@@ -19,7 +21,10 @@
 #define SET_STATE(state) SetState(state, __PRETTY_FUNCTION__)
 
 namespace {
-// Maximum size of balloon's height.
+// Minimum and maximum size of balloon content.
+const int kBalloonMinWidth = 300;
+const int kBalloonMaxWidth = 300;
+const int kBalloonMinHeight = 24;
 const int kBalloonMaxHeight = 120;
 
 // Maximum height of the notification panel.
@@ -52,17 +57,75 @@ const char* ToStr(const NotificationPanel::State state) {
 }
 #endif
 
+chromeos::BalloonViewImpl* GetBalloonViewOf(const Balloon* balloon) {
+  return static_cast<chromeos::BalloonViewImpl*>(balloon->view());
+}
+
+// A WidgetGtk to preevnt recursive calls to PaintNow, which is observed
+// with gtk 2.18.6. See http://crbug.com/42235 for more details.
 class PanelWidget : public views::WidgetGtk {
  public:
-  explicit PanelWidget(chromeos::NotificationPanel* panel)
-      : WidgetGtk(views::WidgetGtk::TYPE_WINDOW),
+  PanelWidget() : WidgetGtk(TYPE_WINDOW), painting_(false) {
+  }
+
+  virtual ~PanelWidget() {
+    // Enable double buffering because the panel has both pure views control and
+    // native controls (scroll bar).
+    EnableDoubleBuffer(true);
+  }
+
+  // views::WidgetGtk overrides.
+  virtual void PaintNow(const gfx::Rect& update_rect) {
+    if (!painting_) {
+      painting_ = true;
+      WidgetGtk::PaintNow(update_rect);
+      painting_ = false;
+    }
+  }
+
+ private:
+  // True if the painting is in progress.
+  bool painting_;
+
+  DISALLOW_COPY_AND_ASSIGN(PanelWidget);
+};
+
+// A WidgetGtk that covers entire ScrollView's viewport. Without this,
+// all renderer's native gtk widgets are moved one by one via
+// View::VisibleBoundsInRootChanged() notification, which makes
+// scrolling not smooth.
+class ViewportWidget : public views::WidgetGtk {
+ public:
+  explicit ViewportWidget(chromeos::NotificationPanel* panel)
+      : WidgetGtk(views::WidgetGtk::TYPE_CHILD),
         panel_(panel) {
+  }
+
+  void UpdateControl() {
+    if (last_point_.get())
+      panel_->OnMouseMotion(*last_point_.get());
   }
 
   // views::WidgetGtk overrides.
   virtual gboolean OnMotionNotify(GtkWidget* widget, GdkEventMotion* event) {
     gboolean result = WidgetGtk::OnMotionNotify(widget, event);
-    panel_->OnMouseMotion();
+
+    int x = 0, y = 0;
+    GetContainedWidgetEventCoordinates(event, &x, &y);
+
+    // The window_contents_' allocation has been moved off the top left
+    // corner, so we need to adjust it.
+    GtkAllocation alloc = widget->allocation;
+    x -= alloc.x;
+    y -= alloc.y;
+
+    if (!last_point_.get()) {
+      last_point_.reset(new gfx::Point(x, y));
+    } else {
+      last_point_->set_x(x);
+      last_point_->set_y(y);
+    }
+    panel_->OnMouseMotion(*last_point_.get());
     return result;
   }
 
@@ -75,13 +138,15 @@ class PanelWidget : public views::WidgetGtk {
     GetBounds(&bounds, true);
     if (!bounds.Contains(p)) {
       panel_->OnMouseLeave();
+      last_point_.reset();
     }
     return result;
   }
 
  private:
   chromeos::NotificationPanel* panel_;
-  DISALLOW_COPY_AND_ASSIGN(PanelWidget);
+  scoped_ptr<gfx::Point> last_point_;
+  DISALLOW_COPY_AND_ASSIGN(ViewportWidget);
 };
 
 class BalloonSubContainer : public views::View {
@@ -173,6 +238,17 @@ class BalloonSubContainer : public views::View {
     return NULL;
   }
 
+  BalloonViewImpl* FindBalloonView(const gfx::Point point) {
+    gfx::Point copy(point);
+    ConvertPointFromWidget(this, &copy);
+    for (int i = GetChildViewCount() - 1; i >= 0; --i) {
+      views::View* view = GetChildViewAt(i);
+      if (view->bounds().Contains(copy))
+        return static_cast<BalloonViewImpl*>(view);
+    }
+    return NULL;
+  }
+
  private:
   gfx::Size preferred_size_;
   int margin_;
@@ -186,13 +262,14 @@ namespace chromeos {
 
 class BalloonContainer : public views::View {
  public:
-  explicit BalloonContainer(int margin)
+  BalloonContainer(int margin)
       : margin_(margin),
         sticky_container_(new BalloonSubContainer(margin)),
         non_sticky_container_(new BalloonSubContainer(margin)) {
     AddChildView(sticky_container_);
     AddChildView(non_sticky_container_);
   }
+  virtual ~BalloonContainer() {}
 
   // views::View overrides.
   virtual void Layout() {
@@ -224,15 +301,13 @@ class BalloonContainer : public views::View {
 
   // Adds a ballon to the panel.
   void Add(Balloon* balloon) {
-    BalloonViewImpl* view =
-        static_cast<BalloonViewImpl*>(balloon->view());
+    BalloonViewImpl* view = GetBalloonViewOf(balloon);
     GetContainerFor(balloon)->AddChildView(view);
   }
 
   // Updates the position of the |balloon|.
   bool Update(Balloon* balloon) {
-    BalloonViewImpl* view =
-        static_cast<BalloonViewImpl*>(balloon->view());
+    BalloonViewImpl* view = GetBalloonViewOf(balloon);
     View* container = NULL;
     if (sticky_container_->HasChildView(view)) {
       container = sticky_container_;
@@ -249,10 +324,10 @@ class BalloonContainer : public views::View {
   }
 
   // Removes a ballon from the panel.
-  void Remove(Balloon* balloon) {
-    BalloonViewImpl* view =
-        static_cast<BalloonViewImpl*>(balloon->view());
+  BalloonViewImpl* Remove(Balloon* balloon) {
+    BalloonViewImpl* view = GetBalloonViewOf(balloon);
     GetContainerFor(balloon)->RemoveChildView(view);
+    return view;
   }
 
   // Returns the number of notifications added to the panel.
@@ -310,10 +385,14 @@ class BalloonContainer : public views::View {
     return view ? view : non_sticky_container_->FindBalloonView(notification);
   }
 
+  BalloonViewImpl* FindBalloonView(const gfx::Point& point) {
+    BalloonViewImpl* view = sticky_container_->FindBalloonView(point);
+    return view ? view : non_sticky_container_->FindBalloonView(point);
+  }
+
  private:
   BalloonSubContainer* GetContainerFor(Balloon* balloon) const {
-    BalloonViewImpl* view =
-        static_cast<BalloonViewImpl*>(balloon->view());
+    BalloonViewImpl* view = GetBalloonViewOf(balloon);
     return view->sticky() ?
         sticky_container_ : non_sticky_container_;
   }
@@ -330,12 +409,14 @@ class BalloonContainer : public views::View {
 
 NotificationPanel::NotificationPanel()
     : balloon_container_(NULL),
+      panel_widget_(NULL),
+      container_host_(NULL),
       state_(CLOSED),
       task_factory_(this),
-      min_bounds_(0, 0,
-                  BalloonCollectionImpl::kBalloonWidth,
-                  BalloonCollectionImpl::kBalloonMinHeight),
-      stale_timeout_(1000 * kStaleTimeoutInSeconds) {
+      min_bounds_(0, 0, kBalloonMinWidth, kBalloonMinHeight),
+      stale_timeout_(1000 * kStaleTimeoutInSeconds),
+      active_(NULL),
+      scroll_to_(NULL) {
   Init();
 }
 
@@ -347,25 +428,37 @@ NotificationPanel::~NotificationPanel() {
 // NottificationPanel public.
 
 void NotificationPanel::Show() {
-  if (!panel_widget_.get()) {
+  if (!panel_widget_) {
     // TODO(oshima): Using window because Popup widget behaves weird
     // when resizing. This needs to be investigated.
-    panel_widget_.reset(new PanelWidget(this));
+    panel_widget_ = new PanelWidget();
     gfx::Rect bounds = GetPreferredBounds();
     bounds = bounds.Union(min_bounds_);
     panel_widget_->Init(NULL, bounds);
-    // TODO(oshima): I needed the following code in order to get sizing
-    // reliably. Investigate and fix it in WidgetGtk.
+    // Set minimum bounds so that it can grow freely.
     gtk_widget_set_size_request(GTK_WIDGET(panel_widget_->GetNativeView()),
-                                bounds.width(), bounds.height());
+                                min_bounds_.width(), min_bounds_.height());
+
+    views::NativeViewHost* native = new views::NativeViewHost();
+    scroll_view_->SetContents(native);
+
     panel_widget_->SetContentsView(scroll_view_.get());
+
+    // Add the view port after scroll_view is attached to the panel widget.
+    ViewportWidget* widget = new ViewportWidget(this);
+    container_host_ = widget;
+    container_host_->Init(NULL, gfx::Rect());
+    container_host_->SetContentsView(balloon_container_.get());
+    // The window_contents_ is onwed by the WidgetGtk. Increase ref count
+    // so that window_contents does not get deleted when detached.
+    g_object_ref(widget->window_contents());
+    native->Attach(widget->window_contents());
+
     UnregisterNotification();
     panel_controller_.reset(
-        new PanelController(this,
-                            GTK_WINDOW(panel_widget_->GetNativeView()),
-                            gfx::Rect(0, 0,
-                                      BalloonCollectionImpl::kBalloonWidth,
-                                      1)));
+        new PanelController(this, GTK_WINDOW(panel_widget_->GetNativeView())));
+    panel_controller_->Init(false /* don't focus when opened */,
+                            gfx::Rect(0, 0, kBalloonMinWidth, 1), 0);
     registrar_.Add(this, NotificationType::PANEL_STATE_CHANGED,
                    Source<PanelController>(panel_controller_.get()));
   }
@@ -373,14 +466,26 @@ void NotificationPanel::Show() {
 }
 
 void NotificationPanel::Hide() {
-  if (panel_widget_.get()) {
+  if (panel_widget_) {
+    container_host_->GetRootView()->RemoveChildView(balloon_container_.get());
+
+    views::NativeViewHost* native =
+        static_cast<views::NativeViewHost*>(scroll_view_->GetContents());
+    native->Detach();
+    scroll_view_->SetContents(NULL);
+    container_host_->Hide();
+    container_host_->CloseNow();
+    container_host_ = NULL;
+
     UnregisterNotification();
-    panel_controller_.release()->Close();
+    panel_controller_->Close();
+    MessageLoop::current()->DeleteSoon(FROM_HERE, panel_controller_.release());
     // We need to remove & detach the scroll view from hierarchy to
     // avoid GTK deleting child.
     // TODO(oshima): handle this details in WidgetGtk.
     panel_widget_->GetRootView()->RemoveChildView(scroll_view_.get());
-    panel_widget_.release()->Close();
+    panel_widget_->Close();
+    panel_widget_ = NULL;
   }
 }
 
@@ -389,28 +494,28 @@ void NotificationPanel::Hide() {
 
 void NotificationPanel::Add(Balloon* balloon) {
   balloon_container_->Add(balloon);
-  if (state_ == CLOSED || state_ == MINIMIZED || state_ == KEEP_SIZE)
+  if (state_ == CLOSED || state_ == MINIMIZED)
     SET_STATE(STICKY_AND_NEW);
   Show();
-  UpdatePanel(true);
+  // Don't resize the panel yet. The panel will be resized when WebKit tells
+  // the size in ResizeNotification.
+  UpdatePanel(false);
+  UpdateControl();
   StartStaleTimer(balloon);
+  scroll_to_ = balloon;
 }
 
 bool NotificationPanel::Update(Balloon* balloon) {
-  if (balloon_container_->Update(balloon)) {
-    if (state_ == CLOSED || state_ == MINIMIZED)
-      SET_STATE(STICKY_AND_NEW);
-    Show();
-    UpdatePanel(true);
-    StartStaleTimer(balloon);
-    return true;
-  } else {
-    return false;
-  }
+  return balloon_container_->Update(balloon);
 }
 
 void NotificationPanel::Remove(Balloon* balloon) {
-  balloon_container_->Remove(balloon);
+  BalloonViewImpl* view = balloon_container_->Remove(balloon);
+  if (view == active_)
+    active_ = NULL;
+  if (scroll_to_ == balloon)
+    scroll_to_ = NULL;
+
   // TODO(oshima): May be we shouldn't close
   // if the mouse pointer is still on the panel.
   if (balloon_container_->GetNotificationCount() == 0)
@@ -418,26 +523,61 @@ void NotificationPanel::Remove(Balloon* balloon) {
   // no change to the state
   if (state_ == KEEP_SIZE) {
     // Just update the content.
-    balloon_container_->UpdateBounds();
-    scroll_view_->Layout();
+    UpdateContainerBounds();
   } else {
     if (state_ != CLOSED &&
         balloon_container_->GetStickyNewNotificationCount() == 0)
       SET_STATE(MINIMIZED);
     UpdatePanel(true);
   }
+  UpdateControl();
+}
+
+void NotificationPanel::Show(Balloon* balloon) {
+  if (state_ == CLOSED || state_ == MINIMIZED)
+    SET_STATE(STICKY_AND_NEW);
+  Show();
+  UpdatePanel(true);
+  StartStaleTimer(balloon);
+  ScrollBalloonToVisible(balloon);
 }
 
 void NotificationPanel::ResizeNotification(
     Balloon* balloon, const gfx::Size& size) {
   // restrict to the min & max sizes
   gfx::Size real_size(
-      BalloonCollectionImpl::kBalloonWidth,
-      std::max(BalloonCollectionImpl::kBalloonMinHeight,
+      std::max(kBalloonMinWidth,
+               std::min(kBalloonMaxWidth, size.width())),
+      std::max(kBalloonMinHeight,
                std::min(kBalloonMaxHeight, size.height())));
-  balloon->set_content_size(real_size);
-  static_cast<BalloonViewImpl*>(balloon->view())->Layout();
-  UpdatePanel(true);
+
+  // Don't allow balloons to shrink.  This avoids flickering
+  // which sometimes rapidly reports alternating sizes.  Special
+  // case for setting the minimum value.
+  gfx::Size old_size = balloon->content_size();
+  if (real_size.width() > old_size.width() ||
+      real_size.height() > old_size.height() ||
+      real_size == min_bounds_.size()) {
+    balloon->set_content_size(real_size);
+    GetBalloonViewOf(balloon)->Layout();
+    UpdatePanel(true);
+    if (scroll_to_ == balloon) {
+      ScrollBalloonToVisible(scroll_to_);
+      scroll_to_ = NULL;
+    }
+  }
+}
+
+void NotificationPanel::SetActiveView(BalloonViewImpl* view) {
+  // Don't change the active view if it's same notification,
+  // or the notification is being closed.
+  if (active_ == view || (view && view->closed()))
+    return;
+  if (active_)
+    active_->Deactivated();
+  active_ = view;
+  if (active_)
+    active_->Activated();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -490,12 +630,15 @@ void NotificationPanel::Observe(NotificationType type,
 // PanelController public.
 
 void NotificationPanel::OnMouseLeave() {
+  SetActiveView(NULL);
   if (balloon_container_->GetNotificationCount() == 0)
     SET_STATE(CLOSED);
   UpdatePanel(true);
 }
 
-void NotificationPanel::OnMouseMotion() {
+void NotificationPanel::OnMouseMotion(const gfx::Point& point) {
+  SetActiveView(balloon_container_->FindBalloonView(point));
+
   SET_STATE(KEEP_SIZE);
 }
 
@@ -509,14 +652,14 @@ NotificationPanelTester* NotificationPanel::GetTester() {
 // NotificationPanel private.
 
 void NotificationPanel::Init() {
-  DCHECK(!panel_widget_.get());
-  balloon_container_ = new BalloonContainer(1);
+  DCHECK(!panel_widget_);
+  balloon_container_.reset(new BalloonContainer(1));
+  balloon_container_->set_parent_owned(false);
   balloon_container_->set_background(
       views::Background::CreateSolidBackground(ResourceBundle::frame_color));
 
   scroll_view_.reset(new views::ScrollView());
   scroll_view_->set_parent_owned(false);
-  scroll_view_->SetContents(balloon_container_);
   scroll_view_->set_background(
       views::Background::CreateSolidBackground(SK_ColorWHITE));
 }
@@ -527,18 +670,37 @@ void NotificationPanel::UnregisterNotification() {
                       Source<PanelController>(panel_controller_.get()));
 }
 
-void NotificationPanel::UpdatePanel(bool contents_changed) {
-  if (contents_changed) {
-    balloon_container_->UpdateBounds();
-    scroll_view_->Layout();
+void NotificationPanel::ScrollBalloonToVisible(Balloon* balloon) {
+  BalloonViewImpl* view = GetBalloonViewOf(balloon);
+  if (!view->closed()) {
+    // We can't use View::ScrollRectToVisible because the viewport is not
+    // ancestor of the BalloonViewImpl.
+    // Use Widget's coordinate which is same as viewport's coordinates.
+    gfx::Point p(0, 0);
+    views::View::ConvertPointToWidget(view, &p);
+    gfx::Rect visible_rect(p.x(), p.y(), view->width(), view->height());
+    scroll_view_->ScrollContentsRegionToBeVisible(visible_rect);
   }
-  switch (state_) {
+}
+
+void NotificationPanel::UpdatePanel(bool update_container_size) {
+  if (update_container_size)
+    UpdateContainerBounds();
+  switch(state_) {
     case KEEP_SIZE: {
       gfx::Rect min_bounds = GetPreferredBounds();
       gfx::Rect panel_bounds;
       panel_widget_->GetBounds(&panel_bounds, true);
       if (min_bounds.height() < panel_bounds.height())
         panel_widget_->SetBounds(min_bounds);
+      else if (min_bounds.height() > panel_bounds.height()) {
+        // need scroll bar
+        int width = balloon_container_->width() +
+            scroll_view_->GetScrollBarWidth();
+        panel_bounds.set_width(width);
+        panel_widget_->SetBounds(panel_bounds);
+      }
+
       // no change.
       break;
     }
@@ -552,13 +714,13 @@ void NotificationPanel::UpdatePanel(bool contents_changed) {
         panel_controller_->SetState(PanelController::MINIMIZED);
       break;
     case FULL:
-      if (panel_widget_.get()) {
+      if (panel_widget_) {
         panel_widget_->SetBounds(GetPreferredBounds());
         panel_controller_->SetState(PanelController::EXPANDED);
       }
       break;
     case STICKY_AND_NEW:
-      if (panel_widget_.get()) {
+      if (panel_widget_) {
         panel_widget_->SetBounds(GetStickyNewBounds());
         panel_controller_->SetState(PanelController::EXPANDED);
       }
@@ -566,13 +728,31 @@ void NotificationPanel::UpdatePanel(bool contents_changed) {
   }
 }
 
+void NotificationPanel::UpdateContainerBounds() {
+  balloon_container_->UpdateBounds();
+  views::NativeViewHost* native =
+      static_cast<views::NativeViewHost*>(scroll_view_->GetContents());
+  // Update from WebKit may arrive after the panel is closed/hidden
+  // and viewport widget is detached.
+  if (native) {
+    native->SetBounds(balloon_container_->bounds());
+    scroll_view_->Layout();
+  }
+}
+
+void NotificationPanel::UpdateControl() {
+  if (container_host_)
+    static_cast<ViewportWidget*>(container_host_)->UpdateControl();
+}
+
 gfx::Rect NotificationPanel::GetPreferredBounds() {
   gfx::Size pref_size = balloon_container_->GetPreferredSize();
   int new_height = std::min(pref_size.height(), kMaxPanelHeight);
   int new_width = pref_size.width();
   // Adjust the width to avoid showing a horizontal scroll bar.
-  if (new_height != pref_size.height())
+  if (new_height != pref_size.height()) {
     new_width += scroll_view_->GetScrollBarWidth();
+  }
   return gfx::Rect(0, 0, new_width, new_height).Union(min_bounds_);
 }
 
@@ -588,7 +768,7 @@ gfx::Rect NotificationPanel::GetStickyNewBounds() {
 }
 
 void NotificationPanel::StartStaleTimer(Balloon* balloon) {
-  BalloonViewImpl* view = static_cast<BalloonViewImpl*>(balloon->view());
+  BalloonViewImpl* view = GetBalloonViewOf(balloon);
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       task_factory_.NewRunnableMethod(
@@ -648,8 +828,31 @@ void NotificationPanelTester::MarkStale(const Notification& notification) {
   panel_->MarkStale(notification);
 }
 
-PanelController* NotificationPanelTester::GetPanelController() {
+PanelController* NotificationPanelTester::GetPanelController() const {
   return panel_->panel_controller_.get();
+}
+
+BalloonViewImpl* NotificationPanelTester::GetBalloonView(
+    BalloonCollectionImpl* collection,
+    const Notification& notification) {
+  BalloonCollectionImpl::Balloons::iterator iter =
+      collection->FindBalloon(notification);
+  DCHECK(iter != collection->balloons_.end());
+  Balloon* balloon = (*iter);
+  return GetBalloonViewOf(balloon);
+}
+
+bool NotificationPanelTester::IsVisible(const BalloonViewImpl* view) const {
+  gfx::Rect rect = panel_->scroll_view_->GetVisibleRect();
+  gfx::Point origin(0, 0);
+  views::View::ConvertPointToView(view, panel_->balloon_container_.get(),
+                                  &origin);
+  return rect.Contains(gfx::Rect(origin, view->bounds().size()));
+}
+
+
+bool NotificationPanelTester::IsActive(const BalloonViewImpl* view) const {
+  return panel_->active_ == view;
 }
 
 }  // namespace chromeos

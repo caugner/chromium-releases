@@ -19,8 +19,7 @@
 
 namespace {
 
-class EnvVarGetterImpl
-    : public base::EnvVarGetter {
+class EnvVarGetterImpl : public base::EnvVarGetter {
  public:
   virtual bool GetEnv(const char* variable_name, std::string* result) {
     if (GetEnvImpl(variable_name, result))
@@ -40,6 +39,11 @@ class EnvVarGetterImpl
       return false;
     return GetEnvImpl(alternate_case_var.c_str(), result);
   }
+
+  virtual bool SetEnv(const char* variable_name, const std::string& new_value) {
+    return SetEnvImpl(variable_name, new_value);
+  }
+
  private:
   bool GetEnvImpl(const char* variable_name, std::string* result) {
 #if defined(OS_POSIX)
@@ -66,11 +70,28 @@ class EnvVarGetterImpl
 #error need to port
 #endif
   }
+
+  bool SetEnvImpl(const char* variable_name, const std::string& new_value) {
+#if defined(OS_POSIX)
+    // On success, zero is returned.
+    return setenv(variable_name, new_value.c_str(), 1) == 0;
+#elif defined(OS_WIN)
+    // On success, a nonzero is returned.
+    return ::SetEnvironmentVariable(ASCIIToWide(variable_name).c_str(),
+                                    ASCIIToWide(new_value).c_str()) != 0;
+#endif
+  }
 };
 
 }  // namespace
 
 namespace base {
+
+EnvVarGetter::~EnvVarGetter() {}
+
+bool EnvVarGetter::HasEnv(const char* variable_name) {
+  return GetEnv(variable_name, NULL);
+}
 
 // static
 EnvVarGetter* EnvVarGetter::Create() {

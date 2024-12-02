@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_RENDERER_HOST_TEST_TEST_RENDER_VIEW_HOST_H_
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/message_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/renderer_host/mock_render_process_host.h"
@@ -15,9 +16,16 @@
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/test_tab_contents.h"
-#include "chrome/browser/user_data_manager.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+// Utility function to initialize ViewHostMsg_NavigateParams_Params
+// with given |page_id|, |url| and |transition_type|.
+void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
+                        int page_id,
+                        const GURL& url,
+                        PageTransition::Type transition_type);
 
 // This file provides a testing framework for mocking out the RenderProcessHost
 // layer. It allows you to test RenderViewHost, TabContents,
@@ -59,11 +67,12 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   virtual void SetIsLoading(bool is_loading) {}
   virtual void UpdateCursor(const WebCursor& cursor) {}
   virtual void UpdateCursorIfOverSelf() {}
-  virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect) {}
-  virtual void DidPaintBackingStoreRects(
+  virtual void ImeUpdateTextInputState(WebKit::WebTextInputType state,
+                                       const gfx::Rect& caret_rect) {}
+  virtual void ImeCancelComposition() {}
+  virtual void DidUpdateBackingStore(
+      const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
       const std::vector<gfx::Rect>& rects) {}
-  virtual void DidScrollBackingStoreRect(
-      const gfx::Rect& rect, int dx, int dy) {}
   virtual void RenderViewGone() { delete this; }
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) { }
   virtual void Destroy() {}
@@ -76,13 +85,15 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
                                   int item_height,
                                   double item_font_size,
                                   int selected_item,
-                                  const std::vector<WebMenuItem>& items) {}
+                                  const std::vector<WebMenuItem>& items,
+                                  bool right_aligned) {}
   virtual gfx::Rect GetWindowRect();
   virtual gfx::Rect GetRootWindowRect();
   virtual void SetActive(bool active);
   virtual void SetWindowVisibility(bool visible) {}
   virtual void WindowFrameChanged() {}
-  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle();
+  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(
+      bool opaque);
   virtual void DestroyFakePluginWindowHandle(gfx::PluginWindowHandle window);
   virtual void AcceleratedSurfaceSetIOSurface(gfx::PluginWindowHandle window,
                                               int32 width,
@@ -137,6 +148,13 @@ class TestRenderViewHost : public RenderViewHost {
   // This is a helper function for simulating the most common types of loads.
   void SendNavigate(int page_id, const GURL& url);
 
+  // Calls OnMsgNavigate on the RenderViewHost with the given information,
+  // including a custom PageTransition::Type.  Sets the rest of the parameters
+  // in the message to the "typical" values.
+  // This is a helper function for simulating the most common types of loads.
+  void SendNavigateWithTransition(int page_id, const GURL& url,
+                                  PageTransition::Type transition);
+
   // If set, *delete_counter is incremented when this object destructs.
   void set_delete_counter(int* delete_counter) {
     delete_counter_ = delete_counter;
@@ -149,13 +167,20 @@ class TestRenderViewHost : public RenderViewHost {
     render_view_created_ = created;
   }
 
+  // Returns whether the RenderViewHost is currently waiting to hear the result
+  // of a before unload handler from the renderer.
+  bool is_waiting_for_beforeunload_ack() const {
+    return is_waiting_for_beforeunload_ack_;
+  }
+
   // RenderViewHost overrides --------------------------------------------------
 
-  virtual bool CreateRenderView(URLRequestContextGetter* request_context);
+  virtual bool CreateRenderView(URLRequestContextGetter* request_context,
+                                const string16& frame_name);
   virtual bool IsRenderViewLive() const;
 
  private:
-  FRIEND_TEST(RenderViewHostTest, FilterNavigate);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewHostTest, FilterNavigate);
 
   // Tracks if the caller thinks if it created the RenderView. This is so we can
   // respond to IsRenderViewLive appropriately.
@@ -279,8 +304,6 @@ class RenderViewHostTestHarness : public testing::Test {
   TestRenderViewHostFactory rvh_factory_;
 
   scoped_ptr<TestTabContents> contents_;
-
-  scoped_ptr<UserDataManager> user_data_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostTestHarness);
 };

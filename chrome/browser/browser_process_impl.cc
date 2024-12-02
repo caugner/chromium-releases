@@ -4,6 +4,8 @@
 
 #include "chrome/browser/browser_process_impl.h"
 
+#include <map>
+
 #include "app/clipboard/clipboard.h"
 #include "app/l10n_util.h"
 #include "base/command_line.h"
@@ -12,15 +14,15 @@
 #include "base/thread.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/appcache/chrome_appcache_service.h"
+#include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_main.h"
 #include "chrome/browser/browser_process_sub_thread.h"
 #include "chrome/browser/browser_trial.h"
-#include "chrome/browser/child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/debugger/debugger_wrapper.h"
 #include "chrome/browser/debugger/devtools_manager.h"
-#include "chrome/browser/download/download_file.h"
+#include "chrome/browser/download/download_file_manager.h"
 #include "chrome/browser/download/save_file_manager.h"
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/google_url_tracker.h"
@@ -29,7 +31,7 @@
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/net/sqlite_persistent_cookie_store.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -41,11 +43,13 @@
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/status_icons/status_tray_manager.h"
+#include "chrome/browser/tab_closeable_state_watcher.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
+#include "chrome/common/json_pref_store.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -62,6 +66,12 @@
 #include "chrome/common/render_messages.h"
 #endif
 
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
+// How often to check if the persistent instance of Chrome needs to restart
+// to install an update.
+static const int kUpdateCheckIntervalHours = 6;
+#endif
+
 BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
     : created_resource_dispatcher_host_(false),
       created_metrics_service_(false),
@@ -69,6 +79,7 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
       created_file_thread_(false),
       created_db_thread_(false),
       created_process_launcher_thread_(false),
+      created_cache_thread_(false),
       created_profile_manager_(false),
       created_local_state_(false),
       created_icon_manager_(false),
@@ -76,6 +87,7 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
       created_devtools_manager_(false),
       created_notification_ui_manager_(false),
       module_ref_count_(0),
+      did_start_(false),
       checked_for_new_frames_(false),
       using_new_frames_(false),
       have_inspector_files_(true) {
@@ -146,6 +158,9 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   // request before going away.
   io_thread_.reset();
 
+  // The IO thread was the only user of this thread.
+  cache_thread_.reset();
+
   // Stop the process launcher thread after the IO thread, in case the IO thread
   // posted a task to terminate a process on the process launcher thread.
   process_launcher_thread_.reset();
@@ -173,6 +188,10 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   print_job_manager_->OnQuit();
   print_job_manager_.reset();
 
+  // Destroy TabCloseableStateWatcher before NotificationService since the
+  // former registers for notifications.
+  tab_closeable_state_watcher_.reset();
+
   // Now OK to destroy NotificationService.
   main_notification_service_.reset();
 
@@ -196,13 +215,14 @@ static void PostQuit(MessageLoop* message_loop) {
 
 unsigned int BrowserProcessImpl::AddRefModule() {
   DCHECK(CalledOnValidThread());
+  did_start_ = true;
   module_ref_count_++;
   return module_ref_count_;
 }
 
 unsigned int BrowserProcessImpl::ReleaseModule() {
   DCHECK(CalledOnValidThread());
-  DCHECK(0 != module_ref_count_);
+  DCHECK_NE(0u, module_ref_count_);
   module_ref_count_--;
   if (0 == module_ref_count_) {
     MessageLoop::current()->PostTask(
@@ -244,7 +264,7 @@ void BrowserProcessImpl::EndSession() {
 
 printing::PrintJobManager* BrowserProcessImpl::print_job_manager() {
   // TODO(abarth): DCHECK(CalledOnValidThread());
-  //               See <http://b/1287209>.
+  // http://code.google.com/p/chromium/issues/detail?id=6828
   // print_job_manager_ is initialized in the constructor and destroyed in the
   // destructor, so it should always be valid.
   DCHECK(print_job_manager_.get());
@@ -263,7 +283,7 @@ bool BrowserProcessImpl::ShouldClearLocalState(FilePath* profile_path) {
   FilePath user_data_dir;
   Profile* profile;
 
-  // Check for the existance of a profile manager. When quitting early,
+  // Check for the existence of a profile manager. When quitting early,
   // e.g. because another chrome instance is running, or when invoked with
   // options such as --uninstall or --try-chrome-again=0, the profile manager
   // does not exist yet.
@@ -369,6 +389,19 @@ void BrowserProcessImpl::CreateProcessLauncherThread() {
   process_launcher_thread_.swap(thread);
 }
 
+void BrowserProcessImpl::CreateCacheThread() {
+  DCHECK(!created_cache_thread_ && !cache_thread_.get());
+  created_cache_thread_ = true;
+
+  scoped_ptr<base::Thread> thread(
+      new BrowserProcessSubThread(ChromeThread::CACHE));
+  base::Thread::Options options;
+  options.message_loop_type = MessageLoop::TYPE_IO;
+  if (!thread->StartWithOptions(options))
+    return;
+  cache_thread_.swap(thread);
+}
+
 void BrowserProcessImpl::CreateProfileManager() {
   DCHECK(!created_profile_manager_ && profile_manager_.get() == NULL);
   created_profile_manager_ = true;
@@ -382,8 +415,8 @@ void BrowserProcessImpl::CreateLocalState() {
 
   FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
-  local_state_.reset(new PrefService(local_state_path));
-}
+  local_state_.reset(PrefService::CreatePrefService(local_state_path));
+  }
 
 void BrowserProcessImpl::CreateIconManager() {
   DCHECK(!created_icon_manager_ && icon_manager_.get() == NULL);
@@ -391,11 +424,11 @@ void BrowserProcessImpl::CreateIconManager() {
   icon_manager_.reset(new IconManager);
 }
 
-void BrowserProcessImpl::CreateDebuggerWrapper(int port) {
+void BrowserProcessImpl::CreateDebuggerWrapper(int port, bool useHttp) {
   DCHECK(debugger_wrapper_.get() == NULL);
   created_debugger_wrapper_ = true;
 
-  debugger_wrapper_ = new DebuggerWrapper(port);
+  debugger_wrapper_ = new DebuggerWrapper(port, useHttp);
 }
 
 void BrowserProcessImpl::CreateDevToolsManager() {
@@ -433,13 +466,14 @@ void BrowserProcessImpl::CreateStatusTrayManager() {
   status_tray_manager_.reset(new StatusTrayManager());
 }
 
+void BrowserProcessImpl::CreateTabCloseableStateWatcher() {
+  DCHECK(tab_closeable_state_watcher_.get() == NULL);
+  tab_closeable_state_watcher_.reset(TabCloseableStateWatcher::Create());
+}
+
 // The BrowserProcess object must outlive the file thread so we use traits
 // which don't do any management.
-template <>
-struct RunnableMethodTraits<BrowserProcessImpl> {
-  void RetainCallee(BrowserProcessImpl* process) {}
-  void ReleaseCallee(BrowserProcessImpl* process) {}
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(BrowserProcessImpl);
 
 void BrowserProcessImpl::CheckForInspectorFiles() {
   file_thread()->message_loop()->PostTask
@@ -447,14 +481,14 @@ void BrowserProcessImpl::CheckForInspectorFiles() {
        NewRunnableMethod(this, &BrowserProcessImpl::DoInspectorFilesCheck));
 }
 
-#if defined(OS_WIN)
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 void BrowserProcessImpl::StartAutoupdateTimer() {
   autoupdate_timer_.Start(
-      TimeDelta::FromHours(google_update::kUpdateCheckInvervalHours),
+      base::TimeDelta::FromHours(kUpdateCheckIntervalHours),
       this,
       &BrowserProcessImpl::OnAutoupdateTimer);
 }
-#endif  //  OS_WIN
+#endif
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
 
@@ -485,7 +519,7 @@ void BrowserProcessImpl::SetIPCLoggingEnabled(bool enable) {
 void BrowserProcessImpl::SetIPCLoggingEnabledForChildProcesses(bool enabled) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
-  ChildProcessHost::Iterator i;  // default constr references a singleton
+  BrowserChildProcessHost::Iterator i;  // default constr references a singleton
   while (!i.Done()) {
     i->Send(new PluginProcessMsg_SetIPCLoggingEnabled(enabled));
     ++i;
@@ -507,8 +541,8 @@ void BrowserProcessImpl::DoInspectorFilesCheck() {
   have_inspector_files_ = result;
 }
 
-#if defined(OS_WIN)  // Linux doesn't do rename on restart, and Mac is currently
-                     // not supported.
+// Mac is currently not supported.
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 
 bool BrowserProcessImpl::CanAutorestartForUpdate() const {
   // Check if browser is in the background and if it needs to be restarted to
@@ -530,13 +564,13 @@ const char* const kSwitchesToRemoveOnAutorestart[] = {
 
 void BrowserProcessImpl::RestartPersistentInstance() {
   CommandLine* old_cl = CommandLine::ForCurrentProcess();
-  CommandLine new_cl(old_cl->GetProgram());
+  scoped_ptr<CommandLine> new_cl(new CommandLine(old_cl->GetProgram()));
 
   std::map<std::string, CommandLine::StringType> switches =
       old_cl->GetSwitches();
 
   // Remove the keys that we shouldn't pass through during restart.
-  for (int i = 0; i < arraysize(kSwitchesToRemoveOnAutorestart); i++) {
+  for (size_t i = 0; i < arraysize(kSwitchesToRemoveOnAutorestart); i++) {
     switches.erase(kSwitchesToRemoveOnAutorestart[i]);
   }
 
@@ -546,28 +580,27 @@ void BrowserProcessImpl::RestartPersistentInstance() {
       switches.begin(); i != switches.end(); ++i) {
       CommandLine::StringType switch_value = i->second;
       if (switch_value.length() > 0) {
-        new_cl.AppendSwitchWithValue(i->first, i->second);
+        new_cl->AppendSwitchWithValue(i->first, i->second);
       } else {
-        new_cl.AppendSwitch(i->first);
+        new_cl->AppendSwitch(i->first);
       }
   }
 
-  // TODO(atwilson): Uncomment the following two lines to add the "persistence"
-  // switch when the corresponding CL is committed.
-  // if (!new_cl.HasSwitch(switches::kLongLivedExtensions))
-  //  new_cl.AppendSwitch(switches::kLongLivedExtensions);
+  if (!new_cl->HasSwitch(switches::kRestoreBackgroundContents))
+    new_cl->AppendSwitch(switches::kRestoreBackgroundContents);
 
-  if (Upgrade::RelaunchChromeBrowser(new_cl)) {
-    BrowserList::CloseAllBrowsersAndExit();
-  } else {
-    DLOG(ERROR) << "Could not restart browser for autoupdate.";
-  }
+  DLOG(WARNING) << "Shutting down current instance of the browser.";
+  BrowserList::CloseAllBrowsersAndExit();
+
+  // Transfer ownership to Upgrade.
+  Upgrade::SetNewCommandLine(new_cl.release());
 }
 
 void BrowserProcessImpl::OnAutoupdateTimer() {
   if (CanAutorestartForUpdate()) {
+    DLOG(WARNING) << "Detected update.  Restarting browser.";
     RestartPersistentInstance();
   }
 }
 
-#endif
+#endif  // (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)

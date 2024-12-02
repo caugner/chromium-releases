@@ -30,7 +30,7 @@ void GetHistoryItemDictionary(const history::URLRow& row,
                               DictionaryValue* value) {
   value->SetString(keys::kIdKey, Int64ToString(row.id()));
   value->SetString(keys::kUrlKey, row.url().spec());
-  value->SetString(keys::kTitleKey, row.title());
+  value->SetStringFromUTF16(keys::kTitleKey, row.title());
   value->SetReal(keys::kLastVisitdKey, MilliSecondsFromTime(row.last_visit()));
   value->SetInteger(keys::kTypedCountKey, row.typed_count());
   value->SetInteger(keys::kVisitCountKey, row.visit_count());
@@ -143,7 +143,7 @@ void ExtensionHistoryEventRouter::DispatchEvent(Profile* profile,
                                                 const std::string& json_args) {
   if (profile && profile->GetExtensionMessageService()) {
     profile->GetExtensionMessageService()->DispatchEventToRenderers(
-        event_name, json_args, profile->IsOffTheRecord());
+        event_name, json_args, profile->IsOffTheRecord(), GURL());
   }
 }
 
@@ -206,8 +206,8 @@ void HistoryFunctionWithCallback::SendResponseToCallback() {
 }
 
 bool GetVisitsHistoryFunction::RunAsyncImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* json = args_as_dictionary();
+  DictionaryValue* json;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &json));
 
   Value* value;
   EXTENSION_FUNCTION_VALIDATE(json->Get(keys::kUrlKey, &value));
@@ -243,12 +243,13 @@ void GetVisitsHistoryFunction::QueryComplete(
 }
 
 bool SearchHistoryFunction::RunAsyncImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* json = args_as_dictionary();
+  DictionaryValue* json;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &json));
 
   // Initialize the HistoryQuery
-  std::wstring search_text;
-  EXTENSION_FUNCTION_VALIDATE(json->GetString(keys::kTextKey, &search_text));
+  string16 search_text;
+  EXTENSION_FUNCTION_VALIDATE(json->GetStringAsUTF16(keys::kTextKey,
+                                                     &search_text));
 
   history::QueryOptions options;
   options.SetRecentDayRange(1);
@@ -293,8 +294,8 @@ void SearchHistoryFunction::SearchComplete(
 }
 
 bool AddUrlHistoryFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* json = args_as_dictionary();
+  DictionaryValue* json;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &json));
 
   Value* value;
   EXTENSION_FUNCTION_VALIDATE(json->Get(keys::kUrlKey, &value));
@@ -311,8 +312,8 @@ bool AddUrlHistoryFunction::RunImpl() {
 }
 
 bool DeleteUrlHistoryFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* json = args_as_dictionary();
+  DictionaryValue* json;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &json));
 
   Value* value;
   EXTENSION_FUNCTION_VALIDATE(json->Get(keys::kUrlKey, &value));
@@ -329,8 +330,8 @@ bool DeleteUrlHistoryFunction::RunImpl() {
 }
 
 bool DeleteRangeHistoryFunction::RunAsyncImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* json = args_as_dictionary();
+  DictionaryValue* json;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &json));
 
   Value* value = NULL;
   EXTENSION_FUNCTION_VALIDATE(json->Get(keys::kStartTimeKey, &value));

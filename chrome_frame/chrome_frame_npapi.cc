@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -272,7 +272,8 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
   // TODO(stoyan): Ask host for specific interface whether to honor
   // host's in-private mode.
   return InitializeAutomation(profile_name, extra_arguments,
-                              GetBrowserIncognitoMode(), true);
+                              GetBrowserIncognitoMode(), true,
+                              GURL(src_), GURL());
 }
 
 void ChromeFrameNPAPI::Uninitialize() {
@@ -1344,7 +1345,7 @@ void ChromeFrameNPAPI::OnGetEnabledExtensionsComplete(
     const std::vector<FilePath>& extension_directories) {
   std::vector<std::wstring> extension_paths;
   for (size_t i = 0; i < extension_directories.size(); ++i) {
-    extension_paths.push_back(extension_directories[i].ToWStringHack());
+    extension_paths.push_back(extension_directories[i].value());
   }
   std::wstring tab_delimited = JoinString(extension_paths, L'\t');
 
@@ -1399,7 +1400,8 @@ NPObject* ChromeFrameNPAPI::GetWindowObject() const {
 bool ChromeFrameNPAPI::GetBrowserIncognitoMode() {
   bool incognito_mode = false;
 
-  // Check disabled for Opera due to bug: http://b/issue?id=1815494
+  // Check disabled for Opera due to bug:
+  // http://code.google.com/p/chromium/issues/detail?id=24287
   if (GetBrowserType() != BROWSER_OPERA) {
     // Check whether host browser is in private mode;
     NPBool private_mode = FALSE;

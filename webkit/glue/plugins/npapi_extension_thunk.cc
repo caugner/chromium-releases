@@ -11,7 +11,6 @@
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/webplugin.h"
 #include "webkit/glue/plugins/webplugin_delegate.h"
-#include "webkit/glue/scoped_clipboard_writer_glue.h"
 #include "webkit/glue/webkit_glue.h"
 
 // FindInstance()
@@ -27,7 +26,8 @@ static NPAPI::PluginInstance* FindInstance(NPP id) {
 
 // 2D device API ---------------------------------------------------------------
 
-static NPError Device2DQueryCapability(NPP id, int32 capability, int32* value) {
+static NPError Device2DQueryCapability(NPP id, int32_t capability,
+                                       int32_t* value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
     plugin->webplugin()->delegate()->Device2DQueryCapability(capability, value);
@@ -63,7 +63,7 @@ static NPError Device2DInitializeContext(NPP id,
 
 static NPError Device2DSetStateContext(NPP id,
                                        NPDeviceContext* context,
-                                       int32 state,
+                                       int32_t state,
                                        intptr_t value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
@@ -75,7 +75,7 @@ static NPError Device2DSetStateContext(NPP id,
 
 static NPError Device2DGetStateContext(NPP id,
                                        NPDeviceContext* context,
-                                       int32 state,
+                                       int32_t state,
                                        intptr_t* value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
@@ -120,49 +120,27 @@ static NPError Device2DDestroyContext(NPP id,
 static NPError Device2DCreateBuffer(NPP id,
                                     NPDeviceContext* context,
                                     size_t size,
-                                    int32* buffer_id) {
+                                    int32_t* buffer_id) {
   return NPERR_GENERIC_ERROR;
 }
 
 static NPError Device2DDestroyBuffer(NPP id,
                                      NPDeviceContext* context,
-                                     int32 buffer_id) {
+                                     int32_t buffer_id) {
   return NPERR_GENERIC_ERROR;
 }
 
 static NPError Device2DMapBuffer(NPP id,
                                  NPDeviceContext* context,
-                                 int32 buffer_id,
+                                 int32_t buffer_id,
                                  NPDeviceBuffer* buffer) {
-  return NPERR_GENERIC_ERROR;
-}
-
-static NPError Device2DThemeGetSize(NPP id,
-                                    NPThemeItem item,
-                                    int* width,
-                                    int* height) {
-  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
-  if (plugin) {
-    return plugin->webplugin()->delegate()->Device2DThemeGetSize(
-        item, width, height);
-  }
-  return NPERR_GENERIC_ERROR;
-}
-
-static NPError Device2DThemePaint(NPP id,
-                                  NPDeviceContext* context,
-                                  NPThemeParams* params) {
-  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
-  if (plugin) {
-    return plugin->webplugin()->delegate()->Device2DThemePaint(
-        static_cast<NPDeviceContext2D*>(context), params);
-  }
   return NPERR_GENERIC_ERROR;
 }
 
 // 3D device API ---------------------------------------------------------------
 
-static NPError Device3DQueryCapability(NPP id, int32 capability, int32* value) {
+static NPError Device3DQueryCapability(NPP id, int32_t capability,
+                                       int32_t* value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
     plugin->webplugin()->delegate()->Device3DQueryCapability(capability, value);
@@ -198,7 +176,7 @@ static NPError Device3DInitializeContext(NPP id,
 
 static NPError Device3DSetStateContext(NPP id,
                                        NPDeviceContext* context,
-                                       int32 state,
+                                       int32_t state,
                                        intptr_t value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
@@ -210,7 +188,7 @@ static NPError Device3DSetStateContext(NPP id,
 
 static NPError Device3DGetStateContext(NPP id,
                                        NPDeviceContext* context,
-                                       int32 state,
+                                       int32_t state,
                                        intptr_t* value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
@@ -245,7 +223,7 @@ static NPError Device3DDestroyContext(NPP id,
 static NPError Device3DCreateBuffer(NPP id,
                                     NPDeviceContext* context,
                                     size_t size,
-                                    int32* buffer_id) {
+                                    int32_t* buffer_id) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
     return plugin->webplugin()->delegate()->Device3DCreateBuffer(
@@ -256,7 +234,7 @@ static NPError Device3DCreateBuffer(NPP id,
 
 static NPError Device3DDestroyBuffer(NPP id,
                                      NPDeviceContext* context,
-                                     int32 buffer_id) {
+                                     int32_t buffer_id) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
     return plugin->webplugin()->delegate()->Device3DDestroyBuffer(
@@ -267,7 +245,7 @@ static NPError Device3DDestroyBuffer(NPP id,
 
 static NPError Device3DMapBuffer(NPP id,
                                  NPDeviceContext* context,
-                                 int32 buffer_id,
+                                 int32_t buffer_id,
                                  NPDeviceBuffer* buffer) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
@@ -277,10 +255,86 @@ static NPError Device3DMapBuffer(NPP id,
   return NPERR_GENERIC_ERROR;
 }
 
+// Experimental 3D device API --------------------------------------------------
+
+static NPError Device3DGetNumConfigs(NPP id, int32_t* num_configs) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (plugin) {
+    return plugin->webplugin()->delegate()->Device3DGetNumConfigs(num_configs);
+  }
+  return NPERR_GENERIC_ERROR;
+}
+
+static NPError Device3DGetConfigAttribs(NPP id,
+                                        int32_t config,
+                                        int32_t* attrib_list) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (plugin) {
+    return plugin->webplugin()->delegate()->Device3DGetConfigAttribs(
+        config,
+        attrib_list);
+  }
+  return NPERR_GENERIC_ERROR;
+}
+
+static NPError Device3DCreateContext(NPP id,
+                                     int32_t config,
+                                     const int32_t* attrib_list,
+                                     NPDeviceContext** context) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (plugin) {
+    return plugin->webplugin()->delegate()->Device3DCreateContext(
+        config,
+        attrib_list,
+        reinterpret_cast<NPDeviceContext3D**>(context));
+  }
+  return NPERR_GENERIC_ERROR;
+}
+
+static NPError Device3DSynchronizeContext(
+    NPP id,
+    NPDeviceContext* context,
+    NPDeviceSynchronizationMode mode,
+    const int32_t* input_attrib_list,
+    int32_t* output_attrib_list,
+    NPDeviceSynchronizeContextCallbackPtr callback,
+    void* callback_data) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (plugin) {
+    return plugin->webplugin()->delegate()->Device3DSynchronizeContext(
+        id,
+        static_cast<NPDeviceContext3D*>(context),
+        mode,
+        input_attrib_list,
+        output_attrib_list,
+        callback,
+        callback_data);
+  }
+  return NPERR_GENERIC_ERROR;
+}
+
+static NPError Device3DRegisterCallback(
+    NPP id,
+    NPDeviceContext* context,
+    int32_t callback_type,
+    NPDeviceGenericCallbackPtr callback,
+    void* callback_data) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (plugin) {
+    return plugin->webplugin()->delegate()->Device3DRegisterCallback(
+        id,
+        static_cast<NPDeviceContext3D*>(context),
+        callback_type,
+        callback,
+        callback_data);
+  }
+  return NPERR_GENERIC_ERROR;
+}
+
 // Audio device API ------------------------------------------------------------
 
-static NPError DeviceAudioQueryCapability(NPP id, int32 capability,
-                                          int32* value) {
+static NPError DeviceAudioQueryCapability(NPP id, int32_t capability,
+                                          int32_t* value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
     plugin->webplugin()->delegate()->DeviceAudioQueryCapability(capability,
@@ -317,7 +371,7 @@ static NPError DeviceAudioInitializeContext(NPP id,
 
 static NPError DeviceAudioSetStateContext(NPP id,
                                           NPDeviceContext* context,
-                                          int32 state,
+                                          int32_t state,
                                           intptr_t value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   if (plugin) {
@@ -329,7 +383,7 @@ static NPError DeviceAudioSetStateContext(NPP id,
 
 static NPError DeviceAudioGetStateContext(NPP id,
                                           NPDeviceContext* context,
-                                          int32 state,
+                                          int32_t state,
                                           intptr_t* value) {
   scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
   return plugin->webplugin()->delegate()->DeviceAudioGetStateContext(
@@ -365,8 +419,11 @@ static NPDevice* AcquireDevice(NPP id, NPDeviceID device_id) {
     Device2DCreateBuffer,
     Device2DDestroyBuffer,
     Device2DMapBuffer,
-    Device2DThemeGetSize,
-    Device2DThemePaint,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
   };
   static NPDevice device_3d = {
     Device3DQueryCapability,
@@ -379,22 +436,28 @@ static NPDevice* AcquireDevice(NPP id, NPDeviceID device_id) {
     Device3DCreateBuffer,
     Device3DDestroyBuffer,
     Device3DMapBuffer,
-    NULL,
-    NULL,
+    Device3DGetNumConfigs,
+    Device3DGetConfigAttribs,
+    Device3DCreateContext,
+    Device3DRegisterCallback,
+    Device3DSynchronizeContext,
   };
   static NPDevice device_audio = {
-      DeviceAudioQueryCapability,
-      DeviceAudioQueryConfig,
-      DeviceAudioInitializeContext,
-      DeviceAudioSetStateContext,
-      DeviceAudioGetStateContext,
-      DeviceAudioFlushContext,
-      DeviceAudioDestroyContext,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
+    DeviceAudioQueryCapability,
+    DeviceAudioQueryConfig,
+    DeviceAudioInitializeContext,
+    DeviceAudioSetStateContext,
+    DeviceAudioGetStateContext,
+    DeviceAudioFlushContext,
+    DeviceAudioDestroyContext,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
   };
 
   switch (device_id) {
@@ -407,11 +470,6 @@ static NPDevice* AcquireDevice(NPP id, NPDeviceID device_id) {
     default:
       return NULL;
   }
-}
-
-static void CopyTextToClipboard(NPP id, const char* content) {
-  ScopedClipboardWriterGlue scw(webkit_glue::ClipboardGetClipboard());
-  scw.WriteText(UTF8ToUTF16(content));
 }
 
 static NPError ChooseFile(NPP id,
@@ -445,15 +503,42 @@ static void SelectedFindResultChanged(NPP id, int index) {
     plugin->webplugin()->delegate()->SelectedFindResultChanged(index);
 }
 
+static NPWidgetExtensions* GetWidgetExtensions(NPP id) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (!plugin)
+    return NULL;
+
+  return plugin->webplugin()->delegate()->GetWidgetExtensions();
+}
+
+static NPError NPSetCursor(NPP id, NPCursorType type) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (!plugin)
+    return NPERR_GENERIC_ERROR;
+
+  return plugin->webplugin()->delegate()->SetCursor(type) ?
+      NPERR_NO_ERROR : NPERR_GENERIC_ERROR;
+}
+
+static NPFontExtensions* GetFontExtensions(NPP id) {
+  scoped_refptr<NPAPI::PluginInstance> plugin = FindInstance(id);
+  if (!plugin)
+    return NULL;
+
+  return plugin->webplugin()->delegate()->GetFontExtensions();
+}
+
 namespace NPAPI {
 
 NPError GetPepperExtensionsFunctions(void* value) {
   static const NPNExtensions kExtensions = {
     &AcquireDevice,
-    &CopyTextToClipboard,
     &NumberOfFindResultsChanged,
     &SelectedFindResultChanged,
     &ChooseFile,
+    &GetWidgetExtensions,
+    &NPSetCursor,
+    &GetFontExtensions,
   };
 
   // Return a pointer to the canonical function table.

@@ -31,6 +31,8 @@ class BrowserDistribution {
 
   virtual std::wstring GetAlternateApplicationName();
 
+  virtual std::wstring GetBrowserAppId();
+
   virtual std::wstring GetInstallSubDir();
 
   virtual std::wstring GetPublisherName();
@@ -58,7 +60,13 @@ class BrowserDistribution {
 
   virtual std::wstring GetVersionKey();
 
+  virtual std::wstring GetEnvVersionKey();
+
   virtual bool CanSetAsDefault();
+
+  virtual int GetIconIndex();
+
+  virtual bool GetChromeChannel(std::wstring* channel);
 
   virtual void UpdateDiffInstallStatus(bool system_install,
       bool incremental_install, installer_util::InstallStatus install_status);

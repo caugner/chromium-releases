@@ -5,6 +5,7 @@
 
 #include "base/callback.h"
 #include "net/base/net_errors.h"
+#include "chrome_frame/custom_sync_call_context.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 
 #define GMOCK_MUTANT_INCLUDE_LATE_OBJECT_BINDING
@@ -14,20 +15,9 @@ using testing::_;
 using testing::CreateFunctor;
 using testing::Return;
 
-template <> struct RunnableMethodTraits<ProxyFactory::LaunchDelegate> {
-  void RetainCallee(ProxyFactory::LaunchDelegate* obj) {}
-  void ReleaseCallee(ProxyFactory::LaunchDelegate* obj) {}
-};
-
-template <> struct RunnableMethodTraits<ChromeFrameAutomationClient> {
-  void RetainCallee(ChromeFrameAutomationClient* obj) {}
-  void ReleaseCallee(ChromeFrameAutomationClient* obj) {}
-};
-
-template <> struct RunnableMethodTraits<chrome_frame_test::TimedMsgLoop> {
-  void RetainCallee(chrome_frame_test::TimedMsgLoop* obj) {}
-  void ReleaseCallee(chrome_frame_test::TimedMsgLoop* obj) {}
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(ProxyFactory::LaunchDelegate);
+DISABLE_RUNNABLE_METHOD_REFCOUNT(ChromeFrameAutomationClient);
+DISABLE_RUNNABLE_METHOD_REFCOUNT(chrome_frame_test::TimedMsgLoop);
 
 void MockProxyFactory::GetServerImpl(ChromeFrameAutomationProxy* pxy,
                                      void* proxy_id,
@@ -45,7 +35,7 @@ void MockProxyFactory::GetServerImpl(ChromeFrameAutomationProxy* pxy,
 void CFACMockTest::SetAutomationServerOk(int times) {
   EXPECT_CALL(factory_, GetAutomationServer(testing::NotNull(),
               testing::Field(&ChromeFrameLaunchParams::profile_name,
-                  testing::StrEq(profile_path_.BaseName().ToWStringHack())),
+                  testing::StrEq(profile_path_.BaseName().value())),
               testing::NotNull()))
     .Times(times)
     .WillRepeatedly(testing::Invoke(CreateFunctor(&factory_,
@@ -79,11 +69,13 @@ ACTION_P3(HandleCreateTab, tab_handle, external_tab_container, tab_wnd) {
   // arg0 - message
   // arg1 - callback
   // arg2 - key
-  CallbackRunner<Tuple3<HWND, HWND, int> >* c =
-      reinterpret_cast<CallbackRunner<Tuple3<HWND, HWND, int> >*>(arg1);
-  c->Run(external_tab_container, tab_wnd, tab_handle);
-  delete c;
-  delete arg0;
+  CreateExternalTabContext::output_type input_args(tab_wnd,
+                                                   external_tab_container,
+                                                   tab_handle);
+  CreateExternalTabContext* context =
+      reinterpret_cast<CreateExternalTabContext*>(arg1);
+  DispatchToMethod(context, &CreateExternalTabContext::Completed, input_args);
+  delete context;
 }
 
 // We mock ChromeFrameDelegate only. The rest is with real AutomationProxy
@@ -183,7 +175,7 @@ TEST(CFACWithChrome, NavigateOk) {
     EXPECT_CALL(cfd, OnDidNavigate(_, EqNavigationInfoUrl(GURL())))
         .Times(1);
 
-    EXPECT_CALL(cfd, OnUpdateTargetUrl(_, _)).Times(1);
+    EXPECT_CALL(cfd, OnUpdateTargetUrl(_, _)).Times(testing::AtMost(1));
 
     EXPECT_CALL(cfd, OnLoad(_, _))
         .Times(1)
@@ -343,8 +335,11 @@ class TestChromeFrameAutomationProxyImpl
   TestChromeFrameAutomationProxyImpl()
       : ChromeFrameAutomationProxyImpl(1) {  // 1 is an unneeded timeout.
   }
-  MOCK_METHOD3(SendAsAsync, void(IPC::SyncMessage* msg, void* callback,
-                                 void* key));
+  MOCK_METHOD3(
+      SendAsAsync,
+      void(IPC::SyncMessage* msg,
+           SyncMessageReplyDispatcher::SyncMessageCallContext* context,
+           void* key));
   void FakeChannelError() {
     reinterpret_cast<IPC::ChannelProxy::MessageFilter*>(message_filter_.get())->
         OnChannelError();

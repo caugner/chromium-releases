@@ -38,18 +38,6 @@ fun:vfprintf
 fun:fwrite
 fun:fflush
 
-# 32-bit version of std::string
-# There is something very strange inside these functions.
-# Looks like they write zero to a global variable which
-# value is already zero. I.e. the race is benign.
-# Global var is _ZNSs4_Rep20_S_empty_rep_storageE
-fun:*_M_mutateE*
-fun_r:*_M_set_length_and_sharable*
-fun:*_M_is_leaked*
-fun:*_M_is_shared*
-fun:*_M_set_leaked*
-fun:*_M_set_sharable*
-
 # Don't instrument intercepts
 src:*ts_valgrind_intercepts.c
 
@@ -60,7 +48,7 @@ src:*base/atomic*
 src:*base/condition_variable*
 src:*base/lock*
 src:*base/stats_counters*
-src:*base/thread_local_storage_posix*
+src:*base/thread_local_storage*
 
 # Don't instrument tcmalloc
 src:*/tcmalloc/*
@@ -74,8 +62,12 @@ fun_r:*disk_cache*BackendImpl*CheckAllEntries*
 # Can we miss data races on V8 objects due to non thread-safe API calls
 # if we don't instrument v8::internals?
 fun_r:*v8*internal*
+
 # unibrow namespace contains lots of tiny unicode conversion functions.
 fun_hist:*unibrow*
+
+# Histogram has tiny functions that can be called frequently
+fun_hist:*Histogram*
 
 # TODO(timurrrr): SKIA - needs separate testing?
 # SKIA unittest is single-threaded...
@@ -91,3 +83,8 @@ fun:*icu_4_2*UnicodeSet*add*
 
 # There's some weird failure test going on in this tiny test function in sqlite
 fun_r:threadLockingTest
+
+# Ignore accesses below GetCurrentThreadIdentifier.
+# There is a benign race which is hard to suppress properly,
+# see http://crbug.com/44580
+fun_r:*ChromeThread*GetCurrentThreadIdentifier*

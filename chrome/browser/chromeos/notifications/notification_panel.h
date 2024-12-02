@@ -91,8 +91,10 @@ class NotificationPanel : public PanelController::Delegate,
   virtual void Add(Balloon* balloon);
   virtual bool Update(Balloon* balloon);
   virtual void Remove(Balloon* balloon);
+  virtual void Show(Balloon* balloon);
   virtual void ResizeNotification(Balloon* balloon,
                                   const gfx::Size& size);
+  virtual void SetActiveView(BalloonViewImpl* view);
 
   // PanelController overrides.
   virtual string16 GetPanelTitle();
@@ -106,7 +108,7 @@ class NotificationPanel : public PanelController::Delegate,
 
   // Called when a mouse left the panel window.
   void OnMouseLeave();
-  void OnMouseMotion();
+  void OnMouseMotion(const gfx::Point& point);
 
   NotificationPanelTester* GetTester();
 
@@ -119,7 +121,16 @@ class NotificationPanel : public PanelController::Delegate,
   void UnregisterNotification();
 
   // Update the Panel Size according to its state.
-  void UpdatePanel(bool contents_changed);
+  void UpdatePanel(bool update_panel_size);
+
+  // Scroll the panel so that the |balloon| is visible.
+  void ScrollBalloonToVisible(Balloon* balloon);
+
+  // Update the container's bounds so that it can show all notifications.
+  void UpdateContainerBounds();
+
+  // Update the notification's control view state.
+  void UpdateControl();
 
   // Returns the panel's preferred bounds in the screen's coordinates.
   // The position will be controlled by window manager so
@@ -141,16 +152,47 @@ class NotificationPanel : public PanelController::Delegate,
   // Mark the given notification as stale.
   void MarkStale(const Notification& notification);
 
-  BalloonContainer* balloon_container_;
-  scoped_ptr<views::Widget> panel_widget_;
+  // Contains all notifications. This is owned by the panel so that we can
+  // re-attach to the widget when closing and opening the panel.
+  scoped_ptr<BalloonContainer> balloon_container_;
+
+  // The notification panel's widget.
+  views::Widget* panel_widget_;
+
+  // The notification panel's widget.
+  views::Widget* container_host_;
+
+  // Panel controller for the notification panel.
+  // This is owned by the panel to compute the panel size before
+  // actually opening the panel.
   scoped_ptr<PanelController> panel_controller_;
+
+  // A scrollable parent of the BalloonContainer.
   scoped_ptr<views::ScrollView> scroll_view_;
+
+  // Panel's state.
   State state_;
+
   ScopedRunnableMethodFactory<NotificationPanel> task_factory_;
+
+  // The minimum size of a notification.
   gfx::Rect min_bounds_;
-  scoped_ptr<NotificationPanelTester> tester_;
+
+  // Stale timeout.
   int stale_timeout_;
+
+  // A registrar to subscribe PANEL_STATE_CHANGED event.
   NotificationRegistrar registrar_;
+
+  // The notification a mouse pointer is currently on. NULL if the mouse
+  // is out of the panel.
+  BalloonViewImpl* active_;
+
+  // A balloon that should be visible when it gets some size.
+  Balloon* scroll_to_;
+
+  // An object that provides interfacce for tests.
+  scoped_ptr<NotificationPanelTester> tester_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationPanel);
 };
@@ -180,7 +222,18 @@ class NotificationPanelTester {
   // Mark the given notification as stale.
   void MarkStale(const Notification& notification);
 
-  PanelController* GetPanelController();
+  // Returns the notification panel's PanelController.
+  PanelController* GetPanelController() const;
+
+  // Returns the BalloonView object of the notification.
+  BalloonViewImpl* GetBalloonView(BalloonCollectionImpl* collection,
+                                  const Notification& notification);
+
+  // True if the view is in visible in the ScrollView.
+  bool IsVisible(const BalloonViewImpl* view) const;
+
+  // True if the view is currently active.
+  bool IsActive(const BalloonViewImpl* view) const;
 
  private:
   NotificationPanel* panel_;

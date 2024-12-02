@@ -15,6 +15,12 @@ using WebKit::WebPasswordFormData;
 
 namespace webkit_glue {
 
+PasswordFormFillData::PasswordFormFillData() : wait_for_username(false) {
+}
+
+PasswordFormFillData::~PasswordFormFillData() {
+}
+
 PasswordForm* PasswordFormDomManager::CreatePasswordForm(
     const WebFormElement& webform) {
   WebPasswordFormData web_password_form(webform);
@@ -29,7 +35,7 @@ void PasswordFormDomManager::InitFillData(
     const PasswordFormMap& matches,
     const PasswordForm* const preferred_match,
     bool wait_for_username_before_autofill,
-    PasswordFormDomManager::FillData* result) {
+    PasswordFormFillData* result) {
   DCHECK(preferred_match);
   // Fill basic form data.
   result->basic_data.origin = form_on_page.origin;
@@ -37,16 +43,20 @@ void PasswordFormDomManager::InitFillData(
   // TODO(jhawkins): Is it right to use an empty string for the form control
   // type?  I don't think the password autocomplete really cares, but we should
   // correct this anyway.
+  // TODO(dhollowa): Similarly, |size| ideally should be set from the form
+  // control itself.  But it is currently unused.
   result->basic_data.fields.push_back(
       FormField(string16(),
                 form_on_page.username_element,
                 preferred_match->username_value,
-                string16()));
+                string16(),
+                0));
   result->basic_data.fields.push_back(
       FormField(string16(),
                 form_on_page.password_element,
                 preferred_match->password_value,
-                string16()));
+                string16(),
+                0));
   result->wait_for_username = wait_for_username_before_autofill;
 
   // Copy additional username/value pairs.

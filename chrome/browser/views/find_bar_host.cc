@@ -153,8 +153,8 @@ gfx::Rect FindBarHost::GetDialogPosition(gfx::Rect avoid_overlapping_rect) {
   // Place the view in the top right corner of the widget boundaries (top left
   // for RTL languages).
   gfx::Rect view_location;
-  int x = view()->UILayoutIsRightToLeft() ?
-              widget_bounds.x() : widget_bounds.width() - prefsize.width();
+  int x = base::i18n::IsRTL() ?
+      widget_bounds.x() : widget_bounds.width() - prefsize.width();
   int y = widget_bounds.y();
   view_location.SetRect(x, y, prefsize.width(), prefsize.height());
 
@@ -229,7 +229,8 @@ FindBarTesting* FindBarHost::GetFindBarTesting() {
 
 void FindBarHost::UpdateUIForFindResult(const FindNotificationDetails& result,
                                        const string16& find_text) {
-  find_bar_view()->UpdateForResult(result, find_text);
+  if (!find_text.empty())
+    find_bar_view()->UpdateForResult(result, find_text);
 
   // We now need to check if the window is obscuring the search results.
   if (!result.selection_rect().IsEmpty())

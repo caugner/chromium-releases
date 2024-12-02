@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@
 class SyncResourcesSource : public ChromeURLDataManager::DataSource {
  public:
   SyncResourcesSource()
-      : DataSource(chrome::kSyncResourcesHost, MessageLoop::current()) {
+      : DataSource(chrome::kChromeUISyncResourcesHost, MessageLoop::current()) {
   }
 
   virtual void StartDataRequest(const std::string& path,
@@ -33,10 +33,7 @@ class SyncResourcesSource : public ChromeURLDataManager::DataSource {
                                 int request_id);
 
   virtual std::string GetMimeType(const std::string& path) const {
-    if (path == chrome::kSyncThrobberPath)
-      return "image/png";
-    else
-      return "text/html";
+    return "text/html";
   }
 
   static const char* kInvalidPasswordHelpUrl;
@@ -63,17 +60,13 @@ const char* SyncResourcesSource::kCreateNewAccountUrl =
 
 void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
     bool is_off_the_record, int request_id) {
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  if (path_raw == chrome::kSyncThrobberPath) {
-    scoped_refptr<RefCountedMemory> throbber(
-        ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
-            IDR_THROBBER));
-    SendResponse(request_id, throbber);
-    return;
-  }
+  const char kSyncGaiaLoginPath[] = "gaialogin";
+  const char kSyncChooseDataTypesPath[] = "choosedatatypes";
+  const char kSyncSetupFlowPath[] = "setup";
+  const char kSyncSetupDonePath[] = "setupdone";
 
   std::string response;
-  if (path_raw == chrome::kSyncGaiaLoginPath) {
+  if (path_raw == kSyncGaiaLoginPath) {
     DictionaryValue localized_strings;
 
     // Start by setting the per-locale URLs we show on the setup wizard.
@@ -111,8 +104,6 @@ void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
         l10n_util::GetString(IDS_SYNC_CREATE_ACCOUNT));
     localized_strings.SetString(L"cancel",
         l10n_util::GetString(IDS_CANCEL));
-    localized_strings.SetString(L"customize",
-        l10n_util::GetString(IDS_SYNC_LOGIN_CUSTOMIZE));
     localized_strings.SetString(L"settingup",
         l10n_util::GetString(IDS_SYNC_LOGIN_SETTING_UP));
     localized_strings.SetString(L"success",
@@ -126,7 +117,47 @@ void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
     SetFontAndTextDirection(&localized_strings);
     response = jstemplate_builder::GetI18nTemplateHtml(
         html, &localized_strings);
-  } else if (path_raw == chrome::kSyncSetupDonePath) {
+  } else if (path_raw == kSyncChooseDataTypesPath) {
+    DictionaryValue localized_strings;
+    localized_strings.SetString(L"choosedatatypesheader",
+        l10n_util::GetString(IDS_SYNC_CHOOSE_DATATYPES_HEADER));
+    localized_strings.SetString(L"choosedatatypesinstructions",
+        l10n_util::GetStringF(IDS_SYNC_CHOOSE_DATATYPES_INSTRUCTIONS,
+        l10n_util::GetString(IDS_PRODUCT_NAME)));
+    localized_strings.SetString(L"keepeverythingsynced",
+        l10n_util::GetString(IDS_SYNC_EVERYTHING));
+    localized_strings.SetString(L"choosedatatypes",
+        l10n_util::GetString(IDS_SYNC_CHOOSE_DATATYPES));
+    localized_strings.SetString(L"bookmarks",
+        l10n_util::GetString(IDS_SYNC_DATATYPE_BOOKMARKS));
+    localized_strings.SetString(L"preferences",
+        l10n_util::GetString(IDS_SYNC_DATATYPE_PREFERENCES));
+    localized_strings.SetString(L"autofill",
+        l10n_util::GetString(IDS_SYNC_DATATYPE_AUTOFILL));
+    localized_strings.SetString(L"themes",
+        l10n_util::GetString(IDS_SYNC_DATATYPE_THEMES));
+    localized_strings.SetString(L"passwords",
+        l10n_util::GetString(IDS_SYNC_DATATYPE_PASSWORDS));
+    localized_strings.SetString(L"extensions",
+        l10n_util::GetString(IDS_SYNC_DATATYPE_EXTENSIONS));
+    localized_strings.SetString(L"typedurls",
+        l10n_util::GetString(IDS_SYNC_DATATYPE_TYPED_URLS));
+    localized_strings.SetString(L"synczerodatatypeserror",
+        l10n_util::GetString(IDS_SYNC_ZERO_DATA_TYPES_ERROR));
+    localized_strings.SetString(L"setupabortederror",
+        l10n_util::GetString(IDS_SYNC_SETUP_ABORTED_BY_PENDING_CLEAR));
+    localized_strings.SetString(L"ok",
+        l10n_util::GetString(IDS_OK));
+    localized_strings.SetString(L"cancel",
+        l10n_util::GetString(IDS_CANCEL));
+    localized_strings.SetString(L"settingup",
+        l10n_util::GetString(IDS_SYNC_LOGIN_SETTING_UP));
+    static const base::StringPiece html(ResourceBundle::GetSharedInstance()
+      .GetRawDataResource(IDR_SYNC_CHOOSE_DATATYPES_HTML));
+    SetFontAndTextDirection(&localized_strings);
+    response = jstemplate_builder::GetI18nTemplateHtml(
+      html, &localized_strings);
+  } else if (path_raw == kSyncSetupDonePath) {
     DictionaryValue localized_strings;
     localized_strings.SetString(L"success",
         l10n_util::GetString(IDS_SYNC_SUCCESS));
@@ -142,12 +173,13 @@ void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
     SetFontAndTextDirection(&localized_strings);
     response = jstemplate_builder::GetI18nTemplateHtml(
         html, &localized_strings);
-  } else if (path_raw == chrome::kSyncSetupFlowPath) {
+  } else if (path_raw == kSyncSetupFlowPath) {
     static const base::StringPiece html(ResourceBundle::GetSharedInstance()
         .GetRawDataResource(IDR_SYNC_SETUP_FLOW_HTML));
     response = html.as_string();
   }
   // Send the response.
+  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
   html_bytes->data.resize(response.size());
   std::copy(response.begin(), response.end(), html_bytes->data.begin());
   SendResponse(request_id, html_bytes);
@@ -163,7 +195,8 @@ std::string SyncResourcesSource::GetLocalizedUrl(
 
 SyncSetupWizard::SyncSetupWizard(ProfileSyncService* service)
     : service_(service),
-      flow_container_(new SyncSetupFlowContainer()) {
+      flow_container_(new SyncSetupFlowContainer()),
+      parent_window_(NULL) {
   // Add our network layer data source for 'cloudy' URLs.
   SyncResourcesSource* sync_source = new SyncResourcesSource();
   ChromeThread::PostTask(
@@ -189,14 +222,16 @@ void SyncSetupWizard::Step(State advance_state) {
     // No flow is in progress, and we have never escorted the user all the
     // way through the wizard flow.
     flow_container_->set_flow(
-        SyncSetupFlow::Run(service_, flow_container_, advance_state, DONE));
+        SyncSetupFlow::Run(service_, flow_container_, advance_state, DONE,
+                           parent_window_));
   } else {
     // No flow in in progress, but we've finished the wizard flow once before.
     // This is just a discrete run.
     if (IsTerminalState(advance_state))
       return;  // Nothing to do.
     flow_container_->set_flow(SyncSetupFlow::Run(service_, flow_container_,
-        advance_state, GetEndStateForDiscreteRun(advance_state)));
+        advance_state, GetEndStateForDiscreteRun(advance_state),
+        parent_window_));
   }
 }
 
@@ -205,18 +240,35 @@ bool SyncSetupWizard::IsTerminalState(State advance_state) {
   return advance_state == GAIA_SUCCESS ||
          advance_state == DONE ||
          advance_state == DONE_FIRST_TIME ||
-         advance_state == FATAL_ERROR;
+         advance_state == FATAL_ERROR ||
+         advance_state == SETUP_ABORTED_BY_PENDING_CLEAR;
 }
 
 bool SyncSetupWizard::IsVisible() const {
   return flow_container_->get_flow() != NULL;
 }
 
+void SyncSetupWizard::Focus() {
+  SyncSetupFlow* flow = flow_container_->get_flow();
+  if (flow) {
+    flow->Focus();
+  }
+}
+
+void SyncSetupWizard::SetParent(gfx::NativeWindow parent_window) {
+  parent_window_ = parent_window;
+}
+
 // static
 SyncSetupWizard::State SyncSetupWizard::GetEndStateForDiscreteRun(
     State start_state) {
-  State result = start_state == GAIA_LOGIN ? GAIA_SUCCESS : DONE;
-  DCHECK_NE(DONE, result) <<
+  State result = FATAL_ERROR;
+  if (start_state == GAIA_LOGIN) {
+    result = GAIA_SUCCESS;
+  } else if (start_state == CHOOSE_DATA_TYPES) {
+    result = DONE;
+  }
+  DCHECK_NE(FATAL_ERROR, result) <<
       "Invalid start state for discrete run: " << start_state;
   return result;
 }

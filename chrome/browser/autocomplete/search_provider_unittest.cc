@@ -4,13 +4,14 @@
 
 #include "base/string_util.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/browser/net/test_url_fetcher_factory.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/common/net/test_url_fetcher_factory.h"
 #include "chrome/test/testing_profile.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -29,9 +30,9 @@ class SearchProviderTest : public testing::Test,
  public:
   SearchProviderTest()
       : default_t_url_(NULL),
-        term1_(L"term1"),
+        term1_(UTF8ToUTF16("term1")),
         keyword_t_url_(NULL),
-        keyword_term_(L"keyword"),
+        keyword_term_(UTF8ToUTF16("keyword")),
         io_thread_(ChromeThread::IO),
         quit_when_done_(false) {
     io_thread_.Start();
@@ -56,14 +57,14 @@ class SearchProviderTest : public testing::Test,
   void RunTillProviderDone();
 
   // Invokes Start on provider_, then runs all pending tasks.
-  void QueryForInput(const std::wstring& text);
+  void QueryForInput(const string16& text);
 
   // See description above class for details of these fields.
   TemplateURL* default_t_url_;
-  const std::wstring term1_;
+  const string16 term1_;
   GURL term1_url_;
   TemplateURL* keyword_t_url_;
-  const std::wstring keyword_term_;
+  const string16 keyword_term_;
   GURL keyword_url_;
 
   MessageLoopForUI message_loop_;
@@ -95,8 +96,8 @@ void SearchProviderTest::SetUp() {
 
   // Reset the default TemplateURL.
   default_t_url_ = new TemplateURL();
-  default_t_url_->SetURL(L"http://defaultturl/{searchTerms}", 0, 0);
-  default_t_url_->SetSuggestionsURL(L"http://defaultturl2/{searchTerms}", 0, 0);
+  default_t_url_->SetURL("http://defaultturl/{searchTerms}", 0, 0);
+  default_t_url_->SetSuggestionsURL("http://defaultturl2/{searchTerms}", 0, 0);
   turl_model->Add(default_t_url_);
   turl_model->SetDefaultSearchProvider(default_t_url_);
   TemplateURL::IDType default_provider_id = default_t_url_->id();
@@ -105,9 +106,9 @@ void SearchProviderTest::SetUp() {
   // Add url1, with search term term1_.
   HistoryService* history =
       profile_.GetHistoryService(Profile::EXPLICIT_ACCESS);
-  term1_url_ = GURL(WideToUTF8(default_t_url_->url()->ReplaceSearchTerms(
-      *default_t_url_, term1_, 0, std::wstring())));
-  history->AddPageWithDetails(term1_url_, std::wstring(), 1, 1,
+  term1_url_ = GURL(default_t_url_->url()->ReplaceSearchTerms(
+      *default_t_url_, UTF16ToWide(term1_), 0, std::wstring()));
+  history->AddPageWithDetails(term1_url_, string16(), 1, 1,
                               base::Time::Now(), false);
   history->SetKeywordSearchTermsForURL(term1_url_, default_t_url_->id(),
                                        term1_);
@@ -115,16 +116,16 @@ void SearchProviderTest::SetUp() {
   // Create another TemplateURL.
   keyword_t_url_ = new TemplateURL();
   keyword_t_url_->set_keyword(L"k");
-  keyword_t_url_->SetURL(L"http://keyword/{searchTerms}", 0, 0);
-  keyword_t_url_->SetSuggestionsURL(L"http://suggest_keyword/{searchTerms}", 0,
+  keyword_t_url_->SetURL("http://keyword/{searchTerms}", 0, 0);
+  keyword_t_url_->SetSuggestionsURL("http://suggest_keyword/{searchTerms}", 0,
                                     0);
   profile_.GetTemplateURLModel()->Add(keyword_t_url_);
   ASSERT_NE(0, keyword_t_url_->id());
 
   // Add a page and search term for keyword_t_url_.
-  keyword_url_ = GURL(WideToUTF8(keyword_t_url_->url()->ReplaceSearchTerms(
-      *keyword_t_url_, keyword_term_, 0, std::wstring())));
-  history->AddPageWithDetails(keyword_url_, std::wstring(), 1, 1,
+  keyword_url_ = GURL(keyword_t_url_->url()->ReplaceSearchTerms(
+      *keyword_t_url_, UTF16ToWide(keyword_term_), 0, std::wstring()));
+  history->AddPageWithDetails(keyword_url_, string16(), 1, 1,
                               base::Time::Now(), false);
   history->SetKeywordSearchTermsForURL(keyword_url_, keyword_t_url_->id(),
                                        keyword_term_);
@@ -154,9 +155,10 @@ void SearchProviderTest::RunTillProviderDone() {
 #endif
 }
 
-void SearchProviderTest::QueryForInput(const std::wstring& text) {
+void SearchProviderTest::QueryForInput(const string16& text) {
   // Start a query.
-  AutocompleteInput input(text, std::wstring(), false, false, false);
+  AutocompleteInput input(UTF16ToWide(text), std::wstring(),
+                          false, false, false);
   provider_->Start(input, false);
 
   // RunAllPending so that the task scheduled by SearchProvider to create the
@@ -188,7 +190,7 @@ AutocompleteMatch SearchProviderTest::FindMatchWithDestination(
 // Make sure we query history for the default provider and a URLFetcher is
 // created for the default provider suggest results.
 TEST_F(SearchProviderTest, QueryDefaultProvider) {
-  std::wstring term = term1_.substr(0, term1_.size() - 1);
+  string16 term = term1_.substr(0, term1_.size() - 1);
   QueryForInput(term);
 
   // Make sure the default providers suggest service was queried.
@@ -197,8 +199,9 @@ TEST_F(SearchProviderTest, QueryDefaultProvider) {
   ASSERT_TRUE(fetcher);
 
   // And the URL matches what we expected.
-  GURL expected_url = GURL(WideToUTF8(default_t_url_->suggestions_url()->
-      ReplaceSearchTerms(*default_t_url_, term, 0, std::wstring())));
+  GURL expected_url = GURL(default_t_url_->suggestions_url()->
+      ReplaceSearchTerms(*default_t_url_, UTF16ToWide(term),
+      0, std::wstring()));
   ASSERT_TRUE(fetcher->original_url() == expected_url);
 
   // Tell the SearchProvider the suggest query is done.
@@ -219,8 +222,9 @@ TEST_F(SearchProviderTest, QueryDefaultProvider) {
 // Issues a query that matches the registered keyword and makes sure history
 // is queried as well as URLFetchers getting created.
 TEST_F(SearchProviderTest, QueryKeywordProvider) {
-  std::wstring term = keyword_term_.substr(0, keyword_term_.size() - 1);
-  QueryForInput(keyword_t_url_->keyword() + L" " + term);
+  string16 term = keyword_term_.substr(0, keyword_term_.size() - 1);
+  QueryForInput(WideToUTF16(keyword_t_url_->keyword()) +
+                UTF8ToUTF16(" ") + term);
 
   // Make sure the default providers suggest service was queried.
   TestURLFetcher* default_fetcher = test_factory_.GetFetcherByID(
@@ -239,8 +243,9 @@ TEST_F(SearchProviderTest, QueryKeywordProvider) {
   ASSERT_TRUE(keyword_fetcher);
 
   // And the URL matches what we expected.
-  GURL expected_url = GURL(WideToUTF8(keyword_t_url_->suggestions_url()->
-      ReplaceSearchTerms(*keyword_t_url_, term, 0, std::wstring())));
+  GURL expected_url = GURL(keyword_t_url_->suggestions_url()->
+      ReplaceSearchTerms(*keyword_t_url_, UTF16ToWide(term), 0,
+      std::wstring()));
   ASSERT_TRUE(keyword_fetcher->original_url() == expected_url);
 
   // Tell the SearchProvider the keyword suggest query is done.
@@ -261,6 +266,6 @@ TEST_F(SearchProviderTest, QueryKeywordProvider) {
   EXPECT_TRUE(match.template_url);
 
   // The fill into edit should contain the keyword.
-  EXPECT_EQ(keyword_t_url_->keyword() + L" " + keyword_term_,
+  EXPECT_EQ(keyword_t_url_->keyword() + L" " + UTF16ToWide(keyword_term_),
             match.fill_into_edit);
 }

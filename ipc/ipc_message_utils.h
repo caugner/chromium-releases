@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 
 #include "base/file_path.h"
 #include "base/format_macros.h"
@@ -38,6 +39,8 @@ enum IPCMessageStart {
   PluginProcessHostMsgStart,
   PluginMsgStart,
   PluginHostMsgStart,
+  ProfileImportProcessMsgStart,
+  ProfileImportProcessHostMsgStart,
   NPObjectMsgStart,
   TestMsgStart,
   DevToolsAgentMsgStart,
@@ -223,6 +226,31 @@ struct ParamTraits<unsigned long long> {
   }
 };
 
+// Note that the IPC layer doesn't sanitize NaNs and +/- INF values.  Clients
+// should be sure to check the sanity of these values after receiving them over
+// IPC.
+template <>
+struct ParamTraits<float> {
+  typedef float param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(param_type));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    const char *data;
+    int data_size;
+    if (!m->ReadData(iter, &data, &data_size) ||
+        data_size != sizeof(param_type)) {
+      NOTREACHED();
+      return false;
+    }
+    memcpy(r, data, sizeof(param_type));
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(StringPrintf(L"e", p));
+  }
+};
+
 template <>
 struct ParamTraits<double> {
   typedef double param_type;
@@ -231,16 +259,14 @@ struct ParamTraits<double> {
   }
   static bool Read(const Message* m, void** iter, param_type* r) {
     const char *data;
-    int data_size = 0;
-    bool result = m->ReadData(iter, &data, &data_size);
-    if (result && data_size == sizeof(param_type)) {
-      memcpy(r, data, sizeof(param_type));
-    } else {
-      result = false;
+    int data_size;
+    if (!m->ReadData(iter, &data, &data_size) ||
+        data_size != sizeof(param_type)) {
       NOTREACHED();
+      return false;
     }
-
-    return result;
+    memcpy(r, data, sizeof(param_type));
+    return true;
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(StringPrintf(L"e", p));
@@ -467,11 +493,37 @@ struct ParamTraits<std::vector<P> > {
     for (size_t i = 0; i < p.size(); ++i) {
       if (i != 0)
         l->append(L" ");
-
       LogParam((p[i]), l);
     }
   }
 };
+
+template <class P>
+struct ParamTraits<std::set<P> > {
+  typedef std::set<P> param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, static_cast<int>(p.size()));
+    typename param_type::const_iterator iter;
+    for (iter = p.begin(); iter != p.end(); ++iter)
+      WriteParam(m, *iter);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    int size;
+    if (!m->ReadLength(iter, &size))
+      return false;
+    for (int i = 0; i < size; ++i) {
+      P item;
+      if (!ReadParam(m, iter, &item))
+        return false;
+      r->insert(item);
+    }
+    return true;
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"<std::set>");
+  }
+};
+
 
 template <class K, class V>
 struct ParamTraits<std::map<K, V> > {

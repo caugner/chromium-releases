@@ -36,7 +36,8 @@ install_gold() {
   # Gold is optional; it's a faster replacement for ld,
   # and makes life on 2GB machines much more pleasant.
 
-  # First make sure root can access this directory, as that's tripped up some folks.
+  # First make sure root can access this directory, as that's tripped
+  # up some folks.
   if sudo touch xyz.$$
   then
     sudo rm xyz.$$
@@ -45,9 +46,9 @@ install_gold() {
     return
   fi
 
-  BINUTILS=binutils-2.20
+  BINUTILS=binutils-2.20.1
   BINUTILS_URL=http://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2
-  BINUTILS_SHA1=747e7b4d94bce46587236dc5f428e5b412a590dc
+  BINUTILS_SHA1=fd2ba806e6f3a55cee453cb25c86991b26a75dee
 
   test -f $BINUTILS.tar.bz2 || wget $BINUTILS_URL
   if test "`sha1sum $BINUTILS.tar.bz2|cut -d' ' -f1`" != "$BINUTILS_SHA1"
@@ -56,47 +57,8 @@ install_gold() {
     exit 1
   fi
 
-  cat > binutils-fix.patch <<__EOF__
---- binutils-2.20/gold/output.cc.orig	2009-11-17 17:40:49.000000000 -0800
-+++ binutils-2.20/gold/output.cc	2009-11-17 18:27:21.000000000 -0800
-@@ -22,6 +22,10 @@
- 
- #include "gold.h"
- 
-+#if !defined(__STDC_FORMAT_MACROS)
-+#define __STDC_FORMAT_MACROS
-+#endif
-+
- #include <cstdlib>
- #include <cstring>
- #include <cerrno>
-@@ -29,6 +33,7 @@
- #include <unistd.h>
- #include <sys/mman.h>
- #include <sys/stat.h>
-+#include <inttypes.h>
- #include <algorithm>
- #include "libiberty.h"
- 
-@@ -3505,11 +3510,11 @@
- 		  Output_section* os = (*p)->output_section();
- 		  if (os == NULL)
- 		    gold_error(_("dot moves backward in linker script "
--				 "from 0x%llx to 0x%llx"),
-+				 "from 0x%"PRIx64" to 0x%"PRIx64),
- 			       addr + (off - startoff), (*p)->address());
- 		  else
- 		    gold_error(_("address of section '%s' moves backward "
--				 "from 0x%llx to 0x%llx"),
-+				 "from 0x%"PRIx64" to 0x%"PRIx64),
- 			       os->name(), addr + (off - startoff),
- 			       (*p)->address());
- 		}
-__EOF__
-
   tar -xjvf $BINUTILS.tar.bz2
   cd $BINUTILS
-  patch -p1 < ../binutils-fix.patch
   ./configure --prefix=/usr/local/gold --enable-gold
   make -j3
   if sudo make install
@@ -116,8 +78,11 @@ __EOF__
   fi
 }
 
-if ! egrep -q 'Ubuntu (8\.04|8\.10|9\.04|9\.10|karmic|lucid)' /etc/issue; then
-  echo "Only Ubuntu 8.04, 8.10, 9.04, and 9.10 are currently supported" >&2
+if ! egrep -q \
+    'Ubuntu (8\.04|8\.10|9\.04|9\.10|10\.04|10\.10|karmic|lucid|maverick)' \
+    /etc/issue; then
+  echo "Only Ubuntu 8.04 (hardy) through 10.10 (maverick) are currently" \
+      "supported" >&2
   exit 1
 fi
 
@@ -132,22 +97,29 @@ if [ "x$(id -u)" != x0 ]; then
   echo
 fi
 
+# Packages needed for chromeos only
+chromeos_dev_list="libpulse-dev"
+
 # Packages need for development
-dev_list="apache2 bison fakeroot flex g++ g++-multilib gperf libapache2-mod-php5
+dev_list="apache2 bison fakeroot flex g++ gperf libapache2-mod-php5
           libasound2-dev libbz2-dev libcairo2-dev libdbus-glib-1-dev
           libgconf2-dev libgl1-mesa-dev libglu1-mesa-dev libglib2.0-dev
-          libgtk2.0-dev libjpeg62-dev libnspr4-dev libnss3-dev libpam0g-dev
-          libsqlite3-dev libxslt1-dev libxss-dev lighttpd mesa-common-dev
-          msttcorefonts patch perl php5-cgi pkg-config python python2.5-dev rpm
-          subversion ttf-dejavu-core ttf-kochi-gothic ttf-kochi-mincho wdiff"
+          libgnome-keyring-dev libgtk2.0-dev libjpeg62-dev libnspr4-dev
+          libnss3-dev libpam0g-dev libsqlite3-dev libxslt1-dev libxss-dev
+          lighttpd mesa-common-dev msttcorefonts patch perl php5-cgi pkg-config
+          python python-dev rpm subversion ttf-dejavu-core ttf-kochi-gothic
+          ttf-kochi-mincho wdiff libcurl4-gnutls-dev $chromeos_dev_list"
+
+# Run-time libraries required by chromeos only
+chromeos_lib_list="libpulse0 libbz2-1.0 libcurl4-gnutls-dev"
 
 # Full list of required run-time libraries
 lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libdbus-glib-1-2 libexpat1
-          libfontconfig1 libfreetype6 libglib2.0-0 libgtk2.0-0 libnspr4-0d
-          libnss3-1d libpango1.0-0 libpcre3 libpixman-1-0 libpng12-0 libstdc++6
-          libsqlite3-0 libx11-6 libxau6 libxcb1 libxcomposite1
+          libfontconfig1 libfreetype6 libglib2.0-0 libgnome-keyring0 libgtk2.0-0
+          libnspr4-0d libnss3-1d libpango1.0-0 libpcre3 libpixman-1-0 libpng12-0
+          libstdc++6 libsqlite3-0 libx11-6 libxau6 libxcb1 libxcomposite1
           libxcursor1 libxdamage1 libxdmcp6 libxext6 libxfixes3 libxi6
-          libxinerama1 libxrandr2 libxrender1 zlib1g"
+          libxinerama1 libxrandr2 libxrender1 zlib1g $chromeos_lib_list"
 
 # Debugging symbols for all of the run-time libraries
 dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg
@@ -158,9 +130,13 @@ dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg
           libxfixes3-dbg libxi6-dbg libxinerama1-dbg libxrandr2-dbg
           libxrender1-dbg zlib1g-dbg"
 
-# Standard 32bit compatibility libraries
-cmp_list="ia32-libs lib32asound2-dev lib32readline5-dev lib32stdc++6 lib32z1
-          lib32z1-dev libc6-dev-i386 libc6-i386"
+# CUPS package changed its name from hardy to the next version. Include
+# proper package here depending on the system.
+if egrep -q 'Ubuntu (8\.04|8\.10)' /etc/issue; then
+  dev_list="${dev_list} libcupsys2-dev"
+else
+  dev_list="${dev_list} libcups2-dev"
+fi
 
 # Waits for the user to press 'Y' or 'N'. Either uppercase of lowercase is
 # accepted. Returns 0 for 'Y' and 1 for 'N'. If an optional parameter has
@@ -224,19 +200,14 @@ sudo apt-get update
 # We then re-run "apt-get" with just the list of missing packages.
 echo "Finding missing packages..."
 packages="${dev_list} ${lib_list} ${dbg_list}"
-if [ "$(uname -m)" = "x86_64" ]; then
-  packages+=" ${cmp_list}"
-fi
 # Intentially leaving $packages unquoted so it's more readable.
 echo "Packages required: " $packages
 echo
 new_list_cmd="sudo apt-get install --reinstall $(echo $packages)"
-if new_list="$(yes n | LANG=C $new_list_cmd)"
-then
+if new_list="$(yes n | LANG=C $new_list_cmd)"; then
   # We probably never hit this following line.
   echo "No missing packages, and the packages are up-to-date."
-elif [ $? -eq 1 ]
-then
+elif [ $? -eq 1 ]; then
   # We expect apt-get to have exit status of 1.
   # This indicates that we canceled the install with "yes n|".
   new_list=$(echo "$new_list" |
@@ -264,13 +235,15 @@ else
   exit 100
 fi
 
-# Some operating systems already ship gold
-# (on Debian, you can probably do "apt-get install binutils-gold" to get it),
-# but though Ubuntu toyed with shipping it, they haven't yet.
-# So just install from source if it isn't the default linker.
+# Some operating systems already ship gold (on recent Debian and
+# Ubuntu you can do "apt-get install binutils-gold" to get it), but
+# older releases didn't.  Additionally, gold 2.20 (included in Ubuntu
+# Lucid) makes binaries that just segfault.
+# So install from source if we don't have a good version.
 
 case `ld --version` in
-*gold*2.2*) ;;
+*gold*2.20.1*) ;;
+*gold*2.2[1-9]*) ;;
 * )
   if test "$do_inst_gold" = ""
   then
@@ -283,8 +256,8 @@ case `ld --version` in
   fi
   if test "$do_inst_gold" = "1"
   then
-    # If the system provides gold, just install it.
-    if apt-cache show binutils-gold >/dev/null; then
+    # If the system provides a good version of gold, just install it.
+    if apt-cache show binutils-gold | grep -Eq 'Version: 2.2(0.1|[1-9]*)'; then
       echo "Installing binutils-gold. Backing up ld as ld.single."
       sudo apt-get install binutils-gold
     else
@@ -302,6 +275,8 @@ if [ "$(uname -m)" = "x86_64" ]; then
   if test "$do_inst_lib32" = ""
   then
     echo "Installing 32bit libraries not already provided by the system"
+    echo
+    echo "This is only needed to build a 32-bit Chrome on your 64-bit system."
     echo
     echo "While we only need to install a relatively small number of library"
     echo "files, we temporarily need to download a lot of large *.deb packages"
@@ -321,6 +296,13 @@ if [ "$(uname -m)" = "x86_64" ]; then
     echo "Exiting without installing any 32bit libraries."
     exit 0
   fi
+
+  # Standard 32bit compatibility libraries
+  echo "First, installing the limited existing 32-bit support..."
+  cmp_list="ia32-libs lib32asound2-dev lib32readline5-dev lib32stdc++6 lib32z1
+            lib32z1-dev libc6-dev-i386 libc6-i386 g++-multilib"
+  sudo apt-get install $cmp_list
+
   tmp=/tmp/install-32bit.$$
   trap 'rm -rf "${tmp}"' EXIT INT TERM QUIT
   mkdir -p "${tmp}/apt/lists/partial" "${tmp}/cache" "${tmp}/partial"
@@ -337,11 +319,11 @@ EOF
 
   # Download 32bit packages
   echo "Computing list of available 32bit packages..."
-  apt-get -c="${tmp}/apt/apt.conf" update
+  sudo apt-get -c="${tmp}/apt/apt.conf" update
 
   echo "Downloading available 32bit packages..."
-  apt-get -c="${tmp}/apt/apt.conf" \
-          --yes --download-only --force-yes --reinstall  install \
+  sudo apt-get -c="${tmp}/apt/apt.conf" \
+          --yes --download-only --force-yes --reinstall install \
           ${lib_list} ${dbg_list}
 
   # Open packages, remove everything that is not a library, move the
@@ -361,19 +343,44 @@ EOF
       tar zCfx dpkg data.tar.gz
       tar zCfx dpkg/DEBIAN control.tar.gz
 
-      # Rename package, change architecture, remove dependencies
-      sed -i -e "s/\(Package:.*\)/\1-ia32/"       \
-             -e "s/\(Architecture:\).*/\1 amd64/" \
-             -e "s/\(Depends:\).*/\1 ia32-libs/"  \
-             -e "/Recommends/d"                   \
-             -e "/Conflicts/d"                    \
-          dpkg/DEBIAN/control
+      # Create a posix extended regular expression fragment that will
+      # recognize the includes which have changed. Should be rare,
+      # will almost always be empty.
+      includes=`sed -n -e "s/^[0-9a-z]*  //g" \
+                       -e "\,usr/include/,p" dpkg/DEBIAN/md5sums |
+                  xargs -n 1 -I FILE /bin/sh -c \
+                    "cmp -s dpkg/FILE /FILE || echo FILE" |
+                  tr "\n" "|" |
+                  sed -e "s,|$,,"`
 
-      # Only keep files that live in "lib" directories
-      sed -i -e "/\/lib64\//d" -e "/\/.?bin\//d" \
-             -e "s,\([ /]lib\)/,\132/g,;t1;d;:1" \
-             -e "s,^/usr/lib32/debug\(.*/lib32\),/usr/lib/debug\1," \
-          dpkg/DEBIAN/md5sums
+      # If empty, set it to not match anything.
+      test -z "$includes" && includes="^//"
+
+      # Turn the conflicts into an extended RE for removal from the
+      # Provides line.
+      conflicts=`sed -n -e "/Conflicts/s/Conflicts: *//;T;s/, */|/g;p" \
+                   dpkg/DEBIAN/control`
+
+      # Rename package, change architecture, remove conflicts and dependencies
+      sed -r -i                              \
+          -e "/Package/s/$/-ia32/"           \
+          -e "/Architecture/s/:.*$/: amd64/" \
+          -e "/Depends/s/:.*/: ia32-libs/"   \
+          -e "/Provides/s/($conflicts)(, *)?//g;T1;s/, *$//;:1"   \
+          -e "/Recommends/d"                 \
+          -e "/Conflicts/d"                  \
+        dpkg/DEBIAN/control
+
+      # Only keep files that live in "lib" directories or the includes
+      # that have changed.
+      sed -r -i                                                               \
+          -e "/\/lib64\//d" -e "/\/.?bin\//d"                                 \
+          -e "\,$includes,s,[ /]include/,&32/,g;s,include/32/,include32/,g"   \
+          -e "s, lib/, lib32/,g"                                              \
+          -e "s,/lib/,/lib32/,g"                                              \
+          -e "t;d"                                                            \
+          -e "\,^/usr/lib32/debug\(.*/lib32\),s,^/usr/lib32/debug,/usr/lib/debug," \
+        dpkg/DEBIAN/md5sums
 
       # Re-run ldconfig after installation/removal
       { echo "#!/bin/sh"; echo "[ \"x\$1\" = xconfigure ]&&ldconfig||:"; } \
@@ -387,12 +394,17 @@ EOF
                        -name postinst -o -name postrm ")" -o -print |
         xargs -r rm -rf
 
-      # Remove any files/dirs that live outside of "lib" directories
-      find dpkg -mindepth 1 "(" -name DEBIAN -o -name lib ")" -prune -o \
-                -print | tac | xargs -r -n 1 sh -c \
-                "rm \$0 2>/dev/null || rmdir \$0 2>/dev/null || : "
+      # Remove any files/dirs that live outside of "lib" directories,
+      # or are not in our list of changed includes.
+      find dpkg -mindepth 1 -regextype posix-extended \
+          "(" -name DEBIAN -o -name lib -o -regex "dpkg/($includes)" ")" \
+          -prune -o -print | tac |
+        xargs -r -n 1 sh -c "rm \$0 2>/dev/null || rmdir \$0 2>/dev/null || : "
       find dpkg -name lib64 -o -name bin -o -name "?bin" |
         tac | xargs -r rm -rf
+
+      # Remove any symbolic links that were broken by the above steps.
+      find -L dpkg -type l -print | tac | xargs -r rm -rf
 
       # Rename lib to lib32, but keep debug symbols in /usr/lib/debug/usr/lib32
       # That is where gdb looks for them.
@@ -403,6 +415,9 @@ EOF
                -e s,/usr/lib32/debug\\\\\(.*/lib32\\\\\),/usr/lib/debug\\\\1,);
           mkdir -p \"\${i%/*}\";
           mv \"\${0}\" \"\${i}\""
+
+      # Rename include to include32.
+      [ -d "dpkg/usr/include" ] && mv "dpkg/usr/include" "dpkg/usr/include32"
 
       # Prune any empty directories
       find dpkg -type d | tac | xargs -r -n 1 rmdir 2>/dev/null || :

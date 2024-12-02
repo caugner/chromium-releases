@@ -12,15 +12,31 @@ AudioManagerOpenBSD* g_audio_manager = NULL;
 }  // namespace
 
 // Implementation of AudioManager.
-bool AudioManagerOpenBSD::HasAudioDevices() {
+bool AudioManagerOpenBSD::HasAudioOutputDevices() {
   NOTIMPLEMENTED();
   return false;
 }
 
-AudioOutputStream* AudioManagerOpenBSD::MakeAudioStream(Format format,
-                                                        int channels,
-                                                        int sample_rate,
-                                                        char bits_per_sample) {
+bool AudioManagerOpenBSD::HasAudioInputDevices() {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+AudioInputStream* AudioManagerOpenBSD::MakeAudioInputStream(
+    Format format,
+    int channels,
+    int sample_rate,
+    char bits_per_sample,
+    uint32 samples_per_packet) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+AudioOutputStream* AudioManagerOpenBSD::MakeAudioOutputStream(
+    Format format,
+    int channels,
+    int sample_rate,
+    char bits_per_sample) {
   NOTIMPLEMENTED();
   return NULL;
 }

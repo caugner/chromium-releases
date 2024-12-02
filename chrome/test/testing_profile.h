@@ -8,19 +8,25 @@
 #include "base/base_paths.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_prefs.h"
 #include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/favicon_service.h"
 #include "chrome/browser/find_bar_state.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#include "chrome/browser/geolocation/geolocation_permission_context.h"
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
-#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/pref_service.h"
+#include "chrome/browser/pref_value_store.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/common/json_pref_store.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "net/base/cookie_monster.h"
 
 class ProfileSyncService;
@@ -58,13 +64,15 @@ class TestingProfile : public Profile {
   // BlockUntilBookmarkModelLoaded.
   void CreateBookmarkModel(bool delete_file);
 
+  // Creates an AutocompleteClassifier. If not invoked the
+  // AutocompleteClassifier is NULL.
+  void CreateAutocompleteClassifier();
+
   // Creates the webdata service.  If |delete_file| is true, the webdata file is
   // deleted first, then the WebDataService is created.  As TestingProfile
   // deletes the directory containing the files used by WebDataService, this
   // only matters if you're recreating the WebDataService.
   void CreateWebDataService(bool delete_file);
-
-  // Destroys
 
   // Blocks until the BookmarkModel finishes loaded. This is NOT invoked from
   // CreateBookmarkModel.
@@ -92,6 +100,8 @@ class TestingProfile : public Profile {
   virtual Profile* GetOffTheRecordProfile() { return NULL; }
 
   virtual void DestroyOffTheRecordProfile() {}
+
+  virtual bool HasOffTheRecordProfile() { return false; }
 
   virtual Profile* GetOriginalProfile() { return this; }
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker();
@@ -127,8 +137,8 @@ class TestingProfile : public Profile {
       return NULL;
     return GetRequestContext()->GetCookieStore()->GetCookieMonster();
   }
-  virtual SearchVersusNavigateClassifier* GetSearchVersusNavigateClassifier() {
-    return NULL;
+  virtual AutocompleteClassifier* GetAutocompleteClassifier() {
+    return autocomplete_classifier_.get();
   }
   virtual WebDataService* GetWebDataService(ServiceAccessType access) {
     return web_data_service_.get();
@@ -143,7 +153,8 @@ class TestingProfile : public Profile {
     if (!prefs_.get()) {
       FilePath prefs_filename =
           path_.Append(FILE_PATH_LITERAL("TestPreferences"));
-      prefs_.reset(new PrefService(prefs_filename));
+
+      prefs_.reset(PrefService::CreateUserPrefService(prefs_filename));
       Profile::RegisterUserPrefs(prefs_.get());
       browser::RegisterAllPrefs(prefs_.get(), prefs_.get());
     }
@@ -153,7 +164,7 @@ class TestingProfile : public Profile {
     return template_url_model_.get();
   }
   virtual TemplateURLFetcher* GetTemplateURLFetcher() { return NULL; }
-  virtual ThumbnailStore* GetThumbnailStore() { return NULL; }
+  virtual history::TopSites* GetTopSites() { return NULL; }
   virtual DownloadManager* GetDownloadManager() { return NULL; }
   virtual PersonalDataManager* GetPersonalDataManager() { return NULL; }
   virtual bool HasCreatedDownloadManager() const { return false; }
@@ -182,7 +193,6 @@ class TestingProfile : public Profile {
   virtual URLRequestContextGetter* GetRequestContextForExtensions();
 
   virtual net::SSLConfigService* GetSSLConfigService() { return NULL; }
-  virtual Blacklist* GetPrivacyBlacklist() { return NULL; }
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() { return NULL; }
   virtual FindBarState* GetFindBarState() {
     if (!find_bar_state_.get())
@@ -200,6 +210,13 @@ class TestingProfile : public Profile {
           new GeolocationContentSettingsMap(this);
     }
     return geolocation_content_settings_map_.get();
+  }
+  virtual GeolocationPermissionContext* GetGeolocationPermissionContext() {
+    if (!geolocation_permission_context_.get()) {
+      geolocation_permission_context_ =
+          new GeolocationPermissionContext(this);
+    }
+    return geolocation_permission_context_.get();
   }
   virtual HostZoomMap* GetHostZoomMap() { return NULL; }
   void set_session_service(SessionService* session_service);
@@ -233,7 +250,7 @@ class TestingProfile : public Profile {
   virtual void ReinitializeSpellCheckHost(bool force) { }
   virtual WebKitContext* GetWebKitContext() {
     if (webkit_context_ == NULL)
-      webkit_context_ = new WebKitContext(GetPath(), false);
+      webkit_context_ = new WebKitContext(this);
     return webkit_context_;
   }
   virtual WebKitContext* GetOffTheRecordWebKitContext() { return NULL; }
@@ -242,8 +259,23 @@ class TestingProfile : public Profile {
   virtual void InitWebResources() {}
   virtual NTPResourceCache* GetNTPResourceCache();
   virtual DesktopNotificationService* GetDesktopNotificationService() {
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    if (!desktop_notification_service_.get()) {
+       desktop_notification_service_.reset(new DesktopNotificationService(
+           this, NULL));
+    }
+    return desktop_notification_service_.get();
+  }
+  virtual BackgroundContentsService* GetBackgroundContentsService() {
     return NULL;
   }
+  virtual FilePath last_selected_directory() {
+    return last_selected_directory_;
+  }
+  virtual void set_last_selected_directory(const FilePath& path) {
+    last_selected_directory_ = path;
+  }
+
 
   // Schedules a task on the history backend and runs a nested loop until the
   // task is processed.  This has the effect of blocking the caller until the
@@ -251,7 +283,9 @@ class TestingProfile : public Profile {
   void BlockUntilHistoryProcessesPendingRequests();
 
   // Creates and initializes a profile sync service if the tests require one.
+  virtual TokenService* GetTokenService();
   virtual ProfileSyncService* GetProfileSyncService();
+  virtual CloudPrintProxyService* GetCloudPrintProxyService() { return NULL; }
 
  protected:
   // The path of the profile; the various database and other files are relative
@@ -281,8 +315,15 @@ class TestingProfile : public Profile {
   // The BookmarkModel. Only created if CreateBookmarkModel is invoked.
   scoped_ptr<BookmarkModel> bookmark_bar_model_;
 
+  // The TokenService. Created by CreateTokenService. Filled with dummy data.
+  scoped_ptr<TokenService> token_service_;
+
   // The ProfileSyncService.  Created by CreateProfileSyncService.
   scoped_ptr<ProfileSyncService> profile_sync_service_;
+
+  // The AutocompleteClassifier.  Only created if CreateAutocompleteClassifier
+  // is invoked.
+  scoped_ptr<AutocompleteClassifier> autocomplete_classifier_;
 
   // The WebDataService.  Only created if CreateWebDataService is invoked.
   scoped_refptr<WebDataService> web_data_service_;
@@ -325,9 +366,13 @@ class TestingProfile : public Profile {
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   scoped_refptr<GeolocationContentSettingsMap>
       geolocation_content_settings_map_;
+  scoped_refptr<GeolocationPermissionContext> geolocation_permission_context_;
+  scoped_ptr<DesktopNotificationService> desktop_notification_service_;
 
   // Find bar state.  Created lazily by GetFindBarState().
   scoped_ptr<FindBarState> find_bar_state_;
+
+  FilePath last_selected_directory_;
 };
 
 // A profile that derives from another profile.  This does not actually

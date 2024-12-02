@@ -27,19 +27,13 @@ struct AtomInfo {
 
 // Each value from the Atom enum must be present here.
 static const AtomInfo kAtomInfos[] = {
+  { WmIpc::ATOM_CHROME_LOGGED_IN,        "_CHROME_LOGGED_IN" },
   { WmIpc::ATOM_CHROME_WINDOW_TYPE,      "_CHROME_WINDOW_TYPE" },
   { WmIpc::ATOM_CHROME_WM_MESSAGE,       "_CHROME_WM_MESSAGE" },
   { WmIpc::ATOM_MANAGER,                 "MANAGER" },
-  { WmIpc::ATOM_NET_SUPPORTING_WM_CHECK, "_NET_SUPPORTING_WM_CHECK" },
-  { WmIpc::ATOM_NET_WM_NAME,             "_NET_WM_NAME" },
-  { WmIpc::ATOM_PRIMARY,                 "PRIMARY" },
   { WmIpc::ATOM_STRING,                  "STRING" },
   { WmIpc::ATOM_UTF8_STRING,             "UTF8_STRING" },
-  { WmIpc::ATOM_WM_NORMAL_HINTS,         "WM_NORMAL_HINTS" },
   { WmIpc::ATOM_WM_S0,                   "WM_S0" },
-  { WmIpc::ATOM_WM_STATE,                "WM_STATE" },
-  { WmIpc::ATOM_WM_TRANSIENT_FOR,        "WM_TRANSIENT_FOR" },
-  { WmIpc::ATOM_WM_SYSTEM_METRICS,       "WM_SYSTEM_METRICS" },
 };
 
 bool SetIntProperty(XID xid, Atom xatom, const std::vector<int>& values) {
@@ -74,7 +68,7 @@ WmIpc* WmIpc::instance() {
 }
 
 bool WmIpc::SetWindowType(GtkWidget* widget,
-                          WindowType type,
+                          WmIpcWindowType type,
                           const std::vector<int>* params) {
   std::vector<int> values;
   values.push_back(type);
@@ -84,15 +78,21 @@ bool WmIpc::SetWindowType(GtkWidget* widget,
                         type_to_atom_[ATOM_CHROME_WINDOW_TYPE], values);
 }
 
-WmIpc::WindowType WmIpc::GetWindowType(GtkWidget* widget) {
-  int type;
-  if (x11_util::GetIntProperty(
+WmIpcWindowType WmIpc::GetWindowType(GtkWidget* widget,
+                                     std::vector<int>* params) {
+  std::vector<int> properties;
+  if (x11_util::GetIntArrayProperty(
           x11_util::GetX11WindowFromGtkWidget(widget),
           atom_to_string_[type_to_atom_[ATOM_CHROME_WINDOW_TYPE]],
-          &type)) {
-    return static_cast<WindowType>(type);
+          &properties)) {
+    int type = properties.front();
+    if (params) {
+      params->clear();
+      params->insert(params->begin(), properties.begin() + 1, properties.end());
+    }
+    return static_cast<WmIpcWindowType>(type);
   } else {
-    return WINDOW_TYPE_UNKNOWN;
+    return WM_IPC_WINDOW_UNKNOWN;
   }
 }
 
@@ -117,8 +117,7 @@ void WmIpc::SendMessage(const Message& msg) {
              &e);
 }
 
-bool WmIpc::DecodeMessage(const GdkEventClient& event,
-                          Message* msg) {
+bool WmIpc::DecodeMessage(const GdkEventClient& event, Message* msg) {
   if (wm_message_atom_ != gdk_x11_atom_to_xatom(event.message_type))
     return false;
 
@@ -129,8 +128,8 @@ bool WmIpc::DecodeMessage(const GdkEventClient& event,
     return false;
   }
 
-  msg->set_type(static_cast<Message::Type>(event.data.l[0]));
-  if (msg->type() < 0 || msg->type() >= Message::kNumTypes) {
+  msg->set_type(static_cast<WmIpcMessageType>(event.data.l[0]));
+  if (msg->type() < 0) {
     DLOG(WARNING) << "Ignoring ClientEventMessage with invalid message "
                   << "type " << msg->type();
     return false;
@@ -145,59 +144,6 @@ bool WmIpc::DecodeMessage(const GdkEventClient& event,
   return true;
 }
 
-bool WmIpc::DecodeStringMessage(const GdkEventProperty& event,
-                                std::string* msg) {
-  DCHECK(NULL != msg);
-  if (type_to_atom_[ATOM_WM_SYSTEM_METRICS] !=
-      gdk_x11_atom_to_xatom(event.atom))
-    return false;
-
-  DLOG(WARNING) << "Got property change notification for system metrics.";
-  if (GDK_PROPERTY_DELETE == event.state) {
-    DLOG(WARNING) << "Ignoring delete EventPropertyNotification";
-    return false;
-  }
-
-  // We will be using DBus for this communication in the future, so I don't
-  // really worry right now that we could generate more than 1KB here.
-  // Also, I use "long" rather than int64 because that is what X expects.
-  long acceptable_bytes = 1024;
-  Atom actual_type;
-  int actual_format;
-  unsigned long num_items, bytes_left;
-  unsigned char *output;
-  if (Success != XGetWindowProperty(x11_util::GetXDisplay(),
-                                    GDK_WINDOW_XID(event.window),
-                                    type_to_atom_[ATOM_WM_SYSTEM_METRICS],
-                                    0,
-                                    acceptable_bytes,
-                                    false,
-                                    AnyPropertyType,
-                                    &actual_type,
-                                    &actual_format,
-                                    &num_items,
-                                    &bytes_left,
-                                    &output)) {
-    DLOG(WARNING) << "Could not read system metrics property from X.";
-    return false;
-  }
-  if (actual_format == 0) {
-    DLOG(WARNING) << "System Metrics property not set.";
-    return false;
-  }
-  if (actual_format != 8) {
-    DLOG(WARNING) << "Message was not encoded as a string of bytes...";
-    return false;
-  }
-  if (bytes_left != 0) {
-    DLOG(ERROR) << "We wanted all the bytes at once...";
-    return false;
-  }
-  msg->assign(reinterpret_cast<char*>(output), num_items);
-  XFree(output);
-  return true;
-}
-
 void WmIpc::HandleNonChromeClientMessageEvent(const GdkEventClient& event) {
   // Only do these lookups once; they should never change.
   static GdkAtom manager_gdk_atom =
@@ -208,6 +154,14 @@ void WmIpc::HandleNonChromeClientMessageEvent(const GdkEventClient& event) {
       static_cast<Atom>(event.data.l[1]) == wm_s0_atom) {
     InitWmInfo();
   }
+}
+
+void WmIpc::SetLoggedInProperty(bool logged_in) {
+  std::vector<int> values;
+  values.push_back(static_cast<int>(logged_in));
+  SetIntProperty(gdk_x11_get_default_root_xwindow(),
+                 type_to_atom_[ATOM_CHROME_LOGGED_IN],
+                 values);
 }
 
 WmIpc::WmIpc() {
@@ -245,7 +199,7 @@ void WmIpc::InitWmInfo() {
   wm_ = XGetSelectionOwner(x11_util::GetXDisplay(), type_to_atom_[ATOM_WM_S0]);
 
   // Let the window manager know which version of the IPC messages we support.
-  Message msg(Message::WM_NOTIFY_IPC_VERSION);
+  Message msg(chromeos::WM_IPC_MESSAGE_WM_NOTIFY_IPC_VERSION);
   // TODO: The version number is the latest listed in wm_ipc.h --
   // ideally, once this header is shared between Chrome and the Chrome OS window
   // manager, we'll just define the version statically in the header.

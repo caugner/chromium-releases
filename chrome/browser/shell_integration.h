@@ -71,6 +71,8 @@ class ShellIntegration {
   // which is deprecated. If |extension_app_id| is non-empty, an arguments
   // string is created using the kAppId=<id> flag. Otherwise, the kApp=<url> is
   // used.
+  // FIXME This function is dangerous, do not use!  You cannot treat
+  // command lines as plain strings as there are metacharacters.
   static std::string GetCommandLineArgumentsCommon(const GURL& url,
       const string16& extension_app_id);
 
@@ -97,7 +99,7 @@ class ShellIntegration {
   // Generates Win7 app id for given app name and profile path. The returned app
   // id is in the format of "|app_name|[.<profile_id>]". "profile_id" is
   // appended when user override the default value.
-  static std::wstring GetAppId(const wchar_t* app_name,
+  static std::wstring GetAppId(const std::wstring& app_name,
                                const FilePath& profile_path);
 
   // Generates Win7 app id for Chromium by calling GetAppId with

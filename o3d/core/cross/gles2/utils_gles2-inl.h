@@ -33,7 +33,7 @@
 #ifndef O3D_CORE_CROSS_GLES2_UTILS_GLES2_INL_H_
 #define O3D_CORE_CROSS_GLES2_UTILS_GLES2_INL_H_
 
-#include "core/cross/types.h"
+#include "core/cross/glcommon/utils_glcommon-inl.h"
 
 namespace o3d {
 
@@ -43,15 +43,6 @@ namespace o3d {
 inline GLvoid* BufferOffset(unsigned i) {
   return static_cast<int8 *>(NULL)+(i);
 }
-
-#ifdef GL_ERROR_DEBUGGING
-#define CHECK_GL_ERROR() do {                                         \
-  GLenum gl_error = glGetError();                                     \
-  LOG_IF(ERROR, gl_error != GL_NO_ERROR) << "GL Error :" << gl_error; \
-} while(0)
-#else  // GL_ERROR_DEBUGGING
-#define CHECK_GL_ERROR() void(0)
-#endif  // GL_ERROR_DEBUGGING
 
 }  // namespace o3d
 

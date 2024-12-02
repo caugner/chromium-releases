@@ -8,8 +8,10 @@
 #include <vector>
 
 #include "base/scoped_ptr.h"
+#include "base/thread.h"
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store.h"
+#include "chrome/common/notification_service.h"
 
 class MacKeychain;
 
@@ -24,9 +26,17 @@ class PasswordStoreMac : public PasswordStore {
   // non-NULL.
   PasswordStoreMac(MacKeychain* keychain, LoginDatabase* login_db);
 
- private:
+  // Initializes |thread_| and |notification_service_|.
+  virtual bool Init();
+
+ protected:
   virtual ~PasswordStoreMac();
 
+  // Schedules tasks on |thread_|.
+  virtual void ScheduleTask(Task* task);
+
+ private:
+  void ReportMetricsImpl();
   void AddLoginImpl(const webkit_glue::PasswordForm& form);
   void UpdateLoginImpl(const webkit_glue::PasswordForm& form);
   void RemoveLoginImpl(const webkit_glue::PasswordForm& form);
@@ -36,6 +46,10 @@ class PasswordStoreMac : public PasswordStore {
                      const webkit_glue::PasswordForm& form);
   void GetAutofillableLoginsImpl(GetLoginsRequest* request);
   void GetBlacklistLoginsImpl(GetLoginsRequest* request);
+  bool FillAutofillableLogins(
+      std::vector<webkit_glue::PasswordForm*>* forms);
+  bool FillBlacklistLogins(
+      std::vector<webkit_glue::PasswordForm*>* forms);
 
   // Adds the given form to the Keychain if it's something we want to store
   // there (i.e., not a blacklist entry). Returns true if the operation
@@ -60,8 +74,19 @@ class PasswordStoreMac : public PasswordStore {
   void RemoveKeychainForms(
       const std::vector<webkit_glue::PasswordForm*>& forms);
 
+  // Allows the creation of |notification_service_| to be scheduled on the right
+  // thread.
+  void CreateNotificationService();
+
   scoped_ptr<MacKeychain> keychain_;
   scoped_ptr<LoginDatabase> login_metadata_db_;
+
+  // Thread that the synchronous methods are run on.
+  scoped_ptr<base::Thread> thread_;
+
+  // Since we aren't running on a well-known thread but still want to send out
+  // notifications, we need to run our own service.
+  scoped_ptr<NotificationService> notification_service_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreMac);
 };

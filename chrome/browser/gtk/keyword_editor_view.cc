@@ -7,6 +7,7 @@
 #include <string>
 
 #include "app/l10n_util.h"
+#include "base/gtk_util.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
@@ -46,17 +47,20 @@ void KeywordEditorView::Show(Profile* profile) {
 
   // If there's already an existing editor window, activate it.
   if (instance_) {
-    gtk_window_present(GTK_WINDOW(instance_->dialog_));
+    gtk_util::PresentWindow(instance_->dialog_, 0);
   } else {
     instance_ = new KeywordEditorView(profile);
-    gtk_widget_show_all(instance_->dialog_);
+    gtk_util::ShowDialogWithLocalizedSize(instance_->dialog_,
+        IDS_SEARCHENGINES_DIALOG_WIDTH_CHARS,
+        IDS_SEARCHENGINES_DIALOG_HEIGHT_LINES,
+        true);
   }
 }
 
 void KeywordEditorView::OnEditedKeyword(const TemplateURL* template_url,
                                         const std::wstring& title,
                                         const std::wstring& keyword,
-                                        const std::wstring& url) {
+                                        const std::string& url) {
   if (template_url) {
     controller_->ModifyTemplateURL(template_url, title, keyword, url);
 
@@ -197,13 +201,6 @@ void KeywordEditorView::Init() {
   table_model_->Reload();
 
   EnableControls();
-
-  // Set the size of the dialog.
-  gtk_widget_realize(dialog_);
-  gtk_util::SetWindowSizeFromResources(GTK_WINDOW(dialog_),
-                                       IDS_SEARCHENGINES_DIALOG_WIDTH_CHARS,
-                                       IDS_SEARCHENGINES_DIALOG_HEIGHT_LINES,
-                                       true);
 
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponse), this);
   g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroy), this);
@@ -420,9 +417,9 @@ gboolean KeywordEditorView::OnCheckRowIsSeparator(GtkTreeModel* model,
 }
 
 // static
-gboolean KeywordEditorView::OnSelectionFilter(GtkTreeSelection *selection,
-                                              GtkTreeModel *model,
-                                              GtkTreePath *path,
+gboolean KeywordEditorView::OnSelectionFilter(GtkTreeSelection* selection,
+                                              GtkTreeModel* model,
+                                              GtkTreePath* path,
                                               gboolean path_currently_selected,
                                               gpointer user_data) {
   GtkTreeIter iter;
@@ -437,7 +434,7 @@ gboolean KeywordEditorView::OnSelectionFilter(GtkTreeSelection *selection,
 
 // static
 void KeywordEditorView::OnSelectionChanged(
-    GtkTreeSelection *selection, KeywordEditorView* editor) {
+    GtkTreeSelection* selection, KeywordEditorView* editor) {
   editor->EnableControls();
 }
 
@@ -453,7 +450,8 @@ void KeywordEditorView::OnRowActivated(GtkTreeView* tree_view,
 void KeywordEditorView::OnAddButtonClicked(GtkButton* button,
                                            KeywordEditorView* editor) {
   new EditSearchEngineDialog(
-      GTK_WINDOW(gtk_widget_get_toplevel(editor->dialog_)),
+      GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(
+          gtk_util::GetDialogWindow(editor->dialog_)))),
       NULL,
       editor,
       editor->profile_);
@@ -467,7 +465,8 @@ void KeywordEditorView::OnEditButtonClicked(GtkButton* button,
     return;
 
   new EditSearchEngineDialog(
-      GTK_WINDOW(gtk_widget_get_toplevel(editor->dialog_)),
+      GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(
+          gtk_util::GetDialogWindow(editor->dialog_)))),
       editor->controller_->GetTemplateURL(model_row),
       editor,
       editor->profile_);

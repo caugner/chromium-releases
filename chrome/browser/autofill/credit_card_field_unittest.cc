@@ -44,13 +44,15 @@ TEST_F(CreditCardFieldTest, ParseCreditCardNoNumber) {
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Month"),
                                                ASCIIToUTF16("ccmonth"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("month1")));
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Year"),
                                                ASCIIToUTF16("ccyear"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("year1")));
   list_.push_back(NULL);
   iter_ = list_.begin();
@@ -63,7 +65,8 @@ TEST_F(CreditCardFieldTest, ParseCreditCardNoDate) {
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Card Number"),
                                                ASCIIToUTF16("card_number"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("number1")));
   list_.push_back(NULL);
   iter_ = list_.begin();
@@ -76,19 +79,22 @@ TEST_F(CreditCardFieldTest, ParseMiniumCreditCard) {
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Card Number"),
                                                ASCIIToUTF16("card_number"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("number1")));
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Month"),
                                                ASCIIToUTF16("ccmonth"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("month1")));
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Year"),
                                                ASCIIToUTF16("ccyear"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("year1")));
   list_.push_back(NULL);
   iter_ = list_.begin();
@@ -110,22 +116,27 @@ TEST_F(CreditCardFieldTest, ParseMiniumCreditCard) {
 TEST_F(CreditCardFieldTest, ParseMiniumCreditCardEcml) {
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Card Number"),
-                                               kEcmlCardNumber,
+                                               ASCIIToUTF16(kEcmlCardNumber),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("number1")));
   list_.push_back(
-      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Month"),
-                                               kEcmlCardExpireMonth,
-                                               string16(),
-                                               ASCIIToUTF16("text")),
-                        ASCIIToUTF16("month1")));
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("Exp Month"),
+                                 ASCIIToUTF16(kEcmlCardExpireMonth),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("month1")));
   list_.push_back(
-      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Year"),
-                                               kEcmlCardExpireYear,
-                                               string16(),
-                                               ASCIIToUTF16("text")),
-                        ASCIIToUTF16("year1")));
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("Exp Year"),
+                                 ASCIIToUTF16(kEcmlCardExpireYear),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("year1")));
   list_.push_back(NULL);
   iter_ = list_.begin();
   field_.reset(CreditCardField::Parse(&iter_, false));
@@ -148,31 +159,36 @@ TEST_F(CreditCardFieldTest, ParseFullCreditCard) {
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Name on Card"),
                                                ASCIIToUTF16("name on card"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("name1")));
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Card Number"),
                                                ASCIIToUTF16("card_number"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("number1")));
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Month"),
                                                ASCIIToUTF16("ccmonth"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("month1")));
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Year"),
                                                ASCIIToUTF16("ccyear"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("year1")));
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Verification"),
                                                ASCIIToUTF16("verification"),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("cvc1")));
   list_.push_back(NULL);
   iter_ = list_.begin();
@@ -192,43 +208,50 @@ TEST_F(CreditCardFieldTest, ParseFullCreditCard) {
       field_type_map_.find(ASCIIToUTF16("year1")) != field_type_map_.end());
   EXPECT_EQ(CREDIT_CARD_EXP_4_DIGIT_YEAR,
       field_type_map_[ASCIIToUTF16("year1")]);
-  ASSERT_TRUE(
-      field_type_map_.find(ASCIIToUTF16("cvc1")) != field_type_map_.end());
-  EXPECT_EQ(CREDIT_CARD_VERIFICATION_CODE,
-      field_type_map_[ASCIIToUTF16("cvc1")]);
+  // We don't store CVV.
+  EXPECT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("cvc1")) == field_type_map_.end());
 }
 
 TEST_F(CreditCardFieldTest, ParseFullCreditCardEcml) {
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Name on Card"),
-                                               kEcmlCardHolder,
+                                               ASCIIToUTF16(kEcmlCardHolder),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("name1")));
   list_.push_back(
       new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Card Number"),
-                                               kEcmlCardNumber,
+                                               ASCIIToUTF16(kEcmlCardNumber),
                                                string16(),
-                                               ASCIIToUTF16("text")),
+                                               ASCIIToUTF16("text"),
+                                               0),
                         ASCIIToUTF16("number1")));
   list_.push_back(
-      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Month"),
-                                               kEcmlCardExpireMonth,
-                                               string16(),
-                                               ASCIIToUTF16("text")),
-                        ASCIIToUTF16("month1")));
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("Exp Month"),
+                                 ASCIIToUTF16(kEcmlCardExpireMonth),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("month1")));
   list_.push_back(
-      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Exp Year"),
-                                               kEcmlCardExpireYear,
-                                               string16(),
-                                               ASCIIToUTF16("text")),
-                        ASCIIToUTF16("year1")));
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("Exp Year"),
+                                 ASCIIToUTF16(kEcmlCardExpireYear),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("year1")));
   list_.push_back(
-      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Verification"),
-                                               kEcmlCardVerification,
-                                               string16(),
-                                               ASCIIToUTF16("text")),
-                        ASCIIToUTF16("cvc1")));
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("Verification"),
+                                 ASCIIToUTF16(kEcmlCardVerification),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("cvc1")));
   list_.push_back(NULL);
   iter_ = list_.begin();
   field_.reset(CreditCardField::Parse(&iter_, false));
@@ -247,10 +270,111 @@ TEST_F(CreditCardFieldTest, ParseFullCreditCardEcml) {
       field_type_map_.find(ASCIIToUTF16("year1")) != field_type_map_.end());
   EXPECT_EQ(CREDIT_CARD_EXP_4_DIGIT_YEAR,
       field_type_map_[ASCIIToUTF16("year1")]);
+  // We don't store the CVV.
+  EXPECT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("cvc1")) == field_type_map_.end());
+}
+
+TEST_F(CreditCardFieldTest, ParseExpMonthYear) {
+  list_.push_back(
+      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Name on Card"),
+                                               ASCIIToUTF16("Name"),
+                                               string16(),
+                                               ASCIIToUTF16("text"),
+                                               0),
+                        ASCIIToUTF16("name")));
+  list_.push_back(
+      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Card Number"),
+                                               ASCIIToUTF16("Card"),
+                                               string16(),
+                                               ASCIIToUTF16("text"),
+                                               0),
+                        ASCIIToUTF16("number")));
+  list_.push_back(
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("ExpDate Month / Year"),
+                                 ASCIIToUTF16("ExpDate"),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("month")));
+  list_.push_back(
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("ExpDate Month / Year"),
+                                 ASCIIToUTF16("ExpDate"),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("year")));
+  list_.push_back(NULL);
+  iter_ = list_.begin();
+  field_.reset(CreditCardField::Parse(&iter_, false));
+  ASSERT_NE(static_cast<CreditCardField*>(NULL), field_.get());
+  ASSERT_TRUE(field_->GetFieldInfo(&field_type_map_));
   ASSERT_TRUE(
-      field_type_map_.find(ASCIIToUTF16("cvc1")) != field_type_map_.end());
-  EXPECT_EQ(CREDIT_CARD_VERIFICATION_CODE,
-      field_type_map_[ASCIIToUTF16("cvc1")]);
+      field_type_map_.find(ASCIIToUTF16("name")) != field_type_map_.end());
+  EXPECT_EQ(CREDIT_CARD_NAME, field_type_map_[ASCIIToUTF16("name")]);
+  ASSERT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("number")) != field_type_map_.end());
+  EXPECT_EQ(CREDIT_CARD_NUMBER, field_type_map_[ASCIIToUTF16("number")]);
+  ASSERT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("month")) != field_type_map_.end());
+  EXPECT_EQ(CREDIT_CARD_EXP_MONTH, field_type_map_[ASCIIToUTF16("month")]);
+  ASSERT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("year")) != field_type_map_.end());
+  EXPECT_EQ(CREDIT_CARD_EXP_4_DIGIT_YEAR,
+      field_type_map_[ASCIIToUTF16("year")]);
+}
+
+TEST_F(CreditCardFieldTest, ParseExpMonthYear2) {
+  list_.push_back(
+      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Name on Card"),
+                                               ASCIIToUTF16("Name"),
+                                               string16(),
+                                               ASCIIToUTF16("text"),
+                                               0),
+                        ASCIIToUTF16("name")));
+  list_.push_back(
+      new AutoFillField(webkit_glue::FormField(ASCIIToUTF16("Card Number"),
+                                               ASCIIToUTF16("Card"),
+                                               string16(),
+                                               ASCIIToUTF16("text"),
+                                               0),
+                        ASCIIToUTF16("number")));
+  list_.push_back(
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("Expiration date Month / Year"),
+                                 ASCIIToUTF16("ExpDate"),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("month")));
+  list_.push_back(
+      new AutoFillField(
+          webkit_glue::FormField(ASCIIToUTF16("Expiration date Month / Year"),
+                                 ASCIIToUTF16("ExpDate"),
+                                 string16(),
+                                 ASCIIToUTF16("text"),
+                                 0),
+          ASCIIToUTF16("year")));
+  list_.push_back(NULL);
+  iter_ = list_.begin();
+  field_.reset(CreditCardField::Parse(&iter_, false));
+  ASSERT_NE(static_cast<CreditCardField*>(NULL), field_.get());
+  ASSERT_TRUE(field_->GetFieldInfo(&field_type_map_));
+  ASSERT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("name")) != field_type_map_.end());
+  EXPECT_EQ(CREDIT_CARD_NAME, field_type_map_[ASCIIToUTF16("name")]);
+  ASSERT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("number")) != field_type_map_.end());
+  EXPECT_EQ(CREDIT_CARD_NUMBER, field_type_map_[ASCIIToUTF16("number")]);
+  ASSERT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("month")) != field_type_map_.end());
+  EXPECT_EQ(CREDIT_CARD_EXP_MONTH, field_type_map_[ASCIIToUTF16("month")]);
+  ASSERT_TRUE(
+      field_type_map_.find(ASCIIToUTF16("year")) != field_type_map_.end());
+  EXPECT_EQ(CREDIT_CARD_EXP_4_DIGIT_YEAR,
+      field_type_map_[ASCIIToUTF16("year")]);
 }
 
 }  // namespace

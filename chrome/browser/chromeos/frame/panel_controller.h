@@ -7,6 +7,7 @@
 
 #include <gtk/gtk.h>
 
+#include "app/x11_util.h"
 #include "views/controls/button/button.h"
 
 class BrowserView;
@@ -24,7 +25,7 @@ class WidgetGtk;
 namespace chromeos {
 
 // Controls interactions with the WM for popups / panels.
-class PanelController : public views::ButtonListener {
+class PanelController {
  public:
   enum State {
     INITIAL,
@@ -46,9 +47,12 @@ class PanelController : public views::ButtonListener {
   };
 
   PanelController(Delegate* delegate_window,
-                  GtkWindow* window,
-                  const gfx::Rect& init_bounds);
+                  GtkWindow* window);
   virtual ~PanelController() {}
+
+  // Initializes the panel controller with the initial state of the focus and
+  // the window bounds.
+  void Init(bool initial_focus, const gfx::Rect& init_bounds, XID creator_xid);
 
   bool TitleMousePressed(const views::MouseEvent& event);
   void TitleMouseReleased(const views::MouseEvent& event, bool canceled);
@@ -62,11 +66,9 @@ class PanelController : public views::ButtonListener {
 
   void SetState(State state);
 
-  // ButtonListener methods.
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
-
  private:
-  class TitleContentView : public views::View {
+  class TitleContentView : public views::View,
+                           public views::ButtonListener {
    public:
     explicit TitleContentView(PanelController* panelController);
     virtual ~TitleContentView() {}
@@ -76,11 +78,15 @@ class PanelController : public views::ButtonListener {
     virtual bool OnMouseDragged(const views::MouseEvent& event);
     void OnFocusIn();
     void OnFocusOut();
+    void OnClose();
 
     views::ImageView* title_icon() { return title_icon_; }
     views::Label* title_label() { return title_label_; }
     views::ImageButton* close_button() { return close_button_; }
 
+    // ButtonListener methods.
+    virtual void ButtonPressed(views::Button* sender,
+                               const views::Event& event);
    private:
     views::ImageView* title_icon_;
     views::Label* title_label_;
@@ -89,14 +95,14 @@ class PanelController : public views::ButtonListener {
     DISALLOW_COPY_AND_ASSIGN(TitleContentView);
   };
 
+  // Called from TitleContentView's ButtonPressed handler.
+  void OnCloseButtonPressed();
+
   // Dispatches client events to PanelController instances
   static bool OnPanelClientEvent(
       GtkWidget* widget,
       GdkEventClient* event,
       PanelController* panel_controller);
-
-  // Initializes the panel controller with the window bounds.
-  void Init(const gfx::Rect window_bounds);
 
   // Panel's delegate.
   Delegate* delegate_;

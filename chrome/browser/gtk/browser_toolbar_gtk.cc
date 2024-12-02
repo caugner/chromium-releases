@@ -13,6 +13,7 @@
 #include "app/menus/accelerator_gtk.h"
 #include "app/resource_bundle.h"
 #include "base/base_paths.h"
+#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/keyboard_codes_posix.h"
 #include "base/logging.h"
@@ -28,26 +29,28 @@
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/cairo_cached_surface.h"
 #include "chrome/browser/gtk/custom_button.h"
-#include "chrome/browser/gtk/go_button_gtk.h"
 #include "chrome/browser/gtk/gtk_chrome_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/location_bar_view_gtk.h"
-#include "chrome/browser/gtk/standard_menus.h"
+#include "chrome/browser/gtk/reload_button_gtk.h"
+#include "chrome/browser/gtk/rounded_window.h"
 #include "chrome/browser/gtk/tabs/tab_strip_gtk.h"
-#include "chrome/browser/gtk/toolbar_star_toggle_gtk.h"
 #include "chrome/browser/gtk/view_id_util.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/upgrade_detector.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "gfx/canvas_skia_paint.h"
 #include "gfx/gtk_util.h"
+#include "gfx/skbitmap_operations.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -66,9 +69,15 @@ const int kToolbarHeightLocationBarOnly = kToolbarHeight - 2;
 // Interior spacing between toolbar widgets.
 const int kToolbarWidgetSpacing = 2;
 
-// The color used as the base[] color of the location entry during a secure
-// connection.
-const GdkColor kSecureColor = GDK_COLOR_RGB(255, 245, 195);
+// Amount of rounding on top corners of toolbar. Only used in Gtk theme mode.
+const int kToolbarCornerSize = 3;
+
+// The offset in pixels of the upgrade dot on the app menu.
+const int kUpgradeDotOffset = 11;
+
+// The duration of the upgrade notification animation (actually the duration
+// of a half-throb).
+const int kThrobDuration = 1000;
 
 }  // namespace
 
@@ -76,42 +85,45 @@ const GdkColor kSecureColor = GDK_COLOR_RGB(255, 245, 195);
 
 BrowserToolbarGtk::BrowserToolbarGtk(Browser* browser, BrowserWindowGtk* window)
     : toolbar_(NULL),
-      location_bar_(new LocationBarViewGtk(this, browser)),
+      location_bar_(new LocationBarViewGtk(browser)),
       model_(browser->toolbar_model()),
-      page_menu_model_(this, browser),
-      app_menu_model_(this, browser),
+      wrench_menu_model_(this, browser),
       browser_(browser),
       window_(window),
       profile_(NULL),
-      sync_service_(NULL),
-      menu_bar_helper_(this) {
+      upgrade_reminder_animation_(this),
+      upgrade_reminder_canceled_(false) {
   browser_->command_updater()->AddCommandObserver(IDC_BACK, this);
   browser_->command_updater()->AddCommandObserver(IDC_FORWARD, this);
-  browser_->command_updater()->AddCommandObserver(IDC_RELOAD, this);
   browser_->command_updater()->AddCommandObserver(IDC_HOME, this);
   browser_->command_updater()->AddCommandObserver(IDC_BOOKMARK_PAGE, this);
 
   registrar_.Add(this,
                  NotificationType::BROWSER_THEME_CHANGED,
                  NotificationService::AllSources());
+  registrar_.Add(this,
+                 NotificationType::UPGRADE_RECOMMENDED,
+                 NotificationService::AllSources());
+
+  upgrade_reminder_animation_.SetThrobDuration(kThrobDuration);
+
+  ActiveWindowWatcherX::AddObserver(this);
+  MaybeShowUpgradeReminder();
 }
 
 BrowserToolbarGtk::~BrowserToolbarGtk() {
-  if (sync_service_)
-    sync_service_->RemoveObserver(this);
+  ActiveWindowWatcherX::RemoveObserver(this);
 
   browser_->command_updater()->RemoveCommandObserver(IDC_BACK, this);
   browser_->command_updater()->RemoveCommandObserver(IDC_FORWARD, this);
-  browser_->command_updater()->RemoveCommandObserver(IDC_RELOAD, this);
   browser_->command_updater()->RemoveCommandObserver(IDC_HOME, this);
   browser_->command_updater()->RemoveCommandObserver(IDC_BOOKMARK_PAGE, this);
 
   offscreen_entry_.Destroy();
 
-  page_menu_.reset();
   app_menu_.reset();
-  page_menu_button_.Destroy();
   app_menu_button_.Destroy();
+  app_menu_image_.Destroy();
 }
 
 void BrowserToolbarGtk::Init(Profile* profile,
@@ -123,6 +135,9 @@ void BrowserToolbarGtk::Init(Profile* profile,
   offscreen_entry_.Own(gtk_entry_new());
 
   show_home_button_.Init(prefs::kShowHomeButton, profile->GetPrefs(), this);
+  home_page_.Init(prefs::kHomePage, profile->GetPrefs(), this);
+  home_page_is_new_tab_page_.Init(prefs::kHomePageIsNewTabPage,
+                                  profile->GetPrefs(), this);
 
   event_box_ = gtk_event_box_new();
   // Make the event box transparent so themes can use transparent toolbar
@@ -137,117 +152,97 @@ void BrowserToolbarGtk::Init(Profile* profile,
                    G_CALLBACK(&OnAlignmentExposeThunk), this);
   gtk_container_add(GTK_CONTAINER(event_box_), alignment_);
   gtk_container_add(GTK_CONTAINER(alignment_), toolbar_);
-  // Force the height of the toolbar so we get the right amount of padding
-  // above and below the location bar. -1 for width means "let GTK do its
-  // normal sizing".
-  gtk_widget_set_size_request(toolbar_, -1, ShouldOnlyShowLocation() ?
-      kToolbarHeightLocationBarOnly : kToolbarHeight);
 
-  // Group back and forward into an hbox so there's no spacing between them.
+  toolbar_left_ = gtk_hbox_new(FALSE, 0);
+
   GtkWidget* back_forward_hbox_ = gtk_hbox_new(FALSE, 0);
-
   back_.reset(new BackForwardButtonGtk(browser_, false));
-  gtk_box_pack_start(GTK_BOX(back_forward_hbox_), back_->widget(), FALSE,
-                     FALSE, 0);
   g_signal_connect(back_->widget(), "clicked",
                    G_CALLBACK(OnButtonClickThunk), this);
+  gtk_box_pack_start(GTK_BOX(back_forward_hbox_), back_->widget(), FALSE,
+                     FALSE, 0);
 
   forward_.reset(new BackForwardButtonGtk(browser_, true));
-  gtk_box_pack_start(GTK_BOX(back_forward_hbox_), forward_->widget(), FALSE,
-                     FALSE, 0);
   g_signal_connect(forward_->widget(), "clicked",
                    G_CALLBACK(OnButtonClickThunk), this);
-  gtk_box_pack_start(GTK_BOX(toolbar_), back_forward_hbox_, FALSE, FALSE,
-                     kToolbarWidgetSpacing);
+  gtk_box_pack_start(GTK_BOX(back_forward_hbox_), forward_->widget(), FALSE,
+                     FALSE, 0);
 
-  reload_.reset(BuildToolbarButton(IDR_RELOAD, IDR_RELOAD_P, IDR_RELOAD_H, 0,
-                                   IDR_BUTTON_MASK,
-                                   l10n_util::GetStringUTF8(IDS_TOOLTIP_RELOAD),
-                                   GTK_STOCK_REFRESH));
+  gtk_box_pack_start(GTK_BOX(toolbar_left_), back_forward_hbox_, FALSE,
+                     FALSE, kToolbarWidgetSpacing);
+
+  reload_.reset(new ReloadButtonGtk(location_bar_.get(), browser_));
+  gtk_box_pack_start(GTK_BOX(toolbar_left_), reload_->widget(), FALSE, FALSE,
+                     0);
 
   home_.reset(BuildToolbarButton(IDR_HOME, IDR_HOME_P, IDR_HOME_H, 0,
                                  IDR_BUTTON_MASK,
                                  l10n_util::GetStringUTF8(IDS_TOOLTIP_HOME),
-                                 GTK_STOCK_HOME));
+                                 GTK_STOCK_HOME, kToolbarWidgetSpacing));
   gtk_util::SetButtonTriggersNavigation(home_->widget());
-  SetUpDragForHomeButton();
 
-  // Group the start, omnibox, and go button into an hbox.
-  GtkWidget* location_hbox = gtk_hbox_new(FALSE, 0);
-  star_.reset(BuildStarButton(l10n_util::GetStringUTF8(IDS_TOOLTIP_STAR)));
-  gtk_box_pack_start(GTK_BOX(location_hbox), star_->widget(), FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(toolbar_), toolbar_left_, FALSE, FALSE, 0);
 
+  location_hbox_ = gtk_hbox_new(FALSE, 0);
   location_bar_->Init(ShouldOnlyShowLocation());
-  gtk_box_pack_start(GTK_BOX(location_hbox), location_bar_->widget(), TRUE,
+  gtk_box_pack_start(GTK_BOX(location_hbox_), location_bar_->widget(), TRUE,
                      TRUE, 0);
 
-  go_.reset(new GoButtonGtk(location_bar_.get(), browser_));
-  gtk_box_pack_start(GTK_BOX(location_hbox), go_->widget(), FALSE, FALSE, 0);
-
-  g_signal_connect(location_hbox, "expose-event",
+  g_signal_connect(location_hbox_, "expose-event",
                    G_CALLBACK(OnLocationHboxExposeThunk), this);
-  gtk_box_pack_start(GTK_BOX(toolbar_), location_hbox, TRUE, TRUE,
+  gtk_box_pack_start(GTK_BOX(toolbar_), location_hbox_, TRUE, TRUE,
       kToolbarWidgetSpacing + (ShouldOnlyShowLocation() ? 1 : 0));
+
+  toolbar_right_ = gtk_hbox_new(FALSE, 0);
 
   if (!ShouldOnlyShowLocation()) {
     actions_toolbar_.reset(new BrowserActionsToolbarGtk(browser_));
-    gtk_box_pack_start(GTK_BOX(toolbar_), actions_toolbar_->widget(),
+    gtk_box_pack_start(GTK_BOX(toolbar_right_), actions_toolbar_->widget(),
                        FALSE, FALSE, 0);
   }
 
-  // Group the menu buttons together in an hbox.
-  GtkWidget* menus_hbox_ = gtk_hbox_new(FALSE, 0);
-  GtkWidget* page_menu = BuildToolbarMenuButton(
-      l10n_util::GetStringUTF8(IDS_PAGEMENU_TOOLTIP),
-      &page_menu_button_);
-  menu_bar_helper_.Add(page_menu_button_.get());
-  page_menu_image_ = gtk_image_new_from_pixbuf(
-      theme_provider_->GetRTLEnabledPixbufNamed(IDR_MENU_PAGE));
-  gtk_container_add(GTK_CONTAINER(page_menu), page_menu_image_);
-
-  page_menu_.reset(new MenuGtk(this, &page_menu_model_));
-  gtk_box_pack_start(GTK_BOX(menus_hbox_), page_menu, FALSE, FALSE, 0);
-
+  // We need another hbox for the menu buttons so we can place them together,
+  // but still have some padding to their collective left/right.
+  GtkWidget* menus_hbox = gtk_hbox_new(FALSE, 0);
   GtkWidget* chrome_menu = BuildToolbarMenuButton(
       l10n_util::GetStringFUTF8(IDS_APPMENU_TOOLTIP,
           WideToUTF16(l10n_util::GetString(IDS_PRODUCT_NAME))),
       &app_menu_button_);
-  menu_bar_helper_.Add(app_menu_button_.get());
-  app_menu_image_ = gtk_image_new_from_pixbuf(
-      theme_provider_->GetRTLEnabledPixbufNamed(IDR_MENU_CHROME));
-  gtk_container_add(GTK_CONTAINER(chrome_menu), app_menu_image_);
+  app_menu_image_.Own(gtk_image_new_from_pixbuf(
+      theme_provider_->GetRTLEnabledPixbufNamed(IDR_TOOLS)));
+  gtk_container_add(GTK_CONTAINER(chrome_menu), app_menu_image_.get());
+  g_signal_connect_after(app_menu_image_.get(), "expose-event",
+                         G_CALLBACK(OnAppMenuImageExposeThunk), this);
 
-  app_menu_.reset(new MenuGtk(this, &app_menu_model_));
-  gtk_box_pack_start(GTK_BOX(menus_hbox_), chrome_menu, FALSE, FALSE, 0);
-
-  gtk_box_pack_start(GTK_BOX(toolbar_), menus_hbox_, FALSE, FALSE,
+  app_menu_.reset(new MenuGtk(this, &wrench_menu_model_));
+  gtk_box_pack_start(GTK_BOX(menus_hbox), chrome_menu, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(toolbar_right_), menus_hbox, FALSE, FALSE,
                      kToolbarWidgetSpacing);
+  g_signal_connect(app_menu_->widget(), "show",
+                   G_CALLBACK(OnAppMenuShowThunk), this);
+
+  gtk_box_pack_start(GTK_BOX(toolbar_), toolbar_right_, FALSE, FALSE, 0);
 
   if (ShouldOnlyShowLocation()) {
     gtk_widget_show(event_box_);
     gtk_widget_show(alignment_);
     gtk_widget_show(toolbar_);
-    gtk_widget_show_all(location_hbox);
-    gtk_widget_hide(star_->widget());
-    gtk_widget_hide(go_->widget());
+    gtk_widget_show_all(location_hbox_);
+    gtk_widget_hide(reload_->widget());
   } else {
     gtk_widget_show_all(event_box_);
-
-    if (show_home_button_.GetValue()) {
-      gtk_widget_show(home_->widget());
-    } else {
-      gtk_widget_hide(home_->widget());
-    }
-
     if (actions_toolbar_->button_count() == 0)
       gtk_widget_hide(actions_toolbar_->widget());
   }
+  // Initialize pref-dependent UI state.
+  NotifyPrefChanged(NULL);
 
   // Because the above does a recursive show all on all widgets we need to
   // update the icon visibility to hide them.
   location_bar_->UpdateContentSettingsIcons();
 
   SetViewIDs();
+  theme_provider_->InitThemesFor(this);
 }
 
 void BrowserToolbarGtk::SetViewIDs() {
@@ -256,10 +251,7 @@ void BrowserToolbarGtk::SetViewIDs() {
   ViewIDUtil::SetID(forward_->widget(), VIEW_ID_FORWARD_BUTTON);
   ViewIDUtil::SetID(reload_->widget(), VIEW_ID_RELOAD_BUTTON);
   ViewIDUtil::SetID(home_->widget(), VIEW_ID_HOME_BUTTON);
-  ViewIDUtil::SetID(star_->widget(), VIEW_ID_STAR_BUTTON);
   ViewIDUtil::SetID(location_bar_->widget(), VIEW_ID_LOCATION_BAR);
-  ViewIDUtil::SetID(go_->widget(), VIEW_ID_GO_BUTTON);
-  ViewIDUtil::SetID(page_menu_button_.get(), VIEW_ID_PAGE_MENU);
   ViewIDUtil::SetID(app_menu_button_.get(), VIEW_ID_APP_MENU);
 }
 
@@ -283,12 +275,11 @@ void BrowserToolbarGtk::UpdateForBookmarkBarVisibility(
       0, 0);
 }
 
-void BrowserToolbarGtk::ShowPageMenu() {
-  PopupForButton(page_menu_button_.get());
-}
-
 void BrowserToolbarGtk::ShowAppMenu() {
-  PopupForButton(app_menu_button_.get());
+  app_menu_->Cancel();
+  gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(app_menu_button_.get()),
+                                    GTK_STATE_ACTIVE);
+  app_menu_->PopupAsFromKeyEvent(app_menu_button_.get());
 }
 
 // CommandUpdater::CommandObserver ---------------------------------------------
@@ -302,18 +293,9 @@ void BrowserToolbarGtk::EnabledStateChangedForCommand(int id, bool enabled) {
     case IDC_FORWARD:
       widget = forward_->widget();
       break;
-    case IDC_RELOAD:
-      widget = reload_->widget();
-      break;
-    case IDC_GO:
-      widget = go_->widget();
-      break;
     case IDC_HOME:
       if (home_.get())
         widget = home_->widget();
-      break;
-    case IDC_BOOKMARK_PAGE:
-      widget = star_->widget();
       break;
   }
   if (widget) {
@@ -334,14 +316,13 @@ void BrowserToolbarGtk::StoppedShowing() {
   // Without these calls, the hover state can get stuck since the leave-notify
   // event is not sent when clicking a button brings up the menu.
   gtk_chrome_button_set_hover_state(
-      GTK_CHROME_BUTTON(page_menu_button_.get()), 0.0);
-  gtk_chrome_button_set_hover_state(
       GTK_CHROME_BUTTON(app_menu_button_.get()), 0.0);
-
-  gtk_chrome_button_unset_paint_state(
-      GTK_CHROME_BUTTON(page_menu_button_.get()));
   gtk_chrome_button_unset_paint_state(
       GTK_CHROME_BUTTON(app_menu_button_.get()));
+}
+
+GtkIconSet* BrowserToolbarGtk::GetIconSetForId(int idr) {
+  return theme_provider_->GetIconSetForId(idr);
 }
 
 // menus::SimpleMenuModel::Delegate
@@ -388,33 +369,38 @@ void BrowserToolbarGtk::Observe(NotificationType type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
   if (type == NotificationType::PREF_CHANGED) {
-    std::wstring* pref_name = Details<std::wstring>(details).ptr();
-    if (*pref_name == prefs::kShowHomeButton) {
-      if (show_home_button_.GetValue() && !ShouldOnlyShowLocation()) {
-        gtk_widget_show(home_->widget());
-      } else {
-        gtk_widget_hide(home_->widget());
-      }
-    }
+    NotifyPrefChanged(Details<std::wstring>(details).ptr());
   } else if (type == NotificationType::BROWSER_THEME_CHANGED) {
     // Update the spacing around the menu buttons
-    int border = theme_provider_->UseGtkTheme() ? 0 : 2;
-    gtk_container_set_border_width(
-        GTK_CONTAINER(page_menu_button_.get()), border);
+    bool use_gtk = theme_provider_->UseGtkTheme();
+    int border = use_gtk ? 0 : 2;
     gtk_container_set_border_width(
         GTK_CONTAINER(app_menu_button_.get()), border);
 
-    // Update the menu button images.
-    gtk_image_set_from_pixbuf(GTK_IMAGE(page_menu_image_),
-        theme_provider_->GetRTLEnabledPixbufNamed(IDR_MENU_PAGE));
-    gtk_image_set_from_pixbuf(GTK_IMAGE(app_menu_image_),
-        theme_provider_->GetRTLEnabledPixbufNamed(IDR_MENU_CHROME));
+    // Update the menu button image.
+    gtk_image_set_from_pixbuf(GTK_IMAGE(app_menu_image_.get()),
+        theme_provider_->GetRTLEnabledPixbufNamed(IDR_TOOLS));
+
+    // Force the height of the toolbar so we get the right amount of padding
+    // above and below the location bar. We always force the size of the hboxes
+    // to either side of the location box, but we only force the location box
+    // size in chrome-theme mode because that's the only time we try to control
+    // the font size.
+    int toolbar_height = ShouldOnlyShowLocation() ?
+                         kToolbarHeightLocationBarOnly : kToolbarHeight;
+    gtk_widget_set_size_request(toolbar_left_, -1, toolbar_height);
+    gtk_widget_set_size_request(toolbar_right_, -1, toolbar_height);
+    gtk_widget_set_size_request(location_hbox_, -1,
+                                use_gtk ? -1 : toolbar_height);
 
     // When using the GTK+ theme, we need to have the event box be visible so
     // buttons don't get a halo color from the background.  When using Chromium
     // themes, we want to let the background show through the toolbar.
-    gtk_event_box_set_visible_window(GTK_EVENT_BOX(event_box_),
-                                     theme_provider_->UseGtkTheme());
+    gtk_event_box_set_visible_window(GTK_EVENT_BOX(event_box_), use_gtk);
+
+    UpdateRoundedness();
+  } else if (type == NotificationType::UPGRADE_RECOMMENDED) {
+    MaybeShowUpgradeReminder();
   } else {
     NOTREACHED();
   }
@@ -428,13 +414,6 @@ void BrowserToolbarGtk::SetProfile(Profile* profile) {
 
   profile_ = profile;
   location_bar_->SetProfile(profile);
-
-  if (profile_->GetProfileSyncService()) {
-    // Obtain a pointer to the profile sync service and add our instance as an
-    // observer.
-    sync_service_ = profile_->GetProfileSyncService();
-    sync_service_->AddObserver(this);
-  }
 }
 
 void BrowserToolbarGtk::UpdateTabContents(TabContents* contents,
@@ -445,44 +424,12 @@ void BrowserToolbarGtk::UpdateTabContents(TabContents* contents,
     actions_toolbar_->Update();
 }
 
-gfx::Rect BrowserToolbarGtk::GetLocationStackBounds() const {
-  // The number of pixels from the left or right edges of the location stack to
-  // "just inside the visible borders".  When the omnibox bubble contents are
-  // aligned with this, the visible borders tacked on to the outsides will line
-  // up with the visible borders on the location stack.
-  const int kLocationStackEdgeWidth = 1;
-
-  GtkWidget* left;
-  GtkWidget* right;
-  if (base::i18n::IsRTL()) {
-    left = go_->widget();
-    right = star_->widget();
-  } else {
-    left = star_->widget();
-    right = go_->widget();
-  }
-
-  gint origin_x, origin_y;
-  DCHECK_EQ(left->window, right->window);
-  gdk_window_get_origin(left->window, &origin_x, &origin_y);
-
-  gint right_x = origin_x + right->allocation.x + right->allocation.width;
-  gint left_x = origin_x + left->allocation.x;
-  DCHECK_LE(left_x, right_x);
-
-  gfx::Rect stack_bounds(left_x, origin_y + left->allocation.y,
-                         right_x - left_x, left->allocation.height);
-  // Inset the bounds to just inside the visible edges (see comment above).
-  stack_bounds.Inset(kLocationStackEdgeWidth, 0);
-  return stack_bounds;
-}
-
 // BrowserToolbarGtk, private --------------------------------------------------
 
 CustomDrawButton* BrowserToolbarGtk::BuildToolbarButton(
     int normal_id, int active_id, int highlight_id, int depressed_id,
     int background_id, const std::string& localized_tooltip,
-    const char* stock_id) {
+    const char* stock_id, int spacing) {
   CustomDrawButton* button = new CustomDrawButton(
       GtkThemeProvider::GetFrom(profile_),
       normal_id, active_id, highlight_id, depressed_id, background_id, stock_id,
@@ -493,20 +440,8 @@ CustomDrawButton* BrowserToolbarGtk::BuildToolbarButton(
   g_signal_connect(button->widget(), "clicked",
                    G_CALLBACK(OnButtonClickThunk), this);
 
-  gtk_box_pack_start(GTK_BOX(toolbar_), button->widget(), FALSE, FALSE,
-                     kToolbarWidgetSpacing);
-  return button;
-}
-
-ToolbarStarToggleGtk* BrowserToolbarGtk::BuildStarButton(
-    const std::string& localized_tooltip) {
-  ToolbarStarToggleGtk* button = new ToolbarStarToggleGtk(this);
-
-  gtk_widget_set_tooltip_text(button->widget(),
-                              localized_tooltip.c_str());
-  g_signal_connect(button->widget(), "clicked",
-                   G_CALLBACK(OnButtonClickThunk), this);
-
+  gtk_box_pack_start(GTK_BOX(toolbar_left_), button->widget(), FALSE, FALSE,
+                     spacing);
   return button;
 }
 
@@ -524,40 +459,51 @@ GtkWidget* BrowserToolbarGtk::BuildToolbarMenuButton(
   return button;
 }
 
-void BrowserToolbarGtk::SetUpDragForHomeButton() {
-  gtk_drag_dest_set(home_->widget(), GTK_DEST_DEFAULT_ALL,
-                    NULL, 0, GDK_ACTION_COPY);
-  static const int targets[] = { gtk_dnd_util::TEXT_PLAIN,
-                                 gtk_dnd_util::TEXT_URI_LIST, -1 };
-  gtk_dnd_util::SetDestTargetList(home_->widget(), targets);
+void BrowserToolbarGtk::SetUpDragForHomeButton(bool enable) {
+  if (enable) {
+    gtk_drag_dest_set(home_->widget(), GTK_DEST_DEFAULT_ALL,
+                      NULL, 0, GDK_ACTION_COPY);
+    static const int targets[] = { gtk_dnd_util::TEXT_PLAIN,
+                                   gtk_dnd_util::TEXT_URI_LIST, -1 };
+    gtk_dnd_util::SetDestTargetList(home_->widget(), targets);
 
-  g_signal_connect(home_->widget(), "drag-data-received",
-                   G_CALLBACK(OnDragDataReceivedThunk), this);
+    drop_handler_.reset(new GtkSignalRegistrar());
+    drop_handler_->Connect(home_->widget(), "drag-data-received",
+                           G_CALLBACK(OnDragDataReceivedThunk), this);
+  } else {
+    gtk_drag_dest_unset(home_->widget());
+    drop_handler_.reset(NULL);
+  }
 }
 
-void BrowserToolbarGtk::ChangeActiveMenu(GtkWidget* active_menu,
-    guint timestamp) {
-  MenuGtk* old_menu;
-  MenuGtk* new_menu;
-  GtkWidget* relevant_button;
-  if (active_menu == app_menu_->widget()) {
-    old_menu = app_menu_.get();
-    new_menu = page_menu_.get();
-    relevant_button = page_menu_button_.get();
+bool BrowserToolbarGtk::UpdateRoundedness() {
+  // We still round the corners if we are in chrome theme mode, but we do it by
+  // drawing theme resources rather than changing the physical shape of the
+  // widget.
+  bool should_be_rounded = theme_provider_->UseGtkTheme() &&
+      window_->ShouldDrawContentDropShadow();
+
+  if (should_be_rounded == gtk_util::IsActingAsRoundedWindow(alignment_))
+    return false;
+
+  if (should_be_rounded) {
+    gtk_util::ActAsRoundedWindow(alignment_, GdkColor(), kToolbarCornerSize,
+                                 gtk_util::ROUNDED_TOP,
+                                 gtk_util::BORDER_NONE);
   } else {
-    old_menu = page_menu_.get();
-    new_menu = app_menu_.get();
-    relevant_button = app_menu_button_.get();
+    gtk_util::StopActingAsRoundedWindow(alignment_);
   }
 
-  old_menu->Cancel();
-  gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(relevant_button),
-                                    GTK_STATE_ACTIVE);
-  new_menu->Popup(relevant_button, 0, timestamp);
+  return true;
 }
 
 gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
                                               GdkEventExpose* e) {
+  // We may need to update the roundedness of the toolbar's top corners. In
+  // this case, don't draw; we'll be called again soon enough.
+  if (UpdateRoundedness())
+    return TRUE;
+
   // We don't need to render the toolbar image in GTK mode.
   if (theme_provider_->UseGtkTheme())
     return FALSE;
@@ -568,8 +514,90 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
 
   gfx::Point tabstrip_origin =
       window_->tabstrip()->GetTabStripOriginForWidget(widget);
-  gtk_util::DrawThemedToolbarBackground(widget, cr, e, tabstrip_origin,
-                                        theme_provider_);
+  // Fill the entire region with the toolbar color.
+  GdkColor color = theme_provider_->GetGdkColor(
+      BrowserThemeProvider::COLOR_TOOLBAR);
+  gdk_cairo_set_source_color(cr, &color);
+  cairo_fill(cr);
+
+  // The horizontal size of the top left and right corner images.
+  const int kCornerWidth = 4;
+  // The thickness of the shadow outside the toolbar's bounds; the offset
+  // between the edge of the toolbar and where we anchor the corner images.
+  const int kShadowThickness = 2;
+
+  gfx::Rect area(e->area);
+  gfx::Rect right(widget->allocation.x + widget->allocation.width -
+                      kCornerWidth,
+                  widget->allocation.y - kShadowThickness,
+                  kCornerWidth,
+                  widget->allocation.height + kShadowThickness);
+  gfx::Rect left(widget->allocation.x - kShadowThickness,
+                 widget->allocation.y - kShadowThickness,
+                 kCornerWidth,
+                 widget->allocation.height + kShadowThickness);
+
+  if (window_->ShouldDrawContentDropShadow()) {
+    // Leave room to draw rounded corners.
+    area = area.Subtract(right).Subtract(left);
+  }
+
+  CairoCachedSurface* background = theme_provider_->GetSurfaceNamed(
+      IDR_THEME_TOOLBAR, widget);
+  background->SetSource(cr, tabstrip_origin.x(), tabstrip_origin.y());
+  cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
+  cairo_rectangle(cr, area.x(), area.y(), area.width(), area.height());
+  cairo_fill(cr);
+
+  if (!window_->ShouldDrawContentDropShadow()) {
+    // The rest of this function is for rounded corners. Our work is done here.
+    cairo_destroy(cr);
+    return FALSE;
+  }
+
+  bool draw_left_corner = left.Intersects(gfx::Rect(e->area));
+  bool draw_right_corner = right.Intersects(gfx::Rect(e->area));
+
+  if (draw_left_corner || draw_right_corner) {
+    // Create a mask which is composed of the left and/or right corners.
+    cairo_surface_t* target = cairo_surface_create_similar(
+        cairo_get_target(cr),
+        CAIRO_CONTENT_COLOR_ALPHA,
+        widget->allocation.x + widget->allocation.width,
+        widget->allocation.y + widget->allocation.height);
+    cairo_t* copy_cr = cairo_create(target);
+
+    cairo_set_operator(copy_cr, CAIRO_OPERATOR_SOURCE);
+    if (draw_left_corner) {
+      CairoCachedSurface* left_corner = theme_provider_->GetSurfaceNamed(
+          IDR_CONTENT_TOP_LEFT_CORNER_MASK, widget);
+      left_corner->SetSource(copy_cr, left.x(), left.y());
+      cairo_paint(copy_cr);
+    }
+    if (draw_right_corner) {
+      CairoCachedSurface* right_corner = theme_provider_->GetSurfaceNamed(
+          IDR_CONTENT_TOP_RIGHT_CORNER_MASK, widget);
+      right_corner->SetSource(copy_cr, right.x(), right.y());
+      // We fill a path rather than just painting because we don't want to
+      // overwrite the left corner.
+      cairo_rectangle(copy_cr, right.x(), right.y(),
+                      right.width(), right.height());
+      cairo_fill(copy_cr);
+    }
+
+    // Draw the background. CAIRO_OPERATOR_IN uses the existing pixel data as
+    // an alpha mask.
+    background->SetSource(copy_cr, tabstrip_origin.x(), tabstrip_origin.y());
+    cairo_set_operator(copy_cr, CAIRO_OPERATOR_IN);
+    cairo_pattern_set_extend(cairo_get_source(copy_cr), CAIRO_EXTEND_REPEAT);
+    cairo_paint(copy_cr);
+    cairo_destroy(copy_cr);
+
+    // Copy the temporary surface to the screen.
+    cairo_set_source_surface(cr, target, 0, 0);
+    cairo_paint(cr);
+    cairo_surface_destroy(target);
+  }
 
   cairo_destroy(cr);
 
@@ -579,73 +607,24 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
 gboolean BrowserToolbarGtk::OnLocationHboxExpose(GtkWidget* location_hbox,
                                                  GdkEventExpose* e) {
   if (theme_provider_->UseGtkTheme()) {
-    // To get the proper look surrounding the location bar, we issue raw gtk
-    // painting commands to the theme engine. We figure out the region from the
-    // leftmost widget to the rightmost and then tell GTK to perform the same
-    // drawing commands that draw a GtkEntry on that region.
-    GtkWidget* star = star_->widget();
-    GtkWidget* left = NULL;
-    GtkWidget* right = NULL;
-    if (ShouldOnlyShowLocation()) {
-      left = location_hbox;
-      right = location_hbox;
-    } else if (gtk_widget_get_direction(star) == GTK_TEXT_DIR_LTR) {
-      left = star_->widget();
-      right = go_->widget();
-    } else {
-      left = go_->widget();
-      right = star_->widget();
-    }
-
-    GdkRectangle rec = {
-      left->allocation.x,
-      left->allocation.y,
-      (right->allocation.x - left->allocation.x) + right->allocation.width,
-      (right->allocation.y - left->allocation.y) + right->allocation.height
-    };
-
-    // Make sure our off screen entry has the correct base color if we're in
-    // secure mode.
-    gtk_widget_modify_base(
-        offscreen_entry_.get(), GTK_STATE_NORMAL,
-        (browser_->toolbar_model()->GetSchemeSecurityLevel() ==
-         ToolbarModel::SECURE) ?
-        &kSecureColor : NULL);
-
     gtk_util::DrawTextEntryBackground(offscreen_entry_.get(),
                                       location_hbox, &e->area,
-                                      &rec);
+                                      &location_hbox->allocation);
   }
 
   return FALSE;
 }
 
 void BrowserToolbarGtk::OnButtonClick(GtkWidget* button) {
-  if ((button == back_->widget()) ||
-      (button == forward_->widget())) {
-    location_bar_->Revert();
+  if ((button == back_->widget()) || (button == forward_->widget())) {
+    if (gtk_util::DispositionForCurrentButtonPressEvent() == CURRENT_TAB)
+      location_bar_->Revert();
     return;
   }
 
-  int tag = -1;
-  if (button == reload_->widget()) {
-    GdkModifierType modifier_state;
-    if (gtk_get_current_event_state(&modifier_state) &&
-        modifier_state & GDK_SHIFT_MASK) {
-      tag = IDC_RELOAD_IGNORING_CACHE;
-    } else {
-      tag = IDC_RELOAD;
-    }
-    location_bar_->Revert();
-  } else if (home_.get() && button == home_->widget()) {
-    tag = IDC_HOME;
-  } else if (button == star_->widget()) {
-    tag = IDC_BOOKMARK_PAGE;
-  }
-
-  DCHECK_NE(tag, -1) << "Unexpected button click callback";
-  browser_->ExecuteCommandWithDisposition(tag,
-      gtk_util::DispositionForCurrentButtonPressEvent());
+  DCHECK(home_.get() && button == home_->widget()) <<
+      "Unexpected button click callback";
+  browser_->Home(gtk_util::DispositionForCurrentButtonPressEvent());
 }
 
 gboolean BrowserToolbarGtk::OnMenuButtonPressEvent(GtkWidget* button,
@@ -655,10 +634,7 @@ gboolean BrowserToolbarGtk::OnMenuButtonPressEvent(GtkWidget* button,
 
   gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(button),
                                     GTK_STATE_ACTIVE);
-  MenuGtk* menu = button == page_menu_button_.get() ?
-                  page_menu_.get() : app_menu_.get();
-  menu->Popup(button, reinterpret_cast<GdkEvent*>(event));
-  menu_bar_helper_.MenuStartedShowing(button, menu->widget());
+  app_menu_->Popup(button, reinterpret_cast<GdkEvent*>(event));
 
   return TRUE;
 }
@@ -676,36 +652,35 @@ void BrowserToolbarGtk::OnDragDataReceived(GtkWidget* widget,
     return;
 
   bool url_is_newtab = url.spec() == chrome::kChromeUINewTabURL;
-  profile_->GetPrefs()->SetBoolean(prefs::kHomePageIsNewTabPage,
-                                   url_is_newtab);
-  if (!url_is_newtab) {
-    profile_->GetPrefs()->SetString(prefs::kHomePage,
-                                    UTF8ToWide(url.spec()));
-  }
+  home_page_is_new_tab_page_.SetValue(url_is_newtab);
+  if (!url_is_newtab)
+    home_page_.SetValue(url.spec());
 }
 
-void BrowserToolbarGtk::OnStateChanged() {
-  DCHECK(sync_service_);
-
-  std::string menu_label = UTF16ToUTF8(
-      sync_ui_util::GetSyncMenuLabel(sync_service_));
-
-  gtk_container_foreach(GTK_CONTAINER(app_menu_->widget()), &SetSyncMenuLabel,
-                        &menu_label);
-}
-
-// static
-void BrowserToolbarGtk::SetSyncMenuLabel(GtkWidget* widget, gpointer userdata) {
-  const MenuCreateMaterial* data =
-      reinterpret_cast<const MenuCreateMaterial*>(
-          g_object_get_data(G_OBJECT(widget), "menu-data"));
-  if (data) {
-    if (data->id == IDC_SYNC_BOOKMARKS) {
-      std::string label = gtk_util::ConvertAcceleratorsFromWindowsStyle(
-          *reinterpret_cast<const std::string*>(userdata));
-      GtkWidget *menu_label = gtk_bin_get_child(GTK_BIN(widget));
-      gtk_label_set_label(GTK_LABEL(menu_label), label.c_str());
+void BrowserToolbarGtk::NotifyPrefChanged(const std::wstring* pref) {
+  if (!pref || *pref == prefs::kShowHomeButton) {
+    if (show_home_button_.GetValue() && !ShouldOnlyShowLocation()) {
+      gtk_widget_show(home_->widget());
+    } else {
+      gtk_widget_hide(home_->widget());
     }
+  }
+
+  if (!pref ||
+      *pref == prefs::kHomePage ||
+      *pref == prefs::kHomePageIsNewTabPage)
+    SetUpDragForHomeButton(!home_page_.IsManaged() &&
+                           !home_page_is_new_tab_page_.IsManaged());
+}
+
+void BrowserToolbarGtk::MaybeShowUpgradeReminder() {
+  // Only show the upgrade reminder animation for the currently active window.
+  if (window_->IsActive() &&
+      Singleton<UpgradeDetector>::get()->notify_upgrade() &&
+      !upgrade_reminder_canceled_) {
+    upgrade_reminder_animation_.StartThrobbing(-1);
+  } else {
+    upgrade_reminder_animation_.Reset();
   }
 }
 
@@ -714,21 +689,63 @@ bool BrowserToolbarGtk::ShouldOnlyShowLocation() const {
   return browser_->type() != Browser::TYPE_NORMAL;
 }
 
-void BrowserToolbarGtk::PopupForButton(GtkWidget* button) {
-  page_menu_->Cancel();
-  app_menu_->Cancel();
-
-  gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(button),
-                                    GTK_STATE_ACTIVE);
-  MenuGtk* menu = button == page_menu_button_.get() ?
-                  page_menu_.get() : app_menu_.get();
-  menu->PopupAsFromKeyEvent(button);
-  menu_bar_helper_.MenuStartedShowing(button, menu->widget());
+void BrowserToolbarGtk::AnimationEnded(const Animation* animation) {
+  DCHECK_EQ(animation, &upgrade_reminder_animation_);
+  gtk_widget_queue_draw(app_menu_image_.get());
 }
 
-void BrowserToolbarGtk::PopupForButtonNextTo(GtkWidget* button,
-                                             GtkMenuDirectionType dir) {
-  GtkWidget* other_button = button == page_menu_button_.get() ?
-      app_menu_button_.get() : page_menu_button_.get();
-  PopupForButton(other_button);
+void BrowserToolbarGtk::AnimationProgressed(const Animation* animation) {
+  DCHECK_EQ(animation, &upgrade_reminder_animation_);
+  if (UpgradeAnimationIsFaded())
+    gtk_widget_queue_draw(app_menu_image_.get());
+}
+
+void BrowserToolbarGtk::AnimationCanceled(const Animation* animation) {
+  AnimationEnded(animation);
+}
+
+void BrowserToolbarGtk::ActiveWindowChanged(GdkWindow* active_window) {
+  MaybeShowUpgradeReminder();
+}
+
+void BrowserToolbarGtk::OnAppMenuShow(GtkWidget* sender) {
+  if (upgrade_reminder_animation_.is_animating()) {
+    upgrade_reminder_canceled_ = true;
+    MaybeShowUpgradeReminder();
+  }
+}
+
+gboolean BrowserToolbarGtk::OnAppMenuImageExpose(GtkWidget* sender,
+                                                 GdkEventExpose* expose) {
+  if (!Singleton<UpgradeDetector>::get()->notify_upgrade())
+    return FALSE;
+
+  SkBitmap badge;
+  if (UpgradeAnimationIsFaded()) {
+    badge = SkBitmapOperations::CreateBlendedBitmap(
+        *theme_provider_->GetBitmapNamed(IDR_UPGRADE_DOT_ACTIVE),
+        *theme_provider_->GetBitmapNamed(IDR_UPGRADE_DOT_INACTIVE),
+        upgrade_reminder_animation_.GetCurrentValue());
+  } else {
+    badge = *theme_provider_->GetBitmapNamed(IDR_UPGRADE_DOT_INACTIVE);
+  }
+
+  // Draw the chrome app menu icon onto the canvas.
+  gfx::CanvasSkiaPaint canvas(expose, false);
+  int x_offset = base::i18n::IsRTL() ?
+      sender->allocation.width - kUpgradeDotOffset - badge.width() :
+      kUpgradeDotOffset;
+  canvas.DrawBitmapInt(
+      badge,
+      sender->allocation.x + x_offset,
+      sender->allocation.y + sender->allocation.height - badge.height());
+
+  return FALSE;
+}
+
+bool BrowserToolbarGtk::UpgradeAnimationIsFaded() {
+  return upgrade_reminder_animation_.cycles_remaining() > 0 &&
+      // This funky looking math makes the badge throb for 2 seconds once
+      // every 8 seconds.
+      ((upgrade_reminder_animation_.cycles_remaining() - 1) / 2) % 4 == 0;
 }

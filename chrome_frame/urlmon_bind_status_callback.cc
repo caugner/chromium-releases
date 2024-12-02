@@ -75,8 +75,10 @@ STDMETHODIMP CacheStream::Read(void* pv, ULONG cb, ULONG* read) {
   if (!pv || !read)
     return E_INVALIDARG;
 
-  if (!cache_.get())
-    return E_FAIL;
+  if (!cache_.get()) {
+    *read = 0;
+    return S_FALSE;
+  }
 
   // Default to E_PENDING to signal that this is a partial data.
   HRESULT hr = eof_ ? S_FALSE : E_PENDING;
@@ -175,12 +177,12 @@ void SniffData::DetermineRendererType(bool last_chance) {
       if (is_cache_valid() && cache_) {
         HGLOBAL memory = NULL;
         GetHGlobalFromStream(cache_, &memory);
-        char* buffer = reinterpret_cast<char*>(GlobalLock(memory));
+        const char* buffer = reinterpret_cast<const char*>(GlobalLock(memory));
 
         std::wstring html_contents;
         // TODO(joshia): detect and handle different content encodings
         if (buffer && size_) {
-          UTF8ToWide(buffer, size_, &html_contents);
+          UTF8ToWide(buffer, std::min(size_, kMaxSniffSize), &html_contents);
           GlobalUnlock(memory);
         }
 
@@ -195,8 +197,8 @@ void SniffData::DetermineRendererType(bool last_chance) {
       }
     }
     DLOG(INFO) << __FUNCTION__ << "Url: " << url_ <<
-      StringPrintf("Renderer type: %s",
-                    renderer_type_ == CHROME ? "CHROME" : "OTHER");
+        StringPrintf("Renderer type: %s",
+                      renderer_type_ == CHROME ? "CHROME" : "OTHER");
   }
 }
 
@@ -277,9 +279,9 @@ STDMETHODIMP BSCBStorageBind::OnDataAvailable(DWORD flags, DWORD size,
   // the chain handles the exception.
   ExceptionBarrier barrier;
   // Do not touch anything other than text/html.
-  const CLIPFORMAT text_html = RegisterClipboardFormat(CFSTR_MIME_HTML);
   bool is_interesting = (format_etc && stgmed && stgmed->pstm &&
-      (stgmed->tymed == TYMED_ISTREAM) && (text_html == format_etc->cfFormat));
+      stgmed->tymed == TYMED_ISTREAM &&
+      IsTextHtmlClipFormat(format_etc->cfFormat));
 
   if (!is_interesting) {
     // Play back report progress so far.
@@ -426,3 +428,4 @@ bool BSCBStorageBind::ShouldCacheProgress(unsigned long status_code) const {
 
   return false;
 }
+

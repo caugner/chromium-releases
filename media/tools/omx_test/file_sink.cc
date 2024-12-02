@@ -10,36 +10,8 @@
 
 namespace media {
 
-bool FileSink::AllocateEGLImages(int width, int height,
-                                 std::vector<EGLImageKHR>* images) {
-  NOTREACHED() << "This method is never used";
-  return false;
-}
 
-void FileSink::ReleaseEGLImages(const std::vector<EGLImageKHR>& images) {
-  NOTREACHED() << "This method is never used";
-}
-
-void FileSink::UseThisBuffer(int buffer_id, OMX_BUFFERHEADERTYPE* buffer) {
-  CHECK(omx_buffers_.find(buffer_id) == omx_buffers_.end());
-  omx_buffers_[buffer_id] = buffer;
-}
-
-void FileSink::StopUsingThisBuffer(int id) {
-  omx_buffers_.erase(id);
-}
-
-void FileSink::BufferReady(int buffer_id, BufferUsedCallback* callback) {
-  CHECK(omx_buffers_.find(buffer_id) != omx_buffers_.end());
-  CHECK(callback);
-
-  OMX_BUFFERHEADERTYPE* omx_buffer = omx_buffers_[buffer_id];
-  uint8* buffer = omx_buffer->pBuffer;
-  int size = omx_buffer->nFilledLen;
-
-  // We never receive an end-of-stream buffer here.
-  CHECK(!(omx_buffer->nFlags & OMX_BUFFERFLAG_EOS));
-
+void FileSink::BufferReady(int size, uint8* buffer) {
   if (size > copy_buf_size_) {
     copy_buf_.reset(new uint8[size]);
     copy_buf_size_ = size;
@@ -62,18 +34,14 @@ void FileSink::BufferReady(int buffer_id, BufferUsedCallback* callback) {
 
   if (output_file_.get())
     fwrite(out_buffer, sizeof(uint8), size, output_file_.get());
-
-  // Always make the callback.
-  callback->Run(buffer_id);
-  delete callback;
 }
 
 bool FileSink::Initialize() {
   // Opens the output file for writing.
-  if (!output_filename_.empty()) {
-    output_file_.Set(file_util::OpenFile(output_filename_, "wb"));
+  if (!output_path_.empty()) {
+    output_file_.Set(file_util::OpenFile(output_path_, "wb"));
     if (!output_file_.get()) {
-      LOG(ERROR) << "can't open dump file %s" << output_filename_;
+      LOG(ERROR) << "can't open dump file %s" << output_path_.value();
       return false;
     }
   }

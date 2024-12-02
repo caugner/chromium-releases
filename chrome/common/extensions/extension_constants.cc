@@ -7,7 +7,9 @@
 namespace extension_manifest_keys {
 
 const wchar_t* kAllFrames = L"all_frames";
+const wchar_t* kApp = L"app";
 const wchar_t* kBackground = L"background_page";
+const wchar_t* kBrowseURLs = L"app.browse_urls";
 const wchar_t* kBrowserAction = L"browser_action";
 const wchar_t* kChromeURLOverrides = L"chrome_url_overrides";
 const wchar_t* kContentScripts = L"content_scripts";
@@ -16,17 +18,21 @@ const wchar_t* kCss = L"css";
 const wchar_t* kCurrentLocale = L"current_locale";
 const wchar_t* kDefaultLocale = L"default_locale";
 const wchar_t* kDescription = L"description";
+const wchar_t* kExcludeGlobs = L"exclude_globs";
 const wchar_t* kIcons = L"icons";
+const wchar_t* kIncludeGlobs = L"include_globs";
 const wchar_t* kJs = L"js";
-const wchar_t* kLaunch = L"launch";
-const wchar_t* kLaunchContainer = L"launch.container";
-const wchar_t* kLaunchLocalPath = L"launch.local_path";
-const wchar_t* kLaunchWebURL = L"launch.web_url";
+const wchar_t* kLaunch = L"app.launch";
+const wchar_t* kLaunchContainer = L"app.launch.container";
+const wchar_t* kLaunchFullscreen = L"app.launch.fullscreen";
+const wchar_t* kLaunchHeight = L"app.launch.height";
+const wchar_t* kLaunchLocalPath = L"app.launch.local_path";
+const wchar_t* kLaunchWebURL = L"app.launch.web_url";
+const wchar_t* kLaunchWidth = L"app.launch.width";
 const wchar_t* kMatches = L"matches";
 const wchar_t* kMinimumChromeVersion = L"minimum_chrome_version";
-const wchar_t* kIncludeGlobs = L"include_globs";
-const wchar_t* kExcludeGlobs = L"exclude_globs";
 const wchar_t* kName = L"name";
+const wchar_t* kOmniboxKeyword = L"omnibox_keyword";
 const wchar_t* kPageActionId = L"id";
 const wchar_t* kPageAction = L"page_action";
 const wchar_t* kPageActions = L"page_actions";
@@ -57,10 +63,7 @@ const wchar_t* kType = L"type";
 const wchar_t* kVersion = L"version";
 const wchar_t* kUpdateURL = L"update_url";
 const wchar_t* kOptionsPage = L"options_page";
-const wchar_t* kWebContent = L"web_content";
-const wchar_t* kWebContentEnabled = L"web_content.enabled";
-const wchar_t* kWebOrigin = L"web_content.origin";
-const wchar_t* kWebPaths = L"web_content.paths";
+const wchar_t* kWebURLs = L"app.urls";
 }  // namespace extension_manifest_keys
 
 namespace extension_manifest_values {
@@ -84,6 +87,10 @@ const char* kChromeVersionTooLow =
     "This extension requires * version * or greater.";
 const char* kInvalidAllFrames =
     "Invalid value for 'content_scripts[*].all_frames'.";
+const char* kInvalidBrowseURL =
+    "Invalid value for 'app.browse_urls[*]'.";
+const char* kInvalidBrowseURLs =
+    "Invalid value for 'app.browse_urls'.";
 const char* kInvalidBrowserAction =
     "Invalid value for 'browser_action'.";
 const char* kInvalidChromeURLOverrides =
@@ -111,11 +118,21 @@ const char* kInvalidJs =
 const char* kInvalidJsList =
     "Required value 'content_scripts[*].js' is invalid.";
 const char* kInvalidLaunchContainer =
-    "Invalid value for 'launch.container'.";
+    "Invalid value for 'app.launch.container'.";
+const char* kInvalidLaunchFullscreen =
+    "Invalid value for 'app.launch.fullscreen'.";
+const char* kInvalidLaunchHeight =
+    "Invalid value for 'app.launch.height'.";
+const char* kInvalidLaunchHeightContainer =
+    "Invalid container type for 'app.launch.height'.";
 const char* kInvalidLaunchLocalPath =
-    "Invalid value for 'launch.local_path'.";
+    "Invalid value for 'app.launch.local_path'.";
 const char* kInvalidLaunchWebURL =
-    "Invalid value for 'launch.web_url'.";
+    "Invalid value for 'app.launch.web_url'.";
+const char* kInvalidLaunchWidth =
+    "Invalid value for 'app.launch.width'.";
+const char* kInvalidLaunchWidthContainer =
+    "Invalid container type for 'app.launch.width'.";
 const char* kInvalidKey =
     "Value 'key' is missing or invalid.";
 const char* kInvalidManifest =
@@ -204,24 +221,20 @@ const char* kInvalidThemeTints =
     "Invalid value for theme images - tints must be decimal numbers.";
 const char* kInvalidUpdateURL =
     "Invalid value for update url: '[*]'.";
-const char* kInvalidWebContentEnabled =
-    "Invalid value for 'web_content.enabled'.";
-const char* kInvalidWebOrigin =
-    "Invalid value for 'web_content.origin'.";
-const char* kInvalidWebPaths =
-    "Invalid value for 'web_content.paths'.";
-const char* kInvalidWebPath =
-    "Invalid value for 'web_contents.paths[*]'.";
+const char* kInvalidWebURLs =
+    "Invalid value for 'app.urls'.";
+const char* kInvalidWebURL =
+    "Invalid value for 'app.urls[*]'.";
 const char* kInvalidDefaultLocale =
     "Invalid value for default locale - locale name must be a string.";
 const char* kOneUISurfaceOnly =
     "An extension cannot have both a page action and a browser action.";
 const char* kThemesCannotContainExtensions =
     "A theme cannot contain extensions code.";
-const char* kLaunchContainerWithoutURL =
-    "Launch container specified, but no local_path or web_url to launch.";
 const char* kLaunchPathAndURLAreExclusive =
-    "The 'launch.local_path' and 'launch.web_url' keys cannot both be set.";
+    "The 'app.launch.local_path' and 'launch.web_url' keys cannot both be set.";
+const char* kLaunchURLRequired =
+    "Either 'app.launch.local_path' or 'app.launch.web_url' is required.";
 const char* kLocalesNoDefaultLocaleSpecified =
     "Localization used, but default_locale wasn't specified in the manifest.";
 const char* kLocalesNoDefaultMessages =
@@ -239,14 +252,36 @@ const char* kReservedMessageFound =
 const char* kCannotAccessPage = "Cannot access contents of url \"*\". "
     "Extension manifest must request permission to access this host.";
 const char* kCannotScriptGallery = "The extensions gallery cannot be scripted.";
-const char* kWebContentMustBeEnabled = "The 'web_content.enabled' property "
-    "must be set to true in order to use any other web content features.";
+const char* kInvalidOmniboxKeyword =
+    "Invalid value for 'omnibox_keyword'.";
+const char* kOmniboxExperimental =
+    "You must request the 'experimental' permission in order to use the"
+    " omnibox API.";
 }  // namespace extension_manifest_errors
 
 namespace extension_urls {
 const char* kGalleryBrowsePrefix = "https://chrome.google.com/extensions";
 const char* kGalleryDownloadPrefix =
     "https://clients2.googleusercontent.com/crx/download";
+const char* kGalleryUpdateHttpUrl =
+    "http://clients2.google.com/service/update2/crx";
+const char* kGalleryUpdateHttpsUrl =
+    "https://clients2.google.com/service/update2/crx";
 const char* kMiniGalleryBrowsePrefix = "https://tools.google.com/chrome/";
 const char* kMiniGalleryDownloadPrefix = "https://dl-ssl.google.com/chrome/";
+}
+
+namespace extension_filenames {
+const char* kTempExtensionName = "CRX_INSTALL";
+
+// The file to write our decoded images to, relative to the extension_path.
+const char* kDecodedImagesFilename = "DECODED_IMAGES";
+
+// The file to write our decoded message catalogs to, relative to the
+// extension_path.
+const char* kDecodedMessageCatalogsFilename = "DECODED_MESSAGE_CATALOGS";
+}
+
+namespace extension_misc {
+const char* kBookmarkManagerId = "eemcgdkfndhakfknompkggombfjjjeno";
 }

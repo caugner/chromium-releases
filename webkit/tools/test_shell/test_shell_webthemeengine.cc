@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,10 +24,6 @@
 #include "webkit/tools/test_shell/test_shell_webthemecontrol.h"
 #include "third_party/skia/include/core/SkRect.h"
 
-#ifndef CHECK_EQ
-#define CHECK_EQ(a, b) CHECK((a) == (b))
-#endif
-
 // We define this for clarity, although there really should be a DFCS_NORMAL
 // in winuser.h.
 namespace {
@@ -40,24 +36,31 @@ using WebKit::WebRect;
 
 namespace TestShellWebTheme {
 
-SkIRect webRectToSkIRect(const WebRect &web_rect) {
+SkIRect webRectToSkIRect(const WebRect& web_rect) {
   SkIRect irect;
   irect.set(web_rect.x, web_rect.y, web_rect.x + web_rect.width,
             web_rect.y + web_rect.height);
   return irect;
 }
 
-void drawControl(WebCanvas *canvas, const WebRect &rect, Control::Type ctype,
+void drawControl(WebCanvas* canvas, const WebRect& rect, Control::Type ctype,
                  Control::State cstate) {
   Control control(canvas, webRectToSkIRect(rect), ctype, cstate);
   control.draw();
 }
 
-void drawTextField(WebCanvas *canvas, const WebRect &rect,
+void drawTextField(WebCanvas* canvas, const WebRect& rect,
                    Control::Type ctype, Control::State cstate,
                    bool draw_edges, bool fill_content_area, WebColor color) {
   Control control(canvas, webRectToSkIRect(rect), ctype, cstate);
   control.drawTextField(draw_edges, fill_content_area, color);
+}
+
+void drawProgressBar(WebCanvas* canvas,
+                     Control::Type ctype, Control::State cstate,
+                     const WebRect& bar_rect, const WebRect& fill_rect) {
+  Control control(canvas, webRectToSkIRect(bar_rect), ctype, cstate);
+  control.drawProgressBar(webRectToSkIRect(fill_rect));
 }
 
 void Engine::paintButton(WebCanvas* canvas, int part, int state,
@@ -106,6 +109,28 @@ void Engine::paintButton(WebCanvas* canvas, int part, int state,
         CHECK_EQ(classic_state,
                  DFCS_BUTTONCHECK | DFCS_CHECKED | DFCS_INACTIVE);
         ctype = Control::kCheckedBox_Type;
+        cstate = Control::kDisabled_State;
+        break;
+      case CBS_MIXEDNORMAL:
+        // Classic theme can't represent mixed state checkbox. We assume
+        // it's equivalent to unchecked.
+        CHECK_EQ(classic_state, DFCS_BUTTONCHECK);
+        ctype = Control::kIndeterminateCheckBox_Type;
+        cstate = Control::kNormal_State;
+        break;
+      case CBS_MIXEDHOT:
+        CHECK_EQ(classic_state, DFCS_BUTTONCHECK | DFCS_HOT);
+        ctype = Control::kIndeterminateCheckBox_Type;
+        cstate = Control::kHot_State;
+        break;
+      case CBS_MIXEDPRESSED:
+        CHECK_EQ(classic_state, DFCS_BUTTONCHECK | DFCS_PUSHED);
+        ctype = Control::kIndeterminateCheckBox_Type;
+        cstate = Control::kPressed_State;
+        break;
+      case CBS_MIXEDDISABLED:
+        CHECK_EQ(classic_state, DFCS_BUTTONCHECK | DFCS_INACTIVE);
+        ctype = Control::kIndeterminateCheckBox_Type;
         cstate = Control::kDisabled_State;
         break;
       default:
@@ -531,6 +556,17 @@ void Engine::paintTrackbar(WebCanvas* canvas, int part, int state,
   }
 
   drawControl(canvas, rect, ctype, cstate);
+}
+
+
+void Engine::paintProgressBar(WebKit::WebCanvas* canvas,
+                              const WebKit::WebRect& barRect,
+                              const WebKit::WebRect& valueRect,
+                              bool determinate, double) {
+  Control::Type ctype = Control::kProgressBar_Type;
+  Control::State cstate =
+      determinate ? Control::kNormal_State : Control::kIndeterminate_State;
+  drawProgressBar(canvas, ctype, cstate, barRect, valueRect);
 }
 
 }  // namespace TestShellWebTheme

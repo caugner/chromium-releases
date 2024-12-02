@@ -14,8 +14,10 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/debugger/devtools_toggle_action.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_disabled_infobar_delegate.h"
+#include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_message_service.h"
@@ -27,12 +29,11 @@
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_error_reporter.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/jstemplate_builder.h"
@@ -55,7 +56,7 @@ namespace {
 static bool ShouldShowExtension(Extension* extension) {
   // Don't show the themes since this page's UI isn't really useful for
   // themes.
-  if (extension->IsTheme())
+  if (extension->is_theme())
     return false;
 
   // Don't show component extensions because they are only extensions as an
@@ -99,12 +100,12 @@ void ExtensionsUIHTMLSource::StartDataRequest(const std::string& path,
       l10n_util::GetStringF(IDS_EXTENSIONS_NONE_INSTALLED_SUGGEST_GALLERY,
           std::wstring(L"<a href='") +
           ASCIIToWide(google_util::AppendGoogleLocaleParam(
-              GURL(extension_urls::kGalleryBrowsePrefix)).spec()) + L"'>",
+              GURL(Extension::ChromeStoreURL())).spec()) + L"'>",
           L"</a>"));
   localized_strings.SetString(L"getMoreExtensions",
       std::wstring(L"<a href='") +
           ASCIIToWide(google_util::AppendGoogleLocaleParam(
-              GURL(extension_urls::kGalleryBrowsePrefix)).spec()) + L"'>" +
+              GURL(Extension::ChromeStoreURL())).spec()) + L"'>" +
           l10n_util::GetString(IDS_GET_MORE_EXTENSIONS) +
           L"</a>");
   localized_strings.SetString(L"extensionDisabled",
@@ -125,6 +126,10 @@ void ExtensionsUIHTMLSource::StartDataRequest(const std::string& path,
       l10n_util::GetString(IDS_EXTENSIONS_ENABLE));
   localized_strings.SetString(L"enableIncognito",
       l10n_util::GetString(IDS_EXTENSIONS_ENABLE_INCOGNITO));
+  localized_strings.SetString(L"allowFileAccess",
+      l10n_util::GetString(IDS_EXTENSIONS_ALLOW_FILE_ACCESS));
+  localized_strings.SetString(L"incognitoWarning",
+      l10n_util::GetString(IDS_EXTENSIONS_INCOGNITO_WARNING));
   localized_strings.SetString(L"reload",
       l10n_util::GetString(IDS_EXTENSIONS_RELOAD));
   localized_strings.SetString(L"uninstall",
@@ -206,8 +211,8 @@ void ExtensionsDOMHandler::IconLoader::LoadIconsOnFileThread(
                                      &file_contents)) {
       // If there's no icon, default to the puzzle icon. This is safe to do from
       // the file thread.
-      file_contents = ResourceBundle::GetSharedInstance().GetDataResource(
-          IDR_EXTENSION_DEFAULT_ICON);
+      file_contents = ResourceBundle::GetSharedInstance().GetRawDataResource(
+          IDR_EXTENSION_DEFAULT_ICON).as_string();
     }
 
     // If the extension is disabled, we desaturate the icon to add to the
@@ -262,7 +267,9 @@ void ExtensionsDOMHandler::IconLoader::ReportResultOnUIThread(
 ///////////////////////////////////////////////////////////////////////////////
 
 ExtensionsDOMHandler::ExtensionsDOMHandler(ExtensionsService* extension_service)
-    : extensions_service_(extension_service) {
+    : extensions_service_(extension_service),
+      ignore_notifications_(false),
+      deleting_rvh_(NULL) {
 }
 
 void ExtensionsDOMHandler::RegisterMessages() {
@@ -278,6 +285,8 @@ void ExtensionsDOMHandler::RegisterMessages() {
       NewCallback(this, &ExtensionsDOMHandler::HandleEnableMessage));
   dom_ui_->RegisterMessageCallback("enableIncognito",
       NewCallback(this, &ExtensionsDOMHandler::HandleEnableIncognitoMessage));
+  dom_ui_->RegisterMessageCallback("allowFileAccess",
+      NewCallback(this, &ExtensionsDOMHandler::HandleAllowFileAccessMessage));
   dom_ui_->RegisterMessageCallback("uninstall",
       NewCallback(this, &ExtensionsDOMHandler::HandleUninstallMessage));
   dom_ui_->RegisterMessageCallback("options",
@@ -304,13 +313,19 @@ void ExtensionsDOMHandler::HandleRequestExtensionsData(const Value* value) {
   std::vector<ExtensionResource>* extension_icons =
       new std::vector<ExtensionResource>();
 
+  ExtensionProcessManager* process_manager =
+      extensions_service_->profile()->GetExtensionProcessManager();
   const ExtensionList* extensions = extensions_service_->extensions();
   for (ExtensionList::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
     if (ShouldShowExtension(*extension)) {
+      RenderProcessHost* process =
+          process_manager->GetExtensionProcess((*extension)->url());
       extensions_list->Append(CreateExtensionDetailValue(
           extensions_service_.get(),
-          *extension, GetActivePagesForExtension((*extension)->id()), true));
+          *extension,
+          GetActivePagesForExtension(process, *extension),
+          true));  // enabled
       extension_icons->push_back(PickExtensionIcon(*extension));
     }
   }
@@ -318,9 +333,13 @@ void ExtensionsDOMHandler::HandleRequestExtensionsData(const Value* value) {
   for (ExtensionList::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
     if (ShouldShowExtension(*extension)) {
+      RenderProcessHost* process =
+          process_manager->GetExtensionProcess((*extension)->url());
       extensions_list->Append(CreateExtensionDetailValue(
           extensions_service_.get(),
-          *extension, GetActivePagesForExtension((*extension)->id()), false));
+          *extension,
+          GetActivePagesForExtension(process, *extension),
+          false));  // enabled
       extension_icons->push_back(PickExtensionIcon(*extension));
     }
   }
@@ -357,6 +376,18 @@ void ExtensionsDOMHandler::OnIconsLoaded(DictionaryValue* json) {
       NotificationService::AllSources());
   registrar_.Add(this,
       NotificationType::EXTENSION_FUNCTION_DISPATCHER_DESTROYED,
+      NotificationService::AllSources());
+  registrar_.Add(this,
+      NotificationType::NAV_ENTRY_COMMITTED,
+      NotificationService::AllSources());
+  registrar_.Add(this,
+      NotificationType::RENDER_VIEW_HOST_DELETED,
+      NotificationService::AllSources());
+  registrar_.Add(this,
+      NotificationType::BACKGROUND_CONTENTS_NAVIGATED,
+      NotificationService::AllSources());
+  registrar_.Add(this,
+      NotificationType::BACKGROUND_CONTENTS_DELETED,
       NotificationService::AllSources());
 }
 
@@ -406,7 +437,9 @@ void ExtensionsDOMHandler::HandleInspectMessage(const Value* value) {
     return;
   }
 
-  DevToolsManager::GetInstance()->ToggleDevToolsWindow(host, true);
+  DevToolsManager::GetInstance()->ToggleDevToolsWindow(
+      host,
+      DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
 }
 
 void ExtensionsDOMHandler::HandleReloadMessage(const Value* value) {
@@ -451,18 +484,34 @@ void ExtensionsDOMHandler::HandleEnableIncognitoMessage(const Value* value) {
                                                                true);
   DCHECK(extension);
 
-  if (enable_str == "true") {
-    if (!extension_id_prompting_.empty())
-      return;  // only one prompt at a time
+  // Flipping the incognito bit will generate unload/load notifications for the
+  // extension, but we don't want to reload the page, because a) we've already
+  // updated the UI to reflect the change, and b) we want the yellow warning
+  // text to stay until the user has left the page.
+  //
+  // TODO(aa): This creates crapiness in some cases. For example, in a main
+  // window, when toggling this, the browser action will flicker because it gets
+  // unloaded, then reloaded. It would be better to have a dedicated
+  // notification for this case.
+  //
+  // Bug: http://crbug.com/41384
+  ignore_notifications_ = true;
+  extensions_service_->SetIsIncognitoEnabled(extension, enable_str == "true");
+  ignore_notifications_ = false;
+}
 
-    // Prompt the user first.
-    ui_prompt_type_ = ExtensionInstallUI::ENABLE_INCOGNITO_PROMPT;
-    extension_id_prompting_ = extension_id;
+void ExtensionsDOMHandler::HandleAllowFileAccessMessage(const Value* value) {
+  CHECK(value->IsType(Value::TYPE_LIST));
+  const ListValue* list = static_cast<const ListValue*>(value);
+  CHECK(list->GetSize() == 2);
+  std::string extension_id, allow_str;
+  CHECK(list->GetString(0, &extension_id));
+  CHECK(list->GetString(1, &allow_str));
+  Extension* extension = extensions_service_->GetExtensionById(extension_id,
+                                                               true);
+  DCHECK(extension);
 
-    GetExtensionInstallUI()->ConfirmEnableIncognito(this, extension);
-  } else {
-    extensions_service_->SetIsIncognitoEnabled(extension, false);
-  }
+  extensions_service_->SetAllowFileAccess(extension, allow_str == "true");
 }
 
 void ExtensionsDOMHandler::HandleUninstallMessage(const Value* value) {
@@ -480,7 +529,6 @@ void ExtensionsDOMHandler::HandleUninstallMessage(const Value* value) {
   if (!extension_id_prompting_.empty())
     return;  // only one prompt at a time
 
-  ui_prompt_type_ = ExtensionInstallUI::UNINSTALL_PROMPT;
   extension_id_prompting_ = extension_id;
 
   GetExtensionInstallUI()->ConfirmUninstall(this, extension);
@@ -491,6 +539,8 @@ void ExtensionsDOMHandler::InstallUIProceed(bool create_app_shortcut) {
   // result in it telling us to create a shortcut.
   DCHECK(!create_app_shortcut);
 
+  DCHECK(!extension_id_prompting_.empty());
+
   // The extension can be uninstalled in another window while the UI was
   // showing. Do nothing in that case.
   Extension* extension =
@@ -498,19 +548,8 @@ void ExtensionsDOMHandler::InstallUIProceed(bool create_app_shortcut) {
   if (!extension)
     return;
 
-  switch (ui_prompt_type_) {
-    case ExtensionInstallUI::UNINSTALL_PROMPT:
-      extensions_service_->UninstallExtension(extension_id_prompting_,
-                                              false /* external_uninstall */);
-      break;
-    case ExtensionInstallUI::ENABLE_INCOGNITO_PROMPT:
-      extensions_service_->SetIsIncognitoEnabled(extension, true);
-      break;
-    default:
-      NOTREACHED();
-      break;
-  }
-
+  extensions_service_->UninstallExtension(extension_id_prompting_,
+                                          false /* external_uninstall */);
   extension_id_prompting_ = "";
 }
 
@@ -549,17 +588,16 @@ void ExtensionsDOMHandler::ShowAlert(const std::string& message) {
 }
 
 void ExtensionsDOMHandler::HandlePackMessage(const Value* value) {
-  std::string extension_path;
-  std::string private_key_path;
+  std::wstring extension_path;
+  std::wstring private_key_path;
   CHECK(value->IsType(Value::TYPE_LIST));
   const ListValue* list = static_cast<const ListValue*>(value);
   CHECK(list->GetSize() == 2);
   CHECK(list->GetString(0, &extension_path));
   CHECK(list->GetString(1, &private_key_path));
 
-  FilePath root_directory = FilePath::FromWStringHack(ASCIIToWide(
-      extension_path));
-  FilePath key_file = FilePath::FromWStringHack(ASCIIToWide(private_key_path));
+  FilePath root_directory = FilePath::FromWStringHack(extension_path);
+  FilePath key_file = FilePath::FromWStringHack(private_key_path);
 
   if (root_directory.empty()) {
     if (extension_path.empty()) {
@@ -603,7 +641,7 @@ void ExtensionsDOMHandler::OnPackSuccess(const FilePath& crx_file,
 }
 
 void ExtensionsDOMHandler::OnPackFailure(const std::wstring& error) {
-  ShowAlert(WideToASCII(error));
+  ShowAlert(WideToUTF8(error));
 }
 
 void ExtensionsDOMHandler::HandleAutoUpdateMessage(const Value* value) {
@@ -668,14 +706,26 @@ void ExtensionsDOMHandler::Observe(NotificationType type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
   switch (type.value) {
-    // We listen to both EXTENSION_LOADED and EXTENSION_PROCESS_CREATED because
+    // We listen for notifications that will result in the page being
+    // repopulated with data twice for the same event in certain cases.
+    // For instance, EXTENSION_LOADED & EXTENSION_PROCESS_CREATED because
     // we don't know about the views for an extension at EXTENSION_LOADED, but
     // if we only listen to EXTENSION_PROCESS_CREATED, we'll miss extensions
-    // that don't have a process at startup.
+    // that don't have a process at startup. Similarly, NAV_ENTRY_COMMITTED &
+    // EXTENSION_FUNCTION_DISPATCHER_CREATED because we want to handle both
+    // the case of live app pages (which don't have an EFD) and
+    // chrome-extension:// urls which are served in a TabContents.
     //
-    // Doing it this way gets everything, but it means that we will actually
-    // render the page twice. This doesn't seem to result in any noticeable
-    // flicker, though.
+    // Doing it this way gets everything but causes the page to be rendered
+    // more than we need. It doesn't seem to result in any noticeable flicker.
+    case NotificationType::RENDER_VIEW_HOST_DELETED:
+      deleting_rvh_ = Details<RenderViewHost>(details).ptr();
+      MaybeUpdateAfterNotification();
+      break;
+    case NotificationType::BACKGROUND_CONTENTS_DELETED:
+      deleting_rvh_ = Details<BackgroundContents>(details)->render_view_host();
+      MaybeUpdateAfterNotification();
+      break;
     case NotificationType::EXTENSION_LOADED:
     case NotificationType::EXTENSION_PROCESS_CREATED:
     case NotificationType::EXTENSION_UNLOADED:
@@ -683,13 +733,19 @@ void ExtensionsDOMHandler::Observe(NotificationType type,
     case NotificationType::EXTENSION_UPDATE_DISABLED:
     case NotificationType::EXTENSION_FUNCTION_DISPATCHER_CREATED:
     case NotificationType::EXTENSION_FUNCTION_DISPATCHER_DESTROYED:
-      if (dom_ui_->tab_contents())
-        HandleRequestExtensionsData(NULL);
+    case NotificationType::NAV_ENTRY_COMMITTED:
+    case NotificationType::BACKGROUND_CONTENTS_NAVIGATED:
+      MaybeUpdateAfterNotification();
       break;
-
     default:
       NOTREACHED();
   }
+}
+
+void ExtensionsDOMHandler::MaybeUpdateAfterNotification() {
+  if (!ignore_notifications_ && dom_ui_->tab_contents())
+    HandleRequestExtensionsData(NULL);
+  deleting_rvh_ = NULL;
 }
 
 static void CreateScriptFileDetailValue(
@@ -732,9 +788,23 @@ DictionaryValue* ExtensionsDOMHandler::CreateContentScriptDetailValue(
   return script_data;
 }
 
+static bool ExtensionWantsFileAccess(const Extension* extension) {
+  for (UserScriptList::const_iterator it = extension->content_scripts().begin();
+       it != extension->content_scripts().end(); ++it) {
+    for (UserScript::PatternList::const_iterator pattern =
+             it->url_patterns().begin();
+         pattern != it->url_patterns().end(); ++pattern) {
+      if (pattern->MatchesScheme(chrome::kFileScheme))
+        return true;
+    }
+  }
+
+  return false;
+}
+
 // Static
 DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
-    ExtensionsService* service, const Extension *extension,
+    ExtensionsService* service, const Extension* extension,
     const std::vector<ExtensionPage>& pages, bool enabled) {
   DictionaryValue* extension_data = new DictionaryValue();
 
@@ -745,6 +815,10 @@ DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
   extension_data->SetBoolean(L"enabled", enabled);
   extension_data->SetBoolean(L"enabledIncognito",
       service ? service->IsIncognitoEnabled(extension) : false);
+  extension_data->SetBoolean(L"wantsFileAccess",
+      ExtensionWantsFileAccess(extension));
+  extension_data->SetBoolean(L"allowFileAccess",
+      service ? service->AllowFileAccess(extension) : false);
   extension_data->SetBoolean(L"allow_reload",
                              extension->location() == Extension::LOAD);
 
@@ -758,7 +832,7 @@ DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
   if (!extension->options_url().is_empty())
     extension_data->SetString(L"options_url", extension->options_url().spec());
 
-  // Add list of content_script detail DictionaryValues
+  // Add list of content_script detail DictionaryValues.
   ListValue *content_script_list = new ListValue();
   UserScriptList content_scripts = extension->content_scripts();
   for (UserScriptList::const_iterator script = content_scripts.begin();
@@ -768,7 +842,7 @@ DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
   }
   extension_data->Set(L"content_scripts", content_script_list);
 
-  // Add permissions
+  // Add permissions.
   ListValue *permission_list = new ListValue;
   std::vector<URLPattern> permissions = extension->host_permissions();
   for (std::vector<URLPattern>::iterator permission = permissions.begin();
@@ -783,8 +857,13 @@ DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
   for (std::vector<ExtensionPage>::const_iterator iter = pages.begin();
        iter != pages.end(); ++iter) {
     DictionaryValue* view_value = new DictionaryValue;
-    view_value->SetString(L"path",
-        iter->url.path().substr(1, std::string::npos));  // no leading slash
+    if (iter->url.scheme() == chrome::kExtensionScheme) {
+      // No leading slash.
+      view_value->SetString(L"path", iter->url.path().substr(1));
+    } else {
+      // For live pages, use the full URL.
+      view_value->SetString(L"path", iter->url.spec());
+    }
     view_value->SetInteger(L"renderViewId", iter->render_view_id);
     view_value->SetInteger(L"renderProcessId", iter->render_process_id);
     views->Append(view_value);
@@ -792,33 +871,39 @@ DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
   extension_data->Set(L"views", views);
   extension_data->SetBoolean(L"hasPopupAction",
       extension->browser_action() || extension->page_action());
+  extension_data->SetString(L"galleryUrl", extension->GalleryUrl().spec());
 
   return extension_data;
 }
 
 std::vector<ExtensionPage> ExtensionsDOMHandler::GetActivePagesForExtension(
-    const std::string& extension_id) {
+    RenderProcessHost* process,
+    Extension* extension) {
   std::vector<ExtensionPage> result;
-  std::set<ExtensionFunctionDispatcher*>* all_instances =
-      ExtensionFunctionDispatcher::all_instances();
+  if (!process)
+    return result;
 
-  for (std::set<ExtensionFunctionDispatcher*>::iterator iter =
-       all_instances->begin(); iter != all_instances->end(); ++iter) {
-    RenderViewHost* view = (*iter)->render_view_host();
-    if ((*iter)->extension_id() == extension_id && view) {
-      // We avoid adding views which are contained in popups to this list
-      // because clicking the link would cause the popup to loose focus and
-      // close. Instead, we display text that tells the developer to
-      // right-click on popups to inspect them.
-      if (ViewType::EXTENSION_POPUP ==
-          (*iter)->render_view_host()->delegate()->GetRenderViewType()) {
+  RenderProcessHost::listeners_iterator iter = process->ListenersIterator();
+  for (; !iter.IsAtEnd(); iter.Advance()) {
+    const RenderWidgetHost* widget =
+        static_cast<const RenderWidgetHost*>(iter.GetCurrentValue());
+    DCHECK(widget);
+    if (!widget || !widget->IsRenderView())
+      continue;
+    const RenderViewHost* host = static_cast<const RenderViewHost*>(widget);
+    if (host == deleting_rvh_ ||
+        ViewType::EXTENSION_POPUP == host->delegate()->GetRenderViewType())
+      continue;
+
+    GURL url = host->delegate()->GetURL();
+    if (url.SchemeIs(chrome::kExtensionScheme)) {
+      if (url.host() != extension->id())
         continue;
-      }
-
-      result.push_back(ExtensionPage((*iter)->url(),
-                                     view->process()->id(),
-                                     view->routing_id()));
+    } else if (!extension->web_extent().ContainsURL(url)) {
+      continue;
     }
+
+    result.push_back(ExtensionPage(url, process->id(), host->routing_id()));
   }
 
   return result;

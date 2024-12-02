@@ -10,7 +10,10 @@
 #include "app/combobox_model.h"
 #include "base/stl_util-inl.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/system_library.h"
 #include "chrome/browser/chromeos/options/language_config_view.h"
+#include "chrome/browser/chromeos/options/options_window_view.h"
 #include "chrome/browser/pref_member.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
@@ -29,20 +32,23 @@ namespace chromeos {
 
 // Date/Time section for datetime settings
 class DateTimeSection : public SettingsPageSection,
-                        public views::Combobox::Listener {
+                        public views::Combobox::Listener,
+                        public SystemLibrary::Observer {
  public:
   explicit DateTimeSection(Profile* profile);
-  virtual ~DateTimeSection() {}
+  virtual ~DateTimeSection();
 
   // Overridden from views::Combobox::Listener:
   virtual void ItemChanged(views::Combobox* sender,
                            int prev_index,
                            int new_index);
 
+  // Overridden from SystemLibrary::Observer:
+  virtual void TimezoneChanged(const icu::TimeZone& timezone);
+
  protected:
   // SettingsPageSection overrides:
   virtual void InitContents(GridLayout* layout);
-  virtual void NotifyPrefChanged(const std::wstring* pref_name);
 
  private:
   // The combobox model for the list of timezones.
@@ -125,12 +131,8 @@ class DateTimeSection : public SettingsPageSection,
           L"(GMT+%d) " : L"(GMT%d) "), hour_offset) + output;
     }
 
-    virtual std::wstring GetTimeZoneIDAt(int index) {
-      icu::UnicodeString id;
-      timezones_[index]->getID(id);
-      std::wstring output;
-      UTF16ToWide(id.getBuffer(), id.length(), &output);
-      return output;
+    virtual icu::TimeZone* GetTimeZoneAt(int index) {
+      return timezones_[index];
     }
 
    private:
@@ -139,17 +141,11 @@ class DateTimeSection : public SettingsPageSection,
     DISALLOW_COPY_AND_ASSIGN(TimezoneComboboxModel);
   };
 
-  // Selects the timezone.
-  void SelectTimeZone(const std::wstring& id);
-
   // TimeZone combobox model.
   views::Combobox* timezone_combobox_;
 
   // Controls for this section:
   TimezoneComboboxModel timezone_combobox_model_;
-
-  // Preferences for this section:
-  StringPrefMember timezone_;
 
   DISALLOW_COPY_AND_ASSIGN(DateTimeSection);
 };
@@ -157,6 +153,11 @@ class DateTimeSection : public SettingsPageSection,
 DateTimeSection::DateTimeSection(Profile* profile)
     : SettingsPageSection(profile, IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME),
       timezone_combobox_(NULL) {
+  CrosLibrary::Get()->GetSystemLibrary()->AddObserver(this);
+}
+
+DateTimeSection::~DateTimeSection() {
+  CrosLibrary::Get()->GetSystemLibrary()->RemoveObserver(this);
 }
 
 void DateTimeSection::ItemChanged(views::Combobox* sender,
@@ -164,7 +165,18 @@ void DateTimeSection::ItemChanged(views::Combobox* sender,
                                   int new_index) {
   if (new_index == prev_index)
     return;
-  timezone_.SetValue(timezone_combobox_model_.GetTimeZoneIDAt(new_index));
+
+  CrosLibrary::Get()->GetSystemLibrary()->SetTimezone(
+      timezone_combobox_model_.GetTimeZoneAt(new_index));
+}
+
+void DateTimeSection::TimezoneChanged(const icu::TimeZone& timezone) {
+  for (int i = 0; i < timezone_combobox_model_.GetItemCount(); i++) {
+    if (*timezone_combobox_model_.GetTimeZoneAt(i) == timezone) {
+      timezone_combobox_->SetSelectedItem(i);
+      return;
+    }
+  }
 }
 
 void DateTimeSection::InitContents(GridLayout* layout) {
@@ -177,24 +189,7 @@ void DateTimeSection::InitContents(GridLayout* layout) {
   layout->AddView(timezone_combobox_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
-  // Init member prefs so we can update the controls if prefs change.
-  timezone_.Init(prefs::kTimeZone, profile()->GetPrefs(), this);
-}
-
-void DateTimeSection::NotifyPrefChanged(const std::wstring* pref_name) {
-  if (!pref_name || *pref_name == prefs::kTimeZone) {
-    std::wstring timezone = timezone_.GetValue();
-    SelectTimeZone(timezone);
-  }
-}
-
-void DateTimeSection::SelectTimeZone(const std::wstring& id) {
-  for (int i = 0; i < timezone_combobox_model_.GetItemCount(); i++) {
-    if (timezone_combobox_model_.GetTimeZoneIDAt(i) == id) {
-      timezone_combobox_->SetSelectedItem(i);
-      return;
-    }
-  }
+  TimezoneChanged(CrosLibrary::Get()->GetSystemLibrary()->GetTimezone());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -360,14 +355,15 @@ class LanguageSection : public SettingsPageSection,
   virtual ~LanguageSection() {}
 
  private:
+  enum ButtonTag {
+    kCustomizeLanguagesButton,
+  };
   // Overridden from SettingsPageSection:
   virtual void InitContents(GridLayout* layout);
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event);
-
-  views::NativeButton* customize_languages_button_;
 
   DISALLOW_COPY_AND_ASSIGN(LanguageSection);
 };
@@ -380,22 +376,88 @@ LanguageSection::LanguageSection(Profile* profile)
 void LanguageSection::InitContents(GridLayout* layout) {
   // Add the customize button.
   layout->StartRow(0, single_column_view_set_id());
-  customize_languages_button_ = new views::NativeButton(
+  views::NativeButton* customize_languages_button = new views::NativeButton(
       this,
       l10n_util::GetString(IDS_OPTIONS_SETTINGS_LANGUAGES_CUSTOMIZE));
-  layout->AddView(customize_languages_button_, 1, 1,
+  customize_languages_button->set_tag(kCustomizeLanguagesButton);
+  layout->AddView(customize_languages_button, 1, 1,
                   GridLayout::LEADING, GridLayout::CENTER);
+  layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
 }
 
 void LanguageSection::ButtonPressed(
     views::Button* sender, const views::Event& event) {
-  if (sender == customize_languages_button_) {
-    views::Window* window = views::Window::CreateChromeWindow(
-        NULL,
-        gfx::Rect(),
-        new LanguageConfigView(profile()));
-    window->SetIsAlwaysOnTop(true);
-    window->Show();
+  if (sender->tag() == kCustomizeLanguagesButton) {
+    LanguageConfigView::Show(profile(), GetOptionsViewParent());
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// AccessibilitySection
+
+// Checkbox for specifying if accessibility should be enabled for this profile
+class AccessibilitySection : public SettingsPageSection,
+                             public views::ButtonListener {
+ public:
+  explicit AccessibilitySection(Profile* profile);
+  virtual ~AccessibilitySection() {}
+
+ protected:
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event);
+
+  // Overridden from SettingsPageSection:
+  virtual void InitContents(GridLayout* layout);
+  virtual void NotifyPrefChanged(const std::wstring* pref_name);
+
+ private:
+  // The View that contains the contents of the section.
+  views::View* contents_;
+
+  // Controls for this section:
+  views::Checkbox* accessibility_checkbox_;
+
+  // Preferences for this section:
+  BooleanPrefMember accessibility_enabled_;
+
+  DISALLOW_COPY_AND_ASSIGN(AccessibilitySection);
+};
+
+AccessibilitySection::AccessibilitySection(Profile* profile)
+    : SettingsPageSection(profile,
+                          IDS_OPTIONS_SETTINGS_SECTION_TITLE_ACCESSIBILITY),
+      accessibility_checkbox_(NULL) {
+}
+
+void AccessibilitySection::InitContents(GridLayout* layout) {
+  accessibility_checkbox_ = new views::Checkbox(l10n_util::GetString(
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_DESCRIPTION));
+  accessibility_checkbox_->set_listener(this);
+  accessibility_checkbox_->SetMultiLine(true);
+
+  layout->StartRow(0, double_column_view_set_id());
+  layout->AddView(accessibility_checkbox_);
+  layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
+
+  // Init member prefs so we can update the controls if prefs change.
+  accessibility_enabled_.Init(prefs::kAccessibilityEnabled,
+      profile()->GetPrefs(), this);
+}
+
+void AccessibilitySection::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
+  if (sender == accessibility_checkbox_) {
+    bool enabled = accessibility_checkbox_->checked();
+    // Set the accessibility enabled value in profile/prefs
+    accessibility_enabled_.SetValue(enabled);
+  }
+}
+
+void AccessibilitySection::NotifyPrefChanged(const std::wstring* pref_name) {
+  if (!pref_name || *pref_name == prefs::kAccessibilityEnabled) {
+    bool enabled = accessibility_enabled_.GetValue();
+    accessibility_checkbox_->SetChecked(enabled);
   }
 }
 
@@ -422,6 +484,9 @@ void SystemPageView::InitControlLayout() {
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(new LanguageSection(profile()));
+  layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  layout->StartRow(0, single_column_view_set_id);
+  layout->AddView(new AccessibilitySection(profile()));
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 }
 

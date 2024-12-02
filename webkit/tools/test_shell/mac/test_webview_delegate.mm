@@ -48,6 +48,7 @@ void TestWebViewDelegate::show(WebNavigationPolicy policy) {
   int item_height = popup_menu_info_->itemHeight;
   double font_size = popup_menu_info_->itemFontSize;
   int selected_index = popup_menu_info_->selectedIndex;
+  bool right_aligned = popup_menu_info_->rightAligned;
   popup_menu_info_.reset();  // No longer needed.
 
   const WebRect& bounds = popup_bounds_;
@@ -62,7 +63,8 @@ void TestWebViewDelegate::show(WebNavigationPolicy policy) {
   // Display the menu.
   scoped_nsobject<WebMenuRunner> menu_runner;
   menu_runner.reset([[WebMenuRunner alloc] initWithItems:items
-                                                fontSize:font_size]);
+                                                fontSize:font_size
+                                            rightAligned:right_aligned]);
 
   [menu_runner runMenuInView:shell_->webViewWnd()
                   withBounds:position
@@ -167,27 +169,14 @@ void TestWebViewDelegate::runModal() {
 // WebPluginPageDelegate ------------------------------------------------------
 
 webkit_glue::WebPluginDelegate* TestWebViewDelegate::CreatePluginDelegate(
-    const GURL& url,
-    const std::string& mime_type,
-    std::string* actual_mime_type) {
+    const FilePath& path,
+    const std::string& mime_type) {
   WebWidgetHost *host = GetWidgetHost();
   if (!host)
     return NULL;
+
   gfx::PluginWindowHandle containing_view = NULL;
-
-  bool allow_wildcard = true;
-  WebPluginInfo info;
-  if (!NPAPI::PluginList::Singleton()->GetPluginInfo(
-          url, mime_type,  allow_wildcard, &info, actual_mime_type)) {
-    return NULL;
-  }
-
-  if (actual_mime_type && !actual_mime_type->empty())
-    return WebPluginDelegateImpl::Create(info.path, *actual_mime_type,
-                                         containing_view);
-  else
-    return WebPluginDelegateImpl::Create(info.path, mime_type,
-                                         containing_view);
+  return WebPluginDelegateImpl::Create(path, mime_type, containing_view);
 }
 
 void TestWebViewDelegate::CreatedPluginWindow(

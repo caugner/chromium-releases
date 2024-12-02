@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,11 +84,11 @@ class FormatEtcEnumerator : public IEnumFORMATETC {
   std::vector<FORMATETC*> contents_;
 
   // The cursor of the active enumeration - an index into |contents_|.
-  int cursor_;
+  size_t cursor_;
 
   LONG ref_count_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(FormatEtcEnumerator);
+  DISALLOW_COPY_AND_ASSIGN(FormatEtcEnumerator);
 };
 
 // Safely makes a copy of all of the relevant bits of a FORMATETC object.
@@ -125,10 +125,9 @@ STDMETHODIMP FormatEtcEnumerator::Next(
     DCHECK(count == 1);
 
   // This method copies count elements into |elements_array|.
-  int index = 0;
-  while (cursor_ < static_cast<int>(contents_.size()) &&
-         static_cast<ULONG>(index) < count) {
-    CloneFormatEtc(contents_.at(cursor_), &elements_array[index]);
+  ULONG index = 0;
+  while (cursor_ < contents_.size() && index < count) {
+    CloneFormatEtc(contents_[cursor_], &elements_array[index]);
     ++cursor_;
     ++index;
   }
@@ -144,7 +143,7 @@ STDMETHODIMP FormatEtcEnumerator::Skip(ULONG skip_count) {
   cursor_ += skip_count;
   // MSDN implies it's OK to leave the enumerator trashed.
   // "Whatever you say, boss"
-  return cursor_ <= static_cast<int>(contents_.size()) ? S_OK : S_FALSE;
+  return cursor_ <= contents_.size() ? S_OK : S_FALSE;
 }
 
 STDMETHODIMP FormatEtcEnumerator::Reset() {
@@ -303,7 +302,8 @@ void OSExchangeDataProviderWin::SetURL(const GURL& url,
   data_->contents_.push_back(new DataObjectImpl::StoredDataInfo(
       ClipboardUtil::GetUrlFormat()->cfFormat, storage));
 
-  // TODO(beng): (http://b/1085501) add CF_HTML...
+  // TODO(beng): add CF_HTML.
+  // http://code.google.com/p/chromium/issues/detail?id=6767
 
   // Also add text representations (these should be last since they're the
   // least preferable).
@@ -369,7 +369,7 @@ bool OSExchangeDataProviderWin::GetString(std::wstring* data) const {
 bool OSExchangeDataProviderWin::GetURLAndTitle(GURL* url,
                                                std::wstring* title) const {
   std::wstring url_str;
-  bool success = ClipboardUtil::GetUrl(source_object_, &url_str, title);
+  bool success = ClipboardUtil::GetUrl(source_object_, &url_str, title, true);
   if (success) {
     GURL test_url(url_str);
     if (test_url.is_valid()) {

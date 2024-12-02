@@ -12,30 +12,9 @@
 #include "net/base/net_util.h"
 
 #if defined(OS_MACOSX)
-// The window pops up, but doesn't close.
-#define MAYBE_IncognitoWindow DISABLED_IncognitoWindow
-#define MAYBE_OpenCloseBrowserWindowWithAccelerator \
-    DISABLED_OpenCloseBrowserWindowWithAccelerator
-#else
-// http://code.google.com/p/chromium/issues/detail?id=14731
-#define MAYBE_IncognitoWindow DISABLED_IncognitoWindow
-// http://crbug.com/19394
-#define MAYBE_OpenCloseBrowserWindowWithAccelerator \
-    DISABLED_OpenCloseBrowserWindowWithAccelerator
-#endif
-
-// Automation pieces are not implemented for these on platforms other than
-// Windows.
-#if defined(OS_WIN)
-#define MAYBE_ShowBookmarkBar ShowBookmarkBar
-#else
-#define MAYBE_ShowBookmarkBar DISABLED_ShowBookmarkBar
-#endif
-
-// FindBarTesting not implemented on mac.
-#if defined(OS_MACOSX)
-#define MAYBE_FindInPage DISABLED_FindInPage
-#else
+// http://crbug.com/45882
+#define MAYBE_FindInPage FAILS_FindInPage
+#else  // !defined(OS_MACOSX)
 #define MAYBE_FindInPage FindInPage
 #endif
 
@@ -86,7 +65,7 @@ TEST_F(AutomatedUITestBase, DuplicateTab) {
   ASSERT_EQ(3, tab_count);
 }
 
-TEST_F(AutomatedUITestBase, DISABLED_RestoreTab) {
+TEST_F(AutomatedUITestBase, RestoreTab) {
   int tab_count;
   ASSERT_TRUE(active_browser()->GetTabCount(&tab_count));
   ASSERT_EQ(1, tab_count);
@@ -105,8 +84,7 @@ TEST_F(AutomatedUITestBase, DISABLED_RestoreTab) {
   ASSERT_EQ(2, tab_count);
 }
 
-// http://code.google.com/p/chromium/issues/detail?id=14774
-TEST_F(AutomatedUITestBase, FLAKY_CloseTab) {
+TEST_F(AutomatedUITestBase, CloseTab) {
   int num_browser_windows;
   int tab_count;
   NewTab();
@@ -196,8 +174,7 @@ TEST_F(AutomatedUITestBase, OpenBrowserWindow) {
   ASSERT_EQ(1, num_browser_windows);
 }
 
-// http://code.google.com/p/chromium/issues/detail?id=14774
-TEST_F(AutomatedUITestBase, FLAKY_CloseBrowserWindow) {
+TEST_F(AutomatedUITestBase, CloseBrowserWindow) {
   int tab_count;
   NewTab();
   ASSERT_TRUE(active_browser()->GetTabCount(&tab_count));
@@ -233,7 +210,7 @@ TEST_F(AutomatedUITestBase, FLAKY_CloseBrowserWindow) {
   ASSERT_FALSE(CloseActiveWindow());
 }
 
-TEST_F(AutomatedUITestBase, MAYBE_IncognitoWindow) {
+TEST_F(AutomatedUITestBase, IncognitoWindow) {
   int num_browser_windows;
   int num_normal_browser_windows;
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&num_browser_windows));
@@ -266,7 +243,7 @@ TEST_F(AutomatedUITestBase, MAYBE_IncognitoWindow) {
   ASSERT_EQ(1, num_browser_windows);
 }
 
-TEST_F(AutomatedUITestBase, MAYBE_OpenCloseBrowserWindowWithAccelerator) {
+TEST_F(AutomatedUITestBase, OpenCloseBrowserWindowWithAccelerator) {
   // Note: we don't use RunCommand(IDC_OPEN/CLOSE_WINDOW) to open/close
   // browser window in automated ui tests. Instead we use
   // OpenAndActivateNewBrowserWindow and CloseActiveWindow.
@@ -368,7 +345,7 @@ TEST_F(AutomatedUITestBase, SelectTab) {
   ASSERT_EQ(2, active_tab_index);
 }
 
-TEST_F(AutomatedUITestBase, MAYBE_ShowBookmarkBar) {
+TEST_F(AutomatedUITestBase, ShowBookmarkBar) {
   ASSERT_TRUE(ShowBookmarkBar());
   bool is_visible;
   bool is_animating;

@@ -40,7 +40,6 @@ class FirstRunController : public ImportObserver {
   // first run tasks are done.
   void FirstRunDone();
 
-
   scoped_refptr<ImporterHost> importer_host_;
 
   DISALLOW_COPY_AND_ASSIGN(FirstRunController);
@@ -52,22 +51,27 @@ bool OpenFirstRunDialog(Profile* profile,
                         int import_items,
                         int dont_import_items,
                         bool search_engine_experiment,
+                        bool randomize_search_engine_experiment,
                         ProcessSingleton* process_singleton) {
   FirstRunController* controller = new FirstRunController;
   return controller->DoFirstRun(profile, process_singleton);
 }
 
+bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
+                                        MasterPrefs* out_prefs) {
+  // TODO(jeremy,viettrungluu): http://crbug.com/44901
+  NOTIMPLEMENTED();
+  return true;
+}
+
 FirstRunController::FirstRunController()
-    : importer_host_(new ImporterHost) {
+    : importer_host_(new ExternalProcessImporterHost) {
 }
 
 void FirstRunController::FirstRunDone() {
   // Set preference to show first run bubble and welcome page.
-  // TODO(jeremy): Implement
-  // FirstRun::SetShowFirstRunBubblePref();
-  // FirstRun::SetShowWelcomePagePref();
-
-  delete this;
+  FirstRun::SetShowFirstRunBubblePref(true);
+  FirstRun::SetShowWelcomePagePref();
 }
 
 bool FirstRunController::DoFirstRun(Profile* profile,
@@ -142,9 +146,12 @@ bool FirstRunController::DoFirstRun(Profile* profile,
         GetSourceProfileInfoAt([dialog.get() browserImportSelectedIndex]);
     int16 items = source_profile.services_supported;
     // TODO(port): Do the actual import in a new process like Windows.
-    gc.release();
+    ignore_result(gc.release());
     StartImportingWithUI(nil, items, importer_host_.get(),
                          source_profile, profile, this, true);
+  } else {
+    // This is called by the importer if it runs.
+    FirstRunDone();
   }
 
   return true;

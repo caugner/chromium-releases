@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include <gtk/gtk.h>
 #include <math.h>
 
+#include "app/gtk_signal.h"
+#include "app/gtk_signal_registrar.h"
 #include "base/i18n/rtl.h"
 #include "chrome/browser/gtk/gtk_util.h"
 
@@ -36,6 +38,9 @@ struct RoundedWindowData {
 
   // Which sides of the window should have an internal border?
   int drawn_borders;
+
+  // Keeps track of attached signal handlers.
+  GtkSignalRegistrar signals;
 };
 
 // Callback from GTK to release allocated memory.
@@ -256,11 +261,12 @@ void ActAsRoundedWindow(
   DCHECK(!g_object_get_data(G_OBJECT(widget), kRoundedData));
 
   gtk_widget_set_app_paintable(widget, TRUE);
-  g_signal_connect(widget, "expose-event",
-                   G_CALLBACK(OnRoundedWindowExpose), NULL);
-  g_signal_connect(widget, "style-set", G_CALLBACK(OnStyleSet), NULL);
 
   RoundedWindowData* data = new RoundedWindowData;
+  data->signals.Connect(widget, "expose-event",
+                        G_CALLBACK(OnRoundedWindowExpose), NULL);
+  data->signals.Connect(widget, "style-set", G_CALLBACK(OnStyleSet), NULL);
+
   data->expected_width = -1;
   data->expected_height = -1;
 
@@ -272,19 +278,23 @@ void ActAsRoundedWindow(
 
   g_object_set_data_full(G_OBJECT(widget), kRoundedData,
                          data, FreeRoundedWindowData);
+
+  if (GTK_WIDGET_VISIBLE(widget))
+    gtk_widget_queue_draw(widget);
 }
 
 void StopActingAsRoundedWindow(GtkWidget* widget) {
-  g_signal_handlers_disconnect_by_func(widget,
-      reinterpret_cast<gpointer>(OnRoundedWindowExpose), NULL);
-  g_signal_handlers_disconnect_by_func(widget,
-      reinterpret_cast<gpointer>(OnStyleSet), NULL);
-
-  delete static_cast<RoundedWindowData*>(
-      g_object_steal_data(G_OBJECT(widget), kRoundedData));
+  g_object_set_data(G_OBJECT(widget), kRoundedData, NULL);
 
   if (GTK_WIDGET_REALIZED(widget))
     gdk_window_shape_combine_mask(widget->window, NULL, 0, 0);
+
+  if (GTK_WIDGET_VISIBLE(widget))
+    gtk_widget_queue_draw(widget);
+}
+
+bool IsActingAsRoundedWindow(GtkWidget* widget) {
+  return g_object_get_data(G_OBJECT(widget), kRoundedData) != NULL;
 }
 
 void SetRoundedWindowEdgesAndBorders(GtkWidget* widget,

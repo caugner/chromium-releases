@@ -8,7 +8,7 @@
 #include "base/keyboard_codes.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/path.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "views/background.h"
@@ -52,6 +52,12 @@ class ViewTest : public testing::Test {
 #endif
   }
 
+  virtual void TearDown() {
+    // Flush the message loop because we have pending release tasks
+    // and these tasks if un-executed would upset Valgrind.
+    RunPendingMessages();
+  }
+
   Widget* CreateWidget() {
 #if defined(OS_WIN)
     return new WidgetWin();
@@ -75,7 +81,7 @@ void PaintRootView(views::RootView* root, bool empty_paint) {
     // User isn't logged in, so that PaintNow will generate an empty rectangle.
     // Invoke paint directly.
     gfx::Rect paint_rect = root->GetScheduledPaintRect();
-    gfx::Canvas canvas(paint_rect.width(), paint_rect.height(), true);
+    gfx::CanvasSkia canvas(paint_rect.width(), paint_rect.height(), true);
     canvas.TranslateInt(-paint_rect.x(), -paint_rect.y());
     canvas.ClipRectInt(0, 0, paint_rect.width(), paint_rect.height());
     root->ProcessPaint(&canvas);
@@ -381,7 +387,7 @@ TEST_F(ViewTest, MouseEvent) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void TestView::Paint(gfx::Canvas* canvas) {
-  canvas->getClipBounds(&last_clip_);
+  canvas->AsCanvasSkia()->getClipBounds(&last_clip_);
 }
 
 void CheckRect(const SkRect& check_rect, const SkRect& target_rect) {
@@ -631,11 +637,7 @@ TEST_F(ViewTest, Textfield) {
   Clipboard clipboard;
 
   Widget* window = CreateWidget();
-#if defined(OS_WIN)
-  static_cast<WidgetWin*>(window)->Init(NULL, gfx::Rect(0, 0, 100, 100));
-#else
-  static_cast<WidgetGtk*>(window)->Init(NULL, gfx::Rect(0, 0, 100, 100));
-#endif
+  window->Init(NULL, gfx::Rect(0, 0, 100, 100));
   RootView* root_view = window->GetRootView();
 
   Textfield* textfield = new Textfield();
@@ -687,6 +689,8 @@ class TestViewsDelegate : public views::ViewsDelegate {
   virtual HICON GetDefaultWindowIcon() const {
     return NULL;
   }
+  virtual void AddRef() {}
+  virtual void ReleaseRef() {}
 
  private:
   mutable scoped_ptr<Clipboard> clipboard_;
@@ -954,7 +958,7 @@ class SimpleWindowDelegate : public WindowDelegate {
 // under the mouse.
 // TODO(jcampan): http://crbug.com/10572 Disabled as it fails on the Vista build
 //                bot.
-TEST_F(ViewTest, DISABLED_RerouteMouseWheelTest) {
+TEST_F(ViewTest, FAILS_RerouteMouseWheelTest) {
   TestViewWithControls* view_with_controls = new TestViewWithControls();
   views::Window* window1 =
       views::Window::CreateChromeWindow(
@@ -1345,4 +1349,3 @@ TEST_F(ViewTest, ChangeNativeViewHierarchyChangeHierarchy) {
   test.CheckChangingHierarhy();
 #endif
 }
-

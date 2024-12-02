@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "chrome/browser/sync/engine/apply_updates_command.h"
 #include "chrome/browser/sync/engine/build_and_process_conflict_sets_command.h"
 #include "chrome/browser/sync/engine/build_commit_command.h"
+#include "chrome/browser/sync/engine/cleanup_disabled_types_command.h"
 #include "chrome/browser/sync/engine/conflict_resolver.h"
 #include "chrome/browser/sync/engine/download_updates_command.h"
 #include "chrome/browser/sync/engine/get_commit_ids_command.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable-inl.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/closure.h"
 
 using base::TimeDelta;
 using sync_pb::ClientCommand;
@@ -55,24 +55,29 @@ using sessions::ConflictProgress;
 Syncer::Syncer(sessions::SyncSessionContext* context)
     : early_exit_requested_(false),
       max_commit_batch_size_(kDefaultMaxCommitBatchSize),
-      syncer_event_channel_(new SyncerEventChannel(SyncerEvent(
-          SyncerEvent::SHUTDOWN_USE_WITH_CARE))),
+      syncer_event_channel_(new SyncerEventChannel()),
       resolver_scoper_(context, &resolver_),
       event_channel_scoper_(context, syncer_event_channel_.get()),
       context_(context),
       updates_source_(sync_pb::GetUpdatesCallerInfo::UNKNOWN),
       pre_conflict_resolution_closure_(NULL) {
-  shutdown_channel_.reset(new ShutdownChannel(this));
+  shutdown_channel_.reset(new ShutdownChannel());
 
   ScopedDirLookup dir(context->directory_manager(), context->account_name());
   // The directory must be good here.
   CHECK(dir.good());
 }
 
+Syncer::~Syncer() {
+  syncer_event_channel_->Notify(
+      SyncerEvent(SyncerEvent::SHUTDOWN_USE_WITH_CARE));
+  shutdown_channel_->Notify(SyncerShutdownEvent(this));
+}
+
 void Syncer::RequestNudge(int milliseconds) {
   SyncerEvent event(SyncerEvent::REQUEST_SYNC_NUDGE);
   event.nudge_delay_milliseconds = milliseconds;
-  syncer_event_channel_->NotifyListeners(event);
+  syncer_event_channel_->Notify(event);
 }
 
 bool Syncer::SyncShare(sessions::SyncSession::Delegate* delegate) {
@@ -114,8 +119,15 @@ void Syncer::SyncShare(sessions::SyncSession* session,
     switch (current_step) {
       case SYNCER_BEGIN:
         LOG(INFO) << "Syncer Begin";
+        next_step = CLEANUP_DISABLED_TYPES;
+        break;
+      case CLEANUP_DISABLED_TYPES: {
+        LOG(INFO) << "Cleaning up disabled types";
+        CleanupDisabledTypesCommand cleanup;
+        cleanup.Execute(session);
         next_step = DOWNLOAD_UPDATES;
         break;
+      }
       case DOWNLOAD_UPDATES: {
         LOG(INFO) << "Downloading Updates";
         DownloadUpdatesCommand download_updates;

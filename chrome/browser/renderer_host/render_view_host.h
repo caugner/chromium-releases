@@ -15,15 +15,17 @@
 #include "chrome/common/page_zoom.h"
 #include "chrome/common/translate_errors.h"
 #include "chrome/common/view_types.h"
+#include "chrome/common/window_container_type.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
-#include "webkit/glue/password_form_dom_manager.h"
+#include "webkit/glue/webaccessibility.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class FilePath;
+class GURL;
 class ListValue;
 class RenderViewHostDelegate;
 class SiteInstance;
@@ -35,6 +37,7 @@ struct MediaPlayerAction;
 struct ThumbnailScore;
 struct ViewHostMsg_DidPrintPage_Params;
 struct ViewHostMsg_RunFileChooser_Params;
+struct ViewHostMsg_ShowNotification_Params;
 struct ViewMsg_Navigate_Params;
 struct WebDropData;
 struct WebPreferences;
@@ -47,6 +50,8 @@ class Point;
 namespace webkit_glue {
 struct FormData;
 class FormField;
+struct PasswordForm;
+struct PasswordFormFillData;
 struct WebApplicationInfo;
 }  // namespace webkit_glue
 
@@ -101,8 +106,10 @@ class RenderViewHost : public RenderWidgetHost {
   RenderViewHostDelegate* delegate() const { return delegate_; }
 
   // Set up the RenderView child process. Virtual because it is overridden by
-  // TestRenderViewHost.
-  virtual bool CreateRenderView(URLRequestContextGetter* request_context);
+  // TestRenderViewHost. If the |frame_name| parameter is non-empty, it is used
+  // as the name of the new top-level frame.
+  virtual bool CreateRenderView(URLRequestContextGetter* request_context,
+                                const string16& frame_name);
 
   // Returns true if the RenderView is active and has not crashed. Virtual
   // because it is overridden by TestRenderViewHost.
@@ -215,7 +222,7 @@ class RenderViewHost : public RenderWidgetHost {
   // Fill out a password form and trigger DOM autocomplete in the case
   // of multiple matching logins.
   void FillPasswordForm(
-      const webkit_glue::PasswordFormDomManager::FillData& form_data);
+      const webkit_glue::PasswordFormFillData& form_data);
 
   // D&d drop target messages that get sent to WebKit.
   void DragTargetDragEnter(const WebDropData& drop_data,
@@ -315,6 +322,11 @@ class RenderViewHost : public RenderWidgetHost {
   // RenderView. See BindingsPolicy for details.
   int enabled_bindings() { return enabled_bindings_; }
 
+  // See variable comment.
+  void set_is_extension_process(bool is_extension_process) {
+    is_extension_process_ = is_extension_process;
+  }
+
   // Sets a property with the given name and value on the DOM UI binding object.
   // Must call AllowDOMUIBindings() on this renderer first.
   void SetDOMUIProperty(const std::string& name, const std::string& value);
@@ -370,26 +382,22 @@ class RenderViewHost : public RenderWidgetHost {
   // as a popup.
   void DisassociateFromPopupCount();
 
-  // Notifies the Renderer that we've either displayed or hidden the popup
-  // notification.
-  void PopupNotificationVisibilityChanged(bool visible);
+  // Tells the renderer whether it should allow window.close. This is initially
+  // set to false when creating a renderer-initiated window via window.open.
+  void AllowScriptToClose(bool visible);
 
   // Called by the AutoFillManager when the list of suggestions is ready.
   void AutoFillSuggestionsReturned(
       int query_id,
       const std::vector<string16>& values,
       const std::vector<string16>& labels,
-      int default_suggestion_index);
-
-  // Called by the AutoFillManager to fill out all the forms in the renderer.
-  void AutoFillForms(const std::vector<webkit_glue::FormData>& forms);
+      const std::vector<int>& unique_ids);
 
   // Called by the AutocompleteHistoryManager when the list of suggestions is
   // ready.
   void AutocompleteSuggestionsReturned(
       int query_id,
-      const std::vector<string16>& suggestions,
-      int default_suggestion_index);
+      const std::vector<string16>& suggestions);
 
   // Called by the AutoFillManager when the FormData has been filled out.
   void AutoFillFormDataFilled(int query_id, const webkit_glue::FormData& form);
@@ -403,7 +411,6 @@ class RenderViewHost : public RenderWidgetHost {
   virtual bool IsRenderView() const { return true; }
   virtual void OnMessageReceived(const IPC::Message& msg);
   virtual void GotFocus();
-  virtual bool CanBlur() const;
   virtual void ForwardMouseEvent(const WebKit::WebMouseEvent& mouse_event);
   virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
   virtual void ForwardEditCommand(const std::string& name,
@@ -413,7 +420,9 @@ class RenderViewHost : public RenderWidgetHost {
   virtual gfx::Rect GetRootWindowResizerRect() const;
 
   // Creates a new RenderView with the given route id.
-  void CreateNewWindow(int route_id);
+  void CreateNewWindow(int route_id,
+                       WindowContainerType window_container_type,
+                       const string16& frame_name);
 
   // Creates a new RenderWidget with the given route id.  |popup_type| indicates
   // if this widget is a popup and what kind of popup it is (select, autofill).
@@ -453,6 +462,12 @@ class RenderViewHost : public RenderWidgetHost {
   void SendContentSettings(const GURL& url,
                            const ContentSettings& settings);
 
+  // Tells the renderer to notify us when the page contents preferred size
+  // changed. |flags| is a combination of
+  // |ViewHostMsg_EnablePreferredSizeChangedMode_Flags| values, which is defined
+  // in render_messages.h.
+  void EnablePreferredSizeChangedMode(int flags);
+
  protected:
   // RenderWidgetHost protected overrides.
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -490,6 +505,7 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgDidStartLoading();
   void OnMsgDidStopLoading();
   void OnMsgDocumentAvailableInMainFrame();
+  void OnMsgDocumentOnLoadCompletedInMainFrame();
   void OnMsgDidLoadResourceFromMemoryCache(const GURL& url,
                                            const std::string& frame_origin,
                                            const std::string& main_frame_origin,
@@ -545,8 +561,10 @@ class RenderViewHost : public RenderWidgetHost {
                                 IPC::Message* reply_msg);
   void OnMsgFormsSeen(
       const std::vector<webkit_glue::FormData>& forms);
-  void OnMsgPasswordFormsSeen(
+  void OnMsgPasswordFormsFound(
       const std::vector<webkit_glue::PasswordForm>& forms);
+  void OnMsgPasswordFormsVisible(
+      const std::vector<webkit_glue::PasswordForm>& visible_forms);
   void OnMsgFormSubmitted(const webkit_glue::FormData& forms);
   void OnMsgStartDragging(const WebDropData& drop_data,
                           WebKit::WebDragOperationsMask operations_allowed,
@@ -555,13 +573,15 @@ class RenderViewHost : public RenderWidgetHost {
   void OnUpdateDragCursor(WebKit::WebDragOperation drag_operation);
   void OnTakeFocus(bool reverse);
   void OnMsgPageHasOSDD(int32 page_id, const GURL& doc_url, bool autodetected);
+  void OnMsgGetSearchProviderInstallState(const GURL& url,
+                                          IPC::Message* reply_msg);
   void OnDidGetPrintedPagesCount(int cookie, int number_pages);
   void DidPrintPage(const ViewHostMsg_DidPrintPage_Params& params);
   void OnAddMessageToConsole(const std::wstring& message,
                              int32 line_no,
                              const std::wstring& source_id);
-
-  void OnUpdateInspectorSettings(const std::string& raw_settings);
+  void OnUpdateInspectorSetting(const std::string& key,
+                                const std::string& value);
   void OnForwardToDevToolsAgent(const IPC::Message& message);
   void OnForwardToDevToolsClient(const IPC::Message& message);
   void OnActivateDevToolsWindow();
@@ -587,21 +607,20 @@ class RenderViewHost : public RenderWidgetHost {
   void OnDidGetApplicationInfo(int32 page_id,
                                const webkit_glue::WebApplicationInfo& info);
   void OnMsgShouldCloseACK(bool proceed);
-  void OnQueryFormFieldAutofill(int request_id,
+  void OnQueryFormFieldAutoFill(int request_id,
+                                bool form_autofilled,
                                 const webkit_glue::FormField& field);
-  void OnRemoveAutofillEntry(const string16& field_name,
-                             const string16& value);
+  void OnRemoveAutocompleteEntry(const string16& field_name,
+                                 const string16& value);
+  void OnShowAutoFillDialog();
   void OnFillAutoFillFormData(int query_id,
                               const webkit_glue::FormData& form,
                               const string16& value,
-                              const string16& label);
+                              const string16& label,
+                              int unique_id);
 
-  void OnShowDesktopNotification(const GURL& source_origin,
-                                 const GURL& url, int notification_id);
-  void OnShowDesktopNotificationText(const GURL& origin, const GURL& icon,
-                                     const string16& title,
-                                     const string16& text,
-                                     int notification_id);
+  void OnShowDesktopNotification(
+      const ViewHostMsg_ShowNotification_Params& params);
   void OnCancelDesktopNotification(int notification_id);
   void OnRequestNotificationPermission(const GURL& origin, int callback_id);
 
@@ -612,16 +631,24 @@ class RenderViewHost : public RenderWidgetHost {
   void OnExtensionPostMessage(int port_id, const std::string& message);
   void OnAccessibilityFocusChange(int acc_obj_id);
   void OnAccessibilityObjectStateChange(int acc_obj_id);
+  void OnAccessibilityTree(const webkit_glue::WebAccessibility& tree);
   void OnCSSInserted();
   void OnPageContents(const GURL& url,
                       int32 page_id,
-                      const std::wstring& contents,
-                      const std::string& language);
+                      const string16& contents,
+                      const std::string& language,
+                      bool page_translatable);
   void OnPageTranslated(int32 page_id,
                         const std::string& original_lang,
                         const std::string& translated_lang,
                         TranslateErrors::Type error_type);
   void OnContentBlocked(ContentSettingsType type);
+  void OnAppCacheAccessed(const GURL& manifest_url, bool blocked_by_policy);
+  void OnWebDatabaseAccessed(const GURL& url,
+                             const string16& name,
+                             const string16& display_name,
+                             unsigned long estimated_size,
+                             bool blocked_by_policy);
 
  private:
   friend class TestRenderViewHost;
@@ -689,6 +716,17 @@ class RenderViewHost : public RenderWidgetHost {
 
   // The session storage namespace id to be used by the associated render view.
   int64 session_storage_namespace_id_;
+
+  // Whether this render view will be used for extensions. This controls
+  // what process type we use.
+  bool is_extension_process_;
+
+  // AutoFill and Autocomplete suggestions.  We accumulate these separately and
+  // send them back to the renderer together.
+  int autofill_query_id_;
+  std::vector<string16> autofill_values_;
+  std::vector<string16> autofill_labels_;
+  std::vector<int> autofill_unique_ids_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHost);
 };

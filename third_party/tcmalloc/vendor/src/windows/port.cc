@@ -71,7 +71,8 @@ int getpagesize() {
   if (pagesize == 0) {
     SYSTEM_INFO system_info;
     GetSystemInfo(&system_info);
-    pagesize = system_info.dwPageSize;
+    pagesize = std::max(system_info.dwPageSize,
+                        system_info.dwAllocationGranularity);
   }
   return pagesize;
 }
@@ -99,10 +100,14 @@ bool CheckIfKernelSupportsTLS() {
 // binary (it also doesn't run if the thread is terminated via
 // TerminateThread, which if we're lucky this routine does).
 
-// This makes the linker create the TLS directory if it's not already
-// there (that is, even if __declspec(thead) is not used).
+// Force a reference to _tls_used to make the linker create the TLS directory
+// if it's not already there (that is, even if __declspec(thread) is not used).
+// Force a reference to p_thread_callback_tcmalloc and p_process_term_tcmalloc
+// to prevent whole program optimization from discarding the variables.
 #ifdef _MSC_VER
 #pragma comment(linker, "/INCLUDE:__tls_used")
+#pragma comment(linker, "/INCLUDE:_p_thread_callback_tcmalloc")
+#pragma comment(linker, "/INCLUDE:_p_process_term_tcmalloc")
 #endif
 
 // When destr_fn eventually runs, it's supposed to take as its
@@ -141,14 +146,18 @@ static void NTAPI on_tls_callback(HINSTANCE h, DWORD dwReason, PVOID pv) {
 
 #ifdef _MSC_VER
 
+// extern "C" suppresses C++ name mangling so we know the symbol names
+// for the linker /INCLUDE:symbol pragmas above.
+extern "C" {
 // This tells the linker to run these functions.
 #pragma data_seg(push, old_seg)
 #pragma data_seg(".CRT$XLB")
-static void (NTAPI *p_thread_callback)(HINSTANCE h, DWORD dwReason, PVOID pv)
-    = on_tls_callback;
+void (NTAPI *p_thread_callback_tcmalloc)(
+    HINSTANCE h, DWORD dwReason, PVOID pv) = on_tls_callback;
 #pragma data_seg(".CRT$XTU")
-static int (*p_process_term)(void) = on_process_term;
+int (*p_process_term_tcmalloc)(void) = on_process_term;
 #pragma data_seg(pop, old_seg)
+}  // extern "C"
 
 #else  // #ifdef _MSC_VER  [probably msys/mingw]
 
@@ -186,15 +195,15 @@ pthread_key_t PthreadKeyCreate(void (*destr_fn)(void*)) {
 // munmap's in the middle of the page, which is forbidden in windows.
 extern void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
                                   size_t alignment) {
-  // Safest is to make actual_size same as input-size.
-  if (actual_size) {
-    *actual_size = size;
-  }
-
   // Align on the pagesize boundary
   const int pagesize = getpagesize();
   if (alignment < pagesize) alignment = pagesize;
   size = ((size + alignment - 1) / alignment) * alignment;
+
+  // Safest is to make actual_size same as input-size.
+  if (actual_size) {
+    *actual_size = size;
+  }
 
   // Ask for extra memory if alignment > pagesize
   size_t extra = 0;

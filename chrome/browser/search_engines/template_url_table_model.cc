@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,7 +82,7 @@ class ModelEntry {
     if (!fav_icon_url.is_valid()) {
       // The favicon url isn't always set. Guess at one here.
       if (template_url_.url() && template_url_.url()->IsValid()) {
-        GURL url = GURL(WideToUTF16Hack(template_url_.url()->url()));
+        GURL url = GURL(template_url_.url()->url());
         if (url.is_valid())
           fav_icon_url = TemplateURL::GenerateFaviconURL(url);
       }
@@ -114,7 +114,7 @@ class ModelEntry {
   TemplateURLTableModel* model_;
   CancelableRequestConsumer request_consumer_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ModelEntry);
+  DISALLOW_COPY_AND_ASSIGN(ModelEntry);
 };
 
 // TemplateURLTableModel -----------------------------------------
@@ -159,7 +159,8 @@ void TemplateURLTableModel::Reload() {
     const TemplateURL* template_url = *i;
     // NOTE: we don't use ShowInDefaultList here to avoid things bouncing
     // the lists while editing.
-    if (!template_url->show_in_default_list())
+    if (!template_url->show_in_default_list() &&
+        !template_url->IsExtensionKeyword())
       entries_.push_back(new ModelEntry(this, *template_url));
   }
 
@@ -189,15 +190,10 @@ std::wstring TemplateURLTableModel::GetText(int row, int col_id) {
     }
 
     case IDS_SEARCH_ENGINES_EDITOR_KEYWORD_COLUMN: {
-      const std::wstring& keyword = url.keyword();
       // Keyword should be domain name. Force it to have LTR directionality.
-      if (base::i18n::IsRTL()) {
-        std::wstring localized_keyword = keyword;
-        base::i18n::WrapStringWithLTRFormatting(&localized_keyword);
-        return localized_keyword;
-      }
+      std::wstring keyword(url.keyword());
+      base::i18n::GetDisplayStringInLTRDirectionality(&keyword);
       return keyword;
-      break;
     }
 
     default:
@@ -275,7 +271,7 @@ void TemplateURLTableModel::Add(int index, TemplateURL* template_url) {
 void TemplateURLTableModel::ModifyTemplateURL(int index,
                                               const std::wstring& title,
                                               const std::wstring& keyword,
-                                              const std::wstring& url) {
+                                              const std::string& url) {
   DCHECK(index >= 0 && index <= RowCount());
   const TemplateURL* template_url = &GetTemplateURL(index);
   template_url_model_->RemoveObserver(this);

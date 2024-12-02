@@ -8,8 +8,8 @@
 #include "base/json/json_writer.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/common/geoposition.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
 
@@ -54,6 +54,8 @@ void AddInteger(const std::wstring& property_name,
                 int value,
                 DictionaryValue* object);
 // Parses the server response body. Returns true if parsing was successful.
+// Sets |*position| to the parsed location if a valid fix was received,
+// otherwise leaves it unchanged (i.e. IsInitialized() == false).
 bool ParseServerResponse(const std::string& response_body,
                          const base::Time& timestamp,
                          Geoposition* position,
@@ -170,14 +172,14 @@ void FormRequestBody(const std::string& host_name,
 }
 
 void FormatPositionError(const GURL& server_url,
-                         const std::wstring& message,
+                         const std::string& message,
                          Geoposition* position) {
     position->error_code = Geoposition::ERROR_CODE_POSITION_UNAVAILABLE;
-    position->error_message = L"Network location provider at '";
-    position->error_message += ASCIIToWide(server_url.possibly_invalid_spec());
-    position->error_message += L"' : ";
+    position->error_message = "Network location provider at '";
+    position->error_message += server_url.possibly_invalid_spec();
+    position->error_message += "' : ";
     position->error_message += message;
-    position->error_message += L".";
+    position->error_message += ".";
     LOG(INFO) << "NetworkLocationRequest::GetLocationFromResponse() : "
               << position->error_message;
 }
@@ -195,12 +197,12 @@ void GetLocationFromResponse(bool http_post_result,
   // HttpPost can fail for a number of reasons. Most likely this is because
   // we're offline, or there was no response.
   if (!http_post_result) {
-    FormatPositionError(server_url, L"No response received", position);
+    FormatPositionError(server_url, "No response received", position);
     return;
   }
   if (status_code != 200) {  // HTTP OK.
-    std::wstring message = L"Returned error code ";
-    message += IntToWString(status_code);
+    std::string message = "Returned error code ";
+    message += IntToString(status_code);
     FormatPositionError(server_url, message, position);
     return;
   }
@@ -208,14 +210,14 @@ void GetLocationFromResponse(bool http_post_result,
   // this position fix.
   if (!ParseServerResponse(response_body, timestamp, position, access_token)) {
     // We failed to parse the repsonse.
-    FormatPositionError(server_url, L"Response was malformed", position);
+    FormatPositionError(server_url, "Response was malformed", position);
     return;
   }
   // The response was successfully parsed, but it may not be a valid
   // position fix.
   if (!position->IsValidFix()) {
     FormatPositionError(server_url,
-                        L"Did not provide a good position fix", position);
+                        "Did not provide a good position fix", position);
     return;
   }
 }
@@ -279,6 +281,7 @@ bool ParseServerResponse(const std::string& response_body,
                          Geoposition* position,
                          string16* access_token) {
   DCHECK(position);
+  DCHECK(!position->IsInitialized());
   DCHECK(access_token);
   DCHECK(!timestamp.is_null());
 
@@ -314,7 +317,9 @@ bool ParseServerResponse(const std::string& response_body,
   Value* location_value = NULL;
   if (!response_object->Get(kLocationString, &location_value)) {
     LOG(INFO) << "ParseServerResponse() : Missing location attribute.\n";
-    return false;
+    // GLS returns a response with no location property to represent
+    // no fix available; return true to indicate successful parse.
+    return true;
   }
   DCHECK(location_value);
 

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/callback.h"
+#include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/thread.h"
 #include "base/timer.h"
@@ -23,7 +24,7 @@ class DatabaseModelWorkerTest : public testing::Test {
       did_do_work_(false),
       db_thread_(ChromeThread::DB),
       io_thread_(ChromeThread::IO, &io_loop_),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {};
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {}
 
   bool did_do_work() { return did_do_work_; }
   DatabaseModelWorker* worker() { return worker_.get(); }
@@ -35,7 +36,8 @@ class DatabaseModelWorkerTest : public testing::Test {
   // Schedule DoWork to be executed on the DB thread and have the test fail if
   // DoWork hasn't executed within 10 seconds.
   void ScheduleWork() {
-    scoped_ptr<Closure> c(NewCallback(this, &DatabaseModelWorkerTest::DoWork));
+    scoped_ptr<Callback0::Type> c(NewCallback(this,
+        &DatabaseModelWorkerTest::DoWork));
     timer()->Start(TimeDelta::FromSeconds(10),
                    this, &DatabaseModelWorkerTest::Timeout);
     worker()->DoWorkAndWaitUntilDone(c.get());

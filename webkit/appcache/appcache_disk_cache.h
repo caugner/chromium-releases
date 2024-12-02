@@ -29,6 +29,7 @@ class AppCacheDiskCache {
   // Initializes the object to use disk backed storage.
   int InitWithDiskBackend(const FilePath& disk_cache_directory,
                           int disk_cache_size, bool force,
+                          base::MessageLoopProxy* cache_thread,
                           net::CompletionCallback* callback);
 
   // Initializes the object to use memory only storage.
@@ -81,9 +82,12 @@ class AppCacheDiskCache {
   };
   typedef std::vector<PendingCall> PendingCalls;
 
-  bool is_initializing() const { return create_backend_callback_.get(); }
+  bool is_initializing() const {
+    return create_backend_callback_.get() != NULL;
+  }
   int Init(net::CacheType cache_type, const FilePath& directory,
-           int cache_size, bool force, net::CompletionCallback* callback);
+           int cache_size, bool force, base::MessageLoopProxy* cache_thread,
+           net::CompletionCallback* callback);
   void OnCreateBackendComplete(int rv);
 
   bool is_disabled_;

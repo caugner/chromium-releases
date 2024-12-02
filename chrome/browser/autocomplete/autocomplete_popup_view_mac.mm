@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,16 @@
 
 #include "app/resource_bundle.h"
 #include "app/text_elider.h"
+#include "base/stl_util-inl.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_mac.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
-#include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/cocoa/event_utils.h"
+#include "chrome/browser/cocoa/image_utils.h"
 #include "gfx/rect.h"
 #include "grit/theme_resources.h"
+#include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 
 namespace {
@@ -37,14 +39,17 @@ const CGFloat kPopupFieldGap = 2.0;
 // autocomplete_popup_contents_view.cc, kGlassPopupTransparency).
 const CGFloat kPopupAlpha = 240.0 / 255.0;
 
-// How much space to leave for the left and right margins.
-const CGFloat kLeftRightMargin = 6.0;
+// How far to offset image column from the left.
+const CGFloat kImageXOffset = 2.0;
 
 // How far to offset the text column from the left.
-const CGFloat kTextXOffset = 31.0;
+const CGFloat kTextXOffset = 25.0;
 
 // Animation duration when animating the popup window smaller.
-const CGFloat kShrinkAnimationDuration = 0.1;
+const NSTimeInterval kShrinkAnimationDuration = 0.1;
+
+// A very short animation duration used to cancel running animations.
+const NSTimeInterval kCancelAnimationDuration = 0.00001;
 
 // Maximum fraction of the popup width that can be used to display match
 // contents.
@@ -52,6 +57,21 @@ const float kMaxContentsFraction = 0.7;
 
 // NSEvent -buttonNumber for middle mouse button.
 const static NSInteger kMiddleButtonNumber(2);
+
+// The autocomplete field's visual border is slightly inset from the
+// actual border so that it can spill a glow into the toolbar or
+// something like that.  This is how much to inset vertically.
+const CGFloat kFieldVisualInset = 1.0;
+
+// The popup window has a single-pixel border in screen coordinates,
+// which has to be backed out to line the borders up with the field
+// borders.
+const CGFloat kWindowBorderWidth = 1.0;
+
+// |AutocompleteButtonCell| and |AutocompleteTextFieldCell| draw their
+// text somewhat differently.  The image needs to be adjusted slightly
+// downward to align with the text the same.
+const CGFloat kImageBaselineAdjust = 1.0;
 
 // Background colors for different states of the popup elements.
 NSColor* BackgroundColor() {
@@ -64,66 +84,14 @@ NSColor* HoveredBackgroundColor() {
   return [[NSColor controlHighlightColor] colorWithAlphaComponent:kPopupAlpha];
 }
 
-// TODO(shess): These are totally unprincipled.  I experimented with
-// +controlTextColor and the like, but found myself wondering whether
-// that was really appropriate.  Circle back after consulting with
-// someone more knowledgeable about the ins and outs of this.
-static const NSColor* ContentTextColor() {
+static NSColor* ContentTextColor() {
   return [NSColor blackColor];
 }
-static const NSColor* URLTextColor() {
+static NSColor* URLTextColor() {
   return [NSColor colorWithCalibratedRed:0.0 green:0.55 blue:0.0 alpha:1.0];
 }
-static const NSColor* DescriptionTextColor() {
+static NSColor* DescriptionTextColor() {
   return [NSColor darkGrayColor];
-}
-
-// Helper to fetch and retain an image from the resource bundle.
-NSImage* RetainedResourceImage(int resource_id) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  NSImage* image = rb.GetNSImageNamed(resource_id);
-  DCHECK(image);
-  return [image retain];
-}
-
-// Return the appropriate icon for the given match.  Derived from the
-// gtk code.
-NSImage* MatchIcon(const AutocompleteMatch& match) {
-  if (match.starred) {
-    static NSImage* starImage = RetainedResourceImage(IDR_O2_STAR);
-    return starImage;
-  }
-
-  switch (match.type) {
-    case AutocompleteMatch::URL_WHAT_YOU_TYPED:
-    case AutocompleteMatch::NAVSUGGEST: {
-      static NSImage* globeImage = RetainedResourceImage(IDR_O2_GLOBE);
-      return globeImage;
-    }
-    case AutocompleteMatch::HISTORY_URL:
-    case AutocompleteMatch::HISTORY_TITLE:
-    case AutocompleteMatch::HISTORY_BODY:
-    case AutocompleteMatch::HISTORY_KEYWORD: {
-      static NSImage* historyImage = RetainedResourceImage(IDR_O2_HISTORY);
-      return historyImage;
-    }
-    case AutocompleteMatch::SEARCH_WHAT_YOU_TYPED:
-    case AutocompleteMatch::SEARCH_HISTORY:
-    case AutocompleteMatch::SEARCH_SUGGEST:
-    case AutocompleteMatch::SEARCH_OTHER_ENGINE: {
-      static NSImage* searchImage = RetainedResourceImage(IDR_O2_SEARCH);
-      return searchImage;
-    }
-    case AutocompleteMatch::OPEN_HISTORY_PAGE: {
-      static NSImage* moreImage = RetainedResourceImage(IDR_O2_MORE);
-      return moreImage;
-    }
-    default:
-      NOTREACHED();
-      break;
-  }
-
-  return nil;
 }
 
 }  // namespace
@@ -187,7 +155,7 @@ NSMutableAttributedString* AutocompletePopupViewMac::ElideString(
   }
 
   // If ElideText() decides to do nothing, nothing to be done.
-  const std::wstring elided(ElideText(originalString, font, width));
+  const std::wstring elided(ElideText(originalString, font, width, false));
   if (0 == elided.compare(originalString)) {
     return aString;
   }
@@ -229,7 +197,7 @@ NSAttributedString* AutocompletePopupViewMac::MatchText(
     // partially visible.
     // TODO(shess): Consider revising our NSCell subclass to have two
     // bits and just draw them right, rather than truncating here.
-    const float textWidth = cellWidth - kTextXOffset - kLeftRightMargin;
+    const float textWidth = cellWidth - kTextXOffset;
     as = ElideString(as, match.contents, font,
                      textWidth * kMaxContentsFraction);
 
@@ -293,12 +261,10 @@ NSAttributedString* AutocompletePopupViewMac::MatchText(
 AutocompletePopupViewMac::AutocompletePopupViewMac(
     AutocompleteEditViewMac* edit_view,
     AutocompleteEditModel* edit_model,
-    const BubblePositioner* bubble_positioner,
     Profile* profile,
     NSTextField* field)
     : model_(new AutocompletePopupModel(this, edit_model, profile)),
       edit_view_(edit_view),
-      bubble_positioner_(bubble_positioner),
       field_(field),
       popup_(nil) {
   DCHECK(edit_view);
@@ -308,14 +274,12 @@ AutocompletePopupViewMac::AutocompletePopupViewMac(
 }
 
 AutocompletePopupViewMac::~AutocompletePopupViewMac() {
-  // TODO(shess): Having to be aware of destructor ordering in this
-  // way seems brittle.  There must be a better way.
-
   // Destroy the popup model before this object is destroyed, because
   // it can call back to us in the destructor.
   model_.reset();
 
-  // Break references to matrix_target_ before it is released.
+  // Break references to |this| because the popup may not be
+  // deallocated immediately.
   AutocompleteMatrix* matrix = [popup_ contentView];
   DCHECK(matrix == nil || [matrix isKindOfClass:[AutocompleteMatrix class]]);
   [matrix setPopupView:NULL];
@@ -346,6 +310,65 @@ void AutocompletePopupViewMac::CreatePopupIfNeeded() {
   }
 }
 
+void AutocompletePopupViewMac::PositionPopup(const CGFloat matrixHeight) {
+  // Calculate the popup's position on the screen.  It should abut the
+  // field's visual border vertically, and be below the bounds
+  // horizontally.
+
+  // Start with the field's rect on the screen.
+  NSRect popupFrame = NSInsetRect([field_ bounds], 0.0, kFieldVisualInset);
+  popupFrame = [field_ convertRect:popupFrame toView:nil];
+  popupFrame.origin = [[field_ window] convertBaseToScreen:popupFrame.origin];
+
+  // Size to fit the matrix, and shift down by the size plus the top
+  // window border.  Would prefer -convertSize:fromView: to
+  // -userSpaceScaleFactor for the scale conversion, but until the
+  // window is on-screen that doesn't work right (bug?).
+  popupFrame.size.height = matrixHeight * [popup_ userSpaceScaleFactor];
+  popupFrame.origin.y -= NSHeight(popupFrame) + kWindowBorderWidth;
+
+  // Inset to account for the horizontal border drawn by the window.
+  popupFrame = NSInsetRect(popupFrame, kWindowBorderWidth, 0.0);
+
+  // Leave a gap between the popup and the field.
+  popupFrame.origin.y -= kPopupFieldGap * [popup_ userSpaceScaleFactor];
+
+  // Do nothing if the popup is already animating to the given |frame|.
+  if (NSEqualRects(popupFrame, targetPopupFrame_))
+    return;
+
+  NSRect currentPopupFrame = [popup_ frame];
+  targetPopupFrame_ = popupFrame;
+
+  // Animate the frame change if the only change is that the height got smaller.
+  // Otherwise, resize immediately.
+  bool animate = (NSHeight(popupFrame) < NSHeight(currentPopupFrame) &&
+                  NSWidth(popupFrame) == NSWidth(currentPopupFrame));
+  NSTimeInterval duration =
+      (animate ? kShrinkAnimationDuration: kCancelAnimationDuration);
+
+  [NSAnimationContext beginGrouping];
+  // Don't use the GTM additon for the "Steve" slowdown because this can happen
+  // async from user actions and the effects could be a surprise.
+  [[NSAnimationContext currentContext] setDuration:duration];
+  [[popup_ animator] setFrame:popupFrame display:YES];
+  [NSAnimationContext endGrouping];
+
+  if (!IsOpen())
+    [[field_ window] addChildWindow:popup_ ordered:NSWindowAbove];
+}
+
+NSImage* AutocompletePopupViewMac::ImageForMatch(
+    const AutocompleteMatch& match) {
+  const SkBitmap* bitmap = model_->GetSpecialIconForMatch(match);
+  if (bitmap)
+    return gfx::SkBitmapToNSImage(*bitmap);
+
+  const int resource_id = match.starred ?
+      IDR_OMNIBOX_STAR : AutocompleteMatch::TypeToIcon(match.type);
+  return AutocompleteEditViewMac::ImageForResource(resource_id);
+}
+
 void AutocompletePopupViewMac::UpdatePopupAppearance() {
   DCHECK([NSThread isMainThread]);
   const AutocompleteResult& result = model_->result();
@@ -353,9 +376,11 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
     [[popup_ parentWindow] removeChildWindow:popup_];
     [popup_ orderOut:nil];
 
-    // Break references to matrix_target_ before releasing popup_.
-    NSMatrix* matrix = [popup_ contentView];
-    [matrix setTarget:nil];
+    // Break references to |this| because the popup may not be
+    // deallocated immediately.
+    AutocompleteMatrix* matrix = [popup_ contentView];
+    DCHECK(matrix == nil || [matrix isKindOfClass:[AutocompleteMatrix class]]);
+    [matrix setPopupView:NULL];
 
     popup_.reset(nil);
 
@@ -364,30 +389,32 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
 
   CreatePopupIfNeeded();
 
-  // Layout the popup and size it to land underneath the field.
-  NSRect r =
-      NSRectFromCGRect(bubble_positioner_->GetLocationStackBounds().ToCGRect());
-  r.origin = [[field_ window] convertBaseToScreen:r.origin];
-  DCHECK_GT(r.size.width, 0.0);
-
-  // The popup's font is a slightly smaller version of what |field_|
-  // uses.
-  NSFont* fieldFont = [field_ font];
+  // The popup's font is a slightly smaller version of the field's.
+  NSFont* fieldFont = AutocompleteEditViewMac::GetFieldFont();
   const CGFloat resultFontSize = [fieldFont pointSize] + kEditFontAdjust;
   gfx::Font resultFont = gfx::Font::CreateFont(
       base::SysNSStringToWide([fieldFont fontName]), (int)resultFontSize);
 
-  // Load the results into the popup's matrix.  The popup window must be
-  // correctly sized before calling MatchText().
   AutocompleteMatrix* matrix = [popup_ contentView];
+
+  // Calculate the width of the matrix based on backing out the
+  // popup's border from the width of the field.  Would prefer to use
+  // [matrix convertSize:fromView:] for converting from screen size,
+  // but that doesn't work until the popup is on-screen (bug?).
+  const NSRect fieldRectBase = [field_ convertRect:[field_ bounds] toView:nil];
+  const CGFloat popupWidth = NSWidth(fieldRectBase) - 2 * kWindowBorderWidth;
+  DCHECK_GT(popupWidth, 0.0);
+  const CGFloat matrixWidth = popupWidth / [popup_ userSpaceScaleFactor];
+
+  // Load the results into the popup's matrix.
   const size_t rows = model_->result().size();
   DCHECK_GT(rows, 0U);
   [matrix renewRows:rows columns:1];
   for (size_t ii = 0; ii < rows; ++ii) {
     AutocompleteButtonCell* cell = [matrix cellAtRow:ii column:0];
     const AutocompleteMatch& match = model_->result().match_at(ii);
-    [cell setImage:MatchIcon(match)];
-    [cell setAttributedTitle:MatchText(match, resultFont, r.size.width)];
+    [cell setImage:ImageForMatch(match)];
+    [cell setAttributedTitle:MatchText(match, resultFont, matrixWidth)];
   }
 
   // Set the cell size to fit a line of text in the cell's font.  All
@@ -395,38 +422,17 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
   // line, so they should all be about the same height.
   const NSSize cellSize = [[matrix cellAtRow:0 column:0] cellSize];
   DCHECK_GT(cellSize.height, 0.0);
-  [matrix setCellSize:NSMakeSize(r.size.width,
-                                 cellSize.height + kCellHeightAdjust)];
+  const CGFloat cellHeight = cellSize.height + kCellHeightAdjust;
+  [matrix setCellSize:NSMakeSize(matrixWidth, cellHeight)];
 
-  // Make the matrix big enough to hold all the cells.
-  [matrix sizeToCells];
-
-  // Make the window just as big.
-  r.size.height = [matrix frame].size.height;
-  r.origin.y -= r.size.height + kPopupFieldGap;
-
-  // Update the selection.
+  // Update the selection before placing (and displaying) the window.
   PaintUpdatesNow();
 
-  // Animate the frame change if the only change is that the height got smaller.
-  // Otherwise, resize immediately.
-  NSRect oldFrame = [popup_ frame];
-  if (r.size.height < oldFrame.size.height &&
-      r.origin.x == oldFrame.origin.x &&
-      r.size.width == oldFrame.size.width) {
-    [NSAnimationContext beginGrouping];
-    // Don't use the GTM additon for the "Steve" slowdown because this can
-    // happen async from user actions and the effects could be a surprise.
-   [[NSAnimationContext currentContext] setDuration:kShrinkAnimationDuration];
-    [[popup_ animator] setFrame:r display:YES];
-    [NSAnimationContext endGrouping];
-  } else {
-    [popup_ setFrame:r display:YES];
-  }
-
-  if (!IsOpen()) {
-    [[field_ window] addChildWindow:popup_ ordered:NSWindowAbove];
-  }
+  // Calculate the matrix size manually rather than using -sizeToCells
+  // because actually resizing the matrix messed up the popup size
+  // animation.
+  DCHECK_EQ([matrix intercellSpacing].height, 0.0);
+  PositionPopup(rows * cellHeight);
 }
 
 // This is only called by model in SetSelectedLine() after updating
@@ -488,33 +494,30 @@ void AutocompletePopupViewMac::OpenURLForRow(int row, bool force_background) {
 // The default NSButtonCell drawing leaves the image flush left and
 // the title next to the image.  This spaces things out to line up
 // with the star button and autocomplete field.
-// TODO(shess): Determine if the star button can change size (other
-// than scaling coordinates), in which case this needs to be more
-// dynamic.
 - (void)drawInteriorWithFrame:(NSRect)cellFrame inView:(NSView *)controlView {
   [[self backgroundColor] set];
   NSRectFill(cellFrame);
 
   // Put the image centered vertically but in a fixed column.
-  // TODO(shess) Currently, the images are all 16x16 png files, so
-  // left-justified works out fine.  If that changes, it may be
-  // appropriate to align them on their centers instead of their
-  // left-hand sides.
   NSImage* image = [self image];
   if (image) {
     NSRect imageRect = cellFrame;
     imageRect.size = [image size];
-    imageRect.origin.y +=
+    imageRect.origin.y += kImageBaselineAdjust +
         floor((NSHeight(cellFrame) - NSHeight(imageRect)) / 2);
-    imageRect.origin.x += kLeftRightMargin;
-    [self drawImage:image withFrame:imageRect inView:controlView];
+    imageRect.origin.x += kImageXOffset;
+    [image drawInRect:imageRect
+             fromRect:NSZeroRect  // Entire image
+            operation:NSCompositeSourceOver
+             fraction:1.0
+         neverFlipped:YES];
   }
 
   // Adjust the title position to be lined up under the field's text.
   NSAttributedString* title = [self attributedTitle];
   if (title) {
     NSRect titleRect = cellFrame;
-    titleRect.size.width -= (kTextXOffset + kLeftRightMargin);
+    titleRect.size.width -= kTextXOffset;
     titleRect.origin.x += kTextXOffset;
     [self drawTitle:title withFrame:titleRect inView:controlView];
   }
@@ -523,6 +526,8 @@ void AutocompletePopupViewMac::OpenURLForRow(int row, bool force_background) {
 @end
 
 @implementation AutocompleteMatrix
+
+
 
 // Remove all tracking areas and initialize the one we want.  Removing
 // all might be overkill, but it's unclear why there would be others
@@ -705,9 +710,9 @@ void AutocompletePopupViewMac::OpenURLForRow(int row, bool force_background) {
 // calling on NSMatrix to draw the actual contents.
 - (void)drawRect:(NSRect)rect {
   NSBezierPath* path =
-      [NSBezierPath bezierPathWithRoundedRect:[self bounds]
-                                      xRadius:kPopupRoundingRadius
-                                      yRadius:kPopupRoundingRadius];
+     [NSBezierPath bezierPathWithRoundedRect:[self bounds]
+                                     xRadius:kPopupRoundingRadius
+                                     yRadius:kPopupRoundingRadius];
 
   // Draw the matrix clipped to our border.
   [NSGraphicsContext saveGraphicsState];

@@ -17,6 +17,7 @@
 
 namespace net {
 class AuthChallengeInfo;
+class HttpRequestHeaders;
 class HttpResponseInfo;
 class IOBuffer;
 class UploadData;
@@ -50,10 +51,10 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
 
   // Sets the upload data, most requests have no upload data, so this is a NOP.
   // Job types supporting upload data will override this.
-  virtual void SetUpload(net::UploadData* upload) { }
+  virtual void SetUpload(net::UploadData* upload);
 
   // Sets extra request headers for Job types that support request headers.
-  virtual void SetExtraRequestHeaders(const std::string& headers) { }
+  virtual void SetExtraRequestHeaders(const net::HttpRequestHeaders& headers);
 
   // If any error occurs while starting the Job, NotifyStartError should be
   // called.
@@ -97,26 +98,24 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   virtual void StopCaching();
 
   // Called to fetch the current load state for the job.
-  virtual net::LoadState GetLoadState() const { return net::LOAD_STATE_IDLE; }
+  virtual net::LoadState GetLoadState() const;
 
   // Called to get the upload progress in bytes.
-  virtual uint64 GetUploadProgress() const { return 0; }
+  virtual uint64 GetUploadProgress() const;
 
   // Called to fetch the charset for this request.  Only makes sense for some
   // types of requests. Returns true on success.  Calling this on a type that
   // doesn't have a charset will return false.
-  virtual bool GetCharset(std::string* charset) { return false; }
+  virtual bool GetCharset(std::string* charset);
 
   // Called to get response info.
-  virtual void GetResponseInfo(net::HttpResponseInfo* info) {}
+  virtual void GetResponseInfo(net::HttpResponseInfo* info);
 
   // Returns the cookie values included in the response, if applicable.
   // Returns true if applicable.
   // NOTE: This removes the cookies from the job, so it will only return
   //       useful results once per job.
-  virtual bool GetResponseCookies(std::vector<std::string>* cookies) {
-    return false;
-  }
+  virtual bool GetResponseCookies(std::vector<std::string>* cookies);
 
   // Called to fetch the encoding types for this request. Only makes sense for
   // some types of requests. Returns true on success. Calling this on a request
@@ -129,16 +128,14 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // in the reverse order (in the above example, ungzip first, and then sdch
   // expand).
   virtual bool GetContentEncodings(
-      std::vector<Filter::FilterType>* encoding_types) {
-    return false;
-  }
+      std::vector<Filter::FilterType>* encoding_types);
 
   // Find out if this is a download.
   virtual bool IsDownload() const;
 
   // Find out if this is a response to a request that advertised an SDCH
   // dictionary.  Only makes sense for some types of requests.
-  virtual bool IsSdchResponse() const { return false; }
+  virtual bool IsSdchResponse() const;
 
   // Called to setup stream filter for this request. An example of filter is
   // content encoding/decoding.
@@ -161,14 +158,12 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // location.  This may be used to implement protocol-specific restrictions.
   // If this function returns false, then the URLRequest will fail reporting
   // net::ERR_UNSAFE_REDIRECT.
-  virtual bool IsSafeRedirect(const GURL& location) {
-    return true;
-  }
+  virtual bool IsSafeRedirect(const GURL& location);
 
   // Called to determine if this response is asking for authentication.  Only
   // makes sense for some types of requests.  The caller is responsible for
   // obtaining the credentials passing them to SetAuth.
-  virtual bool NeedsAuth() { return false; }
+  virtual bool NeedsAuth();
 
   // Fills the authentication info with the server's response.
   virtual void GetAuthChallengeInfo(
@@ -211,13 +206,13 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
 
   // FilterContext methods:
   // These methods are not applicable to all connections.
-  virtual bool GetMimeType(std::string* mime_type) const { return false; }
+  virtual bool GetMimeType(std::string* mime_type) const;
   virtual bool GetURL(GURL* gurl) const;
   virtual base::Time GetRequestTime() const;
-  virtual bool IsCachedContent() const { return false; }
+  virtual bool IsCachedContent() const;
   virtual int64 GetByteReadCount() const;
-  virtual int GetResponseCode() const { return -1; }
-  virtual int GetInputStreamBufferSize() const { return kFilterBufSize; }
+  virtual int GetResponseCode() const;
+  virtual int GetInputStreamBufferSize() const;
   virtual void RecordPacketStats(StatisticSelector statistic) const;
 
  protected:
@@ -298,6 +293,15 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // Contains IO performance measurement when profiling is enabled.
   scoped_ptr<URLRequestJobMetrics> metrics_;
 
+  // The number of bytes read before passing to the filter.
+  int prefilter_bytes_read_;
+  // The number of bytes read after passing through the filter.
+  int postfilter_bytes_read_;
+  // True when (we believe) the content in this URLRequest was compressible.
+  bool is_compressible_content_;
+  // True when the content in this URLRequest was compressed.
+  bool is_compressed_;
+
  private:
   // Size of filter input buffers used by this class.
   static const int kFilterBufSize;
@@ -323,6 +327,8 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // Record packet arrival times for possible use in histograms.
   void UpdatePacketReadTimes();
 
+  void RecordCompressionHistograms();
+
   // Indicates that the job is done producing data, either it has completed
   // all the data or an error has been encountered. Set exclusively by
   // NotifyDone so that it is kept in sync with the request.
@@ -342,7 +348,7 @@ class URLRequestJob : public base::RefCountedThreadSafe<URLRequestJob>,
   // processing the filtered data, we return the data in the caller's buffer.
   // While the async IO is in progress, we save the user buffer here, and
   // when the IO completes, we fill this in.
-  net::IOBuffer *read_buffer_;
+  scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_len_;
 
   // Used by HandleResponseIfNecessary to track whether we've sent the

@@ -20,11 +20,13 @@
       'sources': [
         'bindings/npapi.h',
         'bindings/npapi_extensions.h',
+        'bindings/npfunctions.h',
         'bindings/nphostapi.h',
+        'bindings/nptypes.h',
         'bindings/npruntime.h',
       ],
       'conditions': [
-        ['OS=="linux"', {
+        ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
           'sources': [
             'bindings/npapi_x11.h',
           ],

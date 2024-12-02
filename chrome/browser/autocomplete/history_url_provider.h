@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -118,7 +118,7 @@ struct HistoryURLProviderParams {
   std::wstring languages;
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(HistoryURLProviderParams);
+  DISALLOW_COPY_AND_ASSIGN(HistoryURLProviderParams);
 };
 
 // This class is an autocomplete provider and is also a pseudo-internal
@@ -260,6 +260,12 @@ class HistoryURLProvider : public AutocompleteProvider {
   // e.g. we convert a Unicode hostname to punycode, other providers will show
   // output that surprises the user ("Search Google for xn--6ca.com").
   static std::wstring FixupUserInput(const AutocompleteInput& input);
+
+  // Trims "http:" and up to two subsequent slashes from |url|.  Returns the
+  // number of characters that were trimmed.
+  // NOTE: For a view-source: URL, this will trim from after "view-source:" and
+  // return 0.
+  static size_t TrimHttpPrefix(std::wstring* url);
 
   // Returns true if |url| is just a host (e.g. "http://www.google.com/") and
   // not some other subpage (e.g. "http://www.google.com/foo.html").

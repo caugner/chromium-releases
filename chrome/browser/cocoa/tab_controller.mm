@@ -10,15 +10,18 @@
 #import "chrome/browser/cocoa/tab_controller_target.h"
 #import "chrome/browser/cocoa/tab_view.h"
 #import "chrome/browser/cocoa/themed_window.h"
+#import "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
 
 @implementation TabController
 
+@synthesize action = action_;
+@synthesize app = app_;
 @synthesize loadingState = loadingState_;
 @synthesize mini = mini_;
 @synthesize phantom = phantom_;
+@synthesize pinned = pinned_;
 @synthesize target = target_;
-@synthesize action = action_;
 
 namespace TabControllerInternal {
 
@@ -28,7 +31,8 @@ namespace TabControllerInternal {
 class MenuDelegate : public menus::SimpleMenuModel::Delegate {
  public:
   explicit MenuDelegate(id<TabControllerTarget> target, TabController* owner)
-      : target_(target), owner_(owner) { }
+      : target_(target),
+        owner_(owner) {}
 
   // Overridden from menus::SimpleMenuModel::Delegate
   virtual bool IsCommandIdChecked(int command_id) const { return false; }
@@ -46,20 +50,6 @@ class MenuDelegate : public menus::SimpleMenuModel::Delegate {
     [target_ commandDispatch:command forController:owner_];
   }
 
-  virtual bool IsLabelForCommandIdDynamic(int command_id) const {
-    return command_id == TabStripModel::CommandTogglePinned;
-  }
-  virtual string16 GetLabelForCommandId(int command_id) const {
-    // Display "Pin Tab" when the tab is not pinned and "Unpin Tab" when it is
-    // (this is not a checkmark menu item, per Apple's HIG).
-    if (command_id == TabStripModel::CommandTogglePinned) {
-      return l10n_util::GetStringUTF16(
-          [owner_ mini] ? IDS_TAB_CXMENU_UNPIN_TAB_MAC
-                          : IDS_TAB_CXMENU_PIN_TAB_MAC);
-    }
-    return string16();
-  }
-
  private:
   id<TabControllerTarget> target_;  // weak
   TabController* owner_;  // weak, owns me
@@ -71,9 +61,10 @@ class MenuDelegate : public menus::SimpleMenuModel::Delegate {
 // padding, of which we have no comparable constants (we draw using paths, not
 // images). The selected tab width includes the close button width.
 + (CGFloat)minTabWidth { return 31; }
-+ (CGFloat)minSelectedTabWidth { return 47; }
++ (CGFloat)minSelectedTabWidth { return 46; }
 + (CGFloat)maxTabWidth { return 220; }
 + (CGFloat)miniTabWidth { return 53; }
++ (CGFloat)appTabWidth { return 66; }
 
 - (TabView*)tabView {
   return static_cast<TabView*>([self view]);
@@ -138,7 +129,11 @@ class MenuDelegate : public menus::SimpleMenuModel::Delegate {
 - (NSMenu*)menu {
   contextMenuDelegate_.reset(
       new TabControllerInternal::MenuDelegate(target_, self));
-  contextMenuModel_.reset(new TabMenuModel(contextMenuDelegate_.get()));
+  contextMenuModel_.reset(new TabMenuModel(contextMenuDelegate_.get(),
+                                           [self pinned],
+                                           false,   // allow_toolbar_toggle
+                                           true));  // is_toolbar_visible
+
   contextMenuController_.reset(
       [[MenuController alloc] initWithModel:contextMenuModel_.get()
                      useWithPopUpButtonCell:NO]);
@@ -174,8 +169,16 @@ class MenuDelegate : public menus::SimpleMenuModel::Delegate {
 - (void)setIconView:(NSView*)iconView {
   [iconView_ removeFromSuperview];
   iconView_ = iconView;
-  [iconView_ setFrame:originalIconFrame_];
-
+  if ([self app]) {
+    NSRect appIconFrame = [iconView frame];
+    appIconFrame.origin = originalIconFrame_.origin;
+    // Center the icon.
+    appIconFrame.origin.x = ([TabController appTabWidth] -
+        NSWidth(appIconFrame)) / 2.0;
+    [iconView setFrame:appIconFrame];
+  } else {
+    [iconView_ setFrame:originalIconFrame_];
+  }
   // Ensure that the icon is suppressed if no icon is set or if the tab is too
   // narrow to display one.
   [self updateVisibility];

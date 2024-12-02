@@ -4,6 +4,8 @@
 
 #include "chrome/renderer/devtools_agent.h"
 
+#include "base/command_line.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/devtools_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/devtools_agent_filter.h"
@@ -17,11 +19,36 @@
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebDevToolsAgent;
+using WebKit::WebDevToolsAgentClient;
 using WebKit::WebPoint;
 using WebKit::WebString;
 using WebKit::WebCString;
 using WebKit::WebVector;
 using WebKit::WebView;
+
+namespace {
+
+class WebKitClientMessageLoopImpl
+    : public WebDevToolsAgentClient::WebKitClientMessageLoop {
+ public:
+  WebKitClientMessageLoopImpl() : message_loop_(MessageLoop::current()) { }
+  virtual ~WebKitClientMessageLoopImpl() {
+    message_loop_ = NULL;
+  }
+  virtual void run() {
+    bool old_state = message_loop_->NestableTasksAllowed();
+    message_loop_->SetNestableTasksAllowed(true);
+    message_loop_->Run();
+    message_loop_->SetNestableTasksAllowed(old_state);
+  }
+  virtual void quitNow() {
+    message_loop_->QuitNow();
+  }
+ private:
+  MessageLoop* message_loop_;
+};
+
+} //  namespace
 
 // static
 std::map<int, DevToolsAgent*> DevToolsAgent::agent_for_routing_id_;
@@ -30,6 +57,9 @@ DevToolsAgent::DevToolsAgent(int routing_id, RenderView* render_view)
     : routing_id_(routing_id),
       render_view_(render_view) {
   agent_for_routing_id_[routing_id] = this;
+
+  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  expose_v8_debugger_protocol_ =cmd->HasSwitch(switches::kRemoteShellPort);
 }
 
 DevToolsAgent::~DevToolsAgent() {
@@ -85,14 +115,30 @@ void DevToolsAgent::runtimeFeatureStateChanged(const WebKit::WebString& feature,
 WebCString DevToolsAgent::injectedScriptSource() {
   base::StringPiece injectjsWebkit =
       webkit_glue::GetDataResource(IDR_DEVTOOLS_INJECT_WEBKIT_JS);
-  return WebCString(injectjsWebkit.as_string().c_str());
+  return WebCString(injectjsWebkit.data(), injectjsWebkit.length());
 }
 
 WebCString DevToolsAgent::injectedScriptDispatcherSource() {
   base::StringPiece injectDispatchjs =
       webkit_glue::GetDataResource(IDR_DEVTOOLS_INJECT_DISPATCH_JS);
-  return WebCString(injectDispatchjs.as_string().c_str());
+  return WebCString(injectDispatchjs.data(), injectDispatchjs.length());
 }
+
+WebCString DevToolsAgent::debuggerScriptSource() {
+  base::StringPiece debuggerScriptjs =
+      webkit_glue::GetDataResource(IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS);
+  return WebCString(debuggerScriptjs.data(), debuggerScriptjs.length());
+}
+
+WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
+    DevToolsAgent::createClientMessageLoop() {
+  return new WebKitClientMessageLoopImpl();
+}
+
+bool DevToolsAgent::exposeV8DebuggerProtocol() {
+  return expose_v8_debugger_protocol_;
+}
+
 
 // static
 DevToolsAgent* DevToolsAgent::FromHostId(int host_id) {
@@ -148,10 +194,4 @@ WebDevToolsAgent* DevToolsAgent::GetWebAgent() {
   if (!web_view)
     return NULL;
   return web_view->devToolsAgent();
-}
-
-// static
-void WebKit::WebDevToolsAgentClient::sendMessageToFrontendOnIOThread(
-    const WebDevToolsMessageData& data) {
-  DevToolsAgentFilter::SendRpcMessage(DevToolsMessageData(data));
 }

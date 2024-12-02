@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ class GURL;
 // This class describes an error that happened while showing a page over SSL.
 // An SSLErrorInfo object only exists on the UI thread and only contains
 // information about an error (type of error and text details).
-// Note no DISALLOW_EVIL_CONSTRUCTORS as we want the copy constructor.
+// Note no DISALLOW_COPY_AND_ASSIGN as we want the copy constructor.
 class SSLErrorInfo {
  public:
   enum ErrorType {
@@ -28,8 +28,6 @@ class SSLErrorInfo {
     CERT_REVOKED,
     CERT_INVALID,
     CERT_WEAK_SIGNATURE_ALGORITHM,
-    MIXED_CONTENTS,
-    UNSAFE_CONTENTS,
     UNKNOWN
   };
 

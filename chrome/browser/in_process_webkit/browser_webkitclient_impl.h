@@ -5,13 +5,17 @@
 #ifndef CHROME_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITCLIENT_IMPL_H_
 #define CHROME_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITCLIENT_IMPL_H_
 
+#include "webkit/glue/webfilesystem_impl.h"
 #include "webkit/glue/webkitclient_impl.h"
 
 class BrowserWebKitClientImpl : public webkit_glue::WebKitClientImpl {
  public:
+  BrowserWebKitClientImpl();
+
   // WebKitClient methods:
   virtual WebKit::WebClipboard* clipboard();
   virtual WebKit::WebMimeRegistry* mimeRegistry();
+  virtual WebKit::WebFileSystem* fileSystem();
   virtual WebKit::WebSandboxSupport* sandboxSupport();
   virtual bool sandboxEnabled();
   virtual unsigned long long visitedLinkHash(const char* canonicalURL,
@@ -38,6 +42,11 @@ class BrowserWebKitClientImpl : public webkit_glue::WebKitClientImpl {
       const WebKit::WebString& origin, const WebKit::WebURL& url,
       bool isLocalStorage);
   virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
+  virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
+                                 bool sync_dir);
+
+ private:
+  webkit_glue::WebFileSystemImpl file_system_;
 };
 
 #endif  // CHROME_BROWSER_IN_PROCESS_WEBKIT_BROWSER_WEBKITCLIENT_IMPL_H_

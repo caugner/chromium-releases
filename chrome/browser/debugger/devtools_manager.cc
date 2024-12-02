@@ -24,6 +24,10 @@
 
 // static
 DevToolsManager* DevToolsManager::GetInstance() {
+  // http://crbug.com/47806 this method may be called when BrowserProcess
+  // has already been destroyed.
+  if (!g_browser_process)
+    return NULL;
   return g_browser_process->devtools_manager();
 }
 
@@ -111,8 +115,11 @@ void DevToolsManager::ActivateWindow(RenderViewHost* client_rvh) {
 
 void DevToolsManager::CloseWindow(RenderViewHost* client_rvh) {
   DevToolsClientHost* client_host = FindOnwerDevToolsClientHost(client_rvh);
-  if (client_host)
-    CloseWindow(client_host);
+  if (client_host) {
+    RenderViewHost* inspected_rvh = GetInspectedRenderViewHost(client_host);
+    DCHECK(inspected_rvh);
+    UnregisterDevToolsClientHostFor(inspected_rvh);
+  }
 }
 
 void DevToolsManager::RequestDockWindow(RenderViewHost* client_rvh) {
@@ -124,12 +131,16 @@ void DevToolsManager::RequestUndockWindow(RenderViewHost* client_rvh) {
 }
 
 void DevToolsManager::OpenDevToolsWindow(RenderViewHost* inspected_rvh) {
-  ToggleDevToolsWindow(inspected_rvh, true, false);
+  ToggleDevToolsWindow(
+      inspected_rvh,
+      true,
+      DEVTOOLS_TOGGLE_ACTION_NONE);
 }
 
-void DevToolsManager::ToggleDevToolsWindow(RenderViewHost* inspected_rvh,
-                                           bool open_console) {
-  ToggleDevToolsWindow(inspected_rvh, false, open_console);
+void DevToolsManager::ToggleDevToolsWindow(
+    RenderViewHost* inspected_rvh,
+    DevToolsToggleAction action) {
+  ToggleDevToolsWindow(inspected_rvh, false, action);
 }
 
 void DevToolsManager::RuntimeFeatureStateChanged(RenderViewHost* inspected_rvh,
@@ -194,6 +205,7 @@ void DevToolsManager::UnregisterDevToolsClientHostFor(
   DevToolsClientHost* host = GetDevToolsClientHostFor(inspected_rvh);
   if (!host)
     return;
+  SendDetachToAgent(inspected_rvh);
   UnbindClientHost(inspected_rvh, host);
 
   if (inspected_rvh_for_reopen_ == inspected_rvh)
@@ -303,7 +315,6 @@ void DevToolsManager::SendDetachToAgent(RenderViewHost* inspected_rvh) {
 void DevToolsManager::ForceReopenWindow() {
   if (inspected_rvh_for_reopen_) {
     RenderViewHost* inspected_rvn = inspected_rvh_for_reopen_;
-    SendDetachToAgent(inspected_rvn);
     UnregisterDevToolsClientHostFor(inspected_rvn);
     OpenDevToolsWindow(inspected_rvn);
   }
@@ -338,9 +349,10 @@ void DevToolsManager::ReopenWindow(RenderViewHost* client_rvh, bool docked) {
   window->SetDocked(docked);
 }
 
-void DevToolsManager::ToggleDevToolsWindow(RenderViewHost* inspected_rvh,
-                                           bool force_open,
-                                           bool open_console) {
+void DevToolsManager::ToggleDevToolsWindow(
+    RenderViewHost* inspected_rvh,
+    bool force_open,
+    DevToolsToggleAction action) {
   bool do_open = force_open;
   DevToolsClientHost* host = GetDevToolsClientHostFor(inspected_rvh);
   if (!host) {
@@ -360,19 +372,11 @@ void DevToolsManager::ToggleDevToolsWindow(RenderViewHost* inspected_rvh,
   // If window is docked and visible, we hide it on toggle. If window is
   // undocked, we show (activate) it.
   if (!window->is_docked() || do_open) {
-    AutoReset auto_reset_in_initial_show(&in_initial_show_, true);
-    window->Show(open_console);
+    AutoReset<bool> auto_reset_in_initial_show(&in_initial_show_, true);
+    window->Show(action);
   } else {
-    CloseWindow(host);
+    UnregisterDevToolsClientHostFor(inspected_rvh);
   }
-}
-
-void DevToolsManager::CloseWindow(DevToolsClientHost* client_host) {
-  RenderViewHost* inspected_rvh = GetInspectedRenderViewHost(client_host);
-  DCHECK(inspected_rvh);
-  SendDetachToAgent(inspected_rvh);
-
-  UnregisterDevToolsClientHostFor(inspected_rvh);
 }
 
 void DevToolsManager::BindClientHost(RenderViewHost* inspected_rvh,

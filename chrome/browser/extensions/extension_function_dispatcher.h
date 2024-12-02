@@ -18,10 +18,11 @@ class Extension;
 class ExtensionDOMUI;
 class ExtensionFunction;
 class ExtensionHost;
+class ListValue;
 class Profile;
 class RenderViewHost;
 class RenderViewHostDelegate;
-class Value;
+class TabContents;
 
 // A factory function for creating new ExtensionFunction instances.
 typedef ExtensionFunction* (*ExtensionFunctionFactory)();
@@ -47,6 +48,12 @@ class ExtensionFunctionDispatcher {
     virtual gfx::NativeWindow GetCustomFrameNativeWindow() {
       return NULL;
     }
+
+    // Asks the delegate for any relevant TabContents associated with this
+    // context. For example, the TabContents in which an infobar or
+    // chrome-extension://<id> URL are being shown. Callers must check for a
+    // NULL return value (as in the case of a background page).
+    virtual TabContents* associated_tab_contents() = 0;
 
    protected:
     virtual ~Delegate() {}
@@ -83,15 +90,12 @@ class ExtensionFunctionDispatcher {
                                              Delegate* delegate,
                                              const GURL& url);
 
-  // Retrieves a vector of all EFD instances.
-  static std::set<ExtensionFunctionDispatcher*>* all_instances();
-
   ~ExtensionFunctionDispatcher();
 
   Delegate* delegate() { return delegate_; }
 
   // Handle a request to execute an extension function.
-  void HandleRequest(const std::string& name, const Value* args,
+  void HandleRequest(const std::string& name, const ListValue* args,
                      const GURL& source_url, int request_id, bool has_callback);
 
   // Send a response to a function.

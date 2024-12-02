@@ -11,56 +11,39 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "base/task.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
-#include "chrome/browser/autocomplete/autocomplete_edit_view.h"
+#include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser.h"
-#include "chrome/browser/browser_window.h"
-#include "chrome/browser/bubble_positioner.h"
-#include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_view_host_factory.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
-#include "chrome/browser/renderer_host/site_instance.h"
-#include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/view_ids.h"
+#include "chrome/browser/views/dom_view.h"
 #include "chrome/browser/views/info_bubble.h"
 #include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/views/location_bar/location_bar_view.h"
 #include "chrome/common/url_constants.h"
-#include "views/controls/native/native_view_host.h"
 #include "views/widget/root_view.h"
-#include "views/widget/widget.h"
 
-#if defined(OS_WIN)
-#include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
-#include "chrome/browser/renderer_host/render_widget_host_view_win.h"
-#elif defined(OS_LINUX)
-#include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
-#include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
-#endif
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/status/status_area_view.h"
 #endif
 
 namespace {
 
-// Padding & margins for the navigation entry.
-const int kNavigationEntryPadding = 2;
-const int kNavigationEntryXMargin = 3;
-const int kNavigationEntryYMargin = 1;
-
 // Padding between the navigation bar and the render view contents.
 const int kNavigationBarBottomPadding = 3;
 
-// NavigationBar size.
-const int kNavigationBarHeight = 25;
+// NavigationBar constants.
+const int kNavigationBarBorderThickness = 1;
 
-// The delta applied to the default font size for the omnibox.
-const int kAutocompleteEditFontDelta = 3;
+// The speed in pixels per milli-second at which the animation should progress.
+// It is easier to use a speed than a duration as the contents may report
+// several changes in size over-time.
+const double kAnimationSpeedPxPerMS = 1.5;
+
+const SkColor kBorderColor = SkColorSetRGB(205, 201, 201);
 
 // Command line switch for specifying url of the page.
+// TODO: nuke when we convert to the real app page. Also nuke code in
+// AddNewContents
 const wchar_t kURLSwitch[] = L"main-menu-url";
 
 // Returns the URL of the menu.
@@ -69,224 +52,41 @@ static GURL GetMenuURL() {
       CommandLine::ForCurrentProcess()->GetSwitchValue(kURLSwitch);
   if (!url_string.empty())
     return GURL(WideToUTF8(url_string));
-  return GURL(chrome::kChromeUIAppsURL);
+  return GURL(chrome::kChromeUIAppLauncherURL);
 }
 
-// RenderWidgetHostViewGtk propagates the mouse press events (see
-// render_widget_host_view_gtk.cc).  We subclass to stop the propagation here,
-// as if the click event was propagated it would reach the TopContainer view and
-// it would close the popup.
-class RWHVNativeViewHost : public views::NativeViewHost {
- public:
-  RWHVNativeViewHost() {}
-
-  virtual bool OnMousePressed(const views::MouseEvent& event) { return true; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RWHVNativeViewHost);
-};
+// Returns the location bar view of |browser|.
+static views::View* GetBrowserLocationBar(Browser* browser) {
+  BrowserView* browser_view = static_cast<BrowserView*>(browser->window());
+  views::RootView* root_view = views::Widget::GetWidgetFromNativeWindow(
+      browser_view->GetNativeHandle())->GetRootView();
+  return root_view->GetViewByID(VIEW_ID_LOCATION_BAR);
+}
 
 }  // namespace
 
-////////////////////////////////////////////////////////////////////////////////
-// TabContentsDelegateImpl
-//
-// TabContentsDelegate and RenderViewHostDelegate::View have some methods
-// in common (with differing signatures). The TabContentsDelegate methods are
-// implemented by this class.
-
-class TabContentsDelegateImpl : public TabContentsDelegate {
- public:
-  explicit TabContentsDelegateImpl(AppLauncher* app_launcher);
-
-  // TabContentsDelegate.
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url, const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition);
-  virtual void NavigationStateChanged(const TabContents* source,
-                                      unsigned changed_flags) {}
-  virtual void AddNewContents(TabContents* source,
-                              TabContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture) {}
-  virtual void ActivateContents(TabContents* contents) {}
-  virtual void LoadingStateChanged(TabContents* source) {}
-  virtual void CloseContents(TabContents* source) {}
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
-  virtual bool IsPopup(TabContents* source) { return false; }
-  virtual void ToolbarSizeChanged(TabContents* source, bool is_animating) {}
-  virtual void URLStarredChanged(TabContents* source, bool starred) {}
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
-
- private:
-  AppLauncher* app_launcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabContentsDelegateImpl);
-};
-
-TabContentsDelegateImpl::TabContentsDelegateImpl(AppLauncher* app_launcher)
-    : app_launcher_(app_launcher) {
-}
-
-void TabContentsDelegateImpl::OpenURLFromTab(TabContents* source,
-                                             const GURL& url,
-                                             const GURL& referrer,
-                                             WindowOpenDisposition disposition,
-                                             PageTransition::Type transition) {
-  app_launcher_->browser()->OpenURL(url, referrer, NEW_FOREGROUND_TAB,
-                                   PageTransition::LINK);
-  app_launcher_->Hide();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// NavigationBar
-//
-// A navigation bar that is shown in the app launcher in compact navigation bar
-// mode.
-
-class NavigationBar : public views::View,
-                      public AutocompleteEditController,
-                      public BubblePositioner {
- public:
-  explicit NavigationBar(AppLauncher* app_launcher)
-      : app_launcher_(app_launcher),
-        location_entry_view_(NULL) {
-    SetFocusable(true);
-    location_entry_view_ = new views::NativeViewHost;
-    AddChildView(location_entry_view_);
-    set_border(views::Border::CreateSolidBorder(1, SK_ColorGRAY));
-  }
-
-  virtual ~NavigationBar() {
-    if (location_entry_view_->native_view())
-      location_entry_view_->Detach();
-  }
-
-  // views::View overrides.
-  virtual void Focus() {
-    location_entry_->SetFocus();
-    location_entry_->SelectAll(true);
-  }
-
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) {
-    if (!is_add || child != this)
-      return;
-
-    DCHECK(!location_entry_.get());
-
-    Browser* browser = app_launcher_->browser();
-#if defined (OS_WIN)
-    gfx::Font font;
-    font = font.DeriveFont(kAutocompleteEditFontDelta);
-    AutocompleteEditViewWin* autocomplete_view =
-        new AutocompleteEditViewWin(font, this, browser->toolbar_model(),
-                                    this, GetWidget()->GetNativeView(),
-                                    browser->profile(),
-                                    browser->command_updater(), false, this);
-    location_entry_.reset(autocomplete_view);
-    autocomplete_view->Update(NULL);
-    // The Update call above sets the autocomplete text to the current one in
-    // the location bar, make sure to clear it.
-    autocomplete_view->SetUserText(std::wstring());
-#elif defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
-    AutocompleteEditViewGtk* autocomplete_view =
-        new AutocompleteEditViewGtk(this, browser->toolbar_model(),
-                                    browser->profile(),
-                                    browser->command_updater(), false, this);
-    autocomplete_view->Init();
-    gtk_widget_show_all(autocomplete_view->widget());
-    gtk_widget_hide(autocomplete_view->widget());
-    location_entry_.reset(autocomplete_view);
-#else
-    NOTIMPLEMENTED();
-#endif
-    location_entry_view_->set_focus_view(this);
-    location_entry_view_->Attach(location_entry_->GetNativeView());
-  }
-
-  virtual void Layout() {
-    gfx::Rect bounds = GetLocalBounds(false);
-    location_entry_view_->SetBounds(
-        bounds.x() + kNavigationEntryXMargin + kNavigationEntryPadding,
-        bounds.y() + kNavigationEntryYMargin,
-        bounds.width() - 2 * (kNavigationEntryPadding +
-                              kNavigationEntryXMargin),
-        bounds.height() - kNavigationEntryYMargin * 2);
-  }
-
-  // BubblePositioner implementation.
-  virtual gfx::Rect GetLocationStackBounds() const {
-    gfx::Rect bounds = location_entry_view_->GetBounds(
-        views::View::APPLY_MIRRORING_TRANSFORMATION);
-    gfx::Point origin(bounds.x(), bounds.bottom() + kNavigationEntryPadding);
-    views::View::ConvertPointToScreen(this, &origin);
-    gfx::Rect rect = gfx::Rect(origin, gfx::Size(500, 0));
-    if (UILayoutIsRightToLeft()) {
-      // Align the window to the right side of the entry view when
-      // UI is RTL mode.
-      rect.set_x(rect.x() - (rect.width() - location_entry_view_->width()));
-    }
-    return rect;
-  }
-
-  // AutocompleteController implementation.
-  virtual void OnAutocompleteAccept(const GURL& url,
-                                    WindowOpenDisposition disposition,
-                                    PageTransition::Type transition,
-                                    const GURL& alternate_nav_url) {
-    app_launcher_->AddTabWithURL(url, transition);
-    app_launcher_->Hide();
-  }
-  virtual void OnChanged() {}
-  virtual void OnInputInProgress(bool in_progress) {}
-  virtual void OnKillFocus() {}
-  virtual void OnSetFocus() {
-    views::FocusManager* focus_manager = GetFocusManager();
-    if (!focus_manager) {
-      NOTREACHED();
-      return;
-    }
-    focus_manager->SetFocusedView(this);
-  }
-  virtual SkBitmap GetFavIcon() const {
-    return SkBitmap();
-  }
-  virtual std::wstring GetTitle() const {
-    return std::wstring();
-  }
-
- private:
-  AppLauncher* app_launcher_;
-  views::NativeViewHost* location_entry_view_;
-#if defined(OS_WIN)
-  scoped_ptr<AutocompleteEditViewWin> location_entry_;
-#elif defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
-  scoped_ptr<AutocompleteEditViewGtk> location_entry_;
-#else
-  NOTIMPLEMENTED();
-#endif
-
-  DISALLOW_COPY_AND_ASSIGN(NavigationBar);
-};
-
-////////////////////////////////////////////////////////////////////////////////
 // InfoBubbleContentsView
 //
-// The view that contains the navigation bar and render view.
+// The view that contains the navigation bar and DOMUI.
 // It is displayed in an info-bubble.
 
-class InfoBubbleContentsView : public views::View {
+class InfoBubbleContentsView : public views::View,
+                               public LocationBarView::Delegate,
+                               public CommandUpdater::CommandUpdaterDelegate {
  public:
   explicit InfoBubbleContentsView(AppLauncher* app_launcher);
   ~InfoBubbleContentsView();
 
+  // Computes and sets the preferred size for the InfoBubbleContentsView based
+  // on the preferred size of the DOMUI contents specified.
+  void ComputePreferredSize(const gfx::Size& dom_view_preferred_size);
+
   // Sets the initial focus.
   // Should be called when the bubble that contains us is shown.
   void BubbleShown();
+
+  // Returns the TabContents displaying the contents for this bubble.
+  TabContents* GetBubbleTabContents();
 
   // views::View override:
   virtual gfx::Size GetPreferredSize();
@@ -295,30 +95,73 @@ class InfoBubbleContentsView : public views::View {
                                     views::View* parent,
                                     views::View* child);
 
+  // LocationBarView::Delegate implementation:
+
+  // WARNING: this is not the TabContents of the bubble!  Use
+  // GetBubbleTabContents() to get the bubble's TabContents.
+  virtual TabContents* GetTabContents();
+  virtual void OnInputInProgress(bool in_progress) {}
+
+  // CommandUpdater::CommandUpdaterDelegate implementation:
+  virtual void ExecuteCommand(int id);
+
  private:
   // The application launcher displaying this info bubble.
   AppLauncher* app_launcher_;
 
-  // The navigation bar.
-  NavigationBar* navigation_bar_;
+  // The location bar.
+  LocationBarView* location_bar_;
 
   // The view containing the renderer view.
-  views::NativeViewHost* render_view_container_;
+  DOMView* dom_view_;
+
+  // The preferred size for this view (at which it fits its contents).
+  gfx::Size preferred_size_;
+
+  // CommandUpdater the location bar sends commands to.
+  CommandUpdater command_updater_;
+
+  // The width of the browser's location bar.
+  int browser_location_bar_width_;
 
   DISALLOW_COPY_AND_ASSIGN(InfoBubbleContentsView);
 };
 
 InfoBubbleContentsView::InfoBubbleContentsView(AppLauncher* app_launcher)
     : app_launcher_(app_launcher),
-      navigation_bar_(NULL),
-      render_view_container_(NULL) {
+      location_bar_(NULL),
+      dom_view_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(command_updater_(this)) {
+  // Allow the location bar to open URLs.
+  command_updater_.UpdateCommandEnabled(IDC_OPEN_CURRENT_URL, true);
+  DCHECK(app_launcher);
+
+  browser_location_bar_width_ =
+      GetBrowserLocationBar(app_launcher->browser())->width();
 }
 
 InfoBubbleContentsView::~InfoBubbleContentsView() {
 }
 
+void InfoBubbleContentsView::ComputePreferredSize(
+    const gfx::Size& dom_view_preferred_size) {
+  preferred_size_ = dom_view_preferred_size;
+
+  // Add the padding and location bar height.
+  preferred_size_.Enlarge(
+      0, location_bar_->height() + kNavigationBarBottomPadding);
+
+  // Make sure the width is at least the browser location bar width.
+  if (preferred_size_.width() < browser_location_bar_width_)
+    preferred_size_.set_width(browser_location_bar_width_);
+}
+
 void InfoBubbleContentsView::BubbleShown() {
-  navigation_bar_->RequestFocus();
+  location_bar_->RequestFocus();
+}
+
+TabContents* InfoBubbleContentsView::GetBubbleTabContents() {
+  return dom_view_->tab_contents();
 }
 
 void InfoBubbleContentsView::ViewHierarchyChanged(
@@ -326,25 +169,52 @@ void InfoBubbleContentsView::ViewHierarchyChanged(
   if (!is_add || child != this)
     return;
 
-  DCHECK(!render_view_container_);
-  render_view_container_ = new RWHVNativeViewHost;
-  AddChildView(render_view_container_);
-#if defined(OS_WIN)
-  RenderWidgetHostViewWin* view_win =
-      static_cast<RenderWidgetHostViewWin*>(app_launcher_->rwhv_);
-  // Create the HWND now that we are parented.
-  HWND hwnd = view_win->Create(GetWidget()->GetNativeView());
-  view_win->ShowWindow(SW_SHOW);
-#endif
-  render_view_container_->Attach(app_launcher_->rwhv_->GetNativeView());
+  DCHECK(!dom_view_);
+  dom_view_ = new DOMView();
+  AddChildView(dom_view_);
+  // We pass NULL for site instance so the renderer uses its own process.
+  dom_view_->Init(app_launcher_->browser()->profile(), NULL);
+  // We make the AppLauncher the TabContents delegate so we get notifications
+  // from the page to open links.
+  dom_view_->tab_contents()->set_delegate(app_launcher_);
+  GURL url = GetMenuURL();
+  std::string ref = url.ref();
+  if (!app_launcher_->hash_params().empty()) {
+    if (!ref.empty())
+      ref += "&";
+    ref += app_launcher_->hash_params();
 
-  navigation_bar_ = new NavigationBar(app_launcher_);
-  AddChildView(navigation_bar_);
+    url_canon::Replacements<char> replacements;
+    replacements.SetRef(ref.c_str(), url_parse::Component(0, ref.size()));
+    url = url.ReplaceComponents(replacements);
+  }
+  dom_view_->LoadURL(url);
+
+  Browser* browser = app_launcher_->browser();
+  location_bar_ =  new LocationBarView(browser->profile(),
+                                       &command_updater_,
+                                       browser->toolbar_model(),
+                                       this,
+                                       LocationBarView::APP_LAUNCHER);
+
+  location_bar_->set_border(
+      views::Border::CreateSolidBorder(kNavigationBarBorderThickness,
+                                       kBorderColor));
+  AddChildView(location_bar_);
+  location_bar_->Init();
+  // Size the location to its preferred size so ComputePreferredSize() computes
+  // the right size.
+  location_bar_->SizeToPreferredSize();
+  ComputePreferredSize(gfx::Size(browser_location_bar_width_, 0));
+  Layout();
+}
+
+TabContents* InfoBubbleContentsView::GetTabContents() {
+  return app_launcher_->browser()->GetSelectedTabContents();
 }
 
 gfx::Size InfoBubbleContentsView::GetPreferredSize() {
-  gfx::Rect bounds = app_launcher_->browser()->window()->GetRestoredBounds();
-  return gfx::Size(bounds.width() * 6 / 7, bounds.height() * 9 / 10);
+  return preferred_size_;
 }
 
 void InfoBubbleContentsView::Layout() {
@@ -352,23 +222,23 @@ void InfoBubbleContentsView::Layout() {
     return;
 
   gfx::Rect bounds = GetLocalBounds(false);
-  int navigation_bar_height =
-      kNavigationBarHeight + kNavigationEntryYMargin * 2;
-  const views::Border* border = navigation_bar_->border();
-  if (border) {
-    gfx::Insets insets;
-    border->GetInsets(&insets);
-    navigation_bar_height += insets.height();
-  }
-  navigation_bar_->SetBounds(bounds.x(), bounds.y(),
-                             bounds.width(), navigation_bar_height);
-  int render_y = navigation_bar_->bounds().bottom() +
-      kNavigationBarBottomPadding;
-  gfx::Size rwhv_size =
-      gfx::Size(width(), std::max(0, bounds.height() - render_y + bounds.y()));
-  render_view_container_->SetBounds(bounds.x(), render_y,
-                                    rwhv_size.width(), rwhv_size.height());
-  app_launcher_->rwhv_->SetSize(rwhv_size);
+  // The browser's location bar use a vertical padding that we need to take into
+  // account to match its height.
+  int location_bar_height =
+      location_bar_->GetPreferredSize().height() - LocationBarView::kVertMargin;
+  location_bar_->SetBounds(bounds.x(), bounds.y(), bounds.width(),
+                           location_bar_height);
+  int render_y = location_bar_->bounds().bottom() + kNavigationBarBottomPadding;
+  dom_view_->SetBounds(0, render_y,
+                       width(), app_launcher_->contents_pref_size_.height());
+}
+
+void InfoBubbleContentsView::ExecuteCommand(int id) {
+  // The user navigated by typing or selecting an entry in the location bar.
+  DCHECK_EQ(IDC_OPEN_CURRENT_URL, id);
+  GURL url(WideToUTF8(location_bar_->GetInputString()));
+  app_launcher_->AddTabWithURL(url, location_bar_->GetPageTransition());
+  app_launcher_->Hide();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -376,54 +246,44 @@ void InfoBubbleContentsView::Layout() {
 
 AppLauncher::AppLauncher(Browser* browser)
     : browser_(browser),
-      info_bubble_(NULL),
-      site_instance_(NULL),
-      contents_rvh_(NULL),
-      rwhv_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          tab_contents_delegate_(new TabContentsDelegateImpl(this))) {
+      info_bubble_(NULL) {
+  DCHECK(browser);
   info_bubble_content_ = new InfoBubbleContentsView(this);
-
-  Profile* profile = browser_->profile();
-  int64 session_storage_namespace_id = profile->GetWebKitContext()->
-      dom_storage_context()->AllocateSessionStorageNamespaceId();
-  site_instance_ = SiteInstance::CreateSiteInstanceForURL(profile,
-                                                          GetMenuURL());
-  contents_rvh_ = new RenderViewHost(site_instance_, this, MSG_ROUTING_NONE,
-                                     session_storage_namespace_id);
-  rwhv_ = RenderWidgetHostView::CreateViewForWidget(contents_rvh_);
-  contents_rvh_->set_view(rwhv_);
-
-  // On Windows, we'll create the RWHV HWND once we are attached as we need
-  // to be parented for CreateWindow to work.
-#if defined(OS_LINUX)
-  RenderWidgetHostViewGtk* view_gtk =
-      static_cast<RenderWidgetHostViewGtk*>(rwhv_);
-  view_gtk->InitAsChild();
+#if defined(OS_WIN)
+  animate_ = true;
+  animation_.reset(new SlideAnimation(this));
+  animation_->SetTweenType(Tween::LINEAR);
+#else
+  animate_ = false;
 #endif
-
-  contents_rvh_->CreateRenderView(profile->GetRequestContext());
-  DCHECK(contents_rvh_->IsRenderViewLive());
-  contents_rvh_->NavigateToURL(GetMenuURL());
 }
 
 AppLauncher::~AppLauncher() {
-  contents_rvh_->Shutdown();
 }
 
 // static
-AppLauncher* AppLauncher::Show(Browser* browser, const gfx::Rect& bounds) {
+AppLauncher* AppLauncher::Show(Browser* browser,
+                               const gfx::Rect& bounds,
+                               const gfx::Point& bubble_anchor,
+                               const std::string& hash_params) {
   AppLauncher* app_launcher = new AppLauncher(browser);
   BrowserView* browser_view = static_cast<BrowserView*>(browser->window());
+  app_launcher->hash_params_ = hash_params;
   app_launcher->info_bubble_ =
-      InfoBubble::Show(browser_view->frame()->GetWindow(), bounds,
-                       app_launcher->info_bubble_content_, app_launcher);
+      PinnedContentsInfoBubble::Show(browser_view->GetWidget(),
+          bounds, BubbleBorder::TOP_LEFT, bubble_anchor,
+          app_launcher->info_bubble_content_, app_launcher);
   app_launcher->info_bubble_content_->BubbleShown();
+
+  // TODO(finnur): Change this so that we only fade out when the user launches
+  // something from the bubble. This will fade out on dismiss as well.
+  app_launcher->info_bubble_->set_fade_away_on_close(true);
   return app_launcher;
 }
 
 // static
-AppLauncher* AppLauncher::ShowForNewTab(Browser* browser) {
+AppLauncher* AppLauncher::ShowForNewTab(Browser* browser,
+                                        const std::string& hash_params) {
   BrowserView* browser_view = static_cast<BrowserView*>(browser->window());
   TabStrip* tabstrip = browser_view->tabstrip()->AsTabStrip();
   if (!tabstrip)
@@ -432,96 +292,106 @@ AppLauncher* AppLauncher::ShowForNewTab(Browser* browser) {
   gfx::Point origin = bounds.origin();
   views::RootView::ConvertPointToScreen(tabstrip, &origin);
   bounds.set_origin(origin);
-  return Show(browser, bounds);
+
+  // Figure out where the location bar is, so we can pin the bubble to
+  // make our url bar appear exactly over it.
+  views::View* location_bar = GetBrowserLocationBar(browser);
+  gfx::Point location_bar_origin = location_bar->bounds().origin();
+  views::RootView::ConvertPointToScreen(location_bar->GetParent(),
+                                        &location_bar_origin);
+
+  return Show(browser, bounds, location_bar_origin, hash_params);
 }
 
 void AppLauncher::Hide() {
   info_bubble_->Close();
 }
 
+void AppLauncher::OpenURLFromTab(TabContents* source,
+                                 const GURL& url, const GURL& referrer,
+                                 WindowOpenDisposition disposition,
+                                 PageTransition::Type transition) {
+  // TODO(jcivelli): we should call Browser::OpenApplicationTab(), we would need
+  //                 to access the app for this URL.
+  // The user clicked an item in the app launcher contents.
+  AddTabWithURL(url, PageTransition::AUTO_BOOKMARK);
+  Hide();
+}
+
+void AppLauncher::AddNewContents(TabContents* source,
+                                 TabContents* new_contents,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture) {
+#if defined(OS_CHROMEOS)
+  // ChromeOS uses the kURLSwitch to specify a page that opens popups. We need
+  // to do this so the popups are opened when the user clicks on the page.
+  // TODO: nuke when convert to the real app page.
+  new_contents->set_delegate(NULL);
+  browser_->GetSelectedTabContents()->AddNewContents(
+      new_contents, disposition, initial_pos, user_gesture);
+  Hide();
+#endif
+}
+
+void AppLauncher::UpdatePreferredSize(const gfx::Size& pref_size) {
+  if (pref_size.width() == 0 || pref_size.height() == 0)
+    return;
+
+  previous_contents_pref_size_ = contents_pref_size_;
+  contents_pref_size_ = pref_size;
+
+  if (!animate_) {
+    info_bubble_content_->ComputePreferredSize(pref_size);
+    info_bubble_->SizeToContents();
+    return;
+  }
+
+  int original_height = previous_contents_pref_size_.height();
+  int new_height = contents_pref_size_.height();
+  int new_duration;
+  if (animation_->is_animating()) {
+    // Modify the animation duration so that the current running animation does
+    // not appear janky.
+    new_duration = static_cast<int>(new_height / kAnimationSpeedPxPerMS);
+  } else {
+    // The animation is not running.
+    animation_->Reset();  // It may have already been run.
+    new_duration = static_cast<int>(abs(new_height - original_height) /
+                                    kAnimationSpeedPxPerMS);
+  }
+  animation_->SetSlideDuration(new_duration);
+  animation_->Show();  // No-op if already showing.
+}
+
+void AppLauncher::AnimationProgressed(const Animation* animation) {
+  gfx::Size contents_size(contents_pref_size_.width(),
+      animation->CurrentValueBetween(previous_contents_pref_size_.height(),
+                                     contents_pref_size_.height()));
+  info_bubble_content_->ComputePreferredSize(contents_size);
+  info_bubble_->SizeToContents();
+}
+
 void AppLauncher::InfoBubbleClosing(InfoBubble* info_bubble,
                                     bool closed_by_escape) {
-  // The stack may have pending_contents_ on it. Delay deleting the
-  // pending_contents_ as TabContents doesn't deal well with being deleted
-  // while on the stack.
+  // Delay deleting to be safe (we, and our tabcontents may be on the stack).
+  // Remove ourself as a delegate as on GTK the Widget destruction is
+  // asynchronous and will happen after the AppLauncher has been deleted (and it
+  // might notify us after we have been deleted).
+  info_bubble_content_->GetBubbleTabContents()->set_delegate(NULL);
   MessageLoop::current()->PostTask(FROM_HERE,
                                    new DeleteTask<AppLauncher>(this));
 }
 
-void AppLauncher::RequestMove(const gfx::Rect& new_bounds) {
-#if defined(OS_LINUX)
-  // Invoking PositionChild results in a gtk signal that triggers attempting to
-  // to resize the window. We need to set the size request so that it resizes
-  // correctly when this happens.
-  gtk_widget_set_size_request(info_bubble_->GetNativeView(),
-                              new_bounds.width(), new_bounds.height());
-  info_bubble_->SetBounds(new_bounds);
-#endif
-}
-
-RendererPreferences AppLauncher::GetRendererPrefs(Profile* profile) const {
-  RendererPreferences preferences;
-  renderer_preferences_util::UpdateFromSystemSettings(&preferences, profile);
-  return preferences;
-}
-
-void AppLauncher::CreateNewWindow(int route_id) {
-  if (pending_contents_.get()) {
-    NOTREACHED();
-    return;
-  }
-
-  helper_.CreateNewWindow(route_id, browser_->profile(), site_instance_,
-                          DOMUIFactory::GetDOMUIType(GURL(GetMenuURL())),
-                          NULL);
-  pending_contents_.reset(helper_.GetCreatedWindow(route_id));
-  pending_contents_->set_delegate(tab_contents_delegate_.get());
-}
-
-void AppLauncher::ShowCreatedWindow(int route_id,
-                                    WindowOpenDisposition disposition,
-                                    const gfx::Rect& initial_pos,
-                                    bool user_gesture) {
-  if (disposition == NEW_POPUP) {
-    pending_contents_->set_delegate(NULL);
-    browser_->GetSelectedTabContents()->AddNewContents(
-        pending_contents_.release(), disposition, initial_pos, user_gesture);
-    Hide();
-  }
-}
-
-void AppLauncher::StartDragging(const WebDropData& drop_data,
-                                WebKit::WebDragOperationsMask allowed_ops,
-                                const SkBitmap& image,
-                                const gfx::Point& image_offset) {
-  // We're not going to do any drag & drop, but we have to tell the renderer the
-  // drag & drop ended, othewise the renderer thinks the drag operation is
-  // underway and mouse events won't work.
-  contents_rvh_->DragSourceSystemDragEnded();
-}
-
 void AppLauncher::AddTabWithURL(const GURL& url,
                                 PageTransition::Type transition) {
-#if defined(OS_CHROMEOS)
-  switch (chromeos::StatusAreaView::GetOpenTabsMode()) {
-    case chromeos::StatusAreaView::OPEN_TABS_ON_LEFT: {
-      // Add the new tab at the first non-pinned location.
-      int index = browser_->tabstrip_model()->IndexOfFirstNonMiniTab();
-      browser_->AddTabWithURL(url, GURL(), transition,
-                              true, index, true, NULL);
-      break;
-    }
-    case chromeos::StatusAreaView::OPEN_TABS_CLOBBER: {
-      browser_->GetSelectedTabContents()->controller().LoadURL(
-          url, GURL(), transition);
-      break;
-    }
-    case chromeos::StatusAreaView::OPEN_TABS_ON_RIGHT: {
-      browser_->AddTabWithURL(url, GURL(), transition, true, -1, true, NULL);
-      break;
-    }
-  }
-#else
-  browser_->AddTabWithURL(url, GURL(), transition, true, -1, true, NULL);
-#endif
+  browser_->AddTabWithURL(
+      url, GURL(), transition, -1,
+      TabStripModel::ADD_SELECTED | TabStripModel::ADD_FORCE_INDEX, NULL,
+      std::string());
+}
+
+void AppLauncher::Resize(const gfx::Size& contents_size) {
+  info_bubble_content_->ComputePreferredSize(contents_size);
+  info_bubble_->SizeToContents();
 }

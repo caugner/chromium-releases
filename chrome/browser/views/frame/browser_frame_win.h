@@ -35,9 +35,11 @@ class BrowserFrameWin : public BrowserFrame, public views::WindowWin {
 
   BrowserView* browser_view() const { return browser_view_; }
 
+  // Returns the height of the title bar.
+  int GetTitleBarHeight();
+
   // BrowserFrame implementation.
   virtual views::Window* GetWindow();
-  virtual void TabStripCreated(BaseTabStrip* tabstrip);
   virtual int GetMinimizeButtonOffset() const;
   virtual gfx::Rect GetBoundsForTabStrip(BaseTabStrip* tabstrip) const;
   virtual void UpdateThrobber(bool running);
@@ -45,7 +47,7 @@ class BrowserFrameWin : public BrowserFrame, public views::WindowWin {
   virtual ThemeProvider* GetThemeProviderForFrame() const;
   virtual bool AlwaysUseNativeFrame() const;
   virtual views::View* GetFrameView() const;
-  virtual void PaintTabStripShadow(gfx::Canvas* canvas);
+  virtual void TabStripDisplayModeChanged();
 
  protected:
   // Overridden from views::WindowWin:

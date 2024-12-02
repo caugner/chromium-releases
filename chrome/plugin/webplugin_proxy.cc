@@ -112,6 +112,13 @@ void WebPluginProxy::Invalidate() {
 
 void WebPluginProxy::InvalidateRect(const gfx::Rect& rect) {
 #if defined(OS_MACOSX)
+  // If this is a Core Animation plugin, all we need to do is inform the
+  // delegate.
+  if (!windowless_context_.get()) {
+    delegate_->PluginDidInvalidate();
+    return;
+  }
+
   // Some plugins will send invalidates larger than their own rect when
   // offscreen, so constrain invalidates to the plugin rect.
   gfx::Rect plugin_rect = delegate_->GetRect();
@@ -130,8 +137,8 @@ void WebPluginProxy::InvalidateRect(const gfx::Rect& rect) {
   // This is not true because scrolling (or window resize) could occur and be
   // handled by the renderer before it receives the InvalidateRect message,
   // changing the clip rect and then not painting.
-  if (invalidate_rect.IsEmpty() ||
-      !delegate_->GetClipRect().Intersects(invalidate_rect))
+  if (damaged_rect_.IsEmpty() ||
+      !delegate_->GetClipRect().Intersects(damaged_rect_))
     return;
 
   // Only send a single InvalidateRect message at a time.  From DidPaint we
@@ -457,7 +464,7 @@ void WebPluginProxy::UpdateGeometry(
   // Send over any pending invalidates which occured when the plugin was
   // off screen.
   if (delegate_->IsWindowless() && !clip_rect.IsEmpty() &&
-      old_clip_rect.IsEmpty() && !damaged_rect_.IsEmpty()) {
+      !damaged_rect_.IsEmpty()) {
     InvalidateRect(damaged_rect_);
   }
 
@@ -580,13 +587,12 @@ void WebPluginProxy::SetDeferResourceLoading(unsigned long resource_id,
 }
 
 #if defined(OS_MACOSX)
-void WebPluginProxy::BindFakePluginWindowHandle() {
-  Send(new PluginHostMsg_BindFakePluginWindowHandle(route_id_));
+void WebPluginProxy::BindFakePluginWindowHandle(bool opaque) {
+  Send(new PluginHostMsg_BindFakePluginWindowHandle(route_id_, opaque));
 }
 
 void WebPluginProxy::AcceleratedFrameBuffersDidSwap(
     gfx::PluginWindowHandle window) {
-  // TODO(pinkerton): Rename this message.
   Send(new PluginHostMsg_AcceleratedSurfaceBuffersSwapped(route_id_, window));
 }
 
@@ -594,7 +600,6 @@ void WebPluginProxy::SetAcceleratedSurface(gfx::PluginWindowHandle window,
     int32 width,
     int32 height,
     uint64 accelerated_surface_identifier) {
-  // TODO(pinkerton): Rename this message.
   Send(new PluginHostMsg_AcceleratedSurfaceSetIOSurface(
       route_id_, window, width, height, accelerated_surface_identifier));
 }

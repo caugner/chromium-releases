@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 
 #include "base/logging.h"
 #include "base/scoped_handle.h"
+#include "base/win_util.h"
 #include "gfx/gdi_util.h"
 #include "gfx/rect.h"
 #include "skia/ext/platform_canvas.h"
@@ -177,7 +178,7 @@ HRESULT NativeTheme::PaintMenuArrow(ThemeName theme,
                                     int state_id,
                                     RECT* rect,
                                     MenuArrowDirection arrow_direction,
-                                    bool is_highlighted) const {
+                                    ControlState control_state) const {
   HANDLE handle = GetThemeHandle(MENU);
   if (handle && draw_theme_) {
     if (arrow_direction == RIGHT_POINTING_ARROW) {
@@ -216,7 +217,7 @@ HRESULT NativeTheme::PaintMenuArrow(ThemeName theme,
     state = DFCS_MENUARROW;
   else
     state = DFCS_MENUARROWRIGHT;
-  return PaintFrameControl(hdc, rect, DFC_MENU, state, is_highlighted);
+  return PaintFrameControl(hdc, rect, DFC_MENU, state, control_state);
 }
 
 HRESULT NativeTheme::PaintMenuBackground(ThemeName theme,
@@ -253,12 +254,12 @@ HRESULT NativeTheme::PaintMenuCheck(ThemeName theme,
                                     int part_id,
                                     int state_id,
                                     RECT* rect,
-                                    bool is_highlighted) const {
+                                    ControlState control_state) const {
   HANDLE handle = GetThemeHandle(MENU);
   if (handle && draw_theme_) {
     return draw_theme_(handle, hdc, part_id, state_id, rect, NULL);
   }
-  return PaintFrameControl(hdc, rect, DFC_MENU, DFCS_MENUCHECK, is_highlighted);
+  return PaintFrameControl(hdc, rect, DFC_MENU, DFCS_MENUCHECK, control_state);
 }
 
 HRESULT NativeTheme::PaintMenuGutter(HDC hdc,
@@ -364,6 +365,18 @@ HRESULT NativeTheme::PaintScrollbarThumb(HDC hdc,
   if ((part_id == SBP_THUMBBTNHORZ) || (part_id == SBP_THUMBBTNVERT))
     DrawEdge(hdc, rect, EDGE_RAISED, BF_RECT | BF_MIDDLE);
   // Classic mode doesn't have a gripper.
+  return S_OK;
+}
+
+HRESULT NativeTheme::PaintSpinButton(HDC hdc,
+                                     int part_id,
+                                     int state_id,
+                                     int classic_state,
+                                     RECT* rect) const {
+  HANDLE handle = GetThemeHandle(SPIN);
+  if (handle && draw_theme_)
+    return draw_theme_(handle, hdc, part_id, state_id, rect, NULL);
+  DrawFrameControl(hdc, rect, DFC_SCROLL, classic_state);
   return S_OK;
 }
 
@@ -475,6 +488,126 @@ HRESULT NativeTheme::PaintTrackbar(HDC hdc,
       canvas->drawPath(right_triangle, paint);
     }
   }
+  return S_OK;
+}
+
+//    <-a->
+// [  *****             ]
+//  ____ |              |
+//  <-a-> <------b----->
+// a: object_width
+// b: frame_width
+// *: animating object
+//
+// - the animation goes from "[" to "]" repeatedly.
+// - the animation offset is at first "|"
+//
+static int ComputeAnimationProgress(int frame_width,
+                                    int object_width,
+                                    int pixels_per_second,
+                                    double animated_seconds) {
+  int animation_width = frame_width + object_width;
+  double interval = static_cast<double>(animation_width) / pixels_per_second;
+  double ratio = fmod(animated_seconds, interval) / interval;
+  return static_cast<int>(animation_width * ratio) - object_width;
+}
+
+static RECT InsetRect(const RECT* rect, int size) {
+  gfx::Rect result(*rect);
+  result.Inset(size, size);
+  return result.ToRECT();
+}
+
+HRESULT NativeTheme::PaintProgressBar(HDC hdc,
+                                      RECT* bar_rect,
+                                      RECT* value_rect,
+                                      bool determinate,
+                                      double animated_seconds,
+                                      skia::PlatformCanvas* canvas) const {
+  // There is no documentation about the animation speed, frame-rate, nor
+  // size of moving overlay of the indeterminate progress bar.
+  // So we just observed real-world programs and guessed following parameters.
+  const int kDeteminateOverlayPixelsPerSecond = 300;
+  const int kDeteminateOverlayWidth = 120;
+  const int kIndeterminateOverlayPixelsPerSecond =  175;
+  const int kVistaIndeterminateOverlayWidth = 120;
+  const int kXPIndeterminateOverlayWidth = 55;
+  // The thickness of the bar frame inside |value_rect|
+  const int kXPBarPadding = 3;
+
+  bool pre_vista = win_util::GetWinVersion() < win_util::WINVERSION_VISTA;
+  HANDLE handle = GetThemeHandle(PROGRESS);
+  if (handle && draw_theme_ && draw_theme_ex_) {
+    draw_theme_(handle, hdc, PP_BAR, 0, bar_rect, NULL);
+
+    int bar_width = bar_rect->right - bar_rect->left;
+    if (determinate) {
+      // TODO(morrita): this RTL guess can be wrong.
+      // We should pass the direction from WebKit side.
+      bool is_rtl = (bar_rect->right == value_rect->right &&
+                     bar_rect->left != value_rect->left);
+      // We should care the direction here because PP_CNUNK painting
+      // is asymmetric.
+      DTBGOPTS value_draw_options;
+      value_draw_options.dwSize = sizeof(DTBGOPTS);
+      value_draw_options.dwFlags = is_rtl ? DTBG_MIRRORDC : 0;
+      value_draw_options.rcClip = *bar_rect;
+
+      if (pre_vista) {
+        // On XP, progress bar is chunk-style and has no glossy effect.
+        // We need to shrink destination rect to fit the part inside the bar
+        // with an appropriate margin.
+        RECT shrunk_value_rect = InsetRect(value_rect, kXPBarPadding);
+        draw_theme_ex_(handle, hdc, PP_CHUNK, 0,
+                       &shrunk_value_rect, &value_draw_options);
+      } else  {
+        // On Vista or later, the progress bar part has a
+        // single-block value part. It also has glossy effect.
+        // And the value part has exactly same height as the bar part
+        // so we don't need to shrink the rect.
+        draw_theme_ex_(handle, hdc, PP_FILL, 0,
+                       value_rect, &value_draw_options);
+
+        int dx = ComputeAnimationProgress(bar_width,
+                                          kDeteminateOverlayWidth,
+                                          kDeteminateOverlayPixelsPerSecond,
+                                          animated_seconds);
+        RECT overlay_rect = *value_rect;
+        overlay_rect.left += dx;
+        overlay_rect.right = overlay_rect.left + kDeteminateOverlayWidth;
+        draw_theme_(handle, hdc, PP_MOVEOVERLAY, 0, &overlay_rect, value_rect);
+      }
+    } else {
+      // A glossy overlay for indeterminate progress bar has small pause
+      // after each animation. We emulate this by adding an invisible margin
+      // the animation has to traverse.
+      int width_with_margin = bar_width + kIndeterminateOverlayPixelsPerSecond;
+      int overlay_width = pre_vista ?
+          kXPIndeterminateOverlayWidth : kVistaIndeterminateOverlayWidth;
+      int dx = ComputeAnimationProgress(width_with_margin,
+                                        overlay_width,
+                                        kIndeterminateOverlayPixelsPerSecond,
+                                        animated_seconds);
+      RECT overlay_rect = *bar_rect;
+      overlay_rect.left += dx;
+      overlay_rect.right = overlay_rect.left + overlay_width;
+      if (pre_vista) {
+        RECT shrunk_rect = InsetRect(&overlay_rect, kXPBarPadding);
+        RECT shrunk_bar_rect = InsetRect(bar_rect, kXPBarPadding);
+        draw_theme_(handle, hdc, PP_CHUNK, 0, &shrunk_rect, &shrunk_bar_rect);
+      } else {
+        draw_theme_(handle, hdc, PP_MOVEOVERLAY, 0, &overlay_rect, bar_rect);
+      }
+    }
+
+    return S_OK;
+  }
+
+  HBRUSH bg_brush = GetSysColorBrush(COLOR_BTNFACE);
+  HBRUSH fg_brush = GetSysColorBrush(COLOR_BTNSHADOW);
+  FillRect(hdc, bar_rect, bg_brush);
+  FillRect(hdc, value_rect, fg_brush);
+  DrawEdge(hdc, bar_rect, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
   return S_OK;
 }
 
@@ -612,7 +745,7 @@ HRESULT NativeTheme::PaintFrameControl(HDC hdc,
                                        RECT* rect,
                                        UINT type,
                                        UINT state,
-                                       bool is_highlighted) const {
+                                       ControlState control_state) const {
   const int width = rect->right - rect->left;
   const int height = rect->bottom - rect->top;
 
@@ -631,13 +764,29 @@ HRESULT NativeTheme::PaintFrameControl(HDC hdc,
   // dc's text color for the black bits in the mask, and the dest dc's
   // background color for the white bits in the mask. DrawFrameControl draws the
   // check in black, and the background in white.
-  COLORREF old_bg_color =
-      SetBkColor(hdc,
-                 GetSysColor(is_highlighted ? COLOR_HIGHLIGHT : COLOR_MENU));
-  COLORREF old_text_color =
-      SetTextColor(hdc,
-                   GetSysColor(is_highlighted ? COLOR_HIGHLIGHTTEXT :
-                                                COLOR_MENUTEXT));
+  int bg_color_key;
+  int text_color_key;
+  switch (control_state) {
+    case CONTROL_HIGHLIGHTED:
+      bg_color_key = COLOR_HIGHLIGHT;
+      text_color_key = COLOR_HIGHLIGHTTEXT;
+      break;
+    case CONTROL_NORMAL:
+      bg_color_key = COLOR_MENU;
+      text_color_key = COLOR_MENUTEXT;
+      break;
+    case CONTROL_DISABLED:
+      bg_color_key = COLOR_MENU;
+      text_color_key = COLOR_GRAYTEXT;
+      break;
+    default:
+      NOTREACHED();
+      bg_color_key = COLOR_MENU;
+      text_color_key = COLOR_MENUTEXT;
+      break;
+  }
+  COLORREF old_bg_color = SetBkColor(hdc, GetSysColor(bg_color_key));
+  COLORREF old_text_color = SetTextColor(hdc, GetSysColor(text_color_key));
   BitBlt(hdc, rect->left, rect->top, width, height, bitmap_dc, 0, 0, SRCCOPY);
   SetBkColor(hdc, old_bg_color);
   SetTextColor(hdc, old_text_color);
@@ -657,6 +806,13 @@ void NativeTheme::CloseHandles() const
       close_theme_(theme_handles_[i]);
       theme_handles_[i] = NULL;
   }
+}
+
+bool NativeTheme::IsClassicTheme(ThemeName name) const {
+  if (!theme_dll_)
+    return true;
+
+  return !GetThemeHandle(name);
 }
 
 HANDLE NativeTheme::GetThemeHandle(ThemeName theme_name) const
@@ -699,6 +855,12 @@ HANDLE NativeTheme::GetThemeHandle(ThemeName theme_name) const
     break;
   case WINDOW:
     handle = open_theme_(NULL, L"Window");
+    break;
+  case PROGRESS:
+    handle = open_theme_(NULL, L"Progress");
+    break;
+  case SPIN:
+    handle = open_theme_(NULL, L"Spin");
     break;
   default:
     NOTREACHED();

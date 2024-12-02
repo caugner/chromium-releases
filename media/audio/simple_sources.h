@@ -8,7 +8,8 @@
 #include <list>
 
 #include "base/lock.h"
-#include "media/audio/audio_output.h"
+#include "media/audio/audio_io.h"
+#include "media/base/seekable_buffer.h"
 
 // An audio source that produces a pure sinusoidal tone.
 class SineWaveAudioSource : public AudioOutputStream::AudioSourceCallback {
@@ -55,10 +56,11 @@ class PushAudioOutput {
 // A fairly basic class to connect a push model provider PushAudioOutput to
 // a pull model provider AudioSourceCallback. Fundamentally it manages a series
 // of audio buffers and is unaware of the actual audio format.
+// Note that the PushSource is not thread safe and user need to provide locking.
 class PushSource : public AudioOutputStream::AudioSourceCallback,
                    public PushAudioOutput {
  public:
-  explicit PushSource();
+  PushSource();
   virtual ~PushSource();
 
   // Write one buffer.
@@ -77,21 +79,10 @@ class PushSource : public AudioOutputStream::AudioSourceCallback,
   void ClearAll();
 
  private:
-  // Defines the unit of playback. We own the memory pointed by |buffer|.
-  struct Packet {
-    char* buffer;
-    uint32 size;
-  };
-
   // Free acquired resources.
   void CleanUp();
 
-  typedef std::list<Packet> PacketList;
-  PacketList packets_;
-  uint32 buffered_bytes_;
-  uint32 front_buffer_consumed_;
-  // Serialize access to packets_ and buffered_bytes_ using this lock.
-  Lock lock_;
+  media::SeekableBuffer buffer_;
 };
 
 #endif  // MEDIA_AUDIO_SIMPLE_SOURCES_H_

@@ -5,6 +5,7 @@
 #include "base/logging.h"
 #include "base/registry.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
 #include "chrome_frame/test/test_server.h"
 
@@ -172,11 +173,13 @@ void SimpleWebServer::DidAccept(ListenSocket* server,
 }
 
 void SimpleWebServer::DidRead(ListenSocket* connection,
-                              const std::string& data) {
+                              const char* data,
+                              int len) {
   Connection* c = FindConnection(connection);
   DCHECK(c);
   Request& r = c->request();
-  r.OnDataReceived(data);
+  std::string str(data, len);
+  r.OnDataReceived(str);
   if (r.AllContentReceived()) {
     const Request& request = c->request();
     Response* response = FindResponse(request);
@@ -213,6 +216,150 @@ void SimpleWebServer::DidClose(ListenSocket* sock) {
     connections_.erase(std::find(connections_.begin(), connections_.end(), c));
     delete c;
   }
+}
+
+HTTPTestServer::HTTPTestServer(int port, const std::wstring& address,
+                               FilePath root_dir)
+    : port_(port), address_(address), root_dir_(root_dir) {
+  net::EnsureWinsockInit();
+  server_ = ListenSocket::Listen(WideToUTF8(address), port, this);
+}
+
+HTTPTestServer::~HTTPTestServer() {
+}
+
+std::list<scoped_refptr<ConfigurableConnection>>::iterator
+HTTPTestServer::FindConnection(const ListenSocket* socket) {
+  ConnectionList::iterator it;
+  for (it = connection_list_.begin(); it != connection_list_.end(); ++it) {
+    if ((*it)->socket_ == socket) {
+      break;
+    }
+  }
+
+  return it;
+}
+
+scoped_refptr<ConfigurableConnection> HTTPTestServer::ConnectionFromSocket(
+    const ListenSocket* socket) {
+  ConnectionList::iterator it = FindConnection(socket);
+  if (it != connection_list_.end())
+    return *it;
+  return NULL;
+}
+
+void HTTPTestServer::DidAccept(ListenSocket* server, ListenSocket* socket) {
+  connection_list_.push_back(new ConfigurableConnection(socket));
+}
+
+void HTTPTestServer::DidRead(ListenSocket* socket,
+                             const char* data,
+                             int len) {
+  scoped_refptr<ConfigurableConnection> connection =
+      ConnectionFromSocket(socket);
+  if (connection) {
+    std::string str(data, len);
+    connection->r_.OnDataReceived(str);
+    if (connection->r_.AllContentReceived()) {
+      std::wstring path = UTF8ToWide(connection->r_.path());
+      if (LowerCaseEqualsASCII(connection->r_.method(), "post"))
+        this->Post(connection, path, connection->r_);
+      else
+        this->Get(connection, path, connection->r_);
+    }
+  }
+}
+
+void HTTPTestServer::DidClose(ListenSocket* socket) {
+  ConnectionList::iterator it = FindConnection(socket);
+  DCHECK(it != connection_list_.end());
+  connection_list_.erase(it);
+}
+
+std::wstring HTTPTestServer::Resolve(const std::wstring& path) {
+  // Remove the first '/' if needed.
+  std::wstring stripped_path = path;
+  if (path.size() && path[0] == L'/')
+    stripped_path = path.substr(1);
+
+  if (port_ == 80) {
+    if (stripped_path.empty()) {
+      return StringPrintf(L"http://%ls", address_.c_str());
+    } else {
+      return StringPrintf(L"http://%ls/%ls", address_.c_str(),
+                          stripped_path.c_str());
+    }
+  } else {
+    if (stripped_path.empty()) {
+      return StringPrintf(L"http://%ls:%d", address_.c_str(), port_);
+    } else {
+      return StringPrintf(L"http://%ls:%d/%ls", address_.c_str(), port_,
+                          stripped_path.c_str());
+    }
+  }
+}
+
+void ConfigurableConnection::SendChunk() {
+  int size = (int)data_.size();
+  const char* chunk_ptr = data_.c_str() + cur_pos_;
+  int bytes_to_send = std::min(options_.chunk_size_, size - cur_pos_);
+
+  socket_->Send(chunk_ptr, bytes_to_send);
+  DLOG(INFO) << "Sent(" << cur_pos_ << "," << bytes_to_send
+      << "): " << base::StringPiece(chunk_ptr, bytes_to_send);
+
+  cur_pos_ += bytes_to_send;
+  if (cur_pos_ < size) {
+    MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(this,
+        &ConfigurableConnection::SendChunk), options_.timeout_);
+  } else {
+    socket_ = 0;  // close the connection.
+  }
+}
+
+void ConfigurableConnection::Send(const std::string& headers,
+                                  const std::string& content) {
+  SendOptions options(SendOptions::IMMEDIATE, 0, 0);
+  SendWithOptions(headers, content, options);
+}
+
+void ConfigurableConnection::SendWithOptions(const std::string& headers,
+                                             const std::string& content,
+                                             const SendOptions& options) {
+  std::string content_length_header;
+  if (!content.empty() &&
+      std::string::npos == headers.find("Context-Length:")) {
+    content_length_header = StringPrintf("Content-Length: %u\r\n",
+                                         content.size());
+  }
+
+  // Save the options.
+  options_ = options;
+
+  if (options_.speed_ == SendOptions::IMMEDIATE) {
+    socket_->Send(headers);
+    socket_->Send(content_length_header, true);
+    socket_->Send(content);
+    socket_ = 0;  // close the connection.
+    return;
+  }
+
+  if (options_.speed_ == SendOptions::IMMEDIATE_HEADERS_DELAYED_CONTENT) {
+    socket_->Send(headers);
+    socket_->Send(content_length_header, true);
+    DLOG(INFO) << "Headers sent: " << headers << content_length_header;
+    data_.append(content);
+  }
+
+  if (options_.speed_ == SendOptions::DELAYED) {
+    data_ = headers;
+    data_.append(content_length_header);
+    data_.append("\r\n");
+  }
+
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+      NewRunnableMethod(this, &ConfigurableConnection::SendChunk),
+                        options.timeout_);
 }
 
 }  // namespace test_server

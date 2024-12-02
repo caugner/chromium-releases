@@ -11,12 +11,17 @@
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
+#include "base/file_path.h"
+#include "base/mac_util.h"
+#include "base/path_service.h"
+#include "base/scoped_nsobject.h"
 #include "chrome/app/breakpad_mac.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/browser_main_win.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
 #import "chrome/browser/cocoa/keystone_glue.h"
 #include "chrome/browser/metrics/metrics_service.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/result_codes.h"
@@ -41,11 +46,23 @@ void WillInitializeMainMessageLoop(const MainFunctionParams& parameters) {
 
     // Before we load the nib, we need to start up the resource bundle so we
     // have the strings avaiable for localization.
-    ResourceBundle::InitSharedInstance(std::wstring());
+    std::wstring pref_locale;
+    // TODO(markusheintz): Read preference pref::kApplicationLocale in order to
+    // enforce the application locale.
+    ResourceBundle::InitSharedInstance(pref_locale);
+
+    FilePath resources_pack_path;
+    PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
+    ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
   }
 
-  // Now load the nib.
-  [NSBundle loadNibNamed:@"MainMenu" owner:NSApp];
+  // Now load the nib (from the right bundle).
+  scoped_nsobject<NSNib>
+      nib([[NSNib alloc] initWithNibNamed:@"MainMenu"
+                                   bundle:mac_util::MainAppBundle()]);
+  [nib instantiateNibWithOwner:NSApp topLevelObjects:nil];
+  // Make sure the app controller has been created.
+  DCHECK([NSApp delegate]);
 
   // This is a no-op if the KeystoneRegistration framework is not present.
   // The framework is only distributed with branded Google Chrome builds.

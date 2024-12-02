@@ -10,15 +10,21 @@
 #include "base/basictypes.h"
 
 class Task;
+class WebURLLoaderMockFactory;
 namespace WebKit {
+class WebApplicationCacheHost;
+class WebApplicationCacheHostClient;
+class WebCString;
 class WebFrame;
 class WebKitClient;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebPlugin;
-struct WebPluginParams;
 class WebString;
+class WebThemeEngine;
 class WebURL;
+class WebURLResponse;
+struct WebPluginParams;
 }
 
 // This package provides functions used by DumpRenderTree/chromium.
@@ -29,9 +35,21 @@ class WebURL;
 namespace webkit_support {
 
 // Initializes or terminates a test environment.
-// SetUpTestEnvironment() calls WebKit::initialize().
+// |unit_test_mode| should be set to true when running in a TestSuite, in which
+// case no AtExitManager is created and ICU is not initialized (as it is already
+// done by the TestSuite).
+// SetUpTestEnvironment() and SetUpTestEnvironmentForUnitTests() calls
+// WebKit::initialize().
 // TearDownTestEnvironment() calls WebKit::shutdown().
+// SetUpTestEnvironmentForUnitTests() should be used when running in a
+// TestSuite, in which case no AtExitManager is created and ICU is not
+// initialized (as it is already done by the TestSuite).
 void SetUpTestEnvironment();
+void SetUpTestEnvironmentForUnitTests();
+// TODO(jcivelli): the method below is deprecated and should be removed when
+//                 DumpRenderTree has been modified to use the version with no
+//                 parameter.
+void SetUpTestEnvironment(bool unit_test_mode);
 void TearDownTestEnvironment();
 
 // Returns a pointer to a WebKitClient implementation for DumpRenderTree.
@@ -46,6 +64,28 @@ WebKit::WebPlugin* CreateWebPlugin(WebKit::WebFrame* frame,
 // This is used by WebFrameClient::createMediaPlayer().
 WebKit::WebMediaPlayer* CreateMediaPlayer(WebKit::WebFrame* frame,
                                           WebKit::WebMediaPlayerClient* client);
+
+// This is used by WebFrameClient::createApplicationCacheHost().
+WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
+    WebKit::WebFrame* frame, WebKit::WebApplicationCacheHostClient* client);
+
+// Returns the root directory of the WebKit code.
+WebKit::WebString GetWebKitRootDir();
+
+// ------- URL load mocking.
+// Registers the file at |file_path| to be served when |url| is requested.
+// |response| is the response provided with the contents.
+void RegisterMockedURL(const WebKit::WebURL& url,
+                       const WebKit::WebURLResponse& response,
+                       const WebKit::WebString& file_path);
+
+// Unregisters URLs so they are no longer mocked.
+void UnregisterMockedURL(const WebKit::WebURL& url);
+void UnregisterAllMockedURLs();
+
+// Causes all pending asynchronous requests to be served.  When this method
+// returns all the pending requests have been processed.
+void ServeAsynchronousMockedRequests();
 
 // Wrappers to minimize dependecy.
 
@@ -75,12 +115,27 @@ WebKit::WebURL CreateURLForPathOrURL(
 // Converts file:///tmp/LayoutTests URLs to the actual location on disk.
 WebKit::WebURL RewriteLayoutTestsURL(const std::string& utf8_url);
 
+// Set the directory of specified file: URL as the current working directory.
+bool SetCurrentDirectoryForFileURL(const WebKit::WebURL& fileUrl);
+
 // - Database
 void SetDatabaseQuota(int quota);
 void ClearAllDatabases();
 
 // - Resource loader
 void SetAcceptAllCookies(bool accept);
+
+// - Theme engine
+#if defined(OS_WIN)
+void SetThemeEngine(WebKit::WebThemeEngine* engine);
+WebKit::WebThemeEngine* GetThemeEngine();
+#endif
+
+// - DevTools
+WebKit::WebCString GetDevToolsInjectedScriptSource();
+WebKit::WebCString GetDevToolsInjectedScriptDispatcherSource();
+WebKit::WebCString GetDevToolsDebuggerScriptSource();
+WebKit::WebURL GetDevToolsPathAsURL();
 
 }  // namespace webkit_support
 

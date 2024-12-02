@@ -15,17 +15,17 @@
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 
-namespace webkit_glue {
-struct FormData;
-class FormField;
-}  // namespace webkit_glue
-
-class AutoFillInfoBarDelegate;
+class AutoFillCCInfoBarDelegate;
 class AutoFillProfile;
 class CreditCard;
 class FormStructure;
 class PrefService;
 class TabContents;
+
+namespace webkit_glue {
+struct FormData;
+class FormField;
+}  // namespace webkit_glue
 
 // TODO(jhawkins): Maybe this should be in a grd file?
 extern const char* kAutoFillLearnMoreUrl;
@@ -33,7 +33,6 @@ extern const char* kAutoFillLearnMoreUrl;
 // Manages saving and restoring the user's personal information entered into web
 // forms.
 class AutoFillManager : public RenderViewHostDelegate::AutoFill,
-                        public PersonalDataManager::Observer,
                         public AutoFillDownloadManager::Observer {
  public:
   explicit AutoFillManager(TabContents* tab_contents);
@@ -47,39 +46,34 @@ class AutoFillManager : public RenderViewHostDelegate::AutoFill,
 
   // RenderViewHostDelegate::AutoFill implementation:
   virtual void FormSubmitted(const webkit_glue::FormData& form);
-  virtual void FormsSeen(
-      const std::vector<webkit_glue::FormData>& forms);
+  virtual void FormsSeen(const std::vector<webkit_glue::FormData>& forms);
   virtual bool GetAutoFillSuggestions(int query_id,
+                                      bool form_autofilled,
                                       const webkit_glue::FormField& field);
   virtual bool FillAutoFillFormData(int query_id,
                                     const webkit_glue::FormData& form,
                                     const string16& value,
-                                    const string16& label);
+                                    const string16& label,
+                                    int unique_id);
+  virtual void ShowAutoFillDialog();
 
-  // PersonalDataManager::Observer implementation:
-  virtual void OnPersonalDataLoaded();
-
-  // Called by the AutoFillInfoBarDelegate when the user closes the infobar.
-  virtual void OnInfoBarClosed();
-
-  // Called by the AutoFillInfoBarDelegate when the user accepts the infobar.
-  virtual void OnInfoBarAccepted();
-
-  // Called by the AutoFillInfoBarDelegate when the user cancels the infobar.
-  virtual void OnInfoBarCancelled();
+  // Called by the AutoFillCCInfoBarDelegate when the user interacts with the
+  // infobar.
+  virtual void OnInfoBarClosed(bool should_save);
 
   // Resets the stored form data.
   virtual void Reset();
 
   // AutoFillDownloadManager::Observer implementation:
-  virtual void OnLoadedAutoFillHeuristics(
-      const std::vector<std::string>& form_signatures,
-      const std::string& heuristic_xml);
+  virtual void OnLoadedAutoFillHeuristics(const std::string& heuristic_xml);
   virtual void OnUploadedAutoFillHeuristics(const std::string& form_signature);
   virtual void OnHeuristicsRequestError(
       const std::string& form_signature,
       AutoFillDownloadManager::AutoFillRequestType request_type,
       int http_error);
+
+  // Returns the value of the AutoFillEnabled pref.
+  virtual bool IsAutoFillEnabled() const;
 
   // Uses heuristics and existing personal data to determine the possible field
   // types.
@@ -88,30 +82,80 @@ class AutoFillManager : public RenderViewHostDelegate::AutoFill,
   // Handles the form data submitted by the user.
   void HandleSubmit();
 
-
-  // Uploads the form data to the autofill server.
+  // Uploads the form data to the AutoFill server.
   void UploadFormData();
 
-  // Returns the value of the AutoFillEnabled pref.
-  bool IsAutoFillEnabled();
-
-  // Fills all the forms in the page with the default profile.
-  // TODO(jhawkins): Do we really want to fill all of the forms on the page?
-  // Check how toolbar handles this case.
-  void FillDefaultProfile();
-
  protected:
-  // For AutoFillInfoBarDelegateTest.
+  // For tests.
   AutoFillManager();
+  AutoFillManager(TabContents* tab_contents,
+                  PersonalDataManager* personal_data);
+  void set_personal_data_manager(PersonalDataManager* personal_data) {
+    personal_data_ = personal_data;
+  }
 
  private:
+  // Returns a list of values from the stored profiles that match |type| and the
+  // value of |field| and returns the labels of the matching profiles. |labels|
+  // is filled with the Profile label and possibly the last four digits of a
+  // corresponding credit card: 'Home; 1258' - Home is the Profile label and
+  // 1258 is the last four digits of the credit card. If |include_cc_labels| is
+  // true, check for billing fields and append CC digits to the labels;
+  // otherwise, regular profiles are returned for billing address fields.
+  void GetProfileSuggestions(FormStructure* form,
+                             const webkit_glue::FormField& field,
+                             AutoFillType type,
+                             bool include_cc_labels,
+                             std::vector<string16>* values,
+                             std::vector<string16>* labels,
+                             std::vector<int>* unique_ids);
+
+  // Same as GetProfileSuggestions, but the list of stored profiles is limited
+  // to the linked billing addresses from the list of credit cards.
+  void GetBillingProfileSuggestions(FormStructure* form,
+                                    const webkit_glue::FormField& field,
+                                    AutoFillType type,
+                                    std::vector<string16>* values,
+                                    std::vector<string16>* labels,
+                                    std::vector<int>* unique_ids);
+
+  // Returns a list of values from the stored credit cards that match |type| and
+  // the value of |field| and returns the labels of the matching credit cards.
+  void GetCreditCardSuggestions(FormStructure* form,
+                                const webkit_glue::FormField& field,
+                                AutoFillType type,
+                                std::vector<string16>* values,
+                                std::vector<string16>* labels,
+                                std::vector<int>* unique_ids);
+
+  // Set |field| argument's value based on |type| and contents of the
+  // |credit_card|.  The |type| field is expected to have main group type of
+  // ADDRESS_BILLING.  The address information is retrieved from the billing
+  // profile associated with the |credit_card|, if there is one set.
+  void FillBillingFormField(const CreditCard* credit_card,
+                            AutoFillType type,
+                            webkit_glue::FormField* field);
+
+  // Set |field| argument's value based on |type| and contents of the |profile|.
+  void FillFormField(const AutoFillProfile* profile,
+                     AutoFillType type,
+                     webkit_glue::FormField* field);
+
+  // Set |field| argument's value for phone number based on contents of the
+  // |profile|.
+  void FillPhoneNumberField(const AutoFillProfile* profile,
+                            webkit_glue::FormField* field);
+
+  // Parses the forms using heuristic matching and querying the AutoFill server.
+  void ParseForms(const std::vector<webkit_glue::FormData>& forms);
+
   // The TabContents hosting this AutoFillManager.
   // Weak reference.
   // May not be NULL.
   TabContents* tab_contents_;
 
   // The personal data manager, used to save and load personal data to/from the
-  // web database.
+  // web database.  This is overridden by the AutoFillManagerTest.
   // Weak reference.
   // May be NULL.  NULL indicates OTR.
   PersonalDataManager* personal_data_;
@@ -125,8 +169,8 @@ class AutoFillManager : public RenderViewHostDelegate::AutoFill,
   // The form data the user has submitted.
   scoped_ptr<FormStructure> upload_form_structure_;
 
-  // The infobar that asks for permission to store form information.
-  scoped_ptr<AutoFillInfoBarDelegate> infobar_;
+  // The InfoBar that asks for permission to store credit card information.
+  scoped_ptr<AutoFillCCInfoBarDelegate> cc_infobar_;
 
   DISALLOW_COPY_AND_ASSIGN(AutoFillManager);
 };

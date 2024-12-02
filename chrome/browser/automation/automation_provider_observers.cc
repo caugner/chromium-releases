@@ -1,38 +1,61 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/automation/automation_provider_observers.h"
 
 #include "base/basictypes.h"
+#include "base/json/json_writer.h"
 #include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/automation/automation_provider.h"
+#include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/dom_operation_notification_details.h"
+#include "chrome/browser/download/download_item.h"
+#include "chrome/browser/download/save_package.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/login_prompt.h"
 #include "chrome/browser/metrics/metric_event_duration_details.h"
+#include "chrome/browser/printing/print_job.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/test/automation/automation_constants.h"
 
-#if defined(OS_WIN)
-#include "chrome/browser/printing/print_job.h"
-#endif  // defined(OS_WIN)
-
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/authentication_notification_details.h"
 #endif
 
+// Holds onto start and stop timestamps for a particular tab
+class InitialLoadObserver::TabTime {
+ public:
+  explicit TabTime(base::TimeTicks started)
+      : load_start_time_(started) {
+  }
+  void set_stop_time(base::TimeTicks stopped) {
+    load_stop_time_ = stopped;
+  }
+  base::TimeTicks stop_time() const {
+    return load_stop_time_;
+  }
+  base::TimeTicks start_time() const {
+    return load_start_time_;
+  }
+ private:
+  base::TimeTicks load_start_time_;
+  base::TimeTicks load_stop_time_;
+};
+
 InitialLoadObserver::InitialLoadObserver(size_t tab_count,
                                          AutomationProvider* automation)
     : automation_(automation),
-      outstanding_tab_count_(tab_count) {
+      outstanding_tab_count_(tab_count),
+      init_time_(base::TimeTicks::Now()) {
   if (outstanding_tab_count_ > 0) {
     registrar_.Add(this, NotificationType::LOAD_START,
                    NotificationService::AllSources());
@@ -49,17 +72,44 @@ void InitialLoadObserver::Observe(NotificationType type,
                                   const NotificationDetails& details) {
   if (type == NotificationType::LOAD_START) {
     if (outstanding_tab_count_ > loading_tabs_.size())
-      loading_tabs_.insert(source.map_key());
+      loading_tabs_.insert(TabTimeMap::value_type(
+          source.map_key(),
+          TabTime(base::TimeTicks::Now())));
   } else if (type == NotificationType::LOAD_STOP) {
     if (outstanding_tab_count_ > finished_tabs_.size()) {
-      if (loading_tabs_.find(source.map_key()) != loading_tabs_.end())
+      TabTimeMap::iterator iter = loading_tabs_.find(source.map_key());
+      if (iter != loading_tabs_.end()) {
         finished_tabs_.insert(source.map_key());
+        iter->second.set_stop_time(base::TimeTicks::Now());
+      }
       if (outstanding_tab_count_ == finished_tabs_.size())
         ConditionMet();
     }
   } else {
     NOTREACHED();
   }
+}
+
+DictionaryValue* InitialLoadObserver::GetTimingInformation() const {
+  ListValue* items = new ListValue;
+  for (TabTimeMap::const_iterator it = loading_tabs_.begin();
+       it != loading_tabs_.end();
+       ++it) {
+    DictionaryValue* item = new DictionaryValue;
+    base::TimeDelta delta_start = it->second.start_time() - init_time_;
+
+    item->SetReal(L"load_start_ms", delta_start.InMillisecondsF());
+    if (it->second.stop_time().is_null()) {
+      item->Set(L"load_stop_ms", Value::CreateNullValue());
+    } else {
+      base::TimeDelta delta_stop = it->second.stop_time() - init_time_;
+      item->SetReal(L"load_stop_ms", delta_stop.InMillisecondsF());
+    }
+    items->Append(item);
+  }
+  DictionaryValue* return_value = new DictionaryValue;
+  return_value->Set(L"tabs", items);
+  return return_value;
 }
 
 void InitialLoadObserver::ConditionMet() {
@@ -306,8 +356,6 @@ ExtensionInstallNotificationObserver::ExtensionInstallNotificationObserver(
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSION_INSTALL_ERROR,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_OVERINSTALL_ERROR,
-                 NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSION_UPDATE_DISABLED,
                  NotificationService::AllSources());
 }
@@ -325,9 +373,6 @@ void ExtensionInstallNotificationObserver::Observe(
     case NotificationType::EXTENSION_INSTALL_ERROR:
     case NotificationType::EXTENSION_UPDATE_DISABLED:
       SendResponse(AUTOMATION_MSG_EXTENSION_INSTALL_FAILED);
-      break;
-    case NotificationType::EXTENSION_OVERINSTALL_ERROR:
-      SendResponse(AUTOMATION_MSG_EXTENSION_ALREADY_INSTALLED);
       break;
     default:
       NOTREACHED();
@@ -373,8 +418,6 @@ ExtensionReadyNotificationObserver::ExtensionReadyNotificationObserver(
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSION_INSTALL_ERROR,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_OVERINSTALL_ERROR,
-                 NotificationService::AllSources());
   registrar_.Add(this, NotificationType::EXTENSION_UPDATE_DISABLED,
                  NotificationService::AllSources());
 }
@@ -402,7 +445,6 @@ void ExtensionReadyNotificationObserver::Observe(
       break;
     case NotificationType::EXTENSION_INSTALL_ERROR:
     case NotificationType::EXTENSION_UPDATE_DISABLED:
-    case NotificationType::EXTENSION_OVERINSTALL_ERROR:
       success = false;
       break;
     default:
@@ -635,9 +677,17 @@ struct CommandNotification {
 const struct CommandNotification command_notifications[] = {
   {IDC_DUPLICATE_TAB, NotificationType::TAB_PARENTED},
   {IDC_NEW_TAB, NotificationType::INITIAL_NEW_TAB_UI_LOAD},
+
   // Returns as soon as the restored tab is created. To further wait until
   // the content page is loaded, use WaitForTabToBeRestored.
-  {IDC_RESTORE_TAB, NotificationType::TAB_PARENTED}
+  {IDC_RESTORE_TAB, NotificationType::TAB_PARENTED},
+
+  // For the following commands, we need to wait for a new tab to be created,
+  // load to finish, and title to change.
+  {IDC_MANAGE_EXTENSIONS, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
+  {IDC_OPTIONS, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
+  {IDC_SHOW_DOWNLOADS, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
+  {IDC_SHOW_HISTORY, NotificationType::TAB_CONTENTS_TITLE_UPDATED},
 };
 
 }  // namespace
@@ -802,8 +852,6 @@ void DomOperationNotificationObserver::Observe(
   }
 }
 
-#if defined(OS_WIN)
-// TODO(port): Enable when printing is ported.
 DocumentPrintedNotificationObserver::DocumentPrintedNotificationObserver(
     AutomationProvider* automation, IPC::Message* reply_message)
     : automation_(automation),
@@ -854,7 +902,6 @@ void DocumentPrintedNotificationObserver::Observe(
     }
   }
 }
-#endif  // defined(OS_WIN)
 
 MetricEventDurationObserver::MetricEventDurationObserver() {
   registrar_.Add(this, NotificationType::METRIC_EVENT_DURATION,
@@ -929,9 +976,123 @@ void AutomationProviderDownloadItemObserver::OnDownloadFileCompleted(
     DownloadItem* download) {
   download->RemoveObserver(this);
   if (--downloads_ == 0) {
-    AutomationMsg_SendJSONRequest::WriteReplyParams(
-        reply_message_, std::string("{}"), true);
-    provider_->Send(reply_message_);
+    AutomationJSONReply(provider_, reply_message_).SendSuccess(NULL);
     delete this;
+  }
+}
+
+void AutomationProviderHistoryObserver::HistoryQueryComplete(
+    HistoryService::Handle request_handle,
+    history::QueryResults* results) {
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+
+  ListValue* history_list = new ListValue;
+  for (size_t i = 0; i < results->size(); ++i) {
+    DictionaryValue* page_value = new DictionaryValue;
+    history::URLResult const &page = (*results)[i];
+    page_value->SetStringFromUTF16(L"title", page.title());
+    page_value->SetString(L"url", page.url().spec());
+    page_value->SetReal(L"time",
+                        static_cast<double>(page.visit_time().ToDoubleT()));
+    page_value->SetStringFromUTF16(L"snippet", page.snippet().text());
+    page_value->SetBoolean(
+        L"starred",
+        provider_->profile()->GetBookmarkModel()->IsBookmarked(page.url()));
+    history_list->Append(page_value);
+  }
+
+  return_value->Set(L"history", history_list);
+  // Return history info.
+  AutomationJSONReply reply(provider_, reply_message_);
+  reply.SendSuccess(return_value.get());
+  delete this;
+}
+
+void AutomationProviderImportSettingsObserver::ImportEnded() {
+  // Send back an empty success message.
+  AutomationJSONReply(provider_, reply_message_).SendSuccess(NULL);
+  delete this;
+}
+
+void AutomationProviderGetPasswordsObserver::OnPasswordStoreRequestDone(
+    int handle, const std::vector<webkit_glue::PasswordForm*>& result) {
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+
+  ListValue* passwords = new ListValue;
+  for (std::vector<webkit_glue::PasswordForm*>::const_iterator it =
+          result.begin(); it != result.end(); ++it) {
+    DictionaryValue* password_val = new DictionaryValue;
+    webkit_glue::PasswordForm* password_form = *it;
+    password_val->SetStringFromUTF16(L"username",
+                                     password_form->username_value);
+    password_val->SetStringFromUTF16(L"password",
+                                     password_form->password_value);
+    password_val->SetReal(
+        L"time", static_cast<double>(
+            password_form->date_created.ToDoubleT()));
+    passwords->Append(password_val);
+  }
+
+  return_value->Set(L"passwords", passwords);
+  AutomationJSONReply(provider_, reply_message_).SendSuccess(
+      return_value.get());
+  delete this;
+}
+
+void AutomationProviderBrowsingDataObserver::OnBrowsingDataRemoverDone() {
+  // Send back an empty success message
+  AutomationJSONReply(provider_, reply_message_).SendSuccess(NULL);
+  delete this;
+}
+
+OmniboxAcceptNotificationObserver::OmniboxAcceptNotificationObserver(
+    NavigationController* controller,
+    AutomationProvider* automation,
+    IPC::Message* reply_message)
+  : automation_(automation),
+    reply_message_(reply_message),
+    controller_(controller) {
+  Source<NavigationController> source(controller_);
+  registrar_.Add(this, NotificationType::LOAD_STOP, source);
+  // Pages requiring auth don't send LOAD_STOP.
+  registrar_.Add(this, NotificationType::AUTH_NEEDED, source);
+}
+
+OmniboxAcceptNotificationObserver::~OmniboxAcceptNotificationObserver() {
+  automation_->RemoveNavigationStatusListener(this);
+}
+
+void OmniboxAcceptNotificationObserver::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  if (type == NotificationType::LOAD_STOP ||
+      type == NotificationType::AUTH_NEEDED) {
+    AutomationJSONReply(automation_, reply_message_).SendSuccess(NULL);
+    delete this;
+  } else {
+    NOTREACHED();
+  }
+}
+
+SavePackageNotificationObserver::SavePackageNotificationObserver(
+    SavePackage* save_package,
+    AutomationProvider* automation,
+    IPC::Message* reply_message) : automation_(automation),
+                                   reply_message_(reply_message) {
+  Source<SavePackage> source(save_package);
+  registrar_.Add(this, NotificationType::SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
+                 source);
+}
+
+void SavePackageNotificationObserver::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  if (type == NotificationType::SAVE_PACKAGE_SUCCESSFULLY_FINISHED) {
+    AutomationJSONReply(automation_, reply_message_).SendSuccess(NULL);
+    delete this;
+  } else {
+    NOTREACHED();
   }
 }

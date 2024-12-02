@@ -17,6 +17,7 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/render_messages.h"
@@ -208,6 +209,17 @@ void ExtensionProcessManager::UnregisterExtensionProcess(int process_id) {
 }
 
 RenderProcessHost* ExtensionProcessManager::GetExtensionProcess(
+    const GURL& url) {
+  if (!browsing_instance_->HasSiteInstance(url))
+    return NULL;
+  scoped_refptr<SiteInstance> site =
+    browsing_instance_->GetSiteInstanceForURL(url);
+  if (site->HasProcess())
+    return site->GetProcess();
+  return NULL;
+}
+
+RenderProcessHost* ExtensionProcessManager::GetExtensionProcess(
     const std::string& extension_id) {
   ProcessIDMap::const_iterator it = process_ids_.find(extension_id);
   if (it == process_ids_.end())
@@ -278,15 +290,13 @@ void ExtensionProcessManager::Observe(NotificationType type,
       // Close background hosts when the last browser is closed so that they
       // have time to shutdown various objects on different threads. Our
       // destructor is called too late in the shutdown sequence.
-      bool app_closing_non_mac = *Details<bool>(details).ptr();
-      if (app_closing_non_mac)
+      bool app_closing = *Details<bool>(details).ptr();
+      if (app_closing)
         CloseBackgroundHosts();
       break;
     }
 #elif defined(OS_MACOSX)
     case NotificationType::APP_TERMINATING: {
-      // Don't follow the behavior of having the last browser window closed
-      // being an indication that the app should close.
       CloseBackgroundHosts();
       break;
     }

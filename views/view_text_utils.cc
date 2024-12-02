@@ -8,7 +8,8 @@
 #include "base/i18n/rtl.h"
 #include "base/i18n/word_iterator.h"
 #include "base/logging.h"
-#include "gfx/canvas.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/color_utils.h"
 #include "gfx/size.h"
 #include "views/controls/label.h"
@@ -97,7 +98,8 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
 
   // Iterate through line breaking opportunities (which in English would be
   // spaces and such). This tells us where to wrap.
-  WordIterator iter(text, WordIterator::BREAK_LINE);
+  string16 text16(WideToUTF16(text));
+  WordIterator iter(&text16, WordIterator::BREAK_LINE);
   if (!iter.Init())
     return;
 
@@ -111,12 +113,12 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
     // Get the word and figure out the dimensions.
     std::wstring word;
     if (!ltr_within_rtl)
-      word = iter.GetWord();  // Get the next word.
+      word = UTF16ToWide(iter.GetWord());  // Get the next word.
     else
       word = text;  // Draw the whole text at once.
 
     int w = font.GetStringWidth(word), h = font.height();
-    canvas->SizeStringInt(word, font, &w, &h, flags);
+    gfx::CanvasSkia::SizeStringInt(word, font, &w, &h, flags);
 
     // If we exceed the boundaries, we need to wrap.
     WrapIfWordDoesntFit(w, font.height(), position, bounds);
@@ -130,7 +132,7 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
       // left of the LTR string.
       if (ltr_within_rtl && word[word.size() - 1] == L' ') {
         int space_w = font.GetStringWidth(L" "), space_h = font.height();
-        canvas->SizeStringInt(L" ", font, &space_w, &space_h, flags);
+        gfx::CanvasSkia::SizeStringInt(L" ", font, &space_w, &space_h, flags);
         x += space_w;
       }
     }

@@ -1,17 +1,20 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <oleacc.h>
 
 #include "app/l10n_util.h"
+#include "base/scoped_comptr_win.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/bookmark_bar_view.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/toolbar_view.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
+#include "chrome/test/ui_test_utils.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "views/accessibility/view_accessibility_wrapper.h"
@@ -52,16 +55,6 @@ class BrowserViewsAccessibilityTest : public InProcessBrowserTest {
   BrowserView* GetBrowserView() {
     return BrowserView::GetBrowserViewForNativeWindow(
                browser()->window()->GetNativeHandle());
-  }
-
-  // Retrieves and initializes an instance of LocationBarView.
-  LocationBarView* GetLocationBarView() {
-    BrowserWindowTesting* browser_window_testing = GetBrowserWindowTesting();
-
-    if (!browser_window_testing)
-      return NULL;
-
-    return GetBrowserWindowTesting()->GetLocationBarView();
   }
 
   // Retrieves and initializes an instance of ToolbarView.
@@ -124,7 +117,8 @@ class BrowserViewsAccessibilityTest : public InProcessBrowserTest {
 };
 
 // Retrieve accessibility object for main window and verify accessibility info.
-IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestChromeWindowAccObj) {
+IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest,
+                       TestChromeWindowAccObj) {
   BrowserWindow* browser_window = browser()->window();
   ASSERT_TRUE(NULL != browser_window);
 
@@ -132,16 +126,17 @@ IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestChromeWindowAccObj) {
   ASSERT_TRUE(NULL != hwnd);
 
   // Get accessibility object.
-  IAccessible* acc_obj = NULL;
+  ScopedComPtr<IAccessible> acc_obj;
   HRESULT hr = ::AccessibleObjectFromWindow(hwnd, OBJID_WINDOW, IID_IAccessible,
                                             reinterpret_cast<void**>(&acc_obj));
   ASSERT_EQ(S_OK, hr);
   ASSERT_TRUE(NULL != acc_obj);
 
-  TestAccessibilityInfo(acc_obj, l10n_util::GetString(IDS_PRODUCT_NAME),
-                        ROLE_SYSTEM_WINDOW);
-
-  acc_obj->Release();
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
+  std::wstring title =
+      l10n_util::GetStringF(IDS_BROWSER_WINDOW_TITLE_FORMAT,
+      ASCIIToWide(chrome::kAboutBlankURL));
+  TestAccessibilityInfo(acc_obj, title, ROLE_SYSTEM_WINDOW);
 }
 
 // Retrieve accessibility object for non client view and verify accessibility
@@ -151,8 +146,8 @@ IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestNonClientViewAccObj) {
   GetBrowserView()->GetWindow()->GetNonClientView();
 
   TestViewAccessibilityObject(non_client_view,
-  l10n_util::GetString(IDS_PRODUCT_NAME),
-  ROLE_SYSTEM_WINDOW);
+      l10n_util::GetString(IDS_PRODUCT_NAME),
+      ROLE_SYSTEM_WINDOW);
 }
 
 // Retrieve accessibility object for browser root view and verify
@@ -218,38 +213,12 @@ IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestHomeButtonAccObj) {
 }
 
 // Retrieve accessibility object for Star button and verify accessibility info.
-IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestStarButtonAccObj) {
+IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest,
+                       TestStarButtonAccObj) {
   // Verify Star button MSAA name and role.
   TestViewAccessibilityObject(
       GetToolbarView()->GetViewByID(VIEW_ID_STAR_BUTTON),
       l10n_util::GetString(IDS_ACCNAME_STAR), ROLE_SYSTEM_PUSHBUTTON);
-}
-
-// Retrieve accessibility object for location bar view and verify accessibility
-// info.
-IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest,
-                       TestLocationBarViewAccObj) {
-  // Verify location bar MSAA name and role.
-  TestViewAccessibilityObject(GetLocationBarView(),
-                              l10n_util::GetString(IDS_ACCNAME_LOCATION),
-                              ROLE_SYSTEM_GROUPING);
-}
-
-// Retrieve accessibility object for Go button and verify accessibility info.
-IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestGoButtonAccObj) {
-  // Verify Go button MSAA name and role.
-  TestViewAccessibilityObject(GetToolbarView()->GetViewByID(VIEW_ID_GO_BUTTON),
-                              l10n_util::GetString(IDS_ACCNAME_GO),
-                              ROLE_SYSTEM_PUSHBUTTON);
-}
-
-// Retrieve accessibility object for Page menu button and verify accessibility
-// info.
-IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest, TestPageMenuAccObj) {
-  // Verify Page menu button MSAA name and role.
-  TestViewAccessibilityObject(GetToolbarView()->GetViewByID(VIEW_ID_PAGE_MENU),
-                              l10n_util::GetString(IDS_ACCNAME_PAGE),
-                              ROLE_SYSTEM_BUTTONMENU);
 }
 
 // Retrieve accessibility object for App menu button and verify accessibility
@@ -267,5 +236,29 @@ IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest,
                               l10n_util::GetString(IDS_ACCNAME_BOOKMARKS),
                               ROLE_SYSTEM_TOOLBAR);
 }
-}  // Namespace.
 
+IN_PROC_BROWSER_TEST_F(BrowserViewsAccessibilityTest,
+                       TestAboutChromeViewAccObj) {
+  //  Firstly, test that the WindowDelegate got updated.
+  views::Window* aboutChromeWindow = GetBrowserView()->ShowAboutChromeDialog();
+  EXPECT_STREQ(aboutChromeWindow->GetDelegate()->GetWindowTitle().c_str(),
+               l10n_util::GetString(IDS_ABOUT_CHROME_TITLE).c_str());
+  EXPECT_EQ(aboutChromeWindow->GetDelegate()->accessible_role(),
+            AccessibilityTypes::ROLE_DIALOG);
+
+  // Also test the accessibility object directly.
+  IAccessible* acc_obj = NULL;
+  HRESULT hr =
+    ::AccessibleObjectFromWindow(aboutChromeWindow->GetNativeWindow(),
+                                 OBJID_CLIENT,
+                                 IID_IAccessible,
+                                 reinterpret_cast<void**>(&acc_obj));
+  ASSERT_EQ(S_OK, hr);
+  ASSERT_TRUE(NULL != acc_obj);
+
+  TestAccessibilityInfo(acc_obj, l10n_util::GetString(IDS_ABOUT_CHROME_TITLE),
+                        ROLE_SYSTEM_DIALOG);
+
+  acc_obj->Release();
+}
+}  // Namespace.

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@ namespace views {
 
 class DefaultThemeProvider;
 class DropTargetGtk;
+class FocusSearch;
 class TooltipManagerGtk;
 class View;
 class WindowGtk;
@@ -32,7 +33,6 @@ class WindowGtk;
 // Widget implementation for GTK.
 class WidgetGtk
     : public Widget,
-      public MessageLoopForUI::Observer,
       public FocusTraversable,
       public ActiveWindowWatcherX::Observer {
  public:
@@ -76,8 +76,15 @@ class WidgetGtk
   // invoked before Init. This does a couple of checks and returns true if
   // the window can be made transparent. The actual work of making the window
   // transparent is done by ConfigureWidgetForTransparentBackground.
+  // This works for both child and window types.
   bool MakeTransparent();
   bool is_transparent() const { return transparent_; }
+
+  // Enable/Disable double buffering.This is neccessary to prevent
+  // flickering in ScrollView, which has both native and view
+  // controls.
+  void EnableDoubleBuffer(bool enabled);
+  bool is_double_buffered() const { return is_double_buffered_; }
 
   // Makes the window pass all events through to any windows behind it.
   // This must be invoked before Init. This does a couple of checks and returns
@@ -124,7 +131,7 @@ class WidgetGtk
   void SetFocusTraversableParentView(View* parent_view);
 
   // Invoked when the active status changes.
-  virtual void IsActiveChanged() {}
+  virtual void IsActiveChanged();
 
   // Sets initial focus on a new window. On X11/Gtk, window creation
   // is asynchronous and a focus request has to be made after a window
@@ -133,10 +140,6 @@ class WidgetGtk
 
   // Gets the WidgetGtk in the userdata section of the widget.
   static WidgetGtk* GetViewForNative(GtkWidget* widget);
-
-  // Gets the WindowGtk in the userdata section of the widget.
-  // TODO(beng): move to WindowGtk
-  static WindowGtk* GetWindowForNative(GtkWidget* widget);
 
   // Sets the drop target to NULL. This is invoked by DropTargetGTK when the
   // drop is done.
@@ -150,6 +153,7 @@ class WidgetGtk
 
   // Overridden from Widget:
   virtual void Init(gfx::NativeView parent, const gfx::Rect& bounds);
+  virtual void InitWithWidget(Widget* parent, const gfx::Rect& bounds);
   virtual WidgetDelegate* GetWidgetDelegate();
   virtual void SetWidgetDelegate(WidgetDelegate* delegate);
   virtual void SetContentsView(View* view);
@@ -185,20 +189,13 @@ class WidgetGtk
                                     View *child);
   virtual bool ContainsNativeView(gfx::NativeView native_view);
 
-
-  // Overridden from MessageLoopForUI::Observer:
-  virtual void WillProcessEvent(GdkEvent* event);
-  virtual void DidProcessEvent(GdkEvent* event);
-
   // Overridden from FocusTraversable:
-  virtual View* FindNextFocusableView(View* starting_view,
-                                      bool reverse,
-                                      Direction direction,
-                                      bool check_starting_view,
-                                      FocusTraversable** focus_traversable,
-                                      View** focus_traversable_view);
+  virtual FocusSearch* GetFocusSearch();
   virtual FocusTraversable* GetFocusTraversableParent();
   virtual View* GetFocusTraversableParentView();
+
+  // Clears the focus on the native widget having the focus.
+  virtual void ClearNativeFocus();
 
  protected:
   // If widget containes another widget, translates event coordinates to the
@@ -226,6 +223,7 @@ class WidgetGtk
 
   // Event handlers:
   CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnButtonPress, GdkEventButton*);
+  CHROMEGTK_CALLBACK_1(WidgetGtk, void, OnSizeRequest, GtkRequisition*);
   CHROMEGTK_CALLBACK_1(WidgetGtk, void, OnSizeAllocate, GtkAllocation*);
   CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnPaint, GdkEventExpose*);
   CHROMEGTK_CALLBACK_4(WidgetGtk, void, OnDragDataGet,
@@ -271,16 +269,23 @@ class WidgetGtk
   virtual bool ReleaseCaptureOnMouseReleased() { return true; }
 
   // Does a mouse grab on this widget.
-  void DoGrab();
+  virtual void DoGrab();
 
   // Releases a grab done by this widget.
   virtual void ReleaseGrab();
 
-  // Sets the WindowGtk in the userdata section of the widget.
-  static void SetWindowForNative(GtkWidget* widget, WindowGtk* window);
+  // Invoked when input grab is stolen by other GtkWidget in the same
+  // application.
+  virtual void HandleGrabBroke();
 
   // Are we a subclass of WindowGtk?
   bool is_window_;
+
+  // For test code to provide a customized focus manager.
+  void set_focus_manager(FocusManager* focus_manager) {
+    delete focus_manager_;
+    focus_manager_ = focus_manager;
+  }
 
  private:
   class DropObserver;
@@ -307,15 +312,16 @@ class WidgetGtk
   // Invoked from create widget to enable the various bits needed for a
   // transparent background. This is only invoked if MakeTransparent has been
   // invoked.
-  void ConfigureWidgetForTransparentBackground();
+  void ConfigureWidgetForTransparentBackground(GtkWidget* parent);
 
   // Invoked from create widget to enable the various bits needed for a
   // window which doesn't receive events. This is only invoked if
   // MakeIgnoreEvents has been invoked.
   void ConfigureWidgetForIgnoreEvents();
 
-  // TODO(sky): documentation
-  void HandleGrabBroke();
+  // A utility function to draw a transparent background onto the |widget|.
+  static void DrawTransparentBackground(GtkWidget* widget,
+                                        GdkEventExpose* event);
 
   const Type type_;
 
@@ -341,7 +347,7 @@ class WidgetGtk
   // children.  NULL for non top-level widgets.
   // WARNING: RootView's destructor calls into the FocusManager. As such, this
   // must be destroyed AFTER root_view_.
-  scoped_ptr<FocusManager> focus_manager_;
+  FocusManager* focus_manager_;
 
   // The root of the View hierarchy attached to this window.
   scoped_ptr<RootView> root_view_;
@@ -424,6 +430,10 @@ class WidgetGtk
   // If true, the window stays on top of the screen. This is only used
   // for types other than TYPE_CHILD.
   bool always_on_top_;
+
+  // If true, we enable the content widget's double buffering.
+  // This is false by default.
+  bool is_double_buffered_;
 
   DISALLOW_COPY_AND_ASSIGN(WidgetGtk);
 };

@@ -10,26 +10,30 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "chrome/browser/cocoa/background_gradient_view.h"
+
 @class BookmarkBarController;
 
-@interface BookmarkBarView : NSView {
+@interface BookmarkBarView : BackgroundGradientView {
  @private
   BOOL dropIndicatorShown_;
   CGFloat dropIndicatorPosition_;  // x position
 
   IBOutlet BookmarkBarController* controller_;
   IBOutlet NSTextField* noItemTextfield_;
+  IBOutlet NSButton* importBookmarksButton_;
   NSView* noItemContainer_;
 }
 - (NSTextField*)noItemTextfield;
+- (NSButton*)importBookmarksButton;
 - (BookmarkBarController*)controller;
 
-@property (assign, nonatomic) IBOutlet NSView* noItemContainer;
+@property (nonatomic, assign) IBOutlet NSView* noItemContainer;
 @end
 
 @interface BookmarkBarView()  // TestingOrInternalAPI
-@property (readonly) BOOL dropIndicatorShown;
-@property (readonly) CGFloat dropIndicatorPosition;
+@property (nonatomic, readonly) BOOL dropIndicatorShown;
+@property (nonatomic, readonly) CGFloat dropIndicatorPosition;
 - (void)setController:(id)controller;
 @end
 

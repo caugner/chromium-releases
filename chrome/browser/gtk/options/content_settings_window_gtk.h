@@ -36,12 +36,15 @@ class ContentSettingsWindowGtk {
   CHROMEGTK_CALLBACK_2(ContentSettingsWindowGtk, void, OnSwitchPage,
                        GtkNotebookPage*, guint);
   CHROMEGTK_CALLBACK_0(ContentSettingsWindowGtk, void, OnWindowDestroy);
+  CHROMEG_CALLBACK_0(ContentSettingsWindowGtk, void, OnListSelectionChanged,
+                     GtkTreeSelection*);
 
   // The options dialog.
   GtkWidget* dialog_;
 
   // The container of the option pages.
   GtkWidget* notebook_;
+  GtkWidget* list_;
 
   // The Profile associated with these options.
   Profile* profile_;
@@ -58,6 +61,7 @@ class ContentSettingsWindowGtk {
   ContentFilterPageGtk plugin_page_;
   ContentFilterPageGtk popup_page_;
   ContentFilterPageGtk geolocation_page_;
+  ContentFilterPageGtk notifications_page_;
 
   // Helper object to manage accessibility metadata.
   scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;

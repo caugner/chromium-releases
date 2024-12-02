@@ -10,6 +10,7 @@
 extern "C" {
 #include <sandbox.h>
 }
+#include <sys/param.h>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
@@ -118,20 +119,19 @@ bool QuotePlainString(const std::string& str_utf8, std::string* dst) {
 //
 // Returns: true on success, false otherwise.
 bool QuoteStringForRegex(const std::string& str_utf8, std::string* dst) {
-  // List of chars with special meaning to regex.
-  // This list is derived from http://perldoc.perl.org/perlre.html .
+  // Characters with special meanings in sandbox profile syntax.
   const char regex_special_chars[] = {
     '\\',
 
     // Metacharacters
     '^',
     '.',
-    '$',
-    '|',
-    '(',
-    ')',
     '[',
     ']',
+    '$',
+    '(',
+    ')',
+    '|',
 
     // Quantifiers
     '*',
@@ -281,29 +281,48 @@ bool EnableSandbox(SandboxProcessType sandbox_type,
       // TODO(msneck): Remove the use of Unix sockets from Native Client and
       // then decide on an appropriate sandbox type for the untrusted code.
       // This might simply mean removing the Unix socket rules from
-      // chrome/browser/nacl-loader.sb or it might mean sharing the
+      // chrome/browser/nacl_loader.sb or it might mean sharing the
       // sandbox configuration with SANDBOX_TYPE_WORKER.
       // See http://code.google.com/p/nativeclient/issues/detail?id=344
-      sandbox_config_filename = @"nacl-loader";
+      sandbox_config_filename = @"nacl_loader";
       break;
     default:
       NOTREACHED();
       return false;
   }
 
+  // Read in the sandbox profile and the common prefix file.
+  NSString* common_sandbox_prefix_path =
+      [mac_util::MainAppBundle() pathForResource:@"common"
+                                          ofType:@"sb"];
+  NSString* common_sandbox_prefix_data =
+      [NSString stringWithContentsOfFile:common_sandbox_prefix_path
+                                encoding:NSUTF8StringEncoding
+                                   error:NULL];
+
+  if (!common_sandbox_prefix_data) {
+    LOG(FATAL) << "Failed to find the sandbox profile on disk "
+               << [common_sandbox_prefix_path fileSystemRepresentation];
+    return false;
+  }
+
   NSString* sandbox_profile_path =
       [mac_util::MainAppBundle() pathForResource:sandbox_config_filename
                                           ofType:@"sb"];
-  NSString* sandbox_data = [NSString
-      stringWithContentsOfFile:sandbox_profile_path
-                      encoding:NSUTF8StringEncoding
-                         error:nil];
+  NSString* sandbox_data =
+      [NSString stringWithContentsOfFile:sandbox_profile_path
+                                 encoding:NSUTF8StringEncoding
+                                    error:NULL];
 
   if (!sandbox_data) {
-    PLOG(ERROR) << "Failed to find the sandbox profile on disk "
-                << base::SysNSStringToUTF8(sandbox_profile_path);
+    LOG(FATAL) << "Failed to find the sandbox profile on disk "
+               << [sandbox_profile_path fileSystemRepresentation];
     return false;
   }
+
+  // Prefix sandbox_data with common_sandbox_prefix_data.
+  sandbox_data =
+      [common_sandbox_prefix_data stringByAppendingString:sandbox_data];
 
   // Enable verbose logging if enabled on the command line.
   // (see renderer.sb for details).
@@ -326,16 +345,13 @@ bool EnableSandbox(SandboxProcessType sandbox_type,
     // needed so the caller doesn't need to worry about things like /var
     // being a link to /private/var (like in the paths CreateNewTempDirectory()
     // returns).
-    FilePath allowed_dir_absolute(allowed_dir);
-    if (!file_util::AbsolutePath(&allowed_dir_absolute)) {
-      PLOG(ERROR) << "Failed to resolve absolute path";
-      return false;
-    }
+    FilePath allowed_dir_canonical(allowed_dir);
+    GetCanonicalSandboxPath(&allowed_dir_canonical);
 
     std::string allowed_dir_escaped;
-    if (!QuoteStringForRegex(allowed_dir_absolute.value(),
+    if (!QuoteStringForRegex(allowed_dir_canonical.value(),
                              &allowed_dir_escaped)) {
-      LOG(ERROR) << "Regex string quoting failed " << allowed_dir.value();
+      LOG(FATAL) << "Regex string quoting failed " << allowed_dir.value();
       return false;
     }
     NSString* allowed_dir_escaped_ns = base::SysUTF8ToNSString(
@@ -365,9 +381,13 @@ bool EnableSandbox(SandboxProcessType sandbox_type,
     // If we ever need this on pre-10.6 OSs then we'll have to rethink the
     // surrounding sandbox syntax.
     std::string home_dir = base::SysNSStringToUTF8(NSHomeDirectory());
+
+    FilePath home_dir_canonical(home_dir);
+    GetCanonicalSandboxPath(&home_dir_canonical);
+
     std::string home_dir_escaped;
-    if (!QuotePlainString(home_dir, &home_dir_escaped)) {
-      LOG(ERROR) << "Sandbox string quoting failed";
+    if (!QuotePlainString(home_dir_canonical.value(), &home_dir_escaped)) {
+      LOG(FATAL) << "Sandbox string quoting failed";
       return false;
     }
     NSString* home_dir_escaped_ns = base::SysUTF8ToNSString(home_dir_escaped);
@@ -384,12 +404,31 @@ bool EnableSandbox(SandboxProcessType sandbox_type,
   char* error_buff = NULL;
   int error = sandbox_init([sandbox_data UTF8String], 0, &error_buff);
   bool success = (error == 0 && error_buff == NULL);
-  LOG_IF(ERROR, !success) << "Failed to initialize sandbox: "
+  LOG_IF(FATAL, !success) << "Failed to initialize sandbox: "
                           << error
                           << " "
                           << error_buff;
   sandbox_free_error(error_buff);
   return success;
+}
+
+void GetCanonicalSandboxPath(FilePath* path) {
+  int fd = HANDLE_EINTR(open(path->value().c_str(), O_RDONLY));
+  if (fd < 0) {
+    PLOG(FATAL) << "GetCanonicalSandboxPath() failed for: "
+                << path->value();
+    return;
+  }
+  file_util::ScopedFD file_closer(&fd);
+
+  FilePath::CharType canonical_path[MAXPATHLEN];
+  if (HANDLE_EINTR(fcntl(fd, F_GETPATH, canonical_path)) != 0) {
+    PLOG(FATAL) << "GetCanonicalSandboxPath() failed for: "
+                << path->value();
+    return;
+  }
+
+  *path = FilePath(canonical_path);
 }
 
 }  // namespace sandbox

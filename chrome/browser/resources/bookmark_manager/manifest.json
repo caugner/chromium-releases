@@ -4,13 +4,14 @@
   "version": "0.1",
   "description": "Bookmark Manager",
   "icons": {
-    "16": "images/bookmarks_favicon.png"
+    // The favicon is loaded directly from resources.pak.
   },
   "permissions": [
     "bookmarks",
     "experimental",
     "tabs",
-    "chrome://favicon/"
+    "chrome://favicon/",
+    "chrome://resources/"
   ],
   "chrome_url_overrides": {
     "bookmarks": "main.html"

@@ -14,9 +14,8 @@
 //     same type as a NativeWindow on some platforms.
 //   NativeViewId: Often, in our cross process model, we need to pass around a
 //     reference to a "window". This reference will, say, be echoed back from a
-//     renderer to the browser when it wishes to query it's size. On Windows, a
-//     HWND can be used for this. On other platforms, we may wish to pass
-//     around X window ids, or maybe abstract identifiers.
+//     renderer to the browser when it wishes to query its size. On Windows we
+//     use an HWND for this.
 //
 //     As a rule of thumb - if you're in the renderer, you should be dealing
 //     with NativeViewIds. This should remind you that you shouldn't be doing
@@ -46,7 +45,7 @@ class NSView;
 class NSWindow;
 class NSTextField;
 #endif  // __OBJC__
-#elif defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
 typedef struct _GdkCursor GdkCursor;
 typedef struct _GdkRegion GdkRegion;
 typedef struct _GtkWidget GtkWidget;
@@ -88,35 +87,32 @@ typedef GdkRegion* NativeRegion;
 // See comment at the top of the file for usage.
 typedef intptr_t NativeViewId;
 
-// Convert a NativeViewId to a NativeView.
-// On Windows, these are both HWNDS so it's just a cast.
-// On Mac, for now, we pass the NSView pointer into the renderer
-// On Linux we use an opaque id
 #if defined(OS_WIN)
+// Convert a NativeViewId to a NativeView.
+//
+// On Windows, we pass an HWND into the renderer. As stated above, the renderer
+// should not be performing operations on the view.
 static inline NativeView NativeViewFromId(NativeViewId id) {
   return reinterpret_cast<NativeView>(id);
 }
+#define NativeViewFromIdInBrowser(x) NativeViewFromId(x)
 #elif defined(OS_MACOSX)
+// On the Mac, a NativeView is a pointer to an object, and is useless outside
+// the process in which it was created. NativeViewFromId should only be used
+// inside the appropriate platform ifdef outside of the browser.
+// (NativeViewFromIdInBrowser can be used everywhere in the browser.) If your
+// cross-platform design involves a call to NativeViewFromId from outside the
+// browser it will never work on the Mac and is fundamentally broken.
 
-// A recent CL removed the need for Mac to actually convert
-// NativeViewId to NativeView.  Until other platforms make changes,
-// the platform-independent code cannot be removed.  The following is
-// to discourage new platform-independent uses.
+// Please do not call this from outside the browser. It won't work; the name
+// should give you a subtle hint.
+static inline NativeView NativeViewFromIdInBrowser(NativeViewId id) {
+  return reinterpret_cast<NativeView>(id);
+}
+#endif
 
-#define NativeViewFromId(x) NATIVE_VIEW_FROM_ID_NOT_AVAILABLE_ON_MAC
-
-#elif defined(USE_X11)
-// A NativeView on Linux is a GtkWidget*. However, we can't go directly from an
-// X window ID to a GtkWidget. Thus, functions which handle NativeViewIds from
-// the renderer have to use Xlib. This is fine since these functions are
-// generally performed on the BACKGROUND_X thread which can't use GTK anyway.
-
-#define NativeViewFromId(x) NATIVE_VIEW_FROM_ID_NOT_AVAILIBLE_ON_X11
-
-#endif  // defined(USE_X11)
-
-// Convert a NativeView to a NativeViewId. See the comments above
-// NativeViewFromId.
+// Convert a NativeView to a NativeViewId.  See the comments at the top of
+// this file.
 #if defined(OS_WIN) || defined(OS_MACOSX)
 static inline NativeViewId IdFromNativeView(NativeView view) {
   return reinterpret_cast<NativeViewId>(view);

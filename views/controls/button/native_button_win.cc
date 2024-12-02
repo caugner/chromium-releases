@@ -19,7 +19,8 @@ namespace views {
 // NativeButtonWin, public:
 
 NativeButtonWin::NativeButtonWin(NativeButton* native_button)
-    : native_button_(native_button) {
+    : native_button_(native_button),
+      button_size_valid_(false) {
   // Associates the actual HWND with the native_button so the native_button is
   // the one considered as having the focus (not the wrapper) when the HWND is
   // focused directly (with a click for example).
@@ -36,18 +37,21 @@ void NativeButtonWin::UpdateLabel() {
   // Show or hide the shield icon of Windows onto this button every time when we
   // update the button text so Windows can lay out the shield icon and the
   // button text correctly.
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
+  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA &&
+      win_util::UserAccountControlIsEnabled()) {
     Button_SetElevationRequiredState(native_view(),
                                      native_button_->need_elevation());
   }
 
   SetWindowText(native_view(), native_button_->label().c_str());
+  button_size_valid_ = false;
 }
 
 void NativeButtonWin::UpdateFont() {
   SendMessage(native_view(), WM_SETFONT,
               reinterpret_cast<WPARAM>(native_button_->font().hfont()),
               FALSE);
+  button_size_valid_ = false;
 }
 
 void NativeButtonWin::UpdateEnabled() {
@@ -59,6 +63,7 @@ void NativeButtonWin::UpdateDefault() {
     SendMessage(native_view(), BM_SETSTYLE,
                 native_button_->is_default() ? BS_DEFPUSHBUTTON : BS_PUSHBUTTON,
                 true);
+    button_size_valid_ = false;
   }
 }
 
@@ -87,10 +92,13 @@ gfx::NativeView NativeButtonWin::GetTestingHandle() const {
 // NativeButtonWin, View overrides:
 
 gfx::Size NativeButtonWin::GetPreferredSize() {
-  SIZE sz = {0};
-  SendMessage(native_view(), BCM_GETIDEALSIZE, 0, reinterpret_cast<LPARAM>(&sz));
-
-  return gfx::Size(sz.cx, sz.cy);
+  if (!button_size_valid_) {
+    SIZE sz = {0};
+    Button_GetIdealSize(native_view(), reinterpret_cast<LPARAM>(&sz));
+    button_size_.SetSize(sz.cx, sz.cy);
+    button_size_valid_ = true;
+  }
+  return button_size_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

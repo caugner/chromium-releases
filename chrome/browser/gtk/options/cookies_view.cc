@@ -9,12 +9,15 @@
 #include <string>
 
 #include "app/l10n_util.h"
+#include "base/gtk_util.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/profile.h"
 #include "gfx/gtk_util.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 
 namespace {
 
@@ -55,7 +58,7 @@ void CookiesView::Show(
 
   // If there's already an existing editor window, activate it.
   if (instance_) {
-    gtk_window_present(GTK_WINDOW(instance_->dialog_));
+    gtk_util::PresentWindow(instance_->dialog_, 0);
   } else {
     instance_ = new CookiesView(parent,
                                 profile,
@@ -78,7 +81,12 @@ CookiesView::CookiesView(
       filter_update_factory_(this),
       destroy_dialog_in_destructor_(false) {
   Init(parent);
-  gtk_widget_show_all(dialog_);
+
+  gtk_util::ShowDialogWithLocalizedSize(dialog_,
+      IDS_COOKIES_DIALOG_WIDTH_CHARS,
+      -1,
+      true);
+
   gtk_chrome_cookie_view_clear(GTK_CHROME_COOKIE_VIEW(cookie_display_));
 }
 
@@ -175,7 +183,8 @@ void CookiesView::Init(GtkWindow* parent) {
                                       GTK_SHADOW_ETCHED_IN);
   gtk_box_pack_start(GTK_BOX(cookie_list_vbox), scroll_window, TRUE, TRUE, 0);
 
-  cookies_tree_model_.reset(new CookiesTreeModel(profile_,
+  cookies_tree_model_.reset(new CookiesTreeModel(
+      profile_->GetRequestContext()->GetCookieStore()->GetCookieMonster(),
       browsing_data_database_helper_,
       browsing_data_local_storage_helper_,
       browsing_data_appcache_helper_));

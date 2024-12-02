@@ -12,6 +12,7 @@ class ViewType {
  public:
   enum Type {
     INVALID,
+    BACKGROUND_CONTENTS,
     TAB_CONTENTS,
     EXTENSION_TOOLSTRIP,
     EXTENSION_MOLE,
@@ -33,9 +34,6 @@ class ViewType {
   static const char* kInfobar;
   static const char* kNotification;
   static const char* kAll;
-
-  // Return true if a view type should automatically resize to fit its contents.
-  static bool ShouldAutoResize(Type);
 
  private:
   // This class is for scoping only, so you shouldn't create an instance of it.

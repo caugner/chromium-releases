@@ -5,6 +5,7 @@
 #include "chrome/browser/sync/glue/theme_change_processor.h"
 
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sync/engine/syncapi.h"
@@ -19,9 +20,22 @@ namespace browser_sync {
 namespace {
 std::string GetThemeId(Extension* current_theme) {
   if (current_theme) {
-    DCHECK(current_theme->IsTheme());
+    DCHECK(current_theme->is_theme());
   }
   return current_theme ? current_theme->id() : "default/system";
+}
+
+void UpdateThemeSyncNode(Profile* profile, sync_api::WriteNode* node) {
+  sync_pb::ThemeSpecifics old_theme_specifics = node->GetThemeSpecifics();
+  // Make sure to base new_theme_specifics on old_theme_specifics so
+  // we preserve the state of use_system_theme_by_default.
+  sync_pb::ThemeSpecifics new_theme_specifics = old_theme_specifics;
+  GetThemeSpecificsFromCurrentTheme(profile, &new_theme_specifics);
+  // Do a write only if something actually changed so as to guard
+  // against cycles.
+  if (!AreThemeSpecificsEqual(old_theme_specifics, new_theme_specifics)) {
+    node->SetThemeSpecifics(new_theme_specifics);
+  }
 }
 }  // namespace
 
@@ -56,7 +70,7 @@ void ThemeChangeProcessor::Observe(NotificationType type,
       DCHECK_EQ(Source<BrowserThemeProvider>(source).ptr(),
                 profile_->GetThemeProvider());
       if (extension != NULL) {
-        DCHECK(extension->IsTheme());
+        DCHECK(extension->is_theme());
         DCHECK_EQ(extension->id(), current_or_future_theme_id);
         if (!current_theme || (current_theme->id() != extension->id())) {
           return;
@@ -71,7 +85,7 @@ void ThemeChangeProcessor::Observe(NotificationType type,
       // installed successfully.
       DCHECK_EQ(Source<Profile>(source).ptr(), profile_);
       CHECK(extension);
-      if (!extension->IsTheme()) {
+      if (!extension->is_theme()) {
         return;
       }
       LOG(INFO) << "Got EXTENSION_LOADED notification for theme "
@@ -87,7 +101,7 @@ void ThemeChangeProcessor::Observe(NotificationType type,
       // theme).
       DCHECK_EQ(Source<Profile>(source).ptr(), profile_);
       CHECK(extension);
-      if (!extension->IsTheme()) {
+      if (!extension->is_theme()) {
         return;
       }
       LOG(INFO) << "Got EXTENSION_UNLOADED notification for theme "
@@ -101,7 +115,7 @@ void ThemeChangeProcessor::Observe(NotificationType type,
 
   DCHECK_EQ(extension, current_theme);
   if (extension) {
-    DCHECK(extension->IsTheme());
+    DCHECK(extension->is_theme());
   }
   LOG(INFO) << "Theme changed to " << GetThemeId(extension);
 
@@ -110,25 +124,33 @@ void ThemeChangeProcessor::Observe(NotificationType type,
 
   sync_api::WriteTransaction trans(share_handle());
   sync_api::WriteNode node(&trans);
-  if (!node.InitByClientTagLookup(syncable::THEMES,
-                                  kCurrentThemeClientTag)) {
-    LOG(ERROR) << "Could not create node with client tag: "
-               << kCurrentThemeClientTag;
-    error_handler()->OnUnrecoverableError();
-    return;
+  if (node.InitByClientTagLookup(syncable::THEMES,
+                                 kCurrentThemeClientTag)) {
+    UpdateThemeSyncNode(profile_, &node);
+  } else if (profile_->GetTheme() ||
+             (UseSystemTheme(profile_) &&
+              IsSystemThemeDistinctFromDefaultTheme())) {
+    // The sync node might not exist yet if this is the first time the user
+    // switches away from the default theme.
+    sync_api::ReadNode root(&trans);
+    if (!root.InitByTagLookup(kThemesTag)) {
+      std::string err = "Server did not create the top-level themes node. We "
+                        "might be running against an out-of-date server.";
+      error_handler()->OnUnrecoverableError(FROM_HERE, err);
+      return;
+    }
+    sync_api::WriteNode new_node(&trans);
+    if (!new_node.InitUniqueByCreation(syncable::THEMES, root,
+                                       kCurrentThemeClientTag)) {
+      std::string err = "Could not create node with client tag: ";
+      error_handler()->OnUnrecoverableError(FROM_HERE,
+                                            err + kCurrentThemeClientTag);
+      return;
+    }
+    new_node.SetIsFolder(false);
+    new_node.SetTitle(UTF8ToWide(kCurrentThemeNodeTitle));
+    UpdateThemeSyncNode(profile_, &new_node);
   }
-
-  sync_pb::ThemeSpecifics old_theme_specifics = node.GetThemeSpecifics();
-  // Make sure to base new_theme_specifics on old_theme_specifics so
-  // we preserve the state of use_system_theme_by_default.
-  sync_pb::ThemeSpecifics new_theme_specifics = old_theme_specifics;
-  GetThemeSpecificsFromCurrentTheme(profile_, &new_theme_specifics);
-  // Do a write only if something actually changed so as to guard
-  // against cycles.
-  if (!AreThemeSpecificsEqual(old_theme_specifics, new_theme_specifics)) {
-    node.SetThemeSpecifics(new_theme_specifics);
-  }
-  return;
 }
 
 void ThemeChangeProcessor::ApplyChangesFromSyncModel(
@@ -144,8 +166,9 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
   // we can remove the extra logic below.  See:
   // http://code.google.com/p/chromium/issues/detail?id=41696 .
   if (change_count < 1) {
-    LOG(ERROR) << "Unexpected change_count: " << change_count;
-    error_handler()->OnUnrecoverableError();
+    std::string err("Unexpected change_count: ");
+    err += change_count;
+    error_handler()->OnUnrecoverableError(FROM_HERE, err);
     return;
   }
   if (change_count > 1) {
@@ -154,17 +177,14 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
   }
   const sync_api::SyncManager::ChangeRecord& change =
       changes[change_count - 1];
-  if (change.action != sync_api::SyncManager::ChangeRecord::ACTION_UPDATE) {
-    LOG(WARNING) << "strange theme change.action: " << change.action;
-  }
   sync_pb::ThemeSpecifics theme_specifics;
   // If the action is a delete, simply use the default values for
   // ThemeSpecifics, which would cause the default theme to be set.
   if (change.action != sync_api::SyncManager::ChangeRecord::ACTION_DELETE) {
     sync_api::ReadNode node(trans);
     if (!node.InitByIdLookup(change.id)) {
-      LOG(ERROR) << "Theme node lookup failed";
-      error_handler()->OnUnrecoverableError();
+      error_handler()->OnUnrecoverableError(FROM_HERE,
+                                            "Theme node lookup failed.");
       return;
     }
     DCHECK_EQ(node.GetModelType(), syncable::THEMES);

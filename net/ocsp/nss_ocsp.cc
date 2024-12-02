@@ -15,6 +15,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/condition_variable.h"
+#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
@@ -23,6 +24,7 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
+#include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -187,10 +189,8 @@ class OCSPRequestSession
   }
 
   void AddHeader(const char* http_header_name, const char* http_header_value) {
-    if (!extra_request_headers_.empty())
-      extra_request_headers_ += "\r\n";
-    StringAppendF(&extra_request_headers_,
-                  "%s: %s", http_header_name, http_header_value);
+    extra_request_headers_.SetHeader(http_header_name,
+                                     http_header_value);
   }
 
   void Start() {
@@ -364,14 +364,12 @@ class OCSPRequestSession
       DCHECK(!upload_content_type_.empty());
 
       request_->set_method("POST");
-      if (!extra_request_headers_.empty())
-        extra_request_headers_ += "\r\n";
-      StringAppendF(&extra_request_headers_,
-                    "Content-Type: %s", upload_content_type_.c_str());
+      extra_request_headers_.SetHeader(
+          net::HttpRequestHeaders::kContentType, upload_content_type_);
       request_->AppendBytesToUpload(upload_content_.data(),
                                     static_cast<int>(upload_content_.size()));
     }
-    if (!extra_request_headers_.empty())
+    if (!extra_request_headers_.IsEmpty())
       request_->SetExtraRequestHeaders(extra_request_headers_);
 
     request_->Start();
@@ -409,7 +407,7 @@ class OCSPRequestSession
   base::TimeDelta timeout_;       // The timeout for OCSP
   URLRequest* request_;           // The actual request this wraps
   scoped_refptr<net::IOBuffer> buffer_;  // Read buffer
-  std::string extra_request_headers_;  // Extra headers for the request, if any
+  net::HttpRequestHeaders extra_request_headers_;
   std::string upload_content_;    // HTTP POST payload
   std::string upload_content_type_;  // MIME type of POST payload
 
@@ -601,6 +599,12 @@ SECStatus OCSPTrySendAndReceive(SEC_HTTP_REQUEST_SESSION request,
                                 const char** http_response_headers,
                                 const char** http_response_data,
                                 PRUint32* http_response_data_len) {
+  if (http_response_data_len) {
+    // We must always set an output value, even on failure.  The output value 0
+    // means the failure was unrelated to the acceptable response data length.
+    *http_response_data_len = 0;
+  }
+
   LOG(INFO) << "OCSP try send and receive";
   DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
@@ -612,15 +616,63 @@ SECStatus OCSPTrySendAndReceive(SEC_HTTP_REQUEST_SESSION request,
     // We support blocking mode only, so this function shouldn't be called
     // again when req has stareted or finished.
     NOTREACHED();
-    goto failed;
+    PORT_SetError(SEC_ERROR_BAD_HTTP_RESPONSE);  // Simple approximation.
+    return SECFailure;
   }
-  req->Start();
-  if (!req->Wait())
-    goto failed;
 
-  // If the response code is -1, the request failed and there is no response.
-  if (req->http_response_code() == static_cast<PRUint16>(-1))
-    goto failed;
+  const base::Time start_time = base::Time::Now();
+  req->Start();
+  if (!req->Wait() || req->http_response_code() == static_cast<PRUint16>(-1)) {
+    // If the response code is -1, the request failed and there is no response.
+    PORT_SetError(SEC_ERROR_BAD_HTTP_RESPONSE);  // Simple approximation.
+    return SECFailure;
+  }
+  const base::TimeDelta duration = base::Time::Now() - start_time;
+
+  // We want to know if this was:
+  //   1) An OCSP request
+  //   2) A CRL request
+  //   3) A request for a missing intermediate certificate
+  // There's no sure way to do this, so we use heuristics like MIME type and
+  // URL.
+  const char* mime_type = req->http_response_content_type().c_str();
+  bool is_ocsp_resp =
+      strcasecmp(mime_type, "application/ocsp-response") == 0;
+  bool is_crl_resp = strcasecmp(mime_type, "application/x-pkcs7-crl") == 0 ||
+                     strcasecmp(mime_type, "application/x-x509-crl") == 0 ||
+                     strcasecmp(mime_type, "application/pkix-crl") == 0;
+  bool is_crt_resp =
+      strcasecmp(mime_type, "application/x-x509-ca-cert") == 0 ||
+      strcasecmp(mime_type, "application/x-x509-server-cert") == 0 ||
+      strcasecmp(mime_type, "application/pkix-cert") == 0 ||
+      strcasecmp(mime_type, "application/pkcs7-mime") == 0;
+  bool known_resp_type = is_crt_resp || is_crt_resp || is_ocsp_resp;
+
+  bool crl_in_url = false, crt_in_url = false, ocsp_in_url = false,
+       have_url_hint = false;
+  if (!known_resp_type) {
+    const std::string path = req->url().path();
+    const std::string host = req->url().host();
+    crl_in_url = strcasestr(path.c_str(), ".crl") != NULL;
+    crt_in_url = strcasestr(path.c_str(), ".crt") != NULL ||
+                 strcasestr(path.c_str(), ".p7c") != NULL ||
+                 strcasestr(path.c_str(), ".cer") != NULL;
+    ocsp_in_url = strcasestr(host.c_str(), "ocsp") != NULL;
+    have_url_hint = crl_in_url || crt_in_url || ocsp_in_url;
+  }
+
+  if (is_ocsp_resp ||
+      (!known_resp_type && (ocsp_in_url ||
+                            (!have_url_hint &&
+                             req->http_request_method() == "POST")))) {
+    UMA_HISTOGRAM_TIMES("Net.OCSPRequestTimeMs", duration);
+  } else if (is_crl_resp || (!known_resp_type && crl_in_url)) {
+    UMA_HISTOGRAM_TIMES("Net.CRLRequestTimeMs", duration);
+  } else if (is_crt_resp || (!known_resp_type && crt_in_url)) {
+    UMA_HISTOGRAM_TIMES("Net.CRTRequestTimeMs", duration);
+  } else {
+    UMA_HISTOGRAM_TIMES("Net.UnknownTypeRequestTimeMs", duration);
+  }
 
   return OCSPSetResponse(
       req, http_response_code,
@@ -628,15 +680,6 @@ SECStatus OCSPTrySendAndReceive(SEC_HTTP_REQUEST_SESSION request,
       http_response_headers,
       http_response_data,
       http_response_data_len);
-
- failed:
-  if (http_response_data_len) {
-    // We must always set an output value, even on failure.  The output value 0
-    // means the failure was unrelated to the acceptable response data length.
-    *http_response_data_len = 0;
-  }
-  PORT_SetError(SEC_ERROR_BAD_HTTP_RESPONSE);  // Simple approximation.
-  return SECFailure;
 }
 
 SECStatus OCSPFree(SEC_HTTP_REQUEST_SESSION request) {

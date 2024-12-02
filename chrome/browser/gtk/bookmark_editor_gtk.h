@@ -5,38 +5,41 @@
 #ifndef CHROME_BROWSER_GTK_BOOKMARK_EDITOR_GTK_H_
 #define CHROME_BROWSER_GTK_BOOKMARK_EDITOR_GTK_H_
 
-#include <gtk/gtk.h>
-
 #include <string>
 
+#include "app/gtk_integers.h"
 #include "app/gtk_signal.h"
-#include "base/scoped_ptr.h"
+#include "base/gtest_prod_util.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class GURL;
+
+typedef union  _GdkEvent GdkEvent;
+typedef struct _GtkTreeIter GtkTreeIter;
+typedef struct _GtkTreeSelection GtkTreeSelection;
+typedef struct _GtkTreeStore GtkTreeStore;
+typedef struct _GtkWidget GtkWidget;
 
 // GTK version of the bookmark editor dialog.
 class BookmarkEditorGtk : public BookmarkEditor,
                           public BookmarkModelObserver {
-  FRIEND_TEST(BookmarkEditorGtkTest, ChangeParent);
-  FRIEND_TEST(BookmarkEditorGtkTest, ChangeParentAndURL);
-  FRIEND_TEST(BookmarkEditorGtkTest, ChangeURLToExistingURL);
-  FRIEND_TEST(BookmarkEditorGtkTest, EditTitleKeepsPosition);
-  FRIEND_TEST(BookmarkEditorGtkTest, EditURLKeepsPosition);
-  FRIEND_TEST(BookmarkEditorGtkTest, ModelsMatch);
-  FRIEND_TEST(BookmarkEditorGtkTest, MoveToNewParent);
-  FRIEND_TEST(BookmarkEditorGtkTest, NewURL);
-  FRIEND_TEST(BookmarkEditorGtkTest, ChangeURLNoTree);
-  FRIEND_TEST(BookmarkEditorGtkTest, ChangeTitleNoTree);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, ChangeParent);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, ChangeParentAndURL);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, ChangeURLToExistingURL);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, EditTitleKeepsPosition);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, EditURLKeepsPosition);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, ModelsMatch);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, MoveToNewParent);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, NewURL);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, ChangeURLNoTree);
+  FRIEND_TEST_ALL_PREFIXES(BookmarkEditorGtkTest, ChangeTitleNoTree);
  public:
   BookmarkEditorGtk(GtkWindow* window,
                     Profile* profile,
                     const BookmarkNode* parent,
                     const EditDetails& details,
-                    BookmarkEditor::Configuration configuration,
-                    BookmarkEditor::Handler* handler);
+                    BookmarkEditor::Configuration configuration);
 
   virtual ~BookmarkEditorGtk();
 
@@ -137,8 +140,6 @@ class BookmarkEditorGtk : public BookmarkEditor,
 
   // Is the tree shown?
   bool show_tree_;
-
-  scoped_ptr<BookmarkEditor::Handler> handler_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkEditorGtk);
 };

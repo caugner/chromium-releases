@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@
 
 namespace {
 
-const wchar_t kTestingPage[] = L"files/keyevents_test.html";
+const char kTestingPage[] = "files/keyevents_test.html";
 const wchar_t kSuppressEventJS[] =
     L"window.domAutomationController.send(setDefaultAction('%ls', %ls));";
 const wchar_t kGetResultJS[] =
@@ -135,7 +135,9 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     gfx::NativeWindow window = NULL;
     ASSERT_NO_FATAL_FAILURE(GetNativeWindow(&window));
     EXPECT_TRUE(ui_controls::SendKeyPressNotifyWhenDone(
-        window, key, control, shift, alt, new MessageLoop::QuitTask()));
+                    window, key, control, shift, alt,
+                    false /* command, */,
+                    new MessageLoop::QuitTask()));
     ui_test_utils::RunMessageLoop();
   }
 
@@ -287,7 +289,8 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, NormalKeyEvents) {
+// Flaky since r51395. See crbug.com/48671.
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FLAKY_NormalKeyEvents) {
   static const KeyEventTestData kTestNoInput[] = {
     // a
     { base::VKEY_A, false, false, false,
@@ -349,7 +352,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, NormalKeyEvents) {
 
   HTTPTestServer* server = StartHTTPServer();
 
-  GURL url = server->TestServerPageW(kTestingPage);
+  GURL url = server->TestServerPage(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
@@ -423,7 +426,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, CtrlKeyEvents) {
 
   HTTPTestServer* server = StartHTTPServer();
 
-  GURL url = server->TestServerPageW(kTestingPage);
+  GURL url = server->TestServerPage(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
@@ -447,7 +450,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, CtrlKeyEvents) {
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlEnter));
 }
 
-#if defined(OS_CHROMEOS)
+#if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
 // See http://crbug.com/40037 for details.
 #define MAYBE_AccessKeys DISABLED_AccessKeys
 #else
@@ -491,7 +494,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
 
   HTTPTestServer* server = StartHTTPServer();
 
-  GURL url = server->TestServerPageW(kTestingPage);
+  GURL url = server->TestServerPage(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ui_test_utils::RunAllPendingInMessageLoop();
@@ -546,7 +549,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, ReservedAccelerators) {
   HTTPTestServer* server = StartHTTPServer();
 
-  GURL url = server->TestServerPageW(kTestingPage);
+  GURL url = server->TestServerPage(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));

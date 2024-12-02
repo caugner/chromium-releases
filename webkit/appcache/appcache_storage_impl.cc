@@ -118,6 +118,7 @@ void AppCacheStorageImpl::DatabaseTask::CallRunCompleted() {
     DCHECK(storage_->scheduled_database_tasks_.front() == this);
     storage_->scheduled_database_tasks_.pop_front();
     RunCompleted();
+    delegates_.clear();
   }
 }
 
@@ -843,8 +844,10 @@ AppCacheStorageImpl::~AppCacheStorageImpl() {
     AppCacheThread::DeleteSoon(AppCacheThread::db(), FROM_HERE, database_);
 }
 
-void AppCacheStorageImpl::Initialize(const FilePath& cache_directory) {
+void AppCacheStorageImpl::Initialize(const FilePath& cache_directory,
+                                     base::MessageLoopProxy* cache_thread) {
   cache_directory_ = cache_directory;
+  cache_thread_ = cache_thread;
   is_incognito_ = cache_directory_.empty();
 
   FilePath db_file_path;
@@ -1041,7 +1044,7 @@ void AppCacheStorageImpl::CheckPolicyAndCallOnMainResponseFound(
       FOR_EACH_DELEGATE(
           (*delegates),
           OnMainResponseFound(url, AppCacheEntry(), AppCacheEntry(),
-                              kNoCacheId, GURL(), true));
+                              kNoCacheId, manifest_url, true));
       return;
     }
   }
@@ -1272,8 +1275,11 @@ AppCacheDiskCache* AppCacheStorageImpl::disk_cache() {
     } else {
       rv = disk_cache_->InitWithDiskBackend(
           cache_directory_.Append(kDiskCacheDirectoryName),
-          kMaxDiskCacheSize, false, &init_callback_);
+          kMaxDiskCacheSize, false, cache_thread_, &init_callback_);
     }
+
+    // We should not keep this reference around.
+    cache_thread_ = NULL;
 
     if (rv != net::ERR_IO_PENDING)
       OnDiskCacheInitialized(rv);

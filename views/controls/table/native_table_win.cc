@@ -12,7 +12,7 @@
 #include "app/table_model.h"
 #include "base/logging.h"
 #include "base/win_util.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/favicon_size.h"
 #include "gfx/icon_util.h"
 #include "skia/ext/skia_utils_win.h"
@@ -266,21 +266,13 @@ bool NativeTableWin::ProcessMessage(UINT message, WPARAM w_param,
 
       case LVN_ITEMCHANGED: {
         // Notification that the state of an item has changed. The state
-        // includes such things as whether the item is selected or checked.
+        // includes such things as whether the item is selected.
         NMLISTVIEW* state_change = reinterpret_cast<NMLISTVIEW*>(hdr);
         if ((state_change->uChanged & LVIF_STATE) != 0) {
           if ((state_change->uOldState & LVIS_SELECTED) !=
               (state_change->uNewState & LVIS_SELECTED)) {
             // Selected state of the item changed.
             OnSelectedStateChanged();
-          }
-          if ((state_change->uOldState & LVIS_STATEIMAGEMASK) !=
-              (state_change->uNewState & LVIS_STATEIMAGEMASK)) {
-            // Checked state of the item changed.
-            bool is_checked =
-                ((state_change->uNewState & LVIS_STATEIMAGEMASK) ==
-                INDEXTOSTATEIMAGEMASK(2));
-            OnCheckedStateChanged(state_change->iItem, is_checked);
           }
         }
         break;
@@ -303,8 +295,47 @@ bool NativeTableWin::ProcessMessage(UINT message, WPARAM w_param,
         break;
       }
 
-      case LVN_MARQUEEBEGIN:  // We don't want the marque selection.
+      case LVN_MARQUEEBEGIN:  // We don't want the marquee selection.
         return true;
+
+      case LVN_GETINFOTIP: {
+        // This is called when the user hovers items in column zero.
+        //   * If the text in this column is not fully visible, the dwFlags
+        //     field will be set to 0, and pszText will contain the full text.
+        //     If you return without making any changes, this text will be
+        //     displayed in a "labeltip" - a bubble that's overlaid (at the
+        //     correct alignment!) on the item.  If you return with a different
+        //     pszText, it will be displayed as a tooltip if nonempty.
+        //   * Otherwise, dwFlags will be LVGIT_UNFOLDED and pszText will be
+        //     empty.  On return, if pszText is nonempty, it will be displayed
+        //     as a labeltip if dwFlags has been changed to 0 (even if it bears
+        //     no resemblance to the item text), or as a tooltip otherwise.
+        //
+        // Once the tooltip for an item has been obtained, this will not be
+        // called again until the user hovers a different item.  If after that
+        // the original item is hovered a second time, this will be called.
+        //
+        // When the user hovers items in other columns, they will be "unfolded"
+        // (displayed as labeltips) when necessary, but this function will
+        // never be called.
+        //
+        // Changing the LVS_EX_INFOTIP extended style to LVS_EX_LABELTIP will
+        // cause all of the above to be true except that this function will not
+        // be called when dwFlags would be LVGIT_UNFOLDED.  Removing it entirely
+        // will disable all of the above behavior.
+        NMLVGETINFOTIP* info_tip = reinterpret_cast<NMLVGETINFOTIP*>(hdr);
+        std::wstring tooltip = table_->model()->GetTooltip(info_tip->iItem);
+        CHECK(info_tip->cchTextMax >= 2);
+        if (tooltip.length() >= static_cast<size_t>(info_tip->cchTextMax)) {
+          // Elide the tooltip if necessary.
+          tooltip.erase(info_tip->cchTextMax - 2);  // Ellipsis + '\0'
+          const wchar_t kEllipsis = L'\x2026';
+          tooltip += kEllipsis;
+        }
+        if (!tooltip.empty())
+          wcscpy_s(info_tip->pszText, tooltip.length() + 1, tooltip.c_str());
+        return true;
+      }
 
       default:
         break;
@@ -335,15 +366,11 @@ void NativeTableWin::CreateNativeControl() {
                                table_->GetWidget()->GetNativeView(),
                                NULL, NULL, NULL);
 
-  // Make the selection extend across the row.
-  // Reduce overdraw/flicker artifacts by double buffering.
-  DWORD list_view_style = LVS_EX_FULLROWSELECT;
-  if (win_util::GetWinVersion() > win_util::WINVERSION_2000) {
-    list_view_style |= LVS_EX_DOUBLEBUFFER;
-  }
-  if (table_->type() == CHECK_BOX_AND_TEXT)
-    list_view_style |= LVS_EX_CHECKBOXES;
-  ListView_SetExtendedListViewStyleEx(hwnd, 0, list_view_style);
+  // Reduce overdraw/flicker artifacts by double buffering.  Support tooltips
+  // and display elided items completely on hover (see comments in OnNotify()
+  // under LVN_GETINFOTIP).  Make the selection extend across the row.
+  ListView_SetExtendedListViewStyle(hwnd,
+      LVS_EX_DOUBLEBUFFER | LVS_EX_INFOTIP | LVS_EX_FULLROWSELECT);
   l10n_util::AdjustUIFontForWindow(hwnd);
 
   NativeControlCreated(hwnd);
@@ -362,7 +389,7 @@ void NativeTableWin::CreateNativeControl() {
     // We create 2 phony images because we are going to switch images at every
     // refresh in order to force a refresh of the icon area (somehow the clip
     // rect does not include the icon).
-    gfx::Canvas canvas(kImageSize, kImageSize, false);
+    gfx::CanvasSkia canvas(kImageSize, kImageSize, false);
     // Make the background completely transparent.
     canvas.drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
     HICON empty_icon =
@@ -442,11 +469,6 @@ bool NativeTableWin::OnKeyDown(base::KeyboardCode virtual_keycode) {
   return false;  // Let the key event be processed as ususal.
 }
 
-void NativeTableWin::OnCheckedStateChanged(int model_row, bool is_checked) {
-  if (!ignore_listview_change_)
-    table_->model()->SetChecked(model_row, is_checked);
-}
-
 LRESULT NativeTableWin::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
   switch (draw_info->nmcd.dwDrawStage) {
     case CDDS_PREPAINT: {
@@ -486,8 +508,8 @@ LRESULT NativeTableWin::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
             client_rect.top += content_offset_;
             // Make sure the region need to paint is visible.
             if (IntersectRect(&intersection, &icon_rect, &client_rect)) {
-              gfx::Canvas canvas(icon_rect.right - icon_rect.left,
-                                 icon_rect.bottom - icon_rect.top, false);
+              gfx::CanvasSkia canvas(icon_rect.right - icon_rect.left,
+                                     icon_rect.bottom - icon_rect.top, false);
 
               // It seems the state in nmcd.uItemState is not correct.
               // We'll retrieve it explicitly.
@@ -548,15 +570,9 @@ void NativeTableWin::UpdateListViewCache(int start, int length, bool add) {
     for (int i = start; i < max_row; ++i) {
       item.iItem = i;
       item.lParam = i;
-      // We do not want to notify of the check state when we insert the items.
       ignore_listview_change_ = true;
       ListView_InsertItem(native_view(), &item);
       ignore_listview_change_ = false;
-      if (table_->type() == CHECK_BOX_AND_TEXT &&
-          table_->model()->IsChecked(i)) {
-        // Setting the state notifies of the check state change.
-        ListView_SetCheckState(native_view(), i, true);
-      }
     }
   }
 
@@ -654,7 +670,7 @@ LRESULT CALLBACK NativeTableWin::TableWndProc(HWND window,
       //
       // As a work around this uses the position of the cursor and ignores
       // the position supplied in the l_param.
-      if (table->UILayoutIsRightToLeft() &&
+      if (base::i18n::IsRTL() &&
           (GET_X_LPARAM(l_param) != -1 || GET_Y_LPARAM(l_param) != -1)) {
         POINT screen_point;
         GetCursorPos(&screen_point);

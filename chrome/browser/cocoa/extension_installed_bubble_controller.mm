@@ -9,15 +9,15 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/cocoa/autocomplete_text_field_cell.h"
 #include "chrome/browser/cocoa/browser_window_cocoa.h"
 #include "chrome/browser/cocoa/browser_window_controller.h"
 #include "chrome/browser/cocoa/extensions/browser_actions_controller.h"
 #include "chrome/browser/cocoa/hover_close_button.h"
 #include "chrome/browser/cocoa/info_bubble_view.h"
-#include "chrome/browser/cocoa/location_bar_view_mac.h"
+#include "chrome/browser/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/cocoa/toolbar_controller.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
@@ -143,14 +143,13 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
   if (!extension_->page_action() || pageActionRemoved_)
     return;
   pageActionRemoved_ = YES;
-  BrowserWindowCocoa* window = static_cast<BrowserWindowCocoa*>(
-      browser_->window());
-  LocationBarViewMac* locationBarView = static_cast<LocationBarViewMac*>(
-      [[window->cocoa_controller() toolbarController] locationBarBridge]);
 
+  BrowserWindowCocoa* window =
+      static_cast<BrowserWindowCocoa*>(browser_->window());
+  LocationBarViewMac* locationBarView =
+      [window->cocoa_controller() locationBarBridge];
   locationBarView->SetPreviewEnabledPageAction(extension_->page_action(),
                                                false);  // disables preview.
-  [locationBarView->GetAutocompleteTextField() setNeedsDisplay:YES];
 }
 
 // The extension installed bubble points at the browser action icon or the
@@ -174,9 +173,8 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
     }
     case extension_installed_bubble::kPageAction: {
       LocationBarViewMac* locationBarView =
-          static_cast<LocationBarViewMac*>(
-              [[window->cocoa_controller() toolbarController]
-               locationBarBridge]);
+          [window->cocoa_controller() locationBarBridge];
+
       // Tell the location bar to show a preview of the page action icon, which
       // would ordinarily only be displayed on a page of the appropriate type.
       // We remove this preview when the extension installed bubble closes.
@@ -184,15 +182,8 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
                                                    true);
 
       // Find the center of the bottom of the page action icon.
-      AutocompleteTextField* field =
-          locationBarView->GetAutocompleteTextField();
-      size_t index =
-          locationBarView->GetPageActionIndex(extension_->page_action());
-      NSRect iconRect = [[field autocompleteTextFieldCell]
-          pageActionFrameForIndex:index inFrame:[field frame]];
-      NSRect boundsrect = [[field superview] convertRect:iconRect
-                                                  toView:nil];
-      arrowPoint = NSMakePoint(NSMidX(boundsrect) + 1, NSMinY(boundsrect));
+      arrowPoint =
+          locationBarView->GetPageActionBubblePoint(extension_->page_action());
       break;
     }
     default: {
@@ -231,8 +222,8 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
   // Find window origin, taking into account bubble size and arrow location.
   NSPoint origin =
       [parentWindow_ convertBaseToScreen:[self calculateArrowPoint]];
-  NSSize offsets = NSMakeSize(kBubbleArrowXOffset + kBubbleArrowWidth / 2.0,
-                              0);
+  NSSize offsets = NSMakeSize(info_bubble::kBubbleArrowXOffset +
+                              info_bubble::kBubbleArrowWidth / 2.0, 0);
   offsets = [[window contentView] convertSize:offsets toView:nil];
   origin.x -= NSWidth([window frame]) - offsets.width;
   origin.y -= NSHeight([window frame]);
@@ -247,7 +238,7 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
 // function is exposed for unit testing.
 - (NSWindow*)initializeWindow {
   NSWindow* window = [self window];  // completes nib load
-  [infoBubbleView_ setArrowLocation:kTopRight];
+  [infoBubbleView_ setArrowLocation:info_bubble::kTopRight];
 
   // Set appropriate icon, resizing if necessary.
   if ([icon_ size].width > extension_installed_bubble::kIconSize) {

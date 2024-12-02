@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #endif
 
 #include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/browser.h"
@@ -47,9 +48,9 @@ class BrowserProxy : public AutomationResourceProxy {
   // success.
   bool BringToFront() WARN_UNUSED_RESULT;
 
-  // Checks to see if a navigation command is active or not. If the call was
-  // successful, puts the result in |enabled| and returns true.
-  bool IsPageMenuCommandEnabled(int id, bool* enabled) WARN_UNUSED_RESULT;
+  // Checks to see if a command is enabled or not. If the call was successful,
+  // puts the result in |enabled| and returns true.
+  bool IsMenuCommandEnabled(int id, bool* enabled) WARN_UNUSED_RESULT;
 
   // Append a new tab to the TabStrip.  The new tab is selected.
   // The new tab navigates to the given tab_url.
@@ -183,7 +184,7 @@ class BrowserProxy : public AutomationResourceProxy {
 
   // Sets the string value of the specified preference.
   bool SetStringPreference(const std::wstring& name,
-                           const std::wstring& value) WARN_UNUSED_RESULT;
+                           const std::string& value) WARN_UNUSED_RESULT;
 
   // Gets the boolean value of the specified preference.
   bool GetBooleanPreference(const std::wstring& name,
@@ -229,6 +230,15 @@ class BrowserProxy : public AutomationResourceProxy {
   // Experimental generic pattern.
   bool SendJSONRequest(const std::string& request,
                        std::string* response) WARN_UNUSED_RESULT;
+
+  // Gets the load times for all tabs started from the command line.
+  // Puts the time of the first tab to start loading into |min_start_time|,
+  // the time when loading stopped into |max_stop_time| (should be similar to
+  // the delay that WaitForInitialLoads waits for), and a list of all
+  // finished timestamps into |stop_times|. Returns true on success.
+  bool GetInitialLoadTimes(float* min_start_time, float* max_stop_time,
+                           std::vector<float>* stop_times);
+
 
  protected:
   virtual ~BrowserProxy() {}

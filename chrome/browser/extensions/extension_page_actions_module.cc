@@ -14,6 +14,7 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/render_messages.h"
 
@@ -31,13 +32,10 @@ const char kNoIconSpecified[] = "Page action has no icons to show.";
 
 // TODO(EXTENSIONS_DEPRECATED): obsolete API.
 bool PageActionFunction::SetPageActionEnabled(bool enable) {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_LIST));
-  const ListValue* args = args_as_list();
-
   std::string page_action_id;
-  EXTENSION_FUNCTION_VALIDATE(args->GetString(0, &page_action_id));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &page_action_id));
   DictionaryValue* action;
-  EXTENSION_FUNCTION_VALIDATE(args->GetDictionary(1, &action));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(1, &action));
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(action->GetInteger(keys::kTabIdKey, &tab_id));
@@ -116,7 +114,7 @@ bool PageActionFunction::InitCommon(int tab_id) {
 
 bool PageActionFunction::SetVisible(bool visible) {
   int tab_id;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetAsInteger(&tab_id));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &tab_id));
   if (!InitCommon(tab_id))
     return false;
 
@@ -142,8 +140,8 @@ bool PageActionHideFunction::RunImpl() {
 }
 
 bool PageActionSetIconFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = args_as_dictionary();
+  DictionaryValue* args;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -178,8 +176,8 @@ bool PageActionSetIconFunction::RunImpl() {
 }
 
 bool PageActionSetTitleFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = args_as_dictionary();
+  DictionaryValue* args;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -195,8 +193,8 @@ bool PageActionSetTitleFunction::RunImpl() {
 }
 
 bool PageActionSetPopupFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = args_as_dictionary();
+  DictionaryValue* args;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -220,8 +218,8 @@ bool PageActionSetPopupFunction::RunImpl() {
 // Not currently exposed to extensions. To re-enable, add mapping in
 // extension_function_dispatcher.
 bool PageActionSetBadgeBackgroundColorFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = args_as_dictionary();
+  DictionaryValue* args;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -246,8 +244,8 @@ bool PageActionSetBadgeBackgroundColorFunction::RunImpl() {
 // Not currently exposed to extensions. To re-enable, add mapping in
 // extension_function_dispatcher.
 bool PageActionSetBadgeTextColorFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = args_as_dictionary();
+  DictionaryValue* args;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -272,8 +270,8 @@ bool PageActionSetBadgeTextColorFunction::RunImpl() {
 // Not currently exposed to extensions. To re-enable, add mapping in
 // extension_function_dispatcher.
 bool PageActionSetBadgeTextFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = args_as_dictionary();
+  DictionaryValue* args;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));

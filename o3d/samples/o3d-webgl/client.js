@@ -97,17 +97,10 @@ o3d.Renderer.clients_ = [];
 o3d.Renderer.renderClients = function() {
   for (var i = 0; i < o3d.Renderer.clients_.length; ++i) {
     var client = o3d.Renderer.clients_[i];
-    var renderEvent = new o3d.RenderEvent;
-    var now = (new Date()).getTime() * 0.001;
-    if(client.then_ == 0.0)
-      renderEvent.elapsedTime = 0.0;
-    else
-      renderEvent.elapsedTime = now - client.then_;
-    if (client.render_callback) {
-      client.render_callback(renderEvent);
+    client.counter_manager_.tick();
+    if (client.renderMode == o3d.Client.RENDERMODE_CONTINUOUS) {
+      client.render();
     }
-    client.then_ = now;
-    client.renderTree(client.renderGraphRoot);
   }
 };
 
@@ -201,6 +194,15 @@ o3d.ClientInfo.prototype.software_renderer = false;
 o3d.ClientInfo.prototype.non_power_of_two_textures = true;
 
 
+
+/**
+ * True if shaders need to be GLSL instead of Cg/HLSL.
+ * In this implementation of o3d, that is true by default.
+ **/
+o3d.ClientInfo.prototype.glsl = true;
+
+
+
 /**
  * The Client class is the main point of entry to O3D.  It defines methods
  * for creating and deleting packs. Each new object created by the Client is
@@ -212,15 +214,33 @@ o3d.ClientInfo.prototype.non_power_of_two_textures = true;
  */
 o3d.Client = function() {
   o3d.NamedObject.call(this);
-  this.root = new o3d.Transform;
-  this.renderGraphRoot = new o3d.RenderNode;
-  this.root = new o3d.Transform;
+
+  var tempPack = this.createPack();
+  this.root = tempPack.createObject('Transform');
+  this.renderGraphRoot = tempPack.createObject('RenderNode');
   this.clientId = o3d.Client.nextId++;
+  this.packs_ = [tempPack];
+  this.clientInfo = tempPack.createObject('ClientInfo');
+  this.counter_manager_ = new o3d.CounterManager;
 
   if (o3d.Renderer.clients_.length == 0)
     o3d.Renderer.installRenderInterval();
 
   o3d.Renderer.clients_.push(this);
+
+  /**
+   * Stack of objects showing how the state has changed.
+   * @type {!Array.<!Object>}
+   * @private
+   */
+  this.stateMapStack_ = [];
+
+  /**
+   * An object containing an entry for each state variable that has changed.
+   * @type {Object}
+   * @private
+   */
+  this.stateVariableStacks_ = {};
 };
 o3d.inherit('Client', 'NamedObject');
 
@@ -268,6 +288,19 @@ o3d.Client.prototype.root = null;
 
 
 /**
+ * A list of all packs for this client.
+ * @type {!Array.<!o3d.Pack>}
+ */
+o3d.Client.prototype.packs_ = [];
+
+/**
+ * Keeps track of all counters associated with this client.
+ * @type {o3d.CounterManager}
+ */
+o3d.Client.prototype.counter_manager_ = null;
+
+
+/**
  * Function that gets called when the client encounters an error.
  */
 o3d.Client.prototype.error_callback = function(error_message) {
@@ -312,9 +345,23 @@ o3d.Client.prototype.cleanup = function () {
 o3d.Client.prototype.createPack =
     function() {
   var pack = new o3d.Pack;
+  pack.client = this;
   pack.gl = this.gl;
+  this.packs_.push(pack);
   return pack;
 };
+
+
+/**
+ * Creates a pack object.
+ *   A pack object.
+ * @param {!o3d.Pack} pack The pack to remove.
+ */
+o3d.Client.prototype.destroyPack =
+    function(pack) {
+  o3d.removeFromArray(this.packs_, pack);
+};
+
 
 
 /**
@@ -338,8 +385,14 @@ o3d.Client.prototype.getObjectById =
  */
 o3d.Client.prototype.getObjects =
     function(name, class_name) {
-  o3d.notImplemented();
-  return [];
+  var objects = [];
+
+  for (var i = 0; i < this.packs_.length; ++i) {
+    var pack = this.packs_[i];
+    objects = objects.concat(pack.getObjects(name, class_name));
+  }
+
+  return objects;
 };
 
 
@@ -350,8 +403,14 @@ o3d.Client.prototype.getObjects =
  */
 o3d.Client.prototype.getObjectsByClassName =
     function(class_name) {
-  o3d.notImplemented();
-  return [];
+  var objects = [];
+
+  for (var i = 0; i < this.packs_.length; ++i) {
+    var pack = this.packs_[i];
+    objects = objects.concat(pack.getObjectsByClassName(class_name));
+  }
+
+  return objects;
 };
 
 
@@ -386,9 +445,46 @@ o3d.Client.prototype.renderMode = o3d.Client.RENDERMODE_CONTINUOUS;
  * RENDERMODE_ON_DEMAND.
  */
 o3d.Client.prototype.render = function() {
-  this.renderTree();
+  // Synthesize a render event.
+  var render_event = new o3d.RenderEvent;
+  this.counter_manager_.advanceRenderFrameCounters();
+
+  this.clearStateStack_();
+
+  var now = (new Date()).getTime() * 0.001;
+  if(this.then_ == 0.0)
+    render_event.elapsedTime = 0.0;
+  else
+    render_event.elapsedTime = now - this.then_;
+
+  if (this.render_callback) {
+    for (var stat in this.render_stats_) {
+      render_event[stat] = this.render_stats_[stat];
+    }
+    this.render_callback(render_event);
+  }
+  this.then_ = now;
+
+  this.gl.colorMask(true, true, true, true);
+
+  this.renderTree(this.renderGraphRoot);
+
+  // When o3d finally draws to the webpage, the alpha channel should be all 1's
+  // So we clear with a color mask to set all alpha bytes to 1 before drawing.
+  // Before we draw again, the color mask gets set back to all true (above).
+  this.gl.colorMask(false, false, false, true);
+  this.gl.clearColor(0.0, 0.0, 0.0, 1.0);
+  this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 };
 
+
+/**
+ * An object for various statistics that are gather during the render tree
+ * tranversal.
+ *
+ * @type {Object}
+ */
+o3d.Client.prototype.render_stats = {}
 
 
 /**
@@ -406,6 +502,16 @@ o3d.Client.prototype.render = function() {
  */
 o3d.Client.prototype.renderTree =
     function(render_node) {
+
+  this.render_stats_ = {
+    drawElementsCulled: 0,
+    drawElementsProcessed: 0,
+    drawElementsRendered: 0,
+    primitivesRendered: 0,
+    transformsCulled: 0,
+    transformsProcessed: 0
+  };
+
   render_node.render();
 };
 
@@ -417,7 +523,6 @@ o3d.Client.prototype.renderTree =
  * @type {!Array.<!o3d.Client.DispalyMode>}
  */
 o3d.Client.prototype.getDisplayModes = [];
-
 
 
 /**
@@ -436,7 +541,7 @@ o3d.Client.prototype.getDisplayModes = [];
  */
 o3d.Client.prototype.setFullscreenClickRegion =
     function(x, y, width, height, mode_id) {
-
+  o3d.notImplemented();
 };
 
 
@@ -484,13 +589,13 @@ o3d.Client.prototype.fullscreen = false;
  */
 o3d.Client.prototype.__defineGetter__('width',
     function() {
-      return this.gl.canvas.width;
+      return this.gl.hack_canvas.width;
     }
 );
 
 o3d.Client.prototype.__defineSetter__('width',
     function(x) {
-      this.gl.canvas.width = x;
+      this.gl.hack_canvas.width = x;
     }
 );
 
@@ -501,13 +606,13 @@ o3d.Client.prototype.__defineSetter__('width',
  */
 o3d.Client.prototype.__defineGetter__('height',
     function() {
-      return this.gl.canvas.height;
+      return this.gl.hack_canvas.height;
     }
 );
 
 o3d.Client.prototype.__defineSetter__('height',
     function(x) {
-      this.gl.canvas.height = x;
+      this.gl.hack_canvas.height = x;
     }
 );
 
@@ -515,6 +620,7 @@ o3d.Client.prototype.__defineSetter__('height',
 /**
  * Initializes this client using the canvas.
  * @param {Canvas}
+ * @return {boolean} Success.
  */
 o3d.Client.prototype.initWithCanvas = function(canvas) {
   var gl;
@@ -527,19 +633,60 @@ o3d.Client.prototype.initWithCanvas = function(canvas) {
     premultipliedAlpha : true
   };
 
-  try {gl = canvas.getContext("experimental-webgl", standard_attributes) } catch(e) { }
-  if (!gl)
-      try {gl = canvas.getContext("moz-webgl") } catch(e) { }
+  if (!canvas || !canvas.getContext) {
+    return false;
+  }
+  try {
+    gl = canvas.getContext("experimental-webgl", standard_attributes)
+  } catch(e) { }
   if (!gl) {
-      alert("No WebGL context found");
-      return null;
+    try {
+      gl = canvas.getContext("moz-webgl")
+    } catch(e) { }
   }
 
+  if (!gl) {
+    return false;
+  }
+
+  // TODO(petersont): Remove this workaround once WebGLRenderingContext.canvas
+  // is implemented in Firefox.
+  gl.hack_canvas = canvas;
   this.gl = gl;
+  this.root.gl = gl;
+  this.renderGraphRoot.gl = gl;
 
   gl.client = this;
   gl.displayInfo = {width: canvas.width,
                     height: canvas.height};
+  o3d.State.createDefaultState_(gl).push_();
+
+  // Create the default error texture.
+  var defaultTexture = new o3d.Texture2D();
+  defaultTexture.gl = this.gl;
+  defaultTexture.init_(8, 8, o3d.Texture.ARGB8, 1, false);
+  var r = [1, 0, 0, 1];
+  var Y = [1, 1, 0, 1];
+  var error = [r, r, r, r, r, r, r, r,
+               r, r, Y, Y, Y, Y, r, r,
+               r, Y, r, r, r, Y, Y, r,
+               r, Y, r, r, Y, r, Y, r,
+               r, Y, r, Y, r, r, Y, r,
+               r, Y, Y, r, r, r, Y, r,
+               r, r, Y, Y, Y, Y, r, r,
+               r, r, r, r, r, r, r, r];
+  var pixels = [];
+  for (var i = 0; i < error.length; i++) {
+    for (var j = 0; j < 4; j++) {
+      pixels[i * 4 + j] = error[i][j];
+    }
+  }
+  defaultTexture.set(0, pixels);
+  defaultTexture.name = 'DefaultTexture';
+  this.fallback_error_texture_ = defaultTexture;
+  this.error_texture_ = defaultTexture;
+
+  return true;
 };
 
 
@@ -639,6 +786,96 @@ o3d.Client.prototype.clearLostResourcesCallback =
 
 
 /**
+ * Returns the event object for processing.
+ * @param {Event} event A mouse-related DOM event.
+ * @private
+ */
+o3d.Client.getEvent_ = function(event) {
+  return event ? event : window.event;
+};
+
+
+/**
+ * Returns an object with event, element, name and wheel in a semi cross
+ * browser way. Note: this can only be called from since an event because
+ * depending on the browser it expects that window.event is valid.
+ * @param {!Event} event A mouse-related DOM event.
+ * @return {!EventInfo} Info about the event.
+ * @private
+ */
+o3d.Client.getEventInfo_ = function(event) {
+  var elem = event.target ? event.target : event.srcElement;
+  var name = elem.id ? elem.id : ('->' + elem.toString());
+  var wheel = event.detail ? event.detail : -event.wheelDelta;
+  return { event: event,
+           element: elem,
+           name: name,
+           wheel: wheel };
+};
+
+
+/**
+ * Returns the absolute position of an element.
+ * @param {!HTMLElement} element The element to get a position for.
+ * @return {!Object} An object containing x and y as the absolute position
+ *     of the given element.
+ * @private
+ */
+o3d.Client.getAbsolutePosition_ = function(element) {
+  var r = {x: 0, y: 0};
+  for (var e = element; e; e = e.offsetParent) {
+    r.x += e.offsetLeft;
+    r.y += e.offsetTop;
+  }
+  return r;
+};
+
+/**
+ * Compute the x and y of an event with respect to the element which received
+ * the event.
+ *
+ * @param {!Object} eventInfo As returned from
+ *     o3d.Client.getEventInfo.
+ * @return {!Object} An object containing keys 'x' and 'y'.
+ * @private
+ */
+o3d.Client.getLocalXY_ = function(eventInfo) {
+  var event = eventInfo.event;
+  var p = o3d.Client.getAbsolutePosition_(eventInfo.element);
+  return {x: event.x - p.x, y: event.y - p.y};
+};
+
+
+/**
+ * Wraps a user's event callback with one that properly computes
+ * relative coordinates for the event.
+ * @param {!o3d.EventCallback} handler Function to call on event.
+ * @param {boolean} doCancelEvent If event should be canceled after callback.
+ * @return {!o3d.EventCallback} Wrapped handler function.
+ * @private
+ */
+o3d.Client.wrapEventCallback_ = function(handler, doCancelEvent) {
+  return function(event) {
+    event = o3d.Client.getEvent_(event);
+    var originalEvent = event;
+    var info = o3d.Client.getEventInfo_(event);
+    var relativeCoords = o3d.Client.getLocalXY_(info);
+    // In a proper event, there are read only properties, so we clone it.
+    event = o3d.clone(event);
+    event.x = relativeCoords.x;
+    event.y = relativeCoords.y;
+    // Invert value to meet contract for deltaY. @see event.js.
+    event.deltaY = -info.wheel;
+    handler(event);
+    if (doCancelEvent) {
+      // Need to cancel the original, un-cloned event.
+      o3djs.event.cancel(originalEvent);
+    }
+  };
+};
+
+
+/**
  * Sets a callback for a given event type.
  * types.
  * There can be only one callback for a given event type at a time; setting a
@@ -649,13 +886,23 @@ o3d.Client.prototype.clearLostResourcesCallback =
  */
 o3d.Client.prototype.setEventCallback =
     function(type, handler) {
-  var listener = this.gl.canvas;
+  var listener = this.gl.hack_canvas;
   // TODO(petersont): Figure out a way for a canvas to listen to a key event
   // directly.
-  if (type.substr(0, 3) == 'key') {
+
+  var isWheelEvent = type == 'wheel';
+  var forKeyEvent = type.substr(0, 3) == 'key';
+  if (forKeyEvent) {
     listener = document;
+  } else {
+    handler = o3d.Client.wrapEventCallback_(handler, isWheelEvent);
   }
-  listener.addEventListener(type, handler, true);
+  if (isWheelEvent) {
+    listener.addEventListener('DOMMouseScroll', handler, true);
+    listener.addEventListener('mousewheel', handler, true);
+  } else {
+    listener.addEventListener(type, handler, true);
+  }
 };
 
 
@@ -665,10 +912,21 @@ o3d.Client.prototype.setEventCallback =
  */
 o3d.Client.prototype.clearEventCallback =
     function(type) {
-  if (type.substr(0, 3) == 'key') {
+  //TODO(petersont): Same as TODO in setEventCallback above.
+  var listener = this.gl.hack_canvas;
+
+  var isWheelEvent = type == 'wheel';
+  var forKeyEvent = type.substr(0, 3) == 'key';
+  if (forKeyEvent) {
     listener = document;
   }
-  listener.removeEventListener(type);
+
+  if (isWheelEvent) {
+    listener.removeEventListener('DOMMouseScroll');
+    listener.removeEventListener('mousewheel');
+  } else {
+    listener.removeEventListener(type);
+  }
 };
 
 
@@ -693,7 +951,7 @@ o3d.Client.prototype.clearEventCallback =
  */
 o3d.Client.prototype.setErrorTexture =
     function(texture) {
-  o3d.notImplemented();
+  this.error_texture_ = texture;
 };
 
 
@@ -752,8 +1010,31 @@ o3d.Client.prototype.clearTickCallback = function() {
  */
 o3d.Client.prototype.setErrorCallback =
     function(error_callback) {
-  this.error_callback = error_callback;
+  // Other code expects to not see a null error callback.
+  if (error_callback) {
+    this.error_callback = this.wrapErrorCallback_(error_callback);
+  } else {
+    this.error_callback = function(string) {
+      this.last_error_ = string;
+    };
+  }
 };
+
+
+/**
+ * Wraps a callback function, saving the error string so that the
+ * lastError variable can access it.
+ *
+ * @param {function} error_callback User-defined error callback.
+ * @return {function} Wrapped error callback.
+ * @private
+ */
+o3d.Client.prototype.wrapErrorCallback_ = function(error_callback) {
+  return function(string) {
+    this.last_error_ = string;
+    error_callback(string);
+  }
+}
 
 
 /**
@@ -764,7 +1045,7 @@ o3d.Client.prototype.setErrorCallback =
  * time or if you call ClearErrorCallback.
  */
 o3d.Client.prototype.clearErrorCallback = function() {
-  this.error_callback = null;
+  this.setErrorCallback(null);
 };
 
 
@@ -791,6 +1072,78 @@ o3d.Client.prototype.toDataURL =
 
 
 /**
+ * Saves data needed to return state to current, then sets the state according
+ * to the given object.
+ * @private
+ */
+o3d.Client.prototype.clearStateStack_ = function() {
+  this.stateMapStack_ = [];
+  for (var name in this.stateVariableStacks_) {
+    var l = this.stateVariableStacks_[name];
+    // Recall there is a default value at the bottom of each of these stacks.
+    if (l.length != 1) {
+      this.stateVariableStacks_[name] = l.slice(0, 1);
+    }
+  }
+};
+
+
+/**
+ * Saves data needed to return state to current, then sets the state according
+ * to the given object.
+ * @param {Object} variable_map A map linking names to values.
+ * @private
+ */
+o3d.Client.prototype.pushState_ = function(variable_map) {
+  // Save the variable map itself in a stack.
+  this.stateMapStack_.push(variable_map);
+
+  // Save each of the state's variable's value in its own stack.
+  for (var name in variable_map) {
+    var value = variable_map[name];
+    if (this.stateVariableStacks_[name] == undefined) {
+      this.stateVariableStacks_[name] = [];
+    }
+    this.stateVariableStacks_[name].push(value);
+  }
+
+  // The value on the top of the stack in stateVariableStacks_
+  // is current at this point.
+  o3d.State.setVariables_(this.gl, variable_map);
+};
+
+
+/**
+ * Returns the state to the way it was before the current state
+ * @private
+ */
+o3d.Client.prototype.popState_ = function() {
+  var variable_map = this.stateMapStack_.pop();
+
+  for (var name in variable_map) {
+    var stack = this.stateVariableStacks_[name];
+    stack.pop();
+    variable_map[name] = stack.length ? stack[stack.length - 1] :
+        o3d.State.stateVariableInfos_[name]['defaultValue'];
+  }
+
+  o3d.State.setVariables_(this.gl, variable_map);
+};
+
+
+/**
+ * Gets the current value of the state variable with the give name.
+ * @param {string} name The name of the state variable in question.
+ * @private
+ */
+o3d.Client.prototype.getState_ = function(name) {
+  var stack = this.stateVariableStacks_[name];
+  return stack.length ? stack[stack.length - 1] :
+        o3d.State.stateVariableInfos_[name]['defaultValue'];
+};
+
+
+/**
  * Returns the status of initializing the renderer so we can display the
  * appropriate message. We require a certain minimum set of graphics
  * capabilities. If the user's computer does not have his minimum
@@ -799,7 +1152,6 @@ o3d.Client.prototype.toDataURL =
  * will be INITIALIZATION_ERROR. Otherwise it will be SUCCESS.
  */
 o3d.Client.prototype.renderer_init_status = 0;
-
 
 
 /**
@@ -811,12 +1163,49 @@ o3d.Client.prototype.cursor = null;
 
 
 /**
+ * The current error texture.
+ *
+ * @type {o3d.Texture}
+ * @private
+ */
+o3d.Client.prototype.error_texture_ = null;
+
+
+/**
+ * The fallback error texture. Should only be initialized once per client and
+ * is read-only.
+ *
+ * @type {!o3d.Texture}
+ * @private
+ */
+o3d.Client.prototype.fallback_error_texture_ = null;
+
+
+/**
  * The last error reported by the plugin.
  *
  * @type {string}
+ * @private
  */
 o3d.Client.prototype.last_error_ = '';
+o3d.Client.prototype.__defineGetter__('lastError',
+    function() {
+      return this.last_error_;
+    }
+);
 
+/**
+ * Returns true if missing textures, samplers or ParamSamplers should be
+ * reported by calling the error callback. We assume that if the user
+ * explicitly sets the error texture to null, then they want such errors to
+ * trigger the error callback.
+ *
+ * @return {boolean}
+ * @private
+ */
+o3d.Client.prototype.reportErrors_ = function() {
+  return (this.error_texture_ == null);
+}
 
 
 /**
@@ -845,7 +1234,7 @@ o3d.Client.prototype.objects = [];
  * Clears the error returned in lastError.
  */
 o3d.Client.prototype.clearLastError = function () {
-  o3d.notImplemented();
+  this.last_error_ = '';
 };
 
 
@@ -879,9 +1268,13 @@ o3d.Client.prototype.clientId = 0;
 
 
 /**
+ * Gets info about the client.
+ */
+o3d.Client.prototype.clientInfo = null;
+
+
+/**
  * The canvas associated with this client.
  * @type {Element}
  */
 o3d.Client.prototype.canvas = null;
-
-

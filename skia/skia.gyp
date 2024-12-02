@@ -597,6 +597,7 @@
             '../build/linux/system.gyp:freetype2',
             '../third_party/harfbuzz/harfbuzz.gyp:harfbuzz',
             '../third_party/harfbuzz/harfbuzz.gyp:harfbuzz_interface',
+            '../third_party/icu/icu.gyp:icuuc',
           ],
           'cflags': [
             '-Wno-unused',
@@ -692,7 +693,7 @@
         '../third_party/skia/src/core',
       ],
       'conditions': [
-        [ 'OS == "linux" and target_arch != "arm"', {
+        [ '(OS == "linux" or OS == "freebsd" or OS == "openbsd") and target_arch != "arm"', {
           'cflags': [
             '-msse2',
           ],

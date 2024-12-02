@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,41 +9,29 @@
 #include <map>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/observer_list.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "chrome/browser/google_service_auth_error.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/pref_member.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/notification_method.h"
+#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_setup_wizard.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class NotificationDetails;
 class NotificationSource;
 class NotificationType;
-
-// Various UI components such as the New Tab page can be driven by observing
-// the ProfileSyncService through this interface.
-class ProfileSyncServiceObserver {
- public:
-  // When one of the following events occurs, OnStateChanged() is called.
-  // Observers should query the service to determine what happened.
-  // - We initialized successfully.
-  // - There was an authentication error and the user needs to reauthenticate.
-  // - The sync servers are unavailable at this time.
-  // - Credentials are now in flight for authentication.
-  virtual void OnStateChanged() = 0;
- protected:
-  virtual ~ProfileSyncServiceObserver() { }
-};
+class Profile;
+class ProfileSyncFactory;
 
 // ProfileSyncService is the layer between browser subsystems like bookmarks,
 // and the sync backend.  Each subsystem is logically thought of as being
@@ -107,7 +95,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
     CANCEL_FROM_SIGNON_WITHOUT_AUTH = 10,   // Cancelled before submitting
                                             // username and password.
     CANCEL_DURING_SIGNON = 11,              // Cancelled after auth.
-
+    CANCEL_FROM_CHOOSE_DATA_TYPES = 12,     // Cancelled before choosing data
+                                            // types and clicking OK.
     // Events resulting in the stoppage of sync service.
     STOP_FROM_OPTIONS = 20,  // Sync was stopped from Wrench->Options.
 
@@ -115,6 +104,11 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
     MAX_SYNC_EVENT_CODE
   };
+
+  // Default sync server URL.
+  static const char* kSyncServerUrl;
+  // Sync server URL for dev channel users
+  static const char* kDevServerUrl;
 
   ProfileSyncService(ProfileSyncFactory* factory_,
                      Profile* profile,
@@ -138,7 +132,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
     browser_sync::DataTypeController::StateMap* state_map) const;
 
   // Enables/disables sync for user.
-  virtual void EnableForUser();
+  virtual void EnableForUser(gfx::NativeWindow parent_window);
   virtual void DisableForUser();
 
   // Whether sync is enabled by user or not.
@@ -149,11 +143,20 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void OnBackendInitialized();
   virtual void OnSyncCycleCompleted();
   virtual void OnAuthError();
+  virtual void OnStopSyncingPermanently();
 
   // Called when a user enters credentials through UI.
   virtual void OnUserSubmittedAuth(const std::string& username,
                                    const std::string& password,
                                    const std::string& captcha);
+
+  // Called when a user chooses which data types to sync as part of the sync
+  // setup wizard.  |sync_everything| represents whether they chose the
+  // "keep everything synced" option; if true, |chosen_types| will be ignored
+  // and all data types will be synced.  |sync_everything| means "sync all
+  // current and future data types."
+  virtual void OnUserChoseDatatypes(bool sync_everything,
+      const syncable::ModelTypeSet& chosen_types);
 
   // Called when a user cancels any setup dialog (login, etc).
   virtual void OnUserCancelledDialog();
@@ -173,12 +176,15 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // occurred preventing the action. We make it the duty of ProfileSyncService
   // to open the dialog to easily ensure only one is ever showing.
   bool SetupInProgress() const {
-    return !HasSyncSetupCompleted() && WizardIsVisible();
+    return !HasSyncSetupCompleted() &&
+        (WizardIsVisible() || bootstrap_sync_authentication_);
   }
   bool WizardIsVisible() const {
     return wizard_.IsVisible();
   }
-  void ShowLoginDialog();
+  void ShowLoginDialog(gfx::NativeWindow parent_window);
+
+  void ShowChooseDataTypes(gfx::NativeWindow parent_window);
 
   // Pretty-printed strings for a given StatusSummary.
   static std::wstring BuildSyncStatusSummaryText(
@@ -191,6 +197,13 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   bool sync_initialized() const { return backend_initialized_; }
   bool unrecoverable_error_detected() const {
     return unrecoverable_error_detected_;
+  }
+  const std::string& unrecoverable_error_message() {
+    return unrecoverable_error_message_;
+  }
+  tracked_objects::Location unrecoverable_error_location() {
+    return unrecoverable_error_location_.get() ?
+        *unrecoverable_error_location_.get() : tracked_objects::Location();
   }
 
   bool UIShouldDepictAuthInProgress() const {
@@ -232,8 +245,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // command-line switches).
   static bool IsSyncEnabled();
 
+  // Retuns whether sync is managed, i.e. controlled by configuration
+  // management. If so, the user is not allowed to configure sync.
+  bool IsManaged();
+
   // UnrecoverableErrorHandler implementation.
-  virtual void OnUnrecoverableError();
+  virtual void OnUnrecoverableError(
+      const tracked_objects::Location& from_here,
+      const std::string& message);
 
   browser_sync::SyncBackendHost* backend() { return backend_.get(); }
 
@@ -269,12 +288,25 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void GetRegisteredDataTypes(
       syncable::ModelTypeSet* registered_types) const;
 
+  // Checks whether the Cryptographer is ready to encrypt and decrypt updates
+  // for sensitive data types.
+  virtual bool IsCryptographerReady() const;
+
+  // Sets the Cryptographer's passphrase. This will check asynchronously whether
+  // the passphrase is valid and notify ProfileSyncServiceObservers via the
+  // NotificationService when the outcome is known.
+  virtual void SetPassphrase(const std::string& passphrase);
+
  protected:
-  // Call this after any of the subsystems being synced (the bookmark
-  // model and the sync backend) finishes its initialization.  When everything
-  // is ready, this function will bootstrap the subsystems so that they are
-  // initially in sync, and start forwarding changes between the two models.
-  void StartProcessingChangesIfReady();
+  // Used by ProfileSyncServiceMock only.
+  //
+  // TODO(akalin): Separate this class out into an abstract
+  // ProfileSyncService interface and a ProfileSyncServiceImpl class
+  // so we don't need this hack anymore.
+  ProfileSyncService();
+
+  // Helper to install and configure a data type manager.
+  void ConfigureDataTypeManager();
 
   // Returns whether processing changes is allowed.  Check this before doing
   // any model-modifying operations.
@@ -295,11 +327,19 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // folder is partial/corrupt)
   virtual void InitializeBackend(bool delete_sync_data_folder);
 
+  const browser_sync::DataTypeController::TypeMap& data_type_controllers() {
+    return data_type_controllers_;
+  }
+
   // We keep track of the last auth error observed so we can cover up the first
   // "expected" auth failure from observers.
   // TODO(timsteele): Same as expecting_first_run_auth_needed_event_. Remove
   // this!
   GoogleServiceAuthError last_auth_error_;
+
+  // Our asynchronous backend to communicate with sync components living on
+  // other threads.
+  scoped_ptr<browser_sync::SyncBackendHost> backend_;
 
   // Cache of the last name the client attempted to authenticate.
   std::string last_attempted_user_email_;
@@ -308,7 +348,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   friend class ProfileSyncServiceTest;
   friend class ProfileSyncServicePreferenceTest;
   friend class ProfileSyncServiceTestHarness;
-  FRIEND_TEST(ProfileSyncServiceTest, UnrecoverableErrorSuspendsService);
+  FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest, InitialState);
+  FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest,
+                           UnrecoverableErrorSuspendsService);
 
   // Initializes the various settings from the command line.
   void InitSettings();
@@ -317,10 +359,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   void UpdateLastSyncedTime();
 
   static const wchar_t* GetPrefNameForDataType(syncable::ModelType data_type);
-
-  // When running inside Chrome OS, extract the LSID cookie from the cookie
-  // store to bootstrap the authentication process.
-  virtual std::string GetLsidForAuthBootstraping();
 
   // Time at which we begin an attempt a GAIA authorization.
   base::TimeTicks auth_start_time_;
@@ -347,10 +385,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // The last time we detected a successful transition from SYNCING state.
   // Our backend notifies us whenever we should take a new snapshot.
   base::Time last_synced_time_;
-
-  // Our asynchronous backend to communicate with sync components living on
-  // other threads.
-  scoped_ptr<browser_sync::SyncBackendHost> backend_;
 
   // List of available data type controllers.
   browser_sync::DataTypeController::TypeMap data_type_controllers_;
@@ -382,6 +416,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // doing any work that might corrupt things further.
   bool unrecoverable_error_detected_;
 
+  // A message sent when an unrecoverable error occurred.
+  std::string unrecoverable_error_message_;
+  scoped_ptr<tracked_objects::Location> unrecoverable_error_location_;
+
+  // Whether to use the (new, untested) Chrome-socket-based
+  // buzz::AsyncSocket implementation for notifications.
+  bool use_chrome_async_socket_;
+
   // Which peer-to-peer notification method to use.
   browser_sync::NotificationMethod notification_method_;
 
@@ -394,6 +436,15 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   ScopedRunnableMethodFactory<ProfileSyncService>
     scoped_runnable_method_factory_;
+
+  // The preference that controls whether sync is under control by configuration
+  // management.
+  BooleanPrefMember pref_sync_managed_;
+
+  // This allows us to gracefully handle an ABORTED return code from the
+  // DataTypeManager in the event that the server informed us to cease and
+  // desist syncing immediately.
+  bool expect_sync_configuration_aborted_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncService);
 };

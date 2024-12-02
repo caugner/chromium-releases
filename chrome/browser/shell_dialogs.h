@@ -17,6 +17,12 @@ namespace gfx {
 class Font;
 }
 
+// This function is declared extern such that it is accessible for unit tests
+// in /chrome/browser/views/shell_dialogs_win_unittest.cc
+extern std::wstring AppendExtensionIfNeeded(const std::wstring& filename,
+                                            const std::wstring& filter_selected,
+                                            const std::wstring& suggested_ext);
+
 // A base class for shell dialogs.
 class BaseShellDialog {
  public:
@@ -115,6 +121,9 @@ class SelectFileDialog
                           const FilePath::StringType& default_extension,
                           gfx::NativeWindow owning_window,
                           void* params) = 0;
+
+  // browser_mode is true when running inside the browser.
+  virtual void set_browser_mode(bool value) {}
 
  protected:
   friend class base::RefCountedThreadSafe<SelectFileDialog>;

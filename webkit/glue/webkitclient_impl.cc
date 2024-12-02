@@ -12,8 +12,6 @@
 
 #include <vector>
 
-#include "base/file_path.h"
-#include "base/file_util.h"
 #include "base/lock.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
@@ -25,7 +23,6 @@
 #include "base/trace_event.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_strings.h"
-#include "net/base/net_util.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCookie.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrameClient.h"
@@ -197,16 +194,14 @@ void WebKitClientImpl::getPluginList(bool refresh,
     const WebPluginInfo& plugin = plugins[i];
 
     builder->addPlugin(
-        WideToUTF16Hack(plugin.name),
-        WideToUTF16Hack(plugin.desc),
+        plugin.name, plugin.desc,
         FilePathStringToWebString(plugin.path.BaseName().value()));
 
     for (size_t j = 0; j < plugin.mime_types.size(); ++j) {
       const WebPluginMimeType& mime_type = plugin.mime_types[j];
 
       builder->addMediaTypeToLastPlugin(
-          WebString::fromUTF8(mime_type.mime_type),
-          WideToUTF16Hack(mime_type.description));
+          WebString::fromUTF8(mime_type.mime_type), mime_type.description);
 
       for (size_t k = 0; k < mime_type.file_extensions.size(); ++k) {
         builder->addFileExtensionToLastMediaType(
@@ -239,32 +234,39 @@ WebData WebKitClientImpl::loadResource(const char* name) {
     const char* name;
     int id;
   } resources[] = {
-    { "textAreaResizeCorner", IDR_TEXTAREA_RESIZER },
     { "missingImage", IDR_BROKENIMAGE },
-    { "tickmarkDash", IDR_TICKMARK_DASH },
+    { "mediaPause", IDR_MEDIA_PAUSE_BUTTON },
+    { "mediaPlay", IDR_MEDIA_PLAY_BUTTON },
+    { "mediaPlayDisabled", IDR_MEDIA_PLAY_BUTTON_DISABLED },
+    { "mediaSoundDisabled", IDR_MEDIA_SOUND_DISABLED },
+    { "mediaSoundFull", IDR_MEDIA_SOUND_FULL_BUTTON },
+    { "mediaSoundNone", IDR_MEDIA_SOUND_NONE_BUTTON },
+    { "mediaSliderThumb", IDR_MEDIA_SLIDER_THUMB },
+    { "mediaVolumeSliderThumb", IDR_MEDIA_VOLUME_SLIDER_THUMB },
     { "panIcon", IDR_PAN_SCROLL_ICON },
     { "searchCancel", IDR_SEARCH_CANCEL },
     { "searchCancelPressed", IDR_SEARCH_CANCEL_PRESSED },
     { "searchMagnifier", IDR_SEARCH_MAGNIFIER },
     { "searchMagnifierResults", IDR_SEARCH_MAGNIFIER_RESULTS },
-    { "mediaPlay", IDR_MEDIA_PLAY_BUTTON },
-    { "mediaPlayDisabled", IDR_MEDIA_PLAY_BUTTON_DISABLED },
-    { "mediaPause", IDR_MEDIA_PAUSE_BUTTON },
-    { "mediaSoundFull", IDR_MEDIA_SOUND_FULL_BUTTON },
-    { "mediaSoundNone", IDR_MEDIA_SOUND_NONE_BUTTON },
-    { "mediaSoundDisabled", IDR_MEDIA_SOUND_DISABLED },
-    { "mediaSliderThumb", IDR_MEDIA_SLIDER_THUMB },
-    { "mediaVolumeSliderThumb", IDR_MEDIA_VOLUME_SLIDER_THUMB },
+    { "textAreaResizeCorner", IDR_TEXTAREA_RESIZER },
+    { "tickmarkDash", IDR_TICKMARK_DASH },
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     // TODO(port): rename these to "skia" instead of "Linux".
-    { "linuxCheckboxOff", IDR_LINUX_CHECKBOX_OFF },
-    { "linuxCheckboxOn", IDR_LINUX_CHECKBOX_ON },
+    { "linuxCheckboxDisabledIndeterminate",
+        IDR_LINUX_CHECKBOX_DISABLED_INDETERMINATE },
     { "linuxCheckboxDisabledOff", IDR_LINUX_CHECKBOX_DISABLED_OFF },
     { "linuxCheckboxDisabledOn", IDR_LINUX_CHECKBOX_DISABLED_ON },
-    { "linuxRadioOff", IDR_LINUX_RADIO_OFF },
-    { "linuxRadioOn", IDR_LINUX_RADIO_ON },
+    { "linuxCheckboxIndeterminate", IDR_LINUX_CHECKBOX_INDETERMINATE },
+    { "linuxCheckboxOff", IDR_LINUX_CHECKBOX_OFF },
+    { "linuxCheckboxOn", IDR_LINUX_CHECKBOX_ON },
     { "linuxRadioDisabledOff", IDR_LINUX_RADIO_DISABLED_OFF },
     { "linuxRadioDisabledOn", IDR_LINUX_RADIO_DISABLED_ON },
+    { "linuxRadioOff", IDR_LINUX_RADIO_OFF },
+    { "linuxRadioOn", IDR_LINUX_RADIO_ON },
+    { "linuxProgressBar", IDR_PROGRESS_BAR },
+    { "linuxProgressBorderLeft", IDR_PROGRESS_BORDER_LEFT },
+    { "linuxProgressBorderRight", IDR_PROGRESS_BORDER_RIGHT },
+    { "linuxProgressValue", IDR_PROGRESS_VALUE },
 #endif
   };
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(resources); ++i) {
@@ -332,15 +334,12 @@ void WebKitClientImpl::stopSharedTimer() {
   shared_timer_.Stop();
 }
 
-void WebKitClientImpl::callOnMainThread(void (*func)()) {
-  main_loop_->PostTask(FROM_HERE, NewRunnableFunction(func));
+void WebKitClientImpl::callOnMainThread(void (*func)(void*), void* context) {
+  main_loop_->PostTask(FROM_HERE, NewRunnableFunction(func, context));
 }
 
 base::PlatformFile WebKitClientImpl::databaseOpenFile(
-    const WebKit::WebString& vfs_file_name, int desired_flags,
-    base::PlatformFile* dir_handle) {
-  if (dir_handle)
-    *dir_handle = base::kInvalidPlatformFileValue;
+    const WebKit::WebString& vfs_file_name, int desired_flags) {
   return base::kInvalidPlatformFileValue;
 }
 
@@ -408,7 +407,7 @@ static size_t memoryUsageMBGeneric() {
 #endif
 
 size_t WebKitClientImpl::memoryUsageMB() {
-  size_t current_mem_usage;
+  size_t current_mem_usage = 0;
   MemoryUsageCache* mem_usage_cache_singleton = MemoryUsageCache::Get();
   if (mem_usage_cache_singleton->IsCachedValueValid(&current_mem_usage))
     return current_mem_usage;
@@ -423,70 +422,6 @@ size_t WebKitClientImpl::memoryUsageMB() {
 #endif
   mem_usage_cache_singleton->SetMemoryValue(current_mem_usage);
   return current_mem_usage;
-}
-
-bool WebKitClientImpl::fileExists(const WebKit::WebString& path) {
-  FilePath::StringType file_path = webkit_glue::WebStringToFilePathString(path);
-  return file_util::PathExists(FilePath(file_path));
-}
-
-bool WebKitClientImpl::deleteFile(const WebKit::WebString& path) {
-  NOTREACHED();
-  return false;
-}
-
-bool WebKitClientImpl::deleteEmptyDirectory(const WebKit::WebString& path) {
-  NOTREACHED();
-  return false;
-}
-
-bool WebKitClientImpl::getFileSize(const WebKit::WebString& path,
-                                   long long& result) {
-  NOTREACHED();
-  return false;
-}
-
-bool WebKitClientImpl::getFileModificationTime(const WebKit::WebString& path,
-                                               double& result) {
-  NOTREACHED();
-  return false;
-}
-
-WebKit::WebString WebKitClientImpl::directoryName(
-    const WebKit::WebString& path) {
-  NOTREACHED();
-  return WebKit::WebString();
-}
-
-WebKit::WebString WebKitClientImpl::pathByAppendingComponent(
-    const WebKit::WebString& webkit_path,
-    const WebKit::WebString& webkit_component) {
-  FilePath path(webkit_glue::WebStringToFilePathString(webkit_path));
-  FilePath component(webkit_glue::WebStringToFilePathString(webkit_component));
-  FilePath combined_path = path.Append(component);
-  return webkit_glue::FilePathStringToWebString(combined_path.value());
-}
-
-bool WebKitClientImpl::makeAllDirectories(const WebKit::WebString& path) {
-  DCHECK(!sandboxEnabled());
-  FilePath::StringType file_path = webkit_glue::WebStringToFilePathString(path);
-  return file_util::CreateDirectory(FilePath(file_path));
-}
-
-WebKit::WebString WebKitClientImpl::getAbsolutePath(
-    const WebKit::WebString& path) {
-  FilePath file_path(webkit_glue::WebStringToFilePathString(path));
-  file_util::AbsolutePath(&file_path);
-  return webkit_glue::FilePathStringToWebString(file_path.value());
-}
-
-bool WebKitClientImpl::isDirectory(const WebKit::WebString& path) {
-  FilePath file_path(webkit_glue::WebStringToFilePathString(path));
-  return file_util::DirectoryExists(file_path);
-}
-
-WebKit::WebURL WebKitClientImpl::filePathToURL(const WebKit::WebString& path) {
-  return net::FilePathToFileURL(webkit_glue::WebStringToFilePath(path));
 }
 
 void WebKitClientImpl::SuspendSharedTimer() {

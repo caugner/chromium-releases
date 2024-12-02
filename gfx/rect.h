@@ -25,6 +25,8 @@ typedef struct _GdkRectangle GdkRectangle;
 
 namespace gfx {
 
+class Insets;
+
 class Rect {
  public:
   Rect();
@@ -37,6 +39,7 @@ class Rect {
 #elif defined(USE_X11)
   explicit Rect(const GdkRectangle& r);
 #endif
+  explicit Rect(const gfx::Size& size);
   Rect(const gfx::Point& origin, const gfx::Size& size);
 
   ~Rect() {}
@@ -56,10 +59,10 @@ class Rect {
   void set_y(int y) { origin_.set_y(y); }
 
   int width() const { return size_.width(); }
-  void set_width(int width);
+  void set_width(int width) { size_.set_width(width); }
 
   int height() const { return size_.height(); }
-  void set_height(int height);
+  void set_height(int height) { size_.set_height(height); }
 
   const gfx::Point& origin() const { return origin_; }
   void set_origin(const gfx::Point& origin) { origin_ = origin; }
@@ -76,6 +79,9 @@ class Rect {
   void Inset(int horizontal, int vertical) {
     Inset(horizontal, vertical, horizontal, vertical);
   }
+
+  // Shrink the rectangle by the given insets.
+  void Inset(const gfx::Insets& insets);
 
   // Shrink the rectangle by the specified amount on each side.
   void Inset(int left, int top, int right, int bottom);

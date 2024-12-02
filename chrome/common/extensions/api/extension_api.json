@@ -134,9 +134,9 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": ["tab", "infobar", "notification"],
+                "enum": ["tab", "infobar", "notification", "popup"],
                 "optional": true,
-                "description": "The type of view to get. If omitted, returns all views (including background pages and tabs). Valid values: 'tab', 'infobar', 'notification'."
+                "description": "The type of view to get. If omitted, returns all views (including background pages and tabs). Valid values: 'tab', 'infobar', 'notification', 'popup'."
               },
               "windowId": {
                 "type": "integer",
@@ -506,6 +506,13 @@
         }
       }
     ],
+    "properties": {
+      "WINDOW_ID_NONE": {
+        "type": "integer",
+        "value": "-1",
+        "description": "The windowId value that represents the absence of a chrome browser window."
+      }
+    },
     "functions": [
       {
         "name": "get",
@@ -680,7 +687,7 @@
       {
         "name": "onFocusChanged",
         "type": "function",
-        "description": "Fired when the currently focused window changes.",
+        "description": "Fired when the currently focused window changes. Will be chrome.windows.WINDOW_ID_NONE if all chrome windows have lost focus. Note: On some Linux window managers, WINDOW_ID_NONE will always be sent immediately preceding a switch from one chrome window to another.",
         "parameters": [
           {"type": "integer", "name": "windowId", "minimum": 0, "description": "ID of the newly focused window."}
         ]
@@ -722,6 +729,24 @@
             "name": "callback",
             "parameters": [
               {"name": "tab", "$ref": "Tab"}
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getCurrent",
+        "type": "function",
+        "description": "Gets the tab that this script call is being made from. May be undefined if called from a non-tab context (for example: a background page or popup view).",
+        "parameters": [
+          {
+            "type": "function",
+            "name": "callback",
+            "parameters": [
+              {
+                "name": "tab",
+                "$ref": "Tab",
+                "optional": true
+              }
             ]
           }
         ]
@@ -898,7 +923,7 @@
       {
         "name": "move",
         "type": "function",
-        "description": "Moves a tab to a new position within its window, or to a new window.",
+        "description": "Moves a tab to a new position within its window, or to a new window. Note that tabs can only be moved to and from normal (window.type === \"normal\") windows.",
         "parameters": [
           {"type": "integer", "name": "tabId", "minimum": 0},
           {
@@ -982,7 +1007,8 @@
             "type": "object",
             "name": "options",
             "optional": true,
-            "description": "Set parameters of image capture, such as the format of the resulting image.  This parameter was added in version 5.0 .  Earlier versions of chrome will throw an exception unless you omit it.",
+            "min_version": "5.0.372.0",
+            "description": "Set parameters of image capture, such as the format of the resulting image.",
             "properties": {
               "format": {
                 "type": "string",
@@ -991,7 +1017,7 @@
                 "description": "The format of the resulting image.  Default is jpeg."
               },
               "quality": {
-                "type": "integer", 
+                "type": "integer",
                 "name": "quality",
                 "optional": true,
                 "minimum": 0,
@@ -1301,6 +1327,7 @@
         "name": "setPopup",
         "type": "function",
         "description": "Sets the html document to be opened as a popup when the user clicks on the page action's icon.",
+        "min_version": "5.0.308.0",
         "parameters": [
           {
             "name": "details",
@@ -1319,6 +1346,7 @@
     "events": [
       {
         "name": "onClicked",
+        "perExtensionEvent": true,
         "type": "function",
         "description": "Fired when a page action icon is clicked.  This event will not fire if the page action has a popup.",
         "parameters": [
@@ -1390,6 +1418,7 @@
       {
         "name": "setPopup",
         "type": "function",
+        "min_version": "5.0.316.0",
         "description": "Sets the html document to be opened as a popup when the user clicks on the browser action's icon.",
         "parameters": [
           {
@@ -1465,6 +1494,7 @@
     "events": [
       {
         "name": "onClicked",
+        "perExtensionEvent": true,
         "type": "function",
         "description": "Fired when a browser action icon is clicked.  This event will not fire if the browser action has a popup.",
         "parameters": [
@@ -1485,14 +1515,13 @@
         "type": "function",
         "description": "Shows an infobar in the specified tab. The infobar will be closed automatically when the tab navigates. Use window.close() to close the infobar before then.",
         "parameters": [
-          { 
+          {
             "name": "details",
             "type": "object",
             "properties": {
               "tabId": {
                 "type": "integer",
-                "description": "The tab id for the tab to display the infobar in. If not specified the current tab will be used.",
-                "optional": true
+                "description": "The tab id for the tab to display the infobar in."
               },
               "path": {
                 "type": "string",
@@ -1985,8 +2014,7 @@
     ]
   },
   {
-    "namespace": "experimental.idle",
-    "nodoc": "true",
+    "namespace": "idle",
     "types": [],
     "functions": [
       {
@@ -1995,16 +2023,17 @@
         "description": "Returns the current state of the browser.",
         "parameters": [
           {
-            "name": "threshold",
+            "name": "thresholdSeconds",
             "type": "integer",
             "minimum": 15,
-            "description": "Threshold used to determine when a machine is in the idle state."
+            "description": "Threshold, in seconds, used to determine when a machine is in the idle state."
           },
           {
             "name": "callback",
             "type": "function",
             "parameters": [
               {
+                "name": "newState",
                 "type": "string",
                 "enum": ["active", "idle", "locked"]
               }
@@ -2020,6 +2049,7 @@
         "description": "Fired when the browser changes to an active state.  Currently only reports the transition from idle to active.",
         "parameters": [
           {
+            "name": "newState",
             "type": "string",
             "enum": ["active"]
           }
@@ -2472,56 +2502,65 @@
     "events": []
   },
   {
-    "namespace": "experimental.contextMenu",
+    "namespace": "contextMenus",
     "types": [],
     "functions": [
       {
         "name": "create",
         "type": "function",
-        "description": "An API to add items to context menus.",        
+        "description": "Creates a new context menu item. Note that if an error occurs during creation, you may not find out until the creation callback fires (the details will be in chrome.extension.lastError).",
+        "returns": {
+          "type": "integer",
+          "description": "The id of the newly created item."
+        },
         "parameters": [
           {
             "type": "object",
-            "name": "createProperties", 
+            "name": "createProperties",
             "properties": {
               "type": {
                 "type": "string",
                 "optional": true,
-                "description": "The type of menu item - one of 'NORMAL', 'CHECKBOX', 'RADIO', or 'SEPARATOR'. Defaults to 'NORMAL' if not specified."
+                "description": "The type of menu item - one of 'normal', 'checkbox', 'radio', or 'separator'. Defaults to 'normal' if not specified."
               },
               "title": {
                 "type": "string",
                 "optional": "true",
-                "description": "This must be specified unless type is 'SEPARATOR'."
+                "description": "This must be specified unless type is 'separator'."
               },
               "checked": {
                 "type": "boolean",
                 "optional": true,
-                "description": " For items of type CHECKBOX or RADIO, should this be selected (RADIO) or checked (CHECKBOX)? Only one RADIO item can be selected at a time in a given group of RADIO items, with the last one to have checked == true winning."
+                "description": "This only applies to the initial state of a checkbox or radio item. It indicates if the item should initially be checked/selected. Only one radio item can be selected at a time in a given group of radio items."
               },
               "contexts": {
                 "type": "array",
                 "items": {"type": "string"},
                 "minItems": 1,
                 "optional": true,
-                "description": "List of contexts this menu item will appear in. Legal values are: 'ALL', 'PAGE', 'SELECTION', 'LINK', 'EDITABLE', 'IMAGE', 'VIDEO', and 'AUDIO'. Defaults to ['PAGE']."
-              },
-              "enabledContexts": {
-                "type": "array",
-                "optional": true,
-                "items": {"type": "string"},
-                "minItems": 1,
-                "description": "By default the values you pass for the contexts parameter make an item both shown and selectable in those contexts. If you want to limit the contexts where an item is selectable (i.e. not greyed out), you put the ones you want selectable in enabledContexts and any not listed will be shown but disabled. So, for example, if you wanted an item to appear for links and images but only be enabled for links, you would set 'contexts' : ['LINK', 'IMAGE'] and 'enabledContexts' : ['LINK']."
+                "description": "List of contexts this menu item will appear in. Legal values are: 'all', 'page', 'selection', 'link', 'editable', 'image', 'video', and 'audio'. Defaults to ['page']."
               },
               "onclick": {
                 "type": "function",
                 "optional": true,
-                "description": "Function to be called back when your menu item or one of its children is clicked."
-              }, 
+                "description": "Function to be called back when your menu item is clicked."
+              },
               "parentId": {
                 "type": "integer",
                 "optional": true,
                 "description": "The id of a parent menu item - this makes the item a child of a previously added item."
+              },
+              "documentUrlPatterns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "optional": true,
+                "description": "Lets you restrict the item to only apply to documents whose URL matches one of the given patterns. (This applies to frames as well). For details on the format of a pattern, see <a href='match_patterns.html'>Match Patterns</a>."
+              },
+              "targetUrlPatterns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "optional": true,
+                "description": "Similar to documentUrlPatterns, but this lets you filter based on the src attribute of img/audio/video tags and the href of anchor tags."
               }
             }
           },
@@ -2529,13 +2568,71 @@
             "type": "function",
             "name": "callback",
             "optional": true,
-            "parameters": [
-              {
-                "name": "menuItemId",
+            "description": "Called when the item has been created in the browser. If there were any problems creating the item, details will be avilable in chrome.extension.lastError.",
+            "parameters": []
+          }
+        ]
+      },
+      {
+        "name": "update",
+        "type": "function",
+        "description": "Update a previously created context menu item.",
+        "parameters": [
+          {
+            "type": "integer",
+            "name": "id",
+            "description": "The id of the item to update."
+          },
+          {
+            "type": "object",
+            "name": "updateProperties",
+            "description": "The properties to update. Accepts the same values as the create function.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "optional": true
+              },
+              "title": {
+                "type": "string",
+                "optional": "true"
+              },
+              "checked": {
+                "type": "boolean",
+                "optional": true
+              },
+              "contexts": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "optional": true
+              },
+              "onclick": {
+                "type": "function",
+                "optional": true
+              },
+              "parentId": {
                 "type": "integer",
-                "description": "The id of the newly created context menu item."
+                "optional": true,
+                "description": "Note: you cannot change an item to be a child of one of it's own descendants."
+              },
+              "documentUrlPatterns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "optional": true
+              },
+              "targetUrlPatterns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "optional": true
               }
-            ]
+            }
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "parameters": [],
+            "description": "Called when the context menu has been updated."
           }
         ]
       },
@@ -2557,8 +2654,22 @@
             "description": "Called when the context menu has been removed."
           }
         ]
+      },
+      {
+        "name": "removeAll",
+        "type": "function",
+        "description": "Remove all context menu items added by this extension.",
+        "parameters": [
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "parameters": [],
+            "description": "Called when removal is complete."
+          }
+        ]
       }
-    ]  
+    ]
   },
   {
     "namespace": "experimental.metrics",
@@ -2667,6 +2778,218 @@
     "events": []
   },
   {
+    "namespace": "cookies",
+    "types": [
+      {
+        "id": "Cookie",
+        "type": "object",
+        "description": "Represents information about an HTTP cookie.",
+        "properties": {
+          "name": {"type": "string", "description": "The name of the cookie."},
+          "value": {"type": "string", "description": "The value of the cookie."},
+          "domain": {"type": "string", "description": "The domain of the cookie (e.g. \"www.google.com\", \"example.com\")."},
+          "hostOnly": {"type": "boolean", "description": "True if the cookie is a host-only cookie (i.e. a request's host must exactly match the domain of the cookie)."},
+          "path": {"type": "string", "description": "The path of the cookie."},
+          "secure": {"type": "boolean", "description": "True if the cookie is marked as Secure (i.e. its scope is limited to secure channels, typically HTTPS)."},
+          "httpOnly": {"type": "boolean", "description": "True if the cookie is marked as HttpOnly (i.e. the cookie is inaccessible to client-side scripts)."},
+          "session": {"type": "boolean", "description": "True if the cookie is a session cookie, as opposed to a persistent cookie with an expiration date."},
+          "expirationDate": {"type": "number", "optional": true, "description": "The expiration date of the cookie as the number of seconds since the UNIX epoch. Not provided for session cookies."},
+          "storeId": {"type": "string", "description": "The ID of the cookie store containing this cookie, as provided in getAllCookieStores()."}
+        }
+      },
+      {
+        "id": "CookieStore",
+        "type": "object",
+        "description": "Represents a cookie store in the browser. An incognito mode window, for instance, uses a separate cookie store from a non-incognito window.",
+        "properties": {
+          "id": {"type": "string", "description": "The unique identifier for the cookie store."},
+          "tabIds": {"type": "array", "items": {"type": "integer"}, "description": "Identifiers of all the browser tabs that share this cookie store."}
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "get",
+        "type": "function",
+        "description": "Retrieves information about a single cookie. If more than one cookie of the same name exists for the given URL, the one with the longest domain property will be returned. For cookies with the same domain property length, the one with the longest path length will be returned. If domains and paths are equal, then the cookie with the earliest creation time will be returned.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "description": "Details to identify the cookie being retrieved.",
+            "properties": {
+              "url": {"type": "string", "description": "The URL with which the cookie to retrieve is associated. This argument may be a full URL, in which case any data following the URL path (e.g. the query string) is simply ignored. If host permissions for this URL are not specified in the manifest file, the API call will fail."},
+              "name": {"type": "string", "description": "The name of the cookie to retrieve."},
+              "storeId": {"type": "string", "optional": true, "description": "The ID of the cookie store in which to look for the cookie. By default, the current execution context's cookie store will be used."}
+            }
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "parameters": [
+              {
+                "name": "cookie", "$ref": "Cookie", "optional": true, "description": "Contains details about the cookie. This parameter is null if no such cookie was found."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getAll",
+        "type": "function",
+        "description": "Retrieves all cookies from a single cookie store that match the given information.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "description": "Information to filter the cookies being retrieved.",
+            "properties": {
+              "url": {"type": "string", "optional": true, "description": "Restricts the retrieved cookies to those that would match the given URL."},
+              "name": {"type": "string", "optional": true, "description": "Filters the cookies by name."},
+              "domain": {"type": "string", "optional": true, "description": "Restricts the retrieved cookies to those whose domains match or are subdomains of this one."},
+              "path": {"type": "string", "optional": true, "description": "Restricts the retrieved cookies to those whose path exactly matches this string."},
+              "secure": {"type": "boolean", "optional": true, "description": "Filters the cookies by their Secure property."},
+              "session": {"type": "boolean", "optional": true, "description": "Filters out session vs. persistent cookies."},
+              "storeId": {"type": "string", "optional": true, "description": "The cookie store to retrieve cookies from. If omitted, the current execution context's cookie store will be used."}
+            }
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "parameters": [
+              {
+                "name": "cookies", "type": "array", "items": {"$ref": "Cookie"}, "description": "All the existing, unexpired cookies that match the given cookie info."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "set",
+        "type": "function",
+        "description": "Sets a cookie with the given cookie data; may overwrite equivalent cookies if they exist.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "description": "Details about the cookie being set.",
+            "properties": {
+              "url": {"type": "string", "description": "The request-URI to associate with the setting of the cookie. This value can affect the default domain and path values of the created cookie. If host permissions for this URL are not specified in the manifest file, the API call will fail."},
+              "name": {"type": "string", "optional": true, "description": "The name of the cookie. Empty by default if omitted."},
+              "value": {"type": "string", "optional": true, "description": "The value of the cookie. Empty by default if omitted."},
+              "domain": {"type": "string", "optional": true, "description": "The domain of the cookie. If omitted, the cookie becomes a host-only cookie."},
+              "path": {"type": "string", "optional": true, "description": "The path of the cookie. Defaults to the path portion of the url parameter."},
+              "secure": {"type": "boolean", "optional": true, "description": "Whether the cookie should be marked as Secure. Defaults to false."},
+              "httpOnly": {"type": "boolean", "optional": true, "description": "Whether the cookie should be marked as HttpOnly. Defaults to false."},
+              "expirationDate": {"type": "number", "optional": true, "description": "The expiration date of the cookie as the number of seconds since the UNIX epoch. If omitted, the cookie becomes a session cookie."},
+              "storeId": {"type": "string", "optional": true, "description": "The ID of the cookie store in which to set the cookie. By default, the cookie is set in the current execution context's cookie store."}
+            }
+          }
+        ]
+      },
+      {
+        "name": "remove",
+        "type": "function",
+        "description": "Deletes a cookie by name.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "description": "Information to identify the cookie to remove.",
+            "properties": {
+              "url": {"type": "string", "description": "The URL associated with the cookie. If host permissions for this URL are not specified in the manifest file, the API call will fail."},
+              "name": {"type": "string", "description": "The name of the cookie to remove."},
+              "storeId": {"type": "string", "optional": true, "description": "The ID of the cookie store to look in for the cookie. If unspecified, the cookie is looked for by default in the current execution context's cookie store."}
+            }
+          }
+        ]
+      },
+      {
+        "name": "getAllCookieStores",
+        "type": "function",
+        "description": "Lists all existing cookie stores.",
+        "parameters": [
+          {
+            "type": "function",
+            "name": "callback",
+            "parameters": [
+              {
+                "name": "cookieStores", "type": "array", "items": {"$ref": "CookieStore"}, "description": "All the existing cookie stores."
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "onChanged",
+        "type": "function",
+        "description": "Fired when a cookie is set or removed.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "changeInfo",
+            "properties": {
+              "removed": {"type": "boolean", "description": "True if a cookie was removed."},
+              "cookie": {"$ref": "Cookie", "description": "Information about the cookie that was set or removed."}
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "namespace": "experimental.rlz",
+    "nodoc": true,
+    "types": [],
+    "functions": [
+      {
+        "name": "recordProductEvent",
+        "type": "function",
+        "description": "Records an RLZ event for a given product's access point.",
+        "parameters": [
+          {"name": "product", "type": "string", "minLength": 1, "maxLength": 1},
+          {"name": "accessPoint", "type": "string", "minLength": 1, "maxLength": 2},
+          {"name": "event", "type": "string", "enum": ["install", "set-to-google", "first-search", "activate"]}
+        ]
+      },
+      {
+        "name": "getAccessPointRlz",
+        "type": "function",
+        "description": "Gets the RLZ string to be used when accessing a Google property through the given access point.",
+        "parameters": [
+          {"name": "accessPoint", "type": "string", "minLength": 1, "maxLength": 2},
+          {"name": "callback", "type": "function", "parameters": [{"name": "rlz", "type": "string"}]}
+        ]
+      },
+      {
+        "name": "sendFinancialPing",
+        "type": "function",
+        "description": "Sends Google promotional information about this extension.",
+        "parameters": [
+          {"name": "product", "type": "string", "minLength": 1, "maxLength": 1},
+          {"name": "accessPoints", "type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2}, "minItems": 1},
+          {"name": "signature", "type": "string"},
+          {"name": "brand", "type": "string"},
+          {"name": "id", "type": "string"},
+          {"name": "lang", "type": "string"},
+          {"name": "exclude_machine_id", "type": "boolean"}
+        ]
+      },
+      {
+        "name": "clearProductState",
+        "type": "function",
+        "description": "Clears all product-specific RLZ state from the machine, as well as clearing all events for the specified access points.",
+        "parameters": [
+          {"name": "product", "type": "string", "minLength": 1, "maxLength": 1},
+          {"name": "accessPoints", "type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2}, "minItems": 1}
+        ]
+      }
+    ],
+    "events": []
+  },
+  {
     "namespace": "test",
     "nodoc": true,
     "types": [],
@@ -2710,7 +3033,24 @@
         ]
       }
     ],
-    "events": []
+    "events": [
+      {
+        "name": "onMessage",
+        "type": "function",
+        "unprivileged": true,
+        "description": "Used to test sending messages to extensions.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "info",
+            "properties": {
+              "data": { "type": "string", "description": "Additional information." },
+              "lastMessage": { "type": "boolean", "description": "True if this was the last message for this test" }
+            }
+          }
+        ]
+      }
+    ]
   },
   {
     "namespace": "experimental.clipboard",
@@ -2745,5 +3085,136 @@
       }
     ],
     "events": []
+  },
+  {
+    "namespace": "experimental.omnibox",
+    "types": [
+      {
+        "id": "SuggestResult",
+        "type": "object",
+        "description": "A suggest result.",
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The text that is put into the URL bar, and that is sent to the extension when the user chooses this entry."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The text that is displayed in the URL dropdown. Can optionally be stylized by the descriptionStyles parameter."
+          },
+          "descriptionStyles": {
+            "type": "array",
+            "optional": true,
+            "items": {
+              "type": "object",
+              "description": "A style object, created using styleNone, styleUrl, styleMatch, or styleDim. A style applies to the region of text starting at the style's offset, until either the next style or the end of the description.",
+              "properties": {
+                "type": {"type": "string", "enum": ["none", "url", "match", "dim"]},
+                "offset": {"type": "integer"}
+              }
+            }
+          }
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "sendSuggestions",
+        "nodoc": true,
+        "type": "function",
+        "description": "A callback passed to the onInputChanged event used for sending suggestions back to the browser.",
+        "parameters": [
+          {"type": "integer", "name": "requestId"},
+          {
+            "type": "array",
+            "description": "Array of suggest results",
+            "items": {
+              "$ref": "SuggestResult"
+            }
+          }
+        ]
+      },
+      {
+        "name": "styleNone",
+        "type": "function",
+        "description": "Constructor for the descriptionStyles parameter of the suggest callback.",
+        "parameters": [ {"type": "integer", "name": "offset", "minimum": 0} ]
+      },
+      {
+        "name": "styleUrl",
+        "type": "function",
+        "description": "Constructor for the descriptionStyles parameter of the suggest callback. This style designates a region of text matching a URL or filename.",
+        "parameters": [ {"type": "integer", "name": "offset", "minimum": 0} ]
+      },
+      {
+        "name": "styleMatch",
+        "type": "function",
+        "description": "Constructor for the descriptionStyles parameter of the suggest callback. This style designates a region of text matching what the user typed.",
+        "parameters": [ {"type": "integer", "name": "offset", "minimum": 0} ]
+      },
+      {
+        "name": "styleDim",
+        "type": "function",
+        "description": "Constructor for the descriptionStyles parameter of the suggest callback. This style designates a region of dim helper text.",
+        "parameters": [ {"type": "integer", "name": "offset", "minimum": 0} ]
+      }
+    ],
+    "events": [
+      {
+        "name": "onInputStarted",
+        "perExtensionEvent": true,
+        "type": "function",
+        "description": "User has started a keyword input session by typing the extension's keyword. This is guaranteed to be sent exactly once per input session, and before any onInputChanged events.",
+        "parameters": []
+      },
+      {
+        "name": "onInputChanged",
+        "perExtensionEvent": true,
+        "type": "function",
+        "description": "User has changed what is typed into the omnibox.",
+        "parameters": [
+          {
+            "type": "string",
+            "name": "text"
+          },
+          {
+            "name": "suggest",
+            "type": "function",
+            "description": "A callback passed to the onInputChanged event used for sending suggestions back to the browser.",
+            "parameters": [
+              {"type": "integer", "name": "requestId"},
+              {
+                "type": "array",
+                "description": "Array of suggest results",
+                "items": {
+                  "$ref": "SuggestResult"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "onInputEntered",
+        "perExtensionEvent": true,
+        "type": "function",
+        "description": "User has accepted what is typed into the omnibox.",
+        "parameters": [
+          {
+            "type": "string",
+            "name": "text"
+          }
+        ]
+      },
+      {
+        "name": "onInputCancelled",
+        "perExtensionEvent": true,
+        "type": "function",
+        "description": "User has ended the keyword input session without accepting the input.",
+        "parameters": []
+      }
+    ]
   }
 ]

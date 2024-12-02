@@ -9,12 +9,6 @@
 #include <map>
 #include <vector>
 
-#if defined(USE_SYSTEM_SQLITE)
-#include <sqlite3.h>
-#else
-#include "third_party/sqlite/preprocessed/sqlite3.h"
-#endif
-
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -50,17 +44,21 @@
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/external_extension.h"
+#include "chrome/renderer/indexed_db_dispatcher.h"
 #include "chrome/renderer/loadtimes_extension_bindings.h"
-#include "chrome/renderer/net/render_dns_master.h"
+#include "chrome/renderer/net/renderer_net_predictor.h"
 #include "chrome/renderer/plugin_channel_host.h"
 #include "chrome/renderer/render_process_impl.h"
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/render_view_visitor.h"
+#include "chrome/renderer/renderer_webindexeddatabase_impl.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "chrome/renderer/user_script_slave.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_platform_file.h"
+#include "net/base/net_util.h"
+#include "third_party/sqlite/preprocessed/sqlite3.h"
 #include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebColor.h"
@@ -110,6 +108,8 @@ static const double kInitialIdleHandlerDelayS = 1.0 /* seconds */;
 static const double kInitialExtensionIdleHandlerDelayS = 5.0 /* seconds */;
 static const int64 kMaxExtensionIdleHandlerDelayS = 5*60 /* seconds */;
 
+// Keep the global RenderThread in a TLS slot so it is impossible to access
+// incorrectly from the wrong thread.
 static base::LazyInstance<base::ThreadLocalPointer<RenderThread> > lazy_tls(
     base::LINKER_INITIALIZED);
 
@@ -171,14 +171,14 @@ class RenderViewContentSettingsSetter : public RenderViewVisitor {
 
 class RenderViewZoomer : public RenderViewVisitor {
  public:
-  RenderViewZoomer(const std::string& host, int zoom_level)
-      : host_(host),
-        zoom_level_(zoom_level) {
+  RenderViewZoomer(const GURL& url, int zoom_level)
+      : zoom_level_(zoom_level) {
+    host_ = net::GetHostOrSpecFromURL(url);
   }
 
   virtual bool Visit(RenderView* render_view) {
     WebView* webview = render_view->webview();  // Guaranteed non-NULL.
-    if (GURL(webview->mainFrame()->url()).host() == host_)
+    if (net::GetHostOrSpecFromURL(GURL(webview->mainFrame()->url())) == host_)
       webview->setZoomLevel(false, zoom_level_);
     return true;
   }
@@ -213,11 +213,12 @@ void RenderThread::Init() {
 
   std::string type_str = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
       switches::kProcessType);
-  is_extension_process_ = type_str == switches::kExtensionProcess;
+  // In single process the single process is all there is.
+  is_extension_process_ = type_str == switches::kExtensionProcess ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
   is_incognito_process_ = false;
   suspend_webkit_shared_timer_ = true;
   notify_webkit_of_modal_loop_ = true;
-  did_notify_webkit_of_modal_loop_ = false;
   plugin_refresh_allowed_ = true;
   cache_stats_task_pending_ = false;
   widget_count_ = 0;
@@ -228,9 +229,10 @@ void RenderThread::Init() {
 
   visited_link_slave_.reset(new VisitedLinkSlave());
   user_script_slave_.reset(new UserScriptSlave());
-  dns_master_.reset(new RenderDnsMaster());
+  renderer_net_predictor_.reset(new RendererNetPredictor());
   histogram_snapshots_.reset(new RendererHistogramSnapshots());
   appcache_dispatcher_.reset(new AppCacheDispatcher(this));
+  indexed_db_dispatcher_.reset(new IndexedDBDispatcher());
   spellchecker_.reset(new SpellCheck());
 
   devtools_agent_filter_ = new DevToolsAgentFilter();
@@ -246,6 +248,14 @@ void RenderThread::Init() {
   suicide_on_channel_error_filter_ = new SuicideOnChannelErrorFilter;
   AddFilter(suicide_on_channel_error_filter_.get());
 #endif
+
+  // Establish a channel to the GPU process asynchronously if requested. If the
+  // channel is established in time, EstablishGpuChannelSync will not block when
+  // it is later called.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kPrelaunchGpuProcess)) {
+    EstablishGpuChannel();
+  }
 }
 
 RenderThread::~RenderThread() {
@@ -338,12 +348,8 @@ bool RenderThread::Send(IPC::Message* msg) {
     if (suspend_webkit_shared_timer)
       webkit_client_->SuspendSharedTimer();
 
-    // WebKit does not like nested calls to willEnterModalLoop.
-    // TODO(darin): Fix WebKit to allow nesting.
-    if (notify_webkit_of_modal_loop && !did_notify_webkit_of_modal_loop_) {
+    if (notify_webkit_of_modal_loop)
       WebView::willEnterModalLoop();
-      did_notify_webkit_of_modal_loop_ = true;
-    }
 
     RenderWidget* widget =
         static_cast<RenderWidget*>(ResolveRoute(msg->routing_id()));
@@ -362,10 +368,8 @@ bool RenderThread::Send(IPC::Message* msg) {
           new PluginMsg_ResetModalDialogEvent(host_window));
     }
 
-    if (notify_webkit_of_modal_loop && did_notify_webkit_of_modal_loop_) {
+    if (notify_webkit_of_modal_loop)
       WebView::didExitModalLoop();
-      did_notify_webkit_of_modal_loop_ = false;
-    }
 
     if (suspend_webkit_shared_timer)
       webkit_client_->ResumeSharedTimer();
@@ -405,7 +409,7 @@ void RenderThread::RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) {
 void RenderThread::WidgetHidden() {
   DCHECK(hidden_widget_count_ < widget_count_);
   hidden_widget_count_++;
-  if (!is_extension_process() &&
+  if (!is_extension_process_ &&
       widget_count_ && hidden_widget_count_ == widget_count_)
     ScheduleIdleHandler(kInitialIdleHandlerDelayS);
 }
@@ -413,7 +417,7 @@ void RenderThread::WidgetHidden() {
 void RenderThread::WidgetRestored() {
   DCHECK_GT(hidden_widget_count_, 0);
   hidden_widget_count_--;
-  if (!is_extension_process())
+  if (!is_extension_process_)
     idle_timer_.Stop();
 }
 
@@ -426,7 +430,7 @@ void RenderThread::DoNotNotifyWebKitOfModalLoop() {
 }
 
 void RenderThread::Resolve(const char* name, size_t length) {
-  return dns_master_->Resolve(name, length);
+  return renderer_net_predictor_->Resolve(name, length);
 }
 
 void RenderThread::SendHistograms(int sequence_number) {
@@ -455,9 +459,9 @@ void RenderThread::OnSetContentSettingsForCurrentURL(
   RenderView::ForEach(&setter);
 }
 
-void RenderThread::OnSetZoomLevelForCurrentHost(const std::string& host,
-                                                int zoom_level) {
-  RenderViewZoomer zoomer(host, zoom_level);
+void RenderThread::OnSetZoomLevelForCurrentURL(const GURL& url,
+                                               int zoom_level) {
+  RenderViewZoomer zoomer(url, zoom_level);
   RenderView::ForEach(&zoomer);
 }
 
@@ -470,6 +474,17 @@ void RenderThread::OnUpdateUserScripts(base::SharedMemoryHandle scripts) {
 void RenderThread::OnSetExtensionFunctionNames(
     const std::vector<std::string>& names) {
   ExtensionProcessBindings::SetFunctionNames(names);
+}
+
+void RenderThread::OnExtensionExtentsUpdated(
+    const ViewMsg_ExtensionExtentsUpdated_Params& params) {
+  extension_extents_.resize(params.extension_apps.size());
+  for (size_t i = 0; i < params.extension_apps.size(); ++i) {
+    extension_extents_[i].extension_id = params.extension_apps[i].extension_id;
+    extension_extents_[i].web_extent = params.extension_apps[i].web_extent;
+    extension_extents_[i].browse_extent =
+        params.extension_apps[i].browse_extent;
+  }
 }
 
 void RenderThread::OnPageActionsUpdated(
@@ -510,8 +525,10 @@ void RenderThread::OnDOMStorageEvent(
 }
 
 void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
-  // App cache messages are handled by a delegate.
+  // Some messages are handled by delegates.
   if (appcache_dispatcher_->OnMessageReceived(msg))
+    return;
+  if (indexed_db_dispatcher_->OnMessageReceived(msg))
     return;
 
   IPC_BEGIN_MESSAGE_MAP(RenderThread, msg)
@@ -520,8 +537,8 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewMsg_VisitedLink_Reset, OnResetVisitedLinks)
     IPC_MESSAGE_HANDLER(ViewMsg_SetContentSettingsForCurrentURL,
                         OnSetContentSettingsForCurrentURL)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetZoomLevelForCurrentHost,
-                        OnSetZoomLevelForCurrentHost)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetZoomLevelForCurrentURL,
+                        OnSetZoomLevelForCurrentURL)
     IPC_MESSAGE_HANDLER(ViewMsg_SetIsIncognitoProcess, OnSetIsIncognitoProcess)
     IPC_MESSAGE_HANDLER(ViewMsg_SetNextPageID, OnSetNextPageID)
     IPC_MESSAGE_HANDLER(ViewMsg_SetCSSColors, OnSetCSSColors)
@@ -546,6 +563,8 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnExtensionMessageInvoke)
     IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetFunctionNames,
                         OnSetExtensionFunctionNames)
+    IPC_MESSAGE_HANDLER(ViewMsg_ExtensionExtentsUpdated,
+                        OnExtensionExtentsUpdated)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgeMemory, OnPurgeMemory)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgePluginListCache,
                         OnPurgePluginListCache)
@@ -604,9 +623,15 @@ void RenderThread::OnCreateNewView(const ViewMsg_New_Params& params) {
   EnsureWebKitInitialized();
   // When bringing in render_view, also bring in webkit's glue and jsbindings.
   RenderView::Create(
-      this, params.parent_window, MSG_ROUTING_NONE, params.renderer_preferences,
-      params.web_preferences, new SharedRenderViewCounter(0), params.view_id,
-      params.session_storage_namespace_id);
+      this,
+      params.parent_window,
+      MSG_ROUTING_NONE,
+      params.renderer_preferences,
+      params.web_preferences,
+      new SharedRenderViewCounter(0),
+      params.view_id,
+      params.session_storage_namespace_id,
+      params.frame_name);
 }
 
 void RenderThread::OnSetCacheCapacities(size_t min_dead_capacity,
@@ -674,6 +699,11 @@ void RenderThread::SetCacheMode(bool enabled) {
   Send(new ViewHostMsg_SetCacheMode(enabled));
 }
 
+void RenderThread::ClearCache() {
+  int rv;
+  Send(new ViewHostMsg_ClearCache(&rv));
+}
+
 void RenderThread::UpdateActiveExtensions() {
   // In single-process mode, the browser process reports the active extensions.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
@@ -706,19 +736,9 @@ void RenderThread::EstablishGpuChannel() {
 }
 
 GpuChannelHost* RenderThread::EstablishGpuChannelSync() {
-  // We may need to retry the connection establishment if an existing
-  // connection has gone bad, which will not be detected in
-  // EstablishGpuChannel since we do not send duplicate
-  // ViewHostMsg_EstablishGpuChannel messages -- doing so breaks the
-  // preexisting connection in bad ways.
-  bool retry = true;
-  for (int i = 0; i < 2 && retry; ++i) {
-    EstablishGpuChannel();
-    retry = !Send(new ViewHostMsg_SynchronizeGpu());
-  }
-  // TODO(kbr): the GPU channel is still in the unconnected state at this point.
-  // Need to figure out whether it is really safe to return it.
-  return gpu_channel_.get();
+  EstablishGpuChannel();
+  Send(new ViewHostMsg_SynchronizeGpu());
+  return GetGpuChannel();
 }
 
 GpuChannelHost* RenderThread::GetGpuChannel() {
@@ -755,7 +775,7 @@ void RenderThread::EnsureWebKitInitialized() {
 
   // For extensions, we want to ensure we call the IdleHandler every so often,
   // even if the extension keeps up activity.
-  if (is_extension_process()) {
+  if (is_extension_process_) {
     forced_idle_timer_.Start(
         base::TimeDelta::FromSeconds(kMaxExtensionIdleHandlerDelayS),
         this, &RenderThread::IdleHandler);
@@ -777,14 +797,9 @@ void RenderThread::EnsureWebKitInitialized() {
   WebSecurityPolicy::registerURLSchemeAsLocal(chrome_ui_scheme);
   WebSecurityPolicy::registerURLSchemeAsNoAccess(chrome_ui_scheme);
 
-  // chrome-extension: resources shouldn't trigger mixed content warnings.
+  // chrome-extension: resources shouldn't trigger insecure content warnings.
   WebString extension_scheme(ASCIIToUTF16(chrome::kExtensionScheme));
   WebSecurityPolicy::registerURLSchemeAsSecure(extension_scheme);
-
-  // print: pages should be not accessible by normal context.
-  WebString print_ui_scheme(ASCIIToUTF16(chrome::kPrintScheme));
-  WebSecurityPolicy::registerURLSchemeAsLocal(print_ui_scheme);
-  WebSecurityPolicy::registerURLSchemeAsNoAccess(print_ui_scheme);
 
 #if defined(OS_WIN)
   // We don't yet support Gears on non-Windows, so don't tell pages that we do.
@@ -875,6 +890,9 @@ void RenderThread::EnsureWebKitInitialized() {
       command_line.HasSwitch(switches::kEnableExperimentalWebGL));
 
   WebRuntimeFeatures::enablePushState(true);
+
+  WebRuntimeFeatures::enableTouch(
+      command_line.HasSwitch(switches::kEnableTouch));
 }
 
 void RenderThread::IdleHandler() {
@@ -882,7 +900,6 @@ void RenderThread::IdleHandler() {
   MallocExtension::instance()->ReleaseFreeMemory();
 #endif
 
-  LOG(INFO) << "RenderThread calling v8 IdleNotification for " << this;
   v8::V8::IdleNotification();
 
   // Schedule next invocation.
@@ -894,7 +911,7 @@ void RenderThread::IdleHandler() {
   // kInitialIdleHandlerDelayS in RenderThread::WidgetHidden.
   ScheduleIdleHandler(idle_notification_delay_in_s_ +
                       1.0 / (idle_notification_delay_in_s_ + 2.0));
-  if (is_extension_process()) {
+  if (is_extension_process_) {
     // Dampen the forced delay as well if the extension stays idle for long
     // periods of time.
     int64 forced_delay_s =
@@ -917,12 +934,14 @@ void RenderThread::ScheduleIdleHandler(double initial_delay_s) {
 
 void RenderThread::OnExtensionMessageInvoke(const std::string& function_name,
                                             const ListValue& args,
-                                            bool requires_incognito_access) {
-  RendererExtensionBindings::Invoke(function_name, args, NULL, requires_incognito_access);
+                                            bool requires_incognito_access,
+                                            const GURL& event_url) {
+  RendererExtensionBindings::Invoke(
+      function_name, args, NULL, requires_incognito_access, event_url);
 
   // Reset the idle handler each time there's any activity like event or message
   // dispatch, for which Invoke is the chokepoint.
-  if (is_extension_process())
+  if (is_extension_process_)
     ScheduleIdleHandler(kInitialExtensionIdleHandlerDelayS);
 }
 
@@ -1007,4 +1026,25 @@ void RenderThread::OnGpuChannelEstablished(
     // Otherwise cancel the connection.
     gpu_channel_ = NULL;
   }
+}
+
+std::string RenderThread::GetExtensionIdByURL(const GURL& url) {
+  if (url.SchemeIs(chrome::kExtensionScheme))
+    return url.host();
+
+  for (size_t i = 0; i < extension_extents_.size(); ++i) {
+    if (extension_extents_[i].web_extent.ContainsURL(url))
+      return extension_extents_[i].extension_id;
+  }
+
+  return std::string();
+}
+
+std::string RenderThread::GetExtensionIdByBrowseExtent(const GURL& url) {
+  for (size_t i = 0; i < extension_extents_.size(); ++i) {
+    if (extension_extents_[i].browse_extent.ContainsURL(url))
+      return extension_extents_[i].extension_id;
+  }
+
+  return std::string();
 }

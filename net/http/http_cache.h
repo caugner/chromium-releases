@@ -16,15 +16,19 @@
 
 #include <list>
 #include <set>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/hash_tables.h"
+#include "base/message_loop_proxy.h"
+#include "base/non_thread_safe.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "base/weak_ptr.h"
 #include "net/base/cache_type.h"
 #include "net/base/completion_callback.h"
+#include "net/base/load_states.h"
 #include "net/http/http_transaction_factory.h"
 
 class GURL;
@@ -38,16 +42,19 @@ namespace net {
 
 class HostResolver;
 class HttpAuthHandlerFactory;
+class HttpNetworkDelegate;
 class HttpNetworkSession;
-class HttpRequestInfo;
+struct HttpRequestInfo;
 class HttpResponseInfo;
 class IOBuffer;
-class NetworkChangeNotifier;
+class NetLog;
 class ProxyService;
 class SSLConfigService;
+class ViewCacheHelper;
 
 class HttpCache : public HttpTransactionFactory,
-                  public base::SupportsWeakPtr<HttpCache> {
+                  public base::SupportsWeakPtr<HttpCache>,
+                  public NonThreadSafe {
  public:
   ~HttpCache();
 
@@ -65,70 +72,88 @@ class HttpCache : public HttpTransactionFactory,
     DISABLE
   };
 
-  // Initialize the cache from the directory where its data is stored. The
-  // disk cache is initialized lazily (by CreateTransaction) in this case. If
-  // |cache_size| is zero, a default value will be calculated automatically.
-  HttpCache(NetworkChangeNotifier* network_change_notifier,
-            HostResolver* host_resolver,
+  // A BackendFactory creates a backend object to be used by the HttpCache.
+  class BackendFactory {
+   public:
+    virtual ~BackendFactory() {}
+
+    // The actual method to build the backend. Returns a net error code. If
+    // ERR_IO_PENDING is returned, the |callback| will be notified when the
+    // operation completes, and |backend| must remain valid until the
+    // notification arrives.
+    // The implementation must not access the factory object after invoking the
+    // |callback| because the object can be deleted from within the callback.
+    virtual int CreateBackend(disk_cache::Backend** backend,
+                              CompletionCallback* callback) = 0;
+  };
+
+  // A default backend factory for the common use cases.
+  class DefaultBackend : public BackendFactory {
+   public:
+    // |path| is the destination for any files used by the backend, and
+    // |cache_thread| is the thread where disk operations should take place. If
+    // |max_bytes| is  zero, a default value will be calculated automatically.
+    DefaultBackend(CacheType type, const FilePath& path, int max_bytes,
+                   base::MessageLoopProxy* thread)
+        : type_(type), path_(path), max_bytes_(max_bytes), thread_(thread) {}
+
+    // Returns a factory for an in-memory cache.
+    static BackendFactory* InMemory(int max_bytes)  {
+      return new DefaultBackend(MEMORY_CACHE, FilePath(), max_bytes, NULL);
+    }
+
+    // BackendFactory implementation.
+    virtual int CreateBackend(disk_cache::Backend** backend,
+                              CompletionCallback* callback);
+
+   private:
+    CacheType type_;
+    const FilePath path_;
+    int max_bytes_;
+    scoped_refptr<base::MessageLoopProxy> thread_;
+  };
+
+  // The disk cache is initialized lazily (by CreateTransaction) in this case.
+  // The  HttpCache takes ownership of the |backend_factory|.
+  HttpCache(HostResolver* host_resolver,
             ProxyService* proxy_service,
             SSLConfigService* ssl_config_service,
             HttpAuthHandlerFactory* http_auth_handler_factory,
-            const FilePath& cache_dir,
-            int cache_size);
+            HttpNetworkDelegate* network_delegate,
+            NetLog* net_log,
+            BackendFactory* backend_factory);
 
-  // Initialize the cache from the directory where its data is stored. The
-  // disk cache is initialized lazily (by CreateTransaction) in  this case. If
-  // |cache_size| is zero, a default value will be calculated automatically.
+  // The disk cache is initialized lazily (by CreateTransaction) in  this case.
   // Provide an existing HttpNetworkSession, the cache can construct a
   // network layer with a shared HttpNetworkSession in order for multiple
-  // network layers to share information (e.g. authenication data).
-  HttpCache(HttpNetworkSession* session, const FilePath& cache_dir,
-            int cache_size);
-
-  // Initialize using an in-memory cache. The cache is initialized lazily
-  // (by CreateTransaction) in this case. If |cache_size| is zero, a default
-  // value will be calculated automatically.
-  HttpCache(NetworkChangeNotifier* network_change_notifier,
-            HostResolver* host_resolver,
-            ProxyService* proxy_service,
-            SSLConfigService* ssl_config_service,
-            HttpAuthHandlerFactory* http_auth_handler_factory,
-            int cache_size);
+  // network layers to share information (e.g. authenication data). The
+  // HttpCache takes ownership of the |backend_factory|.
+  HttpCache(HttpNetworkSession* session, BackendFactory* backend_factory);
 
   // Initialize the cache from its component parts, which is useful for
-  // testing.  The lifetime of the network_layer and disk_cache are managed by
-  // the HttpCache and will be destroyed using |delete| when the HttpCache is
+  // testing.  The lifetime of the network_layer and backend_factory are managed
+  // by the HttpCache and will be destroyed using |delete| when the HttpCache is
   // destroyed.
   HttpCache(HttpTransactionFactory* network_layer,
-            disk_cache::Backend* disk_cache);
+            BackendFactory* backend_factory);
 
   HttpTransactionFactory* network_layer() { return network_layer_.get(); }
 
-  // Returns the cache backend for this HttpCache instance. If the backend
-  // is not initialized yet, this method will initialize it. If the return
-  // value is NULL then the backend cannot be initialized.
-  disk_cache::Backend* GetBackend();
+  // Retrieves the cache backend for this HttpCache instance. If the backend
+  // is not initialized yet, this method will initialize it. The return value is
+  // a network error code, and it could be ERR_IO_PENDING, in which case the
+  // |callback| will be notified when the operation completes. The pointer that
+  // receives the |backend| must remain valid until the operation completes.
+  int GetBackend(disk_cache::Backend** backend, CompletionCallback* callback);
+
+  // Returns the current backend (can be NULL).
+  disk_cache::Backend* GetCurrentBackend();
 
   // HttpTransactionFactory implementation:
   virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans);
   virtual HttpCache* GetCache();
   virtual HttpNetworkSession* GetSession();
   virtual void Suspend(bool suspend);
-
-  // Helper function for reading response info from the disk cache.  If the
-  // cache doesn't have the whole resource *|request_truncated| is set to true.
-  // Avoid this function for performance critical paths as it uses blocking IO.
-  static bool ReadResponseInfo(disk_cache::Entry* disk_entry,
-                               HttpResponseInfo* response_info,
-                               bool* response_truncated);
-
-  // Helper function for writing response info into the disk cache.  If the
-  // cache doesn't have the whole resource |request_truncated| should be true.
-  // Avoid this function for performance critical paths as it uses blocking IO.
-  static bool WriteResponseInfo(disk_cache::Entry* disk_entry,
-                                const HttpResponseInfo* response_info,
-                                bool skip_transient_headers,
-                                bool response_truncated);
 
   // Given a header data blob, convert it to a response info object.
   static bool ParseResponseInfo(const char* data, int len,
@@ -146,9 +171,6 @@ class HttpCache : public HttpTransactionFactory,
   void set_mode(Mode value) { mode_ = value; }
   Mode mode() { return mode_; }
 
-  void set_type(CacheType type) { type_ = type; }
-  CacheType type() { return type_; }
-
   // Close currently active sockets so that fresh page loads will not use any
   // recycled connections.  For sockets currently in use, they may not close
   // immediately, but they will not be reusable. This is for debugging.
@@ -158,8 +180,19 @@ class HttpCache : public HttpTransactionFactory,
     enable_range_support_ = value;
   }
 
- private:
+ protected:
+  // Disk cache entry data indices.
+  enum {
+    kResponseInfoIndex = 0,
+    kResponseContentIndex,
+    kMetadataIndex,
 
+    // Must remain at the end of the enum.
+    kNumCacheEntryDataIndices
+  };
+  friend class ViewCacheHelper;
+
+ private:
   // Types --------------------------------------------------------------------
 
   class BackendCallback;
@@ -167,7 +200,7 @@ class HttpCache : public HttpTransactionFactory,
   class Transaction;
   class WorkItem;
   friend class Transaction;
-  struct NewEntry;  // Info for an entry under construction.
+  struct PendingOp;  // Info for an entry under construction.
 
   typedef std::list<Transaction*> TransactionList;
   typedef std::list<WorkItem*> WorkItemList;
@@ -185,11 +218,22 @@ class HttpCache : public HttpTransactionFactory,
   };
 
   typedef base::hash_map<std::string, ActiveEntry*> ActiveEntriesMap;
-  typedef base::hash_map<std::string, NewEntry*> NewEntriesMap;
+  typedef base::hash_map<std::string, PendingOp*> PendingOpsMap;
   typedef std::set<ActiveEntry*> ActiveEntriesSet;
 
-
   // Methods ------------------------------------------------------------------
+
+  // Creates the |backend| object and notifies the |callback| when the operation
+  // completes. Returns an error code.
+  int CreateBackend(disk_cache::Backend** backend,
+                    CompletionCallback* callback);
+
+  // Makes sure that the backend creation is complete before allowing the
+  // provided transaction to use the object. Returns an error code.  |trans|
+  // will be notified via its IO callback if this method returns ERR_IO_PENDING.
+  // The transaction is free to use the backend directly at any time after
+  // receiving the notification.
+  int GetBackendForTransaction(Transaction* trans);
 
   // Generates the cache key for this request.
   std::string GenerateCacheKey(const HttpRequestInfo*);
@@ -222,12 +266,12 @@ class HttpCache : public HttpTransactionFactory,
   // Deletes an ActiveEntry using an exhaustive search.
   void SlowDeactivateEntry(ActiveEntry* entry);
 
-  // Returns the NewEntry for the desired |key|. If an entry is not under
-  // construction already, a new NewEntry structure is created.
-  NewEntry* GetNewEntry(const std::string& key);
+  // Returns the PendingOp for the desired |key|. If an entry is not under
+  // construction already, a new PendingOp structure is created.
+  PendingOp* GetPendingOp(const std::string& key);
 
-  // Deletes a NewEntry.
-  void DeleteNewEntry(NewEntry* entry);
+  // Deletes a PendingOp.
+  void DeletePendingOp(PendingOp* pending_op);
 
   // Opens the disk cache entry associated with |key|, returning an ActiveEntry
   // in |*entry|. |trans| will be notified via its IO callback if this method
@@ -267,17 +311,20 @@ class HttpCache : public HttpTransactionFactory,
   // transactions can start reading from this entry.
   void ConvertWriterToReader(ActiveEntry* entry);
 
+  // Returns the LoadState of the provided pending transaction.
+  LoadState GetLoadStateForPendingTransaction(const Transaction* trans);
+
   // Removes the transaction |trans|, from the pending list of an entry
-  // (NewEntry, active or doomed entry).
+  // (PendingOp, active or doomed entry).
   void RemovePendingTransaction(Transaction* trans);
 
   // Removes the transaction |trans|, from the pending list of |entry|.
   bool RemovePendingTransactionFromEntry(ActiveEntry* entry,
                                          Transaction* trans);
 
-  // Removes the transaction |trans|, from the pending list of |entry|.
-  bool RemovePendingTransactionFromNewEntry(NewEntry* entry,
-                                            Transaction* trans);
+  // Removes the transaction |trans|, from the pending list of |pending_op|.
+  bool RemovePendingTransactionFromPendingOp(PendingOp* pending_op,
+                                             Transaction* trans);
 
   // Resumes processing the pending list of |entry|.
   void ProcessPendingQueue(ActiveEntry* entry);
@@ -289,16 +336,20 @@ class HttpCache : public HttpTransactionFactory,
   // Callbacks ----------------------------------------------------------------
 
   // Processes BackendCallback notifications.
-  void OnIOComplete(int result, NewEntry* entry);
+  void OnIOComplete(int result, PendingOp* entry);
+
+  // Processes the backend creation notification.
+  void OnBackendCreated(int result, PendingOp* pending_op);
 
 
   // Variables ----------------------------------------------------------------
 
   // Used when lazily constructing the disk_cache_.
-  FilePath disk_cache_dir_;
+  scoped_ptr<BackendFactory> backend_factory_;
+  disk_cache::Backend* temp_backend_;
+  bool building_backend_;
 
   Mode mode_;
-  CacheType type_;
 
   scoped_ptr<HttpTransactionFactory> network_layer_;
   scoped_ptr<disk_cache::Backend> disk_cache_;
@@ -310,12 +361,11 @@ class HttpCache : public HttpTransactionFactory,
   ActiveEntriesSet doomed_entries_;
 
   // The set of entries "under construction".
-  NewEntriesMap new_entries_;
+  PendingOpsMap pending_ops_;
 
   ScopedRunnableMethodFactory<HttpCache> task_factory_;
 
   bool enable_range_support_;
-  int cache_size_;
 
   typedef base::hash_map<std::string, int> PlaybackCacheMap;
   scoped_ptr<PlaybackCacheMap> playback_cache_map_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,12 @@ class TestTabStripDelegate : public TabStripModelDelegate {
   virtual bool CanBookmarkAllTabs() const { return false; }
 
   virtual void BookmarkAllTabs() {}
+
+  virtual bool UseVerticalTabs() const { return false; }
+
+  virtual void ToggleUseVerticalTabs() {}
+
+  virtual void SetToolbarVisibility(bool value) {}
 };
 
 class TabStripControllerTest : public CocoaTest {

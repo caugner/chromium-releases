@@ -8,10 +8,11 @@
 
 #include <set>
 
+#include "app/gtk_signal_registrar.h"
 #include "app/resource_bundle.h"
 #include "base/env_var.h"
-#include "base/linux_util.h"
 #include "base/stl_util-inl.h"
+#include "base/xdg_util.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/gtk/cairo_cached_surface.h"
@@ -91,10 +92,30 @@ const int kThemeImages[] = {
   IDR_THEME_FRAME_INCOGNITO_INACTIVE,
 };
 
+// A list of icons used in the autocomplete view that should be tinted to the
+// current gtk theme selection color so they stand out against the GtkEntry's
+// base color.
+const int kAutocompleteImages[] = {
+  IDR_OMNIBOX_HTTP,
+  IDR_OMNIBOX_HTTP_DARK,
+  IDR_OMNIBOX_HISTORY,
+  IDR_OMNIBOX_HISTORY_DARK,
+  IDR_OMNIBOX_SEARCH,
+  IDR_OMNIBOX_SEARCH_DARK,
+  IDR_OMNIBOX_MORE,
+  IDR_OMNIBOX_MORE_DARK,
+  IDR_OMNIBOX_STAR,
+  IDR_OMNIBOX_STAR_DARK,
+  IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON,
+  IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON
+};
+
 bool IsOverridableImage(int id) {
   static std::set<int> images;
   if (images.empty()) {
     images.insert(kThemeImages, kThemeImages + arraysize(kThemeImages));
+    images.insert(kAutocompleteImages,
+                  kAutocompleteImages + arraysize(kAutocompleteImages));
 
     const std::set<int>& buttons =
         BrowserThemeProvider::GetTintableToolbarButtons();
@@ -103,6 +124,108 @@ bool IsOverridableImage(int id) {
 
   return images.count(id) > 0;
 }
+
+// Picks a button tint from a set of background colors. While
+// |accent_gdk_color| will usually be the same color through a theme, this
+// function will get called with the normal GtkLabel |text_color|/GtkWindow
+// |background_color| pair and the GtkEntry |text_color|/|background_color|
+// pair. While 3/4 of the time the resulting tint will be the same, themes that
+// have a dark window background (with light text) and a light text entry (with
+// dark text) will get better icons with this separated out.
+void PickButtonTintFromColors(const GdkColor& accent_gdk_color,
+                              const GdkColor& text_color,
+                              const GdkColor& background_color,
+                              color_utils::HSL* tint) {
+  SkColor accent_color = GdkToSkColor(&accent_gdk_color);
+  color_utils::HSL accent_tint;
+  color_utils::SkColorToHSL(accent_color, &accent_tint);
+
+  color_utils::HSL text_tint;
+  color_utils::SkColorToHSL(GdkToSkColor(&text_color), &text_tint);
+
+  color_utils::HSL background_tint;
+  color_utils::SkColorToHSL(GdkToSkColor(&background_color), &background_tint);
+
+  // If the accent color is gray, then our normal HSL tomfoolery will bring out
+  // whatever color is oddly dominant (for example, in rgb space [125, 128,
+  // 125] will tint green instead of gray). Slight differences (+/-10 (4%) to
+  // all color components) should be interpreted as this color being gray and
+  // we should switch into a special grayscale mode.
+  int rb_diff = abs(SkColorGetR(accent_color) - SkColorGetB(accent_color));
+  int rg_diff = abs(SkColorGetR(accent_color) - SkColorGetG(accent_color));
+  int bg_diff = abs(SkColorGetB(accent_color) - SkColorGetG(accent_color));
+  if (rb_diff < 10 && rg_diff < 10 && bg_diff < 10) {
+    // Our accent is white/gray/black. Only the luminance of the accent color
+    // matters.
+    tint->h = -1;
+
+    // Use the saturation of the text.
+    tint->s = text_tint.s;
+
+    // Use the luminance of the accent color UNLESS there isn't enough
+    // luminance contrast between the accent color and the base color.
+    if (fabs(accent_tint.l - background_tint.l) > 0.3)
+      tint->l = accent_tint.l;
+    else
+      tint->l = text_tint.l;
+  } else {
+    // Our accent is a color.
+    tint->h = accent_tint.h;
+
+    // Don't modify the saturation; the amount of color doesn't matter.
+    tint->s = -1;
+
+    // If the text wants us to darken the icon, don't change the luminance (the
+    // icons are already dark enough). Otherwise, lighten the icon by no more
+    // than 0.9 since we don't want a pure-white icon even if the text is pure
+    // white.
+    if (text_tint.l < 0.5)
+      tint->l = -1;
+    else if (text_tint.l <= 0.9)
+      tint->l = text_tint.l;
+    else
+      tint->l = 0.9;
+  }
+}
+
+
+// Builds and tints the image with |id| to the GtkStateType |state| and
+// places the result in |icon_set|.
+void BuildIconFromIDRWithColor(int id,
+                               GtkStyle* style,
+                               GtkStateType state,
+                               GtkIconSet* icon_set) {
+  SkColor color = GdkToSkColor(&style->fg[state]);
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  SkBitmap original = *rb.GetBitmapNamed(id);
+
+  SkBitmap fill_color;
+  fill_color.setConfig(SkBitmap::kARGB_8888_Config,
+                       original.width(), original.height(), 0);
+  fill_color.allocPixels();
+  fill_color.eraseColor(color);
+  SkBitmap masked = SkBitmapOperations::CreateMaskedBitmap(
+      fill_color, original);
+
+  GtkIconSource* icon = gtk_icon_source_new();
+  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&masked);
+  gtk_icon_source_set_pixbuf(icon, pixbuf);
+  g_object_unref(pixbuf);
+
+  gtk_icon_source_set_direction_wildcarded(icon, TRUE);
+  gtk_icon_source_set_size_wildcarded(icon, TRUE);
+
+  gtk_icon_source_set_state(icon, state);
+  // All fields default to wildcarding being on and setting a property doesn't
+  // turn off wildcarding. You need to do this yourself. This is stated once in
+  // the documentation in the gtk_icon_source_new() function, and no where else.
+  gtk_icon_source_set_state_wildcarded(
+      icon, state == GTK_STATE_NORMAL);
+
+  gtk_icon_set_add_source(icon_set, icon);
+  gtk_icon_source_free(icon);
+}
+
 
 }  // namespace
 
@@ -118,14 +241,20 @@ GtkThemeProvider* GtkThemeProvider::GetFrom(Profile* profile) {
 GtkThemeProvider::GtkThemeProvider()
     : BrowserThemeProvider(),
       fake_window_(gtk_window_new(GTK_WINDOW_TOPLEVEL)),
-      fake_frame_(meta_frames_new()) {
+      fake_frame_(meta_frames_new()),
+      signals_(new GtkSignalRegistrar),
+      fullscreen_icon_set_(NULL) {
   fake_label_.Own(gtk_label_new(""));
   fake_entry_.Own(gtk_entry_new());
+  fake_menu_item_.Own(gtk_menu_item_new());
 
   // Only realized widgets receive style-set notifications, which we need to
-  // broadcast new theme images and colors.
+  // broadcast new theme images and colors. Only realized widgets have style
+  // properties, too, which we query for some colors.
   gtk_widget_realize(fake_frame_);
-  g_signal_connect(fake_frame_, "style-set", G_CALLBACK(&OnStyleSet), this);
+  gtk_widget_realize(fake_window_);
+  signals_->Connect(fake_frame_, "style-set",
+                    G_CALLBACK(&OnStyleSetThunk), this);
 }
 
 GtkThemeProvider::~GtkThemeProvider() {
@@ -134,17 +263,13 @@ GtkThemeProvider::~GtkThemeProvider() {
   gtk_widget_destroy(fake_frame_);
   fake_label_.Destroy();
   fake_entry_.Destroy();
+  fake_menu_item_.Destroy();
+
+  FreeIconSets();
 
   // We have to call this because FreePlatformCached() in ~BrowserThemeProvider
   // doesn't call the right virutal FreePlatformCaches.
   FreePlatformCaches();
-
-  // Disconnect from the destroy signal of any redisual widgets in
-  // |chrome_buttons_|.
-  for (std::vector<GtkWidget*>::iterator it = chrome_buttons_.begin();
-       it != chrome_buttons_.end(); ++it) {
-    gtk_signal_disconnect_by_data(GTK_OBJECT(*it), this);
-  }
 }
 
 void GtkThemeProvider::Init(Profile* profile) {
@@ -155,12 +280,12 @@ void GtkThemeProvider::Init(Profile* profile) {
 }
 
 SkBitmap* GtkThemeProvider::GetBitmapNamed(int id) const {
-  if (use_gtk_ && IsOverridableImage(id)) {
-    // Try to get our cached version:
-    ImageCache::const_iterator it = gtk_images_.find(id);
-    if (it != gtk_images_.end())
-      return it->second;
+  // Try to get our cached version:
+  ImageCache::const_iterator it = gtk_images_.find(id);
+  if (it != gtk_images_.end())
+    return it->second;
 
+  if (use_gtk_ && IsOverridableImage(id)) {
     // We haven't built this image yet:
     SkBitmap* bitmap = GenerateGtkThemeBitmap(id);
     gtk_images_[id] = bitmap;
@@ -212,6 +337,10 @@ void GtkThemeProvider::SetNativeTheme() {
   NotifyThemeChanged(NULL);
 }
 
+bool GtkThemeProvider::UsingDefaultTheme() {
+  return !use_gtk_ && BrowserThemeProvider::UsingDefaultTheme();
+}
+
 void GtkThemeProvider::Observe(NotificationType type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
@@ -225,8 +354,8 @@ GtkWidget* GtkThemeProvider::BuildChromeButton() {
   gtk_chrome_button_set_use_gtk_rendering(GTK_CHROME_BUTTON(button), use_gtk_);
   chrome_buttons_.push_back(button);
 
-  g_signal_connect(button, "destroy", G_CALLBACK(OnDestroyChromeButtonThunk),
-                   this);
+  signals_->Connect(button, "destroy", G_CALLBACK(OnDestroyChromeButtonThunk),
+                    this);
   return button;
 }
 
@@ -237,8 +366,8 @@ GtkWidget* GtkThemeProvider::CreateToolbarSeparator() {
       kSeparatorPadding, kSeparatorPadding, kSeparatorPadding, 0);
   gtk_container_add(GTK_CONTAINER(alignment), separator);
 
-  g_signal_connect(separator, "expose-event",
-                   G_CALLBACK(OnSeparatorExposeThunk), this);
+  signals_->Connect(separator, "expose-event",
+                    G_CALLBACK(OnSeparatorExposeThunk), this);
   return alignment;
 }
 
@@ -274,6 +403,13 @@ GdkColor GtkThemeProvider::GetBorderColor() const {
   return color;
 }
 
+GtkIconSet* GtkThemeProvider::GetIconSetForId(int id) const {
+  if (id == IDR_FULLSCREEN_MENU_BUTTON)
+    return fullscreen_icon_set_;
+
+  return NULL;
+}
+
 void GtkThemeProvider::GetScrollbarColors(GdkColor* thumb_active_color,
                                           GdkColor* thumb_inactive_color,
                                           GdkColor* track_color) {
@@ -287,8 +423,8 @@ void GtkThemeProvider::GetScrollbarColors(GdkColor* thumb_active_color,
   gtk_widget_realize(scrollbar);
 
   // Draw scrollbar thumb part and track into offscreen image
-  int kWidth        = 100;
-  int kHeight       = 20;
+  const int kWidth  = 100;
+  const int kHeight = 20;
   GtkStyle*  style  = gtk_rc_get_style(scrollbar);
   GdkPixmap* pm     = gdk_pixmap_new(window->window, kWidth, kHeight, -1);
   GdkRectangle rect = { 0, 0, kWidth, kHeight };
@@ -363,11 +499,31 @@ CairoCachedSurface* GtkThemeProvider::GetSurfaceNamed(
   return surface;
 }
 
+CairoCachedSurface* GtkThemeProvider::GetUnthemedSurfaceNamed(
+    int id, GtkWidget* widget_on_display) {
+  GdkDisplay* display = gtk_widget_get_display(widget_on_display);
+  CairoCachedSurfaceMap& surface_map = per_display_unthemed_surfaces_[display];
+
+  // Check to see if we already have the pixbuf in the cache.
+  CairoCachedSurfaceMap::const_iterator found = surface_map.find(id);
+  if (found != surface_map.end())
+    return found->second;
+
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  GdkPixbuf* pixbuf = rb.GetPixbufNamed(id);
+  CairoCachedSurface* surface = new CairoCachedSurface;
+  surface->UsePixbuf(pixbuf);
+
+  surface_map[id] = surface;
+
+  return surface;
+}
+
 // static
 GdkPixbuf* GtkThemeProvider::GetFolderIcon(bool native) {
   if (native) {
     if (!icon_widget_)
-      icon_widget_ = gtk_fixed_new();
+      icon_widget_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     // We never release our ref, so we will leak this on program shutdown.
     if (!default_folder_icon_) {
       default_folder_icon_ =
@@ -388,7 +544,7 @@ GdkPixbuf* GtkThemeProvider::GetFolderIcon(bool native) {
 GdkPixbuf* GtkThemeProvider::GetDefaultFavicon(bool native) {
   if (native) {
     if (!icon_widget_)
-      icon_widget_ = gtk_fixed_new();
+      icon_widget_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     // We never release our ref, so we will leak this on program shutdown.
     if (!default_bookmark_icon_) {
       default_bookmark_icon_ =
@@ -432,6 +588,8 @@ void GtkThemeProvider::LoadThemePrefs() {
     LoadDefaultValues();
     BrowserThemeProvider::LoadThemePrefs();
   }
+
+  RebuildMenuIconSets();
 }
 
 void GtkThemeProvider::NotifyThemeChanged(Extension* extension) {
@@ -447,24 +605,25 @@ void GtkThemeProvider::NotifyThemeChanged(Extension* extension) {
 
 void GtkThemeProvider::FreePlatformCaches() {
   BrowserThemeProvider::FreePlatformCaches();
-  FreePerDisplaySurfaces();
+  FreePerDisplaySurfaces(&per_display_surfaces_);
+  FreePerDisplaySurfaces(&per_display_unthemed_surfaces_);
   STLDeleteValues(&gtk_images_);
 }
 
-// static
 void GtkThemeProvider::OnStyleSet(GtkWidget* widget,
-                                  GtkStyle* previous_style,
-                                  GtkThemeProvider* provider) {
+                                  GtkStyle* previous_style) {
   GdkPixbuf* default_folder_icon = default_folder_icon_;
   GdkPixbuf* default_bookmark_icon = default_bookmark_icon_;
   default_folder_icon_ = NULL;
   default_bookmark_icon_ = NULL;
 
-  if (provider->profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme)) {
-    provider->ClearAllThemeData();
-    provider->LoadGtkValues();
-    provider->NotifyThemeChanged(NULL);
+  if (profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme)) {
+    ClearAllThemeData();
+    LoadGtkValues();
+    NotifyThemeChanged(NULL);
   }
+
+  RebuildMenuIconSets();
 
   // Free the old icons only after the theme change notification has gone
   // through.
@@ -529,23 +688,10 @@ void GtkThemeProvider::LoadGtkValues() {
     frame_color.blue = SkColorGetB(shifted) * kSkiaToGDKMultiplier;
   }
 
-  // By default, the button tint color is the background selection color. But
-  // this can be unreadable in some dark themes, so we set a minimum contrast
-  // between the button color and the toolbar color.
-  color_utils::HSL button_hsl;
-  color_utils::SkColorToHSL(GdkToSkColor(&button_color), &button_hsl);
-  color_utils::HSL toolbar_hsl;
-  color_utils::SkColorToHSL(GdkToSkColor(&toolbar_color), &toolbar_hsl);
-  double hsl_difference = fabs(button_hsl.l - toolbar_hsl.l);
-  if (hsl_difference <= kMinimumLuminanceDifference) {
-    // Not enough contrast. Try the text color instead.
-    color_utils::HSL label_hsl;
-    color_utils::SkColorToHSL(GdkToSkColor(&label_color), &label_hsl);
-    double label_difference = fabs(label_hsl.l - toolbar_hsl.l);
-    if (label_difference >= kMinimumLuminanceDifference) {
-      button_color = label_color;
-    }
-  }
+  // Build the various icon tints.
+  GetNormalButtonTintHSL(&button_tint_);
+  GetNormalEntryForegroundHSL(&entry_tint_);
+  GetSelectedEntryForegroundHSL(&selected_entry_tint_);
 
   SetThemeTintFromGtk(BrowserThemeProvider::TINT_BUTTONS, &button_color);
   SetThemeTintFromGtk(BrowserThemeProvider::TINT_FRAME, &frame_color);
@@ -639,7 +785,7 @@ void GtkThemeProvider::LoadGtkValues() {
                        link_color);
 
   // Generate the colors that we pass to WebKit.
-  focus_ring_color_ = GdkToSkColor(&button_color);
+  focus_ring_color_ = GdkToSkColor(&frame_color);
   GdkColor thumb_active_color, thumb_inactive_color, track_color;
   GtkThemeProvider::GetScrollbarColors(&thumb_active_color,
                                        &thumb_inactive_color,
@@ -672,6 +818,22 @@ void GtkThemeProvider::LoadDefaultValues() {
   inactive_selection_fg_color_ = SkColorSetRGB(50, 50, 50);
 }
 
+void GtkThemeProvider::RebuildMenuIconSets() {
+  FreeIconSets();
+
+  GtkStyle* style = gtk_rc_get_style(fake_menu_item_.get());
+
+  fullscreen_icon_set_ = gtk_icon_set_new();
+  BuildIconFromIDRWithColor(IDR_FULLSCREEN_MENU_BUTTON,
+                            style,
+                            GTK_STATE_PRELIGHT,
+                            fullscreen_icon_set_);
+  BuildIconFromIDRWithColor(IDR_FULLSCREEN_MENU_BUTTON,
+                            style,
+                            GTK_STATE_NORMAL,
+                            fullscreen_icon_set_);
+}
+
 void GtkThemeProvider::SetThemeColorFromGtk(int id, const GdkColor* color) {
   colors_[id] = GdkToSkColor(color);
 }
@@ -701,15 +863,23 @@ void GtkThemeProvider::SetTintToExactColor(int id, const GdkColor* color) {
   tints_[id] = hsl;
 }
 
-void GtkThemeProvider::FreePerDisplaySurfaces() {
-  for (PerDisplaySurfaceMap::iterator it = per_display_surfaces_.begin();
-       it != per_display_surfaces_.end(); ++it) {
+void GtkThemeProvider::FreePerDisplaySurfaces(
+    PerDisplaySurfaceMap* per_display_map) {
+  for (PerDisplaySurfaceMap::iterator it = per_display_map->begin();
+       it != per_display_map->end(); ++it) {
     for (CairoCachedSurfaceMap::iterator jt = it->second.begin();
          jt != it->second.end(); ++jt) {
       delete jt->second;
     }
   }
-  per_display_surfaces_.clear();
+  per_display_map->clear();
+}
+
+void GtkThemeProvider::FreeIconSets() {
+  if (fullscreen_icon_set_) {
+    gtk_icon_set_unref(fullscreen_icon_set_);
+    fullscreen_icon_set_ = NULL;
+  }
 }
 
 SkBitmap* GtkThemeProvider::GenerateGtkThemeBitmap(int id) const {
@@ -738,15 +908,47 @@ SkBitmap* GtkThemeProvider::GenerateGtkThemeBitmap(int id) const {
       return GenerateFrameImage(
           BrowserThemeProvider::TINT_FRAME_INCOGNITO_INACTIVE);
     }
+    // Icons that sit inside the omnibox shouldn't receive TINT_BUTTONS and
+    // instead should tint based on the foreground text entry color in GTK+
+    // mode because some themes that try to be dark *and* light have very
+    // different colors between the omnibox and the normal background area.
+    case IDR_OMNIBOX_SEARCH:
+    case IDR_OMNIBOX_MORE:
+    case IDR_OMNIBOX_STAR:
+    case IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON:
+    case IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON: {
+      return GenerateTintedIcon(id, entry_tint_);
+    }
+    // Two sets of omnibox icons, the one for normal http and the one for
+    // history, include white backgrounds (and are supposed to, for the windows
+    // chrome-theme). On linux, where we have all sorts of wacky themes and
+    // color combinations we need to deal with, switch them out with
+    // transparent background versions.
+    case IDR_OMNIBOX_HTTP: {
+      return GenerateTintedIcon(IDR_OMNIBOX_HTTP_TRANSPARENT, entry_tint_);
+    }
+    case IDR_OMNIBOX_HISTORY: {
+      return GenerateTintedIcon(IDR_OMNIBOX_HISTORY_TRANSPARENT, entry_tint_);
+    }
+    // In GTK mode, the dark versions of the omnibox icons only ever appear in
+    // the autocomplete popup and only against the current theme's GtkEntry
+    // base[GTK_STATE_SELECTED] color, so tint the icons so they won't collide
+    // with the selected color.
+    case IDR_OMNIBOX_HTTP_DARK: {
+      return GenerateTintedIcon(IDR_OMNIBOX_HTTP_DARK_TRANSPARENT,
+                                selected_entry_tint_);
+    }
+    case IDR_OMNIBOX_HISTORY_DARK: {
+      return GenerateTintedIcon(IDR_OMNIBOX_HISTORY_DARK_TRANSPARENT,
+                                selected_entry_tint_);
+    }
+    case IDR_OMNIBOX_SEARCH_DARK:
+    case IDR_OMNIBOX_MORE_DARK:
+    case IDR_OMNIBOX_STAR_DARK: {
+      return GenerateTintedIcon(id, selected_entry_tint_);
+    }
     default: {
-      // This is a tinted button. Tint it and return it.
-      ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-      scoped_ptr<SkBitmap> button(new SkBitmap(*rb.GetBitmapNamed(id)));
-      TintMap::const_iterator it = tints_.find(
-          BrowserThemeProvider::TINT_BUTTONS);
-      DCHECK(it != tints_.end());
-      return new SkBitmap(SkBitmapOperations::CreateHSLShiftedBitmap(
-          *button, it->second));
+      return GenerateTintedIcon(id, button_tint_);
     }
   }
 }
@@ -766,6 +968,48 @@ SkBitmap* GtkThemeProvider::GenerateTabImage(int base_id) const {
       *base_image, GetTint(BrowserThemeProvider::TINT_BACKGROUND_TAB));
   return new SkBitmap(SkBitmapOperations::CreateTiledBitmap(
       bg_tint, 0, 0, bg_tint.width(), bg_tint.height()));
+}
+
+SkBitmap* GtkThemeProvider::GenerateTintedIcon(int base_id,
+                                               color_utils::HSL tint) const {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  scoped_ptr<SkBitmap> button(new SkBitmap(*rb.GetBitmapNamed(base_id)));
+  return new SkBitmap(SkBitmapOperations::CreateHSLShiftedBitmap(
+      *button, tint));
+}
+
+void GtkThemeProvider::GetNormalButtonTintHSL(
+    color_utils::HSL* tint) const {
+  GtkStyle* window_style = gtk_rc_get_style(fake_window_);
+  const GdkColor accent_gdk_color = window_style->bg[GTK_STATE_SELECTED];
+  const GdkColor base_color = window_style->base[GTK_STATE_NORMAL];
+
+  GtkStyle* label_style = gtk_rc_get_style(fake_label_.get());
+  const GdkColor text_color = label_style->fg[GTK_STATE_NORMAL];
+
+  PickButtonTintFromColors(accent_gdk_color, text_color, base_color, tint);
+}
+
+void GtkThemeProvider::GetNormalEntryForegroundHSL(
+    color_utils::HSL* tint) const {
+  GtkStyle* window_style = gtk_rc_get_style(fake_window_);
+  const GdkColor accent_gdk_color = window_style->bg[GTK_STATE_SELECTED];
+
+  GtkStyle* style = gtk_rc_get_style(fake_entry_.get());
+  const GdkColor text_color = style->text[GTK_STATE_NORMAL];
+  const GdkColor base_color = style->base[GTK_STATE_NORMAL];
+
+  PickButtonTintFromColors(accent_gdk_color, text_color, base_color, tint);
+}
+
+void GtkThemeProvider::GetSelectedEntryForegroundHSL(
+    color_utils::HSL* tint) const {
+  // The simplest of all the tints. We just use the selected text in the entry
+  // since the icons tinted this way will only be displayed against
+  // base[GTK_STATE_SELECTED].
+  GtkStyle* style = gtk_rc_get_style(fake_entry_.get());
+  const GdkColor color = style->text[GTK_STATE_SELECTED];
+  color_utils::SkColorToHSL(GdkToSkColor(&color), tint);
 }
 
 void GtkThemeProvider::OnDestroyChromeButton(GtkWidget* button) {

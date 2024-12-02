@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -188,13 +188,15 @@ void NativeViewHostGtk::RemovedFromWidget() {
 void NativeViewHostGtk::InstallClip(int x, int y, int w, int h) {
   DCHECK(w > 0 && h > 0);
   installed_clip_bounds_.SetRect(x, y, w, h);
-  installed_clip_ = true;
+  if (!installed_clip_) {
+    installed_clip_ = true;
 
-  // We only re-create the fixed with a window when a cliprect is installed.
-  // Because the presence of a X Window will prevent transparency from working
-  // properly, we only want it to be active for the duration of a clip
-  // (typically during animations and scrolling.)
-  CreateFixed(true);
+    // We only re-create the fixed with a window when a cliprect is installed.
+    // Because the presence of a X Window will prevent transparency from working
+    // properly, we only want it to be active for the duration of a clip
+    // (typically during animations and scrolling.)
+    CreateFixed(true);
+  }
 }
 
 bool NativeViewHostGtk::HasInstalledClip() {
@@ -271,6 +273,7 @@ void NativeViewHostGtk::CreateFixed(bool needs_window) {
   DestroyFixed();
 
   fixed_ = gtk_fixed_new();
+  gtk_widget_set_name(fixed_, "views-native-view-host-fixed");
   gtk_fixed_set_has_window(GTK_FIXED(fixed_), needs_window);
   // Defeat refcounting. We need to own the fixed.
   gtk_widget_ref(fixed_);
@@ -338,9 +341,9 @@ void NativeViewHostGtk::CallDestroy(GtkObject* object,
 }
 
 // static
-void NativeViewHostGtk::CallFocusIn(GtkWidget* widget,
-                                    GdkEventFocus* event,
-                                    NativeViewHostGtk* host) {
+gboolean NativeViewHostGtk::CallFocusIn(GtkWidget* widget,
+                                        GdkEventFocus* event,
+                                        NativeViewHostGtk* host) {
   FocusManager* focus_manager =
       FocusManager::GetFocusManagerForNativeView(widget);
   if (!focus_manager) {
@@ -348,9 +351,10 @@ void NativeViewHostGtk::CallFocusIn(GtkWidget* widget,
     // options page is only based on views.
     // NOTREACHED();
     NOTIMPLEMENTED();
-    return;
+    return false;
   }
   focus_manager->SetFocusedView(host->host_->focus_view());
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,10 @@
 #include <atlcom.h>
 #include <atlctl.h>
 #include <htiframe.h>
-#include <map>
 #include <mshtmcid.h>
 #include <perhist.h>
+
+#include <map>
 
 #include "base/scoped_ptr.h"
 #include "base/scoped_comptr_win.h"
@@ -130,16 +131,16 @@ extern const DWORD kIEEncodingIdArray[];
 
 // This macro should be defined in the public section of the class.
 #define BEGIN_EXEC_COMMAND_MAP(theClass) \
-  public: \
-   HRESULT ProcessExecCommand(const GUID* cmd_group_guid, DWORD command_id, \
-                              DWORD cmd_exec_opt, VARIANT* in_args, \
-                              VARIANT* out_args) { \
-   HRESULT hr = OLECMDERR_E_NOTSUPPORTED; \
-   do {
+ public: \
+  HRESULT ProcessExecCommand(const GUID* cmd_group_guid, DWORD command_id, \
+                             DWORD cmd_exec_opt, VARIANT* in_args, \
+                             VARIANT* out_args) { \
+  HRESULT hr = OLECMDERR_E_NOTSUPPORTED; \
+  do {
 
 #define EXEC_COMMAND_HANDLER(group, id, handler)                              \
   if ((id == command_id) && ((group != NULL && cmd_group_guid != NULL && \
-       IsEqualGUID(*(GUID*)group,*cmd_group_guid)) || \
+       IsEqualGUID(*reinterpret_cast<const GUID*>(group), *cmd_group_guid)) || \
        (group == NULL && cmd_group_guid == NULL))) {  \
     hr = S_OK;  \
     handler(cmd_group_guid, command_id, cmd_exec_opt, in_args, out_args);  \
@@ -148,7 +149,7 @@ extern const DWORD kIEEncodingIdArray[];
 
 #define EXEC_COMMAND_HANDLER_NO_ARGS(group, id, handler) \
   if ((id == command_id) && ((group != NULL && cmd_group_guid != NULL && \
-       IsEqualGUID(*(GUID*)group,*cmd_group_guid)) || \
+       IsEqualGUID(*reinterpret_cast<const GUID*>(group), *cmd_group_guid)) || \
        (group == NULL && cmd_group_guid == NULL))) {  \
     hr = S_OK;  \
     handler();  \
@@ -157,7 +158,7 @@ extern const DWORD kIEEncodingIdArray[];
 
 #define EXEC_COMMAND_HANDLER_GENERIC(group, id, code) \
   if ((id == command_id) && ((group != NULL && cmd_group_guid != NULL && \
-       IsEqualGUID(*(GUID*)group,*cmd_group_guid)) || \
+       IsEqualGUID(*reinterpret_cast<const GUID*>(group), *cmd_group_guid)) || \
        (group == NULL && cmd_group_guid == NULL))) {  \
     hr = S_OK;  \
     code;  \
@@ -176,7 +177,8 @@ extern const DWORD kIEEncodingIdArray[];
       commands++; \
     } \
     if (id_in_group_commands && ((group != NULL && cmd_group_guid != NULL && \
-        IsEqualGUID(*(GUID*)group,*cmd_group_guid)) || \
+        IsEqualGUID(*reinterpret_cast<const GUID*>(group), \
+                    *cmd_group_guid)) || \
         (group == NULL && cmd_group_guid == NULL))) { \
       hr = S_OK; \
       handler(cmd_group_guid, command_id, cmd_exec_opt, in_args, out_args); \
@@ -232,8 +234,8 @@ END_COM_MAP()
 
 BEGIN_MSG_MAP(ChromeActiveDocument)
   MESSAGE_HANDLER(WM_FIRE_PRIVACY_CHANGE_NOTIFICATION, OnFirePrivacyChange)
-  COMMAND_ID_HANDLER(IDC_FORWARD, OnForward)
-  COMMAND_ID_HANDLER(IDC_BACK, OnBack)
+  COMMAND_ID_HANDLER(IDC_CHROMEFRAME_FORWARD, OnForward)
+  COMMAND_ID_HANDLER(IDC_CHROMEFRAME_BACK, OnBack)
   CHAIN_MSG_MAP(BaseActiveX)
 END_MSG_MAP()
 
@@ -280,6 +282,7 @@ END_EXEC_COMMAND_MAP()
   virtual void OnTabbedOut(int tab_handle, bool reverse);
   virtual void OnDidNavigate(int tab_handle,
                              const IPC::NavigationInfo& nav_info);
+  virtual void OnCloseTab(int tab_handle);
   // Override DoVerb
   STDMETHOD(DoVerb)(LONG verb,
                     LPMSG msg,
@@ -342,10 +345,9 @@ END_EXEC_COMMAND_MAP()
 
   // IEnumPrivacyRecords
   STDMETHOD(Reset)();
-  STDMETHOD(GetSize)(unsigned long* size);
+  STDMETHOD(GetSize)(ULONG* size);
   STDMETHOD(GetPrivacyImpacted)(BOOL* privacy_impacted);
-  STDMETHOD(Next)(BSTR* url, BSTR* policy, long* reserved,
-                  unsigned long* flags);
+  STDMETHOD(Next)(BSTR* url, BSTR* policy, LONG* reserved, DWORD* flags);
 
  protected:
   // ChromeFrameActivexBase overrides
@@ -378,7 +380,7 @@ END_EXEC_COMMAND_MAP()
   HRESULT IEExec(const GUID* cmd_group_guid, DWORD command_id,
                  DWORD cmd_exec_opt, VARIANT* in_args, VARIANT* out_args);
 
-  unsigned long MapUrlToZone(const wchar_t* url);
+  DWORD MapUrlToZone(const wchar_t* url);
 
   // Parses the URL and returns information whether it is a new navigation and
   // the actual url after stripping out the cf: prefix if any.
@@ -390,7 +392,8 @@ END_EXEC_COMMAND_MAP()
 
   // Initiates navigation to the URL passed in.
   // Returns true on success.
-  bool LaunchUrl(const std::wstring& url, bool is_new_navigation);
+  bool LaunchUrl(const std::wstring& url, const std::string& referrer,
+                 bool is_new_navigation);
 
   // Handler to set the page font size in Chrome.
   HRESULT SetPageFontSize(const GUID* cmd_group_guid,
@@ -418,6 +421,10 @@ END_EXEC_COMMAND_MAP()
 
   LRESULT OnFirePrivacyChange(UINT message, WPARAM wparam, LPARAM lparam,
                               BOOL& handled);
+
+  // Checks for the presence of known-to-be-buggy BHOs.  If we find any
+  // we do not fire the DocumentComplete event to avoid a crash.
+  static bool ShouldFireDocumentComplete();
 
  protected:
   typedef std::map<int, bool> EnabledCommandsMap;
@@ -453,6 +460,10 @@ END_EXEC_COMMAND_MAP()
   UrlmonUrlRequestManager::PrivacyInfo::PrivacyRecords::iterator
       next_privacy_record_;
 
+  // Dimensions of the window. Used only when opening popups.
+  gfx::Rect dimensions_;
+  // Set to true if the document was loaded by a window.open in chrome.
+  bool is_new_navigation_;
  public:
   ScopedComPtr<IOleInPlaceFrame> in_place_frame_;
   OLEINPLACEFRAMEINFO frame_info_;

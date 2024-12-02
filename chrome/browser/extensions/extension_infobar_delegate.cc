@@ -20,10 +20,12 @@ ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(Browser* browser,
     : InfoBarDelegate(tab_contents),
       observer_(NULL),
       extension_(extension),
-      tab_contents_(tab_contents) {
+      tab_contents_(tab_contents),
+      closing_(false) {
   ExtensionProcessManager* manager =
       browser->profile()->GetExtensionProcessManager();
   extension_host_.reset(manager->CreateInfobar(url, browser));
+  extension_host_->set_associated_tab_contents(tab_contents);
 
   registrar_.Add(this, NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE,
                  Source<Profile>(browser->profile()));
@@ -55,13 +57,6 @@ bool ExtensionInfoBarDelegate::EqualsDelegate(InfoBarDelegate* delegate) const {
 void ExtensionInfoBarDelegate::InfoBarClosed() {
   delete this;
 }
-
-#if !defined(TOOLKIT_VIEWS)
-InfoBar* ExtensionInfoBarDelegate::CreateInfoBar() {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-#endif  // !TOOLKIT_VIEWS
 
 void ExtensionInfoBarDelegate::Observe(NotificationType type,
                                        const NotificationSource& source,

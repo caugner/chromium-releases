@@ -98,9 +98,12 @@ class PyUITestBase : public UITestBase {
   // Open a new browser window. Returns false on failure.
   bool OpenNewBrowserWindow(bool show);
 
+  // Fetch the number of browser windows. Includes popups.
+  int GetBrowserWindowCount();
+
   // Installs the extension crx. Returns true only if extension was installed
   // and loaded successfully. Overinstalls will fail.
-  bool InstallExtension(const FilePath& crx_file);
+  bool InstallExtension(const FilePath& crx_file, bool with_ui);
 
   // Returns bookmark bar visibility state.
   bool GetBookmarkBarVisibility();
@@ -143,6 +146,16 @@ class PyUITestBase : public UITestBase {
   // JSON dict to avoid future use of the SWIG interface and
   // automation proxy additions.  Returns response as JSON dict.
   std::string _SendJSONRequest(int window_index, std::string& request);
+
+  // Resets to the default theme. Returns true on success.
+  bool ResetToDefaultTheme();
+
+  // Sets a cookie value for a url. Returns true on success.
+  bool SetCookie(const GURL& cookie_url, const std::string& value,
+                 int window_index=0, int tab_index=0);
+  // Gets a cookie value for the given url.
+  std::string GetCookie(const GURL& cookie_url, int window_index=0,
+                        int tab_index=0);
 
  private:
   // Enables PostTask to main thread.

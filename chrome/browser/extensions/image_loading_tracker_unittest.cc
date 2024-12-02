@@ -7,11 +7,14 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "gfx/size.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 class ImageLoadingTrackerTest : public testing::Test,
                                 public ImageLoadingTracker::Observer {
@@ -100,11 +103,12 @@ TEST_F(ImageLoadingTrackerTest, Cache) {
 
   ExtensionResource image_resource =
       extension->GetIconPath(Extension::EXTENSION_ICON_SMALLISH);
+  gfx::Size max_size(Extension::EXTENSION_ICON_SMALLISH,
+                     Extension::EXTENSION_ICON_SMALLISH);
   ImageLoadingTracker loader(static_cast<ImageLoadingTracker::Observer*>(this));
   loader.LoadImage(extension.get(),
                    image_resource,
-                   gfx::Size(Extension::EXTENSION_ICON_SMALLISH,
-                             Extension::EXTENSION_ICON_SMALLISH),
+                   max_size,
                    ImageLoadingTracker::CACHE);
 
   // The image isn't cached, so we should not have received notification.
@@ -119,17 +123,16 @@ TEST_F(ImageLoadingTrackerTest, Cache) {
   EXPECT_EQ(Extension::EXTENSION_ICON_SMALLISH, image_.width());
 
   // The image should be cached in the Extension.
-  EXPECT_TRUE(extension->HasCachedImage(image_resource));
+  EXPECT_TRUE(extension->HasCachedImage(image_resource, max_size));
 
   // Make sure the image is in the extension.
   EXPECT_EQ(Extension::EXTENSION_ICON_SMALLISH,
-            extension->GetCachedImage(image_resource).width());
+            extension->GetCachedImage(image_resource, max_size).width());
 
   // Ask the tracker for the image again, this should call us back immediately.
   loader.LoadImage(extension.get(),
                    image_resource,
-                   gfx::Size(Extension::EXTENSION_ICON_SMALLISH,
-                             Extension::EXTENSION_ICON_SMALLISH),
+                   max_size,
                    ImageLoadingTracker::CACHE);
   // We should have gotten the image.
   EXPECT_EQ(1, image_loaded_count());

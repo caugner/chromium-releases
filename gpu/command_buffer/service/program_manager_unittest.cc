@@ -3,12 +3,13 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/program_manager.h"
+#include <algorithm>
+#include "app/gfx/gl/gl_mock.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "gpu/command_buffer/service/gl_mock.h"
 
-using ::gles2::MockGLInterface;
+using ::gfx::MockGLInterface;
 using ::testing::_;
 using ::testing::DoAll;
 using ::testing::InSequence;
@@ -26,32 +27,66 @@ namespace gles2 {
 class ProgramManagerTest : public testing::Test {
  public:
   ProgramManagerTest() { }
+  ~ProgramManagerTest() {
+    manager_.Destroy(false);
+  }
 
  protected:
   virtual void SetUp() {
+    gl_.reset(new ::testing::StrictMock< ::gfx::MockGLInterface>());
+    ::gfx::GLInterface::SetGLInterface(gl_.get());
   }
 
   virtual void TearDown() {
+    ::gfx::GLInterface::SetGLInterface(NULL);
+    gl_.reset();
   }
 
+  // Use StrictMock to make 100% sure we know how GL will be called.
+  scoped_ptr< ::testing::StrictMock< ::gfx::MockGLInterface> > gl_;
   ProgramManager manager_;
 };
 
 TEST_F(ProgramManagerTest, Basic) {
-  const GLuint kProgram1Id = 1;
-  const GLuint kProgram2Id = 2;
+  const GLuint kClient1Id = 1;
+  const GLuint kService1Id = 11;
+  const GLuint kClient2Id = 2;
   // Check we can create program.
-  manager_.CreateProgramInfo(kProgram1Id);
+  manager_.CreateProgramInfo(kClient1Id, kService1Id);
   // Check program got created.
-  ProgramManager::ProgramInfo* info1 = manager_.GetProgramInfo(kProgram1Id);
+  ProgramManager::ProgramInfo* info1 = manager_.GetProgramInfo(kClient1Id);
   ASSERT_TRUE(info1 != NULL);
+  EXPECT_EQ(kService1Id, info1->service_id());
+  EXPECT_FALSE(info1->CanLink());
+  EXPECT_STREQ("", info1->log_info().c_str());
+  GLuint client_id = 0;
+  EXPECT_TRUE(manager_.GetClientId(info1->service_id(), &client_id));
+  EXPECT_EQ(kClient1Id, client_id);
   // Check we get nothing for a non-existent program.
-  EXPECT_TRUE(manager_.GetProgramInfo(kProgram2Id) == NULL);
+  EXPECT_TRUE(manager_.GetProgramInfo(kClient2Id) == NULL);
   // Check trying to a remove non-existent programs does not crash.
-  manager_.RemoveProgramInfo(kProgram2Id);
+  manager_.RemoveProgramInfo(kClient2Id);
   // Check we can't get the program after we remove it.
-  manager_.RemoveProgramInfo(kProgram1Id);
-  EXPECT_TRUE(manager_.GetProgramInfo(kProgram1Id) == NULL);
+  manager_.RemoveProgramInfo(kClient1Id);
+  EXPECT_TRUE(manager_.GetProgramInfo(kClient1Id) == NULL);
+}
+
+TEST_F(ProgramManagerTest, Destroy) {
+  const GLuint kClient1Id = 1;
+  const GLuint kService1Id = 11;
+  // Check we can create program.
+  manager_.CreateProgramInfo(kClient1Id, kService1Id);
+  // Check program got created.
+  ProgramManager::ProgramInfo* info1 =
+      manager_.GetProgramInfo(kClient1Id);
+  ASSERT_TRUE(info1 != NULL);
+  EXPECT_CALL(*gl_, DeleteProgram(kService1Id))
+      .Times(1)
+      .RetiresOnSaturation();
+  manager_.Destroy(true);
+  // Check the resources were released.
+  info1 = manager_.GetProgramInfo(kClient1Id);
+  ASSERT_TRUE(info1 == NULL);
 }
 
 class ProgramManagerWithShaderTest : public testing::Test {
@@ -60,11 +95,15 @@ class ProgramManagerWithShaderTest : public testing::Test {
       : program_info_(NULL) {
   }
 
+  ~ProgramManagerWithShaderTest() {
+    manager_.Destroy(false);
+  }
+
   static const GLint kNumVertexAttribs = 16;
 
-  static const GLuint kProgramId = 123;
+  static const GLuint kClientProgramId = 123;
+  static const GLuint kServiceProgramId = 456;
 
-  static const GLint kMaxAttribLength = 10;
   static const char* kAttrib1Name;
   static const char* kAttrib2Name;
   static const char* kAttrib3Name;
@@ -80,7 +119,6 @@ class ProgramManagerWithShaderTest : public testing::Test {
   static const GLint kInvalidAttribLocation = 30;
   static const GLint kBadAttribIndex = kNumVertexAttribs;
 
-  static const GLint kMaxUniformLength = 12;
   static const char* kUniform1Name;
   static const char* kUniform2Name;
   static const char* kUniform3Name;
@@ -115,13 +153,13 @@ class ProgramManagerWithShaderTest : public testing::Test {
   };
 
   virtual void SetUp() {
-    gl_.reset(new StrictMock<MockGLInterface>());
-    ::gles2::GLInterface::SetGLInterface(gl_.get());
+    gl_.reset(new StrictMock<gfx::MockGLInterface>());
+    ::gfx::GLInterface::SetGLInterface(gl_.get());
 
     SetupDefaultShaderExpectations();
 
-    manager_.CreateProgramInfo(kProgramId);
-    program_info_ = manager_.GetProgramInfo(kProgramId);
+    manager_.CreateProgramInfo(kClientProgramId, kServiceProgramId);
+    program_info_ = manager_.GetProgramInfo(kClientProgramId);
     program_info_->Update();
   }
 
@@ -130,18 +168,31 @@ class ProgramManagerWithShaderTest : public testing::Test {
                    GLuint service_id) {
     InSequence s;
     EXPECT_CALL(*gl_,
+        GetProgramiv(service_id, GL_INFO_LOG_LENGTH, _))
+        .WillOnce(SetArgumentPointee<2>(0))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_,
+        GetProgramInfoLog(service_id, _, _, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_,
         GetProgramiv(service_id, GL_ACTIVE_ATTRIBUTES, _))
         .WillOnce(SetArgumentPointee<2>(num_attribs))
         .RetiresOnSaturation();
+    size_t max_attrib_len = 0;
+    for (size_t ii = 0; ii < num_attribs; ++ii) {
+      size_t len = strlen(attribs[ii].name) + 1;
+      max_attrib_len = std::max(max_attrib_len, len);
+    }
     EXPECT_CALL(*gl_,
         GetProgramiv(service_id, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, _))
-        .WillOnce(SetArgumentPointee<2>(kMaxAttribLength))
+        .WillOnce(SetArgumentPointee<2>(max_attrib_len))
         .RetiresOnSaturation();
     for (size_t ii = 0; ii < num_attribs; ++ii) {
       const AttribInfo& info = attribs[ii];
       EXPECT_CALL(*gl_,
           GetActiveAttrib(service_id, ii,
-                          kMaxAttribLength, _, _, _, _))
+                          max_attrib_len, _, _, _, _))
           .WillOnce(DoAll(
               SetArgumentPointee<3>(strlen(info.name)),
               SetArgumentPointee<4>(info.size),
@@ -160,15 +211,20 @@ class ProgramManagerWithShaderTest : public testing::Test {
         GetProgramiv(service_id, GL_ACTIVE_UNIFORMS, _))
         .WillOnce(SetArgumentPointee<2>(num_uniforms))
         .RetiresOnSaturation();
+    size_t max_uniform_len = 0;
+    for (size_t ii = 0; ii < num_uniforms; ++ii) {
+      size_t len = strlen(uniforms[ii].name) + 1;
+      max_uniform_len = std::max(max_uniform_len, len);
+    }
     EXPECT_CALL(*gl_,
         GetProgramiv(service_id, GL_ACTIVE_UNIFORM_MAX_LENGTH, _))
-        .WillOnce(SetArgumentPointee<2>(kMaxUniformLength))
+        .WillOnce(SetArgumentPointee<2>(max_uniform_len))
         .RetiresOnSaturation();
     for (size_t ii = 0; ii < num_uniforms; ++ii) {
       const UniformInfo& info = uniforms[ii];
       EXPECT_CALL(*gl_,
           GetActiveUniform(service_id, ii,
-                           kMaxUniformLength, _, _, _, _))
+                           max_uniform_len, _, _, _, _))
           .WillOnce(DoAll(
               SetArgumentPointee<3>(strlen(info.name)),
               SetArgumentPointee<4>(info.size),
@@ -182,9 +238,14 @@ class ProgramManagerWithShaderTest : public testing::Test {
             .WillOnce(Return(info.location))
             .RetiresOnSaturation();
         if (info.size > 1) {
+          std::string base_name = info.name;
+          size_t array_pos = base_name.rfind("[0]");
+          if (base_name.size() > 3 && array_pos == base_name.size() - 3) {
+            base_name = base_name.substr(0, base_name.size() - 3);
+          }
           for (GLsizei jj = 1; jj < info.size; ++jj) {
             std::string element_name(
-                std::string(info.name) + "[" + IntToString(jj) + "]");
+                std::string(base_name) + "[" + IntToString(jj) + "]");
             EXPECT_CALL(*gl_, GetUniformLocation(service_id,
                                                  StrEq(element_name)))
                 .WillOnce(Return(info.location + jj * 2))
@@ -198,16 +259,17 @@ class ProgramManagerWithShaderTest : public testing::Test {
 
   void SetupDefaultShaderExpectations() {
     SetupShader(kAttribs, kNumAttribs, kUniforms, kNumUniforms,
-                kProgramId);
+                kServiceProgramId);
   }
 
   virtual void TearDown() {
+    ::gfx::GLInterface::SetGLInterface(NULL);
   }
 
   static AttribInfo kAttribs[];
   static UniformInfo kUniforms[];
 
-  scoped_ptr<StrictMock<MockGLInterface> > gl_;
+  scoped_ptr<StrictMock<gfx::MockGLInterface> > gl_;
 
   ProgramManager manager_;
 
@@ -224,8 +286,8 @@ ProgramManagerWithShaderTest::AttribInfo
 // GCC requires these declarations, but MSVC requires they not be present
 #ifndef COMPILER_MSVC
 const GLint ProgramManagerWithShaderTest::kNumVertexAttribs;
-const GLuint ProgramManagerWithShaderTest::kProgramId;
-const GLint ProgramManagerWithShaderTest::kMaxAttribLength;
+const GLuint ProgramManagerWithShaderTest::kClientProgramId;
+const GLuint ProgramManagerWithShaderTest::kServiceProgramId;
 const GLint ProgramManagerWithShaderTest::kAttrib1Size;
 const GLint ProgramManagerWithShaderTest::kAttrib2Size;
 const GLint ProgramManagerWithShaderTest::kAttrib3Size;
@@ -237,7 +299,6 @@ const GLenum ProgramManagerWithShaderTest::kAttrib2Type;
 const GLenum ProgramManagerWithShaderTest::kAttrib3Type;
 const GLint ProgramManagerWithShaderTest::kInvalidAttribLocation;
 const GLint ProgramManagerWithShaderTest::kBadAttribIndex;
-const GLint ProgramManagerWithShaderTest::kMaxUniformLength;
 const GLint ProgramManagerWithShaderTest::kUniform1Size;
 const GLint ProgramManagerWithShaderTest::kUniform2Size;
 const GLint ProgramManagerWithShaderTest::kUniform3Size;
@@ -275,7 +336,7 @@ const char* ProgramManagerWithShaderTest::kUniform3Name = "uniform3";
 
 TEST_F(ProgramManagerWithShaderTest, GetAttribInfos) {
   const ProgramManager::ProgramInfo* program_info =
-      manager_.GetProgramInfo(kProgramId);
+      manager_.GetProgramInfo(kClientProgramId);
   ASSERT_TRUE(program_info != NULL);
   const ProgramManager::ProgramInfo::AttribInfoVector& infos =
       program_info->GetAttribInfos();
@@ -293,7 +354,7 @@ TEST_F(ProgramManagerWithShaderTest, GetAttribInfo) {
   const GLint kValidIndex = 1;
   const GLint kInvalidIndex = 1000;
   const ProgramManager::ProgramInfo* program_info =
-      manager_.GetProgramInfo(kProgramId);
+      manager_.GetProgramInfo(kClientProgramId);
   ASSERT_TRUE(program_info != NULL);
   const ProgramManager::ProgramInfo::VertexAttribInfo* info =
       program_info->GetAttribInfo(kValidIndex);
@@ -308,7 +369,7 @@ TEST_F(ProgramManagerWithShaderTest, GetAttribInfo) {
 TEST_F(ProgramManagerWithShaderTest, GetAttribLocation) {
   const char* kInvalidName = "foo";
   const ProgramManager::ProgramInfo* program_info =
-      manager_.GetProgramInfo(kProgramId);
+      manager_.GetProgramInfo(kClientProgramId);
   ASSERT_TRUE(program_info != NULL);
   EXPECT_EQ(kAttrib2Location, program_info->GetAttribLocation(kAttrib2Name));
   EXPECT_EQ(-1, program_info->GetAttribLocation(kInvalidName));
@@ -317,7 +378,7 @@ TEST_F(ProgramManagerWithShaderTest, GetAttribLocation) {
 TEST_F(ProgramManagerWithShaderTest, GetUniformInfo) {
   const GLint kInvalidIndex = 1000;
   const ProgramManager::ProgramInfo* program_info =
-      manager_.GetProgramInfo(kProgramId);
+      manager_.GetProgramInfo(kClientProgramId);
   ASSERT_TRUE(program_info != NULL);
   const ProgramManager::ProgramInfo::UniformInfo* info =
       program_info->GetUniformInfo(0);
@@ -344,9 +405,54 @@ TEST_F(ProgramManagerWithShaderTest, GetUniformInfo) {
   EXPECT_TRUE(program_info->GetUniformInfo(kInvalidIndex) == NULL);
 }
 
+TEST_F(ProgramManagerWithShaderTest, AttachDetachShader) {
+  ShaderManager shader_manager;
+  ProgramManager::ProgramInfo* program_info =
+      manager_.GetProgramInfo(kClientProgramId);
+  ASSERT_TRUE(program_info != NULL);
+  EXPECT_FALSE(program_info->CanLink());
+  const GLuint kVShaderClientId = 2001;
+  const GLuint kFShaderClientId = 2002;
+  const GLuint kVShaderServiceId = 3001;
+  const GLuint kFShaderServiceId = 3002;
+  shader_manager.CreateShaderInfo(
+      kVShaderClientId, kVShaderServiceId, GL_VERTEX_SHADER);
+  ShaderManager::ShaderInfo* vshader = shader_manager.GetShaderInfo(
+      kVShaderClientId);
+  vshader->SetStatus(true, "");
+  shader_manager.CreateShaderInfo(
+      kFShaderClientId, kFShaderServiceId, GL_FRAGMENT_SHADER);
+  ShaderManager::ShaderInfo* fshader = shader_manager.GetShaderInfo(
+      kFShaderClientId);
+  fshader->SetStatus(true, "");
+  program_info->AttachShader(vshader);
+  EXPECT_FALSE(program_info->CanLink());
+  program_info->AttachShader(fshader);
+  EXPECT_TRUE(program_info->CanLink());
+  program_info->DetachShader(vshader);
+  EXPECT_FALSE(program_info->CanLink());
+  program_info->AttachShader(vshader);
+  EXPECT_TRUE(program_info->CanLink());
+  program_info->DetachShader(fshader);
+  EXPECT_FALSE(program_info->CanLink());
+  program_info->AttachShader(vshader);
+  EXPECT_FALSE(program_info->CanLink());
+  program_info->AttachShader(fshader);
+  EXPECT_TRUE(program_info->CanLink());
+  vshader->SetStatus(false, "");
+  EXPECT_FALSE(program_info->CanLink());
+  vshader->SetStatus(true, "");
+  EXPECT_TRUE(program_info->CanLink());
+  fshader->SetStatus(false, "");
+  EXPECT_FALSE(program_info->CanLink());
+  fshader->SetStatus(true, "");
+  EXPECT_TRUE(program_info->CanLink());
+  shader_manager.Destroy(false);
+}
+
 TEST_F(ProgramManagerWithShaderTest, GetUniformLocation) {
   const ProgramManager::ProgramInfo* program_info =
-      manager_.GetProgramInfo(kProgramId);
+      manager_.GetProgramInfo(kClientProgramId);
   ASSERT_TRUE(program_info != NULL);
   EXPECT_EQ(kUniform1Location, program_info->GetUniformLocation(kUniform1Name));
   EXPECT_EQ(kUniform2Location, program_info->GetUniformLocation(kUniform2Name));
@@ -374,7 +480,7 @@ TEST_F(ProgramManagerWithShaderTest, GetUniformTypeByLocation) {
   const GLint kInvalidLocation = 1234;
   GLenum type = 0u;
   const ProgramManager::ProgramInfo* program_info =
-      manager_.GetProgramInfo(kProgramId);
+      manager_.GetProgramInfo(kClientProgramId);
   ASSERT_TRUE(program_info != NULL);
   EXPECT_TRUE(program_info->GetUniformTypeByLocation(kUniform2Location, &type));
   EXPECT_EQ(kUniform2Type, type);
@@ -382,6 +488,39 @@ TEST_F(ProgramManagerWithShaderTest, GetUniformTypeByLocation) {
   EXPECT_FALSE(program_info->GetUniformTypeByLocation(
       kInvalidLocation, &type));
   EXPECT_EQ(0u, type);
+}
+
+// Some GL drivers incorrectly return gl_DepthRange and possibly other uniforms
+// that start with "gl_". Our implementation catches these and does not allow
+// them back to client.
+TEST_F(ProgramManagerWithShaderTest, GLDriverReturnsGLUnderscoreUniform) {
+  static const char* kUniform2Name = "gl_longNameWeCanCheckFor";
+  static ProgramManagerWithShaderTest::UniformInfo kUniforms[] = {
+    { kUniform1Name, kUniform1Size, kUniform1Type, kUniform1Location, },
+    { kUniform2Name, kUniform2Size, kUniform2Type, kUniform2Location, },
+    { kUniform3Name, kUniform3Size, kUniform3Type, kUniform3Location, },
+  };
+  const size_t kNumUniforms = arraysize(kUniforms);
+  static const GLuint kClientProgramId = 1234;
+  static const GLuint kServiceProgramId = 5679;
+  SetupShader(kAttribs, kNumAttribs, kUniforms, kNumUniforms,
+              kServiceProgramId);
+  manager_.CreateProgramInfo(kClientProgramId, kServiceProgramId);
+  ProgramManager::ProgramInfo* program_info =
+      manager_.GetProgramInfo(kClientProgramId);
+  ASSERT_TRUE(program_info != NULL);
+  program_info->Update();
+  GLint value = 0;
+  program_info->GetProgramiv(GL_ACTIVE_ATTRIBUTES, &value);
+  EXPECT_EQ(3, value);
+  // Check that we skipped the "gl_" uniform.
+  program_info->GetProgramiv(GL_ACTIVE_UNIFORMS, &value);
+  EXPECT_EQ(2, value);
+  // Check that our max length adds room for the array spec and is not as long
+  // as the "gl_" uniform we skipped.
+  // +4u is to account for "gl_" and NULL terminator.
+  program_info->GetProgramiv(GL_ACTIVE_UNIFORM_MAX_LENGTH, &value);
+  EXPECT_EQ(strlen(kUniform3Name) + 4u, static_cast<size_t>(value));
 }
 
 }  // namespace gles2
