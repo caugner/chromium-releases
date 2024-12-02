@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "base/auto_reset.h"
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
@@ -43,8 +44,8 @@
 #include "views/window/hit_test.h"
 
 #if defined(TOUCH_UI)
+#include "ui/base/touch/touch_factory.h"
 #include "views/widget/tooltip_manager_views.h"
-#include "views/touchui/touch_factory.h"
 #else
 #include "views/widget/tooltip_manager_gtk.h"
 #endif
@@ -182,6 +183,7 @@ void RemoveExposeHandlerIfExists(GtkWidget* widget) {
 
 GtkWindowType WindowTypeToGtkWindowType(Widget::InitParams::Type type) {
   switch (type) {
+    case Widget::InitParams::TYPE_BUBBLE:
     case Widget::InitParams::TYPE_WINDOW:
     case Widget::InitParams::TYPE_WINDOW_FRAMELESS:
       return GTK_WINDOW_TOPLEVEL;
@@ -260,7 +262,15 @@ class NativeWidgetGtk::DropObserver : public MessageLoopForUI::Observer {
   static DropObserver* GetInstance() {
     return Singleton<DropObserver>::get();
   }
+#if defined(TOUCH_UI)
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE {
+    return base::EVENT_CONTINUE;
+  }
 
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE {
+  }
+#else
   virtual void WillProcessEvent(GdkEvent* event) {
     if (event->type == GDK_DROP_START) {
       NativeWidgetGtk* widget = GetNativeWidgetGtkForEvent(event);
@@ -271,6 +281,7 @@ class NativeWidgetGtk::DropObserver : public MessageLoopForUI::Observer {
 
   virtual void DidProcessEvent(GdkEvent* event) {
   }
+#endif
 
  private:
   NativeWidgetGtk* GetNativeWidgetGtkForEvent(GdkEvent* event) {
@@ -381,7 +392,7 @@ NativeWidgetGtk::NativeWidgetGtk(internal::NativeWidgetDelegate* delegate)
 #if defined(TOUCH_UI)
   // Make sure the touch factory is initialized so that it can setup XInput2 for
   // the widget.
-  TouchFactory::GetInstance();
+  ui::TouchFactory::GetInstance();
 #endif
   static bool installed_message_loop_observer = false;
   if (!installed_message_loop_observer) {
@@ -660,7 +671,6 @@ void NativeWidgetGtk::InitNativeWidget(const Widget::InitParams& params) {
   SetInitParams(params);
 
   Widget::InitParams modified_params = params;
-  gfx::NativeView parent = params.parent;
   if (params.parent_widget) {
     NativeWidgetGtk* parent_gtk =
         static_cast<NativeWidgetGtk*>(params.parent_widget->native_widget());
@@ -686,12 +696,16 @@ void NativeWidgetGtk::InitNativeWidget(const Widget::InitParams& params) {
     } else {
       gint width, height;
       gdk_drawable_get_size(window_contents_->window, &width, &height);
-      compositor_ = ui::Compositor::Create(
+      compositor_ = ui::Compositor::Create(this,
           GDK_WINDOW_XID(window_contents_->window),
           gfx::Size(width, height));
     }
-    if (compositor_.get())
-      delegate_->AsWidget()->GetRootView()->SetPaintToLayer(true);
+    if (compositor_.get()) {
+      View* root_view = delegate_->AsWidget()->GetRootView();
+      root_view->SetPaintToLayer(true);
+      compositor_->SetRootLayer(root_view->layer());
+      root_view->SetFillsBoundsOpaquely(!transparent_);
+    }
   }
 
   delegate_->OnNativeWidgetCreated();
@@ -804,7 +818,7 @@ void NativeWidgetGtk::InitNativeWidget(const Widget::InitParams& params) {
                              G_CALLBACK(&OnQueryTooltipThunk), this);
 
   if (child_) {
-    if (parent)
+    if (modified_params.parent)
       SetBounds(params.bounds);
   } else {
     gtk_widget_add_events(widget_,
@@ -866,11 +880,12 @@ ui::Compositor* NativeWidgetGtk::GetCompositor() {
   return compositor_.get();
 }
 
-void NativeWidgetGtk::MarkLayerDirty() {
+void NativeWidgetGtk::CalculateOffsetToAncestorWithLayer(
+    gfx::Point* offset,
+    ui::Layer** layer_parent) {
 }
 
-void NativeWidgetGtk::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                         View** ancestor) {
+void NativeWidgetGtk::ReorderLayers() {
 }
 
 void NativeWidgetGtk::ViewRemoved(View* view) {
@@ -940,7 +955,7 @@ void NativeWidgetGtk::SetMouseCapture() {
     ::Window window = GDK_WINDOW_XID(window_contents()->window);
     Display* display = GDK_WINDOW_XDISPLAY(window_contents()->window);
     bool xi2grab =
-        TouchFactory::GetInstance()->GrabTouchDevices(display, window);
+        ui::TouchFactory::GetInstance()->GrabTouchDevices(display, window);
     // xi2grab should always succeed if has_pointer_grab_ succeeded.
     DCHECK(xi2grab);
     has_pointer_grab_ = has_pointer_grab_ && xi2grab;
@@ -960,7 +975,7 @@ void NativeWidgetGtk::ReleaseMouseCapture() {
     has_pointer_grab_ = false;
     gdk_pointer_ungrab(GDK_CURRENT_TIME);
 #if defined(TOUCH_UI)
-    TouchFactory::GetInstance()->UngrabTouchDevices(
+    ui::TouchFactory::GetInstance()->UngrabTouchDevices(
         GDK_WINDOW_XDISPLAY(window_contents()->window));
 #endif
   }
@@ -1022,7 +1037,7 @@ void NativeWidgetGtk::GetWindowPlacement(
   // Do nothing for now. ChromeOS isn't yet saving window placement.
 }
 
-void NativeWidgetGtk::SetWindowTitle(const std::wstring& title) {
+void NativeWidgetGtk::SetWindowTitle(const string16& title) {
   // We don't have a window title on ChromeOS (right now).
 }
 
@@ -1031,7 +1046,7 @@ void NativeWidgetGtk::SetWindowIcons(const SkBitmap& window_icon,
   // We don't have window icons on ChromeOS.
 }
 
-void NativeWidgetGtk::SetAccessibleName(const std::wstring& name) {
+void NativeWidgetGtk::SetAccessibleName(const string16& name) {
 }
 
 void NativeWidgetGtk::SetAccessibleRole(ui::AccessibilityTypes::Role role) {
@@ -1157,11 +1172,12 @@ void NativeWidgetGtk::Close() {
 
   // Hide first.
   Hide();
-  if (close_widget_factory_.empty()) {
+  if (!close_widget_factory_.HasWeakPtrs()) {
     // And we delay the close just in case we're on the stack.
-    MessageLoop::current()->PostTask(FROM_HERE,
-        close_widget_factory_.NewRunnableMethod(
-            &NativeWidgetGtk::CloseNow));
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&NativeWidgetGtk::CloseNow,
+                   close_widget_factory_.GetWeakPtr()));
   }
 }
 
@@ -1180,8 +1196,6 @@ void NativeWidgetGtk::Show() {
     gtk_widget_show(widget_);
     if (widget_->window)
       gdk_window_raise(widget_->window);
-    // See Hide() for the reason why we're not calling
-    // OnNativeWidgetVisibilityChange.
   }
 }
 
@@ -1190,15 +1204,6 @@ void NativeWidgetGtk::Hide() {
     gtk_widget_hide(widget_);
     if (widget_->window)
       gdk_window_lower(widget_->window);
-    // We're not calling OnNativeWidgetVisibilityChanged because it
-    // breaks the ability to refocus to FindBar. NativeControlGtk
-    // detaches the underlying gtk widget for optimization purpose
-    // when it becomes invisible, which in turn breaks SetNativeFocus
-    // because there is no gtk attached to NativeControlGtk. I'm not
-    // fixing that part because
-    // a) This is views/gtk only issue, which will be gone soon.
-    // b) Alternative fix, which we can modify animator to show it
-    // immediately, won't be necessary for non gtk implementation.
   }
 }
 
@@ -1216,7 +1221,8 @@ void NativeWidgetGtk::ShowWithWindowState(ui::WindowShowState show_state) {
 }
 
 bool NativeWidgetGtk::IsVisible() const {
-  return GTK_WIDGET_VISIBLE(GetNativeView());
+  return GTK_WIDGET_VISIBLE(GetNativeView()) && (GetWidget()->is_top_level() ||
+      GetWidget()->GetTopLevelWidget()->IsVisible());
 }
 
 void NativeWidgetGtk::Activate() {
@@ -1240,7 +1246,17 @@ void NativeWidgetGtk::SetAlwaysOnTop(bool on_top) {
 }
 
 void NativeWidgetGtk::Maximize() {
+#if defined(TOUCH_UI)
+  // There may not be a window manager. So maximize ourselves: move to the
+  // top-left corner and resize to the entire bounds of the screen.
+  gfx::Rect screen = gfx::Screen::GetMonitorAreaNearestWindow(GetNativeView());
+  gtk_window_move(GTK_WINDOW(GetNativeWindow()), screen.x(), screen.y());
+  // TODO(backer): Remove this driver bug workaround once it is fixed.
+  gtk_window_resize(GTK_WINDOW(GetNativeWindow()),
+                    screen.width() - 1, screen.height());
+#else
   gtk_window_maximize(GetNativeWindow());
+#endif
 }
 
 void NativeWidgetGtk::Minimize() {
@@ -1315,9 +1331,9 @@ void NativeWidgetGtk::SchedulePaintInRect(const gfx::Rect& rect) {
 
 void NativeWidgetGtk::SetCursor(gfx::NativeCursor cursor) {
 #if defined(TOUCH_UI)
-  if (TouchFactory::GetInstance()->keep_mouse_cursor())
+  if (ui::TouchFactory::GetInstance()->keep_mouse_cursor())
     cursor = gfx::GetCursor(GDK_ARROW);
-  else if (!TouchFactory::GetInstance()->is_cursor_visible())
+  else if (!ui::TouchFactory::GetInstance()->is_cursor_visible())
     cursor = gfx::GetCursor(GDK_BLANK_CURSOR);
 #endif
   // |window_contents_| is placed on top of |widget_|. So the cursor needs to be
@@ -1344,6 +1360,17 @@ bool NativeWidgetGtk::ConvertPointFromAncestor(
     const Widget* ancestor, gfx::Point* point) const {
   NOTREACHED();
   return false;
+}
+
+gfx::Rect NativeWidgetGtk::GetWorkAreaBoundsInScreen() const {
+  ViewsDelegate *delegate = ViewsDelegate::views_delegate;
+  if (delegate && delegate->GetDefaultParentView()) {
+    // For views-desktop, the work area is the entire space inside this
+    // containter window.
+    return gfx::Rect(gfx::Point(0, 0),
+                     delegate->GetDefaultParentView()->size());
+  } else
+    return gfx::Screen::GetMonitorWorkAreaNearestWindow(GetNativeView());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1695,7 +1722,7 @@ gboolean NativeWidgetGtk::OnFocusOut(GtkWidget* widget, GdkEventFocus* event) {
 }
 
 gboolean NativeWidgetGtk::OnEventKey(GtkWidget* widget, GdkEventKey* event) {
-  KeyEvent key(reinterpret_cast<NativeEvent>(event));
+  KeyEvent key(reinterpret_cast<GdkEvent*>(event));
   InputMethod* input_method = GetWidget()->GetInputMethod();
   if (input_method)
     input_method->DispatchKeyEvent(key);
@@ -1751,8 +1778,8 @@ gboolean NativeWidgetGtk::OnGrabBrokeEvent(GtkWidget* widget, GdkEvent* event) {
   }
   ReleaseMouseCapture();
 
-#if defined(HAVE_XINPUT2) && defined(TOUCH_UI)
-  TouchFactory::GetInstance()->UngrabTouchDevices(
+#if defined(TOUCH_UI)
+  ui::TouchFactory::GetInstance()->UngrabTouchDevices(
       GDK_WINDOW_XDISPLAY(window_contents()->window));
 #endif
   return false;  // To let other widgets get the event.
@@ -1788,6 +1815,7 @@ void NativeWidgetGtk::OnDestroyed(GObject *where_the_object_was) {
 }
 
 void NativeWidgetGtk::OnShow(GtkWidget* widget) {
+  delegate_->OnNativeWidgetVisibilityChanged(true);
 }
 
 void NativeWidgetGtk::OnMap(GtkWidget* widget) {
@@ -1804,6 +1832,7 @@ void NativeWidgetGtk::OnMap(GtkWidget* widget) {
 }
 
 void NativeWidgetGtk::OnHide(GtkWidget* widget) {
+  delegate_->OnNativeWidgetVisibilityChanged(false);
 }
 
 gboolean NativeWidgetGtk::OnWindowStateEvent(GtkWidget* widget,
@@ -1830,6 +1859,10 @@ void NativeWidgetGtk::HandleGtkGrabBroke() {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetGtk, private:
 
+void NativeWidgetGtk::ScheduleDraw() {
+  SchedulePaintInRect(gfx::Rect(gfx::Point(), size_));
+}
+
 void NativeWidgetGtk::DispatchKeyEventPostIME(const KeyEvent& key) {
   // Always reset |should_handle_menu_key_release_| unless we are handling a
   // VKEY_MENU key release event. It ensures that VKEY_MENU accelerator can only
@@ -1848,7 +1881,7 @@ void NativeWidgetGtk::DispatchKeyEventPostIME(const KeyEvent& key) {
   // To prevent GtkWindow from handling the key event as a keybinding, we need
   // to bypass GtkWindow's default key event handler and dispatch the event
   // here.
-  GdkEventKey* event = reinterpret_cast<GdkEventKey*>(key.native_event());
+  GdkEventKey* event = reinterpret_cast<GdkEventKey*>(key.gdk_event());
   if (!handled && event && GTK_IS_WINDOW(widget_))
     handled = gtk_window_propagate_key_event(GTK_WINDOW(widget_), event);
 
@@ -2148,22 +2181,20 @@ bool Widget::ConvertRect(const Widget* source,
   DCHECK(target);
   DCHECK(rect);
 
-  GtkWidget* source_widget = source->GetNativeView();
-  GtkWidget* target_widget = target->GetNativeView();
-  if (source_widget == target_widget)
-    return true;
+  // TODO(oshima): Add check if source and target belongs to the same
+  // screen.
 
-  if (!source_widget || !target_widget)
+  if (source == target)
+    return true;
+  if (!source || !target)
     return false;
 
-  GdkRectangle gdk_rect = rect->ToGdkRectangle();
-  if (gtk_widget_translate_coordinates(source_widget, target_widget,
-                                       gdk_rect.x, gdk_rect.y,
-                                       &gdk_rect.x, &gdk_rect.y)) {
-    *rect = gdk_rect;
-    return true;
-  }
-  return false;
+  gfx::Point source_point = source->GetWindowScreenBounds().origin();
+  gfx::Point target_point = target->GetWindowScreenBounds().origin();
+
+  rect->set_origin(
+      source_point.Subtract(target_point).Add(rect->origin()));
+  return true;
 }
 
 namespace internal {

@@ -12,6 +12,7 @@
 #include "chrome/browser/sync/profile_sync_factory.h"
 
 class CommandLine;
+class ExtensionSettingsBackend;
 class Profile;
 
 class ProfileSyncFactoryImpl : public ProfileSyncFactory {
@@ -29,6 +30,13 @@ class ProfileSyncFactoryImpl : public ProfileSyncFactory {
       browser_sync::SyncBackendHost* backend,
       const browser_sync::DataTypeController::TypeMap* controllers);
 
+  virtual browser_sync::GenericChangeProcessor* CreateGenericChangeProcessor(
+      ProfileSyncService* profile_sync_service,
+      browser_sync::UnrecoverableErrorHandler* error_handler,
+      const base::WeakPtr<SyncableService>& local_service);
+
+  virtual browser_sync::SharedChangeProcessor* CreateSharedChangeProcessor();
+
   virtual SyncComponents CreateAppSyncComponents(
       ProfileSyncService* profile_sync_service,
       browser_sync::UnrecoverableErrorHandler* error_handler);
@@ -36,16 +44,17 @@ class ProfileSyncFactoryImpl : public ProfileSyncFactory {
   virtual SyncComponents CreateAutofillSyncComponents(
       ProfileSyncService* profile_sync_service,
       WebDatabase* web_database,
-      PersonalDataManager* personal_data,
       browser_sync::UnrecoverableErrorHandler* error_handler);
 
-  virtual SyncComponents CreateAutofillProfileSyncComponents(
-      ProfileSyncService* profile_sync_service,
-      WebDatabase* web_database,
-      PersonalDataManager* personal_data,
-      browser_sync::UnrecoverableErrorHandler* error_handler);
+  virtual base::WeakPtr<SyncableService> GetAutofillProfileSyncableService(
+      WebDataService* web_data_service) const;
 
   virtual SyncComponents CreateBookmarkSyncComponents(
+      ProfileSyncService* profile_sync_service,
+      browser_sync::UnrecoverableErrorHandler* error_handler);
+
+  virtual SyncComponents CreateExtensionSettingSyncComponents(
+      ExtensionSettingsBackend* extension_settings_backend,
       ProfileSyncService* profile_sync_service,
       browser_sync::UnrecoverableErrorHandler* error_handler);
 

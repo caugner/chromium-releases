@@ -29,19 +29,19 @@
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/bindings_policy.h"
 #include "content/common/content_constants.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/drag_messages.h"
-#include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
 #include "content/common/result_codes.h"
 #include "content/common/speech_input_messages.h"
 #include "content/common/swapped_out_messages.h"
-#include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/bindings_policy.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -163,7 +163,7 @@ bool RenderViewHost::CreateRenderView(const string16& frame_name) {
   DCHECK(process()->HasConnection());
   DCHECK(process()->browser_context());
 
-  if (BindingsPolicy::is_web_ui_enabled(enabled_bindings_)) {
+  if (enabled_bindings_ & content::BINDINGS_POLICY_WEB_UI) {
     ChildProcessSecurityPolicy::GetInstance()->GrantWebUIBindings(
         process()->id());
   }
@@ -257,7 +257,7 @@ void RenderViewHost::NavigateToURL(const GURL& url) {
   params.current_history_list_offset = -1;
   params.current_history_list_length = 0;
   params.url = url;
-  params.transition = PageTransition::LINK;
+  params.transition = content::PAGE_TRANSITION_LINK;
   params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
   Navigate(params);
 }
@@ -481,49 +481,6 @@ int RenderViewHost::ExecuteJavascriptInWebFrameNotifyResult(
   return next_id++;
 }
 
-void RenderViewHost::Undo() {
-  Send(new ViewMsg_Undo(routing_id()));
-  UserMetrics::RecordAction(UserMetricsAction("Undo"));
-}
-
-void RenderViewHost::Redo() {
-  Send(new ViewMsg_Redo(routing_id()));
-  UserMetrics::RecordAction(UserMetricsAction("Redo"));
-}
-
-void RenderViewHost::Cut() {
-  Send(new ViewMsg_Cut(routing_id()));
-  UserMetrics::RecordAction(UserMetricsAction("Cut"));
-}
-
-void RenderViewHost::Copy() {
-  Send(new ViewMsg_Copy(routing_id()));
-  UserMetrics::RecordAction(UserMetricsAction("Copy"));
-}
-
-void RenderViewHost::CopyToFindPboard() {
-#if defined(OS_MACOSX)
-  // Windows/Linux don't have the concept of a find pasteboard.
-  Send(new ViewMsg_CopyToFindPboard(routing_id()));
-  UserMetrics::RecordAction(UserMetricsAction("CopyToFindPboard"));
-#endif
-}
-
-void RenderViewHost::Paste() {
-  Send(new ViewMsg_Paste(routing_id()));
-  UserMetrics::RecordAction(UserMetricsAction("Paste"));
-}
-
-void RenderViewHost::Delete() {
-  Send(new ViewMsg_Delete(routing_id()));
-  UserMetrics::RecordAction(UserMetricsAction("DeleteSelection"));
-}
-
-void RenderViewHost::SelectAll() {
-  Send(new ViewMsg_SelectAll(routing_id()));
-  UserMetrics::RecordAction(UserMetricsAction("SelectAll"));
-}
-
 void RenderViewHost::JavaScriptDialogClosed(IPC::Message* reply_msg,
                                             bool success,
                                             const string16& user_input) {
@@ -577,7 +534,7 @@ void RenderViewHost::AllowBindings(int bindings_flags) {
 
 void RenderViewHost::SetWebUIProperty(const std::string& name,
                                       const std::string& value) {
-  DCHECK(BindingsPolicy::is_web_ui_enabled(enabled_bindings_));
+  DCHECK(enabled_bindings_  & content::BINDINGS_POLICY_WEB_UI);
   Send(new ViewMsg_SetWebUIProperty(routing_id(), name, value));
 }
 
@@ -594,17 +551,23 @@ void RenderViewHost::LostCapture() {
   delegate_->LostCapture();
 }
 
+void RenderViewHost::LostMouseLock() {
+  RenderWidgetHost::LostMouseLock();
+  delegate_->LostMouseLock();
+}
+
 void RenderViewHost::SetInitialFocus(bool reverse) {
   Send(new ViewMsg_SetInitialFocus(routing_id(), reverse));
 }
 
 void RenderViewHost::FilesSelectedInChooser(
-    const std::vector<FilePath>& files) {
+    const std::vector<FilePath>& files,
+    int permissions) {
   // Grant the security access requested to the given files.
   for (std::vector<FilePath>::const_iterator file = files.begin();
        file != files.end(); ++file) {
-    ChildProcessSecurityPolicy::GetInstance()->GrantReadFile(
-        process()->id(), *file);
+    ChildProcessSecurityPolicy::GetInstance()->GrantPermissionsForFile(
+        process()->id(), *file, permissions);
   }
   Send(new ViewMsg_RunFileChooserResponse(routing_id(), files));
 }
@@ -708,6 +671,8 @@ bool RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShouldClose_ACK, OnMsgShouldCloseACK)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ClosePage_ACK, OnMsgClosePageACK)
     IPC_MESSAGE_HANDLER(ViewHostMsg_SelectionChanged, OnMsgSelectionChanged)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_SelectionBoundsChanged,
+                        OnMsgSelectionBoundsChanged)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AccessibilityNotifications,
                         OnAccessibilityNotifications)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ScriptEvalResponse, OnScriptEvalResponse)
@@ -722,6 +687,7 @@ bool RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShowPopup, OnMsgShowPopup)
 #endif
     IPC_MESSAGE_HANDLER(ViewHostMsg_RunFileChooser, OnRunFileChooser)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_WebUISend, OnWebUISend)
     // Have the super handle all other messages.
     IPC_MESSAGE_UNHANDLED(handled = RenderWidgetHost::OnMessageReceived(msg))
   IPC_END_MESSAGE_MAP_EX()
@@ -857,7 +823,7 @@ void RenderViewHost::OnMsgNavigate(const IPC::Message& msg) {
   // to allow the pending navigation to continue.
   if (is_waiting_for_beforeunload_ack_ &&
       unload_ack_is_for_cross_site_transition_ &&
-      PageTransition::IsMainFrame(validated_params.transition)) {
+      content::PageTransitionIsMainFrame(validated_params.transition)) {
     OnMsgShouldCloseACK(true);
     return;
   }
@@ -993,12 +959,14 @@ void RenderViewHost::OnMsgToggleFullscreen(bool enter_fullscreen) {
 
 void RenderViewHost::OnMsgOpenURL(const GURL& url,
                                   const GURL& referrer,
-                                  WindowOpenDisposition disposition) {
+                                  WindowOpenDisposition disposition,
+                                  int64 source_frame_id) {
   GURL validated_url(url);
   FilterURL(ChildProcessSecurityPolicy::GetInstance(),
             process()->id(), &validated_url);
 
-  delegate_->RequestOpenURL(validated_url, referrer, disposition);
+  delegate_->RequestOpenURL(
+      validated_url, referrer, disposition, source_frame_id);
 }
 
 void RenderViewHost::OnMsgDidContentsPreferredSizeChange(
@@ -1021,12 +989,18 @@ void RenderViewHost::OnMsgDidChangeScrollOffsetPinningForMainFrame(
 void RenderViewHost::OnMsgDidChangeNumWheelEvents(int count) {
 }
 
-void RenderViewHost::OnMsgSelectionChanged(const std::string& text,
-                                           const ui::Range& range,
-                                           const gfx::Point& start,
-                                           const gfx::Point& end) {
+void RenderViewHost::OnMsgSelectionChanged(const string16& text,
+                                           size_t offset,
+                                           const ui::Range& range) {
   if (view())
-    view()->SelectionChanged(text, range, start, end);
+    view()->SelectionChanged(text, offset, range);
+}
+
+void RenderViewHost::OnMsgSelectionBoundsChanged(
+    const gfx::Rect& start_rect,
+    const gfx::Rect& end_rect) {
+  if (view())
+    view()->SelectionBoundsChanged(start_rect, end_rect);
 }
 
 void RenderViewHost::OnMsgRunJavaScriptMessage(
@@ -1110,7 +1084,7 @@ void RenderViewHost::OnAddMessageToConsole(int32 level,
                                            const string16& source_id) {
   // Pass through log level only on WebUI pages to limit console spew.
   int32 resolved_level =
-      BindingsPolicy::is_web_ui_enabled(enabled_bindings_) ? level : 0;
+      (enabled_bindings_ & content::BINDINGS_POLICY_WEB_UI) ? level : 0;
 
   logging::LogMessage("CONSOLE", line_no, resolved_level).stream() << "\"" <<
       message << "\", source: " << source_id << " (" << line_no << ")";
@@ -1171,6 +1145,14 @@ void RenderViewHost::NotifyRendererUnresponsive() {
 
 void RenderViewHost::NotifyRendererResponsive() {
   delegate_->RendererResponsive(this);
+}
+
+void RenderViewHost::RequestToLockMouse() {
+  delegate_->RequestToLockMouse();
+}
+
+bool RenderViewHost::IsFullscreen() const {
+  return delegate_->IsFullscreenForCurrentTab();
 }
 
 void RenderViewHost::OnMsgFocus() {
@@ -1260,6 +1242,85 @@ void RenderViewHost::FilterURL(ChildProcessSecurityPolicy* policy,
   }
 }
 
+void RenderViewHost::SetAltErrorPageURL(const GURL& url) {
+  Send(new ViewMsg_SetAltErrorPageURL(routing_id(), url));
+}
+
+void RenderViewHost::ExitFullscreen() {
+  RejectMouseLockOrUnlockIfNecessary();
+
+  Send(new ViewMsg_ExitFullscreen(routing_id()));
+}
+
+void RenderViewHost::UpdateWebkitPreferences(const WebPreferences& prefs) {
+  Send(new ViewMsg_UpdateWebPreferences(routing_id(), prefs));
+}
+
+void RenderViewHost::ClearFocusedNode() {
+  Send(new ViewMsg_ClearFocusedNode(routing_id()));
+}
+
+void RenderViewHost::SetZoomLevel(double level) {
+  Send(new ViewMsg_SetZoomLevel(routing_id(), level));
+}
+
+void RenderViewHost::Zoom(PageZoom::Function zoom_function) {
+  Send(new ViewMsg_Zoom(routing_id(), zoom_function));
+}
+
+void RenderViewHost::ReloadFrame() {
+  Send(new ViewMsg_ReloadFrame(routing_id()));
+}
+
+void RenderViewHost::Find(int request_id, const string16& search_text,
+                          const WebKit::WebFindOptions& options) {
+  Send(new ViewMsg_Find(routing_id(), request_id, search_text, options));
+}
+
+void RenderViewHost::InsertCSS(const string16& frame_xpath,
+                               const std::string& css) {
+  Send(new ViewMsg_CSSInsertRequest(routing_id(), frame_xpath, css));
+}
+
+void RenderViewHost::DisableScrollbarsForThreshold(const gfx::Size& size) {
+  Send(new ViewMsg_DisableScrollbarsForSmallWindows(routing_id(), size));
+}
+
+void RenderViewHost::EnablePreferredSizeMode(int flags) {
+  Send(new ViewMsg_EnablePreferredSizeChangedMode(routing_id(), flags));
+}
+
+void RenderViewHost::ExecuteCustomContextMenuCommand(
+    int action, const webkit_glue::CustomContextMenuContext& context) {
+  Send(new ViewMsg_CustomContextMenuAction(routing_id(), context, action));
+}
+
+void RenderViewHost::NotifyContextMenuClosed(
+    const webkit_glue::CustomContextMenuContext& context) {
+  Send(new ViewMsg_ContextMenuClosed(routing_id(), context));
+}
+
+void RenderViewHost::CopyImageAt(int x, int y) {
+  Send(new ViewMsg_CopyImageAt(routing_id(), x, y));
+}
+
+void RenderViewHost::ExecuteMediaPlayerActionAtLocation(
+  const gfx::Point& location, const WebKit::WebMediaPlayerAction& action) {
+  Send(new ViewMsg_MediaPlayerActionAt(routing_id(), location, action));
+}
+
+void RenderViewHost::DisassociateFromPopupCount() {
+  Send(new ViewMsg_DisassociateFromPopupCount(routing_id()));
+}
+
+void RenderViewHost::NotifyMoveOrResizeStarted() {
+  Send(new ViewMsg_MoveOrResizeStarted(routing_id()));
+}
+
+void RenderViewHost::StopFinding(const ViewMsg_StopFinding_Params& params) {
+  Send(new ViewMsg_StopFinding(routing_id(), params));
+}
+
 void RenderViewHost::OnAccessibilityNotifications(
     const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
   if (view() && !is_swapped_out_)
@@ -1271,7 +1332,7 @@ void RenderViewHost::OnAccessibilityNotifications(
 
       if (param.notification_type == ViewHostMsg_AccEvent::LOAD_COMPLETE &&
           save_accessibility_tree_for_testing_) {
-        accessibility_tree_ = param.acc_obj;
+        accessibility_tree_ = param.acc_tree;
       }
     }
 
@@ -1309,8 +1370,8 @@ void RenderViewHost::OnDidZoomURL(double zoom_level,
     for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
          !i.IsAtEnd(); i.Advance()) {
       RenderProcessHost* render_process_host = i.GetCurrentValue();
-      if (render_process_host->browser_context() ==
-          process()->browser_context()) {
+      if (render_process_host->browser_context()->GetHostZoomMap()->
+          GetOriginal() == host_zoom_map) {
         render_process_host->Send(
             new ViewMsg_SetZoomLevelForCurrentURL(url, zoom_level));
       }
@@ -1329,14 +1390,12 @@ void RenderViewHost::OnRequestDesktopNotificationPermission(
 
 void RenderViewHost::OnShowDesktopNotification(
     const DesktopNotificationHostMsg_Show_Params& params) {
-  // Disallow HTML notifications from unwanted schemes.  javascript:
-  // in particular allows unwanted cross-domain access.
+  // Disallow HTML notifications from javascript: and file: schemes as this
+  // allows unwanted cross-domain access.
   GURL url = params.contents_url;
   if (params.is_html &&
-      !url.SchemeIs(chrome::kHttpScheme) &&
-      !url.SchemeIs(chrome::kHttpsScheme) &&
-      !url.SchemeIs(chrome::kExtensionScheme) &&
-      !url.SchemeIs(chrome::kDataScheme)) {
+      (url.SchemeIs(chrome::kJavaScriptScheme) ||
+       url.SchemeIs(chrome::kFileScheme))) {
     return;
   }
 
@@ -1367,4 +1426,10 @@ void RenderViewHost::OnMsgShowPopup(
 void RenderViewHost::OnRunFileChooser(
     const ViewHostMsg_RunFileChooser_Params& params) {
   delegate_->RunFileChooser(this, params);
+}
+
+void RenderViewHost::OnWebUISend(const GURL& source_url,
+                                 const std::string& name,
+                                 const base::ListValue& args) {
+  delegate_->WebUISend(this, source_url, name, args);
 }

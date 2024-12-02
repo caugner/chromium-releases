@@ -4,6 +4,7 @@
 
 #include "content/browser/renderer_host/media/video_capture_controller.h"
 
+#include "base/bind.h"
 #include "base/stl_util.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
@@ -16,11 +17,13 @@ static const size_t kNoOfDIBS = 3;
 VideoCaptureController::VideoCaptureController(
     const VideoCaptureControllerID& id,
     base::ProcessHandle render_process,
-    VideoCaptureControllerEventHandler* event_handler)
+    VideoCaptureControllerEventHandler* event_handler,
+    media_stream::VideoCaptureManager* video_capture_manager)
     : render_handle_(render_process),
       report_ready_to_delete_(false),
       event_handler_(event_handler),
-      id_(id) {
+      id_(id),
+      video_capture_manager_(video_capture_manager) {
   memset(&params_, 0, sizeof(params_));
 }
 
@@ -35,21 +38,15 @@ void VideoCaptureController::StartCapture(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   params_ = params;
-    media_stream::VideoCaptureManager* manager =
-        media_stream::MediaStreamManager::Get()->video_capture_manager();
   // Order the manager to start the actual capture.
-  manager->Start(params, this);
+  video_capture_manager_->Start(params, this);
 }
 
-void VideoCaptureController::StopCapture(Task* stopped_task) {
+void VideoCaptureController::StopCapture(base::Closure stopped_cb) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  media_stream::VideoCaptureManager* manager =
-      media_stream::MediaStreamManager::Get()->video_capture_manager();
-  manager->Stop(params_.session_id,
-                NewRunnableMethod(this,
-                                  &VideoCaptureController::OnDeviceStopped,
-                                  stopped_task));
+  video_capture_manager_->Stop(params_.session_id,
+      base::Bind(&VideoCaptureController::OnDeviceStopped, this, stopped_cb));
 }
 
 void VideoCaptureController::ReturnBuffer(int buffer_id) {
@@ -59,9 +56,10 @@ void VideoCaptureController::ReturnBuffer(int buffer_id) {
   {
     base::AutoLock lock(lock_);
     free_dibs_.push_back(buffer_id);
-    ready_to_delete = (free_dibs_.size() == owned_dibs_.size());
+    ready_to_delete = (free_dibs_.size() == owned_dibs_.size()) &&
+        report_ready_to_delete_;
   }
-  if (report_ready_to_delete_ && ready_to_delete) {
+  if (ready_to_delete) {
     event_handler_->OnReadyToDelete(id_);
   }
 }
@@ -157,8 +155,7 @@ void VideoCaptureController::OnIncomingCapturedFrame(const uint8* data,
 
 void VideoCaptureController::OnError() {
   event_handler_->OnError(id_);
-  media_stream::MediaStreamManager::Get()->video_capture_manager()->
-      Error(params_.session_id);
+  video_capture_manager_->Error(params_.session_id);
 }
 
 void VideoCaptureController::OnFrameInfo(
@@ -195,21 +192,20 @@ void VideoCaptureController::OnFrameInfo(
 // Called by VideoCaptureManager when a device have been stopped.
 // This will report to the event handler that this object is ready to be deleted
 // if all DIBS have been returned.
-void VideoCaptureController::OnDeviceStopped(Task* stopped_task) {
+void VideoCaptureController::OnDeviceStopped(base::Closure stopped_cb) {
   bool ready_to_delete_now;
 
-  // Set flag to indicate we need to report when all DIBs have been returned.
-  report_ready_to_delete_ = true;
   {
     base::AutoLock lock(lock_);
+    // Set flag to indicate we need to report when all DIBs have been returned.
+    report_ready_to_delete_ = true;
     ready_to_delete_now = (free_dibs_.size() == owned_dibs_.size());
   }
 
   if (ready_to_delete_now) {
     event_handler_->OnReadyToDelete(id_);
   }
-  if (stopped_task) {
-    stopped_task->Run();
-    delete stopped_task;
-  }
+
+  if (!stopped_cb.is_null())
+    stopped_cb.Run();
 }

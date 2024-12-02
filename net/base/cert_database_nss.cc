@@ -21,6 +21,12 @@
 #include "net/third_party/mozilla_security_manager/nsNSSCertTrust.h"
 #include "net/third_party/mozilla_security_manager/nsPKCS12Blob.h"
 
+// In NSS 3.13, CERTDB_VALID_PEER was renamed CERTDB_TERMINAL_RECORD. So we use
+// the new name of the macro.
+#if !defined(CERTDB_TERMINAL_RECORD)
+#define CERTDB_TERMINAL_RECORD CERTDB_VALID_PEER
+#endif
+
 // PSM = Mozilla's Personal Security Manager.
 namespace psm = mozilla_security_manager;
 
@@ -197,7 +203,7 @@ X509Certificate* CertDatabase::FindRootInList(
 }
 
 bool CertDatabase::ImportCACerts(const CertificateList& certificates,
-                                 unsigned int trust_bits,
+                                 TrustBits trust_bits,
                                  ImportCertFailureList* not_imported) {
   X509Certificate* root = FindRootInList(certificates);
   bool success = psm::ImportCACerts(certificates, root, trust_bits,
@@ -213,8 +219,8 @@ bool CertDatabase::ImportServerCert(const CertificateList& certificates,
   return psm::ImportServerCert(certificates, not_imported);
 }
 
-unsigned int CertDatabase::GetCertTrust(
-    const X509Certificate* cert, CertType type) const {
+CertDatabase::TrustBits CertDatabase::GetCertTrust(const X509Certificate* cert,
+                                                   CertType type) const {
   CERTCertTrust nsstrust;
   SECStatus srv = CERT_GetCertTrust(cert->os_cert_handle(), &nsstrust);
   if (srv != SECSuccess) {
@@ -236,10 +242,63 @@ unsigned int CertDatabase::GetCertTrust(
   }
 }
 
+bool CertDatabase::IsUntrusted(const X509Certificate* cert) const {
+  CERTCertTrust nsstrust;
+  SECStatus rv = CERT_GetCertTrust(cert->os_cert_handle(), &nsstrust);
+  if (rv != SECSuccess) {
+    LOG(ERROR) << "CERT_GetCertTrust failed with error " << PORT_GetError();
+    return false;
+  }
+
+  // The CERTCertTrust structure contains three trust records:
+  // sslFlags, emailFlags, and objectSigningFlags.  The three
+  // trust records are independent of each other.
+  //
+  // If the CERTDB_TERMINAL_RECORD bit in a trust record is set,
+  // then that trust record is a terminal record.  A terminal
+  // record is used for explicit trust and distrust of an
+  // end-entity or intermediate CA cert.
+  //
+  // In a terminal record, if neither CERTDB_TRUSTED_CA nor
+  // CERTDB_TRUSTED is set, then the terminal record means
+  // explicit distrust.  On the other hand, if the terminal
+  // record has either CERTDB_TRUSTED_CA or CERTDB_TRUSTED bit
+  // set, then the terminal record means explicit trust.
+  //
+  // For a root CA, the trust record does not have
+  // the CERTDB_TERMINAL_RECORD bit set.
+
+  static const unsigned int kTrusted = CERTDB_TRUSTED_CA | CERTDB_TRUSTED;
+  if ((nsstrust.sslFlags & CERTDB_TERMINAL_RECORD) != 0 &&
+      (nsstrust.sslFlags & kTrusted) == 0) {
+    return true;
+  }
+  if ((nsstrust.emailFlags & CERTDB_TERMINAL_RECORD) != 0 &&
+      (nsstrust.emailFlags & kTrusted) == 0) {
+    return true;
+  }
+  if ((nsstrust.objectSigningFlags & CERTDB_TERMINAL_RECORD) != 0 &&
+      (nsstrust.objectSigningFlags & kTrusted) == 0) {
+    return true;
+  }
+
+  // Self-signed certificates that don't have any trust bits set are untrusted.
+  // Other certificates that don't have any trust bits set may still be trusted
+  // if they chain up to a trust anchor.
+  if (CERT_CompareName(&cert->os_cert_handle()->issuer,
+                       &cert->os_cert_handle()->subject) == SECEqual) {
+    return (nsstrust.sslFlags & kTrusted) == 0 &&
+           (nsstrust.emailFlags & kTrusted) == 0 &&
+           (nsstrust.objectSigningFlags & kTrusted) == 0;
+  }
+
+  return false;
+}
+
 bool CertDatabase::SetCertTrust(const X509Certificate* cert,
                                 CertType type,
-                                unsigned int trusted) {
-  bool success = psm::SetCertTrust(cert, type, trusted);
+                                TrustBits trust_bits) {
+  bool success = psm::SetCertTrust(cert, type, trust_bits);
   if (success)
     CertDatabase::NotifyObserversOfCertTrustChanged(cert);
 

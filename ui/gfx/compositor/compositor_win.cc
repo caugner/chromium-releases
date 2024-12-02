@@ -86,7 +86,8 @@ class ViewTexture : public Texture {
 // D3D 10 Compositor implementation.
 class CompositorWin : public Compositor {
  public:
-  CompositorWin(gfx::AcceleratedWidget widget,
+  CompositorWin(CompositorDelegate* delegate,
+                gfx::AcceleratedWidget widget,
                 const gfx::Size& size);
 
   void Init();
@@ -101,12 +102,12 @@ class CompositorWin : public Compositor {
 
   // Compositor:
   virtual Texture* CreateTexture() OVERRIDE;
-  virtual void NotifyStart() OVERRIDE;
-  virtual void NotifyEnd() OVERRIDE;
+
   virtual void Blur(const gfx::Rect& bounds) OVERRIDE;
-  virtual void SchedulePaint() OVERRIDE;
 
  protected:
+  virtual void OnNotifyStart(bool clear) OVERRIDE;
+  virtual void OnNotifyEnd() OVERRIDE;
   virtual void OnWidgetSizeChanged() OVERRIDE;
 
  private:
@@ -241,12 +242,18 @@ void ViewTexture::SetCanvas(const SkCanvas& canvas,
 
 void ViewTexture::Draw(const ui::TextureDrawParams& params,
                        const gfx::Rect& clip_bounds) {
+  if (params.vertically_flipped)
+    NOTIMPLEMENTED();
+
   compositor_->UpdatePerspective(params.transform, view_size_);
 
   // Make texture active.
   RETURN_IF_FAILED(
       effect_->GetVariableByName("textureMap")->AsShaderResource()->
       SetResource(shader_view_.get()));
+
+  RETURN_IF_FAILED(effect_->GetVariableByName("alpha")->AsScalar()->SetFloat(
+                   params.opacity));
 
   ID3D10EffectTechnique* technique = effect_->GetTechniqueByName("ViewTech");
   DCHECK(technique);
@@ -321,9 +328,10 @@ void ViewTexture::CreateVertexBufferForRegion(const gfx::Rect& bounds) {
                                          vertex_buffer_.Receive()));
 }
 
-CompositorWin::CompositorWin(gfx::AcceleratedWidget widget,
+CompositorWin::CompositorWin(CompositorDelegate* delegate,
+                             gfx::AcceleratedWidget widget,
                              const gfx::Size& size)
-    : Compositor(size),
+    : Compositor(delegate, size),
       host_(widget),
       technique_(NULL) {
 }
@@ -386,11 +394,12 @@ Texture* CompositorWin::CreateTexture() {
   return new ViewTexture(this, device_.get(), fx_.get());
 }
 
-void CompositorWin::NotifyStart() {
+void CompositorWin::OnNotifyStart(bool clear) {
   ID3D10RenderTargetView* target_view = main_render_target_view_.get();
   device_->OMSetRenderTargets(1, &target_view, depth_stencil_view_.get());
 
   // Clear the background and stencil view.
+  // TODO(vollick) see if |clear| can be used to avoid unnecessary clearing.
   device_->ClearRenderTargetView(target_view,
                                  D3DXCOLOR(0.0f, 0.0f, 0.0f, 0.0f));
   device_->ClearDepthStencilView(
@@ -405,7 +414,7 @@ void CompositorWin::NotifyStart() {
   device_->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
 
-void CompositorWin::NotifyEnd() {
+void CompositorWin::OnNotifyEnd() {
   // Copy from main_render_target_view_| (where all are rendering was done) back
   // to |dest_render_target_view_|.
   ID3D10RenderTargetView* target_view = dest_render_target_view_.get();
@@ -497,12 +506,6 @@ void CompositorWin::Blur(const gfx::Rect& bounds) {
   device_->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset);
   device_->IASetIndexBuffer(index_buffer_.get(), DXGI_FORMAT_R32_UINT, 0);
 #endif
-}
-
-void CompositorWin::SchedulePaint() {
-  RECT bounds;
-  GetClientRect(host_, &bounds);
-  InvalidateRect(host_, &bounds, FALSE);
 }
 
 void CompositorWin::OnWidgetSizeChanged() {
@@ -796,9 +799,10 @@ ID3D10Buffer* CompositorWin::CreateVertexBufferForRegion(
 }  // namespace
 
 // static
-Compositor* Compositor::Create(gfx::AcceleratedWidget widget,
+Compositor* Compositor::Create(CompositorDelegate* delegate,
+                               gfx::AcceleratedWidget widget,
                                const gfx::Size& size) {
-  CompositorWin* compositor = new CompositorWin(widget, size);
+  CompositorWin* compositor = new CompositorWin(delegate, widget, size);
   compositor->Init();
   return compositor;
 }

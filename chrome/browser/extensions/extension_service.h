@@ -22,18 +22,20 @@
 #include "base/time.h"
 #include "base/tuple.h"
 #include "chrome/browser/extensions/apps_promo.h"
-#include "chrome/browser/extensions/extension_app_api.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_permissions_api.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_settings_frontend.h"
 #include "chrome/browser/extensions/extension_sync_data.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
+#include "chrome/browser/extensions/extension_warning_set.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
 #include "chrome/browser/extensions/external_extension_provider_interface.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
+#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/api/syncable_service.h"
@@ -44,18 +46,20 @@
 #include "content/common/notification_registrar.h"
 #include "content/common/property_bag.h"
 
+class AppNotificationManager;
 class CrxInstaller;
 class ExtensionBookmarkEventRouter;
 class ExtensionBrowserEventRouter;
 class ExtensionContentSettingsStore;
 class ExtensionCookiesEventRouter;
+class ExtensionDownloadsEventRouter;
 class ExtensionFileBrowserEventRouter;
+class ExtensionGlobalError;
 class ExtensionHistoryEventRouter;
 class ExtensionInstallUI;
 class ExtensionManagementEventRouter;
 class ExtensionPreferenceEventRouter;
 class ExtensionServiceBackend;
-class ExtensionSettings;
 class ExtensionSyncData;
 class ExtensionToolbarModel;
 class ExtensionUpdater;
@@ -65,6 +69,10 @@ class PendingExtensionManager;
 class Profile;
 class SyncData;
 class Version;
+
+namespace chromeos {
+class ExtensionInputMethodEventRouter;
+}  // namespace chromeos
 
 // This is an interface class to encapsulate the dependencies that
 // various classes have on ExtensionService. This allows easy mocking.
@@ -137,9 +145,6 @@ class ExtensionService
   // If auto-updates are turned on, default to running every 5 hours.
   static const int kDefaultUpdateFrequencySeconds = 60 * 60 * 5;
 
-  // The name of the file that the current active version number is stored in.
-  static const char* kCurrentVersionFileName;
-
   // The name of the directory inside the profile where per-extension settings
   // are stored.
   static const char* kSettingsDirectoryName;
@@ -178,7 +183,6 @@ class ExtensionService
                    const CommandLine* command_line,
                    const FilePath& install_directory,
                    ExtensionPrefs* extension_prefs,
-                   ExtensionSettings* extension_settings,
                    bool autoupdate_enabled,
                    bool extensions_enabled);
 
@@ -203,6 +207,7 @@ class ExtensionService
   const FilePath& install_directory() const { return install_directory_; }
 
   AppsPromo* apps_promo() { return &apps_promo_; }
+  WebstoreInstaller* webstore_installer() { return &webstore_installer_; }
 
   // Whether this extension can run in an incognito window.
   virtual bool IsIncognitoEnabled(const std::string& extension_id) const;
@@ -356,9 +361,11 @@ class ExtensionService
   // Lookup an extension by |url|.
   const Extension* GetExtensionByURL(const GURL& url);
 
-  // If there is an extension for the specified url it is returned. Otherwise
-  // returns the extension whose web extent contains |url|.
+  // Returns the extension whose web extent contains |url|.
   const Extension* GetExtensionByWebExtent(const GURL& url);
+
+  // Returns the disabled extension whose web extent contains |url|.
+  const Extension* GetDisabledExtensionByWebExtent(const GURL& url);
 
   // Returns an extension that contains any URL that overlaps with the given
   // extent, if one exists.
@@ -437,7 +444,7 @@ class ExtensionService
   // ExtensionPrefs* mutable_extension_prefs().
   ExtensionPrefs* extension_prefs();
 
-  ExtensionSettings* extension_settings();
+  ExtensionSettingsFrontend* extension_settings_frontend();
 
   ExtensionContentSettingsStore* GetExtensionContentSettingsStore();
 
@@ -455,7 +462,7 @@ class ExtensionService
   ExtensionMenuManager* menu_manager() { return &menu_manager_; }
 
   AppNotificationManager* app_notification_manager() {
-    return &app_notification_manager_;
+    return app_notification_manager_.get();
   }
 
   ExtensionPermissionsManager* permissions_manager() {
@@ -470,13 +477,15 @@ class ExtensionService
   ExtensionFileBrowserEventRouter* file_browser_event_router() {
     return file_browser_event_router_.get();
   }
+  chromeos::ExtensionInputMethodEventRouter* input_method_event_router() {
+    return input_method_event_router_.get();
+  }
 #endif
 
   // Notify the frontend that there was an error loading an extension.
   // This method is public because ExtensionServiceBackend can post to here.
   void ReportExtensionLoadError(const FilePath& extension_path,
                                 const std::string& error,
-                                int type,
                                 bool be_noisy);
 
   // ExtensionHost of background page calls this method right after its render
@@ -508,6 +517,23 @@ class ExtensionService
 
   virtual void OnExternalProviderReady() OVERRIDE;
 
+  // Once all external providers are done, generates any needed alerts about
+  // extensions.
+  void IdentifyAlertableExtensions();
+
+  // Marks alertable extensions as acknowledged, after the user presses the
+  // accept button.
+  void HandleExtensionAlertAccept(const ExtensionGlobalError& global_error,
+                                  Browser* browser);
+
+  // Opens the Extensions page because the user wants to get more details
+  // about the alerts.
+  void HandleExtensionAlertDetails(const ExtensionGlobalError& global_error,
+                                   Browser* browser);
+
+  // Displays the extension alert in the last-active browser window.
+  void ShowExtensionAlert(ExtensionGlobalError* global_error);
+
   // NotificationObserver
   virtual void Observe(int type,
                        const NotificationSource& source,
@@ -534,6 +560,10 @@ class ExtensionService
     TrackTerminatedExtension(extension);
   }
 #endif
+
+  ExtensionWarningSet* extension_warnings() {
+    return &extension_warnings_;
+  }
 
  private:
   // Bundle of type (app or extension)-specific sync stuff.
@@ -608,11 +638,6 @@ class ExtensionService
       const ExtensionSyncData& extension_sync_data,
       SyncBundle& bundle);
 
-  // Clear all persistent data that may have been stored by the extension.
-  void ClearExtensionData(const std::string& extension_id,
-                          const GURL& storage_url,
-                          bool is_storage_isolated);
-
   // Look up an extension by ID, optionally including either or both of enabled
   // and disabled extensions.
   const Extension* GetExtensionByIdInternal(const std::string& id,
@@ -656,6 +681,11 @@ class ExtensionService
 
   NaClModuleInfoList::iterator FindNaClModule(const GURL& url);
 
+  // Returns the flags that should be used with Extension::Create() for an
+  // extension that is already installed.
+  int GetExtensionCreateFlagsForInstalledExtension(
+      const ExtensionInfo* info);
+
   base::WeakPtrFactory<ExtensionService> weak_ptr_factory_;
 
   ScopedRunnableMethodFactory<ExtensionService> method_factory_;
@@ -666,8 +696,8 @@ class ExtensionService
   // Preferences for the owning profile (weak reference).
   ExtensionPrefs* extension_prefs_;
 
-  // Settings for the owning profile (weak reference).
-  ExtensionSettings* extension_settings_;
+  // Settings for the owning profile.
+  ExtensionSettingsFrontend extension_settings_frontend_;
 
   // The current list of installed extensions.
   // TODO(aa): This should use chrome/common/extensions/extension_set.h.
@@ -742,7 +772,7 @@ class ExtensionService
   ExtensionMenuManager menu_manager_;
 
   // Keeps track of app notifications.
-  AppNotificationManager app_notification_manager_;
+  scoped_refptr<AppNotificationManager> app_notification_manager_;
 
   // Keeps track of extension permissions.
   ExtensionPermissionsManager permissions_manager_;
@@ -758,8 +788,13 @@ class ExtensionService
   // Manages the promotion of the web store.
   AppsPromo apps_promo_;
 
+  // Coordinates the extension download and install process from the gallery.
+  WebstoreInstaller webstore_installer_;
+
   // Flag to make sure event routers are only initialized once.
   bool event_routers_initialized_;
+
+  scoped_ptr<ExtensionDownloadsEventRouter> downloads_event_router_;
 
   scoped_ptr<ExtensionHistoryEventRouter> history_event_router_;
 
@@ -777,6 +812,8 @@ class ExtensionService
 
 #if defined(OS_CHROMEOS)
   scoped_ptr<ExtensionFileBrowserEventRouter> file_browser_event_router_;
+  scoped_ptr<chromeos::ExtensionInputMethodEventRouter>
+      input_method_event_router_;
 #endif
 
   // A collection of external extension providers.  Each provider reads
@@ -793,6 +830,9 @@ class ExtensionService
 
   SyncBundle app_sync_bundle_;
   SyncBundle extension_sync_bundle_;
+
+  // Contains an entry for each warning that shall be currently shown.
+  ExtensionWarningSet extension_warnings_;
 
   FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            InstallAppsWithUnlimtedStorage);

@@ -8,9 +8,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autofill/autofill_regex_constants.h"
 #include "chrome/browser/autofill/autofill_scanner.h"
 #include "chrome/browser/autofill/autofill_type.h"
-#include "grit/autofill_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -75,8 +75,8 @@ bool NameField::ClassifyField(FieldTypeMap* map) const {
 FullNameField* FullNameField::Parse(AutofillScanner* scanner) {
   // Exclude e.g. "username" or "nickname" fields.
   scanner->SaveCursor();
-  bool should_ignore = ParseField(
-      scanner, l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_IGNORED_RE), NULL);
+  bool should_ignore = ParseField(scanner,
+                                  UTF8ToUTF16(autofill::kNameIgnoredRe), NULL);
   scanner->Rewind();
   if (should_ignore)
     return NULL;
@@ -85,8 +85,7 @@ FullNameField* FullNameField::Parse(AutofillScanner* scanner) {
   // for example, Travelocity_Edit travel profile.html contains a field
   // "Travel Profile Name".
   const AutofillField* field = NULL;
-  if (ParseField(scanner, l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_RE),
-                 &field))
+  if (ParseField(scanner, UTF8ToUTF16(autofill::kNameRe), &field))
     return new FullNameField(field);
 
   return NULL;
@@ -109,8 +108,7 @@ FirstLastNameField* FirstLastNameField::ParseSpecificName(
 
   const AutofillField* next;
   if (ParseField(scanner,
-                 l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_SPECIFIC_RE),
-                 &v->first_name_) &&
+                 UTF8ToUTF16(autofill::kNameSpecificRe), &v->first_name_) &&
       ParseEmptyLabel(scanner, &next)) {
     if (ParseEmptyLabel(scanner, &v->last_name_)) {
       // There are three name fields; assume that the middle one is a
@@ -146,15 +144,13 @@ FirstLastNameField* FirstLastNameField::ParseComponentNames(
   // Allow name fields to appear in any order.
   while (!scanner->IsEnd()) {
     // Skip over any unrelated fields, e.g. "username" or "nickname".
-    if (ParseFieldSpecifics(scanner,
-                   l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_IGNORED_RE),
-                   MATCH_DEFAULT | MATCH_SELECT, NULL)) {
+    if (ParseFieldSpecifics(scanner, UTF8ToUTF16(autofill::kNameIgnoredRe),
+                            MATCH_DEFAULT | MATCH_SELECT, NULL)) {
           continue;
     }
 
     if (!v->first_name_ &&
-        ParseField(scanner,
-                   l10n_util::GetStringUTF16(IDS_AUTOFILL_FIRST_NAME_RE),
+        ParseField(scanner, UTF8ToUTF16(autofill::kFirstNameRe),
                    &v->first_name_)) {
       continue;
     }
@@ -165,23 +161,20 @@ FirstLastNameField* FirstLastNameField::ParseComponentNames(
     // "txtmiddlename"); such a field probably actually represents a
     // middle initial.
     if (!v->middle_name_ &&
-        ParseField(scanner,
-                   l10n_util::GetStringUTF16(IDS_AUTOFILL_MIDDLE_INITIAL_RE),
+        ParseField(scanner, UTF8ToUTF16(autofill::kMiddleInitialRe),
                    &v->middle_name_)) {
       v->middle_initial_ = true;
       continue;
     }
 
     if (!v->middle_name_ &&
-        ParseField(scanner,
-                   l10n_util::GetStringUTF16(IDS_AUTOFILL_MIDDLE_NAME_RE),
+        ParseField(scanner, UTF8ToUTF16(autofill::kMiddleNameRe),
                    &v->middle_name_)) {
       continue;
     }
 
     if (!v->last_name_ &&
-        ParseField(scanner,
-                   l10n_util::GetStringUTF16(IDS_AUTOFILL_LAST_NAME_RE),
+        ParseField(scanner, UTF8ToUTF16(autofill::kLastNameRe),
                    &v->last_name_)) {
       continue;
     }

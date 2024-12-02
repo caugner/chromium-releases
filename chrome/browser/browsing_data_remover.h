@@ -228,7 +228,7 @@ class BrowsingDataRemover : public NotificationObserver,
   static bool removing_;
 
   // Used to delete data from the HTTP caches.
-  net::CompletionCallbackImpl<BrowsingDataRemover> cache_callback_;
+  net::OldCompletionCallbackImpl<BrowsingDataRemover> cache_callback_;
   CacheState next_cache_state_;
   disk_cache::Backend* cache_;
 
@@ -258,9 +258,6 @@ class BrowsingDataRemover : public NotificationObserver,
 
   // Used if we need to clear history.
   CancelableRequestConsumer request_consumer_;
-
-  // Keeps track of whether clearing LSO data is supported.
-  BooleanPrefMember clear_plugin_lso_data_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingDataRemover);
 };

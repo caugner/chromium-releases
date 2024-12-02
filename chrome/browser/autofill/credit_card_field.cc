@@ -12,9 +12,9 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_field.h"
+#include "chrome/browser/autofill/autofill_regex_constants.h"
 #include "chrome/browser/autofill/autofill_scanner.h"
 #include "chrome/browser/autofill/field_types.h"
-#include "grit/autofill_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 // static
@@ -29,6 +29,10 @@ FormField* CreditCardField::Parse(AutofillScanner* scanner) {
   // We loop until no more credit card related fields are found, see |break| at
   // bottom of the loop.
   for (int fields = 0; !scanner->IsEnd(); ++fields) {
+    // Ignore gift card fields.
+    if (ParseField(scanner, UTF8ToUTF16(autofill::kGiftCardRe), NULL))
+      break;
+
     // Sometimes the cardholder field is just labeled "name". Unfortunately this
     // is a dangerously generic word to search for, since it will often match a
     // name (not cardholder name) field before or after credit card fields. So
@@ -39,10 +43,9 @@ FormField* CreditCardField::Parse(AutofillScanner* scanner) {
       string16 name_pattern;
       if (fields == 0 || credit_card_field->expiration_month_) {
         // at beginning or end
-        name_pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_ON_CARD_RE);
+        name_pattern = UTF8ToUTF16(autofill::kNameOnCardRe);
       } else {
-        name_pattern = l10n_util::GetStringUTF16(
-            IDS_AUTOFILL_NAME_ON_CARD_CONTEXTUAL_RE);
+        name_pattern = UTF8ToUTF16(autofill::kNameOnCardContextualRe);
       }
 
       if (ParseField(scanner, name_pattern, &credit_card_field->cardholder_))
@@ -68,14 +71,14 @@ FormField* CreditCardField::Parse(AutofillScanner* scanner) {
     // has a plethora of names; we've seen "verification #",
     // "verification number", "card identification number" and others listed
     // in the |pattern| below.
-    string16 pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_CARD_CVC_RE);
+    string16 pattern = UTF8ToUTF16(autofill::kCardCvcRe);
     if (!credit_card_field->verification_ &&
         ParseField(scanner, pattern, &credit_card_field->verification_)) {
       continue;
     }
     // TODO(jhawkins): Parse the type select control.
 
-    pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_CARD_NUMBER_RE);
+    pattern = UTF8ToUTF16(autofill::kCardNumberRe);
     if (!credit_card_field->number_ &&
         ParseField(scanner, pattern, &credit_card_field->number_)) {
       continue;
@@ -87,11 +90,11 @@ FormField* CreditCardField::Parse(AutofillScanner* scanner) {
     } else {
       // First try to parse split month/year expiration fields.
       scanner->SaveCursor();
-      pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_EXPIRATION_MONTH_RE);
+      pattern = UTF8ToUTF16(autofill::kExpirationMonthRe);
       if (!credit_card_field->expiration_month_ &&
           ParseFieldSpecifics(scanner, pattern, MATCH_DEFAULT | MATCH_SELECT,
                               &credit_card_field->expiration_month_)) {
-        pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_EXPIRATION_YEAR_RE);
+        pattern = UTF8ToUTF16(autofill::kExpirationYearRe);
         if (ParseFieldSpecifics(scanner, pattern, MATCH_DEFAULT | MATCH_SELECT,
                                  &credit_card_field->expiration_year_)) {
           continue;
@@ -102,18 +105,20 @@ FormField* CreditCardField::Parse(AutofillScanner* scanner) {
       if (!credit_card_field->expiration_date_) {
         // Look for a 2-digit year first.
         scanner->Rewind();
-        pattern = l10n_util::GetStringUTF16(
-            IDS_AUTOFILL_EXPIRATION_DATE_2_DIGIT_YEAR_RE);
+        pattern = UTF8ToUTF16(autofill::kExpirationDate2DigitYearRe);
+        // We allow <select> fields, because they're used e.g. on qvc.com.
         if (ParseFieldSpecifics(scanner, pattern,
-                                MATCH_LABEL | MATCH_VALUE | MATCH_TEXT,
+                                MATCH_LABEL | MATCH_VALUE | MATCH_TEXT |
+                                    MATCH_SELECT,
                                 &credit_card_field->expiration_date_)) {
           credit_card_field->is_two_digit_year_ = true;
           continue;
         }
 
-        pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_EXPIRATION_DATE_RE);
+        pattern = UTF8ToUTF16(autofill::kExpirationDateRe);
         if (ParseFieldSpecifics(scanner, pattern,
-                                MATCH_LABEL | MATCH_VALUE | MATCH_TEXT,
+                                MATCH_LABEL | MATCH_VALUE | MATCH_TEXT |
+                                    MATCH_SELECT,
                                 &credit_card_field->expiration_date_)) {
           continue;
         }
@@ -133,11 +138,8 @@ FormField* CreditCardField::Parse(AutofillScanner* scanner) {
     // We also ignore any other fields within a credit card block that
     // start with "card", under the assumption that they are related to
     // the credit card section being processed but are uninteresting to us.
-    if (ParseField(scanner,
-                   l10n_util::GetStringUTF16(IDS_AUTOFILL_CARD_IGNORED_RE),
-                   NULL)) {
+    if (ParseField(scanner, UTF8ToUTF16(autofill::kCardIgnoredRe), NULL))
       continue;
-    }
 
     break;
   }

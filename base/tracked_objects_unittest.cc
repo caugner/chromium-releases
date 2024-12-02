@@ -7,6 +7,7 @@
 #include "base/tracked_objects.h"
 
 #include "base/message_loop.h"
+#include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace tracked_objects {
@@ -22,11 +23,11 @@ TEST_F(TrackedObjectsTest, MinimalStartupShutdown) {
     return;
 
   EXPECT_FALSE(ThreadData::first());  // No activity even on this thread.
-  ThreadData* data = ThreadData::current();
+  ThreadData* data = ThreadData::Get();
   EXPECT_TRUE(ThreadData::first());  // Now class was constructed.
   EXPECT_TRUE(data);
   EXPECT_TRUE(!data->next());
-  EXPECT_EQ(data, ThreadData::current());
+  EXPECT_EQ(data, ThreadData::Get());
   ThreadData::BirthMap birth_map;
   data->SnapshotBirthMap(&birth_map);
   EXPECT_EQ(0u, birth_map.size());
@@ -38,11 +39,11 @@ TEST_F(TrackedObjectsTest, MinimalStartupShutdown) {
   // Do it again, just to be sure we reset state completely.
   ThreadData::StartTracking(true);
   EXPECT_FALSE(ThreadData::first());  // No activity even on this thread.
-  data = ThreadData::current();
+  data = ThreadData::Get();
   EXPECT_TRUE(ThreadData::first());  // Now class was constructed.
   EXPECT_TRUE(data);
   EXPECT_TRUE(!data->next());
-  EXPECT_EQ(data, ThreadData::current());
+  EXPECT_EQ(data, ThreadData::Get());
   birth_map.clear();
   data->SnapshotBirthMap(&birth_map);
   EXPECT_EQ(0u, birth_map.size());
@@ -52,22 +53,18 @@ TEST_F(TrackedObjectsTest, MinimalStartupShutdown) {
   ThreadData::ShutdownSingleThreadedCleanup();
 }
 
-class NoopTracked : public tracked_objects::Tracked {
-};
-
 TEST_F(TrackedObjectsTest, TinyStartupShutdown) {
   if (!ThreadData::StartTracking(true))
     return;
 
   // Instigate tracking on a single tracked object, or our thread.
   const Location& location = FROM_HERE;
-  NoopTracked tracked;
-  tracked.SetBirthPlace(location);
+  ThreadData::TallyABirthIfActive(location);
 
   const ThreadData* data = ThreadData::first();
   ASSERT_TRUE(data);
   EXPECT_TRUE(!data->next());
-  EXPECT_EQ(data, ThreadData::current());
+  EXPECT_EQ(data, ThreadData::Get());
   ThreadData::BirthMap birth_map;
   data->SnapshotBirthMap(&birth_map);
   EXPECT_EQ(1u, birth_map.size());                         // 1 birth location.
@@ -78,9 +75,12 @@ TEST_F(TrackedObjectsTest, TinyStartupShutdown) {
 
 
   // Now instigate a birth, and a death.
-  NoopTracked* new_tracked = new NoopTracked;
-  new_tracked->SetBirthPlace(location);
-  delete new_tracked;
+  const Births* second_birth = ThreadData::TallyABirthIfActive(location);
+  ThreadData::TallyADeathIfActive(
+      second_birth,
+      base::TimeTicks(), /* Bogus post_time. */
+      base::TimeTicks(), /* Bogus delayed_start_time. */
+      base::TimeTicks()  /* Bogus start_run_time. */);
 
   birth_map.clear();
   data->SnapshotBirthMap(&birth_map);

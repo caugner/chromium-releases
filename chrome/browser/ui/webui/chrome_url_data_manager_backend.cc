@@ -4,11 +4,16 @@
 
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
 
+#include <set>
+
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
@@ -33,6 +38,54 @@
 #include "webkit/appcache/view_appcache_internals_job.h"
 
 namespace {
+
+// X-WebKit-CSP is our development name for Content-Security-Policy.
+// TODO(tsepez) rename when Content-security-policy is done.
+// TODO(tsepez) remove unsafe-eval when bidichecker_packaged.js fixed.
+// TODO(tsepez) chrome-extension: permits the ChromeVox screen reader
+//     extension to function on these pages.  Remove it when the extension
+//     is updated to stop injecting script into the pages.
+const char kChromeURLContentSecurityPolicyHeader[] =
+    "X-WebKit-CSP: object-src 'self'; script-src chrome://resources "
+    "chrome-extension://mndnfokpggljbaajbnioimlmbfngpief "
+    "'self' 'unsafe-eval'";
+
+class ChromeURLContentSecurityPolicyExceptionSet
+    : public std::set<std::string> {
+ public:
+  ChromeURLContentSecurityPolicyExceptionSet() : std::set<std::string>() {
+    insert(chrome::kChromeUICloudPrintResourcesHost);
+    insert(chrome::kChromeUICloudPrintSetupHost);
+    insert(chrome::kChromeUICreditsHost);
+    insert(chrome::kChromeUIDevToolsHost);
+    insert(chrome::kChromeUIDialogHost);
+    insert(chrome::kChromeUINewTabHost);
+#if defined(OS_CHROMEOS)
+    insert(chrome::kChromeUIActiveDownloadsHost);
+    insert(chrome::kChromeUIEnterpriseEnrollmentHost);
+    insert(chrome::kChromeUIKeyboardOverlayHost);
+    insert(chrome::kChromeUIOobeHost);
+    insert(chrome::kChromeUIMobileSetupHost);
+    insert(chrome::kChromeUIProxySettingsHost);
+    insert(chrome::kChromeUIRegisterPageHost);
+    insert(chrome::kChromeUISimUnlockHost);
+    insert(chrome::kChromeUISystemInfoHost);
+#else
+    insert(chrome::kChromeUISyncPromoHost);
+#endif
+#if defined(TOUCH_UI)
+    insert(chrome::kChromeUIKeyboardHost);
+#endif
+#if defined(OS_CHROMEOS) || defined(TOUCH_UI)
+    insert(chrome::kChromeUICollectedCookiesHost);
+    insert(chrome::kChromeUIHttpAuthHost);
+    insert(chrome::kChromeUIRepostFormWarningHost);
+#endif
+  }
+};
+
+base::LazyInstance<ChromeURLContentSecurityPolicyExceptionSet>
+    g_chrome_url_content_security_policy_exceptions(base::LINKER_INITIALIZED);
 
 // Parse a URL into the components used to resolve its request. |source_name|
 // is the hostname and |path| is the remaining portion of the URL.
@@ -76,7 +129,7 @@ class URLRequestChromeJob : public net::URLRequestJob {
   virtual void Kill() OVERRIDE;
   virtual bool ReadRawData(net::IOBuffer* buf,
                            int buf_size,
-                           int *bytes_read) OVERRIDE;
+                           int* bytes_read) OVERRIDE;
   virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
   virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE;
 
@@ -114,7 +167,7 @@ class URLRequestChromeJob : public net::URLRequestJob {
   // The backend is owned by ChromeURLRequestContext and always outlives us.
   ChromeURLDataManagerBackend* backend_;
 
-  ScopedRunnableMethodFactory<URLRequestChromeJob> method_factory_;
+  base::WeakPtrFactory<URLRequestChromeJob> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestChromeJob);
 };
@@ -125,7 +178,7 @@ URLRequestChromeJob::URLRequestChromeJob(net::URLRequest* request,
       data_offset_(0),
       pending_buf_size_(0),
       backend_(backend),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK(backend);
 }
 
@@ -136,8 +189,10 @@ URLRequestChromeJob::~URLRequestChromeJob() {
 void URLRequestChromeJob::Start() {
   // Start reading asynchronously so that all error reporting and data
   // callbacks happen as they would for network requests.
-  MessageLoop::current()->PostTask(FROM_HERE, method_factory_.NewRunnableMethod(
-      &URLRequestChromeJob::StartAsync));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&URLRequestChromeJob::StartAsync,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void URLRequestChromeJob::Kill() {
@@ -155,6 +210,10 @@ void URLRequestChromeJob::GetResponseInfo(net::HttpResponseInfo* info) {
   // status code of 200. Without this they return a 0, which makes the status
   // indistiguishable from other error types. Instant relies on getting a 200.
   info->headers = new net::HttpResponseHeaders("HTTP/1.1 200 OK");
+  ChromeURLContentSecurityPolicyExceptionSet* exceptions =
+      g_chrome_url_content_security_policy_exceptions.Pointer();
+  if (exceptions->find(request_->url().host()) == exceptions->end())
+    info->headers->AddHeader(kChromeURLContentSecurityPolicyHeader);
 }
 
 void URLRequestChromeJob::DataAvailable(RefCountedMemory* bytes) {
@@ -367,9 +426,8 @@ bool ChromeURLDataManagerBackend::StartRequest(const GURL& url,
     // usually the UI thread, for this path.
     target_message_loop->PostTask(
         FROM_HERE,
-        NewRunnableMethod(source,
-                          &ChromeURLDataManager::DataSource::StartDataRequest,
-                          path, context->is_incognito(), request_id));
+        base::Bind(&ChromeURLDataManager::DataSource::StartDataRequest, source,
+                   path, context->is_incognito(), request_id));
   }
   return true;
 }

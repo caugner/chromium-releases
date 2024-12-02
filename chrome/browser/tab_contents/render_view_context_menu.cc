@@ -20,14 +20,16 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/net/browser_url_util.h"
-#include "chrome/browser/page_info_window.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -56,14 +58,15 @@
 #include "content/browser/download/save_package.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/speech/speech_input_preferences.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/content_restriction.h"
-#include "content/common/view_messages.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
+#include "net/base/net_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -81,6 +84,16 @@ using WebKit::WebURL;
 using WebKit::WebString;
 
 namespace {
+
+// Usually a new tab is expected where this function is used,
+// however users should be able to open a tab in background
+// or in a new window.
+WindowOpenDisposition ForceNewTabDispositionFromEventFlags(
+    int event_flags) {
+  WindowOpenDisposition disposition =
+      browser::DispositionFromEventFlags(event_flags);
+  return disposition == CURRENT_TAB ? NEW_FOREGROUND_TAB : disposition;
+}
 
 bool IsCustomItemEnabled(const std::vector<WebMenuItem>& items, int id) {
   DCHECK(id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
@@ -450,8 +463,8 @@ void RenderViewContextMenu::SetExtensionIcon(const std::string& extension_id) {
   DCHECK_GE(index, 0);
 
   const SkBitmap& icon = menu_manager->GetIconForExtension(extension_id);
-  DCHECK(icon.width() == kFaviconSize);
-  DCHECK(icon.height() == kFaviconSize);
+  DCHECK(icon.width() == gfx::kFaviconSize);
+  DCHECK(icon.height() == gfx::kFaviconSize);
 
   menu_model_.SetIcon(index, icon);
 }
@@ -796,7 +809,7 @@ void RenderViewContextMenu::AppendSearchProvider() {
        i = printable_selection_text.find('&', i + 2))
     printable_selection_text.insert(i, 1, '&');
 
-  if (match.transition == PageTransition::TYPED) {
+  if (match.transition == content::PAGE_TRANSITION_TYPED) {
     if (ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
         selection_navigation_url_.scheme())) {
       menu_model_.AddItem(
@@ -859,6 +872,8 @@ void RenderViewContextMenu::AppendEditableItems() {
                                   IDS_CONTENT_CONTEXT_COPY);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_PASTE,
                                   IDS_CONTENT_CONTEXT_PASTE);
+  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE,
+                                  IDS_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_DELETE,
                                   IDS_CONTENT_CONTEXT_DELETE);
   menu_model_.AddSeparator();
@@ -934,9 +949,9 @@ void RenderViewContextMenu::AppendSpellcheckOptionsSubMenu() {
 void RenderViewContextMenu::AppendSpeechInputOptionsSubMenu() {
   if (params_.speech_input_enabled) {
     speech_input_submenu_model_.AddCheckItem(
-        IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS,
+        IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES,
         l10n_util::GetStringUTF16(
-            IDS_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS));
+            IDS_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES));
 
     speech_input_submenu_model_.AddItemWithStringId(
         IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT,
@@ -1178,10 +1193,11 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       if (!local_state->GetBoolean(prefs::kAllowFileSelectionDialogs))
         return false;
 
-      return (params_.media_flags &
-              WebContextMenuData::MediaCanSave) &&
-             params_.src_url.is_valid() &&
-             ProfileIOData::IsHandledProtocol(params_.src_url.scheme());
+      const GURL& url = params_.src_url;
+      return (params_.media_flags & WebContextMenuData::MediaCanSave) &&
+          url.is_valid() && ProfileIOData::IsHandledProtocol(url.scheme()) &&
+          // Do not save the preview PDF on the print preview page.
+          !(printing::PrintPreviewTabController::IsPrintPreviewURL(url));
     }
 
     case IDC_CONTENT_CONTEXT_OPENAVNEWTAB:
@@ -1220,6 +1236,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return !!(params_.edit_flags & WebContextMenuData::CanCopy);
 
     case IDC_CONTENT_CONTEXT_PASTE:
+    case IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE:
       return !!(params_.edit_flags & WebContextMenuData::CanPaste);
 
     case IDC_CONTENT_CONTEXT_DELETE:
@@ -1299,7 +1316,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_SPELLCHECK_MENU:
       return true;
 
-    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS:
+    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES:
     case IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT:
     case IDC_SPEECH_INPUT_MENU:
       return true;
@@ -1365,8 +1382,9 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
   }
 
   // Check box for menu item 'Block offensive words'.
-  if (id == IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS) {
-    return profile_->GetPrefs()->GetBoolean(prefs::kSpeechInputCensorResults);
+  if (id == IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES) {
+    return profile_->GetPrefs()->GetBoolean(
+        prefs::kSpeechInputFilterProfanities);
   }
 
   // Don't bother getting the display language vector if this isn't a spellcheck
@@ -1381,6 +1399,10 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id) {
+  return ExecuteCommand(id, 0);
+}
+
+void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
   // If this command is is added by one of our observers, we dispatch it to the
   // observer.
   ObserverListBase<RenderViewContextMenuObserver>::Iterator it(observers_);
@@ -1411,8 +1433,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
   if (id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
       id <= IDC_CONTENT_CONTEXT_CUSTOM_LAST) {
     unsigned action = id - IDC_CONTENT_CONTEXT_CUSTOM_FIRST;
-    rvh->Send(new ViewMsg_CustomContextMenuAction(
-        rvh->routing_id(), params_.custom_context, action));
+    rvh->ExecuteCustomContextMenuCommand(action, params_.custom_context);
     return;
   }
 
@@ -1440,12 +1461,14 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
     UserMetrics::RecordAction(
         UserMetricsAction("RegisterProtocolHandler.ContextMenu_Open"));
     int handlerIndex = id - IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST;
+    WindowOpenDisposition disposition =
+        ForceNewTabDispositionFromEventFlags(event_flags);
     OpenURL(
         handlers[handlerIndex].TranslateUrl(params_.link_url),
         params_.frame_url.is_empty() ? params_.page_url : params_.frame_url,
         params_.frame_id,
-        NEW_FOREGROUND_TAB,
-        PageTransition::LINK);
+        disposition,
+        content::PAGE_TRANSITION_LINK);
     return;
   }
 
@@ -1458,7 +1481,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
           source_tab_contents_->delegate() &&
               source_tab_contents_->delegate()->IsApplication() ?
                   NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB,
-          PageTransition::LINK);
+          content::PAGE_TRANSITION_LINK);
       break;
 
     case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
@@ -1466,7 +1489,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
           params_.link_url,
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url,
           params_.frame_id,
-          NEW_WINDOW, PageTransition::LINK);
+          NEW_WINDOW, content::PAGE_TRANSITION_LINK);
       break;
 
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
@@ -1474,7 +1497,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
               GURL(),
               params_.frame_id,
               OFF_THE_RECORD,
-              PageTransition::LINK);
+              content::PAGE_TRANSITION_LINK);
       break;
 
     case IDC_CONTENT_CONTEXT_SAVEAVAS:
@@ -1487,7 +1510,8 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       const GURL& url =
           (id == IDC_CONTENT_CONTEXT_SAVELINKAS ? params_.link_url :
                                                   params_.src_url);
-      DownloadManager* dlm = profile_->GetDownloadManager();
+      DownloadManager* dlm =
+          DownloadServiceFactory::GetForProfile(profile_)->GetDownloadManager();
       dlm->DownloadUrl(url, referrer, params_.frame_charset,
                        source_tab_contents_);
       break;
@@ -1512,7 +1536,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
           params_.src_url,
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url,
           params_.frame_id,
-          NEW_BACKGROUND_TAB, PageTransition::LINK);
+          NEW_BACKGROUND_TAB, content::PAGE_TRANSITION_LINK);
       break;
 
     case IDC_CONTENT_CONTEXT_PLAYPAUSE: {
@@ -1583,8 +1607,15 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
                 source_tab_contents_);
         if (!tab_contents_wrapper)
           break;
+#if defined(OS_CHROMEOS)
+        // Disable print preview in CHROMEOS in incognito mode until bug 99271
+        // is fixed.
+        if (switches::IsPrintPreviewEnabled() && !profile_->IsOffTheRecord())
+#else
         if (switches::IsPrintPreviewEnabled())
+#endif
           tab_contents_wrapper->print_view_manager()->PrintPreviewNow();
+
         else
           tab_contents_wrapper->print_view_manager()->PrintNow();
       } else {
@@ -1635,7 +1666,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
     }
 
     case IDC_CONTENT_CONTEXT_RELOADFRAME:
-      rvh->Send(new ViewMsg_ReloadFrame(rvh->routing_id()));
+      rvh->ReloadFrame();
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE:
@@ -1647,7 +1678,10 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       // Deserialize the SSL info.
       NavigationEntry::SSLStatus ssl;
       if (!params_.security_info.empty()) {
-        int cert_id, cert_status, security_bits, connection_status;
+        int cert_id;
+        net::CertStatus cert_status;
+        int security_bits;
+        int connection_status;
         SSLManager::DeserializeSecurityInfo(params_.security_info,
                                             &cert_id,
                                             &cert_status,
@@ -1683,6 +1717,10 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       rvh->Paste();
       break;
 
+    case IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE:
+      rvh->PasteAndMatchStyle();
+      break;
+
     case IDC_CONTENT_CONTEXT_DELETE:
       rvh->Delete();
       break;
@@ -1693,11 +1731,13 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
 
     case IDC_CONTENT_CONTEXT_SEARCHWEBFOR:
     case IDC_CONTENT_CONTEXT_GOTOURL: {
+      WindowOpenDisposition disposition =
+          ForceNewTabDispositionFromEventFlags(event_flags);
       OpenURL(selection_navigation_url_,
               GURL(),
               params_.frame_id,
-              NEW_FOREGROUND_TAB,
-              PageTransition::LINK);
+              disposition,
+              content::PAGE_TRANSITION_LINK);
       break;
     }
 
@@ -1730,9 +1770,11 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
     }
 
     case IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS: {
+      WindowOpenDisposition disposition =
+          ForceNewTabDispositionFromEventFlags(event_flags);
       std::string url = std::string(chrome::kChromeUISettingsURL) +
           chrome::kLanguageOptionsSubPage;
-      OpenURL(GURL(url), GURL(), 0, NEW_FOREGROUND_TAB, PageTransition::LINK);
+      OpenURL(GURL(url), GURL(), 0, disposition, content::PAGE_TRANSITION_LINK);
       break;
     }
 
@@ -1763,9 +1805,11 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
     case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS: {
       UserMetrics::RecordAction(
           UserMetricsAction("RegisterProtocolHandler.ContextMenu_Settings"));
+      WindowOpenDisposition disposition =
+          ForceNewTabDispositionFromEventFlags(event_flags);
       std::string url = std::string(chrome::kChromeUISettingsURL) +
           chrome::kHandlerSettingsSubPage;
-      OpenURL(GURL(url), GURL(), 0, NEW_FOREGROUND_TAB, PageTransition::LINK);
+      OpenURL(GURL(url), GURL(), 0, disposition, content::PAGE_TRANSITION_LINK);
       break;
     }
 
@@ -1799,10 +1843,12 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       break;
     }
 
-    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS: {
+    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES: {
       PrefService* prefs = profile_->GetPrefs();
-      const bool censor = !prefs->GetBoolean(prefs::kSpeechInputCensorResults);
-      prefs->SetBoolean(prefs::kSpeechInputCensorResults, censor);
+      const bool filter = !prefs->GetBoolean(
+          prefs::kSpeechInputFilterProfanities);
+      prefs->SetBoolean(prefs::kSpeechInputFilterProfanities, filter);
+      profile_->GetSpeechInputPreferences()->set_filter_profanities(filter);
       break;
     }
 
@@ -1811,7 +1857,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       GURL localized_url = google_util::AppendGoogleLocaleParam(url);
       // Open URL with no referrer field (because user clicked on menu item).
       OpenURL(localized_url, GURL(), 0, NEW_FOREGROUND_TAB,
-              PageTransition::LINK);
+          content::PAGE_TRANSITION_LINK);
       break;
     }
 
@@ -1849,8 +1895,7 @@ void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
     view->ShowingContextMenu(false);
   RenderViewHost* rvh = source_tab_contents_->render_view_host();
   if (rvh) {
-    rvh->Send(new ViewMsg_ContextMenuClosed(
-        rvh->routing_id(), params_.custom_context));
+    rvh->NotifyContextMenuClosed(params_.custom_context);
   }
 }
 
@@ -1880,7 +1925,7 @@ string16 RenderViewContextMenu::PrintableSelectionText() {
 void RenderViewContextMenu::OpenURL(
     const GURL& url, const GURL& referrer, int64 frame_id,
     WindowOpenDisposition disposition,
-    PageTransition::Type transition) {
+    content::PageTransition transition) {
   TabContents* new_contents =
       source_tab_contents_->OpenURL(url, referrer, disposition, transition);
 
@@ -1899,8 +1944,7 @@ void RenderViewContextMenu::OpenURL(
 }
 
 void RenderViewContextMenu::CopyImageAt(int x, int y) {
-  RenderViewHost* rvh = source_tab_contents_->render_view_host();
-  rvh->Send(new ViewMsg_CopyImageAt(rvh->routing_id(), x, y));
+  source_tab_contents_->render_view_host()->CopyImageAt(x, y);
 }
 
 void RenderViewContextMenu::Inspect(int x, int y) {
@@ -1919,7 +1963,6 @@ void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
 void RenderViewContextMenu::MediaPlayerActionAt(
     const gfx::Point& location,
     const WebMediaPlayerAction& action) {
-  RenderViewHost* rvh = source_tab_contents_->render_view_host();
-  rvh->Send(new ViewMsg_MediaPlayerActionAt(
-      rvh->routing_id(), location, action));
+  source_tab_contents_->render_view_host()->
+      ExecuteMediaPlayerActionAtLocation(location, action);
 }

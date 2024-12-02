@@ -46,6 +46,7 @@ class ExtensionPermissionMessage {
     kFullAccess,
     kClipboard,
     kTtsEngine,
+    kContentSettings,
     kEnumBoundary
   };
 
@@ -114,13 +115,14 @@ class ExtensionAPIPermission {
     kManagement,
     kMediaPlayerPrivate,
     kNotification,
-    kPermissions,
     kPlugin,
     kProxy,
     kTab,
     kTts,
     kTtsEngine,
     kUnlimitedStorage,
+    kWebNavigation,
+    kWebRequest,
     kWebSocketProxyPrivate,
     kWebstorePrivate,
     kEnumBoundary

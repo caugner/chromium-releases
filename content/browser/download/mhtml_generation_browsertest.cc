@@ -10,7 +10,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/download/mhtml_generation_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
+#include "content/public/browser/notification_types.h"
 #include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -55,9 +55,9 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTML) {
 
   MHTMLGenerationManager::NotificationDetails details;
   ASSERT_TRUE(signal.GetDetailsFor(source.map_key(), &details));
-  ASSERT_TRUE(details.success);
+  ASSERT_GT(details.file_size, 0);
 
-  // Make sure the generated file has some contents.
+  // Make sure the actual generated file has some contents.
   int64 file_size;
   ASSERT_TRUE(file_util::GetFileSize(path, &file_size));
   EXPECT_GT(file_size, 100);

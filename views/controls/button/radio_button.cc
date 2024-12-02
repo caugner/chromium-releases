@@ -13,13 +13,7 @@ namespace views {
 // static
 const char RadioButton::kViewClassName[] = "views/RadioButton";
 
-////////////////////////////////////////////////////////////////////////////////
-//
-// RadioButton
-//
-////////////////////////////////////////////////////////////////////////////////
-
-RadioButton::RadioButton(const std::wstring& label, int group_id)
+RadioButton::RadioButton(const string16& label, int group_id)
     : Checkbox(label) {
   SetGroup(group_id);
   set_focusable(true);

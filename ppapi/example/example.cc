@@ -170,7 +170,9 @@ class MyInstance : public pp::InstancePrivate, public MyFetcherClient {
         height_(0),
         animation_counter_(0),
         print_settings_valid_(false),
-        showing_custom_cursor_(false) {
+        showing_custom_cursor_(false),
+        cursor_dimension_(50),
+        expanding_cursor_(false) {
     RequestInputEvents(PP_INPUTEVENT_CLASS_MOUSE);
   }
 
@@ -328,16 +330,8 @@ int gettimeofday(struct timeval *tv, struct timezone*) {
   }
 
   // Print interfaces.
-  // TODO(mball,dmichael) Replace this with the PPP_PRINTING_DEV_USE_0_4 version
-  virtual PP_PrintOutputFormat_Dev* QuerySupportedPrintOutputFormats(
-      uint32_t* format_count) {
-    pp::Memory_Dev memory;
-    PP_PrintOutputFormat_Dev* format =
-        static_cast<PP_PrintOutputFormat_Dev*>(
-            memory.MemAlloc(sizeof(PP_PrintOutputFormat_Dev)));
-    *format = PP_PRINTOUTPUTFORMAT_RASTER;
-    *format_count = 1;
-    return format;
+  virtual uint32_t QuerySupportedPrintOutputFormats() {
+    return PP_PRINTOUTPUTFORMAT_RASTER;
   }
 
   virtual int32_t PrintBegin(const PP_PrintSettings_Dev& print_settings) {
@@ -378,11 +372,17 @@ int gettimeofday(struct timeval *tv, struct timezone*) {
     print_settings_valid_ = false;
   }
 
+  virtual bool IsScalingDisabled() {
+    return false;
+  }
+
   void OnFlush() {
     if (animation_counter_ % kStepsPerCircle == 0)
       UpdateFps();
     animation_counter_++;
     Paint();
+    if (showing_custom_cursor_)
+      SetCursor();
   }
 
  private:
@@ -430,6 +430,11 @@ int gettimeofday(struct timeval *tv, struct timezone*) {
   }
 
   void ToggleCursor() {
+    showing_custom_cursor_ = !showing_custom_cursor_;
+    SetCursor();
+  }
+
+  void SetCursor() {
     const PPB_CursorControl_Dev* cursor_control =
         reinterpret_cast<const PPB_CursorControl_Dev*>(
             pp::Module::Get()->GetBrowserInterface(
@@ -437,20 +442,26 @@ int gettimeofday(struct timeval *tv, struct timezone*) {
     if (!cursor_control)
       return;
 
-    if (showing_custom_cursor_) {
+    if (!showing_custom_cursor_) {
       cursor_control->SetCursor(pp_instance(), PP_CURSORTYPE_POINTER, 0, NULL);
     } else {
       pp::ImageData image_data(this, pp::ImageData::GetNativeImageDataFormat(),
-                               pp::Size(50, 50), false);
-      FillRect(&image_data, 0, 0, 50, 50,
+                               pp::Size(cursor_dimension_, cursor_dimension_),
+                               false);
+      FillRect(&image_data, 0, 0, cursor_dimension_, cursor_dimension_,
                image_data.format() == PP_IMAGEDATAFORMAT_BGRA_PREMUL ?
                    0x80800000 : 0x80000080);
-      pp::Point hot_spot(0, 0);
+      pp::Point hot_spot(cursor_dimension_ / 2, cursor_dimension_ / 2);
       cursor_control->SetCursor(pp_instance(), PP_CURSORTYPE_CUSTOM,
                                 image_data.pp_resource(), &hot_spot.pp_point());
+      if (expanding_cursor_) {
+        if (++cursor_dimension_ >= 50)
+          expanding_cursor_ = false;
+      } else {
+        if (--cursor_dimension_ <= 5)
+          expanding_cursor_ = true;
+      }
     }
-
-    showing_custom_cursor_ = !showing_custom_cursor_;
   }
 
   pp::Var console_;
@@ -469,6 +480,8 @@ int gettimeofday(struct timeval *tv, struct timezone*) {
   PP_PrintSettings_Dev print_settings_;
 
   bool showing_custom_cursor_;
+  int cursor_dimension_;
+  bool expanding_cursor_;
 };
 
 void FlushCallback(void* data, int32_t result) {

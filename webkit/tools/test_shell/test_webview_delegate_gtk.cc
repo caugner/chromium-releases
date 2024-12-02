@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,10 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
-#include "content/common/page_transition_types.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -104,8 +104,9 @@ void TestWebViewDelegate::show(WebNavigationPolicy policy) {
 
 void TestWebViewDelegate::closeWidgetSoon() {
   if (this == shell_->delegate()) {
-    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableFunction(
-        &gtk_widget_destroy, GTK_WIDGET(shell_->mainWnd())));
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&gtk_widget_destroy, GTK_WIDGET(shell_->mainWnd())));
   } else if (this == shell_->popup_delegate()) {
     shell_->ClosePopup();
   }
@@ -260,9 +261,9 @@ void TestWebViewDelegate::ShowJavaScriptAlert(const std::wstring& message) {
   gtk_widget_destroy(dialog);
 }
 
-void TestWebViewDelegate::SetPageTitle(const std::wstring& title) {
+void TestWebViewDelegate::SetPageTitle(const string16& title) {
   gtk_window_set_title(GTK_WINDOW(shell_->mainWnd()),
-                       ("Test Shell - " + WideToUTF8(title)).c_str());
+                       ("Test Shell - " + UTF16ToUTF8(title)).c_str());
 }
 
 void TestWebViewDelegate::SetAddressBarURL(const GURL& url) {

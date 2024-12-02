@@ -4,13 +4,17 @@
 
 #include "chrome/browser/chromeos/cros/network_library.h"
 
-#include <algorithm>
 #include <dbus/dbus-glib.h>
 #include <dbus/dbus-gtype-specialized.h>
 #include <glib-object.h>
+
+#include <algorithm>
+#include <list>
 #include <map>
 #include <set>
+#include <utility>
 
+#include "base/bind.h"
 #include "base/i18n/icu_encoding_detection.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
@@ -26,6 +30,7 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/native_network_constants.h"
 #include "chrome/browser/chromeos/cros/native_network_parser.h"
+#include "chrome/browser/chromeos/cros/onc_network_parser.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/network_login_observer.h"
 #include "chrome/browser/chromeos/user_cros_settings_provider.h"
@@ -57,9 +62,11 @@
 //  CellularNetwork
 //   active_cellular_: Cellular version of wifi_.
 //   cellular_networks_: Cellular version of wifi_.
-// network_unique_id_map_: map<unique_id, Network*> for visible networks.
+// network_unique_id_map_: map<unique_id, Network*> for all visible networks.
 // remembered_network_map_: a canonical map<path, Network*> for all networks
 //     remembered in the active Profile ("favorites").
+// remembered_network_unique_id_map_: map<unique_id, Network*> for all
+//     remembered networks.
 // remembered_wifi_networks_: ordered vector of WifiNetwork* entries in
 //     remembered_network_map_, in descending order of preference.
 // remembered_virtual_networks_: ordered vector of VirtualNetwork* entries in
@@ -334,13 +341,17 @@ NetworkDevice::NetworkDevice(const std::string& device_path)
 
 NetworkDevice::~NetworkDevice() {}
 
+void NetworkDevice::SetNetworkDeviceParser(NetworkDeviceParser* parser) {
+  device_parser_.reset(parser);
+}
+
 void NetworkDevice::ParseInfo(const DictionaryValue& info) {
   if (device_parser_.get())
     device_parser_->UpdateDeviceFromInfo(info, this);
 }
 
 bool NetworkDevice::UpdateStatus(const std::string& key,
-                                 const Value& value,
+                                 const base::Value& value,
                                  PropertyIndex* index) {
   if (device_parser_.get())
     return device_parser_->UpdateStatus(key, value, this, index);
@@ -351,8 +362,7 @@ bool NetworkDevice::UpdateStatus(const std::string& key,
 // Network
 
 Network::Network(const std::string& service_path,
-                 ConnectionType type,
-                 NativeNetworkParser* parser)
+                 ConnectionType type)
     : state_(STATE_UNKNOWN),
       error_(ERROR_NO_ERROR),
       connectable_(true),
@@ -366,17 +376,22 @@ Network::Network(const std::string& service_path,
       notify_failure_(false),
       profile_type_(PROFILE_NONE),
       service_path_(service_path),
-      type_(type),
-      network_parser_(parser) {
+      type_(type) {
 }
 
 Network::~Network() {}
+
+void Network::SetNetworkParser(NetworkParser* parser) {
+  network_parser_.reset(parser);
+}
 
 void Network::SetState(ConnectionState new_state) {
   if (new_state == state_)
     return;
   ConnectionState old_state = state_;
   state_ = new_state;
+  if (!IsConnectingState(new_state))
+    set_connection_started(false);
   if (new_state == STATE_FAILURE) {
     if (old_state != STATE_UNKNOWN &&
         old_state != STATE_IDLE) {
@@ -384,10 +399,12 @@ void Network::SetState(ConnectionState new_state) {
       // Transition STATE_IDLE -> STATE_FAILURE sometimes happens on resume
       // but is not an actual failure as network device is not ready yet.
       notify_failure_ = true;
+      // Normally error_ should be set, but if it is not we need to set it to
+      // something here so that the retry logic will be triggered.
+      if (error_ == ERROR_NO_ERROR)
+        error_ = ERROR_UNKNOWN;
     }
   } else {
-    if (!IsConnectingState(new_state))
-      set_connection_started(false);
     // State changed, so refresh IP address.
     // Note: blocking DBus call. TODO(stevenjb): refactor this.
     InitIPAddress();
@@ -565,6 +582,17 @@ std::string Network::GetErrorString() const {
     case ERROR_HTTP_GET_FAILED:
       return l10n_util::GetStringUTF8(
           IDS_CHROMEOS_NETWORK_ERROR_HTTP_GET_FAILED);
+    case ERROR_IPSEC_PSK_AUTH_FAILED:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ERROR_IPSEC_PSK_AUTH_FAILED);
+    case ERROR_IPSEC_CERT_AUTH_FAILED:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ERROR_IPSEC_CERT_AUTH_FAILED);
+    case ERROR_PPP_AUTH_FAILED:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ERROR_PPP_AUTH_FAILED);
+    case ERROR_UNKNOWN:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN);
   }
   return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED);
 }
@@ -607,14 +635,14 @@ bool Network::UpdateStatus(const std::string& key,
 // EthernetNetwork
 
 EthernetNetwork::EthernetNetwork(const std::string& service_path)
-    : Network(service_path, TYPE_ETHERNET, new NativeEthernetNetworkParser) {
+    : Network(service_path, TYPE_ETHERNET) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // VirtualNetwork
 
 VirtualNetwork::VirtualNetwork(const std::string& service_path)
-    : Network(service_path, TYPE_VPN, new NativeVirtualNetworkParser),
+    : Network(service_path, TYPE_VPN),
       provider_type_(PROVIDER_TYPE_L2TP_IPSEC_PSK) {
 }
 
@@ -656,17 +684,28 @@ void VirtualNetwork::CopyCredentialsFromRemembered(Network* remembered) {
 bool VirtualNetwork::NeedMoreInfoToConnect() const {
   if (server_hostname_.empty() || username_.empty() || user_passphrase_.empty())
     return true;
+  if (error() != ERROR_NO_ERROR)
+    return true;
   switch (provider_type_) {
     case PROVIDER_TYPE_L2TP_IPSEC_PSK:
       if (psk_passphrase_.empty())
         return true;
       break;
     case PROVIDER_TYPE_L2TP_IPSEC_USER_CERT:
-    case PROVIDER_TYPE_OPEN_VPN:
       if (client_cert_id_.empty())
         return true;
       break;
+    case PROVIDER_TYPE_OPEN_VPN:
+      if (client_cert_id_.empty())
+        return true;
+      // For now we always need additional info for OpenVPN.
+      // TODO(stevenjb): Check connectable() once flimflam sets that state
+      // properly, or define another mechanism to determine when additional
+      // credentials are required.
+      return true;
+      break;
     case PROVIDER_TYPE_MAX:
+      NOTREACHED();
       break;
   }
   return false;
@@ -698,29 +737,58 @@ void VirtualNetwork::SetCACertNSS(const std::string& ca_cert_nss) {
       flimflam::kL2tpIpsecCaCertNssProperty, ca_cert_nss, &ca_cert_nss_);
 }
 
-void VirtualNetwork::SetPSKPassphrase(const std::string& psk_passphrase) {
-  SetStringProperty(
-      flimflam::kL2tpIpsecPskProperty, psk_passphrase, &psk_passphrase_);
-}
-
-void VirtualNetwork::SetClientCertID(const std::string& cert_id) {
-  SetStringProperty(
-      flimflam::kL2tpIpsecClientCertIdProperty, cert_id, &client_cert_id_);
-}
-
-void VirtualNetwork::SetUsername(const std::string& username) {
+void VirtualNetwork::SetL2TPIPsecPSKCredentials(
+    const std::string& psk_passphrase,
+    const std::string& username,
+    const std::string& user_passphrase,
+    const std::string& group_name) {
+  SetStringProperty(flimflam::kL2tpIpsecPskProperty,
+                    psk_passphrase, &psk_passphrase_);
   SetStringProperty(flimflam::kL2tpIpsecUserProperty, username, &username_);
+  SetStringProperty(flimflam::kL2tpIpsecPasswordProperty,
+                    user_passphrase, &user_passphrase_);
+  SetStringProperty(flimflam::kL2tpIpsecGroupNameProperty,
+                    group_name, &group_name_);
 }
 
-void VirtualNetwork::SetUserPassphrase(const std::string& user_passphrase) {
-  SetStringProperty(
-      flimflam::kL2tpIpsecPasswordProperty, user_passphrase, &user_passphrase_);
+void VirtualNetwork::SetL2TPIPsecCertCredentials(
+    const std::string& client_cert_id,
+    const std::string& username,
+    const std::string& user_passphrase,
+    const std::string& group_name) {
+  SetStringProperty(flimflam::kL2tpIpsecClientCertIdProperty,
+                    client_cert_id, &client_cert_id_);
+  SetStringProperty(flimflam::kL2tpIpsecUserProperty, username, &username_);
+  SetStringProperty(flimflam::kL2tpIpsecPasswordProperty,
+                    user_passphrase, &user_passphrase_);
+  SetStringProperty(flimflam::kL2tpIpsecGroupNameProperty,
+                    group_name, &group_name_);
+}
+
+void VirtualNetwork::SetOpenVPNCredentials(
+    const std::string& client_cert_id,
+    const std::string& username,
+    const std::string& user_passphrase,
+    const std::string& otp) {
+  SetStringProperty(flimflam::kOpenVPNClientCertIdProperty,
+                    client_cert_id, &client_cert_id_);
+  SetStringProperty(flimflam::kOpenVPNUserProperty, username, &username_);
+  SetStringProperty(flimflam::kOpenVPNPasswordProperty,
+                    user_passphrase, &user_passphrase_);
+  SetStringProperty(flimflam::kOpenVPNOTPProperty, otp, NULL);
 }
 
 void VirtualNetwork::SetCertificateSlotAndPin(
     const std::string& slot, const std::string& pin) {
-  SetOrClearStringProperty(flimflam::kL2tpIpsecClientCertSlotProp, slot, NULL);
-  SetOrClearStringProperty(flimflam::kL2tpIpsecPinProperty, pin, NULL);
+  if (provider_type() == PROVIDER_TYPE_OPEN_VPN) {
+    SetOrClearStringProperty(flimflam::kOpenVPNClientCertSlotProperty,
+                             slot, NULL);
+    SetOrClearStringProperty(flimflam::kOpenVPNPinProperty, pin, NULL);
+  } else {
+    SetOrClearStringProperty(flimflam::kL2tpIpsecClientCertSlotProperty,
+                             slot, NULL);
+    SetOrClearStringProperty(flimflam::kL2tpIpsecPinProperty, pin, NULL);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -977,21 +1045,27 @@ void CellularApn::Set(const DictionaryValue& dict) {
 // CellularNetwork
 
 CellularNetwork::CellularNetwork(const std::string& service_path)
-    : WirelessNetwork(service_path, TYPE_CELLULAR,
-                      new NativeCellularNetworkParser),
+    : WirelessNetwork(service_path, TYPE_CELLULAR),
       activation_state_(ACTIVATION_STATE_UNKNOWN),
       network_technology_(NETWORK_TECHNOLOGY_UNKNOWN),
       roaming_state_(ROAMING_STATE_UNKNOWN),
+      using_post_(false),
       data_left_(DATA_UNKNOWN) {
 }
 
 CellularNetwork::~CellularNetwork() {
 }
 
-bool CellularNetwork::StartActivation() const {
+bool CellularNetwork::StartActivation() {
   if (!EnsureCrosLoaded())
     return false;
-  return chromeos::ActivateCellularModem(service_path().c_str(), NULL);
+  if (!chromeos::ActivateCellularModem(service_path().c_str(), NULL))
+    return false;
+  // Don't wait for flimflam to tell us that we are really activating since
+  // other notifications in the message loop might cause us to think that
+  // the process hasn't started yet.
+  activation_state_ = ACTIVATION_STATE_ACTIVATING;
+  return true;
 }
 
 void CellularNetwork::RefreshDataPlansIfNeeded() const {
@@ -1116,7 +1190,7 @@ std::string CellularNetwork::GetRoamingStateString() const {
 // WifiNetwork
 
 WifiNetwork::WifiNetwork(const std::string& service_path)
-    : WirelessNetwork(service_path, TYPE_WIFI, new NativeWifiNetworkParser),
+    : WirelessNetwork(service_path, TYPE_WIFI),
       encryption_(SECURITY_NONE),
       passphrase_required_(false),
       eap_method_(EAP_METHOD_UNKNOWN),
@@ -1400,6 +1474,10 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   virtual void CallEnableNetworkDeviceType(
       ConnectionType device, bool enable) = 0;
 
+  // Called from DeleteRememberedNetwork for VPN services.
+  // Asynchronously disconnects and removes the service.
+  virtual void CallRemoveNetwork(const Network* network) = 0;
+
   //////////////////////////////////////////////////////////////////////////////
   // NetworkLibrary implementation.
 
@@ -1519,6 +1597,15 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   virtual bool cellular_enabled() const OVERRIDE {
     return enabled_devices_ & (1 << TYPE_CELLULAR);
   }
+  virtual bool ethernet_busy() const OVERRIDE {
+    return busy_devices_ & (1 << TYPE_ETHERNET);
+  }
+  virtual bool wifi_busy() const OVERRIDE {
+    return busy_devices_ & (1 << TYPE_WIFI);
+  }
+  virtual bool cellular_busy() const OVERRIDE {
+    return busy_devices_ & (1 << TYPE_CELLULAR);
+  }
   virtual bool wifi_scanning() const OVERRIDE {
     return wifi_scanning_;
   }
@@ -1532,6 +1619,8 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   virtual const NetworkDevice* FindEthernetDevice() const OVERRIDE;
   virtual const NetworkDevice* FindWifiDevice() const OVERRIDE;
   virtual Network* FindNetworkByPath(const std::string& path) const OVERRIDE;
+  virtual Network* FindNetworkByUniqueId(
+      const std::string& unique_id) const OVERRIDE;
   WirelessNetwork* FindWirelessNetworkByPath(const std::string& path) const;
   virtual WifiNetwork* FindWifiNetworkByPath(
       const std::string& path) const OVERRIDE;
@@ -1539,11 +1628,11 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
       const std::string& path) const OVERRIDE;
   virtual VirtualNetwork* FindVirtualNetworkByPath(
       const std::string& path) const OVERRIDE;
-  virtual Network* FindNetworkFromRemembered(
-      const Network* remembered) const OVERRIDE;
   Network* FindRememberedFromNetwork(const Network* network) const;
   virtual Network* FindRememberedNetworkByPath(
       const std::string& path) const OVERRIDE;
+  virtual Network* FindRememberedNetworkByUniqueId(
+      const std::string& unique_id) const OVERRIDE;
 
   virtual const CellularDataPlanVector* GetDataPlans(
       const std::string& path) const OVERRIDE;
@@ -1584,19 +1673,12 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
       const EAPConfigData* eap_config,
       bool save_credentials,
       bool shared) OVERRIDE;
-  virtual void ConnectToVirtualNetworkPSK(
+
+  virtual void ConnectToUnconfiguredVirtualNetwork(
       const std::string& service_name,
       const std::string& server_hostname,
-      const std::string& psk,
-      const std::string& username,
-      const std::string& user_passphrase) OVERRIDE;
-  virtual void ConnectToVirtualNetworkCert(
-      const std::string& service_name,
-      const std::string& server_hostname,
-      const std::string& server_ca_cert_nss_nickname,
-      const std::string& client_cert_pkcs11_id,
-      const std::string& username,
-      const std::string& user_passphrase) OVERRIDE;
+      ProviderType provider_type,
+      const VPNConfigData& config) OVERRIDE;
 
   // virtual DisconnectFromNetwork implemented in derived classes.
   virtual void ForgetNetwork(const std::string& service_path) OVERRIDE;
@@ -1607,6 +1689,9 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   // virtual GetIPConfigs implemented in derived classes.
   // virtual SetIPConfig implemented in derived classes.
   virtual void SwitchToPreferredNetwork() OVERRIDE;
+  virtual bool LoadOncNetworks(const std::string& onc_blob) OVERRIDE;
+  virtual bool SetActiveNetwork(ConnectionType type,
+                                const std::string& service_path) OVERRIDE;
 
  protected:
   typedef ObserverList<NetworkObserver> NetworkObserverList;
@@ -1641,7 +1726,10 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
         profile_type(PROFILE_NONE) {}
     ConnectionSecurity security;
     std::string service_name;  // For example, SSID.
+    std::string username;
     std::string passphrase;
+    std::string otp;
+    std::string group_name;
     std::string server_hostname;
     std::string server_ca_cert_nss_nickname;
     std::string client_cert_pkcs11_id;
@@ -1651,7 +1739,6 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
     std::string eap_identity;
     std::string eap_anonymous_identity;
     std::string psk_key;
-    std::string psk_username;
     bool save_credentials;
     NetworkProfileType profile_type;
   };
@@ -1677,11 +1764,14 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   // Called from GetSignificantDataPlan.
   const CellularDataPlan* GetSignificantDataPlanFromVector(
       const CellularDataPlanVector* plans) const;
-  CellularNetwork::DataLeft GetDataLeft(CellularDataPlanVector* data_plans);
+  CellularNetwork::DataLeft GetDataLeft(
+      CellularDataPlanVector* data_plan_vector);
+  // Takes ownership of |data_plan|.
   void UpdateCellularDataPlan(const std::string& service_path,
-                              const CellularDataPlanList* data_plan_list);
+                              CellularDataPlanVector* data_plan_vector);
 
   // Network list management functions.
+  void ClearActiveNetwork(ConnectionType type);
   void UpdateActiveNetwork(Network* network);
   void AddNetwork(Network* network);
   void DeleteNetwork(Network* network);
@@ -1695,6 +1785,9 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   void DeleteDeviceFromDeviceObserversMap(const std::string& device_path);
 
   // Profile management functions.
+  void AddProfile(const std::string& profile_path,
+                  NetworkProfileType profile_type);
+  NetworkProfile* GetProfileForType(NetworkProfileType type);
   void SetProfileType(Network* network, NetworkProfileType type);
   void SetProfileTypeFromPath(Network* network);
   std::string GetProfilePath(NetworkProfileType type);
@@ -1702,7 +1795,7 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   // Notifications.
   void NotifyNetworkManagerChanged(bool force_update);
   void SignalNetworkManagerObservers();
-  void NotifyNetworkChanged(Network* network);
+  void NotifyNetworkChanged(const Network* network);
   void NotifyNetworkDeviceChanged(NetworkDevice* device, PropertyIndex index);
   void NotifyCellularDataPlanChanged();
   void NotifyPinOperationCompleted(PinOperationError error);
@@ -1712,9 +1805,6 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   void GetTpmInfo();
   const std::string& GetTpmSlot();
   const std::string& GetTpmPin();
-
-  // Pin related functions.
-  void FlipSimPinRequiredStateIfNeeded();
 
   // Network manager observer list.
   ObserverList<NetworkManagerObserver> network_manager_observers_;
@@ -1740,17 +1830,17 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   // List of profiles.
   NetworkProfileList profile_list_;
 
-  // List of networks to move to the user profile once logged in.
-  std::list<std::string> user_networks_;
-
-  // A service path based map of all Networks.
+  // A service path based map of all visible Networks.
   NetworkMap network_map_;
 
-  // A unique_id_ based map of Networks.
+  // A unique_id based map of all visible Networks.
   NetworkMap network_unique_id_map_;
 
   // A service path based map of all remembered Networks.
   NetworkMap remembered_network_map_;
+
+  // A unique_id based map of all remembered Networks.
+  NetworkMap remembered_network_unique_id_map_;
 
   // A list of services that we are awaiting updates for.
   PriorityMap network_update_requests_;
@@ -1797,6 +1887,10 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   // The current enabled network devices. Bitwise flag of ConnectionTypes.
   int enabled_devices_;
 
+  // The current busy network devices. Bitwise flag of ConnectionTypes.
+  // Busy means device is switching from enable/disable state.
+  int busy_devices_;
+
   // The current connected network devices. Bitwise flag of ConnectionTypes.
   int connected_devices_;
 
@@ -1815,6 +1909,10 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
 
   // Type of pending SIM operation, SIM_OPERATION_NONE otherwise.
   SimOperationType sim_operation_;
+
+ private:
+  // List of networks to move to the user profile once logged in.
+  std::list<std::string> user_networks_;
 
   // Delayed task to notify a network change.
   CancelableTask* notify_task_;
@@ -1835,6 +1933,7 @@ NetworkLibraryImplBase::NetworkLibraryImplBase()
       active_virtual_(NULL),
       available_devices_(0),
       enabled_devices_(0),
+      busy_devices_(0),
       connected_devices_(0),
       wifi_scanning_(false),
       offline_mode_(false),
@@ -2131,6 +2230,14 @@ Network* NetworkLibraryImplBase::FindNetworkByPath(
   return NULL;
 }
 
+Network* NetworkLibraryImplBase::FindNetworkByUniqueId(
+    const std::string& unique_id) const {
+  NetworkMap::const_iterator found = network_unique_id_map_.find(unique_id);
+  if (found != network_unique_id_map_.end())
+    return found->second;
+  return NULL;
+}
+
 WirelessNetwork* NetworkLibraryImplBase::FindWirelessNetworkByPath(
     const std::string& path) const {
   Network* network = FindNetworkByPath(path);
@@ -2164,15 +2271,6 @@ VirtualNetwork* NetworkLibraryImplBase::FindVirtualNetworkByPath(
   return NULL;
 }
 
-Network* NetworkLibraryImplBase::FindNetworkFromRemembered(
-    const Network* remembered) const {
-  NetworkMap::const_iterator found =
-      network_unique_id_map_.find(remembered->unique_id());
-  if (found != network_unique_id_map_.end())
-    return found->second;
-  return NULL;
-}
-
 Network* NetworkLibraryImplBase::FindRememberedFromNetwork(
     const Network* network) const {
   for (NetworkMap::const_iterator iter = remembered_network_map_.begin();
@@ -2188,6 +2286,15 @@ Network* NetworkLibraryImplBase::FindRememberedNetworkByPath(
   NetworkMap::const_iterator iter = remembered_network_map_.find(path);
   if (iter != remembered_network_map_.end())
     return iter->second;
+  return NULL;
+}
+
+Network* NetworkLibraryImplBase::FindRememberedNetworkByUniqueId(
+    const std::string& unique_id) const {
+  NetworkMap::const_iterator found =
+      remembered_network_unique_id_map_.find(unique_id);
+  if (found != remembered_network_unique_id_map_.end())
+    return found->second;
   return NULL;
 }
 
@@ -2228,8 +2335,9 @@ GetSignificantDataPlanFromVector(const CellularDataPlanVector* plans) const {
 }
 
 CellularNetwork::DataLeft NetworkLibraryImplBase::GetDataLeft(
-    CellularDataPlanVector* data_plans) {
-  const CellularDataPlan* plan = GetSignificantDataPlanFromVector(data_plans);
+    CellularDataPlanVector* data_plan_vector) {
+  const CellularDataPlan* plan =
+      GetSignificantDataPlanFromVector(data_plan_vector);
   if (!plan)
     return CellularNetwork::DATA_UNKNOWN;
   if (plan->plan_type == CELLULAR_DATA_PLAN_UNLIMITED) {
@@ -2259,25 +2367,15 @@ CellularNetwork::DataLeft NetworkLibraryImplBase::GetDataLeft(
 
 void NetworkLibraryImplBase::UpdateCellularDataPlan(
     const std::string& service_path,
-    const CellularDataPlanList* data_plan_list) {
+    CellularDataPlanVector* data_plan_vector) {
   VLOG(1) << "Updating cellular data plans for: " << service_path;
-  CellularDataPlanVector* data_plans = NULL;
   // Find and delete any existing data plans associated with |service_path|.
   CellularDataPlanMap::iterator found = data_plan_map_.find(service_path);
-  if (found != data_plan_map_.end()) {
-    data_plans = found->second;
-    data_plans->reset();  // This will delete existing data plans.
-  } else {
-    data_plans = new CellularDataPlanVector;
-    data_plan_map_[service_path] = data_plans;
-  }
-  for (size_t i = 0; i < data_plan_list->plans_size; ++i) {
-    const CellularDataPlanInfo* info(data_plan_list->GetCellularDataPlan(i));
-    CellularDataPlan* plan = new CellularDataPlan(*info);
-    data_plans->push_back(plan);
-    VLOG(2) << " Plan: " << plan->GetPlanDesciption()
-            << " : " << plan->GetDataRemainingDesciption();
-  }
+  if (found != data_plan_map_.end())
+    delete found->second;  // This will delete existing data plans.
+  // Takes ownership of |data_plan_vector|.
+  data_plan_map_[service_path] = data_plan_vector;
+
   // Now, update any matching cellular network's cached data
   CellularNetwork* cellular = FindCellularNetworkByPath(service_path);
   if (cellular) {
@@ -2286,7 +2384,7 @@ void NetworkLibraryImplBase::UpdateCellularDataPlan(
     if (cellular->needs_new_plan())
       data_left = CellularNetwork::DATA_NONE;
     else
-      data_left = GetDataLeft(data_plans);
+      data_left = GetDataLeft(data_plan_vector);
     VLOG(2) << " Data left: " << data_left
             << " Need plan: " << cellular->needs_new_plan();
     cellular->set_data_left(data_left);
@@ -2385,6 +2483,7 @@ void NetworkLibraryImplBase::ConnectToVirtualNetwork(VirtualNetwork* vpn) {
 // 2. Start the connection.
 void NetworkLibraryImplBase::NetworkConnectStartWifi(
     WifiNetwork* wifi, NetworkProfileType profile_type) {
+  DCHECK(!wifi->connection_started());
   // This will happen if a network resets, gets out of range or is forgotten.
   if (wifi->user_passphrase_ != wifi->passphrase_ ||
       wifi->passphrase_required())
@@ -2442,7 +2541,7 @@ void NetworkLibraryImplBase::NetworkConnectStart(
     std::string profile_path = GetProfilePath(profile_type);
     if (!profile_path.empty()) {
       if (profile_path != network->profile_path())
-        network->SetProfilePath(profile_path);
+        SetProfileType(network, profile_type);
     } else if (profile_type == PROFILE_USER) {
       // The user profile was specified but is not available (i.e. pre-login).
       // Add this network to the list of networks to move to the user profile
@@ -2482,16 +2581,8 @@ void NetworkLibraryImplBase::NetworkConnectCompleted(
   if (!network->save_credentials())
     network->EraseCredentials();
 
-  // Update local cache and notify listeners.
-  if (network->type() == TYPE_WIFI) {
-    active_wifi_ = static_cast<WifiNetwork*>(network);
-  } else if (network->type() == TYPE_CELLULAR) {
-    active_cellular_ = static_cast<CellularNetwork*>(network);
-  } else if (network->type() == TYPE_VPN) {
-    active_virtual_ = static_cast<VirtualNetwork*>(network);
-  } else {
-    LOG(ERROR) << "Network of unexpected type: " << network->type();
-  }
+  ClearActiveNetwork(network->type());
+  UpdateActiveNetwork(network);
 
   // Notify observers.
   NotifyNetworkManagerChanged(true);  // Forced update.
@@ -2535,41 +2626,24 @@ void NetworkLibraryImplBase::ConnectToUnconfiguredWifiNetwork(
 }
 
 // 1. Connect to a virtual network with a PSK.
-void NetworkLibraryImplBase::ConnectToVirtualNetworkPSK(
+void NetworkLibraryImplBase::ConnectToUnconfiguredVirtualNetwork(
     const std::string& service_name,
     const std::string& server_hostname,
-    const std::string& psk,
-    const std::string& username,
-    const std::string& user_passphrase) {
-  // Store the connection data to be used by the callback.
-  connect_data_.service_name = service_name;
-  connect_data_.psk_key = psk;
-  connect_data_.server_hostname = server_hostname;
-  connect_data_.psk_username = username;
-  connect_data_.passphrase = user_passphrase;
-  CallRequestVirtualNetworkAndConnect(
-      service_name, server_hostname,
-      PROVIDER_TYPE_L2TP_IPSEC_PSK);
-}
-
-// 1. Connect to a virtual network with a user cert.
-void NetworkLibraryImplBase::ConnectToVirtualNetworkCert(
-    const std::string& service_name,
-    const std::string& server_hostname,
-    const std::string& server_ca_cert_nss_nickname,
-    const std::string& client_cert_pkcs11_id,
-    const std::string& username,
-    const std::string& user_passphrase) {
+    ProviderType provider_type,
+    const VPNConfigData& config) {
   // Store the connection data to be used by the callback.
   connect_data_.service_name = service_name;
   connect_data_.server_hostname = server_hostname;
-  connect_data_.server_ca_cert_nss_nickname = server_ca_cert_nss_nickname;
-  connect_data_.client_cert_pkcs11_id = client_cert_pkcs11_id;
-  connect_data_.psk_username = username;
-  connect_data_.passphrase = user_passphrase;
+  connect_data_.psk_key = config.psk;
+  connect_data_.server_ca_cert_nss_nickname =
+      config.server_ca_cert_nss_nickname;
+  connect_data_.client_cert_pkcs11_id = config.client_cert_pkcs11_id;
+  connect_data_.username = config.username;
+  connect_data_.passphrase = config.user_passphrase;
+  connect_data_.otp = config.otp;
+  connect_data_.group_name = config.group_name;
   CallRequestVirtualNetworkAndConnect(
-      service_name, server_hostname,
-      PROVIDER_TYPE_L2TP_IPSEC_USER_CERT);
+      service_name, server_hostname, provider_type);
 }
 
 // 2. Requests a WiFi Network by SSID and security.
@@ -2628,11 +2702,29 @@ void NetworkLibraryImplBase::ConnectToVirtualNetworkUsingConnectData(
   vpn->set_added(true);
   if (!data.server_hostname.empty())
     vpn->set_server_hostname(data.server_hostname);
+
   vpn->SetCACertNSS(data.server_ca_cert_nss_nickname);
-  vpn->SetClientCertID(data.client_cert_pkcs11_id);
-  vpn->SetPSKPassphrase(data.psk_key);
-  vpn->SetUsername(data.psk_username);
-  vpn->SetUserPassphrase(data.passphrase);
+  switch (vpn->provider_type()) {
+    case PROVIDER_TYPE_L2TP_IPSEC_PSK:
+      vpn->SetL2TPIPsecPSKCredentials(
+          data.psk_key, data.username, data.passphrase, data.group_name);
+      break;
+    case PROVIDER_TYPE_L2TP_IPSEC_USER_CERT: {
+      vpn->SetL2TPIPsecCertCredentials(
+          data.client_cert_pkcs11_id,
+          data.username, data.passphrase, data.group_name);
+      break;
+    }
+    case PROVIDER_TYPE_OPEN_VPN: {
+      vpn->SetOpenVPNCredentials(
+          data.client_cert_pkcs11_id,
+          data.username, data.passphrase, data.otp);
+      break;
+    }
+    case PROVIDER_TYPE_MAX:
+      NOTREACHED();
+      break;
+  }
 
   NetworkConnectStartVPN(vpn);
 }
@@ -2685,6 +2777,44 @@ void NetworkLibraryImplBase::SwitchToPreferredNetwork() {
   }
 }
 
+bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob) {
+  OncNetworkParser parser(onc_blob);
+
+  for (int i = 0; i < parser.GetNetworkConfigsSize(); i++) {
+    // Parse Open Network Configuration blob into a temporary Network object.
+    Network* network = parser.ParseNetwork(i);
+    if (!network) {
+      DLOG(WARNING) << "Cannot parse networks in ONC file";
+      return false;
+    }
+
+    // TODO(chocobo): Pass parsed network values to flimflam update network.
+  }
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////
+// Testing functions.
+
+bool NetworkLibraryImplBase::SetActiveNetwork(
+    ConnectionType type, const std::string& service_path) {
+  Network* network = NULL;
+  if (!service_path.empty())
+    network = FindNetworkByPath(service_path);
+  if (network && network->type() != type) {
+    LOG(WARNING) << "SetActiveNetwork type mismatch for: " << network->name();
+    return false;
+  }
+
+  ClearActiveNetwork(type);
+
+  if (!network)
+    return true;
+
+  // Set |network| to active.
+  UpdateActiveNetwork(network);
+  return true;
+}
 
 ////////////////////////////////////////////////////////////////////////////
 // Network list management functions.
@@ -2697,30 +2827,65 @@ void NetworkLibraryImplBase::SwitchToPreferredNetwork() {
 // This relies on services being requested from flimflam in priority order,
 // and the updates getting processed and received in order.
 void NetworkLibraryImplBase::UpdateActiveNetwork(Network* network) {
+  network->set_is_active(true);
   ConnectionType type(network->type());
   if (type == TYPE_ETHERNET) {
     if (ethernet_enabled()) {
       // Set ethernet_ to the first connected ethernet service, or the first
       // disconnected ethernet service if none are connected.
-      if (ethernet_ == NULL || !ethernet_->connected())
+      if (ethernet_ == NULL || !ethernet_->connected()) {
         ethernet_ = static_cast<EthernetNetwork*>(network);
+        VLOG(2) << "Active ethernet -> " << ethernet_->name();
+      }
     }
   } else if (type == TYPE_WIFI) {
     if (wifi_enabled()) {
       // Set active_wifi_ to the first connected or connecting wifi service.
-      if (active_wifi_ == NULL && network->connecting_or_connected())
+      if (active_wifi_ == NULL && network->connecting_or_connected()) {
         active_wifi_ = static_cast<WifiNetwork*>(network);
+        VLOG(2) << "Active wifi -> " << active_wifi_->name();
+      }
     }
   } else if (type == TYPE_CELLULAR) {
     if (cellular_enabled()) {
       // Set active_cellular_ to first connected/connecting celluar service.
-      if (active_cellular_ == NULL && network->connecting_or_connected())
+      if (active_cellular_ == NULL && network->connecting_or_connected()) {
         active_cellular_ = static_cast<CellularNetwork*>(network);
+        VLOG(2) << "Active cellular -> " << active_cellular_->name();
+      }
     }
   } else if (type == TYPE_VPN) {
-    // Set active_virtual_ to the first connected or connecting vpn service.
-    if (active_virtual_ == NULL && network->connecting_or_connected())
+    // Set active_virtual_ to the first connected or connecting vpn service. {
+    if (active_virtual_ == NULL && network->connecting_or_connected()) {
       active_virtual_ = static_cast<VirtualNetwork*>(network);
+      VLOG(2) << "Active virtual -> " << active_virtual_->name();
+    }
+  }
+}
+
+void NetworkLibraryImplBase::ClearActiveNetwork(ConnectionType type) {
+  // Clear any existing active network matching |type|.
+  for (NetworkMap::iterator iter = network_map_.begin();
+       iter != network_map_.end(); ++iter) {
+    Network* other = iter->second;
+    if (other->type() == type)
+      other->set_is_active(false);
+  }
+  switch (type) {
+    case TYPE_ETHERNET:
+      ethernet_ = NULL;
+      break;
+    case TYPE_WIFI:
+      active_wifi_ = NULL;
+      break;
+    case TYPE_CELLULAR:
+      active_cellular_ = NULL;
+      break;
+    case TYPE_VPN:
+      active_virtual_ = NULL;
+      break;
+    default:
+      break;
   }
 }
 
@@ -2751,8 +2916,8 @@ void NetworkLibraryImplBase::DeleteNetwork(Network* network) {
     CellularDataPlanMap::iterator found =
         data_plan_map_.find(network->service_path());
     if (found != data_plan_map_.end()) {
-      CellularDataPlanVector* data_plans = found->second;
-      delete data_plans;
+      CellularDataPlanVector* data_plan_vector = found->second;
+      delete data_plan_vector;
       data_plan_map_.erase(found);
     }
   }
@@ -2803,18 +2968,14 @@ void NetworkLibraryImplBase::DeleteRememberedNetwork(
 
   // Update any associated network service before removing from profile
   // so that flimflam doesn't recreate the service (e.g. when we disconenct it).
-  Network* network = FindNetworkFromRemembered(remembered_network);
+  Network* network = FindNetworkByUniqueId(remembered_network->unique_id());
   if (network) {
     // Clear the stored credentials for any forgotten networks.
     network->EraseCredentials();
     SetProfileType(network, PROFILE_NONE);
     // Remove VPN from list of networks.
-    if (network->type() == TYPE_VPN) {
-      const char* service_path = network->service_path().c_str();
-      if (network->connected())
-        chromeos::RequestNetworkServiceDisconnect(service_path);
-      chromeos::RequestRemoveNetworkService(service_path);
-    }
+    if (network->type() == TYPE_VPN)
+      CallRemoveNetwork(network);
   } else {
     // Network is not in service list.
     VLOG(2) << "Remembered Network not in service list: "
@@ -2874,6 +3035,7 @@ void NetworkLibraryImplBase::ClearNetworks() {
 
 void NetworkLibraryImplBase::ClearRememberedNetworks() {
   remembered_network_map_.clear();
+  remembered_network_unique_id_map_.clear();
   remembered_wifi_networks_.clear();
   remembered_virtual_networks_.clear();
 }
@@ -2903,6 +3065,35 @@ void NetworkLibraryImplBase::DeleteDevice(const std::string& device_path) {
 }
 
 ////////////////////////////////////////////////////////////////////////////
+
+void NetworkLibraryImplBase::AddProfile(
+    const std::string& profile_path, NetworkProfileType profile_type) {
+  profile_list_.push_back(NetworkProfile(profile_path, profile_type));
+  // Check to see if we connected to any networks before a user profile was
+  // available (i.e. before login), but unchecked the "Share" option (i.e.
+  // the desired pofile is the user profile). Move these networks to the
+  // user profile when it becomes available.
+  if (profile_type == PROFILE_USER && !user_networks_.empty()) {
+    for (std::list<std::string>::iterator iter2 = user_networks_.begin();
+         iter2 != user_networks_.end(); ++iter2) {
+      Network* network = FindNetworkByPath(*iter2);
+      if (network && network->profile_path() != profile_path)
+        network->SetProfilePath(profile_path);
+    }
+    user_networks_.clear();
+  }
+}
+
+NetworkLibraryImplBase::NetworkProfile*
+NetworkLibraryImplBase::GetProfileForType(NetworkProfileType type) {
+  for (NetworkProfileList::iterator iter = profile_list_.begin();
+       iter != profile_list_.end(); ++iter) {
+    NetworkProfile& profile = *iter;
+    if (profile.type == type)
+      return &profile;
+  }
+  return NULL;
+}
 
 void NetworkLibraryImplBase::SetProfileType(
     Network* network, NetworkProfileType type) {
@@ -2934,18 +3125,15 @@ void NetworkLibraryImplBase::SetProfileTypeFromPath(Network* network) {
       return;
     }
   }
-  NOTREACHED() << "Profile path not found: " << network->profile_path();
+  LOG(WARNING) << "Profile path not found: " << network->profile_path();
   network->set_profile_type(PROFILE_NONE);
 }
 
 std::string NetworkLibraryImplBase::GetProfilePath(NetworkProfileType type) {
   std::string profile_path;
-  for (NetworkProfileList::iterator iter = profile_list_.begin();
-       iter != profile_list_.end(); ++iter) {
-    NetworkProfile& profile = *iter;
-    if (profile.type == type)
-      profile_path = profile.path;
-  }
+  NetworkProfile* profile = GetProfileForType(type);
+  if (profile)
+    profile_path = profile->path;
   return profile_path;
 }
 
@@ -2956,7 +3144,6 @@ std::string NetworkLibraryImplBase::GetProfilePath(NetworkProfileType type) {
 // TODO(stevenjb): We should consider breaking this into multiple
 // notifications, e.g. connection state, devices, services, etc.
 void NetworkLibraryImplBase::NotifyNetworkManagerChanged(bool force_update) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Cancel any pending signals.
   if (notify_task_) {
     notify_task_->Cancel();
@@ -2966,7 +3153,7 @@ void NetworkLibraryImplBase::NotifyNetworkManagerChanged(bool force_update) {
     // Signal observers now.
     SignalNetworkManagerObservers();
   } else {
-    // Schedule a deleayed signal to limit the frequency of notifications.
+    // Schedule a delayed signal to limit the frequency of notifications.
     notify_task_ = NewRunnableMethod(
         this, &NetworkLibraryImplBase::SignalNetworkManagerObservers);
     BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE, notify_task_,
@@ -2986,7 +3173,7 @@ void NetworkLibraryImplBase::SignalNetworkManagerObservers() {
   }
 }
 
-void NetworkLibraryImplBase::NotifyNetworkChanged(Network* network) {
+void NetworkLibraryImplBase::NotifyNetworkChanged(const Network* network) {
   DCHECK(network);
   VLOG(2) << "Network changed: " << network->name();
   NetworkObserverMap::const_iterator iter = network_observers_.find(
@@ -2995,7 +3182,7 @@ void NetworkLibraryImplBase::NotifyNetworkChanged(Network* network) {
     FOR_EACH_OBSERVER(NetworkObserver,
                       *(iter->second),
                       OnNetworkChanged(this, network));
-  } else {
+  } else if (IsCros()) {
     LOG(ERROR) << "Unexpected signal for unobserved network: "
                << network->name();
   }
@@ -3064,7 +3251,7 @@ void NetworkLibraryImplBase::GetTpmInfo() {
       // For now, use a hard coded, well known slot instead.
       const char kHardcodedTpmSlot[] = "0";
       tpm_slot_ = kHardcodedTpmSlot;
-    } else {
+    } else if (IsCros()) {
       LOG(WARNING) << "TPM token not ready";
     }
   }
@@ -3078,20 +3265,6 @@ const std::string& NetworkLibraryImplBase::GetTpmSlot() {
 const std::string& NetworkLibraryImplBase::GetTpmPin() {
   GetTpmInfo();
   return tpm_pin_;
-}
-
-void NetworkLibraryImplBase::FlipSimPinRequiredStateIfNeeded() {
-  if (sim_operation_ != SIM_OPERATION_CHANGE_REQUIRE_PIN)
-    return;
-
-  const NetworkDevice* cellular = FindCellularDevice();
-  if (cellular) {
-    NetworkDevice* device = FindNetworkDeviceByPath(cellular->device_path());
-    if (device->sim_pin_required() == SIM_PIN_NOT_REQUIRED)
-      device->sim_pin_required_ = SIM_PIN_REQUIRED;
-    else if (device->sim_pin_required() == SIM_PIN_REQUIRED)
-      device->sim_pin_required_ = SIM_PIN_NOT_REQUIRED;
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -3145,6 +3318,8 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
   virtual void DisconnectFromNetwork(const Network* network) OVERRIDE;
   virtual void CallEnableNetworkDeviceType(
       ConnectionType device, bool enable) OVERRIDE;
+  virtual void CallRemoveNetwork(const Network* network) OVERRIDE;
+
   virtual void EnableOfflineMode(bool enable) OVERRIDE;
 
   virtual NetworkIPConfigVector GetIPConfigs(
@@ -3190,9 +3365,10 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
   static void NetworkManagerUpdate(
       void* object, const char* manager_path, GHashTable* ghash);
 
-  static void DataPlanUpdateHandler(void* object,
-                                    const char* modem_service_path,
-                                    const CellularDataPlanList* dataplan);
+  static void DataPlanUpdateHandler(
+      void* object,
+      const char* modem_service_path,
+      const chromeos::CellularDataPlanList* data_plan_list);
 
   static void NetworkServiceUpdate(
       void* object, const char* service_path, GHashTable* ghash);
@@ -3347,6 +3523,7 @@ void NetworkLibraryImplCros::MonitorNetworkDeviceStop(
 // static callback
 void NetworkLibraryImplCros::NetworkStatusChangedHandler(
     void* object, const char* path, const char* key, const GValue* gvalue) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -3379,6 +3556,7 @@ void NetworkLibraryImplCros::UpdateNetworkStatus(
 // static callback
 void NetworkLibraryImplCros::NetworkDevicePropertyChangedHandler(
     void* object, const char* path, const char* key, const GValue* gvalue) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -3434,6 +3612,7 @@ void NetworkLibraryImplCros::NetworkConnectCallback(
     const char* service_path,
     NetworkMethodErrorType error,
     const char* error_message) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkConnectStatus status;
   if (error == NETWORK_METHOD_ERROR_NONE) {
     status = CONNECT_SUCCESS;
@@ -3467,6 +3646,7 @@ void NetworkLibraryImplCros::CallConnectToNetwork(Network* network) {
 // static callback
 void NetworkLibraryImplCros::WifiServiceUpdateAndConnect(
     void* object, const char* service_path, GHashTable* ghash) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -3494,6 +3674,7 @@ void NetworkLibraryImplCros::CallRequestWifiNetworkAndConnect(
 // static callback
 void NetworkLibraryImplCros::VPNServiceUpdateAndConnect(
     void* object, const char* service_path, GHashTable* ghash) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -3591,6 +3772,7 @@ void NetworkLibraryImplCros::PinOperationCallback(
     const char* path,
     NetworkMethodErrorType error,
     const char* error_message) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -3600,10 +3782,6 @@ void NetworkLibraryImplCros::PinOperationCallback(
   if (error == chromeos::NETWORK_METHOD_ERROR_NONE) {
     pin_error = PIN_ERROR_NONE;
     VLOG(1) << "Pin operation completed successfuly";
-    // TODO(nkostylev): Might be cleaned up and exposed in flimflam API.
-    // http://crosbug.com/14253
-    // Since this option state is not exposed we have to update it manually.
-    networklib->FlipSimPinRequiredStateIfNeeded();
   } else {
     if (error_message &&
         (strcmp(error_message, flimflam::kErrorIncorrectPinMsg) == 0 ||
@@ -3648,6 +3826,7 @@ void NetworkLibraryImplCros::CellularRegisterCallback(
     const char* path,
     NetworkMethodErrorType error,
     const char* error_message) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -3729,8 +3908,16 @@ void NetworkLibraryImplCros::DisconnectFromNetwork(const Network* network) {
 
 void NetworkLibraryImplCros::CallEnableNetworkDeviceType(
     ConnectionType device, bool enable) {
+  busy_devices_ |= 1 << device;
   chromeos::RequestNetworkDeviceEnable(
       ConnectionTypeToString(device), enable);
+}
+
+void NetworkLibraryImplCros::CallRemoveNetwork(const Network* network) {
+  const char* service_path = network->service_path().c_str();
+  if (network->connected())
+    chromeos::RequestNetworkServiceDisconnect(service_path);
+  chromeos::RequestRemoveNetworkService(service_path);
 }
 
 void NetworkLibraryImplCros::EnableOfflineMode(bool enable) {
@@ -3869,6 +4056,7 @@ void NetworkLibraryImplCros::SetIPConfig(const NetworkIPConfig& ipconfig) {
 // static
 void NetworkLibraryImplCros::NetworkManagerStatusChangedHandler(
     void* object, const char* path, const char* key, const GValue* gvalue) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -3970,6 +4158,7 @@ void NetworkLibraryImplCros::NetworkManagerStatusChanged(
 // static
 void NetworkLibraryImplCros::NetworkManagerUpdate(
     void* object, const char* manager_path, GHashTable* ghash) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -4000,13 +4189,24 @@ void NetworkLibraryImplCros::ParseNetworkManager(const DictionaryValue& dict) {
 void NetworkLibraryImplCros::DataPlanUpdateHandler(
     void* object,
     const char* modem_service_path,
-    const CellularDataPlanList* dataplan) {
+    const chromeos::CellularDataPlanList* data_plan_list) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
-  if (modem_service_path && dataplan) {
+  if (modem_service_path && data_plan_list) {
+    // Copy contents of |data_plan_list| from libcros to |data_plan_vector|.
+    CellularDataPlanVector* data_plan_vector = new CellularDataPlanVector;
+    for (size_t i = 0; i < data_plan_list->plans_size; ++i) {
+      const CellularDataPlanInfo* info(data_plan_list->GetCellularDataPlan(i));
+      CellularDataPlan* plan = new CellularDataPlan(*info);
+      data_plan_vector->push_back(plan);
+      VLOG(2) << " Plan: " << plan->GetPlanDesciption()
+              << " : " << plan->GetDataRemainingDesciption();
+    }
+    // |data_plan_vector| will become owned by networklib.
     networklib->UpdateCellularDataPlan(std::string(modem_service_path),
-                                       dataplan);
+                                       data_plan_vector);
   }
 }
 
@@ -4039,7 +4239,9 @@ void NetworkLibraryImplCros::UpdateAvailableTechnologies(
 
 void NetworkLibraryImplCros::UpdateEnabledTechnologies(
     const ListValue* technologies) {
+  int old_enabled_devices = enabled_devices_;
   UpdateTechnologies(technologies, &enabled_devices_);
+  busy_devices_ &= ~(old_enabled_devices ^ enabled_devices_);
   if (!ethernet_enabled())
     ethernet_ = NULL;
   if (!wifi_enabled()) {
@@ -4147,6 +4349,7 @@ void NetworkLibraryImplCros::UpdateWatchedNetworkServiceList(
 // static
 void NetworkLibraryImplCros::NetworkServiceUpdate(
     void* object, const char* service_path, GHashTable* ghash) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -4170,7 +4373,8 @@ Network* NetworkLibraryImplCros::ParseNetwork(
     // Erase entry from network_unique_id_map_ in case unique id changes.
     if (!network->unique_id().empty())
       network_unique_id_map_.erase(network->unique_id());
-    network->network_parser()->UpdateNetworkFromInfo(info, network);
+    if (network->network_parser())
+      network->network_parser()->UpdateNetworkFromInfo(info, network);
   }
 
   if (!network->unique_id().empty())
@@ -4227,20 +4431,7 @@ void NetworkLibraryImplCros::UpdateRememberedNetworks(
       profile_type = PROFILE_SHARED;
     else
       profile_type = PROFILE_USER;
-    profile_list_.push_back(NetworkProfile(profile_path, profile_type));
-    // Check to see if we connected to any networks before a user profile was
-    // available (i.e. before login), but unchecked the "Share" option (i.e.
-    // the desired pofile is the user profile). Move these networks to the
-    // user profile when it becomes available.
-    if (profile_type == PROFILE_USER && !user_networks_.empty()) {
-      for (std::list<std::string>::iterator iter2 = user_networks_.begin();
-           iter2 != user_networks_.end(); ++iter2) {
-        Network* network = FindNetworkByPath(*iter2);
-        if (network && network->profile_path() != profile_path)
-          network->SetProfilePath(profile_path);
-      }
-      user_networks_.clear();
-    }
+    AddProfile(profile_path, profile_type);
   }
 }
 
@@ -4267,6 +4458,7 @@ void NetworkLibraryImplCros::RequestRememberedNetworksUpdate() {
 // static
 void NetworkLibraryImplCros::ProfileUpdate(
     void* object, const char* profile_path, GHashTable* ghash) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -4292,7 +4484,8 @@ void NetworkLibraryImplCros::UpdateRememberedServiceList(
       break;
   }
   if (iter1 == profile_list_.end()) {
-    NOTREACHED() << "Profile not in list: " << profile_path;
+    // This can happen if flimflam gets restarted while Chrome is running.
+    LOG(WARNING) << "Profile not in list: " << profile_path;
     return;
   }
   NetworkProfile& profile = *iter1;
@@ -4321,6 +4514,7 @@ void NetworkLibraryImplCros::UpdateRememberedServiceList(
 // static
 void NetworkLibraryImplCros::RememberedNetworkServiceUpdate(
     void* object, const char* service_path, GHashTable* ghash) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -4344,7 +4538,11 @@ Network* NetworkLibraryImplCros::ParseRememberedNetwork(
   NetworkMap::iterator found = remembered_network_map_.find(service_path);
   if (found != remembered_network_map_.end()) {
     remembered = found->second;
-    remembered->network_parser()->UpdateNetworkFromInfo(info, remembered);
+    // Erase entry from network_unique_id_map_ in case unique id changes.
+    if (!remembered->unique_id().empty())
+      remembered_network_unique_id_map_.erase(remembered->unique_id());
+    if (remembered->network_parser())
+      remembered->network_parser()->UpdateNetworkFromInfo(info, remembered);
   } else {
     NativeNetworkParser parser;
     remembered = parser.CreateNetworkFromInfo(service_path, info);
@@ -4358,6 +4556,9 @@ Network* NetworkLibraryImplCros::ParseRememberedNetwork(
     }
   }
 
+  if (!remembered->unique_id().empty())
+    remembered_network_unique_id_map_[remembered->unique_id()] = remembered;
+
   SetProfileTypeFromPath(remembered);
 
   VLOG(1) << "ParseRememberedNetwork: " << remembered->name()
@@ -4368,7 +4569,7 @@ Network* NetworkLibraryImplCros::ParseRememberedNetwork(
   if (remembered->type() == TYPE_VPN) {
     // VPNs are only stored in profiles. If we don't have a network for it,
     // request one.
-    if (!FindNetworkFromRemembered(remembered)) {
+    if (!FindNetworkByUniqueId(remembered->unique_id())) {
       VirtualNetwork* vpn = static_cast<VirtualNetwork*>(remembered);
       std::string provider_type = ProviderTypeToString(vpn->provider_type());
       VLOG(1) << "Requesting VPN: " << vpn->name()
@@ -4424,6 +4625,7 @@ void NetworkLibraryImplCros::UpdateNetworkDeviceList(const ListValue* devices) {
 // static
 void NetworkLibraryImplCros::NetworkDeviceUpdate(
     void* object, const char* device_path, GHashTable* ghash) {
+  DCHECK(CrosLibrary::Get()->libcros_loaded());
   NetworkLibraryImplCros* networklib =
       static_cast<NetworkLibraryImplCros*>(object);
   DCHECK(networklib);
@@ -4517,7 +4719,7 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
       const std::string& network_id) OVERRIDE {}
   virtual void SetCellularDataRoamingAllowed(bool new_value) OVERRIDE {}
   virtual bool IsCellularAlwaysInRoaming() OVERRIDE { return false; }
-  virtual void RequestNetworkScan() OVERRIDE {}
+  virtual void RequestNetworkScan() OVERRIDE;
 
   virtual bool GetWifiAccessPoints(WifiAccessPointVector* result) OVERRIDE;
 
@@ -4525,6 +4727,9 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
 
   virtual void CallEnableNetworkDeviceType(
       ConnectionType device, bool enable) OVERRIDE {}
+
+  virtual void CallRemoveNetwork(const Network* network) OVERRIDE {}
+
   virtual void EnableOfflineMode(bool enable) OVERRIDE {
     offline_mode_ = enable;
   }
@@ -4536,12 +4741,18 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
   virtual void SetIPConfig(const NetworkIPConfig& ipconfig) OVERRIDE;
 
  private:
+  void AddStubNetwork(Network* network, NetworkProfileType profile_type);
+  void AddStubRememberedNetwork(Network* network);
+  void ConnectToNetwork(Network* network);
+
   std::string ip_address_;
   std::string hardware_address_;
   NetworkIPConfigVector ip_configs_;
   std::string pin_;
   bool pin_required_;
   bool pin_entered_;
+  int64 connect_delay_ms_;
+  int network_priority_order_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkLibraryImplStub);
 };
@@ -4553,7 +4764,9 @@ NetworkLibraryImplStub::NetworkLibraryImplStub()
       hardware_address_("01:23:45:67:89:ab"),
       pin_(""),
       pin_required_(false),
-      pin_entered_(false) {
+      pin_entered_(false),
+      connect_delay_ms_(0),
+      network_priority_order_(0) {
 }
 
 NetworkLibraryImplStub::~NetworkLibraryImplStub() {
@@ -4574,168 +4787,257 @@ void NetworkLibraryImplStub::Init() {
   cellular->imsi_ = "123456789012345";
   device_map_["cellular"] = cellular;
 
+  // Profiles
+  AddProfile("default", PROFILE_SHARED);
+  AddProfile("user", PROFILE_USER);
+
   // Networks
-  DeleteNetworks();
+  // If these change, the expectations in network_library_unittest and
+  // network_menu_icon_unittest need to be changed also.
 
-  ethernet_ = new EthernetNetwork("eth1");
-  ethernet_->set_connected(true);
-  // Note: We need exactly one network connected and active, otherwise
-  // browser_tests sometimes conclude we are offline and fail.
-  ethernet_->set_is_active(true);
-  AddNetwork(ethernet_);
+  // Networks are added in priority order.
+  network_priority_order_ = 0;
 
-  WifiNetwork* wifi1 = new WifiNetwork("fw1");
-  wifi1->set_name("Fake WiFi Connected");
-  wifi1->set_strength(90);
-  wifi1->set_connected(false);
-  wifi1->set_connecting(true);
+  Network* ethernet = new EthernetNetwork("eth1");
+  ethernet->set_name("Fake Ethernet");
+  ethernet->set_is_active(true);
+  ethernet->set_connected(true);
+  AddStubNetwork(ethernet, PROFILE_NONE);
+
+  WifiNetwork* wifi1 = new WifiNetwork("wifi1");
+  wifi1->set_name("Fake WiFi1");
+  wifi1->set_strength(100);
+  wifi1->set_connected(true);
   wifi1->set_encryption(SECURITY_NONE);
-  wifi1->set_profile_type(PROFILE_SHARED);
-  AddNetwork(wifi1);
+  AddStubNetwork(wifi1, PROFILE_NONE);
 
-  WifiNetwork* wifi2 = new WifiNetwork("fw2");
-  wifi2->set_name("Fake WiFi");
+  WifiNetwork* wifi2 = new WifiNetwork("wifi2");
+  wifi2->set_name("Fake WiFi2");
   wifi2->set_strength(70);
-  wifi2->set_connected(false);
   wifi2->set_encryption(SECURITY_NONE);
-  wifi2->set_profile_type(PROFILE_SHARED);
-  AddNetwork(wifi2);
+  AddStubNetwork(wifi2, PROFILE_SHARED);
 
-  WifiNetwork* wifi3 = new WifiNetwork("fw3");
-  wifi3->set_name("Fake WiFi Encrypted with a long name");
+  WifiNetwork* wifi3 = new WifiNetwork("wifi3");
+  wifi3->set_name("Fake WiFi3 Encrypted with a long name");
   wifi3->set_strength(60);
-  wifi3->set_connected(false);
   wifi3->set_encryption(SECURITY_WEP);
   wifi3->set_passphrase_required(true);
-  wifi3->set_profile_type(PROFILE_USER);
-  AddNetwork(wifi3);
+  AddStubNetwork(wifi3, PROFILE_USER);
 
-  WifiNetwork* wifi4 = new WifiNetwork("fw4");
-  wifi4->set_name("Fake WiFi 802.1x");
+  WifiNetwork* wifi4 = new WifiNetwork("wifi4");
+  wifi4->set_name("Fake WiFi4 802.1x");
   wifi4->set_strength(50);
-  wifi4->set_connected(false);
   wifi4->set_connectable(false);
   wifi4->set_encryption(SECURITY_8021X);
   wifi4->SetEAPMethod(EAP_METHOD_PEAP);
   wifi4->SetEAPIdentity("nobody@google.com");
   wifi4->SetEAPPassphrase("password");
-  AddNetwork(wifi4);
+  AddStubNetwork(wifi4, PROFILE_NONE);
 
-  WifiNetwork* wifi5 = new WifiNetwork("fw5");
-  wifi5->set_name("Fake WiFi UTF-8 SSID ");
-  wifi5->SetSsid("Fake WiFi UTF-8 SSID \u3042\u3044\u3046");
+  WifiNetwork* wifi5 = new WifiNetwork("wifi5");
+  wifi5->set_name("Fake WiFi5 UTF-8 SSID ");
+  wifi5->SetSsid("Fake WiFi5 UTF-8 SSID \u3042\u3044\u3046");
   wifi5->set_strength(25);
-  wifi5->set_connected(false);
-  AddNetwork(wifi5);
+  AddStubNetwork(wifi5, PROFILE_NONE);
 
-  WifiNetwork* wifi6 = new WifiNetwork("fw6");
-  wifi6->set_name("Fake WiFi latin-1 SSID ");
-  wifi6->SetSsid("Fake WiFi latin-1 SSID \xc0\xcb\xcc\xd6\xfb");
+  WifiNetwork* wifi6 = new WifiNetwork("wifi6");
+  wifi6->set_name("Fake WiFi6 latin-1 SSID ");
+  wifi6->SetSsid("Fake WiFi6 latin-1 SSID \xc0\xcb\xcc\xd6\xfb");
   wifi6->set_strength(20);
-  wifi6->set_connected(false);
-  AddNetwork(wifi6);
+  AddStubNetwork(wifi6, PROFILE_NONE);
 
-  active_wifi_ = wifi1;
-
-  CellularNetwork* cellular1 = new CellularNetwork("fc1");
-  cellular1->set_name("Fake Cellular");
-  cellular1->set_strength(70);
-  cellular1->set_connected(false);
-  cellular1->set_connecting(true);
+  CellularNetwork* cellular1 = new CellularNetwork("cellular1");
+  cellular1->set_name("Fake Cellular1");
+  cellular1->set_strength(100);
+  cellular1->set_connected(true);
   cellular1->set_activation_state(ACTIVATION_STATE_ACTIVATED);
   cellular1->set_payment_url(std::string("http://www.google.com"));
   cellular1->set_usage_url(std::string("http://www.google.com"));
   cellular1->set_network_technology(NETWORK_TECHNOLOGY_EVDO);
-  cellular1->set_roaming_state(ROAMING_STATE_ROAMING);
+  AddStubNetwork(cellular1, PROFILE_NONE);
+
+  CellularNetwork* cellular2 = new CellularNetwork("cellular2");
+  cellular2->set_name("Fake Cellular2");
+  cellular2->set_strength(50);
+  cellular2->set_activation_state(ACTIVATION_STATE_NOT_ACTIVATED);
+  cellular2->set_network_technology(NETWORK_TECHNOLOGY_UMTS);
+  cellular2->set_roaming_state(ROAMING_STATE_ROAMING);
+  AddStubNetwork(cellular2, PROFILE_NONE);
 
   CellularDataPlan* base_plan = new CellularDataPlan();
   base_plan->plan_name = "Base plan";
   base_plan->plan_type = CELLULAR_DATA_PLAN_METERED_BASE;
   base_plan->plan_data_bytes = 100ll * 1024 * 1024;
-  base_plan->data_bytes_used = 75ll * 1024 * 1024;
-  CellularDataPlanVector* data_plans = new CellularDataPlanVector();
-  data_plan_map_[cellular1->service_path()] = data_plans;
-  data_plans->push_back(base_plan);
+  base_plan->data_bytes_used = base_plan->plan_data_bytes / 4;
 
   CellularDataPlan* paid_plan = new CellularDataPlan();
   paid_plan->plan_name = "Paid plan";
   paid_plan->plan_type = CELLULAR_DATA_PLAN_METERED_PAID;
   paid_plan->plan_data_bytes = 5ll * 1024 * 1024 * 1024;
-  paid_plan->data_bytes_used = 3ll * 1024 * 1024 * 1024;
-  data_plans->push_back(paid_plan);
+  paid_plan->data_bytes_used = paid_plan->plan_data_bytes / 2;
 
-  AddNetwork(cellular1);
-  active_cellular_ = cellular1;
+  CellularDataPlanVector* data_plan_vector = new CellularDataPlanVector;
+  data_plan_vector->push_back(base_plan);
+  data_plan_vector->push_back(paid_plan);
+  UpdateCellularDataPlan(cellular1->service_path(), data_plan_vector);
 
-  CellularNetwork* cellular2 = new CellularNetwork("fc2");
-  cellular2->set_name("Fake Cellular 2");
-  cellular2->set_strength(70);
-  cellular2->set_connected(true);
-  cellular2->set_activation_state(ACTIVATION_STATE_ACTIVATED);
-  cellular2->set_network_technology(NETWORK_TECHNOLOGY_UMTS);
-  AddNetwork(cellular2);
-
-  // VPNs
-  VirtualNetwork* vpn1 = new VirtualNetwork("fv1");
-  vpn1->set_name("Fake VPN Provider 1");
+  VirtualNetwork* vpn1 = new VirtualNetwork("vpn1");
+  vpn1->set_name("Fake VPN1");
   vpn1->set_server_hostname("vpn1server.fake.com");
   vpn1->set_provider_type(PROVIDER_TYPE_L2TP_IPSEC_PSK);
   vpn1->set_username("VPN User 1");
-  vpn1->set_connected(false);
-  AddNetwork(vpn1);
+  AddStubNetwork(vpn1, PROFILE_USER);
 
-  VirtualNetwork* vpn2 = new VirtualNetwork("fv2");
-  vpn2->set_name("Fake VPN Provider 2");
+  VirtualNetwork* vpn2 = new VirtualNetwork("vpn2");
+  vpn2->set_name("Fake VPN2");
   vpn2->set_server_hostname("vpn2server.fake.com");
   vpn2->set_provider_type(PROVIDER_TYPE_L2TP_IPSEC_USER_CERT);
   vpn2->set_username("VPN User 2");
-  vpn2->set_connected(true);
-  AddNetwork(vpn2);
+  AddStubNetwork(vpn2, PROFILE_USER);
 
-  VirtualNetwork* vpn3 = new VirtualNetwork("fv3");
-  vpn3->set_name("Fake VPN Provider 3");
+  VirtualNetwork* vpn3 = new VirtualNetwork("vpn3");
+  vpn3->set_name("Fake VPN3");
   vpn3->set_server_hostname("vpn3server.fake.com");
   vpn3->set_provider_type(PROVIDER_TYPE_OPEN_VPN);
-  vpn3->set_connected(false);
-  AddNetwork(vpn3);
-
-  active_virtual_ = vpn2;
-
-  // Remembered Networks
-  DeleteRememberedNetworks();
-  NetworkProfile profile("default", PROFILE_SHARED);
-  profile.services.insert("fw2");
-  profile.services.insert("fv2");
-  profile_list_.push_back(profile);
-  WifiNetwork* remembered_wifi2 = new WifiNetwork("fw2");
-  remembered_wifi2->set_name("Fake WiFi 2");
-  remembered_wifi2->set_encryption(SECURITY_WEP);
-  AddRememberedNetwork(remembered_wifi2);
-  VirtualNetwork* remembered_vpn2 = new VirtualNetwork("fv2");
-  remembered_vpn2->set_name("Fake VPN Provider 2");
-  remembered_vpn2->set_server_hostname("vpn2server.fake.com");
-  remembered_vpn2->set_provider_type(
-      PROVIDER_TYPE_L2TP_IPSEC_USER_CERT);
-  remembered_vpn2->set_connected(true);
-  AddRememberedNetwork(remembered_vpn2);
+  AddStubNetwork(vpn3, PROFILE_USER);
 
   wifi_scanning_ = false;
   offline_mode_ = false;
+
+  // Ensure our active network is connected and vice versa, otherwise our
+  // autotest browser_tests sometimes conclude the device is offline.
+  CHECK(active_network()->connected());
+  CHECK(connected_network()->is_active());
+}
+
+////////////////////////////////////////////////////////////////////////////
+// NetworkLibraryImplStub private methods.
+
+void NetworkLibraryImplStub::AddStubNetwork(
+    Network* network, NetworkProfileType profile_type) {
+  network->priority_order_ = network_priority_order_++;
+  network->CalculateUniqueId();
+  if (!network->unique_id().empty())
+    network_unique_id_map_[network->unique_id()] = network;
+  AddNetwork(network);
+  UpdateActiveNetwork(network);
+  SetProfileType(network, profile_type);
+  AddStubRememberedNetwork(network);
+}
+
+// Add a remembered network to the appropriate profile if specified.
+void NetworkLibraryImplStub::AddStubRememberedNetwork(Network* network) {
+  if (network->profile_type() == PROFILE_NONE)
+    return;
+
+  Network* remembered = FindRememberedFromNetwork(network);
+  if (remembered) {
+    // This network is already in the rememebred list. Check to see if the
+    // type has changed.
+    if (remembered->profile_type() == network->profile_type())
+      return;  // Same type, nothing to do.
+    // Delete the existing remembered network from the previous profile.
+    DeleteRememberedNetwork(remembered->service_path());
+    remembered = NULL;
+  }
+
+  NetworkProfile* profile = GetProfileForType(network->profile_type());
+  if (profile) {
+    profile->services.insert(network->service_path());
+  } else {
+    LOG(ERROR) << "No profile type: " << network->profile_type();
+    return;
+  }
+
+  if (network->type() == TYPE_WIFI) {
+    WifiNetwork* remembered_wifi = new WifiNetwork(network->service_path());
+    remembered_wifi->set_encryption(remembered_wifi->encryption());
+    remembered = remembered_wifi;
+  } else if (network->type() == TYPE_VPN) {
+    VirtualNetwork* remembered_vpn =
+        new VirtualNetwork(network->service_path());
+    remembered_vpn->set_server_hostname("vpnserver.fake.com");
+    remembered_vpn->set_provider_type(PROVIDER_TYPE_L2TP_IPSEC_USER_CERT);
+    remembered = remembered_vpn;
+  }
+  if (remembered) {
+    remembered->set_name(network->name());
+    remembered->set_unique_id(network->unique_id());
+    // AddRememberedNetwork will insert the network into the matching profile
+    // and set the profile type + path.
+    AddRememberedNetwork(remembered);
+  }
+}
+
+void NetworkLibraryImplStub::ConnectToNetwork(Network* network) {
+  // Set connected state.
+  network->set_connected(true);
+  network->set_connection_started(false);
+
+  // Make the connected network the highest priority network.
+  // Set all other networks of the same type to disconnected + inactive;
+  int old_priority_order = network->priority_order_;
+  network->priority_order_ = 0;
+  for (NetworkMap::iterator iter = network_map_.begin();
+       iter != network_map_.end(); ++iter) {
+    Network* other = iter->second;
+    if (other == network)
+      continue;
+    if (other->priority_order_ < old_priority_order)
+      other->priority_order_++;
+    if (other->type() == network->type()) {
+      other->set_is_active(false);
+      other->set_connected(false);
+    }
+  }
+
+  // Remember connected network.
+  if (network->profile_type() == PROFILE_NONE) {
+    NetworkProfileType profile_type = PROFILE_USER;
+    if (network->type() == TYPE_WIFI) {
+      WifiNetwork* wifi = static_cast<WifiNetwork*>(network);
+      if (!wifi->encrypted())
+        profile_type = PROFILE_SHARED;
+    }
+    SetProfileType(network, profile_type);
+  }
+  AddStubRememberedNetwork(network);
+
+  // Call Completed and signal observers.
+  NetworkConnectCompleted(network, CONNECT_SUCCESS);
+  SignalNetworkManagerObservers();
+  NotifyNetworkChanged(network);
 }
 
 //////////////////////////////////////////////////////////////////////////////
 // NetworkLibraryImplBase implementation.
 
 void NetworkLibraryImplStub::CallConnectToNetwork(Network* network) {
-  NetworkConnectCompleted(network, CONNECT_SUCCESS);
+  // Immediately set the network to active to mimic flimflam's behavior.
+  SetActiveNetwork(network->type(), network->service_path());
+  // If a delay has been set (i.e. we are interactive), delay the call to
+  // ConnectToNetwork (but signal observers since we changed connecting state).
+  if (connect_delay_ms_) {
+    BrowserThread::PostDelayedTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&NetworkLibraryImplStub::ConnectToNetwork,
+                   base::Unretained(this), network),
+        connect_delay_ms_);
+    SignalNetworkManagerObservers();
+    NotifyNetworkChanged(network);
+  } else {
+    ConnectToNetwork(network);
+  }
 }
 
 void NetworkLibraryImplStub::CallRequestWifiNetworkAndConnect(
     const std::string& ssid, ConnectionSecurity security) {
   WifiNetwork* wifi = new WifiNetwork(ssid);
+  wifi->set_name(ssid);
   wifi->set_encryption(security);
   AddNetwork(wifi);
   ConnectToWifiNetworkUsingConnectData(wifi);
+  SignalNetworkManagerObservers();
 }
 
 void NetworkLibraryImplStub::CallRequestVirtualNetworkAndConnect(
@@ -4743,10 +5045,12 @@ void NetworkLibraryImplStub::CallRequestVirtualNetworkAndConnect(
     const std::string& server_hostname,
     ProviderType provider_type) {
   VirtualNetwork* vpn = new VirtualNetwork(service_name);
+  vpn->set_name(service_name);
   vpn->set_server_hostname(server_hostname);
   vpn->set_provider_type(provider_type);
   AddNetwork(vpn);
   ConnectToVirtualNetworkUsingConnectData(vpn);
+  SignalNetworkManagerObservers();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -4768,7 +5072,6 @@ void NetworkLibraryImplStub::ChangeRequirePin(bool require_pin,
   sim_operation_ = SIM_OPERATION_CHANGE_REQUIRE_PIN;
   if (!pin_required_ || pin == pin_) {
     pin_required_ = require_pin;
-    FlipSimPinRequiredStateIfNeeded();
     NotifyPinOperationCompleted(PIN_ERROR_NONE);
   } else {
     NotifyPinOperationCompleted(PIN_ERROR_INCORRECT_CODE);
@@ -4792,6 +5095,13 @@ void NetworkLibraryImplStub::UnblockPin(const std::string& puk,
   NotifyPinOperationCompleted(PIN_ERROR_NONE);
 }
 
+void NetworkLibraryImplStub::RequestNetworkScan() {
+  // This is triggered by user interaction, so set a network conenct delay.
+  const int kConnectDelayMs = 4 * 1000;
+  connect_delay_ms_ = kConnectDelayMs;
+  SignalNetworkManagerObservers();
+}
+
 bool NetworkLibraryImplStub::GetWifiAccessPoints(
     WifiAccessPointVector* result) {
   *result = WifiAccessPointVector();
@@ -4800,13 +5110,17 @@ bool NetworkLibraryImplStub::GetWifiAccessPoints(
 
 void NetworkLibraryImplStub::DisconnectFromNetwork(const Network* network) {
   // Update the network state here since no network manager in stub impl.
-  (const_cast<Network*>(network))->set_connected(false);
+  Network* modify_network = const_cast<Network*>(network);
+  modify_network->set_is_active(false);
+  modify_network->set_connected(false);
   if (network == active_wifi_)
     active_wifi_ = NULL;
   else if (network == active_cellular_)
     active_cellular_ = NULL;
   else if (network == active_virtual_)
     active_virtual_ = NULL;
+  SignalNetworkManagerObservers();
+  NotifyNetworkChanged(network);
 }
 
 NetworkIPConfigVector NetworkLibraryImplStub::GetIPConfigs(
@@ -4826,18 +5140,11 @@ void NetworkLibraryImplStub::SetIPConfig(const NetworkIPConfig& ipconfig) {
 // static
 NetworkLibrary* NetworkLibrary::GetImpl(bool stub) {
   NetworkLibrary* impl;
-  // If CrosLibrary failed to load, use the stub implementation, since the
-  // cros implementation would crash on any libcros call.
-  if (!CrosLibrary::Get()->libcros_loaded()) {
-    LOG(WARNING) << "NetworkLibrary: falling back to stub impl.";
-    stub = true;
-  }
   if (stub)
     impl = new NetworkLibraryImplStub();
   else
     impl = new NetworkLibraryImplCros();
   impl->Init();
-
   return impl;
 }
 

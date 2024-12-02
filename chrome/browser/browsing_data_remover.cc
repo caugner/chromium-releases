@@ -8,22 +8,28 @@
 #include <set>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/platform_file.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
+#include "chrome/browser/net/predictor.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/plugin_data_remover.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -78,9 +84,6 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
       waiting_for_clear_cache_(false),
       waiting_for_clear_lso_data_(false) {
   DCHECK(profile);
-  clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
-                                      profile_->GetPrefs(),
-                                      NULL);
 }
 
 BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
@@ -104,9 +107,6 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
       waiting_for_clear_cache_(false),
       waiting_for_clear_lso_data_(false) {
   DCHECK(profile);
-  clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
-                                      profile_->GetPrefs(),
-                                      NULL);
 }
 
 BrowsingDataRemover::~BrowsingDataRemover() {
@@ -133,7 +133,8 @@ void BrowsingDataRemover::Remove(int remove_mask) {
       history_service->ExpireHistoryBetween(restrict_urls,
           delete_begin_, delete_end_,
           &request_consumer_,
-          NewCallback(this, &BrowsingDataRemover::OnHistoryDeletionDone));
+          base::Bind(&BrowsingDataRemover::OnHistoryDeletionDone,
+                     base::Unretained(this)));
     }
 
     // Need to clear the host cache and accumulated speculative data, as it also
@@ -178,7 +179,7 @@ void BrowsingDataRemover::Remove(int remove_mask) {
     // It also may have a prerendered page. If so, the page could be considered
     // to have a small amount of historical information, so delete it, too.
     prerender::PrerenderManager* prerender_manager =
-        profile_->GetPrerenderManager();
+        prerender::PrerenderManagerFactory::GetForProfile(profile_);
     if (prerender_manager) {
       prerender_manager->ClearData(
           prerender::PrerenderManager::CLEAR_PRERENDER_CONTENTS |
@@ -188,7 +189,8 @@ void BrowsingDataRemover::Remove(int remove_mask) {
 
   if (remove_mask & REMOVE_DOWNLOADS) {
     UserMetrics::RecordAction(UserMetricsAction("ClearBrowsingData_Downloads"));
-    DownloadManager* download_manager = profile_->GetDownloadManager();
+    DownloadManager* download_manager =
+        DownloadServiceFactory::GetForProfile(profile_)->GetDownloadManager();
     download_manager->RemoveDownloadsBetween(delete_begin_, delete_end_);
     download_manager->ClearLastDownloadPath();
   }
@@ -231,7 +233,7 @@ void BrowsingDataRemover::Remove(int remove_mask) {
     }
   }
 
-  if (remove_mask & REMOVE_LSO_DATA && *clear_plugin_lso_data_enabled_) {
+  if (remove_mask & REMOVE_LSO_DATA) {
     UserMetrics::RecordAction(UserMetricsAction("ClearBrowsingData_LSOData"));
 
     waiting_for_clear_lso_data_ = true;
@@ -261,7 +263,8 @@ void BrowsingDataRemover::Remove(int remove_mask) {
           delete_end_);
       web_data_service->RemoveAutofillProfilesAndCreditCardsModifiedBetween(
           delete_begin_, delete_end_);
-      PersonalDataManager* data_manager = profile_->GetPersonalDataManager();
+      PersonalDataManager* data_manager =
+          PersonalDataManagerFactory::GetForProfile(profile_);
       if (data_manager) {
         data_manager->Refresh();
       }
@@ -283,22 +286,16 @@ void BrowsingDataRemover::Remove(int remove_mask) {
     // The PrerenderManager may have a page actively being prerendered, which
     // is essentially a preemptively cached page.
     prerender::PrerenderManager* prerender_manager =
-        profile_->GetPrerenderManager();
+        prerender::PrerenderManagerFactory::GetForProfile(profile_);
     if (prerender_manager) {
       prerender_manager->ClearData(
           prerender::PrerenderManager::CLEAR_PRERENDER_CONTENTS);
     }
   }
 
-  // Also delete cached TransportSecurityState data.
-  if (profile_->GetTransportSecurityState()) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(
-            profile_->GetTransportSecurityState(),
-            &net::TransportSecurityState::DeleteSince,
-            delete_begin_));
-  }
+  // Also delete cached network related data (like TransportSecurityState,
+  // HttpServerProperties data).
+  profile_->ClearNetworkingHistorySince(delete_begin_);
 
   NotifyAndDeleteIfDone();
 }
@@ -388,7 +385,13 @@ void BrowsingDataRemover::ClearNetworkingHistory(IOThread* io_thread) {
   // This function should be called on the IO thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  io_thread->ClearNetworkingHistory();
+  io_thread->ClearHostCache();
+
+  chrome_browser_net::Predictor* predictor = profile_->GetNetworkPredictor();
+  if (predictor) {
+    predictor->DiscardInitialNavigationHistory();
+    predictor->DiscardAllResults();
+  }
 
   // Notify the UI thread that we are done.
   BrowserThread::PostTask(
@@ -577,7 +580,7 @@ void BrowsingDataRemover::ClearCookiesOnIOThread(
       GetURLRequestContext()->cookie_store()->GetCookieMonster();
   if (cookie_monster) {
       cookie_monster->DeleteAllCreatedBetweenAsync(
-          delete_begin_, delete_end_, true,
+          delete_begin_, delete_end_,
           base::Bind(&BrowsingDataRemover::OnClearedCookies,
                      base::Unretained(this)));
   } else {

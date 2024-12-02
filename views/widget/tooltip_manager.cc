@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,33 +6,24 @@
 
 #include <vector>
 
+#include "base/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "ui/base/text/text_elider.h"
 
-namespace views {
+namespace {
 
 // Maximum number of characters we allow in a tooltip.
-static const size_t kMaxTooltipLength = 1024;
+const size_t kMaxTooltipLength = 1024;
 
 // Maximum number of lines we allow in the tooltip.
-static const size_t kMaxLines = 6;
+const size_t kMaxLines = 6;
 
-// Breaks |text| along line boundaries, placing each line of text into lines.
-static void SplitTooltipString(const std::wstring& text,
-                               std::vector<std::wstring>* lines) {
-  size_t index = 0;
-  size_t next_index;
-  while ((next_index = text.find(TooltipManager::GetLineSeparator(), index))
-         != std::wstring::npos && lines->size() < kMaxLines) {
-    lines->push_back(text.substr(index, next_index - index));
-    index = next_index + TooltipManager::GetLineSeparator().size();
-  }
-  if (next_index != text.size() && lines->size() < kMaxLines)
-    lines->push_back(text.substr(index, text.size() - index));
-}
+}  // namespace
+
+namespace views {
 
 // static
-void TooltipManager::TrimTooltipToFit(std::wstring* text,
+void TooltipManager::TrimTooltipToFit(string16* text,
                                       int* max_width,
                                       int* line_count,
                                       int x,
@@ -48,26 +39,23 @@ void TooltipManager::TrimTooltipToFit(std::wstring* text,
   // Determine the available width for the tooltip.
   int available_width = GetMaxWidth(x, y);
 
-  // Split the string.
-  std::vector<std::wstring> lines;
-  SplitTooltipString(*text, &lines);
+  // Split the string into at most kMaxLines lines.
+  std::vector<string16> lines;
+  base::SplitString(*text, '\n', &lines);
+  if (lines.size() > kMaxLines)
+    lines.resize(kMaxLines);
   *line_count = static_cast<int>(lines.size());
 
   // Format each line to fit.
   gfx::Font font = GetDefaultFont();
-  std::wstring result;
-  for (std::vector<std::wstring>::iterator i = lines.begin(); i != lines.end();
+  string16 result;
+  for (std::vector<string16>::iterator i = lines.begin(); i != lines.end();
        ++i) {
-    string16 elided_text = ui::ElideText(WideToUTF16Hack(*i),
-                                          font, available_width, false);
+    string16 elided_text = ui::ElideText(*i, font, available_width, false);
     *max_width = std::max(*max_width, font.GetStringWidth(elided_text));
-    if (i == lines.begin() && i + 1 == lines.end()) {
-      *text = UTF16ToWideHack(elided_text);
-      return;
-    }
     if (!result.empty())
-      result.append(GetLineSeparator());
-    result.append(UTF16ToWideHack(elided_text));
+      result.push_back('\n');
+    result.append(elided_text);
   }
   *text = result;
 }

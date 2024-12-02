@@ -56,12 +56,6 @@ gfx::Font TooltipManager::GetDefaultFont() {
 }
 
 // static
-const std::wstring& TooltipManager::GetLineSeparator() {
-  static const std::wstring* line_separator = new std::wstring(L"\n");
-  return *line_separator;
-}
-
-// static
 int TooltipManager::GetMaxWidth(int x, int y) {
   // FIXME: change this. This is for now just copied from TooltipManagerGtk.
 
@@ -120,23 +114,28 @@ base::MessagePumpObserver::EventStatus TooltipManagerViews::WillProcessEvent(
   return base::MessagePumpObserver::EVENT_CONTINUE;
 }
 #elif defined(USE_X11)
-base::MessagePumpObserver::EventStatus TooltipManagerViews::WillProcessXEvent(
-    XEvent* xevent) {
-  XGenericEventCookie* cookie = &xevent->xcookie;
+base::EventStatus TooltipManagerViews::WillProcessEvent(
+    const base::NativeEvent& event) {
+  XGenericEventCookie* cookie = &event->xcookie;
   if (cookie->evtype == XI_Motion) {
-    XIDeviceEvent* xievent = static_cast<XIDeviceEvent*>(cookie->data);
+    const XIDeviceEvent* xievent = static_cast<XIDeviceEvent*>(cookie->data);
     OnMouseMoved(static_cast<int>(xievent->event_x),
                  static_cast<int>(xievent->event_y));
   }
-  return base::MessagePumpObserver::EVENT_CONTINUE;
-}
-#elif defined(OS_WIN)
-void TooltipManagerViews::WillProcessMessage(const MSG& msg) {
-  if (msg.message == WM_MOUSEMOVE)
-    OnMouseMoved(GET_X_LPARAM(msg.lParam), GET_Y_LPARAM(msg.lParam));
+  return base::EVENT_CONTINUE;
 }
 
-void TooltipManagerViews::DidProcessMessage(const MSG& msg) {
+void TooltipManagerViews::DidProcessEvent(const base::NativeEvent& event) {
+}
+#elif defined(OS_WIN)
+base::EventStatus TooltipManagerViews::WillProcessEvent(
+    const base::NativeEvent& event) {
+  if (event.message == WM_MOUSEMOVE)
+    OnMouseMoved(GET_X_LPARAM(event.lParam), GET_Y_LPARAM(event.lParam));
+  return base::EVENT_CONTINUE;
+}
+
+void TooltipManagerViews::DidProcessEvent(const base::NativeEvent& event) {
 }
 #endif
 
@@ -164,7 +163,7 @@ View* TooltipManagerViews::GetViewForTooltip(int x, int y, bool for_keyboard) {
 
 void TooltipManagerViews::UpdateIfRequired(int x, int y, bool for_keyboard) {
   View* view = GetViewForTooltip(x, y, for_keyboard);
-  std::wstring tooltip_text;
+  string16 tooltip_text;
   if (view)
     view->GetTooltipText(gfx::Point(x, y), &tooltip_text);
 
@@ -183,7 +182,7 @@ void TooltipManagerViews::Update() {
     tooltip_widget_->Hide();
   } else {
     int max_width, line_count;
-    std::wstring tooltip_text(tooltip_text_);
+    string16 tooltip_text(tooltip_text_);
     TrimTooltipToFit(&tooltip_text, &max_width, &line_count,
                      curr_mouse_pos_.x(), curr_mouse_pos_.y());
     tooltip_label_.SetText(tooltip_text);

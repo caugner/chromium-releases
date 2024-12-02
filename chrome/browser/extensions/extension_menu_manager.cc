@@ -13,7 +13,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_event_router.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
@@ -92,9 +92,9 @@ void ExtensionMenuItem::AddChild(ExtensionMenuItem* item) {
   children_.push_back(item);
 }
 
-ExtensionMenuManager::ExtensionMenuManager() {
+ExtensionMenuManager::ExtensionMenuManager(Profile* profile) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 NotificationService::AllSources());
+                 Source<Profile>(profile));
 }
 
 ExtensionMenuManager::~ExtensionMenuManager() {
@@ -449,11 +449,9 @@ void ExtensionMenuManager::ExecuteCommand(
 void ExtensionMenuManager::Observe(int type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
+  DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
+
   // Remove menu items for disabled/uninstalled extensions.
-  if (type != chrome::NOTIFICATION_EXTENSION_UNLOADED) {
-    NOTREACHED();
-    return;
-  }
   const Extension* extension =
       Details<UnloadedExtensionInfo>(details)->extension;
   if (ContainsKey(context_items_, extension->id())) {

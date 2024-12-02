@@ -6,10 +6,14 @@
 
 #include <algorithm>
 
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/constrained_window_tab_helper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -29,11 +33,16 @@
 #include "ui/gfx/rect.h"
 #include "views/controls/button/image_button.h"
 #include "views/focus/focus_manager.h"
+#include "views/views_delegate.h"
 #include "views/widget/widget.h"
 #include "views/window/client_view.h"
 #include "views/window/non_client_view.h"
 #include "views/window/window_resources.h"
 #include "views/window/window_shape.h"
+
+#if defined(OS_LINUX)
+#include "views/window/hit_test.h"
+#endif
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "views/widget/native_widget_win.h"
@@ -204,7 +213,7 @@ class ConstrainedWindowFrameView
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
 
   SkColor GetTitleColor() const {
-    return container_->owner()->browser_context()->IsOffTheRecord()
+    return container_->owner()->profile()->IsOffTheRecord()
 #if defined(OS_WIN) && !defined(USE_AURA)
             || !views::NativeWidgetWin::IsAeroGlassEnabled()
 #endif
@@ -228,12 +237,12 @@ class ConstrainedWindowFrameView
   static void InitClass();
 
   // The font to be used to render the titlebar text.
-  static gfx::Font* title_font_;
+  static const gfx::Font* title_font_;
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowFrameView);
 };
 
-gfx::Font* ConstrainedWindowFrameView::title_font_ = NULL;
+const gfx::Font* ConstrainedWindowFrameView::title_font_ = NULL;
 
 namespace {
 // The frame border is only visible in restored mode and is hardcoded to 4 px on
@@ -400,7 +409,7 @@ int ConstrainedWindowFrameView::IconSize() const {
   // size are increased.
   return GetSystemMetrics(SM_CYSMICON);
 #else
-  return std::max(title_font_->height(), kIconMinimumSize);
+  return std::max(title_font_->GetHeight(), kIconMinimumSize);
 #endif
 }
 
@@ -545,10 +554,13 @@ gfx::Rect ConstrainedWindowFrameView::CalculateClientAreaBounds(
 }
 
 void ConstrainedWindowFrameView::InitWindowResources() {
-#if !defined(USE_AURA)
+#if defined(OS_WIN) && !defined(USE_AURA)
   resources_.reset(views::NativeWidgetWin::IsAeroGlassEnabled() ?
       static_cast<views::WindowResources*>(new VistaWindowResources) :
       new XPWindowResources);
+#else
+  // TODO(oshima): Use aura frame decoration.
+  resources_.reset(new XPWindowResources);
 #endif
 }
 
@@ -558,10 +570,9 @@ void ConstrainedWindowFrameView::InitClass() {
   if (!initialized) {
 #if defined(OS_WIN) && !defined(USE_AURA)
     title_font_ = new gfx::Font(views::NativeWidgetWin::GetWindowTitleFont());
-#elif defined(USE_AURA)
-    // TODO(beng):
-    NOTIMPLEMENTED();
-    title_font_ = NULL;
+#else
+    ResourceBundle& resources = ResourceBundle::GetSharedInstance();
+    title_font_ = &resources.GetFont(ResourceBundle::MediumFont);
 #endif
     initialized = true;
   }
@@ -571,18 +582,31 @@ void ConstrainedWindowFrameView::InitClass() {
 // ConstrainedWindowViews, public:
 
 ConstrainedWindowViews::ConstrainedWindowViews(
-    TabContents* owner,
+    TabContentsWrapper* wrapper,
     views::WidgetDelegate* widget_delegate)
-    : owner_(owner),
+    : wrapper_(wrapper),
       ALLOW_THIS_IN_INITIALIZER_LIST(native_constrained_window_(
           NativeConstrainedWindow::CreateNativeConstrainedWindow(this))) {
   views::Widget::InitParams params;
   params.delegate = widget_delegate;
-  params.child = true;
-  params.parent = owner->GetNativeView();
   params.native_widget = native_constrained_window_->AsNativeWidget();
+
+  if (views::Widget::IsPureViews() &&
+      views::ViewsDelegate::views_delegate &&
+      views::ViewsDelegate::views_delegate->GetDefaultParentView()) {
+    // Don't set parent so that constrained window is attached to
+    // desktop. This is necessary for key events to work under views desktop
+    // because key events need to be sent to toplevel window
+    // which has an inputmethod object that knows where to forward
+    // event.
+  } else {
+    params.child = true;
+    params.parent = wrapper->tab_contents()->GetNativeView();
+  }
+
   Init(params);
-  owner->AddConstrainedDialog(this);
+
+  wrapper_->constrained_window_tab_helper()->AddConstrainedDialog(this);
 }
 
 ConstrainedWindowViews::~ConstrainedWindowViews() {
@@ -595,19 +619,24 @@ void ConstrainedWindowViews::ShowConstrainedWindow() {
   // We marked the view as hidden during construction.  Mark it as
   // visible now so FocusManager will let us receive focus.
   non_client_view()->SetVisible(true);
-  if (owner_->delegate())
-    owner_->delegate()->WillShowConstrainedWindow(owner_);
+  ConstrainedWindowTabHelper* helper =
+      wrapper_->constrained_window_tab_helper();
+  if (helper && helper->delegate())
+    helper->delegate()->WillShowConstrainedWindow(wrapper_);
   Activate();
   FocusConstrainedWindow();
 }
 
 void ConstrainedWindowViews::CloseConstrainedWindow() {
+  wrapper_->constrained_window_tab_helper()->WillClose(this);
   Close();
 }
 
 void ConstrainedWindowViews::FocusConstrainedWindow() {
-  if ((!owner_->delegate() ||
-       owner_->delegate()->ShouldFocusConstrainedWindow()) &&
+  ConstrainedWindowTabHelper* helper =
+      wrapper_->constrained_window_tab_helper();
+  if ((!helper->delegate() ||
+       helper->delegate()->ShouldFocusConstrainedWindow()) &&
       widget_delegate() &&
       widget_delegate()->GetInitiallyFocusedView()) {
     widget_delegate()->GetInitiallyFocusedView()->RequestFocus();
@@ -625,9 +654,7 @@ views::NonClientFrameView* ConstrainedWindowViews::CreateNonClientFrameView() {
 // ConstrainedWindowViews, NativeConstrainedWindowDelegate implementation:
 
 void ConstrainedWindowViews::OnNativeConstrainedWindowDestroyed() {
-  // Tell our constraining TabContents that we've gone so it can update its
-  // list.
-  owner_->WillClose(this);
+  wrapper_->constrained_window_tab_helper()->WillClose(this);
 }
 
 void ConstrainedWindowViews::OnNativeConstrainedWindowMouseActivate() {

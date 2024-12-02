@@ -8,7 +8,6 @@
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
-#include "chrome/browser/content_settings/content_settings_pattern.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_child_process_host.h"
@@ -53,12 +53,14 @@ const ContentSetting kDefaultSetting = CONTENT_SETTING_ASK;
 // permissions.
 class NotificationPermissionInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  NotificationPermissionInfoBarDelegate(TabContents* contents,
-                                        const GURL& origin,
-                                        const string16& display_name,
-                                        int process_id,
-                                        int route_id,
-                                        int callback_context);
+  NotificationPermissionInfoBarDelegate(
+      InfoBarTabHelper* infobar_helper,
+      DesktopNotificationService* notification_service,
+      const GURL& origin,
+      const string16& display_name,
+      int process_id,
+      int route_id,
+      int callback_context);
 
  private:
   virtual ~NotificationPermissionInfoBarDelegate();
@@ -78,8 +80,8 @@ class NotificationPermissionInfoBarDelegate : public ConfirmInfoBarDelegate {
   // origin_ for extensions.
   string16 display_name_;
 
-  // The Profile that we restore sessions from.
-  Profile* profile_;
+  // The notification service to be used.
+  DesktopNotificationService* notification_service_;
 
   // The callback information that tells us how to respond to javascript via
   // the correct RenderView.
@@ -94,16 +96,17 @@ class NotificationPermissionInfoBarDelegate : public ConfirmInfoBarDelegate {
 };
 
 NotificationPermissionInfoBarDelegate::NotificationPermissionInfoBarDelegate(
-    TabContents* contents,
+    InfoBarTabHelper* infobar_helper,
+    DesktopNotificationService* notification_service,
     const GURL& origin,
     const string16& display_name,
     int process_id,
     int route_id,
     int callback_context)
-    : ConfirmInfoBarDelegate(contents),
+    : ConfirmInfoBarDelegate(infobar_helper),
       origin_(origin),
       display_name_(display_name),
-      profile_(Profile::FromBrowserContext(contents->browser_context())),
+      notification_service_(notification_service),
       process_id_(process_id),
       route_id_(route_id),
       callback_context_(callback_context),
@@ -143,16 +146,14 @@ string16 NotificationPermissionInfoBarDelegate::GetButtonLabel(
 
 bool NotificationPermissionInfoBarDelegate::Accept() {
   UMA_HISTOGRAM_COUNTS("NotificationPermissionRequest.Allowed", 1);
-  DesktopNotificationServiceFactory::GetForProfile(profile_)->
-      GrantPermission(origin_);
+  notification_service_->GrantPermission(origin_);
   action_taken_ = true;
   return true;
 }
 
 bool NotificationPermissionInfoBarDelegate::Cancel() {
   UMA_HISTOGRAM_COUNTS("NotificationPermissionRequest.Denied", 1);
-  DesktopNotificationServiceFactory::GetForProfile(profile_)->
-      DenyPermission(origin_);
+  notification_service_->DenyPermission(origin_);
   action_taken_ = true;
   return true;
 }
@@ -169,8 +170,8 @@ string16 DesktopNotificationService::CreateDataUrl(
   if (icon_url.is_valid()) {
     resource = IDR_NOTIFICATION_ICON_HTML;
     subst.push_back(icon_url.spec());
-    subst.push_back(EscapeForHTML(UTF16ToUTF8(title)));
-    subst.push_back(EscapeForHTML(UTF16ToUTF8(body)));
+    subst.push_back(net::EscapeForHTML(UTF16ToUTF8(title)));
+    subst.push_back(net::EscapeForHTML(UTF16ToUTF8(body)));
     // icon float position
     subst.push_back(dir == WebKit::WebTextDirectionRightToLeft ?
                     "right" : "left");
@@ -180,12 +181,12 @@ string16 DesktopNotificationService::CreateDataUrl(
     // Strings are div names in the template file.
     string16 line_name = title.empty() ? ASCIIToUTF16("description")
                                        : ASCIIToUTF16("title");
-    subst.push_back(EscapeForHTML(UTF16ToUTF8(line_name)));
-    subst.push_back(EscapeForHTML(UTF16ToUTF8(line)));
+    subst.push_back(net::EscapeForHTML(UTF16ToUTF8(line_name)));
+    subst.push_back(net::EscapeForHTML(UTF16ToUTF8(line)));
   } else {
     resource = IDR_NOTIFICATION_2LINE_HTML;
-    subst.push_back(EscapeForHTML(UTF16ToUTF8(title)));
-    subst.push_back(EscapeForHTML(UTF16ToUTF8(body)));
+    subst.push_back(net::EscapeForHTML(UTF16ToUTF8(title)));
+    subst.push_back(net::EscapeForHTML(UTF16ToUTF8(body)));
   }
   // body text direction
   subst.push_back(dir == WebKit::WebTextDirectionRightToLeft ?
@@ -208,7 +209,7 @@ string16 DesktopNotificationService::CreateDataUrl(
 
   std::string data = ReplaceStringPlaceholders(template_html, subst, NULL);
   return UTF8ToUTF16("data:text/html;charset=utf-8," +
-                      EscapeQueryParamValue(data, false));
+                      net::EscapeQueryParamValue(data, false));
 }
 
 DesktopNotificationService::DesktopNotificationService(Profile* profile,
@@ -225,7 +226,7 @@ DesktopNotificationService::~DesktopNotificationService() {
 void DesktopNotificationService::StartObserving() {
   if (!profile_->IsOffTheRecord()) {
     notification_registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                                NotificationService::AllSources());
+                                Source<Profile>(profile_));
   }
   notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                               Source<Profile>(profile_));
@@ -260,14 +261,14 @@ void DesktopNotificationService::DenyPermission(const GURL& origin) {
 void DesktopNotificationService::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
-  if (chrome::NOTIFICATION_EXTENSION_UNLOADED == type) {
+  if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     // Remove all notifications currently shown or queued by the extension
     // which was unloaded.
     const Extension* extension =
         Details<UnloadedExtensionInfo>(details)->extension;
     if (extension)
       ui_manager_->CancelAllBySourceOrigin(extension->url());
-  } else if (chrome::NOTIFICATION_PROFILE_DESTROYED == type) {
+  } else if (type == chrome::NOTIFICATION_PROFILE_DESTROYED) {
     StopObserving();
   }
 }
@@ -330,7 +331,7 @@ void DesktopNotificationService::RequestPermission(
     TabContents* tab) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!tab) {
-    Browser* browser = BrowserList::GetLastActive();
+    Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
     if (browser)
       tab = browser->GetSelectedTabContents();
   }
@@ -347,10 +348,15 @@ void DesktopNotificationService::RequestPermission(
     // Show an info bar requesting permission.
     TabContentsWrapper* wrapper =
         TabContentsWrapper::GetCurrentWrapperForContents(tab);
-    wrapper->infobar_tab_helper()->AddInfoBar(
-        new NotificationPermissionInfoBarDelegate(
-            tab, origin, DisplayNameForOrigin(origin), process_id,
-            route_id, callback_context));
+    InfoBarTabHelper* infobar_helper = wrapper->infobar_tab_helper();
+    infobar_helper->AddInfoBar(new NotificationPermissionInfoBarDelegate(
+        infobar_helper,
+        DesktopNotificationServiceFactory::GetForProfile(wrapper->profile()),
+        origin,
+        DisplayNameForOrigin(origin),
+        process_id,
+        route_id,
+        callback_context));
   } else {
     // Notify renderer immediately.
     RenderViewHost* host = RenderViewHost::FromID(process_id, route_id);

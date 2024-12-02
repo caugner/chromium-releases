@@ -19,6 +19,7 @@
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_platform_file.h"
 #include "ppapi/c/dev/pp_video_capture_dev.h"
+#include "ppapi/c/dev/ppb_text_input_dev.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_instance.h"
@@ -44,6 +45,7 @@
 
 IPC_ENUM_TRAITS(PP_InputEvent_Type)
 IPC_ENUM_TRAITS(PP_InputEvent_MouseButton)
+IPC_ENUM_TRAITS(PP_TextInput_Type)
 IPC_ENUM_TRAITS(PP_VideoDecoder_Profile)
 IPC_ENUM_TRAITS(PP_VideoDecodeError_Dev)
 
@@ -113,6 +115,10 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::InputEventData)
   IPC_STRUCT_TRAITS_MEMBER(wheel_scroll_by_page)
   IPC_STRUCT_TRAITS_MEMBER(key_code)
   IPC_STRUCT_TRAITS_MEMBER(character_text)
+  IPC_STRUCT_TRAITS_MEMBER(composition_segment_offsets)
+  IPC_STRUCT_TRAITS_MEMBER(composition_target_segment)
+  IPC_STRUCT_TRAITS_MEMBER(composition_selection_start)
+  IPC_STRUCT_TRAITS_MEMBER(composition_selection_end)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ppapi::PPB_URLRequestInfo_Data)
@@ -193,9 +199,10 @@ IPC_MESSAGE_CONTROL2(PpapiMsg_ExecuteCallback,
 
 // Broker Process.
 
-IPC_SYNC_MESSAGE_CONTROL2_0(PpapiMsg_ConnectToPlugin,
+IPC_SYNC_MESSAGE_CONTROL2_1(PpapiMsg_ConnectToPlugin,
                             PP_Instance /* instance */,
-                            IPC::PlatformFileForTransit /* handle */)
+                            IPC::PlatformFileForTransit /* handle */,
+                            int32_t /* result */)
 
 // PPB_Audio.
 
@@ -258,6 +265,23 @@ IPC_MESSAGE_ROUTED4(PpapiMsg_PPBFlashTCPSocket_ReadACK,
                     bool /* succeeded */,
                     std::string /* data */)
 IPC_MESSAGE_ROUTED4(PpapiMsg_PPBFlashTCPSocket_WriteACK,
+                    uint32 /* plugin_dispatcher_id */,
+                    uint32 /* socket_id */,
+                    bool /* succeeded */,
+                    int32_t /* bytes_written */)
+
+// PPB_Flash_UDPSocket
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPBFlashUDPSocket_BindACK,
+                    uint32 /* plugin_dispatcher_id */,
+                    uint32 /* socket_id */,
+                    bool /* succeeded */)
+IPC_MESSAGE_ROUTED5(PpapiMsg_PPBFlashUDPSocket_RecvFromACK,
+                    uint32 /* plugin_dispatcher_id */,
+                    uint32 /* socket_id */,
+                    bool /* succeeded */,
+                    std::string /* data */,
+                    PP_Flash_NetAddress /* remote_addr */)
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPBFlashUDPSocket_SendToACK,
                     uint32 /* plugin_dispatcher_id */,
                     uint32 /* socket_id */,
                     bool /* succeeded */,
@@ -351,11 +375,12 @@ IPC_SYNC_MESSAGE_ROUTED3_1(PpapiMsg_PPPInstance_DidCreate,
                            PP_Bool /* result */)
 IPC_SYNC_MESSAGE_ROUTED1_0(PpapiMsg_PPPInstance_DidDestroy,
                            PP_Instance /* instance */)
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPPInstance_DidChangeView,
+IPC_MESSAGE_ROUTED5(PpapiMsg_PPPInstance_DidChangeView,
                     PP_Instance /* instance */,
                     PP_Rect /* position */,
                     PP_Rect /* clip */,
-                    PP_Bool /* fullscreen */)
+                    PP_Bool /* fullscreen */,
+                    PP_Bool /* flash_fullscreen */)
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPPInstance_DidChangeFocus,
                     PP_Instance /* instance */,
                     PP_Bool /* has_focus */)
@@ -373,6 +398,10 @@ IPC_SYNC_MESSAGE_ROUTED1_1(PpapiMsg_PPPInstancePrivate_GetInstanceObject,
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPPMessaging_HandleMessage,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* message */)
+
+// PPP_MouseLock.
+IPC_MESSAGE_ROUTED1(PpapiMsg_PPPMouseLock_MouseLockLost,
+                    PP_Instance /* instance */)
 
 // PPB_URLLoader
 // (Messages from browser to plugin to notify it of changes in state.)
@@ -464,17 +493,6 @@ IPC_SYNC_MESSAGE_ROUTED2_2(PpapiHostMsg_PPBBuffer_Create,
                            ppapi::HostResource /* result_resource */,
                            base::SharedMemoryHandle /* result_shm_handle */)
 
-// PPB_Console.
-IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBConsole_Log,
-                    PP_Instance /* instance */,
-                    int /* log_level */,
-                    ppapi::proxy::SerializedVar /* value */)
-IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBConsole_LogWithSource,
-                    PP_Instance /* instance */,
-                    int /* log_level */,
-                    ppapi::proxy::SerializedVar /* soruce */,
-                    ppapi::proxy::SerializedVar /* value */)
-
 // PPB_Context3D.
 IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBContext3D_Create,
                            PP_Instance /* instance */,
@@ -528,11 +546,6 @@ IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBCore_AddRefResource,
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBCore_ReleaseResource,
                     ppapi::HostResource)
 
-// PPB_CharSet.
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBCharSet_GetDefaultCharSet,
-                           PP_Instance /* instance */,
-                           ppapi::proxy::SerializedVar /* result */)
-
 // PPB_CursorControl.
 IPC_SYNC_MESSAGE_ROUTED4_1(PpapiHostMsg_PPBCursorControl_SetCursor,
                            PP_Instance /* instance */,
@@ -557,10 +570,13 @@ IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBCursorControl_CanLockCursor,
 IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBFileChooser_Create,
                            PP_Instance /* instance */,
                            int /* mode */,
-                           ppapi::proxy::SerializedVar /* accept_mime_types */,
+                           std::string /* accept_mime_types */,
                            ppapi::HostResource /* result */)
-IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBFileChooser_Show,
-                    ppapi::HostResource /* file_chooser */)
+IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBFileChooser_Show,
+                    ppapi::HostResource /* file_chooser */,
+                    bool /* save_as */,
+                    std::string /* suggested_file_name */,
+                    bool /* require_user_gesture */)
 
 
 // PPB_FileRef.
@@ -736,6 +752,24 @@ IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBFlashTCPSocket_Write,
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBFlashTCPSocket_Disconnect,
                      uint32 /* socket_id */)
 
+// PPB_Flash_UDPSocket
+IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBFlashUDPSocket_Create,
+                            int32 /* routing_id */,
+                            uint32 /* plugin_dispatcher_id */,
+                            uint32 /* socket_id */)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBFlashUDPSocket_Bind,
+                     uint32 /* socket_id */,
+                     PP_Flash_NetAddress /* net_addr */)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBFlashUDPSocket_RecvFrom,
+                     uint32 /* socket_id */,
+                     int32_t /* num_bytes */)
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBFlashUDPSocket_SendTo,
+                     uint32 /* socket_id */,
+                     std::string /* data */,
+                     PP_Flash_NetAddress /* net_addr */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBFlashUDPSocket_Close,
+                     uint32 /* socket_id */)
+
 // PPB_Font.
 IPC_SYNC_MESSAGE_CONTROL0_1(PpapiHostMsg_PPBFont_GetFontFamilies,
                             std::string /* result */)
@@ -820,11 +854,31 @@ IPC_SYNC_MESSAGE_ROUTED2_2(PpapiHostMsg_PPBInstance_ExecuteScript,
                            ppapi::proxy::SerializedVar /* script */,
                            ppapi::proxy::SerializedVar /* out_exception */,
                            ppapi::proxy::SerializedVar /* result */)
+IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetDefaultCharSet,
+                           PP_Instance /* instance */,
+                           ppapi::proxy::SerializedVar /* result */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_Log,
+                    PP_Instance /* instance */,
+                    int /* log_level */,
+                    ppapi::proxy::SerializedVar /* value */)
+IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_LogWithSource,
+                    PP_Instance /* instance */,
+                    int /* log_level */,
+                    ppapi::proxy::SerializedVar /* source */,
+                    ppapi::proxy::SerializedVar /* value */)
 IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBInstance_SetFullscreen,
                            PP_Instance /* instance */,
                            PP_Bool /* fullscreen */,
                            PP_Bool /* result */)
 IPC_SYNC_MESSAGE_ROUTED1_2(PpapiHostMsg_PPBInstance_GetScreenSize,
+                           PP_Instance /* instance */,
+                           PP_Bool /* result */,
+                           PP_Size /* size */)
+IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBInstance_FlashSetFullscreen,
+                           PP_Instance /* instance */,
+                           PP_Bool /* fullscreen */,
+                           PP_Bool /* result */)
+IPC_SYNC_MESSAGE_ROUTED1_2(PpapiHostMsg_PPBInstance_FlashGetScreenSize,
                            PP_Instance /* instance */,
                            PP_Bool /* result */,
                            PP_Size /* size */)
@@ -838,6 +892,29 @@ IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_ClearInputEvents,
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_PostMessage,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* message */)
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_LockMouse,
+                    PP_Instance /* instance */,
+                    uint32_t /* serialized_callback */)
+IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_UnlockMouse,
+                    PP_Instance /* instance */)
+IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBInstance_ResolveRelativeToDocument,
+                           PP_Instance /* instance */,
+                           ppapi::proxy::SerializedVar /* relative */,
+                           ppapi::proxy::SerializedVar /* result */)
+IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBInstance_DocumentCanRequest,
+                           PP_Instance /* instance */,
+                           ppapi::proxy::SerializedVar /* relative */,
+                           PP_Bool /* result */)
+IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBInstance_DocumentCanAccessDocument,
+                           PP_Instance /* active */,
+                           PP_Instance /* target */,
+                           PP_Bool /* result */)
+IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetDocumentURL,
+                           PP_Instance /* active */,
+                           ppapi::proxy::SerializedVar /* result */)
+IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetPluginInstanceURL,
+                           PP_Instance /* active */,
+                           ppapi::proxy::SerializedVar /* result */)
 
 IPC_SYNC_MESSAGE_ROUTED3_1(
     PpapiHostMsg_PPBPDF_GetFontFileWithFallback,
@@ -870,6 +947,17 @@ IPC_SYNC_MESSAGE_ROUTED3_1(
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBTesting_GetLiveObjectsForInstance,
                            PP_Instance /* instance */,
                            uint32 /* result */)
+
+// PPB_TextInput.
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBTextInput_SetTextInputType,
+                    PP_Instance /* instance */,
+                    PP_TextInput_Type /* type */)
+IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBTextInput_UpdateCaretPosition,
+                    PP_Instance /* instance */,
+                    PP_Rect /* caret */,
+                    PP_Rect /* bounding_box */)
+IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBTextInput_CancelCompositionText,
+                    PP_Instance /* instance */)
 
 // PPB_URLLoader.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBURLLoader_Create,
@@ -905,26 +993,6 @@ IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBURLResponseInfo_GetProperty,
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBURLResponseInfo_GetBodyAsFileRef,
                            ppapi::HostResource /* response */,
                            ppapi::PPB_FileRef_CreateInfo /* result */)
-
-// PPB_URLUtil.
-IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBURLUtil_ResolveRelativeToDocument,
-                           PP_Instance /* instance */,
-                           ppapi::proxy::SerializedVar /* relative */,
-                           ppapi::proxy::SerializedVar /* result */)
-IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBURLUtil_DocumentCanRequest,
-                           PP_Instance /* instance */,
-                           ppapi::proxy::SerializedVar /* relative */,
-                           PP_Bool /* result */)
-IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBURLUtil_DocumentCanAccessDocument,
-                           PP_Instance /* active */,
-                           PP_Instance /* target */,
-                           PP_Bool /* result */)
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBURLUtil_GetDocumentURL,
-                           PP_Instance /* active */,
-                           ppapi::proxy::SerializedVar /* result */)
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBURLUtil_GetPluginInstanceURL,
-                           PP_Instance /* active */,
-                           ppapi::proxy::SerializedVar /* result */)
 
 // PPB_Var.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBVar_AddRefObject,

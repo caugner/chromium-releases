@@ -9,15 +9,16 @@
 #include <gtk/gtk.h>
 
 #include "base/basictypes.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task.h"
-#include "content/browser/tab_contents/constrained_window.h"
+#include "chrome/browser/ui/constrained_window.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 
-class TabContents;
+class TabContentsWrapper;
 typedef struct _GdkColor GdkColor;
 #if defined(TOUCH_UI)
-class TabContentsViewTouch;
+class TabContentsViewViews;
 #elif defined(TOOLKIT_VIEWS)
 class NativeTabContentsViewGtk;
 #else
@@ -51,14 +52,14 @@ class ConstrainedWindowGtkDelegate {
 class ConstrainedWindowGtk : public ConstrainedWindow {
  public:
 #if defined(TOUCH_UI)
-   typedef TabContentsViewTouch TabContentsViewType;
+   typedef TabContentsViewViews TabContentsViewType;
 #elif defined(TOOLKIT_VIEWS)
    typedef NativeTabContentsViewGtk TabContentsViewType;
 #else
    typedef TabContentsViewGtk TabContentsViewType;
 #endif
 
-  ConstrainedWindowGtk(TabContents* owner,
+  ConstrainedWindowGtk(TabContentsWrapper* wrapper,
                        ConstrainedWindowGtkDelegate* delegate);
   virtual ~ConstrainedWindowGtk();
 
@@ -67,8 +68,8 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   virtual void CloseConstrainedWindow();
   virtual void FocusConstrainedWindow();
 
-  // Returns the TabContents that constrains this Constrained Window.
-  TabContents* owner() const { return owner_; }
+  // Returns the TabContentsWrapper that constrains this Constrained Window.
+  TabContentsWrapper* owner() const { return wrapper_; }
 
   // Returns the toplevel widget that displays this "window".
   GtkWidget* widget() { return border_.get(); }
@@ -85,8 +86,8 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   CHROMEGTK_CALLBACK_1(ConstrainedWindowGtk, void, OnHierarchyChanged,
                        GtkWidget*);
 
-  // The TabContents that owns and constrains this ConstrainedWindow.
-  TabContents* owner_;
+  // The TabContentsWrapper that owns and constrains this ConstrainedWindow.
+  TabContentsWrapper* wrapper_;
 
   // The top level widget container that exports to our TabContentsView.
   ui::OwnedWidgetGtk border_;
@@ -97,7 +98,7 @@ class ConstrainedWindowGtk : public ConstrainedWindow {
   // Stores if |ShowConstrainedWindow()| has been called.
   bool visible_;
 
-  ScopedRunnableMethodFactory<ConstrainedWindowGtk> factory_;
+  base::WeakPtrFactory<ConstrainedWindowGtk> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowGtk);
 };

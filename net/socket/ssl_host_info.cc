@@ -4,6 +4,7 @@
 
 #include "net/socket/ssl_host_info.h"
 
+#include "base/bind.h"
 #include "base/metrics/histogram.h"
 #include "base/pickle.h"
 #include "base/string_piece.h"
@@ -35,9 +36,7 @@ SSLHostInfo::SSLHostInfo(
       rev_checking_enabled_(ssl_config.rev_checking_enabled),
       verify_ev_cert_(ssl_config.verify_ev_cert),
       verifier_(cert_verifier),
-      callback_(new CancelableCompletionCallback<SSLHostInfo>(
-                        ALLOW_THIS_IN_INITIALIZER_LIST(this),
-                        &SSLHostInfo::VerifyCallback)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       dnsrr_resolver_(NULL),
       dns_callback_(NULL),
       dns_handle_(DnsRRResolver::kInvalidHandle) {
@@ -128,8 +127,9 @@ bool SSLHostInfo::ParseInner(const std::string& data) {
       VLOG(1) << "Kicking off verification for " << hostname_;
       verification_start_time_ = base::TimeTicks::Now();
       verification_end_time_ = base::TimeTicks();
-      int rv = verifier_.Verify(cert_.get(), hostname_, flags,
-                           &cert_verify_result_, callback_);
+      int rv = verifier_.Verify(
+          cert_.get(), hostname_, flags, &cert_verify_result_,
+          base::Bind(&SSLHostInfo::VerifyCallback, weak_factory_.GetWeakPtr()));
       if (rv != ERR_IO_PENDING)
         VerifyCallback(rv);
     } else {
@@ -179,7 +179,7 @@ const CertVerifyResult& SSLHostInfo::cert_verify_result() const {
   return cert_verify_result_;
 }
 
-int SSLHostInfo::WaitForCertVerification(CompletionCallback* callback) {
+int SSLHostInfo::WaitForCertVerification(OldCompletionCallback* callback) {
   if (cert_verification_complete_)
     return cert_verification_error_;
   DCHECK(!cert_parsing_failed_);
@@ -205,7 +205,7 @@ void SSLHostInfo::VerifyCallback(int rv) {
   cert_verification_complete_ = true;
   cert_verification_error_ = rv;
   if (cert_verification_callback_) {
-    CompletionCallback* callback = cert_verification_callback_;
+    OldCompletionCallback* callback = cert_verification_callback_;
     cert_verification_callback_ = NULL;
     callback->Run(rv);
   }

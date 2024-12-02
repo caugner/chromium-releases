@@ -7,6 +7,7 @@
 // these urls, and sends "goback" or "proceed" commands and verifies
 // they work.
 
+#include "base/bind.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -14,6 +15,7 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -42,8 +44,8 @@ class FakeSafeBrowsingService :  public SafeBrowsingService {
 
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this, &FakeSafeBrowsingService::OnCheckBrowseURLDone,
-                          gurl, client));
+        base::Bind(&FakeSafeBrowsingService::OnCheckBrowseURLDone,
+                   this, gurl, client));
     return false;
   }
 
@@ -65,8 +67,7 @@ class FakeSafeBrowsingService :  public SafeBrowsingService {
     // Notify the UI thread that we got a report.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-                          &FakeSafeBrowsingService::OnMalwareDetailsDone));
+        base::Bind(&FakeSafeBrowsingService::OnMalwareDetailsDone, this));
   }
 
   void OnMalwareDetailsDone() {
@@ -113,8 +114,8 @@ class FakeMalwareDetails : public MalwareDetails {
 
     // Notify the UI thread that we got the dom details.
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            NewRunnableMethod(this,
-                            &FakeMalwareDetails::OnDOMDetailsDone));
+                            base::Bind(&FakeMalwareDetails::OnDOMDetailsDone,
+                                       this));
   }
 
   void OnDOMDetailsDone() {
@@ -313,16 +314,11 @@ class SafeBrowsingBlockingPageTest : public InProcessBrowserTest,
 
   void WaitForInterstitial() {
     TabContents* contents = browser()->GetSelectedTabContents();
-    if (!InterstitialPage::GetInterstitialPage(contents))
-      ui_test_utils::WaitForNotificationFrom(
+    ui_test_utils::WindowedNotificationObserver interstitial_observer(
           content::NOTIFICATION_INTERSTITIAL_ATTACHED,
           Source<TabContents>(contents));
-  }
-
-  void WaitForNavigation() {
-    NavigationController* controller =
-        &browser()->GetSelectedTabContents()->controller();
-    ui_test_utils::WaitForNavigation(controller);
+    if (!InterstitialPage::GetInterstitialPage(contents))
+      interstitial_observer.Wait();
   }
 
   void AssertReportSent() {
@@ -422,8 +418,12 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, MalwareProceed) {
   AddURLResult(url, SafeBrowsingService::URL_MALWARE);
 
   ui_test_utils::NavigateToURL(browser(), url);
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(
+          &browser()->GetSelectedTabContentsWrapper()->controller()));
   SendCommand("\"proceed\"");    // Simulate the user clicking "proceed"
-  WaitForNavigation();    // Wait until we finish the navigation.
+  observer.Wait();
   AssertNoInterstitial(true);    // Assert the interstitial is gone.
   EXPECT_EQ(url, browser()->GetSelectedTabContents()->GetURL());
 }
@@ -446,8 +446,12 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingProceed) {
 
   ui_test_utils::NavigateToURL(browser(), url);
 
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(
+          &browser()->GetSelectedTabContentsWrapper()->controller()));
   SendCommand("\"proceed\"");   // Simulate the user clicking "proceed".
-  WaitForNavigation();    // Wait until we finish the navigation.
+  observer.Wait();
   AssertNoInterstitial(true);    // Assert the interstitial is gone
   EXPECT_EQ(url, browser()->GetSelectedTabContents()->GetURL());
 }
@@ -458,8 +462,12 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest, PhishingReportError) {
 
   ui_test_utils::NavigateToURL(browser(), url);
 
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(
+          &browser()->GetSelectedTabContentsWrapper()->controller()));
   SendCommand("\"reportError\"");   // Simulate the user clicking "report error"
-  WaitForNavigation();    // Wait until we finish the navigation.
+  observer.Wait();
   AssertNoInterstitial(false);    // Assert the interstitial is gone
 
   // We are in the error reporting page.
@@ -474,8 +482,12 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
 
   ui_test_utils::NavigateToURL(browser(), url);
 
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(
+          &browser()->GetSelectedTabContentsWrapper()->controller()));
   SendCommand("\"learnMore\"");   // Simulate the user clicking "learn more"
-  WaitForNavigation();    // Wait until we finish the navigation.
+  observer.Wait();
   AssertNoInterstitial(false);    // Assert the interstitial is gone
 
   // We are in the help page.

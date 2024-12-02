@@ -1,17 +1,13 @@
-  // Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_POLICY_POLICY_STATUS_INFO_H_
 #define CHROME_BROWSER_POLICY_POLICY_STATUS_INFO_H_
 
-#include <map>
-#include <string>
-
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/values.h"
-#include "policy/configuration_policy_type.h"
 
 namespace policy {
 
@@ -82,16 +78,16 @@ struct PolicyStatusInfo {
   string16 error_message;
 
   // Paths for the DictionaryValue returned by GetDictionaryValue().
-  static const std::string kLevelDictPath;
-  static const std::string kNameDictPath;
-  static const std::string kSetDictPath;
-  static const std::string kSourceTypeDictPath;
-  static const std::string kStatusDictPath;
-  static const std::string kValueDictPath;
+  static const char kLevelDictPath[];
+  static const char kNameDictPath[];
+  static const char kSetDictPath[];
+  static const char kSourceTypeDictPath[];
+  static const char kStatusDictPath[];
+  static const char kValueDictPath[];
 
   DISALLOW_COPY_AND_ASSIGN(PolicyStatusInfo);
 };
 
-} // namespace policy
+}  // namespace policy
 
 #endif  // CHROME_BROWSER_POLICY_POLICY_STATUS_INFO_H_

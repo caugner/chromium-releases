@@ -17,6 +17,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
  public:
   virtual content::BrowserMainParts* CreateBrowserMainParts(
       const MainFunctionParams& parameters) OVERRIDE;
+  virtual RenderWidgetHostView* CreateViewForWidget(
+      RenderWidgetHost* widget) OVERRIDE;
   virtual TabContentsView* CreateTabContentsView(
       TabContents* tab_contents) OVERRIDE;
   virtual void RenderViewHostCreated(RenderViewHost* render_view_host) OVERRIDE;
@@ -30,6 +32,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual GURL GetEffectiveURL(content::BrowserContext* browser_context,
                                const GURL& url) OVERRIDE;
   virtual bool IsURLSameAsAnySiteInstance(const GURL& url) OVERRIDE;
+  virtual bool IsSuitableHost(RenderProcessHost* process_host,
+                              const GURL& url) OVERRIDE;
+  virtual bool ShouldSwapProcessesForNavigation(const GURL& current_url,
+                                                const GURL& new_url) OVERRIDE;
   virtual std::string GetCanonicalEncodingNameByAliasName(
       const std::string& alias_name) OVERRIDE;
   virtual void AppendExtraCommandLineSwitches(CommandLine* command_line,
@@ -38,6 +44,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual std::string GetAcceptLangs(const TabContents* tab) OVERRIDE;
   virtual SkBitmap* GetDefaultFavicon() OVERRIDE;
   virtual bool AllowAppCache(const GURL& manifest_url,
+                             const GURL& first_party,
                              const content::ResourceContext& context) OVERRIDE;
   virtual bool AllowGetCookie(const GURL& url,
                               const GURL& first_party,
@@ -62,7 +69,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void AllowCertificateError(
       SSLCertErrorHandler* handler,
       bool overridable,
-      Callback2<SSLCertErrorHandler*, bool>::Type* callback) OVERRIDE;
+      const base::Callback<void(SSLCertErrorHandler*, bool)>& callback)
+      OVERRIDE;
   virtual void SelectClientCertificate(
       int render_process_id,
       int render_view_id,
@@ -115,13 +123,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void ClearCache(RenderViewHost* rvh) OVERRIDE;
   virtual void ClearCookies(RenderViewHost* rvh) OVERRIDE;
   virtual FilePath GetDefaultDownloadDirectory() OVERRIDE;
-  virtual net::URLRequestContextGetter*
-      GetDefaultRequestContextDeprecatedCrBug64339() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetSystemRequestContext() OVERRIDE;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Can return an optional fd for crash handling, otherwise returns -1.
-  virtual int GetCrashSignalFD(const std::string& process_type) OVERRIDE;
+  virtual int GetCrashSignalFD(const CommandLine& command_line) OVERRIDE;
 #endif
 #if defined(OS_WIN)
   virtual const wchar_t* GetResourceDllName() OVERRIDE;

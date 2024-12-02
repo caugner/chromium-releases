@@ -6,6 +6,7 @@
 
 #include "build/build_config.h"
 #include "content/common/common_param_traits.h"
+#include "content/common/content_export.h"
 #include "content/common/webkit_param_traits.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
@@ -16,6 +17,9 @@
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
 #endif
+
+#undef IPC_MESSAGE_EXPORT
+#define IPC_MESSAGE_EXPORT CONTENT_EXPORT
 
 #define IPC_MESSAGE_START PluginMsgStart
 
@@ -199,6 +203,17 @@ IPC_SYNC_MESSAGE_ROUTED1_2(PluginMsg_HandleInputEvent,
 IPC_MESSAGE_ROUTED1(PluginMsg_SetContentAreaFocus,
                     bool /* has_focus */)
 
+#if defined(OS_WIN)
+IPC_MESSAGE_ROUTED4(PluginMsg_ImeCompositionUpdated,
+                    string16 /* text */,
+                    std::vector<int> /* clauses */,
+                    std::vector<int>, /* target */
+                    int /* cursor_position */)
+
+IPC_MESSAGE_ROUTED1(PluginMsg_ImeCompositionCompleted,
+                    string16 /* text */)
+#endif
+
 #if defined(OS_MACOSX)
 IPC_MESSAGE_ROUTED1(PluginMsg_SetWindowFocus,
                     bool /* has_focus */)
@@ -300,6 +315,16 @@ IPC_SYNC_MESSAGE_ROUTED1_0(PluginHostMsg_SetWindow,
 // in HandleEvent calls.
 IPC_SYNC_MESSAGE_ROUTED1_0(PluginHostMsg_SetWindowlessPumpEvent,
                            HANDLE /* modal_loop_pump_messages_event */)
+
+// Send the IME status retrieved from a windowless plug-in. A windowless plug-in
+// uses the IME attached to a browser process as a renderer does. A plug-in
+// sends this message to control the IME status of a browser process. I would
+// note that a plug-in sends this message to a renderer process that hosts this
+// plug-in (not directly to a browser process) so the renderer process can
+// update its IME status.
+IPC_MESSAGE_ROUTED2(PluginHostMsg_NotifyIMEStatus,
+                    int /* input_type */,
+                    gfx::Rect /* caret_rect */)
 #endif
 
 IPC_MESSAGE_ROUTED1(PluginHostMsg_URLRequest,

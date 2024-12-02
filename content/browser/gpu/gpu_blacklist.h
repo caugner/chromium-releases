@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "content/common/content_export.h"
 #include "content/common/gpu/gpu_feature_flags.h"
 
 class Version;
@@ -23,7 +24,7 @@ namespace base {
 class DictionaryValue;
 }
 
-class GpuBlacklist {
+class CONTENT_EXPORT GpuBlacklist {
  public:
   enum OsType {
     kOsLinux,
@@ -58,35 +59,21 @@ class GpuBlacklist {
                                            Version* os_version,
                                            const GPUInfo& gpu_info);
 
-  // Collects the entries that set the "feature" flag from the last
+  // Collects the active entries that set the "feature" flag from the last
   // DetermineGpuFeatureFlags() call.  This tells which entries are responsible
   // for raising a certain flag, i.e, for blacklisting a certain feature.
   // Examples of "feature":
   //   kGpuFeatureAll - any of the supported features;
   //   kGpuFeatureWebgl - a single feature;
   //   kGpuFeatureWebgl | kGpuFeatureAcceleratedCompositing - two features.
+  // If disabled set to true, return entries that are disabled; otherwise,
+  // return enabled entries.
   void GetGpuFeatureFlagEntries(GpuFeatureFlags::GpuFeatureType feature,
-                                std::vector<uint32>& entry_ids) const;
+                                std::vector<uint32>& entry_ids,
+                                bool disabled) const;
 
-  // Returns status information on the blacklist. This is two parted:
-  // {
-  //    featureStatus: []
-  //    problems: []
-  // }
-  //
-  // Each entry in feature_status has:
-  // {
-  //    name:  "name of feature"
-  //    status: "enabled" | "unavailable_software" | "unavailable_off" |
-  //            "software" | "disabled_off" | "disabled_softare";
-  // }
-  //
-  // The features reported are not 1:1 with GpuFeatureType. Rather, they are:
-  //    '2d_canvas'
-  //    '3d_css'
-  //    'composting',
-  //    'webgl',
-  //    'multisampling'
+  // Returns the description and bugs from active entries from the last
+  // DetermineGpuFeatureFlags() call.
   //
   // Each problems has:
   // {
@@ -94,11 +81,7 @@ class GpuBlacklist {
   //    "crBugs": [1234],
   //    "webkitBugs": []
   // }
-  base::Value* GetFeatureStatus(bool gpu_access_allowed,
-                                bool disable_accelerated_compositing,
-                                bool disable_accelerated_2D_canvas,
-                                bool disable_experimental_webgl,
-                                bool disable_multisampling) const;
+  void GetBlacklistReasons(ListValue* problem_list) const;
 
   // Return the largest entry id.  This is used for histogramming.
   uint32 max_entry_id() const;
@@ -237,6 +220,9 @@ class GpuBlacklist {
     // Returns the entry's unique id.  0 is reserved.
     uint32 id() const;
 
+    // Returns whether the entry is disabled.
+    bool disabled() const;
+
     // Returns the description of the entry
     const std::string& description() const { return description_; }
 
@@ -263,6 +249,8 @@ class GpuBlacklist {
     ~GpuBlacklistEntry() { }
 
     bool SetId(uint32 id);
+
+    void SetDisabled(bool disabled);
 
     bool SetOsInfo(const std::string& os,
                    const std::string& version_op,
@@ -298,6 +286,7 @@ class GpuBlacklist {
     void AddBrowserChannel(BrowserChannel channel);
 
     uint32 id_;
+    bool disabled_;
     std::string description_;
     std::vector<int> cr_bugs_;
     std::vector<int> webkit_bugs_;
@@ -320,8 +309,6 @@ class GpuBlacklist {
   static OsType GetOsType();
 
   void Clear();
-
-  bool IsFeatureBlacklisted(GpuFeatureFlags::GpuFeatureType feature) const;
 
   // Check if the entry is supported by the current version of browser.
   // By default, if there is no browser version information in the entry,

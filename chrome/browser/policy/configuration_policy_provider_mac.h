@@ -7,9 +7,9 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/policy/configuration_policy_store_interface.h"
 #include "chrome/browser/policy/file_based_policy_provider.h"
-#include "chrome/browser/preferences_mac.h"
+
+class MacPreferences;
 
 namespace policy {
 
@@ -20,12 +20,12 @@ class MacPreferencesPolicyProviderDelegate
   // Takes ownership of |preferences|.
   MacPreferencesPolicyProviderDelegate(
       MacPreferences* preferences,
-      const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list);
+      const PolicyDefinitionList* policy_list);
   virtual ~MacPreferencesPolicyProviderDelegate();
 
   // FileBasedPolicyLoader::Delegate implementation.
-  virtual DictionaryValue* Load();
-  virtual base::Time GetLastModification();
+  virtual DictionaryValue* Load() OVERRIDE;
+  virtual base::Time GetLastModification() OVERRIDE;
 
  private:
   // In order to access the application preferences API, the names and values of
@@ -33,7 +33,7 @@ class MacPreferencesPolicyProviderDelegate
   // Unfortunately, we cannot get the policy list at load time from the
   // provider, because the loader may outlive the provider, so we store our own
   // pointer to the list.
-  const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list_;
+  const PolicyDefinitionList* policy_list_;
 
   scoped_ptr<MacPreferences> preferences_;
 
@@ -42,15 +42,13 @@ class MacPreferencesPolicyProviderDelegate
 
 // An implementation of |ConfigurationPolicyProvider| using the mechanism
 // provided by Mac OS X's managed preferences.
-class ConfigurationPolicyProviderMac
-    : public FileBasedPolicyProvider {
+class ConfigurationPolicyProviderMac : public FileBasedPolicyProvider {
  public:
   explicit ConfigurationPolicyProviderMac(
-      const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list);
+      const PolicyDefinitionList* policy_list);
   // For testing; takes ownership of |preferences|.
-  ConfigurationPolicyProviderMac(
-      const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list,
-      MacPreferences* preferences);
+  ConfigurationPolicyProviderMac(const PolicyDefinitionList* policy_list,
+                                 MacPreferences* preferences);
 
   DISALLOW_COPY_AND_ASSIGN(ConfigurationPolicyProviderMac);
 };

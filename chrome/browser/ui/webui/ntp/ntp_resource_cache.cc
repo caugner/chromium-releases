@@ -4,15 +4,14 @@
 
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 
-#include <algorithm>
 #include <vector>
 
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/string16.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -27,6 +26,7 @@
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/shown_sections_handler.h"
+#include "chrome/browser/ui/webui/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -176,9 +176,8 @@ NTPResourceCache::NTPResourceCache(Profile* profile) : profile_(profile) {
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
   pref_change_registrar_.Init(profile_->GetPrefs());
-  pref_change_registrar_.Add(prefs::kAcknowledgedSyncTypes, this);
+  pref_change_registrar_.Add(prefs::kSyncAcknowledgedSyncTypes, this);
   pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
-  pref_change_registrar_.Add(prefs::kEnableBookmarkBar, this);
   pref_change_registrar_.Add(prefs::kHomePageIsNewTabPage, this);
   pref_change_registrar_.Add(prefs::kNTPShownSections, this);
   pref_change_registrar_.Add(prefs::kNTPShownPage, this);
@@ -305,7 +304,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   localized_strings.SetString("searchengines",
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SEARCH_ENGINES));
   localized_strings.SetString("foreignsessions",
-      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SESSIONS));
+      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_TABS));
   localized_strings.SetString("closedwindowmultiple",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_MULTIPLE));
   localized_strings.SetString("attributionintro",
@@ -367,6 +366,8 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_MANAGER_LINK_TITLE));
   localized_strings.SetString("bookmarksShowAllLinkTitle",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_SHOW_ALL_LINK_TITLE));
+  localized_strings.SetString("importDataLinkTitle",
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_BOOKMARKS_IMPORT_LINK_TITLE));
 #if defined(OS_CHROMEOS)
   localized_strings.SetString("expandMenu",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_CLOSE_MENU_EXPAND));
@@ -420,6 +421,10 @@ void NTPResourceCache::CreateNewTabHTML() {
         profile_->GetPrefs()->GetString(prefs::kNTPPromoLine));
     UserMetrics::RecordAction(UserMetricsAction("NTPPromoShown"));
   }
+
+  // Enable or disable bookmark features based on an about flag.
+  localized_strings.SetString("bookmark_features",
+      NewTabUI::NTP4BookmarkFeaturesEnabled() ? "true" : "false");
 
   // Load the new tab page appropriate for this build
   // Note that some builds (eg. TOUCHUI) don't make use of everything we

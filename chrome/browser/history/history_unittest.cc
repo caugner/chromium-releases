@@ -23,6 +23,8 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
@@ -88,12 +90,14 @@ class BackendDelegate : public HistoryBackend::Delegate {
       : history_test_(history_test) {
   }
 
-  virtual void NotifyProfileError(sql::InitStatus init_status) OVERRIDE {}
-  virtual void SetInMemoryBackend(InMemoryHistoryBackend* backend) OVERRIDE;
+  virtual void NotifyProfileError(int backend_id,
+                                  sql::InitStatus init_status) OVERRIDE {}
+  virtual void SetInMemoryBackend(int backend_id,
+                                  InMemoryHistoryBackend* backend) OVERRIDE;
   virtual void BroadcastNotifications(int type,
                                       HistoryDetails* details) OVERRIDE;
-  virtual void DBLoaded() OVERRIDE {}
-  virtual void StartTopSitesMigration() OVERRIDE {}
+  virtual void DBLoaded(int backend_id) OVERRIDE {}
+  virtual void StartTopSitesMigration(int backend_id) OVERRIDE {}
  private:
   HistoryTest* history_test_;
 };
@@ -116,7 +120,7 @@ class HistoryTest : public testing::Test {
   // assigning the values to backend_ and db_.
   void CreateBackendAndDatabase() {
     backend_ =
-        new HistoryBackend(history_dir_, new BackendDelegate(this), NULL);
+        new HistoryBackend(history_dir_, 0, new BackendDelegate(this), NULL);
     backend_->Init(std::string(), false);
     db_ = backend_->db_.get();
     DCHECK(in_mem_backend_.get()) << "Mem backend should have been set by "
@@ -189,9 +193,11 @@ class HistoryTest : public testing::Test {
         GURL("foo-url"),
         GURL(""),
         time,
+        time,
         0,
         512,
         state,
+        0,
         0);
     return db_->CreateDownload(download);
   }
@@ -201,7 +207,8 @@ class HistoryTest : public testing::Test {
   // found, this will return false and those structures will not be changed.
   bool QueryURL(HistoryService* history, const GURL& url) {
     history->QueryURL(url, true, &consumer_,
-                      NewCallback(this, &HistoryTest::SaveURLAndQuit));
+                      base::Bind(&HistoryTest::SaveURLAndQuit,
+                                 base::Unretained(this)));
     MessageLoop::current()->Run();  // Will be exited in SaveURLAndQuit.
     return query_url_success_;
   }
@@ -226,7 +233,8 @@ class HistoryTest : public testing::Test {
   // returning true on success. False means the URL was not found.
   bool QueryRedirectsFrom(HistoryService* history, const GURL& url) {
     history->QueryRedirectsFrom(url, &consumer_,
-        NewCallback(this, &HistoryTest::OnRedirectQueryComplete));
+        base::Bind(&HistoryTest::OnRedirectQueryComplete,
+                   base::Unretained(this)));
     MessageLoop::current()->Run();  // Will be exited in *QueryComplete.
     return redirect_query_success_;
   }
@@ -285,7 +293,8 @@ class HistoryTest : public testing::Test {
   HistoryDatabase* db_;  // Cached reference to the backend's database.
 };
 
-void BackendDelegate::SetInMemoryBackend(InMemoryHistoryBackend* backend) {
+void BackendDelegate::SetInMemoryBackend(int backend_id,
+                                         InMemoryHistoryBackend* backend) {
   // Save the in-memory backend to the history test object, this happens
   // synchronously, so we don't have to do anything fancy.
   history_test_->in_mem_backend_.reset(backend);
@@ -362,8 +371,16 @@ TEST_F(HistoryTest, ClearBrowsingData_Downloads) {
             downloads[2].start_time.ToInternalValue());
 
   // Change state so we can delete the downloads.
-  EXPECT_TRUE(db_->UpdateDownload(512, DownloadItem::COMPLETE, in_progress));
-  EXPECT_TRUE(db_->UpdateDownload(512, DownloadItem::CANCELLED, removing));
+  DownloadPersistentStoreInfo data;
+  data.received_bytes = 512;
+  data.state = DownloadItem::COMPLETE;
+  data.end_time = base::Time::Now();
+  data.opened = false;
+  data.db_handle = in_progress;
+  EXPECT_TRUE(db_->UpdateDownload(data));
+  data.state = DownloadItem::CANCELLED;
+  data.db_handle = removing;
+  EXPECT_TRUE(db_->UpdateDownload(data));
 
   // Try removing from Time=0. This should delete all.
   db_->RemoveDownloadsBetween(Time(), Time());
@@ -395,7 +412,7 @@ TEST_F(HistoryTest, AddPage) {
   // Add the page once from a child frame.
   const GURL test_url("http://www.google.com/");
   history->AddPage(test_url, NULL, 0, GURL(),
-                   PageTransition::MANUAL_SUBFRAME,
+                   content::PAGE_TRANSITION_MANUAL_SUBFRAME,
                    history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url));
@@ -404,7 +421,7 @@ TEST_F(HistoryTest, AddPage) {
   EXPECT_TRUE(query_url_row_.hidden());  // Hidden because of child frame.
 
   // Add the page once from the main frame (should unhide it).
-  history->AddPage(test_url, NULL, 0, GURL(), PageTransition::LINK,
+  history->AddPage(test_url, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
                    history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url));
@@ -428,7 +445,7 @@ TEST_F(HistoryTest, AddPageSameTimes) {
   // Make sure that two pages added at the same time with no intervening
   // additions have different timestamps.
   history->AddPage(test_urls[0], now, NULL, 0, GURL(),
-                   PageTransition::LINK,
+                   content::PAGE_TRANSITION_LINK,
                    history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_urls[0]));
@@ -436,7 +453,7 @@ TEST_F(HistoryTest, AddPageSameTimes) {
   EXPECT_TRUE(now == query_url_row_.last_visit());  // gtest doesn't like Time
 
   history->AddPage(test_urls[1], now, NULL, 0, GURL(),
-                   PageTransition::LINK,
+                   content::PAGE_TRANSITION_LINK,
                    history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_urls[1]));
@@ -447,7 +464,7 @@ TEST_F(HistoryTest, AddPageSameTimes) {
   // Make sure the next page, at a different time, is also correct.
   history->AddPage(test_urls[2], now + TimeDelta::FromMinutes(1),
                    NULL, 0, GURL(),
-                   PageTransition::LINK,
+                   content::PAGE_TRANSITION_LINK,
                    history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_urls[2]));
@@ -472,7 +489,7 @@ TEST_F(HistoryTest, AddRedirect) {
   // Add the sequence of pages as a server with no referrer. Note that we need
   // to have a non-NULL page ID scope.
   history->AddPage(first_redirects.back(), MakeFakeHost(1), 0, GURL(),
-                   PageTransition::LINK, first_redirects,
+                   content::PAGE_TRANSITION_LINK, first_redirects,
                    history::SOURCE_BROWSED,  true);
 
   // The first page should be added once with a link visit type (because we set
@@ -481,8 +498,9 @@ TEST_F(HistoryTest, AddRedirect) {
   EXPECT_EQ(1, query_url_row_.visit_count());
   ASSERT_EQ(1U, query_url_visits_.size());
   int64 first_visit = query_url_visits_[0].visit_id;
-  EXPECT_EQ(PageTransition::LINK |
-            PageTransition::CHAIN_START, query_url_visits_[0].transition);
+  EXPECT_EQ(content::PAGE_TRANSITION_LINK |
+            content::PAGE_TRANSITION_CHAIN_START,
+            query_url_visits_[0].transition);
   EXPECT_EQ(0, query_url_visits_[0].referring_visit);  // No referrer.
 
   // The second page should be a server redirect type with a referrer of the
@@ -491,8 +509,9 @@ TEST_F(HistoryTest, AddRedirect) {
   EXPECT_EQ(1, query_url_row_.visit_count());
   ASSERT_EQ(1U, query_url_visits_.size());
   int64 second_visit = query_url_visits_[0].visit_id;
-  EXPECT_EQ(PageTransition::SERVER_REDIRECT |
-            PageTransition::CHAIN_END, query_url_visits_[0].transition);
+  EXPECT_EQ(content::PAGE_TRANSITION_SERVER_REDIRECT |
+            content::PAGE_TRANSITION_CHAIN_END,
+            query_url_visits_[0].transition);
   EXPECT_EQ(first_visit, query_url_visits_[0].referring_visit);
 
   // Check that the redirect finding function successfully reports it.
@@ -509,8 +528,9 @@ TEST_F(HistoryTest, AddRedirect) {
   second_redirects.push_back(GURL("http://last.page.com/"));
   history->AddPage(second_redirects[1], MakeFakeHost(1), 1,
                    second_redirects[0],
-                   static_cast<PageTransition::Type>(PageTransition::LINK |
-                       PageTransition::CLIENT_REDIRECT),
+                   static_cast<content::PageTransition>(
+                       content::PAGE_TRANSITION_LINK |
+                       content::PAGE_TRANSITION_CLIENT_REDIRECT),
                    second_redirects, history::SOURCE_BROWSED, true);
 
   // The last page (source of the client redirect) should NOT have an
@@ -523,8 +543,9 @@ TEST_F(HistoryTest, AddRedirect) {
   EXPECT_TRUE(QueryURL(history, second_redirects[1]));
   EXPECT_EQ(1, query_url_row_.visit_count());
   ASSERT_EQ(1U, query_url_visits_.size());
-  EXPECT_EQ(PageTransition::CLIENT_REDIRECT |
-            PageTransition::CHAIN_END, query_url_visits_[0].transition);
+  EXPECT_EQ(content::PAGE_TRANSITION_CLIENT_REDIRECT |
+            content::PAGE_TRANSITION_CHAIN_END,
+            query_url_visits_[0].transition);
   EXPECT_EQ(second_visit, query_url_visits_[0].referring_visit);
 }
 
@@ -536,71 +557,72 @@ TEST_F(HistoryTest, MakeIntranetURLsTyped) {
   // Add a non-typed visit to an intranet URL on an unvisited host.  This should
   // get promoted to a typed visit.
   const GURL test_url("http://intranet_host/path");
-  history->AddPage(test_url, NULL, 0, GURL(), PageTransition::LINK,
+  history->AddPage(test_url, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
                    history::RedirectList(), history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_EQ(1, query_url_row_.typed_count());
   ASSERT_EQ(1U, query_url_visits_.size());
-  EXPECT_EQ(PageTransition::TYPED,
-            PageTransition::StripQualifier(query_url_visits_[0].transition));
+  EXPECT_EQ(content::PAGE_TRANSITION_TYPED,
+      content::PageTransitionStripQualifier(query_url_visits_[0].transition));
 
   // Add more visits on the same host.  None of these should be promoted since
   // there is already a typed visit.
 
   // Different path.
   const GURL test_url2("http://intranet_host/different_path");
-  history->AddPage(test_url2, NULL, 0, GURL(), PageTransition::LINK,
+  history->AddPage(test_url2, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
                    history::RedirectList(), history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url2));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_EQ(0, query_url_row_.typed_count());
   ASSERT_EQ(1U, query_url_visits_.size());
-  EXPECT_EQ(PageTransition::LINK,
-            PageTransition::StripQualifier(query_url_visits_[0].transition));
+  EXPECT_EQ(content::PAGE_TRANSITION_LINK,
+      content::PageTransitionStripQualifier(query_url_visits_[0].transition));
 
   // No path.
   const GURL test_url3("http://intranet_host/");
-  history->AddPage(test_url3, NULL, 0, GURL(), PageTransition::LINK,
+  history->AddPage(test_url3, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
                    history::RedirectList(), history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url3));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_EQ(0, query_url_row_.typed_count());
   ASSERT_EQ(1U, query_url_visits_.size());
-  EXPECT_EQ(PageTransition::LINK,
-            PageTransition::StripQualifier(query_url_visits_[0].transition));
+  EXPECT_EQ(content::PAGE_TRANSITION_LINK,
+      content::PageTransitionStripQualifier(query_url_visits_[0].transition));
 
   // Different scheme.
   const GURL test_url4("https://intranet_host/");
-  history->AddPage(test_url4, NULL, 0, GURL(), PageTransition::LINK,
+  history->AddPage(test_url4, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
                    history::RedirectList(), history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url4));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_EQ(0, query_url_row_.typed_count());
   ASSERT_EQ(1U, query_url_visits_.size());
-  EXPECT_EQ(PageTransition::LINK,
-            PageTransition::StripQualifier(query_url_visits_[0].transition));
+  EXPECT_EQ(content::PAGE_TRANSITION_LINK,
+      content::PageTransitionStripQualifier(query_url_visits_[0].transition));
 
   // Different transition.
   const GURL test_url5("http://intranet_host/another_path");
-  history->AddPage(test_url5, NULL, 0, GURL(), PageTransition::AUTO_BOOKMARK,
+  history->AddPage(test_url5, NULL, 0, GURL(),
+                   content::PAGE_TRANSITION_AUTO_BOOKMARK,
                    history::RedirectList(), history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url5));
   EXPECT_EQ(1, query_url_row_.visit_count());
   EXPECT_EQ(0, query_url_row_.typed_count());
   ASSERT_EQ(1U, query_url_visits_.size());
-  EXPECT_EQ(PageTransition::AUTO_BOOKMARK,
-            PageTransition::StripQualifier(query_url_visits_[0].transition));
+  EXPECT_EQ(content::PAGE_TRANSITION_AUTO_BOOKMARK,
+      content::PageTransitionStripQualifier(query_url_visits_[0].transition));
 
   // Original URL.
-  history->AddPage(test_url, NULL, 0, GURL(), PageTransition::LINK,
+  history->AddPage(test_url, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
                    history::RedirectList(), history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url));
   EXPECT_EQ(2, query_url_row_.visit_count());
   EXPECT_EQ(1, query_url_row_.typed_count());
   ASSERT_EQ(2U, query_url_visits_.size());
-  EXPECT_EQ(PageTransition::LINK,
-            PageTransition::StripQualifier(query_url_visits_[1].transition));
+  EXPECT_EQ(content::PAGE_TRANSITION_LINK,
+      content::PageTransitionStripQualifier(query_url_visits_[1].transition));
 }
 
 TEST_F(HistoryTest, Typed) {
@@ -610,7 +632,7 @@ TEST_F(HistoryTest, Typed) {
 
   // Add the page once as typed.
   const GURL test_url("http://www.google.com/");
-  history->AddPage(test_url, NULL, 0, GURL(), PageTransition::TYPED,
+  history->AddPage(test_url, NULL, 0, GURL(), content::PAGE_TRANSITION_TYPED,
                    history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url));
@@ -620,7 +642,7 @@ TEST_F(HistoryTest, Typed) {
   EXPECT_EQ(1, query_url_row_.typed_count());
 
   // Add the page again not typed.
-  history->AddPage(test_url, NULL, 0, GURL(), PageTransition::LINK,
+  history->AddPage(test_url, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
                    history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url));
@@ -631,7 +653,7 @@ TEST_F(HistoryTest, Typed) {
 
   // Add the page again as a generated URL.
   history->AddPage(test_url, NULL, 0, GURL(),
-                   PageTransition::GENERATED, history::RedirectList(),
+                   content::PAGE_TRANSITION_GENERATED, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url));
 
@@ -641,7 +663,7 @@ TEST_F(HistoryTest, Typed) {
 
   // Add the page again as a reload.
   history->AddPage(test_url, NULL, 0, GURL(),
-                   PageTransition::RELOAD, history::RedirectList(),
+                   content::PAGE_TRANSITION_RELOAD, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(history, test_url));
 
@@ -691,14 +713,14 @@ TEST_F(HistoryTest, Segments) {
   // Add a URL.
   const GURL existing_url("http://www.google.com/");
   history->AddPage(existing_url, scope, 0, GURL(),
-                   PageTransition::TYPED, history::RedirectList(),
+                   content::PAGE_TRANSITION_TYPED, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
 
   // Make sure a segment was created.
   history->QuerySegmentUsageSince(
       &consumer_, Time::Now() - TimeDelta::FromDays(1), 10,
-      NewCallback(static_cast<HistoryTest*>(this),
-                  &HistoryTest::OnSegmentUsageAvailable));
+      base::Bind(&HistoryTest::OnSegmentUsageAvailable,
+                 base::Unretained(this)));
 
   // Wait for processing.
   MessageLoop::current()->Run();
@@ -710,14 +732,14 @@ TEST_F(HistoryTest, Segments) {
   // Add a URL which doesn't create a segment.
   const GURL link_url("http://yahoo.com/");
   history->AddPage(link_url, scope, 0, GURL(),
-                   PageTransition::LINK, history::RedirectList(),
+                   content::PAGE_TRANSITION_LINK, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
 
   // Query again
   history->QuerySegmentUsageSince(
       &consumer_, Time::Now() - TimeDelta::FromDays(1), 10,
-      NewCallback(static_cast<HistoryTest*>(this),
-                  &HistoryTest::OnSegmentUsageAvailable));
+      base::Bind(&HistoryTest::OnSegmentUsageAvailable,
+                 base::Unretained(this)));
 
   // Wait for processing.
   MessageLoop::current()->Run();
@@ -728,14 +750,14 @@ TEST_F(HistoryTest, Segments) {
 
   // Add a page linked from existing_url.
   history->AddPage(GURL("http://www.google.com/foo"), scope, 3, existing_url,
-                   PageTransition::LINK, history::RedirectList(),
+                   content::PAGE_TRANSITION_LINK, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
 
   // Query again
   history->QuerySegmentUsageSince(
       &consumer_, Time::Now() - TimeDelta::FromDays(1), 10,
-      NewCallback(static_cast<HistoryTest*>(this),
-                  &HistoryTest::OnSegmentUsageAvailable));
+      base::Bind(&HistoryTest::OnSegmentUsageAvailable,
+                 base::Unretained(this)));
 
   // Wait for processing.
   MessageLoop::current()->Run();
@@ -763,14 +785,15 @@ TEST_F(HistoryTest, MostVisitedURLs) {
 
   // Add two pages.
   history->AddPage(url0, scope, 0, GURL(),
-                   PageTransition::TYPED, history::RedirectList(),
+                   content::PAGE_TRANSITION_TYPED, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   history->AddPage(url1, scope, 0, GURL(),
-                   PageTransition::TYPED, history::RedirectList(),
+                   content::PAGE_TRANSITION_TYPED, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   history->QueryMostVisitedURLs(20, 90, &consumer_,
-                                NewCallback(static_cast<HistoryTest*>(this),
-                                    &HistoryTest::OnMostVisitedURLsAvailable));
+                                base::Bind(
+                                    &HistoryTest::OnMostVisitedURLsAvailable,
+                                    base::Unretained(this)));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(2U, most_visited_urls_.size());
@@ -779,11 +802,12 @@ TEST_F(HistoryTest, MostVisitedURLs) {
 
   // Add another page.
   history->AddPage(url2, scope, 0, GURL(),
-                   PageTransition::TYPED, history::RedirectList(),
+                   content::PAGE_TRANSITION_TYPED, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   history->QueryMostVisitedURLs(20, 90, &consumer_,
-                                NewCallback(static_cast<HistoryTest*>(this),
-                                    &HistoryTest::OnMostVisitedURLsAvailable));
+                                base::Bind(
+                                    &HistoryTest::OnMostVisitedURLsAvailable,
+                                    base::Unretained(this)));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(3U, most_visited_urls_.size());
@@ -793,11 +817,12 @@ TEST_F(HistoryTest, MostVisitedURLs) {
 
   // Revisit url2, making it the top URL.
   history->AddPage(url2, scope, 0, GURL(),
-                   PageTransition::TYPED, history::RedirectList(),
+                   content::PAGE_TRANSITION_TYPED, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   history->QueryMostVisitedURLs(20, 90, &consumer_,
-                                NewCallback(static_cast<HistoryTest*>(this),
-                                    &HistoryTest::OnMostVisitedURLsAvailable));
+                                base::Bind(
+                                    &HistoryTest::OnMostVisitedURLsAvailable,
+                                    base::Unretained(this)));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(3U, most_visited_urls_.size());
@@ -807,11 +832,12 @@ TEST_F(HistoryTest, MostVisitedURLs) {
 
   // Revisit url1, making it the top URL.
   history->AddPage(url1, scope, 0, GURL(),
-                   PageTransition::TYPED, history::RedirectList(),
+                   content::PAGE_TRANSITION_TYPED, history::RedirectList(),
                    history::SOURCE_BROWSED, false);
   history->QueryMostVisitedURLs(20, 90, &consumer_,
-                                NewCallback(static_cast<HistoryTest*>(this),
-                                    &HistoryTest::OnMostVisitedURLsAvailable));
+                                base::Bind(
+                                    &HistoryTest::OnMostVisitedURLsAvailable,
+                                    base::Unretained(this)));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(3U, most_visited_urls_.size());
@@ -826,11 +852,12 @@ TEST_F(HistoryTest, MostVisitedURLs) {
 
   // Visit url4 using redirects.
   history->AddPage(url4, scope, 0, GURL(),
-                   PageTransition::TYPED, redirects,
+                   content::PAGE_TRANSITION_TYPED, redirects,
                    history::SOURCE_BROWSED, false);
   history->QueryMostVisitedURLs(20, 90, &consumer_,
-                                NewCallback(static_cast<HistoryTest*>(this),
-                                    &HistoryTest::OnMostVisitedURLsAvailable));
+                                base::Bind(
+                                    &HistoryTest::OnMostVisitedURLsAvailable,
+                                    base::Unretained(this)));
   MessageLoop::current()->Run();
 
   EXPECT_EQ(4U, most_visited_urls_.size());

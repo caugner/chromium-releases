@@ -11,6 +11,7 @@
 
 #include "base/i18n/rtl.h"
 #include "base/string_util.h"
+#include "base/win/scoped_gdi_object.h"
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -806,12 +807,13 @@ HWND TableView::CreateNativeControl(HWND parent_container) {
     // rect does not include the icon).
     gfx::CanvasSkia canvas(kImageSize, kImageSize, false);
     // Make the background completely transparent.
-    canvas.drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
-    HICON empty_icon =
-        IconUtil::CreateHICONFromSkBitmap(canvas.ExtractBitmap());
-    ImageList_AddIcon(image_list, empty_icon);
-    ImageList_AddIcon(image_list, empty_icon);
-    DeleteObject(empty_icon);
+    canvas.sk_canvas()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
+    {
+      base::win::ScopedHICON empty_icon(
+          IconUtil::CreateHICONFromSkBitmap(canvas.ExtractBitmap()));
+      ImageList_AddIcon(image_list, empty_icon);
+      ImageList_AddIcon(image_list, empty_icon);
+    }
     ListView_SetImageList(list_view_, image_list, LVSIL_SMALL);
   }
 
@@ -1080,13 +1082,13 @@ LRESULT TableView::OnNotify(int w_param, LPNMHDR hdr) {
       // called when dwFlags would be LVGIT_UNFOLDED.  Removing it entirely will
       // disable all of the above behavior.
       NMLVGETINFOTIP* info_tip = reinterpret_cast<NMLVGETINFOTIP*>(hdr);
-      std::wstring tooltip =
+      string16 tooltip =
           model_->GetTooltip(ViewToModel(info_tip->iItem));
-      CHECK(info_tip->cchTextMax >= 2);
+      CHECK_GE(info_tip->cchTextMax, 2);
       if (tooltip.length() >= static_cast<size_t>(info_tip->cchTextMax)) {
         tooltip.erase(info_tip->cchTextMax - 2);  // Ellipsis + '\0'
-        const wchar_t kEllipsis = L'\x2026';
-        tooltip += kEllipsis;
+        const char16 kEllipsis = 0x2026;
+        tooltip.push_back(kEllipsis);
       }
       if (!tooltip.empty())
         wcscpy_s(info_tip->pszText, tooltip.length() + 1, tooltip.c_str());
@@ -1155,7 +1157,8 @@ void TableView::PaintAltText() {
   canvas.DrawStringWithHalo(alt_text_, font, SK_ColorDKGRAY, SK_ColorWHITE, 1,
                             1, bounds.width() - 2, bounds.height() - 2,
                             gfx::CanvasSkia::DefaultCanvasTextAlignment());
-  skia::DrawToNativeContext(&canvas, dc, bounds.x(), bounds.y(), NULL);
+  skia::DrawToNativeContext(
+      canvas.sk_canvas(), dc, bounds.x(), bounds.y(), NULL);
   ReleaseDC(GetNativeControlHWND(), dc);
 }
 
@@ -1172,7 +1175,7 @@ LRESULT TableView::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
         r |= CDRF_NOTIFYPOSTPAINT;
       return r;
     }
-    case (CDDS_ITEMPREPAINT | CDDS_SUBITEM): {
+    case CDDS_ITEMPREPAINT | CDDS_SUBITEM: {
       // The list-view is painting a subitem. See if the colors should be
       // changed from the default.
       if (custom_colors_enabled_) {
@@ -1253,14 +1256,15 @@ LRESULT TableView::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
               // NOTE: This may be invoked without the ListView filling in the
               // background (or rather windows paints background, then invokes
               // this twice). As such, we always fill in the background.
-              canvas.drawColor(
+              canvas.sk_canvas()->drawColor(
                   skia::COLORREFToSkColor(GetSysColor(bg_color_index)),
                   SkXfermode::kSrc_Mode);
               // + 1 for padding (we declared the image as 18x18 in the list-
               // view when they are 16x16 so we get an extra pixel of padding).
               canvas.DrawBitmapInt(image, 0, 0,
                                    image.width(), image.height(),
-                                   1, 1, kFaviconSize, kFaviconSize, true);
+                                   1, 1,
+                                   gfx::kFaviconSize, gfx::kFaviconSize, true);
 
               // Only paint the visible region of the icon.
               RECT to_draw = { intersection.left - icon_rect.left,
@@ -1270,9 +1274,9 @@ LRESULT TableView::OnCustomDraw(NMLVCUSTOMDRAW* draw_info) {
                               (intersection.right - intersection.left);
               to_draw.bottom = to_draw.top +
                               (intersection.bottom - intersection.top);
-              skia::DrawToNativeContext(&canvas, draw_info->nmcd.hdc,
-                                       intersection.left, intersection.top,
-                                       &to_draw);
+              skia::DrawToNativeContext(canvas.sk_canvas(), draw_info->nmcd.hdc,
+                                        intersection.left, intersection.top,
+                                        &to_draw);
               r = CDRF_SKIPDEFAULT;
             }
           }

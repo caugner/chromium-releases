@@ -382,7 +382,7 @@ int TCPClientSocketWin::Bind(const IPEndPoint& address) {
 }
 
 
-int TCPClientSocketWin::Connect(CompletionCallback* callback) {
+int TCPClientSocketWin::Connect(OldCompletionCallback* callback) {
   DCHECK(CalledOnValidThread());
 
   // If already connected, then just return OK.
@@ -589,6 +589,9 @@ bool TCPClientSocketWin::IsConnected() const {
   if (socket_ == INVALID_SOCKET || waiting_connect())
     return false;
 
+  if (waiting_read_)
+    return true;
+
   // Check if connection is alive.
   char c;
   int rv = recv(socket_, &c, 1, MSG_PEEK);
@@ -605,6 +608,9 @@ bool TCPClientSocketWin::IsConnectedAndIdle() const {
 
   if (socket_ == INVALID_SOCKET || waiting_connect())
     return false;
+
+  if (waiting_read_)
+    return true;
 
   // Check if connection is alive and we haven't received any data
   // unexpectedly.
@@ -670,7 +676,7 @@ base::TimeDelta TCPClientSocketWin::GetConnectTimeMicros() const {
 
 int TCPClientSocketWin::Read(IOBuffer* buf,
                              int buf_len,
-                             CompletionCallback* callback) {
+                             OldCompletionCallback* callback) {
   DCHECK(CalledOnValidThread());
   DCHECK_NE(socket_, INVALID_SOCKET);
   DCHECK(!waiting_read_);
@@ -712,7 +718,7 @@ int TCPClientSocketWin::Read(IOBuffer* buf,
 
 int TCPClientSocketWin::Write(IOBuffer* buf,
                               int buf_len,
-                              CompletionCallback* callback) {
+                              OldCompletionCallback* callback) {
   DCHECK(CalledOnValidThread());
   DCHECK_NE(socket_, INVALID_SOCKET);
   DCHECK(!waiting_write_);
@@ -808,7 +814,7 @@ void TCPClientSocketWin::DoReadCallback(int rv) {
   DCHECK(read_callback_);
 
   // since Run may result in Read being called, clear read_callback_ up front.
-  CompletionCallback* c = read_callback_;
+  OldCompletionCallback* c = read_callback_;
   read_callback_ = NULL;
   c->Run(rv);
 }
@@ -818,7 +824,7 @@ void TCPClientSocketWin::DoWriteCallback(int rv) {
   DCHECK(write_callback_);
 
   // since Run may result in Write being called, clear write_callback_ up front.
-  CompletionCallback* c = write_callback_;
+  OldCompletionCallback* c = write_callback_;
   write_callback_ = NULL;
   c->Run(rv);
 }

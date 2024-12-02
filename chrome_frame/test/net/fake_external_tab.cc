@@ -231,6 +231,9 @@ FakeExternalTab::~FakeExternalTab() {
 
 void FakeExternalTab::Initialize() {
   DCHECK(g_browser_process == NULL);
+
+  notificaton_service_.reset(new NotificationService);
+
   base::SystemMonitor system_monitor;
 
   icu_util::Initialize();
@@ -269,9 +272,6 @@ void FakeExternalTab::Initialize() {
 
   FilePath profile_path(ProfileManager::GetDefaultProfileDir(user_data()));
 
-  Profile* profile =
-      g_browser_process->profile_manager()->GetProfile(profile_path);
-
   // Initialize the content client which that code uses to talk to Chrome.
   content::SetContentClient(&g_chrome_content_client.Get());
 
@@ -281,7 +281,10 @@ void FakeExternalTab::Initialize() {
 
   content::GetContentClient()->set_renderer(&g_renderer_client.Get());
 
-  // Create the child threads.
+  Profile* profile =
+      g_browser_process->profile_manager()->GetProfile(profile_path);
+
+    // Create the child threads.
   g_browser_process->db_thread();
   g_browser_process->file_thread();
   g_browser_process->io_thread();
@@ -375,11 +378,10 @@ void CFUrlRequestUnittestRunner::OnConnectAutomationProviderToChannel(
   Profile* profile = g_browser_process->profile_manager()->
       GetDefaultProfile(fake_chrome_.user_data());
 
-  AutomationProviderList* list =
-      g_browser_process->InitAutomationProviderList();
+  AutomationProviderList* list = g_browser_process->GetAutomationProviderList();
   DCHECK(list);
-  list->AddProvider(TestAutomationProvider::NewAutomationProvider(profile,
-      channel_id, this));
+  list->AddProvider(
+      TestAutomationProvider::NewAutomationProvider(profile, channel_id, this));
 }
 
 void CFUrlRequestUnittestRunner::OnInitialTabLoaded() {
@@ -520,6 +522,15 @@ void FilterDisabledTests() {
 
     // Not supported in ChromeFrame as we use IE's network stack.
     "URLRequestTest.NetworkDelegateProxyError",
+
+    // URLRequestAutomationJob needs to support NeedsAuth.
+    // http://crbug.com/98446
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncNoAction",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncSetAuth",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredSyncCancel",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncNoAction",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncSetAuth",
+    "URLRequestTestHTTP.NetworkDelegateOnAuthRequiredAsyncCancel",
   };
 
   std::string filter("-");  // All following filters will be negative.

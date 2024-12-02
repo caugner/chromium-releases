@@ -15,9 +15,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/background/background_application_list_model.h"
+#include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/virtual_driver_install_helper.h"
@@ -59,8 +63,8 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/cloud_print_class_mac.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
@@ -643,7 +647,11 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
   std::vector<Profile*> profiles(profile_manager->GetLoadedProfiles());
   for (size_t i = 0; i < profiles.size(); ++i) {
-    DownloadManager* download_manager = profiles[i]->GetDownloadManager();
+    DownloadService* download_service =
+      DownloadServiceFactory::GetForProfile(profiles[i]);
+    DownloadManager* download_manager =
+        (download_service->HasCreatedDownloadManager() ?
+         download_service->GetDownloadManager() : NULL);
     if (download_manager && download_manager->in_progress_count() > 0) {
       int downloadCount = download_manager->in_progress_count();
       if ([self userWillWaitForInProgressDownloads:downloadCount]) {
@@ -903,13 +911,8 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   BackgroundApplicationListModel applications(profile);
   DCHECK(tag >= 0 &&
          tag < static_cast<int>(applications.size()));
-  Browser* browser = BrowserList::GetLastActive();
-  if (!browser) {
-    Browser::OpenEmptyWindow(profile);
-    browser = BrowserList::GetLastActive();
-  }
   const Extension* extension = applications.GetExtension(tag);
-  browser->OpenApplicationTab(profile, extension, NEW_FOREGROUND_TAB);
+  BackgroundModeManager::LaunchBackgroundApplication(profile, extension);
 }
 
 // Same as |-commandDispatch:|, but executes commands using a disposition
@@ -994,8 +997,6 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
 // Conditionally adds the Profile menu to the main menu bar.
 - (void)initProfileMenu {
-  bool enableMenu = ProfileManager::IsMultipleProfilesEnabled();
-
   NSMenu* mainMenu = [NSApp mainMenu];
   NSMenuItem* profileMenu = [mainMenu itemWithTag:IDC_PROFILE_MAIN_MENU];
 
@@ -1003,17 +1004,17 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   // in Chromium as squished menu items <http://crbug.com/90753>. To prevent
   // this, remove the Profile menu on Leopard, regardless of the user's
   // multiprofile state.
-  if (base::mac::IsOSLeopard()) {
+  if (!ProfileManager::IsMultipleProfilesEnabled() ||
+      base::mac::IsOSLeopard()) {
     [mainMenu removeItem:profileMenu];
     return;
   }
 
-  [profileMenu setHidden:!enableMenu];
+  // The controller will unhide the menu if necessary.
+  [profileMenu setHidden:YES];
 
-  if (enableMenu) {
-    profileMenuController_.reset(
-        [[ProfileMenuController alloc] initWithMainMenuItem:profileMenu]);
-  }
+  profileMenuController_.reset(
+      [[ProfileMenuController alloc] initWithMainMenuItem:profileMenu]);
 }
 
 // The Confirm to Quit preference is atypical in that the preference lives in
@@ -1070,7 +1071,9 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   }
 
   CommandLine dummy(CommandLine::NO_PROGRAM);
-  BrowserInit::LaunchWithProfile launch(FilePath(), dummy);
+  BrowserInit::IsFirstRun first_run = FirstRun::IsChromeFirstRun() ?
+      BrowserInit::IS_FIRST_RUN : BrowserInit::IS_NOT_FIRST_RUN;
+  BrowserInit::LaunchWithProfile launch(FilePath(), dummy, first_run);
   launch.OpenURLsInBrowser(browser, false, urls);
 }
 
@@ -1104,7 +1107,8 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
     string16 printTicket16 = base::SysNSStringToUTF16(printTicket);
     print_dialog_cloud::CreatePrintDialogForFile(
         FilePath([inputPath UTF8String]), title16,
-        printTicket16, [mime UTF8String], /*modal=*/false);
+        printTicket16, [mime UTF8String], /*modal=*/false,
+        /*delete_on_close=*/false);
   }
 }
 

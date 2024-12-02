@@ -6,7 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -111,7 +111,7 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
   switch (command_id) {
     case NAME: {
       browser_->OpenURL(extension->GetHomepageURL(), GURL(),
-                        NEW_FOREGROUND_TAB, PageTransition::LINK);
+                        NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
       break;
     }
     case CONFIGURE:
@@ -131,8 +131,9 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
     }
     case UNINSTALL: {
       AddRef();  // Balanced in Accepted() and Canceled()
-      extension_uninstall_dialog_.reset(new ExtensionUninstallDialog(profile_));
-      extension_uninstall_dialog_->ConfirmUninstall(this, extension);
+      extension_uninstall_dialog_.reset(
+          ExtensionUninstallDialog::Create(profile_, this));
+      extension_uninstall_dialog_->ConfirmUninstall(extension);
       break;
     }
     case MANAGE: {
@@ -149,7 +150,7 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
   }
 }
 
-void ExtensionContextMenuModel::ExtensionDialogAccepted() {
+void ExtensionContextMenuModel::ExtensionUninstallAccepted() {
   if (GetExtension())
     profile_->GetExtensionService()->UninstallExtension(extension_id_, false,
                                                         NULL);
@@ -157,7 +158,7 @@ void ExtensionContextMenuModel::ExtensionDialogAccepted() {
   Release();
 }
 
-void ExtensionContextMenuModel::ExtensionDialogCanceled() {
+void ExtensionContextMenuModel::ExtensionUninstallCanceled() {
   Release();
 }
 

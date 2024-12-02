@@ -16,6 +16,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/browser_thread.h"
+#include "content/common/content_export.h"
 #include "googleurl/src/gurl.h"
 
 class GURL;
@@ -35,7 +36,8 @@ class QuotaManagerProxy;
 class SpecialStoragePolicy;
 }
 
-class IndexedDBContext : public base::RefCountedThreadSafe<IndexedDBContext> {
+class CONTENT_EXPORT IndexedDBContext
+    : public base::RefCountedThreadSafe<IndexedDBContext> {
  public:
   IndexedDBContext(WebKitContext* webkit_context,
                    quota::SpecialStoragePolicy* special_storage_policy,
@@ -73,15 +75,16 @@ class IndexedDBContext : public base::RefCountedThreadSafe<IndexedDBContext> {
 
   quota::QuotaManagerProxy* quota_manager_proxy();
 
-#ifdef UNIT_TEST
   // For unit tests allow to override the |data_path_|.
-  void set_data_path(const FilePath& data_path) { data_path_ = data_path; }
-#endif
+  void set_data_path_for_testing(const FilePath& data_path) {
+    data_path_ = data_path;
+  }
 
  private:
   FRIEND_TEST(ExtensionServiceTest, ClearExtensionData);
   FRIEND_TEST(ExtensionServiceTest, ClearAppData);
   FRIEND_TEST(IndexedDBBrowserTest, ClearLocalState);
+  FRIEND_TEST(IndexedDBBrowserTest, ClearSessionOnlyDatabases);
   friend class IndexedDBQuotaClientTest;
 
   typedef std::map<GURL, int64> OriginToSizeMap;

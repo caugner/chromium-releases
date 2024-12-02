@@ -5,30 +5,32 @@
 #include "chrome/browser/history/download_database.h"
 
 #include <limits>
+#include <string>
 #include <vector>
 
 #include "base/file_path.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "content/browser/browser_thread.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_persistent_store_info.h"
 #include "sql/statement.h"
 
-// Download schema:
-//
-//   id             SQLite-generated primary key.
-//   full_path      Location of the download on disk.
-//   url            URL of the downloaded file.
-//   start_time     When the download was started.
-//   received_bytes Total size downloaded.
-//   total_bytes    Total size of the download.
-//   state          Identifies if this download is completed or not. Not used
-//                  directly by the history system. See DownloadItem's
-//                  DownloadState for where this is used.
-
 namespace history {
 
 namespace {
+
+static const char kSchema[] =
+  "CREATE TABLE downloads ("
+  "id INTEGER PRIMARY KEY,"           // SQLite-generated primary key.
+  "full_path LONGVARCHAR NOT NULL,"   // Location of the download on disk.
+  "url LONGVARCHAR NOT NULL,"         // URL of the downloaded file.
+  "start_time INTEGER NOT NULL,"      // When the download was started.
+  "received_bytes INTEGER NOT NULL,"  // Total size downloaded.
+  "total_bytes INTEGER NOT NULL,"     // Total size of the download.
+  "state INTEGER NOT NULL,"           // 1=complete, 2=cancelled, 4=interrupted
+  "end_time INTEGER NOT NULL,"        // When the download completed.
+  "opened INTEGER NOT NULL)";         // 1 if it has ever been opened else 0
 
 #if defined(OS_POSIX)
 
@@ -52,28 +54,37 @@ FilePath ColumnFilePath(sql::Statement& statement, int col) {
 
 #endif
 
+// Key in the meta_table containing the next id to use for a new download in
+// this profile.
+static const char kNextDownloadId[] = "next_download_id";
+
 }  // namespace
 
-DownloadDatabase::DownloadDatabase() {
+DownloadDatabase::DownloadDatabase()
+    : owning_thread_set_(false),
+      owning_thread_(0),
+      next_id_(0) {
 }
 
 DownloadDatabase::~DownloadDatabase() {
 }
 
+bool DownloadDatabase::EnsureColumnExists(
+    const std::string& name, const std::string& type) {
+  std::string add_col = "ALTER TABLE downloads ADD COLUMN " + name + " " + type;
+  return GetDB().DoesColumnExist("downloads", name.c_str()) ||
+         GetDB().Execute(add_col.c_str());
+}
+
 bool DownloadDatabase::InitDownloadTable() {
-  if (!GetDB().DoesTableExist("downloads")) {
-    if (!GetDB().Execute(
-        "CREATE TABLE downloads ("
-        "id INTEGER PRIMARY KEY,"
-        "full_path LONGVARCHAR NOT NULL,"
-        "url LONGVARCHAR NOT NULL,"
-        "start_time INTEGER NOT NULL,"
-        "received_bytes INTEGER NOT NULL,"
-        "total_bytes INTEGER NOT NULL,"
-        "state INTEGER NOT NULL)"))
-      return false;
+  meta_table_.Init(&GetDB(), 0, 0);
+  meta_table_.GetValue(kNextDownloadId, &next_id_);
+  if (GetDB().DoesTableExist("downloads")) {
+    return EnsureColumnExists("end_time", "INTEGER NOT NULL DEFAULT 0") &&
+           EnsureColumnExists("opened", "INTEGER NOT NULL DEFAULT 0");
+  } else {
+    return GetDB().Execute(kSchema);
   }
-  return true;
 }
 
 bool DownloadDatabase::DropDownloadTable() {
@@ -86,7 +97,7 @@ void DownloadDatabase::QueryDownloads(
 
   sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
       "SELECT id, full_path, url, start_time, received_bytes, "
-        "total_bytes, state "
+        "total_bytes, state, end_time, opened "
       "FROM downloads "
       "ORDER BY start_time"));
   if (!statement)
@@ -102,23 +113,25 @@ void DownloadDatabase::QueryDownloads(
     info.received_bytes = statement.ColumnInt64(4);
     info.total_bytes = statement.ColumnInt64(5);
     info.state = statement.ColumnInt(6);
+    info.end_time = base::Time::FromTimeT(statement.ColumnInt64(7));
+    info.opened = statement.ColumnInt(8) != 0;
     results->push_back(info);
   }
 }
 
-bool DownloadDatabase::UpdateDownload(int64 received_bytes,
-                                      int32 state,
-                                      DownloadID db_handle) {
-  DCHECK(db_handle > 0);
+bool DownloadDatabase::UpdateDownload(const DownloadPersistentStoreInfo& data) {
+  DCHECK(data.db_handle > 0);
   sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
       "UPDATE downloads "
-      "SET received_bytes=?, state=? WHERE id=?"));
+      "SET received_bytes=?, state=?, end_time=?, opened=? WHERE id=?"));
   if (!statement)
     return false;
 
-  statement.BindInt64(0, received_bytes);
-  statement.BindInt(1, state);
-  statement.BindInt64(2, db_handle);
+  statement.BindInt64(0, data.received_bytes);
+  statement.BindInt(1, data.state);
+  statement.BindInt64(2, data.end_time.ToTimeT());
+  statement.BindInt(3, (data.opened ? 1 : 0));
+  statement.BindInt64(4, data.db_handle);
   return statement.Run();
 }
 
@@ -147,10 +160,18 @@ bool DownloadDatabase::CleanUpInProgressEntries() {
 
 int64 DownloadDatabase::CreateDownload(
     const DownloadPersistentStoreInfo& info) {
+  if (owning_thread_set_) {
+    CHECK_EQ(owning_thread_, base::PlatformThread::CurrentId());
+  } else {
+    owning_thread_ = base::PlatformThread::CurrentId();
+    owning_thread_set_ = true;
+  }
+
   sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
       "INSERT INTO downloads "
-      "(full_path, url, start_time, received_bytes, total_bytes, state) "
-      "VALUES (?, ?, ?, ?, ?, ?)"));
+      "(full_path, url, start_time, received_bytes, total_bytes, state, "
+      "end_time, opened) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"));
   if (!statement)
     return 0;
 
@@ -160,9 +181,20 @@ int64 DownloadDatabase::CreateDownload(
   statement.BindInt64(3, info.received_bytes);
   statement.BindInt64(4, info.total_bytes);
   statement.BindInt(5, info.state);
+  statement.BindInt64(6, info.end_time.ToTimeT());
+  statement.BindInt(7, info.opened ? 1 : 0);
 
-  if (statement.Run())
-    return GetDB().GetLastInsertRowId();
+  if (statement.Run()) {
+    int64 id = GetDB().GetLastInsertRowId();
+
+    CHECK_EQ(0u, returned_ids_.count(id));
+    returned_ids_.insert(id);
+
+    // TODO(benjhayden) if(info.id>next_id_){setvalue;next_id_=info.id;}
+    meta_table_.SetValue(kNextDownloadId, ++next_id_);
+
+    return id;
+  }
   return 0;
 }
 
@@ -174,10 +206,36 @@ void DownloadDatabase::RemoveDownload(DownloadID db_handle) {
 
   statement.BindInt64(0, db_handle);
   statement.Run();
+
+  returned_ids_.erase(db_handle);
 }
 
 void DownloadDatabase::RemoveDownloadsBetween(base::Time delete_begin,
                                               base::Time delete_end) {
+  time_t start_time = delete_begin.ToTimeT();
+  time_t end_time = delete_end.ToTimeT();
+
+  // TODO(rdsmith): Remove when http://crbug.com/96627 is resolved.
+  {
+    sql::Statement dbg_statement(GetDB().GetCachedStatement(
+        SQL_FROM_HERE,
+        "SELECT id FROM downloads WHERE start_time >= ? AND start_time < ? "
+        "AND (State = ? OR State = ? OR State = ?)"));
+    if (!dbg_statement)
+      return;
+    dbg_statement.BindInt64(0, start_time);
+    dbg_statement.BindInt64(
+        1,
+        end_time ? end_time : std::numeric_limits<int64>::max());
+    dbg_statement.BindInt(2, DownloadItem::COMPLETE);
+    dbg_statement.BindInt(3, DownloadItem::CANCELLED);
+    dbg_statement.BindInt(4, DownloadItem::INTERRUPTED);
+    while (dbg_statement.Step()) {
+      int64 id_to_delete = dbg_statement.ColumnInt64(0);
+      returned_ids_.erase(id_to_delete);
+    }
+  }
+
   // This does not use an index. We currently aren't likely to have enough
   // downloads where an index by time will give us a lot of benefit.
   sql::Statement statement(GetDB().GetCachedStatement(SQL_FROM_HERE,
@@ -186,8 +244,6 @@ void DownloadDatabase::RemoveDownloadsBetween(base::Time delete_begin,
   if (!statement)
     return;
 
-  time_t start_time = delete_begin.ToTimeT();
-  time_t end_time = delete_end.ToTimeT();
   statement.BindInt64(0, start_time);
   statement.BindInt64(
       1,

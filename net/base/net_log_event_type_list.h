@@ -322,7 +322,7 @@ EVENT_TYPE(TCP_CONNECT)
 //   }
 EVENT_TYPE(TCP_CONNECT_ATTEMPT)
 
-// The start/end of a TCP connect(). This corresponds with a call to
+// The start/end of a TCP accept(). This corresponds with a call to
 // TCPServerSocket::Accept().
 //
 // The END event will contain the following parameters on success:
@@ -400,6 +400,29 @@ EVENT_TYPE(SSL_CONNECT)
 
 // The start/end of an SSL server handshake (aka "accept").
 EVENT_TYPE(SSL_SERVER_HANDSHAKE)
+
+// The SSL server requested a client certificate.
+EVENT_TYPE(SSL_CLIENT_CERT_REQUESTED)
+
+// The start/end of getting an origin-bound certificate and private key.
+//
+// The END event will contain the following parameters on failure:
+//
+//   {
+//     "net_error": <Net integer error code>,
+//   }
+EVENT_TYPE(SSL_GET_ORIGIN_BOUND_CERT)
+
+// A client certificate (or none) was provided to the SSL library to be sent
+// to the SSL server.
+// The following parameters are attached to the event:
+//   {
+//     "cert_count": <Number of certificates>,
+//   }
+//   A cert_count of 0 means no client certificate was provided.
+//   A cert_count of -1 means a client certificate was provided but we don't
+//   know the size of the certificate chain.
+EVENT_TYPE(SSL_CLIENT_CERT_PROVIDED)
 
 // An SSL error occurred while trying to do the indicated activity.
 // The following parameters are attached to the event:
@@ -851,6 +874,13 @@ EVENT_TYPE(SPDY_SESSION_RST_STREAM)
 //   }
 EVENT_TYPE(SPDY_SESSION_SEND_RST_STREAM)
 
+// Sending of a SPDY PING frame.
+// The following parameters are attached:
+//   {
+//     "unique_id": <The unique id of the PING message>,
+//   }
+EVENT_TYPE(SPDY_SESSION_PING)
+
 // Receipt of a SPDY GOAWAY frame.
 // The following parameters are attached:
 //   {
@@ -1206,6 +1236,14 @@ EVENT_TYPE(CHROME_EXTENSION_MODIFIED_HEADERS)
 //    "extension_id": <Extension ID that was ignored>
 //  }
 EVENT_TYPE(CHROME_EXTENSION_IGNORED_DUE_TO_CONFLICT)
+
+// This event is created when a Chrome extension provides authentication
+// credentials.
+//
+//  {
+//    "extension_id": <Extension ID that provides credentials>
+//  }
+EVENT_TYPE(CHROME_EXTENSION_PROVIDE_AUTH_CREDENTIALS)
 
 // ------------------------------------------------------------------------
 // HostBlacklistManager

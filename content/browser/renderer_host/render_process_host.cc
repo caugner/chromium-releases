@@ -4,13 +4,20 @@
 
 #include "content/browser/renderer_host/render_process_host.h"
 
+#include "base/command_line.h"
 #include "base/rand_util.h"
 #include "base/sys_info.h"
+#include "content/browser/browser_main.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
+#include "content/browser/content_browser_client.h"
+#include "content/browser/webui/web_ui_factory.h"
 #include "content/common/child_process_info.h"
+#include "content/common/content_client.h"
 #include "content/common/content_constants.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/content_switches.h"
 
 namespace {
 
@@ -62,19 +69,15 @@ size_t GetMaxRendererProcessCount() {
 // associated with the given browser context.
 static bool IsSuitableHost(RenderProcessHost* host,
                            content::BrowserContext* browser_context,
-                           RenderProcessHost::Type type) {
+                           const GURL& site_url) {
   if (host->browser_context() != browser_context)
     return false;
 
-  RenderProcessHost::Type host_type = RenderProcessHost::TYPE_NORMAL;
-  if (ChildProcessSecurityPolicy::GetInstance()->HasWebUIBindings(host->id()))
-    host_type = RenderProcessHost::TYPE_WEBUI;
-  if (ChildProcessSecurityPolicy::GetInstance()->
-        HasExtensionBindings(host->id()) ||
-      host->is_extension_process())
-    host_type = RenderProcessHost::TYPE_EXTENSION;
+  if (ChildProcessSecurityPolicy::GetInstance()->HasWebUIBindings(host->id()) !=
+      content::WebUIFactory::Get()->HasWebUIScheme(site_url))
+    return false;
 
-  return host_type == type;
+  return content::GetContentClient()->browser()->IsSuitableHost(host, site_url);
 }
 
 // the global list of all renderer processes
@@ -82,13 +85,11 @@ IDMap<RenderProcessHost> all_hosts;
 
 }  // namespace
 
-extern bool g_log_bug53991;
-
 // static
 bool RenderProcessHost::run_renderer_in_process_ = false;
 
 // static
-void RenderProcessHost::SetMaxRendererProcessCount(size_t count) {
+void RenderProcessHost::SetMaxRendererProcessCountForTest(size_t count) {
   max_renderer_count_override = count;
 }
 
@@ -96,12 +97,12 @@ RenderProcessHost::RenderProcessHost(content::BrowserContext* browser_context)
     : max_page_id_(-1),
       fast_shutdown_started_(false),
       deleting_soon_(false),
-      is_extension_process_(false),
       pending_views_(0),
       id_(ChildProcessInfo::GenerateChildProcessUniqueId()),
       browser_context_(browser_context),
       sudden_termination_allowed_(true),
       ignore_input_events_(false) {
+  CHECK(!content::ExitedMainMessageLoop());
   all_hosts.AddWithID(this, id());
   all_hosts.set_check_on_null_data(true);
   // Initialize |child_process_activity_time_| to a reasonable value.
@@ -114,21 +115,39 @@ RenderProcessHost::~RenderProcessHost() {
     all_hosts.Remove(id());
 }
 
+bool RenderProcessHost::HasConnection() const {
+  return channel_.get() != NULL;
+}
+
 void RenderProcessHost::Attach(IPC::Channel::Listener* listener,
                                int routing_id) {
-  VLOG_IF(1, g_log_bug53991) << "AddListener: (" << this << "): " << routing_id;
   listeners_.AddWithID(listener, routing_id);
 }
 
 void RenderProcessHost::Release(int listener_id) {
-  VLOG_IF(1, g_log_bug53991) << "RemListener: (" << this << "): "
-                             << listener_id;
   DCHECK(listeners_.Lookup(listener_id) != NULL);
   listeners_.Remove(listener_id);
 
   // Make sure that all associated resource requests are stopped.
   CancelResourceRequests(listener_id);
 
+#if defined(OS_WIN)
+  // Dump the handle table if handle auditing is enabled.
+  const CommandLine& browser_command_line =
+      *CommandLine::ForCurrentProcess();
+  if (browser_command_line.HasSwitch(switches::kAuditHandles) ||
+      browser_command_line.HasSwitch(switches::kAuditAllHandles)) {
+    DumpHandles();
+
+    // We wait to close the channels until the child process has finished
+    // dumping handles and sends us ChildProcessHostMsg_DumpHandlesDone.
+    return;
+  }
+#endif
+  Cleanup();
+}
+
+void RenderProcessHost::Cleanup() {
   // When no other owners of this object, we can delete ourselves
   if (listeners_.IsEmpty()) {
     NotificationService::current()->Notify(
@@ -136,6 +155,12 @@ void RenderProcessHost::Release(int listener_id) {
         Source<RenderProcessHost>(this), NotificationService::NoDetails());
     MessageLoop::current()->DeleteSoon(FROM_HERE, this);
     deleting_soon_ = true;
+    // It's important not to wait for the DeleteTask to delete the channel
+    // proxy. Kill it off now. That way, in case the profile is going away, the
+    // rest of the objects attached to this RenderProcessHost start going
+    // away first, since deleting the channel proxy will post a
+    // OnChannelClosed() to IPC::ChannelProxy::Context on the IO thread.
+    channel_.reset();
 
     // Remove ourself from the list of renderer processes so that we can't be
     // reused in between now and when the Delete task runs.
@@ -195,7 +220,8 @@ bool RenderProcessHost::ShouldTryToUseExistingProcessHost() {
 
 // static
 RenderProcessHost* RenderProcessHost::GetExistingProcessHost(
-    content::BrowserContext* browser_context, Type type) {
+    content::BrowserContext* browser_context,
+    const GURL& site_url) {
   // First figure out which existing renderers we can use.
   std::vector<RenderProcessHost*> suitable_renderers;
   suitable_renderers.reserve(all_hosts.size());
@@ -203,7 +229,7 @@ RenderProcessHost* RenderProcessHost::GetExistingProcessHost(
   iterator iter(AllHostsIterator());
   while (!iter.IsAtEnd()) {
     if (run_renderer_in_process() ||
-        IsSuitableHost(iter.GetCurrentValue(), browser_context, type))
+        IsSuitableHost(iter.GetCurrentValue(), browser_context, site_url))
       suitable_renderers.push_back(iter.GetCurrentValue());
 
     iter.Advance();

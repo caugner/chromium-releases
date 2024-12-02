@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -11,6 +11,7 @@ that simplejson can load it correctly.  It should catch most common
 formatting problems.
 """
 
+import subprocess
 import sys
 import os
 import unittest
@@ -73,10 +74,12 @@ def LoadJsonFile(filename):
 
 OnTestsLoad()
 
-PERF_EXPECTATIONS = os.path.join(os.path.dirname(sys.argv[0]),
-                                 '../perf_expectations.json')
 CONFIG_JSON = os.path.join(os.path.dirname(sys.argv[0]),
                            '../chromium_perf_expectations.cfg')
+MAKE_EXPECTATIONS = os.path.join(os.path.dirname(sys.argv[0]),
+                                 '../make_expectations.py')
+PERF_EXPECTATIONS = os.path.join(os.path.dirname(sys.argv[0]),
+                                 '../perf_expectations.json')
 
 
 class PerfExpectationsUnittest(unittest.TestCase):
@@ -144,6 +147,11 @@ class PerfExpectationsUnittest(unittest.TestCase):
     if len(bad_keys) > 0:
       msg = "perf expectations keys in bad format, expected a/b/c/d"
       raise Exception("%s: %s" % (msg, bad_keys))
+
+  def testNoUpdatesNeeded(self):
+    p = subprocess.Popen([MAKE_EXPECTATIONS, '-s'], stdout=subprocess.PIPE)
+    p.wait();
+    self.assertEqual(p.returncode, 0, msg='Expectations has pending updates!')
 
   def testConfigFile(self):
     # Test that the config file can be parsed as JSON.

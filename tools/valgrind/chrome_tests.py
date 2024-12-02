@@ -29,6 +29,8 @@ class BuildDirNotFound(Exception): pass
 class BuildDirAmbiguous(Exception): pass
 
 class ChromeTests:
+  SLOW_TOOLS = ["memcheck", "tsan", "tsan_rv", "drmemory"]
+
   def __init__(self, options, args, test):
     if ':' in test:
       (self._test, self._gtest_filter) = test.split(':', 1)
@@ -130,8 +132,12 @@ class ChromeTests:
     gtest_files_dir = os.path.join(path_utils.ScriptDir(), "gtest_exclude")
 
     gtest_filter_files = [
-        os.path.join(gtest_files_dir, name + ".gtest.txt"),
         os.path.join(gtest_files_dir, name + ".gtest-%s.txt" % tool.ToolName())]
+    # Use ".gtest.txt" files only for slow tools, as they now contain
+    # Valgrind- and Dr.Memory-specific filters.
+    # TODO(glider): rename the files to ".gtest_slow.txt"
+    if tool.ToolName() in ChromeTests.SLOW_TOOLS:
+      gtest_filter_files += [os.path.join(gtest_files_dir, name + ".gtest.txt")]
     for platform_suffix in common.PlatformNames():
       gtest_filter_files += [
         os.path.join(gtest_files_dir, name + ".gtest_%s.txt" % platform_suffix),
@@ -239,14 +245,17 @@ class ChromeTests:
   def TestNet(self):
     return self.SimpleTest("net", "net_unittests")
 
+  def TestPPAPI(self):
+    return self.SimpleTest("chrome", "ppapi_unittests")
+
   def TestPrinting(self):
     return self.SimpleTest("chrome", "printing_unittests")
 
   def TestRemoting(self):
     return self.SimpleTest("chrome", "remoting_unittests",
                            cmd_args=[
-                               "--ui-test-action-timeout=120000",
-                               "--ui-test-action-max-timeout=280000"])
+                               "--ui-test-action-timeout=80000",
+                               "--ui-test-action-max-timeout=200000"])
 
   def TestSql(self):
     return self.SimpleTest("chrome", "sql_unittests")
@@ -267,10 +276,10 @@ class ChromeTests:
     return self.SimpleTest("views", "views_unittests")
 
   # Valgrind timeouts are in seconds.
-  UI_VALGRIND_ARGS = ["--timeout=7200", "--trace_children", "--indirect"]
+  UI_VALGRIND_ARGS = ["--timeout=10000", "--trace_children", "--indirect"]
   # UI test timeouts are in milliseconds.
-  UI_TEST_ARGS = ["--ui-test-action-timeout=120000",
-                  "--ui-test-action-max-timeout=280000"]
+  UI_TEST_ARGS = ["--ui-test-action-timeout=80000",
+                  "--ui-test-action-max-timeout=200000"]
 
   def TestAutomatedUI(self):
     return self.SimpleTest("chrome", "automated_ui_tests",
@@ -298,12 +307,12 @@ class ChromeTests:
   def TestSafeBrowsing(self):
     return self.SimpleTest("chrome", "safe_browsing_tests",
                            valgrind_test_args=self.UI_VALGRIND_ARGS,
-                           cmd_args=(["--ui-test-action-max-timeout=900000"]))
+                           cmd_args=(["--ui-test-action-max-timeout=600000"]))
 
   def TestSyncIntegration(self):
     return self.SimpleTest("chrome", "sync_integration_tests",
                            valgrind_test_args=self.UI_VALGRIND_ARGS,
-                           cmd_args=(["--ui-test-action-max-timeout=900000"]))
+                           cmd_args=(["--ui-test-action-max-timeout=600000"]))
 
   def TestUI(self):
     return self.SimpleTest("chrome", "ui_tests",
@@ -325,7 +334,7 @@ class ChromeTests:
     tool = valgrind_test.CreateTool(self._options.valgrind_tool)
     cmd = self._DefaultCommand(tool)
     cmd.append("--trace_children")
-    cmd.append("--indirect")
+    cmd.append("--indirect_webkit_layout")
     cmd.append("--ignore_exit_code")
     # Now build script_cmd, the run_webkits_tests.py commandline
     # Store each chunk in its own directory so that we can find the data later
@@ -429,6 +438,7 @@ class ChromeTests:
     "media": TestMedia,          "media_unittests": TestMedia,
     "net": TestNet,              "net_unittests": TestNet,
     "jingle": TestJingle,        "jingle_unittests": TestJingle,
+    "ppapi": TestPPAPI,          "ppapi_unittests": TestPPAPI,
     "printing": TestPrinting,    "printing_unittests": TestPrinting,
     "reliability": TestReliability, "reliability_tests": TestReliability,
     "remoting": TestRemoting,    "remoting_unittests": TestRemoting,

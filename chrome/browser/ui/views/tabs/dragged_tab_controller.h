@@ -128,11 +128,12 @@ class DraggedTabController : public TabContentsDelegate,
   void InitTabDragData(BaseTab* tab, TabDragData* drag_data);
 
   // Overridden from TabContentsDelegate:
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const GURL& url,
-                                      const GURL& referrer,
-                                      WindowOpenDisposition disposition,
-                                      PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(
+      TabContents* source,
+      const GURL& url,
+      const GURL& referrer,
+      WindowOpenDisposition disposition,
+      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
   virtual void NavigationStateChanged(const TabContents* source,
@@ -153,11 +154,10 @@ class DraggedTabController : public TabContentsDelegate,
                        const NotificationDetails& details) OVERRIDE;
 
   // Overridden from MessageLoop::Observer:
-#if defined(OS_WIN)
-  virtual void WillProcessMessage(const MSG& msg) OVERRIDE;
-  virtual void DidProcessMessage(const MSG& msg) OVERRIDE;
-#elif defined(TOUCH_UI)
-  virtual EventStatus WillProcessXEvent(XEvent* xevent) OVERRIDE;
+#if defined(OS_WIN) || defined(TOUCH_UI) || defined(USE_AURA)
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
 #elif defined(TOOLKIT_USES_GTK)
   virtual void WillProcessEvent(GdkEvent* event) OVERRIDE;
   virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;
@@ -195,9 +195,11 @@ class DraggedTabController : public TabContentsDelegate,
   // Handles dragging while the tabs are detached.
   void MoveDetached(const gfx::Point& screen_point);
 
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Returns the compatible TabStrip that is under the specified point (screen
   // coordinates), or NULL if there is none.
   BaseTabStrip* GetTabStripForPoint(const gfx::Point& screen_point);
+#endif
 
   DockInfo GetDockInfoAtPoint(const gfx::Point& screen_point);
 

@@ -299,17 +299,21 @@ cr.define('ntp4', function() {
       for (var i = 0; i < tile_count; i++)
         this.appendTile(new Bookmark(items[i]), false);
 
-      var link = $('bookmarks-top-link-wrapper').querySelector('a');
-      link.href = 'chrome://bookmarks/#' + this.id;
+      var folder_id = this.id == ROOT_NODE_ID ? BOOKMARKS_BAR_ID : this.id;
+      var top_link = $('bookmarks-top-link-wrapper').querySelector('a');
+      top_link.href = 'chrome://bookmarks/#' + folder_id;
 
       var wrapper = $('bookmarks-bottom-link-wrapper');
       if (items.length > MAX_BOOKMARK_TILES) {
-        var link = wrapper.querySelector('a');
-        link.href = 'chrome://bookmarks/#' + this.id;
+        var bottom_link = wrapper.querySelector('a');
+        bottom_link.href = 'chrome://bookmarks/#' + folder_id;
         wrapper.hidden = false;
       } else {
         wrapper.hidden = true;
       }
+
+      if (this.id === ROOT_NODE_ID && !tile_count && !cr.isChromeOS)
+        this.showImportPromo_();
     },
 
     /**
@@ -378,10 +382,21 @@ cr.define('ntp4', function() {
     bookmarkNodeAdded: function(id, bookmark, fromCurrentPage) {
       if (this.importing) return;
       if (this.currentlyInFolder_(bookmark.parentId)) {
-        // If source of the add came from this page, show an animated insertion,
-        // otherwise just quietly do it.
-        this.addTileAt(new Bookmark(bookmark), bookmark.index, fromCurrentPage);
-        this.repositionTiles_();
+        // Hide the import promo if it exists.
+        this.hideImportPromo_();
+        // Only add the item if it should be visible.
+        if (bookmark.index < MAX_BOOKMARK_TILES) {
+          // If source of the add came from this page, show an animated
+          // insertion, otherwise just quietly do it.
+          this.addTileAt(new Bookmark(bookmark), bookmark.index,
+                         fromCurrentPage);
+          // Delete extra tiles if they exist.
+          while (this.tiles.length > MAX_BOOKMARK_TILES) {
+            var tile = this.tiles[this.tiles.length - 1];
+            this.removeTile(tile, false);
+          }
+          this.repositionTiles_();
+        }
       }
     },
 
@@ -501,9 +516,9 @@ cr.define('ntp4', function() {
     setDropEffect: function(dataTransfer) {
       var tile = ntp4.getCurrentlyDraggingTile();
       if (tile && tile.querySelector('.bookmark'))
-        dataTransfer.dropEffect = 'move';
+        ntp4.setCurrentDropEffect(dataTransfer, 'move');
       else
-        dataTransfer.dropEffect = 'copy';
+        ntp4.setCurrentDropEffect(dataTransfer, 'copy');
     },
 
     /** @inheritDoc */
@@ -550,6 +565,28 @@ cr.define('ntp4', function() {
         title = url;
       // Create a bookmark for the dropped data.
       this.generateBookmarkForLink(parentId, index, title, url);
+    },
+
+    /**
+     * Show the 'Import bookmarks' promo.
+     * @private
+     */
+    showImportPromo_: function() {
+      var importTemplate = $('bookmarks-import-data-link-template');
+      var importWrapper = importTemplate.cloneNode(true);
+      importWrapper.id = '';
+      importWrapper.hidden = false;
+      this.querySelector('.tile-page-content').appendChild(importWrapper);
+    },
+
+    /**
+     * Hide the 'Import bookmarks' promo.
+     * @private
+     */
+    hideImportPromo_: function() {
+      var wrapper = this.querySelector('.bookmarks-import-data-link-wrapper');
+      if (wrapper)
+        wrapper.parentNode.removeChild(wrapper);
     },
 
     /**

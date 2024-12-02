@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 
-#include "base/command_line.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,6 +18,8 @@
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "chrome/browser/ui/views/frame/glass_browser_frame_view.h"
+#elif defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/system/runtime_environment.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -49,6 +50,13 @@ void BrowserFrame::InitBrowserFrame() {
     // created.
     params.bounds = browser_view_->browser()->GetSavedWindowBounds();
     params.show_state = browser_view_->browser()->GetSavedWindowShowState();
+  }
+  if (browser_view_->browser()->is_type_panel()) {
+    // We need to set the top-most bit when the panel window is created.
+    // There is a Windows bug/feature that would very likely prevent the window
+    // from being changed to top-most after the window is created without
+    // activation.
+    params.keep_on_top = true;
   }
   Init(params);
 #if defined(OS_CHROMEOS)
@@ -91,8 +99,8 @@ void BrowserFrame::TabStripDisplayModeChanged() {
 // BrowserFrameWin, views::Window overrides:
 
 bool BrowserFrame::IsMaximized() const {
-#if defined(OS_CHROMEOS)
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeosFrame)) {
+#if defined(OS_CHROMEOS) && !defined(USE_AURA)
+  if (chromeos::system::runtime_environment::IsRunningOnChromeOS()) {
     return !IsFullscreen() &&
         (!browser_view_->IsBrowserTypePopup() || Widget::IsMaximized());
   }

@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
@@ -17,13 +18,14 @@
 #include "content/browser/renderer_host/resource_dispatcher_host_delegate.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/renderer_host/x509_user_cert_resource_handler.h"
+#include "content/browser/resource_context.h"
 #include "content/common/resource_response.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
-#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/webplugininfo.h"
 
 namespace {
 
@@ -143,6 +145,12 @@ bool BufferedResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
     // Done buffering, send the pending ResponseStarted event.
     if (!CompleteResponseStarted(request_id, true))
       return false;
+
+    // The next handler might have paused the request in OnResponseStarted.
+    ResourceDispatcherHostRequestInfo* info =
+        ResourceDispatcherHost::InfoForRequest(request_);
+    if (info->pause_count())
+      return true;
   } else if (wait_for_plugins_) {
     return true;
   }
@@ -309,15 +317,19 @@ bool BufferedResourceHandler::CompleteResponseStarted(int request_id,
 
     info->set_is_download(true);
 
+    DownloadId dl_id = info->context()->next_download_id_thunk().Run();
+
     scoped_refptr<ResourceHandler> handler(
       new DownloadResourceHandler(host_,
                                   info->child_id(),
                                   info->route_id(),
                                   info->request_id(),
                                   request_->url(),
+                                  dl_id,
                                   host_->download_file_manager(),
                                   request_,
                                   false,
+                                  DownloadResourceHandler::OnStartedCallback(),
                                   DownloadSaveInfo()));
 
     if (host_->delegate()) {
@@ -341,10 +353,9 @@ bool BufferedResourceHandler::ShouldWaitForPlugins() {
       ResourceDispatcherHost::InfoForRequest(request_);
   host_->PauseRequest(info->child_id(), info->request_id(), true);
 
-  // Schedule plugin loading on the file thread.
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this, &BufferedResourceHandler::LoadPlugins));
+  // Get the plugins asynchronously.
+  PluginService::GetInstance()->GetPlugins(
+      base::Bind(&BufferedResourceHandler::OnPluginsLoaded, this));
   return true;
 }
 
@@ -450,16 +461,8 @@ void BufferedResourceHandler::UseAlternateResourceHandler(
   real_handler_ = handler;
 }
 
-void BufferedResourceHandler::LoadPlugins() {
-  std::vector<webkit::WebPluginInfo> plugins;
-  webkit::npapi::PluginList::Singleton()->GetPlugins(&plugins);
-
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &BufferedResourceHandler::OnPluginsLoaded));
-}
-
-void BufferedResourceHandler::OnPluginsLoaded() {
+void BufferedResourceHandler::OnPluginsLoaded(
+    const std::vector<webkit::WebPluginInfo>& plugins) {
   wait_for_plugins_ = false;
   if (!request_)
     return;

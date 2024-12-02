@@ -4,12 +4,15 @@
 
 #include "chrome/browser/sync/profile_sync_service.h"
 
-#include <stddef.h>
+#include <algorithm>
+#include <cstddef>
 #include <map>
 #include <set>
 #include <utility>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
@@ -24,31 +27,33 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "chrome/browser/net/gaia/token_service.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/backend_migrator.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
-#include "chrome/browser/sync/glue/session_data_type_controller.h"
-#include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
+#include "chrome/browser/sync/glue/session_model_associator.h"
+#include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
 #include "chrome/browser/sync/internal_api/configure_reason.h"
 #include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/js/js_arg_list.h"
 #include "chrome/browser/sync/js/js_event_details.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
 #include "chrome/browser/sync/signin_manager.h"
+#include "chrome/browser/sync/sync_global_error.h"
 #include "chrome/browser/sync/util/cryptographer.h"
 #include "chrome/browser/sync/util/oauth.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/global_error_service.h"
+#include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "content/common/notification_details.h"
@@ -65,8 +70,8 @@ using browser_sync::JsController;
 using browser_sync::JsEventDetails;
 using browser_sync::JsEventHandler;
 using browser_sync::SyncBackendHost;
-using browser_sync::WeakHandle;
 using browser_sync::SyncProtocolError;
+using browser_sync::WeakHandle;
 using sync_api::SyncCredentials;
 
 typedef GoogleServiceAuthError AuthError;
@@ -94,6 +99,8 @@ ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
       passphrase_required_reason_(sync_api::REASON_PASSPHRASE_NOT_REQUIRED),
       factory_(factory),
       profile_(profile),
+      // |profile| may be NULL in unit tests.
+      sync_prefs_(profile_ ? profile_->GetPrefs() : NULL),
       cros_user_(cros_user),
       sync_service_url_(kDevServerUrl),
       backend_initialized_(false),
@@ -105,7 +112,8 @@ ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
       expect_sync_configuration_aborted_(false),
       clear_server_data_state_(CLEAR_NOT_STARTED),
       encryption_pending_(false),
-      auto_start_enabled_(false) {
+      auto_start_enabled_(false),
+      failed_datatypes_handler_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   // By default, dev, canary, and unbranded Chromium users will go to the
   // development servers. Development servers have more features than standard
   // sync servers. Users with officially-branded Chrome stable and beta builds
@@ -126,6 +134,7 @@ ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
 }
 
 ProfileSyncService::~ProfileSyncService() {
+  sync_prefs_.RemoveSyncPrefObserver(this);
   Shutdown(false);
 }
 
@@ -146,19 +155,13 @@ bool ProfileSyncService::AreCredentialsAvailable() {
 
 void ProfileSyncService::Initialize() {
   InitSettings();
-  RegisterPreferences();
 
   // We clear this here (vs Shutdown) because we want to remember that an error
   // happened on shutdown so we can display details (message, location) about it
   // in about:sync.
-  unrecoverable_error_detected_ = false;
-  unrecoverable_error_message_.clear();
-  unrecoverable_error_location_.reset();
-  last_actionable_error_ = SyncProtocolError();
+  ClearStaleErrors();
 
-  // Watch the preference that indicates sync is managed so we can take
-  // appropriate action.
-  pref_sync_managed_.Init(prefs::kSyncManaged, profile_->GetPrefs(), this);
+  sync_prefs_.AddSyncPrefObserver(this);
 
   // For now, the only thing we can do through policy is to turn sync off.
   if (IsManaged()) {
@@ -187,8 +190,7 @@ void ProfileSyncService::Initialize() {
     // If autostart is enabled, but we haven't completed sync setup, try to
     // start sync anyway (it's possible we crashed/shutdown after logging in
     // but before the backend finished initializing the last time).
-    if (auto_start_enabled_ &&
-        !profile_->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart) &&
+    if (auto_start_enabled_ && !sync_prefs_.IsStartSuppressed() &&
         AreCredentialsAvailable()) {
       StartUp();
     }
@@ -272,106 +274,6 @@ void ProfileSyncService::InitSettings() {
   }
 }
 
-void ProfileSyncService::RegisterPreferences() {
-  PrefService* pref_service = profile_->GetPrefs();
-  if (pref_service->FindPreference(prefs::kSyncLastSyncedTime))
-    return;
-  pref_service->RegisterInt64Pref(prefs::kSyncLastSyncedTime,
-                                  0,
-                                  PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncHasSetupCompleted,
-                                    false,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncSuppressStart,
-                                    false,
-                                    PrefService::UNSYNCABLE_PREF);
-
-  // If you've never synced before, or if you're using Chrome OS, all datatypes
-  // are on by default.
-  // TODO(nick): Perhaps a better model would be to always default to false,
-  // and explicitly call SetDataTypes() when the user shows the wizard.
-#if defined(OS_CHROMEOS)
-  bool enable_by_default = true;
-#else
-  bool enable_by_default =
-      !pref_service->HasPrefPath(prefs::kSyncHasSetupCompleted);
-#endif
-
-  pref_service->RegisterBooleanPref(prefs::kSyncBookmarks,
-                                    true,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncPasswords,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncPreferences,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncAutofill,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncThemes,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncTypedUrls,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncExtensions,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncApps,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncSearchEngines,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncSessions,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kKeepEverythingSynced,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncManaged,
-                                    false,
-                                    PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterStringPref(prefs::kEncryptionBootstrapToken,
-                                   "",
-                                   PrefService::UNSYNCABLE_PREF);
-  pref_service->RegisterBooleanPref(prefs::kSyncAutofillProfile,
-                                    enable_by_default,
-                                    PrefService::UNSYNCABLE_PREF);
-
-  // We will start prompting people about new data types after the launch of
-  // SESSIONS - all previously launched data types are treated as if they are
-  // already acknowledged.
-  syncable::ModelTypeBitSet model_set;
-  model_set.set(syncable::BOOKMARKS);
-  model_set.set(syncable::PREFERENCES);
-  model_set.set(syncable::PASSWORDS);
-  model_set.set(syncable::AUTOFILL_PROFILE);
-  model_set.set(syncable::AUTOFILL);
-  model_set.set(syncable::THEMES);
-  model_set.set(syncable::EXTENSIONS);
-  model_set.set(syncable::NIGORI);
-  model_set.set(syncable::SEARCH_ENGINES);
-  model_set.set(syncable::APPS);
-  model_set.set(syncable::TYPED_URLS);
-  model_set.set(syncable::SESSIONS);
-  pref_service->RegisterListPref(prefs::kAcknowledgedSyncTypes,
-                                 syncable::ModelTypeBitSetToValue(model_set),
-                                 PrefService::UNSYNCABLE_PREF);
-}
-
-void ProfileSyncService::ClearPreferences() {
-  PrefService* pref_service = profile_->GetPrefs();
-  pref_service->ClearPref(prefs::kSyncLastSyncedTime);
-  pref_service->ClearPref(prefs::kSyncHasSetupCompleted);
-  pref_service->ClearPref(prefs::kEncryptionBootstrapToken);
-
-  // TODO(nick): The current behavior does not clear e.g. prefs::kSyncBookmarks.
-  // Is that really what we want?
-  pref_service->ScheduleSavePersistentPrefs();
-}
-
 SyncCredentials ProfileSyncService::GetCredentials() {
   SyncCredentials credentials;
   credentials.email = cros_user_.empty() ? signin_->GetUsername() : cros_user_;
@@ -382,7 +284,7 @@ SyncCredentials ProfileSyncService::GetCredentials() {
   return credentials;
 }
 
-void ProfileSyncService::InitializeBackend(bool delete_sync_data_folder) {
+void ProfileSyncService::InitializeBackend(bool delete_stale_data) {
   if (!backend_.get()) {
     NOTREACHED();
     return;
@@ -401,17 +303,22 @@ void ProfileSyncService::InitializeBackend(bool delete_sync_data_folder) {
   scoped_refptr<net::URLRequestContextGetter> request_context_getter(
       profile_->GetRequestContext());
 
+  if (delete_stale_data)
+    ClearStaleErrors();
+
   backend_->Initialize(
       this,
       WeakHandle<JsEventHandler>(sync_js_controller_.AsWeakPtr()),
       sync_service_url_,
       initial_types,
       credentials,
-      delete_sync_data_folder);
+      delete_stale_data);
 }
 
 void ProfileSyncService::CreateBackend() {
-  backend_.reset(new SyncBackendHost(profile_->GetDebugName(), profile_));
+  backend_.reset(
+      new SyncBackendHost(profile_->GetDebugName(),
+                          profile_, sync_prefs_.AsWeakPtr()));
 }
 
 bool ProfileSyncService::IsEncryptedDatatypeEnabled() const {
@@ -429,6 +336,13 @@ bool ProfileSyncService::IsEncryptedDatatypeEnabled() const {
   return (preferred_types_bitset & encrypted_types_bitset).any();
 }
 
+void ProfileSyncService::OnSyncConfigureDone(
+    DataTypeManager::ConfigureResult result) {
+  if (failed_datatypes_handler_.UpdateFailedDatatypes(result)) {
+    ReconfigureDatatypeManager();
+  }
+}
+
 void ProfileSyncService::StartUp() {
   // Don't start up multiple times.
   if (backend_.get()) {
@@ -438,8 +352,7 @@ void ProfileSyncService::StartUp() {
 
   DCHECK(AreCredentialsAvailable());
 
-  last_synced_time_ = base::Time::FromInternalValue(
-      profile_->GetPrefs()->GetInt64(prefs::kSyncLastSyncedTime));
+  last_synced_time_ = sync_prefs_.GetLastSyncedTime();
 
   CreateBackend();
 
@@ -447,12 +360,33 @@ void ProfileSyncService::StartUp() {
   // we'll want to start from a fresh SyncDB, so delete any old one that might
   // be there.
   InitializeBackend(!HasSyncSetupCompleted());
+
+  if (!sync_global_error_.get()) {
+    sync_global_error_.reset(new SyncGlobalError(this));
+    GlobalErrorServiceFactory::GetForProfile(profile_)->AddGlobalError(
+        sync_global_error_.get());
+    AddObserver(sync_global_error_.get());
+  }
 }
 
 void ProfileSyncService::Shutdown(bool sync_disabled) {
-  // Stop all data type controllers, if needed.
+  // First, we spin down the backend and wait for it to stop syncing completely
+  // before we Stop the data type manager.  This is to avoid a late sync cycle
+  // applying changes to the sync db that wouldn't get applied via
+  // ChangeProcessors, leading to back-from-the-dead bugs.
+  if (backend_.get())
+    backend_->StopSyncingForShutdown();
+
+  // Stop all data type controllers, if needed.  Note that until Stop
+  // completes, it is possible in theory to have a ChangeProcessor apply a
+  // change from a native model.  In that case, it will get applied to the sync
+  // database (which doesn't get destroyed until we destroy the backend below)
+  // as an unsynced change.  That will be persisted, and committed on restart.
   if (data_type_manager_.get()) {
     if (data_type_manager_->state() != DataTypeManager::STOPPED) {
+      // When aborting as part of shutdown, we should expect an aborted sync
+      // configure result, else we'll dcheck when we try to read the sync error.
+      expect_sync_configuration_aborted_ = true;
       data_type_manager_->Stop();
     }
 
@@ -490,6 +424,13 @@ void ProfileSyncService::Shutdown(bool sync_disabled) {
   passphrase_required_reason_ = sync_api::REASON_PASSPHRASE_NOT_REQUIRED;
   last_attempted_user_email_.clear();
   last_auth_error_ = GoogleServiceAuthError::None();
+
+  if (sync_global_error_.get()) {
+    GlobalErrorServiceFactory::GetForProfile(profile_)->RemoveGlobalError(
+        sync_global_error_.get());
+    RemoveObserver(sync_global_error_.get());
+    sync_global_error_.reset(NULL);
+  }
 }
 
 void ProfileSyncService::ClearServerData() {
@@ -501,9 +442,12 @@ void ProfileSyncService::ClearServerData() {
 }
 
 void ProfileSyncService::DisableForUser() {
+  if (SetupInProgress())
+    wizard_.Step(SyncSetupWizard::ABORT);
+
   // Clear prefs (including SyncSetupHasCompleted) before shutting down so
   // PSS clients don't think we're set up while we're shutting down.
-  ClearPreferences();
+  sync_prefs_.ClearPreferences();
   Shutdown(true);
 
   signin_->SignOut();
@@ -512,22 +456,16 @@ void ProfileSyncService::DisableForUser() {
 }
 
 bool ProfileSyncService::HasSyncSetupCompleted() const {
-  return profile_->GetPrefs()->GetBoolean(prefs::kSyncHasSetupCompleted);
+  return sync_prefs_.HasSyncSetupCompleted();
 }
 
 void ProfileSyncService::SetSyncSetupCompleted() {
-  PrefService* prefs = profile()->GetPrefs();
-  prefs->SetBoolean(prefs::kSyncHasSetupCompleted, true);
-  prefs->SetBoolean(prefs::kSyncSuppressStart, false);
-
-  prefs->ScheduleSavePersistentPrefs();
+  sync_prefs_.SetSyncSetupCompleted();
 }
 
 void ProfileSyncService::UpdateLastSyncedTime() {
   last_synced_time_ = base::Time::Now();
-  profile_->GetPrefs()->SetInt64(prefs::kSyncLastSyncedTime,
-      last_synced_time_.ToInternalValue());
-  profile_->GetPrefs()->ScheduleSavePersistentPrefs();
+  sync_prefs_.SetLastSyncedTime(last_synced_time_);
 }
 
 void ProfileSyncService::NotifyObservers() {
@@ -538,37 +476,11 @@ void ProfileSyncService::NotifyObservers() {
       "onServiceStateChanged", JsEventDetails());
 }
 
-// static
-const char* ProfileSyncService::GetPrefNameForDataType(
-    syncable::ModelType data_type) {
-  switch (data_type) {
-    case syncable::BOOKMARKS:
-      return prefs::kSyncBookmarks;
-    case syncable::PASSWORDS:
-      return prefs::kSyncPasswords;
-    case syncable::PREFERENCES:
-      return prefs::kSyncPreferences;
-    case syncable::AUTOFILL:
-      return prefs::kSyncAutofill;
-    case syncable::AUTOFILL_PROFILE:
-      return prefs::kSyncAutofillProfile;
-    case syncable::THEMES:
-      return prefs::kSyncThemes;
-    case syncable::TYPED_URLS:
-      return prefs::kSyncTypedUrls;
-    case syncable::EXTENSIONS:
-      return prefs::kSyncExtensions;
-    case syncable::APPS:
-      return prefs::kSyncApps;
-    case syncable::SEARCH_ENGINES:
-      return prefs::kSyncSearchEngines;
-    case syncable::SESSIONS:
-      return prefs::kSyncSessions;
-    default:
-      break;
-  }
-  NOTREACHED();
-  return NULL;
+void ProfileSyncService::ClearStaleErrors() {
+  unrecoverable_error_detected_ = false;
+  unrecoverable_error_message_.clear();
+  unrecoverable_error_location_ = tracked_objects::Location();
+  last_actionable_error_ = SyncProtocolError();
 }
 
 // static
@@ -576,9 +488,7 @@ std::string ProfileSyncService::GetExperimentNameForDataType(
     syncable::ModelType data_type) {
   switch (data_type) {
     case syncable::SESSIONS:
-      return "sync-sessions";
-    case syncable::TYPED_URLS:
-      return "sync-typed-urls";
+      return "sync-tabs";
     default:
       break;
   }
@@ -613,11 +523,7 @@ void ProfileSyncService::OnUnrecoverableError(
     const std::string& message) {
   unrecoverable_error_detected_ = true;
   unrecoverable_error_message_ = message;
-  unrecoverable_error_location_.reset(
-      new tracked_objects::Location(from_here.function_name(),
-                                    from_here.file_name(),
-                                    from_here.line_number(),
-                                    from_here.program_counter()));
+  unrecoverable_error_location_ = from_here;
 
   // Tell the wizard so it can inform the user only if it is already open.
   wizard_.Step(SyncSetupWizard::FATAL_ERROR);
@@ -660,7 +566,7 @@ void ProfileSyncService::OnBackendInitialized(
   if (auto_start_enabled_ && !SetupInProgress()) {
     // Backend is initialized but we're not in sync setup, so this must be an
     // autostart - mark our sync setup as completed.
-    if (profile_->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart)) {
+    if (sync_prefs_.IsStartSuppressed()) {
       // TODO(sync): This call to ShowConfigure() should go away in favor
       // of the code below that calls wizard_.Step() - http://crbug.com/95269.
       ShowConfigure(true);
@@ -683,6 +589,16 @@ void ProfileSyncService::OnBackendInitialized(
 
 void ProfileSyncService::OnSyncCycleCompleted() {
   UpdateLastSyncedTime();
+  if (GetSessionModelAssociator()) {
+    // Trigger garbage collection of old sessions now that we've downloaded
+    // any new session data. TODO(zea): Have this be a notification the session
+    // model associator listens too. Also consider somehow plumbing the current
+    // server time as last reported by CheckServerReachable, so we don't have to
+    // rely on the local clock, which may be off significantly.
+    MessageLoop::current()->PostTask(FROM_HERE,
+        base::Bind(&browser_sync::SessionModelAssociator::DeleteStaleSessions,
+                   GetSessionModelAssociator()->AsWeakPtr()));
+  }
   VLOG(2) << "Notifying observers sync cycle completed";
   NotifyObservers();
 }
@@ -691,53 +607,59 @@ void ProfileSyncService::OnSyncCycleCompleted() {
 void ProfileSyncService::OnDataTypesChanged(
     const syncable::ModelTypeSet& to_add) {
   // We don't bother doing anything if the migrator is busy.
-  if (migrator_->state() != browser_sync::BackendMigrator::IDLE) {
+  if (migrator_.get() &&
+      migrator_->state() != browser_sync::BackendMigrator::IDLE) {
     VLOG(1) << "Dropping OnDataTypesChanged due to migrator busy.";
     return;
   }
 
-  syncable::ModelTypeSet new_types;
-  syncable::ModelTypeSet preferred_types;
-  GetPreferredDataTypes(&preferred_types);
+  VLOG(2) << "OnDataTypesChanged called with types: "
+          << syncable::ModelTypeSetToString(to_add);
+
   syncable::ModelTypeSet registered_types;
   GetRegisteredDataTypes(&registered_types);
 
-  for (syncable::ModelTypeSet::const_iterator iter = to_add.begin();
-       iter != to_add.end();
-       ++iter) {
-    // Received notice to enable session sync. Check if sessions are
-    // registered, and if not register a new datatype controller.
-    if (registered_types.count(*iter) == 0) {
-      RegisterNewDataType(*iter);
-      // Enable the about:flags switch for sessions so we don't have to always
-      // perform this reconfiguration. Once we set this, sessions will remain
-      // registered, so we will no longer go down this code path.
-      std::string experiment_name = GetExperimentNameForDataType(*iter);
-      if (experiment_name.empty())
-        continue;
-      about_flags::SetExperimentEnabled(g_browser_process->local_state(),
-                                        experiment_name,
-                                        true);
+  syncable::ModelTypeSet to_register;
+  std::set_difference(to_add.begin(), to_add.end(),
+                      registered_types.begin(), registered_types.end(),
+                      std::inserter(to_register, to_register.end()));
 
-      // Check if the user has "Keep Everything Synced" enabled. If so, we want
-      // to turn on sessions if it's not already on. Otherwise we leave it off.
-      // Note: if sessions are already registered, we don't turn it on. This
-      // covers the case where we're already in the process of reconfiguring
-      // to turn sessions on.
-      if (profile_->GetPrefs()->GetBoolean(prefs::kKeepEverythingSynced) &&
-          preferred_types.count(*iter) == 0){
-        std::string pref_name = GetPrefNameForDataType(*iter);
-        if (pref_name.empty())
-          continue;
-        profile_->GetPrefs()->SetBoolean(pref_name.c_str(), true);
-      }
-    }
+  VLOG(2) << "Enabling types: " << syncable::ModelTypeSetToString(to_register);
+
+  for (syncable::ModelTypeSet::const_iterator it = to_register.begin();
+       it != to_register.end(); ++it) {
+    // Received notice to enable experimental type. Check if the type is
+    // registered, and if not register a new datatype controller.
+    RegisterNewDataType(*it);
+    // Enable the about:flags switch for the experimental type so we don't have
+    // to always perform this reconfiguration. Once we set this, the type will
+    // remain registered on restart, so we will no longer go down this code
+    // path.
+    std::string experiment_name = GetExperimentNameForDataType(*it);
+    if (experiment_name.empty())
+      continue;
+    about_flags::SetExperimentEnabled(g_browser_process->local_state(),
+                                      experiment_name,
+                                      true);
   }
 
-  if (!new_types.empty()) {
-    VLOG(1) << "Dynamically enabling new datatypes: "
-            << syncable::ModelTypeSetToString(new_types);
-    OnMigrationNeededForTypes(new_types);
+  // Check if the user has "Keep Everything Synced" enabled. If so, we want
+  // to turn on all experimental types if they're not already on. Otherwise we
+  // leave them off.
+  // Note: if any types are already registered, we don't turn them on. This
+  // covers the case where we're already in the process of reconfiguring
+  // to turn an experimental type on.
+  if (sync_prefs_.HasKeepEverythingSynced()) {
+    // Mark all data types as preferred.
+    sync_prefs_.SetPreferredDataTypes(registered_types, registered_types);
+
+    // Only automatically turn on types if we have already finished set up.
+    // Otherwise, just leave the experimental types on by default.
+    if (!to_register.empty() && HasSyncSetupCompleted() && migrator_.get()) {
+      VLOG(1) << "Dynamically enabling new datatypes: "
+              << syncable::ModelTypeSetToString(to_register);
+      OnMigrationNeededForTypes(to_register);
+    }
   }
 }
 
@@ -774,7 +696,7 @@ void ProfileSyncService::OnStopSyncingPermanently() {
     wizard_.Step(SyncSetupWizard::SETUP_ABORTED_BY_PENDING_CLEAR);
     expect_sync_configuration_aborted_ = true;
   }
-  profile_->GetPrefs()->SetBoolean(prefs::kSyncSuppressStart, true);
+  sync_prefs_.SetStartSuppressed(true);
   DisableForUser();
 }
 
@@ -826,15 +748,6 @@ void ProfileSyncService::OnPassphraseRequired(
           << sync_api::PassphraseRequiredReasonToString(reason);
   passphrase_required_reason_ = reason;
 
-  // We will skip the passphrase prompt and suppress the warning if the
-  // passphrase is needed for decryption but the user is not syncing an
-  // encrypted data type on this machine. Otherwise we look for one.
-  if (!IsEncryptedDatatypeEnabled() && IsPassphraseRequiredForDecryption()) {
-    VLOG(1) << "Decrypting and no encrypted datatypes enabled"
-            << ", accepted passphrase.";
-    OnPassphraseAccepted();
-  }
-
   // First try supplying gaia password as the passphrase.
   // TODO(atwilson): This logic seems odd here - we know what kind of passphrase
   // is required (explicit/gaia) so we should not bother setting the wrong kind
@@ -859,9 +772,16 @@ void ProfileSyncService::OnPassphraseRequired(
     return;
   }
 
-  // Prompt the user for a password.
-  if (WizardIsVisible() && IsEncryptedDatatypeEnabled() &&
-      IsPassphraseRequiredForDecryption()) {
+  // If no passphrase is required (due to not having any encrypted data types
+  // enabled), just act as if we don't have any passphrase error. We still
+  // track the auth error in passphrase_required_reason_ in case the user later
+  // re-enables an encrypted data type.
+  if (!IsPassphraseRequiredForDecryption()) {
+    VLOG(1) << "Decrypting and no encrypted datatypes enabled"
+            << ", accepted passphrase.";
+    ResolvePassphraseRequired();
+  } else if (WizardIsVisible()) {
+    // Prompt the user for a password.
     VLOG(1) << "Prompting user for passphrase.";
     wizard_.Step(SyncSetupWizard::ENTER_PASSPHRASE);
   }
@@ -871,6 +791,19 @@ void ProfileSyncService::OnPassphraseRequired(
 
 void ProfileSyncService::OnPassphraseAccepted() {
   VLOG(1) << "Received OnPassphraseAccepted.";
+  // Reset passphrase_required_reason_ before configuring calling
+  // ResolvePassphraseRequired() (which configures the DataTypeManager) since we
+  // know we no longer require the passphrase. We do this here rather
+  // than down in ResolvePassphraseRequired() because that can be called by
+  // OnPassphraseRequired() if no encrypted data types are enabled, and we
+  // don't want to clobber the true passphrase error.
+  passphrase_required_reason_ = sync_api::REASON_PASSPHRASE_NOT_REQUIRED;
+
+  ResolvePassphraseRequired();
+}
+
+void ProfileSyncService::ResolvePassphraseRequired() {
+  DCHECK(!IsPassphraseRequiredForDecryption());
   // Don't hold on to a passphrase in raw form longer than needed.
   cached_passphrases_ = CachedPassphrases();
 
@@ -879,17 +812,22 @@ void ProfileSyncService::OnPassphraseAccepted() {
   syncable::ModelTypeSet types;
   GetPreferredDataTypes(&types);
 
-  // Reset passphrase_required_reason_ before configuring the DataTypeManager
-  // since we know we no longer require the passphrase.
-  passphrase_required_reason_ = sync_api::REASON_PASSPHRASE_NOT_REQUIRED;
-
   if (data_type_manager_.get()) {
     // Unblock the data type manager if necessary.
     // This will always trigger a SYNC_CONFIGURE_DONE on completion, which will
     // step the UI wizard into DONE state (even if no datatypes have changed).
+    // This will be ignored, because we will already have transitioned to DONE
+    // below.
     data_type_manager_->Configure(types,
                                   sync_api::CONFIGURE_REASON_RECONFIGURATION);
   }
+
+  // If No encryption is pending and our passphrase has been accepted, tell the
+  // wizard we're done (no need to hang around waiting for the sync to
+  // complete). If encryption is pending, its successful completion will trigger
+  // the done step.
+  if (WizardIsVisible() && !encryption_pending())
+    wizard_.Step(SyncSetupWizard::DONE);
 
   NotifyObservers();
 }
@@ -1070,6 +1008,17 @@ bool ProfileSyncService::unrecoverable_error_detected() const {
   return unrecoverable_error_detected_;
 }
 
+bool ProfileSyncService::IsPassphraseRequired() const {
+  return passphrase_required_reason_ !=
+      sync_api::REASON_PASSPHRASE_NOT_REQUIRED;
+}
+
+bool ProfileSyncService::IsPassphraseRequiredForDecryption() const {
+  return IsEncryptedDatatypeEnabled() &&
+      (passphrase_required_reason_ == sync_api::REASON_DECRYPTION ||
+       passphrase_required_reason_ == sync_api::REASON_SET_PASSPHRASE_FAILED);
+}
+
 string16 ProfileSyncService::GetLastSyncedTimeString() const {
   if (last_synced_time_.is_null())
     return l10n_util::GetStringUTF16(IDS_SYNC_TIME_NEVER);
@@ -1116,14 +1065,23 @@ void ProfileSyncService::OnUserSubmittedAuth(
 
   // The user has submitted credentials, which indicates they don't
   // want to suppress start up anymore.
-  PrefService* prefs = profile_->GetPrefs();
-  prefs->SetBoolean(prefs::kSyncSuppressStart, false);
-  prefs->ScheduleSavePersistentPrefs();
+  sync_prefs_.SetStartSuppressed(false);
 
   signin_->StartSignIn(username,
                        password,
                        last_auth_error_.captcha().token,
                        captcha);
+}
+
+void ProfileSyncService::OnUserSubmittedOAuth(
+    const std::string& oauth1_request_token) {
+  is_auth_in_progress_ = true;
+
+  // The user has submitted credentials, which indicates they don't
+  // want to suppress start up anymore.
+  sync_prefs_.SetStartSuppressed(false);
+
+  signin_->StartOAuthSignIn(oauth1_request_token);
 }
 
 void ProfileSyncService::OnUserChoseDatatypes(bool sync_everything,
@@ -1134,12 +1092,11 @@ void ProfileSyncService::OnUserChoseDatatypes(bool sync_everything,
     return;
   }
 
-  profile_->GetPrefs()->SetBoolean(prefs::kKeepEverythingSynced,
-      sync_everything);
+  sync_prefs_.SetKeepEverythingSynced(sync_everything);
 
+  failed_datatypes_handler_.OnUserChoseDatatypes();
   ChangePreferredDataTypes(chosen_types);
   AcknowledgeSyncedTypes();
-  profile_->GetPrefs()->ScheduleSavePersistentPrefs();
 }
 
 void ProfileSyncService::OnUserCancelledDialog() {
@@ -1171,81 +1128,34 @@ void ProfileSyncService::ChangePreferredDataTypes(
     const syncable::ModelTypeSet& preferred_types) {
 
   VLOG(1) << "ChangePreferredDataTypes invoked";
-  // Filter out any datatypes which aren't registered, or for which
-  // the preference can't be set.
   syncable::ModelTypeSet registered_types;
   GetRegisteredDataTypes(&registered_types);
-  for (int i = 0; i < syncable::MODEL_TYPE_COUNT; ++i) {
-    syncable::ModelType model_type = syncable::ModelTypeFromInt(i);
-    if (!registered_types.count(model_type))
-      continue;
-    const char* pref_name = GetPrefNameForDataType(model_type);
-    if (!pref_name)
-      continue;
-    profile_->GetPrefs()->SetBoolean(pref_name,
-        preferred_types.count(model_type) != 0);
-    if (syncable::AUTOFILL == model_type) {
-      profile_->GetPrefs()->SetBoolean(prefs::kSyncAutofillProfile,
-          preferred_types.count(model_type) != 0);
-    }
-  }
+  syncable::ModelTypeSet registered_preferred_types;
+  std::set_intersection(
+      registered_types.begin(), registered_types.end(),
+      preferred_types.begin(), preferred_types.end(),
+      std::inserter(registered_preferred_types,
+                    registered_preferred_types.end()));
+  sync_prefs_.SetPreferredDataTypes(registered_types,
+                                    registered_preferred_types);
 
-  // If we haven't initialized yet, don't configure the DTM as it could cause
-  // association to start before a Directory has even been created.
-  if (backend_initialized_) {
-    DCHECK(backend_.get());
-    ConfigureDataTypeManager();
-  } else if (unrecoverable_error_detected()) {
-    // TODO(tim): crbug.com/87575 . We should have per data type unrecoverable
-    // errors.
-
-    // Close the wizard.
-    if (WizardIsVisible()) {
-       wizard_.Step(SyncSetupWizard::DONE);
-    }
-    // There is nothing more to configure. So inform the listeners,
-    NotifyObservers();
-
-    VLOG(1) << "ConfigureDataTypeManager not invoked because of an "
-            << "Unrecoverable error.";
-  } else {
-    VLOG(0) << "ConfigureDataTypeManager not invoked because backend is not "
-            << "initialized";
-  }
+  // Now reconfigure the DTM.
+  ReconfigureDatatypeManager();
 }
 
 void ProfileSyncService::GetPreferredDataTypes(
     syncable::ModelTypeSet* preferred_types) const {
-  preferred_types->clear();
-  if (profile_->GetPrefs()->GetBoolean(prefs::kKeepEverythingSynced)) {
-    GetRegisteredDataTypes(preferred_types);
-  } else {
-    // Filter out any datatypes which aren't registered, or for which
-    // the preference can't be read.
-    syncable::ModelTypeSet registered_types;
-    GetRegisteredDataTypes(&registered_types);
-    for (int i = 0; i < syncable::MODEL_TYPE_COUNT; ++i) {
-      syncable::ModelType model_type = syncable::ModelTypeFromInt(i);
-      if (!registered_types.count(model_type))
-        continue;
-      if (model_type == syncable::AUTOFILL_PROFILE)
-        continue;
-      const char* pref_name = GetPrefNameForDataType(model_type);
-      if (!pref_name)
-        continue;
+  syncable::ModelTypeSet registered_types;
+  GetRegisteredDataTypes(&registered_types);
+  *preferred_types = sync_prefs_.GetPreferredDataTypes(registered_types);
 
-      // We are trying to group autofill_profile tag with the same
-      // enabled/disabled state as autofill. Because the UI only shows autofill.
-      if (profile_->GetPrefs()->GetBoolean(pref_name)) {
-        preferred_types->insert(model_type);
-        if (model_type == syncable::AUTOFILL) {
-          if (!registered_types.count(syncable::AUTOFILL_PROFILE))
-            continue;
-          preferred_types->insert(syncable::AUTOFILL_PROFILE);
-        }
-      }
-    }
-  }
+  syncable::ModelTypeSet failed_types =
+      failed_datatypes_handler_.GetFailedTypes();
+  syncable::ModelTypeSet difference;
+  std::set_difference(preferred_types->begin(), preferred_types->end(),
+                      failed_types.begin(), failed_types.end(),
+                      std::inserter(difference, difference.end()));
+  std::swap(*preferred_types, difference);
 }
 
 void ProfileSyncService::GetRegisteredDataTypes(
@@ -1261,7 +1171,15 @@ void ProfileSyncService::GetRegisteredDataTypes(
 }
 
 bool ProfileSyncService::IsUsingSecondaryPassphrase() const {
-  return backend_.get() && backend_->IsUsingExplicitPassphrase();
+  // Should never be called when the backend is not initialized, since at that
+  // time we have no idea whether we have an explicit passphrase or not because
+  // the nigori node has not been downloaded yet.
+  if (!sync_initialized()) {
+    NOTREACHED() << "Cannot call IsUsingSecondaryPassphrase() before the sync "
+                 << "backend has downloaded the nigori node";
+    return false;
+  }
+  return backend_->IsUsingExplicitPassphrase();
 }
 
 bool ProfileSyncService::IsCryptographerReady(
@@ -1354,14 +1272,6 @@ bool ProfileSyncService::HasUnsyncedItems() const {
   return false;
 }
 
-void ProfileSyncService::LogUnsyncedItems(int level) const {
-  if (backend_.get() && backend_initialized_) {
-    return backend_->LogUnsyncedItems(level);
-  }
-  VLOG(level) << "Unsynced items not printed because backend is not "
-              << "initialized";
-}
-
 browser_sync::BackendMigrator*
     ProfileSyncService::GetBackendMigratorForTest() {
   return migrator_.get();
@@ -1441,6 +1351,15 @@ void ProfileSyncService::GetEncryptedDataTypes(
   }
 }
 
+void ProfileSyncService::OnSyncManagedPrefChange(bool is_sync_managed) {
+  NotifyObservers();
+  if (is_sync_managed) {
+    DisableForUser();
+  } else if (HasSyncSetupCompleted() && AreCredentialsAvailable()) {
+    StartUp();
+  }
+}
+
 void ProfileSyncService::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
@@ -1462,16 +1381,28 @@ void ProfileSyncService::Observe(int type,
         expect_sync_configuration_aborted_ = false;
         return;
       }
-      if (status != DataTypeManager::OK) {
-        VLOG(0) << "ProfileSyncService::Observe: Unrecoverable error detected";
+      if (status != DataTypeManager::OK &&
+          status != DataTypeManager::PARTIAL_SUCCESS) {
+        // Something catastrophic had happened. We should only have one
+        // error representing it.
+        DCHECK(result->errors.size() == 1);
+        SyncError error = result->errors.front();
+        DCHECK(error.IsSet());
         std::string message =
-          "Sync Configuration failed while configuring " +
-          syncable::ModelTypeSetToString(result->failed_types) +
-          ": " + DataTypeManager::ConfigureStatusToString(status);
-        OnUnrecoverableError(result->location, message);
-        cached_passphrases_ = CachedPassphrases();
+          "Sync configuration failed with status " +
+          DataTypeManager::ConfigureStatusToString(status) +
+          " during " + syncable::ModelTypeToString(error.type()) +
+          ": " + error.message();
+        LOG(ERROR) << "ProfileSyncService error: "
+                   << message;
+        // TODO: Don't
+        OnUnrecoverableError(error.location(), message);
         return;
       }
+
+      MessageLoop::current()->PostTask(FROM_HERE,
+            scoped_runnable_method_factory_.NewRunnableMethod(
+            &ProfileSyncService::OnSyncConfigureDone, *result));
 
       // We should never get in a state where we have no encrypted datatypes
       // enabled, and yet we still think we require a passphrase for decryption.
@@ -1488,18 +1419,6 @@ void ProfileSyncService::Observe(int type,
         NotifyObservers();
       } else {
         backend_->EnableEncryptEverything();
-      }
-      break;
-    }
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      std::string* pref_name = Details<std::string>(details).ptr();
-      if (*pref_name == prefs::kSyncManaged) {
-        NotifyObservers();
-        if (*pref_sync_managed_) {
-          DisableForUser();
-        } else if (HasSyncSetupCompleted() && AreCredentialsAvailable()) {
-          StartUp();
-        }
       }
       break;
     }
@@ -1520,7 +1439,7 @@ void ProfileSyncService::Observe(int type,
         if (backend_initialized_) {
           backend_->UpdateCredentials(GetCredentials());
         }
-        if (!profile_->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart))
+        if (!sync_prefs_.IsStartSuppressed())
           StartUp();
       }
       break;
@@ -1568,9 +1487,8 @@ bool ProfileSyncService::IsSyncEnabled() {
   return !CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableSync);
 }
 
-bool ProfileSyncService::IsManaged() {
-  // Some tests use ProfileSyncServiceMock which doesn't have a profile.
-  return profile_ && profile_->GetPrefs()->GetBoolean(prefs::kSyncManaged);
+bool ProfileSyncService::IsManaged() const {
+  return sync_prefs_.IsManaged();
 }
 
 bool ProfileSyncService::ShouldPushChanges() {
@@ -1587,38 +1505,33 @@ bool ProfileSyncService::ShouldPushChanges() {
 }
 
 void ProfileSyncService::AcknowledgeSyncedTypes() {
-  syncable::ModelTypeBitSet acknowledged = syncable::ModelTypeBitSetFromValue(
-      *profile_->GetPrefs()->GetList(prefs::kAcknowledgedSyncTypes));
-  syncable::ModelTypeSet registered;
-  GetRegisteredDataTypes(&registered);
-  syncable::ModelTypeBitSet registered_bit_set =
-      syncable::ModelTypeBitSetFromSet(registered);
-
-  // Add the registered types to the current set of acknowledged types, and then
-  // store the resulting set in prefs.
-  acknowledged |= registered_bit_set;
-  scoped_ptr<ListValue> value(syncable::ModelTypeBitSetToValue(acknowledged));
-  profile_->GetPrefs()->Set(prefs::kAcknowledgedSyncTypes, *value);
-  profile_->GetPrefs()->ScheduleSavePersistentPrefs();
+  syncable::ModelTypeSet registered_types;
+  GetRegisteredDataTypes(&registered_types);
+  sync_prefs_.AcknowledgeSyncedTypes(registered_types);
 }
 
-// TODO(sync): When we add the next new data type, add code to the NTP to
-// display a "new data type available" notification based on these
-// unacknowledged types, or remove this code if we decide to just bake this
-// in to the "new feature" canned text.
-syncable::ModelTypeBitSet ProfileSyncService::GetUnacknowledgedTypes() const {
-  syncable::ModelTypeBitSet unacknowledged;
-  if (HasSyncSetupCompleted() &&
-      profile_->GetPrefs()->GetBoolean(prefs::kKeepEverythingSynced)) {
-    // User is "syncing everything" - see if we've added any new data types.
-    syncable::ModelTypeBitSet acknowledged =
-        syncable::ModelTypeBitSetFromValue(
-            *profile_->GetPrefs()->GetList(prefs::kAcknowledgedSyncTypes));
-    syncable::ModelTypeSet registered;
-    GetRegisteredDataTypes(&registered);
-    syncable::ModelTypeBitSet registered_bit_set =
-        syncable::ModelTypeBitSetFromSet(registered);
-    unacknowledged = registered_bit_set & ~acknowledged;
+void ProfileSyncService::ReconfigureDatatypeManager() {
+  // If we haven't initialized yet, don't configure the DTM as it could cause
+  // association to start before a Directory has even been created.
+  if (backend_initialized_) {
+    DCHECK(backend_.get());
+    ConfigureDataTypeManager();
+  } else if (unrecoverable_error_detected()) {
+    // Close the wizard.
+    if (WizardIsVisible()) {
+       wizard_.Step(SyncSetupWizard::DONE);
+    }
+    // There is nothing more to configure. So inform the listeners,
+    NotifyObservers();
+
+    VLOG(1) << "ConfigureDataTypeManager not invoked because of an "
+            << "Unrecoverable error.";
+  } else {
+    VLOG(0) << "ConfigureDataTypeManager not invoked because backend is not "
+            << "initialized";
   }
-  return unacknowledged;
+}
+
+const FailedDatatypesHandler& ProfileSyncService::failed_datatypes_handler() {
+  return failed_datatypes_handler_;
 }

@@ -7,7 +7,7 @@
 #include "base/sys_string_conversions.h"
 #include "base/task.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -40,18 +40,19 @@ class AsyncUninstaller : public ExtensionUninstallDialog::Delegate {
   AsyncUninstaller(const Extension* extension, Profile* profile)
       : extension_(extension),
         profile_(profile) {
-    extension_uninstall_dialog_.reset(new ExtensionUninstallDialog(profile));
-    extension_uninstall_dialog_->ConfirmUninstall(this, extension_);
+    extension_uninstall_dialog_.reset(
+        ExtensionUninstallDialog::Create(profile, this));
+    extension_uninstall_dialog_->ConfirmUninstall(extension_);
   }
 
   ~AsyncUninstaller() {}
 
   // ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionDialogAccepted() {
+  virtual void ExtensionUninstallAccepted() {
     profile_->GetExtensionService()->
         UninstallExtension(extension_->id(), false, NULL);
   }
-  virtual void ExtensionDialogCanceled() {}
+  virtual void ExtensionUninstallCanceled() {}
 
  private:
   // The extension that we're loading the icon for. Weak.
@@ -239,7 +240,8 @@ int CurrentTabId() {
     case kExtensionContextName: {
       GURL url(std::string(extension_urls::kGalleryBrowsePrefix) +
                std::string("/detail/") + extension_->id());
-      browser->OpenURL(url, GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+      browser->OpenURL(
+          url, GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
       break;
     }
     case kExtensionContextOptions: {

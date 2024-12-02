@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/create_application_shortcut_view.h"
 
+#include <algorithm>
+
 #include "base/callback.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
@@ -25,8 +27,9 @@
 #include "grit/theme_resources.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request.h"
-#include "third_party/skia/include/core/SkRect.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
@@ -90,7 +93,7 @@ void AppInfoView::Init(const string16& title_text,
   icon_->SetImage(icon);
   icon_->SetImageSize(gfx::Size(kAppIconSize, kAppIconSize));
 
-  title_ = new views::Label(UTF16ToWide(title_text));
+  title_ = new views::Label(title_text);
   title_->SetMultiLine(true);
   title_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   title_->SetFont(ResourceBundle::GetSharedInstance().GetFont(
@@ -107,9 +110,9 @@ void AppInfoView::PrepareDescriptionLabel(const string16& description) {
   DCHECK(!description.empty());
 
   static const size_t kMaxLength = 200;
-  static const wchar_t* const kEllipsis = L" ... ";
+  static const string16 kEllipsis(ASCIIToUTF16(" ... "));
 
-  std::wstring text = UTF16ToWide(description);
+  string16 text = description;
   if (text.length() > kMaxLength) {
     text = text.substr(0, kMaxLength);
     text += kEllipsis;
@@ -149,7 +152,7 @@ void AppInfoView::SetupLayout() {
 
 void AppInfoView::UpdateText(const string16& title,
                              const string16& description) {
-  title_->SetText(UTF16ToWide(title));
+  title_->SetText(title);
   PrepareDescriptionLabel(description);
 
   SetupLayout();
@@ -173,7 +176,7 @@ void AppInfoView::OnPaint(gfx::Canvas* canvas) {
   border_paint.setAntiAlias(true);
   border_paint.setARGB(0xFF, 0xC8, 0xC8, 0xC8);
 
-  canvas->AsCanvasSkia()->drawRoundRect(
+  canvas->GetSkCanvas()->drawRoundRect(
       border_rect, SkIntToScalar(2), SkIntToScalar(2), border_paint);
 
   SkRect inner_rect = {
@@ -186,7 +189,7 @@ void AppInfoView::OnPaint(gfx::Canvas* canvas) {
   SkPaint inner_paint;
   inner_paint.setAntiAlias(true);
   inner_paint.setARGB(0xFF, 0xF8, 0xF8, 0xF8);
-  canvas->AsCanvasSkia()->drawRoundRect(
+  canvas->GetSkCanvas()->drawRoundRect(
       inner_rect, SkDoubleToScalar(1.5), SkDoubleToScalar(1.5), inner_paint);
 }
 
@@ -246,30 +249,30 @@ void CreateApplicationShortcutView::InitControls() {
   app_info_ = new AppInfoView(shortcut_info_.title, shortcut_info_.description,
                               shortcut_info_.favicon);
   create_shortcuts_label_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_LABEL)));
+      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_LABEL));
   create_shortcuts_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 
-  desktop_check_box_ = AddCheckbox(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_DESKTOP_CHKBOX)),
+  desktop_check_box_ = AddCheckbox(
+      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_DESKTOP_CHKBOX),
       profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateOnDesktop));
 
   menu_check_box_ = NULL;
   quick_launch_check_box_ = NULL;
 
 #if defined(OS_WIN)
-  menu_check_box_ = AddCheckbox(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_START_MENU_CHKBOX)),
+  menu_check_box_ = AddCheckbox(
+      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_START_MENU_CHKBOX),
       profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateInAppsMenu));
 
   quick_launch_check_box_ = AddCheckbox(
       (base::win::GetVersion() >= base::win::VERSION_WIN7) ?
-        UTF16ToWide(l10n_util::GetStringUTF16(IDS_PIN_TO_TASKBAR_CHKBOX)) :
-        UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_CREATE_SHORTCUTS_QUICK_LAUNCH_BAR_CHKBOX)),
+        l10n_util::GetStringUTF16(IDS_PIN_TO_TASKBAR_CHKBOX) :
+        l10n_util::GetStringUTF16(
+            IDS_CREATE_SHORTCUTS_QUICK_LAUNCH_BAR_CHKBOX),
       profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateInQuickLaunchBar));
 #elif defined(OS_POSIX)
   menu_check_box_ = AddCheckbox(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_MENU_CHKBOX)),
+      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_MENU_CHKBOX),
       profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateInAppsMenu));
 #endif
 
@@ -320,13 +323,11 @@ gfx::Size CreateApplicationShortcutView::GetPreferredSize() {
   return gfx::Size(kDialogWidth, height);
 }
 
-std::wstring CreateApplicationShortcutView::GetDialogButtonLabel(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
-    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_COMMIT));
-  }
-
-  return std::wstring();
+string16 CreateApplicationShortcutView::GetDialogButtonLabel(
+    ui::MessageBoxFlags::DialogButton button) const {
+  if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK)
+    return l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_COMMIT);
+  return string16();
 }
 
 bool CreateApplicationShortcutView::IsDialogButtonEnabled(
@@ -349,20 +350,12 @@ bool CreateApplicationShortcutView::CanMaximize() const {
   return false;
 }
 
-bool CreateApplicationShortcutView::IsAlwaysOnTop() const {
-  return false;
-}
-
-bool CreateApplicationShortcutView::HasAlwaysOnTopMenu() const {
-  return false;
-}
-
 bool CreateApplicationShortcutView::IsModal() const {
   return true;
 }
 
-std::wstring CreateApplicationShortcutView::GetWindowTitle() const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_TITLE));
+string16 CreateApplicationShortcutView::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_TITLE);
 }
 
 bool CreateApplicationShortcutView::Accept() {
@@ -394,7 +387,7 @@ views::View* CreateApplicationShortcutView::GetContentsView() {
 }
 
 views::Checkbox* CreateApplicationShortcutView::AddCheckbox(
-    const std::wstring& text, bool checked) {
+    const string16& text, bool checked) {
   views::Checkbox* checkbox = new views::Checkbox(text);
   checkbox->SetChecked(checked);
   checkbox->set_listener(this);
@@ -489,7 +482,6 @@ CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
       CreateApplicationShortcutView(profile),
       app_(app),
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {
-
   shortcut_info_.extension_id = app_->id();
   shortcut_info_.url = GURL(app_->launch_web_url());
   shortcut_info_.title = UTF8ToUTF16(app_->name());
@@ -524,7 +516,6 @@ CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
                      icon_resource,
                      max_size,
                      ImageLoadingTracker::DONT_CACHE);
-
 }
 
 CreateChromeApplicationShortcutView::~CreateChromeApplicationShortcutView() {}

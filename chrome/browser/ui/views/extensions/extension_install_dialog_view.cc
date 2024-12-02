@@ -70,16 +70,16 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   virtual ~ExtensionInstallDialogView();
 
  private:
-  // views::DialogDelegate:
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  // views::DialogDelegateView:
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
   virtual int GetDefaultDialogButton() const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
 
-  // views::WindowDelegate:
+  // views::WidgetDelegate:
   virtual bool IsModal() const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
 
   // views::LinkListener:
@@ -148,22 +148,22 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
 
   column_set->AddColumn(GridLayout::LEADING,
                         GridLayout::FILL,
-                        0, // no resizing
+                        0,  // no resizing
                         GridLayout::USE_PREF,
-                        0, // no fixed with
+                        0,  // no fixed with
                         left_column_width);
   column_set->AddPaddingColumn(0, views::kPanelHorizMargin);
   column_set->AddColumn(GridLayout::LEADING,
                         GridLayout::LEADING,
-                        0, // no resizing
+                        0,  // no resizing
                         GridLayout::USE_PREF,
-                        0, // no fixed width
+                        0,  // no fixed width
                         kIconSize);
 
   layout->StartRow(0, column_set_id);
 
-  views::Label* heading = new views::Label(UTF16ToWide(
-      prompt.GetHeading(extension->name())));
+  views::Label* heading = new views::Label(
+      prompt.GetHeading(extension->name()));
   heading->SetFont(heading->font().DeriveFont(kHeadingFontSizeDelta,
                                               gfx::Font::BOLD));
   heading->SetMultiLine(true);
@@ -199,8 +199,7 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     layout->AddView(rating);
     prompt.AppendRatingStars(AddResourceIcon, rating);
 
-    views::Label* rating_count = new views::Label(
-        UTF16ToWide(prompt.GetRatingCount()));
+    views::Label* rating_count = new views::Label(prompt.GetRatingCount());
     rating_count->SetFont(
         rating_count->font().DeriveFont(kRatingFontSizeDelta));
     // Add some space between the stars and the rating count.
@@ -208,15 +207,15 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     rating->AddChildView(rating_count);
 
     layout->StartRow(0, column_set_id);
-    views::Label* user_count = new views::Label(
-        UTF16ToWide(prompt.GetUserCount()));
-    user_count->SetColor(SK_ColorGRAY);
+    views::Label* user_count = new views::Label(prompt.GetUserCount());
+    user_count->SetAutoColorReadabilityEnabled(false);
+    user_count->SetEnabledColor(SK_ColorGRAY);
     user_count->SetFont(user_count->font().DeriveFont(kRatingFontSizeDelta));
     layout->AddView(user_count);
 
     layout->StartRow(0, column_set_id);
-    views::Link* store_link = new views::Link(UTF16ToWide(
-        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_STORE_LINK)));
+    views::Link* store_link = new views::Link(
+        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_STORE_LINK));
     store_link->SetFont(store_link->font().DeriveFont(kRatingFontSizeDelta));
     store_link->set_listener(this);
     layout->AddView(store_link);
@@ -233,8 +232,8 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
     }
 
     layout->StartRow(0, column_set_id);
-    views::Label* permissions_header = new views::Label(UTF16ToWide(
-        prompt.GetPermissionsHeader()));
+    views::Label* permissions_header = new views::Label(
+        prompt.GetPermissionsHeader());
     permissions_header->SetMultiLine(true);
     permissions_header->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     permissions_header->SizeToFit(left_column_width);
@@ -244,7 +243,7 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
       layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
       layout->StartRow(0, column_set_id);
       views::Label* permission_label = new views::Label(
-          UTF16ToWide(prompt.GetPermission(i)));
+          prompt.GetPermission(i));
       permission_label->SetMultiLine(true);
       permission_label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
       permission_label->SizeToFit(left_column_width);
@@ -256,18 +255,18 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
 ExtensionInstallDialogView::~ExtensionInstallDialogView() {
 }
 
-std::wstring ExtensionInstallDialogView::GetDialogButtonLabel(
-    MessageBoxFlags::DialogButton button) const {
+string16 ExtensionInstallDialogView::GetDialogButtonLabel(
+    ui::MessageBoxFlags::DialogButton button) const {
   switch (button) {
-    case MessageBoxFlags::DIALOGBUTTON_OK:
-      return UTF16ToWide(prompt_.GetAcceptButtonLabel());
+    case ui::MessageBoxFlags::DIALOGBUTTON_OK:
+      return prompt_.GetAcceptButtonLabel();
     case MessageBoxFlags::DIALOGBUTTON_CANCEL:
       return prompt_.HasAbortButtonLabel() ?
-          UTF16ToWide(prompt_.GetAbortButtonLabel()) :
-          UTF16ToWide(l10n_util::GetStringUTF16(IDS_CANCEL));
+          prompt_.GetAbortButtonLabel() :
+          l10n_util::GetStringUTF16(IDS_CANCEL);
     default:
       NOTREACHED();
-      return std::wstring();
+      return string16();
   }
 }
 
@@ -289,8 +288,8 @@ bool ExtensionInstallDialogView::IsModal() const {
   return true;
 }
 
-std::wstring ExtensionInstallDialogView::GetWindowTitle() const {
-  return UTF16ToWide(prompt_.GetDialogTitle());
+string16 ExtensionInstallDialogView::GetWindowTitle() const {
+  return prompt_.GetDialogTitle();
 }
 
 views::View* ExtensionInstallDialogView::GetContentsView() {
@@ -301,8 +300,8 @@ void ExtensionInstallDialogView::LinkClicked(views::Link* source,
                                              int event_flags) {
   GURL store_url(
       extension_urls::GetWebstoreItemDetailURLPrefix() + extension_->id());
-  BrowserList::GetLastActive()->
-      OpenURL(store_url, GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  BrowserList::GetLastActive()->OpenURL(
+      store_url, GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
   GetWidget()->Close();
 }
 

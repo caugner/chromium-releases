@@ -4,62 +4,36 @@
 
 #include "views/examples/native_theme_button_example.h"
 
+#include <string>
+
 #include "base/logging.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/gfx/canvas.h"
+#include "views/examples/example_combobox_model.h"
 #include "views/controls/label.h"
 #include "views/layout/grid_layout.h"
 #include "views/native_theme_painter.h"
 
 namespace {
 
-class ExampleComboboxModel : public ui::ComboboxModel {
- public:
-  ExampleComboboxModel(const wchar_t** strings, int count)
-      : strings_(strings), count_(count) {
-  }
-
-  ~ExampleComboboxModel() {
-  }
-
-  void set_data(const wchar_t** strings, int count) {
-    strings_ = strings;
-    count_ = count;
-  }
-
-  // Overridden from ui::ComboboxModel:
-  virtual int GetItemCount() OVERRIDE {
-    return count_;
-  }
-  virtual string16 GetItemAt(int index) OVERRIDE {
-    return WideToUTF16Hack(strings_[index]);
-  }
-
- private:
-  const wchar_t** strings_;
-  int count_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExampleComboboxModel);
+const char* kParts[] = {
+    "PushButton",
+    "RadioButton",
+    "Checkbox",
 };
 
-const wchar_t* kParts[] = {
-    L"PushButton",
-    L"RadioButton",
-    L"Checkbox",
+const char* kStates[] = {
+    "Disabled",
+    "Normal",
+    "Hot",
+    "Pressed",
+    "<Dynamic>",
 };
 
-const wchar_t* kStates[] = {
-    L"Disabled",
-    L"Normal",
-    L"Hot",
-    L"Pressed",
-    L"<Dynamic>",
-};
-
-}  // anonymous namespace
+}  // namespace
 
 namespace examples {
 
@@ -86,7 +60,7 @@ ExampleNativeThemeButton::~ExampleNativeThemeButton() {
 
 std::string ExampleNativeThemeButton::MessWithState() {
   const char* message = NULL;
-  switch(GetThemePart()) {
+  switch (GetThemePart()) {
   case gfx::NativeTheme::kPushButton:
     message = "Pressed! count:%d";
     break;
@@ -123,7 +97,7 @@ void ExampleNativeThemeButton::ItemChanged(views::Combobox* combo_box,
 
 gfx::NativeTheme::Part ExampleNativeThemeButton::GetThemePart() const {
   int selected = cb_part_->selected_item();
-  switch(selected) {
+  switch (selected) {
     case 0:
       return gfx::NativeTheme::kPushButton;
     case 1:
@@ -153,7 +127,7 @@ gfx::NativeTheme::State ExampleNativeThemeButton::GetThemeState(
 
   int selected = cb_state_->selected_item();
   if (selected > 3) {
-    switch(state()) {
+    switch (state()) {
       case BS_DISABLED:
         return gfx::NativeTheme::kDisabled;
       case BS_NORMAL:
@@ -167,7 +141,7 @@ gfx::NativeTheme::State ExampleNativeThemeButton::GetThemeState(
     }
   }
 
-  switch(selected) {
+  switch (selected) {
     case 0:
       return gfx::NativeTheme::kDisabled;
     case 1:
@@ -224,14 +198,10 @@ void ExampleNativeThemeButton::OnPaintBackground(gfx::Canvas* canvas) {
 ////////////////////////////////////////////////////////////////////////////////
 
 NativeThemeButtonExample::NativeThemeButtonExample(ExamplesMain* main)
-    : ExampleBase(main) {
+    : ExampleBase(main, "Native Theme Button") {
 }
 
 NativeThemeButtonExample::~NativeThemeButtonExample() {
-}
-
-std::wstring NativeThemeButtonExample::GetExampleTitle() {
-  return L"Native Theme Button";
 }
 
 void NativeThemeButtonExample::CreateExampleView(views::View* container) {
@@ -249,14 +219,14 @@ void NativeThemeButtonExample::CreateExampleView(views::View* container) {
   column_set->AddPaddingColumn(0, 8);
 
   layout->StartRow(0, 0);
-  layout->AddView(new views::Label(L"Part:"));
+  layout->AddView(new views::Label(ASCIIToUTF16("Part:")));
   views::Combobox* cb_part = new views::Combobox(
       new ExampleComboboxModel(kParts, arraysize(kParts)));
   cb_part->SetSelectedItem(0);
   layout->AddView(cb_part);
 
   layout->StartRow(0, 0);
-  layout->AddView(new views::Label(L"State:"));
+  layout->AddView(new views::Label(ASCIIToUTF16("State:")));
   views::Combobox* cb_state = new views::Combobox(
       new ExampleComboboxModel(kStates, arraysize(kStates)));
   cb_state->SetSelectedItem(0);

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
+#include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
 #include "chrome/common/content_settings_types.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "ui/gfx/native_widget_types.h"
@@ -48,6 +49,7 @@ class BrowserWindow {
   virtual ~BrowserWindow() {}
 
   // Show the window, or activates it if it's already visible.
+  // Browser::OnWindowDidShow should be called after showing the window.
   virtual void Show() = 0;
 
   // Show the window, but do not activate it. Does nothing if window
@@ -135,7 +137,12 @@ class BrowserWindow {
   virtual bool IsMinimized() const = 0;
 
   // Accessors for fullscreen mode state.
-  virtual void SetFullscreen(bool fullscreen) = 0;
+  virtual void EnterFullscreen(const GURL& url,
+                               FullscreenExitBubbleType bubble_type) = 0;
+  virtual void ExitFullscreen() = 0;
+  virtual void UpdateFullscreenExitBubbleContent(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) = 0;
   virtual bool IsFullscreen() const = 0;
 
   // Returns true if the fullscreen bubble is visible.
@@ -193,10 +200,9 @@ class BrowserWindow {
 
   // Shows a confirmation dialog box for setting the default search engine
   // described by |template_url|. Takes ownership of |template_url|.
-  virtual void ConfirmSetDefaultSearchProvider(
-      TabContents* tab_contents,
-      TemplateURL* template_url,
-      TemplateURLService* template_url_service) {
+  virtual void ConfirmSetDefaultSearchProvider(TabContents* tab_contents,
+                                               TemplateURL* template_url,
+                                               Profile* profile) {
     // TODO(levin): Implement this for non-Windows platforms and make it pure.
     // http://crbug.com/38475
   }
@@ -246,11 +252,6 @@ class BrowserWindow {
   // has confirmed.
   virtual void ConfirmBrowserCloseWithPendingDownloads() = 0;
 
-  // Shows a dialog box with HTML content. |parent_window| is the window the
-  // dialog should be opened modal to and is a native window handle.
-  virtual gfx::NativeWindow ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
-                                           gfx::NativeWindow parent_window) = 0;
-
   // ThemeService calls this when a user has changed his or her theme,
   // indicating that it's time to redraw everything.
   virtual void UserChangedTheme() = 0;
@@ -297,16 +298,10 @@ class BrowserWindow {
   virtual void ShowCreateChromeAppShortcutsDialog(Profile* profile,
                                                   const Extension* app) = 0;
 
-  // Toggles compact navigation bar.
-  virtual void ToggleUseCompactNavigationBar() = 0;
-
   // Clipboard commands applied to the whole browser window.
   virtual void Cut() = 0;
   virtual void Copy() = 0;
   virtual void Paste() = 0;
-
-  // Switches between available tabstrip display modes.
-  virtual void ToggleTabStripMode() = 0;
 
 #if defined(OS_MACOSX)
   // Opens the tabpose view.
@@ -314,19 +309,18 @@ class BrowserWindow {
 
   // Sets the presentation mode for the window.  If the window is not already in
   // fullscreen, also enters fullscreen mode.
-  virtual void SetPresentationMode(bool presentation_mode) = 0;
+  virtual void EnterPresentationMode(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) = 0;
+  virtual void ExitPresentationMode() = 0;
   virtual bool InPresentationMode() = 0;
 #endif
-
-  // See InstantDelegate for details.
-  virtual void PrepareForInstant() = 0;
 
   // Invoked when instant's tab contents should be shown.
   virtual void ShowInstant(TabContentsWrapper* preview) = 0;
 
   // Invoked when the instant's tab contents should be hidden.
-  // |instant_is_active| indicates if instant is still active.
-  virtual void HideInstant(bool instant_is_active) = 0;
+  virtual void HideInstant() = 0;
 
   // Returns the desired bounds for instant in screen coordinates. Note that if
   // instant isn't currently visible this returns the bounds instant would be
@@ -354,6 +348,12 @@ class BrowserWindow {
 
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);
+
+  // Shows the avatar bubble inside |tab_contents|. The bubble is positioned
+  // relative to |rect|. |rect| should be in the |tab_contents| coordinate
+  // system.
+  virtual void ShowAvatarBubble(TabContents* tab_contents,
+                                const gfx::Rect& rect) = 0;
 
  protected:
   friend class BrowserList;

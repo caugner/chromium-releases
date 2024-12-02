@@ -83,6 +83,11 @@ const wchar_t kChromeFrameAccessibleMode[] = L"ChromeFrameAccessibleMode";
 // DLL pinning, such as the perf tests.
 const wchar_t kChromeFrameUnpinnedMode[] = L"kChromeFrameUnpinnedMode";
 
+// Controls whether we download subresources, etc on the chrome frame page in
+// the background worker thread. Defaults to true.
+const wchar_t kUseBackgroundThreadForSubResources[]
+    = L"BackgroundHTTPWorkerThread";
+
 // {1AF32B6C-A3BA-48B9-B24E-8AA9C41F6ECD}
 static const IID IID_IWebBrowserPriv2IE7 = { 0x1AF32B6C, 0xA3BA, 0x48B9,
     { 0xB2, 0x4E, 0x8A, 0xA9, 0xC4, 0x1F, 0x6E, 0xCD } };
@@ -409,8 +414,11 @@ IEVersion GetIEVersion() {
       case 8:
         ie_version = IE_8;
         break;
+      case 9:
+        ie_version = IE_9;
+        break;
       default:
-        ie_version = major_version >= 9 ? IE_9 : IE_UNSUPPORTED;
+        ie_version = (major_version >= 10) ? IE_10 : IE_UNSUPPORTED;
         break;
     }
   }
@@ -513,8 +521,8 @@ bool GetModuleVersion(HMODULE module, uint32* high, uint32* low) {
       // Copy data as VerQueryValue tries to modify the data. This causes
       // exceptions and heap corruption errors if debugger is attached.
       scoped_array<char> data(new char[version_resource_size]);
-      memcpy(data.get(), readonly_resource_data, version_resource_size);
       if (data.get()) {
+        memcpy(data.get(), readonly_resource_data, version_resource_size);
         VS_FIXEDFILEINFO* ver_info = NULL;
         UINT info_size = 0;
         if (VerQueryValue(data.get(), L"\\",
@@ -1416,7 +1424,7 @@ bool ChromeFrameUrl::ParseAttachExternalTabUrl() {
   if (tokenizer.GetNext()) {
     profile_name_ = tokenizer.token();
     // Escape out special characters like %20, etc.
-    profile_name_ = UnescapeURLComponent(profile_name_,
+    profile_name_ = net::UnescapeURLComponent(profile_name_,
         UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
   } else {
     return false;

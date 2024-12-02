@@ -21,6 +21,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/timer.h"
@@ -87,8 +88,7 @@ class DownloadItemView : public views::ButtonListener,
   virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
-  virtual bool GetTooltipText(const gfx::Point& p,
-                              std::wstring* tooltip) OVERRIDE;
+  virtual bool GetTooltipText(const gfx::Point& p, string16* tooltip) OVERRIDE;
   virtual void ShowContextMenu(const gfx::Point& p,
                                bool is_mouse_gesture) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
@@ -204,7 +204,7 @@ class DownloadItemView : public views::ButtonListener,
   gfx::Font font_;
 
   // The tooltip.
-  std::wstring tooltip_text_;
+  string16 tooltip_text_;
 
   // The current state (normal, hot or pushed) of the body and drop-down.
   State body_state_;
@@ -274,15 +274,10 @@ class DownloadItemView : public views::ButtonListener,
 
   // Method factory used to delay reenabling of the item when opening the
   // downloaded file.
-  ScopedRunnableMethodFactory<DownloadItemView> reenable_method_factory_;
+  base::WeakPtrFactory<DownloadItemView> reenable_method_factory_;
 
   // The currently running download context menu.
   scoped_ptr<DownloadShelfContextMenuView> context_menu_;
-
-  // If non-NULL, set to true when this object is deleted.
-  // (Used when showing the context menu as it runs an inner message loop that
-  // might delete us).
-  bool* deleted_;
 
   // The name of this view as reported to assistive technology.
   string16 accessible_name_;

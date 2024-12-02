@@ -34,10 +34,7 @@ class ExtensionsTest(pyauto.PyUITest):
     while True:
       raw_input('Interact with the browser and hit <enter> to dump history.. ')
       print '*' * 20
-      extensions = self.GetExtensionsInfo()
-      import pprint
-      pp = pprint.PrettyPrinter(indent=2)
-      pp.pprint(extensions)
+      self.pprint(self.GetExtensionsInfo())
 
   def _GetInstalledExtensionIds(self):
     return [extension['id'] for extension in self.GetExtensionsInfo()]
@@ -183,6 +180,20 @@ class ExtensionsTest(pyauto.PyUITest):
     # Disallow extension in incognito mode and verify.
     self.SetExtensionStateById(ext_id, enable=True, allow_in_incognito=False)
     extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
+    self.assertFalse(extension['allowed_in_incognito'])
+
+  def testAdblockExtensionCrash(self):
+    """Test AdBlock extension successfully installed and enabled, and do not
+    cause browser crash.
+    """
+    crx_file_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'adblock.crx'))
+    ext_id = self.InstallExtension(crx_file_path, False)
+    self.assertTrue(ext_id, msg='Failed to install extension.')
+
+    self.RestartBrowser(clear_profile=False)
+    extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
+    self.assertTrue(extension['is_enabled'])
     self.assertFalse(extension['allowed_in_incognito'])
 
 

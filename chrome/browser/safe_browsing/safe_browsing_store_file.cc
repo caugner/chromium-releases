@@ -4,7 +4,6 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_store_file.h"
 
-#include "base/callback.h"
 #include "base/md5.h"
 #include "base/metrics/histogram.h"
 
@@ -277,10 +276,12 @@ bool SafeBrowsingStoreFile::Delete() {
   return true;
 }
 
-void SafeBrowsingStoreFile::Init(const FilePath& filename,
-                                 Callback0::Type* corruption_callback) {
+void SafeBrowsingStoreFile::Init(
+    const FilePath& filename,
+    const base::Closure& corruption_callback
+) {
   filename_ = filename;
-  corruption_callback_.reset(corruption_callback);
+  corruption_callback_ = corruption_callback;
 }
 
 bool SafeBrowsingStoreFile::BeginChunk() {
@@ -364,8 +365,7 @@ bool SafeBrowsingStoreFile::OnCorruptDatabase() {
     RecordFormatEvent(FORMAT_EVENT_FILE_CORRUPT);
   corruption_seen_ = true;
 
-  if (corruption_callback_.get())
-    corruption_callback_->Run();
+  corruption_callback_.Run();
 
   // Return false as a convenience to callers.
   return false;
@@ -393,6 +393,7 @@ bool SafeBrowsingStoreFile::BeginUpdate() {
   DCHECK(add_hashes_.empty());
   DCHECK(sub_hashes_.empty());
   DCHECK_EQ(chunks_written_, 0);
+  add_prefixes_added_ = 0;
 
   // Since the following code will already hit the profile looking for
   // database files, this is a reasonable to time delete any old
@@ -474,6 +475,7 @@ bool SafeBrowsingStoreFile::FinishChunk() {
     return false;
 
   ++chunks_written_;
+  add_prefixes_added_ += add_prefixes_.size();
 
   // Clear everything to save memory.
   return ClearChunkBuffers();
@@ -518,6 +520,8 @@ bool SafeBrowsingStoreFile::DoUpdate(
                         file_.get(), &context))
       return OnCorruptDatabase();
 
+    add_prefixes.reserve(header.add_prefix_count + add_prefixes_added_);
+
     if (!ReadToVector(&add_prefixes, header.add_prefix_count,
                       file_.get(), &context) ||
         !ReadToVector(&sub_prefixes, header.sub_prefix_count,
@@ -542,6 +546,8 @@ bool SafeBrowsingStoreFile::DoUpdate(
 
     // Close the file so we can later rename over it.
     file_.reset();
+  } else {
+    add_prefixes.reserve(add_prefixes_added_);
   }
   DCHECK(!file_.get());
 
@@ -559,6 +565,9 @@ bool SafeBrowsingStoreFile::DoUpdate(
   // used for "empty" in SafeBrowsingDatabase.
   UMA_HISTOGRAM_COUNTS("SB2.DatabaseUpdateKilobytes",
                        std::max(static_cast<int>(size / 1024), 1));
+
+  // TODO(shess): For SB2.AddPrefixesReallocs histogram.
+  int add_prefixes_reallocs = 0;
 
   // Append the accumulated chunks onto the vectors read from |file_|.
   for (int i = 0; i < chunks_written_; ++i) {
@@ -581,6 +590,10 @@ bool SafeBrowsingStoreFile::DoUpdate(
     if (expected_size > size)
       return false;
 
+    // TODO(shess): For SB2.AddPrefixesReallocs histogram.
+    SBAddPrefix* add_prefixes_old_start =
+        (add_prefixes.size() ? &add_prefixes[0] : NULL);
+
     // TODO(shess): If the vectors were kept sorted, then this code
     // could use std::inplace_merge() to merge everything together in
     // sorted order.  That might still be slower than just sorting at
@@ -597,7 +610,19 @@ bool SafeBrowsingStoreFile::DoUpdate(
         !ReadToVector(&sub_full_hashes, header.sub_hash_count,
                       new_file_.get(), NULL))
       return false;
+
+    // Determine if the vector data moved to a new location.  This
+    // won't track cases where the malloc library was able to expand
+    // the storage in place, but those cases shouldn't cause memory
+    // fragmentation anyhow.
+    SBAddPrefix* add_prefixes_new_start =
+        (add_prefixes.size() ? &add_prefixes[0] : NULL);
+    if (add_prefixes_old_start != add_prefixes_new_start)
+      ++add_prefixes_reallocs;
   }
+
+  // Track the number of times this number of re-allocations occurred.
+  UMA_HISTOGRAM_COUNTS_100("SB2.AddPrefixesReallocs", add_prefixes_reallocs);
 
   // Append items from |pending_adds|.
   add_full_hashes.insert(add_full_hashes.end(),

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/options/core_options_handler.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
@@ -12,14 +14,15 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
+#include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -69,6 +72,11 @@ void CoreOptionsHandler::Initialize() {
 
 void CoreOptionsHandler::GetLocalizedValues(
     DictionaryValue* localized_strings) {
+  GetStaticLocalizedValues(localized_strings);
+}
+
+void CoreOptionsHandler::GetStaticLocalizedValues(
+    base::DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
   // Main
   localized_strings->SetString("title",
@@ -136,25 +144,38 @@ void CoreOptionsHandler::Observe(int type,
 
 void CoreOptionsHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("coreOptionsInitialize",
-      NewCallback(this, &CoreOptionsHandler::HandleInitialize));
+      base::Bind(&CoreOptionsHandler::HandleInitialize,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("fetchPrefs",
-      NewCallback(this, &CoreOptionsHandler::HandleFetchPrefs));
+      base::Bind(&CoreOptionsHandler::HandleFetchPrefs,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("observePrefs",
-      NewCallback(this, &CoreOptionsHandler::HandleObservePrefs));
+      base::Bind(&CoreOptionsHandler::HandleObservePrefs,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setBooleanPref",
-      NewCallback(this, &CoreOptionsHandler::HandleSetBooleanPref));
+      base::Bind(&CoreOptionsHandler::HandleSetBooleanPref,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setIntegerPref",
-      NewCallback(this, &CoreOptionsHandler::HandleSetIntegerPref));
+      base::Bind(&CoreOptionsHandler::HandleSetIntegerPref,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setDoublePref",
-      NewCallback(this, &CoreOptionsHandler::HandleSetDoublePref));
+      base::Bind(&CoreOptionsHandler::HandleSetDoublePref,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setStringPref",
-      NewCallback(this, &CoreOptionsHandler::HandleSetStringPref));
+      base::Bind(&CoreOptionsHandler::HandleSetStringPref,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("setURLPref",
+      base::Bind(&CoreOptionsHandler::HandleSetURLPref,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setListPref",
-      NewCallback(this, &CoreOptionsHandler::HandleSetListPref));
+      base::Bind(&CoreOptionsHandler::HandleSetListPref,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("clearPref",
-      NewCallback(this, &CoreOptionsHandler::HandleClearPref));
+      base::Bind(&CoreOptionsHandler::HandleClearPref,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("coreOptionsUserMetricsAction",
-      NewCallback(this, &CoreOptionsHandler::HandleUserMetricsAction));
+      base::Bind(&CoreOptionsHandler::HandleUserMetricsAction,
+                 base::Unretained(this)));
 }
 
 void CoreOptionsHandler::HandleInitialize(const ListValue* args) {
@@ -295,27 +316,30 @@ void CoreOptionsHandler::HandleObservePrefs(const ListValue* args) {
 }
 
 void CoreOptionsHandler::HandleSetBooleanPref(const ListValue* args) {
-  HandleSetPref(args, Value::TYPE_BOOLEAN);
+  HandleSetPref(args, TYPE_BOOLEAN);
 }
 
 void CoreOptionsHandler::HandleSetIntegerPref(const ListValue* args) {
-  HandleSetPref(args, Value::TYPE_INTEGER);
+  HandleSetPref(args, TYPE_INTEGER);
 }
 
 void CoreOptionsHandler::HandleSetDoublePref(const ListValue* args) {
-  HandleSetPref(args, Value::TYPE_DOUBLE);
+  HandleSetPref(args, TYPE_DOUBLE);
 }
 
 void CoreOptionsHandler::HandleSetStringPref(const ListValue* args) {
-  HandleSetPref(args, Value::TYPE_STRING);
+  HandleSetPref(args, TYPE_STRING);
+}
+
+void CoreOptionsHandler::HandleSetURLPref(const ListValue* args) {
+  HandleSetPref(args, TYPE_URL);
 }
 
 void CoreOptionsHandler::HandleSetListPref(const ListValue* args) {
-  HandleSetPref(args, Value::TYPE_LIST);
+  HandleSetPref(args, TYPE_LIST);
 }
 
-void CoreOptionsHandler::HandleSetPref(const ListValue* args,
-                                       base::Value::Type type) {
+void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
   DCHECK_GT(static_cast<int>(args->GetSize()), 1);
 
   std::string pref_name;
@@ -328,25 +352,48 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args,
 
   scoped_ptr<Value> temp_value;
 
-  // In JS all numbers are doubles.
-  if (type == Value::TYPE_INTEGER) {
-    double double_value;
-    CHECK(value->GetAsDouble(&double_value));
-    temp_value.reset(Value::CreateIntegerValue(static_cast<int>(double_value)));
-    value = temp_value.get();
-
-  // In case we have a List pref we got a JSON string.
-  } else if (type == Value::TYPE_LIST) {
-    std::string json_string;
-    CHECK(value->GetAsString(&json_string));
-    temp_value.reset(
-        base::JSONReader().JsonToValue(json_string,
-                                       false,  // no check_root
-                                       false));  // no trailing comma
-    value = temp_value.get();
+  switch (type) {
+    case TYPE_BOOLEAN:
+      CHECK_EQ(base::Value::TYPE_BOOLEAN, value->GetType());
+      break;
+    case TYPE_INTEGER: {
+      // In JS all numbers are doubles.
+      double double_value;
+      CHECK(value->GetAsDouble(&double_value));
+      int int_value = static_cast<int>(double_value);
+      temp_value.reset(Value::CreateIntegerValue(int_value));
+      value = temp_value.get();
+      break;
+    }
+    case TYPE_DOUBLE:
+      CHECK_EQ(base::Value::TYPE_DOUBLE, value->GetType());
+      break;
+    case TYPE_STRING:
+      CHECK_EQ(base::Value::TYPE_STRING, value->GetType());
+      break;
+    case TYPE_URL: {
+      std::string original;
+      CHECK(value->GetAsString(&original));
+      GURL fixed = URLFixerUpper::FixupURL(original, std::string());
+      temp_value.reset(Value::CreateStringValue(fixed.spec()));
+      value = temp_value.get();
+      break;
+    }
+    case TYPE_LIST: {
+      // In case we have a List pref we got a JSON string.
+      std::string json_string;
+      CHECK(value->GetAsString(&json_string));
+      temp_value.reset(
+          base::JSONReader().JsonToValue(json_string,
+                                         false,  // no check_root
+                                         false));  // no trailing comma
+      value = temp_value.get();
+      CHECK_EQ(base::Value::TYPE_LIST, value->GetType());
+      break;
+    }
+    default:
+      NOTREACHED();
   }
-
-  CHECK_EQ(type, value->GetType());
 
   std::string metric;
   if (args->GetSize() > 2 && !args->GetString(2, &metric))

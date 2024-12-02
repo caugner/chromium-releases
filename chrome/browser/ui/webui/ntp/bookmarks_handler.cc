@@ -5,14 +5,16 @@
 #include "chrome/browser/ui/webui/ntp/bookmarks_handler.h"
 
 #include "base/auto_reset.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/extensions/extension_bookmark_helpers.h"
 #include "chrome/browser/extensions/extension_bookmarks_module_constants.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_service.h"
@@ -25,7 +27,8 @@
 
 namespace keys = extension_bookmarks_module_constants;
 
-BookmarksHandler::BookmarksHandler() : dom_ready_(false),
+BookmarksHandler::BookmarksHandler() : model_(NULL),
+                                       dom_ready_(false),
                                        from_current_page_(false) {
 }
 
@@ -44,13 +47,17 @@ WebUIMessageHandler* BookmarksHandler::Attach(WebUI* web_ui) {
 
 void BookmarksHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("createBookmark",
-      NewCallback(this, &BookmarksHandler::HandleCreateBookmark));
+      base::Bind(&BookmarksHandler::HandleCreateBookmark,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("getBookmarksData",
-      NewCallback(this, &BookmarksHandler::HandleGetBookmarksData));
+      base::Bind(&BookmarksHandler::HandleGetBookmarksData,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("moveBookmark",
-      NewCallback(this, &BookmarksHandler::HandleMoveBookmark));
+      base::Bind(&BookmarksHandler::HandleMoveBookmark,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("removeBookmark",
-      NewCallback(this, &BookmarksHandler::HandleRemoveBookmark));
+      base::Bind(&BookmarksHandler::HandleRemoveBookmark,
+                 base::Unretained(this)));
 }
 
 void BookmarksHandler::Loaded(BookmarkModel* model, bool ids_reassigned) {
@@ -91,8 +98,7 @@ void BookmarksHandler::BookmarkNodeAdded(BookmarkModel* model,
   if (!dom_ready_) return;
   const BookmarkNode* node = parent->GetChild(index);
   base::StringValue id(base::Int64ToString(node->id()));
-  scoped_ptr<base::DictionaryValue> node_info(
-      extension_bookmark_helpers::GetNodeDictionary(node, false, false));
+  scoped_ptr<base::DictionaryValue> node_info(GetNodeDictionary(node));
   base::FundamentalValue from_page(from_current_page_);
 
   web_ui_->CallJavascriptFunction("ntp4.bookmarkNodeAdded", id, *node_info,
@@ -238,15 +244,15 @@ void BookmarksHandler::HandleGetBookmarksData(const base::ListValue* args) {
   base::ListValue* items = new base::ListValue;
   for (int i = 0; i < node->child_count(); ++i) {
     const BookmarkNode* child = node->GetChild(i);
-    extension_bookmark_helpers::AddNode(child, items, false);
+    AddNode(child, items);
   }
   if (node == model->bookmark_bar_node() && model->other_node()->child_count())
-    extension_bookmark_helpers::AddNode(model->other_node(), items, false);
+    AddNode(model->other_node(), items);
 
   base::ListValue* navigation_items = new base::ListValue;
   while (node) {
     if (node != model->bookmark_bar_node())
-      extension_bookmark_helpers::AddNode(node, navigation_items, false);
+      AddNode(node, navigation_items);
     node = node->parent();
   }
 
@@ -295,6 +301,33 @@ void BookmarksHandler::HandleMoveBookmark(const ListValue* args) {
 
   AutoReset<bool> from_page(&from_current_page_, true);
   model_->Move(node, parent, static_cast<int>(index));
+}
+
+base::DictionaryValue* BookmarksHandler::GetNodeDictionary(
+    const BookmarkNode* node) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
+  dict->SetString(keys::kIdKey, base::Int64ToString(node->id()));
+
+  const BookmarkNode* parent = node->parent();
+  if (parent) {
+    dict->SetString(keys::kParentIdKey, base::Int64ToString(parent->id()));
+    dict->SetInteger(keys::kIndexKey, parent->GetIndexOf(node));
+  }
+
+  NewTabUI::SetURLTitleAndDirection(dict, node->GetTitle(), node->url());
+
+  if (!node->is_folder())
+    dict->SetString(keys::kUrlKey, node->url().spec());
+
+  return dict;
+}
+
+void BookmarksHandler::AddNode(const BookmarkNode* node,
+                               base::ListValue* list) {
+  if (node->IsVisible()) {
+    base::DictionaryValue* dict = GetNodeDictionary(node);
+    list->Append(dict);
+  }
 }
 
 // static

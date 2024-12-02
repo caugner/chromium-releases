@@ -46,7 +46,7 @@ class NET_EXPORT MappedHostResolver : public HostResolver {
   // HostResolver methods:
   virtual int Resolve(const RequestInfo& info,
                       AddressList* addresses,
-                      CompletionCallback* callback,
+                      OldCompletionCallback* callback,
                       RequestHandle* out_req,
                       const BoundNetLog& net_log) OVERRIDE;
   virtual int ResolveFromCache(const RequestInfo& info,
@@ -56,6 +56,7 @@ class NET_EXPORT MappedHostResolver : public HostResolver {
   virtual void AddObserver(Observer* observer) OVERRIDE;
   virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual HostResolverImpl* GetAsHostResolverImpl() OVERRIDE;
+  virtual HostCache* GetHostCache() OVERRIDE;
 
  private:
   scoped_ptr<HostResolver> impl_;

@@ -8,35 +8,44 @@
 #include <deque>
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/synchronization/lock.h"
 #include "base/time.h"
+#include "content/common/content_export.h"
 #include "media/base/filters.h"
 #include "media/base/video_frame.h"
-#include "media/filters/decoder_base.h"
 #include "third_party/libjingle/source/talk/session/phone/mediachannel.h"
+#include "third_party/libjingle/source/talk/session/phone/videorenderer.h"
 
-class RTCVideoDecoder
+class MessageLoop;
+
+namespace cricket {
+class VideoFrame;
+}  // namespace cricket
+
+class CONTENT_EXPORT RTCVideoDecoder
     : public media::VideoDecoder,
-      public cricket::VideoRenderer {
+      NON_EXPORTED_BASE(public cricket::VideoRenderer) {
  public:
   RTCVideoDecoder(MessageLoop* message_loop, const std::string& url);
   virtual ~RTCVideoDecoder();
 
   // Filter implementation.
-  virtual void Play(media::FilterCallback* callback) OVERRIDE;
+  virtual void Play(const base::Closure& callback) OVERRIDE;
   virtual void Seek(base::TimeDelta time,
                     const media::FilterStatusCB& cb) OVERRIDE;
-  virtual void Pause(media::FilterCallback* callback) OVERRIDE;
-  virtual void Stop(media::FilterCallback* callback) OVERRIDE;
+  virtual void Pause(const base::Closure& callback) OVERRIDE;
+  virtual void Stop(const base::Closure& callback) OVERRIDE;
 
   // Decoder implementation.
-  virtual void Initialize(media::DemuxerStream* demuxer_stream,
-                          media::FilterCallback* filter_callback,
-                          media::StatisticsCallback* stat_callback) OVERRIDE;
+  virtual void Initialize(
+      media::DemuxerStream* demuxer_stream,
+      const base::Closure& filter_callback,
+      const media::StatisticsCallback& stat_callback) OVERRIDE;
   virtual void ProduceVideoFrame(
       scoped_refptr<media::VideoFrame> video_frame) OVERRIDE;
-  virtual int width() OVERRIDE;
-  virtual int height() OVERRIDE;
+  virtual gfx::Size natural_size() OVERRIDE;
 
   // cricket::VideoRenderer implementation
   virtual bool SetSize(int width, int height, int reserved) OVERRIDE;
@@ -58,8 +67,7 @@ class RTCVideoDecoder
   };
 
   MessageLoop* message_loop_;
-  size_t width_;
-  size_t height_;
+  gfx::Size visible_size_;
   std::string url_;
   DecoderState state_;
   std::deque<scoped_refptr<media::VideoFrame> > frame_queue_available_;

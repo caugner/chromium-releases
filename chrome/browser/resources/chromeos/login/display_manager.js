@@ -65,7 +65,7 @@ cr.define('cr.ui.login', function() {
         if (this.currentScreen.cancel) {
           this.currentScreen.cancel();
         }
-      } else if (ACCELERATOR_ENROLLMENT) {
+      } else if (name == ACCELERATOR_ENROLLMENT) {
         var currentStepId = this.screens_[this.currentStep_];
         if (currentStepId == SCREEN_SIGNIN ||
             currentStepId == SCREEN_GAIA_SIGNIN) {
@@ -179,7 +179,7 @@ cr.define('cr.ui.login', function() {
       var index = this.getScreenIndex_(screenId);
       if (index >= 0)
         this.toggleStep_(index, data);
-      $('offline-message').update();
+      $('error-message').update();
     },
 
     /**
@@ -353,7 +353,7 @@ cr.define('cr.ui.login', function() {
       helpLink.textContent = link;
       helpLink.onclick = function(e) {
         chrome.send('launchHelpApp', [helpId]);
-      }
+      };
       error.appendChild(helpLink);
     }
 

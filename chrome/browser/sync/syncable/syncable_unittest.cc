@@ -23,13 +23,13 @@
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/threading/platform_thread.h"
-#include "base/tracked.h"
 #include "base/values.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
@@ -1149,6 +1149,14 @@ TEST_F(SyncableDirectoryTest, TestSimpleFieldsPreservedDuringSaveChanges) {
     EXPECT_EQ(update_pre_save.ref((Int64Field)i),
               update_post_save.ref((Int64Field)i))
               << "int64 field #" << i << " changed during save/load";
+  }
+  for ( ; i < TIME_FIELDS_END ; ++i) {
+    EXPECT_EQ(create_pre_save.ref((TimeField)i),
+              create_post_save.ref((TimeField)i))
+              << "time field #" << i << " changed during save/load";
+    EXPECT_EQ(update_pre_save.ref((TimeField)i),
+              update_post_save.ref((TimeField)i))
+              << "time field #" << i << " changed during save/load";
   }
   for ( ; i < ID_FIELDS_END ; ++i) {
     EXPECT_EQ(create_pre_save.ref((IdField)i),

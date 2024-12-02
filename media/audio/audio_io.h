@@ -112,7 +112,7 @@ class AudioInputStream {
     // available. This is called from a special audio thread and the
     // implementation should return as soon as possible.
     virtual void OnData(AudioInputStream* stream, const uint8* src,
-                        uint32 size) = 0;
+                        uint32 size, uint32 hardware_delay_bytes) = 0;
 
     // The stream is done with this callback, the last call received by this
     // audio sink.
@@ -125,6 +125,8 @@ class AudioInputStream {
     // specific.
     virtual void OnError(AudioInputStream* stream, int code) = 0;
   };
+
+  virtual ~AudioInputStream() {}
 
   // Open the stream and prepares it for recording. Call Start() to actually
   // begin recording.
@@ -142,9 +144,6 @@ class AudioInputStream {
   // Close the stream. This also generates AudioInputCallback::OnClose(). This
   // should be the last call made on this object.
   virtual void Close() = 0;
-
- protected:
-  virtual ~AudioInputStream() {}
 };
 
 #endif  // MEDIA_AUDIO_AUDIO_IO_H_

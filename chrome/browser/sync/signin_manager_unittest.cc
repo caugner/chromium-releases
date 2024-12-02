@@ -21,7 +21,7 @@
 
 class SigninManagerTest : public TokenServiceTestHarness {
  public:
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     TokenServiceTestHarness::SetUp();
     manager_.reset(new SigninManager());
     google_login_success_.ListenFor(
@@ -29,6 +29,12 @@ class SigninManagerTest : public TokenServiceTestHarness {
         Source<Profile>(profile_.get()));
     google_login_failure_.ListenFor(chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
                                     Source<Profile>(profile_.get()));
+    originally_using_oauth_ = browser_sync::IsUsingOAuth();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    TokenServiceTestHarness::TearDown();
+    browser_sync::SetIsUsingOAuthForTest(originally_using_oauth_);
   }
 
   void SimulateValidResponseClientLogin() {
@@ -78,6 +84,7 @@ class SigninManagerTest : public TokenServiceTestHarness {
   scoped_ptr<SigninManager> manager_;
   TestNotificationTracker google_login_success_;
   TestNotificationTracker google_login_failure_;
+  bool originally_using_oauth_;
 };
 
 // NOTE: ClientLogin's "StartSignin" is called after collecting credentials
@@ -100,7 +107,6 @@ TEST_F(SigninManagerTest, SignInClientLogin) {
   manager_.reset(new SigninManager());
   manager_->Initialize(profile_.get());
   EXPECT_EQ("user@gmail.com", manager_->GetUsername());
-  browser_sync::SetIsUsingOAuthForTest(false);
 }
 
 // NOTE: OAuth's "StartOAuthSignIn" is called before collecting credentials
@@ -121,7 +127,6 @@ TEST_F(SigninManagerTest, SignInOAuth) {
   manager_.reset(new SigninManager());
   manager_->Initialize(profile_.get());
   EXPECT_EQ("user-xZIuqTKu@gmail.com", manager_->GetUsername());
-  browser_sync::SetIsUsingOAuthForTest(false);
 }
 
 TEST_F(SigninManagerTest, SignOutClientLogin) {
@@ -155,7 +160,6 @@ TEST_F(SigninManagerTest, SignOutOAuth) {
   manager_.reset(new SigninManager());
   manager_->Initialize(profile_.get());
   EXPECT_TRUE(manager_->GetUsername().empty());
-  browser_sync::SetIsUsingOAuthForTest(false);
 }
 
 TEST_F(SigninManagerTest, SignInFailureClientLogin) {
@@ -164,24 +168,6 @@ TEST_F(SigninManagerTest, SignInFailureClientLogin) {
   manager_->StartSignIn("username", "password", "", "");
   GoogleServiceAuthError error(GoogleServiceAuthError::REQUEST_CANCELED);
   manager_->OnClientLoginFailure(error);
-
-  EXPECT_EQ(0U, google_login_success_.size());
-  EXPECT_EQ(1U, google_login_failure_.size());
-
-  EXPECT_TRUE(manager_->GetUsername().empty());
-
-  // Should not be persisted
-  manager_.reset(new SigninManager());
-  manager_->Initialize(profile_.get());
-  EXPECT_TRUE(manager_->GetUsername().empty());
-}
-
-TEST_F(SigninManagerTest, SignInFailureOAuth) {
-  browser_sync::SetIsUsingOAuthForTest(true);
-  manager_->Initialize(profile_.get());
-
-  GoogleServiceAuthError error(GoogleServiceAuthError::REQUEST_CANCELED);
-  manager_->OnGetOAuthTokenFailure(error);
 
   EXPECT_EQ(0U, google_login_success_.size());
   EXPECT_EQ(1U, google_login_failure_.size());
@@ -263,5 +249,4 @@ TEST_F(SigninManagerTest, SignOutOnUserInfoSucessRaceTest) {
   manager_->SignOut();
   SimulateOAuthUserInfoSuccess();
   EXPECT_TRUE(manager_->GetUsername().empty());
-  browser_sync::SetIsUsingOAuthForTest(false);
 }

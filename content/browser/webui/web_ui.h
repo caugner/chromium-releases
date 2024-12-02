@@ -10,16 +10,18 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/callback_old.h"
 #include "base/compiler_specific.h"
 #include "base/string16.h"
-#include "content/common/page_transition_types.h"
+#include "content/common/content_export.h"
+#include "content/public/common/page_transition_types.h"
 #include "ipc/ipc_channel.h"
 
-class WebUIMessageHandler;
 class GURL;
 class RenderViewHost;
 class TabContents;
+class WebUIMessageHandler;
 
 namespace base {
 class DictionaryValue;
@@ -32,7 +34,7 @@ class Value;
 //
 // NOTE: If you're creating a new WebUI for Chrome code, make sure you extend
 // ChromeWebUI.
-class WebUI : public IPC::Channel::Listener {
+class CONTENT_EXPORT WebUI : public IPC::Channel::Listener {
  public:
   explicit WebUI(TabContents* contents);
   virtual ~WebUI();
@@ -47,7 +49,7 @@ class WebUI : public IPC::Channel::Listener {
   // *not* called for every page load because in some cases
   // RenderViewHostManager will reuse RenderView instances. In those cases,
   // RenderViewReused will be called instead.
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) {}
+  virtual void RenderViewCreated(RenderViewHost* render_view_host);
 
   // Called by RenderViewHostManager when a RenderView is reused to display a
   // page.
@@ -64,10 +66,12 @@ class WebUI : public IPC::Channel::Listener {
   // won't be run in that case.
   virtual void DidBecomeActiveForReusedRenderView() {}
 
-  // Used by WebUIMessageHandlers.
-  typedef Callback1<const base::ListValue*>::Type MessageCallback;
+  // Used by WebUIMessageHandlers. If the given message is already registered,
+  // the call has no effect unless |register_callback_overwrites_| is set to
+  // true.
+  typedef base::Callback<void(const base::ListValue*)> MessageCallback;
   void RegisterMessageCallback(const std::string& message,
-                               MessageCallback* callback);
+                               const MessageCallback& callback);
 
   // Returns true if the favicon should be hidden for the current tab.
   bool hide_favicon() const {
@@ -96,7 +100,7 @@ class WebUI : public IPC::Channel::Listener {
 
   // Returns the transition type that should be used for link clicks on this
   // Web UI. This will default to LINK but may be overridden.
-  PageTransition::Type link_transition_type() const {
+  content::PageTransition link_transition_type() const {
     return link_transition_type_;
   }
 
@@ -110,7 +114,7 @@ class WebUI : public IPC::Channel::Listener {
     return register_callback_overwrites_;
   }
 
-  void register_callback_overwrites(bool value) {
+  void set_register_callback_overwrites(bool value) {
     register_callback_overwrites_ = value;
   }
 
@@ -172,7 +176,7 @@ class WebUI : public IPC::Channel::Listener {
   bool focus_location_bar_by_default_;
   bool should_hide_url_;
   string16 overridden_title_;  // Defaults to empty string.
-  PageTransition::Type link_transition_type_;  // Defaults to LINK.
+  content::PageTransition link_transition_type_;  // Defaults to LINK.
   int bindings_;  // The bindings from BindingsPolicy that should be enabled for
                   // this page.
 
@@ -187,7 +191,7 @@ class WebUI : public IPC::Channel::Listener {
 
  private:
   // A map of message name -> message handling callback.
-  typedef std::map<std::string, MessageCallback*> MessageCallbackMap;
+  typedef std::map<std::string, MessageCallback> MessageCallbackMap;
   MessageCallbackMap message_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUI);
@@ -196,7 +200,7 @@ class WebUI : public IPC::Channel::Listener {
 // Messages sent from the DOM are forwarded via the WebUI to handler
 // classes. These objects are owned by WebUI and destroyed when the
 // host is destroyed.
-class WebUIMessageHandler {
+class CONTENT_EXPORT WebUIMessageHandler {
  public:
   WebUIMessageHandler();
   virtual ~WebUIMessageHandler();

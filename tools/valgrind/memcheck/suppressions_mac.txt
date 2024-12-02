@@ -187,8 +187,6 @@
    bug_75037
    Memcheck:Cond
    ...
-   fun:gl*
-   ...
    fun:_ZN8remoting*CapturerMac*
 }
 {
@@ -317,9 +315,7 @@
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN11sandboxtest8internal19RegisterSandboxTestIN12_GLOBAL__N_*
-   fun:_ZN11sandboxtest8internal19RegisterSandboxTestIN12_GLOBAL__N_*
-   fun:_Z41__static_initialization_and_destruction_0ii
-   fun:_GLOBAL__I__ZNSt3tr112_GLOBAL__N_16ignoreE
+   ...
    fun:_ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE
    fun:_ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEj
    fun:_ZN11ImageLoader15runInitializersERKNS_11LinkContextE
@@ -394,7 +390,7 @@
    fun:-[NSIBObjectData nibInstantiateWithOwner:topLevelObjects:]
    fun:-[NSNib instantiateNibWithExternalNameTable:]
    fun:-[NSNib instantiateNibWithOwner:topLevelObjects:]
-   fun:_ZN19BrowserMainPartsMac23PreMainMessageLoopStartEv
+   fun:_ZN25ChromeBrowserMainPartsMac23PreMainMessageLoopStartEv
 }
 {
    bug_20582
@@ -506,6 +502,17 @@
    fun:_ZN7history14HistoryBackend8InitImplEv
    fun:_ZN7history14HistoryBackend4InitEb
 }
+{
+   bug_28072d
+   Memcheck:Addr4
+   ...
+   fun:CSBackupSetItemExcluded
+   fun:_ZN4base3mac22SetFileBackupExclusionERK8FilePath
+   fun:_ZN7history15HistoryDatabase4InitERK8FilePathS3_
+   fun:_ZN7history14HistoryBackend8InitImplERKSs
+   fun:_ZN7history14HistoryBackend4InitERKSsb
+}
+
 # Note: bug 31634 happens very sporatically.
 {
    bug_31634
@@ -568,15 +575,9 @@
    Memcheck:Leak
    fun:calloc
    fun:_internal_class_createInstanceFromZone
-   fun:_internal_class_createInstance
+   ...
    fun:+[NSObject allocWithZone:]
-   fun:_decodeObjectBinary
-   fun:_decodeObject
-   fun:-[NSButtonCell initWithCoder:]
-   fun:_decodeObjectBinary
-   fun:_decodeObject
-   fun:-[NSControl initWithCoder:]
-   fun:-[NSButton initWithCoder:]
+   ...
    fun:_decodeObjectBinary
    fun:_decodeObject
    fun:-[NSNibConnector initWithCoder:]
@@ -829,33 +830,6 @@
    fun:_ZN14WebDataService29InitializeDatabaseIfNecessaryEv
 }
 {
-   bug_52364_a
-   Memcheck:Value4
-   fun:_ZNK10CMMConvLut7ConvertER10CMMMinBitsP14CMMRuntimeInfomm
-   fun:_Z16CMMProcessBitmapP15CMMBitmapParams
-   fun:DoMatchBitmap
-   fun:CWMatchBitmap
-   fun:ConvertImageGeneric
-   fun:CMSColorWorldConvertData
-   fun:CMSTransformConvertData
-   fun:CGCMSInterfaceTransformConvertData
-   fun:CGColorTransformConvertData
-}
-{
-   bug_52364_b
-   Memcheck:Cond
-   fun:_ZNK10CMMMtxOnly10ConvertMinE10CMM3x3Type10CMM3x1TypeR12CMMMinBuffermm
-   fun:_ZNK21CMMConvMatrixTemplateI10CMMMtxOnly22CMMConvGrayToRGBMatrixE7ConvertER10CMMMinBitsP14CMMRuntimeInfomm
-   fun:_Z16CMMProcessBitmapP15CMMBitmapParams
-   fun:DoMatchBitmap
-   fun:CWMatchBitmap
-   fun:ConvertImageGeneric
-   fun:CMSColorWorldConvertData
-   fun:CMSTransformConvertData
-   fun:CGCMSInterfaceTransformConvertData
-   fun:CGColorTransformConvertData
-}
-{
    bug_52681_a
    Memcheck:Leak
    fun:_Znw*
@@ -909,15 +883,7 @@
    fun:gl_context_draw
    fun:ogl_array_flush
    fun:ogl_primitives_end_
-   fun:ogl_emit_quad_indices
-   fun:ogl_emit_nine_part_rect
-   fun:ogl_emit_rect_tex
-   fun:ogl_render_layer_contents_bg
-   fun:ogl_render_layer_image_
-   fun:ogl_render_layer_
-   fun:ogl_render_layer_image_
-   fun:ogl_render_layer_
-   fun:ogl_render_layers
+   ...
    fun:CARenderOGLRender
    fun:view_draw
    fun:view_display_link
@@ -936,15 +902,7 @@
    fun:gl_context_draw
    fun:ogl_array_flush
    fun:ogl_primitives_end_
-   fun:ogl_emit_quad_indices
-   fun:ogl_emit_nine_part_rect
-   fun:ogl_emit_rect_tex
-   fun:ogl_render_layer_contents_bg
-   fun:ogl_render_layer_image_
-   fun:ogl_render_layer_
-   fun:ogl_render_layer_image_
-   fun:ogl_render_layer_
-   fun:ogl_render_layers
+   ...
    fun:CARenderOGLRender
    fun:view_draw
    fun:view_display_link
@@ -960,15 +918,7 @@
    fun:gl_context_draw
    fun:ogl_array_flush
    fun:ogl_primitives_end_
-   fun:ogl_emit_quad_indices
-   fun:ogl_emit_nine_part_rect
-   fun:ogl_emit_rect_tex
-   fun:ogl_render_layer_contents_bg
-   fun:ogl_render_layer_image_
-   fun:ogl_render_layer_
-   fun:ogl_render_layer_image_
-   fun:ogl_render_layer_
-   fun:ogl_render_layers
+   ...
    fun:CARenderOGLRender
    fun:view_draw
    fun:view_display_link
@@ -1098,38 +1048,6 @@
    fun:_ZN4skia20BitmapPlatformDevice*
 }
 {
-   bug_61228_a
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN15FilePathWatcherC2Ev
-   fun:_ZN15FilePathWatcherC1Ev
-   fun:_ZN6policy22FileBasedPolicyWatcherC2Ev
-   fun:_ZN6policy22FileBasedPolicyWatcherC1Ev
-   fun:_ZN6policy23FileBasedPolicyProviderC2EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListEPNS0_8DelegateE
-   fun:_ZN6policy30ConfigurationPolicyProviderMacC2EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListEP14MacPreferences
-   fun:_ZN6policy30ConfigurationPolicyProviderMacC1EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListEP14MacPreferences
-}
-{
-   bug_61228_b
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN15FilePathWatcherC2Ev
-   fun:_ZN15FilePathWatcherC1Ev
-   fun:_ZN6policy22FileBasedPolicyWatcherC2Ev
-   fun:_ZN6policy22FileBasedPolicyWatcherC1Ev
-   fun:_ZN6policy23FileBasedPolicyProviderC2EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListEPNS0_8DelegateE
-   fun:_ZN6policy30ConfigurationPolicyProviderMacC2EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListE
-   fun:_ZN6policy30ConfigurationPolicyProviderMacC1EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListE
-}
-{
-   bug_61228_c
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN15FilePathWatcherC2Ev
-   fun:_ZN15FilePathWatcherC1Ev
-   fun:_ZN6policy21FileBasedPolicyLoader16InitOnFileThreadEv
-}
-{
    bug_61737
    Memcheck:Cond
    fun:_ZN2v88internal9preparser9PreParserINS0_7ScannerENS0_21PartialParserRecorderEE36ParseMemberWithNewPrefixesExpressionEPiPb
@@ -1198,32 +1116,6 @@
    fun:_ZN8Security12KeychainCore12CCallbackMgr7consumeEjjRKNS_8CssmDataE
    fun:_ZN8Security14SecurityServer16NotificationPort7receiveERKNS_12MachPlusPlus7MessageE
    fun:_ZN8Security12MachPlusPlus10CFAutoPort10cfCallbackEP12__CFMachPortPvlS4_
-}
-{
-   bug_63513
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN15FilePathWatcherC2Ev
-   fun:_ZN15FilePathWatcherC1Ev
-   fun:_ZN6policy22FileBasedPolicyWatcherC2Ev
-   fun:_ZN6policy22FileBasedPolicyWatcherC1Ev
-   fun:_ZN6policy23FileBasedPolicyProviderC2EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListEPNS0_8DelegateE
-   fun:_ZN6policy30ConfigurationPolicyProviderMacC2EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListE
-   fun:_ZN6policy30ConfigurationPolicyProviderMacC1EPKNS_27ConfigurationPolicyProvider20PolicyDefinitionListE
-   fun:_ZN6policy33ConfigurationPolicyProviderKeeper29CreateManagedPlatformProviderEv
-   fun:_ZN6policy33ConfigurationPolicyProviderKeeperC2Ev
-   fun:_ZN6policy33ConfigurationPolicyProviderKeeperC1Ev
-   fun:_ZN22DefaultSingletonTraitsIN6policy33ConfigurationPolicyProviderKeeperEE3NewEv
-   fun:_ZN9SingletonIN6policy33ConfigurationPolicyProviderKeeperE22DefaultSingletonTraitsIS1_ES1_E3getEv
-   fun:_ZN6policy28ConfigurationPolicyPrefStore36CreateManagedPlatformPolicyPrefStoreEv
-   fun:_ZN14PrefValueStore18RefreshPolicyPrefsEP14CallbackRunnerI6Tuple1ISt6vectorISsSaISsEEEE
-   fun:_Z16DispatchToMethodIN18TestingPrefService21TestingPrefValueStoreEM14PrefValueStoreFvP14CallbackRunnerI6Tuple1ISt6vectorISsSaISsEEEEESA_EvPT_T0_RKS4_IT1_E
-   fun:_ZN14RunnableMethodIN18TestingPrefService21TestingPrefValueStoreEM14PrefValueStoreFvP14CallbackRunnerI6Tuple1ISt6vectorISsSaISsEEEEES4_ISA_EE3RunEv
-   fun:_ZN11MessageLoop7RunTaskERKNS_11PendingTaskE
-   fun:_ZN11MessageLoop21DeferOrRunPendingTaskERKNS_11PendingTaskE
-   fun:_ZN11MessageLoop6DoWorkEv
-   fun:_ZN4base18MessagePumpDefault3RunEPNS_11MessagePump8DelegateE
-   fun:_ZN11MessageLoop11RunInternalEv
 }
 {
    bug_63670
@@ -1615,32 +1507,6 @@
    fun:_ZN11TabContents32CreateRenderViewForRenderManagerEP14RenderViewHost
 }
 {
-   bug_80811
-   Memcheck:Addr4
-   fun:objc_msgSend
-   fun:_ZN6webkit5npapi9PluginLib17ReadWebPluginInfoERK8FilePathPNS0_13WebPluginInfoE
-   fun:_ZN6webkit5npapi10PluginList14ReadPluginInfoERK8FilePathPNS0_13WebPluginInfoEPPKNS0_17PluginEntryPointsE
-   fun:_ZN6webkit5npapi10PluginList10LoadPluginERK8FilePathP12ScopedVectorINS0_11PluginGroupEE
-   fun:_ZN6webkit5npapi10PluginList18LoadPluginsFromDirERK8FilePathP12ScopedVectorINS0_11PluginGroupEEPSt3setIS2_St4lessIS2_ESaIS2_EE
-   fun:_ZN6webkit5npapi10PluginList19LoadPluginsInternalEP12ScopedVectorINS0_11PluginGroupEE
-   fun:_ZN6webkit5npapi10PluginList11LoadPluginsEb
-   fun:_ZN6webkit5npapi10PluginList17GetEnabledPluginsEbPSt6vectorINS0_13WebPluginInfoESaIS3_EE
-   fun:_ZN19RenderMessageFilter12OnGetPluginsEbPSt6vectorIN6webkit5npapi13WebPluginInfoESaIS3_EE
-   fun:_Z16DispatchToMethodI19RenderMessageFilterMS0_FvbPSt6vectorIN6webkit5npapi13WebPluginInfoESaIS4_EEEbS6_EvPT_T0_RK6Tuple1IT1_EPSD_IT2_E
-   fun:_ZN3IPC16MessageWithReplyI6Tuple1IbES1_IRSt6vectorIN6webkit5npapi13WebPluginInfoESaIS6_EEEE8DispatchI19RenderMessageFilterSD_MSD_FvbPS8_EEEbPKNS_7MessageEPT_PT0_T1_
-   fun:_ZN19RenderMessageFilter17OnMessageReceivedERKN3IPC7MessageEPb
-   fun:_ZN20BrowserMessageFilter15DispatchMessageERKN3IPC7MessageE
-   fun:_Z16DispatchToMethodI20BrowserMessageFilterMS0_FbRKN3IPC7MessageEES2_EvPT_T0_RK6Tuple1IT1_E
-   fun:_ZN14RunnableMethodI20BrowserMessageFilterMS0_FbRKN3IPC7MessageEE6Tuple1IS2_EE3RunEv
-   fun:_ZN12_GLOBAL__N_118TaskClosureAdapter3RunEv
-}
-{
-   bug_81788
-   Memcheck:Leak
-   ...
-   fun:CurResFile
-}
-{
    bug_82328
    Memcheck:Addr8
    fun:CGSFillDRAM64
@@ -1845,13 +1711,6 @@
    fun:-[BookmarkBarController initWithBrowser:initialWidth:delegate:resizeDelegate:]
 }
 {
-   bug_93038
-   Memcheck:Cond
-   fun:-[AvatarMenuBubbleController performLayout]
-   ...
-   fun:*AvatarMenuBubbleControllerTest*
-}
-{
    bug_93711_a
    Memcheck:Leak
    fun:malloc
@@ -1871,21 +1730,21 @@
    fun:memcpy
    fun:vp8_decode_update_thread_context
    fun:update_context_from_thread
-   fun:submit_packet
+   ...
    fun:ff_thread_decode_frame
    fun:avcodec_decode_video2
    fun:_ZN5media23FFmpegVideoDecodeEngine11DecodeFrameE13scoped_refptrINS_6BufferEE
    fun:_ZN5media23FFmpegVideoDecodeEngine18ConsumeVideoSampleE13scoped_refptrINS_6BufferEE
-   fun:_ZNK5media21DemuxCompleteActionP2IPNS_23FFmpegVideoDecodeEngineE13scoped_refptrINS_6BufferEEE10gmock_ImplIFvS5_EE17gmock_PerformImplIS5_N7testing8internal12ExcessiveArgESD_SD_SD_SD_SD_SD_SD_SD_EEvRKNSt3tr15tupleIS5_NSE_10_NullClassESG_SG_SG_SG_SG_SG_SG_SG_EET_T0_T1_T2_T3_T4_T5_T6_T7_T8_
-   fun:_ZN7testing8internal12ActionHelperIvN5media21DemuxCompleteActionP2IPNS2_23FFmpegVideoDecodeEngineE13scoped_refptrINS2_6BufferEEE10gmock_ImplIFvS8_EEEE7PerformIS8_EEvPSC_RKNSt3tr15tupleIT_NSG_10_NullClassESJ_SJ_SJ_SJ_SJ_SJ_SJ_SJ_EE
-   fun:_ZN5media21DemuxCompleteActionP2IPNS_23FFmpegVideoDecodeEngineE13scoped_refptrINS_6BufferEEE10gmock_ImplIFvS5_EE7PerformERKNSt3tr15tupleIS5_NSA_10_NullClassESC_SC_SC_SC_SC_SC_SC_SC_EE
-   fun:_ZNK7testing6ActionIFv13scoped_refptrIN5media6BufferEEEE7PerformERKNSt3tr15tupleIS4_NS7_10_NullClassES9_S9_S9_S9_S9_S9_S9_S9_EE
+   fun:_ZNK5media21DemuxCompleteActionP2IPNS_23FFmpegVideoDecodeEngineE13scoped_refptrINS_6BufferEEE10gmock_ImplIFvS5_EE17gmock_PerformImplIS5_N7testing8internal12ExcessiveArg*
+   ...
+   fun:_ZNK7testing6ActionIFv13scoped_refptrIN5media6BufferEEEE7PerformERKNSt3tr15tupleIS4_*
    fun:_ZN7testing8internal18ActionResultHolderIvE13PerformActionIFv13scoped_refptrIN5media6BufferEEEEEPS2_RKNS_6ActionIT_EERKNS0_8FunctionISB_E13ArgumentTupleE
    fun:_ZNK7testing8internal18FunctionMockerBaseIFv13scoped_refptrIN5media6BufferEEEE20UntypedPerformActionEPKvS9_
    fun:_ZN7testing8internal25UntypedFunctionMockerBase17UntypedInvokeWithEPKv
-   fun:_ZN7testing8internal18FunctionMockerBaseIFv13scoped_refptrIN5media6BufferEEEE10InvokeWithERKNSt3tr15tupleIS5_NS8_10_NullClassESA_SA_SA_SA_SA_SA_SA_SA_EE
+   ...
    fun:_ZN7testing8internal14FunctionMockerIFv13scoped_refptrIN5media6BufferEEEE6InvokeES5_
    fun:_ZN5media27FFmpegVideoDecodeEngineTest18ProduceVideoSampleE13scoped_refptrINS_6BufferEE
+   ...
    fun:_ZN5media23FFmpegVideoDecodeEngine9ReadInputEv
    fun:_ZN5media23FFmpegVideoDecodeEngine17ProduceVideoFrameE13scoped_refptrINS_10VideoFrameEE
    fun:_ZN5media27FFmpegVideoDecodeEngineTest21CallProduceVideoFrameEv
@@ -1899,9 +1758,155 @@
    fun:update_context_from_thread
    fun:frame_thread_free
    fun:avcodec_close
+   ...
    fun:_ZN5media23FFmpegVideoDecodeEngineD0Ev
    fun:_ZN10scoped_ptrIN5media23FFmpegVideoDecodeEngineEE5resetEPS1_
    fun:_ZN5media27FFmpegVideoDecodeEngineTestD2Ev
    fun:_ZN5media51FFmpegVideoDecodeEngineTest_DecodeFrame_Normal_TestD0Ev
-   fun:_ZN7testing4Test11DeleteSelf_Ev
+}
+{
+   bug_95718
+   Memcheck:Leak
+   fun:calloc
+   ...
+   fun:error_get_my_stack
+   fun:nss_ClearErrorStack
+   fun:NSSArena_Destroy
+   fun:nssList_Destroy
+   fun:remove_subject_entry
+   ...
+   fun:nssCertificate_Destroy
+   fun:NSSCertificate_Destroy
+   fun:CERT_DestroyCertificate
+   ...
+   fun:SSL_ClearSessionCache
+   ...
+   fun:_ZN3net19NSSSSLInitSingletonD1Ev
+   ...
+   fun:_ZN4base12LazyInstanceIN3net19NSSSSLInitSingletonENS_25DefaultLazyInstanceTraitsIS2_EEE6OnExitEPv
+   fun:_ZN4base8internal8Invoker1ILb0ENS0_15InvokerStorage1IPFvPvES3_EES5_E8DoInvokeEPNS0_18InvokerStorageBaseE
+   fun:_ZNK4base8CallbackIFvvEE3RunEv
+}
+{
+   bug_96300
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:_ZN12OCSPResponseC2ERK9cssm_datad
+   fun:tpVerifyCertGroupWithOCSP
+   fun:_ZN14AppleTPSession15CertGroupVerifyEllRK14cssm_certgroupPK22cssm_tp_verify_contextP29cssm_tp_verify_context_result
+   fun:_Z20cssm_CertGroupVerifylllPK14cssm_certgroupPK22cssm_tp_verify_contextP29cssm_tp_verify_context_result
+   fun:CSSM_TP_CertGroupVerify
+   fun:_ZN8Security10CssmClient6TPImpl15certGroupVerifyERKNS_9CertGroupERKNS_15TPVerifyContextEPNS_14TPVerifyResultE
+   fun:_ZN8Security12KeychainCore5Trust8evaluateEv
+   fun:SecTrustEvaluate
+   fun:_ZNK3net15X509Certificate14VerifyInternalERKSsiPNS_16CertVerifyResultE
+   fun:_ZNK3net15X509Certificate6VerifyERKSsiPNS_16CertVerifyResultE
+   fun:_ZN3net44X509CertificateTest_GoogleDigiNotarTest_Test8TestBodyEv
+}
+{
+   bug_96559a
+   Memcheck:Value4
+   fun:PyObject_Realloc
+}
+{
+   bug_96559b
+   Memcheck:Addr4
+   fun:PyObject_Realloc
+}
+{
+   bug_96559c
+   Memcheck:Cond
+   fun:PyObject_Realloc
+}
+{
+   bug_96559d
+   Memcheck:Value4
+   fun:PyObject_Free
+}
+{
+   bug_96559e
+   Memcheck:Addr4
+   fun:PyObject_Free
+}
+{
+   bug_96559f
+   Memcheck:Cond
+   fun:PyObject_Free
+}
+{
+   bug_96671
+   Memcheck:Cond
+   ...
+   fun:_ZNK12MockKeychain26SearchCreateFromAttributesEPKvmPK24SecKeychainAttributeListPP26OpaqueSecKeychainSearchRef
+   fun:_ZN14KeychainSearch17FindMatchingItemsEPSt6vectorIP24OpaqueSecKeychainItemRefSaIS2_EE
+}
+{
+   bug_96684a
+   Memcheck:Cond
+   fun:_ZN7content16P2PSocketHostTcp4SendERKN3net10IPEndPointERKSt6vectorIcSaIcEE
+   fun:*SocketHostTcpTest_*_Test8TestBodyEv
+}
+{
+   bug_96684b
+   Memcheck:Cond
+   fun:_ZN7content16P2PSocketHostUdp4SendERKN3net10IPEndPointERKSt6vectorIcSaIcEE
+   fun:*SocketHostUdpTest_*_Test8TestBodyEv
+}
+{
+   bug_96689
+   Memcheck:Cond
+   fun:_ZN3net11SSLHostInfo10ParseInnerERKSs
+   fun:_ZN3net11SSLHostInfo5ParseERKSs
+   fun:_ZN3net25DiskCacheBasedSSLHostInfo22DoWaitForDataReadyDoneEv
+   fun:_ZN3net25DiskCacheBasedSSLHostInfo6DoLoopEi
+   fun:_ZN3net25DiskCacheBasedSSLHostInfo12OnIOCompleteEi
+   fun:_Z16DispatchToMethodIN3net25DiskCacheBasedSSLHostInfoEMS1_FviEiEvPT_T0_RK6Tuple1IT1_E
+   fun:_ZN3net25DiskCacheBasedSSLHostInfo12CallbackImpl13RunWithParamsERK6Tuple1IiE
+   fun:_ZN14CallbackRunnerI6Tuple1IiEE3RunIiEEvRKT_
+   fun:_ZN3net9HttpCache8WorkItem10DoCallbackEiPN10disk_cache7BackendE
+   fun:_ZN3net9HttpCache16OnBackendCreatedEiPNS0_9PendingOpE
+   fun:_ZN3net9HttpCache12OnIOCompleteEiPNS0_9PendingOpE
+   fun:_ZN3net9HttpCache15BackendCallback13RunWithParamsERK6Tuple1IiE
+   fun:_ZN14CallbackRunnerI6Tuple1IiEE3RunIiEEvRKT_
+   fun:_ZN12_GLOBAL__N_126MockBlockingBackendFactory14FinishCreationEv
+   fun:_ZN47DiskCacheBasedSSLHostInfo_DeleteInCallback_Test8TestBodyEv
+}
+{
+   bug_97818
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZL14NewFromFontRefPK8__CTFontPKc
+   fun:_Z26SkCreateTypefaceFromCTFontPK8__CTFont
+   fun:_ZN7WebCoreL10setupPaintEP7SkPaintPKNS_14SimpleFontDataEPKNS_4FontE
+   fun:_ZNK7WebCore4Font10drawGlyphsEPNS_15GraphicsContextEPKNS_14SimpleFontDataERKNS_11GlyphBufferEiiRKNS_10FloatPointE
+   fun:_ZNK7WebCore4Font15drawGlyphBufferEPNS_15GraphicsContextERKNS_7TextRunERKNS_11GlyphBufferERKNS_10FloatPointE
+   fun:_ZNK7WebCore4Font14drawSimpleTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
+   fun:_ZNK7WebCore4Font8drawTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
+   fun:_ZN7WebCore15GraphicsContext8drawTextERKNS_4FontERKNS_7TextRunERKNS_10FloatPointEii
+   fun:_ZN7WebCoreL20paintTextWithShadowsEPNS_15GraphicsContextERKNS_4FontERKNS_7TextRunERKN3WTF12AtomicStringEiiiiRKNS_10FloatPointERKNS_9FloatRectEPKNS_10ShadowDataEbb
+   fun:_ZN7WebCore13InlineTextBox5paintERNS_9PaintInfoERKNS_8IntPointEii
+   fun:_ZN7WebCore13InlineFlowBox5paintERNS_9PaintInfoERKNS_8IntPointEii
+   fun:_ZN7WebCore13RootInlineBox5paintERNS_9PaintInfoERKNS_8IntPointEii
+   fun:_ZNK7WebCore17RenderLineBoxList5paintEPNS_20RenderBoxModelObjectERNS_9PaintInfoERKNS_8IntPointE
+   fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_8IntPointE
+   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_8IntPointE
+   fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_8IntPointE
+   fun:_ZN7WebCore11RenderBlock13paintChildrenERNS_9PaintInfoERKNS_8IntPointE
+   fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_8IntPointE
+   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_8IntPointE
+   fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_8IntPointE
+}
+{
+   bug_100022
+   Memcheck:Addr4
+   ...
+   fun:_ZNK11ImageLoader15containsAddressEPKv
+   fun:_ZN4dyld14bindLazySymbolEPK11mach_headerPm
+   fun:stub_binding_helper_interface2
+   obj:/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/CoreGraphics.framework/Versions/A/Resources/libRIP.A.dylib
+   obj:/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/CoreGraphics.framework/Versions/A/Resources/libRIP.A.dylib
+   fun:CGContextDrawImage
+   fun:_Z23PlotISImageRefInContextPvP9CGContext6CGRectssPK8RGBColormPK20_ISImageRefCallbacks
+   fun:PlotIconRefInContext
 }

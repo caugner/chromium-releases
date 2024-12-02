@@ -263,7 +263,7 @@ class HostResolverImpl::Request {
           const BoundNetLog& request_net_log,
           int id,
           const RequestInfo& info,
-          CompletionCallback* callback,
+          OldCompletionCallback* callback,
           AddressList* addresses)
       : source_net_log_(source_net_log),
         request_net_log_(request_net_log),
@@ -294,7 +294,7 @@ class HostResolverImpl::Request {
   void OnComplete(int error, const AddressList& addrlist) {
     if (error == OK)
       *addresses_ = CreateAddressListUsingPort(addrlist, port());
-    CompletionCallback* callback = callback_;
+    OldCompletionCallback* callback = callback_;
     MarkAsCancelled();
     callback->Run(error);
   }
@@ -337,7 +337,7 @@ class HostResolverImpl::Request {
   Job* job_;
 
   // The user's callback to invoke when the request completes.
-  CompletionCallback* callback_;
+  OldCompletionCallback* callback_;
 
   // The address list to save result into.
   AddressList* addresses_;
@@ -1138,7 +1138,7 @@ void HostResolverImpl::SetPoolConstraints(JobPoolIndex pool_index,
 
 int HostResolverImpl::Resolve(const RequestInfo& info,
                               AddressList* addresses,
-                              CompletionCallback* callback,
+                              OldCompletionCallback* callback,
                               RequestHandle* out_req,
                               const BoundNetLog& source_net_log) {
   DCHECK(addresses);
@@ -1159,8 +1159,7 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
   // outstanding jobs map.
   Key key = GetEffectiveKeyForRequest(info);
 
-  int rv = ResolveHelper(request_id, key, info, addresses,
-                         source_net_log, request_net_log);
+  int rv = ResolveHelper(request_id, key, info, addresses, request_net_log);
   if (rv != ERR_DNS_CACHE_MISS) {
     OnFinishRequest(source_net_log, request_net_log, request_id, info,
                     rv,
@@ -1201,8 +1200,7 @@ int HostResolverImpl::ResolveHelper(int request_id,
                                     const Key& key,
                                     const RequestInfo& info,
                                     AddressList* addresses,
-                                    const BoundNetLog& request_net_log,
-                                    const BoundNetLog& source_net_log) {
+                                    const BoundNetLog& request_net_log) {
   // The result of |getaddrinfo| for empty hosts is inconsistent across systems.
   // On Windows it gives the default interface's address, whereas on Linux it
   // gives an error. We will make it fail on all platforms for consistency.
@@ -1237,8 +1235,7 @@ int HostResolverImpl::ResolveFromCache(const RequestInfo& info,
   // outstanding jobs map.
   Key key = GetEffectiveKeyForRequest(info);
 
-  int rv = ResolveHelper(request_id, key, info, addresses, request_net_log,
-                         source_net_log);
+  int rv = ResolveHelper(request_id, key, info, addresses, request_net_log);
   OnFinishRequest(source_net_log, request_net_log, request_id, info,
                   rv,
                   0  /* os_error (unknown since from cache) */);
@@ -1304,6 +1301,9 @@ HostResolverImpl* HostResolverImpl::GetAsHostResolverImpl() {
   return this;
 }
 
+HostCache* HostResolverImpl::GetHostCache() {
+  return cache_.get();
+}
 
 bool HostResolverImpl::ResolveAsIP(const Key& key,
                                    const RequestInfo& info,

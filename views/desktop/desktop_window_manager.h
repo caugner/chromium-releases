@@ -4,19 +4,24 @@
 
 #ifndef VIEWS_DESKTOP_DESKTOP_WINDOW_MANAGER_H_
 #define VIEWS_DESKTOP_DESKTOP_WINDOW_MANAGER_H_
+#pragma once
 
+#include <vector>
+
+#include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "views/widget/widget.h"
 #include "views/widget/window_manager.h"
+
 
 namespace gfx {
 class Point;
 }
 
 namespace views {
-
 namespace desktop {
+
 class WindowController;
 
 // A tentative window manager for views destktop until we have *right*
@@ -28,6 +33,8 @@ class DesktopWindowManager : public views::WindowManager,
  public:
   DesktopWindowManager(Widget* desktop);
   virtual ~DesktopWindowManager();
+
+  void UpdateWindowsAfterScreenSizeChanged(const gfx::Rect& new_size);
 
   // views::WindowManager implementations:
   virtual void StartMoveDrag(views::Widget* widget,
@@ -42,6 +49,8 @@ class DesktopWindowManager : public views::WindowManager,
                               const views::KeyEvent& event) OVERRIDE;
   virtual bool HandleMouseEvent(views::Widget* widget,
                                 const views::MouseEvent& event) OVERRIDE;
+  virtual ui::TouchStatus HandleTouchEvent(views::Widget* widget,
+      const views::TouchEvent& event) OVERRIDE;
 
   virtual void Register(Widget* widget) OVERRIDE;
 
@@ -57,9 +66,17 @@ class DesktopWindowManager : public views::WindowManager,
 
   void Activate(Widget* widget);
 
+  // Returns true if a deactivated widget at the location was activated. Returns
+  // false otherwise.
+  bool ActivateWidgetAtLocation(Widget* widget, const gfx::Point& point);
+
   views::Widget* desktop_;
   views::Widget* mouse_capture_;
   views::Widget* active_widget_;
+
+  // An unordered list of all the top-level Widgets.
+  std::vector<views::Widget*> toplevels_;
+
   scoped_ptr<WindowController> window_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopWindowManager);

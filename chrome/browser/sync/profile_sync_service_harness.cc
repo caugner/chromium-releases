@@ -15,12 +15,13 @@
 #include "base/base64.h"
 #include "base/compiler_specific.h"
 #include "base/json/json_writer.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/task.h"
-#include "base/tracked.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sync_ui_util.h"
@@ -256,7 +257,7 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
     }
     case WAITING_FOR_INITIAL_SYNC: {
       VLOG(1) << GetClientInfoString("WAITING_FOR_INITIAL_SYNC");
-      if (IsSynced()) {
+      if (IsFullySynced()) {
         // The first sync cycle is now complete. We can start running tests.
         SignalStateCompleteWithNextState(FULLY_SYNCED);
         break;
@@ -270,9 +271,9 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
       }
       break;
     }
-    case WAITING_FOR_SYNC_TO_FINISH: {
-      VLOG(1) << GetClientInfoString("WAITING_FOR_SYNC_TO_FINISH");
-      if (IsSynced()) {
+    case WAITING_FOR_FULL_SYNC: {
+      VLOG(1) << GetClientInfoString("WAITING_FOR_FULL_SYNC");
+      if (IsFullySynced()) {
         // The sync cycle we were waiting for is complete.
         SignalStateCompleteWithNextState(FULLY_SYNCED);
         break;
@@ -288,6 +289,13 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
         // The client cannot reach the sync server because the network is
         // disabled. There is no need to wait anymore.
         SignalStateCompleteWithNextState(SERVER_UNREACHABLE);
+        break;
+      }
+      break;
+    }
+    case WAITING_FOR_DATA_SYNC: {
+      if (IsDataSynced()) {
+        SignalStateCompleteWithNextState(FULLY_SYNCED);
         break;
       }
       break;
@@ -325,8 +333,11 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
     }
     case WAITING_FOR_ENCRYPTION: {
       VLOG(1) << GetClientInfoString("WAITING_FOR_ENCRYPTION");
-      if (IsSynced() &&
-          IsTypeEncrypted(waiting_for_encryption_type_) &&
+      // The correctness of this if condition may depend on the ordering of its
+      // sub-expressions.  See crbug.com/98607, crbug.com/95619.
+      // TODO(rlarocque): Figure out a less brittle way of detecting this.
+      if (IsTypeEncrypted(waiting_for_encryption_type_) &&
+          IsFullySynced() &&
           GetLastSessionSnapshot()->num_conflicting_updates == 0) {
         // Encryption is now complete for the the type in which we were waiting.
         SignalStateCompleteWithNextState(FULLY_SYNCED);
@@ -363,13 +374,16 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
           GetLastSessionSnapshot();
       CHECK(snap);
       retry_verifier_.VerifyRetryInterval(*snap);
-      if (retry_verifier_.done())
+      if (retry_verifier_.done()) {
+        // Retry verifier is done verifying exponential backoff.
         SignalStateCompleteWithNextState(WAITING_FOR_NOTHING);
+      }
       break;
     }
     case WAITING_FOR_MIGRATION_TO_START: {
       VLOG(1) << GetClientInfoString("WAITING_FOR_MIGRATION_TO_START");
       if (HasPendingBackendMigration()) {
+        // There are pending migrations. Wait for them.
         SignalStateCompleteWithNextState(WAITING_FOR_MIGRATION_TO_FINISH);
       }
       break;
@@ -377,6 +391,17 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
     case WAITING_FOR_MIGRATION_TO_FINISH: {
       VLOG(1) << GetClientInfoString("WAITING_FOR_MIGRATION_TO_FINISH");
       if (!HasPendingBackendMigration()) {
+        // Done migrating.
+        SignalStateCompleteWithNextState(WAITING_FOR_NOTHING);
+      }
+      break;
+    }
+    case WAITING_FOR_ACTIONABLE_ERROR: {
+      VLOG(1) << GetClientInfoString("WAITING_FOR_ACTIONABLE_ERROR");
+      ProfileSyncService::Status status = GetStatus();
+      if (status.sync_protocol_error.action != browser_sync::UNKNOWN_ACTION &&
+          service_->unrecoverable_error_detected() == true) {
+        // An actionable error has been detected.
         SignalStateCompleteWithNextState(WAITING_FOR_NOTHING);
       }
       break;
@@ -386,7 +411,7 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
       if (GetStatus().server_reachable) {
         // The client was offline due to the network being disabled, but is now
         // back online. Wait for the pending sync cycle to complete.
-        SignalStateCompleteWithNextState(WAITING_FOR_SYNC_TO_FINISH);
+        SignalStateCompleteWithNextState(WAITING_FOR_FULL_SYNC);
       }
       break;
     }
@@ -527,15 +552,39 @@ bool ProfileSyncServiceHarness::AwaitSyncRestart() {
                                       "Waiting for sync configuration.");
 }
 
-bool ProfileSyncServiceHarness::AwaitSyncCycleCompletion(
+bool ProfileSyncServiceHarness::AwaitDataSyncCompletion(
     const std::string& reason) {
-  VLOG(1) << GetClientInfoString("AwaitSyncCycleCompletion");
+  VLOG(1) << GetClientInfoString("AwaitDataSyncCompletion");
+
+  CHECK(service()->sync_initialized());
+  CHECK_NE(wait_state_, SYNC_DISABLED);
+  CHECK_NE(wait_state_, SERVER_UNREACHABLE);
+
+  if (IsDataSynced()) {
+    // Client is already synced; don't wait.
+    return true;
+  }
+
+  wait_state_ = WAITING_FOR_DATA_SYNC;
+  AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
+  if (wait_state_ == FULLY_SYNCED) {
+    return true;
+  } else {
+    LOG(ERROR) << "AwaitDataSyncCompletion failed, state is now: "
+               << wait_state_;
+    return false;
+  }
+}
+
+bool ProfileSyncServiceHarness::AwaitFullSyncCompletion(
+    const std::string& reason) {
+  VLOG(1) << GetClientInfoString("AwaitFullSyncCompletion");
   if (wait_state_ == SYNC_DISABLED) {
     LOG(ERROR) << "Sync disabled for " << profile_debug_name_ << ".";
     return false;
   }
 
-  if (IsSynced()) {
+  if (IsFullySynced()) {
     // Client is already synced; don't wait.
     return true;
   }
@@ -543,12 +592,12 @@ bool ProfileSyncServiceHarness::AwaitSyncCycleCompletion(
   if (wait_state_ == SERVER_UNREACHABLE) {
     // Client was offline; wait for it to go online, and then wait for sync.
     AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
-    DCHECK_EQ(wait_state_, WAITING_FOR_SYNC_TO_FINISH);
+    DCHECK_EQ(wait_state_, WAITING_FOR_FULL_SYNC);
     return AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
   }
 
   DCHECK(service()->sync_initialized());
-  wait_state_ = WAITING_FOR_SYNC_TO_FINISH;
+  wait_state_ = WAITING_FOR_FULL_SYNC;
   AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs, reason);
   if (wait_state_ == FULLY_SYNCED) {
     // Client is online; sync was successful.
@@ -580,6 +629,17 @@ bool ProfileSyncServiceHarness::AwaitExponentialBackoffVerification() {
   AwaitStatusChangeWithTimeout(kExponentialBackoffVerificationTimeoutMs,
       "Verify Exponential backoff");
   return (retry_verifier_.Succeeded());
+}
+
+bool ProfileSyncServiceHarness::AwaitActionableError() {
+  ProfileSyncService::Status status = GetStatus();
+  CHECK(status.sync_protocol_error.action == browser_sync::UNKNOWN_ACTION);
+  wait_state_ = WAITING_FOR_ACTIONABLE_ERROR;
+  AwaitStatusChangeWithTimeout(kLiveSyncOperationTimeoutMs,
+      "Waiting for actionable error");
+  status = GetStatus();
+  return (status.sync_protocol_error.action != browser_sync::UNKNOWN_ACTION &&
+          service_->unrecoverable_error_detected());
 }
 
 bool ProfileSyncServiceHarness::AwaitMigration(
@@ -622,7 +682,7 @@ bool ProfileSyncServiceHarness::AwaitMigration(
               << " after migration finish is not WAITING_FOR_NOTHING";
       return false;
     }
-    if (!AwaitSyncCycleCompletion(
+    if (!AwaitFullSyncCompletion(
             "Config sync cycle after migration cycle")) {
       return false;
     }
@@ -632,7 +692,7 @@ bool ProfileSyncServiceHarness::AwaitMigration(
 bool ProfileSyncServiceHarness::AwaitMutualSyncCycleCompletion(
     ProfileSyncServiceHarness* partner) {
   VLOG(1) << GetClientInfoString("AwaitMutualSyncCycleCompletion");
-  if (!AwaitSyncCycleCompletion("Sync cycle completion on active client."))
+  if (!AwaitFullSyncCompletion("Sync cycle completion on active client."))
     return false;
   return partner->WaitUntilTimestampMatches(this,
       "Sync cycle completion on passive client.");
@@ -641,7 +701,7 @@ bool ProfileSyncServiceHarness::AwaitMutualSyncCycleCompletion(
 bool ProfileSyncServiceHarness::AwaitGroupSyncCycleCompletion(
     std::vector<ProfileSyncServiceHarness*>& partners) {
   VLOG(1) << GetClientInfoString("AwaitGroupSyncCycleCompletion");
-  if (!AwaitSyncCycleCompletion("Sync cycle completion on active client."))
+  if (!AwaitFullSyncCompletion("Sync cycle completion on active client."))
     return false;
   bool return_value = true;
   for (std::vector<ProfileSyncServiceHarness*>::iterator it =
@@ -723,27 +783,49 @@ ProfileSyncService::Status ProfileSyncServiceHarness::GetStatus() {
   return service()->QueryDetailedSyncStatus();
 }
 
-bool ProfileSyncServiceHarness::IsSynced() {
-  if (service() == NULL) {
-    VLOG(1) << GetClientInfoString("IsSynced: false");
-    return false;
-  }
-  const SyncSessionSnapshot* snap = GetLastSessionSnapshot();
-  // TODO(rsimha): Remove additional checks of snap->has_more_to_sync and
-  // snap->unsynced_count once http://crbug.com/48989 is fixed.
-  bool is_synced = snap &&
+// We use this function to share code between IsFullySynced and IsDataSynced
+// while ensuring that all conditions are evaluated using on the same snapshot.
+bool ProfileSyncServiceHarness::IsDataSyncedImpl(
+    const browser_sync::sessions::SyncSessionSnapshot *snap) {
+  return snap &&
       snap->num_blocking_conflicting_updates == 0 &&
       ServiceIsPushingChanges() &&
       GetStatus().notifications_enabled &&
       !service()->HasUnsyncedItems() &&
       !snap->has_more_to_sync &&
-      snap->unsynced_count == 0 &&
       !HasPendingBackendMigration() &&
       service()->passphrase_required_reason() !=
-      sync_api::REASON_SET_PASSPHRASE_FAILED;
+        sync_api::REASON_SET_PASSPHRASE_FAILED;
+}
+
+bool ProfileSyncServiceHarness::IsDataSynced() {
+  if (service() == NULL) {
+    VLOG(1) << GetClientInfoString("IsDataSynced(): false");
+    return false;
+  }
+
+  const SyncSessionSnapshot* snap = GetLastSessionSnapshot();
+  bool is_data_synced = IsDataSyncedImpl(snap);
+
   VLOG(1) << GetClientInfoString(
-      is_synced ? "IsSynced: true" : "IsSynced: false");
-  return is_synced;
+      is_data_synced ? "IsDataSynced: true" : "IsDataSynced: false");
+  return is_data_synced;
+}
+
+bool ProfileSyncServiceHarness::IsFullySynced() {
+  if (service() == NULL) {
+    VLOG(1) << GetClientInfoString("IsFullySynced: false");
+    return false;
+  }
+  const SyncSessionSnapshot* snap = GetLastSessionSnapshot();
+  // snap->unsynced_count == 0 is a fairly reliable indicator of whether or not
+  // our timestamp is in sync with the server.
+  bool is_fully_synced = IsDataSyncedImpl(snap) &&
+      snap->unsynced_count == 0;
+
+  VLOG(1) << GetClientInfoString(
+      is_fully_synced ? "IsFullySynced: true" : "IsFullySynced: false");
+  return is_fully_synced;
 }
 
 bool ProfileSyncServiceHarness::HasPendingBackendMigration() {
@@ -756,7 +838,7 @@ bool ProfileSyncServiceHarness::MatchesOtherClient(
     ProfileSyncServiceHarness* partner) {
   // TODO(akalin): Shouldn't this belong with the intersection check?
   // Otherwise, this function isn't symmetric.
-  if (!IsSynced()) {
+  if (!IsFullySynced()) {
     VLOG(2) << profile_debug_name_ << ": not synced, assuming doesn't match";
     return false;
   }
@@ -775,7 +857,7 @@ bool ProfileSyncServiceHarness::MatchesOtherClient(
           << ": common types are "
           << syncable::ModelTypeSetToString(intersection_types);
 
-  if (!intersection_types.empty() && !partner->IsSynced()) {
+  if (!intersection_types.empty() && !partner->IsFullySynced()) {
     VLOG(2) << "non-empty common types and "
             << partner->profile_debug_name_ << " isn't synced";
     return false;
@@ -844,7 +926,7 @@ bool ProfileSyncServiceHarness::EnableSyncForDatatype(
 
   synced_datatypes.insert(syncable::ModelTypeFromInt(datatype));
   service()->OnUserChoseDatatypes(false, synced_datatypes);
-  if (AwaitSyncCycleCompletion("Datatype configuration.")) {
+  if (AwaitFullSyncCompletion("Datatype configuration.")) {
     VLOG(1) << "EnableSyncForDatatype(): Enabled sync for datatype "
             << syncable::ModelTypeToString(datatype)
             << " on " << profile_debug_name_ << ".";
@@ -877,7 +959,7 @@ bool ProfileSyncServiceHarness::DisableSyncForDatatype(
 
   synced_datatypes.erase(it);
   service()->OnUserChoseDatatypes(false, synced_datatypes);
-  if (AwaitSyncCycleCompletion("Datatype reconfiguration.")) {
+  if (AwaitFullSyncCompletion("Datatype reconfiguration.")) {
     VLOG(1) << "DisableSyncForDatatype(): Disabled sync for datatype "
             << syncable::ModelTypeToString(datatype)
             << " on " << profile_debug_name_ << ".";
@@ -907,7 +989,7 @@ bool ProfileSyncServiceHarness::EnableSyncForAllDatatypes() {
     synced_datatypes.insert(syncable::ModelTypeFromInt(i));
   }
   service()->OnUserChoseDatatypes(true, synced_datatypes);
-  if (AwaitSyncCycleCompletion("Datatype reconfiguration.")) {
+  if (AwaitFullSyncCompletion("Datatype reconfiguration.")) {
     VLOG(1) << "EnableSyncForAllDatatypes(): Enabled sync for all datatypes on "
             << profile_debug_name_ << ".";
     return true;
@@ -1003,8 +1085,11 @@ bool ProfileSyncServiceHarness::EnableEncryptionForType(
 
 bool ProfileSyncServiceHarness::WaitForTypeEncryption(
     syncable::ModelType type) {
-  if (IsSynced() &&
-      IsTypeEncrypted(type) &&
+  // The correctness of this if condition depends on the ordering of its
+  // sub-expressions.  See crbug.com/95619.
+  // TODO(rlarocque): Figure out a less brittle way of detecting this.
+  if (IsTypeEncrypted(type) &&
+      IsFullySynced() &&
       GetLastSessionSnapshot()->num_conflicting_updates == 0) {
     // Encryption is already complete for |type|; do not wait.
     return true;
@@ -1028,10 +1113,11 @@ bool ProfileSyncServiceHarness::IsTypeEncrypted(syncable::ModelType type) {
   return (encrypted_types.count(type) != 0);
 }
 
-bool ProfileSyncServiceHarness::IsTypeRegistered(syncable::ModelType type) {
-  syncable::ModelTypeSet registered_types;
-  service_->GetRegisteredDataTypes(&registered_types);
-  return (registered_types.count(type) != 0);
+bool ProfileSyncServiceHarness::IsTypeRunning(syncable::ModelType type) {
+  browser_sync::DataTypeController::StateMap state_map;
+  service_->GetDataTypeControllerStates(&state_map);
+  return (state_map.count(type) != 0 &&
+          state_map[type] == browser_sync::DataTypeController::RUNNING);
 }
 
 bool ProfileSyncServiceHarness::IsTypePreferred(syncable::ModelType type) {

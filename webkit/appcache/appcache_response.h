@@ -11,27 +11,22 @@
 #include "base/task.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
-#include "net/disk_cache/disk_cache.h"
 #include "net/http/http_response_info.h"
 #include "webkit/appcache/appcache_interfaces.h"
 
 namespace net {
 class IOBuffer;
 }
-namespace disk_cache {
-class Entry;
-};
 
 namespace appcache {
 
-class AppCacheDiskCache;
 class AppCacheService;
 
 static const int kUnkownResponseDataSize = -1;
 
 // Response info for a particular response id. Instances are tracked in
 // the working set.
-class AppCacheResponseInfo
+class APPCACHE_EXPORT AppCacheResponseInfo
     : public base::RefCounted<AppCacheResponseInfo> {
  public:
   // AppCacheResponseInfo takes ownership of the http_info.
@@ -59,7 +54,7 @@ class AppCacheResponseInfo
 
 // A refcounted wrapper for HttpResponseInfo so we can apply the
 // refcounting semantics used with IOBuffer with these structures too.
-struct HttpResponseInfoIOBuffer
+struct APPCACHE_EXPORT HttpResponseInfoIOBuffer
     : public base::RefCountedThreadSafe<HttpResponseInfoIOBuffer> {
   scoped_ptr<net::HttpResponseInfo> http_info;
   int response_data_size;
@@ -72,8 +67,34 @@ struct HttpResponseInfoIOBuffer
   virtual ~HttpResponseInfoIOBuffer();
 };
 
+// Low level storage api used by the response reader and writer.
+class APPCACHE_EXPORT AppCacheDiskCacheInterface {
+ public:
+  class Entry {
+   public:
+    virtual int Read(int index, int64 offset, net::IOBuffer* buf, int buf_len,
+                     net::OldCompletionCallback* completion_callback) = 0;
+    virtual int Write(int index, int64 offset, net::IOBuffer* buf, int buf_len,
+                      net::OldCompletionCallback* completion_callback) = 0;
+    virtual int64 GetSize(int index) = 0;
+    virtual void Close() = 0;
+   protected:
+    virtual ~Entry() {}
+  };
+
+  virtual int CreateEntry(int64 key, Entry** entry,
+                          net::OldCompletionCallback* callback) = 0;
+  virtual int OpenEntry(int64 key, Entry** entry,
+                        net::OldCompletionCallback* callback) = 0;
+  virtual int DoomEntry(int64 key, net::OldCompletionCallback* callback) = 0;
+
+ protected:
+  friend class base::RefCounted<AppCacheDiskCacheInterface>;
+  virtual ~AppCacheDiskCacheInterface() {}
+};
+
 // Common base class for response reader and writer.
-class AppCacheResponseIO {
+class APPCACHE_EXPORT AppCacheResponseIO {
  public:
   virtual ~AppCacheResponseIO();
   int64 response_id() const { return response_id_; }
@@ -82,13 +103,13 @@ class AppCacheResponseIO {
   friend class ScopedRunnableMethodFactory<AppCacheResponseIO>;
 
   template <class T>
-  class EntryCallback : public net::CancelableCompletionCallback<T> {
+  class EntryCallback : public net::CancelableOldCompletionCallback<T> {
    public:
-    typedef net::CancelableCompletionCallback<T> BaseClass;
+    typedef net::CancelableOldCompletionCallback<T> BaseClass;
     EntryCallback(T* object,  void (T::* method)(int))
         : BaseClass(object, method), entry_ptr_(NULL) {}
 
-    disk_cache::Entry* entry_ptr_;  // Accessed directly.
+    AppCacheDiskCacheInterface::Entry* entry_ptr_;  // Accessed directly.
    private:
     ~EntryCallback() {
       if (entry_ptr_)
@@ -96,29 +117,30 @@ class AppCacheResponseIO {
     }
   };
 
-  AppCacheResponseIO(int64 response_id, AppCacheDiskCache* disk_cache);
+  AppCacheResponseIO(int64 response_id,
+                     AppCacheDiskCacheInterface* disk_cache);
 
   virtual void OnIOComplete(int result) = 0;
 
   bool IsIOPending() { return user_callback_ ? true : false; }
-  void ScheduleIOCompletionCallback(int result);
-  void InvokeUserCompletionCallback(int result);
+  void ScheduleIOOldCompletionCallback(int result);
+  void InvokeUserOldCompletionCallback(int result);
   void ReadRaw(int index, int offset, net::IOBuffer* buf, int buf_len);
   void WriteRaw(int index, int offset, net::IOBuffer* buf, int buf_len);
 
   const int64 response_id_;
-  AppCacheDiskCache* disk_cache_;
-  disk_cache::Entry* entry_;
+  AppCacheDiskCacheInterface* disk_cache_;
+  AppCacheDiskCacheInterface::Entry* entry_;
   scoped_refptr<HttpResponseInfoIOBuffer> info_buffer_;
   scoped_refptr<net::IOBuffer> buffer_;
   int buffer_len_;
-  net::CompletionCallback* user_callback_;
+  net::OldCompletionCallback* user_callback_;
   ScopedRunnableMethodFactory<AppCacheResponseIO> method_factory_;
 
  private:
   void OnRawIOComplete(int result);
 
-  scoped_refptr<net::CancelableCompletionCallback<AppCacheResponseIO> >
+  scoped_refptr<net::CancelableOldCompletionCallback<AppCacheResponseIO> >
       raw_callback_;
 };
 
@@ -126,7 +148,7 @@ class AppCacheResponseIO {
 // and there is a read in progress, the implementation will return
 // immediately but will take care of any side effect of cancelling the
 // operation.  In other words, instances are safe to delete at will.
-class AppCacheResponseReader : public AppCacheResponseIO {
+class APPCACHE_EXPORT AppCacheResponseReader : public AppCacheResponseIO {
  public:
   virtual ~AppCacheResponseReader();
 
@@ -141,7 +163,7 @@ class AppCacheResponseReader : public AppCacheResponseIO {
   // Should only be called where there is no Read operation in progress.
   // (virtual for testing)
   virtual void ReadInfo(HttpResponseInfoIOBuffer* info_buf,
-                        net::CompletionCallback* callback);
+                        net::OldCompletionCallback* callback);
 
   // Reads data from storage. Always returns the result of the read
   // asynchronously through the 'callback'. Returns the number of bytes read
@@ -152,7 +174,7 @@ class AppCacheResponseReader : public AppCacheResponseIO {
   // Should only be called where there is no Read operation in progress.
   // (virtual for testing)
   virtual void ReadData(net::IOBuffer* buf, int buf_len,
-                        net::CompletionCallback* callback);
+                        net::OldCompletionCallback* callback);
 
   // Returns true if there is a read operation, for data or info, pending.
   bool IsReadPending() { return IsIOPending(); }
@@ -167,7 +189,8 @@ class AppCacheResponseReader : public AppCacheResponseIO {
   friend class MockAppCacheStorage;
 
   // Should only be constructed by the storage class.
-  AppCacheResponseReader(int64 response_id, AppCacheDiskCache* disk_cache);
+  AppCacheResponseReader(int64 response_id,
+                         AppCacheDiskCacheInterface* disk_cache);
 
   virtual void OnIOComplete(int result);
   void ContinueReadInfo();
@@ -185,7 +208,7 @@ class AppCacheResponseReader : public AppCacheResponseIO {
 // and there is a write in progress, the implementation will return
 // immediately but will take care of any side effect of cancelling the
 // operation. In other words, instances are safe to delete at will.
-class AppCacheResponseWriter : public AppCacheResponseIO {
+class APPCACHE_EXPORT AppCacheResponseWriter : public AppCacheResponseIO {
  public:
   virtual ~AppCacheResponseWriter();
 
@@ -197,7 +220,7 @@ class AppCacheResponseWriter : public AppCacheResponseIO {
   // required parameter. The contents of 'info_buf' are not modified.
   // Should only be called where there is no Write operation in progress.
   void WriteInfo(HttpResponseInfoIOBuffer* info_buf,
-                 net::CompletionCallback* callback);
+                 net::OldCompletionCallback* callback);
 
   // Writes data to storage. Always returns the result of the write
   // asynchronously through the 'callback'. Returns the number of bytes written
@@ -208,7 +231,7 @@ class AppCacheResponseWriter : public AppCacheResponseIO {
   // The contents of 'buf' are not modified.
   // Should only be called where there is no Write operation in progress.
   void WriteData(net::IOBuffer* buf, int buf_len,
-                 net::CompletionCallback* callback);
+                 net::OldCompletionCallback* callback);
 
   // Returns true if there is a write pending.
   bool IsWritePending() { return IsIOPending(); }
@@ -228,7 +251,8 @@ class AppCacheResponseWriter : public AppCacheResponseIO {
   };
 
   // Should only be constructed by the storage class.
-  AppCacheResponseWriter(int64 response_id, AppCacheDiskCache* disk_cache);
+  AppCacheResponseWriter(int64 response_id,
+                         AppCacheDiskCacheInterface* disk_cache);
 
   virtual void OnIOComplete(int result);
   void ContinueWriteInfo();

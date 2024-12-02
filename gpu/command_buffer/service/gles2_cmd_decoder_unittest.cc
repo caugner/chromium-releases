@@ -12,6 +12,8 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_base.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/context_group.h"
+#include "gpu/command_buffer/service/stream_texture_mock.h"
+#include "gpu/command_buffer/service/stream_texture_manager_mock.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -4363,6 +4365,31 @@ TEST_F(GLES2DecoderManualInitTest, GetNoCompressedTextureFormats) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
+TEST_F(GLES2DecoderManualInitTest, CompressedTexImage2DBucketBadBucket) {
+  InitDecoder(
+      "GL_EXT_texture_compression_s3tc",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  const uint32 kBadBucketId = 123;
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  CompressedTexImage2DBucket cmd;
+  cmd.Init(
+      GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, 4, 4, 0,
+      kBadBucketId);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  CompressedTexSubImage2DBucket cmd2;
+  cmd2.Init(
+      GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
+      kBadBucketId);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+}
+
 TEST_F(GLES2DecoderWithShaderTest, GetProgramInfoCHROMIUMValidArgs) {
   const uint32 kBucketId = 123;
   GetProgramInfoCHROMIUM cmd;
@@ -4624,6 +4651,263 @@ TEST_F(GLES2DecoderManualInitTest, BindGeneratesResourceFalse) {
   cmd4.Init(GL_RENDERBUFFER, kInvalidClientId);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd4));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, CreateStreamTextureCHROMIUM) {
+  const GLuint kObjectId = 123;
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  StrictMock<MockStreamTextureManager> manager;
+  decoder_->SetStreamTextureManager(&manager);
+
+  EXPECT_CALL(manager, CreateStreamTexture(kServiceTextureId,
+                                           client_texture_id_))
+      .WillOnce(Return(kObjectId))
+      .RetiresOnSaturation();
+
+  CreateStreamTextureCHROMIUM cmd;
+  CreateStreamTextureCHROMIUM::Result* result =
+      static_cast<CreateStreamTextureCHROMIUM::Result*>(shared_memory_address_);
+  cmd.Init(client_texture_id_, shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(kObjectId, *result);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  TextureManager::TextureInfo* info = GetTextureInfo(client_texture_id_);
+  EXPECT_TRUE(info != NULL);
+  EXPECT_TRUE(info->IsStreamTexture());
+}
+
+TEST_F(GLES2DecoderManualInitTest, CreateStreamTextureCHROMIUMBadId) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  CreateStreamTextureCHROMIUM cmd;
+  CreateStreamTextureCHROMIUM::Result* result =
+      static_cast<CreateStreamTextureCHROMIUM::Result*>(shared_memory_address_);
+  cmd.Init(kNewClientId, shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(static_cast<GLuint>(GL_ZERO), *result);
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, CreateStreamTextureCHROMIUMAlreadyBound) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+
+  CreateStreamTextureCHROMIUM cmd;
+  CreateStreamTextureCHROMIUM::Result* result =
+      static_cast<CreateStreamTextureCHROMIUM::Result*>(shared_memory_address_);
+  cmd.Init(client_texture_id_, shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(static_cast<GLuint>(GL_ZERO), *result);
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, CreateStreamTextureCHROMIUMAlreadySet) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  TextureManager::TextureInfo* info = GetTextureInfo(client_texture_id_);
+  info->SetStreamTexture(true);
+
+  CreateStreamTextureCHROMIUM cmd;
+  cmd.Init(client_texture_id_, shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, BindStreamTextureCHROMIUM) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture GL_OES_EGL_image_external",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  StrictMock<MockStreamTextureManager> manager;
+  StrictMock<MockStreamTexture> texture;
+  decoder_->SetStreamTextureManager(&manager);
+
+  TextureManager::TextureInfo* info = GetTextureInfo(client_texture_id_);
+  info->SetStreamTexture(true);
+
+  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_EXTERNAL_OES, kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(manager, LookupStreamTexture(kServiceTextureId))
+      .WillOnce(Return(&texture))
+      .RetiresOnSaturation();
+  EXPECT_CALL(texture, Update())
+      .Times(1)
+      .RetiresOnSaturation();
+
+  BindTexture cmd;
+  cmd.Init(GL_TEXTURE_EXTERNAL_OES, client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, BindStreamTextureCHROMIUMInvalid) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  TextureManager::TextureInfo* info = GetTextureInfo(client_texture_id_);
+  info->SetStreamTexture(true);
+
+  BindTexture cmd;
+  cmd.Init(GL_TEXTURE_2D, client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  BindTexture cmd2;
+  cmd2.Init(GL_TEXTURE_CUBE_MAP, client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd2));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, DestroyStreamTextureCHROMIUM) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  StrictMock<MockStreamTextureManager> manager;
+  decoder_->SetStreamTextureManager(&manager);
+
+  TextureManager::TextureInfo* info = GetTextureInfo(client_texture_id_);
+  info->SetStreamTexture(true);
+
+  EXPECT_CALL(manager, DestroyStreamTexture(kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  DestroyStreamTextureCHROMIUM cmd;
+  cmd.Init(client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_FALSE(info->IsStreamTexture());
+  EXPECT_EQ(0U, info->target());
+}
+
+TEST_F(GLES2DecoderManualInitTest, DestroyStreamTextureCHROMIUMInvalid) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  TextureManager::TextureInfo* info = GetTextureInfo(client_texture_id_);
+  info->SetStreamTexture(false);
+
+  DestroyStreamTextureCHROMIUM cmd;
+  cmd.Init(client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, DestroyStreamTextureCHROMIUMBadId) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  DestroyStreamTextureCHROMIUM cmd;
+  cmd.Init(GL_ZERO);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, StreamTextureCHROMIUMNullMgr) {
+  InitDecoder(
+      "GL_CHROMIUM_stream_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  CreateStreamTextureCHROMIUM cmd;
+  cmd.Init(client_texture_id_, shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteCmd(cmd));
+  GetGLError(); // ignore internal error
+
+  TextureManager::TextureInfo* info = GetTextureInfo(client_texture_id_);
+  info->SetStreamTexture(true);
+
+  DestroyStreamTextureCHROMIUM cmd2;
+  cmd2.Init(client_texture_id_);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteCmd(cmd2));
+  GetGLError(); // ignore internal error
+}
+
+TEST_F(GLES2DecoderTest, EnableFeatureCHROMIUMBadBucket) {
+  const uint32 kBadBucketId = 123;
+  EnableFeatureCHROMIUM cmd;
+  cmd.Init(kBadBucketId, shared_memory_id_, shared_memory_offset_);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+}
+
+TEST_F(GLES2DecoderTest, RequestExtensionCHROMIUMBadBucket) {
+  const uint32 kBadBucketId = 123;
+  RequestExtensionCHROMIUM cmd;
+  cmd.Init(kBadBucketId);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
 }
 
 // TODO(gman): Complete this test.

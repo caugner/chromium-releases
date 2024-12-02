@@ -5,23 +5,23 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/content_settings/content_settings_pattern.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/geolocation/geolocation_settings_state.h"
+#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
-#include "chrome/browser/tab_contents/infobar.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/content_settings_pattern.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/geolocation/arbitrator_dependency_factories_for_test.h"
@@ -344,14 +344,6 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
               settings_state.state_map().find(requesting_origin)->second);
   }
 
-  void WaitForNavigation() {
-    LOG(WARNING) << "will block for navigation";
-    NavigationController* controller =
-        &current_browser_->GetSelectedTabContents()->controller();
-    ui_test_utils::WaitForNavigation(controller);
-    LOG(WARNING) << "navigated";
-  }
-
   void CheckStringValueFromJavascriptForTab(
       const std::string& expected, const std::string& function,
       TabContents* tab_contents) {
@@ -506,8 +498,12 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   // MockLocationProvider must have been created.
   ASSERT_TRUE(MockLocationProvider::instance_);
   Geoposition fresh_position = GeopositionFromLatLong(3.17, 4.23);
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(
+          &current_browser_->GetSelectedTabContents()->controller()));
   NotifyGeoposition(fresh_position);
-  WaitForNavigation();
+  observer.Wait();
   CheckGeoposition(fresh_position);
 
   // Disable navigation for this frame.
@@ -539,8 +535,12 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   // MockLocationProvider must have been created.
   ASSERT_TRUE(MockLocationProvider::instance_);
   Geoposition cached_position = GeopositionFromLatLong(5.67, 8.09);
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(
+          &current_browser_->GetSelectedTabContents()->controller()));
   NotifyGeoposition(cached_position);
-  WaitForNavigation();
+  observer.Wait();
   CheckGeoposition(cached_position);
 
   // Disable navigation for this frame.
@@ -643,8 +643,12 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, TwoWatchesInOneFrame) {
 
   // The second watch will now have cancelled. Ensure an update still makes
   // its way through to the first watcher.
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      Source<NavigationController>(
+          &current_browser_->GetSelectedTabContents()->controller()));
   NotifyGeoposition(final_position);
-  WaitForNavigation();
+  observer.Wait();
   CheckGeoposition(final_position);
 }
 

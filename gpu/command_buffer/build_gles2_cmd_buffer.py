@@ -220,9 +220,10 @@ GL_APICALL void         GL_APIENTRY glRateLimitOffscreenContextCHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glGetMultipleIntegervCHROMIUM (const GLenum* pnames, GLuint count, GLint* results, GLsizeiptr size);
 GL_APICALL void         GL_APIENTRY glGetProgramInfoCHROMIUM (GLidProgram program, GLsizeiNotNegative bufsize, GLsizei* size, void* info);
 GL_APICALL void         GL_APIENTRY glPlaceholder447CHROMIUM (void);
-GL_APICALL void         GL_APIENTRY glPlaceholder451CHROMIUM (void);
-GL_APICALL void         GL_APIENTRY glPlaceholder452CHROMIUM (void);
+GL_APICALL GLuint       GL_APIENTRY glCreateStreamTextureCHROMIUM (GLuint texture);
+GL_APICALL void         GL_APIENTRY glDestroyStreamTextureCHROMIUM (GLuint texture);
 GL_APICALL void         GL_APIENTRY glPlaceholder453CHROMIUM (void);
+GL_APICALL void         GL_APIENTRY glGetTranslatedShaderSourceANGLE (GLidShader shader, GLsizeiNotNegative bufsize, GLsizei* length, char* source);
 """
 
 # This is the list of all commmands that will be generated and their Id.
@@ -426,11 +427,12 @@ _CMD_ID_TABLE = {
   'ResizeCHROMIUM':                                            448,
   'GetRequestableExtensionsCHROMIUM':                          449,
   'RequestExtensionCHROMIUM':                                  450,
-  'Placeholder451CHROMIUM':                                    451,
-  'Placeholder452CHROMIUM':                                    452,
+  'CreateStreamTextureCHROMIUM':                               451,
+  'DestroyStreamTextureCHROMIUM':                              452,
   'Placeholder453CHROMIUM':                                    453,
   'GetMultipleIntegervCHROMIUM':                               454,
   'GetProgramInfoCHROMIUM':                                    455,
+  'GetTranslatedShaderSourceANGLE':                            456,
 }
 
 # This is a list of enum names and their valid values. It is used to map
@@ -831,6 +833,7 @@ _ENUM_LISTS = {
       'GL_COMPILE_STATUS',
       'GL_INFO_LOG_LENGTH',
       'GL_SHADER_SOURCE_LENGTH',
+      'GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE',
     ],
   },
   'ShaderPrecision': {
@@ -1424,6 +1427,12 @@ _FUNCTION_INFO = {
   },
   'GetTexParameterfv': {'type': 'GETn', 'result': ['SizedResult<GLfloat>']},
   'GetTexParameteriv': {'type': 'GETn', 'result': ['SizedResult<GLint>']},
+  'GetTranslatedShaderSourceANGLE': {
+    'type': 'STRn',
+    'get_len_func': 'DoGetShaderiv',
+    'get_len_enum': 'GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE',
+    'unit_test': False,
+    },
   'GetUniformfv': {
     'type': 'Custom',
     'immediate': False,
@@ -1750,15 +1759,30 @@ _FUNCTION_INFO = {
   },
   'Placeholder447CHROMIUM': {
     'type': 'UnknownCommand',
+    'extension': True,
+    'chromium': True,
   },
-  'Placeholder451CHROMIUM': {
-    'type': 'UnknownCommand',
-  },
-  'Placeholder452CHROMIUM': {
-    'type': 'UnknownCommand',
-  },
+  'CreateStreamTextureCHROMIUM':  {
+    'type': 'Custom',
+    'cmd_args': 'GLuint client_id, void* result',
+    'result': ['GLuint'],
+    'immediate': False,
+    'impl_func': False,
+    'expectation': False,
+    'extension': True,
+    'chromium': True,
+   },
+  'DestroyStreamTextureCHROMIUM':  {
+    'type': 'Custom',
+    'impl_func': False,
+    'expectation': False,
+    'extension': True,
+    'chromium': True,
+   },
   'Placeholder453CHROMIUM': {
     'type': 'UnknownCommand',
+    'extension': True,
+    'chromium': True,
   },
 }
 
@@ -2037,8 +2061,8 @@ COMPILE_ASSERT(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
 
   def WriteFormatTest(self, func, file):
     """Writes a format test for a command."""
-    file.Write("TEST(GLES2FormatTest, %s) {\n" % func.name)
-    file.Write("  %s cmd = { { 0 } };\n" % func.name)
+    file.Write("TEST_F(GLES2FormatTest, %s) {\n" % func.name)
+    file.Write("  %s& cmd = *GetBufferAs<%s>();\n" % (func.name, func.name))
     file.Write("  void* next_cmd = cmd.Set(\n")
     file.Write("      &cmd")
     args = func.GetCmdArgs()
@@ -2051,41 +2075,18 @@ COMPILE_ASSERT(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
     file.Write("  EXPECT_EQ(static_cast<uint32>(%s::kCmdId),\n" % func.name)
     file.Write("            cmd.header.command);\n")
     func.type_handler.WriteCmdSizeTest(func, file)
-    file.Write("  EXPECT_EQ(static_cast<char*>(next_cmd),\n")
-    file.Write("            reinterpret_cast<char*>(&cmd) + sizeof(cmd));\n");
     for arg in args:
       file.Write("  EXPECT_EQ(static_cast<%s>(%d), cmd.%s);\n" %
                  (arg.type, value, arg.name))
       value += 1
+    file.Write("  CheckBytesWrittenMatchesExpectedSize(\n")
+    file.Write("      next_cmd, sizeof(cmd));\n")
     file.Write("}\n")
     file.Write("\n")
 
   def WriteImmediateFormatTest(self, func, file):
     """Writes a format test for an immediate version of a command."""
-    file.Write("TEST(GLES2FormatTest, %s) {\n" % func.name)
-    file.Write("  int8 buf[256] = { 0, };\n")
-    file.Write("  %s& cmd = *static_cast<%s*>(static_cast<void*>(&buf));\n" %
-               (func.name, func.name))
-    file.Write("  void* next_cmd = cmd.Set(\n")
-    file.Write("      &cmd")
-    args = func.GetCmdArgs()
-    value = 11
-    for arg in args:
-      file.Write(",\n      static_cast<%s>(%d)" % (arg.type, value))
-      value += 1
-    file.Write(");\n")
-    value = 11
-    file.Write("  EXPECT_EQ(static_cast<uint32>(%s::kCmdId),\n" % func.name)
-    file.Write("            cmd.header.command);\n")
-    func.type_handler.WriteImmediateCmdSizeTest(func, file)
-    file.Write("  EXPECT_EQ(static_cast<char*>(next_cmd),\n")
-    file.Write("            reinterpret_cast<char*>(&cmd) + sizeof(cmd));\n");
-    for arg in args:
-      file.Write("  EXPECT_EQ(static_cast<%s>(%d), cmd.%s);\n" %
-                 (arg.type, value, arg.name))
-      value += 1
-    file.Write("}\n")
-    file.Write("\n")
+    pass
 
   def WriteBucketFormatTest(self, func, file):
     """Writes a format test for a bucket version of a command."""
@@ -2963,33 +2964,20 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs) {
 
   def WriteImmediateFormatTest(self, func, file):
     """Overrriden from TypeHandler."""
-    file.Write("TEST(GLES2FormatTest, %s) {\n" % func.name)
+    file.Write("TEST_F(GLES2FormatTest, %s) {\n" % func.name)
     file.Write("  static GLuint ids[] = { 12, 23, 34, };\n")
-    file.Write("  int8 buf[256] = { 0, };\n")
-    file.Write("  %s& cmd = *static_cast<%s*>(static_cast<void*>(&buf));\n" %
-               (func.name, func.name))
+    file.Write("  %s& cmd = *GetBufferAs<%s>();\n" % (func.name, func.name))
     file.Write("  void* next_cmd = cmd.Set(\n")
-    file.Write("      &cmd")
-    args = func.GetCmdArgs()
-    value = 11
-    for arg in args:
-      file.Write(",\n      static_cast<%s>(%d)" % (arg.type, value))
-      value += 1
-    file.Write(",\n      ids);\n")
-    args = func.GetCmdArgs()
-    value = 11
+    file.Write("      &cmd, static_cast<GLsizei>(arraysize(ids)), ids);\n")
     file.Write("  EXPECT_EQ(static_cast<uint32>(%s::kCmdId),\n" % func.name)
     file.Write("            cmd.header.command);\n")
     file.Write("  EXPECT_EQ(sizeof(cmd) +\n")
     file.Write("            RoundSizeToMultipleOfEntries(cmd.n * 4u),\n")
     file.Write("            cmd.header.size * 4u);\n")
-    file.Write("  EXPECT_EQ(static_cast<char*>(next_cmd),\n")
-    file.Write("            reinterpret_cast<char*>(&cmd) + sizeof(cmd) +\n");
-    file.Write("                RoundSizeToMultipleOfEntries(cmd.n * 4u));\n");
-    for arg in args:
-      file.Write("  EXPECT_EQ(static_cast<%s>(%d), cmd.%s);\n" %
-                 (arg.type, value, arg.name))
-      value += 1
+    file.Write("  EXPECT_EQ(static_cast<GLsizei>(arraysize(ids)), cmd.n);\n");
+    file.Write("  CheckBytesWrittenMatchesExpectedSize(\n")
+    file.Write("      next_cmd, sizeof(cmd) +\n")
+    file.Write("      RoundSizeToMultipleOfEntries(arraysize(ids) * 4u));\n")
     file.Write("  // TODO(gman): Check that ids were inserted;\n")
     file.Write("}\n")
     file.Write("\n")
@@ -3287,33 +3275,20 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs) {
 
   def WriteImmediateFormatTest(self, func, file):
     """Overrriden from TypeHandler."""
-    file.Write("TEST(GLES2FormatTest, %s) {\n" % func.name)
+    file.Write("TEST_F(GLES2FormatTest, %s) {\n" % func.name)
     file.Write("  static GLuint ids[] = { 12, 23, 34, };\n")
-    file.Write("  int8 buf[256] = { 0, };\n")
-    file.Write("  %s& cmd = *static_cast<%s*>(static_cast<void*>(&buf));\n" %
-               (func.name, func.name))
+    file.Write("  %s& cmd = *GetBufferAs<%s>();\n" % (func.name, func.name))
     file.Write("  void* next_cmd = cmd.Set(\n")
-    file.Write("      &cmd")
-    args = func.GetCmdArgs()
-    value = 11
-    for arg in args:
-      file.Write(",\n      static_cast<%s>(%d)" % (arg.type, value))
-      value += 1
-    file.Write(",\n      ids);\n")
-    args = func.GetCmdArgs()
-    value = 11
+    file.Write("      &cmd, static_cast<GLsizei>(arraysize(ids)), ids);\n")
     file.Write("  EXPECT_EQ(static_cast<uint32>(%s::kCmdId),\n" % func.name)
     file.Write("            cmd.header.command);\n")
     file.Write("  EXPECT_EQ(sizeof(cmd) +\n")
     file.Write("            RoundSizeToMultipleOfEntries(cmd.n * 4u),\n")
     file.Write("            cmd.header.size * 4u);\n")
-    file.Write("  EXPECT_EQ(static_cast<char*>(next_cmd),\n")
-    file.Write("            reinterpret_cast<char*>(&cmd) + sizeof(cmd) +\n");
-    file.Write("                RoundSizeToMultipleOfEntries(cmd.n * 4u));\n");
-    for arg in args:
-      file.Write("  EXPECT_EQ(static_cast<%s>(%d), cmd.%s);\n" %
-                 (arg.type, value, arg.name))
-      value += 1
+    file.Write("  EXPECT_EQ(static_cast<GLsizei>(arraysize(ids)), cmd.n);\n");
+    file.Write("  CheckBytesWrittenMatchesExpectedSize(\n")
+    file.Write("      next_cmd, sizeof(cmd) +\n")
+    file.Write("      RoundSizeToMultipleOfEntries(arraysize(ids) * 4u));\n")
     file.Write("  // TODO(gman): Check that ids were inserted;\n")
     file.Write("}\n")
     file.Write("\n")
@@ -3651,16 +3626,14 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteImmediateFormatTest(self, func, file):
     """Overrriden from TypeHandler."""
-    file.Write("TEST(GLES2FormatTest, %s) {\n" % func.name)
+    file.Write("TEST_F(GLES2FormatTest, %s) {\n" % func.name)
     file.Write("  const int kSomeBaseValueToTestWith = 51;\n")
     file.Write("  static %s data[] = {\n" % func.info.data_type)
     for v in range(0, func.info.count):
       file.Write("    static_cast<%s>(kSomeBaseValueToTestWith + %d),\n" %
                  (func.info.data_type, v))
     file.Write("  };\n")
-    file.Write("  int8 buf[256] = { 0, };\n")
-    file.Write("  %s& cmd = *static_cast<%s*>(static_cast<void*>(&buf));\n" %
-               (func.name, func.name))
+    file.Write("  %s& cmd = *GetBufferAs<%s>();\n" % (func.name, func.name))
     file.Write("  void* next_cmd = cmd.Set(\n")
     file.Write("      &cmd")
     args = func.GetCmdArgs()
@@ -3676,13 +3649,13 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("  EXPECT_EQ(sizeof(cmd) +\n")
     file.Write("            RoundSizeToMultipleOfEntries(sizeof(data)),\n")
     file.Write("            cmd.header.size * 4u);\n")
-    file.Write("  EXPECT_EQ(static_cast<char*>(next_cmd),\n")
-    file.Write("            reinterpret_cast<char*>(&cmd) + sizeof(cmd) +\n")
-    file.Write("                RoundSizeToMultipleOfEntries(sizeof(data)));\n")
     for arg in args:
       file.Write("  EXPECT_EQ(static_cast<%s>(%d), cmd.%s);\n" %
                  (arg.type, value, arg.name))
       value += 1
+    file.Write("  CheckBytesWrittenMatchesExpectedSize(\n")
+    file.Write("      next_cmd, sizeof(cmd) +\n")
+    file.Write("      RoundSizeToMultipleOfEntries(sizeof(data)));\n")
     file.Write("  // TODO(gman): Check that data was inserted;\n")
     file.Write("}\n")
     file.Write("\n")
@@ -3882,16 +3855,18 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteImmediateFormatTest(self, func, file):
     """Overrriden from TypeHandler."""
-    file.Write("TEST(GLES2FormatTest, %s) {\n" % func.name)
+    file.Write("TEST_F(GLES2FormatTest, %s) {\n" % func.name)
     file.Write("  const int kSomeBaseValueToTestWith = 51;\n")
     file.Write("  static %s data[] = {\n" % func.info.data_type)
     for v in range(0, func.info.count * 2):
       file.Write("    static_cast<%s>(kSomeBaseValueToTestWith + %d),\n" %
                  (func.info.data_type, v))
     file.Write("  };\n")
-    file.Write("  int8 buf[256] = { 0, };\n")
-    file.Write("  %s& cmd = *static_cast<%s*>(static_cast<void*>(&buf));\n" %
-               (func.name, func.name))
+    file.Write("  %s& cmd = *GetBufferAs<%s>();\n" % (func.name, func.name))
+    file.Write("  const GLsizei kNumElements = 2;\n")
+    file.Write("  const size_t kExpectedCmdSize =\n")
+    file.Write("      sizeof(cmd) + kNumElements * sizeof(%s) * %d;\n" %
+               (func.info.data_type, func.info.count))
     file.Write("  void* next_cmd = cmd.Set(\n")
     file.Write("      &cmd")
     args = func.GetCmdArgs()
@@ -3904,16 +3879,14 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     value = 1
     file.Write("  EXPECT_EQ(static_cast<uint32>(%s::kCmdId),\n" % func.name)
     file.Write("            cmd.header.command);\n")
-    file.Write("  EXPECT_EQ(sizeof(cmd) +\n")
-    file.Write("            RoundSizeToMultipleOfEntries(sizeof(data)),\n")
-    file.Write("            cmd.header.size * 4u);\n")
-    file.Write("  EXPECT_EQ(static_cast<char*>(next_cmd),\n")
-    file.Write("            reinterpret_cast<char*>(&cmd) + sizeof(cmd) +\n")
-    file.Write("                RoundSizeToMultipleOfEntries(sizeof(data)));\n")
+    file.Write("  EXPECT_EQ(kExpectedCmdSize, cmd.header.size * 4u);\n")
     for arg in args:
       file.Write("  EXPECT_EQ(static_cast<%s>(%d), cmd.%s);\n" %
                  (arg.type, value, arg.name))
       value += 1
+    file.Write("  CheckBytesWrittenMatchesExpectedSize(\n")
+    file.Write("      next_cmd, sizeof(cmd) +\n")
+    file.Write("      RoundSizeToMultipleOfEntries(sizeof(data)));\n")
     file.Write("  // TODO(gman): Check that data was inserted;\n")
     file.Write("}\n")
     file.Write("\n")
@@ -4059,9 +4032,8 @@ class GLcharHandler(CustomHandler):
                         (arg.type, value, arg.name))
       value += 1
     code = """
-TEST(GLES2FormatTest, %(func_name)s) {
-  int8 buf[256] = { 0, };
-  %(func_name)s& cmd = *static_cast<%(func_name)s*>(static_cast<void*>(&buf));
+TEST_F(GLES2FormatTest, %(func_name)s) {
+  %(func_name)s& cmd = *GetBufferAs<%(func_name)s>();
   static const char* const test_str = \"test string\";
   void* next_cmd = cmd.Set(
       &cmd,
@@ -4079,6 +4051,10 @@ TEST(GLES2FormatTest, %(func_name)s) {
 %(check_code)s
   EXPECT_EQ(static_cast<uint32>(strlen(test_str)), cmd.data_size);
   EXPECT_EQ(0, memcmp(test_str, ImmediateDataAddress(&cmd), strlen(test_str)));
+  CheckBytesWritten(
+      next_cmd,
+      sizeof(cmd) + RoundSizeToMultipleOfEntries(strlen(test_str)),
+      sizeof(cmd) + strlen(test_str));
 }
 
 """
@@ -4202,7 +4178,8 @@ TEST_F(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
 
 
 class STRnHandler(TypeHandler):
-  """Handler for GetProgramInfoLog, GetShaderInfoLog and GetShaderSource."""
+  """Handler for GetProgramInfoLog, GetShaderInfoLog, GetShaderSource, and
+  GetTranslatedShaderSourceANGLE."""
 
   def __init__(self):
     TypeHandler.__init__(self)
@@ -5753,8 +5730,8 @@ const size_t GLES2Util::enum_to_string_table_len_ =
       file.Write("typedef %s %s;\n" % (v, k))
     file.Write("#endif  // __gl2_h_\n\n")
 
-    file.Write("#define PPB_OPENGLES2_INTERFACE "
-        "\"PPB_OpenGLES;2.0\"\n")
+    file.Write("#define PPB_OPENGLES2_INTERFACE_1_0 \"PPB_OpenGLES2;1.0\"\n")
+    file.Write("#define PPB_OPENGLES2_INTERFACE PPB_OPENGLES2_INTERFACE_1_0\n")
 
     file.Write("\nstruct PPB_OpenGLES2 {\n")
     for func in self.original_functions:
@@ -5961,7 +5938,7 @@ def main(argv):
   if options.alternate_mode == "ppapi":
     # To trigger this action, do "make ppapi_gles_bindings"
     os.chdir("ppapi");
-    gen.WritePepperGLES2Interface("c/dev/ppb_opengles_dev.h")
+    gen.WritePepperGLES2Interface("c/ppb_opengles2.h")
     gen.WriteGLES2ToPPAPIBridge("lib/gl/gles2/gles2.c")
 
   elif options.alternate_mode == "chrome_ppapi":

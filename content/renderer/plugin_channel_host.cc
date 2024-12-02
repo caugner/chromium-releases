@@ -1,11 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/plugin_channel_host.h"
 
+#include "content/common/child_process.h"
+#include "content/common/npobject_base.h"
 #include "content/common/plugin_messages.h"
-#include "content/plugin/npobject_base.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_channel_posix.h"
@@ -71,12 +72,13 @@ PluginChannelHost* PluginChannelHost::GetPluginChannelHost(
     const IPC::ChannelHandle& channel_handle,
     base::MessageLoopProxy* ipc_message_loop) {
   PluginChannelHost* result =
-      static_cast<PluginChannelHost*>(PluginChannelBase::GetChannel(
+      static_cast<PluginChannelHost*>(NPChannelBase::GetChannel(
           channel_handle,
           IPC::Channel::MODE_CLIENT,
           ClassFactory,
           ipc_message_loop,
-          true));
+          true,
+          ChildProcess::current()->GetShutDownEvent()));
   return result;
 }
 
@@ -87,8 +89,10 @@ PluginChannelHost::~PluginChannelHost() {
 }
 
 bool PluginChannelHost::Init(base::MessageLoopProxy* ipc_message_loop,
-                             bool create_pipe_now) {
-  bool ret = PluginChannelBase::Init(ipc_message_loop, create_pipe_now);
+                             bool create_pipe_now,
+                             base::WaitableEvent* shutdown_event) {
+  bool ret =
+      NPChannelBase::Init(ipc_message_loop, create_pipe_now, shutdown_event);
   is_listening_filter_ = new IsListeningFilter;
   channel_->AddFilter(is_listening_filter_);
   return ret;
@@ -104,7 +108,7 @@ int PluginChannelHost::GenerateRouteID() {
 void PluginChannelHost::AddRoute(int route_id,
                                  IPC::Channel::Listener* listener,
                                  NPObjectBase* npobject) {
-  PluginChannelBase::AddRoute(route_id, listener, npobject);
+  NPChannelBase::AddRoute(route_id, listener, npobject);
 
   if (!npobject)
     proxies_[route_id] = listener;
@@ -112,7 +116,7 @@ void PluginChannelHost::AddRoute(int route_id,
 
 void PluginChannelHost::RemoveRoute(int route_id) {
   proxies_.erase(route_id);
-  PluginChannelBase::RemoveRoute(route_id);
+  NPChannelBase::RemoveRoute(route_id);
 }
 
 bool PluginChannelHost::OnControlMessageReceived(const IPC::Message& message) {
@@ -130,12 +134,12 @@ void PluginChannelHost::OnSetException(const std::string& message) {
   WebKit::WebBindings::setException(NULL, message.c_str());
 }
 
-void PluginChannelHost::OnPluginShuttingDown(const IPC::Message& message) {
+void PluginChannelHost::OnPluginShuttingDown() {
   expecting_shutdown_ = true;
 }
 
 void PluginChannelHost::OnChannelError() {
-  PluginChannelBase::OnChannelError();
+  NPChannelBase::OnChannelError();
 
   for (ProxyMap::iterator iter = proxies_.begin();
        iter != proxies_.end(); iter++) {

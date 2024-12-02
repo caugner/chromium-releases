@@ -38,7 +38,6 @@
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
-#include "net/predictor_api.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
@@ -50,9 +49,6 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/login_library.h"
-#include "chrome/browser/chromeos/system_key_event_listener.h"
-#include "chrome/browser/chromeos/xinput_hierarchy_changed_event_listener.h"
 #endif
 
 using base::Time;
@@ -126,25 +122,10 @@ void Shutdown() {
   // Shutdown the IPC channel to the service processes.
   ServiceProcessControl::GetInstance()->Disconnect();
 
-#if defined(OS_CHROMEOS)
-  // The system key event listener needs to be shut down earlier than when
-  // Singletons are finally destroyed in AtExitManager.
-  chromeos::SystemKeyEventListener::GetInstance()->Stop();
-
-  // The XInput2 event listener needs to be shut down earlier than when
-  // Singletons are finally destroyed in AtExitManager.
-  chromeos::XInputHierarchyChangedEventListener::GetInstance()->Stop();
-#endif
-
   // WARNING: During logoff/shutdown (WM_ENDSESSION) we may not have enough
   // time to get here. If you have something that *must* happen on end session,
   // consider putting it in BrowserProcessImpl::EndSession.
   PrefService* prefs = g_browser_process->local_state();
-
-  // TODO(rlp): Temporarily removing predictor shutdown to eliminate loading
-  // a profile during shutdown. See http://crbug.com/90114. This will mean
-  // some prefetch information is not saved which may make prefetch a bit
-  // slower than usual until the full CL fixing this takes over.
 
   MetricsService* metrics = g_browser_process->metrics_service();
   if (metrics)
@@ -179,6 +160,11 @@ void Shutdown() {
   // before calling UninstallJankometer().
   delete g_browser_process;
   g_browser_process = NULL;
+
+  // crbug.com/95079 - This needs to happen after the browser process object
+  // goes away.
+  ProfileManager::NukeDeletedProfilesFromDisk();
+
 #if defined(OS_CHROMEOS)
   chromeos::BootTimesLoader::Get()->AddLogoutTimeMarker("BrowserDeleted",
                                                         true);

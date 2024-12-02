@@ -17,7 +17,6 @@
 #include <utility>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/input_method/ibus_input_methods.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
@@ -26,7 +25,80 @@
 namespace chromeos {
 namespace input_method {
 
+namespace {
+
+const char kFallbackLayout[] = "us";
+
+InputMethodDescriptors* GetSupportedInputMethodsInternal(
+    const InputMethodWhitelist& whitelist) {
+  InputMethodDescriptors* input_methods = new InputMethodDescriptors;
+  input_methods->reserve(arraysize(kIBusEngines));
+  for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
+    input_methods->push_back(InputMethodDescriptor(
+        whitelist,
+        kIBusEngines[i].input_method_id,
+        kIBusEngines[i].xkb_layout_id,
+        kIBusEngines[i].language_code));
+  }
+  return input_methods;
+}
+
+}  // namespace
+
+class InputMethodWhitelist {
+ public:
+  InputMethodWhitelist() {
+    for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
+      supported_input_methods_.insert(kIBusEngines[i].input_method_id);
+    }
+    for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
+      supported_layouts_.insert(kIBusEngines[i].xkb_layout_id);
+    }
+  }
+
+  // Returns true if |input_method_id| is whitelisted.
+  bool InputMethodIdIsWhitelisted(const std::string& input_method_id) const {
+    return (supported_input_methods_.count(input_method_id) > 0);
+  }
+
+  // Returns true if |xkb_layout| is supported.
+  bool XkbLayoutIsSupported(const std::string& xkb_layout) const {
+    return (supported_layouts_.count(xkb_layout) > 0);
+  }
+
+ private:
+  std::set<std::string> supported_input_methods_;
+  std::set<std::string> supported_layouts_;
+
+  DISALLOW_COPY_AND_ASSIGN(InputMethodWhitelist);
+};
+
+InputMethodDescriptor::InputMethodDescriptor(
+    const InputMethodWhitelist& whitelist,
+    const std::string& id,
+    const std::string& raw_layout,
+    const std::string& language_code)
+    : id_(id),
+      language_code_(language_code) {
+  keyboard_layout_ = kFallbackLayout;
+  base::SplitString(raw_layout, ',', &virtual_keyboard_layouts_);
+
+  // Find a valid XKB layout name from the comma-separated list, |raw_layout|.
+  // Only the first acceptable XKB layout name in the list is used as the
+  // |keyboard_layout| value of the InputMethodDescriptor object to be created
+  for (size_t i = 0; i < virtual_keyboard_layouts_.size(); ++i) {
+    if (whitelist.XkbLayoutIsSupported(virtual_keyboard_layouts_[i])) {
+      keyboard_layout_ = virtual_keyboard_layouts_[i];
+      DCHECK(keyboard_layout_.find(",") == std::string::npos);
+      break;
+    }
+  }
+}
+
 InputMethodDescriptor::InputMethodDescriptor() {
+}
+
+InputMethodDescriptor::~InputMethodDescriptor() {
 }
 
 InputMethodDescriptor::InputMethodDescriptor(
@@ -42,7 +114,20 @@ InputMethodDescriptor::InputMethodDescriptor(
       in_virtual_keyboard_layouts, ',', &virtual_keyboard_layouts_);
 }
 
-InputMethodDescriptor::~InputMethodDescriptor() {
+// static
+InputMethodDescriptor
+InputMethodDescriptor::GetFallbackInputMethodDescriptor() {
+  return InputMethodDescriptor(
+      "xkb:us::eng", kFallbackLayout, kFallbackLayout, "eng");
+}
+
+std::string InputMethodDescriptor::ToString() const {
+  std::stringstream stream;
+  stream << "id=" << id()
+         << ", keyboard_layout=" << keyboard_layout()
+         << ", virtual_keyboard_layouts=" << virtual_keyboard_layouts_.size()
+         << ", language_code=" << language_code();
+  return stream.str();
 }
 
 ImeProperty::ImeProperty(const std::string& in_key,
@@ -67,6 +152,16 @@ ImeProperty::ImeProperty()
 ImeProperty::~ImeProperty() {
 }
 
+std::string ImeProperty::ToString() const {
+  std::stringstream stream;
+  stream << "key=" << key
+         << ", label=" << label
+         << ", is_selection_item=" << is_selection_item
+         << ", is_selection_item_checked=" << is_selection_item_checked
+         << ", selection_item_id=" << selection_item_id;
+  return stream.str();
+}
+
 ImeConfigValue::ImeConfigValue()
     : type(kValueTypeString),
       int_value(0),
@@ -76,58 +171,30 @@ ImeConfigValue::ImeConfigValue()
 ImeConfigValue::~ImeConfigValue() {
 }
 
-// Returns true if |input_method_id| is whitelisted.
-bool InputMethodIdIsWhitelisted(const std::string& input_method_id) {
-  static std::set<std::string>* g_supported_input_methods = NULL;
-  if (!g_supported_input_methods) {
-    g_supported_input_methods = new std::set<std::string>;
-    for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
-      g_supported_input_methods->insert(kIBusEngines[i].input_method_id);
-    }
-  }
-  return (g_supported_input_methods->count(input_method_id) > 0);
-}
-
-// Returns true if |xkb_layout| is supported.
-bool XkbLayoutIsSupported(const std::string& xkb_layout) {
-  static std::set<std::string>* g_supported_layouts = NULL;
-  if (!g_supported_layouts) {
-    g_supported_layouts = new std::set<std::string>;
-    for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
-      g_supported_layouts->insert(kIBusEngines[i].xkb_layout_id);
-    }
-  }
-  return (g_supported_layouts->count(xkb_layout) > 0);
-}
-
-// Creates an InputMethodDescriptor object. |raw_layout| is a comma-separated
-// list of XKB and virtual keyboard layouts.
-// (e.g. "special-us-virtual-keyboard-for-the-input-method,us")
-InputMethodDescriptor InputMethodDescriptor::CreateInputMethodDescriptor(
-    const std::string& id,
-    const std::string& raw_layout,
-    const std::string& language_code) {
-  static const char fallback_layout[] = "us";
-  std::string physical_keyboard_layout = fallback_layout;
-  const std::string& virtual_keyboard_layout = raw_layout;
-
-  std::vector<std::string> layout_names;
-  base::SplitString(raw_layout, ',', &layout_names);
-
-  // Find a valid XKB layout name from the comma-separated list, |raw_layout|.
-  // Only the first acceptable XKB layout name in the list is used as the
-  // |keyboard_layout| value of the InputMethodDescriptor object to be created.
-  for (size_t i = 0; i < layout_names.size(); ++i) {
-    if (XkbLayoutIsSupported(layout_names[i])) {
-      physical_keyboard_layout = layout_names[i];
+std::string ImeConfigValue::ToString() const {
+  std::stringstream stream;
+  stream << "type=" << type;
+  switch (type) {
+    case kValueTypeString:
+      stream << ", string_value=" << string_value;
       break;
-    }
+    case kValueTypeInt:
+      stream << ", int_value=" << int_value;
+      break;
+    case kValueTypeBool:
+      stream << ", bool_value=" << (bool_value ? "true" : "false");
+      break;
+    case kValueTypeStringList:
+      stream << ", string_list_value=";
+      for (size_t i = 0; i < string_list_value.size(); ++i) {
+        if (i) {
+          stream << ",";
+        }
+        stream << string_list_value[i];
+      }
+      break;
   }
-
-  return InputMethodDescriptor(id,
-                               physical_keyboard_layout,
-                               virtual_keyboard_layout,
-                               language_code);
+  return stream.str();
 }
 
 #if defined(HAVE_IBUS)
@@ -158,50 +225,6 @@ bool PropertyKeyIsBlacklisted(const char* key) {
     }
   }
   return false;
-}
-
-// Removes input methods that are not whitelisted from |requested_input_methods|
-// and stores them on |out_filtered_input_methods|.
-// TODO(yusukes): Write unittest.
-void FilterInputMethods(const std::vector<std::string>& requested_input_methods,
-                        std::vector<std::string>* out_filtered_input_methods) {
-  out_filtered_input_methods->clear();
-  for (size_t i = 0; i < requested_input_methods.size(); ++i) {
-    const std::string& input_method = requested_input_methods[i];
-    if (InputMethodIdIsWhitelisted(input_method.c_str())) {
-      out_filtered_input_methods->push_back(input_method);
-    } else {
-      LOG(ERROR) << "Unsupported input method: " << input_method;
-    }
-  }
-}
-
-// Frees input method names in |engines| and the list itself. Please make sure
-// that |engines| points the head of the list.
-void FreeInputMethodNames(GList* engines) {
-  if (engines) {
-    for (GList* cursor = engines; cursor; cursor = g_list_next(cursor)) {
-      g_object_unref(IBUS_ENGINE_DESC(cursor->data));
-    }
-    g_list_free(engines);
-  }
-}
-
-// Copies input method names in |engines| to |out|.
-// TODO(yusukes): Write unittest.
-void AddInputMethodNames(const GList* engines, InputMethodDescriptors* out) {
-  DCHECK(out);
-  for (; engines; engines = g_list_next(engines)) {
-    IBusEngineDesc* engine_desc = IBUS_ENGINE_DESC(engines->data);
-    const gchar* name = ibus_engine_desc_get_name(engine_desc);
-    const gchar* layout = ibus_engine_desc_get_layout(engine_desc);
-    const gchar* language = ibus_engine_desc_get_language(engine_desc);
-    if (InputMethodIdIsWhitelisted(name)) {
-      out->push_back(InputMethodDescriptor::CreateInputMethodDescriptor(
-          name, layout, language));
-      VLOG(1) << name << " (preloaded)";
-    }
-  }
 }
 
 // Returns IBusInputContext for |input_context_path|. NULL on errors.
@@ -492,10 +515,51 @@ std::string PrintPropList(IBusPropList *prop_list, int tree_level) {
 // The real implementation of the IBusController.
 class IBusControllerImpl : public IBusController {
  public:
-  // TODO(satorux,yusukes): Remove use of singleton here.
-  static IBusControllerImpl* GetInstance() {
-    return Singleton<IBusControllerImpl,
-        LeakySingletonTraits<IBusControllerImpl> >::get();
+  IBusControllerImpl()
+      : ibus_(NULL),
+        ibus_config_(NULL) {
+  }
+
+  ~IBusControllerImpl() {
+    // Disconnect signals so the handler functions will not be called with
+    // |this| which is already freed.
+    if (ibus_) {
+      g_signal_handlers_disconnect_by_func(
+          ibus_,
+          reinterpret_cast<gpointer>(G_CALLBACK(IBusBusConnectedThunk)),
+          this);
+      g_signal_handlers_disconnect_by_func(
+          ibus_,
+          reinterpret_cast<gpointer>(G_CALLBACK(IBusBusDisconnectedThunk)),
+          this);
+      g_signal_handlers_disconnect_by_func(
+          ibus_,
+          reinterpret_cast<gpointer>(
+              G_CALLBACK(IBusBusGlobalEngineChangedThunk)),
+          this);
+      g_signal_handlers_disconnect_by_func(
+          ibus_,
+          reinterpret_cast<gpointer>(G_CALLBACK(IBusBusNameOwnerChangedThunk)),
+          this);
+
+      // Disconnect signals for the panel service as well.
+      IBusPanelService* ibus_panel_service = IBUS_PANEL_SERVICE(
+          g_object_get_data(G_OBJECT(ibus_), kPanelObjectKey));
+      if (ibus_panel_service) {
+        g_signal_handlers_disconnect_by_func(
+            ibus_panel_service,
+            reinterpret_cast<gpointer>(G_CALLBACK(FocusInThunk)),
+            this);
+        g_signal_handlers_disconnect_by_func(
+            ibus_panel_service,
+            reinterpret_cast<gpointer>(G_CALLBACK(RegisterPropertiesThunk)),
+            this);
+        g_signal_handlers_disconnect_by_func(
+            ibus_panel_service,
+            reinterpret_cast<gpointer>(G_CALLBACK(UpdatePropertyThunk)),
+            this);
+      }
+    }
   }
 
   virtual void Connect() {
@@ -696,6 +760,25 @@ class IBusControllerImpl : public IBusController {
     g_object_unref(context);
   }
 
+  virtual bool InputMethodIdIsWhitelisted(const std::string& input_method_id) {
+    return whitelist_.InputMethodIdIsWhitelisted(input_method_id);
+  }
+
+  virtual bool XkbLayoutIsSupported(const std::string& xkb_layout) {
+    return whitelist_.XkbLayoutIsSupported(xkb_layout);
+  }
+
+  virtual InputMethodDescriptor CreateInputMethodDescriptor(
+      const std::string& id,
+      const std::string& raw_layout,
+      const std::string& language_code) {
+    return InputMethodDescriptor(whitelist_, id, raw_layout, language_code);
+  }
+
+  virtual InputMethodDescriptors* GetSupportedInputMethods() {
+    return GetSupportedInputMethodsInternal(whitelist_);
+  }
+
   // IBusController override.
   virtual void AddObserver(Observer* observer) {
     observers_.AddObserver(observer);
@@ -754,31 +837,6 @@ class IBusControllerImpl : public IBusController {
                                   gpointer userdata) {
     return reinterpret_cast<IBusControllerImpl*>(userdata)
         ->UpdateProperty(sender, ibus_prop);
-  }
-
-  friend struct DefaultSingletonTraits<IBusControllerImpl>;
-  IBusControllerImpl()
-      : ibus_(NULL),
-        ibus_config_(NULL) {
-  }
-
-  ~IBusControllerImpl() {
-    // Since the class is used as a leaky singleton, this destructor is never
-    // called. However, if you would delete an instance of this class, you have
-    // to disconnect all signals so the handler functions will not be called
-    // with |this| which is already freed.
-    //
-    // if (ibus_) {
-    //   g_signal_handlers_disconnect_by_func(
-    //       ibus_,
-    //       reinterpret_cast<gpointer>(
-    //           G_CALLBACK(IBusBusConnectedCallback)),
-    //       this);
-    //   ...
-    // }
-    // if (ibus_panel_service_) {
-    //   g_signal_handlers_disconnect_by_func(
-    //       ...
   }
 
   // Checks if |ibus_| and |ibus_config_| connections are alive.
@@ -934,11 +992,10 @@ class IBusControllerImpl : public IBusController {
 
     InputMethodDescriptor current_input_method;
     if (engine_info) {
-      current_input_method =
-          InputMethodDescriptor::CreateInputMethodDescriptor(
-              engine_info->input_method_id,
-              engine_info->xkb_layout_id,
-              engine_info->language_code);
+      current_input_method = CreateInputMethodDescriptor(
+          engine_info->input_method_id,
+          engine_info->xkb_layout_id,
+          engine_info->language_code);
     } else {
       if (!InputMethodManager::GetInstance()->GetExtraDescriptor(
           current_global_engine_id, &current_input_method)) {
@@ -1116,6 +1173,50 @@ class IBusControllerImpl : public IBusController {
     }
   }
 
+  // Removes input methods that are not whitelisted from
+  // |requested_input_methods| and stores them on |out_filtered_input_methods|.
+  // TODO(yusukes): Write unittest.
+  void FilterInputMethods(
+      const std::vector<std::string>& requested_input_methods,
+      std::vector<std::string>* out_filtered_input_methods) {
+    out_filtered_input_methods->clear();
+    for (size_t i = 0; i < requested_input_methods.size(); ++i) {
+      const std::string& input_method = requested_input_methods[i];
+      if (whitelist_.InputMethodIdIsWhitelisted(input_method.c_str())) {
+        out_filtered_input_methods->push_back(input_method);
+      } else {
+        LOG(ERROR) << "Unsupported input method: " << input_method;
+      }
+    }
+  }
+
+  // Frees input method names in |engines| and the list itself. Please make sure
+  // that |engines| points the head of the list.
+  void FreeInputMethodNames(GList* engines) {
+    if (engines) {
+      for (GList* cursor = engines; cursor; cursor = g_list_next(cursor)) {
+        g_object_unref(IBUS_ENGINE_DESC(cursor->data));
+      }
+      g_list_free(engines);
+    }
+  }
+
+  // Copies input method names in |engines| to |out|.
+  // TODO(yusukes): Write unittest.
+  void AddInputMethodNames(const GList* engines, InputMethodDescriptors* out) {
+    DCHECK(out);
+    for (; engines; engines = g_list_next(engines)) {
+      IBusEngineDesc* engine_desc = IBUS_ENGINE_DESC(engines->data);
+      const gchar* name = ibus_engine_desc_get_name(engine_desc);
+      const gchar* layout = ibus_engine_desc_get_layout(engine_desc);
+      const gchar* language = ibus_engine_desc_get_language(engine_desc);
+      if (whitelist_.InputMethodIdIsWhitelisted(name)) {
+        out->push_back(CreateInputMethodDescriptor(name, layout, language));
+        VLOG(1) << name << " (preloaded)";
+      }
+    }
+  }
+
   // A callback function that will be called when ibus_config_set_value_async()
   // request is finished.
   static void SetImeConfigCallback(GObject* source_object,
@@ -1151,6 +1252,11 @@ class IBusControllerImpl : public IBusController {
   std::string input_context_path_;
 
   ObserverList<Observer> observers_;
+
+  // An object which knows all valid input method and layout IDs.
+  InputMethodWhitelist whitelist_;
+
+  DISALLOW_COPY_AND_ASSIGN(IBusControllerImpl);
 };
 
 #endif  // defined(HAVE_IBUS)
@@ -1197,11 +1303,41 @@ class IBusControllerStubImpl : public IBusController {
 
   virtual void CancelHandwriting(int n_strokes) {
   }
+
+  // This is for ibus_controller_unittest.cc. Since the test is usually compiled
+  // without HAVE_IBUS, we have to provide the same implementation as
+  // IBusControllerImpl to test the whitelist class.
+  virtual bool InputMethodIdIsWhitelisted(const std::string& input_method_id) {
+    return whitelist_.InputMethodIdIsWhitelisted(input_method_id);
+  }
+  // See the comment above. We have to keep the implementation the same as
+  // IBusControllerImpl.
+  virtual bool XkbLayoutIsSupported(const std::string& xkb_layout) {
+    return whitelist_.XkbLayoutIsSupported(xkb_layout);
+  }
+  // See the comment above. We have to keep the implementation the same as
+  // IBusControllerImpl.
+  virtual InputMethodDescriptor CreateInputMethodDescriptor(
+      const std::string& id,
+      const std::string& raw_layout,
+      const std::string& language_code) {
+    return InputMethodDescriptor(whitelist_, id, raw_layout, language_code);
+  }
+  // See the comment above. We have to keep the implementation the same as
+  // IBusControllerImpl.
+  virtual InputMethodDescriptors* GetSupportedInputMethods() {
+    return GetSupportedInputMethodsInternal(whitelist_);
+  }
+
+ private:
+  InputMethodWhitelist whitelist_;
+
+  DISALLOW_COPY_AND_ASSIGN(IBusControllerStubImpl);
 };
 
 IBusController* IBusController::Create() {
 #if defined(HAVE_IBUS)
-  return IBusControllerImpl::GetInstance();
+  return new IBusControllerImpl;
 #else
   return new IBusControllerStubImpl;
 #endif

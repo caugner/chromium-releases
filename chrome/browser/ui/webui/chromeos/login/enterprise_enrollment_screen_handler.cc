@@ -4,11 +4,13 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/enterprise_enrollment_screen_handler.h"
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
@@ -51,16 +53,16 @@ void EnterpriseEnrollmentScreenHandler::SetupGaiaStrings() {
 void EnterpriseEnrollmentScreenHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(
       "SubmitAuth",
-      NewCallback(
-          this, &EnterpriseEnrollmentScreenHandler::HandleSubmitAuth));
+      base::Bind(&EnterpriseEnrollmentScreenHandler::HandleSubmitAuth,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "DialogClose",
-      NewCallback(
-          this, &EnterpriseEnrollmentScreenHandler::HandleCancelAuth));
+      base::Bind(&EnterpriseEnrollmentScreenHandler::HandleCancelAuth,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "confirmationClose",
-      NewCallback(
-          this, &EnterpriseEnrollmentScreenHandler::HandleConfirmationClose));
+      base::Bind(&EnterpriseEnrollmentScreenHandler::HandleConfirmationClose,
+                 base::Unretained(this)));
 }
 
 // EnterpriseEnrollmentScreenHandler
@@ -185,10 +187,10 @@ void EnterpriseEnrollmentScreenHandler::GetLocalizedStrings(
       "signinsuffix", l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_SIGNIN_SUFFIX));
   localized_strings->SetString(
       "cannotbeblank", l10n_util::GetStringUTF16(IDS_SYNC_CANNOT_BE_BLANK));
-  localized_strings->SetString("emaillabel",
-                               l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_EMAIL));
-  localized_strings->SetString(
-      "passwordlabel", l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_PASSWORD));
+  localized_strings->SetString("emaillabel", l10n_util::GetStringUTF16(
+      IDS_SYNC_LOGIN_EMAIL_SAME_LINE));
+  localized_strings->SetString("passwordlabel", l10n_util::GetStringUTF16(
+      IDS_SYNC_LOGIN_PASSWORD_SAME_LINE));
   localized_strings->SetString(
       "invalidcredentials",
       l10n_util::GetStringUTF16(IDS_SYNC_INVALID_USER_CREDENTIALS));

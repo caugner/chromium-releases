@@ -68,7 +68,10 @@ WebKit::WebString MockWebClipboardImpl::readPlainText(
 
 // TODO(wtc): set output argument *url.
 WebKit::WebString MockWebClipboardImpl::readHTML(
-    WebKit::WebClipboard::Buffer buffer, WebKit::WebURL* url) {
+    WebKit::WebClipboard::Buffer buffer, WebKit::WebURL* url,
+    unsigned* fragmentStart, unsigned* fragmentEnd) {
+  *fragmentStart = 0;
+  *fragmentEnd = static_cast<unsigned>(m_htmlText.length());
   return m_htmlText;
 }
 

@@ -6,7 +6,7 @@
 #define CONTENT_COMMON_CONTENT_EXPORT_H_
 #pragma once
 
-#if defined(COMPONENT_BUILD)
+#if 0 // TODO(dpranke): Uncomment: defined(COMPONENT_BUILD).
 #if defined(WIN32)
 
 #if defined(CONTENT_IMPLEMENTATION)
@@ -16,7 +16,7 @@
 #endif  // defined(CONTENT_IMPLEMENTATION)
 
 #else // defined(WIN32)
-#define CONTENT_EXPORT __attribute__((visibility("default"))
+#define CONTENT_EXPORT __attribute__((visibility("default")))
 #endif
 
 #else // defined(COMPONENT_BUILD)

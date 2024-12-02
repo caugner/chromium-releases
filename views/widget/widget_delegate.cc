@@ -4,6 +4,7 @@
 
 #include "views/widget/widget_delegate.h"
 
+#include "base/utf_string_conversions.h"
 #include "views/view.h"
 #include "views/views_delegate.h"
 #include "views/widget/widget.h"
@@ -35,6 +36,10 @@ DialogDelegate* WidgetDelegate::AsDialogDelegate() {
   return NULL;
 }
 
+BubbleDelegate* WidgetDelegate::AsBubbleDelegate() {
+  return NULL;
+}
+
 bool WidgetDelegate::CanResize() const {
   return false;
 }
@@ -59,12 +64,12 @@ ui::AccessibilityTypes::State WidgetDelegate::GetAccessibleWindowState() const {
   return 0;
 }
 
-std::wstring WidgetDelegate::GetAccessibleWindowTitle() const {
+string16 WidgetDelegate::GetAccessibleWindowTitle() const {
   return GetWindowTitle();
 }
 
-std::wstring WidgetDelegate::GetWindowTitle() const {
-  return L"";
+string16 WidgetDelegate::GetWindowTitle() const {
+  return string16();
 }
 
 bool WidgetDelegate::ShouldShowWindowTitle() const {
@@ -93,13 +98,13 @@ bool WidgetDelegate::ExecuteWindowsCommand(int command_id) {
   return false;
 }
 
-std::wstring WidgetDelegate::GetWindowName() const {
-  return std::wstring();
+std::string WidgetDelegate::GetWindowName() const {
+  return std::string();
 }
 
 void WidgetDelegate::SaveWindowPlacement(const gfx::Rect& bounds,
                                          ui::WindowShowState show_state) {
-  std::wstring window_name = GetWindowName();
+  std::string window_name = GetWindowName();
   if (!ViewsDelegate::views_delegate || window_name.empty())
     return;
 
@@ -110,7 +115,7 @@ void WidgetDelegate::SaveWindowPlacement(const gfx::Rect& bounds,
 bool WidgetDelegate::GetSavedWindowPlacement(
     gfx::Rect* bounds,
     ui::WindowShowState* show_state) const {
-  std::wstring window_name = GetWindowName();
+  std::string window_name = GetWindowName();
   if (!ViewsDelegate::views_delegate || window_name.empty())
     return false;
 
@@ -158,4 +163,3 @@ const Widget* WidgetDelegateView::GetWidget() const {
 }
 
 }  // namespace views
-

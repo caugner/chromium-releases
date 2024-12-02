@@ -14,11 +14,14 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/common/content_export.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/plugins/npapi/gtk_plugin_container_manager.h"
@@ -41,8 +44,8 @@ typedef struct _GtkSelectionData GtkSelectionData;
 // -----------------------------------------------------------------------------
 // See comments in render_widget_host_view.h about this class and its members.
 // -----------------------------------------------------------------------------
-class RenderWidgetHostViewGtk : public RenderWidgetHostView,
-                                public ui::AnimationDelegate {
+class CONTENT_EXPORT RenderWidgetHostViewGtk : public RenderWidgetHostView,
+                                               public ui::AnimationDelegate {
  public:
   explicit RenderWidgetHostViewGtk(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewGtk();
@@ -73,9 +76,8 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
-  virtual void ImeUpdateTextInputState(ui::TextInputType type,
-                                       bool can_compose_inline,
-                                       const gfx::Rect& caret_rect) OVERRIDE;
+  virtual void TextInputStateChanged(ui::TextInputType type,
+                                     bool can_compose_inline) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
@@ -84,11 +86,12 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
                               int error_code) OVERRIDE;
   virtual void Destroy() OVERRIDE;
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) {}
-  virtual void SetTooltipText(const std::wstring& tooltip_text) OVERRIDE;
-  virtual void SelectionChanged(const std::string& text,
-                                const ui::Range& range,
-                                const gfx::Point& start,
-                                const gfx::Point& end) OVERRIDE;
+  virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
+  virtual void SelectionChanged(const string16& text,
+                                size_t offset,
+                                const ui::Range& range) OVERRIDE;
+  virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
+                                      const gfx::Rect& end_rect) OVERRIDE;
   virtual void ShowingContextMenu(bool showing) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
@@ -106,6 +109,8 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
   virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
+  virtual bool LockMouse() OVERRIDE;
+  virtual void UnlockMouse() OVERRIDE;
 
   // ui::AnimationDelegate implementation.
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
@@ -119,6 +124,12 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   // occurred, so that we can force the widget to scroll when it otherwise
   // would be unable to.
   void ModifyEventForEdgeDragging(GtkWidget* widget, GdkEventMotion* event);
+
+  // Mouse events always provide a movementX/Y which needs to be computed.
+  // Also, mouse lock requires knowledge of last unlocked cursor coordinates.
+  // State is stored on the host view to do this, and the mouse event modified.
+  void ModifyEventMovementAndCoords(WebKit::WebMouseEvent* event);
+
   void Paint(const gfx::Rect&);
 
   // Called by GtkIMContextWrapper to forward a keyboard event to renderer.
@@ -169,6 +180,8 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   void ShowCurrentCursor();
 
   void set_last_mouse_down(GdkEventButton* event);
+
+  gfx::Point GetWidgetCenter();
 
   // The model object.
   RenderWidgetHost* host_;
@@ -231,6 +244,18 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   // Is the widget fullscreen?
   bool is_fullscreen_;
 
+  // Used to record the last position of the mouse.
+  // While the mouse is locked, they store the last known position just as mouse
+  // lock was entered.
+  // Relative to the upper-left corner of the view.
+  gfx::Point unlocked_mouse_position_;
+  // Relative to the upper-left corner of the screen.
+  gfx::Point unlocked_global_mouse_position_;
+  // Last hidden cursor position. Relative to screen.
+  gfx::Point global_mouse_position_;
+  // Indicates when mouse motion is valid after the widget has moved.
+  bool mouse_has_been_warped_to_new_center_;
+
   // For full-screen windows we have a OnDestroy handler that we need to remove,
   // so we keep it ID here.
   unsigned long destroy_handler_id_;
@@ -251,6 +276,11 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   // variable because resizing in GTK+ is async.
   gfx::Size requested_size_;
 
+  // The latest reported center of the widget, use GetWidgetCenter() to access.
+  gfx::Point widget_center_;
+  // If the window moves the widget_center will not be valid until we recompute.
+  bool widget_center_valid_;
+
   // The number of times the user has dragged against horizontal edge  of the
   // monitor (if the widget is aligned with that edge). Negative values
   // indicate the left edge, positive the right.
@@ -267,10 +297,16 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   // menus and drags.
   GdkEventButton* last_mouse_down_;
 
+  string16 selection_text_;
+  size_t selection_text_offset_;
+  ui::Range selection_range_;
+
 #if defined(OS_CHROMEOS)
   // Custimized tooltip window.
   scoped_ptr<ui::TooltipWindowGtk> tooltip_window_;
 #endif  // defined(OS_CHROMEOS)
+
+  ui::GtkSignalRegistrar signals_;
 };
 
 #endif  // CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_GTK_H_

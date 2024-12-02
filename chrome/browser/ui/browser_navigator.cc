@@ -10,6 +10,8 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_about_handler.h"
+// TODO(alicet): clean up dependencies on defaults.h and max tab count.
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/google/google_url_tracker.h"
@@ -39,6 +41,9 @@ namespace {
 // multiple tabs, such as app frames and popups. This function returns false for
 // those types of Browser.
 bool WindowCanOpenTabs(Browser* browser) {
+  if (browser->tab_count() >= browser_defaults::kMaxTabCount)
+    return false;
+
   return browser->CanSupportWindowFeature(Browser::FEATURE_TABSTRIP) ||
       browser->tabstrip_model()->empty();
 }
@@ -64,14 +69,14 @@ bool CompareURLsWithReplacements(
 }
 
 // Change some of the navigation parameters based on the particular URL.
-// Currently this applies to chrome://settings and the bookmark manager,
-// which we always want to open in a normal (not incognito) window. Guest
-// session is an exception.
+// Currently this applies to chrome://settings, the bookmark manager,
+// and chrome://extensions, which we always want to open in a normal
+// (not incognito) window. Guest session is an exception.
+// chrome://extensions is on the list because it redirects to
+// chrome://settings.
 void AdjustNavigateParamsForURL(browser::NavigateParams* params) {
   if (!params->target_contents &&
-      params->url.scheme() == chrome::kChromeUIScheme &&
-      (params->url.host() == chrome::kChromeUISettingsHost ||
-       params->url.host() == chrome::kChromeUIBookmarksHost)) {
+      browser::IsURLAllowedInIncognito(params->url)) {
     Profile* profile =
         params->browser ? params->browser->profile() : params->profile;
 
@@ -294,7 +299,8 @@ void InitializeExtraHeaders(browser::NavigateParams* params,
   // set to Google and add RLZ HTTP headers to the request.  This is only
   // done if Google was the original home page, and not changed afterwards by
   // the user.
-  if (profile && (params->transition & PageTransition::HOME_PAGE) != 0) {
+  if (profile &&
+      (params->transition & content::PAGE_TRANSITION_HOME_PAGE) != 0) {
     PrefService* pref_service = profile->GetPrefs();
     if (pref_service) {
       if (!pref_service->GetBoolean(prefs::kHomePageChanged)) {
@@ -322,12 +328,13 @@ namespace browser {
 NavigateParams::NavigateParams(
     Browser* a_browser,
     const GURL& a_url,
-    PageTransition::Type a_transition)
+    content::PageTransition a_transition)
     : url(a_url),
       target_contents(NULL),
       source_contents(NULL),
       disposition(CURRENT_TAB),
       transition(a_transition),
+      is_renderer_initiated(false),
       tabstrip_index(-1),
       tabstrip_add_types(TabStripModel::ADD_ACTIVE),
       window_action(NO_ACTION),
@@ -343,7 +350,8 @@ NavigateParams::NavigateParams(Browser* a_browser,
     : target_contents(a_target_contents),
       source_contents(NULL),
       disposition(CURRENT_TAB),
-      transition(PageTransition::LINK),
+      transition(content::PAGE_TRANSITION_LINK),
+      is_renderer_initiated(false),
       tabstrip_index(-1),
       tabstrip_add_types(TabStripModel::ADD_ACTIVE),
       window_action(NO_ACTION),
@@ -370,8 +378,17 @@ void Navigate(NavigateParams* params) {
   }
 
   params->browser = GetBrowserForDisposition(params);
+
   if (!params->browser)
     return;
+
+  if (params->browser->tab_count() >= browser_defaults::kMaxTabCount &&
+      (params->disposition == NEW_POPUP ||
+       params->disposition == NEW_FOREGROUND_TAB ||
+       params->disposition == NEW_BACKGROUND_TAB)) {
+      return;
+  }
+
   // Navigate() must not return early after this point.
 
   if (GetSourceProfile(params, source_browser) != params->browser->profile()) {
@@ -407,15 +424,16 @@ void Navigate(NavigateParams* params) {
 
   // Determine if the navigation was user initiated. If it was, we need to
   // inform the target TabContents, and we may need to update the UI.
-  PageTransition::Type base_transition =
-      PageTransition::StripQualifier(params->transition);
-  bool user_initiated = params->transition & PageTransition::FROM_ADDRESS_BAR ||
-      base_transition == PageTransition::TYPED ||
-      base_transition == PageTransition::AUTO_BOOKMARK ||
-      base_transition == PageTransition::GENERATED ||
-      base_transition == PageTransition::START_PAGE ||
-      base_transition == PageTransition::RELOAD ||
-      base_transition == PageTransition::KEYWORD;
+  content::PageTransition base_transition =
+      content::PageTransitionStripQualifier(params->transition);
+  bool user_initiated =
+      params->transition & content::PAGE_TRANSITION_FROM_ADDRESS_BAR ||
+      base_transition == content::PAGE_TRANSITION_TYPED ||
+      base_transition == content::PAGE_TRANSITION_AUTO_BOOKMARK ||
+      base_transition == content::PAGE_TRANSITION_GENERATED ||
+      base_transition == content::PAGE_TRANSITION_START_PAGE ||
+      base_transition == content::PAGE_TRANSITION_RELOAD ||
+      base_transition == content::PAGE_TRANSITION_KEYWORD;
 
   std::string extra_headers;
 
@@ -428,7 +446,8 @@ void Navigate(NavigateParams* params) {
     GURL url;
     if (params->url.is_empty()) {
       url = params->browser->GetHomePage();
-      params->transition |= PageTransition::HOME_PAGE;
+      params->transition = content::PageTransitionFromInt(
+          params->transition | content::PAGE_TRANSITION_HOME_PAGE);
     } else {
       url = params->url;
     }
@@ -475,9 +494,15 @@ void Navigate(NavigateParams* params) {
     // Try to handle non-navigational URLs that popup dialogs and such, these
     // should not actually navigate.
     if (!HandleNonNavigationAboutURL(url)) {
-      // Perform the actual navigation.
-      params->target_contents->controller().LoadURLWithHeaders(
-          url, params->referrer, params->transition, extra_headers);
+      // Perform the actual navigation, tracking whether it came from the
+      // renderer.
+      if (params->is_renderer_initiated) {
+        params->target_contents->controller().LoadURLFromRenderer(
+            url, params->referrer, params->transition, extra_headers);
+      } else {
+        params->target_contents->controller().LoadURL(
+            url, params->referrer, params->transition, extra_headers);
+      }
     }
   } else {
     // |target_contents| was specified non-NULL, and so we assume it has already
@@ -525,8 +550,13 @@ void Navigate(NavigateParams* params) {
     } else if (params->path_behavior == NavigateParams::IGNORE_AND_NAVIGATE &&
         target->GetURL() != params->url) {
       InitializeExtraHeaders(params, NULL, &extra_headers);
-      target->controller().LoadURLWithHeaders(
-          params->url, params->referrer, params->transition, extra_headers);
+      if (params->is_renderer_initiated) {
+        target->controller().LoadURLFromRenderer(
+            params->url, params->referrer, params->transition, extra_headers);
+      } else {
+        target->controller().LoadURL(
+            params->url, params->referrer, params->transition, extra_headers);
+      }
     }
 
     // If the singleton tab isn't already selected, select it.
@@ -585,6 +615,13 @@ int GetIndexOfSingletonTab(browser::NavigateParams* params) {
   }
 
   return -1;
+}
+
+bool IsURLAllowedInIncognito(const GURL& url) {
+  return url.scheme() == chrome::kChromeUIScheme &&
+      (url.host() == chrome::kChromeUISettingsHost ||
+       url.host() == chrome::kChromeUIExtensionsHost ||
+       url.host() == chrome::kChromeUIBookmarksHost);
 }
 
 }  // namespace browser

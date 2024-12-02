@@ -13,6 +13,7 @@
 #include "base/process.h"
 #include "base/process_util.h"
 #include "base/time.h"
+#include "content/common/content_export.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/surface/transport_dib.h"
@@ -31,6 +32,8 @@ namespace net {
 class URLRequestContextGetter;
 }
 
+class GURL;
+
 // Virtual interface that represents the browser side of the browser <->
 // renderer communication channel. There will generally be one
 // RenderProcessHost per renderer process.
@@ -38,33 +41,23 @@ class URLRequestContextGetter;
 // The concrete implementation of this class for normal use is the
 // BrowserRenderProcessHost. It may also be implemented by a testing interface
 // for mocking purposes.
-class RenderProcessHost : public IPC::Channel::Sender,
-                          public IPC::Channel::Listener {
+class CONTENT_EXPORT RenderProcessHost : public IPC::Channel::Sender,
+                                         public IPC::Channel::Listener {
  public:
   typedef IDMap<RenderProcessHost>::iterator iterator;
-
-  // We classify renderers according to their highest privilege, and try
-  // to group pages into renderers with similar privileges.
-  // Note: it may be possible for a renderer to have multiple privileges,
-  // in which case we call it an "extension" renderer.
-  enum Type {
-    TYPE_NORMAL,     // Normal renderer, no extra privileges.
-    TYPE_WEBUI,      // Renderer with WebUI privileges, like New Tab.
-    TYPE_EXTENSION,  // Renderer with extension privileges.
-  };
 
   // Details for RENDERER_PROCESS_CLOSED notifications.
   struct RendererClosedDetails {
     RendererClosedDetails(base::TerminationStatus status,
                           int exit_code,
-                          bool was_extension_renderer) {
+                          bool was_alive) {
       this->status = status;
       this->exit_code = exit_code;
-      this->was_extension_renderer = was_extension_renderer;
+      this->was_alive = was_alive;
     }
     base::TerminationStatus status;
     int exit_code;
-    bool was_extension_renderer;
+    bool was_alive;
   };
 
   explicit RenderProcessHost(content::BrowserContext* browser_context);
@@ -82,8 +75,8 @@ class RenderProcessHost : public IPC::Channel::Sender,
   int id() const { return id_; }
 
   // Returns true iff channel_ has been set to non-NULL. Use this for checking
-  // if there is connection or not.
-  bool HasConnection() { return channel_.get() != NULL; }
+  // if there is connection or not. Virtual for mocking out for tests.
+  virtual bool HasConnection() const;
 
   bool sudden_termination_allowed() const {
     return sudden_termination_allowed_;
@@ -92,9 +85,6 @@ class RenderProcessHost : public IPC::Channel::Sender,
     sudden_termination_allowed_ = enabled;
   }
 
-  bool is_extension_process() const { return is_extension_process_; }
-  void mark_is_extension_process() { is_extension_process_ = true; }
-
   // Used for refcounting, each holder of this object must Attach and Release
   // just like it would for a COM object. This object should be allocated on
   // the heap; when no listeners own it any more, it will delete itself.
@@ -102,6 +92,9 @@ class RenderProcessHost : public IPC::Channel::Sender,
 
   // See Attach()
   void Release(int listener_id);
+
+  // Schedules the host for deletion and removes it from the all_hosts list.
+  void Cleanup();
 
   // Listeners should call this when they've sent a "Close" message and
   // they're waiting for a "Close_ACK", so that if the renderer process
@@ -212,6 +205,9 @@ class RenderProcessHost : public IPC::Channel::Sender,
   // Returns True if it was able to do fast shutdown.
   virtual bool FastShutdownIfPossible() = 0;
 
+  // Dump the child process' handle table before shutting down.
+  virtual void DumpHandles() = 0;
+
   // Returns the process object associated with the child process.  In certain
   // tests or single-process mode, this will actually represent the current
   // process.
@@ -267,16 +263,17 @@ class RenderProcessHost : public IPC::Channel::Sender,
 
   // Get an existing RenderProcessHost associated with the given browser
   // context, if possible.  The renderer process is chosen randomly from
-  // suitable renderers that share the same context and type.
+  // suitable renderers that share the same context and type (determined by the
+  // site url).
   // Returns NULL if no suitable renderer process is available, in which case
   // the caller is free to create a new renderer.
   static RenderProcessHost* GetExistingProcessHost(
-      content::BrowserContext* browser_context, Type type);
+      content::BrowserContext* browser_context, const GURL& site_url);
 
   // Overrides the default heuristic for limiting the max renderer process
   // count.  This is useful for unit testing process limit behaviors.
   // A value of zero means to use the default heuristic.
-  static void SetMaxRendererProcessCount(size_t count);
+  static void SetMaxRendererProcessCountForTest(size_t count);
 
  protected:
   // A proxy for our IPC::Channel that lives on the IO thread (see
@@ -295,10 +292,6 @@ class RenderProcessHost : public IPC::Channel::Sender,
 
   // True if we've posted a DeleteTask and will be deleted soon.
   bool deleting_soon_;
-
-  // True iff this process is being used as an extension process. Not valid
-  // when running in single-process mode.
-  bool is_extension_process_;
 
   // The count of currently swapped out but pending RenderViews.  We have
   // started to swap these in, so the renderer process should not exit if

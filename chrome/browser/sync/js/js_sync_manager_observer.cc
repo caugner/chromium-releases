@@ -6,9 +6,11 @@
 
 #include <cstddef>
 
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/tracked.h"
+#include "base/string_number_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/js/js_arg_list.h"
 #include "chrome/browser/sync/js/js_event_details.h"
 #include "chrome/browser/sync/js/js_event_handler.h"
@@ -26,34 +28,6 @@ JsSyncManagerObserver::~JsSyncManagerObserver() {}
 void JsSyncManagerObserver::SetJsEventHandler(
     const WeakHandle<JsEventHandler>& event_handler) {
   event_handler_ = event_handler;
-}
-
-void JsSyncManagerObserver::OnChangesApplied(
-    syncable::ModelType model_type,
-    const sync_api::BaseTransaction* trans,
-    const sync_api::SyncManager::ChangeRecord* changes,
-    int change_count) {
-  if (!event_handler_.IsInitialized()) {
-    return;
-  }
-  DictionaryValue details;
-  details.SetString("modelType", syncable::ModelTypeToString(model_type));
-  ListValue* change_values = new ListValue();
-  details.Set("changes", change_values);
-  for (int i = 0; i < change_count; ++i) {
-    change_values->Append(changes[i].ToValue(trans));
-  }
-  HandleJsEvent(FROM_HERE, "onChangesApplied", JsEventDetails(&details));
-}
-
-void JsSyncManagerObserver::OnChangesComplete(
-    syncable::ModelType model_type) {
-  if (!event_handler_.IsInitialized()) {
-    return;
-  }
-  DictionaryValue details;
-  details.SetString("modelType", syncable::ModelTypeToString(model_type));
-  HandleJsEvent(FROM_HERE, "onChangesComplete", JsEventDetails(&details));
 }
 
 void JsSyncManagerObserver::OnSyncCycleCompleted(
@@ -115,17 +89,6 @@ void JsSyncManagerObserver::OnEncryptionComplete(
   details.Set("encryptedTypes",
                syncable::ModelTypeSetToValue(encrypted_types));
   HandleJsEvent(FROM_HERE, "onEncryptionComplete", JsEventDetails(&details));
-}
-
-void JsSyncManagerObserver::OnMigrationNeededForTypes(
-    const syncable::ModelTypeSet& types) {
-  if (!event_handler_.IsInitialized()) {
-    return;
-  }
-  DictionaryValue details;
-  details.Set("types", syncable::ModelTypeSetToValue(types));
-  HandleJsEvent(FROM_HERE, "onMigrationNeededForTypes",
-                JsEventDetails(&details));
 }
 
 void JsSyncManagerObserver::OnActionableError(

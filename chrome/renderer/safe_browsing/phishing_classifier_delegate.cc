@@ -16,13 +16,16 @@
 #include "chrome/renderer/safe_browsing/feature_extractor_clock.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier.h"
 #include "chrome/renderer/safe_browsing/scorer.h"
-#include "content/renderer/navigation_state.h"
-#include "content/renderer/render_thread.h"
-#include "content/renderer/render_view.h"
+#include "content/public/renderer/navigation_state.h"
+#include "content/public/renderer/render_thread.h"
+#include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+
+using content::NavigationState;
+using content::RenderThread;
 
 namespace safe_browsing {
 
@@ -76,17 +79,17 @@ void PhishingClassifierFilter::OnSetPhishingModel(const std::string& model) {
 
 // static
 PhishingClassifierDelegate* PhishingClassifierDelegate::Create(
-    RenderView* render_view, PhishingClassifier* classifier) {
+    content::RenderView* render_view, PhishingClassifier* classifier) {
   // Private constructor and public static Create() method to facilitate
   // stubbing out this class for binary-size reduction purposes.
   return new PhishingClassifierDelegate(render_view, classifier);
 }
 
 PhishingClassifierDelegate::PhishingClassifierDelegate(
-    RenderView* render_view,
+    content::RenderView* render_view,
     PhishingClassifier* classifier)
-    : RenderViewObserver(render_view),
-      last_main_frame_transition_(PageTransition::LINK),
+    : content::RenderViewObserver(render_view),
+      last_main_frame_transition_(content::PAGE_TRANSITION_LINK),
       have_page_text_(false),
       is_classifying_(false) {
   g_delegates.Get().insert(this);
@@ -108,7 +111,7 @@ PhishingClassifierDelegate::~PhishingClassifierDelegate() {
 
 void PhishingClassifierDelegate::SetPhishingScorer(
     const safe_browsing::Scorer* scorer) {
-  if (!render_view()->webview())
+  if (!render_view()->GetWebView())
     return;  // RenderView is tearing down.
   if (is_classifying_) {
     // If there is a classification going on right now it means we're
@@ -145,7 +148,7 @@ void PhishingClassifierDelegate::DidCommitProvisionalLoad(
       frame->dataSource());
   CancelPendingClassification(state->was_within_same_page() ?
                               NAVIGATE_WITHIN_PAGE : NAVIGATE_AWAY);
-  if (frame == render_view()->webview()->mainFrame()) {
+  if (frame == render_view()->GetWebView()->mainFrame()) {
     last_main_frame_transition_ = state->transition_type();
   }
 }
@@ -201,13 +204,13 @@ void PhishingClassifierDelegate::ClassificationDone(
           << " score = " << verdict.client_score();
   if (verdict.client_score() != PhishingClassifier::kInvalidScore) {
     DCHECK_EQ(last_url_sent_to_classifier_.spec(), verdict.url());
-    Send(new SafeBrowsingHostMsg_PhishingDetectionDone(
+    RenderThread::Get()->Send(new SafeBrowsingHostMsg_PhishingDetectionDone(
         routing_id(), verdict.SerializeAsString()));
   }
 }
 
 GURL PhishingClassifierDelegate::GetToplevelUrl() {
-  return render_view()->webview()->mainFrame()->document().url();
+  return render_view()->GetWebView()->mainFrame()->document().url();
 }
 
 void PhishingClassifierDelegate::MaybeStartClassification() {
@@ -229,7 +232,7 @@ void PhishingClassifierDelegate::MaybeStartClassification() {
     return;
   }
 
-  if (last_main_frame_transition_ & PageTransition::FORWARD_BACK) {
+  if (last_main_frame_transition_ & content::PAGE_TRANSITION_FORWARD_BACK) {
     // Skip loads from session history navigation.  However, update the
     // last URL sent to the classifier, so that we'll properly detect
     // in-page navigations.

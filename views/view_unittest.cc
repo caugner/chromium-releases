@@ -5,6 +5,7 @@
 #include <map>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/rand_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -14,6 +15,8 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/compositor/compositor.h"
 #include "ui/gfx/compositor/layer.h"
+#include "ui/gfx/compositor/test_compositor.h"
+#include "ui/gfx/compositor/test_texture.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/transform.h"
 #include "views/background.h"
@@ -37,8 +40,152 @@
 #if defined(OS_WIN)
 #include "views/test/test_views_delegate.h"
 #endif
+#if defined(USE_AURA)
+#include "ui/aura/desktop.h"
+#endif
 
 using ::testing::_;
+
+namespace {
+
+// Returns true if |ancestor| is an ancestor of |layer|.
+bool LayerIsAncestor(const ui::Layer* ancestor, const ui::Layer* layer) {
+  while (layer && layer != ancestor)
+    layer = layer->parent();
+  return layer == ancestor;
+}
+
+// Convenience functions for walking a View tree.
+const views::View* FirstView(const views::View* view) {
+  const views::View* v = view;
+  while (v->has_children())
+    v = v->child_at(0);
+  return v;
+}
+
+const views::View* NextView(const views::View* view) {
+  const views::View* v = view;
+  const views::View* parent = v->parent();
+  if (!parent)
+    return NULL;
+  int next = parent->GetIndexOf(v) + 1;
+  if (next != parent->child_count())
+    return FirstView(parent->child_at(next));
+  return parent;
+}
+
+// Convenience functions for walking a Layer tree.
+const ui::Layer* FirstLayer(const ui::Layer* layer) {
+  const ui::Layer* l = layer;
+  while (l->children().size() > 0)
+    l = l->children()[0];
+  return l;
+}
+
+const ui::Layer* NextLayer(const ui::Layer* layer) {
+  const ui::Layer* parent = layer->parent();
+  if (!parent)
+    return NULL;
+  const std::vector<ui::Layer*> children = parent->children();
+  size_t index;
+  for (index = 0; index < children.size(); index++) {
+    if (children[index] == layer)
+      break;
+  }
+  size_t next = index + 1;
+  if (next < children.size())
+    return FirstLayer(children[next]);
+  return parent;
+}
+
+// Given the root nodes of a View tree and a Layer tree, makes sure the two
+// trees are in sync.
+bool ViewAndLayerTreeAreConsistent(const views::View* view,
+                                   const ui::Layer* layer) {
+  const views::View* v = FirstView(view);
+  const ui::Layer* l = FirstLayer(layer);
+  while (v && l) {
+    // Find the view with a layer.
+    while (v && !v->layer())
+      v = NextView(v);
+    EXPECT_TRUE(v);
+    if (!v)
+      return false;
+
+    // Check if the View tree and the Layer tree are in sync.
+    EXPECT_EQ(l, v->layer());
+    if (v->layer() != l)
+      return false;
+
+    // Check if the visibility states of the View and the Layer are in sync.
+    EXPECT_EQ(l->IsDrawn(), v->IsVisibleInRootView());
+    if (v->IsVisibleInRootView() != l->IsDrawn()) {
+      for (const views::View* vv = v; vv; vv = vv->parent())
+        LOG(ERROR) << "V: " << vv << " " << vv->IsVisible() << " "
+                   << vv->IsVisibleInRootView() << " " << vv->layer();
+      for (const ui::Layer* ll = l; ll; ll = ll->parent())
+        LOG(ERROR) << "L: " << ll << " " << ll->IsDrawn();
+      return false;
+    }
+
+    // Check if the size of the View and the Layer are in sync.
+    EXPECT_EQ(l->bounds(), v->bounds());
+    if (v->bounds() != l->bounds())
+      return false;
+
+    if (v == view || l == layer)
+      return v == view && l == layer;
+
+    v = NextView(v);
+    l = NextLayer(l);
+  }
+
+  return false;
+}
+
+// Constructs a View tree with the specified depth.
+void ConstructTree(views::View* view, int depth) {
+  if (depth == 0)
+    return;
+  int count = base::RandInt(1, 5);
+  for (int i = 0; i < count; i++) {
+    views::View* v = new views::View;
+    view->AddChildView(v);
+    if (base::RandDouble() > 0.5)
+      v->SetPaintToLayer(true);
+    if (base::RandDouble() < 0.2)
+      v->SetVisible(false);
+
+    ConstructTree(v, depth - 1);
+  }
+}
+
+void ScrambleTree(views::View* view) {
+  int count = view->child_count();
+  if (count == 0)
+    return;
+  for (int i = 0; i < count; i++) {
+    ScrambleTree(view->child_at(i));
+  }
+
+  if (count > 1) {
+    int a = base::RandInt(0, count - 1);
+    int b = base::RandInt(0, count - 1);
+
+    views::View* view_a = view->child_at(a);
+    views::View* view_b = view->child_at(b);
+    view->ReorderChildView(view_a, b);
+    view->ReorderChildView(view_b, a);
+  }
+
+  if (!view->layer() && base::RandDouble() < 0.1)
+    view->SetPaintToLayer(true);
+
+  if (base::RandDouble() < 0.1)
+    view->SetVisible(!view->IsVisible());
+}
+
+}
 
 namespace views {
 
@@ -67,7 +214,7 @@ class TestView : public View {
   virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
   virtual void Paint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void SchedulePaintInternal(const gfx::Rect& rect) OVERRIDE;
+  virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual bool AcceleratorPressed(const Accelerator& accelerator) OVERRIDE;
 
   // OnBoundsChanged.
@@ -395,12 +542,12 @@ TEST_F(ViewTest, TouchEvent) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void TestView::Paint(gfx::Canvas* canvas) {
-  canvas->AsCanvasSkia()->getClipBounds(&last_clip_);
+  canvas->GetSkCanvas()->getClipBounds(&last_clip_);
 }
 
-void TestView::SchedulePaintInternal(const gfx::Rect& rect) {
+void TestView::SchedulePaintInRect(const gfx::Rect& rect) {
   scheduled_paint_rects_.push_back(rect);
-  View::SchedulePaintInternal(rect);
+  View::SchedulePaintInRect(rect);
 }
 
 void CheckRect(const SkRect& check_rect, const SkRect& target_rect) {
@@ -481,7 +628,7 @@ TEST_F(ViewTest, DISABLED_Painting) {
 
 #if defined(OS_WIN)
 TEST_F(ViewTest, RemoveNotification) {
-#elif defined(TOOLKIT_USES_GTK)
+#else
 // TODO(beng): stopped working with widget hierarchy split,
 //             http://crbug.com/82364
 TEST_F(ViewTest, DISABLED_RemoveNotification) {
@@ -1078,7 +1225,7 @@ class TestDialog : public DialogDelegate, public ButtonListener {
       contents_ = new View;
       button1_ = new NativeTextButton(this, L"Button1");
       button2_ = new NativeTextButton(this, L"Button2");
-      checkbox_ = new Checkbox(L"My checkbox");
+      checkbox_ = new Checkbox(ASCIIToUTF16("My checkbox"));
       button_drop_ = new ButtonDropDown(this, mock_menu_model_);
       contents_->AddChildView(button1_);
       contents_->AddChildView(button2_);
@@ -1480,7 +1627,7 @@ class TransformPaintView : public TestView {
   gfx::Rect scheduled_paint_rect() const { return scheduled_paint_rect_; }
 
   // Overridden from View:
-  virtual void SchedulePaintInternal(const gfx::Rect& rect) {
+  virtual void SchedulePaintInRect(const gfx::Rect& rect) {
     gfx::Rect xrect = ConvertRectToParent(rect);
     scheduled_paint_rect_ = scheduled_paint_rect_.Union(xrect);
   }
@@ -2297,76 +2444,6 @@ TEST_F(ViewTest, GetViewByID) {
 
 namespace {
 
-class TestTexture : public ui::Texture {
- public:
-  TestTexture() {
-    live_count_++;
-  }
-
-  ~TestTexture() {
-    live_count_--;
-  }
-
-  static void reset_live_count() { live_count_ = 0; }
-  static int live_count() { return live_count_; }
-
-  // Bounds of the last bitmap passed to SetCanvas.
-  const gfx::Rect& bounds_of_last_paint() const {
-    return bounds_of_last_paint_;
-  }
-
-  // ui::Texture
-  virtual void SetCanvas(const SkCanvas& canvas,
-                         const gfx::Point& origin,
-                         const gfx::Size& overall_size) OVERRIDE;
-
-  virtual void Draw(const ui::TextureDrawParams& params,
-                    const gfx::Rect& clip_bounds) OVERRIDE {}
-
- private:
-  // Number of live instances.
-  static int live_count_;
-
-  gfx::Rect bounds_of_last_paint_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestTexture);
-};
-
-// static
-int TestTexture::live_count_ = 0;
-
-void TestTexture::SetCanvas(const SkCanvas& canvas,
-                            const gfx::Point& origin,
-                            const gfx::Size& overall_size) {
-  const SkBitmap& bitmap = canvas.getDevice()->accessBitmap(false);
-  bounds_of_last_paint_.SetRect(
-      origin.x(), origin.y(), bitmap.width(), bitmap.height());
-}
-
-class TestCompositor : public ui::Compositor {
- public:
-  TestCompositor() : Compositor(gfx::Size(100, 100)) {}
-
-  // ui::Compositor:
-  virtual ui::Texture* CreateTexture() OVERRIDE {
-    return new TestTexture();
-  }
-  virtual void NotifyStart() OVERRIDE {}
-  virtual void NotifyEnd() OVERRIDE {}
-  virtual void Blur(const gfx::Rect& bounds) OVERRIDE {}
-  virtual void SchedulePaint() OVERRIDE {}
-
- protected:
-  virtual void OnWidgetSizeChanged() OVERRIDE {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestCompositor);
-};
-
-static ui::Compositor* TestCreateCompositor() {
-  return new TestCompositor();
-}
-
 // Test implementation of LayerPropertySetter;
 class TestLayerPropertySetter : public LayerPropertySetter {
  public:
@@ -2417,25 +2494,38 @@ class ViewLayerTest : public ViewsTestBase {
   virtual ~ViewLayerTest() {
   }
 
+  // Returns the Layer used by the RootView.
+  ui::Layer* GetRootLayer() {
+#if defined(USE_AURA)
+    ui::Layer* root_layer = NULL;
+    gfx::Point origin;
+    widget()->CalculateOffsetToAncestorWithLayer(&origin, &root_layer);
+    return root_layer;
+#else
+    return widget()->GetRootView()->layer();
+#endif
+  }
+
   virtual void SetUp() OVERRIDE {
     ViewTest::SetUp();
     old_use_acceleration_ = View::get_use_acceleration_when_possible();
     View::set_use_acceleration_when_possible(true);
 
-    TestTexture::reset_live_count();
+    ui::TestTexture::reset_live_count();
 
-    Widget::set_compositor_factory_for_testing(&TestCreateCompositor);
     widget_ = new Widget;
     Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
     params.bounds = gfx::Rect(50, 50, 200, 200);
     widget_->Init(params);
+    widget_->Show();
+    widget_->GetRootView()->SetBounds(0, 0, 200, 200);
   }
 
   virtual void TearDown() OVERRIDE {
     View::set_use_acceleration_when_possible(old_use_acceleration_);
     widget_->CloseNow();
-    Widget::set_compositor_factory_for_testing(NULL);
     Widget::SetPureViews(false);
+    ViewsTestBase::TearDown();
   }
 
   Widget* widget() { return widget_; }
@@ -2445,6 +2535,8 @@ class ViewLayerTest : public ViewsTestBase {
   bool old_use_acceleration_;
 };
 
+#if !defined(USE_AURA)
+// This test assumes a particular layer hierarchy that isn't valid for aura.
 // Ensures the RootView has a layer and its set up correctly.
 TEST_F(ViewLayerTest, RootState) {
   ui::Layer* layer = widget()->GetRootView()->layer();
@@ -2456,20 +2548,50 @@ TEST_F(ViewLayerTest, RootState) {
   EXPECT_TRUE(layer->compositor() != NULL);
 }
 
+// Verifies that the complete bounds of a texture are updated if the texture
+// needs to be refreshed and paint with a clip is invoked.
+// This test invokes OnNativeWidgetPaintAccelerated, which is not used by aura.
+TEST_F(ViewLayerTest, PaintAll) {
+  View* view = widget()->GetRootView();
+  ui::Layer* layer = GetRootLayer();
+  view->SetBounds(0, 0, 200, 200);
+  widget()->OnNativeWidgetPaintAccelerated(gfx::Rect(0, 0, 1, 1));
+  ASSERT_TRUE(layer != NULL);
+  const ui::TestTexture* texture =
+      static_cast<const ui::TestTexture*>(layer->texture());
+  ASSERT_TRUE(texture != NULL);
+  EXPECT_EQ(view->GetLocalBounds(), texture->bounds_of_last_paint());
+}
+#endif
+
 TEST_F(ViewLayerTest, LayerToggling) {
+  // Because we lazily create textures the calls to DrawTree are necessary to
+  // ensure we trigger creation of textures.
+#if defined(USE_AURA)
+  ui::Layer* root_layer = NULL;
+  gfx::Point origin;
+  widget()->CalculateOffsetToAncestorWithLayer(&origin, &root_layer);
+#else
+  ui::Layer* root_layer = widget()->GetRootView()->layer();
+#endif
   View* content_view = new View;
   widget()->SetContentsView(content_view);
+
+  root_layer->DrawTree();
+  ui::TestTexture::reset_live_count();
 
   // Create v1, give it a bounds and verify everything is set up correctly.
   View* v1 = new View;
   v1->SetPaintToLayer(true);
-  EXPECT_EQ(1, TestTexture::live_count());
-  EXPECT_TRUE(v1->layer() == NULL);
-  content_view->AddChildView(v1);
-  EXPECT_EQ(2, TestTexture::live_count());
-  ASSERT_TRUE(v1->layer() != NULL);
-  EXPECT_EQ(widget()->GetRootView()->layer(), v1->layer()->parent());
+  root_layer->DrawTree();
+  EXPECT_EQ(0, ui::TestTexture::live_count());
+  EXPECT_TRUE(v1->layer() != NULL);
   v1->SetBounds(20, 30, 140, 150);
+  content_view->AddChildView(v1);
+  root_layer->DrawTree();
+  EXPECT_EQ(1, ui::TestTexture::live_count());
+  ASSERT_TRUE(v1->layer() != NULL);
+  EXPECT_EQ(root_layer, v1->layer()->parent());
   EXPECT_EQ(gfx::Rect(20, 30, 140, 150), v1->layer()->bounds());
 
   // Create v2 as a child of v1 and do basic assertion testing.
@@ -2478,7 +2600,8 @@ TEST_F(ViewLayerTest, LayerToggling) {
   EXPECT_TRUE(v2->layer() == NULL);
   v2->SetBounds(10, 20, 30, 40);
   v2->SetPaintToLayer(true);
-  EXPECT_EQ(3, TestTexture::live_count());
+  root_layer->DrawTree();
+  EXPECT_EQ(2, ui::TestTexture::live_count());
   ASSERT_TRUE(v2->layer() != NULL);
   EXPECT_EQ(v1->layer(), v2->layer()->parent());
   EXPECT_EQ(gfx::Rect(10, 20, 30, 40), v2->layer()->bounds());
@@ -2486,12 +2609,13 @@ TEST_F(ViewLayerTest, LayerToggling) {
   // Turn off v1s layer. v2 should still have a layer but its parent should have
   // changed.
   v1->SetPaintToLayer(false);
-  EXPECT_EQ(2, TestTexture::live_count());
+  root_layer->DrawTree();
+  EXPECT_EQ(1, ui::TestTexture::live_count());
   EXPECT_TRUE(v1->layer() == NULL);
   EXPECT_TRUE(v2->layer() != NULL);
-  EXPECT_EQ(widget()->GetRootView()->layer(), v2->layer()->parent());
-  ASSERT_EQ(1u, widget()->GetRootView()->layer()->children().size());
-  EXPECT_EQ(widget()->GetRootView()->layer()->children()[0], v2->layer());
+  EXPECT_EQ(root_layer, v2->layer()->parent());
+  ASSERT_EQ(1u, root_layer->children().size());
+  EXPECT_EQ(root_layer->children()[0], v2->layer());
   // The bounds of the layer should have changed to be relative to the root view
   // now.
   EXPECT_EQ(gfx::Rect(30, 50, 30, 40), v2->layer()->bounds());
@@ -2500,13 +2624,14 @@ TEST_F(ViewLayerTest, LayerToggling) {
   ui::Transform transform;
   transform.SetScale(2.0f, 2.0f);
   v1->SetTransform(transform);
-  EXPECT_EQ(3, TestTexture::live_count());
+  root_layer->DrawTree();
+  EXPECT_EQ(2, ui::TestTexture::live_count());
   EXPECT_TRUE(v1->layer() != NULL);
   EXPECT_TRUE(v2->layer() != NULL);
-  EXPECT_EQ(widget()->GetRootView()->layer(), v1->layer()->parent());
+  EXPECT_EQ(root_layer, v1->layer()->parent());
   EXPECT_EQ(v1->layer(), v2->layer()->parent());
-  ASSERT_EQ(1u, widget()->GetRootView()->layer()->children().size());
-  EXPECT_EQ(widget()->GetRootView()->layer()->children()[0], v1->layer());
+  ASSERT_EQ(1u, root_layer->children().size());
+  EXPECT_EQ(root_layer->children()[0], v1->layer());
   ASSERT_EQ(1u, v1->layer()->children().size());
   EXPECT_EQ(v1->layer()->children()[0], v2->layer());
   EXPECT_EQ(gfx::Rect(10, 20, 30, 40), v2->layer()->bounds());
@@ -2583,6 +2708,15 @@ TEST_F(ViewLayerTest, BoundsChangeWithLayer) {
 
   v2->SetPosition(gfx::Point(11, 12));
   EXPECT_EQ(gfx::Rect(36, 48, 40, 50), v2->layer()->bounds());
+
+  // Bounds of the layer should change even if the view is not invisible.
+  v1->SetVisible(false);
+  v1->SetPosition(gfx::Point(20, 30));
+  EXPECT_EQ(gfx::Rect(31, 42, 40, 50), v2->layer()->bounds());
+
+  v2->SetVisible(false);
+  v2->SetBounds(10, 11, 20, 30);
+  EXPECT_EQ(gfx::Rect(30, 41, 20, 30), v2->layer()->bounds());
 }
 
 // Makes sure a transform persists after toggling the visibility.
@@ -2621,23 +2755,38 @@ TEST_F(ViewLayerTest, ResetTransformOnLayerAfterAdd) {
   EXPECT_EQ(2.0f, view->layer()->transform().matrix().get(0, 0));
 }
 
-// Makes sure that layer persists after toggling the visibility.
+// Makes sure that layer visibility is correct after toggling View visibility.
 TEST_F(ViewLayerTest, ToggleVisibilityWithLayer) {
   View* content_view = new View;
   widget()->SetContentsView(content_view);
 
+  // The view isn't attached to a widget or a parent view yet. But it should
+  // still have a layer, but the layer should not be attached to the root
+  // layer.
   View* v1 = new View;
-  content_view->AddChildView(v1);
   v1->SetPaintToLayer(true);
-
-  v1->SetVisible(true);
   EXPECT_TRUE(v1->layer());
+  EXPECT_FALSE(LayerIsAncestor(widget()->GetCompositor()->root_layer(),
+                               v1->layer()));
+
+  // Once the view is attached to a widget, its layer should be attached to the
+  // root layer and visible.
+  content_view->AddChildView(v1);
+  EXPECT_TRUE(LayerIsAncestor(widget()->GetCompositor()->root_layer(),
+                              v1->layer()));
+  EXPECT_TRUE(v1->layer()->IsDrawn());
 
   v1->SetVisible(false);
-  EXPECT_TRUE(v1->layer() == NULL);
+  EXPECT_FALSE(v1->layer()->IsDrawn());
 
   v1->SetVisible(true);
-  EXPECT_TRUE(v1->layer());
+  EXPECT_TRUE(v1->layer()->IsDrawn());
+
+  widget()->Hide();
+  EXPECT_FALSE(v1->layer()->IsDrawn());
+
+  widget()->Show();
+  EXPECT_TRUE(v1->layer()->IsDrawn());
 }
 
 // Test that a hole in a layer is correctly created regardless of whether
@@ -2655,24 +2804,15 @@ TEST_F(ViewLayerTest, ToggleOpacityWithLayer) {
   child_view->SetBounds(50, 50, 100, 100);
   parent_view->AddChildView(child_view);
 
-  // Call SetFillsBoundsOpaquely before layer is created.
   ASSERT_TRUE(child_view->layer() == NULL);
-  child_view->SetFillsBoundsOpaquely(true);
-
   child_view->SetPaintToLayer(true);
+  child_view->SetFillsBoundsOpaquely(true);
   ASSERT_TRUE(child_view->layer());
   EXPECT_EQ(
       gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
 
   child_view->SetFillsBoundsOpaquely(false);
   EXPECT_TRUE(parent_view->layer()->hole_rect().IsEmpty());
-
-  // Call SetFillsBoundsOpaquely after layer is created.
-  ASSERT_TRUE(parent_view->layer());
-
-  child_view->SetFillsBoundsOpaquely(true);
-  EXPECT_EQ(
-      gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
 }
 
 // Test that a hole in a layer always corresponds to the bounds of opaque
@@ -2694,6 +2834,7 @@ TEST_F(ViewLayerTest, MultipleOpaqueLayers) {
 
   View* child_view2 = new View;
   child_view2->SetPaintToLayer(true);
+  child_view2->SetFillsBoundsOpaquely(false);
   child_view2->SetBounds(150, 150, 200, 200);
   parent_view->AddChildView(child_view2);
 
@@ -2728,8 +2869,8 @@ TEST_F(ViewLayerTest, ToggleVisibilityWithOpaqueLayer) {
 
   View* child_view = new View;
   child_view->SetBounds(50, 50, 100, 100);
-  child_view->SetFillsBoundsOpaquely(true);
   child_view->SetPaintToLayer(true);
+  child_view->SetFillsBoundsOpaquely(true);
   parent_view->AddChildView(child_view);
   EXPECT_EQ(
        gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
@@ -2742,17 +2883,31 @@ TEST_F(ViewLayerTest, ToggleVisibilityWithOpaqueLayer) {
       gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
 }
 
-// Verifies that the complete bounds of a texture are updated if the texture
-// needs to be refreshed and paint with a clip is invoked.
-TEST_F(ViewLayerTest, PaintAll) {
-  View* view = widget()->GetRootView();
-  view->SetBounds(0, 0, 200, 200);
-  widget()->OnNativeWidgetPaintAccelerated(gfx::Rect(0, 0, 1, 1));
-  ASSERT_TRUE(view->layer() != NULL);
-  const TestTexture* texture =
-      static_cast<const TestTexture*>(view->layer()->texture());
-  ASSERT_TRUE(texture != NULL);
-  EXPECT_EQ(view->GetLocalBounds(), texture->bounds_of_last_paint());
+// Tests that the layers in the subtree are orphaned after a View is removed
+// from the parent.
+TEST_F(ViewLayerTest, OrphanLayerAfterViewRemove) {
+  View* content_view = new View;
+  widget()->SetContentsView(content_view);
+
+  View* v1 = new View;
+  content_view->AddChildView(v1);
+
+  View* v2 = new View;
+  v1->AddChildView(v2);
+  v2->SetPaintToLayer(true);
+  EXPECT_TRUE(LayerIsAncestor(widget()->GetCompositor()->root_layer(),
+                              v2->layer()));
+  EXPECT_TRUE(v2->layer()->IsDrawn());
+
+  content_view->RemoveChildView(v1);
+  EXPECT_FALSE(LayerIsAncestor(widget()->GetCompositor()->root_layer(),
+                               v2->layer()));
+
+  // Reparent |v2|.
+  content_view->AddChildView(v2);
+  EXPECT_TRUE(LayerIsAncestor(widget()->GetCompositor()->root_layer(),
+                              v2->layer()));
+  EXPECT_TRUE(v2->layer()->IsDrawn());
 }
 
 // TODO(sky): reenable once focus issues are straightened out so that this
@@ -2801,6 +2956,113 @@ TEST_F(ViewLayerTest, DISABLED_NativeWidgetView) {
   EXPECT_EQ(gfx::Rect(5, 6, 10, 11), child_view->layer()->bounds());
 
   child_widget->CloseNow();
+}
+
+class PaintTrackingView : public View {
+ public:
+  PaintTrackingView() : painted_(false) {
+  }
+
+  bool painted() const { return painted_; }
+  void set_painted(bool value) { painted_ = value; }
+
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+    painted_ = true;
+  }
+
+ private:
+  bool painted_;
+
+  DISALLOW_COPY_AND_ASSIGN(PaintTrackingView);
+};
+
+// Makes sure child views with layers aren't painted when paint starts at an
+// ancestor.
+TEST_F(ViewLayerTest, DontPaintChildrenWithLayers) {
+  PaintTrackingView* content_view = new PaintTrackingView;
+  widget()->SetContentsView(content_view);
+  content_view->SetPaintToLayer(true);
+  GetRootLayer()->DrawTree();
+  GetRootLayer()->SchedulePaint(gfx::Rect(0, 0, 10, 10));
+  content_view->set_painted(false);
+  // content_view no longer has a dirty rect. Paint from the root and make sure
+  // PaintTrackingView isn't painted.
+  GetRootLayer()->DrawTree();
+  EXPECT_FALSE(content_view->painted());
+
+  // Make content_view have a dirty rect, paint the layers and make sure
+  // PaintTrackingView is painted.
+  content_view->layer()->SchedulePaint(gfx::Rect(0, 0, 10, 10));
+  GetRootLayer()->DrawTree();
+  EXPECT_TRUE(content_view->painted());
+}
+
+// Tests that the visibility of child layers are updated correctly when a View's
+// visibility changes.
+TEST_F(ViewLayerTest, VisibilityChildLayers) {
+  View* v1 = new View;
+  v1->SetPaintToLayer(true);
+  widget()->SetContentsView(v1);
+
+  View* v2 = new View;
+  v1->AddChildView(v2);
+
+  View* v3 = new View;
+  v2->AddChildView(v3);
+  v3->SetVisible(false);
+
+  View* v4 = new View;
+  v4->SetPaintToLayer(true);
+  v3->AddChildView(v4);
+
+  EXPECT_TRUE(v1->layer()->IsDrawn());
+  EXPECT_FALSE(v4->layer()->IsDrawn());
+
+  v2->SetVisible(false);
+  EXPECT_TRUE(v1->layer()->IsDrawn());
+  EXPECT_FALSE(v4->layer()->IsDrawn());
+
+  v2->SetVisible(true);
+  EXPECT_TRUE(v1->layer()->IsDrawn());
+  EXPECT_FALSE(v4->layer()->IsDrawn());
+
+  v2->SetVisible(false);
+  EXPECT_TRUE(v1->layer()->IsDrawn());
+  EXPECT_FALSE(v4->layer()->IsDrawn());
+  EXPECT_TRUE(ViewAndLayerTreeAreConsistent(v1, v1->layer()));
+
+  v3->SetVisible(true);
+  EXPECT_TRUE(v1->layer()->IsDrawn());
+  EXPECT_FALSE(v4->layer()->IsDrawn());
+  EXPECT_TRUE(ViewAndLayerTreeAreConsistent(v1, v1->layer()));
+
+  // Reparent |v3| to |v1|.
+  v1->AddChildView(v3);
+  EXPECT_TRUE(v1->layer()->IsDrawn());
+  EXPECT_TRUE(v4->layer()->IsDrawn());
+  EXPECT_TRUE(ViewAndLayerTreeAreConsistent(v1, v1->layer()));
+}
+
+// This test creates a random View tree, and then randomly reorders child views,
+// reparents views etc. Unrelated changes can appear to break this test. So
+// marking this as FLAKY.
+TEST_F(ViewLayerTest, FLAKY_ViewLayerTreesInSync) {
+  View* content = new View;
+  content->SetPaintToLayer(true);
+  widget()->SetContentsView(content);
+  widget()->Show();
+
+  ConstructTree(content, 5);
+  EXPECT_TRUE(ViewAndLayerTreeAreConsistent(content, content->layer()));
+
+  ScrambleTree(content);
+  EXPECT_TRUE(ViewAndLayerTreeAreConsistent(content, content->layer()));
+
+  ScrambleTree(content);
+  EXPECT_TRUE(ViewAndLayerTreeAreConsistent(content, content->layer()));
+
+  ScrambleTree(content);
+  EXPECT_TRUE(ViewAndLayerTreeAreConsistent(content, content->layer()));
 }
 
 #endif  // VIEWS_COMPOSITOR

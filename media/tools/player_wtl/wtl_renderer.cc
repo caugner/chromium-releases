@@ -13,15 +13,14 @@ WtlVideoRenderer::WtlVideoRenderer(WtlVideoWindow* window)
 WtlVideoRenderer::~WtlVideoRenderer() {}
 
 bool WtlVideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
-  window_->SetSize(decoder->width(), decoder->height());
+  window_->SetSize(
+      decoder->natural_size().width(), decoder->natural_size().height());
   return true;
 }
 
-void WtlVideoRenderer::OnStop(media::FilterCallback* callback) {
-  if (callback) {
-    callback->Run();
-    delete callback;
-  }
+void WtlVideoRenderer::OnStop(const base::Closure& callback) {
+  if (!callback.is_null())
+    callback.Run();
 }
 
 void WtlVideoRenderer::OnFrameAvailable() {

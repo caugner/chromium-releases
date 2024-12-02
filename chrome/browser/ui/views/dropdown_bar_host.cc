@@ -18,7 +18,9 @@
 #include "views/focus/view_storage.h"
 #include "views/widget/widget.h"
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+#include "ui/gfx/scoped_sk_region.h"
+#elif defined(OS_WIN)
 #include "base/win/scoped_gdi_object.h"
 #elif defined(TOOLKIT_USES_GTK)
 #include "ui/base/gtk/scoped_handle_gtk.h"
@@ -26,7 +28,9 @@
 
 namespace {
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+typedef gfx::ScopedSkRegion ScopedPlatformRegion;
+#elif defined(OS_WIN)
 typedef base::win::ScopedRegion ScopedPlatformRegion;
 #elif defined(TOOLKIT_USES_GTK)
 typedef ui::ScopedRegion ScopedPlatformRegion;

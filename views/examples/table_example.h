@@ -34,12 +34,11 @@ class TableExample : public ExampleBase,
   virtual ~TableExample();
 
   // ExampleBase:
-  virtual std::wstring GetExampleTitle() OVERRIDE;
   virtual void CreateExampleView(views::View* container) OVERRIDE;
 
   // ui::TableModel:
   virtual int RowCount() OVERRIDE;
-  virtual std::wstring GetText(int row, int column_id) OVERRIDE;
+  virtual string16 GetText(int row, int column_id) OVERRIDE;
   virtual SkBitmap GetIcon(int row) OVERRIDE;
   virtual void SetObserver(ui::TableModelObserver* observer) OVERRIDE;
 

@@ -10,27 +10,32 @@
 #include "ui/base/l10n/l10n_font_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/compositor/compositor.h"
+#include "ui/gfx/compositor/layer.h"
 #include "views/controls/menu/menu_controller.h"
+#include "views/focus/focus_manager.h"
 #include "views/focus/focus_manager_factory.h"
 #include "views/focus/view_storage.h"
+#include "views/focus/widget_focus_manager.h"
 #include "views/ime/input_method.h"
 #include "views/views_delegate.h"
 #include "views/widget/default_theme_provider.h"
-#include "views/widget/root_view.h"
 #include "views/widget/native_widget_private.h"
+#include "views/widget/root_view.h"
 #include "views/widget/tooltip_manager.h"
 #include "views/widget/widget_delegate.h"
 #include "views/window/custom_frame_view.h"
 
-namespace views {
-
 namespace {
+
 // Set to true if a pure Views implementation is preferred
 bool use_pure_views = false;
 
 // True to enable debug paint that indicates where to be painted.
 bool debug_paint = false;
-}
+
+}  // namespace
+
+namespace views {
 
 // This class is used to keep track of the event a Widget is processing, and
 // restore any previously active event afterwards.
@@ -68,7 +73,8 @@ class DefaultWidgetDelegate : public WidgetDelegate {
  public:
   DefaultWidgetDelegate(Widget* widget, const Widget::InitParams& params)
       : widget_(widget),
-        can_activate_(params.type != Widget::InitParams::TYPE_POPUP) {
+        can_activate_(!params.child &&
+                      params.type != Widget::InitParams::TYPE_POPUP) {
   }
   virtual ~DefaultWidgetDelegate() {}
 
@@ -121,7 +127,7 @@ Widget::InitParams::InitParams(Type type)
     : type(type),
       delegate(NULL),
       child(type == TYPE_CONTROL),
-      transient(type == TYPE_POPUP || type == TYPE_MENU),
+      transient(type == TYPE_BUBBLE || type == TYPE_POPUP || type == TYPE_MENU),
       transparent(false),
       accept_events(true),
       can_activate(type != TYPE_POPUP && type != TYPE_MENU),
@@ -140,15 +146,8 @@ Widget::InitParams::InitParams(Type type)
 ////////////////////////////////////////////////////////////////////////////////
 // Widget, public:
 
-// static
-Widget::InitParams Widget::WindowInitParams() {
-  return InitParams(InitParams::TYPE_WINDOW);
-}
-
 Widget::Widget()
-    : is_mouse_button_pressed_(false),
-      last_mouse_event_was_move_(false),
-      native_widget_(NULL),
+    : native_widget_(NULL),
       widget_delegate_(NULL),
       non_client_view_(NULL),
       dragged_view_(NULL),
@@ -162,7 +161,9 @@ Widget::Widget()
       minimum_size_(100, 100),
       focus_on_creation_(true),
       is_top_level_(false),
-      native_widget_initialized_(false) {
+      native_widget_initialized_(false),
+      is_mouse_button_pressed_(false),
+      last_mouse_event_was_move_(false) {
 }
 
 Widget::~Widget() {
@@ -215,7 +216,7 @@ void Widget::SetPureViews(bool pure) {
 
 // static
 bool Widget::IsPureViews() {
-#if defined(TOUCH_UI)
+#if defined(USE_ONLY_PURE_VIEWS)
   return true;
 #else
   return use_pure_views;
@@ -288,7 +289,7 @@ bool Widget::IsDebugPaintEnabled() {
 
 // static
 bool Widget::RequiresNonClientView(InitParams::Type type) {
-  return type == InitParams::TYPE_WINDOW;
+  return type == InitParams::TYPE_WINDOW || type == InitParams::TYPE_BUBBLE;
 }
 
 void Widget::Init(const InitParams& params) {
@@ -329,7 +330,7 @@ void Widget::Init(const InitParams& params) {
 // Unconverted methods (see header) --------------------------------------------
 
 gfx::NativeView Widget::GetNativeView() const {
-   return native_widget_->GetNativeView();
+  return native_widget_->GetNativeView();
 }
 
 gfx::NativeWindow Widget::GetNativeWindow() const {
@@ -396,6 +397,8 @@ const Widget* Widget::GetTopLevelWidget() const {
 
 void Widget::SetContentsView(View* view) {
   root_view_->SetContentsView(view);
+  if (non_client_view_ != view)
+    non_client_view_ = NULL;
 }
 
 View* Widget::GetContentsView() {
@@ -609,7 +612,7 @@ ThemeProvider* Widget::GetThemeProvider() const {
 }
 
 FocusManager* Widget::GetFocusManager() {
-  Widget* toplevel_widget = GetTopLevelWidget();
+  const Widget* toplevel_widget = GetTopLevelWidget();
   return toplevel_widget ? toplevel_widget->focus_manager_.get() : NULL;
 }
 
@@ -620,7 +623,12 @@ InputMethod* Widget::GetInputMethod() {
     return input_method_.get();
   } else {
     Widget* toplevel = GetTopLevelWidget();
-    return toplevel ? toplevel->GetInputMethod() : NULL;
+    // If GetTopLevelWidget() returns itself which is not toplevel,
+    // the widget is detached from toplevel widget.
+    // TODO(oshima): Fix GetTopLevelWidget() to return NULL
+    // if there is no toplevel. We probably need to add GetTopMostWidget()
+    // to replace some use cases.
+    return (toplevel && toplevel != this) ? toplevel->GetInputMethod() : NULL;
   }
 }
 
@@ -668,12 +676,12 @@ void Widget::UpdateWindowTitle() {
   // the native frame is being used, since this also updates the taskbar, etc.
   string16 window_title;
   if (native_widget_->IsScreenReaderActive()) {
-    window_title = WideToUTF16(widget_delegate_->GetAccessibleWindowTitle());
+    window_title = widget_delegate_->GetAccessibleWindowTitle();
   } else {
-    window_title = WideToUTF16(widget_delegate_->GetWindowTitle());
+    window_title = widget_delegate_->GetWindowTitle();
   }
   base::i18n::AdjustStringForLocaleDirection(&window_title);
-  native_widget_->SetWindowTitle(UTF16ToWide(window_title));
+  native_widget_->SetWindowTitle(window_title);
 }
 
 void Widget::UpdateWindowIcon() {
@@ -751,13 +759,13 @@ ui::Compositor* Widget::GetCompositor() {
   return native_widget_->GetCompositor();
 }
 
-void Widget::MarkLayerDirty() {
-  native_widget_->MarkLayerDirty();
+void Widget::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
+                                                ui::Layer** layer_parent) {
+  native_widget_->CalculateOffsetToAncestorWithLayer(offset, layer_parent);
 }
 
-void Widget::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                View** ancestor) {
-  native_widget_->CalculateOffsetToAncestorWithLayer(offset, ancestor);
+void Widget::ReorderLayers() {
+  native_widget_->ReorderLayers();
 }
 
 void Widget::NotifyAccessibilityEvent(
@@ -808,6 +816,10 @@ View* Widget::GetChildViewParent() {
   return GetContentsView() ? GetContentsView() : GetRootView();
 }
 
+gfx::Rect Widget::GetWorkAreaBoundsInScreen() const {
+  return native_widget_->GetWorkAreaBoundsInScreen();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Widget, NativeWidgetDelegate implementation:
 
@@ -848,21 +860,22 @@ void Widget::OnNativeWidgetActivationChanged(bool active) {
 }
 
 void Widget::OnNativeFocus(gfx::NativeView focused_view) {
-  GetFocusManager()->GetWidgetFocusManager()->OnWidgetFocusEvent(
-      focused_view,
-      GetNativeView());
+  WidgetFocusManager::GetInstance()->OnWidgetFocusEvent(focused_view,
+                                                        GetNativeView());
 }
 
 void Widget::OnNativeBlur(gfx::NativeView focused_view) {
-  GetFocusManager()->GetWidgetFocusManager()->OnWidgetFocusEvent(
-      GetNativeView(),
-      focused_view);
+  WidgetFocusManager::GetInstance()->OnWidgetFocusEvent(GetNativeView(),
+                                                        focused_view);
 }
 
 void Widget::OnNativeWidgetVisibilityChanged(bool visible) {
-  GetRootView()->PropagateVisibilityNotifications(GetRootView(), visible);
+  View* root = GetRootView();
+  root->PropagateVisibilityNotifications(root, visible);
   FOR_EACH_OBSERVER(Observer, observers_,
                     OnWidgetVisibilityChanged(this, visible));
+  if (GetCompositor() && root->layer())
+    root->layer()->SetVisible(visible);
 }
 
 void Widget::OnNativeWidgetCreated() {
@@ -891,7 +904,7 @@ void Widget::OnNativeWidgetDestroyed() {
 }
 
 gfx::Size Widget::GetMinimumSize() {
-  return non_client_view_ ? non_client_view_->GetMinimumSize() : gfx::Size();
+  return non_client_view_ ? non_client_view_->GetMinimumSize() : minimum_size_;
 }
 
 void Widget::OnNativeWidgetSizeChanged(const gfx::Size& new_size) {
@@ -921,10 +934,32 @@ bool Widget::OnNativeWidgetPaintAccelerated(const gfx::Rect& dirty_region) {
   if (!compositor)
     return false;
 
-  compositor->NotifyStart();
-  GetRootView()->PaintToLayer(dirty_region);
-  GetRootView()->PaintComposite();
-  compositor->NotifyEnd();
+  // If the root view is animating, it is likely that it does not cover the same
+  // set of pixels it did at the last frame, so we must clear when compositing
+  // to avoid leaving ghosts.
+  bool force_clear = false;
+  if (GetRootView()->layer()) {
+    const ui::Transform& layer_transform = GetRootView()->layer()->transform();
+    if (layer_transform != GetRootView()->GetTransform()) {
+      // The layer has not caught up to the view (i.e., the layer is still
+      // animating), and so a clear is required.
+      force_clear = true;
+    } else {
+      // Determine if the layer fills the client area.
+      gfx::Rect layer_bounds = GetRootView()->layer()->bounds();
+      layer_transform.TransformRect(&layer_bounds);
+      gfx::Rect client_bounds = GetClientAreaScreenBounds();
+      // Translate bounds to origin (client area bounds are offset to account
+      // for buttons, etc).
+      client_bounds.set_origin(gfx::Point(0, 0));
+      if (!layer_bounds.Contains(client_bounds)) {
+        // It doesn't, and so a clear is required.
+        force_clear = true;
+      }
+    }
+  }
+
+  compositor->Draw(force_clear);
   return true;
 }
 
@@ -1046,6 +1081,7 @@ internal::RootView* Widget::CreateRootView() {
 }
 
 void Widget::DestroyRootView() {
+  non_client_view_ = NULL;
   root_view_.reset();
   // Input method has to be destroyed before focus manager.
   input_method_.reset();
@@ -1124,12 +1160,13 @@ bool Widget::GetSavedWindowPlacement(gfx::Rect* bounds,
     if (!widget_delegate_->ShouldRestoreWindowSize()) {
       bounds->set_size(non_client_view_->GetPreferredSize());
     } else {
+      gfx::Size minimum_size = GetMinimumSize();
       // Make sure the bounds are at least the minimum size.
-      if (bounds->width() < minimum_size_.width())
-        bounds->set_width(minimum_size_.width());
+      if (bounds->width() < minimum_size.width())
+        bounds->set_width(minimum_size.width());
 
-      if (bounds->height() < minimum_size_.height())
-        bounds->set_height(minimum_size_.height());
+      if (bounds->height() < minimum_size.height())
+        bounds->set_height(minimum_size.height());
     }
     return true;
   }

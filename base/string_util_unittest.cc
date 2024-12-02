@@ -472,17 +472,17 @@ TEST(StringUtilTest, ToUpperASCII) {
   EXPECT_EQ(L"CC2", upper_w);
 }
 
-static const struct {
-  const wchar_t* src_w;
-  const char*    src_a;
-  const char*    dst;
-} lowercase_cases[] = {
-  {L"FoO", "FoO", "foo"},
-  {L"foo", "foo", "foo"},
-  {L"FOO", "FOO", "foo"},
-};
-
 TEST(StringUtilTest, LowerCaseEqualsASCII) {
+  static const struct {
+    const wchar_t* src_w;
+    const char*    src_a;
+    const char*    dst;
+  } lowercase_cases[] = {
+    { L"FoO", "FoO", "foo" },
+    { L"foo", "foo", "foo" },
+    { L"FOO", "FOO", "foo" },
+  };
+
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(lowercase_cases); ++i) {
     EXPECT_TRUE(LowerCaseEqualsASCII(lowercase_cases[i].src_w,
                                      lowercase_cases[i].dst));
@@ -1020,7 +1020,7 @@ TEST(StringUtilTest, LcpyTest) {
 }
 
 TEST(StringUtilTest, WprintfFormatPortabilityTest) {
-  struct TestData {
+  static const struct {
     const wchar_t* input;
     bool portable;
   } cases[] = {
@@ -1046,9 +1046,8 @@ TEST(StringUtilTest, WprintfFormatPortabilityTest) {
     { L"% 10s", false },
     { L"% 10ls", true }
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i)
     EXPECT_EQ(cases[i].portable, base::IsWprintfFormatPortable(cases[i].input));
-  }
 }
 
 TEST(StringUtilTest, RemoveChars) {

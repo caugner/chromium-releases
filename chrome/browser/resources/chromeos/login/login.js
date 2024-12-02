@@ -34,8 +34,9 @@ cr.define('cr.ui', function() {
   Oobe.initialize = function() {
     login.AccountPickerScreen.register();
     login.GaiaSigninScreen.register();
+    oobe.OAuthEnrollmentScreen.register();
     oobe.UserImageScreen.register();
-    login.OfflineMessageScreen.register();
+    login.ErrorMessageScreen.register();
 
     cr.ui.Bubble.decorate($('bubble'));
     login.HeaderBar.decorate($('login-header-bar'));
@@ -149,14 +150,6 @@ cr.define('cr.ui', function() {
 
 var Oobe = cr.ui.Oobe;
 
-// Disable text selection.
-document.onselectstart = function(e) {
-  e.preventDefault();
-}
-
-// Disable dragging.
-document.ondragstart = function(e) {
-  e.preventDefault();
-}
+disableTextSelectAndDrag();
 
 document.addEventListener('DOMContentLoaded', cr.ui.Oobe.initialize);

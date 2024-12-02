@@ -6,7 +6,12 @@
 #define CHROME_BROWSER_HISTORY_DOWNLOAD_DATABASE_H_
 #pragma once
 
+#include <set>
+#include <string>
+
+#include "base/threading/platform_thread.h"
 #include "chrome/browser/history/history_types.h"
+#include "sql/meta_table.h"
 
 struct DownloadPersistentStoreInfo;
 class FilePath;
@@ -24,11 +29,15 @@ class DownloadDatabase {
   DownloadDatabase();
   virtual ~DownloadDatabase();
 
+  int next_download_id() const { return next_id_; }
+
   // Get all the downloads from the database.
   void QueryDownloads(std::vector<DownloadPersistentStoreInfo>* results);
 
   // Update the state of one download. Returns true if successful.
-  bool UpdateDownload(int64 received_bytes, int32 state, DownloadID db_handle);
+  // Does not update |url|, |start_time|, |total_bytes|; uses |db_handle| only
+  // to select the row in the database table to update.
+  bool UpdateDownload(const DownloadPersistentStoreInfo& data);
 
   // Update the path of one download. Returns true if successful.
   bool UpdateDownloadPath(const FilePath& path, DownloadID db_handle);
@@ -63,6 +72,16 @@ class DownloadDatabase {
   bool DropDownloadTable();
 
  private:
+  bool EnsureColumnExists(const std::string& name, const std::string& type);
+
+  // TODO(rdsmith): Remove after http://crbug.com/96627 has been resolved.
+  std::set<int64> returned_ids_;
+  bool owning_thread_set_;
+  base::PlatformThreadId owning_thread_;
+
+  int next_id_;
+  sql::MetaTable meta_table_;
+
   DISALLOW_COPY_AND_ASSIGN(DownloadDatabase);
 };
 

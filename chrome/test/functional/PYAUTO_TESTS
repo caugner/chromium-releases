@@ -51,8 +51,10 @@
       'history',
       'https',
       'imports',
+      'indexeddb',
       'infobars',
       'instant',
+      'multiprofile',
       'navigation',
       'notifications',
       'ntp',
@@ -61,6 +63,8 @@
       'pdf',
       'plugins',
       'plugins_check',
+      'policy',
+      'policy_prefs_ui',
       'popups',
       'prefs',
       'process_count',
@@ -79,83 +83,70 @@
       # ==================================================
       # crbug.com/83686
       '-autofill.AutofillTest.testFillProfileCrazyCharacters',
+      # crbug.com/99475
+      '-autofill.AutofillTest.testNoDuplicatePhoneNumsInPrefs',
       # Browser crash when clearing browsing history and downloads together.
-      # crbug.com/88128
-      '-browsing_data.BrowsingDataTest.testClearHistoryAndDownloads',
-      '-browsing_data.BrowsingDataTest.testClearingAccuracy',
-      # Turkish I problem. crbug.com/60638
-      '-find_in_page.FindMatchTests.testLocalizationAndCaseOrder',
-      # crbug.com/87959
-      '-instant.InstantTest.testInstantLoadsFor100CharsLongQuery',
-      # crbug.com/83459
-      '-instant.InstantTest.testPreFetchInstantURLSetsNoCookies',
-      '-omnibox.OmniboxTest.testHistoryResult',  # crbug.com/71715
-      # crbug.com/91033
-      '-omnibox.OmniboxTest.testOmniboxSearchHistory',
+      # crbug.com/97695
+      '-downloads.DownloadsTest.testBigZip',
+      '-downloads.DownloadsTest.testFileRenaming',
+      '-downloads.DownloadsTest.testCrazyFilenames',
+      # crbug.com/99506
+      '-notifications.NotificationsTest.testSpecialURLNotification',
+      # crbug.com/71715
+      '-omnibox.OmniboxTest.testHistoryResult',
+      # crbug.com/97140
+      '-plugins.PluginsTest.testDisableEnableAllPlugins',
       # crbug.com/82629 - real bug.
       '-popups.PopupsTest.testPopupsLaunchUponBrowserBackButton',
       # crbug.com/47935
       '-popups.PopupsTest.testBlockedPopupNotShowInHistory',
       # crbug.com/83827
-      '-popups.PopupsTest.testUnblockedPopupShowsInHistory',
       '-popups.PopupsTest.testUnblockedPopupAddedToOmnibox',
       # crbug.com/85600
       '-prefs.PrefsTest.testNavigationStateOnSessionRestore',
+      # Flaky browser crash.  crbug.com/99944
+      '-search_engines.SearchEnginesTest.testDefaultSearchEngines',
       # Flaky: crbug.com/67851
       '-special_tabs.SpecialTabsTest.testAboutDNSTab',
       # crbug.com/95140
       '-translate.TranslateTest.testGoBackAndForwardToTranslatePage',
-      # crbug.com/86523
-      '-cookies.CookiesTest.testAllowCookiesForASessionUsingExceptions',
-      '-cookies.CookiesTest.testAllowCookiesUsingExceptions',
-      '-cookies.CookiesTest.testBlockCookiesUsingExceptions',
-      # crbug.com/91030
-      '-omnibox.OmniboxTest.testContentHistory',
       # crbug.com/86524
       '-plugins.PluginsTest.testAllowPluginException',
-      # crbug.com/87811
-      '-plugins.PluginsTest.testDisableEnableAllPlugins',
       # crbug.com/85307
       '-plugins.PluginsTest.testKillAndReloadAllPlugins',
       # crbug.com/88574
       '-special_tabs.SpecialTabsTest.testSpecialURLTabs',
       # crbug.com/88593
       '-sync.SyncTest.testPersonalStuffSyncSection',
-      # crbug.com/94683
-      '-execute_javascript.ExecuteJavascriptTest.testExecuteJavascriptInExtension',
       # crbug.com/95031
       '-notifications.NotificationsTest.testOriginPrefsNotSavedInIncognito',
+      # crbug.com/98918
+      '-policy.PolicyTest.testBookmarkBarPolicy',
+      # crbug.com/100217
+      '-policy.PolicyTest.testBlacklistPolicy',
+      # crbug.com/100591
+      '-pdf.PDFTest.testPDFRunner',
+      # crbug.com/100593
+      '-nacl_sdk.NaClSDKTest.testVerifyNaClPlugin',
     ],
 
     'win': [
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/88210
-      '-autofill.AutofillTest.testCharsStrippedForAggregatedPhoneNumbers',
       # crbug.com/81271
       '-autofill.AutofillTest.testMergeAggregatedProfilesWithSameAddress',
       '-autofill.AutofillTest.testProfilesNotMergedWhenNoMinAddressData',
-      # crbug.com/95141
-      '-enterprise.EnterpriseTest.testDisable3DAPI',
-      # crbug.com/94683
-      '-execute_javascript.ExecuteJavascriptTest.testExecuteJavascriptInExtension',
       # Some download test fails on win official builder, only thru buildbot
       # when downloading the small zip file.
       # crbug.com/91225
       '-find_in_page.FindMatchTests.testSearchInPDF',
-      # crbug.com/94682
-      '-gpu.GpuTest.test2dCanvas',
-      # crbug.com/93423
-      '-gpu.GpuTest.test3dCss',
       # Disabled on vista in the actual test. crbug.com/89767
       # -imports.ImportsTest.testImportFirefoxDataTwice
       # Disabled on vista in the actual test. crbug.com/89767
       # -imports.ImportsTest.testFirefoxImportFromPrefs
       # Disabled on vista in the actual test. crbug.com/89767
       # -imports.ImportsTest.testImportFirefoxPasswordsFromPrefs
-      # crbug.com/95003
-      '-infobars.InfobarTest.testPluginCrashForMultiTabs',
       # crbug.com/66072
       '-notifications.NotificationsTest.testNotificationOrderAfterClosingOne',
       # crbug.com/85598
@@ -170,26 +161,18 @@
       '-passwords.PasswordTest.testInfoBarDisappearByReload',
       '-passwords.PasswordTest.testNeverSavePasswords',
       # crbug.com/91887
-      '-passwords.PasswordTest.testInfoBarDisappearByNavigatingPage',
-      # crbug.com/67588
       '-passwords.PasswordTest.testSavedPasswordInTabsAndWindows',
+      '-passwords.PasswordTest.testClearFetchedCredForNewUserName',
+      # causes browser crash?  crbug.com/99865
+      '-prefs.PrefsTest.testGeolocationPref',
       # crbug.com/88679
       '-sync',
       # crbug.com/86949
       '-sync.SyncTest.testRestartBrowser',
       # crbug.com/87642
       '-sync.SyncTest.testDisableAndEnableDatatypes',
-      # crbug.com/88190
-      '-passwords.PasswordTest.testClearFetchedCredForNewUserName',
-      # Crashes browser. crbug.com/89000
-      '-prefs.PrefsTest.testGeolocationPref',
-      # crbug.com/93822
-      '-process_count.ProcessCountTest.testProcessCountAppendSingleTab',
-      '-process_count.ProcessCountTest.testProcessCountCombination',
-      '-process_count.ProcessCountTest.testProcessCountExtensionProcess',
-      '-process_count.ProcessCountTest.testProcessCountFlashProcess',
-      '-process_count.ProcessCountTest.testProcessCountFreshProfile',
-      '-process_count.ProcessCountTest.testProcessCountNewWindow',
+      # crbug.com/95621
+      '-youtube.YoutubeTest.testPlayerStatus',
     ],
 
     'mac': [
@@ -207,7 +190,6 @@
       '-downloads.DownloadsTest.testDeclineDangerousDownload',
       # crbug.com/75724
       '-downloads.DownloadsTest.testSaveDangerousFile',
-      '-instant.InstantTest.testInstantNavigation',  # crbug.com/69090
       # crbug.com/93956
        '-find_in_page.FindMatchTests.testSearchInPDF',
       # crbug.com/66072
@@ -220,27 +202,31 @@
       '-omnibox.OmniboxTest.testHistoryResult',
       # crbug.com/91617
       '-omnibox.OmniboxTest.testContentHistory',
-      '-omnibox.OmniboxTest.testOmniboxSearchHistory',
       # Keychain popups make autofill/password tests difficult: crbug.com/49378
       '-passwords',
-      # crbug.com/95142
-      '-process_count.ProcessCountTest.testProcessCountExtensionProcess',
-      # WebDriver requires python 2.6, which mac pyauto does not use yet.
-      # crbug.com/49379
-      '-pyauto_webdriver',
+      # crbug.com/97140
+      '-plugins.PluginsTest.testDisableEnableAllPlugins',
       # crbug.com/79263
       '-popups.PopupsTest.testPopupsLaunchUponBrowserBackButton',
       # crbug.com/69619
       '-search_engines.SearchEnginesTest.testDiscoverSearchEngine',
       # Keychain popups make sync tests difficult on Mac.  crbug.com/49378
       '-sync',
-      # crbug.com/87837
+      # crbug.com/85598
+      '-ntp.NTPTest.testGetAppsWhenInstallApp',
+      '-ntp.NTPTest.testGetAppsWhenInstallNonApps',
+      '-ntp.NTPTest.testLaunchAppFullScreen',
+      '-ntp.NTPTest.testLaunchAppPinnedTab',
+      '-ntp.NTPTest.testLaunchAppRegularTab',
+      '-ntp.NTPTest.testLaunchAppWithDefaultSettings',
+      '-ntp.NTPTest.testUninstallApp',
+      # crbug.com/100595
       '-plugins.PluginsTest.testBlockPluginException',
-      '-plugins.PluginsTest.testDisableEnableAllPlugins',
-      '-plugins.PluginsTest.testKillAndReloadAllPlugins',
     ],
 
     'linux': [  # linux != chromeos
+      # Enabling here since it's disabled on other platforms.  crbug.com/88574
+      'special_tabs.SpecialTabsTest.testSpecialURLTabs',
       # ===========================
       # Permanently-disabled tests.
       # ===========================
@@ -250,8 +236,13 @@
       # on the chromium bots, so exlcude these from here.  They're included
       # back in the FULL suite below.
       # crbug.com/85310
+      '-omnibox.OmniboxTest.testAppComboNameWithSpecialCharSearch',
+      '-omnibox.OmniboxTest.testAppNameWithNumberSearch',
+      '-omnibox.OmniboxTest.testAppNameWithSpaceSearch',
+      '-omnibox.OmniboxTest.testAppSearchWithVeryLongAppName',
       '-omnibox.OmniboxTest.testAutoCompleteForNonAsciiSearch',
       '-omnibox.OmniboxTest.testAutoCompleteForSearch',
+      '-omnibox.OmniboxTest.testBasicAppSearch',
       '-omnibox.OmniboxTest.testBookmarkResultInNewTabAndWindow',
       '-omnibox.OmniboxTest.testCrazyFilenames',
       '-omnibox.OmniboxTest.testDifferentTypesOfResults',
@@ -261,20 +252,21 @@
       '-omnibox.OmniboxTest.testSelect',
       '-omnibox.OmniboxTest.testSuggest',
       '-omnibox.OmniboxTest.testSuggestPref',
+
       # System password manager obstructs password automation.
       '-passwords',
 
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/90882
-      '-autofill.AutofillTest.testCharsStrippedForAggregatedPhoneNumbers',
       # crbug.com/91225
       '-find_in_page.FindMatchTests.testSearchInPDF',
-      # crbug.com/91226
-      '-infobars.InfobarTest.testPluginCrashForMultiTabs',
       # crbug.com/85310
       '-instant',
+      # crbug.com/66072
+      '-notifications.NotificationsTest.testNotificationOrderAfterClosingOne',
+      # Plugin block exception broken.  crbug.com/100273
+      '-plugins.PluginsTest.testBlockPluginException',
       # Gnome / kwallet popups on linux break sync tests.  crbug.com/80329
       '-sync',
       # crbug.com/87837
@@ -289,6 +281,7 @@
       'chromeos_basic',
       'chromeos_browser',
       'chromeos_firmware_version_checker',
+      'chromeos_file_browser',
       'chromeos_power',
       'chromeos_prefs',
       'chromeos_security',
@@ -305,17 +298,18 @@
       '-codesign',
       # Import tests are invalid on ChromeOS since Chrome is the only browser.
       '-imports',
+      # Multi-profile doesn't apply to chromeos yet.
+      '-multiprofile',
 
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/90882
-      '-autofill.AutofillTest.testCharsStrippedForAggregatedPhoneNumbers',
       # crbug.com/81271
-      '-autofill.AutofillTest.testMergeAggregatedProfilesWithSameAddress',	
+      '-autofill.AutofillTest.testMergeAggregatedProfilesWithSameAddress',
       '-autofill.AutofillTest.testProfilesNotMergedWhenNoMinAddressData',
-      # Flaky: crosbug.com/14394
-      '-browsing_data.BrowsingDataTest.testClearHistoryAndDownloads',
+      # crosbug.com/19556
+      '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
+      '-autofill.AutofillTest.testPostalCodeAndStateLabelsBasedOnCountry',
       # Downloads panel stays even after declining a download.
       # crosbug.com/14728
       '-downloads.DownloadsTest.testDeclineDangerousDownload',
@@ -344,17 +338,16 @@
       '-sync',
       # crbug.com/87837
       '-plugins.PluginsTest.testKillAndReloadAllPlugins',
-
       # Deal with i18n chars.  crosbug.com/12639
       '-autofill.AutofillTest.testFillProfileCrazyCharacters',
       '-downloads.DownloadsTest.testCrazyFilenames',
       '-omnibox.OmniboxTest.testCrazyFilenames',
-
       # crosbug.com/16977
       '-chromeos_wifi_sanity.ChromeosWifiSanity.testConnectToHiddenWiFiNonExistent',
-
       # crosbug.com/20025
       '-chromeos_browser.ChromeosBrowserTest.testFullScreen',
+      # crosbug.com/19556
+      '-pyauto_webdriver',
     ],
   },
 
@@ -399,7 +392,13 @@
       '-plugins.PluginsTest.testBlockPluginException',
       '-popups.PopupsTest.testMultiplePopups',
       '-popups.PopupsTest.testPopupBlockedEverySec',
-
+      '-process_count.ProcessCountTest.testProcessCountCombination',
+      '-process_count.ProcessCountTest.testProcessCountFlashProcess',
+      '-omnibox.OmniboxTest.testAppComboNameWithSpecialCharSearch',
+      '-omnibox.OmniboxTest.testAppNameWithNumberSearch',
+      '-omnibox.OmniboxTest.testAppNameWithSpaceSearch',
+      '-omnibox.OmniboxTest.testAppSearchWithVeryLongAppName',
+      '-omnibox.OmniboxTest.testBasicAppSearch',
     ],
 
     'win': [
@@ -412,6 +411,17 @@
     ],
 
     'chromeos': [
+      # These tests fail due to crosbug.com/19556
+      '-autofill.AutofillTest.testPostalCodeAndStateLabelsBasedOnCountry',
+      '-autofill.AutofillTest.testDisplayLineItemForEntriesWithNoCCNum',
+      '-autofill.AutofillTest.testNoDuplicatePhoneNumsInPrefs',
+      # Media files test uses internal media files
+      '-chromeos_file_browser.ChromeosFileBrowserTest.testOpenMediaFiles',
+      # Netflix tests
+      '-netflix.NetflixTest.testPlayerLoadsAndPlays',
+      '-netflix.NetflixTest.testPlaying',
+      # Youtube perf test
+      '-perf.YoutubePerfTest.testYoutubeDroppedFrames',
     ],
   },
 
@@ -423,36 +433,52 @@
       'nacl_sdk',
       'translate',
 
+      # ===========================
+      # Permanently-disabled tests.
+      # ===========================
+      # Can't use automation to change the policy data on Chrome builds.
+      '-policy',
+      '-policy_prefs_ui',
+
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # Disable pyauto+webdriver tests on 'Google Chrome' bots until next
-      # build is generated. 8/15/2011. Remove tomorrow.
-      '-pyauto_webdriver',
       # This test fails due to crbug.com/35485
       '-translate.TranslateTest.testBarNotVisibleOnSSLErrorPage',
       # This test fails due to crbug.com/50706
       '-translate.TranslateTest.testToggleTranslateOption',
-      # crbug.com/70280
-      '-translate.TranslateTest.testSeveralLanguages',
       # crbug.com/85601
       '-translate.TranslateTest.testAlwaysTranslateInIncognito',
       # This test fails due to crbug.com/85633
       '-translate.TranslateTest.testSessionRestore',
       # The source is behind.  Waiting for dev to automate the update.
       '-nacl_sdk.NaClSDKTest.testVerifyNaClSDKChecksum',
+      # crbug.com/98681
+      '-nacl_sdk.NaClSDKTest.testNaClSDK',
+      '-nacl_sdk.NaClSDKTest.testVerifyPrereleaseGallery',
     ],
 
     'win': [
       'enterprise',
       'gpu',
-      # crbug.com/92446
-      '-gpu.GpuTest.testGpuWithVideo',
       # Preloaded extensions affect process count: crbug.com/94350
       '-process_count',
+
+      # ==================================================
+      # Disabled tests that need to be investigated/fixed.
+      # ==================================================
+      # crbug.com/95141
+      '-enterprise.EnterpriseTest.testDisable3DAPI',
+      # crbug.com/98500
+      '-enterprise.EnterpriseTestReverse.testAlwaysAuthorizePluginsDisabled',
+      # crbug.com/96896
+      '-enterprise.EnterpriseTest.testDisabledPlugins',
+      '-enterprise.EnterpriseTest.testEnabledPlugins',
     ],
 
     'mac': [
+      # Consistently failing on Mac QA bots only: crbug.com/97810
+      '-process_count',
     ],
 
     'linux': [
@@ -461,8 +487,13 @@
       # because they do not produce omnibox results under virtual X on linux.
       # crbug.com/85310
       'instant',
+      'omnibox.OmniboxTest.testAppComboNameWithSpecialCharSearch',
+      'omnibox.OmniboxTest.testAppNameWithNumberSearch',
+      'omnibox.OmniboxTest.testAppNameWithSpaceSearch',
+      'omnibox.OmniboxTest.testAppSearchWithVeryLongAppName',
       'omnibox.OmniboxTest.testAutoCompleteForNonAsciiSearch',
       'omnibox.OmniboxTest.testAutoCompleteForSearch',
+      'omnibox.OmniboxTest.testBasicAppSearch',
       'omnibox.OmniboxTest.testBookmarkResultInNewTabAndWindow',
       'omnibox.OmniboxTest.testCrazyFilenames',
       'omnibox.OmniboxTest.testDifferentTypesOfResults',
@@ -473,17 +504,20 @@
       'omnibox.OmniboxTest.testSuggest',
       'omnibox.OmniboxTest.testSuggestPref',
 
+
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/83459
-      '-instant.InstantTest.testPreFetchInstantURLSetsNoCookies',
-
       # crbug.com/95035
       '-enterprise.EnterpriseTestReverse.testEnable3DAPI',
+      # crbug.com/98500
+      '-enterprise.EnterpriseTestReverse.testAlwaysAuthorizePluginsDisabled',
+      # crbug.com/97179
+      '-enterprise.EnterpriseTest.testAlwaysAuthorizePlugins',
     ],
 
     'chromeos': [
+      'netflix',
       # ===========================
       # Permanently-disabled tests.
       # ===========================
@@ -523,6 +557,13 @@
   'CHROMEOS_LOGIN': {
     'chromeos': [
       'chromeos_login',
+    ],
+  },
+
+  # ChromeOS volume tests.
+  'CHROMEOS_VOLUME': {
+    'chromeos': [
+      'chromeos_volume',
     ],
   },
 

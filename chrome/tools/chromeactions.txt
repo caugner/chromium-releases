@@ -3,6 +3,7 @@
 0xe93a6d5909da6a5a	AboutFlags_StartupTick
 0xbfdd432b8d9d4ad6	AboutFlags_background-webapps
 0x439284a07fb851bb	AboutFlags_click-to-play
+0x10ffe0a8b323b586	AboutFlags_cloud-print
 0x4da52e00bdfac86a	AboutFlags_cloud-print-proxy
 0xc5ec36aaa32ceff4	AboutFlags_confirm-to-quit
 0x4e8fe1c674de45dd	AboutFlags_conflicting-modules-check
@@ -204,6 +205,7 @@
 0x2aeb39c03cc86464	CreateLink
 0x1225d110ef7fba17	CreateProfile
 0x30604f84327d0ae5	CreateShortcut
+0xfdf6ee64a0588855	Cryptohome.PKCS11InitFail
 0xeb334dca00e390e0	Cut
 0xb94d8a074eddd267	Debugger
 0xf2a6c498fb90ee34	Delete
@@ -241,6 +243,9 @@
 0x2e08637d43bc3450	EditSearchEngines
 0x9a2fdef24427ff67	EmailPageLocation
 0xfef46e5063ce3dc7	Exit
+0xdf56dffe242f621a	Extensions.ExtensionInstalled
+0x4f07c158c8047ab9	Extensions.ExtensionUninstalled
+0xa295e3ad39bbacc0	Extensions.WebStoreLaunch
 0x4cfa6c981549e990	Find
 0x058404d575478e31	FindNext
 0xca56592cf013fc40	FindPrevious
@@ -1115,6 +1120,9 @@
 0x3d0170d09a816e7f	ShowDownloads
 0xf530f742ba5b2683	ShowExtensions
 0xa0118397d83c34d0	ShowFileBrowserFullTab
+0xb1abf919e7eea1ad	ShowHelpTab
+0x12391b25bf32b0de	ShowHelpTabViaF1
+0xb2a3954e828f87c9	ShowHelpTabViaWrenchMenu
 0xb04b2eea6e26ebef	ShowHistory
 0x404c3c24f3091fd7	ShowJSConsole
 0x658963e1a47a5018	ShowOptions
@@ -1174,6 +1182,8 @@
 0x1cdc076b28f70afa	Undo
 0xc1a39b6a60f8b2f8	Unlink
 0xbcd41ce97e3c5568	UpdateChrome
+0x0746723e6884a2fb	Updater.ServerCertificateChanged
+0x169dd0fd613963e8	Updater.ServerCertificateFailed
 0x9b4b5afb2e791f23	UpgradeCheck_AlreadyUpToDate
 0x27b72192736f904d	UpgradeCheck_AlreadyUpgraded
 0x7a54d49f1f7db4ee	UpgradeCheck_Done

@@ -11,6 +11,7 @@
 #include "base/debug/trace_event.h"
 #include "base/file_path.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/json/string_escape.h"
 #include "base/message_loop.h"
@@ -48,7 +49,7 @@
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -87,7 +88,6 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/json_value_serializer.h"
 #include "content/common/view_messages.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_service.h"
@@ -129,7 +129,6 @@ AutomationProvider::AutomationProvider(Profile* profile)
   metric_event_duration_observer_.reset(new MetricEventDurationObserver());
   extension_test_result_observer_.reset(
       new ExtensionTestResultNotificationObserver(this));
-  g_browser_process->AddRefModule();
 
   TRACE_EVENT_END_ETW("AutomationProvider::AutomationProvider", 0, "");
 }
@@ -137,8 +136,6 @@ AutomationProvider::AutomationProvider(Profile* profile)
 AutomationProvider::~AutomationProvider() {
   if (channel_.get())
     channel_->Close();
-
-  g_browser_process->ReleaseModule();
 }
 
 bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
@@ -215,18 +212,21 @@ void AutomationProvider::SetExpectedTabCount(size_t expected_tabs) {
 
 void AutomationProvider::OnInitialTabLoadsComplete() {
   initial_tab_loads_complete_ = true;
+  VLOG(2) << "OnInitialTabLoadsComplete";
   if (is_connected_ && network_library_initialized_ && login_webui_ready_)
     Send(new AutomationMsg_InitialLoadsComplete());
 }
 
 void AutomationProvider::OnNetworkLibraryInit() {
   network_library_initialized_ = true;
+  VLOG(2) << "OnNetworkLibraryInit";
   if (is_connected_ && initial_tab_loads_complete_ && login_webui_ready_)
     Send(new AutomationMsg_InitialLoadsComplete());
 }
 
 void AutomationProvider::OnLoginWebuiReady() {
   login_webui_ready_ = true;
+  VLOG(2) << "OnLoginWebuiReady";
   if (is_connected_ && initial_tab_loads_complete_ &&
       network_library_initialized_)
     Send(new AutomationMsg_InitialLoadsComplete());
@@ -455,7 +455,7 @@ void AutomationProvider::OnChannelError() {
     VLOG(1) << "Error reinitializing AutomationProvider channel.";
   }
   VLOG(1) << "AutomationProxy went away, shutting down app.";
-  AutomationProviderList::GetInstance()->RemoveProvider(this);
+  g_browser_process->GetAutomationProviderList()->RemoveProvider(this);
 }
 
 bool AutomationProvider::Send(IPC::Message* msg) {
@@ -521,10 +521,9 @@ void AutomationProvider::SendFindRequest(
   options.forward = forward;
   options.matchCase = match_case;
   options.findNext = find_next;
-  tab_contents->render_view_host()->Send(new ViewMsg_Find(
-      tab_contents->render_view_host()->routing_id(),
+  tab_contents->render_view_host()->Find(
       FindInPageNotificationObserver::kFindInPageRequestId, search_string,
-      options));
+      options);
 }
 
 class SetProxyConfigTask : public Task {
@@ -712,7 +711,7 @@ void AutomationProvider::StopAsync(int tab_handle) {
     return;
   }
 
-  view->Send(new ViewMsg_Stop(view->routing_id()));
+  view->Stop();
 }
 
 void AutomationProvider::OnSetPageFontSize(int tab_handle,

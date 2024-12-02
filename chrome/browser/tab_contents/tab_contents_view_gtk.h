@@ -23,7 +23,11 @@ class ConstrainedWindowGtk;
 class RenderViewContextMenuGtk;
 class SadTabGtk;
 class TabContentsDragSource;
+class WebDragBookmarkHandlerGtk;
+
+namespace content {
 class WebDragDestGtk;
+}
 
 class TabContentsViewGtk : public TabContentsView,
                            public NotificationObserver {
@@ -53,7 +57,7 @@ class TabContentsViewGtk : public TabContentsView,
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
   virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
-  virtual void SetPageTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;
@@ -157,7 +161,10 @@ class TabContentsViewGtk : public TabContentsView,
 
   // The helper object that handles drag destination related interactions with
   // GTK.
-  scoped_ptr<WebDragDestGtk> drag_dest_;
+  scoped_ptr<content::WebDragDestGtk> drag_dest_;
+
+  // The chrome specific delegate that receives events from WebDragDestGtk.
+  scoped_ptr<WebDragBookmarkHandlerGtk> bookmark_handler_gtk_;
 
   // Object responsible for handling drags from the page for us.
   scoped_ptr<TabContentsDragSource> drag_source_;

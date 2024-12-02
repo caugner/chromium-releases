@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -31,19 +32,17 @@ class MockAuthenticator : public Authenticator {
         expected_password_(expected_password) {
   }
 
-  virtual bool CompleteLogin(Profile* profile,
+  virtual void CompleteLogin(Profile* profile,
                              const std::string& username,
                              const std::string& password);
 
-  // Returns true after posting task to UI thread to call OnLoginSuccess().
-  // This is called on the FILE thread now, so we need to do this.
-  virtual bool AuthenticateToLogin(Profile* profile,
+  virtual void AuthenticateToLogin(Profile* profile,
                                    const std::string& username,
                                    const std::string& password,
                                    const std::string& login_token,
                                    const std::string& login_captcha);
 
-  virtual bool AuthenticateToUnlock(const std::string& username,
+  virtual void AuthenticateToUnlock(const std::string& username,
                                     const std::string& password);
 
   virtual void LoginOffTheRecord();
@@ -70,6 +69,8 @@ class MockAuthenticator : public Authenticator {
   virtual std::string EncryptToken(const std::string& token);
 
   virtual std::string DecryptToken(const std::string& encrypted_token);
+
+  virtual std::string DecryptLegacyToken(const std::string& encrypted_token);
 
   virtual void VerifyOAuth1AccessToken(const std::string& oauth1_access_token,
                                        const std::string& oauth1_secret) {}
@@ -103,7 +104,8 @@ class MockLoginUtils : public LoginUtils {
 
   virtual void SetFirstLoginPrefs(PrefService* prefs) {}
 
-  virtual Authenticator* CreateAuthenticator(LoginStatusConsumer* consumer);
+  virtual scoped_refptr<Authenticator> CreateAuthenticator(
+      LoginStatusConsumer* consumer);
 
   virtual void PrewarmAuthentication() {}
 
@@ -126,8 +128,12 @@ class MockLoginUtils : public LoginUtils {
       const CommandLine& base_command_line,
       CommandLine* command_line);
 
-  virtual bool TransferDefaultCookies(Profile* default_profile,
-                                      Profile* new_profile);
+  virtual void TransferDefaultCookies(Profile* default_profile,
+                                      Profile* new_profile) OVERRIDE;
+
+  virtual void TransferDefaultAuthCache(Profile* default_profile,
+                                        Profile* new_profile) OVERRIDE;
+
  private:
   std::string expected_username_;
   std::string expected_password_;

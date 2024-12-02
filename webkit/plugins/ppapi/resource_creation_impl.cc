@@ -108,7 +108,7 @@ PP_Resource ResourceCreationImpl::CreateDirectoryReader(
 PP_Resource ResourceCreationImpl::CreateFileChooser(
     PP_Instance instance,
     PP_FileChooserMode_Dev mode,
-    const PP_Var& accept_mime_types) {
+    const char* accept_mime_types) {
   return PPB_FileChooser_Impl::Create(instance, mode, accept_mime_types);
 }
 
@@ -142,6 +142,12 @@ PP_Resource ResourceCreationImpl::CreateFlashNetConnector(
 PP_Resource ResourceCreationImpl::CreateFlashTCPSocket(
     PP_Instance instance) {
   // Creating TCP socket resource at the renderer side is not supported.
+  return 0;
+}
+
+PP_Resource ResourceCreationImpl::CreateFlashUDPSocket(
+    PP_Instance instance) {
+  // Creating UDP socket resource at the renderer side is not supported.
   return 0;
 }
 
@@ -251,8 +257,10 @@ PP_Resource ResourceCreationImpl::CreateSurface3D(
 
 PP_Resource ResourceCreationImpl::CreateTransport(PP_Instance instance,
                                                   const char* name,
-                                                  const char* proto) {
-  return PPB_Transport_Impl::Create(instance, name, proto);
+                                                  PP_TransportType type) {
+#if defined(ENABLE_P2P_APIS)
+  return PPB_Transport_Impl::Create(instance, name, type);
+#endif
 }
 
 PP_Resource ResourceCreationImpl::CreateURLLoader(PP_Instance instance) {

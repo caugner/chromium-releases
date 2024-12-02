@@ -4,6 +4,7 @@
 
 #include "content/renderer/media/audio_message_filter.h"
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "content/common/child_process.h"
@@ -30,7 +31,8 @@ bool AudioMessageFilter::Send(IPC::Message* message) {
     // safe.
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &AudioMessageFilter::Send, message));
+        base::IgnoreReturn<bool>(base::Bind(&AudioMessageFilter::Send,
+                                            this, message)));
     return true;
   }
 
@@ -98,15 +100,17 @@ void AudioMessageFilter::OnLowLatencyStreamCreated(
     base::FileDescriptor socket_descriptor,
 #endif
     uint32 length) {
-  Delegate* delegate = delegates_.Lookup(stream_id);
-  if (!delegate) {
-    DLOG(WARNING) << "Got audio stream event for a non-existent or removed"
-        " audio renderer.";
-    return;
-  }
 #if !defined(OS_WIN)
   base::SyncSocket::Handle socket_handle = socket_descriptor.fd;
 #endif
+  Delegate* delegate = delegates_.Lookup(stream_id);
+  if (!delegate) {
+    DLOG(WARNING) << "Got audio stream event for a non-existent or removed"
+        " audio renderer. (stream_id=" << stream_id << ").";
+    base::SharedMemory::CloseHandle(handle);
+    base::SyncSocket socket(socket_handle);
+    return;
+  }
   delegate->OnLowLatencyCreated(handle, socket_handle, length);
 }
 

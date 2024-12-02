@@ -4,15 +4,12 @@
 
 #include "chrome/browser/policy/cloud_policy_provider_impl.h"
 
-#include <set>
-
-#include "base/values.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 
 namespace policy {
 
 CloudPolicyProviderImpl::CloudPolicyProviderImpl(
-    const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list,
+    const PolicyDefinitionList* policy_list,
     CloudPolicyCacheBase::PolicyLevel level)
     : CloudPolicyProvider(policy_list),
       level_(level),
@@ -21,14 +18,10 @@ CloudPolicyProviderImpl::CloudPolicyProviderImpl(
 CloudPolicyProviderImpl::~CloudPolicyProviderImpl() {
   for (ListType::iterator i = caches_.begin(); i != caches_.end(); ++i)
     (*i)->RemoveObserver(this);
-
-  FOR_EACH_OBSERVER(ConfigurationPolicyProvider::Observer,
-                    observer_list_, OnProviderGoingAway());
 }
 
-bool CloudPolicyProviderImpl::Provide(
-    ConfigurationPolicyStoreInterface* store) {
-  ApplyPolicyMap(&combined_, store);
+bool CloudPolicyProviderImpl::ProvideInternal(PolicyMap* result) {
+  result->CopyFrom(combined_);
   return true;
 }
 
@@ -36,18 +29,8 @@ bool CloudPolicyProviderImpl::IsInitializationComplete() const {
   return initialization_complete_;
 }
 
-void CloudPolicyProviderImpl::AddObserver(
-    ConfigurationPolicyProvider::Observer* observer) {
-  observer_list_.AddObserver(observer);
-}
-
-void CloudPolicyProviderImpl::RemoveObserver(
-    ConfigurationPolicyProvider::Observer* observer) {
-  observer_list_.RemoveObserver(observer);
-}
-
 void CloudPolicyProviderImpl::OnCacheUpdate(CloudPolicyCacheBase* cache) {
-  RecombineCachesAndMaybeTriggerUpdate();
+  RecombineCachesAndTriggerUpdate();
 }
 
 void CloudPolicyProviderImpl::OnCacheGoingAway(CloudPolicyCacheBase* cache) {
@@ -59,21 +42,21 @@ void CloudPolicyProviderImpl::OnCacheGoingAway(CloudPolicyCacheBase* cache) {
     }
   }
 
-  RecombineCachesAndMaybeTriggerUpdate();
+  RecombineCachesAndTriggerUpdate();
 }
 
 void CloudPolicyProviderImpl::AppendCache(CloudPolicyCacheBase* cache) {
   initialization_complete_ &= cache->IsReady();
   cache->AddObserver(this);
   caches_.push_back(cache);
-  RecombineCachesAndMaybeTriggerUpdate();
+  RecombineCachesAndTriggerUpdate();
 }
 
 void CloudPolicyProviderImpl::PrependCache(CloudPolicyCacheBase* cache) {
   initialization_complete_ &= cache->IsReady();
   cache->AddObserver(this);
   caches_.insert(caches_.begin(), cache);
-  RecombineCachesAndMaybeTriggerUpdate();
+  RecombineCachesAndTriggerUpdate();
 }
 
 // static
@@ -102,9 +85,8 @@ void CloudPolicyProviderImpl::CombineTwoPolicyMaps(const PolicyMap& base,
   }
 }
 
-void CloudPolicyProviderImpl::RecombineCachesAndMaybeTriggerUpdate() {
+void CloudPolicyProviderImpl::RecombineCachesAndTriggerUpdate() {
   // Re-check whether all caches are ready.
-  bool force_update = false;
   if (!initialization_complete_) {
     bool all_caches_ready = true;
     for (ListType::const_iterator i = caches_.begin();
@@ -114,10 +96,8 @@ void CloudPolicyProviderImpl::RecombineCachesAndMaybeTriggerUpdate() {
         break;
       }
     }
-    if (all_caches_ready) {
-      force_update = true;
+    if (all_caches_ready)
       initialization_complete_ = true;
-    }
   }
 
   // Reconstruct the merged policy map.
@@ -129,13 +109,10 @@ void CloudPolicyProviderImpl::RecombineCachesAndMaybeTriggerUpdate() {
     CombineTwoPolicyMaps(newly_combined, *(*i)->policy(level_), &tmp_map);
     newly_combined.Swap(&tmp_map);
   }
-  if (newly_combined.Equals(combined_) && !force_update)
-    return;
 
-  // Trigger a notification if there was a change.
+  // Trigger a notification.
   combined_.Swap(&newly_combined);
-  FOR_EACH_OBSERVER(ConfigurationPolicyProvider::Observer,
-                    observer_list_, OnUpdatePolicy());
+  NotifyPolicyUpdated();
 }
 
 }  // namespace policy

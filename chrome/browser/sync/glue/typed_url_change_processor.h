@@ -13,12 +13,13 @@
 #include "base/time.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_types.h"
 
 class MessageLoop;
 class NotificationService;
+class Profile;
 
 namespace history {
 class HistoryBackend;
@@ -38,7 +39,8 @@ class UnrecoverableErrorHandler;
 class TypedUrlChangeProcessor : public ChangeProcessor,
                                 public NotificationObserver {
  public:
-  TypedUrlChangeProcessor(TypedUrlModelAssociator* model_associator,
+  TypedUrlChangeProcessor(Profile* profile,
+                          TypedUrlModelAssociator* model_associator,
                           history::HistoryBackend* history_backend,
                           UnrecoverableErrorHandler* error_handler);
   virtual ~TypedUrlChangeProcessor();
@@ -52,8 +54,7 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   // sync_api model -> WebDataService change application.
   virtual void ApplyChangesFromSyncModel(
       const sync_api::BaseTransaction* trans,
-      const sync_api::SyncManager::ChangeRecord* changes,
-      int change_count) OVERRIDE;
+      const sync_api::ImmutableChangeRecordList& changes) OVERRIDE;
 
   // Commit changes here, after we've released the transaction lock to avoid
   // jank.
@@ -80,8 +81,11 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   // Utility routine that either updates an existing sync node or creates a
   // new one for the passed |typed_url| if one does not already exist. Returns
   // false and sets an unrecoverable error if the operation failed.
-  bool CreateOrUpdateSyncNode(const history::URLRow& typed_url,
+  bool CreateOrUpdateSyncNode(history::URLRow typed_url,
                               sync_api::WriteTransaction* transaction);
+
+  // The profile with which we are associated.
+  Profile* profile_;
 
   // The two models should be associated according to this ModelAssociator.
   TypedUrlModelAssociator* model_associator_;
@@ -93,7 +97,7 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
 
   NotificationRegistrar notification_registrar_;
 
-  bool observing_;
+  bool observing_;  // True when we should observe notifications.
 
   MessageLoop* expected_loop_;
 

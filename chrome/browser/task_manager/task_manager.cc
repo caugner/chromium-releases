@@ -25,6 +25,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/chrome_view_types.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
@@ -1044,11 +1045,11 @@ void TaskManager::OpenAboutMemory() {
       return;
     browser = Browser::Create(profile);
     browser->OpenURL(GURL(chrome::kChromeUIMemoryURL), GURL(),
-                     NEW_FOREGROUND_TAB, PageTransition::LINK);
+                     NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
     browser->window()->Show();
   } else {
     browser->OpenURL(GURL(chrome::kChromeUIMemoryURL), GURL(),
-                     NEW_FOREGROUND_TAB, PageTransition::LINK);
+                     NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
 
     // In case the browser window is minimzed, show it. If |browser| is a
     // non-tabbed window, the call to OpenURL above will have opened a
@@ -1088,8 +1089,10 @@ int CountExtensionBackgroundPagesForProfile(Profile* profile) {
   for (ExtensionProcessManager::const_iterator iter = manager->begin();
        iter != manager->end();
        ++iter) {
-    if ((*iter)->GetRenderViewType() == ViewType::EXTENSION_BACKGROUND_PAGE)
+    if ((*iter)->GetRenderViewType() ==
+        chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
       count++;
+    }
   }
   return count;
 }

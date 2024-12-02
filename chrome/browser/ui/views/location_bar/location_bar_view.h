@@ -26,7 +26,9 @@
 #include "views/controls/native/native_view_host.h"
 #include "views/drag_controller.h"
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+#include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
+#elif defined(OS_WIN)
 #include "chrome/browser/ui/views/omnibox/omnibox_view_win.h"
 #elif defined(TOOLKIT_USES_GTK)
 #include "chrome/browser/ui/gtk/omnibox/omnibox_view_gtk.h"
@@ -190,7 +192,7 @@ class LocationBarView : public LocationBar,
   // in the toolbar in full keyboard accessibility mode.
   virtual void SelectAll();
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Event Handlers
   virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const views::MouseEvent& event) OVERRIDE;
@@ -205,7 +207,7 @@ class LocationBarView : public LocationBar,
   // AutocompleteEditController
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
-                                    PageTransition::Type transition,
+                                    content::PageTransition transition,
                                     const GURL& alternate_nav_url) OVERRIDE;
   virtual void OnChanged() OVERRIDE;
   virtual void OnSelectionBoundsChanged() OVERRIDE;
@@ -239,7 +241,7 @@ class LocationBarView : public LocationBar,
                                 InstantCompleteBehavior behavior) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
-  virtual PageTransition::Type GetPageTransition() const OVERRIDE;
+  virtual content::PageTransition GetPageTransition() const OVERRIDE;
   virtual void AcceptInput() OVERRIDE;
   virtual void FocusLocation(bool select_all) OVERRIDE;
   virtual void FocusSearch() OVERRIDE;
@@ -321,15 +323,19 @@ class LocationBarView : public LocationBar,
   void ToggleVisibility(bool new_vis, views::View* view);
 
 #if defined(OS_WIN)
+#if !defined(USE_AURA)
   // Helper for the Mouse event handlers that does all the real work.
   void OnMouseEvent(const views::MouseEvent& event, UINT msg);
+#endif
 
   // Returns true if the suggest text is valid.
   bool HasValidSuggestText() const;
 
+#if !defined(USE_AURA)
   // Returns |location_entry_| cast to OmniboxViewWin, or NULL if
   // |location_entry_| is of a different type.
   OmniboxViewWin* GetOmniboxViewWin();
+#endif
 #endif
 
   // Helper to show the first run info bubble.
@@ -355,13 +361,13 @@ class LocationBarView : public LocationBar,
   WindowOpenDisposition disposition_;
 
   // The transition type to use for the navigation
-  PageTransition::Type transition_;
+  content::PageTransition transition_;
 
   // Font used by edit and some of the hints.
   gfx::Font font_;
 
   // An object used to paint the normal-mode background.
-  scoped_ptr<views::HorizontalPainter> painter_;
+  scoped_ptr<views::Painter> painter_;
 
   // An icon to the left of the edit field.
   LocationIconView* location_icon_view_;

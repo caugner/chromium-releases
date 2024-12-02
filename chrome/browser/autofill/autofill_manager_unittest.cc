@@ -4,7 +4,6 @@
 
 #include <vector>
 
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string16.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -58,6 +58,11 @@ class TestPersonalDataManager : public PersonalDataManager {
   TestPersonalDataManager() {
     CreateTestAutofillProfiles(&web_profiles_);
     CreateTestCreditCards(&credit_cards_);
+  }
+
+  // Factory method for keyed service.  PersonalDataManager is NULL for testing.
+  static ProfileKeyedService* Build(Profile* profile) {
+    return NULL;
   }
 
   MOCK_METHOD1(SaveImportedProfile, void(const AutofillProfile&));
@@ -104,20 +109,19 @@ class TestPersonalDataManager : public PersonalDataManager {
                                   "Presley", "theking@gmail.com", "RCA",
                                   "3734 Elvis Presley Blvd.", "Apt. 10",
                                   "Memphis", "Tennessee", "38116", "USA",
-                                  "12345678901", "");
+                                  "12345678901");
     profile->set_guid("00000000-0000-0000-0000-000000000001");
     profiles->push_back(profile);
     profile = new AutofillProfile;
     autofill_test::SetProfileInfo(profile, "Charles", "Hardin",
                                   "Holley", "buddy@gmail.com", "Decca",
                                   "123 Apple St.", "unit 6", "Lubbock",
-                                  "Texas", "79401", "USA", "23456789012",
-                                  "");
+                                  "Texas", "79401", "USA", "23456789012");
     profile->set_guid("00000000-0000-0000-0000-000000000002");
     profiles->push_back(profile);
     profile = new AutofillProfile;
-    autofill_test::SetProfileInfo(profile, "", "", "", "", "", "", "",
-                                  "", "", "", "", "", "");
+    autofill_test::SetProfileInfo(profile, "", "", "", "", "", "", "", "", "",
+                                  "", "", "");
     profile->set_guid("00000000-0000-0000-0000-000000000003");
     profiles->push_back(profile);
   }
@@ -186,9 +190,6 @@ void CreateTestAddressFormData(FormData* form) {
   form->fields.push_back(field);
   autofill_test::CreateTestFormField(
       "Phone Number", "phonenumber", "", "tel", &field);
-  form->fields.push_back(field);
-  autofill_test::CreateTestFormField(
-      "Fax", "fax", "", "text", &field);
   form->fields.push_back(field);
   autofill_test::CreateTestFormField(
       "Email", "email", "", "email", &field);
@@ -287,7 +288,6 @@ void ExpectFilledForm(int page_id,
                       const char* postal_code,
                       const char* country,
                       const char* phone,
-                      const char* fax,
                       const char* email,
                       const char* name_on_card,
                       const char* card_number,
@@ -297,7 +297,7 @@ void ExpectFilledForm(int page_id,
                       bool has_credit_card_fields,
                       bool use_month_type) {
   // The number of fields in the address and credit card forms created above.
-  const size_t kAddressFormSize = 12;
+  const size_t kAddressFormSize = 11;
   const size_t kCreditCardFormSize = use_month_type ? 3 : 4;
 
   EXPECT_EQ(expected_page_id, page_id);
@@ -340,10 +340,8 @@ void ExpectFilledForm(int page_id,
                       filled_form.fields[8]);
     ExpectFilledField("Phone Number", "phonenumber", phone, "tel",
                       filled_form.fields[9]);
-    ExpectFilledField("Fax", "fax", fax, "text",
-                      filled_form.fields[10]);
     ExpectFilledField("Email", "email", email, "email",
-                      filled_form.fields[11]);
+                      filled_form.fields[10]);
   }
 
   if (has_credit_card_fields) {
@@ -376,7 +374,7 @@ void ExpectFilledAddressFormElvis(int page_id,
                                   bool has_credit_card_fields) {
   ExpectFilledForm(page_id, filled_form, expected_page_id, "Elvis", "Aaron",
                    "Presley", "3734 Elvis Presley Blvd.", "Apt. 10", "Memphis",
-                   "Tennessee", "38116", "United States", "12345678901", "",
+                   "Tennessee", "38116", "United States", "12345678901",
                    "theking@gmail.com", "", "", "", "", true,
                    has_credit_card_fields, false);
 }
@@ -386,7 +384,7 @@ void ExpectFilledCreditCardFormElvis(int page_id,
                                      int expected_page_id,
                                      bool has_address_fields) {
   ExpectFilledForm(page_id, filled_form, expected_page_id,
-                   "", "", "", "", "", "", "", "", "", "", "", "",
+                   "", "", "", "", "", "", "", "", "", "", "",
                    "Elvis Presley", "4234567890123456", "04", "2012",
                    has_address_fields, true, false);
 }
@@ -398,7 +396,7 @@ void ExpectFilledCreditCardYearMonthWithYearMonth(int page_id,
                                               const char* year,
                                               const char* month) {
   ExpectFilledForm(page_id, filled_form, expected_page_id,
-                   "", "", "", "", "", "", "", "", "", "", "", "",
+                   "", "", "", "", "", "", "", "", "", "", "",
                    "Miku Hatsune", "4234567890654321", month, year,
                    has_address_fields, true, true);
 }
@@ -406,10 +404,10 @@ void ExpectFilledCreditCardYearMonthWithYearMonth(int page_id,
 class TestAutofillManager : public AutofillManager {
  public:
   TestAutofillManager(TabContentsWrapper* tab_contents,
-                      TestPersonalDataManager* personal_manager)
-      : AutofillManager(tab_contents, personal_manager),
+                      TestPersonalDataManager* personal_data)
+      : AutofillManager(tab_contents, personal_data),
+        personal_data_(personal_data),
         autofill_enabled_(true) {
-    test_personal_data_ = personal_manager;
   }
 
   virtual bool IsAutofillEnabled() const OVERRIDE { return autofill_enabled_; }
@@ -427,37 +425,22 @@ class TestAutofillManager : public AutofillManager {
   }
 
   AutofillProfile* GetProfileWithGUID(const char* guid) {
-    return test_personal_data_->GetProfileWithGUID(guid);
+    return personal_data_->GetProfileWithGUID(guid);
   }
 
   void AddProfile(AutofillProfile* profile) {
-    test_personal_data_->AddProfile(profile);
+    personal_data_->AddProfile(profile);
   }
 
   void AddCreditCard(CreditCard* credit_card) {
-    test_personal_data_->AddCreditCard(credit_card);
+    personal_data_->AddCreditCard(credit_card);
   }
 
   int GetPackedCreditCardID(int credit_card_id) {
-    return PackGUIDs(IDToGUID(credit_card_id), GUIDPair(std::string(), 0));
-  }
+    std::string credit_card_guid =
+        base::StringPrintf("00000000-0000-0000-0000-%012d", credit_card_id);
 
-  virtual int GUIDToID(const GUIDPair& guid) OVERRIDE {
-    if (guid.first.empty())
-      return 0;
-
-    int id;
-    EXPECT_TRUE(base::StringToInt(guid.first.substr(guid.first.rfind("-") + 1),
-                                  &id));
-    return id;
-  }
-
-  virtual const GUIDPair IDToGUID(int id) OVERRIDE {
-    EXPECT_TRUE(id >= 0);
-    if (id <= 0)
-      return GUIDPair(std::string(), 0);
-
-    return GUIDPair(base::StringPrintf("00000000-0000-0000-0000-%012d", id), 0);
+    return PackGUIDs(GUIDPair(credit_card_guid, 0), GUIDPair(std::string(), 0));
   }
 
   void AddSeenForm(FormStructure* form) {
@@ -465,7 +448,8 @@ class TestAutofillManager : public AutofillManager {
   }
 
  private:
-  TestPersonalDataManager* test_personal_data_;
+  // Weak reference.
+  TestPersonalDataManager* personal_data_;
   bool autofill_enabled_;
   std::string submitted_form_signature_;
 
@@ -480,20 +464,24 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
 
   AutofillManagerTest()
       : TabContentsWrapperTestHarness(),
-        browser_thread_(BrowserThread::UI, &message_loop_) {}
+        browser_thread_(BrowserThread::UI, &message_loop_) {
+  }
 
   virtual ~AutofillManagerTest() {
     // Order of destruction is important as AutofillManager relies on
     // PersonalDataManager to be around when it gets destroyed.
     autofill_manager_.reset(NULL);
-    test_personal_data_ = NULL;
   }
 
   virtual void SetUp() {
+    Profile* profile = new TestingProfile();
+    browser_context_.reset(profile);
+    PersonalDataManagerFactory::GetInstance()->SetTestingFactory(
+        profile, TestPersonalDataManager::Build);
+
     TabContentsWrapperTestHarness::SetUp();
-    test_personal_data_ = new TestPersonalDataManager();
     autofill_manager_.reset(new TestAutofillManager(contents_wrapper(),
-                                                    test_personal_data_.get()));
+                                                    &personal_data_));
   }
 
   void GetAutofillSuggestions(int query_id,
@@ -525,6 +513,10 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
                             const webkit_glue::FormField& field,
                             int unique_id) {
     autofill_manager_->OnFillAutofillFormData(query_id, form, field, unique_id);
+  }
+
+  int PackGUIDs(const GUIDPair& cc_guid, const GUIDPair& profile_guid) const {
+    return autofill_manager_->PackGUIDs(cc_guid, profile_guid);
   }
 
   bool GetAutofillSuggestionsMessage(int* page_id,
@@ -577,7 +569,7 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
   BrowserThread browser_thread_;
 
   scoped_ptr<TestAutofillManager> autofill_manager_;
-  scoped_refptr<TestPersonalDataManager> test_personal_data_;
+  TestPersonalDataManager personal_data_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AutofillManagerTest);
@@ -838,7 +830,7 @@ TEST_F(AutofillManagerTest, GetProfileSuggestionsMethodGet) {
                     expected_labels2, expected_icons2, expected_unique_ids2);
 
   // Now clear the test profiles and try again -- we shouldn't return a warning.
-  test_personal_data_->ClearAutofillProfiles();
+  personal_data_.ClearAutofillProfiles();
   GetAutofillSuggestions(form, field);
   EXPECT_FALSE(GetAutofillSuggestionsMessage(NULL, NULL, NULL, NULL, NULL));
 }
@@ -1025,7 +1017,7 @@ TEST_F(AutofillManagerTest, GetCreditCardSuggestionsNonHTTPS) {
                     expected_labels2, expected_icons2, expected_unique_ids2);
 
   // Clear the test credit cards and try again -- we shouldn't return a warning.
-  test_personal_data_->ClearCreditCards();
+  personal_data_.ClearCreditCards();
   GetAutofillSuggestions(form, field);
   EXPECT_FALSE(GetAutofillSuggestionsMessage(NULL, NULL, NULL, NULL, NULL));
 }
@@ -1226,7 +1218,7 @@ TEST_F(AutofillManagerTest, GetAddressAndCreditCardSuggestionsNonHttps) {
                     expected_labels2, expected_icons2, expected_unique_ids2);
 
   // Clear the test credit cards and try again -- we shouldn't return a warning.
-  test_personal_data_->ClearCreditCards();
+  personal_data_.ClearCreditCards();
   GetAutofillSuggestions(form, field);
   EXPECT_FALSE(GetAutofillSuggestionsMessage(NULL, NULL, NULL, NULL, NULL));
 }
@@ -1371,8 +1363,8 @@ TEST_F(AutofillManagerTest, GetFieldSuggestionsWithDuplicateValues) {
 
   // |profile| will be owned by the mock PersonalDataManager.
   AutofillProfile* profile = new AutofillProfile;
-  autofill_test::SetProfileInfo(profile, "Elvis", "", "", "", "",
-                                "", "", "", "", "", "", "", "");
+  autofill_test::SetProfileInfo(profile, "Elvis", "", "", "", "", "", "", "",
+                                "", "", "", "");
   profile->set_guid("00000000-0000-0000-0000-000000000101");
   autofill_manager_->AddProfile(profile);
 
@@ -1415,13 +1407,13 @@ TEST_F(AutofillManagerTest, GetFieldSuggestionsForMultiValuedProfileUnfilled) {
   // |profile| will be owned by the mock PersonalDataManager.
   AutofillProfile* profile = new AutofillProfile;
   autofill_test::SetProfileInfo(profile, "Elvis", "", "Presley", "me@x.com", "",
-                                "", "", "", "", "", "", "", "");
+                                "", "", "", "", "", "", "");
   profile->set_guid("00000000-0000-0000-0000-000000000101");
   std::vector<string16> multi_values(2);
   multi_values[0] = ASCIIToUTF16("Elvis Presley");
   multi_values[1] = ASCIIToUTF16("Elena Love");
   profile->SetMultiInfo(NAME_FULL, multi_values);
-  test_personal_data_->ClearAutofillProfiles();
+  personal_data_.ClearAutofillProfiles();
   autofill_manager_->AddProfile(profile);
 
   {
@@ -1452,7 +1444,7 @@ TEST_F(AutofillManagerTest, GetFieldSuggestionsForMultiValuedProfileUnfilled) {
       ASCIIToUTF16("me@x.com")
     };
     string16 expected_icons[] = { string16(), string16() };
-    int expected_unique_ids[] = { 101, 101 };
+    int expected_unique_ids[] = { 1, 2 };
     ExpectSuggestions(page_id, values, labels, icons, unique_ids,
                       kDefaultPageID, arraysize(expected_values),
                       expected_values, expected_labels, expected_icons,
@@ -1482,7 +1474,7 @@ TEST_F(AutofillManagerTest, GetFieldSuggestionsForMultiValuedProfileUnfilled) {
     string16 expected_values[] = { ASCIIToUTF16("Elena") };
     string16 expected_labels[] = { ASCIIToUTF16("me@x.com") };
     string16 expected_icons[] = { string16() };
-    int expected_unique_ids[] = { 101 };
+    int expected_unique_ids[] = { 2 };
     ExpectSuggestions(page_id, values, labels, icons, unique_ids,
                       kDefaultPageID, arraysize(expected_values),
                       expected_values, expected_labels, expected_icons,
@@ -1535,7 +1527,7 @@ TEST_F(AutofillManagerTest, GetFieldSuggestionsForMultiValuedProfileFilled) {
   };
   string16 expected_labels[] = { string16(), string16(), string16() };
   string16 expected_icons[] = { string16(), string16(), string16() };
-  int expected_unique_ids[] = { 102, 102, 102 };
+  int expected_unique_ids[] = { 1, 2, 3 };
   ExpectSuggestions(page_id, values, labels, icons, unique_ids,
                     kDefaultPageID, arraysize(expected_values), expected_values,
                     expected_labels, expected_icons, expected_unique_ids);
@@ -1586,7 +1578,7 @@ TEST_F(AutofillManagerTest, GetProfileSuggestionsFancyPhone) {
     ASCIIToUTF16("Natty Bumppo"),
   };
   string16 expected_icons[] = {string16(), string16(), string16()};
-  int expected_unique_ids[] = {1, 2, 103};
+  int expected_unique_ids[] = {1, 2, 3};
   ExpectSuggestions(page_id, values, labels, icons, unique_ids,
                     kDefaultPageID, arraysize(expected_values), expected_values,
                     expected_labels, expected_icons, expected_unique_ids);
@@ -1602,9 +1594,8 @@ TEST_F(AutofillManagerTest, FillAddressForm) {
 
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, form.fields[0],
-      autofill_manager_->PackGUIDs(empty, guid));
+  FillAutofillFormData(kDefaultPageID, form, form.fields[0],
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -1622,9 +1613,8 @@ TEST_F(AutofillManagerTest, FillCreditCardForm) {
 
   GUIDPair guid("00000000-0000-0000-0000-000000000004", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, *form.fields.begin(),
-      autofill_manager_->PackGUIDs(guid, empty));
+  FillAutofillFormData(kDefaultPageID, form, *form.fields.begin(),
+                       PackGUIDs(guid, empty));
 
   int page_id = 0;
   FormData results;
@@ -1637,7 +1627,7 @@ TEST_F(AutofillManagerTest, FillCreditCardForm) {
 TEST_F(AutofillManagerTest, FillCreditCardFormNoYearNoMonth) {
   // Same as the SetUp(), but generate 4 credit cards with year month
   // combination.
-  test_personal_data_->CreateTestCreditCardsYearAndMonth("", "");
+  personal_data_.CreateTestCreditCardsYearAndMonth("", "");
   // Set up our form data.
   FormData form;
   CreateTestCreditCardFormData(&form, true, true);
@@ -1646,9 +1636,8 @@ TEST_F(AutofillManagerTest, FillCreditCardFormNoYearNoMonth) {
 
   GUIDPair guid("00000000-0000-0000-0000-000000000007", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, *form.fields.begin(),
-      autofill_manager_->PackGUIDs(guid, empty));
+  FillAutofillFormData(kDefaultPageID, form, *form.fields.begin(),
+                       PackGUIDs(guid, empty));
 
   int page_id = 0;
   FormData results;
@@ -1663,7 +1652,7 @@ TEST_F(AutofillManagerTest, FillCreditCardFormNoYearNoMonth) {
 TEST_F(AutofillManagerTest, FillCreditCardFormNoYearMonth) {
   // Same as the SetUp(), but generate 4 credit cards with year month
   // combination.
-  test_personal_data_->CreateTestCreditCardsYearAndMonth("", "04");
+  personal_data_.CreateTestCreditCardsYearAndMonth("", "04");
   // Set up our form data.
   FormData form;
   CreateTestCreditCardFormData(&form, true, true);
@@ -1672,9 +1661,8 @@ TEST_F(AutofillManagerTest, FillCreditCardFormNoYearMonth) {
 
   GUIDPair guid("00000000-0000-0000-0000-000000000007", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, *form.fields.begin(),
-      autofill_manager_->PackGUIDs(guid, empty));
+  FillAutofillFormData(kDefaultPageID, form, *form.fields.begin(),
+                       PackGUIDs(guid, empty));
 
   int page_id = 0;
   FormData results;
@@ -1688,7 +1676,7 @@ TEST_F(AutofillManagerTest, FillCreditCardFormNoYearMonth) {
 TEST_F(AutofillManagerTest, FillCreditCardFormYearNoMonth) {
   // Same as the SetUp(), but generate 4 credit cards with year month
   // combination.
-  test_personal_data_->CreateTestCreditCardsYearAndMonth("2012", "");
+  personal_data_.CreateTestCreditCardsYearAndMonth("2012", "");
   // Set up our form data.
   FormData form;
   CreateTestCreditCardFormData(&form, true, true);
@@ -1697,9 +1685,8 @@ TEST_F(AutofillManagerTest, FillCreditCardFormYearNoMonth) {
 
   GUIDPair guid("00000000-0000-0000-0000-000000000007", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, *form.fields.begin(),
-      autofill_manager_->PackGUIDs(guid, empty));
+  FillAutofillFormData(kDefaultPageID, form, *form.fields.begin(),
+                       PackGUIDs(guid, empty));
 
   int page_id = 0;
   FormData results;
@@ -1713,8 +1700,8 @@ TEST_F(AutofillManagerTest, FillCreditCardFormYearNoMonth) {
 TEST_F(AutofillManagerTest, FillCreditCardFormYearMonth) {
   // Same as the SetUp(), but generate 4 credit cards with year month
   // combination.
-  test_personal_data_->ClearCreditCards();
-  test_personal_data_->CreateTestCreditCardsYearAndMonth("2012", "04");
+  personal_data_.ClearCreditCards();
+  personal_data_.CreateTestCreditCardsYearAndMonth("2012", "04");
   // Set up our form data.
   FormData form;
   CreateTestCreditCardFormData(&form, true, true);
@@ -1723,9 +1710,8 @@ TEST_F(AutofillManagerTest, FillCreditCardFormYearMonth) {
 
   GUIDPair guid("00000000-0000-0000-0000-000000000007", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, *form.fields.begin(),
-      autofill_manager_->PackGUIDs(guid, empty));
+  FillAutofillFormData(kDefaultPageID, form, *form.fields.begin(),
+                       PackGUIDs(guid, empty));
 
   int page_id = 0;
   FormData results;
@@ -1747,7 +1733,7 @@ TEST_F(AutofillManagerTest, FillAddressAndCreditCardForm) {
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
   FillAutofillFormData(kDefaultPageID, form, form.fields[0],
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -1760,9 +1746,8 @@ TEST_F(AutofillManagerTest, FillAddressAndCreditCardForm) {
   // Now fill the credit card data.
   const int kPageID2 = 2;
   GUIDPair guid2("00000000-0000-0000-0000-000000000004", 0);
-  FillAutofillFormData(
-      kPageID2, form, form.fields.back(),
-      autofill_manager_->PackGUIDs(guid2, empty));
+  FillAutofillFormData(kPageID2, form, form.fields.back(),
+                       PackGUIDs(guid2, empty));
 
   page_id = 0;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
@@ -1791,7 +1776,7 @@ TEST_F(AutofillManagerTest, FillFormWithMultipleSections) {
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
   FillAutofillFormData(kDefaultPageID, form, form.fields[0],
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -1816,7 +1801,7 @@ TEST_F(AutofillManagerTest, FillFormWithMultipleSections) {
   GUIDPair guid2("00000000-0000-0000-0000-000000000001", 0);
   ASSERT_LT(9U, kAddressFormSize);
   FillAutofillFormData(kPageID2, form, form.fields[kAddressFormSize + 9],
-                       autofill_manager_->PackGUIDs(empty, guid2));
+                       PackGUIDs(empty, guid2));
 
   page_id = 0;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
@@ -1909,7 +1894,7 @@ TEST_F(AutofillManagerTest, FillFormWithAuthorSpecifiedSections) {
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
   FillAutofillFormData(kDefaultPageID, form, form.fields[1],
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -1942,7 +1927,7 @@ TEST_F(AutofillManagerTest, FillFormWithAuthorSpecifiedSections) {
   const int kPageID2 = 2;
   GUIDPair guid2("00000000-0000-0000-0000-000000000001", 0);
   FillAutofillFormData(kPageID2, form, form.fields[0],
-                       autofill_manager_->PackGUIDs(empty, guid2));
+                       PackGUIDs(empty, guid2));
 
   page_id = 0;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
@@ -1975,7 +1960,7 @@ TEST_F(AutofillManagerTest, FillFormWithAuthorSpecifiedSections) {
   const int kPageID3 = 3;
   GUIDPair guid3("00000000-0000-0000-0000-000000000004", 0);
   FillAutofillFormData(kPageID3, form, form.fields[form.fields.size() - 2],
-                       autofill_manager_->PackGUIDs(guid3, empty));
+                       PackGUIDs(guid3, empty));
 
   page_id = 0;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
@@ -2022,7 +2007,7 @@ TEST_F(AutofillManagerTest, FillFormWithMultipleEmails) {
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
   FillAutofillFormData(kDefaultPageID, form, form.fields[0],
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -2050,9 +2035,8 @@ TEST_F(AutofillManagerTest, FillAutofilledForm) {
   // First fill the address data.
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, *form.fields.begin(),
-      autofill_manager_->PackGUIDs(empty, guid));
+  FillAutofillFormData(kDefaultPageID, form, *form.fields.begin(),
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -2060,16 +2044,15 @@ TEST_F(AutofillManagerTest, FillAutofilledForm) {
   {
     SCOPED_TRACE("Address");
     ExpectFilledForm(page_id, results, kDefaultPageID,
-                     "Elvis", "", "", "", "", "", "", "", "", "", "", "",
-                     "", "", "", "", true, true, false);
+                     "Elvis", "", "", "", "", "", "", "", "", "", "", "", "",
+                     "", "", true, true, false);
   }
 
   // Now fill the credit card data.
   const int kPageID2 = 2;
   GUIDPair guid2("00000000-0000-0000-0000-000000000004", 0);
-  FillAutofillFormData(
-      kPageID2, form, form.fields.back(),
-      autofill_manager_->PackGUIDs(guid2, empty));
+  FillAutofillFormData(kPageID2, form, form.fields.back(),
+                       PackGUIDs(guid2, empty));
 
   page_id = 0;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
@@ -2087,17 +2070,67 @@ TEST_F(AutofillManagerTest, FillAutofilledForm) {
   }
 
   const int kPageID3 = 3;
-  FillAutofillFormData(
-      kPageID3, form, *form.fields.rbegin(),
-      autofill_manager_->PackGUIDs(guid2, empty));
+  FillAutofillFormData(kPageID3, form, *form.fields.rbegin(),
+                       PackGUIDs(guid2, empty));
 
   page_id = 0;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
   {
     SCOPED_TRACE("Credit card 2");
     ExpectFilledForm(page_id, results, kPageID3,
-                   "", "", "", "", "", "", "", "", "", "", "", "",
-                   "", "", "", "2012", true, true, false);
+                     "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+                     "2012", true, true, false);
+  }
+}
+
+// Test that we correctly fill an address form with a non-default variant for a
+// multi-valued field.
+TEST_F(AutofillManagerTest, FillAddressFormWithVariantType) {
+  // Set up our form data.
+  FormData form;
+  CreateTestAddressFormData(&form);
+  std::vector<FormData> forms(1, form);
+  FormsSeen(forms);
+
+  // Add a name variant to the Elvis profile.
+  AutofillProfile* profile = autofill_manager_->GetProfileWithGUID(
+      "00000000-0000-0000-0000-000000000001");
+  const string16 elvis_name = profile->GetInfo(NAME_FULL);
+
+  std::vector<string16> name_variants;
+  name_variants.push_back(ASCIIToUTF16("Some Other Guy"));
+  name_variants.push_back(elvis_name);
+  profile->SetMultiInfo(NAME_FULL, name_variants);
+
+  GUIDPair guid(profile->guid(), 1);
+  GUIDPair empty(std::string(), 0);
+  FillAutofillFormData(kDefaultPageID, form, form.fields[0],
+                       PackGUIDs(empty, guid));
+
+  int page_id = 0;
+  FormData results1;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results1));
+  {
+    SCOPED_TRACE("Valid variant");
+    ExpectFilledAddressFormElvis(page_id, results1, kDefaultPageID, false);
+  }
+
+  // Try filling with a variant that doesn't exist.  The fields to which this
+  // variant would normally apply should not be filled.
+  const int kPageID2 = 2;
+  GUIDPair guid2(profile->guid(), 2);
+  FillAutofillFormData(kPageID2, form, form.fields[0],
+                       PackGUIDs(empty, guid2));
+
+  page_id = 0;
+  FormData results2;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results2));
+  {
+    SCOPED_TRACE("Invalid variant");
+    ExpectFilledForm(page_id, results2, kPageID2, "", "", "",
+                     "3734 Elvis Presley Blvd.", "Apt. 10", "Memphis",
+                     "Tennessee", "38116", "United States", "12345678901",
+                     "theking@gmail.com", "", "", "", "", true, false, false);
   }
 }
 
@@ -2158,7 +2191,7 @@ TEST_F(AutofillManagerTest, FillPhoneNumber) {
   int page_id = 1;
   FillAutofillFormData(page_id, form_with_maxlength,
                        *form_with_maxlength.fields.begin(),
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
   page_id = 0;
   FormData results1;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results1));
@@ -2174,7 +2207,7 @@ TEST_F(AutofillManagerTest, FillPhoneNumber) {
   page_id = 2;
   FillAutofillFormData(page_id, form_with_autocompletetype,
                        *form_with_autocompletetype.fields.begin(),
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
   page_id = 0;
   FormData results2;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results2));
@@ -2194,7 +2227,7 @@ TEST_F(AutofillManagerTest, FillPhoneNumber) {
   page_id = 3;
   FillAutofillFormData(page_id, form_with_maxlength,
                        *form_with_maxlength.fields.begin(),
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
   page_id = 0;
   FormData results3;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results3));
@@ -2210,7 +2243,7 @@ TEST_F(AutofillManagerTest, FillPhoneNumber) {
   page_id = 4;
   FillAutofillFormData(page_id, form_with_autocompletetype,
                        *form_with_autocompletetype.fields.begin(),
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
   page_id = 0;
   FormData results4;
   EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results4));
@@ -2222,6 +2255,30 @@ TEST_F(AutofillManagerTest, FillPhoneNumber) {
   EXPECT_EQ(ASCIIToUTF16("954321"), results4.fields[2].value);
   EXPECT_EQ(ASCIIToUTF16("954321"), results4.fields[3].value);
   EXPECT_EQ(string16(), results4.fields[4].value);
+
+  // We should fill all phone fields with the same phone number variant.
+  std::vector<string16> phone_variants;
+  phone_variants.push_back(ASCIIToUTF16("16505554567"));
+  phone_variants.push_back(ASCIIToUTF16("18887771234"));
+  work_profile->SetInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("United States"));
+  work_profile->SetMultiInfo(PHONE_HOME_WHOLE_NUMBER, phone_variants);
+
+  page_id = 5;
+  GUIDPair variant_guid(work_profile->guid(), 1);
+  FillAutofillFormData(page_id, form_with_maxlength,
+                       *form_with_maxlength.fields.begin(),
+                       PackGUIDs(empty, variant_guid));
+  page_id = 0;
+  FormData results5;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results5));
+  EXPECT_EQ(5, page_id);
+
+  ASSERT_EQ(5U, results5.fields.size());
+  EXPECT_EQ(ASCIIToUTF16("1"), results5.fields[0].value);
+  EXPECT_EQ(ASCIIToUTF16("888"), results5.fields[1].value);
+  EXPECT_EQ(ASCIIToUTF16("777"), results5.fields[2].value);
+  EXPECT_EQ(ASCIIToUTF16("1234"), results5.fields[3].value);
+  EXPECT_EQ(string16(), results5.fields[4].value);
 }
 
 // Test that we can still fill a form when a field has been removed from it.
@@ -2243,9 +2300,8 @@ TEST_F(AutofillManagerTest, FormChangesRemoveField) {
 
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, form.fields[0],
-      autofill_manager_->PackGUIDs(empty, guid));
+  FillAutofillFormData(kDefaultPageID, form, form.fields[0],
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -2255,15 +2311,16 @@ TEST_F(AutofillManagerTest, FormChangesRemoveField) {
 
 // Test that we can still fill a form when a field has been added to it.
 TEST_F(AutofillManagerTest, FormChangesAddField) {
-  // The offset of the fax field in the address form.
-  const int kFaxFieldOffset = 10;
+  // The offset of the phone field in the address form.
+  const int kPhoneFieldOffset = 9;
 
   // Set up our form data.
   FormData form;
   CreateTestAddressFormData(&form);
 
-  // Remove the fax field -- we'll add it back later.
-  std::vector<FormField>::iterator pos = form.fields.begin() + kFaxFieldOffset;
+  // Remove the phone field -- we'll add it back later.
+  std::vector<FormField>::iterator pos =
+      form.fields.begin() + kPhoneFieldOffset;
   FormField field = *pos;
   pos = form.fields.erase(pos);
 
@@ -2275,9 +2332,8 @@ TEST_F(AutofillManagerTest, FormChangesAddField) {
 
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
-  FillAutofillFormData(
-      kDefaultPageID, form, form.fields[0],
-      autofill_manager_->PackGUIDs(empty, guid));
+  FillAutofillFormData(kDefaultPageID, form, form.fields[0],
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -2297,7 +2353,7 @@ TEST_F(AutofillManagerTest, FormSubmitted) {
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
   FillAutofillFormData(kDefaultPageID, form, form.fields[0],
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -2306,7 +2362,7 @@ TEST_F(AutofillManagerTest, FormSubmitted) {
 
   // Simulate form submission. We should call into the PDM to try to save the
   // filled data.
-  EXPECT_CALL(*test_personal_data_, SaveImportedProfile(::testing::_)).Times(1);
+  EXPECT_CALL(personal_data_, SaveImportedProfile(::testing::_)).Times(1);
   FormSubmitted(results);
 }
 
@@ -2335,7 +2391,7 @@ TEST_F(AutofillManagerTest, FormSubmittedServerTypes) {
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
   FillAutofillFormData(kDefaultPageID, form, form.fields[0],
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -2344,7 +2400,7 @@ TEST_F(AutofillManagerTest, FormSubmittedServerTypes) {
 
   // Simulate form submission. We should call into the PDM to try to save the
   // filled data.
-  EXPECT_CALL(*test_personal_data_, SaveImportedProfile(::testing::_)).Times(1);
+  EXPECT_CALL(personal_data_, SaveImportedProfile(::testing::_)).Times(1);
   FormSubmitted(results);
 }
 
@@ -2394,7 +2450,7 @@ TEST_F(AutofillManagerTest, FormSubmittedWithDefaultValues) {
   GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
   GUIDPair empty(std::string(), 0);
   FillAutofillFormData(kDefaultPageID, form, form.fields[3],
-                       autofill_manager_->PackGUIDs(empty, guid));
+                       PackGUIDs(empty, guid));
 
   int page_id = 0;
   FormData results;
@@ -2402,7 +2458,7 @@ TEST_F(AutofillManagerTest, FormSubmittedWithDefaultValues) {
 
   // Simulate form submission.  We should call into the PDM to try to save the
   // filled data.
-  EXPECT_CALL(*test_personal_data_, SaveImportedProfile(::testing::_)).Times(1);
+  EXPECT_CALL(personal_data_, SaveImportedProfile(::testing::_)).Times(1);
   FormSubmitted(results);
 
   // Set the address field's value back to the default value.
@@ -2410,7 +2466,7 @@ TEST_F(AutofillManagerTest, FormSubmittedWithDefaultValues) {
 
   // Simulate form submission.  We should not call into the PDM to try to save
   // the filled data, since the filled form is effectively missing an address.
-  EXPECT_CALL(*test_personal_data_, SaveImportedProfile(::testing::_)).Times(0);
+  EXPECT_CALL(personal_data_, SaveImportedProfile(::testing::_)).Times(0);
   FormSubmitted(results);
 }
 
@@ -2733,7 +2789,7 @@ TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUpload) {
 }
 
 TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUploadStressTest) {
-  test_personal_data_->ClearAutofillProfiles();
+  personal_data_.ClearAutofillProfiles();
   const int kNumProfiles = 5;
   for (int i = 0; i < kNumProfiles; ++i) {
     AutofillProfile* profile = new AutofillProfile;
@@ -2747,11 +2803,10 @@ TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUploadStressTest) {
                                   StringPrintf("%d 1st st.", i).c_str(),
                                   "",
                                   "Memphis", "Tennessee", "38116", "USA",
-                                  StringPrintf("650234%04d", i).c_str(),
-                                  "");
+                                  StringPrintf("650234%04d", i).c_str());
     profile->set_guid(
         StringPrintf("00000000-0000-0000-0001-00000000%04d", i).c_str());
-    test_personal_data_->AddProfile(profile);
+    personal_data_.AddProfile(profile);
   }
   FormData form;
   CreateTestAddressFormData(&form);

@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_MANAGER_H__
 #pragma once
 
+#include <list>
 #include <set>
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/internal_api/configure_reason.h"
 #include "chrome/browser/sync/syncable/model_type.h"
@@ -38,30 +40,28 @@ class DataTypeManager {
   // Update NotifyDone() in data_type_manager_impl.cc if you update
   // this.
   enum ConfigureStatus {
+    UNKNOWN = -1,
     OK,                  // Configuration finished without error.
-    ASSOCIATION_FAILED,  // An error occurred during model association.
+    PARTIAL_SUCCESS,     // Some data types had an error while starting up.
     ABORTED,             // Start was aborted by calling Stop() before
                          // all types were started.
-    UNRECOVERABLE_ERROR  // A data type experienced an unrecoverable error
-                         // during startup.
+    UNRECOVERABLE_ERROR  // We got an unrecoverable error during startup.
   };
 
   typedef std::set<syncable::ModelType> TypeSet;
 
-  // Note: location and failed_types are only filled when status is not OK.
+  // Note: |errors| is only filled when status is not OK.
   struct ConfigureResult {
     ConfigureResult();
     ConfigureResult(ConfigureStatus status,
                     TypeSet requested_types);
     ConfigureResult(ConfigureStatus status,
                     TypeSet requested_types,
-                    TypeSet failed_types,
-                    const tracked_objects::Location& location);
+                    const std::list<SyncError>& errors);
     ~ConfigureResult();
     ConfigureStatus status;
     TypeSet requested_types;
-    TypeSet failed_types;
-    tracked_objects::Location location;
+    std::list<SyncError> errors;
   };
 
   virtual ~DataTypeManager() {}

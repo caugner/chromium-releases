@@ -17,11 +17,16 @@
 #include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
 #include "content/browser/trace_message_filter.h"
-#include "content/common/content_switches.h"
 #include "content/common/notification_service.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/process_watcher.h"
 #include "content/common/result_codes.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/content_switches.h"
+
+#if defined(OS_WIN)
+#include "base/synchronization/waitable_event.h"
+#endif  // OS_WIN
 
 namespace {
 
@@ -54,7 +59,8 @@ class ChildNotificationTask : public Task {
 BrowserChildProcessHost::BrowserChildProcessHost(
     ChildProcessInfo::ProcessType type)
     : ChildProcessInfo(type, -1),
-      ALLOW_THIS_IN_INITIALIZER_LIST(client_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(client_(this)),
+      disconnect_was_alive_(false) {
   AddFilter(new TraceMessageFilter);
 
   g_child_process_list.Get().push_back(this);
@@ -89,7 +95,7 @@ void BrowserChildProcessHost::Launch(
 #elif defined(OS_POSIX)
       use_zygote,
       environ,
-      channel()->GetClientFileDescriptor(),
+      channel()->TakeClientFileDescriptor(),
 #endif
       cmd_line,
       &client_));
@@ -123,37 +129,75 @@ base::TerminationStatus BrowserChildProcessHost::GetChildTerminationStatus(
   return child_process_->GetChildTerminationStatus(exit_code);
 }
 
-void BrowserChildProcessHost::OnChildDied() {
-  // This may be called by both the channel's OnChannelError handler
-  // as well as the process launcher's OnProcessLaunched handler.
-  if (handle() != base::kNullProcessHandle) {
-    int exit_code;
-    base::TerminationStatus status = GetChildTerminationStatus(&exit_code);
-    switch (status) {
-      case base::TERMINATION_STATUS_PROCESS_CRASHED:
-      case base::TERMINATION_STATUS_ABNORMAL_TERMINATION: {
-        OnProcessCrashed(exit_code);
+void BrowserChildProcessHost::OnChannelConnected(int32 peer_pid) {
+  Notify(content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED);
+}
 
-        // Report that this child process crashed.
-        Notify(content::NOTIFICATION_CHILD_PROCESS_CRASHED);
-        UMA_HISTOGRAM_COUNTS("ChildProcess.Crashes", this->type());
-        break;
+// The ChildProcessHost default implementation calls OnChildDied() always
+// but at this layer and below we need to have the final child process exit
+// code to properly bucket crashes vs kills. At least on Windows we can do
+// this if we wait until the process handle is signaled, however this means
+// that this function can be called twice: once from the actual channel error
+// and once from OnWaitableEventSignaled().
+void BrowserChildProcessHost::OnChildDisconnected() {
+  DCHECK(handle() != base::kNullProcessHandle);
+  int exit_code;
+  base::TerminationStatus status = GetChildTerminationStatus(&exit_code);
+  switch (status) {
+    case base::TERMINATION_STATUS_PROCESS_CRASHED:
+    case base::TERMINATION_STATUS_ABNORMAL_TERMINATION: {
+      OnProcessCrashed(exit_code);
+      // Report that this child process crashed.
+      Notify(content::NOTIFICATION_CHILD_PROCESS_CRASHED);
+      UMA_HISTOGRAM_COUNTS("ChildProcess.Crashes", this->type());
+      if (disconnect_was_alive_) {
+        UMA_HISTOGRAM_COUNTS("ChildProcess.CrashesWasAlive", this->type());
       }
-      case base::TERMINATION_STATUS_PROCESS_WAS_KILLED: {
-        OnProcessWasKilled(exit_code);
-
-        // Report that this child process was killed.
-        Notify(content::NOTIFICATION_CHILD_PROCESS_WAS_KILLED);
-        UMA_HISTOGRAM_COUNTS("ChildProcess.Kills", this->type());
-        break;
-      }
-      default:
-        break;
+      break;
     }
-    // Notify in the main loop of the disconnection.
-    Notify(content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED);
+    case base::TERMINATION_STATUS_PROCESS_WAS_KILLED: {
+      OnProcessWasKilled(exit_code);
+      // Report that this child process was killed.
+      Notify(content::NOTIFICATION_CHILD_PROCESS_WAS_KILLED);
+      UMA_HISTOGRAM_COUNTS("ChildProcess.Kills", this->type());
+      if (disconnect_was_alive_) {
+        UMA_HISTOGRAM_COUNTS("ChildProcess.KillsWasAlive", this->type());
+      }
+      break;
+    }
+    case base::TERMINATION_STATUS_STILL_RUNNING: {
+      // exit code not yet available.
+      disconnect_was_alive_ = true;
+#if defined(OS_WIN)
+      child_watcher_.StartWatching(new base::WaitableEvent(handle()), this);
+      return;
+#else
+      break;
+#endif
+    }
+
+    default:
+      break;
   }
-  ChildProcessHost::OnChildDied();
+  // Notify in the main loop of the disconnection.
+  Notify(content::NOTIFICATION_CHILD_PROCESS_HOST_DISCONNECTED);
+  OnChildDied();
+}
+
+// The child process handle has been signaled so the exit code is finally
+// available. Unfortunately STILL_ACTIVE (0x103) is a valid exit code in
+// which case we should not call OnChildDisconnected() or else we will be
+// waiting forever.
+void BrowserChildProcessHost::OnWaitableEventSignaled(
+    base::WaitableEvent* waitable_event) {
+#if defined (OS_WIN)
+  unsigned long exit_code = 0;
+  GetExitCodeProcess(waitable_event->Release(), &exit_code);
+  delete waitable_event;
+  if (exit_code == STILL_ACTIVE)
+    OnChildDied();
+  BrowserChildProcessHost::OnChildDisconnected();
+#endif
 }
 
 void BrowserChildProcessHost::ShutdownStarted() {

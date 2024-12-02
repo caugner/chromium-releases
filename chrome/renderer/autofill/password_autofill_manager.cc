@@ -4,10 +4,11 @@
 
 #include "chrome/renderer/autofill/password_autofill_manager.h"
 
+#include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/common/autofill_messages.h"
-#include "content/renderer/render_view.h"
+#include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFormElement.h"
@@ -201,9 +202,9 @@ namespace autofill {
 // PasswordAutofillManager, public:
 
 PasswordAutofillManager::PasswordAutofillManager(
-    RenderView* render_view)
-    : RenderViewObserver(render_view),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+    content::RenderView* render_view)
+    : content::RenderViewObserver(render_view),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
 PasswordAutofillManager::~PasswordAutofillManager() {
@@ -281,9 +282,11 @@ bool PasswordAutofillManager::TextDidChangeInTextField(
   // We post a task for doing the autocomplete as the caret position is not set
   // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976) and
   // we need it to determine whether or not to trigger autocomplete.
-  MessageLoop::current()->PostTask(FROM_HERE, method_factory_.NewRunnableMethod(
-      &PasswordAutofillManager::PerformInlineAutocomplete,
-      element, password, iter->second.fill_data));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&PasswordAutofillManager::PerformInlineAutocomplete,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 element, password, iter->second.fill_data));
   return true;
 }
 
@@ -316,6 +319,13 @@ bool PasswordAutofillManager::DidAcceptAutofillSuggestion(
 }
 
 bool PasswordAutofillManager::DidSelectAutofillSuggestion(
+    const WebKit::WebNode& node) {
+  WebKit::WebInputElement input;
+  PasswordInfo password;
+  return FindLoginInfo(node, &input, &password);
+}
+
+bool PasswordAutofillManager::DidClearAutofillSelection(
     const WebKit::WebNode& node) {
   WebKit::WebInputElement input;
   PasswordInfo password;
@@ -399,7 +409,7 @@ void PasswordAutofillManager::OnFillPasswordForm(
     const webkit_glue::PasswordFormFillData& form_data) {
   FormElementsList forms;
   // We own the FormElements* in forms.
-  FindFormElements(render_view()->webview(), form_data.basic_data, &forms);
+  FindFormElements(render_view()->GetWebView(), form_data.basic_data, &forms);
   FormElementsList::iterator iter;
   for (iter = forms.begin(); iter != forms.end(); ++iter) {
     scoped_ptr<FormElements> form_elements(*iter);

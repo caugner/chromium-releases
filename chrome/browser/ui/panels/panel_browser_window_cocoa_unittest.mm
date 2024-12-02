@@ -14,9 +14,8 @@
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#import "chrome/browser/ui/cocoa/browser_test_helper.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/run_loop_testing.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
@@ -30,11 +29,21 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
 
+class PanelAnimatedBoundsObserver :
+    public ui_test_utils::WindowedNotificationObserver {
+ public:
+  PanelAnimatedBoundsObserver(Panel* panel)
+    : ui_test_utils::WindowedNotificationObserver(
+        chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
+        Source<Panel>(panel)) { }
+  virtual ~PanelAnimatedBoundsObserver() { }
+};
+
 // Main test class.
-class PanelBrowserWindowCocoaTest : public CocoaTest {
+class PanelBrowserWindowCocoaTest : public CocoaProfileTest {
  public:
   virtual void SetUp() {
-    CocoaTest::SetUp();
+    CocoaProfileTest::SetUp();
     CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePanels);
   }
 
@@ -50,11 +59,11 @@ class PanelBrowserWindowCocoaTest : public CocoaTest {
     Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
                                                    panel_name,
                                                    gfx::Rect(),
-                                                   browser_helper_.profile());
+                                                   profile());
 
     TabContentsWrapper* tab_contents = new TabContentsWrapper(
-        new TestTabContents(browser_helper_.profile(), NULL));
-    panel_browser->AddTab(tab_contents, PageTransition::LINK);
+        new TestTabContents(profile(), NULL));
+    panel_browser->AddTab(tab_contents, content::PAGE_TRANSITION_LINK);
 
     // We just created one new panel.
     EXPECT_EQ(panels_count + 1, manager->num_panels());
@@ -111,9 +120,6 @@ class PanelBrowserWindowCocoaTest : public CocoaTest {
     [item setTag:command_id];
     return item;
   }
-
- private:
-  BrowserTestHelper browser_helper_;
 };
 
 TEST_F(PanelBrowserWindowCocoaTest, CreateClose) {
@@ -189,21 +195,29 @@ TEST_F(PanelBrowserWindowCocoaTest, NativeBounds) {
   EXPECT_EQ(bounds1.origin.y, bounds2.origin.y);
   EXPECT_EQ(bounds2.origin.y, bounds3.origin.y);
 
-  // After panel2 is closed, panel3 should take its place.
-  ClosePanelAndWait(panel2->browser());
-  bounds3 = [[native_window3->controller_ window] frame];
-  EXPECT_EQ(bounds2.origin.x, bounds3.origin.x);
-  EXPECT_EQ(bounds2.origin.y, bounds3.origin.y);
-  EXPECT_EQ(bounds2.size.width, bounds3.size.width);
-  EXPECT_EQ(bounds2.size.height, bounds3.size.height);
+  {
+    // After panel2 is closed, panel3 should take its place.
+    PanelAnimatedBoundsObserver bounds_observer(panel3);
+    ClosePanelAndWait(panel2->browser());
+    bounds_observer.Wait();
+    bounds3 = [[native_window3->controller_ window] frame];
+    EXPECT_EQ(bounds2.origin.x, bounds3.origin.x);
+    EXPECT_EQ(bounds2.origin.y, bounds3.origin.y);
+    EXPECT_EQ(bounds2.size.width, bounds3.size.width);
+    EXPECT_EQ(bounds2.size.height, bounds3.size.height);
+  }
 
-  // After panel1 is closed, panel3 should take its place.
-  ClosePanelAndWait(panel1->browser());
-  bounds3 = [[native_window3->controller_ window] frame];
-  EXPECT_EQ(bounds1.origin.x, bounds3.origin.x);
-  EXPECT_EQ(bounds1.origin.y, bounds3.origin.y);
-  EXPECT_EQ(bounds1.size.width, bounds3.size.width);
-  EXPECT_EQ(bounds1.size.height, bounds3.size.height);
+  {
+    // After panel1 is closed, panel3 should take its place.
+    PanelAnimatedBoundsObserver bounds_observer(panel3);
+    ClosePanelAndWait(panel1->browser());
+    bounds_observer.Wait();
+    bounds3 = [[native_window3->controller_ window] frame];
+    EXPECT_EQ(bounds1.origin.x, bounds3.origin.x);
+    EXPECT_EQ(bounds1.origin.y, bounds3.origin.y);
+    EXPECT_EQ(bounds1.size.width, bounds3.size.width);
+    EXPECT_EQ(bounds1.size.height, bounds3.size.height);
+  }
 
   ClosePanelAndWait(panel3->browser());
 }
@@ -245,7 +259,10 @@ TEST_F(PanelBrowserWindowCocoaTest, TitlebarViewSizing) {
   bounds.set_y(bounds.y() - kDelta);
   bounds.set_width(bounds.width() + kDelta);
   bounds.set_height(bounds.height() + kDelta);
+
+  PanelAnimatedBoundsObserver bounds_observer(panel);
   native_window->SetPanelBounds(bounds);
+  bounds_observer.Wait();
 
   // Verify the panel resized.
   NSRect window_frame = [[native_window->controller_ window] frame];
@@ -357,4 +374,32 @@ TEST_F(PanelBrowserWindowCocoaTest, SetTitle) {
   EXPECT_NSEQ(@"Untitled", [[native_window->controller_ window] title]);
   EXPECT_NSNE([[native_window->controller_ window] title], previousTitle);
   ClosePanelAndWait(panel->browser());
+}
+
+TEST_F(PanelBrowserWindowCocoaTest, ActivatePanel) {
+  Panel* panel = CreateTestPanel("Test Panel");
+  Panel* panel2 = CreateTestPanel("Test Panel 2");
+  ASSERT_TRUE(panel);
+  ASSERT_TRUE(panel2);
+
+  PanelBrowserWindowCocoa* native_window =
+      static_cast<PanelBrowserWindowCocoa*>(panel->native_panel());
+  ASSERT_TRUE(native_window);
+  PanelBrowserWindowCocoa* native_window2 =
+      static_cast<PanelBrowserWindowCocoa*>(panel2->native_panel());
+  ASSERT_TRUE(native_window2);
+
+  // No one has a good answer why but apparently windows can't take keyboard
+  // focus outside of interactive UI tests. BrowserWindowController uses the
+  // same way of testing this.
+  native_window->ActivatePanel();
+  NSWindow* frontmostWindow = [[NSApp orderedWindows] objectAtIndex:0];
+  EXPECT_NSEQ(frontmostWindow, [native_window->controller_ window]);
+
+  native_window2->ActivatePanel();
+  frontmostWindow = [[NSApp orderedWindows] objectAtIndex:0];
+  EXPECT_NSEQ(frontmostWindow, [native_window2->controller_ window]);
+
+  ClosePanelAndWait(panel->browser());
+  ClosePanelAndWait(panel2->browser());
 }

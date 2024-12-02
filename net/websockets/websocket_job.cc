@@ -182,7 +182,7 @@ void WebSocketJob::DetachDelegate() {
 }
 
 int WebSocketJob::OnStartOpenConnection(
-    SocketStream* socket, CompletionCallback* callback) {
+    SocketStream* socket, OldCompletionCallback* callback) {
   DCHECK(!callback_);
   state_ = CONNECTING;
   addresses_ = socket->address_list();
@@ -212,6 +212,7 @@ void WebSocketJob::OnConnected(
 
 void WebSocketJob::OnSentData(SocketStream* socket, int amount_sent) {
   DCHECK_NE(INITIALIZED, state_);
+  DCHECK_GT(amount_sent, 0);
   if (state_ == CLOSED)
     return;
   if (state_ == CONNECTING) {
@@ -220,8 +221,10 @@ void WebSocketJob::OnSentData(SocketStream* socket, int amount_sent) {
   }
   if (delegate_) {
     DCHECK(state_ == OPEN || state_ == CLOSING);
-    DCHECK_GT(amount_sent, 0);
-    DCHECK(current_buffer_);
+    if (current_buffer_ == NULL) {
+      VLOG(1) << "OnSentData current_buffer=NULL amount_sent=" << amount_sent;
+      return;
+    }
     current_buffer_->DidConsume(amount_sent);
     if (current_buffer_->BytesRemaining() > 0)
       return;
@@ -630,7 +633,7 @@ void WebSocketJob::RetryPendingIO() {
 void WebSocketJob::CompleteIO(int result) {
   // |callback_| may be NULL if OnClose() or DetachDelegate() was called.
   if (callback_) {
-    net::CompletionCallback* callback = callback_;
+    net::OldCompletionCallback* callback = callback_;
     callback_ = NULL;
     callback->Run(result);
     Release();  // Balanced with OnStartOpenConnection().

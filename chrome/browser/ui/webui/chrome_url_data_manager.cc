@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
@@ -50,9 +51,8 @@ void ChromeURLDataManager::AddDataSource(DataSource* source) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(AddDataSourceOnIOThread,
-                          backend_,
-                          make_scoped_refptr(source)));
+      base::Bind(&AddDataSourceOnIOThread,
+                 backend_, make_scoped_refptr(source)));
 }
 
 // static
@@ -90,10 +90,9 @@ void ChromeURLDataManager::DeleteDataSource(const DataSource* data_source) {
   }
   if (schedule_delete) {
     // Schedule a task to delete the DataSource back on the UI thread.
-    BrowserThread::PostTask(BrowserThread::UI,
-                            FROM_HERE,
-                            NewRunnableFunction(
-                                &ChromeURLDataManager::DeleteDataSources));
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&ChromeURLDataManager::DeleteDataSources));
   }
 }
 

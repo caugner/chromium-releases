@@ -14,14 +14,16 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <tlhelp32.h>
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) || defined(OS_OPENBSD)
 // kinfo_proc is defined in <sys/sysctl.h>, but this forward declaration
 // is sufficient for the vector<kinfo_proc> below.
 struct kinfo_proc;
 // malloc_zone_t is defined in <malloc/malloc.h>, but this forward declaration
 // is sufficient for GetPurgeableZone() below.
 typedef struct _malloc_zone_t malloc_zone_t;
+#if !defined(OS_OPENBSD)
 #include <mach/mach.h>
+#endif
 #elif defined(OS_POSIX)
 #include <dirent.h>
 #include <limits.h>
@@ -164,7 +166,7 @@ BASE_EXPORT void CloseProcessHandle(ProcessHandle process);
 // Win XP SP1 as well.
 BASE_EXPORT ProcessId GetProcId(ProcessHandle process);
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_ANDROID)
 // Returns the path to the executable of the given process.
 BASE_EXPORT FilePath GetProcessExecutablePath(ProcessHandle process);
 
@@ -184,7 +186,7 @@ const int kMaxOomScore = 1000;
 // translate the given value into [0, 15].  Some aliasing of values
 // may occur in that case, of course.
 BASE_EXPORT bool AdjustOOMScore(ProcessId process, int score);
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
 #if defined(OS_POSIX)
 // Returns the ID for the parent of the given process.
@@ -213,7 +215,7 @@ struct LaunchOptions {
   LaunchOptions() : wait(false),
 #if defined(OS_WIN)
                     start_hidden(false), inherit_handles(false), as_user(NULL),
-                    empty_desktop_name(false)
+                    empty_desktop_name(false), job_handle(NULL)
 #else
                     environ(NULL), fds_to_remap(NULL), new_process_group(false)
 #if defined(OS_LINUX)
@@ -245,6 +247,9 @@ struct LaunchOptions {
 
   // If true, use an empty string for the desktop name.
   bool empty_desktop_name;
+
+  // If non-NULL, launches the application in that job object.
+  HANDLE job_handle;
 #else
   // If non-NULL, set/unset environment variables.
   // See documentation of AlterEnvironment().
@@ -523,7 +528,7 @@ class BASE_EXPORT ProcessIterator {
 #if defined(OS_WIN)
   HANDLE snapshot_;
   bool started_iteration_;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) || defined(OS_OPENBSD)
   std::vector<kinfo_proc> kinfo_procs_;
   size_t index_of_kinfo_proc_;
 #elif defined(OS_POSIX)
@@ -709,7 +714,7 @@ class BASE_EXPORT ProcessMetrics {
   DISALLOW_COPY_AND_ASSIGN(ProcessMetrics);
 };
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_ANDROID)
 // Data from /proc/meminfo about system-wide memory consumption.
 // Values are in KB.
 struct SystemMemoryInfoKB {
@@ -727,7 +732,7 @@ struct SystemMemoryInfoKB {
 // Fills in the provided |meminfo| structure. Returns true on success.
 // Exposed for memory debugging widget.
 BASE_EXPORT bool GetSystemMemoryInfo(SystemMemoryInfoKB* meminfo);
-#endif  // defined(OS_LINUX)
+#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
 // Returns the memory committed by the system in KBytes.
 // Returns 0 if it can't compute the commit charge.

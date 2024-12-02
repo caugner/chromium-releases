@@ -21,21 +21,20 @@ class DesktopViewsDelegate : public ViewsDelegate {
   virtual ui::Clipboard* GetClipboard() const OVERRIDE;
   virtual View* GetDefaultParentView() OVERRIDE;
   virtual void SaveWindowPlacement(const Widget* widget,
-                                   const std::wstring& window_name,
+                                   const std::string& window_name,
                                    const gfx::Rect& bounds,
                                    ui::WindowShowState show_state) OVERRIDE;
   virtual bool GetSavedWindowPlacement(
-      const std::wstring& window_name,
+      const std::string& window_name,
       gfx::Rect* bounds,
       ui::WindowShowState* show_state) const OVERRIDE;
   virtual void NotifyAccessibilityEvent(
       views::View* view, ui::AccessibilityTypes::Event event_type) OVERRIDE;
-  virtual void NotifyMenuItemFocused(
-      const std::wstring& menu_name,
-      const std::wstring& menu_item_name,
-      int item_index,
-      int item_count,
-      bool has_submenu) OVERRIDE;
+  virtual void NotifyMenuItemFocused(const string16& menu_name,
+                                     const string16& menu_item_name,
+                                     int item_index,
+                                     int item_count,
+                                     bool has_submenu) OVERRIDE;
 #if defined(OS_WIN)
   virtual HICON GetDefaultWindowIcon() const OVERRIDE;
 #endif

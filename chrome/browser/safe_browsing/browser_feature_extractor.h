@@ -15,6 +15,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback_old.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "content/browser/cancelable_request.h"
+#include "googleurl/src/gurl.h"
 
 class HistoryService;
 class TabContents;
@@ -40,6 +42,12 @@ struct BrowseInfo {
   // If a SafeBrowsing interstitial was shown for the current URL
   // this will contain the UnsafeResource struct for that URL.
   scoped_ptr<SafeBrowsingService::UnsafeResource> unsafe_resource;
+
+  // List of redirects that lead to the first page on the current host and
+  // the current url respectively. These may be the same if the current url
+  // is the first page on its host.
+  std::vector<GURL> host_redirects;
+  std::vector<GURL> url_redirects;
 
   BrowseInfo();
   ~BrowseInfo();
@@ -73,10 +81,6 @@ class BrowserFeatureExtractor {
   virtual void ExtractFeatures(const BrowseInfo* info,
                                ClientPhishingRequest* request,
                                DoneCallback* callback);
-
-  // The size of hash prefix to use for ClientPhishingRequest.hash_prefix.
-  // Public for testing.
-  static const int kHashPrefixLength;
 
  private:
   friend class DeleteTask<BrowserFeatureExtractor>;
@@ -138,10 +142,6 @@ class BrowserFeatureExtractor {
   // Helper function which gets the history server if possible.  If the pointer
   // is set it will return true and false otherwise.
   bool GetHistoryService(HistoryService** history);
-
-  // Computes the SHA-256 hash prefix for the URL and adds it to the
-  // ClientPhishingRequest.
-  void ComputeURLHash(ClientPhishingRequest* request);
 
   TabContents* tab_;
   ClientSideDetectionService* service_;

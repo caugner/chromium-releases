@@ -4,9 +4,11 @@
 
 #include "chrome/browser/importer/firefox_importer_unittest_utils.h"
 
+#include "base/bind.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
@@ -30,7 +32,7 @@ const char kTestChannelID[] = "T1";
 // |handle| - On return, the process handle to use to communicate with the
 // child.
 bool LaunchNSSDecrypterChildProcess(const FilePath& nss_path,
-    const IPC::Channel& channel, base::ProcessHandle* handle) {
+    IPC::Channel* channel, base::ProcessHandle* handle) {
   CommandLine cl(*CommandLine::ForCurrentProcess());
   cl.AppendSwitchASCII(switches::kTestChildProcess, "NSSDecrypterChildProcess");
 
@@ -43,13 +45,13 @@ bool LaunchNSSDecrypterChildProcess(const FilePath& nss_path,
   dyld_override.second = nss_path.value();
   env.push_back(dyld_override);
 
-  base::file_handle_mapping_vector fds_to_map;
-  const int ipcfd = channel.GetClientFileDescriptor();
-  if (ipcfd > -1) {
-    fds_to_map.push_back(std::pair<int,int>(ipcfd, kPrimaryIPCChannel + 3));
-  } else {
+  int ipcfd = channel->TakeClientFileDescriptor();
+  if (ipcfd == -1)
     return false;
-  }
+
+  file_util::ScopedFD client_file_descriptor_closer(&ipcfd);
+  base::file_handle_mapping_vector fds_to_map;
+  fds_to_map.push_back(std::pair<int,int>(ipcfd, kPrimaryIPCChannel + 3));
 
   bool debug_on_start = CommandLine::ForCurrentProcess()->HasSwitch(
                             switches::kDebugChildren);
@@ -139,7 +141,7 @@ bool FFUnitTestDecryptorProxy::Setup(const FilePath& nss_path) {
 
   // Spawn child and set up sync IPC connection.
   bool ret = LaunchNSSDecrypterChildProcess(nss_path,
-                                            *(channel_.get()),
+                                            channel_.get(),
                                             &child_process_);
   return ret && (child_process_ != 0);
 }
@@ -169,7 +171,7 @@ class CancellableQuitMsgLoop : public base::RefCounted<CancellableQuitMsgLoop> {
 // Spin until either a client response arrives or a timeout occurs.
 bool FFUnitTestDecryptorProxy::WaitForClientResponse() {
   // What we're trying to do here is to wait for an RPC message to go over the
-  // wire and the client to reply.  If the client does not replyy by a given
+  // wire and the client to reply.  If the client does not reply by a given
   // timeout we kill the message loop.
   // The way we do this is to post a CancellableQuitMsgLoop for 3 seconds in
   // the future and cancel it if an RPC message comes back earlier.
@@ -179,7 +181,7 @@ bool FFUnitTestDecryptorProxy::WaitForClientResponse() {
       new CancellableQuitMsgLoop());
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      NewRunnableMethod(quit_task.get(), &CancellableQuitMsgLoop::QuitNow),
+      base::Bind(&CancellableQuitMsgLoop::QuitNow, quit_task.get()),
       TestTimeouts::action_max_timeout_ms());
 
   message_loop_->Run();

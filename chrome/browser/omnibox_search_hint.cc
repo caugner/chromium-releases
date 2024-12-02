@@ -28,16 +28,16 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/navigation_details.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 // The URLs of search engines for which we want to trigger the infobar.
-const char* kSearchEngineURLs[] = {
+const char* const kSearchEngineURLs[] = {
     "http://www.google.com/",
     "http://www.yahoo.com/",
     "http://www.bing.com/",
@@ -85,7 +85,7 @@ class HintInfoBar : public ConfirmInfoBarDelegate {
 };
 
 HintInfoBar::HintInfoBar(OmniboxSearchHint* omnibox_hint)
-    : ConfirmInfoBarDelegate(omnibox_hint->tab()->tab_contents()),
+    : ConfirmInfoBarDelegate(omnibox_hint->tab()->infobar_tab_helper()),
       omnibox_hint_(omnibox_hint),
       action_taken_(false),
       should_expire_(false),
@@ -154,10 +154,8 @@ OmniboxSearchHint::OmniboxSearchHint(TabContentsWrapper* tab) : tab_(tab) {
                               content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                               Source<NavigationController>(controller));
   // Fill the search_engine_urls_ map, used for faster look-up (overkill?).
-  for (size_t i = 0;
-       i < sizeof(kSearchEngineURLs) / sizeof(kSearchEngineURLs[0]); ++i) {
+  for (size_t i = 0; i < arraysize(kSearchEngineURLs); ++i)
     search_engine_urls_[kSearchEngineURLs[i]] = 1;
-  }
 
   // Listen for omnibox to figure-out when the user searches from the omnibox.
   notification_registrar_.Add(this,

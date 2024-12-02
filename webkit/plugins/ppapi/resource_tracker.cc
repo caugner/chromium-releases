@@ -18,10 +18,9 @@
 #include "webkit/plugins/ppapi/npobject_var.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
-#include "webkit/plugins/ppapi/ppb_char_set_impl.h"
 #include "webkit/plugins/ppapi/ppb_cursor_control_impl.h"
-#include "webkit/plugins/ppapi/ppb_find_impl.h"
 #include "webkit/plugins/ppapi/ppb_font_impl.h"
+#include "webkit/plugins/ppapi/ppb_text_input_impl.h"
 #include "webkit/plugins/ppapi/resource_creation_impl.h"
 #include "webkit/plugins/ppapi/resource_helper.h"
 
@@ -136,17 +135,14 @@ void ResourceTracker::CleanupInstanceData(PP_Instance instance,
     return proxy.get();
 
   switch (id) {
-    case ::ppapi::proxy::INTERFACE_ID_PPB_CHAR_SET:
-      proxy.reset(new PPB_CharSet_Impl(instance));
-      break;
     case ::ppapi::proxy::INTERFACE_ID_PPB_CURSORCONTROL:
       proxy.reset(new PPB_CursorControl_Impl(instance));
       break;
-    case ::ppapi::proxy::INTERFACE_ID_PPB_FIND:
-      proxy.reset(new PPB_Find_Impl(instance));
-      break;
     case ::ppapi::proxy::INTERFACE_ID_PPB_FONT:
       proxy.reset(new PPB_Font_FunctionImpl(instance));
+      break;
+    case ::ppapi::proxy::INTERFACE_ID_PPB_TEXT_INPUT:
+      proxy.reset(new PPB_TextInput_Impl(instance));
       break;
     case ::ppapi::proxy::INTERFACE_ID_RESOURCE_CREATION:
       proxy.reset(new ResourceCreationImpl(instance));
@@ -327,4 +323,3 @@ void ResourceTracker::ClearSingletonOverride() {
 
 }  // namespace ppapi
 }  // namespace webkit
-

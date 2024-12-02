@@ -4,10 +4,12 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "chrome/browser/chrome_plugin_service_filter.h"
 #include "chrome/browser/chromeos/gview_request_interceptor.h"
 #include "chrome/browser/plugin_prefs.h"
+#include "chrome/browser/plugin_prefs_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "content/browser/mock_resource_context.h"
@@ -67,10 +69,15 @@ class GViewRequestProtocolFactory
   }
 };
 
+void QuitMessageLoop(const std::vector<webkit::WebPluginInfo>&) {
+  MessageLoop::current()->Quit();
+}
+
 class GViewRequestInterceptorTest : public testing::Test {
  public:
   GViewRequestInterceptorTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
+        file_thread_(BrowserThread::FILE, &message_loop_),
         io_thread_(BrowserThread::IO, &message_loop_) {}
 
   virtual void SetUp() {
@@ -82,7 +89,7 @@ class GViewRequestInterceptorTest : public testing::Test {
     job_factory_.SetProtocolHandler("http", new GViewRequestProtocolFactory);
     job_factory_.AddInterceptor(new GViewRequestInterceptor);
     request_context->set_job_factory(&job_factory_);
-    PluginPrefs::RegisterPrefs(&prefs_);
+    PluginPrefsFactory::GetInstance()->ForceRegisterPrefsForTest(&prefs_);
     plugin_prefs_ = new PluginPrefs();
     plugin_prefs_->SetPrefs(&prefs_);
     ChromePluginServiceFilter* filter =
@@ -96,6 +103,7 @@ class GViewRequestInterceptorTest : public testing::Test {
   }
 
   virtual void TearDown() {
+    plugin_prefs_->ShutdownOnUIThread();
     content::ResourceContext* resource_context =
         content::MockResourceContext::GetInstance();
     net::URLRequestContext* request_context =
@@ -107,34 +115,41 @@ class GViewRequestInterceptorTest : public testing::Test {
     PluginService::GetInstance()->set_filter(NULL);
   }
 
+  // GetPluginInfoByPath() will only use stale information. Because plugin
+  // refresh is asynchronous, spin a MessageLoop until the callback is run,
+  // after which, the test will continue.
   void RegisterPDFPlugin() {
     webkit::WebPluginInfo info;
     info.path = pdf_path_;
-    info.enabled = webkit::WebPluginInfo::USER_ENABLED_POLICY_UNMANAGED;
     webkit::npapi::PluginList::Singleton()->RegisterInternalPlugin(info);
-    webkit::npapi::PluginList::Singleton()->RefreshPlugins();
+
+    PluginService::GetInstance()->RefreshPluginList();
+    PluginService::GetInstance()->GetPlugins(base::Bind(&QuitMessageLoop));
+    MessageLoop::current()->Run();
   }
 
   void UnregisterPDFPlugin() {
     webkit::npapi::PluginList::Singleton()->UnregisterInternalPlugin(pdf_path_);
-    webkit::npapi::PluginList::Singleton()->RefreshPlugins();
+
+    PluginService::GetInstance()->RefreshPluginList();
+    PluginService::GetInstance()->GetPlugins(base::Bind(&QuitMessageLoop));
+    MessageLoop::current()->Run();
   }
 
   void SetPDFPluginLoadedState(bool want_loaded) {
     webkit::WebPluginInfo info;
-    bool is_loaded =
-        webkit::npapi::PluginList::Singleton()->GetPluginInfoByPath(
-            pdf_path_, &info);
+    bool is_loaded = PluginService::GetInstance()->GetPluginInfoByPath(
+        pdf_path_, &info);
     if (is_loaded && !want_loaded) {
       UnregisterPDFPlugin();
-      is_loaded = webkit::npapi::PluginList::Singleton()->GetPluginInfoByPath(
+      is_loaded = PluginService::GetInstance()->GetPluginInfoByPath(
           pdf_path_, &info);
     } else if (!is_loaded && want_loaded) {
       // This "loads" the plug-in even if it's not present on the
       // system - which is OK since we don't actually use it, just
       // need it to be "enabled" for the test.
       RegisterPDFPlugin();
-      is_loaded = webkit::npapi::PluginList::Singleton()->GetPluginInfoByPath(
+      is_loaded = PluginService::GetInstance()->GetPluginInfoByPath(
           pdf_path_, &info);
     }
     EXPECT_EQ(want_loaded, is_loaded);
@@ -153,7 +168,7 @@ class GViewRequestInterceptorTest : public testing::Test {
                                               false,       // is_main_frame
                                               -1,          // frame_id
                                               ResourceType::MAIN_FRAME,
-                                              PageTransition::LINK,
+                                              content::PAGE_TRANSITION_LINK,
                                               0,           // upload_size
                                               false,       // is_download
                                               true,        // allow_download
@@ -166,6 +181,7 @@ class GViewRequestInterceptorTest : public testing::Test {
  protected:
   MessageLoopForIO message_loop_;
   BrowserThread ui_thread_;
+  BrowserThread file_thread_;
   BrowserThread io_thread_;
   TestingPrefService prefs_;
   scoped_refptr<PluginPrefs> plugin_prefs_;
@@ -197,7 +213,7 @@ TEST_F(GViewRequestInterceptorTest, DoNotInterceptDownload) {
 
 TEST_F(GViewRequestInterceptorTest, DoNotInterceptPdfWhenEnabled) {
   SetPDFPluginLoadedState(true);
-  webkit::npapi::PluginList::Singleton()->EnablePlugin(pdf_path_);
+  plugin_prefs_->EnablePlugin(true, pdf_path_);
 
   net::URLRequest request(GURL("http://foo.com/file.pdf"), &test_delegate_);
   SetupRequest(&request);
@@ -209,7 +225,7 @@ TEST_F(GViewRequestInterceptorTest, DoNotInterceptPdfWhenEnabled) {
 
 TEST_F(GViewRequestInterceptorTest, InterceptPdfWhenDisabled) {
   SetPDFPluginLoadedState(true);
-  webkit::npapi::PluginList::Singleton()->DisablePlugin(pdf_path_);
+  plugin_prefs_->EnablePlugin(false, pdf_path_);
 
   net::URLRequest request(GURL("http://foo.com/file.pdf"), &test_delegate_);
   SetupRequest(&request);

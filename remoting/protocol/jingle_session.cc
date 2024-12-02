@@ -5,6 +5,7 @@
 #include "remoting/protocol/jingle_session.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/message_loop_proxy.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
@@ -25,13 +26,6 @@ using cricket::BaseSession;
 
 namespace remoting {
 namespace protocol {
-
-namespace {
-
-const char kControlChannelName[] = "control";
-const char kEventChannelName[] = "event";
-
-}  // namespace
 
 // static
 JingleSession* JingleSession::CreateClientSession(
@@ -55,8 +49,10 @@ JingleSession::JingleSession(
     : jingle_session_manager_(jingle_session_manager),
       local_cert_(local_cert),
       state_(INITIALIZING),
+      error_(OK),
       closing_(false),
       cricket_session_(NULL),
+      config_set_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
   // TODO(hclam): Need a better way to clone a key.
   if (local_private_key) {
@@ -70,7 +66,7 @@ JingleSession::JingleSession(
 
 JingleSession::~JingleSession() {
   // Reset the callback so that it's not called from Close().
-  state_change_callback_.reset();
+  state_change_callback_.Reset();
   Close();
   jingle_session_manager_->SessionDestroyed(this);
 }
@@ -131,10 +127,16 @@ cricket::Session* JingleSession::ReleaseSession() {
   return session;
 }
 
-void JingleSession::SetStateChangeCallback(StateChangeCallback* callback) {
+void JingleSession::SetStateChangeCallback(
+    const StateChangeCallback& callback) {
   DCHECK(CalledOnValidThread());
-  DCHECK(callback);
-  state_change_callback_.reset(callback);
+  DCHECK(!callback.is_null());
+  state_change_callback_ = callback;
+}
+
+Session::Error JingleSession::error() {
+  DCHECK(CalledOnValidThread());
+  return error_;
 }
 
 void JingleSession::CreateStreamChannel(
@@ -164,10 +166,7 @@ net::Socket* JingleSession::event_channel() {
 }
 
 const std::string& JingleSession::jid() {
-  // TODO(sergeyu): Fix ChromotingHost so that it doesn't call this
-  // method on invalid thread and uncomment this DCHECK.
-  // See crbug.com/88600 .
-  // DCHECK(CalledOnValidThread());
+  DCHECK(CalledOnValidThread());
   return jid_;
 }
 
@@ -190,20 +189,17 @@ const std::string& JingleSession::local_certificate() const {
   return local_cert_;
 }
 
-const SessionConfig* JingleSession::config() {
-  // TODO(sergeyu): Fix ChromotingHost so that it doesn't call this
-  // method on invalid thread and uncomment this DCHECK.
-  // See crbug.com/88600 .
-  // DCHECK(CalledOnValidThread());
-  DCHECK(config_.get());
-  return config_.get();
+const SessionConfig& JingleSession::config() {
+  DCHECK(CalledOnValidThread());
+  DCHECK(config_set_);
+  return config_;
 }
 
-void JingleSession::set_config(const SessionConfig* config) {
+void JingleSession::set_config(const SessionConfig& config) {
   DCHECK(CalledOnValidThread());
-  DCHECK(!config_.get());
-  DCHECK(config);
-  config_.reset(config);
+  DCHECK(!config_set_);
+  config_ = config;
+  config_set_ = true;
 }
 
 const std::string& JingleSession::initiator_token() {
@@ -339,18 +335,17 @@ bool JingleSession::InitializeConfigFromDescription(
     return false;
   }
 
-  scoped_ptr<SessionConfig> config(
-      content_description->config()->GetFinalConfig());
-  if (!config.get()) {
+  SessionConfig config;
+  if (!content_description->config()->GetFinalConfig(&config)) {
     LOG(ERROR) << "Connection response does not specify configuration";
     return false;
   }
-  if (!candidate_config()->IsSupported(config.get())) {
+  if (!candidate_config()->IsSupported(config)) {
     LOG(ERROR) << "Connection response specifies an invalid configuration";
     return false;
   }
 
-  set_config(config.release());
+  set_config(config);
   return true;
 }
 
@@ -472,8 +467,8 @@ void JingleSession::SetState(State new_state) {
     DCHECK_NE(state_, FAILED);
 
     state_ = new_state;
-    if (state_change_callback_.get())
-      state_change_callback_->Run(new_state);
+    if (!state_change_callback_.is_null())
+      state_change_callback_.Run(new_state);
   }
 }
 

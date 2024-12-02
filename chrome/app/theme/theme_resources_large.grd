@@ -4,10 +4,7 @@
     <output filename="grit/theme_resources_large.h" type="rc_header">
       <emit emit_type='prepend'></emit>
     </output>
-    <output filename="grit/theme_resources_large_map.cc" type="resource_map_source" />
-    <output filename="grit/theme_resources_large_map.h" type="resource_map_header" />
     <output filename="theme_resources_large.pak" type="data_package" />
-    <output filename="theme_resources_large.rc" type="rc_all" />
   </outputs>
   <release seq="1">
     <includes>
@@ -82,16 +79,25 @@
       <include name="IDR_INFOBAR_THEME" file="large_infobar_theme.png" type="BINDATA" />
       <include name="IDR_INFOBAR_TRANSLATE" file="large_infobar_translate.png" type="BINDATA" />
       <include name="IDR_KEYWORD_SEARCH_MAGNIFIER" file="large_keyword_search_magnifier.png" type="BINDATA" />
-      <include name="IDR_LOCATIONBG_C" file="large_omnibox_c.png" type="BINDATA" />
-      <include name="IDR_LOCATIONBG_L" file="large_omnibox_l.png" type="BINDATA" />
-      <include name="IDR_LOCATIONBG_R" file="large_omnibox_r.png" type="BINDATA" />
+      <include name="IDR_LOCATIONBG_C" file="omnibox_c.png" type="BINDATA" />
+      <include name="IDR_LOCATIONBG_L" file="omnibox_l.png" type="BINDATA" />
+      <include name="IDR_LOCATIONBG_R" file="omnibox_r.png" type="BINDATA" />
+      <include name="IDR_LOCATION_BAR_BORDER" file="omnibox_border.png" type="BINDATA" />
       <include name="IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_C" file="large_keyword_search_bubble_c.png" type="BINDATA" />
       <include name="IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_L" file="large_keyword_search_bubble_l.png" type="BINDATA" />
       <include name="IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_R" file="large_keyword_search_bubble_r.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON" file="large_newtab.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON_H" file="large_newtab_h.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON_MASK" file="large_newtab_button_mask.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON_P" file="large_newtab_p.png" type="BINDATA" />
+      <if expr="not pp_ifdef('touchui')">
+        <include name="IDR_NEWTAB_BUTTON" file="large_newtab.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_H" file="large_newtab_h.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_MASK" file="large_newtab_button_mask.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_P" file="large_newtab_p.png" type="BINDATA" />
+      </if>
+      <if expr="pp_ifdef('touchui')">
+        <include name="IDR_NEWTAB_BUTTON" file="touch_newtab.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_H" file="touch_newtab_h.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_MASK" file="touch_newtab_button_mask.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_P" file="touch_newtab_p.png" type="BINDATA" />
+      </if>
       <include name="IDR_SETTINGS_FAVICON" file="large_settings_favicon.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_EV_BUBBLE_BACKGROUND_C" file="large_ev_bubble_c.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_EV_BUBBLE_BACKGROUND_L" file="large_ev_bubble_l.png" type="BINDATA" />

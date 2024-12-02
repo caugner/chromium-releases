@@ -10,12 +10,12 @@
 #include "base/string_number_conversions.h"
 #include "content/common/content_client.h"
 #include "content/common/content_constants.h"
-#include "content/common/content_switches.h"
+#include "content/common/npobject_stub.h"
 #include "content/common/plugin_messages.h"
-#include "content/plugin/npobject_stub.h"
 #include "content/plugin/plugin_channel.h"
 #include "content/plugin/plugin_thread.h"
 #include "content/plugin/webplugin_proxy.h"
+#include "content/public/common/content_switches.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "skia/ext/platform_device.h"
@@ -110,6 +110,12 @@ bool WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_SendJavaScriptStream,
                         OnSendJavaScriptStream)
     IPC_MESSAGE_HANDLER(PluginMsg_SetContentAreaFocus, OnSetContentAreaFocus)
+#if defined(OS_WIN) && !defined(USE_AURA)
+    IPC_MESSAGE_HANDLER(PluginMsg_ImeCompositionUpdated,
+                        OnImeCompositionUpdated)
+    IPC_MESSAGE_HANDLER(PluginMsg_ImeCompositionCompleted,
+                        OnImeCompositionCompleted)
+#endif
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(PluginMsg_SetWindowFocus, OnSetWindowFocus)
     IPC_MESSAGE_HANDLER(PluginMsg_ContainerHidden, OnContainerHidden)
@@ -323,6 +329,25 @@ void WebPluginDelegateStub::OnSetContentAreaFocus(bool has_focus) {
   if (delegate_)
     delegate_->SetContentAreaHasFocus(has_focus);
 }
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+void WebPluginDelegateStub::OnImeCompositionUpdated(
+    const string16& text,
+    const std::vector<int>& clauses,
+    const std::vector<int>& target,
+    int cursor_position) {
+  if (delegate_)
+    delegate_->ImeCompositionUpdated(text, clauses, target, cursor_position);
+#if defined(OS_WIN) && !defined(USE_AURA)
+  webplugin_->UpdateIMEStatus();
+#endif
+}
+
+void WebPluginDelegateStub::OnImeCompositionCompleted(const string16& text) {
+  if (delegate_)
+    delegate_->ImeCompositionCompleted(text);
+}
+#endif
 
 #if defined(OS_MACOSX)
 void WebPluginDelegateStub::OnSetWindowFocus(bool has_focus) {

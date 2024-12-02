@@ -68,6 +68,8 @@
         'audio/openbsd/audio_manager_openbsd.h',
         'audio/mac/audio_input_mac.cc',
         'audio/mac/audio_input_mac.h',
+        'audio/mac/audio_low_latency_input_mac.cc',
+        'audio/mac/audio_low_latency_input_mac.h',
         'audio/mac/audio_low_latency_output_mac.cc',
         'audio/mac/audio_low_latency_output_mac.h',
         'audio/mac/audio_manager_mac.cc',
@@ -84,12 +86,13 @@
         'audio/win/waveout_output_win.h',
         'base/async_filter_factory_base.cc',
         'base/async_filter_factory_base.h',
+        'base/audio_decoder_config.cc',
         'base/audio_decoder_config.h',
         'base/bitstream_buffer.h',
         'base/buffers.cc',
         'base/buffers.h',
-        'base/callback.cc',
-        'base/callback.h',
+        'base/byte_queue.cc',
+        'base/byte_queue.h',
         'base/channel_layout.cc',
         'base/channel_layout.h',
         'base/clock.cc',
@@ -100,6 +103,10 @@
         'base/composite_filter.h',
         'base/data_buffer.cc',
         'base/data_buffer.h',
+        'base/demuxer.cc',
+        'base/demuxer.h',
+        'base/demuxer_stream.cc',
+        'base/demuxer_stream.h',
         'base/djb2.cc',
         'base/djb2.h',
         'base/filter_collection.cc',
@@ -146,8 +153,6 @@
         'ffmpeg/ffmpeg_common.h',
         'ffmpeg/file_protocol.cc',
         'ffmpeg/file_protocol.h',
-        'filters/adaptive_demuxer.cc',
-        'filters/adaptive_demuxer.h',
         'filters/audio_file_reader.cc',
         'filters/audio_file_reader.h',
         'filters/audio_renderer_algorithm_base.cc',
@@ -158,8 +163,6 @@
         'filters/audio_renderer_algorithm_ola.h',
         'filters/audio_renderer_base.cc',
         'filters/audio_renderer_base.h',
-        'filters/audio_renderer_impl.cc',
-        'filters/audio_renderer_impl.h',
         'filters/bitstream_converter.cc',
         'filters/bitstream_converter.h',
         'filters/chunk_demuxer.cc',
@@ -167,7 +170,6 @@
         'filters/chunk_demuxer_client.h',
         'filters/chunk_demuxer_factory.cc',
         'filters/chunk_demuxer_factory.h',
-        'filters/decoder_base.h',
         'filters/dummy_demuxer.cc',
         'filters/dummy_demuxer.h',
         'filters/dummy_demuxer_factory.cc',
@@ -194,16 +196,25 @@
         'filters/null_audio_renderer.h',
         'filters/null_video_renderer.cc',
         'filters/null_video_renderer.h',
+        'filters/reference_audio_renderer.cc',
+        'filters/reference_audio_renderer.h',
         'filters/video_renderer_base.cc',
         'filters/video_renderer_base.h',
         'video/capture/fake_video_capture_device.cc',
         'video/capture/fake_video_capture_device.h',
         'video/capture/linux/video_capture_device_linux.cc',
         'video/capture/linux/video_capture_device_linux.h',
+        'video/capture/mac/video_capture_device_mac.h',
+        'video/capture/mac/video_capture_device_mac.mm',
+        'video/capture/mac/video_capture_device_qtkit_mac.h',
+        'video/capture/mac/video_capture_device_qtkit_mac.mm',
         'video/capture/video_capture.h',
         'video/capture/video_capture_device.h',
+        'video/capture/video_capture_device_dummy.cc',
+        'video/capture/video_capture_device_dummy.h',
         'video/capture/video_capture_proxy.cc',
         'video/capture/video_capture_proxy.h',
+        'video/capture/video_capture_types.h',
         'video/capture/win/filter_base_win.cc',
         'video/capture/win/filter_base_win.h',
         'video/capture/win/pin_base_win.cc',
@@ -215,9 +226,6 @@
         'video/capture/win/sink_input_pin_win.h',
         'video/capture/win/video_capture_device_win.cc',
         'video/capture/win/video_capture_device_win.h',
-        'video/capture/video_capture_device_dummy.cc',
-        'video/capture/video_capture_device_dummy.h',
-        'video/capture/video_capture_types.h',
         'video/ffmpeg_video_decode_engine.cc',
         'video/ffmpeg_video_decode_engine.h',
         'video/picture.cc',
@@ -241,6 +249,43 @@
         ],
       },
       'conditions': [
+        # Android doesn't use ffmpeg, so make the dependency conditional
+        # and exclude the sources which depend on ffmpeg.
+        ['OS=="android"', {
+          'dependencies!': [
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources!': [
+            'base/media_posix.cc',
+            'ffmpeg/ffmpeg_common.cc',
+            'ffmpeg/ffmpeg_common.h',
+            'ffmpeg/file_protocol.cc',
+            'ffmpeg/file_protocol.h',
+            'filters/audio_file_reader.cc',
+            'filters/audio_file_reader.h',
+            'filters/bitstream_converter.cc',
+            'filters/bitstream_converter.h',
+            'filters/chunk_demuxer.cc',
+            'filters/chunk_demuxer.h',
+            'filters/chunk_demuxer_client.h',
+            'filters/chunk_demuxer_factory.cc',
+            'filters/chunk_demuxer_factory.h',
+            'filters/ffmpeg_audio_decoder.cc',
+            'filters/ffmpeg_audio_decoder.h',
+            'filters/ffmpeg_demuxer.cc',
+            'filters/ffmpeg_demuxer.h',
+            'filters/ffmpeg_demuxer_factory.cc',
+            'filters/ffmpeg_demuxer_factory.h',
+            'filters/ffmpeg_h264_bitstream_converter.cc',
+            'filters/ffmpeg_h264_bitstream_converter.h',
+            'filters/ffmpeg_glue.cc',
+            'filters/ffmpeg_glue.h',
+            'filters/ffmpeg_video_decoder.cc',
+            'filters/ffmpeg_video_decoder.h',
+            'video/ffmpeg_video_decode_engine.cc',
+            'video/ffmpeg_video_decode_engine.h',
+          ],
+        }],
         ['OS=="linux" or OS=="freebsd" or OS=="solaris"', {
           'link_settings': {
             'libraries': [
@@ -284,7 +329,7 @@
             'audio/openbsd/audio_manager_openbsd.h',
           ],
         }],
-        ['os_posix == 1 and OS != "mac"', {
+        ['os_posix == 1', {
           'sources!': [
             'video/capture/video_capture_device_dummy.cc',
             'video/capture/video_capture_device_dummy.h',
@@ -296,6 +341,8 @@
               '$(SDKROOT)/System/Library/Frameworks/AudioUnit.framework',
               '$(SDKROOT)/System/Library/Frameworks/AudioToolbox.framework',
               '$(SDKROOT)/System/Library/Frameworks/CoreAudio.framework',
+              '$(SDKROOT)/System/Library/Frameworks/CoreVideo.framework',
+              '$(SDKROOT)/System/Library/Frameworks/QTKit.framework',
             ],
           },
         }],
@@ -341,31 +388,63 @@
       'conditions': [
         [ 'target_arch == "ia32" or target_arch == "x64"', {
           'dependencies': [
-            'yuv_convert_sse2',
+            'yuv_convert_simd_x86',
+          ],
+        }],
+        [ 'target_arch == "arm"', {
+          'dependencies': [
+            'yuv_convert_simd_arm',
           ],
         }],
       ],
       'sources': [
         'base/yuv_convert.cc',
         'base/yuv_convert.h',
-        'base/yuv_convert_internal.h',
-        'base/yuv_convert_c.cc',
-        'base/yuv_row_win.cc',
-        'base/yuv_row_posix.cc',
-        'base/yuv_row_table.cc',
-        'base/yuv_row.h',
       ],
     },
     {
-      'target_name': 'yuv_convert_sse2',
+      'target_name': 'yuv_convert_simd_x86',
       'type': 'static_library',
       'include_dirs': [
         '..',
       ],
+      'sources': [
+        'base/simd/convert_rgb_to_yuv_c.cc',
+        'base/simd/convert_rgb_to_yuv_sse2.cc',
+        'base/simd/convert_rgb_to_yuv_ssse3.asm',
+        'base/simd/convert_rgb_to_yuv_ssse3.cc',
+        'base/simd/convert_rgb_to_yuv_ssse3.inc',
+        'base/simd/convert_yuv_to_rgb_c.cc',
+        'base/simd/convert_yuv_to_rgb_x86.cc',
+        'base/simd/convert_yuv_to_rgb_mmx.asm',
+        'base/simd/convert_yuv_to_rgb_mmx.inc',
+        'base/simd/convert_yuv_to_rgb_sse.asm',
+        'base/simd/filter_yuv.h',
+        'base/simd/filter_yuv_c.cc',
+        'base/simd/filter_yuv_mmx.cc',
+        'base/simd/filter_yuv_sse2.cc',
+        'base/simd/linear_scale_yuv_to_rgb_mmx.asm',
+        'base/simd/linear_scale_yuv_to_rgb_mmx.inc',
+        'base/simd/linear_scale_yuv_to_rgb_sse.asm',
+        'base/simd/scale_yuv_to_rgb_mmx.asm',
+        'base/simd/scale_yuv_to_rgb_mmx.inc',
+        'base/simd/scale_yuv_to_rgb_sse.asm',
+        'base/simd/yuv_to_rgb_table.cc',
+        'base/simd/yuv_to_rgb_table.h',
+      ],
       'conditions': [
+        [ 'target_arch == "x64"', {
+          # Source files optimized for X64 systems.
+          'sources': [
+            'base/simd/linear_scale_yuv_to_rgb_mmx_x64.asm',
+            'base/simd/scale_yuv_to_rgb_sse2_x64.asm',
+          ],
+        }],
         [ 'os_posix == 1 and OS != "mac"', {
           'cflags': [
             '-msse2',
+            '-msse3',
+            '-mssse3',
           ],
         }],
         [ 'OS == "mac"', {
@@ -380,44 +459,71 @@
              },
           },
         }],
+        [ 'OS=="win"', {
+          'variables': {
+            'yasm_flags': [
+              '-DWIN32',
+              '-DMSVC',
+              '-DCHROMIUM',
+              '-Isimd',
+            ],
+          },
+        }],
+        [ 'OS=="mac"', {
+          'variables': {
+            'yasm_flags': [
+              '-DPREFIX',
+              '-DMACHO',
+              '-DCHROMIUM',
+              '-Isimd',
+            ],
+          },
+        }],
+        [ 'OS=="linux"', {
+          'variables': {
+            'conditions': [
+              [ 'target_arch=="ia32"', {
+                'yasm_flags': [
+                  '-DX86_32',
+                  '-DELF',
+                  '-DCHROMIUM',
+                  '-Isimd',
+                ],
+              }, {
+                'yasm_flags': [
+                  '-DARCH_X86_64',
+                  '-DELF',
+                  '-DPIC',
+                  '-DCHROMIUM',
+                  '-Isimd',
+                ],
+              }],
+            ],
+          },
+        }],
       ],
-      'sources': [
-        'base/yuv_convert_sse2.cc',
+      'variables': {
+        'yasm_output_path': '<(SHARED_INTERMEDIATE_DIR)/media',
+      },
+      'includes': [
+        '../third_party/yasm/yasm_compile.gypi',
       ],
     },
     {
-      'target_name': 'ffmpeg_unittests',
-      'type': 'executable',
-      'dependencies': [
-        'media',
-        'media_test_support',
-        '../base/base.gyp:base',
-        '../base/base.gyp:base_i18n',
-        '../base/base.gyp:test_support_base',
-        '../base/base.gyp:test_support_perf',
-        '../testing/gtest.gyp:gtest',
-        '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+      'target_name': 'yuv_convert_simd_arm',
+      'type': 'static_library',
+      'include_dirs': [
+        '..',
       ],
       'sources': [
-        'ffmpeg/ffmpeg_unittest.cc',
-      ],
-      'conditions': [
-        ['toolkit_uses_gtk == 1', {
-          'dependencies': [
-            # Needed for the following #include chain:
-            #   base/run_all_unittests.cc
-            #   ../base/test_suite.h
-            #   gtk/gtk.h
-            '../build/linux/system.gyp:gtk',
-          ],
-          'conditions': [
-            ['linux_use_tcmalloc==1', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
-              ],
-            }],
-          ],
-        }],
+        'base/simd/convert_rgb_to_yuv_c.cc',
+        'base/simd/convert_rgb_to_yuv.h',
+        'base/simd/convert_yuv_to_rgb_c.cc',
+        'base/simd/convert_yuv_to_rgb.h',
+        'base/simd/filter_yuv.h',
+        'base/simd/filter_yuv_c.cc',
+        'base/simd/yuv_to_rgb_table.cc',
+        'base/simd/yuv_to_rgb_table.h',
       ],
     },
     {
@@ -433,6 +539,7 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+        '../ui/ui.gyp:ui',
       ],
       'sources': [
         'audio/audio_input_controller_unittest.cc',
@@ -443,6 +550,7 @@
         'audio/audio_parameters_unittest.cc',
         'audio/audio_util_unittest.cc',
         'audio/linux/alsa_output_unittest.cc',
+        'audio/mac/audio_low_latency_input_mac_unittest.cc',
         'audio/mac/audio_output_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
@@ -453,8 +561,6 @@
         'base/filter_collection_unittest.cc',
         'base/h264_bitstream_converter_unittest.cc',
         'base/mock_reader.h',
-        'base/mock_task.cc',
-        'base/mock_task.h',
         'base/pipeline_impl_unittest.cc',
         'base/pts_heap_unittest.cc',
         'base/pts_stream_unittest.cc',
@@ -467,12 +573,11 @@
         'base/video_util_unittest.cc',
         'base/yuv_convert_unittest.cc',
         'ffmpeg/ffmpeg_common_unittest.cc',
-        'filters/adaptive_demuxer_unittest.cc',
         'filters/audio_renderer_algorithm_ola_unittest.cc',
         'filters/audio_renderer_base_unittest.cc',
         'filters/bitstream_converter_unittest.cc',
         'filters/chunk_demuxer_unittest.cc',
-        'filters/decoder_base_unittest.cc',
+        'filters/ffmpeg_audio_decoder_unittest.cc',
         'filters/ffmpeg_demuxer_unittest.cc',
         'filters/ffmpeg_glue_unittest.cc',
         'filters/ffmpeg_h264_bitstream_converter_unittest.cc',
@@ -492,6 +597,27 @@
                 '../base/allocator/allocator.gyp:allocator',
               ],
             }],
+          ],
+        }],
+        ['OS=="android"', {
+          'dependencies!': [
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources!': [
+            'ffmpeg/ffmpeg_common_unittest.cc',
+            'filters/ffmpeg_audio_decoder_unittest.cc',
+            'filters/bitstream_converter_unittest.cc',
+            'filters/chunk_demuxer_unittest.cc',
+            'filters/ffmpeg_demuxer_unittest.cc',
+            'filters/ffmpeg_glue_unittest.cc',
+            'filters/ffmpeg_h264_bitstream_converter_unittest.cc',
+            'filters/ffmpeg_video_decoder_unittest.cc',
+            'video/ffmpeg_video_decode_engine_unittest.cc',
+          ],
+        }],
+        [ 'target_arch=="ia32" or target_arch=="x64"', {
+          'sources': [
+            'base/simd/convert_rgb_to_yuv_unittest.cc',
           ],
         }],
       ],
@@ -519,18 +645,6 @@
       ],
     },
     {
-      'target_name': 'media_bench',
-      'type': 'executable',
-      'dependencies': [
-        'media',
-        '../base/base.gyp:base',
-        '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
-      ],
-      'sources': [
-        'tools/media_bench/media_bench.cc',
-      ],
-    },
-    {
       'target_name': 'scaler_bench',
       'type': 'executable',
       'dependencies': [
@@ -541,18 +655,6 @@
       ],
       'sources': [
         'tools/scaler_bench/scaler_bench.cc',
-      ],
-    },
-    {
-      'target_name': 'ffmpeg_tests',
-      'type': 'executable',
-      'dependencies': [
-        'media',
-        '../base/base.gyp:base',
-        '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
-      ],
-      'sources': [
-        'test/ffmpeg_tests/ffmpeg_tests.cc',
       ],
     },
     {
@@ -585,6 +687,7 @@
             'yuv_convert',
             '../base/base.gyp:base',
             '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+            '../ui/ui.gyp:ui',
           ],
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
@@ -611,47 +714,6 @@
           'defines': [
             '_CRT_SECURE_NO_WARNINGS=1',
           ],
-        },
-        {
-          'target_name': 'mfplayer',
-          'type': 'executable',
-          'dependencies': [
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'tools/mfplayer/mfplayer.h',
-            'tools/mfplayer/mfplayer.cc',
-            'tools/mfplayer/mf_playback_main.cc',
-          ],
-          'msvs_settings': {
-            'VCLinkerTool': {
-              'SubSystem': '1',         # Set /SUBSYSTEM:CONSOLE
-            },
-          },
-        },
-        {
-          'target_name': 'mfdecoder',
-          'type': 'executable',
-          'dependencies': [
-            'media',
-            'yuv_convert',
-            '../base/base.gyp:base',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'tools/mfdecoder/main.cc',
-            'tools/mfdecoder/mfdecoder.h',
-            'tools/mfdecoder/mfdecoder.cc',
-          ],
-          'msvs_settings': {
-            'VCLinkerTool': {
-              'SubSystem': '1',         # Set /SUBSYSTEM:CONSOLE
-            },
-          },
         },
       ],
     }],
@@ -751,5 +813,69 @@
         },
       ],
     }],
+    # Android does not use ffmpeg, so disable the targets which require it.
+    ['OS!="android"', {
+      'targets': [
+        {
+          'target_name': 'ffmpeg_unittests',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            'media_test_support',
+            '../base/base.gyp:base',
+            '../base/base.gyp:base_i18n',
+            '../base/base.gyp:test_support_base',
+            '../base/base.gyp:test_support_perf',
+            '../testing/gtest.gyp:gtest',
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources': [
+            'ffmpeg/ffmpeg_unittest.cc',
+          ],
+          'conditions': [
+            ['toolkit_uses_gtk == 1', {
+              'dependencies': [
+                # Needed for the following #include chain:
+                #   base/run_all_unittests.cc
+                #   ../base/test_suite.h
+                #   gtk/gtk.h
+                '../build/linux/system.gyp:gtk',
+              ],
+              'conditions': [
+                ['linux_use_tcmalloc==1', {
+                  'dependencies': [
+                    '../base/allocator/allocator.gyp:allocator',
+                  ],
+                }],
+              ],
+            }],
+          ],
+        },
+        {
+          'target_name': 'ffmpeg_tests',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            '../base/base.gyp:base',
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources': [
+            'test/ffmpeg_tests/ffmpeg_tests.cc',
+          ],
+        },
+        {
+          'target_name': 'media_bench',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            '../base/base.gyp:base',
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources': [
+            'tools/media_bench/media_bench.cc',
+          ],
+        },
+      ],
+    }]
   ],
 }

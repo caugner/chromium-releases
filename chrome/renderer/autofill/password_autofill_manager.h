@@ -9,9 +9,9 @@
 #include <map>
 #include <vector>
 
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/renderer/page_click_listener.h"
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
 #include "webkit/glue/password_form_dom_manager.h"
 
@@ -24,10 +24,10 @@ namespace autofill {
 
 // This class is responsible for filling password forms.
 // There is one PasswordAutofillManager per RenderView.
-class PasswordAutofillManager : public RenderViewObserver,
+class PasswordAutofillManager : public content::RenderViewObserver,
                                 public PageClickListener {
  public:
-  explicit PasswordAutofillManager(RenderView* render_view);
+  explicit PasswordAutofillManager(content::RenderView* render_view);
   virtual ~PasswordAutofillManager();
 
   // WebViewClient editor related calls forwarded by the RenderView.
@@ -45,6 +45,10 @@ class PasswordAutofillManager : public RenderViewObserver,
   // A no-op.  No filling happens for selection.  But this method returns
   // true when |node| is fillable by password Autofill.
   bool DidSelectAutofillSuggestion(const WebKit::WebNode& node);
+  // A no-op.  Password forms are not previewed, so they do not need to be
+  // cleared when the selection changes.  However, this method returns
+  // true when |node| is fillable by password Autofill.
+  bool DidClearAutofillSelection(const WebKit::WebNode& node);
 
  private:
   friend class PasswordAutofillManagerTest;
@@ -109,7 +113,7 @@ class PasswordAutofillManager : public RenderViewObserver,
   // The logins we have filled so far with their associated info.
   LoginToPasswordInfoMap login_to_password_info_;
 
-  ScopedRunnableMethodFactory<PasswordAutofillManager> method_factory_;
+  base::WeakPtrFactory<PasswordAutofillManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordAutofillManager);
 };

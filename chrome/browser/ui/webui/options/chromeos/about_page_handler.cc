@@ -7,7 +7,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string16.h"
@@ -15,9 +16,16 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/power_library.h"
+#include "chrome/browser/chromeos/cros/update_library.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "content/common/content_client.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -25,18 +33,10 @@
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/glue/webkit_glue.h"
-
-#if defined(CHROME_V8)
 #include "v8/include/v8.h"
-#endif
-
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/power_library.h"
-#include "chrome/browser/chromeos/cros/update_library.h"
-#include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/user_cros_settings_provider.h"
+#include "webkit/glue/user_agent.h"
+#include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/user_agent.h"
 
 namespace {
 
@@ -210,19 +210,13 @@ void AboutPageHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
 
   // javascript
 
-#if defined(CHROME_V8)
   localized_strings->SetString("js_engine", "V8");
   localized_strings->SetString("js_engine_version", v8::V8::GetVersion());
-#else
-  localized_strings->SetString("js_engine", "JavaScriptCore");
-  localized_strings->SetString("js_engine_version",
-                               webkit_glue::GetWebKitVersion());
-#endif
 
   // user agent
 
   localized_strings->SetString("user_agent_info",
-                               webkit_glue::GetUserAgent(GURL()));
+                               content::GetUserAgent(GURL()));
 
   // command line
 
@@ -243,24 +237,25 @@ void AboutPageHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
 
 void AboutPageHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("PageReady",
-      NewCallback(this, &AboutPageHandler::PageReady));
+      base::Bind(&AboutPageHandler::PageReady, base::Unretained(this)));
   web_ui_->RegisterMessageCallback("SetReleaseTrack",
-      NewCallback(this, &AboutPageHandler::SetReleaseTrack));
+      base::Bind(&AboutPageHandler::SetReleaseTrack, base::Unretained(this)));
 
   web_ui_->RegisterMessageCallback("CheckNow",
-      NewCallback(this, &AboutPageHandler::CheckNow));
+      base::Bind(&AboutPageHandler::CheckNow, base::Unretained(this)));
   web_ui_->RegisterMessageCallback("RestartNow",
-      NewCallback(this, &AboutPageHandler::RestartNow));
+      base::Bind(&AboutPageHandler::RestartNow, base::Unretained(this)));
 }
 
 void AboutPageHandler::PageReady(const ListValue* args) {
   // Version information is loaded from a callback
-  loader_.EnablePlatformVersions(true);
   loader_.GetVersion(&consumer_,
-                     NewCallback(this, &AboutPageHandler::OnOSVersion),
+                     base::Bind(&AboutPageHandler::OnOSVersion,
+                                base::Unretained(this)),
                      VersionLoader::VERSION_FULL);
   loader_.GetFirmware(&consumer_,
-                      NewCallback(this, &AboutPageHandler::OnOSFirmware));
+                      base::Bind(&AboutPageHandler::OnOSFirmware,
+                                 base::Unretained(this)));
 
   UpdateLibrary* update_library =
       CrosLibrary::Get()->GetUpdateLibrary();

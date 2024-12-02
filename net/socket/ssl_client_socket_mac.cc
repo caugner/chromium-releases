@@ -11,6 +11,7 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/string_util.h"
@@ -522,8 +523,7 @@ SSLClientSocketMac::SSLClientSocketMac(ClientSocketHandle* transport_socket,
                                        const HostPortPair& host_and_port,
                                        const SSLConfig& ssl_config,
                                        const SSLClientSocketContext& context)
-    : handshake_io_callback_(this, &SSLClientSocketMac::OnHandshakeIOComplete),
-      transport_read_callback_(this,
+    : transport_read_callback_(this,
                                &SSLClientSocketMac::OnTransportReadComplete),
       transport_write_callback_(this,
                                 &SSLClientSocketMac::OnTransportWriteComplete),
@@ -554,7 +554,7 @@ SSLClientSocketMac::~SSLClientSocketMac() {
   Disconnect();
 }
 
-int SSLClientSocketMac::Connect(CompletionCallback* callback) {
+int SSLClientSocketMac::Connect(OldCompletionCallback* callback) {
   DCHECK(transport_.get());
   DCHECK(next_handshake_state_ == STATE_NONE);
   DCHECK(!user_connect_callback_);
@@ -675,7 +675,7 @@ base::TimeDelta SSLClientSocketMac::GetConnectTimeMicros() const {
 }
 
 int SSLClientSocketMac::Read(IOBuffer* buf, int buf_len,
-                             CompletionCallback* callback) {
+                             OldCompletionCallback* callback) {
   DCHECK(completed_handshake());
   DCHECK(!user_read_callback_);
   DCHECK(!user_read_buf_);
@@ -694,7 +694,7 @@ int SSLClientSocketMac::Read(IOBuffer* buf, int buf_len,
 }
 
 int SSLClientSocketMac::Write(IOBuffer* buf, int buf_len,
-                              CompletionCallback* callback) {
+                              OldCompletionCallback* callback) {
   DCHECK(completed_handshake());
   DCHECK(!user_write_callback_);
   DCHECK(!user_write_buf_);
@@ -893,7 +893,7 @@ void SSLClientSocketMac::DoConnectCallback(int rv) {
   DCHECK(rv != ERR_IO_PENDING);
   DCHECK(user_connect_callback_);
 
-  CompletionCallback* c = user_connect_callback_;
+  OldCompletionCallback* c = user_connect_callback_;
   user_connect_callback_ = NULL;
   c->Run(rv > OK ? OK : rv);
 }
@@ -904,7 +904,7 @@ void SSLClientSocketMac::DoReadCallback(int rv) {
 
   // Since Run may result in Read being called, clear user_read_callback_ up
   // front.
-  CompletionCallback* c = user_read_callback_;
+  OldCompletionCallback* c = user_read_callback_;
   user_read_callback_ = NULL;
   user_read_buf_ = NULL;
   user_read_buf_len_ = 0;
@@ -917,7 +917,7 @@ void SSLClientSocketMac::DoWriteCallback(int rv) {
 
   // Since Run may result in Write being called, clear user_write_callback_ up
   // front.
-  CompletionCallback* c = user_write_callback_;
+  OldCompletionCallback* c = user_write_callback_;
   user_write_callback_ = NULL;
   user_write_buf_ = NULL;
   user_write_buf_len_ = 0;
@@ -1141,7 +1141,7 @@ int SSLClientSocketMac::DoVerifyCert() {
   DCHECK(server_cert_);
 
   VLOG(1) << "DoVerifyCert...";
-  int cert_status;
+  CertStatus cert_status;
   if (ssl_config_.IsAllowedBadCert(server_cert_, &cert_status)) {
     VLOG(1) << "Received an expected bad cert with status: " << cert_status;
     server_cert_verify_result_.Reset();
@@ -1156,9 +1156,11 @@ int SSLClientSocketMac::DoVerifyCert() {
   if (ssl_config_.verify_ev_cert)
     flags |= X509Certificate::VERIFY_EV_CERT;
   verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
-  return verifier_->Verify(server_cert_, host_and_port_.host(), flags,
-                           &server_cert_verify_result_,
-                           &handshake_io_callback_);
+  return verifier_->Verify(
+      server_cert_, host_and_port_.host(), flags,
+      &server_cert_verify_result_,
+      base::Bind(&SSLClientSocketMac::OnHandshakeIOComplete,
+                 base::Unretained(this)));
 }
 
 int SSLClientSocketMac::DoVerifyCertComplete(int result) {

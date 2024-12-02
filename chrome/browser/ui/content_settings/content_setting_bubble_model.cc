@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 
-#include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -318,8 +317,9 @@ class ContentSettingCookiesBubbleModel : public ContentSettingSingleRadioGroup {
 
   virtual ~ContentSettingCookiesBubbleModel() {
     if (settings_changed()) {
-      tab_contents()->infobar_tab_helper()->AddInfoBar(
-          new CollectedCookiesInfoBarDelegate(tab_contents()->tab_contents()));
+      InfoBarTabHelper* infobar_helper = tab_contents()->infobar_tab_helper();
+      infobar_helper->AddInfoBar(
+          new CollectedCookiesInfoBarDelegate(infobar_helper));
     }
   }
 

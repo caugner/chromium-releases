@@ -24,6 +24,7 @@
 
 .overlay {
   -webkit-box-align: center;
+  -webkit-box-orient: vertical;
   -webkit-box-pack: center;
   -webkit-transition: 0.25s opacity;
   background: -webkit-radial-gradient(rgba(127, 127, 127, 0.5),
@@ -32,6 +33,7 @@
   bottom: 0;
   display: -webkit-box;
   left: 0;
+  overflow: auto;
   padding: 20px;
   padding-bottom: 130px;
   position: fixed;
@@ -59,6 +61,14 @@
   top: 16px;
   width: 16px;
 }
+
+/*  In TOUCH_UI builds, the IDR_CLOSE_BAR resource is double-size. */
+<if expr="pp_ifdef('touchui')">
+.close-subpage {
+  height: 32px;
+  width: 32px;
+}
+</if>
 
 .close-subpage:hover {
   background-image: url('chrome://theme/IDR_CLOSE_BAR_H');
@@ -108,21 +118,17 @@ html[dir='rtl'] .action-area {
   display: -webkit-box;
 }
 
+.button-strip > button {
+  -webkit-margin-start: 10px;
+  display: block;
+}
+
 .bottom-strip {
   padding: 12px;
   position: absolute;
   right: 0px;
   bottom: 0px;
   border-top: none;
-}
-
-html[toolkit=views] .button-strip {
-  -webkit-box-direction: reverse;
-}
-
-.button-strip > button {
-  -webkit-margin-start: 10px;
-  display: block;
 }
 
 .overlay .page {

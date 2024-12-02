@@ -11,8 +11,10 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
+#include "base/process_util.h"
 #include "content/browser/browser_child_process_host.h"
 #include "content/browser/browser_thread.h"
+#include "content/common/content_export.h"
 
 // This class acts as the browser-side host to a utility child process.  A
 // utility process is a short-lived sandboxed process that is created to run
@@ -21,12 +23,12 @@
 // If you need multiple batches of work to be done in the sandboxed process,
 // use StartBatchMode(), then multiple calls to StartFooBar(p),
 // then finish with EndBatchMode().
-class UtilityProcessHost : public BrowserChildProcessHost {
+class CONTENT_EXPORT UtilityProcessHost : public BrowserChildProcessHost {
  public:
   // An interface to be implemented by consumers of the utility process to
   // get results back.  All functions are called on the thread passed along
   // to UtilityProcessHost.
-  class Client : public base::RefCountedThreadSafe<Client> {
+  class CONTENT_EXPORT Client : public base::RefCountedThreadSafe<Client> {
    public:
     Client();
 
@@ -61,6 +63,11 @@ class UtilityProcessHost : public BrowserChildProcessHost {
   void EndBatchMode();
 
   void set_exposed_dir(const FilePath& dir) { exposed_dir_ = dir; }
+  void set_no_sandbox(bool flag) { no_sandbox_ = flag; }
+  void set_child_flags(int flags) { child_flags_ = flags; }
+#if defined(OS_POSIX)
+  void set_env(const base::environment_vector& env) { env_ = env; }
+#endif
 
  protected:
   // Allow these methods to be overridden for tests.
@@ -88,6 +95,14 @@ class UtilityProcessHost : public BrowserChildProcessHost {
   // Allows a directory to be opened through the sandbox, in case it's needed by
   // the operation.
   FilePath exposed_dir_;
+
+  // Whether to pass switches::kNoSandbox to the child.
+  bool no_sandbox_;
+
+  // Flags defined in ChildProcessHost with which to start the process.
+  int child_flags_;
+
+  base::environment_vector env_;
 
   bool started_;
 

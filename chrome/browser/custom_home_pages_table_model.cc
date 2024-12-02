@@ -4,6 +4,8 @@
 
 #include "chrome/browser/custom_home_pages_table_model.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -216,14 +218,16 @@ void CustomHomePagesTableModel::LoadTitleAndFavicon(Entry* entry) {
   if (history_service) {
     entry->title_handle = history_service->QueryURL(entry->url, false,
         &history_query_consumer_,
-        NewCallback(this, &CustomHomePagesTableModel::OnGotTitle));
+        base::Bind(&CustomHomePagesTableModel::OnGotTitle,
+                   base::Unretained(this)));
   }
   FaviconService* favicon_service =
       profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
   if (favicon_service) {
     entry->favicon_handle = favicon_service->GetFaviconForURL(entry->url,
         history::FAVICON, &favicon_query_consumer_,
-        NewCallback(this, &CustomHomePagesTableModel::OnGotFavicon));
+        base::Bind(&CustomHomePagesTableModel::OnGotFavicon,
+                   base::Unretained(this)));
   }
 }
 

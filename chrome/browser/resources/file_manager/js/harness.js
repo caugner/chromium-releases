@@ -58,7 +58,7 @@ var harness = {
    * 'Reset Fileystem' button click handler.
    */
   onClearClick: function() {
-    utils.forEachDirEntry(this.filesystem.root, function(dirEntry) {
+    util.forEachDirEntry(this.filesystem.root, function(dirEntry) {
       if (!dirEntry)
         return console.log('Filesystem reset.');
 
@@ -90,6 +90,9 @@ var harness = {
    */
   get fileManager() {
     return document.getElementById('dialog').contentWindow.fileManager;
+  },
+  get pyautoAPI() {
+    return document.getElementById('dialog').contentWindow.pyautoAPI;
   },
 
   /**

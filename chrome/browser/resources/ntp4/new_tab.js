@@ -56,6 +56,12 @@ cr.define('ntp4', function() {
   var dotList;
 
   /**
+   * Live list of the navigation dots.
+   * @type {!NodeList|undefined}
+   */
+  var navDots;
+
+  /**
    * The 'notification-container' element.
    * @type {!Element|undefined}
    */
@@ -136,6 +142,9 @@ cr.define('ntp4', function() {
     themeChanged();
 
     dotList = getRequiredElement('dot-list');
+    dotList.addEventListener('keydown', onDotListKeyDown);
+    navDots = dotList.getElementsByClassName('dot');
+
     pageList = getRequiredElement('page-list');
     trash = getRequiredElement('trash');
     new ntp4.Trash(trash);
@@ -148,6 +157,7 @@ cr.define('ntp4', function() {
     // invoked at some point after this function returns.
     chrome.send('getApps');
 
+    document.addEventListener('keydown', onKeyDown);
     // Prevent touch events from triggering any sort of native scrolling
     document.addEventListener('touchmove', function(e) {
       e.preventDefault();
@@ -185,39 +195,53 @@ cr.define('ntp4', function() {
     chrome.send('getRecentlyClosedTabs');
 
     mostVisitedPage = new ntp4.MostVisitedPage();
-    appendTilePage(mostVisitedPage, localStrings.getString('mostvisited'));
+    appendTilePage(mostVisitedPage, localStrings.getString('mostvisited'),
+                   false);
     chrome.send('getMostVisited');
 
     if (localStrings.getString('ntp4_intro_message')) {
       infoBubble = new cr.ui.Bubble;
       infoBubble.anchorNode = mostVisitedPage.navigationDot;
+      infoBubble.handleCloseEvent = function() {
+        this.hide();
+        chrome.send('introMessageDismissed');
+      }
 
       var bubbleContent = $('ntp4-intro-bubble-contents');
       infoBubble.content = bubbleContent;
       bubbleContent.hidden = false;
 
-      infoBubble.handleCloseEvent = function() {
-        this.hide();
-        chrome.send('introMessageDismissed');
-      }
-      infoBubble.querySelector('a').onclick = infoBubble.hide.bind(infoBubble);
+      var learnMoreLink = infoBubble.querySelector('a');
+      learnMoreLink.href = localStrings.getString('ntp4_intro_url');
+      learnMoreLink.onclick = infoBubble.hide.bind(infoBubble);
 
       infoBubble.show();
       chrome.send('introMessageSeen');
     }
 
-    /*
-    bookmarksPage = new ntp4.BookmarksPage();
-    appendTilePage(bookmarksPage, localStrings.getString('bookmarksPage'));
-    chrome.send('getBookmarksData');
-    */
+    var bookmarkFeatures = localStrings.getString('bookmark_features');
+    if (bookmarkFeatures == 'true') {
+      bookmarksPage = new ntp4.BookmarksPage();
+      appendTilePage(bookmarksPage, localStrings.getString('bookmarksPage'),
+                     false);
+      chrome.send('getBookmarksData');
+    }
 
     var serverpromo = localStrings.getString('serverpromo');
     if (serverpromo) {
       showNotification(parseHtmlSubset(serverpromo), [], function() {
-        chrome.send('closePromo');
+        chrome.send('closeNotificationPromo');
       }, 60000);
+      chrome.send('notificationPromoViewed');
     }
+
+    var loginContainer = getRequiredElement('login-container');
+    loginContainer.addEventListener('click', function() {
+      var rect = loginContainer.getBoundingClientRect();
+      chrome.send('showSyncLoginUI',
+                  [rect.left, rect.top, rect.width, rect.height]);
+    });
+    chrome.send('initializeSyncLogin');
   }
 
   /**
@@ -291,9 +315,6 @@ cr.define('ntp4', function() {
       return true;
     }
 
-    if (!pageNames || stringListIsEmpty(pageNames))
-      pageNames = [localStrings.getString('appDefaultPageName')];
-
     // Sort by launch index
     apps.sort(function(a, b) {
       return a.app_launch_index - b.app_launch_index;
@@ -307,12 +328,12 @@ cr.define('ntp4', function() {
       var app = apps[i];
       var pageIndex = (app.page_index || 0);
       while (pageIndex >= appsPages.length) {
-        var pageName = '';
+        var pageName = localStrings.getString('appDefaultPageName');
         if (appsPages.length < pageNames.length)
           pageName = pageNames[appsPages.length];
 
         var origPageCount = appsPages.length;
-        appendTilePage(new ntp4.AppsPage(), pageName, bookmarksPage);
+        appendTilePage(new ntp4.AppsPage(), pageName, true, bookmarksPage);
         // Confirm that appsPages is a live object, updated when a new page is
         // added (otherwise we'd have an infinite loop)
         assert(appsPages.length == origPageCount + 1, 'expected new page');
@@ -355,7 +376,9 @@ cr.define('ntp4', function() {
 
     if (pageIndex >= appsPages.length) {
       while (pageIndex >= appsPages.length) {
-        appendTilePage(new ntp4.AppsPage(), '', bookmarksPage);
+        appendTilePage(new ntp4.AppsPage(),
+                       localStrings.getString('appDefaultPageName'), true,
+                       bookmarksPage);
       }
       updateSliderCards();
     }
@@ -412,6 +435,16 @@ cr.define('ntp4', function() {
     for (var i = 0; i < data.apps.length; ++i) {
       $(data.apps[i].id).appData = data.apps[i];
     }
+
+    // Set the App dot names. Skip the first and last dots (Most Visited and
+    // Bookmarks).
+    var dots = dotList.getElementsByClassName('dot');
+    // TODO(csilv): Remove this calcluation if/when we remove the flag for
+    // for the bookmarks page.
+    var length = bookmarksPage ? dots.length - 1 : dots.length;
+    for (var i = 1; i < length; ++i) {
+      dots[i].displayTitle = data.appPageNames[i - 1] || '';
+    }
   }
 
   /**
@@ -440,15 +473,14 @@ cr.define('ntp4', function() {
     var pageNo = Math.min(cardSlider.currentCard, tilePages.length - 1);
     cardSlider.setCards(Array.prototype.slice.call(tilePages), pageNo);
     switch (shownPage) {
-      case templateData['bookmarks_page_id']:
       case templateData['apps_page_id']:
         cardSlider.selectCardByValue(
             appsPages[Math.min(shownPageIndex, appsPages.length - 1)]);
         break;
-/*
-        cardSlider.selectCardByValue(bookmarksPage);
+      case templateData['bookmarks_page_id']:
+        if (bookmarksPage)
+          cardSlider.selectCardByValue(bookmarksPage);
         break;
-*/
       case templateData['most_visited_page_id']:
         cardSlider.selectCardByValue(mostVisitedPage);
         break;
@@ -460,21 +492,27 @@ cr.define('ntp4', function() {
    *
    * @param {TilePage} page The page element.
    * @param {string} title The title of the tile page.
-   * @param {TilePage} refNode Optional reference node to insert in front of.
-   * When refNode is falsey, |page| will just be appended to the end of the
+   * @param {bool} titleIsEditable If true, the title can be changed.
+   * @param {TilePage} opt_refNode Optional reference node to insert in front
+   * of.
+   * When opt_refNode is falsey, |page| will just be appended to the end of the
    * page list.
    */
-  function appendTilePage(page, title, refNode) {
-    // When refNode is falsey, insertBefore acts just like appendChild.
-    pageList.insertBefore(page, refNode);
+  function appendTilePage(page, title, titleIsEditable, opt_refNode) {
+    // When opt_refNode is falsey, insertBefore acts just like appendChild.
+    pageList.insertBefore(page, opt_refNode);
 
     // If we're appending an AppsPage and it's a temporary page, animate it.
     var animate = page instanceof ntp4.AppsPage &&
                   page.classList.contains('temporary');
     // Make a deep copy of the dot template to add a new one.
-    var newDot = new ntp4.NavDot(page, title, true, animate);
+    var newDot = new ntp4.NavDot(page, title, titleIsEditable, animate);
     page.navigationDot = newDot;
-    dotList.insertBefore(newDot, refNode ? refNode.navigationDot : null);
+    dotList.insertBefore(newDot, opt_refNode ? opt_refNode.navigationDot
+                                             : null);
+    // Set a tab index on the first dot.
+    if (navDots.length == 1)
+      newDot.tabIndex = 3;
 
     if (infoBubble)
       window.setTimeout(infoBubble.reposition.bind(infoBubble), 0);
@@ -504,7 +542,8 @@ cr.define('ntp4', function() {
   function enterRearrangeMode() {
     var tempPage = new ntp4.AppsPage();
     tempPage.classList.add('temporary');
-    appendTilePage(tempPage, '', bookmarksPage);
+    appendTilePage(tempPage, localStrings.getString('appDefaultPageName'),
+                   true, bookmarksPage);
     var tempIndex = Array.prototype.indexOf.call(tilePages, tempPage);
     if (cardSlider.currentCard >= tempIndex)
       cardSlider.currentCard += 1;
@@ -530,10 +569,69 @@ cr.define('ntp4', function() {
       updateSliderCards();
     } else {
       tempPage.classList.remove('temporary');
-      saveAppPageName(tempPage, '');
+      saveAppPageName(tempPage, localStrings.getString('appDefaultPageName'));
     }
 
     $('footer').classList.remove('showing-trash-mode');
+  }
+
+  /**
+   * Handler for key events on the page. Ctrl-Arrow will switch the visible
+   * page.
+   * @param {Event} e The KeyboardEvent.
+   */
+  function onKeyDown(e) {
+    if (!e.ctrlKey || e.altKey || e.metaKey || e.shiftKey)
+      return;
+
+    var direction = 0;
+    if (e.keyIdentifier == 'Left')
+      direction = -1;
+    else if (e.keyIdentifier == 'Right')
+      direction = 1;
+    else
+      return;
+
+    var cardIndex =
+        (cardSlider.currentCard + direction + cardSlider.cardCount) %
+        cardSlider.cardCount;
+    cardSlider.selectCard(cardIndex, true);
+
+    e.stopPropagation();
+  }
+
+  /**
+   * Handler for key events on the dot list. These keys will change the focus
+   * element.
+   * @param {Event} e The KeyboardEvent.
+   */
+  function onDotListKeyDown(e) {
+    if (e.metaKey || e.shiftKey || e.altKey || e.ctrlKey)
+      return;
+
+    var direction = 0;
+    if (e.keyIdentifier == 'Left')
+      direction = -1;
+    else if (e.keyIdentifier == 'Right')
+      direction = 1;
+    else
+      return;
+
+    var focusDot = dotList.querySelector('.dot:focus');
+    if (!focusDot)
+      return;
+    var focusIndex = Array.prototype.indexOf.call(navDots, focusDot);
+    var newFocusIndex = focusIndex + direction;
+    if (focusIndex == newFocusIndex)
+      return;
+
+    newFocusIndex = (newFocusIndex + navDots.length) % navDots.length;
+    navDots[newFocusIndex].tabIndex = 3;
+    navDots[newFocusIndex].focus();
+    focusDot.tabIndex = -1;
+
+    e.stopPropagation();
+    e.preventDefault();
   }
 
   /**
@@ -817,7 +915,23 @@ cr.define('ntp4', function() {
     var node = $(id);
     if (node)
       node.stripeColor = color;
-  };
+  }
+
+  /**
+   * Updates the text displayed in the login container. If there is no text then
+   * the login container is hidden.
+   * @param {string} loginHeader The first line of text.
+   * @param {string} loginSubHeader The second line of text.
+   */
+  function updateLogin(loginHeader, loginSubHeader) {
+    if (loginHeader || loginSubHeader) {
+      $('login-container').hidden = false;
+      $('login-status-header').innerHTML = loginHeader;
+      $('login-status-sub-header').innerHTML = loginSubHeader;
+    } else {
+      $('login-container').hidden = true;
+    }
+  }
 
   // Return an object with all the exports
   return {
@@ -847,6 +961,7 @@ cr.define('ntp4', function() {
     setStripeColor: setStripeColor,
     showNotification: showNotification,
     themeChanged: themeChanged,
+    updateLogin: updateLogin,
     updateOfflineEnabledApps: updateOfflineEnabledApps
   };
 });
@@ -860,6 +975,7 @@ var appsPrefChangeCallback = ntp4.appsPrefChangeCallback;
 var themeChanged = ntp4.themeChanged;
 var recentlyClosedTabs = ntp4.setRecentlyClosedTabs;
 var setMostVisitedPages = ntp4.setMostVisitedPages;
+var updateLogin = ntp4.updateLogin;
 
 document.addEventListener('DOMContentLoaded', ntp4.initialize);
 window.addEventListener('online', ntp4.updateOfflineEnabledApps);

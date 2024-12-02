@@ -18,6 +18,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
+#include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "chrome/browser/safe_browsing/malware_details.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
@@ -31,8 +32,8 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "net/base/registry_controlled_domain.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -161,6 +162,7 @@ SafeBrowsingService::SafeBrowsingService()
       enabled_(false),
       enable_download_protection_(false),
       enable_csd_whitelist_(false),
+      enable_download_whitelist_(false),
       update_in_progress_(false),
       database_update_in_progress_(false),
       closing_database_(false),
@@ -168,13 +170,16 @@ SafeBrowsingService::SafeBrowsingService()
       download_hashcheck_timeout_ms_(kDownloadHashCheckTimeoutMs) {
 #if !defined(OS_CHROMEOS)
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableClientSidePhishingDetection) &&
-      (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSanitizedClientSidePhishingDetection) ||
-       CanReportStats())) {
+          switches::kDisableClientSidePhishingDetection)) {
     csd_service_.reset(
         safe_browsing::ClientSideDetectionService::Create(
             g_browser_process->system_request_context()));
+  }
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableImprovedDownloadProtection)) {
+    download_service_ = new safe_browsing::DownloadProtectionService(
+        this,
+        g_browser_process->system_request_context());
   }
 #endif
 }
@@ -211,6 +216,15 @@ void SafeBrowsingService::Initialize() {
 }
 
 void SafeBrowsingService::ShutDown() {
+  if (download_service_.get()) {
+    // Disabling the download service first will ensure that it is
+    // disabled before the SafeBrowsingService object becomes invalid.  The
+    // download service might stay around for a bit since it's
+    // ref-counted but it won't do any harm because it will be
+    // disabled.
+    download_service_->SetEnabled(false);
+    download_service_ = NULL;
+  }
   Stop();
   // The IO thread is going away, so make sure the ClientSideDetectionService
   // dtor executes now since it may call the dtor of URLFetcher which relies
@@ -288,6 +302,14 @@ bool SafeBrowsingService::MatchCsdWhitelistUrl(const GURL& url) {
     return true;
   }
   return database_->ContainsCsdWhitelistedUrl(url);
+}
+
+bool SafeBrowsingService::MatchDownloadWhitelistUrl(const GURL& url) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (!enabled_ || !enable_download_whitelist_ || !MakeDatabaseAvailable()) {
+    return true;
+  }
+  return database_->ContainsDownloadWhitelistedUrl(url);
 }
 
 bool SafeBrowsingService::CheckBrowseUrl(const GURL& url,
@@ -687,7 +709,8 @@ SafeBrowsingDatabase* SafeBrowsingService::GetDatabase() {
 
   SafeBrowsingDatabase* database =
       SafeBrowsingDatabase::Create(enable_download_protection_,
-                                   enable_csd_whitelist_);
+                                   enable_csd_whitelist_,
+                                   enable_download_whitelist_);
 
   database->Init(path);
   {
@@ -891,21 +914,18 @@ void SafeBrowsingService::Start() {
       !cmdline->HasSwitch(switches::kSbDisableDownloadProtection);
 
   // We only download the csd-whitelist if client-side phishing detection is
-  // enabled and if the user has opted in with stats collection.  Note: we
-  // cannot check whether the metrics_service() object is created because it
-  // may be initialized after this method is called.
+  // enabled.
 #ifdef OS_CHROMEOS
   // Client-side detection is disabled on ChromeOS for now, so don't bother
   // downloading the whitelist.
   enable_csd_whitelist_ = false;
 #else
   enable_csd_whitelist_ =
-      (!cmdline->HasSwitch(switches::kDisableClientSidePhishingDetection) &&
-       (!cmdline->HasSwitch(
-           switches::kDisableSanitizedClientSidePhishingDetection) ||
-        (local_state &&
-         local_state->GetBoolean(prefs::kMetricsReportingEnabled))));
+      !cmdline->HasSwitch(switches::kDisableClientSidePhishingDetection);
 #endif
+
+  enable_download_whitelist_ = cmdline->HasSwitch(
+      switches::kEnableImprovedDownloadProtection);
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -1348,4 +1368,6 @@ void SafeBrowsingService::RefreshState() {
 
   if (csd_service_.get())
     csd_service_->SetEnabled(enable);
+  if (download_service_.get())
+    download_service_->SetEnabled(enable);
 }

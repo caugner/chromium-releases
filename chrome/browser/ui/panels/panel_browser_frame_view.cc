@@ -4,14 +4,15 @@
 
 #include "chrome/browser/ui/panels/panel_browser_frame_view.h"
 
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/profiles/profile.h"
+#include <algorithm>
+
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_browser_view.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/panels/panel_settings_menu_model.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -19,12 +20,16 @@
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/screen.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/button/menu_button.h"
+#include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/controls/label.h"
 #include "views/painter.h"
 #include "views/widget/widget_delegate.h"
@@ -51,8 +56,8 @@ const int kIconSize = 16;
 // The spacing in pixels between buttons or the button and the adjacent control.
 const int kButtonSpacing = 6;
 
-// The panel can be minimized to 3-pixel lines.
-const int kMinimizedPanelHeight = 3;
+// This value is experimental and subjective.
+const int kUpdateSettingsVisibilityAnimationMs = 120;
 
 // Colors used in painting the titlebar for drawing attention.
 const SkColor kBackgroundColorForAttention = 0xfffa983a;
@@ -145,7 +150,7 @@ void EnsureResourcesInitialized() {
   LoadImageResources();
 }
 
-} // namespace
+}  // namespace
 
 // PanelBrowserFrameView::MouseWatcher -----------------------------------------
 
@@ -166,8 +171,14 @@ bool PanelBrowserFrameView::MouseWatcher::IsCursorInViewBounds() const {
 }
 
 #if defined(OS_WIN)
-void PanelBrowserFrameView::MouseWatcher::DidProcessMessage(const MSG& msg) {
-  switch (msg.message) {
+base::EventStatus PanelBrowserFrameView::MouseWatcher::WillProcessEvent(
+    const base::NativeEvent& event) {
+  return base::EVENT_CONTINUE;
+}
+
+void PanelBrowserFrameView::MouseWatcher::DidProcessEvent(
+    const base::NativeEvent& event) {
+  switch (event.message) {
     case WM_MOUSEMOVE:
     case WM_NCMOUSEMOVE:
     case WM_MOUSELEAVE:
@@ -178,7 +189,20 @@ void PanelBrowserFrameView::MouseWatcher::DidProcessMessage(const MSG& msg) {
       break;
   }
 }
-#else
+#elif defined(TOUCH_UI) || defined(USE_AURA)
+base::EventStatus PanelBrowserFrameView::MouseWatcher::WillProcessEvent(
+    const base::NativeEvent& event) {
+  return base::EVENT_CONTINUE;
+}
+
+void PanelBrowserFrameView::MouseWatcher::DidProcessEvent(
+    const base::NativeEvent& event) {
+  NOTIMPLEMENTED();
+}
+#elif defined(TOOLKIT_USES_GTK)
+void PanelBrowserFrameView::MouseWatcher::WillProcessEvent(GdkEvent* event) {
+}
+
 void PanelBrowserFrameView::MouseWatcher::DidProcessEvent(GdkEvent* event) {
   switch (event->type) {
     case GDK_MOTION_NOTIFY:
@@ -188,6 +212,14 @@ void PanelBrowserFrameView::MouseWatcher::DidProcessEvent(GdkEvent* event) {
     default:
       break;
   }
+}
+#elif defined(USE_AURA)
+base::MessagePumpObserver::EventStatus
+PanelBrowserFrameView::MouseWatcher::WillProcessXEvent(
+    XEvent* xevent) {
+  // TODO(saintlou): This is dummy code, but a value must be returned.
+  NOTIMPLEMENTED();
+  return EVENT_CONTINUE;
 }
 #endif
 
@@ -208,25 +240,21 @@ PanelBrowserFrameView::PanelBrowserFrameView(BrowserFrame* frame,
       browser_view_(browser_view),
       paint_state_(NOT_PAINTED),
       settings_button_(NULL),
-      is_settings_button_visible_(false),
       close_button_(NULL),
       title_icon_(NULL),
       title_label_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(settings_menu_contents_(this)),
-      settings_menu_adapter_(&settings_menu_contents_),
-      settings_menu_(new views::MenuItemView(&settings_menu_adapter_)),
-      settings_menu_runner_(settings_menu_) {
+      is_settings_button_visible_(false) {
   EnsureResourcesInitialized();
   frame_->set_frame_type(views::Widget::FRAME_TYPE_FORCE_CUSTOM);
 
-  settings_button_ =  new views::MenuButton(NULL, std::wstring(), this, false);
+  settings_button_ =  new views::MenuButton(NULL, string16(), this, false);
   settings_button_->SetIcon(*(settings_button_resources.normal_image));
   settings_button_->SetHoverIcon(*(settings_button_resources.hover_image));
   settings_button_->SetPushedIcon(*(settings_button_resources.pushed_image));
   settings_button_->set_alignment(views::TextButton::ALIGN_CENTER);
   settings_button_->set_border(NULL);
   settings_button_->SetTooltipText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_SETTINGS)));
+      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_SETTINGS));
   settings_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_SETTINGS));
   settings_button_->SetVisible(is_settings_button_visible_);
@@ -240,7 +268,7 @@ PanelBrowserFrameView::PanelBrowserFrameView(BrowserFrame* frame,
   close_button_->SetImage(views::CustomButton::BS_PUSHED,
                           close_button_resources.pushed_image);
   close_button_->SetTooltipText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_TOOLTIP_CLOSE_TAB)));
+      l10n_util::GetStringUTF16(IDS_TOOLTIP_CLOSE_TAB));
   close_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
   AddChildView(close_button_);
@@ -248,9 +276,11 @@ PanelBrowserFrameView::PanelBrowserFrameView(BrowserFrame* frame,
   title_icon_ = new TabIconView(this);
   title_icon_->set_is_light(true);
   AddChildView(title_icon_);
+  title_icon_->Update();
 
-  title_label_ = new views::Label(std::wstring());
+  title_label_ = new views::Label(string16());
   title_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  title_label_->SetAutoColorReadabilityEnabled(false);
   AddChildView(title_label_);
 
   mouse_watcher_.reset(new MouseWatcher(this));
@@ -357,6 +387,11 @@ gfx::Size PanelBrowserFrameView::GetMinimumSize() {
 }
 
 void PanelBrowserFrameView::Layout() {
+  // Cancel the settings button animation if the layout of titlebar is being
+  // updated.
+  if (settings_button_animator_.get() && settings_button_animator_->IsShowing())
+    settings_button_animator_->Reset();
+
   // Layout the close button.
   gfx::Size close_button_size = close_button_->GetPreferredSize();
   close_button_->SetBounds(
@@ -373,6 +408,16 @@ void PanelBrowserFrameView::Layout() {
       (NonClientTopBorderHeight() - settings_button_size.height()) / 2,
       settings_button_size.width(),
       settings_button_size.height());
+
+  // Trace the full bounds and zero-size bounds for animation purpose.
+  settings_button_full_bounds_ = settings_button_->bounds();
+  settings_button_zero_bounds_.SetRect(
+      settings_button_full_bounds_.x() +
+          settings_button_full_bounds_.width() / 2,
+      settings_button_full_bounds_.y() +
+          settings_button_full_bounds_.height() / 2,
+      0,
+      0);
 
   // Layout the icon.
   int icon_y = (NonClientTopBorderHeight() - kIconSize) / 2;
@@ -438,88 +483,17 @@ void PanelBrowserFrameView::ButtonPressed(views::Button* sender,
 }
 
 void PanelBrowserFrameView::RunMenu(View* source, const gfx::Point& pt) {
-  EnsureSettingsMenuCreated();
+  if (!EnsureSettingsMenuCreated())
+    return;
 
   DCHECK_EQ(settings_button_, source);
   gfx::Point screen_point;
   views::View::ConvertPointToScreen(source, &screen_point);
-  if (settings_menu_runner_.RunMenuAt(source->GetWidget(),
+  if (settings_menu_runner_->RunMenuAt(source->GetWidget(),
           settings_button_, gfx::Rect(screen_point, source->size()),
           views::MenuItemView::TOPRIGHT, views::MenuRunner::HAS_MNEMONICS) ==
       views::MenuRunner::MENU_DELETED)
     return;
-}
-
-bool PanelBrowserFrameView::IsCommandIdChecked(int command_id) const {
-  // Nothing in the menu is checked.
-  return false;
-}
-
-bool PanelBrowserFrameView::IsCommandIdEnabled(int command_id) const {
-  const Extension* extension = GetExtension();
-  if (!extension)
-    return false;
-
-  switch (command_id) {
-    case COMMAND_NAME:
-      // The NAME links to the Homepage URL. If the extension doesn't have a
-      // homepage, we just disable this menu item.
-      return extension->GetHomepageURL().is_valid();
-    case COMMAND_CONFIGURE:
-      return extension->options_url().spec().length() > 0;
-    case COMMAND_DISABLE:
-    case COMMAND_UNINSTALL:
-      // Some extension types can not be disabled or uninstalled.
-      return Extension::UserMayDisable(extension->location());
-    case COMMAND_MANAGE:
-      return true;
-    default:
-      NOTREACHED();
-      return false;
-  }
-}
-
-bool PanelBrowserFrameView::GetAcceleratorForCommandId(
-    int command_id, ui::Accelerator* accelerator) {
-  return false;
-}
-
-void PanelBrowserFrameView::ExecuteCommand(int command_id) {
-  const Extension* extension = GetExtension();
-  if (!extension)
-    return;
-
-  Browser* browser = browser_view_->browser();
-  switch (command_id) {
-    case COMMAND_NAME:
-     browser->OpenURL(extension->GetHomepageURL(),
-                      GURL(),
-                      NEW_FOREGROUND_TAB,
-                      PageTransition::LINK);
-      break;
-    case COMMAND_CONFIGURE:
-      DCHECK(!extension->options_url().is_empty());
-      browser->GetProfile()->GetExtensionProcessManager()->OpenOptionsPage(
-          extension, browser);
-      break;
-    case COMMAND_DISABLE:
-      browser->GetProfile()->GetExtensionService()->DisableExtension(
-          extension->id());
-      break;
-    case COMMAND_UNINSTALL:
-      // TODO(jianli): Need to handle the case that the extension API requests
-      // the panel to be closed when the uninstall dialog is still showing.
-      extension_uninstall_dialog_.reset(new ExtensionUninstallDialog(
-          browser->GetProfile()));
-      extension_uninstall_dialog_->ConfirmUninstall(this, extension);
-      break;
-    case COMMAND_MANAGE:
-      browser->ShowOptionsTab(chrome::kExtensionsSubPage);
-      break;
-    default:
-      NOTREACHED();
-      break;
-  }
 }
 
 bool PanelBrowserFrameView::ShouldTabIconViewAnimate() const {
@@ -534,15 +508,30 @@ SkBitmap PanelBrowserFrameView::GetFaviconForTabIconView() {
   return frame_->widget_delegate()->GetWindowIcon();
 }
 
-void PanelBrowserFrameView::ExtensionDialogAccepted() {
-  const Extension* extension = GetExtension();
-  if (extension) {
-    browser_view_->browser()->GetProfile()->GetExtensionService()->
-        UninstallExtension(extension->id(), false, NULL);
-  }
+void PanelBrowserFrameView::AnimationEnded(const ui::Animation* animation) {
+  settings_button_->SetVisible(is_settings_button_visible_);
 }
 
-void PanelBrowserFrameView::ExtensionDialogCanceled() {
+void PanelBrowserFrameView::AnimationProgressed(
+    const ui::Animation* animation) {
+  gfx::Rect animation_start_bounds, animation_end_bounds;
+  if (is_settings_button_visible_) {
+    animation_start_bounds = settings_button_zero_bounds_;
+    animation_end_bounds = settings_button_full_bounds_;
+  } else {
+    animation_start_bounds = settings_button_full_bounds_;
+    animation_end_bounds = settings_button_zero_bounds_;
+  }
+  gfx::Rect new_bounds = settings_button_animator_->CurrentValueBetween(
+      animation_start_bounds, animation_end_bounds);
+  if (new_bounds == animation_end_bounds)
+    AnimationEnded(animation);
+  else
+    settings_button_->SetBoundsRect(new_bounds);
+}
+
+void PanelBrowserFrameView::AnimationCanceled(const ui::Animation* animation) {
+  AnimationEnded(animation);
 }
 
 int PanelBrowserFrameView::NonClientBorderThickness() const {
@@ -551,10 +540,6 @@ int PanelBrowserFrameView::NonClientBorderThickness() const {
 
 int PanelBrowserFrameView::NonClientTopBorderHeight() const {
   return kFrameBorderThickness + kTitlebarHeight + kClientEdgeThickness;
-}
-
-int PanelBrowserFrameView::MinimizedPanelHeight() {
-  return kMinimizedPanelHeight;
 }
 
 gfx::Size PanelBrowserFrameView::NonClientAreaSize() const {
@@ -603,7 +588,7 @@ void PanelBrowserFrameView::UpdateControlStyles(PaintState paint_state) {
   paint_state_ = paint_state;
 
   SkColor title_color = GetTitleColor(paint_state_);
-  title_label_->SetColor(title_color);
+  title_label_->SetEnabledColor(title_color);
   title_label_->SetFont(*GetTitleFont());
 
   close_button_->SetBackground(title_color,
@@ -618,7 +603,7 @@ void PanelBrowserFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
   canvas->TileImageInt(*theme_frame, 0, 0, width(), height());
 
   // No need to paint other stuff if panel is minimized.
-  if (height() <= kMinimizedPanelHeight)
+  if (height() <= Panel::kMinimizedPanelHeight)
     return;
 
   // Draw the top border.
@@ -664,7 +649,7 @@ void PanelBrowserFrameView::PaintClientEdge(gfx::Canvas* canvas) {
   int client_area_top = client_view_bounds_.y();
 
   // No need to paint other stuff if panel is minimized.
-  if (height() <= kMinimizedPanelHeight)
+  if (height() <= Panel::kMinimizedPanelHeight)
     return;
 
   // Draw the top edge.
@@ -726,34 +711,42 @@ void PanelBrowserFrameView::OnMouseEnterOrLeaveWindow(bool mouse_entered) {
 
 void PanelBrowserFrameView::UpdateSettingsButtonVisibility(
     bool focused, bool cursor_in_view) {
-  is_settings_button_visible_ = focused || cursor_in_view;
-  settings_button_->SetVisible(is_settings_button_visible_);
-}
-
-const Extension* PanelBrowserFrameView::GetExtension() const {
-  return Panel::GetExtension(browser_view_->browser());
-}
-
-void PanelBrowserFrameView::EnsureSettingsMenuCreated() {
-  if (settings_menu_contents_.GetItemCount())
+  bool is_settings_button_visible = focused || cursor_in_view;
+  if (is_settings_button_visible_ == is_settings_button_visible)
     return;
+  is_settings_button_visible_ = is_settings_button_visible;
 
-  const Extension* extension = GetExtension();
+  // Even if we're hidng the settings button, we still make it visible for the
+  // time period that the animation is running.
+  settings_button_->SetVisible(true);
+
+  if (settings_button_animator_.get()) {
+    if (settings_button_animator_->IsShowing())
+      settings_button_animator_->Reset();
+  } else {
+    settings_button_animator_.reset(new ui::SlideAnimation(this));
+    settings_button_animator_->SetTweenType(ui::Tween::LINEAR);
+    settings_button_animator_->SetSlideDuration(
+        kUpdateSettingsVisibilityAnimationMs);
+  }
+
+  settings_button_animator_->Show();
+}
+
+bool PanelBrowserFrameView::EnsureSettingsMenuCreated() {
+  if (settings_menu_runner_.get())
+    return true;
+
+  const Extension* extension = browser_view_->panel()->GetExtension();
   if (!extension)
-    return;
+    return false;
 
-  settings_menu_contents_.AddItem(
-      COMMAND_NAME, UTF8ToUTF16(extension->name()));
-  settings_menu_contents_.AddSeparator();
-  settings_menu_contents_.AddItem(
-      COMMAND_CONFIGURE, l10n_util::GetStringUTF16(IDS_EXTENSIONS_OPTIONS));
-  settings_menu_contents_.AddItem(
-      COMMAND_DISABLE, l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLE));
-  settings_menu_contents_.AddItem(
-      COMMAND_UNINSTALL, l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
-  settings_menu_contents_.AddSeparator();
-  settings_menu_contents_.AddItem(
-      COMMAND_MANAGE, l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSIONS));
-
-  settings_menu_adapter_.BuildMenu(settings_menu_);
+  settings_menu_model_.reset(
+      new PanelSettingsMenuModel(browser_view_->panel()));
+  settings_menu_adapter_.reset(
+      new views::MenuModelAdapter(settings_menu_model_.get()));
+  settings_menu_ = new views::MenuItemView(settings_menu_adapter_.get());
+  settings_menu_adapter_->BuildMenu(settings_menu_);
+  settings_menu_runner_.reset(new views::MenuRunner(settings_menu_));
+  return true;
 }

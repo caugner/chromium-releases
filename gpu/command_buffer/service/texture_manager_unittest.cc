@@ -338,7 +338,7 @@ TEST_F(TextureInfoTest, Basic) {
 }
 
 TEST_F(TextureInfoTest, POT2D) {
-  manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
+  manager_.SetInfoTarget(&feature_info_, info_, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info_->target());
   // Check Setting level 0 to POT
   manager_.SetLevelInfo(&feature_info_, info_,
@@ -377,13 +377,41 @@ TEST_F(TextureInfoTest, POT2D) {
   EXPECT_TRUE(info_->CanGenerateMipmaps(&feature_info_));
   // Make mips.
   EXPECT_TRUE(manager_.MarkMipmapsGenerated(&feature_info_, info_));
-  EXPECT_FALSE(info_->CanRender(&feature_info_));
-  EXPECT_FALSE(info_->texture_complete());
-  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  EXPECT_TRUE(info_->CanRender(&feature_info_));
+  EXPECT_TRUE(info_->texture_complete());
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
+}
+
+TEST_F(TextureInfoTest, UnusedMips) {
+  manager_.SetInfoTarget(&feature_info_, info_, GL_TEXTURE_2D);
+  EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info_->target());
+  // Set level zero to large size.
+  manager_.SetLevelInfo(&feature_info_, info_,
+      GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
+  EXPECT_TRUE(manager_.MarkMipmapsGenerated(&feature_info_, info_));
+  EXPECT_FALSE(info_->npot());
+  EXPECT_TRUE(info_->texture_complete());
+  EXPECT_TRUE(info_->CanRender(&feature_info_));
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
+  // Set level zero to large smaller (levels unused mips)
+  manager_.SetLevelInfo(&feature_info_, info_,
+      GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
+  EXPECT_TRUE(manager_.MarkMipmapsGenerated(&feature_info_, info_));
+  EXPECT_FALSE(info_->npot());
+  EXPECT_TRUE(info_->texture_complete());
+  EXPECT_TRUE(info_->CanRender(&feature_info_));
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
+  // Set an unused level to some size
+  manager_.SetLevelInfo(&feature_info_, info_,
+      GL_TEXTURE_2D, 4, GL_RGBA, 16, 16, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
+  EXPECT_FALSE(info_->npot());
+  EXPECT_TRUE(info_->texture_complete());
+  EXPECT_TRUE(info_->CanRender(&feature_info_));
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
 }
 
 TEST_F(TextureInfoTest, NPOT2D) {
-  manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
+  manager_.SetInfoTarget(&feature_info_, info_, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info_->target());
   // Check Setting level 0 to NPOT
   manager_.SetLevelInfo(&feature_info_, info_,
@@ -424,7 +452,7 @@ TEST_F(TextureInfoTest, NPOT2DNPOTOK) {
   TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info_ != NULL);
 
-  manager.SetInfoTarget(info, GL_TEXTURE_2D);
+  manager.SetInfoTarget(&feature_info_, info, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info->target());
   // Check Setting level 0 to NPOT
   manager.SetLevelInfo(&feature_info, info,
@@ -442,7 +470,7 @@ TEST_F(TextureInfoTest, NPOT2DNPOTOK) {
 }
 
 TEST_F(TextureInfoTest, POTCubeMap) {
-  manager_.SetInfoTarget(info_, GL_TEXTURE_CUBE_MAP);
+  manager_.SetInfoTarget(&feature_info_, info_, GL_TEXTURE_CUBE_MAP);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP), info_->target());
   // Check Setting level 0 each face to POT
   manager_.SetLevelInfo(&feature_info_, info_,
@@ -522,12 +550,12 @@ TEST_F(TextureInfoTest, POTCubeMap) {
   EXPECT_TRUE(info_->CanGenerateMipmaps(&feature_info_));
   // Make mips.
   EXPECT_TRUE(manager_.MarkMipmapsGenerated(&feature_info_, info_));
-  EXPECT_FALSE(info_->texture_complete());
+  EXPECT_TRUE(info_->texture_complete());
   EXPECT_TRUE(info_->cube_complete());
 }
 
 TEST_F(TextureInfoTest, GetLevelSize) {
-  manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
+  manager_.SetInfoTarget(&feature_info_, info_, GL_TEXTURE_2D);
   manager_.SetLevelInfo(&feature_info_, info_,
       GL_TEXTURE_2D, 1, GL_RGBA, 4, 5, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   GLsizei width = -1;
@@ -543,7 +571,7 @@ TEST_F(TextureInfoTest, GetLevelSize) {
 }
 
 TEST_F(TextureInfoTest, GetLevelType) {
-  manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
+  manager_.SetInfoTarget(&feature_info_, info_, GL_TEXTURE_2D);
   manager_.SetLevelInfo(&feature_info_, info_,
       GL_TEXTURE_2D, 1, GL_RGBA, 4, 5, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   GLenum type = -1;
@@ -559,7 +587,7 @@ TEST_F(TextureInfoTest, GetLevelType) {
 }
 
 TEST_F(TextureInfoTest, ValidForTexture) {
-  manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
+  manager_.SetInfoTarget(&feature_info_, info_, GL_TEXTURE_2D);
   manager_.SetLevelInfo(&feature_info_, info_,
       GL_TEXTURE_2D, 1, GL_RGBA, 4, 5, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   // Check bad face.
@@ -613,7 +641,7 @@ TEST_F(TextureInfoTest, FloatNotLinear) {
   manager.CreateTextureInfo(&feature_info, kClient1Id, kService1Id);
   TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info != NULL);
-  manager.SetInfoTarget(info, GL_TEXTURE_2D);
+  manager.SetInfoTarget(&feature_info_, info, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info->target());
   manager.SetLevelInfo(&feature_info, info,
       GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_FLOAT);
@@ -635,7 +663,7 @@ TEST_F(TextureInfoTest, FloatLinear) {
   manager.CreateTextureInfo(&feature_info, kClient1Id, kService1Id);
   TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info != NULL);
-  manager.SetInfoTarget(info, GL_TEXTURE_2D);
+  manager.SetInfoTarget(&feature_info_, info, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info->target());
   manager.SetLevelInfo(&feature_info, info,
       GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_FLOAT);
@@ -652,7 +680,7 @@ TEST_F(TextureInfoTest, HalfFloatNotLinear) {
   manager.CreateTextureInfo(&feature_info, kClient1Id, kService1Id);
   TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info != NULL);
-  manager.SetInfoTarget(info, GL_TEXTURE_2D);
+  manager.SetInfoTarget(&feature_info_, info, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info->target());
   manager.SetLevelInfo(&feature_info, info,
       GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_HALF_FLOAT_OES);
@@ -674,7 +702,7 @@ TEST_F(TextureInfoTest, HalfFloatLinear) {
   manager.CreateTextureInfo(&feature_info, kClient1Id, kService1Id);
   TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info != NULL);
-  manager.SetInfoTarget(info, GL_TEXTURE_2D);
+  manager.SetInfoTarget(&feature_info_, info, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info->target());
   manager.SetLevelInfo(&feature_info, info,
       GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_HALF_FLOAT_OES);
@@ -691,7 +719,7 @@ TEST_F(TextureInfoTest, EGLImageExternal) {
   manager.CreateTextureInfo(&feature_info, kClient1Id, kService1Id);
   TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info != NULL);
-  manager.SetInfoTarget(info, GL_TEXTURE_EXTERNAL_OES);
+  manager.SetInfoTarget(&feature_info_, info, GL_TEXTURE_EXTERNAL_OES);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_EXTERNAL_OES), info->target());
   EXPECT_FALSE(info->CanGenerateMipmaps(&feature_info));
   manager.Destroy(false);

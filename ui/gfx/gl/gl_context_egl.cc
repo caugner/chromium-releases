@@ -42,7 +42,8 @@ GLContextEGL::~GLContextEGL() {
   Destroy();
 }
 
-bool GLContextEGL::Initialize(GLSurface* compatible_surface) {
+bool GLContextEGL::Initialize(
+    GLSurface* compatible_surface, GpuPreference gpu_preference) {
   DCHECK(compatible_surface);
   DCHECK(!context_);
 
@@ -95,7 +96,12 @@ bool GLContextEGL::MakeCurrent(GLSurface* surface) {
     return false;
   }
 
-  surface->OnMakeCurrent(this);
+  SetCurrent(this, surface);
+  if (!surface->OnMakeCurrent(this)) {
+    LOG(ERROR) << "Could not make current.";
+    return false;
+  }
+
   return true;
 }
 
@@ -103,6 +109,7 @@ void GLContextEGL::ReleaseCurrent(GLSurface* surface) {
   if (!IsCurrent(surface))
     return;
 
+  SetCurrent(NULL, NULL);
   eglMakeCurrent(display_,
                  EGL_NO_SURFACE,
                  EGL_NO_SURFACE,
@@ -111,7 +118,15 @@ void GLContextEGL::ReleaseCurrent(GLSurface* surface) {
 
 bool GLContextEGL::IsCurrent(GLSurface* surface) {
   DCHECK(context_);
-  if (context_ != eglGetCurrentContext())
+
+  bool native_context_is_current = context_ == eglGetCurrentContext();
+
+  // If our context is current then our notion of which GLContext is
+  // current must be correct. On the other hand, third-party code
+  // using OpenGL might change the current context.
+  DCHECK(!native_context_is_current || (GetCurrent() == this));
+
+  if (!native_context_is_current)
     return false;
 
   if (surface) {

@@ -4,7 +4,7 @@
 
 #include "views/controls/single_split_view.h"
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
 #endif
 
@@ -13,8 +13,12 @@
 #include "ui/gfx/canvas.h"
 #include "views/background.h"
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 #include "ui/gfx/gtk_util.h"
+#endif
+
+#if defined(USE_AURA)
+#include "ui/aura/cursor.h"
 #endif
 
 namespace views {
@@ -95,12 +99,15 @@ gfx::Size SingleSplitView::GetPreferredSize() {
 
 gfx::NativeCursor SingleSplitView::GetCursor(const MouseEvent& event) {
   if (!IsPointInDivider(event.location()))
-    return NULL;
-#if defined(OS_WIN)
+    return gfx::kNullCursor;
+#if defined(USE_AURA)
+  return is_horizontal_ ?
+      aura::kCursorEastWestResize : aura::kCursorNorthSouthResize;
+#elif defined(OS_WIN)
   static HCURSOR we_resize_cursor = LoadCursor(NULL, IDC_SIZEWE);
   static HCURSOR ns_resize_cursor = LoadCursor(NULL, IDC_SIZENS);
   return is_horizontal_ ? we_resize_cursor : ns_resize_cursor;
-#elif defined(OS_LINUX)
+#elif defined(TOOLKIT_USES_GTK)
   return gfx::GetCursor(is_horizontal_ ? GDK_SB_H_DOUBLE_ARROW :
                                          GDK_SB_V_DOUBLE_ARROW);
 #endif
@@ -246,7 +253,8 @@ int SingleSplitView::NormalizeDividerOffset(int divider_offset,
                                             const gfx::Rect& bounds) const {
   int primary_axis_size = GetPrimaryAxisSize(bounds.width(), bounds.height());
   if (divider_offset < 0)
-    return (primary_axis_size - kDividerSize) / 2;
+    // primary_axis_size may < kDividerSize during initial layout.
+    return std::max(0, (primary_axis_size - kDividerSize) / 2);
   return std::min(divider_offset,
                   std::max(primary_axis_size - kDividerSize, 0));
 }

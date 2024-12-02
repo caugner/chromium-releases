@@ -13,12 +13,11 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/browser/tab_contents/popup_menu_helper_mac.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
 #include "chrome/browser/ui/browser.h"
@@ -33,6 +32,7 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/chrome_view_types.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
@@ -41,13 +41,14 @@
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/site_instance.h"
+#include "content/browser/tab_contents/popup_menu_helper_mac.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/bindings_policy.h"
 #include "content/common/content_client.h"
-#include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_service.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/bindings_policy.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -129,7 +130,7 @@ class ExtensionHost::ProcessCreationQueue {
 ExtensionHost::ExtensionHost(const Extension* extension,
                              SiteInstance* site_instance,
                              const GURL& url,
-                             ViewType::Type host_type)
+                             content::ViewType host_type)
     : extension_(extension),
       extension_id_(extension->id()),
       profile_(Profile::FromBrowserContext(
@@ -144,7 +145,7 @@ ExtensionHost::ExtensionHost(const Extension* extension,
   render_view_host_ = new RenderViewHost(site_instance, this, MSG_ROUTING_NONE,
                                          NULL);
   if (enable_dom_automation_)
-    render_view_host_->AllowBindings(BindingsPolicy::DOM_AUTOMATION);
+    render_view_host_->AllowBindings(content::BINDINGS_POLICY_DOM_AUTOMATION);
 
   // Listen for when the render process' handle is available so we can add it
   // to the task manager then.
@@ -156,6 +157,22 @@ ExtensionHost::ExtensionHost(const Extension* extension,
                  Source<Profile>(profile_));
 }
 
+// This "mock" constructor should only be used by unit tests.
+ExtensionHost::ExtensionHost(const Extension* extension,
+                             content::ViewType host_type)
+    : extension_(extension),
+      extension_id_(extension->id()),
+      profile_(NULL),
+      render_view_host_(NULL),
+      did_stop_loading_(false),
+      document_element_available_(false),
+      url_(GURL()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          extension_function_dispatcher_(profile_, this)),
+      extension_host_type_(host_type),
+      associated_tab_contents_(NULL) {
+}
+
 ExtensionHost::~ExtensionHost() {
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
@@ -163,7 +180,9 @@ ExtensionHost::~ExtensionHost() {
       Details<ExtensionHost>(this));
   ProcessCreationQueue::GetInstance()->Remove(this);
   GetJavaScriptDialogCreatorInstance()->ResetJavaScriptState(this);
-  render_view_host_->Shutdown();  // deletes render_view_host
+  // render_view_host_ may be NULL in unit tests.
+  if (render_view_host_)
+    render_view_host_->Shutdown();  // deletes render_view_host
 }
 
 void ExtensionHost::CreateView(Browser* browser) {
@@ -214,9 +233,9 @@ void ExtensionHost::CreateRenderViewSoon(RenderWidgetHostView* host_view) {
 
 void ExtensionHost::CreateRenderViewNow() {
   render_view_host_->CreateRenderView(string16());
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
-      extension_host_type_ == ViewType::EXTENSION_DIALOG ||
-      extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
+  if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_DIALOG ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR) {
     // If the host is bound to a browser, then extract its window id.
     // Extensions hosted in ExternalTabContainer objects may not have
     // an associated browser.
@@ -333,7 +352,7 @@ void ExtensionHost::RenderViewGone(RenderViewHost* render_view_host,
 void ExtensionHost::DidNavigate(RenderViewHost* render_view_host,
     const ViewHostMsg_FrameNavigate_Params& params) {
   // We only care when the outer frame changes.
-  if (!PageTransition::IsMainFrame(params.transition))
+  if (!content::PageTransitionIsMainFrame(params.transition))
     return;
 
   url_ = params.url;
@@ -346,22 +365,20 @@ void ExtensionHost::InsertInfobarCSS() {
       ResourceBundle::GetSharedInstance().GetRawDataResource(
       IDR_EXTENSIONS_INFOBAR_CSS));
 
-  render_view_host()->Send(new ViewMsg_CSSInsertRequest(
-      render_view_host()->routing_id(), string16(), css.as_string()));
+  render_view_host()->InsertCSS(string16(), css.as_string());
 }
 
 void ExtensionHost::DisableScrollbarsForSmallWindows(
     const gfx::Size& size_limit) {
-  render_view_host()->Send(new ViewMsg_DisableScrollbarsForSmallWindows(
-      render_view_host()->routing_id(), size_limit));
+  render_view_host()->DisableScrollbarsForThreshold(size_limit);
 }
 
 void ExtensionHost::DidStopLoading() {
   bool notify = !did_stop_loading_;
   did_stop_loading_ = true;
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
-      extension_host_type_ == ViewType::EXTENSION_DIALOG ||
-      extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
+  if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_DIALOG ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR) {
 #if defined(TOOLKIT_VIEWS)
     if (view_.get())
       view_->DidStopLoading();
@@ -372,16 +389,16 @@ void ExtensionHost::DidStopLoading() {
         chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
         Source<Profile>(profile_),
         Details<ExtensionHost>(this));
-    if (extension_host_type_ == ViewType::EXTENSION_BACKGROUND_PAGE) {
+    if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
       UMA_HISTOGRAM_TIMES("Extensions.BackgroundPageLoadTime",
                           since_created_.Elapsed());
-    } else if (extension_host_type_ == ViewType::EXTENSION_DIALOG) {
+    } else if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_DIALOG) {
       UMA_HISTOGRAM_TIMES("Extensions.DialogLoadTime",
                           since_created_.Elapsed());
-    } else if (extension_host_type_ == ViewType::EXTENSION_POPUP) {
+    } else if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP) {
       UMA_HISTOGRAM_TIMES("Extensions.PopupLoadTime",
                           since_created_.Elapsed());
-    } else if (extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
+    } else if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR) {
       UMA_HISTOGRAM_TIMES("Extensions.InfobarLoadTime",
         since_created_.Elapsed());
     }
@@ -399,7 +416,7 @@ void ExtensionHost::DocumentAvailableInMainFrame(RenderViewHost* rvh) {
     profile_->GetExtensionService()->SetBackgroundPageReady(extension_);
   } else {
     switch (extension_host_type_) {
-      case ViewType::EXTENSION_INFOBAR:
+      case chrome::VIEW_TYPE_EXTENSION_INFOBAR:
         InsertInfobarCSS();
         break;
       default:
@@ -410,7 +427,7 @@ void ExtensionHost::DocumentAvailableInMainFrame(RenderViewHost* rvh) {
 
 void ExtensionHost::DocumentOnLoadCompletedInMainFrame(RenderViewHost* rvh,
                                                        int32 page_id) {
-  if (ViewType::EXTENSION_POPUP == GetRenderViewType()) {
+  if (chrome::VIEW_TYPE_EXTENSION_POPUP == GetRenderViewType()) {
     NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_POPUP_VIEW_READY,
         Source<Profile>(profile_),
@@ -479,9 +496,10 @@ void ExtensionHost::OnDialogClosed(IPC::Message* reply_msg,
 }
 
 void ExtensionHost::Close(RenderViewHost* render_view_host) {
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
-      extension_host_type_ == ViewType::EXTENSION_DIALOG ||
-      extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
+  if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_DIALOG ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR) {
     NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
         Source<Profile>(profile_),
@@ -515,14 +533,15 @@ WebPreferences ExtensionHost::GetWebkitPrefs() {
   webkit_prefs.loads_images_automatically = true;
   webkit_prefs.javascript_enabled = true;
 
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
-      extension_host_type_ == ViewType::EXTENSION_DIALOG ||
-      extension_host_type_ == ViewType::EXTENSION_INFOBAR)
+  if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_DIALOG ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR)
     webkit_prefs.allow_scripts_to_close_windows = true;
 
   // Disable anything that requires the GPU process for background pages.
   // See http://crbug.com/64512 and http://crbug.com/64841.
-  if (extension_host_type_ == ViewType::EXTENSION_BACKGROUND_PAGE) {
+  if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
     webkit_prefs.experimental_webgl_enabled = false;
     webkit_prefs.accelerated_compositing_enabled = false;
     webkit_prefs.accelerated_2d_canvas_enabled = false;
@@ -537,7 +556,7 @@ RenderViewHostDelegate::View* ExtensionHost::GetViewDelegate() {
 
 bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                            bool* is_keyboard_shortcut) {
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP &&
+  if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP &&
       event.type == NativeWebKeyboardEvent::RawKeyDown &&
       event.windowsKeyCode == ui::VKEY_ESCAPE) {
     DCHECK(is_keyboard_shortcut != NULL);
@@ -547,7 +566,7 @@ bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 }
 
 void ExtensionHost::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP) {
+  if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP) {
     if (event.type == NativeWebKeyboardEvent::RawKeyDown &&
         event.windowsKeyCode == ui::VKEY_ESCAPE) {
       NotificationService::current()->Notify(
@@ -586,9 +605,11 @@ void ExtensionHost::HandleMouseActivate() {
 void ExtensionHost::RunFileChooser(
     RenderViewHost* render_view_host,
     const ViewHostMsg_RunFileChooser_Params& params) {
-  // This object is destroyed when the file selection is performed or
-  // cancelled.
-  FileSelectHelper* file_select_helper = new FileSelectHelper(profile());
+  // FileSelectHelper adds a reference to itself and only releases it after
+  // sending the result message. It won't be destroyed when this reference
+  // goes out of scope.
+  scoped_refptr<FileSelectHelper> file_select_helper(
+      new FileSelectHelper(profile()));
   file_select_helper->RunFileChooser(render_view_host,
                                      GetAssociatedTabContents(),
                                      params);
@@ -767,7 +788,7 @@ void ExtensionHost::GotFocus() {
 void ExtensionHost::TakeFocus(bool reverse) {
 }
 
-ViewType::Type ExtensionHost::GetRenderViewType() const {
+content::ViewType ExtensionHost::GetRenderViewType() const {
   return extension_host_type_;
 }
 
@@ -792,10 +813,9 @@ void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
   if (view_.get())
     view_->RenderViewCreated();
 
-  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
-      extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
-    render_view_host->Send(new ViewMsg_EnablePreferredSizeChangedMode(
-        render_view_host->routing_id(),
-        kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow));
+  if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR) {
+        render_view_host->EnablePreferredSizeMode(
+            kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
   }
 }

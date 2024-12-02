@@ -182,11 +182,11 @@ void AddUninstallShortcutWorkItems(const InstallerState& installer_state,
                                          true);
 
     // DisplayIcon, NoModify and NoRepair
-    FilePath chrome_icon(install_path.Append(installer::kChromeExe));
-    ShellUtil::GetChromeIcon(product.distribution(), chrome_icon.value());
+    std::wstring chrome_icon = ShellUtil::GetChromeIcon(
+        product.distribution(),
+        install_path.Append(installer::kChromeExe).value());
     install_list->AddSetRegValueWorkItem(reg_root, uninstall_reg,
-                                         L"DisplayIcon", chrome_icon.value(),
-                                         true);
+                                         L"DisplayIcon", chrome_icon, true);
     install_list->AddSetRegValueWorkItem(reg_root, uninstall_reg,
                                          L"NoModify", static_cast<DWORD>(1),
                                          true);
@@ -754,9 +754,10 @@ void AddInstallWorkItems(const InstallationState& original_state,
       target_path.Append(installer::kDictionaries).value(),
       temp_path.value(), WorkItem::IF_NOT_PRESENT);
 
-  // Delete any old_chrome.exe if present.
+  // Delete any old_chrome.exe if present (ignore failure if it's in use).
   install_list->AddDeleteTreeWorkItem(
-      target_path.Append(installer::kChromeOldExe), temp_path);
+      target_path.Append(installer::kChromeOldExe), temp_path)
+      ->set_ignore_failure(true);
 
   // Copy installer in install directory and
   // add shortcut in Control Panel->Add/Remove Programs.

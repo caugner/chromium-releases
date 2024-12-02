@@ -579,6 +579,7 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestAddWebUIMessageCallback) {
           &NotificationTest::HandleWebUIMessage)));
 }
 
+// Occasional crash: http://crbug.com/96461
 IN_PROC_BROWSER_TEST_F(NotificationTest, TestWebUIMessageCallback) {
   BalloonCollectionImpl* collection = GetBalloonCollectionImpl();
   Profile* profile = browser()->profile();

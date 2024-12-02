@@ -5,8 +5,8 @@
 #include <string>
 
 #include "base/format_macros.h"
+#include "base/location.h"
 #include "base/stringprintf.h"
-#include "base/tracked.h"
 #include "chrome/browser/sync/engine/apply_updates_command.h"
 #include "chrome/browser/sync/engine/nigori_util.h"
 #include "chrome/browser/sync/engine/syncer.h"
@@ -123,7 +123,7 @@ class ApplyUpdatesCommandTest : public SyncerCommandTest {
     entry.Put(syncable::IS_DIR, is_folder);
     entry.Put(syncable::IS_DEL, false);
     entry.Put(syncable::PARENT_ID, parent_id);
-    entry.PutPredecessor(predecessor_id);
+    CHECK(entry.PutPredecessor(predecessor_id));
     sync_pb::EntitySpecifics default_specifics;
     syncable::AddDefaultExtensionValue(model_type, &default_specifics);
     entry.Put(syncable::SPECIFICS, default_specifics);

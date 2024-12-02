@@ -33,7 +33,6 @@ class WriteTransaction;
 
 namespace browser_sync {
 
-class TypedUrlChangeProcessor;
 class UnrecoverableErrorHandler;
 
 extern const char kTypedUrlTag[];
@@ -44,7 +43,7 @@ extern const char kTypedUrlTag[];
 // We do not check if we have local data before this run; we always
 // merge and sync.
 class TypedUrlModelAssociator
-  : public PerDataTypeAssociatorInterface<std::string, std::string> {
+  : public AbortablePerDataTypeAssociatorInterface<std::string, std::string> {
  public:
   typedef std::vector<std::pair<GURL, string16> > TypedUrlTitleVector;
   typedef std::vector<history::URLRow> TypedUrlVector;
@@ -72,8 +71,6 @@ class TypedUrlModelAssociator
   // The has_nodes out param is true if the sync model has nodes other
   // than the permanent tagged nodes.
   virtual bool SyncModelHasUserCreatedNodes(bool* has_nodes);
-
-  virtual void AbortAssociation();
 
   virtual bool CryptoReadyIfNecessary();
 
@@ -148,11 +145,12 @@ class TypedUrlModelAssociator
   // the passed URL. This function compensates for the fact that the history DB
   // has rather poor data integrity (duplicate visits, visit timestamps that
   // don't match the last_visit timestamp, huge data sets that exhaust memory
-  // when fetched, etc). Returns false if we could not fetch the visits for the
-  // passed URL.
-  static bool GetVisitsForURL(history::HistoryBackend* backend,
-                              const history::URLRow& url,
-                              history::VisitVector* visits);
+  // when fetched, etc) by modifying the passed |url| object and |visits|
+  // vector.
+  // Returns false if we could not fetch the visits for the passed URL.
+  static bool FixupURLAndGetVisits(history::HistoryBackend* backend,
+                                   history::URLRow* url,
+                                   history::VisitVector* visits);
 
   // Updates the passed |url_row| based on the values in |specifics|. Fields
   // that are not contained in |specifics| (such as typed_count) are left

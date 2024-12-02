@@ -12,25 +12,32 @@
 #include "views/border.h"
 #include "views/view.h"
 
-namespace chromeos {
+namespace {
 
 // Colors for different text styles.
-static const SkColor kWhitePlainTextColor = 0x99ffffff;
-static const SkColor kGrayPlainTextColor = 0x99666666;
-static const SkColor kWhiteHaloedTextColor = 0xb3ffffff;
-static const SkColor kWhiteHaloedHaloColor = 0xb3000000;
-static const SkColor kGrayEmbossedTextColor = 0xff4c4c4c;
-static const SkColor kGrayEmbossedShadowColor = 0x80ffffff;
+const SkColor kWhitePlainTextColor = 0x99ffffff;
+const SkColor kGrayPlainTextColor = 0x99666666;
+const SkColor kWhiteHaloedTextColor = 0xb3ffffff;
+const SkColor kWhiteHaloedHaloColor = 0xb3000000;
+const SkColor kGrayEmbossedTextColor = 0xff4c4c4c;
+const SkColor kGrayEmbossedShadowColor = 0x80ffffff;
 
 // Status area font is bigger.
 const int kFontSizeDelta = 3;
+
+// Pad for status icons.
+const int kIconHorizontalPad = 2;
+
+}
+
+namespace chromeos {
 
 ////////////////////////////////////////////////////////////////////////////////
 // StatusAreaButton
 
 StatusAreaButton::StatusAreaButton(StatusAreaHost* host,
                                    views::ViewMenuDelegate* menu_delegate)
-    : MenuButton(NULL, std::wstring(), menu_delegate, false),
+    : MenuButton(NULL, string16(), menu_delegate, false),
       use_menu_button_paint_(false),
       active_(true),
       host_(host) {
@@ -47,7 +54,8 @@ StatusAreaButton::StatusAreaButton(StatusAreaHost* host,
 
   SetShowMultipleIconStates(false);
   set_alignment(TextButton::ALIGN_CENTER);
-  set_border(NULL);
+  set_border(views::Border::CreateEmptyBorder(
+      0, kIconHorizontalPad, 0, kIconHorizontalPad));
 
   // Use an offset that is top aligned with toolbar.
   set_menu_offset(0, 4);
@@ -70,7 +78,7 @@ void StatusAreaButton::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   }
 }
 
-void StatusAreaButton::SetText(const std::wstring& text) {
+void StatusAreaButton::SetText(const string16& text) {
   // TextButtons normally remember the max text size, so the button's preferred
   // size will always be as large as the largest text ever put in it.
   // We clear that max text size, so we can adjust the size to fit the text.
@@ -82,11 +90,10 @@ void StatusAreaButton::SetText(const std::wstring& text) {
 }
 
 bool StatusAreaButton::Activate() {
-  if (active_) {
+  if (active_)
     return views::MenuButton::Activate();
-  } else {
+  else
     return true;
-  }
 }
 
 gfx::Size StatusAreaButton::GetPreferredSize() {

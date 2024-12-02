@@ -199,9 +199,9 @@
                   <li><a href="background_pages.html">Background Pages</a></li>
                   <li><a href="content_scripts.html">Content Scripts</a></li>
                   <li><a href="xhr.html">Cross-Origin XHR</a></li>
-                  <li><a href="idle.html">Idle</a></li>
                   <li><a href="i18n.html">Internationalization</a></li>
                   <li><a href="messaging.html">Message Passing</a></li>
+                  <li><a href="permissions.html">Optional Permissions</a></li>
                   <li><a href="npapi.html">NPAPI Plugins</a></li>
                 </ul>
               </li>
@@ -285,8 +285,6 @@
                         <a href="#method-connect">connect</a>
                       </li><li>
                         <a href="#method-getBackgroundPage">getBackgroundPage</a>
-                      </li><li style="display: none; ">
-                        <a href="#method-anchor">methodName</a>
                       </li><li style="display: none; ">
                         <a href="#method-anchor">methodName</a>
                       </li><li>
@@ -1078,72 +1076,6 @@ For details, see
 
                 <!-- MIN_VERSION -->
                 <p style="display: none; ">
-                  This function was added in version <b><span></span></b>.
-                  If you require this function, the manifest key
-                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
-                  can ensure that your extension won't be run in an earlier browser version.
-                </p>
-              </div> <!-- /description -->
-
-            </div><div class="apiItem" style="display: none; ">
-              <a></a> <!-- method-anchor -->
-              <h4>method name</h4>
-
-              <div class="summary"><span>void</span>
-                  <!-- Note: intentionally longer 80 columns -->
-                  <span>chrome.module.methodName</span>(<span><span>, </span><span></span>
-                      <var><span></span></var></span>)</div>
-
-              <div class="description">
-                <p class="todo">Undocumented.</p>
-                <p>
-                  A description from the json schema def of the function goes here.
-                </p>
-
-                <!-- PARAMETERS -->
-                <h4>Parameters</h4>
-                <dl>
-                  <div>
-                    <div>
-                    </div>
-                  </div>
-                </dl>
-
-                <!-- RETURNS -->
-                <h4>Returns</h4>
-                <dl>
-                  <div>
-                    <div>
-                    </div>
-                  </div>
-                </dl>
-
-                <!-- CALLBACK -->
-                <div>
-                  <div>
-                  <h4>Callback function</h4>
-                  <p>
-                    The callback <em>parameter</em> should specify a function
-                    that looks like this:
-                  </p>
-                  <p>
-                    If you specify the <em>callback</em> parameter, it should
-                    specify a function that looks like this:
-                  </p>
-
-                  <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
-                  <dl>
-                    <div>
-                      <div>
-                      </div>
-                    </div>
-                  </dl>
-                  </div>
-                </div>
-
-                <!-- MIN_VERSION -->
-                <p>
                   This function was added in version <b><span></span></b>.
                   If you require this function, the manifest key
                   <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
@@ -3102,7 +3034,7 @@ For details, see
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>Function to call when you have a response. The argument should be any JSON-ifiable object, or undefined if there is no response.</dd>
+          <dd>Function to call (at most once) when you have a response. The argument should be any JSON-ifiable object, or undefined if there is no response. If you have more than one <code>onRequest</code> listener in the same document, then only one may send a response.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.

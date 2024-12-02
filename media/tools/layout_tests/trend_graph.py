@@ -3,12 +3,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import fileinput
+"""A module for manipulating trend graph with analyzer result history."""
+
 import os
 import sys
 
-
-"""A Module for manipulating trend graph with analyzer result history."""
+import layouttest_analyzer_helpers
 
 DEFAULT_TREND_GRAPH_PATH = os.path.join('graph', 'graph.html')
 
@@ -56,33 +56,23 @@ class TrendGraph(object):
     str_list[1] = str(int(str_list[1])-1) # month
     datetime_string = ','.join(str_list)
     for key in ['whole', 'skip', 'nonskip']:
-      joined_str += ','.join(data_map[key]) + ','
+      joined_str += str(len(data_map[key][0])) + ','
+      joined_str += ','.join(data_map[key][1:]) + ','
     new_line_for_numbers = '         [new Date(%s),%s],\n' % (datetime_string,
                                                               joined_str)
     new_line_for_numbers += '         %s\n' % (
         LINE_INSERT_POINT_FOR_NUMBERS)
-    self._ReplaceLine(LINE_INSERT_POINT_FOR_NUMBERS, new_line_for_numbers)
+    layouttest_analyzer_helpers.ReplaceLineInFile(
+        self._location, LINE_INSERT_POINT_FOR_NUMBERS,
+        new_line_for_numbers)
 
     joined_str = '%s,%s,%s' % (
-        data_map['passingrate'][0], data_map['nonskip'][1],
+        str(data_map['passingrate'][0]), data_map['nonskip'][1],
         data_map['nonskip'][2])
     new_line_for_passingrate = '         [new Date(%s),%s],\n' % (
         datetime_string, joined_str)
     new_line_for_passingrate += '         %s\n' % (
         LINE_INSERT_POINT_FOR_PASSING_RATE)
-    self._ReplaceLine(LINE_INSERT_POINT_FOR_PASSING_RATE,
-                      new_line_for_passingrate)
-
-  def _ReplaceLine(self, search_exp, replace_line):
-    """Replace line which has |search_exp| with |replace_line|.
-
-    Args:
-        search_exp: search expression to find a line to be replaced.
-        replace_line: the new line.
-    """
-    replaced = False
-    for line in fileinput.input(self._location, inplace=1):
-      if search_exp in line:
-        replaced = True
-        line = replace_line
-      sys.stdout.write(line)
+    layouttest_analyzer_helpers.ReplaceLineInFile(
+        self._location, LINE_INSERT_POINT_FOR_PASSING_RATE,
+        new_line_for_passingrate)

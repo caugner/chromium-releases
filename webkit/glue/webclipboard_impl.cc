@@ -40,7 +40,7 @@ std::string WebClipboardImpl::URLToMarkup(const WebURL& url,
   markup.append(url.spec());
   markup.append("\">");
   // TODO(darin): HTML escape this
-  markup.append(EscapeForHTML(UTF16ToUTF8(title)));
+  markup.append(net::EscapeForHTML(UTF16ToUTF8(title)));
   markup.append("</a>");
   return markup;
 }
@@ -53,7 +53,7 @@ std::string WebClipboardImpl::URLToImageMarkup(const WebURL& url,
   markup.append("\"");
   if (!title.isEmpty()) {
     markup.append(" alt=\"");
-    markup.append(EscapeForHTML(UTF16ToUTF8(title)));
+    markup.append(net::EscapeForHTML(UTF16ToUTF8(title)));
     markup.append("\"");
   }
   markup.append("/>");
@@ -119,14 +119,18 @@ WebString WebClipboardImpl::readPlainText(Buffer buffer) {
   return WebString();
 }
 
-WebString WebClipboardImpl::readHTML(Buffer buffer, WebURL* source_url) {
+WebString WebClipboardImpl::readHTML(Buffer buffer, WebURL* source_url,
+                                     unsigned* fragment_start,
+                                     unsigned* fragment_end) {
   ui::Clipboard::Buffer buffer_type;
   if (!ConvertBufferType(buffer, &buffer_type))
     return WebString();
 
   string16 html_stdstr;
   GURL gurl;
-  ClipboardReadHTML(buffer_type, &html_stdstr, &gurl);
+  ClipboardReadHTML(buffer_type, &html_stdstr, &gurl,
+                    static_cast<uint32*>(fragment_start),
+                    static_cast<uint32*>(fragment_end));
   *source_url = gurl;
   return html_stdstr;
 }

@@ -49,8 +49,9 @@
       ];
 
       (function() {
-        // Switch to 'test harness' mode when loading from a file url.
-        var isHarness = document.location.protocol == 'file:';
+        // Switch to 'test harness' mode when loading from a file or http url.
+        var isHarness = document.location.protocol == 'file:' ||
+                        document.location.protocol == 'http:';
 
         // In test harness mode we load resources from relative dirs.
         var prefix = isHarness ? '../shared/' : 'chrome://resources/';
@@ -77,8 +78,10 @@
     <script src="js/util.js"></script>
     <script src="js/file_copy_manager.js"></script>
     <script src="js/file_manager.js"></script>
+    <script src="js/file_manager_pyauto.js"></script>
     <script src="js/dialogs.js"></script>
     <script src="js/main.js"></script>
+    <script src="js/metadata_provider.js"></script>
 
     <!-- We have to set some default title, or chrome will use the page
       -- name.  As soon as we init and change to a directory, we'll use

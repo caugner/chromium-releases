@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -29,25 +31,26 @@ static const int kMaxSessionsToShow = 10;
 static const int kInvalidId = -1;
 
 ForeignSessionHandler::ForeignSessionHandler() {
-  Init();
 }
 
 void ForeignSessionHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("getForeignSessions",
-      NewCallback(this,
-      &ForeignSessionHandler::HandleGetForeignSessions));
-  web_ui_->RegisterMessageCallback("openForeignSession",
-      NewCallback(this,
-      &ForeignSessionHandler::HandleOpenForeignSession));
+  Init();
+  web_ui()->RegisterMessageCallback("getForeignSessions",
+      base::Bind(&ForeignSessionHandler::HandleGetForeignSessions,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("openForeignSession",
+      base::Bind(&ForeignSessionHandler::HandleOpenForeignSession,
+                 base::Unretained(this)));
 }
 
 void ForeignSessionHandler::Init() {
+  Profile* profile = Profile::FromWebUI(web_ui());
   registrar_.Add(this, chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-                 NotificationService::AllSources());
+                 Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
-                 NotificationService::AllSources());
+                 Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED,
-                 NotificationService::AllSources());
+                 Source<Profile>(profile));
 }
 
 void ForeignSessionHandler::Observe(int type,
@@ -62,7 +65,7 @@ void ForeignSessionHandler::Observe(int type,
     case chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED:
       // Calling foreignSessions with empty list will automatically hide
       // foreign session section.
-      web_ui_->CallJavascriptFunction("foreignSessions", list_value);
+      web_ui()->CallJavascriptFunction("foreignSessions", list_value);
       break;
     default:
       NOTREACHED();
@@ -71,7 +74,7 @@ void ForeignSessionHandler::Observe(int type,
 
 SessionModelAssociator* ForeignSessionHandler::GetModelAssociator() {
   ProfileSyncService* service =
-      Profile::FromWebUI(web_ui_)->GetProfileSyncService();
+      Profile::FromWebUI(web_ui())->GetProfileSyncService();
   if (service == NULL)
     return NULL;
 
@@ -108,10 +111,10 @@ void ForeignSessionHandler::HandleGetForeignSessions(const ListValue* args) {
       added_count < kMaxSessionsToShow; ++i) {
     const SyncedSession* foreign_session = *i;
     scoped_ptr<ListValue> window_list(new ListValue());
-    for (std::vector<SessionWindow*>::const_iterator it =
+    for (SyncedSession::SyncedWindowMap::const_iterator it =
         foreign_session->windows.begin(); it != foreign_session->windows.end();
         ++it) {
-      SessionWindow* window = *it;
+      SessionWindow* window = it->second;
       scoped_ptr<DictionaryValue> window_data(new DictionaryValue());
       if (SessionWindowToValue(*window, window_data.get())) {
         window_data->SetString("sessionTag", foreign_session->session_tag);
@@ -125,7 +128,7 @@ void ForeignSessionHandler::HandleGetForeignSessions(const ListValue* args) {
     // Give ownership to |session_list|.
     session_list.Append(window_list.release());
   }
-  web_ui_->CallJavascriptFunction("foreignSessions", session_list);
+  web_ui()->CallJavascriptFunction("foreignSessions", session_list);
 }
 
 void ForeignSessionHandler::HandleOpenForeignSession(
@@ -164,7 +167,7 @@ void ForeignSessionHandler::HandleOpenForeignSession(
 
   SessionModelAssociator* associator = GetModelAssociator();
 
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   if (tab_id != kInvalidId) {
     // We don't actually care about |window_num|, this is just a sanity check.
     DCHECK_LT(kInvalidId, window_num);
@@ -175,18 +178,18 @@ void ForeignSessionHandler::HandleOpenForeignSession(
     }
     SessionRestore::RestoreForeignSessionTab(profile, *tab);
   } else {
-    std::vector<SessionWindow*> windows;
+    std::vector<const SessionWindow*> windows;
     // Note: we don't own the ForeignSessions themselves.
     if (!associator->GetForeignSession(session_string_value, &windows)) {
       LOG(ERROR) << "ForeignSessionHandler failed to get session data from"
           "SessionModelAssociator.";
       return;
     }
-    std::vector<SessionWindow*>::const_iterator iter_begin = windows.begin() +
-        ((window_num == kInvalidId) ? 0 : window_num);
-    std::vector<SessionWindow*>::const_iterator iter_end =
+    std::vector<const SessionWindow*>::const_iterator iter_begin =
+        windows.begin() + ((window_num == kInvalidId) ? 0 : window_num);
+    std::vector<const SessionWindow*>::const_iterator iter_end =
         ((window_num == kInvalidId) ?
-        std::vector<SessionWindow*>::const_iterator(windows.end()) :
+        std::vector<const SessionWindow*>::const_iterator(windows.end()) :
         iter_begin + 1);
     SessionRestore::RestoreForeignSessionWindows(profile, iter_begin, iter_end);
   }

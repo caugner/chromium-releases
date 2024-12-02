@@ -49,8 +49,6 @@ class BufferedResourceLoader
     kThresholdDefer,
   };
 
-  typedef Callback0::Type NetworkEventCallback;
-
   // |url| - URL for the resource to be loaded.
   // |first_byte_position| - First byte to start loading from,
   // |kPositionNotSpecified| for not specified.
@@ -81,8 +79,8 @@ class BufferedResourceLoader
   //   An error code that indicates the request has failed.
   // |event_callback| is called when the response is completed, data is
   // received, the request is suspended or resumed.
-  virtual void Start(net::CompletionCallback* callback,
-                     NetworkEventCallback* event_callback,
+  virtual void Start(net::OldCompletionCallback* callback,
+                     const base::Closure& event_callback,
                      WebKit::WebFrame* frame);
 
   // Stop this loader, cancels and request and release internal buffer.
@@ -100,7 +98,7 @@ class BufferedResourceLoader
   // - net::ERR_CACHE_MISS
   //   The read was made too far away from the current buffered position.
   virtual void Read(int64 position, int read_size,
-                    uint8* buffer, net::CompletionCallback* callback);
+                    uint8* buffer, net::OldCompletionCallback* callback);
 
   // Returns the position of the last byte buffered. Returns
   // |kPositionNotSpecified| if such value is not available.
@@ -267,17 +265,17 @@ class BufferedResourceLoader
   bool single_origin_;
 
   // Callback method that listens to network events.
-  scoped_ptr<NetworkEventCallback> event_callback_;
+  base::Closure event_callback_;
 
   // Members used during request start.
-  scoped_ptr<net::CompletionCallback> start_callback_;
+  scoped_ptr<net::OldCompletionCallback> start_callback_;
   int64 offset_;
   int64 content_length_;
   int64 instance_size_;
 
   // Members used during a read operation. They should be reset after each
   // read has completed or failed.
-  scoped_ptr<net::CompletionCallback> read_callback_;
+  scoped_ptr<net::OldCompletionCallback> read_callback_;
   int64 read_position_;
   size_t read_size_;
   uint8* read_buffer_;

@@ -46,7 +46,8 @@ class SessionFileReader {
         buffer_position_(0),
         available_count_(0) {
     file_.reset(new net::FileStream());
-    file_->Open(path, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ);
+    if (file_util::PathExists(path))
+      file_->Open(path, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ);
   }
   // Reads the contents of the file specified in the constructor, returning
   // true on success. It is up to the caller to free all SessionCommands
@@ -320,21 +321,21 @@ bool SessionBackend::AppendCommandsToFile(net::FileStream* file,
     else
       UMA_HISTOGRAM_COUNTS("SessionRestore.command_size", total_size);
     wrote = file->Write(reinterpret_cast<const char*>(&total_size),
-                        sizeof(total_size), NULL);
+                        sizeof(total_size), net::CompletionCallback());
     if (wrote != sizeof(total_size)) {
       NOTREACHED() << "error writing";
       return false;
     }
     id_type command_id = (*i)->id();
     wrote = file->Write(reinterpret_cast<char*>(&command_id),
-                        sizeof(command_id), NULL);
+                        sizeof(command_id), net::CompletionCallback());
     if (wrote != sizeof(command_id)) {
       NOTREACHED() << "error writing";
       return false;
     }
     if (content_size > 0) {
       wrote = file->Write(reinterpret_cast<char*>((*i)->contents()),
-                          content_size, NULL);
+                          content_size, net::CompletionCallback());
       if (wrote != content_size) {
         NOTREACHED() << "error writing";
         return false;
@@ -375,7 +376,7 @@ net::FileStream* SessionBackend::OpenAndWriteHeader(const FilePath& path) {
   header.signature = kFileSignature;
   header.version = kFileCurrentVersion;
   int wrote = file->Write(reinterpret_cast<char*>(&header),
-                          sizeof(header), NULL);
+                          sizeof(header), net::CompletionCallback());
   if (wrote != sizeof(header))
     return NULL;
   return file.release();

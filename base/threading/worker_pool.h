@@ -8,9 +8,12 @@
 
 #include "base/base_export.h"
 #include "base/callback.h"
-#include "base/tracked.h"
 
 class Task;
+
+namespace tracked_objects {
+class Location;
+}  // namespace tracked_objects
 
 namespace base {
 
@@ -35,6 +38,14 @@ class BASE_EXPORT WorkerPool {
                        Task* task, bool task_is_slow);
   static bool PostTask(const tracked_objects::Location& from_here,
                        const base::Closure& task, bool task_is_slow);
+
+  // Just like MessageLoopProxy::PostTaskAndReply, except the destination
+  // for |task| is a worker thread and you can specify |task_is_slow| just
+  // like you can for PostTask above.
+  static bool PostTaskAndReply(const tracked_objects::Location& from_here,
+                               const Closure& task,
+                               const Closure& reply,
+                               bool task_is_slow);
 };
 
 }  // namespace base

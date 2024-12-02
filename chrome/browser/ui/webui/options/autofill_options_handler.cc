@@ -6,6 +6,8 @@
 
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
@@ -15,6 +17,7 @@
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/autofill/phone_number_i18n.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
@@ -96,9 +99,15 @@ DictionaryValue* GetCountryData() {
 void GetValueList(const AutofillProfile& profile,
                   AutofillFieldType type,
                   scoped_ptr<ListValue>* list) {
+  list->reset(new ListValue);
+
   std::vector<string16> values;
   profile.GetMultiInfo(type, &values);
-  list->reset(new ListValue);
+
+  // |GetMultiInfo()| always returns at least one, potentially empty, item.
+  if (values.size() == 1 && values.front().empty())
+    return;
+
   for (size_t i = 0; i < values.size(); ++i) {
     (*list)->Set(i, Value::CreateStringValue(values[i]));
   }
@@ -117,8 +126,71 @@ void SetValueList(const ListValue* list,
   profile->SetMultiInfo(type, values);
 }
 
-// Pulls the phone (or fax) number |index|, |phone_number_list|, and
-// |country_code| from the |args| input.
+// Get the multi-valued element for |type| and return it in |ListValue| form.
+void GetNameList(const AutofillProfile& profile,
+                 scoped_ptr<ListValue>* names) {
+  names->reset(new ListValue);
+
+  std::vector<string16> first_names;
+  std::vector<string16> middle_names;
+  std::vector<string16> last_names;
+  profile.GetMultiInfo(NAME_FIRST, &first_names);
+  profile.GetMultiInfo(NAME_MIDDLE, &middle_names);
+  profile.GetMultiInfo(NAME_LAST, &last_names);
+  DCHECK_EQ(first_names.size(), middle_names.size());
+  DCHECK_EQ(first_names.size(), last_names.size());
+
+  // |GetMultiInfo()| always returns at least one, potentially empty, item.
+  if (first_names.size() == 1 && first_names.front().empty() &&
+      middle_names.front().empty() && last_names.front().empty()) {
+    return;
+  }
+
+  for (size_t i = 0; i < first_names.size(); ++i) {
+    ListValue* name = new ListValue;  // owned by |list|
+    name->Set(0, Value::CreateStringValue(first_names[i]));
+    name->Set(1, Value::CreateStringValue(middle_names[i]));
+    name->Set(2, Value::CreateStringValue(last_names[i]));
+    (*names)->Set(i, name);
+  }
+}
+
+// Set the multi-valued element for |type| from input |list| values.
+void SetNameList(const ListValue* names,
+                 AutofillProfile* profile) {
+  const size_t size = names->GetSize();
+  std::vector<string16> first_names(size);
+  std::vector<string16> middle_names(size);
+  std::vector<string16> last_names(size);
+
+  for (size_t i = 0; i < size; ++i) {
+    ListValue* name;
+    bool success = names->GetList(i, &name);
+    DCHECK(success);
+
+    string16 first_name;
+    success = name->GetString(0, &first_name);
+    DCHECK(success);
+    first_names[i] = first_name;
+
+    string16 middle_name;
+    success = name->GetString(1, &middle_name);
+    DCHECK(success);
+    middle_names[i] = middle_name;
+
+    string16 last_name;
+    success = name->GetString(2, &last_name);
+    DCHECK(success);
+    last_names[i] = last_name;
+  }
+
+  profile->SetMultiInfo(NAME_FIRST, first_names);
+  profile->SetMultiInfo(NAME_MIDDLE, middle_names);
+  profile->SetMultiInfo(NAME_LAST, last_names);
+}
+
+// Pulls the phone number |index|, |phone_number_list|, and |country_code| from
+// the |args| input.
 void ExtractPhoneNumberInformation(const ListValue* args,
                                    size_t* index,
                                    ListValue** phone_number_list,
@@ -205,6 +277,7 @@ void AutofillOptionsHandler::GetLocalizedValues(
     { "autofillCreditCards", IDS_AUTOFILL_CREDITCARDS_GROUP_NAME },
     { "autofillAddAddress", IDS_AUTOFILL_ADD_ADDRESS_BUTTON },
     { "autofillAddCreditCard", IDS_AUTOFILL_ADD_CREDITCARD_BUTTON },
+    { "autofillEditProfileButton", IDS_AUTOFILL_EDIT_PROFILE_BUTTON },
     { "helpButton", IDS_AUTOFILL_HELP_LABEL },
     { "addAddressTitle", IDS_AUTOFILL_ADD_ADDRESS_CAPTION },
     { "editAddressTitle", IDS_AUTOFILL_EDIT_ADDRESS_CAPTION },
@@ -224,37 +297,43 @@ void AutofillOptionsHandler::GetLocalizedValues(
 }
 
 void AutofillOptionsHandler::Initialize() {
-  personal_data_ = Profile::FromWebUI(web_ui_)->GetPersonalDataManager();
-  personal_data_->SetObserver(this);
-
-  LoadAutofillData();
+  personal_data_ = PersonalDataManagerFactory::GetForProfile(
+      Profile::FromWebUI(web_ui_));
+  // personal_data_ is NULL in guest mode on Chrome OS.
+  if (personal_data_) {
+    personal_data_->SetObserver(this);
+    LoadAutofillData();
+  }
 }
 
 void AutofillOptionsHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(
       "removeAddress",
-      NewCallback(this, &AutofillOptionsHandler::RemoveAddress));
+      base::Bind(&AutofillOptionsHandler::RemoveAddress,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "removeCreditCard",
-      NewCallback(this, &AutofillOptionsHandler::RemoveCreditCard));
+      base::Bind(&AutofillOptionsHandler::RemoveCreditCard,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "loadAddressEditor",
-      NewCallback(this, &AutofillOptionsHandler::LoadAddressEditor));
+      base::Bind(&AutofillOptionsHandler::LoadAddressEditor,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "loadCreditCardEditor",
-      NewCallback(this, &AutofillOptionsHandler::LoadCreditCardEditor));
+      base::Bind(&AutofillOptionsHandler::LoadCreditCardEditor,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "setAddress",
-      NewCallback(this, &AutofillOptionsHandler::SetAddress));
+      base::Bind(&AutofillOptionsHandler::SetAddress, base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "setCreditCard",
-      NewCallback(this, &AutofillOptionsHandler::SetCreditCard));
+      base::Bind(&AutofillOptionsHandler::SetCreditCard,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "validatePhoneNumbers",
-      NewCallback(this, &AutofillOptionsHandler::ValidatePhoneNumbers));
-  web_ui_->RegisterMessageCallback(
-      "validateFaxNumbers",
-      NewCallback(this, &AutofillOptionsHandler::ValidateFaxNumbers));
+      base::Bind(&AutofillOptionsHandler::ValidatePhoneNumbers,
+                 base::Unretained(this)));
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -267,32 +346,36 @@ void AutofillOptionsHandler::SetAddressOverlayStrings(
     DictionaryValue* localized_strings) {
   localized_strings->SetString("autofillEditAddressTitle",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_EDIT_ADDRESS_CAPTION));
-  localized_strings->SetString("fullNameLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_FULL_NAME));
-  localized_strings->SetString("companyNameLabel",
+  localized_strings->SetString("autofillFirstNameLabel",
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_FIRST_NAME));
+  localized_strings->SetString("autofillMiddleNameLabel",
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_MIDDLE_NAME));
+  localized_strings->SetString("autofillLastNameLabel",
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_LAST_NAME));
+  localized_strings->SetString("autofillCompanyNameLabel",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_COMPANY_NAME));
-  localized_strings->SetString("addrLine1Label",
+  localized_strings->SetString("autofillAddrLine1Label",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADDRESS_LINE_1));
-  localized_strings->SetString("addrLine2Label",
+  localized_strings->SetString("autofillAddrLine2Label",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADDRESS_LINE_2));
-  localized_strings->SetString("cityLabel",
+  localized_strings->SetString("autofillCityLabel",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_CITY));
-  localized_strings->SetString("countryLabel",
+  localized_strings->SetString("autofillCountryLabel",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_COUNTRY));
-  localized_strings->SetString("phoneLabel",
+  localized_strings->SetString("autofillPhoneLabel",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_PHONE));
-  localized_strings->SetString("faxLabel",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_FAX));
-  localized_strings->SetString("emailLabel",
+  localized_strings->SetString("autofillEmailLabel",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_EMAIL));
-  localized_strings->SetString("addNewNamePlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_NEW_NAME));
-  localized_strings->SetString("addNewPhonePlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_NEW_PHONE));
-  localized_strings->SetString("addNewFaxPlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_NEW_FAX));
-  localized_strings->SetString("addNewEmailPlaceholder",
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_NEW_EMAIL));
+  localized_strings->SetString("autofillAddFirstNamePlaceholder",
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_FIRST_NAME));
+  localized_strings->SetString("autofillAddMiddleNamePlaceholder",
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_MIDDLE_NAME));
+  localized_strings->SetString("autofillAddLastNamePlaceholder",
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_LAST_NAME));
+  localized_strings->SetString("autofillAddPhonePlaceholder",
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_PHONE));
+  localized_strings->SetString("autofillAddEmailPlaceholder",
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_ADD_EMAIL));
 
   std::string app_locale = AutofillCountry::ApplicationLocale();
   std::string default_country_code =
@@ -393,7 +476,7 @@ void AutofillOptionsHandler::LoadAddressEditor(const ListValue* args) {
   DictionaryValue address;
   address.SetString("guid", profile->guid());
   scoped_ptr<ListValue> list;
-  GetValueList(*profile, NAME_FULL, &list);
+  GetNameList(*profile, &list);
   address.Set("fullName", list.release());
   address.SetString("companyName", profile->GetInfo(COMPANY_NAME));
   address.SetString("addrLine1", profile->GetInfo(ADDRESS_HOME_LINE1));
@@ -404,8 +487,6 @@ void AutofillOptionsHandler::LoadAddressEditor(const ListValue* args) {
   address.SetString("country", profile->CountryCode());
   GetValueList(*profile, PHONE_HOME_WHOLE_NUMBER, &list);
   address.Set("phone", list.release());
-  GetValueList(*profile, PHONE_FAX_WHOLE_NUMBER, &list);
-  address.Set("fax", list.release());
   GetValueList(*profile, EMAIL_ADDRESS, &list);
   address.Set("email", list.release());
 
@@ -463,7 +544,7 @@ void AutofillOptionsHandler::SetAddress(const ListValue* args) {
   string16 value;
   ListValue* list_value;
   if (args->GetList(1, &list_value))
-    SetValueList(list_value, NAME_FULL, &profile);
+    SetNameList(list_value, &profile);
   if (args->GetString(2, &value))
     profile.SetInfo(COMPANY_NAME, value);
   if (args->GetString(3, &value))
@@ -481,8 +562,6 @@ void AutofillOptionsHandler::SetAddress(const ListValue* args) {
   if (args->GetList(9, &list_value))
     SetValueList(list_value, PHONE_HOME_WHOLE_NUMBER, &profile);
   if (args->GetList(10, &list_value))
-    SetValueList(list_value, PHONE_FAX_WHOLE_NUMBER, &profile);
-  if (args->GetList(11, &list_value))
     SetValueList(list_value, EMAIL_ADDRESS, &profile);
 
   if (!guid::IsValidGUID(profile.guid())) {
@@ -532,15 +611,4 @@ void AutofillOptionsHandler::ValidatePhoneNumbers(const ListValue* args) {
 
   web_ui_->CallJavascriptFunction(
     "AutofillEditAddressOverlay.setValidatedPhoneNumbers", *list_value);
-}
-
-void AutofillOptionsHandler::ValidateFaxNumbers(const ListValue* args) {
-  if (!personal_data_->IsDataLoaded())
-    return;
-
-  ListValue* list_value = NULL;
-  ValidatePhoneArguments(args, &list_value);
-
-  web_ui_->CallJavascriptFunction(
-      "AutofillEditAddressOverlay.setValidatedFaxNumbers", *list_value);
 }

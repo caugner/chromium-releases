@@ -21,6 +21,7 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -46,7 +47,7 @@ void RecordSSLBlockingPageStats(SSLBlockingPageEvent event) {
 SSLBlockingPage::SSLBlockingPage(
     SSLCertErrorHandler* handler,
     bool overridable,
-    Callback2<SSLCertErrorHandler*, bool>::Type* callback)
+    const base::Callback<void(SSLCertErrorHandler*, bool)>& callback)
     : ChromeInterstitialPage(
           tab_util::GetTabContentsByID(
               handler->render_process_host_id(), handler->tab_contents_id()),
@@ -59,7 +60,7 @@ SSLBlockingPage::SSLBlockingPage(
 }
 
 SSLBlockingPage::~SSLBlockingPage() {
-  if (callback_) {
+  if (!callback_.is_null()) {
     // The page is closed without the user having chosen what to do, default to
     // deny.
     NotifyDenyCertificate();
@@ -149,20 +150,18 @@ void SSLBlockingPage::NotifyDenyCertificate() {
   // It's possible that callback_ may not exist if the user clicks "Proceed"
   // followed by pressing the back button before the interstitial is hidden.
   // In that case the certificate will still be treated as allowed.
-  if (!callback_)
+  if (callback_.is_null())
     return;
 
-  callback_->Run(handler_, false);
-  delete callback_;
-  callback_ = NULL;
+  callback_.Run(handler_, false);
+  callback_.Reset();
 }
 
 void SSLBlockingPage::NotifyAllowCertificate() {
-  DCHECK(callback_);
+  DCHECK(!callback_.is_null());
 
-  callback_->Run(handler_, true);
-  delete callback_;
-  callback_ = NULL;
+  callback_.Run(handler_, true);
+  callback_.Reset();
 }
 
 // static

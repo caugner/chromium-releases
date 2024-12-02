@@ -31,9 +31,10 @@ void HtmlDialogTabContentsDelegate::Detach() {
 // TODO(adriansc): Remove this method once refactoring changed all call sites.
 TabContents* HtmlDialogTabContentsDelegate::OpenURLFromTab(
     TabContents* source, const GURL& url, const GURL& referrer,
-    WindowOpenDisposition disposition, PageTransition::Type transition) {
+    WindowOpenDisposition disposition, content::PageTransition transition) {
   return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition));
+                        OpenURLParams(url, referrer, disposition, transition,
+                                      false));
 }
 
 TabContents* HtmlDialogTabContentsDelegate::OpenURLFromTab(
@@ -47,7 +48,7 @@ TabContents* HtmlDialogTabContentsDelegate::OpenURLFromTab(
     nav_params.referrer = params.referrer;
     if (source && source->is_crashed() &&
         params.disposition == CURRENT_TAB &&
-        params.transition == PageTransition::LINK)
+        params.transition == content::PAGE_TRANSITION_LINK)
       nav_params.disposition = NEW_FOREGROUND_TAB;
     else
       nav_params.disposition = params.disposition;
@@ -90,6 +91,6 @@ bool HtmlDialogTabContentsDelegate::IsPopup(const TabContents* source) const {
 
 bool HtmlDialogTabContentsDelegate::ShouldAddNavigationToHistory(
     const history::HistoryAddPageArgs& add_page_args,
-    NavigationType::Type navigation_type) {
+    content::NavigationType navigation_type) {
   return false;
 }

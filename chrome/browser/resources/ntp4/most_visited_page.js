@@ -30,8 +30,8 @@ cr.define('ntp4', function() {
     initialize: function() {
       this.reset();
 
-      this.addEventListener('click', this.handleClick_.bind(this));
-      this.addEventListener('keydown', this.handleKeyDown_.bind(this));
+      this.addEventListener('click', this.handleClick_);
+      this.addEventListener('keydown', this.handleKeyDown_);
     },
 
     get index() {
@@ -61,7 +61,7 @@ cr.define('ntp4', function() {
           '<div class="color-stripe"></div>' +
           '<span class="title"></span>';
 
-      this.removeAttribute('tabIndex');
+      this.tabIndex = -1;
       this.data_ = null;
       this.removeAttribute('id');
       this.title = '';
@@ -87,8 +87,7 @@ cr.define('ntp4', function() {
       var id = tileID++;
       this.id = 'most-visited-tile-' + id;
       this.data_ = data;
-      // TODO(estade): this shouldn't be focusable if the page isn't showing.
-      this.tabIndex = 0;
+      this.classList.add('focusable');
 
       var faviconDiv = this.querySelector('.favicon');
       var faviconUrl = data.faviconUrl ||
@@ -141,7 +140,8 @@ cr.define('ntp4', function() {
                     [encodeURIComponent(this.href),
                      ntp4.APP_LAUNCH.NTP_MOST_VISITED]);
         // Records the index of this tile.
-        chrome.send('recordInHistogram', ['NTP_MostVisited', this.index, 8]);
+        chrome.send('metricsHandler:recordInHistogram',
+                    ['NTP_MostVisited', this.index, 8]);
       }
     },
 
@@ -149,8 +149,8 @@ cr.define('ntp4', function() {
      * Allow blacklisting most visited site using the keyboard.
      */
     handleKeyDown_: function(e) {
-      if (!IS_MAC && e.keyCode == 46 || // Del
-          IS_MAC && e.metaKey && e.keyCode == 8) { // Cmd + Backspace
+      if (!cr.isMac && e.keyCode == 46 || // Del
+          cr.isMac && e.metaKey && e.keyCode == 8) { // Cmd + Backspace
         this.blacklist_();
       }
     },

@@ -366,9 +366,9 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
         if (info->item.mask & TVIF_CHILDREN)
           info->item.cChildren = model_->GetChildCount(details->node);
         if (info->item.mask & TVIF_TEXT) {
-          std::wstring text = details->node->GetTitle();
           DCHECK(info->item.cchTextMax);
 
+          string16 text = details->node->GetTitle();
           // Adjust the string direction if such adjustment is required.
           base::i18n::AdjustStringForLocaleDirection(&text);
 
@@ -699,7 +699,7 @@ HIMAGELIST TreeView::CreateImageList() {
           model_images[i].height() != height) {
         gfx::CanvasSkia canvas(width, height, false);
         // Make the background completely transparent.
-        canvas.drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
+        canvas.sk_canvas()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
 
         // Draw our icons into this canvas.
         int height_offset = (height - model_images[i].height()) / 2;
@@ -752,7 +752,7 @@ LRESULT CALLBACK TreeView::TreeWndProc(HWND window,
       if (canvas.isEmpty())
         return 0;
 
-      HDC dc = skia::BeginPlatformPaint(&canvas);
+      HDC dc = skia::BeginPlatformPaint(canvas.sk_canvas());
       if (base::i18n::IsRTL()) {
         // gfx::CanvasSkia ends up configuring the DC with a mode of
         // GM_ADVANCED. For some reason a graphics mode of ADVANCED triggers
@@ -786,7 +786,7 @@ LRESULT CALLBACK TreeView::TreeWndProc(HWND window,
         // over we copy the right bits.
         SetViewportOrgEx(dc, 0, 0, NULL);
       }
-      skia::EndPlatformPaint(&canvas);
+      skia::EndPlatformPaint(canvas.sk_canvas());
       return 0;
     }
 

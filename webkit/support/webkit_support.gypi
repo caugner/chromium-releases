@@ -37,7 +37,8 @@
         'drt_application_mac.h',
         'drt_application_mac.mm',
         'platform_support.h',
-        'platform_support_gtk.cc',
+        'platform_support_android.cc',
+        'platform_support_linux.cc',
         'platform_support_mac.mm',
         'platform_support_win.cc',
         'test_webkit_platform_support.cc',
@@ -82,6 +83,7 @@
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/ui/ui.gyp:ui',
         'glue',
+        'webkit_support_gfx',
       ],
       'export_dependent_settings': [
         '<(DEPTH)/base/base.gyp:base',
@@ -112,8 +114,6 @@
         '<(DEPTH)/webkit/tools/test_shell/test_shell_webmimeregistry_impl.h',
         'simple_database_system.cc',
         'simple_database_system.h',
-        'webkit_support_gfx.h',
-        'webkit_support_gfx.cc',
       ],
       'conditions': [
         ['inside_chromium_build==0', {
@@ -121,6 +121,26 @@
             'setup_third_party.gyp:third_party_headers',
           ],
         }],
+      ],
+    },
+
+    {
+      'target_name': 'webkit_support_gfx',
+      'type': 'static_library',
+      'dependencies': [
+        '<(DEPTH)/third_party/libpng/libpng.gyp:libpng',
+      ],
+      'sources': [
+        'webkit_support_gfx.h',
+        'webkit_support_gfx.cc',
+      ],
+      'include_dirs': [
+        '<(DEPTH)',
+      ],
+      'conditions': [
+          ['OS=="android"', {
+              'toolsets': ['target', 'host'],
+          }],
       ],
     },
   ],

@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_TABS_TAB_STRIP_MODEL_DELEGATE_H_
 #pragma once
 
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 
 class Browser;
 class DockInfo;
@@ -65,7 +65,7 @@ class TabStripModelDelegate {
       const GURL& url,
       const GURL& referrer,
       Profile* profile,
-      PageTransition::Type transition,
+      content::PageTransition transition,
       bool defer_load,
       SiteInstance* instance) const = 0;
 
@@ -111,18 +111,6 @@ class TabStripModelDelegate {
 
   // Returns true if any of the tabs can be closed.
   virtual bool CanCloseTab() const = 0;
-
-  // Returns true if the vertical tabstrip presentation should be used.
-  virtual bool UseVerticalTabs() const = 0;
-
-  // Toggles the use of the vertical tabstrip.
-  virtual void ToggleUseVerticalTabs() = 0;
-
-  // Returns true if the compact navigation bar should be used.
-  virtual bool UseCompactNavigationBar() const = 0;
-
-  // Toggles the use of the compact navigation bar.
-  virtual void ToggleUseCompactNavigationBar() = 0;
 
   // Returns true if the tab strip can use large icons.
   virtual bool LargeIconsPermitted() const = 0;

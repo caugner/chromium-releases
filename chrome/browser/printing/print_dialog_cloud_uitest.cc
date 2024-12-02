@@ -24,6 +24,7 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_types.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
@@ -204,7 +205,8 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
                             string16(),
                             string16(),
                             std::string("application/pdf"),
-                            true));
+                            true,
+                            false));
   }
 
   bool handler_added_;

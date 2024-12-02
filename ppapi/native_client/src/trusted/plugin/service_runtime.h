@@ -1,6 +1,6 @@
 /* -*- c++ -*- */
 /*
- * Copyright (c) 2011 The Native Client Authors. All rights reserved.
+ * Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -92,7 +92,9 @@ class PluginReverseInterface: public nacl::ReverseInterface {
  public:
   PluginReverseInterface(nacl::WeakRefAnchor* anchor,
                          Plugin* plugin,
-                         pp::CompletionCallback init_done_cb);
+                         ServiceRuntime* service_runtime,
+                         pp::CompletionCallback init_done_cb,
+                         pp::CompletionCallback crash_cb);
 
   virtual ~PluginReverseInterface();
 
@@ -107,6 +109,10 @@ class PluginReverseInterface: public nacl::ReverseInterface {
   virtual bool OpenManifestEntry(nacl::string url_key, int32_t* out_desc);
 
   virtual bool CloseManifestEntry(int32_t desc);
+
+  virtual void ReportCrash();
+
+  virtual void ReportExitStatus(int exit_status);
 
  protected:
   virtual void Log_MainThreadContinuation(LogToJavaScriptConsoleResource* p,
@@ -128,11 +134,13 @@ class PluginReverseInterface: public nacl::ReverseInterface {
   nacl::WeakRefAnchor* anchor_;  // holds a ref
   Plugin* plugin_;  // value may be copied, but should be used only in
                     // main thread in WeakRef-protected callbacks.
+  ServiceRuntime* service_runtime_;
   NaClMutex mu_;
   NaClCondVar cv_;
   bool shutting_down_;
 
   pp::CompletionCallback init_done_cb_;
+  pp::CompletionCallback crash_cb_;
 };
 
 //  ServiceRuntime abstracts a NativeClient sel_ldr instance.
@@ -141,7 +149,8 @@ class ServiceRuntime {
   // TODO(sehr): This class should also implement factory methods, using the
   // Start method below.
   ServiceRuntime(Plugin* plugin,
-                 pp::CompletionCallback init_done_cb);
+                 pp::CompletionCallback init_done_cb,
+                 pp::CompletionCallback crash_cb);
   // The destructor terminates the sel_ldr process.
   ~ServiceRuntime();
 
@@ -158,6 +167,13 @@ class ServiceRuntime {
   bool Log(int severity, nacl::string msg);
   Plugin* plugin() const { return plugin_; }
   void Shutdown();
+
+  // exit_status is -1 when invalid; when we set it, we will ensure
+  // that it is non-negative (the portion of the exit status from the
+  // nexe that is transferred is the low 8 bits of the argument to the
+  // exit syscall).
+  int exit_status();  // const, but grabs mutex etc.
+  void set_exit_status(int exit_status);
 
   nacl::DescWrapper* async_receive_desc() { return async_receive_desc_.get(); }
   nacl::DescWrapper* async_send_desc() { return async_send_desc_.get(); }
@@ -182,6 +198,9 @@ class ServiceRuntime {
   nacl::WeakRefAnchor* anchor_;
 
   PluginReverseInterface* rev_interface_;
+
+  NaClMutex mu_;
+  int exit_status_;
 };
 
 }  // namespace plugin

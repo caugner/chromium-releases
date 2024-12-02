@@ -3,7 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Layout tests module that is necessary for tha layout analyzer.
+"""Layout tests module that is necessary for the layout analyzer.
 
 Layout tests are stored in Webkit SVN and LayoutTestCaseManager collects these
 layout test cases (including description).
@@ -45,36 +45,39 @@ class LayoutTests(object):
   """
 
   def __init__(self, layouttest_root_path=DEFAULT_LAYOUTTEST_LOCATION,
-               csv_file_path=None):
+               parent_location_list=None, filter_names=None,
+               recursion=False):
     """Initialize LayoutTests using root and CSV file.
 
     Args:
       layouttest_root_path: A location string where Webkit layout tests are
           stored.
-      csv_file_path: CSV file path. The file contains a list of test names
-          in CSV format. When this parameter is not specified, the names of
-          all layout tests are retrieved under the root directory.
+      parent_location_list: A list of parent directories that are needed for
+          getting layout tests.
+      filter_names: A list of test name patterns that are used for filtering
+          test names (e.g., media/*.html).
+      recursion: a boolean indicating whether the test names are sought
+          recursively.
     """
-    filter_names = []
-    if csv_file_path:
-      filter_names = LayoutTests.GetLayoutTestNamesFromCSV(csv_file_path)
-    parent_location_list = LayoutTests.GetParentDirectoryList(filter_names)
+
     if layouttest_root_path.startswith('http://'):
       name_map = self.GetLayoutTestNamesFromSVN(parent_location_list,
-                                                layouttest_root_path)
+                                                layouttest_root_path,
+                                                recursion)
     else:
       # TODO(imasaki): support other forms such as CSV for reading test names.
       pass
     self.name_map = copy.copy(name_map)
-    # Filter names.
-    for lt_name in name_map.keys():
-      match = False
-      for filter_name in filter_names:
-        if re.search(filter_name, lt_name):
-          match = True
-          break
-      if not match:
-        del self.name_map[lt_name]
+    if filter_names:
+      # Filter names.
+      for lt_name in name_map.keys():
+        match = False
+        for filter_name in filter_names:
+          if re.search(filter_name, lt_name):
+            match = True
+            break
+        if not match:
+          del self.name_map[lt_name]
     # We get description only for the filtered names.
     for lt_name in self.name_map.keys():
       self.name_map[lt_name] = LayoutTests.GetTestDescriptionFromSVN(lt_name)
@@ -142,25 +145,21 @@ class LayoutTests(object):
 
   @staticmethod
   def GetLayoutTestNamesFromSVN(parent_location_list,
-                                layouttest_root_path):
+                                layouttest_root_path, recursion):
     """Get LayoutTest names from Webkit SVN.
 
     Args:
       parent_location_list: a list of locations of parent directories. This is
           used when getting layout tests using PySVN.list().
       layouttest_root_path: the root path of the Webkit SVN directory.
+      recursion: a boolean indicating whether the test names are sought
+          recursively.
 
     Returns:
       a map containing test names as keys for de-dupe.
     """
     client = pysvn.Client()
     # Get directory structure in the Webkit SVN.
-    if parent_location_list is None:
-      # Try to get all the layout tests by enabling recursion option.
-      parent_location_list = ['/\S+\.html$']
-      recursion = True
-    else:
-      recursion = False
     name_map = {}
     for parent_location in parent_location_list:
       if parent_location.endswith('/'):
@@ -174,7 +173,7 @@ class LayoutTests(object):
           file_name = file_name[0].repos_path.encode(default_encoding)
           # Remove the word '/truck/LayoutTests'.
           file_name = file_name.replace('/trunk/LayoutTests/', '')
-          if file_name.endswith('.html'):
+          if file_name.endswith('.html') or file_name.endswith('.svg'):
             name_map[file_name] = True
     return name_map
 
@@ -246,14 +245,21 @@ class LayoutTests(object):
       root_path: the root path of the Webkit SVN directory.
 
     Returns:
-      A test description string.
+      A test description string. Returns an empty string is returned if the
+          test description cannot be extracted.
 
     Raises:
       A URLError when the layout test is not available.
     """
     if test_location.endswith('.html'):
       url = root_path + test_location
-      resp = urllib2.urlopen(url)
+      try:
+        resp = urllib2.urlopen(url)
+      except urllib2.HTTPError:
+        # Some files with different languages cause this exception.
+        # Return an empty description in this case.
+        return ''
       if resp.code == 200:
         return LayoutTests.ExtractTestDescription(resp.read())
-      raise URLError('Fail to get layout test HTML file from %s.' % url)
+      raise urllib2.URLError(
+          'Fail to get layout test HTML file from %s.' % url)

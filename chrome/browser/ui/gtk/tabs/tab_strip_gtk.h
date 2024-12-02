@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/task.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -84,8 +85,8 @@ class TabStripGtk : public TabStripModelObserver,
   // Destroys the active drag controller.
   void DestroyDragController();
 
-  // Removes the drag source tab from this tabstrip, and deletes it.
-  void DestroyDraggedSourceTab(TabGtk* tab);
+  // Removes |dragged_tab| from this tabstrip, and deletes it.
+  void DestroyDraggedTab(TabGtk* dragged_tab);
 
   // Retrieve the ideal bounds for the Tab at the specified index.
   gfx::Rect GetIdealBounds(int index);
@@ -110,7 +111,12 @@ class TabStripGtk : public TabStripModelObserver,
   virtual void TabMoved(TabContentsWrapper* contents,
                         int from_index,
                         int to_index);
-  virtual void TabSelectionChanged(const TabStripSelectionModel& old_model);
+  virtual void ActiveTabChanged(TabContentsWrapper* old_contents,
+                                TabContentsWrapper* new_contents,
+                                int index,
+                                bool user_gesture);
+  virtual void TabSelectionChanged(TabStripModel* tab_strip_model,
+                                   const TabStripSelectionModel& old_model);
   virtual void TabChangedAt(TabContentsWrapper* contents, int index,
                             TabChangeType change_type);
   virtual void TabReplacedAt(TabStripModel* tab_strip_model,
@@ -228,6 +234,11 @@ class TabStripGtk : public TabStripModelObserver,
     DISALLOW_COPY_AND_ASSIGN(DropInfo);
   };
 
+  // Map signal handler that sets initial z-ordering. The widgets need to be
+  // realized before we can set the stacking. We use the "map" signal since the
+  // "realize" signal is called before the child widgets get realized.
+  CHROMEGTK_CALLBACK_0(TabStripGtk, void, OnMap);
+
   // expose-event handler that redraws the tabstrip
   CHROMEGTK_CALLBACK_1(TabStripGtk, gboolean, OnExpose, GdkEventExpose*);
 
@@ -317,9 +328,17 @@ class TabStripGtk : public TabStripModelObserver,
   // value returned indicates whether a resize actually took place.
   bool ResizeLayoutTabs();
 
+  // See ResizeLayoutTabs. Does not return success or failure. Necessitated by
+  // base::Bind and friends, which cannot handle a WeakPtr for a closure that
+  // has a return value.
+  void ResizeLayoutTabsWithoutResult();
+
   // Returns whether or not the cursor is currently in the "tab strip zone"
   // which is defined as the region above the TabStrip and a bit below it.
   bool IsCursorInTabStripZone() const;
+
+  // Reset the Z-ordering of tabs.
+  void ReStack();
 
   // Ensure that the message loop observer used for event spying is added and
   // removed appropriately so we can tell when to resize layout the tab strip.
@@ -460,7 +479,7 @@ class TabStripGtk : public TabStripModelObserver,
 
   // A factory that is used to construct a delayed callback to the
   // ResizeLayoutTabsNow method.
-  ScopedRunnableMethodFactory<TabStripGtk> resize_layout_factory_;
+  base::WeakPtrFactory<TabStripGtk> weak_factory_;
 
   // True if the tabstrip has already been added as a MessageLoop observer.
   bool added_as_message_loop_observer_;

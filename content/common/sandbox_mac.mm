@@ -5,7 +5,6 @@
 #include "content/common/sandbox_mac.h"
 
 #import <Cocoa/Cocoa.h>
-#import <OpenGL/OpenGL.h>
 
 extern "C" {
 #include <sandbox.h>
@@ -15,6 +14,7 @@ extern "C" {
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/mac/mac_util.h"
 #include "base/rand_util_c.h"
@@ -27,7 +27,7 @@ extern "C" {
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "content/common/chrome_application_mac.h"
-#include "content/common/content_switches.h"
+#include "content/public/common/content_switches.h"
 #include "unicode/uchar.h"
 #include "ui/gfx/gl/gl_surface.h"
 
@@ -67,6 +67,15 @@ bool EscapeSingleChar(char c, std::string* dst) {
 
   dst->append(append);
   return true;
+}
+
+// Errors quoting strings for the Sandbox profile are always fatal, report them
+// in a central place.
+NOINLINE void FatalStringQuoteException(const std::string& str) {
+  // Copy bad string to the stack so it's recorded in the crash dump.
+  char bad_string[256] = {0};
+  base::strlcpy(bad_string, str.c_str(), arraysize(bad_string));
+  LOG(FATAL) << "String quoting failed " << bad_string;
 }
 
 }  // namespace
@@ -240,16 +249,6 @@ void Sandbox::SandboxWarmup(SandboxProcessType sandbox_type) {
   // Process-type dependent warm-up.
   switch (sandbox_type) {
     case SANDBOX_TYPE_GPU:
-      {  // GPU-related stuff is very slow without this, probably because
-         // the sandbox prevents loading graphics drivers or some such.
-         CGLPixelFormatAttribute attribs[] = { (CGLPixelFormatAttribute)0 };
-         CGLPixelFormatObj format;
-         GLint n;
-         CGLChoosePixelFormat(attribs, &format, &n);
-         if (format)
-           CGLReleasePixelFormat(format);
-      }
-
       {
          // Preload either the desktop GL or the osmesa so, depending on the
          // --use-gl flag.
@@ -300,7 +299,7 @@ NSString* Sandbox::BuildAllowDirectoryAccessSandboxString(
        ++i) {
     std::string subdir_escaped;
     if (!QuotePlainString(i->value(), &subdir_escaped)) {
-      LOG(FATAL) << "String quoting failed " << i->value();
+      FatalStringQuoteException(i->value());
       return nil;
     }
 
@@ -431,11 +430,13 @@ bool Sandbox::PostProcessSandboxProfile(
           break;
 
         case SandboxSubstring::LITERAL:
-          QuotePlainString(replacement.value(), &new_piece);
+          if (!QuotePlainString(replacement.value(), &new_piece))
+            FatalStringQuoteException(replacement.value());
           break;
 
         case SandboxSubstring::REGEX:
-          QuoteStringForRegex(replacement.value(), &new_piece);
+          if (!QuoteStringForRegex(replacement.value(), &new_piece))
+            FatalStringQuoteException(replacement.value());
           break;
       }
     }
@@ -513,7 +514,7 @@ bool Sandbox::EnableSandbox(SandboxProcessType sandbox_type,
 
   // Splice the path of the user's home directory into the sandbox profile
   // (see renderer.sb for details).
-  std::string home_dir = base::SysNSStringToUTF8(NSHomeDirectory());
+  std::string home_dir = [NSHomeDirectory() fileSystemRepresentation];
 
   FilePath home_dir_canonical(home_dir);
   GetCanonicalSandboxPath(&home_dir_canonical);

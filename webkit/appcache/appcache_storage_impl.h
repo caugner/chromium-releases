@@ -15,6 +15,7 @@
 #include "base/task.h"
 #include "webkit/appcache/appcache_database.h"
 #include "webkit/appcache/appcache_disk_cache.h"
+#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_storage.h"
 
 namespace appcache {
@@ -25,6 +26,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   virtual ~AppCacheStorageImpl();
 
   void Initialize(const FilePath& cache_directory,
+                  base::MessageLoopProxy* db_thread,
                   base::MessageLoopProxy* cache_thread);
   void Disable();
   bool is_disabled() const { return is_disabled_; }
@@ -112,18 +114,23 @@ class AppCacheStorageImpl : public AppCacheStorage {
       scoped_refptr<AppCache> newest_cache,
       scoped_refptr<DelegateReference> delegate_ref);
 
-  void CheckPolicyAndCallOnMainResponseFound(
+  void CallOnMainResponseFound(
       DelegateReferenceVector* delegates,
       const GURL& url, const AppCacheEntry& entry,
       const GURL& fallback_url, const AppCacheEntry& fallback_entry,
       int64 cache_id, const GURL& manifest_url);
 
-  AppCacheDiskCache* disk_cache();
+  APPCACHE_EXPORT AppCacheDiskCache* disk_cache();
 
   // The directory in which we place files in the file system.
   FilePath cache_directory_;
-  scoped_refptr<base::MessageLoopProxy> cache_thread_;
   bool is_incognito_;
+
+  // This class operates primarily on the io thread, but schedules
+  // its DatabaseTasks on the db thread. Seperately, the disk_cache uses
+  // the cache_thread.
+  scoped_refptr<base::MessageLoopProxy> db_thread_;
+  scoped_refptr<base::MessageLoopProxy> cache_thread_;
 
   // Structures to keep track of DatabaseTasks that are in-flight.
   DatabaseTaskQueue scheduled_database_tasks_;
@@ -140,8 +147,8 @@ class AppCacheStorageImpl : public AppCacheStorage {
   int64 last_deletable_response_rowid_;
 
   // AppCacheDiskCache async callbacks
-  net::CompletionCallbackImpl<AppCacheStorageImpl> doom_callback_;
-  net::CompletionCallbackImpl<AppCacheStorageImpl> init_callback_;
+  net::OldCompletionCallbackImpl<AppCacheStorageImpl> doom_callback_;
+  net::OldCompletionCallbackImpl<AppCacheStorageImpl> init_callback_;
 
   // Created on the IO thread, but only used on the DB thread.
   AppCacheDatabase* database_;

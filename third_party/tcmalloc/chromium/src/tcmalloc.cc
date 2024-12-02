@@ -122,8 +122,8 @@
 #include "base/spinlock.h"              // for SpinLockHolder
 #include "central_freelist.h"  // for CentralFreeListPadded
 #include "common.h"            // for StackTrace, kPageShift, etc
+#include "free_list.h"         // for FL_Init
 #include "internal_logging.h"  // for ASSERT, TCMalloc_Printer, etc
-#include "linked_list.h"       // for SLL_SetNext
 #include "malloc_hook-inl.h"       // for MallocHook::InvokeNewHook, etc
 #include "page_heap.h"         // for PageHeap, PageHeap::Stats
 #include "page_heap_allocator.h"  // for PageHeapAllocator
@@ -1227,7 +1227,7 @@ inline void do_free_with_callback(void* ptr, void (*invalid_free_fn)(void*)) {
       heap->Deallocate(ptr, cl);
     } else {
       // Delete directly into central cache
-      tcmalloc::SLL_SetNext(ptr, NULL);
+      tcmalloc::FL_Init(ptr);
       Static::central_cache()[cl].InsertRange(ptr, ptr, 1);
     }
   } else {
@@ -1791,11 +1791,13 @@ void *(*__MALLOC_HOOK_VOLATILE __memalign_hook)(size_t, size_t, const void *) = 
 // to be hashed encoding of the location, so that they can't be copied over a
 // different region (by accident) without being detected (most of the time).
 
-// Uncomment the following define to turn on all the TCMalloc checking.
-// It will cost abotu 2% in performance, but it will catch double frees (most of
+// Enable the following define to turn on all the TCMalloc checking.
+// It will cost about 2% in performance, but it will catch double frees (most of
 // the time), and will often catch allocated-buffer overrun errors.  This
 // validation is only active when TCMalloc is used as the allocator.
-// #define TCMALLOC_VALIDATION
+#ifndef NDEBUG
+#define TCMALLOC_VALIDATION
+#endif
 
 #if !defined(TCMALLOC_VALIDATION)
 

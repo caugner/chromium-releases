@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/bookmarks/bookmark_editor_view.h"
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -47,11 +49,11 @@ const int kNewFolderButtonID = 1002;
 }  // namespace
 
 // static
-void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
-                          Profile* profile,
-                          const BookmarkNode* parent,
-                          const EditDetails& details,
-                          Configuration configuration) {
+void BookmarkEditor::ShowNative(gfx::NativeWindow parent_hwnd,
+                                Profile* profile,
+                                const BookmarkNode* parent,
+                                const EditDetails& details,
+                                Configuration configuration) {
   DCHECK(profile);
   BookmarkEditorView* editor =
       new BookmarkEditorView(profile, parent, details, configuration);
@@ -105,8 +107,8 @@ bool BookmarkEditorView::CanResize() const {
   return true;
 }
 
-std::wstring BookmarkEditorView::GetWindowTitle() const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_TITLE));
+string16 BookmarkEditorView::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_TITLE);
 }
 
 bool BookmarkEditorView::Accept() {
@@ -183,7 +185,7 @@ bool BookmarkEditorView::CanEdit(views::TreeView* tree_view,
 }
 
 void BookmarkEditorView::ContentsChanged(views::Textfield* sender,
-                                         const std::wstring& new_contents) {
+                                         const string16& new_contents) {
   UserInputChanged();
 }
 
@@ -311,8 +313,8 @@ void BookmarkEditorView::Init() {
   title_tf_.SetController(this);
 
   title_label_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NAME_LABEL)));
-  title_tf_.SetAccessibleName(WideToUTF16Hack(title_label_->GetText()));
+      l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NAME_LABEL));
+  title_tf_.SetAccessibleName(title_label_->GetText());
 
   if (show_tree_) {
     tree_view_ = new views::TreeView();
@@ -366,7 +368,7 @@ void BookmarkEditorView::Init() {
 
   if (details_.type != EditDetails::NEW_FOLDER) {
     url_label_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_URL_LABEL)));
+      l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_URL_LABEL));
 
     std::string languages =
         profile_ ? profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)
@@ -381,7 +383,7 @@ void BookmarkEditorView::Init() {
     url_tf_ = new views::Textfield;
     url_tf_->SetText(UTF16ToWide(url_text));
     url_tf_->SetController(this);
-    url_tf_->SetAccessibleName(WideToUTF16Hack(url_label_->GetText()));
+    url_tf_->SetAccessibleName(url_label_->GetText());
 
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 

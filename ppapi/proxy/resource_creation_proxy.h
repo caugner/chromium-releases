@@ -11,8 +11,8 @@
 #include "ipc/ipc_channel.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
+#include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/serialized_structs.h"
-#include "ppapi/shared_impl/function_group_base.h"
 #include "ppapi/thunk/resource_creation_api.h"
 
 struct PP_Size;
@@ -25,13 +25,15 @@ namespace proxy {
 
 class Dispatcher;
 
-class ResourceCreationProxy : public FunctionGroupBase,
-                              public thunk::ResourceCreationAPI,
-                              public IPC::Channel::Listener,
-                              public IPC::Message::Sender {
+class ResourceCreationProxy : public InterfaceProxy,
+                              public thunk::ResourceCreationAPI {
  public:
   explicit ResourceCreationProxy(Dispatcher* dispatcher);
   virtual ~ResourceCreationProxy();
+
+  // Factory function used for registration (normal code can just use the
+  // constructor).
+  static InterfaceProxy* Create(Dispatcher* dispatcher);
 
   virtual thunk::ResourceCreationAPI* AsResourceCreationAPI() OVERRIDE;
 
@@ -59,7 +61,7 @@ class ResourceCreationProxy : public FunctionGroupBase,
   virtual PP_Resource CreateFileChooser(
       PP_Instance instance,
       PP_FileChooserMode_Dev mode,
-      const PP_Var& accept_mime_types) OVERRIDE;
+      const char* accept_mime_types) OVERRIDE;
   virtual PP_Resource CreateFileIO(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFileRef(PP_Resource file_system,
                                     const char* path) OVERRIDE;
@@ -69,6 +71,7 @@ class ResourceCreationProxy : public FunctionGroupBase,
                                       const PP_Flash_Menu* menu_data) OVERRIDE;
   virtual PP_Resource CreateFlashNetConnector(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFlashTCPSocket(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateFlashUDPSocket(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFontObject(
       PP_Instance instance,
       const PP_FontDescription_Dev* description) OVERRIDE;
@@ -108,7 +111,7 @@ class ResourceCreationProxy : public FunctionGroupBase,
                                       const int32_t* attrib_list) OVERRIDE;
   virtual PP_Resource CreateTransport(PP_Instance instance,
                                       const char* name,
-                                      const char* proto) OVERRIDE;
+                                      PP_TransportType type) OVERRIDE;
   virtual PP_Resource CreateURLLoader(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateURLRequestInfo(
       PP_Instance instance,
@@ -148,8 +151,6 @@ class ResourceCreationProxy : public FunctionGroupBase,
                             HostResource* result,
                             std::string* image_data_desc,
                             ImageHandle* result_image_handle);
-
-  Dispatcher* dispatcher_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceCreationProxy);
 };

@@ -39,6 +39,9 @@ Preferences::~Preferences() {}
 
 // static
 void Preferences::RegisterUserPrefs(PrefService* prefs) {
+  input_method::InputMethodManager* manager =
+      input_method::InputMethodManager::GetInstance();
+
   prefs->RegisterBooleanPref(prefs::kTapToClickEnabled,
                              false,
                              PrefService::SYNCABLE_PREF);
@@ -83,9 +86,10 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterStringPref(prefs::kLanguagePreferredLanguages,
                             kFallbackInputMethodLocale,
                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kLanguagePreloadEngines,
-                            input_method::GetHardwareInputMethodId(),
-                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterStringPref(
+      prefs::kLanguagePreloadEngines,
+      manager->GetInputMethodUtil()->GetHardwareInputMethodId(),
+      PrefService::UNSYNCABLE_PREF);
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
     prefs->RegisterBooleanPref(
         language_prefs::kChewingBooleanPrefs[i].pref_name,
@@ -190,10 +194,6 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kShow3gPromoNotification,
                              true,
                              PrefService::UNSYNCABLE_PREF);
-
-  // The map of timestamps of the last used file browser handlers.
-  prefs->RegisterDictionaryPref(prefs::kLastUsedFileBrowserHandlers,
-                                PrefService::UNSYNCABLE_PREF);
 
   // Use shared proxies default to off.
   prefs->RegisterBooleanPref(prefs::kUseSharedProxies,
@@ -350,7 +350,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
   }
   if (!pref_name || *pref_name == prefs::kLanguageXkbAutoRepeatEnabled) {
     const bool enabled = language_xkb_auto_repeat_enabled_.GetValue();
-    input_method::SetAutoRepeatEnabled(enabled);
+    input_method::XKeyboard::SetAutoRepeatEnabled(enabled);
   }
   if (!pref_name || ((*pref_name == prefs::kLanguageXkbAutoRepeatDelay) ||
                      (*pref_name == prefs::kLanguageXkbAutoRepeatInterval))) {
@@ -551,7 +551,8 @@ void Preferences::UpdateModifierKeyMapping() {
         input_method::ModifierKeyPair(
             input_method::kLeftAltKey,
             input_method::ModifierKey(alt_remap)));
-    input_method::RemapModifierKeys(modifier_map);
+    input_method::InputMethodManager::GetInstance()->GetXKeyboard()->
+        RemapModifierKeys(modifier_map);
   } else {
     LOG(ERROR) << "Failed to remap modifier keys. Unexpected value(s): "
                << search_remap << ", " << control_remap << ", " << alt_remap;
@@ -565,7 +566,7 @@ void Preferences::UpdateAutoRepeatRate() {
       language_xkb_auto_repeat_interval_pref_.GetValue();
   DCHECK(rate.initial_delay_in_ms > 0);
   DCHECK(rate.repeat_interval_in_ms > 0);
-  input_method::SetAutoRepeatRate(rate);
+  input_method::XKeyboard::SetAutoRepeatRate(rate);
 }
 
 void Preferences::UpdateVirturalKeyboardPreference(PrefService* prefs) {

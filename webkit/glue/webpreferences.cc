@@ -74,7 +74,9 @@ WebPreferences::WebPreferences()
       show_fps_counter(false),
       asynchronous_spell_checking_enabled(true),
       accelerated_compositing_enabled(false),
+      threaded_compositing_enabled(false),
       force_compositing_mode(false),
+      allow_webui_compositing(false),
       composite_to_texture_enabled(false),
       accelerated_layers_enabled(false),
       accelerated_video_enabled(false),
@@ -212,9 +214,6 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setFontRenderingModeNormal();
   settings->setJavaEnabled(java_enabled);
 
-  // Turn this on to cause WebCore to paint the resize corner for us.
-  settings->setShouldPaintCustomScrollbars(true);
-
   // By default, allow_universal_access_from_file_urls is set to false and thus
   // we mitigate attacks from local HTML files by not granting file:// URLs
   // universal access. Only test shell will enable this.
@@ -250,6 +249,8 @@ void WebPreferences::Apply(WebView* web_view) const {
 
   // Enable gpu-accelerated compositing if requested on the command line.
   settings->setAcceleratedCompositingEnabled(accelerated_compositing_enabled);
+
+  settings->setUseThreadedCompositor(threaded_compositing_enabled);
 
   // Always enter compositing if requested on the command line.
   settings->setForceCompositingMode(force_compositing_mode);

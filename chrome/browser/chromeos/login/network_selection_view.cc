@@ -23,10 +23,11 @@
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/size.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
-#include "views/controls/button/text_button.h"
 #include "views/controls/throbber.h"
 #include "views/layout/fill_layout.h"
 #include "views/layout/grid_layout.h"
@@ -125,7 +126,7 @@ class NetworkControlReportOnActivate : public NetworkDropdownButton {
 class NotifyingMenuButton : public DropDownButton {
  public:
   NotifyingMenuButton(views::ButtonListener* listener,
-                      const std::wstring& text,
+                      const string16& text,
                       views::ViewMenuDelegate* menu_delegate,
                       bool show_menu_marker,
                       ViewsNetworkScreenActor* actor)
@@ -289,25 +290,32 @@ void NetworkSelectionView::Init() {
       &BorderDefinition::kScreenBorder);
   contents_view_->set_background(
       views::Background::CreateBackgroundPainter(true, painter));
+  SkColor background_color = color_utils::AlphaBlend(
+      BorderDefinition::kScreenBorder.top_color,
+      BorderDefinition::kScreenBorder.bottom_color, 128);
 
   welcome_label_ = new views::Label();
-  welcome_label_->SetColor(kWelcomeColor);
+  welcome_label_->SetEnabledColor(kWelcomeColor);
+  welcome_label_->SetBackgroundColor(background_color);
   welcome_label_->SetMultiLine(true);
 
   select_language_label_ = new views::Label();
+  select_language_label_->SetBackgroundColor(background_color);
 
   languages_menubutton_ = new NotifyingMenuButton(
-      NULL, std::wstring(), actor_->language_switch_menu(), true, actor_);
+      NULL, string16(), actor_->language_switch_menu(), true, actor_);
   InitMenuButtonProperties(languages_menubutton_);
 
   select_keyboard_label_ = new views::Label();
+  select_keyboard_label_->SetBackgroundColor(background_color);
 
   keyboards_menubutton_ = new DropDownButton(
-      NULL /* listener */, L"", actor_->keyboard_switch_menu(),
+      NULL /* listener */, string16(), actor_->keyboard_switch_menu(),
       true /* show_menu_marker */);
   InitMenuButtonProperties(keyboards_menubutton_);
 
   select_network_label_ = new views::Label();
+  select_network_label_->SetBackgroundColor(background_color);
 
   network_dropdown_ = new NetworkControlReportOnActivate(false,
                                                          GetNativeWindow(),
@@ -315,14 +323,16 @@ void NetworkSelectionView::Init() {
   InitMenuButtonProperties(network_dropdown_);
 
   connecting_network_label_ = new views::Label();
+  connecting_network_label_->SetBackgroundColor(background_color);
   connecting_network_label_->SetVisible(false);
 
   proxy_settings_link_ = new views::Link();
   proxy_settings_link_->set_listener(this);
   proxy_settings_link_->SetVisible(true);
   proxy_settings_link_->set_focusable(true);
-  proxy_settings_link_->SetNormalColor(login::kLinkColor);
-  proxy_settings_link_->SetHighlightedColor(login::kLinkColor);
+  proxy_settings_link_->SetBackgroundColor(background_color);
+  proxy_settings_link_->SetEnabledColor(login::kLinkColor);
+  proxy_settings_link_->SetPressedColor(login::kLinkColor);
 
   UpdateLocalizedStringsAndFonts();
 }
@@ -337,32 +347,32 @@ void NetworkSelectionView::UpdateLocalizedStringsAndFonts() {
 
   SetMenuButtonFont(languages_menubutton_, base_font);
   languages_menubutton_->SetText(
-      UTF16ToWide(actor_->language_switch_menu()->GetCurrentLocaleName()));
+      actor_->language_switch_menu()->GetCurrentLocaleName());
   SetMenuButtonFont(keyboards_menubutton_, base_font);
   keyboards_menubutton_->SetText(
-      UTF16ToWide(actor_->keyboard_switch_menu()->GetCurrentKeyboardName()));
+      actor_->keyboard_switch_menu()->GetCurrentKeyboardName());
   welcome_label_->SetFont(welcome_label_font);
   welcome_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_TITLE)));
+      l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_TITLE));
   select_language_label_->SetFont(select_label_font);
   select_language_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_LANGUAGE_SELECTION_SELECT)));
+      l10n_util::GetStringUTF16(IDS_LANGUAGE_SELECTION_SELECT));
   languages_menubutton_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_LANGUAGE_SELECTION_SELECT));
   select_keyboard_label_->SetFont(select_label_font);
   select_keyboard_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_KEYBOARD_SELECTION_SELECT)));
+      l10n_util::GetStringUTF16(IDS_KEYBOARD_SELECTION_SELECT));
   keyboards_menubutton_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_KEYBOARD_SELECTION_SELECT));
   select_network_label_->SetFont(select_label_font);
   select_network_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_SELECT)));
+      l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_SELECT));
   SetMenuButtonFont(network_dropdown_, base_font);
   network_dropdown_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_SELECT));
   proxy_settings_link_->SetFont(base_font);
-  proxy_settings_link_->SetText(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON)));
+  proxy_settings_link_->SetText(
+      l10n_util::GetStringUTF16(IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON));
   connecting_network_label_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
   RecreateNativeControls();
   UpdateConnectingNetworkLabel();
@@ -472,8 +482,8 @@ void NetworkSelectionView::RecreateNativeControls() {
 }
 
 void NetworkSelectionView::UpdateConnectingNetworkLabel() {
-  connecting_network_label_->SetText(UTF16ToWide(l10n_util::GetStringFUTF16(
-      IDS_NETWORK_SELECTION_CONNECTING, network_id_)));
+  connecting_network_label_->SetText(l10n_util::GetStringFUTF16(
+      IDS_NETWORK_SELECTION_CONNECTING, network_id_));
 }
 
 }  // namespace chromeos

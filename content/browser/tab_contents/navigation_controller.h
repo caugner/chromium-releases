@@ -15,8 +15,9 @@
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "content/browser/ssl/ssl_manager.h"
-#include "content/common/navigation_types.h"
-#include "content/common/page_transition_types.h"
+#include "content/common/content_export.h"
+#include "content/public/browser/navigation_types.h"
+#include "content/public/common/page_transition_types.h"
 
 class NavigationEntry;
 class SessionStorageNamespace;
@@ -34,7 +35,7 @@ struct LoadCommittedDetails;
 //
 // The NavigationController also owns all TabContents for the tab. This is to
 // make sure that we have at most one TabContents instance per type.
-class NavigationController {
+class CONTENT_EXPORT NavigationController {
  public:
 
   enum ReloadType {
@@ -172,16 +173,19 @@ class NavigationController {
 
   // New navigations -----------------------------------------------------------
 
-  // Loads the specified URL.
-  void LoadURL(const GURL& url, const GURL& referrer,
-               PageTransition::Type type);
-
   // Loads the specified URL, specifying extra http headers to add to the
   // request.  Extra headers are separated by \n.
-  void LoadURLWithHeaders(const GURL& url,
-                          const GURL& referrer,
-                          PageTransition::Type type,
-                          const std::string& extra_headers);
+  void LoadURL(const GURL& url,
+               const GURL& referrer,
+               content::PageTransition type,
+               const std::string& extra_headers);
+
+  // Same as LoadURL, but for renderer-initiated navigations.  This state is
+  // important for tracking whether to display pending URLs.
+  void LoadURLFromRenderer(const GURL& url,
+                           const GURL& referrer,
+                           content::PageTransition type,
+                           const std::string& extra_headers);
 
   // Loads the current page if this NavigationController was restored from
   // history and the current page has not loaded yet.
@@ -314,11 +318,9 @@ class NavigationController {
   static void DisablePromptOnRepost();
 
   // Maximum number of entries before we start removing entries from the front.
-#ifdef UNIT_TEST
-  static void set_max_entry_count(size_t max_entry_count) {
+  static void set_max_entry_count_for_testing(size_t max_entry_count) {
     max_entry_count_ = max_entry_count;
   }
-#endif
   static size_t max_entry_count() { return max_entry_count_; }
 
   // Cancels a repost that brought up a warning.
@@ -335,7 +337,8 @@ class NavigationController {
   static NavigationEntry* CreateNavigationEntry(
       const GURL& url,
       const GURL& referrer,
-      PageTransition::Type transition,
+      content::PageTransition transition,
+      bool is_renderer_initiated,
       const std::string& extra_headers,
       content::BrowserContext* browser_context);
 
@@ -345,7 +348,7 @@ class NavigationController {
   friend class TabContents;  // For invoking OnReservedPageIDRange.
 
   // Classifies the given renderer navigation (see the NavigationType enum).
-  NavigationType::Type ClassifyNavigation(
+  content::NavigationType ClassifyNavigation(
       const ViewHostMsg_FrameNavigate_Params& params) const;
 
   // Causes the controller to load the specified entry. The function assumes

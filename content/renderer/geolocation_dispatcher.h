@@ -7,10 +7,11 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationController.h"
 
+class RenderViewImpl;
 struct Geoposition;
 
 namespace WebKit {
@@ -24,10 +25,10 @@ class WebSecurityOrigin;
 // GeolocationDispatcher is a delegate for Geolocation messages used by
 // WebKit.
 // It's the complement of GeolocationDispatcherHost (owned by RenderViewHost).
-class GeolocationDispatcher : public RenderViewObserver,
+class GeolocationDispatcher : public content::RenderViewObserver,
                               public WebKit::WebGeolocationClient {
  public:
-  explicit GeolocationDispatcher(RenderView* render_view);
+  explicit GeolocationDispatcher(RenderViewImpl* render_view);
   virtual ~GeolocationDispatcher();
 
  private:

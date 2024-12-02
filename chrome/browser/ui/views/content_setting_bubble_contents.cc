@@ -8,6 +8,11 @@
 #include <gdk/gdk.h>
 #endif
 
+#include <algorithm>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,8 +20,8 @@
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/browser/ui/views/bubble/bubble.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "views/controls/button/radio_button.h"
@@ -31,6 +36,10 @@
 
 #if defined(TOOLKIT_USES_GTK)
 #include "ui/gfx/gtk_util.h"
+#endif
+
+#if defined(USE_AURA)
+#include "ui/aura/cursor.h"
 #endif
 
 // If we don't clamp the maximum width, then very long URLs and titles can make
@@ -85,7 +94,9 @@ void ContentSettingBubbleContents::Favicon::OnMouseReleased(
 
 gfx::NativeCursor ContentSettingBubbleContents::Favicon::GetCursor(
     const views::MouseEvent& event) {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  return aura::kCursorHand;
+#elif defined(OS_WIN)
   static HCURSOR g_hand_cursor = LoadCursor(NULL, IDC_HAND);
   return g_hand_cursor;
 #elif defined(TOOLKIT_USES_GTK)
@@ -191,7 +202,7 @@ void ContentSettingBubbleContents::InitControlLayout() {
   bool bubble_content_empty = true;
 
   if (!bubble_content.title.empty()) {
-    views::Label* title_label = new views::Label(UTF8ToWide(
+    views::Label* title_label = new views::Label(UTF8ToUTF16(
         bubble_content.title));
     layout->StartRow(0, single_column_set_id);
     layout->AddView(title_label);
@@ -204,10 +215,10 @@ void ContentSettingBubbleContents::InitControlLayout() {
       layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
     for (std::set<std::string>::const_iterator it = plugins.begin();
         it != plugins.end(); ++it) {
-      std::wstring name = UTF16ToWide(
-          webkit::npapi::PluginList::Singleton()->GetPluginGroupName(*it));
+      string16 name =
+          webkit::npapi::PluginList::Singleton()->GetPluginGroupName(*it);
       if (name.empty())
-        name = UTF8ToWide(*it);
+        name = UTF8ToUTF16(*it);
       layout->StartRow(0, single_column_set_id);
       layout->AddView(new views::Label(name));
       bubble_content_empty = false;
@@ -233,7 +244,7 @@ void ContentSettingBubbleContents::InitControlLayout() {
         layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
       layout->StartRow(0, popup_column_set_id);
 
-      views::Link* link = new views::Link(UTF8ToWide(i->title));
+      views::Link* link = new views::Link(UTF8ToUTF16(i->title));
       link->set_listener(this);
       link->SetElideInMiddle(true);
       popup_links_[link] = i - bubble_content.popup_items.begin();
@@ -249,7 +260,7 @@ void ContentSettingBubbleContents::InitControlLayout() {
     for (ContentSettingBubbleModel::RadioItems::const_iterator i =
          radio_group.radio_items.begin();
          i != radio_group.radio_items.end(); ++i) {
-      views::RadioButton* radio = new views::RadioButton(UTF8ToWide(*i), 0);
+      views::RadioButton* radio = new views::RadioButton(UTF8ToUTF16(*i), 0);
       radio->set_listener(this);
       radio_group_.push_back(radio);
       if (!bubble_content_empty)
@@ -278,20 +289,20 @@ void ContentSettingBubbleContents::InitControlLayout() {
        bubble_content.domain_lists.begin();
        i != bubble_content.domain_lists.end(); ++i) {
     layout->StartRow(0, single_column_set_id);
-    views::Label* section_title = new views::Label(UTF8ToWide(i->title));
+    views::Label* section_title = new views::Label(UTF8ToUTF16(i->title));
     section_title->SetMultiLine(true);
     section_title->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     layout->AddView(section_title, 1, 1, GridLayout::FILL, GridLayout::LEADING);
     for (std::set<std::string>::const_iterator j = i->hosts.begin();
          j != i->hosts.end(); ++j) {
       layout->StartRow(0, indented_single_column_set_id);
-      layout->AddView(new views::Label(UTF8ToWide(*j), domain_font));
+      layout->AddView(new views::Label(UTF8ToUTF16(*j), domain_font));
     }
     bubble_content_empty = false;
   }
 
   if (!bubble_content.custom_link.empty()) {
-    custom_link_ = new views::Link(UTF8ToWide(bubble_content.custom_link));
+    custom_link_ = new views::Link(UTF8ToUTF16(bubble_content.custom_link));
     custom_link_->SetEnabled(bubble_content.custom_link_enabled);
     custom_link_->set_listener(this);
     if (!bubble_content_empty)
@@ -320,7 +331,7 @@ void ContentSettingBubbleContents::InitControlLayout() {
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, double_column_set_id);
-  manage_link_ = new views::Link(UTF8ToWide(bubble_content.manage_link));
+  manage_link_ = new views::Link(UTF8ToUTF16(bubble_content.manage_link));
   manage_link_->set_listener(this);
   layout->AddView(manage_link_);
 

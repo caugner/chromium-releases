@@ -8,6 +8,7 @@
 #include "remoting/protocol/input_sender.h"
 
 #include "base/task.h"
+#include "base/time.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/buffered_socket_writer.h"
@@ -21,7 +22,7 @@ InputSender::InputSender(base::MessageLoopProxy* message_loop,
     : buffered_writer_(new BufferedSocketWriter(message_loop)) {
   // TODO(garykac) Set write failed callback.
   DCHECK(socket);
-  buffered_writer_->Init(socket, NULL);
+  buffered_writer_->Init(socket, BufferedSocketWriter::WriteFailedCallback());
 }
 
 InputSender::~InputSender() {
@@ -31,14 +32,14 @@ void InputSender::InjectKeyEvent(const KeyEvent& event) {
   EventMessage message;
   message.set_sequence_number(base::Time::Now().ToInternalValue());
   message.mutable_key_event()->CopyFrom(event);
-  buffered_writer_->Write(SerializeAndFrameMessage(message), NULL);
+  buffered_writer_->Write(SerializeAndFrameMessage(message), base::Closure());
 }
 
 void InputSender::InjectMouseEvent(const MouseEvent& event) {
   EventMessage message;
   message.set_sequence_number(base::Time::Now().ToInternalValue());
   message.mutable_mouse_event()->CopyFrom(event);
-  buffered_writer_->Write(SerializeAndFrameMessage(message), NULL);
+  buffered_writer_->Write(SerializeAndFrameMessage(message), base::Closure());
 }
 
 void InputSender::Close() {

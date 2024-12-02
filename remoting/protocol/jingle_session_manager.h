@@ -16,17 +16,15 @@
 #include "third_party/libjingle/source/talk/p2p/base/sessionclient.h"
 
 namespace cricket {
+class HttpPortAllocator;
 class PortAllocator;
 class SessionManager;
 }  // namespace cricket
 
 namespace remoting {
 
-class HostResolverFactory;
-class HttpPortAllocator;
 class JingleInfoRequest;
 class JingleSignalingConnector;
-class PortAllocatorSessionFactory;
 
 namespace protocol {
 
@@ -39,14 +37,7 @@ class JingleSessionManager
  public:
   virtual ~JingleSessionManager();
 
-  static JingleSessionManager* CreateNotSandboxed(
-      base::MessageLoopProxy* message_loop);
-  static JingleSessionManager* CreateSandboxed(
-      base::MessageLoopProxy* message_loop,
-      talk_base::NetworkManager* network_manager,
-      talk_base::PacketSocketFactory* socket_factory,
-      HostResolverFactory* host_resolver_factory,
-      PortAllocatorSessionFactory* port_allocator_session_factory);
+  JingleSessionManager(base::MessageLoopProxy* message_loop);
 
   // SessionManager interface.
   virtual void Init(const std::string& local_jid,
@@ -60,7 +51,7 @@ class JingleSessionManager
       const std::string& host_public_key,
       const std::string& client_token,
       CandidateSessionConfig* config,
-      Session::StateChangeCallback* state_change_callback) OVERRIDE;
+      const Session::StateChangeCallback& state_change_callback) OVERRIDE;
   virtual void Close() OVERRIDE;
 
   void set_allow_local_ips(bool allow_local_ips);
@@ -81,13 +72,6 @@ class JingleSessionManager
 
  private:
   friend class JingleSession;
-
-  JingleSessionManager(
-      base::MessageLoopProxy* message_loop,
-      talk_base::NetworkManager* network_manager,
-      talk_base::PacketSocketFactory* socket_factory,
-      HostResolverFactory* host_resolver_factory,
-      PortAllocatorSessionFactory* port_allocator_session_factory);
 
   // Called by JingleSession when a new connection is
   // initiated. Returns true if session is accepted.
@@ -116,8 +100,6 @@ class JingleSessionManager
 
   scoped_ptr<talk_base::NetworkManager> network_manager_;
   scoped_ptr<talk_base::PacketSocketFactory> socket_factory_;
-  scoped_ptr<HostResolverFactory> host_resolver_factory_;
-  scoped_ptr<PortAllocatorSessionFactory> port_allocator_session_factory_;
 
   std::string local_jid_;  // Full jid for the local side of the session.
   SignalStrategy* signal_strategy_;
@@ -129,7 +111,7 @@ class JingleSessionManager
   bool allow_local_ips_;
 
   scoped_ptr<cricket::PortAllocator> port_allocator_;
-  remoting::HttpPortAllocator* http_port_allocator_;
+  cricket::HttpPortAllocator* http_port_allocator_;
   scoped_ptr<cricket::SessionManager> cricket_session_manager_;
   scoped_ptr<JingleInfoRequest> jingle_info_request_;
   scoped_ptr<JingleSignalingConnector> jingle_signaling_connector_;

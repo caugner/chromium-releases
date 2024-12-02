@@ -78,14 +78,28 @@ class ProfileSyncServiceHarness
 
   // Blocks the caller until this harness has completed a single sync cycle
   // since the previous one.  Returns true if a sync cycle has completed.
-  bool AwaitSyncCycleCompletion(const std::string& reason);
+  bool AwaitDataSyncCompletion(const std::string& reason);
 
-  // Blocks the caller until the sync has been disabled for this client. Returns
+  // Blocks the caller until this harness has completed as many sync cycles as
+  // are required to ensure its progress marker matches the latest available on
+  // the server.
+  //
+  // Note: When other clients are committing changes this will not be reliable.
+  // If your test involves changes to multiple clients, you should use one of
+  // the other Await* functions, such as AwaitMutualSyncCycleComplete.  Refer to
+  // the documentation of those functions for more details.
+  bool AwaitFullSyncCompletion(const std::string& reason);
+
+  // Blocks the caller until sync has been disabled for this client. Returns
   // true if sync is disabled.
   bool AwaitSyncDisabled(const std::string& reason);
 
   // Blocks the caller until exponential backoff has been verified to happen.
   bool AwaitExponentialBackoffVerification();
+
+  // Blocks the caller until the syncer receives an actionable error.
+  // Returns true if the sync client received an actionable error.
+  bool AwaitActionableError();
 
   // Blocks until the given set of data types are migrated.
   bool AwaitMigration(const syncable::ModelTypeSet& expected_migrated_types);
@@ -125,10 +139,10 @@ class ProfileSyncServiceHarness
   // calling SetPassphrase has been accepted.
   bool AwaitPassphraseAccepted();
 
-  // Returns the ProfileSyncService member of the the sync client.
+  // Returns the ProfileSyncService member of the sync client.
   ProfileSyncService* service() { return service_; }
 
-  // Returns the status of the ProfileSyncService member of the the sync client.
+  // Returns the status of the ProfileSyncService member of the sync client.
   ProfileSyncService::Status GetStatus();
 
   // See ProfileSyncService::ShouldPushChanges().
@@ -166,8 +180,8 @@ class ProfileSyncServiceHarness
   // Check if |type| is encrypted.
   bool IsTypeEncrypted(syncable::ModelType type);
 
-  // Check if |type| is registered.
-  bool IsTypeRegistered(syncable::ModelType types);
+  // Check if |type| is registered and the controller is running.
+  bool IsTypeRunning(syncable::ModelType type);
 
   // Check if |type| is being synced.
   bool IsTypePreferred(syncable::ModelType type);
@@ -185,8 +199,11 @@ class ProfileSyncServiceHarness
     // The sync client is waiting for the first sync cycle to complete.
     WAITING_FOR_INITIAL_SYNC,
 
-    // The sync client is waiting for an ongoing sync cycle to complete.
-    WAITING_FOR_SYNC_TO_FINISH,
+    // The sync client is waiting for data to be synced.
+    WAITING_FOR_DATA_SYNC,
+
+    // The sync client is waiting for data and progress markers to be synced.
+    WAITING_FOR_FULL_SYNC,
 
     // The sync client anticipates incoming updates leading to a new sync cycle.
     WAITING_FOR_UPDATES,
@@ -207,7 +224,7 @@ class ProfileSyncServiceHarness
     // full sync cycle is not expected to occur.
     WAITING_FOR_SYNC_CONFIGURATION,
 
-    // The sync client is waiting for the sync to be disabled for this client.
+    // The sync client is waiting for sync to be disabled for this client.
     WAITING_FOR_SYNC_DISABLED,
 
     // The sync client is in the exponential backoff mode. Verify that
@@ -219,6 +236,9 @@ class ProfileSyncServiceHarness
 
     // The sync client is waiting for migration to finish.
     WAITING_FOR_MIGRATION_TO_FINISH,
+
+    // The sync client is waiting for an actionable error from the server.
+    WAITING_FOR_ACTIONABLE_ERROR,
 
     // The client verification is complete. We don't care about the state of
     // the syncer any more.
@@ -258,8 +278,20 @@ class ProfileSyncServiceHarness
   bool AwaitStatusChangeWithTimeout(int timeout_milliseconds,
                                     const std::string& reason);
 
+  // A helper for implementing IsDataSynced() and IsFullySynced().
+  bool IsDataSyncedImpl(const browser_sync::sessions::SyncSessionSnapshot*);
+
   // Returns true if the sync client has no unsynced items.
-  bool IsSynced();
+  bool IsDataSynced();
+
+  // Returns true if the sync client has no unsynced items and its progress
+  // markers are believed to be up to date.
+  //
+  // Although we can't detect when commits from other clients invalidate our
+  // local progress markers, we do know when our own commits have invalidated
+  // our timestmaps.  This check returns true when this client has, to the best
+  // of its knowledge, downloaded the latest progress markers.
+  bool IsFullySynced();
 
   // Returns true if there is a backend migration in progress.
   bool HasPendingBackendMigration();

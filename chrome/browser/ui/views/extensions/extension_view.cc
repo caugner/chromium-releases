@@ -6,13 +6,14 @@
 
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
+#include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "views/widget/widget.h"
 
 #if defined(OS_WIN)
 #include "content/browser/renderer_host/render_widget_host_view_win.h"
-#elif defined(TOUCH_UI)
+#elif defined(TOUCH_UI) || defined(USE_AURA)
 #include "chrome/browser/renderer_host/render_widget_host_view_views.h"
 #elif defined(TOOLKIT_USES_GTK)
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
@@ -59,7 +60,7 @@ void ExtensionView::SetIsClipped(bool is_clipped) {
 }
 
 gfx::NativeCursor ExtensionView::GetCursor(const views::MouseEvent& event) {
-  return NULL;
+  return gfx::kNullCursor;
 }
 
 void ExtensionView::SetVisible(bool is_visible) {
@@ -82,7 +83,8 @@ void ExtensionView::CreateWidgetHostView() {
   DCHECK(!initialized_);
   initialized_ = true;
   RenderWidgetHostView* view =
-      RenderWidgetHostView::CreateViewForWidget(render_view_host());
+      content::GetContentClient()->browser()->CreateViewForWidget(
+      render_view_host());
 
   // TODO(mpcomplete): RWHV needs a cross-platform Init function.
 #if defined(USE_AURA)

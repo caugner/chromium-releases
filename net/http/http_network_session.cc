@@ -25,6 +25,7 @@ namespace net {
 HttpNetworkSession::HttpNetworkSession(const Params& params)
     : net_log_(params.net_log),
       network_delegate_(params.network_delegate),
+      http_server_properties_(params.http_server_properties),
       cert_verifier_(params.cert_verifier),
       http_auth_handler_factory_(params.http_auth_handler_factory),
       proxy_service_(params.proxy_service),
@@ -44,8 +45,9 @@ HttpNetworkSession::HttpNetworkSession(const Params& params)
       spdy_session_pool_(params.host_resolver, params.ssl_config_service),
       ALLOW_THIS_IN_INITIALIZER_LIST(http_stream_factory_(
           new HttpStreamFactoryImpl(this))) {
-  DCHECK(params.proxy_service);
-  DCHECK(params.ssl_config_service);
+  DCHECK(proxy_service_);
+  DCHECK(ssl_config_service_);
+  CHECK(http_server_properties_);
 }
 
 HttpNetworkSession::~HttpNetworkSession() {
@@ -94,6 +96,7 @@ void HttpNetworkSession::CloseAllConnections() {
 
 void HttpNetworkSession::CloseIdleConnections() {
   socket_pool_manager_.CloseIdleSockets();
+  spdy_session_pool_.CloseIdleSessions();
 }
 
 }  //  namespace net

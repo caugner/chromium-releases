@@ -66,6 +66,7 @@ class VPNConfigView : public ChildNetworkConfigView,
   void Refresh();
 
   // Update various controls.
+  void UpdateControlsToEnable();
   void UpdateControls();
   void UpdateErrorLabel();
 
@@ -91,6 +92,8 @@ class VPNConfigView : public ChildNetworkConfigView,
   const std::string GetPSKPassphrase() const;
   const std::string GetUsername() const;
   const std::string GetUserPassphrase() const;
+  const std::string GetOTP() const;
+  const std::string GetGroupName() const;
   const std::string GetServerCACertNssNickname() const;
   const std::string GetUserCertID() const;
 
@@ -99,9 +102,17 @@ class VPNConfigView : public ChildNetworkConfigView,
   std::string server_hostname_;
   string16 service_name_from_server_;
   bool service_text_modified_;
+
+  // Initialized in Init():
+
   ProviderType provider_type_;
 
-  views::Label* server_text_;
+  bool enable_psk_passphrase_;
+  bool enable_user_cert_;
+  bool enable_server_ca_cert_;
+  bool enable_otp_;
+  bool enable_group_name_;
+
   views::Textfield* server_textfield_;
   views::Label* service_text_;
   views::Textfield* service_textfield_;
@@ -115,6 +126,10 @@ class VPNConfigView : public ChildNetworkConfigView,
   views::Combobox* server_ca_cert_combobox_;
   views::Textfield* username_textfield_;
   views::Textfield* user_passphrase_textfield_;
+  views::Label* otp_label_;
+  views::Textfield* otp_textfield_;
+  views::Label* group_name_label_;
+  views::Textfield* group_name_textfield_;
   views::Label* error_label_;
 
   DISALLOW_COPY_AND_ASSIGN(VPNConfigView);

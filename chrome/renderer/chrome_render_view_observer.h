@@ -9,13 +9,14 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
-#include "content/renderer/render_view.h"
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPermissionClient.h"
 
+class ChromeRenderProcessObserver;
 class ContentSettingsObserver;
 class DomAutomationController;
 class ExtensionDispatcher;
@@ -26,6 +27,9 @@ class TranslateHelper;
 struct ThumbnailScore;
 struct ViewMsg_Navigate_Params;
 
+namespace WebKit {
+class WebView;
+}
 namespace safe_browsing {
 class PhishingClassifierDelegate;
 }
@@ -36,13 +40,14 @@ class ImageResourceFetcher;
 
 // This class holds the Chrome specific parts of RenderView, and has the same
 // lifetime.
-class ChromeRenderViewObserver : public RenderViewObserver,
+class ChromeRenderViewObserver : public content::RenderViewObserver,
                                  public WebKit::WebPermissionClient {
  public:
   // translate_helper can be NULL.
   ChromeRenderViewObserver(
-      RenderView* render_view,
+      content::RenderView* render_view,
       ContentSettingsObserver* content_settings,
+      ChromeRenderProcessObserver* chrome_render_process_observer,
       ExtensionDispatcher* extension_dispatcher,
       TranslateHelper* translate_helper);
   virtual ~ChromeRenderViewObserver();
@@ -66,6 +71,7 @@ class ChromeRenderViewObserver : public RenderViewObserver,
   virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
                                         bool is_new_navigation) OVERRIDE;
   virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void DidHandleTouchEvent(const WebKit::WebTouchEvent& event) OVERRIDE;
 
   // WebKit::WebPermissionClient implementation.
   virtual bool allowDatabase(WebKit::WebFrame* frame,
@@ -73,8 +79,9 @@ class ChromeRenderViewObserver : public RenderViewObserver,
                              const WebKit::WebString& display_name,
                              unsigned long estimated_size) OVERRIDE;
   virtual bool allowFileSystem(WebKit::WebFrame* frame) OVERRIDE;
-  virtual bool allowImages(WebKit::WebFrame* frame,
-                           bool enabled_per_settings) OVERRIDE;
+  virtual bool allowImage(WebKit::WebFrame* frame,
+                          bool enabled_per_settings,
+                          const WebKit::WebURL& image_url) OVERRIDE;
   virtual bool allowIndexedDB(WebKit::WebFrame* frame,
                               const WebKit::WebString& name,
                               const WebKit::WebSecurityOrigin& origin) OVERRIDE;
@@ -102,6 +109,7 @@ class ChromeRenderViewObserver : public RenderViewObserver,
       bool allowed_per_settings,
       const WebKit::WebSecurityOrigin& context,
       const WebKit::WebURL& url) OVERRIDE;
+  virtual void Navigate(const GURL& url) OVERRIDE;
 
   void OnWebUIJavaScript(const string16& frame_xpath,
                          const string16& jscript,
@@ -113,12 +121,12 @@ class ChromeRenderViewObserver : public RenderViewObserver,
                                        const std::string& target);
   void OnJavaScriptStressTestControl(int cmd, int param);
   void OnDownloadFavicon(int id, const GURL& image_url, int image_size);
-  void OnNavigate(const ViewMsg_Navigate_Params& params);
   void OnSetIsPrerendering(bool is_prerendering);
   void OnSetAllowDisplayingInsecureContent(bool allow);
   void OnSetAllowRunningInsecureContent(bool allow);
   void OnSetClientSidePhishingDetection(bool enable_phishing_detection);
   void OnStartFrameSniffer(const string16& frame_name);
+  void OnGetFPS();
 
   // Captures the thumbnail and text contents for indexing for the given load
   // ID. If the view's load ID is different than the parameter, this call is
@@ -169,9 +177,12 @@ class ChromeRenderViewObserver : public RenderViewObserver,
   // Save the JavaScript to preload if a ViewMsg_WebUIJavaScript is received.
   scoped_ptr<WebUIJavaScript> webui_javascript_;
 
+  // Owned by ChromeContentRendererClient and outlive us.
+  ChromeRenderProcessObserver* chrome_render_process_observer_;
+  ExtensionDispatcher* extension_dispatcher_;
+
   // Have the same lifetime as us.
   ContentSettingsObserver* content_settings_;
-  ExtensionDispatcher* extension_dispatcher_;
   TranslateHelper* translate_helper_;
   safe_browsing::PhishingClassifierDelegate* phishing_classifier_;
 
@@ -197,8 +208,11 @@ class ChromeRenderViewObserver : public RenderViewObserver,
   ScopedRunnableMethodFactory<ChromeRenderViewObserver>
       page_info_method_factory_;
 
+  typedef std::vector<linked_ptr<webkit_glue::ImageResourceFetcher> >
+      ImageResourceFetcherList;
+
   // ImageResourceFetchers schedule via DownloadImage.
-  RenderView::ImageResourceFetcherList image_fetchers_;
+  ImageResourceFetcherList image_fetchers_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderViewObserver);
 };

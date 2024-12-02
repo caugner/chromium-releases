@@ -19,6 +19,7 @@
 #include "base/message_loop.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -63,6 +64,9 @@ class ProfileManager : public base::NonThreadSafe,
   // Invokes SessionServiceFactory::ShutdownForProfile() for all profiles.
   static void ShutdownSessionServices();
 
+  // Physically remove deleted profile directories from disk.
+  static void NukeDeletedProfilesFromDisk();
+
   // Returns the default profile.  This adds the profile to the
   // ProfileManager if it doesn't already exist.  This method returns NULL if
   // the profile doesn't exist and we can't create it.
@@ -77,11 +81,8 @@ class ProfileManager : public base::NonThreadSafe,
   // otherwise it will create and manage it.
   Profile* GetProfile(const FilePath& profile_dir);
 
-  // Multi-profile support.
+  // Returns total number of profiles available on this machine.
   size_t GetNumberOfProfiles();
-  string16 GetNameOfProfileAtIndex(size_t index);
-  FilePath GetFilePathOfProfileAtIndex(size_t index,
-                                       const FilePath& user_data_dir);
 
   // Explicit asynchronous creation of the profile. |observer| is called
   // when profile is created. If profile has already been created, observer
@@ -107,9 +108,6 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Same as instance method but provides the default user_data_dir as well.
   static Profile* GetLastUsedProfile();
-
-  // Register the mapping of a directory to a profile name in Local State.
-  void RegisterProfileName(Profile* profile);
 
   // Returns created profiles. Note, profiles order is NOT guaranteed to be
   // related with the creation order.
@@ -146,6 +144,15 @@ class ProfileManager : public base::NonThreadSafe,
   // otherwise return NULL.
   Profile* GetProfileByPath(const FilePath& path) const;
 
+  // Opens a new window with the given profile. This launches a new browser for
+  // the profile or activates an existing one; it is the static equivalent of
+  // the instance method Browser::NewWindow(), used for the creation of a
+  // Window from the multi-profile dropdown menu.
+  static void NewWindowWithProfile(
+      Profile* profile,
+      BrowserInit::IsProcessStartup process_startup,
+      BrowserInit::IsFirstRun is_first_run);
+
   // Profile::Delegate implementation:
   virtual void OnProfileCreated(Profile* profile, bool success);
 
@@ -173,9 +180,22 @@ class ProfileManager : public base::NonThreadSafe,
   // Checks if multiple profiles is enabled.
   static bool IsMultipleProfilesEnabled();
 
+  // Autoloads profiles if they are running background apps.
+  void AutoloadProfiles();
+
+  // Register and add testing profile to the ProfileManager. Use ONLY in tests.
+  // This allows the creation of Profiles outside of the standard creation path
+  // for testing. If |addToCache|, add to ProfileInfoCache as well.
+  void RegisterTestingProfile(Profile* profile, bool addToCache);
+
+  const FilePath& user_data_dir() const { return user_data_dir_; }
+
  protected:
   // Does final initial actions.
   virtual void DoFinalInit(Profile* profile, bool go_off_the_record);
+
+  // Creates a new profile. Virtual so that unittests can return TestingProfile.
+  virtual Profile* CreateProfile(const FilePath& path);
 
  private:
   friend class TestingProfileManager;
@@ -244,9 +264,6 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Object to cache various information about profiles.
   scoped_ptr<ProfileInfoCache> profile_info_cache_;
-
-  // Profiles that should be deleted on shutdown.
-  std::vector<FilePath> profiles_to_delete_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileManager);
 };

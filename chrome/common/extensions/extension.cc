@@ -44,6 +44,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/image_decoder.h"
+#include "webkit/glue/web_intent_service_data.h"
 
 namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
@@ -233,6 +234,7 @@ scoped_refptr<Extension> Extension::Create(const FilePath& path,
                                            const DictionaryValue& value,
                                            int flags,
                                            std::string* error) {
+  DCHECK(error);
   scoped_refptr<Extension> extension = new Extension(path, location);
 
   if (!extension->InitFromValue(value, flags, error))
@@ -1127,11 +1129,6 @@ bool Extension::LoadLaunchContainer(const DictionaryValue* manifest,
 
 bool Extension::LoadAppIsolation(const DictionaryValue* manifest,
                                  std::string* error) {
-  // Only parse app isolation features if this switch is present.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalExtensionApis))
-    return true;
-
   Value* temp = NULL;
   if (!manifest->Get(keys::kIsolation, &temp))
     return true;
@@ -1161,6 +1158,74 @@ bool Extension::LoadAppIsolation(const DictionaryValue* manifest,
   }
   return true;
 }
+
+bool Extension::LoadWebIntents(const base::DictionaryValue& manifest,
+                               std::string* error) {
+  DCHECK(error);
+
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableWebIntents))
+    return true;
+
+  if (!manifest.HasKey(keys::kIntents))
+    return true;
+
+  DictionaryValue* all_intents = NULL;
+  if (!manifest.GetDictionary(keys::kIntents, &all_intents)) {
+    *error = errors::kInvalidIntents;
+    return false;
+  }
+
+  std::string value;
+  for (DictionaryValue::key_iterator iter(all_intents->begin_keys());
+       iter != all_intents->end_keys(); ++iter) {
+    WebIntentServiceData intent;
+
+    DictionaryValue* one_intent = NULL;
+    if (!all_intents->GetDictionaryWithoutPathExpansion(*iter, &one_intent)) {
+      *error = errors::kInvalidIntent;
+      return false;
+    }
+    intent.action = UTF8ToUTF16(*iter);
+
+    // TODO(groby): Support an array of types.
+    if (one_intent->HasKey(keys::kIntentType) &&
+        !one_intent->GetString(keys::kIntentType, &intent.type)) {
+      *error = errors::kInvalidIntentType;
+      return false;
+    }
+
+    if (one_intent->HasKey(keys::kIntentPath)) {
+      if (!one_intent->GetString(keys::kIntentPath, &value)) {
+        *error = errors::kInvalidIntentPath;
+        return false;
+      }
+      intent.service_url = GetResourceURL(value);
+    }
+
+    if (one_intent->HasKey(keys::kIntentTitle) &&
+        !one_intent->GetString(keys::kIntentTitle, &intent.title)) {
+      *error = errors::kInvalidIntentTitle;
+      return false;
+    }
+
+    if (one_intent->HasKey(keys::kIntentDisposition)) {
+      if (!one_intent->GetString(keys::kIntentDisposition, &value) ||
+          (value != values::kIntentDispositionWindow &&
+           value != values::kIntentDispositionInline)) {
+        *error = errors::kInvalidIntentDisposition;
+        return false;
+      }
+      if (value == values::kIntentDispositionInline)
+        intent.disposition = WebIntentServiceData::DISPOSITION_INLINE;
+      else
+        intent.disposition = WebIntentServiceData::DISPOSITION_WINDOW;
+    }
+
+    intents_.push_back(intent);
+  }
+  return true;
+}
+
 
 bool Extension::EnsureNotHybridApp(const DictionaryValue* manifest,
                                    std::string* error) {
@@ -1360,6 +1425,7 @@ GURL Extension::GetBaseURLFromExtensionId(const std::string& extension_id) {
 
 bool Extension::InitFromValue(const DictionaryValue& source, int flags,
                               std::string* error) {
+  DCHECK(error);
   base::AutoLock auto_lock(runtime_data_lock_);
   // When strict error checks are enabled, make URL pattern parsing strict.
   URLPattern::ParseOption parse_strictness =
@@ -1424,6 +1490,44 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
   base::i18n::AdjustStringForLocaleDirection(&localized_name);
   name_ = UTF16ToUTF8(localized_name);
+
+  // Load App settings. LoadExtent at least has to be done before
+  // ParsePermissions(), because the valid permissions depend on what type of
+  // package this is.
+  if (!LoadIsApp(manifest_value_.get(), error) ||
+      !LoadExtent(manifest_value_.get(), keys::kWebURLs,
+                  &extent_,
+                  errors::kInvalidWebURLs, errors::kInvalidWebURL,
+                  parse_strictness, error) ||
+      !EnsureNotHybridApp(manifest_value_.get(), error) ||
+      !LoadLaunchURL(manifest_value_.get(), error) ||
+      !LoadLaunchContainer(manifest_value_.get(), error)) {
+    return false;
+  }
+
+  // Initialize the permissions (optional).
+  ExtensionAPIPermissionSet api_permissions;
+  URLPatternSet host_permissions;
+  if (!ParsePermissions(&source,
+                        keys::kPermissions,
+                        flags,
+                        error,
+                        &api_permissions,
+                        &host_permissions)) {
+    return false;
+  }
+
+  // Initialize the optional permissions (optional).
+  ExtensionAPIPermissionSet optional_api_permissions;
+  URLPatternSet optional_host_permissions;
+  if (!ParsePermissions(&source,
+                        keys::kOptionalPermissions,
+                        flags,
+                        error,
+                        &optional_api_permissions,
+                        &optional_host_permissions)) {
+    return false;
+  }
 
   // Initialize description (if present).
   if (source.HasKey(keys::kDescription)) {
@@ -1712,42 +1816,6 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
     }
   }
 
-  // Initialize toolstrips.  This is deprecated for public use.
-  // NOTE(erikkay) Although deprecated, we intend to preserve this parsing
-  // code indefinitely.  Please contact me or Joi for details as to why.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalExtensionApis) &&
-      source.HasKey(keys::kToolstrips)) {
-    ListValue* list_value = NULL;
-    if (!source.GetList(keys::kToolstrips, &list_value)) {
-      *error = errors::kInvalidToolstrips;
-      return false;
-    }
-
-    for (size_t i = 0; i < list_value->GetSize(); ++i) {
-      GURL toolstrip;
-      DictionaryValue* toolstrip_value = NULL;
-      std::string toolstrip_path;
-      if (list_value->GetString(i, &toolstrip_path)) {
-        // Support a simple URL value for backwards compatibility.
-        toolstrip = GetResourceURL(toolstrip_path);
-      } else if (list_value->GetDictionary(i, &toolstrip_value)) {
-        if (!toolstrip_value->GetString(keys::kToolstripPath,
-                                        &toolstrip_path)) {
-          *error = ExtensionErrorUtils::FormatErrorMessage(
-              errors::kInvalidToolstrip, base::IntToString(i));
-          return false;
-        }
-        toolstrip = GetResourceURL(toolstrip_path);
-      } else {
-        *error = ExtensionErrorUtils::FormatErrorMessage(
-            errors::kInvalidToolstrip, base::IntToString(i));
-        return false;
-      }
-      toolstrips_.push_back(toolstrip);
-    }
-  }
-
   // Initialize content scripts (optional).
   if (source.HasKey(keys::kContentScripts)) {
     ListValue* list_value;
@@ -1844,17 +1912,10 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
       return false;  // Failed to parse file browser actions definition.
   }
 
-  // Load App settings.
-  if (!LoadIsApp(manifest_value_.get(), error) ||
-      !LoadExtent(manifest_value_.get(), keys::kWebURLs,
-                  &extent_,
-                  errors::kInvalidWebURLs, errors::kInvalidWebURL,
-                  parse_strictness, error) ||
-      !EnsureNotHybridApp(manifest_value_.get(), error) ||
-      !LoadLaunchURL(manifest_value_.get(), error) ||
-      !LoadLaunchContainer(manifest_value_.get(), error) ||
-      !LoadAppIsolation(manifest_value_.get(), error)) {
-    return false;
+  // App isolation.
+  if (api_permissions.count(ExtensionAPIPermission::kExperimental)) {
+    if (!LoadAppIsolation(manifest_value_.get(), error))
+      return false;
   }
 
   // Initialize options page url (optional).
@@ -1887,32 +1948,6 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
         return false;
       }
     }
-  }
-
-  // Initialize the permissions (optional).
-  ExtensionAPIPermissionSet api_permissions;
-  URLPatternSet host_permissions;
-  if (!ParsePermissions(&source,
-                        keys::kPermissions,
-                        flags,
-                        error,
-                        &api_permissions,
-                        &host_permissions)) {
-    return false;
-  }
-
-  // Initialize the optional permissions (optional).
-  ExtensionAPIPermissionSet optional_api_permissions;
-  URLPatternSet optional_host_permissions;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalExtensionApis) &&
-      !ParsePermissions(&source,
-                        keys::kOptionalPermissions,
-                        flags,
-                        error,
-                        &optional_api_permissions,
-                        &optional_host_permissions)) {
-    return false;
   }
 
   // Initialize background url (optional).
@@ -1972,7 +2007,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
       std::string val;
       // Restrict override pages to a list of supported URLs.
       if ((page != chrome::kChromeUINewTabHost &&
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
            page != chrome::kChromeUIKeyboardHost &&
 #endif
 #if defined(OS_CHROMEOS)
@@ -2001,8 +2036,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
     }
   }
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalExtensionApis) &&
+  if (api_permissions.count(ExtensionAPIPermission::kExperimental) &&
       source.HasKey(keys::kInputComponents)) {
     ListValue* list_value = NULL;
     if (!source.GetList(keys::kInputComponents, &list_value)) {
@@ -2274,6 +2308,10 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
     }
   }
 
+  // Initialize web intents (optional).
+  if (!LoadWebIntents(source, error))
+    return false;
+
   // Initialize incognito behavior. Apps default to split mode, extensions
   // default to spanning.
   incognito_split_mode_ = is_app();
@@ -2525,41 +2563,11 @@ bool Extension::ParsePermissions(const DictionaryValue* source,
       ExtensionAPIPermission* permission =
           ExtensionPermissionsInfo::GetInstance()->GetByName(permission_str);
 
-      // Only COMPONENT extensions can use private APIs.
-      // TODO(asargent) - We want a more general purpose mechanism for this,
-      // and better error messages. (http://crbug.com/54013)
-      if (!IsComponentOnlyPermission(permission)
-#ifndef NDEBUG
-           && !CommandLine::ForCurrentProcess()->HasSwitch(
-                 switches::kExposePrivateExtensionApi)
-#endif
-          ) {
+      if (permission != NULL) {
+        if (!CanSpecifyAPIPermission(permission, error))
+          return false;
+        api_permissions->insert(permission->id());
         continue;
-      }
-
-      if (web_extent().is_empty() || location() == Extension::COMPONENT) {
-        // Check if it's a module permission.  If so, enable that permission.
-        if (permission != NULL) {
-          // Only allow the experimental API permission if the command line
-          // flag is present, or if the extension is a component of Chrome.
-          if (IsDisallowedExperimentalPermission(permission->id()) &&
-              location() != Extension::COMPONENT) {
-            *error = errors::kExperimentalFlagRequired;
-            return false;
-          }
-          api_permissions->insert(permission->id());
-          continue;
-        }
-      } else {
-        // Hosted apps only get access to a subset of the valid permissions.
-        if (permission != NULL && permission->is_hosted_app()) {
-          if (IsDisallowedExperimentalPermission(permission->id())) {
-            *error = errors::kExperimentalFlagRequired;
-            return false;
-          }
-          api_permissions->insert(permission->id());
-          continue;
-        }
       }
 
       // Check if it's a host pattern permission.
@@ -2687,17 +2695,6 @@ scoped_refptr<const ExtensionPermissionSet>
   return runtime_data_.GetActivePermissions();
 }
 
-bool Extension::IsComponentOnlyPermission(
-    const ExtensionAPIPermission* api) const {
-  if (location() == Extension::COMPONENT)
-    return true;
-
-  if (api == NULL)
-    return true;
-
-  return !api->is_component_only();
-}
-
 bool Extension::HasMultipleUISurfaces() const {
   int num_surfaces = 0;
 
@@ -2762,11 +2759,86 @@ bool Extension::ShowConfigureContextMenus() const {
   return location() != Extension::COMPONENT;
 }
 
-bool Extension::IsDisallowedExperimentalPermission(
-    ExtensionAPIPermission::ID permission) const {
-  return permission == ExtensionAPIPermission::kExperimental &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableExperimentalExtensionApis);
+bool Extension::ImplicitlyDelaysNetworkStartup() const {
+  // Network requests should be deferred until any extensions that might want
+  // to observe or modify them are loaded.
+  return HasAPIPermission(ExtensionAPIPermission::kWebNavigation) ||
+      HasAPIPermission(ExtensionAPIPermission::kWebRequest);
+}
+
+bool Extension::CanSpecifyAPIPermission(
+    const ExtensionAPIPermission* permission,
+    std::string* error) const {
+  if (permission->is_component_only()) {
+    if (!CanSpecifyComponentOnlyPermission()) {
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          errors::kPermissionNotAllowed, permission->name());
+      return false;
+    }
+  }
+
+  if (permission->id() == ExtensionAPIPermission::kExperimental) {
+    if (!CanSpecifyExperimentalPermission()) {
+      *error = errors::kExperimentalFlagRequired;
+      return false;
+    }
+  }
+
+  if (is_hosted_app()) {
+    if (!CanSpecifyPermissionForHostedApp(permission)) {
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          errors::kPermissionNotAllowed, permission->name());
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool Extension::CanSpecifyComponentOnlyPermission() const {
+  // Only COMPONENT extensions can use private APIs.
+  // TODO(asargent) - We want a more general purpose mechanism for this,
+  // and better error messages. (http://crbug.com/54013)
+  if (location_ == Extension::COMPONENT)
+    return true;
+
+#ifndef NDEBUG
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kExposePrivateExtensionApi)) {
+    return true;
+  }
+#endif
+
+  return false;
+}
+
+bool Extension::CanSpecifyExperimentalPermission() const {
+  if (location_ == Extension::COMPONENT)
+    return true;
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalExtensionApis)) {
+    return true;
+  }
+
+  // We rely on the webstore to check access to experimental. This way we can
+  // whitelist extensions to have access to experimental in just the store, and
+  // not have to push a new version of the client.
+  if (from_webstore())
+    return true;
+
+  return false;
+}
+
+bool Extension::CanSpecifyPermissionForHostedApp(
+    const ExtensionAPIPermission* permission) const {
+  if (location_ == Extension::COMPONENT)
+    return true;
+
+  if (permission->is_hosted_app())
+    return true;
+
+  return false;
 }
 
 bool Extension::CanExecuteScriptEverywhere() const {
@@ -2901,17 +2973,6 @@ void Extension::RuntimeData::SetActivePermissions(
     const ExtensionPermissionSet* active) {
   active_permissions_ = active;
 }
-
-UninstalledExtensionInfo::UninstalledExtensionInfo(
-    const Extension& extension)
-    : extension_id(extension.id()),
-      extension_api_permissions(
-          extension.GetActivePermissions()->GetAPIsAsStrings()),
-      extension_type(extension.GetType()),
-      update_url(extension.update_url()) {}
-
-UninstalledExtensionInfo::~UninstalledExtensionInfo() {}
-
 
 UnloadedExtensionInfo::UnloadedExtensionInfo(
     const Extension* extension,

@@ -13,6 +13,7 @@
 #include "views/views_delegate.h"
 
 #if defined(USE_AURA)
+#include "ui/aura/window.h"
 #include "views/widget/native_widget_aura.h"
 #elif defined(OS_WIN)
 #include "views/widget/native_widget_win.h"
@@ -132,6 +133,15 @@ Widget* CreateChildPlatformWidget(gfx::NativeView parent_native_view) {
   return child;
 }
 
+Widget* CreateTopLevelNativeWidgetViews() {
+  Widget* toplevel = new Widget;
+  Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
+  params.native_widget = new NativeWidgetViews(toplevel);
+  toplevel->Init(params);
+  toplevel->SetContentsView(new View);
+  return toplevel;
+}
+
 Widget* CreateChildNativeWidgetViewsWithParent(Widget* parent) {
   Widget* child = new Widget;
   Widget::InitParams params(Widget::InitParams::TYPE_CONTROL);
@@ -157,12 +167,12 @@ bool WidgetHasMouseCapture(const Widget* widget) {
 TEST_F(WidgetTest, GetTopLevelWidget_Native) {
   // Create a hierarchy of native widgets.
   Widget* toplevel = CreateTopLevelPlatformWidget();
-#if defined(OS_WIN)
-  gfx::NativeView parent = toplevel->GetNativeView();
-#elif defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_USES_GTK)
   NativeWidgetGtk* native_widget =
       static_cast<NativeWidgetGtk*>(toplevel->native_widget());
   gfx::NativeView parent = native_widget->window_contents();
+#else
+  gfx::NativeView parent = toplevel->GetNativeView();
 #endif
   Widget* child = CreateChildPlatformWidget(parent);
 
@@ -178,7 +188,7 @@ TEST_F(WidgetTest, GetTopLevelWidget_Synthetic) {
   // child NativeWidgetViews.
   Widget* toplevel = CreateTopLevelPlatformWidget();
   widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
-  Widget* child = CreateChildNativeWidgetViews();
+  Widget* child = CreateTopLevelNativeWidgetViews();
 
   EXPECT_EQ(toplevel, toplevel->GetTopLevelWidget());
   EXPECT_EQ(child, child->GetTopLevelWidget());
@@ -187,23 +197,26 @@ TEST_F(WidgetTest, GetTopLevelWidget_Synthetic) {
   // |child| should be automatically destroyed with |toplevel|.
 }
 
-// Creates a hierarchy consisting of a top level platform native widget, a child
-// NativeWidgetViews, and a child of that child, another NativeWidgetViews.
-TEST_F(WidgetTest, GetTopLevelWidget_SyntheticParent) {
-  Widget* toplevel = CreateTopLevelPlatformWidget();
-  widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
+// Creates a hierarchy consisting of a desktop platform native widget, a
+// toplevel NativeWidgetViews, and a child of that toplevel, another
+// NativeWidgetViews.
+TEST_F(WidgetTest, GetTopLevelWidget_SyntheticDesktop) {
+  // Create a hierarchy consisting of a desktop platform native widget,
+  // a toplevel NativeWidgetViews and a chlid NativeWidgetViews.
+  Widget* desktop = CreateTopLevelPlatformWidget();
+  widget_views_delegate().set_default_parent_view(desktop->GetRootView());
+  Widget* toplevel = CreateTopLevelNativeWidgetViews(); // Will be parented
+                                                        // automatically to
+                                                        // |toplevel|.
 
-  Widget* child1 = CreateChildNativeWidgetViews(); // Will be parented
-                                                   // automatically to
-                                                   // |toplevel|.
-  Widget* child11 = CreateChildNativeWidgetViewsWithParent(child1);
+  Widget* child = CreateChildNativeWidgetViewsWithParent(toplevel);
 
+  EXPECT_EQ(desktop, desktop->GetTopLevelWidget());
   EXPECT_EQ(toplevel, toplevel->GetTopLevelWidget());
-  EXPECT_EQ(child1, child1->GetTopLevelWidget());
-  EXPECT_EQ(child1, child11->GetTopLevelWidget());
+  EXPECT_EQ(toplevel, child->GetTopLevelWidget());
 
-  toplevel->CloseNow();
-  // |child1| and |child11| should be destroyed with |toplevel|.
+  desktop->CloseNow();
+  // |toplevel|, |child| should be automatically destroyed with |toplevel|.
 }
 
 // This is flaky on touch build. See crbug.com/94137.
@@ -215,12 +228,8 @@ TEST_F(WidgetTest, GetTopLevelWidget_SyntheticParent) {
 // Tests some grab/ungrab events.
 TEST_F(WidgetTest, MAYBE_GrabUngrab) {
   Widget* toplevel = CreateTopLevelPlatformWidget();
-  widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
-
-  Widget* child1 = CreateChildNativeWidgetViews(); // Will be parented
-                                                   // automatically to
-                                                   // |toplevel|.
-  Widget* child2 = CreateChildNativeWidgetViews();
+  Widget* child1 = CreateChildNativeWidgetViewsWithParent(toplevel);
+  Widget* child2 = CreateChildNativeWidgetViewsWithParent(toplevel);
 
   toplevel->SetBounds(gfx::Rect(0, 0, 500, 500));
 
@@ -296,6 +305,65 @@ TEST_F(WidgetTest, ChangeActivation) {
 
   top1->CloseNow();
   top2->CloseNow();
+}
+
+// Tests visibility of child widgets.
+TEST_F(WidgetTest, Visibility) {
+  Widget* toplevel = CreateTopLevelPlatformWidget();
+#if defined(TOOLKIT_USES_GTK)
+  NativeWidgetGtk* native_widget =
+      static_cast<NativeWidgetGtk*>(toplevel->native_widget());
+  gfx::NativeView parent = native_widget->window_contents();
+#else
+  gfx::NativeView parent = toplevel->GetNativeView();
+#endif
+  Widget* child = CreateChildPlatformWidget(parent);
+
+  EXPECT_FALSE(toplevel->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+
+  child->Show();
+
+  EXPECT_FALSE(toplevel->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+
+  toplevel->Show();
+
+  EXPECT_TRUE(toplevel->IsVisible());
+  EXPECT_TRUE(child->IsVisible());
+
+  toplevel->CloseNow();
+  // |child| should be automatically destroyed with |toplevel|.
+}
+
+// Tests visibility of synthetic child widgets.
+TEST_F(WidgetTest, Visibility_Synthetic) {
+  // Create a hierarchy consisting of a desktop platform native widget,
+  // a toplevel NativeWidgetViews and a chlid NativeWidgetViews.
+  Widget* desktop = CreateTopLevelPlatformWidget();
+  desktop->Show();
+
+  widget_views_delegate().set_default_parent_view(desktop->GetRootView());
+  Widget* toplevel = CreateTopLevelNativeWidgetViews(); // Will be parented
+                                                        // automatically to
+                                                        // |toplevel|.
+
+  Widget* child = CreateChildNativeWidgetViewsWithParent(toplevel);
+
+  EXPECT_FALSE(toplevel->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+
+  child->Show();
+
+  EXPECT_FALSE(toplevel->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+
+  toplevel->Show();
+
+  EXPECT_TRUE(toplevel->IsVisible());
+  EXPECT_TRUE(child->IsVisible());
+
+  desktop->CloseNow();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -531,7 +599,7 @@ TEST_F(WidgetOwnershipTest,
 
   // Now simulate a destroy of the platform native widget from the OS:
 #if defined(USE_AURA)
-  NOTIMPLEMENTED();
+  delete widget->GetNativeView();
 #elif defined(OS_WIN)
   DestroyWindow(widget->GetNativeView());
 #elif defined(TOOLKIT_USES_GTK)
@@ -650,7 +718,7 @@ class WidgetObserverTest : public WidgetTest,
   }
 
   Widget* NewWidget() {
-    Widget* widget = CreateChildNativeWidgetViews();
+    Widget* widget = CreateTopLevelNativeWidgetViews();
     widget->AddObserver(this);
     return widget;
   }
@@ -677,18 +745,26 @@ TEST_F(WidgetObserverTest, ActivationChange) {
   Widget* toplevel = CreateTopLevelPlatformWidget();
   widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
 
-  Widget* child1 = NewWidget();
-  Widget* child2 = NewWidget();
+  Widget* toplevel1 = NewWidget();
+  Widget* toplevel2 = NewWidget();
+
+  toplevel1->Show();
+  toplevel2->Show();
 
   reset();
 
-  child1->Activate();
-  EXPECT_EQ(child1, widget_activated());
+  toplevel1->Activate();
 
-  child2->Activate();
-  EXPECT_EQ(child1, widget_deactivated());
-  EXPECT_EQ(child2, widget_activated());
-  EXPECT_EQ(child2, active());
+  RunPendingMessages();
+  EXPECT_EQ(toplevel1, widget_activated());
+
+  toplevel2->Activate();
+  RunPendingMessages();
+  EXPECT_EQ(toplevel1, widget_deactivated());
+  EXPECT_EQ(toplevel2, widget_activated());
+  EXPECT_EQ(toplevel2, active());
+
+  toplevel->CloseNow();
 }
 
 TEST_F(WidgetObserverTest, VisibilityChange) {
@@ -697,6 +773,10 @@ TEST_F(WidgetObserverTest, VisibilityChange) {
 
   Widget* child1 = NewWidget();
   Widget* child2 = NewWidget();
+
+  toplevel->Show();
+  child1->Show();
+  child2->Show();
 
   reset();
 
@@ -711,6 +791,8 @@ TEST_F(WidgetObserverTest, VisibilityChange) {
 
   child2->Show();
   EXPECT_EQ(child2, widget_shown());
+
+  toplevel->CloseNow();
 }
 
 }  // namespace

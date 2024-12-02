@@ -8,10 +8,6 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_LINUX)
-#include <gdk/gdk.h>
-#endif
-
 #include <string>
 
 #include "base/basictypes.h"
@@ -189,6 +185,14 @@ class VIEWS_EXPORT Textfield : public View {
   // Selects the text given by |range|. This is views-implementation only and
   // has to be called after the wrapper is created.
   void SelectRange(const ui::Range& range);
+
+  // Gets the selection model. This is views-implementation only and
+  // has to be called after the wrapper is created.
+  void GetSelectionModel(gfx::SelectionModel* sel) const;
+
+  // Selects the text given by |sel|. This is views-implementation only and
+  // has to be called after the wrapper is created.
+  void SelectSelectionModel(const gfx::SelectionModel& sel);
 
   // Returns the current cursor position. This is views-implementation
   // only and has to be called after the wrapper is created.

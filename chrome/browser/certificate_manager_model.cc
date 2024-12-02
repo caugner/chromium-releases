@@ -4,7 +4,7 @@
 
 #include "chrome/browser/certificate_manager_model.h"
 
-#include "base/callback_old.h"
+#include "base/bind.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
@@ -38,8 +38,8 @@ void CertificateManagerModel::Refresh() {
       modules,
       browser::kCryptoModulePasswordListCerts,
       "",  // unused.
-      NewCallback(this,
-                  &CertificateManagerModel::RefreshSlotsUnlocked));
+      base::Bind(&CertificateManagerModel::RefreshSlotsUnlocked,
+                 base::Unretained(this)));
 }
 
 void CertificateManagerModel::RefreshSlotsUnlocked() {
@@ -123,7 +123,7 @@ int CertificateManagerModel::ImportFromPKCS12(net::CryptoModule* module,
 
 bool CertificateManagerModel::ImportCACerts(
     const net::CertificateList& certificates,
-    unsigned int trust_bits,
+    net::CertDatabase::TrustBits trust_bits,
     net::CertDatabase::ImportCertFailureList* not_imported) {
   bool result = cert_db_.ImportCACerts(certificates, trust_bits, not_imported);
   if (result && not_imported->size() != certificates.size())
@@ -140,9 +140,10 @@ bool CertificateManagerModel::ImportServerCert(
   return result;
 }
 
-bool CertificateManagerModel::SetCertTrust(const net::X509Certificate* cert,
-                                           net::CertType type,
-                                           unsigned int trust_bits) {
+bool CertificateManagerModel::SetCertTrust(
+    const net::X509Certificate* cert,
+    net::CertType type,
+    net::CertDatabase::TrustBits trust_bits) {
   return cert_db_.SetCertTrust(cert, type, trust_bits);
 }
 

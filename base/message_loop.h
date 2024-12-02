@@ -12,6 +12,7 @@
 #include "base/base_export.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop_proxy.h"
 #include "base/message_pump.h"
@@ -19,7 +20,6 @@
 #include "base/synchronization/lock.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "base/tracked.h"
 
 #if defined(OS_WIN)
 // We need this to declare base::MessagePumpWin::Dispatcher, which we should
@@ -27,11 +27,11 @@
 #include "base/message_pump_win.h"
 #elif defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
 
 #if defined(USE_WAYLAND)
 #include "base/message_pump_wayland.h"
-#elif defined(TOUCH_UI)
+#elif defined(TOUCH_UI) || defined(USE_AURA)
 #include "base/message_pump_x.h"
 #else
 #include "base/message_pump_gtk.h"
@@ -84,8 +84,8 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
  public:
 #if defined(OS_WIN)
   typedef base::MessagePumpWin::Dispatcher Dispatcher;
-  typedef base::MessagePumpForUI::Observer Observer;
-#elif !defined(OS_MACOSX)
+  typedef base::MessagePumpObserver Observer;
+#elif !defined(OS_MACOSX) && !defined(OS_ANDROID)
   typedef base::MessagePumpDispatcher Dispatcher;
   typedef base::MessagePumpObserver Observer;
 #endif
@@ -242,11 +242,10 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
   // messages.  This method may only be called on the same thread that called
   // Run, and Run must still be on the call stack.
   //
-  // Use QuitTask if you need to Quit another thread's MessageLoop, but note
-  // that doing so is fairly dangerous if the target thread makes nested calls
-  // to MessageLoop::Run.  The problem being that you won't know which nested
-  // run loop you are quiting, so be careful!
-  //
+  // Use QuitTask or QuitClosure if you need to Quit another thread's
+  // MessageLoop, but note that doing so is fairly dangerous if the target
+  // thread makes nested calls to MessageLoop::Run.  The problem being that you
+  // won't know which nested run loop you are quitting, so be careful!
   void Quit();
 
   // This method is a variant of Quit, that does not wait for pending messages
@@ -255,12 +254,17 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
 
   // Invokes Quit on the current MessageLoop when run.  Useful to schedule an
   // arbitrary MessageLoop to Quit.
+  // TODO(jhawkins): Remove once task.h is removed.
   class QuitTask : public Task {
    public:
     virtual void Run() {
       MessageLoop::current()->Quit();
     }
   };
+
+  // Invokes Quit on the current MessageLoop when run. Useful to schedule an
+  // arbitrary MessageLoop to Quit.
+  static base::Closure QuitClosure();
 
   // Returns the type passed to the constructor.
   Type type() const { return type_; }
@@ -430,14 +434,14 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
     // The time when the task should be run.
     base::TimeTicks delayed_run_time;
 
+    // The site this PendingTask was posted from.
+    tracked_objects::Location posted_from;
+
     // Secondary sort key for run time.
     int sequence_num;
 
     // OK to dispatch from a nested loop.
     bool nestable;
-
-    // The site this PendingTask was posted from.
-    const void* birth_program_counter;
   };
 
   class TaskQueue : public std::queue<PendingTask> {
@@ -620,6 +624,7 @@ class BASE_EXPORT MessageLoopForUI : public MessageLoop {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
   void Run(Dispatcher* dispatcher);
+  void RunAllPendingWithDispatcher(Dispatcher* dispatcher);
 
  protected:
   // TODO(rvargas): Make this platform independent.

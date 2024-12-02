@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -78,13 +79,12 @@ void PersonalOptionsHandler::GetLocalizedValues(
       "syncOverview",
       l10n_util::GetStringFUTF16(IDS_SYNC_OVERVIEW,
                                  l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
-  localized_strings->SetString(
-      "syncFurtherOverview",
-      l10n_util::GetStringUTF16(IDS_SYNC_FURTHER_OVERVIEW));
   localized_strings->SetString("syncSection",
       l10n_util::GetStringUTF16(IDS_SYNC_OPTIONS_GROUP_NAME));
   localized_strings->SetString("customizeSync",
       l10n_util::GetStringUTF16(IDS_SYNC_CUSTOMIZE_BUTTON_LABEL));
+  localized_strings->SetString("syncLearnMoreURL",
+      google_util::StringAppendGoogleLocaleParam(chrome::kSyncLearnMoreURL));
 
   localized_strings->SetString("profiles",
       l10n_util::GetStringUTF16(IDS_PROFILES_OPTIONS_GROUP_NAME));
@@ -94,8 +94,13 @@ void PersonalOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_PROFILES_MANAGE_BUTTON_LABEL));
   localized_strings->SetString("profilesDelete",
       l10n_util::GetStringUTF16(IDS_PROFILES_DELETE_BUTTON_LABEL));
+  localized_strings->SetString("profilesDeleteSingle",
+      l10n_util::GetStringUTF16(IDS_PROFILES_DELETE_SINGLE_BUTTON_LABEL));
   localized_strings->SetString("profilesListItemCurrent",
       l10n_util::GetStringUTF16(IDS_PROFILES_LIST_ITEM_CURRENT));
+  localized_strings->SetString("profilesSingleUser",
+      l10n_util::GetStringFUTF16(IDS_PROFILES_SINGLE_USER_MESSAGE,
+                                 l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
 
   localized_strings->SetString("passwords",
       l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_GROUP_NAME));
@@ -183,7 +188,7 @@ void PersonalOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("syncsearchengines",
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SEARCH_ENGINES));
   localized_strings->SetString("syncsessions",
-      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SESSIONS));
+      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_TABS));
 
 #if defined(OS_CHROMEOS)
   localized_strings->SetString("account",
@@ -201,15 +206,18 @@ void PersonalOptionsHandler::RegisterMessages() {
   DCHECK(web_ui_);
   web_ui_->RegisterMessageCallback(
       "themesReset",
-      NewCallback(this, &PersonalOptionsHandler::ThemesReset));
+      base::Bind(&PersonalOptionsHandler::ThemesReset,
+                 base::Unretained(this)));
 #if defined(TOOLKIT_GTK)
   web_ui_->RegisterMessageCallback(
       "themesSetGTK",
-      NewCallback(this, &PersonalOptionsHandler::ThemesSetGTK));
+      base::Bind(&PersonalOptionsHandler::ThemesSetGTK,
+                 base::Unretained(this)));
 #endif
   web_ui_->RegisterMessageCallback(
       "createProfile",
-      NewCallback(this, &PersonalOptionsHandler::CreateProfile));
+      base::Bind(&PersonalOptionsHandler::CreateProfile,
+                 base::Unretained(this)));
 }
 
 void PersonalOptionsHandler::Observe(int type,
@@ -239,21 +247,6 @@ void PersonalOptionsHandler::OnStateChanged() {
   bool sync_setup_completed = service->HasSyncSetupCompleted();
   bool status_has_error = sync_ui_util::GetStatusLabels(
       service, &status_label, &link_label) == sync_ui_util::SYNC_ERROR;
-  browser_sync::SyncBackendHost::StatusSummary summary =
-      service->QuerySyncStatusSummary();
-
-  // TODO(jhawkins): This is terribly hacky. Sync should pass us this state, but
-  // we have to fix the other callers of
-  // sync_ui_util::GetSyncedStateStatusLabel() to handle returned HTML.
-  if (!status_has_error &&
-      summary == browser_sync::SyncBackendHost::Status::READY &&
-      service->HasSyncSetupCompleted()) {
-    string16 user_name(service->GetAuthenticatedUsername());
-    status_label.assign(l10n_util::GetStringFUTF16(
-        IDS_SYNC_ACCOUNT_SYNCING_TO_USER,
-        user_name,
-        ASCIIToUTF16(chrome::kSyncGoogleDashboardURL)));
-  }
 
   string16 start_stop_button_label;
   bool is_start_stop_button_visible = false;
@@ -274,7 +267,8 @@ void PersonalOptionsHandler::OnStateChanged() {
     is_start_stop_button_enabled = false;
   } else {
     start_stop_button_label =
-        l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL);
+        l10n_util::GetStringFUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL,
+            l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
     is_start_stop_button_visible = true;
     is_start_stop_button_enabled = !managed;
   }
@@ -399,15 +393,13 @@ void PersonalOptionsHandler::SendProfilesInfo() {
   FilePath current_profile_path =
       web_ui_->tab_contents()->browser_context()->GetPath();
   for (size_t i = 0, e = cache.GetNumberOfProfiles(); i < e; ++i) {
-    DictionaryValue *profile_value = new DictionaryValue();
+    DictionaryValue* profile_value = new DictionaryValue();
     size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(i);
     FilePath profile_path = cache.GetPathOfProfileAtIndex(i);
     profile_value->SetString("name", cache.GetNameOfProfileAtIndex(i));
     profile_value->SetString("iconURL",
                              cache.GetDefaultAvatarIconUrl(icon_index));
-    profile_value->Set("filePath",
-                       base::CreateFilePathValue(
-                          profile_path));
+    profile_value->Set("filePath", base::CreateFilePathValue(profile_path));
     profile_value->SetBoolean("isCurrentProfile",
                               profile_path == current_profile_path);
     profile_info_list.Append(profile_value);

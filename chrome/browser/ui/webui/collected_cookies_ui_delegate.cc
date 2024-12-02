@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/collected_cookies_ui_delegate.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/values.h"
@@ -129,6 +131,16 @@ void CollectedCookiesSource::StartDataRequest(const std::string& path,
 
 }  // namespace
 
+namespace browser {
+
+// Declared in browser_dialogs.h so others don't have to depend on our header.
+void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
+                                TabContentsWrapper* wrapper) {
+  CollectedCookiesUIDelegate::Show(wrapper);
+}
+
+}  // namespace browser
+
 // static
 void CollectedCookiesUIDelegate::Show(TabContentsWrapper* wrapper) {
   CollectedCookiesUIDelegate* delegate =
@@ -136,7 +148,7 @@ void CollectedCookiesUIDelegate::Show(TabContentsWrapper* wrapper) {
   Profile* profile = wrapper->profile();
   ConstrainedHtmlUI::CreateConstrainedHtmlDialog(profile,
                                                  delegate,
-                                                 wrapper->tab_contents());
+                                                 wrapper);
 }
 
 CollectedCookiesUIDelegate::CollectedCookiesUIDelegate(
@@ -201,13 +213,17 @@ bool CollectedCookiesUIDelegate::ShouldShowDialogTitle() const {
 
 void CollectedCookiesUIDelegate::RegisterMessages() {
   web_ui_->RegisterMessageCallback("BindCookiesTreeModel",
-      NewCallback(this, &CollectedCookiesUIDelegate::BindCookiesTreeModel));
+      base::Bind(&CollectedCookiesUIDelegate::BindCookiesTreeModel,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("Block",
-      NewCallback(this, &CollectedCookiesUIDelegate::Block));
+      base::Bind(&CollectedCookiesUIDelegate::Block,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("Allow",
-      NewCallback(this, &CollectedCookiesUIDelegate::Allow));
+      base::Bind(&CollectedCookiesUIDelegate::Allow,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("AllowThisSession",
-      NewCallback(this, &CollectedCookiesUIDelegate::AllowThisSession));
+      base::Bind(&CollectedCookiesUIDelegate::AllowThisSession,
+                 base::Unretained(this)));
 
   allowed_cookies_adapter_.Init(web_ui_);
   blocked_cookies_adapter_.Init(web_ui_);

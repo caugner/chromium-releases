@@ -1,12 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef WEBKIT_APPCACHE_APPCACHE_REQUEST_HANDLER_H_
 #define WEBKIT_APPCACHE_APPCACHE_REQUEST_HANDLER_H_
 
+#include "base/compiler_specific.h"
 #include "net/url_request/url_request.h"
 #include "webkit/appcache/appcache_entry.h"
+#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_host.h"
 #include "webkit/glue/resource_type.h"
 
@@ -24,9 +26,10 @@ class AppCacheURLRequestJob;
 // given the opportunity to hijack the request along the way. Callers
 // should use AppCacheHost::CreateRequestHandler to manufacture instances
 // that can retrieve resources for a particular host.
-class AppCacheRequestHandler : public net::URLRequest::UserData,
-                               public AppCacheHost::Observer,
-                               public AppCacheStorage::Delegate  {
+class APPCACHE_EXPORT AppCacheRequestHandler
+    : NON_EXPORTED_BASE(public net::URLRequest::UserData),
+      public AppCacheHost::Observer,
+      public AppCacheStorage::Delegate  {
  public:
   virtual ~AppCacheRequestHandler();
 
@@ -76,8 +79,7 @@ class AppCacheRequestHandler : public net::URLRequest::UserData,
   virtual void OnMainResponseFound(
       const GURL& url, const AppCacheEntry& entry,
       const GURL& fallback_url, const AppCacheEntry& fallback_entry,
-      int64 cache_id, const GURL& mainfest_url,
-      bool was_blocked_by_policy);
+      int64 cache_id, const GURL& mainfest_url);
 
   // Sub-resource loading -------------------------------------
   // Dedicated worker and all manner of sub-resources are handled here.

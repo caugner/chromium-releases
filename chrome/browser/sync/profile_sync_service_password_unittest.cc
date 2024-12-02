@@ -6,11 +6,11 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "base/location.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task.h"
 #include "base/test/test_timeouts.h"
 #include "base/time.h"
-#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -196,8 +196,10 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
     if (!service_.get()) {
       service_.reset(new PasswordTestProfileSyncService(
           &factory_, &profile_, "test_user", false, root_task, node_task));
-      service_->RegisterPreferences();
-      profile_.GetPrefs()->SetBoolean(prefs::kSyncPasswords, true);
+      syncable::ModelTypeSet preferred_types;
+      service_->GetPreferredDataTypes(&preferred_types);
+      preferred_types.insert(syncable::PASSWORDS);
+      service_->ChangePreferredDataTypes(preferred_types);
       EXPECT_CALL(profile_, GetProfileSyncService()).WillRepeatedly(
           Return(service_.get()));
       PasswordDataTypeController* data_type_controller =
@@ -213,11 +215,11 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
           WillOnce(ReturnNewDataTypeManager());
 
       // We need tokens to get the tests going
-      token_service_.IssueAuthTokenForTest(
+      token_service_->IssueAuthTokenForTest(
           GaiaConstants::kSyncService, "token");
 
       EXPECT_CALL(profile_, GetTokenService()).
-          WillRepeatedly(Return(&token_service_));
+          WillRepeatedly(Return(token_service_.get()));
 
       EXPECT_CALL(profile_, GetPasswordStore(_)).
           Times(AtLeast(2)).  // Can be more if we hit NEEDS_CRYPTO.

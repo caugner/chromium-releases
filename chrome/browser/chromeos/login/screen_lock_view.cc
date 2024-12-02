@@ -152,13 +152,13 @@ void ScreenLockView::Init() {
   UsernameView* username =
       UsernameView::CreateShapedUsernameView(UTF8ToWide(display_name), false);
   username_ = username;
-  username->SetColor(login::kTextColor);
+  username->SetEnabledColor(login::kTextColor);
+  username->SetBackgroundColor(main_->background()->get_color());
   username->SetFont(font);
 
   // Add tooltip if screen name is not unique.
   if (user.NeedsNameTooltip()) {
-    const std::wstring tooltip_text = UTF8ToWide(user.GetNameTooltip());
-
+    string16 tooltip_text = UTF8ToUTF16(user.GetNameTooltip());
     user_view_->SetTooltipText(tooltip_text);
     username->SetTooltipText(tooltip_text);
   }

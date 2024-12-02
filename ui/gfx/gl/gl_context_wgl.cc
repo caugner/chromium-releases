@@ -37,7 +37,8 @@ std::string GLContextWGL::GetExtensions() {
   return GLContext::GetExtensions();
 }
 
-bool GLContextWGL::Initialize(GLSurface* compatible_surface) {
+bool GLContextWGL::Initialize(
+    GLSurface* compatible_surface, GpuPreference gpu_preference) {
   GLSurfaceWGL* surface_wgl = static_cast<GLSurfaceWGL*>(compatible_surface);
 
   // TODO(apatrick): When contexts and surfaces are separated, we won't be
@@ -82,7 +83,12 @@ bool GLContextWGL::MakeCurrent(GLSurface* surface) {
     return false;
   }
 
-  surface->OnMakeCurrent(this);
+  SetCurrent(this, surface);
+  if (!surface->OnMakeCurrent(this)) {
+    LOG(ERROR) << "Could not make current.";
+    return false;
+  }
+
   return true;
 }
 
@@ -90,11 +96,20 @@ void GLContextWGL::ReleaseCurrent(GLSurface* surface) {
   if (!IsCurrent(surface))
     return;
 
+  SetCurrent(NULL, NULL);
   wglMakeCurrent(NULL, NULL);
 }
 
 bool GLContextWGL::IsCurrent(GLSurface* surface) {
-  if (wglGetCurrentContext() != context_)
+  bool native_context_is_current =
+      wglGetCurrentContext() == context_;
+
+  // If our context is current then our notion of which GLContext is
+  // current must be correct. On the other hand, third-party code
+  // using OpenGL might change the current context.
+  DCHECK(!native_context_is_current || (GetCurrent() == this));
+
+  if (!native_context_is_current)
     return false;
 
   if (surface) {

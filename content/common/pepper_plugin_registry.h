@@ -12,12 +12,12 @@
 #include <vector>
 
 #include "base/file_path.h"
-#include "ppapi/proxy/proxy_channel.h"
+#include "content/common/content_export.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/webplugininfo.h"
 
-struct PepperPluginInfo {
+struct CONTENT_EXPORT PepperPluginInfo {
   PepperPluginInfo();
   ~PepperPluginInfo();
 
@@ -31,9 +31,6 @@ struct PepperPluginInfo {
 
   // True when this plugin should be run out of process. Defaults to false.
   bool is_out_of_process;
-
-  // Whether the plugin is enabled.  Defaults to true.
-  bool enabled;
 
   FilePath path;  // Internal plugins have "internal-[name]" as path.
   std::string name;
@@ -58,8 +55,7 @@ bool MakePepperPluginInfo(const webkit::WebPluginInfo& webplugin_info,
 // is a list of all live modules (some of which may be out-of-process and hence
 // not preloaded).
 class PepperPluginRegistry
-    : public webkit::ppapi::PluginDelegate::ModuleLifetime,
-      public ppapi::proxy::ProxyChannel::Delegate {
+    : public webkit::ppapi::PluginDelegate::ModuleLifetime {
  public:
   ~PepperPluginRegistry();
 
@@ -71,7 +67,8 @@ class PepperPluginRegistry
   // has no need to load the pepper plugin modules. It will re-compute the
   // plugin list every time it is called. Generally, code in the registry should
   // be using the cached plugin_list_ instead.
-  static void ComputeList(std::vector<PepperPluginInfo>* plugins);
+  CONTENT_EXPORT static void ComputeList(
+      std::vector<PepperPluginInfo>* plugins);
 
   // Loads the (native) libraries but does not initialize them (i.e., does not
   // call PPP_InitializeModule). This is needed by the zygote on Linux to get
@@ -102,10 +99,6 @@ class PepperPluginRegistry
 
  private:
   PepperPluginRegistry();
-
-  // ProxyChannel::Delegate implementation.
-  virtual base::MessageLoopProxy* GetIPCMessageLoop();
-  virtual base::WaitableEvent* GetShutdownEvent();
 
   // All known pepper plugins.
   std::vector<PepperPluginInfo> plugin_list_;

@@ -83,13 +83,13 @@ ContentView::ContentView(SpeechInputBubbleDelegate* delegate)
   const gfx::Font& font = rb.GetFont(ResourceBundle::MediumFont);
 
   heading_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING)));
+      l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING));
   heading_->set_border(views::Border::CreateEmptyBorder(
       kBubbleHeadingVertMargin, 0, kBubbleHeadingVertMargin, 0));
   heading_->SetFont(font);
   heading_->SetHorizontalAlignment(views::Label::ALIGN_CENTER);
-  heading_->SetText(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING)));
+  heading_->SetText(
+      l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING));
   AddChildView(heading_);
 
   message_ = new views::Label();
@@ -113,7 +113,7 @@ ContentView::ContentView(SpeechInputBubbleDelegate* delegate)
   AddChildView(try_again_);
 
   mic_settings_ = new views::Link(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_MIC_SETTINGS)));
+      l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_MIC_SETTINGS));
   mic_settings_->set_listener(this);
   AddChildView(mic_settings_);
 }
@@ -131,7 +131,7 @@ void ContentView::UpdateLayout(SpeechInputBubbleBase::DisplayMode mode,
   heading_->SetVisible(mode == SpeechInputBubbleBase::DISPLAY_MODE_RECORDING);
 
   if (is_message) {
-    message_->SetText(UTF16ToWideHack(message_text));
+    message_->SetText(message_text);
   } else {
     SetImage(image);
   }
@@ -261,21 +261,21 @@ class SpeechInputBubbleImpl
   virtual ~SpeechInputBubbleImpl();
 
   // SpeechInputBubble methods.
-  virtual void Show();
-  virtual void Hide();
+  virtual void Show() OVERRIDE;
+  virtual void Hide() OVERRIDE;
 
   // SpeechInputBubbleBase methods.
-  virtual void UpdateLayout();
-  virtual void UpdateImage();
+  virtual void UpdateLayout() OVERRIDE;
+  virtual void UpdateImage() OVERRIDE;
 
   // Returns the screen rectangle to use as the info bubble's target.
   // |element_rect| is the html element's bounds in page coordinates.
   gfx::Rect GetInfoBubbleTarget(const gfx::Rect& element_rect);
 
   // BubbleDelegate
-  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape);
-  virtual bool CloseOnEscape();
-  virtual bool FadeInOnShow();
+  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape) OVERRIDE;
+  virtual bool CloseOnEscape() OVERRIDE;
+  virtual bool FadeInOnShow() OVERRIDE;
 
  private:
   Delegate* delegate_;
@@ -351,8 +351,7 @@ void SpeechInputBubbleImpl::Show() {
           Profile::FromBrowserContext(tab_contents()->browser_context());
       Browser* browser = Browser::GetOrCreateTabbedBrowser(profile);
       BrowserView* browser_view =
-          BrowserView::GetBrowserViewForNativeWindow(
-              browser->window()->GetNativeHandle());
+          BrowserView::GetBrowserViewForBrowser(browser);
       gfx::Point point;
       if (base::i18n::IsRTL()) {
         int width = browser_view->toolbar()->location_bar()->width();

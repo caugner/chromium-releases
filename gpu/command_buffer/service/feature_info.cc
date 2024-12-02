@@ -81,14 +81,14 @@ class ExtensionHelper {
 };
 
 bool FeatureInfo::Initialize(const char* allowed_features) {
-  disallowed_extensions_ = DisallowedExtensions();
+  disallowed_features_ = DisallowedFeatures();
   AddFeatures(allowed_features);
   return true;
 }
 
-bool FeatureInfo::Initialize(const DisallowedExtensions& disallowed_extensions,
+bool FeatureInfo::Initialize(const DisallowedFeatures& disallowed_features,
                              const char* allowed_features) {
-  disallowed_extensions_ = disallowed_extensions;
+  disallowed_features_ = disallowed_features;
   AddFeatures(allowed_features);
   return true;
 }
@@ -106,6 +106,7 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
   AddExtensionString("GL_CHROMIUM_strict_attribs");
   AddExtensionString("GL_CHROMIUM_swapbuffers_complete_callback");
   AddExtensionString("GL_CHROMIUM_rate_limit_offscreen_context");
+  AddExtensionString("GL_ANGLE_translated_shader_source");
 
   // Only turn this feature on if it is requested. Not by default.
   if (desired_features && ext.Desire("GL_CHROMIUM_webglsl")) {
@@ -232,8 +233,7 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
   }
 
   if (ext.Desire("GL_OES_rgb8_rgba8")) {
-    if (ext.Have("GL_OES_rgb8_rgba8") ||
-        gfx::GetGLImplementation() == gfx::kGLImplementationDesktopGL) {
+    if (ext.Have("GL_OES_rgb8_rgba8") || gfx::HasDesktopGLFeatures()) {
       AddExtensionString("GL_OES_rgb8_rgba8");
       validators_.render_buffer_format.AddValue(GL_RGB8_OES);
       validators_.render_buffer_format.AddValue(GL_RGBA8_OES);
@@ -302,7 +302,7 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
   }
 
   // Check for multisample support
-  if (!disallowed_extensions_.multisampling &&
+  if (!disallowed_features_.multisampling &&
       ext.Desire("GL_CHROMIUM_framebuffer_multisample") &&
       (ext.Have("GL_EXT_framebuffer_multisample") ||
        ext.Have("GL_ANGLE_framebuffer_multisample"))) {
@@ -316,14 +316,13 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
   }
 
   if (ext.HaveAndDesire("GL_OES_depth24") ||
-      (gfx::GetGLImplementation() == gfx::kGLImplementationDesktopGL &&
-       ext.Desire("GL_OES_depth24"))) {
+      (gfx::HasDesktopGLFeatures() && ext.Desire("GL_OES_depth24"))) {
     AddExtensionString("GL_OES_depth24");
     validators_.render_buffer_format.AddValue(GL_DEPTH_COMPONENT24);
   }
 
   if (ext.HaveAndDesire("GL_OES_standard_derivatives") ||
-      (gfx::GetGLImplementation() == gfx::kGLImplementationDesktopGL &&
+      (gfx::HasDesktopGLFeatures() &&
        ext.Desire("GL_OES_standard_derivatives"))) {
     AddExtensionString("GL_OES_standard_derivatives");
     feature_flags_.oes_standard_derivatives = true;
@@ -338,6 +337,11 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
     validators_.get_tex_param_target.AddValue(GL_TEXTURE_EXTERNAL_OES);
     validators_.texture_parameter.AddValue(GL_REQUIRED_TEXTURE_IMAGE_UNITS_OES);
     validators_.g_l_state.AddValue(GL_TEXTURE_BINDING_EXTERNAL_OES);
+  }
+
+  if (ext.Desire("GL_CHROMIUM_stream_texture")) {
+    AddExtensionString("GL_CHROMIUM_stream_texture");
+    feature_flags_.chromium_stream_texture = true;
   }
 
   // TODO(gman): Add support for these extensions.

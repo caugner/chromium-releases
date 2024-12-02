@@ -6,7 +6,9 @@
 #define CHROME_BROWSER_CHROMEOS_XINPUT_HIERARCHY_CHANGED_EVENT_LISTENER_H_
 #pragma once
 
+#if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
+#endif
 
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
@@ -33,9 +35,11 @@ class XInputHierarchyChangedEventListener : public MessageLoopForUI::Observer {
   XInputHierarchyChangedEventListener();
   virtual ~XInputHierarchyChangedEventListener();
 
-#if defined(TOUCH_UI)
+#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
   // MessageLoopForUI::Observer overrides.
-  virtual EventStatus WillProcessXEvent(XEvent* xevent) OVERRIDE;
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
 #else
   // When TOUCH_UI is not defined, WillProcessXEvent() will not be called
   // automatically. We have to call the function manually by adding the Gdk

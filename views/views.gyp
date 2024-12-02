@@ -13,7 +13,6 @@
         ['include', '_(win)\\.cc$'],
         ['include', '/win/'],
         ['include', '/win_[^/]*\\.cc$'],
-        ['exclude', 'touchui/touch_factory.cc'],
       ]}],
       ['touchui==0', {
         'sources/': [
@@ -24,7 +23,8 @@
         'sources/': [ ['exclude', '_win\\.(h|cc)$'],
                       ['exclude', '_gtk\\.(h|cc)$'],
                       ['exclude', '_x\\.(h|cc)$'] ],
-      }],      
+        'dependencies': [ '../ui/aura/aura.gyp:aura', ],
+      }],
     ],
   },
   'targets': [
@@ -63,6 +63,12 @@
         'border.h',
         'bubble/bubble_border.cc',
         'bubble/bubble_border.h',
+        'bubble/bubble_delegate.cc',
+        'bubble/bubble_delegate.h',
+        'bubble/bubble_frame_view.cc',
+        'bubble/bubble_frame_view.h',
+        'bubble/bubble_view.cc',
+        'bubble/bubble_view.h',
         'context_menu_controller.h',
         'controls/button/button.cc',
         'controls/button/button.h',
@@ -122,6 +128,7 @@
         'controls/menu/menu_item_view.h',
         'controls/menu/menu_item_view_linux.cc',
         'controls/menu/menu_item_view_win.cc',
+        'controls/menu/menu_listener.h',
         'controls/menu/menu_model_adapter.cc',
         'controls/menu/menu_model_adapter.h',
         'controls/menu/menu_runner.cc',
@@ -138,8 +145,8 @@
         'controls/menu/native_menu_gtk.h',
         'controls/menu/native_menu_host.h',
         'controls/menu/native_menu_host_delegate.h',
-        'controls/menu/native_menu_linux.cc',
-        'controls/menu/native_menu_linux.h',
+        'controls/menu/native_menu_views.cc',
+        'controls/menu/native_menu_views.h',
         'controls/menu/native_menu_win.cc',
         'controls/menu/native_menu_win.h',
         'controls/menu/nested_dispatcher_gtk.cc',
@@ -159,6 +166,8 @@
         'controls/native_control_win.h',
         'controls/native/native_view_host.cc',
         'controls/native/native_view_host.h',
+        'controls/native/native_view_host_aura.cc',
+        'controls/native/native_view_host_aura.h',
         'controls/native/native_view_host_gtk.cc',
         'controls/native/native_view_host_gtk.h',
         'controls/native/native_view_host_win.cc',
@@ -171,13 +180,21 @@
         'controls/progress_bar.cc',
         'controls/resize_area.cc',
         'controls/resize_area.h',
+        'controls/resize_area_delegate.h',
         'controls/scroll_view.cc',
         'controls/scroll_view.h',
+        'controls/scrollbar/base_scroll_bar.cc',
+        'controls/scrollbar/base_scroll_bar.h',
+        'controls/scrollbar/base_scroll_bar_button.cc',
+        'controls/scrollbar/base_scroll_bar_button.h',
+        'controls/scrollbar/base_scroll_bar_thumb.cc',
+        'controls/scrollbar/base_scroll_bar_thumb.h',
         'controls/scrollbar/bitmap_scroll_bar.cc',
         'controls/scrollbar/bitmap_scroll_bar.h',
         'controls/scrollbar/native_scroll_bar_gtk.cc',
         'controls/scrollbar/native_scroll_bar_gtk.h',
-        'controls/scrollbar/native_scroll_bar_wayland.cc',
+        'controls/scrollbar/native_scroll_bar_views.cc',
+        'controls/scrollbar/native_scroll_bar_views.h',
         'controls/scrollbar/native_scroll_bar_win.cc',
         'controls/scrollbar/native_scroll_bar_win.h',
         'controls/scrollbar/native_scroll_bar_wrapper.h',
@@ -236,6 +253,7 @@
         'drag_utils.cc',
         'drag_utils.h',
         'drag_utils_gtk.cc',
+        'drag_utils_linux.cc',
         'drag_utils_win.cc',
         'events/event.cc',
         'events/event.h',
@@ -243,8 +261,6 @@
         'events/event_gtk.cc',
         'events/event_wayland.cc',
         'events/event_win.cc',
-        'events/event_utils_win.cc',
-        'events/event_utils_win.h',
         'events/event_x.cc',
         'focus/accelerator_handler.h',
         'focus/accelerator_handler_aura.cc',
@@ -262,6 +278,8 @@
         'focus/focus_search.h',
         'focus/view_storage.cc',
         'focus/view_storage.h',
+        'focus/widget_focus_manager.cc',
+        'focus/widget_focus_manager.h',
         'ime/character_composer.cc',
         'ime/character_composer.h',
         'ime/input_method.h',
@@ -281,8 +299,6 @@
         'ime/text_input_client.h',
         'ime/text_input_type_tracker.h',
         'ime/text_input_type_tracker.cc',
-        'layer_helper.cc',
-        'layer_helper.h',
         'layer_property_setter.cc',
         'layer_property_setter.h',
         'layout/box_layout.cc',
@@ -305,14 +321,14 @@
         'native_theme_delegate.h',
         'native_theme_painter.cc',
         'native_theme_painter.h',
+        'paint_lock.cc',
+        'paint_lock.h',
         'painter.cc',
         'painter.h',
         'repeat_controller.cc',
         'repeat_controller.h',
         'touchui/gesture_manager.cc',
         'touchui/gesture_manager.h',
-        'touchui/touch_factory.cc',
-        'touchui/touch_factory.h',
         'touchui/touch_selection_controller.cc',
         'touchui/touch_selection_controller.h',
         'touchui/touch_selection_controller_impl.cc',
@@ -394,7 +410,7 @@
         'window/window_shape.h',
       ],
       'include_dirs': [
-        '<(DEPTH)/third_party/wtl/include',
+        '../third_party/wtl/include',
       ],
       'conditions': [
         ['use_wayland == 1', {
@@ -405,21 +421,19 @@
             ['exclude', '_(gtk|x)\\.cc$'],
             ['exclude', '/(gtk|x)_[^/]*\\.cc$'],
             ['exclude', 'focus/accelerator_handler_touch.cc'],
-            ['exclude', 'touchui/touch_factory.cc'],
-            ['exclude', 'touchui/touch_factory.h'],
-            ['include', 'controls/menu/native_menu_linux.cc'],
-            ['include', 'controls/menu/native_menu_linux.h'],
+            ['include', 'controls/menu/native_menu_views.cc'],
+            ['include', 'controls/menu/native_menu_views.h'],
             ['include', 'drag_utils_gtk.cc'],
             ['include', 'widget/tooltip_manager_views.cc'],
           ],
         }],
         ['use_aura==1', {
-          'dependencies': [
-            '../aura/aura.gyp:aura',
+          'sources/': [
+            ['exclude', '_(gtk|x)\\.cc$'],
+            ['exclude', '/(gtk|x)_[^/]*\\.cc$'],
+            ['exclude', 'controls/menu/menu_2.*'],
           ],
           'sources!': [
-            'controls/menu/menu_2.cc',
-            'controls/menu/menu_2.h',
             'controls/native_control.cc',
             'controls/native_control.h',
             'controls/scrollbar/bitmap_scroll_bar.cc',
@@ -436,6 +450,7 @@
             'controls/table/table_view_observer.h',
             'controls/tree/tree_view.cc',
             'controls/tree/tree_view.h',
+            'focus/accelerator_handler_touch.cc',
             'widget/aero_tooltip_manager.cc',
             'widget/aero_tooltip_manager.h',
             'widget/child_window_message_processor.cc',
@@ -451,6 +466,10 @@
               ],
             }],
           ],
+        }, { # else: use_aura==1
+          'sources!': [
+            'drag_utils_linux.cc',
+          ]
         }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
@@ -482,14 +501,14 @@
         }],
         ['touchui==0', {
           'sources!': [
-            'controls/menu/native_menu_linux.cc',
-            'controls/menu/native_menu_linux.h',
             'touchui/touch_selection_controller_impl.cc',
             'touchui/touch_selection_controller_impl.h',
           ],
         }],
         ['touchui==0 and use_aura==0', {
           'sources!': [
+            'controls/menu/native_menu_views.cc',
+            'controls/menu/native_menu_views.h',
             'widget/tooltip_manager_views.cc',
           ],
         }],
@@ -511,7 +530,12 @@
         }],
         ['OS=="win"', {
           'include_dirs': [
-            '<(DEPTH)/third_party/wtl/include',
+            '../third_party/wtl/include',
+          ],
+        }],
+        ['use_x11==0', {
+          'sources!': [
+            'events/event_x.cc',
           ],
         }],
       ],
@@ -529,6 +553,7 @@
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../ui/base/strings/ui_strings.gyp:ui_strings',
+        '../ui/gfx/compositor/compositor.gyp:compositor',
         '../ui/ui.gyp:gfx_resources',
         '../ui/ui.gyp:ui',
         '../ui/ui.gyp:ui_resources',
@@ -540,6 +565,9 @@
       ],
       'sources': [
         'animation/bounds_animator_unittest.cc',
+        'bubble/bubble_delegate_unittest.cc',
+        'bubble/bubble_frame_view_unittest.cc',
+        'bubble/bubble_view_unittest.cc',
         'controls/label_unittest.cc',
         'controls/progress_bar_unittest.cc',
         'controls/single_split_view_unittest.cc',
@@ -549,6 +577,7 @@
         'controls/menu/menu_model_adapter_unittest.cc',
         'controls/textfield/native_textfield_views_unittest.cc',
         'controls/textfield/textfield_views_model_unittest.cc',
+        'controls/scrollbar/scrollbar_unittest.cc',
         'events/event_unittest.cc',
         'focus/accelerator_handler_gtk_unittest.cc',
         'focus/focus_manager_unittest.cc',
@@ -569,6 +598,12 @@
         'widget/native_widget_unittest.cc',
         'widget/native_widget_win_unittest.cc',
         'widget/widget_unittest.cc',
+        '../ui/gfx/compositor/test_compositor.cc',
+        '../ui/gfx/compositor/test_compositor.h',
+        '../ui/gfx/compositor/test_texture.cc',
+        '../ui/gfx/compositor/test_texture.h',
+        '../ui/aura/test/test_desktop_delegate.cc',
+        '../ui/aura/test/test_desktop_delegate.h',
 
         '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
@@ -578,7 +613,6 @@
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
-            '../chrome/chrome.gyp:packed_resources',
           ],
           'conditions': [
             ['linux_use_tcmalloc==1', {
@@ -594,20 +628,13 @@
               ],
             }],
           ],
-        },
-        ],
+        }],
         ['touchui==0', {
           'sources!': [
             'touchui/touch_selection_controller_impl_unittest.cc',
           ],
         }],
         ['OS=="win"', {
-          'dependencies': [
-            # TODO(jcivelli): ideally the resource needed by views would be
-            #                 factored out. (for some reason it pulls in a bunch
-            #                 unrelated things like v8, sqlite nss...).
-            '../chrome/chrome.gyp:packed_resources',
-          ],
           'link_settings': {
             'libraries': [
               '-limm32.lib',
@@ -615,7 +642,7 @@
             ]
           },
           'include_dirs': [
-            '<(DEPTH)/third_party/wtl/include',
+            '../third_party/wtl/include',
           ],
         }],
         ['use_ibus!=1', {
@@ -631,6 +658,19 @@
             ['exclude', 'controls/table/table_view_unittest.cc'],
             ['exclude', 'controls/tabbed_pane/tabbed_pane_unittest.cc'],
           ],
+        }, {
+          'sources/': [
+            ['exclude', '../ui/aura/test/test_desktop_delegate.cc'],
+            ['exclude', '../ui/aura/test/test_desktop_delegate.h'],
+          ],        
+        }],
+        ['OS!="mac"', {
+          'dependencies': [
+            # TODO(jcivelli): ideally the resource needed by views would be
+            #                 factored out. (for some reason it pulls in a bunch
+            #                 unrelated things like v8, sqlite nss...).
+            '../chrome/chrome.gyp:packed_resources',
+           ],
         }],
       ],
     },
@@ -653,12 +693,18 @@
         '..',
       ],
       'sources': [
+        'examples/bubble_example.cc',
+        'examples/bubble_example.h',
         'examples/button_example.cc',
         'examples/button_example.h',
         'examples/combobox_example.cc',
         'examples/combobox_example.h',
+        'examples/double_split_view_example.cc',
+        'examples/double_split_view_example.h',
         'examples/example_base.cc',
         'examples/example_base.h',
+        'examples/example_combobox_model.cc',
+        'examples/example_combobox_model.h',
         'examples/examples_main.cc',
         'examples/examples_main.h',
         'examples/link_example.cc',
@@ -683,6 +729,8 @@
         'examples/tabbed_pane_example.h',
         'examples/table2_example.cc',
         'examples/table2_example.h',
+        'examples/text_example.cc',
+        'examples/text_example.h',
         'examples/textfield_example.cc',
         'examples/textfield_example.h',
         'examples/throbber_example.cc',
@@ -699,7 +747,6 @@
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
-            '../chrome/chrome.gyp:packed_resources',
           ],
           'conditions': [
             ['linux_use_tcmalloc==1', {
@@ -718,12 +765,22 @@
             ]
           },
           'include_dirs': [
-            '<(DEPTH)/third_party/wtl/include',
+            '../third_party/wtl/include',
           ],
+          'msvs_settings': {
+            'VCManifestTool': {
+              'AdditionalManifestFiles': '$(ProjectDir)\\examples\\views_examples.exe.manifest',
+            },
+          },
           'sources': [
             'examples/table_example.cc',
             'examples/table_example.h',
           ],
+        }],
+        ['OS!="mac"', {
+          'dependencies': [
+            '../chrome/chrome.gyp:packed_resources',
+           ],
         }],
       ],
     },
@@ -755,7 +812,6 @@
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
-            '../chrome/chrome.gyp:packed_resources',
           ],
           'conditions': [
             ['linux_use_tcmalloc==1', {
@@ -774,8 +830,13 @@
             ]
           },
           'include_dirs': [
-            '<(DEPTH)/third_party/wtl/include',
+            '../third_party/wtl/include',
           ],
+        }],
+        ['OS!="mac"', {
+          'dependencies': [
+            '../chrome/chrome.gyp:packed_resources',
+           ],
         }],
       ],
     },
@@ -810,7 +871,12 @@
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
-            '../chrome/chrome.gyp:packed_resources',
+          ],
+        },
+        ],
+        ['use_glib == 1', {
+          'dependencies': [
+            '../build/linux/system.gyp:glib',
           ],
           'conditions': [
             ['linux_use_tcmalloc==1', {
@@ -819,8 +885,7 @@
                ],
             }],
           ],
-        },
-        ],
+        }],
         ['OS=="win"', {
           'link_settings': {
             'libraries': [
@@ -829,8 +894,13 @@
             ]
           },
           'include_dirs': [
-            '<(DEPTH)/third_party/wtl/include',
+            '../third_party/wtl/include',
           ],
+        }],
+        ['OS!="mac"', {
+          'dependencies': [
+            '../chrome/chrome.gyp:packed_resources',
+           ],
         }],
       ],
     },
@@ -844,10 +914,10 @@
           'dependencies': [
             '../base/base.gyp:base',
             '../base/base.gyp:base_i18n',
-            '../chrome/chrome.gyp:packed_resources',
             '../skia/skia.gyp:skia',
             '../third_party/icu/icu.gyp:icui18n',
             '../third_party/icu/icu.gyp:icuuc',
+            '../ui/aura/aura.gyp:aura',
             '../ui/ui.gyp:gfx_resources',
             '../ui/ui.gyp:ui',
             '../ui/ui.gyp:ui_resources',
@@ -872,12 +942,17 @@
                 ]
               },
               'include_dirs': [
-                '<(DEPTH)/third_party/wtl/include',
+                '../third_party/wtl/include',
               ],
+            }],
+            ['OS!="mac"', {
+              'dependencies': [
+                '../chrome/chrome.gyp:packed_resources',
+               ],
             }],
           ],
         },
       ],
-    }],      
+    }],
   ],
 }

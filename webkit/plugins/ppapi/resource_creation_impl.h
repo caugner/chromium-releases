@@ -48,7 +48,7 @@ class ResourceCreationImpl : public ::ppapi::FunctionGroupBase,
   virtual PP_Resource CreateFileChooser(
       PP_Instance instance,
       PP_FileChooserMode_Dev mode,
-      const PP_Var& accept_mime_types) OVERRIDE;
+      const char* accept_mime_types) OVERRIDE;
   virtual PP_Resource CreateFileIO(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFileRef(PP_Resource file_system,
                                     const char* path) OVERRIDE;
@@ -58,6 +58,7 @@ class ResourceCreationImpl : public ::ppapi::FunctionGroupBase,
                                       const PP_Flash_Menu* menu_data) OVERRIDE;
   virtual PP_Resource CreateFlashNetConnector(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFlashTCPSocket(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateFlashUDPSocket(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFontObject(
       PP_Instance instance,
       const PP_FontDescription_Dev* description) OVERRIDE;
@@ -97,7 +98,7 @@ class ResourceCreationImpl : public ::ppapi::FunctionGroupBase,
                                       const int32_t* attrib_list) OVERRIDE;
   virtual PP_Resource CreateTransport(PP_Instance instance,
                                       const char* name,
-                                      const char* proto) OVERRIDE;
+                                      PP_TransportType type) OVERRIDE;
   virtual PP_Resource CreateURLLoader(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateURLRequestInfo(
       PP_Instance instance,

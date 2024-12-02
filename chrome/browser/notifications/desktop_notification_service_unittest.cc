@@ -4,14 +4,15 @@
 
 #include "chrome/browser/notifications/desktop_notification_service.h"
 
+#include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/test_render_view_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 
@@ -44,19 +45,18 @@ class ThreadProxy : public base::RefCountedThreadSafe<ThreadProxy> {
       const GURL& url) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this, &ThreadProxy::ServiceHasPermissionIO,
-                          service, url));
+        base::Bind(&ThreadProxy::ServiceHasPermissionIO, this, service, url));
     io_event_.Signal();
     ui_event_.Wait();  // Wait for IO thread to be done.
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this, &ThreadProxy::PauseIOThreadIO));
+                            base::Bind(&ThreadProxy::PauseIOThreadIO, this));
 
     return permission_;
   }
 
   void PauseIOThread() {
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this, &ThreadProxy::PauseIOThreadIO));
+                            base::Bind(&ThreadProxy::PauseIOThreadIO, this));
   }
 
   void DrainIOThread() {
@@ -93,13 +93,13 @@ class ThreadProxy : public base::RefCountedThreadSafe<ThreadProxy> {
 
 }  // namespace
 
-class DesktopNotificationServiceTest : public RenderViewHostTestHarness {
+class DesktopNotificationServiceTest : public ChromeRenderViewHostTestHarness {
  public:
   DesktopNotificationServiceTest() {
   }
 
   virtual void SetUp() {
-    RenderViewHostTestHarness::SetUp();
+    ChromeRenderViewHostTestHarness::SetUp();
     proxy_ = new ThreadProxy;
     proxy_->PauseIOThread();
 
@@ -111,7 +111,7 @@ class DesktopNotificationServiceTest : public RenderViewHostTestHarness {
     // The io thread's waiting on the io_event_ might hold a ref to |proxy_|,
     // preventing its destruction. Clear that ref.
     proxy_->DrainIOThread();
-    RenderViewHostTestHarness::TearDown();
+    ChromeRenderViewHostTestHarness::TearDown();
   }
 
   DesktopNotificationService* service_;

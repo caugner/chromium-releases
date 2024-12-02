@@ -96,7 +96,8 @@ bool ConvertMenuData(const PP_Flash_Menu* in_menu,
 }  // namespace
 
 PPB_Flash_Menu_Impl::PPB_Flash_Menu_Impl(PP_Instance instance)
-    : Resource(instance) {
+    : Resource(instance),
+      selected_id_out_(NULL) {
 }
 
 PPB_Flash_Menu_Impl::~PPB_Flash_Menu_Impl() {
@@ -134,10 +135,8 @@ int32_t PPB_Flash_Menu_Impl::Show(const PP_Point* location,
   if (!location)
     return PP_ERROR_BADARGUMENT;
 
-  if (!callback.func) {
-    NOTIMPLEMENTED();
-    return PP_ERROR_BADARGUMENT;
-  }
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
 
   if (callback_.get() && !callback_->completed())
     return PP_ERROR_INPROGRESS;

@@ -35,6 +35,7 @@
         'emf_win.cc',
         'emf_win.h',
         'image.cc',
+        'image_aura.cc',
         'image_cairo.cc',
         'image_mac.cc',
         'image_win.cc',
@@ -50,12 +51,11 @@
         'page_setup.cc',
         'page_setup.h',
         'page_size_margins.h',
-        'pdf_metafile_cairo_linux.cc',
-        'pdf_metafile_cairo_linux.h',
         'pdf_metafile_cg_mac.cc',
         'pdf_metafile_cg_mac.h',
         'pdf_metafile_skia.h',
         'pdf_metafile_skia.cc',
+        'printed_document_aura.cc',
         'printed_document_cairo.cc',
         'printed_document.cc',
         'printed_document.h',
@@ -66,6 +66,7 @@
         'printed_pages_source.h',
         'printing_context.cc',
         'printing_context.h',
+        'printing_context_aura.cc',
         'printing_context_cairo.cc',
         'printing_context_cairo.h',
         'printing_context_mac.mm',
@@ -110,12 +111,6 @@
             '../build/linux/system.gyp:gtkprint',
           ],
         }],
-        ['use_aura==1', {
-          'sources/': [
-            ['exclude', '^printing_context_win.cc'],
-            ['exclude', '^printing_context_win.h'],          
-          ],
-        }],
         ['OS=="mac" and use_skia==0', {
           'sources/': [
             ['exclude', 'pdf_metafile_skia\\.(cc|h)$'],
@@ -123,6 +118,15 @@
           ],
         }],
         ['OS=="win"', {
+          'conditions': [
+            ['use_aura==1', {
+              'sources!': [
+                'image_aura.cc',
+                'printed_document_aura.cc',
+                'printing_context_aura.cc',
+              ],
+            }],
+          ],
           'defines': [
             # PRINT_BACKEND_AVAILABLE disables the default dummy implementation
             # of the print backend and enables a custom implementation instead.
@@ -183,7 +187,6 @@
         'page_number_unittest.cc',
         'page_range_unittest.cc',
         'page_setup_unittest.cc',
-        'pdf_metafile_cairo_linux_unittest.cc',
         'pdf_metafile_cg_mac_unittest.cc',
         'printed_page_unittest.cc',
         'printing_context_win_unittest.cc',

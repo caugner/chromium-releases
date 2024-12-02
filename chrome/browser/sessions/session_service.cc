@@ -541,6 +541,8 @@ void SessionService::Observe(int type,
 
     case content::NOTIFICATION_TAB_PARENTED: {
       TabContentsWrapper* tab = Source<TabContentsWrapper>(source).ptr();
+      if (tab->profile() != profile())
+        return;
       SetTabWindow(tab->restore_tab_helper()->window_id(),
                    tab->restore_tab_helper()->session_id());
       if (tab->extension_tab_helper()->extension_app()) {
@@ -556,8 +558,8 @@ void SessionService::Observe(int type,
       TabContentsWrapper* tab =
           TabContentsWrapper::GetCurrentWrapperForContents(
               Source<NavigationController>(source).ptr()->tab_contents());
-      if (!tab)
-        break;
+      if (!tab || tab->profile() != profile())
+        return;
       TabClosed(tab->restore_tab_helper()->window_id(),
                 tab->restore_tab_helper()->session_id(),
                 tab->tab_contents()->closed_by_user_gesture());
@@ -570,8 +572,8 @@ void SessionService::Observe(int type,
       TabContentsWrapper* tab =
           TabContentsWrapper::GetCurrentWrapperForContents(
               Source<NavigationController>(source).ptr()->tab_contents());
-      if (!tab)
-        break;
+      if (!tab || tab->profile() != profile())
+        return;
       Details<content::PrunedDetails> pruned_details(details);
       if (pruned_details->from_front) {
         TabNavigationPathPrunedFromFront(
@@ -593,8 +595,8 @@ void SessionService::Observe(int type,
       TabContentsWrapper* tab =
           TabContentsWrapper::GetCurrentWrapperForContents(
               Source<NavigationController>(source).ptr()->tab_contents());
-      if (!tab)
-        break;
+      if (!tab || tab->profile() != profile())
+        return;
       Details<content::EntryChangedDetails> changed(details);
       UpdateTabNavigation(
           tab->restore_tab_helper()->window_id(),
@@ -607,8 +609,8 @@ void SessionService::Observe(int type,
       TabContentsWrapper* tab =
           TabContentsWrapper::GetCurrentWrapperForContents(
               Source<NavigationController>(source).ptr()->tab_contents());
-      if (!tab)
-        break;
+      if (!tab || tab->profile() != profile())
+        return;
       int current_entry_index = tab->controller().GetCurrentEntryIndex();
       SetSelectedNavigationIndex(tab->restore_tab_helper()->window_id(),
                                  tab->restore_tab_helper()->session_id(),
@@ -619,8 +621,8 @@ void SessionService::Observe(int type,
           current_entry_index,
           *tab->controller().GetEntryAtIndex(current_entry_index));
       Details<content::LoadCommittedDetails> changed(details);
-      if (changed->type == NavigationType::NEW_PAGE ||
-        changed->type == NavigationType::EXISTING_PAGE) {
+      if (changed->type == content::NAVIGATION_TYPE_NEW_PAGE ||
+        changed->type == content::NAVIGATION_TYPE_EXISTING_PAGE) {
         RecordSessionUpdateHistogramData(
             content::NOTIFICATION_NAV_ENTRY_COMMITTED,
             &last_updated_nav_entry_commit_time_);
@@ -631,6 +633,8 @@ void SessionService::Observe(int type,
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
       ExtensionTabHelper* extension_tab_helper =
           Source<ExtensionTabHelper>(source).ptr();
+      if (extension_tab_helper->tab_contents_wrapper()->profile() != profile())
+        return;
       if (extension_tab_helper->extension_app()) {
         RestoreTabHelper* helper =
             extension_tab_helper->tab_contents_wrapper()->restore_tab_helper();
@@ -981,7 +985,7 @@ bool SessionService::CreateTabsAndWindows(
         // SHOW_STATE_INACTIVE is not persisted.
         ui::WindowShowState show_state = ui::SHOW_STATE_NORMAL;
         if (payload.show_state > ui::SHOW_STATE_DEFAULT &&
-            payload.show_state < ui::SHOW_STATE_MAX &&
+            payload.show_state < ui::SHOW_STATE_END &&
             payload.show_state != ui::SHOW_STATE_INACTIVE) {
           show_state = static_cast<ui::WindowShowState>(payload.show_state);
         } else {

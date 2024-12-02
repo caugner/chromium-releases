@@ -92,6 +92,7 @@ class FlashNetConnector : public PPB_Flash_NetConnector_API,
 FlashNetConnector::FlashNetConnector(const HostResource& resource)
     : Resource(resource),
       callback_(PP_BlockUntilComplete()),
+      socket_out_(NULL),
       local_addr_out_(NULL),
       remote_addr_out_(NULL) {
 }
@@ -175,8 +176,8 @@ int32_t FlashNetConnector::ConnectWithMessage(
 // the callback handler.
 struct PPB_Flash_NetConnector_Proxy::ConnectCallbackInfo {
   ConnectCallbackInfo(const HostResource& r) : resource(r), handle(0) {
-    local_addr.size = 0;
-    remote_addr.size = 0;
+    memset(&local_addr, 0, sizeof(local_addr));
+    memset(&remote_addr, 0, sizeof(remote_addr));
   }
 
   HostResource resource;
@@ -188,16 +189,15 @@ struct PPB_Flash_NetConnector_Proxy::ConnectCallbackInfo {
 
 namespace {
 
-InterfaceProxy* CreateFlashNetConnectorProxy(Dispatcher* dispatcher,
-                                             const void* target_interface) {
-  return new PPB_Flash_NetConnector_Proxy(dispatcher, target_interface);
+InterfaceProxy* CreateFlashNetConnectorProxy(Dispatcher* dispatcher) {
+  return new PPB_Flash_NetConnector_Proxy(dispatcher);
 }
 
 }  // namespace
 
 PPB_Flash_NetConnector_Proxy::PPB_Flash_NetConnector_Proxy(
-    Dispatcher* dispatcher, const void* target_interface)
-    : InterfaceProxy(dispatcher, target_interface),
+    Dispatcher* dispatcher)
+    : InterfaceProxy(dispatcher),
       callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
@@ -249,7 +249,7 @@ bool PPB_Flash_NetConnector_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
 void PPB_Flash_NetConnector_Proxy::OnMsgCreate(PP_Instance instance,
                                                HostResource* result) {
-  EnterFunctionNoLock<ResourceCreationAPI> enter(instance, true);
+  thunk::EnterResourceCreation enter(instance);
   if (enter.succeeded()) {
     result->SetHostResource(
         instance,

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "chrome/browser/ui/fullscreen_exit_bubble.h"
+#include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
 #include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
@@ -21,9 +22,13 @@ class FullscreenExitBubbleGtk : public FullscreenExitBubble {
   // We place the bubble in |container|.
   FullscreenExitBubbleGtk(
       GtkFloatingContainer* container,
-      CommandUpdater::CommandUpdaterDelegate* delegate);
+      Browser* delegate,
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type);
   virtual ~FullscreenExitBubbleGtk();
 
+  void UpdateContent(const GURL& url,
+                     FullscreenExitBubbleType bubble_type);
  protected:
   // FullScreenExitBubble
   virtual gfx::Rect GetPopupRect(bool ignore_animation_state) const OVERRIDE;
@@ -36,6 +41,8 @@ class FullscreenExitBubbleGtk : public FullscreenExitBubble {
 
  private:
   void InitWidgets();
+  std::string GetMessage(const GURL& url);
+  void StartWatchingMouseIfNecessary();
 
   GtkWidget* widget() const {
     return slide_widget_->widget();
@@ -44,12 +51,22 @@ class FullscreenExitBubbleGtk : public FullscreenExitBubble {
   CHROMEGTK_CALLBACK_1(FullscreenExitBubbleGtk, void, OnSetFloatingPosition,
                        GtkAllocation*);
   CHROMEGTK_CALLBACK_0(FullscreenExitBubbleGtk, void, OnLinkClicked);
+  CHROMEGTK_CALLBACK_0(FullscreenExitBubbleGtk, void, OnAllowClicked);
+  CHROMEGTK_CALLBACK_0(FullscreenExitBubbleGtk, void, OnDenyClicked);
 
   // A pointer to the floating container that is our parent.
   GtkFloatingContainer* container_;
+  GtkWidget* render_widget_host_view_widget_;
 
-  // The widget that contains the link.
-  ui::OwnedWidgetGtk link_container_;
+  // The widget that contains the UI.
+  ui::OwnedWidgetGtk ui_container_;
+  GtkWidget* instruction_label_;
+  GtkWidget* hbox_;
+  GtkWidget* message_label_;
+  GtkWidget* button_link_hbox_;
+  GtkWidget* link_;
+  GtkWidget* allow_button_;
+  GtkWidget* deny_button_;
 
   // The widget that animates the slide-out of fullscreen exit bubble.
   scoped_ptr<SlideAnimatorGtk> slide_widget_;

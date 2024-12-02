@@ -11,9 +11,9 @@
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/status/status_area_host.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_types.h"
 #include "ui/base/models/menu_model.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/view_menu_delegate.h"
@@ -37,10 +37,12 @@ namespace chromeos {
 // Since the class provides the views::ViewMenuDelegate interface, it's easy to
 // create a button widget (e.g. views::MenuButton, chromeos::StatusAreaButton)
 // which shows the dropdown menu on click.
-class InputMethodMenu : public views::ViewMenuDelegate,
-                        public ui::MenuModel,
-                        public input_method::InputMethodManager::Observer,
-                        public NotificationObserver {
+class InputMethodMenu
+    : public views::ViewMenuDelegate,
+      public ui::MenuModel,
+      public input_method::InputMethodManager::Observer,
+      public input_method::InputMethodManager::PreferenceObserver,
+      public NotificationObserver {
  public:
   InputMethodMenu(PrefService* pref_service,
                   StatusAreaHost::ScreenMode screen_mode,
@@ -80,13 +82,15 @@ class InputMethodMenu : public views::ViewMenuDelegate,
       input_method::InputMethodManager* manager,
       const input_method::InputMethodDescriptor& current_input_method,
       size_t num_active_input_methods);
+  virtual void PropertyListChanged(
+      input_method::InputMethodManager* manager,
+      const input_method::ImePropertyList& current_ime_properties);
+
+  // InputMethodManager::PreferenceObserver implementation.
   virtual void PreferenceUpdateNeeded(
     input_method::InputMethodManager* manager,
     const input_method::InputMethodDescriptor& previous_input_method,
     const input_method::InputMethodDescriptor& current_input_method);
-  virtual void PropertyListChanged(
-      input_method::InputMethodManager* manager,
-      const input_method::ImePropertyList& current_ime_properties);
   virtual void FirstObserverIsAdded(input_method::InputMethodManager* manager);
 
   // NotificationObserver implementation.
@@ -110,12 +114,12 @@ class InputMethodMenu : public views::ViewMenuDelegate,
 
   // Returns a string for the indicator on top right corner of the Chrome
   // window. The method is public for unit tests.
-  static std::wstring GetTextForIndicator(
+  static string16 GetTextForIndicator(
       const input_method::InputMethodDescriptor& input_method);
 
   // Returns a string for the drop-down menu and the tooltip for the indicator.
   // The method is public for unit tests.
-  static std::wstring GetTextForMenu(
+  static string16 GetTextForMenu(
       const input_method::InputMethodDescriptor& input_method);
 
  protected:
@@ -126,8 +130,8 @@ class InputMethodMenu : public views::ViewMenuDelegate,
   // Updates UI of a container of the menu (e.g. the "US" menu button in the
   // status area). Sub classes have to implement the interface for their own UI.
   virtual void UpdateUI(const std::string& input_method_id,  // e.g. "mozc"
-                        const std::wstring& name,  // e.g. "US", "INTL"
-                        const std::wstring& tooltip,
+                        const string16& name,  // e.g. "US", "INTL"
+                        const string16& tooltip,
                         size_t num_active_input_methods) = 0;
 
   // Sub classes have to implement the interface. This interface should return
@@ -160,6 +164,9 @@ class InputMethodMenu : public views::ViewMenuDelegate,
   // Returns true if the zero-origin |index| points to the "Configure IME" menu
   // item.
   bool IndexPointsToConfigureImeMenuItem(int index) const;
+
+  // Stops observing InputMethodManager.
+  void RemoveObservers();
 
   // The current input method list.
   scoped_ptr<input_method::InputMethodDescriptors> input_method_descriptors_;

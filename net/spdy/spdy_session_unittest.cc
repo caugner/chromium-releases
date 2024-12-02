@@ -20,9 +20,53 @@ class SpdySessionTest : public PlatformTest {
   static void TurnOffCompression() {
     spdy::SpdyFramer::set_enable_compression_default(false);
   }
+ protected:
+  virtual void TearDown() {
+    // Wanted to be 100% sure PING is disabled.
+    SpdySession::set_enable_ping_based_connection_checking(false);
+  }
 };
 
-namespace {
+class TestSpdyStreamDelegate : public net::SpdyStream::Delegate {
+ public:
+  explicit TestSpdyStreamDelegate(OldCompletionCallback* callback)
+      : callback_(callback) {}
+  virtual ~TestSpdyStreamDelegate() {}
+
+  virtual bool OnSendHeadersComplete(int status) { return true; }
+
+  virtual int OnSendBody() {
+    return ERR_UNEXPECTED;
+  }
+
+  virtual int OnSendBodyComplete(int /*status*/, bool* /*eof*/) {
+    return ERR_UNEXPECTED;
+  }
+
+  virtual int OnResponseReceived(const spdy::SpdyHeaderBlock& response,
+                                 base::Time response_time,
+                                 int status) {
+    return status;
+  }
+
+  virtual void OnDataReceived(const char* buffer, int bytes) {
+  }
+
+  virtual void OnDataSent(int length) {
+  }
+
+  virtual void OnClose(int status) {
+    OldCompletionCallback* callback = callback_;
+    callback_ = NULL;
+    callback->Run(OK);
+  }
+
+  virtual void set_chunk_callback(net::ChunkCallback *) {}
+
+ private:
+  OldCompletionCallback* callback_;
+};
+
 
 // Test the SpdyIOBuffer class.
 TEST_F(SpdySessionTest, SpdyIOBuffer) {
@@ -122,6 +166,101 @@ TEST_F(SpdySessionTest, GoAway) {
   session2 = NULL;
 }
 
+TEST_F(SpdySessionTest, Ping) {
+  SpdySessionDependencies session_deps;
+  session_deps.host_resolver->set_synchronous_mode(true);
+
+  MockConnect connect_data(false, OK);
+  scoped_ptr<spdy::SpdyFrame> read_ping(ConstructSpdyPing());
+  MockRead reads[] = {
+    CreateMockRead(*read_ping),
+    CreateMockRead(*read_ping),
+    MockRead(false, 0, 0)  // EOF
+  };
+  scoped_ptr<spdy::SpdyFrame> write_ping(ConstructSpdyPing());
+  MockRead writes[] = {
+    CreateMockRead(*write_ping),
+    CreateMockRead(*write_ping),
+  };
+  StaticSocketDataProvider data(
+      reads, arraysize(reads), writes, arraysize(writes));
+  data.set_connect_data(connect_data);
+  session_deps.socket_factory->AddSocketDataProvider(&data);
+
+  SSLSocketDataProvider ssl(false, OK);
+  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl);
+
+  scoped_refptr<HttpNetworkSession> http_session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
+
+  static const char kStreamUrl[] = "http://www.google.com/";
+  GURL url(kStreamUrl);
+
+  const std::string kTestHost("www.google.com");
+  const int kTestPort = 80;
+  HostPortPair test_host_port_pair(kTestHost, kTestPort);
+  HostPortProxyPair pair(test_host_port_pair, ProxyServer::Direct());
+
+  SpdySessionPool* spdy_session_pool(http_session->spdy_session_pool());
+  EXPECT_FALSE(spdy_session_pool->HasSession(pair));
+  scoped_refptr<SpdySession> session =
+      spdy_session_pool->Get(pair, BoundNetLog());
+  EXPECT_TRUE(spdy_session_pool->HasSession(pair));
+
+
+  scoped_refptr<TransportSocketParams> transport_params(
+      new TransportSocketParams(test_host_port_pair,
+                                MEDIUM,
+                                GURL(),
+                                false,
+                                false));
+  scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
+  EXPECT_EQ(OK,
+            connection->Init(test_host_port_pair.ToString(),
+                             transport_params,
+                             MEDIUM,
+                             NULL,
+                             http_session->transport_socket_pool(),
+                             BoundNetLog()));
+  EXPECT_EQ(OK, session->InitializeWithSocket(connection.release(), false, OK));
+
+  scoped_refptr<SpdyStream> spdy_stream1;
+  TestOldCompletionCallback callback1;
+  EXPECT_EQ(OK, session->CreateStream(url,
+                                      MEDIUM,
+                                      &spdy_stream1,
+                                      BoundNetLog(),
+                                      &callback1));
+  scoped_ptr<TestSpdyStreamDelegate> delegate(
+      new TestSpdyStreamDelegate(&callback1));
+  spdy_stream1->SetDelegate(delegate.get());
+
+  base::TimeTicks before_ping_time = base::TimeTicks::Now();
+
+  // Enable sending of PING.
+  SpdySession::set_enable_ping_based_connection_checking(true);
+  SpdySession::set_connection_at_risk_of_loss_ms(0);
+  SpdySession::set_trailing_ping_delay_time_ms(0);
+  SpdySession::set_hung_interval_ms(50);
+
+  session->SendPrefacePingIfNoneInFlight();
+
+  EXPECT_EQ(OK, callback1.WaitForResult());
+
+  EXPECT_EQ(0, session->pings_in_flight());
+  EXPECT_GT(session->next_ping_id(), static_cast<uint32>(1));
+  EXPECT_FALSE(session->trailing_ping_pending());
+  // TODO(rtenneti): check_ping_status_pending works in debug mode with
+  // breakpoints, but fails if run in stand alone mode.
+  // EXPECT_FALSE(session->check_ping_status_pending());
+  EXPECT_GE(session->received_data_time(), before_ping_time);
+
+  EXPECT_FALSE(spdy_session_pool->HasSession(pair));
+
+  // Delete the first session.
+  session = NULL;
+}
+
 class StreamReleaserCallback : public CallbackRunner<Tuple1<int> > {
  public:
   StreamReleaserCallback(SpdySession* session,
@@ -147,8 +286,114 @@ class StreamReleaserCallback : public CallbackRunner<Tuple1<int> > {
   scoped_refptr<SpdySession> session_;
   scoped_refptr<SpdyStream> first_stream_;
   scoped_refptr<SpdyStream> stream_;
-  TestCompletionCallback callback_;
+  TestOldCompletionCallback callback_;
 };
+
+// TODO(kristianm): Could also test with more sessions where some are idle,
+// and more than one session to a HostPortPair.
+TEST_F(SpdySessionTest, CloseIdleSessions) {
+  SpdySessionDependencies session_deps;
+  scoped_refptr<HttpNetworkSession> http_session(
+  SpdySessionDependencies::SpdyCreateSession(&session_deps));
+  SpdySessionPool* spdy_session_pool(http_session->spdy_session_pool());
+
+  // Set up session 1
+  const std::string kTestHost1("http://www.a.com");
+  HostPortPair test_host_port_pair1(kTestHost1, 80);
+  HostPortProxyPair pair1(test_host_port_pair1, ProxyServer::Direct());
+  scoped_refptr<SpdySession> session1 =
+      spdy_session_pool->Get(pair1, BoundNetLog());
+  scoped_refptr<SpdyStream> spdy_stream1;
+  TestOldCompletionCallback callback1;
+  GURL url1(kTestHost1);
+  EXPECT_EQ(OK, session1->CreateStream(url1,
+                                      MEDIUM, /* priority, not important */
+                                      &spdy_stream1,
+                                      BoundNetLog(),
+                                      &callback1));
+
+  // Set up session 2
+  const std::string kTestHost2("http://www.b.com");
+  HostPortPair test_host_port_pair2(kTestHost2, 80);
+  HostPortProxyPair pair2(test_host_port_pair2, ProxyServer::Direct());
+  scoped_refptr<SpdySession> session2 =
+      spdy_session_pool->Get(pair2, BoundNetLog());
+  scoped_refptr<SpdyStream> spdy_stream2;
+  TestOldCompletionCallback callback2;
+  GURL url2(kTestHost2);
+  EXPECT_EQ(OK, session2->CreateStream(url2,
+                                      MEDIUM, /* priority, not important */
+                                      &spdy_stream2,
+                                      BoundNetLog(),
+                                      &callback2));
+
+  // Set up session 3
+  const std::string kTestHost3("http://www.c.com");
+  HostPortPair test_host_port_pair3(kTestHost3, 80);
+  HostPortProxyPair pair3(test_host_port_pair3, ProxyServer::Direct());
+  scoped_refptr<SpdySession> session3 =
+      spdy_session_pool->Get(pair3, BoundNetLog());
+  scoped_refptr<SpdyStream> spdy_stream3;
+  TestOldCompletionCallback callback3;
+  GURL url3(kTestHost3);
+  EXPECT_EQ(OK, session3->CreateStream(url3,
+                                      MEDIUM, /* priority, not important */
+                                      &spdy_stream3,
+                                      BoundNetLog(),
+                                      &callback3));
+
+  // All sessions are active and not closed
+  EXPECT_TRUE(session1->is_active());
+  EXPECT_FALSE(session1->IsClosed());
+  EXPECT_TRUE(session2->is_active());
+  EXPECT_FALSE(session2->IsClosed());
+  EXPECT_TRUE(session3->is_active());
+  EXPECT_FALSE(session3->IsClosed());
+
+  // Should not do anything, all are active
+  spdy_session_pool->CloseIdleSessions();
+  EXPECT_TRUE(session1->is_active());
+  EXPECT_FALSE(session1->IsClosed());
+  EXPECT_TRUE(session2->is_active());
+  EXPECT_FALSE(session2->IsClosed());
+  EXPECT_TRUE(session3->is_active());
+  EXPECT_FALSE(session3->IsClosed());
+
+  // Make sessions 1 and 3 inactive, but keep them open.
+  // Session 2 still open and active
+  session1->CloseStream(spdy_stream1->stream_id(), OK);
+  session3->CloseStream(spdy_stream3->stream_id(), OK);
+  EXPECT_FALSE(session1->is_active());
+  EXPECT_FALSE(session1->IsClosed());
+  EXPECT_TRUE(session2->is_active());
+  EXPECT_FALSE(session2->IsClosed());
+  EXPECT_FALSE(session3->is_active());
+  EXPECT_FALSE(session3->IsClosed());
+
+  // Should close session 1 and 3, 2 should be left open
+  spdy_session_pool->CloseIdleSessions();
+  EXPECT_FALSE(session1->is_active());
+  EXPECT_TRUE(session1->IsClosed());
+  EXPECT_TRUE(session2->is_active());
+  EXPECT_FALSE(session2->IsClosed());
+  EXPECT_FALSE(session3->is_active());
+  EXPECT_TRUE(session3->IsClosed());
+
+  // Should not do anything
+  spdy_session_pool->CloseIdleSessions();
+  EXPECT_TRUE(session2->is_active());
+  EXPECT_FALSE(session2->IsClosed());
+
+  // Make 2 not active
+  session2->CloseStream(spdy_stream2->stream_id(), OK);
+  EXPECT_FALSE(session2->is_active());
+  EXPECT_FALSE(session2->IsClosed());
+
+  // This should close session 2
+  spdy_session_pool->CloseIdleSessions();
+  EXPECT_FALSE(session2->is_active());
+  EXPECT_TRUE(session2->IsClosed());
+}
 
 // Start with max concurrent streams set to 1.  Request two streams.  Receive a
 // settings frame setting max concurrent streams to 2.  Have the callback
@@ -220,7 +465,7 @@ TEST_F(SpdySessionTest, OnSettings) {
 
   // Create 2 streams.  First will succeed.  Second will be pending.
   scoped_refptr<SpdyStream> spdy_stream1;
-  TestCompletionCallback callback1;
+  TestOldCompletionCallback callback1;
   GURL url("http://www.google.com");
   EXPECT_EQ(OK,
             session->CreateStream(url,
@@ -306,7 +551,7 @@ TEST_F(SpdySessionTest, CancelPendingCreateStream) {
 
   // Use scoped_ptr to let us invalidate the memory when we want to, to trigger
   // a valgrind error if the callback is invoked when it's not supposed to be.
-  scoped_ptr<TestCompletionCallback> callback(new TestCompletionCallback);
+  scoped_ptr<TestOldCompletionCallback> callback(new TestOldCompletionCallback);
 
   // Create 2 streams.  First will succeed.  Second will be pending.
   scoped_refptr<SpdyStream> spdy_stream1;
@@ -576,7 +821,5 @@ TEST_F(SpdySessionTest, ClearSettingsStorageOnIPAddressChanged) {
   spdy_session_pool->OnIPAddressChanged();
   EXPECT_EQ(0u, test_settings_storage->Get(test_host_port_pair).size());
 }
-
-}  // namespace
 
 }  // namespace net

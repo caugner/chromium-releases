@@ -24,33 +24,11 @@
 #include "chrome/common/net/http_return.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/url_fetcher.h"
 #include "grit/chromium_strings.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/l10n/l10n_util.h"
-
-static const char kGetOAuthTokenUrl[] =
-    "https://www.google.com/accounts/o8/GetOAuthToken";
-
-static const char kOAuthGetAccessTokenUrl[] =
-    "https://www.google.com/accounts/OAuthGetAccessToken";
-
-static const char kOAuthWrapBridgeUrl[] =
-    "https://www.google.com/accounts/OAuthWrapBridge";
-
-static const char kOAuthWrapBridgeUserInfoScope[] =
-    "https://www.googleapis.com/auth/userinfo.email";
-
-static const char kOAuth1LoginScope[] =
-    "https://www.google.com/accounts/OAuthLogin";
-
-static const char kUserInfoUrl[] =
-    "https://www.googleapis.com/oauth2/v1/userinfo";
-
-static const char kRevokeTokenUrl[] =
-    "https://www.google.com/accounts/AuthSubRevokeToken";
 
 static const char kOAuthTokenCookie[] = "oauth_token";
 
@@ -111,9 +89,9 @@ URLFetcher* GaiaOAuthFetcher::CreateGaiaFetcher(
 
 // static
 GURL GaiaOAuthFetcher::MakeGetOAuthTokenUrl(
-    const char* oauth1_login_scope,
+    const std::string& oauth1_login_scope,
     const std::string& product_name) {
-  return GURL(std::string(kGetOAuthTokenUrl) +
+  return GURL(GaiaUrls::GetInstance()->get_oauth_token_url() +
       "?scope=" + oauth1_login_scope +
       "&xoauth_display_name=" +
       OAuthRequestSigner::Encode(product_name));
@@ -130,7 +108,7 @@ std::string GaiaOAuthFetcher::MakeOAuthLoginBody(
   parameters["source"] = source;
   std::string signed_request;
   bool is_signed = OAuthRequestSigner::SignURL(
-      GURL(kOAuth1LoginScope),
+      GURL(GaiaUrls::GetInstance()->oauth1_login_url()),
       parameters,
       OAuthRequestSigner::HMAC_SHA1_SIGNATURE,
       OAuthRequestSigner::POST_METHOD,
@@ -149,7 +127,7 @@ std::string GaiaOAuthFetcher::MakeOAuthGetAccessTokenBody(
   OAuthRequestSigner::Parameters empty_parameters;
   std::string signed_request;
   bool is_signed = OAuthRequestSigner::SignURL(
-      GURL(kOAuthGetAccessTokenUrl),
+      GURL(GaiaUrls::GetInstance()->oauth_get_access_token_url()),
       empty_parameters,
       OAuthRequestSigner::HMAC_SHA1_SIGNATURE,
       OAuthRequestSigner::POST_METHOD,
@@ -173,7 +151,7 @@ std::string GaiaOAuthFetcher::MakeOAuthWrapBridgeBody(
   parameters["wrap_scope"] = oauth2_scope;
   std::string signed_request;
   bool is_signed = OAuthRequestSigner::SignURL(
-      GURL(kOAuthWrapBridgeUrl),
+      GURL(GaiaUrls::GetInstance()->oauth_wrap_bridge_url()),
       parameters,
       OAuthRequestSigner::HMAC_SHA1_SIGNATURE,
       OAuthRequestSigner::POST_METHOD,
@@ -306,11 +284,11 @@ void OpenGetOAuthTokenURL(Browser* browser,
                           const GURL& url,
                           const GURL& referrer,
                           WindowOpenDisposition disposition,
-                          PageTransition::Type transition) {
+                          content::PageTransition transition) {
   browser::NavigateParams params(
       browser,
       url,
-      PageTransition::AUTO_BOOKMARK);
+      content::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.source_contents =
       browser->tabstrip_model()->GetTabContentsAt(
           browser->tabstrip_model()->GetWrapperIndex(NULL));
@@ -337,11 +315,11 @@ void GaiaOAuthFetcher::StartGetOAuthToken() {
   DCHECK(browser);
 
   OpenGetOAuthTokenURL(browser,
-      MakeGetOAuthTokenUrl(kOAuth1LoginScope,
+      MakeGetOAuthTokenUrl(GaiaUrls::GetInstance()->oauth1_login_scope(),
                            l10n_util::GetStringUTF8(IDS_PRODUCT_NAME)),
       GURL("chrome://settings/personal"),
       NEW_POPUP,
-      PageTransition::AUTO_BOOKMARK);
+      content::PAGE_TRANSITION_AUTO_BOOKMARK);
   popup_ = BrowserList::GetLastActiveWithProfile(profile_);
   DCHECK(popup_ && popup_ != browser);
   registrar_.Add(this,
@@ -360,12 +338,9 @@ void GaiaOAuthFetcher::StartOAuthLogin(
   request_body_ = MakeOAuthLoginBody(source, service, oauth1_access_token,
                                      oauth1_access_token_secret);
   request_headers_ = "";
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   GURL(kOAuth1LoginScope),
-                                   request_body_,
-                                   request_headers_,
-                                   false,
-                                   this));
+  GURL url(GaiaUrls::GetInstance()->oauth1_login_url());
+  fetcher_.reset(CreateGaiaFetcher(getter_, url, request_body_,
+                                   request_headers_, false, this));
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -377,7 +352,7 @@ void GaiaOAuthFetcher::StartGetOAuthTokenRequest() {
   request_body_ = "";
   request_headers_ = "";
   fetcher_.reset(CreateGaiaFetcher(getter_,
-      MakeGetOAuthTokenUrl(kOAuth1LoginScope,
+      MakeGetOAuthTokenUrl(GaiaUrls::GetInstance()->oauth1_login_scope(),
                            l10n_util::GetStringUTF8(IDS_PRODUCT_NAME)),
       std::string(),
       std::string(),
@@ -394,12 +369,9 @@ void GaiaOAuthFetcher::StartOAuthGetAccessToken(
   // Must outlive fetcher_.
   request_body_ = MakeOAuthGetAccessTokenBody(oauth1_request_token);
   request_headers_ = "";
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   GURL(kOAuthGetAccessTokenUrl),
-                                   request_body_,
-                                   request_headers_,
-                                   false,
-                                   this));
+  GURL url(GaiaUrls::GetInstance()->oauth_get_access_token_url());
+  fetcher_.reset(CreateGaiaFetcher(getter_, url, request_body_,
+                                   request_headers_, false, this));
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -413,7 +385,7 @@ void GaiaOAuthFetcher::StartOAuthWrapBridge(
 
   VLOG(1) << "Starting OAuthWrapBridge for: " << service_scope;
   std::string combined_scope = service_scope + " " +
-      kOAuthWrapBridgeUserInfoScope;
+      GaiaUrls::GetInstance()->oauth_wrap_bridge_user_info_scope();
   service_scope_ = service_scope;
 
   // Must outlive fetcher_.
@@ -424,12 +396,9 @@ void GaiaOAuthFetcher::StartOAuthWrapBridge(
       combined_scope);
 
   request_headers_ = "";
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   GURL(kOAuthWrapBridgeUrl),
-                                   request_body_,
-                                   request_headers_,
-                                   false,
-                                   this));
+  GURL url(GaiaUrls::GetInstance()->oauth_wrap_bridge_url());
+  fetcher_.reset(CreateGaiaFetcher(getter_, url, request_body_,
+                                   request_headers_, false, this));
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -440,12 +409,9 @@ void GaiaOAuthFetcher::StartUserInfo(const std::string& oauth2_access_token) {
   // Must outlive fetcher_.
   request_body_ = "";
   request_headers_ = "Authorization: OAuth " + oauth2_access_token;
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   GURL(kUserInfoUrl),
-                                   request_body_,
-                                   request_headers_,
-                                   false,
-                                   this));
+  GURL url(GaiaUrls::GetInstance()->oauth_user_info_url());
+  fetcher_.reset(CreateGaiaFetcher(getter_, url, request_body_,
+                                   request_headers_, false, this));
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -459,9 +425,8 @@ void GaiaOAuthFetcher::StartOAuthRevokeAccessToken(const std::string& token,
 
   OAuthRequestSigner::Parameters empty_parameters;
   std::string auth_header;
-  GURL url(kRevokeTokenUrl);
   bool is_signed = OAuthRequestSigner::SignAuthHeader(
-      url,
+      GURL(GaiaUrls::GetInstance()->oauth_revoke_token_url()),
       empty_parameters,
       OAuthRequestSigner::HMAC_SHA1_SIGNATURE,
       OAuthRequestSigner::GET_METHOD,
@@ -472,6 +437,7 @@ void GaiaOAuthFetcher::StartOAuthRevokeAccessToken(const std::string& token,
       &auth_header);
   DCHECK(is_signed);
   request_headers_ = "Authorization: " + auth_header;
+  GURL url(GaiaUrls::GetInstance()->oauth_revoke_token_url());
   fetcher_.reset(CreateGaiaFetcher(getter_, url, request_body_,
                                    request_headers_, false, this));
   fetch_pending_ = true;
@@ -485,7 +451,7 @@ void GaiaOAuthFetcher::StartOAuthRevokeWrapToken(const std::string& token) {
   request_body_ = "";
 
   request_headers_ = "Authorization: Bearer " + token;
-  GURL url(kRevokeTokenUrl);
+  GURL url(GaiaUrls::GetInstance()->oauth_revoke_token_url());
   fetcher_.reset(CreateGaiaFetcher(getter_, url, request_body_,
                                    request_headers_, false, this));
   fetch_pending_ = true;
@@ -501,8 +467,8 @@ GoogleServiceAuthError GaiaOAuthFetcher::GenerateAuthError(
       return GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED);
     } else {
       LOG(WARNING) << "Could not reach Google Accounts servers: errno "
-                   << status.os_error();
-      return GoogleServiceAuthError::FromConnectionError(status.os_error());
+                   << status.error();
+      return GoogleServiceAuthError::FromConnectionError(status.error());
     }
   } else {
     LOG(WARNING) << "Unrecognized response from Google Accounts servers.";
@@ -697,17 +663,20 @@ void GaiaOAuthFetcher::OnURLFetchComplete(const URLFetcher* source,
   // Keep |fetcher_| around to avoid invalidating its |status| (accessed below).
   scoped_ptr<URLFetcher> current_fetcher(fetcher_.release());
   fetch_pending_ = false;
-  if (StartsWithASCII(url.spec(), kGetOAuthTokenUrl, true)) {
+  GaiaUrls* gaia_urls = GaiaUrls::GetInstance();
+  if (StartsWithASCII(url.spec(), gaia_urls->get_oauth_token_url(), true)) {
     OnGetOAuthTokenUrlFetched(cookies, status, response_code);
-  } else if (url.spec() == kOAuth1LoginScope) {
+  } else if (url.spec() == gaia_urls->oauth1_login_url()) {
     OnOAuthLoginFetched(data, status, response_code);
-  } else if (url.spec() == kOAuthGetAccessTokenUrl) {
+  } else if (url.spec() == gaia_urls->oauth_get_access_token_url()) {
     OnOAuthGetAccessTokenFetched(data, status, response_code);
-  } else if (url.spec() == kOAuthWrapBridgeUrl) {
+  } else if (url.spec() == gaia_urls->oauth_wrap_bridge_url()) {
     OnOAuthWrapBridgeFetched(data, status, response_code);
-  } else if (url.spec() == kUserInfoUrl) {
+  } else if (url.spec() == gaia_urls->oauth_user_info_url()) {
     OnUserInfoFetched(data, status, response_code);
-  } else if (StartsWithASCII(url.spec(), kRevokeTokenUrl, true)) {
+  } else if (StartsWithASCII(url.spec(),
+                             gaia_urls->oauth_revoke_token_url(),
+                             true)) {
     OnOAuthRevokeTokenFetched(data, status, response_code);
   } else {
     NOTREACHED();

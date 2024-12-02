@@ -18,6 +18,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/non_thread_safe.h"
+#include "content/common/content_export.h"
 #include "content/common/message_router.h"
 
 namespace gfx {
@@ -25,9 +26,9 @@ class Size;
 }
 
 struct GPUCreateCommandBufferConfig;
-struct GpuHostMsg_AcceleratedSurfaceRelease_Params;
-struct GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params;
+struct GpuHostMsg_AcceleratedSurfaceNew_Params;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
+struct GpuHostMsg_AcceleratedSurfaceRelease_Params;
 
 namespace IPC {
 struct ChannelHandle;
@@ -62,7 +63,7 @@ class GpuProcessHostUIShim
   static void Destroy(int host_id);
 
   // Destroy all remaining GpuProcessHostUIShims.
-  static void DestroyAll();
+  CONTENT_EXPORT static void DestroyAll();
 
   static GpuProcessHostUIShim* FromID(int host_id);
 
@@ -75,12 +76,10 @@ class GpuProcessHostUIShim
   // actually received on the IO thread.
   virtual bool OnMessageReceived(const IPC::Message& message);
 
-#if defined(OS_MACOSX)
-  // Notify the GPU process that an accelerated surface was destroyed.
-  void DidDestroyAcceleratedSurface(int renderer_id, int32 render_view_id);
-
+#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
   // TODO(apatrick): Remove this when mac does not use AcceleratedSurfaces for
   // when running the GPU thread in the browser process.
+  // This is now also used in TOUCH_UI builds.
   static void SendToGpuHost(int host_id, IPC::Message* msg);
 #endif
 
@@ -93,21 +92,22 @@ class GpuProcessHostUIShim
 
   void OnLogMessage(int level, const std::string& header,
       const std::string& message);
-#if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
+#if defined(TOOLKIT_USES_GTK) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT) || \
+    defined(OS_WIN)
   void OnResizeView(int32 renderer_id,
                     int32 render_view_id,
                     int32 command_buffer_route_id,
                     gfx::Size size);
 #endif
 
-#if defined(OS_MACOSX) || defined(TOUCH_UI)
-  void OnAcceleratedSurfaceSetIOSurface(
-      const GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params& params);
+#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+  void OnAcceleratedSurfaceNew(
+      const GpuHostMsg_AcceleratedSurfaceNew_Params& params);
   void OnAcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
 #endif
 
-#if defined(TOUCH_UI)
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
   void OnAcceleratedSurfaceRelease(
       const GpuHostMsg_AcceleratedSurfaceRelease_Params& params);
 #endif

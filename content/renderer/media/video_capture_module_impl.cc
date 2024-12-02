@@ -4,14 +4,9 @@
 
 #include "content/renderer/media/video_capture_module_impl.h"
 
+#include "base/atomicops.h"
+#include "base/bind.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
-
-// static
-webrtc::VideoCaptureModule* webrtc::VideoCaptureModule::Create(
-    const WebRtc_Word32 id, const WebRtc_UWord8* device_unique_id_utf8) {
-  NOTREACHED();
-  return NULL;
-}
 
 VideoCaptureModuleImpl::VideoCaptureModuleImpl(
     const media::VideoCaptureSessionId id,
@@ -27,7 +22,8 @@ VideoCaptureModuleImpl::VideoCaptureModuleImpl(
       frame_rate_(-1),
       video_type_(webrtc::kVideoI420),
       capture_engine_(NULL),
-      pending_start_(false) {
+      pending_start_(false),
+      ref_count_(0) {
   DCHECK(vc_manager_);
   Init();
 }
@@ -43,21 +39,34 @@ void VideoCaptureModuleImpl::Init() {
   capture_engine_ = vc_manager_->AddDevice(session_id_, this);
 }
 
+int32_t VideoCaptureModuleImpl::AddRef() {
+  VLOG(1) << "VideoCaptureModuleImpl::AddRef()";
+  return base::subtle::Barrier_AtomicIncrement(&ref_count_, 1);
+}
+
+int32_t VideoCaptureModuleImpl::Release() {
+  VLOG(1) << "VideoCaptureModuleImpl::Release()";
+  int ret = base::subtle::Barrier_AtomicIncrement(&ref_count_, -1);
+  if (ret == 0) {
+    VLOG(1) << "Reference count is zero, hence this object is now deleted.";
+    delete this;
+  }
+  return ret;
+}
+
 WebRtc_Word32 VideoCaptureModuleImpl::StartCapture(
     const webrtc::VideoCaptureCapability& capability) {
   message_loop_proxy_->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this,
-                        &VideoCaptureModuleImpl::StartCaptureOnCaptureThread,
-                        capability));
+      base::Bind(&VideoCaptureModuleImpl::StartCaptureOnCaptureThread,
+                 this, capability));
   return 0;
 }
 
 WebRtc_Word32 VideoCaptureModuleImpl::StopCapture() {
   message_loop_proxy_->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this,
-                        &VideoCaptureModuleImpl::StopCaptureOnCaptureThread));
+      base::Bind(&VideoCaptureModuleImpl::StopCaptureOnCaptureThread, this));
   return 0;
 }
 
@@ -82,8 +91,8 @@ void VideoCaptureModuleImpl::OnStarted(media::VideoCapture* capture) {
 void VideoCaptureModuleImpl::OnStopped(media::VideoCapture* capture) {
   message_loop_proxy_->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &VideoCaptureModuleImpl::OnStoppedOnCaptureThread,
-                        capture));
+      base::Bind(&VideoCaptureModuleImpl::OnStoppedOnCaptureThread, this,
+                 capture));
 }
 
 void VideoCaptureModuleImpl::OnPaused(media::VideoCapture* capture) {
@@ -95,14 +104,17 @@ void VideoCaptureModuleImpl::OnError(media::VideoCapture* capture,
   NOTIMPLEMENTED();
 }
 
+void VideoCaptureModuleImpl::OnRemoved(media::VideoCapture* capture) {
+  NOTIMPLEMENTED();
+}
+
 void VideoCaptureModuleImpl::OnBufferReady(
     media::VideoCapture* capture,
     scoped_refptr<media::VideoCapture::VideoFrameBuffer> buf) {
   message_loop_proxy_->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this,
-                        &VideoCaptureModuleImpl::OnBufferReadyOnCaptureThread,
-                        capture, buf));
+      base::Bind(&VideoCaptureModuleImpl::OnBufferReadyOnCaptureThread,
+                 this, capture, buf));
 }
 
 void VideoCaptureModuleImpl::OnDeviceInfoReceived(

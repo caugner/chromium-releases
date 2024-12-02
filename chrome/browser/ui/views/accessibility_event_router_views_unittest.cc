@@ -33,12 +33,12 @@ class AccessibilityViewsDelegate : public views::ViewsDelegate {
   virtual ui::Clipboard* GetClipboard() const OVERRIDE { return NULL; }
   virtual views::View* GetDefaultParentView() OVERRIDE { return NULL; }
   virtual void SaveWindowPlacement(const views::Widget* window,
-                                   const std::wstring& window_name,
+                                   const std::string& window_name,
                                    const gfx::Rect& bounds,
                                    ui::WindowShowState show_state) OVERRIDE {
   }
   virtual bool GetSavedWindowPlacement(
-      const std::wstring& window_name,
+      const std::string& window_name,
       gfx::Rect* bounds,
       ui::WindowShowState* show_state) const OVERRIDE {
     return false;
@@ -48,12 +48,11 @@ class AccessibilityViewsDelegate : public views::ViewsDelegate {
     AccessibilityEventRouterViews::GetInstance()->HandleAccessibilityEvent(
         view, event_type);
   }
-  virtual void NotifyMenuItemFocused(
-      const std::wstring& menu_name,
-      const std::wstring& menu_item_name,
-      int item_index,
-      int item_count,
-      bool has_submenu) OVERRIDE {}
+  virtual void NotifyMenuItemFocused(const string16& menu_name,
+                                     const string16& menu_item_name,
+                                     int item_index,
+                                     int item_count,
+                                     bool has_submenu) OVERRIDE {}
 #if defined(OS_WIN)
   virtual HICON GetDefaultWindowIcon() const OVERRIDE {
     return NULL;
@@ -127,7 +126,13 @@ class AccessibilityEventRouterViewsTest
   AccessibilityWindowDelegate* window_delegate_;
 };
 
-TEST_F(AccessibilityEventRouterViewsTest, TestFocusNotification) {
+// Crashes on Linux Aura, http://crbug.com/100338
+#if defined(USE_AURA) && !defined(OS_WIN)
+#define MAYBE_TestFocusNotification DISABLED_TestFocusNotification
+#else
+#define MAYBE_TestFocusNotification TestFocusNotification
+#endif
+TEST_F(AccessibilityEventRouterViewsTest, MAYBE_TestFocusNotification) {
   const char kButton1ASCII[] = "Button1";
   const char kButton2ASCII[] = "Button2";
   const char kButton3ASCII[] = "Button3";

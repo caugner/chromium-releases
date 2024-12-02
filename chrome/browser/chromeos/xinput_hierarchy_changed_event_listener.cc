@@ -8,6 +8,7 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/XInput2.h>
 
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "ui/base/x/x11_util.h"
 
@@ -31,7 +32,7 @@ int GetXInputOpCode() {
 // Starts listening to the XI_HierarchyChanged events.
 void SelectXInputEvents() {
   XIEventMask evmask;
-  unsigned char mask[XIMaskLen(XI_LASTEVENT)] = {0};
+  unsigned char mask[XIMaskLen(XI_LASTEVENT)] = {};
   XISetMask(mask, XI_HierarchyChanged);
 
   evmask.deviceid = XIAllDevices;
@@ -49,7 +50,8 @@ void HandleHierarchyChangedEvent(XIHierarchyEvent* event) {
     if ((event->flags & XISlaveAdded) &&
         (info->use == XIFloatingSlave) &&
         (info->flags & XISlaveAdded)) {
-      chromeos::input_method::ReapplyCurrentKeyboardLayout();
+      chromeos::input_method::InputMethodManager::GetInstance()->
+          GetXKeyboard()->ReapplyCurrentKeyboardLayout();
       break;
     }
   }
@@ -70,7 +72,7 @@ XInputHierarchyChangedEventListener::XInputHierarchyChangedEventListener()
       xiopcode_(GetXInputOpCode()) {
   SelectXInputEvents();
 
-#if defined(TOUCH_UI)
+#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
   MessageLoopForUI::current()->AddObserver(this);
 #else
   gdk_window_add_filter(NULL, GdkEventFilter, this);
@@ -85,7 +87,7 @@ void XInputHierarchyChangedEventListener::Stop() {
   if (stopped_)
     return;
 
-#if defined(TOUCH_UI)
+#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
   MessageLoopForUI::current()->RemoveObserver(this);
 #else
   gdk_window_remove_filter(NULL, GdkEventFilter, this);
@@ -94,12 +96,16 @@ void XInputHierarchyChangedEventListener::Stop() {
   xiopcode_ = -1;
 }
 
-#if defined(TOUCH_UI)
-base::MessagePumpObserver::EventStatus
-    XInputHierarchyChangedEventListener::WillProcessXEvent(XEvent* xevent) {
-  return ProcessedXEvent(xevent) ? EVENT_HANDLED : EVENT_CONTINUE;
+#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
+base::EventStatus XInputHierarchyChangedEventListener::WillProcessEvent(
+    const base::NativeEvent& event) {
+  return ProcessedXEvent(event) ? base::EVENT_HANDLED : base::EVENT_CONTINUE;
 }
-#else  // defined(TOUCH_UI)
+
+void XInputHierarchyChangedEventListener::DidProcessEvent(
+    const base::NativeEvent& event) {
+}
+#else  // defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
 // static
 GdkFilterReturn XInputHierarchyChangedEventListener::GdkEventFilter(
     GdkXEvent* gxevent, GdkEvent* gevent, gpointer data) {
@@ -110,7 +116,7 @@ GdkFilterReturn XInputHierarchyChangedEventListener::GdkEventFilter(
   return listener->ProcessedXEvent(xevent) ? GDK_FILTER_REMOVE
                                            : GDK_FILTER_CONTINUE;
 }
-#endif  // defined(TOUCH_UI)
+#endif  // defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
 
 bool XInputHierarchyChangedEventListener::ProcessedXEvent(XEvent* xevent) {
   if ((xevent->xcookie.type != GenericEvent) ||

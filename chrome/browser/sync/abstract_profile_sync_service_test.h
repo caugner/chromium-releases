@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/task.h"
 #include "chrome/browser/net/gaia/token_service.h"
+#include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "content/browser/browser_thread.h"
@@ -35,6 +36,15 @@ class ProfileSyncServiceTestHelper {
   static bool CreateRoot(syncable::ModelType model_type,
                          sync_api::UserShare* service,
                          browser_sync::TestIdFactory* ids);
+
+  static sync_api::ImmutableChangeRecordList MakeSingletonChangeRecordList(
+      int64 node_id, sync_api::ChangeRecord::Action action);
+
+  // Deletions must provide an EntitySpecifics for the deleted data.
+  static sync_api::ImmutableChangeRecordList
+      MakeSingletonDeletionChangeRecordList(
+          int64 node_id,
+          const sync_pb::EntitySpecifics& specifics);
 };
 
 class AbstractProfileSyncServiceTest : public testing::Test {
@@ -54,7 +64,7 @@ class AbstractProfileSyncServiceTest : public testing::Test {
   BrowserThread db_thread_;
   BrowserThread io_thread_;
   ProfileSyncFactoryMock factory_;
-  TokenService token_service_;
+  scoped_ptr<TokenService> token_service_;
   scoped_ptr<TestProfileSyncService> service_;
 };
 

@@ -12,8 +12,9 @@
 using WebKit::WebFrame;
 using WebKit::WebURL;
 
-AutomationRendererHelper::AutomationRendererHelper(RenderView* render_view)
-    : RenderViewObserver(render_view) {
+AutomationRendererHelper::AutomationRendererHelper(
+    content::RenderView* render_view)
+    : content::RenderViewObserver(render_view) {
 }
 
 AutomationRendererHelper::~AutomationRendererHelper() { }

@@ -4,7 +4,7 @@
 
 #include "net/base/cert_verifier.h"
 
-#include "base/callback.h"
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/stringprintf.h"
 #include "net/base/cert_test_util.h"
@@ -14,6 +14,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
+
+namespace {
 
 class TestTimeService : public CertVerifier::TimeService {
  public:
@@ -26,18 +28,12 @@ class TestTimeService : public CertVerifier::TimeService {
   base::Time current_time_;
 };
 
-class CertVerifierTest : public testing::Test {
-};
-
-class ExplodingCallback : public CallbackRunner<Tuple1<int> > {
- public:
-  virtual void RunWithParams(const Tuple1<int>& params) {
-    FAIL();
-  }
-};
+void FailTest(int /* result */) {
+  FAIL();
+}
 
 // Tests a cache hit, which should results in synchronous completion.
-TEST_F(CertVerifierTest, CacheHit) {
+TEST(CertVerifierTest, CacheHit) {
   TestTimeService* time_service = new TestTimeService;
   base::Time current_time = base::Time::Now();
   time_service->set_current_time(current_time);
@@ -54,7 +50,7 @@ TEST_F(CertVerifierTest, CacheHit) {
   CertVerifier::RequestHandle request_handle;
 
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle != NULL);
   error = callback.WaitForResult();
@@ -64,7 +60,7 @@ TEST_F(CertVerifierTest, CacheHit) {
   ASSERT_EQ(0u, verifier.inflight_joins());
 
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   // Synchronous completion.
   ASSERT_NE(ERR_IO_PENDING, error);
   ASSERT_TRUE(IsCertificateError(error));
@@ -75,7 +71,7 @@ TEST_F(CertVerifierTest, CacheHit) {
 }
 
 // Tests an inflight join.
-TEST_F(CertVerifierTest, InflightJoin) {
+TEST(CertVerifierTest, InflightJoin) {
   TestTimeService* time_service = new TestTimeService;
   base::Time current_time = base::Time::Now();
   time_service->set_current_time(current_time);
@@ -95,11 +91,11 @@ TEST_F(CertVerifierTest, InflightJoin) {
   CertVerifier::RequestHandle request_handle2;
 
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle != NULL);
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result2,
-                          &callback2, &request_handle2);
+                          callback2.callback(), &request_handle2);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle2 != NULL);
   error = callback.WaitForResult();
@@ -112,7 +108,7 @@ TEST_F(CertVerifierTest, InflightJoin) {
 }
 
 // Tests cache entry expiration.
-TEST_F(CertVerifierTest, ExpiredCacheEntry) {
+TEST(CertVerifierTest, ExpiredCacheEntry) {
   TestTimeService* time_service = new TestTimeService;
   base::Time current_time = base::Time::Now();
   time_service->set_current_time(current_time);
@@ -129,7 +125,7 @@ TEST_F(CertVerifierTest, ExpiredCacheEntry) {
   CertVerifier::RequestHandle request_handle;
 
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle != NULL);
   error = callback.WaitForResult();
@@ -140,7 +136,7 @@ TEST_F(CertVerifierTest, ExpiredCacheEntry) {
 
   // Before expiration, should have a cache hit.
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   // Synchronous completion.
   ASSERT_NE(ERR_IO_PENDING, error);
   ASSERT_TRUE(IsCertificateError(error));
@@ -154,7 +150,7 @@ TEST_F(CertVerifierTest, ExpiredCacheEntry) {
   current_time += base::TimeDelta::FromMinutes(60);
   time_service->set_current_time(current_time);
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle != NULL);
   ASSERT_EQ(0u, verifier.GetCacheSize());
@@ -166,7 +162,7 @@ TEST_F(CertVerifierTest, ExpiredCacheEntry) {
 }
 
 // Tests a full cache.
-TEST_F(CertVerifierTest, FullCache) {
+TEST(CertVerifierTest, FullCache) {
   TestTimeService* time_service = new TestTimeService;
   base::Time current_time = base::Time::Now();
   time_service->set_current_time(current_time);
@@ -188,7 +184,7 @@ TEST_F(CertVerifierTest, FullCache) {
   CertVerifier::RequestHandle request_handle;
 
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle != NULL);
   error = callback.WaitForResult();
@@ -200,7 +196,7 @@ TEST_F(CertVerifierTest, FullCache) {
   for (unsigned i = 0; i < kCacheSize; i++) {
     std::string hostname = base::StringPrintf("www%d.example.com", i + 1);
     error = verifier.Verify(test_cert, hostname, 0, &verify_result,
-                            &callback, &request_handle);
+                            callback.callback(), &request_handle);
     ASSERT_EQ(ERR_IO_PENDING, error);
     ASSERT_TRUE(request_handle != NULL);
     error = callback.WaitForResult();
@@ -214,7 +210,7 @@ TEST_F(CertVerifierTest, FullCache) {
   current_time += base::TimeDelta::FromMinutes(60);
   time_service->set_current_time(current_time);
   error = verifier.Verify(test_cert, "www999.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle != NULL);
   ASSERT_EQ(kCacheSize, verifier.GetCacheSize());
@@ -227,7 +223,7 @@ TEST_F(CertVerifierTest, FullCache) {
 }
 
 // Tests that the callback of a canceled request is never made.
-TEST_F(CertVerifierTest, CancelRequest) {
+TEST(CertVerifierTest, CancelRequest) {
   CertVerifier verifier;
 
   FilePath certs_dir = GetTestCertsDirectory();
@@ -237,11 +233,10 @@ TEST_F(CertVerifierTest, CancelRequest) {
 
   int error;
   CertVerifyResult verify_result;
-  ExplodingCallback exploding_callback;
   CertVerifier::RequestHandle request_handle;
 
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &exploding_callback, &request_handle);
+                          base::Bind(&FailTest), &request_handle);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle != NULL);
   verifier.CancelRequest(request_handle);
@@ -252,7 +247,7 @@ TEST_F(CertVerifierTest, CancelRequest) {
   TestCompletionCallback callback;
   for (int i = 0; i < 5; ++i) {
     error = verifier.Verify(test_cert, "www2.example.com", 0, &verify_result,
-                            &callback, &request_handle);
+                            callback.callback(), &request_handle);
     ASSERT_EQ(ERR_IO_PENDING, error);
     ASSERT_TRUE(request_handle != NULL);
     error = callback.WaitForResult();
@@ -261,7 +256,7 @@ TEST_F(CertVerifierTest, CancelRequest) {
 }
 
 // Tests that a canceled request is not leaked.
-TEST_F(CertVerifierTest, CancelRequestThenQuit) {
+TEST(CertVerifierTest, CancelRequestThenQuit) {
   CertVerifier verifier;
 
   FilePath certs_dir = GetTestCertsDirectory();
@@ -275,11 +270,13 @@ TEST_F(CertVerifierTest, CancelRequestThenQuit) {
   CertVerifier::RequestHandle request_handle;
 
   error = verifier.Verify(test_cert, "www.example.com", 0, &verify_result,
-                          &callback, &request_handle);
+                          callback.callback(), &request_handle);
   ASSERT_EQ(ERR_IO_PENDING, error);
   ASSERT_TRUE(request_handle != NULL);
   verifier.CancelRequest(request_handle);
   // Destroy |verifier| by going out of scope.
 }
+
+}  // namespace
 
 }  // namespace net

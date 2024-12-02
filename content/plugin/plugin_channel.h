@@ -11,7 +11,7 @@
 #include "base/memory/scoped_handle.h"
 #include "base/process.h"
 #include "build/build_config.h"
-#include "content/plugin/plugin_channel_base.h"
+#include "content/common/np_channel_base.h"
 #include "content/plugin/webplugin_delegate_stub.h"
 
 namespace base {
@@ -20,7 +20,7 @@ class WaitableEvent;
 
 // Encapsulates an IPC channel between the plugin process and one renderer
 // process.  On the renderer side there's a corresponding PluginChannelHost.
-class PluginChannel : public PluginChannelBase {
+class PluginChannel : public NPChannelBase {
  public:
   // Get a new PluginChannel object for the current process to talk to the
   // given renderer process. The renderer ID is an opaque unique ID generated
@@ -43,7 +43,8 @@ class PluginChannel : public PluginChannelBase {
 
   // Returns the event that's set when a call to the renderer causes a modal
   // dialog to come up.
-  base::WaitableEvent* GetModalDialogEvent(gfx::NativeViewId containing_window);
+  virtual base::WaitableEvent* GetModalDialogEvent(
+      gfx::NativeViewId containing_window);
 
   bool in_send() { return in_send_ != 0; }
 
@@ -51,7 +52,9 @@ class PluginChannel : public PluginChannelBase {
   void set_incognito(bool value) { incognito_ = value; }
 
 #if defined(OS_POSIX)
-  int renderer_fd() const { return channel_->GetClientFileDescriptor(); }
+  int TakeRendererFileDescriptor() {
+    return channel_->TakeClientFileDescriptor();
+  }
 #endif
 
  protected:
@@ -61,9 +64,10 @@ class PluginChannel : public PluginChannelBase {
 
   virtual void CleanUp();
 
-  // Overrides PluginChannelBase::Init.
+  // Overrides NPChannelBase::Init.
   virtual bool Init(base::MessageLoopProxy* ipc_message_loop,
-                   bool create_pipe_now);
+                    bool create_pipe_now,
+                    base::WaitableEvent* shutdown_event);
 
  private:
   class MessageFilter;
@@ -73,7 +77,7 @@ class PluginChannel : public PluginChannelBase {
 
   virtual bool OnControlMessageReceived(const IPC::Message& msg);
 
-  static PluginChannelBase* ClassFactory() { return new PluginChannel(); }
+  static NPChannelBase* ClassFactory() { return new PluginChannel(); }
 
   void OnCreateInstance(const std::string& mime_type, int* instance_id);
   void OnDestroyInstance(int instance_id, IPC::Message* reply_msg);

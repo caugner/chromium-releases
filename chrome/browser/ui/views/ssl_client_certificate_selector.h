@@ -13,7 +13,6 @@
 #include "base/string16.h"
 #include "base/memory/ref_counted.h"
 #include "content/browser/ssl/ssl_client_auth_handler.h"
-#include "content/browser/tab_contents/constrained_window.h"
 #include "ui/base/message_box_flags.h"
 #include "views/controls/button/button.h"
 #include "views/controls/table/table_view_observer.h"
@@ -30,7 +29,8 @@ class TextButton;
 }
 
 class CertificateSelectorTableModel;
-class TabContents;
+class ConstrainedWindow;
+class TabContentsWrapper;
 
 class SSLClientCertificateSelector : public SSLClientAuthObserver,
                                      public views::DialogDelegateView,
@@ -38,7 +38,7 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
                                      public views::TableViewObserver {
  public:
   SSLClientCertificateSelector(
-      TabContents* parent,
+      TabContentsWrapper* wrapper,
       net::SSLCertRequestInfo* cert_request_info,
       SSLClientAuthHandler* delegate);
   virtual ~SSLClientCertificateSelector();
@@ -52,7 +52,7 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
 
   // DialogDelegateView:
   virtual bool CanResize() const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool IsDialogButtonEnabled(
       ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
@@ -80,7 +80,7 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
 
   scoped_ptr<CertificateSelectorTableModel> model_;
 
-  TabContents* tab_contents_;
+  TabContentsWrapper* wrapper_;
 
   ConstrainedWindow* window_;
   views::TableView* table_;

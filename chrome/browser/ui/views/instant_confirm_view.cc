@@ -22,12 +22,12 @@
 
 InstantConfirmView::InstantConfirmView(Profile* profile) : profile_(profile) {
   views::Label* description_label = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_INSTANT_OPT_IN_MESSAGE)));
+      l10n_util::GetStringUTF16(IDS_INSTANT_OPT_IN_MESSAGE));
   description_label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   description_label->SetMultiLine(true);
 
   views::Link* learn_more_link = new views::Link(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_LEARN_MORE)));
+      l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   learn_more_link->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   learn_more_link->set_listener(this);
 
@@ -61,8 +61,8 @@ views::View* InstantConfirmView::GetContentsView() {
   return this;
 }
 
-std::wstring InstantConfirmView::GetWindowTitle() const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_INSTANT_OPT_IN_TITLE));
+string16 InstantConfirmView::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_INSTANT_OPT_IN_TITLE);
 }
 
 gfx::Size InstantConfirmView::GetPreferredSize() {
@@ -79,9 +79,9 @@ bool InstantConfirmView::IsModal() const {
 }
 
 void InstantConfirmView::LinkClicked(views::Link* source, int event_flags) {
-  Browser* browser = BrowserList::GetLastActive();
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
   browser->OpenURL(browser::InstantLearnMoreURL(), GURL(),
-                   NEW_FOREGROUND_TAB, PageTransition::TYPED);
+                   NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_TYPED);
 }
 
 namespace browser {

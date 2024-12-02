@@ -40,25 +40,29 @@ cr.define('options', function() {
       UserImagesGrid.decorate(imageGrid);
 
       imageGrid.addEventListener('change', function(e) {
-        // Button selections will be ignored by Chrome handler.
-        chrome.send('selectImage', [this.selectedItemUrl || '']);
+        // Ignore programmatical selection.
+        if (!imageGrid.inProgramSelection) {
+          // Button selections will be ignored by Chrome handler.
+          chrome.send('selectImage', [this.selectedItemUrl || '']);
+        }
       });
       imageGrid.addEventListener('activate',
                                  this.handleImageActivated_.bind(this));
+      imageGrid.addEventListener('dblclick',
+                                 this.handleImageDblClick_.bind(this));
 
-      // Add "Take photo" and "Choose a file" buttons in a uniform way with
-      // other buttons.
+      // Add the "Choose file" button.
       imageGrid.addItem(ButtonImages.CHOOSE_FILE,
                         localStrings.getString('chooseFile'),
                         this.handleChooseFile_.bind(this));
-      imageGrid.addItem(ButtonImages.TAKE_PHOTO,
-                        localStrings.getString('takePhoto'),
-                        this.handleTakePhoto_.bind(this));
+
+      // Profile image data.
+      this.profileImage_ = imageGrid.addItem(
+          ButtonImages.PROFILE_PICTURE,
+          localStrings.getString('profilePhotoLoading'));
 
       // Old user image data (if present).
       this.oldImage_ = null;
-
-      chrome.send('getAvailableImages');
     },
 
     /**
@@ -80,12 +84,20 @@ cr.define('options', function() {
     },
 
     /**
+     * Closes current page, returning back to Personal Stuff page.
+     * @private
+     */
+    closePage_: function() {
+      OptionsPage.navigateToPage('personal');
+    },
+
+    /**
      * Handles "Take photo" button activation.
      * @private
      */
     handleTakePhoto_: function() {
       chrome.send('takePhoto');
-      OptionsPage.navigateToPage('personal');
+      this.closePage_();
     },
 
     /**
@@ -94,7 +106,7 @@ cr.define('options', function() {
      */
     handleChooseFile_: function() {
       chrome.send('chooseFile');
-      OptionsPage.navigateToPage('personal');
+      this.closePage_();
     },
 
     /**
@@ -109,19 +121,89 @@ cr.define('options', function() {
         case ButtonImages.CHOOSE_FILE:
           this.handleChooseFile_();
           break;
+        case ButtonImages.PROFILE_PICTURE:
+          break;
+        default:
+          this.closePage_();
+          break;
       }
     },
 
     /**
-     * Adds old user image that isn't one of the default images and selects it.
+     * Handles double click on the image grid.
+     * @param {Event} e Double click Event.
+     */
+    handleImageDblClick_: function(e) {
+      // Close page unless the click target is the grid itself,
+      // any of the buttons or the Profile image until it's not loaded.
+      var url = e.target.src;
+      if (!url)
+        return;
+      for (var k in ButtonImages) {
+        if (url == ButtonImages[k])
+          return;
+      }
+      this.closePage_();
+    },
+
+    /**
+     * URL of the current user image.
+     * @type {string}
+     */
+    get currentUserImageUrl() {
+      return 'chrome://userimage/' + PersonalOptions.getLoggedInUserEmail() +
+          '?id=' + (new Date()).getTime();
+    },
+
+    /**
+     * Notifies about camera presence change.
+     * @param {boolean} present Whether a camera is present or not.
      * @private
      */
-    addOldImage_: function() {
+    setCameraPresent_: function(present) {
       var imageGrid = $('images-grid');
-      var src = 'chrome://userimage/' + PersonalOptions.getLoggedInUserEmail() +
-                '?id=' + (new Date()).getTime();
-      this.oldImage_ = imageGrid.addItem(src, undefined, undefined, 2);
-      imageGrid.selectedItem = this.oldImage_;
+      if (present && !this.takePhotoButton_) {
+        this.takePhotoButton_ = imageGrid.addItem(
+            ButtonImages.TAKE_PHOTO,
+            localStrings.getString('takePhoto'),
+            this.handleTakePhoto_.bind(this),
+            1);
+      } else if (!present && this.takePhotoButton_) {
+        imageGrid.removeItem(this.takePhotoButton_);
+        this.takePhotoButton_ = null;
+      }
+    },
+
+    /**
+     * Adds or updates old user image taken from file/camera (neither a profile
+     * image nor a default one).
+     * @private
+     */
+    setOldImage_: function() {
+      var imageGrid = $('images-grid');
+      var url = this.currentUserImageUrl;
+      if (this.oldImage_) {
+        this.oldImage_ = imageGrid.updateItem(this.oldImage_, url);
+      } else {
+        // Insert next to the profile image.
+        var pos = imageGrid.findItem(this.profileImage_) + 1;
+        this.oldImage_ = imageGrid.addItem(url, undefined, undefined, pos);
+        imageGrid.selectedItem = this.oldImage_;
+      }
+    },
+
+    /**
+     * Updates user's profile image.
+     * @param {string} imageUrl Profile image, encoded as data URL.
+     * @param {boolean} select If true, profile image should be selected.
+     * @private
+     */
+    setProfileImage_: function(imageUrl, select) {
+      var imageGrid = $('images-grid');
+      this.profileImage_ = imageGrid.updateItem(
+          this.profileImage_, imageUrl, localStrings.getString('profilePhoto'));
+      if (select)
+        imageGrid.selectedItem = this.profileImage_;
     },
 
     /**
@@ -148,12 +230,14 @@ cr.define('options', function() {
 
   // Forward public APIs to private implementations.
   [
-    'addOldImage',
+    'setCameraPresent',
+    'setOldImage',
+    'setProfileImage',
     'setSelectedImage',
     'setUserImages',
   ].forEach(function(name) {
-    ChangePictureOptions[name] = function(value) {
-      ChangePictureOptions.getInstance()[name + '_'](value);
+    ChangePictureOptions[name] = function(value1, value2) {
+      ChangePictureOptions.getInstance()[name + '_'](value1, value2);
     };
   });
 

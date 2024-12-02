@@ -117,7 +117,7 @@ class NewTabButton : public views::ImageButton {
 const int TabStrip::mini_to_non_mini_gap_ = 3;
 
 TabStrip::TabStrip(TabStripController* controller)
-    : BaseTabStrip(controller, BaseTabStrip::HORIZONTAL_TAB_STRIP),
+    : BaseTabStrip(controller),
       newtab_button_(NULL),
       current_unselected_width_(Tab::GetStandardSize().width()),
       current_selected_width_(Tab::GetStandardSize().width()),
@@ -776,7 +776,7 @@ gfx::Rect TabStrip::GetDropBounds(int drop_index,
                         drop_indicator_height);
 
   // If the rect doesn't fit on the monitor, push the arrow to the bottom.
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   gfx::Rect monitor_bounds = views::GetMonitorBoundsForRect(drop_bounds);
   *is_beneath = (monitor_bounds.IsEmpty() ||
                  !monitor_bounds.Contains(drop_bounds));
@@ -1012,10 +1012,7 @@ void TabStrip::StartMouseInitiatedRemoveTabAnimation(int model_index) {
   AnimateToIdealBounds();
 
   gfx::Rect tab_bounds = tab_closing->bounds();
-  if (type() == HORIZONTAL_TAB_STRIP)
-    tab_bounds.set_width(0);
-  else
-    tab_bounds.set_height(0);
+  tab_bounds.set_width(0);
   bounds_animator().AnimateViewTo(tab_closing, tab_bounds);
 
   // Register delegate to do cleanup when done, BoundsAnimator takes

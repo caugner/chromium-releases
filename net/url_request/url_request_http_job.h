@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
@@ -23,6 +24,7 @@
 
 namespace net {
 
+class HttpResponseHeaders;
 class HttpResponseInfo;
 class HttpTransaction;
 class URLRequestContext;
@@ -47,19 +49,18 @@ class URLRequestHttpJob : public URLRequestJob {
 
   void AddExtraHeaders();
   void AddCookieHeaderAndStart();
-  void SaveCookiesAndNotifyHeadersComplete();
+  void SaveCookiesAndNotifyHeadersComplete(int result);
   void SaveNextCookie();
-  void FetchResponseCookies(const HttpResponseInfo* response_info,
-                            std::vector<std::string>* cookies);
+  void FetchResponseCookies(std::vector<std::string>* cookies);
 
   // Process the Strict-Transport-Security header, if one exists.
   void ProcessStrictTransportSecurityHeader();
 
+  // |result| should be net::OK, or the request is canceled.
+  void OnHeadersReceivedCallback(int result);
   void OnStartCompleted(int result);
   void OnReadCompleted(int result);
   void NotifyBeforeSendHeadersCallback(int result);
-
-  bool ShouldTreatAsCertificateError(int result);
 
   void RestartTransactionWithAuth(const string16& username,
                                   const string16& password);
@@ -91,6 +92,7 @@ class URLRequestHttpJob : public URLRequestJob {
   virtual void StopCaching() OVERRIDE;
   virtual void DoneReading() OVERRIDE;
   virtual HostPortPair GetSocketAddress() const OVERRIDE;
+  virtual void NotifyURLRequestDestroyed() OVERRIDE;
 
   // Keep a reference to the url request context to be sure it's not deleted
   // before us.
@@ -109,9 +111,9 @@ class URLRequestHttpJob : public URLRequestJob {
   string16 username_;
   string16 password_;
 
-  CompletionCallbackImpl<URLRequestHttpJob> start_callback_;
-  CompletionCallbackImpl<URLRequestHttpJob> read_callback_;
-  CompletionCallbackImpl<URLRequestHttpJob>
+  OldCompletionCallbackImpl<URLRequestHttpJob> start_callback_;
+  OldCompletionCallbackImpl<URLRequestHttpJob> read_callback_;
+  OldCompletionCallbackImpl<URLRequestHttpJob>
       notify_before_headers_sent_callback_;
 
   bool read_in_progress_;
@@ -169,8 +171,8 @@ class URLRequestHttpJob : public URLRequestJob {
   // Callback functions for Cookie Monster
   void CheckCookiePolicyAndLoad(const CookieList& cookie_list);
   void OnCookiesLoaded(
-      std::string* cookie_line,
-      std::vector<CookieStore::CookieInfo>* cookie_infos);
+      const std::string& cookie_line,
+      const std::vector<CookieStore::CookieInfo>& cookie_infos);
   void DoStartTransaction();
   void OnCookieSaved(bool cookie_status);
   void CookieHandled();
@@ -181,6 +183,10 @@ class URLRequestHttpJob : public URLRequestJob {
   // |rv| is the standard return value of a read function indicating the number
   // of bytes read or, if negative, an error code.
   bool ShouldFixMismatchedContentLength(int rv) const;
+
+  // Returns the effective response headers, considering that they may be
+  // overridden by |override_response_headers_|.
+  HttpResponseHeaders* GetResponseHeaders() const;
 
   base::Time request_creation_time_;
 
@@ -215,6 +221,17 @@ class URLRequestHttpJob : public URLRequestJob {
   scoped_ptr<HttpFilterContext> filter_context_;
   ScopedRunnableMethodFactory<URLRequestHttpJob> method_factory_;
   base::WeakPtrFactory<URLRequestHttpJob> weak_ptr_factory_;
+
+  OldCompletionCallbackImpl<URLRequestHttpJob> on_headers_received_callback_;
+
+  scoped_refptr<HttpResponseHeaders> override_response_headers_;
+
+  // Flag used to verify that |this| is not deleted while we are awaiting
+  // a callback from the NetworkDelegate. Used as a fail-fast mechanism.
+  // True if we are waiting a callback and
+  // NetworkDelegate::NotifyURLRequestDestroyed has not been called, yet,
+  // to inform the NetworkDelegate that it may not call back.
+  bool awaiting_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestHttpJob);
 };

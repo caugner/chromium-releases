@@ -6,6 +6,9 @@
 #define CHROME_BROWSER_CHROMEOS_EXTERNAL_PROTOCOL_DIALOG_H_
 #pragma once
 
+#include <string>
+
+#include "base/string16.h"
 #include "base/time.h"
 #include "views/window/dialog_delegate.h"
 
@@ -28,9 +31,9 @@ class ExternalProtocolDialog : public views::DialogDelegate {
 
   // views::DialogDelegate Methods:
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;

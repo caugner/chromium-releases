@@ -34,8 +34,8 @@ bool ServiceGaiaAuthenticator::Post(const GURL& url,
                         post_body));
   // TODO(sanjeevr): Waiting here until the network request completes is not
   // desirable. We need to change Post to be asynchronous.
-  if (!http_post_completed_.Wait())  // Block until network request completes.
-    NOTREACHED();                    // See OnURLFetchComplete.
+  // Block until network request completes. See OnURLFetchComplete.
+  http_post_completed_.Wait();
 
   *response_code = static_cast<int>(http_response_code_);
   *response_body = response_data_;
@@ -71,16 +71,10 @@ void ServiceGaiaAuthenticator::DoPost(const GURL& post_url,
 }
 
 // URLFetcher::Delegate implementation
-void ServiceGaiaAuthenticator::OnURLFetchComplete(
-    const URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const net::ResponseCookies& cookies,
-    const std::string& data) {
+void ServiceGaiaAuthenticator::OnURLFetchComplete(const URLFetcher* source) {
   DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
-  http_response_code_ = response_code;
-  response_data_ = data;
+  http_response_code_ = source->response_code();
+  response_data_ = source->GetResponseStringRef();
   delete source;
   // Add an extra reference because we want http_post_completed_ to remain
   // valid until after Signal() returns.

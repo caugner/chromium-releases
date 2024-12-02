@@ -17,6 +17,9 @@
       }],
     ],
   },
+  'includes': [
+    '../build/win_precompile.gypi',
+  ],
   'targets': [
     {
       'target_name': 'net',
@@ -31,6 +34,7 @@
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/zlib/zlib.gyp:zlib',
+        '../v8/tools/gyp/v8.gyp:v8',
         'net_resources',
         'ssl_false_start_blacklist_process#host',
       ],
@@ -98,6 +102,10 @@
         'base/ev_root_ca_metadata.cc',
         'base/ev_root_ca_metadata.h',
         'base/file_stream.h',
+        'base/file_stream_metrics.h',
+        'base/file_stream_metrics.cc',
+        'base/file_stream_metrics_posix.cc',
+        'base/file_stream_metrics_win.cc',
         'base/file_stream_posix.cc',
         'base/file_stream_win.cc',
         'base/filter.cc',
@@ -205,6 +213,7 @@
         'base/ssl_config_service_defaults.cc',
         'base/ssl_config_service_defaults.h',
         'base/ssl_false_start_blacklist.cc',
+        'base/ssl_false_start_blacklist.h',
         'base/ssl_info.cc',
         'base/ssl_info.h',
         'base/static_cookie_policy.cc',
@@ -238,6 +247,9 @@
         'base/x509_certificate_nss.cc',
         'base/x509_certificate_openssl.cc',
         'base/x509_certificate_win.cc',
+        'base/x509_util.h',
+        'base/x509_util_nss.cc',
+        'base/x509_util_nss.h',
         'base/x509_util_openssl.cc',
         'base/x509_util_openssl.h',
         'disk_cache/addr.cc',
@@ -303,6 +315,8 @@
         'dns/dns_config_service.h',
         'dns/dns_config_service_posix.cc',
         'dns/dns_config_service_posix.h',
+        'dns/dns_config_service_win.cc',
+        'dns/dns_config_service_win.h',
         'dns/dns_hosts.cc',
         'dns/dns_hosts.h',
         'dns/dns_query.cc',
@@ -311,6 +325,8 @@
         'dns/dns_response.h',
         'dns/dns_transaction.cc',
         'dns/dns_transaction.h',
+        'dns/serial_worker.cc',
+        'dns/serial_worker.h',
         'dns/watching_file_reader.cc',
         'dns/watching_file_reader.h',
         'ftp/ftp_auth_cache.cc',
@@ -348,8 +364,6 @@
         'http/des.h',
         'http/disk_cache_based_ssl_host_info.cc',
         'http/disk_cache_based_ssl_host_info.h',
-        'http/http_alternate_protocols.cc',
-        'http/http_alternate_protocols.h',
         'http/http_atom_list.h',
         'http/http_auth.cc',
         'http/http_auth.h',
@@ -416,6 +430,10 @@
         'http/http_response_headers.h',
         'http/http_response_info.cc',
         'http/http_response_info.h',
+        'http/http_server_properties.cc',
+        'http/http_server_properties.h',
+        'http/http_server_properties_impl.cc',
+        'http/http_server_properties_impl.h',
         'http/http_stream.h',
         'http/http_stream_factory.cc',
         'http/http_stream_factory.h',
@@ -620,8 +638,8 @@
         'udp/udp_socket_libevent.h',
         'udp/udp_socket_win.cc',
         'udp/udp_socket_win.h',
-        'url_request/https_prober.cc',
-        'url_request/https_prober.h',
+        'url_request/fraudulent_certificate_reporter.cc',
+        'url_request/fraudulent_certificate_reporter.h',
         'url_request/url_request.cc',
         'url_request/url_request.h',
         'url_request/url_request_about_job.cc',
@@ -708,11 +726,6 @@
         },
       ],
       'conditions': [
-        ['javascript_engine=="v8"', {
-          'dependencies': [
-            '../v8/tools/gyp/v8.gyp:v8',
-          ],
-        }],
         ['chromeos==1', {
           'sources!': [
              'proxy/proxy_config_service_linux.cc',
@@ -755,6 +768,8 @@
               'base/nss_memio.h',
               'base/test_root_certs_nss.cc',
               'base/x509_certificate_nss.cc',
+              'base/x509_util_nss.cc',
+              'base/x509_util_nss.h',
               'ocsp/nss_ocsp.cc',
               'ocsp/nss_ocsp.h',
               'socket/dns_cert_provenance_check.cc',
@@ -792,10 +807,9 @@
             ],
           },
         ],
-        [ 'toolkit_uses_gtk == 1', {
+        [ 'use_glib == 1', {
             'dependencies': [
               '../build/linux/system.gyp:gconf',
-              '../build/linux/system.gyp:gdk',
               '../build/linux/system.gyp:gio',
               '../build/linux/system.gyp:libresolv',
             ],
@@ -839,6 +853,11 @@
             ],
           },
         ],
+        [ 'toolkit_uses_gtk == 1', {
+          'dependencies': [
+            '../build/linux/system.gyp:gdk',
+          ],
+        }],
         [ 'OS == "win"', {
             'sources!': [
               'http/http_auth_handler_ntlm_portable.cc',
@@ -930,6 +949,7 @@
         'base/gzip_filter_unittest.cc',
         'base/host_cache_unittest.cc',
         'base/host_mapping_rules_unittest.cc',
+        'base/host_port_pair_unittest.cc',
         'base/host_resolver_impl_unittest.cc',
         'base/ip_endpoint_unittest.cc',
         'base/keygen_handler_unittest.cc',
@@ -943,6 +963,7 @@
         'base/net_log_unittest.cc',
         'base/net_log_unittest.h',
         'base/net_util_unittest.cc',
+        'base/network_change_notifier_win_unittest.cc',
         'base/origin_bound_cert_service_unittest.cc',
         'base/pem_tokenizer_unittest.cc',
         'base/registry_controlled_domain_unittest.cc',
@@ -960,6 +981,8 @@
         'base/upload_data_stream_unittest.cc',
         'base/x509_certificate_unittest.cc',
         'base/x509_cert_types_mac_unittest.cc',
+        'base/x509_util_nss_unittest.cc',
+        'base/x509_util_openssl_unittest.cc',
         'disk_cache/addr_unittest.cc',
         'disk_cache/backend_unittest.cc',
         'disk_cache/bitmap_unittest.cc',
@@ -973,10 +996,12 @@
         'dns/async_host_resolver_unittest.cc',
         'dns/dns_config_service_posix_unittest.cc',
         'dns/dns_config_service_unittest.cc',
+        'dns/dns_config_service_win_unittest.cc',
         'dns/dns_hosts_unittest.cc',
         'dns/dns_query_unittest.cc',
         'dns/dns_response_unittest.cc',
         'dns/dns_transaction_unittest.cc',
+        'dns/serial_worker_unittest.cc',
         'dns/watching_file_reader_unittest.cc',
         'ftp/ftp_auth_cache_unittest.cc',
         'ftp/ftp_ctrl_response_buffer_unittest.cc',
@@ -989,7 +1014,6 @@
         'ftp/ftp_network_transaction_unittest.cc',
         'ftp/ftp_util_unittest.cc',
         'http/des_unittest.cc',
-        'http/http_alternate_protocols_unittest.cc',
         'http/http_auth_cache_unittest.cc',
         'http/http_auth_controller_unittest.cc',
         'http/http_auth_filter_unittest.cc',
@@ -1013,6 +1037,7 @@
         'http/http_request_headers_unittest.cc',
         'http/http_response_body_drainer_unittest.cc',
         'http/http_response_headers_unittest.cc',
+        'http/http_server_properties_impl_unittest.cc',
         'http/http_stream_factory_impl_unittest.cc',
         'http/http_transaction_unittest.cc',
         'http/http_transaction_unittest.h',
@@ -1097,17 +1122,21 @@
              'proxy/proxy_config_service_linux_unittest.cc',
           ],
         }],
-        [ 'toolkit_uses_gtk == 1', {
+        [ 'use_glib == 1', {
             'dependencies': [
-              '../build/linux/system.gyp:gtk',
               '../build/linux/system.gyp:ssl',
             ],
-          },
-          {  # else: OS is not in the above list
+          }, {  # else: OS is not in the above list
             'sources!': [
               'base/cert_database_nss_unittest.cc',
             ],
-          }
+          },
+        ],
+        [ 'toolkit_uses_gtk == 1', {
+            'dependencies': [
+              '../build/linux/system.gyp:gtk',
+            ],
+          },
         ],
         [ 'os_posix == 1 and OS != "mac"', {
           'conditions': [
@@ -1135,8 +1164,13 @@
             # TODO(bulach): Add equivalent tests when the underlying
             #               functionality is ported to OpenSSL.
             'sources!': [
+              'base/x509_util_nss_unittest.cc',
               'base/cert_database_nss_unittest.cc',
               'base/dnssec_unittest.cc',
+            ],
+          }, {  # else !use_openssl: remove the unneeded files
+            'sources!': [
+              'base/x509_util_openssl_unittest.cc',
             ],
           },
         ],
@@ -1149,6 +1183,17 @@
             # TODO(mark): Specifying this here shouldn't be necessary.
             'dependencies': [
               '../third_party/icu/icu.gyp:icudata',
+              '../third_party/nss/nss.gyp:nspr',
+              '../third_party/nss/nss.gyp:nss',
+              'third_party/nss/ssl.gyp:ssl',
+            ],
+          },
+        ],
+        [ 'OS == "mac"', {
+            'dependencies': [
+              '../third_party/nss/nss.gyp:nspr',
+              '../third_party/nss/nss.gyp:nss',
+              'third_party/nss/ssl.gyp:ssl',
             ],
           },
         ],
@@ -1400,11 +1445,16 @@
       'target_name': 'ssl_false_start_blacklist_process',
       'type': 'executable',
       'toolsets': ['host'],
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+      ],
       'include_dirs': [
         '..',
       ],
       'sources': [
         'base/ssl_false_start_blacklist_process.cc',
+        'base/ssl_false_start_blacklist.h',
       ],
     },
   ],
@@ -1419,7 +1469,7 @@
            ],
            'dependencies': [
              '../base/base.gyp:base',
-             'net.gyp:net',
+             'net',
              '../third_party/openssl/openssl.gyp:openssl',
            ],
            'sources': [
@@ -1481,7 +1531,7 @@
            'type': 'static_library',
            'dependencies': [
              '../base/base.gyp:base',
-             'net.gyp:net',
+             'net',
            ],
            'sources': [
              'curvecp/circular_buffer.cc',
@@ -1516,8 +1566,8 @@
            'type': 'executable',
            'dependencies': [
              '../base/base.gyp:base',
-             'net.gyp:curvecp',
-             'net.gyp:net',
+             'curvecp',
+             'net',
              'net_test_support',
              '../testing/gmock.gyp:gmock',
              '../testing/gtest.gyp:gtest',

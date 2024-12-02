@@ -116,7 +116,7 @@ const wchar_t kMessageWindowClass[] = L"Chrome_MessageWindow";
 const wchar_t kCrashReportLog[] = L"Reported Crashes.txt";
 const wchar_t kTestingInterfaceDLL[] = L"testing_interface.dll";
 const char    kInitialProfile[] = "Default";
-const char    kMultiProfileDirPrefix[] = "profile_";
+const char    kMultiProfileDirPrefix[] = "Profile ";
 const wchar_t kBrowserResourcesDll[] = L"chrome.dll";
 const FilePath::CharType kExtensionFileExtension[] = FPL(".crx");
 const FilePath::CharType kExtensionKeyFileExtension[] = FPL(".pem");
@@ -124,6 +124,8 @@ const FilePath::CharType kExtensionKeyFileExtension[] = FPL(".pem");
 // filenames
 const FilePath::CharType kArchivedHistoryFilename[] = FPL("Archived History");
 const FilePath::CharType kCacheDirname[] = FPL("Cache");
+const FilePath::CharType kCRLSetFilename[] =
+    FPL("Certificate Revocation Lists");
 const FilePath::CharType kMediaCacheDirname[] = FPL("Media Cache");
 const FilePath::CharType kOffTheRecordMediaCacheDirname[] =
     FPL("Incognito Media Cache");
@@ -181,6 +183,11 @@ const bool kEnableTouchIcon = false;
 #if defined(OS_LINUX)
 extern const int kLowestRendererOomScore = 300;
 extern const int kHighestRendererOomScore = 1000;
+#endif
+
+#if defined(OS_WIN)
+// This is used by the PreRead experiment.
+const char kPreReadEnvironmentVariable[] = "CHROME_PRE_READ_EXPERIMENT";
 #endif
 
 }  // namespace chrome

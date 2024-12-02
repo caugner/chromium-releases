@@ -44,7 +44,6 @@ class ExtensionWebRequestApiTest : public ExtensionApiTest {
  public:
   virtual void SetUpInProcessBrowserTestFixture() {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
-    ExtensionWebRequestEventRouter::SetAllowChromeExtensionScheme();
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(StartTestServer());
   }
@@ -69,10 +68,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestComplex) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
 
-  // Needed for the auth tests.
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_complex.html")) <<
+      message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestAuthRequired) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableExperimentalExtensionApis);
+
   CancelLoginDialog login_dialog_helper;
 
-  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_complex.html")) <<
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_auth_required.html")) <<
       message_;
 }
 

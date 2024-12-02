@@ -10,7 +10,9 @@
 #include <map>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/callback_old.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
@@ -210,9 +212,8 @@ class ObserverListThreadSafe
       ObserverListContext* context = (*it).second;
       context->loop->PostTask(
           FROM_HERE,
-          NewRunnableMethod(this,
-              &ObserverListThreadSafe<ObserverType>::
-                 template NotifyWrapper<Method, Params>, context, method));
+          base::Bind(&ObserverListThreadSafe<ObserverType>::
+              template NotifyWrapper<Method, Params>, this, context, method));
     }
   }
 

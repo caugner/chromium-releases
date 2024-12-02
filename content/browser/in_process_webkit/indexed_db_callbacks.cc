@@ -28,8 +28,10 @@ void IndexedDBCallbacksBase::onBlocked() {
 void IndexedDBCallbacks<WebKit::WebIDBCursor>::onSuccess(
     WebKit::WebIDBCursor* idb_object) {
   int32 object_id = dispatcher_host()->Add(idb_object);
-  dispatcher_host()->Send(
-      new IndexedDBMsg_CallbacksSuccessIDBCursor(response_id(), object_id));
+  dispatcher_host()->Send(new IndexedDBMsg_CallbacksSuccessIDBCursor(
+      response_id(), object_id, IndexedDBKey(idb_object->key()),
+      IndexedDBKey(idb_object->primaryKey()),
+      SerializedScriptValue(idb_object->value())));
 }
 
 void IndexedDBCallbacks<WebKit::WebIDBCursor>::onSuccess(
@@ -44,6 +46,18 @@ void IndexedDBCallbacks<WebKit::WebIDBKey>::onSuccess(
   dispatcher_host()->Send(
       new IndexedDBMsg_CallbacksSuccessIndexedDBKey(
           response_id(), IndexedDBKey(value)));
+}
+
+void IndexedDBCallbacks<WebKit::WebDOMStringList>::onSuccess(
+    const WebKit::WebDOMStringList& value) {
+
+  std::vector<string16> list;
+  for (unsigned i = 0; i < value.length(); ++i)
+      list.push_back(value.item(i));
+
+  dispatcher_host()->Send(
+      new IndexedDBMsg_CallbacksSuccessStringList(
+          response_id(), list));
 }
 
 void IndexedDBCallbacks<WebKit::WebSerializedScriptValue>::onSuccess(

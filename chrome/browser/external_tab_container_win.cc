@@ -9,6 +9,7 @@
 #include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/win_util.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
-#include "chrome/browser/page_info_window.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
@@ -43,12 +43,12 @@
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/provisional_load_details.h"
-#include "content/common/bindings_policy.h"
-#include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_service.h"
-#include "content/common/page_transition_types.h"
 #include "content/common/page_zoom.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/bindings_policy.h"
+#include "content/public/common/page_transition_types.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -113,7 +113,8 @@ class ExternalTabPageInfoBubbleView : public PageInfoBubbleView {
     GURL url = google_util::AppendGoogleLocaleParam(
         GURL(chrome::kPageInfoHelpCenterURL));
     container_->OpenURLFromTab(container_->tab_contents(), url, GURL(),
-                               NEW_FOREGROUND_TAB, PageTransition::LINK);
+                               NEW_FOREGROUND_TAB,
+                               content::PAGE_TRANSITION_LINK);
   }
  private:
   scoped_refptr<ExternalTabContainer> container_;
@@ -204,7 +205,7 @@ bool ExternalTabContainer::Init(Profile* profile,
 
   if (!existing_contents) {
     tab_contents_->render_view_host()->AllowBindings(
-        BindingsPolicy::EXTERNAL_HOST);
+        content::BINDINGS_POLICY_EXTERNAL_HOST);
   }
 
   NavigationController* controller = &tab_contents_->controller();
@@ -364,9 +365,10 @@ TabContents* ExternalTabContainer::OpenURLFromTab(
     const GURL& url,
     const GURL& referrer,
     WindowOpenDisposition disposition,
-    PageTransition::Type transition) {
+    content::PageTransition transition) {
   return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition));
+                        OpenURLParams(url, referrer, disposition, transition,
+                                      false));
 }
 
 TabContents* ExternalTabContainer::OpenURLFromTab(TabContents* source,
@@ -397,7 +399,7 @@ TabContents* ExternalTabContainer::OpenURLFromTab(TabContents* source,
         nav_params.referrer = params.referrer;
         nav_params.url = params.url;
         nav_params.page_id = -1;
-        nav_params.transition = PageTransition::LINK;
+        nav_params.transition = content::PAGE_TRANSITION_LINK;
 
         content::LoadCommittedDetails details;
         details.did_replace_entry = false;
@@ -423,7 +425,7 @@ void ExternalTabContainer::NavigationStateChanged(const TabContents* source,
                                                   unsigned changed_flags) {
   if (automation_) {
     NavigationInfo nav_info;
-    if (InitNavigationInfo(&nav_info, NavigationType::NAV_IGNORE, 0))
+    if (InitNavigationInfo(&nav_info, content::NAVIGATION_TYPE_NAV_IGNORE, 0))
       automation_->Send(new AutomationMsg_NavigationStateChanged(
           tab_handle_, changed_flags, nav_info));
   }
@@ -767,14 +769,13 @@ void ExternalTabContainer::RegisterIntentHandler(TabContents* tab,
   Browser::RegisterIntentHandlerHelper(tab, action, type, href, title);
 }
 
-void ExternalTabContainer::WebIntentDispatch(TabContents* tab,
-                                             int routing_id,
-                                             const string16& action,
-                                             const string16& type,
-                                             const string16& data,
-                                             int intent_id) {
-  Browser::WebIntentDispatchHelper(tab, routing_id, action, type, data,
-                                   intent_id);
+void ExternalTabContainer::WebIntentDispatch(
+    TabContents* tab,
+    int routing_id,
+    const webkit_glue::WebIntentData& intent,
+    int intent_id) {
+  // TODO(binji) How do we want to display the WebIntentPicker bubble if there
+  // is no BrowserWindow?
 }
 
 void ExternalTabContainer::FindReply(TabContents* tab,
@@ -828,7 +829,8 @@ void ExternalTabContainer::Observe(int type,
     case content::NOTIFICATION_LOAD_STOP: {
         const LoadNotificationDetails* load =
             Details<LoadNotificationDetails>(details).ptr();
-        if (load != NULL && PageTransition::IsMainFrame(load->origin())) {
+        if (load != NULL &&
+            content::PageTransitionIsMainFrame(load->origin())) {
           TRACE_EVENT_END_ETW("ExternalTabContainer::Navigate", 0,
                               load->url().spec());
           automation_->Send(new AutomationMsg_TabLoaded(tab_handle_,
@@ -969,7 +971,7 @@ bool ExternalTabContainer::ProcessUnhandledKeyStroke(HWND window,
 }
 
 bool ExternalTabContainer::InitNavigationInfo(NavigationInfo* nav_info,
-                                              NavigationType::Type nav_type,
+                                              content::NavigationType nav_type,
                                               int relative_offset) {
   DCHECK(nav_info);
   NavigationEntry* entry = tab_contents_->controller().GetActiveEntry();
@@ -1037,13 +1039,13 @@ bool ExternalTabContainer::AcceleratorPressed(
   int command_id = iter->second;
   switch (command_id) {
     case IDC_ZOOM_PLUS:
-      host->Send(new ViewMsg_Zoom(host->routing_id(), PageZoom::ZOOM_IN));
+      host->Zoom(PageZoom::ZOOM_IN);
       break;
     case IDC_ZOOM_NORMAL:
-      host->Send(new ViewMsg_Zoom(host->routing_id(), PageZoom::RESET));
+      host->Zoom(PageZoom::RESET);
       break;
     case IDC_ZOOM_MINUS:
-      host->Send(new ViewMsg_Zoom(host->routing_id(), PageZoom::ZOOM_OUT));
+      host->Zoom(PageZoom::ZOOM_OUT);
       break;
     case IDC_DEV_TOOLS:
       DevToolsWindow::ToggleDevToolsWindow(
@@ -1075,7 +1077,8 @@ void ExternalTabContainer::Navigate(const GURL& url, const GURL& referrer) {
   TRACE_EVENT_BEGIN_ETW("ExternalTabContainer::Navigate", 0, url.spec());
 
   tab_contents_->controller().LoadURL(url, referrer,
-                                      PageTransition::START_PAGE);
+                                      content::PAGE_TRANSITION_START_PAGE,
+                                      std::string());
 }
 
 bool ExternalTabContainer::OnGoToEntryOffset(int offset) {
@@ -1099,7 +1102,7 @@ void ExternalTabContainer::LoadAccelerators() {
     return;
   }
 
-  scoped_ptr<ACCEL> scoped_accelerators(new ACCEL[count]);
+  scoped_array<ACCEL> scoped_accelerators(new ACCEL[count]);
   ACCEL* accelerators = scoped_accelerators.get();
   DCHECK(accelerators != NULL);
 
@@ -1161,7 +1164,7 @@ void ExternalTabContainer::SetupExternalTabView() {
   external_tab_view_ = new views::View();
 
   InfoBarContainerView* info_bar_container = new InfoBarContainerView(this);
-  info_bar_container->ChangeTabContents(tab_contents_.get());
+  info_bar_container->ChangeTabContents(tab_contents_->infobar_tab_helper());
 
   views::GridLayout* layout = new views::GridLayout(external_tab_view_);
   // Give this column an identifier of 0.
@@ -1196,9 +1199,10 @@ TemporaryPopupExternalTabContainer::~TemporaryPopupExternalTabContainer() {
 
 TabContents* TemporaryPopupExternalTabContainer::OpenURLFromTab(
     TabContents* source, const GURL& url, const GURL& referrer,
-    WindowOpenDisposition disposition, PageTransition::Type transition) {
+    WindowOpenDisposition disposition, content::PageTransition transition) {
   return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition));
+                        OpenURLParams(url, referrer, disposition, transition,
+                                      false));
 }
 
 TabContents* TemporaryPopupExternalTabContainer::OpenURLFromTab(

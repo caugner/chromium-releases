@@ -16,6 +16,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -37,10 +38,10 @@ class TabCloseableStateWatcherTest : public InProcessBrowserTest {
  protected:
   // Wrapper for Browser::AddTabWithURL
   void AddTabWithURL(Browser* browser, const GURL& url) {
-    AddTabAtIndexToBrowser(browser, 0, url, PageTransition::TYPED);
-    // Wait for page to finish loading.
-    ui_test_utils::WaitForNavigation(
-        &browser->GetSelectedTabContents()->controller());
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+    AddTabAtIndexToBrowser(browser, 0, url, content::PAGE_TRANSITION_TYPED);
+    observer.Wait();
   }
 
   // Wrapper for TabCloseableStateWatcher::CanCloseTab

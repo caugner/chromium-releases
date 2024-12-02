@@ -17,9 +17,14 @@ const EXIF_TAG_SUBIFD = 0x014a;  // Pointer from TIFF to "Extra" IFDs.
 const EXIF_TAG_JPG_THUMB_OFFSET = 0x0201;  // Pointer from TIFF to thumbnail.
 const EXIF_TAG_JPG_THUMB_LENGTH = 0x0202;  // Length of thumbnail data.
 
+const EXIF_TAG_ORIENTATION = 0x0112;
+const EXIF_TAG_X_DIMENSION = 0xA002;
+const EXIF_TAG_Y_DIMENSION = 0xA003;
+
 function ExifParser(parent) {
   MetadataParser.apply(this, [parent]);
   this.verbose = false;
+  this.mimeType = 'image/jpeg';
 }
 
 ExifParser.parserType = 'exif';
@@ -34,7 +39,11 @@ ExifParser.prototype.parse = function(file, callback, errorCallback) {
 
   function nextStep(var_args) {
     self.vlog('exif nextStep: ' + steps[currentStep + 1].name);
-    steps[++currentStep].apply(null, arguments);
+    try {
+      steps[++currentStep].apply(null, arguments);
+    } catch(e) {
+      onError(e);
+    }
   }
 
   function onError(err) {
@@ -100,28 +109,29 @@ ExifParser.prototype.parse = function(file, callback, errorCallback) {
         return onError('Invalid TIFF tag: ' + tag.toString(16));
 
       var metadata = {
-        metadataType: 'exif',
+        metadataType: ExifParser.parserType,
+        mimeType: self.mimeType,
         littleEndian: (order == EXIF_ALIGN_LITTLE),
         ifd: {
           image: {},
-          thumbnail: {},
-          exif: {},
-          gps: {}
+          thumbnail: {}
         }
       };
-
       var directoryOffset = br.readScalar(4);
 
       // Image directory.
       self.vlog('Read image directory.');
       br.seek(directoryOffset);
       directoryOffset = self.readDirectory(br, metadata.ifd.image);
+      metadata.imageTransform = self.parseOrientation(metadata.ifd.image);
 
       // Thumbnail Directory chained from the end of the image directory.
       if (directoryOffset) {
         self.vlog('Read thumbnail directory.');
         br.seek(directoryOffset);
         self.readDirectory(br, metadata.ifd.thumbnail);
+        metadata.thumbnailTransform =
+            self.parseOrientation(metadata.ifd.thumbnail);
       }
 
       // EXIF Directory may be specified as a tag in the image directory.
@@ -129,7 +139,19 @@ ExifParser.prototype.parse = function(file, callback, errorCallback) {
         self.vlog('Read EXIF directory.');
         directoryOffset = metadata.ifd.image[EXIF_TAG_EXIFDATA].value;
         br.seek(directoryOffset);
+        metadata.ifd.exif = {};
         self.readDirectory(br, metadata.ifd.exif);
+
+        if (EXIF_TAG_X_DIMENSION in metadata.ifd.exif &&
+            EXIF_TAG_Y_DIMENSION in metadata.ifd.exif) {
+          if (metadata.imageTransform && metadata.imageTransform.rotate90) {
+            metadata.width = metadata.ifd.exif[EXIF_TAG_Y_DIMENSION].value;
+            metadata.height = metadata.ifd.exif[EXIF_TAG_X_DIMENSION].value;
+          } else {
+            metadata.width = metadata.ifd.exif[EXIF_TAG_X_DIMENSION].value;
+            metadata.height = metadata.ifd.exif[EXIF_TAG_Y_DIMENSION].value;
+          }
+        }
       }
 
       // GPS Directory may also be linked from the image directory.
@@ -137,6 +159,7 @@ ExifParser.prototype.parse = function(file, callback, errorCallback) {
         self.vlog('Read GPS directory.');
         directoryOffset = metadata.ifd.image[EXIF_TAG_GPSDATA].value;
         br.seek(directoryOffset);
+        metadata.ifd.gps = {};
         self.readDirectory(br, metadata.ifd.gps);
       }
 
@@ -250,7 +273,9 @@ ExifParser.prototype.readTagValue = function(br, tag) {
 
     case 2: // String
       safeRead(1);
-      if (tag.componentCount == 1) {
+      if (tag.componentCount == 0) {
+        tag.value = '';
+      } else if (tag.componentCount == 1) {
         tag.value = String.fromCharCode(tag.value);
       } else {
         tag.value = String.fromCharCode.apply(null, tag.value);
@@ -290,6 +315,28 @@ ExifParser.prototype.readTagValue = function(br, tag) {
 
   this.vlog('Read tag: 0x' + tag.id.toString(16) + '/' + tag.format + ': ' +
             tag.value);
+};
+
+ExifParser.SCALEX   = [1, -1, -1,  1,  1,  1, -1, -1];
+ExifParser.SCALEY   = [1,  1, -1, -1, -1,  1,  1, -1];
+ExifParser.ROTATE90 = [0,  0,  0,  0,  1,  1,  1,  1];
+
+/**
+ * Transform exif-encoded orientation into a set of parameters compatible with
+ * CSS and canvas transforms (scaleX, scaleY, rotation).
+ *
+ * @param {Object} ifd exif property dictionary (image or thumbnail)
+ */
+ExifParser.prototype.parseOrientation = function(ifd) {
+  if (ifd[EXIF_TAG_ORIENTATION]) {
+    var index = (ifd[EXIF_TAG_ORIENTATION].value || 1) - 1;
+    return {
+      scaleX: ExifParser.SCALEX[index],
+      scaleY: ExifParser.SCALEY[index],
+      rotate90: ExifParser.ROTATE90[index]
+    }
+  }
+  return null;
 };
 
 MetadataDispatcher.registerParserClass(ExifParser);

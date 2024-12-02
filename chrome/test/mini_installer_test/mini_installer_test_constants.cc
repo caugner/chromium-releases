@@ -39,8 +39,6 @@ const wchar_t kGoogleUpdateExecutable[] = L"GoogleUpdate.exe";
 const wchar_t kIEExecutable[] = L"iexplore.exe";
 const wchar_t kInstallerWindow[] = L"Chrome Installer";
 const wchar_t kStandaloneInstaller[] = L"ChromeSetupTest.exe";
-const wchar_t kSystemInstall[] = L"system";
-const wchar_t kUserInstall[] = L"user";
 const wchar_t kUntaggedInstallerPattern[] = L"ChromeStandaloneSetup_";
 const wchar_t kWinFolder[] = L"win";
 
@@ -64,7 +62,7 @@ const wchar_t kChromeApplyTagExe[] =
 const wchar_t kChromeApplyTagParameters[] =
     L"\"appguid={8A69D345-D564-463C-AFF1-A69D9E530F96}"
     L"&appname=Chrome&needsadmin=false\"";
-const wchar_t kChromeDiffInstallerLocation[] =
+const wchar_t kChromeInstallersLocation[] =
     L"\\\\172.24.6.7\\shares\\chromeclient\\builds\\chrome\\";
 
 }  // namespace mini_installer_constants

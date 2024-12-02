@@ -7,9 +7,10 @@
 #pragma once
 
 #include <set>
-#include <vector>
+#include <string>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
@@ -19,8 +20,6 @@
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/models/accelerator.h"
 #include "views/controls/button/menu_button.h"
-#include "views/controls/menu/menu.h"
-#include "views/controls/menu/menu_wrapper.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/view.h"
 
@@ -28,6 +27,10 @@ class BrowserActionsContainer;
 class Browser;
 class Profile;
 class WrenchMenu;
+
+namespace views {
+class MenuListener;
+}
 
 // The Browser Window's toolbar.
 class ToolbarView : public AccessiblePaneView,
@@ -89,7 +92,7 @@ class ToolbarView : public AccessiblePaneView,
   virtual bool SetPaneFocus(int view_storage_id, View* initial_focus) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // Overridden from views::MenuDelegate:
+  // Overridden from views::ViewMenuDelegate:
   virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
 
   // Overridden from LocationBarView::Delegate:
@@ -165,6 +168,9 @@ class ToolbarView : public AccessiblePaneView,
     return display_mode_ == DISPLAYMODE_NORMAL;
   }
 
+  // Shows the critical notification bubble against the wrench menu.
+  void ShowCriticalNotification();
+
   // Updates the badge on the app menu (Wrench).
   void UpdateAppMenuBadge();
 
@@ -197,14 +203,11 @@ class ToolbarView : public AccessiblePaneView,
   // The display mode used when laying out the toolbar.
   DisplayMode display_mode_;
 
-  // The contents of the wrench menu.
-  scoped_ptr<ui::SimpleMenuModel> wrench_menu_model_;
-
   // Wrench menu.
   scoped_ptr<WrenchMenu> wrench_menu_;
 
-  // Vector of listeners to receive callbacks when the menu opens.
-  std::vector<views::MenuListener*> menu_listeners_;
+  // A list of listeners to call when the menu opens.
+  ObserverList<views::MenuListener> menu_listeners_;
 
   NotificationRegistrar registrar_;
 

@@ -66,7 +66,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithOptions(
     NotificationRegistrar registrar;
     registrar.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                   NotificationService::AllSources());
-    service->LoadExtension(path);
+    service->LoadExtension(path, false);
     ui_test_utils::RunMessageLoop();
   }
 
@@ -246,6 +246,8 @@ bool ExtensionBrowserTest::InstallOrUpdateExtension(const std::string& id,
     registrar.Add(this, chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
                   NotificationService::AllSources());
     registrar.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
+                  NotificationService::AllSources());
+    registrar.Add(this, chrome::NOTIFICATION_EXTENSION_LOAD_ERROR,
                   NotificationService::AllSources());
 
     ExtensionInstallUI* install_ui = NULL;
@@ -431,6 +433,11 @@ void ExtensionBrowserTest::Observe(int type,
     case chrome::NOTIFICATION_EXTENSION_INSTALLED:
       VLOG(1) << "Got EXTENSION_INSTALLED notification.";
       ++extension_installs_observed_;
+      MessageLoopForUI::current()->Quit();
+      break;
+
+    case chrome::NOTIFICATION_EXTENSION_LOAD_ERROR:
+      VLOG(1) << "Got EXTENSION_LOAD_ERROR notification.";
       MessageLoopForUI::current()->Quit();
       break;
 

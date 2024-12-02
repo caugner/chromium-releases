@@ -111,9 +111,7 @@ bool FirstRunDialog::Show(Profile* profile,
   const TemplateURLService* search_engines_model =
       TemplateURLServiceFactory::GetForProfile(profile);
   bool show_search_engines_dialog =
-      !FirstRun::SearchEngineSelectorDisallowed() &&
-      search_engines_model &&
-      !search_engines_model->is_default_search_managed();
+      FirstRun::ShouldShowSearchEngineSelector(search_engines_model);
 
 #if defined(GOOGLE_CHROME_BUILD)
   // If the metrics reporting is managed, we won't ask.
@@ -342,10 +340,12 @@ void FirstRunDialog::OnTemplateURLServiceChanged() {
       GdkPixbuf* pixbuf =
           ResourceBundle::GetSharedInstance().GetNativeImageNamed(logo_id);
       if (ballot_engines.size() > kNormalBallotSize) {
+        GdkPixbuf* old = pixbuf;
         pixbuf = gdk_pixbuf_scale_simple(pixbuf,
                                          kLogoLabelWidthSmall,
                                          kLogoLabelHeightSmall,
                                          GDK_INTERP_HYPER);
+        g_object_unref(old);
       } else {
         g_object_ref(pixbuf);
       }

@@ -25,7 +25,9 @@
 namespace {
 
 const char kNameKey[] = "name";
+const char kUserNameKey[] = "user_name";
 const char kAvatarIconKey[] = "avatar_icon";
+const char kBackgroundAppsKey[] = "background_apps";
 const char kDefaultUrlPrefix[] = "chrome://theme/IDR_PROFILE_AVATAR_";
 
 const int kDefaultAvatarIconResources[] = {
@@ -59,17 +61,30 @@ const int kDefaultAvatarIconResources[] = {
 
 const size_t kDefaultAvatarIconsCount = arraysize(kDefaultAvatarIconResources);
 
-// Returns true if the resource ID belongs to a generic avatar icon.
-bool IsAvatarIconGeneric(int icon_id) {
-  return icon_id == IDR_PROFILE_AVATAR_0 ||
-         icon_id == IDR_PROFILE_AVATAR_1 ||
-         icon_id == IDR_PROFILE_AVATAR_2 ||
-         icon_id == IDR_PROFILE_AVATAR_3 ||
-         icon_id == IDR_PROFILE_AVATAR_4 ||
-         icon_id == IDR_PROFILE_AVATAR_5 ||
-         icon_id == IDR_PROFILE_AVATAR_6 ||
-         icon_id == IDR_PROFILE_AVATAR_7;
-}
+// The first 8 icons are generic.
+const size_t kGenericIconCount = 8;
+
+// First eight are generic icons, which use IDS_NUMBERED_PROFILE_NAME.
+const int kDefaultNames[] = {
+  IDS_DEFAULT_AVATAR_NAME_8,
+  IDS_DEFAULT_AVATAR_NAME_9,
+  IDS_DEFAULT_AVATAR_NAME_10,
+  IDS_DEFAULT_AVATAR_NAME_11,
+  IDS_DEFAULT_AVATAR_NAME_12,
+  IDS_DEFAULT_AVATAR_NAME_13,
+  IDS_DEFAULT_AVATAR_NAME_14,
+  IDS_DEFAULT_AVATAR_NAME_15,
+  IDS_DEFAULT_AVATAR_NAME_16,
+  IDS_DEFAULT_AVATAR_NAME_17,
+  IDS_DEFAULT_AVATAR_NAME_18,
+  IDS_DEFAULT_AVATAR_NAME_19,
+  IDS_DEFAULT_AVATAR_NAME_20,
+  IDS_DEFAULT_AVATAR_NAME_21,
+  IDS_DEFAULT_AVATAR_NAME_22,
+  IDS_DEFAULT_AVATAR_NAME_23,
+  IDS_DEFAULT_AVATAR_NAME_24,
+  IDS_DEFAULT_AVATAR_NAME_25
+};
 
 } // namespace
 
@@ -96,6 +111,7 @@ ProfileInfoCache::~ProfileInfoCache() {
 
 void ProfileInfoCache::AddProfileToCache(const FilePath& profile_path,
                                          const string16& name,
+                                         const string16& username,
                                          size_t icon_index) {
   std::string key = CacheKeyFromProfilePath(profile_path);
   DictionaryPrefUpdate update(prefs_, prefs::kProfileInfoCache);
@@ -103,7 +119,10 @@ void ProfileInfoCache::AddProfileToCache(const FilePath& profile_path,
 
   scoped_ptr<DictionaryValue> info(new DictionaryValue);
   info->SetString(kNameKey, name);
+  info->SetString(kUserNameKey, username);
   info->SetString(kAvatarIconKey, GetDefaultAvatarIconUrl(icon_index));
+  // Default value for whether background apps are running is false.
+  info->SetBoolean(kBackgroundAppsKey, false);
   cache->Set(key, info.release());
 
   sorted_keys_.insert(FindPositionForProfile(key, name), key);
@@ -160,11 +179,25 @@ FilePath ProfileInfoCache::GetPathOfProfileAtIndex(size_t index) const {
   return user_data_dir_.Append(base_name);
 }
 
+string16 ProfileInfoCache::GetUserNameOfProfileAtIndex(size_t index) const {
+  string16 user_name;
+  GetInfoForProfileAtIndex(index)->GetString(kUserNameKey, &user_name);
+  return user_name;
+}
+
 const gfx::Image& ProfileInfoCache::GetAvatarIconOfProfileAtIndex(
     size_t index) const {
   int resource_id = GetDefaultAvatarIconResourceIDAtIndex(
       GetAvatarIconIndexOfProfileAtIndex(index));
   return ResourceBundle::GetSharedInstance().GetImageNamed(resource_id);
+}
+
+bool ProfileInfoCache::GetBackgroundStatusOfProfileAtIndex(
+    size_t index) const {
+  bool background_app_status;
+  GetInfoForProfileAtIndex(index)->GetBoolean(kBackgroundAppsKey,
+                                              &background_app_status);
+  return background_app_status;
 }
 
 size_t ProfileInfoCache::GetAvatarIconIndexOfProfileAtIndex(size_t index)
@@ -185,6 +218,27 @@ void ProfileInfoCache::SetNameOfProfileAtIndex(size_t index,
   info->SetString(kNameKey, name);
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
+
+  // Remove and reinsert key in |sorted_keys_| to alphasort.
+  std::string key = CacheKeyFromProfilePath(GetPathOfProfileAtIndex(index));
+  std::vector<std::string>::iterator key_it =
+      std::find(sorted_keys_.begin(), sorted_keys_.end(), key);
+  DCHECK(key_it != sorted_keys_.end());
+  sorted_keys_.erase(key_it);
+  sorted_keys_.insert(FindPositionForProfile(key, name), key);
+
+  NotificationService::current()->Notify(
+    chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
+    NotificationService::AllSources(),
+    NotificationService::NoDetails());
+}
+
+void ProfileInfoCache::SetUserNameOfProfileAtIndex(size_t index,
+                                                   const string16& user_name) {
+  scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetString(kUserNameKey, user_name);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
 }
 
 void ProfileInfoCache::SetAvatarIconOfProfileAtIndex(size_t index,
@@ -195,10 +249,31 @@ void ProfileInfoCache::SetAvatarIconOfProfileAtIndex(size_t index,
   SetInfoForProfileAtIndex(index, info.release());
 }
 
-string16 ProfileInfoCache::ChooseNameForNewProfile() {
+void ProfileInfoCache::SetBackgroundStatusOfProfileAtIndex(
+    size_t index,
+    bool running_background_apps) {
+  if (GetBackgroundStatusOfProfileAtIndex(index) == running_background_apps)
+    return;
+  scoped_ptr<DictionaryValue> info(GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetBoolean(kBackgroundAppsKey, running_background_apps);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+}
+
+string16 ProfileInfoCache::ChooseNameForNewProfile(size_t icon_index) {
+  string16 name;
   for (int name_index = 1; ; ++name_index) {
-    string16 name = l10n_util::GetStringFUTF16Int(
-        IDS_NUMBERED_PROFILE_NAME, name_index);
+    if (icon_index < kGenericIconCount) {
+      name = l10n_util::GetStringFUTF16Int(IDS_NUMBERED_PROFILE_NAME,
+                                           name_index);
+    } else {
+      name = l10n_util::GetStringUTF16(
+          kDefaultNames[icon_index - kGenericIconCount]);
+      if (name_index > 1)
+        name.append(UTF8ToUTF16(base::IntToString(name_index)));
+    }
+
+    // Loop through previously named profiles to ensure we're not duplicating.
     bool name_found = false;
     for (size_t i = 0; i < GetNumberOfProfiles(); ++i) {
       if (GetNameOfProfileAtIndex(i) == name) {
@@ -211,30 +286,48 @@ string16 ProfileInfoCache::ChooseNameForNewProfile() {
   }
 }
 
-int ProfileInfoCache::ChooseAvatarIconIndexForNewProfile() {
-  // Start with a random icon to introduce variety.
-  size_t rand_start_index = base::RandInt(0, GetDefaultAvatarIconCount() - 1);
-  for (size_t icon_index = 0; icon_index < GetDefaultAvatarIconCount();
-       ++icon_index) {
-    size_t rand_icon_index =
-        (icon_index + rand_start_index) % GetDefaultAvatarIconCount();
-    if (IsAvatarIconGeneric(GetDefaultAvatarIconResourceIDAtIndex(
-        rand_icon_index)))
-      continue;
+bool ProfileInfoCache::IconIndexIsUnique(size_t icon_index) const {
+  for (size_t i = 0; i < GetNumberOfProfiles(); ++i) {
+    if (GetAvatarIconIndexOfProfileAtIndex(i) == icon_index)
+      return false;
+  }
+  return true;
+}
 
-    bool icon_found = false;
-    for (size_t i = 0; i < GetNumberOfProfiles(); ++i) {
-      if (GetAvatarIconIndexOfProfileAtIndex(i) == rand_icon_index) {
-        icon_found = true;
-        break;
-      }
+bool ProfileInfoCache::ChooseAvatarIconIndexForNewProfile(
+    bool allow_generic_icon,
+    bool must_be_unique,
+    size_t* out_icon_index) const {
+  size_t start = allow_generic_icon ? 0 : kGenericIconCount;
+  size_t end = GetDefaultAvatarIconCount();
+  size_t count = end - start;
+
+  int rand = base::RandInt(0, count);
+  for (size_t i = 0; i < count; ++i) {
+    size_t icon_index = start + (rand + i) %  count;
+    if (!must_be_unique || IconIndexIsUnique(icon_index)) {
+      *out_icon_index = icon_index;
+      return true;
     }
-    if (!icon_found)
-      return rand_icon_index;
   }
 
-  // If there's no unique icon then just use the random one.
-  return rand_start_index;
+  return false;
+}
+
+size_t ProfileInfoCache::ChooseAvatarIconIndexForNewProfile() const {
+  size_t icon_index = 0;
+  // Try to find a unique, non-generic icon.
+  if (ChooseAvatarIconIndexForNewProfile(false, true, &icon_index))
+    return icon_index;
+  // Try to find any unique icon.
+  if (ChooseAvatarIconIndexForNewProfile(true, true, &icon_index))
+    return icon_index;
+  // Settle for any random icon, even if it's not unique.
+  if (ChooseAvatarIconIndexForNewProfile(true, false, &icon_index))
+    return icon_index;
+
+  NOTREACHED();
+  return 0;
 }
 
 const FilePath& ProfileInfoCache::GetUserDataDir() const {

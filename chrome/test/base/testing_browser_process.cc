@@ -135,6 +135,10 @@ chromeos::ProxyConfigServiceImpl*
 TestingBrowserProcess::chromeos_proxy_config_service_impl() {
   return NULL;
 }
+
+browser::OomPriorityManager* TestingBrowserProcess::oom_priority_manager() {
+  return NULL;
+}
 #endif  // defined(OS_CHROMEOS)
 
 ui::Clipboard* TestingBrowserProcess::clipboard() {
@@ -165,7 +169,7 @@ IntranetRedirectDetector* TestingBrowserProcess::intranet_redirect_detector() {
   return NULL;
 }
 
-AutomationProviderList* TestingBrowserProcess::InitAutomationProviderList() {
+AutomationProviderList* TestingBrowserProcess::GetAutomationProviderList() {
   return NULL;
 }
 
@@ -250,6 +254,10 @@ GpuBlacklistUpdater* TestingBrowserProcess::gpu_blacklist_updater() {
 }
 
 ComponentUpdateService* TestingBrowserProcess::component_updater() {
+  return NULL;
+}
+
+CRLSetFetcher* TestingBrowserProcess::crl_set_fetcher() {
   return NULL;
 }
 

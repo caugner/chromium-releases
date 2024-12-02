@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,14 +54,6 @@ gfx::Font TooltipManager::GetDefaultFont() {
 }
 
 // static
-const std::wstring& TooltipManager::GetLineSeparator() {
-  static std::wstring* line_separator = NULL;
-  if (!line_separator)
-    line_separator = new std::wstring(L"\n");
-  return *line_separator;
-}
-
-// static
 int TooltipManager::GetMaxWidth(int x, int y) {
   gfx::Rect monitor_bounds =
       gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point(x, y));
@@ -101,7 +93,7 @@ bool TooltipManagerGtk::ShowTooltip(int x, int y, bool for_keyboard,
   if (!view)
     return false;
 
-  std::wstring text;
+  string16 text;
   if (!view->GetTooltipText(view_loc, &text))
     return false;
 
@@ -146,7 +138,7 @@ void TooltipManagerGtk::ShowKeyboardTooltip(View* view) {
   // We have to hide the current tooltip, then show again.
   HideKeyboardTooltip();
 
-  std::wstring tooltip_text;
+  string16 tooltip_text;
   if (!view->GetTooltipText(gfx::Point(), &tooltip_text))
     return;  // The view doesn't have a tooltip, nothing to do.
 

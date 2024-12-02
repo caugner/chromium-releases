@@ -2,16 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/i18n/time_formatting.h"
 #include "base/utf_string_conversions.h"
 #include "base/string_number_conversions.h"
-#include "chrome/browser/ui/webui/certificate_viewer.h"
-#include "chrome/common/url_constants.h"
+#include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/certificate_dialogs.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/webui/certificate_viewer.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/common/net/x509_certificate_model.h"
+#include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "grit/generated_resources.h"
@@ -19,15 +23,24 @@
 namespace {
 
 // Default width/height of the dialog.
-const int kDefaultWidth = 450;
-const int kDefaultHeight = 450;
+const int kDefaultWidth = 530;
+const int kDefaultHeight = 600;
 
 }  // namespace
 
-// Shows a certificate using the WebUI certificate viewer.
+// Shows a certificate using the native or WebUI certificate viewer.
 void ShowCertificateViewer(gfx::NativeWindow parent,
                            net::X509Certificate* cert) {
+#if defined(USE_AURA)
+  // TODO(saintlou): Aura uses always "more WebUI".
   CertificateViewerDialog::ShowDialog(parent, cert);
+#else
+  if (ChromeWebUI::IsMoreWebUI()) {
+    CertificateViewerDialog::ShowDialog(parent, cert);
+  } else {
+    ShowNativeCertificateViewer(parent, cert);
+  }
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -50,6 +63,9 @@ CertificateViewerDialog::CertificateViewerDialog(gfx::NativeWindow parent,
       &cert_chain);
   title_ = l10n_util::GetStringFUTF16(IDS_CERT_INFO_DIALOG_TITLE,
       UTF8ToUTF16(x509_certificate_model::GetTitle(cert_chain.front())));
+}
+
+CertificateViewerDialog::~CertificateViewerDialog() {
 }
 
 bool CertificateViewerDialog::IsDialogModal() const {
@@ -106,16 +122,19 @@ CertificateViewerDialogHandler::CertificateViewerDialogHandler(
       &cert_chain_);
 }
 
+CertificateViewerDialogHandler::~CertificateViewerDialogHandler() {
+}
+
 void CertificateViewerDialogHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("exportCertificate",
-      NewCallback(this,
-          &CertificateViewerDialogHandler::ExportCertificate));
+      base::Bind(&CertificateViewerDialogHandler::ExportCertificate,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("requestCertificateInfo",
-      NewCallback(this,
-          &CertificateViewerDialogHandler::RequestCertificateInfo));
+      base::Bind(&CertificateViewerDialogHandler::RequestCertificateInfo,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("requestCertificateFields",
-      NewCallback(this,
-          &CertificateViewerDialogHandler::RequestCertificateFields));
+      base::Bind(&CertificateViewerDialogHandler::RequestCertificateFields,
+                 base::Unretained(this)));
 }
 
 void CertificateViewerDialogHandler::ExportCertificate(

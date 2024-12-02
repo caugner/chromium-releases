@@ -63,7 +63,7 @@ class NET_EXPORT SocketStream
     virtual ~Delegate() {}
 
     virtual int OnStartOpenConnection(SocketStream* socket,
-                                      CompletionCallback* callback) {
+                                      OldCompletionCallback* callback) {
       return OK;
     }
 
@@ -258,7 +258,7 @@ class NET_EXPORT SocketStream
   // notifications will be sent to delegate.
   void Finish(int result);
 
-  int DidEstablishSSL(int result);
+  int DidEstablishSSL(int result, SSLConfig* ssl_config);
   int DidEstablishConnection();
   int DidReceiveData(int result);
   int DidSendData(int result);
@@ -291,6 +291,7 @@ class NET_EXPORT SocketStream
 
   GURL ProxyAuthOrigin() const;
   int HandleAuthChallenge(const HttpResponseHeaders* headers);
+  int HandleCertificateRequest(int result);
   void DoAuthRequired();
   void DoRestartWithAuth();
 
@@ -335,11 +336,12 @@ class NET_EXPORT SocketStream
   AddressList addresses_;
   scoped_ptr<StreamSocket> socket_;
 
-  SSLConfig ssl_config_;
+  SSLConfig server_ssl_config_;
+  SSLConfig proxy_ssl_config_;
 
-  CompletionCallbackImpl<SocketStream> io_callback_;
-  CompletionCallbackImpl<SocketStream> read_callback_;
-  CompletionCallbackImpl<SocketStream> write_callback_;
+  OldCompletionCallbackImpl<SocketStream> io_callback_;
+  OldCompletionCallbackImpl<SocketStream> read_callback_;
+  OldCompletionCallbackImpl<SocketStream> write_callback_;
 
   scoped_refptr<IOBuffer> read_buf_;
   int read_buf_size_;

@@ -12,6 +12,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "third_party/skia/include/core/SkDevice.h"
 #include "third_party/skia/include/core/SkMatrix.h"
+#include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkScalar.h"
 #include "ui/gfx/rect.h"
@@ -42,6 +43,9 @@ class ui::TextureProgramGL {
   // Location of texture co-ordinate attribute in vertex shader.
   GLuint a_tex_loc() const { return a_tex_loc_; }
 
+  // Location of the alpha multiplier uniform in the vertex shader.
+  GLuint u_alpha_loc() const { return u_alpha_loc_; }
+
   // Location of transformation matrix uniform in vertex shader.
   GLuint u_mat_loc() const { return u_mat_loc_; }
 
@@ -62,6 +66,7 @@ class ui::TextureProgramGL {
 
   GLuint a_pos_loc_;
   GLuint a_tex_loc_;
+  GLuint u_alpha_loc_;
   GLuint u_tex_loc_;
   GLuint u_mat_loc_;
 };
@@ -113,11 +118,16 @@ bool TextureProgramNoSwizzleGL::Initialize() {
       "#ifdef GL_ES\n"
       "precision mediump float;\n"
       "#endif\n"
+      "uniform float u_alpha;"
       "uniform sampler2D u_tex;"
       "varying vec2 v_texCoord;"
       "void main()"
       "{"
       "  gl_FragColor = texture2D(u_tex, v_texCoord);"
+      "  if (u_alpha > 0.0)"
+      "    gl_FragColor.a = u_alpha;"
+      "  else"
+      "    gl_FragColor.a = gl_FragColor.a * -u_alpha;"
       "}";
 
   frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
@@ -132,11 +142,16 @@ bool TextureProgramSwizzleGL::Initialize() {
       "#ifdef GL_ES\n"
       "precision mediump float;\n"
       "#endif\n"
+      "uniform float u_alpha;"
       "uniform sampler2D u_tex;"
       "varying vec2 v_texCoord;"
       "void main()"
       "{"
       "  gl_FragColor = texture2D(u_tex, v_texCoord).zyxw;"
+      "  if (u_alpha > 0.0)"
+      "    gl_FragColor.a = u_alpha;"
+      "  else"
+      "    gl_FragColor.a = gl_FragColor.a * -u_alpha;"
       "}";
 
   frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
@@ -154,6 +169,7 @@ TextureProgramGL::TextureProgramGL()
     : program_(0),
       a_pos_loc_(0),
       a_tex_loc_(0),
+      u_alpha_loc_(0),
       u_tex_loc_(0),
       u_mat_loc_(0) {
 }
@@ -185,6 +201,7 @@ bool TextureProgramGL::InitializeCommon() {
   // Store locations of program inputs.
   a_pos_loc_ = glGetAttribLocation(program_, "a_position");
   a_tex_loc_ = glGetAttribLocation(program_, "a_texCoord");
+  u_alpha_loc_ = glGetUniformLocation(program_, "u_alpha");
   u_tex_loc_ = glGetUniformLocation(program_, "u_tex");
   u_mat_loc_ = glGetUniformLocation(program_, "u_matViewProjection");
 
@@ -234,7 +251,10 @@ bool SharedResources::Initialize() {
     return false;
   }
 
-  context_ = gfx::GLContext::CreateGLContext(NULL, surface_.get());
+  context_ = gfx::GLContext::CreateGLContext(
+      NULL,
+      surface_.get(),
+      gfx::PreferIntegratedGpu);
   if (!context_.get()) {
     LOG(ERROR) << "Unable to create GL context.";
     return false;
@@ -286,7 +306,10 @@ bool SharedResources::MakeSharedContextCurrent() {
 scoped_refptr<gfx::GLContext> SharedResources::CreateContext(
     gfx::GLSurface* surface) {
   if (initialized_)
-    return gfx::GLContext::CreateGLContext(context_->share_group(), surface);
+    return gfx::GLContext::CreateGLContext(
+        context_->share_group(),
+        surface,
+        gfx::PreferIntegratedGpu);
   else
     return NULL;
 }
@@ -362,7 +385,7 @@ void TextureGL::DrawInternal(const ui::TextureProgramGL& program,
       gfx::Rect(gfx::Point(0, 0), size_));
 
   // Verify that compositor_size has been set.
-  DCHECK(params.compositor_size != gfx::Size(0,0));
+  DCHECK(params.compositor_size != gfx::Size(0, 0));
 
   if (params.blend)
     glEnable(GL_BLEND);
@@ -393,17 +416,26 @@ void TextureGL::DrawInternal(const ui::TextureProgramGL& program,
   GLfloat m[16];
   t.matrix().asColMajorf(m);
 
-  SkRect texture_rect = SkRect::MakeXYWH(
-      clip_bounds.x(),
-      clip_bounds.y(),
-      clip_bounds.width(),
-      clip_bounds.height());
+  SkPoint texture_points[4];
+  texture_points[0] = SkPoint::Make(clip_bounds.x(),
+                                    clip_bounds.y() + clip_bounds.height());
+  texture_points[1] = SkPoint::Make(clip_bounds.x() + clip_bounds.width(),
+                                    clip_bounds.y() + clip_bounds.height());
+  texture_points[2] = SkPoint::Make(clip_bounds.x() + clip_bounds.width(),
+                                    clip_bounds.y());
+  texture_points[3] = SkPoint::Make(clip_bounds.x(), clip_bounds.y());
 
   ui::Transform texture_rect_transform;
   texture_rect_transform.ConcatScale(1.0f / size_.width(),
                                      1.0f / size_.height());
+  if (params.vertically_flipped) {
+    ui::Transform vertical_flip;
+    vertical_flip.SetScaleY(-1.0);
+    vertical_flip.SetTranslateY(1.0);
+    texture_rect_transform.ConcatTransform(vertical_flip);
+  }
   SkMatrix texture_transform_matrix = texture_rect_transform.matrix();
-  texture_transform_matrix.mapRect(&texture_rect);
+  texture_transform_matrix.mapPoints(texture_points, 4);
 
   SkRect clip_rect = SkRect::MakeXYWH(
       clip_bounds.x(),
@@ -424,10 +456,10 @@ void TextureGL::DrawInternal(const ui::TextureProgramGL& program,
                               clip_rect.right(), clip_rect.bottom(), +0.,
                               clip_rect.left(), clip_rect.bottom(), +0.};
 
-  GLfloat texture_vertices[]  = { texture_rect.left(), texture_rect.bottom(),
-                                  texture_rect.right(), texture_rect.bottom(),
-                                  texture_rect.right(), texture_rect.top(),
-                                  texture_rect.left(), texture_rect.top()};
+  GLfloat texture_vertices[]  = { texture_points[0].x(), texture_points[0].y(),
+                                  texture_points[1].x(), texture_points[1].y(),
+                                  texture_points[2].x(), texture_points[2].y(),
+                                  texture_points[3].x(), texture_points[3].y()};
 
   glVertexAttribPointer(program.a_pos_loc(), 3, GL_FLOAT,
                         GL_FALSE, 3 * sizeof(GLfloat), clip_vertices);
@@ -438,17 +470,26 @@ void TextureGL::DrawInternal(const ui::TextureProgramGL& program,
 
   glUniformMatrix4fv(program.u_mat_loc(), 1, GL_FALSE, m);
 
+  // negative means multiply, positive means clobber.
+  float alpha = params.has_valid_alpha_channel
+      ? -params.opacity
+      :  params.opacity;
+
+  glUniform1fv(program.u_alpha_loc(), 1, &alpha);
+
   glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 }
 
-CompositorGL::CompositorGL(gfx::AcceleratedWidget widget,
+CompositorGL::CompositorGL(CompositorDelegate* delegate,
+                           gfx::AcceleratedWidget widget,
                            const gfx::Size& size)
-    : Compositor(size),
+    : Compositor(delegate, size),
       started_(false) {
   gl_surface_ = gfx::GLSurface::CreateViewGLSurface(false, widget);
   gl_context_ = SharedResources::GetInstance()->
       CreateContext(gl_surface_.get());
   gl_context_->MakeCurrent(gl_surface_.get());
+  gl_context_->SetSwapInterval(1);
   glColorMask(true, true, true, true);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
@@ -469,21 +510,27 @@ Texture* CompositorGL::CreateTexture() {
   return texture;
 }
 
-void CompositorGL::NotifyStart() {
+void CompositorGL::OnNotifyStart(bool clear) {
   started_ = true;
   gl_context_->MakeCurrent(gl_surface_.get());
   glViewport(0, 0, size().width(), size().height());
   glColorMask(true, true, true, true);
 
-#if defined(DEBUG)
-  // Clear to 'psychedelic' purple to make it easy to spot un-rendered regions.
-  glClearColor(223.0 / 255, 0, 1, 1);
-  glClear(GL_COLOR_BUFFER_BIT);
+  if (clear) {
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+  }
+#if !defined(NDEBUG)
+  else {
+    // In debug mode, when we're not forcing a clear, clear to 'psychedelic'
+    // purple to make it easy to spot un-rendered regions.
+    glClearColor(223.0 / 255, 0, 1, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+  }
 #endif
-  // Do not clear in release: root layer is responsible for drawing every pixel.
 }
 
-void CompositorGL::NotifyEnd() {
+void CompositorGL::OnNotifyEnd() {
   DCHECK(started_);
   gl_surface_->SwapBuffers();
   started_ = false;
@@ -493,18 +540,14 @@ void CompositorGL::Blur(const gfx::Rect& bounds) {
   NOTIMPLEMENTED();
 }
 
-void CompositorGL::SchedulePaint() {
-  // TODO: X doesn't provide coalescing of regions, its left to the toolkit.
-  NOTIMPLEMENTED();
-}
-
 // static
-Compositor* Compositor::Create(gfx::AcceleratedWidget widget,
+Compositor* Compositor::Create(CompositorDelegate* owner,
+                               gfx::AcceleratedWidget widget,
                                const gfx::Size& size) {
   if (SharedResources::GetInstance() == NULL)
     return NULL;
   else
-    return new CompositorGL(widget, size);
+    return new CompositorGL(owner, widget, size);
 }
 
 }  // namespace ui

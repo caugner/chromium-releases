@@ -7,11 +7,11 @@
 
 #include <map>
 
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/ui/gtk/global_bookmark_menu.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/ui/gtk/global_history_menu.h"
 #include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 
@@ -73,11 +73,15 @@ class GlobalMenuBar : public CommandUpdater::CommandObserver,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
+  // Updates the visibility of the bookmark bar on pref changes.
+  void OnBookmarkBarVisibilityChanged();
+
   CHROMEGTK_CALLBACK_0(GlobalMenuBar, void, OnItemActivated);
 
   Browser* browser_;
 
-  NotificationRegistrar registrar_;
+  // Tracks value of the kShowBookmarkBar preference.
+  PrefChangeRegistrar pref_change_registrar_;
 
   // Our menu bar widget.
   ui::OwnedWidgetGtk menu_bar_;
@@ -85,9 +89,6 @@ class GlobalMenuBar : public CommandUpdater::CommandObserver,
   // Listens to the TabRestoreService and the HistoryService and keeps the
   // history menu fresh.
   GlobalHistoryMenu history_menu_;
-
-  // Listens to the bookmark model and updates the menu.
-  scoped_ptr<GlobalBookmarkMenu> bookmark_menu_;
 
   // For some menu items, we want to show the accelerator, but not actually
   // explicitly handle it. To this end we connect those menu items' accelerators

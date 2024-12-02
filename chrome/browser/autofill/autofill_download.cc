@@ -185,15 +185,8 @@ void AutofillDownloadManager::SetNegativeUploadRate(double rate) {
 bool AutofillDownloadManager::StartRequest(
     const std::string& form_xml,
     const FormRequestData& request_data) {
-  net::URLRequestContextGetter* request_context =
-      Profile::Deprecated::GetDefaultRequestContext();
-  // Check if default request context is NULL: this very rarely happens,
-  // I think, this could happen only if user opens chrome with some pages
-  // loading the forms immediately; I cannot reproduce this even in that
-  // scenario, but bug 74492 shows it happened at least once. In that case bail
-  // out and fall back on our own heuristics.
-  if (!request_context)
-    return false;
+  net::URLRequestContextGetter* request_context = profile_->GetRequestContext();
+  DCHECK(request_context);
   std::string request_url;
   if (request_data.request_type == AutofillDownloadManager::REQUEST_QUERY)
     request_url = kAutofillQueryServerRequestUrl;
@@ -268,13 +261,7 @@ std::string AutofillDownloadManager::GetCombinedSignature(
   return signature;
 }
 
-void AutofillDownloadManager::OnURLFetchComplete(
-    const URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const net::ResponseCookies& cookies,
-    const std::string& data) {
+void AutofillDownloadManager::OnURLFetchComplete(const URLFetcher* source) {
   std::map<URLFetcher *, FormRequestData>::iterator it =
       url_fetchers_.find(const_cast<URLFetcher*>(source));
   if (it == url_fetchers_.end()) {
@@ -291,10 +278,10 @@ void AutofillDownloadManager::OnURLFetchComplete(
   const int kHttpServiceUnavailable = 503;
 
   CHECK(it->second.form_signatures.size());
-  if (response_code != kHttpResponseOk) {
+  if (source->response_code() != kHttpResponseOk) {
     bool back_off = false;
     std::string server_header;
-    switch (response_code) {
+    switch (source->response_code()) {
       case kHttpBadGateway:
         if (!source->response_headers()->EnumerateHeader(NULL, "server",
                                                          &server_header) ||
@@ -320,26 +307,28 @@ void AutofillDownloadManager::OnURLFetchComplete(
     }
 
     LOG(WARNING) << "AutofillDownloadManager: " << type_of_request
-                 << " request has failed with response " << response_code;
+                 << " request has failed with response "
+                 << source->response_code();
     if (observer_) {
       observer_->OnServerRequestError(it->second.form_signatures[0],
                                       it->second.request_type,
-                                      response_code);
+                                      source->response_code());
     }
   } else {
     VLOG(1) << "AutofillDownloadManager: " << type_of_request
             << " request has succeeded";
+    const std::string& response_body = source->GetResponseStringRef();
     if (it->second.request_type == AutofillDownloadManager::REQUEST_QUERY) {
-      CacheQueryRequest(it->second.form_signatures, data);
+      CacheQueryRequest(it->second.form_signatures, response_body);
       if (observer_)
-        observer_->OnLoadedServerPredictions(data);
+        observer_->OnLoadedServerPredictions(response_body);
     } else {
       double new_positive_upload_rate = 0;
       double new_negative_upload_rate = 0;
       AutofillUploadXmlParser parse_handler(&new_positive_upload_rate,
                                             &new_negative_upload_rate);
       buzz::XmlParser parser(&parse_handler);
-      parser.Parse(data.data(), data.length(), true);
+      parser.Parse(response_body.data(), response_body.length(), true);
       if (parse_handler.succeeded()) {
         SetPositiveUploadRate(new_positive_upload_rate);
         SetNegativeUploadRate(new_negative_upload_rate);

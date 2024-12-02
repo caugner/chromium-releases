@@ -12,6 +12,7 @@
 #include "webkit/appcache/appcache_backend_impl.h"
 #include "webkit/appcache/appcache_entry.h"
 #include "webkit/appcache/appcache_histograms.h"
+#include "webkit/appcache/appcache_policy.h"
 #include "webkit/appcache/appcache_quota_client.h"
 #include "webkit/appcache/appcache_response.h"
 #include "webkit/appcache/appcache_storage_impl.h"
@@ -30,7 +31,7 @@ class AppCacheService::AsyncHelper
     : public AppCacheStorage::Delegate {
  public:
   AsyncHelper(
-      AppCacheService* service, net::CompletionCallback* callback)
+      AppCacheService* service, net::OldCompletionCallback* callback)
       : service_(service), callback_(callback) {
     service_->pending_helpers_.insert(this);
   }
@@ -54,12 +55,12 @@ class AppCacheService::AsyncHelper
     callback_ = NULL;
   }
 
-  static void DeferredCallCallback(net::CompletionCallback* callback, int rv) {
+  static void DeferredCallCallback(net::OldCompletionCallback* callback, int rv) {
     callback->Run(rv);
   }
 
   AppCacheService* service_;
-  net::CompletionCallback* callback_;
+  net::OldCompletionCallback* callback_;
 };
 
 void AppCacheService::AsyncHelper::Cancel() {
@@ -77,11 +78,17 @@ class AppCacheService::CanHandleOfflineHelper : AsyncHelper {
  public:
   CanHandleOfflineHelper(
       AppCacheService* service, const GURL& url,
-      net::CompletionCallback* callback)
-      : AsyncHelper(service, callback), url_(url) {
+      const GURL& first_party, net::OldCompletionCallback* callback)
+      : AsyncHelper(service, callback), url_(url), first_party_(first_party) {
   }
 
   virtual void Start() {
+    AppCachePolicy* policy = service_->appcache_policy();
+    if (policy && !policy->CanLoadAppCache(url_, first_party_)) {
+      CallCallback(net::ERR_FAILED);
+      delete this;
+      return;
+    }
     service_->storage()->FindResponseForMainRequest(url_, GURL(), this);
   }
 
@@ -90,20 +97,18 @@ class AppCacheService::CanHandleOfflineHelper : AsyncHelper {
   virtual void OnMainResponseFound(
       const GURL& url, const AppCacheEntry& entry,
       const GURL& fallback_url, const AppCacheEntry& fallback_entry,
-      int64 cache_id, const GURL& mainfest_url,
-      bool was_blocked_by_policy);
+      int64 cache_id, const GURL& mainfest_url);
 
   GURL url_;
+  GURL first_party_;
   DISALLOW_COPY_AND_ASSIGN(CanHandleOfflineHelper);
 };
 
 void AppCacheService::CanHandleOfflineHelper::OnMainResponseFound(
       const GURL& url, const AppCacheEntry& entry,
       const GURL& fallback_url, const AppCacheEntry& fallback_entry,
-      int64 cache_id, const GURL& mainfest_url,
-      bool was_blocked_by_policy) {
-  bool can = !was_blocked_by_policy &&
-             (entry.has_response_id() || fallback_entry.has_response_id());
+      int64 cache_id, const GURL& manifest_url) {
+  bool can = (entry.has_response_id() || fallback_entry.has_response_id());
   CallCallback(can ? net::OK : net::ERR_FAILED);
   delete this;
 }
@@ -114,7 +119,7 @@ class AppCacheService::DeleteHelper : public AsyncHelper {
  public:
   DeleteHelper(
       AppCacheService* service, const GURL& manifest_url,
-      net::CompletionCallback* callback)
+      net::OldCompletionCallback* callback)
       : AsyncHelper(service, callback), manifest_url_(manifest_url) {
   }
 
@@ -157,7 +162,7 @@ class AppCacheService::DeleteOriginHelper : public AsyncHelper {
  public:
   DeleteOriginHelper(
       AppCacheService* service, const GURL& origin,
-      net::CompletionCallback* callback)
+      net::OldCompletionCallback* callback)
       : AsyncHelper(service, callback), origin_(origin),
         num_caches_to_delete_(0), successes_(0), failures_(0) {
   }
@@ -247,7 +252,7 @@ class AppCacheService::GetInfoHelper : AsyncHelper {
  public:
   GetInfoHelper(
       AppCacheService* service, AppCacheInfoCollection* collection,
-      net::CompletionCallback* callback)
+      net::OldCompletionCallback* callback)
       : AsyncHelper(service, callback), collection_(collection) {
   }
 
@@ -322,8 +327,8 @@ class AppCacheService::CheckResponseHelper : AsyncHelper {
   int64 expected_total_size_;
   int amount_headers_read_;
   int amount_data_read_;
-  net::CompletionCallbackImpl<CheckResponseHelper> read_info_callback_;
-  net::CompletionCallbackImpl<CheckResponseHelper> read_data_callback_;
+  net::OldCompletionCallbackImpl<CheckResponseHelper> read_info_callback_;
+  net::OldCompletionCallbackImpl<CheckResponseHelper> read_data_callback_;
   DISALLOW_COPY_AND_ASSIGN(CheckResponseHelper);
 };
 
@@ -429,36 +434,38 @@ AppCacheService::~AppCacheService() {
 }
 
 void AppCacheService::Initialize(const FilePath& cache_directory,
+                                 base::MessageLoopProxy* db_thread,
                                  base::MessageLoopProxy* cache_thread) {
   DCHECK(!storage_.get());
   AppCacheStorageImpl* storage = new AppCacheStorageImpl(this);
-  storage->Initialize(cache_directory, cache_thread);
+  storage->Initialize(cache_directory, db_thread, cache_thread);
   storage_.reset(storage);
 }
 
 void AppCacheService::CanHandleMainResourceOffline(
     const GURL& url,
-    net::CompletionCallback* callback) {
+    const GURL& first_party,
+    net::OldCompletionCallback* callback) {
   CanHandleOfflineHelper* helper =
-      new CanHandleOfflineHelper(this, url, callback);
+      new CanHandleOfflineHelper(this, url, first_party, callback);
   helper->Start();
 }
 
 void AppCacheService::GetAllAppCacheInfo(AppCacheInfoCollection* collection,
-                                         net::CompletionCallback* callback) {
+                                         net::OldCompletionCallback* callback) {
   DCHECK(collection);
   GetInfoHelper* helper = new GetInfoHelper(this, collection, callback);
   helper->Start();
 }
 
 void AppCacheService::DeleteAppCacheGroup(const GURL& manifest_url,
-                                          net::CompletionCallback* callback) {
+                                          net::OldCompletionCallback* callback) {
   DeleteHelper* helper = new DeleteHelper(this, manifest_url, callback);
   helper->Start();
 }
 
 void AppCacheService::DeleteAppCachesForOrigin(
-    const GURL& origin,  net::CompletionCallback* callback) {
+    const GURL& origin,  net::OldCompletionCallback* callback) {
   DeleteOriginHelper* helper = new DeleteOriginHelper(this, origin, callback);
   helper->Start();
 }

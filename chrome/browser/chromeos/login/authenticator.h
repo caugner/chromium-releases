@@ -31,17 +31,15 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
 
   // Given externally authenticated |username| and |password|, this method
   // attempts to complete authentication process.
-  // Returns true if the attempt gets sent successfully and false if not.
-  virtual bool CompleteLogin(Profile* profile,
+  virtual void CompleteLogin(Profile* profile,
                              const std::string& username,
                              const std::string& password) = 0;
 
   // Given a |username| and |password|, this method attempts to authenticate
   // to login.
   // Optionally |login_token| and |login_captcha| could be provided.
-  // Returns true if we kick off the attempt successfully and false if we can't.
   // Must be called on the UI thread.
-  virtual bool AuthenticateToLogin(Profile* profile,
+  virtual void AuthenticateToLogin(Profile* profile,
                                    const std::string& username,
                                    const std::string& password,
                                    const std::string& login_token,
@@ -49,9 +47,8 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
 
   // Given a |username| and |password|, this method attempts to
   // authenticate to unlock the computer.
-  // Returns true if we kick off the attempt successfully and false if
-  // we can't. Must be called on the UI thread.
-  virtual bool AuthenticateToUnlock(const std::string& username,
+  // Must be called on the UI thread.
+  virtual void AuthenticateToUnlock(const std::string& username,
                                     const std::string& password) = 0;
 
   // Initiates incognito ("browse without signing in") login.
@@ -100,6 +97,9 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
   // OAuth token encryption helpers.
   virtual std::string EncryptToken(const std::string& token) = 0;
   virtual std::string DecryptToken(const std::string& encrypted_token) = 0;
+  // TODO(zelidrag): Remove legacy encryption support in R16.
+  virtual std::string DecryptLegacyToken(
+      const std::string& encrypted_token) = 0;
 
   // Profile (usually off the record ) that was used to perform the last
   // authentication process.

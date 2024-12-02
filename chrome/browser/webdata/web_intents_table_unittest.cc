@@ -8,12 +8,12 @@
 #include "base/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/intents/web_intent_data.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/browser/webdata/web_intents_table.h"
 #include "chrome/common/chrome_paths.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/glue/web_intent_service_data.h"
 
 namespace {
 
@@ -25,14 +25,15 @@ string16 test_title_2 = ASCIIToUTF16("Test WebIntent #2");
 string16 mime_image = ASCIIToUTF16("image/*");
 string16 mime_video = ASCIIToUTF16("video/*");
 
-WebIntentData MakeIntent(const GURL& url, const string16& action,
-                         const string16& type, const string16& title) {
-  WebIntentData intent;
-  intent.service_url = url;
-  intent.action = action;
-  intent.type = type;
-  intent.title = title;
-  return intent;
+WebIntentServiceData MakeIntent(const GURL& url, const string16& action,
+                                const string16& type, const string16& title) {
+  WebIntentServiceData service;
+  service.service_url = url;
+  service.action = action;
+  service.type = type;
+  service.title = title;
+  service.disposition = WebIntentServiceData::DISPOSITION_INLINE;
+  return service;
 }
 
 class WebIntentsTableTest : public testing::Test {
@@ -53,15 +54,15 @@ class WebIntentsTableTest : public testing::Test {
 
 // Test we can add, retrieve, and remove intents from the database.
 TEST_F(WebIntentsTableTest, SetGetDeleteIntent) {
-  std::vector<WebIntentData> intents;
+  std::vector<WebIntentServiceData> intents;
 
   // By default, no intents exist.
   EXPECT_TRUE(IntentsTable()->GetWebIntents(test_action, &intents));
   EXPECT_EQ(0U, intents.size());
 
   // Now adding one.
-  WebIntentData intent = MakeIntent(test_url, test_action, mime_image,
-                                    test_title);
+  WebIntentServiceData intent = MakeIntent(test_url, test_action, mime_image,
+                                           test_title);
   EXPECT_TRUE(IntentsTable()->SetWebIntent(intent));
 
   // Make sure that intent can now be fetched
@@ -80,10 +81,10 @@ TEST_F(WebIntentsTableTest, SetGetDeleteIntent) {
 
 // Test we support multiple intents for the same MIME type
 TEST_F(WebIntentsTableTest, SetMultipleIntents) {
-  std::vector<WebIntentData> intents;
+  std::vector<WebIntentServiceData> intents;
 
-  WebIntentData intent = MakeIntent(test_url, test_action, mime_image,
-                                    test_title);
+  WebIntentServiceData intent = MakeIntent(test_url, test_action, mime_image,
+                                           test_title);
   EXPECT_TRUE(IntentsTable()->SetWebIntent(intent));
 
   intent.type = mime_video;
@@ -107,10 +108,10 @@ TEST_F(WebIntentsTableTest, SetMultipleIntents) {
 
 // Test we support getting all intents independent of action.
 TEST_F(WebIntentsTableTest, GetAllIntents) {
-  std::vector<WebIntentData> intents;
+  std::vector<WebIntentServiceData> intents;
 
-  WebIntentData intent = MakeIntent(test_url, test_action, mime_image,
-                                    test_title);
+  WebIntentServiceData intent = MakeIntent(test_url, test_action, mime_image,
+                                           test_title);
   EXPECT_TRUE(IntentsTable()->SetWebIntent(intent));
 
   intent.action = test_action_2;
@@ -130,5 +131,27 @@ TEST_F(WebIntentsTableTest, GetAllIntents) {
   intent.action = test_action;
   intent.title = test_title;
   EXPECT_EQ(intent, intents[0]);
+}
+
+TEST_F(WebIntentsTableTest, DispositionToStringMapping) {
+  WebIntentServiceData intent = MakeIntent(test_url, test_action, mime_image,
+                                    test_title);
+  intent.disposition = WebIntentServiceData::DISPOSITION_WINDOW;
+  EXPECT_TRUE(IntentsTable()->SetWebIntent(intent));
+
+  intent = MakeIntent(test_url, test_action, mime_video,
+                                    test_title);
+  intent.disposition = WebIntentServiceData::DISPOSITION_INLINE;
+  EXPECT_TRUE(IntentsTable()->SetWebIntent(intent));
+
+  std::vector<WebIntentServiceData> intents;
+  EXPECT_TRUE(IntentsTable()->GetAllWebIntents(&intents));
+  ASSERT_EQ(2U, intents.size());
+
+  if (intents[0].disposition == WebIntentServiceData::DISPOSITION_WINDOW)
+    std::swap(intents[0], intents[1]);
+
+  EXPECT_EQ(WebIntentServiceData::DISPOSITION_INLINE, intents[0].disposition);
+  EXPECT_EQ(WebIntentServiceData::DISPOSITION_WINDOW, intents[1].disposition);
 }
 } // namespace

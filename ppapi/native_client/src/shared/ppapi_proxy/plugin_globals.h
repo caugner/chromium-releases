@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "ppapi/c/ppp_input_event.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/ppp_messaging.h"
+#include "ppapi/c/ppp_mouse_lock.h"
 #include "native_client/src/untrusted/irt/irt_ppapi.h"
 
 struct NaClSrpcChannel;
@@ -62,6 +63,7 @@ const PPP_Find_Dev* PPPFindInterface();
 const PPP_InputEvent* PPPInputEventInterface();
 const PPP_Instance* PPPInstanceInterface();
 const PPP_Messaging* PPPMessagingInterface();
+const PPP_MouseLock* PPPMouseLockInterface();
 const PPP_Printing_Dev* PPPPrintingInterface();
 const PPP_Scrollbar_Dev* PPPScrollbarInterface();
 const PPP_Selection_Dev* PPPSelectionInterface();

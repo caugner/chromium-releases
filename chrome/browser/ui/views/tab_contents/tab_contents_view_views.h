@@ -13,6 +13,7 @@
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "views/widget/widget.h"
 
+class ConstrainedWindowGtk;
 class NativeTabContentsView;
 class RenderViewContextMenuViews;
 class SadTabView;
@@ -39,6 +40,11 @@ class TabContentsViewViews : public views::Widget,
   explicit TabContentsViewViews(TabContents* tab_contents);
   virtual ~TabContentsViewViews();
 
+  // Intermediate code to pass comiplation. This will be removed as a
+  // part of ConstraintWindow change (http://codereview.chromium.org/7631049).
+  void AttachConstrainedWindow(ConstrainedWindowGtk* constrained_window);
+  void RemoveConstrainedWindow(ConstrainedWindowGtk* constrained_window);
+
   // Reset the native parent of this view to NULL.  Unparented windows should
   // not receive any messages.
   virtual void Unparent();
@@ -55,7 +61,7 @@ class TabContentsViewViews : public views::Widget,
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
   virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
-  virtual void SetPageTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;
@@ -115,6 +121,7 @@ class TabContentsViewViews : public views::Widget,
 
   // Overridden from views::Widget:
   virtual views::FocusManager* GetFocusManager() OVERRIDE;
+  virtual void OnNativeWidgetVisibilityChanged(bool visible) OVERRIDE;
 
   // A helper method for closing the tab.
   void CloseTab();

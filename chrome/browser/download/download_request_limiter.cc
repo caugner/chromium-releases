@@ -4,6 +4,7 @@
 
 #include "chrome/browser/download/download_request_limiter.h"
 
+#include "base/bind.h"
 #include "base/stl_util.h"
 #include "chrome/browser/download/download_request_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper_delegate.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 
 // TabDownloadState ------------------------------------------------------------
 
@@ -74,10 +76,11 @@ void DownloadRequestLimiter::TabDownloadState::PromptUserForDownload(
   if (DownloadRequestLimiter::delegate_) {
     NotifyCallbacks(DownloadRequestLimiter::delegate_->ShouldAllowDownload());
   } else {
-    infobar_ = new DownloadRequestInfoBarDelegate(tab, this);
-    TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab);
-    wrapper->infobar_tab_helper()->AddInfoBar(infobar_);
+    InfoBarTabHelper* infobar_helper =
+        TabContentsWrapper::GetCurrentWrapperForContents(tab)->
+            infobar_tab_helper();
+    infobar_ = new DownloadRequestInfoBarDelegate(infobar_helper, this);
+    infobar_helper->AddInfoBar(infobar_);
   }
 }
 
@@ -112,7 +115,7 @@ void DownloadRequestLimiter::TabDownloadState::Observe(
       if (!entry)
         return;
 
-      if (PageTransition::IsRedirect(entry->transition_type())) {
+      if (content::PageTransitionIsRedirect(entry->transition_type())) {
         // Redirects don't count.
         return;
       }
@@ -203,9 +206,8 @@ void DownloadRequestLimiter::CanDownloadOnIOThread(int render_process_host_id,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &DownloadRequestLimiter::CanDownload,
-                        render_process_host_id, render_view_id, request_id,
-                        callback));
+      base::Bind(&DownloadRequestLimiter::CanDownload, this,
+                 render_process_host_id, render_view_id, request_id, callback));
 }
 
 void DownloadRequestLimiter::OnUserGesture(TabContents* tab) {
@@ -316,8 +318,8 @@ void DownloadRequestLimiter::ScheduleNotification(Callback* callback,
                                                   bool allow) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(
-          this, &DownloadRequestLimiter::NotifyCallback, callback, allow));
+      base::Bind(&DownloadRequestLimiter::NotifyCallback, this, callback,
+                 allow));
 }
 
 void DownloadRequestLimiter::NotifyCallback(Callback* callback, bool allow) {

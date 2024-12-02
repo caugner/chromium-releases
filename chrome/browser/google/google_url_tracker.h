@@ -10,10 +10,11 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "content/common/net/url_fetcher.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/network_change_notifier.h"
 
@@ -84,7 +85,7 @@ class GoogleURLTracker : public URLFetcher::Delegate,
  private:
   friend class GoogleURLTrackerTest;
 
-  typedef InfoBarDelegate* (*InfobarCreator)(TabContents*,
+  typedef InfoBarDelegate* (*InfobarCreator)(InfoBarTabHelper*,
                                              GoogleURLTracker*,
                                              const GURL&);
 
@@ -135,7 +136,7 @@ class GoogleURLTracker : public URLFetcher::Delegate,
   // configure to use https in search engine templates.
   GURL google_url_;
   GURL fetched_google_url_;
-  ScopedRunnableMethodFactory<GoogleURLTracker> runnable_method_factory_;
+  base::WeakPtrFactory<GoogleURLTracker> weak_ptr_factory_;
   scoped_ptr<URLFetcher> fetcher_;
   int fetcher_id_;
   bool queue_wakeup_task_;
@@ -163,7 +164,7 @@ class GoogleURLTracker : public URLFetcher::Delegate,
 // code can subclass it.
 class GoogleURLTrackerInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  GoogleURLTrackerInfoBarDelegate(TabContents* tab_contents,
+  GoogleURLTrackerInfoBarDelegate(InfoBarTabHelper* infobar_helper,
                                   GoogleURLTracker* google_url_tracker,
                                   const GURL& new_google_url);
 
@@ -186,8 +187,6 @@ class GoogleURLTrackerInfoBarDelegate : public ConfirmInfoBarDelegate {
 
   // Returns the portion of the appropriate hostname to display.
   string16 GetHost(bool new_host) const;
-
-  TabContents* tab_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(GoogleURLTrackerInfoBarDelegate);
 };

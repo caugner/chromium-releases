@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ namespace chromeos {
 class DropDownButton : public views::MenuButton {
  public:
   DropDownButton(views::ButtonListener* listener,
-                 const std::wstring& text,
+                 const string16& text,
                  views::ViewMenuDelegate* menu_delegate,
                  bool show_menu_marker);
   virtual ~DropDownButton();
@@ -27,7 +27,7 @@ class DropDownButton : public views::MenuButton {
   // Override SetText to set the accessible value, rather than the
   // accessible name, since this acts more like a combo box than a
   // menu.
-  virtual void SetText(const std::wstring& text);
+  virtual void SetText(const string16& text);
 
   virtual string16 GetAccessibleValue();
 

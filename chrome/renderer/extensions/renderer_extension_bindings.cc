@@ -12,12 +12,13 @@
 #include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/extensions/bindings_utils.h"
+#include "chrome/renderer/extensions/chrome_v8_context.h"
+#include "chrome/renderer/extensions/chrome_v8_context_set.h"
+#include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/event_bindings.h"
-#include "chrome/renderer/extensions/extension_base.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
-#include "content/renderer/render_thread.h"
-#include "content/renderer/render_view.h"
+#include "content/public/renderer/render_thread.h"
+#include "content/public/renderer/render_view.h"
 #include "grit/renderer_resources.h"
 #include "v8/include/v8.h"
 
@@ -30,6 +31,8 @@
 //   alert('response=' + msg);
 //   port.postMessage('I got your reponse');
 // });
+
+using content::RenderThread;
 
 namespace {
 
@@ -59,14 +62,15 @@ static void ClearPortData(int port_id) {
 }
 
 const char kPortClosedError[] = "Attempting to use a disconnected port object";
-const char* kExtensionDeps[] = { EventBindings::kName };
+const char* kExtensionDeps[] = { "extensions/event.js" };
 
-class ExtensionImpl : public ExtensionBase {
+class ExtensionImpl : public ChromeV8Extension {
  public:
   explicit ExtensionImpl(ExtensionDispatcher* dispatcher)
-      : ExtensionBase(RendererExtensionBindings::kName,
-                      GetStringResource(IDR_RENDERER_EXTENSION_BINDINGS_JS),
-                      arraysize(kExtensionDeps), kExtensionDeps, dispatcher) {
+      : ChromeV8Extension("extensions/renderer_extension_bindings.js",
+                          IDR_RENDERER_EXTENSION_BINDINGS_JS,
+                          arraysize(kExtensionDeps), kExtensionDeps,
+                          dispatcher) {
   }
   ~ExtensionImpl() {}
 
@@ -85,7 +89,7 @@ class ExtensionImpl : public ExtensionBase {
     } else if (name->Equals(v8::String::New("GetL10nMessage"))) {
       return v8::FunctionTemplate::New(GetL10nMessage);
     }
-    return ExtensionBase::GetNativeFunction(name);
+    return ChromeV8Extension::GetNativeFunction(name);
   }
 
   // Creates a new messaging channel to the given extension.
@@ -93,7 +97,7 @@ class ExtensionImpl : public ExtensionBase {
       const v8::Arguments& args) {
     // Get the current RenderView so that we can send a routed IPC message from
     // the correct source.
-    RenderView* renderview = GetCurrentRenderView();
+    content::RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
 
@@ -104,7 +108,7 @@ class ExtensionImpl : public ExtensionBase {
       std::string channel_name = *v8::String::Utf8Value(args[2]->ToString());
       int port_id = -1;
       renderview->Send(new ExtensionHostMsg_OpenChannelToExtension(
-          renderview->routing_id(), source_id, target_id,
+          renderview->GetRoutingId(), source_id, target_id,
           channel_name, &port_id));
       return v8::Integer::New(port_id);
     }
@@ -113,7 +117,7 @@ class ExtensionImpl : public ExtensionBase {
 
   // Sends a message along the given channel.
   static v8::Handle<v8::Value> PostMessage(const v8::Arguments& args) {
-    RenderView* renderview = GetCurrentRenderView();
+    content::RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
 
@@ -125,7 +129,7 @@ class ExtensionImpl : public ExtensionBase {
       }
       std::string message = *v8::String::Utf8Value(args[1]->ToString());
       renderview->Send(new ExtensionHostMsg_PostMessage(
-          renderview->routing_id(), port_id, message));
+          renderview->GetRoutingId(), port_id, message));
     }
     return v8::Undefined();
   }
@@ -140,7 +144,7 @@ class ExtensionImpl : public ExtensionBase {
       // Send via the RenderThread because the RenderView might be closing.
       bool notify_browser = args[1]->BooleanValue();
       if (notify_browser)
-        EventBindings::GetRenderThread()->Send(
+        content::RenderThread::Get()->Send(
             new ExtensionHostMsg_CloseChannel(port_id));
       ClearPortData(port_id);
     }
@@ -165,7 +169,7 @@ class ExtensionImpl : public ExtensionBase {
       int port_id = args[0]->Int32Value();
       if (HasPortData(port_id) && --GetPortData(port_id).ref_count == 0) {
         // Send via the RenderThread because the RenderView might be closing.
-        EventBindings::GetRenderThread()->Send(
+        content::RenderThread::Get()->Send(
             new ExtensionHostMsg_CloseChannel(port_id));
         ClearPortData(port_id);
       }
@@ -192,7 +196,7 @@ class ExtensionImpl : public ExtensionBase {
     if (!l10n_messages) {
       // Get the current RenderView so that we can send a routed IPC message
       // from the correct source.
-      RenderView* renderview = GetCurrentRenderView();
+      content::RenderView* renderview = GetCurrentRenderView();
       if (!renderview)
         return v8::Undefined();
 
@@ -246,27 +250,20 @@ class ExtensionImpl : public ExtensionBase {
 
 }  // namespace
 
-const char* RendererExtensionBindings::kName =
-    "chrome/RendererExtensionBindings";
-
 v8::Extension* RendererExtensionBindings::Get(ExtensionDispatcher* dispatcher) {
   static v8::Extension* extension = new ExtensionImpl(dispatcher);
   return extension;
 }
 
 void RendererExtensionBindings::DeliverMessage(
+    const ChromeV8ContextSet::ContextSet& contexts,
     int target_port_id,
     const std::string& message,
-    RenderView* restrict_to_render_view) {
+    content::RenderView* restrict_to_render_view) {
   v8::HandleScope handle_scope;
 
-  bindings_utils::ContextList contexts = bindings_utils::GetContexts();
-  for (bindings_utils::ContextList::iterator it = contexts.begin();
+  for (ChromeV8ContextSet::ContextSet::const_iterator it = contexts.begin();
        it != contexts.end(); ++it) {
-
-    v8::Handle<v8::Context> context = (*it)->context;
-    if (context.IsEmpty())
-      continue;
 
     if (restrict_to_render_view &&
         restrict_to_render_view != (*it)->GetRenderView()) {
@@ -276,9 +273,12 @@ void RendererExtensionBindings::DeliverMessage(
     // Check to see whether the context has this port before bothering to create
     // the message.
     v8::Handle<v8::Value> port_id_handle = v8::Integer::New(target_port_id);
-    v8::Handle<v8::Value> has_port =
-        bindings_utils::CallFunctionInContext(
-            context, "Port.hasPort", 1, &port_id_handle);
+    v8::Handle<v8::Value> has_port;
+    if (!(*it)->CallChromeHiddenMethod("Port.hasPort", 1, &port_id_handle,
+                                       &has_port)) {
+      continue;
+    }
+
     CHECK(!has_port.IsEmpty());
     if (!has_port->BooleanValue())
       continue;
@@ -286,8 +286,9 @@ void RendererExtensionBindings::DeliverMessage(
     std::vector<v8::Handle<v8::Value> > arguments;
     arguments.push_back(v8::String::New(message.c_str(), message.size()));
     arguments.push_back(port_id_handle);
-    bindings_utils::CallFunctionInContext(
-        context, "Port.dispatchOnMessage",
-        arguments.size(), &arguments[0]);
+    CHECK((*it)->CallChromeHiddenMethod("Port.dispatchOnMessage",
+                                        arguments.size(),
+                                        &arguments[0],
+                                        NULL));
   }
 }

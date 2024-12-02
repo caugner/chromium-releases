@@ -7,6 +7,7 @@
 #include "base/shared_memory.h"
 #include "base/timer.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/common/notification_details.h"
@@ -14,6 +15,7 @@
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_source.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/notification_types.h"
 #include "content/test/test_browser_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -37,16 +39,8 @@ class RenderWidgetHostProcess : public MockRenderProcessHost {
         current_update_buf_(NULL),
         update_msg_should_reply_(false),
         update_msg_reply_flags_(0) {
-    // DANGER! This is a hack. The RenderWidgetHost checks the channel to see
-    // if the process is still alive, but it doesn't actually dereference it.
-    // An IPC::ChannelProxy is nontrivial, so we just fake it here. If you end up
-    // crashing by dereferencing 1, then you'll have to make a real channel.
-    channel_.reset(reinterpret_cast<IPC::ChannelProxy*>(0x1));
   }
   ~RenderWidgetHostProcess() {
-    // We don't want to actually delete the channel, since it's not a real
-    // pointer.
-    ignore_result(channel_.release());
     delete current_update_buf_;
   }
 
@@ -59,6 +53,8 @@ class RenderWidgetHostProcess : public MockRenderProcessHost {
 
   // Fills the given update parameters with resonable default values.
   void InitUpdateRectParams(ViewHostMsg_UpdateRect_Params* params);
+
+  virtual bool HasConnection() const { return true; }
 
  protected:
   virtual bool WaitForUpdateMsg(int render_widget_id,
@@ -274,9 +270,7 @@ class RenderWidgetHostTest : public testing::Test {
 
   void SendInputEventACK(WebInputEvent::Type type, bool processed) {
     scoped_ptr<IPC::Message> response(
-        new ViewHostMsg_HandleInputEvent_ACK(0));
-    response->WriteInt(type);
-    response->WriteBool(processed);
+        new ViewHostMsg_HandleInputEvent_ACK(0, type, processed));
     host_->OnMessageReceived(*response);
   }
 
@@ -428,7 +422,7 @@ TEST_F(RenderWidgetHostTest, ResizeThenCrash) {
 TEST_F(RenderWidgetHostTest, Background) {
 #if !defined(OS_MACOSX)
   scoped_ptr<RenderWidgetHostView> view(
-      RenderWidgetHostView::CreateViewForWidget(host_.get()));
+      content::GetContentClient()->browser()->CreateViewForWidget(host_.get()));
   host_->SetView(view.get());
 
   // Create a checkerboard background to test with.
@@ -437,7 +431,8 @@ TEST_F(RenderWidgetHostTest, Background) {
   canvas.FillRectInt(SK_ColorWHITE, 2, 0, 2, 2);
   canvas.FillRectInt(SK_ColorWHITE, 0, 2, 2, 2);
   canvas.FillRectInt(SK_ColorBLACK, 2, 2, 2, 2);
-  const SkBitmap& background = canvas.getDevice()->accessBitmap(false);
+  const SkBitmap& background =
+      canvas.sk_canvas()->getDevice()->accessBitmap(false);
 
   // Set the background and make sure we get back a copy.
   view->SetBackground(background);
@@ -583,7 +578,13 @@ TEST_F(RenderWidgetHostTest, PaintAtSize) {
   EXPECT_EQ(30, observer.size().height());
 }
 
-TEST_F(RenderWidgetHostTest, HandleKeyEventsWeSent) {
+// Fails on Linux Aura, see http://crbug.com/100344
+#if defined(USE_AURA) && !defined(OS_WIN)
+#define MAYBE_HandleKeyEventsWeSent FAILS_HandleKeyEventsWeSent
+#else
+#define MAYBE_HandleKeyEventsWeSent HandleKeyEventsWeSent
+#endif
+TEST_F(RenderWidgetHostTest, MAYBE_HandleKeyEventsWeSent) {
   // Simulate a keyboard event.
   SimulateKeyboardEvent(WebInputEvent::RawKeyDown);
 
@@ -620,7 +621,13 @@ TEST_F(RenderWidgetHostTest, IgnoreKeyEventsHandledByRenderer) {
   EXPECT_FALSE(host_->unhandled_keyboard_event_called());
 }
 
-TEST_F(RenderWidgetHostTest, PreHandleRawKeyDownEvent) {
+// Fails on Linux Aura, see http://crbug.com/100345
+#if defined(USE_AURA) && !defined(OS_WIN)
+#define MAYBE_PreHandleRawKeyDownEvent FAILS_PreHandleRawKeyDownEvent
+#else
+#define MAYBE_PreHandleRawKeyDownEvent PreHandleRawKeyDownEvent
+#endif
+TEST_F(RenderWidgetHostTest, MAYBE_PreHandleRawKeyDownEvent) {
   // Simluate the situation that the browser handled the key down event during
   // pre-handle phrase.
   host_->set_prehandle_keyboard_event(true);

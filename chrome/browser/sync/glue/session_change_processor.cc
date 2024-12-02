@@ -12,9 +12,10 @@
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
+#include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -27,6 +28,7 @@
 namespace browser_sync {
 
 namespace {
+
 // Extract the source SyncedTabDelegate from a NotificationSource originating
 // from a NavigationController, if it exists. Returns |NULL| otherwise.
 SyncedTabDelegate* ExtractSyncedTabDelegate(const NotificationSource& source) {
@@ -36,7 +38,8 @@ SyncedTabDelegate* ExtractSyncedTabDelegate(const NotificationSource& source) {
     return NULL;
   return tab->synced_tab_delegate();
 }
-}
+
+}  // namespace
 
 SessionChangeProcessor::SessionChangeProcessor(
     UnrecoverableErrorHandler* error_handler,
@@ -175,18 +178,35 @@ void SessionChangeProcessor::Observe(int type,
   }
 
   // Associate tabs first so the synced session tracker is aware of them.
-  if (!modified_tabs.empty())
-    session_model_associator_->ReassociateTabs(modified_tabs);
-  // Note, we always reassociate windows because it's possible a tab became
+  // Note that if we fail to associate, it means something has gone wrong,
+  // such as our local session being deleted, so we disassociate and associate
+  // again.
+  bool reassociation_needed = !modified_tabs.empty() &&
+      !session_model_associator_->AssociateTabs(modified_tabs);
+
+  // Note, we always associate windows because it's possible a tab became
   // "interesting" by going to a valid URL, in which case it needs to be added
   // to the window's tab information.
-  session_model_associator_->ReassociateWindows(false);
+  if (!reassociation_needed) {
+    reassociation_needed =
+        !session_model_associator_->AssociateWindows(false);
+  }
+
+  if (reassociation_needed) {
+    VLOG(1) << "Reassociation of local models triggered.";
+    SyncError error;
+    session_model_associator_->DisassociateModels(&error);
+    session_model_associator_->AssociateModels(&error);
+    if (error.IsSet()) {
+      error_handler()->OnUnrecoverableError(FROM_HERE,
+          "Sessions reassociation failed.");
+    }
+  }
 }
 
 void SessionChangeProcessor::ApplyChangesFromSyncModel(
     const sync_api::BaseTransaction* trans,
-    const sync_api::SyncManager::ChangeRecord* changes,
-    int change_count) {
+    const sync_api::ImmutableChangeRecordList& changes) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!running()) {
     return;
@@ -201,20 +221,18 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
     return;
   }
 
-  for (int i = 0; i < change_count; ++i) {
-    const sync_api::SyncManager::ChangeRecord& change = changes[i];
-    sync_api::SyncManager::ChangeRecord::Action action(change.action);
-    if (sync_api::SyncManager::ChangeRecord::ACTION_DELETE == action) {
-      // Deletions should only be for a foreign client itself, and hence affect
-      // the header node, never a tab node.
-      sync_api::ReadNode node(trans);
-      if (!node.InitByIdLookup(change.id)) {
-        error_handler()->OnUnrecoverableError(FROM_HERE,
-                                              "Session node lookup failed.");
-        return;
-      }
-      DCHECK_EQ(node.GetModelType(), syncable::SESSIONS);
-      const sync_pb::SessionSpecifics& specifics = node.GetSessionSpecifics();
+  for (sync_api::ChangeRecordList::const_iterator it =
+           changes.Get().begin(); it != changes.Get().end(); ++it) {
+    const sync_api::ChangeRecord& change = *it;
+    sync_api::ChangeRecord::Action action(change.action);
+    if (sync_api::ChangeRecord::ACTION_DELETE == action) {
+      // Deletions are all or nothing (since we only ever delete entire
+      // sessions). Therefore we don't care if it's a tab node or meta node,
+      // and just ensure we've disassociated.
+      DCHECK_EQ(syncable::GetModelTypeFromSpecifics(it->specifics),
+                syncable::SESSIONS);
+      const sync_pb::SessionSpecifics& specifics =
+          it->specifics.GetExtension(sync_pb::session);
       session_model_associator_->DisassociateForeignSession(
           specifics.session_tag());
       continue;
@@ -244,15 +262,15 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
       StartObserving();
       return;
     }
-    const int64 mtime = sync_node.GetModificationTime();
-    // Model associator handles foreign session update and add the same.
+    const base::Time& mtime = sync_node.GetModificationTime();
+    // The model associator handles foreign session updates and adds the same.
     session_model_associator_->AssociateForeignSpecifics(specifics, mtime);
   }
 
   // Notify foreign session handlers that there are new sessions.
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
-      NotificationService::AllSources(),
+      Source<Profile>(profile_),
       NotificationService::NoDetails());
 
   StartObserving();

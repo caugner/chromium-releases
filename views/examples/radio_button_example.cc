@@ -5,6 +5,7 @@
 #include "views/examples/radio_button_example.h"
 
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "views/controls/button/text_button.h"
 #include "views/layout/grid_layout.h"
 #include "views/view.h"
@@ -12,14 +13,10 @@
 namespace examples {
 
 RadioButtonExample::RadioButtonExample(ExamplesMain* main)
-    : ExampleBase(main), count_(0) {
+    : ExampleBase(main, "Radio Button"), count_(0) {
 }
 
 RadioButtonExample::~RadioButtonExample() {
-}
-
-std::wstring RadioButtonExample::GetExampleTitle() {
-  return L"Radio Button";
 }
 
 void RadioButtonExample::CreateExampleView(views::View* container) {
@@ -29,7 +26,9 @@ void RadioButtonExample::CreateExampleView(views::View* container) {
   int group = 1;
   for (size_t i = 0; i < arraysize(radio_buttons_); ++i) {
     radio_buttons_[i] = new views::RadioButton(
-        base::StringPrintf( L"Radio %d in group %d", i + 1, group), group);
+        UTF8ToUTF16(base::StringPrintf(
+            "Radio %d in group %d", static_cast<int>(i) + 1, group)),
+        group);
     radio_buttons_[i]->set_listener(this);
   }
 
@@ -55,10 +54,10 @@ void RadioButtonExample::ButtonPressed(views::Button* sender,
     radio_buttons_[2]->SetChecked(true);
   } else if (sender == status_) {
     // Show the state of radio buttons.
-    PrintStatus("Group: 1:%ls, 2:%ls, 3:%ls",
-        IntToOnOff(radio_buttons_[0]->checked()),
-        IntToOnOff(radio_buttons_[1]->checked()),
-        IntToOnOff(radio_buttons_[2]->checked()));
+    PrintStatus("Group: 1:%s, 2:%s, 3:%s",
+                BoolToOnOff(radio_buttons_[0]->checked()),
+                BoolToOnOff(radio_buttons_[1]->checked()),
+                BoolToOnOff(radio_buttons_[2]->checked()));
   } else {
     PrintStatus("Pressed! count:%d", ++count_);
   }

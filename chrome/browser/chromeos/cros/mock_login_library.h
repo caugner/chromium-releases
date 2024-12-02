@@ -18,15 +18,17 @@ class MockLoginLibrary : public LoginLibrary {
   MockLoginLibrary();
   virtual ~MockLoginLibrary();
 
-  MOCK_METHOD0(EmitLoginPromptReady, bool(void));
+  MOCK_METHOD0(Init, void(void));
+  MOCK_METHOD0(EmitLoginPromptReady, void(void));
+  MOCK_METHOD0(EmitLoginPromptVisible, void(void));
   MOCK_METHOD2(RequestRetrievePolicy, void(RetrievePolicyCallback, void*));
   MOCK_METHOD3(RequestStorePolicy, void(const std::string&,
                                         StorePolicyCallback,
                                         void*));
-  MOCK_METHOD2(StartSession, bool(const std::string&, const std::string&));
-  MOCK_METHOD1(StopSession, bool(const std::string&));
-  MOCK_METHOD0(RestartEntd, bool(void));
-  MOCK_METHOD2(RestartJob, bool(int, const std::string&));
+  MOCK_METHOD2(StartSession, void(const std::string&, const std::string&));
+  MOCK_METHOD1(StopSession, void(const std::string&));
+  MOCK_METHOD0(RestartEntd, void(void));
+  MOCK_METHOD2(RestartJob, void(int, const std::string&));
 };
 
 }  // namespace chromeos

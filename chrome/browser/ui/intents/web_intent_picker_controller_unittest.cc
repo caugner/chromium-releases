@@ -10,10 +10,10 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/intents/web_intent_data.h"
 #include "chrome/browser/intents/web_intents_registry.h"
 #include "chrome/browser/intents/web_intents_registry_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/intents/web_intent_picker_factory.h"
@@ -21,11 +21,11 @@
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
-#include "content/browser/tab_contents/constrained_window.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "webkit/glue/web_intent_service_data.h"
 
 using testing::_;
 using testing::AtMost;
@@ -73,7 +73,7 @@ MATCHER_P(VectorIsOfSize, n, "") {
   return arg.size() == static_cast<size_t>(n);
 }
 
-} // namespace
+}  // namespace
 
 class WebIntentPickerMock : public WebIntentPicker {
  public:
@@ -86,17 +86,18 @@ class WebIntentPickerMock : public WebIntentPicker {
 
 class WebIntentPickerFactoryMock : public WebIntentPickerFactory {
  public:
-  MOCK_METHOD2(Create,
-               WebIntentPicker*(TabContents* tab_contents,
+  MOCK_METHOD3(Create,
+               WebIntentPicker*(Browser* browser,
+                                TabContentsWrapper* wrapper,
                                 WebIntentPickerDelegate* delegate));
   MOCK_METHOD1(ClosePicker, void(WebIntentPicker* picker));
 };
 
 class TestWebIntentPickerController : public WebIntentPickerController {
  public:
-  TestWebIntentPickerController(TabContents* tab_contents,
+  TestWebIntentPickerController(TabContentsWrapper* wrapper,
                                 WebIntentPickerFactory* factory)
-      : WebIntentPickerController(tab_contents, factory) {
+      : WebIntentPickerController(wrapper, factory) {
   }
 
   MOCK_METHOD1(OnServiceChosen, void(size_t index));
@@ -124,17 +125,18 @@ class WebIntentPickerControllerTest : public TabContentsWrapperTestHarness {
   virtual void SetUp() {
     TabContentsWrapperTestHarness::SetUp();
 
-    profile_->CreateFaviconService();
-    profile_->CreateWebDataService(true);
-    web_data_service_ = profile_->GetWebDataService(Profile::EXPLICIT_ACCESS);
-    favicon_service_ = profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+    profile()->CreateFaviconService();
+    profile()->CreateWebDataService(true);
+    web_data_service_ = profile()->GetWebDataService(Profile::EXPLICIT_ACCESS);
+    favicon_service_ = profile()->GetFaviconService(Profile::EXPLICIT_ACCESS);
     WebIntentsRegistry *registry =
-        WebIntentsRegistryFactory::GetForProfile(profile_.get());
-    registry->Initialize(web_data_service_);
+        WebIntentsRegistryFactory::GetForProfile(profile());
+    // TODO(groby): We should not require a call to Initialize() here.
+    registry->Initialize(web_data_service_, NULL);
 
     picker_factory_ = new WebIntentPickerFactoryMock();
-    controller_.reset(new TestWebIntentPickerController(contents(),
-                                                  picker_factory_));
+    controller_.reset(new TestWebIntentPickerController(contents_wrapper(),
+                                                        picker_factory_));
   }
 
   virtual void TearDown() {
@@ -146,11 +148,11 @@ class WebIntentPickerControllerTest : public TabContentsWrapperTestHarness {
  protected:
   void AddWebIntentService(const string16& action,
                            const GURL& service_url) {
-    WebIntentData web_intent_data;
-    web_intent_data.action = action;
-    web_intent_data.type = kType;
-    web_intent_data.service_url = service_url;
-    web_data_service_->AddWebIntent(web_intent_data);
+    WebIntentServiceData web_intent_service_data;
+    web_intent_service_data.action = action;
+    web_intent_service_data.type = kType;
+    web_intent_service_data.service_url = service_url;
+    web_data_service_->AddWebIntent(web_intent_service_data);
   }
 
   void AddFaviconForURL(const GURL& url) {
@@ -165,8 +167,8 @@ class WebIntentPickerControllerTest : public TabContentsWrapperTestHarness {
 
   void SetPickerExpectations(int expected_service_count,
                              int expected_default_favicons) {
-    EXPECT_CALL(*picker_factory_, Create(_, _)).
-        WillOnce(DoAll(SaveArg<1>(&delegate_), Return(&picker_)));
+    EXPECT_CALL(*picker_factory_, Create(_, _, _)).
+        WillOnce(DoAll(SaveArg<2>(&delegate_), Return(&picker_)));
     EXPECT_CALL(picker_,
                 SetServiceURLs(VectorIsOfSize(expected_service_count))).
         Times(1);
@@ -194,7 +196,10 @@ class WebIntentPickerControllerTest : public TabContentsWrapperTestHarness {
   BrowserThread ui_thread_;
   BrowserThread db_thread_;
   WebIntentPickerMock picker_;
-  WebIntentPickerFactoryMock* picker_factory_; // controller_ takes ownership.
+
+  // |controller_| takes ownership.
+  WebIntentPickerFactoryMock* picker_factory_;
+
   scoped_ptr<TestWebIntentPickerController> controller_;
   WebIntentPickerDelegate* delegate_;
   WebDataService* web_data_service_;
@@ -207,7 +212,7 @@ TEST_F(WebIntentPickerControllerTest, ShowDialogWith3Services) {
   AddWebIntentService(kAction1, kServiceURL2);
   AddWebIntentService(kAction1, kServiceURL3);
 
-  controller_->ShowDialog(kAction1, kType);
+  controller_->ShowDialog(NULL, kAction1, kType);
   WaitForDialogToShow();
 }
 
@@ -216,7 +221,7 @@ TEST_F(WebIntentPickerControllerTest, ShowDialogWithNoServices) {
 
   EXPECT_CALL(picker_, SetServiceIcon(_, _)).Times(0);
 
-  controller_->ShowDialog(kAction1, kType);
+  controller_->ShowDialog(NULL, kAction1, kType);
   WaitForDialogToShow();
 }
 
@@ -234,25 +239,8 @@ TEST_F(WebIntentPickerControllerTest, DISABLED_ShowFavicon) {
   EXPECT_CALL(picker_, SetDefaultServiceIcon(1)).Times(1);
   EXPECT_CALL(picker_, SetServiceIcon(2, _)).Times(1);
 
-  controller_->ShowDialog(kAction1, kType);
+  controller_->ShowDialog(NULL, kAction1, kType);
   WaitForDialogToShow();
-}
-
-TEST_F(WebIntentPickerControllerTest, ChooseService) {
-  SetPickerExpectations(2, 2);
-  AddWebIntentService(kAction1, kServiceURL1);
-  AddWebIntentService(kAction1, kServiceURL2);
-
-  EXPECT_CALL(*controller_, OnServiceChosen(0))
-      .WillOnce(Invoke(controller_.get(),
-                       &TestWebIntentPickerController::BaseOnServiceChosen));
-  EXPECT_CALL(*controller_, OnCancelled())
-      .Times(0);
-  EXPECT_CALL(*picker_factory_, ClosePicker(_));
-
-  controller_->ShowDialog(kAction1, kType);
-  WaitForDialogToShow();
-  delegate_->OnServiceChosen(0);
 }
 
 TEST_F(WebIntentPickerControllerTest, Cancel) {
@@ -267,7 +255,7 @@ TEST_F(WebIntentPickerControllerTest, Cancel) {
                        &TestWebIntentPickerController::BaseOnCancelled));
   EXPECT_CALL(*picker_factory_, ClosePicker(_));
 
-  controller_->ShowDialog(kAction1, kType);
+  controller_->ShowDialog(NULL, kAction1, kType);
   WaitForDialogToShow();
   delegate_->OnCancelled();
 }

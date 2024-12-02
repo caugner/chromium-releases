@@ -7,10 +7,10 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "content/common/content_switches.h"
 #include "content/common/devtools_messages.h"
-#include "content/renderer/render_thread.h"
-#include "content/renderer/render_view.h"
+#include "content/public/common/content_switches.h"
+#include "content/renderer/render_thread_impl.h"
+#include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsFrontend.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "ui/base/ui_base_switches.h"
@@ -18,8 +18,8 @@
 using WebKit::WebDevToolsFrontend;
 using WebKit::WebString;
 
-DevToolsClient::DevToolsClient(RenderView* render_view)
-    : RenderViewObserver(render_view) {
+DevToolsClient::DevToolsClient(RenderViewImpl* render_view)
+    : content::RenderViewObserver(render_view) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   web_tools_frontend_.reset(
       WebDevToolsFrontend::create(
@@ -36,7 +36,7 @@ void DevToolsClient::SendToAgent(const IPC::Message& tools_agent_message) {
 }
 
 bool DevToolsClient::OnMessageReceived(const IPC::Message& message) {
-  DCHECK(RenderThread::current()->message_loop() == MessageLoop::current());
+  DCHECK(RenderThreadImpl::current());
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(DevToolsClient, message)

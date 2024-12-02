@@ -27,7 +27,6 @@
 @interface AvatarMenuBubbleController (Private)
 - (AvatarMenuModel*)model;
 - (NSButton*)configureNewUserButton:(CGFloat)yOffset;
-- (void)configureEditButton:(HoverImageButton*)button;
 @end
 
 namespace AvatarMenuInternal {
@@ -38,7 +37,10 @@ class Bridge : public AvatarMenuModelObserver {
 
   // AvatarMenuModelObserver:
   void OnAvatarMenuModelChanged(AvatarMenuModel* model) {
-    [controller_ performLayout];
+    // Do nothing. Rebuilding while the bubble is open will cause it to be
+    // positioned incorrectly. Since the bubble will be dismissed on losing key
+    // status, it's impossible for the user to edit the information in a
+    // meaningful way such that it would need to be redrawn.
   }
 
  private:
@@ -110,6 +112,14 @@ const CGFloat kLabelInset = 49.0;
                          anchoredAt:point])) {
     bridge_.reset(bridge);
     model_.reset(model);
+
+    [window accessibilitySetOverrideValue:
+        l10n_util::GetNSString(IDS_PROFILES_BUBBLE_ACCESSIBLE_NAME)
+                             forAttribute:NSAccessibilityTitleAttribute];
+    [window accessibilitySetOverrideValue:
+        l10n_util::GetNSString(IDS_PROFILES_BUBBLE_ACCESSIBLE_DESCRIPTION)
+                             forAttribute:NSAccessibilityHelpAttribute];
+
     [[self bubble] setArrowLocation:info_bubble::kTopRight];
     [self performLayout];
   }
@@ -132,7 +142,14 @@ const CGFloat kLabelInset = 49.0;
   // Since drawing happens bottom-up, start with the "New User" link.
   NSButton* newButton = [self configureNewUserButton:yOffset];
   [contentView addSubview:newButton];
-  yOffset += NSHeight([newButton frame]) + (kLinkSpacing - kVerticalSpacing);
+  yOffset += NSHeight([newButton frame]) + kVerticalSpacing;
+
+  NSBox* separator = [self separatorWithFrame:
+      NSMakeRect(10, yOffset, NSWidth([contentView frame]) - 20, 0)];
+  [separator setAutoresizingMask:NSViewWidthSizable];
+  [contentView addSubview:separator];
+
+  yOffset += NSHeight([separator frame]);
 
   // Loop over the profiles in reverse, constructing the menu items.
   CGFloat widthAdjust = 0;
@@ -154,19 +171,22 @@ const CGFloat kLabelInset = 49.0;
     if (delta.width > 0)
       widthAdjust = std::max(widthAdjust, delta.width);
 
+    // Repeat for the sync state/email.
+    NSTextField* emailField = itemView.emailField;
+    emailField.stringValue = base::SysUTF16ToNSString(item.sync_state);
+    delta = [GTMUILocalizerAndLayoutTweaker sizeToFitView:emailField];
+    if (delta.width > 0)
+      widthAdjust = std::max(widthAdjust, delta.width);
+
     if (!item.active) {
       // In the inactive case, hide additional UI.
       [itemView.activeView setHidden:YES];
       [itemView.editButton setHidden:YES];
     } else {
       // Otherwise, set up the edit button and its three interaction states.
-      [self configureEditButton:itemView.editButton];
       itemView.activeView.image =
           rb.GetImageNamed(IDR_PROFILE_SELECTED).ToNSImage();
     }
-
-    // Force a highlight of the default state to get the text colored correctly.
-    [itemView highlightForEventType:NSLeftMouseUp];
 
     // Add the item to the content view.
     [[itemView view] setFrameOrigin:NSMakePoint(0, yOffset)];
@@ -177,7 +197,7 @@ const CGFloat kLabelInset = 49.0;
     [items_ addObject:itemView];
   }
 
-  yOffset += kVerticalSpacing;
+  yOffset += kVerticalSpacing * 1.5;
 
   // Set the window frame, clamping the width at a sensible max.
   NSRect frame = [[self window] frame];
@@ -203,23 +223,6 @@ const CGFloat kLabelInset = 49.0;
   return [newButton.release() autorelease];
 }
 
-- (void)configureEditButton:(HoverImageButton*)button {
-  [button setTrackingEnabled:YES];
-
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  [button setDefaultImage:rb.GetImageNamed(IDR_PROFILE_EDIT).ToNSImage()];
-  [button setDefaultOpacity:1.0];
-
-  [button setHoverImage:rb.GetImageNamed(IDR_PROFILE_EDIT_HOVER).ToNSImage()];
-  [button setHoverOpacity:1.0];
-
-  [button setPressedImage:
-      rb.GetImageNamed(IDR_PROFILE_EDIT_PRESSED).ToNSImage()];
-  [button setPressedOpacity:1.0];
-
-  [[button cell] setHighlightsBy:NSNoCellMask];
-}
-
 - (NSMutableArray*)items {
   return items_.get();
 }
@@ -228,12 +231,17 @@ const CGFloat kLabelInset = 49.0;
 
 // Menu Item Controller ////////////////////////////////////////////////////////
 
+@interface AvatarMenuItemController (Private)
+- (void)animateFromView:(NSView*)outView toView:(NSView*)inView;
+@end
+
 @implementation AvatarMenuItemController
 
 @synthesize modelIndex = modelIndex_;
 @synthesize iconView = iconView_;
 @synthesize activeView = activeView_;
 @synthesize nameField = nameField_;
+@synthesize emailField = emailField_;
 @synthesize editButton = editButton_;
 
 - (id)initWithModelIndex:(size_t)modelIndex
@@ -247,6 +255,16 @@ const CGFloat kLabelInset = 49.0;
   return self;
 }
 
+- (void)dealloc {
+  static_cast<AvatarMenuItemView*>(self.view).viewController = nil;
+  [super dealloc];
+}
+
+- (void)awakeFromNib {
+  [GTMUILocalizerAndLayoutTweaker sizeToFitView:self.editButton];
+  self.editButton.hidden = YES;
+}
+
 - (IBAction)switchToProfile:(id)sender {
   [controller_ switchToProfile:self];
 }
@@ -257,70 +275,168 @@ const CGFloat kLabelInset = 49.0;
 
 - (void)highlightForEventType:(NSEventType)type {
   BOOL active = !self.activeView.isHidden;
-  NSColor* color = nil;
   switch (type) {
     case NSMouseEntered:
-    case NSLeftMouseDown:
-      if (active) {
-        color = [NSColor colorWithCalibratedRed:0 green:0 blue:0 alpha:1];
-      } else {
-        color = [NSColor colorWithCalibratedRed:0.25
-                                          green:0.25
-                                           blue:0.25
-                                          alpha:1];
-      }
+      if (active)
+        [self animateFromView:self.emailField toView:self.editButton];
       break;
 
     case NSMouseExited:
-    case NSLeftMouseUp:
-      if (active) {
-        color = [NSColor colorWithCalibratedRed:0.12
-                                          green:0.12
-                                           blue:0.12
-                                          alpha:1];
-      } else {
-        color = [NSColor colorWithCalibratedRed:0.5
-                                          green:0.5
-                                           blue:0.5
-                                          alpha:1];
-      }
+      if (active)
+        [self animateFromView:self.editButton toView:self.emailField];
       break;
 
     default:
       NOTREACHED();
   };
+}
 
-  DCHECK(color);
-  self.nameField.textColor = color;
+- (void)animateFromView:(NSView*)outView toView:(NSView*)inView {
+  const NSTimeInterval kAnimationDuration = 0.175;
+
+  NSDictionary* outDict = [NSDictionary dictionaryWithObjectsAndKeys:
+      outView, NSViewAnimationTargetKey,
+      NSViewAnimationFadeOutEffect, NSViewAnimationEffectKey,
+      nil
+  ];
+  NSDictionary* inDict = [NSDictionary dictionaryWithObjectsAndKeys:
+      inView, NSViewAnimationTargetKey,
+      NSViewAnimationFadeInEffect, NSViewAnimationEffectKey,
+      nil
+  ];
+
+  scoped_nsobject<NSViewAnimation> animation(
+      [[NSViewAnimation alloc] initWithViewAnimations:[NSArray arrayWithObjects:
+          outDict, inDict, nil]]);
+  [animation setDuration:kAnimationDuration];
+  [self willStartAnimation:animation];
+  [animation startAnimation];
+}
+
+- (void)willStartAnimation:(NSAnimation*)animation {
 }
 
 @end
 
 // Profile Switch Button ///////////////////////////////////////////////////////
 
-@implementation SwitchProfileButtonCell
+@implementation AvatarMenuItemView
 
 @synthesize viewController = viewController_;
 
 - (void)awakeFromNib {
-  // Needed to get entered and exited events.
-  self.showsBorderOnlyWhileMouseInside = YES;
+  [self updateTrackingAreas];
+}
+
+- (void)updateTrackingAreas {
+  if (trackingArea_.get())
+    [self removeTrackingArea:trackingArea_.get()];
+
+  trackingArea_.reset(
+      [[CrTrackingArea alloc] initWithRect:[self bounds]
+                                   options:NSTrackingMouseEnteredAndExited |
+                                           NSTrackingActiveInKeyWindow
+                              proxiedOwner:self
+                                  userInfo:nil]);
+  [self addTrackingArea:trackingArea_.get()];
+
+  [super updateTrackingAreas];
 }
 
 - (void)mouseEntered:(id)sender {
   [viewController_ highlightForEventType:[[NSApp currentEvent] type]];
+  mouseInside_ = YES;
+  [self setNeedsDisplay:YES];
 }
 
 - (void)mouseExited:(id)sender {
   [viewController_ highlightForEventType:[[NSApp currentEvent] type]];
-}
-
-- (void)mouseDown:(id)sender {
-  [viewController_ highlightForEventType:[[NSApp currentEvent] type]];
+  mouseInside_ = NO;
+  [self setNeedsDisplay:YES];
 }
 
 - (void)mouseUp:(id)sender {
-  [viewController_ highlightForEventType:[[NSApp currentEvent] type]];
+  [viewController_ switchToProfile:self];
 }
 
+- (void)drawRect:(NSRect)dirtyRect {
+  NSColor* backgroundColor = nil;
+  if (mouseInside_) {
+    backgroundColor = [NSColor colorWithCalibratedRed:223.0/255
+                                                green:238.0/255
+                                                 blue:246.0/255
+                                                alpha:1.0];
+  } else {
+    backgroundColor = [NSColor whiteColor];
+  }
+
+  [backgroundColor set];
+  NSRectFill([self bounds]);
+}
+
+// Make sure the element is focusable for accessibility.
+- (BOOL)canBecomeKeyView {
+  return YES;
+}
+
+- (BOOL)accessibilityIsIgnored {
+  return NO;
+}
+
+- (NSArray*)accessibilityAttributeNames {
+  NSMutableArray* attributes =
+      [[super accessibilityAttributeNames] mutableCopy];
+  [attributes addObject:NSAccessibilityTitleAttribute];
+  [attributes addObject:NSAccessibilityEnabledAttribute];
+
+  return [attributes autorelease];
+}
+
+- (NSArray*)accessibilityActionNames {
+  NSArray* parentActions = [super accessibilityActionNames];
+  return [parentActions arrayByAddingObject:NSAccessibilityPressAction];
+}
+
+- (id)accessibilityAttributeValue:(NSString*)attribute {
+  if ([attribute isEqual:NSAccessibilityRoleAttribute])
+    return NSAccessibilityButtonRole;
+
+  if ([attribute isEqual:NSAccessibilityRoleDescriptionAttribute])
+    return NSAccessibilityRoleDescription(NSAccessibilityButtonRole, nil);
+
+  if ([attribute isEqual:NSAccessibilityTitleAttribute]) {
+    return l10n_util::GetNSStringF(
+        IDS_PROFILES_SWITCH_TO_PROFILE_ACCESSIBLE_NAME,
+        base::SysNSStringToUTF16(self.viewController.nameField.stringValue));
+  }
+
+  if ([attribute isEqual:NSAccessibilityEnabledAttribute])
+    return [NSNumber numberWithBool:YES];
+
+  return [super accessibilityAttributeValue:attribute];
+}
+
+- (void)accessibilityPerformAction:(NSString*)action {
+  if ([action isEqual:NSAccessibilityPressAction]) {
+    [viewController_ switchToProfile:self];
+    return;
+  }
+
+  [super accessibilityPerformAction:action];
+}
+
+@end
+
+////////////////////////////////////////////////////////////////////////////////
+
+@implementation AccessibilityIgnoredImageCell
+- (BOOL)accessibilityIsIgnored {
+  return YES;
+}
+@end
+
+@implementation AccessibilityIgnoredTextFieldCell
+- (BOOL)accessibilityIsIgnored {
+  return YES;
+}
 @end

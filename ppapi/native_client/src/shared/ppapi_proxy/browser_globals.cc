@@ -23,7 +23,7 @@
 #include "ppapi/c/dev/ppb_layer_compositor_dev.h"
 #include "ppapi/c/dev/ppb_surface_3d_dev.h"
 #include "ppapi/c/ppb_graphics_3d.h"
-#include "ppapi/c/ppb_opengles.h"
+#include "ppapi/c/ppb_opengles2.h"
 #include "ppapi/c/trusted/ppb_graphics_3d_trusted.h"
 
 namespace ppapi_proxy {
@@ -55,26 +55,6 @@ bool enable_dev_interfaces = false;
 bool enable_3d_interfaces = true;
 
 }  // namespace
-
-// By default, disable developer (Dev) interfaces.  To enable developer
-// interfaces, set the environment variable NACL_ENABLE_PPAPI_DEV to 1.
-// Also, the plugin can request whether or not to enable dev interfaces.
-bool AreDevInterfacesEnabled() {
-  static bool first = true;
-  static bool env_dev_enabled = false;
-  if (first) {
-    const char *nacl_enable_ppapi_dev = getenv("NACL_ENABLE_PPAPI_DEV");
-    if (NULL != nacl_enable_ppapi_dev) {
-      int v = strtol(nacl_enable_ppapi_dev, (char **) 0, 0);
-      if (v != 0) {
-        env_dev_enabled = true;
-      }
-    }
-    first = false;
-  }
-  return env_dev_enabled || enable_dev_interfaces;
-}
-
 
 void SetBrowserPppForInstance(PP_Instance instance, BrowserPpp* browser_ppp) {
   // If there was no map, create one.
@@ -202,7 +182,7 @@ const void* GetBrowserInterface(const char* interface_name) {
     return NULL;
   }
   // If dev interface is not enabled, reject interfaces containing "(Dev)"
-  if (!AreDevInterfacesEnabled() && strstr(interface_name, "(Dev)") != NULL) {
+  if (!enable_dev_interfaces && strstr(interface_name, "(Dev)") != NULL) {
     return NULL;
   }
   if (!enable_3d_interfaces) {
@@ -387,10 +367,16 @@ const PPB_Font_Dev* PPBFontInterface() {
   return ppb;
 }
 
-const PPB_Fullscreen_Dev* PPBFullscreenInterface() {
-  static const PPB_Fullscreen_Dev* ppb =
-      static_cast<const PPB_Fullscreen_Dev*>(
-        GetBrowserInterfaceSafe(PPB_FULLSCREEN_DEV_INTERFACE));
+const PPB_Fullscreen* PPBFullscreenInterface() {
+  static const PPB_Fullscreen* ppb =
+      static_cast<const PPB_Fullscreen*>(
+        GetBrowserInterfaceSafe(PPB_FULLSCREEN_INTERFACE));
+  return ppb;
+}
+
+const PPB_MouseLock* PPBMouseLockInterface() {
+  static const PPB_MouseLock* ppb = static_cast<const PPB_MouseLock*>(
+      GetBrowserInterfaceSafe(PPB_MOUSELOCK_INTERFACE));
   return ppb;
 }
 

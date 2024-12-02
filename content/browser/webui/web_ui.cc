@@ -16,8 +16,8 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/webui/generic_handler.h"
-#include "content/common/bindings_policy.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/bindings_policy.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 
@@ -42,8 +42,8 @@ WebUI::WebUI(TabContents* contents)
     : hide_favicon_(false),
       focus_location_bar_by_default_(false),
       should_hide_url_(false),
-      link_transition_type_(PageTransition::LINK),
-      bindings_(BindingsPolicy::WEB_UI),
+      link_transition_type_(content::PAGE_TRANSITION_LINK),
+      bindings_(content::BINDINGS_POLICY_WEB_UI),
       register_callback_overwrites_(false),
       tab_contents_(contents) {
   DCHECK(contents);
@@ -52,8 +52,6 @@ WebUI::WebUI(TabContents* contents)
 }
 
 WebUI::~WebUI() {
-  STLDeleteContainerPairSecondPointers(message_callbacks_.begin(),
-                                       message_callbacks_.end());
   STLDeleteContainerPointers(handlers_.begin(), handlers_.end());
 }
 
@@ -82,11 +80,23 @@ void WebUI::OnWebUISend(const GURL& source_url,
   // Look up the callback for this message.
   MessageCallbackMap::const_iterator callback =
       message_callbacks_.find(message);
-  if (callback == message_callbacks_.end())
+  if (callback != message_callbacks_.end()) {
+    // Forward this message and content on.
+    callback->second.Run(&args);
+  }
+}
+
+void WebUI::RenderViewCreated(RenderViewHost* render_view_host) {
+  // Do not attempt to set the toolkit property if WebUI is not enabled, e.g.,
+  // the bookmarks manager page.
+  if (!(bindings_ & content::BINDINGS_POLICY_WEB_UI))
     return;
 
-  // Forward this message and content on.
-  callback->second->Run(&args);
+#if defined(TOOLKIT_VIEWS)
+  render_view_host->SetWebUIProperty("toolkit", "views");
+#elif defined(TOOLKIT_GTK)
+  render_view_host->SetWebUIProperty("toolkit", "GTK");
+#endif  // defined(TOOLKIT_VIEWS)
 }
 
 void WebUI::CallJavascriptFunction(const std::string& function_name) {
@@ -147,12 +157,12 @@ void WebUI::CallJavascriptFunction(
 }
 
 void WebUI::RegisterMessageCallback(const std::string &message,
-                                    MessageCallback *callback) {
+                                    const MessageCallback& callback) {
   std::pair<MessageCallbackMap::iterator, bool> result =
       message_callbacks_.insert(std::make_pair(message, callback));
 
   // Overwrite preexisting message callback mappings.
-  if (register_callback_overwrites() && !result.second)
+  if (!result.second && register_callback_overwrites())
     result.first->second = callback;
 }
 

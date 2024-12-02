@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
@@ -31,6 +32,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/font.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/button/text_button.h"
@@ -102,9 +104,7 @@ class UsernameField : public chromeos::TextfieldWithMargin {
 
 namespace chromeos {
 
-NewUserView::NewUserView(Delegate* delegate,
-                         bool need_border,
-                         bool need_guest_link)
+NewUserView::NewUserView(Delegate* delegate, bool need_guest_link)
     : username_field_(NULL),
       password_field_(NULL),
       title_label_(NULL),
@@ -123,9 +123,8 @@ NewUserView::NewUserView(Delegate* delegate,
       accel_login_off_the_record_(ui::VKEY_B, false, false, true),
       accel_toggle_accessibility_(WizardAccessibilityHelper::GetAccelerator()),
       delegate_(delegate),
-      ALLOW_THIS_IN_INITIALIZER_LIST(focus_grabber_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       login_in_process_(false),
-      need_border_(need_border),
       need_guest_link_(false),
       need_create_account_(false),
       languages_menubutton_order_(-1),
@@ -141,22 +140,24 @@ NewUserView::~NewUserView() {
 }
 
 void NewUserView::Init() {
-  if (need_border_) {
-    // Use rounded rect background.
-    set_border(CreateWizardBorder(&BorderDefinition::kUserBorder));
-    views::Painter* painter = CreateWizardPainter(
-        &BorderDefinition::kUserBorder);
-    set_background(views::Background::CreateBackgroundPainter(true, painter));
-  }
+  // Use rounded rect background.
+  set_border(CreateWizardBorder(&BorderDefinition::kUserBorder));
+  views::Painter* painter = CreateWizardPainter(&BorderDefinition::kUserBorder);
+  set_background(views::Background::CreateBackgroundPainter(true, painter));
+  SkColor background_color = color_utils::AlphaBlend(
+      BorderDefinition::kUserBorder.top_color,
+      BorderDefinition::kUserBorder.bottom_color, 128);
 
   title_label_ = new views::Label();
+  title_label_->SetBackgroundColor(background_color);
   title_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   title_label_->SetMultiLine(true);
   AddChildView(title_label_);
 
   title_hint_label_ = new views::Label();
+  title_hint_label_->SetBackgroundColor(background_color);
   title_hint_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  title_hint_label_->SetColor(SK_ColorGRAY);
+  title_hint_label_->SetEnabledColor(SK_ColorGRAY);
   title_hint_label_->SetMultiLine(true);
   AddChildView(title_hint_label_);
 
@@ -180,12 +181,10 @@ void NewUserView::Init() {
   RecreatePeculiarControls();
 
   AddChildView(sign_in_button_);
-  if (need_guest_link_) {
-    InitLink(&guest_link_);
-  }
-  if (need_create_account_) {
-    InitLink(&create_account_link_);
-  }
+  if (need_guest_link_)
+    guest_link_ = InitLink(background_color);
+  if (need_create_account_)
+    create_account_link_ = InitLink(background_color);
   AddChildView(languages_menubutton_);
 
   // Set up accelerators.
@@ -231,7 +230,7 @@ void NewUserView::RecreatePeculiarControls() {
   // to shrink, only grow; so recreate on text change.
   delete languages_menubutton_;
   languages_menubutton_ = new views::MenuButton(
-      NULL, std::wstring(), &language_switch_menu_, true);
+      NULL, string16(), &language_switch_menu_, true);
   languages_menubutton_->set_menu_marker(
       ResourceBundle::GetSharedInstance().GetBitmapNamed(
           IDR_MENU_DROPARROW_SHARP));
@@ -289,32 +288,29 @@ void NewUserView::UpdateLocalizedStringsAndFonts() {
   const gfx::Font& base_font = rb.GetFont(ResourceBundle::BaseFont);
 
   title_label_->SetFont(title_font);
-  title_label_->SetText(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_LOGIN_TITLE)));
+  title_label_->SetText(
+      l10n_util::GetStringUTF16(IDS_LOGIN_TITLE));
   title_hint_label_->SetFont(title_hint_font);
-  title_hint_label_->SetText(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_LOGIN_TITLE_HINT)));
+  title_hint_label_->SetText(l10n_util::GetStringUTF16(IDS_LOGIN_TITLE_HINT));
   SetAndCorrectTextfieldFont(username_field_, base_font);
   username_field_->set_text_to_display_when_empty(
       l10n_util::GetStringUTF16(IDS_LOGIN_USERNAME));
   SetAndCorrectTextfieldFont(password_field_, base_font);
   password_field_->set_text_to_display_when_empty(
       l10n_util::GetStringUTF16(IDS_LOGIN_PASSWORD));
-  sign_in_button_->SetText(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_LOGIN_BUTTON)));
+  sign_in_button_->SetText(l10n_util::GetStringUTF16(IDS_LOGIN_BUTTON));
   if (need_guest_link_) {
     guest_link_->SetFont(base_font);
-    guest_link_->SetText(UTF16ToWide(
-        l10n_util::GetStringUTF16(IDS_BROWSE_WITHOUT_SIGNING_IN_BUTTON)));
+    guest_link_->SetText(
+        l10n_util::GetStringUTF16(IDS_BROWSE_WITHOUT_SIGNING_IN_BUTTON));
   }
   if (need_create_account_) {
     create_account_link_->SetFont(base_font);
     create_account_link_->SetText(
-        UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_ACCOUNT_BUTTON)));
+        l10n_util::GetStringUTF16(IDS_CREATE_ACCOUNT_BUTTON));
   }
   delegate_->ClearErrors();
-  languages_menubutton_->SetText(
-      UTF16ToWide(language_switch_menu_.GetCurrentLocaleName()));
+  languages_menubutton_->SetText(language_switch_menu_.GetCurrentLocaleName());
 }
 
 void NewUserView::OnLocaleChanged() {
@@ -339,9 +335,9 @@ void NewUserView::ViewHierarchyChanged(bool is_add,
                                        View *parent,
                                        View *child) {
   if (is_add && (child == username_field_ || child == password_field_)) {
-    MessageLoop::current()->PostTask(FROM_HERE,
-        focus_grabber_factory_.NewRunnableMethod(
-            &NewUserView::Layout));
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&NewUserView::Layout, weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -427,7 +423,7 @@ void NewUserView::Layout() {
   y += setViewBounds(password_field_, x, y, width, true) + kRowPad;
 
   int sign_in_button_width = sign_in_button_->GetPreferredSize().width();
-  setViewBounds(sign_in_button_, x, y, sign_in_button_width,true);
+  setViewBounds(sign_in_button_, x, y, sign_in_button_width, true);
 
   SchedulePaint();
 }
@@ -561,21 +557,21 @@ void NewUserView::EnableInputControls(bool enabled) {
 }
 
 bool NewUserView::NavigateAway() {
-  if (username_field_->text().empty() &&
-      password_field_->text().empty()) {
-    delegate_->NavigateAway();
-    return true;
-  } else {
+  if (!username_field_->text().empty() ||
+      !password_field_->text().empty())
     return false;
-  }
+  delegate_->NavigateAway();
+  return true;
 }
 
-void NewUserView::InitLink(views::Link** link) {
-  *link = new views::Link(std::wstring());
-  (*link)->set_listener(this);
-  (*link)->SetNormalColor(login::kLinkColor);
-  (*link)->SetHighlightedColor(login::kLinkColor);
-  AddChildView(*link);
+views::Link* NewUserView::InitLink(SkColor background_color) {
+  views::Link* link = new views::Link(string16());
+  link->set_listener(this);
+  link->SetBackgroundColor(background_color);
+  link->SetEnabledColor(login::kLinkColor);
+  link->SetPressedColor(login::kLinkColor);
+  AddChildView(link);
+  return link;
 }
 
 }  // namespace chromeos

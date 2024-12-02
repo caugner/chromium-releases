@@ -7,8 +7,10 @@
  * but do not modify the image dimensions.
  * @constructor
  */
-ImageEditor.Mode.Adjust = function(displayName) {
-  ImageEditor.Mode.call(this, displayName);
+ImageEditor.Mode.Adjust = function() {
+  ImageEditor.Mode.apply(this, arguments);
+  this.implicitCommit = true;
+  this.doneMessage_ = null;
   this.viewportGeneration_ = 0;
 };
 
@@ -18,64 +20,41 @@ ImageEditor.Mode.Adjust.prototype = {__proto__: ImageEditor.Mode.prototype};
  *  ImageEditor.Mode methods overridden.
  */
 
-ImageEditor.Mode.Adjust.prototype.commit = function() {
-  if (!this.filter_) return; // Did not do anything yet.
+ImageEditor.Mode.Adjust.prototype.getCommand = function() {
+  if (!this.filter_) return null;
 
-  // Applying the filter to the entire image takes some time, so we do
-  // it in small increments, providing visual feedback.
-  // TODO: provide modal progress indicator.
-
-  // First hide the preview and show the original image.
-  this.repaint();
-
-  var self = this;
-
-  function repaintStrip(fromRow, toRow) {
-    var imageStrip = new Rect(self.getViewport().getImageBounds());
-    imageStrip.top = fromRow;
-    imageStrip.height = toRow - fromRow;
-
-    var screenStrip = new Rect(self.getViewport().getImageBoundsOnScreen());
-    screenStrip.top = Math.round(self.getViewport().imageToScreenY(fromRow));
-    screenStrip.height = Math.round(self.getViewport().imageToScreenY(toRow)) -
-        screenStrip.top;
-
-    self.getBuffer().repaintScreenRect(screenStrip, imageStrip);
-  }
-
-  ImageUtil.trace.resetTimer('filter');
-
-  var lastUpdatedRow = 0;
-
-  filter.applyByStrips(
-      this.getContent().getCanvas().getContext('2d'),
-      this.filter_,
-      function (updatedRow, rowCount) {
-        repaintStrip(lastUpdatedRow, updatedRow);
-        lastUpdatedRow = updatedRow;
-        if (updatedRow == rowCount) {
-          ImageUtil.trace.reportTimer('filter');
-          self.getContent().invalidateCaches();
-          self.repaint();
-        }
-      });
+  return new Command.Filter(this.name, this.filter_, this.doneMessage_);
 };
 
-ImageEditor.Mode.Adjust.prototype.rollback = function() {
+ImageEditor.Mode.Adjust.prototype.cleanUpUI = function() {
+  ImageEditor.Mode.prototype.cleanUpUI.apply(this, arguments);
+  if (this.canvas_) {
+    this.canvas_.parentNode.removeChild(this.canvas_);
+    this.canvas_ = null;
+  }
+};
+
+ImageEditor.Mode.Adjust.prototype.cleanUpCaches = function() {
   this.filter_ = null;
   this.previewImageData_ = null;
 };
 
 ImageEditor.Mode.Adjust.prototype.update = function(options) {
+  ImageEditor.Mode.prototype.update.apply(this, arguments);
+
   // We assume filter names are used in the UI directly.
   // This will have to change with i18n.
   this.filter_ = this.createFilter(options);
-  this.previewValid_ = false;
-  this.repaint();
+  this.updatePreviewImage();
+  ImageUtil.trace.resetTimer('preview');
+  this.filter_(this.previewImageData_, this.originalImageData, 0, 0);
+  ImageUtil.trace.reportTimer('preview');
+  this.canvas_.getContext('2d').putImageData(
+      this.previewImageData_, 0, 0);
 };
 
 /**
- * Clip and scale the source image data for the preview.
+ * Copy the source image data for the preview.
  * Use the cached copy if the viewport has not changed.
  */
 ImageEditor.Mode.Adjust.prototype.updatePreviewImage = function() {
@@ -83,48 +62,23 @@ ImageEditor.Mode.Adjust.prototype.updatePreviewImage = function() {
       this.viewportGeneration_ != this.getViewport().getCacheGeneration()) {
     this.viewportGeneration_ = this.getViewport().getCacheGeneration();
 
-    var imageRect = this.getPreviewRect(this.getViewport().getImageClipped());
-    var screenRect = this.getPreviewRect(this.getViewport().getScreenClipped());
+    if (!this.canvas_) {
+      var container = this.getImageView().container_;
+      this.canvas_ = container.ownerDocument.createElement('canvas');
+      container.appendChild(this.canvas_);
+    }
 
-    // Copy the visible part of the image at the current screen scale.
-    var canvas = this.getContent().createBlankCanvas(
-        screenRect.width, screenRect.height);
-    var context = canvas.getContext('2d');
-    Rect.drawImage(context, this.getContent().getCanvas(), null, imageRect);
-    this.originalImageData =
-        context.getImageData(0, 0, screenRect.width, screenRect.height);
-    this.previewImageData_ =
-        context.getImageData(0, 0, screenRect.width, screenRect.height);
-    this.previewValid_ = false;
-  }
+    var screenClipped = this.getViewport().getScreenClipped();
 
-  if (this.filter_ && !this.previewValid_) {
-    ImageUtil.trace.resetTimer('preview');
-    this.filter_(this.previewImageData_, this.originalImageData, 0, 0);
-    ImageUtil.trace.reportTimer('preview');
-    this.previewValid_ = true;
-  }
-};
+    this.canvas_.style.left = screenClipped.left + 'px';
+    this.canvas_.style.top = screenClipped.top + 'px';
+    if (this.canvas_.width != screenClipped.width)
+      this.canvas_.width = screenClipped.width;
+    if (this.canvas_.height != screenClipped.height)
+      this.canvas_.height = screenClipped.height;
 
-ImageEditor.Mode.Adjust.prototype.draw = function(context) {
-  this.updatePreviewImage();
-
-  var screenClipped = this.getViewport().getScreenClipped();
-
-  var previewRect = this.getPreviewRect(screenClipped);
-  context.putImageData(
-      this.previewImageData_, previewRect.left,  previewRect.top);
-
-  if (previewRect.width < screenClipped.width &&
-      previewRect.height < screenClipped.height) {
-    // Some part of the original image is not covered by the preview,
-    // shade it out.
-    context.globalAlpha = 0.75;
-    context.fillStyle = '#000000';
-    context.strokeStyle = '#000000';
-    Rect.fillBetween(
-        context, previewRect, this.getViewport().getScreenBounds());
-    Rect.outline(context, previewRect);
+    this.originalImageData = this.getImageView().copyScreenImageData();
+    this.previewImageData_ = this.getImageView().copyScreenImageData();
   }
 };
 
@@ -133,22 +87,7 @@ ImageEditor.Mode.Adjust.prototype.draw = function(context) {
  */
 
 ImageEditor.Mode.Adjust.prototype.createFilter = function(options) {
-  return filter.create(this.displayName.toLowerCase(), options);
-};
-
-ImageEditor.Mode.Adjust.prototype.getPreviewRect = function(rect) {
-  if (this.getViewport().getScale() >= 1) {
-    return rect;
-  } else {
-    var bounds = this.getViewport().getImageBounds();
-    var screen = this.getViewport().getScreenClipped();
-
-    screen = screen.inflate(-screen.width / 8, -screen.height / 8);
-
-    return rect.inflate(-rect.width / 2, -rect.height / 2).
-        inflate(Math.min(screen.width, bounds.width) / 2,
-                Math.min(screen.height, bounds.height) / 2);
-  }
+  return filter.create(this.name, options);
 };
 
 /**
@@ -166,17 +105,8 @@ ImageEditor.Mode.ColorFilter.prototype =
 
 ImageEditor.Mode.ColorFilter.prototype.setUp = function() {
   ImageEditor.Mode.Adjust.prototype.setUp.apply(this, arguments);
-  this.histogram_ =
-      new ImageEditor.Mode.Histogram(this.getViewport(), this.getContent());
-};
-
-ImageEditor.Mode.ColorFilter.prototype.draw = function(context) {
-  ImageEditor.Mode.Adjust.prototype.draw.apply(this, arguments);
-  this.histogram_.draw(context);
-};
-
-ImageEditor.Mode.ColorFilter.prototype.getPreviewRect = function(rect) {
-  return rect;
+  this.histogram_ = new ImageEditor.Mode.Histogram(
+      this.getViewport(), this.getImageView().getCanvas());
 };
 
 ImageEditor.Mode.ColorFilter.prototype.createFilter = function(options) {
@@ -186,23 +116,25 @@ ImageEditor.Mode.ColorFilter.prototype.createFilter = function(options) {
   return filterFunc;
 };
 
-ImageEditor.Mode.ColorFilter.prototype.rollback = function() {
-  ImageEditor.Mode.Adjust.prototype.rollback.apply(this, arguments);
-  this.histogram_.update(null);
+ImageEditor.Mode.ColorFilter.prototype.cleanUpUI = function() {
+  ImageEditor.Mode.Adjust.prototype.cleanUpUI.apply(this, arguments);
+  this.histogram_ = null;
 };
 
 /**
  * A histogram container.
  * @constructor
  */
-ImageEditor.Mode.Histogram = function(viewport, content) {
+ImageEditor.Mode.Histogram = function(viewport, canvas) {
   this.viewport_ = viewport;
 
-  var canvas = content.getCanvas();
   var downScale = Math.max(1, Math.sqrt(canvas.width * canvas.height / 10000));
-  var thumbnail = content.copyCanvas(canvas.width / downScale,
-                                     canvas.height / downScale);
+
+  var thumbnail = canvas.ownerDocument.createElement('canvas');
+  thumbnail.width = canvas.width / downScale;
+  thumbnail.height = canvas.height / downScale;
   var context = thumbnail.getContext('2d');
+  Rect.drawImage(context, canvas);
 
   this.originalImageData_ =
       context.getImageData(0, 0, thumbnail.width, thumbnail.height);
@@ -281,13 +213,11 @@ ImageEditor.Mode.Histogram.prototype.draw = function(context) {
  * @constructor
  */
 ImageEditor.Mode.Exposure = function() {
-  ImageEditor.Mode.ColorFilter.call(this, 'Exposure');
+  ImageEditor.Mode.ColorFilter.call(this, 'exposure');
 };
 
 ImageEditor.Mode.Exposure.prototype =
     {__proto__: ImageEditor.Mode.ColorFilter.prototype};
-
-ImageEditor.Mode.register(ImageEditor.Mode.Exposure);
 
 ImageEditor.Mode.Exposure.prototype.createTools = function(toolbar) {
   toolbar.addRange('brightness', -1, 0, 1, 100);
@@ -299,19 +229,37 @@ ImageEditor.Mode.Exposure.prototype.createTools = function(toolbar) {
  * @constructor
  */
 ImageEditor.Mode.Autofix = function() {
-  ImageEditor.Mode.ColorFilter.call(this, 'Autofix');
+  ImageEditor.Mode.ColorFilter.call(this, 'autofix');
+  this.doneMessage_ = 'fixed';
 };
 
 ImageEditor.Mode.Autofix.prototype =
     {__proto__: ImageEditor.Mode.ColorFilter.prototype};
 
-ImageEditor.Mode.register(ImageEditor.Mode.Autofix);
-
 ImageEditor.Mode.Autofix.prototype.createTools = function(toolbar) {
   var self = this;
-  toolbar.addButton('Apply', function() {
-    self.update({histogram: self.histogram_.getData()});
-  });
+  toolbar.addButton('Apply', this.apply.bind(this));
+};
+
+ImageEditor.Mode.Autofix.prototype.apply = function() {
+  this.update({histogram: this.histogram_.getData()});
+};
+
+/**
+ * Instant Autofix.
+ * @constructor
+ */
+ImageEditor.Mode.InstantAutofix = function() {
+  ImageEditor.Mode.Autofix.apply(this, arguments);
+  this.instant = true;
+};
+
+ImageEditor.Mode.InstantAutofix.prototype =
+    {__proto__: ImageEditor.Mode.Autofix.prototype};
+
+ImageEditor.Mode.InstantAutofix.prototype.setUp = function() {
+  ImageEditor.Mode.Autofix.prototype.setUp.apply(this, arguments);
+  this.apply();
 };
 
 /**
@@ -319,13 +267,11 @@ ImageEditor.Mode.Autofix.prototype.createTools = function(toolbar) {
  * @constructor
  */
 ImageEditor.Mode.Blur = function() {
-  ImageEditor.Mode.Adjust.call(this, 'Blur');
+  ImageEditor.Mode.Adjust.call(this, 'blur');
 };
 
 ImageEditor.Mode.Blur.prototype =
     {__proto__: ImageEditor.Mode.Adjust.prototype};
-
-ImageEditor.Mode.register(ImageEditor.Mode.Blur);
 
 ImageEditor.Mode.Blur.prototype.createTools = function(toolbar) {
   toolbar.addRange('strength', 0, 0, 1, 100);
@@ -337,13 +283,11 @@ ImageEditor.Mode.Blur.prototype.createTools = function(toolbar) {
  * @constructor
  */
 ImageEditor.Mode.Sharpen = function() {
-  ImageEditor.Mode.Adjust.call(this, 'Sharpen');
+  ImageEditor.Mode.Adjust.call(this, 'sharpen');
 };
 
 ImageEditor.Mode.Sharpen.prototype =
     {__proto__: ImageEditor.Mode.Adjust.prototype};
-
-ImageEditor.Mode.register(ImageEditor.Mode.Sharpen);
 
 ImageEditor.Mode.Sharpen.prototype.createTools = function(toolbar) {
   toolbar.addRange('strength', 0, 0, 1, 100);

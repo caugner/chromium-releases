@@ -78,21 +78,29 @@ class EnumMapper {
 // policy or setup file import depending on the EnumMapper supplied.
 class NetworkDeviceParser {
  public:
-  virtual NetworkDevice* CreateDeviceFromInfo(const std::string& device_path,
-                                              const DictionaryValue& info);
-  virtual bool UpdateDeviceFromInfo(const DictionaryValue& info,
+  virtual ~NetworkDeviceParser();
+
+  virtual NetworkDevice* CreateDeviceFromInfo(
+      const std::string& device_path,
+      const base::DictionaryValue& info);
+  virtual bool UpdateDeviceFromInfo(const base::DictionaryValue& info,
                                     NetworkDevice* device);
   virtual bool UpdateStatus(const std::string& key,
-                            const Value& value,
+                            const base::Value& value,
                             NetworkDevice* device,
                             PropertyIndex* index);
+
  protected:
   // The NetworkDeviceParser does not take ownership of the |mapper|.
   explicit NetworkDeviceParser(const EnumMapper<PropertyIndex>* mapper);
-  virtual ~NetworkDeviceParser();
+
+  // Creates new NetworkDevice based on device_path.
+  // Subclasses should override this method and set the correct parser for this
+  // network device if appropriate.
+  virtual NetworkDevice* CreateNewNetworkDevice(const std::string& device_path);
 
   virtual bool ParseValue(PropertyIndex index,
-                          const Value& value,
+                          const base::Value& value,
                           NetworkDevice* device) = 0;
   virtual ConnectionType ParseType(const std::string& type) = 0;
 
@@ -111,13 +119,15 @@ class NetworkDeviceParser {
 // customize its methods to parse other forms of input dictionaries.
 class NetworkParser {
  public:
+  virtual ~NetworkParser();
+
   // Called when a new network is encountered.  Returns NULL upon failure.
   virtual Network* CreateNetworkFromInfo(const std::string& service_path,
-                                         const DictionaryValue& info);
+                                         const base::DictionaryValue& info);
 
   // Called when an existing network is has new information that needs
   // to be updated.  Returns false upon failure.
-  virtual bool UpdateNetworkFromInfo(const DictionaryValue& info,
+  virtual bool UpdateNetworkFromInfo(const base::DictionaryValue& info,
                                      Network* network);
 
   // Called when an individual attribute of an existing network has
@@ -125,23 +135,28 @@ class NetworkParser {
   // property index for the given key.  |index| is filled in even if
   // the update fails.  Returns false upon failure.
   virtual bool UpdateStatus(const std::string& key,
-                            const Value& value,
+                            const base::Value& value,
                             Network* network,
                             PropertyIndex* index);
+
  protected:
   // The NetworkParser does not take ownership of the |mapper|.
   explicit NetworkParser(const EnumMapper<PropertyIndex>* mapper);
-  virtual ~NetworkParser();
 
+  // Creates new Network based on type and service_path.
+  // Subclasses should override this method and set the correct parser for this
+  // network if appropriate.
+  virtual Network* CreateNewNetwork(ConnectionType type,
+                                    const std::string& service_path);
+
+  // Parses the value and sets the appropriate field on Network.
   virtual bool ParseValue(PropertyIndex index,
-                          const Value& value,
-                          Network* network) = 0;
+                          const base::Value& value,
+                          Network* network);
+
   virtual ConnectionType ParseType(const std::string& type) = 0;
   virtual ConnectionType ParseTypeFromDictionary(
-      const DictionaryValue& info) = 0;
-  virtual ConnectionMode ParseMode(const std::string& mode) = 0;
-  virtual ConnectionState ParseState(const std::string& state) = 0;
-  virtual ConnectionError ParseError(const std::string& error) = 0;
+      const base::DictionaryValue& info) = 0;
 
   const EnumMapper<PropertyIndex>& mapper() const {
     return *mapper_;

@@ -12,7 +12,7 @@
 
 namespace views {
 class View;
-}  // namespace views
+}
 
 namespace examples {
 
@@ -20,34 +20,33 @@ class ExamplesMain;
 
 class ExampleBase {
  public:
-  // Returns the view containing this example controls.
-  // This view is added as a tab to the example application.
-  views::View* GetExampleView() {
-    return container_;
-  }
+  virtual ~ExampleBase();
 
   // Sub-classes should creates and add the views to the given parent.
   virtual void CreateExampleView(views::View* parent) = 0;
 
- protected:
-  explicit ExampleBase(ExamplesMain* main);
-  virtual ~ExampleBase() {}
+  const std::string& example_title() const { return example_title_; }
 
-  // Sub-classes should return the name of this test.
-  // It is used as the title of the tab displaying this test's controls.
-  virtual std::wstring GetExampleTitle() = 0;
+  // This view is added as a tab to the example application.
+  views::View* example_view() { return container_; }
+
+ protected:
+  ExampleBase(ExamplesMain* main, const char* title);
 
   // Prints a message in the status area, at the bottom of the window.
   void PrintStatus(const char* format, ...);
 
-  // Converts an integer/boolean to wchat "on"/"off".
-  static const wchar_t* IntToOnOff(int value) {
-    return value ? L"on" : L"off";
+  // Converts an boolean value to "on" or "off".
+  const char* BoolToOnOff(bool value) {
+    return value ? "on" : "off";
   }
 
  private:
-  // The runner actually running this test.
+  // The runner actually running this example.
   ExamplesMain* main_;
+
+  // Name of the example - used for the title of the tab.
+  std::string example_title_;
 
   // The view containing example views.
   views::View* container_;
@@ -58,4 +57,3 @@ class ExampleBase {
 }  // namespace examples
 
 #endif  // VIEWS_EXAMPLES_EXAMPLE_BASE_H_
-

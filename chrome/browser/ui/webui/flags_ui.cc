@@ -6,7 +6,8 @@
 
 #include <string>
 
-#include "base/memory/singleton.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/about_flags.h"
@@ -15,10 +16,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -104,11 +103,14 @@ class FlagsDOMHandler : public WebUIMessageHandler {
 
 void FlagsDOMHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("requestFlagsExperiments",
-      NewCallback(this, &FlagsDOMHandler::HandleRequestFlagsExperiments));
+      base::Bind(&FlagsDOMHandler::HandleRequestFlagsExperiments,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("enableFlagsExperiment",
-      NewCallback(this, &FlagsDOMHandler::HandleEnableFlagsExperimentMessage));
+      base::Bind(&FlagsDOMHandler::HandleEnableFlagsExperimentMessage,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("restartBrowser",
-      NewCallback(this, &FlagsDOMHandler::HandleRestartBrowser));
+      base::Bind(&FlagsDOMHandler::HandleRestartBrowser,
+                 base::Unretained(this)));
 }
 
 void FlagsDOMHandler::HandleRequestFlagsExperiments(const ListValue* args) {

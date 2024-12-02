@@ -12,7 +12,8 @@
 
 #include "base/base64.h"
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string16.h"
@@ -373,33 +374,47 @@ void InternetOptionsHandler::RegisterMessages() {
   // Setup handlers specific to this panel.
   DCHECK(web_ui_);
   web_ui_->RegisterMessageCallback("buttonClickCallback",
-      NewCallback(this, &InternetOptionsHandler::ButtonClickCallback));
+      base::Bind(&InternetOptionsHandler::ButtonClickCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("refreshCellularPlan",
-      NewCallback(this, &InternetOptionsHandler::RefreshCellularPlanCallback));
+      base::Bind(&InternetOptionsHandler::RefreshCellularPlanCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setPreferNetwork",
-      NewCallback(this, &InternetOptionsHandler::SetPreferNetworkCallback));
+      base::Bind(&InternetOptionsHandler::SetPreferNetworkCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setAutoConnect",
-      NewCallback(this, &InternetOptionsHandler::SetAutoConnectCallback));
+      base::Bind(&InternetOptionsHandler::SetAutoConnectCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setIPConfig",
-      NewCallback(this, &InternetOptionsHandler::SetIPConfigCallback));
+      base::Bind(&InternetOptionsHandler::SetIPConfigCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("enableWifi",
-      NewCallback(this, &InternetOptionsHandler::EnableWifiCallback));
+      base::Bind(&InternetOptionsHandler::EnableWifiCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("disableWifi",
-      NewCallback(this, &InternetOptionsHandler::DisableWifiCallback));
+      base::Bind(&InternetOptionsHandler::DisableWifiCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("enableCellular",
-      NewCallback(this, &InternetOptionsHandler::EnableCellularCallback));
+      base::Bind(&InternetOptionsHandler::EnableCellularCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("disableCellular",
-      NewCallback(this, &InternetOptionsHandler::DisableCellularCallback));
+      base::Bind(&InternetOptionsHandler::DisableCellularCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("buyDataPlan",
-      NewCallback(this, &InternetOptionsHandler::BuyDataPlanCallback));
+      base::Bind(&InternetOptionsHandler::BuyDataPlanCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("showMorePlanInfo",
-      NewCallback(this, &InternetOptionsHandler::BuyDataPlanCallback));
+      base::Bind(&InternetOptionsHandler::BuyDataPlanCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setApn",
-        NewCallback(this, &InternetOptionsHandler::SetApnCallback));
+      base::Bind(&InternetOptionsHandler::SetApnCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("setSimCardLock",
-        NewCallback(this, &InternetOptionsHandler::SetSimCardLockCallback));
+      base::Bind(&InternetOptionsHandler::SetSimCardLockCallback,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("changePin",
-        NewCallback(this, &InternetOptionsHandler::ChangePinCallback));
+      base::Bind(&InternetOptionsHandler::ChangePinCallback,
+                 base::Unretained(this)));
 }
 
 void InternetOptionsHandler::EnableWifiCallback(const ListValue* args) {
@@ -565,18 +580,16 @@ void InternetOptionsHandler::Observe(int type,
                                      const NotificationDetails& details) {
   chromeos::CrosOptionsPageUIHandler::Observe(type, source, details);
   if (type == chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED) {
-    bool require_pin = *Details<bool>(details).ptr();
-    DictionaryValue dictionary;
-    dictionary.SetBoolean("requirePin", require_pin);
+    base::FundamentalValue require_pin(*Details<bool>(details).ptr());
     web_ui_->CallJavascriptFunction(
-        "options.InternetOptions.updateSecurityTab", dictionary);
+        "options.InternetOptions.updateSecurityTab", require_pin);
   } else if (type == chrome::NOTIFICATION_ENTER_PIN_ENDED) {
     // We make an assumption (which is valid for now) that the SIM
     // unlock dialog is put up only when the user is trying to enable
     // mobile data.
     bool cancelled = *Details<bool>(details).ptr();
     if (cancelled) {
-      DictionaryValue dictionary;
+      base::DictionaryValue dictionary;
       FillNetworkInfo(&dictionary);
       web_ui_->CallJavascriptFunction(
           "options.InternetOptions.setupAttributes", dictionary);
@@ -1124,11 +1137,11 @@ ListValue* InternetOptionsHandler::GetWiredList() {
     const chromeos::EthernetNetwork* ethernet_network =
         cros_->ethernet_network();
     if (ethernet_network) {
-      const SkBitmap* icon =
+      const SkBitmap icon =
           chromeos::NetworkMenuIcon::GetBitmap(ethernet_network);
       list->Append(GetNetwork(
           ethernet_network->service_path(),
-          *icon,
+          icon,
           l10n_util::GetStringUTF8(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET),
           ethernet_network->connecting(),
           ethernet_network->connected(),
@@ -1144,20 +1157,19 @@ ListValue* InternetOptionsHandler::GetWiredList() {
 }
 
 ListValue* InternetOptionsHandler::GetWirelessList() {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   ListValue* list = new ListValue();
 
   const chromeos::WifiNetworkVector& wifi_networks = cros_->wifi_networks();
   for (chromeos::WifiNetworkVector::const_iterator it =
       wifi_networks.begin(); it != wifi_networks.end(); ++it) {
-    const SkBitmap* icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
+    const SkBitmap icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
     list->Append(GetNetwork(
         (*it)->service_path(),
-        *icon,
+        icon,
         (*it)->name(),
         (*it)->connecting(),
         (*it)->connected(),
-        (*it)->connectable(),
+        cros_->CanConnectToNetwork(*it),
         chromeos::TYPE_WIFI,
         false,
         false,
@@ -1169,7 +1181,8 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
   if (cros_->wifi_enabled()) {
     list->Append(GetNetwork(
         kOtherNetworksFakePath,
-        *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0),
+        chromeos::NetworkMenuIcon::GetConnectedBitmap(
+            chromeos::NetworkMenuIcon::ARCS),
         l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_OTHER_WIFI_NETWORKS),
         false,
         false,
@@ -1185,14 +1198,14 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
       cros_->cellular_networks();
   for (chromeos::CellularNetworkVector::const_iterator it =
       cellular_networks.begin(); it != cellular_networks.end(); ++it) {
-    const SkBitmap* icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
+    const SkBitmap icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
     list->Append(GetNetwork(
         (*it)->service_path(),
-        *icon,
+        icon,
         (*it)->name(),
         (*it)->connecting(),
         (*it)->connected(),
-        (*it)->connectable(),
+        cros_->CanConnectToNetwork(*it),
         chromeos::TYPE_CELLULAR,
         false,
         false,
@@ -1205,7 +1218,8 @@ ListValue* InternetOptionsHandler::GetWirelessList() {
       cros_->cellular_enabled()) {
     list->Append(GetNetwork(
         kOtherNetworksFakePath,
-        *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0),
+        chromeos::NetworkMenuIcon::GetDisconnectedBitmap(
+            chromeos::NetworkMenuIcon::BARS),
         l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_OTHER_CELLULAR_NETWORKS),
         false,
         false,
@@ -1227,14 +1241,14 @@ ListValue* InternetOptionsHandler::GetVPNList() {
       cros_->virtual_networks();
   for (chromeos::VirtualNetworkVector::const_iterator it =
       virtual_networks.begin(); it != virtual_networks.end(); ++it) {
-    const SkBitmap* icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
+    const SkBitmap icon = chromeos::NetworkMenuIcon::GetBitmap(*it);
     list->Append(GetNetwork(
         (*it)->service_path(),
-        *icon,
+        icon,
         (*it)->name(),
         (*it)->connecting(),
         (*it)->connected(),
-        (*it)->connectable(),
+        cros_->CanConnectToNetwork(*it),
         chromeos::TYPE_VPN,
         false,
         false,
@@ -1253,16 +1267,16 @@ ListValue* InternetOptionsHandler::GetRememberedList() {
        rit != cros_->remembered_wifi_networks().end(); ++rit) {
     chromeos::WifiNetwork* remembered = *rit;
     chromeos::WifiNetwork* wifi = static_cast<chromeos::WifiNetwork*>(
-        cros_->FindNetworkFromRemembered(remembered));
+        cros_->FindNetworkByUniqueId(remembered->unique_id()));
 
     // Set in_active_profile.
     bool shared =
         remembered->profile_type() == chromeos::PROFILE_SHARED;
-    const SkBitmap* icon =
+    const SkBitmap icon =
         chromeos::NetworkMenuIcon::GetBitmap(wifi ? wifi : remembered);
     list->Append(GetNetwork(
         remembered->service_path(),
-        *icon,
+        icon,
         remembered->name(),
         wifi ? wifi->connecting() : false,
         wifi ? wifi->connected() : false,
@@ -1279,16 +1293,16 @@ ListValue* InternetOptionsHandler::GetRememberedList() {
        rit != cros_->remembered_virtual_networks().end(); ++rit) {
     chromeos::VirtualNetwork* remembered = *rit;
     chromeos::VirtualNetwork* vpn = static_cast<chromeos::VirtualNetwork*>(
-        cros_->FindNetworkFromRemembered(remembered));
+        cros_->FindNetworkByUniqueId(remembered->unique_id()));
 
     // Set in_active_profile.
     bool shared =
         remembered->profile_type() == chromeos::PROFILE_SHARED;
-    const SkBitmap* icon =
+    const SkBitmap icon =
         chromeos::NetworkMenuIcon::GetBitmap(vpn ? vpn : remembered);
     list->Append(GetNetwork(
         remembered->service_path(),
-        *icon,
+        icon,
         remembered->name(),
         vpn ? vpn->connecting() : false,
         vpn ? vpn->connected() : false,
@@ -1310,7 +1324,9 @@ void InternetOptionsHandler::FillNetworkInfo(DictionaryValue* dictionary) {
   dictionary->Set("vpnList", GetVPNList());
   dictionary->Set("rememberedList", GetRememberedList());
   dictionary->SetBoolean("wifiAvailable", cros_->wifi_available());
+  dictionary->SetBoolean("wifiBusy", cros_->wifi_busy());
   dictionary->SetBoolean("wifiEnabled", cros_->wifi_enabled());
   dictionary->SetBoolean("cellularAvailable", cros_->cellular_available());
+  dictionary->SetBoolean("cellularBusy", cros_->cellular_busy());
   dictionary->SetBoolean("cellularEnabled", cros_->cellular_enabled());
 }

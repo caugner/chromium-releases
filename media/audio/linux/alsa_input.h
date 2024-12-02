@@ -9,8 +9,9 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_parameters.h"
 
@@ -34,10 +35,10 @@ class AlsaPcmInputStream : public AudioInputStream {
   virtual ~AlsaPcmInputStream();
 
   // Implementation of AudioOutputStream.
-  virtual bool Open();
-  virtual void Start(AudioInputCallback* callback);
-  virtual void Stop();
-  virtual void Close();
+  virtual bool Open() OVERRIDE;
+  virtual void Start(AudioInputCallback* callback) OVERRIDE;
+  virtual void Stop() OVERRIDE;
+  virtual void Close() OVERRIDE;
 
  private:
   // Logs the error and invokes any registered callbacks.
@@ -50,6 +51,9 @@ class AlsaPcmInputStream : public AudioInputStream {
   // Recovers from any device errors if possible.
   bool Recover(int error);
 
+  // Utility function for talking with the ALSA API.
+  snd_pcm_sframes_t GetCurrentDelay();
+
   std::string device_name_;
   AudioParameters params_;
   int bytes_per_packet_;
@@ -58,8 +62,9 @@ class AlsaPcmInputStream : public AudioInputStream {
   AudioInputCallback* callback_;  // Valid during a recording session.
   base::Time next_read_time_;  // Scheduled time for the next read callback.
   snd_pcm_t* device_handle_;  // Handle to the ALSA PCM recording device.
-  ScopedRunnableMethodFactory<AlsaPcmInputStream> task_factory_;
+  base::WeakPtrFactory<AlsaPcmInputStream> weak_factory_;
   scoped_array<uint8> audio_packet_;  // Buffer used for reading audio data.
+  bool read_callback_behind_schedule_;
 
   DISALLOW_COPY_AND_ASSIGN(AlsaPcmInputStream);
 };

@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
@@ -21,6 +22,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
@@ -36,6 +38,7 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/gaia/gaia_oauth_consumer.h"
 #include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
@@ -60,6 +63,9 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_store.h"
+#include "net/http/http_auth_cache.h"
+#include "net/http/http_network_session.h"
+#include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/gfx/gl/gl_switches.h"
@@ -112,14 +118,13 @@ class StartSyncOnUIThreadTask : public Task {
   GaiaAuthConsumer::ClientLoginResult credentials_;
 };
 
-// Transfers initial set of Profile cookies form the default profile.
+// Transfers initial set of Profile cookies from the default profile.
 class TransferDefaultCookiesOnIOThreadTask : public Task {
  public:
   TransferDefaultCookiesOnIOThreadTask(
-      net::URLRequestContextGetter* auth_context, Profile* new_profile,
+      net::URLRequestContextGetter* auth_context,
       net::URLRequestContextGetter* new_context)
           : auth_context_(auth_context),
-            new_profile_(new_profile),
             new_context_(new_context) {}
   virtual ~TransferDefaultCookiesOnIOThreadTask() {}
 
@@ -149,12 +154,36 @@ class TransferDefaultCookiesOnIOThreadTask : public Task {
 
  private:
   net::URLRequestContextGetter* auth_context_;
-  Profile* new_profile_;
   net::URLRequestContextGetter* new_context_;
 
   DISALLOW_COPY_AND_ASSIGN(TransferDefaultCookiesOnIOThreadTask);
 };
 
+// Transfers initial HTTP proxy authentication from the default profile.
+class TransferDefaultAuthCacheOnIOThreadTask : public Task {
+ public:
+  TransferDefaultAuthCacheOnIOThreadTask(
+      net::URLRequestContextGetter* auth_context,
+      net::URLRequestContextGetter* new_context)
+          : auth_context_(auth_context),
+            new_context_(new_context) {}
+  virtual ~TransferDefaultAuthCacheOnIOThreadTask() {}
+
+  // Task override.
+  virtual void Run() OVERRIDE {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    net::HttpAuthCache* new_cache = new_context_->GetURLRequestContext()->
+        http_transaction_factory()->GetSession()->http_auth_cache();
+    new_cache->UpdateAllFrom(*auth_context_->GetURLRequestContext()->
+        http_transaction_factory()->GetSession()->http_auth_cache());
+  }
+
+ private:
+  net::URLRequestContextGetter* auth_context_;
+  net::URLRequestContextGetter* new_context_;
+
+  DISALLOW_COPY_AND_ASSIGN(TransferDefaultAuthCacheOnIOThreadTask);
+};
 
 // Verifies OAuth1 access token by performing OAuthLogin.
 class OAuthLoginVerifier : public GaiaOAuthConsumer {
@@ -182,7 +211,7 @@ class OAuthLoginVerifier : public GaiaOAuthConsumer {
           GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS));
     } else {
       oauth_fetcher_.StartOAuthLogin(GaiaConstants::kChromeOSSource,
-                                     GaiaConstants::kContactsService,
+                                     GaiaConstants::kPicasaService,
                                      oauth1_token_,
                                      oauth1_secret_);
     }
@@ -326,6 +355,52 @@ class PolicyOAuthFetcher : public GaiaOAuthConsumer {
   DISALLOW_COPY_AND_ASSIGN(PolicyOAuthFetcher);
 };
 
+// Used to request a restart to switch to the guest mode.
+class JobRestartRequest
+    : public base::RefCountedThreadSafe<JobRestartRequest> {
+ public:
+  JobRestartRequest(int pid, const std::string& command_line)
+      : pid_(pid),
+        command_line_(command_line),
+        local_state_(g_browser_process->local_state()) {
+    AddRef();
+    if (local_state_) {
+      // XXX: normally this call must not be needed, however RestartJob
+      // just kills us so settings may be lost. See http://crosbug.com/13102
+      local_state_->CommitPendingWrite();
+      timer_.Start(
+          FROM_HERE, base::TimeDelta::FromSeconds(3), this,
+          &JobRestartRequest::RestartJob);
+      // Post task on FILE thread thus it occurs last on task queue, so it
+      // would be executed after committing pending write on file thread.
+      BrowserThread::PostTask(
+          BrowserThread::FILE, FROM_HERE,
+          base::Bind(&JobRestartRequest::RestartJob, this));
+    } else {
+      RestartJob();
+    }
+  }
+
+ private:
+  void RestartJob() {
+    if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+      CrosLibrary::Get()->GetLoginLibrary()->RestartJob(
+          pid_, command_line_);
+    } else {
+      // This function can be called on FILE thread. See PostTask in the
+      // constructor.
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          NewRunnableMethod(this, &JobRestartRequest::RestartJob));
+      MessageLoop::current()->AssertIdle();
+    }
+  }
+
+  int pid_;
+  std::string command_line_;
+  PrefService* local_state_;
+  base::OneShotTimer<JobRestartRequest> timer_;
+};
 
 class LoginUtilsImpl : public LoginUtils,
                        public ProfileManagerObserver,
@@ -337,7 +412,8 @@ class LoginUtilsImpl : public LoginUtils,
         pending_requests_(false),
         using_oauth_(false),
         has_cookies_(false),
-        delegate_(NULL) {
+        delegate_(NULL),
+        job_restart_request_(NULL) {
     net::NetworkChangeNotifier::AddOnlineStateObserver(this);
   }
 
@@ -345,6 +421,7 @@ class LoginUtilsImpl : public LoginUtils,
     net::NetworkChangeNotifier::RemoveOnlineStateObserver(this);
   }
 
+  // LoginUtils implementation:
   virtual void PrepareProfile(
       const std::string& username,
       const std::string& password,
@@ -353,58 +430,26 @@ class LoginUtilsImpl : public LoginUtils,
       bool using_oauth,
       bool has_cookies,
       LoginUtils::Delegate* delegate) OVERRIDE;
-
   virtual void DelegateDeleted(Delegate* delegate) OVERRIDE;
-
-  // Invoked after the tmpfs is successfully mounted.
-  // Launches a browser in the incognito mode.
   virtual void CompleteOffTheRecordLogin(const GURL& start_url) OVERRIDE;
-
-  // Invoked when the user is logging in for the first time, or is logging in as
-  // a guest user.
   virtual void SetFirstLoginPrefs(PrefService* prefs) OVERRIDE;
-
-  // Creates and returns the authenticator to use. The caller owns the returned
-  // Authenticator and must delete it when done.
-  virtual Authenticator* CreateAuthenticator(
+  virtual scoped_refptr<Authenticator> CreateAuthenticator(
       LoginStatusConsumer* consumer) OVERRIDE;
-
-  // Warms the url used by authentication.
   virtual void PrewarmAuthentication() OVERRIDE;
-
-  // Given the authenticated credentials from the cookie jar, try to exchange
-  // fetch OAuth request, v1 and v2 tokens.
-  void FetchOAuth1AccessToken(Profile* auth_profile);
-
-  // Given the credentials try to exchange them for
-  // full-fledged Google authentication cookies.
   virtual void FetchCookies(
       Profile* profile,
       const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
-
-  // Starts process of fetching OAuth2 tokens (based on OAuth1 tokens found
-  // in |user_profile|) and kicks off internal services that depend on them.
   virtual void StartTokenServices(Profile* user_profile) OVERRIDE;
-
-  // Supply credentials for sync and others to use.
   virtual void StartSync(
       Profile* profile,
       const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
-
-  // Sets the current background view.
   virtual void SetBackgroundView(
       chromeos::BackgroundView* background_view) OVERRIDE;
-
-  // Gets the current background view.
   virtual chromeos::BackgroundView* GetBackgroundView() OVERRIDE;
-
-  // Transfers cookies from the |default_profile| into the |new_profile|.
-  // If authentication was performed by an extension, then
-  // the set of cookies that was acquired through such that process will be
-  // automatically transfered into the profile. Returns true if cookie transfer
-  // was performed successfully.
-  virtual bool TransferDefaultCookies(Profile* default_profile,
+  virtual void TransferDefaultCookies(Profile* default_profile,
                                       Profile* new_profile) OVERRIDE;
+  virtual void TransferDefaultAuthCache(Profile* default_profile,
+                                        Profile* new_profile) OVERRIDE;
 
   // ProfileManagerObserver implementation:
   virtual void OnProfileCreated(Profile* profile, Status status) OVERRIDE;
@@ -420,6 +465,10 @@ class LoginUtilsImpl : public LoginUtils,
 
   // net::NetworkChangeNotifier::OnlineStateObserver overrides.
   virtual void OnOnlineStateChanged(bool online) OVERRIDE;
+
+  // Given the authenticated credentials from the cookie jar, try to exchange
+  // fetch OAuth request, v1 and v2 tokens.
+  void FetchOAuth1AccessToken(Profile* auth_profile);
 
  protected:
   virtual std::string GetOffTheRecordCommandLine(
@@ -479,6 +528,9 @@ class LoginUtilsImpl : public LoginUtils,
 
   // Delegate to be fired when the profile will be prepared.
   LoginUtils::Delegate* delegate_;
+
+  // Used to restart Chrome to switch to the guest mode.
+  JobRestartRequest* job_restart_request_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginUtilsImpl);
 };
@@ -584,6 +636,15 @@ void LoginUtilsImpl::OnProfileCreated(Profile* user_profile, Status status) {
         user_profile->GetTokenService());
   }
 
+  // We suck. This is a hack since we do not have the enterprise feature
+  // done yet to pull down policies from the domain admin. We'll take this
+  // out when we get that done properly.
+  // TODO(xiyuan): Remove this once enterprise feature is ready.
+  if (EndsWith(username_, "@google.com", true)) {
+    PrefService* pref_service = user_profile->GetPrefs();
+    pref_service->SetBoolean(prefs::kEnableScreenLock, true);
+  }
+
   BootTimesLoader* btl = BootTimesLoader::Get();
   btl->AddLoginTimeMarker("UserProfileGotten", false);
 
@@ -595,11 +656,12 @@ void LoginUtilsImpl::OnProfileCreated(Profile* user_profile, Status status) {
       // put in place that will ensure that the newly created session is
       // authenticated for the websites that work with the used authentication
       // schema.
-      if (!TransferDefaultCookies(authenticator_->authentication_profile(),
-                                  user_profile)) {
-        LOG(WARNING) << "Cookie transfer from the default profile failed!";
-      }
+      TransferDefaultCookies(authenticator_->authentication_profile(),
+                             user_profile);
     }
+    // Transfer proxy authentication cache.
+    TransferDefaultAuthCache(authenticator_->authentication_profile(),
+                             user_profile);
     std::string oauth1_token;
     std::string oauth1_secret;
     if (ReadOAuth1AccessToken(user_profile, &oauth1_token, &oauth1_secret) ||
@@ -657,15 +719,6 @@ void LoginUtilsImpl::OnProfileCreated(Profile* user_profile, Status status) {
       }
     }
     btl->AddLoginTimeMarker("TPMOwn-End", false);
-  }
-
-  // We suck. This is a hack since we do not have the enterprise feature
-  // done yet to pull down policies from the domain admin. We'll take this
-  // out when we get that done properly.
-  // TODO(xiyuan): Remove this once enterprise feature is ready.
-  if (EndsWith(username_, "@google.com", true)) {
-    PrefService* pref_service = user_profile->GetPrefs();
-    pref_service->SetBoolean(prefs::kEnableScreenLock, true);
   }
 
   user_profile->OnLogin();
@@ -788,7 +841,12 @@ void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
                                    browser_command_line,
                                    &command_line);
 
-    CrosLibrary::Get()->GetLoginLibrary()->RestartJob(getpid(), cmd_line_str);
+    if (job_restart_request_) {
+      NOTREACHED();
+    }
+    VLOG(1) << "Requesting a restart with PID " << getpid()
+            << " and command line: " << cmd_line_str;
+    job_restart_request_ = new JobRestartRequest(getpid(), cmd_line_str);
   }
 }
 
@@ -803,6 +861,7 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       switches::kUserDataDir,
       switches::kScrollPixels,
       switches::kEnableGView,
+      switches::kEnableSensors,
       switches::kNoFirstRun,
       switches::kLoginProfile,
       switches::kCompressSystemFeedback,
@@ -810,6 +869,7 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
       switches::kPpapiFlashInProcess,
       switches::kPpapiFlashPath,
       switches::kPpapiFlashVersion,
+      switches::kViewsDesktop,
 #if defined(TOUCH_UI)
       switches::kTouchDevices,
       // The virtual keyboard extension for TOUCH_UI (chrome://keyboard) highly
@@ -860,9 +920,8 @@ void LoginUtilsImpl::SetFirstLoginPrefs(PrefService* prefs) {
   input_method::InputMethodManager* manager =
       input_method::InputMethodManager::GetInstance();
   std::vector<std::string> input_method_ids;
-  input_method::GetFirstLoginInputMethodIds(locale,
-                                            manager->current_input_method(),
-                                            &input_method_ids);
+  manager->GetInputMethodUtil()->GetFirstLoginInputMethodIds(
+      locale, manager->current_input_method(), &input_method_ids);
   // Save the input methods in the user's preferences.
   StringPrefMember language_preload_engines;
   language_preload_engines.Init(prefs::kLanguagePreloadEngines,
@@ -881,7 +940,7 @@ void LoginUtilsImpl::SetFirstLoginPrefs(PrefService* prefs) {
   // UI language is set to French. In this case, we should set "fr,en"
   // to the preferred languages preference.
   std::vector<std::string> candidates;
-  input_method::GetLanguageCodesFromInputMethodIds(
+  manager->GetInputMethodUtil()->GetLanguageCodesFromInputMethodIds(
       input_method_ids, &candidates);
   for (size_t i = 0; i < candidates.size(); ++i) {
     const std::string& candidate = candidates[i];
@@ -899,10 +958,16 @@ void LoginUtilsImpl::SetFirstLoginPrefs(PrefService* prefs) {
   prefs->ScheduleSavePersistentPrefs();
 }
 
-Authenticator* LoginUtilsImpl::CreateAuthenticator(
+scoped_refptr<Authenticator> LoginUtilsImpl::CreateAuthenticator(
     LoginStatusConsumer* consumer) {
   // Screen locker needs new Authenticator instance each time.
   if (ScreenLocker::default_screen_locker())
+    authenticator_ = NULL;
+
+  // In case of non-WebUI login new instance of Authenticator is supposed
+  // to be created on each call.
+  // TODO(nkostylev): Clean up after WebUI login migration is complete.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kWebUILogin))
     authenticator_ = NULL;
 
   if (authenticator_ == NULL) {
@@ -911,7 +976,7 @@ Authenticator* LoginUtilsImpl::CreateAuthenticator(
     else
       authenticator_ = new GoogleAuthenticator(consumer);
   }
-  return authenticator_.get();
+  return authenticator_;
 }
 
 // We use a special class for this so that it can be safely leaked if we
@@ -963,14 +1028,20 @@ BackgroundView* LoginUtilsImpl::GetBackgroundView() {
   return background_view_;
 }
 
-bool LoginUtilsImpl::TransferDefaultCookies(Profile* default_profile,
+void LoginUtilsImpl::TransferDefaultCookies(Profile* default_profile,
                                             Profile* profile) {
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           new TransferDefaultCookiesOnIOThreadTask(
                               default_profile->GetRequestContext(),
-                              profile,
                               profile->GetRequestContext()));
-  return true;
+}
+
+void LoginUtilsImpl::TransferDefaultAuthCache(Profile* default_profile,
+                                              Profile* profile) {
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          new TransferDefaultAuthCacheOnIOThreadTask(
+                              default_profile->GetRequestContext(),
+                              profile->GetRequestContext()));
 }
 
 void LoginUtilsImpl::OnGetOAuthTokenSuccess(const std::string& oauth_token) {
@@ -1019,8 +1090,19 @@ bool LoginUtilsImpl::ReadOAuth1AccessToken(Profile* user_profile,
   DCHECK(authenticator_.get());
   std::string decoded_token = authenticator_->DecryptToken(encoded_token);
   std::string decoded_secret = authenticator_->DecryptToken(encoded_secret);
-  if (!decoded_token.length() || !decoded_secret.length())
-    return false;
+  if (!decoded_token.length() || !decoded_secret.length()) {
+    // TODO(zelidrag): Remove legacy encryption support in R16.
+    // Check if tokens were encoded with the legacy encryption instead.
+    decoded_token = authenticator_->DecryptLegacyToken(encoded_token);
+    decoded_secret = authenticator_->DecryptLegacyToken(encoded_secret);
+    if (!decoded_token.length() || !decoded_secret.length())
+      return false;
+
+    pref_service->SetString(prefs::kOAuth1Token,
+                            authenticator_->EncryptToken(decoded_token));
+    pref_service->SetString(prefs::kOAuth1Secret,
+                            authenticator_->EncryptToken(decoded_secret));
+  }
 
   *token = decoded_token;
   *secret = decoded_secret;
@@ -1116,15 +1198,21 @@ void LoginUtils::Set(LoginUtils* mock) {
 
 void LoginUtils::DoBrowserLaunch(Profile* profile,
                                  LoginDisplayHost* login_host) {
+  if (browser_shutdown::IsTryingToQuit())
+    return;
+
   BootTimesLoader::Get()->AddLoginTimeMarker("BrowserLaunched", false);
 
   VLOG(1) << "Launching browser...";
   BrowserInit browser_init;
   int return_code;
+  BrowserInit::IsFirstRun first_run = FirstRun::IsChromeFirstRun() ?
+      BrowserInit::IS_FIRST_RUN: BrowserInit::IS_NOT_FIRST_RUN;
   browser_init.LaunchBrowser(*CommandLine::ForCurrentProcess(),
                              profile,
                              FilePath(),
-                             true,
+                             BrowserInit::IS_PROCESS_STARTUP,
+                             first_run,
                              &return_code);
 
   // Mark login host for deletion after browser starts.  This

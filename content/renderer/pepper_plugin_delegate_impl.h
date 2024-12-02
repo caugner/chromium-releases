@@ -14,15 +14,18 @@
 #include "base/id_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "content/common/content_export.h"
+#include "content/renderer/pepper_parent_context_provider.h"
 #include "ppapi/proxy/broker_dispatcher.h"
 #include "ppapi/proxy/proxy_channel.h"
+#include "ui/base/ime/text_input_type.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/ppb_broker_impl.h"
 #include "webkit/plugins/ppapi/ppb_flash_menu_impl.h"
 
 class FilePath;
 class PepperPluginDelegateImpl;
-class RenderView;
+class RenderViewImpl;
 
 namespace gfx {
 class Point;
@@ -44,6 +47,8 @@ class PluginModule;
 
 namespace WebKit {
 class WebFileChooserCompletion;
+class WebMouseEvent;
+struct WebCompositionUnderline;
 struct WebFileChooserParams;
 }
 
@@ -67,6 +72,7 @@ class BrokerDispatcherWrapper {
 
  private:
   scoped_ptr<ppapi::proxy::BrokerDispatcher> dispatcher_;
+  scoped_ptr<ppapi::proxy::ProxyChannel::Delegate> dispatcher_delegate_;
 };
 
 // This object is NOT thread-safe.
@@ -114,9 +120,10 @@ class PpapiBrokerImpl : public webkit::ppapi::PluginDelegate::PpapiBroker,
 
 class PepperPluginDelegateImpl
     : public webkit::ppapi::PluginDelegate,
-      public base::SupportsWeakPtr<PepperPluginDelegateImpl> {
+      public base::SupportsWeakPtr<PepperPluginDelegateImpl>,
+      public PepperParentContextProvider {
  public:
-  explicit PepperPluginDelegateImpl(RenderView* render_view);
+  explicit PepperPluginDelegateImpl(RenderViewImpl* render_view);
   virtual ~PepperPluginDelegateImpl();
 
   // Attempts to create a PPAPI plugin for the given filepath. On success, it
@@ -128,7 +135,8 @@ class PepperPluginDelegateImpl
   // the second is that the plugin failed to initialize. In this case,
   // |*pepper_plugin_was_registered| will be set to true and the caller should
   // not fall back on any other plugin types.
-  scoped_refptr<webkit::ppapi::PluginModule> CreatePepperPluginModule(
+  CONTENT_EXPORT scoped_refptr<webkit::ppapi::PluginModule>
+  CreatePepperPluginModule(
       const webkit::WebPluginInfo& webplugin_info,
       bool* pepper_plugin_was_registered);
 
@@ -162,11 +170,38 @@ class PepperPluginDelegateImpl
   // notifies all of the plugins.
   void OnSetFocus(bool has_focus);
 
-  // Returns whether or not a Pepper plugin is focused.
+  // IME status.
   bool IsPluginFocused() const;
+  gfx::Rect GetCaretBounds() const;
+  ui::TextInputType GetTextInputType() const;
+  bool IsPluginAcceptingCompositionEvents() const;
+  bool CanComposeInline() const;
+
+  // IME events.
+  void OnImeSetComposition(
+      const string16& text,
+      const std::vector<WebKit::WebCompositionUnderline>& underlines,
+      int selection_start,
+      int selection_end);
+  void OnImeConfirmComposition(const string16& text);
+
+  // Notification that the request to lock the mouse has completed.
+  void OnLockMouseACK(bool succeeded);
+  // Notification that the plugin instance has lost the mouse lock.
+  void OnMouseLockLost();
+  // Notification that a mouse event has arrived at the render view.
+  // Returns true if no further handling is needed. For example, if the mouse is
+  // currently locked, this method directly dispatches the event to the owner of
+  // the mouse lock and returns true.
+  bool HandleMouseEvent(const WebKit::WebMouseEvent& event);
 
   // PluginDelegate implementation.
-  virtual void PluginFocusChanged(bool focused) OVERRIDE;
+  virtual void PluginFocusChanged(webkit::ppapi::PluginInstance* instance,
+                                  bool focused) OVERRIDE;
+  virtual void PluginTextInputTypeChanged(
+      webkit::ppapi::PluginInstance* instance) OVERRIDE;
+  virtual void PluginRequestedCancelComposition(
+      webkit::ppapi::PluginInstance* instance) OVERRIDE;
   virtual void PluginCrashed(webkit::ppapi::PluginInstance* instance);
   virtual void InstanceCreated(
       webkit::ppapi::PluginInstance* instance);
@@ -195,11 +230,11 @@ class PepperPluginDelegateImpl
       WebKit::WebFileChooserCompletion* chooser_completion);
   virtual bool AsyncOpenFile(const FilePath& path,
                              int flags,
-                             AsyncOpenFileCallback* callback);
+                             const AsyncOpenFileCallback& callback);
   virtual bool AsyncOpenFileSystemURL(
       const GURL& path,
       int flags,
-      AsyncOpenFileCallback* callback) OVERRIDE;
+      const AsyncOpenFileCallback& callback) OVERRIDE;
   virtual bool OpenFileSystem(
       const GURL& url,
       fileapi::FileSystemType type,
@@ -228,9 +263,10 @@ class PepperPluginDelegateImpl
       const GURL& directory_path,
       fileapi::FileSystemCallbackDispatcher* dispatcher) OVERRIDE;
   virtual void PublishPolicy(const std::string& policy_json) OVERRIDE;
-  virtual void QueryAvailableSpace(const GURL& origin,
-                                   quota::StorageType type,
-                                   AvailableSpaceCallback* callback) OVERRIDE;
+  virtual void QueryAvailableSpace(
+      const GURL& origin,
+      quota::StorageType type,
+      const AvailableSpaceCallback& callback) OVERRIDE;
   virtual void WillUpdateFile(const GURL& file_path) OVERRIDE;
   virtual void DidUpdateFile(const GURL& file_path, int64_t delta) OVERRIDE;
   virtual base::PlatformFileError OpenFile(
@@ -295,15 +331,21 @@ class PepperPluginDelegateImpl
   virtual void DidStopLoading() OVERRIDE;
   virtual void SetContentRestriction(int restrictions) OVERRIDE;
   virtual void SaveURLAs(const GURL& url) OVERRIDE;
-  virtual content::P2PSocketDispatcher* GetP2PSocketDispatcher() OVERRIDE;
   virtual webkit_glue::P2PTransport* CreateP2PTransport() OVERRIDE;
   virtual double GetLocalTimeZoneOffset(base::Time t) OVERRIDE;
   virtual std::string GetFlashCommandLineArgs() OVERRIDE;
   virtual base::SharedMemory* CreateAnonymousSharedMemory(uint32_t size)
       OVERRIDE;
   virtual ::ppapi::Preferences GetPreferences() OVERRIDE;
+  virtual void LockMouse(webkit::ppapi::PluginInstance* instance) OVERRIDE;
+  virtual void UnlockMouse(webkit::ppapi::PluginInstance* instance) OVERRIDE;
+  virtual void DidChangeCursor(webkit::ppapi::PluginInstance* instance,
+                               const WebKit::WebCursorInfo& cursor) OVERRIDE;
+  virtual void DidReceiveMouseEvent(
+      webkit::ppapi::PluginInstance* instance) OVERRIDE;
+  virtual bool IsInFullscreenMode() OVERRIDE;
 
-  int GetRoutingId() const;
+  CONTENT_EXPORT int GetRoutingId() const;
 
  private:
   void PublishInitialPolicy(
@@ -314,8 +356,15 @@ class PepperPluginDelegateImpl
   scoped_refptr<PpapiBrokerImpl> CreatePpapiBroker(
       webkit::ppapi::PluginModule* plugin_module);
 
+  bool MouseLockedOrPending() const {
+    return mouse_locked_ || pending_lock_request_ || pending_unlock_request_;
+  }
+
+  // Implementation of PepperParentContextProvider.
+  virtual RendererGLContext* GetParentContextForPlatformContext3D();
+
   // Pointer to the RenderView that owns us.
-  RenderView* render_view_;
+  RenderViewImpl* render_view_;
 
   std::set<webkit::ppapi::PluginInstance*> active_instances_;
 
@@ -323,10 +372,7 @@ class PepperPluginDelegateImpl
   bool has_saved_context_menu_action_;
   unsigned saved_context_menu_action_;
 
-  // TODO(viettrungluu): Get rid of |id_generator_| -- just use |IDMap::Add()|.
-  // Rename |messages_waiting_replies_| (to specify async open file).
-  int id_generator_;
-  IDMap<AsyncOpenFileCallback> messages_waiting_replies_;
+  IDMap<AsyncOpenFileCallback> pending_async_open_files_;
 
   IDMap<scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl>,
         IDMapOwnPointer> pending_connect_tcps_;
@@ -338,11 +384,36 @@ class PepperPluginDelegateImpl
   BrokerMap pending_connect_broker_;
 
   // Whether or not the focus is on a PPAPI plugin
-  bool is_pepper_plugin_focused_;
+  webkit::ppapi::PluginInstance* focused_plugin_;
+
+  // Current text input composition text. Empty if no composition is in
+  // progress.
+  string16 composition_text_;
 
   // Set of instances to receive a notification when the enterprise policy has
   // been updated.
   std::set<webkit::ppapi::PluginInstance*> subscribed_to_policy_updates_;
+
+  // |mouse_lock_owner_| is not owned by this class. We can know about when it
+  // is destroyed via InstanceDeleted().
+  // |mouse_lock_owner_| being non-NULL doesn't indicate that currently the
+  // mouse has been locked. It is possible that a request to lock the mouse has
+  // been sent, but the response hasn't arrived yet.
+  webkit::ppapi::PluginInstance* mouse_lock_owner_;
+  bool mouse_locked_;
+  // If both |pending_lock_request_| and |pending_unlock_request_| are true,
+  // it means a lock request was sent before an unlock request and we haven't
+  // received responses for them.
+  // The logic in LockMouse() makes sure that a lock request won't be sent when
+  // there is a pending unlock request.
+  bool pending_lock_request_;
+  bool pending_unlock_request_;
+
+  // The plugin instance that received the last mouse event. It is set to NULL
+  // if the last mouse event went to elements other than Pepper plugins.
+  // |last_mouse_event_target_| is not owned by this class. We can know about
+  // when it is destroyed via InstanceDeleted().
+  webkit::ppapi::PluginInstance* last_mouse_event_target_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperPluginDelegateImpl);
 };

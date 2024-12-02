@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_VIEWS_EXTERNAL_PROTOCOL_DIALOG_H_
 #pragma once
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "views/window/dialog_delegate.h"
@@ -29,11 +31,11 @@ class ExternalProtocolDialog : public views::DialogDelegate {
 
   virtual ~ExternalProtocolDialog();
 
-  // views::DialogDelegate Methods:
+  // views::DialogDelegate methods:
   virtual int GetDefaultDialogButton() const OVERRIDE;
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
@@ -41,9 +43,8 @@ class ExternalProtocolDialog : public views::DialogDelegate {
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
 
-  // views::WindowDelegate Methods:
-  virtual bool IsAlwaysOnTop() const { return false; }
-  virtual bool IsModal() const { return false; }
+  // views::WidgetDelegate methods:
+  virtual bool IsModal() const OVERRIDE { return false; }
 
  private:
   // The message box view whose commands we handle.

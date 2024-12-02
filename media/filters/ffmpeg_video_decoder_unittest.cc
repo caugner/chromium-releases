@@ -5,6 +5,7 @@
 #include <deque>
 
 #include "base/bind.h"
+#include "base/message_loop.h"
 #include "base/memory/singleton.h"
 #include "base/string_util.h"
 #include "media/base/data_buffer.h"
@@ -12,7 +13,6 @@
 #include "media/base/mock_callback.h"
 #include "media/base/mock_filter_host.h"
 #include "media/base/mock_filters.h"
-#include "media/base/mock_task.h"
 #include "media/base/video_frame.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_video_decoder.h"
@@ -33,8 +33,9 @@ using ::testing::Invoke;
 
 namespace media {
 
-static const int kWidth = 1280;
-static const int kHeight = 720;
+static const gfx::Size kCodedSize(1280, 720);
+static const gfx::Rect kVisibleRect(1280, 720);
+static const gfx::Size kNaturalSize(1280, 720);
 
 // Holds timestamp and duration data needed for properly enqueuing a frame.
 struct TimeTuple {
@@ -53,19 +54,6 @@ static const TimeTuple kTestPts3 =
       base::TimeDelta::FromMicroseconds(60) };
 static const PipelineStatistics kStatistics;
 
-class MockFFmpegDemuxerStream : public MockDemuxerStream {
- public:
-  MockFFmpegDemuxerStream() {}
-
-  MOCK_METHOD0(GetAVStream, AVStream*());
-
- protected:
-  virtual ~MockFFmpegDemuxerStream() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockFFmpegDemuxerStream);
-};
-
 // TODO(hclam): Share this in a separate file.
 class MockVideoDecodeEngine : public VideoDecodeEngine {
  public:
@@ -79,11 +67,9 @@ class MockVideoDecodeEngine : public VideoDecodeEngine {
   MOCK_METHOD0(Flush, void());
   MOCK_METHOD0(Seek, void());
 
-  MockVideoDecodeEngine() : event_handler_(NULL) {
-    memset(&info_, 0, sizeof(info_));
-  }
+  MockVideoDecodeEngine() : event_handler_(NULL) {}
+
   VideoDecodeEngine::EventHandler* event_handler_;
-  VideoCodecInfo info_;
 };
 
 // Class that just mocks the private functions.
@@ -109,10 +95,7 @@ class DecoderPrivateMock : public FFmpegVideoDecoder {
 
 ACTION_P2(EngineInitialize, engine, success) {
   engine->event_handler_ = arg1;
-  engine->info_.success = success;
-  engine->info_.surface_width = kWidth;
-  engine->info_.surface_height = kHeight;
-  engine->event_handler_->OnInitializeComplete(engine->info_);
+  engine->event_handler_->OnInitializeComplete(success);
 }
 
 ACTION_P(EngineUninitialize, engine) {
@@ -148,7 +131,7 @@ class FFmpegVideoDecoderTest : public testing::Test {
         base::Bind(&MockVideoRenderer::ConsumeVideoFrame,
                    base::Unretained(renderer_.get())));
     decoder_->SetVideoDecodeEngineForTest(engine_);
-    demuxer_ = new StrictMock<MockFFmpegDemuxerStream>();
+    demuxer_ = new StrictMock<MockDemuxerStream>();
 
     // Initialize FFmpeg fixtures.
     memset(&stream_, 0, sizeof(stream_));
@@ -156,11 +139,13 @@ class FFmpegVideoDecoderTest : public testing::Test {
     memset(&codec_, 0, sizeof(codec_));
     memset(&yuv_frame_, 0, sizeof(yuv_frame_));
     base::TimeDelta zero;
-    video_frame_ = VideoFrame::CreateFrame(VideoFrame::YV12, kWidth, kHeight,
+    video_frame_ = VideoFrame::CreateFrame(VideoFrame::YV12,
+                                           kVisibleRect.width(),
+                                           kVisibleRect.height(),
                                            zero, zero);
     stream_.codec = &codec_context_;
-    codec_context_.width = kWidth;
-    codec_context_.height = kHeight;
+    codec_context_.width = kVisibleRect.width();
+    codec_context_.height = kVisibleRect.height();
     codec_context_.codec_id = CODEC_ID_H264;
     stream_.r_frame_rate.num = 1;
     stream_.r_frame_rate.den = 1;
@@ -178,7 +163,7 @@ class FFmpegVideoDecoderTest : public testing::Test {
           .WillOnce(EngineUninitialize(engine_));
     }
 
-    decoder_->Stop(NewExpectedCallback());
+    decoder_->Stop(NewExpectedClosure());
 
     // Finish up any remaining tasks.
     message_loop_.RunAllPending();
@@ -193,20 +178,20 @@ class FFmpegVideoDecoderTest : public testing::Test {
         .WillOnce(EngineInitialize(engine_, true));
 
     decoder_->Initialize(demuxer_,
-                         NewExpectedCallback(), NewStatisticsCallback());
+                         NewExpectedClosure(), NewStatisticsCallback());
     message_loop_.RunAllPending();
   }
 
-  StatisticsCallback* NewStatisticsCallback() {
-    return NewCallback(&stats_callback_object_,
-                       &MockStatisticsCallback::OnStatistics);
+  StatisticsCallback NewStatisticsCallback() {
+    return base::Bind(&MockStatisticsCallback::OnStatistics,
+                      base::Unretained(&stats_callback_object_));
   }
 
   // Fixture members.
   MockVideoDecodeEngine* engine_;  // Owned by |decoder_|.
   scoped_refptr<DecoderPrivateMock> decoder_;
   scoped_refptr<MockVideoRenderer> renderer_;
-  scoped_refptr<StrictMock<MockFFmpegDemuxerStream> > demuxer_;
+  scoped_refptr<StrictMock<MockDemuxerStream> > demuxer_;
   scoped_refptr<DataBuffer> buffer_;
   scoped_refptr<DataBuffer> end_of_stream_buffer_;
   MockStatisticsCallback stats_callback_object_;
@@ -231,7 +216,7 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_GetAVStreamFails) {
   EXPECT_CALL(host_, SetError(PIPELINE_ERROR_DECODE));
 
   decoder_->Initialize(demuxer_,
-                       NewExpectedCallback(), NewStatisticsCallback());
+                       NewExpectedClosure(), NewStatisticsCallback());
 
   message_loop_.RunAllPending();
 }
@@ -247,7 +232,7 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_EngineFails) {
   EXPECT_CALL(host_, SetError(PIPELINE_ERROR_DECODE));
 
   decoder_->Initialize(demuxer_,
-                       NewExpectedCallback(), NewStatisticsCallback());
+                       NewExpectedClosure(), NewStatisticsCallback());
   message_loop_.RunAllPending();
 }
 
@@ -256,8 +241,7 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_Successful) {
 
   // Test that the uncompressed video surface matches the dimensions
   // specified by FFmpeg.
-  EXPECT_EQ(kWidth, decoder_->width());
-  EXPECT_EQ(kHeight, decoder_->height());
+  EXPECT_EQ(kNaturalSize, decoder_->natural_size());
 }
 
 TEST_F(FFmpegVideoDecoderTest, OnError) {
@@ -414,7 +398,7 @@ TEST_F(FFmpegVideoDecoderTest, DoSeek) {
     // Expect a flush.
     EXPECT_CALL(*engine_, Flush())
         .WillOnce(EngineFlush(engine_));
-    decoder_->Flush(NewExpectedCallback());
+    decoder_->Flush(NewExpectedClosure());
 
     // Expect Seek and verify the results.
     EXPECT_CALL(*engine_, Seek())

@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/eintr_wrapper.h"
 #include "base/environment.h"
+#include "base/file_util.h"
 #include "base/linux_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -21,13 +22,14 @@
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
-#include "content/common/content_switches.h"
 #include "content/common/process_watcher.h"
 #include "content/common/result_codes.h"
 #include "content/common/unix_domain_socket_posix.h"
+#include "content/public/common/content_switches.h"
 #include "sandbox/linux/suid/suid_unsafe_environment_variables.h"
 
 #if defined(USE_TCMALLOC)
@@ -141,7 +143,7 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
       LOG(FATAL) << "The SUID sandbox helper binary was found, but is not "
                     "configured correctly. Rather than run without sandboxing "
                     "I'm aborting now. You need to make sure that "
-                 << sandbox_binary_ << " is mode 4755 and owned by root.";
+                 << sandbox_binary_ << " is owned by root and has mode 4755.";
     }
   } else {
     LOG(WARNING) << "Running without the SUID sandbox! See "
@@ -306,14 +308,17 @@ void ZygoteHost::AdjustRendererOOMScore(base::ProcessHandle pid, int score) {
   // don't want to add another library to the build as it's sure to cause
   // problems with other, non-SELinux distros.
   //
-  // So we just check for /selinux. This isn't foolproof, but it's not bad
-  // and it's easy.
+  // So we just check for files in /selinux. This isn't foolproof, but it's not
+  // bad and it's easy.
 
   static bool selinux;
   static bool selinux_valid = false;
 
   if (!selinux_valid) {
-    selinux = access("/selinux", X_OK) == 0;
+    const FilePath kSelinuxPath("/selinux");
+    selinux = access(kSelinuxPath.value().c_str(), X_OK) == 0 &&
+        file_util::CountFilesCreatedAfter(kSelinuxPath,
+                                          base::Time::UnixEpoch()) > 0;
     selinux_valid = true;
   }
 

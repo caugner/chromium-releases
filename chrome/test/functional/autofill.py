@@ -23,12 +23,9 @@ class AutofillTest(pyauto.PyUITest):
 
     This method will not run automatically.
     """
-    import pprint
-    pp = pprint.PrettyPrinter(indent=2)
     while True:
       raw_input('Hit <enter> to dump info.. ')
-      info = self.GetAutofillProfile()
-      pp.pprint(info)
+      self.pprint(self.GetAutofillProfile())
 
   def testFillProfile(self):
     """Test filling profiles and overwriting with new profiles."""
@@ -92,7 +89,7 @@ class AutofillTest(pyauto.PyUITest):
   def testAutofillInvalid(self):
     """Test filling in invalid values for profiles are saved as-is.
 
-    Phone/Fax information entered into the prefs UI is not validated or rejected
+    Phone information entered into the prefs UI is not validated or rejected
     except for duplicates.
     """
     # First try profiles with invalid ZIP input.
@@ -101,14 +98,13 @@ class AutofillTest(pyauto.PyUITest):
                        'ADDRESS_HOME_STATE': ['CA',],
                        'ADDRESS_HOME_ZIP': ['my_zip',],
                        'ADDRESS_HOME_COUNTRY': ['United States',]}
-    # Add invalid data for phone and fax fields.
+    # Add invalid data for phone field.
     with_invalid = without_invalid.copy()
     with_invalid['PHONE_HOME_WHOLE_NUMBER'] = ['Invalid_Phone_Number',]
-    with_invalid['PHONE_FAX_WHOLE_NUMBER'] = ['Invalid_Fax_Number',]
     self.FillAutofillProfile(profiles=[with_invalid])
     self.assertNotEqual(
         [without_invalid], self.GetAutofillProfile()['profiles'],
-        msg='Phone/Fax data entered into prefs UI is validated.')
+        msg='Phone data entered into prefs UI is validated.')
 
   def testAutofillPrefsStringSavedAsIs(self):
     """Test invalid credit card numbers typed in prefs should be saved as-is."""
@@ -193,7 +189,7 @@ class AutofillTest(pyauto.PyUITest):
     Args:
       number: the credit card number being validated, as a string.
 
-    Return:
+    Returns:
       boolean whether the credit card number is valid or not.
     """
     # Filters out non-digit characters.
@@ -365,15 +361,15 @@ class AutofillTest(pyauto.PyUITest):
 
   def testCharsStrippedForAggregatedPhoneNumbers(self):
     """Test aggregated phone numbers are standardized (not saved "as-is")."""
-    us_phone = self.GetAutofillProfile()[
-        'profiles'][0]['PHONE_HOME_WHOLE_NUMBER']
-    de_phone = self.GetAutofillProfile()[
-        'profiles'][1]['PHONE_HOME_WHOLE_NUMBER']
     profiles_list = self.EvalDataFrom(
         os.path.join(self.DataDir(), 'autofill', 'functional',
                      'phonecharacters.txt'))
     self._FillFormAndSubmit(profiles_list, 'autofill_test_form.html',
                             tab_index=0, windex=0)
+    us_phone = self.GetAutofillProfile()[
+        'profiles'][0]['PHONE_HOME_WHOLE_NUMBER']
+    de_phone = self.GetAutofillProfile()[
+        'profiles'][1]['PHONE_HOME_WHOLE_NUMBER']
     self.assertEqual(
         ['+1 408-871-4567',], us_phone,
         msg='Aggregated US phone number %s not standardized.' % us_phone)
@@ -720,6 +716,80 @@ class AutofillTest(pyauto.PyUITest):
       js += 'document.getElementById("testform").submit();'
       self.SubmitAutofillForm(js, tab_index=0, windex=0)
     return len(list_of_dict)
+
+  def _SelectOptionXpath(self, value):
+    """Returns an xpath query used to select an item from a dropdown list.
+    Args:
+      value: Option selected for the drop-down list field.
+
+    Returns:
+      The value of the xpath query.
+    """
+    return '//option[@value="%s"]' % value
+
+  def testPostalCodeAndStateLabelsBasedOnCountry(self):
+    """Verify postal code and state labels based on selected country."""
+    data_file = os.path.join(self.DataDir(), 'autofill', 'functional',
+                             'state_zip_labels.txt')
+    import simplejson
+    from webdriver_pages import settings
+    test_data = simplejson.loads(open(data_file).read())
+
+    driver = self.NewWebDriver()
+    page = settings.AutofillEditAddressDialog.FromNavigation(driver)
+    # Initial check of State and ZIP labels.
+    self.assertEqual('State', page.GetStateLabel())
+    self.assertEqual('ZIP code', page.GetPostalCodeLabel())
+
+    for country_code in test_data:
+      page.Fill(country_code=country_code)
+
+      # Compare postal code labels.
+      actual_postal_label = page.GetPostalCodeLabel()
+      self.assertEqual(
+          test_data[country_code]['postalCodeLabel'],
+          actual_postal_label,
+          msg=('Postal code label "%s" does not match Country "%s"' %
+               (actual_postal_label, country_code)))
+
+      # Compare state labels.
+      actual_state_label = page.GetStateLabel()
+      self.assertEqual(
+          test_data[country_code]['stateLabel'],
+          actual_state_label,
+          msg=('State label "%s" does not match Country "%s"' %
+               (actual_state_label, country_code)))
+
+  def testNoDuplicatePhoneNumsInPrefs(self):
+    """Test duplicate phone numbers entered in prefs are removed."""
+    from webdriver_pages import settings
+    driver = self.NewWebDriver()
+    page = settings.AutofillEditAddressDialog.FromNavigation(driver)
+    non_duplicates = ['111-1111', '222-2222']
+    duplicates = ['111-1111']
+    page.Fill(phones=non_duplicates + duplicates)
+    self.assertEqual(non_duplicates, page.GetPhones(),
+        msg='Duplicate phone number in prefs unexpectedly saved.')
+
+  def testDisplayLineItemForEntriesWithNoCCNum(self):
+    """Verify Autofill creates a line item for CC entries with no CC number."""
+    driver = self.NewWebDriver()
+    self.NavigateToURL('chrome://settings/autofillEditCreditCard')
+    driver.find_element_by_id('name-on-card').send_keys('Jane Doe')
+    query_month = self._SelectOptionXpath('12')
+    query_year = self._SelectOptionXpath('2014')
+    driver.find_element_by_id('expiration-month').find_element_by_xpath(
+        query_month).click()
+    driver.find_element_by_id('expiration-year').find_element_by_xpath(
+        query_year).click()
+    driver.find_element_by_id(
+        'autofill-edit-credit-card-apply-button').click()
+    # Refresh the page to ensure the UI is up-to-date.
+    driver.refresh()
+    list_entry = driver.find_element_by_class_name('autofill-list-item')
+    self.assertTrue(list_entry.is_displayed)
+    self.assertEqual('Jane Doe', list_entry.text,
+                     msg='Saved CC line item not same as what was entered.')
 
 
 if __name__ == '__main__':

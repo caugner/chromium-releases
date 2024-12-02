@@ -344,6 +344,14 @@ void NativeTextfieldWin::SelectRange(const ui::Range& range) {
   NOTREACHED();
 }
 
+void NativeTextfieldWin::GetSelectionModel(gfx::SelectionModel* sel) const {
+  NOTREACHED();
+}
+
+void NativeTextfieldWin::SelectSelectionModel(const gfx::SelectionModel& sel) {
+  NOTREACHED();
+}
+
 size_t NativeTextfieldWin::GetCursorPosition() const {
   NOTREACHED();
   return 0U;

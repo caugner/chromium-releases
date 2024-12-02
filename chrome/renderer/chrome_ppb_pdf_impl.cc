@@ -8,9 +8,9 @@
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/common/render_messages.h"
-#include "content/common/view_messages.h"
-#include "content/renderer/pepper_plugin_delegate_impl.h"
-#include "content/renderer/render_thread.h"
+#include "content/public/common/child_process_sandbox_support_linux.h"
+#include "content/public/renderer/render_thread.h"
+#include "content/public/renderer/render_view.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_strings.h"
 #include "ppapi/c/pp_resource.h"
@@ -20,16 +20,23 @@
 #include "ppapi/shared_impl/tracker_base.h"
 #include "ppapi/shared_impl/var.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "unicode/usearch.h"
-#include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
 #include "webkit/plugins/ppapi/resource_tracker.h"
+
+using WebKit::WebView;
+using content::RenderThread;
 
 namespace chrome {
 
@@ -45,7 +52,7 @@ class PrivateFontFile : public ppapi::Resource {
                     void* output,
                     uint32_t* output_length) {
     size_t temp_size = static_cast<size_t>(*output_length);
-    bool rv = webkit_glue::GetFontTable(
+    bool rv = content::GetFontTable(
         fd_, table, static_cast<uint8_t*>(output), &temp_size);
     *output_length = static_cast<uint32_t>(temp_size);
     return rv;
@@ -188,7 +195,7 @@ PP_Resource GetFontFileWithFallback(
   if (!face_name)
     return 0;
 
-  int fd = webkit_glue::MatchFontWithFallback(
+  int fd = content::MatchFontWithFallback(
       face_name->value().c_str(),
       description->weight >= PP_FONTWEIGHT_BOLD,
       description->italic,
@@ -234,7 +241,7 @@ void SearchString(PP_Instance instance,
 
   UErrorCode status = U_ZERO_ERROR;
   UStringSearch* searcher = usearch_open(
-      term, -1, string, -1, webkit_glue::GetWebKitLocale().c_str(), 0,
+      term, -1, string, -1, RenderThread::Get()->GetLocale().c_str(), 0,
       &status);
   DCHECK(status == U_ZERO_ERROR || status == U_USING_FALLBACK_WARNING ||
          status == U_USING_DEFAULT_WARNING);
@@ -304,10 +311,8 @@ void HistogramPDFPageCount(int count) {
 void UserMetricsRecordAction(PP_Var action) {
   scoped_refptr<ppapi::StringVar> action_str(
       ppapi::StringVar::FromPPVar(action));
-  if (action_str) {
-    RenderThread::current()->Send(
-        new ViewHostMsg_UserMetricsRecordAction(action_str->value()));
-  }
+  if (action_str)
+    RenderThread::Get()->RecordUserMetrics(action_str->value());
 }
 
 void HasUnsupportedFeature(PP_Instance instance_id) {
@@ -320,12 +325,10 @@ void HasUnsupportedFeature(PP_Instance instance_id) {
   if (!instance->IsFullPagePlugin())
     return;
 
-  PepperPluginDelegateImpl* pepper_delegate =
-      static_cast<PepperPluginDelegateImpl*>(instance->delegate());
-
-  RenderThread::current()->Send(
-      new ChromeViewHostMsg_PDFHasUnsupportedFeature(
-          pepper_delegate->GetRoutingId()));
+  WebView* view = instance->container()->element().document().frame()->view();
+  content::RenderView* render_view = content::RenderView::FromWebView(view);
+  render_view->Send(new ChromeViewHostMsg_PDFHasUnsupportedFeature(
+      render_view->GetRoutingId()));
 }
 
 void SaveAs(PP_Instance instance_id) {

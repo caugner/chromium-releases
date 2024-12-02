@@ -10,10 +10,10 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/window.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/native_web_keyboard_event.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/notification_types.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "views/events/event.h"
 #include "views/widget/root_view.h"
@@ -28,10 +28,10 @@ class RenderWidgetHost;
 namespace browser {
 
 // Declared in browser_dialogs.h so that others don't need to depend on our .h.
-gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent, Profile* profile,
+gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent,
+                                 Profile* profile,
                                  HtmlDialogUIDelegate* delegate) {
-  HtmlDialogView* html_view =
-      new HtmlDialogView(profile, delegate);
+  HtmlDialogView* html_view = new HtmlDialogView(profile, delegate);
   browser::CreateViewsWindow(parent, html_view);
   html_view->InitDialog();
   html_view->GetWidget()->Show();
@@ -76,7 +76,7 @@ void HtmlDialogView::ViewHierarchyChanged(
   DOMView::ViewHierarchyChanged(is_add, parent, child);
   if (is_add && GetWidget() && state_ == NONE) {
     state_ = INITIALIZED;
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
     CHECK(
         static_cast<views::NativeWidgetGtk*>(
             GetWidget()->native_widget())->SuppressFreezeUpdates());
@@ -86,7 +86,7 @@ void HtmlDialogView::ViewHierarchyChanged(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// HtmlDialogView, views::WindowDelegate implementation:
+// HtmlDialogView, views::WidgetDelegate implementation:
 
 bool HtmlDialogView::CanResize() const {
   return true;
@@ -98,10 +98,10 @@ bool HtmlDialogView::IsModal() const {
   return false;
 }
 
-std::wstring HtmlDialogView::GetWindowTitle() const {
+string16 HtmlDialogView::GetWindowTitle() const {
   if (delegate_)
-    return UTF16ToWideHack(delegate_->GetDialogTitle());
-  return std::wstring();
+    return delegate_->GetDialogTitle();
+  return string16();
 }
 
 void HtmlDialogView::WindowClosing() {
@@ -140,7 +140,7 @@ bool HtmlDialogView::IsDialogModal() const {
 }
 
 string16 HtmlDialogView::GetDialogTitle() const {
-  return WideToUTF16Hack(GetWindowTitle());
+  return GetWindowTitle();
 }
 
 GURL HtmlDialogView::GetDialogContentURL() const {
@@ -207,7 +207,9 @@ void HtmlDialogView::MoveContents(TabContents* source, const gfx::Rect& pos) {
 // We don't handle global keyboard shortcuts here, but that's fine since
 // they're all browser-specific. (This may change in the future.)
 void HtmlDialogView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(saintlou): Need to provide some Aura handling.
+#elif defined(OS_WIN)
   // Any unhandled keyboard/character messages should be defproced.
   // This allows stuff like F10, etc to work correctly.
   DefWindowProc(event.os_event.hwnd, event.os_event.message,
@@ -274,7 +276,7 @@ void HtmlDialogView::Observe(int type,
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT:
       if (state_ == LOADED) {
         state_ = PAINTED;
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
         views::NativeWidgetGtk::UpdateFreezeUpdatesProperty(
             GTK_WINDOW(GetWidget()->GetNativeView()), false);
 #endif

@@ -6,10 +6,11 @@
 
 #include <string>
 
-#include "content/browser/webui/web_ui.h"
-#include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
+#include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
+#include "content/browser/webui/web_ui.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/gfx/font.h"
 
@@ -91,7 +92,7 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
 
 // NetworkDropdown -------------------------------------------------------------
 
-NetworkDropdown::NetworkDropdown(WebUI *web_ui, gfx::NativeWindow parent_window)
+NetworkDropdown::NetworkDropdown(WebUI* web_ui, gfx::NativeWindow parent_window)
     : parent_window_(parent_window),
       web_ui_(web_ui) {
   network_menu_.reset(new NetworkMenuWebUI(this, web_ui));
@@ -148,9 +149,10 @@ void NetworkDropdown::NetworkMenuIconChanged() {
 
 void NetworkDropdown::SetNetworkIconAndText() {
   string16 text;
-  const SkBitmap* icon_bitmap = network_icon_->GetIconAndText(&text);
+  const SkBitmap icon_bitmap = network_icon_->GetIconAndText(&text);
   std::string icon_str =
-      icon_bitmap ? web_ui_util::GetImageDataUrl(*icon_bitmap) : std::string();
+      icon_bitmap.empty() ?
+          std::string() : web_ui_util::GetImageDataUrl(icon_bitmap);
   base::StringValue title(text);
   base::StringValue icon(icon_str);
   web_ui_->CallJavascriptFunction("cr.ui.DropDown.updateNetworkTitle",

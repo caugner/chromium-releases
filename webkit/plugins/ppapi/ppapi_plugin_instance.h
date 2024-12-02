@@ -18,9 +18,11 @@
 #include "googleurl/src/gurl.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
+#include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
+#include "ppapi/c/ppb_input_event.h"
 #include "ppapi/c/ppp_graphics_3d.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/shared_impl/function_group_base.h"
@@ -30,6 +32,8 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCanvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/rect.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
@@ -38,6 +42,7 @@ struct PPP_Find_Dev;
 struct PPP_InputEvent;
 struct PPP_Instance_Private;
 struct PPP_Messaging;
+struct PPP_MouseLock;
 struct PPP_Pdf;
 struct PPP_PolicyUpdate_Dev;
 struct PPP_Selection_Dev;
@@ -46,14 +51,11 @@ struct PPP_Zoom_Dev;
 class SkBitmap;
 class TransportDIB;
 
-namespace gfx {
-class Rect;
-}
-
 namespace WebKit {
-struct WebCursorInfo;
 class WebInputEvent;
 class WebPluginContainer;
+struct WebCompositionUnderline;
+struct WebCursorInfo;
 }
 
 namespace ppapi {
@@ -103,8 +105,6 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
 
   const gfx::Rect& position() const { return position_; }
   const gfx::Rect& clip() const { return clip_; }
-
-  int find_identifier() const { return find_identifier_; }
 
   void set_always_on_top(bool on_top) { always_on_top_ = on_top; }
 
@@ -167,6 +167,26 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   PP_Var GetInstanceObject();
   void ViewChanged(const gfx::Rect& position, const gfx::Rect& clip);
 
+  // Handlers for composition events.
+  bool HandleCompositionStart(const string16& text);
+  bool HandleCompositionUpdate(
+      const string16& text,
+      const std::vector<WebKit::WebCompositionUnderline>& underlines,
+      int selection_start,
+      int selection_end);
+  bool HandleCompositionEnd(const string16& text);
+  bool HandleTextInput(const string16& text);
+
+  // Implementation of composition API.
+  void UpdateCaretPosition(const gfx::Rect& caret,
+                           const gfx::Rect& bounding_box);
+  void SetTextInputType(ui::TextInputType type);
+
+  // Gets the current text input status.
+  ui::TextInputType text_input_type() const { return text_input_type_; }
+  gfx::Rect GetCaretBounds() const;
+  bool IsPluginAcceptingCompositionEvents() const;
+
   // Notifications about focus changes, see has_webkit_focus_ below.
   void SetWebKitFocus(bool has_focus);
   void SetContentAreaFocus(bool has_focus);
@@ -201,32 +221,66 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   void StopFind();
 
   bool SupportsPrintInterface();
+  bool IsPrintScalingDisabled();
   int PrintBegin(const gfx::Rect& printable_area, int printer_dpi);
   bool PrintPage(int page_number, WebKit::WebCanvas* canvas);
   void PrintEnd();
 
   void Graphics3DContextLost();
 
-  // Implementation of PPB_Fullscreen_Dev.
+  // There are 2 implementations of the fullscreen interface
+  // PPB_FlashFullscreen is used by Pepper Flash.
+  // PPB_Fullscreen is intended for other applications including NaCl.
+  // The two interface are mutually exclusive.
+
+  // Implementation of PPB_FlashFullscreen.
 
   // Because going to fullscreen is asynchronous (but going out is not), there
   // are 3 states:
-  // - normal (fullscreen_container_ == NULL)
-  // - fullscreen pending (fullscreen_container_ != NULL, fullscreen_ == false)
-  // - fullscreen (fullscreen_container_ != NULL, fullscreen_ = true)
+  // - normal            : fullscreen_container_ == NULL
+  //                       flash_fullscreen_ == false
+  // - fullscreen pending: fullscreen_container_ != NULL
+  //                       flash_fullscreen_ == false
+  // - fullscreen        : fullscreen_container_ != NULL
+  //                       flash_fullscreen_ == true
   //
   // In normal state, events come from webkit and painting goes back to it.
   // In fullscreen state, events come from the fullscreen container, and
-  // painting goes back to it
+  // painting goes back to it.
   // In pending state, events from webkit are ignored, and as soon as we receive
   // events from the fullscreen container, we go to the fullscreen state.
-  bool IsFullscreenOrPending();
+  bool FlashIsFullscreenOrPending();
 
   // Switches between fullscreen and normal mode. If |delay_report| is set to
   // false, it may report the new state through DidChangeView immediately. If
   // true, it will delay it. When called from the plugin, delay_report should be
   // true to avoid re-entrancy.
-  void SetFullscreen(bool fullscreen, bool delay_report);
+  void FlashSetFullscreen(bool fullscreen, bool delay_report);
+
+  FullscreenContainer* fullscreen_container() const {
+    return fullscreen_container_;
+  }
+
+  // Implementation of PPB_Fullscreen.
+
+  // Because going to/from fullscreen is asynchronous, there are 4 states:
+  // - normal            : desired_fullscreen_state_ == false
+  //                       fullscreen_ == false
+  // - fullscreen pending: desired_fullscreen_state_ == true
+  //                       fullscreen_ == false
+  // - fullscreen        : desired_fullscreen_state_ == true
+  //                       fullscreen_ == true
+  // - normal pending    : desired_fullscreen_state_ = false
+  //                       fullscreen_ = true
+  bool IsFullscreenOrPending();
+
+  // Switches between fullscreen and normal mode. If |delay_report| is set to
+  // false, it may report the new state through DidChangeView immediately. If
+  // true, it will delay it. When called from the plugin, delay_report should be
+  // true to avoid re-entrancy. Returns true on success, false on failure
+  // (e.g. trying to enter fullscreen when not processing a user gesture or
+  // trying to set fullscreen when already in fullscreen mode).
+  bool SetFullscreen(bool fullscreen, bool delay_report);
 
   // Implementation of PPB_Flash.
   int32_t Navigate(PPB_URLRequestInfo_Impl* request,
@@ -242,15 +296,14 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // embedded in a page).
   bool IsFullPagePlugin() const;
 
-  FullscreenContainer* fullscreen_container() const {
-    return fullscreen_container_;
-  }
+  void OnLockMouseACK(int32_t result);
+  void OnMouseLockLost();
 
   // FunctionGroupBase overrides.
   virtual ::ppapi::thunk::PPB_Instance_FunctionAPI* AsPPB_Instance_FunctionAPI()
       OVERRIDE;
 
-  // PPB_Instance_API implementation.
+  // PPB_Instance_FunctionAPI implementation.
   virtual PP_Bool BindGraphics(PP_Instance instance,
                                PP_Resource device) OVERRIDE;
   virtual PP_Bool IsFullFrame(PP_Instance instance) OVERRIDE;
@@ -259,10 +312,29 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   virtual PP_Var ExecuteScript(PP_Instance instance,
                                PP_Var script,
                                PP_Var* exception) OVERRIDE;
+  virtual PP_Var GetDefaultCharSet(PP_Instance instance) OVERRIDE;
+  virtual void Log(PP_Instance instance,
+                   int log_level,
+                   PP_Var value) OVERRIDE;
+  virtual void LogWithSource(PP_Instance instance,
+                             int log_level,
+                             PP_Var source,
+                             PP_Var value) OVERRIDE;
+  virtual void NumberOfFindResultsChanged(PP_Instance instance,
+                                          int32_t total,
+                                          PP_Bool final_result) OVERRIDE;
+  virtual void SelectedFindResultChanged(PP_Instance instance,
+                                         int32_t index) OVERRIDE;
+  virtual PP_Bool FlashIsFullscreen(PP_Instance instance) OVERRIDE;
+  virtual PP_Bool FlashSetFullscreen(PP_Instance instance,
+                                     PP_Bool fullscreen) OVERRIDE;
+  virtual PP_Bool FlashGetScreenSize(PP_Instance instance,
+                                     PP_Size* size) OVERRIDE;
   virtual PP_Bool IsFullscreen(PP_Instance instance) OVERRIDE;
   virtual PP_Bool SetFullscreen(PP_Instance instance,
-                                PP_Bool fullscreen) OVERRIDE;
-  virtual PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size) OVERRIDE;
+                                     PP_Bool fullscreen) OVERRIDE;
+  virtual PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size)
+      OVERRIDE;
   virtual int32_t RequestInputEvents(PP_Instance instance,
                                      uint32_t event_classes) OVERRIDE;
   virtual int32_t RequestFilteringInputEvents(PP_Instance instance,
@@ -274,7 +346,22 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
                                  double minimum_factor,
                                  double maximium_factor) OVERRIDE;
   virtual void PostMessage(PP_Instance instance, PP_Var message) OVERRIDE;
+  virtual int32_t LockMouse(PP_Instance instance,
+                            PP_CompletionCallback callback) OVERRIDE;
+  virtual void UnlockMouse(PP_Instance instance) OVERRIDE;
   virtual void SubscribeToPolicyUpdates(PP_Instance instance) OVERRIDE;
+  virtual PP_Var ResolveRelativeToDocument(
+      PP_Instance instance,
+      PP_Var relative,
+      PP_URLComponents_Dev* components) OVERRIDE;
+  virtual PP_Bool DocumentCanRequest(PP_Instance instance, PP_Var url) OVERRIDE;
+  virtual PP_Bool DocumentCanAccessDocument(PP_Instance instance,
+                                            PP_Instance target) OVERRIDE;
+  virtual PP_Var GetDocumentURL(PP_Instance instance,
+                                PP_URLComponents_Dev* components) OVERRIDE;
+  virtual PP_Var GetPluginInstanceURL(
+      PP_Instance instance,
+      PP_URLComponents_Dev* components) OVERRIDE;
 
  private:
   // See the static Create functions above for creating PluginInstance objects.
@@ -288,6 +375,7 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   bool LoadFindInterface();
   bool LoadInputEventInterface();
   bool LoadMessagingInterface();
+  bool LoadMouseLockInterface();
   bool LoadPdfInterface();
   bool LoadPolicyUpdateInterface();
   bool LoadPrintInterface();
@@ -345,9 +433,33 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
 
   void DoSetCursor(WebKit::WebCursorInfo* cursor);
 
+  // Internal helper functions for HandleCompositionXXX().
+  bool SendCompositionEventToPlugin(
+      PP_InputEvent_Type type,
+      const string16& text);
+  bool SendCompositionEventWithUnderlineInformationToPlugin(
+      PP_InputEvent_Type type,
+      const string16& text,
+      const std::vector<WebKit::WebCompositionUnderline>& underlines,
+      int selection_start,
+      int selection_end);
+
+  // Checks if the security origin of the document containing this instance can
+  // assess the security origin of the main frame document.
+  bool CanAccessMainFrame() const;
+
   // Returns true if the WebView the plugin is in renders via the accelerated
   // compositing path.
   bool IsViewAccelerated();
+
+  // Remember view parameters that were sent to the plugin.
+  void SetSentDidChangeView(const gfx::Rect& position, const gfx::Rect& clip);
+
+  // Track, set and reset size attributes to control the size of the plugin
+  // in and out of fullscreen mode.
+  void KeepSizeAttributesBeforeFullscreen();
+  void SetSizeAttributesForFullscreen();
+  void ResetSizeAttributesAfterFullscreen();
 
   PluginDelegate* delegate_;
   scoped_refptr<PluginModule> module_;
@@ -396,6 +508,7 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // The plugin-provided interfaces.
   const PPP_Find_Dev* plugin_find_interface_;
   const PPP_Messaging* plugin_messaging_interface_;
+  const PPP_MouseLock* plugin_mouse_lock_interface_;
   const PPP_InputEvent* plugin_input_event_interface_;
   const PPP_Instance_Private* plugin_private_interface_;
   const PPP_Pdf* plugin_pdf_interface_;
@@ -417,14 +530,14 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // variable to hold on to the pixels.
   scoped_refptr<PPB_ImageData_Impl> last_printed_page_;
 #endif  // defined(OS_MACOSX)
-#if defined(OS_LINUX) || defined(OS_WIN)
-  // When printing to PDF (print preview, Linux) the entire document goes into
-  // one metafile.  However, when users print only a subset of all the pages,
-  // it is impossible to know if a call to PrintPage() is the last call.
-  // Thus in PrintPage(), just store the page number in |ranges_|.
-  // The hack is in PrintEnd(), where a valid |canvas_| is preserved in
-  // PrintWebViewHelper::PrintPages. This makes it possible to generate the
-  // entire PDF given the variables below:
+#if defined(USE_SKIA)
+  // Always when printing to PDF on Linux and when printing for preview on Mac
+  // and Win, the entire document goes into one metafile.  However, when users
+  // print only a subset of all the pages, it is impossible to know if a call
+  // to PrintPage() is the last call. Thus in PrintPage(), just store the page
+  // number in |ranges_|. The hack is in PrintEnd(), where a valid |canvas_|
+  // is preserved in PrintWebViewHelper::PrintPages. This makes it possible
+  // to generate the entire PDF given the variables below:
   //
   // The most recently used WebCanvas, guaranteed to be valid.
   SkRefPtr<WebKit::WebCanvas> canvas_;
@@ -445,13 +558,37 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // to use a more optimized painting path in some cases.
   bool always_on_top_;
 
+  // Implementation of PPB_FlashFullscreen.
+
   // Plugin container for fullscreen mode. NULL if not in fullscreen mode. Note:
   // there is a transition state where fullscreen_container_ is non-NULL but
-  // fullscreen_ is false (see above).
+  // flash_fullscreen_ is false (see above).
   FullscreenContainer* fullscreen_container_;
 
-  // True if we are in fullscreen mode. Note: it is false during the transition.
+  // True if we are in fullscreen mode. False if we are in normal mode or
+  // in transition to fullscreen.
+  bool flash_fullscreen_;
+
+  // Implementation of PPB_Fullscreen.
+
+  // Since entering fullscreen mode is an asynchronous operation, we set this
+  // variable to the desired state at the time we issue the fullscreen change
+  // request. The plugin will receive a DidChangeView event when it goes
+  // fullscreen.
+  bool desired_fullscreen_state_;
+
+  // True if we are in fullscreen mode. False if we are in normal mode.
+  // It reflects the previous state when in transition.
   bool fullscreen_;
+
+  // WebKit does not resize the plugin when going into fullscreen mode, so we do
+  // this here by modifying the various plugin attributes and then restoring
+  // them on exit.
+  WebKit::WebString width_before_fullscreen_;
+  WebKit::WebString height_before_fullscreen_;
+  WebKit::WebString border_before_fullscreen_;
+  WebKit::WebString style_before_fullscreen_;
+  gfx::Size screen_size_for_fullscreen_;
 
   // The MessageChannel used to implement bidirectional postMessage for the
   // instance.
@@ -467,6 +604,14 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // and not. The bits are PP_INPUTEVENT_CLASS_*.
   uint32_t input_event_mask_;
   uint32_t filtered_input_event_mask_;
+
+  // Text composition status.
+  ui::TextInputType text_input_type_;
+  gfx::Rect text_input_caret_;
+  gfx::Rect text_input_caret_bounds_;
+  bool text_input_caret_set_;
+
+  PP_CompletionCallback lock_mouse_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginInstance);
 };

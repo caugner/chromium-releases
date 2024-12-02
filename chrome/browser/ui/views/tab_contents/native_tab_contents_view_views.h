@@ -11,6 +11,10 @@
 
 class TabContents;
 
+namespace views {
+class MouseEvent;
+}
+
 class NativeTabContentsViewViews : public views::NativeWidgetViews,
                                    public NativeTabContentsView {
  public:
@@ -19,13 +23,18 @@ class NativeTabContentsViewViews : public views::NativeWidgetViews,
   virtual ~NativeTabContentsViewViews();
 
  private:
+  // Overridden from NativeWidgetViews:
+  virtual void OnBoundsChanged(const gfx::Rect& new_bounds,
+                               const gfx::Rect& old_bounds) OVERRIDE;
+  virtual bool OnMouseEvent(const views::MouseEvent& event) OVERRIDE;
+
   // Overridden from NativeTabContentsView:
   virtual void InitNativeTabContentsView() OVERRIDE;
   virtual void Unparent() OVERRIDE;
   virtual RenderWidgetHostView* CreateRenderWidgetHostView(
       RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
-  virtual void SetPageTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask ops,
                              const SkBitmap& image,

@@ -35,15 +35,15 @@ class JSModalDialogViews : public NativeAppModalDialog,
   // Overridden from views::DialogDelegate:
   virtual int GetDefaultDialogButton() const OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
-  virtual std::wstring GetDialogButtonLabel(
+  virtual string16 GetDialogButtonLabel(
       ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
 
-  // Overridden from views::WindowDelegate:
+  // Overridden from views::WidgetDelegate:
   virtual bool IsModal() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;

@@ -4,7 +4,6 @@
 
 #include <vector>
 
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/time.h"
@@ -14,8 +13,11 @@
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
+#include "chrome/test/base/testing_profile.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -81,6 +83,11 @@ class TestPersonalDataManager : public PersonalDataManager {
     CreateTestAutofillProfiles(&web_profiles_);
   }
 
+  // Factory method for keyed service.  PersonalDataManager is NULL for testing.
+  static ProfileKeyedService* Build(Profile* profile) {
+    return NULL;
+  }
+
   // Overridden to avoid a trip to the database. This should be a no-op except
   // for the side-effect of logging the profile count.
   virtual void LoadProfiles() OVERRIDE {
@@ -117,15 +124,14 @@ class TestPersonalDataManager : public PersonalDataManager {
                                   "Presley", "theking@gmail.com", "RCA",
                                   "3734 Elvis Presley Blvd.", "Apt. 10",
                                   "Memphis", "Tennessee", "38116", "USA",
-                                  "12345678901", "");
+                                  "12345678901");
     profile->set_guid("00000000-0000-0000-0000-000000000001");
     profiles->push_back(profile);
     profile = new AutofillProfile;
     autofill_test::SetProfileInfo(profile, "Charles", "Hardin",
                                   "Holley", "buddy@gmail.com", "Decca",
                                   "123 Apple St.", "unit 6", "Lubbock",
-                                  "Texas", "79401", "USA", "2345678901",
-                                  "");
+                                  "Texas", "79401", "USA", "2345678901");
     profile->set_guid("00000000-0000-0000-0000-000000000002");
     profiles->push_back(profile);
   }
@@ -224,7 +230,7 @@ class AutofillMetricsTest : public TabContentsWrapperTestHarness {
                                             CreditCard** created_card);
 
   scoped_ptr<TestAutofillManager> autofill_manager_;
-  scoped_refptr<TestPersonalDataManager> test_personal_data_;
+  TestPersonalDataManager personal_data_;
 
  private:
   BrowserThread browser_thread_;
@@ -241,14 +247,17 @@ AutofillMetricsTest::~AutofillMetricsTest() {
   // Order of destruction is important as AutofillManager relies on
   // PersonalDataManager to be around when it gets destroyed.
   autofill_manager_.reset(NULL);
-  test_personal_data_ = NULL;
 }
 
 void AutofillMetricsTest::SetUp() {
+  Profile* profile = new TestingProfile();
+  browser_context_.reset(profile);
+  PersonalDataManagerFactory::GetInstance()->SetTestingFactory(
+      profile, TestPersonalDataManager::Build);
+
   TabContentsWrapperTestHarness::SetUp();
-  test_personal_data_ = new TestPersonalDataManager();
   autofill_manager_.reset(new TestAutofillManager(contents_wrapper(),
-                                                  test_personal_data_.get()));
+                                                  &personal_data_));
 }
 
 AutofillCCInfoBarDelegate* AutofillMetricsTest::CreateDelegate(
@@ -260,8 +269,10 @@ AutofillCCInfoBarDelegate* AutofillMetricsTest::CreateDelegate(
   CreditCard* credit_card = new CreditCard();
   if (created_card)
     *created_card = credit_card;
-  return new AutofillCCInfoBarDelegate(contents(), credit_card,
-      test_personal_data_.get(), metric_logger);
+  return new AutofillCCInfoBarDelegate(contents_wrapper()->infobar_tab_helper(),
+                                       credit_card,
+                                       &personal_data_,
+                                       metric_logger);
 }
 
 // Test that we log quality metrics appropriately.
@@ -858,27 +869,27 @@ TEST_F(AutofillMetricsTest, QualityMetricsWithExperimentId) {
 // Test that the profile count is logged correctly.
 TEST_F(AutofillMetricsTest, StoredProfileCount) {
   // The metric should be logged when the profiles are first loaded.
-  EXPECT_CALL(*test_personal_data_->metric_logger(),
+  EXPECT_CALL(*personal_data_.metric_logger(),
               LogStoredProfileCount(2)).Times(1);
-  test_personal_data_->LoadProfiles();
+  personal_data_.LoadProfiles();
 
   // The metric should only be logged once.
-  EXPECT_CALL(*test_personal_data_->metric_logger(),
+  EXPECT_CALL(*personal_data_.metric_logger(),
               LogStoredProfileCount(::testing::_)).Times(0);
-  test_personal_data_->LoadProfiles();
+  personal_data_.LoadProfiles();
 }
 
 // Test that we correctly log whether Autofill is enabled.
 TEST_F(AutofillMetricsTest, AutofillIsEnabledAtStartup) {
-  test_personal_data_->set_autofill_enabled(true);
-  EXPECT_CALL(*test_personal_data_->metric_logger(),
+  personal_data_.set_autofill_enabled(true);
+  EXPECT_CALL(*personal_data_.metric_logger(),
               LogIsAutofillEnabledAtStartup(true)).Times(1);
-  test_personal_data_->Init(NULL);
+  personal_data_.Init(profile());
 
-  test_personal_data_->set_autofill_enabled(false);
-  EXPECT_CALL(*test_personal_data_->metric_logger(),
+  personal_data_.set_autofill_enabled(false);
+  EXPECT_CALL(*personal_data_.metric_logger(),
               LogIsAutofillEnabledAtStartup(false)).Times(1);
-  test_personal_data_->Init(NULL);
+  personal_data_.Init(profile());
 }
 
 // Test that we log the number of Autofill suggestions when filling a form.
@@ -980,8 +991,7 @@ TEST_F(AutofillMetricsTest, CreditCardInfoBar) {
     CreditCard* credit_card;
     scoped_ptr<InfoBarDelegate> infobar(CreateDelegate(&metric_logger,
                                                        &credit_card));
-    EXPECT_CALL(*test_personal_data_.get(),
-                SaveImportedCreditCard(*credit_card));
+    EXPECT_CALL(personal_data_, SaveImportedCreditCard(*credit_card));
     EXPECT_CALL(metric_logger,
         LogCreditCardInfoBarMetric(AutofillMetrics::INFOBAR_ACCEPTED)).Times(1);
     EXPECT_CALL(metric_logger,

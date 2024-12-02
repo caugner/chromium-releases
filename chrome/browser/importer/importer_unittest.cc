@@ -16,6 +16,7 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -112,8 +113,8 @@ class ImporterTest : public testing::Test {
     int items = importer::HISTORY | importer::PASSWORDS | importer::FAVORITES;
     if (import_search_plugins)
       items = items | importer::SEARCH_ENGINES;
-    loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
-        &ImporterHost::StartImportSettings, source_profile,
+    loop->PostTask(FROM_HERE, base::Bind(
+        &ImporterHost::StartImportSettings, host.get(), source_profile,
         profile_.get(), items, make_scoped_refptr(writer), true));
     loop->Run();
   }
@@ -206,12 +207,6 @@ class TestObserver : public ProfileWriter,
     MessageLoop::current()->Quit();
     EXPECT_EQ(arraysize(kIEBookmarks), bookmark_count_);
     EXPECT_EQ(1, history_count_);
-#if 0  // This part of the test is disabled. See bug #2466
-    if (base::win::GetVersion() >= base::win::VERSION_VISTA)
-      EXPECT_EQ(0, password_count_);
-    else
-      EXPECT_EQ(1, password_count_);
-#endif
   }
 
   virtual bool BookmarkModelIsLoaded() const {
@@ -357,30 +352,7 @@ TEST_F(ImporterTest, IEImporter) {
   file_util::WriteFile(path + L"\\InvalidUrlFile.url", "x", 1);
   file_util::WriteFile(path + L"\\PlainTextFile.txt", "x", 1);
 
-  // Sets up dummy password data.
   HRESULT res;
-#if 0  // This part of the test is disabled. See bug #2466
-  base::win::ScopedComPtr<IPStore> pstore;
-  HMODULE pstorec_dll;
-  GUID type = IEImporter::kUnittestGUID;
-  GUID subtype = IEImporter::kUnittestGUID;
-  // PStore is read-only in Windows Vista.
-  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
-    typedef HRESULT (WINAPI *PStoreCreateFunc)(IPStore**, DWORD, DWORD, DWORD);
-    pstorec_dll = LoadLibrary(L"pstorec.dll");
-    PStoreCreateFunc PStoreCreateInstance =
-        (PStoreCreateFunc)GetProcAddress(pstorec_dll, "PStoreCreateInstance");
-    res = PStoreCreateInstance(pstore.Receive(), 0, 0, 0);
-    ASSERT_TRUE(res == S_OK);
-    ClearPStoreType(pstore, &type, &subtype);
-    PST_TYPEINFO type_info;
-    type_info.szDisplayName = L"TestType";
-    type_info.cbSize = 8;
-    pstore->CreateType(0, &type, &type_info, 0);
-    pstore->CreateSubtype(0, &type, &subtype, &type_info, NULL, 0);
-    WritePStore(pstore, &type, &subtype);
-  }
-#endif
 
   // Sets up a special history link.
   base::win::ScopedComPtr<IUrlHistoryStg2> url_history_stg2;
@@ -400,8 +372,9 @@ TEST_F(ImporterTest, IEImporter) {
   source_profile.importer_type = importer::TYPE_IE;
   source_profile.source_path = temp_dir_.path();
 
-  loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
+  loop->PostTask(FROM_HERE, base::Bind(
       &ImporterHost::StartImportSettings,
+      host.get(),
       source_profile,
       profile_.get(),
       importer::HISTORY | importer::PASSWORDS | importer::FAVORITES,
@@ -412,14 +385,6 @@ TEST_F(ImporterTest, IEImporter) {
   // Cleans up.
   url_history_stg2->DeleteUrl(kIEIdentifyUrl, 0);
   url_history_stg2.Release();
-#if 0  // This part of the test is disabled. See bug #2466
-  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
-    ClearPStoreType(pstore, &type, &subtype);
-    // Releases it befor unload the dll.
-    pstore.Release();
-    FreeLibrary(pstorec_dll);
-  }
-#endif
 }
 
 TEST_F(ImporterTest, IE7Importer) {
@@ -694,9 +659,9 @@ TEST_F(ImporterTest, MAYBE(Firefox2Importer)) {
   source_profile.app_path = app_path_;
   source_profile.source_path = profile_path_;
 
-  loop->PostTask(FROM_HERE, NewRunnableMethod(
-      host.get(),
+  loop->PostTask(FROM_HERE, base::Bind(
       &ImporterHost::StartImportSettings,
+      host.get(),
       source_profile,
       profile_.get(),
       importer::HISTORY | importer::PASSWORDS |

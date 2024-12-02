@@ -8,6 +8,9 @@
 #include <gtk/gtk.h>
 #endif
 
+#include <algorithm>
+#include <map>
+
 #include "base/command_line.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
@@ -51,6 +54,7 @@
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/skia_util.h"
 #include "views/bubble/bubble_border.h"
 #include "views/controls/label.h"
@@ -99,11 +103,10 @@ static const int kSelectedKeywordBackgroundImages[] = {
   IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_R,
 };
 
-static const int kNormalModeBackgroundImages[] = {
-  IDR_LOCATIONBG_L,
-  IDR_LOCATIONBG_C,
-  IDR_LOCATIONBG_R,
-};
+// Height of the location bar's round corner region.
+static const int kBorderRoundCornerHeight = 6;
+// Width of location bar's round corner region.
+static const int kBorderRoundCornerWidth = 5;
 
 // LocationBarView -----------------------------------------------------------
 
@@ -115,7 +118,9 @@ LocationBarView::LocationBarView(Browser* browser,
       model_(model),
       delegate_(delegate),
       disposition_(CURRENT_TAB),
-      transition_(PageTransition::TYPED | PageTransition::FROM_ADDRESS_BAR),
+      transition_(content::PageTransitionFromInt(
+          content::PAGE_TRANSITION_TYPED |
+          content::PAGE_TRANSITION_FROM_ADDRESS_BAR)),
       location_icon_view_(NULL),
       ev_bubble_view_(NULL),
       location_entry_view_(NULL),
@@ -133,8 +138,15 @@ LocationBarView::LocationBarView(Browser* browser,
   set_id(VIEW_ID_LOCATION_BAR);
   set_focusable(true);
 
-  if (mode_ == NORMAL)
-    painter_.reset(new views::HorizontalPainter(kNormalModeBackgroundImages));
+  if (mode_ == NORMAL) {
+    painter_.reset(
+        views::Painter::CreateImagePainter(
+            *ResourceBundle::GetSharedInstance().GetImageNamed(
+                IDR_LOCATION_BAR_BORDER).ToSkBitmap(),
+            gfx::Insets(kBorderRoundCornerHeight, kBorderRoundCornerWidth,
+                kBorderRoundCornerHeight, kBorderRoundCornerWidth),
+            true));
+  }
 
   edit_bookmarks_enabled_.Init(prefs::kEditBookmarksEnabled,
                                browser_->profile()->GetPrefs(), this);
@@ -207,13 +219,10 @@ void LocationBarView::Init() {
   selected_keyword_view_->SetFont(font_);
   selected_keyword_view_->SetVisible(false);
 
-  SkColor dimmed_text = GetColor(ToolbarModel::NONE, DEEMPHASIZED_TEXT);
-
   keyword_hint_view_ = new KeywordHintView(profile);
   AddChildView(keyword_hint_view_);
   keyword_hint_view_->SetVisible(false);
   keyword_hint_view_->SetFont(font_);
-  keyword_hint_view_->SetColor(dimmed_text);
 
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
     ContentSettingImageView* content_blocked_view =
@@ -348,10 +357,13 @@ void LocationBarView::InvalidatePageActions() {
 }
 
 void LocationBarView::OnFocus() {
-  // Focus the location entry native view.
-  location_entry_->SetFocus();
+  // Focus the view widget first which implements accessibility for Chrome OS.
   GetWidget()->NotifyAccessibilityEvent(
       this, ui::AccessibilityTypes::EVENT_FOCUS, true);
+
+  // Then focus the native location view which implements accessibility for
+  // Windows.
+  location_entry_->SetFocus();
 }
 
 void LocationBarView::SetPreviewEnabledPageAction(ExtensionAction* page_action,
@@ -421,18 +433,16 @@ void LocationBarView::SetInstantSuggestion(const string16& text,
   if (!text.empty()) {
     if (!suggested_text_view_) {
       suggested_text_view_ = new SuggestedTextView(location_entry_->model());
-      suggested_text_view_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-      suggested_text_view_->SetColor(
-          GetColor(ToolbarModel::NONE,
-                   LocationBarView::DEEMPHASIZED_TEXT));
-      suggested_text_view_->SetText(UTF16ToWide(text));
+      suggested_text_view_->SetText(text);
       if (views::Widget::IsPureViews())
         NOTIMPLEMENTED();
+#if !defined(USE_AURA)
       else
         suggested_text_view_->SetFont(GetOmniboxViewWin()->GetFont());
+#endif
       AddChildView(suggested_text_view_);
-    } else if (suggested_text_view_->GetText() != UTF16ToWide(text)) {
-      suggested_text_view_->SetText(UTF16ToWide(text));
+    } else if (suggested_text_view_->GetText() != text) {
+      suggested_text_view_->SetText(text);
     }
     if (animate_to_complete && !location_entry_->IsImeComposing())
       suggested_text_view_->StartAnimation();
@@ -501,7 +511,7 @@ void LocationBarView::Layout() {
     entry_width -= (kEdgeThickness + kEdgeEditPadding);
   } else if (model_->GetSecurityLevel() == ToolbarModel::EV_SECURE) {
     ev_bubble_view_->SetVisible(true);
-    ev_bubble_view_->SetLabel(UTF16ToWideHack(model_->GetEVCertName()));
+    ev_bubble_view_->SetLabel(model_->GetEVCertName());
     ev_bubble_width = ev_bubble_view_->GetPreferredSize().width();
     // We'll adjust this width and take it out of |entry_width| below.
   } else {
@@ -545,12 +555,14 @@ void LocationBarView::Layout() {
   if (views::Widget::IsPureViews()) {
     NOTIMPLEMENTED();
   } else {
+#if !defined(USE_AURA)
     RECT formatting_rect;
     GetOmniboxViewWin()->GetRect(&formatting_rect);
     RECT edit_bounds;
     GetOmniboxViewWin()->GetClientRect(&edit_bounds);
     max_edit_width = entry_width - formatting_rect.left -
                      (edit_bounds.right - formatting_rect.right);
+#endif
   }
 #else
   int max_edit_width = entry_width;
@@ -674,6 +686,7 @@ void LocationBarView::Layout() {
     if (views::Widget::IsPureViews()) {
       NOTIMPLEMENTED();
     } else {
+#if !defined(USE_AURA)
       // TODO(sky): need to layout when the user changes caret position.
       int suggested_text_width =
           suggested_text_view_->GetPreferredSize().width();
@@ -692,6 +705,7 @@ void LocationBarView::Layout() {
                                         suggested_text_width,
                                         location_bounds.height());
       }
+#endif
     }
   }
 #endif
@@ -731,8 +745,8 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
     const SkScalar radius(SkIntToScalar(
         views::BubbleBorder::GetCornerRadius()));
     bounds.Inset(kNormalHorizontalEdgeThickness, 0);
-    canvas->AsCanvasSkia()->drawRoundRect(gfx::RectToSkRect(bounds), radius,
-                                          radius, paint);
+    canvas->GetSkCanvas()->drawRoundRect(gfx::RectToSkRect(bounds), radius,
+                                         radius, paint);
   } else {
     canvas->FillRectInt(color, bounds.x(), bounds.y(), bounds.width(),
                         bounds.height());
@@ -757,7 +771,7 @@ void LocationBarView::SelectAll() {
   location_entry_->SelectAll(true);
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 bool LocationBarView::OnMousePressed(const views::MouseEvent& event) {
   UINT msg;
   if (event.IsLeftMouseButton()) {
@@ -808,14 +822,15 @@ void LocationBarView::OnMouseCaptureLost() {
 void LocationBarView::OnAutocompleteAccept(
     const GURL& url,
     WindowOpenDisposition disposition,
-    PageTransition::Type transition,
+    content::PageTransition transition,
     const GURL& alternate_nav_url) {
   // WARNING: don't add an early return here. The calls after the if must
   // happen.
   if (url.is_valid()) {
     location_input_ = UTF8ToUTF16(url.spec());
     disposition_ = disposition;
-    transition_ = transition | PageTransition::FROM_ADDRESS_BAR;
+    transition_ = content::PageTransitionFromInt(
+        transition | content::PAGE_TRANSITION_FROM_ADDRESS_BAR);
 
     if (browser_->command_updater()) {
       if (!alternate_nav_url.is_valid()) {
@@ -989,9 +1004,9 @@ void LocationBarView::RefreshPageActionViews() {
   }
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
-  UINT flags = event.GetWindowsFlags();
+  UINT flags = event.native_event().wParam;
   gfx::Point screen_point(event.location());
   ConvertPointToScreen(this, &screen_point);
   if (views::Widget::IsPureViews())
@@ -1041,9 +1056,11 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(
       return true;
     }
 
+#if !defined(USE_AURA)
     // If the caret is not at the end, then tab moves the caret to the end.
     if (!views_omnibox && !GetOmniboxViewWin()->IsCaretAtEnd())
       return true;
+#endif
 
     // Tab while showing instant commits instant immediately.
     // Return true so that focus traversal isn't attempted. The edit ends
@@ -1052,8 +1069,10 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(
       return true;
   }
 
+#if !defined(USE_AURA)
   if (!views_omnibox)
     return GetOmniboxViewWin()->SkipDefaultKeyEventProcessing(event);
+#endif
   NOTIMPLEMENTED();
   return false;
 #else
@@ -1136,7 +1155,7 @@ WindowOpenDisposition LocationBarView::GetWindowOpenDisposition() const {
   return disposition_;
 }
 
-PageTransition::Type LocationBarView::GetPageTransition() const {
+content::PageTransition LocationBarView::GetPageTransition() const {
   return transition_;
 }
 
@@ -1253,8 +1272,10 @@ bool LocationBarView::HasValidSuggestText() const {
       !suggested_text_view_->GetText().empty();
 }
 
+#if !defined(USE_AURA)
 OmniboxViewWin* LocationBarView::GetOmniboxViewWin() {
   CHECK(!views::Widget::IsPureViews());
   return static_cast<OmniboxViewWin*>(location_entry_.get());
 }
+#endif
 #endif

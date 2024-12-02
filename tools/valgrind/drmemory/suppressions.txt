@@ -522,6 +522,16 @@ POSSIBLE LEAK
 <ntdll.dll+0x64fde>
 <ntdll.dll+0x447f3>
 
+# http://crbug.com/96433
+UNADDRESSABLE ACCESS
+ntdll.dll!*
+ntdll.dll!*
+ntdll.dll!*
+KERNELBASE.dll!LocalReAlloc
+CRYPT32.dll!*
+...
+CRYPT32.dll!CertControlStore
+
 ############################
 # TODO(timurrrr): investigate these
 UNINITIALIZED READ
@@ -659,25 +669,46 @@ base_unittests.exe!base::ToolsSanityTest_AccessesToNewMemory_Test::TestBody
 UNADDRESSABLE ACCESS
 base_unittests.exe!base::ToolsSanityTest_AccessesToNewMemory_Test::TestBody
 
+UNADDRESSABLE ACCESS
+name=AboutHandler::AboutCrash deliberate crash
+# TODO(bruening): switch to annotation once have support for that
+chrome.dll!AboutHandler::AboutCrash
+
+UNADDRESSABLE ACCESS
+name=RendererCrashTest.Crash deliberate crash
+# function is small, little risk for false negative in rest of it
+# TODO(bruening): switch to annotation once have support for that
+chrome.dll!HandleRendererErrorTestParameters
+
+UNADDRESSABLE ACCESS
+name=NPAPITesterBase.NoHangIfInitCrashes deliberate crash
+# function is small, little risk for false negative in rest of it
+# TODO(bruening): switch to annotation once have support for that
+npapi_test_plugin.dll!NPAPIClient::PluginClient::Initialize
+
 ############################
 # Benign issues in Chromium
 
 # We deliberately leak different kinds of Histograms to avoid data races.
 LEAK
 ...
-*!operator new
+*!operator new*
 ...
 *!*::*Histogram::FactoryGet
 
 # Deliberate LazyInstance leaks
 LEAK
 ...
-*!base::LeakyLazyInstanceTraits*::New
+*!*base::LeakyLazyInstanceTraits*::*
+...
 *!base::LazyInstance*::Pointer
 
 # Deliberate NULL deref to crash the child process
 UNADDRESSABLE ACCESS
 *!CrashingChildProcess
+
+UNADDRESSABLE ACCESS
+*!`anonymous namespace'::Crasher::Run
 
 # http://crbug.com/79933
 LEAK
@@ -704,8 +735,26 @@ LEAK
 ...
 *!BrowserThreadTest_NotReleasedIfTargetThreadNonExistent_Test::TestBody
 
+WARNING
+# http://code.google.com/p/chromium/issues/detail?id=72463
+name=Ci#72463: prefetches in generated MemCopy
+instruction=prefetch*
+<not in a module>                  
+chrome.dll!v8::internal::CopyChars*
+
+UNADDRESSABLE ACCESS
+# http://code.google.com/p/drmemory/issues/detail?id=582
+name=bizarre cl-generated read-beyond-TOS
+instruction=mov    0xfffffffc(%esp) -> %eax
+chrome.dll!WebCore::RenderStyle::resetBorder*
+
 ############################
 # Real issues in Chromium
+
+# http://crbug.com/32085
+LEAK
+...
+chrome.dll!NotificationRegistrar::Add
 
 # http://crbug.com/32623
 LEAK
@@ -746,34 +795,6 @@ LEAK
 *!net::SSL*SocketNSS::DoHandshake
 *!net::SSL*SocketNSS::DoHandshakeLoop
 
-# http://crbug.com/70388
-LEAK
-*!operator new
-*!NewCallback<PrintingContextTest,enum printing::PrintingContext::Result>
-*!PrintingContextTest_PrintAll_Test::TestBody
-
-# http://crbug.com/70389
-POSSIBLE LEAK
-...
-WINSPOOL.DRV!OpenPrinterW
-*!PrintDlgExMock
-*!printing::PrintingContextWin::AskUserForSettings
-*!PrintingContextTest_PrintAll_Test::TestBody
-
-# http://crbug.com/73744
-LEAK
-*!operator new
-*!remoting::TraceContext::Get
-*!remoting::TraceContext::tracer
-*!remoting::ScreenRecorder::DoCapture
-*!remoting::ScreenRecorder::DoStart
-
-# http://crbug.com/74413
-LEAK
-...
-*!operator new
-*!net::HttpAuthHandlerFactory::CreateDefault
-
 # http://crbug.com/74417
 LEAK
 *!operator new
@@ -790,14 +811,6 @@ LEAK
 *!operator new
 *!AutofillDownloadTestHelper::AutofillDownloadTestHelper
 
-# http://crbug.com/76354
-LEAK
-...
-*!IPC::MessageWithReply*
-*!ChildProcessHostMsg_ResolveProxy::ChildProcessHostMsg_ResolveProxy
-*!ResolveProxyMsgHelperTest::GenerateReply
-*!ResolveProxyMsgHelperTest_*_Test::TestBody
-
 # http://crbug.com/78784
 LEAK
 *!generic_cpp_alloc
@@ -813,41 +826,6 @@ LEAK
 LEAK
 ...
 *!RenderWidgetHost::WasRestored
-
-# http://crbug.com/81522
-LEAK
-*!operator new
-*!base::MessageLoopProxy::current
-*!IPC::ChannelProxy::Context::Context
-*!IPC::ChannelProxy::ChannelProxy
-*!IPCChannelTest_ChannelProxyTest_Test::TestBody
-
-# http://crbug.com/81753
-UNINITIALIZED READ
-...
-*!icu_46::RegexMatcher::MatchChunkAt
-*!icu_46::RegexMatcher::findUsingChunk
-*!icu_46::RegexMatcher::find
-*!icu_46::RegexMatcher::find
-*!autofill::MatchesPattern
-
-UNINITIALIZED READ
-...
-*!icu_46::RegexMatcher::MatchChunkAt
-*!icu_46::RegexMatcher::matches
-*!i18n::phonenumbers::IcuRegExp::Match
-*!i18n::phonenumbers::RegExp::FullMatch
-*!i18n::phonenumbers::PhoneNumberUtil::IsViablePhoneNumber
-
-# http://crbug.com/82716
-LEAK
-*!generic_cpp_alloc
-*!operator new
-*!base::MessageLoopProxy::current
-*!IPC::SyncChannel::ReceivedSyncMsgQueue::ReceivedSyncMsgQueue
-*!IPC::SyncChannel::ReceivedSyncMsgQueue::AddContext
-*!IPC::SyncChannel::SyncContext::SyncContext
-*!IPC::SyncChannel::SyncChannel
 
 # http://crbug.com/87612
 LEAK
@@ -869,12 +847,6 @@ LEAK
 *!ProfileImpl::InitRegisteredProtocolHandlers
 *!ProfileImpl::DoFinalInit
 *!ProfileImpl::OnPrefsLoaded
-
-# http://crbug.com/90654
-UNINITIALIZED READ
-*!_output_s_l
-...
-*!testing_internal::DefaultPrintNonContainerTo<policy::FailedRequestParams>
 
 # http://crbug.com/91465
 LEAK
@@ -905,6 +877,11 @@ LEAK
 ...
 *!operator new
 *!views::NativeWidgetWin::OnCreate
+
+# http://crbug.com/96010
+UNADDRESSABLE ACCESS
+...
+*!NotificationService::Notify
 
 # Empty line at EOF - workaround for
 # http://code.google.com/p/drmemory/issues/detail?id=41

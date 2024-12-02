@@ -26,6 +26,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/task.h"
+#include "base/time.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/cache_type.h"
 #include "net/base/completion_callback.h"
@@ -50,6 +51,7 @@ class HttpAuthHandlerFactory;
 class HttpNetworkSession;
 struct HttpRequestInfo;
 class HttpResponseInfo;
+class HttpServerProperties;
 class IOBuffer;
 class NetLog;
 class NetworkDelegate;
@@ -89,7 +91,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
     // |callback| because the object can be deleted from within the callback.
     virtual int CreateBackend(NetLog* net_log,
                               disk_cache::Backend** backend,
-                              CompletionCallback* callback) = 0;
+                              OldCompletionCallback* callback) = 0;
   };
 
   // A default backend factory for the common use cases.
@@ -108,7 +110,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
     // BackendFactory implementation.
     virtual int CreateBackend(NetLog* net_log,
                               disk_cache::Backend** backend,
-                              CompletionCallback* callback);
+                              OldCompletionCallback* callback);
 
    private:
     CacheType type_;
@@ -128,6 +130,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
             SSLConfigService* ssl_config_service,
             HttpAuthHandlerFactory* http_auth_handler_factory,
             NetworkDelegate* network_delegate,
+            HttpServerProperties* http_server_properties,
             NetLog* net_log,
             BackendFactory* backend_factory);
 
@@ -155,7 +158,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // a network error code, and it could be ERR_IO_PENDING, in which case the
   // |callback| will be notified when the operation completes. The pointer that
   // receives the |backend| must remain valid until the operation completes.
-  int GetBackend(disk_cache::Backend** backend, CompletionCallback* callback);
+  int GetBackend(disk_cache::Backend** backend, OldCompletionCallback* callback);
 
   // Returns the current backend (can be NULL).
   disk_cache::Backend* GetCurrentBackend() const;
@@ -180,6 +183,9 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // recycled connections.  For sockets currently in use, they may not close
   // immediately, but they will not be reusable. This is for debugging.
   void CloseAllConnections();
+
+  // Close all idle connections. Will close all sockets not in active use.
+  void CloseIdleConnections();
 
   // Called whenever an external cache in the system reuses the resource
   // referred to by |url| and |http_method|.
@@ -238,7 +244,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // Creates the |backend| object and notifies the |callback| when the operation
   // completes. Returns an error code.
   int CreateBackend(disk_cache::Backend** backend,
-                    CompletionCallback* callback);
+                    OldCompletionCallback* callback);
 
   // Makes sure that the backend creation is complete before allowing the
   // provided transaction to use the object. Returns an error code.  |trans|

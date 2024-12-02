@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
+#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -22,18 +23,10 @@ class WebstorePrivateApi {
   // Allows you to set the ProfileSyncService the function will use for
   // testing purposes.
   static void SetTestingProfileSyncService(ProfileSyncService* service);
-};
 
-// TODO(asargent): this is being deprecated in favor of
-// BeginInstallWithManifestFunction. See crbug.com/75821 for details.
-class BeginInstallFunction : public SyncExtensionFunction {
- public:
-  // For use only in tests - sets a flag that can cause this function to ignore
-  // the normal requirement that it is called during a user gesture.
-  static void SetIgnoreUserGestureForTests(bool ignore);
- protected:
-  virtual bool RunImpl();
-  DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.beginInstall");
+  // Allows you to override the WebstoreInstaller delegate for testing.
+  static void SetWebstoreInstallerDelegateForTesting(
+      WebstoreInstaller::Delegate* delegate);
 };
 
 class BeginInstallWithManifestFunction
@@ -44,7 +37,7 @@ class BeginInstallWithManifestFunction
   BeginInstallWithManifestFunction();
 
   // Result codes for the return value. If you change this, make sure to
-  // update the description for the beginInstallWithManifest callback in
+  // update the description for the beginInstallWithManifest3 callback in
   // extension_api.json.
   enum ResultCode {
     ERROR_NONE = 0,
@@ -67,16 +60,9 @@ class BeginInstallWithManifestFunction
     // The page does not have permission to call this function.
     PERMISSION_DENIED,
 
-    // The function was not called during a user gesture.
-    NO_GESTURE,
-
     // Invalid icon url.
     INVALID_ICON_URL
   };
-
-  // For use only in tests - sets a flag that can cause this function to ignore
-  // the normal requirement that it is called during a user gesture.
-  static void SetIgnoreUserGestureForTests(bool ignore);
 
   // Implementing WebstoreInstallHelper::Delegate interface.
   virtual void OnWebstoreParseSuccess(
@@ -113,7 +99,7 @@ class BeginInstallWithManifestFunction
   // ExtensionInstallUI to prompt for confirmation of the install.
   scoped_refptr<Extension> dummy_extension_;
 
-  DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.beginInstallWithManifest2");
+  DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.beginInstallWithManifest3");
 };
 
 class CompleteInstallFunction : public SyncExtensionFunction {

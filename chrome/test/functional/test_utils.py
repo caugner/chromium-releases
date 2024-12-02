@@ -9,6 +9,7 @@ import email
 import logging
 import os
 import platform
+import shutil
 import smtplib
 import subprocess
 import types
@@ -19,6 +20,17 @@ import pyauto_utils
 
 
 """Commonly used functions for PyAuto tests."""
+
+def CopyFileFromDataDirToDownloadDir(test, file_path):
+  """Copy a file from data directory to downloads directory.
+
+  Args:
+    test: derived from pyauto.PyUITest - base class for UI test cases.
+    path: path of the file relative to the data directory
+  """
+  data_file = os.path.join(test.DataDir(), file_path)
+  download_dir = test.GetDownloadDirectory().value()
+  shutil.copy(data_file, download_dir)
 
 def DownloadFileFromDownloadsDataDir(test, file_name):
   """Download a file from downloads data directory, in first tab, first window.
@@ -69,11 +81,11 @@ def GoogleAccountsLogin(test, username, password, tab_index=0, windex=0):
              'window.domAutomationController.send("done")' % username
   password = 'document.getElementById("Passwd").value = "%s"; ' \
              'window.domAutomationController.send("done")' % password
-  test.ExecuteJavascript(email_id, windex, tab_index);
-  test.ExecuteJavascript(password, windex, tab_index);
+  test.ExecuteJavascript(email_id, tab_index, windex)
+  test.ExecuteJavascript(password, tab_index, windex)
   test.ExecuteJavascript('document.getElementById("gaia_loginform").submit();'
                          'window.domAutomationController.send("done")',
-                         windex, tab_index)
+                         tab_index, windex)
 
 
 def VerifyGoogleAccountCredsFilled(test, username, password, tab_index=0,
@@ -88,9 +100,9 @@ def VerifyGoogleAccountCredsFilled(test, username, password, tab_index=0,
     windex: The window index, default is 0.
   """
   email_value = test.GetDOMValue('document.getElementById("Email").value',
-                                 windex, tab_index)
+                                 tab_index, windex)
   passwd_value = test.GetDOMValue('document.getElementById("Passwd").value',
-                                  windex, tab_index)
+                                  tab_index, windex)
   test.assertEqual(email_value, username)
   # Not using assertEqual because if it fails it would end up dumping the
   # password (which is supposed to be private)

@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <dbus/dbus.h>
 
 #include "base/callback.h"
@@ -284,22 +285,24 @@ class Bus : public base::RefCountedThreadSafe<Bus> {
   virtual void Send(DBusMessage* request, uint32* serial);
 
   // Adds the message filter function. |filter_function| will be called
-  // when incoming messages are received.
+  // when incoming messages are received. Returns true on success.
   //
   // When a new incoming message arrives, filter functions are called in
   // the order that they were added until the the incoming message is
   // handled by a filter function.
   //
-  // The same filter function must not be added more than once.
+  // The same filter function associated with the same user data cannot be
+  // added more than once. Returns false for this case.
   //
   // BLOCKING CALL.
-  virtual void AddFilterFunction(DBusHandleMessageFunction filter_function,
+  virtual bool AddFilterFunction(DBusHandleMessageFunction filter_function,
                                  void* user_data);
 
   // Removes the message filter previously added by AddFilterFunction().
+  // Returns true on success.
   //
   // BLOCKING CALL.
-  virtual void RemoveFilterFunction(DBusHandleMessageFunction filter_function,
+  virtual bool RemoveFilterFunction(DBusHandleMessageFunction filter_function,
                                     void* user_data);
 
   // Adds the match rule. Messages that match the rule will be processed
@@ -309,7 +312,8 @@ class Bus : public base::RefCountedThreadSafe<Bus> {
   // Instead, you should check if an incoming message is what you are
   // interested in, in the filter functions.
   //
-  // The same match rule must not be added more than once.
+  // The same match rule can be added more than once, but ignored from the
+  // second time.
   //
   // The match rule looks like:
   // "type='signal', interface='org.chromium.SomeInterface'".
@@ -380,6 +384,9 @@ class Bus : public base::RefCountedThreadSafe<Bus> {
   // AssertOnOriginThread().
   virtual void AssertOnDBusThread();
 
+  // Returns true if the bus is connected to D-Bus.
+  bool is_connected() { return connection_ != NULL; }
+
  protected:
   // This is protected, so we can define sub classes.
   virtual ~Bus();
@@ -436,7 +443,7 @@ class Bus : public base::RefCountedThreadSafe<Bus> {
   base::WaitableEvent on_shutdown_;
   DBusConnection* connection_;
 
-  MessageLoop* origin_loop_;
+  scoped_refptr<base::MessageLoopProxy> origin_message_loop_proxy_;
   base::PlatformThreadId origin_thread_id_;
 
   std::set<std::string> owned_service_names_;
@@ -444,7 +451,8 @@ class Bus : public base::RefCountedThreadSafe<Bus> {
   // are properly cleaned up before destruction of the bus object.
   std::set<std::string> match_rules_added_;
   std::set<std::string> registered_object_paths_;
-  std::set<DBusHandleMessageFunction> filter_functions_added_;
+  std::set<std::pair<DBusHandleMessageFunction, void*> >
+      filter_functions_added_;
 
   // ObjectProxyTable is used to hold the object proxies created by the
   // bus object. Key is a concatenated string of service name + object path,

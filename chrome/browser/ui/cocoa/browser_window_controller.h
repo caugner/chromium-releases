@@ -28,7 +28,7 @@
 #import "chrome/browser/ui/cocoa/view_resizer.h"
 #include "ui/gfx/rect.h"
 
-@class AvatarButton;
+@class AvatarButtonController;
 class Browser;
 class BrowserWindow;
 class BrowserWindowCocoa;
@@ -99,21 +99,15 @@ class TabContents;
   // NO on growth.
   BOOL isShrinkingFromZoomed_;
 
-  // Touch event data for two-finger gestures. Only available on Lion or higher
-  // with two-finger gestures enabled in the Trackpad preferences. This will
-  // contain the NSTouch objects from |-beginGestureWithEvent:| keyed by the
-  // touch's |identity|.
-  scoped_nsobject<NSMutableDictionary> twoFingerGestureTouches_;
-
   // The raw accumulated zoom value and the actual zoom increments made for an
   // an in-progress pinch gesture.
   CGFloat totalMagnifyGestureAmount_;
   NSInteger currentZoomStepDelta_;
 
-  // The view that shows the incognito badge or the multi-profile avatar icon.
-  // Nil if neither is present. Needed to access the view to move it to/from the
-  // fullscreen window.
-  scoped_nsobject<AvatarButton> avatarButton_;
+  // The view controller that manages the incognito badge or the multi-profile
+  // avatar icon. The view is always in the view hierarchy, but will be hidden
+  // unless it's appropriate to show it.
+  scoped_nsobject<AvatarButtonController> avatarButtonController_;
 
   // The view that shows the presentation mode toggle when in Lion fullscreen
   // mode.  Nil if not in fullscreen mode or not on Lion.
@@ -155,6 +149,12 @@ class TabContents;
   // Bar visibility locks and releases only result (when appropriate) in changes
   // in visible state when the following is |YES|.
   BOOL barVisibilityUpdatesEnabled_;
+
+  // When going fullscreen for a tab, we need to store the URL and the
+  // fullscreen type, since we can't show the bubble until
+  // -windowDidEnterFullScreen: gets called.
+  GURL fullscreenUrl_;
+  FullscreenExitBubbleType fullscreenBubbleType_;
 }
 
 // A convenience class method which gets the |BrowserWindowController| for a
@@ -297,11 +297,6 @@ class TabContents;
 // Return the point to which a bubble window's arrow should point.
 - (NSPoint)bookmarkBubblePoint;
 
-// Call when the user changes the tab strip display mode, enabling or
-// disabling vertical tabs for this browser. Re-flows the contents of the
-// browser.
-- (void)toggleTabStripDisplayMode;
-
 // Shows or hides the Instant preview contents.
 - (void)showInstant:(TabContents*)previewContents;
 - (void)hideInstant;
@@ -366,7 +361,14 @@ class TabContents;
 
 // Enters (or exits) fullscreen mode.  This method is safe to call on all OS
 // versions.
-- (void)setFullscreen:(BOOL)fullscreen;
+- (void)enterFullscreenForURL:(const GURL&)url
+                   bubbleType:(FullscreenExitBubbleType)bubbleType;
+- (void)exitFullscreen;
+
+// Updates the contents of the fullscreen exit bubble with |url| and
+// |bubbleType|.
+- (void)updateFullscreenExitBubbleURL:(const GURL&)url
+                           bubbleType:(FullscreenExitBubbleType)bubbleType;
 
 // Returns fullscreen state.  This method is safe to call on all OS versions.
 - (BOOL)isFullscreen;
@@ -379,7 +381,9 @@ class TabContents;
 // Enters (or exits) presentation mode.  Also enters fullscreen mode if this
 // window is not already fullscreen.  This method is safe to call on all OS
 // versions.
-- (void)setPresentationMode:(BOOL)presentationMode;
+- (void)enterPresentationModeForURL:(const GURL&)url
+                         bubbleType:(FullscreenExitBubbleType)bubbleType;
+- (void)exitPresentationMode;
 
 // Returns presentation mode state.  This method is safe to call on all OS
 // versions.

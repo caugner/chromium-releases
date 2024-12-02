@@ -190,7 +190,7 @@ void UserController::ClearAndEnablePassword() {
 
 void UserController::EnableNameTooltip(bool enable) {
   name_tooltip_enabled_ = enable;
-  std::wstring tooltip_text;
+  string16 tooltip_text;
   if (enable)
     tooltip_text = GetNameTooltip();
 
@@ -229,6 +229,7 @@ void UserController::StopThrobber() {
 }
 
 void UserController::UpdateUserCount(int index, int total_user_count) {
+#if defined(TOOLKIT_USES_GTK)
   user_index_ = index;
   std::vector<int> params;
   params.push_back(index);
@@ -239,6 +240,7 @@ void UserController::UpdateUserCount(int index, int total_user_count) {
       border_window_->GetNativeView(),
       WM_IPC_WINDOW_LOGIN_BORDER,
       &params);
+#endif
 }
 
 std::string UserController::GetAccessibleUserLabel() {
@@ -346,12 +348,14 @@ void UserController::ConfigureAndShow(Widget* widget,
                                       views::View* contents_view) {
   widget->SetContentsView(contents_view);
 
+#if defined(TOOLKIT_USES_GTK)
   std::vector<int> params;
   params.push_back(index);
   WmIpc::instance()->SetWindowType(
       widget->GetNativeView(),
       type,
       &params);
+#endif
 
   widget->Show();
 }
@@ -363,7 +367,7 @@ void UserController::SetupControlsWidget(
   views::View* control_view;
   if (is_new_user_) {
     NewUserView* new_user_view =
-        new NewUserView(this, true, need_browse_without_signin);
+        new NewUserView(this, need_browse_without_signin);
     new_user_view->Init();
     control_view = new_user_view;
     user_input_ = new_user_view;
@@ -459,16 +463,16 @@ void UserController::CreateBorderWindow(int index,
 }
 
 Widget* UserController::CreateLabelWidget(int index, WmIpcWindowType type) {
-  std::wstring text;
+  string16 text;
   if (is_guest_) {
-    text = std::wstring();
+    text = string16();
   } else if (is_new_user_) {
     // Add user should have label only in activated state.
     // When new user is the only, label is not needed.
     if (type == WM_IPC_WINDOW_LOGIN_LABEL && index != 0)
-      text = UTF16ToWide(l10n_util::GetStringUTF16(IDS_ADD_USER));
+      text = l10n_util::GetStringUTF16(IDS_ADD_USER);
   } else {
-    text = UTF8ToWide(user_.GetDisplayName());
+    text = UTF8ToUTF16(user_.GetDisplayName());
   }
 
   views::Label* label = NULL;
@@ -476,17 +480,19 @@ Widget* UserController::CreateLabelWidget(int index, WmIpcWindowType type) {
   if (is_new_user_) {
     label = new views::Label(text);
   } else if (type == WM_IPC_WINDOW_LOGIN_LABEL) {
-    label = UsernameView::CreateShapedUsernameView(text, false);
+    label = UsernameView::CreateShapedUsernameView(UTF16ToWide(text), false);
   } else {
     DCHECK(type == WM_IPC_WINDOW_LOGIN_UNSELECTED_LABEL);
     // TODO(altimofeev): switch to the rounded username view.
-    label = UsernameView::CreateShapedUsernameView(text, true);
+    label = UsernameView::CreateShapedUsernameView(
+        UTF16ToWideHack(text), true);
   }
 
   const gfx::Font& font = (type == WM_IPC_WINDOW_LOGIN_LABEL) ?
       GetLabelFont() : GetUnselectedLabelFont();
   label->SetFont(font);
-  label->SetColor(login::kTextColor);
+  label->SetAutoColorReadabilityEnabled(false);
+  label->SetEnabledColor(login::kTextColor);
 
   if (type == WM_IPC_WINDOW_LOGIN_LABEL)
     label_view_ = label;
@@ -519,14 +525,13 @@ gfx::Font UserController::GetUnselectedLabelFont() {
       kUnselectedUsernameFontDelta, gfx::Font::BOLD);
 }
 
-
-std::wstring UserController::GetNameTooltip() const {
+string16 UserController::GetNameTooltip() const {
   if (is_new_user_)
-    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_ADD_USER));
+    return l10n_util::GetStringUTF16(IDS_ADD_USER);
   else if (is_guest_)
-    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_GO_INCOGNITO_BUTTON));
+    return l10n_util::GetStringUTF16(IDS_GO_INCOGNITO_BUTTON);
   else
-    return UTF8ToWide(user_.GetNameTooltip());
+    return UTF8ToUTF16(user_.GetNameTooltip());
 }
 
 }  // namespace chromeos

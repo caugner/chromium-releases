@@ -170,6 +170,19 @@ class PppMessagingRpcServer {
   void operator=(const PppMessagingRpcServer);
 };  // class PppMessagingRpcServer
 
+class PppMouseLockRpcServer {
+ public:
+  static void PPP_MouseLock_MouseLockLost(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance);
+
+ private:
+  PppMouseLockRpcServer();
+  PppMouseLockRpcServer(const PppMouseLockRpcServer&);
+  void operator=(const PppMouseLockRpcServer);
+};  // class PppMouseLockRpcServer
+
 class PppPrintingRpcServer {
  public:
   static void PPP_Printing_QuerySupportedFormats(
@@ -194,6 +207,11 @@ class PppPrintingRpcServer {
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Instance instance);
+  static void PPP_Printing_IsScalingDisabled(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      int32_t* result);
 
  private:
   PppPrintingRpcServer();

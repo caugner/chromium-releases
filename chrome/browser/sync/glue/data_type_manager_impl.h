@@ -8,6 +8,7 @@
 
 #include "chrome/browser/sync/glue/data_type_manager.h"
 
+#include <list>
 #include <map>
 #include <vector>
 
@@ -46,13 +47,12 @@ class DataTypeManagerImpl : public DataTypeManager {
 
   // Callback passed to each data type controller on startup.
   void TypeStartCallback(DataTypeController::StartResult result,
-      const tracked_objects::Location& from_here);
+                         const SyncError& error);
 
   // Stops all data types.
   void FinishStop();
   void Abort(ConfigureStatus status,
-             const tracked_objects::Location& location,
-             syncable::ModelType last_attempted_type);
+             const SyncError& error);
 
   // Returns true if any last_requested_types_ currently needs to start model
   // association.  If non-null, fills |needs_start| with all such controllers.
@@ -107,6 +107,11 @@ class DataTypeManagerImpl : public DataTypeManager {
   // The accumulated time spent between calls to Restart() and going
   // to the DONE/BLOCKED state.
   base::TimeDelta configure_time_delta_;
+
+  // Collects the list of errors resulting from failing to start a type. This
+  // would eventually be sent to the listeners after all the types have
+  // been given a chance to start.
+  std::list<SyncError> failed_datatypes_info_;
 
   DISALLOW_COPY_AND_ASSIGN(DataTypeManagerImpl);
 };

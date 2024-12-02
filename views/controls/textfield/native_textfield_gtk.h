@@ -13,6 +13,10 @@
 #include "views/controls/native_control_gtk.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 
+namespace gfx {
+class SelectionModel;
+}
+
 namespace views {
 
 class NativeTextfieldGtk : public NativeControlGtk,
@@ -51,6 +55,8 @@ class NativeTextfieldGtk : public NativeControlGtk,
   virtual bool IsIMEComposing() const OVERRIDE;
   virtual void GetSelectedRange(ui::Range* range) const OVERRIDE;
   virtual void SelectRange(const ui::Range& range) OVERRIDE;
+  virtual void GetSelectionModel(gfx::SelectionModel* sel) const OVERRIDE;
+  virtual void SelectSelectionModel(const gfx::SelectionModel& sel) OVERRIDE;
   virtual size_t GetCursorPosition() const OVERRIDE;
   virtual bool HandleKeyPressed(const views::KeyEvent& e) OVERRIDE;
   virtual bool HandleKeyReleased(const views::KeyEvent& e) OVERRIDE;

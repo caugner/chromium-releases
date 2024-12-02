@@ -15,7 +15,7 @@
 #include "chrome/common/instant_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 
@@ -50,7 +50,7 @@ class InstantLoader : public NotificationObserver {
   bool Update(TabContentsWrapper* tab_contents,
               const TemplateURL* template_url,
               const GURL& url,
-              PageTransition::Type transition_type,
+              content::PageTransition transition_type,
               const string16& user_text,
               bool verbatim,
               string16* suggested_text);
@@ -92,7 +92,9 @@ class InstantLoader : public NotificationObserver {
     return preview_contents_.get();
   }
 
-  // Returns true if the preview TabContents is ready to be shown.
+  // Returns true if the preview TabContents is ready to be shown. A non-instant
+  // loader is ready once the renderer paints, otherwise it isn't ready until we
+  // get a response back from the page.
   bool ready() const { return ready_; }
 
   // Returns true if the current load returned a 200.
@@ -114,6 +116,12 @@ class InstantLoader : public NotificationObserver {
 
   // See description above field.
   const string16& user_text() const { return user_text_; }
+
+  // Are we waiting for the preview page to finish loading and to determine if
+  // it supports instant?
+  bool is_determining_if_page_supports_instant() const {
+    return frame_load_observer_.get() != NULL;
+  }
 
  private:
   friend class InstantLoaderManagerTest;
@@ -145,11 +153,6 @@ class InstantLoader : public NotificationObserver {
   // Returns the bounds of the omnibox in terms of the preview tab contents.
   gfx::Rect GetOmniboxBoundsInTermsOfPreview();
 
-  // Are we waiting for the preview page to finish loading?
-  bool is_waiting_for_load() const {
-    return frame_load_observer_.get() != NULL;
-  }
-
   // Invoked if it the page doesn't really support instant when we thought it
   // did. If |needs_reload| is true, the text changed since the first load and
   // the page needs to be reloaded.
@@ -178,7 +181,7 @@ class InstantLoader : public NotificationObserver {
   // Creates and loads the |template_url|'s instant URL.
   void LoadInstantURL(TabContentsWrapper* tab_contents,
                       const TemplateURL* template_url,
-                      PageTransition::Type transition_type,
+                      content::PageTransition transition_type,
                       const string16& user_text,
                       bool verbatim);
 
@@ -222,7 +225,7 @@ class InstantLoader : public NotificationObserver {
   scoped_ptr<FrameLoadObserver> frame_load_observer_;
 
   // Transition type of the match last passed to Update.
-  PageTransition::Type last_transition_type_;
+  content::PageTransition last_transition_type_;
 
   // Timer used to update the bounds of the omnibox.
   base::OneShotTimer<InstantLoader> update_bounds_timer_;

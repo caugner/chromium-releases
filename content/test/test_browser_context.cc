@@ -7,15 +7,17 @@
 #include "base/file_path.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/mock_resource_context.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 TestBrowserContext::TestBrowserContext() {
+  EXPECT_TRUE(browser_context_dir_.CreateUniqueTempDir());
 }
 
 TestBrowserContext::~TestBrowserContext() {
 }
 
 FilePath TestBrowserContext::GetPath() {
-  return FilePath();
+  return browser_context_dir_.path();
 }
 
 bool TestBrowserContext::IsOffTheRecord() {
@@ -28,10 +30,6 @@ SSLHostState* TestBrowserContext::GetSSLHostState() {
 
 DownloadManager* TestBrowserContext::GetDownloadManager() {
   return NULL;
-}
-
-bool TestBrowserContext::HasCreatedDownloadManager() const {
-  return false;
 }
 
 net::URLRequestContextGetter* TestBrowserContext::GetRequestContext() {
@@ -58,6 +56,10 @@ HostZoomMap* TestBrowserContext::GetHostZoomMap() {
 
 GeolocationPermissionContext*
 TestBrowserContext::GetGeolocationPermissionContext() {
+  return NULL;
+}
+
+SpeechInputPreferences* TestBrowserContext::GetSpeechInputPreferences() {
   return NULL;
 }
 
