@@ -57,6 +57,10 @@ if (is_android) {
   import("//third_party/icu/config.gni")
 }
 
+if (is_chromeos_ash) {
+  import("//build/chromeos/embed_sections.gni")
+}
+
 declare_args() {
   # On macOS, `is_chrome_branded` builds that have been signed locally will not
   # launch because certain entitlements are tied to the official Google code
@@ -341,6 +345,10 @@ if (!is_android && !is_mac) {
 
         if (is_chromeos_ash) {
           public_deps += [ "//ui/lottie" ]
+          deps += [
+            "//chrome/browser/ash/locale",
+            "//chrome/browser/ash/schedqos",
+          ]
         }
 
         if (is_chromeos_lacros) {
@@ -359,10 +367,6 @@ if (!is_android && !is_mac) {
             deps += [ "//ui/linux:display_server_utils" ]
           }
         }
-      }
-
-      if (is_chromeos_ash || is_win) {
-        data_deps += [ "//mojo/core:shared_library" ]
       }
 
       # These files are used by the installer so we need a public dep.
@@ -463,6 +467,10 @@ if (is_win) {
 
     if (use_aura) {
       deps += [ "//ui/compositor" ]
+    }
+
+    if (is_chromeos_ash) {
+      deps += [ "//chrome/browser/ash/schedqos" ]
     }
   }
 
@@ -1164,6 +1172,10 @@ if (is_win) {
       "//third_party/cld_3/src/src:cld_3",
     ]
 
+    if (is_chromeos_ash) {
+      deps += [ "//chrome/browser/ash/schedqos" ]
+    }
+
     if (is_component_build) {
       frameworks = [ "Carbon.framework" ]
     }
@@ -1470,6 +1482,8 @@ group("dependencies") {
     public_deps += [
       "//ash/constants",
       "//chrome/browser/ash",
+      "//chrome/browser/ash/boot_times_recorder",
+      "//chrome/browser/ash/schedqos",
       "//chromeos",
       "//chromeos/ash/components/memory",
     ]
@@ -1697,6 +1711,7 @@ if (is_android) {
 
     if (is_chromeos_ash) {
       public_deps += [ "//ui/lottie" ]
+      deps += [ "//chrome/browser/ash/schedqos" ]
     }
   }
 }
@@ -1837,6 +1852,14 @@ if (is_linux || is_chromeos) {
           [ "//chrome/app/theme/$branding_path_component/product_logo_48.png" ]
     }
     outputs = [ "$root_out_dir/{{source_file_part}}" ]
+  }
+}
+
+if (is_chromeos_ash) {
+  embed_sections("section_embedded_chrome_binary") {
+    binary_input = "$root_out_dir/chrome"
+    sections_embedded_binary_output = "$root_out_dir/chrome.sections_embedded"
+    deps = [ ":chrome" ]
   }
 }
 

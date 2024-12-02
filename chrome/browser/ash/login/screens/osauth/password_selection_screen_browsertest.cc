@@ -8,7 +8,6 @@
 #include <optional>
 #include <utility>
 
-#include "ash/constants/ash_features.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "chrome/browser/ash/login/screens/osauth/cryptohome_recovery_setup_screen.h"
@@ -29,6 +28,7 @@
 #include "chromeos/ash/components/login/auth/public/cryptohome_key_constants.h"
 #include "chromeos/ash/components/osauth/public/auth_session_storage.h"
 #include "content/public/test/browser_test.h"
+#include "password_selection_screen.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace ash {
@@ -62,7 +62,6 @@ AuthFactorsConfiguration GetFakeAuthFactorConfiguration(
 class PasswordSelectionScreenTest : public OobeBaseTest {
  public:
   PasswordSelectionScreenTest() {
-    feature_list_.InitAndEnableFeature(features::kLocalPasswordForConsumers);
   }
   ~PasswordSelectionScreenTest() override = default;
 
@@ -169,7 +168,6 @@ class PasswordSelectionScreenTest : public OobeBaseTest {
     }
   }
 
-  base::test::ScopedFeatureList feature_list_;
   FakeGaiaMixin fake_gaia_{&mixin_host_};
 
   PasswordSelectionScreen::ScreenExitCallback original_callback_;
@@ -270,6 +268,42 @@ IN_PROC_BROWSER_TEST_F(PasswordSelectionScreenTest,
   WaitForScreenExit();
   EXPECT_EQ(result_.value(),
             PasswordSelectionScreen::Result::GAIA_PASSWORD_FALLBACK);
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordSelectionScreenTest,
+                       DISABLED_RecoveryWithNoPasswordGAIAChoice) {
+  StartLogin();
+  auto user_context = BorrowUserContext();
+  LoginDisplayHost::default_host()
+      ->GetWizardContextForTesting()
+      ->knowledge_factor_setup.auth_setup_flow =
+      WizardContext::AuthChangeFlow::kRecovery;
+  StoreUserContext(std::move(user_context));
+  WaitForScreen();
+  test::OobeJS().ExpectVisiblePath(kGaiaPasswordButton);
+  test::OobeJS().ClickOnPath(kGaiaPasswordButton);
+  test::OobeJS().ClickOnPath(kNextButton);
+  WaitForScreenExit();
+  EXPECT_EQ(result_.value(),
+            PasswordSelectionScreen::Result::GAIA_PASSWORD_CHOICE);
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordSelectionScreenTest,
+                       DISABLED_RecoveryWithNoPasswordLocalChoice) {
+  StartLogin();
+  auto user_context = BorrowUserContext();
+  LoginDisplayHost::default_host()
+      ->GetWizardContextForTesting()
+      ->knowledge_factor_setup.auth_setup_flow =
+      WizardContext::AuthChangeFlow::kRecovery;
+  StoreUserContext(std::move(user_context));
+  WaitForScreen();
+  test::OobeJS().ExpectVisiblePath(kLocalPasswordButton);
+  test::OobeJS().ClickOnPath(kLocalPasswordButton);
+  test::OobeJS().ClickOnPath(kNextButton);
+  WaitForScreenExit();
+  EXPECT_EQ(result_.value(),
+            PasswordSelectionScreen::Result::LOCAL_PASSWORD_CHOICE);
 }
 
 }  // namespace ash
