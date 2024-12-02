@@ -4,11 +4,12 @@
 
 #include "base/thread.h"
 #include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/net/url_fetcher.h"
 #include "chrome/browser/net/url_fetcher_protect.h"
 #include "chrome/common/chrome_plugin_lib.h"
-#include "net/base/ssl_test_util.h"
 #include "net/http/http_response_headers.h"
+#include "net/socket/ssl_test_util.h"
 #include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -303,7 +304,7 @@ void URLFetcherCancelTest::CreateFetcher(const GURL& url) {
   fetcher_->set_io_loop(&io_loop_);
   fetcher_->Start();
   // Make sure we give the IO thread a chance to run.
-  timer_.Start(TimeDelta::FromMilliseconds(100), this,
+  timer_.Start(TimeDelta::FromMilliseconds(300), this,
                &URLFetcherCancelTest::CancelRequest);
 }
 
@@ -323,7 +324,7 @@ void URLFetcherCancelTest::CancelRequest() {
   delete fetcher_;
   timer_.Stop();
   // Make sure we give the IO thread a chance to run.
-  timer_.Start(TimeDelta::FromMilliseconds(100), this,
+  timer_.Start(TimeDelta::FromMilliseconds(300), this,
                &URLFetcherCancelTest::TestContextReleased);
 }
 
@@ -356,7 +357,7 @@ TEST_F(URLFetcherTest, DifferentThreadsTest) {
   // message loop will be shut down automatically as the thread goes out of
   // scope.
   base::Thread t("URLFetcher test thread");
-  t.Start();
+  ASSERT_TRUE(t.Start());
   t.message_loop()->PostTask(FROM_HERE, new FetcherWrapperTask(this,
       GURL(server->TestServerPage("defaultresponse"))));
 
@@ -371,7 +372,7 @@ TEST_F(URLFetcherPostTest, Basic) {
   MessageLoop::current()->Run();
 }
 
-TEST_F(URLFetcherHeadersTest, Headers) {
+TEST_F(URLFetcherHeadersTest, DISABLED_Headers) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(L"net/data/url_request_unittest", NULL);
   ASSERT_TRUE(NULL != server.get());
@@ -455,7 +456,7 @@ TEST_F(URLFetcherCancelTest, ReleasesContext) {
   // message loop will be shut down automatically as the thread goes out of
   // scope.
   base::Thread t("URLFetcher test thread");
-  t.Start();
+  ASSERT_TRUE(t.Start());
   t.message_loop()->PostTask(FROM_HERE, new FetcherWrapperTask(this, url));
 
   MessageLoop::current()->Run();

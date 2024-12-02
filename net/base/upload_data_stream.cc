@@ -5,12 +5,14 @@
 #include "net/base/upload_data_stream.h"
 
 #include "base/logging.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 
 namespace net {
 
 UploadDataStream::UploadDataStream(const UploadData* data)
     : data_(data),
+      buf_(new IOBuffer(kBufSize)),
       buf_len_(0),
       next_element_(data->elements().begin()),
       next_element_offset_(0),
@@ -28,7 +30,7 @@ void UploadDataStream::DidConsume(size_t num_bytes) {
 
   buf_len_ -= num_bytes;
   if (buf_len_)
-    memmove(buf_, buf_ + num_bytes, buf_len_);
+    memmove(buf_->data(), buf_->data() + num_bytes, buf_len_);
 
   FillBuf();
 
@@ -51,7 +53,7 @@ void UploadDataStream::FillBuf() {
 
       size_t bytes_copied = std::min(count, size_remaining);
 
-      memcpy(buf_ + buf_len_, &d[next_element_offset_], bytes_copied);
+      memcpy(buf_->data() + buf_len_, &d[next_element_offset_], bytes_copied);
       buf_len_ += bytes_copied;
 
       if (bytes_copied == count) {
@@ -65,19 +67,19 @@ void UploadDataStream::FillBuf() {
       if (!next_element_stream_.IsOpen()) {
         int flags = base::PLATFORM_FILE_OPEN |
                     base::PLATFORM_FILE_READ;
-        int rv = next_element_stream_.Open(
-            FilePath::FromWStringHack(element.file_path()), flags);
+        int rv = next_element_stream_.Open(element.file_path(), flags);
         // If the file does not exist, that's technically okay.. we'll just
         // upload an empty file.  This is for consistency with Mozilla.
-        DLOG_IF(WARNING, rv != OK) << "Failed to open \"" <<
-            element.file_path() << "\" for reading: " << rv;
+        DLOG_IF(WARNING, rv != OK) << "Failed to open \""
+                                   << element.file_path().value()
+                                   << "\" for reading: " << rv;
 
         next_element_remaining_ = 0;  // Default to reading nothing.
         if (rv == OK) {
           uint64 offset = element.file_range_offset();
           if (offset && next_element_stream_.Seek(FROM_BEGIN, offset) < 0) {
-            DLOG(WARNING) << "Failed to seek \"" << element.file_path() <<
-                "\" to offset: " << offset;
+            DLOG(WARNING) << "Failed to seek \"" << element.file_path().value()
+                          << "\" to offset: " << offset;
           } else {
             next_element_remaining_ = element.file_range_length();
           }
@@ -88,7 +90,8 @@ void UploadDataStream::FillBuf() {
       int count = static_cast<int>(std::min(
           static_cast<uint64>(size_remaining), next_element_remaining_));
       if (count > 0 &&
-          (rv = next_element_stream_.Read(buf_ + buf_len_, count, NULL)) > 0) {
+          (rv = next_element_stream_.Read(buf_->data() + buf_len_,
+                                          count, NULL)) > 0) {
         buf_len_ += rv;
         next_element_remaining_ -= rv;
       } else {

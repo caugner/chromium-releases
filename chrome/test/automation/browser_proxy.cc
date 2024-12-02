@@ -19,6 +19,7 @@
 using base::TimeDelta;
 using base::TimeTicks;
 
+
 bool BrowserProxy::ActivateTab(int tab_index) {
   return ActivateTabWithTimeout(tab_index, base::kNoTimeout, NULL);
 }
@@ -111,25 +112,34 @@ bool BrowserProxy::GetActiveTabIndexWithTimeout(int* active_tab_index,
   return succeeded;
 }
 
-TabProxy* BrowserProxy::GetTab(int tab_index) const {
+scoped_refptr<TabProxy> BrowserProxy::GetTab(int tab_index) const {
   if (!is_valid())
     return NULL;
 
-  int handle = 0;
+  int tab_handle = 0;
 
-  sender_->Send(new AutomationMsg_Tab(0, handle_, tab_index, &handle));
-  if (!handle)
+  sender_->Send(new AutomationMsg_Tab(0, handle_, tab_index, &tab_handle));
+  if (!tab_handle)
     return NULL;
 
-  return new TabProxy(sender_, tracker_, handle);
+  TabProxy* tab = static_cast<TabProxy*>(tracker_->GetResource(tab_handle));
+  if (!tab) {
+    tab = new TabProxy(sender_, tracker_, tab_handle);
+    tab->AddRef();
+  }
+
+  // Since there is no scoped_refptr::attach.
+  scoped_refptr<TabProxy> result;
+  result.swap(&tab);
+  return result;
 }
 
-TabProxy* BrowserProxy::GetActiveTab() const {
+scoped_refptr<TabProxy> BrowserProxy::GetActiveTab() const {
   return GetActiveTabWithTimeout(base::kNoTimeout, NULL);
 }
 
-TabProxy* BrowserProxy::GetActiveTabWithTimeout(uint32 timeout_ms,
-                                                bool* is_timeout) const {
+scoped_refptr<TabProxy> BrowserProxy::GetActiveTabWithTimeout(uint32 timeout_ms,
+    bool* is_timeout) const {
   int active_tab_index;
   if (!GetActiveTabIndexWithTimeout(&active_tab_index, timeout_ms, is_timeout))
     return NULL;
@@ -165,11 +175,7 @@ bool BrowserProxy::GetTabCountWithTimeout(int* num_tabs, uint32 timeout_ms,
 }
 
 bool BrowserProxy::ApplyAccelerator(int id) {
-  if (!is_valid())
-    return false;
-
-  return sender_->Send(
-      new AutomationMsg_ApplyAccelerator(0, handle_, id));
+  return RunCommandAsync(id);
 }
 
 #if defined(OS_WIN)
@@ -204,24 +210,6 @@ bool BrowserProxy::SimulateDragWithTimeout(const POINT& start,
   return result;
 }
 #endif  // defined(OS_WIN)
-
-bool BrowserProxy::WaitForTabCountToChange(int count, int* new_count,
-                                           int wait_timeout) {
-  const TimeTicks start = TimeTicks::Now();
-  const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
-  while (TimeTicks::Now() - start < timeout) {
-    PlatformThread::Sleep(automation::kSleepTime);
-    bool is_timeout;
-    bool succeeded = GetTabCountWithTimeout(new_count, wait_timeout,
-                                            &is_timeout);
-    if (!succeeded)
-      return false;
-    if (count != *new_count)
-      return true;
-  }
-  // If we get here, the tab count hasn't changed.
-  return false;
-}
 
 bool BrowserProxy::WaitForTabCountToBecome(int count, int wait_timeout) {
   const TimeTicks start = TimeTicks::Now();
@@ -299,6 +287,19 @@ bool BrowserProxy::GetHWND(HWND* handle) const {
 }
 #endif  // defined(OS_WIN)
 
+bool BrowserProxy::RunCommandAsync(int browser_command) const {
+  if (!is_valid())
+    return false;
+
+  bool result = false;
+
+  sender_->Send(new AutomationMsg_WindowExecuteCommandAsync(0, handle_,
+                                                            browser_command,
+                                                            &result));
+
+  return result;
+}
+
 bool BrowserProxy::RunCommand(int browser_command) const {
   if (!is_valid())
     return false;
@@ -324,6 +325,27 @@ bool BrowserProxy::GetBookmarkBarVisibility(bool* is_visible,
 
   return sender_->Send(new AutomationMsg_BookmarkBarVisibility(
       0, handle_, is_visible, is_animating));
+}
+
+bool BrowserProxy::IsShelfVisible(bool* is_visible) {
+  if (!is_valid())
+    return false;
+
+  if (!is_visible) {
+    NOTREACHED();
+    return false;
+  }
+
+  return sender_->Send(new AutomationMsg_ShelfVisibility(0, handle_,
+                                                         is_visible));
+}
+
+bool BrowserProxy::SetShelfVisible(bool is_visible) {
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_SetShelfVisibility(0, handle_,
+                                                            is_visible));
 }
 
 bool BrowserProxy::SetIntPreference(const std::wstring& name, int value) {
@@ -373,9 +395,9 @@ bool BrowserProxy::SetBooleanPreference(const std::wstring& name,
   return result;
 }
 
-WindowProxy* BrowserProxy::GetWindow() {
+scoped_refptr<WindowProxy> BrowserProxy::GetWindow() const {
   if (!is_valid())
-    return false;
+    return NULL;
 
   bool handle_ok = false;
   int window_handle = 0;
@@ -385,10 +407,20 @@ WindowProxy* BrowserProxy::GetWindow() {
   if (!handle_ok)
     return NULL;
 
-  return new WindowProxy(sender_, tracker_, window_handle);
+  WindowProxy* window =
+      static_cast<WindowProxy*>(tracker_->GetResource(window_handle));
+  if (!window) {
+    window = new WindowProxy(sender_, tracker_, window_handle);
+    window->AddRef();
+  }
+
+  // Since there is no scoped_refptr::attach.
+  scoped_refptr<WindowProxy> result;
+  result.swap(&window);
+  return result;
 }
 
-AutocompleteEditProxy* BrowserProxy::GetAutocompleteEdit() {
+scoped_refptr<AutocompleteEditProxy> BrowserProxy::GetAutocompleteEdit() {
   if (!is_valid())
     return NULL;
 
@@ -401,5 +433,16 @@ AutocompleteEditProxy* BrowserProxy::GetAutocompleteEdit() {
   if (!handle_ok)
     return NULL;
 
-  return new AutocompleteEditProxy(sender_, tracker_, autocomplete_edit_handle);
+  AutocompleteEditProxy* p = static_cast<AutocompleteEditProxy*>(
+        tracker_->GetResource(autocomplete_edit_handle));
+
+  if (!p) {
+    p = new AutocompleteEditProxy(sender_, tracker_, autocomplete_edit_handle);
+    p->AddRef();
+  }
+
+  // Since there is no scoped_refptr::attach.
+  scoped_refptr<AutocompleteEditProxy> result;
+  result.swap(&p);
+  return result;
 }

@@ -11,17 +11,25 @@
 #ifndef CHROME_BROWSER_NET_DNS_GLOBAL_H_
 #define CHROME_BROWSER_NET_DNS_GLOBAL_H_
 
-#include "chrome/browser/net/dns_master.h"
 
 #include <string>
 
+#include "base/field_trial.h"
+#include "base/scoped_ptr.h"
+#include "chrome/browser/net/dns_master.h"
+
 class PrefService;
+
+namespace net {
+class HostResolver;
+}
 
 namespace chrome_browser_net {
 
 // Initialize dns prefetching subsystem. Must be called before any other
 // functions.
-void InitDnsPrefetch(PrefService* user_prefs);
+void InitDnsPrefetch(TimeDelta max_queue_delay, size_t max_concurrent,
+                     PrefService* user_prefs);
 
 // Cancel pending lookup requests and don't make new ones. Does nothing
 // if dns prefetching has not been initialized (to simplify its usage).
@@ -30,6 +38,10 @@ void EnsureDnsPrefetchShutdown();
 // Free all resources allocated by InitDnsPrefetch. After that you must not call
 // any function from this file.
 void FreeDnsPrefetchResources();
+
+// Lazily allocates a HostResolver to be used by the DNS prefetch system, on
+// the IO thread.
+net::HostResolver* GetGlobalHostResolver();
 
 //------------------------------------------------------------------------------
 // Global APIs relating to Prefetching in browser
@@ -58,15 +70,23 @@ void TrimSubresourceReferrers();
 // Helper class to handle global init and shutdown.
 class DnsPrefetcherInit {
  public:
-  explicit DnsPrefetcherInit(PrefService* user_prefs) {
-    InitDnsPrefetch(user_prefs);
-  }
+  // Too many concurrent lookups negate benefits of prefetching by trashing
+  // the OS cache before all resource loading is complete.
+  // This is the default.
+  static const size_t kMaxConcurrentLookups;
 
-  ~DnsPrefetcherInit() {
-    FreeDnsPrefetchResources();
-  }
+  // When prefetch requests are queued beyond some period of time, then the
+  // system is congested, and we need to clear all queued requests to get out
+  // of that state.  The following is the suggested default time limit.
+  static const int kMaxQueueingDelayMs;
+
+  DnsPrefetcherInit(PrefService* user_prefs, PrefService* local_state);
+  ~DnsPrefetcherInit();
 
  private:
+  // Maintain a field trial instance when we do A/B testing.
+  scoped_refptr<FieldTrial> trial_;
+
   DISALLOW_COPY_AND_ASSIGN(DnsPrefetcherInit);
 };
 

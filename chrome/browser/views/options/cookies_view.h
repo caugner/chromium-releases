@@ -1,21 +1,26 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_OPTIONS_COOKIES_VIEW_H__
-#define CHROME_BROWSER_VIEWS_OPTIONS_COOKIES_VIEW_H__
+#ifndef CHROME_BROWSER_VIEWS_OPTIONS_COOKIES_VIEW_H_
+#define CHROME_BROWSER_VIEWS_OPTIONS_COOKIES_VIEW_H_
 
 #include "base/task.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/table/table_view.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/dialog_delegate.h"
-#include "chrome/views/window/window.h"
+#include "views/controls/button/button.h"
+#include "views/controls/table/table_view_observer.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/view.h"
+#include "views/window/dialog_delegate.h"
+#include "views/window/window.h"
 
 namespace views {
+
 class Label;
-}
+class NativeButton;
+class TableView;
+
+}  // namespace views
+
 class CookieInfoView;
 class CookiesTableModel;
 class CookiesTableView;
@@ -24,9 +29,9 @@ class Timer;
 
 class CookiesView : public views::View,
                     public views::DialogDelegate,
-                    public views::NativeButton::Listener,
+                    public views::ButtonListener,
                     public views::TableViewObserver,
-                    public views::TextField::Controller {
+                    public views::Textfield::Controller {
  public:
   // Show the Cookies Window, creating one if necessary.
   static void ShowCookiesWindow(Profile* profile);
@@ -36,27 +41,28 @@ class CookiesView : public views::View,
   // Updates the display to show only the search results.
   void UpdateSearchResults();
 
-  // views::NativeButton::Listener implementation:
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // views::ButtonListener implementation.
+  virtual void ButtonPressed(views::Button* sender);
 
-  // views::TableViewObserver implementation:
+  // views::TableViewObserver implementation.
   virtual void OnSelectionChanged();
 
   // Invoked when the user presses the delete key. Deletes the selected
   // cookies.
   virtual void OnTableViewDelete(views::TableView* table_view);
 
-  // views::TextField::Controller implementation:
-  virtual void ContentsChanged(views::TextField* sender,
+  // views::Textfield::Controller implementation.
+  virtual void ContentsChanged(views::Textfield* sender,
                                const std::wstring& new_contents);
-  virtual void HandleKeystroke(views::TextField* sender,
-                               UINT message, TCHAR key, UINT repeat_count,
-                               UINT flags);
+  virtual bool HandleKeystroke(views::Textfield* sender,
+                               const views::Textfield::Keystroke& key);
 
-  // views::WindowDelegate implementation:
-  virtual int GetDialogButtons() const { return DIALOGBUTTON_CANCEL; }
+  // views::WindowDelegate implementation.
+  virtual int GetDialogButtons() const {
+    return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  }
   virtual views::View* GetInitiallyFocusedView() {
-      return search_field_;
+    return search_field_;
   }
   virtual bool CanResize() const { return true; }
   virtual std::wstring GetWindowTitle() const;
@@ -88,7 +94,7 @@ class CookiesView : public views::View,
 
   // Assorted dialog controls
   views::Label* search_label_;
-  views::TextField* search_field_;
+  views::Textfield* search_field_;
   views::NativeButton* clear_search_button_;
   views::Label* description_label_;
   CookiesTableView* cookies_table_;
@@ -98,7 +104,6 @@ class CookiesView : public views::View,
 
   // The Cookies Table model
   scoped_ptr<CookiesTableModel> cookies_table_model_;
-  scoped_ptr<CookiesTableModel> search_table_model_;
 
   // The Profile for which Cookies are displayed
   Profile* profile_;
@@ -111,7 +116,7 @@ class CookiesView : public views::View,
   // window somewhere.
   static views::Window* instance_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CookiesView);
+  DISALLOW_COPY_AND_ASSIGN(CookiesView);
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_OPTIONS_GENERAL_PAGE_VIEW_H__
+#endif  // CHROME_BROWSER_VIEWS_OPTIONS_COOKIES_VIEW_H_

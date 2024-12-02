@@ -7,6 +7,7 @@
 #ifndef NET_DISK_CACHE_BACKEND_IMPL_H_
 #define NET_DISK_CACHE_BACKEND_IMPL_H_
 
+#include "base/hash_tables.h"
 #include "base/timer.h"
 #include "net/disk_cache/block_files.h"
 #include "net/disk_cache/disk_cache.h"
@@ -17,20 +18,32 @@
 
 namespace disk_cache {
 
+enum BackendFlags {
+  kMask = 1,
+  kMaxSize = 1 << 1,
+  kUnitTestMode = 1 << 2,
+  kUpgradeMode = 1 << 3,
+  kNewEviction = 1 << 4
+};
+
 // This class implements the Backend interface. An object of this
 // class handles the operations of the cache for a particular profile.
 class BackendImpl : public Backend {
   friend class Eviction;
  public:
   explicit BackendImpl(const std::wstring& path)
-      : path_(path), block_files_(path), mask_(0), max_size_(0), init_(false),
-        restarted_(false), unit_test_(false), read_only_(false),
-        new_eviction_(false) {}
+      : path_(path), block_files_(path), mask_(0), max_size_(0),
+        cache_type_(net::DISK_CACHE), uma_report_(0), user_flags_(0),
+        init_(false), restarted_(false), unit_test_(false), read_only_(false),
+        new_eviction_(false), first_timer_(true),
+        ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {}
   // mask can be used to limit the usable size of the hash table, for testing.
   BackendImpl(const std::wstring& path, uint32 mask)
       : path_(path), block_files_(path), mask_(mask), max_size_(0),
+        cache_type_(net::DISK_CACHE), uma_report_(0), user_flags_(kMask),
         init_(false), restarted_(false), unit_test_(false), read_only_(false),
-        new_eviction_(false) {}
+        new_eviction_(false), first_timer_(true),
+        ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {}
   ~BackendImpl();
 
   // Performs general initialization for this current instance of the cache.
@@ -51,6 +64,9 @@ class BackendImpl : public Backend {
 
   // Sets the maximum size for the total amount of data stored by this instance.
   bool SetMaxSize(int max_bytes);
+
+  // Sets the cache type for this backend.
+  void SetType(net::CacheType type);
 
   // Returns the full name for an external storage file.
   std::wstring GetFileName(Addr address) const;
@@ -86,10 +102,15 @@ class BackendImpl : public Backend {
   void RemoveEntry(EntryImpl* entry);
 
   // This method must be called whenever an entry is released for the last time.
-  void CacheEntryDestroyed();
+  // |address| is the cache address of the entry.
+  void CacheEntryDestroyed(Addr address);
+
+  // Returns true if the data stored by the provided |rankings| points to an
+  // open entry, false otherwise.
+  bool IsOpen(CacheRankingsBlock* rankings) const;
 
   // Returns the id being used on this run of the cache.
-  int32 GetCurrentEntryId();
+  int32 GetCurrentEntryId() const;
 
   // Returns the maximum size for a file to reside on the cache.
   int MaxFileSize() const;
@@ -99,6 +120,21 @@ class BackendImpl : public Backend {
 
   // Logs requests that are denied due to being too big.
   void TooMuchStorageRequested(int32 size);
+
+  // Returns true if this instance seems to be under heavy load.
+  bool IsLoaded() const;
+
+  // Returns the full histogram name, for the given base |name| and experiment,
+  // and the current cache type. The name will be "DiskCache.t.name_e" where n
+  // is the cache type and e the provided |experiment|.
+  std::string HistogramName(const char* name, int experiment) const;
+
+  net::CacheType cache_type() const {
+    return cache_type_;
+  }
+
+  // Returns the group for this client, based on the current cache size.
+  int GetSizeGroup() const;
 
   // Returns true if we should send histograms for this user again. The caller
   // must call this function only once per run (because it returns always the
@@ -130,6 +166,9 @@ class BackendImpl : public Backend {
   // Sets internal parameters to enable upgrade mode (for internal tools).
   void SetUpgradeMode();
 
+  // Sets the eviction algorithm to version 2.
+  void SetNewEviction();
+
   // Clears the counter of references to test handling of corruptions.
   void ClearRefCountForTest();
 
@@ -141,6 +180,8 @@ class BackendImpl : public Backend {
   bool OpenPrevEntry(void** iter, Entry** prev_entry);
 
  private:
+  typedef base::hash_map<CacheAddr, EntryImpl*> EntriesMap;
+
   // Creates a new backing file for the cache index.
   bool CreateBackingStore(disk_cache::File* file);
   bool InitBackingStore(bool* file_created);
@@ -169,13 +210,15 @@ class BackendImpl : public Backend {
                                   CacheRankingsBlock** from_entry,
                                   EntryImpl** next_entry);
 
-  // Returns the entry that is pointed by |next|.
-  EntryImpl* GetEnumeratedEntry(CacheRankingsBlock* next);
+  // Returns the entry that is pointed by |next|. If we are trimming the cache,
+  // |to_evict| should be true so that we don't perform extra disk writes.
+  EntryImpl* GetEnumeratedEntry(CacheRankingsBlock* next, bool to_evict);
 
   // Re-opens an entry that was previously deleted.
   bool ResurrectEntry(EntryImpl* deleted_entry, Entry** entry);
 
-  void DestroyInvalidEntry(Addr address, EntryImpl* entry);
+  void DestroyInvalidEntry(EntryImpl* entry);
+  void DestroyInvalidEntryFromEnumeration(EntryImpl* entry);
 
   // Handles the used storage count.
   void AddStorageSize(int32 bytes);
@@ -213,22 +256,31 @@ class BackendImpl : public Backend {
   uint32 mask_;  // Binary mask to map a hash to the hash table.
   int32 max_size_;  // Maximum data size for this instance.
   Eviction eviction_;  // Handler of the eviction algorithm.
+  EntriesMap open_entries_;  // Map of open entries.
   int num_refs_;  // Number of referenced cache entries.
   int max_refs_;  // Max number of referenced cache entries.
   int num_pending_io_;  // Number of pending IO operations.
+  net::CacheType cache_type_;
+  int uma_report_;  // Controls transmision of UMA data.
+  uint32 user_flags_;  // Flags set by the user.
   bool init_;  // controls the initialization of the system.
   bool restarted_;
   bool unit_test_;
   bool read_only_;  // Prevents updates of the rankings data (used by tools).
   bool disabled_;
   bool new_eviction_;  // What eviction algorithm should be used.
+  bool first_timer_;  // True if the timer has not been called.
 
   Stats stats_;  // Usage statistcs.
   base::RepeatingTimer<BackendImpl> timer_;  // Usage timer.
-  TraceObject trace_object_;  // Inits and destroys internal tracing.
+  scoped_refptr<TraceObject> trace_object_;  // Inits internal tracing.
+  ScopedRunnableMethodFactory<BackendImpl> factory_;
 
   DISALLOW_EVIL_CONSTRUCTORS(BackendImpl);
 };
+
+// Returns the prefered max cache size given the available disk space.
+int PreferedCacheSize(int64 available);
 
 }  // namespace disk_cache
 

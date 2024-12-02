@@ -18,25 +18,28 @@
 
 #include <string>
 
+#include "app/gfx/font.h"
+#include "app/slide_animation.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
+#include "base/time.h"
 #include "base/timer.h"
-#include "chrome/common/slide_animation.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/icon_manager.h"
-#include "chrome/views/event.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/view.h"
+#include "views/event.h"
+#include "views/controls/button/button.h"
+#include "views/view.h"
 
 namespace views {
 class Label;
+class NativeButton;
 }
 class BaseDownloadItemModel;
 class DownloadShelfView;
 class SkBitmap;
 
-class DownloadItemView : public views::NativeButton::Listener,
+class DownloadItemView : public views::ButtonListener,
                          public views::View,
                          public DownloadItem::Observer,
                          public AnimationDelegate {
@@ -48,10 +51,11 @@ class DownloadItemView : public views::NativeButton::Listener,
 
   // DownloadObserver method
   virtual void OnDownloadUpdated(DownloadItem* download);
+  virtual void OnDownloadOpened(DownloadItem* download);
 
   // View overrides
   virtual void Layout();
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual gfx::Size GetPreferredSize();
   virtual void OnMouseExited(const views::MouseEvent& event);
   virtual void OnMouseMoved(const views::MouseEvent& event);
@@ -59,8 +63,8 @@ class DownloadItemView : public views::NativeButton::Listener,
   virtual void OnMouseReleased(const views::MouseEvent& event, bool canceled);
   virtual bool OnMouseDragged(const views::MouseEvent& event);
 
-  // NativeButton::Listener implementation.
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // ButtonListener implementation.
+  virtual void ButtonPressed(views::Button* sender);
 
   // AnimationDelegate implementation.
   virtual void AnimationProgressed(const Animation* animation);
@@ -107,7 +111,7 @@ class DownloadItemView : public views::NativeButton::Listener,
 
   // Convenience method to paint the 3 vertical bitmaps (bottom, middle, top)
   // that form the background.
-  void PaintBitmaps(ChromeCanvas* canvas,
+  void PaintBitmaps(gfx::Canvas* canvas,
                     const SkBitmap* top_bitmap,
                     const SkBitmap* center_bitmap,
                     const SkBitmap* bottom_bitmap,
@@ -134,6 +138,14 @@ class DownloadItemView : public views::NativeButton::Listener,
   // and simply returned on subsequent calls.
   void SizeLabelToMinWidth();
 
+  // Reenables the item after it has been disabled when a user clicked it to
+  // open the downloaded file.
+  void Reenable();
+
+  // Given |x|, returns whether |x| is within the x coordinate range of
+  // the drop-down button or not.
+  bool InDropDownButtonXCoordinateRange(int x);
+
   // The different images used for the background.
   BodyImageSet normal_body_image_set_;
   BodyImageSet hot_body_image_set_;
@@ -157,7 +169,7 @@ class DownloadItemView : public views::NativeButton::Listener,
   bool show_status_text_;
 
   // The font used to print the file name and status.
-  ChromeFont font_;
+  gfx::Font font_;
 
   // The current state (normal, hot or pushed) of the body and drop-down.
   State body_state_;
@@ -166,8 +178,9 @@ class DownloadItemView : public views::NativeButton::Listener,
   // In degrees, for downloads with no known total size.
   int progress_angle_;
 
-  // The x coordinate at which the drop-down button starts.
-  int drop_down_x_;
+  // The left and right x coordinates of the drop-down button.
+  int drop_down_x_left_;
+  int drop_down_x_right_;
 
   // Used when we are showing the menu to show the drop-down as pressed.
   bool drop_down_pressed_;
@@ -217,6 +230,16 @@ class DownloadItemView : public views::NativeButton::Listener,
 
   // The size of the buttons.  Cached so animation works when hidden.
   gfx::Size cached_button_size_;
+
+  // Whether we are currently disabled as part of opening the downloaded file.
+  bool disabled_while_opening_;
+
+  // The time at which this view was created.
+  base::Time creation_time_;
+
+  // Method factory used to delay reenabling of the item when opening the
+  // downloaded file.
+  ScopedRunnableMethodFactory<DownloadItemView> reenable_method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadItemView);
 };

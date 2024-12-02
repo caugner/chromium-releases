@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/string16.h"
-#include "chrome/common/ipc_message_macros.h"
 #include "googleurl/src/gurl.h"
+#include "ipc/ipc_message_macros.h"
 
 
 //-----------------------------------------------------------------------------
@@ -29,10 +29,9 @@ IPC_END_MESSAGES(WorkerProcess)
 // Worker messages
 // These are messages sent from the renderer process to the worker process.
 IPC_BEGIN_MESSAGES(Worker)
-  IPC_MESSAGE_ROUTED4(WorkerMsg_StartWorkerContext,
+  IPC_MESSAGE_ROUTED3(WorkerMsg_StartWorkerContext,
                       GURL /* url */,
                       string16  /* user_agent */,
-                      string16  /* encoding */,
                       string16  /* source_code */)
 
   IPC_MESSAGE_ROUTED0(WorkerMsg_TerminateWorkerContext)
@@ -56,13 +55,8 @@ IPC_BEGIN_MESSAGES(WorkerHost)
                       int  /* line_number */,
                       string16  /* source_url*/)
 
-  IPC_MESSAGE_ROUTED6(WorkerHostMsg_PostConsoleMessageToWorkerObject,
-                      int  /* destination */,
-                      int  /* source */,
-                      int  /* level */,
-                      string16  /* message */,
-                      int  /* line_number */,
-                      string16  /* source_url */)
+  IPC_MESSAGE_ROUTED1(WorkerHostMsg_PostConsoleMessageToWorkerObject,
+                      WorkerHostMsg_PostConsoleMessageToWorkerObject_Params)
 
   IPC_MESSAGE_ROUTED1(WorkerHostMsg_ConfirmMessageFromWorkerObject,
                       bool /* bool has_pending_activity */)

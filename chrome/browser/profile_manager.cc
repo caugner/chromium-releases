@@ -6,16 +6,17 @@
 
 #include "chrome/browser/profile_manager.h"
 
+#include "app/l10n_util.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
@@ -24,12 +25,6 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_tracker.h"
-
-#if defined(OS_POSIX)
-// TODO(port): get rid of this include. It's used just to provide declarations
-// and stub definitions for classes we encouter during the porting effort.
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
 
 // static
 void ProfileManager::RegisterUserPrefs(PrefService* prefs) {
@@ -139,7 +134,8 @@ Profile* ProfileManager::AddProfileByPath(const FilePath& path) {
 void ProfileManager::NewWindowWithProfile(Profile* profile) {
   DCHECK(profile);
   Browser* browser = Browser::Create(profile);
-  browser->AddTabWithURL(GURL(), GURL(), PageTransition::TYPED, true, NULL);
+  browser->AddTabWithURL(GURL(), GURL(), PageTransition::TYPED, true, -1,
+                         false, NULL);
   browser->window()->Show();
 }
 

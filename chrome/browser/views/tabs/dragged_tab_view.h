@@ -5,20 +5,25 @@
 #ifndef CHROME_BROWSER_VIEWS_TABS_DRAGGED_TAB_VIEW_H_
 #define CHROME_BROWSER_VIEWS_TABS_DRAGGED_TAB_VIEW_H_
 
+#include "app/slide_animation.h"
 #include "base/gfx/point.h"
 #include "base/gfx/size.h"
 #include "base/task.h"
-#include "chrome/common/slide_animation.h"
-#include "chrome/views/view.h"
-#include "skia/include/SkBitmap.h"
+#include "build/build_config.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "views/view.h"
 
 namespace views {
+#if defined(OS_WIN)
 class WidgetWin;
+#elif defined(OS_LINUX)
+class WidgetGtk;
+#endif
 }
 namespace gfx {
 class Point;
 }
-class HWNDPhotobooth;
+class NativeViewPhotobooth;
 class Tab;
 class TabContents;
 class TabRenderer;
@@ -39,7 +44,7 @@ class DraggedTabView : public views::View,
   void Attach(int selected_width);
 
   // Notifies the DraggedTabView that it has been detached from a TabStrip.
-  void Detach(HWNDPhotobooth* photobooth);
+  void Detach(NativeViewPhotobooth* photobooth);
 
   // Notifies the DraggedTabView that it should update itself.
   void Update();
@@ -59,15 +64,18 @@ class DraggedTabView : public views::View,
   virtual void AnimationCanceled(const Animation* animation);
 
   // Overridden from views::View:
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
 
   // Paint the view, when it's attached to a TabStrip.
-  void PaintAttachedTab(ChromeCanvas* canvas);
+  void PaintAttachedTab(gfx::Canvas* canvas);
 
   // Paint the view, when it's not attached to any TabStrip.
-  void PaintDetachedView(ChromeCanvas* canvas);
+  void PaintDetachedView(gfx::Canvas* canvas);
+
+  // Paint the view, when "Show window contents while dragging" is disabled.
+  void PaintFocusRect(gfx::Canvas* canvas);
 
   // Resizes the container to fit the content for the current attachment mode.
   void ResizeContainer();
@@ -76,7 +84,11 @@ class DraggedTabView : public views::View,
   int ScaleValue(int value);
 
   // The window that contains the DraggedTabView.
+#if defined(OS_WIN)
   scoped_ptr<views::WidgetWin> container_;
+#elif defined(OS_LINUX)
+  scoped_ptr<views::WidgetGtk> container_;
+#endif
 
   // The renderer that paints the Tab shape.
   scoped_ptr<TabRenderer> renderer_;
@@ -84,6 +96,9 @@ class DraggedTabView : public views::View,
   // True if the view is currently attached to a TabStrip. Controls rendering
   // and sizing modes.
   bool attached_;
+
+  // True if "Show window contents while dragging" is enabled.
+  bool show_contents_on_drag_;
 
   // The unscaled offset of the mouse from the top left of the dragged Tab.
   // This is used to maintain an appropriate offset for the mouse pointer when
@@ -97,7 +112,7 @@ class DraggedTabView : public views::View,
 
   // A handle to the DIB containing the current screenshot of the TabContents
   // we are dragging.
-  HWNDPhotobooth* photobooth_;
+  NativeViewPhotobooth* photobooth_;
 
   // The dimensions of the TabContents being dragged.
   gfx::Size contents_size_;

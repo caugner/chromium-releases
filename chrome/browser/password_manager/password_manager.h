@@ -6,16 +6,16 @@
 #define CHROME_BROWSER_PASSWORD_MANAGER_H__
 
 #include "base/scoped_ptr.h"
-#include "chrome/browser/password_manager/password_form_manager.h"
+#include "base/stl_util-inl.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/views/login_view.h"
 #include "chrome/common/pref_member.h"
-#include "chrome/common/stl_util-inl.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/password_form_dom_manager.h"
 
+class PasswordFormManager;
 class PrefService;
-class WebContents;
+class TabContents;
 
 // Per-tab password manager. Handles creation and management of UI elements,
 // receiving password form data from the renderer and managing the password
@@ -25,14 +25,14 @@ class PasswordManager : public views::LoginModel {
  public:
   static void RegisterUserPrefs(PrefService* prefs);
 
-  explicit PasswordManager(WebContents* web_contents);
+  explicit PasswordManager(TabContents* tab_contents);
   ~PasswordManager();
 
   // Called by a PasswordFormManager when it decides a form can be autofilled
   // on the page.
-  void Autofill(const PasswordForm& form_for_autofill,
-                const PasswordFormMap& best_matches,
-                const PasswordForm* const preferred_match) const;
+  void Autofill(const webkit_glue::PasswordForm& form_for_autofill,
+                const webkit_glue::PasswordFormMap& best_matches,
+                const webkit_glue::PasswordForm* const preferred_match) const;
 
   // Notification that the user navigated away from the current page.
   // Unless this is a password form submission, for our purposes this
@@ -44,12 +44,12 @@ class PasswordManager : public views::LoginModel {
   void DidStopLoading();
 
   // Notifies the password manager that password forms were parsed on the page.
-  void PasswordFormsSeen(const std::vector<PasswordForm>& forms);
+  void PasswordFormsSeen(const std::vector<webkit_glue::PasswordForm>& forms);
 
   // When a form is submitted, we prepare to save the password but wait
   // until we decide the user has successfully logged in. This is step 1
   // of 2 (see SavePassword).
-  void ProvisionallySavePassword(PasswordForm form);
+  void ProvisionallySavePassword(webkit_glue::PasswordForm form);
 
   // Clear any pending saves
   void ClearProvisionalSave();
@@ -88,8 +88,8 @@ class PasswordManager : public views::LoginModel {
   // time a user submits a login form and gets to the next page.
   scoped_ptr<PasswordFormManager> provisional_save_manager_;
 
-  // The containing WebContents
-  WebContents* web_contents_;
+  // The containing TabContents.
+  TabContents* tab_contents_;
 
   // The LoginModelObserver (i.e LoginView) requiring autofill.
   views::LoginModelObserver* observer_;

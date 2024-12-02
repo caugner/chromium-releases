@@ -11,6 +11,8 @@
 #ifndef NET_BASE_LISTEN_SOCKET_H_
 #define NET_BASE_LISTEN_SOCKET_H_
 
+#include "build/build_config.h"
+
 #if defined(OS_WIN)
 #include <winsock2.h>
 #endif
@@ -19,8 +21,6 @@
 #include "base/object_watcher.h"
 #elif defined(OS_POSIX)
 #include "base/message_loop.h"
-#include "net/base/net_util.h"
-#include "net/base/net_errors.h"
 #endif
 
 #include "base/basictypes.h"
@@ -28,7 +28,7 @@
 
 #if defined(OS_POSIX)
 struct event;  // From libevent
-#define SOCKET int
+typedef int SOCKET;
 #endif
 
 // Implements a raw socket interface
@@ -45,6 +45,8 @@ class ListenSocket : public base::RefCountedThreadSafe<ListenSocket>,
   // should be split up similarly.
   class ListenSocketDelegate {
    public:
+    virtual ~ListenSocketDelegate() {}
+
     // server is the original listening Socket, connection is the new
     // Socket that was created.  Ownership of connection is transferred
     // to the delegate with this call.
@@ -59,11 +61,20 @@ class ListenSocket : public base::RefCountedThreadSafe<ListenSocket>,
                               ListenSocketDelegate* del);
   virtual ~ListenSocket();
 
-  // send data to the socket
+  // Send data to the socket.
   void Send(const char* bytes, int len, bool append_linefeed = false);
   void Send(const std::string& str, bool append_linefeed = false);
 
+  // NOTE: This is for unit test use only!
+  // Pause/Resume calling Read().  Note that ResumeReads() will also call
+  // Read() if there is anything to read.
+  void PauseReads();
+  void ResumeReads();
+
  protected:
+  static const SOCKET kInvalidSocket;
+  static const int kSocketError;
+
   ListenSocket(SOCKET s, ListenSocketDelegate* del);
   static SOCKET Listen(std::string ip, int port);
   // if valid, returned SOCKET is non-blocking
@@ -106,7 +117,10 @@ class ListenSocket : public base::RefCountedThreadSafe<ListenSocket>,
   ListenSocketDelegate *socket_delegate_;
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(ListenSocket);
+  bool reads_paused_;
+  bool has_pending_reads_;
+
+  DISALLOW_COPY_AND_ASSIGN(ListenSocket);
 };
 
 #endif  // NET_BASE_LISTEN_SOCKET_H_

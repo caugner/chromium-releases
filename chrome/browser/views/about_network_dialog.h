@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_VIEWS_ABOUT_NETWORK_DIALOG_H_
 
 #include "base/singleton.h"
-#include "chrome/views/controls/button/button.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/controls/button/button.h"
+#include "views/window/dialog_delegate.h"
 
 namespace views {
 class TextButton;
-class TextField;
+class Textfield;
 }  // namespace views
 
 class AboutNetworkDialog : public views::DialogDelegate,
@@ -53,7 +53,7 @@ class AboutNetworkDialog : public views::DialogDelegate,
   views::TextButton* track_toggle_;
   views::TextButton* show_button_;
   views::TextButton* clear_button_;
-  views::TextField* text_field_;
+  views::Textfield* text_field_;
 
   // Set to true when we're tracking network status.
   bool tracking_;

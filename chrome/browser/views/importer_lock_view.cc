@@ -4,14 +4,15 @@
 
 #include "chrome/browser/views/importer_lock_view.h"
 
+#include "app/l10n_util.h"
+#include "base/message_loop.h"
 #include "chrome/browser/importer/importer.h"
-#include "chrome/browser/views/standard_layout.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "views/controls/label.h"
+#include "views/standard_layout.h"
+#include "views/window/window.h"
 
 using views::ColumnSet;
 using views::GridLayout;
@@ -46,10 +47,10 @@ void ImporterLockView::Layout() {
 }
 
 std::wstring ImporterLockView::GetDialogButtonLabel(
-    DialogButton button) const {
-  if (button == DIALOGBUTTON_OK) {
+    MessageBoxFlags::DialogButton button) const {
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
     return l10n_util::GetString(IDS_IMPORTER_LOCK_OK);
-  } else if (button == DIALOGBUTTON_CANCEL) {
+  } else if (button == MessageBoxFlags::DIALOGBUTTON_CANCEL) {
     return l10n_util::GetString(IDS_IMPORTER_LOCK_CANCEL);
   }
   return std::wstring();

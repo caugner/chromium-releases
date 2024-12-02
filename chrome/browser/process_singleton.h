@@ -13,6 +13,10 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/gfx/native_widget_types.h"
+#include "base/logging.h"
+#include "base/non_thread_safe.h"
+#include "base/ref_counted.h"
 
 // ProcessSingleton ----------------------------------------------------------
 //
@@ -25,7 +29,7 @@
 // - the Windows implementation uses an invisible global message window;
 // - the Linux implementation uses a Unix domain socket in the user data dir.
 
-class ProcessSingleton {
+class ProcessSingleton : public NonThreadSafe {
  public:
   explicit ProcessSingleton(const FilePath& user_data_dir);
   ~ProcessSingleton();
@@ -39,24 +43,33 @@ class ProcessSingleton {
   // first one, so this function won't find it.
   bool NotifyOtherProcess();
 
-  // Set ourselves up as the singleton instance.
+  // Sets ourself up as the singleton instance.
   void Create();
 
-  // Blocks the dispatch of CopyData messages.
-  void Lock() {
+  // Blocks the dispatch of CopyData messages. foreground_window refers
+  // to the window that should be set to the foreground if a CopyData message
+  // is received while the ProcessSingleton is locked.
+  void Lock(gfx::NativeWindow foreground_window) {
+    DCHECK(CalledOnValidThread());
     locked_ = true;
+    foreground_window_ = foreground_window;
   }
 
   // Allows the dispatch of CopyData messages.
   void Unlock() {
+    DCHECK(CalledOnValidThread());
     locked_ = false;
+    foreground_window_ = NULL;
   }
 
-  // Looks for zombie renderer and plugin processes that could have survived.
-  void HuntForZombieChromeProcesses();
+  bool locked() {
+    DCHECK(CalledOnValidThread());
+    return locked_;
+  }
 
  private:
   bool locked_;
+  gfx::NativeWindow foreground_window_;
 
 #if defined(OS_WIN)
   // This ugly behemoth handles startup commands sent from another process.
@@ -84,9 +97,14 @@ class ProcessSingleton {
 
   // Path in file system to the socket.
   FilePath socket_path_;
+
+  // Helper class for linux specific messages.  LinuxWatcher is ref counted
+  // because it posts messages between threads.
+  class LinuxWatcher;
+  scoped_refptr<LinuxWatcher> watcher_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(ProcessSingleton);
 };
 
-#endif  // #ifndef CHROME_BROWSER_PROCESS_SINGLETON_H_
+#endif  // CHROME_BROWSER_PROCESS_SINGLETON_H_

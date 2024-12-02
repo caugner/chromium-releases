@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2008 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,8 +6,10 @@
 
 import os
 import re
+import signal
 import subprocess
 import sys
+import logging
 
 import google.path_utils
 
@@ -20,6 +21,15 @@ import path_utils as layout_package_path_utils
 THISDIR = os.path.dirname(os.path.abspath(__file__))
 def PathFromBase(*pathies):
   return google.path_utils.FindUpward(THISDIR, *pathies)
+
+def PathFromBuildResults(*pathies):
+  # FIXME(dkegel): use latest or warn if more than one found?
+  for dir in ["sconsbuild", "out", "xcodebuild"]:
+    try:
+      return google.path_utils.FindUpward(THISDIR, dir, *pathies)
+    except:
+      pass
+  raise google.path_utils.PathNotFound("Unable to find %s under any ancestor of %s" % (os.path.join(*pathies), THISDIR))
 
 def IsNonWindowsPlatformTargettingWindowsResults():
   """Returns true iff this platform is targetting Windows baseline, but isn't
@@ -146,17 +156,11 @@ class PlatformUtility(object):
     """
     # server_process is not set when "http_server.py stop" is run manually.
     if server_process is None:
-      # Try to determine the HTTP server process.
       # TODO(mmoss) This isn't ideal, since it could conflict with lighttpd
       # processes not started by http_server.py, but good enough for now.
-      proc = subprocess.Popen(('ps', '--no-headers', '-o', 'pid',
-                               '-C', 'lighttpd'),
-                              stdout=subprocess.PIPE)
-      pid = proc.stdout.readline().strip()
+      subprocess.call(['killall', '-u', os.getenv('USER'), '-TERM', 'lighttpd'])
     else:
-      pid = server_process.pid
-    subprocess.Popen(('kill', '-TERM', '%s' % pid), stdout=subprocess.PIPE,
-                     stderr=subprocess.PIPE).wait()
+      os.kill(server_process.pid, signal.SIGTERM)
 
   def WDiffExecutablePath(self):
     """Path to the WDiff executable, which we assume is already installed and
@@ -166,8 +170,7 @@ class PlatformUtility(object):
 
   def ImageCompareExecutablePath(self, target):
     """Path to the image_diff binary."""
-    # See mmoss TODO below.
-    return PathFromBase('chrome', 'Hammer', 'image_diff')
+    return PathFromBuildResults(target, 'image_diff')
 
   def TestShellBinary(self):
     """The name of the binary for TestShell."""
@@ -179,14 +182,31 @@ class PlatformUtility(object):
     Args:
       target: Build target mode (debug or release)
     """
-    # TODO(mmoss) - hard-coded to "Hammer" for now until I look into the scons
-    # output directory logic (and how/if it will change once Linux supports
-    # multiple debug/release targets).
-    try:
-      path = PathFromBase('webkit', 'Hammer', self.TestShellBinary())
-    except google.path_utils.PathNotFound:
-      path = PathFromBase('chrome', 'Hammer', self.TestShellBinary())
-    return path
+
+    if target in ('Debug', 'Release'):
+      try:
+        debug_path = PathFromBuildResults('Debug', self.TestShellBinary())
+        release_path = PathFromBuildResults('Release', \
+                                    self.TestShellBinary())
+
+        debug_mtime = os.stat(debug_path).st_mtime
+        release_mtime = os.stat(release_path).st_mtime
+
+        if debug_mtime > release_mtime and target == 'Release' or \
+           release_mtime > debug_mtime and target == 'Debug':
+          logging.info('\x1b[31mWarning: you are not running the most ' + \
+                       'recent test_shell binary. You need to pass ' + \
+                       '--debug or not to select between Debug and ' + \
+                       'Release.\x1b[0m')
+      # This will fail if we don't have both a debug and release binary.
+      # That's fine because, in this case, we must already be running the
+      # most up-to-date one.
+      except OSError:
+        pass
+      except google.path_utils.PathNotFound:
+        pass
+
+    return PathFromBuildResults(target, self.TestShellBinary())
 
   def FuzzyMatchBinaryPath(self):
     """Return the path to the fuzzy matcher binary."""
@@ -201,3 +221,8 @@ class PlatformUtility(object):
     results live.
     """
     return 'chromium-linux'
+
+  def PlatformNewResultsDir(self):
+    """Returns the directory name in which to output newly baselined tests.
+    """
+    return self.PlatformDir()

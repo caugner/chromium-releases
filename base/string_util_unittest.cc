@@ -13,7 +13,29 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
+
+// Given a null-terminated string of wchar_t with each wchar_t representing
+// a UTF-16 code unit, returns a string16 made up of wchar_t's in the input.
+// Each wchar_t should be <= 0xFFFF and a non-BMP character (> U+FFFF)
+// should be represented as a surrogate pair (two UTF-16 units)
+// *even* where wchar_t is 32-bit (Linux and Mac).
+//
+// This is to help write tests for functions with string16 params until
+// the C++ 0x UTF-16 literal is well-supported by compilers.
+string16 BuildString16(const wchar_t* s) {
+#if defined(WCHAR_T_IS_UTF16)
+  return string16(s);
+#elif defined(WCHAR_T_IS_UTF32)
+  string16 u16;
+  while (*s != 0) {
+    DCHECK(static_cast<unsigned int>(*s) <= 0xFFFFu);
+    u16.push_back(*s++);
+  }
+  return u16;
+#endif
 }
+
+}  // namespace
 
 static const struct trim_case {
   const wchar_t* input;
@@ -157,6 +179,36 @@ TEST(StringUtilTest, CollapseWhitespace) {
   }
 }
 
+static const struct collapse_case_ascii {
+  const char* input;
+  const bool trim;
+  const char* output;
+} collapse_cases_ascii[] = {
+  {" Google Video ", false, "Google Video"},
+  {"Google Video", false, "Google Video"},
+  {"", false, ""},
+  {"  ", false, ""},
+  {"\t\rTest String\n", false, "Test String"},
+  {"    Test     \n  \t String    ", false, "Test String"},
+  {"   Test String", false, "Test String"},
+  {"Test String    ", false, "Test String"},
+  {"Test String", false, "Test String"},
+  {"", true, ""},
+  {"\n", true, ""},
+  {"  \r  ", true, ""},
+  {"\nFoo", true, "Foo"},
+  {"\r  Foo  ", true, "Foo"},
+  {" Foo bar ", true, "Foo bar"},
+  {"  \tFoo  bar  \n", true, "Foo bar"},
+  {" a \r b\n c \r\n d \t\re \t f \n ", true, "abcde f"},
+};
+
+TEST(StringUtilTest, CollapseWhitespaceASCII) {
+  for (size_t i = 0; i < arraysize(collapse_cases_ascii); ++i) {
+    const collapse_case_ascii& value = collapse_cases_ascii[i];
+    EXPECT_EQ(value.output, CollapseWhitespaceASCII(value.input, value.trim));
+  }
+}
 
 TEST(StringUtilTest, IsStringUTF8) {
   EXPECT_TRUE(IsStringUTF8("abc"));
@@ -279,8 +331,8 @@ TEST(StringUtilTest, ConvertUTF8ToWide) {
   } convert_cases[] = {
     // Regular UTF-8 input.
     {"\xe4\xbd\xa0\xe5\xa5\xbd", L"\x4f60\x597d", true},
-    // Invalid Unicode code point.
-    {"\xef\xbf\xbfHello", L"Hello", false},
+    // Non-character is passed through.
+    {"\xef\xbf\xbfHello", L"\xffffHello", true},
     // Truncated UTF-8 sequence.
     {"\xe4\xa0\xe5\xa5\xbd", L"\x597d", false},
     // Truncated off the end.
@@ -289,11 +341,14 @@ TEST(StringUtilTest, ConvertUTF8ToWide) {
     {"\xf0\x84\xbd\xa0\xe5\xa5\xbd", L"\x597d", false},
     // This UTF-8 character decodes to a UTF-16 surrogate, which is illegal.
     {"\xed\xb0\x80", L"", false},
-    // Non-BMP character. The result will either be in UTF-16 or UTF-32.
+    // Non-BMP characters. The second is a non-character regarded as valid.
+    // The result will either be in UTF-16 or UTF-32.
 #if defined(WCHAR_T_IS_UTF16)
     {"A\xF0\x90\x8C\x80z", L"A\xd800\xdf00z", true},
+    {"A\xF4\x8F\xBF\xBEz", L"A\xdbff\xdffez", true},
 #elif defined(WCHAR_T_IS_UTF32)
     {"A\xF0\x90\x8C\x80z", L"A\x10300z", true},
+    {"A\xF4\x8F\xBF\xBEz", L"A\x10fffez", true},
 #endif
   };
 
@@ -311,7 +366,11 @@ TEST(StringUtilTest, ConvertUTF8ToWide) {
   std::wstring converted;
   EXPECT_TRUE(UTF8ToWide("\00Z\t", 3, &converted));
   ASSERT_EQ(3U, converted.length());
+#if defined(WCHAR_T_IS_UNSIGNED)
+  EXPECT_EQ(0U, converted[0]);
+#else
   EXPECT_EQ(0, converted[0]);
+#endif
   EXPECT_EQ('Z', converted[1]);
   EXPECT_EQ('\t', converted[2]);
 
@@ -333,8 +392,9 @@ TEST(StringUtilTest, ConvertUTF16ToUTF8) {
     {L"\x4f60\x597d", "\xe4\xbd\xa0\xe5\xa5\xbd", true},
     // Test a non-BMP character.
     {L"\xd800\xdf00", "\xF0\x90\x8C\x80", true},
-    // Invalid Unicode code point.
-    {L"\xffffHello", "Hello", false},
+    // Non-characters are passed through.
+    {L"\xffffHello", "\xEF\xBF\xBFHello", true},
+    {L"\xdbff\xdffeHello", "\xF4\x8F\xBF\xBEHello", true},
     // The first character is a truncated UTF-16 character.
     {L"\xd800\x597d", "\xe5\xa5\xbd", false},
     // Truncated at the end.
@@ -355,7 +415,7 @@ TEST(StringUtilTest, ConvertUTF16ToUTF8) {
 #elif defined(WCHAR_T_IS_UTF32)
 // This test is only valid when wchar_t == UTF-32.
 TEST(StringUtilTest, ConvertUTF32ToUTF8) {
-  struct UTF8ToWideCase {
+  struct WideToUTF8Case {
     const wchar_t* utf32;
     const char* utf8;
     bool success;
@@ -364,11 +424,14 @@ TEST(StringUtilTest, ConvertUTF32ToUTF8) {
     {L"\x4f60\x597d", "\xe4\xbd\xa0\xe5\xa5\xbd", true},
     // Test a non-BMP character.
     {L"A\x10300z", "A\xF0\x90\x8C\x80z", true},
+    // Non-characters are passed through.
+    {L"\xffffHello", "\xEF\xBF\xBFHello", true},
+    {L"\x10fffeHello", "\xF4\x8F\xBF\xBEHello", true},
     // Invalid Unicode code points.
-    {L"\xffffHello", "Hello", false},
     {L"\xfffffffHello", "Hello", false},
     // The first character is a truncated UTF-16 character.
     {L"\xd800\x597d", "\xe5\xa5\xbd", false},
+    {L"\xdc01Hello", "Hello", false},
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(convert_cases); i++) {
@@ -418,104 +481,162 @@ TEST(StringUtilTest, ConvertCodepageUTF8) {
   }
 }
 
-TEST(StringUtilTest, ConvertBetweenCodepageAndWide) {
-  static const struct {
-    const char* codepage_name;
-    const char* encoded;
-    OnStringUtilConversionError::Type on_error;
-    bool success;
-    const wchar_t* wide;
-  } kConvertCodepageCases[] = {
-    // Test a case where the input can no be decoded, using both SKIP and FAIL
-    // error handling rules. "A7 41" is valid, but "A6" isn't.
-    {"big5",
-     "\xA7\x41\xA6",
-     OnStringUtilConversionError::FAIL,
-     false,
-     L""},
-    {"big5",
-     "\xA7\x41\xA6",
-     OnStringUtilConversionError::SKIP,
-     true,
-     L"\x4F60"},
-    // Arabic (ISO-8859)
-    {"iso-8859-6",
-     "\xC7\xEE\xE4\xD3\xF1\xEE\xE4\xC7\xE5\xEF" " "
-     "\xD9\xEE\xE4\xEE\xEA\xF2\xE3\xEF\xE5\xF2",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x0627\x064E\x0644\x0633\x0651\x064E\x0644\x0627\x0645\x064F" L" "
-     L"\x0639\x064E\x0644\x064E\x064A\x0652\x0643\x064F\x0645\x0652"},
-    // Chinese Simplified (GB2312)
-    {"gb2312",
-     "\xC4\xE3\xBA\xC3",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x4F60\x597D"},
-    // Chinese Traditional (BIG5)
-    {"big5",
-     "\xA7\x41\xA6\x6E",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x4F60\x597D"},
-    // Greek (ISO-8859)
-    {"iso-8859-7",
-     "\xE3\xE5\xE9\xDC" " " "\xF3\xEF\xF5",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x03B3\x03B5\x03B9\x03AC" L" " L"\x03C3\x03BF\x03C5"},
-    // Hebrew (Windows)
-    {"windows-1255", /* to be replaced with "iso-8859-8-I"? */
-     "\xF9\xD1\xC8\xEC\xE5\xC9\xED",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x05E9\x05C1\x05B8\x05DC\x05D5\x05B9\x05DD"},
-    // Hindi Devanagari (ISCII)
-    {"iscii-dev",
-     "\xEF\x42" "\xC6\xCC\xD7\xE8\xB3\xDA\xCF",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x0928\x092E\x0938\x094D\x0915\x093E\x0930"},
-    // Korean (EUC)
-    {"euc-kr",
-     "\xBE\xC8\xB3\xE7\xC7\xCF\xBC\xBC\xBF\xE4",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\xC548\xB155\xD558\xC138\xC694"},
-    // Japanese (EUC)
-    {"euc-jp",
-     "\xA4\xB3\xA4\xF3\xA4\xCB\xA4\xC1\xA4\xCF",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x3053\x3093\x306B\x3061\x306F"},
-    // Japanese (ISO-2022)
-    {"iso-2022-jp",
-     "\x1B\x24\x42" "\x24\x33\x24\x73\x24\x4B\x24\x41\x24\x4F" "\x1B\x28\x42",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x3053\x3093\x306B\x3061\x306F"},
-    // Japanese (Shift-JIS)
-    {"sjis",
-     "\x82\xB1\x82\xF1\x82\xC9\x82\xBF\x82\xCD",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x3053\x3093\x306B\x3061\x306F"},
-    // Russian (KOI8)
-    {"koi8-r",
-     "\xDA\xC4\xD2\xC1\xD7\xD3\xD4\xD7\xD5\xCA\xD4\xC5",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x0437\x0434\x0440\x0430\x0432\x0441\x0442\x0432"
-     L"\x0443\x0439\x0442\x0435"},
-    // Thai (ISO-8859)
-    {"windows-874", /* to be replaced with "iso-8859-11". */
-     "\xCA\xC7\xD1\xCA\xB4\xD5" "\xA4\xC3\xD1\xBA",
-     OnStringUtilConversionError::FAIL,
-     true,
-     L"\x0E2A\x0E27\x0E31\x0E2A\x0E14\x0E35"
-     L"\x0E04\x0E23\x0e31\x0E1A"},
-  };
+// kConverterCodepageCases is not comprehensive. There are a number of cases
+// to add if we really want to have a comprehensive coverage of various
+// codepages and their 'idiosyncrasies'. Currently, the only implementation
+// for CodepageTo* and *ToCodepage uses ICU, which has a very extensive
+// set of tests for the charset conversion. So, we can get away with a
+// relatively small number of cases listed below.
+//
+// Note about |u16_wide| in the following struct.
+// On Windows, the field is always identical to |wide|. On Mac and Linux,
+// it's identical as long as there's no character outside the
+// BMP (<= U+FFFF). When there is, it is different from |wide| and
+// is not a real wide string (UTF-32 string) in that each wchar_t in
+// the string is a UTF-16 code unit zero-extended to be 32-bit
+// even when the code unit belongs to a surrogate pair.
+// For instance, a Unicode string (U+0041 U+010000) is represented as
+// L"\x0041\xD800\xDC00" instead of L"\x0041\x10000".
+// To avoid the clutter, |u16_wide| will be set to NULL
+// if it's identical to |wide| on *all* platforms.
 
+static const struct {
+  const char* codepage_name;
+  const char* encoded;
+  OnStringUtilConversionError::Type on_error;
+  bool success;
+  const wchar_t* wide;
+  const wchar_t* u16_wide;
+} kConvertCodepageCases[] = {
+  // Test a case where the input cannot be decoded, using SKIP, FAIL
+  // and SUBSTITUTE error handling rules. "A7 41" is valid, but "A6" isn't.
+  {"big5",
+   "\xA7\x41\xA6",
+   OnStringUtilConversionError::FAIL,
+   false,
+   L"",
+   NULL},
+  {"big5",
+   "\xA7\x41\xA6",
+   OnStringUtilConversionError::SKIP,
+   true,
+   L"\x4F60",
+   NULL},
+  {"big5",
+   "\xA7\x41\xA6",
+   OnStringUtilConversionError::SUBSTITUTE,
+   true,
+   L"\x4F60\xFFFD",
+   NULL},
+  // Arabic (ISO-8859)
+  {"iso-8859-6",
+   "\xC7\xEE\xE4\xD3\xF1\xEE\xE4\xC7\xE5\xEF" " "
+   "\xD9\xEE\xE4\xEE\xEA\xF2\xE3\xEF\xE5\xF2",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x0627\x064E\x0644\x0633\x0651\x064E\x0644\x0627\x0645\x064F" L" "
+   L"\x0639\x064E\x0644\x064E\x064A\x0652\x0643\x064F\x0645\x0652",
+   NULL},
+  // Chinese Simplified (GB2312)
+  {"gb2312",
+   "\xC4\xE3\xBA\xC3",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x4F60\x597D",
+   NULL},
+  // Chinese (GB18030) : 4 byte sequences mapped to BMP characters
+  {"gb18030",
+   "\x81\x30\x84\x36\xA1\xA7",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x00A5\x00A8",
+   NULL},
+  // Chinese (GB18030) : A 4 byte sequence mapped to plane 2 (U+20000)
+  {"gb18030",
+   "\x95\x32\x82\x36\xD2\xBB",
+   OnStringUtilConversionError::FAIL,
+   true,
+#if defined(WCHAR_T_IS_UTF16)
+   L"\xD840\xDC00\x4E00",
+#else
+   L"\x20000\x4E00",
+#endif
+   L"\xD840\xDC00\x4E00"},
+  {"big5",
+   "\xA7\x41\xA6\x6E",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x4F60\x597D",
+   NULL},
+  // Greek (ISO-8859)
+  {"iso-8859-7",
+   "\xE3\xE5\xE9\xDC" " " "\xF3\xEF\xF5",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x03B3\x03B5\x03B9\x03AC" L" " L"\x03C3\x03BF\x03C5",
+   NULL},
+  // Hebrew (Windows)
+  {"windows-1255",
+   "\xF9\xD1\xC8\xEC\xE5\xC9\xED",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x05E9\x05C1\x05B8\x05DC\x05D5\x05B9\x05DD",
+   NULL},
+  // Hindi Devanagari (ISCII)
+  {"iscii-dev",
+   "\xEF\x42" "\xC6\xCC\xD7\xE8\xB3\xDA\xCF",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x0928\x092E\x0938\x094D\x0915\x093E\x0930",
+   NULL},
+  // Korean (EUC)
+  {"euc-kr",
+   "\xBE\xC8\xB3\xE7\xC7\xCF\xBC\xBC\xBF\xE4",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\xC548\xB155\xD558\xC138\xC694",
+   NULL},
+  // Japanese (EUC)
+  {"euc-jp",
+   "\xA4\xB3\xA4\xF3\xA4\xCB\xA4\xC1\xA4\xCF\xB0\xEC\x8F\xB0\xA1\x8E\xA6",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x3053\x3093\x306B\x3061\x306F\x4E00\x4E02\xFF66",
+   NULL},
+  // Japanese (ISO-2022)
+  {"iso-2022-jp",
+   "\x1B$B" "\x24\x33\x24\x73\x24\x4B\x24\x41\x24\x4F\x30\x6C" "\x1B(B"
+   "ab" "\x1B(J" "\x5C\x7E#$" "\x1B(B",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x3053\x3093\x306B\x3061\x306F\x4E00" L"ab\x00A5\x203E#$",
+   NULL},
+  // Japanese (Shift-JIS)
+  {"sjis",
+   "\x82\xB1\x82\xF1\x82\xC9\x82\xBF\x82\xCD\x88\xEA\xA6",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x3053\x3093\x306B\x3061\x306F\x4E00\xFF66",
+   NULL},
+  // Russian (KOI8)
+  {"koi8-r",
+   "\xDA\xC4\xD2\xC1\xD7\xD3\xD4\xD7\xD5\xCA\xD4\xC5",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x0437\x0434\x0440\x0430\x0432\x0441\x0442\x0432"
+   L"\x0443\x0439\x0442\x0435",
+   NULL},
+  // Thai (windows-874)
+  {"windows-874",
+   "\xCA\xC7\xD1\xCA\xB4\xD5" "\xA4\xC3\xD1\xBA",
+   OnStringUtilConversionError::FAIL,
+   true,
+   L"\x0E2A\x0E27\x0E31\x0E2A\x0E14\x0E35"
+   L"\x0E04\x0E23\x0e31\x0E1A",
+   NULL},
+};
+
+TEST(StringUtilTest, ConvertBetweenCodepageAndWide) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kConvertCodepageCases); ++i) {
     std::wstring wide;
     bool success = CodepageToWide(kConvertCodepageCases[i].encoded,
@@ -526,7 +647,9 @@ TEST(StringUtilTest, ConvertBetweenCodepageAndWide) {
     EXPECT_EQ(kConvertCodepageCases[i].wide, wide);
 
     // When decoding was successful and nothing was skipped, we also check the
-    // reverse conversion.
+    // reverse conversion. Not all conversions are round-trippable, but
+    // kConverterCodepageCases does not have any one-way conversion at the
+    // moment.
     if (success &&
         kConvertCodepageCases[i].on_error ==
             OnStringUtilConversionError::FAIL) {
@@ -549,6 +672,11 @@ TEST(StringUtilTest, ConvertBetweenCodepageAndWide) {
   EXPECT_TRUE(WideToCodepage(L"Chinese\xff27", "iso-8859-1",
                              OnStringUtilConversionError::SKIP, &encoded));
   EXPECT_STREQ("Chinese", encoded.c_str());
+  // From Unicode, SUBSTITUTE is the same as SKIP for now.
+  EXPECT_TRUE(WideToCodepage(L"Chinese\xff27", "iso-8859-1",
+                             OnStringUtilConversionError::SUBSTITUTE,
+                             &encoded));
+  EXPECT_STREQ("Chinese", encoded.c_str());
 
 #if defined(WCHAR_T_IS_UTF16)
   // When we're in UTF-16 mode, test an invalid UTF-16 character in the input.
@@ -568,6 +696,36 @@ TEST(StringUtilTest, ConvertBetweenCodepageAndWide) {
   // Invalid codepages should fail.
   EXPECT_FALSE(WideToCodepage(L"Hello, world", "awesome-8571-2",
                               OnStringUtilConversionError::SKIP, &encoded));
+}
+
+TEST(StringUtilTest, ConvertBetweenCodepageAndUTF16) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kConvertCodepageCases); ++i) {
+    string16 utf16;
+    bool success = CodepageToUTF16(kConvertCodepageCases[i].encoded,
+                                   kConvertCodepageCases[i].codepage_name,
+                                   kConvertCodepageCases[i].on_error,
+                                   &utf16);
+    string16 utf16_expected;
+    if (kConvertCodepageCases[i].u16_wide == NULL)
+      utf16_expected = BuildString16(kConvertCodepageCases[i].wide);
+    else
+      utf16_expected = BuildString16(kConvertCodepageCases[i].u16_wide);
+    EXPECT_EQ(kConvertCodepageCases[i].success, success);
+    EXPECT_EQ(utf16_expected, utf16);
+
+    // When decoding was successful and nothing was skipped, we also check the
+    // reverse conversion. See also the corresponding comment in
+    // ConvertBetweenCodepageAndWide.
+    if (success &&
+        kConvertCodepageCases[i].on_error ==
+            OnStringUtilConversionError::FAIL) {
+      std::string encoded;
+      success = UTF16ToCodepage(utf16, kConvertCodepageCases[i].codepage_name,
+                                kConvertCodepageCases[i].on_error, &encoded);
+      EXPECT_EQ(kConvertCodepageCases[i].success, success);
+      EXPECT_EQ(kConvertCodepageCases[i].encoded, encoded);
+    }
+  }
 }
 
 TEST(StringUtilTest, ConvertASCII) {
@@ -1418,22 +1576,80 @@ TEST(StringUtilTest, StartsWith) {
   EXPECT_TRUE(StartsWith(L"java", L"", true));
 }
 
+TEST(StringUtilTest, EndsWith) {
+  EXPECT_TRUE(EndsWith(L"Foo.plugin", L".plugin", true));
+  EXPECT_FALSE(EndsWith(L"Foo.Plugin", L".plugin", true));
+  EXPECT_TRUE(EndsWith(L"Foo.plugin", L".plugin", false));
+  EXPECT_TRUE(EndsWith(L"Foo.Plugin", L".plugin", false));
+  EXPECT_FALSE(EndsWith(L".plug", L".plugin", true));
+  EXPECT_FALSE(EndsWith(L".plug", L".plugin", false));
+  EXPECT_FALSE(EndsWith(L"Foo.plugin Bar", L".plugin", true));
+  EXPECT_FALSE(EndsWith(L"Foo.plugin Bar", L".plugin", false));
+  EXPECT_FALSE(EndsWith(L"", L".plugin", false));
+  EXPECT_FALSE(EndsWith(L"", L".plugin", true));
+  EXPECT_TRUE(EndsWith(L"Foo.plugin", L"", false));
+  EXPECT_TRUE(EndsWith(L"Foo.plugin", L"", true));
+  EXPECT_TRUE(EndsWith(L".plugin", L".plugin", false));
+  EXPECT_TRUE(EndsWith(L".plugin", L".plugin", true));
+  EXPECT_TRUE(EndsWith(L"", L"", false));
+  EXPECT_TRUE(EndsWith(L"", L"", true));
+}
+
 TEST(StringUtilTest, GetStringFWithOffsets) {
+  std::vector<string16> subst;
+  subst.push_back(ASCIIToUTF16("1"));
+  subst.push_back(ASCIIToUTF16("2"));
   std::vector<size_t> offsets;
 
-  ReplaceStringPlaceholders(L"Hello, $1. Your number is $2.", L"1", L"2",
+  ReplaceStringPlaceholders(ASCIIToUTF16("Hello, $1. Your number is $2."),
+                            subst,
                             &offsets);
   EXPECT_EQ(2U, offsets.size());
   EXPECT_EQ(7U, offsets[0]);
   EXPECT_EQ(25U, offsets[1]);
   offsets.clear();
 
-  ReplaceStringPlaceholders(L"Hello, $2. Your number is $1.", L"1", L"2",
+  ReplaceStringPlaceholders(ASCIIToUTF16("Hello, $2. Your number is $1."),
+                            subst,
                             &offsets);
   EXPECT_EQ(2U, offsets.size());
   EXPECT_EQ(25U, offsets[0]);
   EXPECT_EQ(7U, offsets[1]);
   offsets.clear();
+}
+
+TEST(StringUtilTest, ReplaceStringPlaceholders) {
+  std::vector<string16> subst;
+  subst.push_back(ASCIIToUTF16("9a"));
+  subst.push_back(ASCIIToUTF16("8b"));
+  subst.push_back(ASCIIToUTF16("7c"));
+  subst.push_back(ASCIIToUTF16("6d"));
+  subst.push_back(ASCIIToUTF16("5e"));
+  subst.push_back(ASCIIToUTF16("4f"));
+  subst.push_back(ASCIIToUTF16("3g"));
+  subst.push_back(ASCIIToUTF16("2h"));
+  subst.push_back(ASCIIToUTF16("1i"));
+
+  string16 formatted =
+      ReplaceStringPlaceholders(
+          ASCIIToUTF16("$1a,$2b,$3c,$4d,$5e,$6f,$7g,$8h,$9i"), subst, NULL);
+
+  EXPECT_EQ(formatted, ASCIIToUTF16("9aa,8bb,7cc,6dd,5ee,4ff,3gg,2hh,1ii"));
+}
+
+TEST(StringUtilTest, ReplaceStringPlaceholdersTooFew) {
+  // Test whether replacestringplaceholders works as expected when there
+  // are fewer inputs than outputs.
+  std::vector<string16> subst;
+  subst.push_back(ASCIIToUTF16("9a"));
+  subst.push_back(ASCIIToUTF16("8b"));
+  subst.push_back(ASCIIToUTF16("7c"));
+
+  string16 formatted =
+      ReplaceStringPlaceholders(
+          ASCIIToUTF16("$1a,$2b,$3c,$4d,$5e,$6f,$1g,$2h,$3i"), subst, NULL);
+
+  EXPECT_EQ(formatted, ASCIIToUTF16("9aa,8bb,7cc,d,e,f,9ag,8bh,7ci"));
 }
 
 TEST(StringUtilTest, SplitStringAlongWhitespace) {
@@ -1505,8 +1721,13 @@ TEST(StringUtilTest, LcpyTest) {
     EXPECT_EQ(1, dst[0]);
     EXPECT_EQ(2, dst[1]);
     EXPECT_EQ(7U, base::wcslcpy(wdst, L"abcdefg", 0));
+#if defined(WCHAR_T_IS_UNSIGNED)
+    EXPECT_EQ(1U, wdst[0]);
+    EXPECT_EQ(2U, wdst[1]);
+#else
     EXPECT_EQ(1, wdst[0]);
     EXPECT_EQ(2, wdst[1]);
+#endif
   }
 
   // Test the case were we _just_ competely fit including the null.

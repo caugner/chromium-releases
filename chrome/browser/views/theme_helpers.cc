@@ -8,10 +8,10 @@
 #include <atlapp.h>
 #include <atltheme.h>
 
-#include "chrome/common/gfx/chrome_canvas.h"
+#include "app/gfx/canvas.h"
 #include "base/logging.h"
 #include "skia/ext/bitmap_platform_device_win.h"
-#include "SkGradientShader.h"
+#include "third_party/skia/include/effects/SkGradientShader.h"
 
 void GetRebarGradientColors(int width, int x1, int x2,
                             SkColor* c1, SkColor* c2) {
@@ -23,7 +23,7 @@ void GetRebarGradientColors(int width, int x1, int x2,
   // those so calling code can use them to create gradient brushes for use in
   // rendering in other directions.
 
-  ChromeCanvas canvas(width, 1, true);
+  gfx::Canvas canvas(width, 1, true);
 
   // Render the Rebar gradient into the DIB
   CTheme theme;
@@ -64,8 +64,8 @@ void GetRebarGradientColors(int width, int x1, int x2,
   // Extract the color values from the selected pixels
   // The | in the following operations forces the alpha to 0xFF. This is
   // needed as windows sets the alpha to 0 when it renders.
-  skia::BitmapPlatformDeviceWin& device =
-      static_cast<skia::BitmapPlatformDeviceWin&>(
+  skia::BitmapPlatformDevice& device =
+      static_cast<skia::BitmapPlatformDevice&>(
           canvas.getTopPlatformDevice());
   *c1 = 0xFF000000 | device.getColorAt(x1, 0);
   *c2 = 0xFF000000 | device.getColorAt(x2, 0);

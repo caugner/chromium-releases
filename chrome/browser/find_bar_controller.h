@@ -7,15 +7,15 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
 class FindBar;
-class WebContents;
+class TabContents;
 
 class FindBarController : public NotificationObserver {
  public:
   // FindBar takes ownership of |find_bar_view|.
-  FindBarController(FindBar* find_bar);
+  explicit FindBarController(FindBar* find_bar);
 
   virtual ~FindBarController();
 
@@ -25,25 +25,36 @@ class FindBarController : public NotificationObserver {
   // Ends the current session.
   void EndFindSession();
 
-  // Accessor for the attached WebContents.
-  WebContents* web_contents() const { return web_contents_; }
+  // Accessor for the attached TabContents.
+  TabContents* tab_contents() const { return tab_contents_; }
 
-  // Changes the WebContents that this FindBar is attached to. This occurs when
+  // Changes the TabContents that this FindBar is attached to. This occurs when
   // the user switches tabs in the Browser window. |contents| can be NULL.
-  void ChangeWebContents(WebContents* contents);
+  void ChangeTabContents(TabContents* contents);
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  FindBar* get_find_bar() const { return find_bar_.get(); }
+  FindBar* find_bar() const { return find_bar_.get(); }
 
  private:
+  // Sents an update to the find bar with the tab contents' current result. The
+  // tab_contents_ must be non-NULL before this call. Theis handles
+  // de-flickering in addition to just calling the update function.
+  void UpdateFindBarForCurrentResult();
+
+  NotificationRegistrar registrar_;
+
   scoped_ptr<FindBar> find_bar_;
 
-  // The WebContents we are currently associated with.  Can be NULL.
-  WebContents* web_contents_;
+  // The TabContents we are currently associated with.  Can be NULL.
+  TabContents* tab_contents_;
+
+  // The last match count we reported to the user. This is used by
+  // UpdateFindBarForCurrentResult to avoid flickering.
+  int last_reported_matchcount_;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarController);
 };

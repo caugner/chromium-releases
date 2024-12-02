@@ -18,7 +18,7 @@
 #if defined(OS_WIN)
 // TODO(port): these can probably all go away, even on win
 #include "chrome/browser/profile.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #endif
 
 
@@ -67,12 +67,8 @@ void BrowserList::RemoveBrowser(Browser* browser) {
 
   // If the last Browser object was destroyed, make sure we try to close any
   // remaining dependent windows too.
-  if (browsers_.empty()) {
-    NotificationService::current()->Notify(
-        NotificationType::ALL_APPWINDOWS_CLOSED,
-        NotificationService::AllSources(),
-        NotificationService::NoDetails());
-  }
+  if (browsers_.empty())
+    AllBrowsersClosed();
 
   g_browser_process->ReleaseModule();
 }
@@ -180,12 +176,27 @@ BrowserList::list_type BrowserList::last_active_browsers_;
 void BrowserList::SetLastActive(Browser* browser) {
   RemoveBrowserFrom(browser, &last_active_browsers_);
   last_active_browsers_.push_back(browser);
+
+  for (int i = 0; i < static_cast<int>(observers_.size()); i++)
+    observers_[i]->OnBrowserSetLastActive(browser);
 }
 
 // static
 Browser* BrowserList::GetLastActive() {
   if (!last_active_browsers_.empty())
     return *(last_active_browsers_.rbegin());
+
+  return NULL;
+}
+
+// static
+Browser* BrowserList::GetLastActiveWithProfile(Profile* p) {
+  list_type::reverse_iterator browser = last_active_browsers_.rbegin();
+  for (; browser != last_active_browsers_.rend(); ++browser) {
+    if ((*browser)->profile() == p) {
+      return *browser;
+    }
+  }
 
   return NULL;
 }
@@ -202,6 +213,33 @@ Browser* BrowserList::FindBrowserWithType(Profile* p, Browser::Type t) {
       continue;
 
     if ((*i)->profile() == p && (*i)->type() == t)
+      return *i;
+  }
+  return NULL;
+}
+
+// static
+Browser* BrowserList::FindBrowserWithProfile(Profile* p) {
+  Browser* last_active = GetLastActive();
+  if (last_active && last_active->profile() == p)
+    return last_active;
+
+  BrowserList::const_iterator i;
+  for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
+    if (*i == last_active)
+      continue;
+
+    if ((*i)->profile() == p)
+      return *i;
+  }
+  return NULL;
+}
+
+// static
+Browser* BrowserList::FindBrowserWithID(SessionID::id_type desired_id) {
+  BrowserList::const_iterator i;
+  for (i = BrowserList::begin(); i != BrowserList::end(); ++i) {
+    if ((*i)->session_id().id() == desired_id)
       return *i;
   }
   return NULL;
@@ -247,20 +285,20 @@ void BrowserList::RemoveBrowserFrom(Browser* browser, list_type* browser_list) {
     browser_list->erase(remove_browser);
 }
 
-WebContentsIterator::WebContentsIterator()
+TabContentsIterator::TabContentsIterator()
     : browser_iterator_(BrowserList::begin()),
       web_view_index_(-1),
       cur_(NULL) {
     Advance();
   }
 
-void WebContentsIterator::Advance() {
+void TabContentsIterator::Advance() {
   // Unless we're at the beginning (index = -1) or end (iterator = end()),
-  // then the current WebContents should be valid.
+  // then the current TabContents should be valid.
   DCHECK(web_view_index_ || browser_iterator_ == BrowserList::end() ||
     cur_) << "Trying to advance past the end";
 
-  // Update cur_ to the next WebContents in the list.
+  // Update cur_ to the next TabContents in the list.
   for (;;) {
     web_view_index_++;
 
@@ -274,8 +312,8 @@ void WebContentsIterator::Advance() {
       }
     }
 
-    WebContents* next_tab =
-      (*browser_iterator_)->GetTabContentsAt(web_view_index_)->AsWebContents();
+    TabContents* next_tab =
+        (*browser_iterator_)->GetTabContentsAt(web_view_index_);
     if (next_tab) {
       cur_ = next_tab;
       return;

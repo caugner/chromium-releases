@@ -21,6 +21,7 @@
 #include "base/hash_tables.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
+#include "net/base/cache_type.h"
 #include "net/http/http_transaction_factory.h"
 
 namespace disk_cache {
@@ -30,6 +31,7 @@ class Entry;
 
 namespace net {
 
+class HostResolver;
 class HttpNetworkSession;
 class HttpRequestInfo;
 class HttpResponseInfo;
@@ -47,24 +49,17 @@ class HttpCache : public HttpTransactionFactory {
     RECORD,
     // Playback mode replays from a cache without considering any
     // standard invalidations.
-    PLAYBACK
-  };
-
-  // The type of an HttpCache object, essentially describe what an HttpCache
-  // object is for.
-  enum Type {
-    // An HttpCache object for common objects, e.g. html pages, images, fonts,
-    // css files, js files and other common web resources.
-    COMMON = 0,
-    // A cache system for media file, e.g. video and audio files. These files
-    // are huge and has special requirement for access.
-    MEDIA
+    PLAYBACK,
+    // Disables reads and writes from the cache.
+    // Equivalent to setting LOAD_DISABLE_CACHE on every request.
+    DISABLE
   };
 
   // Initialize the cache from the directory where its data is stored. The
   // disk cache is initialized lazily (by CreateTransaction) in this case. If
   // |cache_size| is zero, a default value will be calculated automatically.
-  HttpCache(ProxyService* proxy_service,
+  HttpCache(HostResolver* host_resolver,
+            ProxyService* proxy_service,
             const std::wstring& cache_dir,
             int cache_size);
 
@@ -80,7 +75,9 @@ class HttpCache : public HttpTransactionFactory {
   // Initialize using an in-memory cache. The cache is initialized lazily
   // (by CreateTransaction) in this case. If |cache_size| is zero, a default
   // value will be calculated automatically.
-  HttpCache(ProxyService* proxy_service, int cache_size);
+  HttpCache(HostResolver* host_resolver,
+            ProxyService* proxy_service,
+            int cache_size);
 
   // Initialize the cache from its component parts, which is useful for
   // testing.  The lifetime of the network_layer and disk_cache are managed by
@@ -106,15 +103,15 @@ class HttpCache : public HttpTransactionFactory {
                                 const HttpResponseInfo* response_info,
                                 bool skip_transient_headers);
 
-  // Generate a key that can be used inside the cache.
-  std::string GenerateCacheKey(const HttpRequestInfo* request);
-
   // Get/Set the cache's mode.
   void set_mode(Mode value) { mode_ = value; }
   Mode mode() { return mode_; }
 
-  void set_type(Type type) { type_ = type; }
-  Type type() { return type_; }
+  void set_type(CacheType type) { type_ = type; }
+  CacheType type() { return type_; }
+
+  // Close All Idle Sockets.  This is for debugging.
+  void CloseIdleConnections();
 
  private:
 
@@ -143,11 +140,13 @@ class HttpCache : public HttpTransactionFactory {
 
   // Methods ------------------------------------------------------------------
 
+  std::string GenerateCacheKey(const HttpRequestInfo*);
   void DoomEntry(const std::string& key);
   void FinalizeDoomedEntry(ActiveEntry* entry);
   ActiveEntry* FindActiveEntry(const std::string& key);
   ActiveEntry* ActivateEntry(const std::string& key, disk_cache::Entry*);
   void DeactivateEntry(ActiveEntry* entry);
+  void SlowDeactivateEntry(ActiveEntry* entry);
   ActiveEntry* OpenEntry(const std::string& key);
   ActiveEntry* CreateEntry(const std::string& cache_key);
   void DestroyEntry(ActiveEntry* entry);
@@ -171,7 +170,7 @@ class HttpCache : public HttpTransactionFactory {
   std::wstring disk_cache_dir_;
 
   Mode mode_;
-  Type type_;
+  CacheType type_;
 
   scoped_ptr<HttpTransactionFactory> network_layer_;
   scoped_ptr<disk_cache::Backend> disk_cache_;
@@ -185,6 +184,7 @@ class HttpCache : public HttpTransactionFactory {
   ScopedRunnableMethodFactory<HttpCache> task_factory_;
 
   bool in_memory_cache_;
+  bool deleted_;  // TODO(rvargas): remove this member. See bug 9952.
   int cache_size_;
 
   typedef base::hash_map<std::string, int> PlaybackCacheMap;

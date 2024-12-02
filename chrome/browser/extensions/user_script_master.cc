@@ -10,9 +10,13 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/pickle.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "base/thread.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/stl_util-inl.h"
 #include "chrome/common/url_constants.h"
 #include "net/base/net_util.h"
 
@@ -28,6 +32,11 @@ static bool GetDeclarationValue(const StringPiece& line,
                    line.length() - prefix.length());
   TrimWhitespace(temp, TRIM_ALL, value);
   return true;
+}
+
+UserScriptMaster::ScriptReloader::ScriptReloader(UserScriptMaster* master)
+    : master_(master),
+      master_message_loop_(MessageLoop::current()) {
 }
 
 // static
@@ -155,7 +164,7 @@ void UserScriptMaster::ScriptReloader::LoadScriptsFromDirectory(
       UserScript& user_script = result->back();
       // Push single js file in this UserScript.
       GURL url(std::string(chrome::kUserScriptScheme) + ":/" +
-          net::FilePathToFileURL(file.ToWStringHack()).ExtractFileName());
+          net::FilePathToFileURL(file).ExtractFileName());
       user_script.js_scripts().push_back(UserScript::File(file, url));
       UserScript::File& script_file = user_script.js_scripts().back();
       LoadScriptContent(&script_file);
@@ -184,8 +193,6 @@ static void LoadLoneScripts(UserScriptList* lone_scripts) {
 
 // Pickle user scripts and return pointer to the shared memory.
 static base::SharedMemory* Serialize(UserScriptList& scripts) {
-  if (scripts.empty())
-    return NULL;  // Nothing to serialize
   Pickle pickle;
   pickle.WriteSize(scripts.size());
   for (size_t i = 0; i < scripts.size(); i++) {
@@ -252,26 +259,36 @@ UserScriptMaster::UserScriptMaster(MessageLoop* worker_loop,
                                    const FilePath& script_dir)
     : user_script_dir_(script_dir),
       worker_loop_(worker_loop),
+      extensions_service_ready_(false),
       pending_scan_(false) {
   if (!user_script_dir_.value().empty())
     AddWatchedPath(script_dir);
+
+  registrar_.Add(this, NotificationType::EXTENSIONS_READY,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::EXTENSIONS_LOADED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+                 NotificationService::AllSources());
 }
 
 UserScriptMaster::~UserScriptMaster() {
   if (script_reloader_)
     script_reloader_->DisownMaster();
 
-// TODO(aa): Enable this when DirectoryWatcher is implemented for linux and mac.
-#if defined(OS_WIN)
+// TODO(aa): Enable this when DirectoryWatcher is implemented for linux.
+#if defined(OS_WIN) || defined(OS_MACOSX)
   STLDeleteElements(&dir_watchers_);
 #endif
 }
 
 void UserScriptMaster::AddWatchedPath(const FilePath& path) {
-// TODO(aa): Enable this when DirectoryWatcher is implemented for linux and mac.
-#if defined(OS_WIN)
+// TODO(aa): Enable this when DirectoryWatcher is implemented for linux.
+#if defined(OS_WIN) || defined(OS_MACOSX)
   DirectoryWatcher* watcher = new DirectoryWatcher();
-  watcher->Watch(path, this, true);
+  base::Thread* file_thread = g_browser_process->file_thread();
+  watcher->Watch(path, this, file_thread ? file_thread->message_loop() : NULL,
+                 true);
   dir_watchers_.push_back(watcher);
 #endif
 }
@@ -292,7 +309,7 @@ void UserScriptMaster::NewScriptsAvailable(base::SharedMemory* handle) {
     shared_memory_.swap(handle_deleter);
 
     NotificationService::current()->Notify(
-        NotificationType::USER_SCRIPTS_LOADED,
+        NotificationType::USER_SCRIPTS_UPDATED,
         NotificationService::AllSources(),
         Details<base::SharedMemory>(handle));
   }
@@ -307,6 +324,60 @@ void UserScriptMaster::OnDirectoryChanged(const FilePath& path) {
   }
 
   StartScan();
+}
+
+void UserScriptMaster::Observe(NotificationType type,
+                               const NotificationSource& source,
+                               const NotificationDetails& details) {
+  switch (type.value) {
+    case NotificationType::EXTENSIONS_READY:
+      extensions_service_ready_ = true;
+      StartScan();
+      break;
+    case NotificationType::EXTENSIONS_LOADED: {
+      // TODO(aa): Fix race here. A page could need a content script on startup,
+      // before the extension has loaded.  We need to freeze the renderer in
+      // that case.
+      // See: http://code.google.com/p/chromium/issues/detail?id=11547.
+
+      // Add any content scripts inside the extension.
+      ExtensionList* extensions = Details<ExtensionList>(details).ptr();
+      for (ExtensionList::iterator extension_iterator = extensions->begin();
+           extension_iterator != extensions->end(); ++extension_iterator) {
+        Extension* extension = *extension_iterator;
+        const UserScriptList& scripts = extension->content_scripts();
+        for (UserScriptList::const_iterator iter = scripts.begin();
+             iter != scripts.end(); ++iter) {
+          lone_scripts_.push_back(*iter);
+        }
+      }
+      if (extensions_service_ready_)
+        StartScan();
+      break;
+    }
+
+    case NotificationType::EXTENSION_UNLOADED: {
+      // Remove any content scripts.
+      Extension* extension = Details<Extension>(details).ptr();
+      UserScriptList new_lone_scripts;
+      for (UserScriptList::iterator iter = lone_scripts_.begin();
+           iter != lone_scripts_.end(); ++iter) {
+        if (iter->extension_id() != extension->id()) {
+          new_lone_scripts.push_back(*iter);
+        }
+      }
+      lone_scripts_ = new_lone_scripts;
+      StartScan();
+
+      // TODO(aa): Do we want to do something smarter for the scripts that have
+      // already been injected?
+
+      break;
+    }
+
+    default:
+      DCHECK(false);
+  }
 }
 
 void UserScriptMaster::StartScan() {

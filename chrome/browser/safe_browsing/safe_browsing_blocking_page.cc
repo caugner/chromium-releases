@@ -6,7 +6,11 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/histogram.h"
 #include "base/string_util.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
@@ -15,10 +19,8 @@
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/resource_bundle.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
@@ -49,19 +51,59 @@ static const char* const kLearnMoreCommand = "learnMore";
 static const char* const kProceedCommand = "proceed";
 static const char* const kTakeMeBackCommand = "takeMeBack";
 
+namespace {
+
+enum SafeBrowsingBlockingPageEvent {
+  SHOW,
+  PROCEED,
+  DONT_PROCEED,
+};
+
+void RecordSafeBrowsingBlockingPageStats(SafeBrowsingBlockingPageEvent event) {
+  static LinearHistogram histogram("interstial.safe_browsing", 0, 2, 3);
+  histogram.SetFlags(kUmaTargetedHistogramFlag);
+  histogram.Add(event);
+}
+
+}  // namespace
+// static
+SafeBrowsingBlockingPageFactory* SafeBrowsingBlockingPage::factory_ = NULL;
+
+// The default SafeBrowsingBlockingPageFactory.  Global, made a singleton so we
+// don't leak it.
+class SafeBrowsingBlockingPageFactoryImpl
+    : public SafeBrowsingBlockingPageFactory {
+ public:
+  SafeBrowsingBlockingPage* CreateSafeBrowsingPage(
+      SafeBrowsingService* service,
+      TabContents* tab_contents,
+      const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources) {
+    return new SafeBrowsingBlockingPage(service, tab_contents,
+                                        unsafe_resources);
+  }
+
+ private:
+  friend struct DefaultSingletonTraits<SafeBrowsingBlockingPageFactoryImpl>;
+
+  SafeBrowsingBlockingPageFactoryImpl() { }
+
+  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingBlockingPageFactoryImpl);
+};
+
 SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
     SafeBrowsingService* sb_service,
-    WebContents* web_contents,
+    TabContents* tab_contents,
     const UnsafeResourceList& unsafe_resources)
-    : InterstitialPage(web_contents,
+    : InterstitialPage(tab_contents,
                        IsMainPage(unsafe_resources),
                        unsafe_resources[0].url),
       sb_service_(sb_service),
       is_main_frame_(IsMainPage(unsafe_resources)),
       unsafe_resources_(unsafe_resources) {
+  RecordSafeBrowsingBlockingPageStats(SHOW);
   if (!is_main_frame_) {
     navigation_entry_index_to_remove_ =
-        tab()->controller()->GetLastCommittedEntryIndex();
+        tab()->controller().last_committed_entry_index();
   } else {
     navigation_entry_index_to_remove_ = -1;
   }
@@ -95,7 +137,7 @@ std::string SafeBrowsingBlockingPage::GetHTMLContents() {
     html = rb.GetDataResource(IDR_SAFE_BROWSING_PHISHING_BLOCK);
   }
 
-  return jstemplate_builder::GetTemplateHtml(html, &strings, "template_root");
+  return jstemplate_builder::GetTemplatesHtml(html, &strings, "template_root");
 }
 
 void SafeBrowsingBlockingPage::PopulateStringDictionary(
@@ -338,6 +380,8 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
 }
 
 void SafeBrowsingBlockingPage::Proceed() {
+  RecordSafeBrowsingBlockingPageStats(PROCEED);
+
   NotifySafeBrowsingService(sb_service_, unsafe_resources_, true);
 
   // Check to see if some new notifications of unsafe resources have been
@@ -349,8 +393,8 @@ void SafeBrowsingBlockingPage::Proceed() {
     // Build an interstitial for all the unsafe resources notifications.
     // Don't show it now as showing an interstitial while an interstitial is
     // already showing would cause DontProceed() to be invoked.
-    blocking_page = new SafeBrowsingBlockingPage(sb_service_, tab(),
-                                                 iter->second);
+    blocking_page = factory_->CreateSafeBrowsingPage(sb_service_, tab(),
+                                                     iter->second);
     unsafe_resource_map->erase(iter);
   }
 
@@ -363,6 +407,8 @@ void SafeBrowsingBlockingPage::Proceed() {
 }
 
 void SafeBrowsingBlockingPage::DontProceed() {
+  RecordSafeBrowsingBlockingPageStats(DONT_PROCEED);
+
   NotifySafeBrowsingService(sb_service_, unsafe_resources_, false);
 
   // The user does not want to proceed, clear the queued unsafe resources
@@ -378,8 +424,8 @@ void SafeBrowsingBlockingPage::DontProceed() {
   // would trigger a navigation that would cause trouble as the render view host
   // for the tab has by then already been destroyed.
   if (navigation_entry_index_to_remove_ != -1 && !tab()->is_being_destroyed()) {
-    tab()->controller()->RemoveEntryAtIndex(navigation_entry_index_to_remove_,
-                                            GURL(chrome::kChromeUINewTabURL));
+    tab()->controller().RemoveEntryAtIndex(navigation_entry_index_to_remove_,
+                                           GURL(chrome::kChromeUINewTabURL));
     navigation_entry_index_to_remove_ = -1;
   }
   InterstitialPage::DontProceed();
@@ -391,11 +437,13 @@ void SafeBrowsingBlockingPage::NotifySafeBrowsingService(
     SafeBrowsingService* sb_service,
     const UnsafeResourceList& unsafe_resources,
     bool proceed) {
-  base::Thread* io_thread = g_browser_process->io_thread();
-  if (!io_thread)
-    return;
+  MessageLoop* message_loop;
+  if (g_browser_process->io_thread())
+    message_loop = g_browser_process->io_thread()->message_loop();
+  else  // For unit-tests, just post on the current thread.
+    message_loop = MessageLoop::current();
 
-  io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+  message_loop->PostTask(FROM_HERE, NewRunnableMethod(
       sb_service, &SafeBrowsingService::OnBlockingPageDone, unsafe_resources,
       proceed));
 }
@@ -410,16 +458,20 @@ SafeBrowsingBlockingPage::UnsafeResourceMap*
 void SafeBrowsingBlockingPage::ShowBlockingPage(
     SafeBrowsingService* sb_service,
     const SafeBrowsingService::UnsafeResource& unsafe_resource) {
-  WebContents* web_contents = tab_util::GetWebContentsByID(
+  TabContents* tab_contents = tab_util::GetTabContentsByID(
       unsafe_resource.render_process_host_id, unsafe_resource.render_view_id);
 
-  if (!InterstitialPage::GetInterstitialPage(web_contents)) {
+  if (!InterstitialPage::GetInterstitialPage(tab_contents)) {
     // There are no interstitial currently showing in that tab, go ahead and
     // show this interstitial.
     std::vector<SafeBrowsingService::UnsafeResource> resources;
     resources.push_back(unsafe_resource);
+    // Set up the factory if this has not been done already (tests do that
+    // before this method is called).
+    if (!factory_)
+      factory_ = Singleton<SafeBrowsingBlockingPageFactoryImpl>::get();
     SafeBrowsingBlockingPage* blocking_page =
-        new SafeBrowsingBlockingPage(sb_service, web_contents, resources);
+        factory_->CreateSafeBrowsingPage(sb_service, tab_contents, resources);
     blocking_page->Show();
     return;
   }
@@ -428,7 +480,7 @@ void SafeBrowsingBlockingPage::ShowBlockingPage(
   // Note we only expect resources from the page at this point.
   DCHECK(unsafe_resource.resource_type != ResourceType::MAIN_FRAME);
   UnsafeResourceMap* unsafe_resource_map = GetUnsafeResourcesMap();
-  (*unsafe_resource_map)[web_contents].push_back(unsafe_resource);
+  (*unsafe_resource_map)[tab_contents].push_back(unsafe_resource);
 }
 
 // static

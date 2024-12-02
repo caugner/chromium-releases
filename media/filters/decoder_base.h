@@ -10,6 +10,7 @@
 #include <deque>
 
 #include "base/lock.h"
+#include "base/stl_util-inl.h"
 #include "base/task.h"
 #include "base/thread.h"
 #include "media/base/buffers.h"
@@ -18,93 +19,72 @@
 
 namespace media {
 
+// In this class, we over-specify method lookup via this-> to avoid unexpected
+// name resolution issues due to the two-phase lookup needed for dependent
+// name resolution in templates.
 template <class Decoder, class Output>
 class DecoderBase : public Decoder {
  public:
+  typedef CallbackRunner< Tuple1<Output*> > ReadCallback;
+
   // MediaFilter implementation.
   virtual void Stop() {
-    OnStop();
-    {
-      AutoLock auto_lock(lock_);
-      running_ = false;
-      if (process_task_) {
-        process_task_->Cancel();
-        process_task_ = NULL;
-      }
-      DiscardQueues();
-    }
-    // Because decode_thread_ is a scoped_ptr this will destroy the thread,
-    // if there was one, which causes it to be shut down in an orderly way.
-    decode_thread_.reset();
+    this->message_loop()->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &DecoderBase::StopTask));
+  }
+
+  virtual void Seek(base::TimeDelta time,
+                    FilterCallback* callback) {
+    this->message_loop()->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &DecoderBase::SeekTask, time, callback));
   }
 
   // Decoder implementation.
-  virtual bool Initialize(DemuxerStream* demuxer_stream) {
-    demuxer_stream_ = demuxer_stream;
-    if (decode_thread_.get()) {
-      if (!decode_thread_->Start()) {
-        NOTREACHED();
-        return false;
-      }
-    }
-    if (OnInitialize(demuxer_stream)) {
-      DCHECK(!media_format_.empty());
-      host()->InitializationComplete();
-      return true;
-    } else {
-      demuxer_stream_ = NULL;
-      decode_thread_.reset();
-      return false;
-    }
+  virtual void Initialize(DemuxerStream* demuxer_stream,
+                          FilterCallback* callback) {
+    this->message_loop()->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &DecoderBase::InitializeTask, demuxer_stream,
+                          callback));
   }
 
-  virtual const MediaFormat* GetMediaFormat() { return &media_format_; }
+  virtual const MediaFormat& media_format() { return media_format_; }
 
-  // Audio or Video decoder.
-  virtual void Read(Assignable<Output>* output) {
-    AutoLock auto_lock(lock_);
-    if (IsRunning()) {
-      output->AddRef();
-      output_queue_.push_back(output);
-      ScheduleProcessTask();
-    }
+  // Audio or video decoder.
+  virtual void Read(ReadCallback* read_callback) {
+    this->message_loop()->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &DecoderBase::ReadTask, read_callback));
   }
 
-  // AssignableBuffer callback.
-  virtual void OnAssignment(Buffer* buffer) {
-    AutoLock auto_lock(lock_);
-    if (IsRunning()) {
-      buffer->AddRef();
-      input_queue_.push_back(buffer);
-      --pending_reads_;
-      ScheduleProcessTask();
-    }
+  void OnReadComplete(Buffer* buffer) {
+    // Little bit of magic here to get NewRunnableMethod() to generate a Task
+    // that holds onto a reference via scoped_refptr<>.
+    //
+    // TODO(scherkus): change the callback format to pass a scoped_refptr<> or
+    // better yet see if we can get away with not using reference counting.
+    scoped_refptr<Buffer> buffer_ref = buffer;
+    this->message_loop()->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &DecoderBase::ReadCompleteTask, buffer_ref));
   }
 
  protected:
-  // If NULL is passed for the |thread_name| then all processing of decodes
-  // will happen on the pipeline thread.  If the name is non-NULL then a new
-  // thread will be created for this decoder, and it will be assigned the
-  // name provided by |thread_name|.
-  explicit DecoderBase(const char* thread_name)
-      : running_(true),
-        demuxer_stream_(NULL),
-        decode_thread_(thread_name ? new base::Thread(thread_name) : NULL),
-        pending_reads_(0),
-        process_task_(NULL) {
+  DecoderBase()
+      : pending_reads_(0),
+        expecting_discontinuous_(false),
+        state_(kUninitialized) {
   }
 
   virtual ~DecoderBase() {
-    Stop();
+    DCHECK(state_ == kUninitialized || state_ == kStopped);
+    DCHECK(result_queue_.empty());
+    DCHECK(read_queue_.empty());
   }
 
   // This method is called by the derived class from within the OnDecode method.
   // It places an output buffer in the result queue.  It must be called from
   // within the OnDecode method.
   void EnqueueResult(Output* output) {
-    AutoLock auto_lock(lock_);
-    if (IsRunning()) {
-      output->AddRef();
+    DCHECK_EQ(MessageLoop::current(), this->message_loop());
+    if (!IsStopped()) {
       result_queue_.push_back(output);
     }
   }
@@ -119,174 +99,188 @@ class DecoderBase : public Decoder {
   virtual bool OnInitialize(DemuxerStream* demuxer_stream) = 0;
 
   // Method that may be implemented by the derived class if desired.  It will
-  // be called from within the MediaFilter::Stop method prior to stopping the
+  // be called from within the MediaFilter::Stop() method prior to stopping the
   // base class.
   virtual void OnStop() {}
+
+  // Derived class can implement this method and perform seeking logic prior
+  // to the base class.
+  virtual void OnSeek(base::TimeDelta time) {}
 
   // Method that must be implemented by the derived class.  If the decode
   // operation produces one or more outputs, the derived class should call
   // the EnequeueResult() method from within this method.
   virtual void OnDecode(Buffer* input) = 0;
 
-  bool IsRunning() const { return running_; }
-
   MediaFormat media_format_;
 
  private:
-  // The GCL compiler does not like .cc files that directly access members of
-  // a base class.  This inline method helps.
-  FilterHost* host() const { return Decoder::host_; }
+  bool IsStopped() { return state_ == kStopped; }
 
-  // Schedules a task that will execute the ProcessTask method.
-  void ScheduleProcessTask() {
-    DCHECK(IsRunning());
-    if (!process_task_) {
-      process_task_ = NewRunnableMethod(this, &DecoderBase::ProcessTask);
-      if (decode_thread_.get()) {
-        decode_thread_->message_loop()->PostTask(FROM_HERE, process_task_);
-      } else {
-        host()->PostTask(process_task_);
-      }
+  void StopTask() {
+    DCHECK_EQ(MessageLoop::current(), this->message_loop());
+
+    // Delegate to the subclass first.
+    OnStop();
+
+    // Throw away all buffers in all queues.
+    result_queue_.clear();
+    STLDeleteElements(&read_queue_);
+    state_ = kStopped;
+  }
+
+  void SeekTask(base::TimeDelta time, FilterCallback* callback) {
+    DCHECK_EQ(MessageLoop::current(), this->message_loop());
+    DCHECK_EQ(0u, pending_reads_) << "Pending reads should have completed";
+    DCHECK(read_queue_.empty()) << "Read requests should be empty";
+    scoped_ptr<FilterCallback> c(callback);
+
+    // Delegate to the subclass first.
+    //
+    // TODO(scherkus): if we have the strong assertion that there are no pending
+    // reads in the entire pipeline when we receive Seek(), subclasses could
+    // either flush their buffers here or wait for IsDiscontinuous().  I'm
+    // inclined to say that they should still wait for IsDiscontinuous() so they
+    // don't have duplicated logic for Seek() and actual discontinuous frames.
+    OnSeek(time);
+
+    // Flush our decoded results.  We'll set a boolean that we can DCHECK to
+    // verify our assertion that the first buffer received after a Seek() should
+    // always be discontinuous.
+    result_queue_.clear();
+    expecting_discontinuous_ = true;
+
+    // Signal that we're done seeking.
+    callback->Run();
+  }
+
+  void InitializeTask(DemuxerStream* demuxer_stream, FilterCallback* callback) {
+    DCHECK_EQ(MessageLoop::current(), this->message_loop());
+    CHECK(kUninitialized == state_);
+    CHECK(!demuxer_stream_);
+    scoped_ptr<FilterCallback> c(callback);
+    demuxer_stream_ = demuxer_stream;
+
+    // Delegate to subclass first.
+    if (!OnInitialize(demuxer_stream_)) {
+      this->host()->SetError(PIPELINE_ERROR_DECODE);
+      callback->Run();
+      return;
+    }
+
+    // TODO(scherkus): subclass shouldn't mutate superclass media format.
+    DCHECK(!media_format_.empty()) << "Subclass did not set media_format_";
+    state_ = kInitialized;
+    callback->Run();
+  }
+
+  void ReadTask(ReadCallback* read_callback) {
+    DCHECK_EQ(MessageLoop::current(), this->message_loop());
+
+    // TODO(scherkus): should reply with a null operation (empty buffer).
+    if (IsStopped()) {
+      delete read_callback;
+      return;
+    }
+
+    // Enqueue the callback and attempt to fulfill it immediately.
+    read_queue_.push_back(read_callback);
+    FulfillPendingRead();
+
+    // Issue reads as necessary.
+    while (pending_reads_ < read_queue_.size()) {
+      demuxer_stream_->Read(NewCallback(this, &DecoderBase::OnReadComplete));
+      ++pending_reads_;
     }
   }
 
-  // The core work loop of the decoder base.  This method will run the methods
-  // SubmitReads(), ProcessInput(), and ProcessOutput() in a loop until they
-  // either produce no further work, or the filter is stopped.  Once there is
-  // no further work to do, the method returns.  A later call to the
-  // ScheduleProcessTask() method will start this task again.
-  void ProcessTask() {
-    AutoLock auto_lock(lock_);
-    bool did_some_work;
-    do {
-      did_some_work  = SubmitReads();
-      did_some_work |= ProcessInput();
-      did_some_work |= ProcessOutput();
-    } while (IsRunning() && did_some_work);
-    DCHECK(process_task_ || !IsRunning());
-    process_task_ = NULL;
-  }
+  void ReadCompleteTask(scoped_refptr<Buffer> buffer) {
+    DCHECK_EQ(MessageLoop::current(), this->message_loop());
+    DCHECK_GT(pending_reads_, 0u);
+    --pending_reads_;
+    if (IsStopped()) {
+      return;
+    }
 
-  // If necessary, calls the |demuxer_stream_| to read buffers.  Returns true
-  // if reads have happened, else false.  This method must be called with
-  // |lock_| acquired.  If the method submits any reads, then it will Release()
-  // the |lock_| when calling the demuxer and then re-Acquire() the |lock_|.
-  bool SubmitReads() {
-    lock_.AssertAcquired();
-    bool did_read = false;
-    if (IsRunning() &&
-        pending_reads_ + input_queue_.size() < output_queue_.size()) {
-      did_read = true;
-      size_t read = output_queue_.size() - pending_reads_ - input_queue_.size();
-      pending_reads_ += read;
-      {
-        AutoUnlock unlock(lock_);
-        while (read) {
-          demuxer_stream_->
-              Read(new AssignableBuffer<DecoderBase, Buffer>(this));
-          --read;
-        }
-      }
+    // TODO(scherkus): remove this when we're less paranoid about our seeking
+    // invariants.
+    if (buffer->IsDiscontinuous()) {
+      DCHECK(expecting_discontinuous_);
+      expecting_discontinuous_ = false;
     }
-    return did_read;
-  }
 
-  // If the |input_queue_| has any buffers, this method will call the derived
-  // class's OnDecode() method.
-  bool ProcessInput() {
-    lock_.AssertAcquired();
-    bool did_decode = false;
-    while (IsRunning() && !input_queue_.empty()) {
-      did_decode = true;
-      Buffer* input = input_queue_.front();
-      input_queue_.pop_front();
-      // Release |lock_| before calling the derived class to do the decode.
-      {
-        AutoUnlock unlock(lock_);
-        OnDecode(input);
-        input->Release();
-      }
-    }
-    return did_decode;
-  }
+    // Decode the frame right away.
+    OnDecode(buffer);
 
-  // Removes any buffers from the |result_queue_| and assigns them to a pending
-  // read Assignable buffer in the |output_queue_|.
-  bool ProcessOutput() {
-    lock_.AssertAcquired();
-    bool called_renderer = false;
-    while (IsRunning() && !output_queue_.empty() && !result_queue_.empty()) {
-      called_renderer = true;
-      Output* output = result_queue_.front();
-      result_queue_.pop_front();
-      Assignable<Output>* assignable_output = output_queue_.front();
-      output_queue_.pop_front();
-      // Release |lock_| before calling the renderer.
-      {
-        AutoUnlock unlock(lock_);
-        assignable_output->SetBuffer(output);
-        output->Release();
-        assignable_output->OnAssignment();
-        assignable_output->Release();
-      }
-    }
-    return called_renderer;
-  }
+    // Attempt to fulfill a pending read callback and schedule additional reads
+    // if necessary.
+    FulfillPendingRead();
 
-  // Throw away all buffers in all queues.
-  void DiscardQueues() {
-    lock_.AssertAcquired();
-    while (!input_queue_.empty()) {
-      input_queue_.front()->Release();
-      input_queue_.pop_front();
-    }
-    while (!result_queue_.empty()) {
-      result_queue_.front()->Release();
-      result_queue_.pop_front();
-    }
-    while (!output_queue_.empty()) {
-      output_queue_.front()->Release();
-      output_queue_.pop_front();
+    // Issue reads as necessary.
+    //
+    // Note that it's possible for us to decode but not produce a frame, in
+    // which case |pending_reads_| will remain less than |read_queue_| so we
+    // need to schedule an additional read.
+    DCHECK_LE(pending_reads_, read_queue_.size());
+    while (pending_reads_ < read_queue_.size()) {
+      demuxer_stream_->Read(NewCallback(this, &DecoderBase::OnReadComplete));
+      ++pending_reads_;
     }
   }
 
-  // The critical section for the decoder.
-  Lock lock_;
+  // Attempts to fulfill a single pending read by dequeuing a buffer and read
+  // callback pair and executing the callback.
+  void FulfillPendingRead() {
+    DCHECK_EQ(MessageLoop::current(), this->message_loop());
+    if (read_queue_.empty() || result_queue_.empty()) {
+      return;
+    }
 
-  // If false, then the Stop() method has been called, and no further processing
-  // of buffers should occur.
-  bool running_;
+    // Dequeue a frame and read callback pair.
+    scoped_refptr<Output> output = result_queue_.front();
+    scoped_ptr<ReadCallback> read_callback(read_queue_.front());
+    result_queue_.pop_front();
+    read_queue_.pop_front();
 
-  // Pointer to the demuxer stream that will feed us compressed buffers.
-  DemuxerStream* demuxer_stream_;
+    // Execute the callback!
+    read_callback->Run(output);
+  }
 
-  // If this pointer is NULL then there is no thread dedicated to this decoder
-  // and decodes will happen on the pipeline thread.
-  scoped_ptr<base::Thread> decode_thread_;
-
-  // Number of times we have called Read() on the demuxer that have not yet
-  // been satisfied.
+  // Tracks the number of asynchronous reads issued to |demuxer_stream_|.
+  // Using size_t since it is always compared against deque::size().
   size_t pending_reads_;
 
-  CancelableTask* process_task_;
+  // A flag used for debugging that we expect our next read to be discontinuous.
+  bool expecting_discontinuous_;
 
-  // Queue of buffers read from teh |demuxer_stream_|
-  typedef std::deque<Buffer*> InputQueue;
-  InputQueue input_queue_;
+  // Pointer to the demuxer stream that will feed us compressed buffers.
+  scoped_refptr<DemuxerStream> demuxer_stream_;
 
   // Queue of decoded samples produced in the OnDecode() method of the decoder.
   // Any samples placed in this queue will be assigned to the OutputQueue
   // buffers once the OnDecode() method returns.
+  //
   // TODO(ralphl): Eventually we want to have decoders get their destination
   // buffer from the OutputQueue and write to it directly.  Until we change
   // from the Assignable buffer to callbacks and renderer-allocated buffers,
   // we need this extra queue.
-  typedef std::deque<Output*> ResultQueue;
+  typedef std::deque<scoped_refptr<Output> > ResultQueue;
   ResultQueue result_queue_;
 
-  // Queue of buffers supplied by the renderer through the Read() method.
-  typedef std::deque<Assignable<Output>*> OutputQueue;
-  OutputQueue output_queue_;
+  // Queue of callbacks supplied by the renderer through the Read() method.
+  typedef std::deque<ReadCallback*> ReadQueue;
+  ReadQueue read_queue_;
+
+  // Pause callback.
+  scoped_ptr<FilterCallback> pause_callback_;
+
+  // Simple state tracking variable.
+  enum State {
+    kUninitialized,
+    kInitialized,
+    kStopped,
+  };
+  State state_;
 
   DISALLOW_COPY_AND_ASSIGN(DecoderBase);
 };

@@ -47,6 +47,7 @@
 #include <algorithm>
 
 #include "base/basictypes.h"
+#include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/string_tokenizer.h"
@@ -74,8 +75,8 @@ namespace net {
 // going through the garbage collection process less often.
 static const size_t kNumCookiesPerHost      = 70;  // ~50 cookies
 static const size_t kNumCookiesPerHostPurge = 20;
-static const size_t kNumCookiesTotal        = 1100;  // ~1000 cookies
-static const size_t kNumCookiesTotalPurge   = 100;
+static const size_t kNumCookiesTotal        = 3300;  // ~3000 cookies
+static const size_t kNumCookiesTotalPurge   = 300;
 
 // Default minimum delay after updating a cookie's LastAccessDate before we
 // will update it again.
@@ -94,6 +95,7 @@ CookieMonster::CookieMonster()
       store_(NULL),
       last_access_threshold_(
           TimeDelta::FromSeconds(kDefaultAccessUpdateThresholdSeconds)) {
+  SetDefaultCookieableSchemes();
 }
 
 CookieMonster::CookieMonster(PersistentCookieStore* store)
@@ -101,6 +103,7 @@ CookieMonster::CookieMonster(PersistentCookieStore* store)
       store_(store),
       last_access_threshold_(
           TimeDelta::FromSeconds(kDefaultAccessUpdateThresholdSeconds)) {
+  SetDefaultCookieableSchemes();
 }
 
 CookieMonster::~CookieMonster() {
@@ -122,6 +125,13 @@ void CookieMonster::InitStore() {
        it != cookies.end(); ++it) {
     InternalInsertCookie(it->first, it->second, false);
   }
+}
+
+void CookieMonster::SetDefaultCookieableSchemes() {
+  // Note: file must be the last scheme.
+  static const char* kDefaultCookieableSchemes[] = { "http", "https", "file" };
+  int num_schemes = enable_file_scheme_ ? 3 : 2;
+  SetCookieableSchemes(kDefaultCookieableSchemes, num_schemes);
 }
 
 // The system resolution is not high enough, so we can have multiple
@@ -276,7 +286,8 @@ static bool GetCookieDomainKey(const GURL& url,
   // domain=.my.domain.com -- for compatibility we do the same here.  Firefox
   // also treats domain=.....my.domain.com like domain=.my.domain.com, but
   // neither IE nor Safari do this, and we don't either.
-  std::string cookie_domain(net::CanonicalizeHost(pc.Domain(), NULL));
+  url_canon::CanonHostInfo ignored;
+  std::string cookie_domain(net::CanonicalizeHost(pc.Domain(), &ignored));
   if (cookie_domain.empty())
     return false;
   if (cookie_domain[0] != '.')
@@ -341,12 +352,12 @@ static Time CanonExpiration(const CookieMonster::ParsedCookie& pc,
   // First, try the Max-Age attribute.
   uint64 max_age = 0;
   if (pc.HasMaxAge() &&
-#if defined(COMPILER_MSVC)
-      sscanf_s(pc.MaxAge().c_str(), " %I64u", &max_age) == 1) {
-
+#ifdef COMPILER_MSVC
+      sscanf_s(
 #else
-      sscanf(pc.MaxAge().c_str(), " %llu", &max_age) == 1) {
+      sscanf(
 #endif
+             pc.MaxAge().c_str(), " %" PRIu64, &max_age) == 1) {
     return current + TimeDelta::FromSeconds(max_age);
   }
 
@@ -358,18 +369,11 @@ static Time CanonExpiration(const CookieMonster::ParsedCookie& pc,
   return Time();
 }
 
-static bool HasCookieableScheme(const GURL& url) {
-  static const char* kCookieableSchemes[]  = { "http", "https", "file" };
-  static const int   kCookieableSchemesLen = arraysize(kCookieableSchemes);
-  static const int   kCookieableSchemesFileIndex = 2;
-
+bool CookieMonster::HasCookieableScheme(const GURL& url) {
   // Make sure the request is on a cookie-able url scheme.
-  for (int i = 0; i < kCookieableSchemesLen; ++i) {
+  for (size_t i = 0; i < cookieable_schemes_.size(); ++i) {
     // We matched a scheme.
-    if (url.SchemeIs(kCookieableSchemes[i])) {
-      // This is file:// scheme
-      if (i == kCookieableSchemesFileIndex)
-        return CookieMonster::enable_file_scheme_;
+    if (url.SchemeIs(cookieable_schemes_[i].c_str())) {
       // We've matched a supported scheme.
       return true;
     }
@@ -378,6 +382,13 @@ static bool HasCookieableScheme(const GURL& url) {
   // The scheme didn't match any in our whitelist.
   COOKIE_DLOG(WARNING) << "Unsupported cookie scheme: " << url.scheme();
   return false;
+}
+
+void CookieMonster::SetCookieableSchemes(
+    const char* schemes[], size_t num_schemes) {
+  cookieable_schemes_.clear();
+  cookieable_schemes_.insert(cookieable_schemes_.end(),
+                             schemes, schemes + num_schemes);
 }
 
 bool CookieMonster::SetCookie(const GURL& url,
@@ -389,8 +400,12 @@ bool CookieMonster::SetCookie(const GURL& url,
 bool CookieMonster::SetCookieWithOptions(const GURL& url,
                                          const std::string& cookie_line,
                                          const CookieOptions& options) {
-  Time creation_date = CurrentTime();
-  last_time_seen_ = creation_date;
+  Time creation_date;
+  {
+    AutoLock autolock(lock_);
+    creation_date = CurrentTime();
+    last_time_seen_ = creation_date;
+  }
   return SetCookieWithCreationTimeWithOptions(url,
                                               cookie_line,
                                               creation_date,
@@ -415,7 +430,6 @@ bool CookieMonster::SetCookieWithCreationTimeWithOptions(
   DCHECK(!creation_time.is_null());
 
   if (!HasCookieableScheme(url)) {
-    DLOG(WARNING) << "Unsupported cookie scheme: " << url.scheme();
     return false;
   }
 
@@ -729,7 +743,6 @@ std::string CookieMonster::GetCookies(const GURL& url) {
 std::string CookieMonster::GetCookiesWithOptions(const GURL& url,
                                                  const CookieOptions& options) {
   if (!HasCookieableScheme(url)) {
-    DLOG(WARNING) << "Unsupported cookie scheme: " << url.scheme();
     return std::string();
   }
 

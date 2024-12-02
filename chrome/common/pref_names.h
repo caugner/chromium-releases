@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #ifndef CHROME_COMMON_PREF_NAMES_H_
 #define CHROME_COMMON_PREF_NAMES_H_
+
+#include "build/build_config.h"
 
 namespace prefs {
 
@@ -24,6 +26,7 @@ extern const wchar_t kApplicationLocale[];
 extern const wchar_t kDefaultCharset[];
 extern const wchar_t kAcceptLanguages[];
 extern const wchar_t kStaticEncodings[];
+extern const wchar_t kPopupWhitelistedHosts[];
 extern const wchar_t kShowBookmarkBar[];
 extern const wchar_t kWebKitStandardFontIsSerif[];
 extern const wchar_t kWebKitFixedFontFamily[];
@@ -42,7 +45,7 @@ extern const wchar_t kWebKitLoadsImagesAutomatically[];
 extern const wchar_t kWebKitPluginsEnabled[];
 extern const wchar_t kWebKitDomPasteEnabled[];
 extern const wchar_t kWebKitShrinksStandaloneImagesToFit[];
-extern const wchar_t kWebKitDeveloperExtrasEnabled[];
+extern const wchar_t kWebKitInspectorSettings[];
 extern const wchar_t kWebKitUsesUniversalDetector[];
 extern const wchar_t kWebKitTextAreasAreResizable[];
 extern const wchar_t kWebKitJavaEnabled[];
@@ -57,7 +60,6 @@ extern const wchar_t kDefaultSearchProviderSearchURL[];
 extern const wchar_t kDefaultSearchProviderSuggestURL[];
 extern const wchar_t kDefaultSearchProviderName[];
 extern const wchar_t kDefaultSearchProviderID[];
-extern const wchar_t kBlockPopups[];
 extern const wchar_t kPromptForDownload[];
 extern const wchar_t kAlternateErrorPagesEnabled[];
 extern const wchar_t kDnsPrefetchingEnabled[];
@@ -65,6 +67,7 @@ extern const wchar_t kDnsStartupPrefetchList[];
 extern const wchar_t kDnsHostReferralList[];
 extern const wchar_t kIpcDisabledMessages[];
 extern const wchar_t kShowHomeButton[];
+extern const wchar_t kShowPageOptionsButtons[];
 extern const wchar_t kRecentlySelectedEncoding[];
 extern const wchar_t kDeleteBrowsingHistory[];
 extern const wchar_t kDeleteDownloadHistory[];
@@ -80,7 +83,25 @@ extern const wchar_t kBookmarkTablePathWidth[];
 extern const wchar_t kBookmarkManagerPlacement[];
 extern const wchar_t kBookmarkManagerSplitLocation[];
 extern const wchar_t kEnableSpellCheck[];
+extern const wchar_t kEnableAutoSpellCorrect[];
 extern const wchar_t kDeleteTimePeriod[];
+extern const wchar_t kPrintingPageHeaderLeft[];
+extern const wchar_t kPrintingPageHeaderCenter[];
+extern const wchar_t kPrintingPageHeaderRight[];
+extern const wchar_t kPrintingPageFooterLeft[];
+extern const wchar_t kPrintingPageFooterCenter[];
+extern const wchar_t kPrintingPageFooterRight[];
+#if defined(OS_LINUX)
+extern const wchar_t kUsesSystemTheme[];
+#endif
+extern const wchar_t kCurrentThemeID[];
+extern const wchar_t kCurrentThemeImages[];
+extern const wchar_t kCurrentThemeColors[];
+extern const wchar_t kCurrentThemeTints[];
+extern const wchar_t kCurrentThemeDisplayProperties[];
+extern const wchar_t kCheckDefaultBrowser[];
+extern const wchar_t kUseCustomChromeFrame[];
+extern const wchar_t kNTPThemePromoRemaining[];
 
 // Local state
 extern const wchar_t kAvailableProfiles[];
@@ -126,6 +147,7 @@ extern const wchar_t kStabilityPluginCrashes[];
 extern const wchar_t kUninstallMetricsPageLoadCount[];
 extern const wchar_t kUninstallLaunchCount[];
 
+extern const wchar_t kUninstallMetricsInstallDate[];
 extern const wchar_t kUninstallMetricsUptimeSec[];
 extern const wchar_t kUninstallLastLaunchTimeSec[];
 extern const wchar_t kUninstallLastObservedRunTimeSec[];
@@ -153,6 +175,7 @@ extern const wchar_t kSafeBrowsingWrappedKey[];
 
 extern const wchar_t kOptionsWindowLastTabIndex[];
 extern const wchar_t kShouldShowFirstRunBubble[];
+extern const wchar_t kShouldUseOEMFirstRunBubble[];
 extern const wchar_t kShouldShowWelcomePage[];
 
 extern const wchar_t kLastKnownGoogleURL[];
@@ -173,6 +196,16 @@ extern const wchar_t kNumKeywords[];
 
 extern const wchar_t kEnableExtensions[];
 extern const wchar_t kEnableUserScripts[];
+
+extern const wchar_t kNTPMostVisitedURLsBlacklist[];
+extern const wchar_t kNTPMostVisitedPinnedURLs[];
+extern const wchar_t kNTPTipsCache[];
+extern const wchar_t kNTPTipsCacheUpdate[];
+extern const wchar_t kNTPTipsServer[];
+extern const wchar_t kNTPShownSections[];
+
+extern const wchar_t kDevToolsOpenDocked[];
+extern const wchar_t kDevToolsSplitLocation[];
 }
 
 #endif  // CHROME_COMMON_PREF_NAMES_H_

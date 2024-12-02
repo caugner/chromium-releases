@@ -9,11 +9,12 @@
 #include "webkit/tools/test_shell/layout_test_controller.h"
 
 #include "base/basictypes.h"
-#include "base/file_util.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "webkit/api/public/WebScriptSource.h"
 #include "webkit/glue/dom_operations.h"
 #include "webkit/glue/webframe.h"
 #include "webkit/glue/webpreferences.h"
@@ -23,6 +24,9 @@
 
 using std::string;
 using std::wstring;
+
+using WebKit::WebScriptSource;
+using WebKit::WebString;
 
 #if defined(OS_WIN)
 namespace {
@@ -84,7 +88,8 @@ LayoutTestController::LayoutTestController(TestShell* shell) {
   BindMethod("waitUntilDone", &LayoutTestController::waitUntilDone);
   BindMethod("notifyDone", &LayoutTestController::notifyDone);
   BindMethod("queueReload", &LayoutTestController::queueReload);
-  BindMethod("queueScript", &LayoutTestController::queueScript);
+  BindMethod("queueLoadingScript", &LayoutTestController::queueLoadingScript);
+  BindMethod("queueNonLoadingScript", &LayoutTestController::queueNonLoadingScript);
   BindMethod("queueLoad", &LayoutTestController::queueLoad);
   BindMethod("queueBackNavigation", &LayoutTestController::queueBackNavigation);
   BindMethod("queueForwardNavigation", &LayoutTestController::queueForwardNavigation);
@@ -108,6 +113,8 @@ LayoutTestController::LayoutTestController(TestShell* shell) {
   BindMethod("pauseTransitionAtTimeOnElementWithId", &LayoutTestController::pauseTransitionAtTimeOnElementWithId);
   BindMethod("elementDoesAutoCompleteForElementWithId", &LayoutTestController::elementDoesAutoCompleteForElementWithId);
   BindMethod("numberOfActiveAnimations", &LayoutTestController::numberOfActiveAnimations);
+  BindMethod("setCustomPolicyDelegate", &LayoutTestController::setCustomPolicyDelegate);
+  BindMethod("waitForPolicyDelegate", &LayoutTestController::waitForPolicyDelegate);
 
   // The following are stubs.
   BindMethod("dumpAsWebArchive", &LayoutTestController::dumpAsWebArchive);
@@ -125,12 +132,9 @@ LayoutTestController::LayoutTestController(TestShell* shell) {
   BindMethod("setCallCloseOnWebViews", &LayoutTestController::setCallCloseOnWebViews);
   BindMethod("setPrivateBrowsingEnabled", &LayoutTestController::setPrivateBrowsingEnabled);
   BindMethod("setUseDashboardCompatibilityMode", &LayoutTestController::setUseDashboardCompatibilityMode);
-  BindMethod("setCustomPolicyDelegate", &LayoutTestController::setCustomPolicyDelegate);
 
-  // This typo (missing 'i') is intentional as it matches the typo in the layout test
-  // see: LayoutTests/fast/canvas/fill-stroke-clip-reset-path.html.
-  // If Apple ever fixes this, we'll need to update it.
-  BindMethod("setUseDashboardCompatiblityMode", &LayoutTestController::setUseDashboardCompatibilityMode);
+  BindMethod("setXSSAuditorEnabled", &LayoutTestController::setXSSAuditorEnabled);
+  BindMethod("queueScriptInIsolatedWorld", &LayoutTestController::queueScriptInIsolatedWorld);
 
   // The fallback method is called when an unknown method is invoked.
   BindFallbackMethod(&LayoutTestController::fallbackMethod);
@@ -161,15 +165,17 @@ void LayoutTestController::WorkQueue::ProcessWorkSoon() {
 
 void LayoutTestController::WorkQueue::ProcessWork() {
   // Quit doing work once a load is in progress.
-  while (!queue_.empty() && !shell_->delegate()->top_loading_frame()) {
-    queue_.front()->Run(shell_);
+  while (!queue_.empty()) {
+    bool started_load = queue_.front()->Run(shell_);
     delete queue_.front();
     queue_.pop();
+
+    if (started_load)
+      return;
   }
 
-  if (!shell_->delegate()->top_loading_frame() && !wait_until_done_) {
+  if (!wait_until_done_ && !shell_->delegate()->top_loading_frame())
     shell_->TestFinished();
-  }
 }
 
 void LayoutTestController::WorkQueue::Reset() {
@@ -280,8 +286,9 @@ void LayoutTestController::notifyDone(
 class WorkItemBackForward : public LayoutTestController::WorkItem {
  public:
   WorkItemBackForward(int distance) : distance_(distance) {}
-  void Run(TestShell* shell) {
+  bool Run(TestShell* shell) {
     shell->GoBackOrForward(distance_);
+    return true;  // TODO(darin): Did it really start a navigation?
   }
  private:
   int distance_;
@@ -303,8 +310,9 @@ void LayoutTestController::queueForwardNavigation(
 
 class WorkItemReload : public LayoutTestController::WorkItem {
  public:
-  void Run(TestShell* shell) {
+  bool Run(TestShell* shell) {
     shell->Reload();
+    return true;
   }
 };
 
@@ -314,21 +322,53 @@ void LayoutTestController::queueReload(
   result->SetNull();
 }
 
-class WorkItemScript : public LayoutTestController::WorkItem {
+class WorkItemLoadingScript : public LayoutTestController::WorkItem {
  public:
-  WorkItemScript(const string& script) : script_(script) {}
-  void Run(TestShell* shell) {
-    wstring url = L"javascript:" + UTF8ToWide(script_);
-    shell->LoadURL(url.c_str());
+  WorkItemLoadingScript(const string& script) : script_(script) {}
+  bool Run(TestShell* shell) {
+    shell->webView()->GetMainFrame()->ExecuteScript(
+        WebScriptSource(WebString::fromUTF8(script_)));
+    return true;  // TODO(darin): Did it really start a navigation?
   }
  private:
   string script_;
 };
 
-void LayoutTestController::queueScript(
+class WorkItemNonLoadingScript : public LayoutTestController::WorkItem {
+ public:
+  WorkItemNonLoadingScript(const string& script) : script_(script) {}
+  bool Run(TestShell* shell) {
+    shell->webView()->GetMainFrame()->ExecuteScript(
+        WebScriptSource(WebString::fromUTF8(script_)));
+    return false;
+  }
+ private:
+  string script_;
+};
+
+class WorkItemIsolatedWorldScript : public LayoutTestController::WorkItem {
+ public:
+  WorkItemIsolatedWorldScript(const string& script) : script_(script) {}
+  bool Run(TestShell* shell) {
+    WebScriptSource source(WebString::fromUTF8(script_));
+    shell->webView()->GetMainFrame()->ExecuteScriptInNewWorld(&source, 1);
+    return false;
+  }
+ private:
+  string script_;
+};
+
+void LayoutTestController::queueLoadingScript(
     const CppArgumentList& args, CppVariant* result) {
   if (args.size() > 0 && args[0].isString())
-    work_queue_.AddWork(new WorkItemScript(args[0].ToString()));
+    work_queue_.AddWork(new WorkItemLoadingScript(args[0].ToString()));
+  result->SetNull();
+}
+
+void LayoutTestController::queueNonLoadingScript(
+    const CppArgumentList& args, CppVariant* result) {
+  if (args.size() > 0 && args[0].isString())
+    work_queue_.AddWork(new WorkItemNonLoadingScript(args[0].ToString()));
   result->SetNull();
 }
 
@@ -336,9 +376,10 @@ class WorkItemLoad : public LayoutTestController::WorkItem {
  public:
   WorkItemLoad(const GURL& url, const string& target)
       : url_(url), target_(target) {}
-  void Run(TestShell* shell) {
+  bool Run(TestShell* shell) {
     shell->LoadURLForFrame(UTF8ToWide(url_.spec()).c_str(),
                            UTF8ToWide(target_).c_str());
+    return true;  // TODO(darin): Did it really start a navigation?
   }
  private:
   GURL url_;
@@ -424,6 +465,15 @@ void LayoutTestController::LocationChangeDone() {
     work_queue_.ProcessWorkSoon();
 }
 
+void LayoutTestController::PolicyDelegateDone() {
+  if (!shell_->layout_test_mode())
+    return;
+
+  DCHECK(wait_until_done_);
+  shell_->TestFinished();
+  wait_until_done_ = false;
+}
+
 void LayoutTestController::setCanOpenWindows(
     const CppArgumentList& args, CppVariant* result) {
   can_open_windows_ = true;
@@ -491,7 +541,7 @@ void LayoutTestController::execCommand(
       value = args[2].ToString();
 
     // Note: webkit's version does not return the boolean, so neither do we.
-    shell_->webView()->GetFocusedFrame()->ExecuteCoreCommandByName(command,
+    shell_->webView()->GetFocusedFrame()->ExecuteEditCommandByName(command,
                                                                    value);
   }
   result->SetNull();
@@ -505,7 +555,7 @@ void LayoutTestController::isCommandEnabled(
   }
 
   std::string command = args[0].ToString();
-  bool rv = shell_->webView()->GetFocusedFrame()->IsCoreCommandEnabled(command);
+  bool rv = shell_->webView()->GetFocusedFrame()->IsEditCommandEnabled(command);
   result->Set(rv);
 }
 
@@ -530,9 +580,20 @@ void LayoutTestController::setUseDashboardCompatibilityMode(
 void LayoutTestController::setCustomPolicyDelegate(
     const CppArgumentList& args, CppVariant* result) {
   if (args.size() > 0 && args[0].isBool()) {
-    shell_->delegate()->SetCustomPolicyDelegate(args[0].value.boolValue);
+    bool enable = args[0].value.boolValue;
+    bool permissive = false;
+    if (args.size() > 1 && args[1].isBool())
+      permissive = args[1].value.boolValue;
+    shell_->delegate()->SetCustomPolicyDelegate(enable, permissive);
   }
 
+  result->SetNull();
+}
+
+void LayoutTestController::waitForPolicyDelegate(
+    const CppArgumentList& args, CppVariant* result) {
+  shell_->delegate()->WaitForPolicyDelegate();
+  wait_until_done_ = true;
   result->SetNull();
 }
 
@@ -545,10 +606,10 @@ void LayoutTestController::pathToLocalResource(
   std::string url = args[0].ToString();
   if (StartsWithASCII(url, "/tmp/", true)) {
     // We want a temp file.
-    std::wstring path;
+    FilePath path;
     PathService::Get(base::DIR_TEMP, &path);
-    file_util::AppendToPath(&path, UTF8ToWide(url.substr(5)));
-    result->Set(WideToUTF8(path));
+    path = path.AppendASCII(url.substr(5));
+    result->Set(WideToUTF8(path.ToWStringHack()));
     return;
   }
 
@@ -710,6 +771,23 @@ void LayoutTestController::setCallCloseOnWebViews(
 }
 void LayoutTestController::setPrivateBrowsingEnabled(
     const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+}
+
+void LayoutTestController::setXSSAuditorEnabled(
+    const CppArgumentList& args, CppVariant* result) {
+  if (args.size() > 0 && args[0].isBool()) {
+    WebPreferences* preferences = shell_->GetWebPreferences();
+    preferences->xss_auditor_enabled = args[0].value.boolValue;
+    shell_->webView()->SetPreferences(*preferences);
+  }
+  result->SetNull();
+}
+
+void LayoutTestController::queueScriptInIsolatedWorld(
+    const CppArgumentList& args, CppVariant* result) {
+  if (args.size() > 0 && args[0].isString())
+    work_queue_.AddWork(new WorkItemIsolatedWorldScript(args[0].ToString()));
   result->SetNull();
 }
 

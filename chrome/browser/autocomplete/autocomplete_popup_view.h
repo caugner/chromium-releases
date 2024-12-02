@@ -11,9 +11,29 @@
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_POPUP_VIEW_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_POPUP_VIEW_H_
 
+#include "build/build_config.h"
+
 class AutocompleteEditView;
 class AutocompletePopupModel;
-class ChromeFont;
+namespace gfx {
+class Font;
+class Rect;
+}
+#if defined(OS_WIN)
+class AutocompleteEditViewWin;
+class AutocompleteEditModel;
+class Profile;
+#endif
+
+// An object in the browser UI can implement this interface to provide display
+// bounds for the autocomplete popup view.
+class AutocompletePopupPositioner {
+ public:
+  // Returns the bounds at which the popup should be shown, in screen
+  // coordinates. The height is ignored, since the popup is sized to its
+  // contents automatically.
+  virtual gfx::Rect GetPopupBounds() const = 0;
+};
 
 class AutocompletePopupView {
  public:
@@ -34,6 +54,20 @@ class AutocompletePopupView {
 
   // Paint any pending updates.
   virtual void PaintUpdatesNow() = 0;
+
+  // Returns the popup's model.
+  virtual AutocompletePopupModel* GetModel() = 0;
+
+#if defined(OS_WIN)
+  // Create a popup view implementation. It may make sense for this to become
+  // platform independent eventually.
+  static AutocompletePopupView* CreatePopupView(
+      const gfx::Font& font,
+      AutocompleteEditViewWin* edit_view,
+      AutocompleteEditModel* edit_model,
+      Profile* profile,
+      AutocompletePopupPositioner* popup_positioner);
+#endif
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_POPUP_VIEW_H_

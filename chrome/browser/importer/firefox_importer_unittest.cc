@@ -11,6 +11,7 @@
 #include "chrome/browser/importer/firefox_importer_utils.h"
 #include "chrome/browser/importer/firefox_profile_lock.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/test/file_test_utils.h"
 
 using base::Time;
 
@@ -100,7 +101,17 @@ TEST(FirefoxImporterTest, Firefox2BookmarkParse) {
       charset, &title, &url, &favicon, &shortcut, &add_date, &post_data);
   EXPECT_TRUE(result);
   EXPECT_EQ(L"name", title);
-  EXPECT_EQ("http://domain.com/?q=\"%3C%3E\"", url.spec());
+  EXPECT_EQ("http://domain.com/?q=%22%3C%3E%22", url.spec());
+  EXPECT_EQ(L"", shortcut);
+  EXPECT_EQ(L"", post_data);
+  EXPECT_TRUE(Time() == add_date);
+
+  result = Firefox2Importer::ParseBookmarkFromLine(
+      "<DT><A HREF=\"http://domain.com/?g=&quot;\"\">name</A>",
+      charset, &title, &url, &favicon, &shortcut, &add_date, &post_data);
+  EXPECT_TRUE(result);
+  EXPECT_EQ(L"name", title);
+  EXPECT_EQ("http://domain.com/?g=%22", url.spec());
   EXPECT_EQ(L"", shortcut);
   EXPECT_EQ(L"", post_data);
   EXPECT_TRUE(Time() == add_date);
@@ -148,6 +159,7 @@ TEST(FirefoxImporterTest, ProfileLock) {
   std::wstring test_path;
   file_util::CreateNewTempDirectory(L"firefox_profile", &test_path);
   FilePath lock_file_path = FilePath::FromWStringHack(test_path);
+  FileAutoDeleter deleter(lock_file_path);
   lock_file_path = lock_file_path.Append(FirefoxProfileLock::kLockFileName);
 
   scoped_ptr<FirefoxProfileLock> lock;
@@ -175,6 +187,7 @@ TEST(FirefoxImporterTest, ProfileLockOrphaned) {
   std::wstring test_path;
   file_util::CreateNewTempDirectory(L"firefox_profile", &test_path);
   FilePath lock_file_path = FilePath::FromWStringHack(test_path);
+  FileAutoDeleter deleter(lock_file_path);
   lock_file_path = lock_file_path.Append(FirefoxProfileLock::kLockFileName);
 
   // Create the orphaned lock file.
@@ -195,6 +208,7 @@ TEST(FirefoxImporterTest, ProfileLockOrphaned) {
 TEST(FirefoxImporterTest, ProfileLockContention) {
   std::wstring test_path;
   file_util::CreateNewTempDirectory(L"firefox_profile", &test_path);
+  FileAutoDeleter deleter(FilePath::FromWStringHack(test_path));
 
   scoped_ptr<FirefoxProfileLock> lock1;
   EXPECT_EQ(static_cast<FirefoxProfileLock*>(NULL), lock1.get());

@@ -16,6 +16,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "googleurl/src/gurl.h"
 
+#if defined(OS_WIN)
 bool WindowProxy::GetHWND(HWND* handle) const {
   if (!is_valid()) return false;
 
@@ -32,6 +33,18 @@ bool WindowProxy::SimulateOSClick(const POINT& click, int flags) {
 
   return sender_->Send(
       new AutomationMsg_WindowClick(0, handle_, click, flags));
+}
+#endif  // defined(OS_WIN)
+
+bool WindowProxy::GetWindowTitle(string16* text) {
+  if (!is_valid()) return false;
+
+  if (!text) {
+    NOTREACHED();
+    return false;
+  }
+
+  return sender_->Send(new AutomationMsg_WindowTitle(0, handle_, text));
 }
 
 bool WindowProxy::SimulateOSKeyPress(wchar_t key, int flags) {
@@ -93,6 +106,15 @@ bool WindowProxy::GetViewBoundsWithTimeout(int view_id, gfx::Rect* bounds,
   return result;
 }
 
+bool WindowProxy::SetBounds(const gfx::Rect& bounds) {
+  if (!is_valid())
+    return false;
+  bool result = false;
+  sender_->Send(new AutomationMsg_SetWindowBounds(0, handle_, bounds,
+                                                  &result));
+  return result;
+}
+
 bool WindowProxy::GetFocusedViewID(int* view_id) {
   if (!is_valid()) return false;
 
@@ -105,14 +127,14 @@ bool WindowProxy::GetFocusedViewID(int* view_id) {
                                                           view_id));
 }
 
-BrowserProxy* WindowProxy::GetBrowser() {
+scoped_refptr<BrowserProxy> WindowProxy::GetBrowser() {
   return GetBrowserWithTimeout(base::kNoTimeout, NULL);
 }
 
-BrowserProxy* WindowProxy::GetBrowserWithTimeout(uint32 timeout_ms,
-                                                 bool* is_timeout) {
+scoped_refptr<BrowserProxy> WindowProxy::GetBrowserWithTimeout(
+    uint32 timeout_ms, bool* is_timeout) {
   if (!is_valid())
-    return false;
+    return NULL;
 
   bool handle_ok = false;
   int browser_handle = 0;
@@ -122,5 +144,15 @@ BrowserProxy* WindowProxy::GetBrowserWithTimeout(uint32 timeout_ms,
   if (!handle_ok)
     return NULL;
 
-  return new BrowserProxy(sender_, tracker_, browser_handle);
+  BrowserProxy* browser =
+      static_cast<BrowserProxy*>(tracker_->GetResource(browser_handle));
+  if (!browser) {
+    browser = new BrowserProxy(sender_, tracker_, browser_handle);
+    browser->AddRef();
+  }
+
+  // Since there is no scoped_refptr::attach.
+  scoped_refptr<BrowserProxy> result;
+  result.swap(&browser);
+  return result;
 }

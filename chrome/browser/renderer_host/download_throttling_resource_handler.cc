@@ -40,10 +40,15 @@ bool DownloadThrottlingResourceHandler::OnUploadProgress(int request_id,
   return true;
 }
 
-bool DownloadThrottlingResourceHandler::OnRequestRedirected(int request_id,
-                                                            const GURL& url) {
-  if (download_handler_.get())
-    return download_handler_->OnRequestRedirected(request_id, url);
+bool DownloadThrottlingResourceHandler::OnRequestRedirected(
+    int request_id,
+    const GURL& url,
+    ResourceResponse* response,
+    bool* defer) {
+  if (download_handler_.get()) {
+    return download_handler_->OnRequestRedirected(
+        request_id, url, response, defer);
+  }
   url_ = url;
   return true;
 }
@@ -104,6 +109,13 @@ bool DownloadThrottlingResourceHandler::OnResponseCompleted(
   if (download_handler_.get())
     return download_handler_->OnResponseCompleted(request_id, status,
                                                   security_info);
+
+  // For a download, if ResourceDispatcher::Read() fails,
+  // ResourceDispatcher::OnresponseStarted() will call
+  // OnResponseCompleted(), and we will end up here with an error
+  // status.
+  if (!status.is_success())
+    return false;
   NOTREACHED();
   return true;
 }

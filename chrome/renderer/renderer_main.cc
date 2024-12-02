@@ -2,25 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/command_line.h"
+#include "base/field_trial.h"
 #include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
+#include "base/process_util.h"
 #include "base/scoped_nsautorelease_pool.h"
+#include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "base/system_monitor.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
-#include "chrome/common/resource_bundle.h"
 #include "chrome/renderer/renderer_main_platform_delegate.h"
 #include "chrome/renderer/render_process.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+
+#if defined(OS_LINUX)
+#include "chrome/app/breakpad_linux.h"
+#endif
 
 // This function provides some ways to test crash and assertion handling
 // behavior of the renderer.
@@ -39,8 +46,10 @@ static void HandleRendererErrorTestParameters(const CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kRendererStartupDialog)) {
 #if defined(OS_WIN)
     std::wstring title = l10n_util::GetString(IDS_PRODUCT_NAME);
+    std::wstring message = L"renderer starting with pid: ";
+    message += IntToWString(base::GetCurrentProcId());
     title += L" renderer";  // makes attaching to process easier
-    ::MessageBox(NULL, L"renderer starting...", title.c_str(),
+    ::MessageBox(NULL, message.c_str(), title.c_str(),
                  MB_OK | MB_SETFOREGROUND);
 #elif defined(OS_MACOSX)
     // TODO(playmobil): In the long term, overriding this flag doesn't seem
@@ -54,10 +63,15 @@ static void HandleRendererErrorTestParameters(const CommandLine& command_line) {
   }
 }
 
-// mainline routine for running as the Rendererer process
+// mainline routine for running as the Renderer process
 int RendererMain(const MainFunctionParams& parameters) {
   const CommandLine& parsed_command_line = parameters.command_line_;
   base::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
+
+#if defined(OS_LINUX)
+  // Needs to be called after we have chrome::DIR_USER_DATA.
+  InitCrashReporter();
+#endif
 
   // This function allows pausing execution using the --renderer-startup-dialog
   // flag allowing us to attach a debugger.
@@ -84,10 +98,20 @@ int RendererMain(const MainFunctionParams& parameters) {
   platform.InitSandboxTests(no_sandbox);
 
   // Initialize histogram statistics gathering system.
-  // Don't create StatisticsRecorde in the single process mode.
+  // Don't create StatisticsRecorder in the single process mode.
   scoped_ptr<StatisticsRecorder> statistics;
   if (!StatisticsRecorder::WasStarted()) {
     statistics.reset(new StatisticsRecorder());
+  }
+
+  // Initialize statistical testing infrastructure.
+  FieldTrialList field_trial;
+  // Ensure any field trials in browser are reflected into renderer.
+  if (parsed_command_line.HasSwitch(switches::kForceFieldTestNameAndValue)) {
+    std::string persistent(WideToASCII(parsed_command_line.GetSwitchValue(
+        switches::kForceFieldTestNameAndValue)));
+    bool ret = field_trial.StringAugmentsState(persistent);
+    DCHECK(ret);
   }
 
   {

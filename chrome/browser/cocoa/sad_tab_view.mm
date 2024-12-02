@@ -4,8 +4,9 @@
 
 #include "chrome/browser/cocoa/sad_tab_view.h"
 
+#include "app/l10n_util.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/common/l10n_util.h"
+#include "chrome/browser/cocoa/nsimage_cache.h"
 #include "grit/generated_resources.h"
 
 static const int kSadTabOffset = -64;
@@ -15,7 +16,7 @@ static const int kTitleMessageSpacing = 15;
 @implementation SadTabView
 
 - (void)drawRect:(NSRect)dirtyRect {
-  NSImage* sadTabImage = [NSImage imageNamed:@"sadtab"];
+  NSImage* sadTabImage = nsimage_cache::ImageNamed(@"sadtab.png");
   NSString* title =
       base::SysWideToNSString(l10n_util::GetString(IDS_SAD_TAB_TITLE));
   NSString* message =

@@ -61,24 +61,22 @@ int main(int argc, char* argv[]) {
   // Suppress error dialogs and do not show GP fault error box on Windows.
   TestShell::InitLogging(true, false, false);
 
-#if defined(OS_WIN)
   // Some of the individual tests wind up calling TestShell::WaitTestFinished
   // which has a timeout in it.  For these tests, we don't care about a timeout
-  // so just set it to be a really large number.  This is necessary because
-  // when running under Purify, we were hitting those timeouts.
-  TestShell::SetFileTestTimeout(USER_TIMER_MAXIMUM);
-#endif
+  // so just set it to be really large.  This is necessary because
+  // we hit those timeouts under Purify and Valgrind.
+  TestShell::SetFileTestTimeout(10 * 60 * 60 * 1000);  // Ten hours.
 
   // Initialize test shell in layout test mode, which will let us load one
   // request than automatically quit.
   TestShell::InitializeTestShell(true);
 
-  // Initialize WebKit for this scope.
-  TestShellWebKitInit test_shell_webkit_init(true);
-
   // Allocate a message loop for this thread.  Although it is not used
   // directly, its constructor sets up some necessary state.
-  MessageLoop main_message_loop;
+  MessageLoopForUI main_message_loop;
+
+  // Initialize WebKit for this scope.
+  TestShellWebKitInit test_shell_webkit_init(true);
 
   // Load ICU data tables
   icu_util::Initialize();
@@ -92,6 +90,8 @@ int main(int argc, char* argv[]) {
 
   TestShell::ShutdownTestShell();
   TestShell::CleanupLogging();
+
+  CommandLine::Terminate();
 
   return result;
 }

@@ -18,12 +18,19 @@
 #include "base/logging.h"
 #include "base/multiprocess_test.h"
 #include "base/scoped_nsautorelease_pool.h"
+#include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
-#elif defined(OS_LINUX)
+#endif
+
+#if defined(OS_POSIX)
+#include <signal.h>
+#endif
+
+#if defined(OS_LINUX)
 #include <gtk/gtk.h>
 #endif
 
@@ -61,7 +68,13 @@ class TestSuite {
     }
     int result = RUN_ALL_TESTS();
 
+    // This MUST happen before Shutdown() since Shutdown() tears down
+    // objects (such as NotificationService::current()) that Cocoa
+    // objects use to remove themselves as observers.
+    scoped_pool.Recycle();
+
     Shutdown();
+
     return result;
   }
 
@@ -101,7 +114,23 @@ class TestSuite {
     // Note: temporarily enabled timestamps in an effort to catch bug 6361.
     logging::SetLogItems(true, true, true, true);
 
+#if defined(OS_POSIX)
+    // When running in an application, our code typically expects SIGPIPE
+    // to be ignored.  Therefore, when testing that same code, it should run
+    // with SIGPIPE ignored as well.
+    struct sigaction action;
+    action.sa_handler = SIG_IGN;
+    action.sa_flags = 0;
+    sigemptyset(&action.sa_mask);
+    CHECK(sigaction(SIGPIPE, &action, NULL) == 0);
+#endif  // OS_POSIX
+
 #if defined(OS_WIN)
+    // For unit tests we turn on the high resolution timer and disable
+    // base::Time's use of SystemMonitor. Tests create and destroy the message
+    // loop, which causes a crash with SystemMonitor (http://crbug.com/12187).
+    base::Time::EnableHiResClockForTests();
+
     // In some cases, we do not want to see standard error dialogs.
     if (!IsDebuggerPresent() &&
         !CommandLine::ForCurrentProcess()->HasSwitch(L"show-error-dialogs")) {
@@ -110,9 +139,9 @@ class TestSuite {
       // When the code in this file moved around, bug 6436 resurfaced.
       // As a hack workaround, just #ifdef out this code for Purify builds.
       logging::SetLogAssertHandler(UnitTestAssertHandler);
-#endif
+#endif  // !defined(PURIFY)
     }
-#endif
+#endif  // defined(OS_WIN)
 
     icu_util::Initialize();
   }

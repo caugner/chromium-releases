@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,32 +11,39 @@
 #include "webkit/glue/window_open_disposition.h"
 
 class Profile;
-class WebContents;
+class TabContents;
+struct MediaPlayerAction;
 
 class RenderViewContextMenu {
  public:
   RenderViewContextMenu(
-      WebContents* web_contents,
+      TabContents* tab_contents,
       const ContextMenuParams& params);
 
   virtual ~RenderViewContextMenu();
 
+  // Initializes the context menu.
+  void Init();
+
  protected:
-  void InitMenu(ContextNode node);
+  void InitMenu(ContextNodeType node, ContextMenuMediaParams media_params);
 
   // Functions to be implemented by platform-specific subclasses ---------------
+
+  // Platform specific initialization goes here.
+  virtual void DoInit() {}
 
   // Append a normal menu item, taking the name from the id.
   virtual void AppendMenuItem(int id) = 0;
 
   // Append a normal menu item, using |label| for the name.
-  virtual void AppendMenuItem(int id, const std::wstring& label) = 0;
+  virtual void AppendMenuItem(int id, const string16& label) = 0;
 
   // Append a radio menu item.
-  virtual void AppendRadioMenuItem(int id, const std::wstring& label) = 0;
+  virtual void AppendRadioMenuItem(int id, const string16& label) = 0;
 
   // Append a checkbox menu item.
-  virtual void AppendCheckboxMenuItem(int id, const std::wstring& label) = 0;
+  virtual void AppendCheckboxMenuItem(int id, const string16& label) = 0;
 
   // Append a separator.
   virtual void AppendSeparator() = 0;
@@ -46,10 +53,14 @@ class RenderViewContextMenu {
   // the main menu we are building. We only support at most single-depth
   // submenus, so calls to StartSubMenu() while we are already building a
   // submenu will be ignored.
-  virtual void StartSubMenu(int id, const std::wstring& label) = 0;
+  virtual void StartSubMenu(int id, const string16& label) = 0;
 
   // Finish creating the submenu and attach it to the main menu.
   virtual void FinishSubMenu() = 0;
+
+  // For Linux, we want to know when we have written a URL to the clipboard.
+  // Most platforms won't care.
+  virtual void DidWriteURLToClipboard(const std::string& url) { };
 
   // Delegate functions --------------------------------------------------------
 
@@ -57,10 +68,18 @@ class RenderViewContextMenu {
   bool ItemIsChecked(int id) const;
   void ExecuteItemCommand(int id);
 
+ protected:
+  ContextMenuParams params_;
+  TabContents* source_tab_contents_;
+  Profile* profile_;
+
  private:
   void AppendDeveloperItems();
   void AppendLinkItems();
   void AppendImageItems();
+  void AppendAudioItems(ContextMenuMediaParams media_params);
+  void AppendVideoItems(ContextMenuMediaParams media_params);
+  void AppendMediaItems(ContextMenuMediaParams media_params);
   void AppendPageItems();
   void AppendFrameItems();
   void AppendCopyItem();
@@ -83,11 +102,9 @@ class RenderViewContextMenu {
   void WriteTextToClipboard(const string16& text);
   void WriteURLToClipboard(const GURL& url);
 
-  bool IsDevCommandEnabled(int id) const;
+  void MediaPlayerActionAt(int x, int y, const MediaPlayerAction& action);
 
-  ContextMenuParams params_;
-  WebContents* source_web_contents_;
-  Profile* profile_;
+  bool IsDevCommandEnabled(int id) const;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenu);
 };

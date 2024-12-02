@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -161,7 +161,7 @@ class HistoryBackend::URLQuerier {
   // When track_unique_ is set, this is updated with every URL seen so far.
   std::set<GURL> unique_urls_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(URLQuerier);
+  DISALLOW_COPY_AND_ASSIGN(URLQuerier);
 };
 
 // HistoryBackend --------------------------------------------------------------
@@ -351,6 +351,10 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
   if (request->time < first_recorded_time_)
     first_recorded_time_ = request->time;
 
+  PageTransition::Type transition =
+      PageTransition::StripQualifier(request->transition);
+  bool is_keyword_generated = (transition == PageTransition::KEYWORD_GENERATED);
+
   if (request->redirects.size() <= 1) {
     // The single entry is both a chain start and end.
     PageTransition::Type t = request->transition |
@@ -360,13 +364,15 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
     last_ids = AddPageVisit(request->url, last_recorded_time_,
                             last_ids.second, t);
 
-    // Update the segment for this visit.
-    UpdateSegments(request->url, from_visit_id, last_ids.second, t,
-                   last_recorded_time_);
+    // Update the segment for this visit. KEYWORD_GENERATED visits should not
+    // result in changing most visited, so we don't update segments (most
+    // visited db).
+    if (!is_keyword_generated) {
+      UpdateSegments(request->url, from_visit_id, last_ids.second, t,
+                     last_recorded_time_);
+    }
   } else {
     // Redirect case. Add the redirect chain.
-    PageTransition::Type transition =
-        PageTransition::StripQualifier(request->transition);
 
     PageTransition::Type redirect_info = PageTransition::CHAIN_START;
 
@@ -396,12 +402,13 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
         DCHECK(request->referrer == request->redirects[0]);
         request->redirects.erase(request->redirects.begin());
 
-        // Make sure to remove the CHAIN_END marker from the first visit. This
+        // If the navigation entry for this visit has replaced that for the
+        // first visit, remove the CHAIN_END marker from the first visit. This
         // can be called a lot, for example, the page cycler, and most of the
         // time we won't have changed anything.
-        // TODO(brettw) this should be unit tested.
         VisitRow visit_row;
-        if (db_->GetRowForVisit(last_ids.second, &visit_row) &&
+        if (request->did_replace_entry &&
+            db_->GetRowForVisit(last_ids.second, &visit_row) &&
             visit_row.transition | PageTransition::CHAIN_END) {
           visit_row.transition &= ~PageTransition::CHAIN_END;
           db_->UpdateVisitRow(visit_row);
@@ -445,10 +452,8 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
   // TODO(evanm): Due to http://b/1194536 we lose the referrers of a subframe
   // navigation anyway, so last_visit_id is always zero for them.  But adding
   // them here confuses main frame history, so we skip them for now.
-  PageTransition::Type transition =
-      PageTransition::StripQualifier(request->transition);
   if (transition != PageTransition::AUTO_SUBFRAME &&
-      transition != PageTransition::MANUAL_SUBFRAME) {
+      transition != PageTransition::MANUAL_SUBFRAME && !is_keyword_generated) {
     tracker_.AddVisit(request->id_scope, request->page_id, request->url,
                       last_ids.second);
   }
@@ -586,8 +591,11 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
   // TODO(pkasting): http://b/1148304 We shouldn't be marking so many URLs as
   // typed, which would eliminate the need for this code.
   int typed_increment = 0;
-  if (PageTransition::StripQualifier(transition) == PageTransition::TYPED &&
-      !PageTransition::IsRedirect(transition))
+  PageTransition::Type transition_type =
+      PageTransition::StripQualifier(transition);
+  if ((transition_type == PageTransition::TYPED &&
+       !PageTransition::IsRedirect(transition)) ||
+      transition_type == PageTransition::KEYWORD_GENERATED)
     typed_increment = 1;
 
   // See if this URL is already in the DB.
@@ -633,10 +641,17 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
   VisitRow visit_info(url_id, time, referring_visit, transition, 0);
   VisitID visit_id = db_->AddVisit(&visit_info);
 
+  if (visit_info.visit_time < first_recorded_time_)
+    first_recorded_time_ = visit_info.visit_time;
+
   // Broadcast a notification of the visit.
   if (visit_id) {
     URLVisitedDetails* details = new URLVisitedDetails;
+    details->transition = transition;
     details->row = url_info;
+    // TODO(meelapshah) Disabled due to potential PageCycler regression.
+    // Re-enable this.
+    // GetMostRecentRedirectsTo(url, &details->redirects);
     BroadcastNotifications(NotificationType::HISTORY_URL_VISITED, details);
   }
 
@@ -648,7 +663,7 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls) {
   if (!db_.get())
     return;
 
-  URLsModifiedDetails* modified = new URLsModifiedDetails;
+  scoped_ptr<URLsModifiedDetails> modified(new URLsModifiedDetails);
   for (std::vector<URLRow>::const_iterator i = urls.begin();
        i != urls.end(); ++i) {
     DCHECK(!i->last_visit().is_null());
@@ -710,6 +725,9 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls) {
       NOTREACHED() << "Adding visit failed.";
       return;
     }
+
+    if (visit_info.visit_time < first_recorded_time_)
+      first_recorded_time_ = visit_info.visit_time;
   }
 
   // Broadcast a notification for typed URLs that have been modified. This
@@ -718,7 +736,7 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls) {
   // TODO(brettw) bug 1140015: Add an "add page" notification so the history
   // views can keep in sync.
   BroadcastNotifications(NotificationType::HISTORY_TYPED_URLS_MODIFIED,
-                         modified);
+                         modified.release());
 
   ScheduleCommit();
 }
@@ -731,8 +749,8 @@ void HistoryBackend::SetPageTitle(const GURL& url,
   // Search for recent redirects which should get the same title. We make a
   // dummy list containing the exact URL visited if there are no redirects so
   // the processing below can be the same.
-  HistoryService::RedirectList dummy_list;
-  HistoryService::RedirectList* redirects;
+  history::RedirectList dummy_list;
+  history::RedirectList* redirects;
   RedirectCache::iterator iter = recent_redirects_.Get(url);
   if (iter != recent_redirects_.end()) {
     redirects = &iter->second;
@@ -840,12 +858,13 @@ void HistoryBackend::SetSegmentPresentationIndex(SegmentID segment_id,
 
 void HistoryBackend::QuerySegmentUsage(
     scoped_refptr<QuerySegmentUsageRequest> request,
-    const Time from_time) {
+    const Time from_time,
+    int max_result_count) {
   if (request->canceled())
     return;
 
   if (db_.get()) {
-    db_->QuerySegmentUsage(from_time, &request->value.get());
+    db_->QuerySegmentUsage(from_time, max_result_count, &request->value.get());
 
     // If this is the first time we query segments, invoke
     // DeleteOldSegmentData asynchronously. We do this to cleanup old
@@ -1112,6 +1131,16 @@ void HistoryBackend::QueryRedirectsFrom(
       request->handle(), url, success, &request->value));
 }
 
+void HistoryBackend::QueryRedirectsTo(
+    scoped_refptr<QueryRedirectsRequest> request,
+    const GURL& url) {
+  if (request->canceled())
+    return;
+  bool success = GetMostRecentRedirectsTo(url, &request->value);
+  request->ForwardResult(QueryRedirectsRequest::TupleType(
+      request->handle(), url, success, &request->value));
+}
+
 void HistoryBackend::GetVisitCountToHost(
     scoped_refptr<GetVisitCountToHostRequest> request,
     const GURL& url) {
@@ -1125,8 +1154,38 @@ void HistoryBackend::GetVisitCountToHost(
       request->handle(), success, count, first_visit));
 }
 
+void HistoryBackend::QueryTopURLsAndRedirects(
+    scoped_refptr<QueryTopURLsAndRedirectsRequest> request,
+    int result_count) {
+  if (request->canceled())
+    return;
+
+  if (!db_.get()) {
+    request->ForwardResult(QueryTopURLsAndRedirectsRequest::TupleType(
+        NULL, NULL));
+    return;
+  }
+
+  std::vector<GURL>* top_urls = &request->value.a;
+  history::RedirectMap* redirects = &request->value.b;
+
+  std::vector<PageUsageData*> data;
+  db_->QuerySegmentUsage(base::Time::Now() - base::TimeDelta::FromDays(90),
+      result_count, &data);
+
+  for (size_t i = 0; i < data.size(); ++i) {
+    top_urls->push_back(data[i]->GetURL());
+    history::RedirectList list;
+    GetMostRecentRedirectsFrom(top_urls->back(), &list);
+    (*redirects)[top_urls->back()] = new RefCountedVector<GURL>(list);
+  }
+
+  request->ForwardResult(QueryTopURLsAndRedirectsRequest::TupleType(
+      top_urls, redirects));
+}
+
 void HistoryBackend::GetRedirectsFromSpecificVisit(
-    VisitID cur_visit, HistoryService::RedirectList* redirects) {
+    VisitID cur_visit, history::RedirectList* redirects) {
   // Follow any redirects from the given visit and add them to the list.
   // It *should* be impossible to get a circular chain here, but we check
   // just in case to avoid infinite loops.
@@ -1143,9 +1202,31 @@ void HistoryBackend::GetRedirectsFromSpecificVisit(
   }
 }
 
+void HistoryBackend::GetRedirectsToSpecificVisit(
+    VisitID cur_visit,
+    history::RedirectList* redirects) {
+  // Follow redirects going to cur_visit. These are added to |redirects| in
+  // the order they are found. If a redirect chain looks like A -> B -> C and
+  // |cur_visit| = C, redirects will be {B, A} in that order.
+  if (!db_.get())
+    return;
+
+  GURL cur_url;
+  std::set<VisitID> visit_set;
+  visit_set.insert(cur_visit);
+  while (db_->GetRedirectToVisit(cur_visit, &cur_visit, &cur_url)) {
+    if (visit_set.find(cur_visit) != visit_set.end()) {
+      NOTREACHED() << "Loop in visit chain, giving up";
+      return;
+    }
+    visit_set.insert(cur_visit);
+    redirects->push_back(cur_url);
+  }
+}
+
 bool HistoryBackend::GetMostRecentRedirectsFrom(
     const GURL& from_url,
-    HistoryService::RedirectList* redirects) {
+    history::RedirectList* redirects) {
   redirects->clear();
   if (!db_.get())
     return false;
@@ -1156,6 +1237,22 @@ bool HistoryBackend::GetMostRecentRedirectsFrom(
     return false;  // No visits for URL.
 
   GetRedirectsFromSpecificVisit(cur_visit, redirects);
+  return true;
+}
+
+bool HistoryBackend::GetMostRecentRedirectsTo(
+    const GURL& to_url,
+    history::RedirectList* redirects) {
+  redirects->clear();
+  if (!db_.get())
+    return false;
+
+  URLID to_url_id = db_->GetRowForURL(to_url, NULL);
+  VisitID cur_visit = db_->GetMostRecentVisitForURL(to_url_id, NULL);
+  if (!cur_visit)
+    return false;  // No visits for URL.
+
+  GetRedirectsToSpecificVisit(cur_visit, redirects);
   return true;
 }
 
@@ -1212,7 +1309,7 @@ void HistoryBackend::GetPageThumbnailDirectly(
     // Time the result.
     TimeTicks beginning_time = TimeTicks::Now();
 
-    HistoryService::RedirectList redirects;
+    history::RedirectList redirects;
     URLID url_id;
     bool success = false;
 
@@ -1260,7 +1357,7 @@ bool HistoryBackend::GetThumbnailFromOlderRedirect(
   bool success = false;
   for (VisitVector::const_iterator it = older_sessions.begin();
        !success && it != older_sessions.end(); ++it) {
-    HistoryService::RedirectList redirects;
+    history::RedirectList redirects;
     if (it->visit_id) {
       GetRedirectsFromSpecificVisit(it->visit_id, &redirects);
 
@@ -1436,8 +1533,8 @@ void HistoryBackend::SetFavIconMapping(const GURL& page_url,
                                        FavIconID id) {
   // Find all the pages whose favicons we should set, we want to set it for
   // all the pages in the redirect chain if it redirected.
-  HistoryService::RedirectList dummy_list;
-  HistoryService::RedirectList* redirects;
+  history::RedirectList dummy_list;
+  history::RedirectList* redirects;
   RedirectCache::iterator iter = recent_redirects_.Get(page_url);
   if (iter != recent_redirects_.end()) {
     redirects = &iter->second;
@@ -1455,7 +1552,7 @@ void HistoryBackend::SetFavIconMapping(const GURL& page_url,
   std::set<GURL> favicons_changed;
 
   // Save page <-> favicon association.
-  for (HistoryService::RedirectList::const_iterator i(redirects->begin());
+  for (history::RedirectList::const_iterator i(redirects->begin());
        i != redirects->end(); ++i) {
     URLRow row;
     if (!db_->GetRowForURL(*i, &row) || row.favicon_id() == id)

@@ -34,7 +34,7 @@ class ScopedComPtr : public scoped_refptr<Interface> {
   explicit ScopedComPtr(Interface* p) : ParentClass(p) {
   }
 
-  explicit ScopedComPtr(const ScopedComPtr<Interface, interface_id>& p)
+  ScopedComPtr(const ScopedComPtr<Interface, interface_id>& p)
       : ParentClass(p) {
   }
 
@@ -87,6 +87,13 @@ class ScopedComPtr : public scoped_refptr<Interface> {
     // so the iid parameter is implicit here. The only thing this
     // function adds are the DCHECKs.
     return ptr_->QueryInterface(p);
+  }
+
+  // QI for times when the IID is not associated with the type.
+  HRESULT QueryInterface(const IID& iid, void** obj) {
+    DCHECK(obj != NULL);
+    DCHECK(ptr_ != NULL);
+    return ptr_->QueryInterface(iid, obj);
   }
 
   // Queries |other| for the interface this object wraps and returns the

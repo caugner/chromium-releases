@@ -5,44 +5,50 @@
 #ifndef CHROME_BROWSER_TASK_MANAGER_RESOURCE_PROVIDERS_H_
 #define CHROME_BROWSER_TASK_MANAGER_RESOURCE_PROVIDERS_H_
 
+#include <map>
+#include <vector>
+
 #include "base/basictypes.h"
+#include "base/process_util.h"
 #include "chrome/browser/task_manager.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/notification_observer.h"
 
-class WebContents;
+class Extension;
+class ExtensionHost;
+class TabContents;
 
 // These file contains the resource providers used in the task manager.
 
-class TaskManagerWebContentsResource : public TaskManager::Resource {
+class TaskManagerTabContentsResource : public TaskManager::Resource {
  public:
-  explicit TaskManagerWebContentsResource(WebContents* web_contents);
-  ~TaskManagerWebContentsResource();
+  explicit TaskManagerTabContentsResource(TabContents* tab_contents);
+  ~TaskManagerTabContentsResource();
 
   // TaskManagerResource methods:
   std::wstring GetTitle() const;
   SkBitmap GetIcon() const;
-  HANDLE GetProcess() const;
+  base::ProcessHandle GetProcess() const;
   TabContents* GetTabContents() const;
 
-  // WebContents always provide the network usage.
+  // TabContents always provide the network usage.
   bool SupportNetworkUsage() const { return true; }
-  void SetSupportNetworkUsage() { };
+  void SetSupportNetworkUsage() { }
 
  private:
-  WebContents* web_contents_;
-  HANDLE process_;
+  TabContents* tab_contents_;
+  base::ProcessHandle process_;
   int pid_;
 
-  DISALLOW_COPY_AND_ASSIGN(TaskManagerWebContentsResource);
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerTabContentsResource);
 };
 
-class TaskManagerWebContentsResourceProvider
+class TaskManagerTabContentsResourceProvider
     : public TaskManager::ResourceProvider,
       public NotificationObserver {
  public:
-  explicit TaskManagerWebContentsResourceProvider(TaskManager* task_manager);
-  virtual ~TaskManagerWebContentsResourceProvider();
+  explicit TaskManagerTabContentsResourceProvider(TaskManager* task_manager);
+  virtual ~TaskManagerTabContentsResourceProvider();
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
@@ -56,10 +62,10 @@ class TaskManagerWebContentsResourceProvider
                        const NotificationDetails& details);
 
  private:
-  void Add(WebContents* web_contents);
-  void Remove(WebContents* web_contents);
+  void Add(TabContents* tab_contents);
+  void Remove(TabContents* tab_contents);
 
-  void AddToTaskManager(WebContents* web_contents);
+  void AddToTaskManager(TabContents* tab_contents);
 
   // Whether we are currently reporting to the task manager. Used to ignore
   // notifications sent after StopUpdating().
@@ -67,11 +73,14 @@ class TaskManagerWebContentsResourceProvider
 
   TaskManager* task_manager_;
 
-  // Maps the actual resources (the WebContents) to the Task Manager
+  // Maps the actual resources (the TabContents) to the Task Manager
   // resources.
-  std::map<WebContents*, TaskManagerWebContentsResource*> resources_;
+  std::map<TabContents*, TaskManagerTabContentsResource*> resources_;
 
-  DISALLOW_COPY_AND_ASSIGN(TaskManagerWebContentsResourceProvider);
+  // A scoped container for notification registries.
+  NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerTabContentsResourceProvider);
 };
 
 class TaskManagerChildProcessResource : public TaskManager::Resource {
@@ -82,7 +91,7 @@ class TaskManagerChildProcessResource : public TaskManager::Resource {
   // TaskManagerResource methods:
   std::wstring GetTitle() const;
   SkBitmap GetIcon() const;
-  HANDLE GetProcess() const;
+  base::ProcessHandle GetProcess() const;
 
   bool SupportNetworkUsage() const {
     return network_usage_support_;
@@ -102,7 +111,7 @@ class TaskManagerChildProcessResource : public TaskManager::Resource {
   bool network_usage_support_;
 
   // The icon painted for the child processs.
-  // TODO (jcampan): we should have plugin specific icons for well-known
+  // TODO(jcampan): we should have plugin specific icons for well-known
   // plugins.
   static SkBitmap* default_icon_;
 
@@ -158,7 +167,81 @@ class TaskManagerChildProcessResourceProvider
   // byte read notifications).
   std::map<int, TaskManagerChildProcessResource*> pid_to_resources_;
 
+  // A scoped container for notification registries.
+  NotificationRegistrar registrar_;
+
   DISALLOW_COPY_AND_ASSIGN(TaskManagerChildProcessResourceProvider);
+};
+
+class TaskManagerExtensionProcessResource : public TaskManager::Resource {
+ public:
+  explicit TaskManagerExtensionProcessResource(ExtensionHost* extension_host);
+  ~TaskManagerExtensionProcessResource();
+
+  // TaskManagerResource methods:
+  std::wstring GetTitle() const;
+  SkBitmap GetIcon() const;
+  base::ProcessHandle GetProcess() const;
+  bool SupportNetworkUsage() const { return true; }
+  void SetSupportNetworkUsage() { NOTREACHED(); }
+
+  // Returns the pid of the extension process.
+  int process_id() const { return pid_; }
+
+ private:
+  Extension* extension() const;
+
+  // The icon painted for the extension process.
+  static SkBitmap* default_icon_;
+
+  ExtensionHost* extension_host_;
+
+  // Cached data about the extension.
+  base::ProcessHandle process_handle_;
+  int pid_;
+  std::wstring title_;
+
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerExtensionProcessResource);
+};
+
+class TaskManagerExtensionProcessResourceProvider
+    : public TaskManager::ResourceProvider,
+      public NotificationObserver {
+ public:
+  explicit TaskManagerExtensionProcessResourceProvider(
+      TaskManager* task_manager);
+  virtual ~TaskManagerExtensionProcessResourceProvider();
+
+  virtual TaskManager::Resource* GetResource(int origin_pid,
+                                             int render_process_host_id,
+                                             int routing_id);
+  virtual void StartUpdating();
+  virtual void StopUpdating();
+
+  // NotificationObserver method:
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  void AddToTaskManager(ExtensionHost* extension_host);
+  void RemoveFromTaskManager(ExtensionHost* extension_host);
+
+  TaskManager* task_manager_;
+
+  // Maps the actual resources (ExtensionHost*) to the Task Manager resources.
+  std::map<ExtensionHost*, TaskManagerExtensionProcessResource*> resources_;
+
+  // Maps the pids to the resources (used for quick access to the resource on
+  // byte read notifications).
+  std::map<int, TaskManagerExtensionProcessResource*> pid_to_resources_;
+
+  // A scoped container for notification registries.
+  NotificationRegistrar registrar_;
+
+  bool updating_;
+
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerExtensionProcessResourceProvider);
 };
 
 class TaskManagerBrowserProcessResource : public TaskManager::Resource {
@@ -169,23 +252,17 @@ class TaskManagerBrowserProcessResource : public TaskManager::Resource {
   // TaskManagerResource methods:
   std::wstring GetTitle() const;
   SkBitmap GetIcon() const;
-  HANDLE GetProcess() const;
+  base::ProcessHandle GetProcess() const;
 
-  bool SupportNetworkUsage() const {
-    return network_usage_support_;
-  }
-
-  void SetSupportNetworkUsage() {
-    network_usage_support_ = true;
-  }
+  bool SupportNetworkUsage() const { return true; }
+  void SetSupportNetworkUsage() { NOTREACHED(); }
 
   // Returns the pid of the browser process.
   int process_id() const { return pid_; }
 
  private:
-  HANDLE process_;
+  base::ProcessHandle process_;
   int pid_;
-  bool network_usage_support_;
   mutable std::wstring title_;
 
   static SkBitmap* default_icon_;

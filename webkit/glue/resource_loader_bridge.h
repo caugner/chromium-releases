@@ -34,6 +34,8 @@ namespace net {
 class HttpResponseHeaders;
 }
 
+class FilePath;
+
 namespace webkit_glue {
 
 class ResourceLoaderBridge {
@@ -67,19 +69,8 @@ class ResourceLoaderBridge {
     // Content length if available. -1 if not available
     int64 content_length;
 
-    // A platform specific handle for a file that carries response data. This
-    // entry is used if the resource request is of type ResourceType::MEDIA and
-    // the underlying cache layer keeps the response data in a standalone file.
-#if defined(OS_POSIX)
-    // If the response data file is available, the file handle is stored in
-    // response_data_file.fd, its value is base::kInvalidPlatformFileValue
-    // otherwise.
-    base::FileDescriptor response_data_file;
-#elif defined(OS_WIN)
-    // An asynchronous file handle to the response data file, its value is
-    // base::kInvalidPlatformFileValue if the file is not available.
-    base::PlatformFile response_data_file;
-#endif
+    // The appcache this response was loaded from, or kNoAppCacheId.
+    int64 app_cache_id;
   };
 
   // See the SyncLoad method declared below.  (The name of this struct is not
@@ -110,19 +101,16 @@ class ResourceLoaderBridge {
    public:
     virtual ~Peer() {}
 
-    // Called as download progress is made.
-    // note: only for requests with LOAD_ENABLE_DOWNLOAD_FILE set and the
-    // resource is downloaded to a standalone file and the file handle to it is
-    // passed in ResponseInfo during OnReceivedResponse. Note that size may be
-    // unknown and |size| will be kuint64max in that case.
-    virtual void OnDownloadProgress(uint64 position, uint64 size) {}
-
     // Called as upload progress is made.
     // note: only for requests with LOAD_ENABLE_UPLOAD_PROGRESS set
     virtual void OnUploadProgress(uint64 position, uint64 size) = 0;
 
-    // Called when a redirect occurs.
-    virtual void OnReceivedRedirect(const GURL& new_url) = 0;
+    // Called when a redirect occurs.  The implementation may return false to
+    // suppress the redirect.  The given ResponseInfo provides complete
+    // information about the redirect, and new_url is the URL that will be
+    // loaded if this method returns true.
+    virtual bool OnReceivedRedirect(const GURL& new_url,
+                                    const ResponseInfo& info) = 0;
 
     // Called when response headers are available (after all redirects have
     // been followed).  |content_filtered| is set to true if the contents is
@@ -171,6 +159,9 @@ class ResourceLoaderBridge {
   // request_type indicates if the current request is the main frame load, a
   // sub-frame load, or a sub objects load.
   //
+  // app_cache_context_id identifies that app cache context this request is
+  // associated with.
+  //
   // routing_id passed to this function allows it to be associated with a
   // frame's network context.
   static ResourceLoaderBridge* Create(const std::string& method,
@@ -183,6 +174,7 @@ class ResourceLoaderBridge {
                                       int load_flags,
                                       int requestor_pid,
                                       ResourceType::Type request_type,
+                                      int app_cache_context_id,
                                       int routing_id);
 
   // Call this method before calling Start() to append a chunk of binary data
@@ -191,14 +183,19 @@ class ResourceLoaderBridge {
 
   // Call this method before calling Start() to append the contents of a file
   // to the request body.  May only be used with HTTP(S) POST requests.
-  void AppendFileToUpload(const std::wstring& file_path) {
+  void AppendFileToUpload(const FilePath& file_path) {
     AppendFileRangeToUpload(file_path, 0, kuint64max);
   }
 
   // Call this method before calling Start() to append the contents of a file
   // to the request body.  May only be used with HTTP(S) POST requests.
-  virtual void AppendFileRangeToUpload(const std::wstring& file_path,
+  virtual void AppendFileRangeToUpload(const FilePath& file_path,
                                        uint64 offset, uint64 length) = 0;
+
+  // Call this method before calling Start() to assign an upload identifier to
+  // this request.  This is used to enable caching of POST responses.  A value
+  // of 0 implies the unspecified identifier.
+  virtual void SetUploadIdentifier(int64 identifier) = 0;
 
   // Call this method to initiate the request.  If this method succeeds, then
   // the peer's methods will be called asynchronously to report various events.

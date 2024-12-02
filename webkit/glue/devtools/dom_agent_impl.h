@@ -19,9 +19,11 @@ namespace WebCore {
 class Document;
 class Element;
 class Event;
+class NameNodeMap;
 class Node;
 }
 
+class DictionaryValue;
 class ListValue;
 class Value;
 
@@ -32,14 +34,22 @@ class DomAgentImpl : public DomAgent {
   virtual ~DomAgentImpl();
 
   // DomAgent implementation.
-  void GetDocumentElement(int call_id);
+  void GetDocumentElement();
   void GetChildNodes(int call_id, int element_id);
   void SetAttribute(
+      int call_id,
       int element_id,
       const WebCore::String& name,
       const WebCore::String& value);
-  void RemoveAttribute(int element_id, const WebCore::String& name);
-  void SetTextNodeValue(int element_id, const WebCore::String& value);
+  void RemoveAttribute(
+      int call_id,
+      int element_id,
+      const WebCore::String& name);
+  void SetTextNodeValue(
+      int call_id,
+      int element_id,
+      const WebCore::String& value);
+  void PerformSearch(int call_id, const String& query);
   void DiscardBindings();
 
   // Initializes dom agent with the given document.
@@ -52,17 +62,24 @@ class DomAgentImpl : public DomAgent {
   int GetIdForNode(WebCore::Node* node);
 
   // Sends path to a given node to the client. Returns node's id according to
-  // the resulting binding.
-  int GetPathToNode(WebCore::Node* node);
+  // the resulting binding. Only sends nodes that are missing on the client.
+  int PushNodePathToClient(WebCore::Node* node);
 
  private:
-  // Convenience EventListner wrapper for cleaner Ref management.
+  static const char kExactTagNames[];
+  static const char kPartialTagNames[];
+  static const char kStartOfTagNames[];
+  static const char kPartialTagNamesAndAttributeValues[];
+  static const char kPartialAttributeValues[];
+  static const char kPlainText[];
+
+// Convenience EventListner wrapper for cleaner Ref management.
   class EventListenerWrapper : public WebCore::EventListener {
    public:
     static PassRefPtr<EventListenerWrapper> Create(
         DomAgentImpl* dom_agent_impl);
     virtual ~EventListenerWrapper() {}
-    virtual void handleEvent(WebCore::Event* event, bool isWindowEvent);
+    virtual void handleEvent(WebCore::Event* event, bool is_window_event);
    private:
     explicit EventListenerWrapper(DomAgentImpl* dom_agent_impl);
     DomAgentImpl* dom_agent_impl_;
@@ -83,25 +100,43 @@ class DomAgentImpl : public DomAgent {
   // Releases Node to int binding.
   void Unbind(WebCore::Node* node);
 
+  // Pushes document element to the client.
+  void PushDocumentElementToClient();
+
+  // Pushes child nodes to the client.
+  void PushChildNodesToClient(int element_id);
+
   // Serializes given node into the list value.
   ListValue* BuildValueForNode(
       WebCore::Node* node,
       int depth);
 
   // Serializes given element's attributes into the list value.
-  ListValue* BuildValueForElementAttributes(WebCore::Element* elemen);
+  static ListValue* BuildValueForElementAttributes(WebCore::Element* elemen);
 
   // Serializes given elements's children into the list value.
   ListValue* BuildValueForElementChildren(
       WebCore::Element* element,
       int depth);
 
+  // Serializes CSSStyleDeclaration into a list of properties
+  // where aeach property represented as an array as an
+  // [name, important, implicit, shorthand, value]
+  static ListValue* BuildValueForStyle(
+      const WebCore::CSSStyleDeclaration& style);
+
   // We represent embedded doms as a part of the same hierarchy. Hence we
-  // treat children of frame owners differently. Following two methods
-  // encapsulate frame owner specifics.
+  // treat children of frame owners differently. We also skip whitespace
+  // text nodes conditionally. Following four methods encapsulate these
+  // specifics.
   WebCore::Node* InnerFirstChild(WebCore::Node* node);
+  WebCore::Node* InnerNextSibling(WebCore::Node* node);
+  WebCore::Node* InnerPreviousSibling(WebCore::Node* node);
   int InnerChildNodeCount(WebCore::Node* node);
   WebCore::Element* InnerParentElement(WebCore::Node* node);
+  bool IsWhitespace(WebCore::Node* node);
+
+  WebCore::Document* GetMainFrameDocument();
 
   DomAgentDelegate* delegate_;
   HashMap<WebCore::Node*, int> node_to_id_;
@@ -112,7 +147,7 @@ class DomAgentImpl : public DomAgent {
   RefPtr<WebCore::EventListener> event_listener_;
   // Captures pending document element request's call id.
   // Defaults to 0 meaning no pending request.
-  int document_element_call_id_;
+  bool document_element_requested_;
 
   DISALLOW_COPY_AND_ASSIGN(DomAgentImpl);
 };

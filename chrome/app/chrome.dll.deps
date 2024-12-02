@@ -15,7 +15,6 @@ dependents = [
   'OLEAUT32.dll',
   'OLEACC.dll',
   'secur32.dll',
-  't2embed.dll',
 ]
 
 delay_loaded = [
@@ -27,9 +26,10 @@ delay_loaded = [
   'WS2_32.dll',
   'PSAPI.DLL',
   'dwmapi.dll',
+  'dbghelp.dll',
   'COMDLG32.dll',
   'urlmon.dll',
-  'avutil-49.dll',
-  'avformat-52.dll',
   'avcodec-52.dll',
+  'avformat-52.dll',
+  'avutil-50.dll',
 ]

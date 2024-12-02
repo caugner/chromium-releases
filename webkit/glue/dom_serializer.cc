@@ -163,6 +163,12 @@ DomSerializer::SerializeDomParam::SerializeDomParam(
   is_html_document = doc->isHTMLDocument();
 }
 
+// Static
+std::wstring DomSerializer::GenerateMetaCharsetDeclaration(
+    const std::wstring& charset) {
+  return StringPrintf(kDefaultMetaContent, charset.c_str());
+}
+
 // Static.
 std::string DomSerializer::GenerateMarkOfTheWebDeclaration(
     const GURL& url) {
@@ -250,6 +256,7 @@ WebCore::String DomSerializer::PostActionAfterSerializeOpenTag(
     const WebCore::Element* element, SerializeDomParam* param) {
   WebCore::String result;
 
+  param->has_added_contents_before_end = false;
   if (!param->is_html_document)
     return result;
   // Check after processing the open tag of HEAD element
@@ -264,10 +271,11 @@ WebCore::String DomSerializer::PostActionAfterSerializeOpenTag(
     // See http://bugs.webkit.org/show_bug.cgi?id=16621.
     // First we generate new content for writing correct META element.
     std::wstring str_meta =
-        StringPrintf(kDefaultMetaContent,
-                     ASCIIToWide(param->text_encoding.name()).c_str());
+        GenerateMetaCharsetDeclaration(
+            ASCIIToWide(param->text_encoding.name()));
     result += StdWStringToString(str_meta);
 
+    param->has_added_contents_before_end = true;
     // Will search each META which has charset declaration, and skip them all
     // in PreActionBeforeSerializeOpenTag.
   } else if (element->hasTagName(WebCore::HTMLNames::scriptTag) ||
@@ -352,7 +360,7 @@ void DomSerializer::OpenTagToString(const WebCore::Element* element,
   // Add open tag
   result += "<" + element->nodeName();
   // Go through all attributes and serialize them.
-  const WebCore::NamedAttrMap *attrMap = element->attributes(true);
+  const WebCore::NamedNodeMap *attrMap = element->attributes(true);
   if (attrMap) {
     unsigned numAttrs = attrMap->length();
     for (unsigned i = 0; i < numAttrs; i++) {
@@ -399,11 +407,15 @@ void DomSerializer::OpenTagToString(const WebCore::Element* element,
       result += "\"";
     }
   }
-  // Complete the open tag for element when it has child/children.
-  if (element->hasChildNodes())
-    result += ">";
+
   // Do post action for open tag.
-  result += PostActionAfterSerializeOpenTag(element, param);
+  WebCore::String added_contents =
+      PostActionAfterSerializeOpenTag(element, param);
+  // Complete the open tag for element when it has child/children.
+  if (element->hasChildNodes() || param->has_added_contents_before_end)
+    result += ">";
+  // Append the added contents generate in  post action of open tag.
+  result += added_contents;
   // Save the result to data buffer.
   SaveHtmlContentToBuffer(result, param);
 }
@@ -419,7 +431,7 @@ void DomSerializer::EndTagToString(const WebCore::Element* element,
   if (need_skip)
     return;
   // Write end tag when element has child/children.
-  if (element->hasChildNodes()) {
+  if (element->hasChildNodes() || param->has_added_contents_before_end) {
     result += "</";
     result += element->nodeName();
     result += ">";

@@ -6,7 +6,9 @@
 #define CHROME_BROWSER_PASSWORD_FORM_MANAGER_H__
 
 #include "build/build_config.h"
-#include "chrome/common/stl_util-inl.h"
+
+#include "base/stl_util-inl.h"
+#include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "webkit/glue/password_form.h"
 
@@ -15,7 +17,7 @@ class Profile;
 
 // Per-password-form-{on-page, dialog} class responsible for interactions
 // between a given form, the per-tab PasswordManager, and the web database.
-class PasswordFormManager : public WebDataServiceConsumer {
+class PasswordFormManager : public PasswordStoreConsumer {
  public:
   // web_data_service allows access to current profile's Web Data
   // password_manager owns this object
@@ -24,18 +26,15 @@ class PasswordFormManager : public WebDataServiceConsumer {
   //           used to filter login results from database.
   PasswordFormManager(Profile* profile,
                       PasswordManager* password_manager,
-                      const PasswordForm& observed_form,
+                      const webkit_glue::PasswordForm& observed_form,
                       bool ssl_valid);
   virtual ~PasswordFormManager();
 
   // Compare basic data of observed_form_ with argument.
-  bool DoesManage(const PasswordForm& form) const;
+  bool DoesManage(const webkit_glue::PasswordForm& form) const;
 
   // Retrieves potential matching logins from the database.
   void FetchMatchingLoginsFromWebDatabase();
-#if defined(OS_WIN)
-  void FetchMatchingIE7LoginFromWebDatabase();
-#endif
 
   // Simple state-check to verify whether this object as received a callback
   // from the web database and completed its matching phase. Note that the
@@ -59,19 +58,13 @@ class PasswordFormManager : public WebDataServiceConsumer {
   // managed by this.
   bool IsNewLogin();
 
-  // WebDataServiceConsumer implementation. If matches were found
-  // (in *result), this is where we determine we need to autofill.
-  virtual void OnWebDataServiceRequestDone(WebDataService::Handle h,
-                                           const WDTypedResult* result);
-
   // Determines if we need to autofill given the results of the query.
-  void OnRequestDone(WebDataService::Handle h, const WDTypedResult* result);
+  void OnRequestDone(
+      int handle, const std::vector<webkit_glue::PasswordForm*>& result);
 
-#if defined(OS_WIN)
-  // Determines if we need to autofill given the results of the query in the
-  // ie7_password table.
-  void OnIE7RequestDone(WebDataService::Handle h, const WDTypedResult* result);
-#endif
+  // PasswordStoreConsumer implementation.
+  virtual void OnPasswordStoreRequestDone(
+      int handle, const std::vector<webkit_glue::PasswordForm*>& result);
 
   // A user opted to 'never remember' passwords for this form.
   // Blacklist it so that from now on when it is seen we ignore it.
@@ -80,7 +73,7 @@ class PasswordFormManager : public WebDataServiceConsumer {
   // If the user has submitted observed_form_, provisionally hold on to
   // the submitted credentials until we are told by PasswordManager whether
   // or not the login was successful.
-  void ProvisionallySave(const PasswordForm& credentials);
+  void ProvisionallySave(const webkit_glue::PasswordForm& credentials);
 
   // Handles save-as-new or update of the form managed by this manager.
   // Note the basic data of updated_credentials must match that of
@@ -95,7 +88,7 @@ class PasswordFormManager : public WebDataServiceConsumer {
 
   // Helper for OnWebDataServiceRequestDone to determine whether or not
   // the given result form is worth scoring.
-  bool IgnoreResult(const PasswordForm& form) const;
+  bool IgnoreResult(const webkit_glue::PasswordForm& form) const;
 
   // Helper for Save in the case that best_matches.size() == 0, meaning
   // we have no prior record of this form/username/password and the user
@@ -104,7 +97,7 @@ class PasswordFormManager : public WebDataServiceConsumer {
 
   // Helper for OnWebDataServiceRequestDone to score an individual result
   // against the observed_form_.
-  int ScoreResult(const PasswordForm& form) const;
+  int ScoreResult(const webkit_glue::PasswordForm& form) const;
 
   // Helper for Save in the case that best_matches.size() > 0, meaning
   // we have at least one match for this form/username/password. This
@@ -116,13 +109,13 @@ class PasswordFormManager : public WebDataServiceConsumer {
   // Set of PasswordForms from the DB that best match the form
   // being managed by this. Use a map instead of vector, because we most
   // frequently require lookups by username value in IsNewLogin.
-  PasswordFormMap best_matches_;
+  webkit_glue::PasswordFormMap best_matches_;
 
   // Cleans up when best_matches_ goes out of scope.
-  STLValueDeleter<PasswordFormMap> best_matches_deleter_;
+  STLValueDeleter<webkit_glue::PasswordFormMap> best_matches_deleter_;
 
   // The PasswordForm from the page or dialog managed by this.
-  PasswordForm observed_form_;
+  webkit_glue::PasswordForm observed_form_;
 
   // The origin url path of observed_form_ tokenized, for convenience when
   // scoring.
@@ -130,7 +123,7 @@ class PasswordFormManager : public WebDataServiceConsumer {
 
   // Stores updated credentials when the form was submitted but success is
   // still unknown.
-  PasswordForm pending_credentials_;
+  webkit_glue::PasswordForm pending_credentials_;
 
   // Whether pending_credentials_ stores a new login or is an update
   // to an existing one.
@@ -139,18 +132,18 @@ class PasswordFormManager : public WebDataServiceConsumer {
   // PasswordManager owning this.
   const PasswordManager* const password_manager_;
 
-  // Handle to any pending WebDataService::GetLogins query.
-  WebDataService::Handle pending_login_query_;
+  // Handle to any pending PasswordStore::GetLogins query.
+  int pending_login_query_;
 
   // Convenience pointer to entry in best_matches_ that is marked
   // as preferred. This is only allowed to be null if there are no best matches
   // at all, since there will always be one preferred login when there are
   // multiple matches (when first saved, a login is marked preferred).
-  const PasswordForm* preferred_match_;
+  const webkit_glue::PasswordForm* preferred_match_;
 
   typedef enum {
     PRE_MATCHING_PHASE,      // Have not yet invoked a GetLogins query to find
-                             // matching login information from DB.
+                             // matching login information from password store.
     MATCHING_PHASE,          // We've made a GetLogins request, but
                              // haven't received or finished processing result.
     POST_MATCHING_PHASE      // We've queried the DB and processed matching

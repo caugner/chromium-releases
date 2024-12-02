@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,10 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/backend_impl.h"
+#include "net/disk_cache/bitmap.h"
 #include "net/disk_cache/cache_util.h"
+#include "net/disk_cache/histogram_macros.h"
+#include "net/disk_cache/sparse_control.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -78,10 +81,10 @@ EntryImpl::EntryImpl(BackendImpl* backend, Addr address)
   entry_.LazyInit(backend->File(address), address);
   doomed_ = false;
   backend_ = backend;
-  for (int i = 0; i < NUM_STREAMS; i++) {
+  for (int i = 0; i < kNumStreams; i++) {
     unreported_size_[i] = 0;
-    need_file_[i] = false;
   }
+  key_file_ = NULL;
 }
 
 // When an entry is deleted from the cache, we clean up all the data associated
@@ -91,11 +94,14 @@ EntryImpl::EntryImpl(BackendImpl* backend, Addr address)
 // data related to a previous cache entry because the range was not fully
 // written before).
 EntryImpl::~EntryImpl() {
+  // Save the sparse info to disk before deleting this entry.
+  sparse_.reset();
+
   if (doomed_) {
     DeleteEntryData(true);
   } else {
     bool ret = true;
-    for (int index = 0; index < NUM_STREAMS; index++) {
+    for (int index = 0; index < kNumStreams; index++) {
       if (user_buffers_[index].get()) {
         if (!(ret = Flush(index, entry_.Data()->data_size[index], false)))
           LOG(ERROR) << "Failed to save user data";
@@ -123,7 +129,7 @@ EntryImpl::~EntryImpl() {
     }
   }
 
-  backend_->CacheEntryDestroyed();
+  backend_->CacheEntryDestroyed(entry_.address());
 }
 
 void EntryImpl::Doom() {
@@ -140,25 +146,29 @@ void EntryImpl::Close() {
 
 std::string EntryImpl::GetKey() const {
   CacheEntryBlock* entry = const_cast<CacheEntryBlock*>(&entry_);
-  if (entry->Data()->key_len > kMaxInternalKeyLength) {
-    Addr address(entry->Data()->long_key);
-    DCHECK(address.is_initialized());
-    COMPILE_ASSERT(NUM_STREAMS == kKeyFileIndex, invalid_key_index);
-    File* file = const_cast<EntryImpl*>(this)->GetBackingFile(address,
-                                                              kKeyFileIndex);
-
-    size_t offset = 0;
-    if (address.is_block_file())
-      offset = address.start_block() * address.BlockSize() + kBlockHeaderSize;
-
-    std::string key;
-    if (!file || !file->Read(WriteInto(&key, entry->Data()->key_len + 1),
-                             entry->Data()->key_len + 1, offset))
-      key.clear();
-    return key;
-  } else {
+  if (entry->Data()->key_len <= kMaxInternalKeyLength)
     return std::string(entry->Data()->key);
+
+  Addr address(entry->Data()->long_key);
+  DCHECK(address.is_initialized());
+  size_t offset = 0;
+  if (address.is_block_file())
+    offset = address.start_block() * address.BlockSize() + kBlockHeaderSize;
+
+  if (!key_file_) {
+    // We keep a copy of the file needed to access the key so that we can
+    // always return this object's key, even if the backend is disabled.
+    COMPILE_ASSERT(kNumStreams == kKeyFileIndex, invalid_key_index);
+    key_file_ = const_cast<EntryImpl*>(this)->GetBackingFile(address,
+                                                             kKeyFileIndex);
   }
+
+  std::string key;
+  if (!key_file_ ||
+      !key_file_->Read(WriteInto(&key, entry->Data()->key_len + 1),
+                       entry->Data()->key_len + 1, offset))
+    key.clear();
+  return key;
 }
 
 Time EntryImpl::GetLastUsed() const {
@@ -172,7 +182,7 @@ Time EntryImpl::GetLastModified() const {
 }
 
 int32 EntryImpl::GetDataSize(int index) const {
-  if (index < 0 || index >= NUM_STREAMS)
+  if (index < 0 || index >= kNumStreams)
     return 0;
 
   CacheEntryBlock* entry = const_cast<CacheEntryBlock*>(&entry_);
@@ -182,7 +192,7 @@ int32 EntryImpl::GetDataSize(int index) const {
 int EntryImpl::ReadData(int index, int offset, net::IOBuffer* buf, int buf_len,
                         net::CompletionCallback* completion_callback) {
   DCHECK(node_.Data()->dirty);
-  if (index < 0 || index >= NUM_STREAMS)
+  if (index < 0 || index >= kNumStreams)
     return net::ERR_INVALID_ARGUMENT;
 
   int entry_size = entry_.Data()->data_size[index];
@@ -193,9 +203,6 @@ int EntryImpl::ReadData(int index, int offset, net::IOBuffer* buf, int buf_len,
     return net::ERR_INVALID_ARGUMENT;
 
   Time start = Time::Now();
-  static Histogram stats("DiskCache.ReadTime", TimeDelta::FromMilliseconds(1),
-                         TimeDelta::FromSeconds(10), 50);
-  stats.SetFlags(kUmaTargetedHistogramFlag);
 
   if (offset + buf_len > entry_size)
     buf_len = entry_size - offset;
@@ -208,7 +215,7 @@ int EntryImpl::ReadData(int index, int offset, net::IOBuffer* buf, int buf_len,
     // Complete the operation locally.
     DCHECK(kMaxBlockSize >= offset + buf_len);
     memcpy(buf->data() , user_buffers_[index].get() + offset, buf_len);
-    stats.AddTime(Time::Now() - start);
+    ReportIOTime(kRead, start);
     return buf_len;
   }
 
@@ -240,7 +247,7 @@ int EntryImpl::ReadData(int index, int offset, net::IOBuffer* buf, int buf_len,
   if (io_callback && completed)
     io_callback->Discard();
 
-  stats.AddTime(Time::Now() - start);
+  ReportIOTime(kRead, start);
   return (completed || !completion_callback) ? buf_len : net::ERR_IO_PENDING;
 }
 
@@ -248,7 +255,7 @@ int EntryImpl::WriteData(int index, int offset, net::IOBuffer* buf, int buf_len,
                          net::CompletionCallback* completion_callback,
                          bool truncate) {
   DCHECK(node_.Data()->dirty);
-  if (index < 0 || index >= NUM_STREAMS)
+  if (index < 0 || index >= kNumStreams)
     return net::ERR_INVALID_ARGUMENT;
 
   if (offset < 0 || buf_len < 0)
@@ -267,9 +274,6 @@ int EntryImpl::WriteData(int index, int offset, net::IOBuffer* buf, int buf_len,
   }
 
   Time start = Time::Now();
-  static Histogram stats("DiskCache.WriteTime", TimeDelta::FromMilliseconds(1),
-                         TimeDelta::FromSeconds(10), 50);
-  stats.SetFlags(kUmaTargetedHistogramFlag);
 
   // Read the size at this point (it may change inside prepare).
   int entry_size = entry_.Data()->data_size[index];
@@ -300,16 +304,14 @@ int EntryImpl::WriteData(int index, int offset, net::IOBuffer* buf, int buf_len,
 
   backend_->OnEvent(Stats::WRITE_DATA);
 
-  // If we have prepared the cache as an external file, we should never use
-  // user_buffers_ and always write to file directly.
-  if (!need_file_[index] && user_buffers_[index].get()) {
+  if (user_buffers_[index].get()) {
     // Complete the operation locally.
     if (!buf_len)
       return 0;
 
     DCHECK(kMaxBlockSize >= offset + buf_len);
     memcpy(user_buffers_[index].get() + offset, buf->data(), buf_len);
-    stats.AddTime(Time::Now() - start);
+    ReportIOTime(kWrite, start);
     return buf_len;
   }
 
@@ -345,45 +347,44 @@ int EntryImpl::WriteData(int index, int offset, net::IOBuffer* buf, int buf_len,
   if (io_callback && completed)
     io_callback->Discard();
 
-  stats.AddTime(Time::Now() - start);
+  ReportIOTime(kWrite, start);
   return (completed || !completion_callback) ? buf_len : net::ERR_IO_PENDING;
 }
 
-base::PlatformFile EntryImpl::UseExternalFile(int index) {
-  DCHECK(index >= 0 && index < NUM_STREAMS);
+int EntryImpl::ReadSparseData(int64 offset, net::IOBuffer* buf, int buf_len,
+                              net::CompletionCallback* completion_callback) {
+  DCHECK(node_.Data()->dirty);
+  int result = InitSparseData();
+  if (net::OK != result)
+    return result;
 
-  Addr address(entry_.Data()->data_addr[index]);
-
-  // We will not prepare the cache file since the entry is already initialized,
-  // just return the platform file backing the cache.
-  if (address.is_initialized())
-    return GetPlatformFile(index);
-
-  if (!backend_->CreateExternalFile(&address))
-    return base::kInvalidPlatformFileValue;
-
-  entry_.Data()->data_addr[index] = address.value();
-  entry_.Store();
-
-  // Set the flag for this stream so we never use user_buffer_.
-  // TODO(hclam): do we need to save this information to EntryStore?
-  need_file_[index] = true;
-
-  return GetPlatformFile(index);
+  Time start = Time::Now();
+  result = sparse_->StartIO(SparseControl::kReadOperation, offset, buf, buf_len,
+                            completion_callback);
+  ReportIOTime(kSparseRead, start);
+  return result;
 }
 
-base::PlatformFile EntryImpl::GetPlatformFile(int index) {
-  DCHECK(index >= 0 && index < NUM_STREAMS);
+int EntryImpl::WriteSparseData(int64 offset, net::IOBuffer* buf, int buf_len,
+                               net::CompletionCallback* completion_callback) {
+  DCHECK(node_.Data()->dirty);
+  int result = InitSparseData();
+  if (net::OK != result)
+    return result;
 
-  Addr address(entry_.Data()->data_addr[index]);
-  if (!address.is_initialized() || !address.is_separate_file())
-    return base::kInvalidPlatformFileValue;
+  Time start = Time::Now();
+  result = sparse_->StartIO(SparseControl::kWriteOperation, offset, buf,
+                            buf_len, completion_callback);
+  ReportIOTime(kSparseWrite, start);
+  return result;
+}
 
-  return base::CreatePlatformFile(backend_->GetFileName(address),
-                                  base::PLATFORM_FILE_OPEN |
-                                      base::PLATFORM_FILE_READ |
-                                  base::PLATFORM_FILE_ASYNC,
-                                  NULL);
+int EntryImpl::GetAvailableRange(int64 offset, int len, int64* start) {
+  int result = InitSparseData();
+  if (net::OK != result)
+    return result;
+
+  return sparse_->GetAvailableRange(offset, len, start);
 }
 
 uint32 EntryImpl::GetHash() {
@@ -413,19 +414,19 @@ bool EntryImpl::CreateEntry(Addr node_address, const std::string& key,
       return false;
 
     entry_store->long_key = address.value();
-    File* file = GetBackingFile(address, kKeyFileIndex);
+    key_file_ = GetBackingFile(address, kKeyFileIndex);
 
     size_t offset = 0;
     if (address.is_block_file())
       offset = address.start_block() * address.BlockSize() + kBlockHeaderSize;
 
-    if (!file || !file->Write(key.data(), key.size(), offset)) {
+    if (!key_file_ || !key_file_->Write(key.data(), key.size(), offset)) {
       DeleteData(address, kKeyFileIndex);
       return false;
     }
 
     if (address.is_separate_file())
-      file->SetLength(key.size() + 1);
+      key_file_->SetLength(key.size() + 1);
   } else {
     memcpy(entry_store->key, key.data(), key.size());
     entry_store->key[key.size()] = '\0';
@@ -457,11 +458,16 @@ void EntryImpl::InternalDoom() {
 void EntryImpl::DeleteEntryData(bool everything) {
   DCHECK(doomed_ || !everything);
 
+  if (GetEntryFlags() & PARENT_ENTRY) {
+    // We have some child entries that must go away.
+    SparseControl::DeleteChildren(this);
+  }
+
   if (GetDataSize(0))
-    UMA_HISTOGRAM_COUNTS("DiskCache.DeleteHeader", GetDataSize(0));
+    CACHE_UMA(COUNTS, "DeleteHeader", 0, GetDataSize(0));
   if (GetDataSize(1))
-    UMA_HISTOGRAM_COUNTS("DiskCache.DeleteData", GetDataSize(1));
-  for (int index = 0; index < NUM_STREAMS; index++) {
+    CACHE_UMA(COUNTS, "DeleteData", 0, GetDataSize(1));
+  for (int index = 0; index < kNumStreams; index++) {
     Addr address(entry_.Data()->data_addr[index]);
     if (address.is_initialized()) {
       DeleteData(address, index);
@@ -510,30 +516,29 @@ bool EntryImpl::LoadNodeAddress() {
   return node_.Load();
 }
 
-EntryImpl* EntryImpl::Update(EntryImpl* entry) {
-  DCHECK(entry->rankings()->HasData());
+bool EntryImpl::Update() {
+  DCHECK(node_.HasData());
 
-  RankingsNode* rankings = entry->rankings()->Data();
+  RankingsNode* rankings = node_.Data();
   if (rankings->pointer) {
-    // Already in memory. Prevent clearing the dirty flag on the destructor.
-    rankings->dirty = 0;
-    EntryImpl* real_node = reinterpret_cast<EntryImpl*>(rankings->pointer);
-    real_node->AddRef();
-    entry->Release();
-    return real_node;
+    // Nothing to do here, the entry was in memory.
+    DCHECK(rankings->pointer == this);
   } else {
-    rankings->dirty = entry->backend_->GetCurrentEntryId();
-    rankings->pointer = entry;
-    if (!entry->rankings()->Store()) {
-      entry->Release();
-      return NULL;
-    }
-    return entry;
+    rankings->dirty = backend_->GetCurrentEntryId();
+    rankings->pointer = this;
+    if (!node_.Store())
+      return false;
   }
+  return true;
 }
 
 bool EntryImpl::IsDirty(int32 current_id) {
   DCHECK(node_.HasData());
+  // We are checking if the entry is valid or not. If there is a pointer here,
+  // we should not be checking the entry.
+  if (node_.Data()->pointer)
+    return true;
+
   return node_.Data()->dirty && current_id != node_.Data()->dirty;
 }
 
@@ -579,7 +584,7 @@ void EntryImpl::SetTimes(base::Time last_used, base::Time last_modified) {
 }
 
 bool EntryImpl::CreateDataBlock(int index, int size) {
-  DCHECK(index >= 0 && index < NUM_STREAMS);
+  DCHECK(index >= 0 && index < kNumStreams);
 
   Addr address(entry_.Data()->data_addr[index]);
   if (!CreateBlock(size, &address))
@@ -616,11 +621,11 @@ void EntryImpl::DeleteData(Addr address, int index) {
     if (files_[index])
       files_[index] = NULL;  // Releases the object.
 
-    if (!DeleteCacheFile(backend_->GetFileName(address))) {
-      UMA_HISTOGRAM_COUNTS("DiskCache.DeleteFailed", 1);
+    int failure = DeleteCacheFile(backend_->GetFileName(address)) ? 0 : 1;
+    CACHE_UMA(COUNTS, "DeleteFailed", 0, failure);
+    if (failure)
       LOG(ERROR) << "Failed to delete " << backend_->GetFileName(address) <<
                     " from the cache.";
-    }
   } else {
     backend_->DeleteBlock(address, true);
   }
@@ -663,15 +668,6 @@ File* EntryImpl::GetExternalFile(Addr address, int index) {
 bool EntryImpl::PrepareTarget(int index, int offset, int buf_len,
                               bool truncate) {
   Addr address(entry_.Data()->data_addr[index]);
-
-  // If we are instructed to use an external file, we should never buffer when
-  // writing. We are done with preparation of the target automatically, since
-  // we have already created the external file for writing.
-  if (need_file_[index]) {
-    // Make sure the stream is initialized and is kept in an external file.
-    DCHECK(address.is_initialized() && address.is_separate_file());
-    return true;
-  }
 
   if (address.is_initialized() || user_buffers_[index].get())
     return GrowUserBuffer(index, offset, buf_len, truncate);
@@ -835,6 +831,69 @@ bool EntryImpl::Flush(int index, int size, bool async) {
   user_buffers_[index].release();
 
   return true;
+}
+
+int EntryImpl::InitSparseData() {
+  if (sparse_.get())
+    return net::OK;
+
+  sparse_.reset(new SparseControl(this));
+  int result = sparse_->Init();
+  if (net::OK != result)
+    sparse_.reset();
+  return result;
+}
+
+void EntryImpl::SetEntryFlags(uint32 flags) {
+  entry_.Data()->flags |= flags;
+  entry_.set_modified();
+}
+
+uint32 EntryImpl::GetEntryFlags() {
+  return entry_.Data()->flags;
+}
+
+void EntryImpl::GetData(int index, char** buffer, Addr* address) {
+  if (user_buffers_[index].get()) {
+    // The data is already in memory, just copy it an we're done.
+    int data_len = entry_.Data()->data_size[index];
+    DCHECK(data_len <= kMaxBlockSize);
+    *buffer = new char[data_len];
+    memcpy(*buffer, user_buffers_[index].get(), data_len);
+    return;
+  }
+
+  // Bad news: we'd have to read the info from disk so instead we'll just tell
+  // the caller where to read from.
+  *buffer = NULL;
+  address->set_value(entry_.Data()->data_addr[index]);
+  if (address->is_initialized()) {
+    // Prevent us from deleting the block from the backing store.
+    backend_->ModifyStorageSize(entry_.Data()->data_size[index] -
+                                    unreported_size_[index], 0);
+    entry_.Data()->data_addr[index] = 0;
+    entry_.Data()->data_size[index] = 0;
+  }
+}
+
+void EntryImpl::ReportIOTime(Operation op, const base::Time& start) {
+  int group = backend_->GetSizeGroup();
+  switch (op) {
+    case kRead:
+      CACHE_UMA(AGE_MS, "ReadTime", group, start);
+      break;
+    case kWrite:
+      CACHE_UMA(AGE_MS, "WriteTime", group, start);
+      break;
+    case kSparseRead:
+      CACHE_UMA(AGE_MS, "SparseReadTime", 0, start);
+      break;
+    case kSparseWrite:
+      CACHE_UMA(AGE_MS, "SparseWriteTime", 0, start);
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 void EntryImpl::Log(const char* msg) {

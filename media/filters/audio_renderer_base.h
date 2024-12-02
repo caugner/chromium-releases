@@ -24,82 +24,116 @@
 #include "media/base/buffers.h"
 #include "media/base/factory.h"
 #include "media/base/filters.h"
+#include "media/filters/audio_renderer_algorithm_base.h"
 
 namespace media {
 
 class AudioRendererBase : public AudioRenderer {
  public:
   // MediaFilter implementation.
+  virtual void Play(FilterCallback* callback);
+  virtual void Pause(FilterCallback* callback);
   virtual void Stop();
 
-  // AudioRenderer implementation.
-  virtual bool Initialize(AudioDecoder* decoder);
+  virtual void Seek(base::TimeDelta time, FilterCallback* callback);
 
-  // AssignableBuffer<AudioRendererBase, BufferInterface> implementation.
-  virtual void OnAssignment(Buffer* buffer_in);
+  // AudioRenderer implementation.
+  virtual void Initialize(AudioDecoder* decoder, FilterCallback* callback);
+  virtual bool HasEnded();
 
  protected:
-  // The default maximum size of the queue.
-  static const size_t kDefaultMaxQueueSize;
-
   // Only allow a factory to create this class.
-  AudioRendererBase(size_t max_queue_size);
+  AudioRendererBase();
   virtual ~AudioRendererBase();
 
   // Called by Initialize().  |media_format| is the format of the AudioDecoder.
   // Subclasses should return true if they were able to initialize, false
   // otherwise.
-  virtual bool OnInitialize(const MediaFormat* media_format) = 0;
+  virtual bool OnInitialize(const MediaFormat& media_format) = 0;
 
   // Called by Stop().  Subclasses should perform any necessary cleanup during
   // this time, such as stopping any running threads.
   virtual void OnStop() = 0;
 
-  // Fills the given buffer with audio data by dequeuing buffers and copying the
-  // data into the |dest|.  FillBuffer also takes care of updating the clock.
-  // Returns the number of bytes copied into |dest|, which may be less than
-  // equal to |len|.
+  // Called when a AudioDecoder::Read() completes and decrements
+  // |pending_reads_|.
+  virtual void OnReadComplete(Buffer* buffer_in);
+
+  // Fills the given buffer with audio data by delegating to its |algorithm_|.
+  // FillBuffer() also takes care of updating the clock. Returns the number of
+  // bytes copied into |dest|, which may be less than or equal to |len|.
   //
   // If this method is returns less bytes than |len| (including zero), it could
   // be a sign that the pipeline is stalled or unable to stream the data fast
   // enough.  In such scenarios, the callee should zero out unused portions
   // of their buffer to playback silence.
   //
+  // FillBuffer() updates the pipeline's playback timestamp. If FillBuffer() is
+  // not called at the same rate as audio samples are played, then the reported
+  // timestamp in the pipeline will be ahead of the actual audio playback. In
+  // this case |playback_delay| should be used to indicate when in the future
+  // should the filled buffer be played. If FillBuffer() is called as the audio
+  // hardware plays the buffer, then |playback_delay| should be zero.
+  //
   // Safe to call on any thread.
-  size_t FillBuffer(uint8* dest, size_t len);
+  size_t FillBuffer(uint8* dest,
+                    size_t len,
+                    const base::TimeDelta& playback_delay);
 
   // Helper to parse a media format and return whether we were successful
   // retrieving all the information we care about.
-  static bool ParseMediaFormat(const MediaFormat* media_format,
+  static bool ParseMediaFormat(const MediaFormat& media_format,
                                int* channels_out, int* sample_rate_out,
                                int* sample_bits_out);
 
+  // Get/Set the playback rate of |algorithm_|.
+  virtual void SetPlaybackRate(float playback_rate);
+  virtual float GetPlaybackRate();
+
  private:
+  // Helper method that schedules an asynchronous read from the decoder and
+  // increments |pending_reads_|.
+  //
+  // Safe to call from any thread.
+  void ScheduleRead_Locked();
+
   // Audio decoder.
-  AudioDecoder* decoder_;
+  scoped_refptr<AudioDecoder> decoder_;
 
-  // Maximum queue size, configuration parameter passed in during construction.
-  size_t max_queue_size_;
+  // Algorithm for scaling audio.
+  scoped_ptr<AudioRendererAlgorithmBase> algorithm_;
 
-  // Queued audio data.
-  typedef std::deque<Buffer*> BufferQueue;
-  BufferQueue queue_;
   Lock lock_;
 
-  // Remembers the amount of remaining audio data for the front buffer.
-  size_t data_offset_;
+  // Simple state tracking variable.
+  enum State {
+    kUninitialized,
+    kPaused,
+    kSeeking,
+    kPlaying,
+    kStopped,
+    kError,
+  };
+  State state_;
 
-  // Whether or not we're initialized.
-  bool initialized_;
+  // Keeps track of whether we received and rendered the end of stream buffer.
+  bool recieved_end_of_stream_;
+  bool rendered_end_of_stream_;
 
-  // Whether or not we've stopped.
-  bool stopped_;
-
-  // Posts a task on the pipeline thread to read a sample from the decoder.  The
-  // resulting buffer will be placed in the queue.
+  // Keeps track of our pending reads.  We *must* have no pending reads before
+  // executing the pause callback, otherwise we breach the contract that all
+  // filters are idling.
   //
-  // Safe to call on any thread.
-  void ScheduleRead();
+  // We use size_t since we compare against std::deque::size().
+  size_t pending_reads_;
+
+  // Audio time at end of last call to FillBuffer().
+  // TODO(ralphl): Update this value after seeking.
+  base::TimeDelta last_fill_buffer_time_;
+
+  // Filter callbacks.
+  scoped_ptr<FilterCallback> pause_callback_;
+  scoped_ptr<FilterCallback> seek_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererBase);
 };

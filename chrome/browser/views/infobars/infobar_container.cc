@@ -26,26 +26,20 @@ InfoBarContainer::~InfoBarContainer() {
 }
 
 void InfoBarContainer::ChangeTabContents(TabContents* contents) {
-  if (tab_contents_) {
-    NotificationService::current()->RemoveObserver(
-        this, NotificationType::TAB_CONTENTS_INFOBAR_ADDED,
-        Source<TabContents>(tab_contents_));
-    NotificationService::current()->RemoveObserver(
-        this, NotificationType::TAB_CONTENTS_INFOBAR_REMOVED,
-        Source<TabContents>(tab_contents_));
-  }
+  registrar_.RemoveAll();
   // No need to delete the child views here, their removal from the view
   // hierarchy does this automatically (see InfoBar::InfoBarRemoved).
   RemoveAllChildViews(false);
   tab_contents_ = contents;
   if (tab_contents_) {
     UpdateInfoBars();
-    NotificationService::current()->AddObserver(
-        this, NotificationType::TAB_CONTENTS_INFOBAR_ADDED,
-        Source<TabContents>(tab_contents_));
-    NotificationService::current()->AddObserver(
-        this, NotificationType::TAB_CONTENTS_INFOBAR_REMOVED,
-        Source<TabContents>(tab_contents_));
+    Source<TabContents> tc_source(tab_contents_);
+    registrar_.Add(this, NotificationType::TAB_CONTENTS_INFOBAR_ADDED,
+                   tc_source);
+    registrar_.Add(this, NotificationType::TAB_CONTENTS_INFOBAR_REMOVED,
+                   tc_source);
+    registrar_.Add(this, NotificationType::TAB_CONTENTS_INFOBAR_REPLACED,
+                   tc_source);
   }
 }
 
@@ -96,9 +90,13 @@ void InfoBarContainer::Observe(NotificationType type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
   if (type == NotificationType::TAB_CONTENTS_INFOBAR_ADDED) {
-    AddInfoBar(Details<InfoBarDelegate>(details).ptr());
+    AddInfoBar(Details<InfoBarDelegate>(details).ptr(), true);  // animated
   } else if (type == NotificationType::TAB_CONTENTS_INFOBAR_REMOVED) {
-    RemoveInfoBar(Details<InfoBarDelegate>(details).ptr());
+    RemoveInfoBar(Details<InfoBarDelegate>(details).ptr(), true);  // animated
+  } else if (type == NotificationType::TAB_CONTENTS_INFOBAR_REPLACED) {
+    std::pair<InfoBarDelegate*, InfoBarDelegate*>* delegates =
+        Details<std::pair<InfoBarDelegate*, InfoBarDelegate*> >(details).ptr();
+    ReplaceInfoBar(delegates->first, delegates->second);
   } else {
     NOTREACHED();
   }
@@ -116,20 +114,37 @@ void InfoBarContainer::UpdateInfoBars() {
   }
 }
 
-void InfoBarContainer::AddInfoBar(InfoBarDelegate* delegate) {
+void InfoBarContainer::AddInfoBar(InfoBarDelegate* delegate,
+                                  bool use_animation) {
   InfoBar* infobar = delegate->CreateInfoBar();
   infobar->set_container(this);
-  infobar->AnimateOpen();
   AddChildView(infobar);
+
+  if (use_animation)
+    infobar->AnimateOpen();
+  else
+    infobar->Open();
 }
 
-void InfoBarContainer::RemoveInfoBar(InfoBarDelegate* delegate) {
+void InfoBarContainer::RemoveInfoBar(InfoBarDelegate* delegate,
+                                     bool use_animation) {
   int index = 0;
   for (; index < tab_contents_->infobar_delegate_count(); ++index) {
     if (tab_contents_->GetInfoBarDelegateAt(index) == delegate)
       break;
   }
 
-  // The View will be removed once the Close animation completes.
-  static_cast<InfoBar*>(GetChildViewAt(index))->AnimateClose();
+  InfoBar* infobar = static_cast<InfoBar*>(GetChildViewAt(index));
+  if (use_animation) {
+    // The View will be removed once the Close animation completes.
+    infobar->AnimateClose();
+  } else {
+    infobar->Close();
+  }
+}
+
+void InfoBarContainer::ReplaceInfoBar(InfoBarDelegate* old_delegate,
+                                      InfoBarDelegate* new_delegate) {
+  RemoveInfoBar(old_delegate, false);  // no animation
+  AddInfoBar(new_delegate, false);  // no animation
 }

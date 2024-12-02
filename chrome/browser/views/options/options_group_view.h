@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_VIEWS_OPTIONS_OPTIONS_GROUP_VIEW_H__
 #define CHROME_BROWSER_VIEWS_OPTIONS_OPTIONS_GROUP_VIEW_H__
 
-#include "chrome/views/view.h"
+#include "views/view.h"
 
 namespace views {
 class Label;
@@ -34,7 +34,7 @@ class OptionsGroupView : public views::View {
 
  protected:
   // views::View overrides:
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
                                     views::View* child);

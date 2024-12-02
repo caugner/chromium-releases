@@ -5,21 +5,34 @@
 #include "chrome/browser/views/html_dialog_view.h"
 
 #include "chrome/browser/browser.h"
-#include "chrome/views/widget/root_view.h"
-#include "chrome/views/window/window.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "views/widget/root_view.h"
+#include "views/widget/widget.h"
+#include "views/window/window.h"
+
+namespace browser {
+
+// Declared in browser_dialogs.h so that others don't need to depend on our .h. 
+void ShowHtmlDialogView(gfx::NativeWindow parent, Browser* browser,
+                        HtmlDialogUIDelegate* delegate) {
+  HtmlDialogView* html_view = new HtmlDialogView(browser, delegate);
+  views::Window::CreateChromeWindow(parent, gfx::Rect(), html_view);
+  html_view->InitDialog();
+  html_view->window()->Show();
+}
+
+}  // namespace browser
 
 ////////////////////////////////////////////////////////////////////////////////
 // HtmlDialogView, public:
 
 HtmlDialogView::HtmlDialogView(Browser* parent_browser,
-                               Profile* profile,
-                               HtmlDialogContentsDelegate* delegate)
-    : DOMView(delegate->GetDialogContentURL()),
+                               HtmlDialogUIDelegate* delegate)
+    : DOMView(),
       parent_browser_(parent_browser),
-      profile_(profile),
+      profile_(parent_browser->profile()),
       delegate_(delegate) {
-  DCHECK(parent_browser);
-  DCHECK(profile);
+  DCHECK(profile_);
 }
 
 HtmlDialogView::~HtmlDialogView() {
@@ -66,7 +79,7 @@ views::View* HtmlDialogView::GetInitiallyFocusedView() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// HtmlDialogContentsDelegate implementation:
+// HtmlDialogUIDelegate implementation:
 
 bool HtmlDialogView::IsDialogModal() const {
   return IsModal();
@@ -78,6 +91,11 @@ std::wstring HtmlDialogView::GetDialogTitle() const {
 
 GURL HtmlDialogView::GetDialogContentURL() const {
   return delegate_->GetDialogContentURL();
+}
+
+void HtmlDialogView::GetDOMMessageHandlers(
+    std::vector<DOMMessageHandler*>* handlers) const {
+  delegate_->GetDOMMessageHandlers(handlers);
 }
 
 void HtmlDialogView::GetDialogSize(gfx::Size* size) const {
@@ -95,7 +113,8 @@ void HtmlDialogView::OnDialogClosed(const std::string& json_retval) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// PageNavigator implementation:
+// TabContentsDelegate implementation:
+
 void HtmlDialogView::OpenURLFromTab(TabContents* source,
                                     const GURL& url,
                                     const GURL& referrer,
@@ -104,12 +123,9 @@ void HtmlDialogView::OpenURLFromTab(TabContents* source,
   // Force all links to open in a new window, ignoring the incoming
   // disposition. This is a tabless, modal dialog so we can't just
   // open it in the current frame.
-  parent_browser_->OpenURLFromTab(source, url, referrer, NEW_WINDOW,
-                                  transition);
+  static_cast<TabContentsDelegate*>(parent_browser_)->OpenURLFromTab(
+      source, url, referrer, NEW_WINDOW, transition);
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// TabContentsDelegate implementation:
 
 void HtmlDialogView::NavigationStateChanged(const TabContents* source,
                                             unsigned changed_flags) {
@@ -126,7 +142,7 @@ void HtmlDialogView::AddNewContents(TabContents* source,
                     WindowOpenDisposition disposition,
                     const gfx::Rect& initial_pos,
                     bool user_gesture) {
-  parent_browser_->AddNewContents(
+  static_cast<TabContentsDelegate*>(parent_browser_)->AddNewContents(
       source, new_contents, NEW_WINDOW, initial_pos, user_gesture);
 }
 
@@ -136,7 +152,7 @@ void HtmlDialogView::ActivateContents(TabContents* contents) {
 }
 
 void HtmlDialogView::LoadingStateChanged(TabContents* source) {
-  // We don't care about this notification
+  // We don't care about this notification.
 }
 
 void HtmlDialogView::CloseContents(TabContents* source) {
@@ -147,7 +163,7 @@ void HtmlDialogView::CloseContents(TabContents* source) {
 void HtmlDialogView::MoveContents(TabContents* source, const gfx::Rect& pos) {
   // The contained web page wishes to resize itself. We let it do this because
   // if it's a dialog we know about, we trust it not to be mean to the user.
-  window()->SetBounds(pos);
+  GetWidget()->SetBounds(pos);
 }
 
 bool HtmlDialogView::IsPopup(TabContents* source) {
@@ -177,9 +193,12 @@ void HtmlDialogView::InitDialog() {
   // Now Init the DOMView. This view runs in its own process to render the html.
   DOMView::Init(profile_, NULL);
 
-  // Make sure this new TabContents we just created in Init() knows about us.
-  DCHECK(host_->type() == TAB_CONTENTS_HTML_DIALOG);
-  HtmlDialogContents* host = static_cast<HtmlDialogContents*>(host_);
-  host->Init(this);
-  host->set_delegate(this);
+  tab_contents_->set_delegate(this);
+
+  // Set the delegate. This must be done before loading the page. See
+  // the comment above HtmlDialogUI in its header file for why.
+  HtmlDialogUI::GetPropertyAccessor().SetProperty(tab_contents_->property_bag(),
+                                                  this);
+
+  DOMView::LoadURL(delegate_->GetDialogContentURL());
 }

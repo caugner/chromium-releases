@@ -20,11 +20,13 @@
 #include "base/values.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/net/url_fetcher.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "webkit/glue/webplugin.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class BookmarkModel;
 class BookmarkNode;
+class HistogramSynchronizer;
 class PrefService;
 class Profile;
 class TemplateURLModel;
@@ -159,6 +161,12 @@ class MetricsService : public NotificationObserver,
   // Generates a new client ID to use to identify self to metrics server.
   static std::string GenerateClientID();
 
+#if defined(OS_POSIX)
+  // Generates a new client ID to use to identify self to metrics server,
+  // given 128 bits of randomness.
+  static std::string RandomBytesToGUIDString(const uint64 bytes[2]);
+#endif
+
   // Schedule the next save of LocalState information.  This is called
   // automatically by the task that performs each save to schedule the next one.
   void ScheduleNextStateSave();
@@ -177,14 +185,6 @@ class MetricsService : public NotificationObserver,
   // or passes in NULL to indicate that the log should simply be deleted.
   void StopRecording(MetricsLog** log);
 
-  void ListenerRegistration(bool start_listening);
-
-  // Adds or Removes (depending on the value of is_add) the given observer
-  // to the given notification type for all sources.
-  static void AddOrRemoveObserver(NotificationObserver* observer,
-                                  NotificationType type,
-                                  bool is_add);
-
   // Deletes pending_log_ and current_log_, and pushes their text into the
   // appropriate unsent_log vectors.  Called when Chrome shuts down.
   void PushPendingLogsToUnsentLists();
@@ -195,9 +195,15 @@ class MetricsService : public NotificationObserver,
 
   // Start timer for next log transmission.
   void StartLogTransmissionTimer();
-  // Do not call TryToStartTransmission() directly.
+
+  // Internal function to collect process memory information.
+  void LogTransmissionTimerDone();
+
+  // Do not call OnMemoryDetailCollectionDone() or
+  // OnHistogramSynchronizationDone() directly.
   // Use StartLogTransmissionTimer() to schedule a call.
-  void TryToStartTransmission();
+  void OnMemoryDetailCollectionDone();
+  void OnHistogramSynchronizationDone();
 
   // Takes whatever log should be uploaded next (according to the state_)
   // and makes it the pending log.  If pending_log_ is not NULL,
@@ -208,9 +214,6 @@ class MetricsService : public NotificationObserver,
   // the user whether the pending_log_ should be sent or discarded.  Called by
   // TryToStartTransmission.
   bool TransmissionPermitted() const;
-
-  // Internal function to collect process memory information.
-  void CollectMemoryDetails();
 
   // Check to see if there is a log that needs to be, or is being, transmitted.
   bool pending_log() const {
@@ -320,7 +323,7 @@ class MetricsService : public NotificationObserver,
   // Set the value in preferences for for the number of bookmarks and folders
   // in node. The pref key for the number of bookmarks in num_bookmarks_key and
   // the pref key for number of folders in num_folders_key.
-  void LogBookmarks(BookmarkNode* node,
+  void LogBookmarks(const BookmarkNode* node,
                     const wchar_t* num_bookmarks_key,
                     const wchar_t* num_folders_key);
 
@@ -377,6 +380,8 @@ class MetricsService : public NotificationObserver,
   // Sets the value of the specified path in prefs and schedules a save.
   void RecordBooleanPrefValue(const wchar_t* path, bool value);
 
+  NotificationRegistrar registrar_;
+
   // Indicate whether recording and reporting are currently happening.
   // These should not be set directly, but by calling SetRecording and
   // SetReporting.
@@ -410,6 +415,9 @@ class MetricsService : public NotificationObserver,
 
   // The log that we are still appending to.
   MetricsLog* current_log_;
+
+  // The URL for the metrics server.
+  std::wstring server_url_;
 
   // The identifier that's sent to the server with the log reports.
   std::string client_id_;
@@ -474,6 +482,9 @@ class MetricsService : public NotificationObserver,
   // Indicate that a timer for sending the next log has already been queued.
   bool timer_pending_;
 
+  FRIEND_TEST(MetricsServiceTest, ClientIdGeneratesAllZeroes);
+  FRIEND_TEST(MetricsServiceTest, ClientIdGeneratesCorrectly);
+  FRIEND_TEST(MetricsServiceTest, ClientIdCorrectlyFormatted);
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };
 

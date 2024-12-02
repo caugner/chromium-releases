@@ -63,7 +63,7 @@ class TemplateURLRef {
   // returns false), an empty string is returned.
   //
   // The TemplateURL is used to determine the input encoding for the term.
-  GURL ReplaceSearchTerms(
+  std::wstring ReplaceSearchTerms(
       const TemplateURL& host,
       const std::wstring& terms,
       int accepted_suggestion,
@@ -250,6 +250,10 @@ class TemplateURL {
   // Generates a favicon URL from the specified url.
   static GURL GenerateFaviconURL(const GURL& url);
 
+  // Returns true if |true| is non-null and has a search URL that supports
+  // replacement.
+  static bool SupportsReplacement(const TemplateURL* turl);
+
   TemplateURL()
       : autogenerate_keyword_(false),
         show_in_default_list_(false),
@@ -267,6 +271,10 @@ class TemplateURL {
     short_name_ = short_name;
   }
   const std::wstring& short_name() const { return short_name_; }
+
+  // An accessor for the short_name, but adjusted so it can be appropriately
+  // displayed even if it is LTR and the UI is RTL.
+  std::wstring AdjustedShortNameForLocaleDirection() const;
 
   // A description of the template; this may be empty.
   void set_description(const std::wstring& description) {

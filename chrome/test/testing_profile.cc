@@ -13,6 +13,26 @@ using base::Time;
 
 namespace {
 
+// Task used to make sure history has finished processing a request. Intended
+// for use with BlockUntilHistoryProcessesPendingRequests.
+
+class QuittingHistoryDBTask : public HistoryDBTask {
+ public:
+  QuittingHistoryDBTask() {}
+
+  virtual bool RunOnDBThread(history::HistoryBackend* backend,
+                             history::HistoryDatabase* db) {
+    return true;
+  }
+
+  virtual void DoneRunOnMainThread() {
+    MessageLoop::current()->Quit();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(QuittingHistoryDBTask);
+};
+
 // BookmarkLoadObserver is used when blocking until the BookmarkModel
 // finishes loading. As soon as the BookmarkModel finishes loading the message
 // loop is quit.
@@ -24,22 +44,23 @@ class BookmarkLoadObserver : public BookmarkModelObserver {
   }
 
   virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 BookmarkNode* old_parent,
+                                 const BookmarkNode* old_parent,
                                  int old_index,
-                                 BookmarkNode* new_parent,
+                                 const BookmarkNode* new_parent,
                                  int new_index) {}
   virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 BookmarkNode* parent,
+                                 const BookmarkNode* parent,
                                  int index) {}
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
-                                   int index) {}
+                                   const BookmarkNode* parent,
+                                   int old_index,
+                                   const BookmarkNode* node) {}
   virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   BookmarkNode* node) {}
+                                   const BookmarkNode* node) {}
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             BookmarkNode* node) {}
+                                             const BookmarkNode* node) {}
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
-                                         BookmarkNode* node) {}
+                                         const BookmarkNode* node) {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BookmarkLoadObserver);
@@ -143,4 +164,17 @@ void TestingProfile::BlockUntilBookmarkModelLoaded() {
 
 void TestingProfile::CreateTemplateURLModel() {
   template_url_model_.reset(new TemplateURLModel(this));
+}
+
+void TestingProfile::CreateThemeProvider() {
+  theme_provider_ = new BrowserThemeProvider();
+}
+
+void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
+  DCHECK(history_service_.get());
+  DCHECK(MessageLoop::current());
+
+  CancelableRequestConsumer consumer;
+  history_service_->ScheduleDBTask(new QuittingHistoryDBTask(), &consumer);
+  MessageLoop::current()->Run();
 }

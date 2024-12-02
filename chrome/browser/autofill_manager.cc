@@ -6,18 +6,22 @@
 
 #include "base/string_util.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "webkit/glue/autofill_form.h"
+
+// Limit on the number of suggestions to appear in the pop-up menu under an
+// text input element in a form.
+static const int kMaxAutofillMenuItems = 6;
 
 // static
 void AutofillManager::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kFormAutofillEnabled, true);
 }
 
-AutofillManager::AutofillManager(WebContents* web_contents)
-    : web_contents_(web_contents),
+AutofillManager::AutofillManager(TabContents* tab_contents)
+    : tab_contents_(tab_contents),
       pending_query_handle_(0),
       node_id_(0),
       request_id_(0) {
@@ -43,18 +47,17 @@ void AutofillManager::CancelPendingQuery() {
 }
 
 Profile* AutofillManager::profile() {
-  return web_contents_->profile();
+  return tab_contents_->profile();
 }
 
-void AutofillManager::AutofillFormSubmitted(const AutofillForm& form) {
+void AutofillManager::AutofillFormSubmitted(const webkit_glue::AutofillForm& form) {
   StoreFormEntriesInWebDatabase(form);
 }
 
-void AutofillManager::FetchValuesForName(const std::wstring& name,
-                                         const std::wstring& prefix,
-                                         int limit,
-                                         int64 node_id,
-                                         int request_id) {
+void AutofillManager::GetAutofillSuggestions(const std::wstring& name,
+                                             const std::wstring& prefix,
+                                             int64 node_id,
+                                             int request_id) {
   if (!*form_autofill_enabled_)
     return;
 
@@ -70,12 +73,12 @@ void AutofillManager::FetchValuesForName(const std::wstring& name,
   node_id_ = node_id;
   request_id_ = request_id;
 
-  pending_query_handle_ = web_data_service->
-      GetFormValuesForElementName(name, prefix, limit, this);
+  pending_query_handle_ = web_data_service->GetFormValuesForElementName(
+      name, prefix, kMaxAutofillMenuItems, this);
 }
 
-void AutofillManager::RemoveValueForName(const std::wstring& name,
-                                         const std::wstring& value) {
+void AutofillManager::RemoveAutofillEntry(const std::wstring& name,
+                                          const std::wstring& value) {
   WebDataService* web_data_service =
       profile()->GetWebDataService(Profile::EXPLICIT_ACCESS);
   if (!web_data_service) {
@@ -100,7 +103,7 @@ void AutofillManager::OnWebDataServiceRequestDone(WebDataService::Handle h,
 
   switch (result->GetType()) {
     case AUTOFILL_VALUE_RESULT: {
-      RenderViewHost* host = web_contents_->render_view_host();
+      RenderViewHost* host = tab_contents_->render_view_host();
       if (!host)
         return;
       const WDResult<std::vector<std::wstring> >* r =
@@ -117,7 +120,7 @@ void AutofillManager::OnWebDataServiceRequestDone(WebDataService::Handle h,
 }
 
 void AutofillManager::StoreFormEntriesInWebDatabase(
-    const AutofillForm& form) {
+    const webkit_glue::AutofillForm& form) {
   if (!*form_autofill_enabled_)
     return;
 

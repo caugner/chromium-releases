@@ -2,85 +2,61 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "temp_scaffolding_stubs.h"
+#include "chrome/common/temp_scaffolding_stubs.h"
 
 #include "build/build_config.h"
 
 #include <vector>
 
-#include "base/file_util.h"
+#include "base/gfx/rect.h"
 #include "base/logging.h"
-#include "base/thread.h"
-#include "base/path_service.h"
-#include "base/string_piece.h"
-#include "base/singleton.h"
-#include "base/task.h"
-#include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/automation/automation_provider.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/debugger/debugger_shell.h"
-#include "chrome/browser/dom_ui/dom_ui.h"
 #include "chrome/browser/download/download_request_dialog_delegate.h"
 #include "chrome/browser/download/download_request_manager.h"
 #include "chrome/browser/first_run.h"
-#include "chrome/browser/history/in_memory_history_backend.h"
+#include "chrome/browser/fonts_languages_window.h"
+#include "chrome/browser/hung_renderer_dialog.h"
 #include "chrome/browser/memory_details.h"
-#include "chrome/browser/profile_manager.h"
-#include "chrome/browser/renderer_host/render_widget_helper.h"
-#include "chrome/browser/renderer_host/resource_message_filter.h"
+#include "chrome/browser/options_window.h"
 #include "chrome/browser/rlz/rlz.h"
-#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/tab_contents/web_contents.h"
-#include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_plugin_util.h"
-#include "chrome/common/gfx/chrome_font.h"
-#include "chrome/common/gfx/text_elider.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/common/process_watcher.h"
-#include "net/url_request/url_request_context.h"
-#include "webkit/glue/webcursor.h"
-#include "webkit/glue/webkit_glue.h"
+
+#if defined(OS_LINUX)
+#include "chrome/browser/dock_info.h"
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+#include "chrome/browser/bookmarks/bookmark_editor.h"
+#include "chrome/browser/bookmarks/bookmark_manager.h"
+#include "chrome/browser/tab_contents/constrained_window.h"
+#include "views/controls/menu/chrome_menu.h"
+#include "views/controls/single_split_view.h"
+#endif
+
+class TabContents;
 
 //--------------------------------------------------------------------------
 
-WebContents* AutomationProvider::GetWebContentsForHandle(
-    int handle, NavigationController** tab) {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
 void AutomationProvider::GetActiveWindow(int* handle) { NOTIMPLEMENTED(); }
-
-void AutomationProvider::IsWindowActive(int handle, bool* success,
-                                        bool* is_active) {
-  *success = false;
-  NOTIMPLEMENTED();
-}
 
 void AutomationProvider::ActivateWindow(int handle) { NOTIMPLEMENTED(); }
 
 void AutomationProvider::SetWindowVisible(int handle, bool visible,
                                           bool* result) { NOTIMPLEMENTED(); }
 
+void AutomationProvider::SetWindowBounds(int handle, const gfx::Rect& bounds,
+                                         bool* success) {
+  NOTIMPLEMENTED();
+}
+
+
 void AutomationProvider::GetFocusedViewID(int handle, int* view_id) {
   NOTIMPLEMENTED();
 }
 
-void AutomationProvider::OpenNewBrowserWindow(int show_command) {
-  NOTIMPLEMENTED();
-}
-
-void AutomationProvider::GetWindowForBrowser(int browser_handle,
-                                             bool* success,
-                                             int* handle) {
-  *success = false;
-  NOTIMPLEMENTED();
-}
-
+#if defined(OS_MACOSX)
 void AutomationProvider::GetAutocompleteEditForBrowser(
     int browser_handle,
     bool* success,
@@ -88,6 +64,7 @@ void AutomationProvider::GetAutocompleteEditForBrowser(
   *success = false;
   NOTIMPLEMENTED();
 }
+#endif
 
 void AutomationProvider::GetBrowserForWindow(int window_handle,
                                              bool* success,
@@ -120,15 +97,11 @@ void AutomationProvider::PrintNow(int tab_handle,
   NOTIMPLEMENTED();
 }
 
-void AutomationProvider::SavePage(int tab_handle,
-                                  const std::wstring& file_name,
-                                  const std::wstring& dir_path,
-                                  int type,
-                                  bool* success) {
-  *success = false;
+void AutomationProvider::PrintAsync(int tab_handle) {
   NOTIMPLEMENTED();
 }
 
+#if defined(OS_MACOSX)
 void AutomationProvider::GetAutocompleteEditText(int autocomplete_edit_handle,
                                                  bool* success,
                                                  std::wstring* text) {
@@ -164,73 +137,65 @@ void AutomationProvider::OnMessageFromExternalHost(
     const std::string& target) {
   NOTIMPLEMENTED();
 }
-
-void AutomationProvider::GetShowingAppModalDialog(bool* showing_dialog,
-                                                  int* dialog_button) {
-  NOTIMPLEMENTED();
-}
-
-void AutomationProvider::ClickAppModalDialogButton(int button, bool* success) {
-  *success = false;
-  NOTIMPLEMENTED();
-}
+#endif  // defined(OS_MACOSX)
 
 //--------------------------------------------------------------------------
 
-bool ShellIntegration::SetAsDefaultBrowser() {
-  NOTIMPLEMENTED();
-  return true;
-}
-
-bool ShellIntegration::IsDefaultBrowser() {
-  NOTIMPLEMENTED();
-  return true;
-}
-
-//--------------------------------------------------------------------------
-
-// static
-bool FirstRun::IsChromeFirstRun() {
-  NOTIMPLEMENTED();
-  return false;
-}
 
 // static
 bool FirstRun::ProcessMasterPreferences(const FilePath& user_data_dir,
                                         const FilePath& master_prefs_path,
-                                        int* preference_details) {
+                                        std::vector<std::wstring>* new_tabs,
+                                        int* ping_delay,
+                                        int import_items,
+                                        int dont_import_items) {
+  // http://code.google.com/p/chromium/issues/detail?id=11971
+  // Pretend we processed them correctly.
+  return true;
+}
+
+// static
+int FirstRun::ImportNow(Profile* profile, const CommandLine& cmdline) {
+  // http://code.google.com/p/chromium/issues/detail?id=11971
+  return 0;
+}
+
+bool FirstRun::CreateChromeDesktopShortcut() {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool FirstRun::CreateChromeQuickLaunchShortcut() {
   NOTIMPLEMENTED();
   return false;
 }
 
 // static
-int FirstRun::ImportNow(Profile* profile, const CommandLine& cmdline) {
-  NOTIMPLEMENTED();
-  return 0;
-}
-
-// static
 bool Upgrade::IsBrowserAlreadyRunning() {
-  NOTIMPLEMENTED();
+  // http://code.google.com/p/chromium/issues/detail?id=9295
   return false;
 }
 
 // static
 bool Upgrade::RelaunchChromeBrowser(const CommandLine& command_line) {
-  NOTIMPLEMENTED();
+  // http://code.google.com/p/chromium/issues/detail?id=9295
   return true;
 }
 
 // static
 bool Upgrade::SwapNewChromeExeIfPresent() {
-  NOTIMPLEMENTED();
+  // http://code.google.com/p/chromium/issues/detail?id=9295
   return true;
 }
 
-void OpenFirstRunDialog(Profile* profile) { NOTIMPLEMENTED(); }
+// static
+Upgrade::TryResult ShowTryChromeDialog(size_t version) {
+  return Upgrade::TD_NOT_NOW;
+}
 
 //--------------------------------------------------------------------------
 
+#if defined(OS_MACOSX)
 void InstallJankometer(const CommandLine&) {
   // http://code.google.com/p/chromium/issues/detail?id=8077
 }
@@ -238,6 +203,7 @@ void InstallJankometer(const CommandLine&) {
 void UninstallJankometer() {
   // http://code.google.com/p/chromium/issues/detail?id=8077
 }
+#endif
 
 //--------------------------------------------------------------------------
 
@@ -256,75 +222,21 @@ bool RLZTracker::RecordProductEvent(Product product, AccessPoint point,
   return false;
 }
 
-// This depends on porting all the plugin IPC messages.
-bool IsPluginProcess() {
-  return false;
-}
-
-//--------------------------------------------------------------------------
-
-#if defined(OS_MACOSX)
-
-class DownloadShelfMac : public DownloadShelf {
- public:
-  explicit DownloadShelfMac(TabContents* tab_contents)
-      : DownloadShelf(tab_contents) { }
-  virtual void AddDownload(BaseDownloadItemModel* download_model) { }
-  virtual bool IsShowing() const { return false; }
-};
-
-// static
-DownloadShelf* DownloadShelf::Create(TabContents* tab_contents) {
-  return new DownloadShelfMac(tab_contents);
-}
-
-#endif
-
-//--------------------------------------------------------------------------
-
-void RunJavascriptMessageBox(WebContents* web_contents,
-                             const GURL& url,
-                             int dialog_flags,
-                             const std::wstring& message_text,
-                             const std::wstring& default_prompt_text,
-                             bool display_suppress_checkbox,
-                             IPC::Message* reply_msg) {
-  NOTIMPLEMENTED();
-}
-
-void RunBeforeUnloadDialog(WebContents* web_contents,
-                           const GURL& url,
-                           const std::wstring& message_text,
-                           IPC::Message* reply_msg) {
-  NOTIMPLEMENTED();
-}
-
 //--------------------------------------------------------------------------
 
 void RunRepostFormWarningDialog(NavigationController*) {
 }
 
+#if defined(OS_MACOSX)
 LoginHandler* CreateLoginPrompt(net::AuthChallengeInfo* auth_info,
                                 URLRequest* request,
                                 MessageLoop* ui_loop) {
   NOTIMPLEMENTED();
   return NULL;
 }
-
-void ProcessWatcher::EnsureProcessTerminated(int) {
-  NOTIMPLEMENTED();
-}
-
+#endif
 
 //--------------------------------------------------------------------------
-namespace webkit_glue {
-
-bool IsDefaultPluginEnabled() {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-}  // webkit_glue
 
 MemoryDetails::MemoryDetails() {
   NOTIMPLEMENTED();
@@ -334,34 +246,26 @@ void MemoryDetails::StartFetch() {
   NOTIMPLEMENTED();
 }
 
-InfoBar* ConfirmInfoBarDelegate::CreateInfoBar() {
-  NOTIMPLEMENTED();
-  return NULL;
-}
+// This should prompt the user if she wants to allow more than one concurrent
+// download per tab. Until this is in place, always allow multiple downloads.
+class DownloadRequestDialogDelegateStub
+    : public DownloadRequestDialogDelegate {
+ public:
+  explicit DownloadRequestDialogDelegateStub(
+    DownloadRequestManager::TabDownloadState* host)
+      : DownloadRequestDialogDelegate(host) { DoAccept(); }
 
-InfoBar* AlertInfoBarDelegate::CreateInfoBar() {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
-InfoBar* LinkInfoBarDelegate::CreateInfoBar() {
-  NOTIMPLEMENTED();
-  return NULL;
-}
+  virtual void CloseWindow() {}
+};
 
 DownloadRequestDialogDelegate* DownloadRequestDialogDelegate::Create(
     TabContents* tab,
     DownloadRequestManager::TabDownloadState* host) {
   NOTIMPLEMENTED();
-  return NULL;
+  return new DownloadRequestDialogDelegateStub(host);
 }
 
-views::Window* CreateInputWindow(gfx::NativeWindow parent_hwnd,
-                                 InputWindowDelegate* delegate) {
-  NOTIMPLEMENTED();
-  return new views::Window();
-}
-
+#if !defined(TOOLKIT_VIEWS)
 namespace download_util {
 
 void DragDownload(const DownloadItem* download, SkBitmap* icon) {
@@ -369,3 +273,150 @@ void DragDownload(const DownloadItem* download, SkBitmap* icon) {
 }
 
 }  // namespace download_util
+#endif
+
+#if !defined(TOOLKIT_VIEWS)
+void BrowserList::AllBrowsersClosed() {
+  // TODO(port): Close any dependent windows if necessary when the last browser
+  //             window is closed.
+}
+#endif
+
+//--------------------------------------------------------------------------
+
+#if defined(OS_MACOSX)
+void ShowOptionsWindow(OptionsPage page,
+                       OptionsGroup highlight_group,
+                       Profile* profile) {
+  NOTIMPLEMENTED();
+}
+#endif
+
+#if defined(OS_MACOSX)
+bool DockInfo::GetNewWindowBounds(gfx::Rect* new_window_bounds,
+                                  bool* maximize_new_window) const {
+  NOTIMPLEMENTED();
+  return true;
+}
+
+void DockInfo::AdjustOtherWindowBounds() const {
+  NOTIMPLEMENTED();
+}
+#endif
+
+//------------------------------------------------------------------------------
+
+#if defined(OS_MACOSX)
+void ShowFontsLanguagesWindow(gfx::NativeWindow window,
+                              FontsLanguagesPage page,
+                              Profile* profile) {
+  NOTIMPLEMENTED();
+}
+#endif
+
+//------------------------------------------------------------------------------
+
+#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
+namespace views {
+
+MenuItemView::MenuItemView(MenuDelegate* delegate) {
+}
+
+MenuItemView::~MenuItemView() {
+}
+
+MenuItemView* MenuItemView::AppendMenuItemInternal(int item_id,
+                                                   const std::wstring& label,
+                                                   const SkBitmap& icon,
+                                                   Type type) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+void MenuItemView::RunMenuAt(gfx::NativeView parent,
+               const gfx::Rect& bounds,
+               AnchorPosition anchor,
+               bool has_mnemonics) {
+  NOTIMPLEMENTED();
+}
+
+void MenuItemView::RunMenuForDropAt(gfx::NativeView parent,
+                      const gfx::Rect& bounds,
+                      AnchorPosition anchor) {
+  NOTIMPLEMENTED();
+}
+
+// Hides and cancels the menu. This does nothing if the menu is not open.
+void MenuItemView::Cancel() {
+  NOTIMPLEMENTED();
+}
+
+SubmenuView* MenuItemView::CreateSubmenu() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+void MenuItemView::SetSelected(bool selected) {
+  NOTIMPLEMENTED();
+}
+
+void MenuItemView::SetIcon(const SkBitmap& icon, int item_id) {
+  NOTIMPLEMENTED();
+}
+
+void MenuItemView::SetIcon(const SkBitmap& icon) {
+  NOTIMPLEMENTED();
+}
+
+void MenuItemView::Paint(gfx::Canvas* canvas) {
+  NOTIMPLEMENTED();
+}
+
+gfx::Size MenuItemView::GetPreferredSize() {
+  NOTIMPLEMENTED();
+  return gfx::Size();
+}
+
+MenuController* MenuItemView::GetMenuController() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+MenuDelegate* MenuItemView::GetDelegate() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+MenuItemView* MenuItemView::GetRootMenuItem() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+wchar_t MenuItemView::GetMnemonic() {
+  return 'a';
+}
+
+}  // namespace views
+
+ConstrainedWindow* ConstrainedWindow::CreateConstrainedDialog(
+    TabContents* owner,
+    ConstrainedWindowDelegate* delegate) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+void BookmarkEditor::Show(gfx::NativeView parent_window,
+                          Profile* profile,
+                          const BookmarkNode* parent,
+                          const BookmarkNode* node,
+                          Configuration configuration,
+                          Handler* handler) {
+  NOTIMPLEMENTED();
+}
+
+void BookmarkManager::SelectInTree(Profile* profile, const BookmarkNode* node) {
+}
+void BookmarkManager::Show(Profile* profile) {
+}
+
+#endif

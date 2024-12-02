@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html i18n-values="dir:textdirection;firstview:firstview;bookmarkbarattached:bookmarkbarattached;hasattribution:hasattribution;anim:anim">
+<meta charset="utf-8">
+<title i18n-content="title"></title>
+<script>
+// Logging info for benchmarking purposes.
+var log = [];
+function logEvent(name) {
+  log.push([name, Date.now()]);
+}
+
+var global = this;
+
+/**
+ * Registers a callback function so that if the backend calls it too early it
+ * will get delayed until DOMContentLoaded is fired.
+ * @param {string} name The name of the global function that the backend calls.
+ */
+function registerCallback(name) {
+  var f = function(var_args) {
+    var args = Array.prototype.slice.call(arguments);
+    // If we still have the temporary function we delay until the dom is ready.
+    if (global[name] == f) {
+      logEvent(name + ' is not yet ready. Waiting for DOMContentLoaded');
+      document.addEventListener('DOMContentLoaded', function() {
+        logEvent('Calling the new ' + name);
+        global[name].apply(null, args);
+      });
+    }
+  };
+  global[name] = f;
+}
+
+chrome.send('getShownSections');
+chrome.send('getMostVisited');
+chrome.send('getRecentlyClosedTabs');
+chrome.send('getTips');
+
+registerCallback('onShownSections');
+registerCallback('mostVisitedPages');
+registerCallback('recentlyClosedTabs');
+registerCallback('tips');
+logEvent('log start');
+
+</script>
+<link rel="stylesheet" href="new_new_tab.css">
+<script>
+// Until themes can clear the cache, force-reload the theme stylesheet.
+document.write('<link id="themecss" rel="stylesheet" ' +
+               'href="chrome://theme/css/newtab.css?' +
+               (new Date()).getTime() + '">');
+</script>
+</head>
+<body class="loading"
+      i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
+
+<div id="main">
+
+  <div id="view-toolbar"
+      ><input type=checkbox id="thumb-checkbox" checked
+              i18n-values="title:showhidethumbnailtooltip"
+      ><input type=checkbox id="list-checkbox"
+              i18n-values="title:showhidelisttooltip"
+      ><input type="button" id="option-button"
+              i18n-values="title:pagedisplaytooltip"></div>
+
+  <div id="option-menu" class="window-menu">
+    <div command="hide" section="THUMB" i18n-content="mostvisited"></div>
+    <div command="hide" section="RECENT" i18n-content="recentlyclosed"></div>
+    <hr>
+    <div command="clear-all-blacklisted"
+         i18n-content="restorethumbnails"></div>
+  </div>
+
+  <div id="notification">
+    <span>&nbsp;</span>
+    <span class="link"><span class="link-color"></span></span>
+  </div>
+
+  <div id="most-visited">
+    <a class="thumbnail-container filler" tabindex="1" id="t0">
+      <div class="edit-mode-border">
+        <div class="edit-bar">
+          <div class="pin"></div>
+          <div class="spacer"></div>
+          <div class="remove"></div>
+        </div>
+        <span class="thumbnail-wrapper">
+          <span class="thumbnail"></span>
+        </span>
+      </div>
+      <div class="title">
+        <div></div>
+      </div>
+    </a>
+
+    <a class="thumbnail-container filler" tabindex="1" id="t1">
+      <div class="edit-mode-border">
+        <div class="edit-bar">
+          <div class="pin"></div>
+          <div class="spacer"></div>
+          <div class="remove"></div>
+        </div>
+        <span class="thumbnail-wrapper">
+          <span class="thumbnail"></span>
+        </span>
+      </div>
+      <div class="title">
+        <div></div>
+      </div>
+    </a>
+
+    <a class="thumbnail-container filler" tabindex="1" id="t2">
+      <div class="edit-mode-border">
+        <div class="edit-bar">
+          <div class="pin"></div>
+          <div class="spacer"></div>
+          <div class="remove"></div>
+        </div>
+        <span class="thumbnail-wrapper">
+          <span class="thumbnail"></span>
+        </span>
+      </div>
+      <div class="title">
+        <div></div>
+      </div>
+    </a>
+
+    <a class="thumbnail-container filler" tabindex="1" id="t3">
+      <div class="edit-mode-border">
+        <div class="edit-bar">
+          <div class="pin"></div>
+          <div class="spacer"></div>
+          <div class="remove"></div>
+        </div>
+        <span class="thumbnail-wrapper">
+          <span class="thumbnail"></span>
+        </span>
+      </div>
+      <div class="title">
+        <div></div>
+      </div>
+    </a>
+
+    <a class="thumbnail-container filler" tabindex="1" id="t4">
+      <div class="edit-mode-border">
+        <div class="edit-bar">
+          <div class="pin"></div>
+          <div class="spacer"></div>
+          <div class="remove"></div>
+        </div>
+        <span class="thumbnail-wrapper">
+          <span class="thumbnail"></span>
+        </span>
+      </div>
+      <div class="title">
+        <div></div>
+      </div>
+    </a>
+
+    <a class="thumbnail-container filler" tabindex="1" id="t5">
+      <div class="edit-mode-border">
+        <div class="edit-bar">
+          <div class="pin"></div>
+          <div class="spacer"></div>
+          <div class="remove"></div>
+        </div>
+        <span class="thumbnail-wrapper">
+          <span class="thumbnail"></span>
+        </span>
+      </div>
+      <div class="title">
+        <div></div>
+      </div>
+    </a>
+
+    <a class="thumbnail-container filler" tabindex="1" id="t6">
+      <div class="edit-mode-border">
+        <div class="edit-bar">
+          <div class="pin"></div>
+          <div class="spacer"></div>
+          <div class="remove"></div>
+        </div>
+        <span class="thumbnail-wrapper">
+          <span class="thumbnail"></span>
+        </span>
+      </div>
+      <div class="title">
+        <div></div>
+      </div>
+    </a>
+
+    <a class="thumbnail-container filler" tabindex="1" id="t7">
+      <div class="edit-mode-border">
+        <div class="edit-bar">
+          <div class="pin"></div>
+          <div class="spacer"></div>
+          <div class="remove"></div>
+        </div>
+        <span class="thumbnail-wrapper">
+          <span class="thumbnail"></span>
+        </span>
+      </div>
+      <div class="title">
+        <div></div>
+      </div>
+    </a>
+
+  </div>
+
+  <div id="recently-closed">
+    <h2 i18n-content="recentlyclosed"></h2>
+    <span class="nav">
+      <a href="chrome://history/" class="item"
+          i18n-content="viewfullhistory"></a>
+    </span>
+  </div>
+
+  <div id="tip-line"></div>
+
+  <div id="attribution" class="attribution">
+    <div i18n-content="attributionintro"></div>
+    <img id="attribution-img">
+  </div>
+
+</div> <!-- main -->
+
+<div id="themes-promo">
+  <a i18n-values="href:themelink">
+    <img src="chrome://theme/newtab_themes_promo">
+  </a>
+</div>
+
+<div class="window-menu" id="window-tooltip"></div>
+
+</body>
+<script src="local_strings.js"></script>
+<script src="new_new_tab.js"></script>
+</html>

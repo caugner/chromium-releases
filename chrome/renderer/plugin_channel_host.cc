@@ -6,6 +6,10 @@
 
 #include "chrome/common/plugin_messages.h"
 
+#if defined(OS_POSIX)
+#include "ipc/ipc_channel_posix.h"
+#endif
+
 // A simple MessageFilter that will ignore all messages and respond to sync
 // messages with an error when is_listening_ is false.
 class IsListeningFilter : public IPC::ChannelProxy::MessageFilter {
@@ -26,24 +30,34 @@ class IsListeningFilter : public IPC::ChannelProxy::MessageFilter {
 };
 
 bool IsListeningFilter::OnMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  if (!IsListeningFilter::is_listening_) {
-    // reply to synchronous messages with an error (so they don't block while
-    // we're not listening)
-    if (message.is_sync()) {
-      IPC::Message* reply = IPC::SyncMessage::GenerateReply(&message);
-      reply->set_reply_error();
-      channel_->Send(reply);
-    }
-    handled = true;
-  } else {
-    handled = false;
+  if (IsListeningFilter::is_listening_) {
+    // Proceed with normal operation.
+    return false;
   }
-  return handled;
+
+  // Always process message reply to prevent renderer from hanging on sync
+  // messages.
+  if (message.is_reply() || message.is_reply_error()) {
+    return false;
+  }
+
+  // Reply to synchronous messages with an error (so they don't block while
+  // we're not listening).
+  if (message.is_sync()) {
+    IPC::Message* reply = IPC::SyncMessage::GenerateReply(&message);
+    reply->set_reply_error();
+    channel_->Send(reply);
+  }
+  return true;
 }
 
 // static
 bool IsListeningFilter::is_listening_ = true;
+
+// static
+bool PluginChannelHost::IsListening() {
+  return IsListeningFilter::is_listening_;
+}
 
 // static
 void PluginChannelHost::SetListening(bool flag) {
@@ -51,7 +65,7 @@ void PluginChannelHost::SetListening(bool flag) {
 }
 
 PluginChannelHost* PluginChannelHost::GetPluginChannelHost(
-    const std::wstring& channel_name, MessageLoop* ipc_message_loop) {
+    const std::string& channel_name, MessageLoop* ipc_message_loop) {
   PluginChannelHost* result =
       static_cast<PluginChannelHost*>(PluginChannelBase::GetChannel(
           channel_name,
@@ -66,6 +80,9 @@ PluginChannelHost::PluginChannelHost() {
 }
 
 PluginChannelHost::~PluginChannelHost() {
+#if defined(OS_POSIX)
+  IPC::RemoveAndCloseChannelSocket(channel_name());
+#endif
 }
 
 bool PluginChannelHost::Init(MessageLoop* ipc_message_loop,

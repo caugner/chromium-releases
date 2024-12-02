@@ -1,15 +1,17 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_FIND_BAR_WIN_H_
 #define CHROME_BROWSER_VIEWS_FIND_BAR_WIN_H_
 
+#include "app/animation.h"
 #include "base/gfx/rect.h"
+#include "base/gfx/native_widget_types.h"
+#include "base/scoped_ptr.h"
 #include "chrome/browser/find_bar.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
-#include "chrome/common/animation.h"
-#include "chrome/views/widget/widget_win.h"
+#include "views/focus/focus_manager.h"
 
 class BrowserView;
 class FindBarController;
@@ -22,6 +24,8 @@ namespace views {
 class ExternalFocusTracker;
 class View;
 }
+
+// TODO(sky): rename this to FindBarViews.
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -37,61 +41,53 @@ class View;
 // is attached to the frame's Widget for the first time.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class FindBarWin : public views::FocusChangeListener,
-                   public views::WidgetWin,
+class FindBarWin : public views::AcceleratorTarget,
+                   public views::FocusChangeListener,
                    public AnimationDelegate,
-                   public FindBar {
+                   public FindBar,
+                   public FindBarTesting {
  public:
   explicit FindBarWin(BrowserView* browser_view);
   virtual ~FindBarWin();
 
-  // Accessor for find_bar_controller so FindBarView can get back to
-  // FindBarController.
-  FindBarController* find_bar_controller() const {
-    return find_bar_controller_;
-  }
-  void set_find_bar_controller(FindBarController* find_bar_controller) {
-    find_bar_controller_ = find_bar_controller;
-  }
-
-  // If the find bar obscures the search results we need to move the window. To
-  // do that we need to know what is selected on the page. We simply calculate
-  // where it would be if we place it on the left of the selection and if it
-  // doesn't fit on the screen we try the right side. The parameter
-  // |selection_rect| is expected to have coordinates relative to the top of
-  // the web page area. If |no_redraw| is true, the window will be moved without
-  // redrawing siblings.
-  void MoveWindowIfNecessary(const gfx::Rect& selection_rect, bool no_redraw);
-
-  // Moves the window according to the new window size.
-  void RespondToResize(const gfx::Size& new_size);
-
   // Whether we are animating the position of the Find window.
   bool IsAnimating();
 
-  // We need to monitor focus changes so that we can register a handler for
-  // Escape when we get focus and unregister it when we looses focus. This
-  // function unregisters our old Escape accelerator (if registered) and
-  // registers a new one with the FocusManager associated with the
-  // new |parent_hwnd|.
-  void SetFocusChangeListener(HWND parent_hwnd);
+#if defined(OS_WIN)
+  // Forwards selected keystrokes to the renderer. This is useful to make sure
+  // that arrow keys and PageUp and PageDown result in scrolling, instead of
+  // being eaten because the FindBar has focus. Returns true if the keystroke
+  // was forwarded, false if not.
+  bool MaybeForwardKeystrokeToWebpage(UINT message, TCHAR key, UINT flags);
+#endif
+
+  void OnFinalMessage();
+
+  bool IsVisible();
 
   // FindBar implementation:
+  virtual FindBarController* GetFindBarController() const {
+    return find_bar_controller_;
+  }
+  virtual void SetFindBarController(FindBarController* find_bar_controller) {
+    find_bar_controller_ = find_bar_controller;
+  }
   virtual void Show();
   virtual void Hide(bool animate);
   virtual void SetFocusAndSelection();
   virtual void ClearResults(const FindNotificationDetails& results);
   virtual void StopAnimation();
+  virtual void MoveWindowIfNecessary(const gfx::Rect& selection_rect,
+                                     bool no_redraw);
   virtual void SetFindText(const string16& find_text);
   virtual void UpdateUIForFindResult(const FindNotificationDetails& result,
                                      const string16& find_text);
+  virtual void AudibleAlert();
   virtual gfx::Rect GetDialogPosition(gfx::Rect avoid_overlapping_rect);
   virtual void SetDialogPosition(const gfx::Rect& new_pos, bool no_redraw);
   virtual bool IsFindBarVisible();
   virtual void RestoreSavedFocus();
-
-  // Overridden from views::WidgetWin:
-  virtual void OnFinalMessage(HWND window);
+  virtual FindBarTesting* GetFindBarTesting();
 
   // Overridden from views::FocusChangeListener:
   virtual void FocusWillChange(views::View* focused_before,
@@ -104,7 +100,21 @@ class FindBarWin : public views::FocusChangeListener,
   virtual void AnimationProgressed(const Animation* animation);
   virtual void AnimationEnded(const Animation* animation);
 
+  // FindBarTesting implementation:
+  virtual bool GetFindBarWindowInfo(gfx::Point* position,
+                                    bool* fully_visible);
+
+  // Get the offset with which to paint the theme image.
+  void GetThemePosition(gfx::Rect* bounds);
+
+  // During testing we can disable animations by setting this flag to true,
+  // so that opening and closing the Find box happens instantly, instead of
+  // having to poll it while it animates to open/closed status.
+  static bool disable_animations_during_testing_;
+
  private:
+  class Host;
+
   // Retrieves the boundaries that the find bar has to work with within the
   // Chrome frame window. The resulting rectangle will be a rectangle that
   // overlaps the bottom of the Chrome toolbar by one pixel (so we can create
@@ -149,9 +159,8 @@ class FindBarWin : public views::FocusChangeListener,
   // The focus manager we register with to keep track of focus changes.
   views::FocusManager* focus_manager_;
 
-  // Stores the previous accelerator target for the Escape key, so that we can
-  // restore the state once we loose focus.
-  views::AcceleratorTarget* old_accel_target_for_esc_;
+  // True if the accelerator target for Esc key is registered.
+  bool esc_accel_target_registered_;
 
   // Tracks and stores the last focused view which is not the FindBarView
   // or any of its children. Used to restore focus once the FindBarView is
@@ -160,6 +169,10 @@ class FindBarWin : public views::FocusChangeListener,
 
   // A pointer back to the owning controller.
   FindBarController* find_bar_controller_;
+
+  // Host is the Widget implementation that is created and maintained by the
+  // find bar. It contains the FindBarView.
+  scoped_ptr<Host> host_;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarWin);
 };

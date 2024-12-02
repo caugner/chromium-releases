@@ -12,14 +12,18 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
+
 #include "chrome/plugin/npobject_stub.h"
 
-struct _NPVariant;
-typedef _NPVariant NPVariant;
+class GURL;
 class NPObjectProxy;
 class PluginChannelBase;
+
+struct _NPVariant;
 struct NPIdentifier_Param;
 struct NPVariant_Param;
+
+typedef _NPVariant NPVariant;
 typedef void *NPIdentifier;
 
 namespace base {
@@ -49,16 +53,18 @@ void CreateNPVariantParam(const NPVariant& variant,
                           PluginChannelBase* channel,
                           NPVariant_Param* param,
                           bool release,
-                          base::WaitableEvent* modal_dialog_event);
+                          base::WaitableEvent* modal_dialog_event,
+                          const GURL& page_url);
 
-#if defined(OS_WIN)
 // Creates an NPVariant from the marshalled object.
 void CreateNPVariant(const NPVariant_Param& param,
                      PluginChannelBase* channel,
                      NPVariant* result,
-                     base::WaitableEvent* modal_dialog_event);
+                     base::WaitableEvent* modal_dialog_event,
+                     const GURL& page_url);
 
-// Given a plugin's HWND, returns an event associated with the WebContents
+#if defined(OS_WIN)
+// Given a plugin's HWND, returns an event associated with the TabContents
 // that's set when inside a messagebox.  This tells the plugin process that
 // the message queue should be pumped (as what would happen if everything was
 // in-process).  This avoids deadlocks when a plugin invokes javascript that

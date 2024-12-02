@@ -8,8 +8,11 @@
 #include "base/command_line.h"
 #include "chrome/common/child_process.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/ipc_logging.h"
+#include "chrome/common/plugin_messages.h"
+#include "ipc/ipc_logging.h"
+#include "ipc/ipc_switches.h"
 #include "webkit/glue/webkit_glue.h"
+
 
 // V8 needs a 1MB stack size.
 const size_t ChildThread::kV8StackSize = 1024 * 1024;
@@ -17,10 +20,12 @@ const size_t ChildThread::kV8StackSize = 1024 * 1024;
 ChildThread::ChildThread(Thread::Options options)
     : Thread("Chrome_ChildThread"),
       owner_loop_(MessageLoop::current()),
-      options_(options) {
+      options_(options),
+      check_with_browser_before_shutdown_(false) {
   DCHECK(owner_loop_);
-  channel_name_ = CommandLine::ForCurrentProcess()->GetSwitchValue(
-      switches::kProcessChannelID);
+  channel_name_ = WideToASCII(
+      CommandLine::ForCurrentProcess()->GetSwitchValue(
+          switches::kProcessChannelID));
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUserAgent)) {
     webkit_glue::SetUserAgent(WideToUTF8(
@@ -66,6 +71,16 @@ void ChildThread::OnMessageReceived(const IPC::Message& msg) {
   if (resource_dispatcher_->OnMessageReceived(msg))
     return;
 
+  if (msg.type() == PluginProcessMsg_AskBeforeShutdown::ID) {
+    check_with_browser_before_shutdown_ = true;
+    return;
+  }
+
+  if (msg.type() == PluginProcessMsg_Shutdown::ID) {
+    owner_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    return;
+  }
+
   if (msg.routing_id() == MSG_ROUTING_CONTROL) {
     OnControlMessageReceived(msg);
   } else {
@@ -96,4 +111,17 @@ void ChildThread::CleanUp() {
   // it caches a pointer to this thread.
   channel_.reset();
   resource_dispatcher_.reset();
+}
+
+void ChildThread::OnProcessFinalRelease() {
+  if (!check_with_browser_before_shutdown_) {
+    owner_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    return;
+  }
+
+  // The child process shutdown sequence is a request response based mechanism,
+  // where we send out an initial feeler request to the child process host
+  // instance in the browser to verify if it's ok to shutdown the child process.
+  // The browser then sends back a response if it's ok to shutdown.
+  Send(new PluginProcessHostMsg_ShutdownRequest);
 }

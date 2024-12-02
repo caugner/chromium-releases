@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #endif
 #if defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
+#include "base/third_party/valgrind/valgrind.h"
 #endif
 #if defined(OS_LINUX)
 #include "base/message_pump_glib.h"
@@ -231,7 +232,7 @@ void MessageLoop::PostTask(
 }
 
 void MessageLoop::PostDelayedTask(
-    const tracked_objects::Location& from_here, Task* task, int delay_ms) {
+    const tracked_objects::Location& from_here, Task* task, int64 delay_ms) {
   PostTask_Helper(from_here, task, delay_ms, true);
 }
 
@@ -241,13 +242,13 @@ void MessageLoop::PostNonNestableTask(
 }
 
 void MessageLoop::PostNonNestableDelayedTask(
-    const tracked_objects::Location& from_here, Task* task, int delay_ms) {
+    const tracked_objects::Location& from_here, Task* task, int64 delay_ms) {
   PostTask_Helper(from_here, task, delay_ms, false);
 }
 
 // Possibly called on a background thread!
 void MessageLoop::PostTask_Helper(
-    const tracked_objects::Location& from_here, Task* task, int delay_ms,
+    const tracked_objects::Location& from_here, Task* task, int64 delay_ms,
     bool nestable) {
   task->SetBirthPlace(from_here);
 
@@ -295,6 +296,10 @@ void MessageLoop::SetNestableTasksAllowed(bool allowed) {
 
 bool MessageLoop::NestableTasksAllowed() const {
   return nestable_tasks_allowed_;
+}
+
+bool MessageLoop::IsNested() {
+  return state_->run_depth > 1;
 }
 
 //------------------------------------------------------------------------------
@@ -365,10 +370,16 @@ bool MessageLoop::DeletePendingTasks() {
       AddToDelayedWorkQueue(pending_task);
     } else {
       // TODO(darin): Delete all tasks once it is safe to do so.
-      // Until it is totally safe, just do it when running purify.
+      // Until it is totally safe, just do it when running Purify or
+      // Valgrind.
+#if defined(OS_WIN)
 #ifdef PURIFY
       delete pending_task.task;
 #endif  // PURIFY
+#elif defined(OS_POSIX)
+      if (RUNNING_ON_VALGRIND)
+        delete pending_task.task;
+#endif  // defined(OS_POSIX)
     }
   }
   did_work |= !deferred_non_nestable_work_queue_.empty();
@@ -558,20 +569,24 @@ const LinearHistogram::DescriptionPair MessageLoop::event_descriptions_[] = {
 //------------------------------------------------------------------------------
 // MessageLoopForUI
 
+#if defined(OS_LINUX) || defined(OS_WIN)
+
+void MessageLoopForUI::AddObserver(Observer* observer) {
+  pump_ui()->AddObserver(observer);
+}
+
+void MessageLoopForUI::RemoveObserver(Observer* observer) {
+  pump_ui()->RemoveObserver(observer);
+}
+
+#endif
+
 #if defined(OS_WIN)
 
 void MessageLoopForUI::Run(Dispatcher* dispatcher) {
   AutoRunState save_state(this);
   state_->dispatcher = dispatcher;
   RunHandler();
-}
-
-void MessageLoopForUI::AddObserver(Observer* observer) {
-  pump_win()->AddObserver(observer);
-}
-
-void MessageLoopForUI::RemoveObserver(Observer* observer) {
-  pump_win()->RemoveObserver(observer);
 }
 
 void MessageLoopForUI::WillProcessMessage(const MSG& message) {

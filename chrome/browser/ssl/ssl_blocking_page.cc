@@ -4,32 +4,51 @@
 
 #include "chrome/browser/ssl/ssl_blocking_page.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/histogram.h"
 #include "base/string_piece.h"
 #include "base/values.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/cert_store.h"
 #include "chrome/browser/dom_operation_notification_details.h"
+#include "chrome/browser/ssl/ssl_cert_error_handler.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/resource_bundle.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 
+namespace {
+
+enum SSLBlockingPageEvent {
+  SHOW,
+  PROCEED,
+  DONT_PROCEED,
+};
+
+void RecordSSLBlockingPageStats(SSLBlockingPageEvent event) {
+  static LinearHistogram histogram("interstial.ssl", 0, 2, 3);
+  histogram.SetFlags(kUmaTargetedHistogramFlag);
+  histogram.Add(event);
+}
+
+}  // namespace
+
 // Note that we always create a navigation entry with SSL errors.
 // No error happening loading a sub-resource triggers an interstitial so far.
-SSLBlockingPage::SSLBlockingPage(SSLManager::CertError* error,
+SSLBlockingPage::SSLBlockingPage(SSLCertErrorHandler* handler,
                                  Delegate* delegate)
-    : InterstitialPage(error->GetWebContents(), true, error->request_url()),
-      error_(error),
+    : InterstitialPage(handler->GetTabContents(), true, handler->request_url()),
+      handler_(handler),
       delegate_(delegate),
       delegate_has_been_notified_(false) {
+  RecordSSLBlockingPageStats(SHOW);
 }
 
 SSLBlockingPage::~SSLBlockingPage() {
@@ -43,7 +62,7 @@ SSLBlockingPage::~SSLBlockingPage() {
 std::string SSLBlockingPage::GetHTMLContents() {
   // Let's build the html error page.
   DictionaryValue strings;
-  SSLErrorInfo error_info = delegate_->GetSSLErrorInfo(error_);
+  SSLErrorInfo error_info = delegate_->GetSSLErrorInfo(handler_);
   strings.SetString(L"title",
                     l10n_util::GetString(IDS_SSL_BLOCKING_PAGE_TITLE));
   strings.SetString(L"headLine", error_info.title());
@@ -66,15 +85,13 @@ std::string SSLBlockingPage::GetHTMLContents() {
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_SSL_ROAD_BLOCK_HTML));
 
-  return jstemplate_builder::GetTemplateHtml(html, &strings, "template_root");
+  return jstemplate_builder::GetI18nTemplateHtml(html, &strings);
 }
 
 void SSLBlockingPage::UpdateEntry(NavigationEntry* entry) {
-  DCHECK(tab()->type() == TAB_CONTENTS_WEB);
-  WebContents* web = tab()->AsWebContents();
-  const net::SSLInfo& ssl_info = error_->ssl_info();
+  const net::SSLInfo& ssl_info = handler_->ssl_info();
   int cert_id = CertStore::GetSharedInstance()->StoreCert(
-      ssl_info.cert, web->render_view_host()->process()->pid());
+      ssl_info.cert, tab()->render_view_host()->process()->pid());
 
   entry->ssl().set_security_style(SECURITY_STYLE_AUTHENTICATION_BROKEN);
   entry->ssl().set_cert_id(cert_id);
@@ -82,7 +99,7 @@ void SSLBlockingPage::UpdateEntry(NavigationEntry* entry) {
   entry->ssl().set_security_bits(ssl_info.security_bits);
   NotificationService::current()->Notify(
       NotificationType::SSL_VISIBLE_STATE_CHANGED,
-      Source<NavigationController>(web->controller()),
+      Source<NavigationController>(&tab()->controller()),
       NotificationService::NoDetails());
 }
 
@@ -95,6 +112,8 @@ void SSLBlockingPage::CommandReceived(const std::string& command) {
 }
 
 void SSLBlockingPage::Proceed() {
+  RecordSSLBlockingPageStats(PROCEED);
+
   // Accepting the certificate resumes the loading of the page.
   NotifyAllowCertificate();
 
@@ -103,22 +122,23 @@ void SSLBlockingPage::Proceed() {
 }
 
 void SSLBlockingPage::DontProceed() {
+  RecordSSLBlockingPageStats(DONT_PROCEED);
+
   NotifyDenyCertificate();
   InterstitialPage::DontProceed();
 }
 
-
 void SSLBlockingPage::NotifyDenyCertificate() {
   DCHECK(!delegate_has_been_notified_);
 
-  delegate_->OnDenyCertificate(error_);
+  delegate_->OnDenyCertificate(handler_);
   delegate_has_been_notified_ = true;
 }
 
 void SSLBlockingPage::NotifyAllowCertificate() {
   DCHECK(!delegate_has_been_notified_);
 
-  delegate_->OnAllowCertificate(error_);
+  delegate_->OnAllowCertificate(handler_);
   delegate_has_been_notified_ = true;
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,18 @@
 
 #include "chrome/browser/renderer_host/cross_site_resource_handler.h"
 
+#include "base/message_loop.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/tab_contents/web_contents.h"
 
 namespace {
-// Task to notify the WebContents that a cross-site response has begun, so that
-// WebContents can tell the old page to run its onunload handler.
-class CrossSiteNotifyTabTask : public Task {
+
+// Task to notify the TabContents that a cross-site response has begun, so that
+// TabContents can tell the old page to run its onunload handler.
+class CrossSiteNotifyTask : public Task {
  public:
-  CrossSiteNotifyTabTask(int render_process_host_id,
-                         int render_view_id,
-                         int request_id)
+  CrossSiteNotifyTask(int render_process_host_id,
+                      int render_view_id,
+                      int request_id)
     : render_process_host_id_(render_process_host_id),
       render_view_id_(render_view_id),
       request_id_(request_id) {}
@@ -48,17 +48,22 @@ class CancelPendingRenderViewTask : public Task {
       render_view_id_(render_view_id) {}
 
   void Run() {
-    WebContents* web_contents =
-        tab_util::GetWebContentsByID(render_process_host_id_, render_view_id_);
-    if (web_contents)
-      web_contents->CrossSiteNavigationCanceled();
+    RenderViewHost* view =
+        RenderViewHost::FromID(render_process_host_id_, render_view_id_);
+    if (view) {
+      RenderViewHostDelegate::RendererManagement* management_delegate =
+          view->delegate()->GetRendererManagementDelegate();
+      if (management_delegate)
+        management_delegate->OnCrossSiteNavigationCanceled();
+    }
   }
 
  private:
   int render_process_host_id_;
   int render_view_id_;
 };
-}
+
+}  // namespace
 
 CrossSiteResourceHandler::CrossSiteResourceHandler(
     ResourceHandler* handler,
@@ -77,10 +82,13 @@ CrossSiteResourceHandler::CrossSiteResourceHandler(
       rdh_(resource_dispatcher_host) {}
 
 bool CrossSiteResourceHandler::OnRequestRedirected(int request_id,
-                                                   const GURL& new_url) {
+                                                   const GURL& new_url,
+                                                   ResourceResponse* response,
+                                                   bool* defer) {
   // We should not have started the transition before being redirected.
   DCHECK(!in_cross_site_transition_);
-  return next_handler_->OnRequestRedirected(request_id, new_url);
+  return next_handler_->OnRequestRedirected(
+      request_id, new_url, response, defer);
 }
 
 bool CrossSiteResourceHandler::OnResponseStarted(int request_id,
@@ -174,7 +182,7 @@ bool CrossSiteResourceHandler::OnResponseCompleted(
 }
 
 // We can now send the response to the new renderer, which will cause
-// WebContents to swap in the new renderer and destroy the old one.
+// TabContents to swap in the new renderer and destroy the old one.
 void CrossSiteResourceHandler::ResumeResponse() {
   DCHECK(request_id_ != -1);
   DCHECK(in_cross_site_transition_);
@@ -250,9 +258,9 @@ void CrossSiteResourceHandler::StartCrossSiteTransition(
   // Tell the tab responsible for this request that a cross-site response is
   // starting, so that it can tell its old renderer to run its onunload
   // handler now.  We will wait to hear the corresponding ClosePage_ACK.
-  CrossSiteNotifyTabTask* task =
-      new CrossSiteNotifyTabTask(render_process_host_id_,
-                                 render_view_id_,
-                                 request_id);
+  CrossSiteNotifyTask* task =
+      new CrossSiteNotifyTask(render_process_host_id_,
+                              render_view_id_,
+                              request_id);
   rdh_->ui_loop()->PostTask(FROM_HERE, task);
 }

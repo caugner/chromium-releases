@@ -1,206 +1,34 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/gfx/gdi_util.h"
-#include "skia/ext/platform_device.h"
-#include "base/gfx/png_decoder.h"
-#include "base/gfx/png_encoder.h"
 #include "base/simple_thread.h"
 #include "base/win_util.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/gfx/emf.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "chrome/browser/printing/printing_test.h"
 #include "net/url_request/url_request_unittest.h"
+#include "printing/image.h"
+#include "printing/printing_test.h"
+#include "printing/native_metafile.h"
 
 namespace {
+
+using printing::Image;
 
 const wchar_t* const kGenerateSwitch = L"print-layout-generate";
 const wchar_t kDocRoot[] = L"chrome/test/data";
 
-// Lightweight raw-bitmap management. The image, once initialized, is immuable.
-// It is mainly used for comparison.
-class Image {
- public:
-  // Creates the image from the given filename on disk.
-  Image(const std::wstring& filename) : ignore_alpha_(true) {
-    std::string data;
-    file_util::ReadFileToString(filename, &data);
-    EXPECT_TRUE(data.size());
-    std::wstring ext = file_util::GetFileExtensionFromPath(filename);
-    if (LowerCaseEqualsASCII(ext, "png")) {
-      LoadPng(data);
-    } else if (LowerCaseEqualsASCII(ext, "emf")) {
-      LoadEmf(data);
-    } else {
-      EXPECT_TRUE(false);
-    }
-  }
-
-  const gfx::Size& size() const {
-    return size_;
-  }
-
-  // Used to create the initial test files.
-  void SaveToPng(const std::wstring& filename) {
-    ASSERT_FALSE(data_.empty());
-    std::vector<unsigned char> compressed;
-    ASSERT_TRUE(PNGEncoder::Encode(&*data_.begin(),
-                                   PNGEncoder::FORMAT_BGRA,
-                                   size_.width(),
-                                   size_.height(),
-                                   row_length_,
-                                   true,
-                                   &compressed));
-    ASSERT_TRUE(compressed.size());
-    ASSERT_EQ(compressed.size(), file_util::WriteFile(
-        filename,
-        reinterpret_cast<char*>(&*compressed.begin()), compressed.size()));
-  }
-
-  double PercentageDifferent(const Image& rhs) const {
-    if (size_.width() == 0 || size_.height() == 0 ||
-        rhs.size_.width() == 0 || rhs.size_.height() == 0)
-      return 100.;
-
-    int width = std::min(size_.width(), rhs.size_.width());
-    int height = std::min(size_.height(), rhs.size_.height());
-    // Compute pixels different in the overlap
-    int pixels_different = 0;
-    for (int y = 0; y < height; ++y) {
-      for (int x = 0; x < width; ++x) {
-        uint32 lhs_pixel = pixel_at(x, y);
-        uint32 rhs_pixel = rhs.pixel_at(x, y);
-        if (lhs_pixel != rhs_pixel)
-          ++pixels_different;
-      }
-
-      // Look for extra right lhs pixels. They should be white.
-      for (int x = width; x < size_.width(); ++x) {
-        uint32 lhs_pixel = pixel_at(x, y);
-        if (lhs_pixel != Color(SK_ColorWHITE))
-          ++pixels_different;
-      }
-
-      // Look for extra right rhs pixels. They should be white.
-      for (int x = width; x < rhs.size_.width(); ++x) {
-        uint32 rhs_pixel = rhs.pixel_at(x, y);
-        if (rhs_pixel != Color(SK_ColorWHITE))
-          ++pixels_different;
-      }
-    }
-
-    // Look for extra bottom lhs pixels. They should be white.
-    for (int y = height; y < size_.height(); ++y) {
-      for (int x = 0; x < size_.width(); ++x) {
-        uint32 lhs_pixel = pixel_at(x, y);
-        if (lhs_pixel != Color(SK_ColorWHITE))
-          ++pixels_different;
-      }
-    }
-
-    // Look for extra bottom rhs pixels. They should be white.
-    for (int y = height; y < rhs.size_.height(); ++y) {
-      for (int x = 0; x < rhs.size_.width(); ++x) {
-        uint32 rhs_pixel = rhs.pixel_at(x, y);
-        if (rhs_pixel != Color(SK_ColorWHITE))
-          ++pixels_different;
-      }
-    }
-
-    // Like the WebKit ImageDiff tool, we define percentage different in terms
-    // of the size of the 'actual' bitmap.
-    double total_pixels = static_cast<double>(size_.width()) *
-                          static_cast<double>(height);
-    return static_cast<double>(pixels_different) / total_pixels * 100.;
-  }
-
-  // Returns the 0x0RGB or 0xARGB value of the pixel at the given location,
-  // depending on ignore_alpha_.
-  uint32 Color(uint32 color) const {
-    if (ignore_alpha_)
-      return color & 0xFFFFFF;  // Strip out A.
-    else
-      return color;
-  }
-
-  uint32 pixel_at(int x, int y) const {
-    EXPECT_TRUE(x >= 0 && x < size_.width());
-    EXPECT_TRUE(y >= 0 && y < size_.height());
-    const uint32* data = reinterpret_cast<const uint32*>(&*data_.begin());
-    const uint32* data_row = data + y * row_length_ / sizeof(uint32);
-    return Color(data_row[x]);
-  }
-
- private:
-  void LoadPng(const std::string& compressed) {
-    int w;
-    int h;
-    EXPECT_TRUE(PNGDecoder::Decode(
-        reinterpret_cast<const unsigned char*>(compressed.c_str()),
-        compressed.size(), PNGDecoder::FORMAT_BGRA, &data_, &w, &h));
-    size_.SetSize(w, h);
-    row_length_ = size_.width() * sizeof(uint32);
-  }
-
-  void LoadEmf(const std::string& data) {
-    ASSERT_FALSE(data.empty());
-    gfx::Emf emf;
-    emf.CreateFromData(data.data(), data.size());
-    gfx::Rect rect(emf.GetBounds());
-    // Create a temporary HDC and bitmap to retrieve the renderered data.
-    HDC hdc = CreateCompatibleDC(NULL);
-    BITMAPV4HEADER hdr;
-    EXPECT_FALSE(rect.x());
-    EXPECT_FALSE(rect.y());
-    EXPECT_NE(rect.width(), 0);
-    EXPECT_NE(rect.height(), 0);
-    size_ = rect.size();
-    gfx::CreateBitmapV4Header(rect.width(), rect.height(), &hdr);
-    void* bits;
-    HBITMAP bitmap = CreateDIBSection(hdc,
-                                      reinterpret_cast<BITMAPINFO*>(&hdr), 0,
-                                      &bits, NULL, 0);
-    EXPECT_TRUE(bitmap);
-    EXPECT_TRUE(SelectObject(hdc, bitmap));
-    skia::PlatformDeviceWin::InitializeDC(hdc);
-    EXPECT_TRUE(emf.Playback(hdc, NULL));
-    row_length_ = size_.width() * sizeof(uint32);
-    size_t bytes = row_length_ * size_.height();
-    ASSERT_TRUE(bytes);
-    data_.resize(bytes);
-    memcpy(&*data_.begin(), bits, bytes);
-    DeleteDC(hdc);
-    DeleteObject(bitmap);
-  }
-
-  // Pixel dimensions of the image.
-  gfx::Size size_;
-
-  // Length of a line in bytes.
-  int row_length_;
-
-  // Actual bitmap data in arrays of RGBAs (so when loaded as uint32, it's
-  // 0xABGR).
-  std::vector<unsigned char> data_;
-
-  // Flag to signal if the comparison functions should ignore the alpha channel.
-  const bool ignore_alpha_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(Image);
-};
-
 class PrintingLayoutTest : public PrintingTest<UITest> {
  public:
   PrintingLayoutTest() {
-    emf_path_ = browser_directory_;
-    file_util::AppendToPath(&emf_path_, L"emf_dumps");
+    emf_path_ = browser_directory_.ToWStringHack();
+    file_util::AppendToPath(&emf_path_, L"metafile_dumps");
     launch_arguments_.AppendSwitchWithValue(L"debug-print",
                                             L'"' + emf_path_ + L'"');
     show_window_ = true;
@@ -219,7 +47,7 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
 
  protected:
   void PrintNowTab() {
-    scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+    scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
     if (!tab_proxy.get())
       return;
@@ -238,7 +66,7 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
       return 100.;
     }
 
-    std::wstring verification_file(test_data_directory_);
+    std::wstring verification_file(test_data_directory_.ToWStringHack());
     file_util::AppendToPath(&verification_file, L"printing");
     file_util::AppendToPath(&verification_file, verification_name);
     std::wstring emf(verification_file + L".emf");
@@ -300,7 +128,7 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
       if (file_util::Delete(emf_path(), true)) {
         break;
       }
-      Sleep(100);
+      PlatformThread::Sleep(100);
     }
     file_util::CreateDirectory(emf_path());
   }
@@ -358,7 +186,7 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
       }
       if (found_emf && found_prn)
         break;
-      Sleep(100);
+      PlatformThread::Sleep(100);
     }
     EXPECT_TRUE(found_emf) << ".PRN file is: " << prn_file;
     EXPECT_TRUE(found_prn) << ".EMF file is: " << emf_file;
@@ -450,13 +278,13 @@ class DismissTheWindow : public base::DelegateSimpleThread::Delegate {
           break;
         }
       }
-      Sleep(10);
+      PlatformThread::Sleep(10);
     }
 
     // Now verify that it indeed closed itself.
     while (IsWindow(dialog_window)) {
       CloseDialogWindow(dialog_window);
-      Sleep(10);
+      PlatformThread::Sleep(10);
     }
   }
 
@@ -566,7 +394,7 @@ TEST_F(PrintingLayoutTest, DISABLED_Delayed) {
   ASSERT_TRUE(NULL != server.get());
 
   {
-    scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+    scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
     bool is_timeout = true;
     GURL url = server->TestServerPage("files/printing/popup_delayed_print.htm");
@@ -601,7 +429,7 @@ TEST_F(PrintingLayoutTest, DISABLED_IFrame) {
   ASSERT_TRUE(NULL != server.get());
 
   {
-    scoped_ptr<TabProxy> tab_proxy(GetActiveTab());
+    scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
     ASSERT_TRUE(tab_proxy.get());
     GURL url = server->TestServerPage("files/printing/iframe.htm");
     EXPECT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,

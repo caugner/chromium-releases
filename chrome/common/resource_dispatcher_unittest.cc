@@ -10,8 +10,8 @@
 #include "chrome/common/filter_policy.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/resource_dispatcher.h"
-
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/glue/webappcachecontext.h"
 
 using webkit_glue::ResourceLoaderBridge;
 
@@ -31,7 +31,10 @@ class TestRequestCallback : public ResourceLoaderBridge::Peer {
   TestRequestCallback() : complete_(false) {
   }
 
-  virtual void OnReceivedRedirect(const GURL& new_url) {
+  virtual bool OnReceivedRedirect(
+      const GURL& new_url,
+      const ResourceLoaderBridge::ResponseInfo& info) {
+    return true;
   }
 
   virtual void OnReceivedResponse(
@@ -120,11 +123,11 @@ class ResourceDispatcherTest : public testing::Test,
       message_queue_.erase(message_queue_.begin());
 
       // read the ack message.
-      int request_ack = -1;
+      Tuple1<int> request_ack;
       ASSERT_TRUE(ViewHostMsg_DataReceived_ACK::Read(
           &message_queue_[0], &request_ack));
 
-      ASSERT_EQ(request_ack, request_id);
+      ASSERT_EQ(request_ack.a, request_id);
 
       message_queue_.erase(message_queue_.begin());
     }
@@ -157,6 +160,7 @@ TEST_F(ResourceDispatcherTest, RoundTrip) {
     dispatcher_->CreateBridge("GET", GURL(test_page_url), GURL(test_page_url),
                               GURL(), "null", "null", std::string(), 0, 0,
                               ResourceType::SUB_RESOURCE, 0,
+                              WebAppCacheContext::kNoAppCacheContextId,
                               MSG_ROUTING_CONTROL);
 
   bridge->Start(&callback);

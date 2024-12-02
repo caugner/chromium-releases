@@ -14,6 +14,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/gfx/native_widget_types.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "webkit/glue/plugins/nphostapi.h"
@@ -68,11 +69,11 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
   // NPAPI's instance identifier for this instance
   NPP npp() { return npp_; }
 
-#if defined(OS_WIN)
-  // Get/Set for the instance's HWND.
-  HWND window_handle() { return hwnd_; }
-  void set_window_handle(HWND value) { hwnd_ = value; }
-#endif
+  // Get/Set for the instance's window handle.
+  gfx::PluginWindowHandle window_handle() const { return window_handle_; }
+  void set_window_handle(gfx::PluginWindowHandle value) {
+    window_handle_ = value;
+  }
 
   // Get/Set whether this instance is in Windowless mode.
   // Default is false.
@@ -138,7 +139,7 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
 
   // Helper method to set some persistent data for getURLNotify since
   // resource fetches happen async.
-  void SetURLLoadData(const GURL& url, void* notify_data);
+  void SetURLLoadData(const GURL& url, intptr_t notify_data);
 
   // If true, send the Mozilla user agent instead of Chrome's to the plugin.
   bool use_mozilla_user_agent() { return use_mozilla_user_agent_; }
@@ -166,7 +167,8 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
   bool NPP_Print(NPPrint* platform_print);
 
   void SendJavaScriptStream(const std::string& url, const std::wstring& result,
-                            bool success, bool notify_needed, int notify_data);
+                            bool success, bool notify_needed,
+                            intptr_t notify_data);
 
   void DidReceiveManualResponse(const std::string& url,
                                 const std::string& mime_type,
@@ -223,15 +225,13 @@ class PluginInstance : public base::RefCountedThreadSafe<PluginInstance> {
   scoped_refptr<PluginHost>                host_;
   NPPluginFuncs*                           npp_functions_;
   std::vector<scoped_refptr<PluginStream> > open_streams_;
-#if defined(OS_WIN)
-  HWND                                     hwnd_;
-#endif
+  gfx::PluginWindowHandle                  window_handle_;
   bool                                     windowless_;
   bool                                     transparent_;
   WebPlugin*                               webplugin_;
   std::string                              mime_type_;
   GURL                                     get_url_;
-  void*                                    get_notify_data_;
+  intptr_t                                 get_notify_data_;
   bool                                     use_mozilla_user_agent_;
 #if defined(OS_WIN)
   scoped_refptr<MozillaExtensionApi>       mozilla_extenstions_;

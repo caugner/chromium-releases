@@ -4,37 +4,45 @@
 
 #include "chrome/browser/renderer_host/render_widget_host_view_win.h"
 
+#include "app/gfx/canvas.h"
+#include "app/l10n_util.h"
+#include "app/l10n_util_win.h"
+#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/gfx/gdi_util.h"
 #include "base/gfx/rect.h"
 #include "base/histogram.h"
 #include "base/win_util.h"
-#include "chrome/browser/browser_accessibility.h"
 #include "chrome/browser/browser_accessibility_manager.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_trial.h"
+#include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/renderer_host/backing_store.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/l10n_util_win.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/common/win_util.h"
-// Included for views::kReflectedMessage - TODO(beng): move this to win_util.h!
-#include "chrome/views/widget/widget_win.h"
 #include "grit/webkit_resources.h"
+#include "skia/ext/skia_utils_win.h"
+#include "webkit/api/public/WebInputEvent.h"
+#include "webkit/api/public/win/WebInputEventFactory.h"
+#include "views/focus/focus_util_win.h"
+// Included for views::kReflectedMessage - TODO(beng): move this to win_util.h!
+#include "views/widget/widget_win.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 #include "webkit/glue/webcursor.h"
 
-
 using base::TimeDelta;
 using base::TimeTicks;
+
+using WebKit::WebInputEvent;
+using WebKit::WebInputEventFactory;
+using WebKit::WebMouseEvent;
+using WebKit::WebTextDirection;
 
 namespace {
 
@@ -59,6 +67,124 @@ BOOL CALLBACK DismissOwnedPopups(HWND window, LPARAM arg) {
   return TRUE;
 }
 
+// Enumerates the installed keyboard layouts in this system and returns true
+// if an RTL keyboard layout is installed.
+// TODO(hbono): to be moved to "src/chrome/common/l10n_util.cc"?
+static bool IsRTLKeyboardLayoutInstalled() {
+  static enum {
+    RTL_KEYBOARD_LAYOUT_NOT_INITIALIZED,
+    RTL_KEYBOARD_LAYOUT_INSTALLED,
+    RTL_KEYBOARD_LAYOUT_NOT_INSTALLED,
+    RTL_KEYBOARD_LAYOUT_ERROR,
+  } layout = RTL_KEYBOARD_LAYOUT_NOT_INITIALIZED;
+
+  // Cache the result value.
+  if (layout != RTL_KEYBOARD_LAYOUT_NOT_INITIALIZED)
+    return layout == RTL_KEYBOARD_LAYOUT_INSTALLED;
+
+  // Retrieve the number of layouts installed in this system.
+  int size = GetKeyboardLayoutList(0, NULL);
+  if (size <= 0) {
+    layout = RTL_KEYBOARD_LAYOUT_ERROR;
+    return false;
+  }
+
+  // Retrieve the keyboard layouts in an array and check if there is an RTL
+  // layout in it.
+  scoped_array<HKL> layouts(new HKL[size]);
+  GetKeyboardLayoutList(size, layouts.get());
+  for (int i = 0; i < size; ++i) {
+    if (PRIMARYLANGID(layouts[i]) == LANG_ARABIC ||
+        PRIMARYLANGID(layouts[i]) == LANG_HEBREW ||
+        PRIMARYLANGID(layouts[i]) == LANG_PERSIAN) {
+      layout = RTL_KEYBOARD_LAYOUT_INSTALLED;
+      return true;
+    }
+  }
+
+  layout = RTL_KEYBOARD_LAYOUT_NOT_INSTALLED;
+  return false;
+}
+
+// Returns the text direction according to the keyboard status.
+// This function retrieves the status of all keys and returns the following
+// values:
+// * WEB_TEXT_DIRECTION_RTL
+//   If only a control key and a right-shift key are down.
+// * WEB_TEXT_DIRECTION_LTR
+//   If only a control key and a left-shift key are down.
+
+static bool GetNewTextDirection(WebTextDirection* direction) {
+  uint8_t keystate[256];
+  if (!GetKeyboardState(&keystate[0]))
+    return false;
+
+  // To check if a user is pressing only a control key and a right-shift key
+  // (or a left-shift key), we use the steps below:
+  // 1. Check if a user is pressing a control key and a right-shift key (or
+  //    a left-shift key).
+  // 2. If the condition 1 is true, we should check if there are any other
+  //    keys pressed at the same time.
+  //    To ignore the keys checked in 1, we set their status to 0 before
+  //    checking the key status.
+  const int kKeyDownMask = 0x80;
+  if ((keystate[VK_CONTROL] & kKeyDownMask) == 0)
+    return false;
+
+  if (keystate[VK_RSHIFT] & kKeyDownMask) {
+    keystate[VK_RSHIFT] = 0;
+    *direction = WebKit::WebTextDirectionRightToLeft;
+  } else if (keystate[VK_LSHIFT] & kKeyDownMask) {
+    keystate[VK_LSHIFT] = 0;
+    *direction = WebKit::WebTextDirectionLeftToRight;
+  } else {
+    return false;
+  }
+
+  // Scan the key status to find pressed keys. We should adandon changing the
+  // text direction when there are other pressed keys.
+  // This code is executed only when a user is pressing a control key and a
+  // right-shift key (or a left-shift key), i.e. we should ignore the status of
+  // the keys: VK_SHIFT, VK_CONTROL, VK_RCONTROL, and VK_LCONTROL.
+  // So, we reset their status to 0 and ignore them.
+  keystate[VK_SHIFT] = 0;
+  keystate[VK_CONTROL] = 0;
+  keystate[VK_RCONTROL] = 0;
+  keystate[VK_LCONTROL] = 0;
+  for (int i = 0; i <= VK_PACKET; ++i) {
+    if (keystate[i] & kKeyDownMask)
+      return false;
+  }
+  return true;
+}
+
+class NotifyPluginProcessHostTask : public Task {
+ public:
+  NotifyPluginProcessHostTask(HWND window, HWND parent)
+    : window_(window), parent_(parent) { }
+
+ private:
+  void Run() {
+    DWORD plugin_process_id;
+    GetWindowThreadProcessId(window_, &plugin_process_id);
+    for (ChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
+         !iter.Done(); ++iter) {
+      PluginProcessHost* plugin = static_cast<PluginProcessHost*>(*iter);
+      if (plugin->GetProcessId() == plugin_process_id) {
+        plugin->AddWindow(parent_);
+        return;
+      }
+    }
+
+    // The plugin process might have died in the time to execute the task, don't
+    // leak the HWND.
+    PostMessage(parent_, WM_CLOSE, 0, 0);
+  }
+
+  HWND window_;  // Plugin HWND, created and destroyed in the plugin process.
+  HWND parent_;  // Parent HWND, created and destroyed on the browser UI thread.
+};
+
 }  // namespace
 
 // RenderWidgetHostView --------------------------------------------------------
@@ -77,13 +203,13 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
       track_mouse_leave_(false),
       ime_notification_(false),
       is_hidden_(false),
+      about_to_validate_and_paint_(false),
       close_on_deactivate_(false),
       tooltip_hwnd_(NULL),
       tooltip_showing_(false),
       shutdown_factory_(this),
       parent_hwnd_(NULL),
-      is_loading_(false),
-      activatable_(true) {
+      is_loading_(false) {
   render_widget_host_->set_view(this);
   renderer_accessible_ =
       CommandLine::ForCurrentProcess()->HasSwitch(
@@ -96,6 +222,15 @@ RenderWidgetHostViewWin::~RenderWidgetHostViewWin() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewWin, RenderWidgetHostView implementation:
+
+void RenderWidgetHostViewWin::InitAsPopup(
+    RenderWidgetHostView* parent_host_view, const gfx::Rect& pos) {
+  parent_hwnd_ = parent_host_view->GetNativeView();
+  close_on_deactivate_ = true;
+  Create(parent_hwnd_, NULL, NULL, WS_POPUP, WS_EX_TOOLWINDOW);
+  MoveWindow(pos.x(), pos.y(), pos.width(), pos.height(), TRUE);
+  ShowWindow(activatable_ ? SW_SHOW : SW_SHOWNA);
+}
 
 RenderWidgetHost* RenderWidgetHostViewWin::GetRenderWidgetHost() const {
   return render_widget_host_;
@@ -144,7 +279,7 @@ void RenderWidgetHostViewWin::SetSize(const gfx::Size& size) {
   EnsureTooltip();
 }
 
-gfx::NativeView RenderWidgetHostViewWin::GetPluginNativeView() {
+gfx::NativeView RenderWidgetHostViewWin::GetNativeView() {
   return m_hWnd;
 }
 
@@ -152,6 +287,10 @@ void RenderWidgetHostViewWin::MovePluginWindows(
     const std::vector<WebPluginGeometry>& plugin_window_moves) {
   if (plugin_window_moves.empty())
     return;
+
+  bool oop_plugins =
+    !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess) &&
+    !CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessPlugins);
 
   HDWP defer_window_pos_info =
       ::BeginDeferWindowPos(static_cast<int>(plugin_window_moves.size()));
@@ -164,18 +303,36 @@ void RenderWidgetHostViewWin::MovePluginWindows(
   for (size_t i = 0; i < plugin_window_moves.size(); ++i) {
     unsigned long flags = 0;
     const WebPluginGeometry& move = plugin_window_moves[i];
+    HWND window = move.window;
 
     // As the plugin parent window which lives on the browser UI thread is
     // destroyed asynchronously, it is possible that we have a stale window
     // sent in by the renderer for moving around.
-    if (!::IsWindow(move.window))
+    // Note: get the parent before checking if the window is valid, to avoid a
+    // race condition where the window is destroyed after the check but before
+    // the GetParent call.
+    HWND parent = ::GetParent(window);
+    if (!::IsWindow(window))
       continue;
 
-    // The renderer should only be trying to move windows that are children
-    // of its render widget window.
-    if (::IsChild(m_hWnd, move.window) == 0) {
-      NOTREACHED();
-      continue;
+    if (oop_plugins) {
+      if (parent == m_hWnd) {
+        // The plugin window is a direct child of this window, add an
+        // intermediate window that lives on this thread to speed up scrolling.
+        // Note this only works with out of process plugins since we depend on
+        // PluginProcessHost to destroy the intermediate HWNDs.
+        parent = ReparentWindow(window);
+        ::ShowWindow(window, SW_SHOW);  // Window was created hidden.
+      } else if (::GetParent(parent) != m_hWnd) {
+        // The renderer should only be trying to move windows that are children
+        // of its render widget window.
+        NOTREACHED();
+        continue;
+      }
+
+      // We move the intermediate parent window which doesn't result in cross-
+      // process synchronous Windows messages.
+      window = parent;
     }
 
     if (move.visible)
@@ -183,18 +340,23 @@ void RenderWidgetHostViewWin::MovePluginWindows(
     else
       flags |= SWP_HIDEWINDOW;
 
-    HRGN hrgn = ::CreateRectRgn(move.clip_rect.x(),
-                                move.clip_rect.y(),
-                                move.clip_rect.right(),
-                                move.clip_rect.bottom());
-    gfx::SubtractRectanglesFromRegion(hrgn, move.cutout_rects);
+    if (move.rects_valid) {
+      HRGN hrgn = ::CreateRectRgn(move.clip_rect.x(),
+                                  move.clip_rect.y(),
+                                  move.clip_rect.right(),
+                                  move.clip_rect.bottom());
+      gfx::SubtractRectanglesFromRegion(hrgn, move.cutout_rects);
 
-    // Note: System will own the hrgn after we call SetWindowRgn,
-    // so we don't need to call DeleteObject(hrgn)
-    ::SetWindowRgn(move.window, hrgn, !move.clip_rect.IsEmpty());
+      // Note: System will own the hrgn after we call SetWindowRgn,
+      // so we don't need to call DeleteObject(hrgn)
+      ::SetWindowRgn(window, hrgn, !move.clip_rect.IsEmpty());
+    } else {
+      flags |= SWP_NOMOVE;
+      flags |= SWP_NOSIZE;
+    }
 
     defer_window_pos_info = ::DeferWindowPos(defer_window_pos_info,
-                                             move.window, NULL,
+                                             window, NULL,
                                              move.window_rect.x(),
                                              move.window_rect.y(),
                                              move.window_rect.width(),
@@ -208,6 +370,37 @@ void RenderWidgetHostViewWin::MovePluginWindows(
   ::EndDeferWindowPos(defer_window_pos_info);
 }
 
+HWND RenderWidgetHostViewWin::ReparentWindow(HWND window) {
+  static ATOM window_class = 0;
+  if (!window_class) {
+    WNDCLASSEX wcex;
+    wcex.cbSize         = sizeof(WNDCLASSEX);
+    wcex.style          = CS_DBLCLKS;
+    wcex.lpfnWndProc    = ::DefWindowProc;
+    wcex.cbClsExtra     = 0;
+    wcex.cbWndExtra     = 0;
+    wcex.hInstance      = GetModuleHandle(NULL);
+    wcex.hIcon          = 0;
+    wcex.hCursor        = 0;
+    wcex.hbrBackground  = reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);
+    wcex.lpszMenuName   = 0;
+    wcex.lpszClassName  = kWrapperNativeWindowClassName;
+    wcex.hIconSm        = 0;
+    window_class = RegisterClassEx(&wcex);
+  }
+
+  HWND parent = CreateWindowEx(
+      WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR,
+      MAKEINTATOM(window_class), 0,
+      WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+      0, 0, 0, 0, ::GetParent(window), 0, GetModuleHandle(NULL), 0);
+  DCHECK(parent);
+  ::SetParent(window, parent);
+  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+      new NotifyPluginProcessHostTask(window, parent));
+  return parent;
+}
+
 void RenderWidgetHostViewWin::Focus() {
   if (IsWindow())
     SetFocus();
@@ -215,7 +408,7 @@ void RenderWidgetHostViewWin::Focus() {
 
 void RenderWidgetHostViewWin::Blur() {
   views::FocusManager* focus_manager =
-      views::FocusManager::GetFocusManager(GetParent());
+      views::FocusManager::GetFocusManagerForNativeView(m_hWnd);
   // We don't have a FocusManager if we are hidden.
   if (focus_manager && render_widget_host_->CanBlur())
     focus_manager->ClearFocus();
@@ -227,6 +420,7 @@ bool RenderWidgetHostViewWin::HasFocus() {
 
 void RenderWidgetHostViewWin::Show() {
   DCHECK(parent_hwnd_);
+  DCHECK(parent_hwnd_ != GetDesktopWindow());
   SetParent(parent_hwnd_);
   ShowWindow(SW_SHOW);
 
@@ -234,11 +428,18 @@ void RenderWidgetHostViewWin::Show() {
 }
 
 void RenderWidgetHostViewWin::Hide() {
+  if (GetParent() == GetDesktopWindow()) {
+    LOG(WARNING) << "Hide() called twice in a row: " << this << ":" <<
+        parent_hwnd_ << ":" << GetParent();
+    return;
+  }
+
   if (::GetFocus() == m_hWnd)
     ::SetFocus(NULL);
   ShowWindow(SW_HIDE);
+
+  // Cache the old parent, then orphan the window so we stop receiving messages
   parent_hwnd_ = GetParent();
-  // Orphan the window so we stop receiving messages.
   SetParent(NULL);
 
   WasHidden();
@@ -354,7 +555,7 @@ void RenderWidgetHostViewWin::DrawResizeCorner(const gfx::Rect& paint_rect,
   if (!paint_rect.Intersect(resize_corner_rect).IsEmpty()) {
     SkBitmap* bitmap = ResourceBundle::GetSharedInstance().
         GetBitmapNamed(IDR_TEXTAREA_RESIZER);
-    ChromeCanvas canvas(bitmap->width(), bitmap->height(), false);
+    gfx::Canvas canvas(bitmap->width(), bitmap->height(), false);
     // TODO(jcampan): This const_cast should not be necessary once the
     // SKIA API has been changed to return a non-const bitmap.
     const_cast<SkBitmap&>(canvas.getDevice()->accessBitmap(true)).
@@ -382,7 +583,10 @@ void RenderWidgetHostViewWin::DidPaintRect(const gfx::Rect& rect) {
   if (is_hidden_)
     return;
 
-  Redraw(rect);
+  if (about_to_validate_and_paint_)
+    InvalidateRect(&rect.ToRECT(), false);
+  else
+    Redraw(rect);
 }
 
 void RenderWidgetHostViewWin::DidScrollRect(
@@ -448,7 +652,13 @@ void RenderWidgetHostViewWin::SetTooltipText(const std::wstring& tooltip_text) {
 
 BackingStore* RenderWidgetHostViewWin::AllocBackingStore(
     const gfx::Size& size) {
-  return new BackingStore(size);
+  return new BackingStore(render_widget_host_, size);
+}
+
+void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
+  RenderWidgetHostView::SetBackground(background);
+  Send(new ViewMsg_SetBackground(render_widget_host_->routing_id(),
+                                 background));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -458,7 +668,9 @@ LRESULT RenderWidgetHostViewWin::OnCreate(CREATESTRUCT* create_struct) {
   // Call the WM_INPUTLANGCHANGE message handler to initialize the input locale
   // of a browser process.
   OnInputLangChange(0, 0);
-  TRACK_HWND_CREATION(m_hWnd);
+  // Marks that window as supporting mouse-wheel messages rerouting so it is
+  // scrolled when under the mouse pointer even if inactive.
+  views::SetWindowSupportsRerouteMouseWheel(m_hWnd);
   return 0;
 }
 
@@ -476,26 +688,34 @@ void RenderWidgetHostViewWin::OnActivate(UINT action, BOOL minimized,
 void RenderWidgetHostViewWin::OnDestroy() {
   ResetTooltip();
   TrackMouseLeave(false);
-  TRACK_HWND_DESTRUCTION(m_hWnd);
 }
 
 void RenderWidgetHostViewWin::OnPaint(HDC dc) {
-  DCHECK(render_widget_host_->process()->channel());
+  DCHECK(render_widget_host_->process()->HasConnection());
 
+  about_to_validate_and_paint_ = true;
+  BackingStore* backing_store = render_widget_host_->GetBackingStore(true);
+
+  // We initialize |paint_dc| (and thus call BeginPaint()) after calling
+  // GetBackingStore(), so that if it updates the invalid rect we'll catch the
+  // changes and repaint them.
+  about_to_validate_and_paint_ = false;
   CPaintDC paint_dc(m_hWnd);
-  HBRUSH white_brush = reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
 
-  BackingStore* backing_store = render_widget_host_->GetBackingStore();
+  gfx::Rect damaged_rect(paint_dc.m_ps.rcPaint);
+  if (damaged_rect.IsEmpty())
+    return;
 
   if (backing_store) {
-    gfx::Rect damaged_rect(paint_dc.m_ps.rcPaint);
-
     gfx::Rect bitmap_rect(
         0, 0, backing_store->size().width(), backing_store->size().height());
 
     gfx::Rect paint_rect = bitmap_rect.Intersect(damaged_rect);
     if (!paint_rect.IsEmpty()) {
       DrawResizeCorner(paint_rect, backing_store->hdc());
+      bool manage_colors = BackingStore::ColorManagementEnabled();
+      if (manage_colors)
+        SetICMMode(paint_dc.m_hDC, ICM_ON);
       BitBlt(paint_dc.m_hDC,
              paint_rect.x(),
              paint_rect.y(),
@@ -505,16 +725,18 @@ void RenderWidgetHostViewWin::OnPaint(HDC dc) {
              paint_rect.x(),
              paint_rect.y(),
              SRCCOPY);
+      if (manage_colors)
+        SetICMMode(paint_dc.m_hDC, ICM_OFF);
     }
 
-    // Fill the remaining portion of the damaged_rect with white
+    // Fill the remaining portion of the damaged_rect with the background
     if (damaged_rect.right() > bitmap_rect.right()) {
       RECT r;
       r.left = std::max(bitmap_rect.right(), damaged_rect.x());
       r.right = damaged_rect.right();
       r.top = damaged_rect.y();
       r.bottom = std::min(bitmap_rect.bottom(), damaged_rect.bottom());
-      paint_dc.FillRect(&r, white_brush);
+      DrawBackground(r, &paint_dc);
     }
     if (damaged_rect.bottom() > bitmap_rect.bottom()) {
       RECT r;
@@ -522,7 +744,7 @@ void RenderWidgetHostViewWin::OnPaint(HDC dc) {
       r.right = damaged_rect.right();
       r.top = std::max(bitmap_rect.bottom(), damaged_rect.y());
       r.bottom = damaged_rect.bottom();
-      paint_dc.FillRect(&r, white_brush);
+      DrawBackground(r, &paint_dc);
     }
     if (!whiteout_start_time_.is_null()) {
       TimeDelta whiteout_duration = TimeTicks::Now() - whiteout_start_time_;
@@ -533,9 +755,30 @@ void RenderWidgetHostViewWin::OnPaint(HDC dc) {
       whiteout_start_time_ = TimeTicks();
     }
   } else {
-    paint_dc.FillRect(&paint_dc.m_ps.rcPaint, white_brush);
+    DrawBackground(paint_dc.m_ps.rcPaint, &paint_dc);
     if (whiteout_start_time_.is_null())
       whiteout_start_time_ = TimeTicks::Now();
+  }
+}
+
+void RenderWidgetHostViewWin::DrawBackground(const RECT& dirty_rect,
+                                             CPaintDC* dc) {
+  if (!background_.empty()) {
+    gfx::Canvas canvas(dirty_rect.right - dirty_rect.left,
+                       dirty_rect.bottom - dirty_rect.top,
+                       true);  // opaque
+    canvas.TranslateInt(-dirty_rect.left, -dirty_rect.top);
+
+    const RECT& dc_rect = dc->m_ps.rcPaint;
+    canvas.TileImageInt(background_, 0, 0,
+                        dc_rect.right - dc_rect.left,
+                        dc_rect.bottom - dc_rect.top);
+
+    canvas.getTopPlatformDevice().drawToHDC(*dc, dirty_rect.left,
+                                            dirty_rect.top, NULL);
+  } else {
+    HBRUSH white_brush = reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
+    dc->FillRect(&dirty_rect, white_brush);
   }
 }
 
@@ -555,7 +798,7 @@ LRESULT RenderWidgetHostViewWin::OnSetCursor(HWND window, UINT hittest_code,
 }
 
 void RenderWidgetHostViewWin::OnSetFocus(HWND window) {
-  render_widget_host_->Focus();
+  render_widget_host_->GotFocus();
 }
 
 void RenderWidgetHostViewWin::OnKillFocus(HWND window) {
@@ -700,7 +943,7 @@ LRESULT RenderWidgetHostViewWin::OnImeComposition(
   ImeComposition composition;
   if (ime_input_.GetResult(m_hWnd, lparam, &composition)) {
     Send(new ViewMsg_ImeSetComposition(render_widget_host_->routing_id(),
-                                       1,
+                                       WebKit::WebCompositionCommandConfirm,
                                        composition.cursor_position,
                                        composition.target_start,
                                        composition.target_end,
@@ -715,7 +958,7 @@ LRESULT RenderWidgetHostViewWin::OnImeComposition(
   // composition and send it to a renderer process.
   if (ime_input_.GetComposition(m_hWnd, lparam, &composition)) {
     Send(new ViewMsg_ImeSetComposition(render_widget_host_->routing_id(),
-                                       0,
+                                       WebKit::WebCompositionCommandSet,
                                        composition.cursor_position,
                                        composition.target_start,
                                        composition.target_end,
@@ -736,7 +979,8 @@ LRESULT RenderWidgetHostViewWin::OnImeEndComposition(
     // of the renderer process.
     std::wstring empty_string;
     Send(new ViewMsg_ImeSetComposition(render_widget_host_->routing_id(),
-                                       -1, -1, -1, -1, empty_string));
+                                       WebKit::WebCompositionCommandDiscard,
+                                       -1, -1, -1, empty_string));
     ime_input_.ResetComposition(m_hWnd);
   }
   ime_input_.DestroyImeWindow(m_hWnd);
@@ -761,14 +1005,14 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
   }
 
   // TODO(jcampan): I am not sure if we should forward the message to the
-  // WebContents first in the case of popups.  If we do, we would need to
-  // convert the click from the popup window coordinates to the WebContents'
+  // TabContents first in the case of popups.  If we do, we would need to
+  // convert the click from the popup window coordinates to the TabContents'
   // window coordinates. For now we don't forward the message in that case to
   // address bug #907474.
   // Note: GetParent() on popup windows returns the top window and not the
   // parent the window was created with (the parent and the owner of the popup
   // is the first non-child view of the view that was specified to the create
-  // call).  So the WebContents window would have to be specified to the
+  // call).  So the TabContents window would have to be specified to the
   // RenderViewHostHWND as there is no way to retrieve it from the HWND.
   if (!close_on_deactivate_) {  // Don't forward if the container is a popup.
     if (message == WM_LBUTTONDOWN) {
@@ -791,13 +1035,30 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
       case WM_MOUSEMOVE:
       case WM_MOUSELEAVE:
       case WM_RBUTTONDOWN: {
-        // Give the WebContents first crack at the message. It may want to
+        // Give the TabContents first crack at the message. It may want to
         // prevent forwarding to the renderer if some higher level browser
         // functionality is invoked.
-        if (SendMessage(GetParent(), message, wparam, lparam) != 0)
+        LPARAM parent_msg_lparam = lparam;
+        if (message != WM_MOUSELEAVE) {
+          // For the messages except WM_MOUSELEAVE, before forwarding them to
+          // parent window, we should adjust cursor position from client
+          // coordinates in current window to client coordinates in its parent
+          // window.
+          CPoint cursor_pos(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+          ClientToScreen(&cursor_pos);
+          GetParent().ScreenToClient(&cursor_pos);
+          parent_msg_lparam = MAKELPARAM(cursor_pos.x, cursor_pos.y);
+        }
+        if (SendMessage(GetParent(), message, wparam, parent_msg_lparam) != 0)
           return 1;
       }
     }
+
+    // WebKit does not update its IME status when a user clicks a mouse button
+    // to change the input focus onto a popup menu. As a workaround, we finish
+    // an ongoing composition every time when we click a left button.
+    if (message == WM_LBUTTONDOWN)
+      ime_input_.CleanupComposition(m_hWnd);
   }
 
   ForwardMouseEventToRenderer(message, wparam, lparam);
@@ -823,6 +1084,38 @@ LRESULT RenderWidgetHostViewWin::OnKeyEvent(UINT message, WPARAM wparam,
     return ::SendMessage(parent_hwnd_, message, wparam, lparam);
   }
 
+  // Bug 1845: we need to update the text direction when a user releases
+  // either a right-shift key or a right-control key after pressing both of
+  // them. So, we just update the text direction while a user is pressing the
+  // keys, and we notify the text direction when a user releases either of them.
+  // Bug 9718: http://crbug.com/9718 To investigate IE and notepad, this
+  // shortcut is enabled only on a PC having RTL keyboard layouts installed.
+  // We should emulate them.
+  if (IsRTLKeyboardLayoutInstalled()) {
+    if (message == WM_KEYDOWN) {
+      if (wparam == VK_SHIFT) {
+        WebTextDirection direction;
+        if (GetNewTextDirection(&direction))
+          render_widget_host_->UpdateTextDirection(direction);
+      } else if (wparam != VK_CONTROL) {
+        // Bug 9762: http://crbug.com/9762 A user pressed a key except shift
+        // and control keys.
+        // When a user presses a key while he/she holds control and shift keys,
+        // we cancel sending an IPC message in NotifyTextDirection() below and
+        // ignore succeeding UpdateTextDirection() calls while we call
+        // NotifyTextDirection().
+        // To cancel it, this call set a flag that prevents sending an IPC
+        // message in NotifyTextDirection() only if we are going to send it.
+        // It is harmless to call this function if we aren't going to send it.
+        render_widget_host_->CancelUpdateTextDirection();
+      }
+    } else if (message == WM_KEYUP &&
+               (wparam == VK_SHIFT || wparam == VK_CONTROL)) {
+      // We send an IPC message only if we need to update the text direction.
+      render_widget_host_->NotifyTextDirection();
+    }
+  }
+
   render_widget_host_->ForwardKeyboardEvent(
       NativeWebKeyboardEvent(m_hWnd, message, wparam, lparam));
   return 0;
@@ -830,6 +1123,14 @@ LRESULT RenderWidgetHostViewWin::OnKeyEvent(UINT message, WPARAM wparam,
 
 LRESULT RenderWidgetHostViewWin::OnWheelEvent(UINT message, WPARAM wparam,
                                               LPARAM lparam, BOOL& handled) {
+  // Forward the mouse-wheel message to the window under the mouse if it belongs
+  // to us.
+  if (message == WM_MOUSEWHEEL &&
+      views::RerouteMouseWheel(m_hWnd, wparam, lparam)) {
+    handled = TRUE;
+    return 0;
+  }
+
   // Workaround for Thinkpad mousewheel driver. We get mouse wheel/scroll
   // messages even if we are not in the foreground. So here we check if
   // we have any owned popup windows in the foreground and dismiss them.
@@ -842,8 +1143,8 @@ LRESULT RenderWidgetHostViewWin::OnWheelEvent(UINT message, WPARAM wparam,
   }
 
   // This is a bit of a hack, but will work for now since we don't want to
-  // pollute this object with WebContents-specific functionality...
-  bool handled_by_webcontents = false;
+  // pollute this object with TabContents-specific functionality...
+  bool handled_by_TabContents = false;
   if (GetParent()) {
     // Use a special reflected message to break recursion. If we send
     // WM_MOUSEWHEEL, the focus manager subclass of web contents will
@@ -854,14 +1155,15 @@ LRESULT RenderWidgetHostViewWin::OnWheelEvent(UINT message, WPARAM wparam,
     new_message.wParam = wparam;
     new_message.lParam = lparam;
 
-    handled_by_webcontents =
+    handled_by_TabContents =
         !!::SendMessage(GetParent(), views::kReflectedMessage, 0,
                         reinterpret_cast<LPARAM>(&new_message));
   }
 
-  if (!handled_by_webcontents) {
+  if (!handled_by_TabContents) {
     render_widget_host_->ForwardWheelEvent(
-        WebMouseWheelEvent(m_hWnd, message, wparam, lparam));
+        WebInputEventFactory::mouseWheelEvent(m_hWnd, message, wparam,
+                                              lparam));
   }
   handled = TRUE;
   return 0;
@@ -911,41 +1213,24 @@ LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,
     // If our MSAA DOM root is already created, reuse that pointer. Otherwise,
     // create a new one.
     if (!browser_accessibility_root_) {
-      CComObject<BrowserAccessibility>* accessibility = NULL;
-
-      if (!SUCCEEDED(CComObject<BrowserAccessibility>::CreateInstance(
-              &accessibility)) || !accessibility) {
-        // Return with failure.
-        return static_cast<LRESULT>(0L);
-      }
-
-      CComPtr<IAccessible> accessibility_comptr(accessibility);
-
-      // Root id is always 0, to distinguish this particular instance when
-      // mapping to the render-side IAccessible.
-      accessibility->set_iaccessible_id(0);
-
-      // Set the unique member variables of this particular process.
-      accessibility->set_instance_id(
-          BrowserAccessibilityManager::GetInstance()->
-              SetMembers(accessibility, m_hWnd, render_widget_host_));
-
-      // All is well, assign the temp instance to the class smart pointer.
-      browser_accessibility_root_.Attach(accessibility_comptr.Detach());
+      // Create a new instance of IAccessible. Root id is 1000, to avoid
+      // conflicts with the ids used by MSAA.
+      BrowserAccessibilityManager::GetInstance()->
+          CreateAccessibilityInstance(IID_IAccessible, 1000,
+                                      render_widget_host_->routing_id(),
+                                      render_widget_host_->process()->pid(),
+                                      m_hWnd, reinterpret_cast<void **>
+                                          (&browser_accessibility_root_));
 
       if (!browser_accessibility_root_) {
-        // Paranoia check. Return with failure.
+        // No valid root found, return with failure.
         NOTREACHED();
         return static_cast<LRESULT>(0L);
       }
-
-      // Notify that an instance of IAccessible was allocated for m_hWnd.
-      ::NotifyWinEvent(EVENT_OBJECT_CREATE, m_hWnd, OBJID_CLIENT,
-                       CHILDID_SELF);
     }
 
-    // Create a reference to ViewAccessibility that MSAA will marshall
-    // to the client.
+    // Create a reference to BrowserAccessibility which MSAA will marshall to
+    // the client.
     reference_result = LresultFromObject(IID_IAccessible, wparam,
         static_cast<IAccessible*>(browser_accessibility_root_));
   }
@@ -1009,18 +1294,19 @@ void RenderWidgetHostViewWin::ResetTooltip() {
 void RenderWidgetHostViewWin::ForwardMouseEventToRenderer(UINT message,
                                                           WPARAM wparam,
                                                           LPARAM lparam) {
-  WebMouseEvent event(m_hWnd, message, wparam, lparam);
+  WebMouseEvent event(
+      WebInputEventFactory::mouseEvent(m_hWnd, message, wparam, lparam));
   switch (event.type) {
-    case WebInputEvent::MOUSE_MOVE:
+    case WebInputEvent::MouseMove:
       TrackMouseLeave(true);
       break;
-    case WebInputEvent::MOUSE_LEAVE:
+    case WebInputEvent::MouseLeave:
       TrackMouseLeave(false);
       break;
-    case WebInputEvent::MOUSE_DOWN:
+    case WebInputEvent::MouseDown:
       SetCapture();
       break;
-    case WebInputEvent::MOUSE_UP:
+    case WebInputEvent::MouseUp:
       if (GetCapture() == m_hWnd)
         ReleaseCapture();
       break;
@@ -1028,7 +1314,7 @@ void RenderWidgetHostViewWin::ForwardMouseEventToRenderer(UINT message,
 
   render_widget_host_->ForwardMouseEvent(event);
 
-  if (activatable_ && event.type == WebInputEvent::MOUSE_DOWN) {
+  if (activatable_ && event.type == WebInputEvent::MouseDown) {
     // This is a temporary workaround for bug 765011 to get focus when the
     // mouse is clicked. This happens after the mouse down event is sent to
     // the renderer because normally Windows does a WM_SETFOCUS after

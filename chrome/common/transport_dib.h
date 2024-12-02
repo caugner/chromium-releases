@@ -20,10 +20,14 @@
 namespace gfx {
 class Size;
 }
+namespace skia {
+class PlatformCanvas;
+}
 
 // -----------------------------------------------------------------------------
 // A TransportDIB is a block of memory that is used to transport pixels
-// from the renderer process to the browser.
+// between processes: from the renderer process to the browser, and
+// between renderer and plugin processes.
 // -----------------------------------------------------------------------------
 class TransportDIB {
  public:
@@ -55,11 +59,10 @@ class TransportDIB {
     }
 
     bool operator< (const HandleAndSequenceNum& other) const {
-      if (other.handle < handle)
-        return true;
-      if (other.sequence_num < sequence_num)
-        return true;
-      return false;
+      // Use the lexicographic order on the tuple <handle, sequence_num>.
+      if (other.handle != handle)
+        return other.handle < handle;
+      return other.sequence_num < sequence_num;
     }
 
     HANDLE handle;
@@ -83,6 +86,11 @@ class TransportDIB {
 
   // Map the referenced transport DIB. Returns NULL on failure.
   static TransportDIB* Map(Handle transport_dib);
+
+  // Returns a canvas using the memory of this TransportDIB. The returned
+  // pointer will be owned by the caller. The bitmap will be of the given size,
+  // which should fit inside this memory.
+  skia::PlatformCanvas* GetPlatformCanvas(int w, int h);
 
   // Return a pointer to the shared memory
   void* memory() const;

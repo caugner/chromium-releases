@@ -171,12 +171,14 @@ TrimPositions TrimWhitespace(const std::string& input,
 // (3) All other whitespace sequences are converted to single spaces.
 std::wstring CollapseWhitespace(const std::wstring& text,
                                 bool trim_sequences_with_line_breaks);
+std::string CollapseWhitespaceASCII(const std::string& text,
+                                    bool trim_sequences_with_line_breaks);
 
 // These convert between ASCII (7-bit) and Wide/UTF16 strings.
 std::string WideToASCII(const std::wstring& wide);
-std::wstring ASCIIToWide(const std::string& ascii);
+std::wstring ASCIIToWide(const StringPiece& ascii);
 std::string UTF16ToASCII(const string16& utf16);
-string16 ASCIIToUTF16(const std::string& ascii);
+string16 ASCIIToUTF16(const StringPiece& ascii);
 
 // These convert between UTF-8, -16, and -32 strings. They are potentially slow,
 // so avoid unnecessary conversions. The low-level versions return a boolean
@@ -184,6 +186,13 @@ string16 ASCIIToUTF16(const std::string& ascii);
 // do the best it can and put the result in the output buffer. The versions that
 // return strings ignore this error and just return the best conversion
 // possible.
+//
+// Note that only the structural validity is checked and non-character
+// codepoints and unassigned are regarded as valid.
+// TODO(jungshik): Consider replacing an invalid input sequence with
+// the Unicode replacement character or adding |replacement_char| parameter.
+// Currently, it's skipped in the ouput, which could be problematic in
+// some situations.
 bool WideToUTF8(const wchar_t* src, size_t src_len, std::string* output);
 std::string WideToUTF8(const std::wstring& wide);
 bool UTF8ToWide(const char* src, size_t src_len, std::wstring* output);
@@ -212,7 +221,8 @@ std::string UTF16ToUTF8(const string16& utf16);
 # define UTF16ToWideHack UTF16ToWide
 #endif
 
-// Defines the error handling modes of WideToCodepage and CodepageToWide.
+// Defines the error handling modes of UTF16ToCodepage, CodepageToUTF16,
+// WideToCodepage and CodepageToWide.
 class OnStringUtilConversionError {
  public:
   enum Type {
@@ -222,11 +232,29 @@ class OnStringUtilConversionError {
     // The offending characters are skipped and the conversion will proceed as
     // if they did not exist.
     SKIP,
+
+    // When converting to Unicode, the offending byte sequences are substituted
+    // by Unicode replacement character (U+FFFD). When converting from Unicode,
+    // this is the same as SKIP.
+    SUBSTITUTE,
   };
 
  private:
   OnStringUtilConversionError();
 };
+
+// Converts between UTF-16 strings and the encoding specified.  If the
+// encoding doesn't exist or the encoding fails (when on_error is FAIL),
+// returns false.
+bool UTF16ToCodepage(const string16& utf16,
+                     const char* codepage_name,
+                     OnStringUtilConversionError::Type on_error,
+                     std::string* encoded);
+
+bool CodepageToUTF16(const std::string& encoded,
+                     const char* codepage_name,
+                     OnStringUtilConversionError::Type on_error,
+                     string16* utf16);
 
 // Converts between wide strings and the encoding specified.  If the
 // encoding doesn't exist or the encoding fails (when on_error is FAIL),
@@ -248,11 +276,18 @@ bool WideToLatin1(const std::wstring& wide, std::string* latin1);
 // string be 8-bit or UTF8? It contains only characters that are < 256 (in the
 // first case) or characters that use only 8-bits and whose 8-bit
 // representation looks like a UTF-8 string (the second case).
+//
+// Note that IsStringUTF8 checks not only if the input is structrually
+// valid but also if it doesn't contain any non-character codepoint
+// (e.g. U+FFFE). It's done on purpose because all the existing callers want
+// to have the maximum 'discriminating' power from other encodings. If
+// there's a use case for just checking the structural validity, we have to
+// add a new function for that.
 bool IsString8Bit(const std::wstring& str);
 bool IsStringUTF8(const std::string& str);
 bool IsStringWideUTF8(const std::wstring& str);
 bool IsStringASCII(const std::wstring& str);
-bool IsStringASCII(const std::string& str);
+bool IsStringASCII(const StringPiece& str);
 bool IsStringASCII(const string16& str);
 
 // ASCII-specific tolower.  The standard library's tolower is locale sensitive,
@@ -316,6 +351,10 @@ bool LowerCaseEqualsASCII(const wchar_t* a_begin,
                           const wchar_t* a_end,
                           const char* b);
 
+// Performs a case-sensitive string compare. The behavior is undefined if both
+// strings are not ASCII.
+bool EqualsASCII(const string16& a, const StringPiece& b);
+
 // Returns true if str starts with search, or false otherwise.
 bool StartsWithASCII(const std::string& str,
                      const std::string& search,
@@ -323,6 +362,12 @@ bool StartsWithASCII(const std::string& str,
 bool StartsWith(const std::wstring& str,
                 const std::wstring& search,
                 bool case_sensitive);
+
+// Returns true if str ends with search, or false otherwise.
+bool EndsWith(const std::wstring& str,
+              const std::wstring& search,
+              bool case_sensitive);
+
 
 // Determines the type of ASCII character, independent of locale (the C
 // library versions will change based on locale).
@@ -401,8 +446,10 @@ void ReplaceSubstringsAfterOffset(std::string* str,
 // Specialized string-conversion functions.
 std::string IntToString(int value);
 std::wstring IntToWString(int value);
+string16 IntToString16(int value);
 std::string UintToString(unsigned int value);
 std::wstring UintToWString(unsigned int value);
+string16 UintToString16(unsigned int value);
 std::string Int64ToString(int64 value);
 std::wstring Int64ToWString(int64 value);
 std::string Uint64ToString(uint64 value);
@@ -490,19 +537,11 @@ void StringAppendV(std::wstring* dst, const wchar_t* format, va_list ap);
 // the string's buffer with nulls.  I call it to change the length of the
 // string (needed because writing directly to the buffer doesn't do this).
 // Perhaps there's a constant-time way to change the string's length.
-template <class char_type>
-inline char_type* WriteInto(
-    std::basic_string<char_type, std::char_traits<char_type>,
-                      std::allocator<char_type> >* str,
-    size_t length_including_null) {
-  str->reserve(length_including_null);
-  str->resize(length_including_null - 1);
-  return &((*str)[0]);
-}
-
-inline char16* WriteInto(string16* str, size_t length_including_null) {
-  str->reserve(length_including_null);
-  str->resize(length_including_null - 1);
+template <class string_type>
+inline typename string_type::value_type* WriteInto(string_type* str,
+                                                   size_t length_with_null) {
+  str->reserve(length_with_null);
+  str->resize(length_with_null - 1);
   return &((*str)[0]);
 }
 
@@ -561,30 +600,17 @@ std::string JoinString(const std::vector<std::string>& parts, char s);
 void SplitStringAlongWhitespace(const std::wstring& str,
                                 std::vector<std::wstring>* result);
 
-// Replace $1-$2-$3 in the format string with |a| and |b| respectively.
-// Additionally, $$ is replaced by $. The offset/offsets parameter here can be
-// NULL.
-std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
-                                       const std::wstring& a,
-                                       size_t* offset);
+// Replace $1-$2-$3..$9 in the format string with |a|-|b|-|c|..|i| respectively.
+// Additionally, $$ is replaced by $. The offsets parameter here can
+// be NULL. This only allows you to use up to nine replacements.
+string16 ReplaceStringPlaceholders(const string16& format_string,
+                                   const std::vector<string16>& subst,
+                                   std::vector<size_t>* offsets);
 
-std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
-                                       const std::wstring& a,
-                                       const std::wstring& b,
-                                       std::vector<size_t>* offsets);
-
-std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
-                                       const std::wstring& a,
-                                       const std::wstring& b,
-                                       const std::wstring& c,
-                                       std::vector<size_t>* offsets);
-
-std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
-                                       const std::wstring& a,
-                                       const std::wstring& b,
-                                       const std::wstring& c,
-                                       const std::wstring& d,
-                                       std::vector<size_t>* offsets);
+// Single-string shortcut for ReplaceStringHolders.
+string16 ReplaceStringPlaceholders(const string16& format_string,
+                                   const string16& a,
+                                   size_t* offset);
 
 // If the size of |input| is more than |max_len|, this function returns true and
 // |input| is shortened into |output| by removing chars in the middle (they are
@@ -611,5 +637,33 @@ bool MatchPattern(const std::string& string, const std::string& pattern);
 //   std::numeric_limits<size_t>::max() / 2
 std::string HexEncode(const void* bytes, size_t size);
 
+// Hack to convert any char-like type to its unsigned counterpart.
+// For example, it will convert char, signed char and unsigned char to unsigned
+// char.
+template<typename T>
+struct ToUnsigned {
+  typedef T Unsigned;
+};
+
+template<>
+struct ToUnsigned<char> {
+  typedef unsigned char Unsigned;
+};
+template<>
+struct ToUnsigned<signed char> {
+  typedef unsigned char Unsigned;
+};
+template<>
+struct ToUnsigned<wchar_t> {
+#if defined(WCHAR_T_IS_UTF16)
+  typedef unsigned short Unsigned;
+#elif defined(WCHAR_T_IS_UTF32)
+  typedef uint32 Unsigned;
+#endif
+};
+template<>
+struct ToUnsigned<short> {
+  typedef unsigned short Unsigned;
+};
 
 #endif  // BASE_STRING_UTIL_H_

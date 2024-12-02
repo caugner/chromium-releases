@@ -5,10 +5,15 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_WEBVIEW_HOST_H_
 #define WEBKIT_TOOLS_TEST_SHELL_WEBVIEW_HOST_H_
 
+#include <map>
+
 #include "base/basictypes.h"
 #include "base/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
 #include "webkit/tools/test_shell/webwidget_host.h"
+#if defined(OS_LINUX)
+#include "webkit/glue/plugins/gtk_plugin_container_manager.h"
+#endif
 
 struct WebPreferences;
 class WebView;
@@ -26,11 +31,29 @@ class WebViewHost : public WebWidgetHost {
 
   WebView* webview() const;
 
+#if defined(OS_LINUX)
+  // Create a new plugin parent container, returning its X window id for
+  // embedders to use.
+  GdkNativeWindow CreatePluginContainer();
+
+  // Called when a plugin has been destroyed.  Lets us clean up our side.
+  void OnPluginWindowDestroyed(GdkNativeWindow id);
+
+  GtkPluginContainerManager* plugin_container_manager() {
+    return &plugin_container_manager_;
+  }
+#endif
+
  protected:
 #if defined(OS_WIN)
   virtual bool WndProc(UINT message, WPARAM wparam, LPARAM lparam) {
     return false;
   }
+#endif
+
+#if defined(OS_LINUX)
+  // Helper class that creates and moves plugin containers.
+  GtkPluginContainerManager plugin_container_manager_;
 #endif
 };
 

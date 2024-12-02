@@ -47,9 +47,10 @@ class NSWindow;
 class NSTextField;
 #endif  // __OBJC__
 #elif defined(OS_LINUX)
+typedef struct _GdkCursor GdkCursor;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
-typedef struct _cairo_surface cairo_surface_t;
+typedef struct _cairo cairo_t;
 #endif
 
 namespace gfx {
@@ -59,16 +60,22 @@ typedef HWND NativeView;
 typedef HWND NativeWindow;
 typedef HWND NativeEditView;
 typedef HDC NativeDrawingContext;
+typedef HCURSOR NativeCursor;
+typedef HMENU NativeMenu;
 #elif defined(OS_MACOSX)
 typedef NSView* NativeView;
 typedef NSWindow* NativeWindow;
 typedef NSTextField* NativeEditView;
 typedef CGContext* NativeDrawingContext;
+typedef void* NativeCursor;
+typedef void* NativeMenu;
 #elif defined(OS_LINUX)
 typedef GtkWidget* NativeView;
 typedef GtkWindow* NativeWindow;
 typedef GtkWidget* NativeEditView;
-typedef cairo_surface_t* NativeDrawingContext;
+typedef cairo_t* NativeDrawingContext;
+typedef GdkCursor* NativeCursor;
+typedef GtkWidget* NativeMenu;
 #endif
 
 // Note: for test_shell we're packing a pointer into the NativeViewId. So, if
@@ -78,23 +85,58 @@ typedef cairo_surface_t* NativeDrawingContext;
 // See comment at the top of the file for usage.
 typedef intptr_t NativeViewId;
 
-// Convert a NativeViewId to a NativeView. At the moment, we assume that the
-// ids are the same as the NativeViews. This is correct on Windows (where
-// NativeView == HWND).
-// TODO(port): figure out what ids are going to be and implement this function
-// This is only to be called in the browser process.
+// Convert a NativeViewId to a NativeView.
+// On Windows, these are both HWNDS so it's just a cast.
+// On Mac, for now, we pass the NSView pointer into the renderer
+// On Linux we use an opaque id
+#if defined(OS_WIN)
 static inline NativeView NativeViewFromId(NativeViewId id) {
   return reinterpret_cast<NativeView>(id);
 }
+#elif defined(OS_MACOSX)
 
-// Convert a NativeView to a NativeViewId. At the moment, we assume that the
-// ids are the same as the NativeViews. This is correct on Windows (where
-// NativeView == HWND).
-// TODO(port): figure out what ids are going to be and implement this function
-// This is only to be called in the browser process.
+// A recent CL removed the need for Mac to actually convert
+// NativeViewId to NativeView.  Until other platforms make changes,
+// the platform-independent code cannot be removed.  The following is
+// to discourage new platform-independent uses.
+
+#define NativeViewFromId(x) NATIVE_VIEW_FROM_ID_NOT_AVAILABLE_ON_MAC
+
+#elif defined(OS_LINUX)
+// A NativeView on Linux is a GtkWidget*. However, we can't go directly from an
+// X window ID to a GtkWidget. Thus, functions which handle NativeViewIds from
+// the renderer have to use Xlib. This is fine since these functions are
+// generally performed on the BACKGROUND_X thread which can't use GTK anyway.
+
+#define NativeViewFromId(x) NATIVE_VIEW_FROM_ID_NOT_AVAILIBLE_ON_LINUX
+
+#endif  // defined(OS_LINUX)
+
+// Convert a NativeView to a NativeViewId. See the comments above
+// NativeViewFromId.
+#if defined(OS_WIN) || defined(OS_MACOSX)
 static inline NativeViewId IdFromNativeView(NativeView view) {
   return reinterpret_cast<NativeViewId>(view);
 }
+#elif defined(OS_LINUX)
+// Not inlined because it involves pulling too many headers.
+NativeViewId IdFromNativeView(NativeView view);
+#endif  // defined(OS_LINUX)
+
+
+// PluginWindowHandle is an abstraction wrapping "the types of windows
+// used by NPAPI plugins".  On Windows it's an HWND, on X it's an X
+// window id.
+#if defined(OS_WIN)
+  typedef HWND PluginWindowHandle;
+#elif defined(OS_LINUX)
+  typedef unsigned long PluginWindowHandle;
+#else
+  // On OS X we don't have windowed plugins.
+  // We use a NULL/0 PluginWindowHandle in shared code to indicate there
+  // is no window present, so mirror that behavior here.
+  typedef bool PluginWindowHandle;
+#endif
 
 }  // namespace gfx
 

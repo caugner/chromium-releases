@@ -2,15 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/gfx/canvas.h"
 #include "base/basictypes.h"
 #include "base/keyboard_codes.h"
 #include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "build/build_config.h"
 #include "chrome/browser/renderer_host/backing_store.h"
-#include "chrome/browser/renderer_host/test_render_view_host.h"
+#include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/common/render_messages.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using WebKit::WebInputEvent;
 
 // RenderWidgetHostProcess -----------------------------------------------------
 
@@ -97,7 +100,7 @@ bool RenderWidgetHostProcess::WaitForPaintMsg(int render_widget_id,
 // This test view allows us to specify the size.
 class TestView : public TestRenderWidgetHostView {
  public:
-  TestView() {}
+  TestView(RenderWidgetHost* rwh) : TestRenderWidgetHostView(rwh) {}
 
   // Sets the bounds returned by GetViewBounds.
   void set_bounds(const gfx::Rect& bounds) {
@@ -107,10 +110,6 @@ class TestView : public TestRenderWidgetHostView {
   // RenderWidgetHostView override.
   virtual gfx::Rect GetViewBounds() const {
     return bounds_;
-  }
-
-  BackingStore* AllocBackingStore(const gfx::Size& size) {
-    return new BackingStore(size);
   }
 
  protected:
@@ -157,8 +156,9 @@ class RenderWidgetHostTest : public testing::Test {
     profile_.reset(new TestingProfile());
     process_ = new RenderWidgetHostProcess(profile_.get());
     host_.reset(new MockRenderWidgetHost(process_, 1));
-    view_.reset(new TestView);
+    view_.reset(new TestView(host_.get()));
     host_->set_view(view_.get());
+    host_->Init();
   }
   void TearDown() {
     view_.reset();
@@ -241,13 +241,65 @@ TEST_F(RenderWidgetHostTest, Resize) {
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(ViewMsg_Resize::ID));
 }
 
+// Tests setting custom background
+TEST_F(RenderWidgetHostTest, Background) {
+#if defined(OS_WIN) || defined(OS_LINUX)
+  scoped_ptr<RenderWidgetHostView> view(
+      RenderWidgetHostView::CreateViewForWidget(host_.get()));
+  host_->set_view(view.get());
+
+  // Create a checkerboard background to test with.
+  gfx::Canvas canvas(4, 4, true);
+  canvas.FillRectInt(SK_ColorBLACK, 0, 0, 2, 2);
+  canvas.FillRectInt(SK_ColorWHITE, 2, 0, 2, 2);
+  canvas.FillRectInt(SK_ColorWHITE, 0, 2, 2, 2);
+  canvas.FillRectInt(SK_ColorBLACK, 2, 2, 2, 2);
+  const SkBitmap& background = canvas.getDevice()->accessBitmap(false);
+
+  // Set the background and make sure we get back a copy.
+  view->SetBackground(background);
+  EXPECT_EQ(4, view->background().width());
+  EXPECT_EQ(4, view->background().height());
+  EXPECT_EQ(background.getSize(), view->background().getSize());
+  EXPECT_TRUE(0 == memcmp(background.getPixels(),
+                          view->background().getPixels(),
+                          background.getSize()));
+
+#if defined(OS_WIN)
+  // A message should have been dispatched telling the renderer about the new
+  // background.
+  const IPC::Message* set_background =
+      process_->sink().GetUniqueMessageMatching(ViewMsg_SetBackground::ID);
+  ASSERT_TRUE(set_background);
+  Tuple1<SkBitmap> sent_background;
+  ViewMsg_SetBackground::Read(set_background, &sent_background);
+  EXPECT_EQ(background.getSize(), sent_background.a.getSize());
+  EXPECT_TRUE(0 == memcmp(background.getPixels(),
+                          sent_background.a.getPixels(),
+                          background.getSize()));
+#else
+  // TODO(port): When custom backgrounds are implemented for other ports, this
+  // test should work (assuming the background must still be copied into the
+  // renderer -- if not, then maybe the test doesn't apply?).
+#endif
+
+#else
+  // TODO(port): Mac does not have gfx::Canvas. Maybe we can just change this
+  // test to use SkCanvas directly?
+#endif
+
+  // TODO(aa): It would be nice to factor out the painting logic so that we
+  // could test that, but it appears that would mean painting everything twice
+  // since windows HDC structures are opaque.
+}
+
 // Tests getting the backing store with the renderer not setting repaint ack
 // flags.
 TEST_F(RenderWidgetHostTest, GetBackingStore_NoRepaintAck) {
   // We don't currently have a backing store, and if the renderer doesn't send
   // one in time, we should get nothing.
   process_->set_paint_msg_should_reply(false);
-  BackingStore* backing = host_->GetBackingStore();
+  BackingStore* backing = host_->GetBackingStore(true);
   EXPECT_FALSE(backing);
   // The widget host should have sent a request for a repaint, and there should
   // be no paint ACK.
@@ -259,7 +311,7 @@ TEST_F(RenderWidgetHostTest, GetBackingStore_NoRepaintAck) {
   process_->sink().ClearMessages();
   process_->set_paint_msg_should_reply(true);
   process_->set_paint_msg_reply_flags(0);
-  backing = host_->GetBackingStore();
+  backing = host_->GetBackingStore(true);
   EXPECT_TRUE(backing);
   // The widget host should NOT have sent a request for a repaint, since there
   // was an ACK already pending.
@@ -275,7 +327,7 @@ TEST_F(RenderWidgetHostTest, GetBackingStore_RepaintAck) {
   process_->set_paint_msg_should_reply(true);
   process_->set_paint_msg_reply_flags(
       ViewHostMsg_PaintRect_Flags::IS_REPAINT_ACK);
-  BackingStore* backing = host_->GetBackingStore();
+  BackingStore* backing = host_->GetBackingStore(true);
   EXPECT_TRUE(backing);
   // We still should not have sent out a repaint request since the last flags
   // didn't have the repaint ack set, and the pending flag will still be set.
@@ -286,7 +338,7 @@ TEST_F(RenderWidgetHostTest, GetBackingStore_RepaintAck) {
   // Asking again for the backing store should just re-use the existing one
   // and not send any messagse.
   process_->sink().ClearMessages();
-  backing = host_->GetBackingStore();
+  backing = host_->GetBackingStore(true);
   EXPECT_TRUE(backing);
   EXPECT_FALSE(process_->sink().GetUniqueMessageMatching(ViewMsg_Repaint::ID));
   EXPECT_FALSE(process_->sink().GetUniqueMessageMatching(
@@ -321,16 +373,16 @@ TEST_F(RenderWidgetHostTest, HiddenPaint) {
   const IPC::Message* restored = process_->sink().GetUniqueMessageMatching(
       ViewMsg_WasRestored::ID);
   ASSERT_TRUE(restored);
-  bool needs_repaint;
+  Tuple1<bool> needs_repaint;
   ViewMsg_WasRestored::Read(restored, &needs_repaint);
-  EXPECT_TRUE(needs_repaint);
+  EXPECT_TRUE(needs_repaint.a);
 }
 
 TEST_F(RenderWidgetHostTest, HandleKeyEventsWeSent) {
   NativeWebKeyboardEvent key_event;
-  key_event.type = WebInputEvent::KEY_DOWN;
-  key_event.modifiers = WebInputEvent::CTRL_KEY;
-  key_event.windows_key_code = base::VKEY_L;  // non-null made up value.
+  key_event.type = WebInputEvent::KeyDown;
+  key_event.modifiers = WebInputEvent::ControlKey;
+  key_event.windowsKeyCode = base::VKEY_L;  // non-null made up value.
 
   host_->ForwardKeyboardEvent(key_event);
 
@@ -353,7 +405,7 @@ TEST_F(RenderWidgetHostTest, IgnoreKeyEventsWeDidntSend) {
   // Send a simulated, unrequested key response. We should ignore this.
   scoped_ptr<IPC::Message> response(
       new ViewHostMsg_HandleInputEvent_ACK(0));
-  response->WriteInt(WebInputEvent::KEY_DOWN);
+  response->WriteInt(WebInputEvent::KeyDown);
   response->WriteBool(false);
   host_->OnMessageReceived(*response);
 

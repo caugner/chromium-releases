@@ -5,26 +5,21 @@
 #ifndef CHROME_BROWSER_VIEWS_BOOKMARK_BAR_VIEW_H_
 #define CHROME_BROWSER_VIEWS_BOOKMARK_BAR_VIEW_H_
 
+#include "app/slide_animation.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
-#include "chrome/browser/bookmarks/bookmark_menu_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/common/slide_animation.h"
-#include "chrome/views/controls/button/menu_button.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/menu/menu.h"
-#include "chrome/views/controls/menu/view_menu_delegate.h"
-#include "chrome/views/view.h"
+#include "chrome/browser/views/bookmark_menu_controller_views.h"
+#include "chrome/common/notification_registrar.h"
+#include "views/controls/button/menu_button.h"
+#include "views/controls/label.h"
+#include "views/controls/menu/view_menu_delegate.h"
+#include "views/view.h"
+#include "third_party/skia/include/core/SkRect.h"
 
 class Browser;
 class PageNavigator;
 class PrefService;
-
-namespace {
-class MenuRunner;
-class ButtonSeparatorView;
-struct DropInfo;
-}
 
 namespace views {
 class MenuItemView;
@@ -41,7 +36,6 @@ class BookmarkBarView : public views::View,
                         public BookmarkModelObserver,
                         public views::ViewMenuDelegate,
                         public views::ButtonListener,
-                        public Menu::Delegate,
                         public NotificationObserver,
                         public views::ContextMenuController,
                         public views::DragController,
@@ -71,6 +65,8 @@ class BookmarkBarView : public views::View,
     virtual void ModelChanged() = 0;
   };
 
+  static const int kNewtabBarHeight;
+
   explicit BookmarkBarView(Profile* profile, Browser* browser);
   virtual ~BookmarkBarView();
 
@@ -90,12 +86,13 @@ class BookmarkBarView : public views::View,
 
   // View methods:
   virtual gfx::Size GetPreferredSize();
+  virtual gfx::Size GetMinimumSize();
   virtual void Layout();
   virtual void DidChangeBounds(const gfx::Rect& previous,
                                const gfx::Rect& current);
   virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
-  virtual void Paint(ChromeCanvas* canvas);
-  virtual void PaintChildren(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
+  virtual void PaintChildren(gfx::Canvas* canvas);
   virtual bool CanDrop(const OSExchangeData& data);
   virtual void OnDragEntered(const views::DropTargetEvent& event);
   virtual int OnDragUpdated(const views::DropTargetEvent& event);
@@ -138,8 +135,9 @@ class BookmarkBarView : public views::View,
   // True if we're on a page where the bookmarks bar is always visible.
   bool OnNewTabPage();
 
-  // How much we want the bookmark bar to overlap the toolbar.
-  int GetToolbarOverlap();
+  // How much we want the bookmark bar to overlap the toolbar.  If |return_max|
+  // is true, we return the maximum overlap rather than the current overlap.
+  int GetToolbarOverlap(bool return_max);
 
   // Whether or not we are animating.
   bool IsAnimating() { return size_animation_->IsAnimating(); }
@@ -179,11 +177,20 @@ class BookmarkBarView : public views::View,
   static bool testing_;
 
  private:
+  class ButtonSeparatorView;
+  struct DropInfo;
+
+  // Paint the theme background with the proper alignment.
+  void PaintThemeBackgroundTopAligned(gfx::Canvas* canvas,
+      SkBitmap* ntp_background, int tiling, int alignment);
+  void PaintThemeBackgroundBottomAligned(gfx::Canvas* canvas,
+      SkBitmap* ntp_background, int tiling, int alignment);
+
   // Task that invokes ShowDropFolderForNode when run. ShowFolderDropMenuTask
   // deletes itself once run.
   class ShowFolderDropMenuTask : public Task {
    public:
-    ShowFolderDropMenuTask(BookmarkBarView* view, BookmarkNode* node)
+    ShowFolderDropMenuTask(BookmarkBarView* view, const BookmarkNode* node)
       : view_(view),
         node_(node) {
     }
@@ -203,7 +210,7 @@ class BookmarkBarView : public views::View,
 
    private:
     BookmarkBarView* view_;
-    BookmarkNode* node_;
+    const BookmarkNode* node_;
 
     DISALLOW_COPY_AND_ASSIGN(ShowFolderDropMenuTask);
   };
@@ -232,51 +239,52 @@ class BookmarkBarView : public views::View,
 
   // Invokes added followed by removed.
   virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 BookmarkNode* old_parent,
+                                 const BookmarkNode* old_parent,
                                  int old_index,
-                                 BookmarkNode* new_parent,
+                                 const BookmarkNode* new_parent,
                                  int new_index);
 
   // Notifies ModelChangeListener of change.
   // If the node was added to the root node, a button is created and added to
   // this bookmark bar view.
   virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 BookmarkNode* parent,
+                                 const BookmarkNode* parent,
                                  int index);
 
   // Implementation for BookmarkNodeAddedImpl.
   void BookmarkNodeAddedImpl(BookmarkModel* model,
-                             BookmarkNode* parent,
+                             const BookmarkNode* parent,
                              int index);
 
   // Notifies ModelChangeListener of change.
   // If the node was a child of the root node, the button corresponding to it
   // is removed.
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   BookmarkNode* parent,
-                                   int index);
+                                   const BookmarkNode* parent,
+                                   int old_index,
+                                   const BookmarkNode* node);
 
   // Implementation for BookmarkNodeRemoved.
   void BookmarkNodeRemovedImpl(BookmarkModel* model,
-                               BookmarkNode* parent,
+                               const BookmarkNode* parent,
                                int index);
 
   // Notifies ModelChangedListener and invokes BookmarkNodeChangedImpl.
   virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   BookmarkNode* node);
+                                   const BookmarkNode* node);
 
   // If the node is a child of the root node, the button is updated
   // appropriately.
-  void BookmarkNodeChangedImpl(BookmarkModel* model, BookmarkNode* node);
+  void BookmarkNodeChangedImpl(BookmarkModel* model, const BookmarkNode* node);
 
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             BookmarkNode* node);
+                                             const BookmarkNode* node);
 
   // Invoked when the favicon is available. If the node is a child of the
   // root node, the appropriate button is updated. If a menu is showing, the
   // call is forwarded to the menu to allow for it to update the icon.
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
-                                         BookmarkNode* node);
+                                         const BookmarkNode* node);
 
   // DragController method. Determines the node representing sender and invokes
   // WriteDragData to write the actual data.
@@ -286,7 +294,7 @@ class BookmarkBarView : public views::View,
                              OSExchangeData* data);
 
   // Writes a BookmarkDragData for node to data.
-  void WriteDragData(BookmarkNode* node, OSExchangeData* data);
+  void WriteDragData(const BookmarkNode* node, OSExchangeData* data);
 
   // Returns the drag operations for the specified button.
   virtual int GetDragOperations(views::View* sender, int x, int y);
@@ -297,7 +305,8 @@ class BookmarkBarView : public views::View,
   // . menu for star groups.
   // The latter two are handled by a MenuRunner, which builds the appropriate
   // menu.
-  virtual void RunMenu(views::View* view, const CPoint& pt, HWND hwnd);
+  virtual void RunMenu(views::View* view, const gfx::Point& pt,
+                       gfx::NativeView parent);
 
   // Invoked when a star entry corresponding to a URL on the bookmark bar is
   // pressed. Forwards to the PageNavigator to open the URL.
@@ -311,11 +320,11 @@ class BookmarkBarView : public views::View,
                                bool is_mouse_gesture);
 
   // Creates the button for rendering the specified bookmark node.
-  views::View* CreateBookmarkButton(BookmarkNode* node);
+  views::View* CreateBookmarkButton(const BookmarkNode* node);
 
   // COnfigures the button from the specified node. This sets the text,
   // and icon.
-  void ConfigureButton(BookmarkNode* node, views::TextButton* button);
+  void ConfigureButton(const BookmarkNode* node, views::TextButton* button);
 
   // Used when showing the menu allowing the user to choose when the bar is
   // visible. Return value corresponds to the users preference for when the
@@ -331,22 +340,20 @@ class BookmarkBarView : public views::View,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // If we have registered an observer on the notification service, this
-  // unregisters it. This does nothing if we have not installed ourself as an
-  // observer.
-  void RemoveNotificationObservers();
+  // Overridden from views::View.
+  virtual void ThemeChanged();
 
   // If the ModelChangedListener is non-null, ModelChanged is invoked on it.
   void NotifyModelChanged();
 
   // Shows the menu used during drag and drop for the specified node.
-  void ShowDropFolderForNode(BookmarkNode* node);
+  void ShowDropFolderForNode(const BookmarkNode* node);
 
   // Cancels the timer used to show a drop menu.
   void StopShowFolderDropMenuTimer();
 
   // Stars the timer used to show a drop menu for node.
-  void StartShowFolderDropMenuTimer(BookmarkNode* node);
+  void StartShowFolderDropMenuTimer(const BookmarkNode* node);
 
   // Returns the drop operation and index for the drop based on the event
   // and data. Returns DragDropTypes::DRAG_NONE if not a valid location.
@@ -370,10 +377,10 @@ class BookmarkBarView : public views::View,
   // throbs.
   void StopThrobbing(bool immediate);
 
-  // Add any extension toolstrips which may be requested by the given
-  // extensions.  Views for the toolstrips are inserted after the last bookmark
-  // button.  Returns true if there were any new toolstrips added.
-  bool AddExtensionToolstrips(const ExtensionList* extensions);
+  // Updates the colors for all the buttons in the bookmarks bar.
+  void UpdateButtonColors();
+
+  NotificationRegistrar registrar_;
 
   Profile* profile_;
 
@@ -427,8 +434,8 @@ class BookmarkBarView : public views::View,
   // overflow_button_ or a button on the bar.
   views::CustomButton* throbbing_view_;
 
-  // How many extension toolstrips we have showing in the toolbar.
-  int num_extension_toolstrips_;
+  // Background for extension toolstrips.
+  SkBitmap toolstrip_background_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkBarView);
 };

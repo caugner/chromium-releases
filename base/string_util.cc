@@ -37,35 +37,6 @@ struct EmptyStrings {
   const string16 s16;
 };
 
-// Hack to convert any char-like type to its unsigned counterpart.
-// For example, it will convert char, signed char and unsigned char to unsigned
-// char.
-template<typename T>
-struct ToUnsigned {
-  typedef T Unsigned;
-};
-
-template<>
-struct ToUnsigned<char> {
-  typedef unsigned char Unsigned;
-};
-template<>
-struct ToUnsigned<signed char> {
-  typedef unsigned char Unsigned;
-};
-template<>
-struct ToUnsigned<wchar_t> {
-#if defined(WCHAR_T_IS_UTF16)
-  typedef unsigned short Unsigned;
-#elif defined(WCHAR_T_IS_UTF32)
-  typedef uint32 Unsigned;
-#endif
-};
-template<>
-struct ToUnsigned<short> {
-  typedef unsigned short Unsigned;
-};
-
 // Used by ReplaceStringPlaceholders to track the position in the string of
 // replaced parameters.
 struct ReplacementOffset {
@@ -449,9 +420,10 @@ TrimPositions TrimWhitespace(const std::string& input,
   return TrimWhitespaceASCII(input, positions, output);
 }
 
-std::wstring CollapseWhitespace(const std::wstring& text,
-                                bool trim_sequences_with_line_breaks) {
-  std::wstring result;
+template<typename STR>
+STR CollapseWhitespaceT(const STR& text,
+                        bool trim_sequences_with_line_breaks) {
+  STR result;
   result.resize(text.size());
 
   // Set flags to pretend we're already in a trimmed whitespace sequence, so we
@@ -460,7 +432,7 @@ std::wstring CollapseWhitespace(const std::wstring& text,
   bool already_trimmed = true;
 
   int chars_written = 0;
-  for (std::wstring::const_iterator i(text.begin()); i != text.end(); ++i) {
+  for (typename STR::const_iterator i(text.begin()); i != text.end(); ++i) {
     if (IsWhitespace(*i)) {
       if (!in_whitespace) {
         // Reduce all whitespace sequences to a single space.
@@ -490,12 +462,22 @@ std::wstring CollapseWhitespace(const std::wstring& text,
   return result;
 }
 
+std::wstring CollapseWhitespace(const std::wstring& text,
+                                bool trim_sequences_with_line_breaks) {
+  return CollapseWhitespaceT(text, trim_sequences_with_line_breaks);
+}
+
+std::string CollapseWhitespaceASCII(const std::string& text,
+                                    bool trim_sequences_with_line_breaks) {
+  return CollapseWhitespaceT(text, trim_sequences_with_line_breaks);
+}
+
 std::string WideToASCII(const std::wstring& wide) {
   DCHECK(IsStringASCII(wide));
   return std::string(wide.begin(), wide.end());
 }
 
-std::wstring ASCIIToWide(const std::string& ascii) {
+std::wstring ASCIIToWide(const StringPiece& ascii) {
   DCHECK(IsStringASCII(ascii));
   return std::wstring(ascii.begin(), ascii.end());
 }
@@ -505,7 +487,7 @@ std::string UTF16ToASCII(const string16& utf16) {
   return std::string(utf16.begin(), utf16.end());
 }
 
-string16 ASCIIToUTF16(const std::string& ascii) {
+string16 ASCIIToUTF16(const StringPiece& ascii) {
   DCHECK(IsStringASCII(ascii));
   return string16(ascii.begin(), ascii.end());
 }
@@ -552,7 +534,7 @@ bool IsStringASCII(const string16& str) {
 }
 #endif
 
-bool IsStringASCII(const std::string& str) {
+bool IsStringASCII(const StringPiece& str) {
   return DoIsStringASCII(str);
 }
 
@@ -734,6 +716,12 @@ bool LowerCaseEqualsASCII(const wchar_t* a_begin,
   return DoLowerCaseEqualsASCII(a_begin, a_end, b);
 }
 
+bool EqualsASCII(const string16& a, const StringPiece& b) {
+  if (a.length() != b.length())
+    return false;
+  return std::equal(b.begin(), b.end(), a.begin());
+}
+
 bool StartsWithASCII(const std::string& str,
                      const std::string& search,
                      bool case_sensitive) {
@@ -752,6 +740,22 @@ bool StartsWith(const std::wstring& str,
     if (search.size() > str.size())
       return false;
     return std::equal(search.begin(), search.end(), str.begin(),
+                      CaseInsensitiveCompare<wchar_t>());
+  }
+}
+
+bool EndsWith(const std::wstring& str,
+              const std::wstring& search,
+              bool case_sensitive) {
+  std::wstring::size_type str_length = str.length();
+  std::wstring::size_type search_length = search.length();
+  if (search_length > str_length)
+    return false;
+  if (case_sensitive) {
+    return str.compare(str_length - search_length, search_length, search) == 0;
+  } else {
+    return std::equal(search.begin(), search.end(),
+                      str.begin() + (str_length - search_length),
                       CaseInsensitiveCompare<wchar_t>());
   }
 }
@@ -917,16 +921,14 @@ inline int vsnprintfT(wchar_t* buffer,
 
 // Templatized backend for StringPrintF/StringAppendF. This does not finalize
 // the va_list, the caller is expected to do that.
-template <class char_type>
-static void StringAppendVT(
-    std::basic_string<char_type, std::char_traits<char_type> >* dst,
-    const char_type* format,
-    va_list ap) {
-
+template <class StringType>
+static void StringAppendVT(StringType* dst,
+                           const typename StringType::value_type* format,
+                           va_list ap) {
   // First try with a small fixed size buffer.
   // This buffer size should be kept in sync with StringUtilTest.GrowBoundary
   // and StringUtilTest.StringPrintfBounds.
-  char_type stack_buf[1024];
+  typename StringType::value_type stack_buf[1024];
 
   va_list backup_ap;
   base::va_copy(backup_ap, ap);
@@ -973,7 +975,7 @@ static void StringAppendVT(
       return;
     }
 
-    std::vector<char_type> mem_buf(mem_length);
+    std::vector<typename StringType::value_type> mem_buf(mem_length);
 
     // Restore the va_list before we use it again.
     base::va_copy(backup_ap, ap);
@@ -1063,12 +1065,20 @@ std::wstring IntToWString(int value) {
   return IntToStringT<std::wstring, int, unsigned int, true>::
       IntToString(value);
 }
+string16 IntToString16(int value) {
+  return IntToStringT<string16, int, unsigned int, true>::
+      IntToString(value);
+}
 std::string UintToString(unsigned int value) {
   return IntToStringT<std::string, unsigned int, unsigned int, false>::
       IntToString(value);
 }
 std::wstring UintToWString(unsigned int value) {
   return IntToStringT<std::wstring, unsigned int, unsigned int, false>::
+      IntToString(value);
+}
+string16 UintToString16(unsigned int value) {
+  return IntToStringT<string16, unsigned int, unsigned int, false>::
       IntToString(value);
 }
 std::string Int64ToString(int64 value) {
@@ -1100,13 +1110,11 @@ std::wstring DoubleToWString(double value) {
 }
 
 void StringAppendV(std::string* dst, const char* format, va_list ap) {
-  StringAppendVT<char>(dst, format, ap);
+  StringAppendVT(dst, format, ap);
 }
 
-void StringAppendV(std::wstring* dst,
-                   const wchar_t* format,
-                   va_list ap) {
-  StringAppendVT<wchar_t>(dst, format, ap);
+void StringAppendV(std::wstring* dst, const wchar_t* format, va_list ap) {
+  StringAppendVT(dst, format, ap);
 }
 
 std::string StringPrintf(const char* format, ...) {
@@ -1269,79 +1277,47 @@ void SplitStringAlongWhitespace(const std::wstring& str,
   }
   if (!last_was_ws) {
     result->push_back(
-              str.substr(last_non_ws_start, length - last_non_ws_start));
+        str.substr(last_non_ws_start, length - last_non_ws_start));
   }
 }
 
-std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
-                                       const std::wstring& a,
-                                       size_t* offset) {
-  std::vector<size_t> offsets;
-  std::wstring result = ReplaceStringPlaceholders(format_string, a,
-                                                  std::wstring(),
-                                                  std::wstring(),
-                                                  std::wstring(), &offsets);
-  DCHECK(offsets.size() == 1);
-  if (offset) {
-    *offset = offsets[0];
+string16 ReplaceStringPlaceholders(const string16& format_string,
+                                   const std::vector<string16>& subst,
+                                   std::vector<size_t>* offsets) {
+  int substitutions = subst.size();
+  DCHECK(substitutions < 10);
+
+  int sub_length = 0;
+  for (std::vector<string16>::const_iterator iter = subst.begin();
+       iter != subst.end();
+       ++iter) {
+    sub_length += (*iter).length();
   }
-  return result;
-}
 
-std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
-                                       const std::wstring& a,
-                                       const std::wstring& b,
-                                       std::vector<size_t>* offsets) {
-  return ReplaceStringPlaceholders(format_string, a, b, std::wstring(),
-                                   std::wstring(), offsets);
-}
-
-std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
-                                       const std::wstring& a,
-                                       const std::wstring& b,
-                                       const std::wstring& c,
-                                       std::vector<size_t>* offsets) {
-  return ReplaceStringPlaceholders(format_string, a, b, c, std::wstring(),
-                                   offsets);
-}
-
-std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
-                                       const std::wstring& a,
-                                       const std::wstring& b,
-                                       const std::wstring& c,
-                                       const std::wstring& d,
-                                       std::vector<size_t>* offsets) {
-  // We currently only support up to 4 place holders ($1 through $4), although
-  // it's easy enough to add more.
-  const std::wstring* subst_texts[] = { &a, &b, &c, &d };
-
-  std::wstring formatted;
-  formatted.reserve(format_string.length() + a.length() +
-      b.length() + c.length() + d.length());
+  string16 formatted;
+  formatted.reserve(format_string.length() + sub_length);
 
   std::vector<ReplacementOffset> r_offsets;
-
-  // Replace $$ with $ and $1-$4 with placeholder text if it exists.
-  for (std::wstring::const_iterator i = format_string.begin();
+  for (string16::const_iterator i = format_string.begin();
        i != format_string.end(); ++i) {
     if ('$' == *i) {
       if (i + 1 != format_string.end()) {
         ++i;
-        DCHECK('$' == *i || ('1' <= *i && *i <= '4')) <<
-            "Invalid placeholder: " << *i;
+        DCHECK('$' == *i || '1' <= *i) << "Invalid placeholder: " << *i;
         if ('$' == *i) {
           formatted.push_back('$');
         } else {
           int index = *i - '1';
           if (offsets) {
             ReplacementOffset r_offset(index,
-                                       static_cast<int>(formatted.size()));
+                static_cast<int>(formatted.size()));
             r_offsets.insert(std::lower_bound(r_offsets.begin(),
-                                              r_offsets.end(), r_offset,
-                                              &CompareParameter),
-                             r_offset);
+                r_offsets.end(), r_offset,
+                &CompareParameter),
+                r_offset);
           }
-          formatted.append(*subst_texts[index]);
+          if (index < substitutions)
+            formatted.append(subst.at(index));
         }
       }
     } else {
@@ -1350,11 +1326,26 @@ std::wstring ReplaceStringPlaceholders(const std::wstring& format_string,
   }
   if (offsets) {
     for (std::vector<ReplacementOffset>::const_iterator i = r_offsets.begin();
-         i != r_offsets.end(); ++i) {
+        i != r_offsets.end(); ++i) {
       offsets->push_back(i->offset);
     }
   }
   return formatted;
+}
+
+string16 ReplaceStringPlaceholders(const string16& format_string,
+                                   const string16& a,
+                                   size_t* offset) {
+  std::vector<size_t> offsets;
+  std::vector<string16> subst;
+  subst.push_back(a);
+  string16 result = ReplaceStringPlaceholders(format_string, subst, &offsets);
+
+  DCHECK(offsets.size() == 1);
+  if (offset) {
+    *offset = offsets[0];
+  }
+  return result;
 }
 
 template <class CHAR>

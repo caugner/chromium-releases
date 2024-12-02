@@ -16,6 +16,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -34,10 +35,10 @@ const int kExpectedCrash = 100;
 
 // Starts a new process.
 int RunSlave(int iteration) {
-  std::wstring exe;
+  FilePath exe;
   PathService::Get(base::FILE_EXE, &exe);
 
-  CommandLine cmdline(exe);
+  CommandLine cmdline(exe.ToWStringHack());
   cmdline.AppendLooseValue(ASCIIToWide(IntToString(iteration)));
 
   base::ProcessHandle handle;
@@ -77,7 +78,8 @@ void StressTheCache(int iteration) {
   std::wstring path = GetCachePath();
   path.append(L"_stress");
   disk_cache::Backend* cache = disk_cache::CreateCacheBackend(path, false,
-                                                              cache_size);
+                                                              cache_size,
+                                                              net::DISK_CACHE);
   if (NULL == cache) {
     printf("Unable to initialize cache.\n");
     return;

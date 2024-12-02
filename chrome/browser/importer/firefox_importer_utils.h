@@ -1,29 +1,46 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_IMPORTER_FIREFOX_IMPORTER_UTILS_H_
 #define CHROME_BROWSER_IMPORTER_FIREFOX_IMPORTER_UTILS_H_
 
-#include "base/basictypes.h"
-#include "base/values.h"
-#include "build/build_config.h"
-#include "webkit/glue/password_form.h"
+#include <vector>
 
+#include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/native_library.h"
+#include "build/build_config.h"
+
+class DictionaryValue;
 class GURL;
 class TemplateURL;
 
-// Detects which version of Firefox is installed. Returns its
+namespace webkit_glue {
+struct PasswordForm;
+}
+
+#if defined(OS_WIN)
+// Detects which version of Firefox is installed from registry. Returns its
 // major version, and drops the minor version. Returns 0 if
 // failed. If there are indicators of both FF2 and FF3 it is
 // biased to return the biggest version.
-int GetCurrentFirefoxMajorVersion();
+int GetCurrentFirefoxMajorVersionFromRegistry();
 
-#if defined(OS_WIN)
+// Detects where Firefox lives.  Returns a empty string if Firefox
+// is not installed.
+std::wstring GetFirefoxInstallPathFromRegistry();
+#endif
+
+// Detects version of Firefox and installation path from given Firefox profile
+bool GetFirefoxVersionAndPathFromProfile(const std::wstring& profile_path,
+                                         int* version,
+                                         std::wstring* app_path);
+
 // Gets the full path of the profiles.ini file. This file records
 // the profiles that can be used by Firefox.  Returns an empty
 // string if failed.
-std::wstring GetProfilesINI();
+FilePath GetProfilesINI();
 
 // Parses the profile.ini file, and stores its information in |root|.
 // This file is a plain-text file. Key/value pairs are stored one per
@@ -38,11 +55,6 @@ std::wstring GetProfilesINI();
 // We set "[value]" in path "<Section>.<Key>". For example, the path
 // "Genenral.StartWithLastProfile" has the value "1".
 void ParseProfileINI(std::wstring file, DictionaryValue* root);
-#endif
-
-// Detects where Firefox lives.  Returns a empty string if Firefox
-// is not installed.
-std::wstring GetFirefoxInstallPath();
 
 // Returns true if we want to add the URL to the history. We filter
 // out the URL with a unsupported scheme.
@@ -181,9 +193,14 @@ class NSSDecryptor {
   // username/password and reads other related information.
   // The result will be stored in |forms|.
   void ParseSignons(const std::string& content,
-                    std::vector<PasswordForm>* forms);
+                    std::vector<webkit_glue::PasswordForm>* forms);
 
  private:
+  // Performs tasks common across all platforms to initialize NSS.
+  bool InitNSS(const std::wstring& db_path,
+               base::NativeLibrary plds4_dll,
+               base::NativeLibrary nspr4_dll);
+
   // Methods in Firefox security components.
   NSSInitFunc NSS_Init;
   NSSShutdownFunc NSS_Shutdown;
@@ -202,11 +219,9 @@ class NSSDecryptor {
   static const wchar_t kPLDS4Library[];
   static const wchar_t kNSPR4Library[];
 
-#if defined(OS_WIN)
   // NSS3 module handles.
-  HMODULE nss3_dll_;
-  HMODULE softokn3_dll_;
-#endif
+  base::NativeLibrary nss3_dll_;
+  base::NativeLibrary softokn3_dll_;
 
   // True if NSS_Init() has been called
   bool is_nss_initialized_;

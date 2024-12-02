@@ -6,14 +6,14 @@
 #define CHROME_BROWSER_VIEWS_ABOUT_CHROME_VIEW_H_
 
 #include "chrome/browser/google_update.h"
-#include "chrome/views/controls/image_view.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/link.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/controls/image_view.h"
+#include "views/controls/label.h"
+#include "views/controls/link.h"
+#include "views/view.h"
+#include "views/window/dialog_delegate.h"
 
 namespace views {
-class TextField;
+class Textfield;
 class Throbber;
 class Window;
 }
@@ -41,16 +41,18 @@ class AboutChromeView : public views::View,
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
-  virtual void Paint(ChromeCanvas* canvas);
+  virtual void Paint(gfx::Canvas* canvas);
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
                                     views::View* child);
 
   // Overridden from views::DialogDelegate:
-  virtual int GetDialogButtons() const;
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
-  virtual bool IsDialogButtonEnabled(DialogButton button) const;
-  virtual bool IsDialogButtonVisible(DialogButton button) const;
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const;
+  virtual bool IsDialogButtonEnabled(
+      MessageBoxFlags::DialogButton button) const;
+  virtual bool IsDialogButtonVisible(
+      MessageBoxFlags::DialogButton button) const;
   virtual bool CanResize() const;
   virtual bool CanMaximize() const;
   virtual bool IsAlwaysOnTop() const;
@@ -91,24 +93,24 @@ class AboutChromeView : public views::View,
   // NOTE: The reason why we need this function is because while Skia knows how
   // to wrap text appropriately, it doesn't tell us where it drew the last
   // character, which we need to position the URLs within the text.
-  void DrawTextAndPositionUrl(ChromeCanvas* canvas,
+  void DrawTextAndPositionUrl(gfx::Canvas* canvas,
                               const std::wstring& text,
                               views::Link* link,
                               gfx::Rect* rect,
                               gfx::Size* position,
                               const gfx::Rect& bounds,
-                              const ChromeFont& font);
+                              const gfx::Font& font);
 
   // A helper function for DrawTextAndPositionUrl, which simply draws the text
   // from a certain starting point |position| and wraps within bounds.
   // |word_for_word| specifies whether to draw the text word for word or wheter
   // to treat the text as one blurb (similar to the way url's are treated inside
   // RTL text. For details on the other parameters, see DrawTextAndPositionUrl.
-  void DrawTextStartingFrom(ChromeCanvas* canvas,
+  void DrawTextStartingFrom(gfx::Canvas* canvas,
                             const std::wstring& text,
                             gfx::Size* position,
                             const gfx::Rect& bounds,
-                            const ChromeFont& font,
+                            const gfx::Font& font,
                             bool word_for_word);
 
   // A simply utility function that calculates whether a word of width
@@ -124,7 +126,7 @@ class AboutChromeView : public views::View,
   // UI elements on the dialog.
   views::ImageView* about_dlg_background_logo_;
   views::Label* about_title_label_;
-  views::TextField* version_label_;
+  views::Textfield* version_label_;
   views::Label* copyright_label_;
   views::Label* main_text_label_;
   int main_text_label_height_;

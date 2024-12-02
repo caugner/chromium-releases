@@ -6,6 +6,7 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 
@@ -86,7 +87,12 @@ std::wstring FileVersionInfo::private_build() {
 }
 
 std::wstring FileVersionInfo::file_version() {
-  return GetStringValue(L"CFBundleVersion");
+  // CFBundleVersion has limitations that may not be honored by a
+  // proper Chromium version number, so try KSVersion first.
+  std::wstring version = GetStringValue(L"KSVersion");
+  if (version == L"")
+    version = GetStringValue(L"CFBundleVersion");
+  return version;
 }
 
 std::wstring FileVersionInfo::original_filename() {
@@ -98,11 +104,15 @@ std::wstring FileVersionInfo::special_build() {
 }
 
 std::wstring FileVersionInfo::last_change() {
-  return L"";
+  return GetStringValue(L"SVNRevision");
 }
 
 bool FileVersionInfo::is_official_build() {
+#if defined (GOOGLE_CHROME_BUILD)
+  return true;
+#else
   return false;
+#endif
 }
 
 bool FileVersionInfo::GetValue(const wchar_t* name, std::wstring* value_str) {

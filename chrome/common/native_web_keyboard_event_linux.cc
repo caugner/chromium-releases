@@ -4,6 +4,10 @@
 
 #include "chrome/common/native_web_keyboard_event.h"
 
+#include "webkit/api/public/gtk/WebInputEventFactory.h"
+
+using WebKit::WebInputEventFactory;
+
 namespace {
 
 void CopyEventTo(const GdkEventKey* in, GdkEventKey** out) {
@@ -30,8 +34,17 @@ NativeWebKeyboardEvent::NativeWebKeyboardEvent()
 }
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(const GdkEventKey* native_event)
-    : WebKeyboardEvent(native_event) {
+    : WebKeyboardEvent(WebInputEventFactory::keyboardEvent(native_event)) {
   CopyEventTo(native_event, &os_event);
+}
+
+NativeWebKeyboardEvent::NativeWebKeyboardEvent(wchar_t character,
+                                               int state,
+                                               double time_stamp_seconds)
+    : WebKeyboardEvent(WebInputEventFactory::keyboardEvent(character,
+                                                           state,
+                                                           time_stamp_seconds)),
+      os_event(NULL) {
 }
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(

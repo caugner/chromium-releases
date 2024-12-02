@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -121,6 +121,9 @@ void HttpResponseHeaders::Persist(Pickle* pickle, PersistOptions options) {
   if ((options & PERSIST_SANS_HOP_BY_HOP) == PERSIST_SANS_HOP_BY_HOP)
     AddHopByHopHeaders(&filter_headers);
 
+  if ((options & PERSIST_SANS_RANGES) == PERSIST_SANS_RANGES)
+    AddHopContentRangeHeaders(&filter_headers);
+
   std::string blob;
   blob.reserve(raw_headers_.size());
 
@@ -141,8 +144,9 @@ void HttpResponseHeaders::Persist(Pickle* pickle, PersistOptions options) {
     StringToLowerASCII(&header_name);
 
     if (filter_headers.find(header_name) == filter_headers.end()) {
-      // Includes terminator null due to the + 1.
-      blob.append(parsed_[i].name_begin, parsed_[k].value_end + 1);
+      // Make sure there is a null after the value.
+      blob.append(parsed_[i].name_begin, parsed_[k].value_end);
+      blob.push_back('\0');
     }
 
     i = k;
@@ -156,22 +160,22 @@ void HttpResponseHeaders::Update(const HttpResponseHeaders& new_headers) {
   DCHECK(new_headers.response_code() == 304 ||
          new_headers.response_code() == 206);
 
-  // copy up to the null byte.  this just copies the status line.
+  // Copy up to the null byte.  This just copies the status line.
   std::string new_raw_headers(raw_headers_.c_str());
   new_raw_headers.push_back('\0');
 
   HeaderSet updated_headers;
 
-  // NOTE: we write the new headers then the old headers for convenience.  the
+  // NOTE: we write the new headers then the old headers for convenience.  The
   // order should not matter.
 
-  // figure out which headers we want to take from new_headers:
+  // Figure out which headers we want to take from new_headers:
   for (size_t i = 0; i < new_headers.parsed_.size(); ++i) {
     const HeaderList& new_parsed = new_headers.parsed_;
 
     DCHECK(!new_parsed[i].is_continuation());
 
-    // locate the start of the next header
+    // Locate the start of the next header.
     size_t k = i;
     while (++k < new_parsed.size() && new_parsed[k].is_continuation());
     --k;
@@ -183,35 +187,70 @@ void HttpResponseHeaders::Update(const HttpResponseHeaders& new_headers) {
       StringToLowerASCII(&name);
       updated_headers.insert(name);
 
-      // preserve this header line in the merged result
-      // (including trailing '\0')
-      new_raw_headers.append(name_begin, new_parsed[k].value_end + 1);
+      // Preserve this header line in the merged result, making sure there is
+      // a null after the value.
+      new_raw_headers.append(name_begin, new_parsed[k].value_end);
+      new_raw_headers.push_back('\0');
     }
 
     i = k;
   }
 
-  // now, build the new raw headers
+  // Now, build the new raw headers.
+  MergeWithHeaders(new_raw_headers, updated_headers);
+}
+
+void HttpResponseHeaders::MergeWithHeaders(const std::string& raw_headers,
+                                           const HeaderSet& headers_to_remove) {
+  std::string new_raw_headers(raw_headers);
   for (size_t i = 0; i < parsed_.size(); ++i) {
     DCHECK(!parsed_[i].is_continuation());
 
-    // locate the start of the next header
+    // Locate the start of the next header.
     size_t k = i;
     while (++k < parsed_.size() && parsed_[k].is_continuation());
     --k;
 
     std::string name(parsed_[i].name_begin, parsed_[i].name_end);
     StringToLowerASCII(&name);
-    if (updated_headers.find(name) == updated_headers.end()) {
-      // ok to preserve this header in the final result
-      new_raw_headers.append(parsed_[i].name_begin, parsed_[k].value_end + 1);
+    if (headers_to_remove.find(name) == headers_to_remove.end()) {
+      // It's ok to preserve this header in the final result.
+      new_raw_headers.append(parsed_[i].name_begin, parsed_[k].value_end);
+      new_raw_headers.push_back('\0');
     }
 
     i = k;
   }
   new_raw_headers.push_back('\0');
 
-  // ok, make this object hold the new data
+  // Make this object hold the new data.
+  raw_headers_.clear();
+  parsed_.clear();
+  Parse(new_raw_headers);
+}
+
+void HttpResponseHeaders::RemoveHeader(const std::string& name) {
+  // Copy up to the null byte.  This just copies the status line.
+  std::string new_raw_headers(raw_headers_.c_str());
+  new_raw_headers.push_back('\0');
+
+  std::string lowercase_name(name);
+  StringToLowerASCII(&lowercase_name);
+  HeaderSet to_remove;
+  to_remove.insert(lowercase_name);
+  MergeWithHeaders(new_raw_headers, to_remove);
+}
+
+void HttpResponseHeaders::AddHeader(const std::string& header) {
+  DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 2]);
+  DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 1]);
+  // Don't copy the last null.
+  std::string new_raw_headers(raw_headers_, 0, raw_headers_.size() - 1);
+  new_raw_headers.append(header);
+  new_raw_headers.push_back('\0');
+  new_raw_headers.push_back('\0');
+
+  // Make this object hold the new data.
   raw_headers_.clear();
   parsed_.clear();
   Parse(new_raw_headers);
@@ -644,6 +683,10 @@ void HttpResponseHeaders::AddChallengeHeaders(HeaderSet* result) {
     result->insert(std::string(kChallengeResponseHeaders[i]));
 }
 
+void HttpResponseHeaders::AddHopContentRangeHeaders(HeaderSet* result) {
+  result->insert("content-range");
+}
+
 void HttpResponseHeaders::GetMimeTypeAndCharset(std::string* mime_type,
                                                 std::string* charset) const {
   mime_type->clear();
@@ -967,6 +1010,115 @@ int64 HttpResponseHeaders::GetContentLength() const {
     return -1;
 
   return result;
+}
+
+// From RFC 2616 14.16:
+// content-range-spec =
+//     bytes-unit SP byte-range-resp-spec "/" ( instance-length | "*" )
+// byte-range-resp-spec = (first-byte-pos "-" last-byte-pos) | "*"
+// instance-length = 1*DIGIT
+// bytes-unit = "bytes"
+bool HttpResponseHeaders::GetContentRange(int64* first_byte_position,
+                                          int64* last_byte_position,
+                                          int64* instance_length) const {
+  void* iter = NULL;
+  std::string content_range_spec;
+  if (!EnumerateHeader(&iter, "content-range", &content_range_spec))
+    return false;
+
+  // If the header value is empty, we have an invalid header.
+  if (content_range_spec.empty())
+    return false;
+
+  size_t space_position = content_range_spec.find(' ');
+  if (space_position == std::string::npos)
+    return false;
+
+  // Invalid header if it doesn't contain "bytes-unit".
+  std::string::const_iterator content_range_spec_begin =
+      content_range_spec.begin();
+  std::string::const_iterator content_range_spec_end =
+      content_range_spec.begin() + space_position;
+  HttpUtil::TrimLWS(&content_range_spec_begin, &content_range_spec_end);
+  if (!LowerCaseEqualsASCII(content_range_spec_begin,
+                            content_range_spec_end,
+                            "bytes")) {
+    return false;
+  }
+
+  size_t slash_position = content_range_spec.find('/', space_position + 1);
+  if (slash_position == std::string::npos)
+    return false;
+
+  // Obtain the part behind the space and before slash.
+  std::string::const_iterator byte_range_resp_spec_begin =
+      content_range_spec.begin() + space_position + 1;
+  std::string::const_iterator byte_range_resp_spec_end =
+      content_range_spec.begin() + slash_position;
+  HttpUtil::TrimLWS(&byte_range_resp_spec_begin, &byte_range_resp_spec_end);
+
+  // Parse the byte-range-resp-spec part.
+  std::string byte_range_resp_spec(byte_range_resp_spec_begin,
+                                   byte_range_resp_spec_end);
+  // If byte-range-resp-spec == "*".
+  if (LowerCaseEqualsASCII(byte_range_resp_spec, "*")) {
+    *first_byte_position = -1;
+    *last_byte_position = -1;
+  } else {
+    size_t minus_position = byte_range_resp_spec.find('-');
+    if (minus_position != std::string::npos) {
+      // Obtain first-byte-pos.
+      std::string::const_iterator first_byte_pos_begin =
+          byte_range_resp_spec.begin();
+      std::string::const_iterator first_byte_pos_end =
+          byte_range_resp_spec.begin() + minus_position;
+      HttpUtil::TrimLWS(&first_byte_pos_begin, &first_byte_pos_end);
+
+      bool ok = StringToInt64(
+          std::string(first_byte_pos_begin, first_byte_pos_end),
+          first_byte_position);
+
+      // Obtain last-byte-pos.
+      std::string::const_iterator last_byte_pos_begin =
+           byte_range_resp_spec.begin() + minus_position + 1;
+      std::string::const_iterator last_byte_pos_end =
+           byte_range_resp_spec.end();
+      HttpUtil::TrimLWS(&last_byte_pos_begin, &last_byte_pos_end);
+
+      ok &= StringToInt64(
+          std::string(last_byte_pos_begin, last_byte_pos_end),
+          last_byte_position);
+      if (!ok ||
+          *first_byte_position < 0 ||
+          *last_byte_position < 0 ||
+          *first_byte_position > *last_byte_position)
+        return false;
+    } else {
+      return false;
+    }
+  }
+
+  // Parse the instance-length part.
+  // If instance-length == "*".
+  std::string::const_iterator instance_length_begin =
+      content_range_spec.begin() + slash_position + 1;
+  std::string::const_iterator instance_length_end =
+      content_range_spec.end();
+  HttpUtil::TrimLWS(&instance_length_begin, &instance_length_end);
+
+  if (LowerCaseEqualsASCII(instance_length_begin, instance_length_end, "*")) {
+    *instance_length = -1;
+  } else if (!StringToInt64(
+                 std::string(instance_length_begin, instance_length_end),
+                 instance_length)) {
+    return false;
+  } else if (*instance_length < 0 ||
+             *instance_length <
+                 *last_byte_position - *first_byte_position + 1) {
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace net

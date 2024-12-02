@@ -6,11 +6,13 @@
 
 #include <nss.h>
 #include <plarena.h>
+#include <prerror.h>
 #include <prinit.h>
 
 // Work around https://bugzilla.mozilla.org/show_bug.cgi?id=455424
 // until NSS 3.12.2 comes out and we update to it.
 #define Lock FOO_NSS_Lock
+#include <pk11pub.h>
 #include <secmod.h>
 #include <ssl.h>
 #undef Lock
@@ -18,8 +20,24 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/singleton.h"
+#include "base/string_util.h"
 
 namespace {
+
+std::string GetDefaultConfigDirectory() {
+  const char* home = getenv("HOME");
+  if (home == NULL) {
+    LOG(ERROR) << "$HOME is not set.";
+    return "";
+  }
+  FilePath dir(home);
+  dir = dir.AppendASCII(".pki").AppendASCII("nssdb");
+  if (!file_util::CreateDirectory(dir)) {
+    LOG(ERROR) << "Failed to create ~/.pki/nssdb directory.";
+    return "";
+  }
+  return dir.value();
+}
 
 // Load nss's built-in root certs.
 SECMODModule *InitDefaultRootCerts() {
@@ -40,9 +58,36 @@ SECMODModule *InitDefaultRootCerts() {
 class NSSInitSingleton {
  public:
   NSSInitSingleton() {
+    SECStatus status;
+    std::string database_dir = GetDefaultConfigDirectory();
+    if (!database_dir.empty()) {
+      // Initialize with a persistant database (~/.pki/nssdb).
+      // Use "sql:" which can be shared by multiple processes safely.
+      status = NSS_InitReadWrite(
+          StringPrintf("sql:%s", database_dir.c_str()).c_str());
+    } else {
+      LOG(WARNING) << "Initialize NSS without using a persistent database "
+                   << "(~/.pki/nssdb).";
+      status = NSS_NoDB_Init(".");
+    }
+    if (status != SECSuccess) {
+      char buffer[513] = "Couldn't retrieve error";
+      PRInt32 err_length = PR_GetErrorTextLength();
+      if (err_length > 0 && static_cast<size_t>(err_length) < sizeof(buffer))
+        PR_GetErrorText(buffer);
 
-    // Initialize without using a persistant database (e.g. ~/.netscape)
-    CHECK(NSS_NoDB_Init(".") == SECSuccess);
+      NOTREACHED() << "Error initializing NSS: " << buffer;
+    }
+
+    // If we haven't initialized the password for the NSS databases,
+    // initialize an empty-string password so that we don't need to
+    // log in.
+    PK11SlotInfo* slot = PK11_GetInternalKeySlot();
+    if (slot) {
+      if (PK11_NeedUserInit(slot))
+        PK11_InitPin(slot, NULL, NULL);
+      PK11_FreeSlot(slot);
+    }
 
     root_ = InitDefaultRootCerts();
 

@@ -23,12 +23,17 @@ class MockRenderProcessHost : public RenderProcessHost {
   // renderer via this RenderProcessHost.
   IPC::TestSink& sink() { return sink_; }
 
+  // Provides tests access to the max page ID currently used for this process.
+  int max_page_id() const { return max_page_id_; }
+
+  // Provides test access to how many times a bad message has been received.
+  int bad_msg_count() const { return bad_msg_count_; }
+
   // RenderProcessHost implementation (public portion).
   virtual bool Init();
   virtual int GetNextRoutingID();
   virtual void CancelResourceRequests(int render_widget_id);
-  virtual void CrossSiteClosePageACK(int new_render_process_host_id,
-                                     int new_request_id);
+  virtual void CrossSiteClosePageACK(const ViewMsg_ClosePage_Params& params);
   virtual bool WaitForPaintMsg(int render_widget_id,
                                const base::TimeDelta& max_delay,
                                IPC::Message* msg);
@@ -36,7 +41,11 @@ class MockRenderProcessHost : public RenderProcessHost {
   virtual void WidgetRestored();
   virtual void WidgetHidden();
   virtual void AddWord(const std::wstring& word);
+  virtual void AddVisitedLinks(
+      const VisitedLinkCommon::Fingerprints& visited_links);
+  virtual void ResetVisitedLinks();
   virtual bool FastShutdownIfPossible();
+  virtual bool SendWithTimeout(IPC::Message* msg, int timeout_ms);
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id);
 
   // IPC::Channel::Sender via RenderProcessHost.
@@ -50,6 +59,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   // Stores IPC messages that would have been sent to the renderer.
   IPC::TestSink sink_;
   TransportDIB* transport_dib_;
+  int bad_msg_count_;
 
   DISALLOW_COPY_AND_ASSIGN(MockRenderProcessHost);
 };

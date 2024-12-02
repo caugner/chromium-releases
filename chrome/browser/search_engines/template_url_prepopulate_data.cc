@@ -293,6 +293,17 @@ const PrepopulatedEngine bigmir = {
   33,
 };
 
+const PrepopulatedEngine bing_en_US = {  // "en_US" since we'll add more soon
+  L"Bing",
+  L"bing.com",
+  "http://www.bing.com/s/wlflag.ico",
+  L"http://www.bing.com/search?setmkt=en-US&q={searchTerms}",
+  "UTF-8",
+  L"http://api.bing.com/osjson.aspx?query={searchTerms}&language={language}&"
+      L"form=OSDJAS",
+  3,  // Same unique ID as Live, since we'll be replacing it
+};
+
 const PrepopulatedEngine bluewin = {
   L"Bluewin",
   L"search.bluewin.ch",
@@ -495,8 +506,7 @@ const PrepopulatedEngine google = {
       L"{google:originalQueryForSuggestion}sourceid=chrome&ie={inputEncoding}&"
       L"q={searchTerms}",
   "UTF-8",
-  L"{google:baseSuggestURL}search?client=chrome&output=chrome&hl={language}&"
-      L"q={searchTerms}",
+  L"{google:baseSuggestURL}search?client=chrome&hl={language}&q={searchTerms}",
   1,
 };
 
@@ -687,17 +697,6 @@ const PrepopulatedEngine live_en_NZ = {
   L"live.com",
   "http://search.live.com/s/wlflag.ico",
   L"http://search.live.com/results.aspx?mkt=en-NZ&q={searchTerms}",
-  "UTF-8",
-  NULL,
-  3,
-};
-
-const PrepopulatedEngine live_en_US = {
-  L"Live Search",
-  L"live.com",
-  "http://search.live.com/s/wlflag.ico",
-  L"http://search.live.com/results.aspx?setlang=en-US&mkt=en-US&"
-      L"q={searchTerms}",
   "UTF-8",
   NULL,
   3,
@@ -2220,7 +2219,7 @@ const PrepopulatedEngine yahoo_vn = {
 };
 
 const PrepopulatedEngine yam = {
-  L"\u5929\u7a7a",
+  L"\x5929\x7a7a",
   L"yam.com",
   "http://www.yam.com/i/8/sky.ico",
   L"http://search.yam.com/wps?k={searchTerms}",
@@ -2646,7 +2645,7 @@ const PrepopulatedEngine* engines_UA[] =
 
 // United States
 const PrepopulatedEngine* engines_US[] =
-    { &google, &yahoo, &live_en_US, &aol, &ask, };
+    { &google, &yahoo, &bing_en_US, &aol, &ask, };
 
 // Uruguay
 const PrepopulatedEngine* engines_UY[] =
@@ -3186,7 +3185,7 @@ void RegisterUserPrefs(PrefService* prefs) {
 }
 
 int GetDataVersion() {
-  return 20;  // Increment this if you change the above data in ways that mean
+  return 24;  // Increment this if you change the above data in ways that mean
               // users with existing data should get a new version.
 }
 

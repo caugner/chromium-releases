@@ -18,8 +18,8 @@ class PropertyAccessorBase;
 //
 // The property bag is not read or written directly. Instead, callers go
 // through a PropertyAccessor. The Accessor generates the unique IDs that
-// identify different properties, so uniquely identify a property. The Accessor
-// is templatized to also provide typesafety to the callers.
+// identify different properties. The Accessor is templatized to also provide
+// typesafety to the callers.
 //
 // Example:
 //   // Note: you don't want to use Singleton for your Accessor if you're using
@@ -123,15 +123,13 @@ class PropertyAccessorBase {
 
 // Provides typesafe accessor functions for a property bag, and manages the
 // unique identifiers for properties via the PropertyAccessorBase.
-//
-// Note that class T must be derived from PropertyBag::Prop.
 template<class T>
 class PropertyAccessor : public PropertyAccessorBase {
  public:
   PropertyAccessor() : PropertyAccessorBase() {}
   virtual ~PropertyAccessor() {}
 
-  // Takes ownership of the |prop| pointer.
+  // Makes a copy of the |prop| object for storage.
   void SetProperty(PropertyBag* bag, const T& prop) {
     SetPropertyInternal(bag, new Container(prop));
   }

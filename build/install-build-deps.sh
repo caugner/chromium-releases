@@ -4,8 +4,74 @@
 # See http://code.google.com/p/chromium/wiki/LinuxBuildInstructions
 # and http://code.google.com/p/chromium/wiki/LinuxBuild64Bit
 
-if ! egrep -q "Ubuntu 8.04|Ubuntu 8.10" /etc/issue; then
-  echo "Only Ubuntu 8.04 and 8.10 are currently supported" >&2
+install_gold() {
+  # Gold is optional; it's a faster replacement for ld,
+  # and makes life on 2GB machines much more pleasant.
+
+  # First make sure root can access this directory, as that's tripped up some folks.
+  if sudo touch xyz.$$
+  then
+    sudo rm xyz.$$
+  else
+    echo root cannot write to the current directory, not installing gold
+    return
+  fi
+
+  BINUTILS=binutils-2.19.1
+  BINUTILS_URL=http://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2
+  BINUTILS_SHA1=88c91e36cde93433e4c4c2b2e3417777aad84526
+
+  test -f $BINUTILS.tar.bz2 || wget $BINUTILS_URL
+  if `sha1sum $BINUTILS.tar.bz2` != $BINUTILS_SHA1
+  then
+    echo Bad sha1sum for $BINUTILS.tar.bz2
+    exit 1
+  fi
+  cat > binutils-fix.patch <<__EOF__
+--- binutils-2.19.1/gold/reduced_debug_output.h.orig	2009-05-10 14:44:52.000000000 -0700
++++ binutils-2.19.1/gold/reduced_debug_output.h	2009-05-10 14:46:51.000000000 -0700
+@@ -64,7 +64,7 @@
+   void
+   failed(std::string reason)
+   {
+-    gold_warning(reason.c_str());
++    gold_warning("%s", reason.c_str());
+     failed_ = true;
+   }
+ 
+@@ -110,7 +110,7 @@
+   void
+   failed(std::string reason)
+   {
+-    gold_warning(reason.c_str());
++    gold_warning("%s", reason.c_str());
+     this->failed_ = true;
+   }
+ 
+__EOF__
+
+  tar -xjvf $BINUTILS.tar.bz2
+  cd $BINUTILS
+  patch -p1 < ../binutils-fix.patch
+  ./configure --prefix=/usr/local/gold --enable-gold
+  make -j3
+  if sudo make install
+  then
+    # Still need to figure out graceful way of pointing gyp to use
+    # /usr/local/gold/bin/ld without requiring him to set environment
+    # variables.  That will go into bootstrap-linux.sh when it's ready.
+    echo "Installing gold as /usr/bin/ld."
+    echo "To uninstall, do 'cd /usr/bin; sudo rm ld; sudo mv ld.orig ld'"
+    test -f /usr/bin/ld && sudo mv /usr/bin/ld /usr/bin/ld.orig
+    sudo ln -fs /usr/local/gold/bin/ld /usr/bin/ld.gold
+    sudo ln -fs /usr/bin/ld.gold /usr/bin/ld
+  else
+    echo "make install failed, not installing gold"
+  fi
+}
+
+if ! egrep -q "Ubuntu 8.04|Ubuntu 8.10|Ubuntu 9.04" /etc/issue; then
+  echo "Only Ubuntu 8.04, 8.10, and 9.04 are currently supported" >&2
   exit 1
 fi
 
@@ -21,29 +87,31 @@ if [ "x$(id -u)" != x0 ]; then
 fi
 
 # Packages need for development
-dev_list="subversion pkg-config python perl g++ g++-multilib bison flex gperf
-          libnss3-dev libglib2.0-dev libgtk2.0-dev libnspr4-dev libsqlite3-dev
-          wdiff lighttpd php5-cgi msttcorefonts sun-java6-fonts"
+dev_list="bison fakeroot flex g++ g++-multilib gperf libasound2-dev
+          libcairo2-dev libgconf2-dev libglib2.0-dev libgtk2.0-dev libnspr4-dev
+          libnss3-dev libsqlite3-dev lighttpd msttcorefonts perl php5-cgi
+          pkg-config python subversion wdiff"
 
 # Full list of required run-time libraries
-lib_list="libatk1.0-0 libc6 libcairo2 libexpat1 libfontconfig1 libfreetype6
-          libglib2.0-0 libgtk2.0-0 libnspr4-0d libnss3-1d libpango1.0-0
-          libpcre3 libpixman-1-0 libpng12-0 libstdc++6 libsqlite3-0 libx11-6
-          libxau6 libxcb-xlib0 libxcb1 libxcomposite1 libxcursor1 libxdamage1
-          libxdmcp6 libxext6 libxfixes3 libxi6 libxinerama1 libxrandr2
-          libxrender1 zlib1g"
+lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libexpat1 libfontconfig1
+          libfreetype6 libglib2.0-0 libgtk2.0-0 libnspr4-0d libnss3-1d
+          libpango1.0-0 libpcre3 libpixman-1-0 libpng12-0 libstdc++6
+          libsqlite3-0 libx11-6 libxau6 libxcb1 libxcomposite1
+          libxcursor1 libxdamage1 libxdmcp6 libxext6 libxfixes3 libxi6
+          libxinerama1 libxrandr2 libxrender1 zlib1g"
 
 # Debugging symbols for all of the run-time libraries
 dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg libfontconfig1-dbg
           libglib2.0-0-dbg libgtk2.0-0-dbg libnspr4-0d-dbg libnss3-1d-dbg
           libpango1.0-0-dbg libpcre3-dbg libpixman-1-0-dbg libx11-6-dbg
-          libxau6-dbg libxcb-xlib0-dbg libxcb1-dbg libxcomposite1-dbg
+          libxau6-dbg libxcb1-dbg libxcomposite1-dbg
           libxcursor1-dbg libxdamage1-dbg libxdmcp6-dbg libxext6-dbg
           libxfixes3-dbg libxi6-dbg libxinerama1-dbg libxrandr2-dbg
           libxrender1-dbg zlib1g-dbg"
 
 # Standard 32bit compatibility libraries
-cmp_list="ia32-libs lib32stdc++6 lib32z1 lib32z1-dev libc6-dev-i386 libc6-i386"
+cmp_list="ia32-libs lib32asound2-dev lib32readline-dev lib32stdc++6 lib32z1
+          lib32z1-dev libc6-dev-i386 libc6-i386"
 
 # Waits for the user to press 'Y' or 'N'. Either uppercase of lowercase is
 # accepted. Returns 0 for 'Y' and 1 for 'N'. If an optional parameter has
@@ -80,7 +148,8 @@ yes_no() {
   done
 }
 
-echo "This script installs all required libraries for building Chromium."
+echo "This script installs all tools and libraries needed to build Chromium."
+echo ""
 echo "For most of the libraries, it can also install debugging symbols, which"
 echo "will allow you to debug code in the system libraries. Most developers"
 echo "won't need these symbols."
@@ -100,14 +169,34 @@ sudo apt-get update
 # We then re-run "apt-get" with just the list of missing packages.
 echo "Finding missing packages..."
 new_list="$(yes n |
-            sudo apt-get install --reinstall \
-                         ${pkg_list} ${lib_list} ${dbg_list} \
+            LANG=C sudo apt-get install --reinstall \
+                         ${dev_list} ${lib_list} ${dbg_list} \
                          $([ "$(uname -m)" = x86_64 ] && echo ${cmp_list}) \
-                         2>/dev/null |
-            sed -e 's/^  //;t;d')"
+                         |
+            sed -e '1,/The following NEW packages will be installed:/d;s/^  //;t;d')"
 
 echo "Installing missing packages..."
 sudo apt-get install ${new_list}
+
+# Some operating systems already ship gold
+# (on Debian, you can probably do "apt-get install binutils-gold" to get it),
+# but though Ubuntu toyed with shipping it, they haven't yet.
+# So just install from source if it isn't the default linker.
+
+case `ld --version` in
+*gold*) ;;
+* )
+  # FIXME: avoid installing as /usr/bin/ld
+  echo "Gold is a new linker that links Chrome 5x faster than ld."
+  echo "Don't use it if you need to link other apps (e.g. valgrind, wine)"
+  echo -n "REPLACE SYSTEM LINKER ld with gold and back up ld as ld.orig? (y/N) "
+  if yes_no 1; then
+    echo "Building binutils."
+    install_gold || exit 99
+  else
+    echo "Not installing gold."
+  fi
+esac
 
 # Install 32bit backwards compatibility support for 64bit systems
 if [ "$(uname -m)" = x86_64 ]; then
@@ -139,7 +228,7 @@ if [ "$(uname -m)" = x86_64 ]; then
 	Dir::State::Lists "${tmp}/apt/lists/";
 	Dir::State::status "${tmp}/status";
 	EOF
-  
+
   # Download 32bit packages
   echo "Computing list of available 32bit packages..."
   apt-get -c="${tmp}/apt/apt.conf" update

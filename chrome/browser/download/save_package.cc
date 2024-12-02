@@ -1,13 +1,15 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/save_package.h"
 
+#include "app/l10n_util.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/thread.h"
@@ -17,18 +19,18 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/save_file.h"
 #include "chrome/browser/download/save_file_manager.h"
+#include "chrome/browser/download/save_item.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/l10n_util.h"
+#include "chrome/common/platform_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/stl_util-inl.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "net/base/io_buffer.h"
@@ -37,18 +39,36 @@
 #include "net/url_request/url_request_context.h"
 #include "webkit/glue/dom_serializer_delegate.h"
 
-#if defined(OS_WIN)
-#include "base/win_util.h"
-#include "chrome/common/win_util.h"
-#endif
-
 using base::Time;
+
+// This structure is for storing parameters which we will use to create a
+// SavePackage object later.
+struct SavePackageParam {
+  // MIME type of current tab contents.
+  const std::string current_tab_mime_type;
+  // Pointer to preference service.
+  SavePackage::SavePackageType save_type;
+  // File path for main html file.
+  FilePath saved_main_file_path;
+  // Directory path for saving sub resources and sub html frames.
+  FilePath dir;
+
+  SavePackageParam(const std::string& mime_type)
+      : current_tab_mime_type(mime_type) { }
+};
 
 namespace {
 
 // Default name which will be used when we can not get proper name from
 // resource URL.
 const wchar_t kDefaultSaveName[] = L"saved_resource";
+
+const FilePath::CharType kDefaultHtmlExtension[] =
+#if defined(OS_WIN)
+    FILE_PATH_LITERAL("htm");
+#else
+    FILE_PATH_LITERAL("html");
+#endif
 
 // Maximum number of file ordinal number. I think it's big enough for resolving
 // name-conflict files which has same base file name.
@@ -93,60 +113,14 @@ FilePath::StringType StripOrdinalNumber(
   return pure_file_name.substr(0, l_paren_index);
 }
 
-// In testing mode, |should_prompt_user| will be false, and we simply set the
-// final name as the suggested name. Otherwise we pop up a Save As dialog.
-bool SaveFileAsWithFilter(gfx::NativeView owner,
-                          const std::wstring& suggested_name,
-                          const std::wstring& filter,
-                          const std::wstring& def_ext,
-                          bool ignore_suggested_ext,
-                          unsigned* index,
-                          std::wstring* final_name,
-                          bool should_prompt_user) {
-// TODO(port): Until we have an equivalent call on other platforms, assume
-// |suggested_name| will work just fine.
-#if defined(OS_WIN)
-  if (should_prompt_user)
-    return win_util::SaveFileAsWithFilter(owner,
-                                          suggested_name,
-                                          filter,
-                                          def_ext,
-                                          ignore_suggested_ext,
-                                          index,
-                                          final_name);
-#elif defined(OS_POSIX)
-  NOTIMPLEMENTED();
-#endif
-
-  final_name->assign(suggested_name);
-  return true;
-}
-
-// As above, in testing mode, just assign |final_name| to be |suggested_name|.
-bool SaveFileAs(gfx::NativeView owner,
-                const std::wstring& suggested_name,
-                std::wstring* final_name,
-                bool should_prompt_user) {
-// TODO(port): Until we have an equivalent call on other platforms, assume
-// |suggested_name| will work just fine.
-#if defined(OS_WIN)
-  if (should_prompt_user)
-    return win_util::SaveFileAs(owner, suggested_name, final_name);
-#elif defined(OS_POSIX)
-  NOTIMPLEMENTED();
-#endif
-
-  final_name->assign(suggested_name);
-  return true;
-}
-
 }  // namespace
 
-SavePackage::SavePackage(WebContents* web_content,
+SavePackage::SavePackage(TabContents* web_content,
                          SavePackageType save_type,
                          const FilePath& file_full_path,
                          const FilePath& directory_full_path)
-    : web_contents_(web_content),
+    : file_manager_(NULL),
+      tab_contents_(web_content),
       download_(NULL),
       saved_main_file_path_(file_full_path),
       saved_main_directory_path_(directory_full_path),
@@ -158,7 +132,7 @@ SavePackage::SavePackage(WebContents* web_content,
       wait_state_(INITIALIZE),
       tab_id_(web_content->process()->pid()) {
   DCHECK(web_content);
-  const GURL& current_page_url = web_contents_->GetURL();
+  const GURL& current_page_url = tab_contents_->GetURL();
   DCHECK(current_page_url.is_valid());
   page_url_ = current_page_url;
   DCHECK(save_type_ == SAVE_AS_ONLY_HTML ||
@@ -169,11 +143,27 @@ SavePackage::SavePackage(WebContents* web_content,
          saved_main_directory_path_.value().length() < kMaxFilePathLength);
 }
 
+SavePackage::SavePackage(TabContents* tab_contents)
+    : file_manager_(NULL),
+      tab_contents_(tab_contents),
+      download_(NULL),
+      finished_(false),
+      user_canceled_(false),
+      disk_error_occurred_(false),
+      all_save_items_count_(0),
+      wait_state_(INITIALIZE),
+      tab_id_(tab_contents->process()->pid()) {
+  const GURL& current_page_url = tab_contents_->GetURL();
+  DCHECK(current_page_url.is_valid());
+  page_url_ = current_page_url;
+}
+
 // This is for testing use. Set |finished_| as true because we don't want
 // method Cancel to be be called in destructor in test mode.
 SavePackage::SavePackage(const FilePath& file_full_path,
                          const FilePath& directory_full_path)
-    : download_(NULL),
+    : file_manager_(NULL),
+      download_(NULL),
       saved_main_file_path_(file_full_path),
       saved_main_directory_path_(directory_full_path),
       finished_(true),
@@ -218,6 +208,11 @@ SavePackage::~SavePackage() {
     download_ = NULL;
   }
   file_manager_ = NULL;
+
+  // If there's an outstanding save dialog, make sure it doesn't call us back
+  // now that we're gone.
+  if (select_file_dialog_.get())
+    select_file_dialog_->ListenerDestroyed();
 }
 
 // Cancel all in progress request, might be called by user or internal error.
@@ -240,7 +235,7 @@ bool SavePackage::Init() {
   wait_state_ = START_PROCESS;
 
   // Initialize the request context and resource dispatcher.
-  Profile* profile = web_contents_->profile();
+  Profile* profile = tab_contents_->profile();
   if (!profile) {
     NOTREACHED();
     return false;
@@ -261,17 +256,10 @@ bool SavePackage::Init() {
   }
 
   // Create the fake DownloadItem and display the view.
-  download_ = new DownloadItem(1, saved_main_file_path_, 0, page_url_,
-      FilePath(), Time::Now(), 0, -1, -1, false);
-  download_->set_manager(web_contents_->profile()->GetDownloadManager());
-#if !defined(OS_MACOSX)
-  DownloadShelf* shelf = web_contents_->GetDownloadShelf();
-  shelf->AddDownload(new SavePageModel(this, download_));
-  web_contents_->SetDownloadShelfVisible(true);
-#else
-  // TODO(port): Create a download shelf for mac.
-  NOTIMPLEMENTED();
-#endif
+  download_ = new DownloadItem(1, saved_main_file_path_, 0, page_url_, GURL(),
+      "", FilePath(), Time::Now(), 0, -1, -1, false);
+  download_->set_manager(tab_contents_->profile()->GetDownloadManager());
+  tab_contents_->OnStartDownload(download_);
 
   // Check save type and process the save page job.
   if (save_type_ == SAVE_AS_COMPLETE_HTML) {
@@ -304,17 +292,21 @@ bool SavePackage::GenerateFilename(const std::string& disposition,
                                    const GURL& url,
                                    bool need_html_ext,
                                    FilePath::StringType* generated_name) {
+  // TODO(jungshik): Figure out the referrer charset when having one
+  // makes sense and pass it to GetSuggestedFilename.
   FilePath file_path = FilePath::FromWStringHack(
-      net::GetSuggestedFilename(url, disposition, kDefaultSaveName));
+      net::GetSuggestedFilename(url, disposition, "", kDefaultSaveName));
 
   DCHECK(!file_path.empty());
   FilePath::StringType pure_file_name =
       file_path.RemoveExtension().BaseName().value();
   FilePath::StringType file_name_ext = file_path.Extension();
 
-  // If it is HTML resource, use ".htm" as its extension name.
-  if (need_html_ext)
-    file_name_ext = FILE_PATH_LITERAL(".htm");
+  // If it is HTML resource, use ".htm{l,}" as its extension.
+  if (need_html_ext) {
+    file_name_ext = FILE_PATH_LITERAL(".");
+    file_name_ext.append(kDefaultHtmlExtension);
+  }
 
   // Get safe pure file name.
   if (!GetSafePureFileName(saved_main_directory_path_, file_name_ext,
@@ -518,6 +510,11 @@ bool SavePackage::UpdateSaveProgress(int32 save_id,
 // Stop all page saving jobs that are in progress and instruct the file thread
 // to delete all saved  files.
 void SavePackage::Stop() {
+  // If we haven't moved out of the initial state, there's nothing to cancel and
+  // there won't be valid pointers for file_manager_ or download_.
+  if (wait_state_ == INITIALIZE)
+    return;
+
   // When stopping, if it still has some items in in_progress, cancel them.
   DCHECK(canceled());
   if (in_process_count()) {
@@ -560,9 +557,9 @@ void SavePackage::CheckFinish() {
   if (in_process_count() || finished_)
     return;
 
-  FilePath dir = save_type_ == SAVE_AS_COMPLETE_HTML ?
-                 saved_main_directory_path_ :
-                 FilePath();
+  FilePath dir = (save_type_ == SAVE_AS_COMPLETE_HTML &&
+                  saved_success_items_.size() > 1) ?
+                  saved_main_directory_path_ : FilePath();
 
   // This vector contains the final names of all the successfully saved files
   // along with their save ids. It will be passed to SaveFileManager to do the
@@ -578,8 +575,8 @@ void SavePackage::CheckFinish() {
                         &SaveFileManager::RenameAllFiles,
                         final_names,
                         dir,
-                        web_contents_->process()->pid(),
-                        web_contents_->render_view_host()->routing_id()));
+                        tab_contents_->process()->pid(),
+                        tab_contents_->render_view_host()->routing_id()));
 }
 
 // Successfully finished all items of this SavePackage.
@@ -700,7 +697,7 @@ void SavePackage::SaveCanceled(SaveItem* save_item) {
 // the save source. Parameter process_all_remaining_items indicates whether
 // we need to save all remaining items.
 void SavePackage::SaveNextFile(bool process_all_remaining_items) {
-  DCHECK(web_contents_);
+  DCHECK(tab_contents_);
   DCHECK(waiting_item_queue_.size());
 
   do {
@@ -716,8 +713,8 @@ void SavePackage::SaveNextFile(bool process_all_remaining_items) {
     save_item->Start();
     file_manager_->SaveURL(save_item->url(),
                            save_item->referrer(),
-                           web_contents_->process()->pid(),
-                           web_contents_->render_view_host()->routing_id(),
+                           tab_contents_->process()->pid(),
+                           tab_contents_->render_view_host()->routing_id(),
                            save_item->save_source(),
                            save_item->full_path(),
                            request_context_.get(),
@@ -828,7 +825,7 @@ void SavePackage::GetSerializedHtmlDataForCurrentPageWithLocalLinks() {
   // Get the relative directory name.
   FilePath relative_dir_name = saved_main_directory_path_.BaseName();
 
-  web_contents_->render_view_host()->
+  tab_contents_->render_view_host()->
       GetSerializedHtmlDataForCurrentPageWithLocalLinks(
       saved_links, saved_file_paths, relative_dir_name);
 }
@@ -903,7 +900,7 @@ void SavePackage::GetAllSavableResourceLinksForCurrentPage() {
 
   wait_state_ = RESOURCES_LIST;
   GURL main_page_url(page_url_);
-  web_contents_->render_view_host()->
+  tab_contents_->render_view_host()->
       GetAllSavableResourceLinksForCurrentPage(main_page_url);
 }
 
@@ -956,11 +953,61 @@ void SavePackage::SetShouldPromptUser(bool should_prompt) {
   g_should_prompt_for_filename = should_prompt;
 }
 
-// static
-FilePath SavePackage::GetSuggestNameForSaveAs(PrefService* prefs,
-                                              const FilePath& name) {
-  // Check whether the preference has the preferred directory for saving file.
-  // If not, initialize it with default directory.
+// static.
+FilePath SavePackage::GetSuggestedNameForSaveAs(const FilePath& name,
+                                                bool can_save_as_complete) {
+  // If the name is a URL, try to use the last path component or if there is
+  // none, the domain as the file name.
+  FilePath name_with_proper_ext = name;
+  GURL url(WideToUTF8(name_with_proper_ext.ToWStringHack()));
+  if (url.is_valid()) {
+    std::string url_path;
+    std::vector<std::string> url_parts;
+    SplitString(url.path(), '/', &url_parts);
+    if (!url_parts.empty()) {
+      for (int i = static_cast<int>(url_parts.size()) - 1; i >= 0; --i) {
+        url_path = url_parts[i];
+        if (!url_path.empty())
+          break;
+      }
+    }
+    if (url_path.empty())
+      url_path = url.host();
+    name_with_proper_ext = FilePath::FromWStringHack(UTF8ToWide(url_path));
+  }
+
+  // Ask user for getting final saving name.
+  if (can_save_as_complete)
+    name_with_proper_ext = EnsureHtmlExtension(name_with_proper_ext);
+
+  std::wstring file_name = name_with_proper_ext.ToWStringHack();
+  // TODO(port): we need a version of ReplaceIllegalCharacters() that takes
+  // FilePaths.
+  file_util::ReplaceIllegalCharacters(&file_name, L' ');
+  TrimWhitespace(file_name, TRIM_ALL, &file_name);
+
+  return FilePath::FromWStringHack(file_name);
+}
+
+FilePath SavePackage::EnsureHtmlExtension(const FilePath& name) {
+  // If the file name doesn't have an extension suitable for HTML files,
+  // append one.
+  FilePath::StringType ext = file_util::GetFileExtensionFromPath(name);
+  std::string mime_type;
+  if (!net::GetMimeTypeFromExtension(ext, &mime_type) ||
+      !CanSaveAsComplete(mime_type)) {
+    return FilePath(name.value() + FILE_PATH_LITERAL(".") +
+                    kDefaultHtmlExtension);
+  }
+  return name;
+}
+
+// static.
+// Check whether the preference has the preferred directory for saving file. If
+// not, initialize it with default directory.
+FilePath SavePackage::GetSaveDirPreference(PrefService* prefs) {
+  DCHECK(prefs);
+
   if (!prefs->IsPrefRegistered(prefs::kSaveFileDefaultDirectory)) {
     FilePath default_save_path;
     if (!prefs->IsPrefRegistered(prefs::kDownloadDefaultDirectory)) {
@@ -972,8 +1019,8 @@ FilePath SavePackage::GetSuggestNameForSaveAs(PrefService* prefs,
       StringPrefMember default_download_path;
       default_download_path.Init(prefs::kDownloadDefaultDirectory,
                                  prefs, NULL);
-      default_save_path = FilePath::FromWStringHack(
-                          default_download_path.GetValue());
+      default_save_path =
+          FilePath::FromWStringHack(default_download_path.GetValue());
     }
     prefs->RegisterFilePathPref(prefs::kSaveFileDefaultDirectory,
                                 default_save_path);
@@ -984,71 +1031,88 @@ FilePath SavePackage::GetSuggestNameForSaveAs(PrefService* prefs,
   save_file_path.Init(prefs::kSaveFileDefaultDirectory, prefs, NULL);
   DCHECK(!(*save_file_path).empty());
 
-  // Ask user for getting final saving name.
-  std::wstring file_name = name.ToWStringHack();
-  // TODO(port): we need a version of ReplaceIllegalCharacters() that takes
-  // FilePaths.
-  file_util::ReplaceIllegalCharacters(&file_name, L' ');
-  TrimWhitespace(file_name, TRIM_ALL, &file_name);
-  FilePath suggest_name = FilePath::FromWStringHack(save_file_path.GetValue());
-  suggest_name = suggest_name.Append(FilePath::FromWStringHack(file_name));
-
-  return suggest_name;
+  return FilePath::FromWStringHack(*save_file_path);
 }
 
-// Static.
-bool SavePackage::GetSaveInfo(const FilePath& suggest_name,
-                              gfx::NativeView container_window,
-                              SavePackageParam* param,
-                              DownloadManager* download_manager) {
-  // TODO(tc): It might be nice to move this code into the download
-  // manager.  http://crbug.com/6025
-
+void SavePackage::GetSaveInfo() {
   // Use "Web Page, Complete" option as default choice of saving page.
-  unsigned index = 2;
+  int file_type_index = 2;
+  SelectFileDialog::FileTypeInfo file_type_info;
+  FilePath::StringType default_extension;
+
+  SavePackageParam* save_params =
+      new SavePackageParam(tab_contents_->contents_mime_type());
+
+  bool can_save_as_complete =
+      CanSaveAsComplete(save_params->current_tab_mime_type);
+
+  FilePath title =
+      FilePath::FromWStringHack(UTF16ToWideHack(tab_contents_->GetTitle()));
+  FilePath save_dir =
+      GetSaveDirPreference(tab_contents_->profile()->GetPrefs());
+  FilePath suggested_path =
+      save_dir.Append(GetSuggestedNameForSaveAs(title, can_save_as_complete));
 
   // If the contents can not be saved as complete-HTML, do not show the
   // file filters.
-  if (CanSaveAsComplete(param->current_tab_mime_type)) {
-    // Create filter string.
-    std::wstring filter = l10n_util::GetString(IDS_SAVE_PAGE_FILTER);
-    filter.resize(filter.size() + 2);
-    filter[filter.size() - 1] = L'\0';
-    filter[filter.size() - 2] = L'\0';
-
-    // Since we take the suggested name from the web page's title, we want to
-    // ignore the file extension generated by SaveFileAsWithFilter, since it
-    // will always be ".htm".
-    std::wstring main_file_path;
-    bool success = SaveFileAsWithFilter(container_window,
-        suggest_name.ToWStringHack(), filter, L"htm", true, &index,
-        &main_file_path, g_should_prompt_for_filename);
-    param->saved_main_file_path = FilePath::FromWStringHack(main_file_path);
-    if (!success)
-      return false;
+  if (can_save_as_complete) {
+    file_type_info.extensions.resize(2);
+    file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("htm"));
+    file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("html"));
+    file_type_info.extension_description_overrides.push_back(
+        WideToUTF16(l10n_util::GetString(IDS_SAVE_PAGE_DESC_HTML_ONLY)));
+    file_type_info.extensions[1].push_back(FILE_PATH_LITERAL("htm"));
+    file_type_info.extensions[1].push_back(FILE_PATH_LITERAL("html"));
+    file_type_info.extension_description_overrides.push_back(
+        WideToUTF16(l10n_util::GetString(IDS_SAVE_PAGE_DESC_COMPLETE)));
+    file_type_info.include_all_files = false;
+    default_extension = kDefaultHtmlExtension;
   } else {
-    std::wstring main_file_path;
-    bool success = SaveFileAs(container_window, suggest_name.ToWStringHack(),
-                              &main_file_path, g_should_prompt_for_filename);
-    param->saved_main_file_path = FilePath::FromWStringHack(main_file_path);
-    if (!success)
-      return false;
-
-    // Set save-as type to only-HTML if the contents of current tab can not be
-    // saved as complete-HTML.
-    index = 1;
+    file_type_info.extensions.resize(1);
+    file_type_info.extensions[0].push_back(suggested_path.Extension());
+    if (!file_type_info.extensions[0][0].empty())
+      file_type_info.extensions[0][0].erase(0, 1);  // drop the .
+    file_type_info.include_all_files = true;
+    file_type_index = 1;
   }
 
+  if (g_should_prompt_for_filename) {
+    if (!select_file_dialog_.get())
+      select_file_dialog_ = SelectFileDialog::Create(this);
+    select_file_dialog_->SelectFile(SelectFileDialog::SELECT_SAVEAS_FILE,
+                                    string16(),
+                                    suggested_path,
+                                    &file_type_info,
+                                    file_type_index,
+                                    default_extension,
+                                    platform_util::GetTopLevel(
+                                        tab_contents_->GetNativeView()),
+                                    save_params);
+  } else {
+    // Just use 'suggested_path' instead of opening the dialog prompt.
+    ContinueSave(save_params, suggested_path, file_type_index);
+    delete save_params;
+  }
+}
+
+// Called after the save file dialog box returns.
+void SavePackage::ContinueSave(SavePackageParam* param,
+                               const FilePath& final_name,
+                               int index) {
   // Ensure the filename is safe.
-  download_manager->GenerateSafeFilename(param->current_tab_mime_type,
-                                         &param->saved_main_file_path);
+  param->saved_main_file_path = final_name;
+  DownloadManager* dlm = tab_contents_->profile()->GetDownloadManager();
+  DCHECK(dlm);
+  dlm->GenerateSafeFilename(param->current_tab_mime_type,
+                            &param->saved_main_file_path);
 
   // The option index is not zero-based.
   DCHECK(index > 0 && index < 3);
   param->dir = param->saved_main_file_path.DirName();
 
+  PrefService* prefs = tab_contents_->profile()->GetPrefs();
   StringPrefMember save_file_path;
-  save_file_path.Init(prefs::kSaveFileDefaultDirectory, param->prefs, NULL);
+  save_file_path.Init(prefs::kSaveFileDefaultDirectory, prefs, NULL);
   // If user change the default saving directory, we will remember it just
   // like IE and FireFox.
   if (save_file_path.GetValue() != param->dir.ToWStringHack())
@@ -1064,7 +1128,11 @@ bool SavePackage::GetSaveInfo(const FilePath& suggest_name,
         FILE_PATH_LITERAL("_files"));
   }
 
-  return true;
+  save_type_ = param->save_type;
+  saved_main_file_path_ = param->saved_main_file_path;
+  saved_main_directory_path_ = param->dir;
+
+  Init();
 }
 
 // Static
@@ -1118,4 +1186,17 @@ bool SavePackage::GetSafePureFileName(const FilePath& dir_path,
   // Not enough room to even use a shortened |pure_file_name|.
   pure_file_name->clear();
   return false;
+}
+
+// SelectFileDialog::Listener interface.
+void SavePackage::FileSelected(const FilePath& path,
+                               int index, void* params) {
+  SavePackageParam* save_params = reinterpret_cast<SavePackageParam*>(params);
+  ContinueSave(save_params, path, index);
+  delete save_params;
+}
+
+void SavePackage::FileSelectionCanceled(void* params) {
+  SavePackageParam* save_params = reinterpret_cast<SavePackageParam*>(params);
+  delete save_params;
 }

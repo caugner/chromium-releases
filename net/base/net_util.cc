@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <algorithm>
+#include <map>
 #include <unicode/ucnv.h>
 #include <unicode/uidna.h>
 #include <unicode/ulocdata.h>
@@ -28,8 +29,12 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/lock.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/singleton.h"
+#include "base/stl_util-inl.h"
 #include "base/string_escape.h"
 #include "base/string_piece.h"
 #include "base/string_tokenizer.h"
@@ -117,6 +122,7 @@ static const int kRestrictedPorts[] = {
   993,  // ldap+ssl
   995,  // pop3+ssl
   2049, // nfs
+  3659, // apple-sasl / PasswordServer
   4045, // lockd
   6000, // X11
 };
@@ -247,17 +253,22 @@ bool DecodeBQEncoding(const std::string& part, RFC2047EncodingType enc_type,
 }
 
 bool DecodeWord(const std::string& encoded_word,
+                const std::string& referrer_charset,
                 bool *is_rfc2047,
                 std::string* output) {
-  // TODO(jungshik) : Revisit this later. Do we want to pass through non-ASCII
-  // strings which can be mozibake?  WinHTTP converts a raw 8bit string
-  // UTF-16 assuming it's in the OS default encoding.
   if (!IsStringASCII(encoded_word)) {
-    // Try falling back to the NativeMB encoding if the raw input is not UTF-8.
+    // Try UTF-8, referrer_charset and the native OS default charset in turn.
     if (IsStringUTF8(encoded_word)) {
       *output = encoded_word;
     } else {
-      *output = WideToUTF8(base::SysNativeMBToWide(encoded_word));
+      std::wstring wide_output;
+      if (!referrer_charset.empty() &&
+          CodepageToWide(encoded_word, referrer_charset.c_str(),
+                         OnStringUtilConversionError::FAIL, &wide_output)) {
+        *output = WideToUTF8(wide_output);
+      } else {
+        *output = WideToUTF8(base::SysNativeMBToWide(encoded_word));
+      }
     }
     *is_rfc2047 = false;
     return true;
@@ -357,7 +368,9 @@ bool DecodeWord(const std::string& encoded_word,
   return false;
 }
 
-bool DecodeParamValue(const std::string& input, std::string* output) {
+bool DecodeParamValue(const std::string& input,
+                      const std::string& referrer_charset,
+                      std::string* output) {
   std::string tmp;
   // Tokenize with whitespace characters.
   StringTokenizer t(input, " \t\n\r");
@@ -378,7 +391,8 @@ bool DecodeParamValue(const std::string& input, std::string* output) {
     // in a single encoded-word. Firefox/Thunderbird do not support
     // it, either.
     std::string decoded;
-    if (!DecodeWord(t.token(), &is_previous_token_rfc2047, &decoded))
+    if (!DecodeWord(t.token(), referrer_charset, &is_previous_token_rfc2047,
+                    &decoded))
       return false;
     tmp.append(decoded);
   }
@@ -475,9 +489,83 @@ bool IsCompatibleWithASCIILetters(const std::string& lang) {
   // For now, just list Chinese, Japanese and Korean (positive list).
   // An alternative is negative-listing (languages using Greek and
   // Cyrillic letters), but it can be more dangerous.
-  return !lang.substr(0,2).compare("zh") ||
-         !lang.substr(0,2).compare("ja") ||
-         !lang.substr(0,2).compare("ko");
+  return !lang.substr(0, 2).compare("zh") ||
+         !lang.substr(0, 2).compare("ja") ||
+         !lang.substr(0, 2).compare("ko");
+}
+
+typedef std::map<std::string, icu::UnicodeSet*> LangToExemplarSetMap;
+
+class LangToExemplarSet {
+ private:
+  LangToExemplarSetMap map;
+  LangToExemplarSet() { }
+  ~LangToExemplarSet() {
+    STLDeleteContainerPairSecondPointers(map.begin(), map.end());
+  }
+
+  friend class Singleton<LangToExemplarSet>;
+  friend struct DefaultSingletonTraits<LangToExemplarSet>;
+  friend bool GetExemplarSetForLang(const std::string&, icu::UnicodeSet**);
+  friend void SetExemplarSetForLang(const std::string&, icu::UnicodeSet*);
+
+  DISALLOW_COPY_AND_ASSIGN(LangToExemplarSet);
+};
+
+bool GetExemplarSetForLang(const std::string& lang,
+                           icu::UnicodeSet** lang_set) {
+  const LangToExemplarSetMap& map = Singleton<LangToExemplarSet>()->map;
+  LangToExemplarSetMap::const_iterator pos = map.find(lang);
+  if (pos != map.end()) {
+    *lang_set = pos->second;
+    return true;
+  }
+  return false;
+}
+
+void SetExemplarSetForLang(const std::string& lang,
+                           icu::UnicodeSet* lang_set) {
+  LangToExemplarSetMap& map = Singleton<LangToExemplarSet>()->map;
+  map.insert(std::make_pair(lang, lang_set));
+}
+
+static Lock lang_set_lock;
+
+// Returns true if all the characters in component_characters are used by
+// the language |lang|.
+bool IsComponentCoveredByLang(const icu::UnicodeSet& component_characters,
+                              const std::string& lang) {
+  static const icu::UnicodeSet kASCIILetters(0x61, 0x7a);  // [a-z]
+  icu::UnicodeSet* lang_set;
+  // We're called from both the UI thread and the history thread.
+  {
+    AutoLock lock(lang_set_lock);
+    if (!GetExemplarSetForLang(lang, &lang_set)) {
+      UErrorCode status = U_ZERO_ERROR;
+      ULocaleData* uld = ulocdata_open(lang.c_str(), &status);
+      // TODO(jungshik) Turn this check on when the ICU data file is
+      // rebuilt with the minimal subset of locale data for languages
+      // to which Chrome is not localized but which we offer in the list
+      // of languages selectable for Accept-Languages. With the rebuilt ICU
+      // data, ulocdata_open never should fall back to the default locale.
+      // (issue 2078)
+      // DCHECK(U_SUCCESS(status) && status != U_USING_DEFAULT_WARNING);
+      if (U_SUCCESS(status) && status != U_USING_DEFAULT_WARNING) {
+        lang_set = reinterpret_cast<icu::UnicodeSet *>(
+            ulocdata_getExemplarSet(uld, NULL, 0,
+                                    ULOCDATA_ES_STANDARD, &status));
+        // If |lang| is compatible with ASCII Latin letters, add them.
+        if (IsCompatibleWithASCIILetters(lang))
+          lang_set->addAll(kASCIILetters);
+      } else {
+        lang_set = new icu::UnicodeSet(1, 0);
+      }
+      lang_set->freeze();
+      SetExemplarSetForLang(lang, lang_set);
+      ulocdata_close(uld);
+    }
+  }
+  return !lang_set->isEmpty() && lang_set->containsAll(component_characters);
 }
 
 // Returns true if the given Unicode host component is safe to display to the
@@ -501,7 +589,7 @@ bool IsIDNComponentSafe(const char16* str,
 
   UErrorCode status = U_ZERO_ERROR;
 #ifdef U_WCHAR_IS_UTF16
-  UnicodeSet dangerous_characters(UnicodeString(
+  icu::UnicodeSet dangerous_characters(icu::UnicodeString(
       L"[[\\ \u00bc\u00bd\u01c3\u0337\u0338"
       L"\u05c3\u05f4\u06d4\u0702\u115f\u1160][\u2000-\u200b]"
       L"[\u2024\u2027\u2028\u2029\u2039\u203a\u2044\u205f]"
@@ -511,8 +599,8 @@ bool IsIDNComponentSafe(const char16* str,
       L"\ufe15\ufe3f\ufe5d\ufe5e\ufeff\uff0e\uff06\uff61\uffa0\ufff9]"
       L"[\ufffa-\ufffd]]"), status);
 #else
-  UnicodeSet dangerous_characters(UnicodeString(
-      "[[\\ \\u0020\\u00bc\\u00bd\\u01c3\\u0337\\u0338"
+  icu::UnicodeSet dangerous_characters(icu::UnicodeString(
+      "[[\\u0020\\u00bc\\u00bd\\u01c3\\u0337\\u0338"
       "\\u05c3\\u05f4\\u06d4\\u0702\\u115f\\u1160][\\u2000-\\u200b]"
       "[\\u2024\\u2027\\u2028\\u2029\\u2039\\u203a\\u2044\\u205f]"
       "[\\u2154-\\u2156][\\u2159-\\u215b][\\u215f\\u2215\\u23ae"
@@ -522,8 +610,8 @@ bool IsIDNComponentSafe(const char16* str,
       "[\\ufffa-\\ufffd]]", -1, US_INV), status);
 #endif
   DCHECK(U_SUCCESS(status));
-  UnicodeSet component_characters;
-  component_characters.addAll(UnicodeString(str, str_len));
+  icu::UnicodeSet component_characters;
+  component_characters.addAll(icu::UnicodeString(str, str_len));
   if (dangerous_characters.containsSome(component_characters))
     return false;
 
@@ -540,49 +628,21 @@ bool IsIDNComponentSafe(const char16* str,
   // underscore that are used across scripts and allowed in domain names.
   // (sync'd with characters allowed in url_canon_host with square
   // brackets excluded.) See kHostCharLookup[] array in url_canon_host.cc.
-  UnicodeSet common_characters(UNICODE_STRING_SIMPLE("[[0-9]\\-_+\\ ]"),
-                               status);
+  icu::UnicodeSet common_characters(UNICODE_STRING_SIMPLE("[[0-9]\\-_+\\ ]"),
+                                    status);
   DCHECK(U_SUCCESS(status));
   // Subtract common characters because they're always allowed so that
   // we just have to check if a language-specific set contains
   // the remainder.
   component_characters.removeAll(common_characters);
 
-  USet *lang_set = uset_open(1, 0);  // create an empty set
-  UnicodeSet ascii_letters(0x61, 0x7a);  // [a-z]
   bool safe = false;
   std::string languages_list(WideToASCII(languages));
   StringTokenizer t(languages_list, ",");
   while (t.GetNext()) {
-    std::string lang = t.token();
-    status = U_ZERO_ERROR;
-    // TODO(jungshik) Cache exemplar sets for locales.
-    ULocaleData* uld = ulocdata_open(lang.c_str(), &status);
-    // TODO(jungshik) Turn this check on when the ICU data file is
-    // rebuilt with the minimal subset of locale data for languages
-    // to which Chrome is not localized but which we offer in the list
-    // of languages selectable for Accept-Languages. With the rebuilt ICU
-    // data, ulocdata_open never should fall back to the default locale.
-    // (issue 2078)
-    // DCHECK(U_SUCCESS(status) && status != U_USING_DEFAULT_WARNING);
-    if (U_SUCCESS(status) && status != U_USING_DEFAULT_WARNING) {
-      // Should we use auxiliary set, instead?
-      ulocdata_getExemplarSet(uld, lang_set, 0, ULOCDATA_ES_STANDARD, &status);
-      ulocdata_close(uld);
-      if (U_SUCCESS(status)) {
-        UnicodeSet* allowed_characters =
-            reinterpret_cast<UnicodeSet*>(lang_set);
-        // If |lang| is compatible with ASCII Latin letters, add them.
-        if (IsCompatibleWithASCIILetters(lang))
-          allowed_characters->addAll(ascii_letters);
-        if (allowed_characters->containsAll(component_characters)) {
-          safe = true;
-          break;
-        }
-      }
-    }
+    if (safe = IsComponentCoveredByLang(component_characters, t.token()))
+      break;
   }
-  uset_close(lang_set);
   return safe;
 }
 
@@ -643,9 +703,61 @@ void IDNToUnicodeOneComponent(const char16* comp,
     (*out)[host_begin_in_output + i] = comp[i];
 }
 
+// Helper for FormatUrl().
+std::wstring FormatViewSourceUrl(const GURL& url,
+                                 const std::wstring& languages,
+                                 bool omit_username_password,
+                                 UnescapeRule::Type unescape_rules,
+                                 url_parse::Parsed* new_parsed,
+                                 size_t* prefix_end) {
+  DCHECK(new_parsed);
+  const wchar_t* const kWideViewSource = L"view-source:";
+  const size_t kViewSourceLengthPlus1 = 12;
+
+  GURL real_url(url.possibly_invalid_spec().substr(kViewSourceLengthPlus1));
+  std::wstring result = net::FormatUrl(real_url, languages,
+      omit_username_password, unescape_rules, new_parsed, prefix_end);
+  result.insert(0, kWideViewSource);
+
+  // Adjust position values.
+  if (prefix_end)
+    *prefix_end += kViewSourceLengthPlus1;
+  if (new_parsed->scheme.is_nonempty()) {
+    // Assume "view-source:real-scheme" as a scheme.
+    new_parsed->scheme.len += kViewSourceLengthPlus1;
+  } else {
+    new_parsed->scheme.begin = 0;
+    new_parsed->scheme.len = kViewSourceLengthPlus1 - 1;
+  }
+  if (new_parsed->username.is_nonempty())
+    new_parsed->username.begin += kViewSourceLengthPlus1;
+  if (new_parsed->password.is_nonempty())
+    new_parsed->password.begin += kViewSourceLengthPlus1;
+  if (new_parsed->host.is_nonempty())
+    new_parsed->host.begin += kViewSourceLengthPlus1;
+  if (new_parsed->port.is_nonempty())
+    new_parsed->port.begin += kViewSourceLengthPlus1;
+  if (new_parsed->path.is_nonempty())
+    new_parsed->path.begin += kViewSourceLengthPlus1;
+  if (new_parsed->query.is_nonempty())
+    new_parsed->query.begin += kViewSourceLengthPlus1;
+  if (new_parsed->ref.is_nonempty())
+    new_parsed->ref.begin += kViewSourceLengthPlus1;
+  return result;
+}
+
 }  // namespace
 
 namespace net {
+
+// Appends the substring |in_component| inside of the URL |spec| to |output|,
+// and the resulting range will be filled into |out_component|. |unescape_rules|
+// defines how to clean the URL for human readability.
+static void AppendFormattedComponent(const std::string& spec,
+                                     const url_parse::Component& in_component,
+                                     UnescapeRule::Type unescape_rules,
+                                     std::wstring* output,
+                                     url_parse::Component* out_component);
 
 GURL FilePathToFileURL(const FilePath& path) {
   // Produce a URL like "file:///C:/foo" for a regular file, or
@@ -673,10 +785,6 @@ GURL FilePathToFileURL(const FilePath& path) {
   return GURL(url_string);
 }
 
-GURL FilePathToFileURL(const std::wstring& path_str) {
-  return FilePathToFileURL(FilePath::FromWStringHack(path_str));
-}
-
 std::wstring GetSpecificHeader(const std::wstring& headers,
                                const std::wstring& name) {
   return GetSpecificHeaderT(headers, name);
@@ -687,7 +795,8 @@ std::string GetSpecificHeader(const std::string& headers,
   return GetSpecificHeaderT(headers, name);
 }
 
-std::wstring GetFileNameFromCD(const std::string& header) {
+std::wstring GetFileNameFromCD(const std::string& header,
+                               const std::string& referrer_charset) {
   std::string param_value = GetHeaderParamValue(header, "filename");
   if (param_value.empty()) {
     // Some servers use 'name' parameter.
@@ -696,7 +805,7 @@ std::wstring GetFileNameFromCD(const std::string& header) {
   if (param_value.empty())
     return std::wstring();
   std::string decoded;
-  if (DecodeParamValue(param_value, &decoded))
+  if (DecodeParamValue(param_value, referrer_charset, &decoded))
     return UTF8ToWide(decoded);
   return std::wstring();
 }
@@ -772,46 +881,37 @@ void IDNToUnicode(const char* host,
 #endif
 }
 
-std::string CanonicalizeHost(const std::string& host, bool* is_ip_address) {
+std::string CanonicalizeHost(const std::string& host,
+                             url_canon::CanonHostInfo* host_info) {
   // Try to canonicalize the host.
-  const url_parse::Component raw_host_component(0,
-      static_cast<int>(host.length()));
+  const url_parse::Component raw_host_component(
+      0, static_cast<int>(host.length()));
   std::string canon_host;
   url_canon::StdStringCanonOutput canon_host_output(&canon_host);
-  url_parse::Component canon_host_component;
-  if (!url_canon::CanonicalizeHost(host.c_str(), raw_host_component,
-                                   &canon_host_output, &canon_host_component)) {
-    if (is_ip_address)
-      *is_ip_address = false;
-    return std::string();
-  }
-  canon_host_output.Complete();
+  url_canon::CanonicalizeHostVerbose(host.c_str(), raw_host_component,
+                                     &canon_host_output, host_info);
 
-  if (is_ip_address) {
-    // See if the host is an IP address.
-    url_canon::RawCanonOutputT<char, 128> ignored_output;
-    url_parse::Component ignored_component;
-    *is_ip_address = url_canon::CanonicalizeIPAddress(canon_host.c_str(),
-                                                      canon_host_component,
-                                                      &ignored_output,
-                                                      &ignored_component);
+  if (host_info->out_host.is_nonempty() &&
+      host_info->family != url_canon::CanonHostInfo::BROKEN) {
+    // Success!  Assert that there's no extra garbage.
+    canon_host_output.Complete();
+    DCHECK_EQ(host_info->out_host.len, static_cast<int>(canon_host.length()));
+  } else {
+    // Empty host, or canonicalization failed.  We'll return empty.
+    canon_host.clear();
   }
 
-  // Return the host as a string, stripping any unnecessary bits off the ends.
-  if ((canon_host_component.begin == 0) &&
-      (static_cast<size_t>(canon_host_component.len) == canon_host.length()))
-    return canon_host;
-  return canon_host.substr(canon_host_component.begin,
-                           canon_host_component.len);
+  return canon_host;
 }
 
-std::string CanonicalizeHost(const std::wstring& host, bool* is_ip_address) {
+std::string CanonicalizeHost(const std::wstring& host,
+                             url_canon::CanonHostInfo* host_info) {
   std::string converted_host;
   WideToUTF8(host.c_str(), host.length(), &converted_host);
-  return CanonicalizeHost(converted_host, is_ip_address);
+  return CanonicalizeHost(converted_host, host_info);
 }
 
-std::string GetDirectoryListingHeader(const std::string& title) {
+std::string GetDirectoryListingHeader(const string16& title) {
   static const StringPiece header(NetModule::GetResource(IDR_DIR_HEADER_HTML));
   if (header.empty()) {
     NOTREACHED() << "expected resource not found";
@@ -819,29 +919,34 @@ std::string GetDirectoryListingHeader(const std::string& title) {
   std::string result(header.data(), header.size());
 
   result.append("<script>start(");
-  string_escape::JavascriptDoubleQuote(title, true, &result);
+  string_escape::JsonDoubleQuote(title, true, &result);
   result.append(");</script>\n");
 
   return result;
 }
 
-std::string GetDirectoryListingEntry(const std::string& name,
+std::string GetDirectoryListingEntry(const string16& name,
+                                     const std::string& raw_bytes,
                                      bool is_dir,
                                      int64 size,
-                                     const Time& modified) {
+                                     Time modified) {
   std::string result;
   result.append("<script>addRow(");
-  string_escape::JavascriptDoubleQuote(name, true, &result);
+  string_escape::JsonDoubleQuote(name, true, &result);
   result.append(",");
-  string_escape::JavascriptDoubleQuote(
-      EscapePath(name), true, &result);
+  if (raw_bytes.empty()) {
+    string_escape::JsonDoubleQuote(EscapePath(UTF16ToUTF8(name)),
+                                   true, &result);
+  } else {
+    string_escape::JsonDoubleQuote(EscapePath(raw_bytes), true, &result);
+  }
   if (is_dir) {
     result.append(",1,");
   } else {
     result.append(",0,");
   }
 
-  string_escape::JavascriptDoubleQuote(
+  string_escape::JsonDoubleQuote(
       WideToUTF16Hack(FormatBytes(size, GetByteDisplayUnits(size), true)), true,
       &result);
 
@@ -852,7 +957,7 @@ std::string GetDirectoryListingEntry(const std::string& name,
   if (!modified.is_null()) {
     modified_str = WideToUTF16Hack(base::TimeFormatShortDateAndTime(modified));
   }
-  string_escape::JavascriptDoubleQuote(modified_str, true, &result);
+  string_escape::JsonDoubleQuote(modified_str, true, &result);
 
   result.append(");</script>\n");
 
@@ -867,8 +972,10 @@ std::wstring StripWWW(const std::wstring& text) {
 
 std::wstring GetSuggestedFilename(const GURL& url,
                                   const std::string& content_disposition,
+                                  const std::string& referrer_charset,
                                   const std::wstring& default_name) {
-  std::wstring filename = GetFileNameFromCD(content_disposition);
+  std::wstring filename = GetFileNameFromCD(content_disposition,
+                                            referrer_charset);
   if (!filename.empty()) {
     // Remove any path information the server may have sent, take the name
     // only.
@@ -890,26 +997,20 @@ std::wstring GetSuggestedFilename(const GURL& url,
   // If there's no filename or it gets trimed to be empty, use
   // the URL hostname or default_name
   if (filename.empty()) {
-    if (!default_name.empty())
+    if (!default_name.empty()) {
       filename = default_name;
-    else if (url.is_valid()) {
+    } else if (url.is_valid()) {
       // Some schemes (e.g. file) do not have a hostname. Even though it's
       // not likely to reach here, let's hardcode the last fallback name.
       // TODO(jungshik) : Decode a 'punycoded' IDN hostname. (bug 1264451)
       filename = url.host().empty() ? L"download" : UTF8ToWide(url.host());
-    } else
+    } else {
       NOTREACHED();
+    }
   }
 
   file_util::ReplaceIllegalCharacters(&filename, '-');
   return filename;
-}
-
-std::wstring GetSuggestedFilename(const GURL& url,
-                                  const std::wstring& content_disposition,
-                                  const std::wstring& default_name) {
-  return GetSuggestedFilename(
-      url, WideToUTF8(content_disposition), default_name);
 }
 
 bool IsPortAllowedByDefault(int port) {
@@ -945,18 +1046,10 @@ int SetNonBlocking(int fd) {
 #endif
 }
 
-// Deprecated.
-bool FileURLToFilePath(const GURL& gurl, std::wstring* file_path) {
-  FilePath path;
-  bool rv = FileURLToFilePath(gurl, &path);
-  *file_path = path.ToWStringHack();
-  return rv;
-}
-
-bool GetHostAndPort(std::string::const_iterator host_and_port_begin,
-                    std::string::const_iterator host_and_port_end,
-                    std::string* host,
-                    int* port) {
+bool ParseHostAndPort(std::string::const_iterator host_and_port_begin,
+                      std::string::const_iterator host_and_port_end,
+                      std::string* host,
+                      int* port) {
   if (host_and_port_begin >= host_and_port_end)
     return false;
 
@@ -1000,10 +1093,25 @@ bool GetHostAndPort(std::string::const_iterator host_and_port_begin,
   return true;  // Success.
 }
 
-bool GetHostAndPort(const std::string& host_and_port,
-                    std::string* host,
-                    int* port) {
-  return GetHostAndPort(host_and_port.begin(), host_and_port.end(), host, port);
+bool ParseHostAndPort(const std::string& host_and_port,
+                      std::string* host,
+                      int* port) {
+  return ParseHostAndPort(
+      host_and_port.begin(), host_and_port.end(), host, port);
+}
+
+std::string GetHostAndPort(const GURL& url) {
+  // For IPv6 literals, GURL::host() already includes the brackets so it is
+  // safe to just append a colon.
+  return StringPrintf("%s:%d", url.host().c_str(), url.EffectiveIntPort());
+}
+
+std::string GetHostAndOptionalPort(const GURL& url) {
+  // For IPv6 literals, GURL::host() already includes the brackets
+  // so it is safe to just append a colon.
+  if (url.has_port())
+    return StringPrintf("%s:%s", url.host().c_str(), url.port().c_str());
+  return url.host();
 }
 
 std::string NetAddressToString(const struct addrinfo* net_address) {
@@ -1024,13 +1132,12 @@ std::string NetAddressToString(const struct addrinfo* net_address) {
   return std::string(buffer);
 }
 
-std::string GetMyHostName() {
+std::string GetHostName() {
 #if defined(OS_WIN)
   EnsureWinsockInit();
 #endif
 
-  // Maximum size of 256 is somewhat arbitrary. Mozilla uses a size of 100
-  // so this should cover the majority of cases.
+  // Host names are limited to 255 bytes.
   char buffer[256];
   int result = gethostname(buffer, sizeof(buffer));
   if (result != 0) {
@@ -1038,6 +1145,159 @@ std::string GetMyHostName() {
     buffer[0] = '\0';
   }
   return std::string(buffer);
+}
+
+void AppendFormattedHost(const GURL& url,
+                         const std::wstring& languages,
+                         std::wstring* output,
+                         url_parse::Parsed* new_parsed) {
+  const url_parse::Component& host =
+      url.parsed_for_possibly_invalid_spec().host;
+
+  if (host.is_nonempty()) {
+    // Handle possible IDN in the host name.
+    if (new_parsed)
+      new_parsed->host.begin = static_cast<int>(output->length());
+
+    const std::string& spec = url.possibly_invalid_spec();
+    DCHECK(host.begin >= 0 &&
+           ((spec.length() == 0 && host.begin == 0) ||
+            host.begin < static_cast<int>(spec.length())));
+    net::IDNToUnicode(&spec[host.begin], host.len, languages, output);
+
+    if (new_parsed) {
+      new_parsed->host.len =
+          static_cast<int>(output->length()) - new_parsed->host.begin;
+    }
+  } else if (new_parsed) {
+    new_parsed->host.reset();
+  }
+}
+
+/* static */
+void AppendFormattedComponent(const std::string& spec,
+                              const url_parse::Component& in_component,
+                              UnescapeRule::Type unescape_rules,
+                              std::wstring* output,
+                              url_parse::Component* out_component) {
+  if (in_component.is_nonempty()) {
+    out_component->begin = static_cast<int>(output->length());
+    if (unescape_rules == UnescapeRule::NONE) {
+      output->append(UTF8ToWide(spec.substr(
+          in_component.begin, in_component.len)));
+    } else {
+      output->append(UnescapeAndDecodeUTF8URLComponent(
+          spec.substr(in_component.begin, in_component.len),
+          unescape_rules));
+    }
+    out_component->len =
+        static_cast<int>(output->length()) - out_component->begin;
+  } else {
+    out_component->reset();
+  }
+}
+
+std::wstring FormatUrl(const GURL& url,
+                       const std::wstring& languages,
+                       bool omit_username_password,
+                       UnescapeRule::Type unescape_rules,
+                       url_parse::Parsed* new_parsed,
+                       size_t* prefix_end) {
+  url_parse::Parsed parsed_temp;
+  if (!new_parsed)
+    new_parsed = &parsed_temp;
+
+  std::wstring url_string;
+
+  // Check for empty URLs or 0 available text width.
+  if (url.is_empty()) {
+    if (prefix_end)
+      *prefix_end = 0;
+    return url_string;
+  }
+
+  // Special handling for view-source:.  Don't use chrome::kViewSourceScheme
+  // because this library shouldn't depend on chrome.
+  const char* const kViewSource = "view-source";
+  const char* const kViewSourceTwice = "view-source:view-source:";
+  // Rejects view-source:view-source:... to avoid deep recursive call.
+  if (url.SchemeIs(kViewSource) &&
+      !StartsWithASCII(url.possibly_invalid_spec(), kViewSourceTwice, false)) {
+    return FormatViewSourceUrl(url, languages, omit_username_password,
+        unescape_rules, new_parsed, prefix_end);
+  }
+
+  // We handle both valid and invalid URLs (this will give us the spec
+  // regardless of validity).
+  const std::string& spec = url.possibly_invalid_spec();
+  const url_parse::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
+
+  // Copy everything before the username (the scheme and the separators.)
+  // These are ASCII.
+  int pre_end = parsed.CountCharactersBefore(url_parse::Parsed::USERNAME, true);
+  for (int i = 0; i < pre_end; ++i)
+    url_string.push_back(spec[i]);
+  new_parsed->scheme = parsed.scheme;
+
+  if (omit_username_password) {
+    // Remove the username and password fields. We don't want to display those
+    // to the user since they can be used for attacks,
+    // e.g. "http://google.com:search@evil.ru/"
+    new_parsed->username.reset();
+    new_parsed->password.reset();
+  } else {
+    AppendFormattedComponent(
+        spec, parsed.username, unescape_rules,
+        &url_string, &new_parsed->username);
+    if (parsed.password.is_valid()) {
+      url_string.push_back(':');
+    }
+    AppendFormattedComponent(
+        spec, parsed.password, unescape_rules,
+        &url_string, &new_parsed->password);
+    if (parsed.username.is_valid() || parsed.password.is_valid()) {
+      url_string.push_back('@');
+    }
+  }
+  if (prefix_end)
+    *prefix_end = static_cast<size_t>(url_string.length());
+
+  AppendFormattedHost(url, languages, &url_string, new_parsed);
+
+  // Port.
+  if (parsed.port.is_nonempty()) {
+    url_string.push_back(':');
+    int begin = url_string.length();
+    for (int i = parsed.port.begin; i < parsed.port.end(); ++i)
+      url_string.push_back(spec[i]);
+    new_parsed->port.begin = begin;
+    new_parsed->port.len = url_string.length() - begin;
+  } else {
+    new_parsed->port.reset();
+  }
+
+  // Path and query both get the same general unescape & convert treatment.
+  AppendFormattedComponent(
+      spec, parsed.path, unescape_rules, &url_string,
+      &new_parsed->path);
+  if (parsed.query.is_valid())
+    url_string.push_back('?');
+  AppendFormattedComponent(
+      spec, parsed.query, unescape_rules, &url_string,
+      &new_parsed->query);
+
+  // Reference is stored in valid, unescaped UTF-8, so we can just convert.
+  if (parsed.ref.is_valid()) {
+    url_string.push_back('#');
+    int begin = url_string.length();
+    if (parsed.ref.len > 0)
+      url_string.append(UTF8ToWide(std::string(&spec[parsed.ref.begin],
+                                               parsed.ref.len)));
+    new_parsed->ref.begin = begin;
+    new_parsed->ref.len = url_string.length() - begin;
+  }
+
+  return url_string;
 }
 
 }  // namespace net

@@ -2,22 +2,36 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
-
 #include "chrome/plugin/plugin_channel.h"
 
-#include "chrome/common/plugin_messages.h"
 #include "base/command_line.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
+#include "build/build_config.h"
+#include "chrome/common/child_process.h"
+#include "chrome/common/plugin_messages.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/plugin/plugin_process.h"
 #include "chrome/plugin/plugin_thread.h"
 
-PluginChannel* PluginChannel::GetPluginChannel(MessageLoop* ipc_message_loop) {
-  static int next_id;
-  std::wstring channel_name = StringPrintf(
-      L"%d.r%d", GetCurrentProcessId(), ++next_id);
+#if defined(OS_POSIX)
+#include "ipc/ipc_channel_posix.h"
+#endif
+
+class PluginReleaseTask : public Task {
+ public:
+  void Run() {
+    ChildProcess::current()->ReleaseProcess();
+  }
+};
+
+// How long we wait before releasing the plugin process.
+static const int kPluginReleaseTimeMS = 10000;
+
+PluginChannel* PluginChannel::GetPluginChannel(
+    int process_id, MessageLoop* ipc_message_loop) {
+  // map renderer's process id to a (single) channel to that process
+  std::string channel_name = StringPrintf(
+      "%d.r%d", base::GetCurrentProcId(), process_id);
 
   return static_cast<PluginChannel*>(PluginChannelBase::GetChannel(
       channel_name,
@@ -27,15 +41,31 @@ PluginChannel* PluginChannel::GetPluginChannel(MessageLoop* ipc_message_loop) {
       false));
 }
 
-PluginChannel::PluginChannel() : in_send_(0) {
+PluginChannel::PluginChannel()
+    : renderer_handle_(0),
+#if defined(OS_POSIX)
+      renderer_fd_(-1),
+#endif
+      in_send_(0),
+      off_the_record_(false) {
   SendUnblockingOnlyDuringDispatch();
-  PluginProcess::current()->AddRefProcess();
+  ChildProcess::current()->AddRefProcess();
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   log_messages_ = command_line->HasSwitch(switches::kLogPluginMessages);
 }
 
 PluginChannel::~PluginChannel() {
-  PluginProcess::current()->ReleaseProcess();
+  if (renderer_handle_)
+    base::CloseProcessHandle(renderer_handle_);
+#if defined(OS_POSIX)
+  IPC::RemoveAndCloseChannelSocket(channel_name());
+  // If we still have the renderer FD, close it.
+  if (renderer_fd_ != -1) {
+    close(renderer_fd_);
+  }
+#endif
+  MessageLoop::current()->PostDelayedTask(FROM_HERE, new PluginReleaseTask(),
+                                          kPluginReleaseTimeMS);
 }
 
 bool PluginChannel::Send(IPC::Message* msg) {
@@ -95,17 +125,22 @@ void PluginChannel::OnGenerateRouteID(int* route_id) {
 }
 
 int PluginChannel::GenerateRouteID() {
-  static LONG last_id = 0;
-  return InterlockedIncrement(&last_id);
+  static int last_id = 0;
+  return ++last_id;
 }
 
 void PluginChannel::OnChannelConnected(int32 peer_pid) {
-  renderer_handle_.Set(base::OpenProcessHandle(peer_pid));
+  base::ProcessHandle handle;
+  if (!base::OpenProcessHandle(peer_pid, &handle)) {
+    NOTREACHED();
+  }
+  renderer_handle_ = handle;
   PluginChannelBase::OnChannelConnected(peer_pid);
 }
 
 void PluginChannel::OnChannelError() {
-  renderer_handle_.Set(NULL);
+  base::CloseProcessHandle(renderer_handle_);
+  renderer_handle_ = 0;
   PluginChannelBase::OnChannelError();
   CleanUp();
 }
@@ -124,4 +159,17 @@ void PluginChannel::CleanUp() {
   scoped_refptr<PluginChannel> me(this);
 
   plugin_stubs_.clear();
+}
+
+bool PluginChannel::Init(MessageLoop* ipc_message_loop, bool create_pipe_now) {
+#if defined(OS_POSIX)
+  // This gets called when the PluginChannel is initially created. At this
+  // point, create the socketpair and assign the plugin side FD to the channel
+  // name. Keep the renderer side FD as a member variable in the PluginChannel
+  // to be able to transmit it through IPC.
+  int plugin_fd;
+  IPC::SocketPair(&plugin_fd, &renderer_fd_);
+  IPC::AddChannelSocket(channel_name(), plugin_fd);
+#endif
+  return PluginChannelBase::Init(ipc_message_loop, create_pipe_now);
 }

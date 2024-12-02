@@ -19,11 +19,21 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/platform_thread.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
+// This macro helps avoid wrapped lines in the test structs.
+#define FPL(x) FILE_PATH_LITERAL(x)
+
 namespace {
+
+const file_util::FileEnumerator::FILE_TYPE FILES_AND_DIRECTORIES =
+    static_cast<file_util::FileEnumerator::FILE_TYPE>(
+        file_util::FileEnumerator::FILES |
+        file_util::FileEnumerator::DIRECTORIES);
 
 // file_util winds up using autoreleased objects on the Mac, so this needs
 // to be a PlatformTest
@@ -148,60 +158,61 @@ TEST_F(FileUtilTest, AppendToPath) {
 }
 
 static const struct InsertBeforeExtensionCase {
-  std::wstring path;
-  FilePath::StringType suffix;
-  std::wstring result;
+  const FilePath::CharType* path;
+  const FilePath::CharType* suffix;
+  const FilePath::CharType* result;
 } kInsertBeforeExtension[] = {
-  {L"", FILE_PATH_LITERAL(""), L""},
-  {L"", FILE_PATH_LITERAL("txt"), L"txt"},
-  {L".", FILE_PATH_LITERAL("txt"), L"txt."},
-  {L".", FILE_PATH_LITERAL(""), L"."},
-  {L"foo.dll", FILE_PATH_LITERAL("txt"), L"footxt.dll"},
-  {L"foo.dll", FILE_PATH_LITERAL(".txt"), L"foo.txt.dll"},
-  {L"foo", FILE_PATH_LITERAL("txt"), L"footxt"},
-  {L"foo", FILE_PATH_LITERAL(".txt"), L"foo.txt"},
-  {L"foo.baz.dll", FILE_PATH_LITERAL("txt"), L"foo.baztxt.dll"},
-  {L"foo.baz.dll", FILE_PATH_LITERAL(".txt"), L"foo.baz.txt.dll"},
-  {L"foo.dll", FILE_PATH_LITERAL(""), L"foo.dll"},
-  {L"foo.dll", FILE_PATH_LITERAL("."), L"foo..dll"},
-  {L"foo", FILE_PATH_LITERAL(""), L"foo"},
-  {L"foo", FILE_PATH_LITERAL("."), L"foo."},
-  {L"foo.baz.dll", FILE_PATH_LITERAL(""), L"foo.baz.dll"},
-  {L"foo.baz.dll", FILE_PATH_LITERAL("."), L"foo.baz..dll"},
+  {FPL(""), FPL(""), FPL("")},
+  {FPL(""), FPL("txt"), FPL("txt")},
+  {FPL("."), FPL("txt"), FPL("txt.")},
+  {FPL("."), FPL(""), FPL(".")},
+  {FPL("foo.dll"), FPL("txt"), FPL("footxt.dll")},
+  {FPL("foo.dll"), FPL(".txt"), FPL("foo.txt.dll")},
+  {FPL("foo"), FPL("txt"), FPL("footxt")},
+  {FPL("foo"), FPL(".txt"), FPL("foo.txt")},
+  {FPL("foo.baz.dll"), FPL("txt"), FPL("foo.baztxt.dll")},
+  {FPL("foo.baz.dll"), FPL(".txt"), FPL("foo.baz.txt.dll")},
+  {FPL("foo.dll"), FPL(""), FPL("foo.dll")},
+  {FPL("foo.dll"), FPL("."), FPL("foo..dll")},
+  {FPL("foo"), FPL(""), FPL("foo")},
+  {FPL("foo"), FPL("."), FPL("foo.")},
+  {FPL("foo.baz.dll"), FPL(""), FPL("foo.baz.dll")},
+  {FPL("foo.baz.dll"), FPL("."), FPL("foo.baz..dll")},
 #if defined(OS_WIN)
-  {L"\\", L"", L"\\"},
-  {L"\\", L"txt", L"\\txt"},
-  {L"\\.", L"txt", L"\\txt."},
-  {L"\\.", L"", L"\\."},
-  {L"C:\\bar\\foo.dll", L"txt", L"C:\\bar\\footxt.dll"},
-  {L"C:\\bar.baz\\foodll", L"txt", L"C:\\bar.baz\\foodlltxt"},
-  {L"C:\\bar.baz\\foo.dll", L"txt", L"C:\\bar.baz\\footxt.dll"},
-  {L"C:\\bar.baz\\foo.dll.exe", L"txt", L"C:\\bar.baz\\foo.dlltxt.exe"},
-  {L"C:\\bar.baz\\foo", L"", L"C:\\bar.baz\\foo"},
-  {L"C:\\bar.baz\\foo.exe", L"", L"C:\\bar.baz\\foo.exe"},
-  {L"C:\\bar.baz\\foo.dll.exe", L"", L"C:\\bar.baz\\foo.dll.exe"},
-  {L"C:\\bar\\baz\\foo.exe", L" (1)", L"C:\\bar\\baz\\foo (1).exe"},
+  {FPL("\\"), FPL(""), FPL("\\")},
+  {FPL("\\"), FPL("txt"), FPL("\\txt")},
+  {FPL("\\."), FPL("txt"), FPL("\\txt.")},
+  {FPL("\\."), FPL(""), FPL("\\.")},
+  {FPL("C:\\bar\\foo.dll"), FPL("txt"), FPL("C:\\bar\\footxt.dll")},
+  {FPL("C:\\bar.baz\\foodll"), FPL("txt"), FPL("C:\\bar.baz\\foodlltxt")},
+  {FPL("C:\\bar.baz\\foo.dll"), FPL("txt"), FPL("C:\\bar.baz\\footxt.dll")},
+  {FPL("C:\\bar.baz\\foo.dll.exe"), FPL("txt"),
+   FPL("C:\\bar.baz\\foo.dlltxt.exe")},
+  {FPL("C:\\bar.baz\\foo"), FPL(""), FPL("C:\\bar.baz\\foo")},
+  {FPL("C:\\bar.baz\\foo.exe"), FPL(""), FPL("C:\\bar.baz\\foo.exe")},
+  {FPL("C:\\bar.baz\\foo.dll.exe"), FPL(""), FPL("C:\\bar.baz\\foo.dll.exe")},
+  {FPL("C:\\bar\\baz\\foo.exe"), FPL(" (1)"), FPL("C:\\bar\\baz\\foo (1).exe")},
 #elif defined(OS_POSIX)
-  {L"/", "", L"/"},
-  {L"/", "txt", L"/txt"},
-  {L"/.", "txt", L"/txt."},
-  {L"/.", "", L"/."},
-  {L"/bar/foo.dll", "txt", L"/bar/footxt.dll"},
-  {L"/bar.baz/foodll", "txt", L"/bar.baz/foodlltxt"},
-  {L"/bar.baz/foo.dll", "txt", L"/bar.baz/footxt.dll"},
-  {L"/bar.baz/foo.dll.exe", "txt", L"/bar.baz/foo.dlltxt.exe"},
-  {L"/bar.baz/foo", "", L"/bar.baz/foo"},
-  {L"/bar.baz/foo.exe", "", L"/bar.baz/foo.exe"},
-  {L"/bar.baz/foo.dll.exe", "", L"/bar.baz/foo.dll.exe"},
-  {L"/bar/baz/foo.exe", " (1)", L"/bar/baz/foo (1).exe"},
+  {FPL("/"), FPL(""), FPL("/")},
+  {FPL("/"), FPL("txt"), FPL("/txt")},
+  {FPL("/."), FPL("txt"), FPL("/txt.")},
+  {FPL("/."), FPL(""), FPL("/.")},
+  {FPL("/bar/foo.dll"), FPL("txt"), FPL("/bar/footxt.dll")},
+  {FPL("/bar.baz/foodll"), FPL("txt"), FPL("/bar.baz/foodlltxt")},
+  {FPL("/bar.baz/foo.dll"), FPL("txt"), FPL("/bar.baz/footxt.dll")},
+  {FPL("/bar.baz/foo.dll.exe"), FPL("txt"), FPL("/bar.baz/foo.dlltxt.exe")},
+  {FPL("/bar.baz/foo"), FPL(""), FPL("/bar.baz/foo")},
+  {FPL("/bar.baz/foo.exe"), FPL(""), FPL("/bar.baz/foo.exe")},
+  {FPL("/bar.baz/foo.dll.exe"), FPL(""), FPL("/bar.baz/foo.dll.exe")},
+  {FPL("/bar/baz/foo.exe"), FPL(" (1)"), FPL("/bar/baz/foo (1).exe")},
 #endif
 };
 
 TEST_F(FileUtilTest, InsertBeforeExtensionTest) {
   for (unsigned int i = 0; i < arraysize(kInsertBeforeExtension); ++i) {
-    FilePath path = FilePath::FromWStringHack(kInsertBeforeExtension[i].path);
+    FilePath path(kInsertBeforeExtension[i].path);
     file_util::InsertBeforeExtension(&path, kInsertBeforeExtension[i].suffix);
-    EXPECT_EQ(kInsertBeforeExtension[i].result, path.ToWStringHack());
+    EXPECT_EQ(kInsertBeforeExtension[i].result, path.value());
   }
 }
 
@@ -308,36 +319,35 @@ TEST_F(FileUtilTest, GetDirectoryFromPath) {
   }
 }
 
-// TODO(erikkay): implement
-#if defined OS_WIN
 TEST_F(FileUtilTest, CountFilesCreatedAfter) {
   // Create old file (that we don't want to count)
-  FilePath old_file_name = test_dir_.Append(L"Old File.txt");
+  FilePath old_file_name = test_dir_.Append(FILE_PATH_LITERAL("Old File.txt"));
   CreateTextFile(old_file_name, L"Just call me Mr. Creakybits");
 
   // Age to perfection
-  Sleep(100);
+#if defined(OS_WIN)
+  PlatformThread::Sleep(100);
+#elif defined(OS_POSIX)
+  // We need to wait at least one second here because the precision of
+  // file creation time is one second.
+  PlatformThread::Sleep(1500);
+#endif
 
   // Establish our cutoff time
-  FILETIME test_start_time;
-  GetSystemTimeAsFileTime(&test_start_time);
-  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(test_dir_.value(),
-                                                 test_start_time));
+  base::Time now(base::Time::NowFromSystemTime());
+  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(test_dir_, now));
 
   // Create a new file (that we do want to count)
-  FilePath new_file_name = test_dir_.Append(L"New File.txt");
+  FilePath new_file_name = test_dir_.Append(FILE_PATH_LITERAL("New File.txt"));
   CreateTextFile(new_file_name, L"Waaaaaaaaaaaaaah.");
 
   // We should see only the new file.
-  EXPECT_EQ(1, file_util::CountFilesCreatedAfter(test_dir_.value(),
-                                                 test_start_time));
+  EXPECT_EQ(1, file_util::CountFilesCreatedAfter(test_dir_, now));
 
   // Delete new file, we should see no files after cutoff now
   EXPECT_TRUE(file_util::Delete(new_file_name, false));
-  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(test_dir_.value(),
-                                                 test_start_time));
+  EXPECT_EQ(0, file_util::CountFilesCreatedAfter(test_dir_, now));
 }
-#endif
 
 // Tests that the Delete function works as expected, especially
 // the recursion flag.  Also coincidentally tests PathExists.
@@ -619,6 +629,56 @@ TEST_F(ReadOnlyFileUtilTest, ContentsEqual) {
   EXPECT_FALSE(file_util::ContentsEqual(binary_file, binary_file_diff));
 }
 
+TEST_F(ReadOnlyFileUtilTest, TextContentsEqual) {
+  FilePath data_dir;
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &data_dir));
+  data_dir = data_dir.Append(FILE_PATH_LITERAL("base"))
+                     .Append(FILE_PATH_LITERAL("data"))
+                     .Append(FILE_PATH_LITERAL("file_util_unittest"));
+  ASSERT_TRUE(file_util::PathExists(data_dir));
+
+  FilePath original_file =
+      data_dir.Append(FILE_PATH_LITERAL("original.txt"));
+  FilePath same_file =
+      data_dir.Append(FILE_PATH_LITERAL("same.txt"));
+  FilePath crlf_file =
+      data_dir.Append(FILE_PATH_LITERAL("crlf.txt"));
+  FilePath shortened_file =
+      data_dir.Append(FILE_PATH_LITERAL("shortened.txt"));
+  FilePath different_file =
+      data_dir.Append(FILE_PATH_LITERAL("different.txt"));
+  FilePath different_first_file =
+      data_dir.Append(FILE_PATH_LITERAL("different_first.txt"));
+  FilePath different_last_file =
+      data_dir.Append(FILE_PATH_LITERAL("different_last.txt"));
+  FilePath first1_file =
+      data_dir.Append(FILE_PATH_LITERAL("first1.txt"));
+  FilePath first2_file =
+      data_dir.Append(FILE_PATH_LITERAL("first2.txt"));
+  FilePath empty1_file =
+      data_dir.Append(FILE_PATH_LITERAL("empty1.txt"));
+  FilePath empty2_file =
+      data_dir.Append(FILE_PATH_LITERAL("empty2.txt"));
+  FilePath blank_line_file =
+      data_dir.Append(FILE_PATH_LITERAL("blank_line.txt"));
+  FilePath blank_line_crlf_file =
+      data_dir.Append(FILE_PATH_LITERAL("blank_line_crlf.txt"));
+
+  EXPECT_TRUE(file_util::TextContentsEqual(original_file, same_file));
+  EXPECT_TRUE(file_util::TextContentsEqual(original_file, crlf_file));
+  EXPECT_FALSE(file_util::TextContentsEqual(original_file, shortened_file));
+  EXPECT_FALSE(file_util::TextContentsEqual(original_file, different_file));
+  EXPECT_FALSE(file_util::TextContentsEqual(original_file,
+                                            different_first_file));
+  EXPECT_FALSE(file_util::TextContentsEqual(original_file,
+                                            different_last_file));
+  EXPECT_FALSE(file_util::TextContentsEqual(first1_file, first2_file));
+  EXPECT_TRUE(file_util::TextContentsEqual(empty1_file, empty2_file));
+  EXPECT_FALSE(file_util::TextContentsEqual(original_file, empty1_file));
+  EXPECT_TRUE(file_util::TextContentsEqual(blank_line_file,
+                                           blank_line_crlf_file));
+}
+
 // We don't need equivalent functionality outside of Windows.
 #if defined(OS_WIN)
 TEST_F(FileUtilTest, ResolveShortcutTest) {
@@ -829,11 +889,9 @@ static const struct goodbad_pair {
 #if defined(OS_WIN)
   {L"bad*file\\name.jpg", L"bad-file-name.jpg"},
   {L"\t  bad*file\\name/.jpg ", L"bad-file-name-.jpg"},
-  {L"bad\uFFFFfile\U0010FFFEname.jpg ", L"bad-file-name.jpg"},
 #elif defined(OS_POSIX)
   {L"bad*file?name.jpg", L"bad-file-name.jpg"},
   {L"\t  bad*file?name/.jpg ", L"bad-file-name-.jpg"},
-  {L"bad\uFFFFfile-name.jpg ", L"bad-file-name.jpg"},
 #endif
   {L"this_file_name is okay!.mp3", L"this_file_name is okay!.mp3"},
   {L"\u4E00\uAC00.mp3", L"\u4E00\uAC00.mp3"},
@@ -841,6 +899,9 @@ static const struct goodbad_pair {
   {L"\U00010330\U00010331.mp3", L"\U00010330\U00010331.mp3"},
   // Unassigned codepoints are ok.
   {L"\u0378\U00040001.mp3", L"\u0378\U00040001.mp3"},
+  // Non-characters are not allowed.
+  {L"bad\uFFFFfile\U0010FFFEname.jpg ", L"bad-file-name.jpg"},
+  {L"bad\uFDD0file\uFDEFname.jpg ", L"bad-file-name.jpg"},
 };
 
 TEST_F(FileUtilTest, ReplaceIllegalCharactersTest) {
@@ -891,15 +952,24 @@ TEST_F(FileUtilTest, ReplaceExtensionTestWithPathSeparators) {
   // '/foo.bar/foo' with extension '.baz'
   FilePath result_path = path;
   file_util::ReplaceExtension(&result_path, FILE_PATH_LITERAL(".baz"));
-  EXPECT_EQ(path.ToWStringHack() + L".baz", result_path.ToWStringHack());
+  EXPECT_EQ(path.value() + FILE_PATH_LITERAL(".baz"),
+            result_path.value());
 }
 
 TEST_F(FileUtilTest, FileEnumeratorTest) {
   // Test an empty directory.
-  file_util::FileEnumerator f0(test_dir_, true,
-      file_util::FileEnumerator::FILES_AND_DIRECTORIES);
+  file_util::FileEnumerator f0(test_dir_, true, FILES_AND_DIRECTORIES);
   EXPECT_EQ(f0.Next().value(), FILE_PATH_LITERAL(""));
   EXPECT_EQ(f0.Next().value(), FILE_PATH_LITERAL(""));
+
+  // Test an empty directory, non-recursively, including "..".
+  file_util::FileEnumerator f0_dotdot(test_dir_, false,
+      static_cast<file_util::FileEnumerator::FILE_TYPE>(
+          FILES_AND_DIRECTORIES | file_util::FileEnumerator::INCLUDE_DOT_DOT));
+  EXPECT_EQ(test_dir_.Append(FILE_PATH_LITERAL("..")).value(),
+            f0_dotdot.Next().value());
+  EXPECT_EQ(FILE_PATH_LITERAL(""),
+            f0_dotdot.Next().value());
 
   // create the directories
   FilePath dir1 = test_dir_.Append(FILE_PATH_LITERAL("dir1"));
@@ -949,9 +1019,20 @@ TEST_F(FileUtilTest, FileEnumeratorTest) {
   EXPECT_TRUE(c2_non_recursive.HasFile(dir2));
   EXPECT_EQ(c2_non_recursive.size(), 2);
 
+  // Only enumerate directories, non-recursively, including "..".
+  file_util::FileEnumerator f2_dotdot(
+      test_dir_, false,
+      static_cast<file_util::FileEnumerator::FILE_TYPE>(
+          file_util::FileEnumerator::DIRECTORIES |
+          file_util::FileEnumerator::INCLUDE_DOT_DOT));
+  FindResultCollector c2_dotdot(f2_dotdot);
+  EXPECT_TRUE(c2_dotdot.HasFile(dir1));
+  EXPECT_TRUE(c2_dotdot.HasFile(dir2));
+  EXPECT_TRUE(c2_dotdot.HasFile(test_dir_.Append(FILE_PATH_LITERAL(".."))));
+  EXPECT_EQ(c2_dotdot.size(), 3);
+
   // Enumerate files and directories.
-  file_util::FileEnumerator f3(test_dir_, true,
-      file_util::FileEnumerator::FILES_AND_DIRECTORIES);
+  file_util::FileEnumerator f3(test_dir_, true, FILES_AND_DIRECTORIES);
   FindResultCollector c3(f3);
   EXPECT_TRUE(c3.HasFile(dir1));
   EXPECT_TRUE(c3.HasFile(dir2));
@@ -963,8 +1044,7 @@ TEST_F(FileUtilTest, FileEnumeratorTest) {
   EXPECT_EQ(c3.size(), 7);
 
   // Non-recursive operation.
-  file_util::FileEnumerator f4(test_dir_, false,
-      file_util::FileEnumerator::FILES_AND_DIRECTORIES);
+  file_util::FileEnumerator f4(test_dir_, false, FILES_AND_DIRECTORIES);
   FindResultCollector c4(f4);
   EXPECT_TRUE(c4.HasFile(dir2));
   EXPECT_TRUE(c4.HasFile(dir2));
@@ -973,8 +1053,7 @@ TEST_F(FileUtilTest, FileEnumeratorTest) {
   EXPECT_EQ(c4.size(), 4);
 
   // Enumerate with a pattern.
-  file_util::FileEnumerator f5(test_dir_, true,
-      file_util::FileEnumerator::FILES_AND_DIRECTORIES,
+  file_util::FileEnumerator f5(test_dir_, true, FILES_AND_DIRECTORIES,
       FILE_PATH_LITERAL("dir*"));
   FindResultCollector c5(f5);
   EXPECT_TRUE(c5.HasFile(dir1));
@@ -986,62 +1065,61 @@ TEST_F(FileUtilTest, FileEnumeratorTest) {
 
   // Make sure the destructor closes the find handle while in the middle of a
   // query to allow TearDown to delete the directory.
-  file_util::FileEnumerator f6(test_dir_, true,
-      file_util::FileEnumerator::FILES_AND_DIRECTORIES);
+  file_util::FileEnumerator f6(test_dir_, true, FILES_AND_DIRECTORIES);
   EXPECT_FALSE(f6.Next().value().empty());  // Should have found something
                                             // (we don't care what).
 }
 
+TEST_F(FileUtilTest, FileEnumeratorOrderTest) {
+  FilePath fileA = test_dir_.Append(FILE_PATH_LITERAL("a"));
+  FilePath fileB = test_dir_.Append(FILE_PATH_LITERAL("B"));
+  FilePath dirC = test_dir_.Append(FILE_PATH_LITERAL("C"));
+  FilePath dirD = test_dir_.Append(FILE_PATH_LITERAL("d"));
+  FilePath dirE = test_dir_.Append(FILE_PATH_LITERAL("e"));
+  FilePath fileF = test_dir_.Append(FILE_PATH_LITERAL("f"));
 
-void PathComponents(const std::wstring& path,
-                    std::vector<std::wstring>* components) {
-  DCHECK(components != NULL);
-  if (components == NULL)
-    return;
-  std::wstring::size_type start = 0;
-  std::wstring::size_type end = path.find('/', start);
+  // Create files/directories in near random order.
+  CreateTextFile(fileF, L"");
+  CreateTextFile(fileA, L"");
+  CreateTextFile(fileB, L"");
+  EXPECT_TRUE(file_util::CreateDirectory(dirE));
+  EXPECT_TRUE(file_util::CreateDirectory(dirC));
+  EXPECT_TRUE(file_util::CreateDirectory(dirD));
 
-  // Special case the "/" or "\" directory.  On Windows with a drive letter,
-  // this code path won't hit, but the right thing should still happen.
-  // "E:\foo" will turn into "E:","foo".
-  if (end == start) {
-    components->push_back(std::wstring(path, 0, 1));
-    start = end + 1;
-    end = path.find('/', start);
-  }
-  while (end != std::wstring::npos) {
-    std::wstring component = std::wstring(path, start, end - start);
-    components->push_back(component);
-    start = end + 1;
-    end = path.find('/', start);
-  }
-  std::wstring component = std::wstring(path, start);
-  components->push_back(component);
-}
+  // On Windows, files and directories are enumerated in the lexicographical
+  // order, ignoring case and whether they are files or directories. On posix,
+  // we order directories before files.
+  file_util::FileEnumerator enumerator(test_dir_, false, FILES_AND_DIRECTORIES);
+  FilePath cur_file = enumerator.Next();
+#if defined(OS_WIN)
+  EXPECT_EQ(fileA.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(fileB.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(dirC.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(dirD.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(dirE.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(fileF.value(), cur_file.value());
+  cur_file = enumerator.Next();
+#elif defined(OS_POSIX)
+  EXPECT_EQ(dirC.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(dirD.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(dirE.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(fileA.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(fileB.value(), cur_file.value());
+  cur_file = enumerator.Next();
+  EXPECT_EQ(fileF.value(), cur_file.value());
+  cur_file = enumerator.Next();
+#endif
 
-static const struct PathComponentsCase {
-  std::wstring path;
-  FilePath::StringType result;
-} kPathComponents[] = {
-  {L"/foo/bar/baz/", FILE_PATH_LITERAL("/|foo|bar|baz|")},
-  {L"/foo/bar/baz", FILE_PATH_LITERAL("/|foo|bar|baz")},
-  {L"e:/foo", FILE_PATH_LITERAL("e:|foo")},
-};
-
-TEST_F(FileUtilTest, PathComponentsTest) {
-  for (size_t i = 0; i < arraysize(kPathComponents); ++i) {
-    FilePath path = FilePath::FromWStringHack(kPathComponents[i].path);
-    std::vector<FilePath::StringType> comps;
-    file_util::PathComponents(path, &comps);
-
-    FilePath::StringType result;
-    for (size_t j = 0; j < comps.size(); ++j) {
-      result.append(comps[j]);
-      if (j < comps.size() - 1)
-        result.append(FILE_PATH_LITERAL("|"), 1);
-    }
-    EXPECT_EQ(kPathComponents[i].result, result);
-  }
+  EXPECT_EQ(FILE_PATH_LITERAL(""), cur_file.value());
 }
 
 TEST_F(FileUtilTest, Contains) {
@@ -1062,12 +1140,9 @@ TEST_F(FileUtilTest, Contains) {
   // which Contains() relies on in posix, to work.
   ASSERT_TRUE(file_util::CreateDirectory(foo));
   std::string data("hello");
-  ASSERT_TRUE(file_util::WriteFile(bar.ToWStringHack(), data.c_str(),
-                                   data.length()));
-  ASSERT_TRUE(file_util::WriteFile(baz.ToWStringHack(), data.c_str(),
-                                   data.length()));
-  ASSERT_TRUE(file_util::WriteFile(foobar.ToWStringHack(), data.c_str(),
-                                   data.length()));
+  ASSERT_TRUE(file_util::WriteFile(bar, data.c_str(), data.length()));
+  ASSERT_TRUE(file_util::WriteFile(baz, data.c_str(), data.length()));
+  ASSERT_TRUE(file_util::WriteFile(foobar, data.c_str(), data.length()));
 
   EXPECT_TRUE(file_util::ContainsPath(foo, bar));
   EXPECT_FALSE(file_util::ContainsPath(foo, baz));

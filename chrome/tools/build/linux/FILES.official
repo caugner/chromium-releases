@@ -1,0 +1,11 @@
+chrome
+chrome.pak
+chrome_sandbox
+installer
+libavcodec.so.52
+libavformat.so.52
+libavutil.so.50
+locales
+themes
+resources
+xdg-settings

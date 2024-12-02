@@ -22,7 +22,6 @@
 
 using base::Time;
 
-extern int g_cache_tests_max_id;
 extern volatile int g_cache_tests_received;
 extern volatile bool g_cache_tests_error;
 
@@ -49,9 +48,8 @@ int TimeWrite(int num_entries, disk_cache::Backend* cache,
   CacheTestFillBuffer(buffer1->data(), kSize1, false);
   CacheTestFillBuffer(buffer2->data(), kMaxSize, false);
 
-  CallbackTest callback(1);
+  CallbackTest callback(true);
   g_cache_tests_error = false;
-  g_cache_tests_max_id = 1;
   g_cache_tests_received = 0;
   int expected = 0;
 
@@ -99,9 +97,8 @@ int TimeRead(int num_entries, disk_cache::Backend* cache,
   CacheTestFillBuffer(buffer1->data(), kSize1, false);
   CacheTestFillBuffer(buffer2->data(), kMaxSize, false);
 
-  CallbackTest callback(1);
+  CallbackTest callback(true);
   g_cache_tests_error = false;
-  g_cache_tests_max_id = 1;
   g_cache_tests_received = 0;
   int expected = 0;
 
@@ -159,7 +156,8 @@ TEST_F(DiskCacheTest, CacheBackendPerformance) {
 
   ScopedTestCache test_cache;
   disk_cache::Backend* cache =
-      disk_cache::CreateCacheBackend(test_cache.path_wstring(), false, 0);
+      disk_cache::CreateCacheBackend(test_cache.path_wstring(), false, 0,
+                                     net::DISK_CACHE);
   ASSERT_TRUE(NULL != cache);
 
   int seed = static_cast<int>(Time::Now().ToInternalValue());
@@ -185,7 +183,8 @@ TEST_F(DiskCacheTest, CacheBackendPerformance) {
   ASSERT_TRUE(file_util::EvictFileFromSystemCache(
               test_cache.path().AppendASCII("data_3")));
 
-  cache = disk_cache::CreateCacheBackend(test_cache.path_wstring(), false, 0);
+  cache = disk_cache::CreateCacheBackend(test_cache.path_wstring(), false, 0,
+                                         net::DISK_CACHE);
   ASSERT_TRUE(NULL != cache);
 
   ret = TimeRead(num_entries, cache, entries, true);
@@ -215,10 +214,7 @@ TEST_F(DiskCacheTest, BlockFilesPerformance) {
   srand(seed);
 
   const int kNumEntries = 60000;
-  int32 buffer[kNumEntries];
-  memset(buffer, 0, sizeof(buffer));
-  disk_cache::Addr* address = reinterpret_cast<disk_cache::Addr*>(buffer);
-  ASSERT_EQ(sizeof(*address), sizeof(*buffer));
+  disk_cache::Addr* address = new disk_cache::Addr[kNumEntries];
 
   PerfTimeLogger timer1("Fill three block-files");
 
@@ -243,4 +239,5 @@ TEST_F(DiskCacheTest, BlockFilesPerformance) {
 
   timer2.Done();
   MessageLoop::current()->RunAllPending();
+  delete[] address;
 }

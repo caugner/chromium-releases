@@ -1,16 +1,13 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// Class WebTextInput provides text input APIs used by TextInputController
-// in test_shell. It only facilitates layout tests and should not be used
-// by renderers.
 
-#ifndef WEBKIT_GLUE_WEBTEXTINPUT_H__
-#define WEBKIT_GLUE_WEBTEXTINPUT_H__
+#ifndef WEBKIT_GLUE_WEBTEXTINPUT_H_
+#define WEBKIT_GLUE_WEBTEXTINPUT_H_
 
 #include <string>
 #include "base/basictypes.h"
+#include "base/string16.h"
 
 class WebTextInput {
  public:
@@ -18,13 +15,13 @@ class WebTextInput {
   virtual ~WebTextInput() {}
 
   // Inserts text to the associated frame.
-  virtual void InsertText(const std::string& text) = 0;
+  virtual void InsertText(const string16& text) = 0;
 
   // Executes the given editing command on the frame.
-  virtual void DoCommand(const std::string& command) = 0;
+  virtual void DoCommand(const string16& command) = 0;
 
   // Sets marked text region on the frame.
-  virtual void SetMarkedText(const std::string& text,
+  virtual void SetMarkedText(const string16& text,
                              int32_t location, int32_t length) = 0;
 
   // Clears the marked text region on the frame.
@@ -56,7 +53,7 @@ class WebTextInput {
   virtual void MakeAttributedString(const std::string& str) = 0;
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(WebTextInput);
+  DISALLOW_COPY_AND_ASSIGN(WebTextInput);
 };
 
-#endif  // #ifndef WEBKIT_GLUE_WEBTEXTINPUT_H__
+#endif  // #ifndef WEBKIT_GLUE_WEBTEXTINPUT_H_

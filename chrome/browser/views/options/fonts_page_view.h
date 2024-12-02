@@ -8,42 +8,43 @@
 #include "chrome/browser/views/options/options_page_view.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/common/pref_member.h"
-#include "chrome/views/controls/combo_box.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/view.h"
+#include "views/controls/combobox/combobox.h"
+#include "views/controls/button/button.h"
+#include "views/view.h"
 
 
 namespace views {
 class GroupboxView;
 class Label;
-class TableModel;
+class NativeButton;
 class TableView;
 }
 
-class FontDisplayView;
 class DefaultEncodingComboboxModel;
+class FontDisplayView;
+class TableModel;
 
 ///////////////////////////////////////////////////////////////////////////////
 // FontsPageView
 
 class FontsPageView : public OptionsPageView,
-                      public views::ComboBox::Listener,
+                      public views::Combobox::Listener,
                       public SelectFontDialog::Listener,
-                      public views::NativeButton::Listener {
+                      public views::ButtonListener {
  public:
   explicit FontsPageView(Profile* profile);
   virtual ~FontsPageView();
 
-  // views::NativeButton::Listener implementation:
-  virtual void ButtonPressed(views::NativeButton* sender);
+  // views::ButtonListener implementation:
+  virtual void ButtonPressed(views::Button* sender);
 
-  // views::ComboBox::Listener implementation:
-  virtual void ItemChanged(views::ComboBox* combo_box,
+  // views::Combobox::Listener implementation:
+  virtual void ItemChanged(views::Combobox* combo_box,
                            int prev_index,
                            int new_index);
 
   // SelectFontDialog::Listener implementation:
-  virtual void FontSelected(const ChromeFont& font, void* params);
+  virtual void FontSelected(const gfx::Font& font, void* params);
 
   // Save Changes made to relevent pref members associated with this tab.
   // This is public since it is called by FontsLanguageWindowView in its
@@ -104,6 +105,9 @@ class FontsPageView : public OptionsPageView,
   IntegerPrefMember serif_size_;
   IntegerPrefMember sans_serif_size_;
   IntegerPrefMember fixed_width_size_;
+  int serif_font_size_pixel_;
+  int sans_serif_font_size_pixel_;
+  int fixed_width_font_size_pixel_;
   StringPrefMember default_encoding_;
   bool font_changed_;
 
@@ -113,7 +117,7 @@ class FontsPageView : public OptionsPageView,
   // Default Encoding.
   scoped_ptr<DefaultEncodingComboboxModel> default_encoding_combobox_model_;
   views::Label* default_encoding_combobox_label_;
-  views::ComboBox* default_encoding_combobox_;
+  views::Combobox* default_encoding_combobox_;
   std::wstring default_encoding_selected_;
   bool default_encoding_changed_;
 

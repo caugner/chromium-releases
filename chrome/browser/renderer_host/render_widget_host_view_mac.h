@@ -7,22 +7,45 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/scoped_nsobject.h"
+#include "base/scoped_ptr.h"
+#include "base/task.h"
 #include "base/time.h"
 #include "chrome/browser/cocoa/base_view.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "webkit/glue/webcursor.h"
+#include "webkit/glue/webmenuitem.h"
 
 class RenderWidgetHostViewMac;
+class RWHVMEditCommandHelper;
+@class ToolTip;
+
+@protocol RenderWidgetHostViewMacOwner
+- (RenderWidgetHostViewMac*)renderWidgetHostViewMac;
+@end
 
 // This is the view that lives in the Cocoa view hierarchy. In Windows-land,
 // RenderWidgetHostViewWin is both the view and the delegate. We split the roles
 // but that means that the view needs to own the delegate and will dispose of it
 // when it's removed from the view system.
 
-@interface RenderWidgetHostViewCocoa : BaseView {
+@interface RenderWidgetHostViewCocoa : BaseView <RenderWidgetHostViewMacOwner> {
  @private
   RenderWidgetHostViewMac* renderWidgetHostView_;
+  BOOL canBeKeyView_;
+  BOOL closeOnDeactivate_;
+  scoped_ptr<RWHVMEditCommandHelper> editCommand_helper_;
+
+  // These are part of the magic tooltip code from WebKit's WebHTMLView:
+  id trackingRectOwner_;              // (not retained)
+  void *trackingRectUserData_;
+  NSTrackingRectTag lastToolTipTag_;
+  NSString* toolTip_;
 }
+
+- (void)setCanBeKeyView:(BOOL)can;
+- (void)setCloseOnDeactivate:(BOOL)b;
+- (void)setToolTipAtMousePoint:(NSString *)string;
 
 @end
 
@@ -49,18 +72,16 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   explicit RenderWidgetHostViewMac(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewMac();
 
-  RenderWidgetHost* render_widget_host() const { return render_widget_host_; }
-
-  base::TimeTicks& whiteout_start_time() { return whiteout_start_time_; }
-
-  gfx::NativeView native_view() const { return cocoa_view_; }
+  RenderWidgetHostViewCocoa* native_view() const { return cocoa_view_; }
 
   // Implementation of RenderWidgetHostView:
+  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
+                           const gfx::Rect& pos);
   virtual RenderWidgetHost* GetRenderWidgetHost() const;
   virtual void DidBecomeSelected();
   virtual void WasHidden();
   virtual void SetSize(const gfx::Size& size);
-  virtual gfx::NativeView GetPluginNativeView();
+  virtual gfx::NativeView GetNativeView();
   virtual void MovePluginWindows(
       const std::vector<WebPluginGeometry>& plugin_window_moves);
   virtual void Focus();
@@ -70,7 +91,6 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void Hide();
   virtual gfx::Rect GetViewBounds() const;
   virtual void UpdateCursor(const WebCursor& cursor);
-  virtual void UpdateCursorIfOverSelf();
   virtual void SetIsLoading(bool is_loading);
   virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect);
   virtual void DidPaintRect(const gfx::Rect& rect);
@@ -79,20 +99,47 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void Destroy();
   virtual void SetTooltipText(const std::wstring& tooltip_text);
   virtual BackingStore* AllocBackingStore(const gfx::Size& size);
+  virtual void ShowPopupWithItems(gfx::Rect bounds,
+                                  int item_height,
+                                  int selected_item,
+                                  const std::vector<WebMenuItem>& items);
+  virtual gfx::Rect GetWindowRect();
+  virtual gfx::Rect GetRootWindowRect();
+
+  void KillSelf();
+
+  void set_parent_view(BaseView* parent_view) { parent_view_ = parent_view; }
+
+  // These member variables should be private, but the associated ObjC class
+  // needs access to them and can't be made a friend.
+
+  // The associated Model.  Can be NULL if Destroy() is called when
+  // someone (other than superview) has retained |cocoa_view_|.
+  RenderWidgetHost* render_widget_host_;
+
+  // This is true when we are currently painting and thus should handle extra
+  // paint requests by expanding the invalid rect rather than actually painting.
+  bool about_to_validate_and_paint_;
+
+  // This is the rectangle which we'll paint.
+  NSRect invalid_rect_;
+
+  // The time at which this view started displaying white pixels as a result of
+  // not having anything to paint (empty backing store from renderer). This
+  // value returns true for is_null() if we are not recording whiteout times.
+  base::TimeTicks whiteout_start_time_;
 
  private:
+  // Updates the display cursor to the current cursor if the cursor is over this
+  // render view.
+  void UpdateCursorIfOverSelf();
+
   // Shuts down the render_widget_host_.  This is a separate function so we can
   // invoke it from the message loop.
   void ShutdownHost();
 
-  // Redraws the window asynchronously.
-  void Redraw(const gfx::Rect& invalid_rect);
-
   // The associated view.
   RenderWidgetHostViewCocoa* cocoa_view_;  // WEAK
-
-  // The associated Model.
-  RenderWidgetHost* render_widget_host_;
 
   // The cursor for the page. This is passed up from the renderer.
   WebCursor current_cursor_;
@@ -103,14 +150,14 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // true if the View is not visible.
   bool is_hidden_;
 
-  // Tooltips
   // The text to be shown in the tooltip, supplied by the renderer.
   std::wstring tooltip_text_;
 
-  // The time at which this view started displaying white pixels as a result of
-  // not having anything to paint (empty backing store from renderer). This
-  // value returns true for is_null() if we are not recording whiteout times.
-  base::TimeTicks whiteout_start_time_;
+  // Factory used to safely scope delayed calls to ShutdownHost().
+  ScopedRunnableMethodFactory<RenderWidgetHostViewMac> shutdown_factory_;
+
+  // Used for positioning a popup menu.
+  BaseView* parent_view_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewMac);
 };

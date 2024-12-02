@@ -13,6 +13,9 @@
 
 #include <algorithm>
 
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#endif
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -25,9 +28,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profile.h"
-#if defined(OS_WIN)
-#include "chrome/common/win_util.h"
-#endif
 
 using file_util::ScopedFILE;
 using file_util::OpenFile;
@@ -95,7 +95,7 @@ class AsyncWriter : public Task {
 
     // The write may not make it to the kernel (stdlib may buffer the write)
     // until the next fseek/fclose call.  If we crash, it's easy for our used
-    // item count to be out of sync with the number of hashes we write. 
+    // item count to be out of sync with the number of hashes we write.
     // Protect against this by calling fflush.
     int ret = fflush(file);
     DCHECK_EQ(0, ret);
@@ -199,24 +199,24 @@ class VisitedLinkMaster::TableBuilder : public HistoryService::URLEnumerator,
   uint8 salt_[LINK_SALT_LENGTH];
 
   // Stores the fingerprints we computed on the background thread.
-  std::vector<VisitedLinkMaster::Fingerprint> fingerprints_;
+  VisitedLinkCommon::Fingerprints fingerprints_;
 };
 
 // VisitedLinkMaster ----------------------------------------------------------
 
 VisitedLinkMaster::VisitedLinkMaster(base::Thread* file_thread,
-                                     PostNewTableEvent* poster,
+                                     Listener* listener,
                                      Profile* profile) {
-  InitMembers(file_thread, poster, profile);
+  InitMembers(file_thread, listener, profile);
 }
 
 VisitedLinkMaster::VisitedLinkMaster(base::Thread* file_thread,
-                                     PostNewTableEvent* poster,
+                                     Listener* listener,
                                      HistoryService* history_service,
                                      bool suppress_rebuild,
                                      const FilePath& filename,
                                      int32 default_table_size) {
-  InitMembers(file_thread, poster, NULL);
+  InitMembers(file_thread, listener, NULL);
 
   database_name_override_ = filename;
   table_size_override_ = default_table_size;
@@ -236,14 +236,16 @@ VisitedLinkMaster::~VisitedLinkMaster() {
 }
 
 void VisitedLinkMaster::InitMembers(base::Thread* file_thread,
-                                    PostNewTableEvent* poster,
+                                    Listener* listener,
                                     Profile* profile) {
+  DCHECK(listener);
+
   if (file_thread)
     file_thread_ = file_thread->message_loop();
   else
     file_thread_ = NULL;
 
-  post_new_table_event_ = poster;
+  listener_ = listener;
   file_ = NULL;
   shared_memory_ = NULL;
   shared_memory_serial_ = 0;
@@ -309,7 +311,7 @@ VisitedLinkMaster::Hash VisitedLinkMaster::TryToAddURL(const GURL& url) {
   if (used_items_ / 8 > table_length_ / 10)
     return null_hash_;  // Table is more than 80% full.
 
-  return AddFingerprint(fingerprint);
+  return AddFingerprint(fingerprint, true);
 }
 
 void VisitedLinkMaster::AddURL(const GURL& url) {
@@ -348,6 +350,8 @@ void VisitedLinkMaster::DeleteAllURLs() {
   // us, otherwise, schedule writing the new table to disk ourselves.
   if (!ResizeTableIfNecessary())
     WriteFullTable();
+
+  listener_->Reset();
 }
 
 void VisitedLinkMaster::DeleteURLs(const std::set<GURL>& urls) {
@@ -355,6 +359,8 @@ void VisitedLinkMaster::DeleteURLs(const std::set<GURL>& urls) {
 
   if (urls.empty())
     return;
+
+  listener_->Reset();
 
   if (table_builder_) {
     // A rebuild is in progress, save this deletion in the temporary list so
@@ -394,7 +400,8 @@ void VisitedLinkMaster::DeleteURLs(const std::set<GURL>& urls) {
 
 // See VisitedLinkCommon::IsVisited which should be in sync with this algorithm
 VisitedLinkMaster::Hash VisitedLinkMaster::AddFingerprint(
-    Fingerprint fingerprint) {
+    Fingerprint fingerprint,
+    bool send_notifications) {
   if (!hash_table_ || table_length_ == 0) {
     NOTREACHED();  // Not initialized.
     return null_hash_;
@@ -411,6 +418,9 @@ VisitedLinkMaster::Hash VisitedLinkMaster::AddFingerprint(
       // End of probe sequence found, insert here.
       hash_table_[cur_hash] = fingerprint;
       used_items_++;
+      // If allowed, notify listener that a new visited link was added.
+      if (send_notifications)
+        listener_->Add(fingerprint);
       return cur_hash;
     }
 
@@ -495,7 +505,7 @@ bool VisitedLinkMaster::DeleteFingerprint(Fingerprint fingerprint,
   if (!shuffled_fingerprints->empty()) {
     // Need to add the new items back.
     for (size_t i = 0; i < shuffled_fingerprints->size(); i++)
-      AddFingerprint(shuffled_fingerprints[i]);
+      AddFingerprint(shuffled_fingerprints[i], false);
   }
 
   // Write the affected range to disk [deleted_hash, end_range].
@@ -796,7 +806,7 @@ void VisitedLinkMaster::ResizeTable(int32 new_size) {
   for (int32 i = 0; i < old_table_length; i++) {
     Fingerprint cur = old_hash_table[i];
     if (cur)
-      AddFingerprint(cur);
+      AddFingerprint(cur, false);
   }
 
   // On error unmapping, just forget about it since we can't do anything
@@ -805,7 +815,7 @@ void VisitedLinkMaster::ResizeTable(int32 new_size) {
 
   // Send an update notification to all child processes so they read the new
   // table.
-  post_new_table_event_(shared_memory_);
+  listener_->NewTable(shared_memory_);
 
 #ifndef NDEBUG
   DebugValidate();
@@ -874,7 +884,7 @@ bool VisitedLinkMaster::RebuildTableFromHistory() {
   return true;
 }
 
-// See the TableBuilder definition in the header file for how this works.
+// See the TableBuilder declaration above for how this works.
 void VisitedLinkMaster::OnTableRebuildComplete(
     bool success,
     const std::vector<Fingerprint>& fingerprints) {
@@ -887,20 +897,20 @@ void VisitedLinkMaster::OnTableRebuildComplete(
     base::SharedMemory* old_shared_memory = shared_memory_;
 
     int new_table_size = NewTableSizeForCount(
-        static_cast<int>(fingerprints.size()));
+        static_cast<int>(fingerprints.size() + added_since_rebuild_.size()));
     if (BeginReplaceURLTable(new_table_size)) {
       // Free the old table.
       delete old_shared_memory;
 
       // Add the stored fingerprints to the hash table.
       for (size_t i = 0; i < fingerprints.size(); i++)
-        AddFingerprint(fingerprints[i]);
+        AddFingerprint(fingerprints[i], false);
 
       // Also add anything that was added while we were asynchronously
       // generating the new table.
       for (std::set<Fingerprint>::iterator i = added_since_rebuild_.begin();
            i != added_since_rebuild_.end(); ++i)
-        AddFingerprint(*i);
+        AddFingerprint(*i, false);
       added_since_rebuild_.clear();
 
       // Now handle deletions.
@@ -908,7 +918,7 @@ void VisitedLinkMaster::OnTableRebuildComplete(
       deleted_since_rebuild_.clear();
 
       // Send an update notification to all child processes.
-      post_new_table_event_(shared_memory_);
+      listener_->NewTable(shared_memory_);
 
       WriteFullTable();
     }

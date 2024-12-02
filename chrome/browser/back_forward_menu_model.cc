@@ -6,37 +6,38 @@
 
 #include "chrome/browser/back_forward_menu_model.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/common/l10n_util.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "net/base/registry_controlled_domain.h"
-
-#if defined(OS_WIN)
-// TODO(port): port these headers and remove the platform defines.
-#include "chrome/browser/tab_contents/tab_contents.h"
-#elif defined(OS_POSIX)
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
 
 const int BackForwardMenuModel::kMaxHistoryItems = 12;
 const int BackForwardMenuModel::kMaxChapterStops = 5;
 
+BackForwardMenuModel::BackForwardMenuModel(Browser* browser,
+                                           ModelType model_type)
+    : browser_(browser),
+      test_tab_contents_(NULL),
+      model_type_(model_type) {
+}
+
 int BackForwardMenuModel::GetHistoryItemCount() const {
   TabContents* contents = GetTabContents();
-  NavigationController* controller = contents->controller();
-
   int items = 0;
 
-  if (model_type_ == FORWARD_MENU_DELEGATE) {
+  if (model_type_ == FORWARD_MENU) {
     // Only count items from n+1 to end (if n is current entry)
-    items = controller->GetEntryCount() -
-            controller->GetCurrentEntryIndex() - 1;
+    items = contents->controller().entry_count() -
+            contents->controller().GetCurrentEntryIndex() - 1;
   } else {
-    items = controller->GetCurrentEntryIndex();
+    items = contents->controller().GetCurrentEntryIndex();
   }
 
   if (items > kMaxHistoryItems)
@@ -49,14 +50,13 @@ int BackForwardMenuModel::GetHistoryItemCount() const {
 
 int BackForwardMenuModel::GetChapterStopCount(int history_items) const {
   TabContents* contents = GetTabContents();
-  NavigationController* controller = contents->controller();
 
   int chapter_stops = 0;
-  int current_entry = controller->GetCurrentEntryIndex();
+  int current_entry = contents->controller().GetCurrentEntryIndex();
 
   if (history_items == kMaxHistoryItems) {
     int chapter_id = current_entry;
-    if (model_type_ == FORWARD_MENU_DELEGATE) {
+    if (model_type_ == FORWARD_MENU) {
       chapter_id += history_items;
     } else {
       chapter_id -= history_items;
@@ -64,7 +64,7 @@ int BackForwardMenuModel::GetChapterStopCount(int history_items) const {
 
     do {
       chapter_id = GetIndexOfNextChapterStop(chapter_id,
-          model_type_ == FORWARD_MENU_DELEGATE);
+          model_type_ == FORWARD_MENU);
       if (chapter_id != -1)
         ++chapter_stops;
     } while (chapter_id != -1 && chapter_stops < kMaxChapterStops);
@@ -97,9 +97,9 @@ int BackForwardMenuModel::GetTotalItemCount() const {
 int BackForwardMenuModel::GetIndexOfNextChapterStop(int start_from,
                                                     bool forward) const {
   TabContents* contents = GetTabContents();
-  NavigationController* controller = contents->controller();
+  NavigationController& controller = contents->controller();
 
-  int max_count = controller->GetEntryCount();
+  int max_count = controller.entry_count();
   if (start_from < 0 || start_from >= max_count)
     return -1;  // Out of bounds.
 
@@ -113,7 +113,7 @@ int BackForwardMenuModel::GetIndexOfNextChapterStop(int start_from,
     }
   }
 
-  NavigationEntry* start_entry = controller->GetEntryAtIndex(start_from);
+  NavigationEntry* start_entry = controller.GetEntryAtIndex(start_from);
   const GURL& url = start_entry->url();
 
   if (!forward) {
@@ -121,7 +121,7 @@ int BackForwardMenuModel::GetIndexOfNextChapterStop(int start_from,
     // different domain.
     for (int i = start_from - 1; i >= 0; --i) {
       if (!net::RegistryControlledDomainService::SameDomainOrHost(url,
-              controller->GetEntryAtIndex(i)->url()))
+              controller.GetEntryAtIndex(i)->url()))
         return i;
     }
     // We have reached the beginning without finding a chapter stop.
@@ -131,7 +131,7 @@ int BackForwardMenuModel::GetIndexOfNextChapterStop(int start_from,
     // different domain.
     for (int i = start_from + 1; i < max_count; ++i) {
       if (!net::RegistryControlledDomainService::SameDomainOrHost(url,
-              controller->GetEntryAtIndex(i)->url()))
+              controller.GetEntryAtIndex(i)->url()))
         return i - 1;
     }
     // Last entry is always considered a chapter stop.
@@ -149,10 +149,7 @@ int BackForwardMenuModel::FindChapterStop(int offset,
     offset *= -1;
 
   TabContents* contents = GetTabContents();
-  NavigationController* controller = contents->controller();
-
-  int entry = controller->GetCurrentEntryIndex() + offset;
-
+  int entry = contents->controller().GetCurrentEntryIndex() + offset;
   for (int i = 0; i < skip + 1; i++)
     entry = GetIndexOfNextChapterStop(entry, forward);
 
@@ -161,35 +158,31 @@ int BackForwardMenuModel::FindChapterStop(int offset,
 
 void BackForwardMenuModel::ExecuteCommandById(int menu_id) {
   TabContents* contents = GetTabContents();
-  NavigationController* controller = contents->controller();
+  NavigationController& controller = contents->controller();
 
   DCHECK(!IsSeparator(menu_id));
 
   // Execute the command for the last item: "Show Full History".
   if (menu_id == GetTotalItemCount()) {
     UserMetrics::RecordComputedAction(BuildActionName(L"ShowFullHistory", -1),
-                                      controller->profile());
-#if defined(OS_WIN)
+                                      controller.profile());
     browser_->ShowSingleDOMUITab(GURL(chrome::kChromeUIHistoryURL));
-#else
-    NOTIMPLEMENTED();
-#endif
     return;
   }
 
   // Log whether it was a history or chapter click.
   if (menu_id <= GetHistoryItemCount()) {
     UserMetrics::RecordComputedAction(
-        BuildActionName(L"HistoryClick", menu_id), controller->profile());
+        BuildActionName(L"HistoryClick", menu_id), controller.profile());
   } else {
     UserMetrics::RecordComputedAction(
         BuildActionName(L"ChapterClick", menu_id - GetHistoryItemCount() - 1),
-        controller->profile());
+        controller.profile());
   }
 
   int index = MenuIdToNavEntryIndex(menu_id);
-  if (index >= 0 && index < controller->GetEntryCount())
-    controller->GoToIndex(index);
+  if (index >= 0 && index < controller.entry_count())
+    controller.GoToIndex(index);
 }
 
 bool BackForwardMenuModel::IsSeparator(int menu_id) const {
@@ -212,38 +205,41 @@ bool BackForwardMenuModel::IsSeparator(int menu_id) const {
   return menu_id == history_items + 1;
 }
 
-std::wstring BackForwardMenuModel::GetItemLabel(int menu_id) const {
+string16 BackForwardMenuModel::GetItemLabel(int menu_id) const {
   // Return label "Show Full History" for the last item of the menu.
   if (menu_id == GetTotalItemCount())
-    return l10n_util::GetString(IDS_SHOWFULLHISTORY_LINK);
+    return l10n_util::GetStringUTF16(IDS_SHOWFULLHISTORY_LINK);
 
   // Return an empty string for a separator.
   if (IsSeparator(menu_id))
-    return L"";
+    return string16();
 
   NavigationEntry* entry = GetNavigationEntry(menu_id);
-  return UTF16ToWideHack(entry->title());
+  return entry->GetTitleForDisplay(&GetTabContents()->controller());
 }
 
 const SkBitmap& BackForwardMenuModel::GetItemIcon(int menu_id) const {
   DCHECK(ItemHasIcon(menu_id));
+
+  if (menu_id == GetTotalItemCount()) {
+    return *ResourceBundle::GetSharedInstance().GetBitmapNamed(
+        IDR_HISTORY_FAVICON);
+  }
 
   NavigationEntry* entry = GetNavigationEntry(menu_id);
   return entry->favicon().bitmap();
 }
 
 bool BackForwardMenuModel::ItemHasIcon(int menu_id) const {
-  // Using "id" not "id - 1" because the last item "Show Full History"
-  // doesn't have an icon.
-  return menu_id < GetTotalItemCount() && !IsSeparator(menu_id);
+  return menu_id - 1 < GetTotalItemCount() && !IsSeparator(menu_id);
 }
 
 bool BackForwardMenuModel::ItemHasCommand(int menu_id) const {
   return menu_id - 1 < GetTotalItemCount() && !IsSeparator(menu_id);
 }
 
-std::wstring BackForwardMenuModel::GetShowFullHistoryLabel() const {
-  return l10n_util::GetString(IDS_SHOWFULLHISTORY_LINK);
+string16 BackForwardMenuModel::GetShowFullHistoryLabel() const {
+  return l10n_util::GetStringUTF16(IDS_SHOWFULLHISTORY_LINK);
 }
 
 TabContents* BackForwardMenuModel::GetTabContents() const {
@@ -254,20 +250,18 @@ TabContents* BackForwardMenuModel::GetTabContents() const {
 
 int BackForwardMenuModel::MenuIdToNavEntryIndex(int menu_id) const {
   TabContents* contents = GetTabContents();
-  NavigationController* controller = contents->controller();
-
   int history_items = GetHistoryItemCount();
 
   DCHECK(menu_id > 0);
 
   // Convert anything above the History items separator.
   if (menu_id <= history_items) {
-    if (model_type_ == FORWARD_MENU_DELEGATE) {
+    if (model_type_ == FORWARD_MENU) {
       // The |menu_id| is relative to our current position, so we need to add.
-      menu_id += controller->GetCurrentEntryIndex();
+      menu_id += contents->controller().GetCurrentEntryIndex();
     } else {
       // Back menu is reverse.
-      menu_id = controller->GetCurrentEntryIndex() - menu_id;
+      menu_id = contents->controller().GetCurrentEntryIndex() - menu_id;
     }
     return menu_id;
   }
@@ -279,18 +273,15 @@ int BackForwardMenuModel::MenuIdToNavEntryIndex(int menu_id) const {
 
   // This menu item is a chapter stop located between the two separators.
   menu_id = FindChapterStop(history_items,
-                            model_type_ == FORWARD_MENU_DELEGATE,
+                            model_type_ == FORWARD_MENU,
                             menu_id - history_items - 1 - 1);
 
   return menu_id;
 }
 
 NavigationEntry* BackForwardMenuModel::GetNavigationEntry(int menu_id) const {
-  TabContents* contents = GetTabContents();
-  NavigationController* controller = contents->controller();
-
   int index = MenuIdToNavEntryIndex(menu_id);
-  return controller->GetEntryAtIndex(index);
+  return GetTabContents()->controller().GetEntryAtIndex(index);
 }
 
 std::wstring BackForwardMenuModel::BuildActionName(
@@ -298,7 +289,7 @@ std::wstring BackForwardMenuModel::BuildActionName(
   DCHECK(!action.empty());
   DCHECK(index >= -1);
   std::wstring metric_string;
-  if (model_type_ == FORWARD_MENU_DELEGATE)
+  if (model_type_ == FORWARD_MENU)
     metric_string += L"ForwardMenu_";
   else
     metric_string += L"BackMenu_";

@@ -6,7 +6,15 @@
 
 namespace media {
 
-const char kFFmpegCodecID[] = "FFmpegCodecID";
+FFmpegLock::FFmpegLock() {
+}
+
+FFmpegLock::~FFmpegLock() {
+}
+
+Lock& FFmpegLock::lock() {
+  return lock_;
+}
 
 namespace mime_type {
 

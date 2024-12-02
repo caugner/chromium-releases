@@ -14,6 +14,7 @@
 
 #include <string>
 
+#include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/time.h"
@@ -76,7 +77,7 @@ bool LaunchApp(const std::vector<std::string>& argv,
     retval = false;
   } else {
     if (wait)
-      waitpid(pid, 0, 0);
+      HANDLE_EINTR(waitpid(pid, 0, 0));
 
     if (process_handle)
       *process_handle = pid;
@@ -207,7 +208,7 @@ bool NamedProcessIterator::CheckForNextProcess() {
     // Check the name
     if (executable_name_utf8 == exec_name) {
       entry_.pid = kinfo->kp_proc.p_pid;
-      entry_.ppid = kinfo->kp_proc.p_oppid;
+      entry_.ppid = kinfo->kp_eproc.e_ppid;
       base::strlcpy(entry_.szExeFile, exec_name.c_str(),
                     sizeof(entry_.szExeFile));
       // Start w/ the next entry next time through
@@ -226,10 +227,31 @@ bool NamedProcessIterator::IncludeEntry() {
   return filter_->Includes(entry_.pid, entry_.ppid);
 }
 
-bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) {
-  // TODO(pinkerton): can we implement this? On linux it relies on /proc.
-  NOTIMPLEMENTED();
+
+// ------------------------------------------------------------------------
+// NOTE: about ProcessMetrics
+//
+// Mac doesn't have /proc, and getting a mach task from a pid for another
+// process requires permissions, so there doesn't really seem to be a way
+// to do these (and spinning up ps to fetch each stats seems dangerous to
+// put in a base api for anyone to call.
+//
+bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
   return false;
 }
+size_t ProcessMetrics::GetPagefileUsage() const {
+  return 0;
+}
+size_t ProcessMetrics::GetPeakPagefileUsage() const {
+  return 0;
+}
+size_t ProcessMetrics::GetWorkingSetSize() const {
+  return 0;
+}
+size_t ProcessMetrics::GetPeakWorkingSetSize() const {
+  return 0;
+}
+
+// ------------------------------------------------------------------------
 
 }  // namespace base

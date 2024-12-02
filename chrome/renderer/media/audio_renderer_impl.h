@@ -7,27 +7,27 @@
 //
 // Relationship of classes.
 //
-//    AudioRendererHost            AudioRendererImpl
-//           ^                             ^
-//           |                             |
-//           v                 IPC         v
-//   ResourceMessageFilter <---------> RenderView
+//    AudioRendererHost                AudioRendererImpl
+//           ^                                ^
+//           |                                |
+//           v                 IPC            v
+//   ResourceMessageFilter <---------> AudioMessageFilter
 //
 // Implementation of interface with audio device is in AudioRendererHost and
 // it provides services and entry points in ResourceMessageFilter, allowing
-// usage of IPC calls to interact with audio device. RenderView acts as a portal
-// for IPC calls and does no more than delegation.
+// usage of IPC calls to interact with audio device. AudioMessageFilter acts
+// as a portal for IPC calls and does no more than delegation.
 //
 // Transportation of audio buffer is done by using shared memory, after
-// OnCreateAudioStream is executed, OnCreated would be called along with a
+// OnCreateStream is executed, OnCreated would be called along with a
 // SharedMemoryHandle upon successful creation of audio output stream in the
 // browser process. The same piece of shared memory would be used during the
 // lifetime of this unit.
 //
 // This class lives inside three threads during it's lifetime, namely:
-// 1. Render thread
-//    The thread within which this class is constructed and destroyed,
-//    interfacing with RenderView should only happen here.
+// 1. IO thread.
+//    The thread within which this class receives all the IPC messages and
+//    IPC communications can only happen in this thread.
 // 2. Pipeline thread
 //    Initialization of filter and proper stopping of filters happens here.
 //    Properties of this filter is also set in this thread.
@@ -39,32 +39,33 @@
 // Render thread
 // +-- CreateFactory()
 // |     Helper method for construction this class.
-// |-- IsMetidFormatSupported()
-// |     Helper method to identify media formats accepted by this class for
-// |     construction.
-// |-- OnCreateAudioStream()
-// |     Calls RenderView::CreateAudioStream().
-// |-- OnStartAudioStream()
-// |     Calls RenderView::StartAudioStream().
-// |-- OnCloseAudioStream()
-// |     Calls RenderView::CloseAudioStream().
-// |-- OnSetAudioVolume()
-// |     Calls RenderView::SetAudioVolume().
-// |-- OnNotifyAudioPacketReady
-// |     Calls RenderView::NotifyAudioPacketReady().
+// \-- IsMediaFormatSupported()
+//       Helper method to identify media formats accepted by this class for
+//       construction.
+//
+// IO thread (Main thread in render process)
+// +-- OnCreateStream()
+// |     Sends an IPC message to browser to create audio output stream and
+// |     register this object with AudioMessageFilter.
+// |-- OnSetVolume()
+// |     Sends an IPC message to browser to set volume.
+// |-- OnNotifyPacketReady
+// |     Try to fill the shared memory with decoded audio packet and sends IPC
+// |     messages to browser if packet is ready.
 // |-- OnRequestPacket()
-// |     Called from RenderView when an audio packet requested is received
-// |     from browser process.
+// |     Called from AudioMessageFilter when an audio packet requested is
+// |     received from browser process.
 // |-- OnStateChanged()
-// |     Called from RenderView upon state change of the audio output stream
-// |     in the browser process. Error of the output stream is reported here.
+// |     Called from AudioMessageFilter upon state change of the audio output
+// |     stream in the browser process. Error of the stream is reported here.
 // |-- OnCreated()
-// |     Called from RenderView upon successful creation of audio output stream
-// |     in the browser process, called along with a SharedMemoryHandle.
+// |     Called from AudioMessageFilter upon successful creation of audio output
+// |     stream in the browser process, called along with a SharedMemoryHandle.
 // |-- OnVolume()
-// |     Called from RenderView about the volume of the audio output stream.
-// \-- ReleaseRendererResource()
-//       Release resources that live inside render thread.
+// |     Called from AudioMessageFilter about the volume of the audio output
+// |     stream.
+// \-- OnDestroy()
+//       Release resources that live inside io thread.
 //
 // Pipeline thread
 // +-- AudioRendererImpl()
@@ -83,84 +84,92 @@
 //       Called from AudioRendererBase for stop event.
 //
 // Audio decoder thread (If there's one.)
-// \-- OnAssignment()
-//       A raw PCM audio packet buffer is recevied here, this method is called
+// \-- OnReadComplete()
+//       A raw PCM audio packet buffer is received here, this method is called
 //       from pipeline thread if audio decoder thread does not exist.
 
 #ifndef CHROME_RENDERER_MEDIA_AUDIO_RENDERER_IMPL_H_
 #define CHROME_RENDERER_MEDIA_AUDIO_RENDERER_IMPL_H_
 
+#include "base/scoped_ptr.h"
+#include "base/lock.h"
 #include "base/shared_memory.h"
 #include "base/waitable_event.h"
+#include "chrome/renderer/audio_message_filter.h"
 #include "media/audio/audio_output.h"
 #include "media/base/factory.h"
 #include "media/base/filters.h"
 #include "media/filters/audio_renderer_base.h"
 
-class WebMediaPlayerDelegateImpl;
+class AudioMessageFilter;
 
-class AudioRendererImpl : public media::AudioRendererBase {
+class AudioRendererImpl : public media::AudioRendererBase,
+                          public AudioMessageFilter::Delegate {
  public:
   // Methods called on render thread ------------------------------------------
   // Methods called during construction.
-  static media::FilterFactory* CreateFactory(
-      WebMediaPlayerDelegateImpl* delegate) {
+  static media::FilterFactory* CreateFactory(AudioMessageFilter* filter) {
     return new media::FilterFactoryImpl1<AudioRendererImpl,
-                                         WebMediaPlayerDelegateImpl*>(delegate);
+                                         AudioMessageFilter*>(filter);
   }
-  static bool IsMediaFormatSupported(const media::MediaFormat* format);
+  static bool IsMediaFormatSupported(const media::MediaFormat& format);
 
-  // Methods call from RenderView when audio related IPC messages are received
-  // from browser process.
-  void OnRequestPacket();
-  void OnStateChanged(AudioOutputStream::State state, int info);
+  // Methods called on IO thread ----------------------------------------------
+  // AudioMessageFilter::Delegate methods, called by AudioMessageFilter.
+  void OnRequestPacket(size_t bytes_in_buffer,
+                       const base::Time& message_timestamp);
+  void OnStateChanged(ViewMsg_AudioStreamState state);
   void OnCreated(base::SharedMemoryHandle handle, size_t length);
   void OnVolume(double left, double right);
-
-  // Release resources that lives in renderer thread, i.e. audio output streams.
-  void ReleaseRendererResources();
 
   // Methods called on pipeline thread ----------------------------------------
   // media::MediaFilter implementation.
   virtual void SetPlaybackRate(float rate);
-  const media::MediaFormat* GetMediaFormat();
 
   // media::AudioRenderer implementation.
   virtual void SetVolume(float volume);
 
-  // AssignableBuffer<AudioRendererBase, BufferInterface> implementation.
-  virtual void OnAssignment(media::Buffer* buffer_in);
-
  protected:
   // Methods called on audio renderer thread ----------------------------------
   // These methods are called from AudioRendererBase.
-  virtual bool OnInitialize(const media::MediaFormat* media_format);
+  virtual bool OnInitialize(const media::MediaFormat& media_format);
   virtual void OnStop();
+
+  // Called when the decoder completes a Read().
+  virtual void OnReadComplete(media::Buffer* buffer_in);
 
  private:
   friend class media::FilterFactoryImpl1<AudioRendererImpl,
-                                         WebMediaPlayerDelegateImpl*>;
+                                         AudioMessageFilter*>;
 
-  explicit AudioRendererImpl(WebMediaPlayerDelegateImpl* delegate);
+  explicit AudioRendererImpl(AudioMessageFilter* filter);
   virtual ~AudioRendererImpl();
 
-  // Methods call on render thread --------------------------------------------
-  // The following methods are tasks posted on the render thread that needs to
-  // be executed on that thread. They interact with WebMediaPlayerDelegateImpl
-  // and the containing RenderView, because method calls to RenderView must be
-  // executed on render thread.
-  void OnCreateAudioStream(AudioManager::Format format, int channels,
-                           int sample_rate, int bits_per_sample,
-                           size_t packet_size);
-  void OnStartAudioStream();
-  void OnCloseAudioStream();
-  void OnSetAudioVolume(double left, double right);
-  void OnNotifyAudioPacketReady();
+  // Helper methods.
+  // Convert number of bytes to duration of time using information about the
+  // number of channels, sample rate and sample bits.
+  base::TimeDelta ConvertToDuration(int bytes);
 
-  WebMediaPlayerDelegateImpl* delegate_;
+  // Methods call on IO thread ------------------------------------------------
+  // The following methods are tasks posted on the IO thread that needs to
+  // be executed on that thread. They interact with AudioMessageFilter and
+  // sends IPC messages on that thread.
+  void OnCreateStream(AudioManager::Format format, int channels,
+                      int sample_rate, int bits_per_sample,
+                      size_t packet_size, size_t buffer_capacity);
+  void OnPlay();
+  void OnPause();
+  void OnSetVolume(double left, double right);
+  void OnNotifyPacketReady();
+  void OnDestroy();
 
-  // A map of media format information.
-  media::MediaFormat media_format_;
+  // Information about the audio stream.
+  int channels_;
+  int sample_rate_;
+  int sample_bits_;
+  size_t bytes_per_second_;
+
+  scoped_refptr<AudioMessageFilter> filter_;
 
   // ID of the stream created in the browser process.
   int32 stream_id_;
@@ -169,15 +178,33 @@ class AudioRendererImpl : public media::AudioRendererBase {
   scoped_ptr<base::SharedMemory> shared_memory_;
   size_t shared_memory_size_;
 
-  // Flag that tells whether we have any unfulfilled packet request.
-  bool packet_requested_;
+  // Message loop for the IO thread.
+  MessageLoop* io_loop_;
 
-  // Message loop for the render thread, it's the message loop where this class
-  // is constructed.
-  MessageLoop* render_loop_;
+  // Protects:
+  // - |stopped_|
+  // - |pending_request_|
+  // - |request_timestamp_|
+  // - |request_delay_|
+  Lock lock_;
 
-  // Event for releasing resources that live in render thread.
-  base::WaitableEvent resource_release_event_;
+  // A flag that indicates this filter is called to stop.
+  bool stopped_;
+
+  // A flag that indicates an outstanding packet request.
+  bool pending_request_;
+
+  // The time when a request is made.
+  base::Time request_timestamp_;
+
+  // The delay for the requested packet to be played.
+  base::TimeDelta request_delay_;
+
+  // State variables for prerolling.
+  bool prerolling_;
+
+  // Remaining bytes for prerolling to complete.
+  size_t preroll_bytes_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererImpl);
 };

@@ -20,8 +20,10 @@ DevToolsRpc::DevToolsRpc(Delegate* delegate) : delegate_(delegate) {
 DevToolsRpc::~DevToolsRpc() {
 }
 
-void DevToolsRpc::SendValueMessage(const Value& value) {
-  delegate_->SendRpcMessage(Serialize(value));
+void DevToolsRpc::SendValueMessage(const std::string& class_name,
+                                   const std::string& method_name,
+                                   const Value& value) {
+  delegate_->SendRpcMessage(class_name, method_name, Serialize(value));
 }
 
 // static
@@ -32,6 +34,8 @@ Value* DevToolsRpc::ParseMessage(const std::string& raw_msg) {
 // static
 std::string DevToolsRpc::Serialize(const Value& value) {
   std::string json;
+  // TODO(pfeldman): find out why faster way in no longer working.
+  // JSONWriter::WriteWithOptionalEscape(&value, false, false, &json);
   JSONWriter::Write(&value, false, &json);
   return json;
 }

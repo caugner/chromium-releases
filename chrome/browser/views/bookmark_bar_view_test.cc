@@ -13,9 +13,9 @@
 #include "chrome/common/pref_service.h"
 #include "chrome/test/testing_profile.h"
 #include "chrome/test/interactive_ui/view_event_test_base.h"
-#include "chrome/views/controls/button/text_button.h"
-#include "chrome/views/controls/menu/chrome_menu.h"
-#include "chrome/views/window/window.h"
+#include "views/controls/button/text_button.h"
+#include "views/controls/menu/chrome_menu.h"
+#include "views/window/window.h"
 
 namespace {
 
@@ -137,9 +137,10 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   void AddTestData(bool big_menu) {
     std::string test_base = "file:///c:/tmp/";
 
-    BookmarkNode* f1 = model_->AddGroup(model_->GetBookmarkBarNode(), 0, L"F1");
+    const BookmarkNode* f1 = model_->AddGroup(
+        model_->GetBookmarkBarNode(), 0, L"F1");
     model_->AddURL(f1, 0, L"f1a", GURL(test_base + "f1a"));
-    BookmarkNode* f11 = model_->AddGroup(f1, 1, L"F11");
+    const BookmarkNode* f11 = model_->AddGroup(f1, 1, L"F11");
     model_->AddURL(f11, 0, L"f11a", GURL(test_base + "f11a"));
     if (big_menu) {
       for (int i = 1; i <= 100; ++i) {
@@ -156,10 +157,10 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     model_->AddURL(model_->GetBookmarkBarNode(), 4, L"d",
                    GURL(test_base + "d"));
     model_->AddURL(model_->other_node(), 0, L"oa", GURL(test_base + "oa"));
-    BookmarkNode* of = model_->AddGroup(model_->other_node(), 1, L"OF");
+    const BookmarkNode* of = model_->AddGroup(model_->other_node(), 1, L"OF");
     model_->AddURL(of, 0, L"ofa", GURL(test_base + "ofa"));
     model_->AddURL(of, 1, L"ofb", GURL(test_base + "ofb"));
-    BookmarkNode* of2 = model_->AddGroup(model_->other_node(), 2, L"OF2");
+    const BookmarkNode* of2 = model_->AddGroup(model_->other_node(), 2, L"OF2");
     model_->AddURL(of2, 0, L"of2a", GURL(test_base + "of2a"));
     model_->AddURL(of2, 1, L"of2b", GURL(test_base + "of2b"));
   }
@@ -974,3 +975,80 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
 };
 
 VIEW_TEST(BookmarkBarViewTest12, CloseWithModalDialog)
+
+// Tests clicking on the separator of a context menu (this is for coverage of
+// bug 17862).
+class BookmarkBarViewTest13 : public BookmarkBarViewEventTestBase {
+ protected:
+  virtual void DoTestOnMessageLoop() {
+    // Move the mouse to the first folder on the bookmark bar and press the
+    // mouse.
+    views::TextButton* button = bb_view_->other_bookmarked_button();
+    ui_controls::MoveMouseToCenterAndPress(button, ui_controls::LEFT,
+        ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest13::Step2));
+  }
+
+ private:
+  void Step2() {
+    // Menu should be showing.
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    views::MenuItemView* child_menu =
+        menu->GetSubmenu()->GetMenuItemAt(0);
+    ASSERT_TRUE(child_menu != NULL);
+
+    // Right click on the first child to get its context menu.
+    ui_controls::MoveMouseToCenterAndPress(child_menu, ui_controls::RIGHT,
+        ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest13::Step3));
+  }
+
+  void Step3() {
+    // Make sure the context menu is showing.
+    views::MenuItemView* menu = bb_view_->GetContextMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu());
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Find the first separator.
+    views::SubmenuView* submenu = menu->GetSubmenu();
+    views::View* separator_view = NULL;
+    for (int i = 0; i < submenu->GetChildViewCount(); ++i) {
+      if (submenu->GetChildViewAt(i)->GetID() !=
+          views::MenuItemView::kMenuItemViewID) {
+        separator_view = submenu->GetChildViewAt(i);
+        break;
+      }
+    }
+    ASSERT_TRUE(separator_view);
+
+    // Click on the separator. Clicking on the separator shouldn't visually
+    // change anything.
+    ui_controls::MoveMouseToCenterAndPress(separator_view,
+        ui_controls::LEFT, ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest13::Step4));
+  }
+
+  void Step4() {
+    // The context menu should still be showing.
+    views::MenuItemView* menu = bb_view_->GetContextMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu());
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Select the first context menu item.
+    ui_controls::MoveMouseToCenterAndPress(menu->GetSubmenu()->GetMenuItemAt(0),
+        ui_controls::LEFT, ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest13::Step5));
+  }
+
+  void Step5() {
+    DLOG(WARNING) << " DONE";
+    Done();
+  }
+};
+
+VIEW_TEST(BookmarkBarViewTest13, ClickOnContextMenuSeparator)

@@ -39,7 +39,7 @@ TEST_F(StatsTableTest, VerifySlots) {
   // Register a single thread.
   std::string thread_name = "mainThread";
   int slot_id = table.RegisterThread(thread_name);
-  EXPECT_TRUE(slot_id);
+  EXPECT_NE(slot_id, 0);
 
   // Fill up the table with counters.
   std::string counter_base_name = "counter";
@@ -108,7 +108,10 @@ void StatsTableThread::Run() {
 }
 
 // Create a few threads and have them poke on their counters.
+// Currently disabled. See bug report below:
+// TODO(maruel): http://crbug.com/10611
 TEST_F(StatsTableTest, MultipleThreads) {
+#if 0
   // Create a stats table.
   const std::string kTableName = "MultipleThreadStatTable";
   const int kMaxThreads = 20;
@@ -161,6 +164,7 @@ TEST_F(StatsTableTest, MultipleThreads) {
   EXPECT_EQ(0, table.CountThreadsRegistered());
 
   DeleteShmem(kTableName);
+#endif
 }
 
 const std::string kMPTableName = "MultipleProcessStatTable";
@@ -257,9 +261,9 @@ TEST_F(StatsTableTest, StatsCounter) {
 
   // Test initial state.
   EXPECT_TRUE(foo.Enabled());
-  EXPECT_NE(foo.Pointer(), static_cast<int*>(0));
-  EXPECT_EQ(0, table.GetCounterValue("c:foo"));
+  ASSERT_NE(foo.Pointer(), static_cast<int*>(0));
   EXPECT_EQ(0, *(foo.Pointer()));
+  EXPECT_EQ(0, table.GetCounterValue("c:foo"));
 
   // Test Increment.
   while(*(foo.Pointer()) < 123) foo.Increment();
@@ -280,11 +284,11 @@ TEST_F(StatsTableTest, StatsCounter) {
   EXPECT_EQ(0, table.GetCounterValue("c:foo"));
 
   // Test Decrement.
-  foo.Decrement(1);
+  foo.Subtract(1);
   EXPECT_EQ(-1, table.GetCounterValue("c:foo"));
-  foo.Decrement(0);
+  foo.Subtract(0);
   EXPECT_EQ(-1, table.GetCounterValue("c:foo"));
-  foo.Decrement(-1);
+  foo.Subtract(-1);
   EXPECT_EQ(0, table.GetCounterValue("c:foo"));
 
   DeleteShmem(kTableName);

@@ -124,7 +124,7 @@ class ChromeTests:
       self._data_dir = os.path.join(module_dir, "test", "data", "purify")
     else:
       self._data_dir = os.path.join(module_dir, "data", "purify")
-      
+
     cmd = list(self._command_preamble)
     cmd.append("--data_dir=%s" % self._data_dir)
     cmd.append("--report_dir=%s" % self._report_dir)
@@ -326,10 +326,10 @@ class ChromeTests:
     # this code should be undone.
     # BUG=7516
     if ret:
-      return -88
+      return 88
     return 0
 
-  def TestUI(self):
+  def TestUIAll(self):
     if not self._options.no_reinstrument:
       instrumentation_error = self.InstrumentDll()
       if instrumentation_error:
@@ -343,8 +343,68 @@ class ChromeTests:
                               "--ui-test-sleep-timeout=40000"],
                              multi=True)
 
+  def TestUI(self):
+    # Similar to layout test, we run a slice of UI tests with each run.
+    # This is achieved by using --batch-count (total number of slices) and
+    # --batch-index (current slice index) command line switches of UI tests.
+    # A "batch index file" is maintained in the local directory so that each
+    # test runs the kth slice of UI tests and increments k for next run.
+    # Note: a full cycle of UI tests is finished in batch_count runs.
+    # If new test cases are added in the middle of a cycle, some tests
+    # may get skipped in the current cycle. For more discussion on this issue,
+    # see http://codereview.chromium.org/149600.
+
+    # Break UI tests into 16 slices so we have about 30-40 minutes per run.
+    batch_count = 16
+    batch_index = 0
+    batch_index_file = os.path.join(os.environ["TEMP"],
+                                    "purify_ui_batch_index.txt")
+    try:
+      f = open(batch_index_file)
+      if f:
+        str = f.read()
+        if len(str):
+          batch_index = int(str)
+        if batch_index >= batch_count:
+          batch_index = 0
+        f.close()
+    except IOError, (errno, strerror):
+      logging.error("error reading from file %s (%d, %s)" % (batch_index_file,
+                                                             errno, strerror))
+
+    script_cmd = ["ui_tests.exe", "--single-process",
+                  "--ui-test-timeout=180000",
+                  "--ui-test-action-timeout=80000",
+                  "--ui-test-action-max-timeout=180000",
+                  "--ui-test-sleep-timeout=40000",
+                  "--batch-count=%s" % batch_count,
+                  "--batch-index=%s" % batch_index]
+
+    ret = self.ScriptedTest("chrome", "chrome.exe", "ui_tests",
+                            script_cmd, multi=True)
+
+    # Wait until after the test runs to completion to write out the new batch
+    # index. This way, if the bot is killed, we'll start running again from
+    # the current chunk rather than skipping it.
+    try:
+      f = open(batch_index_file, "w")
+      batch_index += 1
+      if batch_index == batch_count:
+        batch_index = 0
+      f.write("%d" % batch_index)
+      f.close()
+    except IOError, (errno, strerror):
+      logging.error("error writing to file %s (%d, %s)" % (batch_index_file,
+                                                           errno, strerror))
+
+    # As we just started to run full pass UI test under purify, there are a
+    # fair number of test errors.
+    if ret:
+      return 88
+    return 0
+
   def TestV8(self):
-    shell = "v8_shell_sample.exe"
+    shell = "v8_shell.exe"
     # We need to compute _build_dir early to in order to pass in the
     # shell path as an argument to the test script.
     self.ComputeBuildDir("chrome", shell)
@@ -402,4 +462,3 @@ def _main(argv):
 if __name__ == "__main__":
   ret = _main(sys.argv)
   sys.exit(ret)
-

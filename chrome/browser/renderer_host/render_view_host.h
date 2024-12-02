@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,25 +9,24 @@
 #include <vector>
 
 #include "base/scoped_ptr.h"
+#include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/common/modal_dialog_event.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/page_zoom.h"
-#ifdef CHROME_PERSONALIZATION
-#include "chrome/personalization/personalization.h"
-#endif
+#include "webkit/api/public/WebConsoleMessage.h"
+#include "webkit/api/public/WebTextDirection.h"
 #include "webkit/glue/autofill_form.h"
-#include "webkit/glue/console_message_level.h"
 #include "webkit/glue/password_form_dom_manager.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class AutofillForm;
-class NavigationEntry;
 class RenderViewHostDelegate;
 class SiteInstance;
 class SkBitmap;
 class ViewMsg_Navigate;
 struct ContextMenuParams;
+struct MediaPlayerAction;
 struct ViewHostMsg_DidPrintPage_Params;
 struct ViewMsg_Navigate_Params;
 struct WebDropData;
@@ -46,6 +45,7 @@ enum LoadState;
 }
 
 namespace webkit_glue {
+class AutofillForm;
 struct WebApplicationInfo;
 }
 
@@ -62,21 +62,22 @@ struct WebApplicationInfo;
 //
 //  The intent of this class is to provide a view-agnostic communication
 //  conduit with a renderer. This is so we can build HTML views not only as
-//  TabContents (see WebContents for an example) but also as views, etc.
+//  TabContents (see TabContents for an example) but also as views, etc.
 //
 //  The exact API of this object needs to be more thoroughly designed. Right
-//  now it mimics what WebContents exposed, which is a fairly large API and may
+//  now it mimics what TabContents exposed, which is a fairly large API and may
 //  contain things that are not relevant to a common subset of views. See also
 //  the comment in render_view_host_delegate.h about the size and scope of the
 //  delegate API.
 //
 //  Right now, the concept of page navigation (both top level and frame) exists
-//  in the WebContents still, so if you instantiate one of these elsewhere, you
+//  in the TabContents still, so if you instantiate one of these elsewhere, you
 //  will not be able to traverse pages back and forward. We need to determine
 //  if we want to bring that and other functionality down into this object so
 //  it can be shared by others.
 //
-class RenderViewHost : public RenderWidgetHost {
+class RenderViewHost : public RenderWidgetHost,
+                       public NotificationObserver {
  public:
   // Returns the RenderViewHost given its ID and the ID of its render process.
   // Returns NULL if the IDs do not correspond to a live RenderViewHost.
@@ -96,15 +97,26 @@ class RenderViewHost : public RenderWidgetHost {
   SiteInstance* site_instance() const { return instance_; }
   RenderViewHostDelegate* delegate() const { return delegate_; }
 
-  // Set up the RenderView child process.
+  // Set up the RenderView child process. Virtual because it is overridden by
+  // TestRenderViewHost.
   virtual bool CreateRenderView();
-  // Returns true if the RenderView is active and has not crashed.
+
+  // Returns true if the RenderView is active and has not crashed. Virtual
+  // because it is overridden by TestRenderViewHost.
   virtual bool IsRenderViewLive() const;
 
-  // Load the specified entry, optionally reloading.
-  virtual void NavigateToEntry(const NavigationEntry& entry, bool is_reload);
+  void SetRendererPrefs(const RendererPreferences& renderer_prefs);
 
-  // Load the specified URL.
+  // Sends the given navigation message. Use this rather than sending it
+  // yourself since this does the internal bookkeeping described below. This
+  // function takes ownership of the provided message pointer.
+  //
+  // If a cross-site request is in progress, we may be suspended while waiting
+  // for the onbeforeunload handler, so this function might buffer the message
+  // rather than sending it.
+  void Navigate(const ViewMsg_Navigate_Params& message);
+
+  // Load the specified URL, this is a shortcut for Navigate().
   void NavigateToURL(const GURL& url);
 
   // Loads the specified html (must be UTF8) in the main frame.  If
@@ -114,10 +126,10 @@ class RenderViewHost : public RenderWidgetHost {
   // string if no secure connection state should be simulated.
   // Note that if |new_navigation| is false, |display_url| and |security_info|
   // are not used.
-  virtual void LoadAlternateHTMLString(const std::string& html_text,
-                                       bool new_navigation,
-                                       const GURL& display_url,
-                                       const std::string& security_info);
+  void LoadAlternateHTMLString(const std::string& html_text,
+                               bool new_navigation,
+                               const GURL& display_url,
+                               const std::string& security_info);
 
   // Returns whether navigation messages are currently suspended for this
   // RenderViewHost.  Only true during a cross-site navigation, while waiting
@@ -136,28 +148,28 @@ class RenderViewHost : public RenderWidgetHost {
   void SetNavigationsSuspended(bool suspend);
 
   // Causes the renderer to invoke the onbeforeunload event handler.  The
-  // result will be returned via ViewMsg_ShouldClose.
-  virtual void FirePageBeforeUnload();
+  // result will be returned via ViewMsg_ShouldClose. See also ClosePage which
+  // will fire the PageUnload event.
+  //
+  // Set bool for_cross_site_transition when this close is just for the current
+  // RenderView in the case of a cross-site transition. False means we're
+  // closing the entire tab.
+  void FirePageBeforeUnload(bool for_cross_site_transition);
 
-  // Close the page after the page has responded that it can be closed via
-  // ViewMsg_ShouldClose. This is where the page itself is closed. The
-  // unload handler is triggered here, which can block with a dialog, but cannot
-  // cancel the close of the page.
-  void FirePageUnload();
+  // Causes the renderer to close the current page, including running its
+  // onunload event handler.  A ClosePage_ACK message will be sent to the
+  // ResourceDispatcherHost when it is finished.
+  //
+  // Please see ViewMsg_ClosePage in resource_messages_internal.h for a
+  // description of the parameters.
+  void ClosePage(bool for_cross_site_transition,
+                 int new_render_process_host_id,
+                 int new_request_id);
 
   // Close the page ignoring whether it has unload events registers.
   // This is called after the beforeunload and unload events have fired
   // and the user has agreed to continue with closing the page.
-  static void ClosePageIgnoringUnloadEvents(int render_process_host_id,
-                                            int request_id);
-
-  // Causes the renderer to close the current page, including running its
-  // onunload event handler.  A ClosePage_ACK message will be sent to the
-  // ResourceDispatcherHost when it is finished. |new_render_process_host_id|
-  // and |new_request_id| will help the ResourceDispatcherHost identify which
-  // response is associated with this event.
-  virtual void ClosePage(int new_render_process_host_id,
-                         int new_request_id);
+  void ClosePageIgnoringUnloadEvents();
 
   // Sets whether this RenderViewHost has an outstanding cross-site request,
   // for which another renderer will need to run an onunload event handler.
@@ -178,10 +190,12 @@ class RenderViewHost : public RenderWidgetHost {
   // Stops the current load.
   void Stop();
 
-
   // Asks the renderer to "render" printed pages and initiate printing on our
   // behalf.
   bool PrintPages();
+
+  // Notify renderer of success/failure of print job.
+  void PrintingDone(int document_cookie, bool success);
 
   // Start looking for a string within the content of the page, with the
   // specified options.
@@ -194,6 +208,12 @@ class RenderViewHost : public RenderWidgetHost {
   // Cancel a pending find operation. If |clear_selection| is true, it will also
   // clear the selection on the focused frame.
   void StopFinding(bool clear_selection);
+
+  // Get the most probable language of the text content in the tab. This sends
+  // a message to the render view to get the content of the page as text. The
+  // caller gets the language via the NotificationService by registering to the
+  // NotificationType TAB_LANGUAGE_DETERMINED.
+  void GetPageLanguage();
 
   // Change the zoom level of a page.
   void Zoom(PageZoom::Function function);
@@ -210,7 +230,8 @@ class RenderViewHost : public RenderWidgetHost {
 
   // Fill out a password form and trigger DOM autocomplete in the case
   // of multiple matching logins.
-  void FillPasswordForm(const PasswordFormDomManager::FillData& form_data);
+  void FillPasswordForm(
+      const webkit_glue::PasswordFormDomManager::FillData& form_data);
 
   // D&d drop target messages that get sent to WebKit.
   void DragTargetDragEnter(const WebDropData& drop_data,
@@ -229,24 +250,14 @@ class RenderViewHost : public RenderWidgetHost {
   void ExecuteJavascriptInWebFrame(const std::wstring& frame_xpath,
                                    const std::wstring& jscript);
 
+  // Insert some css into a frame in the page.
+  void InsertCSSInWebFrame(const std::wstring& frame_xpath,
+                           const std::string& css);
+
   // Logs a message to the console of a frame in the page.
-  void AddMessageToConsole(const std::wstring& frame_xpath,
-                           const std::wstring& msg,
-                           ConsoleMessageLevel level);
-
-  // Send command to the debugger
-  void DebugCommand(const std::wstring& cmd);
-
-  // Attach to the V8 instance for debugging
-  void DebugAttach();
-
-  // Detach from the V8 instance for debugging
-  void DebugDetach();
-
-  // Cause the V8 debugger to trigger a debug break. If the force flag is set
-  // force a debug break even if no JS code is running (this actually causes a
-  // simple JS script to be executed).
-  void DebugBreak(bool force);
+  void AddMessageToConsole(const string16& frame_xpath,
+                           const string16& message,
+                           const WebKit::WebConsoleMessage::Level&);
 
   // Edit operations.
   void Undo();
@@ -260,9 +271,10 @@ class RenderViewHost : public RenderWidgetHost {
   void Delete();
   void SelectAll();
 
-  // Downloads an image notifying the delegate appropriately. The returned
-  // integer uniquely identifies the download for the lifetime of the browser.
-  int DownloadImage(const GURL& url, int image_size);
+  // Downloads an image notifying the FavIcon delegate appropriately. The
+  // returned integer uniquely identifies the download for the lifetime of the
+  // browser.
+  int DownloadFavIcon(const GURL& url, int image_size);
 
   // Requests application info for the specified page. This is an asynchronous
   // request. The delegate is notified by way of OnDidGetApplicationInfo when
@@ -278,18 +290,24 @@ class RenderViewHost : public RenderWidgetHost {
                                   bool success,
                                   const std::wstring& prompt);
 
+  // This function is called when the JavaScript message box window has been
+  // destroyed.
+  void JavaScriptMessageBoxWindowDestroyed();
+
   // Notifies the RenderView that the modal html dialog has been closed.
   void ModalHTMLDialogClosed(IPC::Message* reply_msg,
                              const std::string& json_retval);
 
+  // Send an action to the media player element located at |x|, |y|.
+  void MediaPlayerActionAt(int x, int y, const MediaPlayerAction& action);
+
   // Copies the image at the specified point.
   void CopyImageAt(int x, int y);
 
-  // Inspects the element at the specified point using the Web Inspector.
-  void InspectElementAt(int x, int y);
-
-  // Show the JavaScript console.
-  void ShowJavaScriptConsole();
+  // Notifies the renderer that a drag and drop was cancelled. This is
+  // necessary because the render may be the one that started the drag.
+  void DragSourceCancelledAt(
+      int client_x, int client_y, int screen_x, int screen_y);
 
   // Notifies the renderer that a drop occurred. This is necessary because the
   // render may be the one that started the drag.
@@ -305,38 +323,19 @@ class RenderViewHost : public RenderWidgetHost {
   // This allows the renderer to reset some state.
   void DragSourceSystemDragEnded();
 
-  // Tell the render view to expose DOM automation bindings so that the js
-  // content can send JSON-encoded data back to automation in the parent
-  // process.
-  // Must be called before CreateRenderView().
-  void AllowDomAutomationBindings();
-
-  // Tell the render view to allow the javascript access to
-  // the external host via automation.
-  // Must be called before CreateRenderView().
-  void AllowExternalHostBindings();
-
-  // Tell the render view to expose DOM bindings so that the JS content
-  // can send JSON-encoded data back to the browser process.
-  // This is used for HTML-based UI.
-  // Must be called before CreateRenderView().
-  void AllowDOMUIBindings();
-
-  // Tell the render view to expose privileged bindings for use by extensions.
-  // Must be called before CreateRenderView().
-  void AllowExtensionBindings();
+  // Tell the render view to enable a set of javascript bindings. The argument
+  // should be a combination of values from BindingsPolicy.
+  void AllowBindings(int binding_flags);
 
   // Sets a property with the given name and value on the DOM UI binding object.
   // Must call AllowDOMUIBindings() on this renderer first.
   void SetDOMUIProperty(const std::string& name, const std::string& value);
 
-  // Fill in a ViewMsg_Navigate_Params struct from a NavigationEntry.
-  static void MakeNavigateParams(const NavigationEntry& entry,
-                                 bool reload,
-                                 ViewMsg_Navigate_Params* params);
-
   // Tells the renderer view to focus the first (last if reverse is true) node.
   void SetInitialFocus(bool reverse);
+
+  // Clears the node that is currently focused (if any).
+  void ClearFocusedNode();
 
   // Update render view specific (WebKit) preferences.
   void UpdateWebPreferences(const WebPreferences& prefs);
@@ -363,34 +362,19 @@ class RenderViewHost : public RenderWidgetHost {
 
   // Notifies the RenderViewHost that a file has been chosen by the user from
   // an Open File dialog for the form.
-  void FileSelected(const std::wstring& path);
+  void FileSelected(const FilePath& path);
 
   // Notifies the Listener that many files have been chosen by the user from
   // an Open File dialog for the form.
-  void MultiFilesSelected(const std::vector<std::wstring>& files);
+  void MultiFilesSelected(const std::vector<FilePath>& files);
 
   // Notifies the RenderViewHost that its load state changed.
   void LoadStateChanged(const GURL& url, net::LoadState load_state);
 
-  // Does the associated view have an onunload or onbeforeunload handler?
-  bool HasUnloadListener() { return has_unload_listener_; }
-
-  // If the associated view can be terminated without any side effects
-  bool CanTerminate() const;
-
-  // Clears the has_unload_listener_ bit since the unload handler has fired
-  // and we're necessarily leaving the page.
-  void UnloadListenerHasFired() { has_unload_listener_ = false; }
-
-#ifdef CHROME_PERSONALIZATION
-  // Tells the RenderView to raise an personalization event with the given name
-  // and argument.
-  void RaisePersonalizationEvent(std::string event_name, std::string event_arg);
-
-  HostPersonalization personalization() {
-    return personalization_;
+  bool SuddenTerminationAllowed() const;
+  void set_sudden_termination_allowed(bool enabled) {
+    sudden_termination_allowed_ = enabled;
   }
-#endif
 
   // Forward a message from external host to chrome renderer.
   void ForwardMessageFromExternalHost(const std::string& message,
@@ -416,27 +400,47 @@ class RenderViewHost : public RenderWidgetHost {
   void WindowMoveOrResizeStarted();
 
   // RenderWidgetHost public overrides.
-  virtual void Init();
   virtual void Shutdown();
   virtual bool IsRenderView() { return true; }
   virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual void GotFocus();
   virtual bool CanBlur() const;
+  virtual void ForwardMouseEvent(const WebKit::WebMouseEvent& mouse_event);
+  virtual void ForwardEditCommand(const std::string& name,
+                                  const std::string& value);
   virtual gfx::Rect GetRootWindowResizerRect() const;
+
+  // Creates a new RenderView with the given route id.
+  void CreateNewWindow(int route_id, ModalDialogEvent modal_dialog_event);
+
+  // Creates a new RenderWidget with the given route id.
+  void CreateNewWidget(int route_id, bool activatable);
+
+  // Senf the response to an extension api call.
+  void SendExtensionResponse(int request_id, bool success,
+                             const std::string& response,
+                             const std::string& error);
+
+  void SignalModalDialogEvent();
+  void ResetModalDialogEvent();
+
+  void set_in_inspect_element_mode(bool enabled) {
+    in_inspect_element_mode_ = enabled;
+  }
 
  protected:
   // RenderWidgetHost protected overrides.
   virtual void UnhandledKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual void OnEnterOrSpace();
+  virtual void OnUserGesture();
   virtual void NotifyRendererUnresponsive();
   virtual void NotifyRendererResponsive();
 
   // IPC message handlers.
-  void OnMsgCreateWindow(int route_id, ModalDialogEvent modal_dialog_event);
-  void OnMsgCreateWidget(int route_id, bool activatable);
   void OnMsgShowView(int route_id,
                      WindowOpenDisposition disposition,
                      const gfx::Rect& initial_pos,
-                     bool user_gesture);
+                     bool user_gesture,
+                     const GURL& creator_url);
   void OnMsgShowWidget(int route_id, const gfx::Rect& initial_pos);
   void OnMsgRunModal(IPC::Message* reply_msg);
   void OnMsgRenderViewReady();
@@ -455,8 +459,8 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgDidRedirectProvisionalLoad(int32 page_id,
                                        const GURL& source_url,
                                        const GURL& target_url);
-  void OnMsgDidStartLoading(int32 page_id);
-  void OnMsgDidStopLoading(int32 page_id);
+  void OnMsgDidStartLoading();
+  void OnMsgDidStopLoading();
   void OnMsgDidLoadResourceFromMemoryCache(const GURL& url,
                                            const std::string& frame_origin,
                                            const std::string& main_frame_origin,
@@ -472,14 +476,16 @@ class RenderViewHost : public RenderWidgetHost {
                       const gfx::Rect& selection_rect,
                       int active_match_ordinal,
                       bool final_update);
+  void OnDeterminePageTextReply(const std::wstring& tab_text);
   void OnMsgUpdateFavIconURL(int32 page_id, const GURL& icon_url);
-  void OnMsgDidDownloadImage(int id,
-                             const GURL& image_url,
-                             bool errored,
-                             const SkBitmap& image_data);
+  void OnMsgDidDownloadFavIcon(int id,
+                               const GURL& image_url,
+                               bool errored,
+                               const SkBitmap& image_data);
   void OnMsgContextMenu(const ContextMenuParams& params);
   void OnMsgOpenURL(const GURL& url, const GURL& referrer,
                     WindowOpenDisposition disposition);
+  void OnMsgDidContentsPreferredWidthChange(int pref_width);
   void OnMsgDomOperationResponse(const std::string& json_string,
                                  int automation_id);
   void OnMsgDOMUISend(const std::string& message,
@@ -487,16 +493,15 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgForwardMessageToExternalHost(const std::string& message,
                                          const std::string& origin,
                                          const std::string& target);
-#ifdef CHROME_PERSONALIZATION
-  void OnPersonalizationEvent(const std::string& message,
-                              const std::string& content);
-#endif
+  void OnMsgDocumentLoadedInFrame();
   void OnMsgGoToEntryAtOffset(int offset);
-  void OnMsgSetTooltipText(const std::wstring& tooltip_text);
+  void OnMsgSetTooltipText(const std::wstring& tooltip_text,
+                           WebKit::WebTextDirection text_direction_hint);
+  void OnMsgSelectionChanged(const std::string& text);
+  void OnMsgPasteFromSelectionClipboard();
   void OnMsgRunFileChooser(bool multiple_files,
-                           const std::wstring& title,
-                           const std::wstring& default_file,
-                           const std::wstring& filter);
+                           const string16& title,
+                           const FilePath& default_file);
   void OnMsgRunJavaScriptMessage(const std::wstring& message,
                                  const std::wstring& default_prompt,
                                  const GURL& frame_url,
@@ -508,25 +513,31 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgShowModalHTMLDialog(const GURL& url, int width, int height,
                                 const std::string& json_arguments,
                                 IPC::Message* reply_msg);
-  void OnMsgPasswordFormsSeen(const std::vector<PasswordForm>& forms);
-  void OnMsgAutofillFormSubmitted(const AutofillForm& forms);
+  void OnMsgPasswordFormsSeen(
+      const std::vector<webkit_glue::PasswordForm>& forms);
+  void OnMsgAutofillFormSubmitted(const webkit_glue::AutofillForm& forms);
   void OnMsgStartDragging(const WebDropData& drop_data);
   void OnUpdateDragCursor(bool is_drop_target);
   void OnTakeFocus(bool reverse);
   void OnMsgPageHasOSDD(int32 page_id, const GURL& doc_url, bool autodetected);
-  void OnMsgUpdateFeedList(const ViewHostMsg_UpdateFeedList_Params& params);
-  void OnMsgInspectElementReply(int num_resources);
+  void OnDidGetPrintedPagesCount(int cookie, int number_pages);
   void DidPrintPage(const ViewHostMsg_DidPrintPage_Params& params);
-  void OnDebugMessage(const std::string& message);
   void OnAddMessageToConsole(const std::wstring& message,
                              int32 line_no,
                              const std::wstring& source_id);
-  void OnDebuggerOutput(const std::wstring& output);
-  void DidDebugAttach();
+
+  void OnUpdateInspectorSettings(const std::wstring& raw_settings);
   void OnForwardToDevToolsAgent(const IPC::Message& message);
   void OnForwardToDevToolsClient(const IPC::Message& message);
+  void OnActivateDevToolsWindow();
+  void OnCloseDevToolsWindow();
+  void OnDockDevToolsWindow();
+  void OnUndockDevToolsWindow();
+  void OnToggleInspectElementMode(bool enabled);
+
   void OnUserMetricsRecordAction(const std::wstring& action);
   void OnMissingPluginStatus(int status);
+  void OnCrashedPlugin(base::ProcessId pid, const FilePath& plugin_path);
   void OnMessageReceived(IPC::Message* msg) { }
 
   void OnReceivedSavableResourceLinksForCurrentPage(
@@ -541,7 +552,6 @@ class RenderViewHost : public RenderWidgetHost {
   void OnDidGetApplicationInfo(int32 page_id,
                                const webkit_glue::WebApplicationInfo& info);
   void OnMsgShouldCloseACK(bool proceed);
-  void OnUnloadListenerChanged(bool has_handler);
   void OnQueryFormFieldAutofill(const std::wstring& field_name,
                                 const std::wstring& user_text,
                                 int64 node_id,
@@ -549,17 +559,21 @@ class RenderViewHost : public RenderWidgetHost {
   void OnRemoveAutofillEntry(const std::wstring& field_name,
                              const std::wstring& value);
 
-  // Helper function to send a navigation message.  If a cross-site request is
-  // in progress, we may be suspended while waiting for the onbeforeunload
-  // handler, so this function might buffer the message rather than sending it.
-  void DoNavigate(ViewMsg_Navigate* nav_message);
+  void OnExtensionRequest(const std::string& name, const std::string& args,
+                          int request_id, bool has_callback);
+  void OnExtensionPostMessage(int port_id, const std::string& message);
+  void OnAccessibilityFocusChange(int acc_obj_id);
+  void OnCSSInserted();
 
  private:
   friend class TestRenderViewHost;
 
   void UpdateBackForwardListCount();
 
-  void OnDebugDisconnect();
+  // NotificationObserver implementation.
+  void Observe(NotificationType type,
+               const NotificationSource& source,
+               const NotificationDetails& details);
 
   // The SiteInstance associated with this RenderViewHost.  All pages drawn
   // in this RenderViewHost are part of this SiteInstance.  Should not change
@@ -569,21 +583,9 @@ class RenderViewHost : public RenderWidgetHost {
   // Our delegate, which wants to know about changes in the RenderView.
   RenderViewHostDelegate* delegate_;
 
-#ifdef CHROME_PERSONALIZATION
-  HostPersonalization personalization_;
-#endif
-
-  // true if a renderer has once been valid. We use this flag to display a sad
-  // tab only when we lose our renderer and not if a paint occurs during
-  // initialization.
-  bool renderer_initialized_;
-
   // true if we are currently waiting for a response for drag context
   // information.
   bool waiting_for_drag_context_response_;
-
-  // is the debugger attached to us or not
-  bool debugger_attached_;
 
   // A bitwise OR of bindings types that have been enabled for this RenderView.
   // See BindingsPolicy for details.
@@ -612,8 +614,8 @@ class RenderViewHost : public RenderWidgetHost {
   bool navigations_suspended_;
 
   // We only buffer a suspended navigation message while we a pending RVH for a
-  // WebContents.  There will only ever be one suspended navigation, because
-  // WebContents will destroy the pending RVH and create a new one if a second
+  // TabContents.  There will only ever be one suspended navigation, because
+  // TabContents will destroy the pending RVH and create a new one if a second
   // navigation occurs.
   scoped_ptr<ViewMsg_Navigate> suspended_nav_message_;
 
@@ -621,25 +623,30 @@ class RenderViewHost : public RenderWidgetHost {
   // must return to the renderer to unblock it.
   IPC::Message* run_modal_reply_msg_;
 
-  bool has_unload_listener_;
-
+  // Set to true when there is a pending ViewMsg_ShouldClose message pending.
+  // This ensures we don't spam the renderer many times to close. When true,
+  // the value of unload_ack_is_for_cross_site_transition_ indicates which type
+  // of unload this is for.
   bool is_waiting_for_unload_ack_;
+
+  // Valid only when is_waiting_for_unload_ack_ is true, this tells us if the
+  // unload request is for closing the entire tab ( = false), or only this
+  // RenderViewHost in the case of a cross-site transition ( = true).
+  bool unload_ack_is_for_cross_site_transition_;
 
   bool are_javascript_messages_suppressed_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(RenderViewHost);
-};
+  // True if the render view can be shut down suddenly.
+  bool sudden_termination_allowed_;
 
-// Factory for creating RenderViewHosts.  Useful for unit tests.
-class RenderViewHostFactory {
- public:
-  virtual ~RenderViewHostFactory() {}
+  // DevTools triggers this mode when user chooses inspect lens tool.
+  // While in this mode, mouse click is converted into InspectElement
+  // command.
+  bool in_inspect_element_mode_;
 
-  virtual RenderViewHost* CreateRenderViewHost(
-      SiteInstance* instance,
-      RenderViewHostDelegate* delegate,
-      int routing_id,
-      base::WaitableEvent* modal_dialog_event) = 0;
+  NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(RenderViewHost);
 };
 
 #endif  // CHROME_BROWSER_RENDERER_HOST_RENDER_VIEW_HOST_H_

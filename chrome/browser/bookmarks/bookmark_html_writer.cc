@@ -4,6 +4,7 @@
 
 #include "chrome/browser/bookmarks/bookmark_html_writer.h"
 
+#include "app/l10n_util.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -15,6 +16,7 @@
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/history/history_types.h"
+#include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
@@ -97,7 +99,7 @@ class Writer : public Task {
     if (!roots_d_value->Get(BookmarkCodec::kRootFolderNameKey,
                             &root_folder_value) ||
         root_folder_value->GetType() != Value::TYPE_DICTIONARY ||
-        !roots_d_value->Get(BookmarkCodec::kOtherBookmarFolderNameKey,
+        !roots_d_value->Get(BookmarkCodec::kOtherBookmarkFolderNameKey,
                             &other_folder_value) ||
         other_folder_value->GetType() != Value::TYPE_DICTIONARY) {
       NOTREACHED();
@@ -107,9 +109,9 @@ class Writer : public Task {
     IncrementIndent();
 
     if (!WriteNode(*static_cast<DictionaryValue*>(root_folder_value),
-                   history::StarredEntry::BOOKMARK_BAR) ||
+                   BookmarkNode::BOOKMARK_BAR) ||
         !WriteNode(*static_cast<DictionaryValue*>(other_folder_value),
-                   history::StarredEntry::OTHER)) {
+                   BookmarkNode::OTHER_NODE)) {
       return;
     }
 
@@ -164,12 +166,12 @@ class Writer : public Task {
 
     switch (type) {
       case ATTRIBUTE_VALUE:
-        // Convert " to \"
+        // Convert " to &quot;
         if (text.find(L"\"") != std::wstring::npos) {
           string16 replaced_string = WideToUTF16Hack(text);
           ReplaceSubstringsAfterOffset(&replaced_string, 0,
                                        ASCIIToUTF16("\""),
-                                       ASCIIToUTF16("\\\""));
+                                       ASCIIToUTF16("&quot;"));
           utf8_string = UTF16ToUTF8(replaced_string);
         } else {
           utf8_string = WideToUTF8(text);
@@ -202,7 +204,7 @@ class Writer : public Task {
 
   // Writes the node and all its children, returning true on success.
   bool WriteNode(const DictionaryValue& value,
-                 history::StarredEntry::Type folder_type) {
+                BookmarkNode::Type folder_type) {
     std::wstring title, date_added_string, type_string;
     if (!value.GetString(BookmarkCodec::kNameKey, &title) ||
         !value.GetString(BookmarkCodec::kDateAddedKey, &date_added_string) ||
@@ -243,7 +245,7 @@ class Writer : public Task {
       NOTREACHED();
       return false;
     }
-    if (folder_type != history::StarredEntry::OTHER) {
+    if (folder_type != BookmarkNode::OTHER_NODE) {
       // The other folder name is not written out. This gives the effect of
       // making the contents of the 'other folder' be a sibling to the bookmark
       // bar folder.
@@ -254,10 +256,10 @@ class Writer : public Task {
           !WriteTime(last_modified_date)) {
         return false;
       }
-      if (folder_type == history::StarredEntry::BOOKMARK_BAR) {
+      if (folder_type == BookmarkNode::BOOKMARK_BAR) {
         if (!Write(kBookmarkBar))
           return false;
-        title = L"Bookmark Bar";
+        title = l10n_util::GetString(IDS_BOOMARK_BAR_FOLDER_NAME);
       } else if (!Write(kFolderAttributeEnd)) {
         return false;
       }
@@ -282,11 +284,11 @@ class Writer : public Task {
         return false;
       }
       if (!WriteNode(*static_cast<DictionaryValue*>(child_value),
-                     history::StarredEntry::USER_GROUP)) {
+                     BookmarkNode::FOLDER)) {
         return false;
       }
     }
-    if (folder_type != history::StarredEntry::OTHER) {
+    if (folder_type != BookmarkNode::OTHER_NODE) {
       // Close out the folder.
       DecrementIndent();
       if (!WriteIndent() ||

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/views/first_run_view_base.h"
 
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/thread.h"
@@ -12,32 +14,34 @@
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/background.h"
-#include "chrome/views/controls/button/checkbox.h"
-#include "chrome/views/controls/image_view.h"
-#include "chrome/views/controls/label.h"
-#include "chrome/views/controls/throbber.h"
-#include "chrome/views/controls/separator.h"
-#include "chrome/views/window/client_view.h"
-#include "chrome/views/window/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "views/background.h"
+#include "views/controls/button/checkbox.h"
+#include "views/controls/image_view.h"
+#include "views/controls/label.h"
+#include "views/controls/throbber.h"
+#include "views/controls/separator.h"
+#include "views/standard_layout.h"
+#include "views/window/client_view.h"
+#include "views/window/window.h"
 
-FirstRunViewBase::FirstRunViewBase(Profile* profile)
+FirstRunViewBase::FirstRunViewBase(Profile* profile,
+                                   int import_items,
+                                   int dont_import_items)
     : preferred_width_(0),
       background_image_(NULL),
       separator_1_(NULL),
       default_browser_(NULL),
       separator_2_(NULL),
       importer_host_(NULL),
-      profile_(profile) {
+      profile_(profile),
+      import_items_(import_items),
+      dont_import_items_(dont_import_items) {
   DCHECK(profile);
   SetupControls();
 }
@@ -85,7 +89,7 @@ void FirstRunViewBase::SetupControls() {
   AddChildView(separator_1_);
 
   // The "make us default browser" check box.
-  default_browser_ = new views::CheckBox(
+  default_browser_ = new views::Checkbox(
       l10n_util::GetString(IDS_FR_CUSTOMIZE_DEFAULT_BROWSER));
   default_browser_->SetMultiLine(true);
   AddChildView(default_browser_);
@@ -151,19 +155,31 @@ bool FirstRunViewBase::HasAlwaysOnTopMenu() const {
   return false;
 }
 
-std::wstring FirstRunViewBase::GetDialogButtonLabel(DialogButton button) const {
-  if (DIALOGBUTTON_OK == button)
+std::wstring FirstRunViewBase::GetDialogButtonLabel(
+    MessageBoxFlags::DialogButton button) const {
+  if (MessageBoxFlags::DIALOGBUTTON_OK == button)
     return l10n_util::GetString(IDS_FIRSTRUN_DLG_OK);
   // The other buttons get the default text.
   return std::wstring();
 }
 
-int FirstRunViewBase::GetDefaultImportItems() const {
+int FirstRunViewBase::GetImportItems() const {
   // It is best to avoid importing cookies because there is a bug that make
   // the process take way too much time among other issues. So for the time
   // being we say: TODO(CPU): Bug 1196875
-  return HISTORY | FAVORITES | PASSWORDS | SEARCH_ENGINES | HOME_PAGE;
-};
+  int items = import_items_;
+  if (!(dont_import_items_ & HISTORY))
+    items = items | HISTORY;
+  if (!(dont_import_items_ & FAVORITES))
+    items = items | FAVORITES;
+  if (!(dont_import_items_ & PASSWORDS))
+    items = items | PASSWORDS;
+  if (!(dont_import_items_ & SEARCH_ENGINES))
+    items = items | SEARCH_ENGINES;
+  if (!(dont_import_items_ & HOME_PAGE))
+    items = items | HOME_PAGE;
+  return items;
+}
 
 void FirstRunViewBase::DisableButtons() {
   window()->EnableClose(false);

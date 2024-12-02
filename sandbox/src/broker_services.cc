@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -119,8 +119,11 @@ void BrokerServicesBase::FreeResources(JobTracker* tracker) {
   if (NULL != tracker->policy) {
     BOOL res = ::TerminateJobObject(tracker->job, SBOX_ALL_OK);
     DCHECK(res);
+    // Closing the job causes the target process to be destroyed so this
+    // needs to happen before calling OnJobEmpty().
     res = ::CloseHandle(tracker->job);
     DCHECK(res);
+    // In OnJobEmpty() we don't actually use the job handle directly.
     tracker->policy->OnJobEmpty(tracker->job);
     tracker->policy->Release();
     tracker->policy = NULL;
@@ -256,7 +259,8 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   TargetProcess* target = new TargetProcess(initial_token, lockdown_token,
                                             job, thread_pool_);
 
-  std::wstring desktop = policy_base->GetDesktop();
+  std::wstring desktop = policy_base->GetAlternateDesktop();
+
   win_result = target->Create(exe_path, command_line,
                               desktop.empty() ? NULL : desktop.c_str(),
                               &process_info);

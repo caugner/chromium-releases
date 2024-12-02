@@ -7,8 +7,10 @@
 
 #include <string>
 
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/platform_thread.h"
 #include "base/process_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/common/chrome_constants.h"
@@ -22,7 +24,7 @@
 
 class MetricsServiceTest : public UITest {
  public:
-   MetricsServiceTest() : UITest(), window_(NULL) {
+   MetricsServiceTest() : UITest() {
      // We need to show the window so web content type tabs load.
      show_window_ = true;
    }
@@ -30,16 +32,16 @@ class MetricsServiceTest : public UITest {
   // Open a few tabs of random content
   void OpenTabs() {
     window_ = automation()->GetBrowserWindow(0);
-    ASSERT_TRUE(window_);
+    ASSERT_TRUE(window_.get());
 
-    std::wstring page1_path;
+    FilePath page1_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &page1_path));
-    file_util::AppendToPath(&page1_path, L"title2.html");
+    page1_path = page1_path.AppendASCII("title2.html");
     ASSERT_TRUE(window_->AppendTab(net::FilePathToFileURL(page1_path)));
 
-    std::wstring page2_path;
+    FilePath page2_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &page2_path));
-    file_util::AppendToPath(&page2_path, L"iframe.html");
+    page2_path = page2_path.AppendASCII("iframe.html");
     ASSERT_TRUE(window_->AppendTab(net::FilePathToFileURL(page2_path)));
   }
 
@@ -47,20 +49,20 @@ class MetricsServiceTest : public UITest {
   // that was saved by the app as it closed.  The caller takes ownership of the
   // returned PrefService object.
   PrefService* GetLocalState() {
-    FilePath local_state_path = FilePath::FromWStringHack(user_data_dir())
+    FilePath local_state_path = user_data_dir()
         .Append(chrome::kLocalStateFilename);
 
-    PrefService* local_state(new PrefService(local_state_path));
+    PrefService* local_state(new PrefService(local_state_path, NULL));
     return local_state;
   }
 
   virtual void TearDown() {
-    delete window_;
+    window_ = NULL;
     UITest::TearDown();
   }
 
  protected:
-  BrowserProxy* window_;
+  scoped_refptr<BrowserProxy> window_;
 };
 
 TEST_F(MetricsServiceTest, CloseRenderersNormally) {
@@ -86,16 +88,17 @@ TEST_F(MetricsServiceTest, CrashRenderers) {
   OpenTabs();
 
   // kill the process for one of the tabs
-  scoped_ptr<TabProxy> tab(window_->GetTab(1));
+  scoped_refptr<TabProxy> tab(window_->GetTab(1));
   ASSERT_TRUE(tab.get());
-  int process_id = 0;
-  ASSERT_TRUE(tab->GetProcessID(&process_id));
-  ASSERT_NE(0, process_id);
-  // Fake Access Violation.
-  base::KillProcessById(process_id, 0xc0000005, true);
+
+// Only windows implements the crash service for now.
+#if defined(OS_WIN)
+  expected_crashes_ = 1;
+#endif
+  tab->NavigateToURLAsync(GURL("about:crash"));
 
   // Give the browser a chance to notice the crashed tab.
-  Sleep(1000);
+  PlatformThread::Sleep(1000);
 
   QuitBrowser();
 
@@ -106,6 +109,6 @@ TEST_F(MetricsServiceTest, CrashRenderers) {
   local_state->RegisterIntegerPref(prefs::kStabilityRendererCrashCount, 0);
   EXPECT_TRUE(local_state->GetBoolean(prefs::kStabilityExitedCleanly));
   EXPECT_EQ(1, local_state->GetInteger(prefs::kStabilityLaunchCount));
-  EXPECT_EQ(3, local_state->GetInteger(prefs::kStabilityPageLoadCount));
+  EXPECT_EQ(4, local_state->GetInteger(prefs::kStabilityPageLoadCount));
   EXPECT_EQ(1, local_state->GetInteger(prefs::kStabilityRendererCrashCount));
 }

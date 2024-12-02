@@ -5,7 +5,9 @@
 #include "base/basictypes.h"
 #include "base/gfx/png_encoder.h"
 #include "base/logging.h"
-#include "skia/include/SkBitmap.h"
+#include "base/scoped_ptr.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkUnPreMultiply.h"
 
 extern "C" {
 #include "third_party/libpng/png.h"
@@ -197,9 +199,38 @@ bool PNGEncoder::Encode(const unsigned char* input, ColorFormat format,
 bool PNGEncoder::EncodeBGRASkBitmap(const SkBitmap& input,
                                     bool discard_transparency,
                                     std::vector<unsigned char>* output) {
-  SkAutoLockPixels input_lock(input);
-  DCHECK(input.empty() || input.bytesPerPixel() == 4);
-  return Encode(static_cast<unsigned char*>(input.getPixels()),
-                PNGEncoder::FORMAT_BGRA, input.width(), input.height(),
-                input.rowBytes(), discard_transparency, output);
+  static const int bbp = 4;
+
+  SkAutoLockPixels lock_input(input);
+  DCHECK(input.empty() || input.bytesPerPixel() == bbp);
+
+  // SkBitmaps are premultiplied, we need to unpremultiply them.
+  scoped_array<unsigned char> divided(
+      new unsigned char[input.width() * input.height() * bbp]);
+
+  int i = 0;
+  for (int y = 0; y < input.height(); y++) {
+    for (int x = 0; x < input.width(); x++) {
+      uint32 pixel = input.getAddr32(0, y)[x];
+
+      int alpha = SkColorGetA(pixel);
+      if (alpha != 0 && alpha != 255) {
+        SkColor unmultiplied = SkUnPreMultiply::PMColorToColor(pixel);
+        divided[i + 0] = SkColorGetR(unmultiplied);
+        divided[i + 1] = SkColorGetG(unmultiplied);
+        divided[i + 2] = SkColorGetB(unmultiplied);
+        divided[i + 3] = alpha;
+      } else {
+        divided[i + 0] = SkColorGetR(pixel);
+        divided[i + 1] = SkColorGetG(pixel);
+        divided[i + 2] = SkColorGetB(pixel);
+        divided[i + 3] = alpha;
+      }
+      i += bbp;
+    }
+  }
+
+  return Encode(divided.get(),
+                PNGEncoder::FORMAT_RGBA, input.width(), input.height(),
+                input.width() * bbp, discard_transparency, output);
 }

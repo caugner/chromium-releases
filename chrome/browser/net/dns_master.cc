@@ -10,6 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/histogram.h"
+#include "base/message_loop.h"
 #include "base/lock.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
@@ -19,24 +20,35 @@
 #include "net/base/host_resolver.h"
 #include "net/base/net_errors.h"
 
-namespace chrome_browser_net {
+using base::TimeDelta;
 
-// static
-const size_t DnsMaster::kMaxConcurrentLookups = 8;
+namespace chrome_browser_net {
 
 class DnsMaster::LookupRequest {
  public:
-  LookupRequest(DnsMaster* master, const std::string& hostname)
+  LookupRequest(DnsMaster* master,
+                net::HostResolver* host_resolver,
+                const std::string& hostname)
       : ALLOW_THIS_IN_INITIALIZER_LIST(
           net_callback_(this, &LookupRequest::OnLookupFinished)),
         master_(master),
-        hostname_(hostname) {
+        hostname_(hostname),
+        resolver_(host_resolver) {
   }
 
-  bool Start() {
-    const int result = resolver_.Resolve(hostname_, 80, &addresses_,
-                                         &net_callback_);
-    return (result == net::ERR_IO_PENDING);
+  // Return underlying network resolver status.
+  // net::OK ==> Host was found synchronously.
+  // net:ERR_IO_PENDING ==> Network will callback later with result.
+  // anything else ==> Host was not found synchronously.
+  int Start() {
+    // Port doesn't really matter.
+    net::HostResolver::RequestInfo resolve_info(hostname_, 80);
+
+    // Make a note that this is a speculative resolve request. This allows us
+    // to separate it from real navigations in the observer's callback, and
+    // lets the HostResolver know it can de-prioritize it.
+    resolve_info.set_is_speculative(true);
+    return resolver_.Resolve(resolve_info, &addresses_, &net_callback_);
   }
 
  private:
@@ -50,13 +62,22 @@ class DnsMaster::LookupRequest {
   DnsMaster* master_;  // Master which started us.
 
   const std::string hostname_;  // Hostname to resolve.
-  net::HostResolver resolver_;
+  net::SingleRequestHostResolver resolver_;
   net::AddressList addresses_;
 
   DISALLOW_COPY_AND_ASSIGN(LookupRequest);
 };
 
-DnsMaster::DnsMaster() : peak_pending_lookups_(0), shutdown_(false) {
+DnsMaster::DnsMaster(net::HostResolver* host_resolver,
+                     MessageLoop* host_resolver_loop,
+                     TimeDelta max_queue_delay,
+                     size_t max_concurrent)
+  : peak_pending_lookups_(0),
+    shutdown_(false),
+    max_concurrent_lookups_(max_concurrent),
+    max_queue_delay_(max_queue_delay),
+    host_resolver_(host_resolver),
+    host_resolver_loop_(host_resolver_loop) {
 }
 
 DnsMaster::~DnsMaster() {
@@ -79,6 +100,14 @@ void DnsMaster::ResolveList(const NameList& hostnames,
                             DnsHostInfo::ResolutionMotivation motivation) {
   AutoLock auto_lock(lock_);
 
+  // We need to run this on |host_resolver_loop_| since we may access
+  // |host_resolver_| which is not thread safe.
+  if (MessageLoop::current() != host_resolver_loop_) {
+    host_resolver_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
+        &DnsMaster::ResolveList, hostnames, motivation));
+    return;
+  }
+
   NameList::const_iterator it;
   for (it = hostnames.begin(); it < hostnames.end(); ++it)
     PreLockedResolve(*it, motivation);
@@ -91,6 +120,15 @@ void DnsMaster::Resolve(const std::string& hostname,
   if (0 == hostname.length())
     return;
   AutoLock auto_lock(lock_);
+
+  // We need to run this on |host_resolver_loop_| since we may access
+  // |host_resolver_| which is not thread safe.
+  if (MessageLoop::current() != host_resolver_loop_) {
+    host_resolver_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
+        &DnsMaster::Resolve, hostname, motivation));
+    return;
+  }
+
   PreLockedResolve(hostname, motivation);
 }
 
@@ -165,6 +203,15 @@ void DnsMaster::NonlinkNavigation(const GURL& referrer,
 
 void DnsMaster::NavigatingTo(const std::string& host_name) {
   AutoLock auto_lock(lock_);
+
+  // We need to run this on |host_resolver_loop_| since we may access
+  // |host_resolver_| which is not thread safe.
+  if (MessageLoop::current() != host_resolver_loop_) {
+    host_resolver_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
+        &DnsMaster::NavigatingTo, host_name));
+    return;
+  }
+
   Referrers::iterator it = referrers_.find(host_name);
   if (referrers_.end() == it)
     return;
@@ -307,7 +354,7 @@ void DnsMaster::GetHtmlInfo(std::string* output) {
     }
     if (!it->second.was_found())
       continue;  // Still being processed.
-    if (base::TimeDelta() != it->second.benefits_remaining()) {
+    if (TimeDelta() != it->second.benefits_remaining()) {
       network_hits.push_back(it->second);  // With no benefit yet.
       continue;
     }
@@ -342,7 +389,7 @@ DnsHostInfo* DnsMaster::PreLockedResolve(
     const std::string& hostname,
     DnsHostInfo::ResolutionMotivation motivation) {
   // DCHECK(We have the lock);
-  DCHECK(0 != hostname.length());
+  DCHECK_NE(0u, hostname.length());
 
   if (shutdown_)
     return NULL;
@@ -360,53 +407,87 @@ DnsHostInfo* DnsMaster::PreLockedResolve(
   }
 
   info->SetQueuedState(motivation);
-  name_buffer_.push(hostname);
-
+  work_queue_.Push(hostname, motivation);
   PreLockedScheduleLookups();
-
   return info;
 }
 
 void DnsMaster::PreLockedScheduleLookups() {
-  while (!name_buffer_.empty() &&
-         pending_lookups_.size() < kMaxConcurrentLookups) {
-    const std::string hostname(name_buffer_.front());
-    name_buffer_.pop();
+  // We need to run this on |host_resolver_loop_| since we may access
+  // |host_resolver_| which is not thread safe.
+  DCHECK_EQ(MessageLoop::current(), host_resolver_loop_);
 
+  while (!work_queue_.IsEmpty() &&
+         pending_lookups_.size() < max_concurrent_lookups_) {
+    const std::string hostname(work_queue_.Pop());
     DnsHostInfo* info = &results_[hostname];
     DCHECK(info->HasHostname(hostname));
     info->SetAssignedState();
 
-    LookupRequest* request = new LookupRequest(this, hostname);
-    if (request->Start()) {
+    if (PreLockedCongestionControlPerformed(info)) {
+      DCHECK(work_queue_.IsEmpty());
+      return;
+    }
+
+    LookupRequest* request = new LookupRequest(this, host_resolver_, hostname);
+    int status = request->Start();
+    if (status == net::ERR_IO_PENDING) {
+      // Will complete asynchronously.
       pending_lookups_.insert(request);
       peak_pending_lookups_ = std::max(peak_pending_lookups_,
                                        pending_lookups_.size());
     } else {
-      NOTREACHED();
+      // Completed synchronously (was already cached by HostResolver), or else
+      // there was (equivalently) some network error that prevents us from
+      // finding the name.  Status net::OK means it was "found."
+      PrelockedLookupFinished(request, hostname, status == net::OK);
       delete request;
     }
   }
 }
 
+bool DnsMaster::PreLockedCongestionControlPerformed(DnsHostInfo* info) {
+  // Note: queue_duration is ONLY valid after we go to assigned state.
+  if (info->queue_duration() < max_queue_delay_)
+    return false;
+  // We need to discard all entries in our queue, as we're keeping them waiting
+  // too long.  By doing this, we'll have a chance to quickly service urgent
+  // resolutions, and not have a bogged down system.
+  while (true) {
+    info->RemoveFromQueue();
+    if (work_queue_.IsEmpty())
+      break;
+    info = &results_[work_queue_.Pop()];
+    info->SetAssignedState();
+  }
+  return true;
+}
+
 void DnsMaster::OnLookupFinished(LookupRequest* request,
                                  const std::string& hostname, bool found) {
+  DCHECK_EQ(MessageLoop::current(), host_resolver_loop_);
+
   AutoLock auto_lock(lock_);  // For map access (changing info values).
+  PrelockedLookupFinished(request, hostname, found);
+  pending_lookups_.erase(request);
+  delete request;
+
+  PreLockedScheduleLookups();
+}
+
+void DnsMaster::PrelockedLookupFinished(LookupRequest* request,
+                                        const std::string& hostname,
+                                        bool found) {
   DnsHostInfo* info = &results_[hostname];
   DCHECK(info->HasHostname(hostname));
-  if (info->is_marked_to_delete())
+  if (info->is_marked_to_delete()) {
     results_.erase(hostname);
-  else {
+  } else {
     if (found)
       info->SetFoundState();
     else
       info->SetNoSuchNameState();
   }
-
-  pending_lookups_.erase(request);
-  delete request;
-
-  PreLockedScheduleLookups();
 }
 
 void DnsMaster::DiscardAllResults() {
@@ -418,10 +499,9 @@ void DnsMaster::DiscardAllResults() {
 
 
   // Try to delete anything in our work queue.
-  while (!name_buffer_.empty()) {
+  while (!work_queue_.IsEmpty()) {
     // Emulate processing cycle as though host was not found.
-    std::string hostname = name_buffer_.front();
-    name_buffer_.pop();
+    std::string hostname = work_queue_.Pop();
     DnsHostInfo* info = &results_[hostname];
     DCHECK(info->HasHostname(hostname));
     info->SetAssignedState();
@@ -442,7 +522,7 @@ void DnsMaster::DiscardAllResults() {
       assignees[hostname] = *info;
     }
   }
-  DCHECK(assignees.size() <= kMaxConcurrentLookups);
+  DCHECK(assignees.size() <= max_concurrent_lookups_);
   results_.clear();
   // Put back in the names being worked on.
   for (Results::iterator it = assignees.begin(); assignees.end() != it; ++it) {
@@ -495,6 +575,46 @@ void DnsMaster::DeserializeReferrers(const ListValue& referral_list) {
       continue;
     referrers_[motivating_referrer].Deserialize(*subresource_list);
   }
+}
+
+
+//------------------------------------------------------------------------------
+
+DnsMaster::HostNameQueue::HostNameQueue() {
+}
+
+DnsMaster::HostNameQueue::~HostNameQueue() {
+}
+
+void DnsMaster::HostNameQueue::Push(const std::string& hostname,
+    DnsHostInfo::ResolutionMotivation motivation) {
+  switch (motivation) {
+    case DnsHostInfo::STATIC_REFERAL_MOTIVATED:
+    case DnsHostInfo::LEARNED_REFERAL_MOTIVATED:
+    case DnsHostInfo::MOUSE_OVER_MOTIVATED:
+      rush_queue_.push(hostname);
+      break;
+
+    default:
+      background_queue_.push(hostname);
+      break;
+  }
+}
+
+bool DnsMaster::HostNameQueue::IsEmpty() const {
+  return rush_queue_.empty() && background_queue_.empty();
+}
+
+std::string DnsMaster::HostNameQueue::Pop() {
+  DCHECK(!IsEmpty());
+  if (!rush_queue_.empty()) {
+    std::string hostname(rush_queue_.front());
+    rush_queue_.pop();
+    return hostname;
+  }
+  std::string hostname(background_queue_.front());
+  background_queue_.pop();
+  return hostname;
 }
 
 }  // namespace chrome_browser_net

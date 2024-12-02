@@ -4,7 +4,6 @@
 //
 // Unit tests for the SafeBrowsing storage system.
 
-#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -15,16 +14,17 @@
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
+#include "chrome/test/file_test_utils.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
 using base::Time;
 
-static const FilePath::CharType kBloomSuffix[] =
-    FILE_PATH_LITERAL(" Bloom");
-static const FilePath::CharType kFilterSuffix[] =
-    FILE_PATH_LITERAL(" Filter");
+static const FilePath::CharType kBloomSuffix[] =  FILE_PATH_LITERAL(" Bloom");
+static const FilePath::CharType kFilterSuffix[] = FILE_PATH_LITERAL(" Filter");
+static const FilePath::CharType kFolderPrefix[] =
+    FILE_PATH_LITERAL("SafeBrowsingTestDatabase");
 
 namespace {
   SBPrefix Sha256Prefix(const std::string& str) {
@@ -59,16 +59,22 @@ namespace {
     DelChunk(db, list, chunk_id, true);
   }
 
+  // Creates a new test directory.
+  FilePath CreateTestDirectory() {
+    FilePath temp_dir;
+    EXPECT_TRUE(file_util::CreateNewTempDirectory(kFolderPrefix, &temp_dir));
+    return temp_dir;
+  }
+
   // Common database test set up code.
-  FilePath GetTestDatabaseName() {
-    FilePath filename;
-    PathService::Get(base::DIR_TEMP, &filename);
+  FilePath GetTestDatabaseName(const FilePath& test_dir) {
+    FilePath filename(test_dir);
     filename = filename.AppendASCII("SafeBrowsingTestDatabase");
     return filename;
   }
 
-  SafeBrowsingDatabase* SetupTestDatabase() {
-    FilePath filename = GetTestDatabaseName();
+  SafeBrowsingDatabase* SetupTestDatabase(const FilePath& test_dir) {
+    FilePath filename = GetTestDatabaseName(test_dir);
 
     // In case it existed from a previous run.
     file_util::Delete(FilePath(filename.value() + kBloomSuffix), false);
@@ -103,7 +109,8 @@ class SafeBrowsingDatabasePlatformTest : public PlatformTest {
 
 // Tests retrieving list name information.
 TEST_F(SafeBrowsingDatabasePlatformTest, ListName) {
-  SafeBrowsingDatabase* database = SetupTestDatabase();
+  FileAutoDeleter file_deleter(CreateTestDirectory());
+  SafeBrowsingDatabase* database = SetupTestDatabase(file_deleter.path());
 
   // Insert some malware add chunks.
   SBChunkHost host;
@@ -243,7 +250,8 @@ TEST_F(SafeBrowsingDatabasePlatformTest, ListName) {
 
 // Checks database reading and writing.
 TEST(SafeBrowsingDatabase, Database) {
-  SafeBrowsingDatabase* database = SetupTestDatabase();
+  FileAutoDeleter file_deleter(CreateTestDirectory());
+  SafeBrowsingDatabase* database = SetupTestDatabase(file_deleter.path());
 
   // Add a simple chunk with one hostkey.
   SBChunkHost host;
@@ -580,7 +588,8 @@ TEST(SafeBrowsingDatabase, Database) {
 
 // Test adding zero length chunks to the database.
 TEST(SafeBrowsingDatabase, ZeroSizeChunk) {
-  SafeBrowsingDatabase* database = SetupTestDatabase();
+  FileAutoDeleter file_deleter(CreateTestDirectory());
+  SafeBrowsingDatabase* database = SetupTestDatabase(file_deleter.path());
 
   // Populate with a couple of normal chunks.
   SBChunkHost host;
@@ -760,7 +769,8 @@ void PopulateDatabaseForCacheTest(SafeBrowsingDatabase* database) {
 }
 
 TEST(SafeBrowsingDatabase, HashCaching) {
-  SafeBrowsingDatabase* database = SetupTestDatabase();
+  FileAutoDeleter file_deleter(CreateTestDirectory());
+  SafeBrowsingDatabase* database = SetupTestDatabase(file_deleter.path());
 
   PopulateDatabaseForCacheTest(database);
 
@@ -905,6 +915,19 @@ TEST(SafeBrowsingDatabase, HashCaching) {
   // Prefix miss cache should be cleared.
   EXPECT_EQ(database->prefix_miss_cache()->size(), 0U);
 
+  // Cache a GetHash miss for a particular prefix, and even though the prefix is
+  // in the database, it is flagged as a miss so looking up the associated URL
+  // will not succeed.
+  prefixes.clear();
+  full_hashes.clear();
+  prefix_misses.clear();
+  empty_full_hash.clear();
+  prefix_misses.push_back(Sha256Prefix("www.evil.com/phishing.html"));
+  database->CacheHashResults(prefix_misses, empty_full_hash);
+  EXPECT_FALSE(database->ContainsUrl(GURL("http://www.evil.com/phishing.html"),
+                                     &listname, &prefixes,
+                                     &full_hashes, Time::Now()));
+
   lists.clear();
   prefixes.clear();
   full_hashes.clear();
@@ -1016,15 +1039,15 @@ void PrintStat(const char* name) {
 }
 
 std::wstring GetFullSBDataPath(const std::wstring& path) {
-  std::wstring full_path;
+  FilePath full_path;
   CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &full_path));
-  file_util::AppendToPath(&full_path, L"chrome");
-  file_util::AppendToPath(&full_path, L"test");
-  file_util::AppendToPath(&full_path, L"data");
-  file_util::AppendToPath(&full_path, L"safe_browsing");
-  file_util::AppendToPath(&full_path, path);
+  full_path = full_path.AppendASCII("chrome");
+  full_path = full_path.AppendASCII("test");
+  full_path = full_path.AppendASCII("data");
+  full_path = full_path.AppendASCII("safe_browsing");
+  full_path = full_path.Append(FilePath::FromWStringHack(path));
   CHECK(file_util::PathExists(full_path));
-  return full_path;
+  return full_path.ToWStringHack();
 }
 
 struct ChunksInfo {

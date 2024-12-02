@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,8 @@
 #include "chrome/browser/net/resolve_proxy_msg_helper.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/common/child_process_host.h"
-#include "webkit/glue/webplugin.h"
+#include "ipc/ipc_channel_handle.h"
+#include "webkit/glue/webplugininfo.h"
 
 class URLRequestContext;
 struct ViewHostMsg_Resource_Request;
@@ -65,7 +66,7 @@ class PluginProcessHost : public ChildProcessHost,
   // Sends the reply to an open channel request to the renderer with the given
   // channel name.
   static void ReplyToRenderer(ResourceMessageFilter* renderer_message_filter,
-                              const std::wstring& channel,
+                              const IPC::ChannelHandle& channel,
                               const FilePath& plugin_path,
                               IPC::Message* reply_msg);
 
@@ -74,9 +75,6 @@ class PluginProcessHost : public ChildProcessHost,
   // that reply back to the plugin that requested the dialog.
   void OnModalDialogResponse(const std::string& json_retval,
                              IPC::Message* sync_result);
-
-  // Shuts down the current plugin process instance.
-  void Shutdown();
 
   const WebPluginInfo& info() const { return info_; }
 
@@ -99,20 +97,26 @@ class PluginProcessHost : public ChildProcessHost,
                             const std::string& mime_type,
                             IPC::Message* reply_msg);
   // Message handlers.
-  void OnChannelCreated(const std::wstring& channel_name);
-  void OnDownloadUrl(const std::string& url, int source_pid,
-                     gfx::NativeWindow caller_window);
+  void OnChannelCreated(const IPC::ChannelHandle& channel_handle);
   void OnGetPluginFinderUrl(std::string* plugin_finder_url);
   void OnGetCookies(uint32 request_context, const GURL& url,
                     std::string* cookies);
+  void OnAccessFiles(int process_id, const std::vector<std::string>& files,
+                     bool* allowed);
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
-  void OnPluginShutdownRequest();
   void OnPluginMessage(const std::vector<uint8>& data);
 
 #if defined(OS_WIN)
-  void OnCreateWindow(HWND parent, IPC::Message* reply_msg);
-  void OnDestroyWindow(HWND window);
+  void OnPluginWindowDestroyed(HWND window, HWND parent);
+  void OnDownloadUrl(const std::string& url, int source_pid,
+                     gfx::NativeWindow caller_window);
 #endif
+
+#if defined(OS_LINUX)
+  void OnMapNativeViewId(gfx::NativeViewId id, gfx::PluginWindowHandle* output);
+#endif
+
+  virtual bool CanShutdown() { return sent_requests_.empty(); }
 
   struct ChannelRequest {
     ChannelRequest(ResourceMessageFilter* renderer_message_filter,

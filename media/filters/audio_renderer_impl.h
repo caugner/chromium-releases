@@ -9,6 +9,11 @@
 // interfaces to open an audio device.  Although it cannot be used in the
 // sandbox, it serves as a reference implementation and can be used in other
 // applications such as the test player.
+//
+// Note: THIS IS NOT THE AUDIO RENDERER USED IN CHROME.
+//
+// See src/chrome/renderer/media/audio_renderer_impl.h for chrome's
+// implementation.
 
 #include <deque>
 
@@ -29,7 +34,7 @@ class AudioRendererImpl : public AudioRendererBase,
     return new FilterFactoryImpl0<AudioRendererImpl>();
   }
 
-  static bool IsMediaFormatSupported(const MediaFormat* media_format);
+  static bool IsMediaFormatSupported(const MediaFormat& media_format);
 
   // MediaFilter implementation.
   virtual void SetPlaybackRate(float playback_rate);
@@ -38,7 +43,8 @@ class AudioRendererImpl : public AudioRendererBase,
   virtual void SetVolume(float volume);
 
   // AudioSourceCallback implementation.
-  virtual size_t OnMoreData(AudioOutputStream* stream, void* dest, size_t len);
+  virtual size_t OnMoreData(AudioOutputStream* stream, void* dest,
+                            size_t len, int pending_bytes);
   virtual void OnClose(AudioOutputStream* stream);
   virtual void OnError(AudioOutputStream* stream, int code);
 
@@ -49,12 +55,13 @@ class AudioRendererImpl : public AudioRendererBase,
   virtual ~AudioRendererImpl();
 
   // AudioRendererBase implementation.
-  virtual bool OnInitialize(const MediaFormat* media_format);
+  virtual bool OnInitialize(const MediaFormat& media_format);
   virtual void OnStop();
 
  private:
   // Audio output stream device.
   AudioOutputStream* stream_;
+  int bytes_per_second_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererImpl);
 };

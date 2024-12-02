@@ -120,17 +120,27 @@ class NotificationType {
     // object are provided.
     RESOURCE_RESPONSE_STARTED,
 
-    // The response to a resource request has completed.  The source will be a
-    // Source<NavigationController> corresponding to the tab in which the
-    // request was issued.  Details in the form of a ResourceRequestDetails
-    // object are provided.
-    RESOURCE_RESPONSE_COMPLETED,
-
     // A redirect was received while requesting a resource.  The source will be
     // a Source<NavigationController> corresponding to the tab in which the
     // request was issued.  Details in the form of a ResourceRedirectDetails
     // are provided.
     RESOURCE_RECEIVED_REDIRECT,
+
+    // SSL ---------------------------------------------------------------------
+
+    // Updating the SSL security indicators (the lock icon and such) proceeds
+    // in two phases:
+    //
+    // 1) An SSLManager changes the SSLHostState (which hangs off the profile
+    //    object).  When this happens, the SSLManager broadcasts an
+    //    SSL_INTERNAL_STATE_CHANGED notification.
+    //
+    // 2) The SSLManager for each tab receives this notification and might or
+    //    might not update the navigation entry for its tab, depending on
+    //    whether the change in SSLHostState affects that tab.  If the
+    //    SSLManager does change the navigation entry, then the SSLManager
+    //    broadcasts an SSL_VISIBLE_STATE_CHANGED notification to the user
+    //    interface can redraw properly.
 
     // The SSL state of a page has changed in some visible way.  For example,
     // if an insecure resource is loaded on a secure page.  Note that a
@@ -153,9 +163,11 @@ class NotificationType {
     // change.  There are no details.
     SSL_INTERNAL_STATE_CHANGED,
 
-    // Download start and stop notifications. Stop notifications can occur on
-    // both normal completion or via a cancel operation.
-    DOWNLOAD_START, DOWNLOAD_STOP,
+    // Lets resource handlers and other interested observers know when the
+    // message filter is being deleted and can no longer be used.  This will
+    // also get sent if the renderer crashes (and in that case, it'll be sent
+    // twice).
+    RESOURCE_MESSAGE_FILTER_SHUTDOWN,
 
     // Views -------------------------------------------------------------------
 
@@ -188,6 +200,31 @@ class NotificationType {
     // that was closed, no details are expected.
     WINDOW_CLOSED,
 
+    // Sent when an info bubble has been created but not yet shown. The source
+    // is the InfoBubble.
+    INFO_BUBBLE_CREATED,
+
+    // Sent after a call to RenderViewHost::DeterminePageLanguage. The details
+    // are Details<std::string> and the source is Source<RenderViewHost>.
+    TAB_LANGUAGE_DETERMINED,
+
+    // The user has changed the browser theme.
+    BROWSER_THEME_CHANGED,
+
+    // Fired when the active window changes.  This is currently only used on
+    // Linux.
+    ACTIVE_WINDOW_CHANGED,
+
+    // Application-modal dialogs -----------------------------------------------
+
+    // Sent after an application-modal dialog has been shown. The source
+    // is the dialog.
+    APP_MODAL_DIALOG_SHOWN,
+
+    // Sent after an application-modal dialog has been closed. The source
+    // is the dialog.
+    APP_MODAL_DIALOG_CLOSED,
+
     // Tabs --------------------------------------------------------------------
 
     // This notification is sent after a tab has been appended to the
@@ -207,23 +244,23 @@ class NotificationType {
     TAB_CLOSED,
 
     // This notification is sent when a render view host has connected to a
-    // renderer process. The source is a Source<WebContents> with a pointer to
-    // the WebContents.  A WEB_CONTENTS_DISCONNECTED notification is
+    // renderer process. The source is a Source<TabContents> with a pointer to
+    // the TabContents.  A TAB_CONTENTS_DISCONNECTED notification is
     // guaranteed before the source pointer becomes junk.  No details are
     // expected.
-    WEB_CONTENTS_CONNECTED,
+    TAB_CONTENTS_CONNECTED,
 
-    // This notification is sent when a WebContents swaps its render view host
+    // This notification is sent when a TabContents swaps its render view host
     // with another one, possibly changing processes. The source is a
-    // Source<WebContents> with a pointer to the WebContents.  A
-    // WEB_CONTENTS_DISCONNECTED notification is guaranteed before the
+    // Source<TabContents> with a pointer to the TabContents.  A
+    // TAB_CONTENTS_DISCONNECTED notification is guaranteed before the
     // source pointer becomes junk.  No details are expected.
-    WEB_CONTENTS_SWAPPED,
+    TAB_CONTENTS_SWAPPED,
 
-    // This message is sent after a WebContents is disconnected from the
-    // renderer process.  The source is a Source<WebContents> with a pointer to
-    // the WebContents (the pointer is usable).  No details are expected.
-    WEB_CONTENTS_DISCONNECTED,
+    // This message is sent after a TabContents is disconnected from the
+    // renderer process.  The source is a Source<TabContents> with a pointer to
+    // the TabContents (the pointer is usable).  No details are expected.
+    TAB_CONTENTS_DISCONNECTED,
 
     // This message is sent when a new InfoBar has been added to a TabContents.
     // The source is a Source<TabContents> with a pointer to the TabContents
@@ -238,6 +275,13 @@ class NotificationType {
     // Details<InfoBarDelegate> with a pointer to an object implementing the
     // InfoBarDelegate interface for the InfoBar that was removed.
     TAB_CONTENTS_INFOBAR_REMOVED,
+
+    // This message is sent when an InfoBar is replacing another infobar in a
+    // TabContents. The source is a Source<TabContents> with a pointer to the
+    // TabContents the InfoBar was removed from. The details is a
+    // Details<std::pair<InfoBarDelegate*, InfoBarDelegate*> > with a pointer
+    // to the old and new InfoBarDelegates, respectively.
+    TAB_CONTENTS_INFOBAR_REPLACED,
 
     // This is sent when an externally hosted tab is created. The details
     // contain the ExternalTabContainer that contains the tab
@@ -264,6 +308,12 @@ class NotificationType {
     // Source<TabContents>.
     TAB_CONTENTS_DESTROYED,
 
+    // A RenderViewHost was created for a TabContents. The source is the
+    // associated TabContents, and the details is the RenderViewHost
+    // pointer.
+    RENDER_VIEW_HOST_CREATED_FOR_TAB,
+
+
     // Stuff inside the tabs ---------------------------------------------------
 
     // This message is sent after a constrained window has been closed.  The
@@ -272,11 +322,16 @@ class NotificationType {
     // details are expected.
     CWINDOW_CLOSED,
 
-    // Indicates that a render process has terminated. The source will be the
-    // RenderProcessHost that corresponds to the process, and the details is a
-    // bool specifying whether the termination was expected, i.e. if false it
-    // means the process crashed.
+    // Indicates that a RenderProcessHost is destructing. The source will be the
+    // RenderProcessHost that corresponds to the process.
     RENDERER_PROCESS_TERMINATED,
+
+    // Indicates that a render process was closed (meaning it exited, but the
+    // RenderProcessHost might be reused).  The source will be the corresponding
+    // RenderProcessHost.  The details will be a bool which is true if the
+    // process crashed.  This may get sent along with
+    // RENDERER_PROCESS_TERMINATED.
+    RENDERER_PROCESS_CLOSED,
 
     // Indicates that a render process has become unresponsive for a period of
     // time. The source will be the RenderWidgetHost that corresponds to the
@@ -290,7 +345,7 @@ class NotificationType {
     RENDERER_PROCESS_IN_SBOX,
 
     // This is sent to notify that the RenderViewHost displayed in a
-    // WebContents has changed.  Source is the WebContents for which the change
+    // TabContents has changed.  Source is the TabContents for which the change
     // happened, details is the previous RenderViewHost (can be NULL when the
     // first RenderViewHost is set).
     RENDER_VIEW_HOST_CHANGED,
@@ -299,11 +354,15 @@ class NotificationType {
     // the RenderWidgetHost, the details are not used.
     RENDER_WIDGET_HOST_DESTROYED,
 
-    // Notification from WebContents that we have received a response from the
-    // renderer after using the dom inspector.
-    DOM_INSPECT_ELEMENT_RESPONSE,
+    // Sent from ~RenderViewHost. The source is the RenderViewHost.
+    RENDER_VIEW_HOST_DELETED,
 
-    // Notification from WebContents that we have received a response from the
+    // Indicates a RenderWidgetHost has been hidden or restored. The source is
+    // the RWH whose visibility changed, the details is a bool set to true if
+    // the new state is "visible."
+    RENDER_WIDGET_VISIBILITY_CHANGED,
+
+    // Notification from TabContents that we have received a response from the
     // renderer in response to a dom automation controller action.
     DOM_OPERATION_RESPONSE,
 
@@ -313,7 +372,7 @@ class NotificationType {
 
     // This notification is sent when the result of a find-in-page search is
     // available with the browser process. The source is a Source<TabContents>
-    // with a pointer to the WebContents. Details encompass a
+    // with a pointer to the TabContents. Details encompass a
     // FindNotificationDetail object that tells whether the match was found or
     // not found.
     FIND_RESULT_AVAILABLE,
@@ -466,11 +525,14 @@ class NotificationType {
 
     // Sent by the autocomplete controller at least once per query, each time
     // new matches are available, subject to rate-limiting/coalescing to reduce
-    // the number of updates.  There are no details.
+    // the number of updates.  The details hold the AutocompleteResult that
+    // observers should use if they want to see the updated matches.
     AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED,
 
     // Sent by the autocomplete controller once per query, immediately after
-    // synchronous matches become available.  There are no details.
+    // synchronous matches become available.  The details hold the
+    // AutocompleteResult that observers should use if they want to see the
+    // synchronous matches.
     AUTOCOMPLETE_CONTROLLER_SYNCHRONOUS_MATCHES_AVAILABLE,
 
     // This is sent when an item of the Omnibox popup is selected. The source
@@ -486,12 +548,6 @@ class NotificationType {
     GOOGLE_URL_UPDATED,
 
     // Printing ----------------------------------------------------------------
-
-    // Notification from a PrintedDocument that it has been updated. It may be
-    // that a printed page has just been generated or that the document's
-    // number of pages has been calculated. Details is the new page or NULL if
-    // only the number of pages in the document has been updated.
-    PRINTED_DOCUMENT_UPDATED,
 
     // Notification from PrintJob that an event occured. It can be that a page
     // finished printing or that the print job failed. Details is
@@ -518,20 +574,57 @@ class NotificationType {
 
     // Sent when there are new user scripts available.  The details are a
     // pointer to SharedMemory containing the new scripts.
-    USER_SCRIPTS_LOADED,
+    USER_SCRIPTS_UPDATED,
 
     // Extensions --------------------------------------------------------------
+
+    // Sent when the known installed extensions have all been loaded.  In
+    // testing scenarios this can happen multiple times if extensions are
+    // unloaded and reloaded.
+    EXTENSIONS_READY,
 
     // Sent when new extensions are loaded. The details are an ExtensionList*.
     EXTENSIONS_LOADED,
 
-    // Sent when new extensions are installed. The details are a FilePath.
+    // Sent when a theme is ready to be installed, so we can alert the user.
+    EXTENSION_READY_FOR_INSTALL,
+
+    // Sent on ExtensionOverinstallAttempted when no theme is detected.
+    NO_THEME_DETECTED,
+
+    // Sent when a new theme is installed. The details are an Extension.
+    THEME_INSTALLED,
+
+    // Sent when new extensions are installed. The details are an Extension.
     EXTENSION_INSTALLED,
 
-    // Debugging ---------------------------------------------------------------
+    // Sent when an extension is unloaded. This happens when an extension is
+    // uninstalled. When we add a disable feature, it will also happen then.
+    // The details are an Extension.  Note that when this notification is sent,
+    // ExtensionsService has already removed the extension from its internal
+    // state.
+    EXTENSION_UNLOADED,
 
-    // Sent from ~RenderViewHost. The source is the RenderViewHost.
-    RENDER_VIEW_HOST_DELETED,
+    // Sent after a new ExtensionHost is created. The details are
+    // an ExtensionHost*.
+    EXTENSION_HOST_CREATED,
+
+    // Sent before an ExtensionHost is destroyed. The details are
+    // an ExtensionHost*.
+    EXTENSION_HOST_DESTROYED,
+
+    // Sent after an extension render process is created and fully functional.
+    // The details are an ExtensionHost*.
+    EXTENSION_PROCESS_CREATED,
+
+    // Sent when extension render process crashes. The details are
+    // an ExtensionHost*.
+    EXTENSION_PROCESS_CRASHED,
+
+    // Sent when the contents or order of toolstrips in the shelf model change.
+    EXTENSION_SHELF_MODEL_CHANGED,
+
+    // Debugging ---------------------------------------------------------------
 
     // Count (must be last) ----------------------------------------------------
     // Used to determine the number of notification types.  Not valid as

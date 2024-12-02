@@ -12,7 +12,6 @@
 #include "base/string16.h"
 #include "base/task.h"
 #include "chrome/common/page_transition_types.h"
-#include "webkit/glue/window_open_disposition.h"
 
 class DictionaryValue;
 class DOMMessageHandler;
@@ -20,20 +19,31 @@ class GURL;
 class Profile;
 class RenderViewHost;
 class Value;
-class WebContents;
+class TabContents;
+class ThemeProvider;
 
 // A DOMUI sets up the datasources and message handlers for a given HTML-based
 // UI. It is contained by a DOMUIManager.
 class DOMUI {
  public:
-  explicit DOMUI(WebContents* contents);
+  explicit DOMUI(TabContents* contents);
   virtual ~DOMUI();
 
+  // Called by RenderViewHost when the RenderView is first created. This is
+  // *not* called for every page load because in some cases
+  // RenderViewHostManager will reuse RenderView instances. In those cases,
+  // RenderViewReused will be called instead.
   virtual void RenderViewCreated(RenderViewHost* render_view_host) {}
 
+  // Called by RenderViewHostManager when a RenderView is reused to display a
+  // page.
+  virtual void RenderViewReused(RenderViewHost* render_view_host) {}
+
   // Called from DOMUIContents.
-  void ProcessDOMUIMessage(const std::string& message,
-                           const std::string& content);
+  virtual void ProcessDOMUIMessage(const std::string& message,
+                                   const std::string& content,
+                                   int request_id,
+                                   bool has_callback);
 
   // Used by DOMMessageHandlers.
   typedef Callback1<const Value*>::Type MessageCallback;
@@ -44,7 +54,7 @@ class DOMUI {
   bool hide_favicon() const {
     return hide_favicon_;
   }
-  
+
   // Returns true if the bookmark bar should be forced to being visible,
   // overriding the user's preference.
   bool force_bookmark_bar_visible() const {
@@ -77,6 +87,10 @@ class DOMUI {
     return link_transition_type_;
   }
 
+  const int bindings() const {
+    return bindings_;
+  }
+
   // Call a Javascript function by sending its name and arguments down to
   // the renderer.  This is asynchronous; there's no way to get the result
   // of the call, and should be thought of more like sending a message to
@@ -89,7 +103,9 @@ class DOMUI {
                               const Value& arg1,
                               const Value& arg2);
 
-  WebContents* web_contents() { return web_contents_; }
+  ThemeProvider* GetThemeProvider() const;
+
+  TabContents* tab_contents() { return tab_contents_; }
 
   Profile* GetProfile();
 
@@ -104,13 +120,15 @@ class DOMUI {
   bool should_hide_url_;
   string16 overridden_title_;  // Defaults to empty string.
   PageTransition::Type link_transition_type_;  // Defaults to LINK.
+  int bindings_;  // The bindings from BindingsPolicy that should be enabled for
+                  // this page.
 
  private:
   // Execute a string of raw Javascript on the page.
   void ExecuteJavascript(const std::wstring& javascript);
 
-  // Non-owning pointer to the WebContents this DOMUI is associated with.
-  WebContents* web_contents_;
+  // Non-owning pointer to the TabContents this DOMUI is associated with.
+  TabContents* tab_contents_;
 
   // The DOMMessageHandlers we own.
   std::vector<DOMMessageHandler*> handlers_;
@@ -122,14 +140,18 @@ class DOMUI {
   DISALLOW_COPY_AND_ASSIGN(DOMUI);
 };
 
-// Messages sent from the DOM are forwarded via the DOMUIContents to handler
-// classes. These objects are owned by DOMUIHost and destroyed when the
+// Messages sent from the DOM are forwarded via the DOMUI to handler
+// classes. These objects are owned by DOMUI and destroyed when the
 // host is destroyed.
 class DOMMessageHandler {
  public:
-  explicit DOMMessageHandler(DOMUI* dom_ui);
+  DOMMessageHandler() : dom_ui_(NULL) {}
   virtual ~DOMMessageHandler() {};
 
+  // Attaches |this| to |dom_ui| in order to handle messages from it.  Declared
+  // virtual so that subclasses can do special init work as soon as the dom_ui
+  // is provided.  Returns |this| for convenience.
+  virtual DOMMessageHandler* Attach(DOMUI* dom_ui);
  protected:
   // Adds "url" and "title" keys on incoming dictionary, setting title
   // as the url as a fallback on empty title.
@@ -137,13 +159,16 @@ class DOMMessageHandler {
                              std::wstring title,
                              const GURL& gurl);
 
+  // This is where subclasses specify which messages they'd like to handle.
+  virtual void RegisterMessages() = 0;
+
   // Extract an integer value from a Value.
   bool ExtractIntegerValue(const Value* value, int* out_int);
 
   // Extract a string value from a Value.
   std::wstring ExtractStringValue(const Value* value);
 
-  DOMUI* const dom_ui_;
+  DOMUI* dom_ui_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DOMMessageHandler);

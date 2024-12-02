@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,6 +78,9 @@ const wchar_t kAcceptLanguages[] = L"intl.accept_languages";
 // stored in non-translatable part of the resource bundle.
 const wchar_t kStaticEncodings[] = L"intl.static_encodings";
 
+// The list of hostnames for which we whitelist popups (rather than blocking).
+const wchar_t kPopupWhitelistedHosts[] = L"profile.popup_whitelisted_sites";
+
 // WebKit preferences.
 // A boolean flag to indicate whether WebKit standard font family is
 // serif or sans-serif. We don't have a UI for setting standard family.
@@ -112,8 +115,8 @@ const wchar_t kWebKitPluginsEnabled[] = L"webkit.webprefs.plugins_enabled";
 const wchar_t kWebKitDomPasteEnabled[] = L"webkit.webprefs.dom_paste_enabled";
 const wchar_t kWebKitShrinksStandaloneImagesToFit[] =
     L"webkit.webprefs.shrinks_standalone_images_to_fit";
-const wchar_t kWebKitDeveloperExtrasEnabled[] =
-    L"webkit.webprefs.developer_extras_enabled";
+const wchar_t kWebKitInspectorSettings[] =
+    L"webkit.webprefs.inspector_settings";
 const wchar_t kWebKitUsesUniversalDetector[] =
     L"webkit.webprefs.uses_universal_detector";
 const wchar_t kWebKitTextAreasAreResizable[] =
@@ -170,10 +173,6 @@ const wchar_t kDefaultSearchProviderName[] = L"default_search_provider.name";
 // The id of the default search provider.
 const wchar_t kDefaultSearchProviderID[] = L"default_search_provider.id";
 
-// Boolean of whether or not popups should be completely blocked (true), or
-// just opened "minimized" (default, false).
-const wchar_t kBlockPopups[] = L"browser.block_popups";
-
 // Boolean which specifies whether we should ask the user if we should download
 // a file (true) or just download it automatically.
 const wchar_t kPromptForDownload[] = L"download.prompt_for_download";
@@ -200,6 +199,11 @@ const wchar_t kIpcDisabledMessages[] = L"ipc_log_disabled_messages";
 // A boolean pref set to true if a Home button to open the Home pages should be
 // visible on the toolbar.
 const wchar_t kShowHomeButton[] = L"browser.show_home_button";
+
+// A boolean pref set to true if the Page and Options menu buttons should be
+// visible on the toolbar. This is only used for Mac where the default is to
+// have these menu in the main menubar, not as buttons on the toolbar.
+const wchar_t kShowPageOptionsButtons[] = L"browser.show_page_options_buttons";
 
 // A string value which saves short list of recently user selected encodings
 // separated with comma punctuation mark.
@@ -234,6 +238,40 @@ const wchar_t kBookmarkManagerSplitLocation[] =
 
 // Boolean pref to define the default values for using spellchecker.
 const wchar_t kEnableSpellCheck[] = L"browser.enable_spellchecking";
+
+// Boolean pref to define the default values for using auto spell correct.
+const wchar_t kEnableAutoSpellCorrect[] = L"browser.enable_autospellcorrect";
+
+// String pref to define the default values for print overlays.
+const wchar_t kPrintingPageHeaderLeft[] = L"printing.page.header.left";
+const wchar_t kPrintingPageHeaderCenter[] = L"printing.page.header.center";
+const wchar_t kPrintingPageHeaderRight[] = L"printing.page.header.right";
+const wchar_t kPrintingPageFooterLeft[] = L"printing.page.footer.left";
+const wchar_t kPrintingPageFooterCenter[] = L"printing.page.footer.center";
+const wchar_t kPrintingPageFooterRight[] = L"printing.page.footer.right";
+#if defined(OS_LINUX)
+// GTK specific preference on whether we should match the system GTK theme.
+const wchar_t kUsesSystemTheme[] = L"extensions.theme.use_system";
+#endif
+const wchar_t kCurrentThemeID[] = L"extensions.theme.id";
+const wchar_t kCurrentThemeImages[] = L"extensions.theme.images";
+const wchar_t kCurrentThemeColors[] = L"extensions.theme.colors";
+const wchar_t kCurrentThemeTints[] = L"extensions.theme.tints";
+const wchar_t kCurrentThemeDisplayProperties[] =
+    L"extensions.theme.properties";
+
+// Boolean that indicates whether we should check if we are the default browser
+// on start-up.
+const wchar_t kCheckDefaultBrowser[] = L"browser.check_default_browser";
+
+// Boolean that is false if we should show window manager decorations.  If
+// true, we draw a custom chrome frame (thicker title bar and blue border).
+const wchar_t kUseCustomChromeFrame[] = L"browser.custom_chrome_frame";
+
+// Integer that counts the number of times the theme promo has left to be
+// shown; this decrements each time the NTP is shown for the first time
+// in a session.
+const wchar_t kNTPThemePromoRemaining[] = L"browser.ntp.theme_promo_remaining";
 
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
@@ -375,6 +413,8 @@ const wchar_t kStabilityPluginCrashes[] = L"crashes";
 const wchar_t kUninstallMetricsPageLoadCount[] =
     L"uninstall_metrics.page_load_count";
 const wchar_t kUninstallLaunchCount[] = L"uninstall_metrics.launch_count";
+const wchar_t kUninstallMetricsInstallDate[] =
+    L"uninstall_metrics.installation_date2";
 const wchar_t kUninstallMetricsUptimeSec[] = L"uninstall_metrics.uptime_sec";
 const wchar_t kUninstallLastLaunchTimeSec[] =
     L"uninstall_metrics.last_launch_time_sec";
@@ -440,6 +480,12 @@ const wchar_t kOptionsWindowLastTabIndex[] = L"options_window.last_tab_index";
 // This preference is only registered by the first-run procedure.
 const wchar_t kShouldShowFirstRunBubble[] = L"show-first-run-bubble";
 
+// The mere fact that this pref is registered signals that we should show the
+// smaller OEM First Run Search Information bubble when the first
+// browser window appears.
+// This preference is only registered by the first-run procedure.
+const wchar_t kShouldUseOEMFirstRunBubble[] = L"show-OEM-first-run-bubble";
+
 // Signal that we should show the welcome page when we launch Chrome.
 const wchar_t kShouldShowWelcomePage[] = L"show-welcome-page";
 
@@ -481,5 +527,35 @@ const wchar_t kNumKeywords[] = L"user_experience_metrics.num_keywords";
 // Whether Extensions or User Scripts are enabled.
 const wchar_t kEnableExtensions[] = L"extensions.enabled";
 const wchar_t kEnableUserScripts[] = L"extensions.user_scripts_enabled";
+
+// New Tab Page URLs that should not be shown as most visited thumbnails.
+const wchar_t kNTPMostVisitedURLsBlacklist[] = L"ntp.most_visited_blacklist";
+
+// The URLs that have been pinned to the Most Visited section of the New Tab
+// Page.
+const wchar_t kNTPMostVisitedPinnedURLs[] = L"ntp.pinned_urls";
+
+// Data downloaded from resource pages (JSON, RSS) to be displayed in the
+// recommendations portion of the NTP.
+const wchar_t kNTPTipsCache[] = L"ntp.tips_cache";
+
+// Last time of update of tips_cache.
+const wchar_t kNTPTipsCacheUpdate[] = L"ntp.tips_cache_update";
+
+// Last server used to fill tips_cache.
+const wchar_t kNTPTipsServer[] = L"ntp.tips_server";
+
+// Which sections should be visible on the new tab page
+// 1 - Show the most visited sites in a grid
+// 2 - Show the most visited sites as a list
+// 4 - Show the recent section
+// 8 - Show recommendations
+const wchar_t kNTPShownSections[] = L"ntp.shown_sections";
+
+// A boolean specifying whether dev tools window should be opened docked.
+const wchar_t kDevToolsOpenDocked[] = L"devtools.open_docked";
+
+// Integer location of the split bar in the browser view.
+const wchar_t kDevToolsSplitLocation[] = L"devtools.split_location";
 
 }  // namespace prefs

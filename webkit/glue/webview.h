@@ -1,22 +1,27 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_WEBVIEW_H__
-#define WEBKIT_GLUE_WEBVIEW_H__
+#ifndef WEBKIT_GLUE_WEBVIEW_H_
+#define WEBKIT_GLUE_WEBVIEW_H_
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "webkit/glue/webwidget.h"
+#include "webkit/api/public/WebWidget.h"
 
-struct WebDropData;
+namespace WebKit {
+class WebDragData;
+struct WebPoint;
+}
+
 struct WebPreferences;
 class GURL;
 class WebDevToolsAgent;
 class WebFrame;
 class WebViewDelegate;
+struct MediaPlayerAction;
 
 //
 //  @class WebView
@@ -38,7 +43,7 @@ class WebViewDelegate;
 //  user interface elements in those windows, monitoring the progress of loads,
 //  monitoring URL changes, and making determinations about how content of
 //  certain types should be handled.
-class WebView : public WebWidget {
+class WebView : public WebKit::WebWidget {
  public:
   WebView() {}
   virtual ~WebView() {}
@@ -47,10 +52,21 @@ class WebView : public WebWidget {
   static WebView* Create(WebViewDelegate* delegate,
                          const WebPreferences& prefs);
 
+  // Tells all Page instances of this view to update the visited link state for
+  // the specified hash.
+  static void UpdateVisitedLinkState(uint64 link_hash);
+
+  // Tells all Page instances of this view to update visited state for all their
+  // links.
+  static void ResetVisitedLinkState();
+
   // Returns the delegate for this WebView.  This is the pointer that was
   // passed to WebView::Create. The caller must check this value before using
   // it, it will be NULL during closing of the view.
   virtual WebViewDelegate* GetDelegate() = 0;
+
+  // Changes the delegate for this WebView.  It is valid to set this to NULL.
+  virtual void SetDelegate(WebViewDelegate* delegate) = 0;
 
   // Instructs the EditorClient whether to pass editing notifications on to a
   // delegate, if one is present.  This allows embedders that haven't
@@ -105,21 +121,12 @@ class WebView : public WebWidget {
 
   // ---- TODO(darin): remove to here ----
 
-  // Restores focus to the previously focused element.
-  // This method is invoked when the webview is shown after being
-  // hidden, and focus is to be restored. When WebView loses focus, it remembers
-  // the frame/element that had focus, so that when this method is invoked
-  // focus is then restored.
-  virtual void RestoreFocus() = 0;
-
   // Focus the first (last if reverse is true) focusable node.
   virtual void SetInitialFocus(bool reverse) = 0;
 
-  // Stores the focused node and clears it if |frame| is the focused frame.
-  // TODO(jcampan): http://b/issue?id=1157486 this is needed to work-around
-  // issues caused by the fix for bug #792423 and should be removed when that
-  // bug is fixed.
-  virtual void StoreFocusForFrame(WebFrame* frame) = 0;
+  // Clears the focused node (and selection if a text field is focused) to
+  // ensure that a text field on the page is not eating keystrokes we send it.
+  virtual void ClearFocusedNode() = 0;
 
   // Requests the webview to download an image. When done, the delegate is
   // notified by way of DidDownloadImage. Returns true if the request was
@@ -165,28 +172,47 @@ class WebView : public WebWidget {
   // Show the JavaScript console.
   virtual void ShowJavaScriptConsole() = 0;
 
+  // Notifies the webview that a drag has been cancelled.
+  virtual void DragSourceCancelledAt(
+      const WebKit::WebPoint& client_point,
+      const WebKit::WebPoint& screen_point) = 0;
+
   // Notifies the webview that a drag has terminated.
   virtual void DragSourceEndedAt(
-      int client_x, int client_y, int screen_x, int screen_y) = 0;
+      const WebKit::WebPoint& client_point,
+      const WebKit::WebPoint& screen_point) = 0;
 
   // Notifies the webview that a drag and drop operation is in progress, with
   // dropable items over the view.
   virtual void DragSourceMovedTo(
-      int client_x, int client_y, int screen_x, int screen_y) = 0;
+      const WebKit::WebPoint& client_point,
+      const WebKit::WebPoint& screen_point) = 0;
 
   // Notfies the webview that the system drag and drop operation has ended.
   virtual void DragSourceSystemDragEnded() = 0;
 
-  // Callback methods when a drag and drop operation is trying to drop
-  // something on the renderer.
-  virtual bool DragTargetDragEnter(const WebDropData& drop_data,
-      int client_x, int client_y, int screen_x, int screen_y) = 0;
+  // Callback methods when a drag and drop operation is trying to drop data
+  // on this webview.
+  virtual bool DragTargetDragEnter(
+      const WebKit::WebDragData& drag_data, int identity,
+      const WebKit::WebPoint& client_point,
+      const WebKit::WebPoint& screen_point) = 0;
   virtual bool DragTargetDragOver(
-      int client_x, int client_y, int screen_x, int screen_y) = 0;
+      const WebKit::WebPoint& client_point,
+      const WebKit::WebPoint& screen_point) = 0;
   virtual void DragTargetDragLeave() = 0;
   virtual void DragTargetDrop(
-      int client_x, int client_y, int screen_x, int screen_y) = 0;
+      const WebKit::WebPoint& client_point,
+      const WebKit::WebPoint& screen_point) = 0;
+
+  // Helper method for drag and drop target operations: return the drag data
+  // identity.
   virtual int32 GetDragIdentity() = 0;
+
+  // Helper method for drag and drop target operations: override the default
+  // drop effect with either a "copy" (accept true) or "none" (accept false)
+  // effect.  Return true on success.
+  virtual bool SetDropEffect(bool accept) = 0;
 
   // Notifies the webview that autofill suggestions are available for a node.
   virtual void AutofillSuggestionsForNode(
@@ -200,8 +226,19 @@ class WebView : public WebWidget {
   // Returns development tools agent instance belonging to this view.
   virtual WebDevToolsAgent* GetWebDevToolsAgent() = 0;
 
+  // Makes the webview transparent. Useful if you want to have some custom
+  // background behind it.
+  virtual void SetIsTransparent(bool is_transparent) = 0;
+  virtual bool GetIsTransparent() const = 0;
+
+  // Performs an action from a context menu for the node at the given
+  // location.
+  virtual void MediaPlayerActionAt(int x,
+                                   int y,
+                                   const MediaPlayerAction& action) = 0;
+
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(WebView);
+  DISALLOW_COPY_AND_ASSIGN(WebView);
 };
 
-#endif  // WEBKIT_GLUE_WEBVIEW_H__
+#endif  // WEBKIT_GLUE_WEBVIEW_H_

@@ -2,25 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#endif
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/system_monitor.h"
+#include "build/build_config.h"
+#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
-#include "chrome/common/win_util.h"
-#include "chrome/plugin/plugin_process.h"
+#include "chrome/plugin/plugin_thread.h"
+
+#if defined(OS_WIN)
 #include "chrome/test/injection_test_dll.h"
 #include "sandbox/src/sandbox.h"
+#elif defined(OS_LINUX)
+#include "base/global_descriptors_posix.h"
+#include "ipc/ipc_descriptors.h"
+#endif
 
-// mainline routine for running as the plugin process
+// main() routine for running as the plugin process.
 int PluginMain(const MainFunctionParams& parameters) {
-  const CommandLine& parsed_command_line = parameters.command_line_;
-  sandbox::TargetServices* target_services =
-      parameters.sandbox_info_.TargetServices();
-
   // The main thread of the plugin services IO.
   MessageLoopForIO main_message_loop;
   std::wstring app_name = chrome::kBrowserAppName;
@@ -28,6 +36,12 @@ int PluginMain(const MainFunctionParams& parameters) {
 
   // Initialize the SystemMonitor
   base::SystemMonitor::Start();
+
+  const CommandLine& parsed_command_line = parameters.command_line_;
+
+#if defined(OS_WIN)
+  sandbox::TargetServices* target_services =
+      parameters.sandbox_info_.TargetServices();
 
   CoInitialize(NULL);
   DLOG(INFO) << "Started plugin with " <<
@@ -45,19 +59,31 @@ int PluginMain(const MainFunctionParams& parameters) {
       DCHECK(sandbox_test_module);
     }
   }
-
+#endif
   if (parsed_command_line.HasSwitch(switches::kPluginStartupDialog)) {
+#if defined(OS_WIN)
     std::wstring title = chrome::kBrowserAppName;
     title += L" plugin";  // makes attaching to process easier
     win_util::MessageBox(NULL, L"plugin starting...", title,
                          MB_OK | MB_SETFOREGROUND);
+#elif defined(OS_MACOSX)
+    // TODO(playmobil): In the long term, overriding this flag doesn't seem
+    // right, either use our own flag or open a dialog we can use.
+    // This is just to ease debugging in the interim.
+    LOG(WARNING) << "Plugin ("
+    << getpid()
+    << ") paused waiting for debugger to attach @ pid";
+    pause();
+#else
+  NOTIMPLEMENTED() << " non-windows startup, plugin startup dialog etc.";
+#endif
   }
 
   {
-    PluginProcess plugin_process;
-    if (!no_sandbox && target_services) {
+    ChildProcess plugin_process(new PluginThread());
+#if defined(OS_WIN)
+    if (!no_sandbox && target_services)
       target_services->LowerToken();
-    }
 
     if (sandbox_test_module) {
       RunRendererTests run_security_tests =
@@ -74,12 +100,14 @@ int PluginMain(const MainFunctionParams& parameters) {
           __debugbreak();
       }
     }
+#endif
 
-    // Load the accelerator table from the browser executable and tell the
-    // message loop to use it when translating messages.
     MessageLoop::current()->Run();
   }
 
+#if defined(OS_WIN)
   CoUninitialize();
+#endif
+
   return 0;
 }

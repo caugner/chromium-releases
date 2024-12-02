@@ -8,30 +8,35 @@
 #include <gtk/gtk.h>
 
 #include "base/basictypes.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
+#include "chrome/common/owned_widget_gtk.h"
 
 class RenderViewHost;
+class StatusBubbleGtk;
 class TabContents;
+
+typedef struct _GtkFloatingContainer GtkFloatingContainer;
 
 class TabContentsContainerGtk : public NotificationObserver {
  public:
-  // |findbar| is a pointer to the find bar container widget.  Since the
-  // position is relative to the tab contents, we position the find bar using
-  // the tab contents container.
-  explicit TabContentsContainerGtk(GtkWidget* findbar);
+  explicit TabContentsContainerGtk(StatusBubbleGtk* status_bubble);
   ~TabContentsContainerGtk();
 
-  // Inserts our GtkWidget* hierarchy into a GtkBox managed by our owner.
-  void AddContainerToBox(GtkWidget* widget);
+  void Init();
 
   // Make the specified tab visible.
   void SetTabContents(TabContents* tab_contents);
   TabContents* GetTabContents() const { return tab_contents_; }
 
+  // Remove the tab from the hierarchy.
+  void DetachTabContents(TabContents* tab_contents);
+
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
+
+  GtkWidget* widget() { return floating_.get(); }
 
  private:
   // Add or remove observers for events that we care about.
@@ -48,13 +53,40 @@ class TabContentsContainerGtk : public NotificationObserver {
   // get notified.
   void TabContentsDestroyed(TabContents* contents);
 
+  // Implements our hack around a GtkFixed. The entire size of the GtkFixed is
+  // allocated to normal tab contents views, while the status bubble is
+  // informed of its parent and its parent's allocation (it makes a decision
+  // about layout later.)
+  static void OnFixedSizeAllocate(
+      GtkWidget* fixed,
+      GtkAllocation* allocation,
+      TabContentsContainerGtk* container);
+
+  // Handler for |floating_|'s "set-floating-position" signal. During this
+  // callback, we manually set the position of the status bubble.
+  static void OnSetFloatingPosition(
+      GtkFloatingContainer* container, GtkAllocation* allocation,
+      TabContentsContainerGtk* tab_contents_container);
+
+  NotificationRegistrar registrar_;
+
   // The currently visible TabContents.
   TabContents* tab_contents_;
 
-  // We keep a GtkVBox which is inserted into this object's owner's GtkWidget
-  // hierarchy. We then insert and remove WebContents GtkWidgets into this
-  // vbox_.
-  GtkWidget* vbox_;
+  // The status bubble manager.  Always non-NULL.
+  StatusBubbleGtk* status_bubble_;
+
+  // Top of the TabContentsContainerGtk widget hierarchy. A cross between a
+  // GtkBin and a GtkFixed, |floating_| has |fixed_| as its one "real" child,
+  // and the various things that hang off the bottom (status bubble, etc) have
+  // their positions manually set in OnSetFloatingPosition.
+  OwnedWidgetGtk floating_;
+
+  // We insert and remove TabContents GtkWidgets into this fixed_. This should
+  // not be a GtkVBox since there were errors with timing where the vbox was
+  // horizontally split with the top half displaying the current TabContents
+  // and bottom half displaying the loading page.
+  GtkWidget* fixed_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsContainerGtk);
 };

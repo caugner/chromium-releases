@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/table_model_observer.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/browser/bookmarks/bookmark_table_model.h"
@@ -22,7 +23,7 @@ using base::TimeDelta;
 //   f2
 //   url3 (t0 + 1)
 class BookmarkTableModelTest : public testing::Test,
-                               public views::TableModelObserver {
+                               public TableModelObserver {
  public:
   BookmarkTableModelTest()
       : url1_("http://1"),
@@ -32,18 +33,18 @@ class BookmarkTableModelTest : public testing::Test,
         item_changed_count_(0),
         added_count_(0),
         removed_count_(0) {
-   }
+  }
 
   virtual void SetUp() {
     profile_.reset(new TestingProfile());
     profile_->CreateBookmarkModel(true);
     // Populate with some default data.
     Time t0 = Time::Now();
-    BookmarkNode* bb = bookmark_model()->GetBookmarkBarNode();
+    const BookmarkNode* bb = bookmark_model()->GetBookmarkBarNode();
     bookmark_model()->AddURLWithCreationTime(bb, 0, L"a", url1_, t0);
     bookmark_model()->AddGroup(bb, 1, L"f1");
 
-    BookmarkNode* other = bookmark_model()->other_node();
+    const BookmarkNode* other = bookmark_model()->other_node();
     bookmark_model()->AddURLWithCreationTime(other, 0, L"b",
         url2_, t0 + TimeDelta::FromDays(2));
     bookmark_model()->AddGroup(other, 1, L"f2");
@@ -128,10 +129,10 @@ TEST_F(BookmarkTableModelTest, FolderInitialState) {
 
 // Verifies adding an item to folder model generates the correct event.
 TEST_F(BookmarkTableModelTest, AddToFolder) {
-  BookmarkNode* other = bookmark_model()->other_node();
+  const BookmarkNode* other = bookmark_model()->other_node();
   SetModel(BookmarkTableModel::CreateBookmarkTableModelForFolder(
       bookmark_model(), other));
-  BookmarkNode* new_node = bookmark_model()->AddURL(other, 0, L"new", url1_);
+  const BookmarkNode* new_node = bookmark_model()->AddURL(other, 0, L"new", url1_);
   // Should have gotten notification of the add.
   VerifyAndClearOberserverCounts(0, 0, 1, 0);
   ASSERT_EQ(4, model_->RowCount());
@@ -145,7 +146,7 @@ TEST_F(BookmarkTableModelTest, AddToFolder) {
 
 // Verifies sort sends out notification and results in a sort.
 TEST_F(BookmarkTableModelTest, SortFolder) {
-  BookmarkNode* other = bookmark_model()->other_node();
+  const BookmarkNode* other = bookmark_model()->other_node();
   SetModel(BookmarkTableModel::CreateBookmarkTableModelForFolder(
            bookmark_model(), other));
   ASSERT_EQ(3, model_->RowCount());
@@ -162,7 +163,7 @@ TEST_F(BookmarkTableModelTest, SortFolder) {
 
 // Verifies removing an item from folder model generates the correct event.
 TEST_F(BookmarkTableModelTest, RemoveFromFolder) {
-  BookmarkNode* other = bookmark_model()->other_node();
+  const BookmarkNode* other = bookmark_model()->other_node();
   SetModel(BookmarkTableModel::CreateBookmarkTableModelForFolder(
       bookmark_model(), other));
   bookmark_model()->Remove(other, 0);
@@ -178,7 +179,7 @@ TEST_F(BookmarkTableModelTest, RemoveFromFolder) {
 
 // Verifies changing an item in the folder model generates the correct event.
 TEST_F(BookmarkTableModelTest, ChangeFolder) {
-  BookmarkNode* other = bookmark_model()->other_node();
+  const BookmarkNode* other = bookmark_model()->other_node();
   SetModel(BookmarkTableModel::CreateBookmarkTableModelForFolder(
       bookmark_model(), other));
   bookmark_model()->SetTitle(other->GetChild(0), L"new");
@@ -198,8 +199,8 @@ TEST_F(BookmarkTableModelTest, RecentlyBookmarkedOrder) {
   SetModel(BookmarkTableModel::CreateRecentlyBookmarkedModel(bookmark_model()));
   EXPECT_EQ(3, model_->RowCount());
 
-  BookmarkNode* bb = bookmark_model()->GetBookmarkBarNode();
-  BookmarkNode* other = bookmark_model()->other_node();
+  const BookmarkNode* bb = bookmark_model()->GetBookmarkBarNode();
+  const BookmarkNode* other = bookmark_model()->other_node();
   EXPECT_TRUE(other->GetChild(0) == model_->GetNodeForRow(0));
   EXPECT_TRUE(other->GetChild(2) == model_->GetNodeForRow(1));
   EXPECT_TRUE(bb->GetChild(0) == model_->GetNodeForRow(2));
@@ -247,7 +248,8 @@ TEST_F(BookmarkTableModelTest, ChangeRecentlyBookmarked) {
 
 // Verifies search finds the correct bookmarks.
 TEST_F(BookmarkTableModelTest, Search) {
-  SetModel(BookmarkTableModel::CreateSearchTableModel(bookmark_model(), L"c"));
+  SetModel(BookmarkTableModel::CreateSearchTableModel(
+      bookmark_model(), L"c", std::wstring()));
   ASSERT_EQ(1, model_->RowCount());
   EXPECT_TRUE(bookmark_model()->other_node()->GetChild(2) ==
               model_->GetNodeForRow(0));
@@ -258,8 +260,9 @@ TEST_F(BookmarkTableModelTest, Search) {
 
 // Verifies adding an item to search notifies observers.
 TEST_F(BookmarkTableModelTest, AddToSearch) {
-  SetModel(BookmarkTableModel::CreateSearchTableModel(bookmark_model(), L"c"));
-  BookmarkNode* new_node =
+  SetModel(BookmarkTableModel::CreateSearchTableModel(
+      bookmark_model(), L"c", std::wstring()));
+  const BookmarkNode* new_node =
       bookmark_model()->AddURL(bookmark_model()->other_node(), 0, L"c", url1_);
   // Should have gotten notification of the add.
   VerifyAndClearOberserverCounts(0, 0, 1, 0);
@@ -280,7 +283,8 @@ TEST_F(BookmarkTableModelTest, AddToSearch) {
 
 // Verifies removing an item updates search.
 TEST_F(BookmarkTableModelTest, RemoveFromSearch) {
-  SetModel(BookmarkTableModel::CreateSearchTableModel(bookmark_model(), L"c"));
+  SetModel(BookmarkTableModel::CreateSearchTableModel(
+      bookmark_model(), L"c", std::wstring()));
   bookmark_model()->Remove(bookmark_model()->other_node(), 2);
   // Should have gotten notification of the remove.
   VerifyAndClearOberserverCounts(0, 0, 0, 1);
@@ -297,7 +301,8 @@ TEST_F(BookmarkTableModelTest, RemoveFromSearch) {
 
 // Verifies changing an item in search notifies observer.
 TEST_F(BookmarkTableModelTest, ChangeSearch) {
-  SetModel(BookmarkTableModel::CreateSearchTableModel(bookmark_model(), L"c"));
+  SetModel(BookmarkTableModel::CreateSearchTableModel(bookmark_model(),
+      L"c", std::wstring()));
   bookmark_model()->SetTitle(bookmark_model()->other_node()->GetChild(2),
                              L"new");
   // Should have gotten notification of the change.

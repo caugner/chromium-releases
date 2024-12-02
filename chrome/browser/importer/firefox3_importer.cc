@@ -6,16 +6,22 @@
 
 #include <set>
 
+#include "app/l10n_util.h"
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "base/scoped_ptr.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
-#include "chrome/common/l10n_util.h"
+#include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/time_format.h"
+#include "chrome/common/sqlite_utils.h"
 #include "grit/generated_resources.h"
+#include "webkit/glue/password_form.h"
 
 using base::Time;
+using webkit_glue::PasswordForm;
 
 // Wraps the function sqlite3_close() in a class that is
 // used in scoped_ptr_malloc.
@@ -196,7 +202,7 @@ void Firefox3Importer::ImportBookmarks() {
         // This bookmark entry should be put in the bookmark bar.
         // But we put it in the Firefox group after first run, so
         // that do not mess up the bookmark bar.
-        if (first_run()) {
+        if (import_to_bookmark_bar()) {
           is_in_toolbar = true;
         } else {
           path.insert(path.begin(), parent->title);
@@ -208,7 +214,7 @@ void Firefox3Importer::ImportBookmarks() {
                  parent->id == unsorted_folder_id) {
         // After the first run, the item will be placed in a folder in
         // the "Other bookmarks".
-        if (!first_run())
+        if (!import_to_bookmark_bar())
           path.insert(path.begin(), firefox_folder);
         found_path = true;
         break;
@@ -249,7 +255,7 @@ void Firefox3Importer::ImportBookmarks() {
     main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
         &ProfileWriter::AddBookmarkEntry, bookmarks,
         l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_FIREFOX),
-        first_run() ? ProfileWriter::FIRST_RUN : 0));
+        import_to_bookmark_bar() ? ProfileWriter::IMPORT_TO_BOOKMARK_BAR : 0));
   }
   if (!template_urls.empty() && !cancelled()) {
     main_loop_->PostTask(FROM_HERE, NewRunnableMethod(writer_,
@@ -325,7 +331,11 @@ void Firefox3Importer::GetSearchEnginesXMLFiles(
   scoped_ptr_malloc<sqlite3, DBClose> db(sqlite);
 
   SQLStatement s;
-  const char* stmt = "SELECT engineid FROM engine_data ORDER BY value ASC";
+  const char* stmt = "SELECT engineid FROM engine_data "
+                     "WHERE engineid NOT IN "
+                     "(SELECT engineid FROM engine_data "
+                     "WHERE name='hidden') "
+                     "ORDER BY value ASC";
 
   if (s.prepare(db.get(), stmt) != SQLITE_OK)
     return;
@@ -335,31 +345,46 @@ void Firefox3Importer::GetSearchEnginesXMLFiles(
   std::wstring profile_path = source_path_;
   file_util::AppendToPath(&profile_path, L"searchplugins");
 
-  const std::wstring kAppPrefix = L"[app]/";
-  const std::wstring kProfilePrefix = L"[profile]/";
-  while (s.step() == SQLITE_ROW && !cancelled()) {
-    std::wstring file;
-    std::wstring engine = UTF8ToWide(s.column_string(0));
-    // The string contains [app]/<name>.xml or [profile]/<name>.xml where the
-    // [app] and [profile] need to be replaced with the actual app or profile
-    // path.
-    size_t index = engine.find(kAppPrefix);
-    if (index != std::wstring::npos) {
-      file = app_path;
-      file_util::AppendToPath(
-          &file,
-          engine.substr(index + kAppPrefix.length()));  // Remove '[app]/'.
-    } else if ((index = engine.find(kProfilePrefix)) != std::wstring::npos) {
-      file = profile_path;
-      file_util::AppendToPath(
-          &file,
-          engine.substr(index + kProfilePrefix.length()));  // Remove
-                                                            // '[profile]/'.
-    } else {
-      NOTREACHED() << "Unexpected Firefox 3 search engine id";
-      continue;
-    }
-    files->push_back(file);
+  // Firefox doesn't store a search engine in its sqlite database unless
+  // the user has changed the default definition of engine. So we get search
+  // engines from sqlite db as well as from file system.
+  if (s.step() == SQLITE_ROW) {
+    const std::wstring kAppPrefix = L"[app]/";
+    const std::wstring kProfilePrefix = L"[profile]/";
+    do {
+      std::wstring file;
+      std::wstring engine = UTF8ToWide(s.column_string(0));
+
+      // The string contains [app]/<name>.xml or [profile]/<name>.xml where
+      // the [app] and [profile] need to be replaced with the actual app or
+      // profile path.
+      size_t index = engine.find(kAppPrefix);
+      if (index != std::wstring::npos) {
+        // Remove '[app]/'.
+        file = app_path;
+        file_util::AppendToPath(&file,
+                                engine.substr(index + kAppPrefix.length()));
+      } else if ((index = engine.find(kProfilePrefix)) != std::wstring::npos) {
+        // Remove '[profile]/'.
+        file = profile_path;
+        file_util::AppendToPath(&file,
+                                engine.substr(index + kProfilePrefix.length()));
+      } else {
+        // Looks like absolute path to the file.
+        file = engine;
+      }
+      files->push_back(file);
+    } while (s.step() == SQLITE_ROW && !cancelled());
+  }
+
+  // Get search engine definition from file system.
+  file_util::FileEnumerator engines(FilePath::FromWStringHack(app_path),
+                                    false,
+                                    file_util::FileEnumerator::FILES);
+  for (FilePath engine_path = engines.Next(); !engine_path.value().empty();
+       engine_path = engines.Next()) {
+    std::wstring enginew = engine_path.ToWStringHack();
+    files->push_back(enginew);
   }
 }
 

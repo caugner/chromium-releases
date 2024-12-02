@@ -4,13 +4,13 @@ Copyright (c) 2009 The Chromium Authors. All rights reserved.
 This is the Chromium version of the WebInspector. This html file serves
 as a deployment descriptor and specifies which js libraries to include into the
 app. Once the "main" frontend method that is building WebInspector
-from the js building blocks is extracted, we will be able have different 
-implementations of it for Chromium and WebKit. That would allow us for 
-example not to create WebKit Database tab and remove corresponding js files 
+from the js building blocks is extracted, we will be able have different
+implementations of it for Chromium and WebKit. That would allow us for
+example not to create WebKit Database tab and remove corresponding js files
 from here. Longer term we would like to employ closure + basic js compilation.
-That way js libraries would know their dependencies and js compiler would be 
-able to compile them into a single file. After that this HTML file will 
-include single <sctipt src='fe-compiled.js'> and will become upstreamable.
+That way js libraries would know their dependencies and js compiler would be
+able to compile them into a single file. After that this HTML file will
+include single <script src='fe-compiled.js'> and will become upstreamable.
 
 Copyright (C) 2006, 2007, 2008 Apple Inc.  All rights reserved.
 
@@ -19,13 +19,13 @@ modification, are permitted provided that the following conditions
 are met:
 
 1.  Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer. 
+    notice, this list of conditions and the following disclaimer.
 2.  Redistributions in binary form must reproduce the above copyright
     notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution. 
+    documentation and/or other materials provided with the distribution.
 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
     its contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission. 
+    from this software without specific prior written permission.
 
 THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
 EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -43,17 +43,26 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8">
     <link rel="stylesheet" type="text/css" href="inspector.css">
+    <link rel="stylesheet" type="text/css" href="devtools.css">
     <script type="text/javascript" src="base.js"></script>
-    <script type="text/javascript" src="json.js"></script>
     <script type="text/javascript" src="utilities.js"></script>
     <script type="text/javascript" src="treeoutline.js"></script>
     <script type="text/javascript" src="devtools_callback.js"></script>
+    <script type="text/javascript" src="debugger_agent.js"></script>
     <script type="text/javascript" src="dom_agent.js"></script>
-    <script type="text/javascript" src="net_agent.js"></script>
     <script type="text/javascript" src="inspector_controller.js"></script>
     <script type="text/javascript" src="inspector_controller_impl.js"></script>
     <script type="text/javascript" src="inspector.js"></script>
+    <script type="text/javascript" src="codemap.js"></script>
+    <script type="text/javascript" src="consarray.js"></script>
+    <script type="text/javascript" src="csvparser.js"></script>
+    <script type="text/javascript" src="logreader.js"></script>
+    <script type="text/javascript" src="profile.js"></script>
+    <script type="text/javascript" src="profile_view.js"></script>
+    <script type="text/javascript" src="profiler_processor.js"></script>
+    <script type="text/javascript" src="splaytree.js"></script>
     <script type="text/javascript" src="Object.js"></script>
+    <script type="text/javascript" src="KeyboardShortcut.js"></script>
     <script type="text/javascript" src="TextPrompt.js"></script>
     <script type="text/javascript" src="Placard.js"></script>
     <script type="text/javascript" src="View.js"></script>
@@ -94,15 +103,20 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     <script type="text/javascript" src="DatabaseQueryView.js"></script>
     <script type="text/javascript" src="ScriptView.js"></script>
     <script type="text/javascript" src="ProfileView.js"></script>
+    <script type="text/javascript" src="ProfileDataGridTree.js"></script>
+    <script type="text/javascript" src="BottomUpProfileDataGridTree.js"></script>
+    <script type="text/javascript" src="TopDownProfileDataGridTree.js"></script>
     <script type="text/javascript" src="devtools.js"></script>
     <script type="text/javascript" src="devtools_host_stub.js"></script>
+    <script type="text/javascript" src="tests.js"></script>
 </head>
 <body class="detached">
     <div id="toolbar">
-        <div class="toolbar-item close"><button id="close-button"></button></div>
+        <div class="toolbar-item hidden"></div>
         <div class="toolbar-item flexable-space"></div>
         <div class="toolbar-item hidden" id="search-results-matches"></div>
         <div class="toolbar-item"><input id="search" type="search" incremental results="0"><div id="search-toolbar-label" class="toolbar-label"></div></div>
+        <div class="toolbar-item close"><button id="close-button"></button></div>
     </div>
     <div id="main">
         <div id="main-panels" tabindex="0"></div>

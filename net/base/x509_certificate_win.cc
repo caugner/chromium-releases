@@ -22,6 +22,16 @@ namespace net {
 
 namespace {
 
+// Problematic certificates.
+const X509Certificate::Fingerprint cert_blacklist[] = {
+  // A certificate for www.paypal.com with a NULL byte in the common name.
+  // Validity period from 2009-02-24 to 2011-02-24.
+  // Subject CN=www.paypal.com\00ssl.secureconnection.cc
+  // From http://www.gossamer-threads.com/lists/fulldisc/full-disclosure/70363
+  { 0x4c, 0x88, 0x9e, 0x28, 0xd7, 0x7a, 0x44, 0x1e, 0x13, 0xf2,
+    0x6a, 0xba, 0x1f, 0xe8, 0x1b, 0xd6, 0xab, 0x7b, 0xe8, 0xd7 }
+};
+
 //-----------------------------------------------------------------------------
 
 // TODO(wtc): This is a copy of the MapSecurityError function in
@@ -427,12 +437,8 @@ void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
     dns_names->push_back(subject_.common_name);
 }
 
-bool X509Certificate::HasExpired() const {
-  return Time::Now() > valid_expiry();
-}
-
 int X509Certificate::Verify(const std::string& hostname,
-                            bool rev_checking_enabled,
+                            int flags,
                             CertVerifyResult* verify_result) const {
   verify_result->Reset();
 
@@ -447,12 +453,14 @@ int X509Certificate::Verify(const std::string& hostname,
   chain_para.RequestedUsage.Usage.cUsageIdentifier = 0;
   chain_para.RequestedUsage.Usage.rgpszUsageIdentifier = NULL;  // LPSTR*
   // We can set CERT_CHAIN_RETURN_LOWER_QUALITY_CONTEXTS to get more chains.
-  DWORD flags = CERT_CHAIN_CACHE_END_CERT;
-  if (rev_checking_enabled) {
+  DWORD chain_flags = CERT_CHAIN_CACHE_END_CERT;
+  if (flags & VERIFY_REV_CHECKING_ENABLED) {
     verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
-    flags |= CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+    chain_flags |= CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
   } else {
-    flags |= CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY;
+    chain_flags |= CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY;
+    // EV requires revocation checking.
+    flags &= ~VERIFY_EV_CERT;
   }
   PCCERT_CHAIN_CONTEXT chain_context;
   if (!CertGetCertificateChain(
@@ -461,7 +469,7 @@ int X509Certificate::Verify(const std::string& hostname,
            NULL,  // current system time
            cert_handle_->hCertStore,  // search this store
            &chain_para,
-           flags,
+           chain_flags,
            NULL,  // reserved
            &chain_context)) {
     return MapSecurityError(GetLastError());
@@ -472,6 +480,18 @@ int X509Certificate::Verify(const std::string& hostname,
 
   verify_result->cert_status |= MapCertChainErrorStatusToCertStatus(
       chain_context->TrustStatus.dwErrorStatus);
+
+  // Treat certificate signatures using weak signature algorithms as invalid.
+  if (verify_result->has_md2 || verify_result->has_md4)
+    verify_result->cert_status |= CERT_STATUS_INVALID;
+
+  // Treat certificates on our blacklist as invalid.
+  for (int i = 0; i < arraysize(cert_blacklist); ++i) {
+    if (fingerprint_.Equals(cert_blacklist[i])) {
+      verify_result->cert_status |= CERT_STATUS_INVALID;
+      break;
+    }
+  }
 
   std::wstring wstr_hostname = ASCIIToWide(hostname);
 
@@ -557,22 +577,20 @@ int X509Certificate::Verify(const std::string& hostname,
 
   if (IsCertStatusError(verify_result->cert_status))
     return MapCertStatusToNetError(verify_result->cert_status);
+
+  // TODO(ukai): combine regular cert verification and EV cert verification.
+  if ((flags & VERIFY_EV_CERT) && VerifyEV())
+    verify_result->cert_status |= CERT_STATUS_IS_EV;
   return OK;
 }
 
 // Returns true if the certificate is an extended-validation certificate.
 //
-// The certificate has already been verified by the HTTP library.  cert_status
-// represents the result of that verification.  This function performs
-// additional checks of the certificatePolicies extensions of the certificates
-// in the certificate chain according to Section 7 (pp. 11-12) of the EV
-// Certificate Guidelines Version 1.0 at
+// This function checks the certificatePolicies extensions of the
+// certificates in the certificate chain according to Section 7 (pp. 11-12)
+// of the EV Certificate Guidelines Version 1.0 at
 // http://cabforum.org/EV_Certificate_Guidelines.pdf.
-bool X509Certificate::IsEV(int cert_status) const {
-  if (net::IsCertStatusError(cert_status) ||
-      (cert_status & net::CERT_STATUS_REV_CHECKING_ENABLED) == 0)
-    return false;
-
+bool X509Certificate::VerifyEV() const {
   net::EVRootCAMetadata* metadata = net::EVRootCAMetadata::GetInstance();
 
   PCCERT_CHAIN_CONTEXT chain_context = ConstructCertChain(cert_handle_,

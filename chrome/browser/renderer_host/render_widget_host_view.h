@@ -7,6 +7,7 @@
 
 #include "base/gfx/native_widget_types.h"
 #include "base/shared_memory.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/webplugin.h"
 
 namespace gfx {
@@ -21,6 +22,7 @@ class BackingStore;
 class RenderProcessHost;
 class RenderWidgetHost;
 class WebCursor;
+struct WebMenuItem;
 
 // RenderWidgetHostView is an interface implemented by an object that acts as
 // the "View" portion of a RenderWidgetHost. The RenderWidgetHost and its
@@ -31,6 +33,8 @@ class WebCursor;
 // changes.
 class RenderWidgetHostView {
  public:
+  virtual ~RenderWidgetHostView(){};
+
   // Platform-specific creator. Use this to construct new RenderWidgetHostViews
   // rather than using RenderWidgetHostViewWin & friends.
   //
@@ -42,6 +46,11 @@ class RenderWidgetHostView {
   // The RenderWidgetHost must already be created (because we can't know if it's
   // going to be a regular RenderWidgetHost or a RenderViewHost (a subclass).
   static RenderWidgetHostView* CreateViewForWidget(RenderWidgetHost* widget);
+
+  // Perform all the initialization steps necessary for this object to represent
+  // a popup (such as a <select> dropdown), then shows the popup at |pos|.
+  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
+                           const gfx::Rect& pos) = 0;
 
   // Returns the associated RenderWidgetHost.
   virtual RenderWidgetHost* GetRenderWidgetHost() const = 0;
@@ -55,8 +64,9 @@ class RenderWidgetHostView {
   // Tells the View to size itself to the specified size.
   virtual void SetSize(const gfx::Size& size) = 0;
 
-  // Retrieves the native view used to contain plugins.
-  virtual gfx::NativeView GetPluginNativeView() = 0;
+  // Retrieves the native view used to contain plugins and identify the
+  // renderer in IPC messages.
+  virtual gfx::NativeView GetNativeView() = 0;
 
   // Moves all plugin windows as described in the given list.
   virtual void MovePluginWindows(
@@ -69,7 +79,8 @@ class RenderWidgetHostView {
   // Returns true if the View currently has the focus.
   virtual bool HasFocus() = 0;
 
-  // Shows/hides the view.
+  // Shows/hides the view.  These must always be called together in pairs.
+  // It is not legal to call Hide() multiple times in a row.
   virtual void Show() = 0;
   virtual void Hide() = 0;
 
@@ -79,9 +90,6 @@ class RenderWidgetHostView {
   // Sets the cursor to the one associated with the specified cursor_type
   virtual void UpdateCursor(const WebCursor& cursor) = 0;
 
-  // Updates the displayed cursor to the current one.
-  virtual void UpdateCursorIfOverSelf() = 0;
-
   // Indicates whether the page has finished loading.
   virtual void SetIsLoading(bool is_loading) = 0;
 
@@ -89,8 +97,19 @@ class RenderWidgetHostView {
   virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect) = 0;
 
   // Informs the view that a portion of the widget's backing store was painted.
-  // The view should copy the given rect from the backing store of the render
-  // widget onto the screen.
+  // The view should ensure this gets copied to the screen.
+  //
+  // There are subtle performance implications here.  The RenderWidget gets sent
+  // a paint ack after this returns, so if the view only ever invalidates in
+  // response to this, then on Windows, where WM_PAINT has lower priority than
+  // events which can cause renderer resizes/paint rect updates, e.g.
+  // drag-resizing can starve painting; this function thus provides the view its
+  // main chance to ensure it stays painted and not just invalidated.  On the
+  // other hand, if this always blindly paints, then if we're already in the
+  // midst of a paint on the callstack, we can double-paint unnecessarily.
+  // (Worse, we might recursively call RenderWidgetHost::GetBackingStore().)
+  // Thus implementers should generally paint as much of |rect| as possible
+  // synchronously with as little overpainting as possible.
   virtual void DidPaintRect(const gfx::Rect& rect) = 0;
 
   // Informs the view that a portion of the widget's backing store was scrolled
@@ -110,12 +129,65 @@ class RenderWidgetHostView {
   // the page has changed.
   virtual void SetTooltipText(const std::wstring& tooltip_text) = 0;
 
+  // Notifies the View that the renderer text selection has changed.
+  virtual void SelectionChanged(const std::string& text) { };
+
+  // Tells the View to get the text from the selection clipboard and send it
+  // back to the renderer asynchronously.
+  virtual void PasteFromSelectionClipboard() { }
+
+  // Tells the View whether the context menu is showing. This is used on Linux
+  // to suppress updates to webkit focus for the duration of the show.
+  virtual void ShowingContextMenu(bool showing) { }
+
   // Allocate a backing store for this view
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) = 0;
 
+#if defined(OS_MACOSX)
+  // Display a native control popup menu for WebKit.
+  virtual void ShowPopupWithItems(gfx::Rect bounds,
+                                  int item_height,
+                                  int selected_item,
+                                  const std::vector<WebMenuItem>& items) = 0;
+
+  // Get the view's position on the screen.
+  virtual gfx::Rect GetWindowRect() = 0;
+
+  // Get the view's window's position on the screen.
+  virtual gfx::Rect GetRootWindowRect() = 0;
+#endif
+
+#if defined(OS_LINUX)
+  virtual gfx::PluginWindowHandle CreatePluginContainer(
+      base::ProcessId plugin_process_id) = 0;
+  virtual void DestroyPluginContainer(gfx::PluginWindowHandle container) = 0;
+#endif
+
+  virtual void PluginProcessCrashed(base::ProcessId pid) { }
+
+  void set_activatable(bool activatable) {
+    activatable_ = activatable;
+  }
+  bool activatable() const { return activatable_; }
+
+  // Subclasses should override this method to do whatever is appropriate to set
+  // the custom background for their platform.
+  virtual void SetBackground(const SkBitmap& background) {
+    background_ = background;
+  }
+  const SkBitmap& background() const { return background_; }
+
  protected:
   // Interface class only, do not construct.
-  RenderWidgetHostView() {}
+  RenderWidgetHostView() : activatable_(true) {}
+
+  // Whether the window can be activated. Autocomplete popup windows for example
+  // cannot be activated.  Default is true.
+  bool activatable_;
+
+  // A custom background to paint behind the web content. This will be tiled
+  // horizontally. Can be null, in which case we fall back to painting white.
+  SkBitmap background_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostView);

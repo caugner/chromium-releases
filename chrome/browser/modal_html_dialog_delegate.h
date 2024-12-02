@@ -8,19 +8,20 @@
 #include <vector>
 
 #include "base/gfx/size.h"
-#include "chrome/browser/dom_ui/html_dialog_contents.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/browser/dom_ui/html_dialog_ui.h"
+#include "chrome/common/notification_registrar.h"
+#include "ipc/ipc_message.h"
 
 // This class can only be used on the UI thread.
 class ModalHtmlDialogDelegate
-    : public HtmlDialogContentsDelegate,
+    : public HtmlDialogUIDelegate,
       public NotificationObserver {
  public:
   ModalHtmlDialogDelegate(const GURL& url,
                           int width, int height,
                           const std::string& json_arguments,
                           IPC::Message* sync_result,
-                          WebContents* contents);
+                          TabContents* contents);
   ~ModalHtmlDialogDelegate();
 
   // Notification service callback.
@@ -28,25 +29,24 @@ class ModalHtmlDialogDelegate
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // HTMLDialogContentsDelegate implementation:
+  // HTMLDialogUIDelegate implementation:
   virtual bool IsDialogModal() const;
-  virtual std::wstring GetDialogTitle() const { return L"Google Gears"; }
+  virtual std::wstring GetDialogTitle() const { return L"Gears"; }
   virtual GURL GetDialogContentURL() const;
+  virtual void GetDOMMessageHandlers(
+      std::vector<DOMMessageHandler*>* handlers) const { }
   virtual void GetDialogSize(gfx::Size* size) const;
   virtual std::string GetDialogArgs() const;
   virtual void OnDialogClosed(const std::string& json_retval);
 
  private:
-  // Invoked from the destructor or when we receive notification the web
-  // contents has been disconnnected. Removes the observer from the WebContents
-  // and NULLs out contents_.
-  void RemoveObserver();
+  NotificationRegistrar registrar_;
 
-  // The WebContents that opened the dialog.
-  WebContents* contents_;
+  // The TabContents that opened the dialog.
+  TabContents* contents_;
 
   // The parameters needed to display a modal HTML dialog.
-  HtmlDialogContents::HtmlDialogParams params_;
+  HtmlDialogUI::HtmlDialogParams params_;
 
   // Once we get our reply in OnModalDialogResponse we'll need to respond to the
   // plugin using this |sync_result| pointer so we store it between calls.

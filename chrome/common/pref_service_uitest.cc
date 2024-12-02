@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_value_serializer.h"
@@ -19,32 +20,34 @@ class PreferenceServiceTest : public UITest {
 public:
   void SetUp() {
     PathService::Get(base::DIR_TEMP, &tmp_profile_);
-    file_util::AppendToPath(&tmp_profile_, L"tmp_profile");
+    tmp_profile_ = tmp_profile_.AppendASCII("tmp_profile");
 
     // Create a fresh, empty copy of this directory.
     file_util::Delete(tmp_profile_, true);
-    ::CreateDirectory(tmp_profile_.c_str(), NULL);
+    file_util::CreateDirectory(tmp_profile_);
 
-    std::wstring reference_pref_file(test_data_directory_);
-    file_util::AppendToPath(&reference_pref_file, L"profiles");
-    file_util::AppendToPath(&reference_pref_file, L"window_placement");
-    file_util::AppendToPath(&reference_pref_file, chrome::kLocalStateFilename);
+    FilePath reference_pref_file =
+        test_data_directory_
+            .AppendASCII("profiles")
+            .AppendASCII("window_placement")
+            .Append(chrome::kLocalStateFilename);
 
-    tmp_pref_file_ = tmp_profile_;
-    file_util::AppendToPath(&tmp_pref_file_, chrome::kLocalStateFilename);
+    tmp_pref_file_ = tmp_profile_.Append(chrome::kLocalStateFilename);
 
     ASSERT_TRUE(file_util::PathExists(reference_pref_file));
 
     // Copy only the Local State file, the rest will be automatically created
-    ASSERT_TRUE(::CopyFileW(reference_pref_file.c_str(), tmp_pref_file_.c_str(),
-        TRUE));
+    ASSERT_TRUE(file_util::CopyFile(reference_pref_file, tmp_pref_file_));
 
-    // Make the copy writable
-    ASSERT_TRUE(::SetFileAttributesW(tmp_pref_file_.c_str(),
+#if defined(OS_WIN)
+    // Make the copy writable.  On POSIX we assume the umask allows files
+    // we create to be writable.
+    ASSERT_TRUE(::SetFileAttributesW(tmp_pref_file_.value().c_str(),
         FILE_ATTRIBUTE_NORMAL));
+#endif
 
     launch_arguments_.AppendSwitchWithValue(switches::kUserDataDir,
-                                            tmp_profile_);
+                                            tmp_profile_.ToWStringHack());
   }
 
   bool LaunchAppWithProfile() {
@@ -61,10 +64,18 @@ public:
   }
 
 public:
-  std::wstring tmp_pref_file_;
-  std::wstring tmp_profile_;
+  FilePath tmp_pref_file_;
+  FilePath tmp_profile_;
 };
 
+#if defined(OS_WIN)
+// This test verifies that the window position from the prefs file is restored
+// when the app restores.  This doesn't really make sense on Linux, where
+// the window manager might fight with you over positioning.  However, we
+// might be able to make this work on buildbots.
+// Also, not sure what should happen on the mac.  In any case, the code below
+// (minus the Windows bits) compiles fine on my Linux box now.
+// TODO(port): revisit this.
 TEST_F(PreferenceServiceTest, PreservedWindowPlacementIsLoaded) {
   // The window should open with the reference profile
   ASSERT_TRUE(LaunchAppWithProfile());
@@ -80,9 +91,10 @@ TEST_F(PreferenceServiceTest, PreservedWindowPlacementIsLoaded) {
   DictionaryValue* root_dict = static_cast<DictionaryValue*>(root.get());
 
   // Retrieve the screen rect for the launched window
-  scoped_ptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
-  scoped_ptr<WindowProxy> window(browser->GetWindow());
+  scoped_refptr<WindowProxy> window(browser->GetWindow());
+
   HWND hWnd;
   ASSERT_TRUE(window->GetHWND(&hWnd));
 
@@ -92,30 +104,31 @@ TEST_F(PreferenceServiceTest, PreservedWindowPlacementIsLoaded) {
   // Retrieve the expected rect values from "Preferences"
   int bottom = 0;
   std::wstring kBrowserWindowPlacement(prefs::kBrowserWindowPlacement);
-  ASSERT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".bottom",
+  EXPECT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".bottom",
       &bottom));
-  ASSERT_EQ(bottom, window_placement.rcNormalPosition.bottom);
+  EXPECT_EQ(bottom, window_placement.rcNormalPosition.bottom);
 
   int top = 0;
-  ASSERT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".top",
+  EXPECT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".top",
       &top));
-  ASSERT_EQ(top, window_placement.rcNormalPosition.top);
+  EXPECT_EQ(top, window_placement.rcNormalPosition.top);
 
   int left = 0;
-  ASSERT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".left",
+  EXPECT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".left",
       &left));
-  ASSERT_EQ(left, window_placement.rcNormalPosition.left);
+  EXPECT_EQ(left, window_placement.rcNormalPosition.left);
 
   int right = 0;
-  ASSERT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".right",
+  EXPECT_TRUE(root_dict->GetInteger(kBrowserWindowPlacement + L".right",
       &right));
-  ASSERT_EQ(right, window_placement.rcNormalPosition.right);
+  EXPECT_EQ(right, window_placement.rcNormalPosition.right);
 
   // Find if launched window is maximized
   bool is_window_maximized = (window_placement.showCmd == SW_MAXIMIZE);
 
   bool is_maximized = false;
-  ASSERT_TRUE(root_dict->GetBoolean(kBrowserWindowPlacement + L".maximized",
+  EXPECT_TRUE(root_dict->GetBoolean(kBrowserWindowPlacement + L".maximized",
       &is_maximized));
-  ASSERT_EQ(is_maximized, is_window_maximized);
+  EXPECT_EQ(is_maximized, is_window_maximized);
 }
+#endif

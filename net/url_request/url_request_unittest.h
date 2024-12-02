@@ -21,10 +21,11 @@
 #include "base/thread.h"
 #include "base/time.h"
 #include "base/waitable_event.h"
+#include "net/base/host_resolver.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/base/ssl_test_util.h"
 #include "net/http/http_network_layer.h"
+#include "net/socket/ssl_test_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/proxy/proxy_service.h"
@@ -42,17 +43,21 @@ using base::TimeDelta;
 class TestURLRequestContext : public URLRequestContext {
  public:
   TestURLRequestContext() {
+    host_resolver_ = net::CreateSystemHostResolver();
     proxy_service_ = net::ProxyService::CreateNull();
     http_transaction_factory_ =
-        net::HttpNetworkLayer::CreateFactory(proxy_service_);
+        net::HttpNetworkLayer::CreateFactory(host_resolver_,
+            proxy_service_);
   }
 
   explicit TestURLRequestContext(const std::string& proxy) {
-    net::ProxyInfo proxy_info;
-    proxy_info.UseNamedProxy(proxy);
-    proxy_service_ = net::ProxyService::Create(&proxy_info);
+    host_resolver_ = net::CreateSystemHostResolver();
+    net::ProxyConfig proxy_config;
+    proxy_config.proxy_rules.ParseFromString(proxy);
+    proxy_service_ = net::ProxyService::CreateFixed(proxy_config);
     http_transaction_factory_ =
-        net::HttpNetworkLayer::CreateFactory(proxy_service_);
+        net::HttpNetworkLayer::CreateFactory(host_resolver_,
+            proxy_service_);
   }
 
   virtual ~TestURLRequestContext() {
@@ -69,18 +74,26 @@ class TestDelegate : public URLRequest::Delegate {
         cancel_in_rd_(false),
         cancel_in_rd_pending_(false),
         quit_on_complete_(true),
+        quit_on_redirect_(false),
+        allow_certificate_errors_(false),
         response_started_count_(0),
         received_bytes_count_(0),
         received_redirect_count_(0),
         received_data_before_response_(false),
         request_failed_(false),
+        have_certificate_errors_(false),
         buf_(new net::IOBuffer(kBufferSize)) {
   }
 
-  virtual void OnReceivedRedirect(URLRequest* request, const GURL& new_url) {
+  virtual void OnReceivedRedirect(URLRequest* request, const GURL& new_url,
+                                  bool* defer_redirect) {
     received_redirect_count_++;
-    if (cancel_in_rr_)
+    if (quit_on_redirect_) {
+      *defer_redirect = true;
+      MessageLoop::current()->Quit();
+    } else if (cancel_in_rr_) {
       request->Cancel();
+    }
   }
 
   virtual void OnResponseStarted(URLRequest* request) {
@@ -158,10 +171,14 @@ class TestDelegate : public URLRequest::Delegate {
   virtual void OnSSLCertificateError(URLRequest* request,
                                      int cert_error,
                                      net::X509Certificate* cert) {
-    // Ignore SSL errors, we test the server is started and shut it down by
-    // performing GETs, no security restrictions should apply as we always want
-    // these GETs to go through.
-    request->ContinueDespiteLastError();
+    // The caller can control whether it needs all SSL requests to go through,
+    // independent of any possible errors, or whether it wants SSL errors to
+    // cancel the request.
+    have_certificate_errors_ = true;
+    if (allow_certificate_errors_)
+      request->ContinueDespiteLastError();
+    else
+      request->Cancel();
   }
 
   void set_cancel_in_received_redirect(bool val) { cancel_in_rr_ = val; }
@@ -171,6 +188,10 @@ class TestDelegate : public URLRequest::Delegate {
     cancel_in_rd_pending_ = val;
   }
   void set_quit_on_complete(bool val) { quit_on_complete_ = val; }
+  void set_quit_on_redirect(bool val) { quit_on_redirect_ = val; }
+  void set_allow_certificate_errors(bool val) {
+    allow_certificate_errors_ = val;
+  }
   void set_username(const std::wstring& u) { username_ = u; }
   void set_password(const std::wstring& p) { password_ = p; }
 
@@ -183,6 +204,7 @@ class TestDelegate : public URLRequest::Delegate {
     return received_data_before_response_;
   }
   bool request_failed() const { return request_failed_; }
+  bool have_certificate_errors() const { return have_certificate_errors_; }
 
  private:
   static const int kBufferSize = 4096;
@@ -192,6 +214,8 @@ class TestDelegate : public URLRequest::Delegate {
   bool cancel_in_rd_;
   bool cancel_in_rd_pending_;
   bool quit_on_complete_;
+  bool quit_on_redirect_;
+  bool allow_certificate_errors_;
 
   std::wstring username_;
   std::wstring password_;
@@ -202,6 +226,7 @@ class TestDelegate : public URLRequest::Delegate {
   int received_redirect_count_;
   bool received_data_before_response_;
   bool request_failed_;
+  bool have_certificate_errors_;
   std::string data_received_;
 
   // our read buffer
@@ -248,20 +273,22 @@ class BaseTestServer : public base::RefCounted<BaseTestServer> {
   bool Start(net::TestServerLauncher::Protocol protocol,
              const std::string& host_name, int port,
              const FilePath& document_root,
-             const FilePath& cert_path) {
+             const FilePath& cert_path,
+             const std::wstring& file_root_url) {
     std::string blank;
     return Start(protocol, host_name, port, document_root, cert_path,
-                 blank, blank);
+                 file_root_url, blank, blank);
   }
 
   bool Start(net::TestServerLauncher::Protocol protocol,
              const std::string& host_name, int port,
              const FilePath& document_root,
              const FilePath& cert_path,
+             const std::wstring& file_root_url,
              const std::string& url_user,
              const std::string& url_password) {
     if (!launcher_.Start(protocol,
-        host_name, port, document_root, cert_path))
+        host_name, port, document_root, cert_path, file_root_url))
       return false;
 
     std::string scheme;
@@ -326,13 +353,20 @@ class HTTPTestServer : public BaseTestServer {
   static scoped_refptr<HTTPTestServer> CreateServer(
       const std::wstring& document_root,
       MessageLoop* loop) {
+    return CreateServerWithFileRootURL(document_root, std::wstring(), loop);
+  }
+
+  static scoped_refptr<HTTPTestServer> CreateServerWithFileRootURL(
+      const std::wstring& document_root,
+      const std::wstring& file_root_url,
+      MessageLoop* loop) {
     scoped_refptr<HTTPTestServer> test_server = new HTTPTestServer();
     test_server->loop_ = loop;
     FilePath no_cert;
     FilePath docroot = FilePath::FromWStringHack(document_root);
     if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
                             kDefaultHostName, kHTTPDefaultPort,
-                            docroot, no_cert)) {
+                            docroot, no_cert, file_root_url)) {
       return NULL;
     }
     return test_server;
@@ -426,7 +460,7 @@ class HTTPSTestServer : public HTTPTestServer {
     if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
         net::TestServerLauncher::kHostName,
         net::TestServerLauncher::kOKHTTPSPort,
-        docroot, certpath)) {
+        docroot, certpath, std::wstring())) {
       return NULL;
     }
     return test_server;
@@ -442,7 +476,7 @@ class HTTPSTestServer : public HTTPTestServer {
     if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
         net::TestServerLauncher::kMismatchedHostName,
         net::TestServerLauncher::kOKHTTPSPort,
-        docroot, certpath)) {
+        docroot, certpath, std::wstring())) {
       return NULL;
     }
     return test_server;
@@ -451,13 +485,13 @@ class HTTPSTestServer : public HTTPTestServer {
   // Create a server with an expired certificate
   static scoped_refptr<HTTPSTestServer> CreateExpiredServer(
       const std::wstring& document_root) {
-    HTTPSTestServer* test_server = new HTTPSTestServer();
+    scoped_refptr<HTTPSTestServer> test_server = new HTTPSTestServer();
     FilePath docroot = FilePath::FromWStringHack(document_root);
     FilePath certpath = test_server->launcher_.GetExpiredCertPath();
     if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
         net::TestServerLauncher::kHostName,
         net::TestServerLauncher::kBadHTTPSPort,
-        docroot, certpath)) {
+        docroot, certpath, std::wstring())) {
       return NULL;
     }
     return test_server;
@@ -472,7 +506,7 @@ class HTTPSTestServer : public HTTPTestServer {
     FilePath docroot = FilePath::FromWStringHack(document_root);
     FilePath certpath = FilePath::FromWStringHack(cert_path);
     if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
-        host_name, port, docroot, certpath)) {
+        host_name, port, docroot, certpath, std::wstring())) {
       return NULL;
     }
     return test_server;
@@ -505,7 +539,7 @@ class FTPTestServer : public BaseTestServer {
     FilePath docroot = FilePath::FromWStringHack(document_root);
     FilePath no_cert;
     if (!test_server->Start(net::TestServerLauncher::ProtoFTP,
-        kDefaultHostName, kFTPDefaultPort, docroot, no_cert,
+        kDefaultHostName, kFTPDefaultPort, docroot, no_cert, std::wstring(),
         url_user, url_password)) {
       return NULL;
     }
@@ -527,7 +561,6 @@ class FTPTestServer : public BaseTestServer {
 
     return true;
   }
-
 };
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_UNITTEST_H_

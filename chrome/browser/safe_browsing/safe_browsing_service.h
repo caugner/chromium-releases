@@ -72,8 +72,7 @@ class SafeBrowsingService
 
   // Initializes the service.  io_loop is the message loop that the
   // caller of this service (ResourceDispatcherHost) wants to be notified on
-  // for check results.  db_loop is the message loop for the thread to do
-  // the database work.
+  // for check results.
   void Initialize(MessageLoop* io_loop);
 
   // Called to initialize objects that are used on the io_thread.
@@ -118,7 +117,6 @@ class SafeBrowsingService
     Client* client;
     bool need_get_hash;
     base::Time start;  // Time that check was sent to SB service.
-    base::TimeDelta db_time;  // How long DB look-up took.
     UrlCheckResult result;
     std::vector<SBPrefix> prefix_hits;
     std::vector<SBFullHashResult> full_hits;
@@ -188,9 +186,6 @@ class SafeBrowsingService
 
   // Release the final reference to the database on the db thread.
   void ReleaseDatabase(SafeBrowsingDatabase* database);
-
-  // Called on the database thread to check a url.
-  void CheckDatabase(SafeBrowsingCheck* info, base::Time last_update);
 
   // Called on the IO thread with the check result.
   void OnCheckDone(SafeBrowsingCheck* info);
@@ -284,7 +279,7 @@ class SafeBrowsingService
   bool enabled_;
 
   // The SafeBrowsing thread that runs database operations.
-  scoped_ptr<base::Thread> db_thread_;
+  scoped_ptr<base::Thread> safe_browsing_thread_;
 
   // Indicates if we are in the process of resetting the database.
   bool resetting_;

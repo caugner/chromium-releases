@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_RENDEDER_HOST_RENDER_WIDGET_HELPER_H_
 #define CHROME_BROWSER_RENDEDER_HOST_RENDER_WIDGET_HELPER_H_
 
+#include <map>
+
 #include "base/atomic_sequence_num.h"
 #include "base/hash_tables.h"
 #include "base/process.h"
@@ -24,6 +26,7 @@ class TimeDelta;
 
 class MessageLoop;
 class ResourceDispatcherHost;
+struct ViewMsg_ClosePage_Params;
 
 // Instantiated per RenderProcessHost to provide various optimizations on
 // behalf of a RenderWidgetHost.  This class bridges between the IO thread
@@ -65,7 +68,7 @@ class ResourceDispatcherHost;
 //   is restored, it can be momentarily without a backingstore.  (Restoring a
 //   RenderWidgetHost results in a WasRestored message being sent to the
 //   RenderWidget, which triggers a full PaintRect message.)  This can lead to
-//   an observed rendering glitch as the WebContents will just have to fill
+//   an observed rendering glitch as the TabContents will just have to fill
 //   white overtop the RenderWidgetHost until the RenderWidgetHost receives a
 //   PaintRect message to refresh its backingstore.
 //
@@ -95,9 +98,6 @@ class RenderWidgetHelper :
   // Gets the next available routing id.  This is thread safe.
   int GetNextRoutingID();
 
-  // Sets whether popup blocking is enabled or not.
-  void set_block_popups(bool block) { block_popups_ = block; }
-
 
   // UI THREAD ONLY -----------------------------------------------------------
 
@@ -105,8 +105,7 @@ class RenderWidgetHelper :
   // corresponding functions in RenderProcessHost. See those declarations
   // for documentation.
   void CancelResourceRequests(int render_widget_id);
-  void CrossSiteClosePageACK(int new_render_process_host_id,
-                             int new_request_id);
+  void CrossSiteClosePageACK(const ViewMsg_ClosePage_Params& params);
   bool WaitForPaintMsg(int render_widget_id,
                        const base::TimeDelta& max_delay,
                        IPC::Message* msg);
@@ -139,6 +138,12 @@ class RenderWidgetHelper :
   void FreeTransportDIB(TransportDIB::Id dib_id);
 #endif
 
+  // Helper functions to signal and reset the modal dialog event, used to
+  // signal the renderer that it needs to pump messages while waiting for
+  // sync calls to return. These functions proxy the request to the UI thread.
+  void SignalModalDialogEvent(int routing_id);
+  void ResetModalDialogEvent(int routing_id);
+
  private:
   // A class used to proxy a paint message.  PaintMsgProxy objects are created
   // on the IO thread and destroyed on the UI thread.
@@ -155,20 +160,21 @@ class RenderWidgetHelper :
   void OnDispatchPaintMsg(PaintMsgProxy* proxy);
 
   // Called on the UI thread to finish creating a window.
-  void OnCreateWindowOnUI(const IPC::Message& message, int route_id);
+  void OnCreateWindowOnUI(int opener_id,
+                          int route_id,
+                          ModalDialogEvent modal_dialog_event);
 
   // Called on the IO thread after a window was created on the UI thread.
   void OnCreateWindowOnIO(int route_id);
 
   // Called on the UI thread to finish creating a widget.
-  void OnCreateWidgetOnUI(const IPC::Message& message);
+  void OnCreateWidgetOnUI(int opener_id, int route_id, bool activatable);
 
   // Called on the IO thread to cancel resource requests for the render widget.
   void OnCancelResourceRequests(int render_widget_id);
 
   // Called on the IO thread to resume a cross-site response.
-  void OnCrossSiteClosePageACK(int new_render_process_host_id,
-                               int new_request_id);
+  void OnCrossSiteClosePageACK(ViewMsg_ClosePage_Params params);
 
 #if defined(OS_MACOSX)
   // Called on destruction to release all allocated transport DIBs
@@ -179,6 +185,9 @@ class RenderWidgetHelper :
   Lock allocated_dibs_lock_;
   std::map<TransportDIB::Id, int> allocated_dibs_;
 #endif
+
+  void SignalModalDialogEventOnUI(int routing_id);
+  void ResetModalDialogEventOnUI(int routing_id);
 
   // A map of live paint messages.  Must hold pending_paints_lock_ to access.
   // The PaintMsgProxy objects are not owned by this map.  (See PaintMsgProxy
@@ -194,9 +203,6 @@ class RenderWidgetHelper :
 
   // The next routing id to use.
   base::AtomicSequenceNumber next_routing_id_;
-
-  // Whether popup blocking is enabled or not.
-  bool block_popups_;
 
   ResourceDispatcherHost* resource_dispatcher_host_;
 

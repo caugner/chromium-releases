@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,28 +6,29 @@
 
 #include <algorithm>
 
+#include "app/gfx/canvas.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
 #include "base/string_util.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/find_bar_controller.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/find_bar_win.h"
 #include "chrome/browser/view_ids.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/resource_bundle.h"
-#include "chrome/views/background.h"
-#include "chrome/views/controls/button/image_button.h"
-#include "chrome/views/controls/label.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "skia/include/SkGradientShader.h"
+#include "third_party/skia/include/effects/SkGradientShader.h"
+#include "views/background.h"
+#include "views/controls/button/image_button.h"
+#include "views/controls/label.h"
 
 // The amount of whitespace to have before the find button.
-static const int kWhiteSpaceAfterMatchCountLabel = 3;
+static const int kWhiteSpaceAfterMatchCountLabel = 1;
 
 // The margins around the search field and the close button.
 static const int kMarginLeftOfCloseButton = 3;
 static const int kMarginRightOfCloseButton = 7;
-static const int kMarginLeftOfFindTextField = 12;
+static const int kMarginLeftOfFindTextfield = 12;
 
 // The margins around the match count label (We add extra space so that the
 // background highlight extends beyond just the text).
@@ -52,15 +53,9 @@ static const SkColor kBackgroundColorNoMatch = SkColorSetRGB(255, 102, 102);
 // and a right part. The middle part determines the height of the dialog. The
 // middle part is stretched to fill any remaining part between the left and the
 // right image, after sizing the dialog to kWindowWidth.
-static const SkBitmap* kDlgBackground_left = NULL;
-static const SkBitmap* kDlgBackground_middle = NULL;
-static const SkBitmap* kDlgBackground_right = NULL;
-
-// These are versions of the above images but for use when the bookmarks bar
-// is extended (when toolbar_blend_ = false).
-static const SkBitmap* kDlgBackground_bb_left = NULL;
-static const SkBitmap* kDlgBackground_bb_middle = NULL;
-static const SkBitmap* kDlgBackground_bb_right = NULL;
+static const SkBitmap* kDialog_left = NULL;
+static const SkBitmap* kDialog_middle = NULL;
+static const SkBitmap* kDialog_right = NULL;
 
 // When we are animating, we draw only the top part of the left and right
 // edges to give the illusion that the find dialog is attached to the
@@ -89,15 +84,14 @@ FindBarView::FindBarView(FindBarWin* container)
       find_previous_button_(NULL),
       find_next_button_(NULL),
       close_button_(NULL),
-      animation_offset_(0),
-      last_reported_matchcount_(0),
-      toolbar_blend_(true) {
+      animation_offset_(0) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
-  find_text_ = new views::TextField();
+  find_text_ = new views::Textfield();
   find_text_->SetID(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD);
   find_text_->SetFont(rb.GetFont(ResourceBundle::BaseFont));
   find_text_->set_default_width_in_chars(kDefaultCharWidth);
+  find_text_->SetController(this);
   AddChildView(find_text_);
 
   match_count_text_ = new views::Label();
@@ -151,17 +145,11 @@ FindBarView::FindBarView(FindBarWin* container)
       l10n_util::GetString(IDS_FIND_IN_PAGE_CLOSE_TOOLTIP));
   AddChildView(close_button_);
 
-  if (kDlgBackground_left == NULL) {
+  if (kDialog_left == NULL) {
     // Background images for the dialog.
-    kDlgBackground_left = rb.GetBitmapNamed(IDR_FIND_DLG_LEFT_BACKGROUND);
-    kDlgBackground_middle = rb.GetBitmapNamed(IDR_FIND_DLG_MIDDLE_BACKGROUND);
-    kDlgBackground_right = rb.GetBitmapNamed(IDR_FIND_DLG_RIGHT_BACKGROUND);
-    kDlgBackground_bb_left =
-        rb.GetBitmapNamed(IDR_FIND_DLG_LEFT_BB_BACKGROUND);
-    kDlgBackground_bb_middle =
-        rb.GetBitmapNamed(IDR_FIND_DLG_MIDDLE_BB_BACKGROUND);
-    kDlgBackground_bb_right =
-        rb.GetBitmapNamed(IDR_FIND_DLG_RIGHT_BB_BACKGROUND);
+    kDialog_left = rb.GetBitmapNamed(IDR_FIND_DIALOG_LEFT);
+    kDialog_middle = rb.GetBitmapNamed(IDR_FIND_DIALOG_MIDDLE);
+    kDialog_right = rb.GetBitmapNamed(IDR_FIND_DIALOG_RIGHT);
 
     // Background images for the Find edit box.
     kBackground = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND);
@@ -175,40 +163,25 @@ FindBarView::FindBarView(FindBarWin* container)
 FindBarView::~FindBarView() {
 }
 
-void FindBarView::SetFindText(const std::wstring& find_text) {
-  find_text_->SetText(find_text);
+void FindBarView::SetFindText(const string16& find_text) {
+  find_text_->SetText(UTF16ToWide(find_text));
 }
 
 void FindBarView::UpdateForResult(const FindNotificationDetails& result,
-                                  const std::wstring& find_text) {
+                                  const string16& find_text) {
   bool have_valid_range =
       result.number_of_matches() != -1 && result.active_match_ordinal() != -1;
-
-  // Avoid bug 894389: When a new search starts (and finds something) it reports
-  // an interim match count result of 1 before the scoping effort starts. This
-  // is to provide feedback as early as possible that we will find something.
-  // As you add letters to the search term, this creates a flashing effect when
-  // we briefly show "1 of 1" matches because there is a slight delay until
-  // the scoping effort starts updating the match count. We avoid this flash by
-  // ignoring interim results of 1 if we already have a positive number.
-  if (result.number_of_matches() > -1) {
-    if (last_reported_matchcount_ > 0 &&
-        result.number_of_matches() == 1 &&
-        !result.final_update())
-      return;  // Don't let interim result override match count.
-    last_reported_matchcount_ = result.number_of_matches();
-  }
 
   // If we don't have any results and something was passed in, then that means
   // someone pressed F3 while the Find box was closed. In that case we need to
   // repopulate the Find box with what was passed in.
-  if (find_text_->GetText().empty() && !find_text.empty()) {
-    find_text_->SetText(find_text);
+  std::wstring search_string = find_text_->text();
+  if (search_string.empty() && !find_text.empty()) {
+    find_text_->SetText(UTF16ToWide(find_text));
     find_text_->SelectAll();
   }
 
-  std::wstring search_string = find_text_->GetText();
-  if (search_string.length() > 0 && have_valid_range) {
+  if (!search_string.empty() && have_valid_range) {
     match_count_text_->SetText(
         l10n_util::GetStringF(IDS_FIND_IN_PAGE_COUNT,
                               IntToWString(result.active_match_ordinal()),
@@ -231,19 +204,22 @@ void FindBarView::UpdateForResult(const FindNotificationDetails& result,
     match_count_text_->set_background(
         views::Background::CreateSolidBackground(kBackgroundColorNoMatch));
     match_count_text_->SetColor(kTextColorNoMatch);
-    MessageBeep(MB_OK);
   }
 
   // Make sure Find Next and Find Previous are enabled if we found any matches.
   find_previous_button_->SetEnabled(result.number_of_matches() > 0);
   find_next_button_->SetEnabled(result.number_of_matches() > 0);
 
-  Layout();  // The match_count label may have increased/decreased in size.
+  // The match_count label may have increased/decreased in size so we need to
+  // do a layout and repaint the dialog so that the find text field doesn't
+  // partially overlap the match-count label when it increases on no matches.
+  Layout();
+  SchedulePaint();
 }
 
 void FindBarView::SetFocusAndSelection() {
   find_text_->RequestFocus();
-  if (!find_text_->GetText().empty()) {
+  if (!find_text_->text().empty()) {
     find_text_->SelectAll();
 
     find_previous_button_->SetEnabled(true);
@@ -254,7 +230,7 @@ void FindBarView::SetFocusAndSelection() {
 ///////////////////////////////////////////////////////////////////////////////
 // FindBarView, views::View overrides:
 
-void FindBarView::Paint(ChromeCanvas* canvas) {
+void FindBarView::Paint(gfx::Canvas* canvas) {
   SkPaint paint;
 
   // Get the local bounds so that we now how much to stretch the background.
@@ -265,28 +241,27 @@ void FindBarView::Paint(ChromeCanvas* canvas) {
   // controller, so the whitespace in the left and right background images is
   // actually outside the window region and is therefore not drawn. See
   // FindInPageWidgetWin::CreateRoundedWindowEdges() for details.
-  const SkBitmap *bg_left =
-      toolbar_blend_ ? kDlgBackground_left : kDlgBackground_bb_left;
-  const SkBitmap *bg_middle =
-      toolbar_blend_ ? kDlgBackground_middle : kDlgBackground_bb_middle;
-  const SkBitmap *bg_right =
-      toolbar_blend_ ? kDlgBackground_right : kDlgBackground_bb_right;
+  ThemeProvider* tp = GetThemeProvider();
+  gfx::Rect bounds;
+  container_->GetThemePosition(&bounds);
+  canvas->TileImageInt(*tp->GetBitmapNamed(IDR_THEME_TOOLBAR),
+                       bounds.x(), bounds.y(), 0, 0, lb.width(), lb.height());
 
-  canvas->DrawBitmapInt(*bg_left, 0, 0);
+  canvas->DrawBitmapInt(*kDialog_left, 0, 0);
 
   // Stretch the middle background to cover all of the area between the two
   // other images.
-  canvas->TileImageInt(*bg_middle,
-                        bg_left->width(),
+  canvas->TileImageInt(*kDialog_middle,
+                        kDialog_left->width(),
                         0,
                         lb.width() -
-                            bg_left->width() -
-                            bg_right->width(),
-                        bg_middle->height());
+                            kDialog_left->width() -
+                            kDialog_right->width(),
+                        kDialog_middle->height());
 
-  canvas->DrawBitmapInt(*bg_right, lb.right() - bg_right->width(), 0);
+  canvas->DrawBitmapInt(*kDialog_right, lb.right() - kDialog_right->width(), 0);
 
-  // Then we draw the background image for the Find TextField. We start by
+  // Then we draw the background image for the Find Textfield. We start by
   // calculating the position of background images for the Find text box.
   gfx::Rect find_text_rect;
   gfx::Rect back_button_rect;
@@ -326,15 +301,15 @@ void FindBarView::Paint(ChromeCanvas* canvas) {
   if (animation_offset_ > 0) {
     // While animating we draw the curved edges at the point where the
     // controller told us the top of the window is: |animation_offset_|.
-    canvas->TileImageInt(*bg_left,
+    canvas->TileImageInt(*kDialog_left,
                          lb.x(),
                          animation_offset_,
-                         bg_left->width(),
+                         kDialog_left->width(),
                          kAnimatingEdgeHeight);
-    canvas->TileImageInt(*bg_right,
-                         lb.right() - bg_right->width(),
+    canvas->TileImageInt(*kDialog_right,
+                         lb.right() - kDialog_right->width(),
                          animation_offset_,
-                         bg_right->width(),
+                         kDialog_right->width(),
                          kAnimatingEdgeHeight);
   }
 }
@@ -369,25 +344,32 @@ void FindBarView::Layout() {
 
   // Then the label showing the match count number.
   sz = match_count_text_->GetPreferredSize();
+  // We want to make sure the red "no-match" background almost completely fills
+  // up the amount of vertical space within the text box. We therefore fix the
+  // size relative to the button heights. We use the FindPrev button, which has
+  // a 1px outer whitespace margin, 1px border and we want to appear 1px below
+  // the border line so we subtract 3 for top and 3 for bottom.
+  sz.set_height(find_previous_button_->height() - 6);  // Subtract 3px x 2.
+
   // We extend the label bounds a bit to give the background highlighting a bit
   // of breathing room (margins around the text).
   sz.Enlarge(kMatchCountExtraWidth, 0);
   sz.set_width(std::max(kMatchCountMinWidth, static_cast<int>(sz.width())));
-  match_count_text_->SetBounds(find_previous_button_->x() -
-                                   kWhiteSpaceAfterMatchCountLabel -
-                                   sz.width(),
-                               (height() - sz.height()) / 2 + 1,
+  int match_count_x = find_previous_button_->x() -
+                      kWhiteSpaceAfterMatchCountLabel -
+                      sz.width();
+  match_count_text_->SetBounds(match_count_x,
+                               (height() - sz.height()) / 2,
                                sz.width(),
                                sz.height());
 
   // And whatever space is left in between, gets filled up by the find edit box.
   sz = find_text_->GetPreferredSize();
-  sz.set_width(match_count_text_->x() - kMarginLeftOfFindTextField);
-  find_text_->SetBounds(match_count_text_->x() - sz.width(),
+  sz.set_width(match_count_x - kMarginLeftOfFindTextfield);
+  find_text_->SetBounds(match_count_x - sz.width(),
                         (height() - sz.height()) / 2 + 1,
                         sz.width(),
                         sz.height());
-  find_text_->SetController(this);
 
   // The focus forwarder view is a hidden view that should cover the area
   // between the find text box and the find button so that when the user clicks
@@ -409,11 +391,11 @@ void FindBarView::ViewHierarchyChanged(bool is_add, View *parent, View *child) {
 
 gfx::Size FindBarView::GetPreferredSize() {
   gfx::Size prefsize = find_text_->GetPreferredSize();
-  prefsize.set_height(kDlgBackground_middle->height());
+  prefsize.set_height(kDialog_middle->height());
 
   // Add up all the preferred sizes and margins of the rest of the controls.
   prefsize.Enlarge(kMarginLeftOfCloseButton + kMarginRightOfCloseButton +
-                       kMarginLeftOfFindTextField,
+                       kMarginLeftOfFindTextfield,
                    0);
   prefsize.Enlarge(find_previous_button_->GetPreferredSize().width(), 0);
   prefsize.Enlarge(find_next_button_->GetPreferredSize().width(), 0);
@@ -428,14 +410,20 @@ void FindBarView::ButtonPressed(views::Button* sender) {
   switch (sender->tag()) {
     case FIND_PREVIOUS_TAG:
     case FIND_NEXT_TAG:
-      if (find_text_->GetText().length() > 0) {
-        container_->find_bar_controller()->web_contents()->StartFinding(
-            find_text_->GetText(),
-            sender->tag() == FIND_NEXT_TAG);
+      if (!find_text_->text().empty()) {
+        container_->GetFindBarController()->tab_contents()->StartFinding(
+            WideToUTF16(find_text_->text()),
+            sender->tag() == FIND_NEXT_TAG,
+            false);  // Not case sensitive.
       }
+      // Move the focus back to the text-field, we don't want the button
+      // focused.
+      // TODO(jcampan): http://crbug.com/9867 we should not change the focus
+      //                when teh button was pressed by pressing a key.
+      find_text_->RequestFocus();
       break;
     case CLOSE_TAG:
-      container_->find_bar_controller()->EndFindSession();
+      container_->GetFindBarController()->EndFindSession();
       break;
     default:
       NOTREACHED() << L"Unknown button";
@@ -444,49 +432,58 @@ void FindBarView::ButtonPressed(views::Button* sender) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// FindBarView, views::TextField::Controller implementation:
+// FindBarView, views::Textfield::Controller implementation:
 
-void FindBarView::ContentsChanged(views::TextField* sender,
+void FindBarView::ContentsChanged(views::Textfield* sender,
                                   const std::wstring& new_contents) {
-  FindBarController* controller = container_->find_bar_controller();
+  FindBarController* controller = container_->GetFindBarController();
   DCHECK(controller);
-  // We must guard against a NULL web_contents, which can happen if the text
+  // We must guard against a NULL tab_contents, which can happen if the text
   // in the Find box is changed right after the tab is destroyed. Otherwise, it
   // can lead to crashes, as exposed by automation testing in issue 8048.
-  if (!controller->web_contents())
+  if (!controller->tab_contents())
     return;
 
   // When the user changes something in the text box we check the contents and
   // if the textbox contains something we set it as the new search string and
   // initiate search (even though old searches might be in progress).
-  if (new_contents.length() > 0) {
-    controller->web_contents()->StartFinding(new_contents, true);
+  if (!new_contents.empty()) {
+    // The last two params here are forward (true) and case sensitive (false).
+    controller->tab_contents()->StartFinding(WideToUTF16(new_contents),
+                                             true, false);
   } else {
     // The textbox is empty so we reset.  true = clear selection on page.
-    controller->web_contents()->StopFinding(true);
-    UpdateForResult(controller->web_contents()->find_result(), std::wstring());
+    controller->tab_contents()->StopFinding(true);
+    UpdateForResult(controller->tab_contents()->find_result(), string16());
   }
 }
 
-void FindBarView::HandleKeystroke(views::TextField* sender, UINT message,
-                                  TCHAR key, UINT repeat_count, UINT flags) {
+bool FindBarView::HandleKeystroke(views::Textfield* sender,
+                                  const views::Textfield::Keystroke& key) {
   // If the dialog is not visible, there is no reason to process keyboard input.
   if (!container_->IsVisible())
-    return;
+    return false;
 
-  switch (key) {
-    case VK_RETURN: {
-      // Pressing Return/Enter starts the search (unless text box is empty).
-      std::wstring find_string = find_text_->GetText();
-      if (find_string.length() > 0) {
-        // Search forwards for enter, backwards for shift-enter.
-        container_->find_bar_controller()->web_contents()->StartFinding(
-            find_string,
-            GetKeyState(VK_SHIFT) >= 0);
-      }
-      break;
+  // TODO(port): Handle this for other platforms.
+  #if defined(OS_WIN)
+  if (container_->MaybeForwardKeystrokeToWebpage(key.message, key.key,
+                                                 key.flags))
+    return true;  // Handled, we are done!
+
+  if (views::Textfield::IsKeystrokeEnter(key)) {
+    // Pressing Return/Enter starts the search (unless text box is empty).
+    std::wstring find_string = find_text_->text();
+    if (!find_string.empty()) {
+      // Search forwards for enter, backwards for shift-enter.
+      container_->GetFindBarController()->tab_contents()->StartFinding(
+          find_string,
+          GetKeyState(VK_SHIFT) >= 0,
+          false);  // Not case sensitive.
     }
   }
+  #endif
+
+  return false;
 }
 
 void FindBarView::ResetMatchCountBackground() {

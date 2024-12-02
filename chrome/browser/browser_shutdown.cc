@@ -4,6 +4,7 @@
 
 #include "chrome/browser/browser_shutdown.h"
 
+#include "app/resource_bundle.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/histogram.h"
@@ -16,7 +17,7 @@
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/jankometer.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/plugin_service.h"
+#include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
@@ -25,15 +26,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/chrome_plugin_lib.h"
-#include "chrome/common/resource_bundle.h"
 #include "net/dns_global.h"
-
-// TODO(port): Get rid of this section and finish porting.
-#if defined(OS_WIN)
-#include "chrome/browser/plugin_process_host.h"
-#else
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
 
 
 using base::Time;
@@ -72,6 +65,7 @@ void OnShutdownStarting(ShutdownType type) {
     // a no-op in some cases, so we still need to go through the normal
     // shutdown path for the ones that didn't exit here.
     shutdown_num_processes_slow_ = 0;
+    size_t start_rph_size = RenderProcessHost::size();
     for (RenderProcessHost::iterator hosts = RenderProcessHost::begin();
          hosts != RenderProcessHost::end();
          ++hosts) {
@@ -81,6 +75,9 @@ void OnShutdownStarting(ShutdownType type) {
         // higher up, it's not possible to get here. Confirm this and change
         // FastShutdownIfPossible to just be FastShutdown.
         shutdown_num_processes_slow_++;
+      // The number of RPHs should not have changed as the result of invoking
+      // FastShutdownIfPossible.
+      CHECK(start_rph_size == RenderProcessHost::size());
     }
   }
 }
@@ -105,11 +102,6 @@ void Shutdown() {
 
   // Notifies we are going away.
   g_browser_process->shutdown_event()->Signal();
-
-  PluginService* plugin_service = PluginService::GetInstance();
-  if (plugin_service) {
-    plugin_service->Shutdown();
-  }
 
   PrefService* prefs = g_browser_process->local_state();
 
@@ -136,7 +128,7 @@ void Shutdown() {
                       shutdown_num_processes_slow_);
   }
 
-  prefs->SavePersistentPrefs(g_browser_process->file_thread());
+  prefs->SavePersistentPrefs();
 
   // Cleanup any statics created by RLZ. Must be done before NotificationService
   // is destroyed.

@@ -6,34 +6,27 @@
 #define CHROME_TEST_TESTING_PROFILE_H_
 
 #include "base/base_paths.h"
-#include "base/file_path.h"
-#include "base/path_service.h"
 #include "base/file_util.h"
+#include "base/path_service.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_prefs.h"
+#include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/common/pref_service.h"
 
-#if defined(OS_POSIX)
-// TODO(port): get rid of this include. It's used just to provide declarations
-// and stub definitions for classes we encouter during the porting effort.
-#include "chrome/common/temp_scaffolding_stubs.h"
-#endif
-
-// TODO(port): Get rid of this section and finish porting.
-#if defined(OS_WIN)
-#include "chrome/browser/history/history.h"
-#endif
 
 class TestingProfile : public Profile {
  public:
   TestingProfile();
+
   // Creates a new profile by adding |count| to the end of the path. Use this
   // when you need to have more than one TestingProfile running at the same
   // time.
   explicit TestingProfile(int count);
+
   virtual ~TestingProfile();
 
   // Creates the history service. If |delete_file| is true, the history file is
@@ -59,6 +52,9 @@ class TestingProfile : public Profile {
   // Creates a TemplateURLModel. If not invoked the TemplateURLModel is NULL.
   void CreateTemplateURLModel();
 
+  // Creates a ThemeProvider. If not invoked the ThemeProvider is NULL.
+  void CreateThemeProvider();
+
   virtual FilePath GetPath() {
     return path_;
   }
@@ -72,6 +68,9 @@ class TestingProfile : public Profile {
   virtual Profile* GetOffTheRecordProfile() {
     return NULL;
   }
+
+  virtual void DestroyOffTheRecordProfile() {}
+
   virtual Profile* GetOriginalProfile() {
     return this;
   }
@@ -84,7 +83,16 @@ class TestingProfile : public Profile {
   virtual UserScriptMaster* GetUserScriptMaster() {
     return NULL;
   }
+  virtual ExtensionProcessManager* GetExtensionProcessManager() {
+    return NULL;
+  }
+  virtual ExtensionMessageService* GetExtensionMessageService() {
+    return NULL;
+  }
   virtual SSLHostState* GetSSLHostState() {
+    return NULL;
+  }
+  virtual net::ForceTLSState* GetForceTLSState() {
     return NULL;
   }
   virtual HistoryService* GetHistoryService(ServiceAccessType access) {
@@ -96,13 +104,14 @@ class TestingProfile : public Profile {
   virtual WebDataService* GetWebDataService(ServiceAccessType access) {
     return NULL;
   }
+  virtual PasswordStore* GetPasswordStore(ServiceAccessType access) {
+    return NULL;
+  }
   virtual PrefService* GetPrefs() {
-    FilePath prefs_filename;
-    PathService::Get(base::DIR_TEMP, &prefs_filename);
-    prefs_filename =
-        prefs_filename.Append(FILE_PATH_LITERAL("TestPreferences"));
     if (!prefs_.get()) {
-      prefs_.reset(new PrefService(prefs_filename));
+      FilePath prefs_filename =
+          path_.Append(FILE_PATH_LITERAL("TestPreferences"));
+      prefs_.reset(new PrefService(prefs_filename, NULL));
       Profile::RegisterUserPrefs(prefs_.get());
       browser::RegisterAllPrefs(prefs_.get(), prefs_.get());
     }
@@ -114,16 +123,37 @@ class TestingProfile : public Profile {
   virtual TemplateURLFetcher* GetTemplateURLFetcher() {
     return NULL;
   }
+
+  virtual ThumbnailStore* GetThumbnailStore() {
+    return NULL;
+  }
+
   virtual DownloadManager* GetDownloadManager() {
     return NULL;
   }
   virtual bool HasCreatedDownloadManager() const {
     return false;
   }
+  virtual void InitThemes() { }
+  virtual void SetTheme(Extension* extension) { }
+  virtual void SetNativeTheme() { }
+  virtual void ClearTheme() { }
+  virtual Extension* GetTheme() {
+    return NULL;
+  }
+  virtual ThemeProvider* GetThemeProvider() {
+    return theme_provider_.get();
+  }
   virtual URLRequestContext* GetRequestContext() {
     return NULL;
   }
   virtual URLRequestContext* GetRequestContextForMedia() {
+    return NULL;
+  }
+  virtual URLRequestContext* GetRequestContextForExtensions() {
+    return NULL;
+  }
+  virtual Blacklist* GetBlacklist() {
     return NULL;
   }
   void set_session_service(SessionService* session_service) {
@@ -180,10 +210,23 @@ class TestingProfile : public Profile {
   virtual SpellChecker* GetSpellChecker() {
     return NULL;
   }
+  virtual WebKitContext* GetWebKitContext() {
+    return NULL;
+  }
+  virtual WebKitContext* GetOffTheRecordWebKitContext() {
+    return NULL;
+  }
   virtual void MarkAsCleanShutdown() {
   }
   virtual void InitExtensions() {
   }
+  virtual void InitWebResources() {
+  }
+
+  // Schedules a task on the history backend and runs a nested loop until the
+  // task is processed.  This has the effect of blocking the caller until the
+  // history service processes all pending requests.
+  void BlockUntilHistoryProcessesPendingRequests();
 
 #ifdef CHROME_PERSONALIZATION
   virtual ProfilePersonalization* GetProfilePersonalization() {
@@ -214,6 +257,9 @@ class TestingProfile : public Profile {
 
   // The SessionService. Defaults to NULL, but can be set using the setter.
   scoped_refptr<SessionService> session_service_;
+
+  // The theme provider. Only created if CreateThemeProvider is invoked.
+  scoped_refptr<BrowserThemeProvider> theme_provider_;
 
   // Do we have a history service? This defaults to the value of
   // history_service, but can be explicitly set.

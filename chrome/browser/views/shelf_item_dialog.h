@@ -1,22 +1,23 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_SHELF_ITEM_DIALOG_H__
-#define CHROME_BROWSER_VIEWS_SHELF_ITEM_DIALOG_H__
+#ifndef CHROME_BROWSER_VIEWS_SHELF_ITEM_DIALOG_H_
+#define CHROME_BROWSER_VIEWS_SHELF_ITEM_DIALOG_H_
 
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/views/controls/button/native_button.h"
-#include "chrome/views/controls/table/table_view.h"
-#include "chrome/views/controls/text_field.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/dialog_delegate.h"
-#include "chrome/views/window/window.h"
+#include "views/controls/button/native_button.h"
+#include "views/controls/table/table_view_observer.h"
+#include "views/controls/textfield/textfield.h"
+#include "views/view.h"
+#include "views/window/dialog_delegate.h"
+#include "views/window/window.h"
 
 namespace views {
 class Button;
 class Label;
+class TableView;
 }
 
 class PossibleURLModel;
@@ -42,7 +43,7 @@ class ShelfItemDialogDelegate {
 ////////////////////////////////////////////////////////////////////////////////
 class ShelfItemDialog : public views::View,
                         public views::DialogDelegate,
-                        public views::TextField::Controller,
+                        public views::Textfield::Controller,
                         public views::TableViewObserver {
  public:
   ShelfItemDialog(ShelfItemDialogDelegate* delegate,
@@ -59,17 +60,21 @@ class ShelfItemDialog : public views::View,
   // DialogDelegate.
   virtual std::wstring GetWindowTitle() const;
   virtual bool IsModal() const;
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const;
   virtual bool Accept();
-  virtual bool IsDialogButtonEnabled(DialogButton button) const;
+  virtual int GetDefaultDialogButton() const;
+  virtual bool IsDialogButtonEnabled(
+      MessageBoxFlags::DialogButton button) const;
   virtual views::View* GetContentsView();
 
   // TextField::Controller.
-  virtual void ContentsChanged(views::TextField* sender,
+  virtual void ContentsChanged(views::Textfield* sender,
                                const std::wstring& new_contents);
-  virtual void HandleKeystroke(views::TextField* sender,
-                               UINT message, TCHAR key, UINT repeat_count,
-                               UINT flags) {}
+  virtual bool HandleKeystroke(views::Textfield* sender,
+                               const views::Textfield::Keystroke& key) {
+    return false;
+  }
 
   // Overridden from View.
   virtual gfx::Size GetPreferredSize();
@@ -100,10 +105,10 @@ class ShelfItemDialog : public views::View,
   Profile* profile_;
 
   // URL Field.
-  views::TextField* url_field_;
+  views::Textfield* url_field_;
 
   // Title field. This is NULL if we're not showing the title.
-  views::TextField* title_field_;
+  views::Textfield* title_field_;
 
   // The table model.
   scoped_ptr<PossibleURLModel> url_table_model_;
@@ -120,7 +125,7 @@ class ShelfItemDialog : public views::View,
   // The delegate.
   ShelfItemDialogDelegate* delegate_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ShelfItemDialog);
+  DISALLOW_COPY_AND_ASSIGN(ShelfItemDialog);
 };
 
-#endif  // CHROME_BROWSER_VIEWS_SHELF_ITEM_DIALOG_H__
+#endif  // CHROME_BROWSER_VIEWS_SHELF_ITEM_DIALOG_H_

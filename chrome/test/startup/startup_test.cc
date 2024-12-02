@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
@@ -29,31 +28,51 @@ class StartupTest : public UITest {
   void TearDown() {}
 
   void RunStartupTest(const char* graph, const char* trace,
-      bool test_cold, bool important) {
-    const int kNumCycles = 20;
+      bool test_cold, bool important, int profile_type) {
+    profile_type_ = profile_type;
 
-    TimeDelta timings[kNumCycles];
-    for (int i = 0; i < kNumCycles; ++i) {
+    // Sets the profile data for the run.  For now, this is only used for
+    // the complex theme test.
+    if (profile_type == UITest::COMPLEX_THEME) {
+      set_template_user_data(UITest::ComputeTypicalUserDataSource(
+          profile_type).ToWStringHack());
+    }
+
+    const int kNumCyclesMax = 20;
+    int numCycles = kNumCyclesMax;
+// It's ok for unit test code to use getenv(), isn't it?
+#if defined(OS_WIN)
+#pragma warning( disable : 4996 )
+#endif
+    const char* numCyclesEnv = getenv("STARTUP_TESTS_NUMCYCLES");
+    if (numCyclesEnv && StringToInt(numCyclesEnv, &numCycles))
+      LOG(INFO) << "STARTUP_TESTS_NUMCYCLES set in environment, "
+                << "so setting numCycles to " << numCycles;
+
+    TimeDelta timings[kNumCyclesMax];
+    for (int i = 0; i < numCycles; ++i) {
       if (test_cold) {
         FilePath dir_app;
         ASSERT_TRUE(PathService::Get(chrome::DIR_APP, &dir_app));
 
         FilePath chrome_exe(dir_app.Append(
-            FilePath::FromWStringHack(chrome::kBrowserProcessExecutableName)));
+            FilePath::FromWStringHack(chrome::kBrowserProcessExecutablePath)));
         ASSERT_TRUE(EvictFileFromSystemCacheWrapper(chrome_exe));
 #if defined(OS_WIN)
-        // TODO(port): these files do not exist on other platforms.
-        // Decide what to do.
-
+        // chrome.dll is windows specific.
         FilePath chrome_dll(dir_app.Append(FILE_PATH_LITERAL("chrome.dll")));
         ASSERT_TRUE(EvictFileFromSystemCacheWrapper(chrome_dll));
+#endif
 
+#if defined(OS_WIN)
+        // TODO(port): Re-enable once gears is working on mac/linux.
         FilePath gears_dll;
         ASSERT_TRUE(PathService::Get(chrome::FILE_GEARS_PLUGIN, &gears_dll));
         ASSERT_TRUE(EvictFileFromSystemCacheWrapper(gears_dll));
-#endif  // defined(OS_WIN)
+#else
+        NOTIMPLEMENTED() << "gears not enabled yet";
+#endif
       }
-
       UITest::SetUp();
       TimeTicks end_time = TimeTicks::Now();
       timings[i] = end_time - browser_launch_time_;
@@ -66,11 +85,15 @@ class StartupTest : public UITest {
         // Re-use the profile data after first run so that the noise from
         // creating databases doesn't impact all the runs.
         clear_profile_ = false;
+        // Destroy template_user_data_ for complex theme so we don't try to
+        // rewrite each time through.
+        if (profile_type == UITest::COMPLEX_THEME)
+          set_template_user_data(L"");
       }
     }
 
     std::string times;
-    for (int i = 0; i < kNumCycles; ++i)
+    for (int i = 0; i < numCycles; ++i)
       StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
     PrintResultList(graph, "", trace, times, "ms", important);
   }
@@ -84,10 +107,16 @@ class StartupReferenceTest : public StartupTest {
   // override the browser directory that is used by UITest::SetUp to cause it
   // to use the reference build instead.
   void SetUp() {
-    std::wstring dir;
+    FilePath dir;
     PathService::Get(chrome::DIR_TEST_TOOLS, &dir);
-    file_util::AppendToPath(&dir, L"reference_build");
-    file_util::AppendToPath(&dir, L"chrome");
+    dir = dir.AppendASCII("reference_build");
+#if defined(OS_WIN)
+    dir = dir.AppendASCII("chrome");
+#elif defined(OS_LINUX)
+    dir = dir.AppendASCII("chrome_linux");
+#elif defined(OS_MACOSX)
+    dir = dir.AppendASCII("chrome_mac");
+#endif
     browser_directory_ = dir;
   }
 };
@@ -97,44 +126,50 @@ class StartupFileTest : public StartupTest {
   // Load a file on startup rather than about:blank.  This tests a longer
   // startup path, including resource loading and the loading of gears.dll.
   void SetUp() {
-    std::wstring file_url;
+    FilePath file_url;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &file_url));
-    file_util::AppendToPath(&file_url, L"empty.html");
+    file_url = file_url.AppendASCII("empty.html");
     ASSERT_TRUE(file_util::PathExists(file_url));
-    launch_arguments_.AppendLooseValue(file_url);
+    launch_arguments_.AppendLooseValue(file_url.ToWStringHack());
 
-    pages_ = WideToUTF8(file_url);
+    pages_ = WideToUTF8(file_url.ToWStringHack());
   }
 };
 
 TEST_F(StartupTest, Perf) {
-  RunStartupTest("warm", "t", false /* not cold */, true /* important */);
+  RunStartupTest("warm", "t", false /* not cold */, true /* important */,
+                 UITest::DEFAULT_THEME);
 }
 
-#if defined(OS_WIN)
-// TODO(port): Enable reference tests on other platforms.
-
+// TODO(port): We need a mac reference build checked in for this.
 TEST_F(StartupReferenceTest, Perf) {
   RunStartupTest("warm", "t_ref", false /* not cold */,
-                 true /* important */);
+                 true /* important */, UITest::DEFAULT_THEME);
 }
 
 // TODO(mpcomplete): Should we have reference timings for all these?
 
 TEST_F(StartupTest, PerfCold) {
-  RunStartupTest("cold", "t", true /* cold */, false /* not important */);
+  RunStartupTest("cold", "t", true /* cold */, false /* not important */,
+                 UITest::DEFAULT_THEME);
 }
 
+#if defined(OS_WIN)
+// TODO(port): Enable gears tests on linux/mac once gears is working.
 TEST_F(StartupFileTest, PerfGears) {
   RunStartupTest("warm", "gears", false /* not cold */,
-                 false /* not important */);
+                 false /* not important */, UITest::DEFAULT_THEME);
 }
 
 TEST_F(StartupFileTest, PerfColdGears) {
   RunStartupTest("cold", "gears", true /* cold */,
-                 false /* not important */);
+                 false /* not important */, UITest::DEFAULT_THEME);
 }
+#endif
 
-#endif  // defined(OS_WIN)
+TEST_F(StartupTest, PerfColdComplexTheme) {
+  RunStartupTest("warm", "t-theme", false /* warm */,
+                 false /* not important */, UITest::COMPLEX_THEME);
+}
 
 }  // namespace

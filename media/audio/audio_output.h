@@ -41,12 +41,6 @@
 // a given AudioOutputStream might or might not talk directly to hardware.
 class AudioOutputStream {
  public:
-  enum State {
-    STATE_STARTED = 0,  // The output stream is started.
-    STATE_PAUSED,       // The output stream is paused.
-    STATE_ERROR,        // The output stream is in error state.
-  };
-
   // Audio sources must implement AudioSourceCallback. This interface will be
   // called in a random thread which very likely is a high priority thread. Do
   // not rely on using this thread TLS or make calls that alter the thread
@@ -59,8 +53,10 @@ class AudioOutputStream {
     // buffer size is usually what is specified in Open(). The source
     // will return the number of bytes it filled. The expected structure of
     // |dest| is platform and format specific.
-    virtual size_t OnMoreData(AudioOutputStream* stream,
-                              void* dest, size_t max_size) = 0;
+    // |pending_bytes| is the number of bytes will be played before the
+    // requested data is played.
+    virtual size_t OnMoreData(AudioOutputStream* stream, void* dest,
+                              size_t max_size, int pending_bytes) = 0;
 
     // The stream is done with this callback. After this call the audio source
     // can go away or be destroyed.
@@ -79,12 +75,19 @@ class AudioOutputStream {
   // two buffers of |packet_size| size are created, one will be locked for
   // playback and one will be ready to be filled in the call to
   // AudioSourceCallback::OnMoreData().
+  //
+  // TODO(ajwong): Streams are not reusable, so try to move packet_size into the
+  // constructor.
   virtual bool Open(size_t packet_size) = 0;
 
   // Starts playing audio and generating AudioSourceCallback::OnMoreData().
+  // Since implementor of AudioOutputStream may have internal buffers, right
+  // after calling this method initial buffers are fetched.
+  //
+  // The output stream does not take ownership of this callback.
   virtual void Start(AudioSourceCallback* callback) = 0;
 
-  // Stops playing audio. Effect might no be instantaneous as the hardware
+  // Stops playing audio. Effect might not be instantaneous as the hardware
   // might have locked audio data that is processing.
   virtual void Stop() = 0;
 
@@ -144,11 +147,6 @@ class AudioManager {
   // Un-muting returns the volume to the previous level.
   virtual void MuteAll() = 0;
   virtual void UnMuteAll() = 0;
-
-  // For testing purposes only. Returns the internal buffer of the last
-  // AUDIO_MOCK AudioOutputStream closed. Returns NULL if none closed yet.
-  // The buffer size is the same as passed to AudioOutputStream::Open().
-  virtual const void* GetLastMockBuffer() = 0;
 
   // Get AudioManager singleton.
   // TODO(cpu): Define threading requirements for interacting with AudioManager.

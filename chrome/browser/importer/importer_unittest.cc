@@ -13,14 +13,20 @@
 #include <shlguid.h>
 #include <vector>
 
+#include "app/win_util.h"
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/stl_util-inl.h"
 #include "chrome/browser/importer/ie_importer.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/password_manager/ie7_password.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/win_util.h"
+#include "webkit/glue/password_form.h"
+
+using webkit_glue::PasswordForm;
 
 class ImporterTest : public testing::Test {
  public:
@@ -158,16 +164,8 @@ class TestObserver : public ProfileWriter,
     return true;
   }
 
-  virtual void AddBookmarkModelObserver(BookmarkModelObserver* observer) {
-    NOTREACHED();
-  }
-
   virtual bool TemplateURLModelIsLoaded() const {
     return true;
-  }
-
-  virtual void AddTemplateURLModelObserver(NotificationObserver* observer) {
-    NOTREACHED();
   }
 
   virtual void AddPasswordForm(const PasswordForm& form) {
@@ -347,7 +345,8 @@ TEST_F(ImporterTest, IEImporter) {
 
   loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
       &ImporterHost::StartImportSettings, profile_info,
-      HISTORY | PASSWORDS | FAVORITES, observer, true));
+      static_cast<Profile*>(NULL), HISTORY | PASSWORDS | FAVORITES, observer,
+      true));
   loop->Run();
 
   // Cleans up.
@@ -423,7 +422,7 @@ static const BookmarkList kFirefox2Bookmarks[] = {
    "http://domain/"},
   {false, 0, {},
    L"<Name>",
-   "http://domain.com/q?a=\"er\"&b=%3C%20%20%3E"},
+   "http://domain.com/q?a=%22er%22&b=%3C%20%20%3E"},
   {false, 0, {},
    L"Google Home Page",
    "http://www.google.com/"},
@@ -513,16 +512,8 @@ class FirefoxObserver : public ProfileWriter,
     return true;
   }
 
-  virtual void AddBookmarkModelObserver(BookmarkModelObserver* observer) {
-    NOTREACHED();
-  }
-
   virtual bool TemplateURLModelIsLoaded() const {
     return true;
-  }
-
-  virtual void AddTemplateURLModelObserver(NotificationObserver* observer) {
-    NOTREACHED();
   }
 
   virtual void AddPasswordForm(const PasswordForm& form) {
@@ -630,6 +621,7 @@ TEST_F(ImporterTest, Firefox2Importer) {
 
   loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
       &ImporterHost::StartImportSettings, profile_info,
+      static_cast<Profile*>(NULL),
       HISTORY | PASSWORDS | FAVORITES | SEARCH_ENGINES, observer, true));
   loop->Run();
 }
@@ -710,16 +702,8 @@ class Firefox3Observer : public ProfileWriter,
     return true;
   }
 
-  virtual void AddBookmarkModelObserver(BookmarkModelObserver* observer) {
-    NOTREACHED();
-  }
-
   virtual bool TemplateURLModelIsLoaded() const {
     return true;
-  }
-
-  virtual void AddTemplateURLModelObserver(NotificationObserver* observer) {
-    NOTREACHED();
   }
 
   virtual void AddPasswordForm(const PasswordForm& form) {
@@ -831,6 +815,7 @@ TEST_F(ImporterTest, Firefox3Importer) {
   host->SetObserver(observer);
   loop->PostTask(FROM_HERE, NewRunnableMethod(host.get(),
       &ImporterHost::StartImportSettings, profile_info,
+      static_cast<Profile*>(NULL),
       HISTORY | PASSWORDS | FAVORITES | SEARCH_ENGINES, observer, true));
   loop->Run();
 }

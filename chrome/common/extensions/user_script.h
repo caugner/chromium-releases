@@ -9,10 +9,11 @@
 #include <string>
 
 #include "base/file_path.h"
-#include "base/pickle.h"
 #include "base/string_piece.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "googleurl/src/gurl.h"
+
+class Pickle;
 
 // Represents a user script, either a standalone one, or one that is part of an
 // extension.
@@ -110,9 +111,14 @@ class UserScript {
   FileList& css_scripts() { return css_scripts_; }
   const FileList& css_scripts() const { return css_scripts_; }
 
+  const std::string& extension_id() const { return extension_id_; }
+  void set_extension_id(const std::string& id) { extension_id_ = id; }
+
+  bool is_standalone() const { return extension_id_.empty(); }
+
   // Returns true if the script should be applied to the specified URL, false
   // otherwise.
-  bool MatchesUrl(const GURL& url);
+  bool MatchesUrl(const GURL& url) const;
 
   // Serialize the UserScript into a pickle. The content of the scripts and
   // paths to UserScript::Files will not be serialized!
@@ -140,6 +146,10 @@ class UserScript {
 
   // List of css scripts defined in content_scripts
   FileList css_scripts_;
+
+  // The ID of the extension this script is a part of, if any. Can be empty if
+  // the script is a "standlone" user script.
+  std::string extension_id_;
 };
 
 typedef std::vector<UserScript> UserScriptList;

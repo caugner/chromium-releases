@@ -21,7 +21,8 @@ class CrossSiteResourceHandler : public ResourceHandler {
                            ResourceDispatcherHost* resource_dispatcher_host);
 
   // ResourceHandler implementation:
-  bool OnRequestRedirected(int request_id, const GURL& new_url);
+  bool OnRequestRedirected(int request_id, const GURL& new_url,
+                           ResourceResponse* response, bool* defer);
   bool OnResponseStarted(int request_id,
                          ResourceResponse* response);
   bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
@@ -32,7 +33,7 @@ class CrossSiteResourceHandler : public ResourceHandler {
                            const std::string& security_info);
 
   // We can now send the response to the new renderer, which will cause
-  // WebContents to swap in the new renderer and destroy the old one.
+  // TabContents to swap in the new renderer and destroy the old one.
   void ResumeResponse();
 
  private:

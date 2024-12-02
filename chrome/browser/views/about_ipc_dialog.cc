@@ -6,7 +6,7 @@
 // IPC_MESSAGE_LOG_ENABLED. We need to use it to define
 // IPC_MESSAGE_MACROS_LOG_ENABLED so render_messages.h will generate the
 // ViewMsgLog et al. functions.
-#include "chrome/common/ipc_message.h"
+#include "ipc/ipc_message.h"
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
@@ -20,19 +20,20 @@
 #include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/devtools_messages.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/views/grid_layout.h"
-#include "chrome/views/controls/button/text_button.h"
-#include "chrome/views/controls/hwnd_view.h"
-#include "chrome/views/widget/root_view.h"
-#include "chrome/views/widget/widget.h"
-#include "chrome/views/window/window.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_tracker.h"
+#include "views/grid_layout.h"
+#include "views/controls/button/text_button.h"
+#include "views/controls/native/native_view_host.h"
+#include "views/standard_layout.h"
+#include "views/widget/root_view.h"
+#include "views/widget/widget.h"
+#include "views/window/window.h"
 
 namespace {
 
@@ -82,7 +83,10 @@ struct Settings {
   CListViewCtrl* npobject;
   CListViewCtrl* plugin_process;
   CListViewCtrl* plugin_process_host;
-} settings_views = { NULL, NULL, NULL, NULL, NULL, NULL, NULL };
+  CListViewCtrl* devtools_agent;
+  CListViewCtrl* devtools_client;
+
+} settings_views = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 
 void CreateColumn(uint16 start, uint16 end, HWND hwnd,
                   CListViewCtrl** control) {
@@ -143,6 +147,12 @@ void InitDialog(HWND hwnd) {
   CreateColumn(PluginProcessHostStart, PluginProcessHostEnd,
                ::GetDlgItem(hwnd, IDC_PluginProcessHost),
                &settings_views.plugin_process_host);
+  CreateColumn(DevToolsAgentStart, DevToolsAgentEnd,
+               ::GetDlgItem(hwnd, IDC_DevToolsAgent),
+               &settings_views.devtools_agent);
+  CreateColumn(DevToolsClientStart, DevToolsClientEnd,
+               ::GetDlgItem(hwnd, IDC_DevToolsClient),
+               &settings_views.devtools_client);
   init_done = true;
 }
 
@@ -153,6 +163,8 @@ void CloseDialog() {
   delete settings_views.npobject;
   delete settings_views.plugin_process;
   delete settings_views.plugin_process_host;
+  delete settings_views.devtools_agent;
+  delete settings_views.devtools_client;
   settings_views.view = NULL;
   settings_views.view_host = NULL;
   settings_views.plugin = NULL;
@@ -160,6 +172,8 @@ void CloseDialog() {
   settings_views.npobject = NULL;
   settings_views.plugin_process = NULL;
   settings_views.plugin_process_host = NULL;
+  settings_views.devtools_agent = NULL;
+  settings_views.devtools_client = NULL;
 
   init_done = false;
 
@@ -302,7 +316,7 @@ void AboutIPCDialog::SetupControls() {
   clear_button_ = new views::TextButton(this, kClearLabel);
   filter_button_ = new views::TextButton(this, kFilterLabel);
 
-  table_ = new views::HWNDView();
+  table_ = new views::NativeViewHost;
 
   static const int first_column_set = 1;
   views::ColumnSet* column_set = layout->AddColumnSet(first_column_set);
@@ -388,7 +402,8 @@ void AboutIPCDialog::Log(const IPC::LogData& data) {
   int index = message_list_.InsertItem(count, sent_str.c_str());
 
   message_list_.SetItemText(index, kTimeColumn, sent_str.c_str());
-  message_list_.SetItemText(index, kChannelColumn, data.channel.c_str());
+  message_list_.SetItemText(index, kChannelColumn,
+                            ASCIIToWide(data.channel).c_str());
 
   std::wstring message_name;
   IPC::Logging::GetMessageText(data.type, &message_name, NULL, NULL);

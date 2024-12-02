@@ -4,8 +4,8 @@
 
 #include "chrome/renderer/devtools_client.h"
 
+#include "chrome/common/devtools_messages.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/renderer/devtools_messages.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "webkit/glue/webdevtoolsclient.h"
@@ -30,7 +30,6 @@ bool DevToolsClient::OnMessageReceived(const IPC::Message& message) {
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(DevToolsClient, message)
-    IPC_MESSAGE_HANDLER(DevToolsClientMsg_DidDebugAttach, DidDebugAttach)
     IPC_MESSAGE_HANDLER(DevToolsClientMsg_RpcMessage, OnRpcMessage)
     IPC_MESSAGE_UNHANDLED(handled = false);
   IPC_END_MESSAGE_MAP()
@@ -38,15 +37,44 @@ bool DevToolsClient::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void DevToolsClient::DidDebugAttach() {
-  DCHECK(RenderThread::current()->message_loop() == MessageLoop::current());
-  // TODO(yurys): delegate to JS frontend.
+void DevToolsClient::SendMessageToAgent(const std::string& class_name,
+                                        const std::string& method_name,
+                                        const std::string& raw_msg) {
+  Send(DevToolsAgentMsg_RpcMessage(class_name, method_name, raw_msg));
 }
 
-void DevToolsClient::SendMessageToAgent(const std::string& raw_msg) {
-  Send(DevToolsAgentMsg_RpcMessage(raw_msg));
+void DevToolsClient::SendDebuggerCommandToAgent(const std::string& command) {
+  Send(DevToolsAgentMsg_DebuggerCommand(command));
 }
 
-void DevToolsClient::OnRpcMessage(const std::string& raw_msg) {
-  web_tools_client_->DispatchMessageFromAgent(raw_msg);
+void DevToolsClient::ActivateWindow() {
+  render_view_->Send(new ViewHostMsg_ActivateDevToolsWindow(
+      render_view_->routing_id()));
+}
+
+void DevToolsClient::CloseWindow() {
+  render_view_->Send(new ViewHostMsg_CloseDevToolsWindow(
+      render_view_->routing_id()));
+}
+
+void DevToolsClient::DockWindow() {
+  render_view_->Send(new ViewHostMsg_DockDevToolsWindow(
+      render_view_->routing_id()));
+}
+
+void DevToolsClient::UndockWindow() {
+  render_view_->Send(new ViewHostMsg_UndockDevToolsWindow(
+      render_view_->routing_id()));
+}
+
+void DevToolsClient::ToggleInspectElementMode(bool enabled) {
+  render_view_->Send(new ViewHostMsg_ToggleInspectElementMode(
+      render_view_->routing_id(), enabled));
+}
+
+
+void DevToolsClient::OnRpcMessage(const std::string& class_name,
+                                  const std::string& method_name,
+                                  const std::string& raw_msg) {
+  web_tools_client_->DispatchMessageFromAgent(class_name, method_name, raw_msg);
 }

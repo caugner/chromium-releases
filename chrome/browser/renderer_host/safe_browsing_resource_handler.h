@@ -8,14 +8,15 @@
 #include <string>
 
 #include "base/time.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/renderer_host/resource_handler.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-
-class ResourceDispatcherHost;
+#include "chrome/common/notification_registrar.h"
 
 // Checks that a url is safe.
 class SafeBrowsingResourceHandler : public ResourceHandler,
-                                    public SafeBrowsingService::Client {
+                                    public SafeBrowsingService::Client,
+                                    public NotificationObserver {
  public:
   SafeBrowsingResourceHandler(ResourceHandler* handler,
                               int render_process_host_id,
@@ -23,11 +24,14 @@ class SafeBrowsingResourceHandler : public ResourceHandler,
                               const GURL& url,
                               ResourceType::Type resource_type,
                               SafeBrowsingService* safe_browsing,
-                              ResourceDispatcherHost* resource_dispatcher_host);
+                              ResourceDispatcherHost* resource_dispatcher_host,
+                              ResourceDispatcherHost::Receiver* receiver);
+  ~SafeBrowsingResourceHandler();
 
   // ResourceHandler implementation:
   bool OnUploadProgress(int request_id, uint64 position, uint64 size);
-  bool OnRequestRedirected(int request_id, const GURL& new_url);
+  bool OnRequestRedirected(int request_id, const GURL& new_url,
+                           ResourceResponse* response, bool* defer);
   bool OnResponseStarted(int request_id, ResourceResponse* response);
   void OnGetHashTimeout();
   bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
@@ -46,7 +50,13 @@ class SafeBrowsingResourceHandler : public ResourceHandler,
   // the user has decided to proceed with the current request, or go back.
   void OnBlockingPageComplete(bool proceed);
 
+  // NotificationObserver interface.
+  void Observe(NotificationType type,
+               const NotificationSource& source,
+               const NotificationDetails& details);
+
  private:
+  NotificationRegistrar registrar_;
   scoped_refptr<ResourceHandler> next_handler_;
   int render_process_host_id_;
   int render_view_id_;

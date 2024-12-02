@@ -37,10 +37,10 @@ using disk_cache::RankCrashes;
 
 // Starts a new process, to generate the files.
 int RunSlave(RankCrashes action) {
-  std::wstring exe;
+  FilePath exe;
   PathService::Get(base::FILE_EXE, &exe);
 
-  CommandLine cmdline(exe);
+  CommandLine cmdline(exe.ToWStringHack());
   cmdline.AppendLooseValue(ASCIIToWide(IntToString(action)));
 
   base::ProcessHandle handle;
@@ -119,7 +119,8 @@ bool CreateTargetFolder(const std::wstring& path, RankCrashes action,
 
 // Generates the files for an empty and one item cache.
 int SimpleInsert(const std::wstring& path, RankCrashes action) {
-  disk_cache::Backend* cache = disk_cache::CreateCacheBackend(path, false, 0);
+  disk_cache::Backend* cache = disk_cache::CreateCacheBackend(path, false, 0,
+                                                              net::DISK_CACHE);
   if (!cache || cache->GetEntryCount())
     return GENERIC;
 
@@ -151,7 +152,8 @@ int SimpleRemove(const std::wstring& path, RankCrashes action) {
   DCHECK(action >= disk_cache::REMOVE_ONE_1);
   DCHECK(action <= disk_cache::REMOVE_TAIL_3);
 
-  disk_cache::Backend* cache = disk_cache::CreateCacheBackend(path, false, 0);
+  disk_cache::Backend* cache = disk_cache::CreateCacheBackend(path, false, 0,
+                                                              net::DISK_CACHE);
   if (!cache || cache->GetEntryCount())
     return GENERIC;
 
@@ -182,7 +184,8 @@ int HeadRemove(const std::wstring& path, RankCrashes action) {
   DCHECK(action >= disk_cache::REMOVE_HEAD_1);
   DCHECK(action <= disk_cache::REMOVE_HEAD_4);
 
-  disk_cache::Backend* cache = disk_cache::CreateCacheBackend(path, false, 0);
+  disk_cache::Backend* cache = disk_cache::CreateCacheBackend(path, false, 0,
+                                                              net::DISK_CACHE);
   if (!cache || cache->GetEntryCount())
     return GENERIC;
 
@@ -297,12 +300,12 @@ int main(int argc, const char* argv[]) {
     return INVALID_ARGUMENT;
   }
 
-  std::wstring path;
+  FilePath path;
   PathService::Get(base::DIR_SOURCE_ROOT, &path);
-  file_util::AppendToPath(&path, L"net");
-  file_util::AppendToPath(&path, L"data");
-  file_util::AppendToPath(&path, L"cache_tests");
-  file_util::AppendToPath(&path, L"new_crashes");
+  path = path.AppendASCII("net");
+  path = path.AppendASCII("data");
+  path = path.AppendASCII("cache_tests");
+  path = path.AppendASCII("new_crashes");
 
-  return SlaveCode(path, action);
+  return SlaveCode(path.ToWStringHack(), action);
 }

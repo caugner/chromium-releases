@@ -45,11 +45,15 @@ class CommandLine {
   // TODO(port): should be a FilePath.
   explicit CommandLine(const std::wstring& program);
 
+  // Uninit and free the current process's command line.
+  static void Reset();
+
   // Initialize the current process CommandLine singleton.  On Windows,
   // ignores its arguments (we instead parse GetCommandLineW()
   // directly) because we don't trust the CRT's parsing of the command
   // line, but it still must be called to set up the command line.
   static void Init(int argc, const char* const* argv);
+  static void Init(const std::vector<std::string>& argv);
 
   // Destroys the current process CommandLine singleton. This is necessary if
   // you want to reset the base library to its initial state (for example in an
@@ -73,6 +77,9 @@ class CommandLine {
   // switch has no value or isn't present, this method returns
   // the empty string.
   std::wstring GetSwitchValue(const std::wstring& switch_string) const;
+
+  // Get the number of switches in this process.
+  size_t GetSwitchCount() const { return switches_.size(); }
 
   // Get the remaining arguments to the command.
   // WARNING: this is incorrect on POSIX; we must do string conversions.
@@ -121,7 +128,7 @@ class CommandLine {
                        bool include_program);
 
   // On POSIX systems it's common to run processes via a wrapper (like
-  // "valgrind" or "gdb --args"). *Note, only availible on POSIX*
+  // "valgrind" or "gdb --args").
   void PrependWrapper(const std::wstring& wrapper);
 
  private:

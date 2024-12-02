@@ -6,7 +6,7 @@
 #define SKIA_EXT_PLATFORM_DEVICE_MAC_H_
 
 #import <ApplicationServices/ApplicationServices.h>
-#include "SkDevice.h"
+#include "third_party/skia/include/core/SkDevice.h"
 
 class SkMatrix;
 class SkPath;
@@ -20,8 +20,10 @@ namespace skia {
 // functions.
 // This class is abstract and must be subclassed. It provides the basic
 // interface to implement it either with or without a bitmap backend.
-class PlatformDeviceMac : public SkDevice {
+class PlatformDevice : public SkDevice {
  public:
+  typedef CGContextRef PlatformSurface;
+
   // The CGContext that corresponds to the bitmap, used for CoreGraphics
   // operations drawing into the bitmap. This is possibly heavyweight, so it
   // should exist only during one pass of rendering.
@@ -52,7 +54,7 @@ class PlatformDeviceMac : public SkDevice {
 
  protected:
   // Forwards |bitmap| to SkDevice's constructor.
-  PlatformDeviceMac(const SkBitmap& bitmap);
+  PlatformDevice(const SkBitmap& bitmap);
 
   // Loads the specified Skia transform into the device context
   static void LoadTransformToCGContext(CGContextRef context,

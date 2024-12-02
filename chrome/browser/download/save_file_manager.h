@@ -58,13 +58,10 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_SAVE_FILE_MANAGER_H__
 #define CHROME_BROWSER_DOWNLOAD_SAVE_FILE_MANAGER_H__
 
-#include <utility>
-
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/hash_tables.h"
 #include "base/ref_counted.h"
-#include "base/thread.h"
 #include "chrome/browser/download/save_types.h"
 
 namespace net {
@@ -181,7 +178,7 @@ class SaveFileManager
 
   // Notifications sent from the file thread and run on the UI thread.
 
-  // Lookup the SaveManager for this WebContents' saving profile and inform it
+  // Lookup the SaveManager for this TabContents' saving profile and inform it
   // the saving job has been started.
   void OnStartSave(const SaveFileCreateInfo* info);
   // Update the SavePackage with the current state of a started saving job.

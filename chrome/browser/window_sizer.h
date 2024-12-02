@@ -1,12 +1,16 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_WINDOW_SIZER_H__
-#define CHROME_BROWSER_WINDOW_SIZER_H__
+#ifndef CHROME_BROWSER_WINDOW_SIZER_H_
+#define CHROME_BROWSER_WINDOW_SIZER_H_
+
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/gfx/rect.h"
+
+class Browser;
 
 ///////////////////////////////////////////////////////////////////////////////
 // WindowSizer
@@ -29,34 +33,50 @@ class WindowSizer {
               MonitorInfoProvider* monitor_info_provider);
   virtual ~WindowSizer();
 
+  // Static factory methods to create default MonitorInfoProvider
+  // instances.  The returned object is owned by the caller.
+  static MonitorInfoProvider* CreateDefaultMonitorInfoProvider();
+
   // An interface implemented by an object that can retrieve information about
   // the monitors on the system.
   class MonitorInfoProvider {
    public:
     virtual ~MonitorInfoProvider() { }
 
-    // Returns the bounds of the working rect of the primary monitor.
-    virtual gfx::Rect GetPrimaryMonitorWorkingRect() const = 0;
+    // Returns the bounds of the work area of the primary monitor.
+    virtual gfx::Rect GetPrimaryMonitorWorkArea() const = 0;
 
-    // Returns the bounds of the entire primary screen.
+    // Returns the bounds of the primary monitor.
     virtual gfx::Rect GetPrimaryMonitorBounds() const = 0;
 
-    // Returns the bounds of the working rect of the monitor that most closely
+    // Returns the bounds of the work area of the monitor that most closely
     // intersects the provided bounds.
-    virtual gfx::Rect GetMonitorWorkingRectMatching(
+    virtual gfx::Rect GetMonitorWorkAreaMatching(
         const gfx::Rect& match_rect) const = 0;
 
-    // Returns the delta between the working rect and the monitor size of the
+    // Returns the delta between the work area and the monitor bounds for the
     // monitor that most closely intersects the provided bounds.
     virtual gfx::Point GetBoundsOffsetMatching(
         const gfx::Rect& match_rect) const = 0;
 
-    // Returns the number of monitors on the system.
-    virtual int GetMonitorCount() const = 0;
+    // Ensures number and coordinates of work areas are up-to-date.  You must
+    // call this before calling either of the below functions, as work areas can
+    // change while the program is running.
+    virtual void UpdateWorkAreas() = 0;
 
-    // Returns the bounds of the working rect of the monitor at the specified
+    // Returns the number of monitors on the system.
+    size_t GetMonitorCount() const {
+      return work_areas_.size();
+    }
+
+    // Returns the bounds of the work area of the monitor at the specified
     // index.
-    virtual gfx::Rect GetWorkingRectAt(int index) const = 0;
+    gfx::Rect GetWorkAreaAt(size_t index) const {
+      return work_areas_[index];
+    }
+
+   protected:
+    std::vector<gfx::Rect> work_areas_;
   };
 
   // An interface implemented by an object that can retrieve state from either a
@@ -68,23 +88,14 @@ class WindowSizer {
     // Retrieve the persisted bounds of the window. Returns true if there was
     // persisted data to retrieve state information, false otherwise.
     virtual bool GetPersistentState(gfx::Rect* bounds,
-                                    bool* maximized) const = 0;
+                                    bool* maximized,
+                                    gfx::Rect* work_area) const = 0;
 
     // Retrieve the bounds of the most recent window of the matching type.
     // Returns true if there was a last active window to retrieve state
     // information from, false otherwise.
     virtual bool GetLastActiveWindowState(gfx::Rect* bounds) const = 0;
   };
-
-  // Determines the size, position and maximized state for the browser window.
-  // See documentation for DetermineWindowBounds below.
-  static void GetBrowserWindowBounds(const std::wstring& app_name,
-                                     const gfx::Rect& specified_bounds,
-                                     gfx::Rect* window_bounds,
-                                     bool* maximized);
-
-  // Returns the default origin for popups of the given size.
-  static gfx::Point GetDefaultPopupOrigin(const gfx::Size& size);
 
   // Determines the position, size and maximized state for a window as it is
   // created. This function uses several strategies to figure out optimal size
@@ -101,7 +112,28 @@ class WindowSizer {
                              gfx::Rect* bounds,
                              bool* maximized) const;
 
+  // Determines the size, position and maximized state for the browser window.
+  // See documentation for DetermineWindowBounds below. Normally,
+  // |window_bounds| is calculated by calling GetLastActiveWindowState(). To
+  // explicitly specify a particular window to base the bounds on, pass in a
+  // non-NULL value for |browser|.
+  static void GetBrowserWindowBounds(const std::wstring& app_name,
+                                     const gfx::Rect& specified_bounds,
+                                     Browser* browser,
+                                     gfx::Rect* window_bounds,
+                                     bool* maximized);
+
+  // Returns the default origin for popups of the given size.
+  static gfx::Point GetDefaultPopupOrigin(const gfx::Size& size);
+
+  // How much horizontal and vertical offset there is between newly
+  // opened windows.  This value may be different on each platform.
+  static const int kWindowTilePixels;
+
  private:
+  // The edge of the screen to check for out-of-bounds.
+  enum Edge { TOP, LEFT, BOTTOM, RIGHT };
+
   explicit WindowSizer(const std::wstring& app_name);
 
   void Init(StateProvider* state_provider,
@@ -123,18 +155,22 @@ class WindowSizer {
   // size based on monitor size, etc.
   void GetDefaultWindowBounds(gfx::Rect* default_bounds) const;
 
-  // The edge of the work area to check for out-of-bounds.
-  enum Edge { TOP, LEFT, BOTTOM, RIGHT };
-
-  // Return true if the position is over the specified edge on the valid
-  // monitor work are rects.
+  // Returns true if the specified position is "offscreen" for the given edge,
+  // meaning that it's outside all work areas in the direction of that edge.
   bool PositionIsOffscreen(int position, Edge edge) const;
 
-  // Adjust the bounds specified in |bounds| so that they fit completely within
-  // the work area of the monitor that contains |other_bounds|.
+  // Adjusts |bounds| to be visible onscreen, biased toward the work area of the
+  // monitor containing |other_bounds|.  Despite the name, this doesn't
+  // guarantee the bounds are fully contained within this monitor's work rect;
+  // it just tried to ensure the edges are visible on _some_ work rect.
+  // If |saved_work_area| is non-empty, it is used to determine whether the
+  // monitor cofiguration has changed. If it has, bounds are repositioned and
+  // resized if necessary to make them completely contained in the current work
+  // area.
   void AdjustBoundsToBeVisibleOnMonitorContaining(
       const gfx::Rect& other_bounds,
-      gfx::Rect* bounds /* inout */) const;
+      const gfx::Rect& saved_work_area,
+      gfx::Rect* bounds) const;
 
   // Providers for persistent storage and monitor metrics.
   StateProvider* state_provider_;
@@ -143,5 +179,4 @@ class WindowSizer {
   DISALLOW_EVIL_CONSTRUCTORS(WindowSizer);
 };
 
-
-#endif  // #ifndef CHROME_BROWSER_WINDOW_SIZER_H__
+#endif  // CHROME_BROWSER_WINDOW_SIZER_H_

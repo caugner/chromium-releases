@@ -17,7 +17,7 @@
 #include "chrome/common/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_util.h"
-#include "skia/include/SkBitmap.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // AutocompleteEditModel
@@ -71,8 +71,18 @@ const AutocompleteEditModel::State
   // Like typing, switching tabs "accepts" the temporary text as the user
   // text, because it makes little sense to have temporary text when the
   // popup is closed.
-  if (user_input_in_progress_)
-    InternalSetUserText(UserTextFromDisplayText(view_->GetText()));
+  if (user_input_in_progress_) {
+    // Weird edge case to match other browsers: if the edit is empty, revert to
+    // the permanent text (so the user can get it back easily) but select it (so
+    // on switching back, typing will "just work").
+    const std::wstring user_text(UserTextFromDisplayText(view_->GetText()));
+    if (user_text.empty()) {
+      view_->RevertAll();
+      view_->SelectAll(true);
+    } else {
+      InternalSetUserText(user_text);
+    }
+  }
 
   return State(user_input_in_progress_, user_text_, keyword_, is_keyword_hint_,
       keyword_ui_state_, show_search_hint_);
@@ -188,11 +198,10 @@ bool AutocompleteEditModel::CanPasteAndGo(const std::wstring& text) const {
   paste_and_go_alternate_nav_url_ = GURL();
 
   // Ask the controller what do do with this input.
+  // Setting the profile is cheap, and since there's one paste_and_go_controller
+  // for many tabs which may all have different profiles, it ensures we're
+  // always using the right one.
   paste_and_go_controller->SetProfile(profile_);
-                              // This is cheap, and since there's one
-                              // paste_and_go_controller for many tabs which
-                              // may all have different profiles, it ensures
-                              // we're always using the right one.
   paste_and_go_controller->Start(text, std::wstring(), true, false, true);
   DCHECK(paste_and_go_controller->done());
   const AutocompleteResult& result = paste_and_go_controller->result();
@@ -204,8 +213,7 @@ bool AutocompleteEditModel::CanPasteAndGo(const std::wstring& text) const {
   DCHECK(match != result.end());
   paste_and_go_url_ = match->destination_url;
   paste_and_go_transition_ = match->transition;
-  paste_and_go_alternate_nav_url_ =
-      result.GetAlternateNavURL(paste_and_go_controller->input(), match);
+  paste_and_go_alternate_nav_url_ = result.alternate_nav_url();
 
   return paste_and_go_url_.is_valid();
 }

@@ -8,12 +8,54 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/gfx/rect.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/security_style.h"
-#include "chrome/common/ipc_message_utils.h"
+#include "chrome/common/common_param_traits.h"
 #include "chrome/test/automation/automation_constants.h"
+#include "ipc/ipc_message_utils.h"
+
+struct AutomationMsg_Find_Params {
+  // Unused value, which exists only for backwards compat.
+  int unused;
+
+  // The word(s) to find on the page.
+  string16 search_string;
+
+  // Whether to search forward or backward within the page.
+  bool forward;
+
+  // Whether search should be Case sensitive.
+  bool match_case;
+
+  // Whether this operation is first request (Find) or a follow-up (FindNext).
+  bool find_next;
+};
 
 namespace IPC {
+
+template <>
+struct ParamTraits<AutomationMsg_Find_Params> {
+  typedef AutomationMsg_Find_Params param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.unused);
+    WriteParam(m, p.search_string);
+    WriteParam(m, p.forward);
+    WriteParam(m, p.match_case);
+    WriteParam(m, p.find_next);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return
+      ReadParam(m, iter, &p->unused) &&
+      ReadParam(m, iter, &p->search_string) &&
+      ReadParam(m, iter, &p->forward) &&
+      ReadParam(m, iter, &p->match_case) &&
+      ReadParam(m, iter, &p->find_next);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"<AutomationMsg_Find_Params>");
+  }
+};
 
 template <>
 struct ParamTraits<AutomationMsg_NavigationResponseValues> {
@@ -129,6 +171,8 @@ struct Reposition_Params {
   int width;
   int height;
   int flags;
+  bool set_parent;
+  HWND parent_window;
 };
 
 // Traits for SetWindowPos_Params structure to pack/unpack.
@@ -143,6 +187,8 @@ struct ParamTraits<Reposition_Params> {
     WriteParam(m, p.width);
     WriteParam(m, p.height);
     WriteParam(m, p.flags);
+    WriteParam(m, p.set_parent);
+    WriteParam(m, p.parent_window);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
     return ReadParam(m, iter, &p->window) &&
@@ -151,7 +197,9 @@ struct ParamTraits<Reposition_Params> {
            ReadParam(m, iter, &p->top) &&
            ReadParam(m, iter, &p->width) &&
            ReadParam(m, iter, &p->height) &&
-           ReadParam(m, iter, &p->flags);
+           ReadParam(m, iter, &p->flags) &&
+           ReadParam(m, iter, &p->set_parent) &&
+           ReadParam(m, iter, &p->parent_window);
   }
   static void Log(const param_type& p, std::wstring* l) {
     l->append(L"(");
@@ -168,15 +216,132 @@ struct ParamTraits<Reposition_Params> {
     LogParam(p.height, l);
     l->append(L", ");
     LogParam(p.flags, l);
+    l->append(L", ");
+    LogParam(p.set_parent, l);
+    l->append(L", ");
+    LogParam(p.parent_window, l);
     l->append(L")");
   }
 };
 #endif  // defined(OS_WIN)
 
+struct AutomationURLRequest {
+  std::string url;
+  std::string method;
+  std::string referrer;
+  std::string extra_request_headers;
+};
+
+// Traits for AutomationURLRequest structure to pack/unpack.
+template <>
+struct ParamTraits<AutomationURLRequest> {
+  typedef AutomationURLRequest param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.url);
+    WriteParam(m, p.method);
+    WriteParam(m, p.referrer);
+    WriteParam(m, p.extra_request_headers);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return ReadParam(m, iter, &p->url) &&
+           ReadParam(m, iter, &p->method) &&
+           ReadParam(m, iter, &p->referrer) &&
+           ReadParam(m, iter, &p->extra_request_headers);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.url, l);
+    l->append(L", ");
+    LogParam(p.method, l);
+    l->append(L", ");
+    LogParam(p.referrer, l);
+    l->append(L", ");
+    LogParam(p.extra_request_headers, l);
+    l->append(L")");
+  }
+};
+
+struct AutomationURLResponse {
+  std::string mime_type;
+  std::string headers;
+  int64 content_length;
+  base::Time last_modified;
+};
+
+// Traits for AutomationURLRequest structure to pack/unpack.
+template <>
+struct ParamTraits<AutomationURLResponse> {
+  typedef AutomationURLResponse param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.mime_type);
+    WriteParam(m, p.headers);
+    WriteParam(m, p.content_length);
+    WriteParam(m, p.last_modified);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return ReadParam(m, iter, &p->mime_type) &&
+           ReadParam(m, iter, &p->headers) &&
+           ReadParam(m, iter, &p->content_length) &&
+           ReadParam(m, iter, &p->last_modified);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.mime_type, l);
+    l->append(L", ");
+    LogParam(p.headers, l);
+    l->append(L", ");
+    LogParam(p.content_length, l);
+    l->append(L", ");
+    LogParam(p.last_modified, l);
+    l->append(L")");
+  }
+};
+
+struct ExternalTabSettings {
+  gfx::NativeWindow parent;
+  gfx::Rect dimensions;
+  unsigned int style;
+  bool is_off_the_record;
+  bool load_requests_via_automation;
+};
+
+// Traits for ExternalTabSettings structure to pack/unpack.
+template <>
+struct ParamTraits<ExternalTabSettings> {
+  typedef ExternalTabSettings param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.parent);
+    WriteParam(m, p.dimensions);
+    WriteParam(m, p.style);
+    WriteParam(m, p.is_off_the_record);
+    WriteParam(m, p.load_requests_via_automation);
+  }
+  static bool Read(const Message* m, void** iter, param_type* p) {
+    return ReadParam(m, iter, &p->parent) &&
+           ReadParam(m, iter, &p->dimensions) &&
+           ReadParam(m, iter, &p->style) &&
+           ReadParam(m, iter, &p->is_off_the_record) &&
+           ReadParam(m, iter, &p->load_requests_via_automation);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.parent, l);
+    l->append(L", ");
+    LogParam(p.dimensions, l);
+    l->append(L", ");
+    LogParam(p.style, l);
+    l->append(L", ");
+    LogParam(p.is_off_the_record, l);
+    l->append(L", ");
+    LogParam(p.load_requests_via_automation, l);
+    l->append(L")");
+  }
+};
+
 }  // namespace IPC
 
 #define MESSAGES_INTERNAL_FILE \
     "chrome/test/automation/automation_messages_internal.h"
-#include "chrome/common/ipc_message_macros.h"
+#include "ipc/ipc_message_macros.h"
 
 #endif  // CHROME_TEST_AUTOMATION_AUTOMATION_MESSAGES_H__

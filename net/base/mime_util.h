@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define NET_BASE_MIME_UTIL_H__
 
 #include <string>
+#include <vector>
 
 #include "base/file_path.h"
 
@@ -28,6 +29,7 @@ bool GetPreferredExtensionForMimeType(const std::string& mime_type,
 
 // Check to see if a particular MIME type is in our list.
 bool IsSupportedImageMimeType(const char* mime_type);
+bool IsSupportedMediaMimeType(const char* mime_type);
 bool IsSupportedNonImageMimeType(const char* mime_type);
 bool IsSupportedJavascriptMimeType(const char* mime_type);
 
@@ -43,6 +45,16 @@ bool IsSupportedMimeType(const std::string& mime_type);
 // lower case.
 bool MatchesMimeType(const std::string &mime_type_pattern,
                      const std::string &mime_type);
+
+// Returns true if and only if all codecs are supported, false otherwise.
+bool AreSupportedMediaCodecs(const std::vector<std::string>& codecs);
+
+// Parses a codec string, populating |codecs_out| with the prefix of each codec
+// in the string |codecs_in|. For example, passed "aaa.b.c,dd.eee", |codecs_out|
+// will contain {"aaa", "dd"}.
+// See http://www.ietf.org/rfc/rfc4281.txt.
+void ParseCodecString(const std::string& codecs,
+                      std::vector<std::string>* codecs_out);
 
 }  // namespace net
 

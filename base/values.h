@@ -204,6 +204,9 @@ class DictionaryValue : public Value {
   // Returns true if the current dictionary has a value for the given key.
   bool HasKey(const std::wstring& key) const;
 
+  // Returns the number of Values in this dictionary.
+  size_t GetSize() const { return dictionary_.size(); }
+
   // Clears any current contents of this dictionary.
   void Clear();
 
@@ -214,8 +217,8 @@ class DictionaryValue : public Value {
   // If the key at any step of the way doesn't exist, or exists but isn't
   // a DictionaryValue, a new DictionaryValue will be created and attached
   // to the path in that location.
-  // Note that the dictionary takes ownership of the value
-  // referenced by in_value.
+  // Note that the dictionary takes ownership of the value referenced by
+  // |in_value|.
   bool Set(const std::wstring& path, Value* in_value);
 
   // Convenience forms of Set().  These methods will replace any existing
@@ -331,6 +334,9 @@ class ListValue : public Value {
   // it will return false and the ListValue object will be unchanged.
   bool Remove(size_t index, Value** out_value);
 
+  // Removes the first instance of |value| found in the list, if any.
+  void Remove(const Value& value);
+
   // Appends a Value to the end of the list.
   void Append(Value* in_value);
 
@@ -343,10 +349,6 @@ class ListValue : public Value {
 
   ListValue::const_iterator begin() const { return list_.begin(); }
   ListValue::const_iterator end() const { return list_.end(); }
-
-  ListValue::iterator Erase(iterator item) {
-    return list_.erase(item);
-  }
 
  private:
   DISALLOW_EVIL_CONSTRUCTORS(ListValue);

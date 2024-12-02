@@ -4,17 +4,31 @@
 
 #include "base/gfx/rect.h"
 #include "base/logging.h"
+#include "base/sys_string_conversions.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/cocoa/browser_window_cocoa.h"
-#include "chrome/browser/cocoa/browser_window_controller.h"
+#import "chrome/browser/cocoa/browser_window_controller.h"
+#import "chrome/browser/cocoa/clear_browsing_data_controller.h"
+#import "chrome/browser/cocoa/download_shelf_controller.h"
+#include "chrome/browser/cocoa/page_info_window_mac.h"
 #include "chrome/browser/browser.h"
-#include "chrome/browser/cocoa/status_bubble_mac.h"
+#include "chrome/browser/download/download_shelf.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/common/pref_service.h"
+#include "chrome/common/temp_scaffolding_stubs.h"
+#include "chrome/browser/profile.h"
 
 BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
                                        BrowserWindowController* controller,
                                        NSWindow* window)
-  : browser_(browser), controller_(controller), window_(window),
-    bookmark_menu_bridge_(browser) {
-  status_bubble_.reset(new StatusBubbleMac(window_));
+  : window_(window),
+    browser_(browser),
+    controller_(controller),
+    download_shelf_() {
+  // This pref applies to all windows, so all must watch for it.
+  registrar_.Add(this, NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
+                 NotificationService::AllSources());
 }
 
 BrowserWindowCocoa::~BrowserWindowCocoa() {
@@ -31,6 +45,8 @@ void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
   NSScreen* screen = [window_ screen];
   cocoa_bounds.origin.y =
       [screen frame].size.height - bounds.height() - bounds.y();
+
+  [window_ setFrame:cocoa_bounds display:YES];
 }
 
 // Callers assume that this doesn't immediately delete the Browser object.
@@ -63,16 +79,34 @@ BrowserWindowTesting* BrowserWindowCocoa::GetBrowserWindowTesting() {
 }
 
 StatusBubble* BrowserWindowCocoa::GetStatusBubble() {
-  return status_bubble_.get();
+  return [controller_ statusBubble];
 }
 
 void BrowserWindowCocoa::SelectedTabToolbarSizeChanged(bool is_animating) {
-  NOTIMPLEMENTED();
+  // According to beng, this is an ugly method that comes from the days when the
+  // download shelf was a ChromeView attached to the TabContents, and as its
+  // size changed via animation it notified through TCD/etc to the browser view
+  // to relayout for each tick of the animation. We don't need anything of the
+  // sort on Mac.
 }
 
 void BrowserWindowCocoa::UpdateTitleBar() {
-  // This is used on windows to update the favicon and title in the window
-  // icon, which we don't use on the mac.
+  NSString* newTitle =
+      base::SysUTF16ToNSString(browser_->GetWindowTitleForCurrentTab());
+
+  // Window menu
+  [NSApp changeWindowsItem:window_ title:newTitle filename:NO];
+
+  // Dock
+  [window_ setMiniwindowTitle:newTitle];
+}
+
+void BrowserWindowCocoa::UpdateDevTools() {
+  NOTIMPLEMENTED();
+}
+
+void BrowserWindowCocoa::FocusDevTools() {
+  NOTIMPLEMENTED();
 }
 
 void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
@@ -89,7 +123,7 @@ gfx::Rect BrowserWindowCocoa::GetNormalBounds() const {
   NSRect frame = [window_ frame];
   NSScreen* screen = [window_ screen];
   gfx::Rect bounds(frame.origin.x, 0, frame.size.width, frame.size.height);
-  bounds.set_y([screen frame].size.height + frame.size.height + frame.origin.y);
+  bounds.set_y([screen frame].size.height - frame.origin.y - frame.size.height);
   return bounds;
 }
 
@@ -98,17 +132,22 @@ bool BrowserWindowCocoa::IsMaximized() const {
 }
 
 void BrowserWindowCocoa::SetFullscreen(bool fullscreen) {
-  NOTIMPLEMENTED();
+  [controller_ setFullscreen:fullscreen];
 }
 
 bool BrowserWindowCocoa::IsFullscreen() const {
-  NOTIMPLEMENTED();
-  return false;
+  return !![controller_ isFullscreen];
 }
 
 gfx::Rect BrowserWindowCocoa::GetRootWindowResizerRect() const {
   NSRect tabRect = [controller_ selectedTabGrowBoxRect];
   return gfx::Rect(NSRectToCGRect(tabRect));
+}
+
+void BrowserWindowCocoa::ConfirmAddSearchProvider(
+    const TemplateURL* template_url,
+    Profile* profile) {
+  NOTIMPLEMENTED();
 }
 
 LocationBar* BrowserWindowCocoa::GetLocationBar() const {
@@ -119,7 +158,7 @@ void BrowserWindowCocoa::SetFocusToLocationBar() {
   [controller_ focusLocationBar];
 }
 
-void BrowserWindowCocoa::UpdateStopGoState(bool is_loading) {
+void BrowserWindowCocoa::UpdateStopGoState(bool is_loading, bool force) {
   [controller_ setIsLoading:is_loading ? YES : NO];
 }
 
@@ -134,25 +173,27 @@ void BrowserWindowCocoa::FocusToolbar() {
 }
 
 bool BrowserWindowCocoa::IsBookmarkBarVisible() const {
-  // Conversion from ObjC BOOL to C++ bool.
-  return [controller_ isBookmarkBarVisible] ? true : false;
+  return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
 }
 
-// This is a little awkward.  Internal to Chrome, V and C (in the MVC
-// sense) tend to smear together.  Thus, we have a call chain of
-// C(browser_window)-->
-// V(me;right here)-->
-// C(BrowserWindowController)-->
-// C(TabStripController) --> ...
+// This is called from Browser, which in turn is called directly from
+// a menu option.  All we do here is set a preference.  The act of
+// setting the preference sends notifications to all windows who then
+// know what to do.
 void BrowserWindowCocoa::ToggleBookmarkBar() {
-  [controller_ toggleBookmarkBar];
+  bookmark_utils::ToggleWhenVisible(browser_->profile());
 }
 
-void BrowserWindowCocoa::ShowFindBar() {
-  NOTIMPLEMENTED();
+void BrowserWindowCocoa::AddFindBar(
+    FindBarCocoaController* find_bar_cocoa_controller) {
+  return [controller_ addFindBar:find_bar_cocoa_controller];
 }
 
 void BrowserWindowCocoa::ShowAboutChromeDialog() {
+  NOTIMPLEMENTED();
+}
+
+void BrowserWindowCocoa::ShowTaskManager() {
   NOTIMPLEMENTED();
 }
 
@@ -165,12 +206,24 @@ void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
   NOTIMPLEMENTED();
 }
 
+bool BrowserWindowCocoa::IsDownloadShelfVisible() const {
+  return [controller_ isDownloadShelfVisible] != NO;
+}
+
+DownloadShelf* BrowserWindowCocoa::GetDownloadShelf() {
+  DownloadShelfController* shelfController = [controller_ downloadShelf];
+  return [shelfController bridge];
+}
+
 void BrowserWindowCocoa::ShowReportBugDialog() {
   NOTIMPLEMENTED();
 }
 
 void BrowserWindowCocoa::ShowClearBrowsingDataDialog() {
-  NOTIMPLEMENTED();
+  scoped_nsobject<ClearBrowsingDataController> controller(
+      [[ClearBrowsingDataController alloc]
+          initWithProfile:browser_->profile()]);
+  [controller runModalDialog];
 }
 
 void BrowserWindowCocoa::ShowImportDialog() {
@@ -193,9 +246,49 @@ void BrowserWindowCocoa::ShowNewProfileDialog() {
   NOTIMPLEMENTED();
 }
 
-void BrowserWindowCocoa::ShowHTMLDialog(HtmlDialogContentsDelegate* delegate,
-                                        void* parent_window) {
+void BrowserWindowCocoa::ConfirmBrowserCloseWithPendingDownloads() {
   NOTIMPLEMENTED();
+  browser_->InProgressDownloadResponse(false);
+}
+
+void BrowserWindowCocoa::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
+                                        gfx::NativeWindow parent_window) {
+  NOTIMPLEMENTED();
+}
+
+void BrowserWindowCocoa::UserChangedTheme() {
+  [controller_ userChangedTheme];
+}
+
+int BrowserWindowCocoa::GetExtraRenderViewHeight() const {
+  // Currently this is only used on linux.
+  return 0;
+}
+
+void BrowserWindowCocoa::TabContentsFocused(TabContents* tab_contents) {
+  NOTIMPLEMENTED();
+}
+
+void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
+                                      const GURL& url,
+                                      const NavigationEntry::SSLStatus& ssl,
+                                      bool show_history) {
+  PageInfoWindowMac::ShowPageInfo(profile, url, ssl, show_history);
+}
+
+void BrowserWindowCocoa::Observe(NotificationType type,
+                                 const NotificationSource& source,
+                                 const NotificationDetails& details) {
+  switch (type.value) {
+    // Only the key window gets a direct toggle from the menu.
+    // Other windows hear about it from the notification.
+    case NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED:
+      [controller_ toggleBookmarkBar];
+      break;
+    default:
+      NOTREACHED();  // we don't ask for anything else!
+      break;
+  }
 }
 
 void BrowserWindowCocoa::DestroyBrowser() {

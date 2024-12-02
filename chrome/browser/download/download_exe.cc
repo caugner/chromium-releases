@@ -55,6 +55,7 @@ namespace download_util {
  * ***** END LICENSE BLOCK ***** */
 
 static const char* const g_executables[] = {
+#if defined(OS_WIN)
   "ad",
   "ade",
   "adp",
@@ -76,6 +77,7 @@ static const char* const g_executables[] = {
   "hta",
   "htm",
   "html",
+  "htt",
   "inf",
   "ins",
   "isp",
@@ -100,6 +102,8 @@ static const char* const g_executables[] = {
   "mdt",
   "mdw",
   "mdz",
+  "mht",
+  "mhtml",
   "msc",
   "msh",
   "mshxml",
@@ -121,6 +125,7 @@ static const char* const g_executables[] = {
   "shs",
   "shtm",
   "shtml",
+  "svg",
   "url",
   "vb",
   "vbe",
@@ -136,7 +141,18 @@ static const char* const g_executables[] = {
   "wsh",
   "xht",
   "xhtm",
-  "xhtml"
+  "xhtml",
+  "xml",
+  "xsl",
+  "xslt",
+#elif defined(OS_LINUX)
+  // TODO(estade): lengthen this list.
+  "exe",
+  "pl",
+  "py",
+  "rb",
+  "sh",
+#endif  // defined(OS_LINUX)
 };
 
 void InitializeExeTypes(std::set<std::string>* exe_extensions) {

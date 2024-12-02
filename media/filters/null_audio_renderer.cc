@@ -15,8 +15,7 @@ namespace media {
 static const size_t kBufferSizeInMilliseconds = 100;
 
 NullAudioRenderer::NullAudioRenderer()
-    : AudioRendererBase(kDefaultMaxQueueSize),
-      playback_rate_(0.0f),
+    : AudioRendererBase(),
       bytes_per_millisecond_(0),
       buffer_size_(0),
       thread_(NULL),
@@ -29,15 +28,11 @@ NullAudioRenderer::~NullAudioRenderer() {
 
 // static
 bool NullAudioRenderer::IsMediaFormatSupported(
-    const MediaFormat* media_format) {
+    const MediaFormat& media_format) {
   int channels;
   int sample_rate;
   int sample_bits;
   return ParseMediaFormat(media_format, &channels, &sample_rate, &sample_bits);
-}
-
-void NullAudioRenderer::SetPlaybackRate(float playback_rate) {
-  playback_rate_ = playback_rate;
 }
 
 void NullAudioRenderer::SetVolume(float volume) {
@@ -50,20 +45,26 @@ void NullAudioRenderer::ThreadMain() {
     float sleep_in_milliseconds = 0.0f;
 
     // Only consume buffers when actually playing.
-    if (playback_rate_ > 0.0f)  {
-      size_t bytes = FillBuffer(buffer_.get(), buffer_size_);
+    if (GetPlaybackRate() > 0.0f)  {
+      size_t bytes = FillBuffer(buffer_.get(),
+                                buffer_size_,
+                                base::TimeDelta());
 
       // Calculate our sleep duration, taking playback rate into consideration.
       sleep_in_milliseconds =
           floor(bytes / static_cast<float>(bytes_per_millisecond_));
-      sleep_in_milliseconds /= playback_rate_;
+      sleep_in_milliseconds /= GetPlaybackRate();
+    } else {
+      // If paused, sleep for 10 milliseconds before polling again.
+      sleep_in_milliseconds = 10.0f;
     }
 
-    PlatformThread::Sleep(static_cast<int>(sleep_in_milliseconds));
+    // Sleep for at least one millisecond so we don't spin the CPU.
+    PlatformThread::Sleep(std::max(1, static_cast<int>(sleep_in_milliseconds)));
   }
 }
 
-bool NullAudioRenderer::OnInitialize(const MediaFormat* media_format) {
+bool NullAudioRenderer::OnInitialize(const MediaFormat& media_format) {
   // Parse out audio parameters.
   int channels;
   int sample_rate;
@@ -86,8 +87,10 @@ bool NullAudioRenderer::OnInitialize(const MediaFormat* media_format) {
 
 void NullAudioRenderer::OnStop() {
   shutdown_ = true;
-  if (thread_)
+  if (thread_) {
     PlatformThread::Join(thread_);
+    thread_ = NULL;
+  }
 }
 
 }  // namespace media

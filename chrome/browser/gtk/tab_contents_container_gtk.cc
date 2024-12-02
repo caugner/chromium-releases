@@ -5,37 +5,82 @@
 #include "chrome/browser/gtk/tab_contents_container_gtk.h"
 
 #include "base/gfx/native_widget_types.h"
-#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/gtk/gtk_floating_container.h"
+#include "chrome/browser/gtk/status_bubble_gtk.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "chrome/common/notification_service.h"
 
+namespace {
 
-TabContentsContainerGtk::TabContentsContainerGtk(GtkWidget* findbar)
+// Allocates all normal tab contents views to the size of the passed in
+// |allocation|.
+void ResizeChildren(GtkWidget* widget, void* param) {
+  GtkAllocation* allocation = reinterpret_cast<GtkAllocation*>(param);
+
+  if (widget->allocation.width != allocation->width ||
+      widget->allocation.height != allocation->height) {
+    gtk_widget_set_size_request(widget, allocation->width,
+                                allocation->height);
+  }
+}
+
+}  // namespace
+
+TabContentsContainerGtk::TabContentsContainerGtk(StatusBubbleGtk* status_bubble)
     : tab_contents_(NULL),
-      vbox_(gtk_vbox_new(FALSE, 0)) {
-  DCHECK(findbar);
-  gtk_box_pack_start(GTK_BOX(vbox_), findbar, FALSE, FALSE, 0);
-  gtk_widget_show(vbox_);
+      status_bubble_(status_bubble) {
+  Init();
 }
 
 TabContentsContainerGtk::~TabContentsContainerGtk() {
-  if (tab_contents_)
-    RemoveObservers();
+  floating_.Destroy();
 }
 
-void TabContentsContainerGtk::AddContainerToBox(GtkWidget* box) {
-  gtk_box_pack_start(GTK_BOX(box), vbox_, TRUE, TRUE, 0);
+void TabContentsContainerGtk::Init() {
+  // A high level overview of the TabContentsContainer:
+  //
+  // +- GtkFloatingContainer |floating_| -------------------------------+
+  // |+- GtkFixedContainer |fixed_| -----------------------------------+|
+  // ||                                                                ||
+  // ||                                                                ||
+  // ||                                                                ||
+  // ||                                                                ||
+  // |+- (StatusBubble) ------+                                        ||
+  // |+                       +                                        ||
+  // |+-----------------------+----------------------------------------+|
+  // +------------------------------------------------------------------+
+
+  floating_.Own(gtk_floating_container_new());
+
+  fixed_ = gtk_fixed_new();
+  g_signal_connect(fixed_, "size-allocate",
+                   G_CALLBACK(OnFixedSizeAllocate), this);
+  gtk_container_add(GTK_CONTAINER(floating_.get()), fixed_);
+
+  if (status_bubble_) {
+    gtk_floating_container_add_floating(GTK_FLOATING_CONTAINER(floating_.get()),
+                                        status_bubble_->widget());
+    g_signal_connect(floating_.get(), "set-floating-position",
+                     G_CALLBACK(OnSetFloatingPosition), this);
+  }
+
+  gtk_widget_show(fixed_);
+  gtk_widget_show(floating_.get());
 }
 
 void TabContentsContainerGtk::SetTabContents(TabContents* tab_contents) {
   if (tab_contents_) {
     gfx::NativeView widget = tab_contents_->GetNativeView();
     if (widget)
-      gtk_container_remove(GTK_CONTAINER(vbox_), widget);
+      gtk_widget_hide(widget);
 
     tab_contents_->WasHidden();
 
-    RemoveObservers();
+    registrar_.Remove(this, NotificationType::RENDER_VIEW_HOST_CHANGED,
+        Source<NavigationController>(&tab_contents_->controller()));
+    registrar_.Remove(this, NotificationType::TAB_CONTENTS_DESTROYED,
+                      Source<TabContents>(tab_contents_));
   }
 
   tab_contents_ = tab_contents;
@@ -43,13 +88,41 @@ void TabContentsContainerGtk::SetTabContents(TabContents* tab_contents) {
   // When detaching the last tab of the browser SetTabContents is invoked
   // with NULL. Don't attempt to do anything in that case.
   if (tab_contents_) {
-    AddObservers();
+    // TabContents can change their RenderViewHost and hence the GtkWidget that
+    // is shown. I'm not entirely sure that we need to observe this event under
+    // GTK, but am putting a stub implementation and a comment saying that if
+    // we crash after that NOTIMPLEMENTED(), we'll need it.
+    registrar_.Add(this, NotificationType::RENDER_VIEW_HOST_CHANGED,
+                   Source<NavigationController>(&tab_contents_->controller()));
+    registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
+                   Source<TabContents>(tab_contents_));
 
     gfx::NativeView widget = tab_contents_->GetNativeView();
     if (widget) {
-      gtk_box_pack_end(GTK_BOX(vbox_), widget, TRUE, TRUE, 0);
-      gtk_widget_show_all(widget);
+      if (widget->parent != fixed_)
+        gtk_fixed_put(GTK_FIXED(fixed_), widget, 0, 0);
+      gtk_widget_show(widget);
     }
+
+    // We need to make sure that we are below the findbar.
+    // Sometimes the content native view will be null.
+    // TODO(estade): will this case ever cause findbar occlusion problems?
+    if (tab_contents_->GetContentNativeView()) {
+      GdkWindow* content_gdk_window =
+          tab_contents_->GetContentNativeView()->window;
+      if (content_gdk_window)
+        gdk_window_lower(content_gdk_window);
+    }
+  }
+}
+
+void TabContentsContainerGtk::DetachTabContents(TabContents* tab_contents) {
+  gfx::NativeView widget = tab_contents->GetNativeView();
+  // It is possible to detach an unrealized, unparented TabContents if you
+  // slow things down enough in valgrind. Might happen in the real world, too.
+  if (widget && widget->parent) {
+    DCHECK_EQ(widget->parent, fixed_);
+    gtk_container_remove(GTK_CONTAINER(fixed_), widget);
   }
 }
 
@@ -68,37 +141,6 @@ void TabContentsContainerGtk::Observe(NotificationType type,
   }
 }
 
-void TabContentsContainerGtk::AddObservers() {
-  DCHECK(tab_contents_);
-  if (tab_contents_->AsWebContents()) {
-    // WebContents can change their RenderViewHost and hence the GtkWidget that
-    // is shown. I'm not entirely sure that we need to observe this event under
-    // GTK, but am putting a stub implementation and a comment saying that if
-    // we crash after that NOTIMPLEMENTED(), we'll need it.
-    NotificationService::current()->AddObserver(
-        this, NotificationType::RENDER_VIEW_HOST_CHANGED,
-        Source<NavigationController>(tab_contents_->controller()));
-  }
-  NotificationService::current()->AddObserver(
-      this,
-      NotificationType::TAB_CONTENTS_DESTROYED,
-      Source<TabContents>(tab_contents_));
-}
-
-void TabContentsContainerGtk::RemoveObservers() {
-  DCHECK(tab_contents_);
-  if (tab_contents_->AsWebContents()) {
-    NotificationService::current()->RemoveObserver(
-        this,
-        NotificationType::RENDER_VIEW_HOST_CHANGED,
-        Source<NavigationController>(tab_contents_->controller()));
-  }
-  NotificationService::current()->RemoveObserver(
-      this,
-      NotificationType::TAB_CONTENTS_DESTROYED,
-      Source<TabContents>(tab_contents_));
-}
-
 void TabContentsContainerGtk::RenderViewHostChanged(RenderViewHost* old_host,
                                                     RenderViewHost* new_host) {
   // TODO(port): Remove this method and the logic where we subscribe to the
@@ -111,4 +153,40 @@ void TabContentsContainerGtk::TabContentsDestroyed(TabContents* contents) {
   // us to clean up our state in case this happens.
   DCHECK(contents == tab_contents_);
   SetTabContents(NULL);
+}
+
+// static
+void TabContentsContainerGtk::OnFixedSizeAllocate(
+    GtkWidget* fixed,
+    GtkAllocation* allocation,
+    TabContentsContainerGtk* container) {
+  // Set all the tab contents GtkWidgets to the size of the allocation.
+  gtk_container_foreach(GTK_CONTAINER(fixed), ResizeChildren, allocation);
+}
+
+// static
+void TabContentsContainerGtk::OnSetFloatingPosition(
+    GtkFloatingContainer* floating_container, GtkAllocation* allocation,
+    TabContentsContainerGtk* tab_contents_container) {
+  GtkWidget* widget = tab_contents_container->status_bubble_->widget();
+
+  // Look at the size request of the status bubble and tell the
+  // GtkFloatingContainer where we want it positioned.
+  GtkRequisition requisition;
+  gtk_widget_size_request(widget, &requisition);
+
+  GValue value = { 0, };
+  g_value_init(&value, G_TYPE_INT);
+  g_value_set_int(&value, 0);
+  // TODO(erg): Since we're absolutely positioning stuff, we probably have to
+  // do manual RTL right here.
+  gtk_container_child_set_property(GTK_CONTAINER(floating_container),
+                                   widget, "x", &value);
+
+  int child_y = std::max(
+      allocation->y + allocation->height - requisition.height, 0);
+  g_value_set_int(&value, child_y);
+  gtk_container_child_set_property(GTK_CONTAINER(floating_container),
+                                   widget, "y", &value);
+  g_value_unset(&value);
 }

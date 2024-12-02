@@ -4,41 +4,41 @@
 
 #include "base/directory_watcher.h"
 
-#include <fstream>
+#include <limits>
 
-#include "build/build_config.h"
-
+#include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/string_util.h"
+#include "base/thread.h"
 #if defined(OS_WIN)
 #include "base/win_util.h"
-#endif
+#endif  // defined(OS_WIN)
 #include "testing/gtest/include/gtest/gtest.h"
-
-// TODO(phajdan.jr): Clean up ifdefs in this file when Linux/Windows differences
-// get sorted out.
 
 namespace {
 
 // For tests where we wait a bit to verify nothing happened
-const int kWaitForEventTime = 500;
+const int kWaitForEventTime = 1000;
 
-// Unfortunately Windows supports only recursive watches and Linux
-// only non-recursive ones.
-#if defined(OS_WIN)
-const bool kDefaultRecursiveValue = true;
-#elif defined(OS_LINUX)
-const bool kDefaultRecursiveValue = false;
-#endif
+class DirectoryWatcherTest : public testing::Test {
+ public:
+  // Implementation of DirectoryWatcher on Mac requires UI loop.
+  DirectoryWatcherTest()
+      : loop_(MessageLoop::TYPE_UI),
+        notified_delegates_(0),
+        expected_notified_delegates_(0) {
+  }
 
-}  // namespace
+  void OnTestDelegateFirstNotification(const FilePath& path) {
+    notified_delegates_++;
+    if (notified_delegates_ >= expected_notified_delegates_)
+      MessageLoop::current()->Quit();
+  }
 
-class DirectoryWatcherTest : public testing::Test,
-                             public DirectoryWatcher::Delegate {
  protected:
   virtual void SetUp() {
     // Name a subdirectory of the temp directory.
@@ -49,20 +49,6 @@ class DirectoryWatcherTest : public testing::Test,
     // Create a fresh, empty copy of this directory.
     file_util::Delete(test_dir_, true);
     file_util::CreateDirectory(test_dir_);
-
-    directory_mods_ = 0;
-    quit_mod_count_ = 0;
-
-    original_thread_id_ = PlatformThread::CurrentId();
-  }
-
-  virtual void OnDirectoryChanged(const FilePath& path) {
-    EXPECT_EQ(original_thread_id_, PlatformThread::CurrentId());
-    ++directory_mods_;
-    // The exact number is verified by VerifyExpectedNumberOfModifications.
-    // Sometimes we don't want such check, see WaitForFirstNotification.
-    if (directory_mods_ >= quit_mod_count_)
-      MessageLoop::current()->Quit();
   }
 
   virtual void TearDown() {
@@ -74,36 +60,48 @@ class DirectoryWatcherTest : public testing::Test,
     ASSERT_FALSE(file_util::PathExists(test_dir_));
   }
 
-  // Write |content| to a file under the test directory.
-  void WriteTestDirFile(const FilePath::StringType& filename,
-                        const std::string& content) {
-    FilePath path = test_dir_.Append(filename);
-    file_util::WriteFile(path, content.c_str(), content.length());
+  // Write |content| to the |filename|. Returns true on success.
+  bool WriteTestFile(const FilePath& filename,
+                     const std::string& content) {
+    return (file_util::WriteFile(filename, content.c_str(), content.length()) ==
+            static_cast<int>(content.length()));
   }
 
-  void SetExpectedNumberOfModifications(int n) {
-    quit_mod_count_ = n;
+  // Create directory |name| under test_dir_. If |sync| is true, runs
+  // SyncIfPOSIX. Returns path to the created directory, including test_dir_.
+  FilePath CreateTestDirDirectoryASCII(const std::string& name, bool sync) {
+    FilePath path(test_dir_.AppendASCII(name));
+    EXPECT_TRUE(file_util::CreateDirectory(path));
+    if (sync)
+      SyncIfPOSIX();
+    return path;
   }
 
-  void VerifyExpectedNumberOfModifications() {
-    // Check that we get at least the expected number of notifications.
-    if (quit_mod_count_ - directory_mods_ > 0)
+  void SetExpectedNumberOfNotifiedDelegates(int n) {
+    notified_delegates_ = 0;
+    expected_notified_delegates_ = n;
+  }
+
+  void VerifyExpectedNumberOfNotifiedDelegates() {
+    // Check that we get at least the expected number of notified delegates.
+    if (expected_notified_delegates_ - notified_delegates_ > 0)
       loop_.Run();
 
-    // Check that we get no more than the expected number of notifications.
+    // Check that we get no more than the expected number of notified delegates.
     loop_.PostDelayedTask(FROM_HERE, new MessageLoop::QuitTask,
                           kWaitForEventTime);
     loop_.Run();
-    EXPECT_EQ(quit_mod_count_, directory_mods_);
+    EXPECT_EQ(expected_notified_delegates_, notified_delegates_);
   }
 
-  // Only use this function if you don't care about getting
-  // too many notifications. Useful for tests where you get
-  // different number of notifications on different platforms.
-  void WaitForFirstNotification() {
-    directory_mods_ = 0;
-    SetExpectedNumberOfModifications(1);
-    loop_.Run();
+  // We need this function for reliable tests on Mac OS X. FSEvents API
+  // has a latency interval and can merge multiple events into one,
+  // and we need a clear distinction between events triggered by test setup code
+  // and test code.
+  void SyncIfPOSIX() {
+#if defined(OS_POSIX)
+    sync();
+#endif  // defined(OS_POSIX)
   }
 
   MessageLoop loop_;
@@ -111,12 +109,42 @@ class DirectoryWatcherTest : public testing::Test,
   // The path to a temporary directory used for testing.
   FilePath test_dir_;
 
-  // The number of times a directory modification has been observed.
-  int directory_mods_;
+  // The number of test delegates which received their notification.
+  int notified_delegates_;
 
-  // The number of directory mods which, when reached, cause us to quit
-  // our message loop.
-  int quit_mod_count_;
+  // The number of notified test delegates after which we quit the message loop.
+  int expected_notified_delegates_;
+};
+
+class TestDelegate : public DirectoryWatcher::Delegate {
+ public:
+  TestDelegate(DirectoryWatcherTest* test)
+      : test_(test),
+        got_notification_(false),
+        original_thread_id_(PlatformThread::CurrentId()) {
+  }
+
+  bool got_notification() const {
+    return got_notification_;
+  }
+
+  void reset() {
+    got_notification_ = false;
+  }
+
+  virtual void OnDirectoryChanged(const FilePath& path) {
+    EXPECT_EQ(original_thread_id_, PlatformThread::CurrentId());
+    if (!got_notification_)
+      test_->OnTestDelegateFirstNotification(path);
+    got_notification_ = true;
+  }
+
+ private:
+  // Hold a pointer to current test fixture to inform it on first notification.
+  DirectoryWatcherTest* test_;
+
+  // Set to true after first notification.
+  bool got_notification_;
 
   // Keep track of original thread id to verify that callbacks are called
   // on the same thread.
@@ -126,80 +154,101 @@ class DirectoryWatcherTest : public testing::Test,
 // Basic test: add a file and verify we notice it.
 TEST_F(DirectoryWatcherTest, NewFile) {
   DirectoryWatcher watcher;
-  ASSERT_TRUE(watcher.Watch(test_dir_, this, kDefaultRecursiveValue));
+  TestDelegate delegate(this);
+  ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, NULL, false));
 
-  SetExpectedNumberOfModifications(2);
-  WriteTestDirFile(FILE_PATH_LITERAL("test_file"), "some content");
-  VerifyExpectedNumberOfModifications();
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(WriteTestFile(test_dir_.AppendASCII("test_file"), "content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
 }
 
 // Verify that modifying a file is caught.
 TEST_F(DirectoryWatcherTest, ModifiedFile) {
-  DirectoryWatcher watcher;
-  ASSERT_TRUE(watcher.Watch(test_dir_, this, kDefaultRecursiveValue));
-
   // Write a file to the test dir.
-  SetExpectedNumberOfModifications(2);
-  WriteTestDirFile(FILE_PATH_LITERAL("test_file"), "some content");
-  VerifyExpectedNumberOfModifications();
+  ASSERT_TRUE(WriteTestFile(test_dir_.AppendASCII("test_file"), "content"));
+  SyncIfPOSIX();
+
+  DirectoryWatcher watcher;
+  TestDelegate delegate(this);
+  ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, NULL, false));
 
   // Now make sure we get notified if the file is modified.
-  WriteTestDirFile(FILE_PATH_LITERAL("test_file"), "some new content");
-  // Use a more forgiving function to check because on Linux you will get
-  // 1 notification, and on Windows 2 (and nothing seems to convince it to
-  // send less notifications).
-  WaitForFirstNotification();
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(WriteTestFile(test_dir_.AppendASCII("test_file"), "new content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
+}
+
+TEST_F(DirectoryWatcherTest, DeletedFile) {
+  // Write a file to the test dir.
+  ASSERT_TRUE(WriteTestFile(test_dir_.AppendASCII("test_file"), "content"));
+  SyncIfPOSIX();
+
+  DirectoryWatcher watcher;
+  TestDelegate delegate(this);
+  ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, NULL, false));
+
+  // Now make sure we get notified if the file is deleted.
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(file_util::Delete(test_dir_.AppendASCII("test_file"), false));
+  VerifyExpectedNumberOfNotifiedDelegates();
 }
 
 // Verify that letting the watcher go out of scope stops notifications.
 TEST_F(DirectoryWatcherTest, Unregister) {
+  TestDelegate delegate(this);
+
   {
     DirectoryWatcher watcher;
-    ASSERT_TRUE(watcher.Watch(test_dir_, this, kDefaultRecursiveValue));
+    ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, NULL, false));
 
     // And then let it fall out of scope, clearing its watch.
   }
 
   // Write a file to the test dir.
-  SetExpectedNumberOfModifications(0);
-  WriteTestDirFile(FILE_PATH_LITERAL("test_file"), "some content");
-  VerifyExpectedNumberOfModifications();
+  SetExpectedNumberOfNotifiedDelegates(0);
+  ASSERT_TRUE(WriteTestFile(test_dir_.AppendASCII("test_file"), "content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
 }
 
-TEST_F(DirectoryWatcherTest, SubDir) {
-  FilePath subdir(FILE_PATH_LITERAL("SubDir"));
-  ASSERT_TRUE(file_util::CreateDirectory(test_dir_.Append(subdir)));
-
-#if defined(OS_WIN)
-  // TODO(port): Recursive watches are not implemented on Linux.
+TEST_F(DirectoryWatcherTest, SubDirRecursive) {
+  FilePath subdir(CreateTestDirDirectoryASCII("SubDir", true));
 
   // Verify that modifications to a subdirectory are noticed by recursive watch.
-  {
-    DirectoryWatcher watcher;
-    ASSERT_TRUE(watcher.Watch(test_dir_, this, true));
-    // Write a file to the subdir.
-    SetExpectedNumberOfModifications(2);
-    FilePath test_path = subdir.AppendASCII("test_file");
-    WriteTestDirFile(test_path.value(), "some content");
-    VerifyExpectedNumberOfModifications();
-  }
+  TestDelegate delegate(this);
+  DirectoryWatcher watcher;
+  ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, NULL, true));
+  // Write a file to the subdir.
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(WriteTestFile(subdir.AppendASCII("test_file"), "some content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
+}
+
+TEST_F(DirectoryWatcherTest, SubDirNonRecursive) {
+#if defined(OS_WIN)
+  // Disable this test for earlier version of Windows. It turned out to be
+  // very difficult to create a reliable test for them.
+  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
+    return;
 #endif  // defined(OS_WIN)
 
-#if !defined(OS_WIN)
-  // TODO: Enable when the root cause of http://crbug.com/5072 is fixed.
+  FilePath subdir(CreateTestDirDirectoryASCII("SubDir", false));
+
+  // Create a test file before the test. On Windows we get a notification
+  // when creating a file in a subdir even with a non-recursive watch.
+  ASSERT_TRUE(WriteTestFile(subdir.AppendASCII("test_file"), "some content"));
+
+  SyncIfPOSIX();
 
   // Verify that modifications to a subdirectory are not noticed
   // by a not-recursive watch.
-  {
-    DirectoryWatcher watcher;
-    ASSERT_TRUE(watcher.Watch(test_dir_, this, false));
-    // Write a file to the subdir.
-    SetExpectedNumberOfModifications(0);
-    FilePath test_path = subdir.AppendASCII("test_file");
-    WriteTestDirFile(test_path.value(), "some content");
-    VerifyExpectedNumberOfModifications();
-  }
-#endif  // !defined(OS_WIN)
+  DirectoryWatcher watcher;
+  TestDelegate delegate(this);
+  ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, NULL, false));
+
+  // Modify the test file. There should be no notifications.
+  SetExpectedNumberOfNotifiedDelegates(0);
+  ASSERT_TRUE(WriteTestFile(subdir.AppendASCII("test_file"), "other content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
 }
 
 namespace {
@@ -226,9 +275,9 @@ class Deleter : public DirectoryWatcher::Delegate {
 TEST_F(DirectoryWatcherTest, DeleteDuringNotify) {
   DirectoryWatcher* watcher = new DirectoryWatcher;
   Deleter deleter(watcher, &loop_);  // Takes ownership of watcher.
-  ASSERT_TRUE(watcher->Watch(test_dir_, &deleter, kDefaultRecursiveValue));
+  ASSERT_TRUE(watcher->Watch(test_dir_, &deleter, NULL, false));
 
-  WriteTestDirFile(FILE_PATH_LITERAL("test_file"), "some content");
+  ASSERT_TRUE(WriteTestFile(test_dir_.AppendASCII("test_file"), "content"));
   loop_.Run();
 
   // We win if we haven't crashed yet.
@@ -236,48 +285,130 @@ TEST_F(DirectoryWatcherTest, DeleteDuringNotify) {
   ASSERT_TRUE(deleter.watcher_.get() == NULL);
 }
 
+TEST_F(DirectoryWatcherTest, BackendLoop) {
+  base::Thread thread("test");
+  ASSERT_TRUE(thread.Start());
+
+  DirectoryWatcher watcher;
+  TestDelegate delegate(this);
+  ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, thread.message_loop(),
+                            true));
+}
+
 TEST_F(DirectoryWatcherTest, MultipleWatchersSingleFile) {
   DirectoryWatcher watcher1, watcher2;
-  ASSERT_TRUE(watcher1.Watch(test_dir_, this, kDefaultRecursiveValue));
-  ASSERT_TRUE(watcher2.Watch(test_dir_, this, kDefaultRecursiveValue));
+  TestDelegate delegate1(this), delegate2(this);
+  ASSERT_TRUE(watcher1.Watch(test_dir_, &delegate1, NULL, false));
+  ASSERT_TRUE(watcher2.Watch(test_dir_, &delegate2, NULL, false));
 
-  SetExpectedNumberOfModifications(4);  // Each watcher should fire twice.
-  WriteTestDirFile(FILE_PATH_LITERAL("test_file"), "some content");
-  VerifyExpectedNumberOfModifications();
+  SetExpectedNumberOfNotifiedDelegates(2);
+  ASSERT_TRUE(WriteTestFile(test_dir_.AppendASCII("test_file"), "content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
 }
 
 TEST_F(DirectoryWatcherTest, MultipleWatchersDifferentFiles) {
   const int kNumberOfWatchers = 5;
   DirectoryWatcher watchers[kNumberOfWatchers];
+  TestDelegate delegates[kNumberOfWatchers] = {this, this, this, this, this};
   FilePath subdirs[kNumberOfWatchers];
   for (int i = 0; i < kNumberOfWatchers; i++) {
-    subdirs[i] = FilePath(FILE_PATH_LITERAL("Dir")).AppendASCII(IntToString(i));
-    ASSERT_TRUE(file_util::CreateDirectory(test_dir_.Append(subdirs[i])));
-
-    ASSERT_TRUE(watchers[i].Watch(test_dir_.Append(subdirs[i]), this,
-                                  kDefaultRecursiveValue));
+    subdirs[i] = CreateTestDirDirectoryASCII("Dir" + IntToString(i), false);
+    ASSERT_TRUE(watchers[i].Watch(subdirs[i], &delegates[i],
+                                  NULL, ((i % 2) == 0)));
   }
   for (int i = 0; i < kNumberOfWatchers; i++) {
     // Verify that we only get modifications from one watcher (each watcher has
     // different directory).
 
-    ASSERT_EQ(0, directory_mods_);
+    for (int j = 0; j < kNumberOfWatchers; j++)
+      delegates[j].reset();
 
     // Write a file to the subdir.
-    FilePath test_path = subdirs[i].AppendASCII("test_file");
-    SetExpectedNumberOfModifications(2);
-    WriteTestDirFile(test_path.value(), "some content");
-    VerifyExpectedNumberOfModifications();
+    SetExpectedNumberOfNotifiedDelegates(1);
+    ASSERT_TRUE(WriteTestFile(subdirs[i].AppendASCII("test_file"), "content"));
+    VerifyExpectedNumberOfNotifiedDelegates();
 
-    directory_mods_ = 0;
+    loop_.RunAllPending();
   }
 }
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
+// TODO(phajdan.jr): Enable when support for Linux recursive watches is added.
+
+TEST_F(DirectoryWatcherTest, WatchCreatedDirectory) {
+  TestDelegate delegate(this);
+  DirectoryWatcher watcher;
+  ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, NULL, true));
+
+  SetExpectedNumberOfNotifiedDelegates(1);
+  FilePath subdir(CreateTestDirDirectoryASCII("SubDir", true));
+  VerifyExpectedNumberOfNotifiedDelegates();
+
+  delegate.reset();
+
+  // Verify that changes inside the subdir are noticed.
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(WriteTestFile(subdir.AppendASCII("test_file"), "some content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
+}
+
+TEST_F(DirectoryWatcherTest, RecursiveWatchDeletedSubdirectory) {
+  FilePath subdir(CreateTestDirDirectoryASCII("SubDir", true));
+
+  TestDelegate delegate(this);
+  DirectoryWatcher watcher;
+  ASSERT_TRUE(watcher.Watch(test_dir_, &delegate, NULL, true));
+
+  // Write a file to the subdir.
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(WriteTestFile(subdir.AppendASCII("test_file"), "some content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
+
+  delegate.reset();
+
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(file_util::Delete(subdir, true));
+  VerifyExpectedNumberOfNotifiedDelegates();
+}
+
+TEST_F(DirectoryWatcherTest, MoveFileAcrossWatches) {
+  FilePath subdir1(CreateTestDirDirectoryASCII("SubDir1", true));
+  FilePath subdir2(CreateTestDirDirectoryASCII("SubDir2", true));
+
+  TestDelegate delegate1(this), delegate2(this);
+  DirectoryWatcher watcher1, watcher2;
+  ASSERT_TRUE(watcher1.Watch(subdir1, &delegate1, NULL, true));
+  ASSERT_TRUE(watcher2.Watch(subdir2, &delegate2, NULL, true));
+
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(WriteTestFile(subdir1.AppendASCII("file"), "some content"));
+  SyncIfPOSIX();
+  VerifyExpectedNumberOfNotifiedDelegates();
+
+  delegate1.reset();
+  delegate2.reset();
+
+  SetExpectedNumberOfNotifiedDelegates(2);
+  ASSERT_TRUE(file_util::Move(subdir1.AppendASCII("file"),
+                              subdir2.AppendASCII("file")));
+  VerifyExpectedNumberOfNotifiedDelegates();
+
+  delegate1.reset();
+  delegate2.reset();
+
+  SetExpectedNumberOfNotifiedDelegates(1);
+  ASSERT_TRUE(WriteTestFile(subdir2.AppendASCII("file"), "other content"));
+  VerifyExpectedNumberOfNotifiedDelegates();
+}
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
 // Verify that watching a directory that doesn't exist fails, but doesn't
 // asssert.
 // Basic test: add a file and verify we notice it.
 TEST_F(DirectoryWatcherTest, NonExistentDirectory) {
   DirectoryWatcher watcher;
-  ASSERT_FALSE(watcher.Watch(test_dir_.AppendASCII("does-not-exist"), this,
-                             kDefaultRecursiveValue));
+  ASSERT_FALSE(watcher.Watch(test_dir_.AppendASCII("does-not-exist"),
+                             NULL, NULL, false));
 }
+
+}  // namespace

@@ -6,12 +6,16 @@
 
 #import <AppKit/AppKit.h>
 
+#include "webkit/api/public/mac/WebInputEventFactory.h"
+
+using WebKit::WebInputEventFactory;
+
 NativeWebKeyboardEvent::NativeWebKeyboardEvent()
     : os_event(NULL) {
 }
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(NSEvent* event)
-    : WebKeyboardEvent(event),
+    : WebKeyboardEvent(WebInputEventFactory::keyboardEvent(event)),
       os_event([event retain]) {
 }
 

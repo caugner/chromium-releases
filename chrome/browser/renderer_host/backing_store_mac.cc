@@ -7,16 +7,22 @@
 #include "base/logging.h"
 #include "chrome/common/transport_dib.h"
 #include "skia/ext/platform_canvas.h"
-#include "skia/include/SkBitmap.h"
-#include "skia/include/SkCanvas.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkCanvas.h"
 
-BackingStore::BackingStore(const gfx::Size& size)
-    : size_(size) {
+BackingStore::BackingStore(RenderWidgetHost* widget, const gfx::Size& size)
+    : render_widget_host_(widget),
+      size_(size) {
   if (!canvas_.initialize(size.width(), size.height(), true))
     SK_CRASH();
 }
 
 BackingStore::~BackingStore() {
+}
+
+size_t BackingStore::MemorySize() {
+  // Always 4 bytes per pixel.
+  return size_.GetArea() * 4;
 }
 
 void BackingStore::PaintRect(base::ProcessHandle process,
@@ -64,32 +70,43 @@ void BackingStore::ScrollRect(base::ProcessHandle process,
   uint8_t* x = static_cast<uint8_t*>(backing_bitmap.getPixels());
 
   if (dx) {
-    // Horizontal scroll. According to msdn, positive values of |dx| scroll
-    // left, but in practice this seems reversed. TODO(port): figure this
+    // Do not memmove any data if the scroll distance (|dx|) is greater
+    // than |clip_rect.width()|.  If this is true, then none of the
+    // previous pixels will still be on the screen after the scroll.
+    // The call to PaintRect() below will redraw the entire area.
+    if (abs(dx) < clip_rect.width()) {
+      // Horizontal scroll. According to msdn, positive values of |dx| scroll
+      // left, but in practice this seems reversed. TODO(port): figure this
+      // out. For now just reverse the sign.
+      dx *= -1;
+
+      // This is the number of bytes to move per line at 4 bytes per pixel.
+      const int len = (clip_rect.width() - abs(dx)) * 4;
+
+      // Move |x| to the first pixel of the first row.
+      x += clip_rect.y() * stride;
+      x += clip_rect.x() * 4;
+
+      // If we are scrolling left, move |x| to the |dx|^th pixel.
+      if (dx < 0) {
+        x -= dx * 4;
+      }
+
+      for (int i = clip_rect.y(); i < clip_rect.bottom(); ++i) {
+        // Note that overlapping regions requires memmove, not memcpy.
+        memmove(x, x + dx * 4, len);
+        x += stride;
+      }
+    }
+  } else if (dy) {
+    // Vertical scroll.  The above warning about not copying data if
+    // |dy| > |clip_rect.height()| technically applies here too, but
+    // is implicitly taken care of by the termination condition in the
+    // for loop, so we do not need to explicitly check against |dy|.
+
+    // TODO(port): According to msdn, positive values of |dy| scroll
+    // down, but in practice this seems reversed.  Figure this
     // out. For now just reverse the sign.
-    dx *= -1;
-
-    // This is the number of bytes to move per line at 4 bytes per pixel.
-    const int len = (clip_rect.width() - abs(dx)) * 4;
-
-    // Move |x| to the first pixel of the first row.
-    x += clip_rect.y() * stride;
-    x += clip_rect.x() * 4;
-
-    // If we are scrolling left, move |x| to the |dx|^th pixel.
-    if (dx < 0) {
-      x -= dx * 4;
-    }
-
-    for (int i = clip_rect.y(); i < clip_rect.bottom(); ++i) {
-      // Note that overlapping regions requires memmove, not memcpy.
-      memmove(x, x + dx * 4, len);
-      x += stride;
-    }
-  } else {
-    // Vertical scroll. According to msdn, positive values of |dy| scroll down,
-    // but in practice this seems reversed. TODO(port): figure this out. For now
-    // just reverse the sign.
     dy *= -1;
 
     const int len = clip_rect.width() * 4;
@@ -97,19 +114,20 @@ void BackingStore::ScrollRect(base::ProcessHandle process,
     // For down scrolls, we copy bottom-up (in screen coordinates).
     // For up scrolls, we copy top-down.
     if (dy > 0) {
-      // Move |x| to the first pixel of this row.
+      // Move |x| to the first pixel of the first row of the clip rect.
+      x += clip_rect.y() * stride;
       x += clip_rect.x() * 4;
 
-      for (int i = clip_rect.y(); i < clip_rect.height() - dy; ++i) {
+      for (int i = 0; i < clip_rect.height() - dy; ++i) {
         memcpy(x, x + stride * dy, len);
         x += stride;
       }
     } else {
       // Move |x| to the first pixel of the last row of the clip rect.
-      x += clip_rect.x() * 4;
       x += (clip_rect.bottom() - 1) * stride;
+      x += clip_rect.x() * 4;
 
-      for (int i = clip_rect.y(); i < clip_rect.height() + dy; ++i) {
+      for (int i = 0; i < clip_rect.height() + dy; ++i) {
         memcpy(x, x + stride * dy, len);
         x -= stride;
       }

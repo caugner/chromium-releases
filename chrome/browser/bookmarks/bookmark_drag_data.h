@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_
-#define CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_
+#ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_H_
+#define CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_H_
 
+#include <string>
 #include <vector>
 
 #include "chrome/browser/history/history.h"
@@ -35,10 +36,9 @@ class Profile;
 //     // data is valid, contents are in elements.
 
 struct BookmarkDragData {
-
   // Element represents a single node.
   struct Element {
-    explicit Element(BookmarkNode* node);
+    explicit Element(const BookmarkNode* node);
 
     Element() : is_url(false), id_(0) {}
 
@@ -62,15 +62,16 @@ struct BookmarkDragData {
     bool ReadFromPickle(Pickle* pickle, void** iterator);
 
     // ID of the node.
-    int id_;
+    int64 id_;
   };
 
   BookmarkDragData() { }
 
   // Created a BookmarkDragData populated from the arguments.
-  explicit BookmarkDragData(BookmarkNode* node);
-  explicit BookmarkDragData(const std::vector<BookmarkNode*>& nodes);
+  explicit BookmarkDragData(const BookmarkNode* node);
+  explicit BookmarkDragData(const std::vector<const BookmarkNode*>& nodes);
 
+#if defined(TOOLKIT_VIEWS)
   // Writes elements to data. If there is only one element and it is a URL
   // the URL and title are written to the clipboard in a format other apps can
   // use.
@@ -80,16 +81,23 @@ struct BookmarkDragData {
 
   // Restores this data from the clipboard, returning true on success.
   bool Read(const OSExchangeData& data);
+#endif
+
+  // Writes the data for a drag to |pickle|.
+  void WriteToPickle(Profile* profile, Pickle* pickle) const;
+
+  // Reads the data for a drag from a |pickle|.
+  bool ReadFromPickle(Pickle* pickle);
 
   // Returns the nodes represented by this DragData. If this DragData was
   // created from the same profile then the nodes from the model are returned.
   // If the nodes can't be found (may have been deleted), an empty vector is
   // returned.
-  std::vector<BookmarkNode*> GetNodes(Profile* profile) const;
+  std::vector<const BookmarkNode*> GetNodes(Profile* profile) const;
 
   // Convenience for getting the first node. Returns NULL if the data doesn't
   // match any nodes or there is more than one node.
-  BookmarkNode* GetFirstNode(Profile* profile) const;
+  const BookmarkNode* GetFirstNode(Profile* profile) const;
 
   // Do we contain valid data?
   bool is_valid() const { return !elements.empty(); }
@@ -108,7 +116,11 @@ struct BookmarkDragData {
 
  private:
   // Path of the profile we originated from.
+#if defined(WCHAR_T_IS_UTF16)
   std::wstring profile_path_;
+#elif defined(WCHAR_T_IS_UTF32)
+  std::string profile_path_;
+#endif
 };
 
-#endif  // CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_
+#endif  // CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_H_

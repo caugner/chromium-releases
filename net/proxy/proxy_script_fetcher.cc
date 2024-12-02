@@ -5,11 +5,14 @@
 #include "net/proxy/proxy_script_fetcher.h"
 
 #include "base/compiler_specific.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 
 // TODO(eroman):
@@ -26,6 +29,19 @@ int max_response_bytes = 1048576;  // 1 megabyte
 // The maximum duration (in milliseconds) allowed for fetching the PAC script.
 // Responses exceeding this will fail with ERR_TIMED_OUT.
 int max_duration_ms = 300000;  // 5 minutes
+
+// Returns true if |mime_type| is one of the known PAC mime type.
+bool IsPacMimeType(const std::string& mime_type) {
+  static const char * const kSupportedPacMimeTypes[] = {
+    "application/x-ns-proxy-autoconfig",
+    "application/x-javascript-config",
+  };
+  for (size_t i = 0; i < arraysize(kSupportedPacMimeTypes); ++i) {
+    if (LowerCaseEqualsASCII(mime_type, kSupportedPacMimeTypes[i]))
+      return true;
+  }
+  return false;
+}
 
 }  // namespace
 
@@ -51,7 +67,6 @@ class ProxyScriptFetcherImpl : public ProxyScriptFetcher,
                               AuthChallengeInfo* auth_info);
   virtual void OnSSLCertificateError(URLRequest* request, int cert_error,
                                      X509Certificate* cert);
-  virtual void OnReceivedRedirect(URLRequest* request, const GURL& to_url);
   virtual void OnResponseStarted(URLRequest* request);
   virtual void OnReadCompleted(URLRequest* request, int num_bytes);
   virtual void OnResponseCompleted(URLRequest* request);
@@ -137,7 +152,10 @@ void ProxyScriptFetcherImpl::Fetch(const GURL& url,
 
   // Make sure that the PAC script is downloaded using a direct connection,
   // to avoid circular dependencies (fetching is a part of proxy resolution).
-  cur_request_->set_load_flags(LOAD_BYPASS_PROXY);
+  // Also disable the use of the disk cache. The cache is disabled so that if
+  // the user switches networks we don't potentially use the cached response
+  // from old network when we should in fact be re-fetching on the new network.
+  cur_request_->set_load_flags(LOAD_BYPASS_PROXY | LOAD_DISABLE_CACHE);
 
   // Save the caller's info for notification on completion.
   callback_ = callback;
@@ -165,6 +183,7 @@ void ProxyScriptFetcherImpl::OnAuthRequired(URLRequest* request,
                                             AuthChallengeInfo* auth_info) {
   DCHECK(request == cur_request_.get());
   // TODO(eroman):
+  LOG(WARNING) << "Auth required to fetch PAC script, aborting.";
   result_code_ = ERR_NOT_IMPLEMENTED;
   request->CancelAuth();
 }
@@ -173,15 +192,10 @@ void ProxyScriptFetcherImpl::OnSSLCertificateError(URLRequest* request,
                                                    int cert_error,
                                                    X509Certificate* cert) {
   DCHECK(request == cur_request_.get());
+  LOG(WARNING) << "SSL certificate error when fetching PAC script, aborting.";
   // Certificate errors are in same space as net errors.
   result_code_ = cert_error;
   request->Cancel();
-}
-
-void ProxyScriptFetcherImpl::OnReceivedRedirect(URLRequest* request,
-                                                const GURL& to_url) {
-  DCHECK(request == cur_request_.get());
-  // OK, thanks for telling.
 }
 
 void ProxyScriptFetcherImpl::OnResponseStarted(URLRequest* request) {
@@ -194,15 +208,24 @@ void ProxyScriptFetcherImpl::OnResponseStarted(URLRequest* request) {
 
   // Require HTTP responses to have a success status code.
   if (request->url().SchemeIs("http") || request->url().SchemeIs("https")) {
-    // NOTE about mime types: We do not enforce mime types on PAC files.
-    // This is for compatibility with {IE 7, Firefox 3, Opera 9.5}
-
     // NOTE about status codes: We are like Firefox 3 in this respect.
     // {IE 7, Safari 3, Opera 9.5} do not care about the status code.
     if (request->GetResponseCode() != 200) {
+      LOG(INFO) << "Fetched PAC script had (bad) status line: "
+                << request->response_headers()->GetStatusLine();
       result_code_ = ERR_PAC_STATUS_NOT_OK;
       request->Cancel();
       return;
+    }
+
+    // NOTE about mime types: We do not enforce mime types on PAC files.
+    // This is for compatibility with {IE 7, Firefox 3, Opera 9.5}. We will
+    // however log mismatches to help with debugging.
+    std::string mime_type;
+    cur_request_->GetMimeType(&mime_type);
+    if (!IsPacMimeType(mime_type)) {
+      LOG(INFO) << "Fetched PAC script does not have a proper mime type: "
+                << mime_type;
     }
   }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,27 @@
 #include "base/logging.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "net/base/net_errors.h"
 #include "net/disk_cache/backend_impl.h"
 #include "net/disk_cache/cache_util.h"
 #include "net/disk_cache/file.h"
 
 using base::Time;
 using base::TimeDelta;
+
+namespace {
+
+std::wstring BuildCachePath(const std::wstring& name) {
+  FilePath path;
+  PathService::Get(base::DIR_TEMP, &path);  // Ignore return value;
+  path = path.Append(FilePath::FromWStringHack(name));
+  if (!file_util::PathExists(path))
+    file_util::CreateDirectory(path);
+
+  return path.ToWStringHack();
+}
+
+}  // namespace.
 
 std::string GenerateKey(bool same_length) {
   char key[200];
@@ -40,13 +55,7 @@ void CacheTestFillBuffer(char* buffer, size_t len, bool no_nulls) {
 }
 
 std::wstring GetCachePath() {
-  std::wstring path;
-  PathService::Get(base::DIR_TEMP, &path);
-  file_util::AppendToPath(&path, L"cache_test");
-  if (!file_util::PathExists(path))
-    file_util::CreateDirectory(path);
-
-  return path;
+  return BuildCachePath(L"cache_test");
 }
 
 bool CreateCacheTestFile(const wchar_t* name) {
@@ -69,10 +78,12 @@ bool DeleteCache(const wchar_t* path) {
   return true;
 }
 
-bool CheckCacheIntegrity(const std::wstring& path) {
+bool CheckCacheIntegrity(const std::wstring& path, bool new_eviction) {
   scoped_ptr<disk_cache::BackendImpl> cache(new disk_cache::BackendImpl(path));
   if (!cache.get())
     return false;
+  if (new_eviction)
+    cache->SetNewEviction();
   if (!cache->Init())
     return false;
   return cache->SelfCheck() >= 0;
@@ -83,30 +94,41 @@ ScopedTestCache::ScopedTestCache() : path_(GetCachePath()) {
   DCHECK(result);
 }
 
+ScopedTestCache::ScopedTestCache(const std::wstring& name)
+    : path_(BuildCachePath(name)) {
+  bool result = DeleteCache(path_.c_str());
+  DCHECK(result);
+}
+
 ScopedTestCache::~ScopedTestCache() {
   file_util::Delete(path(), true);
 }
 
 // -----------------------------------------------------------------------
 
-int g_cache_tests_max_id = 0;
 volatile int g_cache_tests_received = 0;
 volatile bool g_cache_tests_error = 0;
 
 // On the actual callback, increase the number of tests received and check for
 // errors (an unexpected test received)
 void CallbackTest::RunWithParams(const Tuple1<int>& params) {
-  if (id_ > g_cache_tests_max_id) {
-    NOTREACHED();
-    g_cache_tests_error = true;
-  } else if (reuse_) {
+  if (reuse_) {
     DCHECK(1 == reuse_);
     if (2 == reuse_)
       g_cache_tests_error = true;
     reuse_++;
   }
 
+  result_ = params.a;
   g_cache_tests_received++;
+}
+
+// -----------------------------------------------------------------------
+
+int SimpleCallbackTest::GetResult(int result) {
+  if (net::ERR_IO_PENDING != result)
+    return result;
+  return WaitForResult();
 }
 
 // -----------------------------------------------------------------------

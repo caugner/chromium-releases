@@ -6,9 +6,9 @@
 
 #include "base/file_util.h"
 #include "base/scoped_ptr.h"
-#include "chrome/common/stl_util-inl.h"
-#include "SkBitmap.h"
-#include "SkCanvas.h"
+#include "base/stl_util-inl.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkCanvas.h"
 
 IconManager::IconManager() {
 }
@@ -17,14 +17,10 @@ IconManager::~IconManager() {
   STLDeleteValues(&icon_cache_);
 }
 
-SkBitmap* IconManager::LookupIcon(const std::wstring& file_name,
+SkBitmap* IconManager::LookupIcon(const FilePath& file_name,
                                   IconLoader::IconSize size) {
-  std::wstring path = file_name;
-  std::wstring extension = file_util::GetFileExtensionFromPath(path);
-  if (extension != L"exe" && extension != L"dll" && extension != L"ico")
-    path = L'.' + extension;
-
-  IconMap::iterator it = icon_cache_.find(CacheKey(path, size));
+  IconGroupID group = GetGroupIDFromFilepath(file_name);
+  IconMap::iterator it = icon_cache_.find(CacheKey(group, size));
   if (it != icon_cache_.end())
     return it->second;
 
@@ -32,33 +28,30 @@ SkBitmap* IconManager::LookupIcon(const std::wstring& file_name,
 }
 
 IconManager::Handle IconManager::LoadIcon(
-    const std::wstring& file_name,
+    const FilePath& file_name,
     IconLoader::IconSize size,
     CancelableRequestConsumerBase* consumer,
     IconRequestCallback* callback) {
-  std::wstring path = file_name;
-  std::wstring extension = file_util::GetFileExtensionFromPath(path);
-  if (extension != L"exe" && extension != L"dll" && extension != L"ico")
-    path = L'.' + extension;
-
+  IconGroupID group = GetGroupIDFromFilepath(file_name);
   IconRequest* request = new IconRequest(callback);
   AddRequest(request, consumer);
 
-  IconLoader* loader =
-      IconLoader::CreateIconLoaderForFileResource(path, size, this);
+  IconLoader* loader = new IconLoader(group, size, this);
+  loader->AddRef();
   loader->Start();
-  ClientRequest client_request = { request, path, size };
+  ClientRequest client_request = { request, group, size };
   requests_[loader] = client_request;
   return request->handle();
 }
 
 // IconLoader::Delegate implementation -----------------------------------------
 
-bool IconManager::OnSkBitmapLoaded(IconLoader* source, SkBitmap* result) {
-  scoped_ptr<IconLoader> scoped_source(source);
+bool IconManager::OnBitmapLoaded(IconLoader* source, SkBitmap* result) {
+  ClientRequests::iterator rit = requests_.find(source);
+  // Balances the AddRef() in LoadIcon().
+  source->Release();
 
   // Look up our client state.
-  ClientRequests::iterator rit = requests_.find(source);
   if (rit == requests_.end()) {
     NOTREACHED();
     return false;  // Return false to indicate result should be deleted.
@@ -72,7 +65,7 @@ bool IconManager::OnSkBitmapLoaded(IconLoader* source, SkBitmap* result) {
 
   // Cache the bitmap. Watch out: |result| or the cached bitmap may be NULL to
   // indicate a current or past failure.
-  CacheKey key(client_request.file_name, client_request.size);
+  CacheKey key(client_request.group, client_request.size);
   IconMap::iterator it = icon_cache_.find(key);
   if (it != icon_cache_.end() && result && it->second) {
     it->second->swap(*result);
@@ -91,21 +84,14 @@ bool IconManager::OnSkBitmapLoaded(IconLoader* source, SkBitmap* result) {
   return true;  // Indicates we took ownership of result.
 }
 
-bool IconManager::OnHICONLoaded(IconLoader* source,
-                                HICON small_icon,
-                                HICON large_icon) {
-  NOTREACHED();
-  return false;
-}
-
-IconManager::CacheKey::CacheKey(std::wstring file_name,
+IconManager::CacheKey::CacheKey(const IconGroupID& group,
                                 IconLoader::IconSize size)
-    : file_name(file_name),
+    : group(group),
       size(size) {
 }
 
 bool IconManager::CacheKey::operator<(const CacheKey &other) const {
-  if (file_name != other.file_name)
-    return file_name < other.file_name;
+  if (group != other.group)
+    return group < other.group;
   return size < other.size;
 }

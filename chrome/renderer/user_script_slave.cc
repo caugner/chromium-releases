@@ -4,34 +4,40 @@
 
 #include "chrome/renderer/user_script_slave.h"
 
+#include "app/resource_bundle.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/perftimer.h"
 #include "base/pickle.h"
 #include "base/shared_memory.h"
-#include "chrome/common/resource_bundle.h"
+#include "base/string_util.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/api/public/WebScriptSource.h"
 #include "webkit/glue/webframe.h"
-#include "webkit/glue/webscriptsource.h"
 
 #include "grit/renderer_resources.h"
+
+using WebKit::WebScriptSource;
+using WebKit::WebString;
 
 // These two strings are injected before and after the Greasemonkey API and
 // user script to wrap it in an anonymous scope.
 static const char kUserScriptHead[] = "(function (unsafeWindow) {\n";
 static const char kUserScriptTail[] = "\n})(window);";
 
+// Creates a convenient reference to a content script's parent extension.
+// TODO(mpcomplete): self.onConnect is deprecated.  Remove it at 1.0.
+// http://code.google.com/p/chromium/issues/detail?id=16356
+static const char kInitExtension[] =
+    "chrome.extension = new chrome.Extension('%s');"
+    "chrome.self.onConnect = chrome.extension.onConnect;";
+
 UserScriptSlave::UserScriptSlave()
     : shared_memory_(NULL),
       script_deleter_(&scripts_),
       user_script_start_line_(0) {
-  // TODO: Only windows supports resources and only windows supports user
-  // scrips, so only load the Greasemonkey API on windows.  Fix this when
-  // better cross platofrm support is available.
-#if defined(OS_WIN)
   api_js_ = ResourceBundle::GetSharedInstance().GetRawDataResource(
                 IDR_GREASEMONKEY_API_JS);
-#endif
 
   // Count the number of lines that will be injected before the user script.
   StringPiece::size_type pos = 0;
@@ -86,13 +92,15 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
       const char* body = NULL;
       int body_length = 0;
       CHECK(pickle.ReadData(&iter, &body, &body_length));
-      script->js_scripts()[j].set_external_content(body);
+      script->js_scripts()[j].set_external_content(
+          StringPiece(body, body_length));
     }
     for (size_t j = 0; j < script->css_scripts().size(); ++j) {
       const char* body = NULL;
       int body_length = 0;
       CHECK(pickle.ReadData(&iter, &body, &body_length));
-      script->css_scripts()[j].set_external_content(body);
+      script->css_scripts()[j].set_external_content(
+          StringPiece(body, body_length));
     }
   }
 
@@ -101,11 +109,15 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
 
 bool UserScriptSlave::InjectScripts(WebFrame* frame,
                                     UserScript::RunLocation location) {
+  // Don't bother if this is not a URL we inject script into.
+  if (!URLPattern::IsValidScheme(frame->GetURL().scheme()))
+    return true;
+
   PerfTimer timer;
   int num_matched = 0;
 
-  std::vector<webkit_glue::WebScriptSource> sources;
   for (size_t i = 0; i < scripts_.size(); ++i) {
+    std::vector<WebScriptSource> sources;
     UserScript* script = scripts_[i];
     if (!script->MatchesUrl(frame->GetURL()))
       continue;  // This frame doesn't match the script url pattern, skip it.
@@ -121,16 +133,38 @@ bool UserScriptSlave::InjectScripts(WebFrame* frame,
     if (script->run_location() == location) {
       for (size_t j = 0; j < script->js_scripts().size(); ++j) {
         UserScript::File &file = script->js_scripts()[j];
-        sources.push_back(webkit_glue::WebScriptSource(
-          file.GetContent().as_string(), file.url()));
+        std::string content = file.GetContent().as_string();
+
+        // We add this dumb function wrapper for standalone user script to
+        // emulate what Greasemonkey does.
+        if (script->is_standalone()) {
+          content.insert(0, kUserScriptHead);
+          content += kUserScriptTail;
+        }
+        sources.push_back(WebScriptSource(
+            WebString::fromUTF8(content.c_str(), content.length()),
+            file.url()));
       }
     }
-  }
 
-  if (!sources.empty()) {
-    sources.insert(sources.begin(),
-                   webkit_glue::WebScriptSource(api_js_.as_string()));
-    frame->ExecuteScriptInNewContext(&sources.front(), sources.size());
+    if (!sources.empty()) {
+      if (script->is_standalone()) {
+        // For standalone scripts, we try to emulate the Greasemonkey API.
+        sources.insert(sources.begin(),
+            WebScriptSource(WebString::fromUTF8(api_js_.as_string())));
+      } else {
+        // Setup chrome.self to contain an Extension object with the correct
+        // ID.
+        sources.insert(sources.begin(),
+            WebScriptSource(WebString::fromUTF8(
+                StringPrintf(kInitExtension, script->extension_id().c_str()))));
+      }
+
+      // TODO(abarth): switch back to NewWorld when V8IsolatedWorld is fixed.
+      // https://bugs.webkit.org/show_bug.cgi?id=27397
+      frame->ExecuteScriptInNewContext(&sources.front(), sources.size());
+      // frame->ExecuteScriptInNewWorld(&sources.front(), sources.size());
+    }
   }
 
   // Log debug info.

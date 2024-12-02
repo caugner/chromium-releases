@@ -7,9 +7,9 @@
 
 #include "chrome/browser/views/first_run_view_base.h"
 #include "chrome/browser/views/first_run_customize_view.h"
-#include "chrome/views/controls/link.h"
-#include "chrome/views/view.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/controls/link.h"
+#include "views/view.h"
+#include "views/window/dialog_delegate.h"
 
 namespace views {
 class Label;
@@ -25,8 +25,12 @@ class FirstRunView : public FirstRunViewBase,
                      public views::LinkController,
                      public FirstRunCustomizeView::CustomizeViewObserver {
  public:
-  explicit FirstRunView(Profile* profile);
+  explicit FirstRunView(Profile* profile,
+                        int import_items,
+                        int dont_import_items);
   virtual ~FirstRunView();
+
+  bool accepted() const { return accepted_;}
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize();
@@ -60,6 +64,10 @@ class FirstRunView : public FirstRunViewBase,
   views::Label* actions_shorcuts_;
   views::Link* customize_link_;
   bool customize_selected_;
+
+  // Whether the user accepted (pressed the "Start" button as opposed to
+  // "Cancel").
+  bool accepted_;
 
   DISALLOW_COPY_AND_ASSIGN(FirstRunView);
 };

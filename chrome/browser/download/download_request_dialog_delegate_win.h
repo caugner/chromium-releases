@@ -9,7 +9,7 @@
 
 #include "chrome/browser/download/download_request_dialog_delegate.h"
 #include "chrome/browser/download/download_request_manager.h"
-#include "chrome/views/window/dialog_delegate.h"
+#include "views/window/dialog_delegate.h"
 
 class ConstrainedWindow;
 class MessageBoxView;
@@ -32,9 +32,10 @@ class DownloadRequestDialogDelegateWin : public DownloadRequestDialogDelegate,
   virtual bool Cancel();
   virtual bool Accept();
   virtual views::View* GetContentsView();
-  virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
+  virtual std::wstring GetDialogButtonLabel(
+      MessageBoxFlags::DialogButton button) const;
   virtual int GetDefaultDialogButton() const {
-    return DIALOGBUTTON_CANCEL;
+    return MessageBoxFlags::DIALOGBUTTON_CANCEL;
   }
   virtual void DeleteDelegate();
 
