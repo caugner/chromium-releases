@@ -2,7 +2,7 @@
 #  To use this DEPS file to re-create a Chromium release you
 #  need the tools from http://dev.chromium.org installed.
 #  
-#  This DEPS file corresponds to Chromium 6.0.472.9
+#  This DEPS file corresponds to Chromium 7.0.517.9
 #  
 #  
 #  
@@ -19,7 +19,7 @@ deps_os = {
       'src/third_party/swig/win':
          '/trunk/deps/third_party/swig/win@40423',
       'src/third_party/ffmpeg/binaries/chromium/win/ia32':
-         '/trunk/deps/third_party/ffmpeg/binaries/win@49485',
+         '/trunk/deps/third_party/ffmpeg/binaries/win@58574',
       'src/third_party/lighttpd':
          '/trunk/deps/third_party/lighttpd@33727',
       'src/third_party/pefile':
@@ -27,11 +27,11 @@ deps_os = {
       'src/chrome/tools/test/reference_build/chrome':
          '/trunk/deps/reference_builds/chrome@41984',
       'src/third_party/nss':
-         '/trunk/deps/third_party/nss@48440',
+         '/trunk/deps/third_party/nss@55513',
       'src/third_party/mingw-w64/mingw/bin':
-         'http://nativeclient.googlecode.com/svn/trunk/src/third_party/mingw-w64/mingw/bin@2697',
+         'http://src.chromium.org/native_client/trunk/src/third_party/mingw-w64/mingw/bin@3186',
       'src/rlz':
-         'http://rlz.googlecode.com/svn/trunk@4',
+         'http://rlz.googlecode.com/svn/trunk@17',
    },
    'mac': {
       'src/third_party/GTM':
@@ -41,11 +41,11 @@ deps_os = {
       'src/chrome/installer/mac/third_party/xz/xz':
          '/trunk/deps/third_party/xz@50504',
       'src/third_party/WebKit/WebKitLibraries':
-         '/branches/WebKit/472/WebKitLibraries@53485',
+         'http://svn.webkit.org/repository/webkit/branches/chromium/517/WebKitLibraries@66913',
       'src/third_party/yasm/source/patched-yasm':
          '/trunk/deps/third_party/yasm/patched-yasm@50870',
       'src/third_party/WebKit/WebKit/mac':
-         '/branches/WebKit/472/WebKit/mac@53485',
+         'http://svn.webkit.org/repository/webkit/branches/chromium/517/WebKit/mac@66913',
       'src/third_party/swig/mac':
          '/trunk/deps/third_party/swig/mac@40423',
       'src/third_party/lighttpd':
@@ -53,125 +53,137 @@ deps_os = {
       'src/chrome/tools/test/reference_build/chrome_mac':
          '/trunk/deps/reference_builds/chrome_mac@41963',
       'src/third_party/nss':
-         '/trunk/deps/third_party/nss@48440',
+         '/trunk/deps/third_party/nss@55513',
    },
    'unix': {
       'src/third_party/swig/linux':
          '/trunk/deps/third_party/swig/linux@40423',
       'src/third_party/cros':
-         'http://src.chromium.org/git/cros.git@cc1c63d',
+         'http://src.chromium.org/git/cros.git@b6fc7838',
       'src/third_party/yasm/source/patched-yasm':
          '/trunk/deps/third_party/yasm/patched-yasm@50870',
       'src/third_party/xdg-utils':
-         '/trunk/deps/third_party/xdg-utils@29103',
+         '/trunk/deps/third_party/xdg-utils@58316',
       'src/chrome/tools/test/reference_build/chrome_linux':
          '/trunk/deps/reference_builds/chrome_linux@41515',
    },
 }
 
 deps = {
-   'src/native_client':
-      'http://nativeclient.googlecode.com/svn/trunk/src/native_client@2697',
    'src/third_party/skia/include':
-      'http://skia.googlecode.com/svn/trunk/include@583',
+      'http://skia.googlecode.com/svn/trunk/include@593',
    'src/third_party/WebKit/WebCore':
-      '/branches/WebKit/472/WebCore@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/WebCore@67543',
    'src/chrome/test/data/layout_tests/LayoutTests/fast/workers':
-      '/branches/WebKit/472/LayoutTests/fast/workers@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/fast/workers@66913',
    'src/chrome/test/data/layout_tests/LayoutTests/platform/chromium/fast/workers':
-      '/branches/WebKit/472/LayoutTests/platform/chromium/fast/workers@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/platform/chromium/fast/workers@66913',
    'src/chrome/test/data/layout_tests/LayoutTests/fast/js/resources':
-      '/branches/WebKit/472/LayoutTests/fast/js/resources@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/fast/js/resources@66913',
    'src/chrome/test/data/layout_tests/LayoutTests/platform/chromium-mac/http/tests/workers':
-      '/branches/WebKit/472/LayoutTests/platform/chromium-mac/http/tests/workers@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/platform/chromium-mac/http/tests/workers@66913',
    'src/chrome/test/data/layout_tests/LayoutTests/http/tests/resources':
-      '/branches/WebKit/472/LayoutTests/http/tests/resources@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/http/tests/resources@66913',
    'src/chrome/test/data/layout_tests/LayoutTests/storage/domstorage':
-      '/branches/WebKit/472/LayoutTests/storage/domstorage@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/storage/domstorage@66913',
+   'src/third_party/pcre':
+      'http://sawbuck.googlecode.com/svn/trunk/third_party/pcre@102',
    'src/third_party/ppapi':
-      'http://ppapi.googlecode.com/svn/trunk@165',
+      'http://ppapi.googlecode.com/svn/trunk@234',
    'src/chrome/test/data/layout_tests/LayoutTests/fast/events':
-      '/branches/WebKit/472/LayoutTests/fast/events@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/fast/events@67263',
    'src/third_party/WebKit':
       '/trunk/deps/third_party/WebKit@33467',
    'src/third_party/ots':
-      'http://ots.googlecode.com/svn/trunk@33',
+      'http://ots.googlecode.com/svn/trunk@35',
    'src/third_party/libvpx/include':
-      '/trunk/deps/third_party/libvpx/include@50313',
+      '/trunk/deps/third_party/libvpx/include@58584',
    'src/chrome/test/data/layout_tests/LayoutTests/http/tests/workers':
-      '/branches/WebKit/472/LayoutTests/http/tests/workers@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/http/tests/workers@66913',
+   'src/chrome/test/data/extensions/api_test/permissions/nacl_enabled/bin':
+      'http://nativeclient.googlecode.com/svn/trunk/src/native_client/tests/prebuilt@3186',
    'src/chrome/test/data/layout_tests/LayoutTests/http/tests/xmlhttprequest':
-      '/branches/WebKit/472/LayoutTests/http/tests/xmlhttprequest@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/http/tests/xmlhttprequest@66913',
+   'src/tools/gyp':
+      'http://gyp.googlecode.com/svn/trunk@840',
    'src/sdch/open-vcdiff':
       'http://open-vcdiff.googlecode.com/svn/trunk@28',
    'src/chrome/test/data/layout_tests/LayoutTests/platform/chromium-win/storage/domstorage':
-      '/branches/WebKit/472/LayoutTests/platform/chromium-win/storage/domstorage@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/platform/chromium-win/storage/domstorage@66913',
    'src/tools/page_cycler/acid3':
       '/trunk/deps/page_cycler/acid3@19546',
    'src/third_party/py/simplejson':
       'http://simplejson.googlecode.com/svn/trunk/simplejson@217',
    'src/build/util/support':
-      '/trunk/deps/support@53607',
+      '/trunk/deps/support@59659',
    'src/third_party/cacheinvalidation/files':
-      'http://google-cache-invalidation-api.googlecode.com/svn/trunk@34',
+      'http://google-cache-invalidation-api.googlecode.com/svn/trunk@35',
    'src/third_party/libjingle/source':
-      'http://libjingle.googlecode.com/svn/branches/nextsnap@24',
+      'http://libjingle.googlecode.com/svn/branches/nextsnap@27',
    'src':
-      '/branches/472/src@53606',
+      '/branches/517/src@59640',
    'src/third_party/hunspell':
-      '/trunk/deps/third_party/hunspell128@50872',
+      '/trunk/deps/third_party/hunspell@51690',
    'src/chrome/test/data/layout_tests/LayoutTests/http/tests/appcache':
-      '/branches/WebKit/472/LayoutTests/http/tests/appcache@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/http/tests/appcache@66913',
    'src/testing/gtest':
       'http://googletest.googlecode.com/svn/trunk@408',
    'src/v8':
-      'http://v8.googlecode.com/svn/branches/2.2@5130',
+      'http://v8.googlecode.com/svn/branches/2.3@5478',
    'src/breakpad/src':
-      'http://google-breakpad.googlecode.com/svn/trunk/src@628',
+      'http://google-breakpad.googlecode.com/svn/trunk/src@657',
    'chromeos':
-      '/trunk/cros_deps@53031',
+      '/trunk/cros_deps@58658',
    'src/googleurl':
-      'http://google-url.googlecode.com/svn/trunk@139',
+      'http://google-url.googlecode.com/svn/trunk@145',
    'src/third_party/protobuf2/src':
       'http://protobuf.googlecode.com/svn/trunk@327',
    'src/third_party/hunspell_dictionaries':
       '/trunk/deps/third_party/hunspell_dictionaries@51875',
    'src/chrome/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/events':
-      '/branches/WebKit/472/LayoutTests/platform/chromium-win/fast/events@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/platform/chromium-win/fast/events@66913',
    'src/third_party/WebKit/JavaScriptCore':
-      '/branches/WebKit/472/JavaScriptCore@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/JavaScriptCore@67410',
+   'src/third_party/sawbuck':
+      'http://sawbuck.googlecode.com/svn/trunk/sawbuck@102',
    'src/third_party/libvpx/lib':
-      '/trunk/deps/third_party/libvpx/lib@50313',
+      '/trunk/deps/third_party/libvpx/lib@58584',
    'src/third_party/WebKit/LayoutTests':
-      '/branches/WebKit/472/LayoutTests@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests@67542',
+   'src/chrome/test/data/layout_tests/LayoutTests/media':
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/media@66913',
    'src/chrome/test/data/layout_tests/LayoutTests/platform/chromium-mac/fast/events':
-      '/branches/WebKit/472/LayoutTests/platform/chromium-mac/fast/events@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/platform/chromium-mac/fast/events@66913',
+   'src/native_client':
+      'http://src.chromium.org/native_client/trunk/src/native_client@3186',
    'src/chrome/test/data/layout_tests/LayoutTests/platform/chromium-mac/storage/domstorage':
-      '/branches/WebKit/472/LayoutTests/platform/chromium-mac/storage/domstorage@53485',
-   'src/tools/gyp':
-      'http://gyp.googlecode.com/svn/trunk@837',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/platform/chromium-mac/storage/domstorage@66913',
    'src/third_party/WebKit/WebKit/chromium':
-      '/branches/WebKit/472/WebKit/chromium@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/WebKit/chromium@67508',
    'src/chrome/test/data/layout_tests/LayoutTests/websocket/tests/workers':
-      '/branches/WebKit/472/LayoutTests/websocket/tests/workers@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/websocket/tests/workers@66913',
    'src/third_party/skia/src':
-      'http://skia.googlecode.com/svn/trunk/src@583',
+      'http://skia.googlecode.com/svn/trunk/src@593',
    'src/third_party/WebKit/WebKitTools/Scripts':
-      '/branches/WebKit/472/WebKitTools/Scripts@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/WebKitTools/Scripts@66913',
    'src/third_party/ffmpeg':
-      '/trunk/deps/third_party/ffmpeg/source@49485',
+      '/trunk/deps/third_party/ffmpeg/source@58574',
+   'src/third_party/speex':
+      '/trunk/deps/third_party/speex@56515',
    'src/chrome/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/workers':
-      '/branches/WebKit/472/LayoutTests/platform/chromium-win/fast/workers@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/platform/chromium-win/fast/workers@66913',
    'src/third_party/WebKit/WebKitTools/DumpRenderTree':
-      '/branches/WebKit/472/WebKitTools/DumpRenderTree@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/WebKitTools/DumpRenderTree@66913',
    'src/third_party/icu':
-      '/trunk/deps/third_party/icu42@51076',
+      '/trunk/deps/third_party/icu42@57283',
+   'src/seccompsandbox':
+      'http://seccompsandbox.googlecode.com/svn/trunk@91',
    'src/chrome/test/data/layout_tests/LayoutTests/platform/chromium-win/http/tests/workers':
-      '/branches/WebKit/472/LayoutTests/platform/chromium-win/http/tests/workers@53485',
+      'http://svn.webkit.org/repository/webkit/branches/chromium/517/LayoutTests/platform/chromium-win/http/tests/workers@66913',
+   'src/third_party/angle':
+      'http://angleproject.googlecode.com/svn/trunk@402',
    'src/third_party/swig/Lib':
       '/trunk/deps/third_party/swig/Lib@40423',
-   'src/third_party/angle':
-      'http://angleproject.googlecode.com/svn/trunk@337',
 }
 
 skip_child_includes =  ['breakpad', 'chrome_frame', 'gears', 'native_client', 'o3d', 'sdch', 'skia', 'testing', 'third_party', 'v8'] 

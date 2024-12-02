@@ -4,25 +4,22 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_UI_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_UI_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "gfx/native_widget_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 class Extension;
-class ExtensionsService;
 class MessageLoop;
 class Profile;
 class InfoBarDelegate;
-class SandboxedExtensionUnpacker;
 class TabContents;
+class URLPattern;
 
 // Displays all the UI around extension installation and uninstallation.
 class ExtensionInstallUI : public ImageLoadingTracker::Observer {
@@ -47,11 +44,21 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
     // We call this method after ConfirmInstall()/ConfirmUninstall() to signal
     // that the installation/uninstallation should stop.
     virtual void InstallUIAbort() = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
+
+  // Returns the distinct hosts that should be displayed in the install UI. This
+  // discards some of the detail that is present in the manifest to make it as
+  // easy as possible to process by users. In particular we disregard the scheme
+  // and path components of URLPatterns and de-dupe the result.
+  static std::vector<std::string> GetDistinctHostsForDisplay(
+      const std::vector<URLPattern>& host_patterns);
 
   explicit ExtensionInstallUI(Profile* profile);
 
-  virtual ~ExtensionInstallUI() {}
+  virtual ~ExtensionInstallUI();
 
   // This is called by the installer to verify whether the installation should
   // proceed. This is declared virtual for testing.
@@ -109,7 +116,7 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
   // NOTE: The implementations of this function is platform-specific.
   static void ShowExtensionInstallUIPromptImpl(
       Profile* profile, Delegate* delegate, Extension* extension,
-      SkBitmap* icon, const string16& warning, PromptType type);
+      SkBitmap* icon, PromptType type);
 
   // Implements the showing of the new install dialog. The implementations of
   // this function are platform-specific.

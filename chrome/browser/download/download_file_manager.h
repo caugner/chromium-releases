@@ -38,9 +38,9 @@
 
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_MANAGER_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_FILE_MANAGER_H_
+#pragma once
 
 #include <map>
-#include <string>
 
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
@@ -62,6 +62,10 @@ class URLRequestContextGetter;
 // Manages all in progress downloads.
 class DownloadFileManager
     : public base::RefCountedThreadSafe<DownloadFileManager> {
+
+  // For testing.
+  friend class DownloadManagerTest;
+
  public:
   explicit DownloadFileManager(ResourceDispatcherHost* rdh);
 
@@ -77,16 +81,6 @@ class DownloadFileManager
   void UpdateDownload(int id, DownloadBuffer* buffer);
   void CancelDownload(int id);
   void DownloadFinished(int id, DownloadBuffer* buffer);
-
-  // Download the URL. Called on the UI thread and forwarded to the
-  // ResourceDispatcherHost on the IO thread.
-  void DownloadUrl(const GURL& url,
-                   const GURL& referrer,
-                   const std::string& referrer_charset,
-                   const DownloadSaveInfo& save_info,
-                   int render_process_host_id,
-                   int render_view_id,
-                   URLRequestContextGetter* request_context_getter);
 
   // Called on the UI thread to remove a download item or manager.
   void RemoveDownloadManager(DownloadManager* manager);
@@ -105,9 +99,17 @@ class DownloadFileManager
                              gfx::NativeView parent_window);
 #endif
 
+  // The DownloadManager in the UI thread has provided an intermediate
+  // .crdownload name for the download specified by 'id'.
+  void OnIntermediateDownloadName(int id, const FilePath& full_path,
+                                  DownloadManager* download_manager);
+
   // The download manager has provided a final name for a download. Sent from
   // the UI thread and run on the download thread.
+  // |need_delete_crdownload| indicates if we explicitly delete the intermediate
+  // .crdownload file or not.
   void OnFinalDownloadName(int id, const FilePath& full_path,
+                           bool need_delete_crdownload,
                            DownloadManager* download_manager);
 
  private:
@@ -123,15 +125,6 @@ class DownloadFileManager
   // Clean up helper that runs on the download thread.
   void OnShutdown();
 
-  // Run on the IO thread to initiate the download of a URL.
-  void OnDownloadUrl(const GURL& url,
-                     const GURL& referrer,
-                     const std::string& referrer_charset,
-                     const DownloadSaveInfo& save_info,
-                     int render_process_host_id,
-                     int render_view_id,
-                     URLRequestContextGetter* request_context_getter);
-
   // Handlers for notifications sent from the download thread and run on
   // the UI thread.
   void OnStartDownload(DownloadCreateInfo* info);
@@ -140,13 +133,17 @@ class DownloadFileManager
   // Called only on UI thread to get the DownloadManager for a tab's profile.
   static DownloadManager* DownloadManagerFromRenderIds(int render_process_id,
                                                        int review_view_id);
-  DownloadManager* LookupManager(int download_id);
+  DownloadManager* GetDownloadManager(int download_id);
 
   // Called only on the download thread.
-  DownloadFile* LookupDownload(int id);
+  DownloadFile* GetDownloadFile(int id);
 
   // Called on the UI thread to remove a download from the UI progress table.
   void RemoveDownloadFromUIProgress(int id);
+
+  // Called only from OnFinalDownloadName or OnIntermediateDownloadName
+  // on the FILE thread.
+  void CancelDownloadOnRename(int id);
 
   // Unique ID for each DownloadFile.
   int next_id_;

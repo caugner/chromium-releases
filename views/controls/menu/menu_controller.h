@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_MENU_MENU_CONTROLLER_H_
 #define VIEWS_CONTROLS_MENU_MENU_CONTROLLER_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -118,6 +119,8 @@ class MenuController : public MessageLoopForUI::Dispatcher {
 
  private:
   class MenuScrollTask;
+
+  struct SelectByCharDetails;
 
   // Tracks selection information.
   struct State {
@@ -308,12 +311,31 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // Selects the next/previous menu item.
   void IncrementSelection(int delta);
 
+  // Returns the next selectable child menu item of |parent| starting at |index|
+  // and incrementing index by |delta|. If there are no more selected menu items
+  // NULL is returned.
+  MenuItemView* FindNextSelectableMenuItem(MenuItemView* parent,
+                                           int index,
+                                           int delta);
+
   // If the selected item has a submenu and it isn't currently open, the
   // the selection is changed such that the menu opens immediately.
   void OpenSubmenuChangeSelectionIfCan();
 
   // If possible, closes the submenu.
   void CloseSubmenu();
+
+  // Returns details about which menu items match the mnemonic |key|.
+  // |match_function| is used to determine which menus match.
+  SelectByCharDetails FindChildForMnemonic(
+      MenuItemView* parent,
+      wchar_t key,
+      bool (*match_function)(MenuItemView* menu, wchar_t mnemonic));
+
+  // Selects or accepts the appropriate menu item based on |details|. Returns
+  // true if |Accept| was invoked (which happens if there aren't multiple item
+  // with the same mnemonic and the item to select does not have a submenu).
+  bool AcceptOrSelect(MenuItemView* parent, const SelectByCharDetails& details);
 
   // Selects by mnemonic, and if that doesn't work tries the first character of
   // the title. Returns true if a match was selected and the menu should exit.

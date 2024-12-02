@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_MENU_MENU_DELEGATE_H_
 #define VIEWS_CONTROLS_MENU_MENU_DELEGATE_H_
+#pragma once
 
 #include <set>
 #include <string>
@@ -207,6 +208,13 @@ class MenuDelegate : Controller {
                                        bool* has_mnemonics,
                                        MenuButton** button) {
       return NULL;
+  }
+
+  // Returns the max width menus can grow to be.
+  virtual int GetMaxWidthForMenu() {
+    // NOTE: this needs to be large enough to accommodate the wrench menu with
+    // big fonts.
+    return 800;
   }
 };
 

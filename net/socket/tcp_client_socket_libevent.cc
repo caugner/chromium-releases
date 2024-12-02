@@ -99,8 +99,10 @@ int MapConnectError(int os_error) {
 
 //-----------------------------------------------------------------------------
 
-TCPClientSocketLibevent::TCPClientSocketLibevent(const AddressList& addresses,
-                                                 net::NetLog* net_log)
+TCPClientSocketLibevent::TCPClientSocketLibevent(
+    const AddressList& addresses,
+    net::NetLog* net_log,
+    const net::NetLog::Source& source)
     : socket_(kInvalidSocket),
       addresses_(addresses),
       current_ai_(NULL),
@@ -111,7 +113,10 @@ TCPClientSocketLibevent::TCPClientSocketLibevent(const AddressList& addresses,
       next_connect_state_(CONNECT_STATE_NONE),
       connect_os_error_(0),
       net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)) {
-  net_log_.BeginEvent(NetLog::TYPE_SOCKET_ALIVE, NULL);
+  scoped_refptr<NetLog::EventParameters> params;
+  if (source.is_valid())
+    params = new NetLogSourceParameter("source_dependency", source);
+  net_log_.BeginEvent(NetLog::TYPE_SOCKET_ALIVE, params);
 }
 
 TCPClientSocketLibevent::~TCPClientSocketLibevent() {
@@ -228,8 +233,10 @@ int TCPClientSocketLibevent::DoConnectComplete(int result) {
 
   write_socket_watcher_.StopWatchingFileDescriptor();
 
-  if (result == OK)
+  if (result == OK) {
+    use_history_.set_was_ever_connected();
     return OK;  // Done!
+  }
 
   // Close whatever partially connected socket we currently have.
   DoDisconnect();
@@ -315,7 +322,8 @@ int TCPClientSocketLibevent::Read(IOBuffer* buf,
   if (nread >= 0) {
     static StatsCounter read_bytes("tcp.read_bytes");
     read_bytes.Add(nread);
-
+    if (nread > 0)
+      use_history_.set_was_used_to_convey_data();
     net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED,
                       new NetLogIntegerParameter("num_bytes", nread));
     return nread;
@@ -353,6 +361,8 @@ int TCPClientSocketLibevent::Write(IOBuffer* buf,
   if (nwrite >= 0) {
     static StatsCounter write_bytes("tcp.write_bytes");
     write_bytes.Add(nwrite);
+    if (nwrite > 0)
+      use_history_.set_was_used_to_convey_data();
     net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_SENT,
                       new NetLogIntegerParameter("num_bytes", nwrite));
     return nwrite;
@@ -469,6 +479,10 @@ void TCPClientSocketLibevent::DidCompleteRead() {
   int result;
   if (bytes_transferred >= 0) {
     result = bytes_transferred;
+    static StatsCounter read_bytes("tcp.read_bytes");
+    read_bytes.Add(bytes_transferred);
+    if (bytes_transferred > 0)
+      use_history_.set_was_used_to_convey_data();
     net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED,
                       new NetLogIntegerParameter("num_bytes", result));
   } else {
@@ -492,6 +506,10 @@ void TCPClientSocketLibevent::DidCompleteWrite() {
   int result;
   if (bytes_transferred >= 0) {
     result = bytes_transferred;
+    static StatsCounter write_bytes("tcp.write_bytes");
+    write_bytes.Add(bytes_transferred);
+    if (bytes_transferred > 0)
+      use_history_.set_was_used_to_convey_data();
     net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_SENT,
                       new NetLogIntegerParameter("num_bytes", result));
   } else {
@@ -513,6 +531,18 @@ int TCPClientSocketLibevent::GetPeerAddress(AddressList* address) const {
     return ERR_UNEXPECTED;
   address->Copy(current_ai_, false);
   return OK;
+}
+
+void TCPClientSocketLibevent::SetSubresourceSpeculation() {
+  use_history_.set_subresource_speculation();
+}
+
+void TCPClientSocketLibevent::SetOmniboxSpeculation() {
+  use_history_.set_omnibox_speculation();
+}
+
+bool TCPClientSocketLibevent::WasEverUsed() const {
+  return use_history_.was_used_to_convey_data();
 }
 
 }  // namespace net

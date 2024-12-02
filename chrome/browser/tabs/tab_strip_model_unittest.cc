@@ -6,10 +6,13 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/string_number_conversions.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/stl_util-inl.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/profile.h"
@@ -27,6 +30,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/property_bag.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -47,7 +51,8 @@ class TabStripDummyDelegate : public TabStripModelDelegate {
   }
   virtual Browser* CreateNewStripWithContents(TabContents* contents,
                                               const gfx::Rect& window_bounds,
-                                              const DockInfo& dock_info) {
+                                              const DockInfo& dock_info,
+                                              bool maximize) {
     return NULL;
   }
   virtual void ContinueDraggingDetachedTab(TabContents* contents,
@@ -80,7 +85,7 @@ class TabStripDummyDelegate : public TabStripModelDelegate {
   virtual void BookmarkAllTabs() {}
   virtual bool UseVerticalTabs() const { return false; }
   virtual void ToggleUseVerticalTabs() {}
-  virtual void SetToolbarVisibility(bool val) {}
+  virtual bool LargeIconsPermitted() const { return true; }
 
  private:
   // A dummy TabContents we give to callers that expect us to actually build a
@@ -99,13 +104,13 @@ class TabStripDummyDelegate : public TabStripModelDelegate {
 class TabStripModelTest : public RenderViewHostTestHarness {
  public:
   TabContents* CreateTabContents() {
-    return new TabContents(profile(), NULL, 0, NULL);
+    return new TabContents(profile(), NULL, 0, NULL, NULL);
   }
 
   TabContents* CreateTabContentsWithSharedRPH(TabContents* tab_contents) {
     TabContents* retval = new TabContents(profile(),
         tab_contents->render_view_host()->site_instance(), MSG_ROUTING_NONE,
-        NULL);
+        NULL, NULL);
     EXPECT_EQ(retval->GetRenderProcessHost(),
               tab_contents->GetRenderProcessHost());
     return retval;
@@ -149,7 +154,7 @@ class TabStripModelTest : public RenderViewHostTestHarness {
       if (i > 0)
         actual += " ";
 
-      actual += IntToString(GetID(model.GetTabContentsAt(i)));
+      actual += base::IntToString(GetID(model.GetTabContentsAt(i)));
 
       if (model.IsAppTab(i))
         actual += "a";
@@ -172,7 +177,7 @@ class TabStripModelTest : public RenderViewHostTestHarness {
     for (size_t i = 0; i < indices.size(); ++i) {
       if (i != 0)
         result += " ";
-      result += IntToString(indices[i]);
+      result += base::IntToString(indices[i]);
     }
     return result;
   }
@@ -1167,7 +1172,7 @@ TEST_F(TabStripModelTest, AddTabContents_ForgetOpeners) {
 
 // Added for http://b/issue?id=958960
 TEST_F(TabStripModelTest, AppendContentsReselectionTest) {
-  TabContents fake_destinations_tab(profile(), NULL, 0, NULL);
+  TabContents fake_destinations_tab(profile(), NULL, 0, NULL, NULL);
   TabStripDummyDelegate delegate(&fake_destinations_tab);
   TabStripModel tabstrip(&delegate, profile());
   EXPECT_TRUE(tabstrip.empty());
@@ -1537,7 +1542,7 @@ TEST_F(TabStripModelTest, Apps) {
     EXPECT_TRUE(observer.StateEquals(0, state));
 
     // And verify the state.
-    EXPECT_EQ("1a 3", GetPinnedState(tabstrip));
+    EXPECT_EQ("1ap 3", GetPinnedState(tabstrip));
 
     observer.ClearStates();
   }
@@ -1551,7 +1556,7 @@ TEST_F(TabStripModelTest, Apps) {
     EXPECT_TRUE(observer.StateEquals(0, state));
 
     // And verify the state.
-    EXPECT_EQ("1a 2a 3", GetPinnedState(tabstrip));
+    EXPECT_EQ("1ap 2ap 3", GetPinnedState(tabstrip));
 
     observer.ClearStates();
   }
@@ -1563,7 +1568,7 @@ TEST_F(TabStripModelTest, Apps) {
     ASSERT_EQ(0, observer.GetStateCount());
 
     // And verify the state didn't change.
-    EXPECT_EQ("1a 2a 3", GetPinnedState(tabstrip));
+    EXPECT_EQ("1ap 2ap 3", GetPinnedState(tabstrip));
 
     observer.ClearStates();
   }
@@ -1575,7 +1580,7 @@ TEST_F(TabStripModelTest, Apps) {
     ASSERT_EQ(0, observer.GetStateCount());
 
     // And verify the state didn't change.
-    EXPECT_EQ("1a 2a 3", GetPinnedState(tabstrip));
+    EXPECT_EQ("1ap 2ap 3", GetPinnedState(tabstrip));
 
     observer.ClearStates();
   }
@@ -1590,7 +1595,7 @@ TEST_F(TabStripModelTest, Apps) {
     EXPECT_TRUE(observer.StateEquals(0, state));
 
     // And verify the state didn't change.
-    EXPECT_EQ("2a 1a 3", GetPinnedState(tabstrip));
+    EXPECT_EQ("2ap 1ap 3", GetPinnedState(tabstrip));
 
     observer.ClearStates();
   }
@@ -1607,7 +1612,7 @@ TEST_F(TabStripModelTest, Apps) {
     EXPECT_TRUE(observer.StateEquals(0, state));
 
     // And verify the state didn't change.
-    EXPECT_EQ("2a 1a 3", GetPinnedState(tabstrip));
+    EXPECT_EQ("2ap 1ap 3", GetPinnedState(tabstrip));
 
     observer.ClearStates();
   }

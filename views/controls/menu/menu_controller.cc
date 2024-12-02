@@ -4,11 +4,12 @@
 
 #include "views/controls/menu/menu_controller.h"
 
+#include "app/keyboard_codes.h"
 #include "app/l10n_util.h"
 #include "app/os_exchange_data.h"
 #include "base/i18n/rtl.h"
-#include "base/keyboard_codes.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "gfx/canvas_skia.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_scroll_view_container.h"
@@ -21,7 +22,7 @@
 #include "views/widget/widget.h"
 
 #if defined(OS_LINUX)
-#include "base/keyboard_code_conversion_gtk.h"
+#include "app/keyboard_code_conversion_gtk.h"
 #endif
 
 using base::Time;
@@ -37,16 +38,30 @@ static const int kShowDelay = 400;
 // Amount of time from when the drop exits the menu and the menu is hidden.
 static const int kCloseOnExitTime = 1200;
 
-// Max width of a menu. There does not appear to be an OS value for this, yet
-// both IE and FF restrict the max width of a menu.
-// NOTE: this needs to be large enough to accommodate the wrench menu with big
-// fonts.
-static const int kMaxMenuWidth = 800;
-
 // Amount to inset submenus.
 static const int kSubmenuHorizontalInset = 3;
 
 namespace views {
+
+namespace {
+
+// Returns true if the mnemonic of |menu| matches key.
+bool MatchesMnemonic(MenuItemView* menu, wchar_t key) {
+  return menu->GetMnemonic() == key;
+}
+
+// Returns true if |menu| doesn't have a mnemonic and first character of the its
+// title is |key|.
+bool TitleMatchesMnemonic(MenuItemView* menu, wchar_t key) {
+  if (menu->GetMnemonic())
+    return false;
+
+  std::wstring lower_title = UTF16ToWide(
+      l10n_util::ToLower(WideToUTF16(menu->GetTitle())));
+  return !lower_title.empty() && lower_title[0] == key;
+}
+
+}  // namespace
 
 // Convenience for scrolling the view such that the origin is visible.
 static void ScrollToVisible(View* view) {
@@ -199,6 +214,31 @@ class MenuController::MenuScrollTask {
   DISALLOW_COPY_AND_ASSIGN(MenuScrollTask);
 };
 
+// MenuController:SelectByCharDetails ----------------------------------------
+
+struct MenuController::SelectByCharDetails {
+  SelectByCharDetails()
+      : first_match(-1),
+        has_multiple(false),
+        index_of_item(-1),
+        next_match(-1) {
+  }
+
+  // Index of the first menu with the specified mnemonic.
+  int first_match;
+
+  // If true there are multiple menu items with the same mnemonic.
+  bool has_multiple;
+
+  // Index of the selected item; may remain -1.
+  int index_of_item;
+
+  // If there are multiple matches this is the index of the item after the
+  // currently selected item whose mnemonic matches. This may remain -1 even
+  // though there are matches.
+  int next_match;
+};
+
 // MenuController ------------------------------------------------------------
 
 // static
@@ -245,9 +285,6 @@ MenuItemView* MenuController::Run(gfx::NativeWindow parent,
   UpdateInitialLocation(bounds, position);
 
   owner_ = parent;
-
-  if (button)
-    button->NotifyAccessibilityEvent(AccessibilityTypes::EVENT_MENUPOPUPSTART);
 
   // Set the selection, which opens the initial menu.
   SetSelection(root, true, true);
@@ -381,11 +418,6 @@ void MenuController::SetSelection(MenuItemView* menu_item,
       (MenuDepth(menu_item) != 1 ||
           menu_item->GetType() != MenuItemView::SUBMENU))
     menu_item->NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS);
-
-  if (menu_button_ && !menu_item && exit_type_ != EXIT_DESTROYED) {
-    menu_button_->
-        NotifyAccessibilityEvent(AccessibilityTypes::EVENT_MENUPOPUPEND);
-  }
 }
 
 void MenuController::Cancel(ExitType type) {
@@ -813,15 +845,15 @@ bool MenuController::Dispatch(const MSG& msg) {
 
 #else
 bool MenuController::Dispatch(GdkEvent* event) {
-  gtk_main_do_event(event);
-
-  if (exit_type_ == EXIT_ALL || exit_type_ == EXIT_DESTROYED)
+  if (exit_type_ == EXIT_ALL || exit_type_ == EXIT_DESTROYED) {
+    gtk_main_do_event(event);
     return false;
+  }
 
   switch (event->type) {
     case GDK_KEY_PRESS: {
-      base::KeyboardCode win_keycode =
-          base::WindowsKeyCodeForGdkKeyCode(event->key.keyval);
+      app::KeyboardCode win_keycode =
+          app::WindowsKeyCodeForGdkKeyCode(event->key.keyval);
 
       if (!OnKeyDown(win_keycode))
         return false;
@@ -836,10 +868,17 @@ bool MenuController::Dispatch(GdkEvent* event) {
       return true;
     }
 
+    case GDK_KEY_RELEASE:
+      return true;
+
     default:
       break;
   }
 
+  // We don not want Gtk to handle keyboard events, otherwise if they get
+  // handled by Gtk, unexpected behavior may occur. For example Tab key
+  // may cause unexpected focus traversing.
+  gtk_main_do_event(event);
   return exit_type_ == EXIT_NONE;
 }
 #endif
@@ -853,35 +892,35 @@ bool MenuController::OnKeyDown(int key_code
   DCHECK(blocking_run_);
 
   switch (key_code) {
-    case base::VKEY_UP:
+    case app::VKEY_UP:
       IncrementSelection(-1);
       break;
 
-    case base::VKEY_DOWN:
+    case app::VKEY_DOWN:
       IncrementSelection(1);
       break;
 
     // Handling of VK_RIGHT and VK_LEFT is different depending on the UI
     // layout.
-    case base::VKEY_RIGHT:
+    case app::VKEY_RIGHT:
       if (base::i18n::IsRTL())
         CloseSubmenu();
       else
         OpenSubmenuChangeSelectionIfCan();
       break;
 
-    case base::VKEY_LEFT:
+    case app::VKEY_LEFT:
       if (base::i18n::IsRTL())
         OpenSubmenuChangeSelectionIfCan();
       else
         CloseSubmenu();
       break;
 
-    case base::VKEY_SPACE:
+    case app::VKEY_SPACE:
       SendAcceleratorToHotTrackedView();
       break;
 
-    case base::VKEY_RETURN:
+    case app::VKEY_RETURN:
       if (pending_state_.item) {
         if (pending_state_.item->HasSubmenu()) {
           OpenSubmenuChangeSelectionIfCan();
@@ -893,7 +932,7 @@ bool MenuController::OnKeyDown(int key_code
       }
       break;
 
-    case base::VKEY_ESCAPE:
+    case app::VKEY_ESCAPE:
       if (!state_.item->GetParentMenuItem() ||
           (!state_.item->GetParentMenuItem()->GetParentMenuItem() &&
            (!state_.item->HasSubmenu() ||
@@ -956,7 +995,7 @@ bool MenuController::SendAcceleratorToHotTrackedView() {
   if (!hot_view)
     return false;
 
-  Accelerator accelerator(base::VKEY_RETURN, false, false, false);
+  Accelerator accelerator(app::VKEY_RETURN, false, false, false);
   hot_view->AcceleratorPressed(accelerator);
   hot_view->SetHotTracked(true);
   return true;
@@ -1203,7 +1242,7 @@ void MenuController::CommitPendingSelection() {
     state_.open_leading.clear();
   } else {
     int cached_size = static_cast<int>(state_.open_leading.size());
-    DCHECK(menu_depth >= 0);
+    DCHECK_GE(menu_depth, 0);
     while (cached_size-- >= menu_depth)
       state_.open_leading.pop_back();
   }
@@ -1358,9 +1397,9 @@ gfx::Rect MenuController::CalculateMenuBounds(MenuItemView* item,
 
   gfx::Size pref = submenu->GetScrollViewContainer()->GetPreferredSize();
 
-  // Don't let the menu go to wide. This is some where between what IE and FF
-  // do.
-  pref.set_width(std::min(pref.width(), kMaxMenuWidth));
+  // Don't let the menu go to wide.
+  pref.set_width(std::min(pref.width(),
+                          item->GetDelegate()->GetMaxWidthForMenu()));
   if (!state_.monitor_bounds.IsEmpty())
     pref.set_width(std::min(pref.width(), state_.monitor_bounds.width()));
 
@@ -1488,10 +1527,11 @@ void MenuController::IncrementSelection(int delta) {
     if (parent_count > 1) {
       for (int i = 0; i < parent_count; ++i) {
         if (parent->GetSubmenu()->GetMenuItemAt(i) == item) {
-          int next_index = (i + delta + parent_count) % parent_count;
-          ScrollToVisible(parent->GetSubmenu()->GetMenuItemAt(next_index));
           MenuItemView* to_select =
-              parent->GetSubmenu()->GetMenuItemAt(next_index);
+              FindNextSelectableMenuItem(parent, i, delta);
+          if (!to_select)
+            break;
+          ScrollToVisible(to_select);
           SetSelection(to_select, false, false);
           View* to_make_hot = GetInitialFocusableView(to_select, delta == 1);
           if (to_make_hot)
@@ -1501,6 +1541,24 @@ void MenuController::IncrementSelection(int delta) {
       }
     }
   }
+}
+
+MenuItemView* MenuController::FindNextSelectableMenuItem(MenuItemView* parent,
+                                                         int index,
+                                                         int delta) {
+  int start_index = index;
+  int parent_count = parent->GetSubmenu()->GetMenuItemCount();
+  // Loop through the menu items skipping any invisible menus. The loop stops
+  // when we wrap or find a visible child.
+  do {
+    index = (index + delta + parent_count) % parent_count;
+    if (index == start_index)
+      return NULL;
+    MenuItemView* child = parent->GetSubmenu()->GetMenuItemAt(index);
+    if (child->IsVisible())
+      return child;
+  } while (index != start_index);
+  return NULL;
 }
 
 void MenuController::OpenSubmenuChangeSelectionIfCan() {
@@ -1527,68 +1585,85 @@ void MenuController::CloseSubmenu() {
   }
 }
 
+MenuController::SelectByCharDetails MenuController::FindChildForMnemonic(
+    MenuItemView* parent,
+    wchar_t key,
+    bool (*match_function)(MenuItemView* menu, wchar_t mnemonic)) {
+  SubmenuView* submenu = parent->GetSubmenu();
+  DCHECK(submenu);
+  SelectByCharDetails details;
+
+  for (int i = 0, menu_item_count = submenu->GetMenuItemCount();
+       i < menu_item_count; ++i) {
+    MenuItemView* child = submenu->GetMenuItemAt(i);
+    if (child->IsEnabled() && child->IsVisible()) {
+      if (child == pending_state_.item)
+        details.index_of_item = i;
+      if (match_function(child, key)) {
+        if (details.first_match == -1)
+          details.first_match = i;
+        else
+          details.has_multiple = true;
+        if (details.next_match == -1 && details.index_of_item != -1 &&
+            i > details.index_of_item)
+          details.next_match = i;
+      }
+    }
+  }
+  return details;
+}
+
+bool MenuController::AcceptOrSelect(MenuItemView* parent,
+                                    const SelectByCharDetails& details) {
+  // This should only be invoked if there is a match.
+  DCHECK(details.first_match != -1);
+  DCHECK(parent->HasSubmenu());
+  SubmenuView* submenu = parent->GetSubmenu();
+  DCHECK(submenu);
+  if (!details.has_multiple) {
+    // There's only one match, activate it (or open if it has a submenu).
+    if (submenu->GetMenuItemAt(details.first_match)->HasSubmenu()) {
+      SetSelection(submenu->GetMenuItemAt(details.first_match), true, false);
+    } else {
+      Accept(submenu->GetMenuItemAt(details.first_match), 0);
+      return true;
+    }
+  } else if (details.index_of_item == -1 || details.next_match == -1) {
+    SetSelection(submenu->GetMenuItemAt(details.first_match), false, false);
+  } else {
+    SetSelection(submenu->GetMenuItemAt(details.next_match), false, false);
+  }
+  return false;
+}
+
 bool MenuController::SelectByChar(wchar_t character) {
   wchar_t char_array[1] = { character };
-  wchar_t key = l10n_util::ToLower(char_array)[0];
+  wchar_t key = UTF16ToWide(l10n_util::ToLower(WideToUTF16(char_array)))[0];
   MenuItemView* item = pending_state_.item;
   if (!item->HasSubmenu() || !item->GetSubmenu()->IsShowing())
     item = item->GetParentMenuItem();
   DCHECK(item);
   DCHECK(item->HasSubmenu());
-  SubmenuView* submenu = item->GetSubmenu();
-  DCHECK(submenu);
-  int menu_item_count = submenu->GetMenuItemCount();
-  if (!menu_item_count)
+  DCHECK(item->GetSubmenu());
+  if (item->GetSubmenu()->GetMenuItemCount() == 0)
     return false;
-  for (int i = 0; i < menu_item_count; ++i) {
-    MenuItemView* child = submenu->GetMenuItemAt(i);
-    if (child->GetMnemonic() == key && child->IsEnabled()) {
-      Accept(child, 0);
-      return true;
-    }
-  }
+
+  // Look for matches based on mnemonic first.
+  SelectByCharDetails details =
+      FindChildForMnemonic(item, key, &MatchesMnemonic);
+  if (details.first_match != -1)
+    return AcceptOrSelect(item, details);
 
   if (item->GetRootMenuItem()->has_mnemonics()) {
     // Don't guess at mnemonics if the menu explicitly has them.
     return false;
   }
 
-  // No matching mnemonic, search through items that don't have mnemonic
-  // based on first character of the title.
-  int first_match = -1;
-  bool has_multiple = false;
-  int next_match = -1;
-  int index_of_item = -1;
-  for (int i = 0; i < menu_item_count; ++i) {
-    MenuItemView* child = submenu->GetMenuItemAt(i);
-    if (!child->GetMnemonic() && child->IsEnabled()) {
-      std::wstring lower_title = l10n_util::ToLower(child->GetTitle());
-      if (child == pending_state_.item)
-        index_of_item = i;
-      if (lower_title.length() && lower_title[0] == key) {
-        if (first_match == -1)
-          first_match = i;
-        else
-          has_multiple = true;
-        if (next_match == -1 && index_of_item != -1 && i > index_of_item)
-          next_match = i;
-      }
-    }
-  }
-  if (first_match != -1) {
-    if (!has_multiple) {
-      if (submenu->GetMenuItemAt(first_match)->HasSubmenu()) {
-        SetSelection(submenu->GetMenuItemAt(first_match), true, false);
-      } else {
-        Accept(submenu->GetMenuItemAt(first_match), 0);
-        return true;
-      }
-    } else if (index_of_item == -1 || next_match == -1) {
-      SetSelection(submenu->GetMenuItemAt(first_match), false, false);
-    } else {
-      SetSelection(submenu->GetMenuItemAt(next_match), false, false);
-    }
-  }
+  // If no mnemonics found, look at first character of titles.
+  details = FindChildForMnemonic(item, key, &TitleMatchesMnemonic);
+  if (details.first_match != -1)
+    return AcceptOrSelect(item, details);
+
   return false;
 }
 
