@@ -24,7 +24,7 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/native_window_notification_source.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/profiles/avatar_menu_model.h"
+#include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -36,6 +36,7 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
+#include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bubble_delegate.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bubble_sign_in_delegate.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
@@ -62,6 +63,7 @@
 #include "chrome/browser/ui/views/avatar_menu_bubble_view.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/browser/ui/views/download/download_in_progress_dialog_view.h"
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
@@ -106,11 +108,11 @@
 #include "grit/webkit_resources.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/base/events/event_utils.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+#include "ui/events/event_utils.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/sys_color_change_listener.h"
@@ -131,9 +133,6 @@
 #include "ash/launcher/launcher_model.h"
 #include "ash/shell.h"
 #include "chrome/browser/ui/ash/ash_util.h"
-#include "chrome/browser/ui/ash/chrome_shell_delegate.h"
-#include "chrome/browser/ui/ash/launcher/browser_launcher_item_controller.h"
-#include "chrome/browser/ui/ash/window_positioner.h"
 #endif
 
 #if defined(USE_AURA)
@@ -423,12 +422,6 @@ BrowserView::BrowserView()
 }
 
 BrowserView::~BrowserView() {
-#if defined(USE_ASH)
-  // Destroy BrowserLauncherItemController early on as it listens to the
-  // TabstripModel, which is destroyed by the browser.
-  launcher_item_controller_.reset();
-#endif
-
   // Immersive mode may need to reparent views before they are removed/deleted.
   immersive_mode_controller_.reset();
 
@@ -467,11 +460,17 @@ BrowserView::~BrowserView() {
   // Child views maintain PrefMember attributes that point to
   // OffTheRecordProfile's PrefService which gets deleted by ~Browser.
   RemoveAllChildViews(true);
+  toolbar_ = NULL;
 
   // It is possible that we were forced-closed by the native view system and
-  // that tabs remain in the browser. Close any such remaining tabs.
-  while (browser_->tab_strip_model()->count())
-    delete browser_->tab_strip_model()->GetWebContentsAt(0);
+  // that tabs remain in the browser. Close any such remaining tabs. Detach
+  // before destroying in hopes of avoiding less callbacks trying to access
+  // members since destroyed.
+  {
+    ScopedVector<content::WebContents> contents;
+    while (browser_->tab_strip_model()->count())
+      contents.push_back(browser_->tab_strip_model()->DetachWebContentsAt(0));
+  }
 
   // Explicitly set browser_ to NULL.
   browser_.reset();
@@ -568,11 +567,20 @@ bool BrowserView::IsGuestSession() const {
   return browser_->profile()->IsGuestSession();
 }
 
+int BrowserView::GetGuestIconResourceID() const {
+  return IDR_GUEST_ICON;
+}
+
 bool BrowserView::ShouldShowAvatar() const {
   if (!IsBrowserTypeNormal())
     return false;
+#if defined(OS_CHROMEOS)
   if (IsOffTheRecord() && !IsGuestSession())
     return true;
+#else
+  if (IsOffTheRecord())  // Desktop guest is incognito and needs avatar.
+    return true;
+#endif
   // Tests may not have a profile manager.
   if (!g_browser_process->profile_manager())
     return false;
@@ -583,7 +591,7 @@ bool BrowserView::ShouldShowAvatar() const {
     return false;
   }
 
-  return AvatarMenuModel::ShouldShowAvatarMenu();
+  return AvatarMenu::ShouldShowAvatarMenu();
 }
 
 bool BrowserView::GetAccelerator(int cmd_id, ui::Accelerator* accelerator) {
@@ -626,8 +634,6 @@ void BrowserView::Show() {
     return;
   }
 
-  CreateLauncherIcon();
-
   // Showing the window doesn't make the browser window active right away.
   // This can cause SetFocusToLocationBar() to skip setting focus to the
   // location bar. To avoid this we explicilty let SetFocusToLocationBar()
@@ -658,7 +664,6 @@ void BrowserView::Show() {
 void BrowserView::ShowInactive() {
   if (frame_->IsVisible())
     return;
-  CreateLauncherIcon();
   frame_->ShowInactive();
 }
 
@@ -964,9 +969,10 @@ void BrowserView::UpdateReloadStopState(bool is_loading, bool force) {
       is_loading ? ReloadButton::MODE_STOP : ReloadButton::MODE_RELOAD, force);
 }
 
-void BrowserView::UpdateToolbar(content::WebContents* contents,
-                                bool should_restore_state) {
-  toolbar_->Update(contents, should_restore_state);
+void BrowserView::UpdateToolbar(content::WebContents* contents) {
+  // We may end up here during destruction.
+  if (toolbar_)
+    toolbar_->Update(contents);
 }
 
 void BrowserView::FocusToolbar() {
@@ -1089,7 +1095,7 @@ void BrowserView::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
   scoped_ptr<BookmarkBubbleDelegate> delegate;
   delegate.reset(new BookmarkBubbleSignInDelegate(browser_.get()));
 
-  chrome::ShowBookmarkBubbleView(GetToolbarView()->GetBookmarkBubbleAnchor(),
+  BookmarkBubbleView::ShowBubble(GetToolbarView()->GetBookmarkBubbleAnchor(),
                                  bookmark_bar_view_.get(),
                                  delegate.Pass(),
                                  browser_->profile(),
@@ -1155,8 +1161,13 @@ DownloadShelf* BrowserView::GetDownloadShelf() {
   return download_shelf_.get();
 }
 
-void BrowserView::ConfirmBrowserCloseWithPendingDownloads() {
-  DownloadInProgressDialogView::Show(browser_.get(), GetNativeWindow());
+void BrowserView::ConfirmBrowserCloseWithPendingDownloads(
+    int download_count,
+    Browser::DownloadClosePreventionType dialog_type,
+    bool app_modal,
+    const base::Callback<void(bool)>& callback) {
+  DownloadInProgressDialogView::Show(
+      GetNativeWindow(), download_count, dialog_type, app_modal, callback);
 }
 
 void BrowserView::ShowCreateChromeAppShortcutsDialog(
@@ -1257,13 +1268,14 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
   // the |browser_| object then send the keyboard event to the
   // |focus_manager| as if we are activating an accelerator key.
   // Then we can retrieve the command id from the |browser_| object.
+  bool original_block_command_state = controller->block_command_execution();
   controller->SetBlockCommandExecution(true);
   // If the |accelerator| is a non-browser shortcut (e.g. Ash shortcut), the
   // command execution cannot be blocked and true is returned. However, it is
   // okay as long as is_app() is false. See comments in this function.
   const bool processed = focus_manager->ProcessAccelerator(accelerator);
   const int id = controller->GetLastBlockedCommand(NULL);
-  controller->SetBlockCommandExecution(false);
+  controller->SetBlockCommandExecution(original_block_command_state);
 
   // Executing the command may cause |this| object to be destroyed.
   if (controller->IsReservedCommandOrKey(id, event)) {
@@ -1591,21 +1603,6 @@ bool BrowserView::GetSavedWindowPlacement(
     return false;
   chrome::GetSavedWindowBoundsAndShowState(browser_.get(), bounds, show_state);
 
-#if defined(USE_ASH)
-  if (chrome::IsNativeWindowInAsh(
-          const_cast<BrowserView*>(this)->GetNativeWindow())) {
-    if (browser_->is_type_popup()) {
-      // In case of a popup with an 'unspecified' location we are
-      // looking for a good screen location. We are interpreting (0,0) as an
-      // unspecified location.
-      if (bounds->x() == 0 && bounds->y() == 0) {
-        *bounds = ChromeShellDelegate::instance()->window_positioner()->
-            GetPopupPosition(*bounds);
-      }
-    }
-  }
-#endif
-
   if (browser_->is_type_popup() &&
       !browser_->is_app() &&
       !browser_->is_devtools()) {
@@ -1658,11 +1655,6 @@ views::ClientView* BrowserView::CreateClientView(views::Widget* widget) {
 
 void BrowserView::OnWidgetActivationChanged(views::Widget* widget,
                                             bool active) {
-#if defined(USE_ASH)
-  if (launcher_item_controller_.get())
-    launcher_item_controller_->BrowserActivationStateChanged();
-#endif
-
   if (active)
     BrowserList::SetLastActive(browser_.get());
 }
@@ -1690,7 +1682,7 @@ void BrowserView::OnWidgetMove() {
   if (status_bubble_.get())
     status_bubble_->Reposition();
 
-  chrome::HideBookmarkBubbleView();
+  BookmarkBubbleView::Hide();
 
   // Close the omnibox popup, if any.
   LocationBarView* location_bar_view = GetLocationBarView();
@@ -1951,6 +1943,9 @@ void BrowserView::InitViews() {
 
   contents_web_view_ = new views::WebView(browser_->profile());
   contents_web_view_->set_id(VIEW_ID_TAB_CONTAINER);
+  contents_web_view_->SetEmbedFullscreenWidgetMode(
+      implicit_cast<content::WebContentsDelegate*>(browser_.get())->
+          EmbedsFullscreenWidget());
   contents_container_ = new ContentsContainer(contents_web_view_);
 
   SkColor bg_color = GetWidget()->GetThemeProvider()->
@@ -2526,16 +2521,6 @@ void BrowserView::UpdateAcceleratorMetrics(
 #endif
 }
 
-void BrowserView::CreateLauncherIcon() {
-#if defined(USE_ASH)
-  if (chrome::IsNativeWindowInAsh(GetNativeWindow()) &&
-      !launcher_item_controller_.get()) {
-    launcher_item_controller_.reset(
-        BrowserLauncherItemController::Create(browser_.get()));
-  }
-#endif  // defined(USE_ASH)
-}
-
 // static
 BrowserWindow* BrowserWindow::CreateBrowserWindow(Browser* browser) {
   // Create the view and the frame. The frame will attach itself via the view
@@ -2566,7 +2551,7 @@ void BrowserView::ShowAvatarBubbleFromAvatarButton() {
 
 void BrowserView::ShowPasswordGenerationBubble(
     const gfx::Rect& rect,
-    const content::PasswordForm& form,
+    const autofill::PasswordForm& form,
     autofill::PasswordGenerator* password_generator) {
   // Create a rect in the content bounds that the bubble will point to.
   gfx::Point origin(rect.origin());
@@ -2597,6 +2582,17 @@ void BrowserView::ShowPasswordGenerationBubble(
 void BrowserView::OverscrollUpdate(int delta_y) {
   if (scroll_end_effect_controller_)
     scroll_end_effect_controller_->OverscrollUpdate(delta_y);
+}
+
+int BrowserView::GetRenderViewHeightInsetWithDetachedBookmarkBar() {
+  if (browser_->bookmark_bar_state() != BookmarkBar::DETACHED ||
+      !bookmark_bar_view_.get() || !bookmark_bar_view_->IsDetached()) {
+    return 0;
+  }
+  // Don't use bookmark_bar_view_->height() which won't be the final height if
+  // the bookmark bar is animating.
+  return chrome::kNTPBookmarkBarHeight -
+      bookmark_bar_view_->GetFullyDetachedToolbarOverlap();
 }
 
 void BrowserView::DoCutCopyPaste(void (content::RenderWidgetHost::*method)(),

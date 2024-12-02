@@ -28,6 +28,7 @@
 #include "chrome/browser/ui/webui/options/content_settings_handler.h"
 #include "chrome/browser/ui/webui/options/cookies_view_handler.h"
 #include "chrome/browser/ui/webui/options/core_options_handler.h"
+#include "chrome/browser/ui/webui/options/create_profile_handler.h"
 #include "chrome/browser/ui/webui/options/font_settings_handler.h"
 #include "chrome/browser/ui/webui/options/handler_options_handler.h"
 #include "chrome/browser/ui/webui/options/home_page_overlay_handler.h"
@@ -36,6 +37,7 @@
 #include "chrome/browser/ui/webui/options/language_options_handler.h"
 #include "chrome/browser/ui/webui/options/manage_profile_handler.h"
 #include "chrome/browser/ui/webui/options/managed_user_create_confirm_handler.h"
+#include "chrome/browser/ui/webui/options/managed_user_import_handler.h"
 #include "chrome/browser/ui/webui/options/managed_user_learn_more_handler.h"
 #include "chrome/browser/ui/webui/options/media_devices_selection_handler.h"
 #include "chrome/browser/ui/webui/options/media_galleries_handler.h"
@@ -74,10 +76,6 @@
 #include "chrome/browser/ui/webui/options/chromeos/display_overscan_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/internet_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/keyboard_handler.h"
-#include "chrome/browser/ui/webui/options/chromeos/language_chewing_handler.h"
-#include "chrome/browser/ui/webui/options/chromeos/language_hangul_handler.h"
-#include "chrome/browser/ui/webui/options/chromeos/language_mozc_handler.h"
-#include "chrome/browser/ui/webui/options/chromeos/language_pinyin_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/pointer_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/proxy_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/stats_options_handler.h"
@@ -259,6 +257,7 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
   AddOptionsPageUIHandler(localized_strings, new ClearBrowserDataHandler());
   AddOptionsPageUIHandler(localized_strings, new ContentSettingsHandler());
   AddOptionsPageUIHandler(localized_strings, new CookiesViewHandler());
+  AddOptionsPageUIHandler(localized_strings, new CreateProfileHandler());
   AddOptionsPageUIHandler(localized_strings, new FontSettingsHandler());
 #if defined(ENABLE_GOOGLE_NOW)
   AddOptionsPageUIHandler(localized_strings, new GeolocationOptionsHandler());
@@ -278,6 +277,7 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
   AddOptionsPageUIHandler(localized_strings, new ManageProfileHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new ManagedUserCreateConfirmHandler());
+  AddOptionsPageUIHandler(localized_strings, new ManagedUserImportHandler());
   AddOptionsPageUIHandler(localized_strings, new ManagedUserLearnMoreHandler());
   AddOptionsPageUIHandler(localized_strings, new PasswordManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new ResetProfileSettingsHandler());
@@ -298,15 +298,7 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::InternetOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
-                          new chromeos::options::LanguageChewingHandler());
-  AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::KeyboardHandler());
-  AddOptionsPageUIHandler(localized_strings,
-                          new chromeos::options::LanguageHangulHandler());
-  AddOptionsPageUIHandler(localized_strings,
-                          new chromeos::options::LanguageMozcHandler());
-  AddOptionsPageUIHandler(localized_strings,
-                          new chromeos::options::LanguagePinyinHandler());
 
   chromeos::options::PointerHandler* pointer_handler =
       new chromeos::options::PointerHandler();

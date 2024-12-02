@@ -27,6 +27,7 @@
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
 #include "chrome/browser/extensions/external_provider_interface.h"
+#include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/extensions/process_map.h"
@@ -34,10 +35,10 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "chrome/common/extensions/manifest.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/common/manifest.h"
 #include "extensions/common/one_shot_event.h"
 #include "sync/api/string_ordinal.h"
 #include "sync/api/sync_change.h"
@@ -118,6 +119,7 @@ class ExtensionServiceInterface : public syncer::SyncableService {
   virtual void UnloadExtension(
       const std::string& extension_id,
       extension_misc::UnloadedExtensionReason reason) = 0;
+  virtual void RemoveComponentExtension(const std::string& extension_id) = 0;
 
   virtual void SyncExtensionChangeIfNeeded(
       const extensions::Extension& extension) = 0;
@@ -265,9 +267,6 @@ class ExtensionService
   // Initialize and start all installed extensions.
   void Init();
 
-  // Start up the extension event routers.
-  void InitEventRouters();
-
   // Called when the associated Profile is going to be destroyed.
   void Shutdown();
 
@@ -375,6 +374,10 @@ class ExtensionService
   virtual void UnloadExtension(
       const std::string& extension_id,
       extension_misc::UnloadedExtensionReason reason) OVERRIDE;
+
+  // Remove the specified component extension.
+  virtual void RemoveComponentExtension(const std::string& extension_id)
+      OVERRIDE;
 
   // Unload all extensions. This is currently only called on shutdown, and
   // does not send notifications.
@@ -548,10 +551,6 @@ class ExtensionService
 
   extensions::MenuManager* menu_manager() { return &menu_manager_; }
 
-  extensions::BrowserEventRouter* browser_event_router() {
-    return browser_event_router_.get();
-  }
-
   // Notify the frontend that there was an error loading an extension.
   // This method is public because UnpackedInstaller and InstalledLoader
   // can post to here.
@@ -654,10 +653,6 @@ class ExtensionService
   // need to be made more efficient.
   static void RecordPermissionMessagesHistogram(
       const extensions::Extension* e, const char* histogram);
-
-  // Open a dev tools window for the background page for the given extension,
-  // starting the background page first if necessary.
-  void InspectBackgroundPage(const extensions::Extension* extension);
 
 #if defined(UNIT_TEST)
   void TrackTerminatedExtensionForTest(const extensions::Extension* extension) {
@@ -780,9 +775,6 @@ class ExtensionService
   // Helper that updates the active extension list used for crash reporting.
   void UpdateActiveExtensionsInCrashReporter();
 
-  // Helper to inspect an ExtensionHost after it has been loaded.
-  void InspectExtensionHost(extensions::ExtensionHost* host);
-
   // Helper to determine whether we should initially enable an installed
   // (or upgraded) extension.
   bool ShouldEnableOnInstall(const extensions::Extension* extension);
@@ -807,8 +799,7 @@ class ExtensionService
 
   // Manages the blacklisted extensions, intended as callback from
   // Blacklist::GetBlacklistedIDs.
-  void ManageBlacklist(const std::set<std::string>& old_blacklisted_ids,
-                       const std::set<std::string>& new_blacklisted_ids);
+  void ManageBlacklist(const std::set<std::string>& blacklisted_ids);
 
   // Controls if installs are delayed. See comment for
   // |installs_delayed_for_gc_|.
@@ -906,13 +897,6 @@ class ExtensionService
   // Keeps track of menu items added by extensions.
   extensions::MenuManager menu_manager_;
 
-  // Flag to make sure event routers are only initialized once.
-  bool event_routers_initialized_;
-
-  // TODO(yoz): None of these should be owned by ExtensionService.
-  // crbug.com/159265
-  scoped_ptr<extensions::BrowserEventRouter> browser_event_router_;
-
   // A collection of external extension providers.  Each provider reads
   // a source of external extension information.  Examples include the
   // windows registry and external_extensions.json.
@@ -958,6 +942,8 @@ class ExtensionService
   scoped_ptr<extensions::ExtensionActionStorageManager>
       extension_action_storage_manager_;
 #endif
+  scoped_ptr<extensions::ManagementPolicy::Provider>
+      shared_module_policy_provider_;
 
   ObserverList<extensions::UpdateObserver, true> update_observers_;
 

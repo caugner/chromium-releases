@@ -41,11 +41,7 @@ def DeviceInfo(serial, options):
   device_build_type = device_adb.GetBuildType()
   device_product_name = device_adb.GetProductName()
 
-  setup_wizard_disabled = device_adb.GetSetupWizardStatus() == 'DISABLED'
   battery = device_adb.GetBatteryInfo()
-  install_output = GetCmdOutput(
-    ['%s/build/android/adb_install_apk.py' % constants.DIR_SOURCE_ROOT, '--apk',
-     '%s/build/android/CheckInstallApk-debug.apk' % constants.DIR_SOURCE_ROOT])
 
   def _GetData(re_expression, line, lambda_function=lambda x:x):
     if not line:
@@ -55,7 +51,17 @@ def DeviceInfo(serial, options):
       return lambda_function(found[0])
     return 'Unknown'
 
-  install_speed = _GetData('(\d+) KB/s', install_output)
+  if options.device_status_dashboard:
+    # Dashboard does not track install speed. Do not unnecessarily install.
+    install_speed = 'Unknown'
+  else:
+    install_output = GetCmdOutput(
+      ['%s/build/android/adb_install_apk.py' % constants.DIR_SOURCE_ROOT,
+       '--apk',
+       '%s/build/android/CheckInstallApk-debug.apk' % constants.DIR_SOURCE_ROOT
+      ])
+    install_speed = _GetData('(\d+) KB/s', install_output)
+
   ac_power = _GetData('AC powered: (\w+)', battery)
   battery_level = _GetData('level: (\d+)', battery)
   battery_temp = _GetData('temperature: (\d+)', battery,
@@ -76,9 +82,10 @@ def DeviceInfo(serial, options):
   errors = []
   if battery_level < 15:
     errors += ['Device critically low in battery. Turning off device.']
-  if (not setup_wizard_disabled and device_build_type != 'user' and
-      not options.no_provisioning_check):
-    errors += ['Setup wizard not disabled. Was it provisioned correctly?']
+  if not options.no_provisioning_check:
+    setup_wizard_disabled = device_adb.GetSetupWizardStatus() == 'DISABLED'
+    if not setup_wizard_disabled and device_build_type != 'user':
+      errors += ['Setup wizard not disabled. Was it provisioned correctly?']
   if device_product_name == 'mantaray' and ac_power != 'true':
     errors += ['Mantaray device not connected to AC power.']
   # TODO(navabi): Insert warning once we have a better handle of what install
@@ -197,9 +204,9 @@ def main():
   parser.add_option('', '--out-dir',
                     help='Directory where the device path is stored',
                     default=os.path.join(constants.DIR_SOURCE_ROOT, 'out'))
-  parser.add_option('--no-provisioning-check',
+  parser.add_option('--no-provisioning-check', action='store_true',
                     help='Will not check if devices are provisioned properly.')
-  parser.add_option('--device-status-dashboard',
+  parser.add_option('--device-status-dashboard', action='store_true',
                     help='Output device status data for dashboard.')
   options, args = parser.parse_args()
   if args:

@@ -13,13 +13,13 @@
 #include "base/values.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/url_constants.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/manifest.h"
+#include "extensions/common/manifest_constants.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -27,10 +27,10 @@
 #include "ui/keyboard/keyboard_constants.h"
 #endif
 
-namespace keys = extension_manifest_keys;
-namespace errors = extension_manifest_errors;
-
 namespace extensions {
+
+namespace keys = manifest_keys;
+namespace errors = manifest_errors;
 
 namespace {
 
@@ -142,8 +142,7 @@ bool HomepageURLHandler::Parse(Extension* extension, string16* error) {
   }
   manifest_url->url_ = GURL(homepage_url_str);
   if (!manifest_url->url_.is_valid() ||
-      (!manifest_url->url_.SchemeIs("http") &&
-       !manifest_url->url_.SchemeIs("https"))) {
+      !manifest_url->url_.SchemeIsHTTPOrHTTPS()) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidHomepageURL, homepage_url_str);
     return false;
@@ -206,7 +205,7 @@ bool OptionsPageHandler::Parse(Extension* extension, string16* error) {
     // hosted apps require an absolute URL.
     GURL options_url(options_str);
     if (!options_url.is_valid() ||
-        !(options_url.SchemeIs("http") || options_url.SchemeIs("https"))) {
+        !options_url.SchemeIsHTTPOrHTTPS()) {
       *error = ASCIIToUTF16(errors::kInvalidOptionsPageInHostedApp);
       return false;
     }
@@ -287,7 +286,7 @@ bool URLOverridesHandler::Parse(Extension* extension, string16* error) {
                    !(extension->location() == Manifest::COMPONENT &&
                      page == chrome::kChromeUIFileManagerHost));
 #endif
-#if defined(USE_AURA)
+#if defined(OS_CHROMEOS)
     is_override = (is_override && page != keyboard::kKeyboardWebUIHost);
 #endif
 

@@ -22,6 +22,10 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kAppLauncherIsEnabled, false);
   registry->RegisterBooleanPref(prefs::kAppLauncherHasBeenEnabled, false);
 
+#if defined(OS_MACOSX)
+  registry->RegisterIntegerPref(prefs::kAppLauncherShortcutVersion, 0);
+#endif
+
 #if defined(OS_WIN)
   registry->RegisterStringPref(prefs::kAppLaunchForMetroRestart, "");
   registry->RegisterStringPref(prefs::kAppLaunchForMetroRestartProfile, "");
@@ -34,6 +38,12 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
 }
 
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+#if !defined(OS_MACOSX)
+  registry->RegisterBooleanPref(
+      prefs::kAppFullscreenAllowed, true,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+#endif
+
   // Indicates whether app shortcuts have been created.
   registry->RegisterBooleanPref(
       prefs::kShortcutsHaveBeenCreated, false,

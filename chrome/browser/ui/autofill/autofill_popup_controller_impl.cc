@@ -14,11 +14,11 @@
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "grit/webkit_resources.h"
 #include "third_party/WebKit/public/web/WebAutofillClient.h"
-#include "ui/base/events/event.h"
-#include "ui/base/text/text_elider.h"
+#include "ui/events/event.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/screen.h"
+#include "ui/gfx/text_elider.h"
 #include "ui/gfx/vector2d.h"
 
 using base::WeakPtr;
@@ -100,7 +100,11 @@ AutofillPopupControllerImpl::AutofillPopupControllerImpl(
       container_view_(container_view),
       element_bounds_(element_bounds),
       text_direction_(text_direction),
-      weak_ptr_factory_(this) {
+      hide_on_outside_click_(false),
+      weak_ptr_factory_(this),
+      key_press_event_callback_(
+          base::Bind(&AutofillPopupControllerImpl::HandleKeyPressEvent,
+                     base::Unretained(this))) {
   ClearState();
 #if !defined(OS_ANDROID)
   subtext_font_ = name_font_.DeriveFont(kLabelFontSizeDelta);
@@ -139,16 +143,16 @@ void AutofillPopupControllerImpl::Show(
 
     // Each field recieves space in proportion to its length.
     int name_size = available_width * name_width / total_text_length;
-    names_[i] = ui::ElideText(names_[i],
+    names_[i] = gfx::ElideText(names_[i],
                               GetNameFontForRow(i),
                               name_size,
-                              ui::ELIDE_AT_END);
+                              gfx::ELIDE_AT_END);
 
     int subtext_size = available_width * subtext_width / total_text_length;
-    subtexts_[i] = ui::ElideText(subtexts_[i],
+    subtexts_[i] = gfx::ElideText(subtexts_[i],
                                  subtext_font(),
                                  subtext_size,
-                                 ui::ELIDE_AT_END);
+                                 gfx::ELIDE_AT_END);
   }
 #endif
 
@@ -167,7 +171,7 @@ void AutofillPopupControllerImpl::Show(
     UpdateBoundsAndRedrawPopup();
   }
 
-  delegate_->OnPopupShown(this);
+  delegate_->OnPopupShown(&key_press_event_callback_);
 }
 
 void AutofillPopupControllerImpl::UpdateDataListValues(
@@ -228,7 +232,7 @@ void AutofillPopupControllerImpl::UpdateDataListValues(
 
 void AutofillPopupControllerImpl::Hide() {
   if (delegate_.get())
-    delegate_->OnPopupHidden(this);
+    delegate_->OnPopupHidden(&key_press_event_callback_);
 
   if (view_)
     view_->Hide();
@@ -302,6 +306,11 @@ void AutofillPopupControllerImpl::MouseExitedPopup() {
   SetSelectedLine(kNoSelection);
 }
 
+bool AutofillPopupControllerImpl::ShouldRepostEvent(
+    const ui::MouseEvent& event) {
+  return delegate_->ShouldRepostEvent(event);
+}
+
 void AutofillPopupControllerImpl::AcceptSuggestion(size_t index) {
   delegate_->DidAcceptSuggestion(full_names_[index], identifiers_[index]);
 }
@@ -363,6 +372,10 @@ bool AutofillPopupControllerImpl::IsRTL() const {
   return text_direction_ == base::i18n::RIGHT_TO_LEFT;
 }
 
+bool AutofillPopupControllerImpl::hide_on_outside_click() const {
+  return hide_on_outside_click_;
+}
+
 const std::vector<string16>& AutofillPopupControllerImpl::names() const {
   return names_;
 }
@@ -395,6 +408,11 @@ const gfx::Font& AutofillPopupControllerImpl::subtext_font() const {
 
 int AutofillPopupControllerImpl::selected_line() const {
   return selected_line_;
+}
+
+void AutofillPopupControllerImpl::set_hide_on_outside_click(
+    bool hide_on_outside_click) {
+  hide_on_outside_click_ = hide_on_outside_click;
 }
 
 void AutofillPopupControllerImpl::SetSelectedLine(int selected_line) {

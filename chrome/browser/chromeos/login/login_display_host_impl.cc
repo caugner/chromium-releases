@@ -10,7 +10,7 @@
 #include "ash/desktop_background/user_wallpaper_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
-#include "ash/wm/window_properties.h"
+#include "ash/wm/frame_painter.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
@@ -23,7 +23,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/first_run/first_run_controller.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/language_preferences.h"
@@ -59,15 +61,14 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/base/events/event_utils.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_element.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/events/event_utils.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
 #include "ui/views/focus/focus_manager.h"
@@ -77,13 +78,16 @@
 namespace {
 
 // URL which corresponds to the login WebUI.
-const char kLoginURL[] = "chrome://oobe/login#login";
+const char kLoginURL[] = "chrome://oobe/login";
 
 // URL which corresponds to the OOBE WebUI.
-const char kOobeURL[] = "chrome://oobe#login";
+const char kOobeURL[] = "chrome://oobe/oobe";
 
 // URL which corresponds to the user adding WebUI.
-const char kUserAddingURL[] = "chrome://oobe/login#user-adding";
+const char kUserAddingURL[] = "chrome://oobe/user-adding";
+
+// URL which corresponds to the app launch splash WebUI.
+const char kAppLaunchSplashURL[] = "chrome://oobe/app-launch-splash";
 
 // Duration of sign-in transition animation.
 const int kLoginFadeoutTransitionDurationMs = 700;
@@ -170,8 +174,7 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
       is_wallpaper_loaded_(false),
       status_area_saved_visibility_(false),
       crash_count_(0),
-      restore_path_(RESTORE_UNKNOWN),
-      old_ignore_solo_window_frame_painter_policy_value_(false) {
+      restore_path_(RESTORE_UNKNOWN) {
   // We need to listen to CLOSE_ALL_BROWSERS_REQUEST but not APP_TERMINATING
   // because/ APP_TERMINATING will never be fired as long as this keeps
   // ref-count. CLOSE_ALL_BROWSERS_REQUEST is safe here because there will be no
@@ -273,6 +276,13 @@ LoginDisplayHostImpl::~LoginDisplayHostImpl() {
   chrome::EndKeepAlive();
 
   default_host_ = NULL;
+  // TODO(dzhioev): find better place for starting tutorial.
+  if (CommandLine::ForCurrentProcess()->
+          HasSwitch(switches::kEnableFirstRunUI)) {
+    // FirstRunController manages its lifetime and destructs after tutorial
+    // completion.
+    (new FirstRunController())->Start();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -303,14 +313,18 @@ void LoginDisplayHostImpl::BeforeSessionStart() {
 
 void LoginDisplayHostImpl::Finalize() {
   DVLOG(1) << "Session starting";
-  ash::Shell::GetInstance()->
-      desktop_background_controller()->MoveDesktopToUnlockedContainer();
+  if (ash::Shell::HasInstance()) {
+    ash::Shell::GetInstance()->
+        desktop_background_controller()->MoveDesktopToUnlockedContainer();
+  }
   if (wizard_controller_.get())
     wizard_controller_->OnSessionStart();
   if (!IsRunningUserAdding()) {
     // Display host is deleted once animation is completed
     // since sign in screen widget has to stay alive.
-    StartAnimation();
+    if (ash::Shell::HasInstance()) {
+      StartAnimation();
+    }
   }
   ShutdownDisplayHost(false);
 }
@@ -394,6 +408,10 @@ void LoginDisplayHostImpl::StartWizard(
 
 WizardController* LoginDisplayHostImpl::GetWizardController() {
   return wizard_controller_.get();
+}
+
+AppLaunchController* LoginDisplayHostImpl::GetAppLaunchController() {
+  return app_launch_controller_.get();
 }
 
 void LoginDisplayHostImpl::StartUserAdding(
@@ -507,6 +525,20 @@ void LoginDisplayHostImpl::PrewarmAuthentication() {
   auth_prewarmer_->PrewarmAuthentication(
       base::Bind(&LoginDisplayHostImpl::OnAuthPrewarmDone,
                  pointer_factory_.GetWeakPtr()));
+}
+
+void LoginDisplayHostImpl::StartAppLaunch(const std::string& app_id) {
+  LOG(WARNING) << "Login WebUI >> start app launch.";
+  SetStatusAreaVisible(false);
+  if (!login_window_)
+    LoadURL(GURL(kAppLaunchSplashURL));
+
+  login_view_->set_should_emit_login_prompt_visible(false);
+
+  app_launch_controller_.reset(new AppLaunchController(
+      app_id, this, GetOobeUI()));
+
+  app_launch_controller_->StartAppLaunch();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -649,8 +681,7 @@ void LoginDisplayHostImpl::StartAnimation() {
 }
 
 void LoginDisplayHostImpl::OnOwnershipStatusCheckDone(
-    DeviceSettingsService::OwnershipStatus status,
-    bool current_user_is_owner) {
+    DeviceSettingsService::OwnershipStatus status) {
   if (status != DeviceSettingsService::OWNERSHIP_NONE) {
     // The device is already owned. No need for auto-enrollment checks.
     VLOG(1) << "CheckForAutoEnrollment: device already owned";
@@ -749,6 +780,7 @@ void LoginDisplayHostImpl::StartPostponedWebUI() {
 void LoginDisplayHostImpl::InitLoginWindowAndView() {
   if (login_window_)
     return;
+  ash::FramePainter::SetSoloWindowHeadersEnabled(false);
 
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -762,18 +794,8 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
 
   login_window_ = new views::Widget;
   login_window_->Init(params);
-  if (login_window_->GetNativeWindow()) {
-    aura::RootWindow* root = login_window_->GetNativeWindow()->GetRootWindow();
-    if (root) {
-      old_ignore_solo_window_frame_painter_policy_value_ =
-          root->GetProperty(ash::internal::kIgnoreSoloWindowFramePainterPolicy);
-      root->SetProperty(ash::internal::kIgnoreSoloWindowFramePainterPolicy,
-                        true);
-    }
-  }
   login_view_ = new WebUILoginView();
-
-  login_view_->Init(login_window_);
+  login_view_->Init();
 
   views::corewm::SetWindowVisibilityAnimationDuration(
       login_window_->GetNativeView(),
@@ -783,7 +805,6 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
       views::corewm::ANIMATE_HIDE);
 
   login_window_->SetContentsView(login_view_);
-  login_view_->UpdateWindowType();
 
   // If WebUI is initialized in hidden state, show it only if we're no
   // longer waiting for wallpaper animation/user images loading. Otherwise,
@@ -797,20 +818,12 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
     login_view_->set_is_hidden(true);
   }
   login_window_->GetNativeView()->SetName("WebUILoginView");
-  login_view_->OnWindowCreated();
 }
 
 void LoginDisplayHostImpl::ResetLoginWindowAndView() {
   if (!login_window_)
     return;
-
-  if (login_window_->GetNativeWindow()) {
-    aura::RootWindow* root = login_window_->GetNativeWindow()->GetRootWindow();
-    if (root) {
-      root->SetProperty(ash::internal::kIgnoreSoloWindowFramePainterPolicy,
-                        old_ignore_solo_window_frame_painter_policy_value_);
-    }
-  }
+  ash::FramePainter::SetSoloWindowHeadersEnabled(true);
   login_window_->Close();
   login_window_ = NULL;
   login_view_ = NULL;
@@ -866,12 +879,22 @@ void ShowLoginWizard(const std::string& first_screen_name) {
     LoginState::Get()->SetLoggedInState(
         LoginState::LOGGED_IN_NONE, LoginState::LOGGED_IN_USER_NONE);
   }
+
+  LoginDisplayHost* display_host = new LoginDisplayHostImpl(screen_bounds);
+
+  bool show_app_launch_splash_screen = (first_screen_name ==
+      chromeos::WizardController::kAppLaunchSplashScreenName);
+
+  if (show_app_launch_splash_screen) {
+    const std::string& auto_launch_app_id =
+        chromeos::KioskAppManager::Get()->GetAutoLaunchApp();
+    display_host->StartAppLaunch(auto_launch_app_id);
+    return;
+  }
+
   bool show_login_screen =
       (first_screen_name.empty() && oobe_complete) ||
       first_screen_name == chromeos::WizardController::kLoginScreenName;
-
-  chromeos::LoginDisplayHost* display_host =
-      new chromeos::LoginDisplayHostImpl(screen_bounds);
 
   if (show_login_screen) {
     // R11 > R12 migration fix. See http://crosbug.com/p/4898.

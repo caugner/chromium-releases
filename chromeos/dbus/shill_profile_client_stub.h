@@ -21,7 +21,8 @@ class ShillProfileClientStub : public ShillProfileClient,
   ShillProfileClientStub();
   virtual ~ShillProfileClientStub();
 
-  // ShillProfileClient overrides.
+  // ShillProfileClient overrides
+  virtual void Init(dbus::Bus* bus) OVERRIDE;
   virtual void AddPropertyChangedObserver(
       const dbus::ObjectPath& profile_path,
       ShillPropertyChangedObserver* observer) OVERRIDE;
@@ -51,8 +52,6 @@ class ShillProfileClientStub : public ShillProfileClient,
   virtual bool AddService(const std::string& profile_path,
                           const std::string& service_path) OVERRIDE;
   virtual void GetProfilePaths(std::vector<std::string>* profiles) OVERRIDE;
-
-  static const char kSharedProfilePath[];
 
  private:
   struct ProfileProperties;

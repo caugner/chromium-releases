@@ -62,7 +62,6 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -88,7 +87,6 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
-#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser_command_controller.h"
@@ -117,6 +115,7 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/media_utils.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/search/search_delegate.h"
 #include "chrome/browser/ui/search/search_model.h"
@@ -148,8 +147,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
 #include "chrome/common/search_types.h"
-#include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
+#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/download_item.h"
@@ -368,8 +367,7 @@ Browser::Browser(const CreateParams& params)
 
   toolbar_model_.reset(new ToolbarModelImpl(toolbar_model_delegate_.get()));
   search_model_.reset(new SearchModel());
-  search_delegate_.reset(
-      new SearchDelegate(search_model_.get(), toolbar_model_.get()));
+  search_delegate_.reset(new SearchDelegate(search_model_.get()));
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
@@ -600,6 +598,24 @@ bool Browser::ShouldCloseWindow() {
   if (IsFastTabUnloadEnabled())
     return fast_unload_controller_->ShouldCloseWindow();
   return unload_controller_->ShouldCloseWindow();
+}
+
+bool Browser::CallBeforeUnloadHandlers(
+    const base::Callback<void(bool)>& on_close_confirmed) {
+  cancel_download_confirmation_state_ = RESPONSE_RECEIVED;
+  if (IsFastTabUnloadEnabled()) {
+    return fast_unload_controller_->CallBeforeUnloadHandlers(
+        on_close_confirmed);
+  }
+  return unload_controller_->CallBeforeUnloadHandlers(on_close_confirmed);
+}
+
+void Browser::ResetBeforeUnloadHandlers() {
+  cancel_download_confirmation_state_ = NOT_PROMPTED;
+  if (IsFastTabUnloadEnabled())
+    fast_unload_controller_->ResetBeforeUnloadHandlers();
+  else
+    unload_controller_->ResetBeforeUnloadHandlers();
 }
 
 bool Browser::HasCompletedUnloadProcessing() const {
@@ -1290,10 +1306,7 @@ WebContents* Browser::OpenURLFromTab(WebContents* source,
   if (source)
     popup_blocker_helper = PopupBlockerTabHelper::FromWebContents(source);
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableBetterPopupBlocking) &&
-      popup_blocker_helper) {
-
+  if (popup_blocker_helper) {
     if ((params.disposition == NEW_POPUP ||
          params.disposition == NEW_FOREGROUND_TAB ||
          params.disposition == NEW_BACKGROUND_TAB ||
@@ -1500,15 +1513,16 @@ bool Browser::ShouldCreateWebContents(
     WindowContainerType window_container_type,
     const string16& frame_name,
     const GURL& target_url,
-    const content::Referrer& referrer,
-    WindowOpenDisposition disposition,
-    const WebWindowFeatures& features,
-    bool user_gesture,
-    bool opener_suppressed) {
+    const std::string& partition_id,
+    content::SessionStorageNamespace* session_storage_namespace) {
   if (window_container_type == WINDOW_CONTAINER_TYPE_BACKGROUND) {
     // If a BackgroundContents is created, suppress the normal WebContents.
-    return !MaybeCreateBackgroundContents(
-        route_id, web_contents, frame_name, target_url);
+    return !MaybeCreateBackgroundContents(route_id,
+                                          web_contents,
+                                          frame_name,
+                                          target_url,
+                                          partition_id,
+                                          session_storage_namespace);
   }
 
   return true;
@@ -1588,6 +1602,19 @@ void Browser::EnumerateDirectory(WebContents* web_contents,
   FileSelectHelper::EnumerateDirectory(web_contents, request_id, path);
 }
 
+bool Browser::EmbedsFullscreenWidget() const {
+#if defined(TOOLKIT_GTK)
+  // TODO(miu): On GTK, the balloon widget for Tab/HTML5 fullscreen needs to be
+  // fixed before we can implement embedded fullscreen widgets.
+  // http://crbug.com/286545
+  return false;
+#else
+  // TODO(miu): Make this feature switchable in about:flags?
+  return CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kEmbedFlashFullscreen);
+#endif
+}
+
 void Browser::ToggleFullscreenModeForTab(WebContents* web_contents,
                                          bool enter_fullscreen) {
   fullscreen_controller_->ToggleFullscreenModeForTab(web_contents,
@@ -1648,17 +1675,7 @@ void Browser::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
-  const extensions::Extension* extension = NULL;
-  GURL origin(request.security_origin);
-  if (origin.SchemeIs(extensions::kExtensionScheme)) {
-    ExtensionService* extensions_service =
-        extensions::ExtensionSystem::Get(profile_)->extension_service();
-    extension = extensions_service->extensions()->GetByID(origin.host());
-    DCHECK(extension);
-  }
-
-  MediaCaptureDevicesDispatcher::GetInstance()->ProcessMediaAccessRequest(
-      web_contents, request, callback, extension);
+  ::RequestMediaAccessPermission(web_contents, profile_, request, callback);
 }
 
 bool Browser::RequestPpapiBrokerPermission(
@@ -1668,6 +1685,26 @@ bool Browser::RequestPpapiBrokerPermission(
     const base::Callback<void(bool)>& callback) {
   PepperBrokerInfoBarDelegate::Create(web_contents, url, plugin_path, callback);
   return true;
+}
+
+gfx::Size Browser::GetSizeForNewRenderView(
+    const WebContents* web_contents) const {
+  // When navigating away from NTP with unpinned bookmark bar, the bookmark bar
+  // would disappear on non-NTP pages, resulting in a bigger size for the new
+  // render view.
+  gfx::Size size = web_contents->GetView()->GetContainerSize();
+  // Don't change render view size if bookmark bar is currently not detached,
+  // or there's no pending entry, or navigating to a NTP page.
+  if (size.IsEmpty() || bookmark_bar_state_ != BookmarkBar::DETACHED)
+    return size;
+  const NavigationEntry* pending_entry =
+      web_contents->GetController().GetPendingEntry();
+  if (pending_entry &&
+      !chrome::IsNTPURL(pending_entry->GetVirtualURL(), profile_)) {
+    size.Enlarge(
+        0, window()->GetRenderViewHeightInsetWithDetachedBookmarkBar());
+  }
+  return size;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1714,14 +1751,6 @@ void Browser::SetWebContentsBlocked(content::WebContents* web_contents,
 web_modal::WebContentsModalDialogHost*
 Browser::GetWebContentsModalDialogHost() {
   return window_->GetWebContentsModalDialogHost();
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Browser, BlockedContentTabHelperDelegate implementation:
-
-content::WebContents* Browser::GetConstrainingWebContents(
-    content::WebContents* source) {
-  return source;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1858,8 +1887,8 @@ void Browser::OnDevToolsDisabledChanged() {
 // Browser, UI update coalescing and handling (private):
 
 void Browser::UpdateToolbar(bool should_restore_state) {
-  window_->UpdateToolbar(tab_strip_model_->GetActiveWebContents(),
-                         should_restore_state);
+  window_->UpdateToolbar(should_restore_state ?
+      tab_strip_model_->GetActiveWebContents() : NULL);
 }
 
 void Browser::UpdateSearchState(WebContents* contents) {
@@ -2038,14 +2067,20 @@ bool Browser::CanCloseWithInProgressDownloads() {
     return cancel_download_confirmation_state_ != WAITING_FOR_RESPONSE;
 
   int num_downloads_blocking;
-  if (DOWNLOAD_CLOSE_OK ==
-      OkToCloseWithInProgressDownloads(&num_downloads_blocking))
+  Browser::DownloadClosePreventionType dialog_type =
+      OkToCloseWithInProgressDownloads(&num_downloads_blocking);
+  if (dialog_type == DOWNLOAD_CLOSE_OK)
     return true;
 
   // Closing this window will kill some downloads; prompt to make sure
   // that's ok.
   cancel_download_confirmation_state_ = WAITING_FOR_RESPONSE;
-  window_->ConfirmBrowserCloseWithPendingDownloads();
+  window_->ConfirmBrowserCloseWithPendingDownloads(
+      num_downloads_blocking,
+      dialog_type,
+      false,
+      base::Bind(&Browser::InProgressDownloadResponse,
+                 weak_factory_.GetWeakPtr()));
 
   // Return false so the browser does not close.  We'll close if the user
   // confirms in the dialog.
@@ -2060,11 +2095,9 @@ void Browser::SetAsDelegate(WebContents* web_contents, Browser* delegate) {
   web_contents->SetDelegate(delegate);
 
   // ...and all the helpers.
-  BlockedContentTabHelper::FromWebContents(web_contents)->
-      set_delegate(delegate);
   BookmarkTabHelper::FromWebContents(web_contents)->set_delegate(delegate);
   WebContentsModalDialogManager::FromWebContents(web_contents)->
-      set_delegate(delegate);
+      SetDelegate(delegate);
   CoreTabHelper::FromWebContents(web_contents)->set_delegate(delegate);
   SearchEngineTabHelper::FromWebContents(web_contents)->set_delegate(delegate);
   ZoomController::FromWebContents(web_contents)->set_observer(delegate);
@@ -2181,10 +2214,13 @@ bool Browser::ShouldHideUIForFullscreen() const {
   return window_ && window_->ShouldHideUIForFullscreen();
 }
 
-bool Browser::MaybeCreateBackgroundContents(int route_id,
-                                            WebContents* opener_web_contents,
-                                            const string16& frame_name,
-                                            const GURL& target_url) {
+bool Browser::MaybeCreateBackgroundContents(
+    int route_id,
+    WebContents* opener_web_contents,
+    const string16& frame_name,
+    const GURL& target_url,
+    const std::string& partition_id,
+    content::SessionStorageNamespace* session_storage_namespace) {
   GURL opener_url = opener_web_contents->GetURL();
   ExtensionService* extensions_service =
       extensions::ExtensionSystem::Get(profile_)->extension_service();
@@ -2247,7 +2283,9 @@ bool Browser::MaybeCreateBackgroundContents(int route_id,
                                         route_id,
                                         profile_,
                                         frame_name,
-                                        ASCIIToUTF16(extension->id()));
+                                        ASCIIToUTF16(extension->id()),
+                                        partition_id,
+                                        session_storage_namespace);
 
   // When a separate process is used, the original renderer cannot access the
   // new window later, thus we need to navigate the window now.

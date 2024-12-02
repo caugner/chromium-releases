@@ -96,11 +96,16 @@ def FindBugs(options):
 
 
 def BisectPerfRegression(_):
-  bb_annotations.PrintNamedStep('Bisect Perf Regression')
   RunCmd([SrcPath('tools', 'prepare-bisect-perf-regression.py'),
           '-w', os.path.join(constants.DIR_SOURCE_ROOT, os.pardir)])
   RunCmd([SrcPath('tools', 'run-bisect-perf-regression.py'),
           '-w', os.path.join(constants.DIR_SOURCE_ROOT, os.pardir)])
+
+
+def DownloadWebRTCResources(_):
+  bb_annotations.PrintNamedStep('download_resources')
+  RunCmd([SrcPath('third_party', 'webrtc', 'tools', 'update_resources.py'),
+          '-p', '../../../'], halt_on_failure=True)
 
 
 def GetHostStepCmds():
@@ -109,6 +114,7 @@ def GetHostStepCmds():
       ('extract_build', ExtractBuild),
       ('check_webview_licenses', CheckWebViewLicenses),
       ('bisect_perf_regression', BisectPerfRegression),
+      ('download_webrtc_resources', DownloadWebRTCResources),
       ('findbugs', FindBugs),
       ('zip_build', ZipBuild)
   ]

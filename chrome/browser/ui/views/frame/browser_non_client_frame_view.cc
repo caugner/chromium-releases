@@ -5,10 +5,11 @@
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/profiles/avatar_menu_model.h"
+#include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/avatar_label.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -54,10 +55,13 @@ void BrowserNonClientFrameView::UpdateAvatarInfo() {
       Profile* profile = browser_view_->browser()->profile();
       if (profile->IsManaged() && !avatar_label_) {
         avatar_label_ = new AvatarLabel(browser_view_);
+        avatar_label_->set_id(VIEW_ID_AVATAR_LABEL);
         AddChildView(avatar_label_);
       }
-      avatar_button_ = new AvatarMenuButton(browser_view_->browser(),
-                                            browser_view_->IsOffTheRecord());
+      avatar_button_ = new AvatarMenuButton(
+          browser_view_->browser(),
+          browser_view_->IsOffTheRecord() && !browser_view_->IsGuestSession());
+      avatar_button_->set_id(VIEW_ID_AVATAR_BUTTON);
       AddChildView(avatar_button_);
       frame_->GetRootView()->Layout();
     }
@@ -77,24 +81,26 @@ void BrowserNonClientFrameView::UpdateAvatarInfo() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::Image avatar;
   string16 text;
-  bool is_gaia_picture = false;
-  if (browser_view_->IsOffTheRecord()) {
+  bool is_rectangle = false;
+  if (browser_view_->IsGuestSession()) {
+    avatar = rb.GetImageNamed(browser_view_->GetGuestIconResourceID());
+  } else if (browser_view_->IsOffTheRecord()) {
     avatar = rb.GetImageNamed(browser_view_->GetOTRIconResourceID());
-  } else if (AvatarMenuModel::ShouldShowAvatarMenu()) {
+  } else if (AvatarMenu::ShouldShowAvatarMenu()) {
     ProfileInfoCache& cache =
         g_browser_process->profile_manager()->GetProfileInfoCache();
     Profile* profile = browser_view_->browser()->profile();
     size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
     if (index == std::string::npos)
       return;
-    is_gaia_picture =
-        cache.IsUsingGAIAPictureOfProfileAtIndex(index) &&
-        cache.GetGAIAPictureOfProfileAtIndex(index);
-    avatar = cache.GetAvatarIconOfProfileAtIndex(index);
     text = cache.GetNameOfProfileAtIndex(index);
+
+    AvatarMenu::GetImageForMenuButton(browser_view_->browser()->profile(),
+                                      &avatar,
+                                      &is_rectangle);
   }
   if (avatar_button_) {
-    avatar_button_->SetAvatarIcon(avatar, is_gaia_picture);
+    avatar_button_->SetAvatarIcon(avatar, is_rectangle);
     if (!text.empty())
       avatar_button_->SetText(text);
   }
@@ -103,5 +109,5 @@ void BrowserNonClientFrameView::UpdateAvatarInfo() {
   // need to draw the taskbar decoration.
   chrome::DrawTaskbarDecoration(
       frame_->GetNativeWindow(),
-      AvatarMenuModel::ShouldShowAvatarMenu() ? &avatar : NULL);
+      AvatarMenu::ShouldShowAvatarMenu() ? &avatar : NULL);
 }

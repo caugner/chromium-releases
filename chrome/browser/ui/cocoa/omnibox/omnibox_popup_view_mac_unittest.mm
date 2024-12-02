@@ -9,7 +9,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
-#include "ui/base/text/text_elider.h"
+#include "chrome/test/base/testing_profile.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/text_elider.h"
 
 namespace {
 
@@ -332,7 +334,7 @@ TEST_F(OmniboxPopupViewMacTest, UpdatePopupAppearance) {
       [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)]);
   [[test_window() contentView] addSubview:field];
 
-  OmniboxViewMac view(NULL, NULL, profile(), NULL, NULL);
+  OmniboxViewMac view(NULL, profile(), NULL, NULL);
   MockOmniboxPopupViewMac popup_view(&view, view.model(), field);
 
   popup_view.UpdatePopupAppearance();

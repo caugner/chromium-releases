@@ -6,6 +6,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
+#include "base/process/process_metrics.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
@@ -26,12 +27,15 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_test.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/python_utils.h"
+#include "testing/perf/perf_test.h"
 
 static const char kMainWebrtcTestHtmlPage[] =
     "/webrtc/webrtc_jsep01_test.html";
@@ -43,47 +47,8 @@ static const char kTestLoggingSessionId[] = "0123456789abcdef";
 // test suite since normal tester machines do not have webcams.
 class WebrtcBrowserTest : public WebRtcTestBase {
  public:
-  // See comment in test where this class is used for purpose.
-  class BrowserMessageFilter : public content::BrowserMessageFilter {
-   public:
-    explicit BrowserMessageFilter(
-        const base::Closure& on_channel_closing)
-        : on_channel_closing_(on_channel_closing) {}
-
-    virtual void OnChannelClosing() OVERRIDE {
-      // Posting on the file thread ensures that the callback is run after
-      // WebRtcLogUploader::UploadLog has finished. See also comment in
-      // MANUAL_RunsAudioVideoWebRTCCallInTwoTabsWithLogging test.
-      content::BrowserThread::PostTask(content::BrowserThread::FILE,
-          FROM_HERE, on_channel_closing_);
-    }
-
-    virtual bool OnMessageReceived(const IPC::Message& message,
-                                   bool* message_was_ok) OVERRIDE {
-      return false;
-    }
-
-  private:
-    virtual ~BrowserMessageFilter() {}
-
-    base::Closure on_channel_closing_;
-  };
-
-  virtual void SetUp() OVERRIDE {
-    // TODO(phoglund): Remove this when the bots enable real GPU with the
-    // command line. crbug.com/271504
-    UseRealGLBindings();
-
-    WebRtcTestBase::SetUp();
-  }
-
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     PeerConnectionServerRunner::KillAllPeerConnectionServersOnCurrentSystem();
-    peerconnection_server_.Start();
-  }
-
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
-    peerconnection_server_.Stop();
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
@@ -96,6 +61,9 @@ class WebrtcBrowserTest : public WebRtcTestBase {
         switches::kUseFakeDeviceForMediaStream));
     EXPECT_FALSE(command_line->HasSwitch(
         switches::kUseFakeUIForMediaStream));
+
+    // The video playback will not work without a GPU, so force its use here.
+    command_line->AppendSwitch(switches::kUseGpuInTests);
   }
 
   // Convenience method which executes the provided javascript in the context
@@ -188,13 +156,35 @@ class WebrtcBrowserTest : public WebRtcTestBase {
         "'video');", tab_contents);
   }
 
- private:
+  void PrintProcessMetrics(base::ProcessMetrics* process_metrics,
+                           const std::string& suffix) {
+    perf_test::PrintResult("cpu", "", "cpu" + suffix,
+                           process_metrics->GetCPUUsage(),
+                           "%", true);
+    perf_test::PrintResult("memory", "", "ws_peak" + suffix,
+                           process_metrics->GetPeakWorkingSetSize(),
+                           "bytes", true);
+    perf_test::PrintResult("memory", "", "ws_final" + suffix,
+                           process_metrics->GetWorkingSetSize(),
+                           "bytes", false);
+
+    size_t private_mem;
+    size_t shared_mem;
+    if (process_metrics->GetMemoryBytes(&private_mem, &shared_mem)) {
+      perf_test::PrintResult("memory", "", "private_mem_final" + suffix,
+                             private_mem, "bytes", false);
+      perf_test::PrintResult("memory", "", "shared_mem_final" + suffix,
+                             shared_mem, "bytes", false);
+    }
+  }
+
   PeerConnectionServerRunner peerconnection_server_;
 };
 
 IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
                        MANUAL_RunsAudioVideoWebRTCCallInTwoTabs) {
-  EXPECT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(peerconnection_server_.Start());
 
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
@@ -229,11 +219,81 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
 
   AssertNoAsynchronousErrors(left_tab);
   AssertNoAsynchronousErrors(right_tab);
+
+  ASSERT_TRUE(peerconnection_server_.Stop());
+}
+
+IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest, MANUAL_CpuUsage15Seconds) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(peerconnection_server_.Start());
+
+  base::FilePath results_file;
+  ASSERT_TRUE(file_util::CreateTemporaryFile(&results_file));
+
+  ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
+  content::WebContents* left_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+#if defined(OS_MACOSX)
+  // Don't measure renderer CPU on mac: requires a mach broker we don't have
+  // access to from the browser test.
+  scoped_ptr<base::ProcessMetrics> browser_process_metrics(
+      base::ProcessMetrics::CreateProcessMetrics(
+      base::Process::Current().handle(), NULL));
+  browser_process_metrics->GetCPUUsage();
+#else
+  // Measure rendering CPU on platforms that support it.
+  base::ProcessHandle renderer_pid =
+      left_tab->GetRenderProcessHost()->GetHandle();
+  scoped_ptr<base::ProcessMetrics> renderer_process_metrics(
+      base::ProcessMetrics::CreateProcessMetrics(renderer_pid));
+  renderer_process_metrics->GetCPUUsage();
+
+  scoped_ptr<base::ProcessMetrics> browser_process_metrics(
+      base::ProcessMetrics::CreateProcessMetrics(
+          base::Process::Current().handle()));
+  browser_process_metrics->GetCPUUsage();
+#endif
+
+  GetUserMediaAndAccept(left_tab);
+
+  chrome::AddBlankTabAt(browser(), -1, true);
+  content::WebContents* right_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ui_test_utils::NavigateToURL(
+        browser(), embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
+  GetUserMediaAndAccept(right_tab);
+
+  ConnectToPeerConnectionServer("peer 1", left_tab);
+  ConnectToPeerConnectionServer("peer 2", right_tab);
+
+  EstablishCall(left_tab, right_tab);
+
+  AssertNoAsynchronousErrors(left_tab);
+  AssertNoAsynchronousErrors(right_tab);
+
+  SleepInJavascript(left_tab, 15000);
+
+  HangUp(left_tab);
+  WaitUntilHangupVerified(left_tab);
+  WaitUntilHangupVerified(right_tab);
+
+#if !defined(OS_MACOSX)
+  PrintProcessMetrics(renderer_process_metrics.get(), "_r");
+#endif
+  PrintProcessMetrics(browser_process_metrics.get(), "_b");
+
+  AssertNoAsynchronousErrors(left_tab);
+  AssertNoAsynchronousErrors(right_tab);
+
+  ASSERT_TRUE(peerconnection_server_.Stop());
 }
 
 IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
                        MANUAL_TestMediaStreamTrackEnableDisable) {
-  EXPECT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(peerconnection_server_.Start());
 
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
@@ -276,7 +336,35 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
 
   AssertNoAsynchronousErrors(left_tab);
   AssertNoAsynchronousErrors(right_tab);
+
+  ASSERT_TRUE(peerconnection_server_.Stop());
 }
+
+// See comment in test where this class is used for purpose.
+class BrowserMessageFilter : public content::BrowserMessageFilter {
+ public:
+  explicit BrowserMessageFilter(
+      const base::Closure& on_channel_closing)
+      : on_channel_closing_(on_channel_closing) {}
+
+  virtual void OnChannelClosing() OVERRIDE {
+    // Posting on the file thread ensures that the callback is run after
+    // WebRtcLogUploader::UploadLog has finished. See also comment in
+    // MANUAL_RunsAudioVideoWebRTCCallInTwoTabsWithLogging test.
+    content::BrowserThread::PostTask(content::BrowserThread::FILE,
+        FROM_HERE, on_channel_closing_);
+  }
+
+  virtual bool OnMessageReceived(const IPC::Message& message,
+                                 bool* message_was_ok) OVERRIDE {
+    return false;
+  }
+
+private:
+  virtual ~BrowserMessageFilter() {}
+
+  base::Closure on_channel_closing_;
+};
 
 // Tests WebRTC diagnostic logging. Sets up the browser to save the multipart
 // contents to a buffer instead of uploading it, then verifies it after a call.
@@ -314,6 +402,7 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
 IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
                        MANUAL_RunsAudioVideoWebRTCCallInTwoTabsWithLogging) {
   EXPECT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  ASSERT_TRUE(peerconnection_server_.Start());
 
   // Add command line switch that forces allowing log uploads.
   CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -446,4 +535,6 @@ IN_PROC_BROWSER_TEST_F(WebrtcBrowserTest,
   final_delimiter += "--";
   EXPECT_STREQ(final_delimiter.c_str(), multipart_lines[29].c_str());
   EXPECT_TRUE(multipart_lines[30].empty());
+
+  ASSERT_TRUE(peerconnection_server_.Stop());
 }

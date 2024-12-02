@@ -11,8 +11,8 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "extensions/common/manifest_constants.h"
 
 namespace extensions {
 
@@ -49,9 +49,9 @@ void ExtensionKeybindingRegistry::Init() {
 
 bool ExtensionKeybindingRegistry::ShouldIgnoreCommand(
     const std::string& command) const {
-  return command == extension_manifest_values::kPageActionCommandEvent ||
-         command == extension_manifest_values::kBrowserActionCommandEvent ||
-         command == extension_manifest_values::kScriptBadgeCommandEvent;
+  return command == manifest_values::kPageActionCommandEvent ||
+         command == manifest_values::kBrowserActionCommandEvent ||
+         command == manifest_values::kScriptBadgeCommandEvent;
 }
 
 void ExtensionKeybindingRegistry::CommandExecuted(
@@ -71,7 +71,7 @@ void ExtensionKeybindingRegistry::CommandExecuted(
     granter->GrantIfRequested(extension);
 
   scoped_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(Value::CreateStringValue(command));
+  args->Append(new base::StringValue(command));
 
   scoped_ptr<Event> event(new Event("commands.onCommand", args.Pass()));
   event->restrict_to_profile = profile_;

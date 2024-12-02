@@ -7,6 +7,34 @@
 
 #include "chrome/browser/extensions/api/execute_code_function.h"
 
+namespace extensions {
+
+class WebviewClearDataFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("webview.clearData", WEBVIEW_CLEARDATA);
+
+  WebviewClearDataFunction();
+
+ protected:
+  virtual ~WebviewClearDataFunction();
+
+  // ExtensionFunction implementation.
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  uint32 GetRemovalMask();
+  void ClearDataDone();
+
+  // Removal start time.
+  base::Time remove_since_;
+  // Removal mask, corresponds to StoragePartition::RemoveDataMask enum.
+  uint32 remove_mask_;
+  // Tracks any data related or parse errors.
+  bool bad_message_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebviewClearDataFunction);
+};
+
 class WebviewExecuteCodeFunction : public extensions::ExecuteCodeFunction {
  public:
   WebviewExecuteCodeFunction();
@@ -143,5 +171,7 @@ class WebviewTerminateFunction : public AsyncExtensionFunction {
  private:
   DISALLOW_COPY_AND_ASSIGN(WebviewTerminateFunction);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_WEBVIEW_WEBVIEW_API_H_

@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_resources.h"
+#include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
@@ -24,22 +25,21 @@
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/base/animation/animation_container.h"
-#include "ui/base/animation/multi_animation.h"
-#include "ui/base/animation/slide_animation.h"
-#include "ui/base/animation/throb_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/base/text/text_elider.h"
 #include "ui/base/theme_provider.h"
+#include "ui/gfx/animation/animation_container.h"
+#include "ui/gfx/animation/multi_animation.h"
+#include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_analysis.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/path.h"
+#include "ui/gfx/text_elider.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
@@ -163,9 +163,6 @@ int tab_icon_size() {
 
 // How long the pulse throb takes.
 const int kPulseDurationMs = 200;
-
-// How long the recording button takes to fade in/out.
-const int kRecordingDurationMs = 1000;
 
 // Width of touch tabs.
 static const int kTouchWidth = 120;
@@ -314,16 +311,16 @@ chrome::HostDesktopType GetHostDesktopType(views::View* view) {
 // FaviconCrashAnimation
 //
 //  A custom animation subclass to manage the favicon crash animation.
-class Tab::FaviconCrashAnimation : public ui::LinearAnimation,
-                                   public ui::AnimationDelegate {
+class Tab::FaviconCrashAnimation : public gfx::LinearAnimation,
+                                   public gfx::AnimationDelegate {
  public:
   explicit FaviconCrashAnimation(Tab* target)
-      : ui::LinearAnimation(1000, 25, this),
+      : gfx::LinearAnimation(1000, 25, this),
         target_(target) {
   }
   virtual ~FaviconCrashAnimation() {}
 
-  // ui::Animation overrides:
+  // gfx::Animation overrides:
   virtual void AnimateToState(double state) OVERRIDE {
     const double kHidingOffset = 27;
 
@@ -338,8 +335,8 @@ class Tab::FaviconCrashAnimation : public ui::LinearAnimation,
     }
   }
 
-  // ui::AnimationDelegate overrides:
-  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE {
+  // gfx::AnimationDelegate overrides:
+  virtual void AnimationCanceled(const gfx::Animation* animation) OVERRIDE {
     target_->SetFaviconHidingOffset(0);
   }
 
@@ -465,6 +462,7 @@ Tab::Tab(TabController* controller)
       tab_activated_with_last_gesture_begin_(false),
       hover_controller_(this),
       showing_icon_(false),
+      showing_audio_indicator_(false),
       showing_close_button_(false),
       close_button_color_(0) {
   InitTabResources();
@@ -492,17 +490,14 @@ Tab::Tab(TabController* controller)
   AddChildView(close_button_);
 
   set_context_menu_controller(this);
-
-  tab_audio_indicator_.reset(new TabAudioIndicator(this));
 }
 
 Tab::~Tab() {
 }
 
-void Tab::set_animation_container(ui::AnimationContainer* container) {
+void Tab::set_animation_container(gfx::AnimationContainer* container) {
   animation_container_ = container;
   hover_controller_.SetAnimationContainer(container);
-  tab_audio_indicator_->SetAnimationContainer(container);
 }
 
 bool Tab::IsActive() const {
@@ -556,8 +551,6 @@ void Tab::SetData(const TabRendererData& data) {
     }
   }
 
-  tab_audio_indicator_->SetIsPlayingAudio(data_.AudioActive());
-
   DataChanged(old);
 
   Layout();
@@ -578,7 +571,7 @@ void Tab::UpdateLoadingAnimation(TabRendererData::NetworkState state) {
 }
 
 void Tab::StartPulse() {
-  ui::ThrobAnimation* animation = new ui::ThrobAnimation(this);
+  gfx::ThrobAnimation* animation = new gfx::ThrobAnimation(this);
   animation->SetSlideDuration(kPulseDurationMs);
   if (animation_container_.get())
     animation->SetContainer(animation_container_.get());
@@ -599,23 +592,23 @@ void Tab::StartMiniTabTitleAnimation() {
   if (!data().mini)
     return;
   if (!tab_animation_.get()) {
-    ui::MultiAnimation::Parts parts;
+    gfx::MultiAnimation::Parts parts;
     parts.push_back(
-        ui::MultiAnimation::Part(kMiniTitleChangeAnimationDuration1MS,
-                                 ui::Tween::EASE_OUT));
+        gfx::MultiAnimation::Part(kMiniTitleChangeAnimationDuration1MS,
+                                 gfx::Tween::EASE_OUT));
     parts.push_back(
-        ui::MultiAnimation::Part(kMiniTitleChangeAnimationDuration2MS,
-                                 ui::Tween::ZERO));
+        gfx::MultiAnimation::Part(kMiniTitleChangeAnimationDuration2MS,
+                                 gfx::Tween::ZERO));
     parts.push_back(
-        ui::MultiAnimation::Part(kMiniTitleChangeAnimationDuration3MS,
-                                 ui::Tween::EASE_IN));
+        gfx::MultiAnimation::Part(kMiniTitleChangeAnimationDuration3MS,
+                                 gfx::Tween::EASE_IN));
     parts[0].start_time_ms = kMiniTitleChangeAnimationStart1MS;
     parts[0].end_time_ms = kMiniTitleChangeAnimationEnd1MS;
     parts[2].start_time_ms = kMiniTitleChangeAnimationStart3MS;
     parts[2].end_time_ms = kMiniTitleChangeAnimationEnd3MS;
     base::TimeDelta timeout =
         base::TimeDelta::FromMilliseconds(kMiniTitleChangeAnimationIntervalMS);
-    ui::MultiAnimation* animation = new ui::MultiAnimation(parts, timeout);
+    gfx::MultiAnimation* animation = new gfx::MultiAnimation(parts, timeout);
     if (animation_container_.get())
       animation->SetContainer(animation_container_.get());
     animation->set_delegate(this);
@@ -679,19 +672,9 @@ int Tab::GetImmersiveHeight() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Tab, TabAudioIndicator::Delegate overrides:
-
-void Tab::ScheduleAudioIndicatorPaint() {
-  // No need to schedule a paint if another animation is active. The other
-  // animation will do its own scheduling.
-  if (!icon_animation_)
-    ScheduleIconPaint();
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // Tab, AnimationDelegate overrides:
 
-void Tab::AnimationProgressed(const ui::Animation* animation) {
+void Tab::AnimationProgressed(const gfx::Animation* animation) {
   // Ignore if the pulse animation is being performed on active tab because
   // it repaints the same image. See |Tab::PaintTabBackground()|.
   if (animation == tab_animation_.get() && IsActive())
@@ -699,11 +682,11 @@ void Tab::AnimationProgressed(const ui::Animation* animation) {
   SchedulePaint();
 }
 
-void Tab::AnimationCanceled(const ui::Animation* animation) {
+void Tab::AnimationCanceled(const gfx::Animation* animation) {
   SchedulePaint();
 }
 
-void Tab::AnimationEnded(const ui::Animation* animation) {
+void Tab::AnimationEnded(const gfx::Animation* animation) {
   SchedulePaint();
 }
 
@@ -781,20 +764,7 @@ void Tab::Layout() {
     int favicon_left = lb.x();
     favicon_bounds_.SetRect(favicon_left, favicon_top,
                             tab_icon_size(), tab_icon_size());
-    if (data().mini && width() < kMiniTabRendererAsNormalTabWidth) {
-      // Adjust the location of the favicon when transitioning from a normal
-      // tab to a mini-tab.
-      int mini_delta = kMiniTabRendererAsNormalTabWidth - GetMiniWidth();
-      int ideal_delta = width() - GetMiniWidth();
-      if (ideal_delta < mini_delta) {
-        int ideal_x = (GetMiniWidth() - tab_icon_size()) / 2;
-        int x = favicon_bounds_.x() + static_cast<int>(
-            (1 - static_cast<float>(ideal_delta) /
-             static_cast<float>(mini_delta)) *
-            (ideal_x - favicon_bounds_.x()));
-        favicon_bounds_.set_x(x);
-      }
-    }
+    MaybeAdjustLeftForMiniTab(&favicon_bounds_);
   } else {
     favicon_bounds_.SetRect(lb.x(), lb.y(), 0, 0);
   }
@@ -831,6 +801,23 @@ void Tab::Layout() {
     close_button_->SetVisible(false);
   }
 
+  showing_audio_indicator_ = ShouldShowAudioIndicator();
+  if (showing_audio_indicator_) {
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    gfx::ImageSkia audio_indicator_image(
+        *rb.GetImageSkiaNamed(IDR_TAB_AUDIO_INDICATOR));
+    const int top =
+        top_padding() + (content_height - audio_indicator_image.height()) / 2;
+    const int right = showing_close_button_ ?
+        close_button_->x() + close_button_->GetInsets().left() : lb.right();
+    const int left = std::max(lb.x(), right - audio_indicator_image.width());
+    audio_indicator_bounds_.SetRect(left, top,
+                                    tab_icon_size(), tab_icon_size());
+    MaybeAdjustLeftForMiniTab(&audio_indicator_bounds_);
+  } else {
+    audio_indicator_bounds_.SetRect(lb.x(), lb.y(), 0, 0);
+  }
+
   const int title_text_offset = is_host_desktop_type_ash ?
       kTitleTextOffsetYAsh : kTitleTextOffsetY;
   int title_left = favicon_bounds_.right() + kFaviconTitleSpacing;
@@ -847,16 +834,19 @@ void Tab::Layout() {
       title_top -= (text_height - minimum_size.height()) / 2;
 
     int title_width;
-    if (close_button_->visible()) {
+    if (showing_audio_indicator_) {
+      title_width = audio_indicator_bounds_.x() - kTitleCloseButtonSpacing -
+          title_left;
+    } else if (close_button_->visible()) {
       // The close button has an empty border with some padding (see details
       // above where the close-button's bounds is set). Allow the title to
       // overlap the empty padding.
-      title_width = std::max(close_button_->x() +
-                             close_button_->GetInsets().left() -
-                             kTitleCloseButtonSpacing - title_left, 0);
+      title_width = close_button_->x() + close_button_->GetInsets().left() -
+          kTitleCloseButtonSpacing - title_left;
     } else {
-      title_width = std::max(lb.width() - title_left, 0);
+      title_width = lb.width() - title_left;
     }
+    title_width = std::max(title_width, 0);
     title_bounds_.SetRect(title_left, title_top, title_width, font_height_);
   } else {
     title_bounds_.SetRect(title_left, title_top, 0, 0);
@@ -1077,6 +1067,17 @@ const gfx::Rect& Tab::GetIconBounds() const {
   return favicon_bounds_;
 }
 
+void Tab::MaybeAdjustLeftForMiniTab(gfx::Rect* bounds) const {
+  if (!data().mini || width() >= kMiniTabRendererAsNormalTabWidth)
+    return;
+  const int mini_delta = kMiniTabRendererAsNormalTabWidth - GetMiniWidth();
+  const int ideal_delta = width() - GetMiniWidth();
+  const int ideal_x = (GetMiniWidth() - bounds->width()) / 2;
+  bounds->set_x(bounds->x() + static_cast<int>(
+      (1 - static_cast<float>(ideal_delta) / static_cast<float>(mini_delta)) *
+      (ideal_x - bounds->x())));
+}
+
 void Tab::DataChanged(const TabRendererData& old) {
   if (data().blocked == old.blocked)
     return;
@@ -1090,9 +1091,13 @@ void Tab::DataChanged(const TabRendererData& old) {
 void Tab::PaintTab(gfx::Canvas* canvas) {
   // See if the model changes whether the icons should be painted.
   const bool show_icon = ShouldShowIcon();
+  const bool show_audio_indicator = ShouldShowAudioIndicator();
   const bool show_close_button = ShouldShowCloseBox();
-  if (show_icon != showing_icon_ || show_close_button != showing_close_button_)
+  if (show_icon != showing_icon_ ||
+      show_audio_indicator != showing_audio_indicator_ ||
+      show_close_button != showing_close_button_) {
     Layout();
+  }
 
   PaintTabBackground(canvas);
 
@@ -1106,6 +1111,9 @@ void Tab::PaintTab(gfx::Canvas* canvas) {
 
   if (show_icon)
     PaintIcon(canvas);
+
+  if (show_audio_indicator)
+    PaintAudioIndicator(canvas);
 
   // If the close button color has changed, generate a new one.
   if (!close_button_color_ || title_color != close_button_color_) {
@@ -1170,8 +1178,8 @@ void Tab::PaintTabBackground(gfx::Canvas* canvas) {
     if (tab_animation_.get() &&
         tab_animation_->is_animating() &&
         data().mini) {
-      ui::MultiAnimation* animation =
-          static_cast<ui::MultiAnimation*>(tab_animation_.get());
+      gfx::MultiAnimation* animation =
+          static_cast<gfx::MultiAnimation*>(tab_animation_.get());
       PaintInactiveTabBackgroundWithTitleChange(canvas, animation);
     } else {
       PaintInactiveTabBackground(canvas);
@@ -1189,7 +1197,7 @@ void Tab::PaintTabBackground(gfx::Canvas* canvas) {
 
 void Tab::PaintInactiveTabBackgroundWithTitleChange(
     gfx::Canvas* canvas,
-    ui::MultiAnimation* animation) {
+    gfx::MultiAnimation* animation) {
   // Render the inactive tab background. We'll use this for clipping.
   gfx::Canvas background_canvas(size(), canvas->scale_factor(), false);
   PaintInactiveTabBackground(&background_canvas);
@@ -1457,13 +1465,6 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
                        data().favicon.width(),
                        data().favicon.height(),
                        bounds, true, SkPaint());
-      } else if (!icon_animation_ && tab_audio_indicator_->IsAnimating()) {
-        // Draw the audio indicator UI only if no other icon animation is
-        // active.
-        if (!icon_animation_ && tab_audio_indicator_->IsAnimating()) {
-          tab_audio_indicator_->set_favicon(data().favicon);
-          tab_audio_indicator_->Paint(canvas, bounds);
-        }
       } else {
         DrawIconCenter(canvas, data().favicon, 0,
                        data().favicon.width(),
@@ -1482,8 +1483,8 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
 void Tab::PaintCaptureState(gfx::Canvas* canvas, gfx::Rect bounds) {
   SkPaint paint;
   paint.setAntiAlias(true);
-  U8CPU alpha = icon_animation_->GetCurrentValue() * 0xff;
-  paint.setAlpha(alpha);
+  DCHECK(capture_icon_animation_.get());
+  paint.setAlpha(capture_icon_animation_->GetCurrentValue() * SK_AlphaOPAQUE);
   ui::ThemeProvider* tp = GetThemeProvider();
 
   if (data().capture_state == TabRendererData::CAPTURE_STATE_PROJECTING) {
@@ -1573,6 +1574,21 @@ void Tab::PaintCaptureState(gfx::Canvas* canvas, gfx::Rect bounds) {
   }
 }
 
+void Tab::PaintAudioIndicator(gfx::Canvas* canvas) {
+  if (audio_indicator_bounds_.IsEmpty())
+    return;
+
+  gfx::Rect bounds = audio_indicator_bounds_;
+  bounds.set_x(GetMirroredXForRect(bounds));
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  const gfx::ImageSkia audio_indicator_image(
+      *rb.GetImageSkiaNamed(IDR_TAB_AUDIO_INDICATOR));
+  DrawIconAtLocation(canvas, audio_indicator_image, 0,
+                     bounds.x(), bounds.y(), audio_indicator_image.width(),
+                     audio_indicator_image.height(), true, SkPaint());
+}
+
 void Tab::PaintTitle(gfx::Canvas* canvas, SkColor title_color) {
   // Paint the Title.
   const gfx::Rect& title_bounds = GetTitleBounds();
@@ -1652,19 +1668,44 @@ void Tab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
 int Tab::IconCapacity() const {
   if (height() < GetMinimumUnselectedSize().height())
     return 0;
-  return (width() - left_padding() - right_padding()) / tab_icon_size();
+  const int kPaddingBetweenIcons = 2;
+  return (width() - left_padding() - right_padding()) /
+      (tab_icon_size() + kPaddingBetweenIcons);
 }
 
 bool Tab::ShouldShowIcon() const {
+  if (!data().show_icon)
+    return false;
+  const bool should_show_audio_indicator = ShouldShowAudioIndicator();
+  if (data().mini && height() >= GetMinimumUnselectedSize().height()) {
+    // Audio indicator always takes precendence over the favicon for mini tabs.
+    return !should_show_audio_indicator;
+  }
+  int required_capacity = should_show_audio_indicator ? 2 : 1;
+  if (IsActive()) {
+    // Active tabs give priority to the close button, then the audio indicator,
+    // then the favicon.
+    ++required_capacity;
+  } else {
+    // Non-active tabs give priority to the audio indicator, then the favicon,
+    // and finally the close button.
+  }
+  return IconCapacity() >= required_capacity;
+}
+
+bool Tab::ShouldShowAudioIndicator() const {
+  // Note: If the capture indicator is active, then do not show the audio
+  // indicator.  This allows the favicon "throbber" animation to be shown in
+  // small-width situations.
+  if (!data().AudioActive() || data().CaptureActive())
+    return false;
   if (data().mini && height() >= GetMinimumUnselectedSize().height())
     return true;
-  if (!data().show_icon) {
-    return false;
-  } else if (IsActive()) {
-    // The active tab clips favicon before close button.
+  if (IsActive()) {
+    // The active tab clips the audio indicator before the close button.
     return IconCapacity() >= 2;
   }
-  // Non-selected tabs clip close button before favicon.
+  // Non-active tabs clip close button before the audio indicator.
   return IconCapacity() >= 1;
 }
 
@@ -1705,27 +1746,25 @@ void Tab::ResetCrashedFavicon() {
 }
 
 void Tab::StopIconAnimation() {
-  if (!icon_animation_.get())
-    return;
-  icon_animation_->Stop();
-  icon_animation_.reset();
+  crash_icon_animation_.reset();
+  capture_icon_animation_.reset();
 }
 
 void Tab::StartCrashAnimation() {
-  icon_animation_.reset(new FaviconCrashAnimation(this));
-  icon_animation_->Start();
+  capture_icon_animation_.reset();
+  crash_icon_animation_.reset(new FaviconCrashAnimation(this));
+  crash_icon_animation_->Start();
 }
 
 void Tab::StartRecordingAnimation() {
-  ui::ThrobAnimation* animation = new ui::ThrobAnimation(this);
-  animation->SetTweenType(ui::Tween::EASE_IN_OUT);
-  animation->SetThrobDuration(kRecordingDurationMs);
-  animation->StartThrobbing(-1);
-  icon_animation_.reset(animation);
+  crash_icon_animation_.reset();
+  capture_icon_animation_ = chrome::CreateTabRecordingIndicatorAnimation();
+  capture_icon_animation_->set_delegate(this);
+  capture_icon_animation_->Start();
 }
 
 bool Tab::IsPerformingCrashAnimation() const {
-  return icon_animation_.get() && data_.IsCrashed();
+  return crash_icon_animation_.get() && data_.IsCrashed();
 }
 
 void Tab::ScheduleIconPaint() {

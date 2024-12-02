@@ -15,12 +15,16 @@
 #include "base/run_loop.h"
 #include "base/strings/stringize_macros.h"
 #include "base/values.h"
+#include "google_apis/gaia/gaia_oauth_client.h"
+#include "google_apis/google_api_keys.h"
 #include "net/base/net_util.h"
+#include "net/url_request/url_fetcher.h"
 #include "remoting/base/rsa_key_pair.h"
+#include "remoting/base/url_request_context.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/pairing_registry_delegate.h"
-#include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/pin_hash.h"
+#include "remoting/host/setup/oauth_client.h"
 #include "remoting/protocol/pairing_registry.h"
 
 #if defined(OS_POSIX)
@@ -32,7 +36,12 @@ namespace {
 // Features supported in addition to the base protocol.
 const char* kSupportedFeatures[] = {
   "pairingRegistry",
+  "oauthClient"
 };
+
+// redirect_uri to use when authenticating service accounts (service account
+// codes are obtained "out-of-band", i.e., not through an OAuth redirect).
+const char* kServiceAccountRedirectUri = "oob";
 
 // Helper to extract the "config" part of a message as a DictionaryValue.
 // Returns NULL on failure, and logs an error message.
@@ -53,8 +62,9 @@ scoped_ptr<base::DictionaryValue> ConfigDictionaryFromMessage(
 namespace remoting {
 
 NativeMessagingHost::NativeMessagingHost(
-    scoped_ptr<DaemonController> daemon_controller,
+    scoped_refptr<DaemonController> daemon_controller,
     scoped_refptr<protocol::PairingRegistry> pairing_registry,
+    scoped_ptr<OAuthClient> oauth_client,
     base::PlatformFile input,
     base::PlatformFile output,
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
@@ -63,8 +73,11 @@ NativeMessagingHost::NativeMessagingHost(
       quit_closure_(quit_closure),
       native_messaging_reader_(input),
       native_messaging_writer_(output),
-      daemon_controller_(daemon_controller.Pass()),
+      daemon_controller_(daemon_controller),
       pairing_registry_(pairing_registry),
+      oauth_client_(oauth_client.Pass()),
+      pending_requests_(0),
+      shutdown_(false),
       weak_factory_(this) {
   weak_ptr_ = weak_factory_.GetWeakPtr();
 }
@@ -81,17 +94,20 @@ void NativeMessagingHost::Start() {
 
 void NativeMessagingHost::Shutdown() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
-  if (!quit_closure_.is_null()) {
+
+  if (shutdown_)
+    return;
+
+  shutdown_ = true;
+  if (!pending_requests_)
     caller_task_runner_->PostTask(FROM_HERE, quit_closure_);
-    quit_closure_.Reset();
-  }
 }
 
 void NativeMessagingHost::ProcessMessage(scoped_ptr<base::Value> message) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   // Don't process any more messages if Shutdown() has been called.
-  if (quit_closure_.is_null())
+  if (shutdown_)
     return;
 
   const base::DictionaryValue* message_dict;
@@ -117,6 +133,9 @@ void NativeMessagingHost::ProcessMessage(scoped_ptr<base::Value> message) {
   }
 
   response_dict->SetString("type", type + "Response");
+
+  DCHECK_GE(pending_requests_, 0);
+  pending_requests_++;
 
   bool success = false;
   if (type == "hello") {
@@ -145,12 +164,21 @@ void NativeMessagingHost::ProcessMessage(scoped_ptr<base::Value> message) {
     success = ProcessStopDaemon(*message_dict, response_dict.Pass());
   } else if (type == "getDaemonState") {
     success = ProcessGetDaemonState(*message_dict, response_dict.Pass());
+  } else if (type == "getHostClientId") {
+    success = ProcessGetHostClientId(*message_dict, response_dict.Pass());
+  } else if (type == "getCredentialsFromAuthCode") {
+    success = ProcessGetCredentialsFromAuthCode(
+        *message_dict, response_dict.Pass());
   } else {
     LOG(ERROR) << "Unsupported request type: " << type;
   }
 
-  if (!success)
+  if (!success) {
+    pending_requests_--;
+    DCHECK_GE(pending_requests_, 0);
+
     Shutdown();
+  }
 }
 
 bool NativeMessagingHost::ProcessHello(
@@ -242,11 +270,9 @@ bool NativeMessagingHost::ProcessUpdateDaemonConfig(
   if (!config_dict)
     return false;
 
-  // base::Unretained() is safe because this object owns |daemon_controller_|
-  // which owns the thread that will run the callback.
   daemon_controller_->UpdateConfig(
       config_dict.Pass(),
-      base::Bind(&NativeMessagingHost::SendAsyncResult, base::Unretained(this),
+      base::Bind(&NativeMessagingHost::SendAsyncResult, weak_ptr_,
                  base::Passed(&response)));
   return true;
 }
@@ -255,8 +281,8 @@ bool NativeMessagingHost::ProcessGetDaemonConfig(
     const base::DictionaryValue& message,
     scoped_ptr<base::DictionaryValue> response) {
   daemon_controller_->GetConfig(
-      base::Bind(&NativeMessagingHost::SendConfigResponse,
-                 base::Unretained(this), base::Passed(&response)));
+      base::Bind(&NativeMessagingHost::SendConfigResponse, weak_ptr_,
+                 base::Passed(&response)));
   return true;
 }
 
@@ -279,7 +305,7 @@ bool NativeMessagingHost::ProcessGetUsageStatsConsent(
     scoped_ptr<base::DictionaryValue> response) {
   daemon_controller_->GetUsageStatsConsent(
       base::Bind(&NativeMessagingHost::SendUsageStatsConsentResponse,
-                 base::Unretained(this), base::Passed(&response)));
+                 weak_ptr_, base::Passed(&response)));
   return true;
 }
 
@@ -299,7 +325,7 @@ bool NativeMessagingHost::ProcessStartDaemon(
 
   daemon_controller_->SetConfigAndStart(
       config_dict.Pass(), consent,
-      base::Bind(&NativeMessagingHost::SendAsyncResult, base::Unretained(this),
+      base::Bind(&NativeMessagingHost::SendAsyncResult, weak_ptr_,
                  base::Passed(&response)));
   return true;
 }
@@ -308,7 +334,7 @@ bool NativeMessagingHost::ProcessStopDaemon(
     const base::DictionaryValue& message,
     scoped_ptr<base::DictionaryValue> response) {
   daemon_controller_->Stop(
-      base::Bind(&NativeMessagingHost::SendAsyncResult, base::Unretained(this),
+      base::Bind(&NativeMessagingHost::SendAsyncResult, weak_ptr_,
                  base::Passed(&response)));
   return true;
 }
@@ -347,6 +373,38 @@ bool NativeMessagingHost::ProcessGetDaemonState(
   return true;
 }
 
+bool NativeMessagingHost::ProcessGetHostClientId(
+    const base::DictionaryValue& message,
+    scoped_ptr<base::DictionaryValue> response) {
+  response->SetString("clientId", google_apis::GetOAuth2ClientID(
+      google_apis::CLIENT_REMOTING_HOST));
+  SendResponse(response.Pass());
+  return true;
+}
+
+bool NativeMessagingHost::ProcessGetCredentialsFromAuthCode(
+    const base::DictionaryValue& message,
+    scoped_ptr<base::DictionaryValue> response) {
+  std::string auth_code;
+  if (!message.GetString("authorizationCode", &auth_code)) {
+    LOG(ERROR) << "'authorizationCode' string not found.";
+    return false;
+  }
+
+  gaia::OAuthClientInfo oauth_client_info = {
+    google_apis::GetOAuth2ClientID(google_apis::CLIENT_REMOTING_HOST),
+    google_apis::GetOAuth2ClientSecret(google_apis::CLIENT_REMOTING_HOST),
+    kServiceAccountRedirectUri
+  };
+
+  oauth_client_->GetCredentialsFromAuthCode(
+      oauth_client_info, auth_code, base::Bind(
+          &NativeMessagingHost::SendCredentialsResponse, weak_ptr_,
+          base::Passed(&response)));
+
+  return true;
+}
+
 void NativeMessagingHost::SendResponse(
     scoped_ptr<base::DictionaryValue> response) {
   if (!caller_task_runner_->BelongsToCurrentThread()) {
@@ -358,6 +416,12 @@ void NativeMessagingHost::SendResponse(
 
   if (!native_messaging_writer_.WriteMessage(*response))
     Shutdown();
+
+  pending_requests_--;
+  DCHECK_GE(pending_requests_, 0);
+
+  if (shutdown_ && !pending_requests_)
+    caller_task_runner_->PostTask(FROM_HERE, quit_closure_);
 }
 
 void NativeMessagingHost::SendConfigResponse(
@@ -380,12 +444,10 @@ void NativeMessagingHost::SendPairedClientsResponse(
 
 void NativeMessagingHost::SendUsageStatsConsentResponse(
     scoped_ptr<base::DictionaryValue> response,
-    bool supported,
-    bool allowed,
-    bool set_by_policy) {
-  response->SetBoolean("supported", supported);
-  response->SetBoolean("allowed", allowed);
-  response->SetBoolean("setByPolicy", set_by_policy);
+    const DaemonController::UsageStatsConsent& consent) {
+  response->SetBoolean("supported", consent.supported);
+  response->SetBoolean("allowed", consent.allowed);
+  response->SetBoolean("setByPolicy", consent.set_by_policy);
   SendResponse(response.Pass());
 }
 
@@ -415,6 +477,15 @@ void NativeMessagingHost::SendBooleanResult(
   SendResponse(response.Pass());
 }
 
+void NativeMessagingHost::SendCredentialsResponse(
+    scoped_ptr<base::DictionaryValue> response,
+    const std::string& user_email,
+    const std::string& refresh_token) {
+  response->SetString("userEmail", user_email);
+  response->SetString("refreshToken", refresh_token);
+  SendResponse(response.Pass());
+}
+
 int NativeMessagingHostMain() {
 #if defined(OS_WIN)
   base::PlatformFile read_file = GetStdHandle(STD_INPUT_HANDLE);
@@ -428,10 +499,19 @@ int NativeMessagingHostMain() {
 
   base::MessageLoop message_loop(base::MessageLoop::TYPE_IO);
   base::RunLoop run_loop;
+  // OAuth client (for credential requests).
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter(
+      new remoting::URLRequestContextGetter(message_loop.message_loop_proxy()));
+  scoped_ptr<remoting::OAuthClient> oauth_client(
+      new remoting::OAuthClient(url_request_context_getter));
+
+  net::URLFetcher::SetIgnoreCertificateRequests(true);
+
   scoped_refptr<protocol::PairingRegistry> pairing_registry =
       CreatePairingRegistry(message_loop.message_loop_proxy());
   remoting::NativeMessagingHost host(remoting::DaemonController::Create(),
                                      pairing_registry,
+                                     oauth_client.Pass(),
                                      read_file, write_file,
                                      message_loop.message_loop_proxy(),
                                      run_loop.QuitClosure());

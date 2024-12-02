@@ -24,7 +24,7 @@ namespace {
 // The ShillIPConfigClient implementation.
 class ShillIPConfigClientImpl : public ShillIPConfigClient {
  public:
-  explicit ShillIPConfigClientImpl(dbus::Bus* bus);
+  ShillIPConfigClientImpl();
 
   ////////////////////////////////////
   // ShillIPConfigClient overrides.
@@ -43,8 +43,6 @@ class ShillIPConfigClientImpl : public ShillIPConfigClient {
                        const VoidDBusMethodCallback& callback) OVERRIDE;
   virtual void GetProperties(const dbus::ObjectPath& ipconfig_path,
                              const DictionaryValueCallback& callback) OVERRIDE;
-  virtual base::DictionaryValue* CallGetPropertiesAndBlock(
-      const dbus::ObjectPath& ipconfig_path) OVERRIDE;
   virtual void SetProperty(const dbus::ObjectPath& ipconfig_path,
                            const std::string& name,
                            const base::Value& value,
@@ -54,6 +52,11 @@ class ShillIPConfigClientImpl : public ShillIPConfigClient {
                              const VoidDBusMethodCallback& callback) OVERRIDE;
   virtual void Remove(const dbus::ObjectPath& ipconfig_path,
                       const VoidDBusMethodCallback& callback) OVERRIDE;
+
+ protected:
+  virtual void Init(dbus::Bus* bus) OVERRIDE {
+    bus_ = bus;
+  }
 
  private:
   typedef std::map<std::string, ShillClientHelper*> HelperMap;
@@ -80,8 +83,8 @@ class ShillIPConfigClientImpl : public ShillIPConfigClient {
   DISALLOW_COPY_AND_ASSIGN(ShillIPConfigClientImpl);
 };
 
-ShillIPConfigClientImpl::ShillIPConfigClientImpl(dbus::Bus* bus)
-    : bus_(bus),
+ShillIPConfigClientImpl::ShillIPConfigClientImpl()
+    : bus_(NULL),
       helpers_deleter_(&helpers_) {
 }
 
@@ -91,14 +94,6 @@ void ShillIPConfigClientImpl::GetProperties(
   dbus::MethodCall method_call(flimflam::kFlimflamIPConfigInterface,
                                flimflam::kGetPropertiesFunction);
   GetHelper(ipconfig_path)->CallDictionaryValueMethod(&method_call, callback);
-}
-
-base::DictionaryValue* ShillIPConfigClientImpl::CallGetPropertiesAndBlock(
-    const dbus::ObjectPath& ipconfig_path) {
-  dbus::MethodCall method_call(flimflam::kFlimflamIPConfigInterface,
-                               flimflam::kGetPropertiesFunction);
-  return GetHelper(ipconfig_path)->CallDictionaryValueMethodAndBlock(
-      &method_call);
 }
 
 void ShillIPConfigClientImpl::Refresh(
@@ -178,10 +173,9 @@ ShillIPConfigClient::~ShillIPConfigClient() {}
 
 // static
 ShillIPConfigClient* ShillIPConfigClient::Create(
-    DBusClientImplementationType type,
-    dbus::Bus* bus) {
+    DBusClientImplementationType type) {
   if (type == REAL_DBUS_CLIENT_IMPLEMENTATION)
-    return new ShillIPConfigClientImpl(bus);
+    return new ShillIPConfigClientImpl();
   DCHECK_EQ(STUB_DBUS_CLIENT_IMPLEMENTATION, type);
   return new ShillIPConfigClientStub();
 }

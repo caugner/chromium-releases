@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function_registry.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -18,8 +17,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/networking_private.h"
 
-using extensions::event_names::kOnNetworkListChanged;
-using extensions::event_names::kOnNetworksChanged;
 using extensions::EventRouter;
 using extensions::ExtensionSystem;
 namespace api = extensions::api::networking_private;
@@ -163,7 +160,6 @@ bool NetworkingPrivateGetStateFunction::RunImpl() {
       "  \"Name\": \"wifi2_PSK\","
       "  \"Type\": \"WiFi\","
       "  \"WiFi\": {"
-      "    \"AutoConnect\": false,"
       "    \"Security\": \"WPA-PSK\","
       "    \"SignalStrength\": 80"
       "  }"
@@ -196,6 +192,31 @@ bool NetworkingPrivateSetPropertiesFunction::RunImpl() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// NetworkingPrivateCreateNetworkFunction
+
+NetworkingPrivateCreateNetworkFunction::
+~NetworkingPrivateCreateNetworkFunction() {
+}
+
+bool NetworkingPrivateCreateNetworkFunction::RunImpl() {
+  scoped_ptr<api::CreateNetwork::Params> params =
+      api::CreateNetwork::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  // Store properties_dict in profile to return from GetProperties.
+  scoped_ptr<base::DictionaryValue> properties_dict(
+      params->properties.ToValue());
+  properties_dict->SetString("GUID", "fake_guid");
+  profile()->SetUserData(
+      kNetworkingPrivateProperties,
+      new NetworkingPrivatePropertiesData(properties_dict.get()));
+
+  results_ = api::CreateNetwork::Results::Create("fake_guid");
+  SendResponse(true);
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // NetworkingPrivateGetVisibleNetworksFunction
 
 NetworkingPrivateGetVisibleNetworksFunction::
@@ -211,7 +232,10 @@ bool NetworkingPrivateGetVisibleNetworksFunction::RunImpl() {
       "    \"ConnectionState\": \"Connected\","
       "    \"GUID\": \"stub_ethernet\","
       "    \"Name\": \"eth0\","
-      "    \"Type\": \"Ethernet\""
+      "    \"Type\": \"Ethernet\","
+      "    \"Ethernet\": {"
+      "      \"Authentication\": \"None\""
+      "    }"
       "  },"
       "  {"
       "    \"ConnectionState\": \"Connected\","
@@ -219,7 +243,6 @@ bool NetworkingPrivateGetVisibleNetworksFunction::RunImpl() {
       "    \"Name\": \"wifi1\","
       "    \"Type\": \"WiFi\","
       "    \"WiFi\": {"
-      "      \"AutoConnect\": false,"
       "      \"Security\": \"WEP-PSK\","
       "      \"SignalStrength\": 0"
       "    }"
@@ -228,10 +251,7 @@ bool NetworkingPrivateGetVisibleNetworksFunction::RunImpl() {
       "    \"ConnectionState\": \"Connected\","
       "    \"GUID\": \"stub_vpn1\","
       "    \"Name\": \"vpn1\","
-      "    \"Type\": \"VPN\","
-      "    \"VPN\": {"
-      "      \"AutoConnect\": false"
-      "    }"
+      "    \"Type\": \"VPN\""
       "  },"
       "  {"
       "    \"ConnectionState\": \"NotConnected\","
@@ -239,7 +259,6 @@ bool NetworkingPrivateGetVisibleNetworksFunction::RunImpl() {
       "    \"Name\": \"wifi2_PSK\","
       "    \"Type\": \"WiFi\","
       "    \"WiFi\": {"
-      "      \"AutoConnect\": false,"
       "      \"Security\": \"WPA-PSK\","
       "      \"SignalStrength\": 80"
       "    }"
@@ -289,7 +308,7 @@ bool NetworkingPrivateRequestNetworkScanFunction::RunImpl() {
   EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
   scoped_ptr<base::ListValue> args(api::OnNetworkListChanged::Create(changes));
   scoped_ptr<extensions::Event> extension_event(new extensions::Event(
-      kOnNetworkListChanged, args.Pass()));
+      api::OnNetworkListChanged::kEventName, args.Pass()));
   event_router->BroadcastEvent(extension_event.Pass());
 
   return true;
@@ -333,7 +352,7 @@ bool NetworkingPrivateStartConnectFunction::RunImpl() {
     scoped_ptr<base::ListValue> args(api::OnNetworksChanged::Create(
         std::vector<std::string>(1, params->network_guid)));
     scoped_ptr<extensions::Event> netchanged_event(
-        new extensions::Event(kOnNetworksChanged, args.Pass()));
+        new extensions::Event(api::OnNetworksChanged::kEventName, args.Pass()));
     event_router->BroadcastEvent(netchanged_event.Pass());
 
     // Generate NetworkListChanged event.
@@ -346,7 +365,7 @@ bool NetworkingPrivateStartConnectFunction::RunImpl() {
 
     scoped_ptr<base::ListValue> arg2(api::OnNetworkListChanged::Create(list));
     scoped_ptr<extensions::Event> netlist_event(new extensions::Event(
-        kOnNetworkListChanged, arg2.Pass()));
+        api::OnNetworkListChanged::kEventName, arg2.Pass()));
     event_router->BroadcastEvent(netlist_event.Pass());
   }
   return true;
@@ -374,7 +393,7 @@ bool NetworkingPrivateStartDisconnectFunction::RunImpl() {
     scoped_ptr<base::ListValue> args(api::OnNetworksChanged::Create(
         std::vector<std::string>(1, params->network_guid)));
     scoped_ptr<extensions::Event> extension_event(
-        new extensions::Event(kOnNetworksChanged, args.Pass()));
+        new extensions::Event(api::OnNetworksChanged::kEventName, args.Pass()));
     event_router->BroadcastEvent(extension_event.Pass());
   }
   return true;

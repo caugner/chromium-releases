@@ -93,7 +93,8 @@ InstantService::InstantService(Profile* profile)
   content::URLDataSource::Add(profile, new ThemeSource(profile));
 #endif  // defined(ENABLE_THEMES)
 
-  content::URLDataSource::Add(profile, new ThumbnailSource(profile));
+  content::URLDataSource::Add(profile, new ThumbnailSource(profile, false));
+  content::URLDataSource::Add(profile, new ThumbnailSource(profile, true));
   content::URLDataSource::Add(profile, new FaviconSource(
       profile, FaviconSource::FAVICON));
   content::URLDataSource::Add(profile, new LocalNtpSource(profile));
@@ -332,21 +333,17 @@ void InstantService::OnThemeChanged(ThemeService* theme_service) {
   theme_info_->header_color = SkColorToRGBAColor(header_color);
   theme_info_->section_border_color = SkColorToRGBAColor(section_border_color);
 
-  // Set logo for the theme. By default, use alternate logo.
-  theme_info_->logo_alternate = true;
-  int logo_alternate = 0;
-  if (theme_service->GetDisplayProperty(
-      ThemeProperties::NTP_LOGO_ALTERNATE, &logo_alternate))
-    theme_info_->logo_alternate = logo_alternate == 1;
+  int logo_alternate = theme_service->GetDisplayProperty(
+      ThemeProperties::NTP_LOGO_ALTERNATE);
+  theme_info_->logo_alternate = logo_alternate == 1;
 
   if (theme_service->HasCustomImage(IDR_THEME_NTP_BACKGROUND)) {
     // Set theme id for theme background image url.
     theme_info_->theme_id = theme_service->GetThemeID();
 
     // Set theme background image horizontal alignment.
-    int alignment = 0;
-    theme_service->GetDisplayProperty(
-        ThemeProperties::NTP_BACKGROUND_ALIGNMENT, &alignment);
+    int alignment = theme_service->GetDisplayProperty(
+        ThemeProperties::NTP_BACKGROUND_ALIGNMENT);
     if (alignment & ThemeProperties::ALIGN_LEFT)
       theme_info_->image_horizontal_alignment = THEME_BKGRND_IMAGE_ALIGN_LEFT;
     else if (alignment & ThemeProperties::ALIGN_RIGHT)
@@ -363,9 +360,8 @@ void InstantService::OnThemeChanged(ThemeService* theme_service) {
       theme_info_->image_vertical_alignment = THEME_BKGRND_IMAGE_ALIGN_CENTER;
 
     // Set theme backgorund image tiling.
-    int tiling = 0;
-    theme_service->GetDisplayProperty(ThemeProperties::NTP_BACKGROUND_TILING,
-                                      &tiling);
+    int tiling = theme_service->GetDisplayProperty(
+        ThemeProperties::NTP_BACKGROUND_TILING);
     switch (tiling) {
       case ThemeProperties::NO_REPEAT:
         theme_info_->image_tiling = THEME_BKGRND_IMAGE_NO_REPEAT;

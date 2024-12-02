@@ -20,7 +20,6 @@
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/ibus/ibus_client.h"
-#include "chromeos/dbus/ibus/ibus_input_context_client.h"
 #include "chromeos/ime/component_extension_ime_manager.h"
 #include "chromeos/ime/extension_ime_util.h"
 #include "chromeos/ime/input_method_delegate.h"
@@ -117,10 +116,11 @@ const struct MigrationHangulKeyboardToInputMethodID {
 
 }  // namespace
 
-bool InputMethodManagerImpl::IsFullLatinKeyboard(
+bool InputMethodManagerImpl::IsLoginKeyboard(
     const std::string& layout) const {
-  const std::string& lang = util_.GetLanguageCodeFromInputMethodId(layout);
-  return full_latin_keyboard_checker.IsFullLatinKeyboard(layout, lang);
+  const InputMethodDescriptor* ime =
+      util_.GetInputMethodDescriptorFromId(layout);
+  return ime ? ime->is_login_keyboard() : false;
 }
 
 InputMethodManagerImpl::InputMethodManagerImpl(
@@ -248,7 +248,7 @@ void InputMethodManagerImpl::EnableLayouts(const std::string& language_code,
   // layouts, so it appears first on the list of active input
   // methods at the input language status menu.
   if (util_.IsValidInputMethodId(initial_layout) &&
-      InputMethodUtil::IsKeyboardLayout(initial_layout)) {
+      IsLoginKeyboard(initial_layout)) {
     layouts.push_back(initial_layout);
   } else if (!initial_layout.empty()) {
     DVLOG(1) << "EnableLayouts: ignoring non-keyboard or invalid ID: "
@@ -260,7 +260,7 @@ void InputMethodManagerImpl::EnableLayouts(const std::string& language_code,
     const std::string& candidate = candidates[i];
     // Not efficient, but should be fine, as the two vectors are very
     // short (2-5 items).
-    if (!Contains(layouts, candidate))
+    if (!Contains(layouts, candidate) && IsLoginKeyboard(candidate))
       layouts.push_back(candidate);
   }
 
@@ -383,19 +383,6 @@ bool InputMethodManagerImpl::MigrateKoreanKeyboard(
   return false;
 }
 
-bool InputMethodManagerImpl::SetInputMethodConfig(
-    const std::string& section,
-    const std::string& config_name,
-    const InputMethodConfigValue& value) {
-  DCHECK(section != language_prefs::kGeneralSectionName ||
-         config_name != language_prefs::kPreloadEnginesConfigName);
-
-  if (state_ == STATE_TERMINATING)
-    return false;
-
-  return ibus_controller_->SetInputMethodConfig(section, config_name, value);
-}
-
 void InputMethodManagerImpl::ChangeInputMethod(
     const std::string& input_method_id) {
   ChangeInputMethodInternal(input_method_id, false);
@@ -433,8 +420,7 @@ bool InputMethodManagerImpl::ChangeInputMethodInternal(
   }
 
   pending_input_method_.clear();
-  IBusInputContextClient* input_context =
-      chromeos::DBusThreadManager::Get()->GetIBusInputContextClient();
+  IBusEngineHandlerInterface* engine = IBusBridge::Get()->GetEngineHandler();
   const std::string current_input_method_id = current_input_method_.id();
   IBusClient* client = DBusThreadManager::Get()->GetIBusClient();
   if (InputMethodUtil::IsKeyboardLayout(input_method_id_to_switch)) {
@@ -447,21 +433,18 @@ bool InputMethodManagerImpl::ChangeInputMethodInternal(
     // itself if the next engine is XKB layout.
     if (current_input_method_id.empty() ||
         InputMethodUtil::IsKeyboardLayout(current_input_method_id)) {
-      if (input_context)
-        input_context->Reset();
+      if (engine)
+        engine->Reset();
     } else {
       if (client)
         client->SetGlobalEngine(current_input_method_id,
                                 base::Bind(&base::DoNothing));
     }
-    if (input_context)
-      input_context->SetIsXKBLayout(true);
+    IBusBridge::Get()->SetEngineHandler(NULL);
   } else {
     DCHECK(client);
     client->SetGlobalEngine(input_method_id_to_switch,
                             base::Bind(&base::DoNothing));
-    if (input_context)
-      input_context->SetIsXKBLayout(false);
   }
 
   if (current_input_method_id != input_method_id_to_switch) {
@@ -577,7 +560,7 @@ void InputMethodManagerImpl::AddInputMethodExtension(
   }
 
   extra_input_methods_[id] =
-      InputMethodDescriptor(id, name, layouts, languages, options_url);
+      InputMethodDescriptor(id, name, layouts, languages, false, options_url);
   if (Contains(enabled_extension_imes_, id) &&
       !ComponentExtensionIMEManager::IsComponentExtensionIMEId(id)) {
     if (!Contains(active_input_method_ids_, id)) {
@@ -958,7 +941,7 @@ void InputMethodManagerImpl::OnScreenLocked() {
     const std::string& input_method_id = saved_active_input_method_ids_[i];
     // Skip if it's not a keyboard layout. Drop input methods including
     // extension ones.
-    if (!InputMethodUtil::IsKeyboardLayout(input_method_id))
+    if (!IsLoginKeyboard(input_method_id))
       continue;
     active_input_method_ids_.push_back(input_method_id);
     if (input_method_id == hardware_keyboard_id)

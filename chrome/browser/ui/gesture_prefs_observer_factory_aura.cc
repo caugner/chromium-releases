@@ -50,7 +50,9 @@ const std::vector<OverscrollPref>& GetOverscrollPrefs() {
       { prefs::kOverscrollVerticalThresholdComplete,
         OVERSCROLL_CONFIG_VERT_THRESHOLD_COMPLETE },
       { prefs::kOverscrollMinimumThresholdStart,
-        OVERSCROLL_CONFIG_HORIZ_THRESHOLD_START },
+        OVERSCROLL_CONFIG_HORIZ_THRESHOLD_START_TOUCHSCREEN },
+      { prefs::kOverscrollMinimumThresholdStartTouchpad,
+        OVERSCROLL_CONFIG_HORIZ_THRESHOLD_START_TOUCHPAD },
       { prefs::kOverscrollVerticalThresholdStart,
         OVERSCROLL_CONFIG_VERT_THRESHOLD_START },
       { prefs::kOverscrollHorizontalResistThreshold,
@@ -126,6 +128,7 @@ const char* kPrefsToObserve[] = {
   prefs::kMinPinchUpdateDistanceInPixels,
   prefs::kMinRailBreakVelocity,
   prefs::kMinScrollDeltaSquared,
+  prefs::kMinScrollSuccessiveVelocityEvents,
   prefs::kMinSwipeSpeed,
   prefs::kMinTouchDownDurationInSecondsForClick,
   prefs::kPointsBufferedForVelocity,
@@ -268,6 +271,9 @@ void GesturePrefsObserver::Update() {
   GestureConfiguration::set_min_scroll_delta_squared(
       prefs_->GetDouble(
           prefs::kMinScrollDeltaSquared));
+  GestureConfiguration::set_min_scroll_successive_velocity_events(
+      prefs_->GetInteger(
+          prefs::kMinScrollSuccessiveVelocityEvents));
   GestureConfiguration::set_min_swipe_speed(
       prefs_->GetDouble(
           prefs::kMinSwipeSpeed));
@@ -471,6 +477,10 @@ void GesturePrefsObserverFactoryAura::RegisterProfilePrefs(
   registry->RegisterDoublePref(
       prefs::kMinScrollDeltaSquared,
       GestureConfiguration::min_scroll_delta_squared(),
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(
+      prefs::kMinScrollSuccessiveVelocityEvents,
+      GestureConfiguration::min_scroll_successive_velocity_events(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterDoublePref(
       prefs::kMinSwipeSpeed,

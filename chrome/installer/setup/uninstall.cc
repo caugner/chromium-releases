@@ -103,7 +103,7 @@ void AddChannelValueUpdateWorkItems(
              product_state != NULL && product_state->is_multi_install())
           << "Channel value for "
           << BrowserDistribution::GetSpecificDistribution(
-                 dist_type)->GetAppShortCutName()
+                 dist_type)->GetDisplayName()
           << " is somehow already set to the desired new value of "
           << channel_info.value();
     }
@@ -325,6 +325,60 @@ void CloseChromeFrameHelperProcess() {
     VLOG(1) << installer::kChromeFrameHelperExe << " hung.  Killing.";
     base::CleanupProcesses(installer::kChromeFrameHelperExe, base::TimeDelta(),
                            content::RESULT_CODE_HUNG, NULL);
+  }
+}
+
+// Updates shortcuts to |old_target_exe| that have non-empty args, making them
+// target |new_target_exe| instead. The non-empty args requirement is a
+// heuristic to determine whether a shortcut is "user-generated". This routine
+// can only be called for user-level installs.
+void RetargetUserShortcutsWithArgs(const InstallerState& installer_state,
+                                   const Product& product,
+                                   const base::FilePath& old_target_exe,
+                                   const base::FilePath& new_target_exe) {
+  if (installer_state.system_install()) {
+    NOTREACHED();
+    return;
+  }
+  BrowserDistribution* dist = product.distribution();
+  ShellUtil::ShellChange install_level = ShellUtil::CURRENT_USER;
+  ShellUtil::ShortcutProperties updated_properties(install_level);
+  updated_properties.set_target(new_target_exe);
+
+  // TODO(huangs): Make this data-driven, along with DeleteShortcuts().
+  VLOG(1) << "Retargeting Desktop shortcuts.";
+  if (!ShellUtil::UpdateShortcutsWithArgs(
+          ShellUtil::SHORTCUT_LOCATION_DESKTOP, dist, install_level,
+          old_target_exe, updated_properties)) {
+    LOG(WARNING) << "Failed to retarget Desktop shortcuts.";
+  }
+
+  VLOG(1) << "Retargeting Quick Launch shortcuts.";
+  if (!ShellUtil::UpdateShortcutsWithArgs(
+          ShellUtil::SHORTCUT_LOCATION_QUICK_LAUNCH, dist, install_level,
+          old_target_exe, updated_properties)) {
+    LOG(WARNING) << "Failed to retarget Quick Launch shortcuts.";
+  }
+
+  VLOG(1) << "Retargeting Start Menu shortcuts.";
+  if (!ShellUtil::UpdateShortcutsWithArgs(
+          ShellUtil::SHORTCUT_LOCATION_START_MENU, dist, install_level,
+          old_target_exe, updated_properties)) {
+    LOG(WARNING) << "Failed to retarget Start Menu shortcuts.";
+  }
+
+  // Retarget pinned-to-taskbar shortcuts that point to |chrome_exe|.
+  if (!ShellUtil::UpdateShortcutsWithArgs(
+          ShellUtil::SHORTCUT_LOCATION_TASKBAR_PINS, dist,
+          ShellUtil::CURRENT_USER, old_target_exe, updated_properties)) {
+    LOG(WARNING) << "Failed to retarget taskbar shortcuts at user-level.";
+  }
+
+  // Retarget the folder of secondary tiles from the start screen for |dist|.
+  if (!ShellUtil::UpdateShortcutsWithArgs(
+          ShellUtil::SHORTCUT_LOCATION_APP_SHORTCUTS, dist, install_level,
+          old_target_exe, updated_properties)) {
+    LOG(WARNING) << "Failed to retarget start-screen shortcuts.";
   }
 }
 
@@ -686,7 +740,9 @@ void RemoveFiletypeRegistration(const InstallerState& installer_state,
   string16 classes_path(ShellUtil::kRegClasses);
   classes_path.push_back(base::FilePath::kSeparators[0]);
 
-  const string16 prog_id(ShellUtil::kChromeHTMLProgId + browser_entry_suffix);
+  BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
+  const string16 prog_id(
+      distribution->GetBrowserProgIdPrefix() + browser_entry_suffix);
 
   // Delete each filetype association if it references this Chrome.  Take care
   // not to delete the association if it references a system-level install of
@@ -759,7 +815,8 @@ bool DeleteChromeRegistrationKeys(const InstallerState& installer_state,
   base::FilePath chrome_exe(installer_state.target_path().Append(kChromeExe));
 
   // Delete Software\Classes\ChromeHTML.
-  const string16 prog_id(ShellUtil::kChromeHTMLProgId + browser_entry_suffix);
+  const string16 prog_id(
+      dist->GetBrowserProgIdPrefix() + browser_entry_suffix);
   string16 reg_prog_id(ShellUtil::kRegClasses);
   reg_prog_id.push_back(base::FilePath::kSeparators[0]);
   reg_prog_id.append(prog_id);
@@ -940,7 +997,7 @@ void UninstallActiveSetupEntries(const InstallerState& installer_state,
     const char* install_level =
         installer_state.system_install() ? "system" : "user";
     VLOG(1) << "No Active Setup processing to do for " << install_level
-            << "-level " << distribution->GetAppShortCutName();
+            << "-level " << distribution->GetDisplayName();
     return;
   }
 
@@ -1079,7 +1136,7 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
 
   bool is_chrome = product.is_chrome();
 
-  VLOG(1) << "UninstallProduct: " << browser_dist->GetAppShortCutName();
+  VLOG(1) << "UninstallProduct: " << browser_dist->GetDisplayName();
 
   if (force_uninstall) {
     // Since --force-uninstall command line option is used, we are going to
@@ -1135,6 +1192,24 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
 
     auto_launch_util::DisableAllAutoStartFeatures(
         ASCIIToUTF16(chrome::kInitialProfile));
+
+    // If user-level chrome is self-destructing as a result of encountering a
+    // system-level chrome, retarget owned non-default shortcuts (app shortcuts,
+    // profile shortcuts, etc.) to the system-level chrome.
+    if (cmd_line.HasSwitch(installer::switches::kSelfDestruct) &&
+        !installer_state.system_install()) {
+      const base::FilePath system_chrome_path(
+          GetChromeInstallPath(true, browser_dist).
+              Append(installer::kChromeExe));
+      VLOG(1) << "Retargeting user-generated Chrome shortcuts.";
+      if (base::PathExists(system_chrome_path)) {
+        RetargetUserShortcutsWithArgs(installer_state, product,
+                                      base::FilePath(chrome_exe),
+                                      system_chrome_path);
+      } else {
+        LOG(ERROR) << "Retarget failed: system-level Chrome not found.";
+      }
+    }
 
     DeleteShortcuts(installer_state, product, base::FilePath(chrome_exe));
 

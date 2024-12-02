@@ -49,12 +49,12 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/autofill/core/common/password_form.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "content/public/common/password_form.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -118,7 +118,6 @@ BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
                                        BrowserWindowController* controller)
   : browser_(browser),
     controller_(controller),
-    confirm_close_factory_(browser),
     initial_show_state_(ui::SHOW_STATE_DEFAULT),
     attention_request_id_(0) {
 
@@ -424,10 +423,8 @@ void BrowserWindowCocoa::UpdateReloadStopState(bool is_loading, bool force) {
   [controller_ setIsLoading:is_loading force:force];
 }
 
-void BrowserWindowCocoa::UpdateToolbar(content::WebContents* contents,
-                                       bool should_restore_state) {
-  [controller_ updateToolbarWithContents:contents
-                      shouldRestoreState:should_restore_state ? YES : NO];
+void BrowserWindowCocoa::UpdateToolbar(content::WebContents* contents) {
+  [controller_ updateToolbarWithContents:contents];
 }
 
 void BrowserWindowCocoa::FocusToolbar() {
@@ -532,12 +529,12 @@ DownloadShelf* BrowserWindowCocoa::GetDownloadShelf() {
 
 // We allow closing the window here since the real quit decision on Mac is made
 // in [AppController quit:].
-void BrowserWindowCocoa::ConfirmBrowserCloseWithPendingDownloads() {
-  // Call InProgressDownloadResponse asynchronously to avoid a crash when the
-  // browser window is closed here (http://crbug.com/44454).
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-      base::Bind(&Browser::InProgressDownloadResponse,
-                 confirm_close_factory_.GetWeakPtr(), true));
+void BrowserWindowCocoa::ConfirmBrowserCloseWithPendingDownloads(
+      int download_count,
+      Browser::DownloadClosePreventionType dialog_type,
+      bool app_modal,
+      const base::Callback<void(bool)>& callback) {
+  callback.Run(true);
 }
 
 void BrowserWindowCocoa::UserChangedTheme() {
@@ -716,7 +713,7 @@ void BrowserWindowCocoa::ShowAvatarBubbleFromAvatarButton() {
 
 void BrowserWindowCocoa::ShowPasswordGenerationBubble(
     const gfx::Rect& rect,
-    const content::PasswordForm& form,
+    const autofill::PasswordForm& form,
     autofill::PasswordGenerator* password_generator) {
   WebContents* web_contents =
       browser_->tab_strip_model()->GetActiveWebContents();
@@ -734,4 +731,41 @@ void BrowserWindowCocoa::ShowPasswordGenerationBubble(
         usingGenerator:password_generator
                forForm:form];
   [controller showWindow:nil];
+}
+
+int
+BrowserWindowCocoa::GetRenderViewHeightInsetWithDetachedBookmarkBar() {
+  if (browser_->bookmark_bar_state() != BookmarkBar::DETACHED)
+    return 0;
+  // TODO(sail): please make this work with cocoa, then enable
+  // BrowserTest.GetSizeForNewRenderView and
+  // WebContentsImplBrowserTest.GetSizeForNewRenderView.
+  // This function should return the extra height of the render view when
+  // detached bookmark bar is hidden.
+  // However, I (kuan) return 0 for now to retain the original behavior,
+  // because I encountered the following problem on cocoa:
+  // 1) When a navigation is requested,
+  //    WebContentsImpl::CreateRenderViewForRenderManager creates the new
+  //    RenderWidgetHostView at the size specified by
+  //    WebContentsDelegate::GetSizeForNewRenderView implemented by Browser.
+  // 2) When the pending navigation entry is committed,
+  //    WebContentsImpl::UpdateRenderViewSizeForRenderManager udpates the size
+  //    of WebContentsView to the size in (1).
+  // 3) WebContentsImpl::DidNavigateMainFramePostCommit() is called, where
+  //    the detached bookmark bar is hidden, resulting in relayout of tab
+  //    contents area.
+  // On cocoa, (2) causes RenderWidgetHostView to resize (enlarge) further.
+  // e.g. if size in (1) is size A, and this function returns height H, height
+  // of RenderWidgetHostView after (2) becomes A.height() + H; it's supposed to
+  // stay at A.height().
+  // Then, in (3), WebContentsView and RenderWidgetHostView enlarge even
+  // further, both by another H, i.e. WebContentsView's height becomes
+  // A.height() + H and RenderWidgetHostView's height becomes A.height() + 2H.
+  // Strangely, the RenderWidgetHostView for the previous navigation entry also
+  // gets enlarged by H.
+  // I believe these "automatic" resizing are caused by setAutoresizingMask of
+  // of the cocoa view in WebContentsViewMac, which defeats the purpose of
+  // WebContentsDelegate::GetSizeForNewRenderView i.e. to prevent resizing of
+  // RenderWidgetHostView in (2) and (3).
+  return 0;
 }

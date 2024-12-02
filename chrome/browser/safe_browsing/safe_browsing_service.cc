@@ -34,8 +34,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
+#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
@@ -307,7 +307,8 @@ void SafeBrowsingService::InitURLRequestContextOnIOThread(
           CookieFilePath(),
           false,
           NULL,
-          NULL));
+          NULL,
+          scoped_refptr<base::SequencedTaskRunner>()));
 
   url_request_context_.reset(new net::URLRequestContext);
   // |system_url_request_context_getter| may be NULL during tests.

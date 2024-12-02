@@ -15,13 +15,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_tabstrip.cc"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/history_overlay_controller.h"
+#import "chrome/browser/ui/cocoa/infobars/infobar_cocoa.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/tab_contents/overlayable_contents_controller.h"
@@ -109,10 +109,8 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
         browser()->tab_strip_model()->GetActiveWebContents();
     InfoBarService* service =
         InfoBarService::FromWebContents(web_contents);
-    info_bar_delegate_.reset(new DummyInfoBar(service));
-    [[controller() infoBarContainerController]
-        addInfoBar:info_bar_delegate_->CreateInfoBar(service)
-           animate:NO];
+    scoped_ptr<InfoBarDelegate> info_bar_delegate(new DummyInfoBar(service));
+    service->AddInfoBar(info_bar_delegate.Pass());
   }
 
   NSView* GetViewWithID(ViewID view_id) const {
@@ -164,8 +162,6 @@ class BrowserWindowControllerTest : public InProcessBrowserTest {
   }
 
  private:
-  scoped_ptr<InfoBarDelegate> info_bar_delegate_;
-
   DISALLOW_COPY_AND_ASSIGN(BrowserWindowControllerTest);
 };
 
@@ -372,10 +368,7 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowControllerTest,
       popup_browser->tab_strip_model()->GetActiveWebContents();
   InfoBarService* service = InfoBarService::FromWebContents(web_contents);
   scoped_ptr<InfoBarDelegate> info_bar_delegate(new DummyInfoBar(service));
-  [[popupController infoBarContainerController]
-      addInfoBar:info_bar_delegate->CreateInfoBar(service)
-         animate:NO];
-
+  service->AddInfoBar(info_bar_delegate.Pass());
   EXPECT_TRUE(
       [[popupController infoBarContainerController]
           shouldSuppressTopInfoBarTip]);

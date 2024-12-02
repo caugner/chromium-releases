@@ -72,7 +72,7 @@ class ChromotingJniRuntime {
                               protocol::ErrorCode error);
 
   // Pops up a dialog box asking the user to enter a PIN. Call on UI thread.
-  void DisplayAuthenticationPrompt();
+  void DisplayAuthenticationPrompt(bool pairing_supported);
 
   // Saves new pairing credentials to permanent storage. Call on UI thread.
   void CommitPairingCredentials(const std::string& host,
@@ -81,6 +81,9 @@ class ChromotingJniRuntime {
 
   // Updates image dimensions and canvas memory space. Call on display thread.
   void UpdateImageBuffer(int width, int height, jobject buffer);
+
+  // Updates cursor shape. Call on display thread.
+  void UpdateCursorShape(const protocol::CursorShapeInfo& cursor_shape);
 
   // Draws the latest image buffer onto the canvas. Call on the display thread.
   void RedrawCanvas();

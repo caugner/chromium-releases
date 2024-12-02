@@ -11,12 +11,17 @@
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/common/metrics/metrics_util.h"
+#include "components/variations/metrics_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chrome_variations {
 
 namespace {
+
+const VariationID TEST_VALUE_A = 3300200;
+const VariationID TEST_VALUE_B = 3300201;
+const VariationID TEST_VALUE_C = 3300202;
+const VariationID TEST_VALUE_D = 3300203;
 
 // Tests whether a field trial is active (i.e. group() has been called on it).
 bool IsFieldTrialActive(const std::string& trial_name) {

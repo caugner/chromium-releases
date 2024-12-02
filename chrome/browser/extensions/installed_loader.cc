@@ -24,22 +24,19 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
-#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/common/manifest.h"
+#include "extensions/common/manifest_constants.h"
 
 using content::BrowserThread;
 using content::UserMetricsAction;
-using extensions::Extension;
-using extensions::ExtensionInfo;
-using extensions::Manifest;
-
-namespace errors = extension_manifest_errors;
 
 namespace extensions {
+
+namespace errors = manifest_errors;
 
 namespace {
 
@@ -71,11 +68,14 @@ enum ExternalItemState {
   EXTERNAL_ITEM_WEBSTORE_ENABLED = 3,
   EXTERNAL_ITEM_NONWEBSTORE_DISABLED = 4,
   EXTERNAL_ITEM_NONWEBSTORE_ENABLED = 5,
-  EXTERNAL_ITEM_MAX_ITEMS = 6
+  EXTERNAL_ITEM_WEBSTORE_UNINSTALLED = 6,
+  EXTERNAL_ITEM_NONWEBSTORE_UNINSTALLED = 7,
+  EXTERNAL_ITEM_MAX_ITEMS = 8
 };
 
 bool IsManifestCorrupt(const DictionaryValue* manifest) {
-  if (!manifest) return false;
+  if (!manifest)
+    return false;
 
   // Because of bug #272524 sometimes manifests got mangled in the preferences
   // file, one particularly bad case resulting in having both a background page
@@ -83,10 +83,8 @@ bool IsManifestCorrupt(const DictionaryValue* manifest) {
   // manifest from the extension to fix this.
   const Value* background_page;
   const Value* background_scripts;
-  return manifest->Get(extension_manifest_keys::kBackgroundPage,
-                       &background_page) &&
-         manifest->Get(extension_manifest_keys::kBackgroundScripts,
-                       &background_scripts);
+  return manifest->Get(manifest_keys::kBackgroundPage, &background_page) &&
+      manifest->Get(manifest_keys::kBackgroundScripts, &background_scripts);
 }
 
 ManifestReloadReason ShouldReloadExtensionManifest(const ExtensionInfo& info) {
@@ -412,6 +410,7 @@ void InstalledLoader::LoadAllExtensions() {
     extension_service_->RecordPermissionMessagesHistogram(
         ex->get(), "Extensions.Permissions_Load");
   }
+
   const ExtensionSet* disabled_extensions =
       extension_service_->disabled_extensions();
   for (ex = disabled_extensions->begin();
@@ -429,6 +428,25 @@ void InstalledLoader::LoadAllExtensions() {
       } else {
         UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
                                   EXTERNAL_ITEM_NONWEBSTORE_DISABLED,
+                                  EXTERNAL_ITEM_MAX_ITEMS);
+      }
+    }
+  }
+
+  scoped_ptr<ExtensionPrefs::ExtensionsInfo> uninstalled_extensions_info(
+      extension_prefs_->GetUninstalledExtensionsInfo());
+  for (size_t i = 0; i < uninstalled_extensions_info->size(); ++i) {
+    ExtensionInfo* info = uninstalled_extensions_info->at(i).get();
+    if (Manifest::IsExternalLocation(info->extension_location)) {
+      std::string update_url;
+      if (info->extension_manifest->GetString("update_url", &update_url) &&
+          extension_urls::IsWebstoreUpdateUrl(GURL(update_url))) {
+        UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
+                                  EXTERNAL_ITEM_WEBSTORE_UNINSTALLED,
+                                  EXTERNAL_ITEM_MAX_ITEMS);
+      } else {
+        UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
+                                  EXTERNAL_ITEM_NONWEBSTORE_UNINSTALLED,
                                   EXTERNAL_ITEM_MAX_ITEMS);
       }
     }

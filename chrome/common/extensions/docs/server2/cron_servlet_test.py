@@ -79,6 +79,9 @@ class CronServletTest(unittest.TestCase):
 
   def testSafeRevision(self):
     test_data = {
+      'api': {
+        '_manifest_features.json': '{}'
+      },
       'docs': {
         'examples': {
           'examples.txt': 'examples.txt contents'
@@ -97,7 +100,13 @@ class CronServletTest(unittest.TestCase):
             'extensions': {
               'storage.html': 'storage.html contents'
             },
-          }
+          },
+          'json': {
+            'manifest.json': '{}',
+            'strings.json': '{}',
+            'apps_sidenav.json': '{}',
+            'extensions_sidenav.json': '{}',
+          },
         }
       }
     }

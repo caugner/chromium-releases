@@ -5,9 +5,12 @@
 #include "chrome/app/chrome_main_delegate.h"
 
 #include "base/command_line.h"
+#include "base/environment.h"
 #include "base/files/file_path.h"
+#include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/statistics_recorder.h"
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/process/memory.h"
@@ -26,12 +29,12 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/profiling.h"
-#include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
 #include "components/nacl/common/nacl_switches.h"
+#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "ui/base/ui_base_switches.h"
@@ -41,6 +44,7 @@
 #include <atlbase.h>
 #include <malloc.h>
 #include "base/strings/string_util.h"
+#include "chrome/common/child_process_logging.h"
 #include "sandbox/win/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
 #include "ui/base/resource/resource_bundle_win.h"
@@ -338,7 +342,15 @@ struct MainFunction {
 }  // namespace
 
 ChromeMainDelegate::ChromeMainDelegate() {
+#if defined(OS_ANDROID)
+// On Android the main entry point time is the time when the Java code starts.
+// This happens before the shared library containing this code is even loaded.
+// The Java startup code has recorded that time, but the C++ code can't fetch it
+// from the Java side until it has initialized the JNI. See
+// ChromeMainDelegateAndroid.
+#else
   startup_metric_utils::RecordMainEntryPointTime();
+#endif
 }
 
 ChromeMainDelegate::~ChromeMainDelegate() {
@@ -393,9 +405,8 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 // No support for ANDROID yet as DiagnosticsController needs wchar support.
 // TODO(gspencer): That's not true anymore, or at least there are no w-string
 // references anymore. Not sure if that means this can be enabled on Android or
-// not though: it still uses string16. As there is no easily accessible command
-// line on Android, I'm not sure this is a big deal, at least for purposes of
-// troubleshooting with a customer.
+// not though.  As there is no easily accessible command line on Android, I'm
+// not sure this is a big deal.
 #if !defined(OS_ANDROID) && !defined(CHROME_MULTIPLE_DLL_CHILD)
   // If we are in diagnostics mode this is the end of the line: after the
   // diagnostics are run the process will invariably exit.
@@ -429,12 +440,15 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
   // original command line.
   if (command_line.HasSwitch(chromeos::switches::kLoginUser) ||
       command_line.HasSwitch(switches::kDiagnosticsRecovery)) {
+
+    // The statistics subsystem needs get initialized soon enough for the
+    // statistics to be collected.  It's safe to call this more than once.
+    base::StatisticsRecorder::Initialize();
+
     CommandLine interim_command_line(command_line.GetProgram());
-    if (command_line.HasSwitch(switches::kUserDataDir)) {
-      interim_command_line.AppendSwitchPath(
-          switches::kUserDataDir,
-          command_line.GetSwitchValuePath(switches::kUserDataDir));
-    }
+    const char* kSwitchNames[] = {switches::kUserDataDir, };
+    interim_command_line.CopySwitchesFrom(
+        command_line, kSwitchNames, arraysize(kSwitchNames));
     interim_command_line.AppendSwitch(switches::kDiagnostics);
     interim_command_line.AppendSwitch(switches::kDiagnosticsRecovery);
 
@@ -472,6 +486,8 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
       *exit_code = recovery_exit_code;
       return true;
     }
+  } else {  // Not running diagnostics or recovery.
+    diagnostics::DiagnosticsController::GetInstance()->RecordRegularStartup();
   }
 #endif
 
@@ -587,9 +603,26 @@ void ChromeMainDelegate::PreSandboxStartup() {
   InitMacCrashReporter(command_line, process_type);
 #endif
 
+#if defined(OS_WIN)
+  child_process_logging::Init();
+#endif
+
   // Notice a user data directory override if any
   base::FilePath user_data_dir =
       command_line.GetSwitchValuePath(switches::kUserDataDir);
+#if defined(OS_LINUX)
+  // On Linux, Chrome does not support running multiple copies under different
+  // DISPLAYs, so the profile directory can be specified in the environment to
+  // support the virtual desktop use-case.
+  if (user_data_dir.empty()) {
+    std::string user_data_dir_string;
+    scoped_ptr<base::Environment> environment(base::Environment::Create());
+    if (environment->GetVar("CHROME_USER_DATA_DIR", &user_data_dir_string) &&
+        IsStringUTF8(user_data_dir_string)) {
+      user_data_dir = base::FilePath::FromUTF8Unsafe(user_data_dir_string);
+    }
+  }
+#endif
 #if defined(OS_MACOSX) || defined(OS_WIN)
   policy::path_parser::CheckUserDataDirPolicy(&user_data_dir);
 #endif
@@ -662,7 +695,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
     ResourceBundle::InitSharedInstanceWithPakFile(locale_pak_fd, false);
 
     int extra_pak_keys[] = {
-      kAndroidChromePakDescriptor,
       kAndroidChrome100PercentPakDescriptor,
       kAndroidUIResourcesPakDescriptor,
     };
@@ -674,6 +706,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
           pak_fd, ui::SCALE_FACTOR_100P);
     }
 
+    base::i18n::SetICUDefaultLocale(locale);
     const std::string loaded_locale = locale;
 #else
     const std::string loaded_locale =
@@ -739,10 +772,9 @@ int ChromeMainDelegate::RunProcess(
     const content::MainFunctionParams& main_function_params) {
   // ANDROID doesn't support "service", so no ServiceProcessMain, and arraysize
   // doesn't support empty array. So we comment out the block for Android.
-#if !defined(OS_ANDROID) && \
-    (!defined(CHROME_MULTIPLE_DLL) || defined(CHROME_MULTIPLE_DLL_BROWSER))
+#if !defined(OS_ANDROID)
   static const MainFunction kMainFunctions[] = {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_FULL_PRINTING) && !defined(CHROME_MULTIPLE_DLL_CHILD)
     { switches::kServiceProcess,     ServiceProcessMain },
 #endif
 
@@ -751,9 +783,11 @@ int ChromeMainDelegate::RunProcess(
       mac_relauncher::internal::RelauncherMain },
 #endif
 
-#if !defined(DISABLE_NACL) && \
-    (!defined(CHROME_MULTIPLE_DLL) || defined(CHROME_MULTIPLE_DLL_CHILD))
-    { switches::kNaClLoaderProcess, NaClMain },
+#if !defined(DISABLE_NACL) && !defined(CHROME_MULTIPLE_DLL_BROWSER)
+    { switches::kNaClLoaderProcess,  NaClMain },
+#else
+    { "<invalid>", NULL },  // To avoid constant array of size 0
+                            // when DISABLE_NACL and CHROME_MULTIPLE_DLL_CHILD
 #endif  // DISABLE_NACL
   };
 

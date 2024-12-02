@@ -12,8 +12,8 @@
 #include "base/values.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/features/feature.h"
-#include "chrome/common/extensions/manifest.h"
+#include "extensions/common/features/feature.h"
+#include "extensions/common/manifest.h"
 
 namespace extensions {
 
@@ -89,6 +89,8 @@ class SimpleFeature : public Feature {
   virtual bool IsInternal() const OVERRIDE;
 
   virtual bool IsIdInWhitelist(const std::string& extension_id) const OVERRIDE;
+  static bool IsIdInWhitelist(const std::string& extension_id,
+                              const std::set<std::string>& whitelist);
 
  protected:
   Availability CreateAvailability(AvailabilityResult result) const;

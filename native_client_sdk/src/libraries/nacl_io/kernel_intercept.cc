@@ -22,6 +22,7 @@ using namespace nacl_io;
   }
 
 static KernelProxy* s_kp;
+static bool s_kp_owned;
 
 void ki_init(void* kp) {
   ki_init_ppapi(kp, 0, NULL);
@@ -32,8 +33,14 @@ void ki_init_ppapi(void* kp,
                    PPB_GetInterface get_browser_interface) {
   kernel_wrap_init();
 
-  if (kp == NULL) kp = new KernelProxy();
-  s_kp = static_cast<KernelProxy*>(kp);
+  if (kp == NULL) {
+    s_kp = new KernelProxy();
+    s_kp_owned = true;
+  } else {
+    s_kp = static_cast<KernelProxy*>(kp);
+    s_kp_owned = false;
+  }
+
 
   PepperInterface* ppapi = NULL;
   if (instance && get_browser_interface)
@@ -48,9 +55,10 @@ int ki_is_initialized() {
 
 void ki_uninit() {
   kernel_wrap_uninit();
+  if (s_kp_owned)
+    delete s_kp;
   s_kp = NULL;
 }
-
 
 int ki_chdir(const char* path) {
   ON_NOSYS_RETURN(-1);
@@ -121,6 +129,11 @@ int ki_umount(const char *path) {
 int ki_open(const char *path, int oflag) {
   ON_NOSYS_RETURN(-1);
   return s_kp->open(path, oflag);
+}
+
+int ki_pipe(int pipefds[2]) {
+  ON_NOSYS_RETURN(-1);
+  return s_kp->pipe(pipefds);
 }
 
 ssize_t ki_read(int fd, void *buf, size_t nbyte) {
@@ -208,6 +221,11 @@ int ki_open_resource(const char* file) {
   ON_NOSYS_RETURN(-1);  return s_kp->open_resource(file);
 }
 
+int ki_fcntl(int d, int request, char* argp) {
+  ON_NOSYS_RETURN(-1);
+  return s_kp->fcntl(d, request, argp);
+}
+
 int ki_ioctl(int d, int request, char* argp) {
   ON_NOSYS_RETURN(-1);
   return s_kp->ioctl(d, request, argp);
@@ -256,6 +274,21 @@ int ki_tcsetattr(int fd, int optional_actions,
                  const struct termios *termios_p) {
   ON_NOSYS_RETURN(-1);
   return s_kp->tcsetattr(fd, optional_actions, termios_p);
+}
+
+int ki_kill(pid_t pid, int sig) {
+  ON_NOSYS_RETURN(-1);
+  return s_kp->kill(pid, sig);
+}
+
+sighandler_t ki_signal(int signum, sighandler_t handler) {
+  ON_NOSYS_RETURN(SIG_ERR);
+  return s_kp->sigset(signum, handler);
+}
+
+sighandler_t ki_sigset(int signum, sighandler_t handler) {
+  ON_NOSYS_RETURN(SIG_ERR);
+  return s_kp->sigset(signum, handler);
 }
 
 #ifdef PROVIDES_SOCKET_API

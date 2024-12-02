@@ -7,7 +7,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
-#include "chrome/browser/signin/oauth2_token_service_test_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -15,6 +14,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
+#include "google_apis/gaia/oauth2_token_service_test_util.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -43,7 +43,6 @@ class TestDeviceOAuth2TokenService : public DeviceOAuth2TokenService {
     robot_account_id_ = id;
   }
 
- protected:
   // Skip calling into the policy subsystem and return our test value.
   virtual std::string GetRobotAccountId() OVERRIDE {
     return robot_account_id_;
@@ -79,7 +78,9 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
   }
 
   scoped_ptr<OAuth2TokenService::Request> StartTokenRequest() {
-    return oauth2_service_.StartRequest(std::set<std::string>(), &consumer_);
+    return oauth2_service_.StartRequest(oauth2_service_.GetRobotAccountId(),
+                                        std::set<std::string>(),
+                                        &consumer_);
   }
 
   virtual void TearDown() OVERRIDE {
@@ -162,12 +163,15 @@ TEST_F(DeviceOAuth2TokenServiceTest, SaveEncryptedToken) {
       .Times(1)
       .WillOnce(Return("test-token"));
 
-  ASSERT_EQ("", oauth2_service_.GetRefreshToken());
+  ASSERT_EQ("", oauth2_service_.GetRefreshToken(
+                    oauth2_service_.GetRobotAccountId()));
   oauth2_service_.SetAndSaveRefreshToken("test-token");
-  ASSERT_EQ("test-token", oauth2_service_.GetRefreshToken());
+  ASSERT_EQ("test-token", oauth2_service_.GetRefreshToken(
+                              oauth2_service_.GetRobotAccountId()));
 
   // This call won't invoke decrypt again, since the value is cached.
-  ASSERT_EQ("test-token", oauth2_service_.GetRefreshToken());
+  ASSERT_EQ("test-token", oauth2_service_.GetRefreshToken(
+                              oauth2_service_.GetRobotAccountId()));
 }
 
 TEST_F(DeviceOAuth2TokenServiceTest, RefreshTokenValidation_Success) {

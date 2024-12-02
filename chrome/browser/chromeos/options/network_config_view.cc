@@ -9,9 +9,9 @@
 #include "ash/shell.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chromeos/cros/network_property_ui_data.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/user.h"
+#include "chrome/browser/chromeos/options/network_property_ui_data.h"
 #include "chrome/browser/chromeos/options/vpn_config_view.h"
 #include "chrome/browser/chromeos/options/wifi_config_view.h"
 #include "chrome/browser/chromeos/options/wimax_config_view.h"
@@ -262,8 +262,10 @@ void NetworkConfigView::ShowDialog(gfx::NativeWindow parent) {
   if (parent == NULL)
     parent = GetDialogParent();
   // Failed connections may result in a pop-up with no natural parent window,
-  // so provide a fallback context on the active display.
-  gfx::NativeWindow context = parent ? NULL : ash::Shell::GetActiveRootWindow();
+  // so provide a fallback context on the primary display. This is necessary
+  // becase one of parent or context must be non NULL.
+  gfx::NativeWindow context =
+      parent ? NULL : ash::Shell::GetPrimaryRootWindow();
   Widget* window = DialogDelegate::CreateDialogWidget(this, context, parent);
   window->SetAlwaysOnTop(true);
   window->Show();

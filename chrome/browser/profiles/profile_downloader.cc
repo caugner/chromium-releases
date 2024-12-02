@@ -40,12 +40,16 @@ const char kUserEntryURL[] =
     "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
 
 // OAuth scope for the user info API.
+// For more info, see https://developers.google.com/accounts/docs/OAuth2LoginV1.
 const char kAPIScope[] = "https://www.googleapis.com/auth/userinfo.profile";
 
 // Path in JSON dictionary to user's photo thumbnail URL.
 const char kPhotoThumbnailURLPath[] = "picture";
 
-const char kNickNamePath[] = "name";
+// From the user info API, this field corresponds to the full name of the user.
+const char kFullNamePath[] = "name";
+
+const char kGivenNamePath[] = "given_name";
 
 // Path format for specifying thumbnail's size.
 const char kThumbnailSizeFormat[] = "s%d-c";
@@ -122,12 +126,15 @@ bool GetImageURLWithSize(const GURL& old_url, int size, GURL* new_url) {
 
 // static
 bool ProfileDownloader::GetProfileNameAndImageURL(const std::string& data,
-                                                  string16* nick_name,
+                                                  string16* full_name,
+                                                  string16* given_name,
                                                   std::string* url,
                                                   int image_size) {
-  DCHECK(nick_name);
+  DCHECK(full_name);
+  DCHECK(given_name);
   DCHECK(url);
-  *nick_name = string16();
+  *full_name = string16();
+  *given_name = string16();
   *url = std::string();
 
   int error_code = -1;
@@ -147,7 +154,8 @@ bool ProfileDownloader::GetProfileNameAndImageURL(const std::string& data,
   base::DictionaryValue* root_dictionary =
       static_cast<base::DictionaryValue*>(root_value.get());
 
-  root_dictionary->GetString(kNickNamePath, nick_name);
+  root_dictionary->GetString(kFullNamePath, full_name);
+  root_dictionary->GetString(kGivenNamePath, given_name);
 
   std::string url_string;
   if (root_dictionary->GetString(kPhotoThumbnailURLPath, &url_string)) {
@@ -160,7 +168,7 @@ bool ProfileDownloader::GetProfileNameAndImageURL(const std::string& data,
   }
 
   // The profile data is considered valid as long as it has a name or a picture.
-  return !nick_name->empty() || !url->empty();
+  return !full_name->empty() || !url->empty();
 }
 
 // static
@@ -209,7 +217,8 @@ void ProfileDownloader::Start() {
     return;
   }
 
-  if (service->RefreshTokenIsAvailable()) {
+  if (service->RefreshTokenIsAvailable(
+          service->GetPrimaryAccountId())) {
     StartFetchingOAuth2AccessToken();
   } else {
     service->AddObserver(this);
@@ -218,6 +227,10 @@ void ProfileDownloader::Start() {
 
 string16 ProfileDownloader::GetProfileFullName() const {
   return profile_full_name_;
+}
+
+string16 ProfileDownloader::GetProfileGivenName() const {
+  return profile_given_name_;
 }
 
 SkBitmap ProfileDownloader::GetProfilePicture() const {
@@ -252,9 +265,10 @@ void ProfileDownloader::StartFetchingOAuth2AccessToken() {
   Profile* profile = delegate_->GetBrowserProfile();
   OAuth2TokenService::ScopeSet scopes;
   scopes.insert(kAPIScope);
-  oauth2_access_token_request_ =
-      ProfileOAuth2TokenServiceFactory::GetForProfile(profile)
-          ->StartRequestWithContext(profile->GetRequestContext(), scopes, this);
+  ProfileOAuth2TokenService* token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
+  oauth2_access_token_request_ = token_service->StartRequest(
+      token_service->GetPrimaryAccountId(), scopes, this);
 }
 
 ProfileDownloader::~ProfileDownloader() {}
@@ -279,8 +293,11 @@ void ProfileDownloader::OnURLFetchComplete(const net::URLFetcher* source) {
 
   if (source == user_entry_fetcher_.get()) {
     std::string image_url;
-    if (!GetProfileNameAndImageURL(data, &profile_full_name_, &image_url,
-        delegate_->GetDesiredImageSideLength())) {
+    if (!GetProfileNameAndImageURL(data,
+                                   &profile_full_name_,
+                                   &profile_given_name_,
+                                   &image_url,
+                                   delegate_->GetDesiredImageSideLength())) {
       delegate_->OnProfileDownloadFailure(
           this, ProfileDownloaderDelegate::SERVICE_ERROR);
       return;

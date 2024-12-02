@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/web_contents.h"
@@ -24,6 +25,7 @@
 #include "ui/views/window/dialog_client_view.h"
 
 using web_modal::WebContentsModalDialogManager;
+using web_modal::WebContentsModalDialogManagerDelegate;
 
 // static
 TabModalConfirmDialog* TabModalConfirmDialog::Create(
@@ -53,12 +55,16 @@ TabModalConfirmDialogViews::TabModalConfirmDialogViews(
 
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =
       WebContentsModalDialogManager::FromWebContents(web_contents);
-  dialog_ = CreateWebContentsModalDialogViews(
+  WebContentsModalDialogManagerDelegate* modal_delegate =
+      web_contents_modal_dialog_manager->delegate();
+  DCHECK(modal_delegate);
+  dialog_ = views::Widget::CreateWindowAsFramelessChild(
       this,
       web_contents->GetView()->GetNativeView(),
-      web_contents_modal_dialog_manager->delegate()->
-          GetWebContentsModalDialogHost());
+      modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
   web_contents_modal_dialog_manager->ShowDialog(dialog_->GetNativeView());
+  web_contents_modal_dialog_manager->SetCloseOnInterstitialWebUI(
+      dialog_->GetNativeView(), true);
   delegate_->set_close_delegate(this);
 }
 

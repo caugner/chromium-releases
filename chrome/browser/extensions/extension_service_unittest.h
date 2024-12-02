@@ -49,6 +49,8 @@ class ExtensionServiceTestBase : public testing::Test {
       const base::FilePath& prefs_file,
       const base::FilePath& source_install_dir);
 
+  void InitializeGoodInstalledExtensionService();
+
   void InitializeEmptyExtensionService();
 
   void InitializeExtensionProcessManager();
@@ -68,8 +70,10 @@ class ExtensionServiceTestBase : public testing::Test {
   void InitializeExtensionServiceHelper(bool autoupdate_enabled,
                                         bool is_first_run);
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  // Destroying at_exit_manager_ will delete all LazyInstances, so it must come
+  // after thread_bundle_ in the destruction order.
   base::ShadowingAtExitManager at_exit_manager_;
+  content::TestBrowserThreadBundle thread_bundle_;
   base::ScopedTempDir temp_dir_;
   scoped_ptr<TestingProfile> profile_;
   base::FilePath extensions_install_dir_;

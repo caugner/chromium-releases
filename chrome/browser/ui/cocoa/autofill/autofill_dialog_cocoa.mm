@@ -17,15 +17,18 @@
 #import "chrome/browser/ui/cocoa/autofill/autofill_details_container.h"
 #include "chrome/browser/ui/cocoa/autofill/autofill_dialog_constants.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_main_container.h"
+#import "chrome/browser/ui/cocoa/autofill/autofill_overlay_controller.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_section_container.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_sign_in_container.h"
-#import "chrome/browser/ui/cocoa/constrained_window/constrained_window_button.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_window.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "grit/generated_resources.h"
 #import "ui/base/cocoa/flipped_view.h"
 #include "ui/base/cocoa/window_size_constants.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/platform_font.h"
 
 namespace {
 
@@ -61,6 +64,7 @@ void AutofillDialogCocoa::Show() {
           initWithCustomWindow:[sheet_delegate_ window]]);
   constrained_window_.reset(
       new ConstrainedWindowMac(this, delegate_->GetWebContents(), sheet));
+  [sheet_delegate_ show];
 }
 
 void AutofillDialogCocoa::Hide() {
@@ -80,11 +84,25 @@ void AutofillDialogCocoa::CloseNow() {
   constrained_window_->CloseWebContentsModalDialog();
 }
 
+void AutofillDialogCocoa::UpdatesStarted() {
+  // TODO(estade): implement if it makes sense to.
+}
+
+void AutofillDialogCocoa::UpdatesFinished() {
+  // TODO(estade): implement if it makes sense to.
+}
+
 void AutofillDialogCocoa::UpdateAccountChooser() {
   [sheet_delegate_ updateAccountChooser];
 }
 
 void AutofillDialogCocoa::UpdateButtonStrip() {
+  [sheet_delegate_ updateButtonStrip];
+}
+
+void AutofillDialogCocoa::UpdateOverlay() {
+  // TODO(estade): only update the overlay.
+  UpdateButtonStrip();
 }
 
 void AutofillDialogCocoa::UpdateDetailArea() {
@@ -95,9 +113,6 @@ void AutofillDialogCocoa::UpdateForErrors() {
 
 void AutofillDialogCocoa::UpdateNotificationArea() {
   [sheet_delegate_ updateNotificationArea];
-}
-
-void AutofillDialogCocoa::UpdateAutocheckoutStepsArea() {
 }
 
 void AutofillDialogCocoa::UpdateSection(DialogSection section) {
@@ -118,6 +133,12 @@ string16 AutofillDialogCocoa::GetCvc() {
   return string16();
 }
 
+bool AutofillDialogCocoa::HitTestInput(const DetailInput& input,
+                                       const gfx::Point& screen_point) {
+  // TODO(dbeam): implement.
+  return false;
+}
+
 bool AutofillDialogCocoa::SaveDetailsLocally() {
   return [sheet_delegate_ saveDetailsLocally];
 }
@@ -129,8 +150,6 @@ const content::NavigationController* AutofillDialogCocoa::ShowSignIn() {
 void AutofillDialogCocoa::HideSignIn() {
   [sheet_delegate_ hideSignIn];
 }
-
-void AutofillDialogCocoa::UpdateProgressBar(double value) {}
 
 void AutofillDialogCocoa::ModelChanged() {
   [sheet_delegate_ modelChanged];
@@ -196,6 +215,24 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
 
 }  // autofill
 
+#pragma mark "Loading" Shield
+
+@interface AutofillOpaqueView : NSView
+@end
+
+@implementation AutofillOpaqueView
+
+- (BOOL)isOpaque {
+  return YES;
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+  [[[self window] backgroundColor] setFill];
+  [NSBezierPath fillRect:[self bounds]];
+}
+
+@end
+
 #pragma mark Window Controller
 
 @interface AutofillDialogWindowController ()
@@ -224,8 +261,7 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
     [mainContainer_ setTarget:self];
 
     signInContainer_.reset(
-        [[AutofillSignInContainer alloc]
-            initWithDelegate:autofillDialog->delegate()]);
+        [[AutofillSignInContainer alloc] initWithDialog:autofillDialog]);
     [[signInContainer_ view] setHidden:YES];
 
     NSRect clientRect = [[mainContainer_ view] frame];
@@ -234,6 +270,16 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
     [[mainContainer_ view] setFrame:clientRect];
     [[signInContainer_ view] setFrame:clientRect];
 
+    // Set dialog title.
+    titleTextField_.reset([[NSTextField alloc] initWithFrame:NSZeroRect]);
+    [titleTextField_ setEditable:NO];
+    [titleTextField_ setBordered:NO];
+    [titleTextField_ setDrawsBackground:NO];
+    [titleTextField_ setFont:[NSFont systemFontOfSize:15.0]];
+    [titleTextField_ setStringValue:
+        base::SysUTF16ToNSString(autofillDialog->delegate()->DialogTitle())];
+    [titleTextField_ sizeToFit];
+
     NSRect headerRect = clientRect;
     headerRect.size.height = kAccountChooserHeight;
     headerRect.origin.y = NSMaxY(clientRect);
@@ -241,13 +287,38 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
                               initWithFrame:headerRect
                                  delegate:autofillDialog->delegate()]);
 
+    loadingShieldTextField_.reset(
+        [[NSTextField alloc] initWithFrame:NSZeroRect]);
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    NSFont* loadingFont = rb.GetFont(
+        ui::ResourceBundle::BaseFont).DeriveFont(15).GetNativeFont();
+    [loadingShieldTextField_ setFont:loadingFont];
+    [loadingShieldTextField_ setEditable:NO];
+    [loadingShieldTextField_ setBordered:NO];
+    [loadingShieldTextField_ setDrawsBackground:NO];
+
+    base::scoped_nsobject<AutofillOpaqueView> loadingShieldView(
+        [[AutofillOpaqueView alloc] initWithFrame:NSZeroRect]);
+    [loadingShieldView setHidden:YES];
+    [loadingShieldView addSubview:loadingShieldTextField_];
+
+    overlayController_.reset(
+        [[AutofillOverlayController alloc] initWithDelegate:
+            autofillDialog->delegate()]);
+    [[overlayController_ view] setHidden:YES];
+
     // This needs a flipped content view because otherwise the size
     // animation looks odd. However, replacing the contentView for constrained
     // windows does not work - it does custom rendering.
     base::scoped_nsobject<NSView> flippedContentView(
         [[FlippedView alloc] initWithFrame:NSZeroRect]);
     [flippedContentView setSubviews:
-        @[accountChooser_, [mainContainer_ view], [signInContainer_ view]]];
+        @[accountChooser_,
+          titleTextField_,
+          [mainContainer_ view],
+          [signInContainer_ view],
+          loadingShieldView,
+          [overlayController_ view]]];
     [flippedContentView setAutoresizingMask:
         (NSViewWidthSizable | NSViewHeightSizable)];
     [[[self window] contentView] addSubview:flippedContentView];
@@ -259,17 +330,6 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
     contentRect.size.height += NSHeight(headerRect) +
                                chrome_style::kClientBottomPadding +
                                chrome_style::kTitleTopPadding;
-    [self performLayout];
-
-    // Resizing the browser causes the ConstrainedWindow to move.
-    // Observe that to allow resizes based on browser size.
-    NSView* contentView = [[self window] contentView];
-    [contentView setPostsFrameChangedNotifications:YES];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(onContentViewFrameDidChange:)
-               name:NSWindowDidMoveNotification
-             object:[self window]];
   }
   return self;
 }
@@ -296,7 +356,7 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   NSSize headerSize = NSMakeSize(contentSize.width, kAccountChooserHeight);
   NSSize size = NSMakeSize(
       std::max(contentSize.width, headerSize.width),
-      contentSize.height + headerSize.height + kDetailTopPadding);
+      contentSize.height + headerSize.height + autofill::kDetailTopPadding);
   size.width += 2 * chrome_style::kHorizontalPadding;
   size.height += chrome_style::kClientBottomPadding +
                  chrome_style::kTitleTopPadding;
@@ -311,6 +371,16 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   dialogFrameRect = [[self window] contentRectForFrameRect:dialogFrameRect];
   size.height = std::min(NSHeight(dialogFrameRect), size.height);
 
+  if (![[overlayController_ view] isHidden]) {
+    CGFloat height = [overlayController_ heightForWidth:size.width];
+    // TODO(groby): This currently reserves size on top of the overlay image
+    // equivalent to the height of the header. Clarify with UX what the final
+    // padding will be.
+    if (height != 0.0) {
+      size.height = height + headerSize.height + autofill::kDetailTopPadding;
+    }
+  }
+
   return size;
 }
 
@@ -323,11 +393,21 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   clientRect.size.height -= chrome_style::kTitleTopPadding +
                             chrome_style::kClientBottomPadding;
 
-  NSRect headerRect, mainRect, dummyRect;
+  NSRect headerRect, mainRect, titleRect, dummyRect;
   NSDivideRect(clientRect, &headerRect, &mainRect,
                kAccountChooserHeight, NSMinYEdge);
   NSDivideRect(mainRect, &dummyRect, &mainRect,
-               kDetailTopPadding, NSMinYEdge);
+               autofill::kDetailTopPadding, NSMinYEdge);
+  NSDivideRect(headerRect, &titleRect, &headerRect,
+               NSWidth([titleTextField_ frame]), NSMinXEdge);
+
+  // Align baseline of title with bottom of accountChooser.
+  base::scoped_nsobject<NSLayoutManager> layout_manager(
+      [[NSLayoutManager alloc] init]);
+  NSFont* titleFont = [titleTextField_ font];
+  titleRect.origin.y += NSHeight(titleRect) -
+      [layout_manager defaultBaselineOffsetForFont:titleFont];
+  [titleTextField_ setFrame:titleRect];
 
   [accountChooser_ setFrame:headerRect];
   if ([[signInContainer_ view] isHidden]) {
@@ -336,6 +416,18 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   } else {
     [[signInContainer_ view] setFrame:mainRect];
   }
+
+  // Loading shield has text centered in the content rect.
+  NSRect textFrame = [loadingShieldTextField_ frame];
+  textFrame.origin.x =
+      std::ceil((NSWidth(contentRect) - NSWidth(textFrame)) / 2.0);
+  textFrame.origin.y =
+    std::ceil((NSHeight(contentRect) - NSHeight(textFrame)) / 2.0);
+  [loadingShieldTextField_ setFrame:textFrame];
+  [[loadingShieldTextField_ superview] setFrame:contentRect];
+
+  [[overlayController_ view] setFrame:contentRect];
+  [overlayController_ performLayout];
 
   NSRect frameRect = [[self window] frameRectForContentRect:contentRect];
   [[self window] setFrame:frameRect display:YES];
@@ -351,6 +443,21 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   autofillDialog_->PerformClose();
 }
 
+- (void)show {
+  // Resizing the browser causes the ConstrainedWindow to move.
+  // Observe that to allow resizes based on browser size.
+  // NOTE: This MUST come last after all initial setup is done, because there
+  // is an immediate notification post registration.
+  DCHECK([self window]);
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(onContentViewFrameDidChange:)
+             name:NSWindowDidMoveNotification
+           object:[self window]];
+
+  [self requestRelayout];
+}
+
 - (void)hide {
   autofillDialog_->delegate()->OnCancel();
   autofillDialog_->PerformClose();
@@ -363,6 +470,33 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
 - (void)updateAccountChooser {
   [accountChooser_ update];
   [mainContainer_ updateLegalDocuments];
+
+  NSString* newLoadingMessage = @"";
+  if (autofillDialog_->delegate()->ShouldShowSpinner())
+    newLoadingMessage = l10n_util::GetNSStringWithFixup(IDS_TAB_LOADING_TITLE);
+  if (![newLoadingMessage isEqualToString:
+       [loadingShieldTextField_ stringValue]]) {
+    NSView* loadingShieldView = [loadingShieldTextField_ superview];
+    [loadingShieldTextField_ setStringValue:newLoadingMessage];
+    [loadingShieldTextField_ sizeToFit];
+    [loadingShieldView setHidden:[newLoadingMessage length] == 0];
+
+    // For the duration of the loading shield, it becomes first responder.
+    // This prevents the currently focused text field "shining through".
+    if (![loadingShieldView isHidden]) {
+      [loadingShieldView setNextResponder:
+          [[loadingShieldView window] firstResponder]];
+      [[loadingShieldView window] makeFirstResponder:loadingShieldView];
+    } else {
+      [[loadingShieldView window] makeFirstResponder:
+          [loadingShieldView nextResponder]];
+    }
+    [self requestRelayout];
+  }
+}
+
+- (void)updateButtonStrip {
+  [overlayController_ updateState];
 }
 
 - (void)updateSection:(autofill::DialogSection)section {

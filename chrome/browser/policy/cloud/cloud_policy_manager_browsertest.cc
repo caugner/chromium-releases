@@ -10,13 +10,14 @@
 #include "chrome/browser/policy/cloud/cloud_policy_client.h"
 #include "chrome/browser/policy/cloud/mock_cloud_policy_client.h"
 #include "chrome/browser/policy/cloud/test_request_interceptor.h"
+#include "chrome/browser/policy/policy_test_utils.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
-#include "chrome/browser/policy/test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "net/base/net_errors.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -73,6 +74,7 @@ class CloudPolicyManagerTest : public InProcessBrowserTest {
     ASSERT_TRUE(policy_manager());
     policy_manager()->Connect(
         g_browser_process->local_state(),
+        g_browser_process->system_request_context(),
         UserCloudPolicyManager::CreateCloudPolicyClient(
             connector->device_management_service()).Pass());
 #endif

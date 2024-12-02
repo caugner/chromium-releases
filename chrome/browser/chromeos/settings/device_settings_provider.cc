@@ -30,6 +30,7 @@
 #include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state_handler.h"
+#include "chromeos/network/shill_property_util.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 using google::protobuf::RepeatedField;
@@ -56,6 +57,7 @@ const char* kKnownSettings[] = {
   kAllowRedeemChromeOsRegistrationOffers,
   kAllowedConnectionTypesForUpdate,
   kAppPack,
+  kAttestationForContentProtectionEnabled,
   kDeviceAttestationEnabled,
   kDeviceOwner,
   kIdleLogoutTimeout,
@@ -267,12 +269,6 @@ void DeviceSettingsProvider::SetInPolicy() {
                   &kiosk_app_id)) {
             account->mutable_kiosk_app()->set_app_id(kiosk_app_id);
           }
-          std::string kiosk_app_update_url;
-          if (entry_dict->GetStringWithoutPathExpansion(
-                  kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL,
-                  &kiosk_app_update_url)) {
-            account->mutable_kiosk_app()->set_update_url(kiosk_app_update_url);
-          }
         } else {
           NOTREACHED();
         }
@@ -383,6 +379,15 @@ void DeviceSettingsProvider::SetInPolicy() {
     bool use_24hour_clock_value;
     if (value->GetAsBoolean(&use_24hour_clock_value)) {
       use_24hour_clock_proto->set_use_24hour_clock(use_24hour_clock_value);
+    } else {
+      NOTREACHED();
+    }
+  } else if (prop == kAttestationForContentProtectionEnabled) {
+    em::AttestationSettingsProto* attestation_settings =
+        device_settings_.mutable_attestation_settings();
+    bool setting_enabled;
+    if (value->GetAsBoolean(&setting_enabled)) {
+      attestation_settings->set_content_protection_enabled(setting_enabled);
     } else {
       NOTREACHED();
     }
@@ -509,11 +514,6 @@ void DeviceSettingsProvider::DecodeLoginPolicies(
           entry_dict->SetStringWithoutPathExpansion(
               kAccountsPrefDeviceLocalAccountsKeyKioskAppId,
               entry->kiosk_app().app_id());
-        }
-        if (entry->kiosk_app().has_update_url()) {
-          entry_dict->SetStringWithoutPathExpansion(
-              kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL,
-              entry->kiosk_app().update_url());
         }
       } else if (entry->has_deprecated_public_session_id()) {
         // Deprecated public session specification.
@@ -741,6 +741,12 @@ void DeviceSettingsProvider::DecodeGenericPolicies(
   new_values_cache->SetBoolean(
       kDeviceAttestationEnabled,
       policy.attestation_settings().attestation_enabled());
+
+  new_values_cache->SetBoolean(
+      kAttestationForContentProtectionEnabled,
+      !(policy.has_attestation_settings() &&
+        policy.attestation_settings().has_content_protection_enabled() &&
+        policy.attestation_settings().content_protection_enabled()));
 }
 
 void DeviceSettingsProvider::UpdateValuesCache(
@@ -809,8 +815,8 @@ void DeviceSettingsProvider::ApplyMetricsSetting(bool use_file,
 void DeviceSettingsProvider::ApplyRoamingSetting(bool new_value) {
   // TODO(armansito): Look up the device by explicitly using the device path.
   const DeviceState* cellular =
-      NetworkHandler::Get()->network_state_handler()->
-          GetDeviceStateByType(flimflam::kTypeCellular);
+      NetworkHandler::Get()->network_state_handler()->GetDeviceStateByType(
+          NetworkTypePattern::Cellular());
   if (!cellular) {
     NET_LOG_DEBUG("No cellular device is available",
                   "Roaming is only supported by cellular devices.");
@@ -818,7 +824,7 @@ void DeviceSettingsProvider::ApplyRoamingSetting(bool new_value) {
   }
   bool current_value;
   if (!cellular->properties().GetBooleanWithoutPathExpansion(
-          flimflam::kCellularAllowRoamingProperty, &current_value)) {
+          shill::kCellularAllowRoamingProperty, &current_value)) {
     NET_LOG_ERROR("Could not get \"allow roaming\" property from cellular "
                   "device.", cellular->path());
     return;
@@ -832,7 +838,7 @@ void DeviceSettingsProvider::ApplyRoamingSetting(bool new_value) {
 
   NetworkHandler::Get()->network_device_handler()->SetDeviceProperty(
       cellular->path(),
-      flimflam::kCellularAllowRoamingProperty,
+      shill::kCellularAllowRoamingProperty,
       base::FundamentalValue(new_value),
       base::Bind(&base::DoNothing),
       base::Bind(&LogShillError));

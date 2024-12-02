@@ -13,23 +13,9 @@
 
 class Browser;
 
-// An interface implemented by an object that can retrieve information about
-// the monitors on the system.
-class MonitorInfoProvider {
- public:
-  virtual ~MonitorInfoProvider() {}
-
-  // Returns the bounds of the work area of the primary monitor.
-  virtual gfx::Rect GetPrimaryDisplayWorkArea() const = 0;
-
-  // Returns the bounds of the primary monitor.
-  virtual gfx::Rect GetPrimaryDisplayBounds() const = 0;
-
-  // Returns the bounds of the work area of the monitor that most closely
-  // intersects the provided bounds.
-  virtual gfx::Rect GetMonitorWorkAreaMatching(
-      const gfx::Rect& match_rect) const = 0;
-};
+namespace gfx {
+class Screen;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // WindowSizer
@@ -50,10 +36,10 @@ class WindowSizer {
   // MonitorInfoProvider using the physical screen.
   WindowSizer(StateProvider* state_provider, const Browser* browser);
 
-  // WindowSizer owns |state_provider| and |monitor_info_provider|.
-  // It will use the supplied monitor info provider. Used only for testing.
+  // WindowSizer owns |state_provider| and will use the supplied |screen|.
+  // Used only for testing.
   WindowSizer(StateProvider* state_provider,
-              MonitorInfoProvider* monitor_info_provider,
+              gfx::Screen* screen,
               const Browser* browser);
 
   virtual ~WindowSizer();
@@ -169,23 +155,26 @@ class WindowSizer {
       gfx::Rect* bounds) const;
 
 #if defined(USE_ASH)
-  // Determines the position and size for an ash window as it gets created. This
-  // will be called before other standard placement logic. It will return true
-  // when the function was setting the bounds structure to the desired size.
-  // Otherwise another algorithm should get used to determine the correct
-  // bounds. |show_state| will only be changed if it was set to
-  // SHOW_STATE_DEFAULT.
-  bool GetBoundsOverrideAsh(gfx::Rect* bounds_in_screen,
-                            ui::WindowShowState* show_state) const;
+  // Determines the position and size for a tabbed browser window in
+  // ash as it gets created. This will be called before other standard
+  // placement logic. |show_state| will only be changed
+  // if it was set to SHOW_STATE_DEFAULT.
+  void GetTabbedBrowserBoundsAsh(gfx::Rect* bounds_in_screen,
+                                 ui::WindowShowState* show_state) const;
 #endif
 
   // Determine the default show state for the window - not looking at other
   // windows or at persistent information.
   ui::WindowShowState GetWindowDefaultShowState() const;
 
+#if defined(USE_ASH)
+  bool IsTabbedBrowserInAsh() const;
+  bool IsPopupBrowserInAsh() const;
+#endif
+
   // Providers for persistent storage and monitor metrics.
   scoped_ptr<StateProvider> state_provider_;
-  scoped_ptr<MonitorInfoProvider> monitor_info_provider_;
+  gfx::Screen* screen_;  // not owned.
 
   // Note that this browser handle might be NULL.
   const Browser* browser_;

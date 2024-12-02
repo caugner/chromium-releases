@@ -16,11 +16,11 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/metrics/entropy_provider.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/variations/entropy_provider.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
@@ -29,53 +29,115 @@
 
 namespace chrome {
 
-TEST(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoEmptyAndValid) {
+class EmbeddedSearchFieldTrialTest : public testing::Test {
+ protected:
+  virtual void SetUp() {
+    field_trial_list_.reset(new base::FieldTrialList(
+        new metrics::SHA1EntropyProvider("42")));
+    base::StatisticsRecorder::Initialize();
+    ResetInstantExtendedOptInStateGateForTest();
+  }
+
+ private:
+  scoped_ptr<base::FieldTrialList> field_trial_list_;
+};
+
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoEmptyAndValid) {
   FieldTrialFlags flags;
   uint64 group_number = 0;
 
-  EXPECT_TRUE(GetFieldTrialInfo(std::string(), &flags, &group_number));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(0ul, group_number);
   EXPECT_EQ(0ul, flags.size());
 
-  EXPECT_TRUE(GetFieldTrialInfo("Group77", &flags, &group_number));
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Group77"));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(77ul, group_number);
   EXPECT_EQ(0ul, flags.size());
 }
 
-TEST(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoInvalidThenValid) {
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoInvalidNumber) {
   FieldTrialFlags flags;
   uint64 group_number = 0;
 
-  EXPECT_FALSE(GetFieldTrialInfo("Group77.2", &flags, &group_number));
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Group77.2"));
+  EXPECT_FALSE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(0ul, group_number);
   EXPECT_EQ(0ul, flags.size());
+}
 
-  EXPECT_TRUE(GetFieldTrialInfo("Invalid77", &flags, &group_number));
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoInvalidName) {
+  FieldTrialFlags flags;
+  uint64 group_number = 0;
+
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Invalid77"));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(0ul, group_number);
   EXPECT_EQ(0ul, flags.size());
+}
 
-  EXPECT_TRUE(GetFieldTrialInfo("Group77 ", &flags, &group_number));
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoValidGroup) {
+  FieldTrialFlags flags;
+  uint64 group_number = 0;
+
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Group77"));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(77ul, group_number);
   EXPECT_EQ(0ul, flags.size());
 }
 
-TEST(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoValidFlag) {
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoValidFlag) {
   FieldTrialFlags flags;
   uint64 group_number = 0;
 
   EXPECT_EQ(9999ul, GetUInt64ValueForFlagWithDefault("foo", 9999, flags));
-  EXPECT_TRUE(GetFieldTrialInfo("Group77 foo:6", &flags, &group_number));
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Group77 foo:6"));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(77ul, group_number);
   EXPECT_EQ(1ul, flags.size());
   EXPECT_EQ(6ul, GetUInt64ValueForFlagWithDefault("foo", 9999, flags));
 }
 
-TEST(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoLotsOfFlags) {
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoNewName) {
   FieldTrialFlags flags;
   uint64 group_number = 0;
 
-  EXPECT_TRUE(GetFieldTrialInfo(
-      "Group77 bar:1 baz:7 cat:dogs", &flags, &group_number));
+  EXPECT_EQ(9999ul, GetUInt64ValueForFlagWithDefault("foo", 9999, flags));
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "EmbeddedSearch", "Group77 foo:6"));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
+  EXPECT_EQ(77ul, group_number);
+  EXPECT_EQ(1ul, flags.size());
+  EXPECT_EQ(6ul, GetUInt64ValueForFlagWithDefault("foo", 9999, flags));
+}
+
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoNewNameOverridesOld) {
+  FieldTrialFlags flags;
+  uint64 group_number = 0;
+
+  EXPECT_EQ(9999ul, GetUInt64ValueForFlagWithDefault("foo", 9999, flags));
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "EmbeddedSearch", "Group77 foo:6"));
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Group78 foo:5"));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
+  EXPECT_EQ(77ul, group_number);
+  EXPECT_EQ(1ul, flags.size());
+  EXPECT_EQ(6ul, GetUInt64ValueForFlagWithDefault("foo", 9999, flags));
+}
+
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoLotsOfFlags) {
+  FieldTrialFlags flags;
+  uint64 group_number = 0;
+
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Group77 bar:1 baz:7 cat:dogs"));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(77ul, group_number);
   EXPECT_EQ(3ul, flags.size());
   EXPECT_EQ(true, GetBoolValueForFlagWithDefault("bar", false, flags));
@@ -86,22 +148,24 @@ TEST(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoLotsOfFlags) {
             GetStringValueForFlagWithDefault("moose", "default", flags));
 }
 
-TEST(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoDisabled) {
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoDisabled) {
   FieldTrialFlags flags;
   uint64 group_number = 0;
 
-  EXPECT_FALSE(GetFieldTrialInfo(
-      "Group77 bar:1 baz:7 cat:dogs DISABLED", &flags, &group_number));
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Group77 bar:1 baz:7 cat:dogs DISABLED"));
+  EXPECT_FALSE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(0ul, group_number);
   EXPECT_EQ(0ul, flags.size());
 }
 
-TEST(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoControlFlags) {
+TEST_F(EmbeddedSearchFieldTrialTest, GetFieldTrialInfoControlFlags) {
   FieldTrialFlags flags;
   uint64 group_number = 0;
 
-  EXPECT_TRUE(GetFieldTrialInfo(
-      "Control77 bar:1 baz:7 cat:dogs", &flags, &group_number));
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Control77 bar:1 baz:7 cat:dogs"));
+  EXPECT_TRUE(GetFieldTrialInfo(&flags, &group_number));
   EXPECT_EQ(0ul, group_number);
   EXPECT_EQ(3ul, flags.size());
 }
@@ -274,6 +338,7 @@ class SearchTest : public BrowserWithTestWindowTest {
     data.SetURL("http://foo.com/url?bar={searchTerms}");
     data.instant_url = "http://foo.com/instant?"
         "{google:omniboxStartMarginParameter}foo=foo#foo=foo&strk";
+    data.new_tab_url = "http://foo.com/newtab?strk";
     data.alternate_urls.push_back("http://foo.com/alt#quux={searchTerms}");
     data.search_terms_replacement_key = "strk";
 
@@ -623,6 +688,37 @@ TEST_F(SearchTest, InstantNTPCustomNavigationEntry) {
   }
 }
 
+TEST_F(SearchTest, InstantCacheableNTPNavigationEntry) {
+  EnableInstantExtendedAPIForTesting();
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("InstantExtended",
+      "Group1 use_cacheable_ntp:1"));
+
+  AddTab(browser(), GURL("chrome://blank"));
+  content::WebContents* contents =
+        browser()->tab_strip_model()->GetWebContentsAt(0);
+  content::NavigationController& controller = contents->GetController();
+  // Local NTP.
+  NavigateAndCommitActiveTab(GURL(chrome::kChromeSearchLocalNtpUrl));
+  EXPECT_TRUE(NavEntryIsInstantNTP(contents,
+                                   controller.GetLastCommittedEntry()));
+  // Instant page is not cacheable NTP.
+  NavigateAndCommitActiveTab(GetInstantURL(profile(), kDisableStartMargin));
+  EXPECT_FALSE(NavEntryIsInstantNTP(contents,
+                                    controller.GetLastCommittedEntry()));
+  // Test Cacheable NTP
+  NavigateAndCommitActiveTab(chrome::GetNewTabPageURL(profile()));
+  EXPECT_TRUE(NavEntryIsInstantNTP(contents,
+                                   controller.GetLastCommittedEntry()));
+}
+
+TEST_F(SearchTest, UseLocalNTPInIncognito) {
+  EnableInstantExtendedAPIForTesting();
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("InstantExtended",
+      "Group1 use_cacheable_ntp:1"));
+  EXPECT_EQ(GURL(), chrome::GetNewTabPageURL(
+      profile()->GetOffTheRecordProfile()));
+}
+
 TEST_F(SearchTest, GetInstantURLExtendedEnabled) {
   // Instant is disabled, so no Instant URL.
   EXPECT_EQ(GURL(), GetInstantURL(profile(), kDisableStartMargin));
@@ -721,15 +817,36 @@ TEST_F(SearchTest, ShouldShowInstantNTP_Default) {
 TEST_F(SearchTest, ShouldShowInstantNTP_DisabledViaFinch) {
   EnableInstantExtendedAPIForTesting();
   ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("InstantExtended",
-                                                     "Group1 show_ntp:0"));
+      "Group1 show_ntp:0"));
   EXPECT_FALSE(ShouldShowInstantNTP());
 }
 
-TEST_F(SearchTest, ShouldShowInstantNTP_DisabledByInstantNewTabURLSwitch) {
+TEST_F(SearchTest, ShouldShowInstantNTP_DisabledByUseCacheableNTPFinchFlag) {
   EnableInstantExtendedAPIForTesting();
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kInstantNewTabURL, "http://example.com/newtab");
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("InstantExtended",
+      "Group1 use_cacheable_ntp:1"));
   EXPECT_FALSE(ShouldShowInstantNTP());
+}
+
+TEST_F(SearchTest, ShouldUseCacheableNTP_Default) {
+  EnableInstantExtendedAPIForTesting();
+  EXPECT_FALSE(ShouldUseCacheableNTP());
+}
+
+TEST_F(SearchTest, ShouldUseCacheableNTP_EnabledViaFinch) {
+  EnableInstantExtendedAPIForTesting();
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("InstantExtended",
+      "Group1 use_cacheable_ntp:1"));
+  EXPECT_TRUE(ShouldUseCacheableNTP());
+}
+
+TEST_F(SearchTest, ShouldUseCacheableNTP_EnabledViaCommandLine) {
+  EnableInstantExtendedAPIForTesting();
+  CommandLine::ForCurrentProcess()->
+      AppendSwitch(switches::kUseCacheableNewTabPage);
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("InstantExtended",
+      "Group1 use_cacheable_ntp:0"));
+  EXPECT_TRUE(ShouldUseCacheableNTP());
 }
 
 TEST_F(SearchTest, IsNTPURL) {

@@ -32,7 +32,6 @@ class LauncherItemController {
     TYPE_APP,
     TYPE_APP_PANEL,
     TYPE_SHORTCUT,
-    TYPE_TABBED,
     TYPE_WINDOWED_APP
   };
 
@@ -66,7 +65,9 @@ class LauncherItemController {
   virtual string16 GetTitle() = 0;
 
   // Returns true if this item controls |window|.
-  virtual bool HasWindow(aura::Window* window) const = 0;
+  // When this |window| has multiple applications/tabs, it only returns true
+  // it controls the currently visible app/tab.
+  virtual bool IsCurrentlyShownInWindow(aura::Window* window) const = 0;
 
   // Returns true if this item is open.
   virtual bool IsOpen() const = 0;
@@ -83,10 +84,6 @@ class LauncherItemController {
 
   // Closes all windows associated with this item.
   virtual void Close() = 0;
-
-  // Indicates that the item at |index| has changed from its previous value.
-  virtual void LauncherItemChanged(int model_index,
-                                   const ash::LauncherItem& old_item) = 0;
 
   // Called when the item is clicked. The behavior varies by the number of
   // windows associated with the item:

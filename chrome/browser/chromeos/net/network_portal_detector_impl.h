@@ -34,7 +34,7 @@ namespace chromeos {
 class NetworkState;
 
 // This class handles all notifications about network changes from
-// NetworkLibrary and delegates portal detection for the default
+// NetworkStateHandler and delegates portal detection for the default
 // network to CaptivePortalService.
 class NetworkPortalDetectorImpl
     : public NetworkPortalDetector,
@@ -61,7 +61,6 @@ class NetworkPortalDetectorImpl
   virtual void DisableLazyDetection() OVERRIDE;
 
   // NetworkStateHandlerObserver implementation:
-  virtual void NetworkManagerChanged() OVERRIDE;
   virtual void DefaultNetworkChanged(const NetworkState* network) OVERRIDE;
 
  private:

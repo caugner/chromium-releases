@@ -112,6 +112,9 @@ class User {
   // Whether the user has a default image.
   bool HasDefaultImage() const;
 
+  // True if user image can be synced.
+  virtual bool CanSyncImage() const;
+
   int image_index() const { return image_index_; }
   bool has_raw_image() const { return user_image_.has_raw_image(); }
   // Returns raw representation of static user image.
@@ -164,6 +167,7 @@ class User {
   friend class UserImageManagerImpl;
   // For testing:
   friend class MockUserManager;
+  friend class FakeUserManager;
 
   // Do not allow anyone else to create new User instances.
   static User* CreateRegularUser(const std::string& email);

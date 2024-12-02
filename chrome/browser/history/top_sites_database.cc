@@ -14,11 +14,16 @@
 
 namespace history {
 
+// Version 2: eb0b24e6/r87284 by satorux@chromium.org on 2011-05-31
+// Version 1: 809cc4d8/r64072 by sky@chromium.org on 2010-10-27
+
 // From the version 1 to 2, one column was added. Old versions of Chrome
 // should be able to read version 2 files just fine.
+// NOTE(shess): When changing the version, add a new golden file for
+// the new version and a test to verify that Init() works with it.
 static const int kVersionNumber = 2;
 
-TopSitesDatabase::TopSitesDatabase() : may_need_history_migration_(false) {
+TopSitesDatabase::TopSitesDatabase() {
 }
 
 TopSitesDatabase::~TopSitesDatabase() {
@@ -27,17 +32,12 @@ TopSitesDatabase::~TopSitesDatabase() {
 bool TopSitesDatabase::Init(const base::FilePath& db_name) {
   bool file_existed = base::PathExists(db_name);
 
-  if (!file_existed)
-    may_need_history_migration_ = true;
-
   db_.reset(CreateDB(db_name));
   if (!db_)
     return false;
 
   bool does_meta_exist = sql::MetaTable::DoesTableExist(db_.get());
   if (!does_meta_exist && file_existed) {
-    may_need_history_migration_ = true;
-
     // If the meta file doesn't exist, this version is old. We could remove all
     // the entries as they are no longer applicable, but it's safest to just
     // remove the file and start over.
@@ -255,6 +255,7 @@ void TopSitesDatabase::UpdatePageRank(const MostVisitedURL& url,
 // Caller should have a transaction open.
 void TopSitesDatabase::UpdatePageRankNoTransaction(
     const MostVisitedURL& url, int new_rank) {
+  DCHECK_GT(db_->transaction_nesting(), 0);
   int prev_rank = GetURLRank(url);
   if (prev_rank == -1) {
     LOG(WARNING) << "Updating rank of an unknown URL: " << url.url.spec();
@@ -296,7 +297,7 @@ void TopSitesDatabase::UpdatePageRankNoTransaction(
 }
 
 bool TopSitesDatabase::GetPageThumbnail(const GURL& url,
-                                            Images* thumbnail) {
+                                        Images* thumbnail) {
   sql::Statement statement(db_->GetCachedStatement(
       SQL_FROM_HERE,
       "SELECT thumbnail, boring_score, good_clipping, at_top, last_updated "

@@ -48,4 +48,12 @@ patch -p4 < $patches_dir/alpn.patch
 
 patch -p5 < $patches_dir/sslsock_903565.patch
 
+patch -p4 < $patches_dir/aesgcm.patch
+
+patch -p4 < $patches_dir/aesgcmchromium.patch
+
 patch -p4 < $patches_dir/tls12backuphash.patch
+
+patch -p4 < $patches_dir/chacha20poly1305.patch
+
+patch -p4 < $patches_dir/cachelocks.patch

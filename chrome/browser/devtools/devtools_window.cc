@@ -288,6 +288,10 @@ void DevToolsWindow::RegisterProfilePrefs(
       prefs::kDevToolsPortForwardingEnabled,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kDevToolsPortForwardingDefaultSet,
+      false,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterDictionaryPref(
       prefs::kDevToolsPortForwardingConfig,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -328,7 +332,8 @@ DevToolsWindow* DevToolsWindow::OpenDevToolsWindowForWorker(
 // static
 DevToolsWindow* DevToolsWindow::CreateDevToolsWindowForWorker(
     Profile* profile) {
-  return Create(profile, GURL(), NULL, DEVTOOLS_DOCK_SIDE_UNDOCKED, true);
+  return Create(profile, GURL(), NULL, DEVTOOLS_DOCK_SIDE_UNDOCKED, true,
+                false);
 }
 
 // static
@@ -360,7 +365,7 @@ void DevToolsWindow::OpenExternalFrontend(
   DevToolsWindow* window = FindDevToolsWindow(agent_host);
   if (!window) {
     window = Create(profile, DevToolsUI::GetProxyURL(frontend_url), NULL,
-                    DEVTOOLS_DOCK_SIDE_UNDOCKED, false);
+                    DEVTOOLS_DOCK_SIDE_UNDOCKED, false, true);
     content::DevToolsManager::GetInstance()->RegisterDevToolsClientHostFor(
         agent_host, window->frontend_host_.get());
   }
@@ -381,7 +386,7 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
     Profile* profile = Profile::FromBrowserContext(
         inspected_rvh->GetProcess()->GetBrowserContext());
     DevToolsDockSide dock_side = GetDockSideFromPrefs(profile);
-    window = Create(profile, GURL(), inspected_rvh, dock_side, false);
+    window = Create(profile, GURL(), inspected_rvh, dock_side, false, false);
     manager->RegisterDevToolsClientHostFor(agent.get(),
                                            window->frontend_host_.get());
     do_open = true;
@@ -582,6 +587,9 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
   if (inspected_rvh)
     inspected_contents_observer_.reset(new InspectedWebContentsObserver(
         content::WebContents::FromRenderViewHost(inspected_rvh)));
+
+  embedder_message_dispatcher_.reset(
+      new DevToolsEmbedderMessageDispatcher(this));
 }
 
 // static
@@ -590,10 +598,12 @@ DevToolsWindow* DevToolsWindow::Create(
     const GURL& frontend_url,
     content::RenderViewHost* inspected_rvh,
     DevToolsDockSide dock_side,
-    bool shared_worker_frontend) {
+    bool shared_worker_frontend,
+    bool external_frontend) {
   // Create WebContents with devtools.
   GURL url(GetDevToolsURL(profile, frontend_url, dock_side,
-                          shared_worker_frontend));
+                          shared_worker_frontend,
+                          external_frontend));
   return new DevToolsWindow(profile, url, inspected_rvh, dock_side);
 }
 
@@ -601,7 +611,8 @@ DevToolsWindow* DevToolsWindow::Create(
 GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
                                     const GURL& base_url,
                                     DevToolsDockSide dock_side,
-                                    bool shared_worker_frontend) {
+                                    bool shared_worker_frontend,
+                                    bool external_frontend) {
   std::string frontend_url(
       base_url.is_empty() ? chrome::kChromeUIDevToolsURL : base_url.spec());
   ThemeService* tp = ThemeServiceFactory::GetForProfile(profile);
@@ -616,6 +627,8 @@ GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
       SkColorToRGBAString(tp->GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT)));
   if (shared_worker_frontend)
     url_string += "&isSharedWorker=true";
+  if (external_frontend)
+    url_string += "&remoteFrontend=true";
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableDevToolsExperiments))
     url_string += "&experiments=true";
@@ -822,15 +835,15 @@ void DevToolsWindow::WebContentsFocused(content::WebContents* contents) {
     inspected_browser->window()->WebContentsFocused(contents);
 }
 
+void DevToolsWindow::DispatchOnEmbedder(const std::string& message) {
+  embedder_message_dispatcher_->Dispatch(message);
+}
+
 void DevToolsWindow::ActivateWindow() {
   if (IsDocked() && GetInspectedBrowserWindow())
     web_contents_->GetView()->Focus();
   else if (!IsDocked() && !browser_->window()->IsActive())
     browser_->window()->Activate();
-}
-
-void DevToolsWindow::ChangeAttachedWindowHeight(unsigned height) {
-  NOTREACHED();  // TODO(dgozman): This is not used anymore, remove.
 }
 
 void DevToolsWindow::CloseWindow() {
@@ -1304,12 +1317,9 @@ void DevToolsWindow::CallClientFunction(const std::string& function_name,
 }
 
 void DevToolsWindow::UpdateBrowserToolbar() {
-  content::WebContents* inspected_web_contents = GetInspectedWebContents();
-  if (!inspected_web_contents)
-    return;
   BrowserWindow* inspected_window = GetInspectedBrowserWindow();
   if (inspected_window)
-    inspected_window->UpdateToolbar(inspected_web_contents, false);
+    inspected_window->UpdateToolbar(NULL);
 }
 
 bool DevToolsWindow::IsDocked() {

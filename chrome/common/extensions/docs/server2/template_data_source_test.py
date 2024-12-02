@@ -11,16 +11,18 @@ import unittest
 from api_data_source import APIDataSource
 from compiled_file_system import CompiledFileSystem
 from local_file_system import LocalFileSystem
-from manifest_data_source import ManifestDataSource
 from object_store_creator import ObjectStoreCreator
+from permissions_data_source import PermissionsDataSource
 from reference_resolver import ReferenceResolver
 from template_data_source import TemplateDataSource
-from test_file_system import TestFileSystem
+from test_branch_utility import TestBranchUtility
 from test_util import DisableLogging
-from third_party.handlebar import Handlebar
 from servlet import Request
+from third_party.handlebar import Handlebar
+
 
 class _FakeFactory(object):
+
   def __init__(self, input_dict=None):
     if input_dict is None:
       self._input_dict = {}
@@ -30,7 +32,9 @@ class _FakeFactory(object):
   def Create(self, *args, **optargs):
     return self._input_dict
 
+
 class TemplateDataSourceTest(unittest.TestCase):
+
   def setUp(self):
     self._base_path = os.path.join(sys.path[0],
                                    'test_data',
@@ -38,9 +42,8 @@ class TemplateDataSourceTest(unittest.TestCase):
     self._fake_api_list_data_source_factory = _FakeFactory()
     self._fake_intro_data_source_factory = _FakeFactory()
     self._fake_samples_data_source_factory = _FakeFactory()
-    self._fake_sidenav_data_source_factory = _FakeFactory()
-    self._manifest_data_source = ManifestDataSource(
-      _FakeFactory(), LocalFileSystem.Create(), '', '')
+    self._permissions_data_source = PermissionsDataSource(
+      _FakeFactory(), LocalFileSystem.Create(), '', '', '')
 
   def _ReadLocalFile(self, filename):
     with open(os.path.join(self._base_path, filename), 'r') as f:
@@ -55,9 +58,11 @@ class TemplateDataSourceTest(unittest.TestCase):
 
   def _CreateTemplateDataSource(self, compiled_fs_factory, api_data=None):
     if api_data is None:
-      api_data_factory = APIDataSource.Factory(compiled_fs_factory,
-                                               'fake_path',
-                                               _FakeFactory())
+      api_data_factory = APIDataSource.Factory(
+      compiled_fs_factory,
+      'fake_path',
+      _FakeFactory(),
+      TestBranchUtility.CreateWithCannedData())
     else:
       api_data_factory = _FakeFactory(api_data)
     reference_resolver_factory = ReferenceResolver.Factory(
@@ -67,16 +72,15 @@ class TemplateDataSourceTest(unittest.TestCase):
     @DisableLogging('error')  # "was never set" error
     def create_from_factory(factory):
       path = 'extensions/foo'
-      return factory.Create(Request.ForTest(path), path)
+      return factory.Create(Request.ForTest(path), {})
     return create_from_factory(TemplateDataSource.Factory(
         api_data_factory,
         self._fake_api_list_data_source_factory,
         self._fake_intro_data_source_factory,
         self._fake_samples_data_source_factory,
-        self._fake_sidenav_data_source_factory,
         compiled_fs_factory,
         reference_resolver_factory,
-        self._manifest_data_source,
+        self._permissions_data_source,
         '.',
         '.',
         ''))

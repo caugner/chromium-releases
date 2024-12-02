@@ -16,29 +16,28 @@ class Image;
 }
 
 class Browser;
-class ChromeLauncherControllerPerApp;
+class ChromeLauncherController;
 class Profile;
 
 // Item controller for an browser shortcut.
 class BrowserShortcutLauncherItemController : public LauncherItemController {
  public:
-  BrowserShortcutLauncherItemController(
-      ChromeLauncherControllerPerApp* controller,
-      Profile* profile);
+  BrowserShortcutLauncherItemController(ChromeLauncherController* controller,
+                                        Profile* profile);
 
   virtual ~BrowserShortcutLauncherItemController();
 
+  // Updates the activation state of the Broswer item.
+  void UpdateBrowserItemState();
+
   // LauncherItemController overrides:
   virtual string16 GetTitle() OVERRIDE;
-  virtual bool HasWindow(aura::Window* window) const OVERRIDE;
+  virtual bool IsCurrentlyShownInWindow(aura::Window* window) const OVERRIDE;
   virtual bool IsOpen() const OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void Launch(int event_flags) OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Close() OVERRIDE;
-  virtual void LauncherItemChanged(
-      int model_index,
-      const ash::LauncherItem& old_item) OVERRIDE;
   virtual void Clicked(const ui::Event& event) OVERRIDE;
   virtual void OnRemoved() OVERRIDE;
   virtual ChromeLauncherAppMenuItems GetApplicationList(
@@ -59,7 +58,9 @@ class BrowserShortcutLauncherItemController : public LauncherItemController {
   // Activate a browser - or advance to the next one on the list.
   void ActivateOrAdvanceToNextBrowser();
 
-  ChromeLauncherControllerPerApp* app_controller_;
+  // Returns true when the given |browser| is listed in the browser application
+  // list.
+  bool IsBrowserRepresentedInBrowserList(Browser* browser);
 
   Profile* profile_;
 

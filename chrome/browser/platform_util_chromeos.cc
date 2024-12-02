@@ -5,7 +5,7 @@
 #include "chrome/browser/platform_util.h"
 
 #include "base/bind.h"
-#include "chrome/browser/chromeos/extensions/file_manager/file_manager_util.h"
+#include "chrome/browser/chromeos/file_manager/open_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -39,12 +39,12 @@ namespace platform_util {
 
 void ShowItemInFolder(const base::FilePath& full_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  file_manager::util::ShowFileInFolder(full_path);
+  file_manager::util::ShowItemInFolder(full_path);
 }
 
 void OpenItem(const base::FilePath& full_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  file_manager::util::ViewItem(full_path);
+  file_manager::util::OpenItem(full_path);
 }
 
 void OpenExternal(const GURL& url) {

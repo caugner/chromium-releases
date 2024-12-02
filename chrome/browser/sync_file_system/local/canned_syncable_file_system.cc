@@ -4,15 +4,18 @@
 
 #include "chrome/browser/sync_file_system/local/canned_syncable_file_system.h"
 
+#include <algorithm>
 #include <iterator>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
+#include "base/guid.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner_util.h"
+#include "chrome/browser/sync_file_system/file_change.h"
 #include "chrome/browser/sync_file_system/local/local_file_change_tracker.h"
 #include "chrome/browser/sync_file_system/local/local_file_sync_context.h"
 #include "chrome/browser/sync_file_system/local/sync_file_system_backend.h"
@@ -106,7 +109,7 @@ void OnCreateSnapshotFileAndVerifyData(
   }
   EXPECT_EQ(expected_data.size(), static_cast<size_t>(file_info.size));
   std::string data;
-  const bool read_status = file_util::ReadFileToString(platform_path, &data);
+  const bool read_status = base::ReadFileToString(platform_path, &data);
   EXPECT_TRUE(read_status);
   EXPECT_EQ(expected_data, data);
   callback.Run(result);
@@ -146,11 +149,13 @@ class WriteHelper {
  public:
   WriteHelper() : bytes_written_(0) {}
   WriteHelper(MockBlobURLRequestContext* request_context,
-              const GURL& blob_url,
               const std::string& blob_data)
       : bytes_written_(0),
         request_context_(request_context),
-        blob_data_(new ScopedTextBlob(*request_context, blob_url, blob_data)) {}
+        blob_data_(new ScopedTextBlob(*request_context,
+                                      base::GenerateGUID(),
+                                      blob_data)) {
+  }
 
   ~WriteHelper() {
     if (request_context_) {
@@ -158,6 +163,8 @@ class WriteHelper {
                                                request_context_.release());
     }
   }
+
+  ScopedTextBlob* scoped_text_blob() const { return blob_data_.get(); }
 
   void DidWrite(const base::Callback<void(int64 result)>& completion_callback,
                 PlatformFileError error, int64 bytes, bool complete) {
@@ -233,7 +240,7 @@ void CannedSyncableFileSystem::SetUp() {
       additional_allowed_schemes);
 
   ScopedVector<fileapi::FileSystemBackend> additional_backends;
-  additional_backends.push_back(new SyncFileSystemBackend());
+  additional_backends.push_back(SyncFileSystemBackend::CreateForTesting());
 
   file_system_context_ = new FileSystemContext(
       io_task_runner_.get(),
@@ -447,14 +454,15 @@ PlatformFileError CannedSyncableFileSystem::ReadDirectory(
 
 int64 CannedSyncableFileSystem::Write(
     net::URLRequestContext* url_request_context,
-    const FileSystemURL& url, const GURL& blob_url) {
+    const FileSystemURL& url,
+    scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle) {
   return RunOnThread<int64>(io_task_runner_.get(),
                             FROM_HERE,
                             base::Bind(&CannedSyncableFileSystem::DoWrite,
                                        base::Unretained(this),
                                        url_request_context,
                                        url,
-                                       blob_url));
+                                       base::Passed(&blob_data_handle)));
 }
 
 int64 CannedSyncableFileSystem::WriteString(
@@ -491,7 +499,7 @@ quota::QuotaStatusCode CannedSyncableFileSystem::GetUsageAndQuota(
 
 void CannedSyncableFileSystem::GetChangedURLsInTracker(
     FileSystemURLSet* urls) {
-  return RunOnThread(
+  RunOnThread(
       file_task_runner_.get(),
       FROM_HERE,
       base::Bind(&LocalFileChangeTracker::GetAllChangedURLs,
@@ -501,12 +509,23 @@ void CannedSyncableFileSystem::GetChangedURLsInTracker(
 
 void CannedSyncableFileSystem::ClearChangeForURLInTracker(
     const FileSystemURL& url) {
-  return RunOnThread(
+  RunOnThread(
       file_task_runner_.get(),
       FROM_HERE,
       base::Bind(&LocalFileChangeTracker::ClearChangesForURL,
                  base::Unretained(backend()->change_tracker()),
                  url));
+}
+
+void CannedSyncableFileSystem::GetChangesForURLInTracker(
+    const FileSystemURL& url,
+    FileChangeList* changes) {
+  RunOnThread(
+      file_task_runner_.get(),
+      FROM_HERE,
+      base::Bind(&LocalFileChangeTracker::GetChangesForURL,
+                 base::Unretained(backend()->change_tracker()),
+                 url, changes));
 }
 
 SyncFileSystemBackend* CannedSyncableFileSystem::backend() {
@@ -547,7 +566,9 @@ void CannedSyncableFileSystem::DoCopy(
     const FileSystemURL& dest_url,
     const StatusCallback& callback) {
   EXPECT_TRUE(is_filesystem_opened_);
-  operation_runner()->Copy(src_url, dest_url, callback);
+  operation_runner()->Copy(
+      src_url, dest_url,
+      fileapi::FileSystemOperationRunner::CopyProgressCallback(), callback);
 }
 
 void CannedSyncableFileSystem::DoMove(
@@ -601,7 +622,7 @@ void CannedSyncableFileSystem::DoVerifyFile(
   EXPECT_TRUE(is_filesystem_opened_);
   operation_runner()->CreateSnapshotFile(
       url,
-      base::Bind(&OnCreateSnapshotFileAndVerifyData,expected_data, callback));
+      base::Bind(&OnCreateSnapshotFileAndVerifyData, expected_data, callback));
 }
 
 void CannedSyncableFileSystem::DoGetMetadataAndPlatformPath(
@@ -625,11 +646,13 @@ void CannedSyncableFileSystem::DoReadDirectory(
 
 void CannedSyncableFileSystem::DoWrite(
     net::URLRequestContext* url_request_context,
-    const FileSystemURL& url, const GURL& blob_url,
+    const FileSystemURL& url,
+    scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle,
     const WriteCallback& callback) {
   EXPECT_TRUE(is_filesystem_opened_);
   WriteHelper* helper = new WriteHelper;
-  operation_runner()->Write(url_request_context, url, blob_url, 0,
+  operation_runner()->Write(url_request_context, url,
+                            blob_data_handle.Pass(), 0,
                             base::Bind(&WriteHelper::DidWrite,
                                        base::Owned(helper), callback));
 }
@@ -640,9 +663,9 @@ void CannedSyncableFileSystem::DoWriteString(
     const WriteCallback& callback) {
   MockBlobURLRequestContext* url_request_context(
       new MockBlobURLRequestContext(file_system_context_.get()));
-  const GURL blob_url(std::string("blob:") + data);
-  WriteHelper* helper = new WriteHelper(url_request_context, blob_url, data);
-  operation_runner()->Write(url_request_context, url, blob_url, 0,
+  WriteHelper* helper = new WriteHelper(url_request_context, data);
+  operation_runner()->Write(url_request_context, url,
+                            helper->scoped_text_blob()->GetBlobDataHandle(), 0,
                             base::Bind(&WriteHelper::DidWrite,
                                        base::Owned(helper), callback));
 }

@@ -32,6 +32,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_creator.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util.h"
@@ -388,6 +389,14 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   if (process_startup)
     ShellIntegration::MigrateChromiumShortcuts();
 #endif  // defined(OS_WIN)
+
+#if defined(ENABLE_EXTENSIONS)
+  // If we deferred creation of background extension hosts, we want to create
+  // them now that the session (if any) has been restored.
+  ExtensionProcessManager* process_manager =
+      extensions::ExtensionSystem::Get(profile)->process_manager();
+  process_manager->DeferBackgroundHostCreation(false);
+#endif
 
   return true;
 }
@@ -869,15 +878,13 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
     if (!command_line_.HasSwitch(switches::kTestType)) {
       GoogleApiKeysInfoBarDelegate::Create(InfoBarService::FromWebContents(
           browser->tab_strip_model()->GetActiveWebContents()));
-
-      // TODO(phajdan.jr): Always enable after migrating bots:
-      // http://crbug.com/170262 .
-      ObsoleteOSInfoBarDelegate::Create(InfoBarService::FromWebContents(
-          browser->tab_strip_model()->GetActiveWebContents()));
     }
 
-    if (browser_defaults::kOSSupportsOtherBrowsers &&
-        !command_line_.HasSwitch(switches::kNoDefaultBrowserCheck)) {
+    ObsoleteOSInfoBarDelegate::Create(InfoBarService::FromWebContents(
+        browser->tab_strip_model()->GetActiveWebContents()));
+
+#if !defined(OS_CHROMEOS)
+    if (!command_line_.HasSwitch(switches::kNoDefaultBrowserCheck)) {
       // Generally, the default browser prompt should not be shown on first
       // run. However, when the set-as-default dialog has been suppressed, we
       // need to allow it.
@@ -889,6 +896,7 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
                                          browser->host_desktop_type());
       }
     }
+#endif
   }
 }
 

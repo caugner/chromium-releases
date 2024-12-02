@@ -17,7 +17,7 @@ namespace file_system {
 
 class TruncateOperationTest : public OperationTestBase {
  protected:
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     OperationTestBase::SetUp();
 
     operation_.reset(new TruncateOperation(
@@ -48,7 +48,7 @@ TEST_F(TruncateOperationTest, Truncate) {
   base::FilePath local_path;
   error = FILE_ERROR_FAILED;
   cache()->GetFileOnUIThread(
-      src_entry.resource_id(),
+      GetLocalId(file_in_root),
       google_apis::test_util::CreateCopyResultCallback(&error, &local_path));
   test_util::RunBlockingPoolTask();
   ASSERT_EQ(FILE_ERROR_OK, error);
@@ -107,14 +107,14 @@ TEST_F(TruncateOperationTest, Extend) {
   base::FilePath local_path;
   error = FILE_ERROR_FAILED;
   cache()->GetFileOnUIThread(
-      src_entry.resource_id(),
+      GetLocalId(file_in_root),
       google_apis::test_util::CreateCopyResultCallback(&error, &local_path));
   test_util::RunBlockingPoolTask();
   ASSERT_EQ(FILE_ERROR_OK, error);
 
   // The local file should be truncated.
   std::string content;
-  ASSERT_TRUE(file_util::ReadFileToString(local_path, &content));
+  ASSERT_TRUE(base::ReadFileToString(local_path, &content));
 
   EXPECT_EQ(file_size + 10, static_cast<int64>(content.size()));
   // All trailing 10 bytes should be '\0'.

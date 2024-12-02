@@ -6,6 +6,7 @@
 
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/gpu_memory_buffer_factory_impl.h"
+#include "android_webview/browser/in_process_view_renderer.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
 #include "android_webview/native/aw_geolocation_permission_context.h"
@@ -46,32 +47,32 @@ AwMainDelegate::~AwMainDelegate() {
 bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   content::SetContentClient(&content_client_);
 
-  gpu::GLInProcessContext::SetGpuMemoryBufferFactory(
+  gpu::InProcessCommandBuffer::SetGpuMemoryBufferFactory(
       gpu_memory_buffer_factory_.get());
   gpu::InProcessCommandBuffer::EnableVirtualizedContext();
 
+  InProcessViewRenderer::CalculateTileMemoryPolicy();
+
   CommandLine* cl = CommandLine::ForCurrentProcess();
   cl->AppendSwitch(switches::kEnableBeginFrameScheduling);
-  if (!cl->HasSwitch("disable-map-image"))
-    cl->AppendSwitch(cc::switches::kUseMapImage);
+  cl->AppendSwitch(cc::switches::kEnableMapImage);
 
   // WebView uses the Android system's scrollbars and overscroll glow.
   cl->AppendSwitch(switches::kHideScrollbars);
   cl->AppendSwitch(switches::kDisableOverscrollEdgeEffect);
 
-  // Not yet secure in single-process mode.
+  // Not yet supported in single-process mode.
   cl->AppendSwitch(switches::kDisableExperimentalWebGL);
+  cl->AppendSwitch(switches::kDisableSharedWorkers);
 
   // Ganesh backed 2D-Canvas is not yet working and causes crashes.
   cl->AppendSwitch(switches::kDisableAccelerated2dCanvas);
 
   // File system API not supported (requires some new API; internal bug 6930981)
-  // TODO(joth): export and use switches::kDisableFileSystem
-  cl->AppendSwitch("disable-file-system");
+  cl->AppendSwitch(switches::kDisableFileSystem);
 
   // Enable D-PAD navigation for application compatibility.
-  // TODO(joth): export and use switches::EnableSpatialNavigation.
-  cl->AppendSwitch("enable-spatial-navigation");
+  cl->AppendSwitch(switches::kEnableSpatialNavigation);
 
   return false;
 }

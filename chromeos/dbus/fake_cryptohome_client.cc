@@ -23,6 +23,9 @@ FakeCryptohomeClient::FakeCryptohomeClient() : unmount_result_(false) {
 FakeCryptohomeClient::~FakeCryptohomeClient() {
 }
 
+void FakeCryptohomeClient::Init(dbus::Bus* bus) {
+}
+
 void FakeCryptohomeClient::TpmIsBeingOwned(
     const BoolDBusMethodCallback& callback) {
 }
@@ -295,7 +298,9 @@ bool FakeCryptohomeClient::CallTpmClearStoredPasswordAndBlock() {
 }
 
 void FakeCryptohomeClient::AsyncTpmAttestationCreateCertRequest(
-    int options,
+    attestation::AttestationCertificateProfile certificate_profile,
+    const std::string& user_email,
+    const std::string& request_origin,
     const AsyncMethodCallback& callback) {
 }
 

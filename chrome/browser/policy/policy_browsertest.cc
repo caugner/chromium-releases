@@ -27,12 +27,15 @@
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
+#include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/extensions/crx_installer.h"
+#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
@@ -75,6 +78,7 @@
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -86,6 +90,8 @@
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -98,6 +104,7 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/process_type.h"
+#include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/webplugininfo.h"
 #include "content/public/test/browser_test_utils.h"
@@ -131,6 +138,16 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chromeos/audio/cras_audio_handler.h"
+#endif
+
+#if !defined(OS_MACOSX)
+#include "apps/native_app_window.h"
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
+#include "ui/base/window_open_disposition.h"
 #endif
 
 using content::BrowserThread;
@@ -171,6 +188,8 @@ const base::FilePath::CharType kGoodUnpackedExt[] =
     FILE_PATH_LITERAL("good_unpacked");
 const base::FilePath::CharType kAppUnpackedExt[] =
     FILE_PATH_LITERAL("app");
+const base::FilePath::CharType kUnpackedFullscreenAppName[] =
+    FILE_PATH_LITERAL("fullscreen_app");
 
 // Filters requests to the hosts in |urls| and redirects them to the test data
 // dir through URLRequestMockHTTPJobs.
@@ -449,6 +468,120 @@ class TestAudioObserver : public chromeos::CrasAudioHandler::AudioObserver {
 };
 #endif
 
+// This is a customized version of content::WindowedNotificationObserver that
+// waits until either of the two provided notification types is observed.
+// See content::WindowedNotificationObserver for further documentation.
+class OneOfTwoNotificationsObserver : public content::NotificationObserver {
+ public:
+  // Set up to wait for one of two notifications.
+  OneOfTwoNotificationsObserver(int notification_type1, int notification_type2);
+  virtual ~OneOfTwoNotificationsObserver();
+
+  // Wait until one of the specified notifications is observed. If either
+  // notification has already been received, Wait() returns immediately.
+  void Wait();
+
+  // content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+ private:
+  bool seen_;
+  bool running_;
+  content::NotificationRegistrar registrar_;
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(OneOfTwoNotificationsObserver);
+};
+
+OneOfTwoNotificationsObserver::OneOfTwoNotificationsObserver(
+    int notification_type1, int notification_type2)
+    : seen_(false), running_(false) {
+  registrar_.Add(this, notification_type1,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this, notification_type2,
+                 content::NotificationService::AllSources());
+}
+
+OneOfTwoNotificationsObserver::~OneOfTwoNotificationsObserver() {}
+
+void OneOfTwoNotificationsObserver::Wait() {
+  if (seen_)
+    return;
+  running_ = true;
+  message_loop_runner_ = new content::MessageLoopRunner;
+  message_loop_runner_->Run();
+  EXPECT_TRUE(seen_);
+}
+
+// NotificationObserver:
+void OneOfTwoNotificationsObserver::Observe(int type,
+                     const content::NotificationSource& source,
+                     const content::NotificationDetails& details) {
+  seen_ = true;
+  if (!running_)
+    return;
+  message_loop_runner_->Quit();
+  running_ = false;
+}
+
+#if !defined(OS_MACOSX)
+
+// Observer used to wait for the creation of a new shell window.
+class TestAddShellWindowObserver : public apps::ShellWindowRegistry::Observer {
+ public:
+  explicit TestAddShellWindowObserver(apps::ShellWindowRegistry* registry);
+  virtual ~TestAddShellWindowObserver();
+
+  // apps::ShellWindowRegistry::Observer:
+  virtual void OnShellWindowAdded(apps::ShellWindow* shell_window) OVERRIDE;
+  virtual void OnShellWindowIconChanged(
+      apps::ShellWindow* shell_window) OVERRIDE;
+  virtual void OnShellWindowRemoved(apps::ShellWindow* shell_window) OVERRIDE;
+
+  apps::ShellWindow* WaitForShellWindow();
+
+ private:
+  apps::ShellWindowRegistry* registry_;  // Not owned.
+  apps::ShellWindow* window_;  // Not owned.
+  base::RunLoop run_loop_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestAddShellWindowObserver);
+};
+
+TestAddShellWindowObserver::TestAddShellWindowObserver(
+    apps::ShellWindowRegistry* registry)
+    : registry_(registry),
+      window_(NULL) {
+  registry_->AddObserver(this);
+}
+
+TestAddShellWindowObserver::~TestAddShellWindowObserver() {
+  registry_->RemoveObserver(this);
+}
+
+void TestAddShellWindowObserver::OnShellWindowAdded(
+    apps::ShellWindow* shell_window) {
+  window_ = shell_window;
+  run_loop_.Quit();
+}
+
+void TestAddShellWindowObserver::OnShellWindowIconChanged(
+    apps::ShellWindow* shell_window) {
+}
+
+void TestAddShellWindowObserver::OnShellWindowRemoved(
+    apps::ShellWindow* shell_window) {
+}
+
+apps::ShellWindow* TestAddShellWindowObserver::WaitForShellWindow() {
+  run_loop_.Run();
+  return window_;
+}
+
+#endif
+
 }  // namespace
 
 class PolicyTest : public InProcessBrowserTest {
@@ -488,53 +621,6 @@ class PolicyTest : public InProcessBrowserTest {
                  POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                  base::Value::CreateBooleanValue(!enabled), NULL);
     UpdateProviderPolicy(policies);
-  }
-
-  void TestScreenshotFeedback(bool enabled) {
-    SetScreenshotPolicy(enabled);
-
-    // Wait for feedback page to load.
-    content::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP,
-        content::NotificationService::AllSources());
-    EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_FEEDBACK));
-    observer.Wait();
-    content::WebContents* web_contents =
-        static_cast<content::Source<content::NavigationController> >(
-            observer.source())->GetWebContents();
-
-    // Wait for feedback page to fully initialize.
-    // setupCurrentScreenshot is called when feedback page loads and (among
-    // other things) adds current-screenshots-thumbnailDiv-0-image element.
-    // The code below executes either before setupCurrentScreenshot was called
-    // (setupCurrentScreenshot is replaced with our hook) or after it has
-    // completed (in that case send result immediately).
-    bool result = false;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-        web_contents,
-        "function btest_initCompleted(url) {"
-        "  var img = new Image();"
-        "  img.src = url;"
-        "  img.onload = function() {"
-        "    domAutomationController.send(img.width * img.height > 0);"
-        "  };"
-        "  img.onerror = function() {"
-        "    domAutomationController.send(false);"
-        "  };"
-        "}"
-        "function setupCurrentScreenshot(url) {"
-        "  btest_initCompleted(url);"
-        "}"
-        "var img = document.getElementById("
-        "    'current-screenshots-thumbnailDiv-0-image');"
-        "if (img)"
-        "  btest_initCompleted(img.src);",
-        &result));
-    EXPECT_EQ(enabled, result);
-
-    // Feedback page is a singleton page, so close so future calls to this
-    // function work as expected.
-    web_contents->Close();
   }
 
 #if defined(OS_CHROMEOS)
@@ -578,7 +664,7 @@ class PolicyTest : public InProcessBrowserTest {
     return details.ptr();
   }
 
-  void LoadUnpackedExtension(
+  const extensions::Extension* LoadUnpackedExtension(
       const base::FilePath::StringType& name, bool expect_success) {
     base::FilePath extension_path(ui_test_utils::GetTestFilePath(
         base::FilePath(kTestExtensionsDir), base::FilePath(name)));
@@ -590,6 +676,14 @@ class PolicyTest : public InProcessBrowserTest {
         content::NotificationService::AllSources());
     installer->Load(extension_path);
     observer.Wait();
+
+    const ExtensionSet* extensions = extension_service()->extensions();
+    for (ExtensionSet::const_iterator it = extensions->begin();
+         it != extensions->end(); ++it) {
+      if ((*it)->path() == extension_path)
+        return it->get();
+    }
+    return NULL;
   }
 
   void UninstallExtension(const std::string& id, bool expect_success) {
@@ -754,6 +848,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DefaultSearchProvider) {
   const std::string kImageURL("http://test.com/searchbyimage/upload");
   const std::string kImageURLPostParams(
       "image_content=content,image_url=http://test.com/test.png");
+  const std::string kNewTabURL("http://search.example/newtab");
 
   TemplateURLService* service = TemplateURLServiceFactory::GetForProfile(
       browser()->profile());
@@ -769,7 +864,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DefaultSearchProvider) {
     default_search->search_terms_replacement_key() ==
         kSearchTermsReplacementKey &&
     default_search->image_url() == kImageURL &&
-    default_search->image_url_post_params() == kImageURLPostParams);
+    default_search->image_url_post_params() == kImageURLPostParams &&
+    default_search->new_tab_url() == kNewTabURL);
 
   // Override the default search provider using policies.
   PolicyMap policies;
@@ -798,6 +894,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DefaultSearchProvider) {
                POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                base::Value::CreateStringValue(kImageURLPostParams),
                NULL);
+  policies.Set(key::kDefaultSearchProviderNewTabURL,
+               POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+               base::Value::CreateStringValue(kNewTabURL),
+               NULL);
   UpdateProviderPolicy(policies);
   default_search = service->GetDefaultSearchProvider();
   ASSERT_TRUE(default_search);
@@ -810,6 +910,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DefaultSearchProvider) {
             default_search->search_terms_replacement_key());
   EXPECT_EQ(kImageURL, default_search->image_url());
   EXPECT_EQ(kImageURLPostParams, default_search->image_url_post_params());
+  EXPECT_EQ(kNewTabURL, default_search->new_tab_url());
 
   // Verify that searching from the omnibox uses kSearchURL.
   chrome::FocusLocationBar(browser());
@@ -966,7 +1067,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
       "https://www.google.com/?espv=1#q=foobar");
   EXPECT_TRUE(
-      browser()->toolbar_model()->WouldReplaceSearchURLWithSearchTerms(false));
+      browser()->toolbar_model()->WouldPerformSearchTermReplacement(false));
   EXPECT_EQ(ASCIIToUTF16("foobar"),
             location_bar->GetLocationEntry()->GetText());
 
@@ -976,7 +1077,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
       "https://www.google.com/?q=foobar");
   EXPECT_FALSE(
-      browser()->toolbar_model()->WouldReplaceSearchURLWithSearchTerms(false));
+      browser()->toolbar_model()->WouldPerformSearchTermReplacement(false));
   EXPECT_EQ(ASCIIToUTF16("https://www.google.com/?q=foobar"),
             location_bar->GetLocationEntry()->GetText());
 
@@ -986,7 +1087,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
       "https://www.google.com/search?espv=1#q=banana");
   EXPECT_TRUE(
-      browser()->toolbar_model()->WouldReplaceSearchURLWithSearchTerms(false));
+      browser()->toolbar_model()->WouldPerformSearchTermReplacement(false));
   EXPECT_EQ(ASCIIToUTF16("banana"),
             location_bar->GetLocationEntry()->GetText());
 
@@ -996,7 +1097,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
       "https://www.google.com/search?q=tractor+parts&espv=1");
   EXPECT_TRUE(
-      browser()->toolbar_model()->WouldReplaceSearchURLWithSearchTerms(false));
+      browser()->toolbar_model()->WouldPerformSearchTermReplacement(false));
   EXPECT_EQ(ASCIIToUTF16("tractor parts"),
             location_bar->GetLocationEntry()->GetText());
 
@@ -1005,7 +1106,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   ui_test_utils::SendToOmniboxAndSubmit(location_bar,
       "https://www.google.com/search?q=tractor+parts&espv=1#q=foobar");
   EXPECT_TRUE(
-      browser()->toolbar_model()->WouldReplaceSearchURLWithSearchTerms(false));
+      browser()->toolbar_model()->WouldPerformSearchTermReplacement(false));
   EXPECT_EQ(ASCIIToUTF16("foobar"),
             location_bar->GetLocationEntry()->GetText());
 }
@@ -1442,6 +1543,46 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
   EXPECT_EQ(1, new_version->CompareTo(old_version));
 
   EXPECT_EQ(0u, interceptor.GetPendingSize());
+
+  // Wait until any background pages belonging to force-installed extensions
+  // have been loaded.
+  ExtensionProcessManager* manager =
+      extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
+  ExtensionProcessManager::ViewSet all_views = manager->GetAllViews();
+  for (ExtensionProcessManager::ViewSet::const_iterator iter =
+           all_views.begin();
+       iter != all_views.end();) {
+    if (!(*iter)->IsLoading()) {
+      ++iter;
+    } else {
+      OneOfTwoNotificationsObserver(
+          content::NOTIFICATION_LOAD_STOP,
+          content::NOTIFICATION_WEB_CONTENTS_DESTROYED).Wait();
+
+      // Test activity may have modified the set of extension processes during
+      // message processing, so re-start the iteration to catch added/removed
+      // processes.
+      all_views = manager->GetAllViews();
+      iter = all_views.begin();
+    }
+  }
+
+  // Test policy-installed extensions are reloaded when killed.
+  BackgroundContentsService::
+      SetRestartDelayForForceInstalledAppsAndExtensionsForTesting(0);
+  content::WindowedNotificationObserver extension_crashed_observer(
+      chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
+      content::NotificationService::AllSources());
+  content::WindowedNotificationObserver extension_loaded_observer(
+      chrome::NOTIFICATION_EXTENSION_LOADED,
+      content::NotificationService::AllSources());
+  extensions::ExtensionHost* extension_host =
+      extensions::ExtensionSystem::Get(browser()->profile())->
+          process_manager()->GetBackgroundHostForExtension(kGoodCrxId);
+  base::KillProcess(extension_host->render_process_host()->GetHandle(),
+                    content::RESULT_CODE_KILLED, false);
+  extension_crashed_observer.Wait();
+  extension_loaded_observer.Wait();
 }
 
 IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionAllowedTypes) {
@@ -1475,7 +1616,13 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionAllowedTypes) {
 // Checks that a click on an extension CRX download triggers the extension
 // installation prompt without further user interaction when the source is
 // whitelisted by policy.
-IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallSources) {
+// Flaky on windows; http://crbug.com/295729 .
+#if defined(OS_WIN)
+#define MAYBE_ExtensionInstallSources DISABLED_ExtensionInstallSources
+#else
+#define MAYBE_ExtensionInstallSources ExtensionInstallSources
+#endif
+IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_ExtensionInstallSources) {
   CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
 
@@ -1555,7 +1702,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, HomepageLocation) {
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_HOME));
   content::WaitForLoadStop(contents);
-  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL), contents->GetURL());
+  EXPECT_TRUE(chrome::IsNTPURL(contents->GetURL(),browser()->profile()));
 }
 
 IN_PROC_BROWSER_TEST_F(PolicyTest, IncognitoEnabled) {
@@ -1834,26 +1981,59 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, FileURLBlacklist) {
   CheckURLIsBlocked(browser(), file_path2.c_str());
 }
 
-// Flaky on Linux. http://crbug.com/155459
-#if defined(OS_LINUX)
-#define MAYBE_DisableScreenshotsFeedback DISABLED_DisableScreenshotsFeedback
-#else
-#define MAYBE_DisableScreenshotsFeedback DisableScreenshotsFeedback
-#endif
-IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_DisableScreenshotsFeedback) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
-    return;
-#endif
+#if !defined(OS_MACOSX)
+IN_PROC_BROWSER_TEST_F(PolicyTest, FullscreenAllowedBrowser) {
+  PolicyMap policies;
+  policies.Set(key::kFullscreenAllowed,
+               POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+               base::Value::CreateBooleanValue(false), NULL);
+  UpdateProviderPolicy(policies);
 
-  // Make sure current screenshot can be taken and displayed on feedback page.
-  TestScreenshotFeedback(true);
+  BrowserWindow* browser_window = browser()->window();
+  ASSERT_TRUE(browser_window);
 
-  // Check if banning screenshots disabled feedback page's ability to grab a
-  // screenshot.
-  TestScreenshotFeedback(false);
+  EXPECT_FALSE(browser_window->IsFullscreen());
+  chrome::ToggleFullscreenMode(browser());
+  EXPECT_FALSE(browser_window->IsFullscreen());
 }
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, FullscreenAllowedApp) {
+  PolicyMap policies;
+  policies.Set(key::kFullscreenAllowed,
+               POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+               base::Value::CreateBooleanValue(false), NULL);
+  UpdateProviderPolicy(policies);
+
+  const extensions::Extension* extension =
+      LoadUnpackedExtension(kUnpackedFullscreenAppName, true);
+  ASSERT_TRUE(extension);
+
+  // Launch an app that tries to open a fullscreen window.
+  TestAddShellWindowObserver add_window_observer(
+      apps::ShellWindowRegistry::Get(browser()->profile()));
+  chrome::OpenApplication(chrome::AppLaunchParams(browser()->profile(),
+                                                  extension,
+                                                  extension_misc::LAUNCH_NONE,
+                                                  NEW_WINDOW));
+  apps::ShellWindow* window = add_window_observer.WaitForShellWindow();
+  ASSERT_TRUE(window);
+
+  // Verify that the window is not in fullscreen mode.
+  EXPECT_FALSE(window->GetBaseWindow()->IsFullscreen());
+
+  // Verify that the window cannot be toggled into fullscreen mode via apps
+  // APIs.
+  EXPECT_TRUE(content::ExecuteScript(
+      window->web_contents(),
+      "chrome.app.window.current().fullscreen();"));
+  EXPECT_FALSE(window->GetBaseWindow()->IsFullscreen());
+
+  // Verify that the window cannot be toggled into fullscreen mode from within
+  // Chrome (e.g., using keyboard accelerators).
+  window->Fullscreen();
+  EXPECT_FALSE(window->GetBaseWindow()->IsFullscreen());
+}
+#endif
 
 #if defined(OS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(PolicyTest, DisableScreenshotsFile) {

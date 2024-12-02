@@ -92,10 +92,13 @@ class LocationBarView : public LocationBar,
   class Delegate {
    public:
     // Should return the current web contents.
-    virtual content::WebContents* GetWebContents() const = 0;
+    virtual content::WebContents* GetWebContents() = 0;
 
     // Returns the InstantController, or NULL if there isn't one.
     virtual InstantController* GetInstant() = 0;
+
+    virtual ToolbarModel* GetToolbarModel() = 0;
+    virtual const ToolbarModel* GetToolbarModel() const = 0;
 
     // Creates Widget for the given delegate.
     virtual views::Widget* CreateViewsBubble(
@@ -135,7 +138,6 @@ class LocationBarView : public LocationBar,
   LocationBarView(Browser* browser,
                   Profile* profile,
                   CommandUpdater* command_updater,
-                  ToolbarModel* model,
                   Delegate* delegate,
                   bool is_popup_mode);
 
@@ -160,9 +162,9 @@ class LocationBarView : public LocationBar,
                    ColorKind kind) const;
 
   // Updates the location bar.  We also reset the bar's permanent text and
-  // security style, and, if |tab_for_state_restoring| is non-NULL, also restore
-  // saved state that the tab holds.
-  void Update(const content::WebContents* tab_for_state_restoring);
+  // security style, and, if |contents| is non-NULL, also restore saved state
+  // that the tab holds.
+  void Update(const content::WebContents* contents);
 
   // Returns corresponding profile.
   Profile* profile() const { return profile_; }
@@ -267,7 +269,9 @@ class LocationBarView : public LocationBar,
   virtual gfx::Image GetFavicon() const OVERRIDE;
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
-  virtual content::WebContents* GetWebContents() const OVERRIDE;
+  virtual content::WebContents* GetWebContents() OVERRIDE;
+  virtual ToolbarModel* GetToolbarModel() OVERRIDE;
+  virtual const ToolbarModel* GetToolbarModel() const OVERRIDE;
 
   // views::View:
   virtual const char* GetClassName() const OVERRIDE;
@@ -380,9 +384,18 @@ class LocationBarView : public LocationBar,
     return is_popup_mode_ ? kPopupEdgeThickness : kNormalEdgeThickness;
   }
 
-  // Update the visibility state of the Content Blocked icons to reflect what is
-  // actually blocked on the current page.
-  void RefreshContentSettingViews();
+  // Updates the visibility state of the Content Blocked icons to reflect what
+  // is actually blocked on the current page. Calling this function should
+  // always eventually be followed by calling Layout() and then
+  // UpdateContentSettingViewsPostLayout(), to ensure the icons can completely
+  // update their states.
+  void UpdateContentSettingViewsPreLayout();
+
+  // Updates after the correct screen coordinates have been set for icons.
+  // Allows content setting icons to perform any updating which can't complete
+  // until after the icons have been correctly laid out.  This should be called
+  // after UpdateContentSettingViewsPreLayout() and a subsequent Layout().
+  void UpdateContentSettingViewsPostLayout();
 
   // Delete all page action views that we have created.
   void DeletePageActionViews();
@@ -434,9 +447,6 @@ class LocationBarView : public LocationBar,
 
   // Command updater which corresponds to this View.
   CommandUpdater* command_updater_;
-
-  // The model.
-  ToolbarModel* model_;
 
   // Our delegate.
   Delegate* delegate_;

@@ -20,6 +20,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/invalidation/invalidation_service_factory.h"
@@ -285,7 +286,7 @@ bool SyncTest::SetupClients() {
 
   // Create the verifier profile.
   verifier_ = MakeProfile(FILE_PATH_LITERAL("Verifier"));
-  ui_test_utils::WaitForBookmarkModelToLoad(
+  test::WaitForBookmarkModelToLoad(
       BookmarkModelFactory::GetForProfile(verifier()));
   ui_test_utils::WaitForHistoryToLoad(HistoryServiceFactory::GetForProfile(
       verifier(), Profile::EXPLICIT_ACCESS));
@@ -324,7 +325,7 @@ void SyncTest::InitializeInstance(int index) {
   EXPECT_FALSE(GetClient(index) == NULL) << "Could not create Client "
                                          << index << ".";
 
-  ui_test_utils::WaitForBookmarkModelToLoad(
+  test::WaitForBookmarkModelToLoad(
       BookmarkModelFactory::GetForProfile(GetProfile(index)));
   ui_test_utils::WaitForHistoryToLoad(HistoryServiceFactory::GetForProfile(
       GetProfile(index), Profile::EXPLICIT_ACCESS));
@@ -407,7 +408,7 @@ void SyncTest::ReadPasswordFile() {
     LOG(FATAL) << "Can't run live server test without specifying --"
                << switches::kPasswordFileForTest << "=<filename>";
   std::string file_contents;
-  file_util::ReadFileToString(password_file_, &file_contents);
+  base::ReadFileToString(password_file_, &file_contents);
   ASSERT_NE(file_contents, "") << "Password file \""
       << password_file_.value() << "\" does not exist.";
   std::vector<std::string> tokens;
@@ -425,15 +426,15 @@ void SyncTest::SetupMockGaiaResponses() {
   password_ = "password";
   factory_.reset(new net::URLFetcherImplFactory());
   fake_factory_.reset(new net::FakeURLFetcherFactory(factory_.get()));
-  fake_factory_->SetFakeResponse(
+  fake_factory_->SetFakeResponseForURL(
       GaiaUrls::GetInstance()->client_login_url(),
       "SID=sid\nLSID=lsid",
       true);
-  fake_factory_->SetFakeResponse(
+  fake_factory_->SetFakeResponseForURL(
       GaiaUrls::GetInstance()->get_user_info_url(),
       "email=user@gmail.com\ndisplayEmail=user@gmail.com",
       true);
-  fake_factory_->SetFakeResponse(
+  fake_factory_->SetFakeResponseForURL(
       GaiaUrls::GetInstance()->issue_auth_token_url(),
       "auth",
       true);
@@ -441,11 +442,11 @@ void SyncTest::SetupMockGaiaResponses() {
       GoogleURLTracker::kSearchDomainCheckURL,
       ".google.com",
       true);
-  fake_factory_->SetFakeResponse(
+  fake_factory_->SetFakeResponseForURL(
       GaiaUrls::GetInstance()->client_login_to_oauth2_url(),
       "some_response",
       true);
-  fake_factory_->SetFakeResponse(
+  fake_factory_->SetFakeResponseForURL(
       GaiaUrls::GetInstance()->oauth2_token_url(),
       "{"
       "  \"refresh_token\": \"rt1\","
@@ -454,7 +455,7 @@ void SyncTest::SetupMockGaiaResponses() {
       "  \"token_type\": \"Bearer\""
       "}",
       true);
-  fake_factory_->SetFakeResponse(
+  fake_factory_->SetFakeResponseForURL(
       GaiaUrls::GetInstance()->oauth1_login_url(),
       "SID=sid\nLSID=lsid\nAuth=auth_token",
       true);

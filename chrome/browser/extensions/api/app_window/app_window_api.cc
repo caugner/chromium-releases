@@ -31,7 +31,6 @@
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
-#include "ash/wm/property_util.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #endif
@@ -164,7 +163,7 @@ bool AppWindowCreateFunction::RunImpl() {
 
           window->GetBaseWindow()->Show();
           base::DictionaryValue* result = new base::DictionaryValue;
-          result->Set("viewId", base::Value::CreateIntegerValue(view_id));
+          result->Set("viewId", new base::FundamentalValue(view_id));
           SetCreateResultFromShellWindow(window, result);
           result->SetBoolean("existingWindow", true);
           result->SetBoolean("injectTitlebar", false);
@@ -311,10 +310,10 @@ bool AppWindowCreateFunction::RunImpl() {
     view_id = created_view->GetRoutingID();
 
   base::DictionaryValue* result = new base::DictionaryValue;
-  result->Set("viewId", base::Value::CreateIntegerValue(view_id));
+  result->Set("viewId", new base::FundamentalValue(view_id));
   result->Set("injectTitlebar",
-      base::Value::CreateBooleanValue(inject_html_titlebar));
-  result->Set("id", base::Value::CreateStringValue(shell_window->window_key()));
+      new base::FundamentalValue(inject_html_titlebar));
+  result->Set("id", new base::StringValue(shell_window->window_key()));
   SetCreateResultFromShellWindow(shell_window, result);
   SetResult(result);
 

@@ -18,7 +18,6 @@
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_stats.h"
-#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
@@ -28,7 +27,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/omaha_query_params/omaha_query_params.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
@@ -42,6 +40,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/manifest_constants.h"
 #include "net/base/escape.h"
 #include "url/gurl.h"
 
@@ -85,7 +84,7 @@ void GetDownloadFilePath(
 #if defined(OS_CHROMEOS)
   // Do not use drive for extension downloads.
   if (drive::util::IsUnderDriveMountPoint(directory))
-    directory = download_util::GetDefaultDownloadDirectory();
+    directory = DownloadPrefs::GetDefaultDownloadDirectory();
 #endif
 
   // Ensure the download directory exists. TODO(asargent) - make this use
@@ -164,7 +163,8 @@ WebstoreInstaller::Approval::Approval()
       use_app_installed_bubble(false),
       skip_post_install_ui(false),
       skip_install_dialog(false),
-      enable_launcher(false) {
+      enable_launcher(false),
+      strict_manifest_check(true) {
 }
 
 scoped_ptr<WebstoreInstaller::Approval>
@@ -178,7 +178,8 @@ scoped_ptr<WebstoreInstaller::Approval>
 WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
     Profile* profile,
     const std::string& extension_id,
-    scoped_ptr<base::DictionaryValue> parsed_manifest) {
+    scoped_ptr<base::DictionaryValue> parsed_manifest,
+    bool strict_manifest_check) {
   scoped_ptr<Approval> result(new Approval());
   result->extension_id = extension_id;
   result->profile = profile;
@@ -186,6 +187,7 @@ WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
       new Manifest(Manifest::INVALID_LOCATION,
                    scoped_ptr<DictionaryValue>(parsed_manifest->DeepCopy())));
   result->skip_install_dialog = true;
+  result->strict_manifest_check = strict_manifest_check;
   return result.Pass();
 }
 
@@ -238,8 +240,7 @@ void WebstoreInstaller::Start() {
                  base::Bind(&WebstoreInstaller::StartDownload, this)));
 
   std::string name;
-  if (!approval_->manifest->value()->GetString(extension_manifest_keys::kName,
-                                               &name)) {
+  if (!approval_->manifest->value()->GetString(manifest_keys::kName, &name)) {
     NOTREACHED();
   }
   extensions::InstallTracker* tracker =
@@ -435,9 +436,9 @@ void WebstoreInstaller::StartDownload(const base::FilePath& file) {
       render_view_host_routing_id ,
       resource_context));
   params->set_file_path(file);
-  if (controller_->GetActiveEntry())
+  if (controller_->GetVisibleEntry())
     params->set_referrer(
-        content::Referrer(controller_->GetActiveEntry()->GetURL(),
+        content::Referrer(controller_->GetVisibleEntry()->GetURL(),
                           WebKit::WebReferrerPolicyDefault));
   params->set_callback(base::Bind(&WebstoreInstaller::OnDownloadStarted, this));
   download_manager->DownloadUrl(params.Pass());

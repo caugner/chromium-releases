@@ -37,11 +37,9 @@ class CryptohomeClient;
 class DebugDaemonClient;
 class GsmSMSClient;
 class IBusClient;
-class IBusConfigClient;
 class IBusEngineFactoryService;
 class IBusEngineService;
 class IBusInputContextClient;
-class IBusPanelService;
 class ImageBurnerClient;
 class IntrospectableClient;
 class ModemMessagingClient;
@@ -131,12 +129,10 @@ class CHROMEOS_EXPORT DBusThreadManager {
   virtual DebugDaemonClient* GetDebugDaemonClient() = 0;
   virtual GsmSMSClient* GetGsmSMSClient() = 0;
   virtual IBusClient* GetIBusClient() = 0;
-  virtual IBusConfigClient* GetIBusConfigClient() = 0;
   virtual IBusEngineFactoryService* GetIBusEngineFactoryService() = 0;
   virtual IBusEngineService* GetIBusEngineService(
       const dbus::ObjectPath& object_path) = 0;
   virtual IBusInputContextClient* GetIBusInputContextClient() = 0;
-  virtual IBusPanelService* GetIBusPanelService() = 0;
   virtual ImageBurnerClient* GetImageBurnerClient() = 0;
   virtual IntrospectableClient* GetIntrospectableClient() = 0;
   virtual ModemMessagingClient* GetModemMessagingClient() = 0;

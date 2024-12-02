@@ -10,15 +10,14 @@
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
-#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_image.h"
 #include "chrome/browser/chromeos/login/user_image_loader.h"
-#include "chrome/browser/chromeos/system/timezone_settings.h"
-#include "chromeos/dbus/power_manager_client.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
@@ -65,9 +64,7 @@ extern const char kThumbnailWallpaperSubDir[];
 
 // This class maintains wallpapers for users who have logged into this Chrome
 // OS device.
-class WallpaperManager: public system::TimezoneSettings::Observer,
-                        public chromeos::PowerManagerClient::Observer,
-                        public content::NotificationObserver {
+class WallpaperManager: public content::NotificationObserver {
  public:
   // For testing.
   class TestApi {
@@ -122,14 +119,6 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // Returns filepath to save original custom wallpaper for the given user.
   base::FilePath GetOriginalWallpaperPathForUser(const std::string& username);
 
-  // Returns small resolution custom wallpaper filepath for the given user when
-  // |is_small| is ture. Otherwise, returns large resolution custom wallpaper
-  // path.
-  // TODO(bshe): Remove this function when all custom wallpapers moved to the
-  // new direcotry. crbug.com/174925
-  base::FilePath GetWallpaperPathForUser(const std::string& username,
-                                         bool is_small);
-
   // Gets wallpaper information of logged in user.
   bool GetLoggedInUserWallpaperInfo(WallpaperInfo* info);
 
@@ -162,10 +151,6 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
                               ash::WallpaperLayout layout,
                               int preferred_width,
                               int preferred_height);
-
-  // Starts a one shot timer which calls BatchUpdateWallpaper at next midnight.
-  // Cancel any previous timer if any.
-  void RestartTimer();
 
   // Saves custom wallpaper to file, post task to generate thumbnail and updates
   // local state preferences.
@@ -210,11 +195,6 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // The number of wallpapers have loaded. For test only.
   int loaded_wallpapers() const { return loaded_wallpapers_; }
 
-  // Change the wallpapers for users who choose DAILY wallpaper type. Updates
-  // current wallpaper if it changed. This function should be called at exactly
-  // at 0am if chromeos device is on.
-  void BatchUpdateWallpaper();
-
   // Cache some (or all) logged in users' wallpapers to memory at login
   // screen. It should not compete with first wallpaper loading when boot
   // up/initialize login WebUI page.
@@ -248,14 +228,6 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   // Gets the CommandLine representing the current process's command line.
   CommandLine* GetComandLine();
 
-  // Loads custom wallpaper from old places and triggers move all custom
-  // wallpapers to new places.
-  // TODO(bshe): Remove this function when all custom wallpapers moved to the
-  // new direcotry. crbug.com/174925
-  void FallbackToOldCustomWallpaper(const std::string& email,
-                                    const WallpaperInfo& info,
-                                    bool update_wallpaper);
-
   // Initialize wallpaper of registered device after device policy is trusted.
   // Note that before device is enrolled, it proceeds with untrusted setting.
   void InitializeRegisteredDeviceWallpaper();
@@ -265,28 +237,6 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   void LoadWallpaper(const std::string& email,
                      const WallpaperInfo& info,
                      bool update_wallpaper);
-
-  // Gets UserList and starts MoveCustomWallpapersOnWorker().
-  // Must be called on UI thread.
-  // TODO(bshe): Remove this function when all custom wallpapers moved to the
-  // new direcotry. crbug.com/174925
-  void MoveCustomWallpapers();
-
-  // Move old custom wallpapers to new places for |users|.
-  // Must execute on wallpaper sequenced worker thread.
-  // TODO(bshe): Remove this function when all custom wallpapers moved to the
-  // new direcotry. crbug.com/174925
-  void MoveCustomWallpapersOnWorker(const UserList& users);
-
-  // Gets |email|'s custom wallpaper at |wallpaper_path|. Falls back on original
-  // custom wallpaper. When |update_wallpaper| is true, sets wallpaper to the
-  // loaded wallpaper. Must run on wallpaper sequenced worker thread.
-  // TODO(bshe): Remove this function when all custom wallpapers moved to the
-  // new direcotry. crbug.com/174925
-  void GetCustomWallpaperInternalOld(const std::string& email,
-                                     const WallpaperInfo& info,
-                                     const base::FilePath& wallpaper_path,
-                                     bool update_wallpaper);
 
   // Gets |email|'s custom wallpaper at |wallpaper_path|. Falls back on original
   // custom wallpaper. When |update_wallpaper| is true, sets wallpaper to the
@@ -337,15 +287,6 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
                  bool update_wallpaper,
                  const base::FilePath& wallpaper_path);
 
-  // Overridden from chromeos::PowerManagerObserver.
-  virtual void SystemResumed(const base::TimeDelta& sleep_duration) OVERRIDE;
-
-  // Overridden from system::TimezoneSettings::Observer.
-  virtual void TimezoneChanged(const icu::TimeZone& timezone) OVERRIDE;
-
-  // True if wallpaper manager is not observering other objects.
-  bool no_observers_;
-
   // The number of loaded wallpapers.
   int loaded_wallpapers_;
 
@@ -375,11 +316,12 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
 
   bool should_cache_wallpaper_;
 
+  scoped_ptr<CrosSettings::ObserverSubscription>
+      show_user_name_on_signin_subscription_;
+
   base::WeakPtrFactory<WallpaperManager> weak_factory_;
 
   content::NotificationRegistrar registrar_;
-
-  base::OneShotTimer<WallpaperManager> timer_;
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperManager);
 };

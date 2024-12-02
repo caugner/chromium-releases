@@ -6,10 +6,10 @@
 
 #include "base/files/file_path.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
+#include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/extensions/file_manager/fileapi_util.h"
+#include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -24,7 +24,6 @@
 #include "webkit/browser/fileapi/file_system_url.h"
 
 using content::BrowserThread;
-using google_apis::InstalledApp;
 
 namespace file_manager {
 namespace util {
@@ -49,8 +48,8 @@ void ContinueGetSelectedFileInfo(Profile* profile,
 void GetSelectedFileInfoInternal(Profile* profile,
                                  scoped_ptr<GetSelectedFileInfoParams> params) {
   DCHECK(profile);
-  drive::DriveIntegrationService* integration_service =
-      drive::DriveIntegrationServiceFactory::GetForProfile(profile);
+  drive::FileSystemInterface* file_system =
+      drive::util::GetFileSystemByProfile(profile);
 
   for (size_t i = params->selected_files.size();
        i < params->file_paths.size(); ++i) {
@@ -60,8 +59,8 @@ void GetSelectedFileInfoInternal(Profile* profile,
       params->selected_files.push_back(
           ui::SelectedFileInfo(file_path, base::FilePath()));
     } else {
-      // |integration_service| is NULL if Drive is disabled.
-      if (!integration_service) {
+      // |file_system| is NULL if Drive is disabled.
+      if (!file_system) {
         ContinueGetSelectedFileInfo(profile,
                                     params.Pass(),
                                     drive::FILE_ERROR_FAILED,
@@ -77,14 +76,14 @@ void GetSelectedFileInfoInternal(Profile* profile,
               ui::SelectedFileInfo(file_path, base::FilePath()));
           break;
         case NEED_LOCAL_PATH_FOR_OPENING:
-          integration_service->file_system()->GetFileByPath(
+          file_system->GetFileByPath(
               drive::util::ExtractDrivePath(file_path),
               base::Bind(&ContinueGetSelectedFileInfo,
                          profile,
                          base::Passed(&params)));
           return;  // Remaining work is done in ContinueGetSelectedFileInfo.
         case NEED_LOCAL_PATH_FOR_SAVING:
-          integration_service->file_system()->GetFileByPathForSaving(
+          file_system->GetFileByPathForSaving(
               drive::util::ExtractDrivePath(file_path),
               base::Bind(&ContinueGetSelectedFileInfo,
                          profile,
@@ -119,6 +118,23 @@ void ContinueGetSelectedFileInfo(Profile* profile,
 
 }  // namespace
 
+// Returns string representaion of VolumeType.
+std::string VolumeTypeToStringEnum(VolumeType type) {
+  switch (type) {
+    case VOLUME_TYPE_GOOGLE_DRIVE:
+      return "drive";
+    case VOLUME_TYPE_DOWNLOADS_DIRECTORY:
+      return "downloads";
+    case VOLUME_TYPE_REMOVABLE_DISK_PARTITION:
+      return "removable";
+    case VOLUME_TYPE_MOUNTED_ARCHIVE_FILE:
+      return "archive";
+  }
+
+  NOTREACHED();
+  return "";
+}
+
 int32 GetTabId(ExtensionFunctionDispatcher* dispatcher) {
   if (!dispatcher) {
     LOG(WARNING) << "No dispatcher";
@@ -137,19 +153,6 @@ int32 GetTabId(ExtensionFunctionDispatcher* dispatcher) {
   return ExtensionTabUtil::GetTabId(web_contents);
 }
 
-GURL FindPreferredIcon(const InstalledApp::IconList& icons,
-                       int preferred_size) {
-  GURL result;
-  if (icons.empty())
-    return result;
-  result = icons.rbegin()->second;
-  for (InstalledApp::IconList::const_reverse_iterator iter = icons.rbegin();
-       iter != icons.rend() && iter->first >= preferred_size; ++iter) {
-    result = iter->second;
-  }
-  return result;
-}
-
 base::FilePath GetLocalPathFromURL(
     content::RenderViewHost* render_view_host,
     Profile* profile,
@@ -158,7 +161,7 @@ base::FilePath GetLocalPathFromURL(
   DCHECK(profile);
 
   scoped_refptr<fileapi::FileSystemContext> file_system_context =
-      fileapi_util::GetFileSystemContextForRenderViewHost(
+      util::GetFileSystemContextForRenderViewHost(
           profile, render_view_host);
 
   const fileapi::FileSystemURL filesystem_url(

@@ -37,7 +37,7 @@
 
   // If the first notification doesn't have an arrow, reserve empty space.
   if (![[notificationControllers_ objectAtIndex:0] hasArrow])
-    preferredSize.height += kArrowHeight;
+    preferredSize.height += autofill::kArrowHeight;
 
   for (AutofillNotificationController* delegate in
        notificationControllers_.get())
@@ -53,7 +53,7 @@
   NSRect remaining = [[self view] bounds];
 
   if (![[notificationControllers_ objectAtIndex:0] hasArrow])
-    remaining.size.height -= kArrowHeight;
+    remaining.size.height -= autofill::kArrowHeight;
 
   for (AutofillNotificationController* delegate in
        notificationControllers_.get()) {
@@ -85,12 +85,11 @@
 
     // Add optional checkbox.
     if (notification.HasCheckbox()) {
-      DCHECK(checkboxNotification_);
+      // No more than one notification with a checkbox.
+      DCHECK(!checkboxNotification_);
       checkboxNotification_.reset(
           new autofill::DialogNotification(notification));
       [notificationController setHasCheckbox:YES];
-      if (!notification.interactive())
-          [[notificationController checkbox] setEnabled:FALSE];
       [[notificationController checkbox] setState:
           (notification.checked() ? NSOnState : NSOffState)];
       [[notificationController checkbox] setTarget:self];

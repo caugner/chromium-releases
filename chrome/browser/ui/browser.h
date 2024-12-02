@@ -20,7 +20,6 @@
 #include "base/strings/string16.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper_delegate.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_delegate.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -98,7 +97,6 @@ class Browser : public TabStripModelObserver,
                 public CoreTabHelperDelegate,
                 public SearchEngineTabHelperDelegate,
                 public ChromeWebModalDialogManagerDelegate,
-                public BlockedContentTabHelperDelegate,
                 public BookmarkTabHelperDelegate,
                 public ZoomObserver,
                 public content::PageNavigator,
@@ -239,6 +237,11 @@ class Browser : public TabStripModelObserver,
   BrowserWindow* window() const { return window_; }
   ToolbarModel* toolbar_model() { return toolbar_model_.get(); }
   const ToolbarModel* toolbar_model() const { return toolbar_model_.get(); }
+#if defined(UNIT_TEST)
+  void swap_toolbar_models(scoped_ptr<ToolbarModel>* toolbar_model) {
+    toolbar_model->swap(toolbar_model_);
+  }
+#endif
   TabStripModel* tab_strip_model() const { return tab_strip_model_.get(); }
   chrome::BrowserCommandController* command_controller() {
     return command_controller_.get();
@@ -288,8 +291,27 @@ class Browser : public TabStripModelObserver,
 
   // OnBeforeUnload handling //////////////////////////////////////////////////
 
-  // Gives beforeunload handlers the chance to cancel the close.
+  // Gives beforeunload handlers the chance to cancel the close. Returns whether
+  // to proceed with the close. If called while the process begun by
+  // CallBeforeUnloadHandlers is in progress, returns false without taking
+  // action.
   bool ShouldCloseWindow();
+
+  // Begins the process of confirming whether the associated browser can be
+  // closed. If there are no tabs with beforeunload handlers it will immediately
+  // return false. Otherwise, it starts prompting the user, returns true and
+  // will call |on_close_confirmed| with the result of the user's decision.
+  // After calling this function, if the window will not be closed, call
+  // ResetBeforeUnloadHandlers() to reset all beforeunload handlers; calling
+  // this function multiple times without an intervening call to
+  // ResetBeforeUnloadHandlers() will run only the beforeunload handlers
+  // registered since the previous call.
+  bool CallBeforeUnloadHandlers(
+      const base::Callback<void(bool)>& on_close_confirmed);
+
+  // Clears the results of any beforeunload confirmation dialogs triggered by a
+  // CallBeforeUnloadHandlers call.
+  void ResetBeforeUnloadHandlers();
 
   // Figure out if there are tabs that have beforeunload handlers.
   // It starts beforeunload/unload processing as a side-effect.
@@ -572,11 +594,8 @@ class Browser : public TabStripModelObserver,
       WindowContainerType window_container_type,
       const string16& frame_name,
       const GURL& target_url,
-      const content::Referrer& referrer,
-      WindowOpenDisposition disposition,
-      const WebKit::WebWindowFeatures& features,
-      bool user_action,
-      bool opener_suppressed) OVERRIDE;
+      const std::string& partition_id,
+      content::SessionStorageNamespace* session_storage_namespace) OVERRIDE;
   virtual void WebContentsCreated(content::WebContents* source_contents,
                                   int64 source_frame_id,
                                   const string16& frame_name,
@@ -599,6 +618,7 @@ class Browser : public TabStripModelObserver,
   virtual void EnumerateDirectory(content::WebContents* web_contents,
                                   int request_id,
                                   const base::FilePath& path) OVERRIDE;
+  virtual bool EmbedsFullscreenWidget() const OVERRIDE;
   virtual void ToggleFullscreenModeForTab(content::WebContents* web_contents,
       bool enter_fullscreen) OVERRIDE;
   virtual bool IsFullscreenForTabOrPending(
@@ -632,6 +652,8 @@ class Browser : public TabStripModelObserver,
       const GURL& url,
       const base::FilePath& plugin_path,
       const base::Callback<void(bool)>& callback) OVERRIDE;
+  virtual gfx::Size GetSizeForNewRenderView(
+      const content::WebContents* web_contents) const OVERRIDE;
 
   // Overridden from CoreTabHelperDelegate:
   // Note that the caller is responsible for deleting |old_contents|.
@@ -651,10 +673,6 @@ class Browser : public TabStripModelObserver,
                                      bool blocked) OVERRIDE;
   virtual web_modal::WebContentsModalDialogHost*
       GetWebContentsModalDialogHost() OVERRIDE;
-
-  // Overridden from BlockedContentTabHelperDelegate:
-  virtual content::WebContents* GetConstrainingWebContents(
-      content::WebContents* source) OVERRIDE;
 
   // Overridden from BookmarkTabHelperDelegate:
   virtual void URLStarredChanged(content::WebContents* web_contents,
@@ -780,10 +798,13 @@ class Browser : public TabStripModelObserver,
 
   // Creates a BackgroundContents if appropriate; return true if one was
   // created.
-  bool MaybeCreateBackgroundContents(int route_id,
-                                     content::WebContents* opener_web_contents,
-                                     const string16& frame_name,
-                                     const GURL& target_url);
+  bool MaybeCreateBackgroundContents(
+      int route_id,
+      content::WebContents* opener_web_contents,
+      const string16& frame_name,
+      const GURL& target_url,
+      const std::string& partition_id,
+      content::SessionStorageNamespace* session_storage_namespace);
 
   // Data members /////////////////////////////////////////////////////////////
 

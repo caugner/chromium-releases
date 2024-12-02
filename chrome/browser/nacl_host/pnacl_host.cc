@@ -45,6 +45,12 @@ PnaclHost::PendingTranslation::PendingTranslation()
       cache_info(nacl::PnaclCacheInfo()) {}
 PnaclHost::PendingTranslation::~PendingTranslation() {}
 
+bool PnaclHost::TranslationMayBeCached(
+    const PendingTranslationMap::iterator& entry) {
+  return !entry->second.is_incognito &&
+         !entry->second.cache_info.has_no_store_header;
+}
+
 /////////////////////////////////////// Initialization
 
 static base::FilePath GetCachePath() {
@@ -90,9 +96,8 @@ void PnaclHost::Init() {
     return;
   disk_cache_.reset(new pnacl::PnaclTranslationCache());
   cache_state_ = CacheInitializing;
-  disk_cache_->InitCache(
+  disk_cache_->InitOnDisk(
       cache_path,
-      false,
       base::Bind(&PnaclHost::OnCacheInitialized, weak_factory_.GetWeakPtr()));
 }
 
@@ -103,9 +108,7 @@ void PnaclHost::InitForTest(base::FilePath temp_dir) {
   disk_cache_.reset(new pnacl::PnaclTranslationCache());
   cache_state_ = CacheInitializing;
   temp_dir_ = temp_dir;
-  disk_cache_->InitCache(
-      temp_dir,
-      true,  // Use in-memory backend
+  disk_cache_->InitInMemory(
       base::Bind(&PnaclHost::OnCacheInitialized, weak_factory_.GetWeakPtr()));
 }
 
@@ -113,41 +116,41 @@ void PnaclHost::InitForTest(base::FilePath temp_dir) {
 
 // Create a temporary file on the blocking pool
 // static
-base::PlatformFile PnaclHost::DoCreateTemporaryFile(base::FilePath temp_dir) {
+void PnaclHost::DoCreateTemporaryFile(base::FilePath temp_dir,
+                                      TempFileCallback cb) {
   DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
   base::FilePath file_path;
+  base::PlatformFile file_handle(base::kInvalidPlatformFileValue);
   bool rv = temp_dir.empty()
                 ? file_util::CreateTemporaryFile(&file_path)
                 : file_util::CreateTemporaryFileInDir(temp_dir, &file_path);
-
   if (!rv) {
-    LOG(ERROR) << "PnaclHost:: Temp file creation failed.";
-    return base::kInvalidPlatformFileValue;
-  }
-  base::PlatformFileError error;
-  base::PlatformFile file_handle(base::CreatePlatformFile(
-      file_path,
-      base::PLATFORM_FILE_CREATE_ALWAYS | base::PLATFORM_FILE_READ |
-          base::PLATFORM_FILE_WRITE | base::PLATFORM_FILE_TEMPORARY |
-          base::PLATFORM_FILE_DELETE_ON_CLOSE,
-      NULL,
-      &error));
+    PLOG(ERROR) << "Temp file creation failed.";
+  } else {
+    base::PlatformFileError error;
+    file_handle = base::CreatePlatformFile(
+        file_path,
+        base::PLATFORM_FILE_CREATE_ALWAYS | base::PLATFORM_FILE_READ |
+            base::PLATFORM_FILE_WRITE | base::PLATFORM_FILE_TEMPORARY |
+            base::PLATFORM_FILE_DELETE_ON_CLOSE,
+        NULL,
+        &error);
 
-  if (error != base::PLATFORM_FILE_OK) {
-    LOG(ERROR) << "PnaclHost: Temp file open failed: " << error;
-    return base::kInvalidPlatformFileValue;
+    if (error != base::PLATFORM_FILE_OK) {
+      PLOG(ERROR) << "Temp file open failed: " << error;
+      file_handle = base::kInvalidPlatformFileValue;
+    }
   }
-
-  return file_handle;
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE, base::Bind(cb, file_handle));
 }
 
 void PnaclHost::CreateTemporaryFile(TempFileCallback cb) {
-  if (!base::PostTaskAndReplyWithResult(
-          BrowserThread::GetBlockingPool(),
-          FROM_HERE,
-          base::Bind(&PnaclHost::DoCreateTemporaryFile, temp_dir_),
-          cb)) {
+  if (!BrowserThread::PostBlockingPoolSequencedTask(
+           "PnaclHostCreateTempFile",
+           FROM_HERE,
+           base::Bind(&PnaclHost::DoCreateTemporaryFile, temp_dir_, cb))) {
     DCHECK(thread_checker_.CalledOnValidThread());
     cb.Run(base::kInvalidPlatformFileValue);
   }
@@ -187,13 +190,13 @@ void PnaclHost::GetNexeFd(int render_process_id,
   PendingTranslationMap::iterator entry = pending_translations_.find(id);
   if (entry != pending_translations_.end()) {
     // Existing translation must have been abandonded. Clean it up.
-    LOG(ERROR) << "PnaclHost::GetNexeFd for already-pending translation";
+    LOG(ERROR) << "GetNexeFd for already-pending translation";
     pending_translations_.erase(entry);
   }
 
   std::string cache_key(disk_cache_->GetKey(cache_info));
   if (cache_key.empty()) {
-    LOG(ERROR) << "PnaclHost::GetNexeFd: Invalid cache info";
+    LOG(ERROR) << "GetNexeFd: Invalid cache info";
     cb.Run(base::kInvalidPlatformFileValue, false);
     return;
   }
@@ -235,7 +238,7 @@ void PnaclHost::OnCacheQueryReturn(
   DCHECK(thread_checker_.CalledOnValidThread());
   PendingTranslationMap::iterator entry(pending_translations_.find(id));
   if (entry == pending_translations_.end()) {
-    LOG(ERROR) << "PnaclHost::OnCacheQueryReturn: id not found";
+    LOG(ERROR) << "OnCacheQueryReturn: id not found";
     return;
   }
   PendingTranslation* pt = &entry->second;
@@ -258,7 +261,7 @@ void PnaclHost::OnTempFileReturn(const TranslationID& id,
   if (entry == pending_translations_.end()) {
     // The renderer may have signaled an error or closed while the temp
     // file was being created.
-    LOG(ERROR) << "PnaclHost::OnTempFileReturn: id not found";
+    LOG(ERROR) << "OnTempFileReturn: id not found";
     BrowserThread::PostBlockingPoolTask(
         FROM_HERE, base::Bind(base::IgnoreResult(base::ClosePlatformFile), fd));
     return;
@@ -266,13 +269,13 @@ void PnaclHost::OnTempFileReturn(const TranslationID& id,
   if (fd == base::kInvalidPlatformFileValue) {
     // This translation will fail, but we need to retry any translation
     // waiting for its result.
-    LOG(ERROR) << "PnaclHost::OnTempFileReturn: temp file creation failed";
+    LOG(ERROR) << "OnTempFileReturn: temp file creation failed";
     std::string key(entry->second.cache_key);
-    bool is_incognito = entry->second.is_incognito;
     entry->second.callback.Run(fd, false);
+    bool may_be_cached = TranslationMayBeCached(entry);
     pending_translations_.erase(entry);
-    // No translations will be waiting for an incongnito translation
-    if (!is_incognito)
+    // No translations will be waiting for entries that will not be stored.
+    if (may_be_cached)
       RequeryMatchingTranslations(key);
     return;
   }
@@ -299,9 +302,9 @@ void PnaclHost::CheckCacheQueryReady(
       if (it->second.cache_key == entry->second.cache_key &&
           // and it's not this translation,
           it->first != entry->first &&
-          // and it's not incognito,
-          !it->second.is_incognito &&
-          // and if it's already gotten past this check and returned the miss.
+          // and it can be stored in the cache,
+          TranslationMayBeCached(it) &&
+          // and it's already gotten past this check and returned the miss.
           it->second.got_cache_reply &&
           it->second.got_nexe_fd) {
         return;
@@ -312,13 +315,13 @@ void PnaclHost::CheckCacheQueryReady(
   }
 
   if (!base::PostTaskAndReplyWithResult(
-          BrowserThread::GetBlockingPool(),
-          FROM_HERE,
-          base::Bind(
-              &PnaclHost::CopyBufferToFile, pt->nexe_fd, pt->nexe_read_buffer),
-          base::Bind(&PnaclHost::OnBufferCopiedToTempFile,
-                     weak_factory_.GetWeakPtr(),
-                     entry->first))) {
+           BrowserThread::GetBlockingPool(),
+           FROM_HERE,
+           base::Bind(
+               &PnaclHost::CopyBufferToFile, pt->nexe_fd, pt->nexe_read_buffer),
+           base::Bind(&PnaclHost::OnBufferCopiedToTempFile,
+                      weak_factory_.GetWeakPtr(),
+                      entry->first))) {
     pt->callback.Run(base::kInvalidPlatformFileValue, false);
   }
 }
@@ -345,14 +348,14 @@ scoped_refptr<net::DrainableIOBuffer> PnaclHost::CopyFileToBuffer(
   bool error = false;
   if (!base::GetPlatformFileInfo(fd, &info) ||
       info.size >= std::numeric_limits<int>::max()) {
-    LOG(ERROR) << "PnaclHost: GetPlatformFileInfo failed";
+    PLOG(ERROR) << "GetPlatformFileInfo failed";
     error = true;
   } else {
     buffer = new net::DrainableIOBuffer(
         new net::IOBuffer(static_cast<int>(info.size)), info.size);
     if (base::ReadPlatformFile(fd, 0, buffer->data(), buffer->size()) !=
         info.size) {
-      LOG(ERROR) << "PnaclHost: CopyFileToBuffer write failed";
+      PLOG(ERROR) << "CopyFileToBuffer file read failed";
       error = true;
     }
   }
@@ -384,16 +387,16 @@ void PnaclHost::TranslationFinished(int render_process_id,
   // TODO(dschuff): use a separate in-memory cache for incognito
   // translations.
   if (!entry->second.got_nexe_fd || !entry->second.got_cache_reply ||
-      !success || entry->second.is_incognito) {
+      !success || !TranslationMayBeCached(entry)) {
     store_nexe = false;
   } else if (!base::PostTaskAndReplyWithResult(
-                 BrowserThread::GetBlockingPool(),
-                 FROM_HERE,
-                 base::Bind(&PnaclHost::CopyFileToBuffer,
-                            entry->second.nexe_fd),
-                 base::Bind(&PnaclHost::StoreTranslatedNexe,
-                            weak_factory_.GetWeakPtr(),
-                            id))) {
+                  BrowserThread::GetBlockingPool(),
+                  FROM_HERE,
+                  base::Bind(&PnaclHost::CopyFileToBuffer,
+                             entry->second.nexe_fd),
+                  base::Bind(&PnaclHost::StoreTranslatedNexe,
+                             weak_factory_.GetWeakPtr(),
+                             id))) {
     store_nexe = false;
   }
 
@@ -477,7 +480,10 @@ void PnaclHost::RequeryMatchingTranslations(const std::string& key) {
 // static
 int PnaclHost::CopyBufferToFile(base::PlatformFile fd,
                                 scoped_refptr<net::DrainableIOBuffer> buffer) {
-  return base::WritePlatformFile(fd, 0, buffer->data(), buffer->size());
+  int rv = base::WritePlatformFile(fd, 0, buffer->data(), buffer->size());
+  if (rv == -1)
+    PLOG(ERROR) << "CopyBufferToFile write error";
+  return rv;
 }
 
 void PnaclHost::OnBufferCopiedToTempFile(const TranslationID& id,
@@ -489,7 +495,6 @@ void PnaclHost::OnBufferCopiedToTempFile(const TranslationID& id,
   }
   if (file_error == -1) {
     // Write error on the temp file. Request a new file and start over.
-    LOG(ERROR) << "PnaclHost::OnBufferCopiedToTempFile write error";
     BrowserThread::PostBlockingPoolTask(
         FROM_HERE,
         base::Bind(base::IgnoreResult(base::ClosePlatformFile),
@@ -523,10 +528,10 @@ void PnaclHost::RendererClosing(int render_process_id) {
           base::Bind(base::IgnoreResult(base::ClosePlatformFile),
                      to_erase->second.nexe_fd));
       std::string key(to_erase->second.cache_key);
-      bool is_incognito = to_erase->second.is_incognito;
+      bool may_be_cached = TranslationMayBeCached(to_erase);
       pending_translations_.erase(to_erase);
-      // No translations will be blocked waiting for an incongnito translation
-      if (!is_incognito)
+      // No translations will be waiting for entries that will not be stored.
+      if (may_be_cached)
         RequeryMatchingTranslations(key);
     }
   }

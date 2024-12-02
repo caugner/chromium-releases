@@ -8,15 +8,13 @@
 #include "base/logging.h"
 #include "chrome/browser/media_galleries/fileapi/itunes_data_provider.h"
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
-#include "chrome/browser/media_galleries/fileapi/picasa/picasa_data_provider.h"
+#include "chrome/browser/media_galleries/fileapi/picasa_data_provider.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "webkit/browser/fileapi/isolated_context.h"
 
 using base::Bind;
 using fileapi::IsolatedContext;
-
-namespace chrome {
 
 namespace {
 
@@ -181,5 +179,3 @@ void ImportedMediaGalleryRegistry::RevokeITunesFileSystem() {
   itunes_data_provider_.reset();
 }
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
-
-}  // namespace chrome

@@ -240,7 +240,8 @@ bool TabSpecificContentSettings::IsContentAllowed(
       content_type != CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA &&
       content_type != CONTENT_SETTINGS_TYPE_PPAPI_BROKER &&
       content_type != CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS &&
-      content_type != CONTENT_SETTINGS_TYPE_MIDI_SYSEX) {
+      content_type != CONTENT_SETTINGS_TYPE_MIDI_SYSEX &&
+      content_type != CONTENT_SETTINGS_TYPE_SAVE_PASSWORD) {
     return false;
   }
 
@@ -277,11 +278,18 @@ void TabSpecificContentSettings::OnContentBlocked(
   // Media is different from other content setting types since it allows new
   // setting to kick in without reloading the page, and the UI for media is
   // always reflecting the newest permission setting.
-  if (type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC ||
-      type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA)
-    content_allowed_[type] = false;
-  else
-    content_allowed_[type] = true;
+  switch (type) {
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
+#if defined(OS_ANDROID)
+    case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
+#endif
+      content_allowed_[type] = false;
+      break;
+    default:
+      content_allowed_[type] = true;
+      break;
+  }
 
   // Unless UI for resource content settings is enabled, ignore the resource
   // identifier.
@@ -295,7 +303,7 @@ void TabSpecificContentSettings::OnContentBlocked(
   if (!identifier.empty())
     AddBlockedResource(type, identifier);
 
-#if defined (OS_ANDROID)
+#if defined(OS_ANDROID)
   if (type == CONTENT_SETTINGS_TYPE_POPUPS) {
     // For Android we do not have a persistent button that will always be
     // visible for blocked popups.  Instead we have info bars which could be
@@ -320,13 +328,21 @@ void TabSpecificContentSettings::OnContentAllowed(ContentSettingsType type) {
   DCHECK(type != CONTENT_SETTINGS_TYPE_GEOLOCATION)
       << "Geolocation settings handled by OnGeolocationPermissionSet";
   bool access_changed = false;
-  if (type == CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
-    // The setting for media is overwritten here because media does not need to
-    // reload the page to have the new setting kick in. See issue/175993.
-    if (content_blocked_[type]) {
-      content_blocked_[type] = false;
-      access_changed = true;
-    }
+  switch (type) {
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
+#if defined(OS_ANDROID)
+    case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
+#endif
+      // The setting for media is overwritten here because media does not need
+      // to reload the page to have the new setting kick in. See issue/175993.
+      if (content_blocked_[type]) {
+        content_blocked_[type] = false;
+        access_changed = true;
+      }
+      break;
+    default:
+      break;
   }
 
   if (!content_allowed_[type]) {
@@ -460,6 +476,34 @@ void TabSpecificContentSettings::OnGeolocationPermissionSet(
       content::NotificationService::NoDetails());
 }
 
+#if defined(OS_ANDROID)
+void TabSpecificContentSettings::OnProtectedMediaIdentifierPermissionSet(
+    const GURL& requesting_origin,
+    bool allowed) {
+  if (allowed) {
+    OnContentAllowed(CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER);
+  } else {
+    OnContentBlocked(CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER,
+                     std::string());
+  }
+}
+#endif
+
+void TabSpecificContentSettings::OnPasswordSubmitted(
+    PasswordFormManager* form_manager) {
+  form_manager_.reset(form_manager);
+  OnContentAllowed(CONTENT_SETTINGS_TYPE_SAVE_PASSWORD);
+  NotifySiteDataObservers();
+}
+
+TabSpecificContentSettings::PasswordSavingState
+TabSpecificContentSettings::GetPasswordSavingState() const {
+  if (IsContentAllowed(CONTENT_SETTINGS_TYPE_SAVE_PASSWORD))
+    return PASSWORD_TO_BE_SAVED;
+  else
+    return NO_PASSWORD_TO_BE_SAVED;
+}
+
 TabSpecificContentSettings::MicrophoneCameraState
 TabSpecificContentSettings::GetMicrophoneCameraState() const {
   if (IsContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) &&
@@ -483,20 +527,44 @@ TabSpecificContentSettings::GetMicrophoneCameraState() const {
   return MICROPHONE_CAMERA_NOT_ACCESSED;
 }
 
-void TabSpecificContentSettings::OnMicrophoneAccessed() {
-  OnContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
-}
+void TabSpecificContentSettings::OnMediaStreamPermissionSet(
+    const GURL& request_origin,
+    const MediaStreamDevicesController::MediaStreamTypePermissionMap&
+        request_permissions) {
+  media_stream_access_origin_ = request_origin;
 
-void TabSpecificContentSettings::OnMicrophoneAccessBlocked() {
-  OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string());
-}
+  MediaStreamDevicesController::MediaStreamTypePermissionMap::const_iterator
+      it = request_permissions.find(content::MEDIA_DEVICE_AUDIO_CAPTURE);
+  if (it != request_permissions.end()) {
+    switch (it->second) {
+      case MediaStreamDevicesController::MEDIA_ALLOWED:
+        OnContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
+        break;
+      // TODO(grunell): UI should show for what reason access has been blocked.
+      case MediaStreamDevicesController::MEDIA_BLOCKED_BY_POLICY:
+      case MediaStreamDevicesController::MEDIA_BLOCKED_BY_USER_SETTING:
+      case MediaStreamDevicesController::MEDIA_BLOCKED_BY_USER:
+        OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+                         std::string());
+        break;
+    }
+  }
 
-void TabSpecificContentSettings::OnCameraAccessed() {
-  OnContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
-}
-
-void TabSpecificContentSettings::OnCameraAccessBlocked() {
-  OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string());
+  it = request_permissions.find(content::MEDIA_DEVICE_VIDEO_CAPTURE);
+  if (it != request_permissions.end()) {
+    switch (it->second) {
+      case MediaStreamDevicesController::MEDIA_ALLOWED:
+        OnContentAllowed(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
+        break;
+      // TODO(grunell): UI should show for what reason access has been blocked.
+      case MediaStreamDevicesController::MEDIA_BLOCKED_BY_POLICY:
+      case MediaStreamDevicesController::MEDIA_BLOCKED_BY_USER_SETTING:
+      case MediaStreamDevicesController::MEDIA_BLOCKED_BY_USER:
+        OnContentBlocked(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+                         std::string());
+        break;
+    }
+  }
 }
 
 void TabSpecificContentSettings::OnMIDISysExAccessed(
@@ -605,6 +673,8 @@ bool TabSpecificContentSettings::OnMessageReceived(
 void TabSpecificContentSettings::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
+  if (form_manager_)
+    form_manager_->ApplyChange();
   if (!details.is_in_page) {
     // Clear "blocked" flags.
     ClearBlockedContentSettingsExceptForCookies();

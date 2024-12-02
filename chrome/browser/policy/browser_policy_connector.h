@@ -23,7 +23,6 @@ class PrefRegistrySimple;
 class PrefService;
 
 namespace net {
-class CertTrustAnchorProvider;
 class URLRequestContextGetter;
 }
 
@@ -56,7 +55,7 @@ class BrowserPolicyConnector {
   // Finalizes the initialization of the connector. This call can be skipped on
   // tests that don't require the full policy system running.
   void Init(PrefService* local_state,
-            scoped_refptr<net::URLRequestContextGetter> request_context);
+            scoped_refptr<net::URLRequestContextGetter> system_request_context);
 
   // Stops the policy providers and cleans up the connector before it can be
   // safely deleted. This must be invoked before the destructor and while the
@@ -111,12 +110,6 @@ class BrowserPolicyConnector {
 #if defined(OS_CHROMEOS)
   AppPackUpdater* GetAppPackUpdater();
 
-  NetworkConfigurationUpdater* network_configuration_updater() {
-    return network_configuration_updater_.get();
-  }
-
-  net::CertTrustAnchorProvider* GetCertTrustAnchorProvider();
-
   DeviceCloudPolicyManagerChromeOS* GetDeviceCloudPolicyManager() {
     return device_cloud_policy_manager_.get();
   }
@@ -138,11 +131,6 @@ class BrowserPolicyConnector {
   // delegate, if there is one.
   void SetUserPolicyDelegate(ConfigurationPolicyProvider* user_policy_provider);
 #endif
-
-  // Allows setting a DeviceManagementService (for injecting mocks in
-  // unit tests).
-  void SetDeviceManagementServiceForTesting(
-      scoped_ptr<DeviceManagementService> service);
 
   // Sets a |provider| that will be included in PolicyServices returned by
   // CreatePolicyService. This is a static method because local state is
@@ -175,7 +163,7 @@ class BrowserPolicyConnector {
   bool is_initialized_;
 
   PrefService* local_state_;
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
+  scoped_refptr<net::URLRequestContextGetter> system_request_context_;
 
   // Used to convert policies to preferences. The providers declared below
   // may trigger policy updates during shutdown, which will result in

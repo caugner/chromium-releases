@@ -16,9 +16,9 @@
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/background/ash_user_wallpaper_delegate.h"
 #include "chrome/browser/chromeos/display/display_preferences.h"
-#include "chrome/browser/chromeos/extensions/file_manager/file_manager_util.h"
 #include "chrome/browser/chromeos/extensions/media_player_api.h"
 #include "chrome/browser/chromeos/extensions/media_player_event_router.h"
+#include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/system/ash_system_tray_delegate.h"
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -26,13 +26,11 @@
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/ui/ash/caps_lock_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/session_state_delegate_chromeos.h"
-#include "chrome/browser/ui/ash/window_positioner.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_switches.h"
@@ -85,19 +83,20 @@ void ChromeShellDelegate::OpenFileManager(bool as_dialog) {
       return;
     }
   } else {
+    using file_manager::kFileManagerAppId;
     Profile* const profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
     const apps::ShellWindowRegistry* const registry =
         apps::ShellWindowRegistry::Get(profile);
     const apps::ShellWindowRegistry::ShellWindowList list =
-        registry->GetShellWindowsForApp(kFileBrowserDomain);
+        registry->GetShellWindowsForApp(kFileManagerAppId);
     if (list.empty()) {
       // Open the new window.
       const ExtensionService* const service = profile->GetExtensionService();
       if (service == NULL ||
-          !service->IsExtensionEnabledForLauncher(kFileBrowserDomain))
+          !service->IsExtensionEnabledForLauncher(kFileManagerAppId))
         return;
       const extensions::Extension* const extension =
-          service->GetInstalledExtension(kFileBrowserDomain);
+          service->GetInstalledExtension(kFileManagerAppId);
       // event_flags = 0 means this invokes the same behavior as the launcher
       // item is clicked without any keyboard modifiers.
       chrome::OpenApplication(
@@ -110,7 +109,7 @@ void ChromeShellDelegate::OpenFileManager(bool as_dialog) {
 }
 
 void ChromeShellDelegate::OpenCrosh() {
-  GURL crosh_url = TerminalExtensionHelper::GetCroshExtensionURL(
+  GURL crosh_url = extensions::TerminalExtensionHelper::GetCroshExtensionURL(
       ProfileManager::GetDefaultProfileOrOffTheRecord());
   if (!crosh_url.is_valid())
     return;

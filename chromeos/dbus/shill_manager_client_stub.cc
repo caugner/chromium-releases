@@ -17,7 +17,6 @@
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_path.h"
-#include "dbus/object_proxy.h"
 #include "dbus/values_util.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -78,12 +77,13 @@ void AppendServicesForType(
 
 ShillManagerClientStub::ShillManagerClientStub()
     : weak_ptr_factory_(this) {
-  SetDefaultProperties();
 }
 
 ShillManagerClientStub::~ShillManagerClientStub() {}
 
 // ShillManagerClient overrides.
+
+void ShillManagerClientStub::Init(dbus::Bus* bus) {}
 
 void ShillManagerClientStub::AddPropertyChangedObserver(
     ShillPropertyChangedObserver* observer) {
@@ -488,17 +488,6 @@ void ShillManagerClientStub::AddServiceToWatchList(
       flimflam::kServiceWatchListProperty, 0);
 }
 
-void ShillManagerClientStub::SetDefaultProperties() {
-  // Stub Technologies.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kDisableStubEthernet)) {
-    AddTechnology(flimflam::kTypeEthernet, true);
-  }
-  AddTechnology(flimflam::kTypeWifi, true);
-  AddTechnology(flimflam::kTypeCellular, true);
-  AddTechnology(flimflam::kTypeWimax, true);
-}
-
 void ShillManagerClientStub::PassStubProperties(
     const DictionaryValueCallback& callback) const {
   scoped_ptr<base::DictionaryValue> stub_properties(
@@ -523,7 +512,7 @@ void ShillManagerClientStub::CallNotifyObserversPropertyChanged(
     int delay_ms) {
   // Avoid unnecessary delayed task if we have no observers (e.g. during
   // initial setup).
-  if (observer_list_.size() == 0)
+  if (!observer_list_.might_have_observers())
     return;
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableStubInteractive)) {

@@ -10,7 +10,6 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/common/metrics/proto/chrome_experiments.pb.h"
-#include "chrome/common/metrics/variations/variations_associated_data.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/http/http_request_headers.h"
 #include "url/gurl.h"
@@ -156,7 +155,7 @@ bool VariationsHttpHeaderProvider::ShouldAppendHeaders(const GURL& url) {
   }
 
   // The below mirrors logic in IsGoogleDomainUrl(), but for youtube.<TLD>.
-  if (!url.is_valid() || !(url.SchemeIs("http") || url.SchemeIs("https")))
+  if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS())
     return false;
 
   const std::string host = url.host();

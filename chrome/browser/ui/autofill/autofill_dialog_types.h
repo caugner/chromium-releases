@@ -10,25 +10,19 @@
 
 #include "base/callback_forward.h"
 #include "base/strings/string16.h"
+#include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/range/range.h"
 #include "ui/gfx/text_constants.h"
+#include "url/gurl.h"
 
 namespace autofill {
 
 class AutofillField;
-
-// The time (in milliseconds) to show the splash page when the dialog is first
-// started.
-extern int const kSplashDisplayDurationMs;
-// The time (in milliseconds) spend fading out the splash image.
-extern int const kSplashFadeOutDurationMs;
-// The time (in milliseconds) spend fading in the dialog (after the splash image
-// has been faded out).
-extern int const kSplashFadeInDialogDurationMs;
 
 // This struct describes a single input control for the imperative autocomplete
 // dialog.
@@ -69,10 +63,9 @@ enum DialogSection {
   // The wallet-backed dialog uses a combined CC and billing section.
   SECTION_CC_BILLING,
   SECTION_SHIPPING,
-  SECTION_EMAIL,
 
   // Upper boundary value for looping over all sections.
-  SECTION_MAX = SECTION_EMAIL
+  SECTION_MAX = SECTION_SHIPPING
 };
 
 // A notification to show in the autofill dialog. Ranges from information to
@@ -82,8 +75,6 @@ class DialogNotification {
  public:
   enum Type {
     NONE,
-    AUTOCHECKOUT_ERROR,
-    AUTOCHECKOUT_SUCCESS,
     DEVELOPER_WARNING,
     EXPLANATORY_MESSAGE,
     REQUIRED_ACTION,
@@ -95,6 +86,7 @@ class DialogNotification {
 
   DialogNotification();
   DialogNotification(Type type, const string16& display_text);
+  ~DialogNotification();
 
   // Returns the appropriate background, border, or text color for the view's
   // notification area based on |type_|.
@@ -111,6 +103,11 @@ class DialogNotification {
   Type type() const { return type_; }
   const string16& display_text() const { return display_text_; }
 
+  void set_link_url(const GURL& link_url) { link_url_ = link_url; }
+  const GURL& link_url() const { return link_url_; }
+
+  const gfx::Range& link_range() const { return link_range_; }
+
   void set_tooltip_text(const string16& tooltip_text) {
     tooltip_text_ = tooltip_text;
   }
@@ -119,12 +116,14 @@ class DialogNotification {
   void set_checked(bool checked) { checked_ = checked; }
   bool checked() const { return checked_; }
 
-  void set_interactive(bool interactive) { interactive_ = interactive; }
-  bool interactive() const { return interactive_; }
-
  private:
   Type type_;
   string16 display_text_;
+
+  // If the notification includes a link, these describe the destination and
+  // which part of |display_text_| is the anchor text.
+  GURL link_url_;
+  gfx::Range link_range_;
 
   // When non-empty, indicates that a tooltip should be shown on the end of
   // the notification.
@@ -133,59 +132,9 @@ class DialogNotification {
   // Whether the dialog notification's checkbox should be checked. Only applies
   // when |HasCheckbox()| is true.
   bool checked_;
-
-  // When false, this disables user interaction with the notification. For
-  // example, WALLET_USAGE_CONFIRMATION notifications set this to false after
-  // the submit flow has started.
-  bool interactive_;
-};
-
-// A notification to show in the autofill dialog. Ranges from information to
-// seriously scary security messages, and will give you the color it should be
-// displayed (if you ask it).
-class DialogAutocheckoutStep {
- public:
-  DialogAutocheckoutStep(AutocheckoutStepType type,
-                         AutocheckoutStepStatus status);
-
-  // Returns the appropriate color for the display text based on |status_|.
-  SkColor GetTextColor() const;
-
-  // Returns the appropriate font for the display text based on |status_|.
-  gfx::Font GetTextFont() const;
-
-  // Returns whether the icon for the view should be visable based on |status_|.
-  bool IsIconVisible() const;
-
-  // Returns the display text based on |type_| and |status_|.
-  string16 GetDisplayText() const;
-
-  AutocheckoutStepStatus status() { return status_; }
-
-  AutocheckoutStepType type() { return type_; }
-
- private:
-  AutocheckoutStepType type_;
-  AutocheckoutStepStatus status_;
 };
 
 extern SkColor const kWarningColor;
-
-enum DialogSignedInState {
-  REQUIRES_RESPONSE,
-  REQUIRES_SIGN_IN,
-  REQUIRES_PASSIVE_SIGN_IN,
-  SIGNED_IN,
-  SIGN_IN_DISABLED,
-};
-
-// Overall state of the Autocheckout flow.
-enum AutocheckoutState {
-  AUTOCHECKOUT_ERROR,        // There was an error in the flow.
-  AUTOCHECKOUT_IN_PROGRESS,  // The flow is currently in.
-  AUTOCHECKOUT_NOT_STARTED,  // The flow has not been initiated by the user yet.
-  AUTOCHECKOUT_SUCCESS,      // The flow completed successfully.
-};
 
 struct SuggestionState {
   SuggestionState();
@@ -213,10 +162,11 @@ struct SuggestionState {
 struct DialogOverlayString {
   DialogOverlayString();
   ~DialogOverlayString();
-  // TODO(estade): need to set a color as well.
   base::string16 text;
+  // TODO(estade): should be able to remove this; text is always black.
   SkColor text_color;
   gfx::Font font;
+  // TODO(estade): should be able to remove this; text is always centered.
   gfx::HorizontalAlignment alignment;
 };
 
@@ -229,9 +179,9 @@ struct DialogOverlayState {
   // more or less front and center.
   gfx::Image image;
   // If non-empty, messages to display.
+  // TODO(estade): make this a single string, no longer need to support multiple
+  // messages.
   std::vector<DialogOverlayString> strings;
-  // If non-empty, holds text that should go on a button.
-  base::string16 button_text;
 };
 
 enum ValidationType {

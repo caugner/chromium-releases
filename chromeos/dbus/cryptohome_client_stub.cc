@@ -20,6 +20,9 @@ CryptohomeClientStubImpl::CryptohomeClientStubImpl()
 
 CryptohomeClientStubImpl::~CryptohomeClientStubImpl() {}
 
+void CryptohomeClientStubImpl::Init(dbus::Bus* bus) {
+}
+
 void CryptohomeClientStubImpl::SetAsyncCallStatusHandlers(
     const AsyncCallStatusHandler& handler,
     const AsyncCallStatusWithDataHandler& data_handler) {
@@ -136,7 +139,8 @@ void CryptohomeClientStubImpl::TpmGetPassword(
   const char kStubTpmPassword[] = "Stub-TPM-password";
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(callback, DBUS_METHOD_CALL_SUCCESS, kStubTpmPassword));
+      base::Bind(callback, DBUS_METHOD_CALL_SUCCESS,
+                 std::string(kStubTpmPassword)));
 }
 
 void CryptohomeClientStubImpl::TpmIsOwned(
@@ -263,7 +267,9 @@ void CryptohomeClientStubImpl::AsyncTpmAttestationEnroll(
 }
 
 void CryptohomeClientStubImpl::AsyncTpmAttestationCreateCertRequest(
-    int options,
+    attestation::AttestationCertificateProfile certificate_profile,
+    const std::string& user_email,
+    const std::string& request_origin,
     const AsyncMethodCallback& callback) {
   ReturnAsyncMethodResult(callback, true);
 }

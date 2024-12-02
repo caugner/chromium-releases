@@ -27,7 +27,7 @@
 #endif
 
 #if defined(USE_OZONE)
-#include "ui/base/ozone/surface_factory_ozone.h"
+#include "ui/gfx/ozone/surface_factory_ozone.h"
 #endif
 
 namespace aura {
@@ -46,8 +46,8 @@ AuraTestHelper::AuraTestHelper(base::MessageLoopForUI* message_loop)
   test::SetUseOverrideRedirectWindowByDefault(true);
 #endif
 #if defined(USE_OZONE)
-  surface_factory_.reset(ui::SurfaceFactoryOzone::CreateTestHelper());
-  ui::SurfaceFactoryOzone::SetInstance(surface_factory_.get());
+  surface_factory_.reset(gfx::SurfaceFactoryOzone::CreateTestHelper());
+  gfx::SurfaceFactoryOzone::SetInstance(surface_factory_.get());
 #endif
 }
 
@@ -105,12 +105,10 @@ void AuraTestHelper::TearDown() {
 }
 
 void AuraTestHelper::RunAllPendingInMessageLoop() {
-#if !defined(OS_MACOSX)
   // TODO(jbates) crbug.com/134753 Find quitters of this RunLoop and have them
   //              use run_loop.QuitClosure().
   base::RunLoop run_loop(Env::GetInstance()->GetDispatcher());
   run_loop.RunUntilIdle();
-#endif
 }
 
 }  // namespace test

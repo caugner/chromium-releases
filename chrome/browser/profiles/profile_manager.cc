@@ -13,6 +13,7 @@
 #include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -315,8 +316,18 @@ base::FilePath ProfileManager::GetInitialProfileDir() {
     base::FilePath profile_dir;
     // If the user has logged in, pick up the new profile.
     if (command_line.HasSwitch(chromeos::switches::kLoginProfile)) {
-      profile_dir = command_line.GetSwitchValuePath(
-          chromeos::switches::kLoginProfile);
+      // TODO(nkostylev): Remove this code completely once we eliminate
+      // legacy --login-profile=user switch and enable multi-profiles on CrOS
+      // by default. http://crbug.com/294628
+      std::string login_profile_value =
+          command_line.GetSwitchValueASCII(chromeos::switches::kLoginProfile);
+      if (login_profile_value == chrome::kLegacyProfileDir ||
+          login_profile_value == chrome::kTestUserProfileDir) {
+        profile_dir = base::FilePath(login_profile_value);
+      } else {
+        profile_dir = g_browser_process->platform_part()->profile_helper()->
+            GetUserProfileDir(login_profile_value);
+      }
     } else if (!command_line.HasSwitch(switches::kMultiProfiles)) {
       // We should never be logged in with no profile dir unless
       // multi-profiles are enabled.
@@ -513,33 +524,18 @@ void ProfileManager::CreateProfileAsync(
   // Call or enqueue the callback.
   if (!callback.is_null()) {
     if (iter != profiles_info_.end() && info->created) {
-        // Profile has already been created. Run callback immediately.
-        callback.Run(info->profile.get(), Profile::CREATE_STATUS_INITIALIZED);
+      Profile* profile = info->profile.get();
+      // If this was the guest profile, apply settings.
+      if (profile->GetPath() == ProfileManager::GetGuestProfilePath())
+        SetGuestProfilePrefs(profile);
+      // Profile has already been created. Run callback immediately.
+      callback.Run(profile, Profile::CREATE_STATUS_INITIALIZED);
     } else {
       // Profile is either already in the process of being created, or new.
       // Add callback to the list.
       info->callbacks.push_back(callback);
     }
   }
-}
-
-// static
-void ProfileManager::CreateDefaultProfileAsync(const CreateCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-
-  base::FilePath default_profile_dir = profile_manager->user_data_dir_;
-  // TODO(mirandac): current directory will not always be default in the future
-  default_profile_dir = default_profile_dir.Append(
-      profile_manager->GetInitialProfileDir());
-
-  // Chrome OS specific note: since we pass string16() here as the icon_url,
-  // profile cache information will not get updated with the is_managed value
-  // so we're fine with passing all default values here.
-  // On Chrome OS |is_managed| preference will get initialized in
-  // Profile::CREATE_STATUS_CREATED callback.
-  profile_manager->CreateProfileAsync(
-      default_profile_dir, callback, string16(), string16(), std::string());
 }
 
 bool ProfileManager::AddProfile(Profile* profile) {
@@ -733,8 +729,37 @@ void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
 void ProfileManager::DoFinalInitForServices(Profile* profile,
                                             bool go_off_the_record) {
 #if defined(ENABLE_EXTENSIONS)
+  // Set up a field trial to determine the effectiveness of deferring
+  // creation of background extension RenderViews.
+  CR_DEFINE_STATIC_LOCAL(scoped_refptr<base::FieldTrial>, trial, ());
+  static bool defer_creation = false;
+
+  if (!trial.get()) {
+    const base::FieldTrial::Probability kDivisor = 100;
+
+    // Enable the deferred creation for 50% of the users.
+    base::FieldTrial::Probability probability_per_group = 50;
+
+    // After August 31, 2014 builds, it will always be in default group
+    // (defer_creation == false).
+    trial = base::FieldTrialList::FactoryGetFieldTrial(
+        "DeferBackgroundExtensionCreation",
+        kDivisor,
+        "RateLimited",
+        2014,
+        8,
+        31,
+        base::FieldTrial::ONE_TIME_RANDOMIZED,
+        NULL);
+
+    // Add group for deferred creation of background extension RenderViews.
+    int defer_creation_group =
+        trial->AppendGroup("Deferred", probability_per_group);
+    defer_creation = trial->group() == defer_creation_group;
+  }
+
   extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
-      !go_off_the_record);
+      !go_off_the_record, defer_creation);
   // During tests, when |profile| is an instance of TestingProfile,
   // ExtensionSystem might not create an ExtensionService.
   if (extensions::ExtensionSystem::Get(profile)->extension_service()) {
@@ -807,6 +832,10 @@ void ProfileManager::OnProfileCreated(Profile* profile,
     profile = NULL;
     profiles_info_.erase(iter);
   }
+
+  // If this was the guest profile, finish setting its incognito status.
+  if (profile->GetPath() == ProfileManager::GetGuestProfilePath())
+    SetGuestProfilePrefs(profile);
 
   // Invoke CREATED callback for incognito profiles.
   if (profile && go_off_the_record)
@@ -934,7 +963,6 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
   if (profile->GetPath().DirName() != cache.GetUserDataDir())
     return;
 
-  bool is_managed = false;
   size_t avatar_index;
   std::string profile_name;
   std::string managed_user_id;
@@ -950,7 +978,6 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
           cache.GetAvatarIconIndexOfProfileAtIndex(profile_cache_index);
       profile_name =
           UTF16ToUTF8(cache.GetNameOfProfileAtIndex(profile_cache_index));
-      is_managed = cache.ProfileIsManagedAtIndex(profile_cache_index);
       managed_user_id =
           cache.GetManagedUserIdOfProfileAtIndex(profile_cache_index);
     } else if (profile->GetPath() ==
@@ -969,11 +996,14 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
   if (!profile->GetPrefs()->HasPrefPath(prefs::kProfileName))
     profile->GetPrefs()->SetString(prefs::kProfileName, profile_name);
 
-  if (!profile->GetPrefs()->HasPrefPath(prefs::kProfileIsManaged))
-    profile->GetPrefs()->SetBoolean(prefs::kProfileIsManaged, is_managed);
-
   if (!profile->GetPrefs()->HasPrefPath(prefs::kManagedUserId))
     profile->GetPrefs()->SetString(prefs::kManagedUserId, managed_user_id);
+}
+
+void ProfileManager::SetGuestProfilePrefs(Profile* profile) {
+  IncognitoModePrefs::SetAvailability(profile->GetPrefs(),
+                                      IncognitoModePrefs::FORCED);
+  profile->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, false);
 }
 
 bool ProfileManager::ShouldGoOffTheRecord(Profile* profile) {

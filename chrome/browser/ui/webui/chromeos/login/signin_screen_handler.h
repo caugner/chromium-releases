@@ -11,12 +11,14 @@
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/screens/error_screen_actor.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
@@ -157,6 +159,9 @@ class SigninScreenHandlerDelegate {
   // Signs out if the screen is currently locked.
   virtual void Signout() = 0;
 
+  // Login to kiosk mode for app with |app_id|.
+  virtual void LoginAsKioskApp(const std::string& app_id) = 0;
+
  protected:
   virtual ~SigninScreenHandlerDelegate() {}
 };
@@ -275,6 +280,7 @@ class SigninScreenHandler
 
   // Updates authentication extension. Called when device settings that affect
   // sign-in (allow BWSI and allow whitelist) are changed.
+  void UserSettingsChanged();
   void UpdateAuthExtension();
   void UpdateAddButtonStatus();
 
@@ -326,6 +332,8 @@ class SigninScreenHandler
   void HandleShowLoadingTimeoutError();
   void HandleUpdateOfflineLogin(bool offline_login_active);
   void HandleShowLocallyManagedUserCreationScreen();
+  void HandleFocusPod(const std::string& user_id);
+  void HandleLaunchKioskApp(const std::string& app_id);
 
   // Fills |user_dict| with information about |user|.
   static void FillUserDictionary(User* user,
@@ -462,6 +470,9 @@ class SigninScreenHandler
   // NOTIFICATION_AUTH_NEEDED and reset on either NOTIFICATION_AUTH_SUPPLIED or
   // NOTIFICATION_AUTH_CANCELLED.
   bool has_pending_auth_ui_;
+
+  scoped_ptr<CrosSettings::ObserverSubscription> allow_new_user_subscription_;
+  scoped_ptr<CrosSettings::ObserverSubscription> allow_guest_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

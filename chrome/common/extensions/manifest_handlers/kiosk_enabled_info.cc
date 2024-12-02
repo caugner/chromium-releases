@@ -9,11 +9,11 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
-
-namespace keys = extension_manifest_keys;
+#include "extensions/common/manifest_constants.h"
 
 namespace extensions {
+
+namespace keys = manifest_keys;
 
 KioskEnabledInfo::KioskEnabledInfo(bool is_kiosk_enabled)
     : kiosk_enabled(is_kiosk_enabled) {
@@ -40,7 +40,7 @@ bool KioskEnabledHandler::Parse(Extension* extension, string16* error) {
 
   bool kiosk_enabled = false;
   if (!extension->manifest()->GetBoolean(keys::kKioskEnabled, &kiosk_enabled)) {
-    *error = ASCIIToUTF16(extension_manifest_errors::kInvalidKioskEnabled);
+    *error = ASCIIToUTF16(manifest_errors::kInvalidKioskEnabled);
     return false;
   }
 

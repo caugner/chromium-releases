@@ -17,12 +17,12 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/extensions/features/feature_channel.h"
-#include "chrome/common/extensions/manifest.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/manifest.h"
 
 class ExtensionProcessManager;
 class ExtensionService;
@@ -229,6 +229,12 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest,
   extensions::ExtensionHost* FindHostWithPath(ExtensionProcessManager* manager,
                                               const std::string& path,
                                               int expected_hosts);
+
+  // Returns
+  // extensions::browsertest_util::ExecuteScriptInBackgroundPage(profile(),
+  // extension_id, script).
+  std::string ExecuteScriptInBackgroundPage(const std::string& extension_id,
+                                            const std::string& script);
 
   // content::NotificationObserver
   virtual void Observe(int type,
