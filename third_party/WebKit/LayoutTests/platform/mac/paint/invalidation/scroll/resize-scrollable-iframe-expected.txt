@@ -3,6 +3,17 @@
     {
       "name": "LayoutView #document",
       "bounds": [800, 600],
+      "drawsContent": false,
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [800, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
+      "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF",
       "paintInvalidations": [
@@ -18,7 +29,7 @@
         },
         {
           "object": "LayoutView #document",
-          "rect": [8, 193, 285, 200],
+          "rect": [8, 208, 300, 200],
           "reason": "incremental"
         },
         {
@@ -28,7 +39,7 @@
         },
         {
           "object": "LayoutView #document",
-          "rect": [93, 108, 200, 285],
+          "rect": [108, 108, 200, 300],
           "reason": "incremental"
         },
         {
@@ -74,6 +85,10 @@
     },
     {
       "object": "LayoutView #document",
+      "reason": "incremental"
+    },
+    {
+      "object": "LayoutView #document",
       "reason": "geometry"
     },
     {
@@ -87,10 +102,6 @@
     {
       "object": "VerticalScrollbar",
       "reason": "scroll control"
-    },
-    {
-      "object": "LayoutView #document",
-      "reason": "incremental"
     }
   ]
 }

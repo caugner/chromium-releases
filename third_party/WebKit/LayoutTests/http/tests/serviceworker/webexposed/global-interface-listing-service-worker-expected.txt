@@ -1,8 +1,19 @@
 [INTERFACES]
+interface AbortController
+    attribute @@toStringTag
+    getter signal
+    method abort
+    method constructor
 interface AbortPaymentEvent : ExtendableEvent
     attribute @@toStringTag
     method constructor
     method respondWith
+interface AbortSignal : EventTarget
+    attribute @@toStringTag
+    getter aborted
+    getter onabort
+    method constructor
+    setter onabort
 interface BackgroundFetchClickEvent : BackgroundFetchEvent
     attribute @@toStringTag
     getter state
@@ -709,9 +720,9 @@ interface Lock
     method constructor
 interface LockManager
     attribute @@toStringTag
-    method acquire
     method constructor
     method query
+    method request
 interface MessageChannel
     attribute @@toStringTag
     getter port1
@@ -724,7 +735,6 @@ interface MessageEvent : Event
     getter origin
     getter ports
     getter source
-    getter suborigin
     method constructor
     method initMessageEvent
 interface MessagePort : EventTarget
@@ -1092,6 +1102,7 @@ interface Request
     getter redirect
     getter referrer
     getter referrerPolicy
+    getter signal
     getter url
     method arrayBuffer
     method blob
@@ -1972,6 +1983,7 @@ interface WebGL2RenderingContext
     method samplerParameterf
     method samplerParameteri
     method scissor
+    method setCompatibleXRDevice
     method shaderSource
     method stencilFunc
     method stencilFuncSeparate
@@ -2438,6 +2450,7 @@ interface WebGLRenderingContext
     method renderbufferStorage
     method sampleCoverage
     method scissor
+    method setCompatibleXRDevice
     method shaderSource
     method stencilFunc
     method stencilFuncSeparate

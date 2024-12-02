@@ -11,11 +11,12 @@
     return NetworkTestRunner.networkRequests().pop();
   }
 
-  function dumpRequest(request) {
+  async function dumpRequest(request) {
     TestRunner.addResult('Dumping request: ');
     TestRunner.addResult('    url: ' + request.url());
-    if (request.requestFormData)
-      TestRunner.addResult('    requestFormData: ' + request.requestFormData);
+    var formData = await request.requestFormData();
+    if (formData)
+      TestRunner.addResult('    requestFormData: ' + formData);
     TestRunner.addResult('    requestMethod: ' + request.requestMethod);
     TestRunner.addResult('    test request header value: ' + request.requestHeaderValue('headerName'));
   }
@@ -33,11 +34,11 @@
     NetworkTestRunner.makeXHR(method, url, async, user, password, headers, withCredentials, payload, type);
 
     var originalRequest =
-        await TestRunner.waitForEvent(NetworkLog.NetworkLog.Events.RequestAdded, NetworkLog.networkLog);
-    dumpRequest(originalRequest);
+        await TestRunner.waitForEvent(BrowserSDK.NetworkLog.Events.RequestAdded, BrowserSDK.networkLog);
+    await dumpRequest(originalRequest);
     TestRunner.NetworkAgent.replayXHR(originalRequest.requestId());
     var replayedRequest =
-        await TestRunner.waitForEvent(NetworkLog.NetworkLog.Events.RequestAdded, NetworkLog.networkLog);
+        await TestRunner.waitForEvent(BrowserSDK.NetworkLog.Events.RequestAdded, BrowserSDK.networkLog);
 
     assertRequestEqual(originalRequest, replayedRequest);
     callback();

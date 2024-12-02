@@ -27,12 +27,14 @@
 #include "ash/system/tray/test_system_tray_item.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/lock_state_controller.h"
+#include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "ui/app_list/app_list_features.h"
 #include "ui/app_list/presenter/app_list.h"
 #include "ui/app_list/presenter/test/test_app_list_presenter.h"
@@ -1503,6 +1505,9 @@ TEST_F(ShelfLayoutManagerTest,
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
   EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
 
+  // Note: A window must be visible in order to hide the shelf.
+  views::Widget* widget = CreateTestWidget();
+
   app_list::test::TestAppListPresenter test_app_list_presenter;
   shell->app_list()->SetAppListPresenter(
       test_app_list_presenter.CreateInterfacePtrAndBind());
@@ -1543,12 +1548,35 @@ TEST_F(ShelfLayoutManagerTest,
   EXPECT_EQ(app_list::mojom::AppListState::CLOSED,
             test_app_list_presenter.app_list_state());
 
-  // Swiping down on the shelf should do nothing in tablet mode.
+  // Swiping down on the shelf should hide it.
   end = start + delta;
   generator.GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
-  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
+
+  // Swiping up should show the shelf but not the app list if shelf is hidden.
+  generator.GestureScrollSequence(end, start, kTimeDelta, kNumScrollSteps);
+  RunAllPendingInMessageLoop();
   EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
+  EXPECT_EQ(2u, test_app_list_presenter.show_count());
+  EXPECT_GE(test_app_list_presenter.set_y_position_count(), 1u);
+  EXPECT_EQ(app_list::mojom::AppListState::CLOSED,
+            test_app_list_presenter.app_list_state());
+
+  // Swiping down should hide the shelf.
+  generator.GestureScrollSequence(start, end, kTimeDelta, kNumScrollSteps);
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
+
+  // Minimize the visible window, the shelf should be shown if there are no
+  // visible windows, even in auto-hide mode.
+  widget->Minimize();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->GetAutoHideState());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
 
   // Swiping up on the shelf in this state should open the app list.
   delta.set_y(ShelfLayoutManager::kAppListDragSnapToFullscreenThreshold + 10);
@@ -1828,9 +1856,7 @@ TEST_F(ShelfLayoutManagerTest, AutohideShelfForAutohideWhenActiveWindow) {
   auto* shelf_window = shelf->GetWindow();
   aura::Window* container = shelf_window->GetRootWindow()->GetChildById(
       kShellWindowId_AlwaysOnTopContainer);
-  auto iter = std::find(container->children().begin(),
-                        container->children().end(), window_two);
-  EXPECT_NE(iter, container->children().end());
+  EXPECT_TRUE(base::ContainsValue(container->children(), window_two));
 
   widget_two->Maximize();
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->GetVisibilityState());
@@ -1953,6 +1979,35 @@ TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColor) {
   w3.reset();
   w1.reset();
   EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
+}
+
+// Test the background color for split view mode.
+TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColorInSplitView) {
+  // Split view is only enabled in tablet mode.
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+
+  std::unique_ptr<aura::Window> window1(CreateTestWindow());
+  window1->SetProperty(aura::client::kResizeBehaviorKey,
+                       ui::mojom::kResizeBehaviorCanResize |
+                           ui::mojom::kResizeBehaviorCanMaximize);
+  window1->Show();
+
+  SplitViewController* split_view_controller =
+      Shell::Get()->split_view_controller();
+  split_view_controller->SnapWindow(window1.get(), SplitViewController::LEFT);
+  EXPECT_EQ(SHELF_BACKGROUND_SPLIT_VIEW, GetShelfWidget()->GetBackgroundType());
+
+  std::unique_ptr<aura::Window> window2(CreateTestWindow());
+  window2->SetProperty(aura::client::kResizeBehaviorKey,
+                       ui::mojom::kResizeBehaviorCanResize |
+                           ui::mojom::kResizeBehaviorCanMaximize);
+  window2->Show();
+  split_view_controller->SnapWindow(window2.get(), SplitViewController::RIGHT);
+  EXPECT_EQ(SHELF_BACKGROUND_SPLIT_VIEW, GetShelfWidget()->GetBackgroundType());
+
+  // Ending split view mode will maximize the two windows.
+  split_view_controller->EndSplitView();
+  EXPECT_EQ(SHELF_BACKGROUND_MAXIMIZED, GetShelfWidget()->GetBackgroundType());
 }
 
 // Verify that the shelf doesn't have the opaque background if it's auto-hide
@@ -2096,8 +2151,8 @@ class ShelfLayoutManagerKeyboardTest : public AshTestBase {
     state.displaced_bounds = is_locked ? bounds : gfx::Rect();
     state.is_locked = is_locked;
     state.is_available = !bounds.IsEmpty();
-    layout_manager->OnKeyboardAvailabilityChanging(state.is_available);
-    layout_manager->OnKeyboardAppearanceChanging(state);
+    layout_manager->OnKeyboardAvailabilityChanged(state.is_available);
+    layout_manager->OnKeyboardAppearanceChanged(state);
   }
 
   const gfx::Rect& keyboard_bounds() const { return keyboard_bounds_; }

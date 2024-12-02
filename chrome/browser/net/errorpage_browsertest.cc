@@ -55,12 +55,12 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/content_features.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/base/filename_util.h"
+#include "net/base/mock_network_change_notifier.h"
 #include "net/base/net_errors.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/failing_http_transaction_factory.h"
@@ -78,6 +78,7 @@
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/features.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
@@ -455,11 +456,11 @@ class DNSErrorPageTest : public ErrorPageTest {
   friend LinkDoctorInterceptor;
 
   DNSErrorPageTest() {
-    if (!base::FeatureList::IsEnabled(features::kNetworkService))
+    if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
       return;
 
-    url_loader_interceptor_ = std::make_unique<content::URLLoaderInterceptor>(
-        base::BindRepeating(
+    url_loader_interceptor_ =
+        std::make_unique<content::URLLoaderInterceptor>(base::BindRepeating(
             [](DNSErrorPageTest* owner,
                content::URLLoaderInterceptor::RequestParams* params) {
               // Add an interceptor that serves LinkDoctor responses
@@ -470,21 +471,22 @@ class DNSErrorPageTest : public ErrorPageTest {
                     BrowserThread::UI, FROM_HERE,
                     base::BindOnce(&DNSErrorPageTest::RequestCreated,
                                    base::Unretained(owner)));
-                return WriteFileToURLLoader(owner, params,
-                                            "mock-link-doctor.json");
+                return chrome_browser_net::WriteFileToURLLoader(
+                    owner->embedded_test_server(), params,
+                    "mock-link-doctor.json");
               }
 
               // Add an interceptor for the search engine the error page will
               // use.
               if (params->url_request.url.host() ==
                   owner->search_term_url_.host()) {
-                return WriteFileToURLLoader(owner, params, "title3.html");
+                return chrome_browser_net::WriteFileToURLLoader(
+                    owner->embedded_test_server(), params, "title3.html");
               }
 
               return false;
             },
-            this),
-        true, true);
+            this));
   }
 
   ~DNSErrorPageTest() override = default;
@@ -520,40 +522,6 @@ class DNSErrorPageTest : public ErrorPageTest {
 
   void TearDownOnMainThread() override { url_loader_interceptor_.reset(); }
 
-  static bool WriteFileToURLLoader(
-      DNSErrorPageTest* owner,
-      content::URLLoaderInterceptor::RequestParams* params,
-      std::string path) {
-    base::ScopedAllowBlockingForTesting allow_blocking;
-
-    if (path[0] == '/')
-      path.erase(0, 1);
-
-    if (path == "favicon.ico")
-      return false;
-
-    base::FilePath file_path;
-    PathService::Get(chrome::DIR_TEST_DATA, &file_path);
-    file_path = file_path.AppendASCII(path);
-
-    std::string contents;
-    const bool result = base::ReadFileToString(file_path, &contents);
-    EXPECT_TRUE(result);
-
-    if (path == "mock-link-doctor.json") {
-      GURL url =
-          owner->embedded_test_server()->GetURL("mock.http", "/title2.html");
-
-      std::string placeholder = "http://mock.http/title2.html";
-      contents.replace(contents.find(placeholder), placeholder.length(),
-                       url.spec());
-    }
-
-    content::URLLoaderInterceptor::WriteResponse(
-        net::URLRequestTestJob::test_headers(), contents, params->client.get());
-    return true;
-  }
-
   void SetUpOnMainThread() override {
     // All mock.http requests get served by the embedded test server.
     host_resolver()->AddRule("mock.http", "127.0.0.1");
@@ -563,14 +531,14 @@ class DNSErrorPageTest : public ErrorPageTest {
     UIThreadSearchTermsData search_terms_data(browser()->profile());
     search_term_url_ = GURL(search_terms_data.GoogleBaseURLValue());
 
-    if (!base::FeatureList::IsEnabled(features::kNetworkService)) {
+    if (!base::FeatureList::IsEnabled(network::features::kNetworkService)) {
       std::unique_ptr<net::URLRequestInterceptor> owned_interceptor(
           new LinkDoctorInterceptor(this));
 
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
           base::BindOnce(&InstallMockInterceptors, search_term_url_,
-                         base::Passed(&owned_interceptor)));
+                         std::move(owned_interceptor)));
     }
   }
 
@@ -1193,8 +1161,16 @@ net::URLRequestJob* LinkDoctorInterceptor::MaybeInterceptRequest(
   contents.replace(contents.find(placeholder), placeholder.length(),
                    link_doctor_url.spec());
 
-  return new net::URLRequestMockDataJob(request, network_delegate, contents, 1,
-                                        false);
+  auto* mock_job = new net::URLRequestMockDataJob(request, network_delegate,
+                                                  contents, 1, false);
+  base::FilePath headers_path(
+      file_path.AddExtension(FILE_PATH_LITERAL("mock-http-headers")));
+  if (base::PathExists(headers_path)) {
+    std::string mocked_headers_contents;
+    if (base::ReadFileToString(headers_path, &mocked_headers_contents))
+      mock_job->OverrideResponseHeaders(mocked_headers_contents);
+  }
+  return mock_job;
 }
 
 class ErrorPageAutoReloadTest : public InProcessBrowserTest {
@@ -1208,11 +1184,13 @@ class ErrorPageAutoReloadTest : public InProcessBrowserTest {
   void InstallInterceptor(const GURL& url, int32_t requests_to_fail) {
     requests_ = failures_ = 0;
 
-    if (base::FeatureList::IsEnabled(features::kNetworkService)) {
+    if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
       url_loader_interceptor_ =
           std::make_unique<content::URLLoaderInterceptor>(base::BindRepeating(
               [](int32_t requests_to_fail, int32_t* requests, int32_t* failures,
                  content::URLLoaderInterceptor::RequestParams* params) {
+                if (params->url_request.url.path() == "/favicon.ico")
+                  return false;
                 (*requests)++;
                 if (*failures < requests_to_fail) {
                   (*failures)++;
@@ -1243,7 +1221,7 @@ class ErrorPageAutoReloadTest : public InProcessBrowserTest {
       // URLRequestFilter::ClearHandlers(), |interceptor_| can become invalid.
       BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                               base::BindOnce(&AddInterceptorForURL, url,
-                                             base::Passed(&owned_interceptor)));
+                                             std::move(owned_interceptor)));
     }
   }
 
@@ -1348,6 +1326,59 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, IgnoresSameDocumentNavigation) {
   EXPECT_EQ(3, interceptor_requests());
 }
 
+class ErrorPageAutoReloadOffline : public ErrorPageAutoReloadTest {
+ public:
+  void PreRunTestOnMainThread() override {
+    // Helps the browser to create renderer in offline mode.
+    MockNetwork();
+    InProcessBrowserTest::PreRunTestOnMainThread();
+  }
+  void PostRunTestOnMainThread() override {
+    InProcessBrowserTest::PostRunTestOnMainThread();
+    ReleaseNetwork();
+  }
+
+  void MockNetwork() {
+    mock_network_ =
+        std::make_unique<net::test::ScopedMockNetworkChangeNotifier>();
+    mock_network_->mock_network_change_notifier()->SetConnectionType(
+        net::NetworkChangeNotifier::CONNECTION_NONE);
+  }
+
+  void ReleaseNetwork() { mock_network_.reset(); }
+
+ private:
+  std::unique_ptr<net::test::ScopedMockNetworkChangeNotifier> mock_network_;
+};
+
+IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadOffline,
+                       AvoidAutoReloadingWhenOffline) {
+  GURL test_url("http://error.page.auto.reload");
+  InstallInterceptor(test_url, 1);
+
+  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(browser(), test_url,
+                                                            1);
+  base::RunLoop().RunUntilIdle();
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  content::WaitForLoadStop(web_contents);
+  // Make sure that first autoreload did not happen.
+  EXPECT_EQ(1, interceptor_requests());
+
+  // Release network. Now the renderer can receive notifications about network.
+  ReleaseNetwork();
+
+  // Browser is online now. Autoreload request should start immediately.
+  net::NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChangeForTests(
+      1., net::NetworkChangeNotifier::CONNECTION_WIFI);
+
+  content::TestNavigationObserver tab_observer(web_contents, 1);
+  tab_observer.Wait();
+
+  EXPECT_EQ(2, interceptor_requests());
+}
+
 // TODO(dougt): AddressUnreachableInterceptor can be removed as soon as the
 // Network Service is the only code path.
 
@@ -1377,7 +1408,7 @@ class ErrorPageNavigationCorrectionsFailTest : public ErrorPageTest {
  public:
   // InProcessBrowserTest:
   void SetUpOnMainThread() override {
-    if (base::FeatureList::IsEnabled(features::kNetworkService)) {
+    if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
       url_loader_interceptor_ =
           std::make_unique<content::URLLoaderInterceptor>(base::BindRepeating(
               [](content::URLLoaderInterceptor::RequestParams* params) {
@@ -1397,7 +1428,7 @@ class ErrorPageNavigationCorrectionsFailTest : public ErrorPageTest {
   }
 
   void TearDownOnMainThread() override {
-    if (base::FeatureList::IsEnabled(features::kNetworkService)) {
+    if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
       url_loader_interceptor_.reset();
     } else {
       BrowserThread::PostTask(
@@ -1533,7 +1564,7 @@ class ErrorPageOfflineTest : public ErrorPageTest {
     if (enroll_) {
       // Set up fake install attributes.
       std::unique_ptr<chromeos::StubInstallAttributes> attributes =
-          base::MakeUnique<chromeos::StubInstallAttributes>();
+          std::make_unique<chromeos::StubInstallAttributes>();
       attributes->SetCloudManaged("example.com", "fake-id");
       policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
           attributes.release());
@@ -1553,7 +1584,7 @@ class ErrorPageOfflineTest : public ErrorPageTest {
       policy_map.Set(
           policy::key::kAllowDinosaurEasterEgg, policy::POLICY_LEVEL_MANDATORY,
           policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-          base::MakeUnique<base::Value>(value_of_allow_dinosaur_easter_egg_),
+          std::make_unique<base::Value>(value_of_allow_dinosaur_easter_egg_),
           nullptr);
     }
     policy_provider_.UpdateChromePolicy(policy_map);

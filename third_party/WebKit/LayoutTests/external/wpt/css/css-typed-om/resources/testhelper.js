@@ -40,10 +40,10 @@ function assert_style_value_equals(a, b) {
     case 'CSSTransformValue':
       assert_style_value_array_equals(a, b);
       break;
-    case 'CSSRotation':
+    case 'CSSRotate':
       assert_style_value_equals(a.angle, b.angle);
       // fallthrough
-    case 'CSSTranslation':
+    case 'CSSTranslate':
     case 'CSSScale':
       assert_style_value_equals(a.x, b.x);
       assert_style_value_equals(a.y, b.y);
@@ -54,17 +54,17 @@ function assert_style_value_equals(a, b) {
       assert_style_value_equals(a.ax, b.ax);
       assert_style_value_equals(a.ay, b.ay);
       break;
+    case 'CSSSkewX':
+      assert_style_value_equals(a.ax, b.ax);
+      break;
+    case 'CSSSkewY':
+      assert_style_value_equals(a.ay, b.ay);
+      break;
     case 'CSSPerspective':
       assert_style_value_equals(a.length, b.length);
       break;
     case 'CSSMatrixComponent':
       assert_matrix_approx_equals(a.matrix, b.matrix, 1e-6);
-      break;
-    case 'CSSURLImageValue':
-      assert_equals(a.instrinsicWidth, b.instrinsicWidth);
-      assert_equals(a.instrinsicHeight, b.instrinsicHeight);
-      assert_equals(a.instrinsicRatio, b.instrinsicRatio);
-      assert_equals(a.url, b.url);
       break;
     default:
       assert_equals(a, b);
@@ -116,7 +116,12 @@ function createElementWithInlineStyleMap(test, cssText) {
 // Creates a new div element with inline style |cssText| and returns
 // its computed style property map.
 function createComputedStyleMap(test, cssText) {
-  return createDivWithStyle(test, cssText).computedStyleMap();
+  return createElementWithComputedStyleMap(test, cssText)[1];
+}
+// Same as createComputedStyleMap but also returns the element itself.
+function createElementWithComputedStyleMap(test, cssText) {
+  let elem = createDivWithStyle(test, cssText);
+  return [elem, elem.computedStyleMap()];
 }
 
 // Creates a new style element with a rule |cssText| and returns
@@ -132,7 +137,7 @@ function createRuleWithDeclaredStyleMap(test, cssText) {
   test.add_cleanup(() => {
     style.remove();
   });
-  return [rule, rule.attributeStyleMap];
+  return [rule, rule.styleMap];
 }
 
 // Creates a new element with background image set to |imageValue|

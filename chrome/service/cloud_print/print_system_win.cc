@@ -19,12 +19,12 @@
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_hdc.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/cloud_print/cloud_print_cdd_conversion.h"
 #include "chrome/common/cloud_print/cloud_print_constants.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/service/cloud_print/cdd_conversion_win.h"
 #include "chrome/service/service_process.h"
 #include "chrome/service/service_utility_process_host.h"
+#include "components/crash/core/common/crash_keys.h"
+#include "components/printing/common/cloud_print_cdd_conversion.h"
 #include "printing/backend/win_helper.h"
 #include "printing/emf_win.h"
 #include "printing/page_range.h"
@@ -419,7 +419,9 @@ class JobSpoolerWin : public PrintSystem::JobSpooler {
     }
 
     void RenderPDFPages(const base::FilePath& pdf_path) {
-      int printer_dpi = ::GetDeviceCaps(printer_dc_.Get(), LOGPIXELSX);
+      gfx::Size printer_dpi =
+          gfx::Size(::GetDeviceCaps(printer_dc_.Get(), LOGPIXELSX),
+                    ::GetDeviceCaps(printer_dc_.Get(), LOGPIXELSY));
       int dc_width = GetDeviceCaps(printer_dc_.Get(), PHYSICALWIDTH);
       int dc_height = GetDeviceCaps(printer_dc_.Get(), PHYSICALHEIGHT);
       gfx::Rect render_area(0, 0, dc_width, dc_height);
@@ -432,11 +434,11 @@ class JobSpoolerWin : public PrintSystem::JobSpooler {
     void RenderPDFPagesInSandbox(
         const base::FilePath& pdf_path,
         const gfx::Rect& render_area,
-        int render_dpi,
+        const gfx::Size& render_dpi,
         const scoped_refptr<base::SingleThreadTaskRunner>& client_task_runner) {
       DCHECK(CurrentlyOnServiceIOThread());
-      std::unique_ptr<ServiceUtilityProcessHost> utility_host(
-          new ServiceUtilityProcessHost(this, client_task_runner.get()));
+      auto utility_host = std::make_unique<ServiceUtilityProcessHost>(
+          this, client_task_runner.get());
       // TODO(gene): For now we disabling autorotation for CloudPrinting.
       // Landscape/Portrait setting is passed in the print ticket and
       // server is generating portrait PDF always.
@@ -592,8 +594,8 @@ class PrinterCapsHandler : public ServiceUtilityProcessHost::Client {
   void GetPrinterCapsAndDefaultsImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& client_task_runner) {
     DCHECK(CurrentlyOnServiceIOThread());
-    std::unique_ptr<ServiceUtilityProcessHost> utility_host(
-        new ServiceUtilityProcessHost(this, client_task_runner.get()));
+    auto utility_host = std::make_unique<ServiceUtilityProcessHost>(
+        this, client_task_runner.get());
     if (utility_host->StartGetPrinterCapsAndDefaults(printer_name_)) {
       // The object will self-destruct when the child process dies.
       ignore_result(utility_host.release());
@@ -606,8 +608,8 @@ class PrinterCapsHandler : public ServiceUtilityProcessHost::Client {
   void GetPrinterSemanticCapsAndDefaultsImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& client_task_runner) {
     DCHECK(CurrentlyOnServiceIOThread());
-    std::unique_ptr<ServiceUtilityProcessHost> utility_host(
-        new ServiceUtilityProcessHost(this, client_task_runner.get()));
+    auto utility_host = std::make_unique<ServiceUtilityProcessHost>(
+        this, client_task_runner.get());
     if (utility_host->StartGetPrinterSemanticCapsAndDefaults(printer_name_)) {
       // The object will self-destruct when the child process dies.
       ignore_result(utility_host.release());

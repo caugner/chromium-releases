@@ -81,7 +81,7 @@ const NavigationCorrection kDefaultCorrections[] = {
 
 std::string SuggestionsToResponse(const NavigationCorrection* corrections,
                                   int num_corrections) {
-  auto url_corrections = base::MakeUnique<base::ListValue>();
+  auto url_corrections = std::make_unique<base::ListValue>();
   for (int i = 0; i < num_corrections; ++i)
     url_corrections->Append(corrections[i].ToValue());
 
@@ -178,8 +178,8 @@ class NetErrorHelperCoreTest : public testing::Test,
     // The old value of timer_, if any, will be freed by the old core_ being
     // destructed, since core_ takes ownership of the timer.
     timer_ = new base::MockTimer(false, false);
-    core_.reset(new NetErrorHelperCore(this, auto_reload_enabled,
-                                       auto_reload_visible_only, visible));
+    core_.reset(new NetErrorHelperCore(
+        this, auto_reload_enabled, auto_reload_visible_only, visible, true));
     core_->set_timer_for_testing(std::unique_ptr<base::Timer>(timer_));
   }
 
@@ -2253,6 +2253,9 @@ TEST_F(NetErrorHelperCoreAutoReloadTest, DoesNotReload) {
   EXPECT_FALSE(timer()->IsRunning());
 
   DoErrorLoad(net::ERR_SSL_PROTOCOL_ERROR);
+  EXPECT_FALSE(timer()->IsRunning());
+
+  DoErrorLoad(net::ERR_BLOCKED_BY_ADMINISTRATOR);
   EXPECT_FALSE(timer()->IsRunning());
 
   DoErrorLoad(net::ERR_BAD_SSL_CLIENT_AUTH_CERT);

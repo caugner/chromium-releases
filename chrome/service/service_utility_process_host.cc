@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/containers/queue.h"
@@ -20,6 +21,7 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/launch.h"
+#include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_runner_util.h"
@@ -27,13 +29,17 @@
 #include "base/win/win_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_printing_messages.h"
-#include "chrome/services/printing/public/interfaces/pdf_to_emf_converter.mojom.h"
+#include "chrome/service/service_process_catalog_source.h"
+#include "chrome/services/printing/public/mojom/pdf_to_emf_converter.mojom.h"
 #include "content/public/common/child_process_host.h"
+#include "content/public/common/connection_filter.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/font_cache_dispatcher_win.h"
 #include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandbox_init.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.mojom.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/named_platform_channel_pair.h"
@@ -44,7 +50,14 @@
 #include "printing/emf_win.h"
 #include "sandbox/win/src/sandbox_policy.h"
 #include "sandbox/win/src/sandbox_types.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/public/mojom/constants.mojom.h"
+#include "services/service_manager/public/mojom/service.mojom.h"
+#include "services/service_manager/runner/host/service_process_launcher.h"
+#include "services/service_manager/runner/host/service_process_launcher_factory.h"
 #include "services/service_manager/sandbox/sandbox_type.h"
+#include "services/service_manager/service_manager.h"
 #include "ui/base/ui_base_switches.h"
 
 namespace {
@@ -114,6 +127,49 @@ class ServicePdfToEmfConverterClientImpl
   }
 
   mojo::Binding<printing::mojom::PdfToEmfConverterClient> binding_;
+};
+
+class NullServiceProcessLauncherFactory
+    : public service_manager::ServiceProcessLauncherFactory {
+ public:
+  NullServiceProcessLauncherFactory() = default;
+  ~NullServiceProcessLauncherFactory() override = default;
+
+  // service_manager::ServiceProcessLauncherFactory:
+  std::unique_ptr<service_manager::ServiceProcessLauncher> Create(
+      const base::FilePath& service_path) override {
+    LOG(ERROR) << "Attempting to run unsupported native service: "
+               << service_path.value();
+    return nullptr;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NullServiceProcessLauncherFactory);
+};
+
+class ConnectionFilterImpl : public content::ConnectionFilter {
+ public:
+  ConnectionFilterImpl() {
+    registry_.AddInterface(
+        base::BindRepeating(&content::FontCacheDispatcher::Create));
+  }
+
+  ~ConnectionFilterImpl() override = default;
+
+  // content::ConnectionFilter:
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle* interface_pipe,
+                       service_manager::Connector* connector) override {
+    registry_.TryBindInterface(interface_name, interface_pipe, source_info);
+  }
+
+ private:
+  service_manager::BinderRegistryWithArgs<
+      const service_manager::BindSourceInfo&>
+      registry_;
+
+  DISALLOW_COPY_AND_ASSIGN(ConnectionFilterImpl);
 };
 
 }  // namespace
@@ -264,7 +320,7 @@ bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
   ReportUmaEvent(SERVICE_UTILITY_METAFILE_REQUEST);
   base::File pdf_file(pdf_path, base::File::FLAG_OPEN | base::File::FLAG_READ |
                                     base::File::FLAG_DELETE_ON_CLOSE);
-  if (!pdf_file.IsValid() || !StartProcess(false))
+  if (!pdf_file.IsValid() || !StartProcess(/*sandbox=*/true))
     return false;
 
   DCHECK(!waiting_for_reply_);
@@ -278,7 +334,7 @@ bool ServiceUtilityProcessHost::StartRenderPDFPagesToMetafile(
 bool ServiceUtilityProcessHost::StartGetPrinterCapsAndDefaults(
     const std::string& printer_name) {
   ReportUmaEvent(SERVICE_UTILITY_CAPS_REQUEST);
-  if (!StartProcess(true))
+  if (!StartProcess(/*sandbox=*/false))
     return false;
   DCHECK(!waiting_for_reply_);
   waiting_for_reply_ = true;
@@ -288,7 +344,7 @@ bool ServiceUtilityProcessHost::StartGetPrinterCapsAndDefaults(
 bool ServiceUtilityProcessHost::StartGetPrinterSemanticCapsAndDefaults(
     const std::string& printer_name) {
   ReportUmaEvent(SERVICE_UTILITY_SEMANTIC_CAPS_REQUEST);
-  if (!StartProcess(true))
+  if (!StartProcess(/*sandbox=*/false))
     return false;
   DCHECK(!waiting_for_reply_);
   waiting_for_reply_ = true;
@@ -296,16 +352,59 @@ bool ServiceUtilityProcessHost::StartGetPrinterSemanticCapsAndDefaults(
       new ChromeUtilityMsg_GetPrinterSemanticCapsAndDefaults(printer_name));
 }
 
-bool ServiceUtilityProcessHost::StartProcess(bool no_sandbox) {
+bool ServiceUtilityProcessHost::StartProcess(bool sandbox) {
   base::FilePath exe_path = GetUtilityProcessCmd();
   if (exe_path.empty()) {
     NOTREACHED() << "Unable to get utility process binary name.";
     return false;
   }
 
+  // We set up a Service Manager for each utility process hosted here. The
+  // utility processes launched by the service process only ever need to
+  // communicate back to the service process itself, so it's safe to host each
+  // one using its own isolated service manager.
+  //
+  // We do this because some common child process code expects to be connected
+  // to a well-behaved service manager from which it can request common host
+  // interfaces.
+  //
+  // In the isolated service environment there are exactly two service
+  // instances: this process, which masquerades as "content_browser"; and the
+  // child process, which exists ostensibly as the only instance of
+  // "content_utility". This is all set up here.
+  service_manager_ = std::make_unique<service_manager::ServiceManager>(
+      std::make_unique<NullServiceProcessLauncherFactory>(),
+      CreateServiceProcessCatalog(), nullptr);
+
+  service_manager::mojom::ServicePtr browser_proxy;
+  service_manager_connection_ = content::ServiceManagerConnection::Create(
+      mojo::MakeRequest(&browser_proxy),
+      base::SequencedTaskRunnerHandle::Get());
+  service_manager_connection_->AddConnectionFilter(
+      std::make_unique<ConnectionFilterImpl>());
+
+  service_manager::mojom::PIDReceiverPtr pid_receiver;
+  service_manager_->RegisterService(
+      service_manager::Identity(content::mojom::kBrowserServiceName,
+                                service_manager::mojom::kRootUserID),
+      std::move(browser_proxy), mojo::MakeRequest(&pid_receiver));
+  pid_receiver->SetPID(base::GetCurrentProcId());
+  pid_receiver.reset();
+
   std::string mojo_bootstrap_token = mojo::edk::GenerateRandomToken();
-  utility_process_connection_.Bind(service_manager::mojom::ServicePtrInfo(
+  service_manager::mojom::ServicePtr utility_service;
+  utility_service.Bind(service_manager::mojom::ServicePtrInfo(
       broker_client_invitation_.AttachMessagePipe(mojo_bootstrap_token), 0u));
+  service_manager_->RegisterService(
+      service_manager::Identity(content::mojom::kUtilityServiceName,
+                                service_manager::mojom::kRootUserID),
+      std::move(utility_service), mojo::MakeRequest(&pid_receiver));
+  pid_receiver->SetPID(base::GetCurrentProcId());
+
+  service_manager_connection_->Start();
+
+  // NOTE: This call to |CreateChannelMojo()| requires a working
+  // ServiceManagerConnection to have already been established.
   child_process_host_->CreateChannelMojo();
 
   base::CommandLine cmd_line(exe_path);
@@ -315,7 +414,7 @@ bool ServiceUtilityProcessHost::StartProcess(bool no_sandbox) {
   cmd_line.AppendSwitch(switches::kLang);
   cmd_line.AppendArg(switches::kPrefetchArgumentOther);
 
-  if (Launch(&cmd_line, no_sandbox)) {
+  if (Launch(&cmd_line, sandbox)) {
     ReportUmaEvent(SERVICE_UTILITY_STARTED);
     return true;
   }
@@ -324,18 +423,24 @@ bool ServiceUtilityProcessHost::StartProcess(bool no_sandbox) {
 }
 
 bool ServiceUtilityProcessHost::Launch(base::CommandLine* cmd_line,
-                                       bool no_sandbox) {
+                                       bool sandbox) {
+  const base::CommandLine& service_command_line =
+      *base::CommandLine::ForCurrentProcess();
+  static const char* const kForwardSwitches[] = {
+      switches::kDisableLogging,
+      switches::kEnableLogging,
+      switches::kIPCConnectionTimeout,
+      switches::kLoggingLevel,
+      switches::kUtilityStartupDialog,
+      switches::kV,
+      switches::kVModule,
+  };
+  cmd_line->CopySwitchesFrom(service_command_line, kForwardSwitches,
+                             arraysize(kForwardSwitches));
+
   mojo::edk::ScopedPlatformHandle parent_handle;
   bool success = false;
-  if (no_sandbox) {
-    mojo::edk::NamedPlatformChannelPair named_pair;
-    parent_handle = named_pair.PassServerHandle();
-    named_pair.PrepareToPassClientHandleToChildProcess(cmd_line);
-
-    cmd_line->AppendSwitch(switches::kNoSandbox);
-    process_ = base::LaunchProcess(*cmd_line, base::LaunchOptions());
-    success = process_.IsValid();
-  } else {
+  if (sandbox) {
     mojo::edk::PlatformChannelPair channel_pair;
     parent_handle = channel_pair.PassServerHandle();
     mojo::edk::ScopedPlatformHandle client_handle =
@@ -354,6 +459,14 @@ bool ServiceUtilityProcessHost::Launch(base::CommandLine* cmd_line,
       process_ = std::move(process);
       success = true;
     }
+  } else {
+    mojo::edk::NamedPlatformChannelPair named_pair;
+    parent_handle = named_pair.PassServerHandle();
+    named_pair.PrepareToPassClientHandleToChildProcess(cmd_line);
+
+    cmd_line->AppendSwitch(switches::kNoSandbox);
+    process_ = base::LaunchProcess(*cmd_line, base::LaunchOptions());
+    success = process_.IsValid();
   }
 
   if (success) {
@@ -385,6 +498,8 @@ void ServiceUtilityProcessHost::OnChildDisconnected() {
         FROM_HERE, base::Bind(&Client::OnChildDied, client_.get()));
     ReportUmaEvent(SERVICE_UTILITY_DISCONNECTED);
   }
+
+  // The child process has died for some reason. This host is no longer needed.
   delete this;
 }
 
@@ -414,14 +529,9 @@ const base::Process& ServiceUtilityProcessHost::GetProcess() const {
 void ServiceUtilityProcessHost::BindInterface(
     const std::string& interface_name,
     mojo::ScopedMessagePipeHandle interface_pipe) {
-  service_manager::BindSourceInfo source_info;
-  // ChildThreadImpl expects a connection from the browser process for
-  // establishing its legacy IPC channel.
-  source_info.identity =
-      service_manager::Identity{content::mojom::kBrowserServiceName};
-  utility_process_connection_->OnBindInterface(source_info, interface_name,
-                                               std::move(interface_pipe),
-                                               base::Bind(&base::DoNothing));
+  service_manager_connection_->GetConnector()->BindInterface(
+      service_manager::Identity(content::mojom::kUtilityServiceName),
+      interface_name, std::move(interface_pipe));
 }
 
 void ServiceUtilityProcessHost::OnMetafileSpooled(bool success) {
@@ -466,6 +576,9 @@ void ServiceUtilityProcessHost::OnPDFToEmfFinished(bool success) {
       FROM_HERE, base::Bind(&Client::OnRenderPDFPagesToMetafileDone,
                             client_.get(), success));
   pdf_to_emf_state_.reset();
+
+  // The child process has finished at this point. This host is done as well.
+  delete this;
 }
 
 void ServiceUtilityProcessHost::OnGetPrinterCapsAndDefaultsSucceeded(
@@ -477,6 +590,8 @@ void ServiceUtilityProcessHost::OnGetPrinterCapsAndDefaultsSucceeded(
   client_task_runner_->PostTask(
       FROM_HERE, base::Bind(&Client::OnGetPrinterCapsAndDefaults, client_.get(),
                             true, printer_name, caps_and_defaults));
+  // The child process disconnects itself and this host deletes itself via
+  // OnChildDisconnected().
 }
 
 void ServiceUtilityProcessHost::OnGetPrinterSemanticCapsAndDefaultsSucceeded(
@@ -489,6 +604,8 @@ void ServiceUtilityProcessHost::OnGetPrinterSemanticCapsAndDefaultsSucceeded(
       FROM_HERE,
       base::Bind(&Client::OnGetPrinterSemanticCapsAndDefaults, client_.get(),
                  true, printer_name, caps_and_defaults));
+  // The child process disconnects itself and this host deletes itself via
+  // OnChildDisconnected().
 }
 
 void ServiceUtilityProcessHost::OnGetPrinterCapsAndDefaultsFailed(
@@ -500,6 +617,8 @@ void ServiceUtilityProcessHost::OnGetPrinterCapsAndDefaultsFailed(
       FROM_HERE,
       base::Bind(&Client::OnGetPrinterCapsAndDefaults, client_.get(), false,
                  printer_name, printing::PrinterCapsAndDefaults()));
+  // The child process disconnects itself and this host deletes itself via
+  // OnChildDisconnected().
 }
 
 void ServiceUtilityProcessHost::OnGetPrinterSemanticCapsAndDefaultsFailed(
@@ -511,6 +630,8 @@ void ServiceUtilityProcessHost::OnGetPrinterSemanticCapsAndDefaultsFailed(
       FROM_HERE, base::Bind(&Client::OnGetPrinterSemanticCapsAndDefaults,
                             client_.get(), false, printer_name,
                             printing::PrinterSemanticCapsAndDefaults()));
+  // The child process disconnects itself and this host deletes itself via
+  // OnChildDisconnected().
 }
 
 bool ServiceUtilityProcessHost::Client::MetafileAvailable(float scale_factor,

@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/bind_helpers.h"
+#include "base/location.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -119,11 +120,12 @@ void VideoCaptureDeviceArcChromeOS::SuspendImminent(
     power_manager::SuspendImminent::Reason reason) {
   capture_task_runner_->PostTask(
       FROM_HERE,
-      base::BindOnce(&VideoCaptureDeviceArcChromeOS::CloseDevice,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     BindToCurrentLoop(chromeos::DBusThreadManager::Get()
-                                           ->GetPowerManagerClient()
-                                           ->GetSuspendReadinessCallback())));
+      base::BindOnce(
+          &VideoCaptureDeviceArcChromeOS::CloseDevice,
+          weak_ptr_factory_.GetWeakPtr(),
+          BindToCurrentLoop(chromeos::DBusThreadManager::Get()
+                                ->GetPowerManagerClient()
+                                ->GetSuspendReadinessCallback(FROM_HERE))));
 }
 
 void VideoCaptureDeviceArcChromeOS::SuspendDone(
@@ -136,6 +138,9 @@ void VideoCaptureDeviceArcChromeOS::SuspendDone(
 void VideoCaptureDeviceArcChromeOS::OpenDevice() {
   DCHECK(capture_task_runner_->BelongsToCurrentThread());
 
+  if (!camera_device_delegate_) {
+    return;
+  }
   // It's safe to pass unretained |device_context_| here since
   // VideoCaptureDeviceArcChromeOS owns |camera_device_delegate_| and makes
   // sure |device_context_| outlives |camera_device_delegate_|.
