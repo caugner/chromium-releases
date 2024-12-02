@@ -84,6 +84,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -146,8 +147,8 @@
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #endif
 
-// The blacklist tests rely on safe browsing.
-#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
+// The blacklist tests rely on the safe-browsing database.
+#if defined(SAFE_BROWSING_DB_LOCAL)
 #define ENABLE_BLACKLIST_TESTS
 #endif
 
@@ -196,7 +197,6 @@ const char page_action[] = "obcimlgaoabeegjmmpldobjndiealpln";
 const char theme_crx[] = "iamefpfkojoapidjnbafmgkgncegbkad";
 const char theme2_crx[] = "pjpgmfcmabopnnfonnhmdjglfpjjfkbf";
 const char permissions_crx[] = "eagpmdpfmaekmmcejjbmjoecnejeiiin";
-const char unpacked[] = "cbcdidchbppangcjoddlpdjlenngjldk";
 const char updates_from_webstore[] = "akjooamlhcgeopfifcmlggaebeocgokj";
 const char permissions_blocklist[] = "noffkehfcaggllbcojjbopcmlhcnhcdn";
 
@@ -459,6 +459,8 @@ class MockProviderVisitor
     EXPECT_EQ(provider, provider_.get());
     EXPECT_TRUE(provider->IsReady());
   }
+
+  Profile* profile() { return profile_.get(); }
 
  private:
   int ids_found_;
@@ -2325,49 +2327,6 @@ TEST_F(ExtensionServiceTest, LoadLocalizedTheme) {
   ASSERT_TRUE(base::DeleteFile(theme_file, false));  // Not recursive.
 }
 
-// Tests that we can change the ID of an unpacked extension by adding a key
-// to its manifest.
-TEST_F(ExtensionServiceTest, UnpackedExtensionCanChangeID) {
-  InitializeEmptyExtensionService();
-
-  base::ScopedTempDir temp;
-  ASSERT_TRUE(temp.CreateUniqueTempDir());
-
-  base::FilePath extension_path = temp.path();
-  base::FilePath manifest_path =
-      extension_path.Append(extensions::kManifestFilename);
-  base::FilePath manifest_no_key =
-      data_dir().AppendASCII("unpacked").AppendASCII("manifest_no_key.json");
-
-  base::FilePath manifest_with_key =
-      data_dir().AppendASCII("unpacked").AppendASCII("manifest_with_key.json");
-
-  ASSERT_TRUE(base::PathExists(manifest_no_key));
-  ASSERT_TRUE(base::PathExists(manifest_with_key));
-
-  // Load the unpacked extension with no key.
-  base::CopyFile(manifest_no_key, manifest_path);
-  extensions::UnpackedInstaller::Create(service())->Load(extension_path);
-
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(0u, GetErrors().size());
-  ASSERT_EQ(1u, loaded_.size());
-  EXPECT_EQ(1u, registry()->enabled_extensions().size());
-
-  // Add the key to the manifest.
-  base::CopyFile(manifest_with_key, manifest_path);
-  loaded_.clear();
-
-  // Reload the extensions.
-  service()->ReloadExtensionsForTest();
-  const Extension* extension = service()->GetExtensionById(unpacked, false);
-  EXPECT_EQ(unpacked, extension->id());
-  ASSERT_EQ(1u, loaded_.size());
-
-  // TODO(jstritar): Right now this just makes sure we don't crash and burn, but
-  // we should also test that preferences are preserved.
-}
-
 #if defined(OS_POSIX)
 TEST_F(ExtensionServiceTest, UnpackedExtensionMayContainSymlinkedFiles) {
   base::FilePath source_data_dir =
@@ -3631,7 +3590,6 @@ TEST_F(ExtensionServiceTest, ReloadBlacklistedExtension) {
   EXPECT_EQ(StringSet(good1, good2),
             registry()->blacklisted_extensions().GetIDs());
 }
-
 #endif  // defined(ENABLE_BLACKLIST_TESTS)
 
 // Tests blocking then unblocking enabled extensions after the service has been
@@ -5533,6 +5491,36 @@ TEST_F(ExtensionServiceTest, ExternalPrefProvider) {
       "  }"
       "}";
   EXPECT_EQ(1, was_installed_by_eom_visitor.Visit(json_data));
+
+  // Test min_profile_created_by_version.
+  MockProviderVisitor min_profile_created_by_version_visitor(base_path);
+  json_data =
+      "{"
+      "  \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\": {"
+      "    \"external_crx\": \"RandomExtension.crx\","
+      "    \"external_version\": \"1.0\","
+      "    \"min_profile_created_by_version\": \"42.0.0.1\""
+      "  },"
+      "  \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\": {"
+      "    \"external_crx\": \"RandomExtension2.crx\","
+      "    \"external_version\": \"1.0\","
+      "    \"min_profile_created_by_version\": \"43.0.0.1\""
+      "  },"
+      "  \"cccccccccccccccccccccccccccccccc\": {"
+      "    \"external_crx\": \"RandomExtension3.crx\","
+      "    \"external_version\": \"3.0\","
+      "    \"min_profile_created_by_version\": \"44.0.0.1\""
+      "  }"
+      "}";
+  min_profile_created_by_version_visitor.profile()->GetPrefs()->SetString(
+      prefs::kProfileCreatedByVersion, "40.0.0.1");
+  EXPECT_EQ(0, min_profile_created_by_version_visitor.Visit(json_data));
+  min_profile_created_by_version_visitor.profile()->GetPrefs()->SetString(
+      prefs::kProfileCreatedByVersion, "43.0.0.1");
+  EXPECT_EQ(2, min_profile_created_by_version_visitor.Visit(json_data));
+  min_profile_created_by_version_visitor.profile()->GetPrefs()->SetString(
+      prefs::kProfileCreatedByVersion, "45.0.0.1");
+  EXPECT_EQ(3, min_profile_created_by_version_visitor.Visit(json_data));
 }
 
 // Test loading good extensions from the profile directory.
@@ -5599,7 +5587,11 @@ class ExtensionsReadyRecorder : public content::NotificationObserver {
 //
 // Also tests that we always fire EXTENSIONS_READY, no matter whether we are
 // enabled or not.
-TEST(ExtensionServiceTestSimple, Enabledness) {
+class ExtensionServiceTestSimple : public testing::Test {
+  content::TestBrowserThreadBundle thread_bundle_;
+};
+
+TEST_F(ExtensionServiceTestSimple, Enabledness) {
   // Make sure the PluginService singleton is destroyed at the end of the test.
   base::ShadowingAtExitManager at_exit_manager;
 #if defined(ENABLE_PLUGINS)
@@ -5610,7 +5602,6 @@ TEST(ExtensionServiceTestSimple, Enabledness) {
   ExtensionErrorReporter::Init(false);  // no noisy errors
   ExtensionsReadyRecorder recorder;
   scoped_ptr<TestingProfile> profile(new TestingProfile());
-  content::TestBrowserThreadBundle thread_bundle_;
 #if defined OS_CHROMEOS
   chromeos::ScopedTestDeviceSettingsService device_settings_service;
   chromeos::ScopedTestCrosSettings cros_settings;

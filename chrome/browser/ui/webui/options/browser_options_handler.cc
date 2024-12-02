@@ -69,7 +69,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
-#include "chromeos/chromeos_switches.h"
+#include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_service.h"
@@ -120,6 +120,7 @@
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "components/user_manager/user.h"
@@ -307,7 +308,12 @@ void BrowserOptionsHandler::GetLocalizedValues(base::DictionaryValue* values) {
     { "metricsReportingResetRestart", IDS_OPTIONS_ENABLE_LOGGING_RESTART },
     { "networkPredictionEnabledDescription",
       IDS_NETWORK_PREDICTION_ENABLED_DESCRIPTION },
-    { "passwordManagerEnabled", IDS_OPTIONS_PASSWORD_MANAGER_ENABLE },
+    { "passwordManagerEnabled",
+      password_bubble_experiment::IsSmartLockBrandingEnabled(
+          ProfileSyncServiceFactory::GetForProfile(
+              Profile::FromWebUI(web_ui()))) ?
+      IDS_OPTIONS_PASSWORD_MANAGER_SMART_LOCK_ENABLE :
+      IDS_OPTIONS_PASSWORD_MANAGER_ENABLE },
     { "passwordsAndAutofillGroupName",
       IDS_OPTIONS_PASSWORDS_AND_FORMS_GROUP_NAME },
     { "privacyClearDataButton", IDS_OPTIONS_PRIVACY_CLEAR_DATA_BUTTON },
@@ -1147,6 +1153,10 @@ void BrowserOptionsHandler::SetDefaultWebClientUIState(
 
   if (state == ShellIntegration::STATE_IS_DEFAULT) {
     status_string_id = IDS_OPTIONS_DEFAULTBROWSER_DEFAULT;
+    // Notify the user in the future if Chrome ceases to be the user's chosen
+    // default browser.
+    PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+    prefs->SetBoolean(prefs::kCheckDefaultBrowser, true);
   } else if (state == ShellIntegration::STATE_NOT_DEFAULT) {
     if (ShellIntegration::CanSetAsDefaultBrowser() ==
             ShellIntegration::SET_DEFAULT_NOT_ALLOWED) {
@@ -1385,12 +1395,17 @@ void BrowserOptionsHandler::SendProfilesInfo() {
 void BrowserOptionsHandler::DeleteProfile(const base::ListValue* args) {
   DCHECK(args);
   const base::Value* file_path_value;
-  if (!args->Get(0, &file_path_value))
+  if (!args->Get(0, &file_path_value)) {
+    NOTREACHED();
     return;
+  }
 
   base::FilePath file_path;
-  if (!base::GetValueAsFilePath(*file_path_value, &file_path))
+  if (!base::GetValueAsFilePath(*file_path_value, &file_path)) {
+    NOTREACHED();
     return;
+  }
+
   helper::DeleteProfileAtPath(file_path, web_ui());
 }
 

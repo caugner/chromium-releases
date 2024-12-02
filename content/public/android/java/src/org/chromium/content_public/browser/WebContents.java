@@ -159,6 +159,11 @@ public interface WebContents {
     public void resumeResponseDeferredAtStart();
 
     /**
+     * Resumes the requests for a newly created window.
+     */
+    public void resumeLoadingCreatedWebContents();
+
+    /**
      * Set pending Navigation for transition testing on this WebContents.
      */
     public void setHasPendingNavigationTransitionForTesting();
@@ -237,6 +242,14 @@ public interface WebContents {
      * @return The theme color for the content as set by the theme-color meta tag.
      */
     public int getThemeColor(int defaultColor);
+
+    /**
+     * Requests a snapshop of accessibility tree. The result is provided asynchronously
+     * using the callback
+     * @param callback The callback to be called when the snapshot is ready. The callback
+     *                 cannot be null.
+     */
+    public void requestAccessibilitySnapshot(AccessibilitySnapshotCallback callback);
 
     /**
      * Add an observer to the WebContents

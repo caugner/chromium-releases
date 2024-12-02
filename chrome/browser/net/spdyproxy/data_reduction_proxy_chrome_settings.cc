@@ -8,6 +8,7 @@
 
 #include "base/base64.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_util.h"
@@ -79,25 +80,35 @@ bool GetEmbeddedPacScript(const std::string& pac_url, std::string* pac_script) {
 // prefs, if present. |proxy_pref_name| is the name of the proxy pref.
 void DataReductionProxyChromeSettings::MigrateDataReductionProxyOffProxyPrefs(
     PrefService* prefs) {
+  ProxyPrefMigrationResult proxy_pref_status =
+      MigrateDataReductionProxyOffProxyPrefsHelper(prefs);
+  UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.ProxyPrefMigrationResult",
+                            proxy_pref_status,
+                            DataReductionProxyChromeSettings::PROXY_PREF_MAX);
+}
+
+DataReductionProxyChromeSettings::ProxyPrefMigrationResult
+DataReductionProxyChromeSettings::MigrateDataReductionProxyOffProxyPrefsHelper(
+    PrefService* prefs) {
   base::DictionaryValue* dict =
-      (base::DictionaryValue*) prefs->GetUserPrefValue(prefs::kProxy);
+      (base::DictionaryValue*)prefs->GetUserPrefValue(prefs::kProxy);
   if (!dict)
-    return;
+    return PROXY_PREF_NOT_CLEARED;
 
   // Clear empty "proxy" dictionary created by a bug. See http://crbug/448172.
   if (dict->empty()) {
     prefs->ClearPref(prefs::kProxy);
-    return;
+    return PROXY_PREF_CLEARED_EMPTY;
   }
 
   std::string mode;
   if (!dict->GetString("mode", &mode))
-    return;
+    return PROXY_PREF_NOT_CLEARED;
   // Clear "system" proxy entry since this is the default. This entry was
   // created by bug (http://crbug/448172).
   if (ProxyModeToString(ProxyPrefs::MODE_SYSTEM) == mode) {
     prefs->ClearPref(prefs::kProxy);
-    return;
+    return PROXY_PREF_CLEARED_MODE_SYSTEM;
   }
 
   // From M36 to M40, the DRP was configured using MODE_FIXED_SERVERS in the
@@ -105,19 +116,23 @@ void DataReductionProxyChromeSettings::MigrateDataReductionProxyOffProxyPrefs(
   if (ProxyModeToString(ProxyPrefs::MODE_FIXED_SERVERS) == mode) {
     std::string proxy_server;
     if (!dict->GetString("server", &proxy_server))
-      return;
+      return PROXY_PREF_NOT_CLEARED;
     net::ProxyConfig::ProxyRules proxy_rules;
     proxy_rules.ParseFromString(proxy_server);
     // Clear the proxy pref if it matches a currently configured Data Reduction
     // Proxy, or if the proxy host ends with ".googlezip.net", in order to
     // ensure that any DRP in the pref is cleared even if the DRP configuration
     // was changed. See http://crbug.com/476610.
-    if (!Config()->ContainsDataReductionProxy(proxy_rules) &&
-        !ContainsDataReductionProxyDefaultHostSuffix(proxy_rules)) {
-      return;
-    }
+    ProxyPrefMigrationResult rv;
+    if (Config()->ContainsDataReductionProxy(proxy_rules))
+      rv = PROXY_PREF_CLEARED_DRP;
+    else if (ContainsDataReductionProxyDefaultHostSuffix(proxy_rules))
+      rv = PROXY_PREF_CLEARED_GOOGLEZIP;
+    else
+      return PROXY_PREF_NOT_CLEARED;
+
     prefs->ClearPref(prefs::kProxy);
-    return;
+    return rv;
   }
 
   // Before M35, the DRP was configured using a PAC script base64 encoded into a
@@ -127,7 +142,7 @@ void DataReductionProxyChromeSettings::MigrateDataReductionProxyOffProxyPrefs(
     std::string pac_script;
     if (!dict->GetString("pac_url", &pac_url) ||
         !GetEmbeddedPacScript(pac_url, &pac_script)) {
-      return;
+      return PROXY_PREF_NOT_CLEARED;
     }
 
     // In M35 and earlier, the way of specifying the DRP in a PAC script would
@@ -136,11 +151,13 @@ void DataReductionProxyChromeSettings::MigrateDataReductionProxyOffProxyPrefs(
     // indicates whether there's a proxy in that PAC script with a host of the
     // form "*.googlezip.net".
     if (pac_script.find(".googlezip.net:") == std::string::npos)
-      return;
+      return PROXY_PREF_NOT_CLEARED;
 
     prefs->ClearPref(prefs::kProxy);
-    return;
+    return PROXY_PREF_CLEARED_PAC_GOOGLEZIP;
   }
+
+  return PROXY_PREF_NOT_CLEARED;
 }
 
 DataReductionProxyChromeSettings::DataReductionProxyChromeSettings()
@@ -176,7 +193,8 @@ void DataReductionProxyChromeSettings::InitDataReductionProxySettings(
               profile_prefs, ui_task_runner, commit_delay));
   scoped_ptr<data_reduction_proxy::DataReductionProxyService> service =
       make_scoped_ptr(new data_reduction_proxy::DataReductionProxyService(
-          compression_stats.Pass(), this, request_context_getter));
+          compression_stats.Pass(), this, profile_prefs, request_context_getter,
+          io_data->io_task_runner()));
   data_reduction_proxy::DataReductionProxySettings::
       InitDataReductionProxySettings(profile_prefs, io_data, service.Pass());
   io_data->SetDataReductionProxyService(
