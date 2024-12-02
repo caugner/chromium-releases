@@ -85,6 +85,11 @@ class AccountSelectionModalView : public views::DialogDelegateView,
   std::string GetDialogTitle() const override;
   std::optional<std::string> GetDialogSubtitle() const override;
 
+  // views::DialogDelegateView:
+  views::View* GetInitiallyFocusedView() override;
+
+  std::u16string GetQueuedAnnouncementForTesting();
+
  private:
   // Returns a View for header of an account chooser. It contains text to prompt
   // the user to sign in to an RP with an account from an IDP.
@@ -136,12 +141,6 @@ class AccountSelectionModalView : public views::DialogDelegateView,
   // Removes all child views and dangling pointers.
   void RemoveNonHeaderChildViews();
 
-  // Opens the use other account pop-up and disables the use other account
-  // button.
-  void OnUseOtherAccount(const GURL& idp_config_url,
-                         const GURL& idp_login_url,
-                         const ui::Event& event);
-
   // View containing the header.
   raw_ptr<views::View> header_view_ = nullptr;
 
@@ -153,6 +152,9 @@ class AccountSelectionModalView : public views::DialogDelegateView,
 
   // View containing the continue button.
   raw_ptr<views::View> continue_button_ = nullptr;
+
+  // View containing the cancel button.
+  raw_ptr<views::View> cancel_button_ = nullptr;
 
   // View containing the account chooser.
   raw_ptr<views::View> account_chooser_ = nullptr;
@@ -168,6 +170,13 @@ class AccountSelectionModalView : public views::DialogDelegateView,
 
   // Whether a progress bar is present.
   bool has_progress_bar_{false};
+
+  // Whether the title has been announced for accessibility.
+  bool has_announced_title_{false};
+
+  // The announcement that should be made upon view focus, if screen reader is
+  // turned on.
+  std::u16string queued_announcement_;
 
   // The title for the modal dialog.
   std::u16string title_;

@@ -38,10 +38,8 @@ std::u16string GetDeviceName(size_t index) {
 }
 
 media_preview_metrics::Context GetMetricsContext() {
-  media_preview_metrics::Context metrics_context(
-      media_preview_metrics::UiLocation::kPermissionPrompt);
-  metrics_context.preview_type = media_preview_metrics::PreviewType::kCamera;
-  return metrics_context;
+  return {media_preview_metrics::UiLocation::kPermissionPrompt,
+          media_preview_metrics::PreviewType::kCamera};
 }
 
 #if !BUILDFLAG(IS_MAC)
@@ -118,12 +116,14 @@ class MediaViewControllerBaseTestParameterized
     return controller_->GetNoDeviceLabelViewForTesting()->GetVisible();
   }
 
-  const std::u16string& GetComboboxAccessibleName() const {
+  std::u16string GetComboboxAccessibleName() const {
     return controller_->GetComboboxForTesting()->GetAccessibleName();
   }
+
   const std::u16string& GetDeviceNameLabel() const {
     return controller_->GetDeviceNameLabelViewForTesting()->GetText();
   }
+
   const std::u16string& GetNoDeviceLabel() const {
     return controller_->GetNoDeviceLabelViewForTesting()->GetText();
   }

@@ -112,9 +112,6 @@
     self.viewController.presentationDelegate = self;
     self.viewController.modelDelegate = self.mediator;
     self.mediator.consumer = self.viewController;
-    [self.baseNavigationController.navigationBar
-        setBackgroundImage:[UIImage imageNamed:@"notifications_opt_in_banner"]
-             forBarMetrics:UIBarMetricsDefault];
     [self.baseNavigationController pushViewController:self.viewController
                                              animated:YES];
   }

@@ -36,7 +36,6 @@
 #include "chrome/browser/dom_distiller/tab_utils.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/favicon/favicon_utils.h"
-#include "chrome/browser/feed/web_feed_ui_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -78,6 +77,7 @@
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/intent_picker_tab_helper.h"
+#include "chrome/browser/ui/lens/lens_overlay_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/qrcode_generator/qrcode_generator_bubble_controller.h"
@@ -129,6 +129,7 @@
 #include "components/find_in_page/find_types.h"
 #include "components/google/core/common/google_util.h"
 #include "components/lens/buildflags.h"
+#include "components/lens/lens_features.h"
 #include "components/media_router/browser/media_router_dialog_controller.h"  // nogncheck
 #include "components/media_router/browser/media_router_metrics.h"
 #include "components/omnibox/browser/omnibox_prefs.h"
@@ -215,6 +216,10 @@
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chromeos/crosapi/mojom/task_manager.mojom.h"
 #include "chromeos/lacros/lacros_service.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chrome/browser/chromeos/printing/print_preview/print_view_manager_common.h"
 #endif
 
 #if !BUILDFLAG(IS_CHROMEOS)
@@ -819,7 +824,7 @@ void Home(Browser* browser, WindowOpenDisposition disposition) {
 
 base::WeakPtr<content::NavigationHandle> OpenCurrentURL(Browser* browser) {
   base::RecordAction(UserMetricsAction("LoadURL"));
-  // TODO(https://crbug.com/1294004): Eliminate extra checks once source of
+  // TODO(crbug.com/40820294): Eliminate extra checks once source of
   //  bad pointer dereference is identified. See also TODO comment below.
   CHECK(browser);
   BrowserWindow* window = browser->window();
@@ -858,7 +863,7 @@ base::WeakPtr<content::NavigationHandle> OpenCurrentURL(Browser* browser) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   DCHECK(extensions::ExtensionSystem::Get(browser->profile())
              ->extension_service());
-  // TODO(https://crbug.com/1294004): Eliminate extra checks once source of
+  // TODO(crbug.com/40820294): Eliminate extra checks once source of
   //  bad pointer dereference is identified. See also TODO comment above.
   extensions::ExtensionRegistry* extension_registry =
       extensions::ExtensionRegistry::Get(browser->profile());
@@ -1659,7 +1664,7 @@ void SavePage(Browser* browser) {
     base::RecordAction(UserMetricsAction("PDF.SavePage"));
 #if BUILDFLAG(ENABLE_PDF)
     // The PDF viewer may handle the event by itself.
-    if (base::FeatureList::IsEnabled(chrome_pdf::features::kPdfOopif) &&
+    if (chrome_pdf::features::IsOopifPdfEnabled() &&
         pdf_extension_util::MaybeDispatchSaveEvent(
             current_tab->GetPrimaryMainFrame())) {
       return;
@@ -1689,6 +1694,23 @@ bool CanSavePage(const Browser* browser) {
 void Print(Browser* browser) {
 #if BUILDFLAG(ENABLE_PRINTING)
   auto* web_contents = browser->tab_strip_model()->GetActiveWebContents();
+
+  // Launch ChromeOS print preview only if in a ChromeOS build and
+  // `kPrintPreviewCrosPrimary` enabled. Otherwise use browser print preview.
+#if BUILDFLAG(IS_CHROMEOS)
+  if (base::FeatureList::IsEnabled(::features::kPrintPreviewCrosPrimary)) {
+    chromeos::printing::StartPrint(
+        web_contents,
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+        /*print_renderer=*/mojo::NullAssociatedRemote(),
+#endif
+        browser->profile()->GetPrefs()->GetBoolean(
+            prefs::kPrintPreviewDisabled),
+        /*has_selection=*/false);
+    return;
+  }
+#endif
+
   printing::StartPrint(
       web_contents,
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -1906,7 +1928,7 @@ void OpenTaskManager(Browser* browser) {
 }
 
 void OpenFeedbackDialog(Browser* browser,
-                        FeedbackSource source,
+                        feedback::FeedbackSource source,
                         const std::string& description_template,
                         const std::string& category_tag) {
   base::RecordAction(UserMetricsAction("Feedback"));
@@ -1945,17 +1967,6 @@ void OpenUpdateChromeDialog(Browser* browser) {
   } else {
     base::RecordAction(UserMetricsAction("UpdateChrome"));
     browser->window()->ShowUpdateChromeDialog();
-  }
-}
-
-void ToggleDistilledView(Browser* browser) {
-  auto* current_web_contents =
-      browser->tab_strip_model()->GetActiveWebContents();
-  if (dom_distiller::url_utils::IsDistilledPage(
-          current_web_contents->GetLastCommittedURL())) {
-    ReturnToOriginalPage(current_web_contents);
-  } else {
-    DistillCurrentPageAndView(current_web_contents);
   }
 }
 
@@ -2200,18 +2211,6 @@ void ProcessInterceptedChromeURLNavigationInIncognito(Browser* browser,
   }
 }
 
-void FollowSite(content::WebContents* web_contents) {
-  DCHECK(!Profile::FromBrowserContext(web_contents->GetBrowserContext())
-              ->IsIncognitoProfile());
-  feed::FollowSite(web_contents);
-}
-
-void UnfollowSite(content::WebContents* web_contents) {
-  DCHECK(!Profile::FromBrowserContext(web_contents->GetBrowserContext())
-              ->IsIncognitoProfile());
-  feed::UnfollowSite(web_contents);
-}
-
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
 void RunScreenAILayoutExtraction(Browser* browser) {
   content::WebContents* web_contents =
@@ -2225,6 +2224,18 @@ void RunScreenAILayoutExtraction(Browser* browser) {
       ->AnnotateScreenshot(web_contents);
 }
 #endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
+
+void ExecLensOverlay(Browser* browser) {
+  content::WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
+  CHECK(web_contents);
+
+  LensOverlayController* const controller =
+      LensOverlayController::GetController(web_contents);
+  CHECK(controller);
+  controller->ShowUI(LensOverlayController::InvocationSource::kAppMenu);
+  browser->window()->NotifyPromoFeatureUsed(lens::features::kLensOverlay);
+}
 
 void ExecLensRegionSearch(Browser* browser) {
 #if BUILDFLAG(ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES)

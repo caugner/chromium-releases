@@ -30,10 +30,6 @@ CONTENT_EXPORT extern const base::FeatureParam<int>
 // itself. See crbug.com/1502326
 BASE_DECLARE_FEATURE(kPrefetchNIKScope);
 
-// If enabled, browser-initiated prefetch is become to be allowed.
-// Please see crbug.com/40946257 for more details.
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchBrowserInitiatedTriggers);
-
 // If enabled, a will retrieve and store responses from/to the HTTP cache
 // whenever possible.
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchUsesHTTPCache);
@@ -57,6 +53,9 @@ enum class PrefetchClientHintsCrossSiteBehavior {
 CONTENT_EXPORT extern const base::FeatureParam<
     PrefetchClientHintsCrossSiteBehavior>
     kPrefetchClientHintsCrossSiteBehavior;
+
+// If enabled, prefetches may occur in off-the-record browser contexts.
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchOffTheRecord);
 
 // If enabled, then prefetch serving will apply mitigations if it may have been
 // contaminated by cross-partition state.

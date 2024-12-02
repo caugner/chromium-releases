@@ -4,7 +4,7 @@
 
 load("//lib/branches.star", "branches")
 load("//lib/builder_config.star", "builder_config")
-load("//lib/builders.star", "cpu", "os", "reclient", "siso")
+load("//lib/builders.star", "cpu", "os", "reclient")
 load("//lib/ci.star", "ci")
 load("//lib/consoles.star", "consoles")
 load("//lib/gn_args.star", "gn_args")
@@ -38,11 +38,7 @@ ci.defaults.set(
     reclient_jobs = reclient.jobs.DEFAULT,
     service_account = ci.DEFAULT_SERVICE_ACCOUNT,
     shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-    siso_configs = ["builder"],
-    siso_enable_cloud_profiler = True,
-    siso_enable_cloud_trace = True,
     siso_enabled = True,
-    siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = reclient.jobs.DEFAULT,
 )
 
@@ -118,7 +114,13 @@ coverage_builder(
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
-            apply_configs = ["android", "enable_wpr_tests"],
+            apply_configs = [
+                "android",
+                # This is necessary due to this builder running the
+                # telemetry_perf_unittests suite.
+                "chromium_with_telemetry_dependencies",
+                "enable_wpr_tests",
+            ],
         ),
         chromium_config = builder_config.chromium_config(
             config = "android",
@@ -491,6 +493,7 @@ coverage_builder(
             "reclient",
             "chromeos_codecs",
             "pdf_xfa",
+            "release",
         ],
     ),
     builderless = True,
@@ -508,7 +511,12 @@ coverage_builder(
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
-            apply_configs = ["use_clang_coverage"],
+            apply_configs = [
+                # This is necessary due to this builder running the
+                # telemetry_perf_unittests suite.
+                "chromium_with_telemetry_dependencies",
+                "use_clang_coverage",
+            ],
         ),
         chromium_config = builder_config.chromium_config(
             config = "chromium",
@@ -610,11 +618,13 @@ coverage_builder(
             "use_clang_coverage",
             "no_symbols",
             "chrome_with_codecs",
+            "x64",
         ],
     ),
     builderless = True,
-    cores = 12,
+    cores = None,
     os = os.MAC_ANY,
+    cpu = cpu.ARM64,
     console_view_entry = [
         consoles.console_view_entry(
             category = "mac",

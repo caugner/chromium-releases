@@ -92,7 +92,6 @@ constexpr char kGetTetheringStatus[] = "getTetheringStatus";
 constexpr char kGetTetheringConfig[] = "getTetheringConfig";
 constexpr char kSetTetheringConfig[] = "setTetheringConfig";
 constexpr char kCheckTetheringReadiness[] = "checkTetheringReadiness";
-constexpr char kSetTetheringEnabled[] = "setTetheringEnabled";
 constexpr char kGetWifiDirectCapabilities[] = "getWifiDirectCapabilities";
 constexpr char kGetWifiDirectOwnerInfo[] = "getWifiDirectOwnerInfo";
 constexpr char kGetWifiDirectClientInfo[] = "getWifiDirectClientInfo";
@@ -209,10 +208,10 @@ class NetworkDiagnosticsMessageHandler : public content::WebUIMessageHandler {
 
  private:
   void OpenFeedbackDialog(const base::Value::List& value) {
-    chrome::ShowFeedbackPage(nullptr, chrome::kFeedbackSourceNetworkHealthPage,
-                             "" /*description_template*/,
-                             "" /*description_template_placeholder*/,
-                             "network-health", "" /*extra_diagnostics*/);
+    chrome::ShowFeedbackPage(
+        nullptr, feedback::kFeedbackSourceNetworkHealthPage,
+        "" /*description_template*/, "" /*description_template_placeholder*/,
+        "network-health", "" /*extra_diagnostics*/);
   }
 };
 
@@ -579,10 +578,6 @@ class HotspotConfigMessageHandler : public content::WebUIMessageHandler {
         base::BindRepeating(
             &HotspotConfigMessageHandler::CheckTetheringReadiness,
             base::Unretained(this)));
-    web_ui()->RegisterMessageCallback(
-        kSetTetheringEnabled,
-        base::BindRepeating(&HotspotConfigMessageHandler::SetTetheringEnabled,
-                            base::Unretained(this)));
   }
 
  private:
@@ -631,34 +626,6 @@ class HotspotConfigMessageHandler : public content::WebUIMessageHandler {
         base::BindOnce(&HotspotConfigMessageHandler::RespondError,
                        weak_ptr_factory_.GetWeakPtr(), callback_id,
                        kCheckTetheringReadiness));
-  }
-
-  void SetTetheringEnabled(const base::Value::List& arg_list) {
-    CHECK_EQ(2u, arg_list.size());
-    std::string callback_id = arg_list[0].GetString();
-    bool enabled = arg_list[1].GetBool();
-
-    // Enable TetheringAllowed flag in Shill manager before turning on/off
-    // tethering.
-    ShillManagerClient::Get()->SetProperty(
-        shill::kTetheringAllowedProperty, base::Value(true),
-        base::BindOnce(&HotspotConfigMessageHandler::PerformSetTetheringEnabled,
-                       weak_ptr_factory_.GetWeakPtr(), callback_id, enabled),
-        base::BindOnce(
-            &HotspotConfigMessageHandler::SetManagerPropertiesErrorCallback,
-            weak_ptr_factory_.GetWeakPtr(), callback_id,
-            shill::kTetheringConfigProperty));
-  }
-
-  void PerformSetTetheringEnabled(const std::string& callback_id,
-                                  bool enabled) {
-    ShillManagerClient::Get()->SetTetheringEnabled(
-        enabled,
-        base::BindOnce(&HotspotConfigMessageHandler::RespondStringResult,
-                       weak_ptr_factory_.GetWeakPtr(), callback_id),
-        base::BindOnce(&HotspotConfigMessageHandler::RespondError,
-                       weak_ptr_factory_.GetWeakPtr(), callback_id,
-                       kSetTetheringEnabled));
   }
 
   void SetTetheringConfig(const base::Value::List& arg_list) {

@@ -14,6 +14,7 @@
 #include "base/token.h"
 #include "chrome/browser/compose/compose_enabling.h"
 #include "chrome/browser/compose/compose_session.h"
+#include "chrome/browser/compose/proactive_nudge_tracker.h"
 #include "chrome/browser/compose/proto/compose_optimization_guide.pb.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/common/compose/compose.mojom.h"
@@ -26,6 +27,7 @@
 #include "components/compose/core/browser/compose_manager_impl.h"
 #include "components/optimization_guide/core/optimization_guide_decision.h"
 #include "components/optimization_guide/core/optimization_guide_model_executor.h"
+#include "components/prefs/pref_member.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -47,6 +49,7 @@ class ChromeComposeClient
       public content::WebContentsUserData<ChromeComposeClient>,
       public autofill::AutofillManager::Observer,
       public compose::mojom::ComposeClientUntrustedPageHandler,
+      public compose::ProactiveNudgeTracker::Delegate,
       public InnerTextProvider {
  public:
   using EntryPoint = autofill::AutofillComposeDelegate::UiEntryPoint;
@@ -67,6 +70,9 @@ class ChromeComposeClient
       const autofill::FormFieldData& trigger_field,
       autofill::AutofillSuggestionTriggerSource trigger_source) override;
   compose::PageUkmTracker* getPageUkmTracker() override;
+  void DisableProactiveNudge() override;
+  void OpenProactiveNudgeSettings() override;
+  void AddSiteToNeverPromptList(const url::Origin& origin) override;
 
   // autofill::AutofillManager::Observer:
   // Used to observe field focus changes so that the saved state notification
@@ -130,6 +136,15 @@ class ChromeComposeClient
   // Called when there has been direct user interaction with the WebContents.
   // Used to close the dialog when the user scrolls.
   void DidGetUserInteraction(const blink::WebInputEvent& event) override;
+
+  // Called when the focused element changes. This is only used to inform
+  // the proactive nudge tracker that focus has changed until the
+  // AutofillManager::Observer APIs for focus tracking are fixed.
+  void OnFocusChangedInPage(content::FocusedNodeDetails* details) override;
+
+  // compose::ProactiveNudgeTracker implementation.
+  void ShowProactiveNudge(autofill::FormGlobalId form,
+                          autofill::FieldGlobalId field) override;
 
   void SetOptimizationGuideForTest(
       optimization_guide::OptimizationGuideDecider* opt_guide);
@@ -203,7 +218,7 @@ class ChromeComposeClient
   // Returns nullptr if no such session exists.
   ComposeSession* GetSessionForActiveComposeField();
 
-  compose::ComposeManagerImpl manager_;
+  compose::ComposeManagerImpl manager_{this};
 
   std::unique_ptr<compose::ComposeDialogController> compose_dialog_controller_;
   // A handle to optimization guide for information about URLs that have
@@ -235,7 +250,7 @@ class ChromeComposeClient
   // binding when the pipe disconnects. Any callbacks in receiver methods can be
   // safely called even when the pipe is disconnected.
   mojo::Receiver<compose::mojom::ComposeClientUntrustedPageHandler>
-      client_page_receiver_;
+      client_page_receiver_{this};
 
   // Time that the last call to show the dialog was started.
   base::TimeTicks show_dialog_start_;
@@ -254,11 +269,17 @@ class ChromeComposeClient
   // page is refocused using OnWebContentsFocused.
   bool open_settings_requested_ = false;
 
+  // A state machine that decides whether the proactive nudge should be shown at
+  // a given moment.
+  compose::ProactiveNudgeTracker nudge_tracker_{this};
+
   // Observer for autofill field focus changes. This is used to prevent showing
   // the saved state notification on a previous focused field when an autofill
   // suggestion will be shown in a newly focused field.
   autofill::ScopedAutofillManagersObservation autofill_managers_observation_{
       this};
+
+  BooleanPrefMember proactive_nudge_enabled_;
 
   base::WeakPtrFactory<ChromeComposeClient> weak_ptr_factory_{this};
 

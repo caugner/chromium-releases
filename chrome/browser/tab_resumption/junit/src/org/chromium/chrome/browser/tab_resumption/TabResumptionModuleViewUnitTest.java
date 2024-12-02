@@ -12,7 +12,6 @@ import static org.mockito.Mockito.when;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
 import android.util.Size;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -43,7 +42,6 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab_resumption.TabResumptionModuleUtils.SuggestionClickCallbacks;
 import org.chromium.chrome.browser.tab_resumption.UrlImageProvider.UrlImageCallback;
-import org.chromium.chrome.browser.tab_ui.TabListFaviconProvider;
 import org.chromium.chrome.browser.tab_ui.TabThumbnailView;
 import org.chromium.chrome.browser.tab_ui.ThumbnailProvider;
 import org.chromium.components.embedder_support.util.UrlUtilities;
@@ -62,16 +60,14 @@ public class TabResumptionModuleViewUnitTest extends TestSupport {
     private static final String TAB_TITLE = "Tab Title";
     private static final int TAB_ID = 11;
 
-    @Mock private TabResumptionDataProvider mDataProvider;
     @Mock private UrlImageProvider mUrlImageProvider;
-    @Mock private TabListFaviconProvider mFaviconProvider;
     @Mock private ThumbnailProvider mThumbnailProvider;
     @Mock private Tab mTab;
 
     @Captor private ArgumentCaptor<GURL> mFetchImagePageUrlCaptor;
-    @Captor private ArgumentCaptor<Callback<Drawable>> mFaviconProviderCaptor;
     @Captor private ArgumentCaptor<Callback<Bitmap>> mThumbnailProviderCaptor;
     @Captor private ArgumentCaptor<UrlImageCallback> mFetchImageCallbackCaptor;
+    @Captor private ArgumentCaptor<Callback<Bitmap>> mFetchSalientImageCallbackCaptor;
 
     private TabResumptionModuleView mModuleView;
     private Size mThumbnailSize;
@@ -124,7 +120,6 @@ public class TabResumptionModuleViewUnitTest extends TestSupport {
         mSuggestionBundle = new SuggestionBundle(CURRENT_TIME_MS);
         mModuleView.setUrlImageProvider(mUrlImageProvider);
         mModuleView.setClickCallbacks(mClickCallbacks);
-        mModuleView.setFaviconProvider(mFaviconProvider);
         mModuleView.setThumbnailProvider(mThumbnailProvider);
         mTileContainerView = mModuleView.getTileContainerViewForTesting();
     }
@@ -209,6 +204,67 @@ public class TabResumptionModuleViewUnitTest extends TestSupport {
 
     @Test
     @SmallTest
+    public void testRenderSingle_SalientImage() {
+        mModuleView.setUseSalientImage(true);
+
+        SuggestionEntry entry1 =
+                new SuggestionEntry(
+                        /* sourceName= */ "Desktop",
+                        /* url= */ JUnitTestGURLs.GOOGLE_URL_DOG,
+                        /* title= */ "Google Dog",
+                        /* timestamp= */ makeTimestamp(24 - 3, 0, 0),
+                        /* id= */ 90);
+        mSuggestionBundle.entries.add(entry1);
+
+        Assert.assertEquals(0, mTileContainerView.getChildCount());
+
+        mModuleView.setSuggestionBundle(mSuggestionBundle);
+        Assert.assertEquals(1, mTileContainerView.getChildCount());
+
+        // Capture call to fetch image.
+        verify(mUrlImageProvider, atLeastOnce())
+                .fetchSalientImageWithFallback(
+                        mFetchImagePageUrlCaptor.capture(),
+                        eq(true),
+                        mFetchSalientImageCallbackCaptor.capture(),
+                        mFetchImageCallbackCaptor.capture());
+        Assert.assertEquals(1, mFetchImagePageUrlCaptor.getAllValues().size());
+        Assert.assertEquals(1, mFetchSalientImageCallbackCaptor.getAllValues().size());
+        Assert.assertEquals(
+                JUnitTestGURLs.GOOGLE_URL_DOG, mFetchImagePageUrlCaptor.getAllValues().get(0));
+
+        // Check tile texts.
+        TabResumptionTileView tile1 = (TabResumptionTileView) mTileContainerView.getChildAt(0);
+        Assert.assertEquals(
+                "From Desktop", ((TextView) tile1.findViewById(R.id.tile_pre_info_text)).getText());
+        Assert.assertEquals(
+                "Google Dog", ((TextView) tile1.findViewById(R.id.tile_display_text)).getText());
+        // Actual code would remove "www." prefix, but the test's JNI mock doesn't do so.
+        Assert.assertEquals(
+                "www.google.com \u2022 3 hr ago",
+                ((TextView) tile1.findViewById(R.id.tile_post_info_text)).getText());
+
+        // Image is not loaded yet.
+        Assert.assertNull(((ImageView) tile1.findViewById(R.id.tile_icon)).getDrawable());
+
+        // Provide test image, and check that it's shown as icon.
+        Bitmap bitmap1 = makeBitmap(64, 64);
+        mFetchSalientImageCallbackCaptor.getAllValues().get(0).onResult(bitmap1);
+        BitmapDrawable drawable1 =
+                (BitmapDrawable) ((ImageView) tile1.findViewById(R.id.tile_icon)).getDrawable();
+        Assert.assertNotNull(drawable1);
+        Assert.assertEquals(bitmap1, drawable1.getBitmap());
+
+        // Simulate click.
+        Assert.assertEquals(0, mClickCount);
+        Assert.assertEquals(null, mLastClickUrl);
+        tile1.performClick();
+        Assert.assertEquals(1, mClickCount);
+        Assert.assertEquals(JUnitTestGURLs.GOOGLE_URL_DOG, mLastClickUrl);
+    }
+
+    @Test
+    @SmallTest
     public void testRenderSingleLocalView() {
         SuggestionEntry entry1 = new LocalTabSuggestionEntry(mTab);
         mSuggestionBundle.entries.add(entry1);
@@ -219,11 +275,9 @@ public class TabResumptionModuleViewUnitTest extends TestSupport {
         Assert.assertEquals(1, mTileContainerView.getChildCount());
 
         // Capture call to fetch favicon.
-        verify(mFaviconProvider, atLeastOnce())
-                .getFaviconDrawableForUrlAsync(
-                        eq(mTab.getUrl()),
-                        eq(/* isIncognito= */ false),
-                        mFaviconProviderCaptor.capture());
+        verify(mUrlImageProvider, atLeastOnce())
+                .fetchImageForUrl(
+                        mFetchImagePageUrlCaptor.capture(), mFetchImageCallbackCaptor.capture());
 
         // Capture call to fetch tab thumbnail.
         verify(mThumbnailProvider, atLeastOnce())
@@ -249,14 +303,14 @@ public class TabResumptionModuleViewUnitTest extends TestSupport {
                         .getIconDrawableForTesting());
 
         // Provide test image, and check that it's shown as icon.
-        BitmapDrawable expectedDrawable = new BitmapDrawable();
-        mFaviconProviderCaptor.getAllValues().get(0).onResult(expectedDrawable);
+        Bitmap expectedBitmap = makeBitmap(48, 48);
+        mFetchImageCallbackCaptor.getAllValues().get(0).onBitmap(expectedBitmap);
         BitmapDrawable drawable =
                 (BitmapDrawable)
                         ((ImageView) localTileView.findViewById(R.id.tab_favicon_view))
                                 .getDrawable();
         Assert.assertNotNull(drawable);
-        Assert.assertEquals(expectedDrawable, drawable);
+        Assert.assertEquals(expectedBitmap, drawable.getBitmap());
 
         mThumbnailProviderCaptor.getAllValues().get(0).onResult(makeBitmap(64, 64));
         // Verifies that the placeholder icon drawable is removed after setting a foreground bitmap.

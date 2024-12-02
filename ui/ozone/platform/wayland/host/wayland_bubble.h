@@ -28,8 +28,15 @@ class WaylandBubble : public WaylandWindow {
   void Hide() override;
   bool IsVisible() const override;
   void SetBoundsInDIP(const gfx::Rect& bounds) override;
+  void SetInputRegion(std::optional<std::vector<gfx::Rect>> region_px) override;
   void Activate() override;
   void Deactivate() override;
+  void ShowTooltip(const std::u16string& text,
+                   const gfx::Point& position,
+                   const PlatformWindowTooltipTrigger trigger,
+                   const base::TimeDelta show_delay,
+                   const base::TimeDelta hide_delay) override;
+  void HideTooltip() override;
 
   // WaylandWindow overrides:
   void UpdateWindowScale(bool update_bounds) override;
@@ -59,6 +66,9 @@ class WaylandBubble : public WaylandWindow {
   // Copied from Widget::InitParams::activatable, indicates whether this bubble
   // take activation from the parent window.
   bool activatable_ = false;
+  // Copied from Widget::InitParams::accept_events, indicates whether this
+  // bubble traps inputs.
+  bool accept_events_ = true;
 };
 
 }  // namespace ui

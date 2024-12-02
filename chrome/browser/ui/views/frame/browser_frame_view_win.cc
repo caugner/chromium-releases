@@ -71,7 +71,7 @@ base::win::ScopedHICON CreateHICONFromSkBitmapSizedTo(
 }
 
 // Additional left margin in the title bar when the window is maximized.
-// TODO(https://crbug.com/1411801): Avoid hardcoding sizes like this.
+// TODO(crbug.com/40890502): Avoid hardcoding sizes like this.
 constexpr int kMaximizedLeftMargin = 2;
 
 constexpr int kIconTitleSpacing = 5;
@@ -168,7 +168,7 @@ void BrowserFrameViewWin::LayoutWebAppWindowTitle(
   gfx::Rect bounds = available_space;
   // If nothing has been added to the left, match native Windows 10 UWP apps
   // that don't have window icons.
-  // TODO(https://crbug.com/1411801): Avoid hardcoding sizes like this.
+  // TODO(crbug.com/40890502): Avoid hardcoding sizes like this.
   constexpr int kMinimumTitleLeftBorderMargin = 11;
   if (bounds.x() < kMinimumTitleLeftBorderMargin) {
     bounds.SetHorizontalBounds(kMinimumTitleLeftBorderMargin, bounds.right());
@@ -317,10 +317,14 @@ int BrowserFrameViewWin::NonClientHitTest(const gfx::Point& point) {
   // At the window corners the resize area is not actually bigger, but the 16
   // pixels at the end of the top and bottom edges trigger diagonal resizing.
   constexpr int kResizeCornerWidth = 16;
+
+  const int top_border_thickness = features::IsChromeRefresh2023()
+                                 ? GetLayoutConstant(TAB_STRIP_PADDING)
+                                 : FrameTopBorderThickness(false);
+
   int window_component = GetHTComponentForFrame(
-      point, gfx::Insets::TLBR(GetLayoutConstant(TAB_STRIP_PADDING), 0, 0, 0),
-      GetLayoutConstant(TAB_STRIP_PADDING),
-      kResizeCornerWidth - FrameBorderThickness(),
+      point, gfx::Insets::TLBR(top_border_thickness, 0, 0, 0),
+      top_border_thickness, kResizeCornerWidth - FrameBorderThickness(),
       frame()->widget_delegate()->CanResize());
 
   int frame_component = frame()->client_view()->NonClientHitTest(point);
@@ -496,7 +500,7 @@ int BrowserFrameViewWin::FrameTopBorderThickness(bool restored) const {
       // default. When maximized, the OS sizes the window such that the border
       // extends beyond the screen edges. In that case, we must return the
       // default value.
-      const int kTopResizeFrameArea = 0;
+      const int kTopResizeFrameArea = features::IsChromeRefresh2023() ? 0 : 5;
       return kTopResizeFrameArea;
     }
 

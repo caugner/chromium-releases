@@ -14,6 +14,7 @@ export enum DragFeature {
   NONE = 0,
   TEXT = 1,
   MANUAL_REGION = 2,
+  POST_SELECTION = 3,
 }
 
 export enum GestureState {
@@ -26,6 +27,13 @@ export enum GestureState {
   DRAGGING = 2,
   // A drag is finished, indicated by a pointerup event.
   FINISHED = 3,
+}
+
+export enum CursorType {
+  DEFAULT = 0,
+  POINTER = 1,
+  CROSSHAIR = 2,
+  TEXT = 3,
 }
 
 export interface GestureEvent {

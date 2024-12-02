@@ -253,6 +253,12 @@ export class RealboxElement extends RealboxElementBase {
         value: () => loadTimeData.getBoolean('realboxIsTall'),
         reflectToAttribute: true,
       },
+
+      inSidePanel_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('searchboxInSidePanel'),
+        reflectToAttribute: true,
+      },
     };
   }
 
@@ -389,7 +395,7 @@ export class RealboxElement extends RealboxElementBase {
   }
 
   private onSetInputText_(inputText: string) {
-    this.$.input.setAttribute('value', inputText);
+    this.updateInput_({text: inputText, inline: ''});
   }
 
   private onSetThumbnail_(thumbnailUrl: string) {
@@ -460,7 +466,7 @@ export class RealboxElement extends RealboxElementBase {
     }
 
     if (inputValue.trim()) {
-      // TODO(crbug.com/1149769): Rather than disabling inline autocompletion
+      // TODO(crbug.com/40732045): Rather than disabling inline autocompletion
       // when the input event is fired within a composition session, change the
       // mechanism via which inline autocompletion is shown in the realbox.
       this.queryAutocomplete_(inputValue, e.isComposing);

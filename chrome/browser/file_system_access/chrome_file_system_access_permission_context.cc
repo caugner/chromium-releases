@@ -267,9 +267,7 @@ const struct {
     {chrome::DIR_DEFAULT_DOWNLOADS_SAFE, nullptr, kDontBlockChildren},
     // The Chrome installation itself should not be modified by the web.
     {base::DIR_EXE, nullptr, kBlockAllChildren},
-#if !BUILDFLAG(IS_FUCHSIA)
     {base::DIR_MODULE, nullptr, kBlockAllChildren},
-#endif
     {base::DIR_ASSETS, nullptr, kBlockAllChildren},
     // And neither should the configuration of at least the currently running
     // Chrome instance (note that this does not take --user-data-dir command
@@ -333,7 +331,7 @@ const struct {
     // website can do with access to that directory and its contents.
     {base::DIR_HOME, FILE_PATH_LITERAL(".dbus"), kBlockAllChildren},
 #endif
-    // TODO(https://crbug.com/984641): Refine this list, for example add
+    // TODO(crbug.com/40095723): Refine this list, for example add
     // XDG_CONFIG_HOME when it is not set ~/.config?
 };
 
@@ -565,7 +563,7 @@ class ChromeFileSystemAccessPermissionContext::PermissionGrantImpl
   // FileSystemAccessPermissionGrant:
   PermissionStatus GetStatus() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    // TODO(crbug.com/1011533): Determine if this should return denied for
+    // TODO(crbug.com/40101962): Determine if this should return denied for
     // guard block, and how ancestor permission should be handled.
     if (status_ == PermissionStatus::ASK &&
         context_->CanAutoGrantViaPersistentPermission(origin_, path_,
@@ -854,7 +852,7 @@ class ChromeFileSystemAccessPermissionContext::PermissionGrantImpl
       // There must be an entry for an ancestor of this entry. Nothing to do
       // here.
       //
-      // TODO(https://crbug.com/1381302): Consolidate superfluous child grants
+      // TODO(crbug.com/40245144): Consolidate superfluous child grants
       // to support directory moves.
       return;
     }
@@ -924,7 +922,7 @@ class ChromeFileSystemAccessPermissionContext::PermissionGrantImpl
       return;
     }
 
-    // TODO(crbug.com/1011533): Consider adding more `PermissionRequestOutcome`
+    // TODO(crbug.com/40101962): Consider adding more `PermissionRequestOutcome`
     // types to account for "restore every time" case and invalid state case.
 
     if (context_->GetPersistedGrantType(origin_) !=
@@ -971,7 +969,7 @@ class ChromeFileSystemAccessPermissionContext::PermissionGrantImpl
             std::move(callback), PermissionRequestOutcome::kUserDismissed);
         break;
       case PermissionAction::IGNORED:
-        // TODO(crbug.com/1011533): This action is not user-detectable,
+        // TODO(crbug.com/40101962): This action is not user-detectable,
         // consider replacing `PermissionRequestOutcome` with a more
         // appropriate type.
         context_->OnRestorePermissionIgnored(origin_);
@@ -1406,8 +1404,8 @@ ChromeFileSystemAccessPermissionContext::GetGrantedObjects(
 
   // Otherwise, a valid set of grants are stored in the in-memory map
   // |active_permissions_map_|.
-  // TODO(crbug.com/1466929): Update iteration logic below to handle the case of
-  // write-only permission grants.
+  // TODO(crbug.com/40276567): Update iteration logic below to handle the case
+  // of write-only permission grants.
   std::vector<std::unique_ptr<Object>> objects;
   auto it = active_permissions_map_.find(origin);
   if (it != active_permissions_map_.end()) {
@@ -1427,8 +1425,7 @@ ChromeFileSystemAccessPermissionContext::GetGrantedObjects(
 
         objects.push_back(std::make_unique<Object>(
             origin, base::Value(std::move(value)),
-            content_settings::SettingSource::SETTING_SOURCE_USER,
-            IsOffTheRecord()));
+            content_settings::SettingSource::kUser, IsOffTheRecord()));
       }
     }
   }
@@ -1672,7 +1669,7 @@ void ChromeFileSystemAccessPermissionContext::CheckPathAgainstBlocklist(
     HandleType handle_type,
     base::OnceCallback<void(bool)> callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // TODO(https://crbug.com/1009970): Figure out what external paths should be
+  // TODO(crbug.com/40101272): Figure out what external paths should be
   // blocked. We could resolve the external path to a local path, and check for
   // blocked directories based on that, but that doesn't work well. Instead we
   // should have a separate Chrome OS only code path to block for example the
@@ -1946,7 +1943,7 @@ void ChromeFileSystemAccessPermissionContext::NotifyEntryMoved(
   bool updated = false;
   auto it = active_permissions_map_.find(origin);
   if (it != active_permissions_map_.end()) {
-    // TODO(https://crbug.com/1381302): Consolidate superfluous child grants.
+    // TODO(crbug.com/40245144): Consolidate superfluous child grants.
     PermissionGrantImpl::UpdateGrantPath(it->second.write_grants, old_path,
                                          new_path);
     PermissionGrantImpl::UpdateGrantPath(it->second.read_grants, old_path,
@@ -2206,7 +2203,7 @@ void ChromeFileSystemAccessPermissionContext::OnWebAppInstalled(
   if (!registrar.IsActivelyInstalled(app_id)) {
     return;
   }
-  // TODO(crbug.com/1487679): Ensure that `GetAppScope` retrieves the correct
+  // TODO(crbug.com/40283362): Ensure that `GetAppScope` retrieves the correct
   // GURL when Scope Extensions is launched, which allows web apps to have more
   // than one origin as a scope.
   const auto gurl = registrar.GetAppScope(app_id);
@@ -2347,7 +2344,7 @@ void ChromeFileSystemAccessPermissionContext::MaybeCleanupPermissions(
 
 void ChromeFileSystemAccessPermissionContext::CleanupPermissions(
     const url::Origin& origin) {
-  // TODO(crbug.com/1011533): Remove this custom implementation to handle site
+  // TODO(crbug.com/40101962): Remove this custom implementation to handle site
   // navigation, with the launch of Persistent Permissions.
   if (base::FeatureList::IsEnabled(
           features::kFileSystemAccessPersistentPermissions)) {

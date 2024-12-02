@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/page_info/permission_toggle_row_view.h"
+
 #include <string>
 #include <string_view>
 
@@ -18,6 +19,7 @@
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/page_info/page_info_navigation_handler.h"
 #include "chrome/browser/ui/views/page_info/page_info_view_factory.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/page_info/page_info.h"
 #include "components/permissions/features.h"
@@ -38,6 +40,13 @@
 #include "ui/views/style/typography.h"
 #include "ui/views/view_class_properties.h"
 
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PermissionToggleRowView,
+                                      kRowSubTitleCameraElementId);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PermissionToggleRowView,
+                                      kRowSubTitleMicrophoneElementId);
+
+using content_settings::SettingSource;
+
 PermissionToggleRowView::PermissionToggleRowView(
     ChromePageInfoUiDelegate* delegate,
     PageInfoNavigationHandler* navigation_handler,
@@ -46,7 +55,7 @@ PermissionToggleRowView::PermissionToggleRowView(
     : permission_(permission),
       delegate_(delegate),
       navigation_handler_(navigation_handler) {
-  // TODO(crbug.com/1446230): Directly subclass `RichControlsContainerView`
+  // TODO(crbug.com/40064612): Directly subclass `RichControlsContainerView`
   // instead of adding it as the only child.
   SetUseDefaultFillLayout(true);
   row_view_ = AddChildView(std::make_unique<RichControlsContainerView>());
@@ -104,7 +113,7 @@ PermissionToggleRowView::PermissionToggleRowView(
         kColorPageInfoPermissionBlockedOnSystemLevelDisabled);
   }
 
-  if (permission.source == content_settings::SETTING_SOURCE_USER) {
+  if (permission.source == SettingSource::kUser) {
     // If permission is not allowed because of security reasons, show a label
     // with explanations instead of the controls.
     std::u16string reason =
@@ -177,7 +186,7 @@ void PermissionToggleRowView::InitForUserSource(
   toggle_button_ = row_view_->AddControl(std::move(toggle_button));
 
   const int icon_size = GetLayoutConstant(PAGE_INFO_ICON_SIZE);
-  // TODO(crbug.com/1011533): Update below code to only display the updated
+  // TODO(crbug.com/40101962): Update below code to only display the updated
   // Page Info UI for File System, once the updated UI is ready to be enabled
   // by default.
   if (permission_.type == ContentSettingsType::FILE_SYSTEM_WRITE_GUARD &&
@@ -205,9 +214,11 @@ void PermissionToggleRowView::InitForUserSource(
           features::kFileSystemAccessPersistentPermissions) &&
       base::FeatureList::IsEnabled(
           features::kFileSystemAccessPersistentPermissionsUpdatedPageInfo);
-  if (permissions::PermissionUtil::CanPermissionBeAllowedOnce(
-          permission_.type) ||
-      show_updated_page_info_file_system) {
+  if ((base::FeatureList::IsEnabled(
+           permissions::features::kOneTimePermission) &&
+       permissions::PermissionUtil::CanPermissionBeAllowedOnce(
+           permission_.type)) ||
+      permission_.is_one_time || show_updated_page_info_file_system) {
     auto subpage_button = views::CreateVectorImageButtonWithNativeTheme(
         base::BindRepeating(
             [=](PermissionToggleRowView* row) {
@@ -245,11 +256,8 @@ void PermissionToggleRowView::InitForManagedSource(
       views::DISTANCE_RELATED_LABEL_HORIZONTAL);
   auto state_label = std::make_unique<views::Label>(
       PageInfoUI::PermissionStateToUIString(delegate, permission_),
-      views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY);
-  if (features::IsChromeRefresh2023()) {
-    state_label->SetTextStyle(views::style::STYLE_BODY_5);
-    state_label->SetEnabledColorId(ui::kColorLabelForegroundSecondary);
-  }
+      views::style::CONTEXT_LABEL, views::style::STYLE_BODY_5);
+  state_label->SetEnabledColorId(ui::kColorLabelForegroundSecondary);
   state_label->SetProperty(views::kMarginsKey,
                            gfx::Insets::VH(0, icon_label_spacing));
   row_view_->AddControl(std::move(state_label));
@@ -283,13 +291,20 @@ void PermissionToggleRowView::UpdateUiOnPermissionChanged() {
   // Add explanation for the user-managed permission state if needed. This would
   // be shown if permission is in allowed once or default states or if it is
   // automatically blocked.
-  if (permission_.source == content_settings::SETTING_SOURCE_USER &&
+  if (permission_.source == SettingSource::kUser &&
       (delegate_->ShouldShowAllow(permission_.type) ||
        delegate_->ShouldShowAsk(permission_.type))) {
     std::u16string state_text =
         PageInfoUI::PermissionMainPageStateToUIString(delegate_, permission_);
     if (!state_text.empty()) {
       state_label_ = row_view_->AddSecondaryLabel(state_text);
+      if (permission_.type == ContentSettingsType::MEDIASTREAM_CAMERA) {
+        state_label_->SetProperty(views::kElementIdentifierKey,
+                                  kRowSubTitleCameraElementId);
+      } else if (permission_.type == ContentSettingsType::MEDIASTREAM_MIC) {
+        state_label_->SetProperty(views::kElementIdentifierKey,
+                                  kRowSubTitleMicrophoneElementId);
+      }
     }
   }
 }

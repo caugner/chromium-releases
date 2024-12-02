@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_COMPOSE_CORE_BROWSER_CONFIG_H_
 #define COMPONENTS_COMPOSE_CORE_BROWSER_CONFIG_H_
 
+#include "base/time/time.h"
+
 namespace compose {
 
 // How Compose should position its dialog if there isn't enough space above or
@@ -41,6 +43,11 @@ struct Config {
   unsigned int input_max_chars = 2500;
   // The maximum number of bytes allowed in the inner text.
   unsigned int inner_text_max_bytes = 1024 * 1024;
+  // The maximum number of bytes allowed in the inner text.
+  unsigned int trimmed_inner_text_max_chars = 12000;
+  // The maximum number of bytes allowed in the inner text.
+  unsigned int trimmed_inner_text_header_length = 4000;
+
   // Whether to send a compose when the dialog is first opened,
   // if there is an acceptable input text selected.
   bool auto_submit_with_selection = false;
@@ -50,6 +57,18 @@ struct Config {
 
   // Whether to enable the proactive nudge with no saved state.
   bool proactive_nudge_enabled = false;
+
+  // Used to randomly hide the nudge in order to reduce exposure, experimental
+  // flag for triggering research experiments only. If param is greater than
+  // `1`, always shows. If param is negative, never shows.
+  double proactive_nudge_show_probability = 1e-3;
+
+  // Ignores OptGuide decision to disable the nudge. Does not bypass other
+  // hint decisions.
+  bool proactive_nudge_bypass_optimization_guide = false;
+
+  // How long to wait to show the proactive nudge.
+  base::TimeDelta proactive_nudge_delay = base::Seconds(3);
 
   // The duration that the saved state notification is shown before
   // auto-dismissal.

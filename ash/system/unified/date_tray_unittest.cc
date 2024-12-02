@@ -9,6 +9,7 @@
 
 #include "ash/api/tasks/fake_tasks_client.h"
 #include "ash/constants/ash_features.h"
+#include "ash/constants/ash_switches.h"
 #include "ash/glanceables/classroom/glanceables_classroom_client.h"
 #include "ash/glanceables/classroom/glanceables_classroom_student_view.h"
 #include "ash/glanceables/classroom/glanceables_classroom_types.h"
@@ -27,6 +28,7 @@
 #include "ash/system/unified/glanceable_tray_bubble.h"
 #include "ash/system/unified/unified_system_tray_bubble.h"
 #include "ash/test/ash_test_base.h"
+#include "base/command_line.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -144,6 +146,8 @@ class DateTrayTest
   DateTrayTest() {
     scoped_feature_list_.InitWithFeatureState(features::kGlanceablesV2,
                                               AreGlanceablesV2Enabled());
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kGlanceablesIgnoreEnableMergeRequestBuildFlag);
   }
 
   void SetUp() override {
@@ -591,11 +595,8 @@ TEST_P(DateTrayTest, DoesNotRenderClassroomBubblesForInactiveRoles) {
   glanceables_classroom_client()->RespondToPendingIsStudentRoleEnabledCallbacks(
       false);
 
-  // Only calendar is rendered in `scroll_view`.
-  const auto* const scroll_view = views::AsViewClass<views::ScrollView>(
-      GetGlanceableTrayBubble()->GetBubbleView()->children().at(0));
-  ASSERT_TRUE(scroll_view);
-  EXPECT_EQ(scroll_view->contents()->children().size(), 1u);
+  // Only calendar is rendered in `GlanceableTrayBubbleView`.
+  EXPECT_EQ(GetGlanceableTrayBubble()->GetBubbleView()->children().size(), 1u);
 }
 
 TEST_P(DateTrayTest, RendersClassroomBubblesForActiveRoles) {
@@ -608,16 +609,15 @@ TEST_P(DateTrayTest, RendersClassroomBubblesForActiveRoles) {
     return;
   }
 
-  // Only calendar is rendered in `scroll_view`.
-  const auto* const scroll_view = views::AsViewClass<views::ScrollView>(
-      GetGlanceableTrayBubble()->GetBubbleView()->children().at(0));
-  ASSERT_TRUE(scroll_view);
-  EXPECT_EQ(scroll_view->contents()->children().size(), 1u);
+  // Only calendar is rendered in `GlanceableTrayBubbleView`.
+  EXPECT_EQ(GetGlanceableTrayBubble()->GetBubbleView()->children().size(), 1u);
 
   // Classroom student bubble is added in TimeManagementContainer.
   glanceables_classroom_client()->RespondToPendingIsStudentRoleEnabledCallbacks(
       true);
-  EXPECT_EQ(scroll_view->contents()->children().size(), 1u);
+  // Both calendar and the `TimeManagementContainer` should be rendered in
+  // `GlanceableTrayBubbleView`.
+  EXPECT_EQ(GetGlanceableTrayBubble()->GetBubbleView()->children().size(), 2u);
   EXPECT_STREQ("TimeManagementContainer", GetGlanceableTrayBubble()
                                               ->GetBubbleView()
                                               ->children()

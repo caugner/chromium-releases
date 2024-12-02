@@ -20,6 +20,7 @@ import '../safety_hub/safety_hub_module.js';
 import '../settings_page/settings_animated_pages.js';
 import '../settings_page/settings_subpage.js';
 import '../settings_shared.css.js';
+import '../site_settings/offer_writing_help_page.js';
 import '../site_settings/settings_category_default_radio_group.js';
 import './privacy_guide/privacy_guide_dialog.js';
 
@@ -198,6 +199,11 @@ export class SettingsPrivacyPageElement extends SettingsPrivacyPageElementBase {
         value: () => loadTimeData.getBoolean('capturedSurfaceControlEnabled'),
       },
 
+      enableComposeProactiveNudge_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('enableComposeProactiveNudge'),
+      },
+
       /**
        * Whether the File System Access Persistent Permissions UI should be
        * displayed.
@@ -355,6 +361,7 @@ export class SettingsPrivacyPageElement extends SettingsPrivacyPageElementBase {
   private privateStateTokensEnabled_: boolean;
   private autoPictureInPictureEnabled_: boolean;
   private capturedSurfaceControlEnabled_: boolean;
+  private enableComposeProactiveNudge_: boolean;
   private enableSafetyHub_: boolean;
   private focusConfig_: FocusConfig;
   private searchFilter_: string;
@@ -605,9 +612,15 @@ export class SettingsPrivacyPageElement extends SettingsPrivacyPageElementBase {
         this.isPrivacySandboxRestrictedNoticeEnabled_;
   }
 
+  // Only show Manage Topics page when PTB is enabled. If user is part of Mode B
+  // and include-mode-b feature param is false, don't show the page.
   private shouldShowManageTopics_(): boolean {
-    return this.isProactiveTopicsBlockingEnabled_ &&
-        !this.isPrivacySandboxRestricted_;
+    if (!this.isProactiveTopicsBlockingEnabled_ ||
+        this.isPrivacySandboxRestricted_) {
+      return false;
+    }
+    return loadTimeData.getBoolean('proactiveTopicsBlockingIncludesModeB') ||
+        !loadTimeData.getBoolean('isInCookieDeprecationFacilitatedTesting');
   }
 
   private onSafetyHubButtonClick_() {

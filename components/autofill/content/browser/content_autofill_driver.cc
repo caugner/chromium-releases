@@ -43,7 +43,7 @@ namespace autofill {
 
 namespace {
 
-// TODO(crbug.com/1117028): Remove once FormData objects aren't stored
+// TODO(crbug.com/40144964): Remove once FormData objects aren't stored
 // globally anymore.
 const FormData& WithNewVersion(const FormData& form) {
   static FormVersion version_counter;
@@ -52,7 +52,7 @@ const FormData& WithNewVersion(const FormData& form) {
   return form;
 }
 
-// TODO(crbug.com/1117028): Remove once FormData objects aren't stored
+// TODO(crbug.com/40144964): Remove once FormData objects aren't stored
 // globally anymore.
 const std::optional<FormData>& WithNewVersion(
     const std::optional<FormData>& form) {
@@ -62,7 +62,7 @@ const std::optional<FormData>& WithNewVersion(
   return form;
 }
 
-// TODO(crbug.com/1117028): Remove once FormData objects aren't stored
+// TODO(crbug.com/40144964): Remove once FormData objects aren't stored
 // globally anymore.
 const std::vector<FormData>& WithNewVersion(
     const std::vector<FormData>& forms) {
@@ -208,14 +208,6 @@ bool ContentAutofillDriver::CanShowAutofillUi() const {
   return render_frame_host_->IsActive();
 }
 
-void ContentAutofillDriver::PopupHidden() {
-  // If the unmask prompt is shown, keep showing the preview. The preview
-  // will be cleared when the prompt closes.
-  if (autofill_manager_->ShouldClearPreviewedForm()) {
-    RendererShouldClearPreviewedForm();
-  }
-}
-
 gfx::RectF ContentAutofillDriver::TransformBoundingBoxToViewportCoordinates(
     const gfx::RectF& bounding_box) const {
   content::RenderWidgetHostView* view = render_frame_host_->GetView();
@@ -296,8 +288,8 @@ void ContentAutofillDriver::ExtractForm(FormGlobalId form_id,
   // - since the response to make_request() is asynchronous, the only way to
   //   squeeze that in is through a separate callback.
   //
-  // TODO(crbug.com/1331312): Make ExtractForm() trigger a FormsSeen() event and
-  // await that event in the browser process, instead of having the response
+  // TODO(crbug.com/40227496): Make ExtractForm() trigger a FormsSeen() event
+  // and await that event in the browser process, instead of having the response
   // callback.
 
   auto set_version = base::BindOnce(
@@ -365,13 +357,6 @@ void ContentAutofillDriver::RendererShouldAcceptDataListSuggestion(
          const std::u16string& value) {
         cast(target)->GetAutofillAgent()->AcceptDataListSuggestion(field,
                                                                    value);
-      });
-}
-
-void ContentAutofillDriver::RendererShouldClearFilledSection() {
-  router().RendererShouldClearFilledSection(
-      this, [](autofill::AutofillDriver* target) {
-        cast(target)->GetAutofillAgent()->ClearSection();
       });
 }
 
@@ -449,7 +434,6 @@ void ContentAutofillDriver::FormSubmitted(
 
 void ContentAutofillDriver::TextFieldDidChange(const FormData& raw_form,
                                                const FormFieldData& raw_field,
-                                               const gfx::RectF& bounding_box,
                                                base::TimeTicks timestamp) {
   if (!bad_message::CheckFrameNotPrerendering(render_frame_host())) {
     return;
@@ -458,19 +442,16 @@ void ContentAutofillDriver::TextFieldDidChange(const FormData& raw_form,
   FormFieldData field = raw_field;
   SetFrameAndFormMetaData(form, field);
   router().TextFieldDidChange(
-      this, std::move(form), field,
-      TransformBoundingBoxToViewportCoordinates(bounding_box), timestamp,
+      this, std::move(form), field, timestamp,
       [](autofill::AutofillDriver* target, const FormData& form,
-         const FormFieldData& field, const gfx::RectF& bounding_box,
-         base::TimeTicks timestamp) {
-        target->GetAutofillManager().OnTextFieldDidChange(
-            WithNewVersion(form), field, bounding_box, timestamp);
+         const FormFieldData& field, base::TimeTicks timestamp) {
+        target->GetAutofillManager().OnTextFieldDidChange(WithNewVersion(form),
+                                                          field, timestamp);
       });
 }
 
 void ContentAutofillDriver::TextFieldDidScroll(const FormData& raw_form,
-                                               const FormFieldData& raw_field,
-                                               const gfx::RectF& bounding_box) {
+                                               const FormFieldData& raw_field) {
   if (!bad_message::CheckFrameNotPrerendering(render_frame_host())) {
     return;
   }
@@ -479,18 +460,16 @@ void ContentAutofillDriver::TextFieldDidScroll(const FormData& raw_form,
   SetFrameAndFormMetaData(form, field);
   router().TextFieldDidScroll(
       this, std::move(form), field,
-      TransformBoundingBoxToViewportCoordinates(bounding_box),
       [](autofill::AutofillDriver* target, const FormData& form,
-         const FormFieldData& field, const gfx::RectF& bounding_box) {
+         const FormFieldData& field) {
         target->GetAutofillManager().OnTextFieldDidScroll(WithNewVersion(form),
-                                                          field, bounding_box);
+                                                          field);
       });
 }
 
 void ContentAutofillDriver::SelectControlDidChange(
     const FormData& raw_form,
-    const FormFieldData& raw_field,
-    const gfx::RectF& bounding_box) {
+    const FormFieldData& raw_field) {
   if (!bad_message::CheckFrameNotPrerendering(render_frame_host())) {
     return;
   }
@@ -499,18 +478,16 @@ void ContentAutofillDriver::SelectControlDidChange(
   SetFrameAndFormMetaData(form, field);
   router().SelectControlDidChange(
       this, std::move(form), field,
-      TransformBoundingBoxToViewportCoordinates(bounding_box),
       [](autofill::AutofillDriver* target, const FormData& form,
-         const FormFieldData& field, const gfx::RectF& bounding_box) {
+         const FormFieldData& field) {
         target->GetAutofillManager().OnSelectControlDidChange(
-            WithNewVersion(form), field, bounding_box);
+            WithNewVersion(form), field);
       });
 }
 
 void ContentAutofillDriver::AskForValuesToFill(
     const FormData& raw_form,
     const FormFieldData& raw_field,
-    const gfx::RectF& bounding_box,
     AutofillSuggestionTriggerSource trigger_source) {
   if (!bad_message::CheckFrameNotPrerendering(render_frame_host())) {
     return;
@@ -519,13 +496,12 @@ void ContentAutofillDriver::AskForValuesToFill(
   FormFieldData field = raw_field;
   SetFrameAndFormMetaData(form, field);
   router().AskForValuesToFill(
-      this, std::move(form), field,
-      TransformBoundingBoxToViewportCoordinates(bounding_box), trigger_source,
+      this, std::move(form), field, trigger_source,
       [](autofill::AutofillDriver* target, const FormData& form,
-         const FormFieldData& field, const gfx::RectF& bounding_box,
+         const FormFieldData& field,
          AutofillSuggestionTriggerSource trigger_source) {
         target->GetAutofillManager().OnAskForValuesToFill(
-            WithNewVersion(form), field, bounding_box, trigger_source);
+            WithNewVersion(form), field, trigger_source);
       });
 }
 
@@ -540,20 +516,19 @@ void ContentAutofillDriver::HidePopup() {
   });
 }
 
-void ContentAutofillDriver::FocusNoLongerOnForm(bool had_interacted_form) {
+void ContentAutofillDriver::FocusOnNonFormField(bool had_interacted_form) {
   if (!bad_message::CheckFrameNotPrerendering(render_frame_host())) {
     return;
   }
-  router().FocusNoLongerOnForm(
+  router().FocusOnNonFormField(
       this, had_interacted_form,
       [](autofill::AutofillDriver* target, bool had_interacted_form) {
-        target->GetAutofillManager().OnFocusNoLongerOnForm(had_interacted_form);
+        target->GetAutofillManager().OnFocusOnNonFormField(had_interacted_form);
       });
 }
 
 void ContentAutofillDriver::FocusOnFormField(const FormData& raw_form,
-                                             const FormFieldData& raw_field,
-                                             const gfx::RectF& bounding_box) {
+                                             const FormFieldData& raw_field) {
   if (!bad_message::CheckFrameNotPrerendering(render_frame_host())) {
     return;
   }
@@ -562,14 +537,13 @@ void ContentAutofillDriver::FocusOnFormField(const FormData& raw_form,
   SetFrameAndFormMetaData(form, field);
   router().FocusOnFormField(
       this, std::move(form), field,
-      TransformBoundingBoxToViewportCoordinates(bounding_box),
       [](autofill::AutofillDriver* target, const FormData& form,
-         const FormFieldData& field, const gfx::RectF& bounding_box) {
+         const FormFieldData& field) {
         target->GetAutofillManager().OnFocusOnFormField(WithNewVersion(form),
-                                                        field, bounding_box);
+                                                        field);
       },
       [](autofill::AutofillDriver* target) {
-        target->GetAutofillManager().OnFocusNoLongerOnForm(true);
+        target->GetAutofillManager().OnFocusOnNonFormField(true);
       });
 }
 
@@ -613,7 +587,8 @@ void ContentAutofillDriver::SelectOrSelectListFieldOptionsDidChange(
 void ContentAutofillDriver::JavaScriptChangedAutofilledValue(
     const FormData& raw_form,
     const FormFieldData& raw_field,
-    const std::u16string& old_value) {
+    const std::u16string& old_value,
+    bool formatting_only) {
   if (!bad_message::CheckFrameNotPrerendering(render_frame_host())) {
     return;
   }
@@ -621,11 +596,12 @@ void ContentAutofillDriver::JavaScriptChangedAutofilledValue(
   FormFieldData field = raw_field;
   SetFrameAndFormMetaData(form, field);
   router().JavaScriptChangedAutofilledValue(
-      this, std::move(form), field, old_value,
+      this, std::move(form), field, old_value, formatting_only,
       [](autofill::AutofillDriver* target, const FormData& form,
-         const FormFieldData& field, const std::u16string& old_value) {
+         const FormFieldData& field, const std::u16string& old_value,
+         bool formatting_only) {
         target->GetAutofillManager().OnJavaScriptChangedAutofilledValue(
-            WithNewVersion(form), field, old_value);
+            WithNewVersion(form), field, old_value, formatting_only);
       });
 }
 
@@ -667,11 +643,11 @@ void ContentAutofillDriver::SetFrameAndFormMetaData(
   FormSignature form_signature = CalculateFormSignature(form);
 
   auto SetFieldMetaData = [&](FormFieldData& f) {
-    f.host_frame = form.host_frame;
-    f.host_form_id = form.renderer_id;
-    f.origin = render_frame_host_->GetLastCommittedOrigin();
-    f.host_form_signature = form_signature;
-    f.bounds = TransformBoundingBoxToViewportCoordinates(f.bounds);
+    f.set_host_frame(form.host_frame);
+    f.set_host_form_id(form.renderer_id);
+    f.set_origin(render_frame_host_->GetLastCommittedOrigin());
+    f.set_host_form_signature(form_signature);
+    f.set_bounds(TransformBoundingBoxToViewportCoordinates(f.bounds()));
   };
 
   for (FormFieldData& f : form.fields) {

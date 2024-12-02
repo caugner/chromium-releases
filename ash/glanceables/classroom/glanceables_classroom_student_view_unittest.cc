@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/glanceables/classroom/glanceables_classroom_student_view.h"
+
 #include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/ash_switches.h"
 #include "ash/glanceables/classroom/glanceables_classroom_client.h"
-#include "ash/glanceables/classroom/glanceables_classroom_student_view.h"
 #include "ash/glanceables/classroom/glanceables_classroom_types.h"
 #include "ash/glanceables/common/glanceables_list_footer_view.h"
 #include "ash/glanceables/common/glanceables_view_id.h"
@@ -17,7 +19,9 @@
 #include "ash/glanceables/glanceables_controller.h"
 #include "ash/shell.h"
 #include "ash/style/combobox.h"
+#include "ash/style/counter_expand_button.h"
 #include "ash/test/ash_test_base.h"
+#include "base/command_line.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -89,6 +93,8 @@ class GlanceablesClassroomStudentViewTest : public AshTestBase {
     feature_list_.InitWithFeatures(
         /*enabled_features=*/{features::kGlanceablesV2},
         /*disabled_features=*/{});
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kGlanceablesIgnoreEnableMergeRequestBuildFlag);
   }
 
   void SetUp() override {
@@ -122,6 +128,11 @@ class GlanceablesClassroomStudentViewTest : public AshTestBase {
   Combobox* GetComboBoxView() {
     return views::AsViewClass<Combobox>(view_->GetViewByID(
         base::to_underlying(GlanceablesViewId::kClassroomBubbleComboBox)));
+  }
+
+  const CounterExpandButton* GetCounterExpandButton() const {
+    return views::AsViewClass<CounterExpandButton>(view_->GetViewByID(
+        base::to_underlying(GlanceablesViewId::kClassroomBubbleExpandButton)));
   }
 
   const views::View* GetListContainerView() const {
@@ -184,6 +195,19 @@ class GlanceablesClassroomStudentViewTest : public AshTestBase {
   base::test::ScopedFeatureList feature_list_;
   AccountId account_id_ = AccountId::FromUserEmail("test_user@gmail.com");
 };
+
+TEST_F(GlanceablesClassroomStudentViewTest, Basics) {
+  // Check that `GlanceablesClassroomStudentView` by itself doesn't have a
+  // background.
+  EXPECT_FALSE(view_->GetBackground());
+
+  // Check that the expand button is not visible when
+  // `GlanceablesClassroomStudentView` is created alone.
+  auto* expand_button = view_->GetViewByID(
+      base::to_underlying(GlanceablesViewId::kClassroomBubbleExpandButton));
+  EXPECT_TRUE(expand_button);
+  EXPECT_FALSE(expand_button->GetVisible());
+}
 
 TEST_F(GlanceablesClassroomStudentViewTest, RendersComboBoxView) {
   EXPECT_CALL(classroom_client_, GetStudentAssignmentsWithoutDueDate(_))
@@ -365,6 +389,7 @@ TEST_F(GlanceablesClassroomStudentViewTest, RendersListItems) {
   EXPECT_TRUE(GetListFooter()->GetVisible());
 
   GetComboBoxView()->SelectMenuItemForTest(3);
+  EXPECT_EQ(GetCounterExpandButton()->counter_for_test(), 3u);
   EXPECT_EQ(GetListContainerView()->children().size(), 3u);  // No more than 3.
 
   EXPECT_TRUE(GetListFooter()->GetVisible());
@@ -377,6 +402,7 @@ TEST_F(GlanceablesClassroomStudentViewTest, RendersEmptyListLabel) {
   ASSERT_TRUE(GetListContainerView());
   EXPECT_FALSE(GetEmptyListLabel()->GetVisible());
   EXPECT_TRUE(GetListFooter()->GetVisible());
+  EXPECT_EQ(GetCounterExpandButton()->counter_for_test(), 1u);
   EXPECT_EQ(GetListFooterItemsCountLabel()->GetText(), u"Showing 1 out of 1");
   EXPECT_EQ(GetListContainerView()->children().size(), 1u);
 
@@ -385,6 +411,7 @@ TEST_F(GlanceablesClassroomStudentViewTest, RendersEmptyListLabel) {
         std::move(cb).Run(/*success=*/true, {});
       });
   GetComboBoxView()->SelectMenuItemForTest(1);
+  EXPECT_EQ(GetCounterExpandButton()->counter_for_test(), 0u);
   EXPECT_EQ(GetListContainerView()->children().size(), 0u);
 
   // The empty list label should be shown, and the footer hidden.
@@ -396,6 +423,7 @@ TEST_F(GlanceablesClassroomStudentViewTest, RendersEmptyListLabel) {
         std::move(cb).Run(/*success=*/true, {});
       });
   GetComboBoxView()->SelectMenuItemForTest(2);
+  EXPECT_EQ(GetCounterExpandButton()->counter_for_test(), 0u);
   EXPECT_EQ(GetListContainerView()->children().size(), 0u);
 
   // The empty list label should be shown, and the footer hidden.

@@ -693,22 +693,7 @@ AutoplayPolicy::Type AudioContext::GetAutoplayPolicy() const {
   LocalDOMWindow* window = GetWindow();
   DCHECK(window);
 
-  auto autoplay_policy =
-      AutoplayPolicy::GetAutoplayPolicyForDocument(*window->document());
-
-  if (autoplay_policy ==
-          AutoplayPolicy::Type::kDocumentUserActivationRequired &&
-      RuntimeEnabledFeatures::AutoplayIgnoresWebAudioEnabled()) {
-// When ignored, the policy is different on Android compared to Desktop.
-#if BUILDFLAG(IS_ANDROID)
-    return AutoplayPolicy::Type::kUserGestureRequired;
-#else
-    // Force no user gesture required on desktop.
-    return AutoplayPolicy::Type::kNoUserGestureRequired;
-#endif
-  }
-
-  return autoplay_policy;
+  return AutoplayPolicy::GetAutoplayPolicyForDocument(*window->document());
 }
 
 bool AudioContext::AreAutoplayRequirementsFulfilled() const {
@@ -1021,7 +1006,7 @@ void AudioContext::DidInitialPermissionCheck(
   permission_service_->AddPermissionObserver(
       CreatePermissionDescriptor(mojom::blink::PermissionName::AUDIO_CAPTURE),
       microphone_permission_status_,
-      std::move(observer));
+      /*should_include_device_status=*/false, std::move(observer));
 }
 
 double AudioContext::GetOutputLatencyQuantizingFactor() const {
@@ -1049,9 +1034,7 @@ void AudioContext::NotifySetSinkIdIsDone(
 
   sink_descriptor_ = pending_sink_descriptor;
   if (sink_descriptor_.Type() ==
-          WebAudioSinkDescriptor::AudioSinkType::kAudible &&
-      base::FeatureList::IsEnabled(
-          features::kWebAudioSetSinkEchoCancellation)) {
+      WebAudioSinkDescriptor::AudioSinkType::kAudible) {
     // Note: in order to not break echo cancellation of PeerConnection audio, we
     // are heavily relying on the fact that setSinkId() path of AudioContext is
     // not triggered unless the sink ID is explicitly specified. It assumes we
@@ -1192,6 +1175,8 @@ bool AudioContext::IsValidSinkDescriptor(
 void AudioContext::OnRenderError() {
   if (base::FeatureList::IsEnabled(features::kWebAudioHandleOnRenderError)) {
     DCHECK(IsMainThread());
+
+    CHECK(GetExecutionContext());
     LocalDOMWindow* window = To<LocalDOMWindow>(GetExecutionContext());
     if (window && window->GetFrame()) {
       window->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(

@@ -241,10 +241,29 @@ constexpr base::TimeDelta kMainIntentCheckDelay = base::Seconds(1);
                             true);
   web::GetUIThreadTaskRunner({})->PostTask(
       FROM_HERE, base::BindOnce(^{
-        // TODO(b/325287919): Add separate call to register with Chime for
-        // Content notifications.
-        [self.pushNotificationDelegate
-            applicationDidRegisterWithAPNS:deviceToken];
+        if (IsContentPushNotificationsEnabled()) {
+          Browser* browser = self.mainController.browserProviderInterface
+                                 .mainBrowserProvider.browser;
+          if (browser) {
+            [self.pushNotificationDelegate
+                applicationDidRegisterWithAPNS:deviceToken
+                                  browserState:browser->GetBrowserState()];
+            // Logs when a Registration succeeded. (BrowserState loaded).
+            base::UmaHistogramBoolean(
+                "ContentNotifications.Registration.BrowserStateUnavailable",
+                false);
+          } else {
+            // Logs when a Registration failed. (BrowserState not available).
+            // Does not register the user and instead waits for the next
+            // registration opportunity/call.
+            base::UmaHistogramBoolean(
+                "IOS.PushNotification.APNSDeviceRegistration", true);
+          }
+        } else {
+          [self.pushNotificationDelegate
+              applicationDidRegisterWithAPNS:deviceToken
+                                browserState:nil];
+        }
       }));
 }
 
@@ -270,7 +289,7 @@ constexpr base::TimeDelta kMainIntentCheckDelay = base::Seconds(1);
   Browser* browser =
       _mainController.browserProviderInterface.mainBrowserProvider.browser;
   if (!browser) {
-    // TODO(crbug.com/1368617): We should store the completionHandler and wait
+    // TODO(crbug.com/40240359): We should store the completionHandler and wait
     // for mainBrowserProvider creation.
     completionHandler();
     return;
@@ -313,7 +332,7 @@ constexpr base::TimeDelta kMainIntentCheckDelay = base::Seconds(1);
   if (!sceneDelegate)
     return;
 
-  // TODO(crbug.com/1060645): This should be called later, or this flow should
+  // TODO(crbug.com/40679152): This should be called later, or this flow should
   // be changed completely.
   if (self.foregroundSceneCount == 0) {
     [_appState applicationWillEnterForeground:UIApplication.sharedApplication

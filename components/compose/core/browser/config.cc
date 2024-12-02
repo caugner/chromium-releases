@@ -47,14 +47,32 @@ Config::Config() {
       features::kComposeInnerText, "inner_text_max_bytes",
       inner_text_max_bytes);
 
+  trimmed_inner_text_max_chars = base::GetFieldTrialParamByFeatureAsInt(
+      features::kComposeInnerText, "trimmed_inner_text_max_chars",
+      trimmed_inner_text_max_chars);
+
+  trimmed_inner_text_header_length = base::GetFieldTrialParamByFeatureAsInt(
+      features::kComposeInnerText, "trimmed_inner_text_header_length",
+      trimmed_inner_text_header_length);
+
   auto_submit_with_selection =
       base::FeatureList::IsEnabled(features::kComposeAutoSubmit);
 
   saved_state_nudge_enabled =
-      base::FeatureList::IsEnabled(features::kEnableComposeNudge);
+      base::FeatureList::IsEnabled(features::kEnableComposeSavedStateNudge);
 
   proactive_nudge_enabled =
       base::FeatureList::IsEnabled(features::kEnableComposeProactiveNudge);
+
+  proactive_nudge_show_probability = base::GetFieldTrialParamByFeatureAsDouble(
+      features::kEnableComposeProactiveNudge,
+      "proactive_nudge_show_probability", proactive_nudge_show_probability);
+
+  proactive_nudge_delay =
+      base::Milliseconds(base::GetFieldTrialParamByFeatureAsInt(
+          features::kEnableComposeProactiveNudge,
+          "proactive_nudge_delay_milliseconds",
+          proactive_nudge_delay.InMilliseconds()));
 
   saved_state_timeout_milliseconds = base::GetFieldTrialParamByFeatureAsInt(
       features::kEnableComposeSavedStateNotification,

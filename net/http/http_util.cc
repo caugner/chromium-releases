@@ -374,24 +374,22 @@ bool HttpUtil::IsSafeHeader(std::string_view name, std::string_view value) {
       return false;
   }
 
-  if (base::FeatureList::IsEnabled(features::kBlockNewForbiddenHeaders)) {
-    bool is_forbidden_header_fields_with_forbidden_method = false;
-    for (const char* field : kForbiddenHeaderFieldsWithForbiddenMethod) {
-      if (base::EqualsCaseInsensitiveASCII(name, field)) {
-        is_forbidden_header_fields_with_forbidden_method = true;
-        break;
-      }
+  bool is_forbidden_header_fields_with_forbidden_method = false;
+  for (const char* field : kForbiddenHeaderFieldsWithForbiddenMethod) {
+    if (base::EqualsCaseInsensitiveASCII(name, field)) {
+      is_forbidden_header_fields_with_forbidden_method = true;
+      break;
     }
-    if (is_forbidden_header_fields_with_forbidden_method) {
-      std::string value_string(value);
-      ValuesIterator method_iterator(value_string.begin(), value_string.end(),
-                                     ',');
-      while (method_iterator.GetNext()) {
-        std::string_view method = method_iterator.value_piece();
-        for (const char* forbidden_method : kForbiddenMethods) {
-          if (base::EqualsCaseInsensitiveASCII(method, forbidden_method))
-            return false;
-        }
+  }
+  if (is_forbidden_header_fields_with_forbidden_method) {
+    std::string value_string(value);
+    ValuesIterator method_iterator(value_string.begin(), value_string.end(),
+                                   ',');
+    while (method_iterator.GetNext()) {
+      std::string_view method = method_iterator.value_piece();
+      for (const char* forbidden_method : kForbiddenMethods) {
+        if (base::EqualsCaseInsensitiveASCII(method, forbidden_method))
+          return false;
       }
     }
   }
@@ -429,9 +427,13 @@ bool HttpUtil::IsNonCoalescingHeader(std::string_view name) {
       "www-authenticate", "proxy-authenticate",
       // STS specifies that UAs must not process any STS headers after the first
       // one.
-      "strict-transport-security"};
+      "strict-transport-security",
+      // Attribution reporting registration header values are JSON, coalescing
+      // them changes the semantic. See https://crbug.com/40242261 for details.
+      "attribution-reporting-register-source",
+      "attribution-reporting-register-trigger"};
 
-  for (const std::string_view& header : kNonCoalescingHeaders) {
+  for (std::string_view header : kNonCoalescingHeaders) {
     if (base::EqualsCaseInsensitiveASCII(name, header)) {
       return true;
     }

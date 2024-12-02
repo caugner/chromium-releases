@@ -12,6 +12,7 @@ import '//resources/cr_elements/cr_icon_button/cr_icon_button.js';
 import '//resources/cr_elements/cr_loading_gradient/cr_loading_gradient.js';
 import '//resources/cr_elements/icons.html.js';
 import '//resources/cr_elements/md_select.css.js';
+import '//resources/polymer/v3_0/iron-icon/iron-icon.js';
 
 import {ColorChangeUpdater} from '//resources/cr_components/color_change_listener/colors_css_updater.js';
 import type {CrButtonElement} from '//resources/cr_elements/cr_button/cr_button.js';
@@ -132,6 +133,11 @@ export class ComposeAppElement extends ComposeAppElementBase {
         value: false,
         observer: 'onIsEditingSubmittedInputChanged_',
       },
+      isEditingResultText_: {
+        type: Boolean,
+        reflectToAttribute: true,
+        value: false,
+      },
       isEditSubmitEnabled_: {
         type: Boolean,
         value: true,
@@ -185,7 +191,7 @@ export class ComposeAppElement extends ComposeAppElementBase {
       },
       feedbackEnabled_: {
         type: Boolean,
-        value: false,
+        value: true,
       },
       responseText_: {
         type: String,
@@ -250,20 +256,20 @@ export class ComposeAppElement extends ComposeAppElementBase {
               isDefault: true,
             },
             {
-              value: StyleModifier.kFormal,
-              label: loadTimeData.getString('formalToneOption'),
-            },
-            {
-              value: StyleModifier.kCasual,
-              label: loadTimeData.getString('casualToneOption'),
-            },
-            {
               value: StyleModifier.kLonger,
               label: loadTimeData.getString('longerOption'),
             },
             {
               value: StyleModifier.kShorter,
               label: loadTimeData.getString('shorterOption'),
+            },
+            {
+              value: StyleModifier.kFormal,
+              label: loadTimeData.getString('formalToneOption'),
+            },
+            {
+              value: StyleModifier.kCasual,
+              label: loadTimeData.getString('casualToneOption'),
             },
             {
               value: StyleModifier.kRetry,
@@ -301,6 +307,7 @@ export class ComposeAppElement extends ComposeAppElementBase {
   private input_: string;
   private inputParams_: ConfigurableParams;
   private isEditingSubmittedInput_: boolean;
+  private isEditingResultText_: boolean;
   private isEditSubmitEnabled_: boolean;
   private isSubmitEnabled_: boolean;
   private loading_: boolean;
@@ -657,6 +664,7 @@ export class ComposeAppElement extends ComposeAppElementBase {
     this.userResponseText_ = undefined;
     this.response_ = null;
     this.partialResponse_ = undefined;
+    this.feedbackEnabled_ = true;
     this.saveComposeAppState_();  // Ensure state is saved before compose call.
     this.apiProxy_.compose(this.input_, inputEdited);
   }
@@ -671,6 +679,7 @@ export class ComposeAppElement extends ComposeAppElementBase {
     this.userResponseText_ = undefined;
     this.response_ = null;
     this.partialResponse_ = undefined;
+    this.feedbackEnabled_ = true;
     this.saveComposeAppState_();  // Ensure state is saved before compose call.
     this.apiProxy_.rewrite(style);
     this.animator_.transitionFromResultToLoading(bodyHeight, resultHeight);
@@ -744,6 +753,13 @@ export class ComposeAppElement extends ComposeAppElementBase {
 
   private isLoadingIndicatorShown_(): boolean {
     return this.loading_ && !this.hasOutput_;
+  }
+
+  // Elements related to results should be hidden when the output is empty, but
+  // not if the results are in an edited state. The latter corresponds with
+  // feedback being disabled.
+  private hideResults_(): boolean {
+    return !this.hasOutput_ && this.feedbackEnabled_;
   }
 
   private hasSuccessfulResponse_(): boolean {
@@ -859,6 +875,10 @@ export class ComposeAppElement extends ComposeAppElementBase {
         this.feedbackState_ = CrFeedbackOption.UNSPECIFIED;
       }
     });
+  }
+
+  private onSetResultFocus_(e: CustomEvent<boolean>) {
+    this.isEditingResultText_ = e.detail;
   }
 
   private saveComposeAppState_() {

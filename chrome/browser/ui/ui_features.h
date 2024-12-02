@@ -73,6 +73,9 @@ extern const base::FeatureParam<int> kRepromptDurationMultiplier;
 // The duration after which the app menu prompt should not longer be shown.
 extern const base::FeatureParam<base::TimeDelta> kDefaultBrowserAppMenuDuration;
 
+// Whether the app menu chip should use more prominent colors.
+extern const base::FeatureParam<bool> kAppMenuChipColorPrimary;
+
 BASE_DECLARE_FEATURE(kExtensionsMenuInAppMenu);
 bool IsExtensionMenuInRootAppMenu();
 
@@ -84,6 +87,8 @@ BASE_DECLARE_FEATURE(kEvDetailsInPageInfo);
 
 #if !BUILDFLAG(IS_ANDROID) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 BASE_DECLARE_FEATURE(kGetTheMostOutOfChrome);
+
+BASE_DECLARE_FEATURE(kIOSPromoRefreshedPasswordBubble);
 
 BASE_DECLARE_FEATURE(kIOSPromoAddressBubble);
 
@@ -192,7 +197,11 @@ bool IsTabOrganization();
 
 BASE_DECLARE_FEATURE(kMultiTabOrganization);
 
+BASE_DECLARE_FEATURE(kTabOrganizationAppMenuItem);
+
 BASE_DECLARE_FEATURE(kTabReorganization);
+
+BASE_DECLARE_FEATURE(kTabReorganizationDivider);
 
 // The target (and minimum) interval between proactive nudge triggers. Measured
 // against a clock that only runs while Chrome is in the foreground.
@@ -291,10 +300,6 @@ BASE_DECLARE_FEATURE(kWebUITabStrip);
 // Controls whether the context menu is shown on a touch press or a touch
 // tap gesture on the WebUI Tab Strip.
 BASE_DECLARE_FEATURE(kWebUITabStripContextMenuAfterTap);
-
-#if BUILDFLAG(IS_CHROMEOS)
-BASE_DECLARE_FEATURE(kChromeOSTabSearchCaptionButton);
-#endif
 
 // Cocoa to views migration.
 #if BUILDFLAG(IS_MAC)

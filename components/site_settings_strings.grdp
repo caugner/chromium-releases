@@ -67,6 +67,9 @@
   <message name="IDS_SITE_SETTINGS_TYPE_CAMERA_PAN_TILT_ZOOM_MID_SENTENCE" desc="The label used for the Camera PTZ site settings controls when used mid-sentence.">
     camera use &amp; movement
   </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_CAMERA_PAN_TILT_ZOOM_WITH_COUNT" desc="The label used for the Camera PTZ site settings controls, in addition to the number of real cameras.">
+    Camera use &amp; movement (<ph name="CAMERAS_COUNT">$1<ex>1</ex></ph>)
+  </message>
   <message name="IDS_SITE_SETTINGS_TYPE_CAPTURED_SURFACE_CONTROL" desc="The label used for the Captured Surface Control site settings controls.">
     Scrolling &amp; zooming
   </message>
@@ -276,6 +279,9 @@
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_PERFORMANCE_SUBLABEL" desc="The sublabel used for the performance site settings controls to manage the exclusion list.">
     Manage sites that will always stay active and won't have memory freed up from them
+  </message>
+  <message name="IDS_SITE_SETTINGS_TYPE_OFFER_WRITING_HELP" desc="Name of the settings page that manages writing help UI preferences.">
+    Offer writing help
   </message>
   </if>
 </grit-part>

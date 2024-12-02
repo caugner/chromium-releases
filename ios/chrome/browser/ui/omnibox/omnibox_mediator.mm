@@ -26,6 +26,7 @@
 #import "ios/chrome/browser/ui/omnibox/omnibox_constants.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_consumer.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_suggestion_icon_util.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_ui_features.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_util.h"
 #import "ios/chrome/browser/ui/omnibox/popup/autocomplete_suggestion.h"
 #import "ios/chrome/browser/url_loading/model/image_search_param_generator.h"
@@ -142,6 +143,10 @@ using base::UserMetricsAction;
   // On first update, don't set the preview text, as omnibox will automatically
   // receive the suggestion as inline autocomplete through OmniboxViewIOS.
   if (!isFirstUpdate) {
+    // Remove additional text when previewing suggestions.
+    if (IsRichAutocompletionEnabled()) {
+      [self.consumer updateAdditionalText:nil];
+    }
     [self.consumer updateText:suggestion.omniboxPreviewText];
   }
 
@@ -335,7 +340,6 @@ using base::UserMetricsAction;
   __weak __typeof(self) weakSelf = self;
   auto textCompletion =
       ^(__kindof id<NSItemProviderReading> providedItem, NSError* error) {
-        default_browser::NotifyOmniboxTextCopyPasteAndNavigate(self.tracker);
         dispatch_async(dispatch_get_main_queue(), ^{
           NSString* text = static_cast<NSString*>(providedItem);
           if (text) {
@@ -391,6 +395,7 @@ using base::UserMetricsAction;
     } else if ([itemProvider canLoadObjectOfClass:[NSString class]]) {
       RecordAction(
           UserMetricsAction("Mobile.OmniboxPasteButton.SearchCopiedText"));
+      default_browser::NotifyOmniboxTextCopyPasteAndNavigate(self.tracker);
       [itemProvider loadObjectOfClass:[NSString class]
                     completionHandler:textCompletion];
       break;

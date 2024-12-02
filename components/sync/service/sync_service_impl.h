@@ -241,7 +241,7 @@ class SyncServiceImpl : public SyncService,
   std::string GetAccessTokenForTest() const;
 
   // Overrides the callback used to create network connections.
-  // TODO(crbug.com/949504): Inject this in the ctor instead. As it is, it's
+  // TODO(crbug.com/41451146): Inject this in the ctor instead. As it is, it's
   // possible that the real callback was already used before the test had a
   // chance to call this.
   void OverrideNetworkForTest(const CreateHttpPostProviderFactory&
@@ -269,11 +269,12 @@ class SyncServiceImpl : public SyncService,
 
   // These values are persisted to logs. Entries should not be renumbered and
   // numeric values should never be reused.
+  // LINT.IfChange(SyncResetEngineReason)
   enum class ResetEngineReason {
     kShutdown = 0,
     kUnrecoverableError = 1,
     kDisabledAccount = 2,
-    kRequestedPrefChange = 3,
+    // kRequestedPrefChange = 3,
     kStopAndClear = 4,
     // kSetSyncAllowedByPlatform = 5,
     kCredentialsChanged = 6,
@@ -281,6 +282,11 @@ class SyncServiceImpl : public SyncService,
 
     kMaxValue = kResetLocalData
   };
+  // LINT.ThenChange(/tools/metrics/histograms/metadata/sync/enums.xml:SyncResetEngineReason)
+
+  // static
+  ShutdownReason ShutdownReasonForResetEngineReason(
+      ResetEngineReason reset_reason);
 
   // Records UMA histograms related to download status during browser startup.
   class DownloadStatusRecorder : public SyncServiceObserver {
@@ -341,12 +347,11 @@ class SyncServiceImpl : public SyncService,
 
   void UpdateDataTypesForInvalidations();
 
-  // Shuts down and destroys the engine. |reason| dictates if sync metadata
-  // should be kept or not.
+  // Shuts down and destroys the engine. |reset_reason| specifies the reason for
+  // the shutdown, and dictates if sync metadata should be kept or not.
   // If the engine is still allowed to run (per IsEngineAllowedToRun()), it will
   // soon start up again (possibly in transport-only mode).
-  std::unique_ptr<SyncEngine> ResetEngine(ShutdownReason shutdown_reason,
-                                          ResetEngineReason reset_reason);
+  std::unique_ptr<SyncEngine> ResetEngine(ResetEngineReason reset_reason);
 
   // Helper for OnUnrecoverableError.
   void OnUnrecoverableErrorImpl(const base::Location& from_here,
@@ -404,6 +409,14 @@ class SyncServiceImpl : public SyncService,
       const std::string& waiting_for_updates_histogram_name) const;
 
   void OnPasswordSyncAllowedChanged();
+
+  // Updates PrefService (SyncPrefs) to cache the last known value for trusted
+  // vault AutoUpgradeDebugInfo. It also notifies SyncClient.
+  void CacheTrustedVaultDebugInfoToPrefsFromEngine();
+
+  // Exercises SyncClient to register synthetic field trials for trusted vault
+  // passphrase type.
+  void RegisterTrustedVaultSyntheticFieldTrialsIfNecessary();
 
   // This profile's SyncClient, which abstracts away non-Sync dependencies and
   // the Sync API component factory.
@@ -508,6 +521,10 @@ class SyncServiceImpl : public SyncService,
   // histogram needs to recorded. Set to false iff histogram was already
   // recorded or trusted vault passphrase type wasn't used on startup.
   bool should_record_trusted_vault_error_shown_on_startup_ = true;
+
+  // Whether or not SyncClient was exercised to register synthetic field trials
+  // related to trusted vault passphrase.
+  bool trusted_vault_auto_upgrade_synthetic_field_trial_registered_ = false;
 
   const bool sync_poll_immediately_on_every_startup_;
 

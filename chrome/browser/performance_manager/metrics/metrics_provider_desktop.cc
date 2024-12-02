@@ -155,7 +155,7 @@ void MetricsProviderDesktop::ProvideCurrentSessionData(
     metrics::ChromeUserMetricsExtension* uma_proto) {
   // It's valid for this to be called when `initialized_` is false if the finch
   // features controlling battery saver and memory saver are disabled.
-  // TODO(crbug.com/1348590): CHECK(initialized_) when the features are enabled
+  // TODO(crbug.com/40233418): CHECK(initialized_) when the features are enabled
   // and removed.
   base::UmaHistogramEnumeration("PerformanceManager.UserTuning.EfficiencyMode",
                                 current_mode_);
@@ -214,7 +214,7 @@ MetricsProviderDesktop::ComputeCurrentMode() const {
   // It's valid for this to be uninitialized if the battery saver/high
   // efficiency modes are unavailable. In that case, the browser is running in
   // normal mode, so return kNormal.
-  // TODO(crbug.com/1348590): Change this to a DCHECK when the features are
+  // TODO(crbug.com/40233418): Change this to a DCHECK when the features are
   // enabled and removed.
   if (!initialized_) {
     return EfficiencyMode::kNormal;
@@ -288,14 +288,17 @@ void MetricsProviderDesktop::RecordCpuFrequencyMetrics() {
   unsigned long max_mhz = base::GetCpuMaxMhz();
   unsigned long mhz_limit = base::GetCpuMhzLimit();
 
-  CHECK_NE(0UL, max_mhz);
-  CHECK_NE(0UL, mhz_limit);
+  if (max_mhz > 0UL) {
+    base::UmaHistogramPercentage(
+        "CPU.Experimental.EstimatedFrequencyAsPercentOfMax",
+        static_cast<int>(estimated_mhz * 100.0 / static_cast<double>(max_mhz)));
+  }
 
-  base::UmaHistogramPercentage(
-      "CPU.Experimental.EstimatedFrequencyAsPercentOfMax",
-      static_cast<int>(estimated_mhz * 100.0 / static_cast<double>(max_mhz)));
-  base::UmaHistogramPercentage(
-      "CPU.Experimental.EstimatedFrequencyAsPercentOfLimit",
-      static_cast<int>(estimated_mhz * 100.0 / static_cast<double>(mhz_limit)));
+  if (mhz_limit > 0UL) {
+    base::UmaHistogramPercentage(
+        "CPU.Experimental.EstimatedFrequencyAsPercentOfLimit",
+        static_cast<int>(estimated_mhz * 100.0 /
+                         static_cast<double>(mhz_limit)));
+  }
 }
 }  // namespace performance_manager

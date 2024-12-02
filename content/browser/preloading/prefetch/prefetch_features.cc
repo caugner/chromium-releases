@@ -22,10 +22,6 @@ BASE_FEATURE(kPrefetchNIKScope,
              "PrefetchNIKScope",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kPrefetchBrowserInitiatedTriggers,
-             "PrefetchBrowserInitiatedTriggers",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
 BASE_FEATURE(kPrefetchClientHints,
              "PrefetchClientHints",
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -41,6 +37,10 @@ const base::FeatureParam<PrefetchClientHintsCrossSiteBehavior>
         &kPrefetchClientHints, "cross_site_behavior",
         PrefetchClientHintsCrossSiteBehavior::kLowEntropy,
         &kPrefetchClientHintsCrossSiteBehaviorOptions};
+
+BASE_FEATURE(kPrefetchOffTheRecord,
+             "PrefetchOffTheRecord",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kPrefetchStateContaminationMitigation,
              "PrefetchStateContaminationMitigation",

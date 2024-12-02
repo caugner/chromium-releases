@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -14,7 +15,6 @@
 #include "base/functional/callback.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
@@ -448,7 +448,7 @@ void AndroidStreamReaderURLLoader::DidRead(int result) {
 
       std::string new_type;
       net::SniffMimeType(
-          base::StringPiece(pending_buffer_->buffer(), data_length),
+          std::string_view(pending_buffer_->buffer(), data_length),
           resource_request_.url, std::string(),
           net::ForceSniffFileUrlsForHtml::kDisabled, &new_type);
       // SniffMimeType() returns false if there is not enough data to
@@ -467,10 +467,14 @@ void AndroidStreamReaderURLLoader::DidRead(int result) {
   producer_handle_ = pending_buffer_->Complete(result);
   pending_buffer_ = nullptr;
 
-  // TODO(timvolodine): consider using a sequenced task runner.
-  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, base::BindOnce(&AndroidStreamReaderURLLoader::ReadMore,
-                                weak_factory_.GetWeakPtr()));
+  if (base::FeatureList::IsEnabled(features::kInputStreamOptimizations)) {
+    ReadMore();
+  } else {
+    // TODO(timvolodine): consider using a sequenced task runner.
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(&AndroidStreamReaderURLLoader::ReadMore,
+                                  weak_factory_.GetWeakPtr()));
+  }
 }
 
 void AndroidStreamReaderURLLoader::OnDataPipeWritable(MojoResult result) {

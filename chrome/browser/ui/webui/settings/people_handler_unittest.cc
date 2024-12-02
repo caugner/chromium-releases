@@ -89,6 +89,9 @@ constexpr char kTestCallbackId[] = "test-callback-id";
 // `PeopleHandler::UpdateChromeSigninUserChoiceInfo()`.
 constexpr char kChromeSigninUserChoiceInfoChangeEventName[] =
     "chrome-signin-user-choice-info-change";
+
+// Event fired when calling `PeopleHandler::UpdateSyncStatus()`.
+constexpr char kSyncStatusChangeEventName[] = "sync-status-changed";
 #endif
 
 // Returns a UserSelectableTypeSet with all types set.
@@ -96,10 +99,7 @@ syncer::UserSelectableTypeSet GetAllTypes() {
   return syncer::UserSelectableTypeSet::All();
 }
 
-enum SyncAllDataConfig {
-  SYNC_ALL_DATA,
-  CHOOSE_WHAT_TO_SYNC
-};
+enum SyncAllDataConfig { SYNC_ALL_DATA, CHOOSE_WHAT_TO_SYNC };
 
 // Create a json-format string with the key/value pairs appropriate for a call
 // to HandleSetDatatypes().
@@ -114,6 +114,7 @@ std::string GetConfiguration(SyncAllDataConfig sync_all,
   result.Set("bookmarksSynced",
              types.Has(syncer::UserSelectableType::kBookmarks));
   result.Set("compareSynced", types.Has(syncer::UserSelectableType::kCompare));
+  result.Set("cookiesSynced", types.Has(syncer::UserSelectableType::kCookies));
   result.Set("extensionsSynced",
              types.Has(syncer::UserSelectableType::kExtensions));
   result.Set("passwordsSynced",
@@ -132,10 +133,6 @@ std::string GetConfiguration(SyncAllDataConfig sync_all,
   result.Set("themesSynced", types.Has(syncer::UserSelectableType::kThemes));
   result.Set("typedUrlsSynced",
              types.Has(syncer::UserSelectableType::kHistory));
-
-  // Reading list doesn't really have a UI and is supported on ios only.
-  result.Set("readingListSynced",
-             types.Has(syncer::UserSelectableType::kReadingList));
 
   std::string args;
   base::JSONWriter::Write(result, &args);
@@ -604,7 +601,7 @@ TEST_F(PeopleHandlerTest, EnterCorrectExistingPassphrase) {
   SigninUserAndTurnSyncFeatureOn();
   CreatePeopleHandler();
 
-  sync_user_settings()->SetRequiredPassphrase(kCorrectPassphrase);
+  sync_user_settings()->SetPassphraseRequired(kCorrectPassphrase);
 
   ASSERT_TRUE(sync_user_settings()->IsPassphraseRequired());
 
@@ -640,8 +637,7 @@ TEST_F(PeopleHandlerTest, EnterWrongExistingPassphrase) {
   SigninUserAndTurnSyncFeatureOn();
   CreatePeopleHandler();
 
-  sync_user_settings()->SetEncryptionPassphrase("correct_passphrase");
-  sync_user_settings()->SetPassphraseRequired(true);
+  sync_user_settings()->SetPassphraseRequired("correct_passphrase");
 
   ASSERT_TRUE(sync_user_settings()->IsPassphraseRequired());
 
@@ -808,7 +804,7 @@ TEST_F(PeopleHandlerTest, ShowSetupOldGaiaPassphraseRequired) {
 
   const auto passphrase_time = base::Time::Now();
 
-  sync_user_settings()->SetPassphraseRequired(true);
+  sync_user_settings()->SetPassphraseRequired();
   sync_user_settings()->SetPassphraseType(
       syncer::PassphraseType::kFrozenImplicitPassphrase);
   sync_user_settings()->SetExplicitPassphraseTime(passphrase_time);
@@ -829,7 +825,7 @@ TEST_F(PeopleHandlerTest, ShowSetupCustomPassphraseRequired) {
 
   const auto passphrase_time = base::Time::Now();
 
-  sync_user_settings()->SetPassphraseRequired(true);
+  sync_user_settings()->SetPassphraseRequired();
   sync_user_settings()->SetPassphraseType(
       syncer::PassphraseType::kCustomPassphrase);
   sync_user_settings()->SetExplicitPassphraseTime(passphrase_time);
@@ -855,7 +851,7 @@ TEST_F(PeopleHandlerTest, OngoingSetupCustomPassphraseRequired) {
   const auto passphrase_time = base::Time::Now();
 
   sync_service_->SetSyncFeatureRequested();
-  sync_user_settings()->SetPassphraseRequired(true);
+  sync_user_settings()->SetPassphraseRequired();
   sync_user_settings()->SetPassphraseType(
       syncer::PassphraseType::kCustomPassphrase);
   sync_user_settings()->SetExplicitPassphraseTime(passphrase_time);
@@ -1344,6 +1340,38 @@ class PeopleHandlerWithExplicitBrowserSigninTest : public PeopleHandlerTest {
     profile()->GetPrefs()->SetBoolean(prefs::kExplicitBrowserSignin, value);
   }
 
+  void TriggerPrimaryAccountInPersistentError() {
+    ASSERT_TRUE(identity_manager()->HasPrimaryAccount(ConsentLevel::kSignin));
+
+    // Inject the error.
+    identity_test_env()->UpdatePersistentErrorOfRefreshTokenForAccount(
+        identity_manager()->GetPrimaryAccountId(ConsentLevel::kSignin),
+        GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
+            GoogleServiceAuthError::InvalidGaiaCredentialsReason::
+                CREDENTIALS_REJECTED_BY_CLIENT));
+  }
+
+  bool HasSyncStatusUpdateChangedEvent() {
+    return !GetAllFiredValuesForEventName(kSyncStatusChangeEventName).empty();
+  }
+
+  void SimluateReauth() {
+    ASSERT_TRUE(
+        identity_manager()->HasPrimaryAccount(signin::ConsentLevel::kSignin));
+
+    // Clear the error.
+    identity_test_env()->UpdatePersistentErrorOfRefreshTokenForAccount(
+        identity_manager()->GetPrimaryAccountId(ConsentLevel::kSignin),
+        GoogleServiceAuthError::AuthErrorNone());
+  }
+
+  void SimulateSignout() {
+    ASSERT_TRUE(
+        identity_manager()->HasPrimaryAccount(signin::ConsentLevel::kSignin));
+
+    identity_test_env()->ClearPrimaryAccount();
+  }
+
  private:
   base::test::ScopedFeatureList scoped_feature_list_{
       switches::kExplicitBrowserSigninUIOnDesktop};
@@ -1391,8 +1419,7 @@ TEST_F(PeopleHandlerWithExplicitBrowserSigninTest,
   ExpectChromeSigninUserChoiceInfoFromWebUiResponse(
       true, ChromeSigninUserChoice::kNoChoice, email);
 
-  // Sign out.
-  identity_test_env()->ClearPrimaryAccount();
+  SimulateSignout();
 
   ASSERT_FALSE(
       identity_manager()->HasPrimaryAccount(signin::ConsentLevel::kSignin));
@@ -1423,18 +1450,21 @@ TEST_F(PeopleHandlerWithExplicitBrowserSigninTest,
 TEST_F(PeopleHandlerWithExplicitBrowserSigninTest,
        ChromeSigninUserInfoUpdateOnPrefValueChange) {
   const std::string email("user@gmail.com");
-  identity_test_env()->MakePrimaryAccountAvailable(email,
-                                                   ConsentLevel::kSignin);
+  AccountInfo account_info = identity_test_env()->MakePrimaryAccountAvailable(
+      email, ConsentLevel::kSignin);
   SetExplicitSignin(true);
 
   CreatePeopleHandler();
 
   ASSERT_FALSE(HasChromeSigninUserChoiceInfoChangeEvent());
 
+  SigninPrefs signin_prefs(*profile()->GetPrefs());
   auto new_choice_value = ChromeSigninUserChoice::kSignin;
-  DiceWebSigninInterceptor::SetChromeSigninUserChoice(*profile()->GetPrefs(),
-                                                      email, new_choice_value);
-
+  ASSERT_NE(
+      signin_prefs.GetChromeSigninInterceptionUserChoice(account_info.gaia),
+      new_choice_value);
+  signin_prefs.SetChromeSigninInterceptionUserChoice(account_info.gaia,
+                                                     new_choice_value);
   ExpectChromeSigninUserChoiceInfoFromLastChangeEvent(true, new_choice_value,
                                                       email);
 }
@@ -1533,7 +1563,155 @@ TEST(PeopleHandlerWebOnlySigninTest, ChromeSigninUserAvailableOnWebSignin) {
             /*expected_should_show_settings=*/true,
             ChromeSigninUserChoice::kNoChoice, email);
   }
+
+  // Check that `SignedInState` is properly computed
+  {
+    const base::Value::Dict& sync_status_values =
+        handler.GetSyncStatusDictionary();
+    std::optional<int> signedInState =
+        sync_status_values.FindInt("signedInState");
+    ASSERT_TRUE(signedInState.has_value());
+    EXPECT_EQ(static_cast<SignedInState>(signedInState.value()),
+              SignedInState::WebOnlySignedIn);
+  }
 }
+
+TEST_F(PeopleHandlerWithExplicitBrowserSigninTest, SigninPausedThenSignout) {
+  identity_test_env()->MakePrimaryAccountAvailable(kTestUser,
+                                                   ConsentLevel::kSignin);
+  SetExplicitSignin(true);
+  CreatePeopleHandler();
+
+  ASSERT_FALSE(HasSyncStatusUpdateChangedEvent());
+
+  TriggerPrimaryAccountInPersistentError();
+
+  {
+    auto values_list =
+        GetAllFiredValuesForEventName(kSyncStatusChangeEventName);
+    ASSERT_GT(values_list.size(), 0U);
+    size_t last_index = values_list.size() - 1;
+    ASSERT_TRUE(values_list[last_index]->is_dict());
+    const base::Value::Dict& sync_status_values =
+        values_list[last_index]->GetDict();
+    std::optional<int> signedInState =
+        sync_status_values.FindInt("signedInState");
+    ASSERT_TRUE(signedInState.has_value());
+    EXPECT_EQ(static_cast<SignedInState>(signedInState.value()),
+              SignedInState::SignedInPaused);
+  }
+
+  // Simulates pressing on the "Sign out" Button in the Sign in Paused state,
+  // that redirects to `PeopleHandler::HandleSignout()`. Since the test has no
+  // browser, clearing the primary account should be equivalent.
+  SimulateSignout();
+
+  {
+    auto values_list =
+        GetAllFiredValuesForEventName(kSyncStatusChangeEventName);
+    ASSERT_GT(values_list.size(), 0U);
+    size_t last_index = values_list.size() - 1;
+    ASSERT_TRUE(values_list[last_index]->is_dict());
+    const base::Value::Dict& sync_status_values =
+        values_list[last_index]->GetDict();
+    std::optional<int> signedInState =
+        sync_status_values.FindInt("signedInState");
+    ASSERT_TRUE(signedInState.has_value());
+    EXPECT_EQ(static_cast<SignedInState>(signedInState.value()),
+              SignedInState::SignedOut);
+  }
+}
+
+TEST_F(PeopleHandlerWithExplicitBrowserSigninTest, SigninPausedThenReauth) {
+  identity_test_env()->MakePrimaryAccountAvailable(kTestUser,
+                                                   ConsentLevel::kSignin);
+  SetExplicitSignin(true);
+  CreatePeopleHandler();
+
+  ASSERT_FALSE(HasSyncStatusUpdateChangedEvent());
+
+  TriggerPrimaryAccountInPersistentError();
+
+  {
+    auto values_list =
+        GetAllFiredValuesForEventName(kSyncStatusChangeEventName);
+    ASSERT_GT(values_list.size(), 0U);
+    size_t last_index = values_list.size() - 1;
+    ASSERT_TRUE(values_list[last_index]->is_dict());
+    const base::Value::Dict& sync_status_values =
+        values_list[last_index]->GetDict();
+    std::optional<int> signedInState =
+        sync_status_values.FindInt("signedInState");
+    ASSERT_TRUE(signedInState.has_value());
+    EXPECT_EQ(static_cast<SignedInState>(signedInState.value()),
+              SignedInState::SignedInPaused);
+    ;
+  }
+
+  // Simulates pressing on the "Verify it's you" button in the Sign in Paused
+  // state, and reauth.
+  SimluateReauth();
+
+  {
+    auto values_list =
+        GetAllFiredValuesForEventName(kSyncStatusChangeEventName);
+    ASSERT_GT(values_list.size(), 0U);
+    size_t last_index = values_list.size() - 1;
+    ASSERT_TRUE(values_list[last_index]->is_dict());
+    const base::Value::Dict& sync_status_values =
+        values_list[last_index]->GetDict();
+    std::optional<int> signedInState =
+        sync_status_values.FindInt("signedInState");
+    ASSERT_TRUE(signedInState.has_value());
+    EXPECT_EQ(static_cast<SignedInState>(signedInState.value()),
+              SignedInState::SignedIn);
+  }
+}
+
+TEST_F(PeopleHandlerWithExplicitBrowserSigninTest, SigninPausedValueWithSync) {
+  CreatePeopleHandler();
+
+  ASSERT_FALSE(HasSyncStatusUpdateChangedEvent());
+
+  // User is syncing.
+  identity_test_env()->MakePrimaryAccountAvailable(kTestUser,
+                                                   ConsentLevel::kSync);
+
+  {
+    auto values_list =
+        GetAllFiredValuesForEventName(kSyncStatusChangeEventName);
+    ASSERT_GT(values_list.size(), 0U);
+    size_t last_index = values_list.size() - 1;
+    ASSERT_TRUE(values_list[last_index]->is_dict());
+    const base::Value::Dict& sync_status_values =
+        values_list[last_index]->GetDict();
+    std::optional<int> signedInState =
+        sync_status_values.FindInt("signedInState");
+    ASSERT_TRUE(signedInState.has_value());
+    EXPECT_EQ(static_cast<SignedInState>(signedInState.value()),
+              SignedInState::Syncing);
+  }
+
+  // Invalidate the account while it is syncing.
+  TriggerPrimaryAccountInPersistentError();
+
+  // `signinPaused` is still false even when the account is in error.
+  {
+    auto values_list =
+        GetAllFiredValuesForEventName(kSyncStatusChangeEventName);
+    ASSERT_GT(values_list.size(), 0U);
+    size_t last_index = values_list.size() - 1;
+    ASSERT_TRUE(values_list[last_index]->is_dict());
+    const base::Value::Dict& sync_status_values =
+        values_list[last_index]->GetDict();
+    std::optional<int> signedInState =
+        sync_status_values.FindInt("signedInState");
+    ASSERT_TRUE(signedInState.has_value());
+    EXPECT_EQ(static_cast<SignedInState>(signedInState.value()),
+              SignedInState::Syncing);
+  }
+}
+
 #endif
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT) || BUILDFLAG(IS_CHROMEOS_LACROS)

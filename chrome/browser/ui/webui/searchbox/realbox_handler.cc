@@ -58,6 +58,7 @@
 #include "components/strings/grit/components_strings.h"
 #include "net/cookies/cookie_util.h"
 #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
+#include "third_party/omnibox_proto/types.pb.h"
 #include "ui/base/webui/resource_path.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/base/window_open_disposition_utils.h"
@@ -276,7 +277,9 @@ void RealboxOmniboxClient::OnAutocompleteAccept(
     const AutocompleteMatch& alternative_nav_match,
     IDNA2008DeviationCharacter deviation_char_in_hostname) {
   if (lens_searchbox_client_) {
-    lens_searchbox_client_->OnSuggestionAccepted(destination_url);
+    lens_searchbox_client_->OnSuggestionAccepted(
+        destination_url, match.type,
+        match.subtypes.contains(omnibox::SUBTYPE_ZERO_PREFIX));
     return;
   }
   web_contents_->OpenURL(
@@ -343,6 +346,13 @@ void RealboxHandler::SetPage(
     mojo::PendingRemote<searchbox::mojom::Page> pending_page) {
   page_.Bind(std::move(pending_page));
   page_set_ = page_.is_bound();
+
+  // The client may have text waiting to be sent to the searchbox that it
+  // couldn't do earlier since the page binding was not set. So now we let the
+  // client know the binding is ready.
+  if (lens_searchbox_client_) {
+    lens_searchbox_client_->OnPageBound();
+  }
 }
 
 void RealboxHandler::OnFocusChanged(bool focused) {
@@ -387,7 +397,7 @@ void RealboxHandler::QueryAutocomplete(const std::u16string& input,
   autocomplete_input.set_allow_exact_keyword_match(false);
   // Set the lens overlay interaction response, if available.
   if (lens_searchbox_client_ &&
-      lens_searchbox_client_->GetLensResponse().has_encoded_response()) {
+      lens_searchbox_client_->GetLensResponse().has_suggest_signals()) {
     autocomplete_input.set_lens_overlay_interaction_response(
         lens_searchbox_client_->GetLensResponse());
   }
@@ -449,6 +459,22 @@ void RealboxHandler::PopupElementSizeChanged(const gfx::Size& size) {
   for (OmniboxWebUIPopupChangeObserver& observer : observers_) {
     observer.OnPopupElementSizeChanged(size);
   }
+}
+
+void RealboxHandler::OnResultChanged(AutocompleteController* controller,
+                                     bool default_match_changed) {
+  // Handles case where the searchbox input has a thumbnail. All lhs icons
+  // of a match should match this thumbnail.
+  if (lens_searchbox_client_) {
+    const GURL& thumbnail = GURL(lens_searchbox_client_->GetThumbnail());
+    if (!thumbnail.is_empty()) {
+      for (AutocompleteMatch& match : const_cast<AutocompleteResult&>(
+               autocomplete_controller()->result())) {
+        match.image_url = thumbnail;
+      }
+    }
+  }
+  SearchboxHandler::OnResultChanged(controller, default_match_changed);
 }
 
 void RealboxHandler::DeleteAutocompleteMatch(uint8_t line, const GURL& url) {

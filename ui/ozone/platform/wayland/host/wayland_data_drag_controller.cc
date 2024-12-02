@@ -202,10 +202,14 @@ bool WaylandDataDragController::StartSession(const OSExchangeData& data,
 }
 
 void WaylandDataDragController::CancelSession() {
-  CHECK(IsDragSource());
+  // Inform the compositor that we're no longer interested in the data offer.
+  if (data_offer_) {
+    data_offer_->SetDndActions(0);
+  }
 
-  // Reset() will reset the wl_data_source we created for the drag, which as per
-  // the spec for wl_data_device.start_drag() will cancel the DnD session.
+  // If this is an outgoing drag session, Reset() will reset the wl_data_source
+  // we created for the drag, which as per the spec for
+  // wl_data_device.start_drag() will cancel the DnD session.
   //
   // Note: resetting immediately might lead to issues in tests in the future,
   // because WaylandWindow::StartDrag() will return even though the compositor
@@ -214,6 +218,10 @@ void WaylandDataDragController::CancelSession() {
   // might lead to issues for real users if the compositor implements the spec
   // incorrectly or just in a way we didn't foresee.
   Reset(DragResult::kCancelled, ui::EventTimeForNow());
+}
+
+bool WaylandDataDragController::IsDragInProgress() const {
+  return state_ != State::kIdle;
 }
 
 void WaylandDataDragController::UpdateDragImage(const gfx::ImageSkia& image,
@@ -436,7 +444,7 @@ void WaylandDataDragController::OnDragMotion(const gfx::PointF& location,
     return;
   }
 
-  // TODO(crbug.com/1519772): we should update the cursor position when some
+  // TODO(crbug.com/41492749): we should update the cursor position when some
   // data is dragged from another client. Currently `drag_source_` may be
   // nullopt in that case.
   if (drag_source_.has_value()) {
@@ -445,7 +453,7 @@ void WaylandDataDragController::OnDragMotion(const gfx::PointF& location,
       auto* cursor_position = connection_->wayland_cursor_position();
       if (cursor_position) {
         CHECK(window_);
-        // TODO(crbug.com/1521286): Once we enable the input region for
+        // TODO(crbug.com/41494257): Once we enable the input region for
         // subsurfaces, we need to update this part since the location will no
         // longer be relative to the window.
         auto location_in_screen =
@@ -492,11 +500,15 @@ void WaylandDataDragController::OnDragDrop(base::TimeTicks timestamp) {
 
   window_->OnDragDrop();
 
-  // Offer must be finished and destroyed here as some compositors may delay to
-  // send wl_data_source::finished|cancelled until owning client destroys the
-  // drag offer. e.g: Exosphere.
-  data_offer_->FinishOffer();
-  data_offer_.reset();
+  // Might have already been reset if the drag was cancelled in response to the
+  // drop event.
+  if (data_offer_) {
+    // Offer must be finished and destroyed here as some compositors may delay
+    // to send wl_data_source::finished|cancelled until owning client destroys
+    // the drag offer. e.g: Exosphere.
+    data_offer_->FinishOffer();
+    data_offer_.reset();
+  }
 }
 
 void WaylandDataDragController::OnDataSourceFinish(WaylandDataSource* source,
@@ -671,6 +683,11 @@ void WaylandDataDragController::Reset(DragResult result,
     if (result != DragResult::kCompleted) {
       origin_window_->OnDragLeave();
     }
+
+    // Ensure we don't send a second leave event below.
+    if (origin_window_ == window_) {
+      window_ = nullptr;
+    }
     origin_window_ = nullptr;
   }
 
@@ -683,6 +700,15 @@ void WaylandDataDragController::Reset(DragResult result,
   // problems.
   if (pointer_grabber_for_window_drag_) {
     DispatchPointerRelease(timestamp);
+  }
+
+  // If we called this method because we want to cancel an incoming drag
+  // session, make sure we send a final leave event. The real leave event we'll
+  // receive from the compositor won't be propagated because we reset
+  // |data_device_|'s delegate below.
+  if (window_) {
+    window_->OnDragLeave();
+    window_ = nullptr;
   }
 
   data_source_.reset();
@@ -752,7 +778,8 @@ void WaylandDataDragController::DispatchPointerRelease(
   pointer_delegate_->OnPointerButtonEvent(
       ET_MOUSE_RELEASED, EF_LEFT_MOUSE_BUTTON, timestamp,
       pointer_grabber_for_window_drag_, wl::EventDispatchPolicy::kImmediate,
-      /*allow_release_of_unpressed_button=*/true);
+      /*allow_release_of_unpressed_button=*/true,
+      /*is_synthesized=*/true);
   pointer_grabber_for_window_drag_ = nullptr;
 }
 

@@ -11,6 +11,7 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings.mojom-shared.h"
 #include "components/content_settings/core/common/content_settings_constraints.h"
+#include "components/content_settings/core/common/content_settings_enums.mojom-shared.h"
 #include "components/content_settings/core/common/content_settings_metadata.h"
 #include "mojo/public/cpp/base/time_mojom_traits.h"
 #include "mojo/public/cpp/base/values_mojom_traits.h"
@@ -123,6 +124,11 @@ struct StructTraits<content_settings::mojom::RuleMetaDataDataView,
     return r.tpcd_metadata_rule_source_;
   }
 
+  static const content_settings::mojom::TpcdMetadataCohort&
+  tpcd_metadata_cohort(const content_settings::RuleMetaData& r) {
+    return r.tpcd_metadata_cohort_;
+  }
+
   static bool Read(content_settings::mojom::RuleMetaDataDataView data,
                    content_settings::RuleMetaData* out);
 };
@@ -151,7 +157,8 @@ struct StructTraits<
     return r.metadata;
   }
 
-  static const std::string& source(const ContentSettingPatternSource& r) {
+  static content_settings::ProviderType source(
+      const ContentSettingPatternSource& r) {
     return r.source;
   }
 

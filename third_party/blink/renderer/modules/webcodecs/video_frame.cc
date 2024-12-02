@@ -514,7 +514,6 @@ bool CopyTexturablePlanes(media::VideoFrame& src_frame,
     return false;
 
   auto* ri = provider->RasterInterface();
-  auto* gr_context = provider->GetGrContext();
   if (!ri)
     return false;
 
@@ -525,7 +524,7 @@ bool CopyTexturablePlanes(media::VideoFrame& src_frame,
     uint8_t* dest_pixels = dest_buffer.data() + dest_layout.Offset(i);
     if (!media::ReadbackTexturePlaneToMemorySync(
             src_frame, i, plane_src_rect, dest_pixels, dest_layout.Stride(i),
-            ri, gr_context, provider->GetCapabilities())) {
+            ri, provider->GetCapabilities())) {
       // It's possible to fail after copying some but not all planes, leaving
       // the output buffer in a corrupt state D:
       return false;
@@ -623,10 +622,12 @@ HeapVector<Member<PlaneLayout>> ConvertLayout(
 VideoFrame::VideoFrame(scoped_refptr<media::VideoFrame> frame,
                        ExecutionContext* context,
                        std::string monitoring_source_id,
-                       sk_sp<SkImage> sk_image) {
+                       sk_sp<SkImage> sk_image,
+                       bool use_capture_timestamp) {
   DCHECK(frame);
   handle_ = base::MakeRefCounted<VideoFrameHandle>(
-      frame, std::move(sk_image), context, std::move(monitoring_source_id));
+      frame, std::move(sk_image), context, std::move(monitoring_source_id),
+      use_capture_timestamp);
   external_allocated_memory_ =
       media::VideoFrame::AllocationSize(frame->format(), frame->coded_size());
   context->GetIsolate()->AdjustAmountOfExternalAllocatedMemory(
@@ -1202,7 +1203,7 @@ void VideoFrame::ConvertAndCopyToRGB(scoped_refptr<media::VideoFrame> frame,
                                      PredefinedColorSpace target_color_space) {
   DCHECK(media::IsRGB(dest_layout.Format()));
   SkColorType skia_pixel_format = media::SkColorTypeForPlane(
-      dest_layout.Format(), media::VideoFrame::kARGBPlane);
+      dest_layout.Format(), media::VideoFrame::Plane::kARGB);
 
   if (frame->visible_rect() != src_rect) {
     frame = media::VideoFrame::WrapVideoFrame(frame, frame->format(), src_rect,

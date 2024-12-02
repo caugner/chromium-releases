@@ -11,10 +11,6 @@
   }
 
   a {
-    color: var(--cr-link-color);
-  }
-
-  :host-context([chrome-refresh-2023]) a {
     color: var(--color-compose-dialog-link);
   }
 
@@ -54,28 +50,14 @@
     min-width: 48px;
     height: 48px;
     border-radius: 12px;
-    background: linear-gradient(
-        136deg,  rgb(211, 227, 253) 1.59%, rgb(231, 248, 237) 100%);
-    color: rgb(4, 30, 73);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    transform-origin: top left;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    #firstRunIconContainer {
-      background: linear-gradient(
-          136deg,  rgb(8, 66, 160) 1.59%, rgb(15, 82, 35) 100%);
-      color: rgb(194, 231, 255);
-    }
-  }
-
-  :host-context([chrome-refresh-2023]) #firstRunIconContainer {
     background: linear-gradient(136deg,
         var(--color-sys-gradient-primary) 1.59%,
         var(--color-sys-gradient-tertiary) 100%);
     color: var(--color-compose-dialog-logo);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transform-origin: top left;
   }
 
   #firstRunHeading iron-icon {
@@ -112,30 +94,18 @@
   }
 
   h1 {
-    color: var(--cr-primary-text-color);
+    color: var(--color-compose-dialog-title);
     font-size: 16px;
     font-weight: 500;
     line-height: 24px;
     margin: 0;
     margin-inline-end: auto;
-    padding-inline-end: 36px; /* From --cr-icon-button-size */
-  }
-
-  :host-context([chrome-refresh-2023]) h1 {
-    color: var(--color-compose-dialog-title);
-    font-size: 16px;
-    font-weight: 500;
-    line-height: 24px;
     padding-inline-end: 32px; /* From --cr-icon-button-size */
   }
 
   cr-icon-button {
-    --cr-icon-button-fill-color: var(--cr-secondary-text-color);
-    margin: 0;
-  }
-
-  :host-context([chrome-refresh-2023]) cr-icon-button {
     --cr-icon-button-fill-color: var(--color-compose-dialog-foreground-subtle);
+    margin: 0;
   }
 
   #bodyAndFooter {
@@ -147,7 +117,7 @@
   }
 
   #body {
-    --results-background_: rgb(234, 240, 249);
+    --results-background_: var(--color-compose-dialog-result-background);
     box-sizing: border-box;
     grid-area: body;
     display: grid;
@@ -157,19 +127,9 @@
     padding: 0 20px;
   }
 
-  @media (prefers-color-scheme: dark) {
-    #body {
-      --results-background_: rgb(60, 64, 67);
-    }
-  }
-
   :host(:not([submitted_])) #body {
     /* Non-submitted dialog has no bodyContent. */
     grid-template-areas: "textarea";
-  }
-
-  :host-context([chrome-refresh-2023]) #body {
-    --results-background_: var(--color-compose-dialog-result-background);
   }
 
   /* Set scroll-related styles if UI refinements are not enabled. */
@@ -181,20 +141,10 @@
   }
 
   :host(:not([enable-ui-refinements])) #body.is-scrolled {
-    border-top: var(--cr-hairline);
-  }
-
-  :host(:not([enable-ui-refinements])) :host-context([chrome-refresh-2023])
-      #body.is-scrolled {
     border-top: solid 1px var(--color-compose-dialog-divider);
   }
 
   :host(:not([enable-ui-refinements]))
-      #body.can-scroll:not(.scrolled-to-bottom) {
-    border-bottom: var(--cr-hairline);
-  }
-
-  :host(:not([enable-ui-refinements])) :host-context([chrome-refresh-2023])
       #body.can-scroll:not(.scrolled-to-bottom) {
     border-bottom: solid 1px var(--color-compose-dialog-divider);
   }
@@ -214,20 +164,12 @@
     width: var(--scrollbar-width_);
   }
 
-  #body::-webkit-scrollbar-thumb,
-      #resultTextContainer::-webkit-scrollbar-thumb {
-    background: var(--google-grey-300);
-  }
-
-  @media (prefers-color-scheme: dark) { #body::-webkit-scrollbar-thumb,
-        #resultTextContainer::-webkit-scrollbar-thumb {
-      background: var(--google-grey-500);
-    }
-  }
-
-  :host-context([chrome-refresh-2023]) #body::-webkit-scrollbar-thumb,
-      #resultTextContainer::-webkit-scrollbar-thumb {
+  #body::-webkit-scrollbar-thumb {
     background: var(--color-compose-dialog-scrollbar-thumb);
+  }
+
+  #resultTextContainer::-webkit-scrollbar-thumb {
+    background: var(--color-compose-dialog-result-container-scrollbar-thumb);
   }
 
   :host([loading-indicator-shown_]) #bodyAndFooter {
@@ -256,22 +198,20 @@
   }
 
   .result-container {
-    --compose-result-text-color-while-loading: var(--cr-primary-text-color);
-    --compose-result-text-color: var(--cr-primary-text-color);
+    --compose-result-text-color-while-loading: var(
+        --color-compose-dialog-result-foreground-while-loading);
+    --compose-result-text-color: var(--color-compose-dialog-result-foreground);
     border-radius: 8px;
     display: flex;
     box-sizing: border-box;
     background: var(--results-background_);
     color: var(--cr-primary-text-color);
     font-size: 12px;
-    line-height: 20px;
+    line-height: 16px;
   }
 
-  :host-context([chrome-refresh-2023]) .result-container {
-    --compose-result-text-color-while-loading: var(
-        --color-compose-dialog-result-foreground-while-loading);
-    --compose-result-text-color: var(--color-compose-dialog-result-foreground);
-    line-height: 16px;
+  :host([enable-ui-refinements][is-editing-result-text_]) .result-container {
+    outline: solid 2px var(--cr-focus-outline-color);
   }
 
   #resultContainerInner {
@@ -287,12 +227,8 @@
   }
 
   /* #resultTextContainer is only styled if UI refinements are applied */
-  :host([enable-ui-refinements]) #resultTextContainer:not(.can-scroll) {
-    margin-bottom: 16px;
-  }
-
   :host([enable-ui-refinements]) #resultTextContainer {
-    max-height: 113px;
+    max-height: 112px;
     overflow: auto;
     /* Incorporates width of righthand scrollbar */
     padding-inline-start: 16px;
@@ -304,7 +240,7 @@
   }
 
   :host([enable-ui-refinements]) #resultOptionsContainer {
-    border-top: 1px solid #D3E3FD;
+    border-top: 1px solid var(--color-compose-dialog-divider);
   }
 
   #resultOptions {
@@ -333,6 +269,15 @@
     width: auto;
   }
 
+  select option {
+    --md-select-option-bg-color: var(--results-background_);
+    color: var(--compose-result-text-color);
+  }
+
+  select option:disabled {
+    color: var(--color-compose-dialog-select-option-disabled);
+  }
+
   :host([enable-ui-refinements]) #resultOptions .md-select {
     --md-select-side-padding: 8px;
     min-height: 24px;
@@ -343,10 +288,6 @@
     font-family: Roboto, "Noto Sans", Arial, sans-serif;
     font-weight: 500;
     color: var(--cr-secondary-text-color);
-  }
-
-  :host-context(html:not([chrome-refresh-2023])) #resultOptions .md-select {
-    border: solid 1px var(--google-grey-400);
   }
 
   .icon-buttons-row {
@@ -366,18 +307,14 @@
   }
 
   .icon-buttons-row cr-icon-button {
-    --cr-icon-button-fill-color: var(--cr-secondary-text-color);
+    --cr-icon-button-fill-color: var(--color-compose-dialog-result-icon);
     --cr-icon-button-icon-size: var(--cr-icon-size);
     margin: 0;
   }
 
-  :host-context([chrome-refresh-2023]) .icon-buttons-row cr-icon-button {
-    --cr-icon-button-fill-color: var(--color-compose-dialog-result-icon);
-  }
-
   /* cr-button is only used when UI refinements is enabled */
   .icon-buttons-row cr-button {
-    --cr-button-text-color: var(--cr-secondary-text-color);
+    --cr-button-text-color: var(--color-compose-dialog-result-icon);
     margin: 0;
     padding: 0;
     min-height: 24px;
@@ -386,15 +323,11 @@
     gap: 4px;
   }
 
-  :host-context([chrome-refresh-2023]) .icon-buttons-row cr-button {
-    --cr-button-text-color: var(--color-compose-dialog-result-icon);
-  }
-
   /* Vertical divider between buttons */
   :host([enable-ui-refinements]) .icon-buttons-row
       .button-container:last-child {
     padding-left: 10px;
-    border-left: 1px solid #A8C7FA;
+    border-left: 1px solid var(--color-compose-dialog-result-buttons-divider);
   }
 
   .footer {
@@ -430,7 +363,7 @@
     align-items: start;
     gap: 8px;
     margin-inline-end: auto;
-    color: var(--cr-secondary-text-color);
+    color: var(--color-compose-dialog-foreground-subtle);
     font-size: 11px;
     line-height: 16px;
   }
@@ -446,11 +379,6 @@
     gap: 2px;
   }
 </if>
-
-  :host-context([chrome-refresh-2023]) .footer-text {
-    color: var(--color-compose-dialog-foreground-subtle);
-    line-height: 16px;
-  }
 
   .footer-text .icon-buttons-row {
     --cr-icon-size: 16px;
@@ -484,8 +412,7 @@
     min-height: 153px;
   }
 
-  :host-context([chrome-refresh-2023], [is-editing-submitted-input_])
-      #bodyAndFooter {
+  :host-context([is-editing-submitted-input_]) #bodyAndFooter {
     min-height: 141px;
   }
 
@@ -606,18 +533,20 @@
         </cr-loading-gradient>
       </div>
       <div id="resultContainer" class="result-container"
-          hidden="[[!hasOutput_]]">
+          hidden="[[hideResults_(hasOutput_, feedbackEnabled_)]]">
         <div id="resultContainerInner">
           <div id="resultTextContainer" scrollable$="[[enableUiRefinements]]">
             <compose-result-text id="resultText" text-input="[[responseText_]]"
               is-output-complete="{{outputComplete_}}"
               has-output="{{hasOutput_}}"
               has-partial-output="{{hasPartialOutput_}}"
-              on-result-edit="onResultEdit_">
+              on-result-edit="onResultEdit_"
+              on-set-result-focus="onSetResultFocus_">
             </compose-result-text>
           </div>
           <div id="resultOptionsContainer">
-            <div id="resultOptions" inert$="[[!outputComplete_]]">
+            <div id="resultOptions"
+                inert$="[[hideResults_(hasOutput_, feedbackEnabled_)]]">
               <select class="md-select" id="lengthMenu"
                 value="[[selectedLength_]]" aria-label="$i18n{lengthMenuTitle}"
                 on-change="onLengthChanged_" hidden="[[enableUiRefinements]]">
@@ -698,7 +627,7 @@
     </div>
 
     <div id="resultFooter" class="footer"
-        hidden$="[[!outputComplete_]]"
+        hidden$="[[hideResults_(hasOutput_, feedbackEnabled_)]]"
         inert$="[[hasPartialOutput_]]">
       <div class="footer-text">
         <div on-click="onFooterClick_">

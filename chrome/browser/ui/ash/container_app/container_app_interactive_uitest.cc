@@ -48,6 +48,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
+#include "chromeos/components/libsegmentation/buildflags.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/app_constants/constants.h"
@@ -93,23 +94,6 @@ inline char kContainerAppElementName[] = "ContainerApp";
 inline char kFilesAppElementName[] = "FilesApp";
 inline char kGmailAppElementName[] = "GmailApp";
 inline char kShowAppInfoMenuItemElementName[] = "ShowAppInfoMenuItem";
-
-// Users -----------------------------------------------------------------------
-
-inline char kManagedUserEmail[] = "managed@example.com";
-inline char kManagedUserGaiaId[] = "<MANAGED_USER_GAIA_ID>";
-inline char kUnmanagedUserEmail[] = "unmanaged@gmail.com";
-inline char kUnmanagedUserGaiaId[] = "<UNMANAGED_USER_GAIA_ID>";
-
-// Helpers ---------------------------------------------------------------------
-
-// Returns an `AccountId` for either a `managed` or an unmanaged user.
-AccountId GetAccountId(bool managed) {
-  return managed ? AccountId::FromUserEmailGaiaId(kManagedUserEmail,
-                                                  kManagedUserGaiaId)
-                 : AccountId::FromUserEmailGaiaId(kUnmanagedUserEmail,
-                                                  kUnmanagedUserGaiaId);
-}
 
 // Returns all `descendants` of the specified `parent` matching the given class.
 template <typename ViewClass>
@@ -224,10 +208,10 @@ class OnBrowserSetLastActiveWaiter : public BrowserListObserver {
 class ContainerAppInteractiveUiTestBase
     : public InteractiveBrowserTestT<MixinBasedInProcessBrowserTest> {
  public:
-  ContainerAppInteractiveUiTestBase(const AccountId& account_id,
-                                    user_manager::UserType user_type,
-                                    bool should_ignore_feature_key)
-      : user_session_mixin_(CreateUserSessionMixin(account_id, user_type)) {
+  ContainerAppInteractiveUiTestBase(
+      std::optional<ash::LoggedInUserMixin::LogInType> login_type,
+      bool should_ignore_feature_key)
+      : user_session_mixin_(CreateUserSessionMixin(login_type)) {
     // Conditionally ignore the container app preinstallation key.
     if (should_ignore_feature_key) {
       ignore_container_app_preinstall_key_ = std::make_unique<
@@ -346,30 +330,24 @@ class ContainerAppInteractiveUiTestBase
 
     // Cache install info for the container app.
     container_app_install_info_ =
-        web_app::GetConfigForContainer().app_info_factory.Run();
+        web_app::GetConfigForContainer(/*device_info=*/std::nullopt)
+            .app_info_factory.Run();
   }
 
  private:
   // Creates the appropriate guest or logged-in user session mixin based on
-  // the specified `account_id` and `user_type`.
+  // the presence of `login_type`.
   absl::variant<ash::GuestSessionMixin, ash::LoggedInUserMixin>
-  CreateUserSessionMixin(const AccountId& account_id,
-                         user_manager::UserType user_type) {
-    if (user_type == user_manager::UserType::kGuest) {
+  CreateUserSessionMixin(
+      std::optional<ash::LoggedInUserMixin::LogInType> login_type) {
+    if (!login_type) {
       return absl::variant<ash::GuestSessionMixin, ash::LoggedInUserMixin>(
           absl::in_place_type_t<ash::GuestSessionMixin>(), &mixin_host_);
     }
 
-    CHECK(user_type == user_manager::UserType::kChild ||
-          user_type == user_manager::UserType::kRegular);
-
     return absl::variant<ash::GuestSessionMixin, ash::LoggedInUserMixin>(
         absl::in_place_type_t<ash::LoggedInUserMixin>(), &mixin_host_,
-        user_type == user_manager::UserType::kChild
-            ? ash::LoggedInUserMixin::LogInType::kChild
-            : ash::LoggedInUserMixin::LogInType::kRegular,
-        embedded_test_server(), this, /*should_launch_browser=*/true,
-        account_id);
+        /*test_base=*/this, embedded_test_server(), login_type.value());
   }
 
   // Returns whether the user should be logged in as part of test setup.
@@ -396,14 +374,15 @@ class ContainerAppInteractiveUiTestBase
 // whether the logged-in user is new or existing. Tests include a PRE_ session,
 // where user state is initialized, followed by a subsequent session containing
 // test logic. Chrome is restarted between sessions.
+
 class ContainerAppInteractiveUiTest
     : public ContainerAppInteractiveUiTestBase,
       public WithParamInterface</*existing_user=*/bool> {
  public:
   ContainerAppInteractiveUiTest()
-      : ContainerAppInteractiveUiTestBase(GetAccountId(/*managed=*/false),
-                                          user_manager::UserType::kRegular,
-                                          /*should_ignore_feature_key=*/true) {
+      : ContainerAppInteractiveUiTestBase(
+            ash::LoggedInUserMixin::LogInType::kConsumer,
+            /*should_ignore_feature_key=*/true) {
     // Disable the container app during the PRE_ session so that the subsequent
     // session containing test logic is when the app preinstallation occurs.
     if (IsPreSession()) {
@@ -855,9 +834,12 @@ IN_PROC_BROWSER_TEST_P(ContainerAppInteractiveUiTest, UninstallFromShelf) {
 enum class IneligibilityReason {
   kMinValue = 0,
   kFeatureFlagDisabled = kMinValue,
+#if !BUILDFLAG(ENABLE_MERGE_REQUEST)
+  // NOTE: Key is bypassed when `ENABLE_MERGE_REQUEST` is enabled.
   kFeatureKeyEmpty,
   kFeatureKeyParamIncorrect,
   kFeatureKeySwitchIncorrect,
+#endif  // !BUILDFLAG(ENABLE_MERGE_REQUEST)
   kFeatureManagementFlagDisabled,
   kUserManaged,
   kUserTypeChild,
@@ -872,9 +854,12 @@ enum class IneligibilityReason {
 inline std::ostream& operator<<(std::ostream& os, IneligibilityReason reason) {
   switch (reason) {
     INELIGIBILITY_REASON_CASE(kFeatureFlagDisabled);
+#if !BUILDFLAG(ENABLE_MERGE_REQUEST)
+    // NOTE: Key is bypassed when `ENABLE_MERGE_REQUEST` is enabled.
     INELIGIBILITY_REASON_CASE(kFeatureKeyEmpty);
     INELIGIBILITY_REASON_CASE(kFeatureKeyParamIncorrect);
     INELIGIBILITY_REASON_CASE(kFeatureKeySwitchIncorrect);
+#endif  // !BUILDFLAG(ENABLE_MERGE_REQUEST)
     INELIGIBILITY_REASON_CASE(kFeatureManagementFlagDisabled);
     INELIGIBILITY_REASON_CASE(kUserManaged);
     INELIGIBILITY_REASON_CASE(kUserTypeChild);
@@ -891,8 +876,7 @@ class ContainerAppInteractiveUiIneligibilityTest
   static constexpr char kIncorrectKey[] = "<INCORRECT_KEY>";
 
   ContainerAppInteractiveUiIneligibilityTest()
-      : ContainerAppInteractiveUiTestBase(GetAccountId(),
-                                          GetUserType(),
+      : ContainerAppInteractiveUiTestBase(GetLoginType(),
                                           ShouldIgnoreFeatureKey()) {
     std::vector<base::test::FeatureRefAndParams> enabled;
     std::vector<base::test::FeatureRef> disabled;
@@ -939,29 +923,26 @@ class ContainerAppInteractiveUiIneligibilityTest
     // preinstallation of the container app, circumvent timeouts by disabling
     // other default web apps.
     std::unique_ptr<web_app::ScopedTestingPreinstalledAppData> app_data;
-    if (GetUserType() == user_manager::UserType::kChild) {
+    if (GetLoginType() == ash::LoggedInUserMixin::LogInType::kChild) {
       app_data = std::make_unique<web_app::ScopedTestingPreinstalledAppData>();
-      app_data->apps.emplace_back(web_app::GetConfigForContainer());
+      app_data->apps.emplace_back(
+          web_app::GetConfigForContainer(/*device_info=*/std::nullopt));
     }
 
     ContainerAppInteractiveUiTestBase::SetUpOnMainThread();
   }
 
-  // Returns the `AccountId` for the user given test parameterization.
-  AccountId GetAccountId() const {
-    return ::GetAccountId(/*managed=*/GetParam() ==
-                          IneligibilityReason::kUserManaged);
-  }
-
-  // Returns the type for the user given test parameterization.
-  user_manager::UserType GetUserType() const {
+  // Returns the login type for the user given test parameterization.
+  std::optional<ash::LoggedInUserMixin::LogInType> GetLoginType() const {
     switch (GetParam()) {
       case IneligibilityReason::kUserTypeChild:
-        return user_manager::UserType::kChild;
+        return ash::LoggedInUserMixin::LogInType::kChild;
       case IneligibilityReason::kUserTypeGuest:
-        return user_manager::UserType::kGuest;
+        return std::nullopt;
+      case IneligibilityReason::kUserManaged:
+        return ash::LoggedInUserMixin::LogInType::kManaged;
       default:
-        return user_manager::UserType::kRegular;
+        return ash::LoggedInUserMixin::LogInType::kConsumer;
     }
   }
 
@@ -973,13 +954,23 @@ class ContainerAppInteractiveUiIneligibilityTest
   // Returns whether the feature key param is incorrect given test
   // parameterization.
   bool IsFeatureKeyParamIncorrect() const {
+#if !BUILDFLAG(ENABLE_MERGE_REQUEST)
     return GetParam() == IneligibilityReason::kFeatureKeyParamIncorrect;
+#else   // !BUILDFLAG(ENABLE_MERGE_REQUEST)
+    // NOTE: Key is bypassed when `ENABLE_MERGE_REQUEST` is enabled.
+    return true;
+#endif  // BUILDFLAG(ENABLE_MERGE_REQUEST)
   }
 
   // Returns whether the feature key switch is incorrect given test
   // parameterization.
   bool IsFeatureKeySwitchIncorrect() const {
+#if !BUILDFLAG(ENABLE_MERGE_REQUEST)
     return GetParam() == IneligibilityReason::kFeatureKeySwitchIncorrect;
+#else   // !BUILDFLAG(ENABLE_MERGE_REQUEST)
+    // NOTE: Key is bypassed when `ENABLE_MERGE_REQUEST` is enabled.
+    return true;
+#endif  // BUILDFLAG(ENABLE_MERGE_REQUEST)
   }
 
   // Returns whether the feature management flag is disabled given test
@@ -991,11 +982,16 @@ class ContainerAppInteractiveUiIneligibilityTest
   // Returns whether the feature key should be ignored given test
   // parameterization.
   bool ShouldIgnoreFeatureKey() const {
+#if !BUILDFLAG(ENABLE_MERGE_REQUEST)
     return !std::set<IneligibilityReason>(
                 {IneligibilityReason::kFeatureKeyEmpty,
                  IneligibilityReason::kFeatureKeyParamIncorrect,
                  IneligibilityReason::kFeatureKeySwitchIncorrect})
                 .contains(GetParam());
+#else   // !BUILDFLAG(ENABLE_MERGE_REQUEST)
+    // NOTE: Key is bypassed when `ENABLE_MERGE_REQUEST` is enabled.
+    return false;
+#endif  // BUILDFLAG(ENABLE_MERGE_REQUEST)
   }
 
   // Used to enable/disable the container app preinstallation based on test

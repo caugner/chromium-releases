@@ -26,6 +26,7 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHAutoDarkOptOutFeature,
     &kIPHAutoDarkUserEducationMessageFeature,
     &kIPHAutoDarkUserEducationMessageOptInFeature,
+    &kIPHAppSpecificHistory,
     &kIPHCCTHistory,
     &kIPHCCTMinimized,
     &kIPHDataSaverDetailFeature,
@@ -148,6 +149,7 @@ const base::Feature* const kAllFeatures[] = {
 #endif  // BUILDFLAG(IS_IOS)
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+    &kEsbDownloadRowPromoFeature,
     &kIPHBatterySaverModeFeature,
     &kIPHCompanionSidePanelFeature,
     &kIPHCompanionSidePanelRegionSearchFeature,
@@ -156,6 +158,8 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHDesktopCustomizeChromeFeature,
     &kIPHDesktopCustomizeChromeRefreshFeature,
     &kIPHDesktopNewTabPageModulesCustomizeFeature,
+    &kIPHDesktopReEngagementFeature,
+    &kIPHDiscardRingFeature,
     &kIPHDownloadEsbPromoFeature,
     &kIPHExperimentalAIPromoFeature,
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -185,12 +189,16 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHShoppingCollectionFeature,
     &kIPHSidePanelGenericMenuFeature,
     &kIPHSidePanelGenericPinnableFeature,
+    &kIPHSidePanelLensOverlayPinnableFeature,
+    &kIPHSidePanelLensOverlayPinnableFollowupFeature,
     &kIPHSideSearchAutoTriggeringFeature,
     &kIPHSideSearchPageActionLabelFeature,
+    &kIPHSignoutWebInterceptFeature,
     &kIPHTabOrganizationSuccessFeature,
     &kIPHTabSearchFeature,
     &kIPHTrackingProtectionOffboardingFeature,
     &kIPHTrackingProtectionOnboardingFeature,
+    &kIPHTrackingProtectionReminderFeature,
     &kIPHWebUITabStripFeature,
     &kIPHDesktopPwaInstallFeature,
     &kIPHProfileSwitchFeature,
@@ -209,7 +217,6 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHAutofillVirtualCardCVCSuggestionFeature,
     &kIPHAutofillVirtualCardSuggestionFeature,
     &kIPHCookieControlsFeature,
-    &kIPH3pcdUserBypassFeature,
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) ||
         // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) ||
         // BUILDFLAG(IS_FUCHSIA)

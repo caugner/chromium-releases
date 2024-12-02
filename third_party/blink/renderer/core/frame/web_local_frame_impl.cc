@@ -396,13 +396,7 @@ class ChromePrintContext : public PrintContext {
           GetFrame()->GetDocument()->GetPageDescription(page_index);
 
       AffineTransform transform;
-      // The transform offset should be in integers, or everything will look
-      // blurry. The value is also rounded to the nearest integer (not ceil /
-      // floor), to better match what it would look like if the same offset were
-      // applied from within the document contents (e.g. margin / padding on a
-      // regular DIV). Some tests depend on this.
-      transform.Translate(std::round(description.margin_left),
-                          current_height + std::round(description.margin_top));
+      transform.Translate(0, current_height);
 
       if (description.orientation == PageOrientation::kUpright) {
         current_height += description.size.height() + 1;
@@ -446,35 +440,19 @@ class ChromePrintContext : public PrintContext {
       return;
     }
     gfx::Rect page_rect = PageRect(page_number);
-    AffineTransform transform;
 
     const LayoutView* layout_view = frame_view->GetLayoutView();
-
-    // Layout may have used a larger viewport size in order to fit more
-    // unbreakable content in the inline direction. Now we need to scale it down
-    // to fit on the actual pages.
-    float inverse_scale = 1.f / layout_view->PageScaleFactor();
-    transform.Scale(inverse_scale, inverse_scale);
-
-    transform.Translate(static_cast<float>(-page_rect.x()),
-                        static_cast<float>(-page_rect.y()));
-    context.Save();
-    context.ConcatCTM(transform);
-    context.ClipRect(gfx::RectToSkRect(page_rect));
 
     auto property_tree_state =
         layout_view->FirstFragment().LocalBorderBoxProperties();
 
     PaintRecordBuilder builder(context);
-    frame_view->PaintOutsideOfLifecycle(
-        builder.Context(),
-        PaintFlag::kOmitCompositingInfo | PaintFlag::kAddUrlMetadata,
-        CullRect(page_rect));
+
+    frame_view->PrintPage(builder.Context(), page_number, CullRect(page_rect));
 
     OutputLinkedDestinations(builder.Context(), property_tree_state, page_rect);
 
     context.DrawRecord(builder.EndRecording(property_tree_state.Unalias()));
-    context.Restore();
   }
 
  private:
@@ -1141,7 +1119,8 @@ v8::Local<v8::Context> WebLocalFrameImpl::MainWorldScriptContext() const {
 int32_t WebLocalFrameImpl::GetScriptContextWorldId(
     v8::Local<v8::Context> script_context) const {
   DCHECK_EQ(this, FrameForContext(script_context));
-  return DOMWrapperWorld::World(script_context).GetWorldId();
+  v8::Isolate* isolate = script_context->GetIsolate();
+  return DOMWrapperWorld::World(isolate, script_context).GetWorldId();
 }
 
 v8::Local<v8::Context> WebLocalFrameImpl::GetScriptContextFromWorldId(
@@ -3327,6 +3306,12 @@ void WebLocalFrameImpl::RemoveObserver(WebLocalFrameObserver* observer) {
 void WebLocalFrameImpl::WillSendSubmitEvent(const WebFormElement& form) {
   for (auto& observer : observers_)
     observer.WillSendSubmitEvent(form);
+}
+
+bool WebLocalFrameImpl::AllowStorageAccessSyncAndNotify(
+    WebContentSettingsClient::StorageType storage_type) {
+  return LocalFrame::FromFrameToken(GetLocalFrameToken())
+      ->AllowStorageAccessSyncAndNotify(storage_type);
 }
 
 }  // namespace blink

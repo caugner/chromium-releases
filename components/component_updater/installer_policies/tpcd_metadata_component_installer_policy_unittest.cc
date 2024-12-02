@@ -19,7 +19,7 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
-#include "components/tpcd/metadata/parser.h"
+#include "components/tpcd/metadata/browser/parser.h"
 #include "net/base/features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -270,7 +270,7 @@ TEST_P(TpcdMetadataComponentInstallerPolicyTest, ComponentReady_kIllicitDtrp) {
   tpcd::metadata::Metadata metadata;
   tpcd::metadata::helpers::AddEntryToMetadata(
       metadata, primary_pattern_spec, secondary_pattern_spec,
-      tpcd::metadata::Parser::kSourceTest, std::nullopt,
+      tpcd::metadata::Parser::kSourceCriticalSector, std::nullopt,
       tpcd::metadata::Parser::kMaxDtrp);
   ASSERT_EQ(metadata.metadata_entries_size(), 1);
 
@@ -294,7 +294,8 @@ TEST_P(TpcdMetadataComponentInstallerPolicyTest, ComponentReady_FiresCallback) {
 
   tpcd::metadata::Metadata metadata;
   tpcd::metadata::helpers::AddEntryToMetadata(metadata, primary_pattern_spec,
-                                              secondary_pattern_spec);
+                                              secondary_pattern_spec,
+                                              Parser::kSourceCriticalSector);
   ASSERT_EQ(metadata.metadata_entries_size(), 1);
 
   ExecFakeComponentInstallation(metadata.SerializeAsString());
@@ -330,7 +331,8 @@ TEST_P(TpcdMetadataComponentInstallerPolicyTest,
 
   tpcd::metadata::Metadata metadata;
   tpcd::metadata::helpers::AddEntryToMetadata(metadata, primary_pattern_spec,
-                                              secondary_pattern_spec);
+                                              secondary_pattern_spec,
+                                              Parser::kSourceCriticalSector);
   ASSERT_EQ(metadata.metadata_entries_size(), 1);
 
   ExecFakeComponentInstallation(metadata.SerializeAsString());

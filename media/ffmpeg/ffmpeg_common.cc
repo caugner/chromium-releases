@@ -546,7 +546,7 @@ bool AVStreamToVideoDecoderConfig(const AVStream* stream,
 #if BUILDFLAG(ENABLE_PLATFORM_HEVC)
     case VideoCodec::kHEVC: {
       int hevc_profile = -1;
-      // We need to parse extradata each time, because we wont add ffmpeg
+      // We need to parse extradata each time, because we won't add ffmpeg
       // hevc decoder & parser to chromium and codec_context->profile
       // should always be FF_PROFILE_UNKNOWN (-99) here
       if (codec_context->extradata && codec_context->extradata_size) {
@@ -742,7 +742,7 @@ bool AVStreamToVideoDecoderConfig(const AVStream* stream,
           smpte_st_2086.luminance_min = av_q2d(mdcv->min_luminance);
         }
 
-        // TODO(https://crbug.com/1446302): Consider rejecting metadata that
+        // TODO(crbug.com/40268540): Consider rejecting metadata that
         // does not specify all values.
         if (mdcv->has_primaries || mdcv->has_luminance) {
           hdr_metadata.smpte_st_2086 = smpte_st_2086;
