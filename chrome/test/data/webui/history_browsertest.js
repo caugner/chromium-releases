@@ -417,7 +417,7 @@ TEST_F('HistoryWebUITest', 'DISABLED_basicTest', function() {
 
   // Check that there are 3 page navigation links and that only the "Older"
   // link is visible.
-  expectEquals(3, document.querySelectorAll('.link-button').length);
+  expectEquals(3, document.querySelectorAll('[is="action-link"]').length);
   expectTrue($('newest-button').hidden);
   expectTrue($('newer-button').hidden);
   expectFalse($('older-button').hidden);
@@ -442,7 +442,7 @@ TEST_F('HistoryWebUITest', 'DISABLED_basicTest', function() {
 
     // Check that the "Newest" and "Newer" links are now visible, but the
     // "Older" link is hidden.
-    expectEquals(3, document.querySelectorAll('.link-button').length);
+    expectEquals(3, document.querySelectorAll('[is="action-link"]').length);
     expectFalse($('newest-button').hidden);
     expectFalse($('newer-button').hidden);
     expectTrue($('older-button').hidden);
@@ -671,7 +671,7 @@ RangeHistoryWebUITest.prototype = {
  */
 TEST_F('RangeHistoryWebUITest', 'DISABLED_allView', function() {
   // Check that we start off in the all time view.
-  expectTrue($('timeframe-filter-all').checked);
+  expectTrue($('timeframe-controls').querySelector('input').checked);
   // See if the correct number of days is shown.
   var dayHeaders = document.querySelectorAll('.day');
   assertEquals(Math.ceil(RESULTS_PER_PAGE / 4), dayHeaders.length);
@@ -784,7 +784,8 @@ TEST_F('HistoryWebUIRealBackendTest', 'basic', function() {
 });
 
 TEST_F('HistoryWebUIRealBackendTest', 'atLeastOneFocusable', function() {
-  expectEquals(1, document.querySelectorAll('[tabindex="0"]').length);
+  var results = document.querySelectorAll('#results-display [tabindex="0"]');
+  expectEquals(1, results.length);
   testDone();
 });
 
@@ -908,6 +909,59 @@ TEST_F('HistoryWebUIRealBackendTest', 'showConfirmDialogAndRemove', function() {
   assertFalse($('alertOverlay').classList.contains('showing'));
 });
 
+TEST_F('HistoryWebUIRealBackendTest', 'menuButtonActivatesOneRow', function() {
+  var entries = document.querySelectorAll('.entry');
+  assertEquals(3, entries.length);
+  assertTrue(entries[0].classList.contains('active'));
+  assertTrue($('action-menu').hidden);
+
+  // Show the menu via mousedown on the menu button.
+  var menuButton = entries[2].querySelector('.menu-button');
+  menuButton.dispatchEvent(new MouseEvent('mousedown'));
+  expectFalse($('action-menu').hidden);
+
+  // Check that the 'active' item hasn't changed.
+  expectTrue(entries[0].classList.contains('active'));
+  expectFalse(entries[2].classList.contains('active'));
+
+  testDone();
+});
+
+TEST_F('HistoryWebUIRealBackendTest', 'shiftClickActivatesOneRow', function() {
+  var entries = document.querySelectorAll('.entry');
+  assertEquals(3, entries.length);
+  assertTrue(entries[0].classList.contains('active'));
+
+  entries[0].visit.checkBox.focus();
+  assertEquals(entries[0].visit.checkBox, document.activeElement);
+
+  entries[0].visit.checkBox.click();
+  assertTrue(entries[0].visit.checkBox.checked);
+
+  var entryBox = entries[2].querySelector('.entry-box');
+  entryBox.dispatchEvent(new MouseEvent('click', {shiftKey: true}));
+  assertTrue(entries[1].visit.checkBox.checked);
+
+  // Focus shouldn't have changed, but the checkbox should toggle.
+  expectEquals(entries[0].visit.checkBox, document.activeElement);
+
+  expectTrue(entries[0].classList.contains('active'));
+  expectFalse(entries[2].classList.contains('active'));
+
+  var shiftDown = new MouseEvent('mousedown', {shiftKey: true, bubbles: true});
+  entries[2].visit.checkBox.dispatchEvent(shiftDown);
+  expectEquals(entries[2].visit.checkBox, document.activeElement);
+
+  // 'focusin' events aren't dispatched while tests are run in batch (e.g.
+  // --test-launcher-jobs=2). Simulate this. TODO(dbeam): fix instead.
+  cr.dispatchSimpleEvent(document.activeElement, 'focusin', true, true);
+
+  expectFalse(entries[0].classList.contains('active'));
+  expectTrue(entries[2].classList.contains('active'));
+
+  testDone();
+});
+
 /**
  * Fixture for History WebUI testing when deletions are prohibited.
  * @extends {HistoryWebUIRealBackendTest}
@@ -944,7 +998,8 @@ TEST_F('HistoryWebUIDeleteProhibitedTest', 'deleteProhibited', function() {
 });
 
 TEST_F('HistoryWebUIDeleteProhibitedTest', 'atLeastOneFocusable', function() {
-  expectEquals(1, document.querySelectorAll('[tabindex="0"]').length);
+  var results = document.querySelectorAll('#results-display [tabindex="0"]');
+  expectEquals(1, results.length);
   testDone();
 });
 
@@ -1052,7 +1107,7 @@ HistoryWebUIWithSchemesTest.prototype = {
 
 TEST_F('HistoryWebUIWithSchemesTest', 'groupingWithSchemes', function() {
   // Switch to the week view.
-  $('timeframe-filter-week').click();
+  $('timeframe-controls').querySelectorAll('input')[1].click();
   waitForCallback('historyResult', function() {
     // Each URL should be organized under a different "domain".
     expectEquals(document.querySelectorAll('.entry').length, 4);

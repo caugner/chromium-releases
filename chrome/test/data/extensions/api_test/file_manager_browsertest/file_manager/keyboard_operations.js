@@ -12,15 +12,15 @@
  *     dialog.
  */
 function waitAndAcceptDialog(windowId) {
-  return waitForElement(windowId, '.cr-dialog-ok').
-      then(callRemoteTestUtil.bind(null,
-                                   'fakeMouseClick',
-                                   windowId,
-                                   ['.cr-dialog-ok'],
-                                   null)).
+  return remoteCall.waitForElement(windowId, '.cr-dialog-ok').
+      then(remoteCall.callRemoteTestUtil.bind(remoteCall,
+                                              'fakeMouseClick',
+                                              windowId,
+                                              ['.cr-dialog-ok'],
+                                              null)).
       then(function(result) {
         chrome.test.assertTrue(result);
-        return waitForElementLost(windowId, '.cr-dialog-container');
+        return remoteCall.waitForElementLost(windowId, '.cr-dialog-container');
       });
 }
 
@@ -49,12 +49,13 @@ function keyboardCopy(path, callback) {
       appId = inAppId;
       fileListBefore = inFileListBefore;
       chrome.test.assertEq(expectedFilesBefore, inFileListBefore);
-      callRemoteTestUtil('copyFile', appId, [filename], this.next);
+      remoteCall.callRemoteTestUtil('copyFile', appId, [filename], this.next);
     },
     // Wait for a file list change.
     function(result) {
       chrome.test.assertTrue(result);
-      waitForFiles(appId, expectedFilesAfter, {ignoreLastModifiedTime: true}).
+      remoteCall.waitForFiles(
+          appId, expectedFilesAfter, {ignoreLastModifiedTime: true}).
           then(this.next);
     },
     // Verify the result.
@@ -91,7 +92,7 @@ function keyboardDelete(path) {
       appId = inAppId;
       fileListBefore = inFileListBefore;
       chrome.test.assertTrue(isFilePresent(filename, fileListBefore));
-      callRemoteTestUtil(
+      remoteCall.callRemoteTestUtil(
           'deleteFile', appId, [filename], this.next);
     },
     // Reply to a dialog.
@@ -101,14 +102,16 @@ function keyboardDelete(path) {
     },
     // Wait for a file list change.
     function() {
-      waitForFileListChange(appId, fileListBefore.length).then(this.next);
+      remoteCall.waitForFileListChange(appId, fileListBefore.length).
+        then(this.next);
     },
     // Delete the directory.
     function(fileList) {
       fileListBefore = fileList;
       chrome.test.assertFalse(isFilePresent(filename, fileList));
       chrome.test.assertTrue(isFilePresent(directoryName, fileList));
-      callRemoteTestUtil('deleteFile', appId, [directoryName], this.next);
+      remoteCall.callRemoteTestUtil(
+          'deleteFile', appId, [directoryName], this.next);
     },
     // Reply to a dialog.
     function(result) {
@@ -117,7 +120,8 @@ function keyboardDelete(path) {
     },
     // Wait for a file list change.
     function() {
-      waitForFileListChange(appId, fileListBefore.length).then(this.next);
+      remoteCall.waitForFileListChange(
+          appId, fileListBefore.length).then(this.next);
     },
     // Verify the result.
     function(fileList) {
@@ -135,18 +139,70 @@ function keyboardDelete(path) {
  * @return {Promise} Promise to be fulfilled on success.
  */
 function renameFile(windowId, oldName, newName) {
-  return callRemoteTestUtil('selectFile', windowId, [oldName]).then(function() {
-    // Push Ctrl+Enter.
-    return fakeKeyDown(windowId, '#detail-table', 'Enter', true);
-  }).then(function() {
-    // Wait for rename text field.
-    return waitForElement(windowId, 'input.rename');
-  }).then(function() {
-    // Type new file name.
-    return callRemoteTestUtil('inputText', windowId, ['input.rename', newName]);
-  }).then(function() {
-    // Push Enter.
-    return fakeKeyDown(windowId, 'input.rename', 'Enter', false);
+  return remoteCall.callRemoteTestUtil('selectFile', windowId, [oldName]).
+    then(function() {
+      // Push Ctrl+Enter.
+      return remoteCall.fakeKeyDown(windowId, '#detail-table', 'Enter', true);
+    }).then(function() {
+      // Wait for rename text field.
+      return remoteCall.waitForElement(windowId, 'input.rename');
+    }).then(function() {
+      // Type new file name.
+      return remoteCall.callRemoteTestUtil(
+          'inputText', windowId, ['input.rename', newName]);
+    }).then(function() {
+      // Push Enter.
+      return remoteCall.fakeKeyDown(windowId, 'input.rename', 'Enter', false);
+    });
+}
+
+/**
+ * Test for renaming a new directory.
+ * @param {string} path Initial path.
+ * @param {Array.<TestEntryInfo>} initialEntrySet Initial set of entries.
+ * @param {string} pathInBreadcrumb Initial path which is shown in breadcrumb.
+ * @return {Promise} Promise to be fulfilled on success.
+ */
+function testRenameNewDirectory(path, initialEntrySet, pathInBreadcrumb) {
+  var expectedRows = TestEntryInfo.getExpectedRows(initialEntrySet);
+
+  return new Promise(function(resolve) {
+    setupAndWaitUntilReady(null, path, resolve);
+  }).then(function(windowId) {
+    return remoteCall.waitForFiles(windowId, expectedRows).then(function() {
+      return remoteCall.fakeKeyDown(windowId, '#list-container', 'U+0045',
+          true);
+    }).then(function() {
+      // Wait for rename text field.
+      return remoteCall.waitForElement(windowId, 'input.rename');
+    }).then(function() {
+      // Type new file name.
+      return remoteCall.callRemoteTestUtil(
+          'inputText', windowId, ['input.rename', 'foo']);
+    }).then(function() {
+      // Press Enter.
+      return remoteCall.fakeKeyDown(windowId, 'input.rename', 'Enter', false);
+    }).then(function() {
+      // Press Enter again to try to get into the new directory.
+      return remoteCall.fakeKeyDown(windowId, '#list-container', 'Enter',
+          false);
+    }).then(function() {
+      // Confirm that it doesn't move the directory since it's in renaming
+      // process.
+      return remoteCall.waitUntilCurrentDirectoryIsChanged(windowId,
+          pathInBreadcrumb);
+    }).then(function() {
+      // Wait until rename is completed.
+      return remoteCall.waitForElementLost(windowId, 'li[renaming]');
+    }).then(function() {
+      // Press Enter again.
+      return remoteCall.fakeKeyDown(windowId, '#list-container', 'Enter',
+          false);
+    }).then(function() {
+      // Confirm that it moves to renamed directory.
+      return remoteCall.waitUntilCurrentDirectoryIsChanged(windowId,
+          pathInBreadcrumb + '/foo');
+    });
   });
 }
 
@@ -176,15 +232,15 @@ function testRenameFile(path, initialEntrySet) {
     setupAndWaitUntilReady(null, path, callback);
   }).then(function(inWindowId) {
     windowId = inWindowId;
-    return waitForFiles(windowId, initialExpectedEntryRows);
+    return remoteCall.waitForFiles(windowId, initialExpectedEntryRows);
   }).then(function(){
     return renameFile(windowId, 'hello.txt', 'New File Name.txt');
   }).then(function() {
     // Wait until rename completes.
-    return waitForElementLost(windowId, '#detail-table [renaming]');
+    return remoteCall.waitForElementLost(windowId, '#detail-table [renaming]');
   }).then(function() {
     // Wait for the new file name.
-    return waitForFiles(windowId,
+    return remoteCall.waitForFiles(windowId,
                         expectedEntryRows,
                         {ignoreLastModifiedTime: true});
   }).then(function() {
@@ -194,7 +250,7 @@ function testRenameFile(path, initialEntrySet) {
     return waitAndAcceptDialog(windowId);
   }).then(function() {
     // The name did not change.
-    return waitForFiles(windowId,
+    return remoteCall.waitForFiles(windowId,
                         expectedEntryRows,
                         {ignoreLastModifiedTime: true});
   });
@@ -225,4 +281,14 @@ testcase.renameFileDownloads = function() {
 
 testcase.renameFileDrive = function() {
   testPromise(testRenameFile(RootPath.DRIVE, BASIC_DRIVE_ENTRY_SET));
+};
+
+testcase.renameNewDirectoryDownloads = function() {
+  testPromise(testRenameNewDirectory(RootPath.DOWNLOADS,
+      BASIC_LOCAL_ENTRY_SET, '/Downloads'));
+};
+
+testcase.renameNewDirectoryDrive = function() {
+  testPromise(testRenameNewDirectory(RootPath.DRIVE, BASIC_DRIVE_ENTRY_SET,
+      '/My Drive'));
 };
