@@ -102,8 +102,7 @@ class BASE_EXPORT SequenceManagerImpl
   SequenceManagerImpl& operator=(const SequenceManagerImpl&) = delete;
   ~SequenceManagerImpl() override;
 
-  // Initializes the state of all the sequence manager features. Must be invoked
-  // after FeatureList initialization.
+  // Initializes features for this class. See `base::features::Init()`.
   static void InitializeFeatures();
 
   // SequenceManager implementation:
@@ -165,8 +164,8 @@ class BASE_EXPORT SequenceManagerImpl
   MessagePump* GetMessagePump() const;
   bool IsType(MessagePumpType type) const;
   void SetAddQueueTimeToTasks(bool enable);
-  void SetTaskExecutionAllowed(bool allowed);
-  bool IsTaskExecutionAllowed() const;
+  void SetTaskExecutionAllowedInNativeNestedLoop(bool allowed);
+  bool IsTaskExecutionAllowedInNativeNestedLoop() const;
 #if BUILDFLAG(IS_IOS)
   void AttachToMessagePump();
 #endif

@@ -36,6 +36,7 @@
 <translation id="2977480621796371840">הסרה מהקבוצה</translation>
 <translation id="3008554597174452548">הפסקת המעקב אחר המוצר הזה</translation>
 <translation id="3052964831964880138">הנחה בסך <ph name="PRICE_DROP" /> על <ph name="PRODUCT_NAME" /></translation>
+<translation id="3078350928901129212">סמל בצבע <ph name="COLOR_NAME" /> של קבוצת הכרטיסיות</translation>
 <translation id="313819129451406482">{TABS_COUNT,plural, =1{יש לך כרטיסייה אחת (<ph name="TABS_COUNT_ONE" />) שהועברה לארכיון}one{יש לך <ph name="TABS_COUNT_MANY" /> כרטיסיות שהועברו לארכיון}two{יש לך <ph name="TABS_COUNT_MANY" /> כרטיסיות שהועברו לארכיון}other{יש לך <ph name="TABS_COUNT_MANY" /> כרטיסיות שהועברו לארכיון}}</translation>
 <translation id="3194464645767632461">דירוג</translation>
 <translation id="3291470810748040983">תתקבל התראה כשתזוהה הנחה בכרטיסייה פתוחה</translation>
@@ -116,6 +117,7 @@
 <translation id="83556505225171773">{TABS_COUNT,plural, =1{סגירה של כרטיסייה אחת (<ph name="TABS_COUNT_ONE" />) שנבחרה}one{סגירה של <ph name="TABS_COUNT_MANY" /> כרטיסיות שנבחרו}two{סגירה של <ph name="TABS_COUNT_MANY" /> כרטיסיות שנבחרו}other{סגירה של <ph name="TABS_COUNT_MANY" /> כרטיסיות שנבחרו}}</translation>
 <translation id="8398929769197326728">תיקייה חדשה – <ph name="CURRENT_TIMESTAMP_MS" /></translation>
 <translation id="8714939927607906138">מחיר נמוך יותר</translation>
+<translation id="8730621377337864115">בוצע</translation>
 <translation id="8730999928494395583">הפעילות שלך בכרטיסיות הפרטיות האלה תוסר מהמכשיר הזה</translation>
 <translation id="875848103419578654">{NUM_MONTHS,plural, =1{נוצרה לפני חודש (<ph name="NUM_MONTHS_ONE" />)}one{נוצרה לפני <ph name="NUM_MONTHS_MANY" /> חודשים}two{נוצרה לפני חודשיים (<ph name="NUM_MONTHS_MANY" />)}other{נוצרה לפני <ph name="NUM_MONTHS_MANY" /> חודשים}}</translation>
 <translation id="8820741577754260431">הצגת הנחות בכרטיסיות</translation>

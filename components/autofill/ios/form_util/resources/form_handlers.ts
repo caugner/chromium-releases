@@ -150,9 +150,9 @@ function formActivity(evt: Event): void {
   const field = target.tagName === 'FORM' ? null : target;
 
   gCrWeb.fill.setUniqueIDIfNeeded(form);
-  const formUniqueId = gCrWeb.fill.getUniqueID(form);
+  const formRendererID = gCrWeb.fill.getUniqueID(form);
   gCrWeb.fill.setUniqueIDIfNeeded(field);
-  const fieldUniqueId = gCrWeb.fill.getUniqueID(field);
+  const fieldRendererID = gCrWeb.fill.getUniqueID(field);
 
   const fieldType = 'type' in target ? target.type : '';
   const fieldValue = 'value' in target ? target.value : '';
@@ -161,9 +161,9 @@ function formActivity(evt: Event): void {
     'command': 'form.activity',
     'frameID': gCrWeb.message.getFrameId(),
     'formName': gCrWeb.form.getFormIdentifier(form),
-    'uniqueFormID': formUniqueId,
+    'formRendererID': formRendererID,
     'fieldIdentifier': gCrWeb.form.getFieldIdentifier(field),
-    'uniqueFieldID': fieldUniqueId,
+    'fieldRendererID': fieldRendererID,
     'fieldType': fieldType,
     'type': evt.type,
     'value': fieldValue,
@@ -383,9 +383,9 @@ function trackFormMutationsOld(delay: number): void {
           'command': 'form.activity',
           'frameID': gCrWeb.message.getFrameId(),
           'formName': '',
-          'uniqueFormID': '',
+          'formRendererID': '',
           'fieldIdentifier': '',
-          'uniqueFieldID': '',
+          'fieldRendererID': '',
           'fieldType': '',
           'type': 'form_changed',
           'value': '',
@@ -403,13 +403,12 @@ function trackFormMutationsOld(delay: number): void {
       const pwdFormGone = findPasswordForm(removedFormElements);
       if (pwdFormGone) {
         // Handle the removed password form case.
-        const uniqueFormId = gCrWeb.fill.getUniqueID(pwdFormGone);
+        const formRendererID = gCrWeb.fill.getUniqueID(pwdFormGone);
         const msg = {
           'command': 'pwdform.removal',
           'frameID': gCrWeb.message.getFrameId(),
-          'formName': gCrWeb.form.getFormIdentifier(pwdFormGone),
-          'uniqueFormID': uniqueFormId,
-          'uniqueFieldID': '',
+          // TODO(crbug.com/328464301): Send all removed forms to browser.
+          'removedFormIDs': gCrWeb.stringify([formRendererID]),
         };
         sendFormMutationMessagesAfterDelay([msg], delay);
         return;
@@ -422,9 +421,7 @@ function trackFormMutationsOld(delay: number): void {
         const msg = {
           'command': 'pwdform.removal',
           'frameID': gCrWeb.message.getFrameId(),
-          'formName': '',
-          'uniqueFormID': '',
-          'uniqueFieldID': gCrWeb.stringify(removedFormlessPasswordFieldsIds),
+          'removedFieldIDs': gCrWeb.stringify(removedFormlessPasswordFieldsIds),
         };
         sendFormMutationMessagesAfterDelay([msg], delay);
         return;
@@ -437,9 +434,9 @@ function trackFormMutationsOld(delay: number): void {
           'command': 'form.activity',
           'frameID': gCrWeb.message.getFrameId(),
           'formName': '',
-          'uniqueFormID': '',
+          'formRendererID': '',
           'fieldIdentifier': '',
-          'uniqueFieldID': '',
+          'fieldRendererID': '',
           'fieldType': '',
           'type': 'form_changed',
           'value': '',
@@ -488,9 +485,9 @@ function trackFormMutationsNew(delay: number): void {
           'command': 'form.activity',
           'frameID': gCrWeb.message.getFrameId(),
           'formName': '',
-          'uniqueFormID': '',
+          'formRendererID': '',
           'fieldIdentifier': '',
-          'uniqueFieldID': '',
+          'fieldRendererID': '',
           'fieldType': '',
           'type': 'form_changed',
           'value': '',
@@ -513,13 +510,11 @@ function trackFormMutationsNew(delay: number): void {
       const pwdFormGone = findPasswordForm(removedFormElements);
       if (!removedFormMessage && pwdFormGone) {
         // Handle the removed password form case.
-        const uniqueFormId = gCrWeb.fill.getUniqueID(pwdFormGone);
+        const formRendererID = gCrWeb.fill.getUniqueID(pwdFormGone);
         removedFormMessage = {
           'command': 'pwdform.removal',
           'frameID': gCrWeb.message.getFrameId(),
-          'formName': gCrWeb.form.getFormIdentifier(pwdFormGone),
-          'uniqueFormID': uniqueFormId,
-          'uniqueFieldID': '',
+          'removedFormIDs': gCrWeb.stringify([formRendererID]),
         };
         continue;
       } else if (pwdFormGone) {
@@ -536,9 +531,7 @@ function trackFormMutationsNew(delay: number): void {
         removedFormMessage = {
           'command': 'pwdform.removal',
           'frameID': gCrWeb.message.getFrameId(),
-          'formName': '',
-          'uniqueFormID': '',
-          'uniqueFieldID': gCrWeb.stringify(removedFormlessPasswordFieldsIds),
+          'removedFieldIDs': gCrWeb.stringify(removedFormlessPasswordFieldsIds),
         };
         continue;
       } else if (formlessFieldsWereRemoved) {
@@ -553,9 +546,9 @@ function trackFormMutationsNew(delay: number): void {
           'command': 'form.activity',
           'frameID': gCrWeb.message.getFrameId(),
           'formName': '',
-          'uniqueFormID': '',
+          'formRendererID': '',
           'fieldIdentifier': '',
-          'uniqueFieldID': '',
+          'fieldRendererID': '',
           'fieldType': '',
           'type': 'form_changed',
           'value': '',

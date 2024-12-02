@@ -39,7 +39,8 @@ void CookiesFetcherRestoreCookiesImpl(
     jint priority,
     const jni_zero::JavaParamRef<jstring>& partition_key,
     jint source_scheme,
-    jint source_port) {
+    jint source_port,
+    jint source_type) {
   if (!ProfileManager::GetPrimaryUserProfile()->HasPrimaryOTRProfile()) {
     return;  // Don't create it. There is nothing to do.
   }
@@ -53,7 +54,7 @@ void CookiesFetcherRestoreCookiesImpl(
   // implemented update this method utilize the ancestor bit.
   base::expected<std::optional<net::CookiePartitionKey>, std::string>
       serialized_cookie_partition_key = net::CookiePartitionKey::FromStorage(
-          top_level_site);
+          top_level_site, /*has_cross_site_ancestor=*/true);
   if (!serialized_cookie_partition_key.has_value()) {
     return;
   }
@@ -73,7 +74,8 @@ void CookiesFetcherRestoreCookiesImpl(
           secure, httponly, static_cast<net::CookieSameSite>(same_site),
           static_cast<net::CookiePriority>(priority),
           serialized_cookie_partition_key.value(),
-          static_cast<net::CookieSourceScheme>(source_scheme), source_port);
+          static_cast<net::CookieSourceScheme>(source_scheme), source_port,
+          static_cast<net::CookieSourceType>(source_type));
   // FromStorage() uses a less strict version of IsCanonical(), we need to check
   // the stricter version as well here. This is safe because this function is
   // only used for incognito cookies which don't survive Chrome updates and

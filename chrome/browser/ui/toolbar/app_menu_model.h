@@ -108,6 +108,7 @@ enum AppMenuAction {
   MENU_ACTION_SHOW_READING_MODE_SIDE_PANEL = 85,
   MENU_ACTION_SHOW_SAFETY_HUB = 86,
   MENU_ACTION_SHOW_PASSWORD_CHECKUP = 87,
+  MENU_ACTION_SET_BROWSER_AS_DEFAULT = 88,
   LIMIT_MENU_ACTION
 };
 
@@ -264,6 +265,10 @@ class AppMenuModel : public ui::SimpleMenuModel,
   // Examples: Extension permissions and sign in errors.
   // Returns a boolean indicating whether any menu items were added.
   bool AddGlobalErrorMenuItems();
+
+  // Adds actionable default browser prompt menu items to the menu. Returns a
+  // boolean indicating whether any menu items were added.
+  bool AddDefaultBrowserMenuItems();
 
   // Adds the Safety Hub menu notifications to the menu. Returns a boolean
   // indicating whether any menu items were added.

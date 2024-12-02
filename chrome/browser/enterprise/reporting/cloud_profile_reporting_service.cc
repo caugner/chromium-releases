@@ -20,8 +20,6 @@
 #include "components/enterprise/browser/reporting/report_scheduler.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
-#include "content/public/browser/browser_task_traits.h"
-#include "content/public/browser/browser_thread.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/enterprise/reporting/reporting_delegate_factory_android.h"
@@ -53,20 +51,6 @@ CloudProfileReportingService::CloudProfileReportingService(
     Profile* profile,
     policy::DeviceManagementService* device_management_service,
     scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory) {
-  content::GetUIThreadTaskRunner({base::TaskPriority::BEST_EFFORT})
-      ->PostTask(
-          FROM_HERE,
-          base::BindOnce(&CloudProfileReportingService::CreateReportScheduler,
-                         weak_factory_.GetWeakPtr(), profile,
-                         device_management_service, system_url_loader_factory));
-}
-
-CloudProfileReportingService::~CloudProfileReportingService() = default;
-
-
-void CloudProfileReportingService::CreateReportScheduler(Profile* profile,
-    policy::DeviceManagementService* device_management_service,
-    scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory) {
   std::string profile_id = "";
   if (enterprise::ProfileIdServiceFactory::GetForProfile(profile)) {
     profile_id = enterprise::ProfileIdServiceFactory::GetForProfile(profile)
@@ -90,5 +74,7 @@ void CloudProfileReportingService::CreateReportScheduler(Profile* profile,
           profile->GetPath(), GetProfileName(profile), &delegate_factory);
   report_scheduler_ = std::make_unique<ReportScheduler>(std::move(params));
 }
+
+CloudProfileReportingService::~CloudProfileReportingService() = default;
 
 }  // namespace enterprise_reporting

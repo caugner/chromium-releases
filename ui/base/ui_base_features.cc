@@ -52,6 +52,12 @@ BASE_FEATURE(kApplyNativeOcclusionToCompositor,
 #endif
 );
 
+// If enabled, native window occlusion tracking will always be used, even if
+// CHROME_HEADLESS is set.
+BASE_FEATURE(kAlwaysTrackNativeWindowOcclusionForTest,
+             "AlwaysTrackNativeWindowOcclusionForTest",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Field trial param name for `kApplyNativeOcclusionToCompositor`.
 const base::FeatureParam<std::string> kApplyNativeOcclusionToCompositorType{
     &kApplyNativeOcclusionToCompositor, "type",
@@ -133,6 +139,17 @@ bool AreF11AndF12ShortcutsEnabled() {
   return base::FeatureList::IsEnabled(features::kSupportF11AndF12KeyShortcuts);
 }
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+#if BUILDFLAG(IS_OZONE)
+BASE_FEATURE(kOzoneBubblesUsePlatformWidgets,
+             "OzoneBubblesUsePlatformWidgets",
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+             base::FEATURE_ENABLED_BY_DEFAULT
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+);
+#endif  // BUILDFLAG(IS_OZONE)
 
 // Update of the virtual keyboard settings UI as described in
 // https://crbug.com/876901.
@@ -254,11 +271,6 @@ BASE_FEATURE(kFocusFollowsCursor,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_WIN)
-// Enables InputPane API for controlling on screen keyboard.
-BASE_FEATURE(kInputPaneOnScreenKeyboard,
-             "InputPaneOnScreenKeyboard",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 // Enables using WM_POINTER instead of WM_TOUCH for touch events.
 BASE_FEATURE(kPointerEventsForTouch,
              "PointerEventsForTouch",
@@ -361,12 +373,6 @@ BASE_FEATURE(kNotificationGesturesUpdate,
 bool IsNotificationGesturesUpdateEnabled() {
   return base::FeatureList::IsEnabled(kNotificationGesturesUpdate);
 }
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-BASE_FEATURE(kHandwritingGesture,
-             "HandwritingGesture",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
 
 BASE_FEATURE(kSynchronousPageFlipTesting,
              "SynchronousPageFlipTesting",

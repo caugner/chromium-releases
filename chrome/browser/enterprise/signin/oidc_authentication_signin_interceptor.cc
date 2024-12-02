@@ -53,6 +53,8 @@ using profile_management::features::kOidcAuthStubUserName;
 
 namespace {
 
+const char kDummyRefreshToken[] = "dummy_refresh_token";
+
 bool IsValidOidcToken(ProfileManagementOicdTokens oidc_tokens) {
   return !oidc_tokens.auth_token.empty() && !oidc_tokens.id_token.empty();
 }
@@ -73,8 +75,15 @@ OidcAuthenticationSigninInterceptor::~OidcAuthenticationSigninInterceptor() =
 void OidcAuthenticationSigninInterceptor::MaybeInterceptOidcAuthentication(
     content::WebContents* intercepted_contents,
     ProfileManagementOicdTokens oidc_tokens,
-    std::string user_email) {
-  if (interception_status_ != OidcInterceptionStatus::kNoInterception) {
+    std::string subject_id) {
+  // The interceptor class should be able to be used if no other interception is
+  // in progress. This includes both when a previous interception succeeded and
+  // failed: in former case, user may want to re-use the class to register
+  // another profile with a different identity; in the latter case, user may
+  // want to retry the process or a different identity.
+  if (interception_status_ != OidcInterceptionStatus::kNoInterception &&
+      interception_status_ != OidcInterceptionStatus::kCompleted &&
+      interception_status_ != OidcInterceptionStatus::kError) {
     DVLOG(1) << "Interception already in progress";
     return;
   }
@@ -92,99 +101,15 @@ void OidcAuthenticationSigninInterceptor::MaybeInterceptOidcAuthentication(
 
   web_contents_ = intercepted_contents->GetWeakPtr();
   oidc_tokens_ = oidc_tokens;
-  user_email_ = user_email;
+  subject_id_ = subject_id;
 
   CHECK(!switch_to_entry_);
-  kOidcAuthStubDmToken.Get().empty()
-      ? StartOidcRegistration(base::BindOnce(
-            &OidcAuthenticationSigninInterceptor::OnClientRegistered,
-            weak_factory_.GetWeakPtr()))
-      : OnClientRegistered(nullptr);
-}
-
-void OidcAuthenticationSigninInterceptor::Shutdown() {
-  Reset();
-}
-
-void OidcAuthenticationSigninInterceptor::Reset() {
-  web_contents_ = nullptr;
-  oidc_tokens_ = {};
-  dm_token_.clear();
-  client_id_.clear();
-  user_display_name_.clear();
-  user_email_.clear();
-  dasher_based_ = true;
-  switch_to_entry_ = nullptr;
-  profile_creator_.reset();
-  profile_color_ = SkColor();
-  interception_status_ = OidcInterceptionStatus::kNoInterception;
-  interception_bubble_handle_.reset();
-  registration_helper_for_temporary_client_.reset();
-}
-
-void OidcAuthenticationSigninInterceptor::StartOidcRegistration(
-    ClientRegisterCallback callback) {
-  policy::DeviceManagementService* device_management_service =
-      g_browser_process->browser_policy_connector()
-          ->device_management_service();
-
-  // If the DeviceManagementService is not yet initialized, start it up now.
-  device_management_service->ScheduleInitialization(0);
-
-  // TODO(xzonghan): Move profile creation prior to OIDC registration or Add
-  // profile ID pre-generation.
-  auto client = std::make_unique<CloudPolicyClient>(
-      base::Uuid::GenerateRandomV4().AsLowercaseString(),
-      device_management_service, g_browser_process->shared_url_loader_factory(),
-      CloudPolicyClient::DeviceDMTokenCallback());
-
-  registration_helper_for_temporary_client_ =
-      std::make_unique<policy::CloudPolicyClientRegistrationHelper>(
-          client.get(), enterprise_management::DeviceRegisterRequest::BROWSER);
-
-  // Using a raw pointer to |this| is okay, because the service owns
-  // |registration_helper_for_temporary_client_|.
-  auto registration_callback =
-      base::BindOnce(&OidcAuthenticationSigninInterceptor::OnClientRegistered,
-                     base::Unretained(this), std::move(client));
-
-  registration_helper_for_temporary_client_->StartRegistrationWithOidcTokens(
-      oidc_tokens_.auth_token, oidc_tokens_.id_token, std::string(),
-      std::move(registration_callback));
-}
-
-void OidcAuthenticationSigninInterceptor::OnClientRegistered(
-    std::unique_ptr<CloudPolicyClient> client) {
-  if (kOidcAuthStubDmToken.Get().empty()) {
-    CHECK(client);
-  }
-
-  dm_token_ = kOidcAuthStubDmToken.Get().empty() ? client->dm_token()
-                                                 : kOidcAuthStubDmToken.Get();
-  client_id_ = kOidcAuthStubClientId.Get().empty()
-                   ? client->client_id()
-                   : kOidcAuthStubClientId.Get();
-  user_display_name_ = kOidcAuthStubUserName.Get().empty()
-                           ? client->oidc_user_display_name()
-                           : kOidcAuthStubUserName.Get();
-  user_email_ = kOidcAuthStubUserEmail.Get().empty()
-                    ? client->oidc_user_email()
-                    : kOidcAuthStubUserEmail.Get();
-
-  bool is_dasherless_client =
-      client->third_party_identity_type() ==
-      policy::ThirdPartyIdentityType::OIDC_MANAGEMENT_DASHERLESS;
-
-  dasher_based_ = !kOidcAuthIsDasherBased.Get() ? kOidcAuthIsDasherBased.Get()
-                                                : !is_dasherless_client;
-
-  CHECK(!dm_token_.empty());
   base::FilePath profile_path = profile_->GetPath();
   for (const auto* entry : g_browser_process->profile_manager()
                                ->GetProfileAttributesStorage()
                                .GetAllProfilesAttributes()) {
     if (!entry->GetProfileManagementOidcTokens().auth_token.empty() &&
-        entry->GetProfileManagementId() == user_display_name_) {
+        entry->GetProfileManagementId() == subject_id_) {
       switch_to_entry_ = entry;
       break;
     }
@@ -206,7 +131,7 @@ void OidcAuthenticationSigninInterceptor::OnClientRegistered(
   WebSigninInterceptor::SigninInterceptionType interception_type =
       switch_to_entry_
           ? WebSigninInterceptor::SigninInterceptionType::kProfileSwitch
-          : WebSigninInterceptor::SigninInterceptionType::kEnterprise;
+          : WebSigninInterceptor::SigninInterceptionType::kEnterpriseOIDC;
   WebSigninInterceptor::Delegate::BubbleParameters bubble_parameters(
       interception_type, AccountInfo(),
       identity_manager->FindExtendedAccountInfoByAccountId(
@@ -223,6 +148,119 @@ void OidcAuthenticationSigninInterceptor::OnClientRegistered(
           base::Unretained(this)));
 }
 
+void OidcAuthenticationSigninInterceptor::Shutdown() {
+  Reset();
+}
+
+void OidcAuthenticationSigninInterceptor::Reset() {
+  web_contents_ = nullptr;
+  oidc_tokens_ = {};
+  dm_token_.clear();
+  client_id_.clear();
+  user_display_name_.clear();
+  user_email_.clear();
+  dasher_based_ = true;
+  switch_to_entry_ = nullptr;
+  profile_creator_.reset();
+  profile_color_ = SkColor();
+  interception_bubble_handle_.reset();
+  registration_helper_for_temporary_client_.reset();
+
+  // Keep the `kCompleted` and `kError` state for logging and metrics purpose.
+  if (interception_status_ != OidcInterceptionStatus::kCompleted &&
+      interception_status_ != OidcInterceptionStatus::kError) {
+    interception_status_ = OidcInterceptionStatus::kNoInterception;
+  }
+  client_for_testing_ = nullptr;
+}
+
+void OidcAuthenticationSigninInterceptor::StartOidcRegistration(
+    ClientRegisterCallback callback) {
+  policy::DeviceManagementService* device_management_service =
+      g_browser_process->browser_policy_connector()
+          ->device_management_service();
+
+  // If the DeviceManagementService is not yet initialized, start it up now.
+  // Skip this for testing client.
+  if (!client_for_testing_) {
+    device_management_service->ScheduleInitialization(0);
+  }
+
+  // TODO(b/329283247): Move profile creation prior to OIDC registration or Add
+  // profile ID pre-generation.
+  auto client = client_for_testing_
+                    ? std::move(client_for_testing_)
+                    : std::make_unique<CloudPolicyClient>(
+                          /*profile_id=*/base::Uuid::GenerateRandomV4()
+                              .AsLowercaseString(),
+                          device_management_service,
+                          g_browser_process->shared_url_loader_factory(),
+                          CloudPolicyClient::DeviceDMTokenCallback());
+
+  registration_helper_for_temporary_client_ =
+      std::make_unique<policy::CloudPolicyClientRegistrationHelper>(
+          client.get(), enterprise_management::DeviceRegisterRequest::BROWSER);
+
+  // Using a raw pointer to |this| is okay, because the service owns
+  // |registration_helper_for_temporary_client_|.
+  auto registration_callback =
+      base::BindOnce(&OidcAuthenticationSigninInterceptor::OnClientRegistered,
+                     base::Unretained(this), std::move(client));
+
+  registration_helper_for_temporary_client_->StartRegistrationWithOidcTokens(
+      oidc_tokens_.auth_token, oidc_tokens_.id_token, std::string(),
+      std::move(registration_callback));
+}
+
+void OidcAuthenticationSigninInterceptor::OnClientRegistered(
+    std::unique_ptr<CloudPolicyClient> client) {
+  if (client->last_dm_status() != policy::DM_STATUS_SUCCESS) {
+    interception_status_ = OidcInterceptionStatus::kError;
+
+    Reset();
+    return;
+  }
+
+  if (kOidcAuthStubDmToken.Get().empty()) {
+    CHECK(client);
+  }
+
+  dm_token_ = kOidcAuthStubDmToken.Get().empty() ? client->dm_token()
+                                                 : kOidcAuthStubDmToken.Get();
+  client_id_ = kOidcAuthStubClientId.Get().empty()
+                   ? client->client_id()
+                   : kOidcAuthStubClientId.Get();
+  user_display_name_ = kOidcAuthStubUserName.Get().empty()
+                           ? client->oidc_user_display_name()
+                           : kOidcAuthStubUserName.Get();
+  user_email_ = kOidcAuthStubUserEmail.Get().empty()
+                    ? client->oidc_user_email()
+                    : kOidcAuthStubUserEmail.Get();
+
+  bool is_dasherless_client =
+      client->third_party_identity_type() ==
+      policy::ThirdPartyIdentityType::OIDC_MANAGEMENT_DASHERLESS;
+
+  // TODO(b/328055055): Replace this somewhat confusing check when bool
+  // IsDasherlessManagement is replaced with an Enum.
+  dasher_based_ = !kOidcAuthIsDasherBased.Get() ? kOidcAuthIsDasherBased.Get()
+                                                : !is_dasherless_client;
+
+  CHECK(!dm_token_.empty());
+
+  // Unretained is fine because the profile creator is owned by this.
+  profile_creator_ = std::make_unique<ManagedProfileCreator>(
+      profile_, subject_id_,
+      (user_display_name_.empty())
+          ? base::UTF8ToUTF16(user_display_name_)
+          : profiles::GetDefaultNameForNewEnterpriseProfile(),
+      std::make_unique<OidcManagedProfileCreationDelegate>(
+          oidc_tokens_.auth_token, oidc_tokens_.id_token, dasher_based_),
+      base::BindOnce(
+          &OidcAuthenticationSigninInterceptor::OnNewSignedInProfileCreated,
+          base::Unretained(this)));
+}
+
 void OidcAuthenticationSigninInterceptor::AddAsPrimaryAccount(
     Profile* new_profile) {
   interception_status_ = OidcInterceptionStatus::kAddAccount;
@@ -233,22 +271,33 @@ void OidcAuthenticationSigninInterceptor::AddAsPrimaryAccount(
   auto* identity_manager = IdentityManagerFactory::GetForProfile(new_profile);
   policy::CloudPolicyManager* user_policy_manager =
       new_profile->GetUserCloudPolicyManager();
+
   std::string gaia_id =
       user_policy_manager->core()->store()->policy()->gaia_id();
+
+  VLOG(1) << "Adding user with gaia id <" << gaia_id << "> and email <"
+          << user_email_ << "> to the newly created OIDC profile.";
+
   CoreAccountId account_id =
       identity_manager->GetAccountsMutator()->AddOrUpdateAccount(
-          gaia_id, user_email_, "refresh_token",
+          gaia_id, user_email_, kDummyRefreshToken,
           /*is_under_advanced_protection=*/false,
           signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN,
           signin_metrics::SourceForRefreshTokenOperation::
               kMachineLogon_CredentialProvider);
+  VLOG(1) << "Account id <" << account_id.ToString()
+          << "> has been added to the newly created OIDC profile.";
 
-  identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
-      account_id, signin::ConsentLevel::kSignin);
+  auto set_primary_account_result =
+      identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
+          account_id, signin::ConsentLevel::kSignin);
+  VLOG(1) << "Operation of setting account id <" << account_id.ToString()
+          << "> received the following result: "
+          << static_cast<int>(set_primary_account_result);
 
   interception_status_ = OidcInterceptionStatus::kCompleted;
-  // TODO(319477219): In addition to kSignin level primary account, allow user
-  // to turn on sync service and upgrade to kSync.
+
+  CloseInterceptedWebContent(web_contents_.get());
   Reset();
 }
 
@@ -256,6 +305,8 @@ void OidcAuthenticationSigninInterceptor::OnProfileCreationChoice(
     SigninInterceptionResult create) {
   if (create != SigninInterceptionResult::kAccepted) {
     if (switch_to_entry_) {
+      // TODO(b/319479021): Improve metrics of the interceptor class using
+      // policy logger.
       DVLOG(1) << "Profile switch refused by the user";
     } else {
       DVLOG(1) << "Profile creation refused by the user";
@@ -276,17 +327,11 @@ void OidcAuthenticationSigninInterceptor::OnProfileCreationChoice(
             &OidcAuthenticationSigninInterceptor::OnNewSignedInProfileCreated,
             base::Unretained(this)));
   } else {
-    // Unretained is fine because the profile creator is owned by this.
-    profile_creator_ = std::make_unique<ManagedProfileCreator>(
-        profile_, user_display_name_,
-        (user_display_name_.empty())
-            ? base::UTF8ToUTF16(user_display_name_)
-            : profiles::GetDefaultNameForNewEnterpriseProfile(),
-        std::make_unique<OidcManagedProfileCreationDelegate>(
-            oidc_tokens_.auth_token, oidc_tokens_.id_token, dasher_based_),
-        base::BindOnce(
-            &OidcAuthenticationSigninInterceptor::OnNewSignedInProfileCreated,
-            base::Unretained(this)));
+    kOidcAuthStubDmToken.Get().empty()
+        ? StartOidcRegistration(base::BindOnce(
+              &OidcAuthenticationSigninInterceptor::OnClientRegistered,
+              weak_factory_.GetWeakPtr()))
+        : OnClientRegistered(nullptr);
   }
 }
 
@@ -299,6 +344,7 @@ void OidcAuthenticationSigninInterceptor::OnNewSignedInProfileCreated(
     Reset();
     return;
   }
+
   // Generate a color theme for new profiles
   if (!switch_to_entry_) {
     CHECK_NE(SkColor(), profile_color_);
@@ -314,11 +360,13 @@ void OidcAuthenticationSigninInterceptor::OnNewSignedInProfileCreated(
     DVLOG(1) << "Profile switched sucessfully";
   }
 
-  // Work is done in this profile, the flow continues in the
-  // OidcAuthenticationSigninInterceptor that is attached to the new profile.
-  // We pass relevant parameters from this instance to the new one.
-  OidcAuthenticationSigninInterceptorFactory::GetForProfile(new_profile.get())
-      ->CreateBrowserAfterSigninInterception(web_contents_.get());
+  if (!disable_browser_creation_after_interception_for_testing_) {
+    // Work is done in this profile, the flow continues in the
+    // OidcAuthenticationSigninInterceptor that is attached to the new profile.
+    // We pass relevant parameters from this instance to the new one.
+    OidcAuthenticationSigninInterceptorFactory::GetForProfile(new_profile.get())
+        ->CreateBrowserAfterSigninInterception();
+  }
 
   policy::UserPolicyOidcSigninService* policy_service =
       policy::UserPolicyOidcSigninServiceFactory::GetForProfile(
@@ -336,14 +384,9 @@ void OidcAuthenticationSigninInterceptor::OnNewSignedInProfileCreated(
                      weak_factory_.GetWeakPtr(), new_profile.get()));
 }
 
-void OidcAuthenticationSigninInterceptor::CreateBrowserAfterSigninInterception(
-    content::WebContents* intercepted_contents) {
-  DCHECK(intercepted_contents);
-
+void OidcAuthenticationSigninInterceptor::
+    CreateBrowserAfterSigninInterception() {
   GURL url_to_open = GURL(chrome::kChromeUINewTabURL);
-  if (intercepted_contents) {
-    intercepted_contents->Close();
-  }
 
   // Open a new browser.
   NavigateParams params(profile_, url_to_open,
@@ -352,14 +395,28 @@ void OidcAuthenticationSigninInterceptor::CreateBrowserAfterSigninInterception(
   DVLOG(1) << "New browser created";
 }
 
+void OidcAuthenticationSigninInterceptor::CloseInterceptedWebContent(
+    content::WebContents* intercepted_contents) {
+  DCHECK(intercepted_contents);
+
+  if (intercepted_contents) {
+    intercepted_contents->Close();
+  }
+}
+
 void OidcAuthenticationSigninInterceptor::OnPolicyFetchCompleteInNewProfile(
     Profile* new_profile,
     bool success) {
-  if (success && dasher_based_) {
+  if (success && dasher_based_ && !switch_to_entry_) {
     return AddAsPrimaryAccount(new_profile);
   }
 
   interception_status_ = success ? OidcInterceptionStatus::kCompleted
                                  : OidcInterceptionStatus::kError;
+
+  if (success) {
+    CloseInterceptedWebContent(web_contents_.get());
+  }
+
   Reset();
 }
