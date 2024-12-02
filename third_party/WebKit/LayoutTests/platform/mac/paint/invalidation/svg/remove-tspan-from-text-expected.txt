@@ -8,47 +8,47 @@
       "paintInvalidations": [
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [10, 62, 306, 258],
+          "rect": [10, 61, 306, 259],
           "reason": "geometry"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [10, 62, 306, 258],
+          "rect": [10, 61, 306, 259],
           "reason": "geometry"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [10, 62, 306, 258],
+          "rect": [10, 61, 306, 259],
           "reason": "geometry"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [10, 62, 306, 258],
-          "reason": "geometry"
+          "rect": [10, 61, 306, 259],
+          "reason": "disappeared"
         },
         {
           "object": "LayoutSVGInlineText #text",
-          "rect": [10, 62, 306, 258],
+          "rect": [10, 61, 306, 259],
           "reason": "disappeared"
         },
         {
           "object": "LayoutSVGTSpan tspan",
-          "rect": [10, 62, 306, 258],
+          "rect": [10, 61, 306, 259],
           "reason": "geometry"
         },
         {
           "object": "LayoutSVGTSpan tspan",
-          "rect": [10, 62, 306, 258],
+          "rect": [10, 61, 306, 259],
           "reason": "geometry"
         },
         {
           "object": "LayoutSVGTSpan tspan id='remove'",
-          "rect": [10, 62, 306, 258],
+          "rect": [10, 61, 306, 259],
           "reason": "disappeared"
         },
         {
           "object": "LayoutSVGText text id='text'",
-          "rect": [10, 62, 306, 258],
+          "rect": [10, 61, 306, 259],
           "reason": "full"
         }
       ]
@@ -61,6 +61,10 @@
     },
     {
       "object": "LayoutSVGTSpan tspan id='remove'",
+      "reason": "disappeared"
+    },
+    {
+      "object": "LayoutSVGInlineText #text",
       "reason": "disappeared"
     },
     {
@@ -93,10 +97,6 @@
     },
     {
       "object": "InlineTextBox ' '",
-      "reason": "geometry"
-    },
-    {
-      "object": "LayoutSVGInlineText #text",
       "reason": "geometry"
     },
     {

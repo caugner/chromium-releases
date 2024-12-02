@@ -20,12 +20,14 @@
 #include "build/build_config.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/network_service.mojom.h"
+#include "content/public/common/resource_type.h"
 #include "extensions/features/features.h"
 #include "media/media_features.h"
 #include "ppapi/features/features.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
 class ChromeContentBrowserClientParts;
+class PrefRegistrySimple;
 
 namespace base {
 class CommandLine;
@@ -64,6 +66,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   ChromeContentBrowserClient();
   ~ChromeContentBrowserClient() override;
 
+  // TODO(https://crbug.com/787567): This file is about calls from content/ out
+  // to chrome/ to get values or notify about events, but both of these
+  // functions are from chrome/ to chrome/ and don't involve content/ at all.
+  // That suggests they belong somewhere else at the chrome/ layer.
+  static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Notification that the application locale has changed. This allows us to
@@ -72,7 +79,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 
   content::BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) override;
-  void PostAfterStartupTask(const tracked_objects::Location& from_here,
+  void PostAfterStartupTask(const base::Location& from_here,
                             const scoped_refptr<base::TaskRunner>& task_runner,
                             base::OnceClosure task) override;
   bool IsBrowserStartupComplete() override;
@@ -93,13 +100,18 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::WebContents* web_contents) override;
   void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
   GURL GetEffectiveURL(content::BrowserContext* browser_context,
-                       const GURL& url) override;
+                       const GURL& url,
+                       bool is_isolated_origin) override;
   bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
                                const GURL& effective_url) override;
   bool DoesSiteRequireDedicatedProcess(content::BrowserContext* browser_context,
                                        const GURL& effective_site_url) override;
   bool ShouldLockToOrigin(content::BrowserContext* browser_context,
                           const GURL& effective_site_url) override;
+  bool ShouldBypassDocumentBlocking(
+      const url::Origin& initiator,
+      const GURL& url,
+      content::ResourceType resource_type) override;
   void GetAdditionalWebUISchemes(
       std::vector<std::string>* additional_schemes) override;
   void GetAdditionalViewSourceSchemes(
@@ -117,6 +129,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool ShouldFrameShareParentSiteInstanceDespiteTopDocumentIsolation(
       const GURL& url,
       content::SiteInstance* parent_site_instance) override;
+  bool ShouldStayInParentProcessForNTP(
+      const GURL& url,
+      content::SiteInstance* parent_site_instance) override;
+
   bool IsSuitableHost(content::RenderProcessHost* process_host,
                       const GURL& site_url) override;
   bool MayReuseHost(content::RenderProcessHost* process_host) override;
@@ -137,10 +153,16 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::vector<url::Origin> GetOriginsRequiringDedicatedProcess() override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
+  void AdjustUtilityServiceProcessCommandLine(
+      const service_manager::Identity& identity,
+      base::CommandLine* command_line) override;
   std::string GetApplicationLocale() override;
   std::string GetAcceptLangs(content::BrowserContext* context) override;
   const gfx::ImageSkia* GetDefaultFavicon() override;
   bool IsDataSaverEnabled(content::BrowserContext* context) override;
+  std::unique_ptr<net::HttpRequestHeaders>
+  GetAdditionalNavigationRequestHeaders(content::BrowserContext* context,
+                                        const GURL& url) const override;
   bool AllowAppCache(const GURL& manifest_url,
                      const GURL& first_party,
                      content::ResourceContext* context) override;
@@ -180,6 +202,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   net::URLRequestContext* OverrideRequestContextForURL(
       const GURL& url,
       content::ResourceContext* context) override;
+  void GetGeolocationRequestContext(
+      base::OnceCallback<void(scoped_refptr<net::URLRequestContextGetter>)>
+          callback) override;
+  std::string GetGeolocationApiKey() override;
   content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
   void GetQuotaSettings(
       content::BrowserContext* context,
@@ -192,7 +218,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
       content::ResourceType resource_type,
-      bool overridable,
       bool strict_enforcement,
       bool expired_previous_decision,
       const base::Callback<void(content::CertificateRequestResultType)>&
@@ -335,14 +360,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 
   std::unique_ptr<base::TaskScheduler::InitParams> GetTaskSchedulerInitParams()
       override;
-  base::FilePath GetLoggingFileName() override;
+  base::FilePath GetLoggingFileName(
+      const base::CommandLine& command_line) override;
   std::vector<std::unique_ptr<content::URLLoaderThrottle>>
   CreateURLLoaderThrottles(
       const base::Callback<content::WebContents*()>& wc_getter) override;
-  bool OverrideLegacySymantecCertConsoleMessage(
-      const GURL& url,
-      const scoped_refptr<net::X509Certificate>& cert,
-      std::string* console_messsage) override;
 
  protected:
   static bool HandleWebUI(GURL* url, content::BrowserContext* browser_context);
