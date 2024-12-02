@@ -19,11 +19,11 @@ using CompletionCallback = base::OnceClosure;
 
 // A class that implements the menu item for copying selected text and a link
 // to the selected text to the user's clipboard.
-class LinkToTextMenuObserver : public RenderViewContextMenuObserver {
+class LinkToTextMenuObserver : public RenderViewContextMenuObserver{
  public:
   static std::unique_ptr<LinkToTextMenuObserver> Create(
       RenderViewContextMenuProxy* proxy,
-      content::RenderFrameHost* render_frame_host,
+      content::GlobalRenderFrameHostId render_frame_host_id,
       CompletionCallback callback);
 
   LinkToTextMenuObserver(const LinkToTextMenuObserver&) = delete;
@@ -44,9 +44,10 @@ class LinkToTextMenuObserver : public RenderViewContextMenuObserver {
  private:
   friend class MockLinkToTextMenuObserver;
 
-  explicit LinkToTextMenuObserver(RenderViewContextMenuProxy* proxy,
-                                  content::RenderFrameHost* render_frame_host,
-                                  CompletionCallback callback);
+  explicit LinkToTextMenuObserver(
+      RenderViewContextMenuProxy* proxy,
+      content::GlobalRenderFrameHostId render_frame_host_id,
+      CompletionCallback callback);
   // Returns true if the link should be generated from the constructor, vs
   // determined when executed.
   bool ShouldPreemptivelyGenerateLink();
@@ -105,7 +106,7 @@ class LinkToTextMenuObserver : public RenderViewContextMenuObserver {
   raw_ptr<RenderViewContextMenuProxy> proxy_;
   GURL url_;
   GURL raw_url_;
-  raw_ptr<content::RenderFrameHost> render_frame_host_;
+  content::GlobalRenderFrameHostId render_frame_host_id_;
 
   std::unordered_map<content::GlobalRenderFrameHostId,
                      std::vector<std::string>,
@@ -136,6 +137,7 @@ class LinkToTextMenuObserver : public RenderViewContextMenuObserver {
   CompletionCallback completion_callback_;
 
   base::WeakPtrFactory<LinkToTextMenuObserver> weak_ptr_factory_{this};
+
 };
 
 #endif  // CHROME_BROWSER_RENDERER_CONTEXT_MENU_LINK_TO_TEXT_MENU_OBSERVER_H_

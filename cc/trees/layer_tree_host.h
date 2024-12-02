@@ -807,6 +807,10 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
     return recording_scale_factor_;
   }
 
+  const ViewportPropertyIds& viewport_property_ids() const {
+    return pending_commit_state()->viewport_property_ids;
+  }
+
   void SetSourceURL(ukm::SourceId source_id, const GURL& url);
   base::ReadOnlySharedMemoryRegion CreateSharedMemoryForSmoothnessUkm();
 
@@ -850,6 +854,8 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   [[nodiscard]] base::AutoReset<bool> SimulateSyncingDeltasForTesting() {
     return base::AutoReset<bool>(&syncing_deltas_for_test_, true);
   }
+
+  void IncrementVisualUpdateDuration(base::TimeDelta visual_update_duration);
 
  protected:
   LayerTreeHost(InitParams params, CompositorMode mode);

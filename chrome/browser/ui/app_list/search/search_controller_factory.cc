@@ -157,7 +157,7 @@ std::unique_ptr<SearchController> CreateSearchController(
   //   true (the default).
   if (!ash::features::IsProductivityLauncherEnabled() ||
       base::GetFieldTrialParamByFeatureAsBool(
-          ash::features::kProductivityLauncher, "enable_continue", true)) {
+          ash::features::kProductivityLauncher, "enable_continue", false)) {
     size_t zero_state_files_group_id =
         controller->AddGroup(kMaxZeroStateFileResults);
     controller->AddProvider(zero_state_files_group_id,
@@ -204,7 +204,7 @@ std::unique_ptr<SearchController> CreateSearchController(
   }
 
   if (ash::features::IsPersonalizationHubEnabled() &&
-      !profile->IsGuestSession()) {
+      profile->IsRegularProfile()) {
     size_t personalization_app_group_id =
         controller->AddGroup(kGenericMaxResults);
 

@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.share.crow;
 
-import android.app.Activity;
+import android.content.Context;
 import android.net.Uri;
 
 import androidx.annotation.VisibleForTesting;
@@ -14,6 +14,8 @@ import org.chromium.base.Callback;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManagerImpl;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.services.UnifiedConsentServiceBridge;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.ui.util.ColorUtils;
 import org.chromium.url.GURL;
@@ -29,6 +31,7 @@ public class CrowButtonDelegateImpl implements CrowButtonDelegate {
     private static final String DEBUG_SERVER_URL_PARAM = "DebugServerURL";
     private static final String DOMAIN_LIST_URL_PARAM = "DomainList";
     private static final String DOMAIN_ID_NONE = "0";
+    private static final String DEFAULT_BUTTON_TEXT = "Thank\u00A0creator";
 
     private static final String TAG = "CrowButton";
 
@@ -43,19 +46,19 @@ public class CrowButtonDelegateImpl implements CrowButtonDelegate {
 
     @Override
     public void launchCustomTab(
-            Activity currentActivity, GURL pageUrl, GURL canonicalUrl, boolean isFollowing) {
+            Context currentContext, GURL pageUrl, GURL canonicalUrl, boolean isFollowing) {
         String customTabUrl = buildServerUrl(new GURL(getServerUrl()), pageUrl, canonicalUrl,
                 getPublicationId(pageUrl), areMetricsEnabled(), isFollowing);
 
         CustomTabsIntent.Builder builder = new CustomTabsIntent.Builder();
         builder.setShowTitle(true);
-        builder.setColorScheme(ColorUtils.inNightMode(currentActivity)
+        builder.setColorScheme(ColorUtils.inNightMode(currentContext)
                         ? CustomTabsIntent.COLOR_SCHEME_DARK
                         : CustomTabsIntent.COLOR_SCHEME_LIGHT);
         builder.setShareState(CustomTabsIntent.SHARE_STATE_OFF);
         CustomTabsIntent customTabsIntent = builder.build();
-        customTabsIntent.intent.setClassName(currentActivity, CustomTabActivity.class.getName());
-        customTabsIntent.launchUrl(currentActivity, Uri.parse(customTabUrl));
+        customTabsIntent.intent.setClassName(currentContext, CustomTabActivity.class.getName());
+        customTabsIntent.launchUrl(currentContext, Uri.parse(customTabUrl));
     }
 
     public boolean isCrowEnabled() {
@@ -87,11 +90,19 @@ public class CrowButtonDelegateImpl implements CrowButtonDelegate {
     }
 
     private String getPublicationId(GURL url) {
+        String host = url.getHost();
+
+        // First check the downloaded component.
+        String publicationID = CrowBridge.getPublicationIDForHost(host);
+        if (!publicationID.isEmpty()) {
+            return publicationID;
+        }
+
+        // Then check the experimental Finch config.
         if (mDomainIdMap == null) {
             mDomainIdMap = parseDomainIdMap(ChromeFeatureList.getFieldTrialParamByFeature(
                     ChromeFeatureList.SHARE_CROW_BUTTON, DOMAIN_LIST_URL_PARAM));
         }
-        String host = url.getHost();
         if (!mDomainIdMap.containsKey(host)) {
             return DOMAIN_ID_NONE;
         }
@@ -100,8 +111,13 @@ public class CrowButtonDelegateImpl implements CrowButtonDelegate {
 
     @Override
     public String getButtonText() {
-        return ChromeFeatureList.getFieldTrialParamByFeature(
+        String param = ChromeFeatureList.getFieldTrialParamByFeature(
                 ChromeFeatureList.SHARE_CROW_BUTTON, APP_MENU_BUTTON_TEXT_PARAM);
+        // Provide a default with non-breaking space. String is en-us only.
+        if (param.isEmpty()) {
+            return DEFAULT_BUTTON_TEXT;
+        }
+        return param;
     }
 
     @Override
@@ -120,7 +136,10 @@ public class CrowButtonDelegateImpl implements CrowButtonDelegate {
     }
 
     private boolean areMetricsEnabled() {
-        return PrivacyPreferencesManagerImpl.getInstance().isUsageAndCrashReportingPermitted();
+        // Require UMA and "Make searches and browsing better" to be enabled.
+        return (PrivacyPreferencesManagerImpl.getInstance().isUsageAndCrashReportingPermitted()
+                && UnifiedConsentServiceBridge.isUrlKeyedAnonymizedDataCollectionEnabled(
+                        Profile.getLastUsedRegularProfile()));
     }
 
     @VisibleForTesting

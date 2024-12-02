@@ -7,7 +7,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "components/password_manager/core/browser/manage_passwords_referrer.h"
 #include "components/password_manager/core/browser/password_manager_constants.h"
-#include "components/password_manager/core/common/password_manager_features.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/page_navigator.h"
@@ -39,17 +38,16 @@ bool IsTriggeredOnGoogleOwnedUI(NavigationHandle* handle) {
     return false;
 
   // Referrer origin and target URL must match.
-  url::Origin origin = handle->GetInitiatorOrigin().value_or(url::Origin());
-  if (origin != url::Origin::Create(GURL(password_manager::kReferrerURL)) ||
-      handle->GetURL() != GURL(password_manager::kManageMyPasswordsURL))
+  if (handle->GetURL() != GURL(password_manager::kManageMyPasswordsURL))
     return false;
 
-#if BUILDFLAG(IS_ANDROID)
-  return password_manager::features::UsesUnifiedPasswordManagerUi();
-#else
-  return base::FeatureList::IsEnabled(
-      password_manager::features::kUnifiedPasswordManagerDesktop);
-#endif
+  url::Origin origin = handle->GetInitiatorOrigin().value_or(url::Origin());
+  if (origin != url::Origin::Create(GURL(password_manager::kReferrerURL)) &&
+      origin !=
+          url::Origin::Create(GURL(password_manager::kTestingReferrerURL)))
+    return false;
+
+  return true;
 }
 
 }  // namespace

@@ -6,9 +6,9 @@
 
 #include "base/i18n/case_conversion.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/accessibility/accessibility_state_utils.h"
 #include "chrome/browser/image_fetcher/image_decoder_impl.h"
-#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/ui/monogram_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/views/hover_button.h"
@@ -18,10 +18,14 @@
 #include "content/public/browser/storage_partition.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "skia/ext/image_operations.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/image/canvas_image_source.h"
+#include "ui/gfx/image/image_skia_operations.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/image_view.h"
@@ -92,6 +96,11 @@ class LetterAvatarImageSkiaSource : public gfx::CanvasImageSource {
   LetterAvatarImageSkiaSource(const std::u16string& letter, int size)
       : gfx::CanvasImageSource(gfx::Size(size, size)), letter_(letter) {}
 
+  LetterAvatarImageSkiaSource(const LetterAvatarImageSkiaSource&) = delete;
+  LetterAvatarImageSkiaSource& operator=(const LetterAvatarImageSkiaSource&) =
+      delete;
+  ~LetterAvatarImageSkiaSource() override = default;
+
   void Draw(gfx::Canvas* canvas) override {
     monogram::DrawMonogramInCanvas(canvas, size().width(), size().width(),
                                    letter_, SK_ColorWHITE, SK_ColorGRAY);
@@ -101,19 +110,115 @@ class LetterAvatarImageSkiaSource : public gfx::CanvasImageSource {
   const std::u16string letter_;
 };
 
-void SendAccessibilityEvent(views::Widget* widget) {
+// A CanvasImageSource that draws a circle cropped avatar.
+class AvatarImageSkiaSource : public gfx::CanvasImageSource {
+ public:
+  AvatarImageSkiaSource(gfx::ImageSkia avatar, int canvas_edge_size)
+      : gfx::CanvasImageSource(gfx::Size(canvas_edge_size, canvas_edge_size)) {
+    // Resize `avatar` so that it completely fills the canvas.
+    float height_ratio = ((float)avatar.height() / (float)avatar.width());
+    int scaled_width = canvas_edge_size;
+    int scaled_height = canvas_edge_size;
+    if (height_ratio >= 1.0f)
+      scaled_height = floor(canvas_edge_size * height_ratio);
+    else
+      scaled_width = floor(canvas_edge_size / height_ratio);
+    avatar_ = gfx::ImageSkiaOperations::CreateResizedImage(
+        avatar, skia::ImageOperations::RESIZE_BEST,
+        gfx::Size(scaled_width, scaled_height));
+  }
+
+  AvatarImageSkiaSource(const AvatarImageSkiaSource&) = delete;
+  AvatarImageSkiaSource& operator=(const AvatarImageSkiaSource&) = delete;
+  ~AvatarImageSkiaSource() override = default;
+
+  // CanvasImageSource override:
+  void Draw(gfx::Canvas* canvas) override {
+    int canvas_edge_size = size().width();
+
+    // Center the avatar in the canvas.
+    int x = (canvas_edge_size - avatar_.width()) / 2;
+    int y = (canvas_edge_size - avatar_.height()) / 2;
+
+    SkPath circular_mask;
+    circular_mask.addCircle(SkIntToScalar(canvas_edge_size / 2),
+                            SkIntToScalar(canvas_edge_size / 2),
+                            SkIntToScalar(canvas_edge_size / 2));
+    canvas->ClipPath(circular_mask, true);
+    canvas->DrawImageInt(avatar_, x, y);
+  }
+
+ private:
+  gfx::ImageSkia avatar_;
+};
+
+class AccountImageView : public views::ImageView {
+ public:
+  AccountImageView() = default;
+
+  AccountImageView(const AccountImageView&) = delete;
+  AccountImageView& operator=(const AccountImageView&) = delete;
+  ~AccountImageView() override = default;
+
+  // Fetch image and set it on AccountImageView.
+  void FetchImage(const content::IdentityRequestAccount& account,
+                  image_fetcher::ImageFetcher& image_fetcher) {
+    image_fetcher::ImageFetcherParams params(kTrafficAnnotation,
+                                             kImageFetcherUmaClient);
+
+    // OnImageFetched() is a member of AccountImageView so that the callback
+    // is cancelled in the case that AccountImageView is destroyed prior to
+    // the callback returning.
+    image_fetcher.FetchImage(account.picture,
+                             base::BindOnce(&AccountImageView::OnImageFetched,
+                                            weak_ptr_factory_.GetWeakPtr(),
+                                            base::UTF8ToUTF16(account.name)),
+                             std::move(params));
+  }
+
+ private:
+  void OnImageFetched(const std::u16string& account_name,
+                      const gfx::Image& image,
+                      const image_fetcher::RequestMetadata& metadata) {
+    gfx::ImageSkia avatar;
+    if (image.IsEmpty()) {
+      std::u16string letter = account_name;
+      if (letter.length() > 0)
+        letter = base::i18n::ToUpper(account_name.substr(0, 1));
+      avatar =
+          gfx::CanvasImageSource::MakeImageSkia<LetterAvatarImageSkiaSource>(
+              letter, kDesiredAvatarSize);
+    } else {
+      avatar = gfx::CanvasImageSource::MakeImageSkia<AvatarImageSkiaSource>(
+          image.AsImageSkia(), kDesiredAvatarSize);
+    }
+    SetImage(avatar);
+  }
+
+  base::WeakPtrFactory<AccountImageView> weak_ptr_factory_{this};
+};
+
+void SendAccessibilityEvent(views::Widget* widget,
+                            std::u16string announcement) {
   if (!widget)
     return;
 
-  widget->GetRootView()->NotifyAccessibilityEvent(ax::mojom::Event::kAlert,
-                                                  true);
+  views::View* root_view = widget->GetRootView();
+#if BUILDFLAG(IS_MAC)
+  if (!announcement.empty())
+    root_view->GetViewAccessibility().OverrideName(announcement);
+  root_view->NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
+#else
+  if (!announcement.empty())
+    root_view->GetViewAccessibility().AnnounceText(announcement);
+#endif
 }
 
 }  // namespace
 
 AccountSelectionBubbleView::AccountSelectionBubbleView(
-    const std::string& rp_etld_plus_one,
-    const std::string& idp_etld_plus_one,
+    const std::string& rp_for_display,
+    const std::string& idp_for_display,
     base::span<const content::IdentityRequestAccount> accounts,
     const content::IdentityProviderMetadata& idp_metadata,
     const content::ClientIdData& client_data,
@@ -124,7 +229,7 @@ AccountSelectionBubbleView::AccountSelectionBubbleView(
         on_account_selected_callback)
     : views::BubbleDialogDelegateView(anchor_view,
                                       views::BubbleBorder::Arrow::TOP_RIGHT),
-      idp_etld_plus_one_(base::UTF8ToUTF16(idp_etld_plus_one)),
+      idp_for_display_(base::UTF8ToUTF16(idp_for_display)),
       brand_text_color_(idp_metadata.brand_text_color),
       brand_background_color_(idp_metadata.brand_background_color),
       tab_strip_model_(tab_strip_model),
@@ -148,21 +253,28 @@ AccountSelectionBubbleView::AccountSelectionBubbleView(
       kTopBottomPadding));
   std::u16string title = l10n_util::GetStringFUTF16(
       IDS_ACCOUNT_SELECTION_SHEET_TITLE_EXPLICIT,
-      base::UTF8ToUTF16(rp_etld_plus_one), idp_etld_plus_one_);
-  gfx::ImageSkia icon =
-      gfx::ImageSkia::CreateFrom1xBitmap(skia::ImageOperations::Resize(
-          idp_metadata.brand_icon, skia::ImageOperations::RESIZE_LANCZOS3,
-          kDesiredIconSize, kDesiredIconSize));
-  header_view_ = AddChildView(CreateHeaderView(icon, title));
+      base::UTF8ToUTF16(rp_for_display), idp_for_display_);
+  bool has_icon = idp_metadata.brand_icon_url.is_valid();
+  header_view_ = AddChildView(CreateHeaderView(title, has_icon));
   AddChildView(std::make_unique<views::Separator>());
   AddChildView(CreateAccountChooser(accounts));
+
+  if (has_icon) {
+    image_fetcher::ImageFetcherParams params(kTrafficAnnotation,
+                                             kImageFetcherUmaClient);
+    image_fetcher_->FetchImage(
+        idp_metadata.brand_icon_url,
+        base::BindOnce(&AccountSelectionBubbleView::OnBrandImageFetched,
+                       weak_ptr_factory_.GetWeakPtr()),
+        std::move(params));
+  }
 }
 
 AccountSelectionBubbleView::~AccountSelectionBubbleView() = default;
 
 std::unique_ptr<views::View> AccountSelectionBubbleView::CreateHeaderView(
-    gfx::ImageSkia icon,
-    const std::u16string& title) {
+    const std::u16string& title,
+    bool has_icon) {
   auto header = std::make_unique<views::View>();
   // Do not use a top margin as it has already been set in the bubble.
   header->SetLayoutManager(std::make_unique<views::FlexLayout>())
@@ -170,11 +282,15 @@ std::unique_ptr<views::View> AccountSelectionBubbleView::CreateHeaderView(
           0, kLeftRightPadding, kVerticalSpacing, kLeftRightPadding));
 
   // Add the icon.
-  auto image_view = std::make_unique<views::ImageView>();
-  image_view->SetImage(icon);
-  image_view->SetProperty(views::kMarginsKey,
-                          gfx::Insets().set_right(kLeftRightPadding));
-  header->AddChildView(image_view.release());
+  if (has_icon) {
+    // Show placeholder brand icon prior to brand icon being fetched so that
+    // header text wrapping does not change when brand icon is fetched.
+    auto image_view = std::make_unique<views::ImageView>();
+    image_view->SetImageSize(gfx::Size(kDesiredIconSize, kDesiredIconSize));
+    image_view->SetProperty(views::kMarginsKey,
+                            gfx::Insets().set_right(kLeftRightPadding));
+    bubble_icon_view_ = header->AddChildView(image_view.release());
+  }
 
   // Add the title.
   title_label_ = header->AddChildView(std::make_unique<views::Label>(
@@ -202,6 +318,8 @@ std::unique_ptr<views::View> AccountSelectionBubbleView::CreateHeaderView(
 void AccountSelectionBubbleView::CloseBubble() {
   if (!GetWidget())
     return;
+  UMA_HISTOGRAM_BOOLEAN("Blink.FedCm.CloseVerifySheet.Desktop",
+                        verify_sheet_shown_);
   GetWidget()->CloseWithReason(
       views::Widget::ClosedReason::kCloseButtonClicked);
 }
@@ -269,7 +387,7 @@ AccountSelectionBubbleView::CreateSingleAccountChooser(
     // Case for both the privacy policy and terms of service URLs are missing.
     std::u16string disclosure_text = l10n_util::GetStringFUTF16(
         IDS_ACCOUNT_SELECTION_DATA_SHARING_CONSENT_NO_PP_OR_TOS,
-        {idp_etld_plus_one_});
+        {idp_for_display_});
     disclosure_label->SetText(disclosure_text);
     return row;
   }
@@ -280,7 +398,7 @@ AccountSelectionBubbleView::CreateSingleAccountChooser(
     // 'terms of service' in order to style that text as a link.
     std::u16string disclosure_text = l10n_util::GetStringFUTF16(
         IDS_ACCOUNT_SELECTION_DATA_SHARING_CONSENT_NO_PP,
-        {idp_etld_plus_one_, std::u16string(), std::u16string()}, &offsets);
+        {idp_for_display_, std::u16string(), std::u16string()}, &offsets);
     disclosure_label->SetText(disclosure_text);
     // Add link styling for terms of service url.
     disclosure_label->AddStyleRange(
@@ -298,7 +416,7 @@ AccountSelectionBubbleView::CreateSingleAccountChooser(
     // 'privacy policy' in order to style that text as a link.
     std::u16string disclosure_text = l10n_util::GetStringFUTF16(
         IDS_ACCOUNT_SELECTION_DATA_SHARING_CONSENT_NO_TOS,
-        {idp_etld_plus_one_, std::u16string(), std::u16string()}, &offsets);
+        {idp_for_display_, std::u16string(), std::u16string()}, &offsets);
     disclosure_label->SetText(disclosure_text);
     // Add link styling for privacy policy url.
     disclosure_label->AddStyleRange(
@@ -314,7 +432,7 @@ AccountSelectionBubbleView::CreateSingleAccountChooser(
   // 'privacy policy' and 'terms of service' in order to style both of them as
   // links.
   std::vector<std::u16string> replacements = {
-      idp_etld_plus_one_, std::u16string(), std::u16string(), std::u16string(),
+      idp_for_display_, std::u16string(), std::u16string(), std::u16string(),
       std::u16string()};
   std::u16string disclosure_text = l10n_util::GetStringFUTF16(
       IDS_ACCOUNT_SELECTION_DATA_SHARING_CONSENT, replacements, &offsets);
@@ -349,22 +467,14 @@ AccountSelectionBubbleView::CreateMultipleAccountChooser(
 std::unique_ptr<views::View> AccountSelectionBubbleView::CreateAccountRow(
     const content::IdentityRequestAccount& account,
     bool should_hover) {
-  auto image_view = std::make_unique<views::ImageView>();
+  auto image_view = std::make_unique<AccountImageView>();
   image_view->SetImageSize({kDesiredAvatarSize, kDesiredAvatarSize});
-  image_fetcher::ImageFetcherParams params(kTrafficAnnotation,
-                                           kImageFetcherUmaClient);
-  std::u16string account_name16 = base::UTF8ToUTF16(account.name);
-  image_fetcher_->FetchImage(
-      account.picture,
-      base::BindOnce(&AccountSelectionBubbleView::OnAccountImageFetched,
-                     weak_ptr_factory_.GetWeakPtr(), image_view.get(),
-                     account_name16),
-      std::move(params));
+  image_view->FetchImage(account, *image_fetcher_);
   if (should_hover) {
     auto row = std::make_unique<HoverButton>(
         base::BindRepeating(&AccountSelectionBubbleView::OnSingleAccountPicked,
                             weak_ptr_factory_.GetWeakPtr(), account),
-        std::move(image_view), account_name16,
+        std::move(image_view), base::UTF8ToUTF16(account.name),
         base::UTF8ToUTF16(account.email));
     row->SetBorder(views::CreateEmptyBorder(
         gfx::Insets::VH(/*vertical=*/0, /*horizontal=*/kLeftRightPadding)));
@@ -399,25 +509,16 @@ std::unique_ptr<views::View> AccountSelectionBubbleView::CreateAccountRow(
   return row;
 }
 
-void AccountSelectionBubbleView::OnAccountImageFetched(
-    views::ImageView* image_view,
-    const std::u16string& account_name,
+void AccountSelectionBubbleView::OnBrandImageFetched(
     const gfx::Image& image,
     const image_fetcher::RequestMetadata& metadata) {
-  ui::ImageModel avatar;
-  if (image.IsEmpty()) {
-    std::u16string letter = account_name;
-    if (letter.length() > 0)
-      letter = base::i18n::ToUpper(account_name.substr(0, 1));
-    avatar = ui::ImageModel::FromImageSkia(
-        gfx::CanvasImageSource::MakeImageSkia<LetterAvatarImageSkiaSource>(
-            letter, kDesiredAvatarSize));
-  } else {
-    avatar = ui::ImageModel::FromImage(profiles::GetSizedAvatarIcon(
-        image, /*is_rectangle=*/true, kDesiredAvatarSize, kDesiredAvatarSize,
-        profiles::SHAPE_CIRCLE));
+  if (bubble_icon_view_ != nullptr && image.Width() == image.Height() &&
+      image.Width() >= AccountSelectionView::GetBrandIconMinimumSize()) {
+    gfx::ImageSkia resized_image = gfx::ImageSkiaOperations::CreateResizedImage(
+        image.AsImageSkia(), skia::ImageOperations::RESIZE_LANCZOS3,
+        gfx::Size(kDesiredIconSize, kDesiredIconSize));
+    bubble_icon_view_->SetImage(resized_image);
   }
-  image_view->SetImage(avatar);
 }
 
 void AccountSelectionBubbleView::OnLinkClicked(const GURL& gurl) {
@@ -443,7 +544,7 @@ void AccountSelectionBubbleView::OnSingleAccountPicked(
   // awkward, so we only want to do so when screen reader is enabled.
   if (accessibility_state_utils::IsScreenReaderEnabled())
     continue_button_->RequestFocus();
-  SendAccessibilityEvent(GetWidget());
+  SendAccessibilityEvent(GetWidget(), std::u16string());
 }
 
 void AccountSelectionBubbleView::OnAccountSelected(
@@ -454,8 +555,10 @@ void AccountSelectionBubbleView::OnAccountSelected(
 
 void AccountSelectionBubbleView::ShowVerifySheet(
     const content::IdentityRequestAccount& account) {
+  verify_sheet_shown_ = true;
   RemoveNonHeaderChildViews();
-  title_label_->SetText(l10n_util::GetStringUTF16(IDS_VERIFY_SHEET_TITLE));
+  std::u16string title = l10n_util::GetStringUTF16(IDS_VERIFY_SHEET_TITLE);
+  title_label_->SetText(title);
   views::ProgressBar* progress_bar =
       AddChildView(std::make_unique<views::ProgressBar>(kProgressBarHeight));
   // Use an infinite animation: SetValue(-1).
@@ -470,7 +573,7 @@ void AccountSelectionBubbleView::ShowVerifySheet(
   SizeToContents();
   PreferredSizeChanged();
 
-  SendAccessibilityEvent(GetWidget());
+  SendAccessibilityEvent(GetWidget(), title);
 }
 
 void AccountSelectionBubbleView::RemoveNonHeaderChildViews() {
