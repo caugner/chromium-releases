@@ -69,7 +69,7 @@
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/snapshot/snapshot.h"
 
-#ifdef OS_ANDROID
+#if BUILDFLAG(IS_ANDROID)
 #include "content/browser/renderer_host/compositor_impl_android.h"
 #endif
 
@@ -218,7 +218,7 @@ PageHandler::PageHandler(
       emulation_handler_(emulation_handler),
       browser_handler_(browser_handler) {
   bool create_video_consumer = true;
-#ifdef OS_ANDROID
+#if BUILDFLAG(IS_ANDROID)
   constexpr auto kScreencastPixelFormat = media::PIXEL_FORMAT_I420;
   // Video capture doesn't work on Android WebView. Use CopyFromSurface instead.
   if (!CompositorImpl::IsInitialized())
@@ -1291,8 +1291,8 @@ Page::BackForwardCacheNotRestoredReason NotRestoredReasonToProtocol(
     BackForwardCacheMetrics::NotRestoredReason reason) {
   using Reason = BackForwardCacheMetrics::NotRestoredReason;
   switch (reason) {
-    case Reason::kNotMainFrame:
-      return Page::BackForwardCacheNotRestoredReasonEnum::NotMainFrame;
+    case Reason::kNotPrimaryMainFrame:
+      return Page::BackForwardCacheNotRestoredReasonEnum::NotPrimaryMainFrame;
     case Reason::kBackForwardCacheDisabled:
       return Page::BackForwardCacheNotRestoredReasonEnum::
           BackForwardCacheDisabled;
@@ -1380,9 +1380,6 @@ Page::BackForwardCacheNotRestoredReason NotRestoredReasonToProtocol(
     case Reason::kNavigationCancelledWhileRestoring:
       return Page::BackForwardCacheNotRestoredReasonEnum::
           NavigationCancelledWhileRestoring;
-    case Reason::kBackForwardCacheDisabledForPrerender:
-      return Page::BackForwardCacheNotRestoredReasonEnum::
-          BackForwardCacheDisabledForPrerender;
     case Reason::kUserAgentOverrideDiffers:
       return Page::BackForwardCacheNotRestoredReasonEnum::
           UserAgentOverrideDiffers;
@@ -1419,6 +1416,8 @@ Page::BackForwardCacheNotRestoredReason NotRestoredReasonToProtocol(
     case Reason::kActivationNavigationsDisallowedForBug1234857:
       return Page::BackForwardCacheNotRestoredReasonEnum::
           ActivationNavigationsDisallowedForBug1234857;
+    case Reason::kErrorDocument:
+      return Page::BackForwardCacheNotRestoredReasonEnum::ErrorDocument;
     case Reason::kBlocklistedFeatures:
       // Blocklisted features should be handled separately and be broken down
       // into sub reasons.
@@ -1653,7 +1652,7 @@ Page::BackForwardCacheNotRestoredReasonType MapNotRestoredReasonToType(
     BackForwardCacheMetrics::NotRestoredReason reason) {
   using Reason = BackForwardCacheMetrics::NotRestoredReason;
   switch (reason) {
-    case Reason::kNotMainFrame:
+    case Reason::kNotPrimaryMainFrame:
     case Reason::kBackForwardCacheDisabled:
     case Reason::kRelatedActiveContentsExist:
     case Reason::kHTTPStatusNotOK:
@@ -1692,12 +1691,12 @@ Page::BackForwardCacheNotRestoredReasonType MapNotRestoredReasonToType(
     case Reason::kUserAgentOverrideDiffers:
     case Reason::kBrowsingInstanceNotSwapped:
     case Reason::kBackForwardCacheDisabledForDelegate:
-    case Reason::kBackForwardCacheDisabledForPrerender:
     case Reason::kServiceWorkerUnregistration:
     case Reason::kCacheControlNoStore:
     case Reason::kCacheControlNoStoreCookieModified:
     case Reason::kCacheControlNoStoreHTTPOnlyCookieModified:
     case Reason::kNoResponseHead:
+    case Reason::kErrorDocument:
       return Page::BackForwardCacheNotRestoredReasonTypeEnum::Circumstantial;
     case Reason::kOptInUnloadHeaderNotPresent:
     case Reason::kUnloadHandlerExistsInMainFrame:
