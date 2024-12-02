@@ -914,6 +914,7 @@ void DiskCacheBackendTest::BackendEnumerations2() {
   entry1->Close();
   ASSERT_EQ(net::OK, CreateEntry(second, &entry2));
   entry2->Close();
+  FlushQueueForTest();
 
   // Make sure that the timestamp is not the same.
   base::PlatformThread::Sleep(20);
@@ -1084,13 +1085,13 @@ TEST_F(DiskCacheBackendTest, NewEvictionFixEnumerators) {
 
 void DiskCacheBackendTest::BackendDoomRecent() {
   InitCache();
-  Time initial = Time::Now();
 
   disk_cache::Entry *entry;
   ASSERT_EQ(net::OK, CreateEntry("first", &entry));
   entry->Close();
   ASSERT_EQ(net::OK, CreateEntry("second", &entry));
   entry->Close();
+  FlushQueueForTest();
 
   base::PlatformThread::Sleep(20);
   Time middle = Time::Now();
@@ -1099,6 +1100,7 @@ void DiskCacheBackendTest::BackendDoomRecent() {
   entry->Close();
   ASSERT_EQ(net::OK, CreateEntry("fourth", &entry));
   entry->Close();
+  FlushQueueForTest();
 
   base::PlatformThread::Sleep(20);
   Time final = Time::Now();
@@ -1130,11 +1132,11 @@ TEST_F(DiskCacheBackendTest, MemoryOnlyDoomRecent) {
 
 void DiskCacheBackendTest::BackendDoomBetween() {
   InitCache();
-  Time initial = Time::Now();
 
   disk_cache::Entry *entry;
   ASSERT_EQ(net::OK, CreateEntry("first", &entry));
   entry->Close();
+  FlushQueueForTest();
 
   base::PlatformThread::Sleep(20);
   Time middle_start = Time::Now();
@@ -1143,6 +1145,7 @@ void DiskCacheBackendTest::BackendDoomBetween() {
   entry->Close();
   ASSERT_EQ(net::OK, CreateEntry("third", &entry));
   entry->Close();
+  FlushQueueForTest();
 
   base::PlatformThread::Sleep(20);
   Time middle_end = Time::Now();
@@ -1151,6 +1154,7 @@ void DiskCacheBackendTest::BackendDoomBetween() {
   entry->Close();
   ASSERT_EQ(net::OK, OpenEntry("fourth", &entry));
   entry->Close();
+  FlushQueueForTest();
 
   base::PlatformThread::Sleep(20);
   Time final = Time::Now();
@@ -1827,7 +1831,6 @@ TEST_F(DiskCacheTest, Backend_UsageStats) {
 
 void DiskCacheBackendTest::BackendDoomAll() {
   InitCache();
-  Time initial = Time::Now();
 
   disk_cache::Entry *entry1, *entry2;
   ASSERT_EQ(net::OK, CreateEntry("first", &entry1));

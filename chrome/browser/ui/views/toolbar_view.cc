@@ -7,7 +7,6 @@
 #include "base/i18n/number_formatting.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/accessibility/browser_accessibility_state.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -18,7 +17,9 @@
 #include "chrome/browser/ui/views/event_utils.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/upgrade_detector.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/accessibility/browser_accessibility_state.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
 #include "grit/chromium_strings.h"
@@ -36,12 +37,14 @@
 #include "views/focus/view_storage.h"
 #include "views/widget/tooltip_manager.h"
 #include "views/window/non_client_view.h"
-#include "views/window/window.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/enumerate_modules_model_win.h"
+#include "chrome/browser/ui/views/app_menu_button_win.h"
 #endif
 
+// static
+char ToolbarView::kViewClassName[] = "browser/ui/views/ToolbarView";
 // The space between items is 4 px in general.
 const int ToolbarView::kStandardSpacing = 4;
 // The top of the toolbar has an edge we have to skip over in addition to the 4
@@ -87,7 +90,7 @@ ToolbarView::ToolbarView(Browser* browser)
       profile_(NULL),
       browser_(browser),
       profiles_menu_contents_(NULL) {
-  SetID(VIEW_ID_TOOLBAR);
+  set_id(VIEW_ID_TOOLBAR);
 
   browser_->command_updater()->AddCommandObserver(IDC_BACK, this);
   browser_->command_updater()->AddCommandObserver(IDC_FORWARD, this);
@@ -101,9 +104,10 @@ ToolbarView::ToolbarView(Browser* browser)
         IDR_LOCATIONBG_POPUPMODE_EDGE);
   }
 
-  registrar_.Add(this, NotificationType::UPGRADE_RECOMMENDED,
+  registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::MODULE_INCOMPATIBILITY_BADGE_CHANGE,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_MODULE_INCOMPATIBILITY_BADGE_CHANGE,
                  NotificationService::AllSources());
 }
 
@@ -128,7 +132,7 @@ void ToolbarView::Init(Profile* profile) {
   back_->SetTooltipText(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_TOOLTIP_BACK)));
   back_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_BACK));
-  back_->SetID(VIEW_ID_BACK_BUTTON);
+  back_->set_id(VIEW_ID_BACK_BUTTON);
 
   forward_ = new views::ButtonDropDown(this, forward_menu_model_.get());
   forward_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
@@ -137,7 +141,7 @@ void ToolbarView::Init(Profile* profile) {
   forward_->SetTooltipText(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_TOOLTIP_FORWARD)));
   forward_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_FORWARD));
-  forward_->SetID(VIEW_ID_FORWARD_BUTTON);
+  forward_->set_id(VIEW_ID_FORWARD_BUTTON);
 
   // Have to create this before |reload_| as |reload_|'s constructor needs it.
   location_bar_ = new LocationBarView(profile, browser_,
@@ -151,7 +155,7 @@ void ToolbarView::Init(Profile* profile) {
   reload_->SetTooltipText(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_TOOLTIP_RELOAD)));
   reload_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_RELOAD));
-  reload_->SetID(VIEW_ID_RELOAD_BUTTON);
+  reload_->set_id(VIEW_ID_RELOAD_BUTTON);
 
   home_ = new views::ImageButton(this);
   home_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
@@ -160,18 +164,22 @@ void ToolbarView::Init(Profile* profile) {
   home_->SetTooltipText(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_TOOLTIP_HOME)));
   home_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_HOME));
-  home_->SetID(VIEW_ID_HOME_BUTTON);
+  home_->set_id(VIEW_ID_HOME_BUTTON);
 
   browser_actions_ = new BrowserActionsContainer(browser_, this);
 
+#if defined(OS_WIN)
+  app_menu_ = new AppMenuButtonWin(this);
+#else
   app_menu_ = new views::MenuButton(NULL, std::wstring(), this, false);
+#endif
   app_menu_->set_border(NULL);
   app_menu_->EnableCanvasFlippingForRTLUI(true);
   app_menu_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_APP));
   app_menu_->SetTooltipText(UTF16ToWide(l10n_util::GetStringFUTF16(
       IDS_APPMENU_TOOLTIP,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME))));
-  app_menu_->SetID(VIEW_ID_APP_MENU);
+  app_menu_->set_id(VIEW_ID_APP_MENU);
 
   // Add any necessary badges to the menu item based on the system state.
   if (IsUpgradeRecommended() || ShouldShowIncompatibilityWarning()) {
@@ -327,7 +335,7 @@ bool ToolbarView::GetAcceleratorInfo(int id, ui::Accelerator* accel) {
 // ToolbarView, views::MenuDelegate implementation:
 
 void ToolbarView::RunMenu(views::View* source, const gfx::Point& /* pt */) {
-  DCHECK_EQ(VIEW_ID_APP_MENU, source->GetID());
+  DCHECK_EQ(VIEW_ID_APP_MENU, source->id());
 
   wrench_menu_ = new WrenchMenu(browser_);
   wrench_menu_->Init(wrench_menu_model_.get());
@@ -398,17 +406,18 @@ void ToolbarView::ButtonPressed(views::Button* sender,
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, NotificationObserver implementation:
 
-void ToolbarView::Observe(NotificationType type,
+void ToolbarView::Observe(int type,
                           const NotificationSource& source,
                           const NotificationDetails& details) {
-  if (type == NotificationType::PREF_CHANGED) {
+  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     std::string* pref_name = Details<std::string>(details).ptr();
     if (*pref_name == prefs::kShowHomeButton) {
       Layout();
       SchedulePaint();
     }
-  } else if (type == NotificationType::UPGRADE_RECOMMENDED ||
-             type == NotificationType::MODULE_INCOMPATIBILITY_BADGE_CHANGE) {
+  } else if (
+        type == chrome::NOTIFICATION_UPGRADE_RECOMMENDED ||
+        type == chrome::NOTIFICATION_MODULE_INCOMPATIBILITY_BADGE_CHANGE) {
     UpdateAppMenuBadge();
   }
 }
@@ -447,6 +456,7 @@ gfx::Size ToolbarView::GetPreferredSize() {
         reload_->GetPreferredSize().width() + kStandardSpacing +
         (show_home_button_.GetValue() ?
             (home_->GetPreferredSize().width() + kButtonSpacing) : 0) +
+        location_bar_->GetPreferredSize().width() +
         browser_actions_->GetPreferredSize().width() +
         app_menu_->GetPreferredSize().width() + kEdgeSpacing;
 
@@ -460,7 +470,7 @@ gfx::Size ToolbarView::GetPreferredSize() {
   }
 
   int vertical_spacing = PopupTopSpacing() +
-      (GetWindow()->ShouldUseNativeFrame() ?
+      (GetWidget()->ShouldUseNativeFrame() ?
           kPopupBottomSpacingGlass : kPopupBottomSpacingNonGlass);
   return gfx::Size(0, location_bar_->GetPreferredSize().height() +
       vertical_spacing);
@@ -560,7 +570,7 @@ void ToolbarView::OnPaint(gfx::Canvas* canvas) {
   // it from the content area.  For non-glass, the NonClientView draws the
   // toolbar background below the location bar for us.
   // NOTE: Keep this in sync with BrowserView::GetInfoBarSeparatorColor()!
-  if (GetWindow()->ShouldUseNativeFrame())
+  if (GetWidget()->ShouldUseNativeFrame())
     canvas->FillRectInt(SK_ColorBLACK, 0, height() - 1, width(), 1);
 }
 
@@ -596,6 +606,10 @@ void ToolbarView::OnThemeChanged() {
   LoadImages();
 }
 
+std::string ToolbarView::GetClassName() const {
+  return kViewClassName;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, protected:
 
@@ -627,16 +641,16 @@ bool ToolbarView::ShouldShowIncompatibilityWarning() {
 }
 
 int ToolbarView::PopupTopSpacing() const {
-  // TODO(beng): For some reason GetWindow() returns NULL here in some
+  // TODO(beng): For some reason GetWidget() returns NULL here in some
   //             unidentified circumstances on ChromeOS. This means GetWidget()
   //             succeeded but we were (probably) unable to locate a
   //             NativeWidgetGtk* on it using
   //             NativeWidget::GetNativeWidgetForNativeView.
   //             I am throwing in a NULL check for now to stop the hurt, but
   //             it's possible the crash may just show up somewhere else.
-  const views::Window* window = GetWindow();
-  DCHECK(window) << "If you hit this please talk to beng";
-  return window && window->ShouldUseNativeFrame() ?
+  const views::Widget* widget = GetWidget();
+  DCHECK(widget) << "If you hit this please talk to beng";
+  return widget && widget->ShouldUseNativeFrame() ?
       0 : kPopupTopSpacingNonGlass;
 }
 

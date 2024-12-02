@@ -8,11 +8,10 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 
 ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(Browser* browser,
                                                    TabContents* tab_contents,
@@ -21,16 +20,15 @@ ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(Browser* browser,
     : InfoBarDelegate(tab_contents),
       observer_(NULL),
       extension_(extension),
-      tab_contents_(tab_contents),
       closing_(false) {
   ExtensionProcessManager* manager =
       browser->profile()->GetExtensionProcessManager();
   extension_host_.reset(manager->CreateInfobarHost(url, browser));
   extension_host_->set_associated_tab_contents(tab_contents);
 
-  registrar_.Add(this, NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
                  Source<Profile>(browser->profile()));
-  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  Source<Profile>(browser->profile()));
 }
 
@@ -68,28 +66,15 @@ ExtensionInfoBarDelegate*
   return this;
 }
 
-void ExtensionInfoBarDelegate::Observe(NotificationType type,
+void ExtensionInfoBarDelegate::Observe(int type,
                                        const NotificationSource& source,
                                        const NotificationDetails& details) {
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
-  switch (type.value) {
-    case NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE: {
-      const ExtensionHost* result = Details<ExtensionHost>(details).ptr();
-      if (extension_host_.get() == result)
-        wrapper->RemoveInfoBar(this);
-      break;
-    }
-    case NotificationType::EXTENSION_UNLOADED: {
-      const Extension* extension =
-          Details<UnloadedExtensionInfo>(details)->extension;
-      if (extension_ == extension)
-        wrapper->RemoveInfoBar(this);
-      break;
-    }
-    default: {
-      NOTREACHED() << "Unknown message";
-      break;
-    }
+  if (type == chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE) {
+    if (extension_host_.get() == Details<ExtensionHost>(details).ptr())
+      RemoveSelf();
+  } else {
+    DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
+    if (extension_ == Details<UnloadedExtensionInfo>(details)->extension)
+      RemoveSelf();
   }
 }

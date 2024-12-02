@@ -13,7 +13,7 @@
 #include "base/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/background_application_list_model.h"
+#include "chrome/browser/background/background_application_list_model.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/command_updater.h"
@@ -41,9 +41,11 @@
 #import "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
 #import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
 #import "chrome/browser/ui/cocoa/history_menu_bridge.h"
+#import "chrome/browser/ui/cocoa/profile_menu_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/app_mode_common_mac.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
@@ -52,6 +54,7 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -152,12 +155,14 @@ void RecordLastRunAppBundlePath() {
 
 @interface AppController (Private)
 - (void)initMenuState;
+- (void)initProfileMenu;
 - (void)updateConfirmToQuitPrefMenuItem:(NSMenuItem*)item;
 - (void)registerServicesMenuTypesTo:(NSApplication*)app;
 - (void)openUrls:(const std::vector<GURL>&)urls;
 - (void)getUrl:(NSAppleEventDescriptor*)event
      withReply:(NSAppleEventDescriptor*)reply;
 - (void)windowLayeringDidChange:(NSNotification*)inNotification;
+- (void)windowChangedToProfile:(Profile*)profile;
 - (void)checkForAnyKeyWindows;
 - (BOOL)userWillWaitForInProgressDownloads:(int)downloadCount;
 - (BOOL)shouldQuitWithInProgressDownloads;
@@ -209,27 +214,11 @@ void RecordLastRunAppBundlePath() {
              name:NSWindowDidResignMainNotification
            object:nil];
 
-  // Register for a notification that the number of tabs changes in windows
-  // so we can adjust the close tab/window command keys.
-  [notificationCenter
-      addObserver:self
-         selector:@selector(tabsChanged:)
-             name:kTabStripNumberOfTabsChanged
-           object:nil];
-
   // Set up the command updater for when there are no windows open
   [self initMenuState];
 
-  // Activate (bring to foreground) if asked to do so.  On
-  // Windows this logic isn't necessary since
-  // BrowserWindow::Activate() calls ::SetForegroundWindow() which is
-  // adequate.  On Mac, BrowserWindow::Activate() calls -[NSWindow
-  // makeKeyAndOrderFront:] which does not activate the application
-  // itself.
-  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-  if (parsed_command_line.HasSwitch(switches::kActivateOnLaunch)) {
-    [NSApp activateIgnoringOtherApps:YES];
-  }
+  // Initialize the Profile menu.
+  [self initProfileMenu];
 }
 
 // (NSApplicationDelegate protocol) This is the Apple-approved place to override
@@ -284,7 +273,7 @@ void RecordLastRunAppBundlePath() {
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)app {
   // Check if the preference is turned on.
-  const PrefService* prefs = [self defaultProfile]->GetPrefs();
+  const PrefService* prefs = [self lastProfile]->GetPrefs();
   if (!prefs->GetBoolean(prefs::kConfirmToQuitEnabled)) {
     confirm_quit::RecordHistogram(confirm_quit::kNoConfirm);
     return NSTerminateNow;
@@ -324,14 +313,14 @@ void RecordLastRunAppBundlePath() {
 }
 
 - (void)didEndMainMessageLoop {
-  DCHECK(!BrowserList::HasBrowserWithProfile([self defaultProfile]));
-  if (!BrowserList::HasBrowserWithProfile([self defaultProfile])) {
+  DCHECK(!BrowserList::HasBrowserWithProfile([self lastProfile]));
+  if (!BrowserList::HasBrowserWithProfile([self lastProfile])) {
     // As we're shutting down, we need to nuke the TabRestoreService, which
     // will start the shutdown of the NavigationControllers and allow for
     // proper shutdown. If we don't do this, Chrome won't shut down cleanly,
     // and may end up crashing when some thread tries to use the IO thread (or
     // another thread) that is no longer valid.
-    TabRestoreServiceFactory::ResetForProfile([self defaultProfile]);
+    TabRestoreServiceFactory::ResetForProfile([self lastProfile]);
   }
 }
 
@@ -359,16 +348,16 @@ void RecordLastRunAppBundlePath() {
   return nil;
 }
 
-// If the window has tabs, make "close window" be cmd-shift-w, otherwise leave
-// it as the normal cmd-w. Capitalization of the key equivalent affects whether
-// the shift modifer is used.
-- (void)adjustCloseWindowMenuItemKeyEquivalent:(BOOL)inHaveTabs {
-  [closeWindowMenuItem_ setKeyEquivalent:(inHaveTabs ? @"W" : @"w")];
+// If the window has a tab controller, make "close window" be cmd-shift-w,
+// otherwise leave it as the normal cmd-w. Capitalization of the key equivalent
+// affects whether the shift modifer is used.
+- (void)adjustCloseWindowMenuItemKeyEquivalent:(BOOL)hasTabs {
+  [closeWindowMenuItem_ setKeyEquivalent:(hasTabs ? @"W" : @"w")];
   [closeWindowMenuItem_ setKeyEquivalentModifierMask:NSCommandKeyMask];
 }
 
-// If the window has tabs, make "close tab" take over cmd-w, otherwise it
-// shouldn't have any key-equivalent because it should be disabled.
+// If the window has a tab controller, make "close tab" take over cmd-w,
+// otherwise it shouldn't have any key-equivalent because it should be disabled.
 - (void)adjustCloseTabMenuItemKeyEquivalent:(BOOL)hasTabs {
   if (hasTabs) {
     [closeTabMenuItem_ setKeyEquivalent:@"w"];
@@ -391,7 +380,7 @@ void RecordLastRunAppBundlePath() {
 
 // See if we have a window with tabs open, and adjust the key equivalents for
 // Close Tab/Close Window accordingly.
-- (void)fixCloseMenuItemKeyEquivalents {
+- (void)fixCloseMenuItemKeyEquivalents:(NSWindow*)window {
   fileMenuUpdatePending_ = NO;
   TabWindowController* tabController = [self keyWindowTabController];
   if (!tabController && ![NSApp keyWindow]) {
@@ -399,17 +388,17 @@ void RecordLastRunAppBundlePath() {
     // so just use our main browser window if there is one.
     tabController = [self mainWindowTabController];
   }
-  BOOL windowWithMultipleTabs =
-      (tabController && [tabController numberOfTabs] > 1);
-  [self adjustCloseWindowMenuItemKeyEquivalent:windowWithMultipleTabs];
-  [self adjustCloseTabMenuItemKeyEquivalent:windowWithMultipleTabs];
+  BOOL hasTabs = !!tabController;
+
+  [self adjustCloseWindowMenuItemKeyEquivalent:hasTabs];
+  [self adjustCloseTabMenuItemKeyEquivalent:hasTabs];
 }
 
 // Fix up the "close tab/close window" command-key equivalents. We do this
 // after a delay to ensure that window layer state has been set by the time
 // we do the enabling. This should only be called on the main thread, code that
 // calls this (even as a side-effect) from other threads needs to be fixed.
-- (void)delayedFixCloseMenuItemKeyEquivalents {
+- (void)delayedFixCloseMenuItemKeyEquivalents:(NSNotification*)notify {
   DCHECK([NSThread isMainThread]);
   if (!fileMenuUpdatePending_) {
     // The OS prefers keypresses to timers, so it's possible that a cmd-w
@@ -419,8 +408,8 @@ void RecordLastRunAppBundlePath() {
     if ([NSThread isMainThread]) {
       fileMenuUpdatePending_ = YES;
       [self clearCloseMenuItemKeyEquivalents];
-      [self performSelector:@selector(fixCloseMenuItemKeyEquivalents)
-                 withObject:nil
+      [self performSelector:@selector(fixCloseMenuItemKeyEquivalents:)
+                 withObject:[notify object]
                  afterDelay:0];
     } else {
       // This shouldn't be happening, but if it does, force it to the main
@@ -429,8 +418,8 @@ void RecordLastRunAppBundlePath() {
       // there could be a race between the selector finishing and setting the
       // flag.
       [self
-          performSelectorOnMainThread:@selector(fixCloseMenuItemKeyEquivalents)
-                           withObject:nil
+          performSelectorOnMainThread:@selector(fixCloseMenuItemKeyEquivalents:)
+                           withObject:[notify object]
                         waitUntilDone:NO];
     }
   }
@@ -439,7 +428,7 @@ void RecordLastRunAppBundlePath() {
 // Called when we get a notification about the window layering changing to
 // update the UI based on the new main window.
 - (void)windowLayeringDidChange:(NSNotification*)notify {
-  [self delayedFixCloseMenuItemKeyEquivalents];
+  [self delayedFixCloseMenuItemKeyEquivalents:notify];
 
   if ([notify name] == NSWindowDidResignKeyNotification) {
     // If a window is closed, this notification is fired but |[NSApp keyWindow]|
@@ -451,6 +440,40 @@ void RecordLastRunAppBundlePath() {
                withObject:nil
                afterDelay:0.0];
   }
+
+  // If the window changed to a new BrowserWindowController, update the profile.
+  id windowController = [[notify object] windowController];
+  if ([windowController isKindOfClass:[BrowserWindowController class]]) {
+    // If the profile is incognito, use the original profile.
+    Profile* newProfile = [windowController profile]->GetOriginalProfile();
+    [self windowChangedToProfile:newProfile];
+  }
+}
+
+// Called when the user has changed browser windows, meaning the backing profile
+// may have changed. This can cause a rebuild of the user-data menus. This is a
+// no-op if the new profile is the same as the current one. This will always be
+// the original profile and never incognito.
+- (void)windowChangedToProfile:(Profile*)profile {
+  if (lastProfile_ == profile)
+    return;
+
+  // Before tearing down the menu controller bridges, return the Cocoa menus to
+  // their initial state.
+  if (bookmarkMenuBridge_.get())
+    bookmarkMenuBridge_->ResetMenu();
+  if (historyMenuBridge_.get())
+    historyMenuBridge_->ResetMenu();
+
+  // Rebuild the menus with the new profile.
+  lastProfile_ = profile;
+
+  bookmarkMenuBridge_.reset(new BookmarkMenuBridge(lastProfile_,
+      [[[NSApp mainMenu] itemWithTag:IDC_BOOKMARKS_MENU] submenu]));
+  bookmarkMenuBridge_->BuildMenu();
+
+  historyMenuBridge_.reset(new HistoryMenuBridge(lastProfile_));
+  historyMenuBridge_->BuildMenu();
 }
 
 - (void)checkForAnyKeyWindows {
@@ -458,19 +481,9 @@ void RecordLastRunAppBundlePath() {
     return;
 
   NotificationService::current()->Notify(
-      NotificationType::NO_KEY_WINDOW,
+      content::NOTIFICATION_NO_KEY_WINDOW,
       NotificationService::AllSources(),
       NotificationService::NoDetails());
-}
-
-// Called when the number of tabs changes in one of the browser windows. The
-// object is the tab strip controller, but we don't currently care.
-- (void)tabsChanged:(NSNotification*)notify {
-  // We don't need to do this on a delay, as in the method above, because the
-  // window layering isn't changing. As a result, there's no chance that a
-  // different window will sneak in as the key window and cause the problems
-  // we hacked around above by clearing the key equivalents.
-  [self fixCloseMenuItemKeyEquivalents];
 }
 
 // If the auto-update interval is not set, make it 5 hours.
@@ -500,10 +513,6 @@ void RecordLastRunAppBundlePath() {
   // when all the browser windows get closed.
   BrowserList::StartKeepAlive();
 
-  bookmarkMenuBridge_.reset(new BookmarkMenuBridge([self defaultProfile],
-      [[[NSApp mainMenu] itemWithTag:IDC_BOOKMARKS_MENU] submenu]));
-  historyMenuBridge_.reset(new HistoryMenuBridge([self defaultProfile]));
-
   [self setUpdateCheckInterval];
 
   // Build up the encoding menu, the order of the items differs based on the
@@ -513,7 +522,7 @@ void RecordLastRunAppBundlePath() {
   NSMenu* viewMenu = [[[NSApp mainMenu] itemWithTag:IDC_VIEW_MENU] submenu];
   NSMenuItem* encodingMenuItem = [viewMenu itemWithTag:IDC_ENCODING_MENU];
   NSMenu* encodingMenu = [encodingMenuItem submenu];
-  EncodingMenuControllerDelegate::BuildEncodingMenu([self defaultProfile],
+  EncodingMenuControllerDelegate::BuildEncodingMenu([self lastProfile],
                                                     encodingMenu);
 
   // Since Chrome is localized to more languages than the OS, tell Cocoa which
@@ -547,7 +556,7 @@ void RecordLastRunAppBundlePath() {
 // This is called after profiles have been loaded and preferences registered.
 // It is safe to access the default profile here.
 - (void)applicationDidBecomeActive:(NSNotification*)notify {
-  NotificationService::current()->Notify(NotificationType::APP_ACTIVATED,
+  NotificationService::current()->Notify(content::NOTIFICATION_APP_ACTIVATED,
                                          NotificationService::AllSources(),
                                          NotificationService::NoDetails());
 }
@@ -640,7 +649,7 @@ void RecordLastRunAppBundlePath() {
 // restore and returns YES if so.
 - (BOOL)canRestoreTab {
   TabRestoreService* service =
-      TabRestoreServiceFactory::GetForProfile([self defaultProfile]);
+      TabRestoreServiceFactory::GetForProfile([self lastProfile]);
   return service && !service->entries().empty();
 }
 
@@ -692,21 +701,21 @@ void RecordLastRunAppBundlePath() {
           enable = [self keyWindowIsNotModal] || ([NSApp modalWindow] == nil);
           break;
         case IDC_SYNC_BOOKMARKS: {
-          Profile* defaultProfile = [self defaultProfile];
+          Profile* lastProfile = [self lastProfile];
           // The profile may be NULL during shutdown -- see
           // http://code.google.com/p/chromium/issues/detail?id=43048 .
           //
           // TODO(akalin,viettrungluu): Figure out whether this method
-          // can be prevented from being called if defaultProfile is
+          // can be prevented from being called if lastProfile is
           // NULL.
-          if (!defaultProfile) {
+          if (!lastProfile) {
             LOG(WARNING)
-                << "NULL defaultProfile detected -- not doing anything";
+                << "NULL lastProfile detected -- not doing anything";
             break;
           }
-          enable = defaultProfile->IsSyncAccessible() &&
+          enable = lastProfile->IsSyncAccessible() &&
               [self keyWindowIsNotModal];
-          sync_ui_util::UpdateSyncItem(item, enable, defaultProfile);
+          sync_ui_util::UpdateSyncItem(item, enable, lastProfile);
           break;
         }
         default:
@@ -735,7 +744,7 @@ void RecordLastRunAppBundlePath() {
 // check, otherwise it should have been disabled in the UI in
 // |-validateUserInterfaceItem:|.
 - (void)commandDispatch:(id)sender {
-  Profile* defaultProfile = [self defaultProfile];
+  Profile* lastProfile = [self lastProfile];
 
   // Handle the case where we're dispatching a command from a sender that's in a
   // browser window. This means that the command came from a background window
@@ -753,80 +762,79 @@ void RecordLastRunAppBundlePath() {
     case IDC_NEW_TAB:
       // Create a new tab in an existing browser window (which we activate) if
       // possible.
-      if (Browser* browser = ActivateBrowser(defaultProfile)) {
+      if (Browser* browser = ActivateBrowser(lastProfile)) {
         browser->ExecuteCommand(IDC_NEW_TAB);
         break;
       }
       // Else fall through to create new window.
     case IDC_NEW_WINDOW:
-      CreateBrowser(defaultProfile);
+      CreateBrowser(lastProfile);
       break;
     case IDC_FOCUS_LOCATION:
-      ActivateOrCreateBrowser(defaultProfile)->
-          ExecuteCommand(IDC_FOCUS_LOCATION);
+      ActivateOrCreateBrowser(lastProfile)->ExecuteCommand(IDC_FOCUS_LOCATION);
       break;
     case IDC_FOCUS_SEARCH:
-      ActivateOrCreateBrowser(defaultProfile)->ExecuteCommand(IDC_FOCUS_SEARCH);
+      ActivateOrCreateBrowser(lastProfile)->ExecuteCommand(IDC_FOCUS_SEARCH);
       break;
     case IDC_NEW_INCOGNITO_WINDOW:
-      Browser::OpenEmptyWindow(defaultProfile->GetOffTheRecordProfile());
+      Browser::OpenEmptyWindow(lastProfile->GetOffTheRecordProfile());
       break;
     case IDC_RESTORE_TAB:
-      Browser::OpenWindowWithRestoredTabs(defaultProfile);
+      Browser::OpenWindowWithRestoredTabs(lastProfile);
       break;
     case IDC_OPEN_FILE:
-      CreateBrowser(defaultProfile)->ExecuteCommand(IDC_OPEN_FILE);
+      CreateBrowser(lastProfile)->ExecuteCommand(IDC_OPEN_FILE);
       break;
     case IDC_CLEAR_BROWSING_DATA: {
       // There may not be a browser open, so use the default profile.
-      if (Browser* browser = ActivateBrowser(defaultProfile)) {
+      if (Browser* browser = ActivateBrowser(lastProfile)) {
         browser->OpenClearBrowsingDataDialog();
       } else {
-        Browser::OpenClearBrowingDataDialogWindow(defaultProfile);
+        Browser::OpenClearBrowsingDataDialogWindow(lastProfile);
       }
       break;
     }
     case IDC_IMPORT_SETTINGS: {
-      if (Browser* browser = ActivateBrowser(defaultProfile)) {
+      if (Browser* browser = ActivateBrowser(lastProfile)) {
         browser->OpenImportSettingsDialog();
       } else {
-        Browser::OpenImportSettingsDialogWindow(defaultProfile);
+        Browser::OpenImportSettingsDialogWindow(lastProfile);
       }
       break;
     }
     case IDC_SHOW_BOOKMARK_MANAGER:
       UserMetrics::RecordAction(UserMetricsAction("ShowBookmarkManager"));
-      if (Browser* browser = ActivateBrowser(defaultProfile)) {
+      if (Browser* browser = ActivateBrowser(lastProfile)) {
         // Open a bookmark manager tab.
         browser->OpenBookmarkManager();
       } else {
         // No browser window, so create one for the bookmark manager tab.
-        Browser::OpenBookmarkManagerWindow(defaultProfile);
+        Browser::OpenBookmarkManagerWindow(lastProfile);
       }
       break;
     case IDC_SHOW_HISTORY:
-      if (Browser* browser = ActivateBrowser(defaultProfile))
+      if (Browser* browser = ActivateBrowser(lastProfile))
         browser->ShowHistoryTab();
       else
-        Browser::OpenHistoryWindow(defaultProfile);
+        Browser::OpenHistoryWindow(lastProfile);
       break;
     case IDC_SHOW_DOWNLOADS:
-      if (Browser* browser = ActivateBrowser(defaultProfile))
+      if (Browser* browser = ActivateBrowser(lastProfile))
         browser->ShowDownloadsTab();
       else
-        Browser::OpenDownloadsWindow(defaultProfile);
+        Browser::OpenDownloadsWindow(lastProfile);
       break;
     case IDC_MANAGE_EXTENSIONS:
-      if (Browser* browser = ActivateBrowser(defaultProfile))
+      if (Browser* browser = ActivateBrowser(lastProfile))
         browser->ShowExtensionsTab();
       else
-        Browser::OpenExtensionsWindow(defaultProfile);
+        Browser::OpenExtensionsWindow(lastProfile);
       break;
     case IDC_HELP_PAGE:
-      if (Browser* browser = ActivateBrowser(defaultProfile))
-        browser->OpenHelpTab();
+      if (Browser* browser = ActivateBrowser(lastProfile))
+        browser->ShowHelpTab();
       else
-        Browser::OpenHelpWindow(defaultProfile);
+        Browser::OpenHelpWindow(lastProfile);
       break;
     case IDC_FEEDBACK: {
       Browser* browser = BrowserList::GetLastActive();
@@ -835,7 +843,7 @@ void RecordLastRunAppBundlePath() {
       BugReportWindowController* controller =
           [[BugReportWindowController alloc]
               initWithTabContents:currentTab
-                          profile:[self defaultProfile]];
+                          profile:[self lastProfile]];
       [controller runModalDialog];
       break;
     }
@@ -844,15 +852,15 @@ void RecordLastRunAppBundlePath() {
       // http://code.google.com/p/chromium/issues/detail?id=43048 .
       //
       // TODO(akalin,viettrungluu): Figure out whether this method can
-      // be prevented from being called if defaultProfile is NULL.
-      if (!defaultProfile) {
-        LOG(WARNING) << "NULL defaultProfile detected -- not doing anything";
+      // be prevented from being called if lastProfile is NULL.
+      if (!lastProfile) {
+        LOG(WARNING) << "NULL lastProfile detected -- not doing anything";
         break;
       }
       // TODO(akalin): Add a constant to denote starting sync from the
       // main menu and use that instead of START_FROM_WRENCH.
       sync_ui_util::OpenSyncMyBookmarksDialog(
-          defaultProfile, ActivateBrowser(defaultProfile),
+          lastProfile, ActivateBrowser(lastProfile),
           ProfileSyncService::START_FROM_WRENCH);
       break;
     case IDC_TASK_MANAGER:
@@ -874,7 +882,7 @@ void RecordLastRunAppBundlePath() {
 // Run a (background) application in a new tab.
 - (void)executeApplication:(id)sender {
   NSInteger tag = [sender tag];
-  Profile* profile = [self defaultProfile];
+  Profile* profile = [self lastProfile];
   DCHECK(profile);
   BackgroundApplicationListModel applications(profile);
   DCHECK(tag >= 0 &&
@@ -929,7 +937,7 @@ void RecordLastRunAppBundlePath() {
         doneOnce = YES;
         if (base::mac::WasLaunchedAsHiddenLoginItem()) {
           SessionService* sessionService =
-              SessionServiceFactory::GetForProfile([self defaultProfile]);
+              SessionServiceFactory::GetForProfile([self lastProfile]);
           if (sessionService &&
               sessionService->RestoreIfNecessary(std::vector<GURL>()))
             return NO;
@@ -939,7 +947,7 @@ void RecordLastRunAppBundlePath() {
   // Otherwise open a new window.
   {
     AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
-    Browser::OpenEmptyWindow([self defaultProfile]);
+    Browser::OpenEmptyWindow([self lastProfile]);
   }
 
   // We've handled the reopen event, so return NO to tell AppKit not
@@ -968,6 +976,30 @@ void RecordLastRunAppBundlePath() {
   menuState_->UpdateCommandEnabled(IDC_TASK_MANAGER, true);
 }
 
+// Conditionally adds the Profile menu to the main menu bar.
+- (void)initProfileMenu {
+  bool enableMenu = ProfileManager::IsMultipleProfilesEnabled();
+
+  NSMenu* mainMenu = [NSApp mainMenu];
+  NSMenuItem* profileMenu = [mainMenu itemWithTag:IDC_PROFILE_MAIN_MENU];
+
+  // On Leopard, hiding main menubar items does not work. This manifests itself
+  // in Chromium as squished menu items <http://crbug.com/90753>. To prevent
+  // this, remove the Profile menu on Leopard, regardless of the user's
+  // multiprofile state.
+  if (base::mac::IsOSLeopard()) {
+    [mainMenu removeItem:profileMenu];
+    return;
+  }
+
+  [profileMenu setHidden:!enableMenu];
+
+  if (enableMenu) {
+    profileMenuController_.reset(
+        [[ProfileMenuController alloc] initWithMainMenuItem:profileMenu]);
+  }
+}
+
 // The Confirm to Quit preference is atypical in that the preference lives in
 // the app menu right above the Quit menu item. This method will refresh the
 // display of that item depending on the preference state.
@@ -978,7 +1010,7 @@ void RecordLastRunAppBundlePath() {
       base::SysNSStringToUTF16(acceleratorString));
   [item setTitle:title];
 
-  const PrefService* prefService = [self defaultProfile]->GetPrefs();
+  const PrefService* prefService = [self lastProfile]->GetPrefs();
   bool enabled = prefService->GetBoolean(prefs::kConfirmToQuitEnabled);
   [item setState:enabled ? NSOnState : NSOffState];
 }
@@ -990,9 +1022,14 @@ void RecordLastRunAppBundlePath() {
   [app registerServicesMenuSendTypes:types returnTypes:types];
 }
 
-- (Profile*)defaultProfile {
+- (Profile*)lastProfile {
+  // Return the profile of the last-used BrowserWindowController, if available.
+  if (lastProfile_)
+    return lastProfile_;
+
+  // On first launch, no profile will be stored, so use last from Local State.
   if (g_browser_process->profile_manager())
-    return g_browser_process->profile_manager()->GetDefaultProfile();
+    return g_browser_process->profile_manager()->GetLastUsedProfile();
 
   return NULL;
 }
@@ -1012,7 +1049,7 @@ void RecordLastRunAppBundlePath() {
   Browser* browser = BrowserList::GetLastActive();
   // if no browser window exists then create one with no tabs to be filled in
   if (!browser) {
-    browser = Browser::Create([self defaultProfile]);
+    browser = Browser::Create([self lastProfile]);
     browser->window()->Show();
   }
 
@@ -1051,12 +1088,12 @@ void RecordLastRunAppBundlePath() {
 // Show the preferences window, or bring it to the front if it's already
 // visible.
 - (IBAction)showPreferences:(id)sender {
-  if (Browser* browser = ActivateBrowser([self defaultProfile])) {
+  if (Browser* browser = ActivateBrowser([self lastProfile])) {
     // Show options tab in the active browser window.
     browser->OpenOptionsDialog();
   } else {
     // No browser window, so create one for the options tab.
-    Browser::OpenOptionsWindow([self defaultProfile]);
+    Browser::OpenOptionsWindow([self lastProfile]);
   }
 }
 
@@ -1077,7 +1114,7 @@ void RecordLastRunAppBundlePath() {
 - (IBAction)orderFrontStandardAboutPanel:(id)sender {
   if (!aboutController_) {
     aboutController_ =
-        [[AboutWindowController alloc] initWithProfile:[self defaultProfile]];
+        [[AboutWindowController alloc] initWithProfile:[self lastProfile]];
 
     // Watch for a notification of when it goes away so that we can destroy
     // the controller.
@@ -1092,7 +1129,7 @@ void RecordLastRunAppBundlePath() {
 }
 
 - (IBAction)toggleConfirmToQuit:(id)sender {
-  PrefService* prefService = [self defaultProfile]->GetPrefs();
+  PrefService* prefService = [self lastProfile]->GetPrefs();
   bool enabled = prefService->GetBoolean(prefs::kConfirmToQuitEnabled);
   prefService->SetBoolean(prefs::kConfirmToQuitEnabled, !enabled);
 }
@@ -1105,7 +1142,7 @@ void RecordLastRunAppBundlePath() {
 
 - (NSMenu*)applicationDockMenu:(NSApplication*)sender {
   NSMenu* dockMenu = [[[NSMenu alloc] initWithTitle: @""] autorelease];
-  Profile* profile = [self defaultProfile];
+  Profile* profile = [self lastProfile];
 
   NSString* titleStr = l10n_util::GetNSStringWithFixup(IDS_NEW_WINDOW_MAC);
   scoped_nsobject<NSMenuItem> item(

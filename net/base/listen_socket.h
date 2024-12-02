@@ -30,9 +30,10 @@
 #include "net/base/net_api.h"
 
 #if defined(OS_POSIX)
-struct event;  // From libevent
 typedef int SOCKET;
 #endif
+
+namespace net {
 
 // Implements a raw socket interface
 class NET_API ListenSocket : public base::RefCountedThreadSafe<ListenSocket>,
@@ -80,8 +81,7 @@ class NET_API ListenSocket : public base::RefCountedThreadSafe<ListenSocket>,
   enum WaitState {
     NOT_WAITING      = 0,
     WAITING_ACCEPT   = 1,
-    WAITING_READ     = 3,
-    WAITING_CLOSE    = 4
+    WAITING_READ     = 2
   };
 
   static const SOCKET kInvalidSocket;
@@ -129,5 +129,7 @@ class NET_API ListenSocket : public base::RefCountedThreadSafe<ListenSocket>,
 
   DISALLOW_COPY_AND_ASSIGN(ListenSocket);
 };
+
+}  // namespace net
 
 #endif  // NET_BASE_LISTEN_SOCKET_H_

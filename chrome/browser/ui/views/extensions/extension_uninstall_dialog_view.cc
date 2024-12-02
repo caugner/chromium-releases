@@ -18,16 +18,15 @@
 #include "views/controls/label.h"
 #include "views/layout/layout_constants.h"
 #include "views/view.h"
+#include "views/widget/widget.h"
 #include "views/window/dialog_delegate.h"
-#include "views/window/window.h"
 
 namespace {
 
 const int kRightColumnWidth = 210;
 const int kIconSize = 69;
 
-class ExtensionUninstallDialogView : public views::View,
-                                     public views::DialogDelegate {
+class ExtensionUninstallDialogView : public views::DialogDelegateView {
  public:
   ExtensionUninstallDialogView(ExtensionUninstallDialog::Delegate* delegate,
                                const Extension* extension,

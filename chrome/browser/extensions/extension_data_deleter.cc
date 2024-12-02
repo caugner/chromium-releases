@@ -64,7 +64,8 @@ void ExtensionDataDeleter::DeleteCookiesOnIOThread() {
       extension_request_context_->GetURLRequestContext()->cookie_store()->
       GetCookieMonster();
   if (cookie_monster)
-    cookie_monster->DeleteAllForHost(extension_url_);
+    cookie_monster->DeleteAllForHostAsync(
+        extension_url_, net::CookieMonster::DeleteCallback());
 }
 
 void ExtensionDataDeleter::DeleteDatabaseOnFileThread() {
@@ -81,7 +82,8 @@ void ExtensionDataDeleter::DeleteLocalStorageOnWebkitThread() {
 
 void ExtensionDataDeleter::DeleteIndexedDBOnWebkitThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
-  webkit_context_->indexed_db_context()->DeleteIndexedDBForOrigin(origin_id_);
+  webkit_context_->indexed_db_context()->DeleteIndexedDBForOrigin(
+      extension_url_);
 }
 
 void ExtensionDataDeleter::DeleteFileSystemOnFileThread() {

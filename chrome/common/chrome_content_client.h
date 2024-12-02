@@ -20,6 +20,10 @@ class ChromeContentClient : public content::ContentClient {
   virtual void AddPepperPlugins(std::vector<PepperPluginInfo>* plugins);
   virtual bool CanSendWhileSwappedOut(const IPC::Message* msg);
   virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg);
+  virtual std::string GetUserAgent(bool mimic_windows) const;
+  virtual string16 GetLocalizedString(int message_id) const;
+  virtual base::StringPiece GetDataResource(int resource_id) const;
+
 #if defined(OS_WIN)
   virtual bool SandboxPlugin(CommandLine* command_line,
                              sandbox::TargetPolicy* policy);

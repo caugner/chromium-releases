@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_gtk.h"
 
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_views.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
@@ -20,7 +21,7 @@ NativeTabContentsContainerGtk::NativeTabContentsContainerGtk(
     TabContentsContainer* container)
     : container_(container),
       focus_callback_id_(0) {
-  SetID(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW);
+  set_id(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW);
 }
 
 NativeTabContentsContainerGtk::~NativeTabContentsContainerGtk() {
@@ -145,5 +146,7 @@ void NativeTabContentsContainerGtk::GetAccessibleState(
 // static
 NativeTabContentsContainer* NativeTabContentsContainer::CreateNativeContainer(
     TabContentsContainer* container) {
+  if (views::Widget::IsPureViews())
+    return new NativeTabContentsContainerViews(container);
   return new NativeTabContentsContainerGtk(container);
 }

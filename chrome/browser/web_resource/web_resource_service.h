@@ -8,25 +8,26 @@
 
 #include <string>
 
-#include "chrome/browser/utility_process_host.h"
-#include "content/common/notification_type.h"
+#include "content/browser/utility_process_host.h"
+#include "content/common/content_notification_types.h"
 
 class PrefService;
-class Profile;
 class ResourceDispatcherHost;
+
+namespace base {
+class DictionaryValue;
+}
 
 // A WebResourceService fetches data from a web resource server and store
 // locally as user preference.
-class WebResourceService
-    : public UtilityProcessHost::Client {
+class WebResourceService : public UtilityProcessHost::Client {
  public:
   // Pass notification_type = NOTIFICATION_TYPE_COUNT if notification is not
   // required.
-  WebResourceService(Profile* profile,
-                     PrefService* prefs,
+  WebResourceService(PrefService* prefs,
                      const char* web_resource_server,
                      bool apply_locale_to_url_,
-                     NotificationType::Type notification_type,
+                     int notification_type,
                      const char* last_update_time_pref_name,
                      int start_fetch_delay,
                      int cache_update_delay);
@@ -42,7 +43,7 @@ class WebResourceService
  protected:
   virtual ~WebResourceService();
 
-  virtual void Unpack(const DictionaryValue& parsed_json) = 0;
+  virtual void Unpack(const base::DictionaryValue& parsed_json) = 0;
 
   // If delay_ms is positive, schedule notification with the delay.
   // If delay_ms is 0, notify immediately by calling WebResourceStateChange().
@@ -52,8 +53,6 @@ class WebResourceService
   // We need to be able to load parsed resource data into preferences file,
   // and get proper install directory.
   PrefService* prefs_;
-
-  Profile* profile_;
 
  private:
   class WebResourceFetcher;
@@ -65,7 +64,7 @@ class WebResourceService
   void EndFetch();
 
   // Puts parsed json data in the right places, and writes to prefs file.
-  void OnWebResourceUnpacked(const DictionaryValue& parsed_json);
+  void OnWebResourceUnpacked(const base::DictionaryValue& parsed_json);
 
   // Notify listeners that the state of a web resource has changed.
   void WebResourceStateChange();
@@ -91,7 +90,7 @@ class WebResourceService
   bool apply_locale_to_url_;
 
   // Notification type when an update is done.
-  NotificationType::Type notification_type_;
+  int notification_type_;
 
   // Pref name to store the last update's time.
   const char* last_update_time_pref_name_;

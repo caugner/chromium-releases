@@ -17,6 +17,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -54,8 +55,9 @@ TabSpecificContentSettings::TabSpecificContentSettings(TabContents* tab)
   ClearCookieSpecificContentSettings();
   g_tab_specific.Get().push_back(this);
 
-  registrar_.Add(this, NotificationType::CONTENT_SETTINGS_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
+                 Source<HostContentSettingsMap>(
+                     tab->profile()->GetHostContentSettingsMap()));
 }
 
 TabSpecificContentSettings::~TabSpecificContentSettings() {
@@ -151,9 +153,6 @@ bool TabSpecificContentSettings::IsContentBlocked(
   DCHECK(content_type != CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
       << "Notifications settings handled by "
       << "ContentSettingsNotificationsImageModel";
-  DCHECK(content_type != CONTENT_SETTINGS_TYPE_PRERENDER)
-      << "Prerendering settings handled by "
-      << "ContentSettingPrerenderImageModel";
 
   if (content_type == CONTENT_SETTINGS_TYPE_IMAGES ||
       content_type == CONTENT_SETTINGS_TYPE_JAVASCRIPT ||
@@ -215,7 +214,7 @@ void TabSpecificContentSettings::OnContentBlocked(
     content_blocked_[type] = true;
     // TODO: it would be nice to have a way of mocking this in tests.
     NotificationService::current()->Notify(
-        NotificationType::TAB_CONTENT_SETTINGS_CHANGED,
+        chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
         Source<TabContents>(tab_contents()),
         NotificationService::NoDetails());
   }
@@ -227,7 +226,7 @@ void TabSpecificContentSettings::OnContentAccessed(ContentSettingsType type) {
   if (!content_accessed_[type]) {
     content_accessed_[type] = true;
     NotificationService::current()->Notify(
-        NotificationType::TAB_CONTENT_SETTINGS_CHANGED,
+        chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
         Source<TabContents>(tab_contents()),
         NotificationService::NoDetails());
   }
@@ -353,7 +352,7 @@ void TabSpecificContentSettings::OnGeolocationPermissionSet(
   geolocation_settings_state_.OnGeolocationPermissionSet(requesting_origin,
                                                          allowed);
   NotificationService::current()->Notify(
-      NotificationType::TAB_CONTENT_SETTINGS_CHANGED,
+      chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
       Source<TabContents>(tab_contents()),
       NotificationService::NoDetails());
 }
@@ -369,7 +368,7 @@ void TabSpecificContentSettings::ClearBlockedContentSettingsExceptForCookies() {
   }
   load_plugins_link_enabled_ = true;
   NotificationService::current()->Notify(
-      NotificationType::TAB_CONTENT_SETTINGS_CHANGED,
+      chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
       Source<TabContents>(tab_contents()),
       NotificationService::NoDetails());
 }
@@ -381,7 +380,7 @@ void TabSpecificContentSettings::ClearCookieSpecificContentSettings() {
   content_accessed_[CONTENT_SETTINGS_TYPE_COOKIES] = false;
   content_blockage_indicated_to_user_[CONTENT_SETTINGS_TYPE_COOKIES] = false;
   NotificationService::current()->Notify(
-      NotificationType::TAB_CONTENT_SETTINGS_CHANGED,
+      chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
       Source<TabContents>(tab_contents()),
       NotificationService::NoDetails());
 }
@@ -390,7 +389,7 @@ void TabSpecificContentSettings::SetPopupsBlocked(bool blocked) {
   content_blocked_[CONTENT_SETTINGS_TYPE_POPUPS] = blocked;
   content_blockage_indicated_to_user_[CONTENT_SETTINGS_TYPE_POPUPS] = false;
   NotificationService::current()->Notify(
-      NotificationType::TAB_CONTENT_SETTINGS_CHANGED,
+      chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
       Source<TabContents>(tab_contents()),
       NotificationService::NoDetails());
 }
@@ -433,6 +432,14 @@ void TabSpecificContentSettings::DidNavigateMainFramePostCommit(
   }
 }
 
+void TabSpecificContentSettings::RenderViewCreated(
+    RenderViewHost* render_view_host) {
+  HostContentSettingsMap* map =
+      tab_contents()->profile()->GetHostContentSettingsMap();
+  render_view_host->Send(new ViewMsg_SetDefaultContentSettings(
+      map->GetDefaultContentSettings()));
+}
+
 void TabSpecificContentSettings::DidStartProvisionalLoadForFrame(
     int64 frame_id,
     bool is_main_frame,
@@ -448,18 +455,12 @@ void TabSpecificContentSettings::DidStartProvisionalLoadForFrame(
   if (!is_error_page)
     ClearCookieSpecificContentSettings();
   ClearGeolocationContentSettings();
-
-  HostContentSettingsMap* map =
-      tab_contents()->profile()->GetHostContentSettingsMap();
-  render_view_host->Send(new ViewMsg_SetContentSettingsForLoadingURL(
-      render_view_host->routing_id(), validated_url,
-      map->GetContentSettings(validated_url)));
 }
 
-void TabSpecificContentSettings::Observe(NotificationType type,
+void TabSpecificContentSettings::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
-  DCHECK(type.value == NotificationType::CONTENT_SETTINGS_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED);
 
   Details<const ContentSettingsDetails> settings_details(details);
   const NavigationController& controller = tab_contents()->controller();
@@ -468,10 +469,15 @@ void TabSpecificContentSettings::Observe(NotificationType type,
   if (entry)
     entry_url = entry->url();
   if (settings_details.ptr()->update_all() ||
-      settings_details.ptr()->pattern().Matches(entry_url)) {
+      // The active NavigationEntry is the URL in the URL field of a tab.
+      // Currently this should be matched by the |primary_pattern|.
+      settings_details.ptr()->primary_pattern().Matches(entry_url)) {
+    HostContentSettingsMap* map =
+        tab_contents()->profile()->GetHostContentSettingsMap();
+    Send(new ViewMsg_SetDefaultContentSettings(
+        map->GetDefaultContentSettings()));
     Send(new ViewMsg_SetContentSettingsForCurrentURL(
-        entry_url, tab_contents()->profile()->GetHostContentSettingsMap()->
-            GetContentSettings(entry_url)));
+        entry_url, map->GetContentSettings(entry_url, entry_url)));
   }
 }
 

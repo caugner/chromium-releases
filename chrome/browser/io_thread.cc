@@ -10,13 +10,15 @@
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
+#include "chrome/browser/media/media_internals.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -40,6 +42,7 @@
 #include "net/base/host_resolver_impl.h"
 #include "net/base/mapped_host_resolver.h"
 #include "net/base/net_util.h"
+#include "net/dns/async_host_resolver.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -158,8 +161,24 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
     }
   }
 
-  net::HostResolver* global_host_resolver =
+  net::HostResolver* global_host_resolver = NULL;
+  if (command_line.HasSwitch(switches::kDnsServer)) {
+    std::string dns_ip_string =
+      command_line.GetSwitchValueASCII(switches::kDnsServer);
+    net::IPAddressNumber dns_ip_number;
+    if (net::ParseIPLiteralToNumber(dns_ip_string, &dns_ip_number)) {
+      global_host_resolver =
+        net::CreateAsyncHostResolver(parallelism, dns_ip_number, net_log);
+    } else {
+      LOG(ERROR) << "Invalid IP address specified for --dns-server: "
+                 << dns_ip_string;
+    }
+  }
+
+  if (!global_host_resolver) {
+    global_host_resolver =
       net::CreateSystemHostResolver(parallelism, retry_attempts, net_log);
+  }
 
   // Determine if we should disable IPv6 support.
   if (!command_line.HasSwitch(switches::kEnableIPv6)) {
@@ -289,9 +308,7 @@ SystemURLRequestContextGetter::~SystemURLRequestContextGetter() {}
 
 net::URLRequestContext* SystemURLRequestContextGetter::GetURLRequestContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  if (!io_thread_->globals()->system_request_context)
-    io_thread_->InitSystemRequestContext();
+  DCHECK(io_thread_->globals()->system_request_context);
 
   return io_thread_->globals()->system_request_context;
 }
@@ -309,6 +326,10 @@ IOThread::Globals::Globals() {}
 
 IOThread::Globals::~Globals() {}
 
+IOThread::Globals::MediaGlobals::MediaGlobals() {}
+
+IOThread::Globals::MediaGlobals::~MediaGlobals() {}
+
 // |local_state| is passed in explicitly in order to (1) reduce implicit
 // dependencies and (2) make IOThread more flexible for testing.
 IOThread::IOThread(
@@ -320,7 +341,8 @@ IOThread::IOThread(
       extension_event_router_forwarder_(extension_event_router_forwarder),
       globals_(NULL),
       speculative_interceptor_(NULL),
-      predictor_(NULL) {
+      predictor_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   // We call RegisterPrefs() here (instead of inside browser_prefs.cc) to make
   // sure that everything is initialized in the right order.
   RegisterPrefs(local_state);
@@ -338,6 +360,9 @@ IOThread::IOThread(
                                                     local_state);
   ssl_config_service_manager_.reset(
       SSLConfigServiceManager::CreateDefaultManager(local_state));
+  MessageLoop::current()->PostTask(FROM_HERE,
+                                   method_factory_.NewRunnableMethod(
+                                       &IOThread::InitSystemRequestContext));
 }
 
 IOThread::~IOThread() {
@@ -412,11 +437,7 @@ void IOThread::ChangedToOnTheRecord() {
 net::URLRequestContextGetter* IOThread::system_url_request_context_getter() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!system_url_request_context_getter_) {
-    system_proxy_config_service_.reset(
-        ProxyServiceFactory::CreateProxyConfigService(
-            pref_proxy_config_tracker_));
-    system_url_request_context_getter_ =
-        new SystemURLRequestContextGetter(this);
+    InitSystemRequestContext();
   }
   return system_url_request_context_getter_;
 }
@@ -446,6 +467,8 @@ void IOThread::Init() {
   DCHECK(!globals_);
   globals_ = new Globals;
 
+  globals_->media.media_internals.reset(new MediaInternals());
+
   // Add an observer that will emit network change events to the ChromeNetLog.
   // Assuming NetworkChangeNotifier dispatches in FIFO order, we should be
   // logging the network change before other IO thread consumers respond to it.
@@ -456,7 +479,8 @@ void IOThread::Init() {
       extension_event_router_forwarder_;
   globals_->system_network_delegate.reset(new ChromeNetworkDelegate(
       extension_event_router_forwarder_,
-      Profile::kInvalidProfileId,
+      NULL,
+      NULL,
       &system_enable_referrers_));
   globals_->host_resolver.reset(
       CreateGlobalHostResolver(net_log_));
@@ -544,11 +568,6 @@ void IOThread::CleanUp() {
   // Deletion will unregister this interceptor.
   delete speculative_interceptor_;
   speculative_interceptor_ = NULL;
-
-  // TODO(eroman): hack for http://crbug.com/15513
-  if (globals_->host_resolver->GetAsHostResolverImpl()) {
-    globals_->host_resolver.get()->GetAsHostResolverImpl()->Shutdown();
-  }
 
   system_proxy_config_service_.reset();
 
@@ -667,6 +686,24 @@ net::SSLConfigService* IOThread::GetSSLConfigService() {
 }
 
 void IOThread::InitSystemRequestContext() {
+  if (system_url_request_context_getter_)
+    return;
+  // If we're in unit_tests, IOThread may not be run.
+  if (!message_loop())
+    return;
+  system_proxy_config_service_.reset(
+      ProxyServiceFactory::CreateProxyConfigService(
+          pref_proxy_config_tracker_));
+  system_url_request_context_getter_ =
+      new SystemURLRequestContextGetter(this);
+  message_loop()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(
+          this,
+          &IOThread::InitSystemRequestContextOnIOThread));
+}
+
+void IOThread::InitSystemRequestContextOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!globals_->system_proxy_service.get());
   DCHECK(system_proxy_config_service_.get());

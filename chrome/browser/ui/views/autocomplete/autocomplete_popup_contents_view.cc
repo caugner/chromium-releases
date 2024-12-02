@@ -31,7 +31,6 @@
 #include "views/layout/layout_constants.h"
 #include "views/painter.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 #if defined(OS_WIN)
 #include <commctrl.h>
@@ -211,7 +210,6 @@ class AutocompletePopupContentsView::InstantOptInView
     views::TextButton* button =
         new views::TextButton(this, UTF16ToWide(l10n_util::GetStringUTF16(id)));
     button->set_border(new OptInButtonBorder());
-    button->SetNormalHasBorder(true);
     button->set_tag(id);
     button->SetFont(font);
     button->set_animate_on_state_change(false);
@@ -276,7 +274,7 @@ void AutocompletePopupContentsView::LayoutChildren() {
   gfx::Rect contents_rect = GetContentsBounds();
   int top = contents_rect.y();
   for (int i = 0; i < child_count(); ++i) {
-    View* v = GetChildViewAt(i);
+    View* v = child_at(i);
     if (v->IsVisible()) {
       v->SetBounds(contents_rect.x(), top, contents_rect.width(),
                    v->GetPreferredSize().height());
@@ -293,7 +291,7 @@ bool AutocompletePopupContentsView::IsOpen() const {
 }
 
 void AutocompletePopupContentsView::InvalidateLine(size_t line) {
-  GetChildViewAt(static_cast<int>(line))->SchedulePaint();
+  child_at(static_cast<int>(line))->SchedulePaint();
 }
 
 void AutocompletePopupContentsView::UpdatePopupAppearance() {
@@ -325,13 +323,13 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
           CreateResultView(this, i, result_font_, result_bold_font_);
       AddChildViewAt(result_view, static_cast<int>(i));
     } else {
-      result_view = static_cast<AutocompleteResultView*>(GetChildViewAt(i));
+      result_view = static_cast<AutocompleteResultView*>(child_at(i));
       result_view->SetVisible(true);
     }
     result_view->SetMatch(GetMatchAtIndex(i));
   }
   for (size_t i = model_->result().size(); i < child_rv_count; ++i)
-    GetChildViewAt(i)->SetVisible(false);
+    child_at(i)->SetVisible(false);
 
   PromoCounter* counter = model_->profile()->GetInstantPromoCounter();
   if (!opt_in_view_ && counter && counter->ShouldShow(base::Time::Now())) {
@@ -517,7 +515,7 @@ int AutocompletePopupContentsView::CalculatePopupHeight() {
   DCHECK_GE(static_cast<size_t>(child_count()), model_->result().size());
   int popup_height = 0;
   for (size_t i = 0; i < model_->result().size(); ++i)
-    popup_height += GetChildViewAt(i)->GetPreferredSize().height();
+    popup_height += child_at(i)->GetPreferredSize().height();
   return popup_height +
       (opt_in_view_ ? opt_in_view_->GetPreferredSize().height() : 0);
 }
@@ -617,11 +615,7 @@ void AutocompletePopupContentsView::UpdateBlurRegion() {
 
   // Translate the contents rect into widget coordinates, since that's what
   // DwmEnableBlurBehindWindow expects a region in.
-  gfx::Rect contents_rect = GetContentsBounds();
-  gfx::Point origin(contents_rect.origin());
-  views::View::ConvertPointToWidget(this, &origin);
-  contents_rect.set_origin(origin);
-
+  gfx::Rect contents_rect = ConvertRectToWidget(GetContentsBounds());
   gfx::Path contents_path;
   MakeContentsPath(&contents_path, contents_rect);
   base::win::ScopedGDIObject<HRGN> popup_region;
@@ -665,7 +659,7 @@ size_t AutocompletePopupContentsView::GetIndexForPoint(
   int nb_match = model_->result().size();
   DCHECK(nb_match <= child_count());
   for (int i = 0; i < nb_match; ++i) {
-    views::View* child = GetChildViewAt(i);
+    views::View* child = child_at(i);
     gfx::Point point_in_child_coords(point);
     View::ConvertPointToView(this, child, &point_in_child_coords);
     if (child->HitTest(point_in_child_coords))
@@ -705,7 +699,7 @@ void AutocompletePopupContentsView::UserPressedOptIn(bool opt_in) {
   counter->Hide();
   if (opt_in) {
     browser::ShowInstantConfirmDialogIfNecessary(
-        location_bar_->GetWindow()->GetNativeWindow(), model_->profile());
+        location_bar_->GetWidget()->GetNativeWindow(), model_->profile());
   }
   UpdatePopupAppearance();
 }

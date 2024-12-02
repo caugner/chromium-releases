@@ -9,7 +9,6 @@
 #include <set>
 #include <vector>
 
-#include "app/sql/init_status.h"
 #include "base/basictypes.h"
 #include "base/callback_old.h"
 #include "base/file_path.h"
@@ -25,6 +24,7 @@
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/page_transition_types.h"
+#include "sql/init_status.h"
 
 class BookmarkService;
 struct DownloadHistoryInfo;
@@ -99,10 +99,6 @@ class HistoryService : public CancelableRequestProvider,
  public:
   // Miscellaneous commonly-used types.
   typedef std::vector<PageUsageData*> PageUsageDataList;
-
-  // ID (both star_id and folder_id) of the bookmark bar.
-  // This entry always exists.
-  static const history::StarID kBookmarkBarID;
 
   // Must call Init after construction.
   explicit HistoryService(Profile* profile);
@@ -552,8 +548,12 @@ class HistoryService : public CancelableRequestProvider,
   //
   // Calling this function many times may be slow because each call will
   // dispatch to the history thread and will be a separate database
-  // transaction. If this functionality is needed for importing many URLs, a
-  // version that takes an array should probably be added.
+  // transaction. If this functionality is needed for importing many URLs,
+  // callers should use AddPagesWithDetails() instead.
+  //
+  // Note that this routine (and AddPageWithDetails()) always adds a single
+  // visit using the |last_visit| timestamp, and a PageTransition type of LINK,
+  // if |visit_source| != SYNCED.
   void AddPageWithDetails(const GURL& url,
                           const string16& title,
                           int visit_count,
@@ -605,7 +605,7 @@ class HistoryService : public CancelableRequestProvider,
   friend class TestingProfile;
 
   // Implementation of NotificationObserver.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -628,7 +628,7 @@ class HistoryService : public CancelableRequestProvider,
   // notification. The function takes ownership of the pointer and deletes it
   // when the notification is sent (it is coming from another thread, so must
   // be allocated on the heap).
-  void BroadcastNotifications(NotificationType type,
+  void BroadcastNotifications(int type,
                               history::HistoryDetails* details_deleted);
 
   // Initializes the backend.

@@ -4,13 +4,16 @@
 
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 
+#include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/print_preview_ui.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -52,7 +55,7 @@ TabContents* PrintPreviewTabController::GetOrCreatePreviewTab(
   TabContents* preview_tab = GetPrintPreviewForTab(initiator_tab);
   if (preview_tab) {
     // Show current preview tab.
-    preview_tab->Activate();
+    static_cast<RenderViewHostDelegate*>(preview_tab)->Activate();
     return preview_tab;
   }
   return CreatePrintPreviewTab(initiator_tab);
@@ -74,18 +77,18 @@ TabContents* PrintPreviewTabController::GetPrintPreviewForTab(
   return NULL;
 }
 
-void PrintPreviewTabController::Observe(NotificationType type,
+void PrintPreviewTabController::Observe(int type,
                                         const NotificationSource& source,
                                         const NotificationDetails& details) {
   TabContents* source_tab = NULL;
   content::LoadCommittedDetails* detail_info = NULL;
 
-  switch (type.value) {
-    case NotificationType::TAB_CONTENTS_DESTROYED: {
+  switch (type) {
+    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED: {
       source_tab = Source<TabContents>(source).ptr();
       break;
     }
-    case NotificationType::NAV_ENTRY_COMMITTED: {
+    case content::NOTIFICATION_NAV_ENTRY_COMMITTED: {
       NavigationController* controller =
           Source<NavigationController>(source).ptr();
       source_tab = controller->tab_contents();
@@ -137,6 +140,16 @@ void PrintPreviewTabController::Observe(NotificationType type,
     if (initiator_tab)
       RemoveObservers(initiator_tab);
 
+    // |source_tab_is_preview_tab| is misleading in the case where the user
+    // chooses to re-open the initiator tab after closing it, as |source_tab|
+    // has navigated to the URL of the initiator tab at this point. Make sure to
+    // verify that |source_tab| really is a print preview tab.
+    if (IsPrintPreviewTab(source_tab) && source_tab->web_ui()) {
+      PrintPreviewUI* print_preview_ui =
+          static_cast<PrintPreviewUI*>(source_tab->web_ui());
+      print_preview_ui->OnNavigation();
+    }
+
     // Erase the map entry.
     preview_tab_map_.erase(source_tab);
   } else {
@@ -158,6 +171,16 @@ bool PrintPreviewTabController::IsPrintPreviewTab(TabContents* tab) {
           url.host() == chrome::kChromeUIPrintHost);
 }
 
+void PrintPreviewTabController::EraseInitiatorTabInfo(
+    TabContents* preview_tab) {
+  PrintPreviewTabMap::iterator it = preview_tab_map_.find(preview_tab);
+  if (it == preview_tab_map_.end())
+    return;
+
+  RemoveObservers(it->second);
+  preview_tab_map_[preview_tab] = NULL;
+}
+
 TabContents* PrintPreviewTabController::GetInitiatorTab(
     TabContents* preview_tab) {
   PrintPreviewTabMap::iterator it = preview_tab_map_.find(preview_tab);
@@ -168,10 +191,14 @@ TabContents* PrintPreviewTabController::GetInitiatorTab(
 
 TabContents* PrintPreviewTabController::CreatePrintPreviewTab(
     TabContents* initiator_tab) {
+  // TODO: this should be converted to TabContentsWrapper.
+  TabContentsWrapper* tab =
+      TabContentsWrapper::GetCurrentWrapperForContents(initiator_tab);
+  DCHECK(tab);
   Browser* current_browser = BrowserList::FindBrowserWithID(
-      initiator_tab->controller().window_id().id());
+      tab->restore_tab_helper()->window_id().id());
   if (!current_browser) {
-    if (initiator_tab->delegate()->IsExternalTabContainer()) {
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame)) {
       current_browser = Browser::CreateForType(Browser::TYPE_POPUP,
                                                initiator_tab->profile());
       if (!current_browser) {
@@ -188,13 +215,13 @@ TabContents* PrintPreviewTabController::CreatePrintPreviewTab(
                                  GURL(chrome::kChromeUIPrintURL),
                                  PageTransition::LINK);
   params.disposition = NEW_FOREGROUND_TAB;
-  if (initiator_tab->delegate()->IsExternalTabContainer())
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame))
     params.disposition = NEW_POPUP;
   params.tabstrip_index = current_browser->tabstrip_model()->
       GetWrapperIndex(initiator_tab) + 1;
   browser::Navigate(&params);
   TabContentsWrapper* preview_tab = params.target_contents;
-  preview_tab->tab_contents()->Activate();
+  static_cast<RenderViewHostDelegate*>(preview_tab->tab_contents())->Activate();
 
   // Add an entry to the map.
   preview_tab_map_[preview_tab->tab_contents()] = initiator_tab;
@@ -207,16 +234,16 @@ TabContents* PrintPreviewTabController::CreatePrintPreviewTab(
 }
 
 void PrintPreviewTabController::AddObservers(TabContents* tab) {
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                  Source<TabContents>(tab));
-  registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
+  registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                  Source<NavigationController>(&tab->controller()));
 }
 
 void PrintPreviewTabController::RemoveObservers(TabContents* tab) {
-  registrar_.Remove(this, NotificationType::TAB_CONTENTS_DESTROYED,
+  registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                     Source<TabContents>(tab));
-  registrar_.Remove(this, NotificationType::NAV_ENTRY_COMMITTED,
+  registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                     Source<NavigationController>(&tab->controller()));
 }
 

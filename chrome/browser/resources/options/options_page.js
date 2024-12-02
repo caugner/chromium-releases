@@ -21,7 +21,6 @@ cr.define('options', function() {
     this.pageDivName = pageDivName;
     this.pageDiv = $(this.pageDivName);
     this.tab = null;
-    this.managed = false;
   }
 
   const SUBPAGE_SHEET_COUNT = 2;
@@ -118,11 +117,14 @@ cr.define('options', function() {
         page.willHidePage();
     }
 
+    var prevVisible = false;
+
     // Update visibilities to show only the hierarchy of the target page.
     for (var name in this.registeredPages) {
       var page = this.registeredPages[name];
       if (!page.parentPage && isRootPageLocked)
         continue;
+      prevVisible = page.visible;
       page.visible = name == pageName ||
           (!document.documentElement.classList.contains('hide-menu') &&
            page.isAncestorOfPage(targetPage));
@@ -140,7 +142,7 @@ cr.define('options', function() {
       var page = this.registeredPages[name];
       if (!page.parentPage && isRootPageLocked)
         continue;
-      if (page.didShowPage && (name == pageName ||
+      if (!prevVisible && page.didShowPage && (name == pageName ||
           page.isAncestorOfPage(targetPage)))
         page.didShowPage();
     }
@@ -207,8 +209,11 @@ cr.define('options', function() {
     if ((!rootPage || !rootPage.sticky) && overlay.parentPage)
       this.showPageByName(overlay.parentPage.name, false);
 
-    overlay.visible = true;
-    if (overlay.didShowPage) overlay.didShowPage();
+    if (!overlay.visible) {
+      overlay.visible = true;
+      if (overlay.didShowPage) overlay.didShowPage();
+    }
+
     return true;
   };
 
@@ -219,15 +224,6 @@ cr.define('options', function() {
    */
   OptionsPage.isOverlayVisible_ = function() {
     return this.getVisibleOverlay_() != null;
-  };
-
-  /**
-   * @return {boolean} True if the visible overlay should be closed.
-   * @private
-   */
-  OptionsPage.shouldCloseOverlay_ = function() {
-    var overlay = this.getVisibleOverlay_();
-    return overlay && overlay.shouldClose();
   };
 
   /**
@@ -342,15 +338,23 @@ cr.define('options', function() {
     if (!tab || !tab.classList.contains('tab'))
       return;
 
-    if (this.activeNavTab != null) {
-      this.activeNavTab.classList.remove('active-tab');
-      $(this.activeNavTab.getAttribute('tab-contents')).classList.
+    // Find tab bar of the tab.
+    var tabBar = tab;
+    while (tabBar && !tabBar.classList.contains('subpages-nav-tabs')) {
+      tabBar = tabBar.parentNode;
+    }
+    if (!tabBar)
+      return;
+
+    if (tabBar.activeNavTab != null) {
+      tabBar.activeNavTab.classList.remove('active-tab');
+      $(tabBar.activeNavTab.getAttribute('tab-contents')).classList.
           remove('active-tab-contents');
     }
 
     tab.classList.add('active-tab');
     $(tab.getAttribute('tab-contents')).classList.add('active-tab-contents');
-    this.activeNavTab = tab;
+    tabBar.activeNavTab = tab;
   };
 
   /**
@@ -364,10 +368,25 @@ cr.define('options', function() {
     pageNav.id = page.name + 'PageNav';
     pageNav.className = 'navbar-item';
     pageNav.setAttribute('pageName', page.name);
+    pageNav.setAttribute('role', 'tab');
     pageNav.textContent = page.pageDiv.querySelector('h1').textContent;
-    pageNav.tabIndex = 0;
+    pageNav.tabIndex = -1;
     pageNav.onclick = function(event) {
       OptionsPage.navigateToPage(this.getAttribute('pageName'));
+    };
+    pageNav.onkeydown = function(event) {
+        if ((event.keyCode == 37 || event.keyCode==38) &&
+             this.previousSibling && this.previousSibling.onkeydown) {
+        // Left and up arrow moves back one tab.
+        OptionsPage.navigateToPage(
+            this.previousSibling.getAttribute('pageName'));
+        this.previousSibling.focus();
+        } else if ((event.keyCode == 39 || event.keyCode == 40) &&
+                    this.nextSibling) {
+        // Right and down arrows move forward one tab.
+        OptionsPage.navigateToPage(this.nextSibling.getAttribute('pageName'));
+        this.nextSibling.focus();
+      }
     };
     pageNav.onkeypress = function(event) {
       // Enter or space
@@ -476,7 +495,7 @@ cr.define('options', function() {
    * @private
    */
   OptionsPage.setPageFrozenAtLevel_ = function(freeze, level) {
-    var container = level == 0 ? $('toplevel-page-container')
+    var container = level == 0 ? $('page-container')
                                : $('subpage-sheet-container-' + level);
 
     if (container.classList.contains('frozen') == freeze)
@@ -559,7 +578,7 @@ cr.define('options', function() {
     // frozen later.
     var sidebarWidth =
         parseInt(window.getComputedStyle($('mainview')).webkitPaddingStart, 10);
-    $('toplevel-page-container').horizontalOffset = sidebarWidth +
+    $('page-container').horizontalOffset = sidebarWidth +
         parseInt(window.getComputedStyle(
             $('mainview-content')).webkitPaddingStart, 10);
     for (var level = 1; level <= SUBPAGE_SHEET_COUNT; level++) {
@@ -687,6 +706,13 @@ cr.define('options', function() {
     if (!topPage || topPage.isOverlay || !topPage.parentPage)
       return;
 
+    // Don't close subpages if a user is clicking in a select element.
+    // This is necessary because WebKit sends click events with strange
+    // coordinates when a user selects a new entry in a select element.
+    // See: http://crbug.com/87199
+    if (event.srcElement.nodeName == 'SELECT')
+      return;
+
     // Do nothing if the client coordinates are not within the source element.
     // This occurs if the user toggles a checkbox by pressing spacebar.
     // This is a workaround to prevent keyboard events from closing the window.
@@ -731,12 +757,10 @@ cr.define('options', function() {
   OptionsPage.keyDownEventHandler_ = function(event) {
     // Close the top overlay or sub-page on esc.
     if (event.keyCode == 27) {  // Esc
-      if (this.isOverlayVisible_()) {
-        if (this.shouldCloseOverlay_())
-          this.closeOverlay();
-      } else {
+      if (this.isOverlayVisible_())
+        this.closeOverlay();
+      else
         this.closeTopSubPage_();
-      }
     }
   };
 
@@ -791,16 +815,6 @@ cr.define('options', function() {
     initializePage: function() {},
 
     /**
-     * Sets managed banner visibility state.
-     */
-    setManagedBannerVisibility: function(visible) {
-      this.managed = visible;
-      if (this.visible) {
-        this.updateManagedBannerVisibility();
-      }
-    },
-
-    /**
      * Updates managed banner visibility state. This function iterates over
      * all input fields of a window and if any of these is marked as managed
      * it triggers the managed banner to be visible. The banner can be enforced
@@ -810,23 +824,32 @@ cr.define('options', function() {
     updateManagedBannerVisibility: function() {
       var bannerDiv = $('managed-prefs-banner');
 
-      var hasManaged = this.managed;
-      if (!hasManaged) {
-        var inputElements = this.pageDiv.querySelectorAll('input');
-        for (var i = 0, len = inputElements.length; i < len; i++) {
-          if (inputElements[i].managed) {
-            hasManaged = true;
-            break;
-          }
-        }
+      var controlledByPolicy = false;
+      var controlledByExtension = false;
+      var inputElements = this.pageDiv.querySelectorAll('input[controlledBy]');
+      for (var i = 0, len = inputElements.length; i < len; i++) {
+        if (inputElements[i].controlledBy == 'policy')
+          controlledByPolicy = true;
+        else if (inputElements[i].controlledBy == 'extension')
+          controlledByExtension = true;
       }
-      if (hasManaged) {
-        bannerDiv.hidden = false;
-        var height = window.getComputedStyle($('managed-prefs-banner')).height;
-        $('subpage-backdrop').style.top = height;
-      } else {
+      if (!controlledByPolicy && !controlledByExtension) {
         bannerDiv.hidden = true;
         $('subpage-backdrop').style.top = '0';
+      } else {
+        bannerDiv.hidden = false;
+        var height = window.getComputedStyle(bannerDiv).height;
+        $('subpage-backdrop').style.top = height;
+        if (controlledByPolicy && !controlledByExtension) {
+          $('managed-prefs-text').textContent =
+              templateData.policyManagedPrefsBannerText;
+        } else if (!controlledByPolicy && controlledByExtension) {
+          $('managed-prefs-text').textContent =
+              templateData.extensionManagedPrefsBannerText;
+        } else if (controlledByPolicy && controlledByExtension) {
+          $('managed-prefs-text').textContent =
+              templateData.policyAndExtensionManagedPrefsBannerText;
+        }
       }
     },
 
@@ -848,13 +871,19 @@ cr.define('options', function() {
       if (visible) {
         this.pageDiv.hidden = false;
 
-        if (this.tab)
+        if (this.tab) {
           this.tab.classList.add('navbar-item-selected');
+          this.tab.setAttribute('aria-selected', 'true');
+          this.tab.tabIndex = 0;
+        }
       } else {
         this.pageDiv.hidden = true;
 
-        if (this.tab)
+        if (this.tab) {
           this.tab.classList.remove('navbar-item-selected');
+          this.tab.setAttribute('aria-selected', 'false');
+          this.tab.tabIndex = -1;
+        }
       }
 
       OptionsPage.updatePageFreezeStates();
@@ -892,8 +921,18 @@ cr.define('options', function() {
       }
       var isSubpage = !this.isOverlay;
 
-      if (!container || container.hidden != visible)
+      if (!container)
         return;
+
+      if (container.hidden != visible) {
+        if (visible) {
+          // If the container is set hidden and then immediately set visible
+          // again, the fadeCompleted_ callback would cause it to be erroneously
+          // hidden again. Removing the transparent tag avoids that.
+          container.classList.remove('transparent');
+        }
+        return;
+      }
 
       if (visible) {
         container.hidden = false;
@@ -985,15 +1024,6 @@ cr.define('options', function() {
      * @return {boolean} True if the page should be shown
      */
     canShowPage: function() {
-      return true;
-    },
-
-    /**
-     * Whether an overlay should be closed. Used by overlay implementation to
-     * handle special closing behaviors.
-     * @return {boolean} True if the overlay should be closed.
-     */
-    shouldClose: function() {
       return true;
     },
   };

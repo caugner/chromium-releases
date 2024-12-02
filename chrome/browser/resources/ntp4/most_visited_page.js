@@ -8,6 +8,10 @@ cr.define('ntp4', function() {
   var TilePage = ntp4.TilePage;
 
   /**
+   */
+  var tileID = 0;
+
+  /**
    * Creates a new Most Visited object for tiling.
    * @constructor
    * @extends {HTMLAnchorElement}
@@ -41,28 +45,21 @@ cr.define('ntp4', function() {
      */
     reset: function() {
       this.className = 'most-visited filler real';
-      // TODO(estade): why do we need edit-mode-border?
       this.innerHTML =
-          '<div class="edit-mode-border fills-parent">' +
-            '<div class="edit-bar-wrapper">' +
-              '<div class="edit-bar">' +
-                '<div class="pin"></div>' +
-                '<div class="spacer"></div>' +
-                '<div class="remove"></div>' +
-              '</div>' +
-            '</div>' +
-            '<span class="thumbnail-wrapper fills-parent">' +
-              '<span class="thumbnail fills-parent">' +
-                // thumbnail-shield provides a gradient fade effect.
-                '<div class="thumbnail-shield fills-parent"></div>' +
-              '</span>' +
-              '<span class="color-bar"></span>' +
+          '<span class="thumbnail-wrapper fills-parent">' +
+            '<div class="close-button"></div>' +
+            '<span class="thumbnail fills-parent">' +
+              // thumbnail-shield provides a gradient fade effect.
+              '<div class="thumbnail-shield fills-parent"></div>' +
             '</span>' +
-            '<span class="title"></span>' +
-          '</div>';
+            '<span class="favicon"></span>' +
+          '</span>' +
+          '<div class="color-stripe"></div>' +
+          '<span class="title"></span>';
 
       this.tabIndex = -1;
       this.data_ = null;
+      this.removeAttribute('id');
     },
 
     /**
@@ -76,15 +73,21 @@ cr.define('ntp4', function() {
         return;
       }
 
+      var id = tileID++;
+      this.setAttribute('id', 'tile' + id);
       this.data_ = data;
       this.tabIndex = 0;
       this.classList.remove('filler');
 
-      var colorBar = this.querySelector('.color-bar');
-      var faviconUrl = data.faviconUrl || 'chrome://favicon/' + data.url;
-      colorBar.style.backgroundImage = url(faviconUrl);
-      colorBar.dir = data.direction;
-      // TODO(estade): add a band of color based on the favicon.
+      var faviconDiv = this.querySelector('.favicon');
+      var faviconUrl = data.faviconUrl ||
+          'chrome://favicon/size/32/' + data.url;
+      faviconDiv.style.backgroundImage = url(faviconUrl);
+      faviconDiv.dir = data.direction;
+      if (data.faviconDominantColor)
+        this.setStripeColor(data.faviconDominantColor);
+      else
+        chrome.send('getFaviconDominantColor', [faviconUrl, id]);
 
       var title = this.querySelector('.title');
       title.textContent = data.title;
@@ -95,8 +98,14 @@ cr.define('ntp4', function() {
           url(thumbnailUrl);
 
       this.href = data.url;
+    },
 
-      this.updatePinnedState_();
+    /**
+     * Sets the color of the favicon dominant color bar.
+     * @param {string} color The css-parsable value for the color.
+     */
+    setStripeColor: function(color) {
+      this.querySelector('.color-stripe').style.backgroundColor = color;
     },
 
     /**
@@ -104,15 +113,11 @@ cr.define('ntp4', function() {
      * @param {Event} e The click event.
      */
     handleClick_: function(e) {
-      var target = e.target;
-      if (target.classList.contains('pin')) {
-        this.togglePinned_();
-        e.preventDefault();
-      } else if (target.classList.contains('remove')) {
+      if (e.target.classList.contains('close-button')) {
         this.blacklist_();
         e.preventDefault();
       } else {
-        chrome.send('metrics', ['NTP_MostVisited' + this.index]);
+        chrome.send('recordInHistogram', ['NTP_MostVisited', this.index, 8]);
       }
     },
 
@@ -127,47 +132,37 @@ cr.define('ntp4', function() {
     },
 
     /**
-     * Changes the visual state of the page and updates the model.
-     */
-    togglePinned_: function() {
-      var data = this.data_;
-      data.pinned = !data.pinned;
-      if (data.pinned) {
-        chrome.send('addPinnedURL', [
-          data.url,
-          data.title,
-          data.faviconUrl || '',
-          data.thumbnailUrl || '',
-          // TODO(estade): should not need to convert index to string.
-          String(this.index)
-        ]);
-      } else {
-        chrome.send('removePinnedURL', [data.url]);
-      }
-
-      this.updatePinnedState_();
-    },
-
-    /**
-     * Updates the DOM for the current pinned state.
-     */
-    updatePinnedState_: function() {
-      if (this.data_.pinned) {
-        this.classList.add('pinned');
-        this.querySelector('.pin').title = templateData.unpinthumbnailtooltip;
-      } else {
-        this.classList.remove('pinned');
-        this.querySelector('.pin').title = templateData.pinthumbnailtooltip;
-      }
-    },
-
-    /**
      * Permanently removes a page from Most Visited.
      */
     blacklist_: function() {
+      this.showUndoNotification_();
       chrome.send('blacklistURLFromMostVisited', [this.data_.url]);
       this.reset();
       chrome.send('getMostVisited');
+    },
+
+    showUndoNotification_: function() {
+      var data = this.data_;
+      var self = this;
+      var doUndo = function () {
+        chrome.send('removeURLsFromMostVisitedBlacklist', [data.url]);
+        self.updateForData(data);
+      }
+
+      var undo = {
+        action: doUndo,
+        text: templateData.undothumbnailremove,
+      }
+
+      var undoAll = {
+        action: function() {
+          chrome.send('clearMostVisitedURLsBlacklist', []);
+        },
+        text: templateData.restoreThumbnailsShort,
+      }
+
+      ntp4.showNotification(templateData.thumbnailremovednotification,
+                            [undo, undoAll]);
     },
 
     /**
@@ -180,7 +175,9 @@ cr.define('ntp4', function() {
     setBounds: function(size, x, y) {
       this.style.width = size + 'px';
       this.style.height = heightForWidth(size) + 'px';
+
       this.style.left = x + 'px';
+      this.style.right = x + 'px';
       this.style.top = y + 'px';
     },
   };
@@ -201,24 +198,23 @@ cr.define('ntp4', function() {
 
   /**
    * Calculates the height for a Most Visited tile for a given width. The size
-   * is based on the thumbnail, which should have a 212:132 ratio (the rest of
-   * the arithmetic accounts for padding).
+   * is based on the thumbnail, which should have a 212:132 ratio.
    * @return {number} The height.
    */
   function heightForWidth(width) {
-    return (width - 2) * 132 / 212 + 48;
+    // The 2s are for borders, the 23 is for the title.
+    return (width - 2) * 132 / 212 + 2 + 23;
   }
 
   var THUMBNAIL_COUNT = 8;
 
   /**
    * Creates a new MostVisitedPage object.
-   * @param {string} name The display name for the page.
    * @constructor
    * @extends {TilePage}
    */
-  function MostVisitedPage(name) {
-    var el = new TilePage(name, mostVisitedPageGridValues);
+  function MostVisitedPage() {
+    var el = new TilePage(mostVisitedPageGridValues);
     el.__proto__ = MostVisitedPage.prototype;
     el.initialize();
 
@@ -230,7 +226,6 @@ cr.define('ntp4', function() {
 
     initialize: function() {
       this.classList.add('most-visited-page');
-
       this.data_ = null;
       this.mostVisitedTiles_ = this.getElementsByClassName('most-visited real');
     },
@@ -280,8 +275,8 @@ cr.define('ntp4', function() {
     },
 
     /** @inheritDoc */
-    shouldAcceptDrag: function(dataTransfer) {
-      return this.contains(ntp4.getCurrentlyDraggingTile());
+    shouldAcceptDrag: function(e) {
+      return false;
     },
 
     /** @inheritDoc */
@@ -314,7 +309,7 @@ cr.define('ntp4', function() {
     // Look through old pages; if they exist in the newData list, keep them
     // where they are.
     for (var i = 0; i < oldData.length; i++) {
-      if (oldData[i].updated)
+      if (!oldData[i] || oldData[i].updated)
         continue;
 
       for (var j = 0; j < newData.length; j++) {
@@ -333,7 +328,7 @@ cr.define('ntp4', function() {
 
     // Look through old pages that haven't been updated yet; replace them.
     for (var i = 0; i < oldData.length; i++) {
-      if (oldData[i].updated)
+      if (oldData[i] && oldData[i].updated)
         continue;
 
       for (var j = 0; j < newData.length; j++) {
@@ -346,7 +341,7 @@ cr.define('ntp4', function() {
         break;
       }
 
-      if (!oldData[i].updated)
+      if (oldData[i] && !oldData[i].updated)
         oldData[i] = null;
     }
 
@@ -359,8 +354,15 @@ cr.define('ntp4', function() {
     return oldData;
   };
 
+  function setFaviconDominantColor(id, color) {
+    var tile = $('tile' + id);
+    if (tile)
+      tile.setStripeColor(color);
+  };
+
   return {
     MostVisitedPage: MostVisitedPage,
     refreshData: refreshData,
+    setFaviconDominantColor: setFaviconDominantColor,
   };
 });

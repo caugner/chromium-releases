@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/bubble/bubble.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
@@ -24,7 +25,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
 #include "views/controls/textfield/textfield.h"
@@ -33,7 +34,6 @@
 #include "views/layout/grid_layout.h"
 #include "views/layout/layout_constants.h"
 #include "views/window/client_view.h"
-#include "views/window/window.h"
 
 using views::ColumnSet;
 using views::GridLayout;
@@ -54,7 +54,7 @@ static SkBitmap* kCloseImage = NULL;
 
 namespace browser {
 
-void ShowBookmarkBubbleView(views::Window* parent,
+void ShowBookmarkBubbleView(views::Widget* parent,
                             const gfx::Rect& bounds,
                             BubbleDelegate* delegate,
                             Profile* profile,
@@ -79,7 +79,7 @@ bool IsBookmarkBubbleViewShowing() {
 BookmarkBubbleView* BookmarkBubbleView::bookmark_bubble_ = NULL;
 
 // static
-void BookmarkBubbleView::Show(views::Window* parent,
+void BookmarkBubbleView::Show(views::Widget* parent,
                               const gfx::Rect& bounds,
                               BubbleDelegate* delegate,
                               Profile* profile,
@@ -90,10 +90,9 @@ void BookmarkBubbleView::Show(views::Window* parent,
 
   bookmark_bubble_ = new BookmarkBubbleView(delegate, profile, url,
                                             newly_bookmarked);
-  // TODO(beng): Pass |parent| after V2 is complete.
   Bubble* bubble = Bubble::Show(
-      parent->client_view()->GetWidget(), bounds, BubbleBorder::TOP_RIGHT,
-      bookmark_bubble_, bookmark_bubble_);
+      parent, bounds, BubbleBorder::TOP_RIGHT, bookmark_bubble_,
+      bookmark_bubble_);
   // |bubble_| can be set to NULL in BubbleClosing when we close the bubble
   // asynchronously. However, that can happen during the Show call above if the
   // window loses activation while we are getting to ready to show the bubble,
@@ -105,7 +104,7 @@ void BookmarkBubbleView::Show(views::Window* parent,
   bubble->SizeToContents();
   GURL url_ptr(url);
   NotificationService::current()->Notify(
-      NotificationType::BOOKMARK_BUBBLE_SHOWN,
+      chrome::NOTIFICATION_BOOKMARK_BUBBLE_SHOWN,
       Source<Profile>(profile->GetOriginalProfile()),
       Details<GURL>(&url_ptr));
   bookmark_bubble_->BubbleShown();
@@ -191,10 +190,10 @@ void BookmarkBubbleView::Init() {
       IDS_BOOMARK_BUBBLE_REMOVE_BOOKMARK)));
   remove_link_->set_listener(this);
 
-  edit_button_ = new views::NativeButton(
+  edit_button_ = new views::NativeTextButton(
       this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOMARK_BUBBLE_OPTIONS)));
 
-  close_button_ = new views::NativeButton(
+  close_button_ = new views::NativeTextButton(
       this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_DONE)));
   close_button_->SetIsDefault(true);
 
@@ -326,7 +325,7 @@ void BookmarkBubbleView::BubbleClosing(Bubble* bubble,
   if (delegate_)
     delegate_->BubbleClosing(bubble, closed_by_escape);
   NotificationService::current()->Notify(
-      NotificationType::BOOKMARK_BUBBLE_HIDDEN,
+      chrome::NOTIFICATION_BOOKMARK_BUBBLE_HIDDEN,
       Source<Profile>(profile_->GetOriginalProfile()),
       NotificationService::NoDetails());
 }

@@ -63,9 +63,9 @@ class AutofillManager : public TabContentsObserver,
   virtual bool OnMessageReceived(const IPC::Message& message);
 
   // AutofillDownloadManager::Observer implementation:
-  virtual void OnLoadedAutofillHeuristics(const std::string& heuristic_xml);
-  virtual void OnUploadedAutofillHeuristics(const std::string& form_signature);
-  virtual void OnHeuristicsRequestError(
+  virtual void OnLoadedServerPredictions(const std::string& response_xml);
+  virtual void OnUploadedPossibleFieldTypes();
+  virtual void OnServerRequestError(
       const std::string& form_signature,
       AutofillDownloadManager::AutofillRequestType request_type,
       int http_error);
@@ -77,7 +77,7 @@ class AutofillManager : public TabContentsObserver,
   void ImportFormData(const FormStructure& submitted_form);
 
   // Uploads the form data to the Autofill server.
-  void UploadFormData(const FormStructure& submitted_form);
+  virtual void UploadFormData(const FormStructure& submitted_form);
 
   // Reset cache.
   void Reset();
@@ -248,8 +248,11 @@ class AutofillManager : public TabContentsObserver,
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FormChangesAddField);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FormSubmitted);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FormSubmittedServerTypes);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, FormSubmittedWithDefaultValues);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            DeterminePossibleFieldTypesForUpload);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           DeterminePossibleFieldTypesForUploadStressTest);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AddressSuggestionsCount);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AutofillIsEnabledAtPageLoad);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest,

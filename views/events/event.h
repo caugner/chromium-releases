@@ -13,7 +13,7 @@
 #include "ui/gfx/point.h"
 #include "views/native_types.h"
 
-#if defined(TOUCH_UI)
+#if defined(USE_X11)
 typedef union _XEvent XEvent;
 #endif
 
@@ -79,7 +79,6 @@ class Event {
            type_ == ui::ET_MOUSEWHEEL;
   }
 
-#if defined(TOUCH_UI)
   bool IsTouchEvent() const {
     return type_ == ui::ET_TOUCH_RELEASED ||
            type_ == ui::ET_TOUCH_PRESSED ||
@@ -87,7 +86,6 @@ class Event {
            type_ == ui::ET_TOUCH_STATIONARY ||
            type_ == ui::ET_TOUCH_CANCELLED;
   }
-#endif
 
 #if defined(OS_WIN)
   // Returns the EventFlags in terms of windows flags.
@@ -165,9 +163,7 @@ class LocatedEvent : public Event {
   gfx::Point location_;
 };
 
-#if defined(TOUCH_UI)
 class TouchEvent;
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -186,14 +182,12 @@ class MouseEvent : public LocatedEvent {
   // from |source| coordinate system to |target| coordinate system.
   MouseEvent(const MouseEvent& model, View* source, View* target);
 
-#if defined(TOUCH_UI)
   // Creates a new MouseEvent from a TouchEvent. The location of the TouchEvent
   // is the same as the MouseEvent. Other attributes (e.g. type, flags) are
   // mapped from the TouchEvent to appropriate MouseEvent attributes.
   // GestureManager uses this to convert TouchEvents that are not handled by any
   // view.
   MouseEvent(const TouchEvent& touch, FromNativeEvent2 from_native);
-#endif
 
   // TODO(msw): Kill this legacy constructor when we update uses.
   // Create a new mouse event
@@ -241,7 +235,6 @@ class MouseEvent : public LocatedEvent {
   DISALLOW_COPY_AND_ASSIGN(MouseEvent);
 };
 
-#if defined(TOUCH_UI)
 ////////////////////////////////////////////////////////////////////////////////
 //
 // TouchEvent class
@@ -261,9 +254,10 @@ class TouchEvent : public LocatedEvent {
              int y,
              int flags,
              int touch_id,
-             float radius,
+             float radius_x,
+             float radius_y,
              float angle,
-             float ratio);
+             float force);
 
   // Create a new TouchEvent which is identical to the provided model.
   // If source / target views are provided, the model location will be converted
@@ -272,9 +266,10 @@ class TouchEvent : public LocatedEvent {
 
   int identity() const { return touch_id_; }
 
-  float radius() const { return radius_; }
-  float angle() const { return angle_; }
-  float ratio() const { return ratio_; }
+  float radius_x() const { return radius_x_; }
+  float radius_y() const { return radius_y_; }
+  float rotation_angle() const { return rotation_angle_; }
+  float force() const { return force_; }
 
  private:
   friend class internal::RootView;
@@ -285,19 +280,20 @@ class TouchEvent : public LocatedEvent {
   // for each separable additional touch that the hardware can detect.
   const int touch_id_;
 
-  // Half length of the major axis of the touch ellipse. Default 0.0.
-  const float radius_;
+  // Radius of the X (major) axis of the touch ellipse. 1.0 if unknown.
+  const float radius_x_;
+
+  // Radius of the Y (minor) axis of the touch ellipse. 1.0 if unknown.
+  const float radius_y_;
 
   // Angle of the major axis away from the X axis. Default 0.0.
-  const float angle_;
+  const float rotation_angle_;
 
-  // Length ratio between major axis and minor axis of the touch ellipse. 1.0
-  // if only the major axis is available, prentending the touch is a circle.
-  const float ratio_;
+  // Force (pressure) of the touch. Normalized to be [0, 1]. Default to be 0.0.
+  const float force_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchEvent);
 };
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // KeyEvent class

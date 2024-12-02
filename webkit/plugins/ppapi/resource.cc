@@ -35,17 +35,16 @@ PP_Resource Resource::GetReferenceNoAddRef() const {
   return resource_id_;
 }
 
+void Resource::ClearInstance() {
+  instance_ = NULL;
+}
+
 void Resource::LastPluginRefWasDeleted() {
   DCHECK(resource_id_ != 0);
   instance()->module()->GetCallbackTracker()->PostAbortForResource(
       resource_id_);
   resource_id_ = 0;
 }
-
-#define DEFINE_TYPE_GETTER(RESOURCE)            \
-  RESOURCE* Resource::As##RESOURCE() { return NULL; }
-FOR_ALL_RESOURCES(DEFINE_TYPE_GETTER)
-#undef DEFINE_TYPE_GETTER
 
 }  // namespace ppapi
 }  // namespace webkit

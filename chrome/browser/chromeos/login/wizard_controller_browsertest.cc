@@ -7,14 +7,15 @@
 #include "chrome/browser/chromeos/login/enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
+#include "chrome/browser/chromeos/login/mock_enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/mock_eula_screen.h"
 #include "chrome/browser/chromeos/login/mock_network_screen.h"
 #include "chrome/browser/chromeos/login/mock_update_screen.h"
 #include "chrome/browser/chromeos/login/network_screen.h"
 #include "chrome/browser/chromeos/login/network_selection_view.h"
 #include "chrome/browser/chromeos/login/user_image_screen.h"
-#include "chrome/browser/chromeos/login/views_oobe_display.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
+#include "chrome/browser/chromeos/login/views_oobe_display.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
@@ -27,23 +28,22 @@
 
 namespace chromeos {
 
-template <class T>
+template <class T, class H>
 class MockOutShowHide : public T {
  public:
-  template <class P> MockOutShowHide(P p) : T(p) {}
+  template <class P> explicit  MockOutShowHide(P p) : T(p) {}
+  template <class P> MockOutShowHide(P p, H* actor)
+      : T(p, actor), actor_(actor) {}
   MOCK_METHOD0(Show, void());
   MOCK_METHOD0(Hide, void());
+
+ private:
+  scoped_ptr<H> actor_;
 };
 
-#define MOCK(mock_var, screen_name, mocked_class)                              \
-  mock_var = new MockOutShowHide<mocked_class>(controller());                  \
-  controller()->screen_name.reset(mock_var);                                   \
-  EXPECT_CALL(*mock_var, Show()).Times(0);                                     \
-  EXPECT_CALL(*mock_var, Hide()).Times(0);
-
-#define MOCK_OLD(mock_var, screen_name, mocked_class)                          \
-  mock_var = new MockOutShowHide<mocked_class>(                                \
-      static_cast<ViewsOobeDisplay*>(controller()->oobe_display_.get()));      \
+#define MOCK(mock_var, screen_name, mocked_class, actor_class)                 \
+  mock_var = new MockOutShowHide<mocked_class, actor_class>(                   \
+      controller(), new actor_class);                                          \
   controller()->screen_name.reset(mock_var);                                   \
   EXPECT_CALL(*mock_var, Show()).Times(0);                                     \
   EXPECT_CALL(*mock_var, Hide()).Times(0);
@@ -99,13 +99,13 @@ class WizardControllerFlowTest : public WizardControllerTest {
     WizardController::default_controller()->is_official_build_ = true;
 
     // Set up the mocks for all screens.
-    MOCK(mock_network_screen_, network_screen_, MockNetworkScreen);
-    MOCK(mock_update_screen_, update_screen_, MockUpdateScreen);
-    MOCK(mock_eula_screen_, eula_screen_, MockEulaScreen);
-
-    MOCK_OLD(mock_enterprise_enrollment_screen_,
-             enterprise_enrollment_screen_,
-             EnterpriseEnrollmentScreen);
+    MOCK(mock_network_screen_, network_screen_,
+         MockNetworkScreen, MockNetworkScreenActor);
+    MOCK(mock_update_screen_, update_screen_,
+         MockUpdateScreen, MockUpdateScreenActor);
+    MOCK(mock_eula_screen_, eula_screen_, MockEulaScreen, MockEulaScreenActor);
+    MOCK(mock_enterprise_enrollment_screen_, enterprise_enrollment_screen_,
+         MockEnterpriseEnrollmentScreen, MockEnterpriseEnrollmentScreenActor);
 
     // Switch to the initial screen.
     EXPECT_EQ(NULL, controller()->current_screen());
@@ -119,11 +119,12 @@ class WizardControllerFlowTest : public WizardControllerTest {
     controller()->OnExit(exit_code);
   }
 
-  MockOutShowHide<MockNetworkScreen>* mock_network_screen_;
-  MockOutShowHide<MockUpdateScreen>* mock_update_screen_;
-  MockOutShowHide<MockEulaScreen>* mock_eula_screen_;
-  MockOutShowHide<EnterpriseEnrollmentScreen>*
-      mock_enterprise_enrollment_screen_;
+  MockOutShowHide<MockNetworkScreen, MockNetworkScreenActor>*
+      mock_network_screen_;
+  MockOutShowHide<MockUpdateScreen, MockUpdateScreenActor>* mock_update_screen_;
+  MockOutShowHide<MockEulaScreen, MockEulaScreenActor>* mock_eula_screen_;
+  MockOutShowHide<MockEnterpriseEnrollmentScreen,
+    MockEnterpriseEnrollmentScreenActor>* mock_enterprise_enrollment_screen_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WizardControllerFlowTest);
@@ -251,7 +252,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, MAYBE_Accelerators) {
   //TODO(altimofeev): do not depend on the display realization.
 
   ViewsOobeDisplay* display =
-      static_cast<ViewsOobeDisplay*>(controller()->oobe_display_.get());
+      static_cast<ViewsOobeDisplay*>(controller()->oobe_display_);
   views::View* contents = display->contents_;
 
   EXPECT_EQ(controller()->GetNetworkScreen(), controller()->current_screen());

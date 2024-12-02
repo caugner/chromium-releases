@@ -13,8 +13,7 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
-#include "crypto/third_party/nss/blapi.h"
-#include "crypto/third_party/nss/sha256.h"
+#include "crypto/sha2.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/login/auth_response_handler.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
@@ -117,6 +117,21 @@ void GoogleAuthenticator::ClearClientLoginAttempt() {
   login_token_.clear();
   login_captcha_.clear();
 }
+bool GoogleAuthenticator::CompleteLogin(Profile* profile,
+                                        const std::string& username,
+                                        const std::string& password) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  authentication_profile_ = profile;
+  username_.assign(Canonicalize(username));
+  ascii_hash_.assign(HashPassword(password));
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableMethod(this,
+                        &GoogleAuthenticator::OnLoginSuccess,
+                        GaiaAuthConsumer::ClientLoginResult(), false));
+  return true;
+}
 
 bool GoogleAuthenticator::AuthenticateToLogin(
     Profile* profile,
@@ -125,6 +140,7 @@ bool GoogleAuthenticator::AuthenticateToLogin(
     const std::string& login_token,
     const std::string& login_captcha) {
   unlock_ = false;
+  authentication_profile_ = profile;
 
   // TODO(cmasone): Figure out how to parallelize fetch, username/password
   // processing without impacting testability.
@@ -165,7 +181,7 @@ void GoogleAuthenticator::LoginOffTheRecord() {
   if (CrosLibrary::Get()->GetCryptohomeLibrary()->MountForBwsi(&mount_error)) {
     AuthenticationNotificationDetails details(true);
     NotificationService::current()->Notify(
-        NotificationType::LOGIN_AUTHENTICATION,
+        chrome::NOTIFICATION_LOGIN_AUTHENTICATION,
         NotificationService::AllSources(),
         Details<AuthenticationNotificationDetails>(&details));
     consumer_->OnOffTheRecordLoginSuccess();
@@ -275,7 +291,7 @@ void GoogleAuthenticator::OnLoginSuccess(
   // Send notification of success
   AuthenticationNotificationDetails details(true);
   NotificationService::current()->Notify(
-      NotificationType::LOGIN_AUTHENTICATION,
+      chrome::NOTIFICATION_LOGIN_AUTHENTICATION,
       NotificationService::AllSources(),
       Details<AuthenticationNotificationDetails>(&details));
 
@@ -289,7 +305,8 @@ void GoogleAuthenticator::OnLoginSuccess(
     consumer_->OnLoginSuccess(username_,
                               password_,
                               credentials,
-                              request_pending);
+                              request_pending,
+                              false);
   } else if (!unlock_ &&
              mount_error == chromeos::kCryptohomeMountErrorKeyFailure) {
     consumer_->OnPasswordChangeDetected(credentials);
@@ -335,6 +352,7 @@ void GoogleAuthenticator::CheckLocalaccount(const LoginFailure& error) {
       consumer_->OnLoginSuccess(username_,
                                 std::string(),
                                 GaiaAuthConsumer::ClientLoginResult(),
+                                false,
                                 false);
     } else {
       LOG(ERROR) << "Could not mount tmpfs for local account: " << mount_error;
@@ -350,7 +368,7 @@ void GoogleAuthenticator::OnLoginFailure(const LoginFailure& error) {
   // Send notification of failure
   AuthenticationNotificationDetails details(false);
   NotificationService::current()->Notify(
-      NotificationType::LOGIN_AUTHENTICATION,
+      chrome::NOTIFICATION_LOGIN_AUTHENTICATION,
       NotificationService::AllSources(),
       Details<AuthenticationNotificationDetails>(&details));
   LOG(WARNING) << "Login failed: " << error.GetErrorString();
@@ -388,6 +406,22 @@ void GoogleAuthenticator::RetryAuth(Profile* profile,
                                     const std::string& login_captcha) {
   NOTIMPLEMENTED();
 }
+
+void GoogleAuthenticator::VerifyOAuth1AccessToken(
+    const std::string& auth1_token, const std::string& oauth1_secret) {
+  NOTIMPLEMENTED();
+}
+
+std::string GoogleAuthenticator::EncryptToken(const std::string& unused) {
+  NOTIMPLEMENTED();
+  return std::string();
+}
+
+std::string GoogleAuthenticator::DecryptToken(const std::string& unused) {
+  NOTIMPLEMENTED();
+  return std::string();
+}
+
 
 void GoogleAuthenticator::LoadSystemSalt() {
   if (!system_salt_.empty())
@@ -436,18 +470,8 @@ std::string GoogleAuthenticator::HashPassword(const std::string& password) {
   char ascii_buf[kPassHashLen + 1];
 
   // Hash salt and password
-  SHA256Context ctx;
-  SHA256_Begin(&ctx);
-  SHA256_Update(&ctx,
-                reinterpret_cast<const unsigned char*>(ascii_salt.data()),
-                static_cast<unsigned int>(ascii_salt.length()));
-  SHA256_Update(&ctx,
-                reinterpret_cast<const unsigned char*>(password.data()),
-                static_cast<unsigned int>(password.length()));
-  SHA256_End(&ctx,
-             passhash_buf,
-             NULL,
-             static_cast<unsigned int>(sizeof(passhash_buf)));
+  crypto::SHA256HashString(ascii_salt + password,
+                           &passhash_buf, sizeof(passhash_buf));
 
   std::vector<unsigned char> passhash(passhash_buf,
                                       passhash_buf + sizeof(passhash_buf));

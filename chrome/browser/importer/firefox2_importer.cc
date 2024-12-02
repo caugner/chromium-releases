@@ -12,7 +12,7 @@
 #include "base/i18n/icu_string_conversions.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
@@ -20,6 +20,7 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/importer/firefox_importer_utils.h"
 #include "chrome/browser/importer/importer_bridge.h"
+#include "chrome/browser/importer/importer_util.h"
 #include "chrome/browser/importer/mork_reader.h"
 #include "chrome/browser/importer/nss_decryptor.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -55,7 +56,7 @@ void Firefox2Importer::StartImport(
   app_path_ = source_profile.app_path;
 
   parsing_bookmarks_html_file_ =
-      (source_profile.importer_type == importer::BOOKMARKS_HTML);
+      (source_profile.importer_type == importer::TYPE_BOOKMARKS_FILE);
 
   // The order here is important!
   bridge_->NotifyStarted();
@@ -660,8 +661,9 @@ void Firefox2Importer::DataURLToFaviconUsage(
     return;
 
   history::ImportedFaviconUsage usage;
-  if (!ReencodeFavicon(reinterpret_cast<const unsigned char*>(&data[0]),
-                       data.size(), &usage.png_data))
+  if (!importer::ReencodeFavicon(
+          reinterpret_cast<const unsigned char*>(&data[0]),
+          data.size(), &usage.png_data))
     return;  // Unable to decode.
 
   // We need to make up a URL for the favicon. We use a version of the page's

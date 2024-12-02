@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "content/renderer/audio_device.h"
+#include "content/renderer/media/audio_device.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAudioDevice.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
 
@@ -33,6 +33,7 @@ class RendererWebAudioDeviceImpl : public WebKit::WebAudioDevice,
 
  private:
   scoped_refptr<AudioDevice> audio_device_;
+  bool is_running_;
 
   // Weak reference to the callback into WebKit code.
   WebKit::WebAudioDevice::RenderCallback* client_callback_;

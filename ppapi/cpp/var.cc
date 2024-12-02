@@ -10,16 +10,11 @@
 #include <algorithm>
 
 #include "ppapi/c/pp_var.h"
-#ifndef PPAPI_VAR_REMOVE_SCRIPTING
-#  include "ppapi/c/dev/ppb_var_deprecated.h"
-#endif
 #include "ppapi/c/ppb_var.h"
-#include "ppapi/cpp/common.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/logging.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
-#include "ppapi/cpp/dev/scriptable_object_deprecated.h"
 
 // Define equivalent to snprintf on Windows.
 #if defined(_MSC_VER)
@@ -34,16 +29,6 @@ template <> const char* interface_name<PPB_Var>() {
   return PPB_VAR_INTERFACE;
 }
 
-#ifdef PPAPI_VAR_REMOVE_SCRIPTING
-typedef PPB_Var PPB_Var_Interface_Type;
-#else
-typedef PPB_Var_Deprecated PPB_Var_Interface_Type;
-
-template <> const char* interface_name<PPB_Var_Deprecated>() {
-  return PPB_VAR_DEPRECATED_INTERFACE;
-}
-#endif
-
 // Technically you can call AddRef and Release on any Var, but it may involve
 // cross-process calls depending on the plugin. This is an optimization so we
 // only do refcounting on the necessary objects.
@@ -53,24 +38,22 @@ inline bool NeedsRefcounting(const PP_Var& var) {
 
 }  // namespace
 
-using namespace deprecated;
-
 Var::Var() {
+  memset(&var_, 0, sizeof(var_));
   var_.type = PP_VARTYPE_UNDEFINED;
-  var_.padding = 0;
   needs_release_ = false;
 }
 
 Var::Var(Null) {
+  memset(&var_, 0, sizeof(var_));
   var_.type = PP_VARTYPE_NULL;
-  var_.padding = 0;
   needs_release_ = false;
 }
 
 Var::Var(bool b) {
   var_.type = PP_VARTYPE_BOOL;
   var_.padding = 0;
-  var_.value.as_bool = BoolToPPBool(b);
+  var_.value.as_bool = PP_FromBool(b);
   needs_release_ = false;
 }
 
@@ -89,10 +72,10 @@ Var::Var(double d) {
 }
 
 Var::Var(const char* utf8_str) {
-  if (has_interface<PPB_Var_Interface_Type>()) {
+  if (has_interface<PPB_Var>()) {
     uint32_t len = utf8_str ? static_cast<uint32_t>(strlen(utf8_str)) : 0;
-    var_ = get_interface<PPB_Var_Interface_Type>()->VarFromUtf8(
-        Module::Get()->pp_module(), utf8_str, len);
+    var_ = get_interface<PPB_Var>()->VarFromUtf8(Module::Get()->pp_module(),
+                                                 utf8_str, len);
   } else {
     var_.type = PP_VARTYPE_NULL;
     var_.padding = 0;
@@ -101,8 +84,8 @@ Var::Var(const char* utf8_str) {
 }
 
 Var::Var(const std::string& utf8_str) {
-  if (has_interface<PPB_Var_Interface_Type>()) {
-    var_ = get_interface<PPB_Var_Interface_Type>()->VarFromUtf8(
+  if (has_interface<PPB_Var>()) {
+    var_ = get_interface<PPB_Var>()->VarFromUtf8(
         Module::Get()->pp_module(),
         utf8_str.c_str(),
         static_cast<uint32_t>(utf8_str.size()));
@@ -116,9 +99,9 @@ Var::Var(const std::string& utf8_str) {
 Var::Var(const Var& other) {
   var_ = other.var_;
   if (NeedsRefcounting(var_)) {
-    if (has_interface<PPB_Var_Interface_Type>()) {
+    if (has_interface<PPB_Var>()) {
       needs_release_ = true;
-      get_interface<PPB_Var_Interface_Type>()->AddRef(var_);
+      get_interface<PPB_Var>()->AddRef(var_);
     } else {
       var_.type = PP_VARTYPE_NULL;
       needs_release_ = false;
@@ -129,25 +112,32 @@ Var::Var(const Var& other) {
 }
 
 Var::~Var() {
-  if (needs_release_ && has_interface<PPB_Var_Interface_Type>())
-    get_interface<PPB_Var_Interface_Type>()->Release(var_);
+  if (needs_release_ && has_interface<PPB_Var>())
+    get_interface<PPB_Var>()->Release(var_);
 }
 
 Var& Var::operator=(const Var& other) {
-  if (needs_release_ && has_interface<PPB_Var_Interface_Type>())
-    get_interface<PPB_Var_Interface_Type>()->Release(var_);
-  var_ = other.var_;
-  if (NeedsRefcounting(var_)) {
-    if (has_interface<PPB_Var_Interface_Type>()) {
-      needs_release_ = true;
-      get_interface<PPB_Var_Interface_Type>()->AddRef(var_);
-    } else {
-      var_.type = PP_VARTYPE_NULL;
-      needs_release_ = false;
-    }
+  // Early return for self-assignment. Note however, that two distinct vars
+  // can refer to the same object, so we still need to be careful about the
+  // refcounting below.
+  if (this == &other)
+    return *this;
+
+  // Be careful to keep the ref alive for cases where we're assigning an
+  // object to itself by addrefing the new one before releasing the old one.
+  bool old_needs_release = needs_release_;
+  if (NeedsRefcounting(other.var_)) {
+    // Assume we already has_interface<PPB_Var> for refcounted vars or else we
+    // couldn't have created them in the first place.
+    needs_release_ = true;
+    get_interface<PPB_Var>()->AddRef(other.var_);
   } else {
     needs_release_ = false;
   }
+  if (old_needs_release)
+    get_interface<PPB_Var>()->Release(var_);
+
+  var_ = other.var_;
   return *this;
 }
 
@@ -178,7 +168,7 @@ bool Var::AsBool() const {
     PP_NOTREACHED();
     return false;
   }
-  return PPBoolToBool(var_.value.as_bool);
+  return PP_ToBool(var_.value.as_bool);
 }
 
 int32_t Var::AsInt() const {
@@ -205,170 +195,12 @@ std::string Var::AsString() const {
     return std::string();
   }
 
-  if (!has_interface<PPB_Var_Interface_Type>())
+  if (!has_interface<PPB_Var>())
     return std::string();
   uint32_t len;
-  const char* str =
-      get_interface<PPB_Var_Interface_Type>()->VarToUtf8(var_, &len);
+  const char* str = get_interface<PPB_Var>()->VarToUtf8(var_, &len);
   return std::string(str, len);
 }
-
-#ifndef PPAPI_VAR_REMOVE_SCRIPTING
-Var::Var(Instance* instance, ScriptableObject* object) {
-  if (has_interface<PPB_Var_Deprecated>()) {
-    var_ = get_interface<PPB_Var_Deprecated>()->CreateObject(
-        instance->pp_instance(), object->GetClass(), object);
-    needs_release_ = true;
-  } else {
-    var_.type = PP_VARTYPE_NULL;
-    var_.padding = 0;
-    needs_release_ = false;
-  }
-}
-
-ScriptableObject* Var::AsScriptableObject() const {
-  if (!is_object()) {
-    PP_NOTREACHED();
-  } else if (has_interface<PPB_Var_Deprecated>()) {
-    void* object = NULL;
-    if (get_interface<PPB_Var_Deprecated>()->IsInstanceOf(
-        var_, ScriptableObject::GetClass(), &object)) {
-      return reinterpret_cast<ScriptableObject*>(object);
-    }
-  }
-  return NULL;
-}
-
-bool Var::HasProperty(const Var& name, Var* exception) const {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return false;
-  return get_interface<PPB_Var_Deprecated>()->HasProperty(
-      var_, name.var_, OutException(exception).get());
-}
-
-bool Var::HasMethod(const Var& name, Var* exception) const {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return false;
-  return get_interface<PPB_Var_Deprecated>()->HasMethod(
-      var_, name.var_, OutException(exception).get());
-}
-
-Var Var::GetProperty(const Var& name, Var* exception) const {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return Var();
-  return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->GetProperty(
-      var_, name.var_, OutException(exception).get()));
-}
-
-void Var::GetAllPropertyNames(std::vector<Var>* properties,
-                              Var* exception) const {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return;
-  PP_Var* props = NULL;
-  uint32_t prop_count = 0;
-  get_interface<PPB_Var_Deprecated>()->GetAllPropertyNames(
-      var_, &prop_count, &props, OutException(exception).get());
-  if (!prop_count)
-    return;
-  properties->resize(prop_count);
-  for (uint32_t i = 0; i < prop_count; ++i) {
-    Var temp(PassRef(), props[i]);
-    (*properties)[i] = temp;
-  }
-  Module::Get()->core()->MemFree(props);
-}
-
-void Var::SetProperty(const Var& name, const Var& value, Var* exception) {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return;
-  get_interface<PPB_Var_Deprecated>()->SetProperty(
-      var_, name.var_, value.var_, OutException(exception).get());
-}
-
-void Var::RemoveProperty(const Var& name, Var* exception) {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return;
-  get_interface<PPB_Var_Deprecated>()->RemoveProperty(
-      var_, name.var_, OutException(exception).get());
-}
-
-Var Var::Call(const Var& method_name, uint32_t argc, Var* argv,
-              Var* exception) {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return Var();
-  if (argc > 0) {
-    std::vector<PP_Var> args;
-    args.reserve(argc);
-    for (size_t i = 0; i < argc; i++)
-      args.push_back(argv[i].var_);
-    return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Call(
-        var_, method_name.var_, argc, &args[0], OutException(exception).get()));
-  } else {
-    // Don't try to get the address of a vector if it's empty.
-    return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Call(
-        var_, method_name.var_, 0, NULL, OutException(exception).get()));
-  }
-}
-
-Var Var::Construct(uint32_t argc, Var* argv, Var* exception) const {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return Var();
-  if (argc > 0) {
-    std::vector<PP_Var> args;
-    args.reserve(argc);
-    for (size_t i = 0; i < argc; i++)
-      args.push_back(argv[i].var_);
-    return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Construct(
-        var_, argc, &args[0], OutException(exception).get()));
-  } else {
-    // Don't try to get the address of a vector if it's empty.
-    return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Construct(
-        var_, 0, NULL, OutException(exception).get()));
-  }
-}
-
-Var Var::Call(const Var& method_name, Var* exception) {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return Var();
-  return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Call(
-      var_, method_name.var_, 0, NULL, OutException(exception).get()));
-}
-
-Var Var::Call(const Var& method_name, const Var& arg1, Var* exception) {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return Var();
-  PP_Var args[1] = {arg1.var_};
-  return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Call(
-      var_, method_name.var_, 1, args, OutException(exception).get()));
-}
-
-Var Var::Call(const Var& method_name, const Var& arg1, const Var& arg2,
-              Var* exception) {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return Var();
-  PP_Var args[2] = {arg1.var_, arg2.var_};
-  return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Call(
-      var_, method_name.var_, 2, args, OutException(exception).get()));
-}
-
-Var Var::Call(const Var& method_name, const Var& arg1, const Var& arg2,
-              const Var& arg3, Var* exception) {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return Var();
-  PP_Var args[3] = {arg1.var_, arg2.var_, arg3.var_};
-  return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Call(
-      var_, method_name.var_, 3, args, OutException(exception).get()));
-}
-
-Var Var::Call(const Var& method_name, const Var& arg1, const Var& arg2,
-              const Var& arg3, const Var& arg4, Var* exception) {
-  if (!has_interface<PPB_Var_Deprecated>())
-    return Var();
-  PP_Var args[4] = {arg1.var_, arg2.var_, arg3.var_, arg4.var_};
-  return Var(PassRef(), get_interface<PPB_Var_Deprecated>()->Call(
-      var_, method_name.var_, 4, args, OutException(exception).get()));
-}
-#endif
 
 std::string Var::DebugString() const {
   char buf[256];

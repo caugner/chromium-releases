@@ -9,7 +9,9 @@
 #include "content/common/webkit_param_traits.h"
 #include "ipc/ipc_message_macros.h"
 #include "webkit/glue/form_data.h"
+#include "webkit/glue/form_data_predictions.h"
 #include "webkit/glue/form_field.h"
+#include "webkit/glue/form_field_predictions.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/password_form_dom_manager.h"
 
@@ -22,7 +24,16 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::FormField)
   IPC_STRUCT_TRAITS_MEMBER(form_control_type)
   IPC_STRUCT_TRAITS_MEMBER(max_length)
   IPC_STRUCT_TRAITS_MEMBER(is_autofilled)
-  IPC_STRUCT_TRAITS_MEMBER(option_strings)
+  IPC_STRUCT_TRAITS_MEMBER(option_values)
+  IPC_STRUCT_TRAITS_MEMBER(option_contents)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(webkit_glue::FormFieldPredictions)
+  IPC_STRUCT_TRAITS_MEMBER(field)
+  IPC_STRUCT_TRAITS_MEMBER(signature)
+  IPC_STRUCT_TRAITS_MEMBER(heuristic_type)
+  IPC_STRUCT_TRAITS_MEMBER(server_type)
+  IPC_STRUCT_TRAITS_MEMBER(overall_type)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(webkit_glue::FormData)
@@ -31,6 +42,13 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::FormData)
   IPC_STRUCT_TRAITS_MEMBER(origin)
   IPC_STRUCT_TRAITS_MEMBER(action)
   IPC_STRUCT_TRAITS_MEMBER(user_submitted)
+  IPC_STRUCT_TRAITS_MEMBER(fields)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(webkit_glue::FormDataPredictions)
+  IPC_STRUCT_TRAITS_MEMBER(data)
+  IPC_STRUCT_TRAITS_MEMBER(signature)
+  IPC_STRUCT_TRAITS_MEMBER(experiment_id)
   IPC_STRUCT_TRAITS_MEMBER(fields)
 IPC_STRUCT_TRAITS_END()
 
@@ -62,6 +80,10 @@ IPC_MESSAGE_ROUTED2(AutofillMsg_FormDataFilled,
 IPC_MESSAGE_ROUTED1(AutofillMsg_FillPasswordForm,
                     webkit_glue::PasswordFormFillData)
 
+// Send the heuristic and server field type predictions to the renderer.
+IPC_MESSAGE_ROUTED1(
+    AutofillMsg_FieldTypePredictionsAvailable,
+    std::vector<webkit_glue::FormDataPredictions> /* forms */)
 
 // Autofill messages sent from the renderer to the browser.
 

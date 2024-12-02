@@ -11,9 +11,8 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/crash_upload_list.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/crashes_ui.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/jstemplate_builder.h"
@@ -36,59 +35,19 @@
 
 namespace {
 
-const int kTimeout = 8 * 1000;  // 8 seconds.
+ChromeWebUIDataSource* CreateFlashUIHTMLSource() {
+  ChromeWebUIDataSource* source =
+      new ChromeWebUIDataSource(chrome::kChromeUIFlashHost);
 
-////////////////////////////////////////////////////////////////////////////////
-//
-// FlashUIHTMLSource
-//
-////////////////////////////////////////////////////////////////////////////////
-
-class FlashUIHTMLSource : public ChromeURLDataManager::DataSource {
- public:
-  FlashUIHTMLSource()
-      : DataSource(chrome::kChromeUIFlashHost, MessageLoop::current()) {}
-
-  // Called when the network layer has requested a resource underneath
-  // the path we registered.
-  virtual void StartDataRequest(const std::string& path,
-                                bool is_incognito,
-                                int request_id);
-
-  virtual std::string GetMimeType(const std::string&) const {
-    return "text/html";
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FlashUIHTMLSource);
-};
-
-void FlashUIHTMLSource::StartDataRequest(const std::string& path,
-                                             bool is_incognito,
-                                             int request_id) {
-  // Strings used in the JsTemplate file.
-  DictionaryValue localized_strings;
-  localized_strings.SetString("loadingMessage",
-      l10n_util::GetStringUTF16(IDS_CONFLICTS_LOADING_MESSAGE));
-  localized_strings.SetString("flashLongTitle", "About Flash");
-
-  ChromeURLDataManager::DataSource::SetFontAndTextDirection(&localized_strings);
-
-  static const base::StringPiece html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_ABOUT_FLASH_HTML));
-  std::string full_html(html.data(), html.size());
-  jstemplate_builder::AppendJsonHtml(&localized_strings, &full_html);
-  jstemplate_builder::AppendI18nTemplateSourceHtml(&full_html);
-  jstemplate_builder::AppendI18nTemplateProcessHtml(&full_html);
-  jstemplate_builder::AppendJsTemplateSourceHtml(&full_html);
-
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
+  source->AddLocalizedString("loadingMessage", IDS_FLASH_LOADING_MESSAGE);
+  source->AddLocalizedString("flashLongTitle", IDS_FLASH_TITLE_MESSAGE);
+  source->set_json_path("strings.js");
+  source->add_resource_path("about_flash.js", IDR_ABOUT_FLASH_JS);
+  source->set_default_resource(IDR_ABOUT_FLASH_HTML);
+  return source;
 }
+
+const int kTimeout = 8 * 1000;  // 8 seconds.
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -237,7 +196,7 @@ void FlashDOMHandler::MaybeRespondToPage() {
   AddPair(list,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
           version_info.Version() + " (" +
-              platform_util::GetVersionStringModifier() + ")");
+          chrome::VersionInfo::GetVersionStringModifier() + ")");
 
   // OS version information.
   std::string os_label = version_info.OSType();
@@ -365,16 +324,15 @@ void FlashDOMHandler::MaybeRespondToPage() {
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-FlashUI::FlashUI(TabContents* contents) : WebUI(contents) {
+FlashUI::FlashUI(TabContents* contents) : ChromeWebUI(contents) {
   UserMetrics::RecordAction(
       UserMetricsAction("ViewAboutFlash"));
 
   AddMessageHandler((new FlashDOMHandler())->Attach(this));
 
-  FlashUIHTMLSource* html_source = new FlashUIHTMLSource();
-
   // Set up the about:flash source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+      CreateFlashUIHTMLSource());
 }
 
 // static

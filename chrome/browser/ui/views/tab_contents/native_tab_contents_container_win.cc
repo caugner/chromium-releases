@@ -4,13 +4,16 @@
 
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_win.h"
 
+#include "chrome/browser/renderer_host/render_widget_host_view_win.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_views.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "views/views_delegate.h"
 #include "views/focus/focus_manager.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -19,7 +22,7 @@
 NativeTabContentsContainerWin::NativeTabContentsContainerWin(
     TabContentsContainer* container)
     : container_(container) {
-  SetID(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW);
+  set_id(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW);
 }
 
 NativeTabContentsContainerWin::~NativeTabContentsContainerWin() {
@@ -135,11 +138,28 @@ void NativeTabContentsContainerWin::GetAccessibleState(
   state->role = ui::AccessibilityTypes::ROLE_GROUPING;
 }
 
+gfx::NativeViewAccessible
+    NativeTabContentsContainerWin::GetNativeViewAccessible() {
+  TabContents* tab_contents = container_->tab_contents();
+  if (tab_contents) {
+    RenderWidgetHostViewWin* host_view_win =
+        static_cast<RenderWidgetHostViewWin*>(
+            tab_contents->GetRenderWidgetHostView());
+    if (host_view_win)
+      return host_view_win->GetIAccessible();
+  }
+
+  return View::GetNativeViewAccessible();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabContentsContainer, public:
 
 // static
 NativeTabContentsContainer* NativeTabContentsContainer::CreateNativeContainer(
     TabContentsContainer* container) {
+  if (views::Widget::IsPureViews() &&
+      views::ViewsDelegate::views_delegate->GetDefaultParentView())
+    return new NativeTabContentsContainerViews(container);
   return new NativeTabContentsContainerWin(container);
 }

@@ -25,10 +25,13 @@
 #include "content/browser/cancelable_request.h"
 #include "googleurl/src/gurl.h"
 
-class DictionaryValue;
 class FilePath;
 class SkBitmap;
 class Profile;
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace history {
 
@@ -167,6 +170,9 @@ class TopSites
   // TopSites isn't loaded yet.
   virtual bool IsFull();
 
+  // Returns the set of prepopulate pages.
+  static MostVisitedURLList GetPrepopulatePages();
+
  protected:
   // For allowing inheritance.
   virtual ~TopSites();
@@ -240,9 +246,6 @@ class TopSites
   static int GetRedirectDistanceForURL(const MostVisitedURL& most_visited,
                                        const GURL& url);
 
-  // Returns the set of prepopulate pages.
-  static MostVisitedURLList GetPrepopulatePages();
-
   // Add prepopulated pages: 'welcome to Chrome' and themes gallery to |urls|.
   // Returns true if any pages were added.
   static bool AddPrepopulatedPages(MostVisitedURLList* urls);
@@ -273,7 +276,7 @@ class TopSites
       const MostVisitedURLList& urls);
 
   // Implementation of NotificationObserver.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -326,7 +329,10 @@ class TopSites
   // Lock used to access |thread_safe_cache_|.
   mutable base::Lock lock_;
 
-  CancelableRequestConsumer cancelable_consumer_;
+  // Need a separate consumer for each CancelableRequestProvider we interact
+  // with (HistoryService and TopSitesBackend).
+  CancelableRequestConsumer history_consumer_;
+  CancelableRequestConsumer top_sites_consumer_;
 
   // Timer that asks history for the top sites. This is used to make sure our
   // data stays in sync with history.
@@ -358,12 +364,12 @@ class TopSites
   // storing all URLs, but filtering on access. It is a dictionary,
   // key is the URL, value is a dummy value. This is owned by the
   // PrefService.
-  const DictionaryValue* blacklist_;
+  const base::DictionaryValue* blacklist_;
 
   // This is a dictionary for the pinned URLs for the the most visited part of
   // the new tab page. Key is the URL, value is index where it is pinned at (may
   // be the same as key). This is owned by the PrefService.
-  const DictionaryValue* pinned_urls_;
+  const base::DictionaryValue* pinned_urls_;
 
   // See description above HistoryLoadState.
   HistoryLoadState history_state_;

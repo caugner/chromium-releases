@@ -16,6 +16,8 @@ GL_FUNCTIONS = [
 ['void', ['glBindAttribLocation'],
     'GLuint program, GLuint index, const char* name'],
 ['void', ['glBindBuffer'], 'GLenum target, GLuint buffer'],
+['void', ['glBindFragDataLocationIndexedARB'],
+    'GLuint program, GLuint colorNumber, GLuint index, const char* name'],
 ['void', ['glBindFramebufferEXT', 'glBindFramebuffer'],
     'GLenum target, GLuint framebuffer'],
 ['void', ['glBindRenderbufferEXT', 'glBindRenderbuffer'],
@@ -84,6 +86,8 @@ GL_FUNCTIONS = [
 ['void', ['glDrawArrays'], 'GLenum mode, GLint first, GLsizei count'],
 ['void', ['glDrawElements'],
     'GLenum mode, GLsizei count, GLenum type, const void* indices'],
+['void', ['glEGLImageTargetTexture2DOES'],
+    'GLenum target, GLeglImageOES image'],
 ['void', ['glEnable'], 'GLenum cap'],
 ['void', ['glEnableVertexAttribArray'], 'GLuint index'],
 ['void', ['glFinish'], 'void'],
@@ -119,6 +123,7 @@ GL_FUNCTIONS = [
 ['void', ['glGetFramebufferAttachmentParameterivEXT',
     'glGetFramebufferAttachmentParameteriv'], 'GLenum target, '
     'GLenum attachment, GLenum pname, GLint* params'],
+['GLenum', ['glGetGraphicsResetStatusARB'], 'void'],
 ['void', ['glGetIntegerv'], 'GLenum pname, GLint* params'],
 ['void', ['glGetProgramiv'], 'GLuint program, GLenum pname, GLint* params'],
 ['void', ['glGetProgramInfoLog'],
@@ -291,6 +296,11 @@ EGL_FUNCTIONS = [
     'EGLint config_size, EGLint* num_config'],
 ['EGLBoolean', ['eglGetConfigAttrib'],
     'EGLDisplay dpy, EGLConfig config, EGLint attribute, EGLint* value'],
+['EGLImageKHR', ['eglCreateImageKHR'],
+    'EGLDisplay dpy, EGLContext ctx, EGLenum target, EGLClientBuffer buffer, '
+    'const EGLint* attrib_list'],
+['EGLBoolean', ['eglDestroyImageKHR'],
+    'EGLDisplay dpy, EGLImageKHR image'],
 ['EGLSurface', ['eglCreateWindowSurface'],
     'EGLDisplay dpy, EGLConfig config, EGLNativeWindowType win, '
     'const EGLint* attrib_list'],
@@ -367,6 +377,10 @@ GLX_FUNCTIONS = [
     'Display* dpy, int screen, int* attribList'],
 ['GLXContext', ['glXCreateContext'],
     'Display* dpy, XVisualInfo* vis, GLXContext shareList, int direct'],
+['void', ['glXBindTexImageEXT'],
+    'Display* dpy, GLXDrawable drawable, int buffer, int* attribList'],
+['void', ['glXReleaseTexImageEXT'],
+    'Display* dpy, GLXDrawable drawable, int buffer'],
 ['void', ['glXDestroyContext'], 'Display* dpy, GLXContext ctx'],
 ['int', ['glXMakeCurrent'],
     'Display* dpy, GLXDrawable drawable, GLXContext ctx'],
@@ -425,6 +439,9 @@ GLX_FUNCTIONS = [
     'Display* dpy, GLXDrawable drawable, int interval'],
 ['GLXFBConfig', ['glXGetFBConfigFromVisualSGIX'],
     'Display* dpy, XVisualInfo* visualInfo'],
+['GLXContext', ['glXCreateContextAttribsARB'],
+    'Display* dpy, GLXFBConfig config, GLXContext share_context, int direct, '
+    'const int* attrib_list'],
 ]
 
 FUNCTION_SETS = [
@@ -524,11 +541,21 @@ def GenerateSource(file, functions, set_name):
     file.write('\n')
     file.write('static %s GL_BINDING_CALL Debug_%s(%s) {\n' %
         (return_type, names[0], arguments))
-    argument_names = re.sub(r'(const )?[a-zA-Z0-9]+\** ([a-zA-Z0-9]+)', r'\2',
+    argument_names = re.sub(r'(const )?[a-zA-Z0-9_]+\** ([a-zA-Z0-9_]+)', r'\2',
                               arguments)
-    argument_names = re.sub(r'(const )?[a-zA-Z0-9]+\** ([a-zA-Z0-9]+)', r'\2',
+    argument_names = re.sub(r'(const )?[a-zA-Z0-9_]+\** ([a-zA-Z0-9_]+)', r'\2',
                               argument_names)
-    log_argument_names = argument_names.replace(',', ' << ", " <<');
+    log_argument_names = re.sub(
+        r'(const )?[a-zA-Z0-9_]+\* ([a-zA-Z0-9_]+)',
+        r'CONSTVOID_\2', arguments)
+    log_argument_names = re.sub(
+        r'(const )?[a-zA-Z0-9_]+\** ([a-zA-Z0-9_]+)', r'\2', log_argument_names)
+    log_argument_names = re.sub(
+        r'(const )?[a-zA-Z0-9_]+\** ([a-zA-Z0-9_]+)', r'\2', log_argument_names)
+    log_argument_names = re.sub(
+        r'CONSTVOID_([a-zA-Z0-9_]+)',
+        r'static_cast<const void*>(\1)', log_argument_names);
+    log_argument_names = log_argument_names.replace(',', ' << ", " <<');
     if argument_names == 'void' or argument_names == '':
       argument_names = ''
       log_argument_names = ''

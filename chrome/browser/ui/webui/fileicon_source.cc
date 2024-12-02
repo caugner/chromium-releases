@@ -14,7 +14,7 @@
 #include "net/base/escape.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 // The path used in internal URLs to file icon data.
 static const char kFileIconPath[] = "fileicon";
@@ -45,7 +45,7 @@ void FileIconSource::StartDataRequest(const std::string& path,
 
   if (icon) {
     scoped_refptr<RefCountedBytes> icon_data(new RefCountedBytes);
-    gfx::PNGCodec::EncodeBGRASkBitmap(*icon, false, &icon_data->data);
+    gfx::PNGCodec::EncodeBGRASkBitmap(*icon, false, &icon_data->data());
 
     SendResponse(request_id, icon_data);
   } else {
@@ -72,7 +72,7 @@ void FileIconSource::OnFileIconDataAvailable(IconManager::Handle handle,
 
   if (icon) {
     scoped_refptr<RefCountedBytes> icon_data(new RefCountedBytes);
-    gfx::PNGCodec::EncodeBGRASkBitmap(*icon, false, &icon_data->data);
+    gfx::PNGCodec::EncodeBGRASkBitmap(*icon, false, &icon_data->data());
 
     SendResponse(request_id, icon_data);
   } else {

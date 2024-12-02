@@ -105,6 +105,11 @@ class FakeSession : public Session {
 
   virtual void SetStateChangeCallback(StateChangeCallback* callback);
 
+  virtual void CreateStreamChannel(
+      const std::string& name, const StreamChannelCallback& callback);
+  virtual void CreateDatagramChannel(
+      const std::string& name, const DatagramChannelCallback& callback);
+
   virtual FakeSocket* control_channel();
   virtual FakeSocket* event_channel();
   virtual FakeSocket* video_channel();
@@ -114,7 +119,6 @@ class FakeSession : public Session {
 
   virtual const std::string& jid();
 
-  virtual MessageLoop* message_loop();
   virtual const CandidateSessionConfig* candidate_config();
   virtual const SessionConfig* config();
   virtual void set_config(const SessionConfig* config);
@@ -124,7 +128,10 @@ class FakeSession : public Session {
   virtual const std::string& receiver_token();
   virtual void set_receiver_token(const std::string& receiver_token);
 
-  virtual void Close(Task* closed_task);
+  virtual void set_shared_secret(const std::string& secret);
+  virtual const std::string& shared_secret();
+
+  virtual void Close();
 
  public:
   scoped_ptr<StateChangeCallback> callback_;
@@ -139,6 +146,8 @@ class FakeSession : public Session {
 
   std::string initiator_token_;
   std::string receiver_token_;
+
+  std::string shared_secret_;
 
   std::string jid_;
   bool closed_;

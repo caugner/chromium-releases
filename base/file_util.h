@@ -18,6 +18,7 @@
 #endif
 #elif defined(OS_POSIX)
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #include <stdio.h>
@@ -468,6 +469,8 @@ class BASE_API FileEnumerator {
   static bool IsDirectory(const FindInfo& info);
 
   static FilePath GetFilename(const FindInfo& find_info);
+  static int64 GetFilesize(const FindInfo& find_info);
+  static base::Time GetLastModifiedTime(const FindInfo& find_info);
 
  private:
   // Returns true if the given path should be skipped in enumeration.

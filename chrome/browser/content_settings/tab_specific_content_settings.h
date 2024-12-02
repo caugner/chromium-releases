@@ -159,6 +159,7 @@ class TabSpecificContentSettings : public TabContentsObserver,
   virtual void DidNavigateMainFramePostCommit(
       const content::LoadCommittedDetails& details,
       const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
       bool is_main_frame,
@@ -246,7 +247,7 @@ class TabSpecificContentSettings : public TabContentsObserver,
   void OnContentAccessed(ContentSettingsType type);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

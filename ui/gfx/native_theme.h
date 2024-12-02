@@ -8,6 +8,7 @@
 
 #include "skia/ext/platform_canvas.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ui_api.h"
 
 namespace gfx {
 
@@ -29,7 +30,7 @@ class Size;
 //
 // NativeTheme also supports getting the default size of a given part with
 // the GetPartSize() method.
-class NativeTheme {
+class UI_API NativeTheme {
  public:
   // The part to be painted / sized.
   enum Part {
@@ -203,6 +204,8 @@ class NativeTheme {
                      State state,
                      const gfx::Rect& rect,
                      const ExtraParams& extra) const = 0;
+
+  virtual int GetPopupListBoxMinimumRowHeight() const;
 
   // Supports theme specific colors.
   void SetScrollbarColors(unsigned inactive_color,

@@ -34,6 +34,13 @@ class ShellIntegration {
   // (only for the current user). Returns false if this operation fails.
   static bool SetAsDefaultProtocolClient(const std::string& protocol);
 
+  // Returns true if the running browser can be set as the default browser.
+  static bool CanSetAsDefaultBrowser();
+
+  // Returns true if the running browser can be set as the default client
+  // application for specific protocols.
+  static bool CanSetAsDefaultProtocolClient();
+
   // On Linux, it may not be possible to determine or set the default browser
   // on some desktop environments or configurations. So, we use this enum and
   // not a plain bool. (Note however that if used like a bool, this enum will
@@ -148,6 +155,9 @@ class ShellIntegration {
     virtual ~DefaultWebClientObserver() {}
     // Updates the UI state to reflect the current default browser state.
     virtual void SetDefaultWebClientUIState(DefaultWebClientUIState state) = 0;
+    // Observer classes that return true to OwnedByWorker are automatically
+    // freed by the worker when they are no longer needed.
+    virtual bool IsOwnedByWorker() { return false; }
   };
 
   //  Helper objects that handle checking if Chrome is the default browser
@@ -248,9 +258,10 @@ class ShellIntegration {
 
     const std::string& protocol() const { return protocol_; }
 
-   private:
+   protected:
     virtual ~DefaultProtocolClientWorker() {}
 
+   private:
     // Check is Chrome is the default handler for this protocol.
     virtual DefaultWebClientState CheckIsDefault();
 

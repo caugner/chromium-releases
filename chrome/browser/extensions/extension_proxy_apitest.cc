@@ -69,7 +69,8 @@ class ProxySettingsApiTest : public ExtensionApiTest {
 };
 
 // Tests direct connection settings.
-IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, ProxyDirectSettings) {
+// Disabled due to http://crbug.com/88937.
+IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, DISABLED_ProxyDirectSettings) {
   ASSERT_TRUE(RunExtensionTestIncognito("proxy/direct")) << message_;
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension);
@@ -192,8 +193,9 @@ IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest,
 }
 
 // Tests setting values also for incognito mode
+// Test disabled due to http://crbug.com/88972.
 IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest,
-                       ProxyFixedIndividualIncognitoAlso) {
+                       DISABLED_ProxyFixedIndividualIncognitoAlso) {
   ASSERT_TRUE(RunExtensionTestIncognito("proxy/individual_incognito_also")) <<
       message_;
   const Extension* extension = GetSingleLoadedExtension();
@@ -253,7 +255,15 @@ IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest,
                    pref_service);
 }
 
-// Tests error events.
-IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, ProxyEvents) {
-  ASSERT_TRUE(RunExtensionTest("proxy/events")) << message_;
+// Tests error events: invalid proxy
+IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, ProxyEventsInvalidProxy) {
+  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(
+      RunExtensionSubtest("proxy/events", "invalid_proxy.html")) << message_;
+}
+
+// Tests error events: PAC script parse error.
+IN_PROC_BROWSER_TEST_F(ProxySettingsApiTest, ProxyEventsParseError) {
+  ASSERT_TRUE(
+      RunExtensionSubtest("proxy/events", "parse_error.html")) << message_;
 }

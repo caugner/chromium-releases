@@ -4,8 +4,10 @@
 
 #include "chrome/test/live_sync/live_bookmarks_sync_test.h"
 
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/test/ui_test_utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -33,7 +35,7 @@ BookmarkModel* LiveBookmarksSyncTest::GetBookmarkModel(int index) {
 }
 
 const BookmarkNode* LiveBookmarksSyncTest::GetBookmarkBarNode(int index) {
-  return GetBookmarkModel(index)->GetBookmarkBarNode();
+  return GetBookmarkModel(index)->bookmark_bar_node();
 }
 
 const BookmarkNode* LiveBookmarksSyncTest::GetOtherNode(int index) {
@@ -46,6 +48,14 @@ BookmarkModel* LiveBookmarksSyncTest::GetVerifierBookmarkModel() {
 
 void LiveBookmarksSyncTest::DisableVerifier() {
   verifier_helper_->set_use_verifier_model(false);
+}
+
+bool LiveBookmarksSyncTest::EnableEncryption(int index) {
+  return GetClient(index)->EnableEncryptionForType(syncable::BOOKMARKS);
+}
+
+bool LiveBookmarksSyncTest::IsEncrypted(int index) {
+  return GetClient(index)->IsTypeEncrypted(syncable::BOOKMARKS);
 }
 
 const BookmarkNode* LiveBookmarksSyncTest::AddURL(int profile,
@@ -262,4 +272,24 @@ std::vector<unsigned char> LiveBookmarksSyncTest::CreateFavicon(int seed) {
   std::vector<unsigned char> favicon;
   gfx::PNGCodec::EncodeBGRASkBitmap(bmp, false, &favicon);
   return favicon;
+}
+
+std::string LiveBookmarksSyncTest::IndexedURL(int i) {
+  return StringPrintf("http://www.host.ext:1234/path/filename/%d", i);
+}
+
+std::wstring LiveBookmarksSyncTest::IndexedURLTitle(int i) {
+  return StringPrintf(L"URL Title %d", i);
+}
+
+std::wstring LiveBookmarksSyncTest::IndexedFolderName(int i) {
+  return StringPrintf(L"Folder Name %d", i);
+}
+
+std::wstring LiveBookmarksSyncTest::IndexedSubfolderName(int i) {
+  return StringPrintf(L"Subfolder Name %d", i);
+}
+
+std::wstring LiveBookmarksSyncTest::IndexedSubsubfolderName(int i) {
+  return StringPrintf(L"Subsubfolder Name %d", i);
 }

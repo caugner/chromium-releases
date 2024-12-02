@@ -8,10 +8,10 @@
 
 #include <list>
 #include <map>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/singleton.h"
+#include "base/observer_list.h"
 #include "ui/gfx/native_widget_types.h"
 #include "views/accelerator.h"
 
@@ -153,9 +153,7 @@ class FocusManager {
     WidgetFocusManager();
     ~WidgetFocusManager();
 
-    typedef std::vector<WidgetFocusChangeListener*>
-      WidgetFocusChangeListenerList;
-    WidgetFocusChangeListenerList focus_change_listeners_;
+    ObserverList<WidgetFocusChangeListener> focus_change_listeners_;
 
     bool enabled_;
 
@@ -271,16 +269,16 @@ class FocusManager {
   AcceleratorTarget* GetCurrentTargetForAccelerator(
       const Accelerator& accelertor) const;
 
-  // Convenience method that returns true if the passed |key_event| should
-  // trigger tab traversal (if it is a TAB key press with or without SHIFT
-  // pressed).
-  static bool IsTabTraversalKeyEvent(const KeyEvent& key_event);
-
   // Sets the focus to the specified native view.
   virtual void FocusNativeView(gfx::NativeView native_view);
 
   // Clears the native view having the focus.
   virtual void ClearNativeFocus();
+
+  // Convenience method that returns true if the passed |key_event| should
+  // trigger tab traversal (if it is a TAB key press with or without SHIFT
+  // pressed).
+  static bool IsTabTraversalKeyEvent(const KeyEvent& key_event);
 
   // Retrieves the FocusManager associated with the passed native view.
   static FocusManager* GetFocusManagerForNativeView(
@@ -321,8 +319,7 @@ class FocusManager {
   AcceleratorMap accelerators_;
 
   // The list of registered FocusChange listeners.
-  typedef std::vector<FocusChangeListener*> FocusChangeListenerList;
-  FocusChangeListenerList focus_change_listeners_;
+  ObserverList<FocusChangeListener, true> focus_change_listeners_;
 
   DISALLOW_COPY_AND_ASSIGN(FocusManager);
 };

@@ -45,6 +45,7 @@
 #include "net/base/cookie_monster.h"
 
 #include <algorithm>
+#include <set>
 
 #include "base/basictypes.h"
 #include "base/format_macros.h"
@@ -98,6 +99,10 @@ const int kVlogPeriodic = 3;
 const int kVlogGarbageCollection = 5;
 const int kVlogSetCookies = 7;
 const int kVlogGetCookies = 9;
+
+#if defined(ENABLE_PERSISTENT_SESSION_COOKIES)
+const int kPersistentSessionCookieExpiryInDays = 14;
+#endif
 
 // Mozilla sorts on the path length (longest first), and then it
 // sorts by creation time (oldest first).
@@ -193,12 +198,6 @@ bool GetCookieDomainWithString(const GURL& url,
   }
 
   // Get the normalized domain specified in cookie line.
-  // Note: The RFC says we can reject a cookie if the domain
-  // attribute does not start with a dot. IE/FF/Safari however, allow a cookie
-  // of the form domain=my.domain.com, treating it the same as
-  // domain=.my.domain.com -- for compatibility we do the same here.  Firefox
-  // also treats domain=.....my.domain.com like domain=.my.domain.com, but
-  // neither IE nor Safari do this, and we don't either.
   url_canon::CanonHostInfo ignored;
   std::string cookie_domain(CanonicalizeHost(domain_string, &ignored));
   if (cookie_domain.empty())
@@ -601,6 +600,35 @@ bool CookieMonster::SetCookieWithDetails(
   return SetCanonicalCookie(&cc, creation_time, options);
 }
 
+void CookieMonster::SetCookieWithDetailsAsync(
+    const GURL& url, const std::string& name, const std::string& value,
+    const std::string& domain, const std::string& path,
+    const base::Time& expiration_time, bool secure, bool http_only,
+    const SetCookiesCallback& callback) {
+  bool success_ = SetCookieWithDetails(url, name, value, domain, path,
+                                       expiration_time, secure, http_only);
+  if (!callback.is_null())
+    callback.Run(success_);
+}
+
+bool CookieMonster::InitializeFrom(CookieMonster* cookie_monster) {
+  net::CookieList list = cookie_monster->GetAllCookies();
+
+  base::AutoLock autolock(lock_);
+  InitIfNecessary();
+  for (net::CookieList::const_iterator iter = list.begin();
+           iter != list.end(); ++iter) {
+    scoped_ptr<net::CookieMonster::CanonicalCookie> cookie;
+    cookie.reset(new net::CookieMonster::CanonicalCookie(*iter));
+    net::CookieOptions options;
+    options.set_include_httponly();
+    if (!SetCanonicalCookie(&cookie, cookie->CreationDate(),
+                                             options)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 CookieList CookieMonster::GetAllCookies() {
   base::AutoLock autolock(lock_);
@@ -635,6 +663,11 @@ CookieList CookieMonster::GetAllCookies() {
   return cookie_list;
 }
 
+void CookieMonster::GetAllCookiesAsync(const GetCookieListCallback& callback) {
+  if (!callback.is_null())
+    callback.Run(GetAllCookies());
+}
+
 CookieList CookieMonster::GetAllCookiesForURLWithOptions(
     const GURL& url,
     const CookieOptions& options) {
@@ -653,11 +686,25 @@ CookieList CookieMonster::GetAllCookiesForURLWithOptions(
   return cookies;
 }
 
+void CookieMonster::GetAllCookiesForURLWithOptionsAsync(
+    const GURL& url,
+    const CookieOptions& options,
+    const GetCookieListCallback& callback) {
+  if (!callback.is_null())
+    callback.Run(GetAllCookiesForURLWithOptions(url, options));
+}
+
 CookieList CookieMonster::GetAllCookiesForURL(const GURL& url) {
   CookieOptions options;
   options.set_include_httponly();
 
   return GetAllCookiesForURLWithOptions(url, options);
+}
+
+void CookieMonster::GetAllCookiesForURLAsync(
+    const GURL& url, const GetCookieListCallback& callback) {
+  if (!callback.is_null())
+    callback.Run(GetAllCookiesForURL(url));
 }
 
 int CookieMonster::DeleteAll(bool sync_to_store) {
@@ -700,9 +747,14 @@ int CookieMonster::DeleteAllCreatedBetween(const Time& delete_begin,
   return num_deleted;
 }
 
-int CookieMonster::DeleteAllCreatedAfter(const Time& delete_begin,
-                                         bool sync_to_store) {
-  return DeleteAllCreatedBetween(delete_begin, Time(), sync_to_store);
+void CookieMonster::DeleteAllCreatedBetweenAsync(
+    const Time& delete_begin, const Time& delete_end,
+    bool sync_to_store,
+    const DeleteCallback& callback) {
+  int num_deleted = DeleteAllCreatedBetween(
+      delete_begin, delete_end, sync_to_store);
+  if (!callback.is_null())
+    callback.Run(num_deleted);
 }
 
 int CookieMonster::DeleteAllForHost(const GURL& url) {
@@ -736,6 +788,13 @@ int CookieMonster::DeleteAllForHost(const GURL& url) {
   return num_deleted;
 }
 
+void CookieMonster::DeleteAllForHostAsync(
+    const GURL& url, const DeleteCallback& callback) {
+  int num_deleted = DeleteAllForHost(url);
+  if (!callback.is_null())
+    callback.Run(num_deleted);
+}
+
 bool CookieMonster::DeleteCanonicalCookie(const CanonicalCookie& cookie) {
   base::AutoLock autolock(lock_);
   InitIfNecessary();
@@ -749,6 +808,14 @@ bool CookieMonster::DeleteCanonicalCookie(const CanonicalCookie& cookie) {
     }
   }
   return false;
+}
+
+void CookieMonster::DeleteCanonicalCookieAsync(
+    const CanonicalCookie& cookie,
+    const DeleteCookieCallback& callback) {
+  bool result = DeleteCanonicalCookie(cookie);
+  if (!callback.is_null())
+    callback.Run(result);
 }
 
 void CookieMonster::SetCookieableSchemes(
@@ -804,6 +871,16 @@ bool CookieMonster::SetCookieWithOptions(const GURL& url,
   return SetCookieWithCreationTimeAndOptions(url, cookie_line, Time(), options);
 }
 
+void CookieMonster::SetCookieWithOptionsAsync(
+    const GURL& url,
+    const std::string& cookie_line,
+    const CookieOptions& options,
+    const SetCookiesCallback& callback) {
+  bool result = SetCookieWithOptions(url, cookie_line, options);
+    if (!callback.is_null())
+      callback.Run(result);
+}
+
 std::string CookieMonster::GetCookiesWithOptions(const GURL& url,
                                                  const CookieOptions& options) {
   base::AutoLock autolock(lock_);
@@ -825,6 +902,14 @@ std::string CookieMonster::GetCookiesWithOptions(const GURL& url,
   VLOG(kVlogGetCookies) << "GetCookies() result: " << cookie_line;
 
   return cookie_line;
+}
+
+void CookieMonster::GetCookiesWithOptionsAsync(
+    const GURL& url, const CookieOptions& options,
+    const GetCookiesCallback& callback) {
+  std::string cookie = GetCookiesWithOptions(url, options);
+  if (!callback.is_null())
+    callback.Run(cookie);
 }
 
 void CookieMonster::GetCookiesWithInfo(const GURL& url,
@@ -852,6 +937,18 @@ void CookieMonster::GetCookiesWithInfo(const GURL& url,
   TimeTicks mac_start_time = TimeTicks::Now();
   BuildCookieInfoList(cookies, cookie_infos);
   histogram_time_mac_->AddTime(TimeTicks::Now() - mac_start_time);
+}
+
+void CookieMonster::GetCookiesWithInfoAsync(
+    const GURL& url,
+    const CookieOptions& options,
+    const GetCookieInfoCallback& callback) {
+  std::string cookie_line;
+  std::vector<CookieInfo> cookie_infos;
+  GetCookiesWithInfo(url, options, &cookie_line, &cookie_infos);
+
+  if (!callback.is_null())
+    callback.Run(&cookie_line, &cookie_infos);
 }
 
 void CookieMonster::DeleteCookie(const GURL& url,
@@ -885,6 +982,14 @@ void CookieMonster::DeleteCookie(const GURL& url,
       InternalDeleteCookie(curit, true, DELETE_COOKIE_EXPLICIT);
     }
   }
+}
+
+void CookieMonster::DeleteCookieAsync(const GURL& url,
+                                      const std::string& cookie_name,
+                                      const base::Closure& callback) {
+  DeleteCookie(url, cookie_name);
+  if (!callback.is_null())
+    callback.Run();
 }
 
 CookieMonster* CookieMonster::GetCookieMonster() {
@@ -1826,23 +1931,6 @@ void CookieMonster::ParsedCookie::ParseValue(
   // value_start should point at the first character of the value.
   *value_start = *it;
 
-  // It is unclear exactly how quoted string values should be handled.
-  // Major browsers do different things, for example, Firefox supports
-  // semicolons embedded in a quoted value, while IE does not.  Looking at
-  // the specs, RFC 2109 and 2965 allow for a quoted-string as the value.
-  // However, these specs were apparently written after browsers had
-  // implemented cookies, and they seem very distant from the reality of
-  // what is actually implemented and used on the web.  The original spec
-  // from Netscape is possibly what is closest to the cookies used today.
-  // This spec didn't have explicit support for double quoted strings, and
-  // states that ; is not allowed as part of a value.  We had originally
-  // implement the Firefox behavior (A="B;C"; -> A="B;C";).  However, since
-  // there is no standard that makes sense, we decided to follow the behavior
-  // of IE and Safari, which is closer to the original Netscape proposal.
-  // This means that A="B;C" -> A="B;.  This also makes the code much simpler
-  // and reduces the possibility for invalid cookies, where other browsers
-  // like Opera currently reject those invalid cookies (ex A="B" "C";).
-
   // Just look for ';' to terminate ('=' allowed).
   // We can hit the end, maybe they didn't terminate.
   SeekTo(it, end, kValueSeparator);
@@ -1979,6 +2067,7 @@ CookieMonster::CanonicalCookie::CanonicalCookie()
     : secure_(false),
       httponly_(false),
       has_expires_(false) {
+  SetSessionCookieExpiryTime();
 }
 
 CookieMonster::CanonicalCookie::CanonicalCookie(
@@ -2000,6 +2089,8 @@ CookieMonster::CanonicalCookie::CanonicalCookie(
       secure_(secure),
       httponly_(httponly),
       has_expires_(has_expires) {
+  if (!has_expires_)
+    SetSessionCookieExpiryTime();
 }
 
 CookieMonster::CanonicalCookie::CanonicalCookie(const GURL& url,
@@ -2017,6 +2108,8 @@ CookieMonster::CanonicalCookie::CanonicalCookie(const GURL& url,
       has_expires_(pc.HasExpires()) {
   if (has_expires_)
     expiry_date_ = CanonExpiration(pc, creation_date_, CookieOptions());
+  else
+    SetSessionCookieExpiryTime();
 
   // Do the best we can with the domain.
   std::string cookie_domain;
@@ -2046,6 +2139,16 @@ std::string CookieMonster::CanonicalCookie::GetCookieSourceFromURL(
     replacements.SetScheme("http", url_parse::Component(0, 4));
 
   return url.GetOrigin().ReplaceComponents(replacements).spec();
+}
+
+void CookieMonster::CanonicalCookie::SetSessionCookieExpiryTime() {
+#if defined(ENABLE_PERSISTENT_SESSION_COOKIES)
+  // Mobile apps can sometimes be shut down without any warning, so the session
+  // cookie has to be persistent and given a default expiration time.
+  expiry_date_ = base::Time::Now() +
+      base::TimeDelta::FromDays(kPersistentSessionCookieExpiryInDays);
+  has_expires_ = true;
+#endif
 }
 
 CookieMonster::CanonicalCookie* CookieMonster::CanonicalCookie::Create(

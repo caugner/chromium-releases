@@ -7,10 +7,12 @@
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
+#include "googleurl/src/url_util.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
@@ -75,6 +77,21 @@ namespace webkit {
 namespace npapi {
 
 namespace {
+
+static const char kFlashMimeType[] = "application/x-shockwave-flash";
+static const char kOctetStreamMimeType[] = "application/octet-stream";
+static const char kHTMLMimeType[] = "text/html";
+static const char kPlainTextMimeType[] = "text/plain";
+static const char kPluginFlashMimeType[] = "Plugin.FlashMIMEType";
+enum {
+  MIME_TYPE_OK = 0,
+  MIME_TYPE_EMPTY,
+  MIME_TYPE_OCTETSTREAM,
+  MIME_TYPE_HTML,
+  MIME_TYPE_PLAINTEXT,
+  MIME_TYPE_OTHER,
+  MIME_TYPE_NUM_EVENTS
+};
 
 // This class handles individual multipart responses. It is instantiated when
 // we receive HTTP status code 206 in the HTTP response. This indicates
@@ -222,6 +239,7 @@ struct WebPluginImpl::ClientInfo {
   bool pending_failure_notification;
   linked_ptr<WebKit::WebURLLoader> loader;
   bool notify_redirects;
+  bool is_plugin_src_load;
 };
 
 bool WebPluginImpl::initialize(WebPluginContainer* container) {
@@ -256,6 +274,16 @@ void WebPluginImpl::destroy() {
 
 NPObject* WebPluginImpl::scriptableObject() {
   return delegate_->GetPluginScriptableObject();
+}
+
+bool WebPluginImpl::getFormValue(WebKit::WebString* value) {
+  if (!delegate_)
+    return false;
+  string16 form_value;
+  if (!delegate_->GetFormValue(&form_value))
+    return false;
+  *value = form_value;
+  return true;
 }
 
 void WebPluginImpl::paint(WebCanvas* canvas, const WebRect& paint_rect) {
@@ -637,7 +665,7 @@ WebPluginDelegate* WebPluginImpl::delegate() {
 
 bool WebPluginImpl::IsValidUrl(const GURL& url, Referrer referrer_flag) {
   if (referrer_flag == PLUGIN_SRC &&
-      mime_type_ == "application/x-shockwave-flash" &&
+      mime_type_ == kFlashMimeType &&
       url.GetOrigin() != plugin_url_.GetOrigin()) {
     // Do url check to make sure that there are no @, ;, \ chars in between url
     // scheme and url path.
@@ -808,7 +836,7 @@ void WebPluginImpl::InvalidateRect(const gfx::Rect& rect) {
 void WebPluginImpl::OnDownloadPluginSrcUrl() {
   HandleURLRequestInternal(
       plugin_url_.spec().c_str(), "GET", NULL, NULL, 0, 0, false, DOCUMENT_URL,
-      false);
+      false, true);
 }
 
 WebPluginResourceClient* WebPluginImpl::GetClientFromLoader(
@@ -835,6 +863,17 @@ void WebPluginImpl::willSendRequest(WebURLLoader* loader,
                                     const WebURLResponse& response) {
   WebPluginImpl::ClientInfo* client_info = GetClientInfoFromLoader(loader);
   if (client_info) {
+    // Currently this check is just to catch an https -> http redirect when
+    // loading the main plugin src URL. Longer term, we could investigate
+    // firing mixed diplay or scripting issues for subresource loads
+    // initiated by plug-ins.
+    if (client_info->is_plugin_src_load &&
+        webframe_ &&
+        !webframe_->checkIfRunInsecureContent(request.url())) {
+      loader->cancel();
+      client_info->client->DidFail();
+      return;
+    }
     if (net::HttpResponseHeaders::IsRedirectResponseCode(
             response.httpStatusCode())) {
       // If the plugin does not participate in url redirect notifications then
@@ -876,6 +915,53 @@ void WebPluginImpl::didReceiveResponse(WebURLLoader* loader,
 
   ResponseInfo response_info;
   GetResponseInfo(response, &response_info);
+
+  ClientInfo* client_info = GetClientInfoFromLoader(loader);
+  if (!client_info)
+    return;
+
+  // Defend against content confusion by the Flash plug-in.
+  if (client_info->is_plugin_src_load &&
+      mime_type_ == kFlashMimeType) {
+    std::string sniff =
+        response.httpHeaderField("X-Content-Type-Options").utf8();
+    std::string content_type =
+        response.httpHeaderField("Content-Type").utf8();
+    StringToLowerASCII(&sniff);
+    StringToLowerASCII(&content_type);
+    if (content_type.find(kFlashMimeType) != std::string::npos) {
+      UMA_HISTOGRAM_ENUMERATION(kPluginFlashMimeType,
+                                MIME_TYPE_OK,
+                                MIME_TYPE_NUM_EVENTS);
+    } else if (content_type.empty()) {
+      UMA_HISTOGRAM_ENUMERATION(kPluginFlashMimeType,
+                                MIME_TYPE_EMPTY,
+                                MIME_TYPE_NUM_EVENTS);
+    } else if (content_type.find(kOctetStreamMimeType) != std::string::npos) {
+      UMA_HISTOGRAM_ENUMERATION(kPluginFlashMimeType,
+                                MIME_TYPE_OCTETSTREAM,
+                                MIME_TYPE_NUM_EVENTS);
+    } else if (content_type.find(kHTMLMimeType) != std::string::npos) {
+      UMA_HISTOGRAM_ENUMERATION(kPluginFlashMimeType,
+                                MIME_TYPE_HTML,
+                                MIME_TYPE_NUM_EVENTS);
+    } else if (content_type.find(kPlainTextMimeType) != std::string::npos) {
+      UMA_HISTOGRAM_ENUMERATION(kPluginFlashMimeType,
+                                MIME_TYPE_PLAINTEXT,
+                                MIME_TYPE_NUM_EVENTS);
+    } else {
+      UMA_HISTOGRAM_ENUMERATION(kPluginFlashMimeType,
+                                MIME_TYPE_OTHER,
+                                MIME_TYPE_NUM_EVENTS);
+    }
+    if (sniff.find("nosniff") != std::string::npos &&
+        !content_type.empty() &&
+        content_type.find(kFlashMimeType) == std::string::npos) {
+      loader->cancel();
+      client_info->client->DidFail();
+      return;
+    }
+  }
 
   bool request_is_seekable = true;
   if (client->IsMultiByteResponseExpected()) {
@@ -1037,7 +1123,7 @@ void WebPluginImpl::HandleURLRequest(const char* url,
   // plugin SRC url as the referrer if it is available.
   HandleURLRequestInternal(
       url, method, target, buf, len, notify_id, popups_allowed, PLUGIN_SRC,
-      notify_redirects);
+      notify_redirects, false);
 }
 
 void WebPluginImpl::HandleURLRequestInternal(const char* url,
@@ -1048,7 +1134,8 @@ void WebPluginImpl::HandleURLRequestInternal(const char* url,
                                              int notify_id,
                                              bool popups_allowed,
                                              Referrer referrer_flag,
-                                             bool notify_redirects) {
+                                             bool notify_redirects,
+                                             bool is_plugin_src_load) {
   // For this request, we either route the output to a frame
   // because a target has been specified, or we handle the request
   // here, i.e. by executing the script if it is a javascript url
@@ -1056,7 +1143,8 @@ void WebPluginImpl::HandleURLRequestInternal(const char* url,
   // case in that the request is a javascript url and the target is "_self",
   // in which case we route the output to the plugin rather than routing it
   // to the plugin's frame.
-  bool is_javascript_url = StartsWithASCII(url, "javascript:", false);
+  bool is_javascript_url = url_util::FindAndCompareScheme(
+      url, strlen(url), "javascript", NULL);
   RoutingStatus routing_status = RouteToFrame(
       url, is_javascript_url, popups_allowed, method, target, buf, len,
       notify_id, referrer_flag);
@@ -1106,7 +1194,8 @@ void WebPluginImpl::HandleURLRequestInternal(const char* url,
     return;
 
   InitiateHTTPRequest(resource_id, resource_client, complete_url, method, buf,
-                      len, NULL, referrer_flag, notify_redirects);
+                      len, NULL, referrer_flag, notify_redirects,
+                      is_plugin_src_load);
 }
 
 unsigned long WebPluginImpl::GetNextResourceId() {
@@ -1126,7 +1215,8 @@ bool WebPluginImpl::InitiateHTTPRequest(unsigned long resource_id,
                                         int buf_len,
                                         const char* range_info,
                                         Referrer referrer_flag,
-                                        bool notify_redirects) {
+                                        bool notify_redirects,
+                                        bool is_plugin_src_load) {
   if (!client) {
     NOTREACHED();
     return false;
@@ -1144,6 +1234,7 @@ bool WebPluginImpl::InitiateHTTPRequest(unsigned long resource_id,
   info.request.setHTTPMethod(WebString::fromUTF8(method));
   info.pending_failure_notification = false;
   info.notify_redirects = notify_redirects;
+  info.is_plugin_src_load = is_plugin_src_load;
 
   if (range_info) {
     info.request.addHTTPHeaderField(WebString::fromUTF8("Range"),
@@ -1190,7 +1281,7 @@ void WebPluginImpl::InitiateHTTPRangeRequest(
       delegate_->CreateSeekableResourceClient(resource_id, range_request_id);
   InitiateHTTPRequest(
       resource_id, resource_client, complete_url, "GET", NULL, 0, range_info,
-      load_manually_ ? NO_REFERRER : PLUGIN_SRC, false);
+      load_manually_ ? NO_REFERRER : PLUGIN_SRC, false, false);
 }
 
 void WebPluginImpl::SetDeferResourceLoading(unsigned long resource_id,

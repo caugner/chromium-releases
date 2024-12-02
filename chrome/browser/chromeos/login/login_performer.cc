@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -21,11 +22,17 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
+#include "net/base/cookie_monster.h"
+#include "net/base/cookie_store.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -42,6 +49,12 @@ LoginPerformer::LoginPerformer(Delegate* delegate)
       password_changed_(false),
       screen_lock_requested_(false),
       initial_online_auth_pending_(false),
+      auth_mode_(AUTH_MODE_INTERNAL),
+      using_oauth_(
+          CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kWebUILogin) &&
+          !CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kSkipOAuthLogin)),
       method_factory_(this) {
   DCHECK(default_performer_ == NULL)
       << "LoginPerformer should have only one instance.";
@@ -110,7 +123,8 @@ void LoginPerformer::OnLoginSuccess(
     const std::string& username,
     const std::string& password,
     const GaiaAuthConsumer::ClientLoginResult& credentials,
-    bool pending_requests) {
+    bool pending_requests,
+    bool using_oauth) {
   UserMetrics::RecordAction(UserMetricsAction("Login_Success"));
   // 0 - Login success offline and online. It's a new user. or it's an
   //     existing user and offline auth took longer than online auth.
@@ -132,7 +146,8 @@ void LoginPerformer::OnLoginSuccess(
     delegate_->OnLoginSuccess(username,
                               password,
                               credentials,
-                              pending_requests);
+                              pending_requests,
+                              using_oauth);
     return;
   } else {
     // Online login has succeeded.
@@ -145,11 +160,28 @@ void LoginPerformer::OnLoginSuccess(
   }
 }
 
-void LoginPerformer::OnProfileCreated(Profile* profile) {
+void LoginPerformer::OnProfileCreated(Profile* profile, Status status) {
   CHECK(profile);
+  switch (status) {
+    case STATUS_INITIALIZED:
+      break;
+    case STATUS_CREATED:
+      return;
+    case STATUS_FAIL:
+    default:
+      NOTREACHED();
+      return;
+  }
 
-  LoginUtils::Get()->FetchCookies(profile, credentials_);
-  LoginUtils::Get()->FetchTokens(profile, credentials_);
+  if (!using_oauth_) {
+    // Fetch cookies, tokens for the loaded profile only if authentication
+    // was performed via ClientLogin. We don't need this in the case when
+    // we use extension + OAuth1 access token check flow.
+    LoginUtils::Get()->FetchCookies(profile, credentials_);
+  } else {
+    LoginUtils::Get()->StartTokenServices(profile);
+  }
+  LoginUtils::Get()->StartSync(profile, credentials_);
   credentials_ = GaiaAuthConsumer::ClientLoginResult();
 
   // Don't unlock screen if it was locked while we're waiting
@@ -200,7 +232,11 @@ void LoginPerformer::OnCheckWhitelistCompleted(SignedSettings::ReturnCode code,
                                                const std::string& email) {
   if (code == SignedSettings::SUCCESS) {
     // Whitelist check passed, continue with authentication.
-    StartAuthentication();
+    if (auth_mode_ == AUTH_MODE_EXTENSION) {
+      StartLoginCompletion();
+    } else {
+      StartAuthentication();
+    }
   } else {
     if (delegate_)
       delegate_->WhiteListCheckFailed(email);
@@ -213,10 +249,10 @@ void LoginPerformer::OnCheckWhitelistCompleted(SignedSettings::ReturnCode code,
 // LoginPerformer, NotificationObserver implementation:
 //
 
-void LoginPerformer::Observe(NotificationType type,
+void LoginPerformer::Observe(int type,
                              const NotificationSource& source,
                              const NotificationDetails& details) {
-  if (type != NotificationType::SCREEN_LOCK_STATE_CHANGED)
+  if (type != chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED)
     return;
 
   bool is_screen_locked = *Details<bool>(details).ptr();
@@ -232,9 +268,56 @@ void LoginPerformer::Observe(NotificationType type,
 
 ////////////////////////////////////////////////////////////////////////////////
 // LoginPerformer, public:
+void LoginPerformer::CompleteLogin(const std::string& username,
+                                   const std::string& password) {
+  auth_mode_ = AUTH_MODE_EXTENSION;
+  username_ = username;
+  password_ = password;
+  // Whitelist check is always performed during initial login and
+  // should not be performed when ScreenLock is active (pending online auth).
+  if (!ScreenLocker::default_screen_locker()) {
+    // Must not proceed without signature verification.
+    UserCrosSettingsProvider user_settings;
+    bool trusted_setting_available = user_settings.RequestTrustedAllowNewUser(
+        method_factory_.NewRunnableMethod(&LoginPerformer::CompleteLogin,
+                                          username,
+                                          password));
+    if (!trusted_setting_available) {
+      // Value of AllowNewUser setting is still not verified.
+      // Another attempt will be invoked after verification completion.
+      return;
+    }
+  }
+
+  if (ScreenLocker::default_screen_locker() ||
+      UserCrosSettingsProvider::cached_allow_new_user()) {
+    // Starts authentication if guest login is allowed or online auth pending.
+    StartLoginCompletion();
+  } else {
+    // Otherwise, do whitelist check first.
+    PrefService* local_state = g_browser_process->local_state();
+    CHECK(local_state);
+    if (local_state->IsManagedPreference(kAccountsPrefUsers)) {
+      if (UserCrosSettingsProvider::IsEmailInCachedWhitelist(username)) {
+        StartLoginCompletion();
+      } else {
+        if (delegate_)
+          delegate_->WhiteListCheckFailed(username);
+        else
+          NOTREACHED();
+      }
+    } else {
+      // In case of signed settings: with current implementation we do not
+      // trust whitelist returned by PrefService.  So make separate check.
+      SignedSettingsHelper::Get()->StartCheckWhitelistOp(
+          username, this);
+    }
+  }
+}
 
 void LoginPerformer::Login(const std::string& username,
                            const std::string& password) {
+  auth_mode_ = AUTH_MODE_INTERNAL;
   username_ = username;
   password_ = password;
 
@@ -314,7 +397,7 @@ void LoginPerformer::RequestScreenLock() {
   DVLOG(1) << "Screen lock requested";
   // Will receive notifications on screen unlock and delete itself.
   registrar_.Add(this,
-                 NotificationType::SCREEN_LOCK_STATE_CHANGED,
+                 chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
                  NotificationService::AllSources());
   if (ScreenLocker::default_screen_locker()) {
     DVLOG(1) << "Screen already locked";
@@ -458,6 +541,23 @@ void LoginPerformer::ResolveScreenUnlocked() {
   registrar_.RemoveAll();
   // If screen was unlocked that was for a reason, should delete itself now.
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+}
+
+void LoginPerformer::StartLoginCompletion() {
+  DVLOG(1) << "Login completion started";
+  BootTimesLoader::Get()->AddLoginTimeMarker("AuthStarted", false);
+  Profile* profile = g_browser_process->profile_manager()->GetDefaultProfile();
+
+  authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableMethod(authenticator_.get(),
+                        &Authenticator::CompleteLogin,
+                        profile,
+                        username_,
+                        password_));
+
+  password_.clear();
 }
 
 void LoginPerformer::StartAuthentication() {

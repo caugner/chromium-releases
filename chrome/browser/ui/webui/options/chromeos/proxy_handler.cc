@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -33,6 +33,8 @@ void ProxyHandler::GetLocalizedValues(
   // Proxy page - ChromeOS
   localized_strings->SetString("proxyPage",
       l10n_util::GetStringUTF16(IDS_OPTIONS_PROXY_TAB_LABEL));
+  localized_strings->SetString("proxyPageTitleFormat",
+     l10n_util::GetStringUTF16(IDS_PROXY_PAGE_TITLE_FORMAT));
   localized_strings->SetString("proxy_config_title",
      l10n_util::GetStringUTF16(IDS_PROXY_CONFIG_TITLE));
   localized_strings->SetString("proxyDirectInternetConnection",
@@ -65,6 +67,12 @@ void ProxyHandler::GetLocalizedValues(
      l10n_util::GetStringUTF16(IDS_PROXY_PORT));
   localized_strings->SetString("proxyBypass",
      l10n_util::GetStringUTF16(IDS_PROXY_BYPASS));
+}
+
+void ProxyHandler::SetNetworkName(const std::string& name) {
+  StringValue network(name);
+  web_ui_->CallJavascriptFunction("options.ProxyOptions.setNetworkName",
+                                  network);
 }
 
 }  // namespace chromeos

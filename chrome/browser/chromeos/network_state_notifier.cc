@@ -7,9 +7,10 @@
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/browser_thread.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 
 namespace chromeos {
 
@@ -47,7 +48,6 @@ NetworkStateNotifier::~NetworkStateNotifier() {
 }
 
 void NetworkStateNotifier::OnNetworkManagerChanged(NetworkLibrary* cros) {
-  DCHECK(CrosLibrary::Get()->EnsureLoaded());
   // Update the state 500ms later using UI thread.
   // See http://crosbug.com/4558
   BrowserThread::PostDelayedTask(
@@ -69,14 +69,14 @@ void NetworkStateNotifier::UpdateNetworkState(
   state_ = new_state;
   NetworkStateDetails details(state_);
   NotificationService::current()->Notify(
-      NotificationType::NETWORK_STATE_CHANGED,
+      chrome::NOTIFICATION_NETWORK_STATE_CHANGED,
       NotificationService::AllSources(),
       Details<NetworkStateDetails>(&details));
 };
 
 // static
 NetworkStateDetails::State NetworkStateNotifier::RetrieveState() {
-  // Running on desktop means always connected, for now.
+  // If CrosLibrary isn't loaded yet, assume connected.
   if (!CrosLibrary::Get()->EnsureLoaded())
     return NetworkStateDetails::CONNECTED;
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();

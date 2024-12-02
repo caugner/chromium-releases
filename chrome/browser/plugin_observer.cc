@@ -48,8 +48,8 @@ class PluginInfoBarDelegate : public ConfirmInfoBarDelegate {
 
  private:
   // ConfirmInfoBarDelegate:
-  virtual gfx::Image* GetIcon() const;
-  virtual string16 GetLinkText();
+  virtual gfx::Image* GetIcon() const OVERRIDE;
+  virtual string16 GetLinkText() const OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(PluginInfoBarDelegate);
 };
@@ -71,8 +71,10 @@ bool PluginInfoBarDelegate::Cancel() {
 }
 
 bool PluginInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
+  if (disposition == CURRENT_TAB)
+    disposition = NEW_FOREGROUND_TAB;
   GURL url = google_util::AppendGoogleLocaleParam(GURL(GetLearnMoreURL()));
-  tab_contents_->OpenURL(url, GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  tab_contents_->OpenURL(url, GURL(), disposition, PageTransition::LINK);
   return false;
 }
 
@@ -81,7 +83,7 @@ gfx::Image* PluginInfoBarDelegate::GetIcon() const {
       IDR_INFOBAR_PLUGIN_INSTALL);
 }
 
-string16 PluginInfoBarDelegate::GetLinkText() {
+string16 PluginInfoBarDelegate::GetLinkText() const {
   return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
 }
 
@@ -126,6 +128,9 @@ BlockedPluginInfoBarDelegate::BlockedPluginInfoBarDelegate(
   else if (name == webkit::npapi::PluginGroup::kRealPlayerGroupName)
     UserMetrics::RecordAction(
         UserMetricsAction("BlockedPluginInfobar.Shown.RealPlayer"));
+  else if (name == webkit::npapi::PluginGroup::kWindowsMediaPlayerGroupName)
+    UserMetrics::RecordAction(
+        UserMetricsAction("BlockedPluginInfobar.Shown.WindowsMediaPlayer"));
 }
 
 BlockedPluginInfoBarDelegate::~BlockedPluginInfoBarDelegate() {
@@ -156,7 +161,10 @@ bool BlockedPluginInfoBarDelegate::Cancel() {
   UserMetrics::RecordAction(
       UserMetricsAction("BlockedPluginInfobar.AlwaysAllow"));
   tab_contents_->profile()->GetHostContentSettingsMap()->AddExceptionForURL(
-      tab_contents_->GetURL(), CONTENT_SETTINGS_TYPE_PLUGINS, std::string(),
+      tab_contents_->GetURL(),
+      tab_contents_->GetURL(),
+      CONTENT_SETTINGS_TYPE_PLUGINS,
+      std::string(),
       CONTENT_SETTING_ALLOW);
   return PluginInfoBarDelegate::Cancel();
 }

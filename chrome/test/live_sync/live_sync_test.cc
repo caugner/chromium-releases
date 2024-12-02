@@ -262,7 +262,7 @@ bool LiveSyncTest::SetupClients() {
         base::StringPrintf(FILE_PATH_LITERAL("Profile%d"), i)));
     EXPECT_FALSE(GetProfile(i) == NULL) << "GetProfile(" << i << ") failed.";
     clients_.push_back(
-        new ProfileSyncServiceHarness(GetProfile(i), username_, password_, i));
+        new ProfileSyncServiceHarness(GetProfile(i), username_, password_));
     EXPECT_FALSE(GetClient(i) == NULL) << "GetClient(" << i << ") failed.";
   }
 
@@ -406,7 +406,11 @@ bool LiveSyncTest::SetUpLocalTestServer() {
   CommandLine::StringType delimiters(FILE_PATH_LITERAL(" "));
   Tokenize(server_cmdline_string, delimiters, &server_cmdline_vector);
   CommandLine server_cmdline(server_cmdline_vector);
-  if (!base::LaunchApp(server_cmdline, false, true, &test_server_handle_))
+  base::LaunchOptions options;
+#if defined(OS_WIN)
+  options.start_hidden = true;
+#endif
+  if (!base::LaunchProcess(server_cmdline, options, &test_server_handle_))
     LOG(ERROR) << "Could not launch local test server.";
 
   const int kMaxWaitTime = TestTimeouts::live_operation_timeout_ms();
@@ -456,7 +460,7 @@ bool LiveSyncTest::IsTestServerRunning() {
   GURL sync_url_status(sync_url.append("/healthz"));
   SyncServerStatusChecker delegate;
   URLFetcher fetcher(sync_url_status, URLFetcher::GET, &delegate);
-  fetcher.set_request_context(Profile::GetDefaultRequestContext());
+  fetcher.set_request_context(Profile::Deprecated::GetDefaultRequestContext());
   fetcher.Start();
   ui_test_utils::RunMessageLoop();
   return delegate.running();

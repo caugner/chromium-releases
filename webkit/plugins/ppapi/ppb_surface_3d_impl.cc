@@ -14,80 +14,73 @@
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_context_3d_impl.h"
 
+using ppapi::thunk::PPB_Surface3D_API;
+
 namespace webkit {
 namespace ppapi {
-
-namespace {
-
-PP_Resource Create(PP_Instance instance_id,
-                   PP_Config3D_Dev config,
-                   const int32_t* attrib_list) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
-  if (!instance)
-    return 0;
-
-  scoped_refptr<PPB_Surface3D_Impl> surface(
-      new PPB_Surface3D_Impl(instance));
-  if (!surface->Init(config, attrib_list))
-    return 0;
-
-  return surface->GetReference();
-}
-
-PP_Bool IsSurface3D(PP_Resource resource) {
-  return BoolToPPBool(!!Resource::GetAs<PPB_Surface3D_Impl>(resource));
-}
-
-int32_t SetAttrib(PP_Resource surface_id,
-                  int32_t attribute,
-                  int32_t value) {
-  // TODO(alokp): Implement me.
-  return 0;
-}
-
-int32_t GetAttrib(PP_Resource surface_id,
-                  int32_t attribute,
-                  int32_t* value) {
-  // TODO(alokp): Implement me.
-  return 0;
-}
-
-int32_t SwapBuffers(PP_Resource surface_id,
-                    PP_CompletionCallback callback) {
-  scoped_refptr<PPB_Surface3D_Impl> surface(
-      Resource::GetAs<PPB_Surface3D_Impl>(surface_id));
-  return surface->SwapBuffers(callback);
-}
-
-const PPB_Surface3D_Dev ppb_surface3d = {
-  &Create,
-  &IsSurface3D,
-  &SetAttrib,
-  &GetAttrib,
-  &SwapBuffers
-};
-
-}  // namespace
 
 PPB_Surface3D_Impl::PPB_Surface3D_Impl(PluginInstance* instance)
     : Resource(instance),
       bound_to_instance_(false),
       swap_initiated_(false),
-      swap_callback_(PP_BlockUntilComplete()),
       context_(NULL) {
 }
 
 PPB_Surface3D_Impl::~PPB_Surface3D_Impl() {
   if (context_)
-    context_->BindSurfaces(NULL, NULL);
+    context_->BindSurfacesImpl(NULL, NULL);
 }
 
-const PPB_Surface3D_Dev* PPB_Surface3D_Impl::GetInterface() {
-  return &ppb_surface3d;
+// static
+PP_Resource PPB_Surface3D_Impl::Create(PluginInstance* instance,
+                                       PP_Config3D_Dev config,
+                                       const int32_t* attrib_list) {
+  scoped_refptr<PPB_Surface3D_Impl> surface(
+      new PPB_Surface3D_Impl(instance));
+  if (!surface->Init(config, attrib_list))
+    return 0;
+  return surface->GetReference();
 }
 
-PPB_Surface3D_Impl* PPB_Surface3D_Impl::AsPPB_Surface3D_Impl() {
+PPB_Surface3D_API* PPB_Surface3D_Impl::AsPPB_Surface3D_API() {
   return this;
+}
+
+int32_t PPB_Surface3D_Impl::SetAttrib(int32_t attribute, int32_t value) {
+  // TODO(alokp): Implement me.
+  return 0;
+}
+
+int32_t PPB_Surface3D_Impl::GetAttrib(int32_t attribute, int32_t* value) {
+  // TODO(alokp): Implement me.
+  return 0;
+}
+
+int32_t PPB_Surface3D_Impl::SwapBuffers(PP_CompletionCallback callback) {
+  if (!callback.func) {
+    // Blocking SwapBuffers isn't supported (since we have to be on the main
+    // thread).
+    return PP_ERROR_BADARGUMENT;
+  }
+
+  if (swap_callback_.get() && !swap_callback_->completed()) {
+    // Already a pending SwapBuffers that hasn't returned yet.
+    return PP_ERROR_INPROGRESS;
+  }
+
+  if (!context_)
+    return PP_ERROR_FAILED;
+
+  PP_Resource resource_id = GetReferenceNoAddRef();
+  CHECK(resource_id);
+  swap_callback_ = new TrackedCompletionCallback(
+      instance()->module()->GetCallbackTracker(), resource_id, callback);
+  gpu::gles2::GLES2Implementation* impl = context_->gles2_impl();
+  if (impl)
+    context_->gles2_impl()->SwapBuffers();
+  // |SwapBuffers()| should not call us back synchronously, but double-check.
+  DCHECK(!swap_callback_->completed());
+  return PP_OK_COMPLETIONPENDING;
 }
 
 bool PPB_Surface3D_Impl::Init(PP_Config3D_Dev config,
@@ -100,19 +93,17 @@ bool PPB_Surface3D_Impl::BindToInstance(bool bind) {
   return true;
 }
 
-bool PPB_Surface3D_Impl::BindToContext(
-    PPB_Context3D_Impl* context) {
+bool PPB_Surface3D_Impl::BindToContext(PPB_Context3D_Impl* context) {
   if (context == context_)
     return true;
 
   if (!context && bound_to_instance_)
-    instance()->BindGraphics(0);
+    instance()->BindGraphics(instance()->pp_instance(), 0);
 
   // Unbind from the current context.
-  if (context_) {
+  if (context_ && context_->platform_context())
     context_->platform_context()->SetSwapBuffersCallback(NULL);
-  }
-  if (context) {
+  if (context && context->platform_context()) {
     // Resize the backing texture to the size of the instance when it is bound.
     // TODO(alokp): This should be the responsibility of plugins.
     gpu::gles2::GLES2Implementation* impl = context->gles2_impl();
@@ -128,39 +119,18 @@ bool PPB_Surface3D_Impl::BindToContext(
   return true;
 }
 
-int32_t PPB_Surface3D_Impl::SwapBuffers(PP_CompletionCallback callback) {
-  if (!context_)
-    return PP_ERROR_FAILED;
-
-  if (swap_callback_.func) {
-    // Already a pending SwapBuffers that hasn't returned yet.
-    return PP_ERROR_INPROGRESS;
-  }
-
-  if (!callback.func) {
-    // Blocking SwapBuffers isn't supported (since we have to be on the main
-    // thread).
-    return PP_ERROR_BADARGUMENT;
-  }
-
-  swap_callback_ = callback;
-  gpu::gles2::GLES2Implementation* impl = context_->gles2_impl();
-  if (impl) {
-    context_->gles2_impl()->SwapBuffers();
-  }
-  return PP_OK_COMPLETIONPENDING;
-}
-
 void PPB_Surface3D_Impl::ViewInitiatedPaint() {
 }
 
 void PPB_Surface3D_Impl::ViewFlushedPaint() {
-  if (swap_initiated_ && swap_callback_.func) {
+  if (swap_initiated_ && swap_callback_.get() && !swap_callback_->completed()) {
     // We must clear swap_callback_ before issuing the callback. It will be
     // common for the plugin to issue another SwapBuffers in response to the
     // callback, and we don't want to think that a callback is already pending.
     swap_initiated_ = false;
-    PP_RunAndClearCompletionCallback(&swap_callback_, PP_OK);
+    scoped_refptr<TrackedCompletionCallback> callback;
+    callback.swap(swap_callback_);
+    callback->Run(PP_OK);  // Will complete abortively if necessary.
   }
 }
 
@@ -172,17 +142,19 @@ void PPB_Surface3D_Impl::OnSwapBuffers() {
   if (bound_to_instance_) {
     instance()->CommitBackingTexture();
     swap_initiated_ = true;
-  } else if (swap_callback_.func) {
+  } else if (swap_callback_.get() && !swap_callback_->completed()) {
     // If we're off-screen, no need to trigger compositing so run the callback
     // immediately.
     swap_initiated_ = false;
-    PP_RunAndClearCompletionCallback(&swap_callback_, PP_OK);
+    scoped_refptr<TrackedCompletionCallback> callback;
+    callback.swap(swap_callback_);
+    callback->Run(PP_OK);  // Will complete abortively if necessary.
   }
 }
 
 void PPB_Surface3D_Impl::OnContextLost() {
   if (bound_to_instance_)
-    instance()->BindGraphics(0);
+    instance()->BindGraphics(instance()->pp_instance(), 0);
 
   // Send context lost to plugin. This may have been caused by a PPAPI call, so
   // avoid re-entering.

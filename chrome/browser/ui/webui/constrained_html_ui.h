@@ -8,8 +8,8 @@
 
 #include <vector>
 
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "content/browser/tab_contents/constrained_window.h"
-#include "content/browser/webui/web_ui.h"
 #include "content/common/property_bag.h"
 
 class HtmlDialogUIDelegate;
@@ -31,7 +31,7 @@ class ConstrainedHtmlUIDelegate {
 //
 // Since ConstrainedWindow requires platform-specific delegate
 // implementations, this class is just a factory stub.
-class ConstrainedHtmlUI : public WebUI {
+class ConstrainedHtmlUI : public ChromeWebUI {
  public:
   explicit ConstrainedHtmlUI(TabContents* contents);
   virtual ~ConstrainedHtmlUI();
@@ -57,7 +57,7 @@ class ConstrainedHtmlUI : public WebUI {
   ConstrainedHtmlUIDelegate* GetConstrainedDelegate();
 
   // JS Message Handler
-  void OnDialogClose(const ListValue* args);
+  void OnDialogClose(const base::ListValue* args);
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedHtmlUI);
 };

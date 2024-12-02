@@ -11,6 +11,7 @@
 #include "base/i18n/rtl.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/base_tab.h"
@@ -33,10 +34,9 @@
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/screen.h"
 #include "views/events/event.h"
-#include "views/screen.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>  // NOLINT
@@ -397,7 +397,7 @@ void DraggedTabController::InitTabDragData(BaseTab* tab,
       drag_data->source_model_index);
   drag_data->pinned = source_tabstrip_->IsTabPinned(tab);
   registrar_.Add(this,
-                 NotificationType::TAB_CONTENTS_DESTROYED,
+                 content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                  Source<TabContents>(drag_data->contents->tab_contents()));
 
   // We need to be the delegate so we receive messages about stuff, otherwise
@@ -411,18 +411,20 @@ void DraggedTabController::InitTabDragData(BaseTab* tab,
 ///////////////////////////////////////////////////////////////////////////////
 // DraggedTabController, PageNavigator implementation:
 
-void DraggedTabController::OpenURLFromTab(TabContents* source,
-                                          const GURL& url,
-                                          const GURL& referrer,
-                                          WindowOpenDisposition disposition,
-                                          PageTransition::Type transition) {
+TabContents* DraggedTabController::OpenURLFromTab(
+    TabContents* source,
+    const GURL& url,
+    const GURL& referrer,
+    WindowOpenDisposition disposition,
+    PageTransition::Type transition) {
   if (source_tab_drag_data()->original_delegate) {
     if (disposition == CURRENT_TAB)
       disposition = NEW_WINDOW;
 
-    source_tab_drag_data()->original_delegate->OpenURLFromTab(
+    return source_tab_drag_data()->original_delegate->OpenURLFromTab(
         source, url, referrer, disposition, transition);
   }
+  return NULL;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -449,36 +451,11 @@ void DraggedTabController::AddNewContents(TabContents* source,
   }
 }
 
-void DraggedTabController::ActivateContents(TabContents* contents) {
-  // Ignored.
-}
-
-void DraggedTabController::DeactivateContents(TabContents* contents) {
-  // Ignored.
-}
-
 void DraggedTabController::LoadingStateChanged(TabContents* source) {
   // It would be nice to respond to this message by changing the
   // screen shot in the dragged tab.
   if (view_.get())
     view_->Update();
-}
-
-void DraggedTabController::CloseContents(TabContents* source) {
-  // Theoretically could be called by a window. Should be ignored
-  // because window.close() is ignored (usually, even though this
-  // method gets called.)
-}
-
-void DraggedTabController::MoveContents(TabContents* source,
-                                        const gfx::Rect& pos) {
-  // Theoretically could be called by a web page trying to move its
-  // own window. Should be ignored since we're moving the window...
-}
-
-void DraggedTabController::UpdateTargetURL(TabContents* source,
-                                           const GURL& url) {
-  // Ignored.
 }
 
 bool DraggedTabController::ShouldSuppressDialogs() {
@@ -488,13 +465,18 @@ bool DraggedTabController::ShouldSuppressDialogs() {
   return false;
 }
 
+content::JavaScriptDialogCreator*
+DraggedTabController::GetJavaScriptDialogCreator() {
+  return GetJavaScriptDialogCreatorInstance();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // DraggedTabController, NotificationObserver implementation:
 
-void DraggedTabController::Observe(NotificationType type,
+void DraggedTabController::Observe(int type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
-  DCHECK_EQ(type.value, NotificationType::TAB_CONTENTS_DESTROYED);
+  DCHECK_EQ(type, content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
   TabContents* destroyed_contents = Source<TabContents>(source).ptr();
   for (size_t i = 0; i < drag_data_.size(); ++i) {
     if (drag_data_[i].contents->tab_contents() == destroyed_contents) {
@@ -525,6 +507,11 @@ void DraggedTabController::DidProcessMessage(const MSG& msg) {
   // kinds of tab dragging.
   if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE)
     EndDrag(true);
+}
+#elif defined(TOUCH_UI)
+base::MessagePumpObserver::EventStatus
+    DraggedTabController::WillProcessXEvent(XEvent* xevent) {
+  return EVENT_CONTINUE;
 }
 #elif defined(TOOLKIT_USES_GTK)
 void DraggedTabController::WillProcessEvent(GdkEvent* event) {
@@ -564,7 +551,7 @@ gfx::Point DraggedTabController::GetWindowCreatePoint() const {
   }
   // If the cursor is outside the monitor area, move it inside. For example,
   // dropping a tab onto the task bar on Windows produces this situation.
-  gfx::Rect work_area = views::Screen::GetMonitorWorkAreaNearestPoint(
+  gfx::Rect work_area = gfx::Screen::GetMonitorWorkAreaNearestPoint(
       cursor_point);
   if (!work_area.IsEmpty()) {
     if (cursor_point.x() < work_area.x())
@@ -920,7 +907,7 @@ void DraggedTabController::Attach(BaseTabStrip* attached_tabstrip,
   }
 
   // Move the corresponding window to the front.
-  attached_tabstrip_->GetWindow()->Activate();
+  attached_tabstrip_->GetWidget()->Activate();
 }
 
 void DraggedTabController::Detach() {
@@ -1269,8 +1256,8 @@ void DraggedTabController::CompleteDrag() {
       }
     }
     // Compel the model to construct a new window for the detached TabContents.
-    views::Window* window = source_tabstrip_->GetWindow();
-    gfx::Rect window_bounds(window->GetNormalBounds());
+    views::Widget* widget = source_tabstrip_->GetWidget();
+    gfx::Rect window_bounds(widget->GetRestoredBounds());
     window_bounds.set_origin(GetWindowCreatePoint());
     // When modifying the following if statement, please make sure not to
     // introduce issue listed in http://crbug.com/6223 comment #11.
@@ -1284,7 +1271,7 @@ void DraggedTabController::CompleteDrag() {
     Browser* new_browser =
         GetModel(source_tabstrip_)->delegate()->CreateNewStripWithContents(
             drag_data_[0].contents, window_bounds, dock_info_,
-            window->IsMaximized());
+            widget->IsMaximized());
     TabStripModel* new_model = new_browser->tabstrip_model();
     new_model->SetTabPinned(
         new_model->GetIndexOfTabContents(drag_data_[0].contents),

@@ -13,6 +13,7 @@
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -115,6 +116,14 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
   net::HttpResponseInfo response_info_;
 };
 
+bool ExtensionCanLoadInIncognito(const std::string& extension_id,
+                                 ExtensionInfoMap* extension_info_map) {
+  const Extension* extension =
+      extension_info_map->extensions().GetByID(extension_id);
+  // Only split-mode extensions can load in incognito profiles.
+  return extension && extension->incognito_split_mode();
+}
+
 // Returns true if an chrome-extension:// resource should be allowed to load.
 // TODO(aa): This should be moved into ExtensionResourceRequestPolicy, but we
 // first need to find a way to get CanLoadInIncognito state into the renderers.
@@ -137,13 +146,27 @@ bool AllowExtensionResourceLoad(net::URLRequest* request,
   // incognito tab prevents that.
   if (is_incognito &&
       info->resource_type() == ResourceType::MAIN_FRAME &&
-      !extension_info_map->ExtensionCanLoadInIncognito(request->url().host())) {
+      !ExtensionCanLoadInIncognito(request->url().host(), extension_info_map)) {
     LOG(ERROR) << "Denying load of " << request->url().spec() << " from "
                << "incognito tab.";
     return false;
   }
 
   return true;
+}
+
+// Returns true if the given URL references an icon in the given extension.
+bool URLIsForExtensionIcon(const GURL& url, const Extension* extension) {
+  DCHECK(url.SchemeIs(chrome::kExtensionScheme));
+
+  if (!extension)
+    return false;
+
+  std::string path = url.path();
+  DCHECK_EQ(url.host(), extension->id());
+  DCHECK(path.length() > 0 && path[0] == '/');
+  path = path.substr(1);
+  return extension->icons().ContainsPath(path);
 }
 
 class ExtensionProtocolHandler
@@ -177,20 +200,25 @@ ExtensionProtocolHandler::MaybeCreateJob(net::URLRequest* request) const {
 
   // chrome-extension://extension-id/resource/path.js
   const std::string& extension_id = request->url().host();
-  FilePath directory_path = extension_info_map_->
-      GetPathForExtension(extension_id);
+  const Extension* extension =
+      extension_info_map_->extensions().GetByID(extension_id);
+  FilePath directory_path;
+  if (extension)
+    directory_path = extension->path();
   if (directory_path.value().empty()) {
-    if (extension_info_map_->URLIsForExtensionIcon(request->url()))
-      directory_path = extension_info_map_->
-          GetPathForDisabledExtension(extension_id);
+    const Extension* disabled_extension =
+        extension_info_map_->disabled_extensions().GetByID(extension_id);
+    if (URLIsForExtensionIcon(request->url(), disabled_extension))
+      directory_path = disabled_extension->path();
     if (directory_path.value().empty()) {
       LOG(WARNING) << "Failed to GetPathForExtension: " << extension_id;
       return NULL;
     }
   }
 
-  const std::string& content_security_policy = extension_info_map_->
-      GetContentSecurityPolicyForExtension(extension_id);
+  std::string content_security_policy;
+  if (extension)
+    content_security_policy = extension->content_security_policy();
 
   FilePath resources_path;
   if (PathService::Get(chrome::DIR_RESOURCES, &resources_path) &&
@@ -233,47 +261,10 @@ ExtensionProtocolHandler::MaybeCreateJob(net::URLRequest* request) const {
                                     content_security_policy);
 }
 
-class UserScriptProtocolHandler
-    : public net::URLRequestJobFactory::ProtocolHandler {
- public:
-  UserScriptProtocolHandler(const FilePath& user_script_dir_path,
-                            ExtensionInfoMap* extension_info_map)
-      : user_script_dir_path_(user_script_dir_path),
-        extension_info_map_(extension_info_map) {}
-
-  virtual ~UserScriptProtocolHandler() {}
-
-  virtual net::URLRequestJob* MaybeCreateJob(
-      net::URLRequest* request) const OVERRIDE;
-
- private:
-  const FilePath user_script_dir_path_;
-  ExtensionInfoMap* const extension_info_map_;
-};
-
-// Factory registered with net::URLRequest to create URLRequestJobs for
-// chrome-user-script:/ URLs.
-net::URLRequestJob* UserScriptProtocolHandler::MaybeCreateJob(
-    net::URLRequest* request) const {
-  // chrome-user-script:/user-script-name.user.js
-  ExtensionResource resource(
-      request->url().host(), user_script_dir_path_,
-      extension_file_util::ExtensionURLToRelativeFilePath(request->url()));
-
-  return new net::URLRequestFileJob(request, resource.GetFilePath());
-}
-
 }  // namespace
 
 net::URLRequestJobFactory::ProtocolHandler* CreateExtensionProtocolHandler(
     bool is_incognito,
     ExtensionInfoMap* extension_info_map) {
   return new ExtensionProtocolHandler(is_incognito, extension_info_map);
-}
-
-net::URLRequestJobFactory::ProtocolHandler* CreateUserScriptProtocolHandler(
-    const FilePath& user_script_dir_path,
-    ExtensionInfoMap* extension_info_map) {
-  return new UserScriptProtocolHandler(
-      user_script_dir_path, extension_info_map);
 }

@@ -24,6 +24,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/process_util.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
 #include "ipc/ipc_descriptors.h"
@@ -309,6 +310,8 @@ Channel::ChannelImpl::ChannelImpl(const IPC::ChannelHandle& channel_handle,
       pipe_name_(channel_handle.name),
       listener_(listener),
       must_unlink_(false) {
+  memset(input_buf_, 0, sizeof(input_buf_));
+  memset(input_cmsg_buf_, 0, sizeof(input_cmsg_buf_));
   if (!CreatePipe(channel_handle)) {
     // The pipe may have been closed already.
     const char *modestr = (mode_ & MODE_SERVER_FLAG) ? "server" : "client";
@@ -735,7 +738,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
       }
       input_overflow_fds_ = std::vector<int>(&fds[fds_i], &fds[num_fds]);
       fds_i = 0;
-      fds = &input_overflow_fds_[0];
+      fds = vector_as_array(&input_overflow_fds_);
       num_fds = input_overflow_fds_.size();
     }
     input_overflow_buf_.assign(p, end - p);
@@ -935,6 +938,8 @@ bool Channel::ChannelImpl::GetClientEuid(uid_t* client_euid) const {
   }
   *client_euid = peer_euid;
   return true;
+#elif defined(OS_SOLARIS)
+  return false;
 #else
   struct ucred cred;
   socklen_t cred_len = sizeof(cred);

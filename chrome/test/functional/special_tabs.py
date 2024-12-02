@@ -1,14 +1,14 @@
 #!/usr/bin/python
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
 import os
 
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
 import test_utils
-
 
 class SpecialTabsTest(pyauto.PyUITest):
   """TestCase for Special Tabs like about:version, chrome://history, etc."""
@@ -19,22 +19,186 @@ class SpecialTabsTest(pyauto.PyUITest):
     pyauto.IDC_SHOW_DOWNLOADS: 'Downloads',
   }
 
+  special_url_redirects = {
+    'about:': 'chrome://version',
+    'about:about': 'chrome://about',
+    'about:appcache-internals': 'chrome://appcache-internals',
+    'about:credits': 'chrome://credits',
+    'about:dns': 'chrome://dns',
+    'about:histograms': 'chrome://histograms',
+    'about:plugins': 'chrome://plugins',
+    'about:sync': 'chrome://sync-internals',
+    'about:sync-internals': 'chrome://sync-internals',
+    'about:version': 'chrome://version',
+  }
+
   special_url_tabs = {
-    'about:': 'About Version',
-    'about:about': 'About Pages',
-    'about:appcache-internals': 'AppCache Internals',
-    'about:credits': 'Credits',
-    'about:dns': 'About DNS',
-    'about:histograms': 'About Histograms',
-    'about:plugins': 'Plug-ins',
-    'about:sync': 'Sync Internals',
-    'about:sync-internals': 'Sync Internals',
-    'about:version': 'About Version',
-    'chrome://downloads': 'Downloads',
-    'chrome://extensions': 'Extensions',
-    'chrome://history': 'History',
-    'chrome://newtab': 'New Tab',
-    'chrome://sync-internals': 'Sync Internals',
+    'chrome://about': { 'title': 'Chrome URLs' },
+    'chrome://appcache-internals': {
+      'title': 'AppCache Internals',
+      'CSP': False
+    },
+    'chrome://blob-internals': {
+      'title': 'Blob Storage Internals',
+      'CSP': False
+    },
+    'chrome://bugreport': {
+      'title': 'Whoops. Let\'s fix that.',
+      'CSP': False
+    },
+    'chrome://chrome-urls': { 'title': 'Chrome URLs' },
+    'chrome://crashes': { 'title': 'Crashes' },
+    'chrome://credits': { 'title': 'Credits', 'CSP': False },
+    'chrome://downloads': { 'title': 'Downloads' },
+    'chrome://dns': { 'title': 'About DNS' },
+    'chrome://extensions': { 'title': 'Extensions' },
+    'chrome://flags': {},
+    'chrome://flash': {},
+    'chrome://gpu-internals': {},
+    'chrome://histograms': { 'title': 'About Histograms' },
+    'chrome://history': { 'title': 'History' },
+    'chrome://history2': { 'title': 'History', 'CSP': False },
+    'chrome://media-internals': { 'title': 'Media Internals', 'CSP': False },
+    'chrome://memory-redirect': { 'title': 'About Memory' },
+    'chrome://net-internals': {},
+    'chrome://net-internals/help.html': {},
+    'chrome://newtab': { 'title': 'New Tab', 'CSP': False },
+    'chrome://plugins': { 'title': 'Plug-ins' },
+    'chrome://sessions': { 'title': 'Sessions', 'CSP': False },
+    'chrome://settings': { 'title': 'Preferences - Basics' },
+    'chrome://stats': { 'CSP': False },
+    'chrome://sync': { 'title': 'Sync Internals', 'CSP': False },
+    'chrome://sync-internals': { 'title': 'Sync Internals', 'CSP': False },
+    'chrome://terms': { 'CSP': False },
+    'chrome://textfields': { 'title': 'chrome://textfields', 'CSP': False },
+    'chrome://version': { 'title': 'About Version' },
+    'chrome://view-http-cache': {},
+  }
+
+  broken_special_url_tabs = {
+    # crashes under debug, bad include of locale.js (bug 88220).
+    'chrome://taskmanager': { 'CSP': False },
+
+    # crashed under debug when invoked from location bar (bug 88223).
+    'chrome://devtools': { 'CSP': False },
+
+    # intermittent crash on cromeos=1 on linux
+    'chrome://tasks': { 'title': 'About Histograms' },
+
+    # returns "not available" despite having an URL constant.
+    'chrome://dialog': { 'CSP': False },
+
+    # separate window on mac, PC untested, not implemented elsewhere.
+    'chrome://ipc': { 'CSP': False },
+
+    # race against redirects via meta-refresh.
+    'chrome://memory': { 'CSP': False },
+  }
+
+  chromeos_special_url_tabs = {
+    'chrome://active-downloads': { 'title': 'Downloads', 'CSP': False },
+    'chrome://choose-mobile-network': { 'title': 'undefined', 'CSP': False },
+    'chrome://imageburner': { 'title':'Create a Recovery Media', 'CSP': False },
+    'chrome://keyboardoverlay': { 'title': 'Keyboard Overlay', 'CSP': False },
+    'chrome://login': { 'CSP': False },
+    'chrome://network': { 'title': 'About Network' },
+    'chrome://oobe': { 'title': 'undefined', 'CSP': False },
+    'chrome://os-credits': { 'title': 'Credits', 'CSP': False },
+    'chrome://proxy-settings': { 'CSP': False },
+    'chrome://register': { 'CSP': False },
+    'chrome://sim-unlock': { 'title': 'Enter SIM Card PIN', 'CSP': False },
+    'chrome://system': { 'title': 'About System', 'CSP': False },
+
+    # OVERRIDE - usually a warning page without CSP (so far).
+    'chrome://flags': { 'CSP': False },
+
+    # OVERRIDE - title and page different on CrOS
+    'chrome://settings/about': { 'title': 'Settings - About' },
+    'chrome://settings/accounts': { 'title': 'Settings - Users' },
+    'chrome://settings/advanced': { 'title': 'Settings - Under the Hood' },
+    'chrome://settings/autofill': { 'title': 'Settings - Autofill Settings' },
+    'chrome://settings/browser': { 'title': 'Settings - Basics' },
+    'chrome://settings/clearBrowserData':
+      { 'title': 'Settings - Clear Browsing Data' },
+    'chrome://settings/content': { 'title': 'Settings - Content Settings' },
+    'chrome://settings/internet': { 'title': 'Settings - Internet' },
+    'chrome://settings/languages':
+      { 'title': 'Settings - Languages and Input' },
+    'chrome://settings/passwords': { 'title': 'Settings - Passwords' },
+    'chrome://settings/personal': { 'title': 'Settings - Personal Stuff' },
+    'chrome://settings/proxy': { 'title': 'Proxy' },
+    'chrome://settings/system': { 'title': 'Settings - System' },
+  }
+
+  broken_chromeos_special_url_tabs = {
+    # returns "not available" page on chromeos=1 linux but has an URL constant.
+    'chrome://activationmessage': { 'CSP': False },
+    'chrome://cloudprintresources': { 'CSP': False },
+    'chrome://cloudprintsetup': { 'CSP': False },
+    'chrome://collected-cookies': { 'CSP': False },
+    'chrome://constrained-test': { 'CSP': False },
+    'chrome://enterprise-enrollment': { 'CSP': False },
+    'chrome://http-auth': { 'CSP': False },
+    'chrome://login-container': { 'CSP': False },
+    'chrome://media-player': { 'CSP': False },
+    'chrome://screenshots': { 'CSP': False },
+    'chrome://slideshow': { 'CSP': False },
+    'chrome://syncresources': { 'CSP': False },
+    'chrome://theme': { 'CSP': False },
+
+    # crashes on chromeos=1 on linux, possibly missing real CrOS features.
+    'chrome://cryptohome': { 'CSP': False},
+    'chrome://mobilesetup': { 'CSP': False },
+    'chrome://print': { 'CSP': False },
+  }
+
+  linux_special_url_tabs = {
+    'chrome://linux-proxy-config': { 'title': 'Proxy Configuration Help' },
+    'chrome://tcmalloc': { 'title': 'About tcmalloc' },
+    'chrome://sandbox': { 'title': 'Sandbox Status' },
+  }
+
+  broken_linux_special_url_tabs = {
+  }
+
+  mac_special_url_tabs = {
+  }
+
+  broken_mac_special_url_tabs = {
+  }
+
+  win_special_url_tabs = {
+    'chrome://conflicts': {},
+
+    # OVERRIDE - different title for page.
+    'chrome://settings': { 'title': 'Options - Basics' },
+  }
+
+  broken_win_special_url_tabs = {
+    # Sync on windows badly broken at the moment.
+    'chrome://sync': {},
+  }
+
+  google_chrome_special_url_tabs = {
+    # OVERRIDE - different title for Google Chrome vs. Chromium.
+    'chrome://terms': {
+      'title': 'Google Chrome Terms of Service',
+      'CSP': False
+    },
+  }
+
+  broken_google_chrome_special_url_tabs = {
+  }
+
+  google_chromeos_special_url_tabs = {
+    # OVERRIDE - different title for Google Chrome OS vs. Chromium OS.
+    'chrome://terms': {
+      'title': 'Google Chrome OS Terms',
+      'CSP': False
+    },
+  }
+
+  broken_google_chromeos_special_url_tabs = {
   }
 
   def _VerifyAppCacheInternals(self):
@@ -47,9 +211,11 @@ class SpecialTabsTest(pyauto.PyUITest):
         lambda: self.GetDOMValue('document.getElementById("result").innerHTML'),
                                  expect_retval='SUCCESS')
     self.GetBrowserWindow(0).GetTab(0).GoBack()
-    test_utils.StringContentCheck(self, self.GetTabContents(),
-                                  ['Manifest', 'Remove this AppCache'],
-                                  [])
+    test_utils.StringContentCheck(
+        self, self.GetTabContents(),
+        ['Manifest',
+         'http://static.webvm.net/appcache-test/resources/simple.manifest'],
+        [])
 
   def _VerifyAboutDNS(self):
     """Confirm about:dns contains expected content related to DNS info.
@@ -61,12 +227,73 @@ class SpecialTabsTest(pyauto.PyUITest):
                                   ['Host name', 'How long ago', 'Motivation'],
                                   [])
 
+  def _GetPlatformSpecialURLTabs(self):
+    tabs = self.special_url_tabs.copy()
+    broken_tabs = self.broken_special_url_tabs.copy()
+    if self.IsChromeOS():
+      tabs.update(self.chromeos_special_url_tabs)
+      broken_tabs.update(self.broken_chromeos_special_url_tabs)
+    elif self.IsLinux():
+      tabs.update(self.linux_special_url_tabs)
+      broken_tabs.update(self.broken_linux_special_url_tabs)
+    elif self.IsMac():
+      tabs.update(self.mac_special_url_tabs)
+      broken_tabs.update(self.broken_mac_special_url_tabs)
+    elif self.IsWin():
+      tabs.update(self.win_special_url_tabs)
+      broken_tabs.update(self.broken_win_special_url_tabs)
+    if self.GetBrowserInfo()['properties']['branding'] == 'Google Chrome':
+      tabs.update(self.google_chrome_special_url_tabs)
+      broken_tabs.update(self.broken_google_chrome_special_url_tabs)
+      if self.IsChromeOS():
+        tabs.update(self.google_chromeos_special_url_tabs)
+        broken_tabs.update(self.broken_google_chromeos_special_url_tabs)
+    for key, value in broken_tabs.iteritems():
+      if key in tabs:
+       del tabs[key]
+    return tabs
+
+  def testSpecialURLRedirects(self):
+    """Test that older about: URLs are implemented by newer chrome:// URLs.
+       The location bar may not get updated in all cases, so checking the
+       tab URL is misleading, instead check for the same contents as the
+       chrome:// page."""
+    tabs = self._GetPlatformSpecialURLTabs()
+    for url, redirect in self.special_url_redirects.iteritems():
+      if redirect in tabs:
+        logging.debug('Testing redirect from %s to %s.' % (url, redirect))
+        self.NavigateToURL(url)
+        self.assertEqual(self.special_url_tabs[redirect]['title'],
+                         self.GetActiveTabTitle())
+
   def testSpecialURLTabs(self):
     """Test special tabs created by URLs like chrome://downloads,
-       chrome://extensions, chrome://history, etc."""
-    for url, title in self.special_url_tabs.iteritems():
+       chrome://extensions, chrome://history etc.  Also ensures they
+       specify content-security-policy and not inline scripts for those
+       pages that are expected to do so."""
+    tabs = self._GetPlatformSpecialURLTabs()
+    for url, properties in tabs.iteritems():
+      logging.debug('Testing URL %s.' % url)
       self.NavigateToURL(url)
-      self.assertEqual(title, self.GetActiveTabTitle())
+      expected_title = 'title' in properties and properties['title'] or url
+      actual_title = self.GetActiveTabTitle()
+      logging.debug('  %s title was %s (%s)' %
+                    (url, actual_title, expected_title == actual_title))
+      self.assertEqual(expected_title, actual_title)
+      include_list = []
+      exclude_list = []
+      if 'CSP' in properties and not properties['CSP']:
+        exclude_list.extend(['X-WebKit-CSP'])
+      else:
+        include_list.extend(['X-WebKit-CSP'])
+        exclude_list.extend(['<script>', 'onclick=', 'onload=',
+                             'onchange=', 'onsubmit=', 'javascript:'])
+      if 'includes' in properties:
+        include_list.extend(properties['includes'])
+      if 'excludes' in properties:
+        exclude_list.extend(properties['exlcudes'])
+      test_utils.StringContentCheck(self, self.GetTabContents(),
+                                    include_list, exclude_list)
 
   def testAboutAppCacheTab(self):
     """Test App Cache tab to confirm about page populates caches."""

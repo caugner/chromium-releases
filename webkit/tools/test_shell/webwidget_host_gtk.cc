@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,7 +76,7 @@ class WebWidgetHostGtkWidget {
                                   GDK_BUTTON_RELEASE_MASK |
                                   GDK_KEY_PRESS_MASK |
                                   GDK_KEY_RELEASE_MASK);
-    GTK_WIDGET_SET_FLAGS(widget, GTK_CAN_FOCUS);
+    gtk_widget_set_can_focus(widget, TRUE);
     g_signal_connect(widget, "size-request",
                      G_CALLBACK(&HandleSizeRequest), host);
     g_signal_connect(widget, "size-allocate",
@@ -365,7 +365,11 @@ void WebWidgetHost::Paint() {
     }
   }
 
+#ifdef WEBWIDGET_HAS_ANIMATE_CHANGES
+  webwidget_->animate(0.0);
+#else
   webwidget_->animate();
+#endif
 
   // This may result in more invalidation
   webwidget_->layout();

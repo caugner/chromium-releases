@@ -10,6 +10,9 @@
 
 namespace chrome {
 
+// Null terminated list of schemes that are savable.
+extern const char* kSavableSchemes[];
+
 // Canonical schemes you can use as input to GURL.SchemeIs().
 // TODO(jam): some of these don't below in the content layer, but are accessed
 // from there.
@@ -29,7 +32,6 @@ extern const char kHttpsScheme[];
 extern const char kJavaScriptScheme[];
 extern const char kMailToScheme[];
 extern const char kMetadataScheme[];
-extern const char kUserScriptScheme[];
 extern const char kViewSourceScheme[];
 
 // Used to separate a standard scheme and the hostname: "://".

@@ -12,10 +12,12 @@
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/shell_integration.h"
 #import "chrome/browser/ui/cocoa/search_engine_dialog_controller.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "grit/locale_settings.h"
@@ -26,7 +28,6 @@
 #import "chrome/app/breakpad_mac.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/shell_integration.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/google_update_settings.h"
 #endif
@@ -125,7 +126,8 @@ void ShowFirstRun(Profile* profile) {
 
   // Set preference to show first run bubble and welcome page.
   // Don't display the minimal bubble if there is no default search provider.
-  TemplateURLModel* search_engines_model = profile->GetTemplateURLModel();
+  TemplateURLService* search_engines_model =
+      TemplateURLServiceFactory::GetForProfile(profile);
   if (search_engines_model &&
       search_engines_model->GetDefaultSearchProvider()) {
     FirstRun::SetShowFirstRunBubblePref(true);
@@ -136,7 +138,8 @@ void ShowFirstRun(Profile* profile) {
 // True when the stats checkbox should be checked by default. This is only
 // the case when the canary is running.
 bool StatsCheckboxDefault() {
-  return platform_util::GetChannel() == platform_util::CHANNEL_CANARY;
+  return chrome::VersionInfo::GetChannel() ==
+      chrome::VersionInfo::CHANNEL_CANARY;
 }
 
 }  // namespace
@@ -147,7 +150,7 @@ void ShowFirstRunDialog(Profile* profile,
                         bool randomize_search_engine_experiment) {
   // If the default search is not managed via policy, ask the user to
   // choose a default.
-  TemplateURLModel* model = profile->GetTemplateURLModel();
+  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(profile);
   if (!FirstRun::SearchEngineSelectorDisallowed() ||
       (model && !model->is_default_search_managed())) {
     ShowSearchEngineSelectionDialog(profile,
@@ -169,7 +172,7 @@ void ShowFirstRunDialog(Profile* profile,
                                           ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
     // Bound to the dialog checkboxes.
-    makeDefaultBrowser_ = platform_util::CanSetAsDefaultBrowser();
+    makeDefaultBrowser_ = ShellIntegration::CanSetAsDefaultBrowser();
     statsEnabled_ = StatsCheckboxDefault();
   }
   return self;
@@ -195,7 +198,7 @@ void ShowFirstRunDialog(Profile* profile,
 - (void)show {
   NSWindow* win = [self window];
 
-  if (!platform_util::CanSetAsDefaultBrowser()) {
+  if (!ShellIntegration::CanSetAsDefaultBrowser()) {
     [setAsDefaultCheckbox_ setHidden:YES];
   }
 

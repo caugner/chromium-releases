@@ -8,6 +8,8 @@
 #include "chrome/browser/net/gaia/token_service_unittest.h"
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/test/signaling_task.h"
 #include "chrome/test/testing_profile.h"
 #include "content/common/test_url_fetcher_factory.h"
@@ -21,9 +23,10 @@ class SigninManagerTest : public TokenServiceTestHarness {
   virtual void SetUp() {
     TokenServiceTestHarness::SetUp();
     manager_.reset(new SigninManager());
-    google_login_success_.ListenFor(NotificationType::GOOGLE_SIGNIN_SUCCESSFUL,
-                                    Source<Profile>(profile_.get()));
-    google_login_failure_.ListenFor(NotificationType::GOOGLE_SIGNIN_FAILED,
+    google_login_success_.ListenFor(
+        chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
+        Source<Profile>(profile_.get()));
+    google_login_failure_.ListenFor(chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
                                     Source<Profile>(profile_.get()));
 
     URLFetcher::set_factory(&factory_);
@@ -35,7 +38,7 @@ class SigninManagerTest : public TokenServiceTestHarness {
     DCHECK(fetcher);
     DCHECK(fetcher->delegate());
     fetcher->delegate()->OnURLFetchComplete(
-        fetcher, GURL(GaiaAuthFetcher::kClientLoginUrl),
+        fetcher, GURL(GaiaUrls::GetInstance()->client_login_url()),
         net::URLRequestStatus(), 200, net::ResponseCookies(),
         "SID=sid\nLSID=lsid\nAuth=auth");
 
@@ -45,7 +48,7 @@ class SigninManagerTest : public TokenServiceTestHarness {
     DCHECK(fetcher);
     DCHECK(fetcher->delegate());
     fetcher->delegate()->OnURLFetchComplete(
-        fetcher, GURL(GaiaAuthFetcher::kGetUserInfoUrl),
+        fetcher, GURL(GaiaUrls::GetInstance()->get_user_info_url()),
         net::URLRequestStatus(), 200, net::ResponseCookies(),
         "email=user@gmail.com");
   }

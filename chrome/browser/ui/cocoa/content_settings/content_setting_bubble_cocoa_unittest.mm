@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/test/testing_profile.h"
+#include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -38,10 +39,14 @@ class ContentSettingBubbleControllerTest
   virtual ~ContentSettingBubbleControllerTest();
 
  private:
+  BrowserThread browser_thread_;
+
   base::mac::ScopedNSAutoreleasePool pool_;
 };
 
-ContentSettingBubbleControllerTest::ContentSettingBubbleControllerTest() {
+ContentSettingBubbleControllerTest::ContentSettingBubbleControllerTest()
+    : TabContentsWrapperTestHarness(),
+      browser_thread_(BrowserThread::UI, &message_loop_) {
 }
 
 ContentSettingBubbleControllerTest::~ContentSettingBubbleControllerTest() {
@@ -52,8 +57,6 @@ TEST_F(ContentSettingBubbleControllerTest, Init) {
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
     if (i == CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
       continue;  // Notifications have no bubble.
-    if (i == CONTENT_SETTINGS_TYPE_PRERENDER)
-      continue;  // Prerender has no bubble.
 
     ContentSettingsType settingsType = static_cast<ContentSettingsType>(i);
 

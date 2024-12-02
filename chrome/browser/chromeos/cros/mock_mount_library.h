@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,13 +25,19 @@ class MockMountLibrary : public MountLibrary {
   MOCK_METHOD1(AddObserver, void(MountLibrary::Observer*));
   MOCK_METHOD1(RemoveObserver, void(MountLibrary::Observer*));
   MOCK_CONST_METHOD0(disks, const MountLibrary::DiskMap&(void));
+  MOCK_CONST_METHOD0(mount_points, const MountLibrary::MountPointMap&(void));
 
   MOCK_METHOD0(RequestMountInfoRefresh, void(void));
-  MOCK_METHOD1(MountPath, void(const char*));
+  MOCK_METHOD3(MountPath, void(const char*, MountType,
+                               const MountPathOptions&));
   MOCK_METHOD1(UnmountPath, void(const char*));
+  MOCK_METHOD3(UnmountDeviceRecursive, void(const char*,
+      MountLibrary::UnmountDeviceRecursiveCallbackType, void*));
 
   void FireDeviceInsertEvents();
   void FireDeviceRemoveEvents();
+
+  void SetupDefaultReplies();
 
  private:
   void AddObserverInternal(MountLibrary::Observer* observer);

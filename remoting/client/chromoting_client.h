@@ -30,8 +30,8 @@ class NotifyResolutionRequest;
 }  // namespace protocol
 
 class ClientContext;
-class ClientLogger;
 class InputHandler;
+class Logger;
 class RectangleUpdateDecoder;
 
 // TODO(sergeyu): Move VideoStub implementation to RectangleUpdateDecoder.
@@ -46,15 +46,12 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
                    ChromotingView* view,
                    RectangleUpdateDecoder* rectangle_decoder,
                    InputHandler* input_handler,
-                   ClientLogger* logger,
+                   Logger* logger,
                    Task* client_done);
   virtual ~ChromotingClient();
 
-  void Start();
-  void StartSandboxed(scoped_refptr<XmppProxy> xmpp_proxy,
-                      const std::string& your_jid,
-                      const std::string& host_jid);
-  void Stop();
+  void Start(scoped_refptr<XmppProxy> xmpp_proxy);
+  void Stop(const base::Closure& shutdown_task);
   void ClientDone();
 
   // Return the stats recorded by this client.
@@ -63,28 +60,19 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   // Signals that the associated view may need updating.
   virtual void Repaint();
 
-  // Sets the viewport to do display.  The viewport may be larger and/or
-  // smaller than the actual image background being displayed.
-  //
-  // TODO(ajwong): This doesn't make sense to have here.  We're going to have
-  // threading isseus since pepper view needs to be called from the main pepper
-  // thread synchronously really.
-  virtual void SetViewport(int x, int y, int width, int height);
-
   // ConnectionToHost::HostEventCallback implementation.
-  virtual void OnConnectionOpened(protocol::ConnectionToHost* conn);
-  virtual void OnConnectionClosed(protocol::ConnectionToHost* conn);
-  virtual void OnConnectionFailed(protocol::ConnectionToHost* conn);
+  virtual void OnConnectionOpened(protocol::ConnectionToHost* conn) OVERRIDE;
+  virtual void OnConnectionClosed(protocol::ConnectionToHost* conn) OVERRIDE;
+  virtual void OnConnectionFailed(protocol::ConnectionToHost* conn) OVERRIDE;
 
   // ClientStub implementation.
-  virtual void NotifyResolution(const protocol::NotifyResolutionRequest* msg,
-                                Task* done);
   virtual void BeginSessionResponse(const protocol::LocalLoginStatus* msg,
-                                    Task* done);
+                                    Task* done) OVERRIDE;
 
   // VideoStub implementation.
-  virtual void ProcessVideoPacket(const VideoPacket* packet, Task* done);
-  virtual int GetPendingPackets();
+  virtual void ProcessVideoPacket(const VideoPacket* packet,
+                                  Task* done) OVERRIDE;
+  virtual int GetPendingPackets() OVERRIDE;
 
  private:
   struct QueuedVideoPacket {
@@ -112,6 +100,8 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   // the packet will start to be processed.
   void OnPacketDone(bool last_packet, base::Time decode_start);
 
+  void OnDisconnected(const base::Closure& shutdown_task);
+
   // The following are not owned by this class.
   ClientConfig config_;
   ClientContext* context_;
@@ -119,7 +109,7 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   ChromotingView* view_;
   RectangleUpdateDecoder* rectangle_decoder_;
   InputHandler* input_handler_;
-  ClientLogger* logger_;
+  Logger* logger_;
 
   // If non-NULL, this is called when the client is done.
   Task* client_done_;

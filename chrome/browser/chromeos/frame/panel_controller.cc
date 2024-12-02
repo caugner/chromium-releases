@@ -6,9 +6,7 @@
 
 #if defined(TOUCH_UI)
 #include <X11/Xlib.h>
-#if defined(HAVE_XINPUT2)
 #include <X11/extensions/XInput2.h>
-#endif
 #endif
 
 #include <vector>
@@ -20,10 +18,11 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "third_party/cros/chromeos_wm_ipc_enums.h"
 #include "third_party/skia/include/effects/SkBlurMaskFilter.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
@@ -36,7 +35,6 @@
 #include "views/painter.h"
 #include "views/view.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 #if defined(TOUCH_UI)
 namespace {
@@ -49,7 +47,6 @@ gfx::Point RootLocationFromXEvent(const XEvent* xev) {
     case MotionNotify:
       return gfx::Point(xev->xmotion.x_root, xev->xmotion.y_root);
 
-#if defined(HAVE_XINPUT2)
     case GenericEvent: {
       const XIDeviceEvent* xiev =
           static_cast<XIDeviceEvent*>(xev->xcookie.data);
@@ -61,7 +58,6 @@ gfx::Point RootLocationFromXEvent(const XEvent* xev) {
                             static_cast<int>(xiev->root_y));
       }
     }
-#endif  // defined(HAVE_XINPUT2)
 
     default:
       NOTREACHED();
@@ -96,8 +92,9 @@ const SkColor kTitleActiveGradientStart = SK_ColorWHITE;
 const SkColor kTitleActiveGradientEnd = 0xffe7edf1;
 const SkColor kTitleUrgentGradientStart = 0xfffea044;
 const SkColor kTitleUrgentGradientEnd = 0xfffa983a;
-const SkColor kTitleActiveColor = SK_ColorBLACK;
-const SkColor kTitleInactiveColor = SK_ColorBLACK;
+const SkColor kTitleActiveTextColor = SK_ColorBLACK;
+const SkColor kTitleInactiveTextColor = SK_ColorBLACK;
+const SkColor kTitleUrgentTextColor = SK_ColorWHITE;
 const SkColor kTitleCloseButtonColor = SK_ColorBLACK;
 // Delay before the urgency can be set after it has been cleared.
 const base::TimeDelta kSetUrgentDelay = base::TimeDelta::FromMilliseconds(500);
@@ -184,7 +181,8 @@ void PanelController::Init(bool initial_focus,
   gfx::Rect title_bounds(0, 0, window_bounds.width(), kTitleHeight);
 
   title_window_ = new views::Widget;
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.transparent = true;
   params.bounds = title_bounds;
   title_window_->Init(params);
@@ -238,6 +236,10 @@ void PanelController::SetUrgent(bool urgent) {
   if (title_window_) {
     gtk_window_set_urgency_hint(panel_, urgent ? TRUE : FALSE);
     title_content_->SchedulePaint();
+    if (urgent)
+      title_content_->title_label()->SetColor(kTitleUrgentTextColor);
+    else
+      title_content_->title_label()->SetColor(kTitleInactiveTextColor);
   }
 }
 
@@ -384,7 +386,7 @@ bool PanelController::PanelClientEvent(GdkEventClient* event) {
       expanded_ = new_state;
       State state = new_state ? EXPANDED : MINIMIZED;
       NotificationService::current()->Notify(
-          NotificationType::PANEL_STATE_CHANGED,
+          chrome::NOTIFICATION_PANEL_STATE_CHANGED,
           Source<PanelController>(this),
           Details<State>(&state));
     }
@@ -485,14 +487,14 @@ bool PanelController::TitleContentView::OnMouseDragged(
 }
 
 void PanelController::TitleContentView::OnFocusIn() {
-  title_label_->SetColor(kTitleActiveColor);
+  title_label_->SetColor(kTitleActiveTextColor);
   title_label_->SetFont(*active_font);
   Layout();
   SchedulePaint();
 }
 
 void PanelController::TitleContentView::OnFocusOut() {
-  title_label_->SetColor(kTitleInactiveColor);
+  title_label_->SetColor(kTitleInactiveTextColor);
   title_label_->SetFont(*inactive_font);
   Layout();
   SchedulePaint();

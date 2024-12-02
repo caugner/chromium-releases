@@ -6,7 +6,7 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
@@ -31,12 +31,8 @@
 namespace {
 
 scoped_refptr<RefCountedMemory> BitmapToMemory(SkBitmap* image) {
-  std::vector<unsigned char> output;
-  gfx::PNGCodec::EncodeBGRASkBitmap(*image, false, &output);
-
-  scoped_refptr<RefCountedBytes> image_bytes(new RefCountedBytes);
-  image_bytes->data.resize(output.size());
-  std::copy(output.begin(), output.end(), image_bytes->data.begin());
+  RefCountedBytes* image_bytes = new RefCountedBytes;
+  gfx::PNGCodec::EncodeBGRASkBitmap(*image, false, &image_bytes->data());
   return image_bytes;
 }
 
@@ -77,9 +73,12 @@ ExtensionIconSource::~ExtensionIconSource() {
 
 // static
 GURL ExtensionIconSource::GetIconURL(const Extension* extension,
-                                            Extension::Icons icon_size,
-                                            ExtensionIconSet::MatchType match,
-                                            bool grayscale) {
+                                     Extension::Icons icon_size,
+                                     ExtensionIconSet::MatchType match,
+                                     bool grayscale) {
+  if (extension->id() == extension_misc::kWebStoreAppId)
+    return GURL("chrome://theme/IDR_WEBSTORE_ICON");
+
   GURL icon_url(base::StringPrintf("%s%s/%d/%d%s",
                                    chrome::kChromeUIExtensionIconURL,
                                    extension->id().c_str(),
@@ -264,12 +263,18 @@ bool ExtensionIconSource::ParseData(const std::string& path,
   if (!base::StringToInt(size_param, &size_num))
     return false;
   size = static_cast<Extension::Icons>(size_num);
+  if (size <= 0)
+    return false;
 
   ExtensionIconSet::MatchType match_type;
   int match_num;
   if (!base::StringToInt(match_param, &match_num))
     return false;
   match_type = static_cast<ExtensionIconSet::MatchType>(match_num);
+  if (!(match_type == ExtensionIconSet::MATCH_EXACTLY ||
+        match_type == ExtensionIconSet::MATCH_SMALLER ||
+        match_type == ExtensionIconSet::MATCH_BIGGER))
+    match_type = ExtensionIconSet::MATCH_EXACTLY;
 
   std::string extension_id = path_parts.at(0);
   const Extension* extension =

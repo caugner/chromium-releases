@@ -74,24 +74,20 @@ class LoginPerformer : public LoginStatusConsumer,
   }
 
   // LoginStatusConsumer implementation:
-  virtual void OnLoginFailure(const LoginFailure& error);
+  virtual void OnLoginFailure(const LoginFailure& error) OVERRIDE;
   virtual void OnLoginSuccess(
       const std::string& username,
       const std::string& password,
       const GaiaAuthConsumer::ClientLoginResult& credentials,
-      bool pending_requests);
-  virtual void OnOffTheRecordLoginSuccess();
+      bool pending_requests,
+      bool using_oauth) OVERRIDE;
+  virtual void OnOffTheRecordLoginSuccess() OVERRIDE;
   virtual void OnPasswordChangeDetected(
-      const GaiaAuthConsumer::ClientLoginResult& credentials);
+      const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
 
-  // SignedSettingsHelper::Callback implementation:
-  virtual void OnCheckWhitelistCompleted(SignedSettings::ReturnCode code,
-                                         const std::string& email);
-
-  // NotificationObserver implementation:
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+  // Completes login process that has already been authenticated with
+  // provided |username| and |password|.
+  void CompleteLogin(const std::string& username, const std::string& password);
 
   // Performs login with the |username| and |password| specified.
   void Login(const std::string& username, const std::string& password);
@@ -118,9 +114,26 @@ class LoginPerformer : public LoginStatusConsumer,
   void set_captcha(const std::string& captcha) { captcha_ = captcha; }
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
+  typedef enum AuthorizationMode {
+    // Authorization performed internally by Chrome.
+    AUTH_MODE_INTERNAL,
+    // Authorization performed by an extension.
+    AUTH_MODE_EXTENSION
+  } AuthorizationMode;
+  AuthorizationMode auth_mode() const { return auth_mode_; }
+
  private:
-  // ProfileManager::Observer implementation:
-  virtual void OnProfileCreated(Profile* profile);
+  // NotificationObserver implementation:
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
+
+  // SignedSettingsHelper::Callback implementation:
+  virtual void OnCheckWhitelistCompleted(SignedSettings::ReturnCode code,
+                                         const std::string& email) OVERRIDE;
+
+  // ProfileManagerObserver implementation:
+  virtual void OnProfileCreated(Profile* profile, Status status) OVERRIDE;
 
   // Requests screen lock and subscribes to screen lock notifications.
   void RequestScreenLock();
@@ -142,6 +155,9 @@ class LoginPerformer : public LoginStatusConsumer,
   // Resolve ScreenLock changed state.
   void ResolveScreenLocked();
   void ResolveScreenUnlocked();
+
+  // Starts login completion of externally authenticated user.
+  void StartLoginCompletion();
 
   // Starts authentication.
   void StartAuthentication();
@@ -189,6 +205,12 @@ class LoginPerformer : public LoginStatusConsumer,
   bool initial_online_auth_pending_;
 
   GaiaAuthConsumer::ClientLoginResult credentials_;
+
+  // Authorization mode type.
+  AuthorizationMode auth_mode_;
+
+  // True if we use OAuth during authorization process.
+  bool using_oauth_;
 
   ScopedRunnableMethodFactory<LoginPerformer> method_factory_;
 

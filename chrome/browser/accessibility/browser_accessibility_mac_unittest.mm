@@ -7,9 +7,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/accessibility/browser_accessibility_cocoa.h"
-#include "chrome/browser/accessibility/browser_accessibility_manager.h"
 #include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#include "content/browser/accessibility/browser_accessibility_cocoa.h"
+#include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
 
@@ -53,7 +53,8 @@ class BrowserAccessibilityTest : public CocoaTest {
     root.location.set_width(500);
     root.location.set_height(100);
     root.role = WebAccessibility::ROLE_WEB_AREA;
-    root.attributes[WebAccessibility::ATTR_HELP] = ASCIIToUTF16("HelpText");
+    root.string_attributes[WebAccessibility::ATTR_HELP] =
+        ASCIIToUTF16("HelpText");
 
     WebAccessibility child1;
     child1.name = ASCIIToUTF16("Child1");

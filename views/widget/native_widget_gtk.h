@@ -8,13 +8,14 @@
 
 #include <gtk/gtk.h>
 
+#include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/x/active_window_watcher_x.h"
 #include "ui/gfx/size.h"
 #include "views/focus/focus_manager.h"
 #include "views/ime/input_method_delegate.h"
-#include "views/widget/native_widget.h"
+#include "views/widget/native_widget_private.h"
 #include "views/widget/widget.h"
 
 namespace gfx {
@@ -40,7 +41,7 @@ class NativeWidgetDelegate;
 }
 
 // Widget implementation for GTK.
-class NativeWidgetGtk : public NativeWidget,
+class NativeWidgetGtk : public internal::NativeWidgetPrivate,
                         public ui::ActiveWindowWatcherX::Observer,
                         public internal::InputMethodDelegate {
  public:
@@ -91,12 +92,7 @@ class NativeWidgetGtk : public NativeWidget,
   void DoDrag(const OSExchangeData& data, int operation);
 
   // Invoked when the active status changes.
-  virtual void IsActiveChanged();
-
-  // Sets initial focus on a new window. On X11/Gtk, window creation
-  // is asynchronous and a focus request has to be made after a window
-  // gets created. This will not be called on a TYPE_CHILD widget.
-  virtual void SetInitialFocus();
+  virtual void OnActiveChanged();
 
   // Sets the drop target to NULL. This is invoked by DropTargetGTK when the
   // drop is done.
@@ -108,17 +104,18 @@ class NativeWidgetGtk : public NativeWidget,
   void GetRequestedSize(gfx::Size* out) const;
 
   // Overridden from ui::ActiveWindowWatcherX::Observer.
-  virtual void ActiveWindowChanged(GdkWindow* active_window);
-
-  // Clears the focus on the native widget having the focus.
-  virtual void ClearNativeFocus();
+  virtual void ActiveWindowChanged(GdkWindow* active_window) OVERRIDE;
 
   // Handles a keyboard event by sending it to our focus manager.
   // Returns true if it's handled by the focus manager.
   bool HandleKeyboardEvent(const KeyEvent& key);
 
-  // Enables debug painting. See |debug_paint_enabled_| for details.
-  static void EnableDebugPaint();
+  // Tells widget not to remove FREEZE_UPDATES property when the
+  // widget is painted.  This is used if painting the gtk widget
+  // is not enough to show the window and has to wait further like
+  // keyboard overlay. Returns true if this is called before
+  // FREEZE_UPDATES property is removed, or false otherwise.
+  bool SuppressFreezeUpdates();
 
   // Sets and deletes FREEZE_UPDATES property on given |window|.
   // It adds the property when |enable| is true and remove if false.
@@ -142,21 +139,25 @@ class NativeWidgetGtk : public NativeWidget,
   // detached widget.
   static void RegisterChildExposeHandler(GtkWidget* widget);
 
-  void set_focus_on_creation(bool focus_on_creation) {
-    focus_on_creation_ = focus_on_creation;
-  }
-
-  // Overridden from NativeWidget:
+  // Overridden from internal::NativeWidgetPrivate:
   virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE;
+  virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
+  virtual void UpdateFrameAfterFrameChange() OVERRIDE;
+  virtual bool ShouldUseNativeFrame() const OVERRIDE;
+  virtual void FrameTypeChanged() OVERRIDE;
   virtual Widget* GetWidget() OVERRIDE;
   virtual const Widget* GetWidget() const OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeWindow GetNativeWindow() const OVERRIDE;
-  virtual Window* GetContainingWindow() OVERRIDE;
-  virtual const Window* GetContainingWindow() const OVERRIDE;
+  virtual Widget* GetTopLevelWidget() OVERRIDE;
+  virtual const ui::Compositor* GetCompositor() const OVERRIDE;
+  virtual ui::Compositor* GetCompositor() OVERRIDE;
+  virtual void MarkLayerDirty() OVERRIDE;
+  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
+                                                  View** ancestor) OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
-  virtual void* GetNativeWindowProperty(const char* name) OVERRIDE;
+  virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
   virtual TooltipManager* GetTooltipManager() const OVERRIDE;
   virtual bool IsScreenReaderActive() const OVERRIDE;
   virtual void SendNativeAccessibilityEvent(
@@ -165,21 +166,39 @@ class NativeWidgetGtk : public NativeWidget,
   virtual void SetMouseCapture() OVERRIDE;
   virtual void ReleaseMouseCapture() OVERRIDE;
   virtual bool HasMouseCapture() const OVERRIDE;
-  virtual bool IsMouseButtonDown() const OVERRIDE;
+  virtual void SetKeyboardCapture() OVERRIDE;
+  virtual void ReleaseKeyboardCapture() OVERRIDE;
+  virtual bool HasKeyboardCapture() const OVERRIDE;
   virtual InputMethod* GetInputMethodNative() OVERRIDE;
   virtual void ReplaceInputMethod(InputMethod* input_method) OVERRIDE;
+  virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
+  virtual void GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
+                                                bool* maximized) const OVERRIDE;
+  virtual void SetWindowTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetWindowIcons(const SkBitmap& window_icon,
+                              const SkBitmap& app_icon) OVERRIDE;
+  virtual void SetAccessibleName(const std::wstring& name) OVERRIDE;
+  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
+  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
+  virtual void BecomeModal() OVERRIDE;
   virtual gfx::Rect GetWindowScreenBounds() const OVERRIDE;
   virtual gfx::Rect GetClientAreaScreenBounds() const OVERRIDE;
+  virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void SetBoundsConstrained(const gfx::Rect& bounds,
                                     Widget* other_widget) OVERRIDE;
   virtual void MoveAbove(gfx::NativeView native_view) OVERRIDE;
+  virtual void MoveToTop() OVERRIDE;
   virtual void SetShape(gfx::NativeRegion shape) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void CloseNow() OVERRIDE;
+  virtual void EnableClose(bool enable) OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
+  virtual void ShowMaximizedWithBounds(
+      const gfx::Rect& restored_bounds) OVERRIDE;
+  virtual void ShowWithState(ShowState state) OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
@@ -190,14 +209,18 @@ class NativeWidgetGtk : public NativeWidget,
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
   virtual void Restore() OVERRIDE;
+  virtual void SetFullscreen(bool fullscreen) OVERRIDE;
+  virtual bool IsFullscreen() const OVERRIDE;
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
+  virtual void SetUseDragFrame(bool use_drag_frame) OVERRIDE;
   virtual bool IsAccessibleWidget() const OVERRIDE;
-  virtual bool ContainsNativeView(gfx::NativeView native_view) const OVERRIDE;
   virtual void RunShellDrag(View* view,
                             const ui::OSExchangeData& data,
                             int operation) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
+  virtual void ClearNativeFocus() OVERRIDE;
+  virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
 
  protected:
   // Modifies event coordinates to the targeted widget contained by this widget.
@@ -256,6 +279,8 @@ class NativeWidgetGtk : public NativeWidget,
   CHROMEGTK_CALLBACK_0(NativeWidgetGtk, void, OnHide);
   CHROMEGTK_CALLBACK_1(NativeWidgetGtk, gboolean, OnWindowStateEvent,
                        GdkEventWindowState*);
+  CHROMEGTK_CALLBACK_1(NativeWidgetGtk, gboolean, OnConfigureEvent,
+                       GdkEventConfigure*);
 
   // Invoked when the widget is destroyed and right before the object
   // destruction. Useful for overriding.
@@ -268,23 +293,9 @@ class NativeWidgetGtk : public NativeWidget,
   // application.
   virtual void HandleGtkGrabBroke();
 
-  // Invoked when X input grab is broken. This typically happen
-  // when a window holding grab is closed without releasing grab.
-  virtual void HandleXGrabBroke();
-
-  // Are we a subclass of NativeWindowGtk?
-  bool is_window_;
-
-  // State of the window, such as fullscreen, hidden...
-  // TODO(beng): move to private once NativeWindowGtk no longer refers to it.
-  GdkWindowState window_state_;
-
  private:
   class DropObserver;
   friend class DropObserver;
-
-  // Overridden from NativeWidget
-  virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
 
   // Overridden from internal::InputMethodDelegate
   virtual void DispatchKeyEventPostIME(const KeyEvent& key) OVERRIDE;
@@ -299,9 +310,6 @@ class NativeWidgetGtk : public NativeWidget,
   // RegisterChildChildExposeHandler.
   void OnChildExpose(GtkWidget* child);
   static gboolean ChildExposeHandler(GtkWidget* widget, GdkEventExpose* event);
-
-  // Returns the first ancestor of |widget| that is a window.
-  static Window* GetWindowImpl(GtkWidget* widget);
 
   // Creates the GtkWidget.
   void CreateGtkWidget(const Widget::InitParams& params);
@@ -318,6 +326,9 @@ class NativeWidgetGtk : public NativeWidget,
   // A utility function to draw a transparent background onto the |widget|.
   static void DrawTransparentBackground(GtkWidget* widget,
                                         GdkEventExpose* event);
+
+  // Asks the delegate if any to save the window's location and size.
+  void SaveWindowPosition();
 
   // A delegate implementation that handles events received here.
   // See class documentation for Widget in widget.h for a note about ownership.
@@ -340,7 +351,7 @@ class NativeWidgetGtk : public NativeWidget,
   // The TooltipManager.
   // WARNING: RootView's destructor calls into the TooltipManager. As such, this
   // must be destroyed AFTER root_view_.
-  scoped_ptr<TooltipManagerGtk> tooltip_manager_;
+  scoped_ptr<TooltipManager> tooltip_manager_;
 
   scoped_ptr<DropTargetGtk> drop_target_;
 
@@ -371,6 +382,9 @@ class NativeWidgetGtk : public NativeWidget,
   // region to be painted to flash in red.
   static bool debug_paint_enabled_;
 
+  // State of the window, such as fullscreen, hidden...
+  GdkWindowState window_state_;
+
   // Are we active?
   bool is_active_;
 
@@ -399,10 +413,6 @@ class NativeWidgetGtk : public NativeWidget,
   // this to determine whether we should process the event.
   bool has_focus_;
 
-  // Whether we should SetFocus() on a newly created window after
-  // Init(). Defaults to true.
-  bool focus_on_creation_;
-
   // If true, the window stays on top of the screen. This is only used
   // for types other than TYPE_CHILD.
   bool always_on_top_;
@@ -423,6 +433,22 @@ class NativeWidgetGtk : public NativeWidget,
   bool painted_;
 
   scoped_ptr<InputMethod> input_method_;
+
+  // The compositor for accelerated drawing.
+  scoped_refptr<ui::Compositor> compositor_;
+
+  // Have we done a pointer grab?
+  bool has_pointer_grab_;
+
+  // Have we done a keyboard grab?
+  bool has_keyboard_grab_;
+
+  // ID of the 'grab-notify' signal. If non-zero we're listening for
+  // 'grab-notify' events.
+  glong grab_notify_signal_id_;
+
+  // If we were created for a menu.
+  bool is_menu_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetGtk);
 };

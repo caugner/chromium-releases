@@ -5,11 +5,13 @@
 #include "chrome/browser/chromeos/frame/browser_view.h"
 
 #include <algorithm>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/command_line.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/chromeos/frame/layout_mode_button.h"
 #include "chrome/browser/chromeos/frame/panel_browser_view.h"
 #include "chrome/browser/chromeos/status/input_method_menu_button.h"
 #include "chrome/browser/chromeos/status/network_menu_button.h"
@@ -17,8 +19,9 @@
 #include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/browser/ui/views/frame/browser_frame_gtk.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/browser_view_layout.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
@@ -33,14 +36,14 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/screen.h"
 #include "views/controls/button/button.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/menu/menu_delegate.h"
 #include "views/controls/menu/menu_item_view.h"
-#include "views/screen.h"
 #include "views/widget/root_view.h"
+#include "views/widget/widget.h"
 #include "views/window/hit_test.h"
-#include "views/window/window.h"
 
 namespace {
 
@@ -52,6 +55,9 @@ const int kStatusAreaVerticalAdjustment = -1;
 // If a popup window is larger than this fraction of the screen, create a tab.
 const float kPopupMaxWidthFactor = 0.5;
 const float kPopupMaxHeightFactor = 0.6;
+
+// GDK representation of the _CHROME_STATE X atom.
+static GdkAtom g_chrome_state_gdk_atom = 0;
 
 // This MenuItemView delegate class forwards to the
 // SimpleMenuModel::Delegate() implementation.
@@ -109,10 +115,10 @@ void SimpleMenuModelDelegateAdapter::ExecuteCommand(int id) {
 
 namespace chromeos {
 
-// LayoutManager for BrowserView, which layouts extra components such as
+// LayoutManager for BrowserView, which lays out extra components such as
 // the status views as follows:
 //       ____  __ __
-//      /    \   \  \     [StatusArea]
+//      /    \   \  \     [StatusArea] [LayoutModeButton]
 //
 class BrowserViewLayout : public ::BrowserViewLayout {
  public:
@@ -124,27 +130,34 @@ class BrowserViewLayout : public ::BrowserViewLayout {
 
   void Installed(views::View* host) {
     status_area_ = NULL;
+    layout_mode_button_ = NULL;
     ::BrowserViewLayout::Installed(host);
   }
 
   void ViewAdded(views::View* host,
                  views::View* view) {
     ::BrowserViewLayout::ViewAdded(host, view);
-    switch (view->GetID()) {
+    switch (view->id()) {
       case VIEW_ID_STATUS_AREA:
         status_area_ = static_cast<chromeos::StatusAreaView*>(view);
+        break;
+      case VIEW_ID_LAYOUT_MODE_BUTTON:
+        layout_mode_button_ = static_cast<chromeos::LayoutModeButton*>(view);
         break;
     }
   }
 
   // In the normal and the compact navigation bar mode, ChromeOS
-  // layouts compact navigation buttons and status views in the title
+  // lays out compact navigation buttons and status views in the title
   // area. See Layout
   virtual int LayoutTabStripRegion() OVERRIDE {
     if (browser_view_->IsFullscreen() || !browser_view_->IsTabStripVisible()) {
       status_area_->SetVisible(false);
+      UpdateStatusAreaBoundsProperty();
       tabstrip_->SetVisible(false);
       tabstrip_->SetBounds(0, 0, 0, 0);
+      layout_mode_button_->SetVisible(false);
+      layout_mode_button_->SetBounds(0, 0, 0, 0);
       return 0;
     }
 
@@ -198,6 +211,12 @@ class BrowserViewLayout : public ::BrowserViewLayout {
     if (status_area_->HitTest(point_in_status_area_coords))
       return true;
 
+    gfx::Point point_in_layout_mode_button_coords(point);
+    views::View::ConvertPointToView(browser_view_, layout_mode_button_,
+                                    &point_in_layout_mode_button_coords);
+    if (layout_mode_button_->HitTest(point_in_layout_mode_button_coords))
+      return true;
+
     return false;
   }
 
@@ -209,6 +228,8 @@ class BrowserViewLayout : public ::BrowserViewLayout {
 
     tabstrip_->SetVisible(true);
     status_area_->SetVisible(true);
+    layout_mode_button_->SetVisible(false);
+    layout_mode_button_->SetBounds(0, 0, 0, 0);
 
     gfx::Size status_size = status_area_->GetPreferredSize();
     int status_height = status_size.height();
@@ -217,8 +238,9 @@ class BrowserViewLayout : public ::BrowserViewLayout {
     // Layout the status area.
     status_area_->SetBounds(status_x, bounds.bottom() - status_height,
                             status_size.width(), status_height);
+    UpdateStatusAreaBoundsProperty();
 
-    // The tabstrip's width is the bigger of it's preferred width and the width
+    // The tabstrip's width is the bigger of its preferred width and the width
     // the status area.
     int tabstrip_w = std::max(status_x + status_size.width(),
                               tabstrip_->GetPreferredSize().width());
@@ -245,29 +267,80 @@ class BrowserViewLayout : public ::BrowserViewLayout {
     return bounds.y() + toolbar_height;
   }
 
-  // Lays out tabstrip and status area in the title bar area (given by
-  // |bounds|).
+  // Lays out tabstrip, status area, and layout mode button in the title bar
+  // area (given by |bounds|).
   int LayoutTitlebarComponents(const gfx::Rect& bounds) {
     if (bounds.IsEmpty())
       return 0;
 
-    tabstrip_->SetVisible(true);
-    status_area_->SetVisible(true);
+    const bool show_layout_mode_button =
+        chromeos_browser_view()->should_show_layout_mode_button();
 
-    // Layout status area after tab strip.
+    tabstrip_->SetVisible(true);
+    status_area_->SetVisible(
+        !chromeos_browser_view()->has_hide_status_area_property());
+    layout_mode_button_->SetVisible(show_layout_mode_button);
+
+    const gfx::Size layout_mode_button_size =
+        layout_mode_button_->GetPreferredSize();
+    layout_mode_button_->SetBounds(
+        bounds.right() - layout_mode_button_size.width(),
+        bounds.y(),
+        layout_mode_button_size.width(),
+        layout_mode_button_size.height());
+
+    // Lay out status area after tab strip and before layout mode button (if
+    // shown).
     gfx::Size status_size = status_area_->GetPreferredSize();
+    const int status_right =
+        show_layout_mode_button ?
+        layout_mode_button_->bounds().x() :
+        bounds.right();
     status_area_->SetBounds(
-        bounds.right() - status_size.width(),
+        status_right - status_size.width(),
         bounds.y() + kStatusAreaVerticalAdjustment,
         status_size.width(),
         status_size.height());
+    UpdateStatusAreaBoundsProperty();
     tabstrip_->SetBounds(bounds.x(), bounds.y(),
         std::max(0, status_area_->bounds().x() - bounds.x()),
         bounds.height());
     return bounds.bottom();
   }
 
+  // Updates |status_area_bounds_for_property_| based on the current bounds and
+  // calls WmIpc::SetStatusBoundsProperty() if it changed.
+  void UpdateStatusAreaBoundsProperty() {
+    gfx::Rect current_bounds;
+    if (status_area_->IsVisible()) {
+      gfx::Rect translated_bounds =
+          status_area_->parent()->ConvertRectToWidget(status_area_->bounds());
+      // To avoid a dead zone across the top of the screen,
+      // StatusAreaButton::HitTest() accepts clicks in the area between the top
+      // of its own bounds and the top of its parent view.  Make the bounds that
+      // we report match.
+      current_bounds.SetRect(
+          translated_bounds.x(),
+          translated_bounds.y() - status_area_->bounds().y(),
+          translated_bounds.width(),
+          translated_bounds.height() + status_area_->bounds().y());
+    }
+
+    if (status_area_bounds_for_property_ != current_bounds) {
+      status_area_bounds_for_property_ = current_bounds;
+      WmIpc::instance()->SetStatusBoundsProperty(
+          GTK_WIDGET(chromeos_browser_view()->frame()->GetNativeWindow()),
+          status_area_bounds_for_property_);
+    }
+  }
+
   chromeos::StatusAreaView* status_area_;
+  chromeos::LayoutModeButton* layout_mode_button_;
+
+  // Most-recently-set bounds for the _CHROME_STATUS_BOUNDS property.
+  // Empty if |status_area_| isn't visible.  Tracked here so we don't update the
+  // property needlessly on no-op relayouts.
+  gfx::Rect status_area_bounds_for_property_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserViewLayout);
 };
@@ -277,13 +350,26 @@ class BrowserViewLayout : public ::BrowserViewLayout {
 BrowserView::BrowserView(Browser* browser)
     : ::BrowserView(browser),
       status_area_(NULL),
-      saved_focused_widget_(NULL) {
+      layout_mode_button_(NULL),
+      saved_focused_widget_(NULL),
+      has_hide_status_area_property_(false),
+      should_show_layout_mode_button_(false) {
   system_menu_delegate_.reset(new SimpleMenuModelDelegateAdapter(this));
+  BrowserList::AddObserver(this);
+  MessageLoopForUI::current()->AddObserver(this);
+
+  if (!g_chrome_state_gdk_atom)
+    g_chrome_state_gdk_atom =
+        gdk_atom_intern(
+            WmIpc::instance()->GetAtomName(WmIpc::ATOM_CHROME_STATE).c_str(),
+            FALSE);  // !only_if_exists
 }
 
 BrowserView::~BrowserView() {
   if (toolbar())
     toolbar()->RemoveMenuListener(this);
+  MessageLoopForUI::current()->RemoveObserver(this);
+  BrowserList::RemoveObserver(this);
 }
 
 // BrowserView, ::BrowserView overrides:
@@ -291,15 +377,26 @@ BrowserView::~BrowserView() {
 void BrowserView::Init() {
   ::BrowserView::Init();
   status_area_ = new StatusAreaView(this);
-  status_area_->SetID(VIEW_ID_STATUS_AREA);
+  status_area_->set_id(VIEW_ID_STATUS_AREA);
   AddChildView(status_area_);
   status_area_->Init();
 
-  frame()->non_client_view()->SetContextMenuController(this);
+  layout_mode_button_ = new LayoutModeButton();
+  layout_mode_button_->set_id(VIEW_ID_LAYOUT_MODE_BUTTON);
+  AddChildView(layout_mode_button_);
+  layout_mode_button_->Init();
+
+  frame()->non_client_view()->set_context_menu_controller(this);
 
   // Listen to wrench menu opens.
   if (toolbar())
     toolbar()->AddMenuListener(this);
+
+  // Listen for PropertyChange events (which we receive in DidProcessEvent()).
+  gtk_widget_add_events(GTK_WIDGET(frame()->GetNativeWindow()),
+                        GDK_PROPERTY_CHANGE_MASK);
+  FetchHideStatusAreaProperty();
+  UpdateLayoutModeButtonVisibility();
 
   // Make sure the window is set to the right type.
   std::vector<int> params;
@@ -357,8 +454,8 @@ bool BrowserView::GetSavedWindowBounds(gfx::Rect* bounds) const {
     // non-full screen size, layout/paint at that size, then the window manager
     // will snap us to full screen size. This results in an ugly
     // resize/paint. To avoid this we always request a full screen size.
-    *bounds = views::Screen::GetMonitorWorkAreaNearestWindow(
-        GTK_WIDGET(GetWindow()->GetNativeWindow()));
+    *bounds = gfx::Screen::GetMonitorWorkAreaNearestWindow(
+        GTK_WIDGET(GetWidget()->GetNativeWindow()));
     return true;
   }
   return ::BrowserView::GetSavedWindowBounds(bounds);
@@ -414,7 +511,7 @@ void BrowserView::ShowContextMenuForView(views::View* source,
   if (hit_test == HTCAPTION || hit_test == HTNOWHERE) {
     // rebuild menu so it reflects current application state
     InitSystemMenu();
-    system_menu_->RunMenuAt(source->GetWindow()->GetNativeWindow(), NULL,
+    system_menu_->RunMenuAt(source->GetWidget()->GetNativeWindow(), NULL,
                             gfx::Rect(p, gfx::Size(0,0)),
                             views::MenuItemView::TOPLEFT,
                             true);
@@ -427,6 +524,22 @@ void BrowserView::OnMenuOpened() {
   saved_focused_widget_ = gtk_window_get_focus(GetNativeHandle());
 }
 
+// BrowserView, BrowserList::Observer implementation.
+
+void BrowserView::OnBrowserAdded(const Browser* browser) {
+  const bool was_showing = should_show_layout_mode_button_;
+  UpdateLayoutModeButtonVisibility();
+  if (should_show_layout_mode_button_ != was_showing)
+    Layout();
+}
+
+void BrowserView::OnBrowserRemoved(const Browser* browser) {
+  const bool was_showing = should_show_layout_mode_button_;
+  UpdateLayoutModeButtonVisibility();
+  if (should_show_layout_mode_button_ != was_showing)
+    Layout();
+}
+
 // BrowserView, StatusAreaHost implementation.
 
 Profile* BrowserView::GetProfile() const {
@@ -434,7 +547,7 @@ Profile* BrowserView::GetProfile() const {
 }
 
 gfx::NativeWindow BrowserView::GetNativeWindow() const {
-  return GetWindow()->GetNativeWindow();
+  return GetWidget()->GetNativeWindow();
 }
 
 bool BrowserView::ShouldOpenButtonOptions(
@@ -461,10 +574,39 @@ StatusAreaHost::ScreenMode BrowserView::GetScreenMode() const {
 }
 
 StatusAreaHost::TextStyle BrowserView::GetTextStyle() const {
-  ui::ThemeProvider* tp = GetThemeProvider();
-  return tp->HasCustomImage(IDR_THEME_FRAME) ?
-      StatusAreaHost::kWhiteHaloed : (IsOffTheRecord() ?
-          StatusAreaHost::kWhitePlain : StatusAreaHost::kGrayEmbossed);
+  ThemeService* theme_service =
+      ThemeServiceFactory::GetForProfile(GetProfile());
+
+  if (!theme_service->UsingDefaultTheme())
+    return StatusAreaHost::kWhiteHaloed;
+
+  return IsOffTheRecord() ?
+      StatusAreaHost::kWhitePlain : StatusAreaHost::kGrayEmbossed;
+}
+
+void BrowserView::ButtonVisibilityChanged(views::View* button_view) {
+  status_area_->ButtonVisibilityChanged(button_view);
+}
+
+// BrowserView, MessageLoopForUI::Observer implementation.
+
+void BrowserView::DidProcessEvent(GdkEvent* event) {
+  if (event->type == GDK_PROPERTY_NOTIFY) {
+    if (!frame()->GetNativeWindow())
+      return;
+
+    GdkEventProperty* property_event =
+        reinterpret_cast<GdkEventProperty*>(event);
+    if (property_event->window ==
+        GTK_WIDGET(frame()->GetNativeWindow())->window) {
+      if (property_event->atom == g_chrome_state_gdk_atom) {
+        const bool had_property = has_hide_status_area_property_;
+        FetchHideStatusAreaProperty();
+        if (has_hide_status_area_property_ != had_property)
+          Layout();
+      }
+    }
+  }
 }
 
 // BrowserView protected:
@@ -488,6 +630,33 @@ void BrowserView::InitSystemMenu() {
   system_menu_->AppendMenuItemWithLabel(
       IDC_TASK_MANAGER,
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER)));
+}
+
+void BrowserView::FetchHideStatusAreaProperty() {
+  std::set<WmIpc::AtomType> state_atoms;
+  if (WmIpc::instance()->GetWindowState(
+          GTK_WIDGET(frame()->GetNativeWindow()), &state_atoms)) {
+    if (state_atoms.count(WmIpc::ATOM_CHROME_STATE_STATUS_HIDDEN)) {
+      has_hide_status_area_property_ = true;
+      return;
+    }
+  }
+  has_hide_status_area_property_ = false;
+}
+
+void BrowserView::UpdateLayoutModeButtonVisibility() {
+  int count = 0;
+  for (BrowserList::const_iterator it = BrowserList::begin();
+       it != BrowserList::end(); ++it) {
+    if ((*it)->is_type_tabbed()) {
+      ++count;
+      if (count >= 2) {
+        should_show_layout_mode_button_ = true;
+        return;
+      }
+    }
+  }
+  should_show_layout_mode_button_ = false;
 }
 
 }  // namespace chromeos

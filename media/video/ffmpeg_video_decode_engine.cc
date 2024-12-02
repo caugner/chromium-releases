@@ -12,9 +12,9 @@
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 #include "media/base/pipeline.h"
+#include "media/base/video_util.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_demuxer.h"
-#include "media/video/ffmpeg_video_allocator.h"
 
 namespace media {
 
@@ -23,7 +23,6 @@ FFmpegVideoDecodeEngine::FFmpegVideoDecodeEngine()
       event_handler_(NULL),
       frame_rate_numerator_(0),
       frame_rate_denominator_(0),
-      direct_rendering_(false),
       pending_input_buffers_(0),
       pending_output_buffers_(0),
       output_eos_reached_(false),
@@ -43,8 +42,6 @@ void FFmpegVideoDecodeEngine::Initialize(
     VideoDecodeEngine::EventHandler* event_handler,
     VideoDecodeContext* context,
     const VideoDecoderConfig& config) {
-  allocator_.reset(new FFmpegVideoAllocator());
-
   // Always try to use three threads for video decoding.  There is little reason
   // not to since current day CPUs tend to be multi-core and we measured
   // performance benefits on older machines such as P4s with hyperthreading.
@@ -72,10 +69,12 @@ void FFmpegVideoDecodeEngine::Initialize(
 
   if (config.extra_data() != NULL) {
     codec_context_->extradata_size = config.extra_data_size();
-    codec_context_->extradata =
-        reinterpret_cast<uint8_t*>(av_malloc(config.extra_data_size()));
+    codec_context_->extradata = reinterpret_cast<uint8_t*>(
+        av_malloc(config.extra_data_size() + FF_INPUT_BUFFER_PADDING_SIZE));
     memcpy(codec_context_->extradata, config.extra_data(),
            config.extra_data_size());
+    memset(codec_context_->extradata + config.extra_data_size(), '\0',
+           FF_INPUT_BUFFER_PADDING_SIZE);
   }
 
   // Enable motion vector search (potentially slow), strong deblocking filter
@@ -85,20 +84,11 @@ void FFmpegVideoDecodeEngine::Initialize(
 
   AVCodec* codec = avcodec_find_decoder(codec_context_->codec_id);
 
-  if (codec) {
-#ifdef FF_THREAD_FRAME  // Only defined in FFMPEG-MT.
-    direct_rendering_ = codec->capabilities & CODEC_CAP_DR1 ? true : false;
-#endif
-    if (direct_rendering_) {
-      DVLOG(1) << "direct rendering is used";
-      allocator_->Initialize(codec_context_, GetSurfaceFormat());
-    }
-  }
-
   // TODO(fbarchard): Improve thread logic based on size / codec.
   // TODO(fbarchard): Fix bug affecting video-cookie.html
+  // 07/21/11(ihf): Still about 20 failures when enabling.
   int decode_threads = (codec_context_->codec_id == CODEC_ID_THEORA) ?
-    1 : kDecodeThreads;
+      1 : kDecodeThreads;
 
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
   std::string threads(cmd_line->GetSwitchValueASCII(switches::kVideoThreads));
@@ -114,72 +104,30 @@ void FFmpegVideoDecodeEngine::Initialize(
   av_frame_.reset(avcodec_alloc_frame());
   VideoCodecInfo info;
   info.success = false;
-  info.provides_buffers = true;
-  info.stream_info.surface_type = VideoFrame::TYPE_SYSTEM_MEMORY;
-  info.stream_info.surface_format = GetSurfaceFormat();
-  info.stream_info.surface_width = config.width();
-  info.stream_info.surface_height = config.height();
+  info.surface_width = config.surface_width();
+  info.surface_height = config.surface_height();
 
   // If we do not have enough buffers, we will report error too.
-  bool buffer_allocated = true;
   frame_queue_available_.clear();
-  if (!direct_rendering_) {
-    // Create output buffer pool when direct rendering is not used.
-    for (size_t i = 0; i < Limits::kMaxVideoFrames; ++i) {
-      scoped_refptr<VideoFrame> video_frame;
-      VideoFrame::CreateFrame(VideoFrame::YV12,
-                              config.width(),
-                              config.height(),
-                              kNoTimestamp,
-                              kNoTimestamp,
-                              &video_frame);
-      if (!video_frame.get()) {
-        buffer_allocated = false;
-        break;
-      }
-      frame_queue_available_.push_back(video_frame);
-    }
-  }
 
+  // Create output buffer pool when direct rendering is not used.
+  for (size_t i = 0; i < Limits::kMaxVideoFrames; ++i) {
+    scoped_refptr<VideoFrame> video_frame =
+        VideoFrame::CreateFrame(VideoFrame::YV12,
+                                config.width(),
+                                config.height(),
+                                kNoTimestamp,
+                                kNoTimestamp);
+    frame_queue_available_.push_back(video_frame);
+  }
+  codec_context_->thread_count = decode_threads;
   if (codec &&
-      avcodec_thread_init(codec_context_, decode_threads) >= 0 &&
       avcodec_open(codec_context_, codec) >= 0 &&
-      av_frame_.get() &&
-      buffer_allocated) {
+      av_frame_.get()) {
     info.success = true;
   }
   event_handler_ = event_handler;
   event_handler_->OnInitializeComplete(info);
-}
-
-// TODO(scherkus): Move this function to a utility class and unit test.
-static void CopyPlane(size_t plane,
-                      scoped_refptr<VideoFrame> video_frame,
-                      const AVFrame* frame,
-                      size_t source_height) {
-  DCHECK_EQ(video_frame->width() % 2, 0u);
-  const uint8* source = frame->data[plane];
-  const size_t source_stride = frame->linesize[plane];
-  uint8* dest = video_frame->data(plane);
-  const size_t dest_stride = video_frame->stride(plane);
-
-  // Calculate amounts to copy and clamp to minium frame dimensions.
-  size_t bytes_per_line = video_frame->width();
-  size_t copy_lines = std::min(video_frame->height(), source_height);
-  if (plane != VideoFrame::kYPlane) {
-    bytes_per_line /= 2;
-    if (video_frame->format() == VideoFrame::YV12) {
-      copy_lines = (copy_lines + 1) / 2;
-    }
-  }
-  bytes_per_line = std::min(bytes_per_line, source_stride);
-
-  // Copy!
-  for (size_t i = 0; i < copy_lines; ++i) {
-    memcpy(dest, source, bytes_per_line);
-    source += source_stride;
-    dest += dest_stride;
-  }
 }
 
 void FFmpegVideoDecodeEngine::ConsumeVideoSample(
@@ -201,11 +149,8 @@ void FFmpegVideoDecodeEngine::ProduceVideoFrame(
   // Increment pending output buffer count.
   pending_output_buffers_++;
 
-  // Return this frame to available pool or allocator after display.
-  if (direct_rendering_)
-    allocator_->DisplayDone(codec_context_, frame);
-  else
-    frame_queue_available_.push_back(frame);
+  // Return this frame to available pool after display.
+  frame_queue_available_.push_back(frame);
 
   if (flush_pending_) {
     TryToFinishPendingFlush();
@@ -295,25 +240,21 @@ void FFmpegVideoDecodeEngine::DecodeFrame(scoped_refptr<Buffer> buffer) {
   base::TimeDelta duration =
       ConvertFromTimeBase(doubled_time_base, 2 + av_frame_->repeat_pict);
 
-  if (!direct_rendering_) {
-    // Available frame is guaranteed, because we issue as much reads as
-    // available frame, except the case of |frame_decoded| == 0, which
-    // implies decoder order delay, and force us to read more inputs.
-    DCHECK(frame_queue_available_.size());
-    video_frame = frame_queue_available_.front();
-    frame_queue_available_.pop_front();
+  // Available frame is guaranteed, because we issue as much reads as
+  // available frame, except the case of |frame_decoded| == 0, which
+  // implies decoder order delay, and force us to read more inputs.
+  DCHECK(frame_queue_available_.size());
+  video_frame = frame_queue_available_.front();
+  frame_queue_available_.pop_front();
 
-    // Copy the frame data since FFmpeg reuses internal buffers for AVFrame
-    // output, meaning the data is only valid until the next
-    // avcodec_decode_video() call.
-    size_t height = codec_context_->height;
-    CopyPlane(VideoFrame::kYPlane, video_frame.get(), av_frame_.get(), height);
-    CopyPlane(VideoFrame::kUPlane, video_frame.get(), av_frame_.get(), height);
-    CopyPlane(VideoFrame::kVPlane, video_frame.get(), av_frame_.get(), height);
-  } else {
-    // Get the VideoFrame from allocator which associate with av_frame_.
-    video_frame = allocator_->DecodeDone(codec_context_, av_frame_.get());
-  }
+  // Copy the frame data since FFmpeg reuses internal buffers for AVFrame
+  // output, meaning the data is only valid until the next
+  // avcodec_decode_video() call.
+  int y_rows = codec_context_->height;
+  int uv_rows = codec_context_->height / 2;
+  CopyYPlane(av_frame_->data[0], av_frame_->linesize[0], y_rows, video_frame);
+  CopyUPlane(av_frame_->data[1], av_frame_->linesize[1], uv_rows, video_frame);
+  CopyVPlane(av_frame_->data[2], av_frame_->linesize[2], uv_rows, video_frame);
 
   video_frame->SetTimestamp(timestamp);
   video_frame->SetDuration(duration);
@@ -323,10 +264,6 @@ void FFmpegVideoDecodeEngine::DecodeFrame(scoped_refptr<Buffer> buffer) {
 }
 
 void FFmpegVideoDecodeEngine::Uninitialize() {
-  if (direct_rendering_) {
-    allocator_->Stop(codec_context_);
-  }
-
   event_handler_->OnUninitializeComplete();
 }
 

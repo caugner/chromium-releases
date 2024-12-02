@@ -10,9 +10,9 @@
 #include "third_party/zlib/zlib.h"
 #endif
 
-#include "base/stl_util-inl.h"
-#include "chrome/browser/browser_process.h"
+#include "base/stl_util.h"
 #include "content/browser/clipboard_dispatcher.h"
+#include "content/browser/content_browser_client.h"
 #include "content/common/clipboard_messages.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
@@ -33,7 +33,8 @@ class WriteClipboardTask : public Task {
   ~WriteClipboardTask() {}
 
   void Run() {
-    g_browser_process->clipboard()->WriteObjects(*objects_.get());
+    content::GetContentClient()->browser()->GetClipboard()->WriteObjects(
+        *objects_.get());
   }
 
  private:
@@ -75,6 +76,7 @@ bool ClipboardMessageFilter::OnMessageReceived(const IPC::Message& message,
 #endif
     IPC_MESSAGE_HANDLER(ClipboardHostMsg_ReadData, OnReadData)
     IPC_MESSAGE_HANDLER(ClipboardHostMsg_ReadFilenames, OnReadFilenames)
+    IPC_MESSAGE_HANDLER(ClipboardHostMsg_GetSequenceNumber, OnGetSequenceNumber)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -124,7 +126,7 @@ void ClipboardMessageFilter::OnWriteObjectsAsync(
 }
 
 void ClipboardMessageFilter::OnIsFormatAvailable(
-    ui::Clipboard::FormatType format, ui::Clipboard::Buffer buffer,
+    const ui::Clipboard::FormatType& format, ui::Clipboard::Buffer buffer,
     bool* result) {
   *result = GetClipboard()->IsFormatAvailable(format, buffer);
 }
@@ -161,7 +163,7 @@ void ClipboardMessageFilter::OnReadImage(
 }
 
 void ClipboardMessageFilter::OnReadImageReply(
-    SkBitmap bitmap, IPC::Message* reply_msg) {
+    const SkBitmap& bitmap, IPC::Message* reply_msg) {
   base::SharedMemoryHandle image_handle = base::SharedMemory::NULLHandle();
   uint32 image_size = 0;
   std::string reply_data;
@@ -207,6 +209,10 @@ void ClipboardMessageFilter::OnReadFilenames(
     ui::Clipboard::Buffer buffer, bool* succeeded,
     std::vector<string16>* filenames) {
   *succeeded = ClipboardDispatcher::ReadFilenames(buffer, filenames);
+}
+
+void ClipboardMessageFilter::OnGetSequenceNumber(uint64* seq_num) {
+  *seq_num = GetClipboard()->GetSequenceNumber();
 }
 
 // static

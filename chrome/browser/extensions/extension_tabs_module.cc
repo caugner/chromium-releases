@@ -9,6 +9,7 @@
 
 #include "base/base64.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -17,7 +18,9 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -26,6 +29,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/window_sizer.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
@@ -78,7 +82,8 @@ Browser* GetBrowserInProfileWithId(Profile* profile,
 
 // |error_message| can optionally be passed in and will be set with an
 // appropriate message if the tab cannot be found by id.
-bool GetTabById(int tab_id, Profile* profile,
+bool GetTabById(int tab_id,
+                Profile* profile,
                 bool include_incognito,
                 Browser** browser,
                 TabStripModel** tab_strip,
@@ -123,22 +128,37 @@ std::string GetWindowTypeText(const Browser* browser) {
   return keys::kWindowTypeValueNormal;
 }
 
+bool IsCrashURL(const GURL& url) {
+  // Check a fixed-up URL, to normalize the scheme and parse hosts correctly.
+  GURL fixed_url =
+      URLFixerUpper::FixupURL(url.possibly_invalid_spec(), std::string());
+  return (fixed_url.SchemeIs(chrome::kChromeUIScheme) &&
+          (fixed_url.host() == chrome::kChromeUIBrowserCrashHost ||
+           fixed_url.host() == chrome::kChromeUICrashHost));
+}
+
 }  // namespace
 
 int ExtensionTabUtil::GetWindowId(const Browser* browser) {
   return browser->session_id().id();
 }
 
+// TODO: this function should really take a TabContentsWrapper.
 int ExtensionTabUtil::GetTabId(const TabContents* tab_contents) {
-  return tab_contents->controller().session_id().id();
+  const TabContentsWrapper* tab =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+  return tab ? tab->restore_tab_helper()->session_id().id() : -1;
 }
 
 std::string ExtensionTabUtil::GetTabStatusText(bool is_loading) {
   return is_loading ? keys::kStatusValueLoading : keys::kStatusValueComplete;
 }
 
+// TODO: this function should really take a TabContentsWrapper.
 int ExtensionTabUtil::GetWindowIdOfTab(const TabContents* tab_contents) {
-  return tab_contents->controller().window_id().id();
+  const TabContentsWrapper* tab =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+  return tab ? tab->restore_tab_helper()->window_id().id() : -1;
 }
 
 DictionaryValue* ExtensionTabUtil::CreateTabValue(
@@ -164,15 +184,17 @@ ListValue* ExtensionTabUtil::CreateTabList(const Browser* browser) {
   return tab_list;
 }
 
-DictionaryValue* ExtensionTabUtil::CreateTabValue(
-    const TabContents* contents, TabStripModel* tab_strip, int tab_index) {
+DictionaryValue* ExtensionTabUtil::CreateTabValue(const TabContents* contents,
+                                                  TabStripModel* tab_strip,
+                                                  int tab_index) {
   DictionaryValue* result = new DictionaryValue();
+  bool is_loading = contents->IsLoading();
   result->SetInteger(keys::kIdKey, ExtensionTabUtil::GetTabId(contents));
   result->SetInteger(keys::kIndexKey, tab_index);
   result->SetInteger(keys::kWindowIdKey,
                      ExtensionTabUtil::GetWindowIdOfTab(contents));
   result->SetString(keys::kUrlKey, contents->GetURL().spec());
-  result->SetString(keys::kStatusKey, GetTabStatusText(contents->is_loading()));
+  result->SetString(keys::kStatusKey, GetTabStatusText(is_loading));
   result->SetBoolean(keys::kSelectedKey,
                      tab_strip && tab_index == tab_strip->active_index());
   result->SetBoolean(keys::kPinnedKey,
@@ -181,7 +203,7 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
   result->SetBoolean(keys::kIncognitoKey,
                      contents->profile()->IsOffTheRecord());
 
-  if (!contents->is_loading()) {
+  if (!is_loading) {
     NavigationEntry* entry = contents->controller().GetActiveEntry();
     if (entry) {
       if (entry->favicon().is_valid())
@@ -189,6 +211,14 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
     }
   }
 
+  return result;
+}
+
+DictionaryValue* ExtensionTabUtil::CreateTabValueActive(
+    const TabContents* contents,
+    bool active) {
+  DictionaryValue* result = ExtensionTabUtil::CreateTabValue(contents);
+  result->SetBoolean(keys::kSelectedKey, active);
   return result;
 }
 
@@ -260,7 +290,8 @@ bool ExtensionTabUtil::GetDefaultTab(Browser* browser,
   return false;
 }
 
-bool ExtensionTabUtil::GetTabById(int tab_id, Profile* profile,
+bool ExtensionTabUtil::GetTabById(int tab_id,
+                                  Profile* profile,
                                   bool include_incognito,
                                   Browser** browser,
                                   TabStripModel** tab_strip,
@@ -278,7 +309,8 @@ bool ExtensionTabUtil::GetTabById(int tab_id, Profile* profile,
       for (int i = 0; i < target_tab_strip->count(); ++i) {
         TabContentsWrapper* target_contents =
             target_tab_strip->GetTabContentsAt(i);
-        if (target_contents->controller().session_id().id() == tab_id) {
+        if (target_contents->restore_tab_helper()->session_id().id() ==
+            tab_id) {
           if (browser)
             *browser = target_browser;
           if (tab_strip)
@@ -402,18 +434,14 @@ bool CreateWindowFunction::RunImpl() {
               keys::kInvalidUrlError, *i);
           return false;
         }
+        // Don't let the extension crash the browser or renderers.
+        if (IsCrashURL(url)) {
+          error_ = keys::kNoCrashBrowserError;
+          return false;
+        }
         urls.push_back(url);
       }
     }
-  }
-
-  // Don't let the extension crash the browser or renderers.
-  GURL browser_crash(chrome::kAboutBrowserCrash);
-  GURL renderer_crash(chrome::kAboutCrashURL);
-  if (std::find(urls.begin(), urls.end(), browser_crash) != urls.end() ||
-      std::find(urls.begin(), urls.end(), renderer_crash) != urls.end()) {
-    error_ = keys::kNoCrashBrowserError;
-    return false;
   }
 
   // Look for optional tab id.
@@ -520,8 +548,8 @@ bool CreateWindowFunction::RunImpl() {
         window_type = Browser::TYPE_POPUP;
         app_name = GetExtension()->id();
       } else if (type_str == keys::kWindowTypeValuePanel) {
-        if (GetExtension()->HasApiPermission(
-                Extension::kExperimentalPermission)) {
+        if (GetExtension()->HasAPIPermission(
+                ExtensionAPIPermission::kExperimental)) {
           window_type = Browser::TYPE_PANEL;
           app_name = GetExtension()->id();
         } else {
@@ -620,14 +648,22 @@ bool UpdateWindowFunction::RunImpl() {
   if (set_bounds)
     browser->window()->SetBounds(bounds);
 
-  bool selected_val = false;
+  bool active_val = false;
   if (update_props->HasKey(keys::kFocusedKey)) {
     EXTENSION_FUNCTION_VALIDATE(update_props->GetBoolean(
-        keys::kFocusedKey, &selected_val));
-    if (selected_val)
+        keys::kFocusedKey, &active_val));
+    if (active_val)
       browser->window()->Activate();
     else
       browser->window()->Deactivate();
+  }
+
+  bool draw_attention = false;
+  if (update_props->HasKey(keys::kDrawAttentionKey)) {
+    EXTENSION_FUNCTION_VALIDATE(update_props->GetBoolean(
+        keys::kDrawAttentionKey, &draw_attention));
+    if (draw_attention)
+        browser->window()->FlashFrame();
   }
 
   result_.reset(ExtensionTabUtil::CreateWindowValue(browser, false));
@@ -676,7 +712,7 @@ bool GetSelectedTabFunction::RunImpl() {
     return false;
 
   TabStripModel* tab_strip = browser->tabstrip_model();
-  TabContentsWrapper* contents = tab_strip->GetSelectedTabContents();
+  TabContentsWrapper* contents = tab_strip->GetActiveTabContents();
   if (!contents) {
     error_ = keys::kNoSelectedTabError;
     return false;
@@ -746,8 +782,7 @@ bool CreateTabFunction::RunImpl() {
   }
 
   // Don't let extensions crash the browser or renderers.
-  if (url == GURL(chrome::kAboutBrowserCrash) ||
-      url == GURL(chrome::kAboutCrashURL)) {
+  if (IsCrashURL(url)) {
     error_ = keys::kNoCrashBrowserError;
     return false;
   }
@@ -841,8 +876,7 @@ bool GetCurrentTabFunction::RunImpl() {
   return true;
 }
 
-UpdateTabFunction::UpdateTabFunction()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(registrar_(this)) {
+UpdateTabFunction::UpdateTabFunction() {
 }
 
 bool UpdateTabFunction::RunImpl() {
@@ -864,7 +898,7 @@ bool UpdateTabFunction::RunImpl() {
   // -title
   // -favIconUrl
 
-  // Navigate the tab to a new location if the url different.
+  // Navigate the tab to a new location if the url is different.
   std::string url_string;
   if (update_props->HasKey(keys::kUrlKey)) {
     EXTENSION_FUNCTION_VALIDATE(update_props->GetString(
@@ -878,8 +912,7 @@ bool UpdateTabFunction::RunImpl() {
     }
 
     // Don't let the extension crash the browser or renderers.
-    if (url == GURL(chrome::kAboutBrowserCrash) ||
-        url == GURL(chrome::kAboutCrashURL)) {
+    if (IsCrashURL(url)) {
       error_ = keys::kNoCrashBrowserError;
       return false;
     }
@@ -906,7 +939,7 @@ bool UpdateTabFunction::RunImpl() {
           new ExtensionMsg_ExecuteCode(render_view_host->routing_id(),
                                        params));
 
-      registrar_.Observe(contents->tab_contents());
+      Observe(contents->tab_contents());
       AddRef();  // balanced in Observe()
 
       return true;
@@ -930,7 +963,7 @@ bool UpdateTabFunction::RunImpl() {
     if (selected) {
       if (tab_strip->active_index() != tab_index) {
         tab_strip->ActivateTabAt(tab_index, false);
-        DCHECK_EQ(contents, tab_strip->GetSelectedTabContents());
+        DCHECK_EQ(contents, tab_strip->GetActiveTabContents());
       }
       contents->tab_contents()->Focus();
     }
@@ -986,7 +1019,7 @@ void UpdateTabFunction::OnExecuteCodeFinished(int request_id,
 
   SendResponse(success);
 
-  registrar_.Observe(NULL);
+  Observe(NULL);
   Release();  // balanced in Execute()
 }
 
@@ -1180,7 +1213,7 @@ bool CaptureVisibleTabFunction::RunImpl() {
   TabContentsWrapper* wrapper = browser->GetSelectedTabContentsWrapper();
   wrapper->CaptureSnapshot();
   registrar_.Add(this,
-                 NotificationType::TAB_SNAPSHOT_TAKEN,
+                 chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN,
                  Source<TabContentsWrapper>(wrapper));
   AddRef();  // Balanced in CaptureVisibleTabFunction::Observe().
 
@@ -1209,10 +1242,10 @@ bool CaptureVisibleTabFunction::CaptureSnapshotFromBackingStore(
 // If a backing store was not available in CaptureVisibleTabFunction::RunImpl,
 // than the renderer was asked for a snapshot.  Listen for a notification
 // that the snapshot is available.
-void CaptureVisibleTabFunction::Observe(NotificationType type,
+void CaptureVisibleTabFunction::Observe(int type,
                                         const NotificationSource& source,
                                         const NotificationDetails& details) {
-  DCHECK(type == NotificationType::TAB_SNAPSHOT_TAKEN);
+  DCHECK(type == chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN);
 
   const SkBitmap *screen_capture = Details<const SkBitmap>(details).ptr();
   const bool error = screen_capture->empty();
@@ -1232,7 +1265,7 @@ void CaptureVisibleTabFunction::Observe(NotificationType type,
 // and call SendResponse().
 void CaptureVisibleTabFunction::SendResultFromBitmap(
     const SkBitmap& screen_capture) {
-  scoped_refptr<RefCountedBytes> image_data(new RefCountedBytes);
+  std::vector<unsigned char> data;
   SkAutoLockPixels screen_capture_lock(screen_capture);
   bool encoded = false;
   std::string mime_type;
@@ -1245,14 +1278,14 @@ void CaptureVisibleTabFunction::SendResultFromBitmap(
           screen_capture.height(),
           static_cast<int>(screen_capture.rowBytes()),
           image_quality_,
-          &image_data->data);
+          &data);
       mime_type = keys::kMimeTypeJpeg;
       break;
     case FORMAT_PNG:
       encoded = gfx::PNGCodec::EncodeBGRASkBitmap(
           screen_capture,
           true,  // Discard transparency.
-          &image_data->data);
+          &data);
       mime_type = keys::kMimeTypePng;
       break;
     default:
@@ -1266,11 +1299,8 @@ void CaptureVisibleTabFunction::SendResultFromBitmap(
   }
 
   std::string base64_result;
-  std::string stream_as_string;
-  stream_as_string.resize(image_data->data.size());
-  memcpy(&stream_as_string[0],
-      reinterpret_cast<const char*>(&image_data->data[0]),
-      image_data->data.size());
+  base::StringPiece stream_as_string(
+      reinterpret_cast<const char*>(vector_as_array(&data)), data.size());
 
   base::Base64Encode(stream_as_string, &base64_result);
   base64_result.insert(0, base::StringPrintf("data:%s;base64,",
@@ -1298,7 +1328,7 @@ bool DetectTabLanguageFunction::RunImpl() {
     browser = GetCurrentBrowser();
     if (!browser)
       return false;
-    contents = browser->tabstrip_model()->GetSelectedTabContents();
+    contents = browser->tabstrip_model()->GetActiveTabContents();
     if (!contents)
       return false;
   }
@@ -1322,20 +1352,20 @@ bool DetectTabLanguageFunction::RunImpl() {
   }
   // The tab contents does not know its language yet.  Let's  wait until it
   // receives it, or until the tab is closed/navigates to some other page.
-  registrar_.Add(this, NotificationType::TAB_LANGUAGE_DETERMINED,
+  registrar_.Add(this, chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
                  Source<TabContents>(contents->tab_contents()));
-  registrar_.Add(this, NotificationType::TAB_CLOSING,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CLOSING,
                  Source<NavigationController>(&(contents->controller())));
-  registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
+  registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                  Source<NavigationController>(&(contents->controller())));
   return true;
 }
 
-void DetectTabLanguageFunction::Observe(NotificationType type,
+void DetectTabLanguageFunction::Observe(int type,
                                         const NotificationSource& source,
                                         const NotificationDetails& details) {
   std::string language;
-  if (type == NotificationType::TAB_LANGUAGE_DETERMINED)
+  if (type == chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED)
     language = *Details<std::string>(details).ptr();
 
   registrar_.RemoveAll();

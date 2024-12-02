@@ -27,8 +27,8 @@
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -718,7 +718,7 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
     // TODO(meelapshah) Disabled due to potential PageCycler regression.
     // Re-enable this.
     // GetMostRecentRedirectsTo(url, &details->redirects);
-    BroadcastNotifications(NotificationType::HISTORY_URL_VISITED, details);
+    BroadcastNotifications(chrome::NOTIFICATION_HISTORY_URL_VISITED, details);
   } else {
     VLOG(0) << "Failed to build visit insert statement:  "
             << "url_id = " << url_id;
@@ -785,18 +785,21 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls,
                                                 i->title(), string16());
     }
 
-    // Make up a visit to correspond to that page.
-    VisitRow visit_info(url_id, i->last_visit(), 0,
-        PageTransition::LINK | PageTransition::CHAIN_START |
-        PageTransition::CHAIN_END, 0);
-    visit_info.is_indexed = has_indexed;
-    if (!visit_database->AddVisit(&visit_info, visit_source)) {
-      NOTREACHED() << "Adding visit failed.";
-      return;
-    }
+    // Sync code manages the visits itself.
+    if (visit_source != SOURCE_SYNCED) {
+      // Make up a visit to correspond to the last visit to the page.
+      VisitRow visit_info(url_id, i->last_visit(), 0,
+                          PageTransition::LINK | PageTransition::CHAIN_START |
+                          PageTransition::CHAIN_END, 0);
+      visit_info.is_indexed = has_indexed;
+      if (!visit_database->AddVisit(&visit_info, visit_source)) {
+        NOTREACHED() << "Adding visit failed.";
+        return;
+      }
 
-    if (visit_info.visit_time < first_recorded_time_)
-      first_recorded_time_ = visit_info.visit_time;
+      if (visit_info.visit_time < first_recorded_time_)
+        first_recorded_time_ = visit_info.visit_time;
+    }
   }
 
   // Broadcast a notification for typed URLs that have been modified. This
@@ -804,7 +807,7 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls,
   //
   // TODO(brettw) bug 1140015: Add an "add page" notification so the history
   // views can keep in sync.
-  BroadcastNotifications(NotificationType::HISTORY_TYPED_URLS_MODIFIED,
+  BroadcastNotifications(chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
                          modified.release());
 
   ScheduleCommit();
@@ -860,7 +863,7 @@ void HistoryBackend::SetPageTitle(const GURL& url,
       if (changed_urls[i].typed_count() > 0)
         modified->changed_urls.push_back(changed_urls[i]);
     }
-    BroadcastNotifications(NotificationType::HISTORY_TYPED_URLS_MODIFIED,
+    BroadcastNotifications(chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
                            modified);
   }
 
@@ -924,12 +927,13 @@ bool HistoryBackend::UpdateURL(URLID id, const history::URLRow& url) {
 }
 
 bool HistoryBackend::AddVisits(const GURL& url,
-                               const std::vector<base::Time>& visits,
+                               const std::vector<VisitInfo>& visits,
                                VisitSource visit_source) {
   if (db_.get()) {
-    for (std::vector<base::Time>::const_iterator visit = visits.begin();
+    for (std::vector<VisitInfo>::const_iterator visit = visits.begin();
          visit != visits.end(); ++visit) {
-      if (!AddPageVisit(url, *visit, 0, 0, visit_source).first) {
+      if (!AddPageVisit(
+              url, visit->first, 0, visit->second, visit_source).first) {
         return false;
       }
     }
@@ -940,35 +944,12 @@ bool HistoryBackend::AddVisits(const GURL& url,
 }
 
 bool HistoryBackend::RemoveVisits(const VisitVector& visits) {
-  if (db_.get()) {
-    std::map<URLID, int> url_visits_removed;
-    for (VisitVector::const_iterator visit = visits.begin();
-         visit != visits.end(); ++visit) {
-      db_->DeleteVisit(*visit);
-      std::map<URLID, int>::iterator visit_count =
-          url_visits_removed.find(visit->url_id);
-      if (visit_count == url_visits_removed.end()) {
-        url_visits_removed[visit->url_id] = 1;
-      } else {
-        ++visit_count->second;
-      }
-    }
-    for (std::map<URLID, int>::iterator count = url_visits_removed.begin();
-         count != url_visits_removed.end(); ++count) {
-      history::URLRow url_row;
-      if (!db_->GetURLRow(count->first, &url_row)) {
-        return false;
-      }
-      DCHECK(count->second <= url_row.visit_count());
-      url_row.set_visit_count(url_row.visit_count() - count->second);
-      if (!db_->UpdateURLRow(url_row.id(), url_row)) {
-        return false;
-      }
-    }
-    ScheduleCommit();
-    return true;
-  }
-  return false;
+  if (!db_.get())
+    return false;
+
+  expirer_.ExpireVisits(visits);
+  ScheduleCommit();
+  return true;
 }
 
 bool HistoryBackend::GetURL(const GURL& url, history::URLRow* url_row) {
@@ -1061,8 +1042,8 @@ void HistoryBackend::SetKeywordSearchTermsForURL(const GURL& url,
   details->url = url;
   details->keyword_id = keyword_id;
   details->term = term;
-  BroadcastNotifications(NotificationType::HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
-                         details);
+  BroadcastNotifications(
+      chrome::NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED, details);
   ScheduleCommit();
 }
 
@@ -1530,19 +1511,19 @@ void HistoryBackend::GetPageThumbnailDirectly(
     if (GetMostRecentRedirectsFrom(page_url, &redirects) &&
         !redirects.empty()) {
       if ((url_id = db_->GetRowForURL(redirects.back(), NULL)))
-        success = thumbnail_db_->GetPageThumbnail(url_id, &(*data)->data);
+        success = thumbnail_db_->GetPageThumbnail(url_id, &(*data)->data());
     }
 
     // If we don't have a thumbnail from redirects, try the URL directly.
     if (!success) {
       if ((url_id = db_->GetRowForURL(page_url, NULL)))
-        success = thumbnail_db_->GetPageThumbnail(url_id, &(*data)->data);
+        success = thumbnail_db_->GetPageThumbnail(url_id, &(*data)->data());
     }
 
     // In this rare case, we start to mine the older redirect sessions
     // from the visit table to try to find a thumbnail.
     if (!success) {
-      success = GetThumbnailFromOlderRedirect(page_url, &(*data)->data);
+      success = GetThumbnailFromOlderRedirect(page_url, &(*data)->data());
     }
 
     if (!success)
@@ -1685,7 +1666,8 @@ void HistoryBackend::SetImportedFavicons(
     // Send the notification about the changed favicon URLs.
     FaviconChangeDetails* changed_details = new FaviconChangeDetails;
     changed_details->urls.swap(favicons_changed);
-    BroadcastNotifications(NotificationType::FAVICON_CHANGED, changed_details);
+    BroadcastNotifications(chrome::NOTIFICATION_FAVICON_CHANGED,
+                           changed_details);
   }
 }
 
@@ -1711,7 +1693,7 @@ void HistoryBackend::UpdateFaviconMappingAndFetchImpl(
       scoped_refptr<RefCountedBytes> data = new RefCountedBytes();
       favicon.known_icon = true;
       Time last_updated;
-      if (thumbnail_db_->GetFavicon(favicon_id, &last_updated, &data->data,
+      if (thumbnail_db_->GetFavicon(favicon_id, &last_updated, &data->data(),
                                     NULL)) {
         favicon.expired = (Time::Now() - last_updated) >
             TimeDelta::FromDays(kFaviconRefetchDays);
@@ -1747,7 +1729,7 @@ void HistoryBackend::GetFaviconForURL(
     if (thumbnail_db_->GetIconMappingsForPageURL(page_url, &icon_mappings) &&
         (icon_mappings.front().icon_type & icon_types) &&
         thumbnail_db_->GetFavicon(icon_mappings.front().icon_id, &last_updated,
-                                  &data->data, &favicon.icon_url)) {
+                                  &data->data(), &favicon.icon_url)) {
       favicon.known_icon = true;
       favicon.expired = (Time::Now() - last_updated) >
           TimeDelta::FromDays(kFaviconRefetchDays);
@@ -1829,7 +1811,8 @@ void HistoryBackend::SetFaviconMapping(const GURL& page_url,
   // Send the notification about the changed favicons.
   FaviconChangeDetails* changed_details = new FaviconChangeDetails;
   changed_details->urls.swap(favicons_changed);
-  BroadcastNotifications(NotificationType::FAVICON_CHANGED, changed_details);
+  BroadcastNotifications(chrome::NOTIFICATION_FAVICON_CHANGED,
+                         changed_details);
 
   ScheduleCommit();
 }
@@ -2056,7 +2039,7 @@ void HistoryBackend::ProcessDBTask(
 }
 
 void HistoryBackend::BroadcastNotifications(
-    NotificationType type,
+    int type,
     HistoryDetails* details_deleted) {
   DCHECK(delegate_.get());
   delegate_->BroadcastNotifications(type, details_deleted);
@@ -2142,7 +2125,7 @@ void HistoryBackend::DeleteAllHistory() {
   // will pick this up and clear itself.
   URLsDeletedDetails* details = new URLsDeletedDetails;
   details->all_history = true;
-  BroadcastNotifications(NotificationType::HISTORY_URLS_DELETED, details);
+  BroadcastNotifications(chrome::NOTIFICATION_HISTORY_URLS_DELETED, details);
 }
 
 bool HistoryBackend::ClearAllThumbnailHistory(

@@ -67,7 +67,6 @@
         }, { # else: os_posix == 1 or OS == "mac" or ! use_system_sqlite
           'product_name': 'sqlite3',
           'type': 'static_library',
-          'msvs_guid': '6EAD4A4B-2BBC-4974-8E45-BB5C16CC2AC9',
           'sources': [
             'amalgamation/sqlite3.h',
             'amalgamation/sqlite3.c',
@@ -146,9 +145,3 @@
     },]
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

@@ -5,7 +5,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
@@ -481,8 +481,7 @@ TEST(AutofillProfileTest, CreateInferredLabelsSkipsEmptyFields) {
 
   // A field must have a non-empty value for each profile to be considered a
   // distinguishing field.
-  profiles[1]->SetInfo(ADDRESS_HOME_LINE1,
-                       ASCIIToUTF16("88 Nowhere Ave."));
+  profiles[1]->SetInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("88 Nowhere Ave."));
   AutofillProfile::CreateInferredLabels(&profiles.get(), NULL, UNKNOWN_TYPE, 1,
                                         &labels);
   ASSERT_EQ(3U, labels.size());

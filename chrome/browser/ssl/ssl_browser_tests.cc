@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -32,6 +34,10 @@ class SSLUITest : public InProcessBrowserTest {
             HTTPSOptions(HTTPSOptions::CERT_MISMATCHED_NAME),
             FilePath(kDocRoot)) {
     EnableDOMAutomation();
+  }
+
+  // Browser will both run and display insecure content.
+  virtual void SetUpCommandLine(CommandLine* command_line) {
   }
 
   void CheckAuthenticatedState(TabContents* tab,
@@ -197,6 +203,17 @@ class SSLUITest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(SSLUITest);
 };
 
+class SSLUITestBlock : public SSLUITest {
+ public:
+  SSLUITestBlock() : SSLUITest() {}
+
+  // Browser will neither run nor display insecure content.
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    command_line->AppendSwitch(switches::kNoDisplayingInsecureContent);
+    command_line->AppendSwitch(switches::kNoRunningInsecureContent);
+  }
+};
+
 // Visits a regular page over http.
 IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTP) {
   ASSERT_TRUE(test_server()->Start());
@@ -334,7 +351,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSExpiredCertAndGoBackViaButton) {
   // Wait until we hear the load failure, and make sure we haven't swapped out
   // the previous page.  Prevents regression of http://crbug.com/82667.
   ui_test_utils::WaitForNotification(
-      NotificationType::FAIL_PROVISIONAL_LOAD_WITH_ERROR);
+      content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR);
   EXPECT_FALSE(tab->render_view_host()->is_swapped_out());
 
   // We should be back at the original good page.
@@ -455,7 +472,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysInsecureContent) {
 // Visits a page that runs insecure content and tries to suppress the insecure
 // content warnings by randomizing location.hash.
 // Based on http://crbug.com/8706
-IN_PROC_BROWSER_TEST_F(SSLUITest, TestRunsInsecuredContentRandomizeHash) {
+IN_PROC_BROWSER_TEST_F(SSLUITest,
+                       TestRunsInsecuredContentRandomizeHash) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
@@ -639,10 +657,18 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysCachedInsecureContent) {
   CheckAuthenticatedState(tab, true);
 }
 
+// http://crbug.com/84729
+#if defined(OS_CHROMEOS)
+#define MAYBE_TestRunsCachedInsecureContent \
+    DISABLED_TestRunsCachedInsecureContent
+#else
+#define MAYBE_TestRunsCachedInsecureContent TestRunsCachedInsecureContent
+#endif  // defined(OS_CHROMEOS)
+
 // Visits a page with script over http.  Visits another page over https
 // referencing that same script over http (hoping it is coming from the webcore
 // memory cache).
-IN_PROC_BROWSER_TEST_F(SSLUITest, TestRunsCachedInsecureContent) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestRunsCachedInsecureContent) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
@@ -1001,16 +1027,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestBadFrameNavigation) {
 
 // From an HTTP top frame, navigate to good and bad HTTPS (security state should
 // stay unauthenticated).
-#if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(OS_LINUX)
 // Disabled, flakily exceeds test timeout, http://crbug.com/43437.
-#define MAYBE_TestUnauthenticatedFrameNavigation \
-      DISABLED_TestUnauthenticatedFrameNavigation
-#else
-// Marked as flaky, see bug 40932.
-#define MAYBE_TestUnauthenticatedFrameNavigation \
-      FLAKY_TestUnauthenticatedFrameNavigation
-#endif
-IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestUnauthenticatedFrameNavigation) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestUnauthenticatedFrameNavigation) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
@@ -1106,6 +1124,45 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContentsInWorker) {
   CheckWorkerLoadResult(tab, true);  // Worker loads insecure content
   CheckAuthenticationBrokenState(tab, 0, true, false);
 }
+
+// Test that when the browser blocks displaying insecure content, the
+// indicator shows a secure page, because the blocking made the otherwise
+// unsafe page safe (the notification of this state is handled by other means).
+IN_PROC_BROWSER_TEST_F(SSLUITestBlock, TestBlockDisplayingInsecureContent) {
+  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(https_server_.Start());
+
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_displays_insecure_content.html",
+      test_server()->host_port_pair(),
+      &replacement_path));
+
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server_.GetURL(replacement_path));
+
+  CheckAuthenticatedState(browser()->GetSelectedTabContents(), false);
+}
+
+// Test that when the browser blocks running insecure content, the
+// indicator shows a secure page, because the blocking made the otherwise
+// unsafe page safe (the notification of this state is handled by other means).
+IN_PROC_BROWSER_TEST_F(SSLUITestBlock, TestBlockRunningInsecureContent) {
+  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(https_server_.Start());
+
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_runs_insecure_content.html",
+      test_server()->host_port_pair(),
+      &replacement_path));
+
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server_.GetURL(replacement_path));
+
+  CheckAuthenticatedState(browser()->GetSelectedTabContents(), false);
+}
+
 
 // TODO(jcampan): more tests to do below.
 

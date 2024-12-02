@@ -9,6 +9,7 @@
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_factory.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -18,7 +19,6 @@
 #include "content/common/bindings_policy.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "content/common/renderer_preferences.h"
 #include "content/common/view_messages.h"
 #include "ipc/ipc_message.h"
@@ -31,7 +31,7 @@ BalloonHost::BalloonHost(Balloon* balloon)
       should_notify_on_disconnect_(false),
       enable_web_ui_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          extension_function_dispatcher_(GetProfile(), this)) {
+          extension_function_dispatcher_(balloon_->profile(), this)) {
   CHECK(balloon_);
   site_instance_ = SiteInstance::CreateSiteInstanceForURL(balloon_->profile(),
                                                           GetURL());
@@ -65,18 +65,10 @@ const string16& BalloonHost::GetSource() const {
 
 WebPreferences BalloonHost::GetWebkitPrefs() {
   WebPreferences web_prefs =
-      RenderViewHostDelegateHelper::GetWebkitPrefs(GetProfile(),
+      RenderViewHostDelegateHelper::GetWebkitPrefs(balloon_->profile(),
                                                    enable_web_ui_);
   web_prefs.allow_scripts_to_close_windows = true;
   return web_prefs;
-}
-
-SiteInstance* BalloonHost::GetSiteInstance() const {
-  return site_instance_.get();
-}
-
-Profile* BalloonHost::GetProfile() const {
-  return balloon_->profile();
 }
 
 const GURL& BalloonHost::GetURL() const {
@@ -100,7 +92,7 @@ void BalloonHost::RenderViewCreated(RenderViewHost* render_view_host) {
 void BalloonHost::RenderViewReady(RenderViewHost* render_view_host) {
   should_notify_on_disconnect_ = true;
   NotificationService::current()->Notify(
-      NotificationType::NOTIFY_BALLOON_CONNECTED,
+      chrome::NOTIFICATION_NOTIFY_BALLOON_CONNECTED,
       Source<BalloonHost>(this), NotificationService::NoDetails());
 }
 
@@ -108,10 +100,6 @@ void BalloonHost::RenderViewGone(RenderViewHost* render_view_host,
                                  base::TerminationStatus status,
                                  int error_code) {
   Close(render_view_host);
-}
-
-int BalloonHost::GetBrowserWindowID() const {
-  return extension_misc::kUnknownWindowId;
 }
 
 ViewType::Type BalloonHost::GetRenderViewType() const {
@@ -169,11 +157,6 @@ void BalloonHost::ShowCreatedWindow(int route_id,
   browser->AddTabContents(contents, disposition, initial_pos, user_gesture);
 }
 
-bool BalloonHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                         bool* is_keyboard_shortcut) {
-  return false;
-}
-
 void BalloonHost::UpdatePreferredSize(const gfx::Size& new_size) {
   balloon_->SetContentPreferredSize(new_size);
 }
@@ -200,7 +183,7 @@ void BalloonHost::Init() {
   InitRenderWidgetHostView();
   DCHECK(render_widget_host_view());
 
-  rvh->set_view(render_widget_host_view());
+  rvh->SetView(render_widget_host_view());
   rvh->CreateRenderView(string16());
   rvh->NavigateToURL(balloon_->notification().content_url());
 
@@ -213,16 +196,6 @@ void BalloonHost::EnableWebUI() {
   enable_web_ui_ = true;
 }
 
-void BalloonHost::UpdateInspectorSetting(const std::string& key,
-                                         const std::string& value) {
-  RenderViewHostDelegateHelper::UpdateInspectorSetting(
-      GetProfile(), key, value);
-}
-
-void BalloonHost::ClearInspectorSettings() {
-  RenderViewHostDelegateHelper::ClearInspectorSettings(GetProfile());
-}
-
 BalloonHost::~BalloonHost() {
   DCHECK(!render_view_host_);
 }
@@ -233,7 +206,7 @@ void BalloonHost::NotifyDisconnect() {
 
   should_notify_on_disconnect_ = false;
   NotificationService::current()->Notify(
-      NotificationType::NOTIFY_BALLOON_DISCONNECTED,
+      chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED,
       Source<BalloonHost>(this), NotificationService::NoDetails());
 }
 

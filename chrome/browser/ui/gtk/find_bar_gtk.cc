@@ -32,6 +32,7 @@
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/native_web_keyboard_event.h"
@@ -300,8 +301,8 @@ void FindBarGtk::InitWidgets() {
   gtk_box_pack_end(GTK_BOX(hbox), border_bin_, TRUE, TRUE, 0);
 
   theme_service_->InitThemesFor(this);
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(theme_service_));
 
   g_signal_connect(widget(), "parent-set", G_CALLBACK(OnParentSet), this);
 
@@ -437,7 +438,7 @@ gfx::Rect FindBarGtk::GetDialogPosition(gfx::Rect avoid_overlapping_rect) {
 }
 
 bool FindBarGtk::IsFindBarVisible() {
-  return GTK_WIDGET_VISIBLE(widget());
+  return gtk_widget_get_visible(widget());
 }
 
 void FindBarGtk::RestoreSavedFocus() {
@@ -456,10 +457,10 @@ FindBarTesting* FindBarGtk::GetFindBarTesting() {
   return this;
 }
 
-void FindBarGtk::Observe(NotificationType type,
+void FindBarGtk::Observe(int type,
                          const NotificationSource& source,
                          const NotificationDetails& details) {
-  DCHECK_EQ(type.value, NotificationType::BROWSER_THEME_CHANGED);
+  DCHECK_EQ(type, chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
 
   // Force reshapings of the find bar window.
   container_width_ = -1;
@@ -686,7 +687,7 @@ void FindBarGtk::AdjustTextAlignment() {
   // Use keymap or widget direction if content does not have strong direction.
   // It matches the behavior of GtkEntry.
   if (content_dir == PANGO_DIRECTION_NEUTRAL) {
-    if (GTK_WIDGET_HAS_FOCUS(text_entry_)) {
+    if (gtk_widget_has_focus(text_entry_)) {
       content_dir = gdk_keymap_get_direction(
         gdk_keymap_get_for_display(gtk_widget_get_display(text_entry_)));
     } else {

@@ -190,6 +190,7 @@ class PrefsTest(pyauto.PyUITest):
     self.NavigateToURL(url)
     self.assertEqual(title, self.GetActiveTabTitle())
 
+
 if __name__ == '__main__':
   pyauto_functional.Main()
 

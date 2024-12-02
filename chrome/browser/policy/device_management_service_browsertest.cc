@@ -15,10 +15,10 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using testing::_;
 using testing::DoAll;
 using testing::Invoke;
 using testing::InvokeWithoutArgs;
+using testing::_;
 
 namespace policy {
 
@@ -48,11 +48,11 @@ class CannedResponseInterceptor : public net::URLRequest::Interceptor {
                             const std::string& response_data)
       : service_url_(service_url),
         response_data_(response_data) {
-    net::URLRequest::RegisterRequestInterceptor(this);
+    net::URLRequest::Deprecated::RegisterRequestInterceptor(this);
   }
 
   virtual ~CannedResponseInterceptor() {
-    net::URLRequest::UnregisterRequestInterceptor(this);
+    net::URLRequest::Deprecated::UnregisterRequestInterceptor(this);
   }
 
  private:
@@ -103,7 +103,8 @@ IN_PROC_BROWSER_TEST_F(DeviceManagementServiceIntegrationTest,
                                           ::CaptureToken),
                         InvokeWithoutArgs(QuitMessageLoop)));
     em::DeviceRegisterRequest request;
-    backend->ProcessRegisterRequest("token", "testid", request, &delegate);
+    backend->ProcessRegisterRequest("gaia_auth_token", "oauth_token",
+                                    "testid", request, &delegate);
     MessageLoop::current()->Run();
   }
 
@@ -154,7 +155,8 @@ IN_PROC_BROWSER_TEST_F(DeviceManagementServiceIntegrationTest,
                                           ::CaptureToken),
                         InvokeWithoutArgs(QuitMessageLoop)));
     em::DeviceRegisterRequest request;
-    backend->ProcessRegisterRequest("token", "testid", request, &delegate);
+    backend->ProcessRegisterRequest("gaia_auth_token", "oauth_token",
+                                    "testid", request, &delegate);
     MessageLoop::current()->Run();
   }
 

@@ -18,12 +18,13 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -95,10 +96,10 @@ gfx::Rect GetWidgetBoundsRelativeToParent(GtkWidget* parent,
 }  // namespace
 
 TabRendererGtk::LoadingAnimation::Data::Data(
-    ui::ThemeProvider* theme_provider) {
+    ThemeService* theme_service) {
   // The loading animation image is a strip of states. Each state must be
   // square, so the height must divide the width evenly.
-  loading_animation_frames = theme_provider->GetBitmapNamed(IDR_THROBBER);
+  loading_animation_frames = theme_service->GetBitmapNamed(IDR_THROBBER);
   DCHECK(loading_animation_frames);
   DCHECK_EQ(loading_animation_frames->width() %
             loading_animation_frames->height(), 0);
@@ -107,7 +108,7 @@ TabRendererGtk::LoadingAnimation::Data::Data(
       loading_animation_frames->height();
 
   waiting_animation_frames =
-      theme_provider->GetBitmapNamed(IDR_THROBBER_WAITING);
+      theme_service->GetBitmapNamed(IDR_THROBBER_WAITING);
   DCHECK(waiting_animation_frames);
   DCHECK_EQ(waiting_animation_frames->width() %
             waiting_animation_frames->height(), 0);
@@ -150,14 +151,14 @@ SkColor TabRendererGtk::unselected_title_color_ = SkColorSetRGB(64, 64, 64);
 // TabRendererGtk::LoadingAnimation, public:
 //
 TabRendererGtk::LoadingAnimation::LoadingAnimation(
-    ui::ThemeProvider* theme_provider)
-    : data_(new Data(theme_provider)),
-      theme_service_(theme_provider),
+    ThemeService* theme_service)
+    : data_(new Data(theme_service)),
+      theme_service_(theme_service),
       animation_state_(ANIMATION_NONE),
       animation_frame_(0) {
   registrar_.Add(this,
-                 NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+                 chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(theme_service_));
 }
 
 TabRendererGtk::LoadingAnimation::LoadingAnimation(
@@ -200,10 +201,10 @@ bool TabRendererGtk::LoadingAnimation::ValidateLoadingAnimation(
 }
 
 void TabRendererGtk::LoadingAnimation::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  DCHECK(type == NotificationType::BROWSER_THEME_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
   data_.reset(new Data(theme_service_));
 }
 
@@ -249,14 +250,15 @@ class TabRendererGtk::FaviconCrashAnimation : public ui::LinearAnimation,
 ////////////////////////////////////////////////////////////////////////////////
 // TabRendererGtk, public:
 
-TabRendererGtk::TabRendererGtk(ui::ThemeProvider* theme_provider)
+TabRendererGtk::TabRendererGtk(ThemeService* theme_service)
     : showing_icon_(false),
       showing_close_button_(false),
       favicon_hiding_offset_(0),
       should_display_crashed_favicon_(false),
-      loading_animation_(theme_provider),
+      loading_animation_(theme_service),
       background_offset_x_(0),
       background_offset_y_(kInactiveTabBackgroundOffsetY),
+      theme_service_(theme_service),
       close_button_color_(0) {
   InitResources();
 
@@ -272,8 +274,8 @@ TabRendererGtk::TabRendererGtk(ui::ThemeProvider* theme_provider)
   hover_animation_.reset(new ui::SlideAnimation(this));
   hover_animation_->SetSlideDuration(kHoverDurationMs);
 
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(theme_service_));
 }
 
 TabRendererGtk::~TabRendererGtk() {
@@ -290,7 +292,6 @@ void TabRendererGtk::UpdateData(TabContents* contents,
   DCHECK(contents);
   TabContentsWrapper* wrapper =
       TabContentsWrapper::GetCurrentWrapperForContents(contents);
-  theme_service_ = GtkThemeService::GetFrom(contents->profile());
 
   if (!loading_only) {
     data_.title = contents->GetTitle();
@@ -319,7 +320,7 @@ void TabRendererGtk::UpdateData(TabContents* contents,
 
   // Loading state also involves whether we show the favicon, since that's where
   // we display the throbber.
-  data_.loading = contents->is_loading();
+  data_.loading = contents->IsLoading();
   data_.show_icon = wrapper->favicon_tab_helper()->ShouldDisplayFavicon();
 }
 
@@ -349,12 +350,16 @@ bool TabRendererGtk::is_blocked() const {
   return data_.blocked;
 }
 
+bool TabRendererGtk::IsActive() const {
+  return true;
+}
+
 bool TabRendererGtk::IsSelected() const {
   return true;
 }
 
 bool TabRendererGtk::IsVisible() const {
-  return GTK_WIDGET_FLAGS(tab_.get()) & GTK_VISIBLE;
+  return gtk_widget_get_visible(tab_.get());
 }
 
 void TabRendererGtk::SetVisible(bool visible) const {
@@ -390,7 +395,7 @@ void TabRendererGtk::PaintFaviconArea(GdkEventExpose* event) {
   // Paint the background behind the favicon.
   int theme_id;
   int offset_y = 0;
-  if (IsSelected()) {
+  if (IsActive()) {
     theme_id = IDR_THEME_TOOLBAR;
   } else {
     if (!data_.incognito) {
@@ -407,7 +412,7 @@ void TabRendererGtk::PaintFaviconArea(GdkEventExpose* event) {
       favicon_bounds_.x(), favicon_bounds_.y(),
       favicon_bounds_.width(), favicon_bounds_.height());
 
-  if (!IsSelected()) {
+  if (!IsActive()) {
     double throb_value = GetThrobValue();
     if (throb_value > 0) {
       SkRect bounds;
@@ -434,8 +439,8 @@ bool TabRendererGtk::ShouldShowIcon() const {
     return true;
   } else if (!data_.show_icon) {
     return false;
-  } else if (IsSelected()) {
-    // The selected tab clips favicon before close button.
+  } else if (IsActive()) {
+    // The active tab clips favicon before close button.
     return IconCapacity() >= 2;
   }
   // Non-selected tabs clip close button before favicon.
@@ -555,10 +560,10 @@ void TabRendererGtk::SetBounds(const gfx::Rect& bounds) {
   gtk_widget_set_size_request(tab_.get(), bounds.width(), bounds.height());
 }
 
-void TabRendererGtk::Observe(NotificationType type,
+void TabRendererGtk::Observe(int type,
                              const NotificationSource& source,
                              const NotificationDetails& details) {
-  DCHECK(type == NotificationType::BROWSER_THEME_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
 
   // Clear our cache when we receive a theme change notification because it
   // contains cached bitmaps based off the previous theme.
@@ -644,12 +649,6 @@ void TabRendererGtk::Paint(gfx::Canvas* canvas) {
 
   if (show_icon)
     PaintIcon(canvas);
-}
-
-SkBitmap TabRendererGtk::PaintBitmap() {
-  gfx::CanvasSkia canvas(width(), height(), false);
-  Paint(&canvas);
-  return canvas.ExtractBitmap();
 }
 
 cairo_surface_t* TabRendererGtk::PaintToSurface() {
@@ -879,7 +878,7 @@ void TabRendererGtk::PaintIcon(gfx::Canvas* canvas) {
 }
 
 void TabRendererGtk::PaintTabBackground(gfx::Canvas* canvas) {
-  if (IsSelected()) {
+  if (IsActive()) {
     PaintActiveTabBackground(canvas);
   } else {
     PaintInactiveTabBackground(canvas);
@@ -904,6 +903,8 @@ void TabRendererGtk::PaintInactiveTabBackground(gfx::Canvas* canvas) {
 
   int tab_id = data_.incognito ?
       IDR_THEME_TAB_BACKGROUND_INCOGNITO : IDR_THEME_TAB_BACKGROUND;
+  if (IsSelected())
+    tab_id = IDR_THEME_TAB_BACKGROUND_V;
 
   SkBitmap* tab_bg = theme_service_->GetBitmapNamed(tab_id);
 
@@ -992,7 +993,7 @@ int TabRendererGtk::IconCapacity() const {
 
 bool TabRendererGtk::ShouldShowCloseBox() const {
   // The selected tab never clips close button.
-  return !mini() && (IsSelected() || IconCapacity() >= 3);
+  return !mini() && (IsActive() || IconCapacity() >= 3);
 }
 
 CustomDrawButton* TabRendererGtk::MakeCloseButton() {
@@ -1010,7 +1011,7 @@ CustomDrawButton* TabRendererGtk::MakeCloseButton() {
                    G_CALLBACK(OnEnterNotifyEventThunk), this);
   g_signal_connect(button->widget(), "leave-notify-event",
                    G_CALLBACK(OnLeaveNotifyEventThunk), this);
-  GTK_WIDGET_UNSET_FLAGS(button->widget(), GTK_CAN_FOCUS);
+  gtk_widget_set_can_focus(button->widget(), FALSE);
   gtk_fixed_put(GTK_FIXED(tab_.get()), button->widget(), 0, 0);
 
   return button;

@@ -7,16 +7,15 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/views/frame/browser_frame_win.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "views/controls/button/button.h"
 #include "views/window/non_client_view.h"
 
 class BrowserView;
-class ProfileMenuButton;
-class ProfileMenuModel;
-class ProfileTagView;
+class AvatarMenuButton;
 class SkBitmap;
 
 class GlassBrowserFrameView : public BrowserNonClientFrameView,
@@ -30,6 +29,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const OVERRIDE;
   virtual int GetHorizontalTabStripVerticalOffset(bool restored) const OVERRIDE;
   virtual void UpdateThrobber(bool running) OVERRIDE;
+  virtual gfx::Size GetMinimumSize() OVERRIDE;
 
   // Overridden from views::NonClientFrameView:
   virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
@@ -66,13 +66,14 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
 
   // Paint various sub-components of this view.
   void PaintToolbarBackground(gfx::Canvas* canvas);
-  void PaintOTRAvatar(gfx::Canvas* canvas);
   void PaintRestoredClientEdge(gfx::Canvas* canvas);
 
   // Layout various sub-components of this view.
-  void LayoutOTRAvatar();
+  void LayoutAvatar();
   void LayoutClientView();
-  void LayoutProfileTag();
+
+  // Returns the insets of the client area.
+  gfx::Insets GetClientAreaInsets() const;
 
   // Returns the bounds of the client area for the specified view size.
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
@@ -85,18 +86,15 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   void DisplayNextThrobberFrame();
 
   // NotificationObserver implementation:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
-  // Receive notifications when the user's Google services user name changes.
-  void RegisterLoginNotifications();
+  // Updates the title and icon of the avatar button.
+  void UpdateAvatarInfo();
 
-  // Returns true if the ProfileButton has been created.
-  bool show_profile_button() const { return profile_button_.get() != NULL; }
-
-  // The layout rect of the OTR avatar icon, if visible.
-  gfx::Rect otr_avatar_bounds_;
+  // The layout rect of the avatar icon, if visible.
+  gfx::Rect avatar_bounds_;
 
   // The frame that hosts this view.
   BrowserFrame* frame_;
@@ -107,11 +105,9 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   // The bounds of the ClientView.
   gfx::Rect client_view_bounds_;
 
-  // Menu button that displays user's name and multi-profile menu.
-  scoped_ptr<ProfileMenuButton> profile_button_;
-
-  // Image tag displayed on frame beneath profile_button_.
-  scoped_ptr<ProfileTagView> profile_tag_;
+  // Menu button that displays that either the incognito icon or the profile
+  // icon.
+  scoped_ptr<AvatarMenuButton> avatar_button_;
 
   // Whether or not the window throbber is currently animating.
   bool throbber_running_;
@@ -119,8 +115,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   // The index of the current frame of the throbber animation.
   int throbber_frame_;
 
-  // The Google services user name associated with this BrowserView's profile.
-  StringPrefMember username_pref_;
+  NotificationRegistrar registrar_;
 
   static const int kThrobberIconCount = 24;
   static HICON throbber_icons_[kThrobberIconCount];

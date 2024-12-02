@@ -84,14 +84,11 @@ class RegistrationScreen : public ViewScreen<RegistrationView>,
   virtual RegistrationView* AllocateView();
 
   // TabContentsDelegate implementation:
-  virtual void LoadingStateChanged(TabContents* source) {}
-  virtual void NavigationStateChanged(const TabContents* source,
-                                      unsigned changed_flags) {}
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url,
-                              const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition);
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const GURL& url,
+                                      const GURL& referrer,
+                                      WindowOpenDisposition disposition,
+                                      PageTransition::Type transition);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
   // WebPageScreen implementation:

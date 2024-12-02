@@ -14,9 +14,10 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
 #include "content/browser/browser_thread.h"
@@ -67,12 +68,12 @@ class WebResourceService::WebResourceFetcher
     url_fetcher_.reset(new URLFetcher(GURL(
         web_resource_server),
         URLFetcher::GET, this));
-    // Do not let url fetcher affect existing state in profile (by setting
-    // cookies, for example.
+    // Do not let url fetcher affect existing state in system context (by
+    // setting cookies, for example).
     url_fetcher_->set_load_flags(net::LOAD_DISABLE_CACHE |
         net::LOAD_DO_NOT_SAVE_COOKIES);
     net::URLRequestContextGetter* url_request_context_getter =
-        web_resource_service_->profile_->GetRequestContext();
+        g_browser_process->system_request_context();
     url_fetcher_->set_request_context(url_request_context_getter);
     url_fetcher_->Start();
   }
@@ -111,8 +112,7 @@ class WebResourceService::WebResourceFetcher
 // This class coordinates a web resource unpack and parse task which is run in
 // a separate process.  Results are sent back to this class and routed to
 // the WebResourceService.
-class WebResourceService::UnpackerClient
-    : public UtilityProcessHost::Client {
+class WebResourceService::UnpackerClient : public UtilityProcessHost::Client {
  public:
   UnpackerClient(WebResourceService* web_resource_service,
                  const std::string& json_data)
@@ -151,6 +151,20 @@ class WebResourceService::UnpackerClient
   ~UnpackerClient() {}
 
   // UtilityProcessHost::Client
+  virtual bool OnMessageReceived(const IPC::Message& message) {
+    bool msg_is_ok = true;
+    bool handled = true;
+    IPC_BEGIN_MESSAGE_MAP_EX(WebResourceService::UnpackerClient, message,
+                             msg_is_ok)
+      IPC_MESSAGE_HANDLER(UtilityHostMsg_UnpackWebResource_Succeeded,
+                          OnUnpackWebResourceSucceeded)
+      IPC_MESSAGE_HANDLER(UtilityHostMsg_UnpackWebResource_Failed,
+                          OnUnpackWebResourceFailed)
+      IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_END_MESSAGE_MAP_EX()
+    return handled;
+  }
+
   virtual void OnProcessCrashed(int exit_code) {
     if (got_response_)
       return;
@@ -159,13 +173,13 @@ class WebResourceService::UnpackerClient
         "Chrome crashed while trying to retrieve web resources.");
   }
 
-  virtual void OnUnpackWebResourceSucceeded(
+  void OnUnpackWebResourceSucceeded(
       const DictionaryValue& parsed_json) {
     web_resource_service_->OnWebResourceUnpacked(parsed_json);
     Cleanup();
   }
 
-  virtual void OnUnpackWebResourceFailed(const std::string& error_message) {
+  void OnUnpackWebResourceFailed(const std::string& error_message) {
     web_resource_service_->EndFetch();
     Cleanup();
   }
@@ -183,7 +197,7 @@ class WebResourceService::UnpackerClient
     UtilityProcessHost* host = new UtilityProcessHost(this, thread_id);
     // TODO(mrc): get proper file path when we start using web resources
     // that need to be unpacked.
-    host->StartWebResourceUnpacker(json_data_);
+    host->Send(new UtilityMsg_UnpackWebResource(json_data_));
   }
 
   scoped_refptr<WebResourceService> web_resource_service_;
@@ -197,16 +211,14 @@ class WebResourceService::UnpackerClient
 };
 
 WebResourceService::WebResourceService(
-    Profile* profile,
     PrefService* prefs,
     const char* web_resource_server,
     bool apply_locale_to_url,
-    NotificationType::Type notification_type,
+    int notification_type,
     const char* last_update_time_pref_name,
     int start_fetch_delay,
     int cache_update_delay)
     : prefs_(prefs),
-      profile_(profile),
       ALLOW_THIS_IN_INITIALIZER_LIST(service_factory_(this)),
       in_fetch_(false),
       web_resource_server_(web_resource_server),
@@ -217,7 +229,6 @@ WebResourceService::WebResourceService(
       cache_update_delay_(cache_update_delay),
       web_resource_update_scheduled_(false) {
   DCHECK(prefs);
-  DCHECK(profile);
   prefs_->RegisterStringPref(last_update_time_pref_name,
                              "0",
                              PrefService::UNSYNCABLE_PREF);
@@ -252,7 +263,7 @@ void WebResourceService::OnWebResourceUnpacked(
 
 void WebResourceService::WebResourceStateChange() {
   web_resource_update_scheduled_ = false;
-  if (notification_type_ == NotificationType::NOTIFICATION_TYPE_COUNT)
+  if (notification_type_ == chrome::NOTIFICATION_CHROME_END)
     return;
   NotificationService* service = NotificationService::current();
   service->Notify(notification_type_,

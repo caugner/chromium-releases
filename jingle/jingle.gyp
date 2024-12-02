@@ -23,6 +23,7 @@
       ],
       'dependencies': [
         '../base/base.gyp:base',
+        '../net/net.gyp:net',
         '../third_party/libjingle/libjingle.gyp:libjingle',
         '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
       ],
@@ -102,6 +103,7 @@
       ],
       'dependencies': [
         '../base/base.gyp:base',
+        '../build/temp_gyp/googleurl.gyp:googleurl',
         '../net/net.gyp:net',
         '../third_party/expat/expat.gyp:expat',
         '../third_party/libjingle/libjingle.gyp:libjingle',
@@ -123,6 +125,8 @@
       'sources': [
         'notifier/base/fake_base_task.cc',
         'notifier/base/fake_base_task.h',
+        'notifier/base/mock_task.cc',
+        'notifier/base/mock_task.h',
       ],
       'dependencies': [
         'notifier',
@@ -156,6 +160,7 @@
         'notifier/base/chrome_async_socket_unittest.cc',
         'notifier/base/fake_ssl_client_socket_unittest.cc',
         'notifier/base/proxy_resolving_client_socket_unittest.cc',
+        'notifier/base/task_pump_unittest.cc',
         'notifier/base/xmpp_connection_unittest.cc',
         'notifier/base/weak_xmpp_client_unittest.cc',
         'notifier/communicator/xmpp_connection_generator_unittest.cc',
@@ -187,9 +192,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

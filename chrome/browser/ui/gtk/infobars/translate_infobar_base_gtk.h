@@ -15,10 +15,10 @@ class TranslateInfoBarDelegate;
 
 // This class contains some of the base functionality that translate infobars
 // use.
-class TranslateInfoBarBase : public InfoBar,
-                             public ui::AnimationDelegate {
+class TranslateInfoBarBase : public InfoBarGtk {
  public:
-  explicit TranslateInfoBarBase(TranslateInfoBarDelegate* delegate);
+  explicit TranslateInfoBarBase(TabContentsWrapper* owner,
+                                TranslateInfoBarDelegate* delegate);
   virtual ~TranslateInfoBarBase();
 
   // Initializes the infobar widgets. Should be called after the object has been
@@ -39,10 +39,6 @@ class TranslateInfoBarBase : public InfoBar,
   // override and return true.
   virtual bool ShowOptionsMenuButton() const;
 
-  // Creates a label with the appropriate font and color for the translate
-  // infobars.
-  GtkWidget* CreateLabel(const std::string& text);
-
   // Creates a combobox that displays the languages currently available.
   // |selected_language| is the language index (as used in the
   // TranslateInfoBarDelegate) that should be selected initially.
@@ -57,7 +53,7 @@ class TranslateInfoBarBase : public InfoBar,
   static size_t GetLanguageComboboxActiveId(GtkComboBox* combo);
 
   // Convenience to retrieve the TranslateInfoBarDelegate for this infobar.
-  TranslateInfoBarDelegate* GetDelegate() const;
+  TranslateInfoBarDelegate* GetDelegate();
 
  private:
   // Builds a button with an arrow in it to emulate the menu-button style from

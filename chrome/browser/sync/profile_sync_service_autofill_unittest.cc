@@ -16,6 +16,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/task.h"
 #include "base/time.h"
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
@@ -32,7 +33,6 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
-#include "chrome/browser/sync/syncable/autofill_migration.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
@@ -41,11 +41,11 @@
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_database.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/test/sync/engine/test_id_factory.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::Time;
@@ -68,7 +68,6 @@ using syncable::CREATE;
 using syncable::GET_BY_SERVER_TAG;
 using syncable::INVALID;
 using syncable::MutableEntry;
-using syncable::OriginalEntries;
 using syncable::SERVER_PARENT_ID;
 using syncable::SERVER_SPECIFICS;
 using syncable::SPECIFICS;
@@ -311,6 +310,9 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
         WillOnce(ReturnNewDataTypeManager());
 
     EXPECT_CALL(profile_, GetWebDataService(_)).
+        // TokenService::Initialize
+        WillOnce(Return(web_data_service_.get())).
+        // AutofillDataTypeController::StartModels()
         WillOnce(Return(web_data_service_.get()));
 
     EXPECT_CALL(profile_, GetPersonalDataManager()).
@@ -332,7 +334,7 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
   }
 
   bool AddAutofillSyncNode(const AutofillEntry& entry) {
-    sync_api::WriteTransaction trans(service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode autofill_root(&trans);
     if (!autofill_root.InitByTagLookup(browser_sync::kAutofillTag))
       return false;
@@ -348,7 +350,7 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
   }
 
   bool AddAutofillSyncNode(const AutofillProfile& profile) {
-    sync_api::WriteTransaction trans(service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode autofill_root(&trans);
     if (!autofill_root.InitByTagLookup(browser_sync::kAutofillProfileTag))
       return false;
@@ -363,7 +365,7 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
 
   bool GetAutofillEntriesFromSyncDB(std::vector<AutofillEntry>* entries,
                                     std::vector<AutofillProfile>* profiles) {
-    sync_api::ReadTransaction trans(service_->GetUserShare());
+    sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode autofill_root(&trans);
     if (!autofill_root.InitByTagLookup(browser_sync::kAutofillTag))
       return false;
@@ -400,7 +402,7 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
 
   bool GetAutofillProfilesFromSyncDBUnderProfileNode(
       std::vector<AutofillProfile>* profiles) {
-    sync_api::ReadTransaction trans(service_->GetUserShare());
+    sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode autofill_root(&trans);
     if (!autofill_root.InitByTagLookup(browser_sync::kAutofillProfileTag))
       return false;
@@ -490,11 +492,11 @@ class AddAutofillTask : public Task {
 static const bool kLoggingInfo = true;
 class WriteTransactionTest: public WriteTransaction {
  public:
-  WriteTransactionTest(const syncable::ScopedDirLookup& directory,
-                       WriterTag writer, const char* source_file,
-                       int line,
+  WriteTransactionTest(const tracked_objects::Location& from_here,
+                       WriterTag writer,
+                       const syncable::ScopedDirLookup& directory,
                        scoped_ptr<WaitableEvent> *wait_for_syncapi)
-      : WriteTransaction(directory, writer, source_file, line),
+      : WriteTransaction(from_here, writer, directory),
         wait_for_syncapi_(wait_for_syncapi) { }
 
   virtual void NotifyTransactionComplete(syncable::ModelTypeBitSet types) {
@@ -552,7 +554,7 @@ class FakeServerUpdater: public base::RefCountedThreadSafe<FakeServerUpdater> {
       (*wait_for_start_)->Signal();
 
       // Create write transaction.
-      WriteTransactionTest trans(dir, UNITTEST, __FILE__, __LINE__,
+      WriteTransactionTest trans(FROM_HERE, UNITTEST, dir,
                                  wait_for_syncapi_);
 
       // Create actual entry based on autofill protobuf information.
@@ -869,7 +871,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeAddEntry) {
   AutofillChangeList changes;
   changes.push_back(AutofillChange(AutofillChange::ADD, added_entry.key()));
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&db_thread_));
-  notifier->Notify(NotificationType::AUTOFILL_ENTRIES_CHANGED,
+  notifier->Notify(chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
                    Source<WebDataService>(web_data_service_.get()),
                    Details<AutofillChangeList>(&changes));
 
@@ -898,7 +900,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeAddProfile) {
   AutofillProfileChange change(AutofillProfileChange::ADD,
       added_profile.guid(), &added_profile);
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&db_thread_));
-  notifier->Notify(NotificationType::AUTOFILL_PROFILE_CHANGED,
+  notifier->Notify(chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
                    Source<WebDataService>(web_data_service_.get()),
                    Details<AutofillProfileChange>(&change));
 
@@ -932,7 +934,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeUpdateEntry) {
   changes.push_back(AutofillChange(AutofillChange::UPDATE,
                                    updated_entry.key()));
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&db_thread_));
-  notifier->Notify(NotificationType::AUTOFILL_ENTRIES_CHANGED,
+  notifier->Notify(chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
                    Source<WebDataService>(web_data_service_.get()),
                    Details<AutofillChangeList>(&changes));
 
@@ -962,7 +964,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeRemoveEntry) {
   changes.push_back(AutofillChange(AutofillChange::REMOVE,
                                    original_entry.key()));
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&db_thread_));
-  notifier->Notify(NotificationType::AUTOFILL_ENTRIES_CHANGED,
+  notifier->Notify(chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
                    Source<WebDataService>(web_data_service_.get()),
                    Details<AutofillChangeList>(&changes));
 
@@ -1000,7 +1002,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeRemoveProfile) {
   AutofillProfileChange change(AutofillProfileChange::REMOVE,
                                sync_profile.guid(), NULL);
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&db_thread_));
-  notifier->Notify(NotificationType::AUTOFILL_PROFILE_CHANGED,
+  notifier->Notify(chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
                    Source<WebDataService>(web_data_service_.get()),
                    Details<AutofillProfileChange>(&change));
 
@@ -1027,7 +1029,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeError) {
   changes.push_back(AutofillChange(AutofillChange::ADD,
                                    evil_entry.key()));
   scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&db_thread_));
-  notifier->Notify(NotificationType::AUTOFILL_ENTRIES_CHANGED,
+  notifier->Notify(chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
                    Source<WebDataService>(web_data_service_.get()),
                    Details<AutofillChangeList>(&changes));
 
@@ -1039,7 +1041,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeError) {
   EXPECT_TRUE(service_->unrecoverable_error_detected());
 
   // Ensure future autofill notifications don't crash.
-  notifier->Notify(NotificationType::AUTOFILL_ENTRIES_CHANGED,
+  notifier->Notify(chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
                    Source<WebDataService>(web_data_service_.get()),
                    Details<AutofillChangeList>(&changes));
 }

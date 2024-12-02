@@ -7,13 +7,17 @@
 
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
+namespace gpu {
+class CommandBufferHelper;
+}
+
 namespace webkit {
 namespace ppapi {
 
 class MockPluginDelegate : public PluginDelegate {
  public:
   MockPluginDelegate();
-  ~MockPluginDelegate();
+  virtual ~MockPluginDelegate();
 
   virtual void PluginFocusChanged(bool focused);
   virtual void PluginCrashed(PluginInstance* instance);
@@ -23,7 +27,9 @@ class MockPluginDelegate : public PluginDelegate {
   virtual PlatformImage2D* CreateImage2D(int width, int height);
   virtual PlatformContext3D* CreateContext3D();
   virtual PlatformVideoDecoder* CreateVideoDecoder(
-      media::VideoDecodeAccelerator::Client* client);
+      media::VideoDecodeAccelerator::Client* client,
+      int32 command_buffer_route_id,
+      gpu::CommandBufferHelper* cmd_buffer_helper);
   virtual PlatformAudio* CreateAudio(uint32_t sample_rate,
                                      uint32_t sample_count,
                                      PlatformAudio::Client* client);
@@ -64,6 +70,11 @@ class MockPluginDelegate : public PluginDelegate {
   virtual bool ReadDirectory(
       const GURL& directory_path,
       fileapi::FileSystemCallbackDispatcher* dispatcher);
+  virtual void QueryAvailableSpace(const GURL& origin,
+                                   quota::StorageType type,
+                                   AvailableSpaceCallback* callback);
+  virtual void WillUpdateFile(const GURL& file_path);
+  virtual void DidUpdateFile(const GURL& file_path, int64_t delta);
   virtual base::PlatformFileError OpenFile(const PepperFilePath& path,
                                            int flags,
                                            base::PlatformFile* file);
@@ -76,6 +87,7 @@ class MockPluginDelegate : public PluginDelegate {
                                             base::PlatformFileInfo* info);
   virtual base::PlatformFileError GetDirContents(const PepperFilePath& path,
                                                  DirContents* contents);
+  virtual void PublishPolicy(const std::string& policy_json);
   virtual scoped_refptr<base::MessageLoopProxy>
       GetFileThreadMessageLoopProxy();
   virtual int32_t ConnectTcp(
@@ -95,6 +107,7 @@ class MockPluginDelegate : public PluginDelegate {
   virtual std::string GetDefaultEncoding();
   virtual void ZoomLimitsChanged(double minimum_factor,
                                  double maximum_factor);
+  virtual void SubscribeToPolicyUpdates(PluginInstance* instance);
   virtual std::string ResolveProxy(const GURL& url);
   virtual void DidStartLoading();
   virtual void DidStopLoading();

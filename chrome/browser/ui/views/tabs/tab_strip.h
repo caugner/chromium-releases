@@ -16,6 +16,7 @@
 #include "views/mouse_watcher.h"
 
 class Tab;
+class TabStripSelectionModel;
 
 namespace views {
 class ImageView;
@@ -41,11 +42,11 @@ class TabStrip : public BaseTabStrip,
   explicit TabStrip(TabStripController* controller);
   virtual ~TabStrip();
 
-  // Creates the new tab button.
-  void InitTabStripButtons();
-
   // Returns the bounds of the new tab button.
   gfx::Rect GetNewTabButtonBounds();
+
+  // Does he new tab button need to be sized to the top of the tab strip?
+  bool SizeTabButtonToTopOfTabStrip();
 
   // MouseWatcherListener overrides:
   virtual void MouseMovedOutOfView() OVERRIDE;
@@ -57,7 +58,9 @@ class TabStrip : public BaseTabStrip,
   // BaseTabStrip implementation:
   virtual void PrepareForCloseAt(int model_index) OVERRIDE;
   virtual void RemoveTabAt(int model_index) OVERRIDE;
-  virtual void SelectTabAt(int old_model_index, int new_model_index) OVERRIDE;
+  virtual void SetSelection(
+      const TabStripSelectionModel& old_selection,
+      const TabStripSelectionModel& new_selection) OVERRIDE;
   virtual void TabTitleChangedNotLoading(int model_index) OVERRIDE;
   virtual void StartHighlight(int model_index) OVERRIDE;
   virtual void StopAllHighlighting() OVERRIDE;
@@ -136,6 +139,9 @@ class TabStrip : public BaseTabStrip,
 
   void Init();
 
+  // Creates the new tab button.
+  void InitTabStripButtons();
+
   // Set the images for the new tab button.
   void LoadNewTabButtonImage();
 
@@ -213,9 +219,6 @@ class TabStrip : public BaseTabStrip,
   void StartResizeLayoutAnimation();
   virtual void StartMiniTabAnimation();
   void StartMouseInitiatedRemoveTabAnimation(int model_index);
-
-  // Calculates the available width for tabs, assuming a Tab is to be closed.
-  int GetAvailableWidthForTabs(Tab* last_tab) const;
 
   // Returns true if the specified point in TabStrip coords is within the
   // hit-test region of the specified Tab.

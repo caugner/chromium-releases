@@ -44,7 +44,8 @@ BookmarkCodec::BookmarkCodec()
 BookmarkCodec::~BookmarkCodec() {}
 
 Value* BookmarkCodec::Encode(BookmarkModel* model) {
-  return Encode(model->GetBookmarkBarNode(), model->other_node(),
+  return Encode(model->bookmark_bar_node(),
+                model->other_node(),
                 model->synced_node());
 }
 
@@ -99,9 +100,9 @@ Value* BookmarkCodec::EncodeNode(const BookmarkNode* node) {
   value->SetString(kNameKey, title);
   value->SetString(kDateAddedKey,
                    base::Int64ToString(node->date_added().ToInternalValue()));
-  if (node->type() == BookmarkNode::URL) {
+  if (node->is_url()) {
     value->SetString(kTypeKey, kTypeURL);
-    std::string url = node->GetURL().possibly_invalid_spec();
+    std::string url = node->url().possibly_invalid_spec();
     value->SetString(kURLKey, url);
     UpdateChecksumWithUrlNode(id, title, url);
   } else {
@@ -337,11 +338,11 @@ void BookmarkCodec::ReassignIDsHelper(BookmarkNode* node) {
 }
 
 void BookmarkCodec::UpdateChecksum(const std::string& str) {
-  MD5Update(&md5_context_, str.data(), str.length() * sizeof(char));
+  base::MD5Update(&md5_context_, str.data(), str.length() * sizeof(char));
 }
 
 void BookmarkCodec::UpdateChecksum(const string16& str) {
-  MD5Update(&md5_context_, str.data(), str.length() * sizeof(char16));
+  base::MD5Update(&md5_context_, str.data(), str.length() * sizeof(char16));
 }
 
 void BookmarkCodec::UpdateChecksumWithUrlNode(const std::string& id,
@@ -362,11 +363,11 @@ void BookmarkCodec::UpdateChecksumWithFolderNode(const std::string& id,
 }
 
 void BookmarkCodec::InitializeChecksum() {
-  MD5Init(&md5_context_);
+  base::MD5Init(&md5_context_);
 }
 
 void BookmarkCodec::FinalizeChecksum() {
-  MD5Digest digest;
-  MD5Final(&digest, &md5_context_);
-  computed_checksum_ = MD5DigestToBase16(digest);
+  base::MD5Digest digest;
+  base::MD5Final(&digest, &md5_context_);
+  computed_checksum_ = base::MD5DigestToBase16(digest);
 }

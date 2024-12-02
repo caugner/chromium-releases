@@ -9,7 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
@@ -19,13 +19,13 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/layout/grid_layout.h"
 #include "views/layout/layout_constants.h"
 #include "views/window/dialog_client_view.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -39,7 +39,7 @@ void GetShortNameAndLogoId(PrefService* prefs,
   DCHECK(short_name);
   DCHECK(logo_id);
 
-  GURL url = TemplateURLModel::GenerateSearchURL(turl);
+  GURL url = TemplateURLService::GenerateSearchURL(turl);
   scoped_ptr<TemplateURL> built_in_data(
       TemplateURLPrepopulateData::GetEngineForOrigin(prefs, url));
 
@@ -97,11 +97,11 @@ views::View* CreateProviderLogo(
 
   return logo_view;
 }
-views::NativeButton* CreateProviderChoiceButton(
+views::View* CreateProviderChoiceButton(
     views::ButtonListener* listener,
     int message_id,
     const std::wstring& short_name) {
-  return new views::NativeButton(listener, UTF16ToWide(
+  return new views::NativeTextButton(listener, UTF16ToWide(
       l10n_util::GetStringFUTF16(message_id, WideToUTF16(short_name))));
 }
 
@@ -110,15 +110,15 @@ views::NativeButton* CreateProviderChoiceButton(
 // static
 void DefaultSearchView::Show(TabContents* tab_contents,
                              TemplateURL* default_url,
-                             TemplateURLModel* template_url_model) {
+                             TemplateURLService* template_url_service) {
   scoped_ptr<TemplateURL> template_url(default_url);
-  if (!template_url_model->CanMakeDefault(default_url) ||
+  if (!template_url_service->CanMakeDefault(default_url) ||
       default_url->url()->GetHost().empty())
     return;
 
   // When the window closes, it will delete itself.
   new DefaultSearchView(tab_contents, template_url.release(),
-                        template_url_model);
+                        template_url_service);
 }
 
 DefaultSearchView::~DefaultSearchView() {
@@ -163,22 +163,30 @@ bool DefaultSearchView::Accept() {
   // Check this again in case the default became managed while this dialog was
   // displayed.
   TemplateURL* set_as_default = proposed_turl_.get();
-  if (!template_url_model_->CanMakeDefault(set_as_default))
+  if (!template_url_service_->CanMakeDefault(set_as_default))
     return true;
 
-  template_url_model_->Add(proposed_turl_.release());
-  template_url_model_->SetDefaultSearchProvider(set_as_default);
+  template_url_service_->Add(proposed_turl_.release());
+  template_url_service_->SetDefaultSearchProvider(set_as_default);
   return true;
+}
+
+views::Widget* DefaultSearchView::GetWidget() {
+  return View::GetWidget();
+}
+
+const views::Widget* DefaultSearchView::GetWidget() const {
+  return View::GetWidget();
 }
 
 DefaultSearchView::DefaultSearchView(TabContents* tab_contents,
                                      TemplateURL* proposed_default_turl,
-                                     TemplateURLModel* template_url_model)
+                                     TemplateURLService* template_url_service)
     : background_image_(NULL),
       default_provider_button_(NULL),
       proposed_provider_button_(NULL),
       proposed_turl_(proposed_default_turl),
-      template_url_model_(template_url_model) {
+      template_url_service_(template_url_service) {
   PrefService* prefs = tab_contents->profile()->GetPrefs();
   SetupControls(prefs);
 
@@ -212,7 +220,7 @@ void DefaultSearchView::SetupControls(PrefService* prefs) {
   std::wstring default_short_name;
   int default_logo_id = kNoSearchEngineLogo;
   GetShortNameAndLogoId(prefs,
-                        template_url_model_->GetDefaultSearchProvider(),
+                        template_url_service_->GetDefaultSearchProvider(),
                         &default_short_name,
                         &default_logo_id);
 
@@ -226,7 +234,7 @@ void DefaultSearchView::SetupControls(PrefService* prefs) {
       layout->AddColumnSet(kWholeDialogViewSetId);
   whole_dialog_column_set->AddColumn(GridLayout::LEADING, GridLayout::LEADING,
                                      1, GridLayout::FIXED,
-                                     views::Window::GetLocalizedContentsWidth(
+                                     views::Widget::GetLocalizedContentsWidth(
                                          IDS_DEFAULT_SEARCH_WIDTH_CHARS),
                                      0);
 

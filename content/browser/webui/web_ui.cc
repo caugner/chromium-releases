@@ -6,7 +6,7 @@
 
 #include "base/i18n/rtl.h"
 #include "base/json/json_writer.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -40,7 +40,6 @@ string16 WebUI::GetJavascriptCall(
 
 WebUI::WebUI(TabContents* contents)
     : hide_favicon_(false),
-      force_bookmark_bar_visible_(false),
       focus_location_bar_by_default_(false),
       should_hide_url_(false),
       link_transition_type_(PageTransition::LINK),
@@ -166,6 +165,15 @@ RenderViewHost* WebUI::GetRenderViewHost() const {
   return tab_contents()->render_view_host();
 }
 
+bool WebUI::IsLoading() const {
+  std::vector<WebUIMessageHandler*>::const_iterator iter;
+  for (iter = handlers_.begin(); iter != handlers_.end(); ++iter) {
+    if ((*iter)->IsLoading())
+      return true;
+  }
+  return false;
+}
+
 // WebUI, protected: ----------------------------------------------------------
 
 void WebUI::AddMessageHandler(WebUIMessageHandler* handler) {
@@ -189,6 +197,10 @@ WebUIMessageHandler* WebUIMessageHandler::Attach(WebUI* web_ui) {
   web_ui_ = web_ui;
   RegisterMessages();
   return this;
+}
+
+bool WebUIMessageHandler::IsLoading() const {
+  return false;
 }
 
 // WebUIMessageHandler, protected: ---------------------------------------------

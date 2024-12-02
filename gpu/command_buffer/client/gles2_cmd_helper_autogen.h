@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file is auto-generated. DO NOT EDIT!
+// This file is auto-generated from
+// gpu/command_buffer/build_gles2_cmd_buffer.py
+// DO NOT EDIT!
 
 #ifndef GPU_COMMAND_BUFFER_CLIENT_GLES2_CMD_HELPER_AUTOGEN_H_
 #define GPU_COMMAND_BUFFER_CLIENT_GLES2_CMD_HELPER_AUTOGEN_H_
@@ -1217,19 +1219,25 @@
     c.Init(bucket_id);
   }
 
-  void SetLatchCHROMIUM(GLuint latch_id) {
-    gles2::SetLatchCHROMIUM& c = GetCmdSpace<gles2::SetLatchCHROMIUM>();
-    c.Init(latch_id);
-  }
-
-  void WaitLatchCHROMIUM(GLuint latch_id) {
-    gles2::WaitLatchCHROMIUM& c = GetCmdSpace<gles2::WaitLatchCHROMIUM>();
-    c.Init(latch_id);
-  }
-
   void SetSurfaceCHROMIUM(GLint surface_id) {
     gles2::SetSurfaceCHROMIUM& c = GetCmdSpace<gles2::SetSurfaceCHROMIUM>();
     c.Init(surface_id);
+  }
+
+  void GetMultipleIntegervCHROMIUM(
+      uint32 pnames_shm_id, uint32 pnames_shm_offset, GLuint count,
+      uint32 results_shm_id, uint32 results_shm_offset, GLsizeiptr size) {
+    gles2::GetMultipleIntegervCHROMIUM& c =
+        GetCmdSpace<gles2::GetMultipleIntegervCHROMIUM>();
+    c.Init(
+        pnames_shm_id, pnames_shm_offset, count, results_shm_id,
+        results_shm_offset, size);
+  }
+
+  void GetProgramInfoCHROMIUM(GLuint program, uint32 bucket_id) {
+    gles2::GetProgramInfoCHROMIUM& c =
+        GetCmdSpace<gles2::GetProgramInfoCHROMIUM>();
+    c.Init(program, bucket_id);
   }
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_CMD_HELPER_AUTOGEN_H_

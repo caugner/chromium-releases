@@ -47,14 +47,19 @@ class GLSurface : public base::RefCounted<GLSurface> {
 
   static bool InitializeOneOff();
 
+  // Called after a context is made current with this surface.
+  virtual void OnMakeCurrent();
+
 #if !defined(OS_MACOSX)
   // Create a GL surface that renders directly to a view.
   static scoped_refptr<GLSurface> CreateViewGLSurface(
+      bool software,
       gfx::PluginWindowHandle window);
 #endif
 
   // Create a GL surface used for offscreen rendering.
   static scoped_refptr<GLSurface> CreateOffscreenGLSurface(
+      bool software,
       const gfx::Size& size);
 
  protected:

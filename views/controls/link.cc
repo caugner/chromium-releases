@@ -69,14 +69,14 @@ Link::Link() : Label(L""),
                listener_(NULL),
                highlighted_(false) {
   Init();
-  SetFocusable(true);
+  set_focusable(true);
 }
 
 Link::Link(const std::wstring& title) : Label(title),
                                         listener_(NULL),
                                         highlighted_(false) {
   Init();
-  SetFocusable(true);
+  set_focusable(true);
 }
 
 void Link::Init() {
@@ -106,6 +106,12 @@ gfx::NativeCursor Link::GetCursor(const MouseEvent& event) {
 #elif defined(OS_LINUX)
   return gfx::GetCursor(GDK_HAND2);
 #endif
+}
+
+bool Link::HitTest(const gfx::Point& l) const {
+  // We need to allow clicks on the link. So we override the implementation in
+  // Label and use the default implementation of View.
+  return View::HitTest(l);
 }
 
 bool Link::OnMousePressed(const MouseEvent& event) {

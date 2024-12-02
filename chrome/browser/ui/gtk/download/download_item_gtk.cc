@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -33,7 +34,7 @@
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/skia_utils_gtk.h"
 
 namespace {
@@ -116,7 +117,7 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
                    G_CALLBACK(OnClickThunk), this);
   g_signal_connect(body_.get(), "button-press-event",
                    G_CALLBACK(OnButtonPressThunk), this);
-  GTK_WIDGET_UNSET_FLAGS(body_.get(), GTK_CAN_FOCUS);
+  gtk_widget_set_can_focus(body_.get(), FALSE);
   // Remove internal padding on the button.
   GtkRcStyle* no_padding_style = gtk_rc_style_new();
   no_padding_style->xthickness = 0;
@@ -125,23 +126,20 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
   g_object_unref(no_padding_style);
 
   name_label_ = gtk_label_new(NULL);
+  // Left align and vertically center the labels.
+  gtk_misc_set_alignment(GTK_MISC(name_label_), 0, 0.5);
+  // Until we switch to vector graphics, force the font size.
+  gtk_util::ForceFontSizePixels(name_label_, kTextSize);
 
   UpdateNameLabel();
 
-  status_label_ = gtk_label_new(NULL);
-  g_signal_connect(status_label_, "destroy",
-                   G_CALLBACK(gtk_widget_destroyed), &status_label_);
-  // Left align and vertically center the labels.
-  gtk_misc_set_alignment(GTK_MISC(name_label_), 0, 0.5);
-  gtk_misc_set_alignment(GTK_MISC(status_label_), 0, 0.5);
-  // Until we switch to vector graphics, force the font size.
-  gtk_util::ForceFontSizePixels(name_label_, kTextSize);
-  gtk_util::ForceFontSizePixels(status_label_, kTextSize);
+  status_label_ = NULL;
 
   // Stack the labels on top of one another.
-  GtkWidget* text_stack = gtk_vbox_new(FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(text_stack), name_label_, TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX(text_stack), status_label_, FALSE, FALSE, 0);
+  text_stack_ = gtk_vbox_new(FALSE, 0);
+  g_signal_connect(text_stack_, "destroy",
+                   G_CALLBACK(gtk_widget_destroyed), &text_stack_);
+  gtk_box_pack_start(GTK_BOX(text_stack_), name_label_, TRUE, TRUE, 0);
 
   // We use a GtkFixed because we don't want it to have its own window.
   // This choice of widget is not critically important though.
@@ -157,11 +155,11 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
   GtkWidget* body_hbox = gtk_hbox_new(FALSE, 0);
   gtk_container_add(GTK_CONTAINER(body_.get()), body_hbox);
   gtk_box_pack_start(GTK_BOX(body_hbox), progress_area_.get(), FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(body_hbox), text_stack, TRUE, TRUE, 0);
+  gtk_box_pack_start(GTK_BOX(body_hbox), text_stack_, TRUE, TRUE, 0);
 
   menu_button_ = gtk_button_new();
   gtk_widget_set_app_paintable(menu_button_, TRUE);
-  GTK_WIDGET_UNSET_FLAGS(menu_button_, GTK_CAN_FOCUS);
+  gtk_widget_set_can_focus(menu_button_, FALSE);
   g_signal_connect(menu_button_, "expose-event",
                    G_CALLBACK(OnExposeThunk), this);
   g_signal_connect(menu_button_, "button-press-event",
@@ -225,7 +223,8 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
     GtkWidget* dangerous_accept = gtk_button_new_with_label(
         l10n_util::GetStringUTF8(
             download_model->download()->is_extension_install() ?
-                IDS_CONTINUE_EXTENSION_DOWNLOAD : IDS_SAVE_DOWNLOAD).c_str());
+                IDS_CONTINUE_EXTENSION_DOWNLOAD :
+                IDS_CONFIRM_DOWNLOAD).c_str());
     g_signal_connect(dangerous_accept, "clicked",
                      G_CALLBACK(OnDangerousAcceptThunk), this);
     gtk_util::CenterWidgetInHBox(dangerous_hbox_.get(), dangerous_accept, false,
@@ -246,8 +245,8 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
     gtk_widget_show_all(dangerous_prompt_);
   }
 
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 
   // Set the initial width of the widget to be animated.
@@ -348,19 +347,7 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
       NOTREACHED();
   }
 
-  // Now update the status label. We may have already removed it; if so, we
-  // do nothing.
-  if (!status_label_) {
-    return;
-  }
-
   status_text_ = UTF16ToUTF8(download_model_->GetStatusText());
-  // Remove the status text label.
-  if (status_text_.empty()) {
-    gtk_widget_destroy(status_label_);
-    return;
-  }
-
   UpdateStatusLabel(status_text_);
 }
 
@@ -383,10 +370,10 @@ void DownloadItemGtk::AnimationProgressed(const ui::Animation* animation) {
   }
 }
 
-void DownloadItemGtk::Observe(NotificationType type,
+void DownloadItemGtk::Observe(int type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  if (type == NotificationType::BROWSER_THEME_CHANGED) {
+  if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     // Our GtkArrow is only visible in gtk mode. Otherwise, we let the custom
     // rendering code do whatever it wants.
     if (theme_service_->UsingNativeTheme()) {
@@ -497,8 +484,33 @@ void DownloadItemGtk::UpdateNameLabel() {
 }
 
 void DownloadItemGtk::UpdateStatusLabel(const std::string& status_text) {
-  if (!status_label_)
+  if (!text_stack_) {
+    // At least our container has been destroyed, which means that
+    // this item is on the way to being destroyed; don't do anything.
     return;
+  }
+
+  // If |status_text| is empty, only |name_label_| is displayed at the
+  // vertical center of |text_stack_|. Otherwise, |name_label_| is displayed
+  // on the upper half of |text_stack_| and |status_label_| is displayed
+  // on the lower half of |text_stack_|.
+  if (status_text.empty()) {
+    if (status_label_)
+      gtk_widget_destroy(status_label_);
+    return;
+  }
+  if (!status_label_) {
+    status_label_ = gtk_label_new(NULL);
+    g_signal_connect(status_label_, "destroy",
+                     G_CALLBACK(gtk_widget_destroyed), &status_label_);
+    // Left align and vertically center the labels.
+    gtk_misc_set_alignment(GTK_MISC(status_label_), 0, 0.5);
+    // Until we switch to vector graphics, force the font size.
+    gtk_util::ForceFontSizePixels(status_label_, kTextSize);
+
+    gtk_box_pack_start(GTK_BOX(text_stack_), status_label_, FALSE, FALSE, 0);
+    gtk_widget_show_all(status_label_);
+  }
 
   GdkColor text_color;
   if (!theme_service_->UsingNativeTheme()) {
@@ -713,7 +725,7 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
       GtkShadowType body_shadow =
           GTK_BUTTON(body_.get())->depressed ? GTK_SHADOW_IN : GTK_SHADOW_OUT;
       gtk_paint_box(style, widget->window,
-                    static_cast<GtkStateType>(GTK_WIDGET_STATE(body_.get())),
+                    gtk_widget_get_state(body_.get()),
                     body_shadow,
                     &left_clip, widget, "button",
                     x, y, width, height);
@@ -721,7 +733,7 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
       GtkShadowType menu_shadow =
           GTK_BUTTON(menu_button_)->depressed ? GTK_SHADOW_IN : GTK_SHADOW_OUT;
       gtk_paint_box(style, widget->window,
-                    static_cast<GtkStateType>(GTK_WIDGET_STATE(menu_button_)),
+                    gtk_widget_get_state(menu_button_),
                     menu_shadow,
                     &right_clip, widget, "button",
                     x, y, width, height);
@@ -732,7 +744,7 @@ gboolean DownloadItemGtk::OnHboxExpose(GtkWidget* widget, GdkEventExpose* e) {
       // the conservative side).
       GtkAllocation arrow_allocation = arrow_->allocation;
       gtk_paint_vline(style, widget->window,
-                      static_cast<GtkStateType>(GTK_WIDGET_STATE(widget)),
+                      gtk_widget_get_state(widget),
                       &e->area, widget, "button",
                       arrow_allocation.y,
                       arrow_allocation.y + arrow_allocation.height,
@@ -748,9 +760,9 @@ gboolean DownloadItemGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e) {
 
     NineBox* nine_box = NULL;
     // If true, this widget is |body_|, otherwise it is |menu_button_|.
-    if (GTK_WIDGET_STATE(widget) == GTK_STATE_PRELIGHT)
+    if (gtk_widget_get_state(widget) == GTK_STATE_PRELIGHT)
       nine_box = is_body ? body_nine_box_prelight_ : menu_nine_box_prelight_;
-    else if (GTK_WIDGET_STATE(widget) == GTK_STATE_ACTIVE)
+    else if (gtk_widget_get_state(widget) == GTK_STATE_ACTIVE)
       nine_box = is_body ? body_nine_box_active_ : menu_nine_box_active_;
     else
       nine_box = is_body ? body_nine_box_normal_ : menu_nine_box_normal_;
@@ -784,7 +796,6 @@ gboolean DownloadItemGtk::OnButtonPress(GtkWidget* button,
     ShowPopupMenu(NULL, event);
     return TRUE;
   }
-
   return FALSE;
 }
 
@@ -832,7 +843,6 @@ gboolean DownloadItemGtk::OnMenuButtonPressEvent(GtkWidget* button,
     gtk_widget_queue_draw(button);
     return TRUE;
   }
-
   return FALSE;
 }
 

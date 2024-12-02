@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,13 +58,16 @@ BufferManager::BufferInfo::BufferInfo(GLuint service_id)
     : service_id_(service_id),
       target_(0),
       size_(0),
+      usage_(GL_STATIC_DRAW),
       shadowed_(false) {
 }
 
 BufferManager::BufferInfo::~BufferInfo() { }
 
-void BufferManager::BufferInfo::SetSize(GLsizeiptr size, bool shadow) {
+void BufferManager::BufferInfo::SetInfo(
+    GLsizeiptr size, GLenum usage, bool shadow) {
   DCHECK(!IsDeleted());
+  usage_ = usage;
   if (size != size_ || shadow != shadowed_) {
     shadowed_ = shadow;
     size_ = size;
@@ -170,8 +173,7 @@ bool BufferManager::BufferInfo::GetMaxValueForRange(
       NOTREACHED();  // should never get here by validation.
       break;
   }
-  std::pair<RangeToMaxValueMap::iterator, bool> result =
-      range_set_.insert(std::make_pair(range, max_v));
+  range_set_.insert(std::make_pair(range, max_v));
   *max_value = max_v;
   return true;
 }
@@ -188,9 +190,11 @@ bool BufferManager::GetClientId(GLuint service_id, GLuint* client_id) const {
   return false;
 }
 
-void BufferManager::SetSize(BufferManager::BufferInfo* info, GLsizeiptr size) {
+void BufferManager::SetInfo(
+    BufferManager::BufferInfo* info, GLsizeiptr size, GLenum usage) {
   DCHECK(info);
-  info->SetSize(size,
+  info->SetInfo(size,
+                usage,
                 info->target() == GL_ELEMENT_ARRAY_BUFFER ||
                 allow_buffers_on_multiple_targets_);
 }

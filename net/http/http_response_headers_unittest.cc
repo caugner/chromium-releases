@@ -35,7 +35,7 @@ class HttpResponseHeadersTest : public testing::Test {
 // Transform "normal"-looking headers (\n-separated) to the appropriate
 // input format for ParseRawHeaders (\0-separated).
 void HeadersToRaw(std::string* headers) {
-  replace(headers->begin(), headers->end(), '\n', '\0');
+  std::replace(headers->begin(), headers->end(), '\n', '\0');
   if (!headers->empty())
     *headers += '\0';
 }
@@ -51,10 +51,10 @@ void TestCommon(const TestData& test) {
   parsed->GetNormalizedHeaders(&headers);
 
   // Transform to readable output format (so it's easier to see diffs).
-  replace(headers.begin(), headers.end(), ' ', '_');
-  replace(headers.begin(), headers.end(), '\n', '\\');
-  replace(expected_headers.begin(), expected_headers.end(), ' ', '_');
-  replace(expected_headers.begin(), expected_headers.end(), '\n', '\\');
+  std::replace(headers.begin(), headers.end(), ' ', '_');
+  std::replace(headers.begin(), headers.end(), '\n', '\\');
+  std::replace(expected_headers.begin(), expected_headers.end(), ' ', '_');
+  std::replace(expected_headers.begin(), expected_headers.end(), '\n', '\\');
 
   EXPECT_EQ(expected_headers, headers);
 
@@ -184,6 +184,19 @@ TEST(HttpResponseHeadersTest, NormalizeHeadersBadStatus) {
     200,
     net::HttpVersion(0,0), // Parse error
     net::HttpVersion(1,0)
+  };
+  TestCommon(test);
+}
+
+TEST(HttpResponseHeadersTest, NormalizeHeadersInvalidStatusCode) {
+  TestData test = {
+    "HTTP/1.1 -1  Unknown\n",
+
+    "HTTP/1.1 200 OK\n",
+
+    200,
+    net::HttpVersion(1,1),
+    net::HttpVersion(1,1)
   };
   TestCommon(test);
 }

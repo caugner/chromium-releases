@@ -41,7 +41,9 @@ class MockLoginDisplay : public LoginDisplay {
   MOCK_METHOD3(Init, void(const UserVector&, bool, bool));
   MOCK_METHOD1(OnUserImageChanged, void(UserManager::User*));
   MOCK_METHOD0(OnFadeOut, void(void));
+  MOCK_METHOD1(OnLoginSuccess, void(const std::string&));
   MOCK_METHOD1(SetUIEnabled, void(bool));
+  MOCK_METHOD1(SelectPod, void(int));
   MOCK_METHOD3(ShowError, void(int, int, HelpAppLauncher::HelpTopic));
   MOCK_METHOD1(OnBeforeUserRemoved, void(const std::string&));
   MOCK_METHOD1(OnUserRemoved, void(const std::string&));
@@ -82,7 +84,7 @@ class MockLoginPerformerDelegate : public LoginPerformer::Delegate {
   void OnLoginSuccess(const std::string&,
                       const std::string&,
                       const GaiaAuthConsumer::ClientLoginResult&,
-                      bool) {
+                      bool, bool) {
     LoginPerformer* login_performer = controller_->login_performer_.release();
     login_performer = NULL;
     controller_->ActivateWizard(WizardController::kUserImageScreenName);

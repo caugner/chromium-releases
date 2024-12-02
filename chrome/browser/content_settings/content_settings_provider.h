@@ -38,25 +38,24 @@ class DefaultProviderInterface {
   virtual void UpdateDefaultSetting(ContentSettingsType content_type,
                                     ContentSetting setting) = 0;
 
-  // Resets the state of the provider to the default.
-  virtual void ResetToDefaults() = 0;
-
   // True if the default setting for the |content_type| is policy managed, i.e.,
   // there shouldn't be any UI shown to modify this setting.
   virtual bool DefaultSettingIsManaged(
       ContentSettingsType content_type) const = 0;
+
+  virtual void ShutdownOnUIThread() = 0;
 };
 
 class ProviderInterface {
  public:
   struct Rule {
     Rule();
-    Rule(const ContentSettingsPattern& requesting_pattern,
-         const ContentSettingsPattern& embedding_pattern,
+    Rule(const ContentSettingsPattern& primary_pattern,
+         const ContentSettingsPattern& secondary_pattern,
          ContentSetting setting);
 
-    ContentSettingsPattern requesting_url_pattern;
-    ContentSettingsPattern embedding_url_pattern;
+    ContentSettingsPattern primary_pattern;
+    ContentSettingsPattern secondary_pattern;
     ContentSetting content_setting;
   };
 
@@ -64,27 +63,28 @@ class ProviderInterface {
 
   virtual ~ProviderInterface() {}
 
-  // Returns a single ContentSetting which applies to a given |requesting_url|,
-  // |embedding_url| pair or CONTENT_SETTING_DEFAULT, if no rule applies. For
+  // Returns a single ContentSetting which applies to a given |primary_url|,
+  // |secondary_url| pair or CONTENT_SETTING_DEFAULT, if no rule applies. For
   // ContentSettingsTypes that require a resource identifier to be specified,
   // the |resource_identifier| must be non-empty.
   //
   // This may be called on any thread.
   virtual ContentSetting GetContentSetting(
-      const GURL& requesting_url,
-      const GURL& embedding_url,
+      const GURL& primary_url,
+      const GURL& secondary_url,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier) const = 0;
 
-  // Sets the content setting for a particular |requesting_pattern|,
-  // |embedding_pattern|, |content_type| tuple. For ContentSettingsTypes that
+  // Sets the content setting for a particular |primary_pattern|,
+  // |secondary_pattern|, |content_type| tuple. For ContentSettingsTypes that
   // require a resource identifier to be specified, the |resource_identifier|
   // must be non-empty.
   //
-  // This should only be called on the UI thread.
+  // This should only be called on the UI thread, and not after
+  // ShutdownOnUIThread has been called.
   virtual void SetContentSetting(
-      const ContentSettingsPattern& requesting_url_pattern,
-      const ContentSettingsPattern& embedding_url_pattern,
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
       ContentSetting content_setting) = 0;
@@ -105,17 +105,19 @@ class ProviderInterface {
 
   // Resets all content settings for the given |content_type| to
   // CONTENT_SETTING_DEFAULT. For content types that require a resource
-  // identifier all content settings for any resource identifieres of the given
+  // identifier all content settings for any resource identifiers of the given
   // |content_type| will be reset to CONTENT_SETTING_DEFAULT.
   //
-  // This should only be called on the UI thread.
+  // This should only be called on the UI thread, and not after
+  // ShutdownOnUIThread has been called.
   virtual void ClearAllContentSettingsRules(
       ContentSettingsType content_type) = 0;
 
-  // Resets all content settings to CONTENT_SETTINGS_DEFAULT.
-  //
-  // This should only be called on the UI thread.
-  virtual void ResetToDefaults() = 0;
+  // Detaches the Provider from all Profile-related objects like PrefService.
+  // This methods needs to be called before destroying the Profile.
+  // Afterwards, none of the methods above that should only be called on the UI
+  // thread should be called anymore.
+  virtual void ShutdownOnUIThread() = 0;
 };
 
 }  // namespace content_settings

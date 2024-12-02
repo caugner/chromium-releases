@@ -9,7 +9,6 @@
 #include <limits>
 #include <string>
 
-#include "app/mac/nsimage_cache.h"
 #include "base/command_line.h"
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
@@ -34,9 +33,9 @@
 #import "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 #import "chrome/browser/ui/cocoa/new_tab_button.h"
-#import "chrome/browser/ui/cocoa/profile_menu_button.h"
 #import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
@@ -55,15 +54,16 @@
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 NSString* const kTabStripNumberOfTabsChanged = @"kTabStripNumberOfTabsChanged";
 
@@ -96,10 +96,6 @@ const CGFloat kIconWidthAndHeight = 16.0;
 
 // The amount by which the new tab button is offset (from the tabs).
 const CGFloat kNewTabButtonOffset = 8.0;
-
-// The amount by which to shrink the tab strip (on the right) when the
-// incognito badge is present.
-const CGFloat kIncognitoBadgeTabStripShrink = 18;
 
 // Time (in seconds) in which tabs animate to their final position.
 const NSTimeInterval kAnimationDuration = 0.125;
@@ -171,8 +167,6 @@ private:
             givesIndex:(NSInteger*)index
            disposition:(WindowOpenDisposition*)disposition;
 - (void)setNewTabButtonHoverState:(BOOL)showHover;
-- (BOOL)shouldShowProfileMenuButton;
-- (void)updateProfileMenuButton;
 @end
 
 // A simple view class that prevents the Window Server from dragging the area
@@ -271,39 +265,6 @@ private:
 
 @end
 
-namespace TabStripControllerInternal {
-
-// Bridges C++ notifications back to the TabStripController.
-class NotificationBridge : public NotificationObserver {
- public:
-  explicit NotificationBridge(TabStripController* controller,
-                              PrefService* prefService)
-      : controller_(controller) {
-    DCHECK(prefService);
-    usernamePref_.Init(prefs::kGoogleServicesUsername, prefService, this);
-  }
-
-  // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    DCHECK_EQ(NotificationType::PREF_CHANGED, type.value);
-    std::string* name = Details<std::string>(details).ptr();
-    if (prefs::kGoogleServicesUsername == *name) {
-      [controller_ updateProfileMenuButton];
-      [controller_ layoutTabsWithAnimation:NO regenerateSubviews:NO];
-    }
-  }
-
- private:
-  TabStripController* controller_;  // weak, owns us
-
-  // The Google services user name associated with this BrowserView's profile.
-  StringPrefMember usernamePref_;
-};
-
-} // namespace TabStripControllerInternal
-
 #pragma mark -
 
 // In general, there is a one-to-one correspondence between TabControllers,
@@ -344,7 +305,8 @@ class NotificationBridge : public NotificationObserver {
 
 @implementation TabStripController
 
-@synthesize indentForControls = indentForControls_;
+@synthesize leftIndentForControls = leftIndentForControls_;
+@synthesize rightIndentForControls = rightIndentForControls_;
 
 - (id)initWithView:(TabStripView*)view
         switchView:(NSView*)switchView
@@ -359,6 +321,8 @@ class NotificationBridge : public NotificationObserver {
     hoverTabSelector_.reset(new HoverTabSelector(tabStripModel_));
     delegate_ = delegate;
     bridge_.reset(new TabStripModelObserverBridge(tabStripModel_, self));
+    dragController_.reset(
+        [[TabStripDragController alloc] initWithTabStripController:self]);
     tabContentsArray_.reset([[NSMutableArray alloc] init]);
     tabArray_.reset([[NSMutableArray alloc] init]);
     NSWindow* browserWindow = [view window];
@@ -368,26 +332,19 @@ class NotificationBridge : public NotificationObserver {
     permanentSubviews_.reset([[NSMutableArray alloc] init]);
 
     defaultFavicon_.reset(
-        [app::mac::GetCachedImageWithName(@"nav.pdf") retain]);
+        [gfx::GetCachedImageWithName(@"nav.pdf") retain]);
 
-    [self setIndentForControls:[[self class] defaultIndentForControls]];
+    [self setLeftIndentForControls:[[self class] defaultLeftIndentForControls]];
+    [self setRightIndentForControls:0];
 
     // TODO(viettrungluu): WTF? "For some reason, if the view is present in the
     // nib a priori, it draws correctly. If we create it in code and add it to
     // the tab view, it draws with all sorts of crazy artifacts."
-    newTabButton_ = [view newTabButton];
+    newTabButton_ = [view getNewTabButton];
     [self addSubviewToPermanentList:newTabButton_];
     [newTabButton_ setTarget:nil];
     [newTabButton_ setAction:@selector(commandDispatch:)];
     [newTabButton_ setTag:IDC_NEW_TAB];
-
-    profileMenuButton_ = [view profileMenuButton];
-    [self addSubviewToPermanentList:profileMenuButton_];
-    [self updateProfileMenuButton];
-    // Register pref observers for profile name.
-    notificationBridge_.reset(
-        new TabStripControllerInternal::NotificationBridge(
-            self, browser_->profile()->GetPrefs()));
 
     // Set the images from code because Cocoa fails to find them in our sub
     // bundle during tests.
@@ -463,7 +420,7 @@ class NotificationBridge : public NotificationObserver {
     // list and create the UI for each.
     const int existingTabCount = tabStripModel_->count();
     const TabContentsWrapper* selection =
-        tabStripModel_->GetSelectedTabContents();
+        tabStripModel_->GetActiveTabContents();
     for (int i = 0; i < existingTabCount; ++i) {
       TabContentsWrapper* currentContents = tabStripModel_->GetTabContentsAt(i);
       [self insertTabWithContents:currentContents
@@ -510,7 +467,7 @@ class NotificationBridge : public NotificationObserver {
   return 25.0;
 }
 
-+ (CGFloat)defaultIndentForControls {
++ (CGFloat)defaultLeftIndentForControls {
   // Default indentation leaves enough room so tabs don't overlap with the
   // window controls.
   return 70.0;
@@ -811,6 +768,11 @@ class NotificationBridge : public NotificationObserver {
   return new TabMenuModel(delegate, tabStripModel_, index);
 }
 
+// Returns a weak reference to the controller that manages dragging of tabs.
+- (id<TabDraggingEventTarget>)dragController {
+  return dragController_.get();
+}
+
 - (void)insertPlaceholderForTab:(TabView*)tab
                           frame:(NSRect)frame
                   yStretchiness:(CGFloat)yStretchiness {
@@ -826,8 +788,9 @@ class NotificationBridge : public NotificationObserver {
 
 - (BOOL)isTabFullyVisible:(TabView*)tab {
   NSRect frame = [tab frame];
-  return NSMinX(frame) >= [self indentForControls] &&
-      NSMaxX(frame) <= NSMaxX([tabStripView_ frame]);
+  return NSMinX(frame) >= [self leftIndentForControls] &&
+      NSMaxX(frame) <= (NSMaxX([tabStripView_ frame]) -
+                        [self rightIndentForControls]);
 }
 
 - (void)showNewTabButton:(BOOL)show {
@@ -875,13 +838,18 @@ class NotificationBridge : public NotificationObserver {
     } else {
       availableSpace = NSWidth([tabStripView_ frame]);
 
-      // Account for the widths of the new tab button or the avatar, if any/all
-      // are present.
+      // Account for the width of the new tab button.
       availableSpace -= NSWidth([newTabButton_ frame]) + kNewTabButtonOffset;
-      if (browser_->profile()->IsOffTheRecord())
-        availableSpace -= kIncognitoBadgeTabStripShrink;
+
+      // Account for the right-side controls if not in rapid closure mode.
+      // (In rapid closure mode, the available width is set based on the
+      // position of the rightmost tab, not based on the width of the tab strip,
+      // so the right controls have already been accounted for.)
+      availableSpace -= [self rightIndentForControls];
     }
-    availableSpace -= [self indentForControls];
+
+    // Need to leave room for the left-side controls even in rapid closure mode.
+    availableSpace -= [self leftIndentForControls];
   }
 
   // This may be negative, but that's okay (taken care of by |MAX()| when
@@ -911,7 +879,7 @@ class NotificationBridge : public NotificationObserver {
 
   BOOL visible = [[tabStripView_ window] isVisible];
 
-  CGFloat offset = [self indentForControls];
+  CGFloat offset = [self leftIndentForControls];
   bool hasPlaceholderGap = false;
   for (TabController* tab in tabArray_.get()) {
     // Ignore a tab that is going through a close animation.
@@ -1061,49 +1029,6 @@ class NotificationBridge : public NotificationObserver {
     }
   }
 
-  if (profileMenuButton_ && ![profileMenuButton_ isHidden]) {
-    CGFloat maxX;
-    if ([newTabButton_ isHidden]) {
-      maxX = std::max(offset, NSMaxX(placeholderFrame_) - kTabOverlap);
-    } else {
-      maxX = NSMaxX(newTabTargetFrame_);
-    }
-    NSRect profileMenuButtonFrame = [profileMenuButton_ frame];
-    NSSize minSize = [profileMenuButton_ minControlSize];
-
-    // Make room for the full screen button if necessary.
-    if (!hasUpdatedProfileMenuButtonXOffset_) {
-      hasUpdatedProfileMenuButtonXOffset_ = YES;
-      if ([[profileMenuButton_ window]
-          respondsToSelector:@selector(toggleFullScreen:)]) {
-        NSButton* fullscreenButton = [[profileMenuButton_ window]
-            standardWindowButton:NSWindowFullScreenButton];
-        if (fullscreenButton) {
-          profileMenuButtonFrame.origin.x = NSMinX([fullscreenButton frame]) -
-              NSWidth(profileMenuButtonFrame) - kProfileMenuButtonOffset;
-        }
-      }
-    }
-
-    // TODO(sail): Animate this.
-    CGFloat availableWidth = NSMaxX(profileMenuButtonFrame) - maxX -
-                             kProfileMenuButtonOffset;
-    if (availableWidth > minSize.width) {
-      [profileMenuButton_ setShouldShowProfileDisplayName:YES];
-    } else {
-      [profileMenuButton_ setShouldShowProfileDisplayName:NO];
-    }
-
-    NSSize desiredSize = [profileMenuButton_ desiredControlSize];
-    NSRect rect;
-    rect.size.width = std::min(desiredSize.width,
-                               std::max(availableWidth, minSize.width));
-    rect.size.height = desiredSize.height;
-    rect.origin.y = NSMaxY(profileMenuButtonFrame) - rect.size.height;
-    rect.origin.x = NSMaxX(profileMenuButtonFrame) - rect.size.width;
-    [profileMenuButton_ setFrame:rect];
-  }
-
   [dragBlockingView_ setFrame:enclosingRect];
 
   // Mark that we've successfully completed layout of at least one tab.
@@ -1114,6 +1039,10 @@ class NotificationBridge : public NotificationObserver {
 // except when it's the first time.
 - (void)layoutTabs {
   [self layoutTabsWithAnimation:initialLayoutComplete_ regenerateSubviews:YES];
+}
+
+- (void)layoutTabsWithoutAnimation {
+  [self layoutTabsWithAnimation:NO regenerateSubviews:YES];
 }
 
 // Handles setting the title of the tab based on the given |contents|. Uses
@@ -1200,7 +1129,7 @@ class NotificationBridge : public NotificationObserver {
   // Take closing tabs into account.
   NSInteger activeIndex = [self indexFromModelIndex:modelIndex];
 
-  if (oldContents && oldContents != newContents) {
+  if (oldContents) {
     int oldModelIndex =
         browser_->GetIndexOfController(&(oldContents->controller()));
     if (oldModelIndex != -1) {  // When closing a tab, the old tab may be gone.
@@ -1452,7 +1381,7 @@ class NotificationBridge : public NotificationObserver {
   } else if (contents->tab_contents()->waiting_for_response()) {
     newState = kTabWaiting;
     throbberImage = throbberWaitingImage;
-  } else if (contents->tab_contents()->is_loading()) {
+  } else if (contents->tab_contents()->IsLoading()) {
     newState = kTabLoading;
     throbberImage = throbberLoadingImage;
   }
@@ -2103,28 +2032,6 @@ class NotificationBridge : public NotificationObserver {
   if (index >= 0) {
     [controller setTab:[self viewAtIndex:index] isDraggable:YES];
   }
-}
-
-- (BOOL)shouldShowProfileMenuButton {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kMultiProfiles))
-    return NO;
-  if (browser_->profile()->IsOffTheRecord())
-    return NO;
-  return (!browser_->profile()->GetPrefs()->GetString(
-        prefs::kGoogleServicesUsername).empty());
-}
-
-- (void)updateProfileMenuButton {
-  if (![self shouldShowProfileMenuButton]) {
-    [profileMenuButton_ setHidden:YES];
-    return;
-  }
-
-  std::string profileName = browser_->profile()->GetPrefs()->GetString(
-      prefs::kGoogleServicesUsername);
-  [profileMenuButton_ setProfileDisplayName:
-      [NSString stringWithUTF8String:profileName.c_str()]];
-  [profileMenuButton_ setHidden:NO];
 }
 
 @end

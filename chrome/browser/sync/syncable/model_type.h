@@ -17,8 +17,10 @@
 #include "base/logging.h"
 #include "base/time.h"
 
+namespace base {
 class ListValue;
 class StringValue;
+}
 
 namespace sync_pb {
 class EntitySpecifics;
@@ -63,8 +65,10 @@ enum ModelType {
   TYPED_URLS,
   // An extension folder or an extension object.
   EXTENSIONS,
-  // An object represeting a set of Nigori keys.
+  // An object representing a set of Nigori keys.
   NIGORI,
+  // An object representing a custom search engine.
+  SEARCH_ENGINES,
   // An object representing a browser session.
   SESSIONS,
   // An app folder or an app object.
@@ -96,6 +100,10 @@ ModelType GetModelType(const sync_pb::SyncEntity& sync_entity);
 // prefer using GetModelType where possible.
 ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics);
 
+// If this returns false, we shouldn't bother maintaining a position
+// value (sibling ordering) for this item.
+bool ShouldMaintainPosition(ModelType model_type);
+
 // Determine a model type from the field number of its associated
 // EntitySpecifics extension.
 ModelType GetModelTypeFromExtensionFieldNumber(int field_number);
@@ -110,12 +118,14 @@ std::string ModelTypeToString(ModelType model_type);
 // Handles all model types, and not just real ones.
 //
 // Caller takes ownership of returned value.
-StringValue* ModelTypeToValue(ModelType model_type);
+base::StringValue* ModelTypeToValue(ModelType model_type);
 
 std::string ModelTypeSetToString(const ModelTypeSet& model_types);
 
 // Returns the ModelType corresponding to the name |model_type_string|.
 ModelType ModelTypeFromString(const std::string& model_type_string);
+
+std::string ModelTypeBitSetToString(const ModelTypeBitSet& model_types);
 
 // Converts a string into a model type bitset. If successful, returns true. If
 // failed to parse string, returns false and model_types is unspecified.
@@ -127,10 +137,10 @@ bool ModelTypeBitSetFromString(
 ModelTypeBitSet ModelTypeBitSetFromSet(const ModelTypeSet& set);
 
 // Caller takes ownership of returned list.
-ListValue* ModelTypeBitSetToValue(const ModelTypeBitSet& model_types);
+base::ListValue* ModelTypeBitSetToValue(const ModelTypeBitSet& model_types);
 
 // Caller takes ownership of returned list.
-ListValue* ModelTypeSetToValue(const ModelTypeSet& model_types);
+base::ListValue* ModelTypeSetToValue(const ModelTypeSet& model_types);
 
 // Returns a string corresponding to the syncable tag for this datatype.
 std::string ModelTypeToRootTag(ModelType type);
@@ -143,13 +153,13 @@ void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time);
 // subscribing to server-issued notifications).  Returns true iff
 // |model_type| was a real model type and |notification_type| was
 // filled in.
-bool RealModelTypeToNotificationType(ModelType model_type,
+bool RealModelTypeToint(ModelType model_type,
                                      std::string* notification_type);
 
 // Converts a notification type to a real model type.  Returns true
 // iff |notification_type| was the notification type of a real model
 // type and |model_type| was filled in.
-bool NotificationTypeToRealModelType(const std::string& notification_type,
+bool intToRealModelType(const std::string& notification_type,
                                      ModelType* model_type);
 
 }  // namespace syncable

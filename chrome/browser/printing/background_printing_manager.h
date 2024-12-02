@@ -36,8 +36,11 @@ class BackgroundPrintingManager
   std::set<TabContentsWrapper*>::const_iterator begin();
   std::set<TabContentsWrapper*>::const_iterator end();
 
+  // Returns true if |printing_contents_| contains |entry|.
+  bool HasTabContents(TabContentsWrapper* entry);
+
   // NotificationObserver overrides:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 

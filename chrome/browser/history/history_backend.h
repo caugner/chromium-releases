@@ -9,7 +9,6 @@
 #include <string>
 #include <utility>
 
-#include "app/sql/init_status.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/mru_cache.h"
@@ -23,6 +22,7 @@
 #include "chrome/browser/history/thumbnail_database.h"
 #include "chrome/browser/history/visit_tracker.h"
 #include "chrome/browser/search_engines/template_url_id.h"
+#include "sql/init_status.h"
 
 class BookmarkService;
 struct DownloadHistoryInfo;
@@ -75,7 +75,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     // the main thread.
     //
     // Ownership of the HistoryDetails is transferred to this function.
-    virtual void BroadcastNotifications(NotificationType type,
+    virtual void BroadcastNotifications(int type,
                                         HistoryDetails* details) = 0;
 
     // Invoked when the backend has finished loading the db.
@@ -282,7 +282,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // While adding visits in batch, the source needs to be provided.
   virtual bool AddVisits(const GURL& url,
-                         const std::vector<base::Time>& visits,
+                         const std::vector<history::VisitInfo>& visits,
                          VisitSource visit_source);
 
   virtual bool RemoveVisits(const VisitVector& visits);
@@ -315,7 +315,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   void SetOnBackendDestroyTask(MessageLoop* message_loop, Task* task);
 
   // Adds the given rows to the database if it doesn't exist. A visit will be
-  // added for each given URL at the last visit time in the URLRow.
+  // added for each given URL at the last visit time in the URLRow if the
+  // passed visit type != SOURCE_SYNCED (the sync code manages visits itself).
   // Each visit will have the visit_source type set.
   void AddPagesWithDetails(const std::vector<URLRow>& info,
                            VisitSource visit_source);
@@ -343,6 +344,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, AddPageArgsSource);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, AddVisitsSource);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, RemoveVisitsSource);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, RemoveVisitsTransitions);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MigrationVisitSource);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MigrationIconMapping);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFaviconMapping);
@@ -485,7 +487,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Schedules a broadcast of the given notification on the main thread. The
   // details argument will have ownership taken by this function (it will be
   // sent to the main thread and deleted there).
-  virtual void BroadcastNotifications(NotificationType type,
+  virtual void BroadcastNotifications(int type,
                                       HistoryDetails* details_deleted);
 
   // Deleting all history ------------------------------------------------------

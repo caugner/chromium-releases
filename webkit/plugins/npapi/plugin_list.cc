@@ -108,6 +108,9 @@ static const VersionRangeDefinition kDivXVersionRange[] = {
 static const VersionRangeDefinition kRealPlayerVersionRange[] = {
     { "", "", "12.0.1.633", true }
 };
+static const VersionRangeDefinition kWindowsMediaPlayerVersionRange[] = {
+    { "", "", "", true }
+};
 static const PluginGroupDefinition kGroupDefinitions[] = {
   kFlashDefinition,
   { "apple-quicktime", PluginGroup::kQuickTimeGroupName, "QuickTime Plug-in",
@@ -129,8 +132,9 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
     kRealPlayerVersionRange, arraysize(kRealPlayerVersionRange),
     "http://www.real.com/realplayer/download" },
   // These are here for grouping, no vulnerabilities known.
-  { "windows-media-player", "Windows Media Player", "Windows Media Player",
-    NULL, 0, "" },
+  { "windows-media-player", PluginGroup::kWindowsMediaPlayerGroupName,
+    "Windows Media Player", kWindowsMediaPlayerVersionRange,
+    arraysize(kWindowsMediaPlayerVersionRange), "" },
   { "microsoft-office", "Microsoft Office", "Microsoft Office",
     NULL, 0, "" },
 };
@@ -174,11 +178,6 @@ PluginList* PluginList::Singleton() {
 bool PluginList::DebugPluginLoading() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDebugPluginLoading);
-}
-
-bool PluginList::PluginsLoaded() {
-  base::AutoLock lock(lock_);
-  return plugins_loaded_;
 }
 
 void PluginList::RefreshPlugins() {
@@ -321,8 +320,7 @@ bool PluginList::ParseMimeTypes(
 }
 
 PluginList::PluginList()
-    : plugins_loaded_(false),
-      plugins_need_refresh_(false),
+    : plugins_need_refresh_(true),
       disable_outdated_plugins_(false),
       group_definitions_(kGroupDefinitions),
       num_group_definitions_(ARRAYSIZE_UNSAFE(kGroupDefinitions)),
@@ -333,11 +331,11 @@ PluginList::PluginList()
 
 PluginList::PluginList(const PluginGroupDefinition* definitions,
                        size_t num_definitions)
-    : plugins_loaded_(false),
-      plugins_need_refresh_(false),
+    : plugins_need_refresh_(true),
       disable_outdated_plugins_(false),
       group_definitions_(definitions),
-      num_group_definitions_(num_definitions) {
+      num_group_definitions_(num_definitions),
+      default_plugin_enabled_(false) {
   // Don't do platform-dependend initialization in unit tests.
   AddHardcodedPluginGroups(&plugin_groups_);
 }
@@ -402,7 +400,7 @@ void PluginList::LoadPluginsInternal(ScopedVector<PluginGroup>* plugin_groups) {
 void PluginList::LoadPlugins(bool refresh) {
   {
     base::AutoLock lock(lock_);
-    if (plugins_loaded_ && !refresh && !plugins_need_refresh_)
+    if (!refresh && !plugins_need_refresh_)
       return;
   }
 
@@ -459,7 +457,6 @@ void PluginList::LoadPlugins(bool refresh) {
   plugins_to_disable_.clear();
 
   plugin_groups_.swap(new_plugin_groups);
-  plugins_loaded_ = true;
 }
 
 void PluginList::LoadPlugin(const FilePath& path,
@@ -539,7 +536,6 @@ void PluginList::GetPluginInfoArray(
   std::set<FilePath> visited_plugins;
 
   // Add in enabled plugins by mime type.
-  WebPluginInfo default_plugin;
   for (size_t i = 0; i < plugin_groups_.size(); ++i) {
     const std::vector<WebPluginInfo>& plugins =
         plugin_groups_[i]->web_plugins_info();

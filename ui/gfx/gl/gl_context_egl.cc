@@ -24,7 +24,7 @@ extern "C" {
 namespace gfx {
 
 std::string GLContextEGL::GetExtensions() {
-  const char* extensions = eglQueryString(GLSurfaceEGL::GetDisplay(),
+  const char* extensions = eglQueryString(display_,
                                           EGL_EXTENSIONS);
   if (!extensions)
     return GLContext::GetExtensions();
@@ -32,8 +32,9 @@ std::string GLContextEGL::GetExtensions() {
   return GLContext::GetExtensions() + " " + extensions;
 }
 
-GLContextEGL::GLContextEGL()
-    : context_(NULL)
+GLContextEGL::GLContextEGL(GLShareGroup* share_group)
+    : GLContext(share_group),
+      context_(NULL)
 {
 }
 
@@ -41,8 +42,7 @@ GLContextEGL::~GLContextEGL() {
   Destroy();
 }
 
-bool GLContextEGL::Initialize(GLContext* shared_context,
-                              GLSurface* compatible_surface) {
+bool GLContextEGL::Initialize(GLSurface* compatible_surface) {
   DCHECK(compatible_surface);
   DCHECK(!context_);
 
@@ -51,10 +51,14 @@ bool GLContextEGL::Initialize(GLContext* shared_context,
     EGL_NONE
   };
 
+  GLSurfaceEGL* egl_surface = static_cast<GLSurfaceEGL*>(compatible_surface);
+  display_ = egl_surface->GetDisplay();
+  config_ = egl_surface->GetConfig();
+
   context_ = eglCreateContext(
-      GLSurfaceEGL::GetDisplay(),
-      GLSurfaceEGL::GetConfig(),
-      shared_context ? shared_context->GetHandle() : NULL,
+      display_,
+      config_,
+      share_group() ? share_group()->GetHandle() : NULL,
       kContextAttributes);
   if (!context_) {
     LOG(ERROR) << "eglCreateContext failed with error "
@@ -68,7 +72,7 @@ bool GLContextEGL::Initialize(GLContext* shared_context,
 
 void GLContextEGL::Destroy() {
   if (context_) {
-    if (!eglDestroyContext(GLSurfaceEGL::GetDisplay(), context_)) {
+    if (!eglDestroyContext(display_, context_)) {
       LOG(ERROR) << "eglDestroyContext failed with error "
                  << GetLastEGLErrorString();
     }
@@ -82,7 +86,7 @@ bool GLContextEGL::MakeCurrent(GLSurface* surface) {
   if (IsCurrent(surface))
       return true;
 
-  if (!eglMakeCurrent(GLSurfaceEGL::GetDisplay(),
+  if (!eglMakeCurrent(display_,
                       surface->GetHandle(),
                       surface->GetHandle(),
                       context_)) {
@@ -91,6 +95,7 @@ bool GLContextEGL::MakeCurrent(GLSurface* surface) {
     return false;
   }
 
+  surface->OnMakeCurrent();
   return true;
 }
 
@@ -98,7 +103,7 @@ void GLContextEGL::ReleaseCurrent(GLSurface* surface) {
   if (!IsCurrent(surface))
     return;
 
-  eglMakeCurrent(GLSurfaceEGL::GetDisplay(),
+  eglMakeCurrent(display_,
                  EGL_NO_SURFACE,
                  EGL_NO_SURFACE,
                  EGL_NO_CONTEXT);
@@ -123,7 +128,7 @@ void* GLContextEGL::GetHandle() {
 
 void GLContextEGL::SetSwapInterval(int interval) {
   DCHECK(IsCurrent(NULL));
-  if (!eglSwapInterval(GLSurfaceEGL::GetDisplay(), interval)) {
+  if (!eglSwapInterval(display_, interval)) {
     LOG(ERROR) << "eglSwapInterval failed with error "
                << GetLastEGLErrorString();
   }

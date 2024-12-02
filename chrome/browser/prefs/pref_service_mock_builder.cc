@@ -60,6 +60,7 @@ PrefServiceMockBuilder::WithRecommendedCloudPrefs(PrefStore* store) {
   return *this;
 }
 
+#if defined(ENABLE_CONFIGURATION_POLICY)
 PrefServiceMockBuilder&
 PrefServiceMockBuilder::WithManagedPlatformProvider(
     policy::ConfigurationPolicyProvider* provider) {
@@ -88,6 +89,7 @@ PrefServiceMockBuilder::WithRecommendedCloudProvider(
   recommended_cloud_prefs_ = new policy::ConfigurationPolicyPrefStore(provider);
   return *this;
 }
+#endif
 
 PrefServiceMockBuilder&
 PrefServiceMockBuilder::WithCommandLine(CommandLine* command_line) {

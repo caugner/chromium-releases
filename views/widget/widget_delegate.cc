@@ -6,16 +6,16 @@
 
 #include "views/view.h"
 #include "views/views_delegate.h"
+#include "views/widget/widget.h"
 #include "views/window/client_view.h"
-#include "views/window/window.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace views {
 
-WidgetDelegate::WidgetDelegate() : window_(NULL) {
-}
+////////////////////////////////////////////////////////////////////////////////
+// WidgetDelegate:
 
-void WidgetDelegate::OnWidgetActivated(bool active) {
+WidgetDelegate::WidgetDelegate() : default_contents_view_(NULL) {
 }
 
 void WidgetDelegate::OnWidgetMove() {
@@ -99,33 +99,30 @@ std::wstring WidgetDelegate::GetWindowName() const {
 
 void WidgetDelegate::SaveWindowPlacement(const gfx::Rect& bounds,
                                          bool maximized) {
-  DCHECK(window_);
   std::wstring window_name = GetWindowName();
   if (!ViewsDelegate::views_delegate || window_name.empty())
     return;
 
   ViewsDelegate::views_delegate->SaveWindowPlacement(
-      window_, window_name, bounds, maximized);
+      GetWidget(), window_name, bounds, maximized);
 }
 
 bool WidgetDelegate::GetSavedWindowBounds(gfx::Rect* bounds) const {
-  DCHECK(window_);
   std::wstring window_name = GetWindowName();
   if (!ViewsDelegate::views_delegate || window_name.empty())
     return false;
 
   return ViewsDelegate::views_delegate->GetSavedWindowBounds(
-      window_, window_name, bounds);
+      window_name, bounds);
 }
 
 bool WidgetDelegate::GetSavedMaximizedState(bool* maximized) const {
-  DCHECK(window_);
   std::wstring window_name = GetWindowName();
   if (!ViewsDelegate::views_delegate || window_name.empty())
     return false;
 
   return ViewsDelegate::views_delegate->GetSavedMaximizedState(
-      window_, window_name, maximized);
+      window_name, maximized);
 }
 
 bool WidgetDelegate::ShouldRestoreWindowSize() const {
@@ -133,11 +130,38 @@ bool WidgetDelegate::ShouldRestoreWindowSize() const {
 }
 
 View* WidgetDelegate::GetContentsView() {
+  if (!default_contents_view_)
+    default_contents_view_ = new View;
+  return default_contents_view_;
+}
+
+ClientView* WidgetDelegate::CreateClientView(Widget* widget) {
+  return new ClientView(widget, GetContentsView());
+}
+
+NonClientFrameView* WidgetDelegate::CreateNonClientFrameView() {
   return NULL;
 }
 
-ClientView* WidgetDelegate::CreateClientView(Window* window) {
-  return new ClientView(window, GetContentsView());
+bool WidgetDelegate::WillProcessWorkAreaChange() const {
+  return false;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// WidgetDelegateView:
+
+WidgetDelegateView::WidgetDelegateView() {
+}
+
+WidgetDelegateView::~WidgetDelegateView() {
+}
+
+Widget* WidgetDelegateView::GetWidget() {
+  return View::GetWidget();
+}
+
+const Widget* WidgetDelegateView::GetWidget() const {
+  return View::GetWidget();
 }
 
 }  // namespace views

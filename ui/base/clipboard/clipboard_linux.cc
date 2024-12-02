@@ -388,10 +388,12 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
   gfx::CanvasSkia canvas(gdk_pixbuf_get_width(pixbuf.get()),
                          gdk_pixbuf_get_height(pixbuf.get()),
                          false);
-  skia::ScopedPlatformPaint scoped_platform_paint(&canvas);
-  cairo_t* context = scoped_platform_paint.GetPlatformSurface();
-  gdk_cairo_set_source_pixbuf(context, pixbuf.get(), 0.0, 0.0);
-  cairo_paint(context);
+  {
+    skia::ScopedPlatformPaint scoped_platform_paint(&canvas);
+    cairo_t* context = scoped_platform_paint.GetPlatformSurface();
+    gdk_cairo_set_source_pixbuf(context, pixbuf.get(), 0.0, 0.0);
+    cairo_paint(context);
+  }
   return canvas.ExtractBitmap();
 }
 
@@ -407,6 +409,13 @@ void Clipboard::ReadData(const std::string& format, std::string* result) {
     return;
   result->assign(reinterpret_cast<char*>(data->data), data->length);
   gtk_selection_data_free(data);
+}
+
+uint64 Clipboard::GetSequenceNumber() {
+  // TODO(cdn): implement this. For now this interface will advertise
+  // that the Linux clipboard never changes. That's fine as long as we
+  // don't rely on this signal.
+  return 0;
 }
 
 // static

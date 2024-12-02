@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -43,6 +43,21 @@ message ClientPhishingRequest {
   // List of features that were extracted.  Those are the features that were
   // sent to the scorer and which resulted in client_score being computed.
   repeated Feature feature_map = 5;
+
+  // The version number of the model that was used to compute the client-score.
+  // Copied from ClientSideModel.version().
+  optional int32 model_version = 6;
+
+  // Field 7 is only used on the server.
+
+  // List of features that are extracted in the client but are not used in the
+  // machine learning model.
+  repeated Feature non_model_feature_map = 8;
+
+  // The referrer URL.  This field might not be set, for example, in the case
+  // where the referrer uses HTTPs.
+  // OBSOLETE: Use feature 'Referrer=<referrer>' instead.
+  optional string OBSOLETE_referrer_url = 9;
 }
 
 message ClientPhishingResponse {

@@ -4,11 +4,14 @@
 
 #include "chrome/browser/renderer_host/chrome_render_view_host_observer.h"
 
+#include "base/command_line.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/net/predictor_api.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
@@ -24,7 +27,7 @@ ChromeRenderViewHostObserver::~ChromeRenderViewHostObserver() {
 void ChromeRenderViewHostObserver::Navigate(
     const ViewMsg_Navigate_Params& params) {
   const GURL& url = params.url;
-  if (!render_view_host()->delegate()->IsExternalTabContainer() &&
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame) &&
       (url.SchemeIs(chrome::kHttpScheme) || url.SchemeIs(chrome::kHttpsScheme)))
     chrome_browser_net::PreconnectUrlAndSubresources(url);
 }
@@ -44,7 +47,7 @@ void ChromeRenderViewHostObserver::OnDomOperationResponse(
     const std::string& json_string, int automation_id) {
   DomOperationNotificationDetails details(json_string, automation_id);
   NotificationService::current()->Notify(
-      NotificationType::DOM_OPERATION_RESPONSE,
+      chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
       Source<RenderViewHost>(render_view_host()),
       Details<DomOperationNotificationDetails>(&details));
 }

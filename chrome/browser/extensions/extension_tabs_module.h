@@ -15,30 +15,37 @@
 
 class BackingStore;
 class Browser;
-class DictionaryValue;
-class ListValue;
 class SkBitmap;
 class TabContents;
 class TabContentsWrapper;
 class TabStripModel;
+
+namespace base {
+class DictionaryValue;
+class ListValue;
+}
 
 namespace ExtensionTabUtil {
 int GetWindowId(const Browser* browser);
 int GetTabId(const TabContents* tab_contents);
 std::string GetTabStatusText(bool is_loading);
 int GetWindowIdOfTab(const TabContents* tab_contents);
-ListValue* CreateTabList(const Browser* browser);
-DictionaryValue* CreateTabValue(const TabContents* tab_contents);
-DictionaryValue* CreateTabValue(const TabContents* tab_contents,
-                                TabStripModel* tab_strip,
-                                int tab_index);
-DictionaryValue* CreateWindowValue(const Browser* browser,
-                                   bool populate_tabs);
+base::ListValue* CreateTabList(const Browser* browser);
+base::DictionaryValue* CreateTabValue(const TabContents* tab_contents);
+base::DictionaryValue* CreateTabValue(const TabContents* tab_contents,
+                                      TabStripModel* tab_strip,
+                                      int tab_index);
+// Create a tab value, overriding its kSelectedKey to the provided boolean.
+base::DictionaryValue* CreateTabValueActive(const TabContents* tab_contents,
+                                            bool active);
+base::DictionaryValue* CreateWindowValue(const Browser* browser,
+                                         bool populate_tabs);
 // Gets the |tab_strip_model| and |tab_index| for the given |tab_contents|.
 bool GetTabStripModel(const TabContents* tab_contents,
                       TabStripModel** tab_strip_model,
                       int* tab_index);
-bool GetDefaultTab(Browser* browser, TabContentsWrapper** contents,
+bool GetDefaultTab(Browser* browser,
+                   TabContentsWrapper** contents,
                    int* tab_id);
 // Any out parameter (|browser|, |tab_strip|, |contents|, & |tab_index|) may
 // be NULL and will not be set within the function.
@@ -120,9 +127,9 @@ class UpdateTabFunction : public AsyncExtensionFunction,
   virtual ~UpdateTabFunction() {}
   virtual bool RunImpl();
   virtual bool OnMessageReceived(const IPC::Message& message);
-  void OnExecuteCodeFinished(int request_id, bool success,
+  void OnExecuteCodeFinished(int request_id,
+                             bool success,
                              const std::string& error);
-  TabContentsObserver::Registrar registrar_;
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.update")
 };
 class MoveTabFunction : public SyncExtensionFunction {
@@ -141,7 +148,7 @@ class DetectTabLanguageFunction : public AsyncExtensionFunction,
   virtual ~DetectTabLanguageFunction() {}
   virtual bool RunImpl();
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
   void GotLanguage(const std::string& language);
@@ -162,7 +169,7 @@ class CaptureVisibleTabFunction : public AsyncExtensionFunction,
   virtual ~CaptureVisibleTabFunction() {}
   virtual bool RunImpl();
   virtual bool CaptureSnapshotFromBackingStore(BackingStore* backing_store);
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
   virtual void SendResultFromBitmap(const SkBitmap& screen_capture);

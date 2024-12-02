@@ -14,7 +14,7 @@
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/ppb_graphics_2d.h"
-#include "ppapi/cpp/common.h"
+#include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/thunk.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/blit.h"
@@ -28,6 +28,9 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #endif
+
+using ppapi::thunk::EnterResourceNoLock;
+using ppapi::thunk::PPB_ImageData_API;
 
 namespace webkit {
 namespace ppapi {
@@ -150,7 +153,6 @@ struct PPB_Graphics2D_Impl::QueuedOperation {
 PPB_Graphics2D_Impl::PPB_Graphics2D_Impl(PluginInstance* instance)
     : Resource(instance),
       bound_instance_(NULL),
-      flushed_any_data_(false),
       offscreen_flush_pending_(false),
       is_always_opaque_(false) {
 }
@@ -159,8 +161,16 @@ PPB_Graphics2D_Impl::~PPB_Graphics2D_Impl() {
 }
 
 // static
-const PPB_Graphics2D* PPB_Graphics2D_Impl::GetInterface() {
-  return ::ppapi::thunk::GetPPB_Graphics2D_Thunk();
+PP_Resource PPB_Graphics2D_Impl::Create(PluginInstance* instance,
+                                        const PP_Size& size,
+                                        PP_Bool is_always_opaque) {
+  scoped_refptr<PPB_Graphics2D_Impl> graphics_2d(
+      new PPB_Graphics2D_Impl(instance));
+  if (!graphics_2d->Init(size.width, size.height,
+                         PPBoolToBool(is_always_opaque))) {
+    return 0;
+  }
+  return graphics_2d->GetReference();
 }
 
 bool PPB_Graphics2D_Impl::Init(int width, int height, bool is_always_opaque) {
@@ -189,7 +199,7 @@ PP_Bool PPB_Graphics2D_Impl::Describe(PP_Size* size,
                                       PP_Bool* is_always_opaque) {
   size->width = image_data_->width();
   size->height = image_data_->height();
-  *is_always_opaque = pp::BoolToPPBool(is_always_opaque_);
+  *is_always_opaque = PP_FromBool(is_always_opaque_);
   return PP_TRUE;
 }
 
@@ -199,10 +209,11 @@ void PPB_Graphics2D_Impl::PaintImageData(PP_Resource image_data,
   if (!top_left)
     return;
 
-  scoped_refptr<PPB_ImageData_Impl> image_resource(
-      Resource::GetAs<PPB_ImageData_Impl>(image_data));
-  if (!image_resource)
+  EnterResourceNoLock<PPB_ImageData_API> enter(image_data, true);
+  if (enter.failed())
     return;
+  PPB_ImageData_Impl* image_resource =
+      static_cast<PPB_ImageData_Impl*>(enter.object());
 
   QueuedOperation operation(QueuedOperation::PAINT);
   operation.paint_image = image_resource;
@@ -253,10 +264,12 @@ void PPB_Graphics2D_Impl::Scroll(const PP_Rect* clip_rect,
 }
 
 void PPB_Graphics2D_Impl::ReplaceContents(PP_Resource image_data) {
-  scoped_refptr<PPB_ImageData_Impl> image_resource(
-      Resource::GetAs<PPB_ImageData_Impl>(image_data));
-  if (!image_resource)
+  EnterResourceNoLock<PPB_ImageData_API> enter(image_data, true);
+  if (enter.failed())
     return;
+  PPB_ImageData_Impl* image_resource =
+      static_cast<PPB_ImageData_Impl*>(enter.object());
+
   if (!PPB_ImageData_Impl::IsImageDataFormatSupported(
           image_resource->format()))
     return;
@@ -320,7 +333,6 @@ int32_t PPB_Graphics2D_Impl::Flush(PP_CompletionCallback callback) {
     }
   }
   queued_operations_.clear();
-  flushed_any_data_ = true;
 
   if (nothing_visible) {
     // There's nothing visible to invalidate so just schedule the callback to
@@ -335,10 +347,11 @@ int32_t PPB_Graphics2D_Impl::Flush(PP_CompletionCallback callback) {
 bool PPB_Graphics2D_Impl::ReadImageData(PP_Resource image,
                                         const PP_Point* top_left) {
   // Get and validate the image object to paint into.
-  scoped_refptr<PPB_ImageData_Impl> image_resource(
-      Resource::GetAs<PPB_ImageData_Impl>(image));
-  if (!image_resource)
+  EnterResourceNoLock<PPB_ImageData_API> enter(image, true);
+  if (enter.failed())
     return false;
+  PPB_ImageData_Impl* image_resource =
+      static_cast<PPB_ImageData_Impl*>(enter.object());
   if (!PPB_ImageData_Impl::IsImageDataFormatSupported(
           image_resource->format()))
     return false;  // Must be in the right format.
@@ -369,7 +382,7 @@ bool PPB_Graphics2D_Impl::ReadImageData(PP_Resource image,
 
   if (image_resource->format() != image_data_->format()) {
     // Convert the image data if the format does not match.
-    ConvertImageData(image_data_, src_irect, image_resource.get(), dest_rect);
+    ConvertImageData(image_data_, src_irect, image_resource, dest_rect);
   } else {
     skia::PlatformCanvas* dest_canvas = image_resource->mapped_canvas();
 
@@ -402,15 +415,8 @@ bool PPB_Graphics2D_Impl::BindToInstance(PluginInstance* new_instance) {
       std::swap(callback, painted_flush_callback_);
       ScheduleOffscreenCallback(callback);
     }
-  } else if (flushed_any_data_) {
-    // Only schedule a paint if this backing store has had any data flushed to
-    // it. This is an optimization. A "normal" plugin will first allocated a
-    // backing store, bind it, and then execute their normal painting and
-    // update loop. If binding a device always invalidated, it would mean we
-    // would get one paint for the bind, and one for the first time the plugin
-    // actually painted something. By not bothering to schedule an invalidate
-    // when an empty device is initially bound, we can save an extra paint for
-    // many plugins during the critical page initialization phase.
+  } else {
+    // Devices being replaced, redraw the plugin.
     new_instance->InvalidateRect(gfx::Rect());
   }
 
@@ -474,19 +480,42 @@ void PPB_Graphics2D_Impl::Paint(WebKit::WebCanvas* canvas,
   CGContextDrawImage(canvas, bitmap_rect, image);
   CGContextRestoreGState(canvas);
 #else
+  SkRect sk_plugin_rect = SkRect::MakeXYWH(
+      SkIntToScalar(plugin_rect.origin().x()),
+      SkIntToScalar(plugin_rect.origin().y()),
+      SkIntToScalar(plugin_rect.width()),
+      SkIntToScalar(plugin_rect.height()));
+  canvas->save();
+  canvas->clipRect(sk_plugin_rect);
+
+  if (instance()->IsFullPagePlugin()) {
+    // When we're resizing a window with a full-frame plugin, the plugin may
+    // not yet have bound a new device, which will leave parts of the
+    // background exposed if the window is getting larger. We want this to
+    // show white (typically less jarring) rather than black or uninitialized.
+    // We don't do this for non-full-frame plugins since we specifically want
+    // the page background to show through.
+    canvas->save();
+    SkRect image_data_rect = SkRect::MakeXYWH(
+        SkIntToScalar(plugin_rect.origin().x()),
+        SkIntToScalar(plugin_rect.origin().y()),
+        SkIntToScalar(image_data_->width()),
+        SkIntToScalar(image_data_->height()));
+    canvas->clipRect(image_data_rect, SkRegion::kDifference_Op);
+
+    SkPaint paint;
+    paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+    paint.setColor(SK_ColorWHITE);
+    canvas->drawRect(sk_plugin_rect, paint);
+    canvas->restore();
+  }
+
   SkPaint paint;
   if (is_always_opaque_) {
     // When we know the device is opaque, we can disable blending for slightly
     // more optimized painting.
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
   }
-
-  canvas->save();
-  SkRect clip_rect = SkRect::MakeXYWH(SkIntToScalar(plugin_rect.origin().x()),
-                                      SkIntToScalar(plugin_rect.origin().y()),
-                                      SkIntToScalar(plugin_rect.width()),
-                                      SkIntToScalar(plugin_rect.height()));
-  canvas->clipRect(clip_rect);
   canvas->drawBitmap(backing_bitmap,
                      SkIntToScalar(plugin_rect.x()),
                      SkIntToScalar(plugin_rect.y()),

@@ -6,11 +6,7 @@
 
 #include <bitset>
 #include <gtk/gtk.h>
-#if defined(HAVE_XINPUT2)
 #include <X11/extensions/XInput2.h>
-#else
-#include <X11/Xlib.h>
-#endif
 
 #include "views/accelerator.h"
 #include "views/events/event.h"
@@ -32,18 +28,17 @@ Widget* FindWidgetForGdkWindow(GdkWindow* gdk_window) {
     DLOG(WARNING) << "no GtkWidget found for that GdkWindow";
     return NULL;
   }
-  NativeWidget* widget = NativeWidget::GetNativeWidgetForNativeView(gtk_widget);
+  Widget* widget = Widget::GetWidgetForNativeView(gtk_widget);
 
   if (!widget) {
     DLOG(WARNING) << "no NativeWidgetGtk found for that GtkWidget";
     return NULL;
   }
-  return widget->GetWidget();
+  return widget;
 }
 
 }  // namespace
 
-#if defined(HAVE_XINPUT2)
 bool DispatchX2Event(Widget* widget, XEvent* xev) {
   XGenericEventCookie* cookie = &xev->xcookie;
   switch (cookie->evtype) {
@@ -80,8 +75,7 @@ bool DispatchX2Event(Widget* widget, XEvent* xev) {
         // If the TouchEvent is processed by |root|, then return. Otherwise let
         // it fall through so it can be used as a MouseEvent, if desired.
         TouchEvent touch(xev, from_native);
-        View* root = widget->GetRootView();
-        if (root->OnTouchEvent(touch) != views::View::TOUCH_STATUS_UNKNOWN)
+        if (widget->OnTouchEvent(touch) != ui::TOUCH_STATUS_UNKNOWN)
           return true;
 
         // We do not want to generate a mouse event for an unprocessed touch
@@ -107,13 +101,10 @@ bool DispatchX2Event(Widget* widget, XEvent* xev) {
   return false;
 }
 
-#endif  // HAVE_XINPUT2
-
 bool DispatchXEvent(XEvent* xev) {
   GdkDisplay* gdisp = gdk_display_get_default();
   XID xwindow = xev->xany.window;
 
-#if defined(HAVE_XINPUT2)
   if (xev->type == GenericEvent) {
     if (!TouchFactory::GetInstance()->ShouldProcessXI2Event(xev))
       return true;  // Consume the event.
@@ -127,7 +118,6 @@ bool DispatchXEvent(XEvent* xev) {
     XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(cookie->data);
     xwindow = xiev->event;
   }
-#endif
 
   GdkWindow* gwind = gdk_window_lookup_for_display(gdisp, xwindow);
   Widget* widget = FindWidgetForGdkWindow(gwind);
@@ -159,35 +149,26 @@ bool DispatchXEvent(XEvent* xev) {
         return widget->OnMouseEvent(mouseev);
       }
 
-#if defined(HAVE_XINPUT2)
       case GenericEvent: {
         return DispatchX2Event(widget, xev);
       }
-#endif
     }
   }
 
   return false;
 }
 
-#if defined(HAVE_XINPUT2)
 void SetTouchDeviceList(std::vector<unsigned int>& devices) {
   TouchFactory::GetInstance()->SetTouchDeviceList(devices);
 }
-#endif
 
 AcceleratorHandler::AcceleratorHandler() {}
 
-bool AcceleratorHandler::Dispatch(GdkEvent* event) {
-  gtk_main_do_event(event);
-  return true;
-}
-
-base::MessagePumpGlibXDispatcher::DispatchStatus
-    AcceleratorHandler::DispatchX(XEvent* xev) {
+base::MessagePumpDispatcher::DispatchStatus
+    AcceleratorHandler::Dispatch(XEvent* xev) {
   return DispatchXEvent(xev) ?
-      base::MessagePumpGlibXDispatcher::EVENT_PROCESSED :
-      base::MessagePumpGlibXDispatcher::EVENT_IGNORED;
+      base::MessagePumpDispatcher::EVENT_PROCESSED :
+      base::MessagePumpDispatcher::EVENT_IGNORED;
 }
 
 }  // namespace views

@@ -99,14 +99,20 @@ bool EncoderVp8::Init(const gfx::Size& size) {
   active_map_height_ = (size.height() + kMacroBlockSize - 1) / kMacroBlockSize;
   active_map_.reset(new uint8[active_map_width_ * active_map_height_]);
 
-  // TODO(hclam): Tune the parameters to better suit the application.
   config.rc_target_bitrate = size.width() * size.height() *
       config.rc_target_bitrate / config.g_w / config.g_h;
   config.g_w = size.width();
   config.g_h = size.height();
   config.g_pass = VPX_RC_ONE_PASS;
-  config.g_profile = 1;
-  config.g_threads = 1;
+
+  // Value of 2 means using the real time profile. This is basically a
+  // redundant option since we explicitly select real time mode when doing
+  // encoding.
+  config.g_profile = 2;
+
+  // Using 2 threads would give a great boost in performance in most systems
+  // while hurting single core systems just a little bit.
+  config.g_threads = 2;
   config.rc_min_quantizer = 20;
   config.rc_max_quantizer = 30;
   config.g_timebase.num = 1;
@@ -114,20 +120,17 @@ bool EncoderVp8::Init(const gfx::Size& size) {
 
   if (vpx_codec_enc_init(codec_.get(), algo, &config, 0))
     return false;
+
+  // Value of 16 will have the smallest CPU load. This turns off subpixel
+  // motion search.
+  if (vpx_codec_control(codec_.get(), VP8E_SET_CPUUSED, 16))
+    return false;
+
+  // Use the lowest level of noise sensitivity so as to spend less time
+  // on motion estimation and inter-prediction mode.
+  if (vpx_codec_control(codec_.get(), VP8E_SET_NOISE_SENSITIVITY, 0))
+    return false;
   return true;
-}
-
-static int RoundToTwosMultiple(int x) {
-  return x & (~1);
-}
-
-// Align the sides of the rectangle to multiples of 2 (expanding outwards).
-static gfx::Rect AlignRect(const gfx::Rect& rect) {
-  int x = RoundToTwosMultiple(rect.x());
-  int y = RoundToTwosMultiple(rect.y());
-  int right = RoundToTwosMultiple(rect.right() + 1);
-  int bottom = RoundToTwosMultiple(rect.bottom() + 1);
-  return gfx::Rect(x, y, right - x, bottom - y);
 }
 
 // static

@@ -12,12 +12,12 @@
 #include <set>
 
 #include "base/file_util.h"
+#include "base/mac/mac_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/webkit_glue.h"
@@ -960,6 +960,17 @@ void WebPluginDelegateImpl::SetNSCursor(NSCursor* cursor) {
   current_windowless_cursor_.InitFromNSCursor(cursor);
 }
 
+bool WebPluginDelegateImpl::AllowBufferFlipping() {
+#ifndef NP_NO_CARBON
+  // Using buffer flipping for Carbon plugins would require issuing an
+  // NPP_SetWindow() call for every frame, which would likely expose plugin
+  // bugs and/or suboptimal behaviour. So we don't allow it.
+  return instance()->event_model() != NPEventModelCarbon;
+#else
+  return true;
+#endif
+}
+
 #pragma mark -
 #pragma mark Internal Tracking
 
@@ -1007,27 +1018,15 @@ void WebPluginDelegateImpl::PluginVisibilityChanged() {
 }
 
 void WebPluginDelegateImpl::StartIme() {
+  // Currently the plugin IME implementation only works on 10.6.
   if (instance()->event_model() != NPEventModelCocoa ||
-      !IsImeSupported()) {
+      base::mac::IsOSLeopardOrEarlier()) {
     return;
   }
   if (ime_enabled_)
     return;
   ime_enabled_ = true;
   plugin_->StartIme();
-}
-
-bool WebPluginDelegateImpl::IsImeSupported() {
-  // Currently the plugin IME implementation only works on 10.6.
-  static BOOL sImeSupported = NO;
-  static BOOL sHaveCheckedSupport = NO;
-  if (!sHaveCheckedSupport) {
-    int32 major, minor, bugfix;
-    base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
-    sImeSupported = major > 10 || (major == 10 && minor > 5);
-    sHaveCheckedSupport = YES;
-  }
-  return sImeSupported;
 }
 
 #pragma mark -

@@ -6,8 +6,8 @@
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/test/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
@@ -54,7 +54,7 @@ TEST_F(BookmarkNodeDataTest, BogusRead) {
 // read it.
 TEST_F(BookmarkNodeDataTest, JustURL) {
   const GURL url("http://google.com");
-  const std::wstring title(L"title");
+  const string16 title(ASCIIToUTF16("title"));
 
   ui::OSExchangeData data;
   data.SetURL(url, title);
@@ -76,7 +76,7 @@ TEST_F(BookmarkNodeDataTest, URL) {
   profile.BlockUntilBookmarkModelLoaded();
   profile.SetID(L"id");
   BookmarkModel* model = profile.GetBookmarkModel();
-  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->bookmark_bar_node();
   GURL url(GURL("http://foo.com"));
   const string16 title(ASCIIToUTF16("blah"));
   const BookmarkNode* node = model->AddURL(root, 0, title, url);
@@ -85,7 +85,7 @@ TEST_F(BookmarkNodeDataTest, URL) {
   ASSERT_EQ(1, drag_data.elements.size());
   EXPECT_TRUE(drag_data.elements[0].is_url);
   EXPECT_EQ(url, drag_data.elements[0].url);
-  EXPECT_EQ(title, WideToUTF16Hack(drag_data.elements[0].title));
+  EXPECT_EQ(title, drag_data.elements[0].title);
   ui::OSExchangeData data;
   drag_data.Write(&profile, &data);
 
@@ -106,7 +106,7 @@ TEST_F(BookmarkNodeDataTest, URL) {
 
   // Writing should also put the URL and title on the clipboard.
   GURL read_url;
-  std::wstring read_title;
+  string16 read_title;
   EXPECT_TRUE(data2.GetURLAndTitle(&read_url, &read_title));
   EXPECT_EQ(url, read_url);
   EXPECT_EQ(title, read_title);
@@ -119,7 +119,7 @@ TEST_F(BookmarkNodeDataTest, Folder) {
   profile.BlockUntilBookmarkModelLoaded();
   profile.SetID(L"id");
   BookmarkModel* model = profile.GetBookmarkModel();
-  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->bookmark_bar_node();
   const BookmarkNode* g1 = model->AddFolder(root, 0, ASCIIToUTF16("g1"));
   const BookmarkNode* g11 = model->AddFolder(g1, 0, ASCIIToUTF16("g11"));
   const BookmarkNode* g12 = model->AddFolder(g1, 0, ASCIIToUTF16("g12"));
@@ -127,7 +127,7 @@ TEST_F(BookmarkNodeDataTest, Folder) {
   BookmarkNodeData drag_data(g12);
   EXPECT_TRUE(drag_data.is_valid());
   ASSERT_EQ(1, drag_data.elements.size());
-  EXPECT_EQ(g12->GetTitle(), WideToUTF16Hack(drag_data.elements[0].title));
+  EXPECT_EQ(g12->GetTitle(), drag_data.elements[0].title);
   EXPECT_FALSE(drag_data.elements[0].is_url);
 
   ui::OSExchangeData data;
@@ -139,7 +139,7 @@ TEST_F(BookmarkNodeDataTest, Folder) {
   EXPECT_TRUE(read_data.Read(data2));
   EXPECT_TRUE(read_data.is_valid());
   ASSERT_EQ(1, read_data.elements.size());
-  EXPECT_EQ(g12->GetTitle(), WideToUTF16Hack(read_data.elements[0].title));
+  EXPECT_EQ(g12->GetTitle(), read_data.elements[0].title);
   EXPECT_FALSE(read_data.elements[0].is_url);
 
   // We should get back the same node when asking for the same profile.
@@ -158,7 +158,7 @@ TEST_F(BookmarkNodeDataTest, FolderWithChild) {
   profile.CreateBookmarkModel(false);
   profile.BlockUntilBookmarkModelLoaded();
   BookmarkModel* model = profile.GetBookmarkModel();
-  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->bookmark_bar_node();
   const BookmarkNode* folder = model->AddFolder(root, 0, ASCIIToUTF16("g1"));
 
   GURL url(GURL("http://foo.com"));
@@ -181,7 +181,7 @@ TEST_F(BookmarkNodeDataTest, FolderWithChild) {
       read_data.elements[0].children[0];
 
   EXPECT_TRUE(read_child.is_url);
-  EXPECT_EQ(title, WideToUTF16Hack(read_child.title));
+  EXPECT_EQ(title, read_child.title);
   EXPECT_EQ(url, read_child.url);
   EXPECT_TRUE(read_child.is_url);
 
@@ -197,7 +197,7 @@ TEST_F(BookmarkNodeDataTest, MultipleNodes) {
   profile.CreateBookmarkModel(false);
   profile.BlockUntilBookmarkModelLoaded();
   BookmarkModel* model = profile.GetBookmarkModel();
-  const BookmarkNode* root = model->GetBookmarkBarNode();
+  const BookmarkNode* root = model->bookmark_bar_node();
   const BookmarkNode* folder = model->AddFolder(root, 0, ASCIIToUTF16("g1"));
 
   GURL url(GURL("http://foo.com"));
@@ -228,7 +228,7 @@ TEST_F(BookmarkNodeDataTest, MultipleNodes) {
 
   const BookmarkNodeData::Element& read_url = read_data.elements[1];
   EXPECT_TRUE(read_url.is_url);
-  EXPECT_EQ(title, WideToUTF16Hack(read_url.title));
+  EXPECT_EQ(title, read_url.title);
   EXPECT_EQ(0, read_url.children.size());
 
   // And make sure we get the node back.

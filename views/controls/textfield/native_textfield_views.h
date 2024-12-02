@@ -11,8 +11,10 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/font.h"
 #include "views/border.h"
+#include "views/context_menu_controller.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #include "views/controls/textfield/textfield_views_model.h"
+#include "views/drag_controller.h"
 #include "views/ime/text_input_client.h"
 #include "views/view.h"
 
@@ -28,7 +30,8 @@ namespace views {
 
 class FocusableBorder;
 class KeyEvent;
-class Menu2;
+class MenuItemView;
+class MenuModelAdapter;
 
 // A views/skia only implementation of NativeTextfieldWrapper.
 // No platform specific code is used.
@@ -36,8 +39,8 @@ class Menu2;
 // * BIDI/Complex script.
 // * Support surrogate pair, or maybe we should just use UTF32 internally.
 // * X selection (only if we want to support).
-// * STYLE_MULTILINE, STYLE_LOWERCASE text. (These are not used in
-//   chromeos, so we may not need them)
+// Once completed, this will replace Textfield, NativeTextfieldWin and
+// NativeTextfieldGtk.
 class NativeTextfieldViews : public View,
                              public ContextMenuController,
                              public DragController,
@@ -111,6 +114,9 @@ class NativeTextfieldViews : public View,
   virtual void HandleFocus() OVERRIDE;
   virtual void HandleBlur() OVERRIDE;
   virtual TextInputClient* GetTextInputClient() OVERRIDE;
+  virtual void ApplyStyleRange(const gfx::StyleRange& style) OVERRIDE;
+  virtual void ApplyDefaultStyle() OVERRIDE;
+  virtual void ClearEditHistory() OVERRIDE;
 
   // ui::SimpleMenuModel::Delegate overrides
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
@@ -122,14 +128,6 @@ class NativeTextfieldViews : public View,
 
   // class name of internal
   static const char kViewClassName[];
-
-  // Returns true when
-  // 1) built with GYP_DEFINES="touchui=1"
-  // 2) enabled by SetEnableTextfieldViews(true)
-  // 3) enabled by the command line flag "--enable-textfield-view".
-  static bool IsTextfieldViewsEnabled();
-  // Enable/Disable TextfieldViews implementation for Textfield.
-  static void SetEnableTextfieldViews(bool enabled);
 
  protected:
   // View override.
@@ -164,11 +162,8 @@ class NativeTextfieldViews : public View,
   // Overridden from TextfieldViewsModel::Delegate:
   virtual void OnCompositionTextConfirmedOrCleared() OVERRIDE;
 
-  // Returns the Textfield's font.
-  const gfx::Font& GetFont() const;
-
-  // Returns the Textfield's text color.
-  SkColor GetTextColor() const;
+  // Returns the TextfieldViewsModel's text/cursor/selection rendering model.
+  gfx::RenderText* GetRenderText() const;
 
   // A callback function to periodically update the cursor state.
   void UpdateCursor();
@@ -177,18 +172,12 @@ class NativeTextfieldViews : public View,
   void RepaintCursor();
 
   // Update the cursor_bounds and text_offset.
-  void UpdateCursorBoundsAndTextOffset();
+  void UpdateCursorBoundsAndTextOffset(size_t cursor_pos, bool insert_mode);
 
   void PaintTextAndCursor(gfx::Canvas* canvas);
 
   // Handle the keyevent.
   bool HandleKeyEvent(const KeyEvent& key_event);
-
-  // Find a cusor position for given |point| in this views coordinates.
-  size_t FindCursorPosition(const gfx::Point& point) const;
-
-  // Returns true if the local point is over the selected range of text.
-  bool IsPointInSelection(const gfx::Point& point) const;
 
   // Helper function to call MoveCursorTo on the TextfieldViewsModel.
   bool MoveCursorTo(const gfx::Point& point, bool select);
@@ -201,8 +190,8 @@ class NativeTextfieldViews : public View,
   // changed.
   void UpdateAfterChange(bool text_changed, bool cursor_changed);
 
-  // Utility function to create the context menu if one does not already exist.
-  void InitContextMenuIfRequired();
+  // Utility function to prepare the context menu..
+  void UpdateContextMenu();
 
   // Convenience method to call InputMethod::OnTextInputTypeChanged();
   void OnTextInputTypeChanged();
@@ -233,17 +222,10 @@ class NativeTextfieldViews : public View,
   // The reference to the border class. The object is owned by View::border_.
   FocusableBorder* text_border_;
 
-  // The x offset for the text to be drawn, without insets;
-  int text_offset_;
-
-  // Cursor's bounds in the textfield's coordinates.
-  gfx::Rect cursor_bounds_;
-
-  // True if the textfield is in insert mode.
-  bool insert_;
-
-  // The drawing state of cursor. True to draw.
+  // The textfield's text and drop cursor visibility.
   bool is_cursor_visible_;
+  // The drop cursor is a visual cue for where dragged text will be dropped.
+  bool is_drop_cursor_visible_;
 
   // True if InputMethod::CancelComposition() should not be called.
   bool skip_input_method_cancel_composition_;
@@ -261,7 +243,8 @@ class NativeTextfieldViews : public View,
 
   // Context menu and its content list for the textfield.
   scoped_ptr<ui::SimpleMenuModel> context_menu_contents_;
-  scoped_ptr<Menu2> context_menu_menu_;
+  scoped_ptr<views::MenuModelAdapter> context_menu_delegate_;
+  scoped_ptr<views::MenuItemView> context_menu_menu_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeTextfieldViews);
 };

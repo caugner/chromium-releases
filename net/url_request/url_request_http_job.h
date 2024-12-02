@@ -15,6 +15,7 @@
 #include "base/time.h"
 #include "net/base/auth.h"
 #include "net/base/completion_callback.h"
+#include "net/base/cookie_store.h"
 #include "net/http/http_request_info.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_throttler_entry_interface.h"
@@ -42,7 +43,7 @@ class URLRequestHttpJob : public URLRequestJob {
   void NotifyDone(const URLRequestStatus& status);
 
   void DestroyTransaction();
-  void StartTransaction();
+
   void AddExtraHeaders();
   void AddCookieHeaderAndStart();
   void SaveCookiesAndNotifyHeadersComplete();
@@ -55,6 +56,7 @@ class URLRequestHttpJob : public URLRequestJob {
 
   void OnStartCompleted(int result);
   void OnReadCompleted(int result);
+  void NotifyBeforeSendHeadersCallback(int result);
 
   bool ShouldTreatAsCertificateError(int result);
 
@@ -88,7 +90,7 @@ class URLRequestHttpJob : public URLRequestJob {
 
   // Keep a reference to the url request context to be sure it's not deleted
   // before us.
-  scoped_refptr<URLRequestContext> context_;
+  scoped_refptr<const URLRequestContext> context_;
 
   HttpRequestInfo request_info_;
   const HttpResponseInfo* response_info_;
@@ -105,6 +107,8 @@ class URLRequestHttpJob : public URLRequestJob {
 
   CompletionCallbackImpl<URLRequestHttpJob> start_callback_;
   CompletionCallbackImpl<URLRequestHttpJob> read_callback_;
+  CompletionCallbackImpl<URLRequestHttpJob>
+      notify_before_headers_sent_callback_;
 
   bool read_in_progress_;
 
@@ -132,6 +136,11 @@ class URLRequestHttpJob : public URLRequestJob {
   bool is_cached_content_;
 
  private:
+  enum CompletionCause {
+    ABORTED,
+    FINISHED
+  };
+
   class HttpFilterContext;
 
   virtual ~URLRequestHttpJob();
@@ -144,6 +153,29 @@ class URLRequestHttpJob : public URLRequestJob {
 
   void RecordCompressionHistograms();
   bool IsCompressibleContent() const;
+
+  // Starts the transaction if extensions using the webrequest API do not
+  // object.
+  void StartTransaction();
+  void StartTransactionInternal();
+
+  void RecordPerfHistograms(CompletionCause reason);
+  void DoneWithRequest(CompletionCause reason);
+
+  // Callback functions for Cookie Monster
+  void OnCookiesLoaded(
+      std::string* cookie_line,
+      std::vector<CookieStore::CookieInfo>* cookie_infos);
+  void DoStartTransaction();
+  void OnCookieSaved(bool cookie_status);
+  void CookieHandled();
+
+  // Some servers send the body compressed, but specify the content length as
+  // the uncompressed size. If this is the case, we return true in order
+  // to request to work around this non-adherence to the HTTP standard.
+  // |rv| is the standard return value of a read function indicating the number
+  // of bytes read or, if negative, an error code.
+  bool ShouldFixMismatchedContentLength(int rv) const;
 
   base::Time request_creation_time_;
 
@@ -158,6 +190,7 @@ class URLRequestHttpJob : public URLRequestJob {
 
   // Enable recording of packet arrival times for histogramming.
   bool packet_timing_enabled_;
+  bool done_;  // True when we are done doing work.
 
   // The number of bytes that have been accounted for in packets (where some of
   // those packets may possibly have had their time of arrival recorded).
@@ -173,6 +206,9 @@ class URLRequestHttpJob : public URLRequestJob {
   // Since we don't save all packet times in packet_times_, we save the
   // last time for use in histograms.
   base::Time final_packet_time_;
+
+  // The start time for the job, ignoring re-starts.
+  base::TimeTicks start_time_;
 
   // The count of the number of packets, some of which may not have been timed.
   // We're ignoring overflow, as 1430 x 2^31 is a LOT of bytes.

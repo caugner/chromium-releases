@@ -5,12 +5,14 @@
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/accessibility_util.h"
 #include "chrome/browser/extensions/extension_accessibility_api.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
@@ -57,19 +59,19 @@ void WizardAccessibilityHelper::Init() {
 
 void WizardAccessibilityHelper::RegisterNotifications() {
   registrar_.Add(accessibility_handler_.get(),
-                 NotificationType::ACCESSIBILITY_CONTROL_FOCUSED,
+                 chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED,
                  NotificationService::AllSources());
   registrar_.Add(accessibility_handler_.get(),
-                 NotificationType::ACCESSIBILITY_CONTROL_ACTION,
+                 chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_ACTION,
                  NotificationService::AllSources());
   registrar_.Add(accessibility_handler_.get(),
-                 NotificationType::ACCESSIBILITY_TEXT_CHANGED,
+                 chrome::NOTIFICATION_ACCESSIBILITY_TEXT_CHANGED,
                  NotificationService::AllSources());
   registrar_.Add(accessibility_handler_.get(),
-                 NotificationType::ACCESSIBILITY_MENU_OPENED,
+                 chrome::NOTIFICATION_ACCESSIBILITY_MENU_OPENED,
                  NotificationService::AllSources());
   registrar_.Add(accessibility_handler_.get(),
-                 NotificationType::ACCESSIBILITY_MENU_CLOSED,
+                 chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED,
                  NotificationService::AllSources());
   registered_notifications_ = true;
 }
@@ -109,13 +111,7 @@ void WizardAccessibilityHelper::ToggleAccessibility() {
 
 void WizardAccessibilityHelper::SetAccessibilityEnabled(bool enabled) {
   bool doSpeak = (IsAccessibilityEnabled() != enabled);
-  if (g_browser_process) {
-    PrefService* prefService = g_browser_process->local_state();
-    prefService->SetBoolean(prefs::kAccessibilityEnabled, enabled);
-    prefService->ScheduleSavePersistentPrefs();
-  }
-  ExtensionAccessibilityEventRouter::GetInstance()->
-      SetAccessibilityEnabled(enabled);
+  accessibility::EnableAccessibility(enabled);
   if (doSpeak) {
     accessibility_handler_->Speak(enabled ?
         l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_ACCESS_ENABLED).c_str() :

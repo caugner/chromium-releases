@@ -61,7 +61,6 @@
 <translation id="5862307444128926510">Բարի գալուստ Chromium</translation>
 <translation id="5947389362804196214">Ձեր նախընտրանքները չեն կարող կարդացվել։\n\nՈրեւէ հնարավորությունները կարող են անմատչելի լինել, եւ նախընտրանքների փոփոխությունները չեն պահվի։</translation>
 <translation id="5981059579301719217">Ձեր հատկագիրը չի կարող օգտագործվել, քանի որ այն Chromium֊ի ավելի նոր տարբերակից է։\n\Որեւէ հնարավորությունները կարող են անմատչելի լինել։ Նշե՛ք հատկագրի այլ գրացուցակ կամ օգտագործե՛ք ավելի նոր տարբերակ։</translation>
-<translation id="5994107996638824097">Ավա՜ղ։ Chromium֊ում բացակայում է PDF դիտարկման ներկառուցված միջոցը, որը պահանջվում է տպումը նախադիտելու համար։</translation>
 <translation id="6055895534982063517">Մատչելի է Chromium֊ի նոր տարբերակ։ Եւ այն ավելի արագ է, քան երբեւէ։</translation>
 <translation id="6089587093203430357">Կենդանի որոնում</translation>
 <translation id="6248213926982192922">Դարձնել Chromium֊ը լռելյայն զննարկիչ</translation>
@@ -102,4 +101,10 @@
 <translation id="9191268552238695869">Այս համակարգչի վրա կառավարիչը տեղադրել է Chromium, որը մատչելի է բոլոր օգտվողներին։ Համակարգային մակարդակով տեղադրված Chromium֊ը հիմա կփոխարինի օգտվողային մակարդակով Ձեր տեղադրումը։</translation>
 <translation id="980185455267101462">Այս համակարգչի վրա տեղադրված է Chromium Frame֊ի ավելի նոր տարբերակ։ Եթե ծրագրաշարը չի աշխատում, հեռացրե՛ք Chromium Frame֊ը եւ դարձյալ ներբեռնեք։</translation>
 <translation id="985602178874221306">Chromium֊ի հեղինակները</translation>
+<translation id="4365115785552740256">Chromium֊ը լույս է տեսել շնորհիվ բաց ծածկագրով <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> նախագծի եւ այլ <ph name="BEGIN_LINK_OSS"/>ազատ ծրագրաշարի<ph name="END_LINK_OSS"/>։</translation>
+<translation id="5211087808649701653">Բացել տպման համակարգային երկխոսությունը</translation>
+<translation id="6714487516757221107">Թարմացումը կատարելու համար չի գտնվել տեղադրված Chromium կամ Chromium Frame։</translation>
+<translation id="8628626585870903697">Chromium֊ում ներդրված չէ PDF նշոցների դիտարկիչ, որը պահանջվում է տպումը նախադիտելու համար։</translation>
+<translation id="8974095189086268230">Chromium ՕՀ իրականություն է դարձել շնորհիվ լրացուցիչ <ph name="BEGIN_LINK_CROS_OSS"/>բաց ծածկագրով ծրագրաշարերի<ph name="END_LINK_CROS_OSS"/>։</translation>
+<translation id="3748537968684000502">Դուք դիտարկում եք Chromium֊ի պաշտպանված էջը։</translation>
 </translationbundle>

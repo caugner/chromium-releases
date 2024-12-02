@@ -15,11 +15,12 @@ struct ClientConfig {
   ClientConfig();
   ~ClientConfig();
 
+  std::string local_jid;
+
   std::string host_jid;
-  std::string username;
-  std::string auth_token;
-  std::string auth_service;
-  std::string nonce;
+  std::string host_public_key;
+
+  std::string access_code;
 };
 
 }  // namespace remoting

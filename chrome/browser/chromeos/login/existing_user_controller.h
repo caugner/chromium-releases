@@ -62,6 +62,8 @@ class ExistingUserController : public LoginDisplay::Delegate,
   virtual void CreateAccount() OVERRIDE;
   virtual string16 GetConnectedNetworkName() OVERRIDE;
   virtual void FixCaptivePortal() OVERRIDE;
+  virtual void CompleteLogin(const std::string& username,
+                             const std::string& password) OVERRIDE;
   virtual void Login(const std::string& username,
                      const std::string& password) OVERRIDE;
   virtual void LoginAsGuest() OVERRIDE;
@@ -69,7 +71,7 @@ class ExistingUserController : public LoginDisplay::Delegate,
   virtual void OnStartEnterpriseEnrollment() OVERRIDE;
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -77,6 +79,12 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Used for testing.
   void set_login_status_consumer(LoginStatusConsumer* consumer) {
     login_status_consumer_ = consumer;
+  }
+
+  // Returns the LoginDisplay instance created and owned by this controller.
+  // Used for testing.
+  LoginDisplay* login_display() {
+    return login_display_;
   }
 
  private:
@@ -89,7 +97,8 @@ class ExistingUserController : public LoginDisplay::Delegate,
       const std::string& username,
       const std::string& password,
       const GaiaAuthConsumer::ClientLoginResult& credentials,
-      bool pending_requests);
+      bool pending_requests,
+      bool using_oauth);
   virtual void OnOffTheRecordLoginSuccess();
   virtual void OnPasswordChangeDetected(
       const GaiaAuthConsumer::ClientLoginResult& credentials);

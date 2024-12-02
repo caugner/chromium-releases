@@ -4,19 +4,22 @@
 
 #include "remoting/client/plugin/pepper_input_handler.h"
 
-#include "ppapi/c/pp_input_event.h"
-#include "remoting/client/chromoting_view.h"
-#include "ui/gfx/point.h"
+#include "ppapi/cpp/input_event.h"
+#include "ppapi/cpp/point.h"
+#include "remoting/client/plugin/pepper_view_proxy.h"
 
 namespace remoting {
 
+using pp::KeyboardInputEvent;
+using pp::MouseInputEvent;
 using protocol::KeyEvent;
 using protocol::MouseEvent;
 
 PepperInputHandler::PepperInputHandler(ClientContext* context,
                                        protocol::ConnectionToHost* connection,
-                                       ChromotingView* view)
-  : InputHandler(context, connection, view) {
+                                       PepperViewProxy* view)
+    : InputHandler(context, connection, view),
+      pepper_view_(view) {
 }
 
 PepperInputHandler::~PepperInputHandler() {
@@ -26,34 +29,48 @@ void PepperInputHandler::Initialize() {
 }
 
 void PepperInputHandler::HandleKeyEvent(bool keydown,
-                                        const PP_InputEvent_Key& event) {
-  SendKeyEvent(keydown, event.key_code);
+                                        const pp::KeyboardInputEvent& event) {
+  SendKeyEvent(keydown, event.GetKeyCode());
 }
 
 void PepperInputHandler::HandleCharacterEvent(
-    const PP_InputEvent_Character& event) {
+    const pp::KeyboardInputEvent& event) {
   // TODO(garykac): Coordinate key and char events.
 }
 
 void PepperInputHandler::HandleMouseMoveEvent(
-    const PP_InputEvent_Mouse& event) {
-  gfx::Point p(static_cast<int>(event.x), static_cast<int>(event.y));
+    const pp::MouseInputEvent& event) {
+  gfx::Point p(event.GetPosition().x(), event.GetPosition().y());
   // Pepper gives co-ordinates in the plugin instance's co-ordinate system,
   // which may be different from the host desktop's co-ordinate system.
-  p = view_->ConvertScreenToHost(p);
-  SendMouseMoveEvent(p.x(), p.y());
+  double horizontal_ratio = view_->GetHorizontalScaleRatio();
+  double vertical_ratio = view_->GetVerticalScaleRatio();
+
+  if (horizontal_ratio == 0.0)
+    horizontal_ratio = 1.0;
+  if (vertical_ratio == 0.0)
+    vertical_ratio = 1.0;
+
+  SendMouseMoveEvent(p.x() / horizontal_ratio, p.y() / vertical_ratio);
 }
 
 void PepperInputHandler::HandleMouseButtonEvent(
     bool button_down,
-    const PP_InputEvent_Mouse& event) {
+    const pp::MouseInputEvent& event) {
   MouseEvent::MouseButton button = MouseEvent::BUTTON_UNDEFINED;
-  if (event.button == PP_INPUTEVENT_MOUSEBUTTON_LEFT) {
-    button = MouseEvent::BUTTON_LEFT;
-  } else if (event.button == PP_INPUTEVENT_MOUSEBUTTON_MIDDLE) {
-    button = MouseEvent::BUTTON_MIDDLE;
-  } else if (event.button == PP_INPUTEVENT_MOUSEBUTTON_RIGHT) {
-    button = MouseEvent::BUTTON_RIGHT;
+  switch (event.GetButton()) {
+    case PP_INPUTEVENT_MOUSEBUTTON_LEFT:
+      button = MouseEvent::BUTTON_LEFT;
+      break;
+    case PP_INPUTEVENT_MOUSEBUTTON_MIDDLE:
+      button = MouseEvent::BUTTON_MIDDLE;
+      break;
+    case PP_INPUTEVENT_MOUSEBUTTON_RIGHT:
+      button = MouseEvent::BUTTON_RIGHT;
+      break;
+    case PP_INPUTEVENT_MOUSEBUTTON_NONE:
+      // Leave button undefined.
+      break;
   }
 
   if (button != MouseEvent::BUTTON_UNDEFINED) {

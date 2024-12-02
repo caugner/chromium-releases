@@ -10,7 +10,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -19,11 +19,9 @@
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/download/save_package.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/net/browser_url_util.h"
@@ -34,13 +32,16 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/spellcheck_host.h"
+#include "chrome/browser/spellcheck_host_metrics.h"
 #include "chrome/browser/spellchecker_platform_engine.h"
 #include "chrome/browser/translate/translate_manager.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
-#include "chrome/browser/ui/download/download_tab_helper.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -49,9 +50,11 @@
 #include "chrome/common/spellcheck_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/child_process_security_policy.h"
+#include "content/browser/download/save_package.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/content_restriction.h"
@@ -190,7 +193,10 @@ RenderViewContextMenu::RenderViewContextMenu(
       ALLOW_THIS_IN_INITIALIZER_LIST(menu_model_(this)),
       external_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(spellcheck_submenu_model_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(bidi_submenu_model_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(bidi_submenu_model_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(protocol_handler_submenu_model_(this)),
+      protocol_handler_registry_(
+          tab_contents->profile()->GetProtocolHandlerRegistry()) {
 }
 
 RenderViewContextMenu::~RenderViewContextMenu() {
@@ -435,9 +441,6 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
   if (!service)
     return;  // In unit-tests, we may not have an ExtensionService.
   ExtensionMenuManager* menu_manager = service->menu_manager();
-  const GURL& document_url = GetDocumentURL(params_);
-  if (!menu_manager->HasAllowedScheme(document_url))
-    return;
 
   // Get a list of extension id's that have context menu items, and sort it by
   // the extension's name.
@@ -570,6 +573,9 @@ void RenderViewContextMenu::AppendLinkItems() {
                                   IDS_CONTENT_CONTEXT_OPENLINKNEWTAB);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW,
                                   IDS_CONTENT_CONTEXT_OPENLINKNEWWINDOW);
+  if (params_.link_url.is_valid()) {
+    AppendProtocolHandlerSubMenu();
+  }
   if (!external_) {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD,
                                     IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD);
@@ -720,7 +726,8 @@ void RenderViewContextMenu::AppendSearchProvider() {
     }
   } else {
     const TemplateURL* const default_provider =
-        profile_->GetTemplateURLModel()->GetDefaultSearchProvider();
+        TemplateURLServiceFactory::GetForProfile(profile_)->
+        GetDefaultSearchProvider();
     if (!default_provider)
       return;
     menu_model_.AddItem(
@@ -739,13 +746,20 @@ void RenderViewContextMenu::AppendEditableItems() {
     menu_model_.AddItem(IDC_SPELLCHECK_SUGGESTION_0 + static_cast<int>(i),
                         params_.dictionary_suggestions[i]);
   }
-  if (!params_.dictionary_suggestions.empty())
+  if (!params_.dictionary_suggestions.empty()) {
     menu_model_.AddSeparator();
+
+    // |spellcheck_host| can be null when the suggested word is
+    // provided by Web SpellCheck API.
+    SpellCheckHost* spellcheck_host = profile_->GetSpellCheckHost();
+    if (spellcheck_host && spellcheck_host->GetMetrics())
+      spellcheck_host->GetMetrics()->RecordSuggestionStats(1);
+  }
 
   // If word is misspelled, give option for "Add to dictionary"
   if (!params_.misspelled_word.empty()) {
     if (params_.dictionary_suggestions.empty()) {
-      menu_model_.AddItem(0,
+      menu_model_.AddItem(IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS,
           l10n_util::GetStringUTF16(
               IDS_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS));
     }
@@ -768,6 +782,12 @@ void RenderViewContextMenu::AppendEditableItems() {
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_DELETE,
                                   IDS_CONTENT_CONTEXT_DELETE);
   menu_model_.AddSeparator();
+
+  if (!params_.keyword_url.is_empty()) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ADDSEARCHENGINE,
+                                    IDS_CONTENT_CONTEXT_ADDSEARCHENGINE);
+    menu_model_.AddSeparator();
+  }
 
   AppendSpellcheckOptionsSubMenu();
 
@@ -846,6 +866,29 @@ void RenderViewContextMenu::AppendBidiSubMenu() {
 }
 #endif  // OS_MACOSX
 
+void RenderViewContextMenu::AppendProtocolHandlerSubMenu() {
+  const ProtocolHandlerRegistry::ProtocolHandlerList handlers =
+      GetHandlersForLinkUrl();
+  if (handlers.empty())
+    return;
+  size_t max = IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_LAST -
+      IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST;
+  for (size_t i = 0; i < handlers.size() && i <= max; i++) {
+    protocol_handler_submenu_model_.AddItem(
+        IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST + i,
+        handlers[i].title());
+  }
+  protocol_handler_submenu_model_.AddSeparator();
+  protocol_handler_submenu_model_.AddItem(
+      IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS,
+      l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKWITH_CONFIGURE));
+
+  menu_model_.AddSubMenu(
+      IDC_CONTENT_CONTEXT_OPENLINKWITH,
+      l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKWITH),
+      &protocol_handler_submenu_model_);
+}
+
 ExtensionMenuItem* RenderViewContextMenu::GetExtensionMenuItem(int id) const {
   ExtensionMenuManager* manager =
       profile_->GetExtensionService()->menu_manager();
@@ -891,6 +934,11 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
     // In the future we may add APIs for extensions to disable items, but for
     // now all items are implicitly enabled.
+    return true;
+  }
+
+  if (id >= IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST &&
+      id <= IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_LAST) {
     return true;
   }
 
@@ -1084,6 +1132,9 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return params_.media_type == WebContextMenuData::MediaTypeNone ||
              params_.media_flags & WebContextMenuData::MediaCanPrint;
 
+    case IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS:
+      return false;
+
     case IDC_CONTENT_CONTEXT_SEARCHWEBFOR:
     case IDC_CONTENT_CONTEXT_GOTOURL:
     case IDC_SPELLCHECK_SUGGESTION_0:
@@ -1130,7 +1181,16 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return true;
 #endif
 
+    case IDC_CONTENT_CONTEXT_ADDSEARCHENGINE:
+      return !params_.keyword_url.is_empty();
+
     case IDC_SPELLCHECK_MENU:
+      return true;
+
+    case IDC_CONTENT_CONTEXT_OPENLINKWITH:
+      return true;
+
+    case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS:
       return true;
 
     default:
@@ -1239,11 +1299,31 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
     return;
   }
 
+  if (id >= IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST &&
+      id <= IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_LAST) {
+    ProtocolHandlerRegistry::ProtocolHandlerList handlers =
+        GetHandlersForLinkUrl();
+    if (handlers.empty()) {
+      return;
+    }
+    UserMetrics::RecordAction(
+        UserMetricsAction("RegisterProtocolHandler.ContextMenu_Open"));
+    int handlerIndex = id - IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST;
+    OpenURL(
+        handlers[handlerIndex].TranslateUrl(params_.link_url),
+        params_.frame_url.is_empty() ? params_.page_url : params_.frame_url,
+        params_.frame_id,
+        NEW_FOREGROUND_TAB,
+        PageTransition::LINK);
+    return;
+  }
+
   switch (id) {
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB:
       OpenURL(
           params_.link_url,
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url,
+          params_.frame_id,
           source_tab_contents_->delegate() &&
               source_tab_contents_->delegate()->IsApplication() ?
                   NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB,
@@ -1254,11 +1334,16 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       OpenURL(
           params_.link_url,
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url,
+          params_.frame_id,
           NEW_WINDOW, PageTransition::LINK);
       break;
 
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
-      OpenURL(params_.link_url, GURL(), OFF_THE_RECORD, PageTransition::LINK);
+      OpenURL(params_.link_url,
+              GURL(),
+              params_.frame_id,
+              OFF_THE_RECORD,
+              PageTransition::LINK);
       break;
 
     case IDC_CONTENT_CONTEXT_SAVEAVAS:
@@ -1295,6 +1380,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       OpenURL(
           params_.src_url,
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url,
+          params_.frame_id,
           NEW_BACKGROUND_TAB, PageTransition::LINK);
       break;
 
@@ -1349,15 +1435,9 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       source_tab_contents_->controller().GoForward();
       break;
 
-    case IDC_SAVE_PAGE: {
-      TabContentsWrapper* tab_contents_wrapper =
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              source_tab_contents_);
-      if (!tab_contents_wrapper)
-        break;
-      tab_contents_wrapper->download_tab_helper()->OnSavePage();
+    case IDC_SAVE_PAGE:
+      source_tab_contents_->OnSavePage();
       break;
-    }
 
     case IDC_RELOAD:
       // Prevent the modal "Resubmit form post" dialog from appearing in the
@@ -1482,7 +1562,10 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
 
     case IDC_CONTENT_CONTEXT_SEARCHWEBFOR:
     case IDC_CONTENT_CONTEXT_GOTOURL: {
-      OpenURL(selection_navigation_url_, GURL(), NEW_FOREGROUND_TAB,
+      OpenURL(selection_navigation_url_,
+              GURL(),
+              params_.frame_id,
+              NEW_FOREGROUND_TAB,
               PageTransition::LINK);
       break;
     }
@@ -1494,12 +1577,11 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
     case IDC_SPELLCHECK_SUGGESTION_4: {
       rvh->Replace(
           params_.dictionary_suggestions[id - IDC_SPELLCHECK_SUGGESTION_0]);
+      // GetSpellCheckHost() can return null when the suggested word is
+      // provided by Web SpellCheck API.
       SpellCheckHost* spellcheck_host = profile_->GetSpellCheckHost();
-      if (!spellcheck_host) {
-        NOTREACHED();
-        break;
-      }
-      spellcheck_host->RecordReplacedWordStats(1);
+      if (spellcheck_host && spellcheck_host->GetMetrics())
+        spellcheck_host->GetMetrics()->RecordReplacedWordStats(1);
       break;
     }
     case IDC_CHECK_SPELLING_OF_THIS_FIELD: {
@@ -1507,12 +1589,11 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       break;
     }
     case IDC_SPELLCHECK_ADD_TO_DICTIONARY: {
-      SpellCheckHost* spellcheck_host = profile_->GetSpellCheckHost();
-      if (!spellcheck_host) {
-        NOTREACHED();
-        break;
-      }
-      spellcheck_host->AddWord(UTF16ToUTF8(params_.misspelled_word));
+      // GetSpellCheckHost() can return null when the suggested word is
+      // provided by Web SpellCheck API.
+      if (profile_->GetSpellCheckHost())
+        profile_->GetSpellCheckHost()->AddWord(
+            UTF16ToUTF8(params_.misspelled_word));
       SpellCheckerPlatform::AddWord(params_.misspelled_word);
       break;
     }
@@ -1520,7 +1601,7 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
     case IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS: {
       std::string url = std::string(chrome::kChromeUISettingsURL) +
           chrome::kLanguageOptionsSubPage;
-      OpenURL(GURL(url), GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+      OpenURL(GURL(url), GURL(), 0, NEW_FOREGROUND_TAB, PageTransition::LINK);
       break;
     }
 
@@ -1548,6 +1629,44 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       LookUpInDictionary();
       break;
 #endif  // OS_MACOSX
+    case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS: {
+      UserMetrics::RecordAction(
+          UserMetricsAction("RegisterProtocolHandler.ContextMenu_Settings"));
+      std::string url = std::string(chrome::kChromeUISettingsURL) +
+          chrome::kHandlerSettingsSubPage;
+      OpenURL(GURL(url), GURL(), 0, NEW_FOREGROUND_TAB, PageTransition::LINK);
+      break;
+    }
+
+    case IDC_CONTENT_CONTEXT_ADDSEARCHENGINE: {
+      // Make sure the model is loaded.
+      TemplateURLService* model =
+          TemplateURLServiceFactory::GetForProfile(profile_);
+      if (!model)
+        return;
+      model->Load();
+
+      scoped_ptr<TemplateURL> template_url(new TemplateURL);
+      string16 keyword =
+          net::StripWWW(UTF8ToUTF16((params_.page_url.host())));
+      template_url->set_short_name(keyword);
+      template_url->set_keyword(keyword);
+      template_url->SetURL(params_.keyword_url.spec(), 0, 0);
+      template_url->SetFaviconURL(TemplateURL::GenerateFaviconURL(
+          params_.page_url.GetOrigin()));
+
+      TabContentsWrapper* tab_contents_wrapper =
+          TabContentsWrapper::GetCurrentWrapperForContents(
+              source_tab_contents_);
+      if (tab_contents_wrapper &&
+          tab_contents_wrapper->search_engine_tab_helper() &&
+          tab_contents_wrapper->search_engine_tab_helper()->delegate()) {
+        // Takes ownership of |template_url|.
+        tab_contents_wrapper->search_engine_tab_helper()->delegate()->
+            ConfirmAddSearchProvider(template_url.release(), profile_);
+      }
+      break;
+    }
 
     default:
       NOTREACHED();
@@ -1555,13 +1674,29 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
   }
 }
 
-void RenderViewContextMenu::MenuWillShow() {
+ProtocolHandlerRegistry::ProtocolHandlerList
+RenderViewContextMenu::GetHandlersForLinkUrl() {
+  ProtocolHandlerRegistry::ProtocolHandlerList handlers =
+      protocol_handler_registry_->GetHandlersFor(params_.link_url.scheme());
+  sort(handlers.begin(), handlers.end());
+  return handlers;
+}
+
+void RenderViewContextMenu::MenuWillShow(ui::SimpleMenuModel* source) {
+  // Ignore notifications from submenus.
+  if (source != &menu_model_)
+    return;
+
   RenderWidgetHostView* view = source_tab_contents_->GetRenderWidgetHostView();
   if (view)
     view->ShowingContextMenu(true);
 }
 
-void RenderViewContextMenu::MenuClosed() {
+void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
+  // Ignore notifications from submenus.
+  if (source != &menu_model_)
+    return;
+
   RenderWidgetHostView* view = source_tab_contents_->GetRenderWidgetHostView();
   if (view)
     view->ShowingContextMenu(false);
@@ -1586,13 +1721,6 @@ bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
   if (active_entry->IsViewSourceMode())
     return false;
 
-  // Don't inspect about:network, about:memory, etc.
-  // However, we do want to inspect about:blank, which is often
-  // used by ordinary web pages.
-  if (active_entry->virtual_url().SchemeIs(chrome::kAboutScheme) &&
-      !LowerCaseEqualsASCII(active_entry->virtual_url().path(), "blank"))
-    return false;
-
   if (id == IDC_CONTENT_CONTEXT_INSPECTELEMENT) {
     // Don't enable the web inspector if JavaScript is disabled.
     if (!profile_->GetPrefs()->GetBoolean(prefs::kWebKitJavascriptEnabled) ||
@@ -1615,10 +1743,23 @@ string16 RenderViewContextMenu::PrintableSelectionText() {
 // Controller functions --------------------------------------------------------
 
 void RenderViewContextMenu::OpenURL(
-    const GURL& url, const GURL& referrer,
+    const GURL& url, const GURL& referrer, int64 frame_id,
     WindowOpenDisposition disposition,
     PageTransition::Type transition) {
-  source_tab_contents_->OpenURL(url, referrer, disposition, transition);
+  TabContents* new_contents =
+      source_tab_contents_->OpenURL(url, referrer, disposition, transition);
+
+  if (new_contents) {
+    content::RetargetingDetails details;
+    details.source_tab_contents = source_tab_contents_;
+    details.source_frame_id = frame_id;
+    details.target_url = url;
+    details.target_tab_contents = new_contents;
+    NotificationService::current()->Notify(
+        content::NOTIFICATION_RETARGETING,
+        Source<Profile>(source_tab_contents_->profile()),
+        Details<content::RetargetingDetails>(&details));
+  }
 }
 
 void RenderViewContextMenu::CopyImageAt(int x, int y) {
@@ -1628,7 +1769,7 @@ void RenderViewContextMenu::CopyImageAt(int x, int y) {
 
 void RenderViewContextMenu::Inspect(int x, int y) {
   UserMetrics::RecordAction(UserMetricsAction("DevTools_InspectElement"));
-  DevToolsManager::GetInstance()->InspectElement(
+  DevToolsWindow::InspectElement(
       source_tab_contents_->render_view_host(), x, y);
 }
 

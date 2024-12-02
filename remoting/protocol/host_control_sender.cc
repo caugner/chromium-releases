@@ -24,19 +24,16 @@ HostControlSender::HostControlSender(net::Socket* socket)
 HostControlSender::~HostControlSender() {
 }
 
-void HostControlSender::SuggestResolution(
-    const SuggestResolutionRequest* msg, Task* done) {
-  protocol::ControlMessage message;
-  message.mutable_suggest_resolution()->CopyFrom(*msg);
-  buffered_writer_->Write(SerializeAndFrameMessage(message), done);
-}
-
 void HostControlSender::BeginSessionRequest(const LocalLoginCredentials* msg,
                                             Task* done) {
   protocol::ControlMessage message;
   message.mutable_begin_session_request()->mutable_credentials()->CopyFrom(
       *msg);
   buffered_writer_->Write(SerializeAndFrameMessage(message), done);
+}
+
+void HostControlSender::Close() {
+  buffered_writer_->Close();
 }
 
 }  // namespace protocol

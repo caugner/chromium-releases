@@ -9,8 +9,8 @@
 
 using webkit_glue::PasswordForm;
 
-// TODO(rsimha): This test fails intermittently -- see http://crbug.com/77993.
-IN_PROC_BROWSER_TEST_F(MultipleClientLivePasswordsSyncTest, FAILS_Sanity) {
+// TODO(rsimha): Enable after crbug.com/77993 is fixed.
+IN_PROC_BROWSER_TEST_F(MultipleClientLivePasswordsSyncTest, FLAKY_Sanity) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   for (int i = 0; i < num_clients(); ++i) {
@@ -20,7 +20,5 @@ IN_PROC_BROWSER_TEST_F(MultipleClientLivePasswordsSyncTest, FAILS_Sanity) {
   ASSERT_TRUE(AwaitQuiescence());
 
   ASSERT_EQ(num_clients(), GetPasswordCount(0));
-  for (int i = 1; i < num_clients(); ++i) {
-    ASSERT_TRUE(ProfilesContainSamePasswordForms(0, i));
-  }
+  ASSERT_TRUE(AllProfilesContainSamePasswordForms());
 }

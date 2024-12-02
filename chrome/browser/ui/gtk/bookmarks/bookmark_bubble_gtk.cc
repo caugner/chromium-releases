@@ -17,9 +17,9 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/bookmarks/recently_used_folders_combo_model.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
@@ -53,19 +53,15 @@ void BookmarkBubbleGtk::BubbleClosing(BubbleGtk* bubble,
   }
 
   NotificationService::current()->Notify(
-      NotificationType::BOOKMARK_BUBBLE_HIDDEN,
+      chrome::NOTIFICATION_BOOKMARK_BUBBLE_HIDDEN,
       Source<Profile>(profile_->GetOriginalProfile()),
       NotificationService::NoDetails());
 }
 
-void BookmarkBubbleGtk::Observe(NotificationType type,
+void BookmarkBubbleGtk::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
-  DCHECK(type == NotificationType::BROWSER_THEME_CHANGED);
-
-  gtk_chrome_link_button_set_use_gtk_theme(
-      GTK_CHROME_LINK_BUTTON(remove_button_),
-      theme_service_->UsingNativeTheme());
+  DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
 
   if (theme_service_->UsingNativeTheme()) {
     for (std::vector<GtkWidget*>::iterator it = labels_.begin();
@@ -100,8 +96,8 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
       newly_bookmarked_ ? IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED :
                           IDS_BOOMARK_BUBBLE_PAGE_BOOKMARK).c_str());
   labels_.push_back(label);
-  remove_button_ = gtk_chrome_link_button_new(
-      l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_REMOVE_BOOKMARK).c_str());
+  remove_button_ = theme_service_->BuildChromeLinkButton(
+      l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_REMOVE_BOOKMARK));
   GtkWidget* edit_button = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_BOOMARK_BUBBLE_OPTIONS).c_str());
   GtkWidget* close_button = gtk_button_new_with_label(
@@ -186,8 +182,8 @@ BookmarkBubbleGtk::BookmarkBubbleGtk(GtkWidget* anchor,
   g_signal_connect(remove_button_, "clicked",
                    G_CALLBACK(&OnRemoveClickedThunk), this);
 
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 }
 
@@ -325,9 +321,12 @@ void BookmarkBubbleGtk::ShowEditor() {
 }
 
 void BookmarkBubbleGtk::InitFolderComboModel() {
+  const BookmarkNode* node =
+      profile_->GetBookmarkModel()->GetMostRecentlyAddedNodeForURL(url_);
+  DCHECK(node);
+
   folder_combo_model_.reset(new RecentlyUsedFoldersComboModel(
-      profile_->GetBookmarkModel(),
-      profile_->GetBookmarkModel()->GetMostRecentlyAddedNodeForURL(url_)));
+      profile_->GetBookmarkModel(), node));
 
   // We always have nodes + 1 entries in the combo.  The last entry will be
   // the 'Select another folder...' entry that opens the bookmark editor.

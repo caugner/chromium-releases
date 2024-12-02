@@ -26,11 +26,6 @@
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
-#if defined(USE_SYSTEM_LIBEVENT)
-#include <event.h>
-#else
-#include "third_party/libevent/event.h"
-#endif
 
 namespace net {
 
@@ -142,7 +137,8 @@ TCPClientSocketLibevent::TCPClientSocketLibevent(
       net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)),
       previously_disconnected_(false),
       use_tcp_fastopen_(false),
-      tcp_fastopen_connected_(false) {
+      tcp_fastopen_connected_(false),
+      num_bytes_read_(0) {
   scoped_refptr<NetLog::EventParameters> params;
   if (source.is_valid())
     params = new NetLogSourceParameter("source_dependency", source);
@@ -303,6 +299,7 @@ int TCPClientSocketLibevent::DoConnect() {
 
   // Connect the socket.
   if (!use_tcp_fastopen_) {
+    connect_start_time_ = base::TimeTicks::Now();
     if (!HANDLE_EINTR(connect(socket_, current_ai_->ai_addr,
                               static_cast<int>(current_ai_->ai_addrlen)))) {
       // Connected without waiting!
@@ -341,9 +338,9 @@ int TCPClientSocketLibevent::DoConnectComplete(int result) {
     params = new NetLogIntegerParameter("os_error", os_error);
   net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT, params);
 
-  write_socket_watcher_.StopWatchingFileDescriptor();
-
   if (result == OK) {
+    connect_time_micros_ = base::TimeTicks::Now() - connect_start_time_;
+    write_socket_watcher_.StopWatchingFileDescriptor();
     use_history_.set_was_ever_connected();
     return OK;  // Done!
   }
@@ -389,6 +386,15 @@ bool TCPClientSocketLibevent::IsConnected() const {
   if (socket_ == kInvalidSocket || waiting_connect())
     return false;
 
+  if (use_tcp_fastopen_ && !tcp_fastopen_connected_) {
+    // With TCP FastOpen, we pretend that the socket is connected.
+    // This allows GetPeerAddress() to return current_ai_ as the peer
+    // address.  Since we don't fail over to the next address if
+    // sendto() fails, current_ai_ is the only possible peer address.
+    CHECK(current_ai_);
+    return true;
+  }
+
   // Check if connection is alive.
   char c;
   int rv = HANDLE_EINTR(recv(socket_, &c, 1, MSG_PEEK));
@@ -405,6 +411,9 @@ bool TCPClientSocketLibevent::IsConnectedAndIdle() const {
 
   if (socket_ == kInvalidSocket || waiting_connect())
     return false;
+
+  // TODO(wtc): should we also handle the TCP FastOpen case here,
+  // as we do in IsConnected()?
 
   // Check if connection is alive and we haven't received any data
   // unexpectedly.
@@ -433,10 +442,11 @@ int TCPClientSocketLibevent::Read(IOBuffer* buf,
   if (nread >= 0) {
     base::StatsCounter read_bytes("tcp.read_bytes");
     read_bytes.Add(nread);
+    num_bytes_read_ += static_cast<int64>(nread);
     if (nread > 0)
       use_history_.set_was_used_to_convey_data();
-    LogByteTransfer(
-        net_log_, NetLog::TYPE_SOCKET_BYTES_RECEIVED, nread, buf->data());
+    net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED, nread,
+                                  buf->data());
     return nread;
   }
   if (errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -474,8 +484,8 @@ int TCPClientSocketLibevent::Write(IOBuffer* buf,
     write_bytes.Add(nwrite);
     if (nwrite > 0)
       use_history_.set_was_used_to_convey_data();
-    LogByteTransfer(
-        net_log_, NetLog::TYPE_SOCKET_BYTES_SENT, nwrite, buf->data());
+    net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_SENT, nwrite,
+                                  buf->data());
     return nwrite;
   }
   if (errno != EAGAIN && errno != EWOULDBLOCK)
@@ -627,10 +637,11 @@ void TCPClientSocketLibevent::DidCompleteRead() {
     result = bytes_transferred;
     base::StatsCounter read_bytes("tcp.read_bytes");
     read_bytes.Add(bytes_transferred);
+    num_bytes_read_ += static_cast<int64>(bytes_transferred);
     if (bytes_transferred > 0)
       use_history_.set_was_used_to_convey_data();
-    LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_RECEIVED, result,
-                    read_buf_->data());
+    net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED, result,
+                                  read_buf_->data());
   } else {
     result = MapSystemError(errno);
   }
@@ -656,8 +667,8 @@ void TCPClientSocketLibevent::DidCompleteWrite() {
     write_bytes.Add(bytes_transferred);
     if (bytes_transferred > 0)
       use_history_.set_was_used_to_convey_data();
-    LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_SENT, result,
-                    write_buf_->data());
+    net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_SENT, result,
+                                  write_buf_->data());
   } else {
     result = MapSystemError(errno);
   }
@@ -714,6 +725,14 @@ bool TCPClientSocketLibevent::WasEverUsed() const {
 
 bool TCPClientSocketLibevent::UsingTCPFastOpen() const {
   return use_tcp_fastopen_;
+}
+
+int64 TCPClientSocketLibevent::NumBytesRead() const {
+  return num_bytes_read_;
+}
+
+base::TimeDelta TCPClientSocketLibevent::GetConnectTimeMicros() const {
+  return connect_time_micros_;
 }
 
 }  // namespace net

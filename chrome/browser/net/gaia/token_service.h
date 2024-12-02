@@ -95,6 +95,9 @@ class TokenService : public GaiaAuthConsumer,
   // Typically you'd then update the credentials.
   void Initialize(const char* const source, Profile* profile);
 
+  // Used to determine whether Initialize() has been called.
+  bool Initialized() const { return !source_.empty(); }
+
   // Update the credentials in the token service.
   // Afterwards you can StartFetchingTokens.
   void UpdateCredentials(
@@ -145,7 +148,7 @@ class TokenService : public GaiaAuthConsumer,
                                            const WDTypedResult* result);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

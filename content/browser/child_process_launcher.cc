@@ -20,9 +20,10 @@
 
 #if defined(OS_WIN)
 #include "base/file_path.h"
+#include "content/browser/handle_enumerator_win.h"
 #include "content/common/sandbox_policy.h"
 #elif defined(OS_MACOSX)
-#include "chrome/browser/mach_broker_mac.h"
+#include "content/browser/mach_broker_mac.h"
 #elif defined(OS_POSIX)
 #include "base/memory/singleton.h"
 #include "content/browser/zygote_host_linux.h"
@@ -42,6 +43,8 @@ class ChildProcessLauncher::Context
   Context()
       : client_(NULL),
         client_thread_id_(BrowserThread::UI),
+        termination_status_(base::TERMINATION_STATUS_NORMAL_TERMINATION),
+        exit_code_(content::RESULT_CODE_NORMAL_EXIT),
         starting_(true),
         terminate_child_on_shutdown_(true)
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -126,8 +129,9 @@ class ChildProcessLauncher::Context
         mapping.push_back(std::pair<uint32_t, int>(kCrashDumpSignal,
                                                    crash_signal_fd));
       }
-      handle = ZygoteHost::GetInstance()->ForkRenderer(cmd_line->argv(),
-                                                       mapping);
+      handle = ZygoteHost::GetInstance()->ForkRequest(cmd_line->argv(),
+                                                      mapping,
+                                                      process_type);
     } else
     // Fall through to the normal posix case below when we're not zygoting.
 #endif
@@ -156,7 +160,7 @@ class ChildProcessLauncher::Context
 #if defined(OS_MACOSX)
       // It is possible for the child process to die immediately after
       // launching.  To prevent leaking MachBroker map entries in this case,
-      // lock around all of LaunchApp().  If the child dies, the death
+      // lock around all of LaunchProcess().  If the child dies, the death
       // notification will be processed by the MachBroker after the call to
       // AddPlaceholderForPid(), enabling proper cleanup.
       {  // begin scope for AutoLock
@@ -165,12 +169,16 @@ class ChildProcessLauncher::Context
 
         // This call to |PrepareForFork()| will start the MachBroker listener
         // thread, if it is not already running.  Therefore the browser process
-        // will be listening for Mach IPC before LaunchApp() is called.
+        // will be listening for Mach IPC before LaunchProcess() is called.
         broker->PrepareForFork();
 #endif
+
         // Actually launch the app.
-        launched = base::LaunchApp(cmd_line->argv(), env, fds_to_map,
-                                   /* wait= */false, &handle);
+        base::LaunchOptions options;
+        options.environ = &env;
+        options.fds_to_remap = &fds_to_map;
+        launched = base::LaunchProcess(*cmd_line, options, &handle);
+
 #if defined(OS_MACOSX)
         if (launched)
           broker->AddPlaceholderForPid(handle);
@@ -216,6 +224,20 @@ class ChildProcessLauncher::Context
     if (!terminate_child_on_shutdown_)
       return;
 
+#if defined(OS_WIN)
+    const CommandLine& browser_command_line =
+        *CommandLine::ForCurrentProcess();
+    if (browser_command_line.HasSwitch(switches::kAuditHandles) ||
+        browser_command_line.HasSwitch(switches::kAuditAllHandles)) {
+      scoped_refptr<content::HandleEnumerator> handle_enum(
+          new content::HandleEnumerator(process_.handle(),
+              browser_command_line.HasSwitch(switches::kAuditAllHandles)));
+      handle_enum->RunHandleEnumeration();
+      process_.set_handle(base::kNullProcessHandle);
+      return;
+    }
+#endif
+
     // On Posix, EnsureProcessTerminated can lead to 2 seconds of sleep!  So
     // don't this on the UI/IO threads.
     BrowserThread::PostTask(
@@ -249,7 +271,7 @@ class ChildProcessLauncher::Context
     base::Process process(handle);
      // Client has gone away, so just kill the process.  Using exit code 0
     // means that UMA won't treat this as a crash.
-    process.Terminate(ResultCodes::NORMAL_EXIT);
+    process.Terminate(content::RESULT_CODE_NORMAL_EXIT);
     // On POSIX, we must additionally reap the child.
 #if defined(OS_POSIX)
 #if !defined(OS_MACOSX)
@@ -273,6 +295,8 @@ class ChildProcessLauncher::Context
   Client* client_;
   BrowserThread::ID client_thread_id_;
   base::Process process_;
+  base::TerminationStatus termination_status_;
+  int exit_code_;
   bool starting_;
   // Controls whether the child process should be terminated on browser
   // shutdown. Default behavior is to terminate the child.
@@ -322,16 +346,26 @@ base::ProcessHandle ChildProcessLauncher::GetHandle() {
 
 base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
     int* exit_code) {
-  base::TerminationStatus status;
   base::ProcessHandle handle = context_->process_.handle();
+  if (handle == base::kNullProcessHandle) {
+    // Process is already gone, so return the cached termination status.
+    if (exit_code)
+      *exit_code = context_->exit_code_;
+    return context_->termination_status_;
+  }
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   if (context_->zygote_) {
-    status = ZygoteHost::GetInstance()->GetTerminationStatus(handle, exit_code);
+    context_->termination_status_ = ZygoteHost::GetInstance()->
+        GetTerminationStatus(handle, &context_->exit_code_);
   } else
 #endif
   {
-    status = base::GetTerminationStatus(handle, exit_code);
+    context_->termination_status_ =
+        base::GetTerminationStatus(handle, &context_->exit_code_);
   }
+
+  if (exit_code)
+    *exit_code = context_->exit_code_;
 
   // POSIX: If the process crashed, then the kernel closed the socket
   // for it and so the child has already died by the time we get
@@ -339,10 +373,10 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
   // it'll reap the process.  However, if GetTerminationStatus didn't
   // reap the child (because it was still running), we'll need to
   // Terminate via ProcessWatcher. So we can't close the handle here.
-  if (status != base::TERMINATION_STATUS_STILL_RUNNING)
+  if (context_->termination_status_ != base::TERMINATION_STATUS_STILL_RUNNING)
     context_->process_.Close();
 
-  return status;
+  return context_->termination_status_;
 }
 
 void ChildProcessLauncher::SetProcessBackgrounded(bool background) {
@@ -359,4 +393,3 @@ void ChildProcessLauncher::SetTerminateChildOnShutdown(
   if (context_)
     context_->set_terminate_child_on_shutdown(terminate_on_shutdown);
 }
-

@@ -12,12 +12,12 @@
 
 namespace chromeos {
 
+class CapsLockMenuButton;
 class ClockMenuButton;
 class InputMethodMenuButton;
 class NetworkMenuButton;
 class PowerMenuButton;
 class StatusAreaHost;
-class WindowSwitcherButton;
 
 // This class is used to wrap the small informative widgets in the upper-right
 // of the window title bar. It is used on ChromeOS only.
@@ -28,28 +28,27 @@ class StatusAreaView : public AccessiblePaneView {
 
   virtual void Init();
   void MakeButtonsActive(bool active);
+  void ButtonVisibilityChanged(views::View* button_view);
 
   // views::View* overrides.
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
   virtual void ChildPreferredSizeChanged(View* child);
 
+  CapsLockMenuButton* caps_lock_view() { return caps_lock_view_; }
   ClockMenuButton* clock_view() { return clock_view_; }
   InputMethodMenuButton* input_method_view() { return input_method_view_; }
   NetworkMenuButton* network_view() { return network_view_; }
   PowerMenuButton* power_view() { return power_view_; }
-  WindowSwitcherButton* window_switcher_view() {
-    return window_switcher_view_;
-  }
 
  private:
   StatusAreaHost* host_;
 
+  CapsLockMenuButton* caps_lock_view_;
   ClockMenuButton* clock_view_;
   InputMethodMenuButton* input_method_view_;
   NetworkMenuButton* network_view_;
   PowerMenuButton* power_view_;
-  WindowSwitcherButton* window_switcher_view_;
 
   DISALLOW_COPY_AND_ASSIGN(StatusAreaView);
 };

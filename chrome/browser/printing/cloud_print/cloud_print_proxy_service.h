@@ -22,8 +22,7 @@ struct CloudPrintProxyInfo;
 // Layer between the browser user interface and the cloud print proxy code
 // running in the service process.
 class CloudPrintProxyService
-    : public CloudPrintSetupHandlerDelegate,
-      public base::RefCountedThreadSafe<CloudPrintProxyService> {
+    : public CloudPrintSetupHandlerDelegate {
  public:
   explicit CloudPrintProxyService(Profile* profile);
   virtual ~CloudPrintProxyService();
@@ -44,6 +43,7 @@ class CloudPrintProxyService
   void RefreshStatusFromService();
 
   bool ShowTokenExpiredNotification();
+  std::string proxy_id() const { return proxy_id_; }
 
   // CloudPrintSetupHandler::Delegate implementation.
   virtual void OnCloudPrintSetupClosed();
@@ -56,6 +56,7 @@ class CloudPrintProxyService
   Profile* profile_;
   scoped_refptr<TokenExpiredNotificationDelegate> token_expired_delegate_;
   scoped_ptr<CloudPrintSetupHandler> cloud_print_setup_handler_;
+  std::string proxy_id_;
 
   // Methods that send an IPC to the service.
   void RefreshCloudPrintProxyStatus();
@@ -78,6 +79,8 @@ class CloudPrintProxyService
   void OnTokenExpiredNotificationClosed(bool by_user);
   void OnTokenExpiredNotificationClick();
   void TokenExpiredNotificationDone(bool keep_alive);
+
+  ScopedRunnableMethodFactory<CloudPrintProxyService> service_task_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CloudPrintProxyService);
 };

@@ -21,23 +21,25 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_types.h"
-#include "chrome/browser/sessions/tab_restore_service.h"
-#include "chrome/browser/sessions/tab_restore_service_delegate.h"
-#include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/sessions/tab_restore_service_observer.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
+#include "chrome/browser/ui/webui/ntp/bookmarks_handler.h"
+#include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
 #include "chrome/browser/ui/webui/ntp/foreign_session_handler.h"
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_sync_handler.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_sync_setup_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
+#include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
+#include "chrome/browser/ui/webui/ntp/recently_closed_tabs_handler.h"
 #include "chrome/browser/ui/webui/ntp/shown_sections_handler.h"
-#include "chrome/browser/ui/webui/ntp/value_helper.h"
 #include "chrome/browser/ui/webui/theme_source.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
@@ -69,103 +71,6 @@ const char kRTLHtmlTextDirection[] = "rtl";
 const char kDefaultHtmlTextDirection[] = "ltr";
 
 ///////////////////////////////////////////////////////////////////////////////
-// RecentlyClosedTabsHandler
-
-class RecentlyClosedTabsHandler : public WebUIMessageHandler,
-                                  public TabRestoreServiceObserver {
- public:
-  RecentlyClosedTabsHandler() : tab_restore_service_(NULL) {}
-  virtual ~RecentlyClosedTabsHandler();
-
-  // WebUIMessageHandler implementation.
-  virtual void RegisterMessages();
-
-  // Callback for the "reopenTab" message. Rewrites the history of the
-  // currently displayed tab to be the one in TabRestoreService with a
-  // history of a session passed in through the content pointer.
-  void HandleReopenTab(const ListValue* args);
-
-  // Callback for the "getRecentlyClosedTabs" message.
-  void HandleGetRecentlyClosedTabs(const ListValue* args);
-
-  // Observer callback for TabRestoreServiceObserver. Sends data on
-  // recently closed tabs to the javascript side of this page to
-  // display to the user.
-  virtual void TabRestoreServiceChanged(TabRestoreService* service);
-
-  // Observer callback to notice when our associated TabRestoreService
-  // is destroyed.
-  virtual void TabRestoreServiceDestroyed(TabRestoreService* service);
-
- private:
-  // TabRestoreService that we are observing.
-  TabRestoreService* tab_restore_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(RecentlyClosedTabsHandler);
-};
-
-void RecentlyClosedTabsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("getRecentlyClosedTabs",
-      NewCallback(this,
-                  &RecentlyClosedTabsHandler::HandleGetRecentlyClosedTabs));
-  web_ui_->RegisterMessageCallback("reopenTab",
-      NewCallback(this, &RecentlyClosedTabsHandler::HandleReopenTab));
-}
-
-RecentlyClosedTabsHandler::~RecentlyClosedTabsHandler() {
-  if (tab_restore_service_)
-    tab_restore_service_->RemoveObserver(this);
-}
-
-void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
-  TabRestoreServiceDelegate* delegate =
-      TabRestoreServiceDelegate::FindDelegateForController(
-      &web_ui_->tab_contents()->controller(), NULL);
-  if (!delegate)
-    return;
-
-  int session_to_restore;
-  if (ExtractIntegerValue(args, &session_to_restore))
-    tab_restore_service_->RestoreEntryById(delegate, session_to_restore, true);
-  // The current tab has been nuked at this point; don't touch any member
-  // variables.
-}
-
-void RecentlyClosedTabsHandler::HandleGetRecentlyClosedTabs(
-    const ListValue* args) {
-  if (!tab_restore_service_) {
-    tab_restore_service_ =
-        TabRestoreServiceFactory::GetForProfile(web_ui_->GetProfile());
-
-    // TabRestoreServiceFactory::GetForProfile() can return NULL (i.e., when in
-    // Off the Record mode)
-    if (tab_restore_service_) {
-      // This does nothing if the tabs have already been loaded or they
-      // shouldn't be loaded.
-      tab_restore_service_->LoadTabsFromLastSession();
-
-      tab_restore_service_->AddObserver(this);
-    }
-  }
-
-  if (tab_restore_service_)
-    TabRestoreServiceChanged(tab_restore_service_);
-}
-
-void RecentlyClosedTabsHandler::TabRestoreServiceChanged(
-    TabRestoreService* service) {
-  ListValue list_value;
-  NewTabUI::AddRecentlyClosedEntries(service->entries(), &list_value);
-
-  web_ui_->CallJavascriptFunction("recentlyClosedTabs", list_value);
-}
-
-void RecentlyClosedTabsHandler::TabRestoreServiceDestroyed(
-    TabRestoreService* service) {
-  tab_restore_service_ = NULL;
-}
-
-///////////////////////////////////////////////////////////////////////////////
 // MetricsHandler
 
 // Let the page contents record UMA actions. Only use when you can't do it from
@@ -183,7 +88,13 @@ class MetricsHandler : public WebUIMessageHandler {
   virtual void RegisterMessages();
 
   // Callback which records a user action.
-  void HandleMetrics(const ListValue* args);
+  void HandleRecordAction(const ListValue* args);
+
+  // Callback which records into a histogram. |args| contains the histogram
+  // name, the value to record, and the maximum allowed value, which can be at
+  // most 4000.  The histogram will use at most 100 buckets, one for each 1,
+  // 10, or 100 different values, depending on the maximum value.
+  void HandleRecordInHistogram(const ListValue* args);
 
   // Callback for the "logEventTime" message.
   void HandleLogEventTime(const ListValue* args);
@@ -194,16 +105,48 @@ class MetricsHandler : public WebUIMessageHandler {
 };
 
 void MetricsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("metrics",
-      NewCallback(this, &MetricsHandler::HandleMetrics));
+  web_ui_->RegisterMessageCallback("recordAction",
+      NewCallback(this, &MetricsHandler::HandleRecordAction));
+  web_ui_->RegisterMessageCallback("recordInHistogram",
+      NewCallback(this, &MetricsHandler::HandleRecordInHistogram));
 
   web_ui_->RegisterMessageCallback("logEventTime",
       NewCallback(this, &MetricsHandler::HandleLogEventTime));
 }
 
-void MetricsHandler::HandleMetrics(const ListValue* args) {
+void MetricsHandler::HandleRecordAction(const ListValue* args) {
   std::string string_action = UTF16ToUTF8(ExtractStringValue(args));
   UserMetrics::RecordComputedAction(string_action);
+}
+
+void MetricsHandler::HandleRecordInHistogram(const ListValue* args) {
+  std::string histogram_name;
+  CHECK(args->GetString(0, &histogram_name));
+
+  double value;
+  CHECK(args->GetDouble(1, &value));
+  int int_value = static_cast<int>(value);
+
+  double boundary_value;
+  CHECK(args->GetDouble(2, &boundary_value));
+  int int_boundary_value = static_cast<int>(boundary_value);
+
+  CHECK_LE(int_boundary_value, 4000);
+  CHECK_LE(int_value, int_boundary_value);
+  CHECK_LE(0, int_value);
+
+  int bucket_count = int_boundary_value;
+  while (bucket_count >= 100) {
+    bucket_count /= 10;
+  }
+
+  // As |histogram_name| may change between calls, the UMA_HISTOGRAM_ENUMERATION
+  // macro cannot be used here.
+  base::Histogram* counter =
+      base::LinearHistogram::FactoryGet(
+          histogram_name, 1, int_boundary_value, bucket_count + 1,
+          base::Histogram::kUmaTargetedHistogramFlag);
+  counter->Add(int_value);
 }
 
 void MetricsHandler::HandleLogEventTime(const ListValue* args) {
@@ -231,82 +174,9 @@ void MetricsHandler::HandleLogEventTime(const ListValue* args) {
     NOTREACHED();
   }
   NotificationService::current()->Notify(
-      NotificationType::METRIC_EVENT_DURATION,
+      chrome::NOTIFICATION_METRIC_EVENT_DURATION,
       Source<TabContents>(tab),
       Details<MetricEventDurationDetails>(&details));
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// NewTabPageSetHomePageHandler
-
-// Sets the new tab page as home page when user clicks on "make this my home
-// page" link.
-class NewTabPageSetHomePageHandler : public WebUIMessageHandler {
- public:
-  NewTabPageSetHomePageHandler() {}
-  virtual ~NewTabPageSetHomePageHandler() {}
-
-  // WebUIMessageHandler implementation.
-  virtual void RegisterMessages();
-
-  // Callback for "setHomePage".
-  void HandleSetHomePage(const ListValue* args);
-
- private:
-
-  DISALLOW_COPY_AND_ASSIGN(NewTabPageSetHomePageHandler);
-};
-
-void NewTabPageSetHomePageHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("setHomePage", NewCallback(
-      this, &NewTabPageSetHomePageHandler::HandleSetHomePage));
-}
-
-void NewTabPageSetHomePageHandler::HandleSetHomePage(
-    const ListValue* args) {
-  web_ui_->GetProfile()->GetPrefs()->SetBoolean(prefs::kHomePageIsNewTabPage,
-                                                true);
-  ListValue list_value;
-  list_value.Append(new StringValue(
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_HOME_PAGE_SET_NOTIFICATION)));
-  list_value.Append(new StringValue(
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_HOME_PAGE_HIDE_NOTIFICATION)));
-  web_ui_->CallJavascriptFunction("onHomePageSet", list_value);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// NewTabPageClosePromoHandler
-
-// Turns off the promo line permanently when it has been explicitly closed by
-// the user.
-class NewTabPageClosePromoHandler : public WebUIMessageHandler {
- public:
-  NewTabPageClosePromoHandler() {}
-  virtual ~NewTabPageClosePromoHandler() {}
-
-  // WebUIMessageHandler implementation.
-  virtual void RegisterMessages();
-
-  // Callback for "closePromo".
-  void HandleClosePromo(const ListValue* args);
-
- private:
-
-  DISALLOW_COPY_AND_ASSIGN(NewTabPageClosePromoHandler);
-};
-
-void NewTabPageClosePromoHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("closePromo", NewCallback(
-      this, &NewTabPageClosePromoHandler::HandleClosePromo));
-}
-
-void NewTabPageClosePromoHandler::HandleClosePromo(
-    const ListValue* args) {
-  web_ui_->GetProfile()->GetPrefs()->SetBoolean(prefs::kNTPPromoClosed, true);
-  NotificationService* service = NotificationService::current();
-  service->Notify(NotificationType::PROMO_RESOURCE_STATE_CHANGED,
-                  Source<NewTabPageClosePromoHandler>(this),
-                  NotificationService::NoDetails());
 }
 
 }  // namespace
@@ -315,14 +185,14 @@ void NewTabPageClosePromoHandler::HandleClosePromo(
 // NewTabUI
 
 NewTabUI::NewTabUI(TabContents* contents)
-    : WebUI(contents) {
+    : ChromeWebUI(contents) {
   // Override some options on the Web UI.
   hide_favicon_ = true;
 
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4) &&
       GetProfile()->GetPrefs()->GetBoolean(prefs::kEnableBookmarkBar) &&
       browser_defaults::bookmarks_enabled) {
-    force_bookmark_bar_visible_ = true;
+    set_force_bookmark_bar_visible(true);
   }
 
   focus_location_bar_by_default_ = true;
@@ -344,10 +214,11 @@ NewTabUI::NewTabUI(TabContents* contents)
 
   if (!GetProfile()->IsOffTheRecord()) {
     PrefService* pref_service = GetProfile()->GetPrefs();
-    AddMessageHandler((new NTPLoginHandler())->Attach(this));
+    if (!NewTabSyncSetupHandler::ShouldShowSyncPromo())
+      AddMessageHandler((new NTPLoginHandler())->Attach(this));
     AddMessageHandler((new ShownSectionsHandler(pref_service))->Attach(this));
     AddMessageHandler((new browser_sync::ForeignSessionHandler())->
-      Attach(this));
+        Attach(this));
     AddMessageHandler((new MostVisitedHandler())->Attach(this));
     AddMessageHandler((new RecentlyClosedTabsHandler())->Attach(this));
     AddMessageHandler((new MetricsHandler())->Attach(this));
@@ -359,9 +230,16 @@ NewTabUI::NewTabUI(TabContents* contents)
     if (service)
       AddMessageHandler((new AppLauncherHandler(service))->Attach(this));
 
-    AddMessageHandler((new NewTabPageSetHomePageHandler())->Attach(this));
-    AddMessageHandler((new NewTabPageClosePromoHandler())->Attach(this));
+    AddMessageHandler((new NewTabPageHandler())->Attach(this));
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4)) {
+      AddMessageHandler((new BookmarksHandler())->Attach(this));
+      AddMessageHandler((new FaviconWebUIHandler())->Attach(this));
+    }
   }
+
+  // Add the sync setup handler for the sync promo UI.
+  scoped_ptr<SyncSetupHandler> handler(new NewTabSyncSetupHandler());
+  AddMessageHandler(handler.release()->Attach(this));
 
   // Initializing the CSS and HTML can require some CPU, so do it after
   // we've hooked up the most visited handler.  This allows the DB query
@@ -372,10 +250,12 @@ NewTabUI::NewTabUI(TabContents* contents)
   contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
 
   // Listen for theme installation.
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(
+                     ThemeServiceFactory::GetForProfile(GetProfile())));
   // Listen for bookmark bar visibility changes.
-  registrar_.Add(this, NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
                  NotificationService::AllSources());
 }
 
@@ -393,7 +273,7 @@ void NewTabUI::PaintTimeout() {
     base::TimeDelta load_time = last_paint_ - start_;
     int load_time_ms = static_cast<int>(load_time.InMilliseconds());
     NotificationService::current()->Notify(
-        NotificationType::INITIAL_NEW_TAB_UI_LOAD,
+        chrome::NOTIFICATION_INITIAL_NEW_TAB_UI_LOAD,
         NotificationService::AllSources(),
         Details<int>(&load_time_ms));
     UMA_HISTOGRAM_TIMES("NewTabUI load", load_time);
@@ -409,7 +289,7 @@ void NewTabUI::PaintTimeout() {
 void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
   start_ = base::TimeTicks::Now();
   last_paint_ = start_;
-  registrar_.Add(this, NotificationType::RENDER_WIDGET_HOST_DID_PAINT,
+  registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
       Source<RenderWidgetHost>(render_view_host));
   timer_.Start(base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
                &NewTabUI::PaintTimeout);
@@ -423,11 +303,11 @@ void NewTabUI::RenderViewReused(RenderViewHost* render_view_host) {
   StartTimingPaint(render_view_host);
 }
 
-void NewTabUI::Observe(NotificationType type,
+void NewTabUI::Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::BROWSER_THEME_CHANGED: {
+  switch (type) {
+    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
       InitializeCSSCaches();
       ListValue args;
       args.Append(Value::CreateStringValue(
@@ -437,7 +317,7 @@ void NewTabUI::Observe(NotificationType type,
       CallJavascriptFunction("themeChanged", args);
       break;
     }
-    case NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED: {
+    case chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED: {
       if (GetProfile()->GetPrefs()->IsManagedPreference(
               prefs::kEnableBookmarkBar)) {
         break;
@@ -448,12 +328,12 @@ void NewTabUI::Observe(NotificationType type,
         CallJavascriptFunction("bookmarkBarDetached");
       break;
     }
-    case NotificationType::RENDER_WIDGET_HOST_DID_PAINT: {
+    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT: {
       last_paint_ = base::TimeTicks::Now();
       break;
     }
     default:
-      CHECK(false) << "Unexpected notification: " << type.value;
+      CHECK(false) << "Unexpected notification: " << type;
   }
 }
 
@@ -469,6 +349,8 @@ void NewTabUI::RegisterUserPrefs(PrefService* prefs) {
                              0,
                              PrefService::UNSYNCABLE_PREF);
 
+  NewTabPageHandler::RegisterUserPrefs(prefs);
+  AppLauncherHandler::RegisterUserPrefs(prefs);
   MostVisitedHandler::RegisterUserPrefs(prefs);
   ShownSectionsHandler::RegisterUserPrefs(prefs);
 
@@ -549,57 +431,6 @@ void NewTabUI::SetURLTitleAndDirection(DictionaryValue* dictionary,
   dictionary->SetString("direction", direction);
 }
 
-namespace {
-
-bool IsTabUnique(const DictionaryValue* tab,
-                 std::set<std::string>* unique_items) {
-  DCHECK(unique_items);
-  std::string title;
-  std::string url;
-  if (tab->GetString("title", &title) &&
-      tab->GetString("url", &url)) {
-    // TODO(viettrungluu): this isn't obviously reliable, since different
-    // combinations of titles/urls may conceivably yield the same string.
-    std::string unique_key = title + url;
-    if (unique_items->find(unique_key) != unique_items->end())
-      return false;
-    else
-      unique_items->insert(unique_key);
-  }
-  return true;
-}
-
-}  // namespace
-
-// static
-void NewTabUI::AddRecentlyClosedEntries(
-    const TabRestoreService::Entries& entries, ListValue* entry_list_value) {
-  const int max_count = 10;
-  int added_count = 0;
-  std::set<std::string> unique_items;
-  // We filter the list of recently closed to only show 'interesting' entries,
-  // where an interesting entry is either a closed window or a closed tab
-  // whose selected navigation is not the new tab ui.
-  for (TabRestoreService::Entries::const_iterator it = entries.begin();
-       it != entries.end() && added_count < max_count; ++it) {
-    TabRestoreService::Entry* entry = *it;
-    scoped_ptr<DictionaryValue> entry_dict(new DictionaryValue());
-    if ((entry->type == TabRestoreService::TAB &&
-         ValueHelper::TabToValue(
-             *static_cast<TabRestoreService::Tab*>(entry),
-             entry_dict.get()) &&
-         IsTabUnique(entry_dict.get(), &unique_items)) ||
-        (entry->type == TabRestoreService::WINDOW &&
-         ValueHelper::WindowToValue(
-             *static_cast<TabRestoreService::Window*>(entry),
-             entry_dict.get()))) {
-      entry_dict->SetInteger("sessionId", entry->id);
-      entry_list_value->Append(entry_dict.release());
-      added_count++;
-    }
-  }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // NewTabHTMLSource
 
@@ -624,8 +455,9 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(const std::string& path,
     return;
   }
 
-  scoped_refptr<RefCountedBytes> html_bytes(
-      profile_->GetNTPResourceCache()->GetNewTabHTML(is_incognito));
+  scoped_refptr<RefCountedMemory> html_bytes(
+      NTPResourceCacheFactory::GetForProfile(profile_)->
+      GetNewTabHTML(is_incognito));
 
   SendResponse(request_id, html_bytes);
 }

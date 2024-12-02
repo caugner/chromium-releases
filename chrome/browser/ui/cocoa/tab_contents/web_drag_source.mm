@@ -6,7 +6,6 @@
 
 #include <sys/param.h>
 
-#include "app/mac/nsimage_cache.h"
 #include "base/file_path.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -23,9 +22,11 @@
 #include "chrome/browser/tab_contents/tab_contents_view_mac.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/url_constants.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 #include "webkit/glue/webdropdata.h"
 
 using base::SysNSStringToUTF8;
@@ -186,9 +187,15 @@ void PromiseWriterTask::Run() {
   // URL.
   } else if ([type isEqualToString:NSURLPboardType]) {
     DCHECK(dropData_->url.is_valid());
-    NSURL* url = [NSURL URLWithString:SysUTF8ToNSString(dropData_->url.spec())];
+    NSString* urlStr = SysUTF8ToNSString(dropData_->url.spec());
+    NSURL* url = [NSURL URLWithString:urlStr];
+    // If NSURL creation failed, check for a badly-escaped javascript URL.
+    if (!url && urlStr && dropData_->url.SchemeIs(chrome::kJavaScriptScheme)) {
+      NSString *escapedStr =
+        [urlStr stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+      url = [NSURL URLWithString:escapedStr];
+    }
     [url writeToPasteboard:pboard];
-
   // URL title.
   } else if ([type isEqualToString:kNSURLTitlePboardType]) {
     [pboard setString:SysUTF16ToNSString(dropData_->url_title)
@@ -440,7 +447,7 @@ void PromiseWriterTask::Run() {
     return dragImage_;
 
   // Default to returning a generic image.
-  return app::mac::GetCachedImageWithName(@"nav.pdf");
+  return gfx::GetCachedImageWithName(@"nav.pdf");
 }
 
 @end  // @implementation WebDragSource (Private)

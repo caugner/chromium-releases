@@ -6,20 +6,27 @@
 
 #include "base/command_line.h"
 #include "chrome/app/breakpad_mac.h"
+#include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/chrome_plugin_message_filter.h"
 #include "chrome/browser/chrome_quota_permission_context.h"
 #include "chrome/browser/chrome_worker_message_filter.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/debugger/devtools_handler.h"
-#include "chrome/browser/desktop_notification_handler.h"
+#include "chrome/browser/download/save_package_file_picker.h"
+#include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_message_handler.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/printing/printing_message_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -28,29 +35,48 @@
 #include "chrome/browser/renderer_host/text_input_client_message_filter.h"
 #include "chrome/browser/search_engines/search_provider_install_state_message_filter.h"
 #include "chrome/browser/spellcheck_message_filter.h"
+#include "chrome/browser/ssl/ssl_add_cert_handler.h"
+#include "chrome/browser/ssl/ssl_blocking_page.h"
+#include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
+#include "chrome/browser/tab_contents/tab_contents_ssl_helper.h"
+#include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_factory.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/browser_url_handler.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy.h"
+#include "content/browser/debugger/devtools_handler.h"
 #include "content/browser/plugin_process_host.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/resource_context.h"
 #include "content/browser/site_instance.h"
+#include "content/browser/ssl/ssl_cert_error_handler.h"
+#include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/worker_host/worker_process_host.h"
 #include "content/common/bindings_policy.h"
+#include "content/common/desktop_notification_messages.h"
+#include "grit/ui_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_options.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_LINUX)
 #include "base/linux_util.h"
 #include "chrome/browser/crash_handler_host_linux.h"
+#endif
+
+#if defined(USE_NSS)
+#include "chrome/browser/ui/crypto_module_password_dialog.h"
 #endif
 
 namespace {
@@ -60,7 +86,6 @@ void InitRenderViewHostForExtensions(RenderViewHost* render_view_host) {
   // chrome-extension:// URL for their site, so we can ignore that wrinkle here.
   SiteInstance* site_instance = render_view_host->site_instance();
   const GURL& site = site_instance->site();
-  RenderProcessHost* process = render_view_host->process();
 
   if (!site.SchemeIs(chrome::kExtensionScheme))
     return;
@@ -81,15 +106,22 @@ void InitRenderViewHostForExtensions(RenderViewHost* render_view_host) {
 
   site_instance->GetProcess()->mark_is_extension_process();
 
-  // Register the association between extension and process with
+  // Register the association between extension and SiteInstance with
   // ExtensionProcessManager.
-  process_manager->RegisterExtensionProcess(extension->id(), process->id());
+  // TODO(creis): Use this to replace SetInstalledAppForRenderer below.
+  process_manager->RegisterExtensionSiteInstance(site_instance->id(),
+                                                 extension->id());
 
-  // Record which, if any, installed app is associated with this process.
-  // TODO(aa): Totally lame to store this state in a global map in extension
-  // service. Can we get it from EPM instead?
-  if (extension->is_app())
+  RenderProcessHost* process = render_view_host->process();
+
+  if (extension->is_app()) {
+    render_view_host->Send(
+        new ExtensionMsg_ActivateApplication(extension->id()));
+    // Record which, if any, installed app is associated with this process.
+    // TODO(aa): Totally lame to store this state in a global map in extension
+    // service. Can we get it from EPM instead?
     service->SetInstalledAppForRenderer(process->id(), extension);
+  }
 
   // Some extensions use chrome:// URLs.
   Extension::Type type = extension->GetType();
@@ -111,14 +143,30 @@ void InitRenderViewHostForExtensions(RenderViewHost* render_view_host) {
   }
 }
 
+// Handles rewriting Web UI URLs.
+static bool HandleWebUI(GURL* url, Profile* profile) {
+  if (!ChromeWebUIFactory::GetInstance()->UseWebUIForURL(profile, *url))
+    return false;
+
+  // Special case the new tab page. In older versions of Chrome, the new tab
+  // page was hosted at chrome-internal:<blah>. This might be in people's saved
+  // sessions or bookmarks, so we say any URL with that scheme triggers the new
+  // tab page.
+  if (url->SchemeIs(chrome::kChromeInternalScheme)) {
+    // Rewrite it with the proper new tab URL.
+    *url = GURL(chrome::kChromeUINewTabURL);
+  }
+
+  return true;
 }
+
+}  // namespace
 
 namespace chrome {
 
 void ChromeContentBrowserClient::RenderViewHostCreated(
     RenderViewHost* render_view_host) {
   new ChromeRenderViewHostObserver(render_view_host);
-  new DesktopNotificationHandler(render_view_host);
   new DevToolsHandler(render_view_host);
   new ExtensionMessageHandler(render_view_host);
 
@@ -175,10 +223,41 @@ GURL ChromeContentBrowserClient::GetEffectiveURL(Profile* profile,
   return extension->GetResourceURL(url.path());
 }
 
+bool ChromeContentBrowserClient::ShouldUseProcessPerSite(
+    Profile* profile,
+    const GURL& effective_url) {
+  // Non-extension URLs should generally use process-per-site-instance.
+  // Because we expect to use the effective URL, hosted apps URLs should have
+  // an extension scheme by now.
+  if (!effective_url.SchemeIs(chrome::kExtensionScheme))
+    return false;
+
+  if (!profile || !profile->GetExtensionService())
+    return false;
+
+  const Extension* extension =
+      profile->GetExtensionService()->GetExtensionByURL(effective_url);
+  if (!extension)
+    return false;
+
+  // If the URL is part of a hosted app that does not have the background
+  // permission, we want to give each instance its own process to improve
+  // responsiveness.
+  if (extension->GetType() == Extension::TYPE_HOSTED_APP &&
+      !extension->HasAPIPermission(ExtensionAPIPermission::kBackground))
+    return false;
+
+  // Hosted apps that have the background permission must use process per site,
+  // since all instances can make synchronous calls to the background window.
+  // Other extensions should use process per site as well.
+  return true;
+}
+
 bool ChromeContentBrowserClient::IsURLSameAsAnySiteInstance(const GURL& url) {
-  return url.spec() == chrome::kAboutKillURL ||
-         url.spec() == chrome::kAboutHangURL ||
-         url.spec() == chrome::kAboutShorthangURL;
+  return url == GURL(chrome::kChromeUICrashURL) ||
+         url == GURL(chrome::kChromeUIKillURL) ||
+         url == GURL(chrome::kChromeUIHangURL) ||
+         url == GURL(chrome::kChromeUIShorthangURL);
 }
 
 std::string ChromeContentBrowserClient::GetCanonicalEncodingNameByAliasName(
@@ -200,11 +279,14 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
   }
 #endif  // OS_MACOSX
 
+  if (logging::DialogsAreSuppressed())
+    command_line->AppendSwitch(switches::kNoErrorDialogs);
+
   std::string process_type =
       command_line->GetSwitchValueASCII(switches::kProcessType);
+  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   if (process_type == switches::kExtensionProcess ||
       process_type == switches::kRendererProcess) {
-    const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
     FilePath user_data_dir =
         browser_command_line.GetSwitchValuePath(switches::kUserDataDir);
     if (!user_data_dir.empty())
@@ -227,9 +309,80 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
     }
 
     // Disable client-side phishing detection in the renderer if it is disabled
-    // in the browser process.
-    if (!g_browser_process->safe_browsing_detection_service())
+    // in the Profile preferences or the browser process.
+    if (!prefs->GetBoolean(prefs::kSafeBrowsingEnabled) ||
+        !g_browser_process->safe_browsing_detection_service()) {
       command_line->AppendSwitch(switches::kDisableClientSidePhishingDetection);
+    }
+
+    static const char* const kSwitchNames[] = {
+      switches::kAllowHTTPBackgroundPage,
+      switches::kAllowScriptingGallery,
+      switches::kAppsCheckoutURL,
+      switches::kAppsGalleryURL,
+      switches::kCloudPrintServiceURL,
+      switches::kDebugPrint,
+#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
+      // Enabled by default in Google Chrome builds, except on CrOS.
+      switches::kDisablePrintPreview,
+#else
+      // Disabled by default in Chromium builds and on CrOS.
+      switches::kEnablePrintPreview,
+#endif
+      switches::kDomAutomationController,
+      switches::kDumpHistogramsOnExit,
+      switches::kEnableClickToPlay,
+      switches::kEnableCrxlessWebApps,
+      switches::kEnableExperimentalExtensionApis,
+      switches::kEnableInBrowserThumbnailing,
+      switches::kEnableIPCFuzzing,
+      switches::kEnableNaCl,
+      switches::kEnableResourceContentSettings,
+      switches::kEnableSearchProviderApiV2,
+      switches::kEnableWatchdog,
+      switches::kExperimentalSpellcheckerFeatures,
+      switches::kMemoryProfiling,
+      switches::kMessageLoopHistogrammer,
+      switches::kPpapiFlashArgs,
+      switches::kPpapiFlashInProcess,
+      switches::kPpapiFlashPath,
+      switches::kPpapiFlashVersion,
+      switches::kProfilingAtStart,
+      switches::kProfilingFile,
+      switches::kProfilingFlush,
+      switches::kSilentDumpOnDCHECK,
+    };
+
+    command_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
+                                   arraysize(kSwitchNames));
+  } else if (process_type == switches::kUtilityProcess) {
+    if (browser_command_line.HasSwitch(
+            switches::kEnableExperimentalExtensionApis)) {
+      command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
+    }
+  } else if (process_type == switches::kPluginProcess) {
+    static const char* const kSwitchNames[] = {
+  #if defined(OS_CHROMEOS)
+      switches::kLoginProfile,
+  #endif
+      switches::kMemoryProfiling,
+      switches::kSilentDumpOnDCHECK,
+      switches::kUserDataDir,
+    };
+
+    command_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
+                                   arraysize(kSwitchNames));
+  } else if (process_type == switches::kZygoteProcess) {
+    static const char* const kSwitchNames[] = {
+      switches::kUserDataDir,  // Make logs go to the right file.
+      // Load (in-process) Pepper plugins in-process in the zygote pre-sandbox.
+      switches::kPpapiFlashInProcess,
+      switches::kPpapiFlashPath,
+      switches::kPpapiFlashVersion,
+    };
+
+    command_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
+                                   arraysize(kSwitchNames));
   }
 }
 
@@ -239,6 +392,11 @@ std::string ChromeContentBrowserClient::GetApplicationLocale() {
 
 std::string ChromeContentBrowserClient::GetAcceptLangs(const TabContents* tab) {
   return tab->profile()->GetPrefs()->GetString(prefs::kAcceptLanguages);
+}
+
+SkBitmap* ChromeContentBrowserClient::GetDefaultFavicon() {
+  ResourceBundle &rb = ResourceBundle::GetSharedInstance();
+  return rb.GetBitmapNamed(IDR_DEFAULT_FAVICON);
 }
 
 bool ChromeContentBrowserClient::AllowAppCache(
@@ -306,6 +464,27 @@ bool ChromeContentBrowserClient::AllowSetCookie(
   return allow;
 }
 
+bool ChromeContentBrowserClient::AllowSaveLocalState(
+    const content::ResourceContext& context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  ProfileIOData* io_data =
+      reinterpret_cast<ProfileIOData*>(context.GetUserData(NULL));
+  return !io_data->clear_local_state_on_exit()->GetValue();
+}
+
+net::URLRequestContext*
+ChromeContentBrowserClient::OverrideRequestContextForURL(
+    const GURL& url, const content::ResourceContext& context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (url.SchemeIs(chrome::kExtensionScheme)) {
+    ProfileIOData* io_data =
+        reinterpret_cast<ProfileIOData*>(context.GetUserData(NULL));
+    return io_data->extensions_request_context();
+  }
+
+  return NULL;
+}
+
 QuotaPermissionContext*
 ChromeContentBrowserClient::CreateQuotaPermissionContext() {
   return new ChromeQuotaPermissionContext();
@@ -323,11 +502,266 @@ void ChromeContentBrowserClient::RevealFolderInOS(const FilePath& path) {
 #endif
 }
 
+void ChromeContentBrowserClient::AllowCertificateError(
+    SSLCertErrorHandler* handler,
+    bool overridable,
+    Callback2<SSLCertErrorHandler*, bool>::Type* callback) {
+  // If the tab is being prerendered, cancel the prerender and the request.
+  TabContents* tab = tab_util::GetTabContentsByID(
+      handler->render_process_host_id(),
+      handler->tab_contents_id());
+  if (!tab) {
+    NOTREACHED();
+    return;
+  }
+  prerender::PrerenderManager* prerender_manager =
+      tab->profile()->GetPrerenderManager();
+  if (prerender_manager && prerender_manager->IsTabContentsPrerendering(tab)) {
+    if (prerender_manager->prerender_tracker()->TryCancel(
+            handler->render_process_host_id(),
+            handler->tab_contents_id(),
+            prerender::FINAL_STATUS_SSL_ERROR)) {
+      handler->CancelRequest();
+      return;
+    }
+  }
+
+  // Otherwise, display an SSL blocking page.
+  SSLBlockingPage* blocking_page = new SSLBlockingPage(
+      handler, overridable, callback);
+  blocking_page->Show();
+}
+
+void ChromeContentBrowserClient::ShowClientCertificateRequestDialog(
+    int render_process_id,
+    int render_view_id,
+    SSLClientAuthHandler* handler) {
+  TabContents* tab = tab_util::GetTabContentsByID(
+      render_process_id, render_view_id);
+  if (!tab) {
+    NOTREACHED();
+    return;
+  }
+
+  TabContentsWrapper* wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab);
+  wrapper->ssl_helper()->ShowClientCertificateRequestDialog(handler);
+}
+
+void ChromeContentBrowserClient::AddNewCertificate(
+    net::URLRequest* request,
+    net::X509Certificate* cert,
+    int render_process_id,
+    int render_view_id) {
+  // The handler will run the UI and delete itself when it's finished.
+  new SSLAddCertHandler(request, cert, render_process_id, render_view_id);
+}
+
+void ChromeContentBrowserClient::RequestDesktopNotificationPermission(
+    const GURL& source_origin,
+    int callback_context,
+    int render_process_id,
+    int render_view_id) {
+  RenderViewHost* rvh = RenderViewHost::FromID(
+      render_process_id, render_view_id);
+  if (!rvh) {
+    NOTREACHED();
+    return;
+  }
+
+  RenderProcessHost* process = rvh->process();
+  DesktopNotificationService* service =
+      DesktopNotificationServiceFactory::GetForProfile(process->profile());
+  service->RequestPermission(
+      source_origin, render_process_id, render_view_id, callback_context,
+      tab_util::GetTabContentsByID(render_process_id, render_view_id));
+}
+
+WebKit::WebNotificationPresenter::Permission
+    ChromeContentBrowserClient::CheckDesktopNotificationPermission(
+        const GURL& source_url,
+        const content::ResourceContext& context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  ProfileIOData* io_data =
+      reinterpret_cast<ProfileIOData*>(context.GetUserData(NULL));
+
+  const Extension* extension =
+      io_data->GetExtensionInfoMap()->extensions().GetByURL(source_url);
+  if (extension &&
+      extension->HasAPIPermission(ExtensionAPIPermission::kNotification)) {
+    return WebKit::WebNotificationPresenter::PermissionAllowed;
+  }
+
+  // Fall back to the regular notification preferences, which works on an
+  // origin basis.
+  return io_data->GetNotificationService() ?
+      io_data->GetNotificationService()->HasPermission(source_url.GetOrigin()) :
+      WebKit::WebNotificationPresenter::PermissionNotAllowed;
+}
+
+void ChromeContentBrowserClient::ShowDesktopNotification(
+    const DesktopNotificationHostMsg_Show_Params& params,
+    int render_process_id,
+    int render_view_id,
+    bool worker) {
+  RenderViewHost* rvh = RenderViewHost::FromID(
+      render_process_id, render_view_id);
+  if (!rvh) {
+    NOTREACHED();
+    return;
+  }
+
+  RenderProcessHost* process = rvh->process();
+  DesktopNotificationService* service =
+      DesktopNotificationServiceFactory::GetForProfile(process->profile());
+  service->ShowDesktopNotification(
+    params, render_process_id, render_view_id,
+    worker ? DesktopNotificationService::WorkerNotification :
+        DesktopNotificationService::PageNotification);
+}
+
+void ChromeContentBrowserClient::CancelDesktopNotification(
+    int render_process_id,
+    int render_view_id,
+    int notification_id) {
+  RenderViewHost* rvh = RenderViewHost::FromID(
+      render_process_id, render_view_id);
+  if (!rvh) {
+    NOTREACHED();
+    return;
+  }
+
+  RenderProcessHost* process = rvh->process();
+  DesktopNotificationService* service =
+      DesktopNotificationServiceFactory::GetForProfile(process->profile());
+  service->CancelDesktopNotification(
+      render_process_id, render_view_id, notification_id);
+}
+
+bool ChromeContentBrowserClient::CanCreateWindow(
+    const GURL& source_url,
+    WindowContainerType container_type,
+    const content::ResourceContext& context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  // If the opener is trying to create a background window but doesn't have
+  // the appropriate permission, fail the attempt.
+  if (container_type == WINDOW_CONTAINER_TYPE_BACKGROUND) {
+    ProfileIOData* io_data =
+        reinterpret_cast<ProfileIOData*>(context.GetUserData(NULL));
+    const Extension* extension =
+        io_data->GetExtensionInfoMap()->extensions().GetByURL(source_url);
+    return (extension &&
+            extension->HasAPIPermission(ExtensionAPIPermission::kBackground));
+  }
+  return true;
+}
+
+std::string ChromeContentBrowserClient::GetWorkerProcessTitle(
+    const GURL& url, const content::ResourceContext& context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  // Check if it's an extension-created worker, in which case we want to use
+  // the name of the extension.
+  ProfileIOData* io_data =
+      reinterpret_cast<ProfileIOData*>(context.GetUserData(NULL));
+  const Extension* extension =
+      io_data->GetExtensionInfoMap()->extensions().GetByID(url.host());
+  return extension ? extension->name() : std::string();
+}
+
+ResourceDispatcherHost*
+    ChromeContentBrowserClient::GetResourceDispatcherHost() {
+  return g_browser_process->resource_dispatcher_host();
+}
+
+ui::Clipboard* ChromeContentBrowserClient::GetClipboard() {
+  return g_browser_process->clipboard();
+}
+
+MHTMLGenerationManager*
+    ChromeContentBrowserClient::GetMHTMLGenerationManager() {
+  return g_browser_process->mhtml_generation_manager();
+}
+
+DevToolsManager* ChromeContentBrowserClient::GetDevToolsManager() {
+  return g_browser_process->devtools_manager();
+}
+
+bool ChromeContentBrowserClient::IsFastShutdownPossible() {
+  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
+  return !browser_command_line.HasSwitch(switches::kChromeFrame);
+}
+
+WebPreferences ChromeContentBrowserClient::GetWebkitPrefs(Profile* profile,
+                                                          bool is_web_ui) {
+  return RenderViewHostDelegateHelper::GetWebkitPrefs(profile, is_web_ui);
+}
+
+void ChromeContentBrowserClient::UpdateInspectorSetting(
+    RenderViewHost* rvh, const std::string& key, const std::string& value) {
+  RenderViewHostDelegateHelper::UpdateInspectorSetting(
+      rvh->process()->profile(), key, value);
+}
+
+void ChromeContentBrowserClient::ClearInspectorSettings(RenderViewHost* rvh) {
+  RenderViewHostDelegateHelper::ClearInspectorSettings(
+      rvh->process()->profile());
+}
+
+void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+    BrowserURLHandler* handler) {
+  // Add the default URL handlers.
+  handler->AddHandlerPair(&ExtensionWebUI::HandleChromeURLOverride,
+                          BrowserURLHandler::null_handler());
+  handler->AddHandlerPair(BrowserURLHandler::null_handler(),
+                          &ExtensionWebUI::HandleChromeURLOverrideReverse);
+
+  // about:
+  handler->AddHandlerPair(&WillHandleBrowserAboutURL,
+                          BrowserURLHandler::null_handler());
+  // chrome: & friends.
+  handler->AddHandlerPair(&HandleWebUI,
+                          BrowserURLHandler::null_handler());
+}
+
+void ChromeContentBrowserClient::ClearCache(RenderViewHost* rvh) {
+  Profile* profile = rvh->site_instance()->GetProcess()->profile();
+  BrowsingDataRemover* remover = new BrowsingDataRemover(profile,
+      BrowsingDataRemover::EVERYTHING,
+      base::Time());
+  remover->Remove(BrowsingDataRemover::REMOVE_CACHE);
+  // BrowsingDataRemover takes care of deleting itself when done.
+}
+
+void ChromeContentBrowserClient::ClearCookies(RenderViewHost* rvh) {
+  Profile* profile = rvh->site_instance()->GetProcess()->profile();
+  BrowsingDataRemover* remover = new BrowsingDataRemover(profile,
+      BrowsingDataRemover::EVERYTHING,
+      base::Time());
+  int remove_mask = BrowsingDataRemover::REMOVE_COOKIES;
+  remover->Remove(remove_mask);
+  // BrowsingDataRemover takes care of deleting itself when done.
+}
+
+void ChromeContentBrowserClient::ChooseSavePath(
+    const base::WeakPtr<SavePackage>& save_package,
+    const FilePath& suggested_path,
+    bool can_save_as_complete) {
+  // Deletes itself.
+  new SavePackageFilePicker(
+      save_package, suggested_path, can_save_as_complete);
+}
+
 #if defined(OS_LINUX)
 int ChromeContentBrowserClient::GetCrashSignalFD(
     const std::string& process_type) {
   if (process_type == switches::kRendererProcess)
     return RendererCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
+
+  if (process_type == switches::kExtensionProcess) {
+    ExtensionCrashHandlerHostLinux* crash_handler =
+        ExtensionCrashHandlerHostLinux::GetInstance();
+    return crash_handler->GetDeathSignalSocket();
+  }
 
   if (process_type == switches::kPluginProcess)
     return PluginCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
@@ -339,6 +773,15 @@ int ChromeContentBrowserClient::GetCrashSignalFD(
     return GpuCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
 
   return -1;
+}
+#endif  // defined(OS_LINUX)
+
+#if defined(USE_NSS)
+crypto::CryptoModuleBlockingPasswordDelegate*
+    ChromeContentBrowserClient::GetCryptoPasswordDelegate(
+        const GURL& url) {
+  return browser::NewCryptoModuleBlockingDialogDelegate(
+      browser::kCryptoModulePasswordKeygen, url.host());
 }
 #endif
 

@@ -27,7 +27,7 @@ DictionaryValue* GetNodeDictionary(const BookmarkNode* node,
   }
 
   if (!node->is_folder()) {
-    dict->SetString(keys::kUrlKey, node->GetURL().spec());
+    dict->SetString(keys::kUrlKey, node->url().spec());
   } else {
     // Javascript Date wants milliseconds since the epoch, ToDoubleT is
     // seconds.
@@ -93,13 +93,13 @@ bool RemoveNode(BookmarkModel* model,
     return false;
   }
   if (node == model->root_node() ||
+      node == model->bookmark_bar_node() ||
       node == model->other_node() ||
-      node == model->synced_node() ||
-      node == model->GetBookmarkBarNode()) {
+      node == model->synced_node()) {
     *error = keys::kModifySpecialError;
     return false;
   }
-  if (node->is_folder() && node->child_count() > 0 && !recursive) {
+  if (node->is_folder() && !node->empty() && !recursive) {
     *error = keys::kFolderNotEmptyError;
     return false;
   }
@@ -110,4 +110,4 @@ bool RemoveNode(BookmarkModel* model,
   return true;
 }
 
-}
+}  // namespace extension_bookmark_helpers

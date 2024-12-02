@@ -23,6 +23,7 @@ document.documentElement.setAttribute('touchui', true);
 
 <link rel="stylesheet" href="../shared/css/menu.css">
 <link rel="stylesheet" href="apps_page.css">
+<link rel="stylesheet" href="bookmarks_page.css">
 <link rel="stylesheet" href="most_visited_page.css">
 <link rel="stylesheet" href="nav_dot.css">
 <link rel="stylesheet" href="new_tab.css">
@@ -40,10 +41,14 @@ document.documentElement.setAttribute('touchui', true);
 <script src="../shared/js/cr/ui/menu_item.js"></script>
 <script src="../shared/js/cr/ui/position_util.js"></script>
 <script src="../shared/js/cr/ui/menu_button.js"></script>
+<script src="../shared/js/cr/ui/context_menu_handler.js"></script>
 
+<script src="drag_wrapper.js"></script>
 <script src="tile_page.js"></script>
 <script src="apps_page.js"></script>
+<script src="bookmarks_page.js"></script>
 <script src="most_visited_page.js"></script>
+<script src="trash.js"></script>
 
 <script src="card_slider.js"></script>
 <script src="grabber.js"></script>
@@ -54,9 +59,16 @@ document.documentElement.setAttribute('touchui', true);
 </head>
 
 <body>
+  <div id="notification" class="inactive">
+    <span></span>
+    <div id="notificationLinks"></div>
+    <button class="close-button"></button>
+  </div>
+
   <div id="card-slider-frame">
-    <div id="page-list">
-    </div>
+    <button id="page-switcher-start" class="page-switcher" hidden>‹</button>
+    <div id="page-list"></div>
+    <button id="page-switcher-end" class="page-switcher" hidden>›</button>
     <div id="attribution">
       <span i18n-content="attributionintro"></span>
       <img id="attribution-img">
@@ -75,8 +87,9 @@ document.documentElement.setAttribute('touchui', true);
         <div class="disclosure-triangle"></div>
       </button>
 
-      <!-- TODO(estade): may want to remove this. -->
-      <div id="trash"></div>
+      <div id="trash">
+        <span i18n-content="trashLabel"></span>
+      </div>
     </div>
   </div>
 </body>

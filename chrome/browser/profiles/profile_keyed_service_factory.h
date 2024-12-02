@@ -23,21 +23,20 @@ class ProfileKeyedServiceFactory {
  public:
   typedef ProfileKeyedService* (*FactoryFunction)(Profile* profile);
 
-#if defined(UNIT_TEST)
-  // Associate an already-created |service| with |profile| for this factory.
-  // The service may be a mock, or may be NULL to inhibit automatic creation of
-  // the service by the default function. A mock factory set with
-  // |set_test_factory| will be called instead if the service is NULL.
-  void ForceAssociationBetween(Profile* profile, ProfileKeyedService* service) {
-    Associate(profile, service);
-  }
+  // Associates |factory| with |profile| so that |factory| is used to create
+  // the ProfileKeyedService when requested.
+  //
+  // |factory| can be NULL to signal that ProfileKeyedService should be NULL. A
+  // second call to SetTestingFactory() is allowed. If the FactoryFunction is
+  // changed AND an instance of the PKSF already exists for |profile|, that
+  // service is destroyed.
+  void SetTestingFactory(Profile* profile, FactoryFunction factory);
 
-  // Sets the factory function to use to create mock instances of this service.
-  // The factory function will only be called for profiles for which
-  // |ForceAssociationBetween| has been previously called with a NULL service
-  // pointer, and therefore does not affect normal non-test profiles.
-  void set_test_factory(FactoryFunction factory) { factory_ = factory; }
-#endif
+  // Associates |factory| with |profile| and immediately returns the created
+  // ProfileKeyedService. Since the factory will be used immediately, it may
+  // not be NULL;
+  ProfileKeyedService* SetTestingFactoryAndUse(Profile* profile,
+                                               FactoryFunction factory);
 
  protected:
   // ProfileKeyedServiceFactories must communicate with a
@@ -76,6 +75,18 @@ class ProfileKeyedServiceFactory {
   virtual bool ServiceRedirectedInIncognito();
   virtual bool ServiceHasOwnInstanceInIncognito();
 
+  // By default, we create instances of a service lazily and wait until
+  // GetForProfile() is called on our subclass. Some services need to be
+  // created as soon as the Profile has been brought up.
+  virtual bool ServiceIsCreatedWithProfile();
+
+  // By default, TestingProfiles will be treated like normal profiles. You can
+  // override this so that by default, the service associated with the
+  // TestingProfile is NULL. (This is just a shortcut around
+  // SetTestingFactory() to make sure our profiles don't directly refer to the
+  // services they use.)
+  virtual bool ServiceIsNULLWhileTesting();
+
   // A helper object actually listens for notifications about Profile
   // destruction, calculates the order in which things are destroyed and then
   // does a two pass shutdown.
@@ -97,13 +108,13 @@ class ProfileKeyedServiceFactory {
   // The mapping between a Profile and its service.
   std::map<Profile*, ProfileKeyedService*> mapping_;
 
+  // The mapping between a Profile and its overridden FactoryFunction.
+  std::map<Profile*, FactoryFunction> factories_;
+
   // Which ProfileDependencyManager we should communicate with. In real code,
   // this will always be ProfileDependencyManager::GetInstance(), but unit
   // tests will want to use their own copy.
   ProfileDependencyManager* dependency_manager_;
-
-  // A mock factory function to use to create the service, used by tests.
-  FactoryFunction factory_;
 };
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_KEYED_SERVICE_FACTORY_H_

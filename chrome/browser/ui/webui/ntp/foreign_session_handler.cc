@@ -16,6 +16,7 @@
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
 #include "chrome/common/url_constants.h"
@@ -42,24 +43,24 @@ void ForeignSessionHandler::RegisterMessages() {
 }
 
 void ForeignSessionHandler::Init() {
-  registrar_.Add(this, NotificationType::SYNC_CONFIGURE_DONE,
+  registrar_.Add(this, chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::FOREIGN_SESSION_UPDATED,
+  registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::FOREIGN_SESSION_DISABLED,
+  registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED,
                  NotificationService::AllSources());
 }
 
-void ForeignSessionHandler::Observe(NotificationType type,
+void ForeignSessionHandler::Observe(int type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
   ListValue list_value;
-  switch (type.value) {
-    case NotificationType::SYNC_CONFIGURE_DONE:
-    case NotificationType::FOREIGN_SESSION_UPDATED:
+  switch (type) {
+    case chrome::NOTIFICATION_SYNC_CONFIGURE_DONE:
+    case chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED:
       HandleGetForeignSessions(&list_value);
       break;
-    case NotificationType::FOREIGN_SESSION_DISABLED:
+    case chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED:
       // Calling foreignSessions with empty list will automatically hide
       // foreign session section.
       web_ui_->CallJavascriptFunction("foreignSessions", list_value);
@@ -87,14 +88,14 @@ SessionModelAssociator* ForeignSessionHandler::GetModelAssociator() {
 
 void ForeignSessionHandler::HandleGetForeignSessions(const ListValue* args) {
   SessionModelAssociator* associator = GetModelAssociator();
-  std::vector<const ForeignSession*> sessions;
+  std::vector<const SyncedSession*> sessions;
 
   if (associator == NULL) {
     // Called before associator created, exit.
     return;
   }
 
-  // Note: we don't own the ForeignSessions themselves.
+  // Note: we don't own the SyncedSessions themselves.
   if (!associator->GetAllForeignSessions(&sessions)) {
     LOG(ERROR) << "ForeignSessionHandler failed to get session data from"
         "SessionModelAssociator.";
@@ -102,10 +103,10 @@ void ForeignSessionHandler::HandleGetForeignSessions(const ListValue* args) {
   }
   int added_count = 0;
   ListValue session_list;
-  for (std::vector<const ForeignSession*>::const_iterator i =
+  for (std::vector<const SyncedSession*>::const_iterator i =
       sessions.begin(); i != sessions.end() &&
       added_count < kMaxSessionsToShow; ++i) {
-    const ForeignSession* foreign_session = *i;
+    const SyncedSession* foreign_session = *i;
     scoped_ptr<ListValue> window_list(new ListValue());
     for (std::vector<SessionWindow*>::const_iterator it =
         foreign_session->windows.begin(); it != foreign_session->windows.end();
@@ -113,8 +114,7 @@ void ForeignSessionHandler::HandleGetForeignSessions(const ListValue* args) {
       SessionWindow* window = *it;
       scoped_ptr<DictionaryValue> window_data(new DictionaryValue());
       if (SessionWindowToValue(*window, window_data.get())) {
-        window_data->SetString("sessionTag",
-            foreign_session->foreign_session_tag);
+        window_data->SetString("sessionTag", foreign_session->session_tag);
 
         // Give ownership to |list_value|.
         window_list->Append(window_data.release());

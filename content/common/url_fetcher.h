@@ -33,6 +33,7 @@ class MessageLoopProxy;
 namespace net {
 class HostPortPair;
 class HttpResponseHeaders;
+class HttpRequestHeaders;
 class URLRequestContextGetter;
 class URLRequestStatus;
 typedef std::vector<std::string> ResponseCookies;
@@ -123,7 +124,9 @@ class URLFetcher {
   // URLFetcher does not take ownership of |factory|. A value of NULL results
   // in a URLFetcher being created directly.
 #if defined(UNIT_TEST)
-  static void set_factory(Factory* factory) { factory_ = factory; }
+  static void set_factory(Factory* factory) {
+    factory_ = factory;
+  }
 #endif
 
   // Normally interception is disabled for URLFetcher, but you can use this
@@ -172,6 +175,8 @@ class URLFetcher {
   // is started.
   void set_extra_request_headers(const std::string& extra_request_headers);
 
+  void GetExtraRequestHeaders(net::HttpRequestHeaders* headers);
+
   // Set the net::URLRequestContext on the request.  Must be called before the
   // request is started.
   void set_request_context(
@@ -182,9 +187,9 @@ class URLFetcher {
   // after backoff_delay() elapses. URLFetcher has it set to true by default.
   void set_automatically_retry_on_5xx(bool retry);
 
-  int max_retries() const { return max_retries_; }
+  int max_retries() const;
 
-  void set_max_retries(int max_retries) { max_retries_ = max_retries; }
+  void set_max_retries(int max_retries);
 
   // Returns the back-off delay before the request will be retried,
   // when a 5xx response was received.
@@ -221,6 +226,10 @@ class URLFetcher {
   // settings.
   virtual void Start();
 
+  // Restarts the URLFetcher with a new URLRequestContextGetter.
+  void StartWithRequestContextGetter(
+      net::URLRequestContextGetter* request_context_getter);
+
   // Return the URL that this fetcher is processing.
   virtual const GURL& url() const;
 
@@ -250,7 +259,8 @@ class URLFetcher {
   // Get the path to the file containing the response body. Returns false
   // if the response body was not saved to a file. If take_ownership is
   // true, caller takes responsibility for the temp file, and it will not
-  // be removed once the URLFetcher is destroyed.
+  // be removed once the URLFetcher is destroyed.  User should not take
+  // ownership more than once, or call this method after taking ownership.
   virtual bool GetResponseAsFilePath(bool take_ownership,
                                      FilePath* out_response_path) const;
 
@@ -279,10 +289,10 @@ class URLFetcher {
   // be STRING, or this will CHECK.  This method exists to support the
   // old signiture to OnURLFetchComplete(), and will be removed as part
   // of crbug.com/83592 .
-  const std::string& GetResponseStringRef() const;
+  virtual const std::string& GetResponseStringRef() const;
 
-  void SetResponseDestinationForTesting(ResponseDestinationType);
-  ResponseDestinationType GetResponseDestinationForTesting() const;
+  virtual void SetResponseDestinationForTesting(ResponseDestinationType);
+  virtual ResponseDestinationType GetResponseDestinationForTesting() const;
 
  private:
   friend class URLFetcherTest;
@@ -297,15 +307,8 @@ class URLFetcher {
 
   static Factory* factory_;
 
-  // If |automatically_retry_on_5xx_| is false, 5xx responses will be
-  // propagated to the observer, if it is true URLFetcher will automatically
-  // re-execute the request, after the back-off delay has expired.
-  // true by default.
-  bool automatically_retry_on_5xx_;
   // Back-off time delay. 0 by default.
   base::TimeDelta backoff_delay_;
-  // Maximum retries allowed.
-  int max_retries_;
 
   static bool g_interception_enabled;
 

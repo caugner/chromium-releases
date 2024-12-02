@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
@@ -35,7 +36,6 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "content/common/page_transition_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -271,7 +271,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
   browser()->Reload(CURRENT_TAB);
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->CloseModalDialog();
-  EXPECT_FALSE(browser()->GetSelectedTabContents()->is_loading());
+  EXPECT_FALSE(browser()->GetSelectedTabContents()->IsLoading());
 
   // Clear the beforeunload handler so the test can easily exit.
   browser()->GetSelectedTabContents()->render_view_host()->
@@ -294,12 +294,12 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
   // Cancel the dialog.
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->CloseModalDialog();
-  EXPECT_FALSE(browser()->GetSelectedTabContents()->is_loading());
+  EXPECT_FALSE(browser()->GetSelectedTabContents()->IsLoading());
 
   // Wait for the ShouldClose_ACK to arrive.  We can detect it by waiting for
   // the pending RVH to be destroyed.
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_WIDGET_HOST_DESTROYED);
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED);
   EXPECT_EQ(url.spec(), WideToUTF8(browser()->toolbar_model()->GetText()));
 
   // Clear the beforeunload handler so the test can easily exit.
@@ -490,7 +490,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
   EXPECT_EQ(expected_favicon_url.spec(), entry->favicon().url().spec());
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_LINUX)
 // http://crbug.com/83828. On Mac 10.6, the failure rate is 14%
 #define MAYBE_FaviconChange FLAKY_FaviconChange
 #else
@@ -589,8 +589,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
 }
 #endif
 
-#if defined(OS_WIN)
-// http://crbug.com/46198. On XP/Vista, the failure rate is 5 ~ 6%.
+#if defined(OS_WIN) || defined(OS_MACOSX)
+// http://crbug.com/46198: On XP/Vista, the failure rate is 5 ~ 6%.
+// On OS 10.5 it's 1%, 10.6 currently 4%.
 #define MAYBE_PageLanguageDetection FLAKY_PageLanguageDetection
 #else
 #define MAYBE_PageLanguageDetection PageLanguageDetection
@@ -599,20 +600,22 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
 IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageLanguageDetection) {
   ASSERT_TRUE(test_server()->Start());
 
+  std::string lang;
+
+  // Open a new tab with a page in English.
+  AddTabAtIndex(0, GURL(test_server()->GetURL("files/english_page.html")),
+                PageTransition::TYPED);
+
   TabContents* current_tab = browser()->GetSelectedTabContents();
   TabContentsWrapper* wrapper = browser()->GetSelectedTabContentsWrapper();
   TranslateTabHelper* helper = wrapper->translate_tab_helper();
   Source<TabContents> source(current_tab);
 
-  // Navigate to a page in English.
   ui_test_utils::WindowedNotificationObserverWithDetails<std::string>
-      en_language_detected_signal(NotificationType::TAB_LANGUAGE_DETERMINED,
+      en_language_detected_signal(chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
                                   source);
-  ui_test_utils::NavigateToURL(
-      browser(), GURL(test_server()->GetURL("files/english_page.html")));
-  EXPECT_TRUE(helper->language_state().original_language().empty());
+  EXPECT_EQ("", helper->language_state().original_language());
   en_language_detected_signal.Wait();
-  std::string lang;
   EXPECT_TRUE(en_language_detected_signal.GetDetailsFor(
         source.map_key(), &lang));
   EXPECT_EQ("en", lang);
@@ -620,11 +623,10 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageLanguageDetection) {
 
   // Now navigate to a page in French.
   ui_test_utils::WindowedNotificationObserverWithDetails<std::string>
-      fr_language_detected_signal(NotificationType::TAB_LANGUAGE_DETERMINED,
+      fr_language_detected_signal(chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
                                   source);
   ui_test_utils::NavigateToURL(
       browser(), GURL(test_server()->GetURL("files/french_page.html")));
-  EXPECT_TRUE(helper->language_state().original_language().empty());
   fr_language_detected_signal.Wait();
   lang.clear();
   EXPECT_TRUE(fr_language_detected_signal.GetDetailsFor(

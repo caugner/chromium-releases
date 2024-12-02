@@ -23,7 +23,7 @@
 #include "base/timer.h"
 #include "content/browser/renderer_host/resource_queue.h"
 #include "content/common/child_process_info.h"
-#include "content/common/notification_type.h"
+#include "content/common/content_notification_types.h"
 #include "ipc/ipc_message.h"
 #include "net/url_request/url_request.h"
 #include "webkit/glue/resource_type.h"
@@ -34,10 +34,10 @@ class DownloadRequestLimiter;
 class LoginHandler;
 class NotificationDetails;
 class PluginService;
+class ResourceDispatcherHostDelegate;
 class ResourceDispatcherHostRequestInfo;
 class ResourceHandler;
 class ResourceMessageFilter;
-class SafeBrowsingService;
 class SaveFileManager;
 class SSLClientAuthHandler;
 class WebKitThread;
@@ -59,46 +59,6 @@ class DeletableFileReference;
 
 class ResourceDispatcherHost : public net::URLRequest::Delegate {
  public:
-  class Observer {
-   public:
-    // Called when a request begins. Return false to abort the request.
-    virtual bool ShouldBeginRequest(
-        int child_id, int route_id,
-        const ResourceHostMsg_Request& request_data,
-        const content::ResourceContext& resource_context,
-        const GURL& referrer) = 0;
-
-    // Called after the load flags have been set when a request begins. Use it
-    // to add or remove load flags.
-    virtual void MutateLoadFlags(int child_id, int route_id,
-                                 int* load_flags) = 0;
-
-    // Called to determine whether a request's start should be deferred. This
-    // is only called if the ResourceHandler associated with the request does
-    // not ask for a deferral. A return value of true will defer the start of
-    // the request, false will continue the request.
-    virtual bool ShouldDeferStart(
-        net::URLRequest* request,
-        const content::ResourceContext& resource_context) = 0;
-
-    // Called when an SSL Client Certificate is requested. If false is returned,
-    // the request is canceled. Otherwise, the certificate is chosen.
-    virtual bool AcceptSSLClientCertificateRequest(
-        net::URLRequest* request,
-        net::SSLCertRequestInfo* cert_request_info) = 0;
-
-    // Called when authentication is required and credentials are needed. If
-    // false is returned, CancelAuth() is called on the URLRequest and the error
-    // page is shown. If true is returned, the user will be prompted for
-    // authentication credentials.
-    virtual bool AcceptAuthRequest(net::URLRequest* request,
-                                   net::AuthChallengeInfo* auth_info) = 0;
-
-   protected:
-    Observer() {}
-    virtual ~Observer() {}
-  };
-
   explicit ResourceDispatcherHost(
       const ResourceQueue::DelegateSet& resource_queue_delegates);
   virtual ~ResourceDispatcherHost();
@@ -192,10 +152,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
     return save_file_manager_;
   }
 
-  SafeBrowsingService* safe_browsing_service() const {
-    return safe_browsing_;
-  }
-
   WebKitThread* webkit_thread() const {
     return webkit_thread_.get();
   }
@@ -209,6 +165,11 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   // Force cancels any pending requests for the given route id.  This method
   // acts like CancelRequestsForProcess when route_id is -1.
   void CancelRequestsForRoute(int process_unique_id, int route_id);
+
+  // Force cancels any pending requests for the given |context|. This is
+  // necessary to ensure that before |context| goes away, all requests
+  // for it are dead.
+  void CancelRequestsForContext(const content::ResourceContext* context);
 
   // net::URLRequest::Delegate
   virtual void OnReceivedRedirect(net::URLRequest* request,
@@ -230,8 +191,8 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   virtual void OnReadCompleted(net::URLRequest* request, int bytes_read);
   void OnResponseCompleted(net::URLRequest* request);
 
-  // Helper functions to get our extra data out of a request. The given request
-  // must have been one we created so that it has the proper extra data pointer.
+  // Helper functions to get the dispatcher's request info for the request.
+  // If the dispatcher didn't create the request then NULL is returned.
   static ResourceDispatcherHostRequestInfo* InfoForRequest(
       net::URLRequest* request);
   static const ResourceDispatcherHostRequestInfo* InfoForRequest(
@@ -289,9 +250,14 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   bool allow_cross_origin_auth_prompt();
   void set_allow_cross_origin_auth_prompt(bool value);
 
-  // This does not take ownership of the observer. It is expected that the
-  // observer have a longer lifetime than the ResourceDispatcherHost.
-  void set_observer(Observer* observer) { observer_ = observer; }
+  // This does not take ownership of the delegate. It is expected that the
+  // delegate have a longer lifetime than the ResourceDispatcherHost.
+  void set_delegate(ResourceDispatcherHostDelegate* delegate) {
+    delegate_ = delegate;
+  }
+  ResourceDispatcherHostDelegate* delegate() {
+    return delegate_;
+  }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
@@ -425,10 +391,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
                         const GURL& new_first_party_for_cookies);
   void OnReleaseDownloadedFile(int request_id);
 
-  ResourceHandler* CreateSafeBrowsingResourceHandler(
-      ResourceHandler* handler, int child_id, int route_id,
-      ResourceType::Type resource_type);
-
   // Creates ResourceDispatcherHostRequestInfo for a browser-initiated request
   // (a download or a page save). |download| should be true if the request
   // is a file download.
@@ -450,7 +412,7 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   // Sends the given notification on the UI thread.  The RenderViewHost's
   // controller is used as the source.
   template <class T>
-  static void NotifyOnUI(NotificationType type,
+  static void NotifyOnUI(int type,
                          int render_process_id,
                          int render_view_id,
                          T* detail);
@@ -493,8 +455,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   // We own the save file manager.
   scoped_refptr<SaveFileManager> save_file_manager_;
 
-  scoped_refptr<SafeBrowsingService> safe_browsing_;
-
   // We own the WebKit thread and see to its destruction.
   scoped_ptr<WebKitThread> webkit_thread_;
 
@@ -536,7 +496,7 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   // to the source of the message.
   ResourceMessageFilter* filter_;
 
-  Observer* observer_;
+  ResourceDispatcherHostDelegate* delegate_;
 
   static bool is_prefetch_enabled_;
   bool allow_cross_origin_auth_prompt_;

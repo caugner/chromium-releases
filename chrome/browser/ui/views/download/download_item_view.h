@@ -21,6 +21,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/string_util.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/download/download_item.h"
@@ -48,7 +49,7 @@ class SlideAnimation;
 
 namespace views {
 class Label;
-class NativeButton;
+class TextButton;
 }
 
 class DownloadItemView : public views::ButtonListener,
@@ -197,8 +198,7 @@ class DownloadItemView : public views::ButtonListener,
   DownloadShelfView* parent_;
 
   // Elements of our particular download
-  std::wstring status_text_;
-  bool show_status_text_;
+  string16 status_text_;
 
   // The font used to print the file name and status.
   gfx::Font font_;
@@ -254,8 +254,8 @@ class DownloadItemView : public views::ButtonListener,
   base::RepeatingTimer<DownloadItemView> progress_timer_;
 
   // Dangerous mode buttons.
-  views::NativeButton* save_button_;
-  views::NativeButton* discard_button_;
+  views::TextButton* save_button_;
+  views::TextButton* discard_button_;
 
   // Dangerous mode label.
   views::Label* dangerous_download_label_;

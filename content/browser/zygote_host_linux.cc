@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/eintr_wrapper.h"
 #include "base/environment.h"
@@ -21,9 +22,9 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
+#include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
+#include "content/common/content_switches.h"
 #include "content/common/process_watcher.h"
 #include "content/common/result_codes.h"
 #include "content/common/unix_domain_socket_posix.h"
@@ -57,8 +58,7 @@ ZygoteHost::ZygoteHost()
       init_(false),
       using_suid_sandbox_(false),
       have_read_sandbox_status_word_(false),
-      sandbox_status_(0) {
-}
+      sandbox_status_(0) {}
 
 ZygoteHost::~ZygoteHost() {
   if (init_)
@@ -104,20 +104,18 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
     switches::kAllowSandboxDebugging,
     switches::kLoggingLevel,
     switches::kEnableLogging,  // Support, e.g., --enable-logging=stderr.
-    switches::kEnableRemoting,
     switches::kV,
     switches::kVModule,
-    switches::kUserDataDir,  // Make logs go to the right file.
-    // Load (in-process) Pepper plugins in-process in the zygote pre-sandbox.
-    switches::kPpapiFlashInProcess,
-    switches::kPpapiFlashPath,
-    switches::kPpapiFlashVersion,
     switches::kRegisterPepperPlugins,
     switches::kDisableSeccompSandbox,
     switches::kEnableSeccompSandbox,
+    switches::kNaClLinuxHelper,
   };
   cmd_line.CopySwitchesFrom(browser_command_line, kForwardSwitches,
                             arraysize(kForwardSwitches));
+
+  content::GetContentClient()->browser()->AppendExtraCommandLineSwitches(
+      &cmd_line, -1);
 
   sandbox_binary_ = sandbox_cmd.c_str();
   struct stat st;
@@ -151,8 +149,10 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
     fds_to_map.push_back(std::make_pair(dummy_fd, 7));
   }
 
-  base::ProcessHandle process;
-  base::LaunchApp(cmd_line.argv(), fds_to_map, false, &process);
+  base::ProcessHandle process = -1;
+  base::LaunchOptions options;
+  options.fds_to_remap = &fds_to_map;
+  base::LaunchProcess(cmd_line.argv(), options, &process);
   CHECK(process != -1) << "Failed to launch zygote process";
 
   if (using_suid_sandbox_) {
@@ -223,13 +223,15 @@ ssize_t ZygoteHost::ReadReply(void* buf, size_t buf_len) {
   return HANDLE_EINTR(read(control_fd_, buf, buf_len));
 }
 
-pid_t ZygoteHost::ForkRenderer(
+pid_t ZygoteHost::ForkRequest(
     const std::vector<std::string>& argv,
-    const base::GlobalDescriptors::Mapping& mapping) {
+    const base::GlobalDescriptors::Mapping& mapping,
+    const std::string& process_type) {
   DCHECK(init_);
   Pickle pickle;
 
   pickle.WriteInt(kCmdFork);
+  pickle.WriteString(process_type);
   pickle.WriteInt(argv.size());
   for (std::vector<std::string>::const_iterator
        i = argv.begin(); i != argv.end(); ++i)
@@ -297,16 +299,15 @@ void ZygoteHost::AdjustRendererOOMScore(base::ProcessHandle pid, int score) {
   }
 
   if (using_suid_sandbox_ && !selinux) {
-    base::ProcessHandle sandbox_helper_process;
     std::vector<std::string> adj_oom_score_cmdline;
-
     adj_oom_score_cmdline.push_back(sandbox_binary_);
     adj_oom_score_cmdline.push_back(base::kAdjustOOMScoreSwitch);
     adj_oom_score_cmdline.push_back(base::Int64ToString(pid));
     adj_oom_score_cmdline.push_back(base::IntToString(score));
-    CommandLine adj_oom_score_cmd(adj_oom_score_cmdline);
-    if (base::LaunchApp(adj_oom_score_cmd, false, true,
-                        &sandbox_helper_process)) {
+
+    base::ProcessHandle sandbox_helper_process;
+    if (base::LaunchProcess(adj_oom_score_cmdline, base::LaunchOptions(),
+                            &sandbox_helper_process)) {
       ProcessWatcher::EnsureProcessGetsReaped(sandbox_helper_process);
     }
   } else if (!using_suid_sandbox_) {
@@ -336,7 +337,7 @@ base::TerminationStatus ZygoteHost::GetTerminationStatus(
 
   // Set this now to handle the early termination cases.
   if (exit_code)
-    *exit_code = ResultCodes::NORMAL_EXIT;
+    *exit_code = content::RESULT_CODE_NORMAL_EXIT;
 
   static const unsigned kMaxMessageLength = 128;
   char buf[kMaxMessageLength];

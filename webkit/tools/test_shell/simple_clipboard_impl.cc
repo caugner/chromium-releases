@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/lazy_instance.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -92,6 +92,10 @@ bool ClipboardReadData(ui::Clipboard::Buffer buffer, const string16& type,
 bool ClipboardReadFilenames(ui::Clipboard::Buffer buffer,
                             std::vector<string16>* filenames) {
   return false;
+}
+
+uint64 ClipboardGetSequenceNumber() {
+  return 0;
 }
 
 }  // namespace webkit_glue

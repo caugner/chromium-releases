@@ -70,10 +70,14 @@ class WebKitClientImpl : public WebKit::WebKitClient {
       const WebKit::WebString& value1, const WebKit::WebString& value2);
   virtual void suddenTerminationChanged(bool enabled) { }
   virtual double currentTime();
+  virtual double monotonicallyIncreasingTime();
   virtual void cryptographicallyRandomValues(
       unsigned char* buffer, size_t length);
   virtual void setSharedTimerFiredFunction(void (*func)());
-  virtual void setSharedTimerFireTime(double fireTime);
+  virtual void setSharedTimerFireInterval(double interval_seconds);
+#ifndef WEBKIT_USE_MONOTONIC_CLOCK_FOR_TIMER_SCHEDULING
+  virtual void setSharedTimerFireTime(double fire_time);
+#endif
   virtual void stopSharedTimer();
   virtual void callOnMainThread(void (*func)(void*), void* context);
 

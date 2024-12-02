@@ -10,7 +10,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/label.h"
-#include "views/controls/menu/menu_2.h"
+#include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/menu_model_adapter.h"
+#include "views/widget/widget.h"
 
 AfterTranslateInfoBar::AfterTranslateInfoBar(
     TabContentsWrapper* owner,
@@ -24,11 +26,8 @@ AfterTranslateInfoBar::AfterTranslateInfoBar(
       revert_button_(NULL),
       options_menu_button_(NULL),
       original_language_menu_model_(delegate, LanguagesMenuModel::ORIGINAL),
-      original_language_menu_(new views::Menu2(&original_language_menu_model_)),
       target_language_menu_model_(delegate, LanguagesMenuModel::TARGET),
-      target_language_menu_(new views::Menu2(&target_language_menu_model_)),
       options_menu_model_(delegate),
-      options_menu_(new views::Menu2(&options_menu_model_)),
       swapped_language_buttons_(false) {
 }
 
@@ -94,8 +93,8 @@ void AfterTranslateInfoBar::ViewHierarchyChanged(bool is_add,
   label_1_ = CreateLabel(strings[0]);
   AddChildView(label_1_);
 
-  original_language_menu_button_ = CreateMenuButton(string16(), true, this);
-  target_language_menu_button_ = CreateMenuButton(string16(), true, this);
+  original_language_menu_button_ = CreateMenuButton(string16(), this);
+  target_language_menu_button_ = CreateMenuButton(string16(), this);
   AddChildView(swapped_language_buttons_ ?
       target_language_menu_button_ : original_language_menu_button_);
 
@@ -113,7 +112,7 @@ void AfterTranslateInfoBar::ViewHierarchyChanged(bool is_add,
   AddChildView(revert_button_);
 
   options_menu_button_ = CreateMenuButton(
-      l10n_util::GetStringUTF16(IDS_TRANSLATE_INFOBAR_OPTIONS), false, this);
+      l10n_util::GetStringUTF16(IDS_TRANSLATE_INFOBAR_OPTIONS), this);
   AddChildView(options_menu_button_);
 
   // This must happen after adding all other children so InfoBarView can ensure
@@ -148,22 +147,37 @@ int AfterTranslateInfoBar::ContentMinimumWidth() const {
 }
 
 void AfterTranslateInfoBar::OriginalLanguageChanged() {
-  UpdateLanguageButtonText(original_language_menu_button_,
-                           LanguagesMenuModel::ORIGINAL);
+  // Tests can call this function when the infobar has never been added to a
+  // view hierarchy and thus there is no button.
+  if (original_language_menu_button_) {
+    UpdateLanguageButtonText(original_language_menu_button_,
+                             LanguagesMenuModel::ORIGINAL);
+  }
 }
 
 void AfterTranslateInfoBar::TargetLanguageChanged() {
-  UpdateLanguageButtonText(target_language_menu_button_,
-                           LanguagesMenuModel::TARGET);
+  // Tests can call this function when the infobar has never been added to a
+  // view hierarchy and thus there is no button.
+  if (target_language_menu_button_) {
+    UpdateLanguageButtonText(target_language_menu_button_,
+                             LanguagesMenuModel::TARGET);
+  }
 }
 
 void AfterTranslateInfoBar::RunMenu(View* source, const gfx::Point& pt) {
+  ui::MenuModel* menu_model = NULL;
   if (source == original_language_menu_button_) {
-    original_language_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPRIGHT);
+    menu_model = &original_language_menu_model_;
   } else if (source == target_language_menu_button_) {
-    target_language_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPRIGHT);
+    menu_model = &target_language_menu_model_;
   } else {
     DCHECK_EQ(options_menu_button_, source);
-    options_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPRIGHT);
+    menu_model = &options_menu_model_;
   }
+
+  views::MenuModelAdapter menu_model_adapter(menu_model);
+  views::MenuItemView menu(&menu_model_adapter);
+  menu_model_adapter.BuildMenu(&menu);
+  menu.RunMenuAt(source->GetWidget()->GetNativeWindow(), NULL,
+      gfx::Rect(pt, gfx::Size()), views::MenuItemView::TOPRIGHT, true);
 }

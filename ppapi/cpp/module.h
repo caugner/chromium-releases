@@ -13,7 +13,6 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/ppb.h"
 #include "ppapi/c/ppb_core.h"
-#include "ppapi/cpp/common.h"
 #include "ppapi/cpp/core.h"
 
 namespace pp {
@@ -22,6 +21,8 @@ class Instance;
 
 class Module {
  public:
+  typedef std::map<PP_Instance, Instance*> InstanceMap;
+
   // You may not call any other PP functions from the constructor, put them
   // in Init instead. Various things will not be set up until the constructor
   // completes.
@@ -89,6 +90,9 @@ class Module {
   bool InternalInit(PP_Module mod,
                     PPB_GetInterface get_browser_interface);
 
+  // Allows iteration over the current instances in the module.
+  const InstanceMap& current_instances() const { return current_instances_; }
+
  protected:
   // Override to create your own plugin type.
   virtual Instance* CreateInstance(PP_Instance instance) = 0;
@@ -105,7 +109,6 @@ class Module {
   Module& operator=(const Module&);
 
   // Instance tracking.
-  typedef std::map<PP_Instance, Instance*> InstanceMap;
   InstanceMap current_instances_;
 
   PP_Module pp_module_;

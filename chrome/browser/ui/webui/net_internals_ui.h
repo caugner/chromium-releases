@@ -6,11 +6,19 @@
 #define CHROME_BROWSER_UI_WEBUI_NET_INTERNALS_UI_H_
 #pragma once
 
-#include "content/browser/webui/web_ui.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 
-class NetInternalsUI : public WebUI {
+namespace base {
+class Value;
+}
+
+class NetInternalsUI : public ChromeWebUI {
  public:
   explicit NetInternalsUI(TabContents* contents);
+
+  // Returns a Value containing constants NetInternals needs to load a log file.
+  // Safe to call on any thread.  Caller takes ownership of the returned Value.
+  static base::Value* GetConstants();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetInternalsUI);

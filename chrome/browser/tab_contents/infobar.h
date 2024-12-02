@@ -6,18 +6,32 @@
 #define CHROME_BROWSER_TAB_CONTENTS_INFOBAR_H_
 #pragma once
 
+#include <utility>
+
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "build/build_config.h"
+#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/animation/animation_delegate.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/gfx/size.h"
 
-class InfoBarContainer;
-class InfoBarDelegate;
-class TabContentsWrapper;
+// TODO(sail): These functions should be static methods in the InfoBar class
+// below once all platforms use that class.
+SkColor GetInfoBarTopColor(InfoBarDelegate::Type infobar_type);
+SkColor GetInfoBarBottomColor(InfoBarDelegate::Type infobar_type);
 
-namespace ui {
-class SlideAnimation;
-}
+// TODO(pkasting): Same with these notification-related typedefs.
+typedef InfoBarDelegate InfoBarAddedDetails;
+typedef std::pair<InfoBarDelegate*, bool> InfoBarRemovedDetails;
+typedef std::pair<InfoBarDelegate*, InfoBarDelegate*> InfoBarReplacedDetails;
+
+// TODO(pkasting): Port Mac to use this.
+#if defined(TOOLKIT_VIEWS) || defined(TOOLKIT_GTK)
+
+class InfoBarContainer;
+class TabContentsWrapper;
 
 class InfoBar : public ui::AnimationDelegate {
  public:
@@ -49,8 +63,14 @@ class InfoBar : public ui::AnimationDelegate {
   // effect once the infobar is animating closed.
   void SetArrowTargetHeight(int height);
 
-  const ui::SlideAnimation* animation() const { return animation_.get(); }
+  // Notifies the infobar that it is no longer owned and should close its
+  // delegate once it is invisible.
+  void CloseSoon();
+
+  const ui::SlideAnimation& animation() const { return animation_; }
   int arrow_height() const { return arrow_height_; }
+  int arrow_target_height() const { return arrow_target_height_; }
+  int arrow_half_width() const { return arrow_half_width_; }
   int total_height() const { return arrow_height_ + bar_height_; }
 
  protected:
@@ -60,9 +80,8 @@ class InfoBar : public ui::AnimationDelegate {
   // ui::AnimationDelegate:
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
-  // Called when the user closes the infobar, notifies the delegate we've been
-  // dismissed and forwards a removal request to our owner.
-  void RemoveInfoBar();
+  // Forwards a close request to our owner.
+  void RemoveSelf();
 
   // Changes the target height of the main ("bar") portion of the infobar.
   void SetBarTargetHeight(int height);
@@ -72,13 +91,16 @@ class InfoBar : public ui::AnimationDelegate {
   // out) as we animate open and closed.
   int OffsetY(const gfx::Size& prefsize) const;
 
+  bool owned() const { return !!owner_; }
   const InfoBarContainer* container() const { return container_; }
-  ui::SlideAnimation* animation() { return animation_.get(); }
-  int arrow_half_width() const { return arrow_half_width_; }
+  InfoBarContainer* container() { return container_; }
+  ui::SlideAnimation* animation() { return &animation_; }
   int bar_height() const { return bar_height_; }
+  int bar_target_height() const { return bar_target_height_; }
 
   // Platforms may optionally override these if they need to do work during
   // processing of the given calls.
+  virtual void PlatformSpecificShow(bool animate) {}
   virtual void PlatformSpecificHide(bool animate) {}
   virtual void PlatformSpecificOnHeightsRecalculated() {}
 
@@ -97,10 +119,10 @@ class InfoBar : public ui::AnimationDelegate {
   // delete us) and closes the delegate.
   void MaybeDelete();
 
-  TabContentsWrapper* owner_;  // TODO(pkasting): Transition to using this.
+  TabContentsWrapper* owner_;
   InfoBarDelegate* delegate_;
   InfoBarContainer* container_;
-  scoped_ptr<ui::SlideAnimation> animation_;
+  ui::SlideAnimation animation_;
 
   // The current and target heights of the arrow and bar portions, and half the
   // current arrow width.  (It's easier to work in half-widths as we draw the
@@ -113,5 +135,9 @@ class InfoBar : public ui::AnimationDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(InfoBar);
 };
+
+#elif defined(OS_MACOSX)
+#include "chrome/browser/ui/cocoa/infobars/infobar.h"
+#endif
 
 #endif  // CHROME_BROWSER_TAB_CONTENTS_INFOBAR_H_

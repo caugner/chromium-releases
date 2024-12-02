@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/string_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/icon_messages.h"
@@ -30,8 +31,8 @@
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
@@ -41,7 +42,6 @@
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/skbitmap_operations.h"
-#include "webkit/glue/dom_operations.h"
 #include "webkit/glue/image_decoder.h"
 #include "webkit/glue/image_resource_fetcher.h"
 #include "webkit/glue/webkit_glue.h"
@@ -51,8 +51,6 @@ using WebKit::WebCString;
 using WebKit::WebDataSource;
 using WebKit::WebFrame;
 using WebKit::WebIconURL;
-using WebKit::WebPageSerializer;
-using WebKit::WebPageSerializerClient;
 using WebKit::WebRect;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebSize;
@@ -84,6 +82,67 @@ static const size_t kMaxIndexChars = 65535;
 // Size of the thumbnails that we'll generate
 static const int kThumbnailWidth = 212;
 static const int kThumbnailHeight = 132;
+
+// Constants for UMA statistic collection.
+static const char kSSLInsecureContent[] = "SSL.InsecureContent";
+static const char kDotGoogleDotCom[] = ".google.com";
+static const char kWWWDotGoogleDotCom[] = "www.google.com";
+static const char kMailDotGoogleDotCom[] = "mail.google.com";
+static const char kPlusDotGoogleDotCom[] = "plus.google.com";
+static const char kDocsDotGoogleDotCom[] = "docs.google.com";
+static const char kSitesDotGoogleDotCom[] = "sites.google.com";
+static const char kPicasawebDotGoogleDotCom[] = "picasaweb.google.com";
+static const char kCodeDotGoogleDotCom[] = "code.google.com";
+static const char kGroupsDotGoogleDotCom[] = "groups.google.com";
+static const char kMapsDotGoogleDotCom[] = "maps.google.com";
+static const char kWWWDotYoutubeDotCom[] = "www.youtube.com";
+static const char kDotGoogleUserContentDotCom[] = ".googleusercontent.com";
+static const char kGoogleReaderPathPrefix[] = "/reader/";
+static const char kGoogleSupportPathPrefix[] = "/support/";
+static const char kGoogleIntlPathPrefix[] = "/intl/";
+static const char kDotJS[] = ".js";
+static const char kDotCSS[] = ".css";
+static const char kDotSWF[] = ".swf";
+static const char kDotHTML[] = ".html";
+enum {
+  INSECURE_CONTENT_DISPLAY = 0,
+  INSECURE_CONTENT_DISPLAY_HOST_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_WWW_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HTML,
+  INSECURE_CONTENT_RUN,
+  INSECURE_CONTENT_RUN_HOST_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_WWW_GOOGLE,
+  INSECURE_CONTENT_RUN_TARGET_YOUTUBE,
+  INSECURE_CONTENT_RUN_JS,
+  INSECURE_CONTENT_RUN_CSS,
+  INSECURE_CONTENT_RUN_SWF,
+  INSECURE_CONTENT_DISPLAY_HOST_YOUTUBE,
+  INSECURE_CONTENT_RUN_HOST_YOUTUBE,
+  INSECURE_CONTENT_RUN_HOST_GOOGLEUSERCONTENT,
+  INSECURE_CONTENT_DISPLAY_HOST_MAIL_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_MAIL_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_PLUS_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_PLUS_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_DOCS_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_DOCS_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_SITES_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_SITES_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_PICASAWEB_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_PICASAWEB_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_READER,
+  INSECURE_CONTENT_RUN_HOST_GOOGLE_READER,
+  INSECURE_CONTENT_DISPLAY_HOST_CODE_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_CODE_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_GROUPS_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_GROUPS_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_MAPS_GOOGLE,
+  INSECURE_CONTENT_RUN_HOST_MAPS_GOOGLE,
+  INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_SUPPORT,
+  INSECURE_CONTENT_RUN_HOST_GOOGLE_SUPPORT,
+  INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_INTL,
+  INSECURE_CONTENT_RUN_HOST_GOOGLE_INTL,
+  INSECURE_CONTENT_NUM_EVENTS
+};
 
 static bool PaintViewIntoCanvas(WebView* view,
                                 skia::PlatformCanvas& canvas) {
@@ -132,14 +191,15 @@ ChromeRenderViewObserver::ChromeRenderViewObserver(
     RenderView* render_view,
     ContentSettingsObserver* content_settings,
     ExtensionDispatcher* extension_dispatcher,
-    TranslateHelper* translate_helper,
-    safe_browsing::PhishingClassifierDelegate* phishing_classifier)
+    TranslateHelper* translate_helper)
     : RenderViewObserver(render_view),
       content_settings_(content_settings),
       extension_dispatcher_(extension_dispatcher),
       translate_helper_(translate_helper),
-      phishing_classifier_(phishing_classifier),
+      phishing_classifier_(NULL),
       last_indexed_page_id_(-1),
+      allow_displaying_insecure_content_(false),
+      allow_running_insecure_content_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(page_info_method_factory_(this)) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kDomAutomationController)) {
@@ -148,6 +208,8 @@ ChromeRenderViewObserver::ChromeRenderViewObserver(
         old_bindings |= BindingsPolicy::DOM_AUTOMATION);
   }
   render_view->webview()->setPermissionClient(this);
+  if (!command_line.HasSwitch(switches::kDisableClientSidePhishingDetection))
+    OnSetClientSidePhishingDetection(true);
 }
 
 ChromeRenderViewObserver::~ChromeRenderViewObserver() {
@@ -161,13 +223,14 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
                         OnHandleMessageFromExternalHost)
     IPC_MESSAGE_HANDLER(ViewMsg_JavaScriptStressTestControl,
                         OnJavaScriptStressTestControl)
-    IPC_MESSAGE_HANDLER(ViewMsg_GetAllSavableResourceLinksForCurrentPage,
-                        OnGetAllSavableResourceLinksForCurrentPage)
-    IPC_MESSAGE_HANDLER(
-        ViewMsg_GetSerializedHtmlDataForCurrentPageWithLocalLinks,
-        OnGetSerializedHtmlDataForCurrentPageWithLocalLinks)
     IPC_MESSAGE_HANDLER(IconMsg_DownloadFavicon, OnDownloadFavicon)
     IPC_MESSAGE_HANDLER(ViewMsg_EnableViewSourceMode, OnEnableViewSourceMode)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetAllowDisplayingInsecureContent,
+                        OnSetAllowDisplayingInsecureContent)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetAllowRunningInsecureContent,
+                        OnSetAllowRunningInsecureContent)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetClientSidePhishingDetection,
+                        OnSetClientSidePhishingDetection)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -217,55 +280,6 @@ void ChromeRenderViewObserver::OnJavaScriptStressTestControl(int cmd,
   }
 }
 
-void ChromeRenderViewObserver::OnGetAllSavableResourceLinksForCurrentPage(
-    const GURL& page_url) {
-  // Prepare list to storage all savable resource links.
-  std::vector<GURL> resources_list;
-  std::vector<GURL> referrers_list;
-  std::vector<GURL> frames_list;
-  webkit_glue::SavableResourcesResult result(&resources_list,
-                                             &referrers_list,
-                                             &frames_list);
-
-  if (!webkit_glue::GetAllSavableResourceLinksForCurrentPage(
-          render_view()->webview(),
-          page_url,
-          &result,
-          chrome::kSavableSchemes)) {
-    // If something is wrong when collecting all savable resource links,
-    // send empty list to embedder(browser) to tell it failed.
-    referrers_list.clear();
-    resources_list.clear();
-    frames_list.clear();
-  }
-
-  // Send result of all savable resource links to embedder.
-  Send(new ViewHostMsg_SendCurrentPageAllSavableResourceLinks(routing_id(),
-                                                              resources_list,
-                                                              referrers_list,
-                                                              frames_list));
-}
-
-void
-ChromeRenderViewObserver::OnGetSerializedHtmlDataForCurrentPageWithLocalLinks(
-    const std::vector<GURL>& links,
-    const std::vector<FilePath>& local_paths,
-    const FilePath& local_directory_name) {
-
-  // Convert std::vector of GURLs to WebVector<WebURL>
-  WebVector<WebURL> weburl_links(links);
-
-  // Convert std::vector of std::strings to WebVector<WebString>
-  WebVector<WebString> webstring_paths(local_paths.size());
-  for (size_t i = 0; i < local_paths.size(); i++)
-    webstring_paths[i] = webkit_glue::FilePathToWebString(local_paths[i]);
-
-  WebPageSerializer::serialize(render_view()->webview()->mainFrame(),
-                               true, this, weburl_links, webstring_paths,
-                               webkit_glue::FilePathToWebString(
-                                   local_directory_name));
-}
-
 void ChromeRenderViewObserver::OnDownloadFavicon(int id,
                                                  const GURL& image_url,
                                                  int image_size) {
@@ -292,19 +306,29 @@ void ChromeRenderViewObserver::OnEnableViewSourceMode() {
   WebFrame* main_frame = render_view()->webview()->mainFrame();
   if (!main_frame)
     return;
-
   main_frame->enableViewSourceMode(true);
 }
 
-void ChromeRenderViewObserver::didSerializeDataForFrame(
-    const WebURL& frame_url,
-    const WebCString& data,
-    WebPageSerializerClient::PageSerializationStatus status) {
-  Send(new ViewHostMsg_SendSerializedHtmlData(
-    routing_id(),
-    frame_url,
-    data.data(),
-    static_cast<int32>(status)));
+void ChromeRenderViewObserver::OnSetAllowDisplayingInsecureContent(bool allow) {
+  allow_displaying_insecure_content_ = allow;
+  WebFrame* main_frame = render_view()->webview()->mainFrame();
+  if (main_frame)
+    main_frame->reload();
+}
+
+void ChromeRenderViewObserver::OnSetAllowRunningInsecureContent(bool allow) {
+  allow_running_insecure_content_ = allow;
+  OnSetAllowDisplayingInsecureContent(allow);
+}
+
+void ChromeRenderViewObserver::OnSetClientSidePhishingDetection(
+    bool enable_phishing_detection) {
+#if defined(ENABLE_SAFE_BROWSING) && !defined(OS_CHROMEOS)
+  phishing_classifier_ = enable_phishing_detection ?
+      safe_browsing::PhishingClassifierDelegate::Create(
+          render_view(), NULL) :
+      NULL;
+#endif
 }
 
 bool ChromeRenderViewObserver::allowDatabase(
@@ -355,7 +379,7 @@ bool ChromeRenderViewObserver::allowReadFromClipboard(WebFrame* frame,
                                                      bool default_value) {
   bool allowed = false;
   Send(new ViewHostMsg_CanTriggerClipboardRead(
-      routing_id(), frame->url(), &allowed));
+      routing_id(), frame->document().url(), &allowed));
   return allowed;
 }
 
@@ -363,8 +387,198 @@ bool ChromeRenderViewObserver::allowWriteToClipboard(WebFrame* frame,
                                                     bool default_value) {
   bool allowed = false;
   Send(new ViewHostMsg_CanTriggerClipboardWrite(
-      routing_id(), frame->url(), &allowed));
+      routing_id(), frame->document().url(), &allowed));
   return allowed;
+}
+
+bool ChromeRenderViewObserver::allowDisplayingInsecureContent(
+    WebKit::WebFrame* frame,
+    bool allowed_per_settings,
+    const WebKit::WebSecurityOrigin& origin,
+    const WebKit::WebURL& url) {
+  UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                            INSECURE_CONTENT_DISPLAY,
+                            INSECURE_CONTENT_NUM_EVENTS);
+  std::string host(origin.host().utf8());
+  GURL frame_url(frame->document().url());
+  if (EndsWith(host, kDotGoogleDotCom, false)) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+    if (StartsWithASCII(frame_url.path(), kGoogleSupportPathPrefix, false)) {
+      UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                                INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_SUPPORT,
+                                INSECURE_CONTENT_NUM_EVENTS);
+    } else if (StartsWithASCII(frame_url.path(),
+                               kGoogleIntlPathPrefix,
+                               false)) {
+      UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                                INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_INTL,
+                                INSECURE_CONTENT_NUM_EVENTS);
+    }
+  }
+  if (host == kWWWDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_WWW_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+    if (StartsWithASCII(frame_url.path(), kGoogleReaderPathPrefix, false)) {
+      UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                                INSECURE_CONTENT_DISPLAY_HOST_GOOGLE_READER,
+                                INSECURE_CONTENT_NUM_EVENTS);
+    }
+  } else if (host == kMailDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_MAIL_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kPlusDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_PLUS_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kDocsDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_DOCS_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kSitesDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_SITES_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kPicasawebDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_PICASAWEB_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kCodeDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_CODE_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kGroupsDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_GROUPS_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kMapsDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_MAPS_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kWWWDotYoutubeDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HOST_YOUTUBE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  }
+  GURL gurl(url);
+  if (EndsWith(gurl.path(), kDotHTML, false)) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_DISPLAY_HTML,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  }
+
+  if (allowed_per_settings || allow_displaying_insecure_content_)
+    return true;
+
+  Send(new ViewHostMsg_DidBlockDisplayingInsecureContent(routing_id()));
+  return false;
+}
+
+bool ChromeRenderViewObserver::allowRunningInsecureContent(
+    WebKit::WebFrame* frame,
+    bool allowed_per_settings,
+    const WebKit::WebSecurityOrigin& origin,
+    const WebKit::WebURL& url) {
+  UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                            INSECURE_CONTENT_RUN,
+                            INSECURE_CONTENT_NUM_EVENTS);
+  std::string host(origin.host().utf8());
+  GURL frame_url(frame->document().url());
+  bool is_google = EndsWith(host, kDotGoogleDotCom, false);
+  if (is_google) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+    if (StartsWithASCII(frame_url.path(), kGoogleSupportPathPrefix, false)) {
+      UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                                INSECURE_CONTENT_RUN_HOST_GOOGLE_SUPPORT,
+                                INSECURE_CONTENT_NUM_EVENTS);
+    } else if (StartsWithASCII(frame_url.path(),
+                               kGoogleIntlPathPrefix,
+                               false)) {
+      UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                                INSECURE_CONTENT_RUN_HOST_GOOGLE_INTL,
+                                INSECURE_CONTENT_NUM_EVENTS);
+    }
+  }
+  if (host == kWWWDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_WWW_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+    if (StartsWithASCII(frame_url.path(), kGoogleReaderPathPrefix, false)) {
+      UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                                INSECURE_CONTENT_RUN_HOST_GOOGLE_READER,
+                                INSECURE_CONTENT_NUM_EVENTS);
+    }
+  } else if (host == kMailDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_MAIL_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kPlusDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_PLUS_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kDocsDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_DOCS_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kSitesDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_SITES_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kPicasawebDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_PICASAWEB_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kCodeDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_CODE_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kGroupsDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_GROUPS_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kMapsDotGoogleDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_MAPS_GOOGLE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (host == kWWWDotYoutubeDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_YOUTUBE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (EndsWith(host, kDotGoogleUserContentDotCom, false)) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_HOST_GOOGLEUSERCONTENT,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  }
+  GURL gurl(url);
+  if (gurl.host() == kWWWDotYoutubeDotCom) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_TARGET_YOUTUBE,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  }
+  if (EndsWith(gurl.path(), kDotJS, false)) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_JS,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (EndsWith(gurl.path(), kDotCSS, false)) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_CSS,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  } else if (EndsWith(gurl.path(), kDotSWF, false)) {
+    UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
+                              INSECURE_CONTENT_RUN_SWF,
+                              INSECURE_CONTENT_NUM_EVENTS);
+  }
+
+  if (allow_running_insecure_content_ || (!is_google && allowed_per_settings))
+    return true;
+
+  Send(new ViewHostMsg_DidBlockRunningInsecureContent(routing_id()));
+  return false;
 }
 
 void ChromeRenderViewObserver::didNotAllowPlugins(WebFrame* frame) {
@@ -397,8 +611,8 @@ void ChromeRenderViewObserver::DidStopLoading() {
           false),
       render_view()->content_state_immediately() ? 0 : kDelayForCaptureMs);
 
-  GURL osd_url =
-      render_view()->webview()->mainFrame()->openSearchDescriptionURL();
+  WebFrame* main_frame = render_view()->webview()->mainFrame();
+  GURL osd_url = main_frame->document().openSearchDescriptionURL();
   if (!osd_url.is_empty()) {
     Send(new ViewHostMsg_PageHasOSDD(
         routing_id(), render_view()->page_id(), osd_url,
@@ -498,16 +712,16 @@ void ChromeRenderViewObserver::CapturePageInfo(int load_id,
     last_indexed_page_id_ = load_id;
 
   // Get the URL for this page.
-  GURL url(main_frame->url());
+  GURL url(main_frame->document().url());
   if (url.is_empty())
     return;
 
   // Retrieve the frame's full text.
   string16 contents;
   CaptureText(main_frame, &contents);
+  if (translate_helper_)
+    translate_helper_->PageCaptured(contents);
   if (contents.size()) {
-    if (translate_helper_)
-      translate_helper_->PageCaptured(contents);
     // Send the text to the browser for indexing (the browser might decide not
     // to index, if the URL is HTTPS for instance) and language discovery.
     Send(new ViewHostMsg_PageContents(routing_id(), url, load_id, contents));
@@ -520,9 +734,11 @@ void ChromeRenderViewObserver::CapturePageInfo(int load_id,
     CaptureThumbnail();
   }
 
+#if defined(ENABLE_SAFE_BROWSING)
   // Will swap out the string.
   if (phishing_classifier_)
     phishing_classifier_->PageCaptured(&contents, preliminary_capture);
+#endif
 }
 
 void ChromeRenderViewObserver::CaptureText(WebFrame* frame,
@@ -563,7 +779,7 @@ void ChromeRenderViewObserver::CaptureThumbnail() {
     return;
 
   // get the URL for this page
-  GURL url(main_frame->url());
+  GURL url(main_frame->document().url());
   if (url.is_empty())
     return;
 

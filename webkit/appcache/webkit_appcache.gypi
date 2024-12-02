@@ -7,10 +7,9 @@
     {
       'target_name': 'appcache',
       'type': 'static_library',
-      'msvs_guid': '0B945915-31A7-4A07-A5B5-568D737A39B1',
       'dependencies': [
-        '<(DEPTH)/app/app.gyp:app_base',
         '<(DEPTH)/net/net.gyp:net',
+        '<(DEPTH)/sql/sql.gyp:sql',
       ],
       'sources': [
         # This list contains all .h and .cc in appcache except for test code.
@@ -36,6 +35,8 @@
         'appcache_interfaces.cc',
         'appcache_interfaces.h',
         'appcache_policy.h',
+        'appcache_quota_client.cc',
+        'appcache_quota_client.h',
         'appcache_request_handler.cc',
         'appcache_request_handler.h',
         'appcache_response.cc',

@@ -14,6 +14,7 @@
 #include "base/callback_old.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "content/renderer/gpu/gpu_video_decode_accelerator_host.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
@@ -48,6 +49,7 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   virtual bool Initialize(base::SharedMemory* buffer, int32 size);
   virtual gpu::Buffer GetRingBuffer();
   virtual State GetState();
+  virtual State GetLastState();
   virtual void Flush(int32 put_offset);
   virtual State FlushSync(int32 put_offset, int32 last_known_get);
   virtual void SetGetOffset(int32 get_offset);
@@ -59,7 +61,15 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   virtual gpu::Buffer GetTransferBuffer(int32 handle);
   virtual void SetToken(int32 token);
   virtual void SetParseError(gpu::error::Error error);
+  virtual void SetContextLostReason(gpu::error::ContextLostReason reason);
   virtual void OnSwapBuffers();
+
+  // Reparent a command buffer. TODO(apatrick): going forward, the notion of
+  // the parent / child relationship between command buffers is going away in
+  // favor of the notion of surfaces that can be drawn to in one command buffer
+  // and bound as a texture in any other.
+  virtual bool SetParent(CommandBufferProxy* parent_command_buffer,
+                         uint32 parent_texture_id);
 
   // Set a callback that will be invoked when the SwapBuffers call has been
   // issued.
@@ -73,14 +83,20 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   // and needs to be repainted. Takes ownership of task.
   void SetNotifyRepaintTask(Task* task);
 
+  // Sends an IPC message to create a GpuVideoDecodeAccelerator. Creates and
+  // returns a pointer to a GpuVideoDecodeAcceleratorHost.
+  // Returns NULL on failure to create the GpuVideoDecodeAcceleratorHost.
+  // Note that the GpuVideoDecodeAccelerator may still fail to be created in
+  // the GPU process, even if this returns non-NULL. In this case the client is
+  // notified of an error later.
+  scoped_refptr<GpuVideoDecodeAcceleratorHost> CreateVideoDecoder(
+      const std::vector<uint32>& configs,
+      gpu::CommandBufferHelper* cmd_buffer_helper,
+      media::VideoDecodeAccelerator::Client* client);
+
 #if defined(OS_MACOSX)
   virtual void SetWindowSize(const gfx::Size& size);
 #endif
-
-  // Get the last state received from the service without synchronizing.
-  State GetLastState() {
-    return last_state_;
-  }
 
  private:
 
@@ -92,6 +108,7 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   // Message handlers:
   void OnUpdateState(const gpu::CommandBuffer::State& state);
   void OnNotifyRepaint();
+  void OnDestroyed(gpu::error::ContextLostReason reason);
 
   // As with the service, the client takes ownership of the ring buffer.
   int32 num_entries_;
@@ -100,6 +117,10 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   // Local cache of id to transfer buffer mapping.
   typedef std::map<int32, gpu::Buffer> TransferBufferMap;
   TransferBufferMap transfer_buffers_;
+
+  // The video decoder host corresponding to the stub's video decoder in the GPU
+  // process, if one exists.
+  scoped_refptr<GpuVideoDecodeAcceleratorHost> video_decoder_host_;
 
   // The last cached state received from the service.
   State last_state_;

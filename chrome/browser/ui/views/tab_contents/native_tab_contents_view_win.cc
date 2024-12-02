@@ -7,9 +7,11 @@
 #include "chrome/browser/renderer_host/render_widget_host_view_win.h"
 #include "chrome/browser/tab_contents/web_drop_target_win.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
+#include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_views.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_drag_win.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "views/views_delegate.h"
 #include "views/widget/widget.h"
 
 namespace {
@@ -80,7 +82,6 @@ NativeTabContentsViewWin::NativeTabContentsViewWin(
 }
 
 NativeTabContentsViewWin::~NativeTabContentsViewWin() {
-  CloseNow();
 }
 
 TabContents* NativeTabContentsViewWin::GetTabContents() const {
@@ -111,8 +112,8 @@ void NativeTabContentsViewWin::InitNativeTabContentsView() {
 void NativeTabContentsViewWin::Unparent() {
   // Note that we do not DCHECK on focus_manager_ as it may be NULL when used
   // with an external tab container.
-  NativeWidget::ReparentNativeView(GetNativeView(),
-                                   HiddenTabHostWindow::Instance());
+  views::Widget::ReparentNativeView(GetNativeView(),
+                                    HiddenTabHostWindow::Instance());
 }
 
 RenderWidgetHostView* NativeTabContentsViewWin::CreateRenderWidgetHostView(
@@ -341,5 +342,8 @@ bool NativeTabContentsViewWin::ScrollZoom(int scroll_type) {
 // static
 NativeTabContentsView* NativeTabContentsView::CreateNativeTabContentsView(
     internal::NativeTabContentsViewDelegate* delegate) {
+  if (views::Widget::IsPureViews() &&
+      views::ViewsDelegate::views_delegate->GetDefaultParentView())
+    return new NativeTabContentsViewViews(delegate);
   return new NativeTabContentsViewWin(delegate);
 }

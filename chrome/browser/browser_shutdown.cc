@@ -15,7 +15,6 @@
 #include "base/process_util.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
-#include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
@@ -28,7 +27,7 @@
 #include "chrome/browser/plugin_updater.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/service/service_process_control_manager.h"
+#include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
@@ -125,30 +124,22 @@ void Shutdown() {
   // shutdown.
   base::ThreadRestrictions::SetIOAllowed(true);
 
-  // Shutdown all IPC channels to service processes.
-  ServiceProcessControlManager::GetInstance()->Shutdown();
+  // Shutdown the IPC channel to the service processes.
+  ServiceProcessControl::GetInstance()->Disconnect();
 
 #if defined(OS_CHROMEOS)
   // The system key event listener needs to be shut down earlier than when
   // Singletons are finally destroyed in AtExitManager.
   chromeos::SystemKeyEventListener::GetInstance()->Stop();
 
-  // TODO(yusukes): Remove the #if once the ARM bot (crbug.com/84694) is fixed.
-#if defined(HAVE_XINPUT2)
   // The XInput2 event listener needs to be shut down earlier than when
   // Singletons are finally destroyed in AtExitManager.
   chromeos::XInputHierarchyChangedEventListener::GetInstance()->Stop();
-#endif
 #endif
 
   // WARNING: During logoff/shutdown (WM_ENDSESSION) we may not have enough
   // time to get here. If you have something that *must* happen on end session,
   // consider putting it in BrowserProcessImpl::EndSession.
-  DCHECK(g_browser_process);
-
-  // Notifies we are going away.
-  g_browser_process->shutdown_event()->Signal();
-
   PrefService* prefs = g_browser_process->local_state();
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   PrefService* user_prefs = profile_manager->GetDefaultProfile()->GetPrefs();
@@ -237,15 +228,7 @@ void Shutdown() {
     if (!new_cl->HasSwitch(switches::kRestoreLastSession))
       new_cl->AppendSwitch(switches::kRestoreLastSession);
 
-#if defined(OS_WIN) || defined(OS_LINUX)
     upgrade_util::RelaunchChromeBrowser(*new_cl.get());
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
-
-#if defined(OS_MACOSX)
-    new_cl->AppendSwitch(switches::kActivateOnLaunch);
-    base::LaunchApp(*new_cl.get(), false, false, NULL);
-#endif  // defined(OS_MACOSX)
-
 #else
     NOTIMPLEMENTED();
 #endif  // !defined(OS_CHROMEOS)

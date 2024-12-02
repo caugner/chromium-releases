@@ -11,8 +11,8 @@
 #include "base/memory/memory_debug.h"
 #include "base/metrics/stats_counters.h"
 #include "base/string_util.h"
-#include "base/sys_info.h"
 #include "base/win/object_watcher.h"
+#include "base/win/windows_version.h"
 #include "net/base/address_list_net_log_param.h"
 #include "net/base/connection_type_histograms.h"
 #include "net/base/io_buffer.h"
@@ -56,10 +56,7 @@ int SetupSocket(SOCKET socket) {
   //    http://blogs.msdn.com/wndp/archive/2006/05/05/Winhec-blog-tcpip-2.aspx
   // Since Vista's auto-tune is better than any static value we can could set,
   // only change these on pre-vista machines.
-  int32 major_version, minor_version, fix_version;
-  base::SysInfo::OperatingSystemVersionNumbers(&major_version, &minor_version,
-    &fix_version);
-  if (major_version < 6) {
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
     const int32 kSocketBufferSize = 64 * 1024;
     SetSocketReceiveBufferSize(socket, kSocketBufferSize);
     SetSocketSendBufferSize(socket, kSocketBufferSize);
@@ -326,7 +323,8 @@ TCPClientSocketWin::TCPClientSocketWin(const AddressList& addresses,
       next_connect_state_(CONNECT_STATE_NONE),
       connect_os_error_(0),
       net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)),
-      previously_disconnected_(false) {
+      previously_disconnected_(false),
+      num_bytes_read_(0) {
   scoped_refptr<NetLog::EventParameters> params;
   if (source.is_valid())
     params = new NetLogSourceParameter("source_dependency", source);
@@ -487,6 +485,7 @@ int TCPClientSocketWin::DoConnect() {
 
   core_->write_overlapped_.hEvent = WSACreateEvent();
 
+  connect_start_time_ = base::TimeTicks::Now();
   if (!connect(socket_, ai->ai_addr, static_cast<int>(ai->ai_addrlen))) {
     // Connected without waiting!
     //
@@ -525,6 +524,7 @@ int TCPClientSocketWin::DoConnectComplete(int result) {
   net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT, params);
 
   if (result == OK) {
+    connect_time_micros_ = base::TimeTicks::Now() - connect_start_time_;
     use_history_.set_was_ever_connected();
     return OK;  // Done!
   }
@@ -661,6 +661,14 @@ bool TCPClientSocketWin::UsingTCPFastOpen() const {
   return false;
 }
 
+int64 TCPClientSocketWin::NumBytesRead() const {
+  return num_bytes_read_;
+}
+
+base::TimeDelta TCPClientSocketWin::GetConnectTimeMicros() const {
+  return connect_time_micros_;
+}
+
 int TCPClientSocketWin::Read(IOBuffer* buf,
                              int buf_len,
                              CompletionCallback* callback) {
@@ -691,10 +699,11 @@ int TCPClientSocketWin::Read(IOBuffer* buf,
       base::MemoryDebug::MarkAsInitialized(core_->read_buffer_.buf, num);
       base::StatsCounter read_bytes("tcp.read_bytes");
       read_bytes.Add(num);
+      num_bytes_read_ += num;
       if (num > 0)
         use_history_.set_was_used_to_convey_data();
-      LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_RECEIVED, num,
-                      core_->read_buffer_.buf);
+      net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED, num,
+                                    core_->read_buffer_.buf);
       return static_cast<int>(num);
     }
   } else {
@@ -745,8 +754,8 @@ int TCPClientSocketWin::Write(IOBuffer* buf,
       write_bytes.Add(rv);
       if (rv > 0)
         use_history_.set_was_used_to_convey_data();
-      LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_SENT, rv,
-                      core_->write_buffer_.buf);
+      net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_SENT, rv,
+                                    core_->write_buffer_.buf);
       return rv;
     }
   } else {
@@ -861,10 +870,11 @@ void TCPClientSocketWin::DidCompleteRead() {
   if (ok) {
     base::StatsCounter read_bytes("tcp.read_bytes");
     read_bytes.Add(num_bytes);
+    num_bytes_read_ += num_bytes;
     if (num_bytes > 0)
       use_history_.set_was_used_to_convey_data();
-    LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_RECEIVED, num_bytes,
-                    core_->read_buffer_.buf);
+    net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED,
+                                  num_bytes, core_->read_buffer_.buf);
   }
   DoReadCallback(ok ? num_bytes : MapSystemError(WSAGetLastError()));
 }
@@ -894,8 +904,8 @@ void TCPClientSocketWin::DidCompleteWrite() {
       write_bytes.Add(num_bytes);
       if (num_bytes > 0)
         use_history_.set_was_used_to_convey_data();
-      LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_SENT, num_bytes,
-                      core_->write_buffer_.buf);
+      net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_SENT, num_bytes,
+                                    core_->write_buffer_.buf);
     }
   }
   core_->write_iobuffer_ = NULL;

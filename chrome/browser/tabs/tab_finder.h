@@ -46,7 +46,7 @@ class TabFinder : public NotificationObserver {
                        Browser** existing_browser);
 
   // NotificationObserver overrides:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
@@ -60,8 +60,6 @@ class TabFinder : public NotificationObserver {
 
   TabFinder();
   virtual ~TabFinder();
-
-  void Init();
 
   // Forwarded from TabContentsObserverImpl.
   void DidNavigateAnyFramePostCommit(
@@ -80,9 +78,6 @@ class TabFinder : public NotificationObserver {
   // If we're not currently tracking |tab| this creates a
   // TabContentsObserverImpl to listen for navigations.
   void TrackTab(TabContents* tab);
-
-  // Queries all the tabs in |browser| for the start of the redirect chain.
-  void TrackBrowser(Browser* browser);
 
   // Invoked when a TabContents is being destroyed.
   void TabDestroyed(TabContentsObserverImpl* observer);

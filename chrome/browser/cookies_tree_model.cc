@@ -15,9 +15,9 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/registry_controlled_domain.h"
 #include "net/url_request/url_request_context.h"
@@ -403,6 +403,7 @@ void CookieTreeOriginNode::CreateContentException(
     HostContentSettingsMap* content_settings, ContentSetting setting) const {
   if (CanCreateContentException()) {
     content_settings->AddExceptionForURL(url_,
+                                         url_,
                                          CONTENT_SETTINGS_TYPE_COOKIES,
                                          "",
                                          setting);
@@ -708,7 +709,7 @@ void CookiesTreeModel::DeleteCookieNode(CookieTreeNode* cookie_node) {
   cookie_node->DeleteStoredObjects();
   CookieTreeNode* parent_node = cookie_node->parent();
   delete Remove(parent_node, cookie_node);
-  if (parent_node->child_count() == 0)
+  if (parent_node->empty())
     DeleteCookieNode(parent_node);
 }
 

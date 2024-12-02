@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,15 +36,6 @@ void LoadClipToContext(cairo_t* context, const SkRegion& clip) {
 }
 
 }  // namespace
-
-SkDevice* BitmapPlatformDeviceFactory::newDevice(SkCanvas* ignored,
-                                                 SkBitmap::Config config,
-                                                 int width, int height,
-                                                 bool isOpaque,
-                                                 bool isForLayer) {
-  SkASSERT(config == SkBitmap::kARGB_8888_Config);
-  return BitmapPlatformDevice::Create(width, height, isOpaque);
-}
 
 BitmapPlatformDevice::BitmapPlatformDeviceData::BitmapPlatformDeviceData(
     cairo_surface_t* surface)
@@ -133,18 +124,14 @@ BitmapPlatformDevice::BitmapPlatformDevice(
       data_(data) {
 }
 
-BitmapPlatformDevice::BitmapPlatformDevice(
-    const BitmapPlatformDevice& other)
-    : PlatformDevice(const_cast<BitmapPlatformDevice&>(
-                          other).accessBitmap(true)),
-      data_(other.data_) {
-}
-
 BitmapPlatformDevice::~BitmapPlatformDevice() {
 }
 
-SkDeviceFactory* BitmapPlatformDevice::onNewDeviceFactory() {
-  return SkNEW(BitmapPlatformDeviceFactory);
+SkDevice* BitmapPlatformDevice::onCreateCompatibleDevice(
+    SkBitmap::Config config, int width, int height, bool isOpaque,
+    Usage /*usage*/) {
+  SkASSERT(config == SkBitmap::kARGB_8888_Config);
+  return BitmapPlatformDevice::Create(width, height, isOpaque);
 }
 
 cairo_t* BitmapPlatformDevice::BeginPlatformPaint() {
@@ -163,12 +150,6 @@ void BitmapPlatformDevice::setMatrixClip(const SkMatrix& transform,
                                          const SkRegion& region,
                                          const SkClipStack&) {
   data_->SetMatrixClip(transform, region);
-}
-
-BitmapPlatformDevice& BitmapPlatformDevice::operator=(
-    const BitmapPlatformDevice& other) {
-  data_ = other.data_;
-  return *this;
 }
 
 }  // namespace skia

@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/url_constants.h"
@@ -23,6 +24,7 @@
 #include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
@@ -49,7 +51,7 @@ PhishingClassifier::~PhishingClassifier() {
 }
 
 void PhishingClassifier::set_phishing_scorer(const Scorer* scorer) {
-  DCHECK(!scorer_);
+  CheckNoPendingClassification();
   scorer_ = scorer;
   url_extractor_.reset(new PhishingUrlFeatureExtractor);
   dom_extractor_.reset(
@@ -104,7 +106,7 @@ void PhishingClassifier::BeginFeatureExtraction() {
 
   // Check whether the URL is one that we should classify.
   // Currently, we only classify http: URLs that are GET requests.
-  GURL url(frame->url());
+  GURL url(frame->document().url());
   if (!url.SchemeIs(chrome::kHttpScheme)) {
     RunFailureCallback();
     return;
@@ -169,7 +171,8 @@ void PhishingClassifier::TermExtractionFinished(bool success) {
     // the score.
     FeatureMap hashed_features;
     ClientPhishingRequest verdict;
-    verdict.set_url(main_frame->url().spec());
+    verdict.set_model_version(scorer_->model_version());
+    verdict.set_url(main_frame->document().url().spec());
     for (base::hash_map<std::string, double>::const_iterator it =
              features_->features().begin();
          it != features_->features().end(); ++it) {
@@ -196,6 +199,8 @@ void PhishingClassifier::CheckNoPendingClassification() {
   if (done_callback_.get() || page_text_) {
     LOG(ERROR) << "Classification in progress, missing call to "
                << "CancelPendingClassification";
+    UMA_HISTOGRAM_COUNTS("SBClientPhishing.CheckNoPendingClassificationFailed",
+                         1);
   }
 }
 

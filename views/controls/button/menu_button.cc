@@ -5,20 +5,19 @@
 #include "views/controls/button/menu_button.h"
 
 #include "base/utf_string_conversions.h"
-#include "grit/app_strings.h"
-#include "grit/app_resources.h"
+#include "grit/ui_resources.h"
+#include "grit/ui_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/screen.h"
 #include "views/controls/button/button.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/events/event.h"
-#include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -222,6 +221,9 @@ void MenuButton::OnMouseExited(const MouseEvent& event) {
 bool MenuButton::OnKeyPressed(const KeyEvent& event) {
   switch (event.key_code()) {
     case ui::VKEY_SPACE:
+      // Alt-space on windows should show the window menu.
+      if (event.IsAltDown())
+        break;
     case ui::VKEY_RETURN:
     case ui::VKEY_UP:
     case ui::VKEY_DOWN: {
@@ -257,7 +259,8 @@ int MenuButton::GetMaximumScreenXCoordinate() {
   }
 
   gfx::Rect monitor_bounds =
-      Screen::GetMonitorWorkAreaNearestWindow(GetWidget()->GetNativeView());
+      gfx::Screen::GetMonitorWorkAreaNearestWindow(
+          GetWidget()->GetTopLevelWidget()->GetNativeView());
   return monitor_bounds.right() - 1;
 }
 

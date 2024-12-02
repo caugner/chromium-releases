@@ -15,9 +15,7 @@
 #include <GL/glext.h>
 
 #include "build/build_config.h"
-#if defined(OS_WIN)
 #include "base/logging.h"
-#endif
 
 // The standard OpenGL native extension headers are also included.
 #if defined(OS_WIN)
@@ -41,11 +39,7 @@
 #define GL_BINDING_CALL
 #endif
 
-#if defined(OS_WIN)
 #define GL_SERVICE_LOG(args) DLOG(INFO) << args;
-#else
-#define GL_SERVICE_LOG(args)
-#endif
 
 // Forward declare OSMesa types.
 typedef struct osmesa_context *OSMesaContext;
@@ -60,9 +54,11 @@ typedef int EGLint;
 typedef void *EGLConfig;
 typedef void *EGLContext;
 typedef void *EGLDisplay;
+typedef void *EGLImageKHR;
 typedef void *EGLSurface;
 typedef void *EGLClientBuffer;
 typedef void (*__eglMustCastToProperFunctionPointerType)(void);
+typedef void* GLeglImageOES;
 
 #if defined(OS_WIN)
 typedef HDC     EGLNativeDisplayType;

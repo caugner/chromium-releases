@@ -53,6 +53,7 @@ SocketStream::SocketStream(const GURL& url, Delegate* delegate)
       next_state_(STATE_NONE),
       host_resolver_(NULL),
       cert_verifier_(NULL),
+      origin_bound_cert_service_(NULL),
       http_auth_handler_factory_(NULL),
       factory_(ClientSocketFactory::GetDefaultFactory()),
       proxy_mode_(kDirectConnection),
@@ -121,6 +122,7 @@ void SocketStream::set_context(URLRequestContext* context) {
   if (context_) {
     host_resolver_ = context_->host_resolver();
     cert_verifier_ = context_->cert_verifier();
+    origin_bound_cert_service_ = context_->origin_bound_cert_service();
     http_auth_handler_factory_ = context_->http_auth_handler_factory();
   }
 }
@@ -234,6 +236,10 @@ void SocketStream::DetachDelegate() {
   Close();
 }
 
+const ProxyServer& SocketStream::proxy_server() const {
+  return proxy_info_.proxy_server();
+}
+
 void SocketStream::SetHostResolver(HostResolver* host_resolver) {
   DCHECK(host_resolver);
   host_resolver_ = host_resolver;
@@ -257,9 +263,10 @@ void SocketStream::CopyAddrInfo(struct addrinfo* head) {
 
 void SocketStream::DoClose() {
   closing_ = true;
-  // If next_state_ is STATE_TCP_CONNECT, it's waiting other socket establishing
-  // connection.  If next_state_ is STATE_AUTH_REQUIRED, it's waiting for
-  // restarting.  In these states, we'll close the SocketStream now.
+  // If next_state_ is STATE_TCP_CONNECT, it's waiting other socket
+  // establishing connection.  If next_state_ is STATE_AUTH_REQUIRED, it's
+  // waiting for restarting.  In these states, we'll close the SocketStream
+  // now.
   if (next_state_ == STATE_TCP_CONNECT || next_state_ == STATE_AUTH_REQUIRED) {
     DoLoop(ERR_ABORTED);
     return;
@@ -285,14 +292,14 @@ void SocketStream::Finish(int result) {
     result = ERR_CONNECTION_CLOSED;
   DCHECK_EQ(next_state_, STATE_NONE);
   DVLOG(1) << "Finish result=" << ErrorToString(result);
-  if (delegate_)
-    delegate_->OnError(this, result);
 
   metrics_->OnClose();
   Delegate* delegate = delegate_;
   delegate_ = NULL;
   if (delegate) {
-    delegate->OnClose(this);
+    delegate->OnError(this, result);
+    if (result != ERR_PROTOCOL_SWITCHED)
+      delegate->OnClose(this);
   }
   Release();
 }
@@ -400,6 +407,12 @@ void SocketStream::DoLoop(int result) {
       case STATE_RESOLVE_HOST_COMPLETE:
         result = DoResolveHostComplete(result);
         break;
+      case STATE_RESOLVE_PROTOCOL:
+        result = DoResolveProtocol(result);
+        break;
+      case STATE_RESOLVE_PROTOCOL_COMPLETE:
+        result = DoResolveProtocolComplete(result);
+        break;
       case STATE_TCP_CONNECT:
         result = DoTcpConnect(result);
         break;
@@ -451,6 +464,8 @@ void SocketStream::DoLoop(int result) {
         Finish(result);
         return;
     }
+    if (state == STATE_RESOLVE_PROTOCOL && result == ERR_PROTOCOL_SWITCHED)
+      continue;
     // If the connection is not established yet and had actual errors,
     // close the connection.
     if (state != STATE_READ_WRITE && result < ERR_IO_PENDING) {
@@ -469,6 +484,14 @@ int SocketStream::DoResolveProxy() {
     next_state_ = STATE_CLOSE;
     return ERR_INVALID_ARGUMENT;
   }
+
+  // TODO(toyoshim): Check server advertisement of SPDY through the HTTP
+  // Alternate-Protocol header, then switch to SPDY if SPDY is available.
+  // Usually we already have a session to the SPDY server because JavaScript
+  // running WebSocket itself would be served by SPDY. But, in some situation
+  // (E.g. Used by Chrome Extensions or used for cross origin connection), this
+  // connection might be the first one. At that time, we should check
+  // Alternate-Protocol header here for ws:// or TLS NPN extension for wss:// .
 
   return proxy_service()->ResolveProxy(
       proxy_url_, &proxy_info_, &io_callback_, &pac_request_, net_log_);
@@ -536,15 +559,39 @@ int SocketStream::DoResolveHost() {
 }
 
 int SocketStream::DoResolveHostComplete(int result) {
-  if (result == OK && delegate_) {
+  if (result == OK && delegate_)
+    next_state_ = STATE_RESOLVE_PROTOCOL;
+  else
+    next_state_ = STATE_CLOSE;
+  // TODO(ukai): if error occured, reconsider proxy after error.
+  return result;
+}
+
+int SocketStream::DoResolveProtocol(int result) {
+  DCHECK_EQ(OK, result);
+  next_state_ = STATE_RESOLVE_PROTOCOL_COMPLETE;
+  result = delegate_->OnStartOpenConnection(this, &io_callback_);
+  if (result == ERR_IO_PENDING)
+    metrics_->OnWaitConnection();
+  else if (result != OK && result != ERR_PROTOCOL_SWITCHED)
+    next_state_ = STATE_CLOSE;
+  return result;
+}
+
+int SocketStream::DoResolveProtocolComplete(int result) {
+  DCHECK_NE(ERR_IO_PENDING, result);
+
+  if (result == ERR_PROTOCOL_SWITCHED) {
+    next_state_ = STATE_CLOSE;
+    metrics_->OnCountWireProtocolType(
+        SocketStreamMetrics::WIRE_PROTOCOL_SPDY);
+  } else if (result == OK) {
     next_state_ = STATE_TCP_CONNECT;
-    result = delegate_->OnStartOpenConnection(this, &io_callback_);
-    if (result == ERR_IO_PENDING)
-      metrics_->OnWaitConnection();
+    metrics_->OnCountWireProtocolType(
+        SocketStreamMetrics::WIRE_PROTOCOL_WEBSOCKET);
   } else {
     next_state_ = STATE_CLOSE;
   }
-  // TODO(ukai): if error occured, reconsider proxy after error.
   return result;
 }
 
@@ -587,7 +634,7 @@ int SocketStream::DoWriteTunnelHeaders() {
   next_state_ = STATE_WRITE_TUNNEL_HEADERS_COMPLETE;
 
   if (!tunnel_request_headers_.get()) {
-    metrics_->OnTunnelProxy();
+    metrics_->OnCountConnectionType(SocketStreamMetrics::TUNNEL_CONNECTION);
     tunnel_request_headers_ = new RequestHeaders();
     tunnel_request_headers_bytes_sent_ = 0;
   }
@@ -785,7 +832,7 @@ int SocketStream::DoSOCKSConnect() {
   else
     s = new SOCKSClientSocket(s, req_info, host_resolver_);
   socket_.reset(s);
-  metrics_->OnSOCKSProxy();
+  metrics_->OnCountConnectionType(SocketStreamMetrics::SOCKS_CONNECTION);
   return socket_->Connect(&io_callback_);
 }
 
@@ -805,14 +852,17 @@ int SocketStream::DoSOCKSConnectComplete(int result) {
 
 int SocketStream::DoSSLConnect() {
   DCHECK(factory_);
+  SSLClientSocketContext ssl_context;
+  ssl_context.cert_verifier = cert_verifier_;
+  ssl_context.origin_bound_cert_service = origin_bound_cert_service_;
   // TODO(agl): look into plumbing SSLHostInfo here.
   socket_.reset(factory_->CreateSSLClientSocket(socket_.release(),
                                                 HostPortPair::FromURL(url_),
                                                 ssl_config_,
                                                 NULL /* ssl_host_info */,
-                                                cert_verifier_));
+                                                ssl_context));
   next_state_ = STATE_SSL_CONNECT_COMPLETE;
-  metrics_->OnSSLConnection();
+  metrics_->OnCountConnectionType(SocketStreamMetrics::SSL_CONNECTION);
   return socket_->Connect(&io_callback_);
 }
 
@@ -832,7 +882,8 @@ int SocketStream::DoSSLConnectComplete(int result) {
         reinterpret_cast<SSLClientSocket*>(socket_.get());
       SSLInfo ssl_info;
       ssl_socket->GetSSLInfo(&ssl_info);
-      if (ssl_config_.IsAllowedBadCert(ssl_info.cert, NULL)) {
+      if (ssl_info.cert == NULL ||
+          ssl_config_.IsAllowedBadCert(ssl_info.cert, NULL)) {
         // If we already have the certificate in the set of allowed bad
         // certificates, we did try it and failed again, so we should not
         // retry again: the connection should fail at last.
@@ -842,7 +893,10 @@ int SocketStream::DoSSLConnectComplete(int result) {
       // Add the bad certificate to the set of allowed certificates in the
       // SSL config object.
       SSLConfig::CertAndStatus bad_cert;
-      bad_cert.cert = ssl_info.cert;
+      if (!ssl_info.cert->GetDEREncoded(&bad_cert.der_cert)) {
+        next_state_ = STATE_CLOSE;
+        return result;
+      }
       bad_cert.cert_status = ssl_info.cert_status;
       ssl_config_.allowed_bad_certs.push_back(bad_cert);
       // Restart connection ignoring the bad certificate.
@@ -852,6 +906,10 @@ int SocketStream::DoSSLConnectComplete(int result) {
       return OK;
     }
   }
+
+  // TODO(toyoshim): Upgrade to SPDY through TLS NPN extension if possible.
+  // If we use HTTPS and this is the first connection to the SPDY server,
+  // we should take care of TLS NPN extension here.
 
   if (result == OK)
     result = DidEstablishConnection();

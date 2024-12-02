@@ -8,6 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
 #include "base/debug/trace_event.h"
@@ -20,6 +21,7 @@
 #include "ppapi/proxy/ppb_char_set_proxy.h"
 #include "ppapi/proxy/ppb_cursor_control_proxy.h"
 #include "ppapi/proxy/ppb_font_proxy.h"
+#include "ppapi/proxy/ppb_instance_proxy.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
 #include "ppapi/shared_impl/tracker_base.h"
@@ -43,7 +45,8 @@ PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
                                    GetInterfaceFunc get_interface)
     : Dispatcher(remote_process_handle, get_interface),
       plugin_delegate_(NULL),
-      received_preferences_(false) {
+      received_preferences_(false),
+      plugin_dispatcher_id_(0) {
   SetSerializationRules(new PluginVarSerializationRules);
 
   // As a plugin, we always support the PPP_Class interface. There's no
@@ -55,6 +58,8 @@ PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
 }
 
 PluginDispatcher::~PluginDispatcher() {
+  if (plugin_delegate_)
+    plugin_delegate_->Unregister(plugin_dispatcher_id_);
 }
 
 // static
@@ -85,6 +90,7 @@ bool PluginDispatcher::InitPluginWithChannel(
   if (!Dispatcher::InitWithChannel(delegate, channel_handle, is_client))
     return false;
   plugin_delegate_ = delegate;
+  plugin_dispatcher_id_ = plugin_delegate_->Register(this);
 
   // The message filter will intercept and process certain messages directly
   // on the I/O thread.
@@ -98,6 +104,7 @@ bool PluginDispatcher::IsPlugin() const {
 }
 
 bool PluginDispatcher::Send(IPC::Message* msg) {
+  DCHECK(MessageLoop::current());
   TRACE_EVENT2("ppapi proxy", "PluginDispatcher::Send",
                "Class", IPC_MESSAGE_ID_CLASS(msg->type()),
                "Line", IPC_MESSAGE_ID_LINE(msg->type()));
@@ -130,7 +137,7 @@ bool PluginDispatcher::OnMessageReceived(const IPC::Message& msg) {
     return handled;
   }
 
-  if (msg.routing_id() <= 0 && msg.routing_id() >= INTERFACE_ID_COUNT) {
+  if (msg.routing_id() <= 0 || msg.routing_id() >= INTERFACE_ID_COUNT) {
     // Host is sending us garbage. Since it's supposed to be trusted, this
     // isn't supposed to happen. Crash here in all builds in case the renderer
     // is compromised.
@@ -235,6 +242,8 @@ ppapi::WebKitForwarding* PluginDispatcher::GetWebKitForwarding() {
     proxy.reset(new PPB_CursorControl_Proxy(this, NULL));
   else if (id == INTERFACE_ID_PPB_FONT)
     proxy.reset(new PPB_Font_Proxy(this, NULL));
+  else if (id == INTERFACE_ID_PPB_INSTANCE)
+    proxy.reset(new PPB_Instance_Proxy(this, NULL));
   else if (id == INTERFACE_ID_RESOURCE_CREATION)
     proxy.reset(new ResourceCreationProxy(this));
 
@@ -253,8 +262,9 @@ void PluginDispatcher::ForceFreeAllInstances() {
     if (i->second == this) {
       // Synthesize an "instance destroyed" message, this will notify the
       // plugin and also remove it from our list of tracked plugins.
-      OnMessageReceived(
-          PpapiMsg_PPPInstance_DidDestroy(INTERFACE_ID_PPP_INSTANCE, i->first));
+      PpapiMsg_PPPInstance_DidDestroy msg(INTERFACE_ID_PPP_INSTANCE, i->first);
+      OnMessageReceived(msg);
+      delete msg.GetReplyDeserializer();
     }
   }
 }
@@ -300,4 +310,3 @@ void PluginDispatcher::OnMsgSetPreferences(const ::ppapi::Preferences& prefs) {
 
 }  // namespace proxy
 }  // namespace pp
-

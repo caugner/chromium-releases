@@ -28,7 +28,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "grit/generated_resources.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 
 namespace {
 
@@ -109,6 +109,15 @@ void DownloadsDOMHandler::OnDownloadUpdated(DownloadItem* download) {
                                        download);
   if (it == download_items_.end())
     return;
+
+  if (download->state() == DownloadItem::REMOVING) {
+    (*it)->RemoveObserver(this);
+    *it = NULL;
+    // A later ModelChanged() notification will change the WebUI's
+    // view of the downloads list.
+    return;
+  }
+
   const int id = static_cast<int>(it - download_items_.begin());
 
   ListValue results_value;
@@ -124,20 +133,19 @@ void DownloadsDOMHandler::ModelChanged() {
                                      &download_items_);
   sort(download_items_.begin(), download_items_.end(), DownloadItemSorter());
 
-  // Scan for any in progress downloads and add ourself to them as an observer.
+  // Add ourself to all download items as an observer.
   for (OrderedDownloads::iterator it = download_items_.begin();
        it != download_items_.end(); ++it) {
     if (static_cast<int>(it - download_items_.begin()) > kMaxDownloads)
       break;
 
-    DownloadItem* download = *it;
-    if (download->IsInProgress()) {
-      // We want to know what happens as the download progresses.
-      download->AddObserver(this);
-    } else if (download->safety_state() == DownloadItem::DANGEROUS) {
-      // We need to be notified when the user validates the dangerous download.
-      download->AddObserver(this);
-    }
+    // TODO(rdsmith): Convert to DCHECK()s when http://crbug.com/84508 is
+    // fixed.
+    // We should never see anything that isn't already in the history.
+    CHECK(*it);
+    CHECK_NE(DownloadHistory::kUninitializedHandle, (*it)->db_handle());
+
+    (*it)->AddObserver(this);
   }
 
   SendCurrentDownloads();
@@ -151,6 +159,8 @@ void DownloadsDOMHandler::HandleGetDownloads(const ListValue* args) {
   } else {
     SendCurrentDownloads();
   }
+
+  download_manager_->CheckForHistoryFilesRemoval();
 }
 
 void DownloadsDOMHandler::HandleOpenFile(const ListValue* args) {
@@ -166,14 +176,18 @@ void DownloadsDOMHandler::HandleDrag(const ListValue* args) {
     gfx::Image* icon = im->LookupIcon(file->GetUserVerifiedFilePath(),
                                       IconLoader::NORMAL);
     gfx::NativeView view = web_ui_->tab_contents()->GetNativeView();
-    download_util::DragDownload(file, icon, view);
+    {
+      // Enable nested tasks during DnD, while |DragDownload()| blocks.
+      MessageLoop::ScopedNestableTaskAllower allower(MessageLoop::current());
+      download_util::DragDownload(file, icon, view);
+    }
   }
 }
 
 void DownloadsDOMHandler::HandleSaveDangerous(const ListValue* args) {
   DownloadItem* file = GetDownloadByValue(args);
   if (file)
-    download_manager_->DangerousDownloadValidated(file);
+    file->DangerousDownloadValidated();
 }
 
 void DownloadsDOMHandler::HandleDiscardDangerous(const ListValue* args) {
@@ -196,8 +210,11 @@ void DownloadsDOMHandler::HandlePause(const ListValue* args) {
 
 void DownloadsDOMHandler::HandleRemove(const ListValue* args) {
   DownloadItem* file = GetDownloadByValue(args);
-  if (file)
+  if (file) {
+    // TODO(rdsmith): Change to DCHECK when http://crbug.com/84508 is fixed.
+    CHECK_NE(DownloadHistory::kUninitializedHandle, file->db_handle());
     file->Remove();
+  }
 }
 
 void DownloadsDOMHandler::HandleCancel(const ListValue* args) {
@@ -219,6 +236,8 @@ void DownloadsDOMHandler::SendCurrentDownloads() {
     int index = static_cast<int>(it - download_items_.begin());
     if (index > kMaxDownloads)
       break;
+    if (!*it)
+      continue;
     results_value.Append(download_util::CreateDownloadItemValue(*it, index));
   }
 
@@ -229,6 +248,8 @@ void DownloadsDOMHandler::ClearDownloadItems() {
   // Clear out old state and remove self as observer for each download.
   for (OrderedDownloads::iterator it = download_items_.begin();
       it != download_items_.end(); ++it) {
+    if (!*it)
+      continue;
     (*it)->RemoveObserver(this);
   }
   download_items_.clear();

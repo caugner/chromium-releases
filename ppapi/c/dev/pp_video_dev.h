@@ -165,16 +165,6 @@ enum PP_ColorFormat_Dev {
 };
 PP_COMPILE_ASSERT_ENUM_SIZE_IN_BYTES(PP_ColorFormat_Dev, 4);
 
-// Enumeration to determine which type of memory for buffer is used.
-enum PP_PictureBufferType_Dev {
-  PP_PICTUREBUFFERTYPE_NONE = 0,
-  // System memory a.k.a. RAM.
-  PP_PICTUREBUFFERTYPE_SYSTEM = 1,
-  // GLES texture allocated using OpenGL ES APIs.
-  PP_PICTUREBUFFERTYPE_GLESTEXTURE = 1 << 1
-};
-PP_COMPILE_ASSERT_ENUM_SIZE_IN_BYTES(PP_PictureBufferType_Dev, 4);
-
 // The data structure for video bitstream buffer.
 struct PP_VideoBitstreamBuffer_Dev {
   // Client-specified identifier for the bitstream buffer.
@@ -188,8 +178,8 @@ struct PP_VideoBitstreamBuffer_Dev {
   int32_t size;
 };
 
-// Struct for specifying data about buffer.
-struct PP_BufferInfo_Dev {
+// Struct for specifying texture-backed picture data.
+struct PP_PictureBuffer_Dev {
   // Client-specified id for the picture buffer. By using this value client can
   // keep track of the buffers it has assigned to the video decoder and how they
   // are passed back to it.
@@ -197,75 +187,34 @@ struct PP_BufferInfo_Dev {
 
   // Dimensions of the buffer.
   struct PP_Size size;
-};
-
-// Struct for specifying texture-backed picture data.
-struct PP_GLESBuffer_Dev {
-  // Context allocated using PPB_Context3D_Dev.
-  PP_Resource context;
 
   // Texture ID in the given context where picture is stored.
   GLuint texture_id;
-
-  // Information about the buffer.
-  struct PP_BufferInfo_Dev info;
-};
-
-// Struct for specifying sysmem-backed picture data.
-struct PP_SysmemBuffer_Dev {
-  // Resource representing system memory from shared memory address space.
-  // Use PPB_Buffer_Dev interface to handle this resource.
-  PP_Resource data;
-
-  // Information about the buffer.
-  struct PP_BufferInfo_Dev info;
 };
 
 // Structure to describe a decoded output frame.
-// The decoded pixels will always begin flush with the upper left-hand corner
-// of the buffer (0, 0).
 struct PP_Picture_Dev {
   // ID of the picture buffer where the picture is stored.
   int32_t picture_buffer_id;
 
   // ID of the bitstream from which this data was decoded.
   int32_t bitstream_buffer_id;
-
-  // Visible size of the picture.
-  // This describes the dimensions of the picture that is intended to be
-  // displayed from the decoded output.
-  struct PP_Size visible_size;
-
-  // Decoded size of the picture.
-  // This describes the dimensions of the decoded output. This may be slightly
-  // larger than the visible size because the stride is sometimes larger than
-  // the width of the output. The plugin should handle rendering the frame
-  // appropriately with respect to the sizes.
-  struct PP_Size decoded_size;
 };
 
-// Enumeration for error events that may be reported through
-// PP_VideoDecodeErrorHandler_Func_Dev callback function to the plugin. Default
-// error handling functionality expected from the plugin is to Flush and Destroy
-// the decoder.
+// Decoder error codes reported to the plugin.  A reasonable naive
+// error handling policy is for the plugin to Destroy() the decoder on error.
+// Note: Keep these in sync with media::VideoDecodeAccelerator::Error.
 enum PP_VideoDecodeError_Dev {
-  PP_VIDEODECODEERROR_NONE = 0,
-  // Decoder has not been initialized and configured properly.
-  PP_VIDEODECODEERROR_UNINITIALIZED,
-  // Decoder does not support feature of configuration or bitstream.
-  PP_VIDEODECODEERROR_UNSUPPORTED,
-  // Decoder did not get valid input.
-  PP_VIDEODECODERERROR_INVALIDINPUT,
-  // Failure in memory allocation or mapping.
-  PP_VIDEODECODERERROR_MEMFAILURE,
-  // Decoder was given bitstream that would result in output pictures but it
-  // has not been provided buffers to do all this.
-  PP_VIDEODECODEERROR_INSUFFICIENT_BUFFERS,
-  // Decoder cannot continue operation due to insufficient resources for the
-  // current configuration.
-  PP_VIDEODECODEERROR_INSUFFICIENTRESOURCES,
-  // Decoder hardware has reported hardware error.
-  PP_VIDEODECODEERROR_HARDWARE
+  // An operation was attempted during an incompatible decoder state.
+  PP_VIDEODECODERERROR_ILLEGAL_STATE = 1,
+  // Invalid argument was passed to an API method.
+  PP_VIDEODECODERERROR_INVALID_ARGUMENT,
+  // Encoded input is unreadable.
+  PP_VIDEODECODERERROR_UNREADABLE_INPUT,
+  // A failure occurred at the browser layer or lower.  Examples of such
+  // failures include GPU hardware failures, GPU driver failures, GPU library
+  // failures, browser programming errors, and so on.
+  PP_VIDEODECODERERROR_PLATFORM_FAILURE
 };
 PP_COMPILE_ASSERT_ENUM_SIZE_IN_BYTES(PP_VideoDecodeError_Dev, 4);
 

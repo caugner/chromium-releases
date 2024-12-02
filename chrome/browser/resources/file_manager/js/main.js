@@ -15,7 +15,7 @@ var fileManager;
 function init() {
   var params;
 
-  var rootPaths = ['Downloads', 'media'];
+  var rootPaths = ['Downloads', 'removable', 'archive', 'tmp'];
 
   if (document.location.search) {
     var json = decodeURIComponent(document.location.search.substr(1));
@@ -26,6 +26,10 @@ function init() {
   function onEntriesFound(entries) {
     FileManager.initStrings(function () {
       fileManager = new FileManager(document.body, entries, params);
+      // We're ready to run.  Tests can monitor for this state with
+      // ExtensionTestMessageListener listener("ready");
+      // ASSERT_TRUE(listener.WaitUntilSatisfied());
+      chrome.test.sendMessage('ready');
     });
   }
 

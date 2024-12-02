@@ -53,7 +53,7 @@ var chrome = chrome || {};
     }
     var port = new chrome.Port(portId, opt_name);
     ports[portId] = port;
-    portReleasers[portId] = PortRelease.partial(portId);
+    portReleasers[portId] = PortRelease.bind(this, portId);
     chromeHidden.onUnload.addListener(portReleasers[portId]);
 
     PortAddRef(portId);
@@ -294,14 +294,16 @@ var chrome = chrome || {};
       // Entire namespaces.
       "bookmarks",
       "browserAction",
+      "chromeAuthPrivate",
       "chromePrivate",
       "chromeosInfoPrivate",
       "contextMenus",
       "cookies",
       "devtools",
       "experimental.accessibility",
+      "experimental.app",
       "experimental.bookmarkManager",
-      "experimental.contentSettings.misc",
+      "experimental.contentSettings",
       "experimental.debugger",
       "experimental.extension",
       "experimental.infobars",
@@ -312,7 +314,6 @@ var chrome = chrome || {};
       "experimental.processes",
       "experimental.rlz",
       "experimental.sidebar",
-      "experimental.tts",
       "experimental.webNavigation",
       "experimental.webRequest",
       "fileBrowserHandler",
@@ -320,6 +321,7 @@ var chrome = chrome || {};
       "fileSystem",
       "history",
       "idle",
+      "inputMethodPrivate",
       "management",
       "mediaPlayerPrivate",
       "omnibox",
@@ -329,6 +331,8 @@ var chrome = chrome || {};
       "tabs",
       "test",
       "toolstrip",
+      "tts",
+      "ttsEngine",
       "types",
       "webSocketProxyPrivate",
       "webstorePrivate",

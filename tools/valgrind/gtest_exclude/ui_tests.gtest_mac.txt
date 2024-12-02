@@ -1,3 +1,8 @@
+# Don't run FLAKY or FAILS ui tests under Valgrind on Mac.
+# They tend to generate way too many flaky Valgrind reports...
+*FLAKY_*
+*FAILS_*
+
 # Hangs on mac at exit, during final valgrind leak checking? (valgrind bug?)
 ErrorPageTest.DNSError_GoBack2Forward2
 # Flakily hangs on Mac
@@ -52,6 +57,7 @@ NPAPITesterBase.GetJavaScriptURL2
 NPAPITesterBase.GetURL
 NPAPITesterBase.GetURLRedirectNotification
 NPAPITesterBase.ManyPlugins
+NPAPITesterBase.NPObjectIdentity
 NPAPITesterBase.NPObjectProxy
 NPAPITesterBase.PluginThreadAsyncCall
 NPAPITesterBase.PrivateDisabled
@@ -79,8 +85,6 @@ BookmarksUITest.CommandAgainGoesBackToBookmarksTab
 ChromeMainTest.AppLaunch
 
 # See http://crbug.com/46783
-SessionHistoryTest.FrameBackForward
-SessionHistoryTest.JavascriptHistory
 SessionHistoryTest.LocationReplace
 
 # UNIMPLEMENTED reached, see http://crbug.com/51387
@@ -112,17 +116,20 @@ LoginPromptTest.SupplyRedundantAuths
 LoginPromptTest.TestCancelAuth
 MetricsServiceTest.CrashRenderers
 PPAPITest.Buffer
-PPAPITest.PaintAggregator
 PPAPITest.FileIO
 PPAPITest.FileRef
+PPAPITest.Graphics2SD
+PPAPITest.PaintAggregator
 PreferenceServiceTest.PreservedWindowPlacementIsLoaded
 PrintPreviewUITest.LoadPrintPreviewByURL
+RedirectTest.Server
 RedirectTest.ServerReference
 RepostFormWarningTest.TestDoubleReload
 ResourceDispatcherTest.ContentDispositionEmpty
 ResourceDispatcherTest.ContentDispositionInline
 ResourceDispatcherTest.SyncXMLHttpRequest
 ResourceDispatcherTest.SniffNoContentTypeNoData
+SessionHistoryTest.BasicBackForward
 SessionHistoryTest.LocationChangeInSubframe
 ShowModalDialogTest.BasicTest
 V8BenchmarkTest.Perf
@@ -170,18 +177,33 @@ ErrorPageTest.Page404_GoBack
 NamedInterfaceTest.BasicNamedInterface
 
 # Fails to start the browser, see http://crbug.com/75249
+AppModeTest.EnableAppModeTest
 AutomationProxySnapshotTest.ContentLargerThanView
 AutomationProxyTest.AcceleratorNewTab
+AutomationProxyTest.GetTab
+AutomationProxyTest.NavigateToURL
 BookmarksUITest.CommandOpensBookmarksTab
+BookmarksUITest.TwoCommandsOneTab
+ExtensionProxyUITest.NoSuchExtension
+ExtensionProxyUITest.Uninstall
 HistoryTester.VerifyHistoryLength1
 HistoryTester.VerifyHistoryLength2
 RedirectTest.ClientServerServer
 DomCheckerTest.File
+PPAPITest.Broker
+PPAPITest.Core
+PPAPITest.Memory
+PPAPITest.PostMessage
+PreferenceServiceTest.PreservedWindowPlacementIsMigrated
+RedirectTest.Client
+RedirectTest.ClientFragments
 ResourceDispatcherTest.CrossSiteNavigationNonBuffered
 ResourceDispatcherTest.CrossSiteNoUnloadOn204
 ResourceDispatcherTest.CrossSiteOnunloadCookie
 ResourceDispatcherTest.CrossOriginRedirectBlocked
 ResourceDispatcherTest.SniffHTMLWithNoContentType
+WorkerFileSystemTest.Persistent
+WorkerFileSystemTest.SyncTemporary
 
 # Fails, see http://crbug.com/75250
 NewTabUITest.AboutHangInNTP
@@ -216,10 +238,28 @@ OptionsUITest.NavBarCheck
 # Timing out, see http://crbug.com/83565
 NPAPIAutomationEnabledTest.LoadAllBlockedPlugins
 
-# Fails constantly. See http://crbug.com/84230.
-NPAPITesterBase.NPObjectIdentity
-
 # Flaky on valgrind test. See http://crbug.com/84257.
 AutomatedUITestBase.RestoreTab
 AutomationProxyTest4.BooleanValueIsEchoedByDomAutomationController 
 
+# http://crbug.com/87625
+PPAPITest.Var
+
+# http://crbug.com/87766
+PPAPITest.URLLoader
+
+# http://crbug.com/87992
+PrintPreviewUITest.PrintCommandDisabled
+
+# http://crbug.com/88068
+LocaleTestsHe.TestStart
+
+# http://crbug.com/88238
+NewTabUITest.ChromeHangInNTP
+
+# http://crbug.com/88244
+NoStartupWindowTest.NoStartupWindowBasicTest
+RunInBackgroundTest.RunInBackgroundBasicTest 
+
+# http://crbug.com/88254
+PPAPITest.CursorControl

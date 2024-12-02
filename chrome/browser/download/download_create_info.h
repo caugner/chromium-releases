@@ -13,7 +13,7 @@
 #include "base/file_path.h"
 #include "base/time.h"
 #include "chrome/browser/download/download_file.h"
-#include "chrome/browser/download/download_process_handle.h"
+#include "chrome/browser/download/download_request_handle.h"
 #include "googleurl/src/gurl.h"
 
 // Used for informing the download manager of a new download, since we don't
@@ -46,9 +46,6 @@ struct DownloadCreateInfo {
   // The URL that referred us.
   GURL referrer_url;
 
-  // The default path for the download (may be overridden).
-  FilePath suggested_path;
-
   // A number that should be added to the suggested path to make it unique.
   // 0 means no number should be appended.  Not actually stored in the db.
   int path_uniquifier;
@@ -71,9 +68,9 @@ struct DownloadCreateInfo {
   // True if the download was initiated by user action.
   bool has_user_gesture;
 
-  // The handle to the process information.  Used for operations outside the
-  // download system.
-  DownloadProcessHandle process_handle;
+  // The handle to the download request information.  Used for operations
+  // outside the download system.
+  DownloadRequestHandle request_handle;
 
   // The handle of the download in the history database.
   int64 db_handle;

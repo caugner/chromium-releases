@@ -182,4 +182,9 @@ void WebThemeEngineImpl::paint(
       WebRectToRect(rect),
       native_theme_extra_params);
 }
+
+int WebThemeEngineImpl::popupListBoxMinimumRowHeight() const {
+  return gfx::NativeTheme::instance()->GetPopupListBoxMinimumRowHeight();
+}
+
 }  // namespace webkit_glue

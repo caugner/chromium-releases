@@ -1,8 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,7 +26,7 @@ class ExecuteNotificationObserver : public NotificationObserver {
  public:
   ExecuteNotificationObserver() : id_(0) {}
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
     id_ = (static_cast<Details<ExecuteDetailType > >(details))->first;
@@ -64,7 +65,7 @@ class RenderViewHostTest : public InProcessBrowserTest {
     ExecuteNotificationObserver observer;
     ui_test_utils::RegisterAndWait(
         out_result,
-        NotificationType::EXECUTE_JAVASCRIPT_RESULT,
+        content::NOTIFICATION_EXECUTE_JAVASCRIPT_RESULT,
         Source<RenderViewHost>(rvh));
     EXPECT_EQ(execute_id, out_result->id());
     ASSERT_TRUE(out_result->value());

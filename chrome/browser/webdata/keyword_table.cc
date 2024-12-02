@@ -4,7 +4,6 @@
 
 #include "chrome/browser/webdata/keyword_table.h"
 
-#include "app/sql/statement.h"
 #include "base/logging.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
@@ -12,13 +11,14 @@
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "googleurl/src/gurl.h"
+#include "sql/statement.h"
 
 using base::Time;
 
 namespace {
 
 // ID of the url column in keywords.
-const int kUrlIdPosition = 16;
+const int kUrlIdPosition = 18;
 
 // Keys used in the meta table.
 const char* kDefaultSearchProviderKey = "Default Search Provider ID";
@@ -54,6 +54,8 @@ void BindURLToStatement(const TemplateURL& url, sql::Statement* s) {
   s->BindBool(14, url.created_by_policy());
   s->BindString(15, url.instant_url() ? url.instant_url()->url() :
                 std::string());
+  s->BindInt64(16, url.last_modified().ToTimeT());
+  s->BindString(17, url.sync_guid());
 }
 }  // anonymous namespace
 
@@ -78,7 +80,9 @@ bool KeywordTable::Init() {
                       "autogenerate_keyword INTEGER DEFAULT 0,"
                       "logo_id INTEGER DEFAULT 0,"
                       "created_by_policy INTEGER DEFAULT 0,"
-                      "instant_url VARCHAR)")) {
+                      "instant_url VARCHAR,"
+                      "last_modified INTEGER DEFAULT 0,"
+                      "sync_guid VARCHAR)")) {
       NOTREACHED();
       return false;
     }
@@ -99,8 +103,8 @@ bool KeywordTable::AddKeyword(const TemplateURL& url) {
       "originating_url, date_created, usage_count, input_encodings, "
       "show_in_default_list, suggest_url, prepopulate_id, "
       "autogenerate_keyword, logo_id, created_by_policy, instant_url, "
-      "id) VALUES "
-      "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+      "last_modified, sync_guid, id) VALUES "
+      "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
   if (!s) {
     NOTREACHED() << "Statement prepare failed";
     return false;
@@ -132,7 +136,7 @@ bool KeywordTable::GetKeywords(std::vector<TemplateURL*>* urls) {
       "safe_for_autoreplace, originating_url, date_created, "
       "usage_count, input_encodings, show_in_default_list, "
       "suggest_url, prepopulate_id, autogenerate_keyword, logo_id, "
-      "created_by_policy, instant_url "
+      "created_by_policy, instant_url, last_modified, sync_guid "
       "FROM keywords ORDER BY id ASC"));
   if (!s) {
     NOTREACHED() << "Statement prepare failed";
@@ -173,7 +177,7 @@ bool KeywordTable::GetKeywords(std::vector<TemplateURL*>* urls) {
 
     template_url->SetSuggestionsURL(s.ColumnString(11), 0, 0);
 
-    template_url->set_prepopulate_id(s.ColumnInt(12));
+    template_url->SetPrepopulateId(s.ColumnInt(12));
 
     template_url->set_autogenerate_keyword(s.ColumnInt(13) == 1);
 
@@ -182,6 +186,10 @@ bool KeywordTable::GetKeywords(std::vector<TemplateURL*>* urls) {
     template_url->set_created_by_policy(s.ColumnBool(15));
 
     template_url->SetInstantURL(s.ColumnString(16), 0, 0);
+
+    template_url->set_last_modified(Time::FromTimeT(s.ColumnInt64(17)));
+
+    template_url->set_sync_guid(s.ColumnString(18));
 
     urls->push_back(template_url);
   }
@@ -197,7 +205,8 @@ bool KeywordTable::UpdateKeyword(const TemplateURL& url) {
       "safe_for_autoreplace=?, originating_url=?, date_created=?, "
       "usage_count=?, input_encodings=?, show_in_default_list=?, "
       "suggest_url=?, prepopulate_id=?, autogenerate_keyword=?, "
-      "logo_id=?, created_by_policy=?, instant_url=? WHERE id=?"));
+      "logo_id=?, created_by_policy=?, instant_url=?, last_modified=?, "
+      "sync_guid=? WHERE id=?"));
   if (!s) {
     NOTREACHED() << "Statement prepare failed";
     return false;
@@ -223,7 +232,8 @@ bool KeywordTable::SetBuitinKeywordVersion(int version) {
 
 int KeywordTable::GetBuitinKeywordVersion() {
   int version = 0;
-  meta_table_->GetValue(kBuiltinKeywordVersion, &version);
+  if (!meta_table_->GetValue(kBuiltinKeywordVersion, &version))
+    return 0;
   return version;
 }
 
@@ -289,4 +299,14 @@ bool KeywordTable::MigrateToVersion29InstantUrlToSupportsInstant() {
     return false;
 
   return true;
+}
+
+bool KeywordTable::MigrateToVersion38AddLastModifiedColumn() {
+  return db_->Execute(
+      "ALTER TABLE keywords ADD COLUMN last_modified INTEGER DEFAULT 0");
+}
+
+bool KeywordTable::MigrateToVersion39AddSyncGUIDColumn() {
+  return db_->Execute(
+      "ALTER TABLE keywords ADD COLUMN sync_guid VARCHAR");
 }

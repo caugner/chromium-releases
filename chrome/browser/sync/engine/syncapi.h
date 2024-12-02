@@ -50,14 +50,16 @@
 #include "build/build_config.h"
 #include "chrome/browser/sync/engine/configure_reason.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
-#include "chrome/browser/sync/syncable/autofill_migration.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/util/cryptographer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "googleurl/src/gurl.h"
 
-class DictionaryValue;
 class FilePath;
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace browser_sync {
 class JsBackend;
@@ -100,6 +102,10 @@ class PasswordSpecificsData;
 class ThemeSpecifics;
 class TypedUrlSpecifics;
 }
+
+namespace tracked_objects {
+class Location;
+}  // namespace tracked_objects
 
 namespace sync_api {
 
@@ -279,13 +285,13 @@ class BaseNode {
   virtual const syncable::Entry* GetEntry() const = 0;
   virtual const BaseTransaction* GetTransaction() const = 0;
 
-  // Dumps all node info into a DictionaryValue and returns it.
+  // Dumps a summary of node info into a DictionaryValue and returns it.
   // Transfers ownership of the DictionaryValue to the caller.
-  DictionaryValue* ToValue() const;
+  base::DictionaryValue* GetSummaryAsValue() const;
 
-  // Does a case in-sensitive search for a given string, which must be
-  // lower case.
-  bool ContainsString(const std::string& lowercase_query) const;
+  // Dumps all node details into a DictionaryValue and returns it.
+  // Transfers ownership of the DictionaryValue to the caller.
+  base::DictionaryValue* GetDetailsAsValue() const;
 
  protected:
   BaseNode();
@@ -300,15 +306,16 @@ class BaseNode {
   // return |true|. If the contents are encrypted, the decrypted data will be
   // stored in |unencrypted_data_|.
   // This method is invoked once when the BaseNode is initialized.
-  bool DecryptIfNecessary(syncable::Entry* entry);
+  bool DecryptIfNecessary();
 
   // Returns the unencrypted specifics associated with |entry|. If |entry| was
   // not encrypted, it directly returns |entry|'s EntitySpecifics. Otherwise,
   // returns |unencrypted_data_|.
-  // This method is invoked by the datatype specific Get<datatype>Specifics
-  // methods.
   const sync_pb::EntitySpecifics& GetUnencryptedSpecifics(
       const syncable::Entry* entry) const;
+
+  // Copy |specifics| into |unencrypted_data_|.
+  void SetUnencryptedSpecifics(const sync_pb::EntitySpecifics& specifics);
 
  private:
   void* operator new(size_t size);  // Node is meant for stack use only.
@@ -392,6 +399,16 @@ class WriteNode : public BaseNode {
   void SetURL(const GURL& url);
   void SetFaviconBytes(const std::vector<unsigned char>& bytes);
 
+  // Generic set specifics method. Will extract the model type from |specifics|.
+  void SetEntitySpecifics(const sync_pb::EntitySpecifics& specifics);
+
+  // Resets the EntitySpecifics for this node based on the unencrypted data.
+  // Will encrypt if necessary.
+  void ResetFromSpecifics();
+
+  // TODO(sync): Remove the setters below when the corresponding data
+  // types are ported to the new sync service API.
+
   // Set the app specifics (id, update url, enabled state, etc).
   // Should only be called if GetModelType() == APPS.
   void SetAppSpecifics(const sync_pb::AppSpecifics& specifics);
@@ -411,10 +428,6 @@ class WriteNode : public BaseNode {
   // Should only be called if GetModelType() == PASSWORD.
   void SetPasswordSpecifics(const sync_pb::PasswordSpecificsData& specifics);
 
-  // Set the preference specifics (name and value).
-  // Should only be called if GetModelType() == PREFERENCE.
-  void SetPreferenceSpecifics(const sync_pb::PreferenceSpecifics& specifics);
-
   // Set the theme specifics (name and value).
   // Should only be called if GetModelType() == THEME.
   void SetThemeSpecifics(const sync_pb::ThemeSpecifics& specifics);
@@ -431,12 +444,13 @@ class WriteNode : public BaseNode {
   // Should only be called if GetModelType() == SESSIONS.
   void SetSessionSpecifics(const sync_pb::SessionSpecifics& specifics);
 
-  // Generic set specifics method. Will extract the model type from |specifics|.
-  void SetEntitySpecifics(const sync_pb::EntitySpecifics& specifics);
-
-  // Resets the EntitySpecifics for this node based on the unencrypted data.
-  // Will encrypt if necessary.
-  void ResetFromSpecifics();
+  // Stores |new_specifics| into |entry|, encrypting if necessary.
+  // Returns false if an error encrypting occurred (does not modify |entry|).
+  // Note: gracefully handles new_specifics aliasing with entry->Get(SPECIFICS).
+  static bool UpdateEntryWithEncryption(
+      browser_sync::Cryptographer* cryptographer,
+      const sync_pb::EntitySpecifics& new_specifics,
+      syncable::MutableEntry* entry);
 
   // Implementation of BaseNode's abstract virtual accessors.
   virtual const syncable::Entry* GetEntry() const;
@@ -452,42 +466,9 @@ class WriteNode : public BaseNode {
   // Helper to set the previous node.
   void PutPredecessor(const BaseNode* predecessor);
 
-  // Private helpers to set type-specific protobuf data.  These don't
-  // do any checking on the previous modeltype, so they can be used
-  // for internal initialization (you can use them to set the modeltype).
-  // Additionally, they will mark for syncing if the underlying value
-  // changes.
-  void PutAppSpecificsAndMarkForSyncing(
-      const sync_pb::AppSpecifics& new_value);
-  void PutAutofillSpecificsAndMarkForSyncing(
-      const sync_pb::AutofillSpecifics& new_value);
-  void PutAutofillProfileSpecificsAndMarkForSyncing(
-      const sync_pb::AutofillProfileSpecifics& new_value);
-  void PutBookmarkSpecificsAndMarkForSyncing(
-      const sync_pb::BookmarkSpecifics& new_value);
-  void PutNigoriSpecificsAndMarkForSyncing(
-      const sync_pb::NigoriSpecifics& new_value);
-  void PutPasswordSpecificsAndMarkForSyncing(
-      const sync_pb::PasswordSpecifics& new_value);
-  void PutPreferenceSpecificsAndMarkForSyncing(
-      const sync_pb::PreferenceSpecifics& new_value);
-  void PutThemeSpecificsAndMarkForSyncing(
-      const sync_pb::ThemeSpecifics& new_value);
-  void PutTypedUrlSpecificsAndMarkForSyncing(
-      const sync_pb::TypedUrlSpecifics& new_value);
-  void PutExtensionSpecificsAndMarkForSyncing(
-      const sync_pb::ExtensionSpecifics& new_value);
-  void PutSessionSpecificsAndMarkForSyncing(
-      const sync_pb::SessionSpecifics& new_value);
-  void PutSpecificsAndMarkForSyncing(
-      const sync_pb::EntitySpecifics& specifics);
-
   // Sets IS_UNSYNCED and SYNCING to ensure this entry is considered in an
   // upcoming commit pass.
   void MarkForSyncing();
-
-  // Encrypt the specifics if the datatype requries it.
-  void EncryptIfNecessary(sync_pb::EntitySpecifics* new_value);
 
   // The underlying syncable object which this class wraps.
   syncable::MutableEntry* entry_;
@@ -577,12 +558,16 @@ class BaseTransaction {
   DISALLOW_COPY_AND_ASSIGN(BaseTransaction);
 };
 
+// TODO(akalin): Make ReadTransaction/WriteTransaction take a Location
+// parameter.
+
 // Sync API's ReadTransaction is a read-only BaseTransaction.  It wraps
 // a syncable::ReadTransaction.
 class ReadTransaction : public BaseTransaction {
  public:
   // Start a new read-only transaction on the specified repository.
-  explicit ReadTransaction(UserShare* share);
+  ReadTransaction(const tracked_objects::Location& from_here,
+                  UserShare* share);
 
   // Resume the middle of a transaction. Will not close transaction.
   ReadTransaction(UserShare* share, syncable::BaseTransaction* trans);
@@ -603,10 +588,14 @@ class ReadTransaction : public BaseTransaction {
 
 // Sync API's WriteTransaction is a read/write BaseTransaction.  It wraps
 // a syncable::WriteTransaction.
+//
+// NOTE: Only a single model type can be mutated for a given
+// WriteTransaction.
 class WriteTransaction : public BaseTransaction {
  public:
   // Start a new read/write transaction.
-  explicit WriteTransaction(UserShare* share);
+  explicit WriteTransaction(const tracked_objects::Location& from_here,
+                            UserShare* share);
   virtual ~WriteTransaction();
 
   // Provide access to the syncable.h transaction from the API WriteNode.
@@ -617,7 +606,8 @@ class WriteTransaction : public BaseTransaction {
   WriteTransaction() {}
 
   void SetTransaction(syncable::WriteTransaction* trans) {
-      transaction_ = trans;}
+      transaction_ = trans;
+  }
 
  private:
   void* operator new(size_t size);  // Transaction is meant for stack use only.
@@ -650,7 +640,7 @@ class SyncManager {
     virtual ~ExtraPasswordChangeRecordData();
 
     // Transfers ownership of the DictionaryValue to the caller.
-    virtual DictionaryValue* ToValue() const;
+    virtual base::DictionaryValue* ToValue() const;
 
     const sync_pb::PasswordSpecificsData& unencrypted() const;
    private:
@@ -671,7 +661,7 @@ class SyncManager {
     ~ChangeRecord();
 
     // Transfers ownership of the DictionaryValue to the caller.
-    DictionaryValue* ToValue(const BaseTransaction* trans) const;
+    base::DictionaryValue* ToValue(const BaseTransaction* trans) const;
 
     int64 id;
     Action action;
@@ -707,6 +697,9 @@ class SyncManager {
 
       SUMMARY_STATUS_COUNT,
     };
+
+    Status();
+    ~Status();
 
     Summary summary;
     bool authenticated;      // Successfully authenticated via GAIA.
@@ -753,6 +746,11 @@ class SyncManager {
     // Count of useless and useful syncs we perform.
     int useless_sync_cycles;
     int useful_sync_cycles;
+
+    // Encryption related.
+    syncable::ModelTypeSet encrypted_types;
+    bool cryptographer_ready;
+    bool crypto_has_pending_keys;
   };
 
   // An interface the embedding application implements to receive notifications
@@ -866,7 +864,7 @@ class SyncManager {
   typedef Callback0::Type ModeChangeCallback;
 
   // Create an uninitialized SyncManager.  Callers must Init() before using.
-  SyncManager();
+  explicit SyncManager(const std::string& name);
   virtual ~SyncManager();
 
   // Initialize the sync manager.  |database_location| specifies the path of
@@ -881,14 +879,14 @@ class SyncManager {
   // |model_safe_worker| ownership is given to the SyncManager.
   // |user_agent| is a 7-bit ASCII string suitable for use as the User-Agent
   // HTTP header. Used internally when collecting stats to classify clients.
-  // |sync_notifier| used to listen for notifications, not owned.
+  // |sync_notifier| is owned and used to listen for notifications.
   bool Init(const FilePath& database_location,
-            const char* sync_server_and_path,
+            const std::string& sync_server_and_path,
             int sync_server_port,
             bool use_ssl,
             HttpPostProviderFactory* post_factory,
             browser_sync::ModelSafeWorkerRegistrar* registrar,
-            const char* user_agent,
+            const std::string& user_agent,
             const SyncCredentials& credentials,
             sync_notifier::SyncNotifier* sync_notifier,
             const std::string& restored_key_for_bootstrapping,
@@ -903,20 +901,6 @@ class SyncManager {
   // Prerequisite for calling this is that OnInitializationComplete has been
   // called.
   bool InitialSyncEndedForAllEnabledTypes();
-
-  syncable::AutofillMigrationState GetAutofillMigrationState();
-
-  void SetAutofillMigrationState(
-    syncable::AutofillMigrationState state);
-
-  syncable::AutofillMigrationDebugInfo GetAutofillMigrationDebugInfo();
-
-  void SetAutofillMigrationDebugInfo(
-      syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
-      const syncable::AutofillMigrationDebugInfo& info);
-
-  // Migrate tokens from user settings DB to the token service.
-  void MigrateTokens();
 
   // Update tokens that we're using in Sync. Email must stay the same.
   void UpdateCredentials(const SyncCredentials& credentials);
@@ -945,21 +929,18 @@ class SyncManager {
   // types, as we do not currently support decrypting datatypes.
   void EncryptDataTypes(const syncable::ModelTypeSet& encrypted_types);
 
-  // Puts the SyncerThread into a mode where no normal nudge or poll traffic
+  // Puts the SyncScheduler into a mode where no normal nudge or poll traffic
   // will occur, but calls to RequestConfig will be supported.  If |callback|
-  // is provided, it will be invoked (from the internal SyncerThread) when
+  // is provided, it will be invoked (from the internal SyncScheduler) when
   // the thread has changed to configuration mode.
   void StartConfigurationMode(ModeChangeCallback* callback);
 
-  // For the new SyncerThread impl, this switches the mode of operation to
-  // CONFIGURATION_MODE and schedules a config task to fetch updates for
-  // |types|.
+  // Switches the mode of operation to CONFIGURATION_MODE and
+  // schedules a config task to fetch updates for |types|.
   void RequestConfig(const syncable::ModelTypeBitSet& types,
      sync_api::ConfigureReason reason);
 
-  // Request a nudge of the syncer, which will cause the syncer thread
-  // to run at the next available opportunity.
-  void RequestNudge(const tracked_objects::Location& nudge_location);
+  void RequestCleanupDisabledTypes();
 
   // Request a clearing of all data on the server
   void RequestClearServerData();
@@ -975,39 +956,73 @@ class SyncManager {
   void RemoveObserver(Observer* observer);
 
   // Returns a pointer to the JsBackend (which is owned by the sync
-  // manager).  Never returns NULL.  The following events are sent by
-  // the returned backend:
+  // manager).  Never returns NULL.  jsDocs for raised events are below:
+
+  /**
+   * @param {{ enabled: boolean }} details enabled is set to whether
+   *     or not notifications are enabled.
+   */
+  // function onNotificationStateChange(details);
+
+  /**
+   * @param {{ changedTypes: Array.<string> }} details changedTypes is
+   *     a list of types (as strings) for which there are new updates.
+   */
+  // function onIncomingNotification(details);
+
+  // jsDocs for handled messages are below (all other messages are
+  // ignored).
+
+  /**
+   * Gets the current notification state.
+   *
+   * @param {function(boolean)} callback Called with whether or not
+   *     notifications are enabled.
+   */
+  // function getNotificationState(callback);
+
+  /**
+   * Gets details about the root node.
+   *
+   * @param {function(!Object)} callback Called with details about the
+   *     root node.
+   */
+  // TODO(akalin): Change this to getRootNodeId or eliminate it
+  // entirely.
   //
-  // onNotificationStateChange({ enabled: (boolean) }):
-  //   Sent when notifications are enabled or disabled.
-  //
-  // onIncomingNotification({ changedTypes: (array) }):
-  //   Sent when an incoming notification arrives.  |changedTypes|
-  //   is a list of sync types (strings) which have changed.
-  //
-  // The following messages are processed by the returned backend:
-  //
-  // getNotificationState():
-  //   callback(boolean notificationsEnabled):
-  //     notificationsEnabled: whether or not notifications are
-  //     enabled.
-  //
-  // getRootNode():
-  //   callback(dictionary nodeInfo):
-  //     nodeInfo: Information on the root node.
-  //
-  // getNodesById(array idList):
-  //   idList: A list of IDs as strings.
-  //   callback(array nodeList):
-  //     nodeList: Information on each node for each valid id in
-  //     idList.  Not guaranteed to be in any order.
-  //
-  // getChildNodeIds(string id):
-  //   id: The id of the node for which to return the child node ids.
-  //   callback(array idList):
-  //     idList: The child node IDs of the node with the given id.
-  //
-  // All other messages are dropped.
+  // function getRootNodeDetails(callback);
+
+  /**
+   * Gets summary information for a list of ids.
+   *
+   * @param {Array.<string>} idList List of 64-bit ids in decimal
+   *     string form.
+   * @param {Array.<{id: string, title: string, isFolder: boolean}>}
+   * callback Called with summaries for the nodes in idList that
+   *     exist.
+   */
+  // function getNodeSummariesById(idList, callback);
+
+  /**
+   * Gets detailed information for a list of ids.
+   *
+   * @param {Array.<string>} idList List of 64-bit ids in decimal
+   *     string form.
+   * @param {Array.<!Object>} callback Called with detailed
+   *     information for the nodes in idList that exist.
+   */
+  // function getNodeDetailsById(idList, callback);
+
+  /**
+   * Gets child ids for a given id.
+   *
+   * @param {string} id 64-bit id in decimal string form of the parent
+   *     node.
+   * @param {Array.<string>} callback Called with the (possibly empty)
+   *     list of child ids.
+   */
+  // function getChildNodeIds(id);
+
   browser_sync::JsBackend* GetJsBackend();
 
   // Status-related getters. Typically GetStatusSummary will suffice, but
@@ -1026,6 +1041,8 @@ class SyncManager {
   // to the syncapi model.
   void SaveChanges();
 
+  void RequestEarlyExit();
+
   // Issue a final SaveChanges, close sqlite handles, and stop running threads.
   // Must be called from the same thread that called Init().
   void Shutdown();
@@ -1038,6 +1055,8 @@ class SyncManager {
   // Note: opens a transaction and can trigger ON_PASSPHRASE_REQUIRED, so must
   // only be called after syncapi has been initialized.
   void RefreshEncryption();
+
+  syncable::ModelTypeSet GetEncryptedDataTypes() const;
 
   // Uses a read-only transaction to determine if the directory being synced has
   // any remaining unsynced items.

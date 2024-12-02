@@ -8,7 +8,7 @@
 
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/win/wrapped_window_proc.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -399,7 +399,7 @@ NativeMenuWin::~NativeMenuWin() {
 void NativeMenuWin::RunMenuAt(const gfx::Point& point, int alignment) {
   CreateHostWindow();
   UpdateStates();
-  UINT flags = TPM_LEFTBUTTON | TPM_RECURSE;
+  UINT flags = TPM_LEFTBUTTON | TPM_RIGHTBUTTON | TPM_RECURSE;
   flags |= GetAlignmentFlags(alignment);
   menu_action_ = MENU_ACTION_NONE;
 
@@ -567,7 +567,7 @@ LRESULT CALLBACK NativeMenuWin::MenuMessageHook(
   }
 
   MSG* msg = reinterpret_cast<MSG*>(l_param);
-  if (msg->message == WM_LBUTTONUP) {
+  if (msg->message == WM_LBUTTONUP || msg->message == WM_RBUTTONUP) {
     HighlightedMenuItemInfo info;
     if (GetHighlightedMenuItemInfo(this_ptr->menu_, &info) && info.menu) {
       // It appears that when running a menu by way of TrackPopupMenu(Ex) win32
@@ -705,7 +705,7 @@ void NativeMenuWin::UpdateMenuItemInfoForString(
   // Give Windows a pointer to the label string.
   mii->fMask |= MIIM_STRING;
   mii->dwTypeData =
-      const_cast<wchar_t*>(items_.at(model_index)->label.c_str());
+      const_cast<wchar_t*>(items_[model_index]->label.c_str());
 }
 
 UINT NativeMenuWin::GetAlignmentFlags(int alignment) const {

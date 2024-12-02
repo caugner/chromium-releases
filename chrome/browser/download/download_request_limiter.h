@@ -17,6 +17,7 @@
 class DownloadRequestInfoBarDelegate;
 class NavigationController;
 class TabContents;
+class TabContentsWrapper;
 
 // DownloadRequestLimiter is responsible for determining whether a download
 // should be allowed or not. It is designed to keep pages from downloading
@@ -130,7 +131,7 @@ class DownloadRequestLimiter
 
    private:
     // NotificationObserver method.
-    virtual void Observe(NotificationType type,
+    virtual void Observe(int type,
                          const NotificationSource& source,
                          const NotificationDetails& details);
 
@@ -223,7 +224,7 @@ class DownloadRequestLimiter
 
   // Does the work of updating the download status on the UI thread and
   // potentially prompting the user.
-  void CanDownloadImpl(TabContents* originating_tab,
+  void CanDownloadImpl(TabContentsWrapper* originating_tab,
                        int request_id,
                        Callback* callback);
 

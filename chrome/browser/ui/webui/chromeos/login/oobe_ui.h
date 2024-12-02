@@ -6,7 +6,18 @@
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_OOBE_UI_H_
 #pragma once
 
-#include "content/browser/webui/web_ui.h"
+#include "chrome/browser/chromeos/login/oobe_display.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
+
+namespace base {
+class DictionaryValue;
+}
+
+namespace chromeos {
+class BaseScreenHandler;
+class CoreOobeHandler;
+class SigninScreenHandler;
+}
 
 namespace chromeos {
 
@@ -14,11 +25,51 @@ namespace chromeos {
 // - welcome screen (setup language/keyboard/network).
 // - eula screen (CrOS (+ OEM) EULA content/TPM password/crash reporting).
 // - update screen.
-class OobeUI : public WebUI {
+class OobeUI : public OobeDisplay,
+               public ChromeWebUI {
  public:
   explicit OobeUI(TabContents* contents);
 
+  // OobeDisplay implementation:
+  virtual void ShowScreen(WizardScreen* screen);
+  virtual void HideScreen(WizardScreen* screen);
+  virtual UpdateScreenActor* GetUpdateScreenActor();
+  virtual NetworkScreenActor* GetNetworkScreenActor();
+  virtual EulaScreenActor* GetEulaScreenActor();
+  virtual EnterpriseEnrollmentScreenActor* GetEnterpriseEnrollmentScreenActor();
+  virtual UserImageScreenActor* GetUserImageScreenActor();
+  virtual ViewScreenDelegate* GetRegistrationScreenActor();
+  virtual ViewScreenDelegate* GetHTMLPageScreenActor();
+
+  // Collects localized strings from the owned handlers.
+  void GetLocalizedStrings(base::DictionaryValue* localized_strings);
+
+  // Initializes the handlers.
+  void InitializeHandlers();
+
+  // Shows or hides OOBE UI elements.
+  void ShowOobeUI(bool show);
+
+  // Shows the signin screen.
+  void ShowSigninScreen();
+
  private:
+  void AddScreenHandler(BaseScreenHandler* handler);
+
+  // Reference to CoreOobeHandler that handles common requests of Oobe page.
+  CoreOobeHandler* core_handler_;
+
+  // Screens actors. Note, OobeUI owns them via |handlers_|, not directly here.
+  UpdateScreenActor* update_screen_actor_;
+  NetworkScreenActor* network_screen_actor_;
+  EulaScreenActor* eula_screen_actor_;
+  EnterpriseEnrollmentScreenActor* enterprise_enrollment_screen_actor_;
+
+  // Reference to SigninScreenHandler that handles sign-in screen requrests and
+  // forward calls from native code to JS side.
+  SigninScreenHandler* signin_screen_handler_;
+  UserImageScreenActor* user_image_screen_actor_;
+
   DISALLOW_COPY_AND_ASSIGN(OobeUI);
 };
 

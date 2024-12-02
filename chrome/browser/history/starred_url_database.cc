@@ -4,18 +4,18 @@
 
 #include "chrome/browser/history/starred_url_database.h"
 
-#include "app/sql/statement.h"
 #include "base/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/scoped_vector.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/history/history.h"
+#include "sql/statement.h"
 
 // The following table is used to store star (aka bookmark) information. This
 // class derives from URLDatabase, which has its own schema.
@@ -81,7 +81,42 @@ void FillInStarredEntry(const sql::Statement& s, StarredEntry* entry) {
   entry->date_folder_modified = base::Time::FromInternalValue(s.ColumnInt64(9));
 }
 
+// Resets the properties of |node| from the supplied |entry|.
+void ResetBookmarkNode(const history::StarredEntry& entry,
+                       BookmarkNode* node) {
+  DCHECK(entry.type != history::StarredEntry::URL ||
+         entry.url == node->url());
+
+  node->set_date_added(entry.date_added);
+  node->set_date_folder_modified(entry.date_folder_modified);
+  node->set_title(entry.title);
+
+  switch (entry.type) {
+    case history::StarredEntry::URL:
+      node->set_type(BookmarkNode::URL);
+      break;
+    case history::StarredEntry::USER_FOLDER:
+      node->set_type(BookmarkNode::FOLDER);
+      break;
+    case history::StarredEntry::BOOKMARK_BAR:
+      node->set_type(BookmarkNode::BOOKMARK_BAR);
+      break;
+    case history::StarredEntry::OTHER:
+      node->set_type(BookmarkNode::OTHER_NODE);
+      break;
+    case history::StarredEntry::SYNCED:
+      node->set_type(BookmarkNode::SYNCED);
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+}
+
 }  // namespace
+
+// static
+const int64 StarredURLDatabase::kBookmarkBarID = 1;
 
 StarredURLDatabase::StarredURLDatabase() {
 }
@@ -543,16 +578,16 @@ bool StarredURLDatabase::MigrateBookmarksToFileImpl(const FilePath& path) {
   history::StarredEntry entry;
   entry.type = history::StarredEntry::BOOKMARK_BAR;
   BookmarkNode bookmark_bar_node(0, GURL());
-  bookmark_bar_node.Reset(entry);
+  ResetBookmarkNode(entry, &bookmark_bar_node);
   entry.type = history::StarredEntry::OTHER;
   BookmarkNode other_node(0, GURL());
-  other_node.Reset(entry);
+  ResetBookmarkNode(entry, &other_node);
   // NOTE(yfriedman): We don't do anything with the synced star node because it
   // won't ever exist in the starred node DB. We only need to create it to pass
   // to "encode".
   entry.type = history::StarredEntry::SYNCED;
   BookmarkNode synced_node(0, GURL());
-  synced_node.Reset(entry);
+  ResetBookmarkNode(entry, &synced_node);
 
   std::map<history::UIStarID, history::StarID> folder_id_to_id_map;
   typedef std::map<history::StarID, BookmarkNode*> IDToNodeMap;
@@ -574,9 +609,8 @@ bool StarredURLDatabase::MigrateBookmarksToFileImpl(const FilePath& path) {
   }
 
   // Register the bookmark bar and other folder nodes in the maps.
-  id_to_node_map[HistoryService::kBookmarkBarID] = &bookmark_bar_node;
-  folder_id_to_id_map[HistoryService::kBookmarkBarID] =
-      HistoryService::kBookmarkBarID;
+  id_to_node_map[kBookmarkBarID] = &bookmark_bar_node;
+  folder_id_to_id_map[kBookmarkBarID] = kBookmarkBarID;
   if (other_folder_folder_id) {
     id_to_node_map[other_folder_id] = &other_node;
     folder_id_to_id_map[other_folder_folder_id] = other_folder_id;
@@ -601,10 +635,10 @@ bool StarredURLDatabase::MigrateBookmarksToFileImpl(const FilePath& path) {
       // encountering the details.
 
       // The created nodes are owned by the root node.
-      node = new BookmarkNode(0, i->url);
+      node = new BookmarkNode(i->url);
       id_to_node_map[i->id] = node;
     }
-    node->Reset(*i);
+    ResetBookmarkNode(*i, node);
 
     DCHECK(folder_id_to_id_map.find(i->parent_folder_id) !=
            folder_id_to_id_map.end());
@@ -612,7 +646,7 @@ bool StarredURLDatabase::MigrateBookmarksToFileImpl(const FilePath& path) {
     BookmarkNode* parent = id_to_node_map[parent_id];
     if (!parent) {
       // Haven't encountered the parent yet, create it now.
-      parent = new BookmarkNode(0, GURL());
+      parent = new BookmarkNode(GURL());
       id_to_node_map[parent_id] = parent;
     }
 

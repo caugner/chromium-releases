@@ -1,10 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file is here so other GLES2 related files can have a common set of
 // includes where appropriate.
 
+#include <stdio.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <GLES2/gles2_command_buffer.h>
@@ -123,6 +124,8 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 2;
     case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
       return 1;
+    case GL_NUM_SHADER_BINARY_FORMATS:
+      return 1;
     case GL_PACK_ALIGNMENT:
       return 1;
     case GL_POLYGON_OFFSET_FACTOR:
@@ -147,6 +150,8 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 4;
     case GL_SCISSOR_TEST:
       return 1;
+    case GL_SHADER_BINARY_FORMATS:
+      return num_shader_binary_formats_;
     case GL_SHADER_COMPILER:
       return 1;
     case GL_STENCIL_BACK_FAIL:
@@ -323,6 +328,7 @@ int ElementsPerGroup(int format, int type) {
     case GL_RGB:
        return 3;
     case GL_LUMINANCE_ALPHA:
+       return 2;
     case GL_RGBA:
     case GL_BGRA_EXT:
        return 4;
@@ -515,6 +521,7 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
     case GL_RGB8_OES:
     case GL_RGB565:
       return 0x0007;
+    case GL_BGRA_EXT:
     case GL_RGBA:
     case GL_RGBA8_OES:
     case GL_RGBA4:
@@ -524,6 +531,43 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
       return 0x0000;
   }
 }
+
+std::string GLES2Util::GetStringEnum(uint32 value) {
+  const EnumToString* entry = enum_to_string_table_;
+  const EnumToString* end = entry + enum_to_string_table_len_;
+  for (;entry < end; ++entry) {
+    if (value == entry->value) {
+      return entry->name;
+    }
+  }
+  char buffer[20];
+  sprintf(buffer, (value < 0x10000) ? "0x%04x" : "0x%08x", value);
+  return buffer;
+}
+
+std::string GLES2Util::GetStringError(uint32 value) {
+  static EnumToString string_table[] = {
+    { GL_NONE, "GL_NONE" },
+  };
+  return GLES2Util::GetQualifiedEnumString(
+      string_table, arraysize(string_table), value);
+}
+
+std::string GLES2Util::GetStringBool(uint32 value) {
+  return value ? "true" : "false";
+}
+
+std::string GLES2Util::GetQualifiedEnumString(
+    const EnumToString* table, size_t count, uint32 value) {
+  for (const EnumToString* end = table + count; table < end; ++table) {
+    if (table->value == value) {
+      return table->name;
+    }
+  }
+  return GetStringEnum(value);
+}
+
+#include "../common/gles2_cmd_utils_implementation_autogen.h"
 
 }  // namespace gles2
 }  // namespace gpu

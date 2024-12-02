@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file is auto-generated. DO NOT EDIT!
+// This file is auto-generated from
+// gpu/command_buffer/build_gles2_cmd_buffer.py
+// DO NOT EDIT!
 
 // It is included by gles2_cmd_decoder_unittest_1.cc
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_1_AUTOGEN_H_
@@ -326,10 +328,9 @@ TEST_F(GLES2DecoderTest1, ClearStencilValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest1, ColorMaskValidArgs) {
-  EXPECT_CALL(*gl_, ColorMask(1, 2, 3, 4));
   SpecializedSetup<ColorMask, 0>(true);
   ColorMask cmd;
-  cmd.Init(1, 2, 3, 4);
+  cmd.Init(true, true, true, true);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -642,10 +643,9 @@ TEST_F(GLES2DecoderTest1, DepthFuncValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest1, DepthMaskValidArgs) {
-  EXPECT_CALL(*gl_, DepthMask(1));
   SpecializedSetup<DepthMask, 0>(true);
   DepthMask cmd;
-  cmd.Init(1);
+  cmd.Init(true);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -704,6 +704,7 @@ TEST_F(GLES2DecoderTest1, DisableVertexAttribArrayValidArgs) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 // TODO(gman): DrawArrays
+
 // TODO(gman): DrawElements
 
 

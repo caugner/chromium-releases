@@ -24,9 +24,12 @@
 #include "googleurl/src/gurl.h"
 
 class ContentSettingsDetails;
-class DictionaryValue;
 class PrefService;
 class Profile;
+
+namespace base {
+class DictionaryValue;
+}
 
 class GeolocationContentSettingsMap
     : public base::RefCountedThreadSafe<GeolocationContentSettingsMap>,
@@ -40,14 +43,6 @@ class GeolocationContentSettingsMap
   virtual ~GeolocationContentSettingsMap();
 
   static void RegisterUserPrefs(PrefService* prefs);
-
-  // Returns the default setting.
-  //
-  // This should only be called on the UI thread.
-  ContentSetting GetDefaultContentSetting() const;
-
-  // Returns true if the content setting is managed (set by a policy).
-  bool IsDefaultContentSettingManaged() const;
 
   // Returns a single ContentSetting which applies to the given |requesting_url|
   // when embedded in a top-level page from |embedding_url|.  To determine the
@@ -63,11 +58,6 @@ class GeolocationContentSettingsMap
   //
   // This should only be called on the UI thread.
   AllOriginsSettings GetAllOriginsSettings() const;
-
-  // Sets the default setting.
-  //
-  // This should only be called on the UI thread.
-  void SetDefaultContentSetting(ContentSetting setting);
 
   // Sets the content setting for a particular (requesting origin, embedding
   // origin) pair.  If the embedding origin is the same as the requesting
@@ -91,15 +81,12 @@ class GeolocationContentSettingsMap
   void ResetToDefault();
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
  private:
   friend class base::RefCountedThreadSafe<GeolocationContentSettingsMap>;
-
-  // The default setting.
-  static const ContentSetting kDefaultSetting;
 
   // Sends a CONTENT_SETTINGS_CHANGED notification.
   void NotifyObservers(const ContentSettingsDetails& details);
@@ -109,7 +96,7 @@ class GeolocationContentSettingsMap
   // Sets the fields of |one_origin_settings| based on the values in
   // |dictionary|.
   static void GetOneOriginSettingsFromDictionary(
-      const DictionaryValue* dictionary,
+      const base::DictionaryValue* dictionary,
       OneOriginSettings* one_origin_settings);
 
   // The profile we're associated with.

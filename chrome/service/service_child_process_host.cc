@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ ServiceChildProcessHost::ServiceChildProcessHost(ProcessType type)
 
 ServiceChildProcessHost::~ServiceChildProcessHost() {
   // We need to kill the child process when the host dies.
-  base::KillProcess(handle(), ResultCodes::NORMAL_EXIT, false);
+  base::KillProcess(handle(), content::RESULT_CODE_NORMAL_EXIT, false);
 }
 
 bool ServiceChildProcessHost::Launch(CommandLine* cmd_line,
@@ -36,7 +36,7 @@ bool ServiceChildProcessHost::Launch(CommandLine* cmd_line,
   if (no_sandbox) {
     base::ProcessHandle process = base::kNullProcessHandle;
     cmd_line->AppendSwitch(switches::kNoSandbox);
-    base::LaunchApp(*cmd_line, false, false, &process);
+    base::LaunchProcess(*cmd_line, base::LaunchOptions(), &process);
     set_handle(process);
   } else {
     set_handle(sandbox::StartProcessWithAccess(cmd_line, exposed_dir));

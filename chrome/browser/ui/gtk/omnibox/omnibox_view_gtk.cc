@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
 #include "googleurl/src/gurl.h"
@@ -46,9 +47,9 @@
 #include "views/controls/textfield/native_textfield_views.h"
 #include "views/events/event.h"
 #else
-#include "chrome/browser/autocomplete/autocomplete_popup_view_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
+#include "chrome/browser/ui/gtk/omnibox/omnibox_popup_view_gtk.h"
 #endif
 
 namespace {
@@ -206,15 +207,16 @@ OmniboxViewGtk::OmniboxViewGtk(
 #if defined(TOOLKIT_VIEWS)
       new AutocompletePopupContentsView
 #else
-      new AutocompletePopupViewGtk
+      new OmniboxPopupViewGtk
 #endif
           (GetFont(), this, model_.get(), profile, location_bar));
 }
 
 OmniboxViewGtk::~OmniboxViewGtk() {
-  NotificationService::current()->Notify(NotificationType::OMNIBOX_DESTROYED,
-                                         Source<OmniboxViewGtk>(this),
-                                         NotificationService::NoDetails());
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_OMNIBOX_DESTROYED,
+      Source<OmniboxViewGtk>(this),
+      NotificationService::NoDetails());
 
   // Explicitly teardown members which have a reference to us.  Just to be safe
   // we want them to be destroyed before destroying any other internal state.
@@ -408,7 +410,7 @@ void OmniboxViewGtk::Init() {
 
 #if !defined(TOOLKIT_VIEWS)
   registrar_.Add(this,
-                 NotificationType::BROWSER_THEME_CHANGED,
+                 chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  NotificationService::AllSources());
   theme_service_->InitThemesFor(this);
 #else
@@ -881,7 +883,7 @@ OmniboxView* OmniboxViewGtk::Create(AutocompleteEditController* controller,
                                     CommandUpdater* command_updater,
                                     bool popup_window_mode,
                                     views::View* location_bar) {
-  if (views::NativeTextfieldViews::IsTextfieldViewsEnabled()) {
+  if (views::Widget::IsPureViews()) {
     OmniboxViewViews* omnibox_view = new OmniboxViewViews(controller,
                                                           toolbar_model,
                                                           profile,
@@ -910,10 +912,10 @@ OmniboxView* OmniboxViewGtk::Create(AutocompleteEditController* controller,
 }
 #endif
 
-void OmniboxViewGtk::Observe(NotificationType type,
+void OmniboxViewGtk::Observe(int type,
                              const NotificationSource& source,
                              const NotificationDetails& details) {
-  DCHECK(type == NotificationType::BROWSER_THEME_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
 
   SetBaseColor();
 }
@@ -1257,7 +1259,7 @@ gboolean OmniboxViewGtk::HandleViewButtonPress(GtkWidget* sender,
     // determine whether we should select all of the text when the button is
     // released.
     button_1_pressed_ = true;
-    text_view_focused_before_button_press_ = GTK_WIDGET_HAS_FOCUS(text_view_);
+    text_view_focused_before_button_press_ = gtk_widget_has_focus(text_view_);
     text_selected_during_click_ = false;
 #endif
 
@@ -1698,7 +1700,7 @@ void OmniboxViewGtk::HandleViewMoveFocus(GtkWidget* widget,
     handled = true;
 #endif
 
-  if (!handled && GTK_WIDGET_VISIBLE(instant_view_))
+  if (!handled && gtk_widget_get_visible(instant_view_))
     handled = model_->CommitSuggestedText(true);
 
   if (!handled) {

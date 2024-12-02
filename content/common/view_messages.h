@@ -167,8 +167,10 @@ IPC_ENUM_TRAITS(WebKit::WebPopupType)
 IPC_ENUM_TRAITS(ui::TextInputType)
 IPC_ENUM_TRAITS(WebMenuItem::Type)
 IPC_ENUM_TRAITS(WindowContainerType)
+IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::IntAttribute)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::Role)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::State)
+IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::StringAttribute)
 
 IPC_STRUCT_TRAITS_BEGIN(ContextMenuParams)
   IPC_STRUCT_TRAITS_MEMBER(media_type)
@@ -179,6 +181,7 @@ IPC_STRUCT_TRAITS_BEGIN(ContextMenuParams)
   IPC_STRUCT_TRAITS_MEMBER(src_url)
   IPC_STRUCT_TRAITS_MEMBER(is_image_blocked)
   IPC_STRUCT_TRAITS_MEMBER(page_url)
+  IPC_STRUCT_TRAITS_MEMBER(keyword_url)
   IPC_STRUCT_TRAITS_MEMBER(frame_url)
   IPC_STRUCT_TRAITS_MEMBER(frame_content_state)
   IPC_STRUCT_TRAITS_MEMBER(media_flags)
@@ -302,6 +305,7 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(application_cache_enabled)
   IPC_STRUCT_TRAITS_MEMBER(tabs_to_links)
   IPC_STRUCT_TRAITS_MEMBER(hyperlink_auditing_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(is_online)
   IPC_STRUCT_TRAITS_MEMBER(user_style_sheet_enabled)
   IPC_STRUCT_TRAITS_MEMBER(user_style_sheet_location)
   IPC_STRUCT_TRAITS_MEMBER(author_and_user_styles_enabled)
@@ -327,10 +331,12 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(fullscreen_enabled)
   IPC_STRUCT_TRAITS_MEMBER(allow_displaying_insecure_content)
   IPC_STRUCT_TRAITS_MEMBER(allow_running_insecure_content)
+  IPC_STRUCT_TRAITS_MEMBER(enable_scroll_animator)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebMenuItem)
   IPC_STRUCT_TRAITS_MEMBER(label)
+  IPC_STRUCT_TRAITS_MEMBER(toolTip)
   IPC_STRUCT_TRAITS_MEMBER(type)
   IPC_STRUCT_TRAITS_MEMBER(action)
   IPC_STRUCT_TRAITS_MEMBER(rtl)
@@ -353,10 +359,13 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebAccessibility)
   IPC_STRUCT_TRAITS_MEMBER(role)
   IPC_STRUCT_TRAITS_MEMBER(state)
   IPC_STRUCT_TRAITS_MEMBER(location)
-  IPC_STRUCT_TRAITS_MEMBER(attributes)
+  IPC_STRUCT_TRAITS_MEMBER(string_attributes)
+  IPC_STRUCT_TRAITS_MEMBER(int_attributes)
   IPC_STRUCT_TRAITS_MEMBER(children)
   IPC_STRUCT_TRAITS_MEMBER(indirect_child_ids)
   IPC_STRUCT_TRAITS_MEMBER(html_attributes)
+  IPC_STRUCT_TRAITS_MEMBER(line_breaks)
+  IPC_STRUCT_TRAITS_MEMBER(cell_ids)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebCookie)
@@ -700,9 +709,6 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // The parent window's id.
   IPC_STRUCT_MEMBER(gfx::NativeViewId, parent_window)
 
-  // Surface for accelerated rendering.
-  IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, compositing_surface)
-
   // Renderer-wide preferences.
   IPC_STRUCT_MEMBER(RendererPreferences, renderer_preferences)
 
@@ -726,6 +732,20 @@ IPC_STRUCT_END()
 IPC_MESSAGE_CONTROL1(ViewMsg_SetNextPageID,
                      int32 /* next_page_id */)
 
+// Sent to the RenderView when a prerendered or instant page is committed
+// to an existing tab. The existing tab has a history of
+// |merged_history_length| which precedes the current history of pages
+// in the render view. All page_ids >= |minimum_page_id| are appended to
+// this new history in the same order.
+//
+// For example, suppose the history of page_ids in the instant RenderView
+// is [4 7 8]. This instant RenderView is committed, and merged into
+// an existing tab with 3 history items, with every page with page_id >= 7
+// is preserved. The resulting page history is [-1 -1 -1 7 8].
+IPC_MESSAGE_ROUTED2(ViewMsg_SetHistoryLengthAndPrune,
+                    int, /* merge_history_length */
+                    int32 /* minimum_page_id */)
+
 // Sends System Colors corresponding to a set of CSS color keywords
 // down the pipe.
 // This message must be sent to the renderer immediately on launch
@@ -740,6 +760,10 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SetCSSColors,
 IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GenerateRoutingID,
                             int /* routing_id */)
 
+// Asks the browser for the default audio hardware sample-rate.
+IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetHardwareSampleRate,
+                            double /* sample_rate */)
+
 // Tells the renderer to create a new view.
 // This message is slightly different, the view it takes (via
 // ViewMsg_New_Params) is the view to create, the message itself is sent as a
@@ -750,9 +774,8 @@ IPC_MESSAGE_CONTROL1(ViewMsg_New,
 // Reply in response to ViewHostMsg_ShowView or ViewHostMsg_ShowWidget.
 // similar to the new command, but used when the renderer created a view
 // first, and we need to update it.
-IPC_MESSAGE_ROUTED2(ViewMsg_CreatingNew_ACK,
-                    gfx::NativeViewId /* parent_hwnd */,
-                    gfx::PluginWindowHandle /* compositing_surface */)
+IPC_MESSAGE_ROUTED1(ViewMsg_CreatingNew_ACK,
+                    gfx::NativeViewId /* parent_hwnd */)
 
 // Sends updated preferences to the renderer.
 IPC_MESSAGE_ROUTED1(ViewMsg_SetRendererPrefs,
@@ -1148,8 +1171,8 @@ IPC_MESSAGE_ROUTED3(ViewMsg_AsyncOpenFile_ACK,
 
 // Tells the renderer that the network state has changed and that
 // window.navigator.onLine should be updated for all WebViews.
-IPC_MESSAGE_ROUTED1(ViewMsg_NetworkStateChanged,
-                    bool /* online */)
+IPC_MESSAGE_CONTROL1(ViewMsg_NetworkStateChanged,
+                     bool /* online */)
 
 // Enable accessibility in the renderer process.
 IPC_MESSAGE_ROUTED0(ViewMsg_EnableAccessibility)
@@ -1194,6 +1217,11 @@ IPC_MESSAGE_ROUTED0(ViewMsg_GetFPS)
 // Used to instruct the RenderView to go into "view source" mode.
 IPC_MESSAGE_ROUTED0(ViewMsg_EnableViewSourceMode)
 
+// Instructs the renderer to save the current page to MHTML.
+IPC_MESSAGE_ROUTED2(ViewMsg_SavePageAsMHTML,
+                    int /* job_id */,
+                    IPC::PlatformFileForTransit /* file handle */)
+
 // Messages sent from the renderer to the browser.
 
 // Sent by the renderer when it is creating a new window.  The browser creates
@@ -1217,6 +1245,25 @@ IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_CreateWidget,
 IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_CreateFullscreenWidget,
                             int /* opener_id */,
                             int /* route_id */)
+
+// Get all savable resource links from current webpage, include main
+// frame and sub-frame.
+IPC_MESSAGE_ROUTED1(ViewMsg_GetAllSavableResourceLinksForCurrentPage,
+                    GURL /* url of page which is needed to save */)
+
+// Get html data by serializing all frames of current page with lists
+// which contain all resource links that have local copy.
+IPC_MESSAGE_ROUTED3(ViewMsg_GetSerializedHtmlDataForCurrentPageWithLocalLinks,
+                    std::vector<GURL> /* urls that have local copy */,
+                    std::vector<FilePath> /* paths of local copy */,
+                    FilePath /* local directory path */)
+
+// Sends updated information about the client firewall traversal policy.
+// |traversal_data| is a json string containing policy information.
+// Sent due to a policy change or in response to a
+// ViewHostMsg_RequestRemoteAccessClientFirewallTraversal message.
+IPC_MESSAGE_ROUTED1(ViewMsg_UpdateRemoteAccessClientFirewallTraversal,
+                    std::string /* traversal_data */)
 
 // These three messages are sent to the parent RenderViewHost to display the
 // page/widget that was created by
@@ -1288,7 +1335,7 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_ShowPopup,
 // String.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_ScriptEvalResponse,
                     int  /* id */,
-                    ListValue  /* result */)
+                    base::ListValue  /* result */)
 
 // Result of string search in the page.
 // Response to ViewMsg_Find with the results of the requested find-in-page
@@ -1568,9 +1615,10 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_AppCacheAccessed,
                     bool /* blocked by policy */)
 
 // Initiates a download based on user actions like 'ALT+click'.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_DownloadUrl,
-                    GURL /* url */,
-                    GURL /* referrer */)
+IPC_MESSAGE_ROUTED3(ViewHostMsg_DownloadUrl,
+                    GURL     /* url */,
+                    GURL     /* referrer */,
+                    string16 /* suggested_name */)
 
 // Used to go to the session history entry at the given offset (ie, -1 will
 // return the "back" item).
@@ -1600,7 +1648,7 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_DidContentsPreferredSizeChange,
 IPC_MESSAGE_ROUTED3(ViewHostMsg_WebUISend,
                     GURL /* source_url */,
                     std::string  /* message */,
-                    ListValue /* args */)
+                    base::ListValue /* args */)
 
 // A renderer sends this to the browser process when it wants to
 // create a ppapi plugin.  The browser will create the plugin process if
@@ -1962,4 +2010,24 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_UserMetricsRecordAction,
 IPC_MESSAGE_CONTROL2(ViewHostMsg_FPS,
                      int /* routing id */,
                      float /* frames per second */)
+
+// Notifies the browser that the page was or was not saved as MHTML.
+IPC_MESSAGE_CONTROL2(ViewHostMsg_SavedPageAsMHTML,
+                     int /* job_id */,
+                     bool /* success */)
+
+IPC_MESSAGE_ROUTED3(ViewHostMsg_SendCurrentPageAllSavableResourceLinks,
+                    std::vector<GURL> /* all savable resource links */,
+                    std::vector<GURL> /* all referrers of resource links */,
+                    std::vector<GURL> /* all frame links */)
+
+IPC_MESSAGE_ROUTED3(ViewHostMsg_SendSerializedHtmlData,
+                    GURL /* frame's url */,
+                    std::string /* data buffer */,
+                    int32 /* complete status */)
+
+// Request updated information about the client firewall traversal policy.
+// Will result in a ViewMsg_UpdateRemoteAccessClientFirewallTraversal message
+// being sent back.
+IPC_MESSAGE_ROUTED0(ViewHostMsg_RequestRemoteAccessClientFirewallTraversal)
 

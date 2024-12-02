@@ -11,8 +11,9 @@
 #include "ui/base/l10n/l10n_util.h"
 
 BeforeTranslateInfoBar::BeforeTranslateInfoBar(
+    TabContentsWrapper* owner,
     TranslateInfoBarDelegate* delegate)
-    : TranslateInfoBarBase(delegate) {
+    : TranslateInfoBarBase(owner, delegate) {
 }
 
 BeforeTranslateInfoBar::~BeforeTranslateInfoBar() {
@@ -93,7 +94,7 @@ void BeforeTranslateInfoBar::OnAcceptPressed(GtkWidget* sender) {
 
 void BeforeTranslateInfoBar::OnDenyPressed(GtkWidget* sender) {
   GetDelegate()->TranslationDeclined();
-  RemoveInfoBar();
+  RemoveSelf();
 }
 
 void BeforeTranslateInfoBar::OnNeverTranslatePressed(GtkWidget* sender) {

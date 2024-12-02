@@ -28,7 +28,7 @@ using media::SwizzleCoreAudioLayout5_1;
 // and notify the audio manager, which likely will destroy this object.
 
 AUAudioOutputStream::AUAudioOutputStream(
-    AudioManagerMac* manager, AudioParameters params)
+    AudioManagerMac* manager, const AudioParameters& params)
     : manager_(manager),
       source_(NULL),
       output_unit_(0),
@@ -47,6 +47,7 @@ AUAudioOutputStream::AUAudioOutputStream(
   format_.mFramesPerPacket = 1;
   format_.mBytesPerPacket = (format_.mBitsPerChannel * params.channels) / 8;
   format_.mBytesPerFrame = format_.mBytesPerPacket;
+  format_.mReserved = 0;
 
   // Calculate the number of sample frames per callback.
   number_of_frames_ = params.GetPacketSize() / format_.mBytesPerPacket;

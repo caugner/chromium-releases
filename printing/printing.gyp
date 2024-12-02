@@ -11,15 +11,15 @@
       'target_name': 'printing',
       'type': 'static_library',
       'dependencies': [
-        '../app/app.gyp:app_base',  # Only required for Font support
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
+        '../ui/ui.gyp:ui',  # Only required for Font support.
       ],
-      'msvs_guid': '9E5416B9-B91B-4029-93F4-102C1AD5CAF4',
       'include_dirs': [
         '..',
       ],
@@ -107,11 +107,12 @@
             '../build/linux/system.gyp:gtkprint',
           ],
         }],
-        ['OS=="mac"',
-          {'sources/': [
+        ['OS=="mac" and use_skia==0', {
+          'sources/': [
             ['exclude', 'pdf_metafile_skia\\.(cc|h)$'],
             ['exclude', 'metafile_skia_wrapper\\.(cc|h)$'],
-        ]}],
+          ],
+        }],
         ['OS=="win"', {
           'defines': [
             # PRINT_BACKEND_AVAILABLE disables the default dummy implementation
@@ -146,12 +147,21 @@
             'backend/print_backend_cups.cc',
           ],
         }],
+        ['OS=="linux" and chromeos==1', {
+          'defines': [
+            # PRINT_BACKEND_AVAILABLE disables the default dummy implementation
+            # of the print backend and enables a custom implementation instead.
+            'PRINT_BACKEND_AVAILABLE',
+          ],
+          'sources': [
+            'backend/print_backend_chromeos.cc',
+          ],
+        }],
       ],
     },
     {
       'target_name': 'printing_unittests',
       'type': 'executable',
-      'msvs_guid': '8B2EE5D9-41BC-4AA2-A401-2DC143A05D2E',
       'dependencies': [
         'printing',
         '../testing/gtest.gyp:gtest',
@@ -223,9 +233,3 @@
     },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

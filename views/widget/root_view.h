@@ -13,12 +13,14 @@
 #include "views/focus/focus_search.h"
 #include "views/view.h"
 
+namespace ui {
+enum TouchStatus;
+}
+
 namespace views {
 
 class Widget;
-#if defined(TOUCH_UI)
 class GestureManager;
-#endif
 
 // This is a views-internal API and should not be used externally.
 // Widget exposes this object as a View*.
@@ -54,6 +56,7 @@ class RootView : public View,
   // Sets the "contents view" of the RootView. This is the single child view
   // that is responsible for laying out the contents of the widget.
   void SetContentsView(View* contents_view);
+  View* GetContentsView();
 
   // Called when parent of the host changed.
   void NotifyNativeViewHierarchyChanged(bool attached,
@@ -61,12 +64,17 @@ class RootView : public View,
 
   // Input ---------------------------------------------------------------------
 
+  // If a capture view has been set all mouse events are forwarded to the
+  // capture view, regardless of whether the mouse is over the view.
+  void set_capture_view(View* v) { capture_view_ = v; }
+  const View* capture_view() const { return capture_view_; }
+
   // Process a key event. Send the event to the focused view and up the focus
   // path, and finally to the default keyboard handler, until someone consumes
   // it. Returns whether anyone consumed the event.
   bool OnKeyEvent(const KeyEvent& event);
 
-#if defined(TOUCH_UI) && defined(UNIT_TEST)
+#if defined(UNIT_TEST)
   // For unit testing purposes, we use this method to set a mock
   // GestureManager
   void SetGestureManager(GestureManager* g) { gesture_manager_ = g; }
@@ -102,6 +110,7 @@ class RootView : public View,
   virtual bool IsVisibleInRootView() const OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
+  virtual void SchedulePaintInternal(const gfx::Rect& rect) OVERRIDE;
   virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
@@ -109,9 +118,7 @@ class RootView : public View,
   virtual void OnMouseMoved(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
   virtual bool OnMouseWheel(const MouseWheelEvent& event) OVERRIDE;
-#if defined(TOUCH_UI)
-  virtual TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
-#endif
+  virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
   virtual void SetMouseHandler(View* new_mouse_handler) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
@@ -120,19 +127,19 @@ class RootView : public View,
   virtual void ViewHierarchyChanged(bool is_add, View* parent,
                                     View* child) OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual bool ShouldPaintToTexture() const OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
+  virtual void MarkLayerDirty() OVERRIDE;
+  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
+                                                  View** ancestor) OVERRIDE;
 
  private:
   friend class View;
   friend class Widget;
 
-#if defined(TOUCH_UI)
   // Required so the GestureManager can call the Process* entry points
   // with synthetic events as necessary.
   friend class GestureManager;
-#endif
 
   // Input ---------------------------------------------------------------------
 
@@ -157,6 +164,9 @@ class RootView : public View,
 
   // Input ---------------------------------------------------------------------
 
+  // View capturing mouse input.
+  View* capture_view_;
+
   // The view currently handing down - drag - up
   View* mouse_pressed_handler_;
 
@@ -176,13 +186,11 @@ class RootView : public View,
   int last_mouse_event_x_;
   int last_mouse_event_y_;
 
-#if defined(TOUCH_UI)
   // The gesture_manager_ for this.
   GestureManager* gesture_manager_;
 
   // The view currently handling touch events.
   View* touch_pressed_handler_;
-#endif
 
   // Focus ---------------------------------------------------------------------
 

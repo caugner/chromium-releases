@@ -35,10 +35,43 @@ void DisablePasswordSync(ProfileSyncService* service) {
   service->OnUserChoseDatatypes(false, types);
 }
 
+// Fills |args| for the enter passphrase screen.
+void GetArgsForEnterPassphrase(bool tried_creating_explicit_passphrase,
+                               bool tried_setting_explicit_passphrase,
+                               DictionaryValue* args) {
+  args->SetBoolean("show_passphrase", true);
+  args->SetBoolean("passphrase_creation_rejected",
+                   tried_creating_explicit_passphrase);
+  args->SetBoolean("passphrase_setting_rejected",
+                   tried_setting_explicit_passphrase);
+}
+
+// Returns the next step for the non-fatal error case.
+SyncSetupWizard::State GetStepForNonFatalError(ProfileSyncService* service) {
+  if (service->IsPassphraseRequired()) {
+    if (service->IsUsingSecondaryPassphrase())
+      return SyncSetupWizard::ENTER_PASSPHRASE;
+    else
+      return SyncSetupWizard::GAIA_LOGIN;
+  }
+
+  const GoogleServiceAuthError& error = service->GetAuthError();
+  if (error.state() == GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
+      error.state() == GoogleServiceAuthError::CAPTCHA_REQUIRED ||
+      error.state() == GoogleServiceAuthError::ACCOUNT_DELETED ||
+      error.state() == GoogleServiceAuthError::ACCOUNT_DISABLED ||
+      error.state() == GoogleServiceAuthError::SERVICE_UNAVAILABLE)
+    return SyncSetupWizard::GAIA_LOGIN;
+
+  NOTREACHED();
+  return SyncSetupWizard::FATAL_ERROR;
+}
+
 }  // namespace
 
 SyncConfiguration::SyncConfiguration()
-    : sync_everything(false),
+    : encrypt_all(false),
+      sync_everything(false),
       use_secondary_passphrase(false) {
 }
 
@@ -53,13 +86,16 @@ SyncSetupFlow* SyncSetupFlow::Run(ProfileSyncService* service,
                                   SyncSetupFlowContainer* container,
                                   SyncSetupWizard::State start,
                                   SyncSetupWizard::State end) {
+  if (start == SyncSetupWizard::NONFATAL_ERROR)
+    start = GetStepForNonFatalError(service);
+
   DictionaryValue args;
   if (start == SyncSetupWizard::GAIA_LOGIN)
     SyncSetupFlow::GetArgsForGaiaLogin(service, &args);
   else if (start == SyncSetupWizard::CONFIGURE)
     SyncSetupFlow::GetArgsForConfigure(service, &args);
   else if (start == SyncSetupWizard::ENTER_PASSPHRASE)
-    SyncSetupFlow::GetArgsForEnterPassphrase(false, false, &args);
+    GetArgsForEnterPassphrase(false, false, &args);
 
   std::string json_args;
   base::JSONWriter::Write(&args, false, &json_args);
@@ -133,34 +169,33 @@ void SyncSetupFlow::GetArgsForConfigure(ProfileSyncService* service,
   args->SetBoolean("syncApps",
       service->profile()->GetPrefs()->GetBoolean(prefs::kSyncApps));
   args->SetBoolean("encryptionEnabled",
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableSyncEncryption));
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableSyncEncryption));
 
   syncable::ModelTypeSet encrypted_types;
   service->GetEncryptedDataTypes(&encrypted_types);
   bool encrypt_all =
       encrypted_types.upper_bound(syncable::PASSWORDS) != encrypted_types.end();
+  if (service->HasPendingEncryptedTypes())
+    encrypt_all = true;
   args->SetBoolean("encryptAllData", encrypt_all);
 
   // Load the parameters for the encryption tab.
   args->SetBoolean("usePassphrase", service->IsUsingSecondaryPassphrase());
 }
 
-// static
-void SyncSetupFlow::GetArgsForEnterPassphrase(
-    bool tried_creating_explicit_passphrase,
-    bool tried_setting_explicit_passphrase,
-    DictionaryValue* args) {
-  args->SetBoolean("show_passphrase", true);
-  args->SetBoolean("passphrase_creation_rejected",
-                   tried_creating_explicit_passphrase);
-  args->SetBoolean("passphrase_setting_rejected",
-                   tried_setting_explicit_passphrase);
+bool SyncSetupFlow::AttachSyncSetupHandler(SyncSetupFlowHandler* handler) {
+  if (flow_handler_)
+    return false;
+
+  flow_handler_ = handler;
+  handler->SetFlow(this);
+  ActivateState(current_state_);
+  return true;
 }
 
-void SyncSetupFlow::AttachSyncSetupHandler(SyncSetupFlowHandler* handler) {
-  flow_handler_ = handler;
-  ActivateState(current_state_);
+bool SyncSetupFlow::IsAttached() const {
+  return flow_handler_ != NULL;
 }
 
 void SyncSetupFlow::Advance(SyncSetupWizard::State advance_state) {
@@ -170,20 +205,26 @@ void SyncSetupFlow::Advance(SyncSetupWizard::State advance_state) {
     return;
   }
 
-  ActivateState(advance_state);
+  if (flow_handler_)
+    ActivateState(advance_state);
 }
 
 void SyncSetupFlow::Focus() {
-  // TODO(jhawkins): Implement this.
+  // This gets called from SyncSetupWizard::Focus(), and might get called
+  // before flow_handler_ is set in AttachSyncSetupHandler() (which gets
+  // called asynchronously after the UI initializes).
+  if (flow_handler_)
+    flow_handler_->Focus();
 }
 
 // A callback to notify the delegate that the dialog closed.
 void SyncSetupFlow::OnDialogClosed(const std::string& json_retval) {
   DCHECK(json_retval.empty());
   container_->set_flow(NULL);  // Sever ties from the wizard.
-  if (current_state_ == SyncSetupWizard::DONE) {
+  // If we've reached the end, mark it.  This could be a discrete run, in which
+  // case it's already set, but it simplifes the logic to do it this way.
+  if (current_state_ == end_state_)
     service_->SetSyncSetupCompleted();
-  }
 
   // Record the state at which the user cancelled the signon dialog.
   switch (current_state_) {
@@ -228,21 +269,31 @@ void SyncSetupFlow::OnUserConfigured(const SyncConfiguration& configuration) {
   // Go to the "loading..." screen.
   Advance(SyncSetupWizard::SETTING_UP);
 
+  // Note: encryption will not occur until OnUserChoseDatatypes is called.
+  syncable::ModelTypeSet encrypted_types;
   if (configuration.encrypt_all) {
-    syncable::ModelTypeSet data_types;
-    service_->GetRegisteredDataTypes(&data_types);
-    service_->EncryptDataTypes(data_types);
-  }
+    // Encrypt all registered types.
+    service_->GetRegisteredDataTypes(&encrypted_types);
+  }  // Else we clear the pending types for encryption.
+  service_->set_pending_types_for_encryption(encrypted_types);
 
-  // If we are activating the passphrase, we need to have one supplied.
-  DCHECK(service_->IsUsingSecondaryPassphrase() ||
-         !configuration.use_secondary_passphrase ||
-         configuration.secondary_passphrase.length() > 0);
-
-  if (configuration.use_secondary_passphrase &&
-      !service_->IsUsingSecondaryPassphrase()) {
-    service_->SetPassphrase(configuration.secondary_passphrase, true, true);
-    tried_creating_explicit_passphrase_ = true;
+  // It's possible the user has to provide a secondary passphrase even when
+  // they have not set one previously. This occurs when the user has changed
+  // their gaia password and then sign in to a new machine for the first time.
+  // The new machine will download data encrypted with their old gaia password,
+  // which their current gaia password will not be able to decrypt, triggering
+  // a prompt for a passphrase. At this point, the user must enter their old
+  // password, which we store as a new secondary passphrase.
+  // TODO(zea): eventually use the above gaia_passphrase instead of the
+  // secondary passphrase in this case.
+  if (configuration.use_secondary_passphrase) {
+    if (!service_->IsUsingSecondaryPassphrase()) {
+      service_->SetPassphrase(configuration.secondary_passphrase, true, true);
+      tried_creating_explicit_passphrase_ = true;
+    } else {
+      service_->SetPassphrase(configuration.secondary_passphrase, true, false);
+      tried_setting_explicit_passphrase_ = true;
+    }
   }
 
   service_->OnUserChoseDatatypes(configuration.sync_everything,
@@ -262,11 +313,6 @@ void SyncSetupFlow::OnPassphraseCancel() {
     DisablePasswordSync(service_);
 
   Advance(SyncSetupWizard::SETTING_UP);
-}
-
-// TODO(jhawkins): Use this method instead of a direct link in the html.
-void SyncSetupFlow::OnGoToDashboard() {
-  BrowserList::GetLastActive()->OpenPrivacyDashboardTabAndActivate();
 }
 
 // Use static Run method to get an instance.
@@ -303,13 +349,12 @@ bool SyncSetupFlow::ShouldAdvance(SyncSetupWizard::State state) {
              current_state_ == SyncSetupWizard::CONFIGURE ||
              current_state_ == SyncSetupWizard::SETTING_UP;
     case SyncSetupWizard::SETUP_ABORTED_BY_PENDING_CLEAR:
-      DCHECK(current_state_ != SyncSetupWizard::GAIA_LOGIN &&
-             current_state_ != SyncSetupWizard::GAIA_SUCCESS);
-      return true;
+      return true;  // The server can abort whenever it wants.
     case SyncSetupWizard::SETTING_UP:
       return current_state_ == SyncSetupWizard::SYNC_EVERYTHING ||
              current_state_ == SyncSetupWizard::CONFIGURE ||
              current_state_ == SyncSetupWizard::ENTER_PASSPHRASE;
+    case SyncSetupWizard::NONFATAL_ERROR:
     case SyncSetupWizard::FATAL_ERROR:
       return true;  // You can always hit the panic button.
     case SyncSetupWizard::DONE:
@@ -322,6 +367,13 @@ bool SyncSetupFlow::ShouldAdvance(SyncSetupWizard::State state) {
 }
 
 void SyncSetupFlow::ActivateState(SyncSetupWizard::State state) {
+  DCHECK(flow_handler_);
+
+  if (state == SyncSetupWizard::NONFATAL_ERROR)
+    state = GetStepForNonFatalError(service_);
+
+  current_state_ = state;
+
   switch (state) {
     case SyncSetupWizard::GAIA_LOGIN: {
       DictionaryValue args;
@@ -334,8 +386,8 @@ void SyncSetupFlow::ActivateState(SyncSetupWizard::State state) {
         flow_handler_->ShowGaiaSuccessAndClose();
         break;
       }
-      state = SyncSetupWizard::SYNC_EVERYTHING;
-      //  Fall through.
+      flow_handler_->ShowGaiaSuccessAndSettingUp();
+      break;
     case SyncSetupWizard::SYNC_EVERYTHING: {
       DictionaryValue args;
       SyncSetupFlow::GetArgsForConfigure(service_, &args);
@@ -352,10 +404,9 @@ void SyncSetupFlow::ActivateState(SyncSetupWizard::State state) {
     case SyncSetupWizard::ENTER_PASSPHRASE: {
       DictionaryValue args;
       SyncSetupFlow::GetArgsForConfigure(service_, &args);
-      SyncSetupFlow::GetArgsForEnterPassphrase(
-          tried_creating_explicit_passphrase_,
-          tried_setting_explicit_passphrase_,
-          &args);
+      GetArgsForEnterPassphrase(tried_creating_explicit_passphrase_,
+                                tried_setting_explicit_passphrase_,
+                                &args);
       flow_handler_->ShowPassphraseEntry(args);
       break;
     }
@@ -386,5 +437,4 @@ void SyncSetupFlow::ActivateState(SyncSetupWizard::State state) {
     default:
       NOTREACHED() << "Invalid advance state: " << state;
   }
-  current_state_ = state;
 }

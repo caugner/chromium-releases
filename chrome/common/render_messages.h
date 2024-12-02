@@ -26,6 +26,7 @@
 #include "chrome/common/translate_errors.h"
 #include "content/common/common_param_traits.h"
 #include "ipc/ipc_message_macros.h"
+#include "ipc/ipc_platform_file.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "ui/gfx/rect.h"
@@ -175,20 +176,14 @@ IPC_MESSAGE_CONTROL2(ViewMsg_SetContentSettingsForCurrentURL,
                      GURL /* url */,
                      ContentSettings /* content_settings */)
 
+// Set the content settings for a particular url that the renderer is in the
+// process of loading.  This will be stored, to be used if the load commits
+// and ignored otherwise.
+IPC_MESSAGE_CONTROL1(ViewMsg_SetDefaultContentSettings,
+                     ContentSettings /* content_settings */)
+
 // Tells the render view to load all blocked plugins.
 IPC_MESSAGE_ROUTED0(ViewMsg_LoadBlockedPlugins)
-
-// Get all savable resource links from current webpage, include main
-// frame and sub-frame.
-IPC_MESSAGE_ROUTED1(ViewMsg_GetAllSavableResourceLinksForCurrentPage,
-                    GURL /* url of page which is needed to save */)
-
-// Get html data by serializing all frames of current page with lists
-// which contain all resource links that have local copy.
-IPC_MESSAGE_ROUTED3(ViewMsg_GetSerializedHtmlDataForCurrentPageWithLocalLinks,
-                    std::vector<GURL> /* urls that have local copy */,
-                    std::vector<FilePath> /* paths of local copy */,
-                    FilePath /* local directory path */)
 
 // Asks the renderer to send back stats on the WebCore cache broken down by
 // resource types.
@@ -260,6 +255,18 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SetIsPrerendering,
 // incognito mode.
 IPC_MESSAGE_CONTROL1(ViewMsg_SetIsIncognitoProcess,
                      bool /* is_incognito_processs */)
+
+// Sent in response to ViewHostMsg_DidBlockDisplayingInsecureContent.
+IPC_MESSAGE_ROUTED1(ViewMsg_SetAllowDisplayingInsecureContent,
+                    bool /* allowed */)
+
+// Sent in response to ViewHostMsg_DidBlockRunningInsecureContent.
+IPC_MESSAGE_ROUTED1(ViewMsg_SetAllowRunningInsecureContent,
+                    bool /* allowed */)
+
+// Sent when the profile changes the kSafeBrowsingEnabled preference.
+IPC_MESSAGE_ROUTED1(ViewMsg_SetClientSidePhishingDetection,
+                    bool /* enable_phishing_detection */)
 
 //-----------------------------------------------------------------------------
 // TabContents messages
@@ -434,16 +441,6 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_BlockedOutdatedPlugin,
                     string16, /* name */
                     GURL      /* update_url */)
 
-IPC_MESSAGE_ROUTED3(ViewHostMsg_SendCurrentPageAllSavableResourceLinks,
-                    std::vector<GURL> /* all savable resource links */,
-                    std::vector<GURL> /* all referrers of resource links */,
-                    std::vector<GURL> /* all frame links */)
-
-IPC_MESSAGE_ROUTED3(ViewHostMsg_SendSerializedHtmlData,
-                    GURL /* frame's url */,
-                    std::string /* data buffer */,
-                    int32 /* complete status */)
-
 // Provide the browser process with information about the WebCore resource
 // cache and current renderer framerate.
 IPC_MESSAGE_CONTROL1(ViewHostMsg_ResourceTypeStats,
@@ -480,6 +477,14 @@ IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_CanTriggerClipboardRead,
 IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_CanTriggerClipboardWrite,
                            GURL /* url */,
                            bool /* allowed */)
+
+// Sent when the renderer was prevented from displaying insecure content in
+// a secure page by a security policy.  The page may appear incomplete.
+IPC_MESSAGE_ROUTED0(ViewHostMsg_DidBlockDisplayingInsecureContent)
+
+// Sent when the renderer was prevented from running insecure content in
+// a secure origin by a security policy.  The page may appear incomplete.
+IPC_MESSAGE_ROUTED0(ViewHostMsg_DidBlockRunningInsecureContent)
 
 // Suggest results -----------------------------------------------------------
 

@@ -16,6 +16,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 
 class GaiaAuthFetcher;
 class Profile;
@@ -33,7 +35,7 @@ struct GoogleServiceSigninSuccessDetails {
   std::string password;
 };
 
-class SigninManager : public GaiaAuthConsumer {
+class SigninManager : public GaiaAuthConsumer , public NotificationObserver {
  public:
   SigninManager();
   virtual ~SigninManager();
@@ -43,6 +45,7 @@ class SigninManager : public GaiaAuthConsumer {
 
   // If user was signed in, load tokens from DB if available.
   void Initialize(Profile* profile);
+  bool IsInitialized() const;
 
   // If a user is signed in, this will return their name.
   // Otherwise, it will return an empty string.
@@ -54,10 +57,12 @@ class SigninManager : public GaiaAuthConsumer {
   // Attempt to sign in this user. If successful, set a preference indicating
   // the signed in user and send out a notification, then start fetching tokens
   // for the user.
-  void StartSignIn(const std::string& username,
-                   const std::string& password,
-                   const std::string& login_token,
-                   const std::string& login_captcha);
+  // This is overridden for test subclasses that don't want to issue auth
+  // requests.
+  virtual void StartSignIn(const std::string& username,
+                           const std::string& password,
+                           const std::string& login_token,
+                           const std::string& login_captcha);
 
   // Used when a second factor access code was required to complete a signin
   // attempt.
@@ -68,12 +73,21 @@ class SigninManager : public GaiaAuthConsumer {
   void SignOut();
 
   // GaiaAuthConsumer
-  virtual void OnClientLoginSuccess(const ClientLoginResult& result);
-  virtual void OnClientLoginFailure(const GoogleServiceAuthError& error);
+  virtual void OnClientLoginSuccess(const ClientLoginResult& result) OVERRIDE;
+  virtual void OnClientLoginFailure(const GoogleServiceAuthError& error)
+      OVERRIDE;
   virtual void OnGetUserInfoSuccess(const std::string& key,
-                                    const std::string& value);
-  virtual void OnGetUserInfoKeyNotFound(const std::string& key);
-  virtual void OnGetUserInfoFailure(const GoogleServiceAuthError& error);
+                                    const std::string& value) OVERRIDE;
+  virtual void OnGetUserInfoKeyNotFound(const std::string& key) OVERRIDE;
+  virtual void OnGetUserInfoFailure(const GoogleServiceAuthError& error)
+      OVERRIDE;
+  virtual void OnTokenAuthFailure(const GoogleServiceAuthError& error)
+      OVERRIDE;
+
+  // NotificationObserver
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
  private:
   Profile* profile_;
@@ -81,12 +95,19 @@ class SigninManager : public GaiaAuthConsumer {
   std::string password_;  // This is kept empty whenever possible.
   bool had_two_factor_error_;
 
+  void CleanupNotificationRegistration();
+
   // Result of the last client login, kept pending the lookup of the
   // canonical email.
   ClientLoginResult last_result_;
 
   // Actual client login handler.
   scoped_ptr<GaiaAuthFetcher> client_login_;
+
+  // Register for notifications from the TokenService.
+  NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(SigninManager);
 };
 
 #endif  // CHROME_BROWSER_SYNC_SIGNIN_MANAGER_H_

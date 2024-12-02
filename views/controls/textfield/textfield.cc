@@ -51,11 +51,10 @@ Textfield::Textfield()
       use_default_text_color_(true),
       background_color_(SK_ColorWHITE),
       use_default_background_color_(true),
-      num_lines_(1),
       initialized_(false),
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false) {
-  SetFocusable(true);
+  set_focusable(true);
 }
 
 Textfield::Textfield(StyleFlags style)
@@ -69,11 +68,10 @@ Textfield::Textfield(StyleFlags style)
       use_default_text_color_(true),
       background_color_(SK_ColorWHITE),
       use_default_background_color_(true),
-      num_lines_(1),
       initialized_(false),
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false) {
-  SetFocusable(true);
+  set_focusable(true);
 }
 
 Textfield::~Textfield() {
@@ -107,10 +105,6 @@ void Textfield::SetPassword(bool password) {
     style_ = static_cast<StyleFlags>(style_ & ~STYLE_PASSWORD);
   if (native_wrapper_)
     native_wrapper_->UpdateIsPassword();
-}
-
-bool Textfield::IsMultiLine() const {
-  return !!(style_ & STYLE_MULTILINE);
 }
 
 void Textfield::SetText(const string16& text) {
@@ -197,12 +191,6 @@ void Textfield::SetVerticalMargins(int top, int bottom) {
   PreferredSizeChanged();
 }
 
-void Textfield::SetHeightInLines(int num_lines) {
-  DCHECK(IsMultiLine());
-  num_lines_ = num_lines;
-  PreferredSizeChanged();
-}
-
 void Textfield::RemoveBorder() {
   if (!draw_border_)
     return;
@@ -273,6 +261,21 @@ size_t Textfield::GetCursorPosition() const {
   return native_wrapper_->GetCursorPosition();
 }
 
+void Textfield::ApplyStyleRange(const gfx::StyleRange& style) {
+  DCHECK(native_wrapper_);
+  return native_wrapper_->ApplyStyleRange(style);
+}
+
+void Textfield::ApplyDefaultStyle() {
+  DCHECK(native_wrapper_);
+  native_wrapper_->ApplyDefaultStyle();
+}
+
+void Textfield::ClearEditHistory() {
+  DCHECK(native_wrapper_);
+  native_wrapper_->ClearEditHistory();
+}
+
 void Textfield::SetAccessibleName(const string16& name) {
   accessible_name_ = name;
 }
@@ -292,8 +295,7 @@ gfx::Size Textfield::GetPreferredSize() {
   if (draw_border_ && native_wrapper_)
     insets = native_wrapper_->CalculateInsets();
   return gfx::Size(font_.GetExpectedTextWidth(default_width_in_chars_) +
-                       insets.width(),
-                   num_lines_ * font_.GetHeight() + insets.height());
+                       insets.width(), font_.GetHeight() + insets.height());
 }
 
 bool Textfield::IsFocusable() const {
@@ -396,7 +398,7 @@ void Textfield::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     UpdateAllProperties();
 
 #if defined(OS_WIN)
-    if (!NativeTextfieldViews::IsTextfieldViewsEnabled()) {
+    if (!views::Widget::IsPureViews()) {
       // TODO(beng): remove this once NativeTextfieldWin subclasses
       // NativeControlWin. This is currently called to perform post-AddChildView
       // initialization for the wrapper. The GTK version subclasses things

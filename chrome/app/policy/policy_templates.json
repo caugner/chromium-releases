@@ -94,7 +94,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 89
+#   For your editing convenience: highest ID currently used: 95
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -281,6 +281,20 @@
       If this setting is disabled, users cannot open web pages in incognito mode.''',
     },
     {
+      'name': 'IncognitoForced',
+      'type': 'main',
+      'supported_on': ['chrome.*:14-', 'chrome_os:0.14-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': False,
+      'id': 93,
+      'caption': '''Force Incognito mode''',
+      'desc': '''Forces every session into Incognito mode in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      If this setting is enabled, users can open pages only in incognito mode.
+
+      If this setting is disabled or not configured, users can use the browser in normal mode as well.''',
+    },
+    {
       'name': 'SavingBrowserHistoryDisabled',
       'type': 'main',
       'supported_on': ['chrome.*:8-', 'chrome_os:0.11-'],
@@ -293,6 +307,44 @@
       If this setting is enabled, browsing history is not saved.
 
       If this setting is disabled or not configured, browsing history is saved.''',
+    },
+    {
+      'name': 'RemoteAccess',
+      'type': 'group',
+      'caption': '''Configure remote access options''',
+      'desc': '''Configure remote access options in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      These features are ignored unless the Remote Access web application is installed.''',
+      'policies': [
+        {
+          'name': 'RemoteAccessClientFirewallTraversal',
+          'type': 'main',
+          'supported_on': ['chrome.*:14-', 'chrome_os:0.14-'],
+          'features': {'dynamic_refresh': 1},
+          'example_value': False,
+          'id': 94,
+          'caption': '''Enable firewall traversal from remote access client''',
+          'desc': '''Enables usage of STUN and relay servers when connecting to a remote client.
+
+          If this setting is enabled, then this machine can discover and connect to remote host machines even if they are separated by a firewall.
+
+          If this setting is disabled and outgoing UDP connections are filtered by the firewall, then this machine can only connect to host machines within the local network.''',
+        },
+        {
+          'name': 'RemoteAccessHostFirewallTraversal',
+          'type': 'main',
+          'supported_on': ['chrome.*:14-', 'chrome_os:0.14-'],
+          'features': {'dynamic_refresh': 1},
+          'example_value': False,
+          'id': 95,
+          'caption': '''Enable firewall traversal from remote access host''',
+          'desc': '''Enables usage of STUN and relay servers when remote clients are trying to establish a connection to this machine.
+
+          If this setting is enabled, then remote clients can discover and connect to this machines even if they are separated by a firewall.
+
+          If this setting is disabled and outgoing UDP connections are filtered by the firewall, then this machine will only allow connections from client machines within the local network.''',
+        },
+      ],
     },
     {
       'name': 'PrintingEnabled',
@@ -1040,18 +1092,18 @@
           'items': [
             {
               'name': 'AllowCookies',
-              'value': 0,
+              'value': 1,
               'caption': '''Allow all sites to set local data.'''
             },
             {
               'name': 'BlockCookies',
-              'value': 1,
+              'value': 2,
               'caption': '''Do not allow any site to set local data'''
             },
           ],
           'supported_on': ['chrome.*:10-', 'chrome_os:0.11-'],
           'features': {'dynamic_refresh': 1},
-          'example_value': 0,
+          'example_value': 1,
           'id': 48,
           'caption': '''Default cookies setting''',
           'desc': '''Allows you to set whether websites are allowed to set local data. Setting local data can be either allowed for all websites or denied for all websites.''',
@@ -1062,18 +1114,18 @@
           'items': [
             {
               'name': 'AllowImages',
-              'value': 0,
+              'value': 1,
               'caption': '''Allow all sites to show all images'''
             },
             {
               'name': 'BlockImages',
-              'value': 1,
+              'value': 2,
               'caption': '''Do not allow any site to show images'''
             },
           ],
           'supported_on': ['chrome.*:10-', 'chrome_os:0.11-'],
           'features': {'dynamic_refresh': 1},
-          'example_value': 0,
+          'example_value': 1,
           'id': 49,
           'caption': '''Default images setting''',
           'desc': '''Allows you to set whether websites are allowed to display images. Displaying images can be either allowed for all websites or denied for all websites.''',
@@ -1084,18 +1136,18 @@
           'items': [
             {
               'name': 'AllowJavaScript',
-              'value': 0,
+              'value': 1,
               'caption': '''Allow all sites to run JavaScript'''
             },
             {
               'name': 'BlockJavaScript',
-              'value': 1,
+              'value': 2,
               'caption': '''Do not allow any site to run JavaScript'''
             },
           ],
           'supported_on': ['chrome.*:10-', 'chrome_os:0.11-'],
           'features': {'dynamic_refresh': 1},
-          'example_value': 0,
+          'example_value': 1,
           'id': 50,
           'caption': '''Default JavaScript setting''',
           'desc': '''Allows you to set whether websites are allowed to run JavaScript. Running JavaScript can be either allowed for all websites or denied for all websites.''',
@@ -1106,18 +1158,18 @@
           'items': [
             {
               'name': 'AllowPlugins',
-              'value': 0,
+              'value': 1,
               'caption': '''Allow all sites to automatically run plugins'''
             },
             {
               'name': 'BlockPlugins',
-              'value': 1,
+              'value': 2,
               'caption': '''Block all plugins'''
             },
           ],
           'supported_on': ['chrome.*:10-', 'chrome_os:0.11-'],
           'features': {'dynamic_refresh': 1},
-          'example_value': 0,
+          'example_value': 1,
           'id': 51,
           'caption': '''Default plugins setting''',
           'desc': '''Allows you to set whether websites are allowed to automatically run plugins. Automatically running plugins can be either allowed for all websites or denied for all websites.''',
@@ -1128,12 +1180,12 @@
           'items': [
             {
               'name': 'AllowPopups',
-              'value': 0,
+              'value': 1,
               'caption': '''Allow all sites to show pop-ups'''
             },
             {
               'name': 'BlockPopups',
-              'value': 1,
+              'value': 2,
               'caption': '''Do not allow any site to show popups'''
             },
           ],
@@ -1150,17 +1202,17 @@
           'items': [
             {
               'name': 'AllowNotifications',
-              'value': 0,
+              'value': 1,
               'caption': '''Allow sites to show desktop notifications'''
             },
             {
               'name': 'BlockNotifications',
-              'value': 1,
+              'value': 2,
               'caption': '''Do not allow any site to show desktop notifications'''
             },
             {
               'name': 'AskNotifications',
-              'value': 2,
+              'value': 3,
               'caption': '''Ask every time a site wants to show desktop notifications'''
             },
           ],
@@ -1177,17 +1229,17 @@
           'items': [
             {
               'name': 'AllowGeolocation',
-              'value': 0,
+              'value': 1,
               'caption': '''Allow sites to track the users' physical location'''
             },
             {
               'name': 'BlockGeolocation',
-              'value': 1,
+              'value': 2,
               'caption': '''Do not allow any site to track the users' physical location'''
             },
             {
               'name': 'AskGeolocation',
-              'value': 2,
+              'value': 3,
               'caption': '''Ask whenever a site wants to track the users' physical location'''
             },
           ],
@@ -1331,10 +1383,10 @@
       'features': {'dynamic_refresh': 1},
       'example_value': 3600000,
       'id': 56,
-      'caption': '''Policy refresh rate''',
-      'desc': '''Specifies the period in milliseconds at which the device management service is queried for policy information.
+      'caption': '''Refresh rate for user policy''',
+      'desc': '''Specifies the period in milliseconds at which the device management service is queried for user policy information.
 
-      Setting this policy overrides the default value of 3 hours. Valid values for this policy are in the range from 30 minutes to 1 day. Any values not in this range will be clamped to the respective boundary.''',
+      Setting this policy overrides the default value of 3 hours. Valid values for this policy are in the range from 1800000 (30 minutes) to 86400000 (1 day). Any values not in this range will be clamped to the respective boundary.''',
     },
     {
       'name': 'ChromeFrameRendererSettings',
@@ -1552,6 +1604,64 @@
       If you set this policy, <ph name="PRODUCT_NAME">$3<ex>Google Chrome Frame</ex></ph> will use the provided directory.''',
       'label': '''Set user data directory''',
     },
+    {
+      'name': 'DevicePolicyRefreshRate',
+      'type': 'int',
+      'supported_on': ['chrome_os:1.0-'],
+      'device_only': True,
+      'features': {'dynamic_refresh': 1},
+      'example_value': 3600000,
+      'id': 90,
+      'caption': '''Refresh rate for Device Policy''',
+      'desc': '''Specifies the period in milliseconds at which the device management service is queried for device policy information.
+
+      Setting this policy overrides the default value of 3 hours. Valid values for this policy are in the range from 1800000 (30 minutes) to 86400000 (1 day). Any values not in this range will be clamped to the respective boundary.''',
+    },
+    {
+      'name': 'ChromeOsReleaseChannel',
+      'type': 'string-enum',
+      'items': [
+        {
+          'name': 'StableChannel',
+          'value': 'stable-channel',
+          'caption': '''Stable channel'''
+        },
+        {
+          'name': 'BetaChannel',
+          'value': 'beta-channel',
+          'caption': '''Beta channel'''
+        },
+        {
+          'name': 'DevChannel',
+          'value': 'dev-channel',
+          'caption': '''Dev channel (may be unstable)'''
+        }
+      ],
+      'supported_on': ['chrome_os:1.0-'],
+      'device_only': True,
+      'features': {'dynamic_refresh': 1},
+      'example_value': 'stable-channel',
+      'id': 91,
+      'caption': '''Release channel''',
+      'desc': '''Specifies the release channel that this device should be locked to. This policy is a work in progress; currently, the user can still change the release channel even if it's specified by the policy.'''
+    },
+    {
+      'name': 'MaxConnectionsPerProxy',
+      'type': 'int',
+      'supported_on': ['chrome_os:1.0-','chrome.*:14-'],
+      'features': {'dynamic_refresh': 0},
+      'example_value': 32,
+      'id': 92,
+      'caption': '''Maximal number of concurrent connections to the proxy server''',
+      'desc': '''Specifies the maximal number of simultanious connections to the proxy server.
+
+      Some proxy servers can not handle high number of concurrent connections per client and this can be solved by setting this policy to a lower value.
+
+      The value of this policy should be lower than 100 and higher than 6 and the default value is 32.
+
+      Some web apps are known to consume many connections with hanging GETs, so lowering below 32 may lead to browser networking hangs if too many such web apps are open. Lower below the default at your own risk.''',
+    },
+
   ],
   'messages': {
     # Messages that are not associated to any policies.

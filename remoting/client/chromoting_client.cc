@@ -4,11 +4,12 @@
 
 #include "remoting/client/chromoting_client.h"
 
+#include "base/bind.h"
 #include "base/message_loop.h"
+#include "remoting/base/logger.h"
 #include "remoting/base/tracer.h"
 #include "remoting/client/chromoting_view.h"
 #include "remoting/client/client_context.h"
-#include "remoting/client/client_logger.h"
 #include "remoting/client/input_handler.h"
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/protocol/connection_to_host.h"
@@ -22,7 +23,7 @@ ChromotingClient::ChromotingClient(const ClientConfig& config,
                                    ChromotingView* view,
                                    RectangleUpdateDecoder* rectangle_decoder,
                                    InputHandler* input_handler,
-                                   ClientLogger* logger,
+                                   Logger* logger,
                                    Task* client_done)
     : config_(config),
       context_(context),
@@ -40,55 +41,39 @@ ChromotingClient::ChromotingClient(const ClientConfig& config,
 ChromotingClient::~ChromotingClient() {
 }
 
-void ChromotingClient::Start() {
+void ChromotingClient::Start(scoped_refptr<XmppProxy> xmpp_proxy) {
   if (message_loop() != MessageLoop::current()) {
     message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &ChromotingClient::Start));
+        NewRunnableMethod(this, &ChromotingClient::Start, xmpp_proxy));
     return;
   }
 
-  connection_->Connect(config_.username, config_.auth_token,
-                       config_.auth_service, config_.host_jid,
-                       config_.nonce, this, this, this);
+  connection_->Connect(xmpp_proxy, config_.local_jid, config_.host_jid,
+                       config_.host_public_key, config_.access_code,
+                       this, this, this);
 
   if (!view_->Initialize()) {
     ClientDone();
   }
 }
 
-void ChromotingClient::StartSandboxed(scoped_refptr<XmppProxy> xmpp_proxy,
-                                      const std::string& your_jid,
-                                      const std::string& host_jid) {
-  // TODO(ajwong): Merge this with Start(), and just change behavior based on
-  // ClientConfig.
+void ChromotingClient::Stop(const base::Closure& shutdown_task) {
   if (message_loop() != MessageLoop::current()) {
     message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &ChromotingClient::StartSandboxed, xmpp_proxy,
-                          your_jid, host_jid));
+        FROM_HERE, base::Bind(&ChromotingClient::Stop,
+                              base::Unretained(this), shutdown_task));
     return;
   }
 
-  connection_->ConnectSandboxed(xmpp_proxy, your_jid, host_jid, config_.nonce,
-                                this, this, this);
-
-  if (!view_->Initialize()) {
-    ClientDone();
-  }
+  connection_->Disconnect(base::Bind(&ChromotingClient::OnDisconnected,
+                                     base::Unretained(this), shutdown_task));
 }
 
-void ChromotingClient::Stop() {
-  if (message_loop() != MessageLoop::current()) {
-    message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &ChromotingClient::Stop));
-    return;
-  }
-
-  connection_->Disconnect();
-
+void ChromotingClient::OnDisconnected(const base::Closure& shutdown_task) {
   view_->TearDown();
+
+  shutdown_task.Run();
 }
 
 void ChromotingClient::ClientDone() {
@@ -112,18 +97,6 @@ void ChromotingClient::Repaint() {
   view_->Paint();
 }
 
-void ChromotingClient::SetViewport(int x, int y, int width, int height) {
-  if (message_loop() != MessageLoop::current()) {
-    message_loop()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &ChromotingClient::SetViewport,
-                          x, y, width, height));
-    return;
-  }
-
-  view_->SetViewport(x, y, width, height);
-}
-
 void ChromotingClient::ProcessVideoPacket(const VideoPacket* packet,
                                           Task* done) {
   if (message_loop() != MessageLoop::current()) {
@@ -131,6 +104,14 @@ void ChromotingClient::ProcessVideoPacket(const VideoPacket* packet,
         FROM_HERE,
         NewRunnableMethod(this, &ChromotingClient::ProcessVideoPacket,
                           packet, done));
+    return;
+  }
+
+  // If the video packet is empty then drop it. Empty packets are used to
+  // maintain activity on the network.
+  if (!packet->has_data() || packet->data().size() == 0) {
+    done->Run();
+    delete done;
     return;
   }
 
@@ -262,16 +243,6 @@ void ChromotingClient::Initialize() {
 
   const protocol::SessionConfig* config = connection_->config();
 
-  // Resize the window.
-  int width = config->initial_resolution().width;
-  int height = config->initial_resolution().height;
-  logger_->VLog(1, "Initial screen geometry: %dx%d", width, height);
-
-  // TODO(ajwong): What to do here?  Does the decoder actually need to request
-  // the right frame size?  This is mainly an optimization right?
-  // rectangle_decoder_->SetOutputFrameSize(width, height);
-  view_->SetViewport(0, 0, width, height);
-
   // Initialize the decoder.
   rectangle_decoder_->Initialize(config);
 
@@ -281,14 +252,6 @@ void ChromotingClient::Initialize() {
 
 ////////////////////////////////////////////////////////////////////////////
 // ClientStub control channel interface.
-void ChromotingClient::NotifyResolution(
-    const protocol::NotifyResolutionRequest* msg, Task* done) {
-  logger_->Log(logging::LOG_INFO, "NotifyResolution change");
-  NOTIMPLEMENTED();
-  done->Run();
-  delete done;
-}
-
 void ChromotingClient::BeginSessionResponse(
     const protocol::LocalLoginStatus* msg, Task* done) {
   if (message_loop() != MessageLoop::current()) {

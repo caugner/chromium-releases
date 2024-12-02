@@ -12,7 +12,6 @@
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
-class ListValue;
 class MockExternalPolicyExtensionProviderVisitor;
 class Profile;
 
@@ -26,7 +25,7 @@ class ExternalPolicyExtensionLoader
   explicit ExternalPolicyExtensionLoader(Profile* profile);
 
   // NotificationObserver implementation
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

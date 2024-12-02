@@ -15,8 +15,7 @@
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/version.h"
-#include "chrome/browser/debugger/devtools_manager.h"
-#include "chrome/browser/debugger/devtools_toggle_action.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_disabled_infobar_delegate.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
@@ -29,7 +28,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/url_pattern.h"
@@ -42,13 +43,14 @@
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -78,122 +80,80 @@ bool ShouldShowExtension(const Extension* extension) {
 
 }  // namespace
 
-////////////////////////////////////////////////////////////////////////////////
-//
-// ExtensionsHTMLSource
-//
-////////////////////////////////////////////////////////////////////////////////
+ChromeWebUIDataSource* CreateExtensionsUIHTMLSource() {
+  ChromeWebUIDataSource* source =
+      new ChromeWebUIDataSource(chrome::kChromeUIExtensionsHost);
 
-ExtensionsUIHTMLSource::ExtensionsUIHTMLSource()
-    : DataSource(chrome::kChromeUIExtensionsHost, MessageLoop::current()) {
-}
+  source->AddLocalizedString("title", IDS_EXTENSIONS_TITLE);
+  source->AddLocalizedString("devModeLink", IDS_EXTENSIONS_DEVELOPER_MODE_LINK);
+  source->AddLocalizedString("devModePrefix",
+                             IDS_EXTENSIONS_DEVELOPER_MODE_PREFIX);
+  source->AddLocalizedString("loadUnpackedButton",
+                             IDS_EXTENSIONS_LOAD_UNPACKED_BUTTON);
+  source->AddLocalizedString("packButton", IDS_EXTENSIONS_PACK_BUTTON);
+  source->AddLocalizedString("updateButton", IDS_EXTENSIONS_UPDATE_BUTTON);
+  source->AddLocalizedString("noExtensions", IDS_EXTENSIONS_NONE_INSTALLED);
+  source->AddLocalizedString("extensionCrashed",
+                             IDS_EXTENSIONS_CRASHED_EXTENSION);
+  source->AddLocalizedString("extensionDisabled",
+                             IDS_EXTENSIONS_DISABLED_EXTENSION);
+  source->AddLocalizedString("inDevelopment", IDS_EXTENSIONS_IN_DEVELOPMENT);
+  source->AddLocalizedString("viewIncognito", IDS_EXTENSIONS_VIEW_INCOGNITO);
+  source->AddLocalizedString("extensionId", IDS_EXTENSIONS_ID);
+  source->AddLocalizedString("extensionPath", IDS_EXTENSIONS_PATH);
+  source->AddLocalizedString("extensionVersion", IDS_EXTENSIONS_VERSION);
+  source->AddLocalizedString("inspectViews", IDS_EXTENSIONS_INSPECT_VIEWS);
+  source->AddLocalizedString("inspectPopupsInstructions",
+                             IDS_EXTENSIONS_INSPECT_POPUPS_INSTRUCTIONS);
+  source->AddLocalizedString("disable", IDS_EXTENSIONS_DISABLE);
+  source->AddLocalizedString("enable", IDS_EXTENSIONS_ENABLE);
+  source->AddLocalizedString("enableIncognito",
+                             IDS_EXTENSIONS_ENABLE_INCOGNITO);
+  source->AddLocalizedString("allowFileAccess",
+                             IDS_EXTENSIONS_ALLOW_FILE_ACCESS);
+  source->AddLocalizedString("reload", IDS_EXTENSIONS_RELOAD);
+  source->AddLocalizedString("uninstall", IDS_EXTENSIONS_UNINSTALL);
+  source->AddLocalizedString("options", IDS_EXTENSIONS_OPTIONS);
+  source->AddLocalizedString("policyControlled",
+                             IDS_EXTENSIONS_POLICY_CONTROLLED);
+  source->AddLocalizedString("packDialogTitle",
+                             IDS_EXTENSION_PACK_DIALOG_TITLE);
+  source->AddLocalizedString("packDialogHeading",
+                             IDS_EXTENSION_PACK_DIALOG_HEADING);
+  source->AddLocalizedString("rootDirectoryLabel",
+                             IDS_EXTENSION_PACK_DIALOG_ROOT_DIRECTORY_LABEL);
+  source->AddLocalizedString("packDialogBrowse",
+                             IDS_EXTENSION_PACK_DIALOG_BROWSE);
+  source->AddLocalizedString("privateKeyLabel",
+                             IDS_EXTENSION_PACK_DIALOG_PRIVATE_KEY_LABEL);
+  source->AddLocalizedString("okButton", IDS_OK);
+  source->AddLocalizedString("cancelButton", IDS_CANCEL);
+  source->AddLocalizedString("showButton", IDS_EXTENSIONS_SHOW_BUTTON);
 
-void ExtensionsUIHTMLSource::StartDataRequest(const std::string& path,
-    bool is_incognito, int request_id) {
-  DictionaryValue localized_strings;
-  localized_strings.SetString("title",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_TITLE));
-  localized_strings.SetString("devModeLink",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_DEVELOPER_MODE_LINK));
-  localized_strings.SetString("devModePrefix",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_DEVELOPER_MODE_PREFIX));
-  localized_strings.SetString("loadUnpackedButton",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_LOAD_UNPACKED_BUTTON));
-  localized_strings.SetString("packButton",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_PACK_BUTTON));
-  localized_strings.SetString("updateButton",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_UPDATE_BUTTON));
-  localized_strings.SetString("noExtensions",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_NONE_INSTALLED));
-  localized_strings.SetString("suggestGallery",
+  source->AddString("incognitoWarning",
+      l10n_util::GetStringFUTF16(IDS_EXTENSIONS_INCOGNITO_WARNING,
+                                 l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+
+  source->AddString("suggestGallery",
       l10n_util::GetStringFUTF16(IDS_EXTENSIONS_NONE_INSTALLED_SUGGEST_GALLERY,
           ASCIIToUTF16("<a href='") +
               ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
                   GURL(Extension::ChromeStoreLaunchURL())).spec()) +
               ASCIIToUTF16("'>"),
           ASCIIToUTF16("</a>")));
-  localized_strings.SetString("getMoreExtensions",
+
+  source->AddString("getMoreExtensions",
       ASCIIToUTF16("<a href='") +
       ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
           GURL(Extension::ChromeStoreLaunchURL())).spec()) +
       ASCIIToUTF16("'>") +
       l10n_util::GetStringUTF16(IDS_GET_MORE_EXTENSIONS) +
       ASCIIToUTF16("</a>"));
-  localized_strings.SetString("extensionCrashed",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_CRASHED_EXTENSION));
-  localized_strings.SetString("extensionDisabled",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLED_EXTENSION));
-  localized_strings.SetString("inDevelopment",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_IN_DEVELOPMENT));
-  localized_strings.SetString("viewIncognito",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_VIEW_INCOGNITO));
-  localized_strings.SetString("extensionId",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_ID));
-  localized_strings.SetString("extensionPath",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_PATH));
-  localized_strings.SetString("extensionVersion",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_VERSION));
-  localized_strings.SetString("inspectViews",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSPECT_VIEWS));
-  localized_strings.SetString("inspectPopupsInstructions",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSPECT_POPUPS_INSTRUCTIONS));
-  localized_strings.SetString("disable",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLE));
-  localized_strings.SetString("enable",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_ENABLE));
-  localized_strings.SetString("enableIncognito",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_ENABLE_INCOGNITO));
-  localized_strings.SetString("allowFileAccess",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_ALLOW_FILE_ACCESS));
-  localized_strings.SetString("incognitoWarning",
-      l10n_util::GetStringFUTF16(IDS_EXTENSIONS_INCOGNITO_WARNING,
-                                 l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
-  localized_strings.SetString("reload",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_RELOAD));
-  localized_strings.SetString("uninstall",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
-  localized_strings.SetString("options",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_OPTIONS));
-  localized_strings.SetString("policyControlled",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_POLICY_CONTROLLED));
-  localized_strings.SetString("packDialogTitle",
-      l10n_util::GetStringUTF16(IDS_EXTENSION_PACK_DIALOG_TITLE));
-  localized_strings.SetString("packDialogHeading",
-      l10n_util::GetStringUTF16(IDS_EXTENSION_PACK_DIALOG_HEADING));
-  localized_strings.SetString("rootDirectoryLabel",
-      l10n_util::GetStringUTF16(
-          IDS_EXTENSION_PACK_DIALOG_ROOT_DIRECTORY_LABEL));
-  localized_strings.SetString("packDialogBrowse",
-      l10n_util::GetStringUTF16(IDS_EXTENSION_PACK_DIALOG_BROWSE));
-  localized_strings.SetString("privateKeyLabel",
-      l10n_util::GetStringUTF16(IDS_EXTENSION_PACK_DIALOG_PRIVATE_KEY_LABEL));
-  localized_strings.SetString("okButton",
-      l10n_util::GetStringUTF16(IDS_OK));
-  localized_strings.SetString("cancelButton",
-      l10n_util::GetStringUTF16(IDS_CANCEL));
-  localized_strings.SetString("showButton",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_SHOW_BUTTON));
 
-  SetFontAndTextDirection(&localized_strings);
-
-  static const base::StringPiece extensions_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_EXTENSIONS_UI_HTML));
-  std::string full_html(extensions_html.data(), extensions_html.size());
-  jstemplate_builder::AppendJsonHtml(&localized_strings, &full_html);
-  jstemplate_builder::AppendI18nTemplateSourceHtml(&full_html);
-  jstemplate_builder::AppendI18nTemplateProcessHtml(&full_html);
-  jstemplate_builder::AppendJsTemplateSourceHtml(&full_html);
-
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
-}
-
-std::string ExtensionsUIHTMLSource::GetMimeType(const std::string&) const {
-  return "text/html";
+  source->set_json_path("strings.js");
+  source->add_resource_path("extensions_ui.js", IDR_EXTENSIONS_UI_JS);
+  source->set_default_resource(IDR_EXTENSIONS_UI_HTML);
+  return source;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -291,31 +251,31 @@ void ExtensionsDOMHandler::HandleRequestExtensionsData(const ListValue* args) {
 
 void ExtensionsDOMHandler::RegisterForNotifications() {
   // Register for notifications that we need to reload the page.
-  registrar_.Add(this, NotificationType::EXTENSION_LOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
       NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_PROCESS_CREATED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED,
       NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
       NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::EXTENSION_UPDATE_DISABLED,
-      NotificationService::AllSources());
-  registrar_.Add(this,
-      NotificationType::NAV_ENTRY_COMMITTED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
       NotificationService::AllSources());
   registrar_.Add(this,
-      NotificationType::RENDER_VIEW_HOST_CREATED,
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       NotificationService::AllSources());
   registrar_.Add(this,
-      NotificationType::RENDER_VIEW_HOST_DELETED,
+      content::NOTIFICATION_RENDER_VIEW_HOST_CREATED,
       NotificationService::AllSources());
   registrar_.Add(this,
-      NotificationType::BACKGROUND_CONTENTS_NAVIGATED,
+      content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
       NotificationService::AllSources());
   registrar_.Add(this,
-      NotificationType::BACKGROUND_CONTENTS_DELETED,
+      chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
       NotificationService::AllSources());
   registrar_.Add(this,
-      NotificationType::EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
+      chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
+      NotificationService::AllSources());
+  registrar_.Add(this,
+      chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
       NotificationService::AllSources());
 }
 
@@ -351,7 +311,7 @@ void ExtensionsDOMHandler::HandleInspectMessage(const ListValue* args) {
     return;
   }
 
-  DevToolsManager::GetInstance()->OpenDevToolsWindow(host);
+  DevToolsWindow::OpenDevToolsWindow(host);
 }
 
 void ExtensionsDOMHandler::HandleReloadMessage(const ListValue* args) {
@@ -618,10 +578,10 @@ void ExtensionsDOMHandler::MultiFilesSelected(
   NOTREACHED();
 }
 
-void ExtensionsDOMHandler::Observe(NotificationType type,
+void ExtensionsDOMHandler::Observe(int type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
-  switch (type.value) {
+  switch (type) {
     // We listen for notifications that will result in the page being
     // repopulated with data twice for the same event in certain cases.
     // For instance, EXTENSION_LOADED & EXTENSION_PROCESS_CREATED because
@@ -636,22 +596,22 @@ void ExtensionsDOMHandler::Observe(NotificationType type,
     //
     // Doing it this way gets everything but causes the page to be rendered
     // more than we need. It doesn't seem to result in any noticeable flicker.
-    case NotificationType::RENDER_VIEW_HOST_DELETED:
+    case content::NOTIFICATION_RENDER_VIEW_HOST_DELETED:
       deleting_rvh_ = Source<RenderViewHost>(source).ptr();
       MaybeUpdateAfterNotification();
       break;
-    case NotificationType::BACKGROUND_CONTENTS_DELETED:
+    case chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED:
       deleting_rvh_ = Details<BackgroundContents>(details)->render_view_host();
       MaybeUpdateAfterNotification();
       break;
-    case NotificationType::EXTENSION_LOADED:
-    case NotificationType::EXTENSION_PROCESS_CREATED:
-    case NotificationType::EXTENSION_UNLOADED:
-    case NotificationType::EXTENSION_UPDATE_DISABLED:
-    case NotificationType::RENDER_VIEW_HOST_CREATED:
-    case NotificationType::NAV_ENTRY_COMMITTED:
-    case NotificationType::BACKGROUND_CONTENTS_NAVIGATED:
-    case NotificationType::EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED:
+    case chrome::NOTIFICATION_EXTENSION_LOADED:
+    case chrome::NOTIFICATION_EXTENSION_PROCESS_CREATED:
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
+    case chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED:
+    case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED:
+    case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
+    case chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED:
+    case chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED:
       MaybeUpdateAfterNotification();
       break;
     default:
@@ -816,7 +776,7 @@ ExtensionsDOMHandler::~ExtensionsDOMHandler() {
 
 // ExtensionsDOMHandler, public: -----------------------------------------------
 
-ExtensionsUI::ExtensionsUI(TabContents* contents) : WebUI(contents) {
+ExtensionsUI::ExtensionsUI(TabContents* contents) : ChromeWebUI(contents) {
   ExtensionService *exstension_service =
       GetProfile()->GetOriginalProfile()->GetExtensionService();
 
@@ -824,10 +784,9 @@ ExtensionsUI::ExtensionsUI(TabContents* contents) : WebUI(contents) {
   AddMessageHandler(handler);
   handler->Attach(this);
 
-  ExtensionsUIHTMLSource* html_source = new ExtensionsUIHTMLSource();
-
   // Set up the chrome://extensions/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+      CreateExtensionsUIHTMLSource());
 }
 
 // static

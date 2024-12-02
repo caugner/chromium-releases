@@ -56,8 +56,8 @@ class RtpVideoWriterTest : public testing::Test {
   };
 
   virtual void SetUp() {
-    session_ = new FakeSession();
-    writer_.Init(session_);
+    session_.reset(new FakeSession());
+    writer_.Init(session_.get());
   }
 
   void InitData(int size) {
@@ -107,10 +107,11 @@ class RtpVideoWriterTest : public testing::Test {
     EXPECT_EQ(pos, static_cast<int>(data_.size()));
   }
 
-  scoped_refptr<FakeSession> session_;
+  MessageLoop message_loop_;
+
+  scoped_ptr<FakeSession> session_;
   RtpVideoWriter writer_;
 
-  MessageLoop message_loop_;
   vector<char> data_;
   VideoPacket* packet_;
 };

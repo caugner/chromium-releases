@@ -61,17 +61,17 @@ class CollectedCookiesUIDelegate : public HtmlDialogUIDelegate,
                            ContentSetting setting);
 
   // Notification Observer implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
   // JS callback to bind cookies tree models with JS trees.
-  void BindCookiesTreeModel(const ListValue* args);
+  void BindCookiesTreeModel(const base::ListValue* args);
 
   // JS callback to block/allow cookies from given site.
-  void Block(const ListValue* args);
-  void Allow(const ListValue* args);
-  void AllowThisSession(const ListValue* args);
+  void Block(const base::ListValue* args);
+  void Allow(const base::ListValue* args);
+  void AllowThisSession(const base::ListValue* args);
 
   NotificationRegistrar registrar_;
   TabContents* tab_contents_;

@@ -28,8 +28,8 @@
           'nacl/nacl_main_platform_delegate_linux.cc',
           'nacl/nacl_main_platform_delegate_mac.mm',
           'nacl/nacl_main_platform_delegate_win.cc',
-          'nacl/nacl_launcher_thread.cc',
-          'nacl/nacl_launcher_thread.h',
+          'nacl/nacl_listener.cc',
+          'nacl/nacl_listener.h',
         ],
         # TODO(gregoryd): consider switching NaCl to use Chrome OS defines
         'conditions': [
@@ -45,6 +45,9 @@
             'defines': [
               '__STDC_LIMIT_MACROS=1',
             ],
+            'sources': [
+              'nacl/nacl_fork_delegate_linux.cc',
+            ],
           },],
         ],
       }],
@@ -54,7 +57,6 @@
     {
       'target_name': 'nacl',
       'type': 'static_library',
-      'msvs_guid': '83E86DAF-5763-4711-AD34-5FDAE395560C',
       'variables': {
         'nacl_target': 1,
       },
@@ -68,7 +70,6 @@
         '../webkit/support/webkit_support.gyp:glue',
         '../native_client/src/trusted/plugin/plugin.gyp:ppGoogleNaClPluginChrome',
         '../native_client/src/trusted/service_runtime/service_runtime.gyp:sel',
-        '../native_client/src/trusted/validator_x86/validator_x86.gyp:ncvalidate',
         '../native_client/src/trusted/platform_qualify/platform_qualify.gyp:platform_qual_lib',
       ],
       'direct_dependent_settings': {
@@ -108,7 +109,6 @@
         {
           'target_name': 'nacl_win64',
           'type': 'static_library',
-          'msvs_guid': '14135464-9FB9-42E3-99D8-791116FA1204',
           'variables': {
             'nacl_target': 1,
           },
@@ -141,6 +141,30 @@
               '<@(nacl_defines)',
             ],
           },
+        },
+      ],
+    }],
+    ['OS=="linux" and touchui == 0', {
+      'targets': [
+        {
+          'target_name': 'nacl_helper',
+          'type': 'executable',
+          'include_dirs': [
+            '..',
+          ],
+          'dependencies': [
+            'nacl',
+          ],
+          'sources': [
+            '../chrome/nacl/nacl_helper_linux.cc',
+          ],
+          'conditions': [
+            ['toolkit_uses_gtk == 1', {
+              'dependencies': [
+                '../build/linux/system.gyp:gtk',
+              ],
+            }],
+          ],
         },
       ],
     }],

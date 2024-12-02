@@ -139,11 +139,11 @@ bool ExtensionContextMenuFunction::ParseURLPatterns(
     if (!(*i)->GetAsString(&tmp))
       return false;
 
-    URLPattern pattern(ExtensionMenuManager::kAllowedSchemes);
+    URLPattern pattern(URLPattern::SCHEME_ALL);
     // TODO(skerner):  Consider enabling strict pattern parsing
     // if this extension's location indicates that it is under development.
     if (URLPattern::PARSE_SUCCESS != pattern.Parse(tmp,
-                                                   URLPattern::PARSE_LENIENT)) {
+                                                   URLPattern::IGNORE_PORTS)) {
       error_ = ExtensionErrorUtils::FormatErrorMessage(kInvalidURLPatternError,
                                                        tmp);
       return false;

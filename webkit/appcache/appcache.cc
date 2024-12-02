@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,6 +68,15 @@ void AppCache::RemoveEntry(const GURL& url) {
 AppCacheEntry* AppCache::GetEntry(const GURL& url) {
   EntryMap::iterator it = entries_.find(url);
   return (it != entries_.end()) ? &(it->second) : NULL;
+}
+
+const AppCacheEntry* AppCache::GetEntryWithResponseId(int64 response_id) {
+  for (EntryMap::const_iterator iter = entries_.begin();
+       iter !=  entries_.end(); ++iter) {
+    if (iter->second.response_id() == response_id)
+      return &iter->second;
+  }
+  return NULL;
 }
 
 GURL AppCache::GetFallbackEntryUrl(const GURL& namespace_url) const {
@@ -229,6 +238,23 @@ FallbackNamespace* AppCache::FindFallbackNamespace(const GURL& url) {
     }
   }
   return NULL;
+}
+
+void AppCache::ToResourceInfoVector(AppCacheResourceInfoVector* infos) const {
+  DCHECK(infos && infos->empty());
+  for (EntryMap::const_iterator iter = entries_.begin();
+       iter !=  entries_.end(); ++iter) {
+    infos->push_back(AppCacheResourceInfo());
+    AppCacheResourceInfo& info = infos->back();
+    info.url = iter->first;
+    info.is_master = iter->second.IsMaster();
+    info.is_manifest = iter->second.IsManifest();
+    info.is_fallback = iter->second.IsFallback();
+    info.is_foreign = iter->second.IsForeign();
+    info.is_explicit = iter->second.IsExplicit();
+    info.size = iter->second.response_size();
+    info.response_id = iter->second.response_id();
+  }
 }
 
 // static

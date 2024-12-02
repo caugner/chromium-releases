@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 namespace remoting {
 namespace protocol {
 
-const int kDefaultStreamVersion = 1;
+const int kDefaultStreamVersion = 2;
 
 namespace {
 const int kDefaultWidth = 800;
@@ -89,7 +89,7 @@ SessionConfig* SessionConfig::CreateDefault() {
                                        ChannelConfig::CODEC_UNDEFINED));
   result->SetVideoConfig(ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                                        kDefaultStreamVersion,
-                                       ChannelConfig::CODEC_ZIP));
+                                       ChannelConfig::CODEC_VP8));
   return result;
 }
 
@@ -111,6 +111,7 @@ SessionConfig* CandidateSessionConfig::Select(
   ChannelConfig control_config;
   ChannelConfig event_config;
   ChannelConfig video_config;
+
   if (!SelectCommonChannelConfig(
           control_configs_, client_config->control_configs_, &control_config) ||
       !SelectCommonChannelConfig(
@@ -213,17 +214,8 @@ CandidateSessionConfig* CandidateSessionConfig::CreateDefault() {
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
                     kDefaultStreamVersion,
                     ChannelConfig::CODEC_UNDEFINED));
-
   result->mutable_video_configs()->push_back(
       ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
-                    kDefaultStreamVersion,
-                    ChannelConfig::CODEC_VP8));
-  result->mutable_video_configs()->push_back(
-      ChannelConfig(ChannelConfig::TRANSPORT_STREAM,
-                    kDefaultStreamVersion,
-                    ChannelConfig::CODEC_ZIP));
-  result->mutable_video_configs()->push_back(
-      ChannelConfig(ChannelConfig::TRANSPORT_SRTP,
                     kDefaultStreamVersion,
                     ChannelConfig::CODEC_VP8));
   return result;

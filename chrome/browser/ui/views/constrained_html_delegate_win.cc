@@ -11,7 +11,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/gfx/rect.h"
 #include "views/view.h"
-#include "views/window/window_delegate.h"
+#include "views/widget/widget_delegate.h"
 
 class ConstrainedHtmlDelegateWin : public TabContentsContainer,
                                    public ConstrainedHtmlUIDelegate,
@@ -23,25 +23,30 @@ class ConstrainedHtmlDelegateWin : public TabContentsContainer,
   ~ConstrainedHtmlDelegateWin();
 
   // ConstrainedHtmlUIDelegate interface.
-  virtual HtmlDialogUIDelegate* GetHtmlDialogUIDelegate();
-  virtual void OnDialogClose();
+  virtual HtmlDialogUIDelegate* GetHtmlDialogUIDelegate() OVERRIDE;
+  virtual void OnDialogClose() OVERRIDE;
 
-  // ConstrainedWindowDelegate (aka views::WindowDelegate) interface.
-  virtual bool CanResize() const { return true; }
+  // ConstrainedWindowDelegate (aka views::WidgetDelegate) interface.
+  virtual bool CanResize() const OVERRIDE { return true; }
   virtual views::View* GetContentsView() {
     return this;
   }
-  virtual void WindowClosing() {
+  virtual void WindowClosing() OVERRIDE {
     html_delegate_->OnWindowClosed();
     html_delegate_->OnDialogClosed("");
   }
+  virtual views::Widget* GetWidget() OVERRIDE {
+    return View::GetWidget();
+  }
+  virtual const views::Widget* GetWidget() const OVERRIDE {
+    return View::GetWidget();
+  }
 
   // HtmlDialogTabContentsDelegate interface.
-  void MoveContents(TabContents* source, const gfx::Rect& pos) {}
-  void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
+  void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) OVERRIDE {}
 
   // Overridden from TabContentsContainer.
-  virtual gfx::Size GetPreferredSize() {
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
     gfx::Size size;
     html_delegate_->GetDialogSize(&size);
     return size;
@@ -49,7 +54,7 @@ class ConstrainedHtmlDelegateWin : public TabContentsContainer,
 
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
-                                    views::View* child) {
+                                    views::View* child) OVERRIDE {
     TabContentsContainer::ViewHierarchyChanged(is_add, parent, child);
     if (is_add && child == this) {
       ChangeTabContents(&html_tab_contents_);

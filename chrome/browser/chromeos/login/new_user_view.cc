@@ -25,14 +25,15 @@
 #include "chrome/browser/chromeos/views/copy_background.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
 #include "views/controls/button/menu_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
 #include "views/controls/textfield/textfield.h"
@@ -235,7 +236,7 @@ void NewUserView::RecreatePeculiarControls() {
       ResourceBundle::GetSharedInstance().GetBitmapNamed(
           IDR_MENU_DROPARROW_SHARP));
   languages_menubutton_->SetEnabledColor(kLanguagesMenuTextColor);
-  languages_menubutton_->SetFocusable(true);
+  languages_menubutton_->set_focusable(true);
   languages_menubutton_->SetEnabled(!g_browser_process->local_state()->
       IsManagedPreference(prefs::kApplicationLocale));
 

@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file is auto-generated. DO NOT EDIT!
+// This file is auto-generated from
+// gpu/command_buffer/build_gles2_cmd_buffer.py
+// DO NOT EDIT!
 
 #ifndef GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_AUTOGEN_H_
 #define GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_AUTOGEN_H_
@@ -8911,74 +8913,6 @@ COMPILE_ASSERT(offsetof(RequestExtensionCHROMIUM, header) == 0,
 COMPILE_ASSERT(offsetof(RequestExtensionCHROMIUM, bucket_id) == 4,
                OffsetOf_RequestExtensionCHROMIUM_bucket_id_not_4);
 
-struct SetLatchCHROMIUM {
-  typedef SetLatchCHROMIUM ValueType;
-  static const CommandId kCmdId = kSetLatchCHROMIUM;
-  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
-
-  static uint32 ComputeSize() {
-    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
-  }
-
-  void SetHeader() {
-    header.SetCmd<ValueType>();
-  }
-
-  void Init(GLuint _latch_id) {
-    SetHeader();
-    latch_id = _latch_id;
-  }
-
-  void* Set(void* cmd, GLuint _latch_id) {
-    static_cast<ValueType*>(cmd)->Init(_latch_id);
-    return NextCmdAddress<ValueType>(cmd);
-  }
-
-  gpu::CommandHeader header;
-  uint32 latch_id;
-};
-
-COMPILE_ASSERT(sizeof(SetLatchCHROMIUM) == 8,
-               Sizeof_SetLatchCHROMIUM_is_not_8);
-COMPILE_ASSERT(offsetof(SetLatchCHROMIUM, header) == 0,
-               OffsetOf_SetLatchCHROMIUM_header_not_0);
-COMPILE_ASSERT(offsetof(SetLatchCHROMIUM, latch_id) == 4,
-               OffsetOf_SetLatchCHROMIUM_latch_id_not_4);
-
-struct WaitLatchCHROMIUM {
-  typedef WaitLatchCHROMIUM ValueType;
-  static const CommandId kCmdId = kWaitLatchCHROMIUM;
-  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
-
-  static uint32 ComputeSize() {
-    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
-  }
-
-  void SetHeader() {
-    header.SetCmd<ValueType>();
-  }
-
-  void Init(GLuint _latch_id) {
-    SetHeader();
-    latch_id = _latch_id;
-  }
-
-  void* Set(void* cmd, GLuint _latch_id) {
-    static_cast<ValueType*>(cmd)->Init(_latch_id);
-    return NextCmdAddress<ValueType>(cmd);
-  }
-
-  gpu::CommandHeader header;
-  uint32 latch_id;
-};
-
-COMPILE_ASSERT(sizeof(WaitLatchCHROMIUM) == 8,
-               Sizeof_WaitLatchCHROMIUM_is_not_8);
-COMPILE_ASSERT(offsetof(WaitLatchCHROMIUM, header) == 0,
-               OffsetOf_WaitLatchCHROMIUM_header_not_0);
-COMPILE_ASSERT(offsetof(WaitLatchCHROMIUM, latch_id) == 4,
-               OffsetOf_WaitLatchCHROMIUM_latch_id_not_4);
-
 struct SetSurfaceCHROMIUM {
   typedef SetSurfaceCHROMIUM ValueType;
   static const CommandId kCmdId = kSetSurfaceCHROMIUM;
@@ -9012,6 +8946,118 @@ COMPILE_ASSERT(offsetof(SetSurfaceCHROMIUM, header) == 0,
                OffsetOf_SetSurfaceCHROMIUM_header_not_0);
 COMPILE_ASSERT(offsetof(SetSurfaceCHROMIUM, surface_id) == 4,
                OffsetOf_SetSurfaceCHROMIUM_surface_id_not_4);
+
+struct GetMultipleIntegervCHROMIUM {
+  typedef GetMultipleIntegervCHROMIUM ValueType;
+  static const CommandId kCmdId = kGetMultipleIntegervCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(
+      uint32 _pnames_shm_id, uint32 _pnames_shm_offset, GLuint _count,
+      uint32 _results_shm_id, uint32 _results_shm_offset, GLsizeiptr _size) {
+    SetHeader();
+    pnames_shm_id = _pnames_shm_id;
+    pnames_shm_offset = _pnames_shm_offset;
+    count = _count;
+    results_shm_id = _results_shm_id;
+    results_shm_offset = _results_shm_offset;
+    size = _size;
+  }
+
+  void* Set(
+      void* cmd, uint32 _pnames_shm_id, uint32 _pnames_shm_offset,
+      GLuint _count, uint32 _results_shm_id, uint32 _results_shm_offset,
+      GLsizeiptr _size) {
+    static_cast<ValueType*>(
+        cmd)->Init(
+            _pnames_shm_id, _pnames_shm_offset, _count, _results_shm_id,
+            _results_shm_offset, _size);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 pnames_shm_id;
+  uint32 pnames_shm_offset;
+  uint32 count;
+  uint32 results_shm_id;
+  uint32 results_shm_offset;
+  int32 size;
+};
+
+COMPILE_ASSERT(sizeof(GetMultipleIntegervCHROMIUM) == 28,
+               Sizeof_GetMultipleIntegervCHROMIUM_is_not_28);
+COMPILE_ASSERT(offsetof(GetMultipleIntegervCHROMIUM, header) == 0,
+               OffsetOf_GetMultipleIntegervCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(GetMultipleIntegervCHROMIUM, pnames_shm_id) == 4,
+               OffsetOf_GetMultipleIntegervCHROMIUM_pnames_shm_id_not_4);
+COMPILE_ASSERT(offsetof(GetMultipleIntegervCHROMIUM, pnames_shm_offset) == 8,
+               OffsetOf_GetMultipleIntegervCHROMIUM_pnames_shm_offset_not_8);
+COMPILE_ASSERT(offsetof(GetMultipleIntegervCHROMIUM, count) == 12,
+               OffsetOf_GetMultipleIntegervCHROMIUM_count_not_12);
+COMPILE_ASSERT(offsetof(GetMultipleIntegervCHROMIUM, results_shm_id) == 16,
+               OffsetOf_GetMultipleIntegervCHROMIUM_results_shm_id_not_16);
+COMPILE_ASSERT(offsetof(GetMultipleIntegervCHROMIUM, results_shm_offset) == 20,
+               OffsetOf_GetMultipleIntegervCHROMIUM_results_shm_offset_not_20);
+COMPILE_ASSERT(offsetof(GetMultipleIntegervCHROMIUM, size) == 24,
+               OffsetOf_GetMultipleIntegervCHROMIUM_size_not_24);
+
+struct GetProgramInfoCHROMIUM {
+  typedef GetProgramInfoCHROMIUM ValueType;
+  static const CommandId kCmdId = kGetProgramInfoCHROMIUM;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+
+  struct Result {
+    uint32 link_status;
+    uint32 num_attribs;
+    uint32 num_uniforms;
+  };
+
+  static uint32 ComputeSize() {
+    return static_cast<uint32>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() {
+    header.SetCmd<ValueType>();
+  }
+
+  void Init(GLuint _program, uint32 _bucket_id) {
+    SetHeader();
+    program = _program;
+    bucket_id = _bucket_id;
+  }
+
+  void* Set(void* cmd, GLuint _program, uint32 _bucket_id) {
+    static_cast<ValueType*>(cmd)->Init(_program, _bucket_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32 program;
+  uint32 bucket_id;
+};
+
+COMPILE_ASSERT(sizeof(GetProgramInfoCHROMIUM) == 12,
+               Sizeof_GetProgramInfoCHROMIUM_is_not_12);
+COMPILE_ASSERT(offsetof(GetProgramInfoCHROMIUM, header) == 0,
+               OffsetOf_GetProgramInfoCHROMIUM_header_not_0);
+COMPILE_ASSERT(offsetof(GetProgramInfoCHROMIUM, program) == 4,
+               OffsetOf_GetProgramInfoCHROMIUM_program_not_4);
+COMPILE_ASSERT(offsetof(GetProgramInfoCHROMIUM, bucket_id) == 8,
+               OffsetOf_GetProgramInfoCHROMIUM_bucket_id_not_8);
+COMPILE_ASSERT(offsetof(GetProgramInfoCHROMIUM::Result, link_status) == 0,
+               OffsetOf_GetProgramInfoCHROMIUM_Result_link_status_not_0);
+COMPILE_ASSERT(offsetof(GetProgramInfoCHROMIUM::Result, num_attribs) == 4,
+               OffsetOf_GetProgramInfoCHROMIUM_Result_num_attribs_not_4);
+COMPILE_ASSERT(offsetof(GetProgramInfoCHROMIUM::Result, num_uniforms) == 8,
+               OffsetOf_GetProgramInfoCHROMIUM_Result_num_uniforms_not_8);
 
 
 #endif  // GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_AUTOGEN_H_

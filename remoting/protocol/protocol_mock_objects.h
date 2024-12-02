@@ -70,8 +70,6 @@ class MockHostStub : public HostStub {
   MockHostStub();
   ~MockHostStub();
 
-  MOCK_METHOD2(SuggestResolution, void(const SuggestResolutionRequest* msg,
-                                       Task* done));
   MOCK_METHOD2(BeginSessionRequest,
                void(const LocalLoginCredentials* credentials, Task* done));
 
@@ -112,6 +110,10 @@ class MockSession : public Session {
   virtual ~MockSession();
 
   MOCK_METHOD1(SetStateChangeCallback, void(StateChangeCallback* callback));
+  MOCK_METHOD2(CreateStreamChannel, void(
+      const std::string& name, const StreamChannelCallback& callback));
+  MOCK_METHOD2(CreateDatagramChannel, void(
+      const std::string& name, const DatagramChannelCallback& callback));
   MOCK_METHOD0(control_channel, net::Socket*());
   MOCK_METHOD0(event_channel, net::Socket*());
   MOCK_METHOD0(video_channel, net::Socket*());
@@ -126,7 +128,9 @@ class MockSession : public Session {
   MOCK_METHOD1(set_initiator_token, void(const std::string& initiator_token));
   MOCK_METHOD0(receiver_token, const std::string&());
   MOCK_METHOD1(set_receiver_token, void(const std::string& receiver_token));
-  MOCK_METHOD1(Close, void(Task* closed_task));
+  MOCK_METHOD1(set_shared_secret, void(const std::string& secret));
+  MOCK_METHOD0(shared_secret, const std::string&());
+  MOCK_METHOD0(Close, void());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSession);

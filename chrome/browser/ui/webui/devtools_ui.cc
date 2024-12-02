@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/devtools_ui.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/profiles/profile.h"
@@ -90,13 +91,14 @@ void DevToolsUI::RegisterDevToolsDataSource() {
   if (!registered) {
     DevToolsDataSource* data_source = new DevToolsDataSource();
     ChromeURLRequestContext* context = static_cast<ChromeURLRequestContext*>(
-        Profile::GetDefaultRequestContext()->GetURLRequestContext());
+        Profile::Deprecated::GetDefaultRequestContext()->
+        GetURLRequestContext());
     context->chrome_url_data_manager_backend()->AddDataSource(data_source);
     registered = true;
   }
 }
 
-DevToolsUI::DevToolsUI(TabContents* contents) : WebUI(contents) {
+DevToolsUI::DevToolsUI(TabContents* contents) : ChromeWebUI(contents) {
   DevToolsDataSource* data_source = new DevToolsDataSource();
   contents->profile()->GetChromeURLDataManager()->AddDataSource(data_source);
 }

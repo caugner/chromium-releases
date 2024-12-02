@@ -11,6 +11,7 @@
 
 #include "base/observer_list.h"
 #include "chrome/browser/ui/browser.h"
+#include "ui/gfx/native_widget_types.h"
 
 // Stores a list of all Browser objects.
 class BrowserList {
@@ -94,25 +95,54 @@ class BrowserList {
   // browser currently exists.
   static Browser* FindBrowserWithID(SessionID::id_type desired_id);
 
+  // Find the browser represented by |window| or NULL if not found.
+  static Browser* FindBrowserWithWindow(gfx::NativeWindow window);
+
   // Checks if the browser can be automatically restarted to install upgrades
   // The browser can be automatically restarted when:
   // 1. It's in the background mode (no visible windows).
   // 2. An update exe is present in the install folder.
   static bool CanRestartForUpdate();
 
-  // Called from Browser::Exit.
-  static void Exit();
+  // Starts a user initiated exit process. Called from Browser::Exit.
+  // On platforms other than ChromeOS, this is equivalent to
+  // CloseAllBrowsersAndExit. On ChromeOS, this tells session manager
+  // that chrome is signing out, which lets session manager send
+  // SIGTERM to start actual exit process.
+  static void AttemptUserExit();
 
-  // Closes all browsers and exits.  This is equivalent to
-  // CloseAllBrowsers(true) on platforms where the application exits when no
-  // more windows are remaining.  On other platforms (the Mac), this will
-  // additionally exit the application.
-  static void CloseAllBrowsersAndExit();
+  // Starts a user initiated restart process. On platforms other than
+  // chromeos, this sets a restart bit in the preference so that
+  // chrome will be restarted at the end of shutdown process. On
+  // ChromeOS, this simply exits the chrome, which lets sesssion
+  // manager re-launch the browser with restore last session flag.
+  static void AttemptRestart();
+
+  // Attempt to exit by closing all browsers.  This is equivalent to
+  // CloseAllBrowsers() on platforms where the application exits
+  // when no more windows are remaining. On other platforms (the Mac),
+  // this will additionally exit the application if all browsers are
+  // successfully closed.
+  //  Note that he exit process may be interrupted by download or
+  // unload handler, and the browser may or may not exit.
+  static void AttemptExit();
+
+#if defined(OS_CHROMEOS)
+  // This is equivalent to AttemptUserExit, except that it always set
+  // exit cleanly bit. ChroemOS checks if it can exit without user
+  // interactions, so it will always exit the browser.  This is used to
+  // handle SIGTERM on chromeos which is a signal to force shutdown
+  // the chrome.
+  static void ExitCleanly();
+#endif
 
   // Closes all browsers. If the session is ending the windows are closed
   // directly. Otherwise the windows are closed by way of posting a WM_CLOSE
   // message.
   static void CloseAllBrowsers();
+
+  // Closes all browsers for |profile|.
+  static void CloseAllBrowsersWithProfile(Profile* profile);
 
   // Begins shutdown of the application when the desktop session is ending.
   static void SessionEnding();
@@ -176,13 +206,7 @@ class BrowserList {
   // Helper method to remove a browser instance from a list of browsers
   static void RemoveBrowserFrom(Browser* browser, BrowserVector* browser_list);
   static void MarkAsCleanShutdown();
-#if defined(OS_CHROMEOS)
-  static bool NeedBeforeUnloadFired();
-  static bool PendingDownloads();
-  static void NotifyWindowManagerAboutSignout();
-
-  static bool signout_;
-#endif
+  static void AttemptExitInternal();
 
   static BrowserVector browsers_;
   static BrowserVector last_active_browsers_;

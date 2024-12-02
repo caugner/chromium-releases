@@ -4,7 +4,7 @@
 
 #include "views/examples/widget_example.h"
 
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/layout/box_layout.h"
 #include "views/layout/layout_manager.h"
 #include "views/view.h"
@@ -21,7 +21,7 @@ class CenterLayout : public views::LayoutManager {
 
   // Overridden from LayoutManager:
   virtual void Layout(views::View* host) {
-    views::View* child = host->GetChildViewAt(0);
+    views::View* child = host->child_at(0);
     gfx::Size size = child->GetPreferredSize();
     child->SetBounds((host->width() - size.width()) / 2,
                      (host->height() - size.height()) / 2,
@@ -81,8 +81,8 @@ void WidgetExample::InitWidget(views::Widget* widget, bool transparent) {
   views::TextButton* close_button = new views::TextButton(this, L"Close");
   close_button->set_tag(CLOSE_WIDGET);
   // TODO(oshima): support transparent native view.
-  views::NativeButton* native_button =
-      new views::NativeButton(this, L"Native Close");
+  views::NativeTextButton* native_button =
+      new views::NativeTextButton(this, L"Native Close");
   native_button->set_tag(CLOSE_WIDGET);
 
   views::View* button_container = new views::View();

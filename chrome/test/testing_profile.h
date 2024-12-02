@@ -11,6 +11,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/timer.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/browser/appcache/chrome_appcache_service.h"
 
 namespace content {
 class ResourceContextGetter;
@@ -44,7 +45,7 @@ class HostContentSettingsMap;
 class PrefService;
 class ProfileDependencyManager;
 class ProfileSyncService;
-class TemplateURLModel;
+class TemplateURLService;
 class TestingPrefService;
 class ThemeService;
 class WebKitContext;
@@ -112,16 +113,14 @@ class TestingProfile : public Profile {
   // Blocks until TopSites finishes loading.
   void BlockUntilTopSitesLoaded();
 
-  // Creates a TemplateURLModel. If not invoked the TemplateURLModel is NULL.
-  // Creates a TemplateURLFetcher. If not invoked, the TemplateURLFetcher is
-  // NULL.
+  // Creates a TemplateURLService. If not invoked the TemplateURLService is
+  // NULL.  Creates a TemplateURLFetcher. If not invoked, the
+  // TemplateURLFetcher is NULL.
   void CreateTemplateURLFetcher();
 
-  // Creates a TemplateURLModel. If not invoked, the TemplateURLModel is NULL.
-  void CreateTemplateURLModel();
-
-  // Sets the TemplateURLModel. Takes ownership of it.
-  void SetTemplateURLModel(TemplateURLModel* model);
+  // Creates a TemplateURLService. If not invoked, the TemplateURLService is
+  // NULL.
+  void CreateTemplateURLService();
 
   // Creates an ExtensionService initialized with the testing profile and
   // returns it. The profile keeps its own copy of a scoped_refptr to the
@@ -133,25 +132,18 @@ class TestingProfile : public Profile {
 
   TestingPrefService* GetTestingPrefService();
 
+  virtual TestingProfile* AsTestingProfile();
   virtual std::string GetProfileName();
-  virtual ProfileId GetRuntimeId();
-
   virtual FilePath GetPath();
-
-  // Sets whether we're incognito. Default is false.
-  void set_incognito(bool incognito) {
-    incognito_ = incognito;
-  }
+  void set_incognito(bool incognito) { incognito_ = incognito; }
   virtual bool IsOffTheRecord();
   // Assumes ownership.
   virtual void SetOffTheRecordProfile(Profile* profile);
   virtual Profile* GetOffTheRecordProfile();
-
   virtual void DestroyOffTheRecordProfile() {}
-
   virtual bool HasOffTheRecordProfile();
-
   virtual Profile* GetOriginalProfile();
+  void SetAppCacheService(ChromeAppCacheService* appcache_service);
   virtual ChromeAppCacheService* GetAppCacheService();
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker();
   virtual VisitedLinkMaster* GetVisitedLinkMaster();
@@ -161,6 +153,8 @@ class TestingProfile : public Profile {
   virtual ExtensionProcessManager* GetExtensionProcessManager();
   virtual ExtensionMessageService* GetExtensionMessageService();
   virtual ExtensionEventRouter* GetExtensionEventRouter();
+  void SetExtensionSpecialStoragePolicy(
+      ExtensionSpecialStoragePolicy* extension_special_storage_policy);
   virtual ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy();
   virtual SSLHostState* GetSSLHostState();
   virtual net::TransportSecurityState* GetTransportSecurityState();
@@ -172,6 +166,7 @@ class TestingProfile : public Profile {
   // for more information.
   net::CookieMonster* GetCookieMonster();
   virtual AutocompleteClassifier* GetAutocompleteClassifier();
+  virtual history::ShortcutsBackend* GetShortcutsBackend();
   virtual WebDataService* GetWebDataService(ServiceAccessType access);
   virtual WebDataService* GetWebDataServiceWithoutCreating();
   virtual PasswordStore* GetPasswordStore(ServiceAccessType access);
@@ -181,13 +176,13 @@ class TestingProfile : public Profile {
   // TestingPrefService takes ownership of |prefs|.
   void SetPrefService(PrefService* prefs);
   virtual PrefService* GetPrefs();
-  virtual TemplateURLModel* GetTemplateURLModel();
   virtual TemplateURLFetcher* GetTemplateURLFetcher();
   virtual history::TopSites* GetTopSites();
   virtual history::TopSites* GetTopSitesWithoutCreating();
   virtual DownloadManager* GetDownloadManager();
   virtual PersonalDataManager* GetPersonalDataManager();
   virtual fileapi::FileSystemContext* GetFileSystemContext();
+  virtual void SetQuotaManager(quota::QuotaManager* manager);
   virtual quota::QuotaManager* GetQuotaManager();
   virtual BrowserSignin* GetBrowserSignin();
   virtual bool HasCreatedDownloadManager() const;
@@ -247,7 +242,6 @@ class TestingProfile : public Profile {
   virtual void InitExtensions(bool extensions_enabled) {}
   virtual void InitPromoResources() {}
   virtual void InitRegisteredProtocolHandlers() {}
-  virtual NTPResourceCache* GetNTPResourceCache();
 
   virtual FilePath last_selected_directory();
   virtual void set_last_selected_directory(const FilePath& path);
@@ -334,11 +328,6 @@ class TestingProfile : public Profile {
   // invoked.
   scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
 
-  // The TemplateURLModel. Only created if CreateTemplateURLModel is invoked.
-  scoped_ptr<TemplateURLModel> template_url_model_;
-
-  scoped_ptr<NTPResourceCache> ntp_resource_cache_;
-
   // Internally, this is a TestURLRequestContextGetter that creates a dummy
   // request context. Currently, only the CookieMonster is hooked up.
   scoped_refptr<net::URLRequestContextGetter> request_context_;
@@ -400,20 +389,11 @@ class TestingProfile : public Profile {
   // death. Defaults to the Singleton implementation but overridable for
   // testing.
   ProfileDependencyManager* profile_dependency_manager_;
-};
 
-// A profile that derives from another profile.  This does not actually
-// override anything except the GetRuntimeId() in order to test sharing of
-// site information.
-class DerivedTestingProfile : public TestingProfile {
- public:
-  explicit DerivedTestingProfile(Profile* profile);
-  virtual ~DerivedTestingProfile();
+  scoped_refptr<ChromeAppCacheService> appcache_service_;
 
-  virtual ProfileId GetRuntimeId();
-
- protected:
-  Profile* original_profile_;
+  // The QuotaManager, only available if set explicitly via SetQuotaManager.
+  scoped_refptr<quota::QuotaManager> quota_manager_;
 };
 
 #endif  // CHROME_TEST_TESTING_PROFILE_H_

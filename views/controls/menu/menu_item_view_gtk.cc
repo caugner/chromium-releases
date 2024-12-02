@@ -5,7 +5,7 @@
 #include "views/controls/menu/menu_item_view.h"
 
 #include "base/utf_string_conversions.h"
-#include "grit/app_resources.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
@@ -35,10 +35,12 @@ gfx::Size MenuItemView::CalculatePreferredSize() {
 #else
   int height = font.GetHeight();
 #endif
+  gfx::Size child_size = GetChildPreferredSize();
   return gfx::Size(
       font.GetStringWidth(title_) + label_start_ +
-          item_right_margin_ + GetChildPreferredWidth(),
-      height + GetBottomMargin() + GetTopMargin());
+          item_right_margin_ + child_size.width(),
+      std::max(height, child_size.height()) + GetBottomMargin() +
+          GetTopMargin());
 }
 
 void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {

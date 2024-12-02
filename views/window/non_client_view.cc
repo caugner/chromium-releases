@@ -8,7 +8,6 @@
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 #include "views/window/client_view.h"
-#include "views/window/window.h"
 
 #if !defined(OS_WIN)
 #include "views/window/hit_test.h"
@@ -16,8 +15,14 @@
 
 namespace views {
 
+// static
 const int NonClientFrameView::kFrameShadowThickness = 1;
 const int NonClientFrameView::kClientEdgeThickness = 1;
+const char NonClientFrameView::kViewClassName[] =
+    "views/window/NonClientFrameView";
+
+const char NonClientView::kViewClassName[] =
+    "views/window/NonClientView";
 
 // The frame view and the client view are always at these specific indices,
 // because the RootView message dispatch sends messages to items higher in the
@@ -29,9 +34,8 @@ static const int kClientViewIndex = 1;
 ////////////////////////////////////////////////////////////////////////////////
 // NonClientView, public:
 
-NonClientView::NonClientView(Window* frame)
-    : frame_(frame),
-      client_view_(NULL) {
+NonClientView::NonClientView()
+    : client_view_(NULL) {
 }
 
 NonClientView::~NonClientView() {
@@ -55,15 +59,16 @@ bool NonClientView::CanClose() {
 }
 
 void NonClientView::WindowClosing() {
-  client_view_->WindowClosing();
+  client_view_->WidgetClosing();
 }
 
 void NonClientView::UpdateFrame() {
-  SetFrameView(frame_->CreateFrameViewForWindow());
-  GetWidget()->ThemeChanged();
+  Widget* widget = GetWidget();
+  SetFrameView(widget->CreateNonClientFrameView());
+  widget->ThemeChanged();
   Layout();
   SchedulePaint();
-  frame_->UpdateFrameAfterFrameChange();
+  widget->UpdateFrameAfterFrameChange();
 }
 
 void NonClientView::DisableInactiveRendering(bool disable) {
@@ -158,6 +163,10 @@ void NonClientView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->name = accessible_name_;
 }
 
+std::string NonClientView::GetClassName() const {
+  return kViewClassName;
+}
+
 views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
   // Because of the z-ordering of our child views (the client view is positioned
   // over the non-client frame view, if the client view ever overlaps the frame
@@ -180,7 +189,7 @@ views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
 bool NonClientFrameView::HitTest(const gfx::Point& l) const {
   // For the default case, we assume the non-client frame view never overlaps
   // the client view.
-  return !GetWindow()->client_view()->bounds().Contains(l);
+  return !GetWidget()->client_view()->bounds().Contains(l);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -236,11 +245,15 @@ int NonClientFrameView::GetHTComponentForFrame(const gfx::Point& point,
 }
 
 bool NonClientFrameView::ShouldPaintAsActive() const {
-  return GetWindow()->IsActive() || paint_as_active_;
+  return GetWidget()->IsActive() || paint_as_active_;
 }
 
 void NonClientFrameView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_WINDOW;
+}
+
+std::string NonClientFrameView::GetClassName() const {
+  return kViewClassName;
 }
 
 void NonClientFrameView::OnBoundsChanged(const gfx::Rect& previous_bounds) {

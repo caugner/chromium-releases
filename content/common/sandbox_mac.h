@@ -78,6 +78,9 @@ class Sandbox {
     // GPU process.
     SANDBOX_TYPE_GPU,
 
+    // The PPAPI plugin process.
+    SANDBOX_TYPE_PPAPI,
+
     SANDBOX_AFTER_TYPE_LAST_TYPE,  // Placeholder to ease iteration.
   };
 
@@ -170,7 +173,7 @@ class Sandbox {
 
   FRIEND_TEST(MacDirAccessSandboxTest, StringEscape);
   FRIEND_TEST(MacDirAccessSandboxTest, RegexEscape);
-  FRIEND_TEST(MacDirAccessSandboxTest, SandboxAccess);
+  FRIEND_TEST(MacDirAccessSandboxTest, DISABLED_SandboxAccess);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(Sandbox);
 };

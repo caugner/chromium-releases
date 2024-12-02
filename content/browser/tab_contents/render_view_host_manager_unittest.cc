@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/browser_url_handler.h"
 #include "chrome/test/test_notification_tracker.h"
 #include "chrome/test/testing_profile.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/browser_url_handler.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_controller.h"
@@ -185,7 +185,7 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
   SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
 
   TestTabContents tab_contents(profile_.get(), instance);
-  notifications.ListenFor(NotificationType::RENDER_VIEW_HOST_CHANGED,
+  notifications.ListenFor(content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
                      Source<NavigationController>(&tab_contents.controller()));
 
   // Create.
@@ -254,7 +254,7 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
 
   // We should observe a notification.
   EXPECT_TRUE(notifications.Check1AndReset(
-      NotificationType::RENDER_VIEW_HOST_CHANGED));
+      content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED));
 }
 
 // Tests WebUI creation.

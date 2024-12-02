@@ -35,6 +35,11 @@ GLvoid StubGLBindBuffer(GLenum target, GLuint buffer) {
   glBindBuffer(target, buffer);
 }
 
+GLvoid StubBindFragDataLocationIndexedARB(GLuint program, GLuint colorNumber,
+                                          GLuint index, const GLchar * name) {
+  glBindFragDataLocationIndexedARB(program, colorNumber, index, name);
+}
+
 GLvoid StubGLBindFramebuffer(GLenum target, GLuint framebuffer) {
   glBindFramebufferEXT(target, framebuffer);
 }
@@ -443,7 +448,7 @@ void BindSkiaToInProcessGL() {
     switch (gfx::GetGLImplementation()) {
       case gfx::kGLImplementationNone:
         NOTREACHED();
-        break;
+        return;
       case gfx::kGLImplementationDesktopGL:
         binding = kDesktop_GrGLBinding;
         break;
@@ -455,11 +460,19 @@ void BindSkiaToInProcessGL() {
         break;
       case gfx::kGLImplementationMockGL:
         NOTREACHED();
-        break;
+        return;
+      default:
+        NOTREACHED();
+        return;
     }
 
     static GrGLInterface host_gl_interface = {
       binding,
+
+      kProbe_GrGLCapability,   // NPOTRenderTargetSupport
+      kProbe_GrGLCapability,   // MinRenderTargetHeight
+      kProbe_GrGLCapability,   // MinRenderTargetWidth
+
       StubGLActiveTexture,
       StubGLAttachShader,
       StubGLBindAttribLocation,
@@ -566,7 +579,7 @@ void BindSkiaToInProcessGL() {
       NULL,  // glResolveMultisampleFramebuffer
       StubGLMapBuffer,
       StubGLUnmapBuffer,
-      NULL,  // glBindFragDataLocationIndexed
+      StubBindFragDataLocationIndexedARB,
       GrGLInterface::kStaticInitEndGuard,
     };
     GrGLSetGLInterface(&host_gl_interface);

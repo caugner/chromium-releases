@@ -20,6 +20,7 @@ class MessageReplyDeserializer;
 
 struct PrintMsg_Print_Params;
 struct PrintMsg_PrintPages_Params;
+struct PrintHostMsg_DidPreviewPage_Params;
 struct PrintHostMsg_ScriptedPrint_Params;
 
 // This class is very simple mock of RenderThread. It simulates an IPC channel
@@ -83,6 +84,9 @@ class MockRenderThread : public RenderThreadBase {
   // False if the user decides to cancel.
   void set_print_dialog_user_response(bool response);
 
+  // Get the number of pages to generate for print preview.
+  int print_preview_pages_remaining();
+
  private:
   // This function operates as a regular IPC listener.
   bool OnMessageReceived(const IPC::Message& msg);
@@ -121,6 +125,9 @@ class MockRenderThread : public RenderThreadBase {
 
   void OnDidGetPrintedPagesCount(int cookie, int number_pages);
   void OnDidPrintPage(const PrintHostMsg_DidPrintPage_Params& params);
+  void OnDidGetPreviewPageCount(int document_cookie, int number_pages,
+                                bool is_modifiable);
+  void OnDidPreviewPage(const PrintHostMsg_DidPreviewPage_Params& params);
 
   // For print preview, PrintWebViewHelper will update settings.
   void OnUpdatePrintSettings(int document_cookie,
@@ -147,6 +154,9 @@ class MockRenderThread : public RenderThreadBase {
 
   // True to simulate user clicking print. False to cancel.
   bool print_dialog_user_response_;
+
+  // Number of pages to generate for print preview.
+  int print_preview_pages_remaining_;
 };
 
 #endif  // CHROME_RENDERER_MOCK_RENDER_THREAD_H_

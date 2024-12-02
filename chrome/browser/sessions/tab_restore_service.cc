@@ -11,7 +11,7 @@
 #include "base/callback.h"
 #include "base/memory/scoped_vector.h"
 #include "base/metrics/histogram.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -428,7 +428,7 @@ void TabRestoreService::LoadTabsFromLastSession() {
       session_service) {
     // The previous session crashed and wasn't restored. Load the tabs/windows
     // that were open at the point of crash from the session service.
-    session_service->GetLastSession(&load_consumer_,
+    session_service->GetLastSession(&crash_consumer_,
         NewCallback(this, &TabRestoreService::OnGotPreviousSession));
   } else {
     load_state_ |= LOADED_LAST_SESSION;

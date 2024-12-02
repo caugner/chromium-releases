@@ -5,22 +5,61 @@
 #include "webkit/plugins/ppapi/resource_creation_impl.h"
 
 #include "ppapi/c/pp_size.h"
-#include "ppapi/shared_impl/font_impl.h"
+#include "ppapi/shared_impl/input_event_impl.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/ppb_audio_impl.h"
 #include "webkit/plugins/ppapi/ppb_broker_impl.h"
 #include "webkit/plugins/ppapi/ppb_buffer_impl.h"
+#include "webkit/plugins/ppapi/ppb_context_3d_impl.h"
 #include "webkit/plugins/ppapi/ppb_directory_reader_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_chooser_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_io_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_ref_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_system_impl.h"
+#include "webkit/plugins/ppapi/ppb_flash_menu_impl.h"
+#include "webkit/plugins/ppapi/ppb_flash_net_connector_impl.h"
 #include "webkit/plugins/ppapi/ppb_font_impl.h"
 #include "webkit/plugins/ppapi/ppb_graphics_2d_impl.h"
+#include "webkit/plugins/ppapi/ppb_graphics_3d_impl.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
+#include "webkit/plugins/ppapi/ppb_input_event_impl.h"
+#include "webkit/plugins/ppapi/ppb_scrollbar_impl.h"
+#include "webkit/plugins/ppapi/ppb_surface_3d_impl.h"
+#include "webkit/plugins/ppapi/ppb_transport_impl.h"
+#include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
+#include "webkit/plugins/ppapi/ppb_url_request_info_impl.h"
+#include "webkit/plugins/ppapi/ppb_video_decoder_impl.h"
+#include "webkit/plugins/ppapi/ppb_video_layer_impl.h"
+#include "webkit/plugins/ppapi/var.h"
+
+using ppapi::InputEventData;
 
 namespace webkit {
 namespace ppapi {
+
+namespace {
+
+// We use two methods for creating resources. When the resource initialization
+// is simple and can't fail, just do
+//   return ReturnResource(new PPB_Foo_Impl(instance_, ...));
+// This will set up everything necessary.
+//
+// If the resource is more complex, generally the best thing is to write a
+// static "Create" function on the resource class that returns a PP_Resource
+// or 0 on failure. That helps keep the resource-specific stuff localized and
+// this class very simple.
+PP_Resource ReturnResource(Resource* resource) {
+  // We actually have to keep a ref here since the argument will not be ref'ed
+  // at all if it was just passed in with new (the expected usage). The
+  // returned PP_Resource created by GetReference will hold onto a ref on
+  // behalf of the plugin which will outlive this function. So the end result
+  // will be a Resource with one ref.
+  scoped_refptr<Resource> ref(resource);
+  return resource->GetReference();
+}
+
+}  // namespace
+
 
 ResourceCreationImpl::ResourceCreationImpl(PluginInstance* instance)
     : instance_(instance) {
@@ -39,45 +78,48 @@ PP_Resource ResourceCreationImpl::CreateAudio(
     PP_Resource config_id,
     PPB_Audio_Callback audio_callback,
     void* user_data) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
-  if (!instance)
-    return 0;
-  scoped_refptr<PPB_Audio_Impl> audio(new PPB_Audio_Impl(instance));
-  if (!audio->Init(config_id, audio_callback, user_data))
-    return 0;
-  return audio->GetReference();
+  return PPB_Audio_Impl::Create(instance_, config_id, audio_callback,
+                                user_data);
 }
 
 PP_Resource ResourceCreationImpl::CreateAudioConfig(
     PP_Instance instance_id,
     PP_AudioSampleRate sample_rate,
     uint32_t sample_frame_count) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
-  if (!instance)
-    return 0;
-  scoped_refptr<PPB_AudioConfig_Impl> config(
-      new PPB_AudioConfig_Impl(instance));
-  if (!config->Init(sample_rate, sample_frame_count))
-    return 0;
-  return config->GetReference();
+  return PPB_AudioConfig_Impl::Create(instance_, sample_rate,
+                                       sample_frame_count);
 }
 
 PP_Resource ResourceCreationImpl::CreateAudioTrusted(
     PP_Instance instance_id) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
-  if (!instance)
-    return 0;
-  scoped_refptr<PPB_Audio_Impl> audio(new PPB_Audio_Impl(instance));
-  return audio->GetReference();
+  return ReturnResource(new PPB_Audio_Impl(instance_));
 }
 
 PP_Resource ResourceCreationImpl::CreateBroker(PP_Instance instance) {
-  return PPB_Broker_Impl::Create(instance);
+  return ReturnResource(new PPB_Broker_Impl(instance_));
 }
 
 PP_Resource ResourceCreationImpl::CreateBuffer(PP_Instance instance,
                                                uint32_t size) {
-  return PPB_Buffer_Impl::Create(instance, size);
+  return PPB_Buffer_Impl::Create(instance_, size);
+}
+
+PP_Resource ResourceCreationImpl::CreateContext3D(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  return PPB_Context3D_Impl::Create(instance, config, share_context,
+                                    attrib_list);
+}
+
+PP_Resource ResourceCreationImpl::CreateContext3DRaw(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  return PPB_Context3D_Impl::CreateRaw(instance, config, share_context,
+                                       attrib_list);
 }
 
 PP_Resource ResourceCreationImpl::CreateDirectoryReader(
@@ -88,11 +130,11 @@ PP_Resource ResourceCreationImpl::CreateDirectoryReader(
 PP_Resource ResourceCreationImpl::CreateFileChooser(
     PP_Instance instance,
     const PP_FileChooserOptions_Dev* options) {
-  return PPB_FileChooser_Impl::Create(instance, options);
+  return PPB_FileChooser_Impl::Create(instance_, options);
 }
 
 PP_Resource ResourceCreationImpl::CreateFileIO(PP_Instance instance) {
-  return PPB_FileIO_Impl::Create(instance);
+  return ReturnResource(new PPB_FileIO_Impl(instance_));
 }
 
 PP_Resource ResourceCreationImpl::CreateFileRef(PP_Resource file_system,
@@ -102,53 +144,170 @@ PP_Resource ResourceCreationImpl::CreateFileRef(PP_Resource file_system,
 
 PP_Resource ResourceCreationImpl::CreateFileSystem(
     PP_Instance instance,
-    PP_FileSystemType_Dev type) {
-  return PPB_FileSystem_Impl::Create(instance, type);
+    PP_FileSystemType type) {
+  return PPB_FileSystem_Impl::Create(instance_, type);
+}
+
+PP_Resource ResourceCreationImpl::CreateFlashMenu(
+    PP_Instance instance,
+    const PP_Flash_Menu* menu_data) {
+  return PPB_Flash_Menu_Impl::Create(instance_, menu_data);
+}
+
+PP_Resource ResourceCreationImpl::CreateFlashNetConnector(
+    PP_Instance instance) {
+  return ReturnResource(new PPB_Flash_NetConnector_Impl(instance_));
+}
+
+PP_Resource ResourceCreationImpl::CreateFlashTCPSocket(
+    PP_Instance instance) {
+  // Creating TCP socket resource at the renderer side is not supported.
+  return 0;
 }
 
 PP_Resource ResourceCreationImpl::CreateFontObject(
     PP_Instance pp_instance,
     const PP_FontDescription_Dev* description) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(pp_instance);
-  if (!instance)
-    return 0;
-
-  if (!::ppapi::FontImpl::IsPPFontDescriptionValid(*description))
-    return 0;
-
-  scoped_refptr<PPB_Font_Impl> font(new PPB_Font_Impl(instance, *description));
-  return font->GetReference();
+  return PPB_Font_Impl::Create(instance_, *description);
 }
 
 PP_Resource ResourceCreationImpl::CreateGraphics2D(
     PP_Instance pp_instance,
     const PP_Size& size,
     PP_Bool is_always_opaque) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(pp_instance);
-  if (!instance)
-    return 0;
+  return PPB_Graphics2D_Impl::Create(instance_, size, is_always_opaque);
+}
 
-  scoped_refptr<PPB_Graphics2D_Impl> graphics_2d(
-      new PPB_Graphics2D_Impl(instance));
-  if (!graphics_2d->Init(size.width, size.height,
-                         PPBoolToBool(is_always_opaque))) {
-    return 0;
-  }
-  return graphics_2d->GetReference();
+PP_Resource ResourceCreationImpl::CreateGraphics3D(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  return PPB_Graphics3D_Impl::Create(instance_, config, share_context,
+                                     attrib_list);
+}
+
+PP_Resource ResourceCreationImpl::CreateGraphics3DRaw(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    PP_Resource share_context,
+    const int32_t* attrib_list) {
+  return PPB_Graphics3D_Impl::CreateRaw(instance_, config, share_context,
+                                        attrib_list);
 }
 
 PP_Resource ResourceCreationImpl::CreateImageData(PP_Instance pp_instance,
                                                   PP_ImageDataFormat format,
                                                   const PP_Size& size,
                                                   PP_Bool init_to_zero) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(pp_instance);
-  if (!instance)
+  return PPB_ImageData_Impl::Create(instance_, format, size, init_to_zero);
+}
+
+PP_Resource ResourceCreationImpl::CreateKeyboardInputEvent(
+    PP_Instance instance,
+    PP_InputEvent_Type type,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    uint32_t key_code,
+    struct PP_Var character_text) {
+  if (type != PP_INPUTEVENT_TYPE_RAWKEYDOWN &&
+      type != PP_INPUTEVENT_TYPE_KEYDOWN &&
+      type != PP_INPUTEVENT_TYPE_KEYUP &&
+      type != PP_INPUTEVENT_TYPE_CHAR)
     return 0;
 
-  scoped_refptr<PPB_ImageData_Impl> data(new PPB_ImageData_Impl(instance));
-  if (!data->Init(format, size.width, size.height, !!init_to_zero))
+  InputEventData data;
+  data.event_type = type;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.key_code = key_code;
+  if (character_text.type == PP_VARTYPE_STRING) {
+    scoped_refptr<StringVar> string_var(StringVar::FromPPVar(character_text));
+    if (!string_var.get())
+      return 0;
+    data.character_text = string_var->value();
+  }
+
+  return PPB_InputEvent_Impl::Create(instance_, data);
+}
+
+PP_Resource ResourceCreationImpl::CreateMouseInputEvent(
+    PP_Instance instance,
+    PP_InputEvent_Type type,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    PP_InputEvent_MouseButton mouse_button,
+    const PP_Point* mouse_position,
+    int32_t click_count) {
+  if (type != PP_INPUTEVENT_TYPE_MOUSEDOWN &&
+      type != PP_INPUTEVENT_TYPE_MOUSEUP &&
+      type != PP_INPUTEVENT_TYPE_MOUSEMOVE &&
+      type != PP_INPUTEVENT_TYPE_MOUSEENTER &&
+      type != PP_INPUTEVENT_TYPE_MOUSELEAVE)
     return 0;
-  return data->GetReference();
+
+  InputEventData data;
+  data.event_type = type;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.mouse_button = mouse_button;
+  data.mouse_position = *mouse_position;
+  data.mouse_click_count = click_count;
+
+  return PPB_InputEvent_Impl::Create(instance_, data);
+}
+
+PP_Resource ResourceCreationImpl::CreateScrollbar(PP_Instance instance,
+                                                  PP_Bool vertical) {
+  return ReturnResource(new PPB_Scrollbar_Impl(instance_, PP_ToBool(vertical)));
+}
+
+PP_Resource ResourceCreationImpl::CreateSurface3D(
+    PP_Instance instance,
+    PP_Config3D_Dev config,
+    const int32_t* attrib_list) {
+  return PPB_Surface3D_Impl::Create(instance_, config, attrib_list);
+}
+
+PP_Resource ResourceCreationImpl::CreateTransport(PP_Instance instance,
+                                                  const char* name,
+                                                  const char* proto) {
+  return PPB_Transport_Impl::Create(instance_, name, proto);
+}
+
+PP_Resource ResourceCreationImpl::CreateURLLoader(PP_Instance instance) {
+  return ReturnResource(new PPB_URLLoader_Impl(instance_, false));
+}
+
+PP_Resource ResourceCreationImpl::CreateURLRequestInfo(PP_Instance instance) {
+  return ReturnResource(new PPB_URLRequestInfo_Impl(instance_));
+}
+
+PP_Resource ResourceCreationImpl::CreateVideoDecoder(PP_Instance instance) {
+  return ReturnResource(new PPB_VideoDecoder_Impl(instance_));
+}
+
+PP_Resource ResourceCreationImpl::CreateVideoLayer(PP_Instance instance,
+                                                   PP_VideoLayerMode_Dev mode) {
+  return PPB_VideoLayer_Impl::Create(instance_, mode);
+}
+
+PP_Resource ResourceCreationImpl::CreateWheelInputEvent(
+    PP_Instance instance,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    const PP_FloatPoint* wheel_delta,
+    const PP_FloatPoint* wheel_ticks,
+    PP_Bool scroll_by_page) {
+  InputEventData data;
+  data.event_type = PP_INPUTEVENT_TYPE_WHEEL;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.wheel_delta = *wheel_delta;
+  data.wheel_ticks = *wheel_ticks;
+  data.wheel_scroll_by_page = PP_ToBool(scroll_by_page);
+
+  return PPB_InputEvent_Impl::Create(instance_, data);
 }
 
 }  // namespace ppapi

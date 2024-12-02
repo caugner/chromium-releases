@@ -11,7 +11,9 @@
 #include "chrome/test/webdriver/commands/webelement_commands.h"
 #include "chrome/test/webdriver/web_element_id.h"
 
+namespace base {
 class DictionaryValue;
+}
 
 namespace gfx {
 class Point;
@@ -22,37 +24,16 @@ namespace webdriver {
 class Error;
 class Response;
 
-// Base class for the following API command classes.
-// - /session/:sessionId/element/:id/click
-// - /session/:sessionId/element/:id/hover
-// - /session/:sessionId/element/:id/drag
-class ElementMouseCommand : public WebElementCommand {
+// Click an element. See:
+// http://selenium.googlecode.com/svn/trunk/docs/api/java/org/openqa/selenium/WebElement.html#click()
+class MoveAndClickCommand : public WebElementCommand {
  public:
-  ElementMouseCommand(const std::vector<std::string>& path_segments,
-                      const DictionaryValue* const parameters);
-  virtual ~ElementMouseCommand();
+  MoveAndClickCommand(const std::vector<std::string>& path_segments,
+                      const base::DictionaryValue* const parameters);
+  virtual ~MoveAndClickCommand();
 
   virtual bool DoesPost();
   virtual void ExecutePost(Response* const response);
-  virtual Error* Action(const gfx::Point& location) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ElementMouseCommand);
-};
-
-// Click this element. If this causes a new page to load, this method will
-// block until the page has loaded. At this point, you should discard all
-// references to this element and any further operations performed on this
-// element will have undefined behaviour unless you know that the element
-// and the page will still be present. See:
-// http://selenium.googlecode.com/svn/trunk/docs/api/java/org/openqa/selenium/WebElement.html#click()
-class MoveAndClickCommand : public ElementMouseCommand {
- public:
-  MoveAndClickCommand(const std::vector<std::string>& path_segments,
-                      const DictionaryValue* const parameters);
-  virtual ~MoveAndClickCommand();
-
-  virtual Error* Action(const gfx::Point& location);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MoveAndClickCommand);
@@ -60,13 +41,14 @@ class MoveAndClickCommand : public ElementMouseCommand {
 
 // Move the mouse over an element. See:
 // http://code.google.com/p/selenium/wiki/JsonWireProtocol#/session/:sessionId/element/:id/hover
-class HoverCommand : public ElementMouseCommand {
+class HoverCommand : public WebElementCommand {
  public:
   HoverCommand(const std::vector<std::string>& path_segments,
-               const DictionaryValue* const parameters);
+               const base::DictionaryValue* const parameters);
   virtual ~HoverCommand();
 
-  virtual Error* Action(const gfx::Point& location);
+  virtual bool DoesPost();
+  virtual void ExecutePost(Response* const response);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HoverCommand);
@@ -75,14 +57,15 @@ class HoverCommand : public ElementMouseCommand {
 // Drag and drop an element. The distance to drag an element should be
 // specified relative to the upper-left corner of the page. See:
 // http://code.google.com/p/selenium/wiki/JsonWireProtocol#/session/:sessionId/element/:id/drag
-class DragCommand : public ElementMouseCommand {
+class DragCommand : public WebElementCommand {
  public:
   DragCommand(const std::vector<std::string>& path_segments,
-              const DictionaryValue* const parameters);
+              const base::DictionaryValue* const parameters);
   virtual ~DragCommand();
 
   virtual bool Init(Response* const response);
-  virtual Error* Action(const gfx::Point& location);
+  virtual bool DoesPost();
+  virtual void ExecutePost(Response* const response);
 
  private:
   int drag_x_, drag_y_;
@@ -99,7 +82,7 @@ class DragCommand : public ElementMouseCommand {
 class AdvancedMouseCommand : public WebDriverCommand {
  public:
   AdvancedMouseCommand(const std::vector<std::string>& path_segments,
-                       const DictionaryValue* const parameters);
+                       const base::DictionaryValue* const parameters);
   virtual ~AdvancedMouseCommand();
 
   virtual bool DoesPost();
@@ -116,7 +99,7 @@ class AdvancedMouseCommand : public WebDriverCommand {
 class MoveToCommand : public AdvancedMouseCommand {
  public:
   MoveToCommand(const std::vector<std::string>& path_segments,
-                const DictionaryValue* const parameters);
+                const base::DictionaryValue* const parameters);
   virtual ~MoveToCommand();
 
   virtual bool Init(Response* const response);
@@ -140,7 +123,7 @@ class MoveToCommand : public AdvancedMouseCommand {
 class ClickCommand : public AdvancedMouseCommand {
  public:
   ClickCommand(const std::vector<std::string>& path_segments,
-               const DictionaryValue* const parameters);
+               const base::DictionaryValue* const parameters);
   virtual ~ClickCommand();
 
   virtual bool Init(Response* const response);
@@ -160,7 +143,7 @@ class ClickCommand : public AdvancedMouseCommand {
 class ButtonDownCommand : public AdvancedMouseCommand {
  public:
   ButtonDownCommand(const std::vector<std::string>& path_segments,
-                    const DictionaryValue* const parameters);
+                    const base::DictionaryValue* const parameters);
   virtual ~ButtonDownCommand();
 
   virtual void ExecutePost(Response* const response);
@@ -176,7 +159,7 @@ class ButtonDownCommand : public AdvancedMouseCommand {
 class ButtonUpCommand : public AdvancedMouseCommand {
  public:
   ButtonUpCommand(const std::vector<std::string>& path_segments,
-                  const DictionaryValue* const parameters);
+                  const base::DictionaryValue* const parameters);
   virtual ~ButtonUpCommand();
 
   virtual void ExecutePost(Response* const response);
@@ -190,7 +173,7 @@ class ButtonUpCommand : public AdvancedMouseCommand {
 class DoubleClickCommand : public AdvancedMouseCommand {
  public:
   DoubleClickCommand(const std::vector<std::string>& ps,
-                     const DictionaryValue* const parameters);
+                     const base::DictionaryValue* const parameters);
   virtual ~DoubleClickCommand();
 
   virtual void ExecutePost(Response* const response);

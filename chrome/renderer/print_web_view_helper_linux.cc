@@ -25,55 +25,46 @@
 using WebKit::WebFrame;
 using WebKit::WebNode;
 
-bool PrintWebViewHelper::CreatePreviewDocument(
-    const PrintMsg_PrintPages_Params& params, WebKit::WebFrame* frame,
-    WebKit::WebNode* node) {
-  int page_count = 0;
-  printing::PreviewMetafile metafile;
-  if (!metafile.Init())
-    return false;
+void PrintWebViewHelper::RenderPreviewPage(int page_number) {
+  PrintMsg_PrintPage_Params page_params;
+  page_params.params = print_preview_context_.print_params();
+  page_params.page_number = page_number;
+  page_params.page_slot =
+      print_preview_context_.GetPageSlotForPage(page_number);
 
-  if (!RenderPages(params, frame, node, false, &page_count, &metafile, true))
-    return false;
+  base::TimeTicks begin_time = base::TimeTicks::Now();
+  PrintPageInternal(page_params,
+                    print_preview_context_.GetPrintCanvasSize(),
+                    print_preview_context_.frame(),
+                    print_preview_context_.metafile());
 
-
-  // Get the size of the resulting metafile.
-  uint32 buf_size = metafile.GetDataSize();
-  DCHECK_GT(buf_size, 0u);
-
-  PrintHostMsg_DidPreviewDocument_Params preview_params;
-  preview_params.data_size = buf_size;
-  preview_params.document_cookie = params.params.document_cookie;
-  preview_params.expected_pages_count = page_count;
-  preview_params.modifiable = IsModifiable(frame, node);
-
-  if (!CopyMetafileDataToSharedMem(&metafile,
-                                   &(preview_params.metafile_data_handle))) {
-    return false;
+  print_preview_context_.RenderedPreviewPage(
+      base::TimeTicks::Now() - begin_time);
+  scoped_ptr<printing::Metafile> page_metafile;
+  if (print_preview_context_.IsModifiable()) {
+    page_metafile.reset(reinterpret_cast<printing::PreviewMetafile*>(
+        print_preview_context_.metafile())->GetMetafileForCurrentPage());
   }
-  Send(new PrintHostMsg_PagesReadyForPreview(routing_id(), preview_params));
-  return true;
+  PreviewPageRendered(page_number, page_metafile.get());
 }
 
 bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
                                     WebFrame* frame,
-                                    WebNode* node) {
-  int page_count = 0;
-  bool send_expected_page_count =
-#if defined(OS_CHROMEOS)
-      false;
-#else
-      true;
-#endif  // defined(OS_CHROMEOS)
-
+                                    WebNode* node,
+                                    PrepareFrameAndViewForPrint* prepare) {
   printing::NativeMetafile metafile;
   if (!metafile.Init())
     return false;
 
-  if (!RenderPages(params, frame, node, send_expected_page_count, &page_count,
-                   &metafile, false)) {
-    return false;
+  scoped_ptr<PrepareFrameAndViewForPrint> prep_frame_view;
+  if (!prepare) {
+    prep_frame_view.reset(new PrepareFrameAndViewForPrint(params.params, frame,
+                                                          node));
+    prepare = prep_frame_view.get();
   }
+  int page_count = 0;
+  if (!RenderPages(params, frame, node, &page_count, prepare, &metafile))
+    return false;
 
   // Get the size of the resulting metafile.
   uint32 buf_size = metafile.GetDataSize();
@@ -146,59 +137,46 @@ bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
 bool PrintWebViewHelper::RenderPages(const PrintMsg_PrintPages_Params& params,
                                      WebKit::WebFrame* frame,
                                      WebKit::WebNode* node,
-                                     bool send_expected_page_count,
                                      int* page_count,
-                                     printing::Metafile* metafile,
-                                     bool is_preview) {
-  PrintMsg_Print_Params printParams = params.params;
+                                     PrepareFrameAndViewForPrint* prepare,
+                                     printing::Metafile* metafile) {
+  PrintMsg_Print_Params print_params = params.params;
+  UpdatePrintableSizeInPrintParameters(frame, node, prepare, &print_params);
 
-  UpdatePrintableSizeInPrintParameters(frame, node, &printParams);
-
-  PrepareFrameAndViewForPrint prep_frame_view(printParams, frame, node,
-                                              frame->view());
-  *page_count = prep_frame_view.GetExpectedPageCount();
-  if (send_expected_page_count) {
-    Send(new PrintHostMsg_DidGetPrintedPagesCount(routing_id(),
-                                                  printParams.document_cookie,
-                                                  *page_count));
-  }
+  *page_count = prepare->GetExpectedPageCount();
   if (!*page_count)
     return false;
+
+#if !defined(OS_CHROMEOS)
+    Send(new PrintHostMsg_DidGetPrintedPagesCount(routing_id(),
+                                                  print_params.document_cookie,
+                                                  *page_count));
+#endif
 
   base::TimeTicks begin_time = base::TimeTicks::Now();
   base::TimeTicks page_begin_time = begin_time;
 
   PrintMsg_PrintPage_Params page_params;
-  page_params.params = printParams;
-  const gfx::Size& canvas_size = prep_frame_view.GetPrintCanvasSize();
+  page_params.params = print_params;
+  const gfx::Size& canvas_size = prepare->GetPrintCanvasSize();
   if (params.pages.empty()) {
     for (int i = 0; i < *page_count; ++i) {
       page_params.page_number = i;
+      page_params.page_slot = i;
       PrintPageInternal(page_params, canvas_size, frame, metafile);
-      if (is_preview) {
-        page_begin_time = ReportPreviewPageRenderTime(page_begin_time);
-      }
     }
   } else {
     for (size_t i = 0; i < params.pages.size(); ++i) {
       page_params.page_number = params.pages[i];
+      page_params.page_slot = i;
       PrintPageInternal(page_params, canvas_size, frame, metafile);
-      if (is_preview) {
-        page_begin_time = ReportPreviewPageRenderTime(page_begin_time);
-      }
     }
   }
 
   base::TimeDelta render_time = base::TimeTicks::Now() - begin_time;
 
-  prep_frame_view.FinishPrinting();
+  prepare->FinishPrinting();
   metafile->FinishDocument();
-
-  if (is_preview) {
-    ReportTotalPreviewGenerationTime(params.pages.size(), *page_count,
-                                     render_time,
-                                     base::TimeTicks::Now() - begin_time);
-  }
   return true;
 }
 
@@ -207,32 +185,24 @@ void PrintWebViewHelper::PrintPageInternal(
     const gfx::Size& canvas_size,
     WebFrame* frame,
     printing::Metafile* metafile) {
-  double content_width_in_points;
-  double content_height_in_points;
-  double margin_top_in_points;
-  double margin_right_in_points;
-  double margin_bottom_in_points;
-  double margin_left_in_points;
-  GetPageSizeAndMarginsInPoints(frame,
-                                params.page_number,
-                                params.params,
-                                &content_width_in_points,
-                                &content_height_in_points,
-                                &margin_top_in_points,
-                                &margin_right_in_points,
-                                &margin_bottom_in_points,
-                                &margin_left_in_points);
+  PageSizeMargins page_layout_in_points;
+  GetPageSizeAndMarginsInPoints(frame, params.page_number, params.params,
+                                &page_layout_in_points);
 
   gfx::Size page_size(
-      content_width_in_points + margin_right_in_points +
-          margin_left_in_points,
-      content_height_in_points + margin_top_in_points +
-          margin_bottom_in_points);
-  gfx::Rect content_area(margin_left_in_points, margin_top_in_points,
-                         content_width_in_points, content_height_in_points);
+      page_layout_in_points.content_width +
+          page_layout_in_points.margin_right +
+          page_layout_in_points.margin_left,
+      page_layout_in_points.content_height +
+          page_layout_in_points.margin_top +
+          page_layout_in_points.margin_bottom);
+  gfx::Rect content_area(page_layout_in_points.margin_left,
+                         page_layout_in_points.margin_top,
+                         page_layout_in_points.content_width,
+                         page_layout_in_points.content_height);
 
   SkDevice* device = metafile->StartPageForVectorCanvas(
-      page_size, content_area, 1.0f);
+      params.page_slot, page_size, content_area, 1.0f);
   if (!device)
     return;
 

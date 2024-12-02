@@ -10,9 +10,12 @@
 
 #include "base/string_piece.h"
 
-class DictionaryValue;
 class FilePath;
-class RefCountedBytes;
+class RefCountedMemory;
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace chromeos {
 
@@ -28,8 +31,7 @@ class HTMLOperationsInterface {
 
   virtual base::StringPiece GetLoginHTML();
   virtual std::string GetFullHTML(base::StringPiece login_html,
-                                  DictionaryValue* localized_strings);
-  virtual RefCountedBytes* CreateHTMLBytes(std::string full_html);
+                                  base::DictionaryValue* localized_strings);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HTMLOperationsInterface);

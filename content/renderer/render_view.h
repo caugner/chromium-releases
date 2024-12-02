@@ -35,6 +35,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIconURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializerClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageVisibilityState.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
@@ -57,6 +58,7 @@ class FilePath;
 class GeolocationDispatcher;
 class GURL;
 class LoadProgressTracker;
+class MediaStreamImpl;
 class NavigationState;
 class NotificationProvider;
 class P2PSocketDispatcher;
@@ -167,6 +169,7 @@ typedef base::RefCountedData<int> SharedRenderViewCounter;
 class RenderView : public RenderWidget,
                    public WebKit::WebViewClient,
                    public WebKit::WebFrameClient,
+                   public WebKit::WebPageSerializerClient,
                    public webkit::npapi::WebPluginPageDelegate,
                    public base::SupportsWeakPtr<RenderView> {
  public:
@@ -179,7 +182,6 @@ class RenderView : public RenderWidget,
   static RenderView* Create(
       RenderThreadBase* render_thread,
       gfx::NativeViewId parent_hwnd,
-      gfx::PluginWindowHandle compositing_surface,
       int32 opener_id,
       const RendererPreferences& renderer_prefs,
       const WebPreferences& webkit_prefs,
@@ -208,11 +210,8 @@ class RenderView : public RenderWidget,
   void OnViewContextSwapBuffersAborted();
 
   int page_id() const { return page_id_; }
+  int history_list_offset() const { return history_list_offset_; }
   PepperPluginDelegateImpl* pepper_delegate() { return &pepper_delegate_; }
-
-  AudioMessageFilter* audio_message_filter() {
-    return audio_message_filter_;
-  }
 
   const WebPreferences& webkit_preferences() const {
     return webkit_preferences_;
@@ -310,6 +309,9 @@ class RenderView : public RenderWidget,
   // Informs the render view that a PPAPI plugin has gained or lost focus.
   void PpapiPluginFocusChanged();
 
+  // Request updated policy regarding firewall NAT traversal being enabled.
+  void RequestRemoteAccessClientFirewallTraversal();
+
 #if defined(OS_MACOSX)
   // Informs the render view that the given plugin has gained or lost focus.
   void PluginFocusChanged(bool focused, int plugin_id);
@@ -405,8 +407,6 @@ class RenderView : public RenderWidget,
   virtual void setStatusText(const WebKit::WebString& text);
   virtual void setMouseOverURL(const WebKit::WebURL& url);
   virtual void setKeyboardFocusURL(const WebKit::WebURL& url);
-  virtual void setToolTipText(const WebKit::WebString& text,
-                              WebKit::WebTextDirection hint);
   virtual void startDragging(const WebKit::WebDragData& data,
                              WebKit::WebDragOperationsMask mask,
                              const WebKit::WebImage& image,
@@ -457,6 +457,10 @@ class RenderView : public RenderWidget,
   virtual void loadURLExternally(WebKit::WebFrame* frame,
                                  const WebKit::WebURLRequest& request,
                                  WebKit::WebNavigationPolicy policy);
+  virtual void loadURLExternally(WebKit::WebFrame* frame,
+                                 const WebKit::WebURLRequest& request,
+                                 WebKit::WebNavigationPolicy policy,
+                                 const WebKit::WebString& suggested_name);
   virtual WebKit::WebNavigationPolicy decidePolicyForNavigation(
       WebKit::WebFrame* frame,
       const WebKit::WebURLRequest& request,
@@ -574,6 +578,13 @@ class RenderView : public RenderWidget,
       unsigned long long requested_size,
       WebKit::WebStorageQuotaCallbacks* callbacks);
 
+  // WebKit::WebPageSerializerClient implementation ----------------------------
+
+  virtual void didSerializeDataForFrame(
+      const WebKit::WebURL& frame_url,
+      const WebKit::WebCString& data,
+      PageSerializationStatus status) OVERRIDE;
+
   // webkit_glue::WebPluginPageDelegate implementation -------------------------
 
   virtual webkit::npapi::WebPluginDelegate* CreatePluginDelegate(
@@ -632,6 +643,7 @@ class RenderView : public RenderWidget,
   FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuRemoveTest, RemoveOnChange);
   FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuTest, NormalCase);
   FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuTest, ShowPopupThenNavigate);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, DontIgnoreBackAfterNavEntryLimit);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, ImeComposition);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, InsertCharacters);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, JSBlockSentAfterPageLoad);
@@ -640,10 +652,12 @@ class RenderView : public RenderWidget,
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnImeStateChanged);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnNavStateChanged);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnSetTextDirection);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, StaleNavigationsIgnored);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, UpdateTargetURLWithInvalidURL);
 #if defined(OS_MACOSX)
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, MacTestCmdUp);
 #endif
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, SetHistoryLengthAndPrune);
 
   typedef std::map<GURL, double> HostZoomLevels;
 
@@ -667,7 +681,6 @@ class RenderView : public RenderWidget,
 
   RenderView(RenderThreadBase* render_thread,
              gfx::NativeViewId parent_hwnd,
-             gfx::PluginWindowHandle compositing_surface,
              int32 opener_id,
              const RendererPreferences& renderer_prefs,
              const WebPreferences& webkit_prefs,
@@ -728,7 +741,7 @@ class RenderView : public RenderWidget,
                          int message_id);
   void OnPpapiBrokerChannelCreated(int request_id,
                                    base::ProcessHandle broker_process_handle,
-                                   IPC::ChannelHandle handle);
+                                   const IPC::ChannelHandle& handle);
   void OnCancelDownload(int32 download_id);
   void OnClearFocusedNode();
   void OnClosePage();
@@ -779,12 +792,16 @@ class RenderView : public RenderWidget,
   void OnFind(int request_id, const string16&, const WebKit::WebFindOptions&);
   void OnFindReplyAck();
   void OnEnableAccessibility();
+  void OnGetAllSavableResourceLinksForCurrentPage(const GURL& page_url);
+  void OnGetSerializedHtmlDataForCurrentPageWithLocalLinks(
+      const std::vector<GURL>& links,
+      const std::vector<FilePath>& local_paths,
+      const FilePath& local_directory_name);
   void OnInstallMissingPlugin();
   void OnMediaPlayerActionAt(const gfx::Point& location,
                              const WebKit::WebMediaPlayerAction& action);
   void OnMoveOrResizeStarted();
   void OnNavigate(const ViewMsg_Navigate_Params& params);
-  void OnNetworkStateChanged(bool online);
   void OnPaste();
 #if defined(OS_MACOSX)
   void OnPluginImeCompositionCompleted(const string16& text, int plugin_id);
@@ -805,6 +822,7 @@ class RenderView : public RenderWidget,
   void OnSetBackground(const SkBitmap& background);
   void OnSetWebUIProperty(const std::string& name, const std::string& value);
   void OnSetEditCommandsForNextKeyEvent(const EditCommands& edit_commands);
+  void OnSetHistoryLengthAndPrune(int history_length, int32 minimum_page_id);
   void OnSetInitialFocus(bool reverse);
 #if defined(OS_MACOSX)
   void OnSetInLiveResize(bool in_live_resize);
@@ -825,6 +843,8 @@ class RenderView : public RenderWidget,
   void OnUndo();
   void OnUpdateTargetURLAck();
   void OnUpdateWebPreferences(const WebPreferences& prefs);
+  void OnUpdateRemoteAccessClientFirewallTraversal(const std::string& policy);
+
 #if defined(OS_MACOSX)
   void OnWindowFrameChanged(const gfx::Rect& window_frame,
                             const gfx::Rect& view_frame);
@@ -869,6 +889,11 @@ class RenderView : public RenderWidget,
 
   // Should only be called if this object wraps a PluginDocument.
   WebKit::WebPlugin* GetWebPluginFromPluginDocument();
+
+  // Returns true if the |params| navigation is to an entry that has been
+  // cropped due to a recent navigation the browser did not know about.
+  bool IsBackForwardToStaleEntry(const ViewMsg_Navigate_Params& params,
+                                 bool is_reload);
 
   // Returns false unless this is a top-level navigation that crosses origins.
   bool IsNonLocalTopLevelNavigation(const GURL& url,
@@ -989,16 +1014,26 @@ class RenderView : public RenderWidget,
   // globally unique in the renderer.
   static int32 next_page_id_;
 
+  // The offset of the current item in the history list.
+  int history_list_offset_;
+
+  // The RenderView's current impression of the history length.  This includes
+  // any items that have committed in this process, but because of cross-process
+  // navigations, the history may have some entries that were committed in other
+  // processes.  We won't know about them until the next navigation in this
+  // process.
+  int history_list_length_;
+
+  // The list of page IDs for each history item this RenderView knows about.
+  // Some entries may be -1 if they were rendered by other processes or were
+  // restored from a previous session.  This lets us detect attempts to
+  // navigate to stale entries that have been cropped from our history.
+  std::vector<int32> history_page_ids_;
+
   // Page info -----------------------------------------------------------------
 
   // The last gotten main frame's encoding.
   std::string last_encoding_name_;
-
-  int history_list_offset_;
-  int history_list_length_;
-
-  // True if the page has any frame-level unload or beforeunload listeners.
-  bool has_unload_listener_;
 
   // UI state ------------------------------------------------------------------
 
@@ -1086,7 +1121,8 @@ class RenderView : public RenderWidget,
   // Device orientation dispatcher attached to this view; lazily initialized.
   DeviceOrientationDispatcher* device_orientation_dispatcher_;
 
-  scoped_refptr<AudioMessageFilter> audio_message_filter_;
+  // MediaStreamImpl attached to this view; lazily initialized.
+  scoped_refptr<MediaStreamImpl> media_stream_impl_;
 
   // Handles accessibility requests into the renderer side, as well as
   // maintains the cache and other features of the accessibility tree.

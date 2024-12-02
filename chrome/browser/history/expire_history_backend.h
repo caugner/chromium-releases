@@ -19,7 +19,6 @@
 
 class BookmarkService;
 class GURL;
-class NotificationType;
 class TestingProfile;
 
 namespace history {
@@ -35,7 +34,7 @@ class BroadcastNotificationDelegate {
  public:
   // Schedules a broadcast of the given notification on the application main
   // thread. The details argument will have ownership taken by this function.
-  virtual void BroadcastNotifications(NotificationType type,
+  virtual void BroadcastNotifications(int type,
                                       HistoryDetails* details_deleted) = 0;
 
  protected:
@@ -87,6 +86,10 @@ class ExpireHistoryBackend {
   // time range, updating the URLs accordingly,
   void ExpireHistoryBetween(const std::set<GURL>& restrict_urls,
                             base::Time begin_time, base::Time end_time);
+
+  // Removes the given list of visits, updating the URLs accordingly (similar to
+  // ExpireHistoryBetween(), but affecting a specific set of visits).
+  void ExpireVisits(const VisitVector& visits);
 
   // Archives all visits before and including the given time, updating the URLs
   // accordingly. This function is intended for migrating old databases

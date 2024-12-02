@@ -16,6 +16,7 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_content_client.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
@@ -70,10 +71,10 @@ void PluginUpdater::EnablePlugin(bool enable,
   NotifyPluginStatusChanged();
 }
 
-void PluginUpdater::Observe(NotificationType type,
+void PluginUpdater::Observe(int type,
                             const NotificationSource& source,
                             const NotificationDetails& details) {
-  DCHECK_EQ(NotificationType::PREF_CHANGED, type.value);
+  DCHECK_EQ(chrome::NOTIFICATION_PREF_CHANGED, type);
   const std::string* pref_name = Details<std::string>(details).ptr();
   if (!pref_name) {
     NOTREACHED();
@@ -157,7 +158,7 @@ void PluginUpdater::SetProfile(Profile* profile) {
   {  // Scoped update of prefs::kPluginsPluginsList.
     ListPrefUpdate update(profile->GetPrefs(), prefs::kPluginsPluginsList);
     ListValue* saved_plugins_list = update.Get();
-    if (saved_plugins_list) {
+    if (saved_plugins_list && !saved_plugins_list->empty()) {
       for (ListValue::const_iterator it = saved_plugins_list->begin();
            it != saved_plugins_list->end();
            ++it) {
@@ -168,8 +169,9 @@ void PluginUpdater::SetProfile(Profile* profile) {
 
         DictionaryValue* plugin = static_cast<DictionaryValue*>(*it);
         string16 group_name;
-        bool enabled = true;
-        plugin->GetBoolean("enabled", &enabled);
+        bool enabled;
+        if (!plugin->GetBoolean("enabled", &enabled))
+          enabled = true;
 
         FilePath::StringType path;
         // The plugin list constains all the plugin files in addition to the
@@ -208,6 +210,11 @@ void PluginUpdater::SetProfile(Profile* profile) {
           EnablePluginGroup(false, group_name);
         }
       }
+    } else {
+      // If the saved plugin list is empty, then the call to UpdatePreferences()
+      // below failed in an earlier run, possibly because the user closed the
+      // browser too quickly. Try to force enable the internal PDF plugin again.
+      force_enable_internal_pdf = true;
     }
   }  // Scoped update of prefs::kPluginsPluginsList.
 
@@ -294,8 +301,6 @@ void PluginUpdater::OnUpdatePreferences(
               webkit::npapi::WebPluginInfo::USER_ENABLED;
       summary->SetBoolean("enabled", user_enabled);
     }
-    bool enabled_val;
-    summary->GetBoolean("enabled", &enabled_val);
     plugins_list->Append(summary);
   }
 
@@ -324,7 +329,7 @@ void PluginUpdater::NotifyPluginStatusChanged() {
 void PluginUpdater::OnNotifyPluginStatusChanged() {
   GetInstance()->notify_pending_ = false;
   NotificationService::current()->Notify(
-      NotificationType::PLUGIN_ENABLE_STATUS_CHANGED,
+      content::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
       Source<PluginUpdater>(GetInstance()),
       NotificationService::NoDetails());
 }

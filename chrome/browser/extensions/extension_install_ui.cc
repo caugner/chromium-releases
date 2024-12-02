@@ -24,7 +24,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/web_ui_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -71,7 +71,8 @@ void ShowAppInstalledAnimation(Browser* browser, const std::string& app_id) {
   // automatically show the install animation for any new apps.
   for (int i = 0; i < browser->tab_count(); ++i) {
     GURL url = browser->GetTabContentsAt(i)->GetURL();
-    if (web_ui_util::ChromeURLHostEquals(url, chrome::kChromeUINewTabHost)) {
+    if (url.SchemeIs(chrome::kChromeUIScheme) &&
+        url.host() == chrome::kChromeUINewTabHost) {
       browser->ActivateTabAt(i, false);
       return;
     }
@@ -197,7 +198,7 @@ void ExtensionInstallUI::OnImageLoaded(
       // TODO(jcivelli): http://crbug.com/44771 We should not show an install
       //                 dialog when installing an app from the gallery.
       NotificationService* service = NotificationService::current();
-      service->Notify(NotificationType::EXTENSION_WILL_SHOW_CONFIRM_DIALOG,
+      service->Notify(chrome::NOTIFICATION_EXTENSION_WILL_SHOW_CONFIRM_DIALOG,
           Source<ExtensionInstallUI>(this),
           NotificationService::NoDetails());
 

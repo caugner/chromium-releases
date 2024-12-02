@@ -18,7 +18,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/options/about_page_handler.h"
 #include "chrome/browser/ui/webui/options/advanced_options_handler.h"
 #include "chrome/browser/ui/webui/options/autofill_options_handler.h"
 #include "chrome/browser/ui/webui/options/browser_options_handler.h"
@@ -30,11 +29,12 @@
 #include "chrome/browser/ui/webui/options/font_settings_handler.h"
 #include "chrome/browser/ui/webui/options/import_data_handler.h"
 #include "chrome/browser/ui/webui/options/language_options_handler.h"
+#include "chrome/browser/ui/webui/options/manage_profile_handler.h"
+#include "chrome/browser/ui/webui/options/options_sync_setup_handler.h"
 #include "chrome/browser/ui/webui/options/password_manager_handler.h"
 #include "chrome/browser/ui/webui/options/personal_options_handler.h"
 #include "chrome/browser/ui/webui/options/search_engine_manager_handler.h"
 #include "chrome/browser/ui/webui/options/stop_syncing_handler.h"
-#include "chrome/browser/ui/webui/options/sync_setup_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
@@ -44,16 +44,18 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_type.h"
+#include "content/common/content_notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/options_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/escape.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/webui/options/chromeos/about_page_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/accounts_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/change_picture_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/core_chromeos_options_handler.h"
@@ -114,35 +116,22 @@ OptionsUIHTMLSource::~OptionsUIHTMLSource() {}
 void OptionsUIHTMLSource::StartDataRequest(const std::string& path,
                                            bool is_incognito,
                                            int request_id) {
-  scoped_refptr<RefCountedBytes> response_bytes(new RefCountedBytes);
+  scoped_refptr<RefCountedMemory> response_bytes;
   SetFontAndTextDirection(localized_strings_.get());
 
   if (path == kLocalizedStringsFile) {
     // Return dynamically-generated strings from memory.
-    std::string template_data;
-    jstemplate_builder::AppendJsonJS(localized_strings_.get(), &template_data);
-    response_bytes->data.resize(template_data.size());
-    std::copy(template_data.begin(),
-              template_data.end(),
-              response_bytes->data.begin());
+    std::string strings_js;
+    jstemplate_builder::AppendJsonJS(localized_strings_.get(), &strings_js);
+    response_bytes = base::RefCountedString::TakeString(&strings_js);
   } else if (path == kOptionsBundleJsFile) {
     // Return (and cache) the options javascript code.
-    static const base::StringPiece options_javascript(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-            IDR_OPTIONS_BUNDLE_JS));
-    response_bytes->data.resize(options_javascript.size());
-    std::copy(options_javascript.begin(),
-              options_javascript.end(),
-              response_bytes->data.begin());
+    response_bytes = ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
+        IDR_OPTIONS_BUNDLE_JS);
   } else {
     // Return (and cache) the main options html page as the default.
-    static const base::StringPiece options_html(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-            IDR_OPTIONS_HTML));
-    response_bytes->data.resize(options_html.size());
-    std::copy(options_html.begin(),
-              options_html.end(),
-              response_bytes->data.begin());
+    response_bytes = ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
+        IDR_OPTIONS_HTML);
   }
 
   SendResponse(request_id, response_bytes);
@@ -205,7 +194,8 @@ void OptionsPageUIHandler::RegisterTitle(DictionaryValue* localized_strings,
 ////////////////////////////////////////////////////////////////////////////////
 
 OptionsUI::OptionsUI(TabContents* contents)
-    : WebUI(contents), initialized_handlers_(false) {
+    : ChromeWebUI(contents),
+      initialized_handlers_(false) {
   DictionaryValue* localized_strings = new DictionaryValue();
 
   CoreOptionsHandler* core_handler;
@@ -230,14 +220,16 @@ OptionsUI::OptionsUI(TabContents* contents)
 #else
   AddOptionsPageUIHandler(localized_strings, new LanguageOptionsHandler());
 #endif
+  AddOptionsPageUIHandler(localized_strings, new ManageProfileHandler());
   AddOptionsPageUIHandler(localized_strings, new PasswordManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new PersonalOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new SearchEngineManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new ImportDataHandler());
   AddOptionsPageUIHandler(localized_strings, new StopSyncingHandler());
-  AddOptionsPageUIHandler(localized_strings, new SyncSetupHandler());
+  AddOptionsPageUIHandler(localized_strings, new OptionsSyncSetupHandler());
 #if defined(OS_CHROMEOS)
-  AddOptionsPageUIHandler(localized_strings, new AboutPageHandler());
+  AddOptionsPageUIHandler(localized_strings,
+                          new chromeos::AboutPageHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::AccountsOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new InternetOptionsHandler());
@@ -281,10 +273,6 @@ OptionsUI::OptionsUI(TabContents* contents)
   contents->profile()->GetChromeURLDataManager()->AddDataSource(
       user_image_source);
 #endif
-
-  // Initialize the chrome://about/ source in case the user clicks the credits
-  // link.
-  InitializeAboutDataSource(contents->profile());
 }
 
 OptionsUI::~OptionsUI() {
@@ -302,10 +290,11 @@ void OptionsUI::RenderViewCreated(RenderViewHost* render_view_host) {
   std::string command_line_string;
 
 #if defined(OS_WIN)
-  std::wstring wstr = CommandLine::ForCurrentProcess()->command_line_string();
+  std::wstring wstr = CommandLine::ForCurrentProcess()->GetCommandLineString();
   command_line_string = WideToASCII(wstr);
 #else
-  command_line_string = CommandLine::ForCurrentProcess()->command_line_string();
+  command_line_string =
+      CommandLine::ForCurrentProcess()->GetCommandLineString();
 #endif
 
   render_view_host->SetWebUIProperty("commandLineString", command_line_string);

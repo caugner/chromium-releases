@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/message_bubble.h"
@@ -20,7 +20,7 @@
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -171,6 +171,9 @@ void ViewsLoginDisplay::OnFadeOut() {
   controllers_[selected_view_index_]->StopThrobber();
 }
 
+void ViewsLoginDisplay::OnLoginSuccess(const std::string& username) {
+}
+
 void ViewsLoginDisplay::SetUIEnabled(bool is_enabled) {
   // Send message to WM to enable/disable click on windows.
   WmIpc::Message message(WM_IPC_MESSAGE_WM_SET_LOGIN_STATE);
@@ -179,6 +182,10 @@ void ViewsLoginDisplay::SetUIEnabled(bool is_enabled) {
 
   if (is_enabled)
     controllers_[selected_view_index_]->ClearAndEnablePassword();
+}
+
+void ViewsLoginDisplay::SelectPod(int index) {
+  SelectUser(index);
 }
 
 void ViewsLoginDisplay::ShowError(int error_msg_id,

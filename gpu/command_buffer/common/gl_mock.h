@@ -28,6 +28,9 @@ class MockGLInterface : public GLInterface {
 
   MOCK_METHOD2(BindBuffer, void(GLenum target, GLuint buffer));
 
+  MOCK_METHOD4(BindFragDataLocationIndexedARB, void(GLuint program,
+      GLuint colorNumber, GLuint index, const char* name));
+
   MOCK_METHOD2(BindFramebufferEXT, void(GLenum target, GLuint framebuffer));
 
   MOCK_METHOD2(BindRenderbufferEXT, void(GLenum target, GLuint renderbuffer));
@@ -134,6 +137,9 @@ class MockGLInterface : public GLInterface {
 
   MOCK_METHOD4(DrawElements, void(
       GLenum mode, GLsizei count, GLenum type, const void* indices));
+
+  MOCK_METHOD2(EGLImageTargetTexture2DOES, void(
+      GLenum target, GLeglImageOES image));
 
   MOCK_METHOD1(Enable, void(GLenum cap));
 
@@ -428,6 +434,8 @@ class MockGLInterface : public GLInterface {
   MOCK_METHOD3(GetFenceivNV, void(GLuint fence, GLenum pname, GLint *params));
 
   MOCK_METHOD1(SetSurfaceCHROMIUM, void(GLuint));
+
+  MOCK_METHOD0(GetGraphicsResetStatusARB, GLenum());
 };
 
 }  // namespace gfx

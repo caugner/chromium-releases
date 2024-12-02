@@ -64,6 +64,7 @@ Chrome supports. -->
     <output filename="strings_google_chrome_vi.rc" type="rc_all" lang="vi" />
     <output filename="strings_google_chrome_zh-CN.rc" type="rc_all" lang="zh-CN" />
     <output filename="strings_google_chrome_zh-TW.rc" type="rc_all" lang="zh-TW" />
+    <output filename="strings_google_chrome_fake-bidi.rc" type="rc_all" lang="fake-bidi" />
 
     <output filename="google_chrome_strings_am.pak" type="data_package" lang="am" />
     <output filename="google_chrome_strings_ar.pak" type="data_package" lang="ar" />
@@ -118,6 +119,7 @@ Chrome supports. -->
     <output filename="google_chrome_strings_vi.pak" type="data_package" lang="vi" />
     <output filename="google_chrome_strings_zh-CN.pak" type="data_package" lang="zh-CN" />
     <output filename="google_chrome_strings_zh-TW.pak" type="data_package" lang="zh-TW" />
+    <output filename="google_chrome_strings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
   </outputs>
   <translations>
     <file path="resources/google_chrome_strings_am.xtb" lang="am" />
@@ -192,7 +194,7 @@ Chrome supports. -->
           Chrome OS
         </message>
       </if>
-      <if expr="os.find('win') != -1">
+      <if expr="is_win">
         <message name="IDS_PRODUCT_FRAME_NAME" desc="The Chrome Frame application name">
           Google Chrome Frame
         </message>
@@ -317,6 +319,10 @@ Chrome supports. -->
       <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
                desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
         Welcome to Google Chrome
+      </message>
+      <message name="IDS_NEW_TAB_THEMES_GALLERY_PAGE_TITLE"
+         desc="Title for the hard coded thumbnail that represents the Themes Gallery page. This is used on the NTP when there aren't enough thumbnails to show.">
+        Google Chrome Themes Gallery
       </message>
       <if expr="not pp_ifdef('chromeos')">
         <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
@@ -525,12 +531,19 @@ Chrome supports. -->
       <message name="IDS_CRASHES_DISABLED_MESSAGE" desc="The explanatory message for chrome://crashes when crash reporting is disabled">
         This page only shows information on your recent crashes if you <ph name="BEGIN_LINK">&lt;a href="https://www.google.com/support/chrome/bin/answer.py?answer=96817"&gt;</ph>enable crash reporting<ph name="END_LINK">&lt;/a&gt;</ph>.
       </message>
+      <!-- Page Info bubble -->
+      <message name="IDS_PAGE_INFO_INTERNAL_PAGE" desc="Message to display in the page info bubble when the page you are on is a chrome:// page or about:something.">
+        You are viewing a secure Google Chrome page.
+      </message>
       <!-- Print Preview -->
       <message name="IDS_PRINT_PREVIEW_NO_PLUGIN" desc="Message to display when the PDF viewer is missing.">
         Google Chrome cannot show the print preview when the built-in PDF viewer is disabled. In order to see the preview, please visit <ph name="BEGIN_LINK">&lt;a target="_blank" rel="noreferrer" href="$1"&gt;</ph>$1<ph name="END_LINK">&lt;/a&gt;</ph>, enable the "Chrome PDF Viewer", and try again.
       </message>
+      <message name="IDS_PRINT_PREVIEW_NATIVE_DIALOG" desc="Option offering the user to open the native print dialog, displayed when the PDF viewer is missing.">
+        Launch native print dialog
+      </message>
 
-      <if expr="os == 'darwin'">
+      <if expr="is_macosx">
         <message name="IDS_APP_MENU_PRODUCT_NAME" desc="The application's short name, used for the Mac's application menu, activity monitor, etc. This should be less than 16 characters. Example: Chrome, not Google Chrome.">
           Chrome
         </message>

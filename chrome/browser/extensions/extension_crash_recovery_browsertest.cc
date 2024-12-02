@@ -73,7 +73,8 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
 
     RenderProcessHost* extension_rph =
         extension_host->render_view_host()->process();
-    base::KillProcess(extension_rph->GetHandle(), ResultCodes::KILLED, false);
+    base::KillProcess(extension_rph->GetHandle(), content::RESULT_CODE_KILLED,
+                      false);
     ASSERT_TRUE(WaitForExtensionCrash(extension_id));
     ASSERT_FALSE(
         GetExtensionProcessManager()->GetBackgroundHostForExtension(extension));
@@ -233,12 +234,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
 // Make sure that when we don't do anything about the crashed extension
 // and close the browser, it doesn't crash. The browser is closed implicitly
 // at the end of each browser test.
+//
+// http://crbug.com/84719
 #if defined(OS_LINUX)
-// Occasional crash on Linux tests (dbg) http://crbug.com/79204
-IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, FLAKY_ShutdownWhileCrashed) {
+#define MAYBE_ShutdownWhileCrashed DISABLED_ShutdownWhileCrashed
 #else
-IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, ShutdownWhileCrashed) {
-#endif
+#define MAYBE_ShutdownWhileCrashed ShutdownWhileCrashed
+#endif  // defined(OS_LINUX)
+
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, MAYBE_ShutdownWhileCrashed) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(size_before);
@@ -324,11 +328,20 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, TwoExtensionsOneByOne) {
   }
 }
 
+// http://crbug.com/84719
+#if defined(OS_LINUX)
+#define MAYBE_TwoExtensionsShutdownWhileCrashed \
+    DISABLED_TwoExtensionsShutdownWhileCrashed
+#else
+#define MAYBE_TwoExtensionsShutdownWhileCrashed \
+    TwoExtensionsShutdownWhileCrashed
+#endif  // defined(OS_LINUX)
+
 // Make sure that when we don't do anything about the crashed extensions
 // and close the browser, it doesn't crash. The browser is closed implicitly
 // at the end of each browser test.
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
-                       TwoExtensionsShutdownWhileCrashed) {
+                       MAYBE_TwoExtensionsShutdownWhileCrashed) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   CrashExtension(size_before);
@@ -338,7 +351,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
   ASSERT_EQ(size_before, GetExtensionService()->extensions()->size());
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, TwoExtensionsIgnoreFirst) {
+// Flaky on linux due to http://crbug.com/89078.
+#if defined(OS_LINUX)
+#define MAYBE_TwoExtensionsIgnoreFirst FLAKY_TwoExtensionsIgnoreFirst
+#else
+#define MAYBE_TwoExtensionsIgnoreFirst TwoExtensionsIgnoreFirst
+#endif  // defined(OS_LINUX)
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
+                       MAYBE_TwoExtensionsIgnoreFirst) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   LoadTestExtension();
   LoadSecondExtension();
@@ -409,7 +429,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, CrashAndUninstall) {
   ASSERT_EQ(0U, CountBalloons());
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, CrashAndUnloadAll) {
+// http://crbug.com/84719
+#if defined(OS_LINUX)
+#define MAYBE_CrashAndUnloadAll DISABLED_CrashAndUnloadAll
+#else
+#define MAYBE_CrashAndUnloadAll CrashAndUnloadAll
+#endif  // defined(OS_LINUX)
+
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, MAYBE_CrashAndUnloadAll) {
   const size_t size_before = GetExtensionService()->extensions()->size();
   const size_t crash_size_before =
       GetExtensionService()->terminated_extensions()->size();

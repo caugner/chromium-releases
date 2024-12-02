@@ -43,10 +43,6 @@ class BufferedDataSource : public WebDataSource {
   virtual bool IsStreaming();
   virtual void SetPreload(media::Preload preload);
 
-  const media::MediaFormat& media_format() {
-    return media_format_;
-  }
-
   // webkit_glue::WebDataSource implementation.
   virtual void Initialize(const std::string& url,
                           media::PipelineStatusCallback* callback);
@@ -125,8 +121,6 @@ class BufferedDataSource : public WebDataSource {
 
   void UpdateHostState();
 
-  media::MediaFormat media_format_;
-
   // URL of the resource requested.
   GURL url_;
 
@@ -204,6 +198,9 @@ class BufferedDataSource : public WebDataSource {
   // Keeps track of whether we used a Range header in the initialization
   // request.
   bool using_range_request_;
+
+  // Number of cache miss retries left.
+  int cache_miss_retries_left_;
 
   DISALLOW_COPY_AND_ASSIGN(BufferedDataSource);
 };

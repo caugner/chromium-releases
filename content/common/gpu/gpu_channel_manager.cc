@@ -4,29 +4,20 @@
 
 #include "content/common/gpu/gpu_channel_manager.h"
 
-#include <string>
-#include <vector>
-
-#include "app/win/scoped_com_initializer.h"
-#include "base/command_line.h"
-#include "base/threading/worker_pool.h"
-#include "build/build_config.h"
-#include "content/common/child_process.h"
+#include "content/common/child_thread.h"
+#include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_messages.h"
-#include "ipc/ipc_channel_handle.h"
-#include "ui/gfx/gl/gl_context.h"
-#include "ui/gfx/gl/gl_implementation.h"
 
-GpuChannelManager::GpuChannelManager(IPC::Message::Sender* browser_channel,
+GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
                                      GpuWatchdog* watchdog,
                                      base::MessageLoopProxy* io_message_loop,
                                      base::WaitableEvent* shutdown_event)
     : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
       io_message_loop_(io_message_loop),
       shutdown_event_(shutdown_event),
-      browser_channel_(browser_channel),
+      gpu_child_thread_(gpu_child_thread),
       watchdog_(watchdog) {
-  DCHECK(browser_channel);
+  DCHECK(gpu_child_thread);
   DCHECK(io_message_loop);
   DCHECK(shutdown_event);
 }
@@ -39,6 +30,20 @@ void GpuChannelManager::RemoveChannel(int renderer_id) {
   gpu_channels_.erase(renderer_id);
 }
 
+int GpuChannelManager::GenerateRouteID() {
+  static int last_id = 0;
+  return ++last_id;
+}
+
+void GpuChannelManager::AddRoute(int32 routing_id,
+                                 IPC::Channel::Listener* listener) {
+  gpu_child_thread_->AddRoute(routing_id, listener);
+}
+
+void GpuChannelManager::RemoveRoute(int32 routing_id) {
+  gpu_child_thread_->RemoveRoute(routing_id);
+}
+
 bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {
   bool msg_is_ok = true;
   bool handled = true;
@@ -47,11 +52,11 @@ bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(GpuMsg_CloseChannel, OnCloseChannel)
     IPC_MESSAGE_HANDLER(GpuMsg_CreateViewCommandBuffer,
                         OnCreateViewCommandBuffer)
-    IPC_MESSAGE_HANDLER(GpuMsg_Synchronize, OnSynchronize)
     IPC_MESSAGE_HANDLER(GpuMsg_VisibilityChanged, OnVisibilityChanged)
 #if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
     IPC_MESSAGE_HANDLER(GpuMsg_ResizeViewACK, OnResizeViewACK);
-#elif defined(OS_MACOSX)
+#endif
+#if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(GpuMsg_AcceleratedSurfaceBuffersSwappedACK,
                         OnAcceleratedSurfaceBuffersSwappedACK)
     IPC_MESSAGE_HANDLER(GpuMsg_DestroyCommandBuffer,
@@ -63,7 +68,7 @@ bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {
 }
 
 bool GpuChannelManager::Send(IPC::Message* msg) {
-  return browser_channel_->Send(msg);
+  return gpu_child_thread_->Send(msg);
 }
 
 void GpuChannelManager::OnEstablishChannel(int renderer_id) {
@@ -73,7 +78,7 @@ void GpuChannelManager::OnEstablishChannel(int renderer_id) {
 
   GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
   if (iter == gpu_channels_.end())
-    channel = new GpuChannel(this, watchdog_, renderer_id);
+    channel = new GpuChannel(this, watchdog_, renderer_id, false);
   else
     channel = iter->second;
 
@@ -90,6 +95,7 @@ void GpuChannelManager::OnEstablishChannel(int renderer_id) {
     // On POSIX, pass the renderer-side FD. Also mark it as auto-close so
     // that it gets closed after it has been sent.
     int renderer_fd = channel->GetRendererFileDescriptor();
+    DCHECK_NE(-1, renderer_fd);
     channel_handle.socket = base::FileDescriptor(dup(renderer_fd), true);
 #endif
   }
@@ -106,10 +112,6 @@ void GpuChannelManager::OnCloseChannel(
       return;
     }
   }
-}
-
-void GpuChannelManager::OnSynchronize() {
-  Send(new GpuHostMsg_SynchronizeReply());
 }
 
 void GpuChannelManager::OnVisibilityChanged(

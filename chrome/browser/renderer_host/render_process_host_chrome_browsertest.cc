@@ -5,7 +5,7 @@
 #include "content/browser/renderer_host/render_process_host_browsertest.h"
 
 #include "base/command_line.h"
-#include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -76,7 +76,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, DevToolsOnSelfInOwnProcessPPT) {
   DCHECK(devtools);
 
   // DevTools start in a separate process.
-  DevToolsManager::GetInstance()->ToggleDevToolsWindow(
+  DevToolsWindow::ToggleDevToolsWindow(
       devtools, DEVTOOLS_TOGGLE_ACTION_INSPECT);
   host_count++;
   EXPECT_EQ(tab_count, browser()->tab_count());
@@ -112,7 +112,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, DevToolsOnSelfInOwnProcess) {
   DCHECK(devtools);
 
   // DevTools start in a separate process.
-  DevToolsManager::GetInstance()->ToggleDevToolsWindow(
+  DevToolsWindow::ToggleDevToolsWindow(
       devtools, DEVTOOLS_TOGGLE_ACTION_INSPECT);
   host_count++;
   EXPECT_EQ(tab_count, browser()->tab_count());

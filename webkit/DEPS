@@ -9,15 +9,20 @@ include_rules = [
   # For bridge/c/c_utility.h in npruntime_util.cc
   "+bridge",
   "+grit",  # For generated headers
+  "+skia",
   "+third_party/sqlite",
   "+third_party/tcmalloc",
   "+ui/gfx",
 
   # For databases/
-  "+app/sql",
+  "+sql",
 
   # For gpu/
-  "+app/gfx",
+  "+ui/gfx",
+  "+gpu/command_buffer/client",
+  "+gpu/command_buffer/common",
+  "+gpu/command_buffer/service",
+  "+gpu/GLES2",
 
   # TODO(brettw) - review these; move up if it's ok, or remove the dependency
   "+crypto",

@@ -23,7 +23,7 @@ class TabContents;
 
 namespace views {
 class Label;
-class NativeButton;
+class TextButton;
 }
 
 // This is the Views implementation of the collected cookies dialog.
@@ -51,6 +51,8 @@ class CollectedCookiesWin : public ConstrainedDialogDelegate,
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
+  virtual views::Widget* GetWidget() OVERRIDE;
+  virtual const views::Widget* GetWidget() const OVERRIDE;
 
   // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
@@ -78,7 +80,7 @@ class CollectedCookiesWin : public ConstrainedDialogDelegate,
   void AddContentException(views::TreeView* tree_view, ContentSetting setting);
 
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
@@ -96,9 +98,9 @@ class CollectedCookiesWin : public ConstrainedDialogDelegate,
   views::TreeView* allowed_cookies_tree_;
   views::TreeView* blocked_cookies_tree_;
 
-  views::NativeButton* block_allowed_button_;
-  views::NativeButton* allow_blocked_button_;
-  views::NativeButton* for_session_blocked_button_;
+  views::TextButton* block_allowed_button_;
+  views::TextButton* allow_blocked_button_;
+  views::TextButton* for_session_blocked_button_;
 
   scoped_ptr<CookiesTreeModel> allowed_cookies_tree_model_;
   scoped_ptr<CookiesTreeModel> blocked_cookies_tree_model_;

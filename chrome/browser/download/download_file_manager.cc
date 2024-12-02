@@ -6,19 +6,22 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_create_info.h"
 #include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/download/download_process_handle.h"
+#include "chrome/browser/download/download_request_handle.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -68,8 +71,7 @@ void DownloadFileManager::CreateDownloadFile(DownloadCreateInfo* info,
   scoped_ptr<DownloadFile>
       download_file(new DownloadFile(info, download_manager));
   if (!download_file->Initialize(get_hash)) {
-    download_util::CancelDownloadRequest(resource_dispatcher_host_,
-                                         info->process_handle);
+    info->request_handle.CancelRequest();
     return;
   }
 
@@ -78,10 +80,7 @@ void DownloadFileManager::CreateDownloadFile(DownloadCreateInfo* info,
   downloads_[id] = download_file.release();
 
   // The file is now ready, we can un-pause the request and start saving data.
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &DownloadFileManager::ResumeDownloadRequest,
-                        info->process_handle));
+  info->request_handle.ResumeRequest();
 
   StartUpdateTimer();
 
@@ -89,16 +88,6 @@ void DownloadFileManager::CreateDownloadFile(DownloadCreateInfo* info,
       BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(download_manager,
                         &DownloadManager::StartDownload, id));
-}
-
-void DownloadFileManager::ResumeDownloadRequest(
-    DownloadProcessHandle process) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  // This balances the pause in DownloadResourceHandler::OnResponseStarted.
-  resource_dispatcher_host_->PauseRequest(process.child_id(),
-                                          process.request_id(),
-                                          false);
 }
 
 DownloadFile* DownloadFileManager::GetDownloadFile(int id) {
@@ -145,10 +134,9 @@ void DownloadFileManager::StartDownload(DownloadCreateInfo* info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(info);
 
-  DownloadManager* manager = info->process_handle.GetDownloadManager();
+  DownloadManager* manager = info->request_handle.GetDownloadManager();
   if (!manager) {
-    download_util::CancelDownloadRequest(resource_dispatcher_host_,
-                                         info->process_handle);
+    info->request_handle.CancelRequest();
     delete info;
     return;
   }
@@ -158,8 +146,13 @@ void DownloadFileManager::StartDownload(DownloadCreateInfo* info) {
 
   manager->CreateDownloadItem(info);
 
-  bool hash_needed = resource_dispatcher_host_->safe_browsing_service()->
-      DownloadBinHashNeeded();
+#if defined(ENABLE_SAFE_BROWSING)
+  bool hash_needed = manager->profile()->GetPrefs()->GetBoolean(
+      prefs::kSafeBrowsingEnabled) &&
+          g_browser_process->safe_browsing_service()->DownloadBinHashNeeded();
+#else
+  bool hash_needed = false;
+#endif
 
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(this, &DownloadFileManager::CreateDownloadFile,
@@ -269,7 +262,7 @@ void DownloadFileManager::OnDownloadManagerShutdown(DownloadManager* manager) {
        i != downloads_.end(); ++i) {
     DownloadFile* download_file = i->second;
     if (download_file->GetDownloadManager() == manager) {
-      download_file->CancelDownloadRequest(resource_dispatcher_host_);
+      download_file->CancelDownloadRequest();
       to_remove.insert(download_file);
     }
   }
@@ -384,7 +377,7 @@ void DownloadFileManager::CancelDownloadOnRename(int id) {
     // Without a download manager, we can't cancel the request normally, so we
     // need to do it here.  The normal path will also update the download
     // history before cancelling the request.
-    download_file->CancelDownloadRequest(resource_dispatcher_host_);
+    download_file->CancelDownloadRequest();
     return;
   }
 

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/download/download_request_limiter.h"
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/download/download_request_infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -13,8 +13,8 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "chrome/browser/ui/download/download_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
+#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper_delegate.h"
 #include "content/common/notification_source.h"
 
 // TabDownloadState ------------------------------------------------------------
@@ -29,9 +29,9 @@ DownloadRequestLimiter::TabDownloadState::TabDownloadState(
       download_count_(0),
       infobar_(NULL) {
   Source<NavigationController> notification_source(controller);
-  registrar_.Add(this, NotificationType::NAV_ENTRY_PENDING,
+  registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
                  notification_source);
-  registrar_.Add(this, NotificationType::TAB_CLOSED, notification_source);
+  registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED, notification_source);
 
   NavigationEntry* active_entry = originating_controller ?
       originating_controller->GetActiveEntry() : controller->GetActiveEntry();
@@ -89,18 +89,18 @@ void DownloadRequestLimiter::TabDownloadState::Accept() {
 }
 
 void DownloadRequestLimiter::TabDownloadState::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  if ((type != NotificationType::NAV_ENTRY_PENDING &&
-       type != NotificationType::TAB_CLOSED) ||
+  if ((type != content::NOTIFICATION_NAV_ENTRY_PENDING &&
+       type != content::NOTIFICATION_TAB_CLOSED) ||
       Source<NavigationController>(source).ptr() != controller_) {
     NOTREACHED();
     return;
   }
 
-  switch (type.value) {
-    case NotificationType::NAV_ENTRY_PENDING: {
+  switch (type) {
+    case content::NOTIFICATION_NAV_ENTRY_PENDING: {
       // NOTE: resetting state on a pending navigate isn't ideal. In particular
       // it is possible that queued up downloads for the page before the
       // pending navigate will be delivered to us after we process this
@@ -129,7 +129,7 @@ void DownloadRequestLimiter::TabDownloadState::Observe(
       break;
     }
 
-    case NotificationType::TAB_CLOSED:
+    case content::NOTIFICATION_TAB_CLOSED:
       // Tab closed, no need to handle closing the dialog as it's owned by the
       // TabContents, break so that we get deleted after switch.
       break;
@@ -251,33 +251,38 @@ void DownloadRequestLimiter::CanDownload(int render_process_host_id,
     ScheduleNotification(callback, false);
     return;
   }
-  CanDownloadImpl(originating_tab, request_id, callback);
+
+  CanDownloadImpl(
+      TabContentsWrapper::GetCurrentWrapperForContents(originating_tab),
+      request_id,
+      callback);
 }
 
 void DownloadRequestLimiter::CanDownloadImpl(
-    TabContents* originating_tab,
+    TabContentsWrapper* originating_tab,
     int request_id,
     Callback* callback) {
+  DCHECK(originating_tab);
+
   // FYI: Chrome Frame overrides CanDownload in ExternalTabContainer in order
   // to cancel the download operation in chrome and let the host browser
   // take care of it.
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(originating_tab);
-  if (!wrapper->download_tab_helper()->CanDownload(request_id)) {
+  if (!originating_tab->tab_contents()->CanDownload(request_id)) {
     ScheduleNotification(callback, false);
     return;
   }
 
   // If the tab requesting the download is a constrained popup that is not
   // shown, treat the request as if it came from the parent.
-  TabContents* effective_tab = originating_tab;
-  if (effective_tab->delegate()) {
-    effective_tab =
-        effective_tab->delegate()->GetConstrainingContents(effective_tab);
+  TabContentsWrapper* effective_wrapper = originating_tab;
+  if (effective_wrapper->blocked_content_tab_helper()->delegate()) {
+    effective_wrapper = effective_wrapper->blocked_content_tab_helper()->
+        delegate()->GetConstrainingContentsWrapper(effective_wrapper);
   }
 
   TabDownloadState* state = GetDownloadState(
-      &effective_tab->controller(), &originating_tab->controller(), true);
+      &effective_wrapper->tab_contents()->controller(),
+      &originating_tab->controller(), true);
   switch (state->download_status()) {
     case ALLOW_ALL_DOWNLOADS:
       if (state->download_count() && !(state->download_count() %
@@ -297,7 +302,7 @@ void DownloadRequestLimiter::CanDownloadImpl(
       break;
 
     case PROMPT_BEFORE_DOWNLOAD:
-      state->PromptUserForDownload(effective_tab, callback);
+      state->PromptUserForDownload(effective_wrapper->tab_contents(), callback);
       state->increment_download_count();
       break;
 

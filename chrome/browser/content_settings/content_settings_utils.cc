@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/command_line.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/common/chrome_switches.h"
@@ -19,6 +21,8 @@ const bool kRequiresResourceIdentifier[CONTENT_SETTINGS_NUM_TYPES] = {
   false,  // Not used for Geolocation
   false,  // Not used for Notifications
 };
+
+const char* kPatternSeparator = ",";
 
 }  // namespace
 
@@ -42,6 +46,40 @@ ContentSetting ClickToPlayFixup(ContentSettingsType content_type,
     return CONTENT_SETTING_BLOCK;
   }
   return setting;
+}
+
+std::string CreatePatternString(
+    const ContentSettingsPattern& item_pattern,
+    const ContentSettingsPattern& top_level_frame_pattern) {
+  return item_pattern.ToString()
+         + std::string(kPatternSeparator)
+         + top_level_frame_pattern.ToString();
+}
+
+PatternPair ParsePatternString(const std::string& pattern_str) {
+  DCHECK(!pattern_str.empty());
+  size_t pos = pattern_str.find(kPatternSeparator);
+
+  std::pair<ContentSettingsPattern, ContentSettingsPattern> pattern_pair;
+  if (pos == std::string::npos) {
+    pattern_pair.first = ContentSettingsPattern::FromString(pattern_str);
+    DCHECK(pattern_pair.first.IsValid());
+    pattern_pair.second = ContentSettingsPattern();
+  } else {
+    pattern_pair.first = ContentSettingsPattern::FromString(
+        pattern_str.substr(0, pos));
+    DCHECK(pattern_pair.first.IsValid());
+    pattern_pair.second = ContentSettingsPattern::FromString(
+        pattern_str.substr(pos+1, pattern_str.size() - pos - 1));
+    DCHECK(pattern_pair.second.IsValid());
+  }
+  return pattern_pair;
+}
+
+ContentSetting ValueToContentSetting(Value* value) {
+  int int_value;
+  value->GetAsInteger(&int_value);
+  return IntToContentSetting(int_value);
 }
 
 }  // namespace content_settings

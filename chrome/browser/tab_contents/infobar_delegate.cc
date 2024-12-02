@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -21,20 +22,10 @@ bool InfoBarDelegate::EqualsDelegate(InfoBarDelegate* delegate) const {
 
 bool InfoBarDelegate::ShouldExpire(
     const content::LoadCommittedDetails& details) const {
-  // Only hide InfoBars when the user has done something that makes the main
-  // frame load. We don't want various automatic or subframe navigations making
-  // it disappear.
-  if (!details.is_user_initiated_main_frame_load())
+  if (!details.is_navigation_to_different_page())
     return false;
 
   return ShouldExpireInternal(details);
-}
-
-bool InfoBarDelegate::ShouldExpireInternal(
-    const content::LoadCommittedDetails& details) const {
-  return (contents_unique_id_ != details.entry->unique_id()) ||
-      (PageTransition::StripQualifier(details.entry->transition_type()) ==
-          PageTransition::RELOAD);
 }
 
 void InfoBarDelegate::InfoBarDismissed() {
@@ -60,6 +51,11 @@ ExtensionInfoBarDelegate* InfoBarDelegate::AsExtensionInfoBarDelegate() {
   return NULL;
 }
 
+InsecureContentInfoBarDelegate*
+    InfoBarDelegate::AsInsecureContentInfoBarDelegate() {
+  return NULL;
+}
+
 LinkInfoBarDelegate* InfoBarDelegate::AsLinkInfoBarDelegate() {
   return NULL;
 }
@@ -79,7 +75,8 @@ TranslateInfoBarDelegate* InfoBarDelegate::AsTranslateInfoBarDelegate() {
 }
 
 InfoBarDelegate::InfoBarDelegate(TabContents* contents)
-    : contents_unique_id_(0) {
+    : contents_unique_id_(0),
+      owner_(contents) {
   if (contents)
     StoreActiveEntryUniqueID(contents);
 }
@@ -87,4 +84,18 @@ InfoBarDelegate::InfoBarDelegate(TabContents* contents)
 void InfoBarDelegate::StoreActiveEntryUniqueID(TabContents* contents) {
   NavigationEntry* active_entry = contents->controller().GetActiveEntry();
   contents_unique_id_ = active_entry ? active_entry->unique_id() : 0;
+}
+
+bool InfoBarDelegate::ShouldExpireInternal(
+    const content::LoadCommittedDetails& details) const {
+  return (contents_unique_id_ != details.entry->unique_id()) ||
+      (PageTransition::StripQualifier(details.entry->transition_type()) ==
+          PageTransition::RELOAD);
+}
+
+void InfoBarDelegate::RemoveSelf() {
+  if (owner_) {
+    TabContentsWrapper::GetCurrentWrapperForContents(owner_)->
+        RemoveInfoBar(this);  // Clears |owner_|.
+  }
 }

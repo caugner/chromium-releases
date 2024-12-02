@@ -6,9 +6,11 @@
 
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
@@ -35,14 +37,16 @@ void BackgroundPrintingManager::OwnTabContents(TabContentsWrapper* contents) {
 
   printing_contents_.insert(contents);
 
-  registrar_.Add(this, NotificationType::PRINT_JOB_RELEASED,
+  registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_RELEASED,
                  Source<TabContentsWrapper>(contents));
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                  Source<TabContents>(contents->tab_contents()));
 
   // Detach |contents| from its tab strip.
   Browser* browser = BrowserList::FindBrowserWithID(
-      contents->controller().window_id().id());
+      contents->restore_tab_helper()->window_id().id());
+  DCHECK(browser);
+
   TabStripModel* tabstrip = browser->tabstrip_model();
   tabstrip->DetachTabContentsAt(tabstrip->GetIndexOfTabContents(contents));
 
@@ -55,16 +59,16 @@ void BackgroundPrintingManager::OwnTabContents(TabContentsWrapper* contents) {
       contents->tab_contents());
   if (!initiator_tab)
     return;
-  initiator_tab->Activate();
+  static_cast<RenderViewHostDelegate*>(initiator_tab)->Activate();
 }
 
-void BackgroundPrintingManager::Observe(NotificationType type,
+void BackgroundPrintingManager::Observe(int type,
                                         const NotificationSource& source,
                                         const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::PRINT_JOB_RELEASED: {
+  switch (type) {
+    case chrome::NOTIFICATION_PRINT_JOB_RELEASED: {
       TabContentsWrapper* tab = Source<TabContentsWrapper>(source).ptr();
-      registrar_.Remove(this, NotificationType::PRINT_JOB_RELEASED,
+      registrar_.Remove(this, chrome::NOTIFICATION_PRINT_JOB_RELEASED,
                         Source<TabContentsWrapper>(tab));
 
       // This might be happening in the middle of a RenderViewGone() loop.
@@ -72,16 +76,16 @@ void BackgroundPrintingManager::Observe(NotificationType type,
       MessageLoop::current()->DeleteSoon(FROM_HERE, tab);
       break;
     }
-    case NotificationType::TAB_CONTENTS_DESTROYED: {
+    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED: {
       TabContentsWrapper* tab =
           TabContentsWrapper::GetCurrentWrapperForContents(
               Source<TabContents>(source).ptr());
-      if (registrar_.IsRegistered(this, NotificationType::PRINT_JOB_RELEASED,
+      if (registrar_.IsRegistered(this, chrome::NOTIFICATION_PRINT_JOB_RELEASED,
                                   Source<TabContentsWrapper>(tab))) {
-        registrar_.Remove(this, NotificationType::PRINT_JOB_RELEASED,
+        registrar_.Remove(this, chrome::NOTIFICATION_PRINT_JOB_RELEASED,
                           Source<TabContentsWrapper>(tab));
       }
-      registrar_.Remove(this, NotificationType::TAB_CONTENTS_DESTROYED,
+      registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                         Source<TabContents>(tab->tab_contents()));
       printing_contents_.erase(tab);
       break;
@@ -101,6 +105,10 @@ std::set<TabContentsWrapper*>::const_iterator
 std::set<TabContentsWrapper*>::const_iterator
     BackgroundPrintingManager::end() {
   return printing_contents_.end();
+}
+
+bool BackgroundPrintingManager::HasTabContents(TabContentsWrapper* entry) {
+  return printing_contents_.find(entry) != printing_contents_.end();
 }
 
 }  // namespace printing

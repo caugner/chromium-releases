@@ -9,24 +9,25 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/views/extensions/extension_dialog_observer.h"
 #include "chrome/browser/ui/views/window.h"  // CreateViewsWindow
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 ExtensionDialog::ExtensionDialog(Browser* browser, ExtensionHost* host,
                                  int width, int height,
-                                 Observer* observer)
+                                 ExtensionDialogObserver* observer)
     : extension_host_(host),
       observer_(observer) {
   AddRef();  // Balanced in DeleteDelegate();
   gfx::NativeWindow parent = browser->window()->GetNativeHandle();
   window_ = browser::CreateViewsWindow(
-      parent, gfx::Rect(), this /* views::WindowDelegate */);
+      parent, gfx::Rect(), this /* views::WidgetDelegate */);
 
   // Center the window over the browser.
   gfx::Point center = browser->window()->GetBounds().CenterPoint();
@@ -37,7 +38,7 @@ ExtensionDialog::ExtensionDialog(Browser* browser, ExtensionHost* host,
   host->view()->SetContainer(this /* ExtensionView::Container */);
 
   // Listen for the containing view calling window.close();
-  registrar_.Add(this, NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
                  Source<Profile>(host->profile()));
 
   window_->Show();
@@ -55,7 +56,7 @@ ExtensionDialog* ExtensionDialog::Show(
     Browser* browser,
     int width,
     int height,
-    Observer* observer) {
+    ExtensionDialogObserver* observer) {
   CHECK(browser);
   ExtensionProcessManager* manager =
       browser->profile()->GetExtensionProcessManager();
@@ -63,6 +64,7 @@ ExtensionDialog* ExtensionDialog::Show(
   if (!manager)
     return NULL;
   ExtensionHost* host = manager->CreateDialogHost(url, browser);
+  DCHECK(host);
   return new ExtensionDialog(browser, host, width, height, observer);
 }
 
@@ -82,7 +84,7 @@ void ExtensionDialog::Close() {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// views::WindowDelegate overrides.
+// views::WidgetDelegate overrides.
 
 bool ExtensionDialog::CanResize() const {
   return false;
@@ -99,6 +101,14 @@ bool ExtensionDialog::ShouldShowWindowTitle() const {
 void ExtensionDialog::DeleteDelegate() {
   // The window has finished closing.  Allow ourself to be deleted.
   Release();
+}
+
+views::Widget* ExtensionDialog::GetWidget() {
+  return extension_host_->view()->GetWidget();
+}
+
+const views::Widget* ExtensionDialog::GetWidget() const {
+  return extension_host_->view()->GetWidget();
 }
 
 views::View* ExtensionDialog::GetContentsView() {
@@ -120,11 +130,11 @@ void ExtensionDialog::OnExtensionPreferredSizeChanged(ExtensionView* view) {
 /////////////////////////////////////////////////////////////////////////////
 // NotificationObserver overrides.
 
-void ExtensionDialog::Observe(NotificationType type,
+void ExtensionDialog::Observe(int type,
                              const NotificationSource& source,
                              const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE:
+  switch (type) {
+    case chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE:
       // If we aren't the host of the popup, then disregard the notification.
       if (Details<ExtensionHost>(host()) != details)
         return;

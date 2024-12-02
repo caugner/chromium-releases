@@ -55,6 +55,7 @@ class AppCache : public base::RefCounted<AppCache> {
 
   // Do not store the returned object as it could be deleted anytime.
   AppCacheEntry* GetEntry(const GURL& url);
+  const AppCacheEntry* GetEntryWithResponseId(int64 response_id);
 
   const EntryMap& entries() const { return entries_; }
 
@@ -105,6 +106,9 @@ class AppCache : public base::RefCounted<AppCache> {
   bool FindResponseForRequest(const GURL& url,
       AppCacheEntry* found_entry, AppCacheEntry* found_fallback_entry,
       GURL* found_fallback_namespace, bool* found_network_namespace);
+
+  // Populates the 'infos' vector with an element per entry in the appcache.
+  void ToResourceInfoVector(AppCacheResourceInfoVector* infos) const;
 
   static bool IsInNetworkNamespace(
       const GURL& url,

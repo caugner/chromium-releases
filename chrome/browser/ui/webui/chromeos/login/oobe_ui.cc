@@ -7,31 +7,33 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/memory/weak_ptr.h"
-#include "base/string_piece.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/values.h"
+#include "chrome/browser/browser_about_handler.h"
+#include "chrome/browser/chromeos/login/enterprise_enrollment_screen_actor.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/enterprise_enrollment_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/eula_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/network_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/update_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/user_image_screen_handler.h"
+#include "chrome/browser/ui/webui/options/chromeos/user_image_source.h"
+#include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/browser_resources.h"
-#include "grit/chromium_strings.h"
-#include "grit/generated_resources.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
-// JS API callbacks names.
-const char kJsApiScreenStateInitialize[] = "screenStateInitialize";
-
-// Page JS API function names.
-// const char kJsApiScreenStateChanged[] = "cr.ui.Oobe.screenStateChanged";
-
-// OOBE screen state variables which are passed to the page.
-const char kState[] = "state";
+// Path for the enterprise enrollment gaia page hosting.
+const char kEnterpriseEnrollmentGaiaLoginPath[] = "gaialogin";
 
 }  // namespace
 
@@ -39,7 +41,7 @@ namespace chromeos {
 
 class OobeUIHTMLSource : public ChromeURLDataManager::DataSource {
  public:
-  OobeUIHTMLSource();
+  explicit OobeUIHTMLSource(DictionaryValue* localized_strings);
 
   // Called when the network layer has requested a resource underneath
   // the path we registered.
@@ -53,176 +55,160 @@ class OobeUIHTMLSource : public ChromeURLDataManager::DataSource {
  private:
   virtual ~OobeUIHTMLSource() {}
 
-  std::string service_path_;
+  scoped_ptr<DictionaryValue> localized_strings_;
   DISALLOW_COPY_AND_ASSIGN(OobeUIHTMLSource);
-};
-
-// The handler for Javascript messages related to the "oobe" view.
-class OobeHandler : public WebUIMessageHandler,
-                    public base::SupportsWeakPtr<OobeHandler> {
- public:
-  OobeHandler();
-  virtual ~OobeHandler();
-
-  // Init work after Attach.
-  void Init(TabContents* contents);
-
-  // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
-
- private:
-  // Should keep this state enum in sync with similar one in JS code.
-  typedef enum ScreenState {
-    SCREEN_LOADING = -1,
-    SCREEN_NONE    =  0,
-    SCREEN_WELCOME =  1,
-    SCREEN_EULA    =  2,
-    SCREEN_UPDATE  =  3,
-  } ScreenState;
-
-  class TaskProxy : public base::RefCountedThreadSafe<TaskProxy> {
-   public:
-    explicit TaskProxy(const base::WeakPtr<OobeHandler>& handler)
-        : handler_(handler) {
-    }
-
-    void HandleInitialize() {
-      if (handler_)
-        handler_->InitializeScreenState();
-    }
-
-   private:
-    base::WeakPtr<OobeHandler> handler_;
-
-    DISALLOW_COPY_AND_ASSIGN(TaskProxy);
-  };
-
-  // Handlers for JS WebUI messages.
-  void HandleScreenStateInitialize(const ListValue* args);
-
-  // Initializes current OOBE state, passes that to page.
-  void InitializeScreenState();
-
-  // Updates page states.
-  void UpdatePage();
-
-  TabContents* tab_contents_;
-  ScreenState state_;
-
-  DISALLOW_COPY_AND_ASSIGN(OobeHandler);
 };
 
 // OobeUIHTMLSource -------------------------------------------------------
 
-OobeUIHTMLSource::OobeUIHTMLSource()
-    : DataSource(chrome::kChromeUIOobeHost, MessageLoop::current()) {
+OobeUIHTMLSource::OobeUIHTMLSource(DictionaryValue* localized_strings)
+    : DataSource(chrome::kChromeUIOobeHost, MessageLoop::current()),
+      localized_strings_(localized_strings) {
 }
 
 void OobeUIHTMLSource::StartDataRequest(const std::string& path,
                                         bool is_incognito,
                                         int request_id) {
-  DictionaryValue strings;
-  // OOBE title is not actually seen in UI, use title of the welcome screen.
-  strings.SetString("title",
-                    l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_TITLE));
-  strings.SetString("welcomeScreenTitle",
-                    l10n_util::GetStringFUTF16(IDS_WELCOME_SCREEN_TITLE,
-                        l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
-  strings.SetString("languageSelect",
-                    l10n_util::GetStringUTF16(IDS_LANGUAGE_SELECTION_SELECT));
-  strings.SetString("keyboardSelect",
-                    l10n_util::GetStringUTF16(IDS_KEYBOARD_SELECTION_SELECT));
-  strings.SetString("networkSelect",
-                    l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_SELECT));
-  strings.SetString("continue",
-      l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_CONTINUE_BUTTON));
-  strings.SetString("eulaScreenTitle",
-                    l10n_util::GetStringFUTF16(IDS_EULA_SCREEN_TITLE,
-                        l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
-  strings.SetString("checkboxLogging",
-      l10n_util::GetStringUTF16(IDS_EULA_CHECKBOX_ENABLE_LOGGING));
-  strings.SetString("learnMore",
-                    l10n_util::GetStringUTF16(IDS_LEARN_MORE));
-  strings.SetString("back",
-                    l10n_util::GetStringUTF16(IDS_EULA_BACK_BUTTON));
-  strings.SetString("acceptAgreement",
-      l10n_util::GetStringUTF16(IDS_EULA_ACCEPT_AND_CONTINUE_BUTTON));
-  SetFontAndTextDirection(&strings);
-
-  static const base::StringPiece html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(IDR_OOBE_HTML));
-
-  const std::string& full_html = jstemplate_builder::GetI18nTemplateHtml(
-      html, &strings);
-
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes());
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
-}
-
-// OobeHandler ------------------------------------------------------------
-
-OobeHandler::OobeHandler()
-    : tab_contents_(NULL),
-      state_(SCREEN_LOADING) {
-}
-
-OobeHandler::~OobeHandler() {
-}
-
-WebUIMessageHandler* OobeHandler::Attach(WebUI* web_ui) {
-  return WebUIMessageHandler::Attach(web_ui);
-}
-
-void OobeHandler::Init(TabContents* contents) {
-  tab_contents_ = contents;
-}
-
-void OobeHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback(kJsApiScreenStateInitialize,
-      NewCallback(this, &OobeHandler::HandleScreenStateInitialize));
-}
-
-void OobeHandler::HandleScreenStateInitialize(const ListValue* args) {
-  const size_t kScreenStateInitializeParamCount = 0;
-  if (args->GetSize() != kScreenStateInitializeParamCount) {
-    NOTREACHED();
-    return;
+  std::string response;
+  if (path.empty()) {
+    static const base::StringPiece html(
+        ResourceBundle::GetSharedInstance().GetRawDataResource(IDR_OOBE_HTML));
+    response = jstemplate_builder::GetI18nTemplateHtml(
+        html, localized_strings_.get());
+  } else if (path == kEnterpriseEnrollmentGaiaLoginPath) {
+    static const base::StringPiece html(
+        ResourceBundle::GetSharedInstance().GetRawDataResource(
+            IDR_GAIA_LOGIN_HTML));
+    response = jstemplate_builder::GetI18nTemplateHtml(
+        html, localized_strings_.get());
   }
-  scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr());
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(task.get(), &TaskProxy::HandleInitialize));
-}
 
-void OobeHandler::InitializeScreenState() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // TODO(nkostylev): Integrated with OOBE flow, controllers.
-  state_ = SCREEN_WELCOME;
-  UpdatePage();
-}
-
-void OobeHandler::UpdatePage() {
-  DictionaryValue screen_info_dict;
-  VLOG(1) << "New state: " << state_;
-  screen_info_dict.SetInteger(kState, state_);
-  // TODO(nkostylev): Initialize page state.
-  // web_ui_->CallJavascriptFunction(kJsApiScreenStateChanged,
-  //                                 screen_info_dict);
+  SendResponse(request_id, base::RefCountedString::TakeString(&response));
 }
 
 // OobeUI ----------------------------------------------------------------------
 
-OobeUI::OobeUI(TabContents* contents) : WebUI(contents) {
-  OobeHandler* handler = new OobeHandler();
-  AddMessageHandler((handler)->Attach(this));
-  handler->Init(contents);
-  OobeUIHTMLSource* html_source = new OobeUIHTMLSource();
+OobeUI::OobeUI(TabContents* contents)
+    : ChromeWebUI(contents),
+      update_screen_actor_(NULL),
+      network_screen_actor_(NULL),
+      eula_screen_actor_(NULL),
+      signin_screen_handler_(NULL),
+      user_image_screen_actor_(NULL) {
+  core_handler_ = new CoreOobeHandler(this);
+  AddScreenHandler(core_handler_);
+
+  NetworkScreenHandler* network_screen_handler = new NetworkScreenHandler();
+  network_screen_actor_ = network_screen_handler;
+  AddScreenHandler(network_screen_handler);
+
+  EulaScreenHandler* eula_screen_handler = new EulaScreenHandler();
+  eula_screen_actor_ = eula_screen_handler;
+  AddScreenHandler(eula_screen_handler);
+
+  UpdateScreenHandler* update_screen_handler = new UpdateScreenHandler();
+  update_screen_actor_ = update_screen_handler;
+  AddScreenHandler(update_screen_handler);
+
+  EnterpriseEnrollmentScreenHandler* enterprise_enrollment_screen_handler =
+      new EnterpriseEnrollmentScreenHandler;
+  enterprise_enrollment_screen_actor_ = enterprise_enrollment_screen_handler;
+  AddScreenHandler(enterprise_enrollment_screen_handler);
+
+  UserImageScreenHandler* user_image_screen_handler =
+      new UserImageScreenHandler();
+  user_image_screen_actor_ = user_image_screen_handler;
+  AddScreenHandler(user_image_screen_handler);
+
+  signin_screen_handler_ = new SigninScreenHandler;
+  AddScreenHandler(signin_screen_handler_);
+
+  DictionaryValue* localized_strings = new DictionaryValue();
+  GetLocalizedStrings(localized_strings);
+
+  // Set up the chrome://theme/ source, for Chrome logo.
+  ThemeSource* theme = new ThemeSource(contents->profile());
+  contents->profile()->GetChromeURLDataManager()->AddDataSource(theme);
+
+  // Set up the chrome://terms/ data source, for EULA content.
+  InitializeAboutDataSource(chrome::kChromeUITermsHost, contents->profile());
 
   // Set up the chrome://oobe/ source.
+  OobeUIHTMLSource* html_source =
+      new OobeUIHTMLSource(localized_strings);
   contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+
+  // Set up the chrome://userimage/ source.
+  UserImageSource* user_image_source = new UserImageSource();
+  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+      user_image_source);
+}
+
+void OobeUI::ShowScreen(WizardScreen* screen) {
+  screen->Show();
+}
+
+void OobeUI::HideScreen(WizardScreen* screen) {
+  screen->Hide();
+}
+
+UpdateScreenActor* OobeUI::GetUpdateScreenActor() {
+  return update_screen_actor_;
+}
+
+NetworkScreenActor* OobeUI::GetNetworkScreenActor() {
+  return network_screen_actor_;
+}
+
+EulaScreenActor* OobeUI::GetEulaScreenActor() {
+  return eula_screen_actor_;
+}
+
+EnterpriseEnrollmentScreenActor* OobeUI::
+    GetEnterpriseEnrollmentScreenActor() {
+  return enterprise_enrollment_screen_actor_;
+}
+
+UserImageScreenActor* OobeUI::GetUserImageScreenActor() {
+  return user_image_screen_actor_;
+}
+
+ViewScreenDelegate* OobeUI::GetRegistrationScreenActor() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+ViewScreenDelegate* OobeUI::GetHTMLPageScreenActor() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+void OobeUI::GetLocalizedStrings(base::DictionaryValue* localized_strings) {
+  // Note, handlers_[0] is a GenericHandler used by the WebUI.
+  for (size_t i = 1; i < handlers_.size(); ++i) {
+    static_cast<BaseScreenHandler*>(handlers_[i])->
+        GetLocalizedStrings(localized_strings);
+  }
+  ChromeURLDataManager::DataSource::SetFontAndTextDirection(localized_strings);
+}
+
+void OobeUI::AddScreenHandler(BaseScreenHandler* handler) {
+  AddMessageHandler(handler->Attach(this));
+}
+
+void OobeUI::InitializeHandlers() {
+  // Note, handlers_[0] is a GenericHandler used by the WebUI.
+  for (size_t i = 1; i < handlers_.size(); ++i) {
+    static_cast<BaseScreenHandler*>(handlers_[i])->InitializeBase();
+  }
+}
+
+void OobeUI::ShowOobeUI(bool show) {
+  core_handler_->ShowOobeUI(show);
+}
+
+void OobeUI::ShowSigninScreen() {
+  signin_screen_handler_->Show(core_handler_->show_oobe_ui());
 }
 
 }  // namespace chromeos

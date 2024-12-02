@@ -32,7 +32,7 @@ namespace chrome {
 class ChromeContentRendererClient : public content::ContentRendererClient {
  public:
   ChromeContentRendererClient();
-  ~ChromeContentRendererClient();
+  virtual ~ChromeContentRendererClient();
 
   virtual void RenderThreadStarted() OVERRIDE;
   virtual void RenderViewCreated(RenderView* render_view) OVERRIDE;
@@ -58,7 +58,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual bool WillSendRequest(WebKit::WebFrame* frame,
                                const GURL& url,
                                GURL* new_url) OVERRIDE;
-  virtual FilePath GetMediaLibraryPath() OVERRIDE;
   virtual bool ShouldPumpEventsDuringCookieMessage() OVERRIDE;
   virtual void DidCreateScriptContext(WebKit::WebFrame* frame) OVERRIDE;
   virtual void DidDestroyScriptContext(WebKit::WebFrame* frame) OVERRIDE;
@@ -75,6 +74,12 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void SetExtensionDispatcher(ExtensionDispatcher* extension_dispatcher);
 
  private:
+  WebKit::WebPlugin* CreatePluginImpl(
+      RenderView* render_view,
+      WebKit::WebFrame* frame,
+      const WebKit::WebPluginParams& params,
+      bool* is_default_plugin);
+
   WebKit::WebPlugin* CreatePluginPlaceholder(
       RenderView* render_view,
       WebKit::WebFrame* frame,

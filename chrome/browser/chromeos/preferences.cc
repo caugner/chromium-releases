@@ -9,19 +9,21 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/input_method_library.h"
 #include "chrome/browser/chromeos/cros/power_library.h"
-#include "chrome/browser/chromeos/cros/touchpad_library.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#include "chrome/browser/chromeos/system/touchpad_settings.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "unicode/timezone.h"
 
 namespace chromeos {
@@ -186,6 +188,19 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   // The map of timestamps of the last used file browser handlers.
   prefs->RegisterDictionaryPref(prefs::kLastUsedFileBrowserHandlers,
                                 PrefService::UNSYNCABLE_PREF);
+
+  // Use shared proxies default to off.
+  prefs->RegisterBooleanPref(prefs::kUseSharedProxies,
+                             false,
+                             PrefService::SYNCABLE_PREF);
+
+  // OAuth1 all access token and secret pair.
+  prefs->RegisterStringPref(prefs::kOAuth1Token,
+                            "",
+                            PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterStringPref(prefs::kOAuth1Secret,
+                            "",
+                            PrefService::UNSYNCABLE_PREF);
 }
 
 void Preferences::Init(PrefService* prefs) {
@@ -254,6 +269,8 @@ void Preferences::Init(PrefService* prefs) {
 
   enable_screen_lock_.Init(prefs::kEnableScreenLock, prefs, this);
 
+  use_shared_proxies_.Init(prefs::kUseSharedProxies, prefs, this);
+
   // Initialize preferences to currently saved state.
   NotifyPrefChanged(NULL);
 
@@ -264,17 +281,17 @@ void Preferences::Init(PrefService* prefs) {
   }
 }
 
-void Preferences::Observe(NotificationType type,
+void Preferences::Observe(int type,
                           const NotificationSource& source,
                           const NotificationDetails& details) {
-  if (type == NotificationType::PREF_CHANGED)
+  if (type == chrome::NOTIFICATION_PREF_CHANGED)
     NotifyPrefChanged(Details<std::string>(details).ptr());
 }
 
 void Preferences::NotifyPrefChanged(const std::string* pref_name) {
   if (!pref_name || *pref_name == prefs::kTapToClickEnabled) {
     bool enabled = tap_to_click_enabled_.GetValue();
-    CrosLibrary::Get()->GetTouchpadLibrary()->SetTapToClick(enabled);
+    system::touchpad_settings::SetTapToClick(enabled);
     if (pref_name)
       UMA_HISTOGRAM_BOOLEAN("Touchpad.TapToClick.Changed", enabled);
     else
@@ -282,7 +299,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
   }
   if (!pref_name || *pref_name == prefs::kTouchpadSensitivity) {
     int sensitivity = sensitivity_.GetValue();
-    CrosLibrary::Get()->GetTouchpadLibrary()->SetSensitivity(sensitivity);
+    system::touchpad_settings::SetSensitivity(sensitivity);
     if (pref_name) {
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Touchpad.Sensitivity.Changed", sensitivity, 1, 5, 5);
@@ -440,35 +457,40 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     CrosLibrary::Get()->GetPowerLibrary()->EnableScreenLock(
         enable_screen_lock_.GetValue());
   }
+
+  if (!pref_name || *pref_name == prefs::kUseSharedProxies) {
+    g_browser_process->chromeos_proxy_config_service_impl()->
+        UISetUseSharedProxies(use_shared_proxies_.GetValue());
+  }
 }
 
 void Preferences::SetLanguageConfigBoolean(const char* section,
                                            const char* name,
                                            bool value) {
-  ImeConfigValue config;
-  config.type = ImeConfigValue::kValueTypeBool;
+  input_method::ImeConfigValue config;
+  config.type = input_method::ImeConfigValue::kValueTypeBool;
   config.bool_value = value;
-  CrosLibrary::Get()->GetInputMethodLibrary()->
+  input_method::InputMethodManager::GetInstance()->
       SetImeConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigInteger(const char* section,
                                            const char* name,
                                            int value) {
-  ImeConfigValue config;
-  config.type = ImeConfigValue::kValueTypeInt;
+  input_method::ImeConfigValue config;
+  config.type = input_method::ImeConfigValue::kValueTypeInt;
   config.int_value = value;
-  CrosLibrary::Get()->GetInputMethodLibrary()->
+  input_method::InputMethodManager::GetInstance()->
       SetImeConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigString(const char* section,
                                           const char* name,
                                           const std::string& value) {
-  ImeConfigValue config;
-  config.type = ImeConfigValue::kValueTypeString;
+  input_method::ImeConfigValue config;
+  config.type = input_method::ImeConfigValue::kValueTypeString;
   config.string_value = value;
-  CrosLibrary::Get()->GetInputMethodLibrary()->
+  input_method::InputMethodManager::GetInstance()->
       SetImeConfig(section, name, config);
 }
 
@@ -476,12 +498,12 @@ void Preferences::SetLanguageConfigStringList(
     const char* section,
     const char* name,
     const std::vector<std::string>& values) {
-  ImeConfigValue config;
-  config.type = ImeConfigValue::kValueTypeStringList;
+  input_method::ImeConfigValue config;
+  config.type = input_method::ImeConfigValue::kValueTypeStringList;
   for (size_t i = 0; i < values.size(); ++i)
     config.string_list_value.push_back(values[i]);
 
-  CrosLibrary::Get()->GetInputMethodLibrary()->
+  input_method::InputMethodManager::GetInstance()->
       SetImeConfig(section, name, config);
 }
 

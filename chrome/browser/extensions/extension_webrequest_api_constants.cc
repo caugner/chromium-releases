@@ -7,6 +7,8 @@
 namespace extension_webrequest_api_constants {
 
 const char kErrorKey[] = "error";
+const char kFrameIdKey[] = "frameId";
+const char kFromCache[] = "fromCache";
 const char kIpKey[] = "ip";
 const char kMethodKey[] = "method";
 const char kRedirectUrlKey[] = "redirectUrl";
@@ -29,7 +31,7 @@ const char kOnBeforeSendHeaders[] =
 const char kOnCompleted[] = "experimental.webRequest.onCompleted";
 const char kOnErrorOccurred[] = "experimental.webRequest.onErrorOccurred";
 const char kOnResponseStarted[] = "experimental.webRequest.onResponseStarted";
-const char kOnRequestSent[] = "experimental.webRequest.onRequestSent";
+const char kOnSendHeaders[] = "experimental.webRequest.onSendHeaders";
 
 const char kInvalidRedirectUrl[] = "redirectUrl '*' is not a valid URL.";
 const char kInvalidBlockingResponse[] =

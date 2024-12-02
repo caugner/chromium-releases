@@ -4,7 +4,20 @@
 
 #include "content/common/url_constants.h"
 
+#include <stdio.h>
+
 namespace chrome {
+
+const char* kSavableSchemes[] = {
+  kHttpScheme,
+  kHttpsScheme,
+  kFileScheme,
+  kFtpScheme,
+  kExtensionScheme,
+  kChromeDevToolsScheme,
+  kChromeUIScheme,
+  NULL
+};
 
 const char kAboutScheme[] = "about";
 const char kBlobScheme[] = "blob";
@@ -24,7 +37,6 @@ const char kHttpsScheme[] = "https";
 const char kJavaScriptScheme[] = "javascript";
 const char kMailToScheme[] = "mailto";
 const char kMetadataScheme[] = "metadata";
-const char kUserScriptScheme[] = "chrome-user-script";
 const char kViewSourceScheme[] = "view-source";
 
 const char kStandardSchemeSeparator[] = "://";

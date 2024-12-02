@@ -15,7 +15,7 @@ namespace views {
 // A View that hosts a native GTK button.
 class NativeButtonGtk : public NativeControlGtk, public NativeButtonWrapper {
  public:
-  explicit NativeButtonGtk(NativeButtonBase* native_button);
+  explicit NativeButtonGtk(NativeButton* native_button);
   virtual ~NativeButtonGtk();
 
   // Overridden from NativeButtonWrapper:
@@ -42,7 +42,7 @@ class NativeButtonGtk : public NativeControlGtk, public NativeButtonWrapper {
   virtual void OnClicked();
 
   // The NativeButton we are bound to.
-  NativeButtonBase* native_button_;
+  NativeButton* native_button_;
 
   // A flag to prevent OnClicked event when updating
   // gtk control via API gtk_toggle_button_set_active.
@@ -61,7 +61,7 @@ class NativeButtonGtk : public NativeControlGtk, public NativeButtonWrapper {
 // A View that hosts a native Gtk checkbox button.
 class NativeCheckboxGtk : public NativeButtonGtk {
  public:
-  explicit NativeCheckboxGtk(Checkbox* checkbox);
+  explicit NativeCheckboxGtk(NativeCheckbox* checkbox);
 
  protected:
   // Update checkbox's check state.
@@ -69,7 +69,7 @@ class NativeCheckboxGtk : public NativeButtonGtk {
 
  private:
   // Return Checkbox we are bound to.
-  Checkbox* checkbox();
+  NativeCheckbox* checkbox();
 
   virtual void CreateNativeControl();
 

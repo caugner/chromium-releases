@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "ui/gfx/rect.h"
 
+class NativePanel;
 class PanelManager;
 
 // A platform independent implementation of BrowserWindow for Panels.  This
@@ -25,14 +26,25 @@ class PanelManager;
 //   other Panels.  For example deleting a panel would rearrange other panels.
 class Panel : public BrowserWindow {
  public:
+  enum ExpansionState {
+   // The panel is fully expanded with both title-bar and the client-area.
+   EXPANDED,
+   // The panel is shown with the title-bar only.
+   TITLE_ONLY,
+   // The panel is shown with 3-pxiel line.
+   MINIMIZED
+  };
+
   virtual ~Panel();
 
   // Returns the PanelManager associated with this panel.
   PanelManager* manager() const;
 
-  void Minimize();
-  void Restore();
-  bool minimized() const { return minimized_; }
+  void SetExpansionState(ExpansionState new_expansion_state);
+
+  bool ShouldBringUpTitleBar(int mouse_x, int mouse_y) const;
+
+  bool IsDrawingAttention() const;
 
   // BrowserWindow overrides.
   virtual void Show() OVERRIDE;
@@ -48,7 +60,8 @@ class Panel : public BrowserWindow {
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
   virtual void ToolbarSizeChanged(bool is_animating) OVERRIDE;
   virtual void UpdateTitleBar() OVERRIDE;
-  virtual void ShelfVisibilityChanged() OVERRIDE;
+  virtual void BookmarkBarStateChanged(
+      BookmarkBar::AnimateChangeType change_type) OVERRIDE;
   virtual void UpdateDevTools() OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
@@ -76,7 +89,7 @@ class Panel : public BrowserWindow {
   virtual void ConfirmSetDefaultSearchProvider(
       TabContents* tab_contents,
       TemplateURL* template_url,
-      TemplateURLModel* template_url_model) OVERRIDE;
+      TemplateURLService* template_url_service) OVERRIDE;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
@@ -118,6 +131,8 @@ class Panel : public BrowserWindow {
   virtual void ToggleTabStripMode() OVERRIDE;
 #if defined(OS_MACOSX)
   virtual void OpenTabpose() OVERRIDE;
+  virtual void SetPresentationMode(bool presentation_mode) OVERRIDE;
+  virtual bool InPresentationMode() OVERRIDE;
 #endif
   virtual void PrepareForInstant() OVERRIDE;
   virtual void ShowInstant(TabContentsWrapper* preview) OVERRIDE;
@@ -131,15 +146,19 @@ class Panel : public BrowserWindow {
 
   // Construct a native panel BrowserWindow implementation for the specified
   // |browser|.
-  static BrowserWindow* CreateNativePanel(Browser* browser, Panel* panel);
+  static NativePanel* CreateNativePanel(Browser* browser,
+                                        Panel* panel,
+                                        const gfx::Rect& bounds);
+
+  // Gets the extension from the browser that a panel is created from.
+  // Returns NULL if it cannot be found.
+  static const Extension* GetExtension(Browser* browser);
 
 #ifdef UNIT_TEST
-  BrowserWindow* browser_window() { return browser_window_.get(); }
+  NativePanel* native_panel() { return native_panel_; }
 #endif
 
-#ifndef NDEBUG
-  bool closing() const { return closing_; }
-#endif
+  ExpansionState expansion_state() const { return expansion_state_; }
 
  protected:
   virtual void DestroyBrowser() OVERRIDE;
@@ -156,25 +175,13 @@ class Panel : public BrowserWindow {
   //   not allowed for Panel.
   void SetPanelBounds(const gfx::Rect& bounds);
 
-  // Platform specifc BrowserWindow implementation for panels.  It'd be one of
+  Browser* browser_;  // Weak, owned by native_panel.
+
+  // Platform specifc implementation for panels.  It'd be one of
   // PanelBrowserWindowGtk/PanelBrowserView/PanelBrowserWindowCocoa.
-  scoped_ptr<BrowserWindow> browser_window_;
+  NativePanel* native_panel_;  // Weak, owns us.
 
-  // The normal bounds when the panel is not minimized.
-  gfx::Rect bounds_;
-
-  // The bounds when the panel is minimized.
-  gfx::Rect minimized_bounds_;
-
-  // Is the panel being closed? This is used by the platform specific
-  // BrowserWindow implementation to ensure its Close() method is only invoked
-  // from Panel::Close().
-#ifndef NDEBUG
-  bool closing_;
-#endif
-
-  // Is the panel minimized?
-  bool minimized_;
+  ExpansionState expansion_state_;
 
   DISALLOW_COPY_AND_ASSIGN(Panel);
 };

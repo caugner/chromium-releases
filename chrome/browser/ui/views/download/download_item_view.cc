@@ -29,9 +29,9 @@
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "unicode/uchar.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
@@ -84,9 +84,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   : warning_icon_(NULL),
     download_(download),
     parent_(parent),
-    status_text_(UTF16ToWide(
-        l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_STARTING))),
-    show_status_text_(true),
+    status_text_(l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_STARTING)),
     body_state_(NORMAL),
     drop_down_state_(NORMAL),
     progress_angle_(download_util::kStartAngleDegrees),
@@ -215,12 +213,12 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     tooltip_text_.clear();
     body_state_ = DANGEROUS;
     drop_down_state_ = DANGEROUS;
-    save_button_ = new views::NativeButton(this,
+    save_button_ = new views::NativeTextButton(this,
         UTF16ToWide(l10n_util::GetStringUTF16(
             download->is_extension_install() ?
-                IDS_CONTINUE_EXTENSION_DOWNLOAD : IDS_SAVE_DOWNLOAD)));
+                IDS_CONTINUE_EXTENSION_DOWNLOAD : IDS_CONFIRM_DOWNLOAD)));
     save_button_->set_ignore_minimum_size(true);
-    discard_button_ = new views::NativeButton(
+    discard_button_ = new views::NativeTextButton(
         this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_DISCARD_DOWNLOAD)));
     discard_button_->set_ignore_minimum_size(true);
     AddChildView(save_button_);
@@ -356,8 +354,6 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
       complete_animation_->SetSlideDuration(kInterruptedAnimationDurationMs);
       complete_animation_->SetTweenType(ui::Tween::LINEAR);
       complete_animation_->Show();
-      if (status_text.empty())
-        show_status_text_ = false;
       SchedulePaint();
       LoadIcon();
       break;
@@ -371,8 +367,6 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
       complete_animation_->SetSlideDuration(kCompleteAnimationDurationMs);
       complete_animation_->SetTweenType(ui::Tween::LINEAR);
       complete_animation_->Show();
-      if (status_text.empty())
-        show_status_text_ = false;
       SchedulePaint();
       LoadIcon();
       break;
@@ -387,7 +381,7 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
       NOTREACHED();
   }
 
-  status_text_ = UTF16ToWideHack(status_text);
+  status_text_ = status_text;
   UpdateAccessibleName();
 
   // We use the parent's (DownloadShelfView's) SchedulePaint, since there
@@ -724,7 +718,7 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
 
   // Draw status before button image to effectively lighten text.
   if (!IsDangerousMode()) {
-    if (show_status_text_) {
+    if (!status_text_.empty()) {
       int mirrored_x = GetMirroredXWithWidthInView(
           download_util::kSmallProgressIconSize, kTextWidth);
       // Add font_.height() to compensate for title, which is drawn later.
@@ -742,7 +736,7 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
                                SkColorGetG(file_name_color)),
               static_cast<int>(kDownloadItemLuminanceMod *
                                SkColorGetB(file_name_color)));
-      canvas->DrawStringInt(WideToUTF16Hack(status_text_), font_,
+      canvas->DrawStringInt(status_text_, font_,
                             file_name_color, mirrored_x, y, kTextWidth,
                             font_.GetHeight());
     }
@@ -857,8 +851,8 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
     SkColor file_name_color = GetThemeProvider()->GetColor(
         ThemeService::COLOR_BOOKMARK_TEXT);
     int y =
-        box_y_ + (show_status_text_ ? kVerticalPadding :
-                                      (box_height_ - font_.GetHeight()) / 2);
+        box_y_ + (status_text_.empty() ?
+                  ((box_height_ - font_.GetHeight()) / 2) : kVerticalPadding);
 
     // Draw the file's name.
     canvas->DrawStringInt(filename, font_,
@@ -1115,7 +1109,7 @@ void DownloadItemView::UpdateAccessibleName() {
   if (download_->safety_state() == DownloadItem::DANGEROUS) {
     new_name = WideToUTF16Hack(dangerous_download_label_->GetText());
   } else {
-    new_name = WideToUTF16Hack(status_text_) + char16(' ') +
+    new_name = status_text_ + char16(' ') +
         download_->GetFileNameToReportUser().LossyDisplayName();
   }
 

@@ -33,11 +33,6 @@ class GaiaAuthFetcher : public URLFetcher::Delegate {
     HostedAccountsNotAllowed
   };
 
-  // The URLs for different calls in the Google Accounts programmatic login API.
-  static const char kClientLoginUrl[];
-  static const char kIssueAuthTokenUrl[];
-  static const char kGetUserInfoUrl[];
-
   // Magic string indicating that, while a second factor is still
   // needed to complete authentication, the user provided the right password.
   static const char kSecondFactor[];
@@ -73,6 +68,9 @@ class GaiaAuthFetcher : public URLFetcher::Delegate {
   void StartGetUserInfo(const std::string& lsid,
                         const std::string& info_key);
 
+  // Start a TokenAuth request to pre-login the user with the given credentials.
+  void StartTokenAuth(const std::string& auth_token);
+
   // Implementation of URLFetcher::Delegate
   virtual void OnURLFetchComplete(const URLFetcher* source,
                                   const GURL& url,
@@ -87,6 +85,13 @@ class GaiaAuthFetcher : public URLFetcher::Delegate {
   // Stop any URL fetches in progress.
   void CancelRequest();
 
+  // From a URLFetcher result, generate an appropriate error.
+  // From the API documentation, both IssueAuthToken and ClientLogin have
+  // the same error returns.
+  static GoogleServiceAuthError GenerateOAuthLoginError(
+      const std::string& data,
+      const net::URLRequestStatus& status);
+
  private:
   // ClientLogin body constants that don't change
   static const char kCookiePersistence[];
@@ -99,20 +104,26 @@ class GaiaAuthFetcher : public URLFetcher::Delegate {
   static const char kClientLoginCaptchaFormat[];
   // The format of the POST body for IssueAuthToken.
   static const char kIssueAuthTokenFormat[];
-  // The format of the POSt body for GetUserInfo.
+  // The format of the POST body for GetUserInfo.
   static const char kGetUserInfoFormat[];
+  // The format of the POST body for TokenAuth.
+  static const char kTokenAuthFormat[];
 
   // Constants for parsing ClientLogin errors.
   static const char kAccountDeletedError[];
+  static const char kAccountDeletedErrorCode[];
   static const char kAccountDisabledError[];
+  static const char kAccountDisabledErrorCode[];
   static const char kBadAuthenticationError[];
+  static const char kBadAuthenticationErrorCode[];
   static const char kCaptchaError[];
+  static const char kCaptchaErrorCode[];
   static const char kServiceUnavailableError[];
+  static const char kServiceUnavailableErrorCode[];
   static const char kErrorParam[];
   static const char kErrorUrlParam[];
   static const char kCaptchaUrlParam[];
   static const char kCaptchaTokenParam[];
-  static const char kCaptchaUrlPrefix[];
 
   // Process the results of a ClientLogin fetch.
   void OnClientLoginFetched(const std::string& data,
@@ -127,6 +138,10 @@ class GaiaAuthFetcher : public URLFetcher::Delegate {
                             const net::URLRequestStatus& status,
                             int response_code);
 
+  void OnTokenAuthFetched(const std::string& data,
+                          const net::URLRequestStatus& status,
+                          int response_code);
+
   // Tokenize the results of a ClientLogin fetch.
   static void ParseClientLoginResponse(const std::string& data,
                                        std::string* sid,
@@ -138,13 +153,6 @@ class GaiaAuthFetcher : public URLFetcher::Delegate {
                                       std::string* error_url,
                                       std::string* captcha_url,
                                       std::string* captcha_token);
-
-  // From a URLFetcher result, generate an appropriate error.
-  // From the API documentation, both IssueAuthToken and ClientLogin have
-  // the same error returns.
-  static GoogleServiceAuthError GenerateAuthError(
-      const std::string& data,
-      const net::URLRequestStatus& status);
 
   // Is this a special case Gaia error for TwoFactor auth?
   static bool IsSecondFactorSuccess(const std::string& alleged_error);
@@ -167,12 +175,23 @@ class GaiaAuthFetcher : public URLFetcher::Delegate {
   // user information.
   static std::string MakeGetUserInfoBody(const std::string& lsid);
 
+  // Supply the authentication token returned from StartIssueAuthToken.
+  static std::string MakeTokenAuthBody(const std::string& auth_token,
+                                       const std::string& continue_url,
+                                       const std::string& source);
+
   // Create a fetcher useable for making any Gaia request.
   static URLFetcher* CreateGaiaFetcher(net::URLRequestContextGetter* getter,
                                        const std::string& body,
                                        const GURL& gaia_gurl_,
                                        URLFetcher::Delegate* delegate);
 
+  // From a URLFetcher result, generate an appropriate error.
+  // From the API documentation, both IssueAuthToken and ClientLogin have
+  // the same error returns.
+  static GoogleServiceAuthError GenerateAuthError(
+      const std::string& data,
+      const net::URLRequestStatus& status);
 
   // These fields are common to GaiaAuthFetcher, same every request
   GaiaAuthConsumer* const consumer_;
@@ -181,6 +200,7 @@ class GaiaAuthFetcher : public URLFetcher::Delegate {
   const GURL client_login_gurl_;
   const GURL issue_auth_token_gurl_;
   const GURL get_user_info_gurl_;
+  const GURL token_auth_gurl_;
 
   // While a fetch is going on:
   scoped_ptr<URLFetcher> fetcher_;

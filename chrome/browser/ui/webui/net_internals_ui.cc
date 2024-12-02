@@ -12,9 +12,9 @@
 
 #include "base/base64.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
+#include "base/metrics/field_trial.h"  // TODO(joi): Remove after the trial ends.
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
@@ -28,19 +28,18 @@
 #include "chrome/browser/net/connection_tester.h"
 #include "chrome/browser/net/passive_log_collector.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/shell_dialogs.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/notification_details.h"
 #include "grit/generated_resources.h"
 #include "grit/net_internals_resources.h"
@@ -64,7 +63,7 @@
 
 #ifdef OS_CHROMEOS
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/syslogs_library.h"
+#include "chrome/browser/chromeos/system/syslogs_provider.h"
 #endif
 #ifdef OS_WIN
 #include "chrome/browser/net/service_providers_win.h"
@@ -76,6 +75,11 @@ namespace {
 // page.  All events that occur during this period are grouped together and
 // sent to the page at once, which reduces context switching and CPU usage.
 const int kNetLogEventDelayMilliseconds = 100;
+
+// about:net-internals will not even attempt to load a log dump when it
+// encounters a new version.  This should be incremented when significant
+// changes are made that will invalidate the old loading code.
+const int kLogFormatVersion = 1;
 
 // Returns the HostCache for |context|'s primary HostResolver, or NULL if
 // there is none.
@@ -126,21 +130,17 @@ Value* ExperimentToValue(const ConnectionTester::Experiment& experiment) {
   return dict;
 }
 
-class NetInternalsHTMLSource : public ChromeURLDataManager::DataSource {
- public:
-  NetInternalsHTMLSource();
+ChromeWebUIDataSource* CreateNetInternalsHTMLSource() {
+  ChromeWebUIDataSource* source =
+      new ChromeWebUIDataSource(chrome::kChromeUINetInternalsHost);
 
-  // Called when the network layer has requested a resource underneath
-  // the path we registered.
-  virtual void StartDataRequest(const std::string& path,
-                                bool is_incognito,
-                                int request_id);
-  virtual std::string GetMimeType(const std::string&) const;
-
- private:
-  ~NetInternalsHTMLSource() {}
-  DISALLOW_COPY_AND_ASSIGN(NetInternalsHTMLSource);
-};
+  source->set_default_resource(IDR_NET_INTERNALS_INDEX_HTML);
+  source->add_resource_path("help.html", IDR_NET_INTERNALS_HELP_HTML);
+  source->add_resource_path("help.js", IDR_NET_INTERNALS_HELP_JS);
+  source->add_resource_path("index.js", IDR_NET_INTERNALS_INDEX_JS);
+  source->set_json_path("strings.js");
+  return source;
+}
 
 // This class receives javascript messages from the renderer.
 // Note that the WebUI infrastructure runs on the UI thread, therefore all of
@@ -153,7 +153,6 @@ class NetInternalsHTMLSource : public ChromeURLDataManager::DataSource {
 // TODO(eroman): Can we start on the IO thread to begin with?
 class NetInternalsMessageHandler
     : public WebUIMessageHandler,
-      public SelectFileDialog::Listener,
       public base::SupportsWeakPtr<NetInternalsMessageHandler>,
       public NotificationObserver {
  public:
@@ -164,13 +163,13 @@ class NetInternalsMessageHandler
   virtual WebUIMessageHandler* Attach(WebUI* web_ui);
   virtual void RegisterMessages();
 
-  // Executes the javascript function |function_name| in the renderer, passing
-  // it the argument |value|.
-  void CallJavascriptFunction(const std::wstring& function_name,
-                              const Value* value);
+  // Calls g_browser.receive in the renderer, passing in |command| and |arg|.
+  // Takes ownership of |arg|.  If the renderer is displaying a log file, the
+  // message will be ignored.
+  void SendJavascriptCommand(const std::wstring& command, Value* arg);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -181,37 +180,10 @@ class NetInternalsMessageHandler
   void OnRefreshSystemLogs(const ListValue* list);
   void OnGetSystemLog(const ListValue* list);
 #endif
-
-  // SelectFileDialog::Listener implementation
-  virtual void FileSelected(const FilePath& path, int index, void* params);
-  virtual void FileSelectionCanceled(void* params);
-
-  // The only callback handled on the UI thread.  As it needs to access fields
-  // from |web_ui_|, it can't be called on the IO thread.
-  void OnLoadLogFile(const ListValue* list);
+  void OnGetPrerenderInfo(const ListValue* list);
 
  private:
   class IOThreadImpl;
-
-  // Task run on the FILE thread to read the contents of a log file.  The result
-  // is then passed to IOThreadImpl's CallJavascriptFunction, which sends it
-  // back to the web page.  IOThreadImpl is used instead of the
-  // NetInternalsMessageHandler directly because it checks if the message
-  // handler has been destroyed in the meantime.
-  class ReadLogFileTask : public Task {
-   public:
-    ReadLogFileTask(IOThreadImpl* proxy, const FilePath& path);
-
-    virtual void Run();
-
-   private:
-    // IOThreadImpl implements existence checks already.  Simpler to reused them
-    // then to reimplement them.
-    scoped_refptr<IOThreadImpl> proxy_;
-
-    // Path of the file to open.
-    const FilePath path_;
-  };
 
 #ifdef OS_CHROMEOS
   // Class that is used for getting network related ChromeOS logs.
@@ -224,7 +196,7 @@ class NetInternalsMessageHandler
   class SystemLogsGetter {
    public:
     SystemLogsGetter(NetInternalsMessageHandler* handler,
-                     chromeos::SyslogsLibrary* syslog_lib);
+                     chromeos::system::SyslogsProvider* syslogs_provider);
     ~SystemLogsGetter();
 
     // Deletes logs copy we currently have, and resets logs_requested and
@@ -242,7 +214,7 @@ class NetInternalsMessageHandler
     void LoadSystemLogs();
     // Processes callback from libcros containing system logs. Postponed
     // request responses are sent.
-    void OnSystemLogsLoaded(chromeos::LogDictionaryType* sys_info,
+    void OnSystemLogsLoaded(chromeos::system::LogDictionaryType* sys_info,
                             std::string* ignored_content);
 
    private:
@@ -256,10 +228,10 @@ class NetInternalsMessageHandler
     void SendLogs(const SystemLogRequest& request);
 
     NetInternalsMessageHandler* handler_;
-    chromeos::SyslogsLibrary* syslogs_library_;
+    chromeos::system::SyslogsProvider* syslogs_provider_;
     // List of postponed requests.
     std::list<SystemLogRequest> requests_;
-    scoped_ptr<chromeos::LogDictionaryType> logs_;
+    scoped_ptr<chromeos::system::LogDictionaryType> logs_;
     bool logs_received_;
     bool logs_requested_;
     CancelableRequestConsumer consumer_;
@@ -272,6 +244,11 @@ class NetInternalsMessageHandler
   // be accessed on the UI thread.
   BooleanPrefMember http_throttling_enabled_;
 
+  // The pref member that determines whether experimentation on HTTP throttling
+  // is allowed (this becomes false once the user explicitly sets the
+  // feature to on or off).
+  BooleanPrefMember http_throttling_may_experiment_;
+
   // OnRendererReady invokes this callback to do the part of message handling
   // that needs to happen on the IO thread.
   scoped_ptr<WebUI::MessageCallback> renderer_ready_io_callback_;
@@ -279,21 +256,20 @@ class NetInternalsMessageHandler
   // This is the "real" message handler, which lives on the IO thread.
   scoped_refptr<IOThreadImpl> proxy_;
 
+  base::WeakPtr<prerender::PrerenderManager> prerender_manager_;
+
 #ifdef OS_CHROMEOS
   // Class that handles getting and filtering system logs.
   scoped_ptr<SystemLogsGetter> syslogs_getter_;
 #endif
-
-  // Used for loading log files.
-  scoped_refptr<SelectFileDialog> select_log_file_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(NetInternalsMessageHandler);
 };
 
 // This class is the "real" message handler. It is allocated and destroyed on
 // the UI thread.  With the exception of OnAddEntry, OnWebUIDeleted, and
-// CallJavascriptFunction, its methods are all expected to be called from the IO
-// thread.  OnAddEntry and CallJavascriptFunction can be called from any thread,
+// SendJavascriptCommand, its methods are all expected to be called from the IO
+// thread.  OnAddEntry and SendJavascriptCommand can be called from any thread,
 // and OnWebUIDeleted can only be called from the UI thread.
 class NetInternalsMessageHandler::IOThreadImpl
     : public base::RefCountedThreadSafe<
@@ -378,10 +354,11 @@ class NetInternalsMessageHandler::IOThreadImpl
       int result);
   virtual void OnCompletedConnectionTestSuite();
 
-  // Helper that executes |function_name| in the attached renderer.
-  // The function takes ownership of |arg|.  Note that this can be called from
-  // any thread.
-  void CallJavascriptFunction(const std::wstring& function_name, Value* arg);
+  // Helper that calls g_browser.receive in the renderer, passing in |command|
+  // and |arg|.  Takes ownership of |arg|.  If the renderer is displaying a log
+  // file, the message will be ignored.  Note that this can be called from any
+  // thread.
+  void SendJavascriptCommand(const std::wstring& command, Value* arg);
 
  private:
   friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
@@ -470,60 +447,6 @@ class NetInternalsMessageHandler::IOThreadImpl::CallbackHelper
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// NetInternalsHTMLSource
-//
-////////////////////////////////////////////////////////////////////////////////
-
-NetInternalsHTMLSource::NetInternalsHTMLSource()
-    : DataSource(chrome::kChromeUINetInternalsHost, MessageLoop::current()) {
-}
-
-void NetInternalsHTMLSource::StartDataRequest(const std::string& path,
-                                              bool is_incognito,
-                                              int request_id) {
-  DictionaryValue localized_strings;
-  SetFontAndTextDirection(&localized_strings);
-
-  // The provided "path" may contain a fragment, or query section. We only
-  // care about the path itself, and will disregard anything else.
-  std::string filename =
-      GURL(std::string("chrome://net/") + path).path().substr(1);
-
-  // The source for the net internals page is flattened during compilation, so
-  // the only resource that should legitimately be requested is the main file.
-  // Note that users can type anything into the address bar, though, so we must
-  // handle arbitrary input.
-  if (filename.empty() || filename == "index.html") {
-    base::StringPiece html(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-            IDR_NET_INTERNALS_INDEX_HTML));
-    std::string full_html(html.data(), html.size());
-    jstemplate_builder::AppendJsonHtml(&localized_strings, &full_html);
-    jstemplate_builder::AppendI18nTemplateSourceHtml(&full_html);
-    jstemplate_builder::AppendI18nTemplateProcessHtml(&full_html);
-    jstemplate_builder::AppendJsTemplateSourceHtml(&full_html);
-
-    scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-    html_bytes->data.resize(full_html.size());
-    std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-    SendResponse(request_id, html_bytes);
-    return;
-  }
-
-  const std::string data_string("<p style='color:red'>Failed to read resource" +
-      EscapeForHTML(filename) + "</p>");
-  scoped_refptr<RefCountedBytes> bytes(new RefCountedBytes);
-  bytes->data.resize(data_string.size());
-  std::copy(data_string.begin(), data_string.end(), bytes->data.begin());
-  SendResponse(request_id, bytes);
-}
-
-std::string NetInternalsHTMLSource::GetMimeType(const std::string&) const {
-  return "text/html";
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//
 // NetInternalsMessageHandler
 //
 ////////////////////////////////////////////////////////////////////////////////
@@ -537,60 +460,40 @@ NetInternalsMessageHandler::~NetInternalsMessageHandler() {
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(proxy_.get(), &IOThreadImpl::Detach));
   }
-  if (select_log_file_dialog_)
-    select_log_file_dialog_->ListenerDestroyed();
 }
 
 WebUIMessageHandler* NetInternalsMessageHandler::Attach(WebUI* web_ui) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   PrefService* pref_service = web_ui->GetProfile()->GetPrefs();
-  http_throttling_enabled_.Init(prefs::kHttpThrottlingEnabled, pref_service,
-                                this);
+  http_throttling_enabled_.Init(
+      prefs::kHttpThrottlingEnabled, pref_service, this);
+  http_throttling_may_experiment_.Init(
+      prefs::kHttpThrottlingMayExperiment, pref_service, NULL);
 
   proxy_ = new IOThreadImpl(this->AsWeakPtr(), g_browser_process->io_thread(),
                             web_ui->GetProfile()->GetRequestContext());
 #ifdef OS_CHROMEOS
   syslogs_getter_.reset(new SystemLogsGetter(this,
-      chromeos::CrosLibrary::Get()->GetSyslogsLibrary()));
+      chromeos::system::SyslogsProvider::GetInstance()));
 #endif
   renderer_ready_io_callback_.reset(
       proxy_->CreateCallback(&IOThreadImpl::OnRendererReady));
+
+  prerender::PrerenderManager* prerender_manager =
+      web_ui->GetProfile()->GetPrerenderManager();
+  if (prerender_manager) {
+    prerender_manager_ = prerender_manager->AsWeakPtr();
+  } else {
+    prerender_manager_ = base::WeakPtr<prerender::PrerenderManager>();
+  }
 
   WebUIMessageHandler* result = WebUIMessageHandler::Attach(web_ui);
   return result;
 }
 
-void NetInternalsMessageHandler::FileSelected(
-    const FilePath& path, int index, void* params) {
-  select_log_file_dialog_.release();
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      new ReadLogFileTask(proxy_.get(), path));
-}
-
-void NetInternalsMessageHandler::FileSelectionCanceled(void* params) {
-  select_log_file_dialog_.release();
-}
-
-void NetInternalsMessageHandler::OnLoadLogFile(const ListValue* list) {
-  // Only allow a single dialog at a time.
-  if (select_log_file_dialog_.get())
-    return;
-  select_log_file_dialog_ = SelectFileDialog::Create(this);
-  select_log_file_dialog_->SelectFile(
-      SelectFileDialog::SELECT_OPEN_FILE, string16(), FilePath(), NULL, 0,
-      FILE_PATH_LITERAL(""), web_ui_->tab_contents(),
-      web_ui_->tab_contents()->view()->GetTopLevelNativeWindow(), NULL);
-}
-
 void NetInternalsMessageHandler::RegisterMessages() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // Only callback handled on UI thread.
-  web_ui_->RegisterMessageCallback(
-      "loadLogFile",
-      NewCallback(this, &NetInternalsMessageHandler::OnLoadLogFile));
-
   web_ui_->RegisterMessageCallback(
       "notifyReady",
       NewCallback(this, &NetInternalsMessageHandler::OnRendererReady));
@@ -665,36 +568,42 @@ void NetInternalsMessageHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(
       "setLogLevel",
       proxy_->CreateCallback(&IOThreadImpl::OnSetLogLevel));
-
   web_ui_->RegisterMessageCallback(
       "enableHttpThrottling",
       NewCallback(this, &NetInternalsMessageHandler::OnEnableHttpThrottling));
+  web_ui_->RegisterMessageCallback(
+      "getPrerenderInfo",
+      NewCallback(this, &NetInternalsMessageHandler::OnGetPrerenderInfo));
 }
 
-void NetInternalsMessageHandler::CallJavascriptFunction(
-    const std::wstring& function_name,
-    const Value* value) {
+void NetInternalsMessageHandler::SendJavascriptCommand(
+    const std::wstring& command,
+    Value* arg) {
+  scoped_ptr<Value> command_value(
+      Value::CreateStringValue(WideToASCII(command)));
+  scoped_ptr<Value> value(arg);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (value) {
-    web_ui_->CallJavascriptFunction(WideToASCII(function_name), *value);
+  if (value.get()) {
+    web_ui_->CallJavascriptFunction("g_browser.receive",
+                                    *command_value.get(),
+                                    *value.get());
   } else {
-    web_ui_->CallJavascriptFunction(WideToASCII(function_name));
+    web_ui_->CallJavascriptFunction("g_browser.receive",
+                                    *command_value.get());
   }
 }
 
-void NetInternalsMessageHandler::Observe(NotificationType type,
+void NetInternalsMessageHandler::Observe(int type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK_EQ(type.value, NotificationType::PREF_CHANGED);
+  DCHECK_EQ(type, chrome::NOTIFICATION_PREF_CHANGED);
 
   std::string* pref_name = Details<std::string>(details).ptr();
   if (*pref_name == prefs::kHttpThrottlingEnabled) {
-    scoped_ptr<Value> enabled(
+    SendJavascriptCommand(
+        L"receivedHttpThrottlingEnabledPrefChanged",
         Value::CreateBooleanValue(*http_throttling_enabled_));
-
-    CallJavascriptFunction(
-        L"g_browser.receivedHttpThrottlingEnabledPrefChanged", enabled.get());
   }
 }
 
@@ -702,10 +611,9 @@ void NetInternalsMessageHandler::OnRendererReady(const ListValue* list) {
   CHECK(renderer_ready_io_callback_.get());
   renderer_ready_io_callback_->Run(list);
 
-  scoped_ptr<Value> enabled(
+  SendJavascriptCommand(
+      L"receivedHttpThrottlingEnabledPrefChanged",
       Value::CreateBooleanValue(*http_throttling_enabled_));
-  CallJavascriptFunction(
-      L"g_browser.receivedHttpThrottlingEnabledPrefChanged", enabled.get());
 }
 
 void NetInternalsMessageHandler::OnEnableHttpThrottling(const ListValue* list) {
@@ -718,26 +626,35 @@ void NetInternalsMessageHandler::OnEnableHttpThrottling(const ListValue* list) {
   }
 
   http_throttling_enabled_.SetValue(enable);
+
+  // We never receive OnEnableHttpThrottling unless the user has modified
+  // the value of the checkbox on the about:net-internals page.  Once the
+  // user does that, we no longer allow experiments to control its value.
+  if (http_throttling_may_experiment_.GetValue()) {
+    http_throttling_may_experiment_.SetValue(false);
+
+    // Disable the ongoing trial so that histograms after this point
+    // show as being in the "Default" group of the trial.
+    base::FieldTrial* trial = base::FieldTrialList::Find(
+        "HttpThrottlingEnabled");
+    if (trial)
+      trial->Disable();
+  }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//
-// NetInternalsMessageHandler::ReadLogFileTask
-//
-////////////////////////////////////////////////////////////////////////////////
+void NetInternalsMessageHandler::OnGetPrerenderInfo(const ListValue* list) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-NetInternalsMessageHandler::ReadLogFileTask::ReadLogFileTask(
-    IOThreadImpl* proxy, const FilePath& path)
-    : proxy_(proxy), path_(path) {
+  Value* value = NULL;
+  prerender::PrerenderManager* prerender_manager = prerender_manager_.get();
+  if (!prerender_manager) {
+    value = new DictionaryValue();
+  } else {
+    value = prerender_manager->GetAsValue();
+  }
+  SendJavascriptCommand(L"receivedPrerenderInfo", value);
 }
 
-void NetInternalsMessageHandler::ReadLogFileTask::Run() {
-  std::string file_contents;
-  if (!file_util::ReadFileToString(path_, &file_contents))
-    return;
-  proxy_->CallJavascriptFunction(L"g_browser.loadedLogFile",
-                                 new StringValue(file_contents));
-}
 
 #ifdef OS_CHROMEOS
 ////////////////////////////////////////////////////////////////////////////////
@@ -748,14 +665,14 @@ void NetInternalsMessageHandler::ReadLogFileTask::Run() {
 
 NetInternalsMessageHandler::SystemLogsGetter::SystemLogsGetter(
     NetInternalsMessageHandler* handler,
-    chromeos::SyslogsLibrary* syslog_lib)
+    chromeos::system::SyslogsProvider* syslogs_provider)
     : handler_(handler),
-      syslogs_library_(syslog_lib),
+      syslogs_provider_(syslogs_provider),
       logs_(NULL),
       logs_received_(false),
       logs_requested_(false) {
-  if (!syslogs_library_)
-    LOG(ERROR) << "System logs library not loaded";
+  if (!syslogs_provider_)
+    LOG(ERROR) << "System access library not loaded";
 }
 
 NetInternalsMessageHandler::SystemLogsGetter::~SystemLogsGetter() {
@@ -763,8 +680,8 @@ NetInternalsMessageHandler::SystemLogsGetter::~SystemLogsGetter() {
 }
 
 void NetInternalsMessageHandler::SystemLogsGetter::DeleteSystemLogs() {
-  if (syslogs_library_ && logs_requested_ && !logs_received_) {
-    syslogs_library_->CancelRequest(syslogs_request_id_);
+  if (syslogs_provider_ && logs_requested_ && !logs_received_) {
+    syslogs_provider_->CancelRequest(syslogs_request_id_);
   }
   logs_requested_ = false;
   logs_received_ = false;
@@ -789,12 +706,12 @@ void NetInternalsMessageHandler::SystemLogsGetter::RequestSystemLog(
 }
 
 void NetInternalsMessageHandler::SystemLogsGetter::LoadSystemLogs() {
-  if (logs_requested_ || !syslogs_library_)
+  if (logs_requested_ || !syslogs_provider_)
     return;
   logs_requested_ = true;
-  syslogs_request_id_ = syslogs_library_->RequestSyslogs(
+  syslogs_request_id_ = syslogs_provider_->RequestSyslogs(
       false,  // compress logs.
-      chromeos::SyslogsLibrary::SYSLOGS_NETWORK,
+      chromeos::system::SyslogsProvider::SYSLOGS_NETWORK,
       &consumer_,
       NewCallback(
           this,
@@ -802,7 +719,8 @@ void NetInternalsMessageHandler::SystemLogsGetter::LoadSystemLogs() {
 }
 
 void NetInternalsMessageHandler::SystemLogsGetter::OnSystemLogsLoaded(
-    chromeos::LogDictionaryType* sys_info, std::string* ignored_content) {
+    chromeos::system::LogDictionaryType* sys_info,
+    std::string* ignored_content) {
   DCHECK(!ignored_content);
   logs_.reset(sys_info);
   logs_received_ = true;
@@ -816,8 +734,9 @@ void NetInternalsMessageHandler::SystemLogsGetter::OnSystemLogsLoaded(
 
 void NetInternalsMessageHandler::SystemLogsGetter::SendLogs(
     const SystemLogRequest& request) {
-  scoped_ptr<DictionaryValue> result(new DictionaryValue());
-  chromeos::LogDictionaryType::iterator log_it = logs_->find(request.log_key);
+  DictionaryValue* result = new DictionaryValue();
+  chromeos::system::LogDictionaryType::iterator log_it =
+      logs_->find(request.log_key);
   if (log_it != logs_->end()) {
     if (!log_it->second.empty()) {
       result->SetString("log", log_it->second);
@@ -829,8 +748,7 @@ void NetInternalsMessageHandler::SystemLogsGetter::SendLogs(
   }
   result->SetString("cellId", request.cell_id);
 
-  handler_->CallJavascriptFunction(L"g_browser.getSystemLogCallback",
-                                   result.get());
+  handler_->SendJavascriptCommand(L"getSystemLogCallback", result);
 }
 #endif
 ////////////////////////////////////////////////////////////////////////////////
@@ -887,7 +805,7 @@ void NetInternalsMessageHandler::IOThreadImpl::SendPassiveLogEntries(
                                                           false));
   }
 
-  CallJavascriptFunction(L"g_browser.receivedPassiveLogEntries", dict_list);
+  SendJavascriptCommand(L"receivedPassiveLogEntries", dict_list);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnWebUIDeleted() {
@@ -900,152 +818,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!is_observing_log_) << "notifyReady called twice";
 
-  // Tell the javascript about the relationship between event type enums and
-  // their symbolic name.
-  {
-    std::vector<net::NetLog::EventType> event_types =
-        net::NetLog::GetAllEventTypes();
-
-    DictionaryValue* dict = new DictionaryValue();
-
-    for (size_t i = 0; i < event_types.size(); ++i) {
-      const char* name = net::NetLog::EventTypeToString(event_types[i]);
-      dict->SetInteger(name, static_cast<int>(event_types[i]));
-    }
-
-    CallJavascriptFunction(L"g_browser.receivedLogEventTypeConstants", dict);
-  }
-
-  // Tell the javascript about the version of the client and its
-  // command line arguments.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-    chrome::VersionInfo version_info;
-
-    if (!version_info.is_valid()) {
-      DLOG(ERROR) << "Unable to create chrome::VersionInfo";
-    } else {
-      // We have everything we need to send the right values.
-      dict->SetString("version", version_info.Version());
-      dict->SetString("cl", version_info.LastChange());
-      dict->SetString("version_mod",
-                      platform_util::GetVersionStringModifier());
-      dict->SetString("official",
-          l10n_util::GetStringUTF16(
-              version_info.IsOfficialBuild() ?
-                IDS_ABOUT_VERSION_OFFICIAL
-              : IDS_ABOUT_VERSION_UNOFFICIAL));
-
-      dict->SetString("command_line",
-          CommandLine::ForCurrentProcess()->command_line_string());
-    }
-
-    CallJavascriptFunction(L"g_browser.receivedClientInfo",
-                           dict);
-  }
-
-  // Tell the javascript about the relationship between load flag enums and
-  // their symbolic name.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-#define LOAD_FLAG(label, value) \
-    dict->SetInteger(# label, static_cast<int>(value));
-#include "net/base/load_flags_list.h"
-#undef LOAD_FLAG
-
-    CallJavascriptFunction(L"g_browser.receivedLoadFlagConstants", dict);
-  }
-
-  // Tell the javascript about the relationship between net error codes and
-  // their symbolic name.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-#define NET_ERROR(label, value) \
-    dict->SetInteger(# label, static_cast<int>(value));
-#include "net/base/net_error_list.h"
-#undef NET_ERROR
-
-    CallJavascriptFunction(L"g_browser.receivedNetErrorConstants", dict);
-  }
-
-  // Tell the javascript about the relationship between event phase enums and
-  // their symbolic name.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-    dict->SetInteger("PHASE_BEGIN", net::NetLog::PHASE_BEGIN);
-    dict->SetInteger("PHASE_END", net::NetLog::PHASE_END);
-    dict->SetInteger("PHASE_NONE", net::NetLog::PHASE_NONE);
-
-    CallJavascriptFunction(L"g_browser.receivedLogEventPhaseConstants", dict);
-  }
-
-  // Tell the javascript about the relationship between source type enums and
-  // their symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-#define SOURCE_TYPE(label, value) dict->SetInteger(# label, value);
-#include "net/base/net_log_source_type_list.h"
-#undef SOURCE_TYPE
-
-    CallJavascriptFunction(L"g_browser.receivedLogSourceTypeConstants", dict);
-  }
-
-  // Tell the javascript about the relationship between LogLevel enums and their
-  // symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-    dict->SetInteger("LOG_ALL", net::NetLog::LOG_ALL);
-    dict->SetInteger("LOG_ALL_BUT_BYTES", net::NetLog::LOG_ALL_BUT_BYTES);
-    dict->SetInteger("LOG_BASIC", net::NetLog::LOG_BASIC);
-
-    CallJavascriptFunction(L"g_browser.receivedLogLevelConstants", dict);
-  }
-
-  // Tell the javascript about the relationship between address family enums and
-  // their symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-    dict->SetInteger("ADDRESS_FAMILY_UNSPECIFIED",
-                     net::ADDRESS_FAMILY_UNSPECIFIED);
-    dict->SetInteger("ADDRESS_FAMILY_IPV4",
-                     net::ADDRESS_FAMILY_IPV4);
-    dict->SetInteger("ADDRESS_FAMILY_IPV6",
-                     net::ADDRESS_FAMILY_IPV6);
-
-    CallJavascriptFunction(L"g_browser.receivedAddressFamilyConstants", dict);
-  }
-
-  // Tell the javascript how the "time ticks" values we have given it relate to
-  // actual system times. (We used time ticks throughout since they are stable
-  // across system clock changes).
-  {
-    int64 cur_time_ms = (base::Time::Now() - base::Time()).InMilliseconds();
-
-    int64 cur_time_ticks_ms =
-        (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds();
-
-    // If we add this number to a time tick value, it gives the timestamp.
-    int64 tick_to_time_ms = cur_time_ms - cur_time_ticks_ms;
-
-    // Chrome on all platforms stores times using the Windows epoch
-    // (Jan 1 1601), but the javascript wants a unix epoch.
-    // TODO(eroman): Getting the timestamp relative the to unix epoch should
-    //               be part of the time library.
-    const int64 kUnixEpochMs = 11644473600000LL;
-    int64 tick_to_unix_time_ms = tick_to_time_ms - kUnixEpochMs;
-
-    // Pass it as a string, since it may be too large to fit in an integer.
-    CallJavascriptFunction(L"g_browser.receivedTimeTickOffset",
-                           Value::CreateStringValue(
-                               base::Int64ToString(tick_to_unix_time_ms)));
-  }
+  SendJavascriptCommand(L"receivedConstants",
+                        NetInternalsUI::GetConstants());
 
   // Register with network stack to observe events.
   is_observing_log_ = true;
@@ -1066,7 +840,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetProxySettings(
   if (proxy_service->config().is_valid())
     dict->Set("effective", proxy_service->config().ToValue());
 
-  CallJavascriptFunction(L"g_browser.receivedProxySettings", dict);
+  SendJavascriptCommand(L"receivedProxySettings", dict);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnReloadProxySettings(
@@ -1100,7 +874,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetBadProxies(
     dict_list->Append(dict);
   }
 
-  CallJavascriptFunction(L"g_browser.receivedBadProxies", dict_list);
+  SendJavascriptCommand(L"receivedBadProxies", dict_list);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnClearBadProxies(
@@ -1120,7 +894,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverInfo(
   net::HostCache* cache = GetHostResolverCache(context);
 
   if (!host_resolver_impl || !cache) {
-    CallJavascriptFunction(L"g_browser.receivedHostResolverInfo", NULL);
+    SendJavascriptCommand(L"receivedHostResolverInfo", NULL);
     return;
   }
 
@@ -1179,7 +953,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverInfo(
   cache_info_dict->Set("entries", entry_list);
   dict->Set("cache", cache_info_dict);
 
-  CallJavascriptFunction(L"g_browser.receivedHostResolverInfo", dict);
+  SendJavascriptCommand(L"receivedHostResolverInfo", dict);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnClearHostResolverCache(
@@ -1267,7 +1041,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
     }
   }
 
-  CallJavascriptFunction(L"g_browser.receivedHSTSResult", result);
+  SendJavascriptCommand(L"receivedHSTSResult", result);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnHSTSAdd(
@@ -1355,7 +1129,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHttpCacheInfo(
 
   info_dict->Set("stats", stats_dict);
 
-  CallJavascriptFunction(L"g_browser.receivedHttpCacheInfo", info_dict);
+  SendJavascriptCommand(L"receivedHttpCacheInfo", info_dict);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetSocketPoolInfo(
@@ -1367,7 +1141,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetSocketPoolInfo(
   if (http_network_session)
     socket_pool_info = http_network_session->SocketPoolInfoToValue();
 
-  CallJavascriptFunction(L"g_browser.receivedSocketPoolInfo", socket_pool_info);
+  SendJavascriptCommand(L"receivedSocketPoolInfo", socket_pool_info);
 }
 
 
@@ -1399,7 +1173,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetSpdySessionInfo(
     spdy_info = http_network_session->SpdySessionPoolInfoToValue();
   }
 
-  CallJavascriptFunction(L"g_browser.receivedSpdySessionInfo", spdy_info);
+  SendJavascriptCommand(L"receivedSpdySessionInfo", spdy_info);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetSpdyStatus(
@@ -1422,7 +1196,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetSpdyStatus(
                    Value::CreateStringValue(
                        *net::HttpStreamFactory::next_protos()));
 
-  CallJavascriptFunction(L"g_browser.receivedSpdyStatus", status_dict);
+  SendJavascriptCommand(L"receivedSpdyStatus", status_dict);
 }
 
 void
@@ -1449,8 +1223,7 @@ NetInternalsMessageHandler::IOThreadImpl::OnGetSpdyAlternateProtocolMappings(
     }
   }
 
-  CallJavascriptFunction(L"g_browser.receivedSpdyAlternateProtocolMappings",
-                         dict_list);
+  SendJavascriptCommand(L"receivedSpdyAlternateProtocolMappings", dict_list);
 }
 
 #ifdef OS_WIN
@@ -1490,8 +1263,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetServiceProviders(
   }
   service_providers->Set("namespace_providers", namespace_list);
 
-  CallJavascriptFunction(L"g_browser.receivedServiceProviders",
-                         service_providers);
+  SendJavascriptCommand(L"receivedServiceProviders", service_providers);
 }
 #endif
 
@@ -1553,19 +1325,17 @@ void NetInternalsMessageHandler::IOThreadImpl::AddEntryToQueue(Value* entry) {
 
 void NetInternalsMessageHandler::IOThreadImpl::PostPendingEntries() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  CallJavascriptFunction(
-      L"g_browser.receivedLogEntries",
-      pending_entries_.release());
+  SendJavascriptCommand(L"receivedLogEntries", pending_entries_.release());
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTestSuite() {
-  CallJavascriptFunction(L"g_browser.receivedStartConnectionTestSuite", NULL);
+  SendJavascriptCommand(L"receivedStartConnectionTestSuite", NULL);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTestExperiment(
     const ConnectionTester::Experiment& experiment) {
-  CallJavascriptFunction(
-      L"g_browser.receivedStartConnectionTestExperiment",
+  SendJavascriptCommand(
+      L"receivedStartConnectionTestExperiment",
       ExperimentToValue(experiment));
 }
 
@@ -1578,15 +1348,15 @@ NetInternalsMessageHandler::IOThreadImpl::OnCompletedConnectionTestExperiment(
   dict->Set("experiment", ExperimentToValue(experiment));
   dict->SetInteger("result", result);
 
-  CallJavascriptFunction(
-      L"g_browser.receivedCompletedConnectionTestExperiment",
+  SendJavascriptCommand(
+      L"receivedCompletedConnectionTestExperiment",
       dict);
 }
 
 void
 NetInternalsMessageHandler::IOThreadImpl::OnCompletedConnectionTestSuite() {
-  CallJavascriptFunction(
-      L"g_browser.receivedCompletedConnectionTestSuite",
+  SendJavascriptCommand(
+      L"receivedCompletedConnectionTestSuite",
       NULL);
 }
 
@@ -1598,16 +1368,17 @@ void NetInternalsMessageHandler::IOThreadImpl::DispatchToMessageHandler(
 }
 
 // Note that this can be called from ANY THREAD.
-void NetInternalsMessageHandler::IOThreadImpl::CallJavascriptFunction(
-    const std::wstring& function_name,
+void NetInternalsMessageHandler::IOThreadImpl::SendJavascriptCommand(
+    const std::wstring& command,
     Value* arg) {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     if (handler_ && !was_webui_deleted_) {
       // We check |handler_| in case it was deleted on the UI thread earlier
       // while we were running on the IO thread.
-      handler_->CallJavascriptFunction(function_name, arg);
+      handler_->SendJavascriptCommand(command, arg);
+    } else {
+      delete arg;
     }
-    delete arg;
     return;
   }
 
@@ -1615,8 +1386,9 @@ void NetInternalsMessageHandler::IOThreadImpl::CallJavascriptFunction(
            BrowserThread::UI, FROM_HERE,
            NewRunnableMethod(
                this,
-               &IOThreadImpl::CallJavascriptFunction,
-               function_name, arg))) {
+               &IOThreadImpl::SendJavascriptCommand,
+               command,
+               arg))) {
     // Failed posting the task, avoid leaking.
     delete arg;
   }
@@ -1631,11 +1403,162 @@ void NetInternalsMessageHandler::IOThreadImpl::CallJavascriptFunction(
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-NetInternalsUI::NetInternalsUI(TabContents* contents) : WebUI(contents) {
+// static
+Value* NetInternalsUI::GetConstants() {
+  DictionaryValue* constants_dict = new DictionaryValue();
+
+  // Version of the file format.
+  constants_dict->SetInteger("logFormatVersion", kLogFormatVersion);
+
+  // Add a dictionary with information on the relationship between event type
+  // enums and their symbolic names.
+  {
+    std::vector<net::NetLog::EventType> event_types =
+        net::NetLog::GetAllEventTypes();
+
+    DictionaryValue* dict = new DictionaryValue();
+
+    for (size_t i = 0; i < event_types.size(); ++i) {
+      const char* name = net::NetLog::EventTypeToString(event_types[i]);
+      dict->SetInteger(name, static_cast<int>(event_types[i]));
+    }
+    constants_dict->Set("logEventTypes", dict);
+  }
+
+  // Add a dictionary with the version of the client and its command line
+  // arguments.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+    chrome::VersionInfo version_info;
+
+    if (!version_info.is_valid()) {
+      DLOG(ERROR) << "Unable to create chrome::VersionInfo";
+    } else {
+      // We have everything we need to send the right values.
+      dict->SetString("name", version_info.Name());
+      dict->SetString("version", version_info.Version());
+      dict->SetString("cl", version_info.LastChange());
+      dict->SetString("version_mod",
+                      chrome::VersionInfo::GetVersionStringModifier());
+      dict->SetString("official",
+                      version_info.IsOfficialBuild() ? "official" :
+                                                       "unofficial");
+      dict->SetString("os_type", version_info.OSType());
+      dict->SetString("command_line",
+                      CommandLine::ForCurrentProcess()->GetCommandLineString());
+    }
+
+    constants_dict->Set("clientInfo", dict);
+  }
+
+  // Add a dictionary with information about the relationship between load flag
+  // enums and their symbolic names.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+#define LOAD_FLAG(label, value) \
+    dict->SetInteger(# label, static_cast<int>(value));
+#include "net/base/load_flags_list.h"
+#undef LOAD_FLAG
+
+    constants_dict->Set("loadFlag", dict);
+  }
+
+  // Add information on the relationship between net error codes and their
+  // symbolic names.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+#define NET_ERROR(label, value) \
+    dict->SetInteger(# label, static_cast<int>(value));
+#include "net/base/net_error_list.h"
+#undef NET_ERROR
+
+    constants_dict->Set("netError", dict);
+  }
+
+  // Information about the relationship between event phase enums and their
+  // symbolic names.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+    dict->SetInteger("PHASE_BEGIN", net::NetLog::PHASE_BEGIN);
+    dict->SetInteger("PHASE_END", net::NetLog::PHASE_END);
+    dict->SetInteger("PHASE_NONE", net::NetLog::PHASE_NONE);
+
+    constants_dict->Set("logEventPhase", dict);
+  }
+
+  // Information about the relationship between source type enums and
+  // their symbolic names.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+#define SOURCE_TYPE(label, value) dict->SetInteger(# label, value);
+#include "net/base/net_log_source_type_list.h"
+#undef SOURCE_TYPE
+
+    constants_dict->Set("logSourceType", dict);
+  }
+
+  // Information about the relationship between LogLevel enums and their
+  // symbolic names.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+    dict->SetInteger("LOG_ALL", net::NetLog::LOG_ALL);
+    dict->SetInteger("LOG_ALL_BUT_BYTES", net::NetLog::LOG_ALL_BUT_BYTES);
+    dict->SetInteger("LOG_BASIC", net::NetLog::LOG_BASIC);
+
+    constants_dict->Set("logLevelType", dict);
+  }
+
+  // Information about the relationship between address family enums and
+  // their symbolic names.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+    dict->SetInteger("ADDRESS_FAMILY_UNSPECIFIED",
+                     net::ADDRESS_FAMILY_UNSPECIFIED);
+    dict->SetInteger("ADDRESS_FAMILY_IPV4",
+                     net::ADDRESS_FAMILY_IPV4);
+    dict->SetInteger("ADDRESS_FAMILY_IPV6",
+                     net::ADDRESS_FAMILY_IPV6);
+
+    constants_dict->Set("addressFamily", dict);
+  }
+
+  // Information about how the "time ticks" values we have given it relate to
+  // actual system times. (We used time ticks throughout since they are stable
+  // across system clock changes).
+  {
+    int64 cur_time_ms = (base::Time::Now() - base::Time()).InMilliseconds();
+
+    int64 cur_time_ticks_ms =
+        (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds();
+
+    // If we add this number to a time tick value, it gives the timestamp.
+    int64 tick_to_time_ms = cur_time_ms - cur_time_ticks_ms;
+
+    // Chrome on all platforms stores times using the Windows epoch
+    // (Jan 1 1601), but the javascript wants a unix epoch.
+    // TODO(eroman): Getting the timestamp relative to the unix epoch should
+    //               be part of the time library.
+    const int64 kUnixEpochMs = 11644473600000LL;
+    int64 tick_to_unix_time_ms = tick_to_time_ms - kUnixEpochMs;
+
+    // Pass it as a string, since it may be too large to fit in an integer.
+    constants_dict->SetString("timeTickOffset",
+                              base::Int64ToString(tick_to_unix_time_ms));
+  }
+  return constants_dict;
+}
+
+NetInternalsUI::NetInternalsUI(TabContents* contents) : ChromeWebUI(contents) {
   AddMessageHandler((new NetInternalsMessageHandler())->Attach(this));
 
-  NetInternalsHTMLSource* html_source = new NetInternalsHTMLSource();
-
   // Set up the chrome://net-internals/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  GetProfile()->GetChromeURLDataManager()->AddDataSource(
+      CreateNetInternalsHTMLSource());
 }

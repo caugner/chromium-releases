@@ -16,6 +16,7 @@
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
+#include "chrome/common/chrome_result_codes.h"
 #include "chrome/installer/setup/install.h"
 #include "chrome/installer/setup/install_worker.h"
 #include "chrome/installer/setup/setup_constants.h"
@@ -24,6 +25,7 @@
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/delete_after_reboot_helper.h"
 #include "chrome/installer/util/google_update_constants.h"
+#include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installation_state.h"
@@ -32,7 +34,6 @@
 #include "chrome/installer/util/self_cleaning_temp_dir.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
-#include "content/common/result_codes.h"
 #include "rlz/win/lib/rlz_lib.h"
 
 // Build-time generated include file.
@@ -118,6 +119,21 @@ void ProcessQuickEnableWorkItems(
     LOG(ERROR) << "Failed to update quick-enable-cf command.";
 }
 
+void ClearRlzProductState() {
+  const rlz_lib::AccessPoint points[] = {rlz_lib::CHROME_OMNIBOX,
+                                         rlz_lib::CHROME_HOME_PAGE,
+                                         rlz_lib::NO_ACCESS_POINT};
+
+  rlz_lib::ClearProductState(rlz_lib::CHROME, points);
+
+  // If chrome has been reactivated, clear all events for this brand as well.
+  std::wstring reactivation_brand;
+  if (GoogleUpdateSettings::GetReactivationBrand(&reactivation_brand)) {
+    rlz_lib::SupplementaryBranding branding(reactivation_brand.c_str());
+    rlz_lib::ClearProductState(rlz_lib::CHROME, points);
+  }
+}
+
 }  // namespace
 
 namespace installer {
@@ -138,9 +154,9 @@ void CloseAllChromeProcesses() {
       if (!SendMessageTimeout(tmpWnd, WM_CLOSE, 0, 0, SMTO_BLOCK, 3000, NULL) &&
           (GetLastError() == ERROR_TIMEOUT)) {
         base::CleanupProcesses(installer::kChromeExe, 0,
-                               ResultCodes::HUNG, NULL);
+                               content::RESULT_CODE_HUNG, NULL);
         base::CleanupProcesses(installer::kNaClExe, 0,
-                               ResultCodes::HUNG, NULL);
+                               content::RESULT_CODE_HUNG, NULL);
         return;
       }
     }
@@ -150,9 +166,9 @@ void CloseAllChromeProcesses() {
   // chrome.exe. This check is just in case Chrome is ignoring WM_CLOSE
   // messages.
   base::CleanupProcesses(installer::kChromeExe, 15000,
-                         ResultCodes::HUNG, NULL);
+                         content::RESULT_CODE_HUNG, NULL);
   base::CleanupProcesses(installer::kNaClExe, 15000,
-                         ResultCodes::HUNG, NULL);
+                         content::RESULT_CODE_HUNG, NULL);
 }
 
 // Attempts to close the Chrome Frame helper process by sending WM_CLOSE
@@ -187,7 +203,7 @@ void CloseChromeFrameHelperProcess() {
   if (kill) {
     VLOG(1) << installer::kChromeFrameHelperExe << " hung.  Killing.";
     base::CleanupProcesses(installer::kChromeFrameHelperExe, 0,
-                           ResultCodes::HUNG, NULL);
+                           content::RESULT_CODE_HUNG, NULL);
   }
 }
 
@@ -440,7 +456,7 @@ DeleteResult DeleteFilesAndFolders(const InstallerState& installer_state,
 InstallStatus IsChromeActiveOrUserCancelled(
     const InstallerState& installer_state,
     const Product& product) {
-  int32 exit_code = ResultCodes::NORMAL_EXIT;
+  int32 exit_code = content::RESULT_CODE_NORMAL_EXIT;
   CommandLine options(CommandLine::NO_PROGRAM);
   options.AppendSwitch(installer::switches::kUninstall);
 
@@ -457,12 +473,12 @@ InstallStatus IsChromeActiveOrUserCancelled(
                                   &exit_code)) {
     VLOG(1) << "chrome.exe launched for uninstall confirmation returned: "
             << exit_code;
-    if ((exit_code == ResultCodes::UNINSTALL_CHROME_ALIVE) ||
-        (exit_code == ResultCodes::UNINSTALL_USER_CANCEL) ||
-        (exit_code == ResultCodes::HUNG))
+    if ((exit_code == chrome::RESULT_CODE_UNINSTALL_CHROME_ALIVE) ||
+        (exit_code == chrome::RESULT_CODE_UNINSTALL_USER_CANCEL) ||
+        (exit_code == content::RESULT_CODE_HUNG))
       return installer::UNINSTALL_CANCELLED;
 
-    if (exit_code == ResultCodes::UNINSTALL_DELETE_PROFILE)
+    if (exit_code == chrome::RESULT_CODE_UNINSTALL_DELETE_PROFILE)
       return installer::UNINSTALL_DELETE_PROFILE;
   } else {
     PLOG(ERROR) << "Failed to launch chrome.exe for uninstall confirmation.";
@@ -689,12 +705,8 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
   // Chrome is not in use so lets uninstall Chrome by deleting various files
   // and registry entries. Here we will just make best effort and keep going
   // in case of errors.
-  if (is_chrome) {
-    const rlz_lib::AccessPoint access_points[] = {rlz_lib::CHROME_OMNIBOX,
-                                                  rlz_lib::CHROME_HOME_PAGE,
-                                                  rlz_lib::NO_ACCESS_POINT};
-    rlz_lib::ClearProductState(rlz_lib::CHROME, access_points);
-  }
+  if (is_chrome)
+    ClearRlzProductState();
 
   // First delete shortcuts from Start->Programs, Desktop & Quick Launch.
   DeleteChromeShortcuts(installer_state, product);
@@ -801,13 +813,10 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
 
   bool can_delete_files = true;
   if (installer_state.is_multi_install()) {
-    BrowserDistribution::Type types[] = {
-      BrowserDistribution::CHROME_BROWSER,
-      BrowserDistribution::CHROME_FRAME
-    };
     ProductState prod_state;
-    for (int i = 0; i < arraysize(types); ++i) {
-      if (prod_state.Initialize(installer_state.system_install(), types[i]) &&
+    for (size_t i = 0; i < BrowserDistribution::kNumProductTypes; ++i) {
+      if (prod_state.Initialize(installer_state.system_install(),
+                                BrowserDistribution::kProductTypes[i]) &&
           prod_state.is_multi_install()) {
         can_delete_files = false;
         break;

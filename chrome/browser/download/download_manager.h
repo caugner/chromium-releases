@@ -36,14 +36,15 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "chrome/browser/download/download_item.h"
+#include "chrome/browser/download/download_request_handle.h"
 #include "chrome/browser/download/download_status_updater_delegate.h"
-#include "chrome/browser/download/download_process_handle.h"
 #include "chrome/browser/ui/shell_dialogs.h"
 #include "content/browser/browser_thread.h"
 
@@ -124,7 +125,6 @@ class DownloadManager
 
   // Called from a view when a user clicks a UI button or link.
   void DownloadCancelled(int32 download_id);
-  void PauseDownload(int32 download_id, bool pause);
   void RemoveDownload(int64 download_handle);
 
   // Determine if the download is ready for completion, i.e. has had
@@ -233,8 +233,15 @@ class DownloadManager
                    const DownloadStateInfo& state,
                    bool visited_referrer_before);
 
-  // Called when the user has validated the download of a dangerous file.
-  void DangerousDownloadValidated(DownloadItem* download);
+  // Checks whether downloaded files still exist. Updates state of downloads
+  // that refer to removed files. The check runs in the background and may
+  // finish asynchronously after this method returns.
+  void CheckForHistoryFilesRemoval();
+
+  // Checks whether a downloaded file still exists and updates the file's state
+  // if the file is already removed. The check runs in the background and may
+  // finish asynchronously after this method returns.
+  void CheckForFileRemoval(DownloadItem* download_item);
 
   // Callback function after url is checked with safebrowsing service.
   void CheckDownloadUrlDone(int32 download_id, bool is_dangerous_url);
@@ -247,6 +254,14 @@ class DownloadManager
   // Callback function after download file hash is checked with safebrowsing
   // service.
   void CheckDownloadHashDone(int32 download_id, bool is_dangerous_hash);
+
+  // Assert the named download item is on the correct queues
+  // in the DownloadManager.  For debugging.
+  void AssertQueueStateConsistent(DownloadItem* download);
+
+  // Get the download item from the history map.  Useful after the item has
+  // been removed from the active map, or was retrieved from the history DB.
+  DownloadItem* GetDownloadItem(int id);
 
  private:
   // For testing.
@@ -280,6 +295,14 @@ class DownloadManager
 
   virtual ~DownloadManager();
 
+  // Called on the FILE thread to check the existence of a downloaded file.
+  void CheckForFileRemovalOnFileThread(int64 db_handle, const FilePath& path);
+
+  // Called on the UI thread if the FILE thread detects the removal of
+  // the downloaded file. The UI thread updates the state of the file
+  // and then notifies this update to the file's observer.
+  void OnFileRemovalDetected(int64 db_handle);
+
   // Called on the download thread to check whether the suggested file path
   // exists.  We don't check if the file exists on the UI thread to avoid UI
   // stalls from interacting with the file system.
@@ -290,7 +313,7 @@ class DownloadManager
   // Called on the UI thread once the DownloadManager has determined whether the
   // suggested file path exists.
   void OnPathExistenceAvailable(int32 download_id,
-                                DownloadStateInfo new_state);
+                                const DownloadStateInfo& new_state);
 
   // Called back after a target path for the file to be downloaded to has been
   // determined, either automatically based on the suggested file name, or by
@@ -299,10 +322,8 @@ class DownloadManager
                                 const FilePath& chosen_file);
 
   // Download cancel helper function.
-  // |process_handle| is passed by value because it is ultimately passed to
-  // other threads, and this way we don't have to worry about object lifetimes.
   void DownloadCancelledInternal(int download_id,
-                                 DownloadProcessHandle process_handle);
+                                 const DownloadRequestHandle& request_handle);
 
   // All data has been downloaded.
   // |hash| is sha256 hash for the downloaded file. It is empty when the hash
@@ -315,20 +336,8 @@ class DownloadManager
   // Updates the app icon about the overall download progress.
   void UpdateAppIcon();
 
-  // Makes the ResourceDispatcherHost pause/un-pause a download request.
-  // Called on the IO thread.
-  // |process_handle| is passed by value because this is called from other
-  // threads, and this way we don't have to worry about object lifetimes.
-  void PauseDownloadRequest(ResourceDispatcherHost* rdh,
-                            DownloadProcessHandle process_handle,
-                            bool pause);
-
   // Inform observers that the model has changed.
   void NotifyModelChanged();
-
-  // Get the download item from the history map.  Useful after the item has
-  // been removed from the active map, or was retrieved from the history DB.
-  DownloadItem* GetDownloadItem(int id);
 
   // Get the download item from the active map.  Useful when the item is not
   // yet in the history map.
@@ -337,6 +346,9 @@ class DownloadManager
   // Debugging routine to confirm relationship between below
   // containers; no-op if NDEBUG.
   void AssertContainersConsistent() const;
+
+  // Add a DownloadItem to history_downloads_.
+  void AddDownloadItemToHistory(DownloadItem* item, int64 db_handle);
 
   // |downloads_| is the owning set for all downloads known to the
   // DownloadManager.  This includes downloads started by the user in

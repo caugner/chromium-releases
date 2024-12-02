@@ -9,9 +9,11 @@
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
+#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/sync/test_http_bridge_factory.h"
 
 using browser_sync::ModelSafeRoutingInfo;
@@ -24,21 +26,34 @@ using syncable::ModelType;
 using syncable::ScopedDirLookup;
 using sync_api::UserShare;
 
+namespace {
+
+class FakeSigninManager : public SigninManager {
+ public:
+  FakeSigninManager() {}
+  virtual ~FakeSigninManager() {}
+
+  virtual void StartSignIn(const std::string& username,
+                           const std::string& password,
+                           const std::string& login_token,
+                           const std::string& login_captcha) OVERRIDE {
+    SetUsername(username);
+  }
+};
+
+}  // namespace
+
 namespace browser_sync {
 
 using ::testing::_;
 SyncBackendHostForProfileSyncTest::SyncBackendHostForProfileSyncTest(
     Profile* profile,
     bool set_initial_sync_ended_on_init,
-    bool synchronous_init)
+    bool synchronous_init,
+    bool fail_initial_download)
     : browser_sync::SyncBackendHost(profile),
-      synchronous_init_(synchronous_init) {
-  ON_CALL(*this, RequestNudge(_)).WillByDefault(
-      testing::Invoke(this,
-                      &SyncBackendHostForProfileSyncTest::
-                      SimulateSyncCycleCompletedInitialSyncEnded));
-  EXPECT_CALL(*this, RequestNudge(_)).Times(testing::AnyNumber());
-}
+      synchronous_init_(synchronous_init),
+      fail_initial_download_(fail_initial_download) {}
 
 SyncBackendHostForProfileSyncTest::~SyncBackendHostForProfileSyncTest() {}
 
@@ -46,9 +61,8 @@ void SyncBackendHostForProfileSyncTest::ConfigureDataTypes(
     const DataTypeController::TypeMap& data_type_controllers,
     const syncable::ModelTypeSet& types,
     sync_api::ConfigureReason reason,
-    CancelableTask* ready_task,
+    base::Callback<void(bool)> ready_task,
     bool nigori_enabled) {
-  SetAutofillMigrationState(syncable::MIGRATED);
   SyncBackendHost::ConfigureDataTypes(data_type_controllers, types,
                                       reason, ready_task, nigori_enabled);
 }
@@ -64,6 +78,10 @@ void SyncBackendHostForProfileSyncTest::
        i != enabled_types.end(); ++i) {
     sync_ended.set(i->first);
   }
+
+  if (fail_initial_download_)
+    sync_ended.reset();
+
   core_->HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
       SyncerStatus(), ErrorCounters(), 0, false,
       sync_ended, download_progress_markers, false, false, 0, 0, 0, false,
@@ -72,19 +90,19 @@ void SyncBackendHostForProfileSyncTest::
 
 sync_api::HttpPostProviderFactory*
     SyncBackendHostForProfileSyncTest::MakeHttpBridgeFactory(
-        net::URLRequestContextGetter* getter) {
+        const scoped_refptr<net::URLRequestContextGetter>& getter) {
   return new browser_sync::TestHttpBridgeFactory;
 }
 
 void SyncBackendHostForProfileSyncTest::InitCore(
     const Core::DoInitializeOptions& options) {
   std::wstring user = L"testuser@gmail.com";
-  core_loop()->PostTask(
+  sync_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(core_.get(),
                         &SyncBackendHost::Core::DoInitializeForTest,
                         user,
-                        options.http_bridge_factory,
+                        options.request_context_getter,
                         options.delete_sync_data_folder));
 
   // TODO(akalin): Figure out a better way to do this.
@@ -133,6 +151,17 @@ void SyncBackendHostForProfileSyncTest::StartConfiguration(
     Callback0::Type* callback) {
   scoped_ptr<Callback0::Type> scoped_callback(callback);
   SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop();
+  if (initialization_state_ == DOWNLOADING_NIGORI) {
+    syncable::ModelTypeBitSet sync_ended;
+
+    if (!fail_initial_download_)
+      sync_ended.set(syncable::NIGORI);
+    std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
+    core_->HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
+        SyncerStatus(), ErrorCounters(), 0, false,
+        sync_ended, download_progress_markers, false, false, 0, 0, 0, false,
+        SyncSourceInfo(), 0));
+  }
 }
 
 void SyncBackendHostForProfileSyncTest::
@@ -161,16 +190,17 @@ browser_sync::SyncBackendHostForProfileSyncTest*
 
 TestProfileSyncService::TestProfileSyncService(
     ProfileSyncFactory* factory,
-                       Profile* profile,
-                       const std::string& test_user,
-                       bool synchronous_backend_initialization,
-                       Task* initial_condition_setup_task)
-    : ProfileSyncService(factory, profile, test_user),
+    Profile* profile,
+    const std::string& test_user,
+    bool synchronous_backend_initialization,
+    Task* initial_condition_setup_task)
+    : ProfileSyncService(factory, profile, new FakeSigninManager(), test_user),
       synchronous_backend_initialization_(
           synchronous_backend_initialization),
       synchronous_sync_configuration_(false),
       initial_condition_setup_task_(initial_condition_setup_task),
-      set_initial_sync_ended_on_init_(true) {
+      set_initial_sync_ended_on_init_(true),
+      fail_initial_download_(false) {
   RegisterPreferences();
   SetSyncSetupCompleted();
 }
@@ -193,42 +223,44 @@ void TestProfileSyncService::SetInitialSyncEndedForEnabledTypes() {
   }
 }
 
-void TestProfileSyncService::OnBackendInitialized() {
-  // Set this so below code can access GetUserShare().
-  backend_initialized_ = true;
-
-  // Set up any nodes the test wants around before model association.
-  if (initial_condition_setup_task_) {
-    initial_condition_setup_task_->Run();
-    initial_condition_setup_task_ = NULL;
-  }
-
-  // Pretend we downloaded initial updates and set initial sync ended bits
-  // if we were asked to.
+void TestProfileSyncService::OnBackendInitialized(bool success) {
   bool send_passphrase_required = false;
-  if (set_initial_sync_ended_on_init_) {
-    UserShare* user_share = GetUserShare();
-    DirectoryManager* dir_manager = user_share->dir_manager.get();
+  if (success) {
+    // Set this so below code can access GetUserShare().
+    backend_initialized_ = true;
 
-    ScopedDirLookup dir(dir_manager, user_share->name);
-    if (!dir.good())
-      FAIL();
-
-    if (!dir->initial_sync_ended_for_type(syncable::NIGORI)) {
-      ProfileSyncServiceTestHelper::CreateRoot(
-          syncable::NIGORI, GetUserShare(),
-          id_factory());
-
-      // A side effect of adding the NIGORI mode (normally done by the syncer)
-      // is a decryption attempt, which will fail the first time.
-      send_passphrase_required = true;
+    // Set up any nodes the test wants around before model association.
+    if (initial_condition_setup_task_) {
+      initial_condition_setup_task_->Run();
+      initial_condition_setup_task_ = NULL;
     }
 
-    SetInitialSyncEndedForEnabledTypes();
+    // Pretend we downloaded initial updates and set initial sync ended bits
+    // if we were asked to.
+    if (set_initial_sync_ended_on_init_) {
+      UserShare* user_share = GetUserShare();
+      DirectoryManager* dir_manager = user_share->dir_manager.get();
+
+      ScopedDirLookup dir(dir_manager, user_share->name);
+      if (!dir.good())
+        FAIL();
+
+      if (!dir->initial_sync_ended_for_type(syncable::NIGORI)) {
+        ProfileSyncServiceTestHelper::CreateRoot(
+            syncable::NIGORI, GetUserShare(),
+            id_factory());
+
+        // A side effect of adding the NIGORI mode (normally done by the
+        // syncer) is a decryption attempt, which will fail the first time.
+        send_passphrase_required = true;
+      }
+
+      SetInitialSyncEndedForEnabledTypes();
+    }
   }
 
-  ProfileSyncService::OnBackendInitialized();
-  if (send_passphrase_required)
+  ProfileSyncService::OnBackendInitialized(success);
+  if (success && send_passphrase_required)
     OnPassphraseRequired(sync_api::REASON_DECRYPTION);
 
   // TODO(akalin): Figure out a better way to do this.
@@ -237,11 +269,11 @@ void TestProfileSyncService::OnBackendInitialized() {
   }
 }
 
-void TestProfileSyncService::Observe(NotificationType type,
+void TestProfileSyncService::Observe(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
   ProfileSyncService::Observe(type, source, details);
-  if (type == NotificationType::SYNC_CONFIGURE_DONE &&
+  if (type == chrome::NOTIFICATION_SYNC_CONFIGURE_DONE &&
       !synchronous_sync_configuration_) {
     MessageLoop::current()->Quit();
   }
@@ -253,12 +285,16 @@ void TestProfileSyncService::dont_set_initial_sync_ended_on_init() {
 void TestProfileSyncService::set_synchronous_sync_configuration() {
   synchronous_sync_configuration_ = true;
 }
+void TestProfileSyncService::fail_initial_download() {
+  fail_initial_download_ = true;
+}
 
 void TestProfileSyncService::CreateBackend() {
   backend_.reset(new browser_sync::SyncBackendHostForProfileSyncTest(
       profile(),
       set_initial_sync_ended_on_init_,
-      synchronous_backend_initialization_));
+      synchronous_backend_initialization_,
+      fail_initial_download_));
 }
 
 std::string TestProfileSyncService::GetLsidForAuthBootstraping() {

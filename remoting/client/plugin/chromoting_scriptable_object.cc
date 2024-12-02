@@ -6,7 +6,8 @@
 
 #include "base/logging.h"
 #include "base/stringprintf.h"
-#include "ppapi/cpp/var.h"
+// TODO(wez): Remove this when crbug.com/86353 is complete.
+#include "ppapi/cpp/private/var_private.h"
 #include "remoting/base/auth_token_util.h"
 #include "remoting/client/client_config.h"
 #include "remoting/client/chromoting_stats.h"
@@ -14,6 +15,7 @@
 #include "remoting/client/plugin/pepper_xmpp_proxy.h"
 
 using pp::Var;
+using pp::VarPrivate;
 
 namespace remoting {
 
@@ -53,11 +55,11 @@ void ChromotingScriptableObject::Init() {
 
   // Plugin API version.
   // This should be incremented whenever the API interface changes.
-  AddAttribute(kApiVersionAttribute, Var(1));
+  AddAttribute(kApiVersionAttribute, Var(2));
 
   // This should be updated whenever we remove support for an older version
   // of the API.
-  AddAttribute(kApiMinVersionAttribute, Var(1));
+  AddAttribute(kApiMinVersionAttribute, Var(2));
 
   // Connection status.
   AddAttribute(kStatusAttribute, Var(STATUS_UNKNOWN));
@@ -96,12 +98,11 @@ void ChromotingScriptableObject::Init() {
   AddAttribute(kRoundTripLatencyAttribute, Var());
 
   AddMethod("connect", &ChromotingScriptableObject::DoConnect);
-  AddMethod("connectUnsandboxed",
-            &ChromotingScriptableObject::DoConnectUnsandboxed);
   AddMethod("disconnect", &ChromotingScriptableObject::DoDisconnect);
   AddMethod("submitLoginInfo", &ChromotingScriptableObject::DoSubmitLogin);
   AddMethod("setScaleToFit", &ChromotingScriptableObject::DoSetScaleToFit);
   AddMethod("onIq", &ChromotingScriptableObject::DoOnIq);
+  AddMethod("releaseAllKeys", &ChromotingScriptableObject::DoReleaseAllKeys);
 }
 
 bool ChromotingScriptableObject::HasProperty(const Var& name, Var* exception) {
@@ -244,7 +245,7 @@ void ChromotingScriptableObject::SetConnectionInfo(ConnectionStatus status,
 
 void ChromotingScriptableObject::LogDebugInfo(const std::string& info) {
   Var exception;
-  Var cb = GetProperty(Var(kDebugInfo), &exception);
+  VarPrivate cb = GetProperty(Var(kDebugInfo), &exception);
 
   // Var() means call the object directly as a function rather than calling
   // a method in the object.
@@ -285,7 +286,7 @@ void ChromotingScriptableObject::AddMethod(const std::string& name,
 
 void ChromotingScriptableObject::SignalConnectionInfoChange() {
   Var exception;
-  Var cb = GetProperty(Var(kConnectionInfoUpdate), &exception);
+  VarPrivate cb = GetProperty(Var(kConnectionInfoUpdate), &exception);
 
   // Var() means call the object directly as a function rather than calling
   // a method in the object.
@@ -298,14 +299,11 @@ void ChromotingScriptableObject::SignalConnectionInfoChange() {
 
 void ChromotingScriptableObject::SignalDesktopSizeChange() {
   Var exception;
-
-  // The JavaScript callback function is the 'callback' property on the
-  // 'desktopSizeUpdate' object.
-  Var cb = GetProperty(Var(kDesktopSizeUpdate), &exception);
+  VarPrivate cb = GetProperty(Var(kDesktopSizeUpdate), &exception);
 
   // Var() means call the object directly as a function rather than calling
   // a method in the object.
-  cb.Call(Var(), 0, NULL, &exception);
+  cb.Call(Var(), &exception);
 
   if (!exception.is_undefined()) {
     LOG(WARNING) << "Exception when invoking JS callback"
@@ -315,7 +313,7 @@ void ChromotingScriptableObject::SignalDesktopSizeChange() {
 
 void ChromotingScriptableObject::SignalLoginChallenge() {
   Var exception;
-  Var cb = GetProperty(Var(kLoginChallenge), &exception);
+  VarPrivate cb = GetProperty(Var(kLoginChallenge), &exception);
 
   // Var() means call the object directly as a function rather than calling
   // a method in the object.
@@ -331,7 +329,7 @@ void ChromotingScriptableObject::AttachXmppProxy(PepperXmppProxy* xmpp_proxy) {
 
 void ChromotingScriptableObject::SendIq(const std::string& message_xml) {
   Var exception;
-  Var cb = GetProperty(Var(kSendIq), &exception);
+  VarPrivate cb = GetProperty(Var(kSendIq), &exception);
 
   // Var() means call the object directly as a function rather than calling
   // a method in the object.
@@ -345,6 +343,7 @@ Var ChromotingScriptableObject::DoConnect(const std::vector<Var>& args,
                                           Var* exception) {
   // Parameter order is:
   //   host_jid
+  //   host_public_key
   //   client_jid
   //   access_code (optional)
   unsigned int arg = 0;
@@ -353,6 +352,12 @@ Var ChromotingScriptableObject::DoConnect(const std::vector<Var>& args,
     return Var();
   }
   std::string host_jid = args[arg++].AsString();
+
+  if (!args[arg].is_string()) {
+    *exception = Var("The host_public_key must be a string.");
+    return Var();
+  }
+  std::string host_public_key = args[arg++].AsString();
 
   if (!args[arg].is_string()) {
     *exception = Var("The client_jid must be a string.");
@@ -377,67 +382,11 @@ Var ChromotingScriptableObject::DoConnect(const std::vector<Var>& args,
   LogDebugInfo("Connecting to host.");
   VLOG(1) << "client_jid: " << client_jid << ", host_jid: " << host_jid
           << ", access_code: " << access_code;
-  instance_->ConnectSandboxed(client_jid, host_jid, access_code);
-
-  return Var();
-}
-
-Var ChromotingScriptableObject::DoConnectUnsandboxed(
-    const std::vector<Var>& args,
-    Var* exception) {
-  // Parameter order is:
-  //   host_jid
-  //   username
-  //   auth_token
-  //   access_code (optional)
-  unsigned int arg = 0;
-  if (!args[arg].is_string()) {
-    *exception = Var("The host_jid must be a string.");
-    return Var();
-  }
-  std::string host_jid = args[arg++].AsString();
-
-  if (!args[arg].is_string()) {
-    *exception = Var("The username must be a string.");
-    return Var();
-  }
-  std::string username = args[arg++].AsString();
-
-  if (!args[arg].is_string()) {
-    *exception = Var("The auth_token_with_service must be a string.");
-    return Var();
-  }
-  std::string auth_token_with_service = args[arg++].AsString();
-
-  std::string auth_service;
-  std::string auth_token;
-  ParseAuthTokenWithService(auth_token_with_service, &auth_token,
-                            &auth_service);
-
-  std::string access_code;
-  if (args.size() > arg) {
-    if (!args[arg].is_string()) {
-      *exception = Var("The access code must be a string.");
-      return Var();
-    }
-    access_code = args[arg++].AsString();
-  }
-
-  if (args.size() != arg) {
-    *exception = Var("Too many agruments passed to connect().");
-    return Var();
-  }
-
-  LogDebugInfo("Connecting to host.");
   ClientConfig config;
+  config.local_jid = client_jid;
   config.host_jid = host_jid;
-  config.username = username;
-  config.auth_token = auth_token;
-  config.auth_service = auth_service;
-  config.nonce = access_code;
-  VLOG(1) << "host_jid: " << host_jid << ", username: " << username
-          << ", auth_service: " << auth_service
-          << ", access_code: " << access_code;
+  config.host_public_key = host_public_key;
+  config.access_code = access_code;
   instance_->Connect(config);
 
   return Var();
@@ -506,6 +455,16 @@ Var ChromotingScriptableObject::DoOnIq(const std::vector<Var>& args,
 
   xmpp_proxy_->OnIq(args[0].AsString());
 
+  return Var();
+}
+
+Var ChromotingScriptableObject::DoReleaseAllKeys(
+    const std::vector<pp::Var>& args, pp::Var* exception) {
+  if (args.size() != 0) {
+    *exception = Var("Usage: DoReleaseAllKeys()");
+    return Var();
+  }
+  instance_->ReleaseAllKeys();
   return Var();
 }
 

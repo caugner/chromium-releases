@@ -17,8 +17,6 @@
 #include "chrome/browser/policy/configuration_policy_store_interface.h"
 #include "chrome/common/pref_store.h"
 
-class Profile;
-
 namespace policy {
 
 class ConfigurationPolicyPrefKeeper;
@@ -49,8 +47,7 @@ class ConfigurationPolicyPrefStore
   static ConfigurationPolicyPrefStore* CreateManagedPlatformPolicyPrefStore();
 
   // Creates a ConfigurationPolicyPrefStore that reads managed cloud policy.
-  static ConfigurationPolicyPrefStore* CreateManagedCloudPolicyPrefStore(
-      Profile* profile);
+  static ConfigurationPolicyPrefStore* CreateManagedCloudPolicyPrefStore();
 
   // Creates a ConfigurationPolicyPrefStore that reads recommended platform
   // policy.
@@ -58,12 +55,14 @@ class ConfigurationPolicyPrefStore
       CreateRecommendedPlatformPolicyPrefStore();
 
   // Creates a ConfigurationPolicyPrefStore that reads recommended cloud policy.
-  static ConfigurationPolicyPrefStore* CreateRecommendedCloudPolicyPrefStore(
-      Profile* profile);
+  static ConfigurationPolicyPrefStore* CreateRecommendedCloudPolicyPrefStore();
 
   // Returns the default policy definition list for Chrome.
   static const ConfigurationPolicyProvider::PolicyDefinitionList*
       GetChromePolicyDefinitionList();
+
+  // Returns true if the given policy is a proxy policy.
+  static bool IsProxyPolicy(ConfigurationPolicyType policy);
 
  private:
   // Refreshes policy information, rereading policy from the provider and

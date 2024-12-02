@@ -9,17 +9,17 @@
 #include <map>
 #include <string>
 
-#include "app/sql/meta_table.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/url_database.h"  // For DBCloseScoper.
+#include "sql/meta_table.h"
 
 class FilePath;
 class RefCountedMemory;
 class SkBitmap;
 
-namespace app {
+namespace sql {
 class Connection;
 }
 

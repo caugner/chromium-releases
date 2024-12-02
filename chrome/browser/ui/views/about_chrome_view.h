@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_VIEWS_ABOUT_CHROME_VIEW_H_
 #pragma once
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "views/controls/image_view.h"
@@ -21,7 +23,6 @@
 namespace views {
 class Textfield;
 class Throbber;
-class Window;
 }
 
 class Profile;
@@ -33,8 +34,7 @@ class Profile;
 // and check for updates.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class AboutChromeView : public views::View,
-                        public views::DialogDelegate,
+class AboutChromeView : public views::DialogDelegateView,
                         public views::LinkListener
 #if defined(OS_WIN)
                         , public GoogleUpdateStatusListener
@@ -139,7 +139,9 @@ class AboutChromeView : public views::View,
   std::string current_version_;
 
   // Additional information about the version (channel and build number).
-  std::string version_details_;
+  // Note: the translation of 'official build' might be included in the version
+  // details.
+  string16 version_details_;
 
   // The version Google Update reports is available to us.
   std::wstring new_version_available_;

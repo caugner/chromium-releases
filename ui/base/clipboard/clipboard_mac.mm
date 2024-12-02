@@ -16,6 +16,7 @@
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/size.h"
 
 namespace ui {
@@ -247,12 +248,16 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
 
   scoped_nsobject<NSImage> image(
       [[NSImage alloc] initWithPasteboard:GetPasteboard()]);
-  if (image.get()) {
-    [image setFlipped:YES];
-    int width = [image size].width;
-    int height = [image size].height;
+  if (!image.get())
+    return SkBitmap();
 
-    gfx::CanvasSkia canvas(width, height, false);
+  gfx::ScopedNSGraphicsContextSaveGState scoped_state;
+  [image setFlipped:YES];
+  int width = [image size].width;
+  int height = [image size].height;
+
+  gfx::CanvasSkia canvas(width, height, false);
+  {
     skia::ScopedPlatformPaint scoped_platform_paint(&canvas);
     CGContextRef gc = scoped_platform_paint.GetPlatformSurface();
     NSGraphicsContext* cocoa_gc =
@@ -262,10 +267,8 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
              fromRect:NSZeroRect
             operation:NSCompositeCopy
              fraction:1.0];
-    [NSGraphicsContext restoreGraphicsState];
-    return canvas.ExtractBitmap();
   }
-  return SkBitmap();
+  return canvas.ExtractBitmap();
 }
 
 void Clipboard::ReadBookmark(string16* title, std::string* url) const {
@@ -317,6 +320,11 @@ void Clipboard::ReadFiles(std::vector<FilePath>* files) const {
     std::string file = [[fileList objectAtIndex:i] UTF8String];
     files->push_back(FilePath(file));
   }
+}
+
+uint64 Clipboard::GetSequenceNumber() {
+  NSPasteboard* pb = GetPasteboard();
+  return [pb changeCount];
 }
 
 // static

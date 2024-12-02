@@ -114,21 +114,24 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
   switch (type_) {
     case BEFORE_TRANSLATE:
       infobar_controller =
-          [[BeforeTranslateInfobarController alloc] initWithDelegate:this];
+          [[BeforeTranslateInfobarController alloc] initWithDelegate:this
+                                                               owner:owner];
       break;
     case AFTER_TRANSLATE:
       infobar_controller =
-          [[AfterTranslateInfobarController alloc] initWithDelegate:this];
+          [[AfterTranslateInfobarController alloc] initWithDelegate:this
+                                                              owner:owner];
       break;
     case TRANSLATING:
     case TRANSLATION_ERROR:
       infobar_controller =
-          [[TranslateMessageInfobarController alloc] initWithDelegate:this];
+          [[TranslateMessageInfobarController alloc] initWithDelegate:this
+                                                                owner:owner];
       break;
     default:
       NOTREACHED();
   }
-  return new InfoBar(infobar_controller);
+  return new InfoBar(infobar_controller, this);
 }
 
 @implementation TranslateInfoBarControllerBase (FrameChangeObserver)
@@ -155,9 +158,6 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
 // Reloads text for all labels for the current state.
 - (void)loadLabelText:(TranslateErrors::Type)error;
 
-// Set the infobar background gradient.
-- (void)setInfoBarGradientColor;
-
 // Main function to update the toolbar graphic state and data model after
 // the state has changed.
 // Controls are moved around as needed and visibility changed to match the
@@ -179,8 +179,9 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
 
 @implementation TranslateInfoBarControllerBase
 
-- (id)initWithDelegate:(InfoBarDelegate*)delegate {
-  if ((self = [super initWithDelegate:delegate])) {
+- (id)initWithDelegate:(InfoBarDelegate*)delegate
+                 owner:(TabContentsWrapper*)owner {
+  if ((self = [super initWithDelegate:delegate owner:owner])) {
       originalLanguageMenuModel_.reset(
           new LanguagesMenuModel([self delegate],
                                  LanguagesMenuModel::ORIGINAL));
@@ -249,18 +250,6 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
   [self layout];
   [self adjustOptionsButtonSizeAndVisibilityForView:
       [[self visibleControls] lastObject]];
-}
-
-- (void)setInfoBarGradientColor {
-  NSColor* startingColor = [NSColor colorWithCalibratedWhite:0.93 alpha:1.0];
-  NSColor* endingColor = [NSColor colorWithCalibratedWhite:0.85 alpha:1.0];
-  NSGradient* translateInfoBarGradient =
-      [[[NSGradient alloc] initWithStartingColor:startingColor
-                                     endingColor:endingColor] autorelease];
-
-  [infoBarView_ setGradient:translateInfoBarGradient];
-  [infoBarView_
-      setStrokeColor:[NSColor colorWithCalibratedWhite:0.75 alpha:1.0]];
 }
 
 - (void)removeOkCancelButtons {
@@ -409,9 +398,6 @@ InfoBar* TranslateInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
   NSRect okButtonFrame = [okButton_ frame];
   NSRect cancelButtonFrame = [cancelButton_ frame];
   spaceBetweenControls_ = NSMinX(cancelButtonFrame) - NSMaxX(okButtonFrame);
-
-  // Set infobar background color.
-  [self setInfoBarGradientColor];
 
   // Instantiate additional controls.
   [self constructViews];

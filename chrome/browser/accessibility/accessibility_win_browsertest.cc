@@ -6,16 +6,18 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_win.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_type.h"
+#include "content/common/content_notification_types.h"
 #include "ia2_api_all.h"  // Generated    NOLINT
 #include "ISimpleDOMNode.h"  // Generated   NOLINT
 
@@ -135,54 +137,53 @@ HRESULT QueryIAccessible2(IAccessible* accessible, IAccessible2** accessible2) {
   return hr;
 }
 
-// Sets result to true if the child is located in the parent's tree. An
-// exhustive search is perform here because we determine equality using
-// IAccessible2::get_unique_id which is only supported by the child node.
-void AccessibleContainsAccessible(
-    IAccessible* parent, IAccessible2* child, bool* result) {
-  vector<base::win::ScopedComPtr<IAccessible>> accessible_list;
-  accessible_list.push_back(base::win::ScopedComPtr<IAccessible>(parent));
+// Recursively search through all of the descendants reachable from an
+// IAccessible node and return true if we find one with the given role
+// and name.
+void RecursiveFindNodeInAccessibilityTree(
+    IAccessible* node,
+    int32 expected_role,
+    const wstring& expected_name,
+    int32 depth,
+    bool* found) {
+  CComBSTR name_bstr;
+  node->get_accName(CreateI4Variant(CHILDID_SELF), &name_bstr);
+  wstring name(name_bstr.m_str, SysStringLen(name_bstr));
+  VARIANT role = {0};
+  node->get_accRole(CreateI4Variant(CHILDID_SELF), &role);
 
-  LONG unique_id;
-  HRESULT hr = child->get_uniqueID(&unique_id);
+  // Print the accessibility tree as we go, because if this test fails
+  // on the bots, this is really helpful in figuring out why.
+  for (int i = 0; i < depth; i++) {
+    printf("  ");
+  }
+  printf("role=%d name=%s\n", role.lVal, WideToUTF8(name).c_str());
+
+  if (expected_role == role.lVal && expected_name == name) {
+    *found = true;
+    return;
+  }
+
+  LONG child_count = 0;
+  HRESULT hr = node->get_accChildCount(&child_count);
   ASSERT_EQ(S_OK, hr);
-  *result = false;
 
-  while (accessible_list.size()) {
-    base::win::ScopedComPtr<IAccessible> accessible = accessible_list.back();
-    accessible_list.pop_back();
+  scoped_array<VARIANT> child_array(new VARIANT[child_count]);
+  LONG obtained_count = 0;
+  hr = AccessibleChildren(
+      node, 0, child_count, child_array.get(), &obtained_count);
+  ASSERT_EQ(S_OK, hr);
+  ASSERT_EQ(child_count, obtained_count);
 
-    base::win::ScopedComPtr<IAccessible2> accessible2;
-    hr = QueryIAccessible2(accessible, accessible2.Receive());
-    if (SUCCEEDED(hr)) {
-      LONG child_id;
-      accessible2->get_uniqueID(&child_id);
-      if (child_id == unique_id) {
-        *result = true;
-        break;
-      }
-    }
-
-    LONG child_count;
-    hr = accessible->get_accChildCount(&child_count);
-    ASSERT_EQ(S_OK, hr);
-    if (child_count == 0)
-      continue;
-
-    scoped_array<VARIANT> child_array(new VARIANT[child_count]);
-    LONG obtained_count = 0;
-    hr = AccessibleChildren(
-        accessible, 0, child_count, child_array.get(), &obtained_count);
-    ASSERT_EQ(S_OK, hr);
-    ASSERT_EQ(child_count, obtained_count);
-
-    for (int index = 0; index < obtained_count; index++) {
-      base::win::ScopedComPtr<IAccessible> child_accessible(
-        GetAccessibleFromResultVariant(accessible, &child_array.get()[index]));
-      if (child_accessible.get()) {
-        accessible_list.push_back(
-            base::win::ScopedComPtr<IAccessible>(child_accessible));
-      }
+  for (int index = 0; index < obtained_count; index++) {
+    base::win::ScopedComPtr<IAccessible> child_accessible(
+        GetAccessibleFromResultVariant(node, &child_array.get()[index]));
+    if (child_accessible.get()) {
+      RecursiveFindNodeInAccessibilityTree(
+          child_accessible.get(), expected_role, expected_name, depth + 1,
+          found);
+      if (*found)
+        return;
     }
   }
 }
@@ -336,7 +337,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
 
   // Wait for the initial accessibility tree to load. Busy state should clear.
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
   document1_checker.SetExpectedState(
       STATE_SYSTEM_READONLY | STATE_SYSTEM_FOCUSABLE | STATE_SYSTEM_FOCUSED);
   document1_checker.CheckAccessible(GetRendererAccessible());
@@ -347,7 +348,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
       "</body></html>");
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check the browser's copy of the renderer accessibility tree.
   AccessibleChecker button_checker(L"push", ROLE_SYSTEM_PUSHBUTTON, L"push");
@@ -370,8 +371,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   EXPECT_NE(parent_dispatch, reinterpret_cast<IDispatch*>(NULL));
 
   // Navigate to another page.
-  GURL about_url("about:");
-  ui_test_utils::NavigateToURL(browser(), about_url);
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIVersionURL));
 
   // Verify that the IAccessible reference still points to a valid object and
   // that calls to its methods fail since the tree is no longer valid after
@@ -388,7 +388,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   GetRendererAccessible();
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check the browser's copy of the renderer accessibility tree.
   AccessibleChecker list_marker_checker(L"", ROLE_SYSTEM_LISTITEM, L"\x2022");
@@ -409,7 +409,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   // Set focus to the radio group.
   ExecuteScript(L"document.body.children[0].focus()");
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check that the accessibility tree of the browser has been updated.
   radio_group_checker.SetExpectedState(
@@ -420,7 +420,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   ExecuteScript(
       L"document.body.children[0].setAttribute('aria-activedescendant', 'li')");
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check that the accessibility tree of the browser has been updated.
   list_item_checker.SetExpectedState(
@@ -436,7 +436,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   GetRendererAccessible();
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check the browser's copy of the renderer accessibility tree.
   AccessibleChecker checkbox_checker(L"", ROLE_SYSTEM_CHECKBUTTON, L"");
@@ -451,7 +451,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   // Check the checkbox.
   ExecuteScript(L"document.body.children[0].checked=true");
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check that the accessibility tree of the browser has been updated.
   checkbox_checker.SetExpectedState(
@@ -467,7 +467,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   GetRendererAccessible();
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check the browser's copy of the renderer accessibility tree.
   AccessibleChecker body_checker(L"", L"body", L"");
@@ -478,7 +478,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   // Change the children of the document body.
   ExecuteScript(L"document.body.innerHTML='<b>new text</b>'");
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check that the accessibility tree of the browser has been updated.
   AccessibleChecker text_checker(L"new text", ROLE_SYSTEM_TEXT, L"");
@@ -495,7 +495,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   GetRendererAccessible();
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check the accessible tree of the browser.
   AccessibleChecker document_checker(L"", ROLE_SYSTEM_DOCUMENT, L"");
@@ -504,7 +504,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   // Change the children of the document body.
   ExecuteScript(L"document.body.children[0].style.visibility='visible'");
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check that the accessibility tree of the browser has been updated.
   AccessibleChecker static_text_checker(L"text", ROLE_SYSTEM_TEXT, L"");
@@ -522,7 +522,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   GetRendererAccessible();
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check the browser's copy of the renderer accessibility tree.
   AccessibleChecker div_checker(L"", L"div", L"");
@@ -535,7 +535,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   // Focus the div in the document
   ExecuteScript(L"document.body.children[0].focus()");
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check that the accessibility tree of the browser has been updated.
   div_checker.SetExpectedState(
@@ -550,7 +550,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
     SELFLAG_TAKEFOCUS, CreateI4Variant(CHILDID_SELF));
   ASSERT_EQ(S_OK, hr);
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check that the accessibility tree of the browser has been updated.
   div_checker.SetExpectedState(
@@ -565,16 +565,14 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   GetRendererAccessible();
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check the browser's copy of the renderer accessibility tree.
 
-  AccessibleChecker text_field_div_checker(L"", L"div", L"");
   AccessibleChecker text_field_checker(L"", ROLE_SYSTEM_TEXT, L"old value");
   text_field_checker.SetExpectedState(STATE_SYSTEM_FOCUSABLE);
   AccessibleChecker body_checker(L"", L"body", L"");
   AccessibleChecker document_checker(L"", ROLE_SYSTEM_DOCUMENT, L"");
-  text_field_checker.AppendExpectedChild(&text_field_div_checker);
   body_checker.AppendExpectedChild(&text_field_checker);
   document_checker.AppendExpectedChild(&body_checker);
   document_checker.CheckAccessible(GetRendererAccessible());
@@ -582,25 +580,29 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   // Set the value of the text control
   ExecuteScript(L"document.body.children[0].value='new value'");
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Check that the accessibility tree of the browser has been updated.
   text_field_checker.SetExpectedValue(L"new value");
   document_checker.CheckAccessible(GetRendererAccessible());
 }
 
-// FAILS crbug.com/54220
-// This test verifies that browser-side cache of the renderer accessibility
-// tree is reachable from the browser's tree. Tools that analyze windows
-// accessibility trees like AccExplorer32 should be able to drill into the
-// cached renderer accessibility tree.
+// This test verifies that the web content's accessibility tree is a
+// descendant of the main browser window's accessibility tree, so that
+// tools like AccExplorer32 or AccProbe can be used to examine Chrome's
+// accessibility support.
+//
+// If you made a change and this test now fails, check that the NativeViewHost
+// that wraps the tab contents returns the IAccessible implementation
+// provided by RenderWidgetHostViewWin in GetNativeViewAccessible().
 IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
-                       DISABLED_ContainsRendererAccessibilityTree) {
-  GURL tree_url("data:text/html,<body><input type='checkbox' /></body>");
+                       ContainsRendererAccessibilityTree) {
+  GURL tree_url("data:text/html,<html><head><title>MyDocument</title></head>"
+                "<body>Content</body></html>");
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   GetRendererAccessible();
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Get the accessibility object for the browser window.
   HWND browser_hwnd = browser()->window()->GetNativeHandle();
@@ -612,45 +614,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
       reinterpret_cast<void**>(browser_accessible.Receive()));
   ASSERT_EQ(S_OK, hr);
 
-  // Get the accessibility object for the renderer client document.
-  base::win::ScopedComPtr<IAccessible> document_accessible(
-      GetRendererAccessible());
-  ASSERT_NE(document_accessible.get(), reinterpret_cast<IAccessible*>(NULL));
-  base::win::ScopedComPtr<IAccessible2> document_accessible2;
-  hr = QueryIAccessible2(document_accessible, document_accessible2.Receive());
-  ASSERT_EQ(S_OK, hr);
-
-  // TODO(ctguil): Pointer comparison of retrieved IAccessible pointers dosen't
-  // seem to work for here. Perhaps make IAccessible2 available in views to make
-  // unique id comparison available.
   bool found = false;
-  base::win::ScopedComPtr<IAccessible> parent = document_accessible;
-  while (parent.get()) {
-    base::win::ScopedComPtr<IDispatch> parent_dispatch;
-    hr = parent->get_accParent(parent_dispatch.Receive());
-    ASSERT_TRUE(SUCCEEDED(hr));
-    if (!parent_dispatch.get()) {
-      ASSERT_EQ(hr, S_FALSE);
-      break;
-    }
-
-    parent.Release();
-    hr = parent_dispatch.QueryInterface(parent.Receive());
-    ASSERT_EQ(S_OK, hr);
-
-    if (parent.get() == browser_accessible.get()) {
-      found = true;
-      break;
-    }
-  }
-
-  // If pointer comparison fails resort to the exhuasive search that can use
-  // IAccessible2::get_unique_id for equality comparison.
-  if (!found) {
-    AccessibleContainsAccessible(
-        browser_accessible, document_accessible2, &found);
-  }
-
+  RecursiveFindNodeInAccessibilityTree(
+      browser_accessible.get(), ROLE_SYSTEM_DOCUMENT, L"MyDocument", 0, &found);
   ASSERT_EQ(found, true);
 }
 
@@ -660,7 +626,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   GetRendererAccessible();
   ui_test_utils::WaitForNotification(
-      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+      content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
 
   // Get the IAccessible object for the document.
   base::win::ScopedComPtr<IAccessible> document_accessible(
