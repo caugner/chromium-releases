@@ -33,9 +33,6 @@ import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.browser.compositor.layouts.components.CompositorButton;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.layouts.components.VirtualView;
-import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabImpl;
-import org.chromium.chrome.browser.tabmodel.EmptyTabModel;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
 import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.ui.base.LocalizationUtils;
@@ -50,8 +47,10 @@ import java.util.List;
 public class StripLayoutHelperTest {
     @Rule
     public TestRule mFeaturesProcessorRule = new Features.JUnitProcessor();
-    @Mock private LayoutUpdateHost mUpdateHost;
-    @Mock private LayoutRenderHost mRenderHost;
+    @Mock
+    private LayoutUpdateHost mUpdateHost;
+    @Mock
+    private LayoutRenderHost mRenderHost;
     @Mock
     private CompositorButton mModelSelectorBtn;
 
@@ -174,7 +173,7 @@ public class StripLayoutHelperTest {
         mModel.closeAllTabs();
 
         // Notify strip of tab closure
-        mStripLayoutHelper.allTabsClosed();
+        mStripLayoutHelper.willCloseAllTabs();
 
         // Verify strip has no tabs.
         assertTrue(mStripLayoutHelper.getStripLayoutTabs().length == 0);
@@ -277,7 +276,7 @@ public class StripLayoutHelperTest {
         // Close btn should be hidden for the partially visible edge tab.
         Mockito.verify(tabs[3]).setCanShowCloseButton(false);
     }
-  
+
     @Test
     @Feature("Tab Strip Improvements")
     public void testTabSelected_LastTab_ShowCloseBtn() {
@@ -623,46 +622,5 @@ public class StripLayoutHelperTest {
         when(tab.getId()).thenReturn(id);
         when(tab.getDrawX()).thenReturn(mDrawX);
         return tab;
-    }
-
-    private static class TestTabModel extends EmptyTabModel {
-        private final List<Tab> mMockTabs = new ArrayList<>();
-        private int mMaxId = -1;
-        private int mIndex;
-
-        public void addTab(final String title) {
-            mMaxId++;
-            final TabImpl mockTab = mock(TabImpl.class);
-            final int tabId = mMaxId;
-            when(mockTab.getId()).thenReturn(tabId);
-            when(mockTab.getTitle()).thenReturn(title);
-            mMockTabs.add(mockTab);
-        }
-
-        @Override
-        public Tab getTabAt(int id) {
-            return mMockTabs.get(id);
-        }
-
-        @Override
-        public int getCount() {
-            return mMockTabs.size();
-        }
-
-        @Override
-        public int index() {
-            return mIndex;
-        }
-
-        @Override
-        public void closeAllTabs() {
-            mMockTabs.clear();
-            mMaxId = -1;
-            mIndex = 0;
-        }
-
-        public void setIndex(int index) {
-            mIndex = index;
-        }
     }
 }
