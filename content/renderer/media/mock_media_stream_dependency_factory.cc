@@ -29,9 +29,11 @@ class MockMediaStreamTrackList
   virtual size_t count() const OVERRIDE {
     return tracks_.size();
   }
+
   virtual TrackType* at(size_t index) OVERRIDE {
     return tracks_[index];
   }
+
   void AddTrack(TrackType* track) {
     tracks_.push_back(track);
   }
@@ -330,14 +332,6 @@ bool MockMediaStreamDependencyFactory::EnsurePeerConnectionFactory() {
 
 bool MockMediaStreamDependencyFactory::PeerConnectionFactoryCreated() {
   return mock_pc_factory_created_;
-}
-
-scoped_refptr<webrtc::PeerConnectionInterface>
-MockMediaStreamDependencyFactory::CreatePeerConnection(
-    const std::string& config,
-    webrtc::PeerConnectionObserver* observer) {
-  DCHECK(mock_pc_factory_created_);
-  return new talk_base::RefCountedObject<MockPeerConnectionImpl>(this);
 }
 
 scoped_refptr<webrtc::PeerConnectionInterface>

@@ -1,6 +1,6 @@
 *.Makefile
 *.gypcmd
-*.host.mk
+*.mk
 *.ncb
 *.ninja
 *.opensdf
@@ -10,7 +10,6 @@
 *.sdf
 *.sln
 *.suo
-*.target.mk
 *.targets
 *.user
 *.vcproj
@@ -24,6 +23,7 @@
 *_proto.xml
 *_proto_cpp.xml
 *~
+!Android.mk
 .*.sw?
 .DS_Store
 .classpath
@@ -40,6 +40,7 @@ Thumbs.db
 v8.log
 /Makefile
 /_out
+/arm-sysroot
 /ash/resources/google_wallpapers/
 /breakpad/src/
 /build/Debug
@@ -93,6 +94,7 @@ v8.log
 /chrome/test/data/perf/frame_rate/content
 /chrome/test/data/perf/frame_rate/private
 /chrome/test/data/perf/private/
+/chrome/test/data/perf/third_party/
 /chrome/test/data/plugin/
 /chrome/test/data/pyauto_private
 /chrome/tools/memory
@@ -126,6 +128,7 @@ v8.log
 /ppapi/native_client/src/shared/ppapi_proxy/ppruntime_lib.xml
 /ppapi/native_client/src/trusted/plugin/ppGoogleNaClPluginChrome.xml
 /remoting/appengine/
+/remoting/host/installer/linux/internal/
 /remoting/proto/chromotocol_proto_lib.xml
 /remoting/proto/trace_proto_lib.xml
 /remoting/remoting_elevated_controller.xml
@@ -150,10 +153,10 @@ v8.log
 /third_party/angle
 /third_party/android_tools/
 /third_party/aosp
+/third_party/apache-mime4j
 /third_party/asan
 /third_party/bidichecker
 /third_party/bison
-/third_party/cacheinvalidation/files
 /third_party/cacheinvalidation/src
 /third_party/chromeos_login_manager
 /third_party/chromeos_text_input
@@ -163,6 +166,8 @@ v8.log
 /third_party/cygwin
 /third_party/directxsdk
 /third_party/drmemory
+/third_party/eyesfree/src
+/third_party/findbugs
 /third_party/ffmpeg
 /third_party/flac
 /third_party/freetype
@@ -171,10 +176,15 @@ v8.log
 /third_party/gold
 /third_party/googlemac
 /third_party/gperf
+/third_party/guava/src
+/third_party/httpcomponents-client
+/third_party/httpcomponents-core
 /third_party/hunspell
 /third_party/hunspell_dictionaries
 /third_party/icu
+/third_party/jarjar
 /third_party/jsoncpp/source
+/third_party/jsr-305/src
 /third_party/leveldatabase/src
 /third_party/leveldb
 /third_party/libexif/sources
@@ -195,7 +205,6 @@ v8.log
 /third_party/lss
 /third_party/mingw-w64
 /third_party/mkl
-/third_party/mozc
 /third_party/mt19937ar
 /third_party/mtpd/source/
 /third_party/nacl_sdk_binaries/
@@ -231,6 +240,7 @@ v8.log
 /third_party/syzygy/binaries
 /third_party/trace-viewer
 /third_party/undoview
+/third_party/usb_ids
 /third_party/v8-i18n
 /third_party/valgrind
 /third_party/webdriver/pylib
@@ -269,6 +279,7 @@ v8.log
 /webkit/data/layout_tests/LayoutTests
 /webkit/data/test_shell/plugins
 /webkit/data/xbm_decoder
+/webkit/media/crypto/ppapi/cdm
 /webpagereplay_logs/
 /x86-generic_out/
 /xcodebuild

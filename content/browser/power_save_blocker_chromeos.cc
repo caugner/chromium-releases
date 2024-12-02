@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/power_save_blocker.h"
+#include "content/browser/power_save_blocker_impl.h"
 
 #include "base/basictypes.h"
 #include "base/bind.h"
@@ -13,8 +13,8 @@
 
 namespace content {
 
-class PowerSaveBlocker::Delegate
-    : public base::RefCountedThreadSafe<PowerSaveBlocker::Delegate> {
+class PowerSaveBlockerImpl::Delegate
+    : public base::RefCountedThreadSafe<PowerSaveBlockerImpl::Delegate> {
  public:
   Delegate(PowerSaveBlockerType type) : type_(type) {}
 
@@ -34,13 +34,13 @@ class PowerSaveBlocker::Delegate
       default:
         NOTREACHED() << "Unhandled block type " << type_;
     }
-    override_.reset(new chromeos::PowerStateOverride(mode));
+    override_ = new chromeos::PowerStateOverride(mode);
   }
 
   // Resets the previously-created PowerStateOverride object.
   void RemoveBlock() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    override_.reset();
+    override_ = NULL;
   }
 
  private:
@@ -49,19 +49,19 @@ class PowerSaveBlocker::Delegate
 
   PowerSaveBlockerType type_;
 
-  scoped_ptr<chromeos::PowerStateOverride> override_;
+  scoped_refptr<chromeos::PowerStateOverride> override_;
 
   DISALLOW_COPY_AND_ASSIGN(Delegate);
 };
 
-PowerSaveBlocker::PowerSaveBlocker(PowerSaveBlockerType type,
-                                   const std::string& reason)
+PowerSaveBlockerImpl::PowerSaveBlockerImpl(PowerSaveBlockerType type,
+                                           const std::string& reason)
     : delegate_(new Delegate(type)) {
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::Bind(&Delegate::ApplyBlock, delegate_));
 }
 
-PowerSaveBlocker::~PowerSaveBlocker() {
+PowerSaveBlockerImpl::~PowerSaveBlockerImpl() {
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::Bind(&Delegate::RemoveBlock, delegate_));
 }

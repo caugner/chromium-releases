@@ -21,7 +21,12 @@
 #include "sync/api/string_ordinal.h"
 
 class ExtensionService;
+class ExtensionServiceTest;
 class SkBitmap;
+
+namespace base {
+class SequencedTaskRunner;
+}
 
 namespace extensions {
 class ExtensionUpdaterTest;
@@ -175,11 +180,16 @@ class CrxInstaller
     error_on_unsupported_requirements_ = val;
   }
 
+  void set_install_wait_for_idle(bool val) {
+    install_wait_for_idle_ = val;
+  }
+
   bool did_handle_successfully() const { return did_handle_successfully_; }
 
   Profile* profile() { return profile_; }
 
  private:
+  friend class ::ExtensionServiceTest;
   friend class ExtensionUpdaterTest;
   friend class ExtensionCrxInstallerTest;
 
@@ -231,6 +241,12 @@ class CrxInstaller
   void ReportSuccessFromUIThread();
   void NotifyCrxInstallComplete(const Extension* extension);
 
+  // Deletes temporary directory and crx file if needed.
+  void CleanupTempFiles();
+
+  // Creates sequenced task runner for extension install file I/O operations.
+  scoped_refptr<base::SequencedTaskRunner> CreateSequencedTaskRunner();
+
   // The file we're installing.
   FilePath source_file_;
 
@@ -261,7 +277,7 @@ class CrxInstaller
 
   // If non-NULL, contains the expected version of the extension we're
   // installing.  Important for external sources, where claiming the wrong
-  // version could cause unnessisary unpacking of an extension at every
+  // version could cause unnecessary unpacking of an extension at every
   // restart.
   scoped_ptr<Version> expected_version_;
 
@@ -364,6 +380,11 @@ class CrxInstaller
   scoped_ptr<RequirementsChecker> requirements_checker_;
 
   bool has_requirement_errors_;
+
+  bool install_wait_for_idle_;
+
+  // Sequenced task runner where file I/O operations will be performed.
+  scoped_refptr<base::SequencedTaskRunner> installer_task_runner_;
 
   // Used to show the install dialog.
   ExtensionInstallPrompt::ShowDialogCallback show_dialog_callback_;

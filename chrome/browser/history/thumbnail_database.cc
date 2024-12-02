@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
@@ -197,6 +198,10 @@ sql::InitStatus ThumbnailDatabase::Init(
     return sql::INIT_FAILURE;
   }
 
+  // Log in a UMA histogram if the structure of the favicons database is not
+  // what it should be.
+  LogIfFaviconDBStructureIncorrect();
+
   return sql::INIT_OK;
 }
 
@@ -321,6 +326,11 @@ bool ThumbnailDatabase::InitFaviconBitmapsIndex() {
                      "favicon_bitmaps(icon_id)");
 }
 
+void ThumbnailDatabase::LogIfFaviconDBStructureIncorrect() {
+  if (!db_.IsSQLValid("SELECT id, url, icon_type, sizes FROM favicons"))
+    UMA_HISTOGRAM_BOOLEAN("History.InvalidFaviconsDBStructure", true);
+}
+
 void ThumbnailDatabase::BeginTransaction() {
   db_.BeginTransaction();
 }
@@ -363,7 +373,7 @@ bool ThumbnailDatabase::SetPageThumbnail(
     return true;
 
   std::vector<unsigned char> jpeg_data;
-  bool encoded = gfx::JPEGEncodedDataFromImage(
+  bool encoded = gfx::JPEG1xEncodedDataFromImage(
       *thumbnail, kImageQuality, &jpeg_data);
   if (encoded) {
     sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
@@ -574,6 +584,17 @@ bool ThumbnailDatabase::SetFaviconBitmap(
   statement.BindInt64(1, time.ToInternalValue());
   statement.BindInt64(2, bitmap_id);
 
+  return statement.Run();
+}
+
+bool ThumbnailDatabase::SetFaviconBitmapLastUpdateTime(
+    FaviconBitmapID bitmap_id,
+    base::Time time) {
+  DCHECK(bitmap_id);
+  sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
+      "UPDATE favicon_bitmaps SET last_updated=? WHERE id=?"));
+  statement.BindInt64(0, time.ToInternalValue());
+  statement.BindInt64(1, bitmap_id);
   return statement.Run();
 }
 

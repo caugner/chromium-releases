@@ -9,8 +9,10 @@
 #define CONTENT_PUBLIC_COMMON_COMMON_PARAM_TRAITS_MACROS_H_
 
 #include "content/public/common/console_message_level.h"
+#include "content/public/common/page_transition_types.h"
 #include "content/public/common/password_form.h"
 #include "content/public/common/security_style.h"
+#include "content/public/common/ssl_status.h"
 #include "ipc/ipc_message_macros.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
@@ -22,6 +24,7 @@
 #define IPC_MESSAGE_EXPORT CONTENT_EXPORT
 
 IPC_ENUM_TRAITS(content::ConsoleMessageLevel)
+IPC_ENUM_TRAITS(content::PageTransition)
 IPC_ENUM_TRAITS(content::SecurityStyle)
 IPC_ENUM_TRAITS(WebKit::WebReferrerPolicy)
 IPC_ENUM_TRAITS(WindowOpenDisposition)
@@ -52,6 +55,15 @@ IPC_STRUCT_TRAITS_MEMBER(old_password_value)
 IPC_STRUCT_TRAITS_MEMBER(ssl_valid)
 IPC_STRUCT_TRAITS_MEMBER(preferred)
 IPC_STRUCT_TRAITS_MEMBER(blacklisted_by_user)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::SSLStatus)
+  IPC_STRUCT_TRAITS_MEMBER(security_style)
+  IPC_STRUCT_TRAITS_MEMBER(cert_id)
+  IPC_STRUCT_TRAITS_MEMBER(cert_status)
+  IPC_STRUCT_TRAITS_MEMBER(security_bits)
+  IPC_STRUCT_TRAITS_MEMBER(connection_status)
+  IPC_STRUCT_TRAITS_MEMBER(content_status)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(webkit::WebPluginMimeType)

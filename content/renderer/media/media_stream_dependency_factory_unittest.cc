@@ -7,7 +7,6 @@
 #include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_source_extra_data.h"
 #include "content/renderer/media/mock_media_stream_dependency_factory.h"
-#include "content/renderer/media/mock_web_peer_connection_00_handler_client.h"
 #include "content/renderer/media/mock_web_rtc_peer_connection_handler_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libjingle/source/talk/app/webrtc/videosourceinterface.h"
@@ -15,8 +14,6 @@
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamComponent.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamDescriptor.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebMediaStreamSource.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebPeerConnection00Handler.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebPeerConnectionHandler.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRTCPeerConnectionHandler.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
 
@@ -61,8 +58,8 @@ class MediaStreamDependencyFactoryTest : public ::testing::Test {
 
     if (audio) {
       StreamDeviceInfo info;
-      info.stream_type = content::MEDIA_DEVICE_AUDIO_CAPTURE;
-      info.name = "audio";
+      info.device.type = content::MEDIA_DEVICE_AUDIO_CAPTURE;
+      info.device.name = "audio";
       info.session_id = 99;
       audio_sources[0].initialize("audio",
                                   WebKit::WebMediaStreamSource::TypeAudio,
@@ -72,8 +69,8 @@ class MediaStreamDependencyFactoryTest : public ::testing::Test {
     }
     if (video) {
       StreamDeviceInfo info;
-      info.stream_type = content::MEDIA_DEVICE_VIDEO_CAPTURE;
-      info.name = "video";
+      info.device.type = content::MEDIA_DEVICE_VIDEO_CAPTURE;
+      info.device.name = "video";
       info.session_id = 98;
       video_sources[0].initialize("video",
                                   WebKit::WebMediaStreamSource::TypeVideo,
@@ -110,13 +107,6 @@ class MediaStreamDependencyFactoryTest : public ::testing::Test {
  protected:
   scoped_ptr<MockMediaStreamDependencyFactory> dependency_factory_;
 };
-
-TEST_F(MediaStreamDependencyFactoryTest, CreatePeerConnectionHandlerJsep) {
-  MockWebPeerConnection00HandlerClient client_jsep;
-  scoped_ptr<WebKit::WebPeerConnection00Handler> pc_handler_jsep(
-      dependency_factory_->CreatePeerConnectionHandlerJsep(&client_jsep));
-  EXPECT_TRUE(pc_handler_jsep.get() != NULL);
-}
 
 TEST_F(MediaStreamDependencyFactoryTest, CreateRTCPeerConnectionHandler) {
   MockWebRTCPeerConnectionHandlerClient client_jsep;

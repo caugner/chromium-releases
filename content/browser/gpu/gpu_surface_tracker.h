@@ -61,6 +61,9 @@ class GpuSurfaceTracker : public GpuSurfaceLookup {
   // Note: This is an O(log N) lookup.
   void SetSurfaceHandle(int surface_id, const gfx::GLSurfaceHandle& handle);
 
+  // Sets the native widget associated with the surface_id.
+  void SetNativeWidget(int surface_id, gfx::AcceleratedWidget widget);
+
   // Gets the native handle for the given surface.
   // Note: This is an O(log N) lookup.
   gfx::GLSurfaceHandle GetSurfaceHandle(int surface_id);
@@ -68,6 +71,9 @@ class GpuSurfaceTracker : public GpuSurfaceLookup {
   // Gets the native window handle for the given surface or NULL if the surface
   // does not exist. This is an O(log N) lookup.
   gfx::PluginWindowHandle GetSurfaceWindowHandle(int surface_id);
+
+  // Returns the number of surfaces currently registered with the tracker.
+  std::size_t GetSurfaceCount();
 
   // Gets the global instance of the surface tracker. Identical to Get(), but
   // named that way for the implementation of Singleton.

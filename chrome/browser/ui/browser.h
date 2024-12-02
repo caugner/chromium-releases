@@ -16,8 +16,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/string16.h"
-#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/debugger/devtools_toggle_action.h"
 #include "chrome/browser/event_disposition.h"
 #include "chrome/browser/sessions/session_id.h"
@@ -36,6 +36,7 @@
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -159,9 +160,11 @@ class Browser : public TabStripModelObserver,
   };
 
   struct CreateParams {
-    CreateParams();
+    // Deprecated: please use the form taking |host_desktop_type| below.
     explicit CreateParams(Profile* profile);
     CreateParams(Type type, Profile* profile);
+
+    CreateParams(Profile* profile, chrome::HostDesktopType host_desktop_type);
     CreateParams(Type type,
                  Profile* profile,
                  chrome::HostDesktopType host_desktop_type);
@@ -229,9 +232,9 @@ class Browser : public TabStripModelObserver,
   bool is_session_restore() const {
     return is_session_restore_;
   }
-  chrome::HostDesktopType host_desktop_type() {
+  chrome::HostDesktopType host_desktop_type() const {
     return host_desktop_type_;
-  };
+  }
 
   // Accessors ////////////////////////////////////////////////////////////////
 
@@ -413,7 +416,7 @@ class Browser : public TabStripModelObserver,
 
   // Called by chrome::Navigate() when a navigation has occurred in a tab in
   // this Browser. Updates the UI for the start of this navigation.
-  void UpdateUIForNavigationInTab(TabContents* contents,
+  void UpdateUIForNavigationInTab(content::WebContents* contents,
                                   content::PageTransition transition,
                                   bool user_initiated);
 
@@ -424,30 +427,32 @@ class Browser : public TabStripModelObserver,
       const content::OpenURLParams& params) OVERRIDE;
 
   // Overridden from TabStripModelObserver:
-  virtual void TabInsertedAt(TabContents* contents,
+  virtual void TabInsertedAt(content::WebContents* contents,
                              int index,
                              bool foreground) OVERRIDE;
   virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            TabContents* contents,
+                            content::WebContents* contents,
                             int index) OVERRIDE;
-  virtual void TabDetachedAt(TabContents* contents, int index) OVERRIDE;
-  virtual void TabDeactivated(TabContents* contents) OVERRIDE;
-  virtual void ActiveTabChanged(TabContents* old_contents,
-                                TabContents* new_contents,
+  virtual void TabDetachedAt(content::WebContents* contents,
+                             int index) OVERRIDE;
+  virtual void TabDeactivated(content::WebContents* contents) OVERRIDE;
+  virtual void ActiveTabChanged(content::WebContents* old_contents,
+                                content::WebContents* new_contents,
                                 int index,
                                 bool user_gesture) OVERRIDE;
-  virtual void TabMoved(TabContents* contents,
+  virtual void TabMoved(content::WebContents* contents,
                         int from_index,
                         int to_index) OVERRIDE;
   virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             TabContents* old_contents,
-                             TabContents* new_contents,
+                             content::WebContents* old_contents,
+                             content::WebContents* new_contents,
                              int index) OVERRIDE;
-  virtual void TabPinnedStateChanged(TabContents* contents,
+  virtual void TabPinnedStateChanged(content::WebContents* contents,
                                      int index) OVERRIDE;
   virtual void TabStripEmpty() OVERRIDE;
 
   // Overridden from content::WebContentsDelegate:
+  virtual bool CanOverscrollContent() const OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event,
@@ -475,6 +480,12 @@ class Browser : public TabStripModelObserver,
   // Show the first run search engine bubble on the location bar.
   void ShowFirstRunBubble();
 
+  // If necessary, update the bookmark bar state according to the instant
+  // preview state: when instant preview shows suggestions and bookmark bar is
+  // still showing attached, start the animation to hide it.
+  void MaybeUpdateBookmarkBarStateForInstantPreview(
+      const chrome::search::Mode& mode);
+
   FullscreenController* fullscreen_controller() {
     return fullscreen_controller_.get();
   }
@@ -494,6 +505,7 @@ class Browser : public TabStripModelObserver,
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, AppIdSwitch);
   FRIEND_TEST_ALL_PREFIXES(BrowserWithTestWindowTest,
                            IsReservedCommandOrKeyIsApp);
+  FRIEND_TEST_ALL_PREFIXES(BrowserWithTestWindowTest, AppFullScreen);
   FRIEND_TEST_ALL_PREFIXES(FullscreenControllerTest,
                            TabEntersPresentationModeFromWindowed);
   FRIEND_TEST_ALL_PREFIXES(FullscreenExitBubbleControllerTest,
@@ -532,6 +544,9 @@ class Browser : public TabStripModelObserver,
 
     // Change is the result of window toggling in/out of fullscreen mode.
     BOOKMARK_BAR_STATE_CHANGE_TOGGLE_FULLSCREEN,
+
+    // Change is the result of a state change in the instant preview.
+    BOOKMARK_BAR_STATE_CHANGE_INSTANT_PREVIEW_STATE,
   };
 
   // Overridden from content::WebContentsDelegate:
@@ -646,9 +661,14 @@ class Browser : public TabStripModelObserver,
       content::WebContents* web_contents,
       const content::MediaStreamRequest* request,
       const content::MediaResponseCallback& callback) OVERRIDE;
+  virtual bool RequestPpapiBrokerPermission(
+      content::WebContents* web_contents,
+      const GURL& url,
+      const FilePath& plugin_path,
+      const base::Callback<void(bool)>& callback) OVERRIDE;
 
   // Overridden from CoreTabHelperDelegate:
-  // Note that the caller is responsible for deleting |old_tab_contents|.
+  // Note that the caller is responsible for deleting |old_contents|.
   virtual void SwapTabContents(content::WebContents* old_contents,
                                content::WebContents* new_contents) OVERRIDE;
   virtual bool CanReloadContents(
@@ -697,8 +717,11 @@ class Browser : public TabStripModelObserver,
 
   // Command and state updating ///////////////////////////////////////////////
 
+  // Handle changes to kDevTools preference.
+  void OnDevToolsDisabledChanged();
+
   // Set the preference that indicates that the home page has been changed.
-  void MarkHomePageAsChanged(PrefService* pref_service);
+  void MarkHomePageAsChanged();
 
   // UI update coalescing and handling ////////////////////////////////////////
 
@@ -710,7 +733,7 @@ class Browser : public TabStripModelObserver,
   void UpdateToolbar(bool should_restore_state);
 
   // Updates the browser's search model with the tab's search model.
-  void UpdateSearchState(TabContents* contents);
+  void UpdateSearchState(content::WebContents* contents);
 
   // Does one or both of the following for each bit in |changed_flags|:
   // . If the update should be processed immediately, it is.
@@ -754,19 +777,11 @@ class Browser : public TabStripModelObserver,
   // Returns true if the window can close, false otherwise.
   bool CanCloseWithInProgressDownloads();
 
-  // Adoption functions ////////////////////////////////////////////////////////
-
-  // Adopts the specified WebContents as a full-fledged browser tab, attaching
-  // all the associated tab helpers that are needed for the WebContents to
-  // serve in that role. It is safe to call this on a WebContents that was
-  // already adopted.
-  static void AdoptAsTabContents(content::WebContents* web_contents);
-
-  // Sets the specified browser as the delegate of all the parts of the
-  // TabContents that are needed.
-  void SetAsDelegate(content::WebContents* web_contents, Browser* delegate);
-
   // Assorted utility functions ///////////////////////////////////////////////
+
+  // Sets the specified browser as the delegate of the WebContents and all the
+  // associated tab helpers that are needed.
+  void SetAsDelegate(content::WebContents* web_contents, Browser* delegate);
 
   // Shows the Find Bar, optionally selecting the next entry that matches the
   // existing search string for that Tab. |forward_direction| controls the
@@ -778,7 +793,9 @@ class Browser : public TabStripModelObserver,
   //             after a return to the message loop.
   void CloseFrame();
 
-  void TabDetachedAtImpl(TabContents* contents, int index, DetachType type);
+  void TabDetachedAtImpl(content::WebContents* contents,
+                         int index,
+                         DetachType type);
 
   // Shared code between Reload() and ReloadIgnoringCache().
   void ReloadInternal(WindowOpenDisposition disposition, bool ignore_cache);
@@ -798,6 +815,8 @@ class Browser : public TabStripModelObserver,
   // Resets |bookmark_bar_state_| based on the active tab. Notifies the
   // BrowserWindow if necessary.
   void UpdateBookmarkBarState(BookmarkBarStateChangeReason reason);
+
+  bool ShouldHideUIForFullscreen() const;
 
   // Creates a BackgroundContents if appropriate; return true if one was
   // created.

@@ -8,10 +8,8 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "ui/views/focus/focus_manager.h"
-#include "ui/views/view.h"
 
 using views::FocusManager;
-using views::View;
 
 typedef InProcessBrowserTest BrowserViewTest;
 

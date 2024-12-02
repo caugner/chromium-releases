@@ -71,6 +71,7 @@ extern const char kChromeUIThemeURL[];
 extern const char kChromeUIThumbnailURL[];
 extern const char kChromeUIUberURL[];
 extern const char kChromeUIUberFrameURL[];
+extern const char kChromeUIUserActionsURL[];
 extern const char kChromeUIVersionURL[];
 
 #if defined(OS_ANDROID)
@@ -97,7 +98,6 @@ extern const char kChromeUISlideshowURL[];
 extern const char kChromeUISystemInfoURL[];
 extern const char kChromeUITermsOemURL[];
 extern const char kChromeUIUserImageURL[];
-extern const char kChromeUIWallpaperURL[];
 extern const char kChromeUIWallpaperImageURL[];
 extern const char kChromeUIWallpaperThumbnailURL[];
 #endif
@@ -165,6 +165,7 @@ extern const char kChromeUIInstantHost[];
 extern const char kChromeUIIPCHost[];
 extern const char kChromeUIKeyboardHost[];
 extern const char kChromeUIKillHost[];
+extern const char kChromeUILocalOmniboxPopupHost[];
 extern const char kChromeUIMediaInternalsHost[];
 extern const char kChromeUIMemoryHost[];
 extern const char kChromeUIMemoryRedirectHost[];
@@ -185,6 +186,7 @@ extern const char kChromeUISessionFaviconHost[];
 extern const char kChromeUISettingsHost[];
 extern const char kChromeUISettingsFrameHost[];
 extern const char kChromeUIShorthangHost[];
+extern const char kChromeUISignInInternalsHost[];
 extern const char kChromeUISuggestionsInternalsHost[];
 extern const char kChromeUISSLClientCertificateSelectorHost[];
 extern const char kChromeUIStatsHost[];
@@ -200,6 +202,7 @@ extern const char kChromeUITouchIconHost[];
 extern const char kChromeUITracingHost[];
 extern const char kChromeUIUberFrameHost[];
 extern const char kChromeUIUberHost[];
+extern const char kChromeUIUserActionsHost[];
 extern const char kChromeUIVersionHost[];
 extern const char kChromeUIWorkersHost[];
 
@@ -239,7 +242,6 @@ extern const char kChromeUISimUnlockHost[];
 extern const char kChromeUISlideshowHost[];
 extern const char kChromeUISystemInfoHost[];
 extern const char kChromeUIUserImageHost[];
-extern const char kChromeUIWallpaperHost[];
 extern const char kChromeUIWallpaperImageHost[];
 extern const char kChromeUIWallpaperThumbnailHost[];
 
@@ -305,6 +307,11 @@ extern const char kChromeHelpViaKeyboardURL[];
 extern const char kChromeHelpViaMenuURL[];
 extern const char kChromeHelpViaWebUIURL[];
 
+#if defined(OS_CHROMEOS)
+// Accessibility help link for Chrome.
+extern const char kChromeAccessibilityHelpURL[];
+#endif
+
 // "Learn more" URL for the one click signin infobar.
 extern const char kChromeSyncLearnMoreURL[];
 
@@ -363,6 +370,9 @@ extern const char kSyncLearnMoreURL[];
 // The URL for the "Learn more" page for download scanning.
 extern const char kDownloadScanningLearnMoreURL[];
 
+// The URL for the "Learn more" page for interrupted downloads.
+extern const char kDownloadInterruptedLearnMoreURL[];
+
 // The URL for the "Learn more" page on the sync setup dialog, when syncing
 // everything.
 extern const char kSyncEverythingLearnMoreURL[];
@@ -394,12 +404,14 @@ extern const char kSideloadWipeoutHelpURL[];
 extern const char kNaturalScrollHelpURL[];
 #endif
 
+#if defined(OS_CHROMEOS)
+// The URL for the Learn More page about enterprise enrolled devices.
+extern const char kLearnMoreEnterpriseURL[];
+#endif
+
 // "Debug" pages which are dangerous and not for general consumption.
 extern const char* const kChromeDebugURLs[];
 extern const int kNumberOfChromeDebugURLs;
-
-// Canonical schemes you can use as input to GURL.SchemeIs().
-extern const char kExtensionScheme[];
 
 // Canonical schemes you can use as input to GURL.SchemeIs().
 extern const char kExtensionResourceScheme[];
@@ -412,6 +424,13 @@ extern const char kDriveScheme[];
 // "Learn more" URL for the Cloud Print section under Options.
 extern const char kCloudPrintLearnMoreURL[];
 #endif
+
+// Parameters that get appended to force SafeSearch.
+extern const char kSafeSearchSafeParameter[];
+extern const char kSafeSearchSsuiParameter[];
+
+// The URL for the "Learn more" link in the media access infobar.
+extern const char kMediaAccessLearnMoreUrl[];
 
 }  // namespace chrome
 

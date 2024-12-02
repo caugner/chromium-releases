@@ -15,11 +15,14 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/sessions/session_backend.h"
+#include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
@@ -36,7 +39,6 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -137,9 +139,9 @@ class MockTabStripModelObserver : public TabStripModelObserver {
   MockTabStripModelObserver() : closing_count_(0) {}
 
   virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            TabContents* contents,
+                            WebContents* contents,
                             int index) {
-    closing_count_++;
+    ++closing_count_;
   }
 
   int closing_count() const { return closing_count_; }
@@ -211,8 +213,8 @@ class BrowserTest : public ExtensionBrowserTest {
 
   // Returns the app extension aptly named "App Test".
   const Extension* GetExtension() {
-    const ExtensionSet* extensions =
-        browser()->profile()->GetExtensionService()->extensions();
+    const ExtensionSet* extensions = extensions::ExtensionSystem::Get(
+        browser()->profile())->extension_service()->extensions();
     for (ExtensionSet::const_iterator it = extensions->begin();
          it != extensions->end(); ++it) {
       if ((*it)->name() == "App Test")
@@ -471,14 +473,9 @@ class BeforeUnloadAtQuitWithTwoWindows : public InProcessBrowserTest {
   }
 };
 
-// This test passes on the trybots but fails on the main waterfall.
-#if defined(OS_WIN)
-#define MAYBE_IfThisTestTimesOutItIndicatesFAILURE DISABLED_IfThisTestTimesOutItIndicatesFAILURE
-#else
-#define MAYBE_IfThisTestTimesOutItIndicatesFAILURE IfThisTestTimesOutItIndicatesFAILURE
-#endif
+// Disabled, http://crbug.com/159214 .
 IN_PROC_BROWSER_TEST_F(BeforeUnloadAtQuitWithTwoWindows,
-                       MAYBE_IfThisTestTimesOutItIndicatesFAILURE) {
+                       DISABLED_IfThisTestTimesOutItIndicatesFAILURE) {
   // In the first browser, set up a page that has a beforeunload handler.
   GURL url(std::string("data:text/html,") + kBeforeUnloadHTML);
   ui_test_utils::NavigateToURL(browser(), url);
@@ -781,7 +778,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   ASSERT_EQ(1, browser()->tab_count());
   WebContents* initial_tab = chrome::GetWebContentsAt(browser(), 0);
   WebContents* app_tab = chrome::AddSelectedTabWithURL(
-      browser(), http_url, content::PAGE_TRANSITION_TYPED)->web_contents();
+      browser(), http_url, content::PAGE_TRANSITION_TYPED);
   ASSERT_EQ(2, browser()->tab_count());
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
 
@@ -876,13 +873,14 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
 
   ui_test_utils::NavigateToURL(browser(), url);
 
-  TabContents* app_contents = chrome::TabContentsFactory(
-      browser()->profile(), NULL, MSG_ROUTING_NONE, NULL);
+  WebContents* app_contents = WebContents::Create(
+      WebContents::CreateParams(browser()->profile()));
+  extensions::TabHelper::CreateForWebContents(app_contents);
   extensions::TabHelper* extensions_tab_helper =
-      extensions::TabHelper::FromWebContents(app_contents->web_contents());
+      extensions::TabHelper::FromWebContents(app_contents);
   extensions_tab_helper->SetExtensionApp(extension_app);
 
-  model->AddTabContents(app_contents, 0, content::PageTransitionFromInt(0),
+  model->AddWebContents(app_contents, 0, content::PageTransitionFromInt(0),
                         TabStripModel::ADD_NONE);
   model->SetTabPinned(0, true);
   ui_test_utils::NavigateToURL(browser(), url);
@@ -891,7 +889,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
   model->AddObserver(&observer);
 
   // Uninstall the extension and make sure TabClosing is sent.
-  ExtensionService* service = browser()->profile()->GetExtensionService();
+  ExtensionService* service = extensions::ExtensionSystem::Get(
+      browser()->profile())->extension_service();
   service->UninstallExtension(GetExtension()->id(), false, NULL);
   EXPECT_EQ(1, observer.closing_count());
 
@@ -997,12 +996,13 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("app/")));
   const Extension* extension_app = GetExtension();
   ui_test_utils::NavigateToURL(browser(), url);
-  TabContents* app_contents = chrome::TabContentsFactory(
-      browser()->profile(), NULL, MSG_ROUTING_NONE, NULL);
+  WebContents* app_contents = WebContents::Create(
+      WebContents::CreateParams(browser()->profile()));
+  extensions::TabHelper::CreateForWebContents(app_contents);
   extensions::TabHelper* extensions_tab_helper =
-      extensions::TabHelper::FromWebContents(app_contents->web_contents());
+      extensions::TabHelper::FromWebContents(app_contents);
   extensions_tab_helper->SetExtensionApp(extension_app);
-  model->AddTabContents(app_contents, 0, content::PageTransitionFromInt(0),
+  model->AddWebContents(app_contents, 0, content::PageTransitionFromInt(0),
                         TabStripModel::ADD_NONE);
   model->SetTabPinned(0, true);
   ui_test_utils::NavigateToURL(browser(), url);
@@ -1054,12 +1054,11 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   EXPECT_FALSE(new_model->IsTabPinned(2));
 
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
-      new_model->GetTabContentsAt(2)->web_contents()->GetURL());
+            new_model->GetWebContentsAt(2)->GetURL());
 
   EXPECT_TRUE(
       extensions::TabHelper::FromWebContents(
-          new_model->GetTabContentsAt(0)->web_contents())->
-              extension_app() == extension_app);
+          new_model->GetWebContentsAt(0))->extension_app() == extension_app);
 }
 #endif  // !defined(OS_CHROMEOS)
 
@@ -1259,7 +1258,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest,
   CommandUpdater* command_updater =
       browser()->command_controller()->command_updater();
   // Disable extensions. This should disable Extensions menu.
-  browser()->profile()->GetExtensionService()->set_extensions_enabled(false);
+  extensions::ExtensionSystem::Get(browser()->profile())->extension_service()->
+      set_extensions_enabled(false);
   // Set Incognito to DISABLED.
   IncognitoModePrefs::SetAvailability(browser()->profile()->GetPrefs(),
                                       IncognitoModePrefs::DISABLED);
@@ -1365,12 +1365,12 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_ENCODING_MENU));
 
   WebContents* contents = chrome::GetActiveWebContents(browser());
-  TestInterstitialPage* interstitial = new TestInterstitialPage(
-      contents, false, GURL());
 
   content::WindowedNotificationObserver interstitial_observer(
       content::NOTIFICATION_INTERSTITIAL_ATTACHED,
       content::Source<WebContents>(contents));
+  TestInterstitialPage* interstitial = new TestInterstitialPage(
+      contents, false, GURL());
   interstitial_observer.Wait();
 
   EXPECT_TRUE(contents->ShowingInterstitialPage());
@@ -1391,6 +1391,26 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_PRINT));
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_SAVE_PAGE));
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_ENCODING_MENU));
+}
+
+IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCloseTab) {
+  WebContents* contents = chrome::GetActiveWebContents(browser());
+
+  content::WindowedNotificationObserver interstitial_observer(
+      content::NOTIFICATION_INTERSTITIAL_ATTACHED,
+      content::Source<WebContents>(contents));
+  // Interstitial will delete itself when we close the tab.
+  new TestInterstitialPage(contents, false, GURL());
+  interstitial_observer.Wait();
+
+  EXPECT_TRUE(contents->ShowingInterstitialPage());
+
+  content::WindowedNotificationObserver interstitial_detach_observer(
+      content::NOTIFICATION_INTERSTITIAL_DETACHED,
+      content::Source<WebContents>(contents));
+  chrome::CloseTab(browser());
+  interstitial_detach_observer.Wait();
+  // interstitial is deleted now.
 }
 
 class MockWebContentsObserver : public WebContentsObserver {
@@ -1464,7 +1484,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   // Open a popup browser with a single blank foreground tab.
   Browser* popup_browser = new Browser(
       Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
-  chrome::AddBlankTab(popup_browser, true);
+  chrome::AddBlankTabAt(popup_browser, -1, true);
   EXPECT_EQ(1, popup_browser->tab_count());
 
   // Now try opening another tab in the popup browser.
@@ -1481,7 +1501,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   // Open an app frame browser with a single blank foreground tab.
   Browser* app_browser = new Browser(Browser::CreateParams::CreateForApp(
       L"Test", browser()->profile(), false));
-  chrome::AddBlankTab(app_browser, true);
+  chrome::AddBlankTabAt(app_browser, -1, true);
   EXPECT_EQ(1, app_browser->tab_count());
 
   // Now try opening another tab in the app browser.
@@ -1499,7 +1519,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   // Open an app frame popup browser with a single blank foreground tab.
   Browser* app_popup_browser = new Browser(Browser::CreateParams::CreateForApp(
       L"Test", browser()->profile(), false));
-  chrome::AddBlankTab(app_popup_browser, true);
+  chrome::AddBlankTabAt(app_popup_browser, -1, true);
   EXPECT_EQ(1, app_popup_browser->tab_count());
 
   // Now try opening another tab in the app popup browser.
@@ -1515,9 +1535,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   EXPECT_EQ(4, browser()->tab_count());
 
   // Close the additional browsers.
-  chrome::CloseAllTabs(popup_browser);
-  chrome::CloseAllTabs(app_browser);
-  chrome::CloseAllTabs(app_popup_browser);
+  popup_browser->tab_strip_model()->CloseAllTabs();
+  app_browser->tab_strip_model()->CloseAllTabs();
+  app_popup_browser->tab_strip_model()->CloseAllTabs();
 }
 #endif
 
@@ -1531,6 +1551,21 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, WindowOpenClose) {
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(browser(), url, 2);
   EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
 }
+
+// GTK doesn't use the Browser's fullscreen state.
+#if !defined(TOOLKIT_GTK)
+IN_PROC_BROWSER_TEST_F(BrowserTest, FullscreenBookmarkBar) {
+  chrome::ToggleBookmarkBar(browser());
+  EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
+  chrome::ToggleFullscreenMode(browser());
+  EXPECT_TRUE(browser()->window()->IsFullscreen());
+#if defined(OS_MACOSX)
+  EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
+#else
+  EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
+#endif
+}
+#endif
 
 class ShowModalDialogTest : public BrowserTest {
  public:
@@ -1605,7 +1640,7 @@ class LaunchBrowserWithNonAsciiUserDatadir : public BrowserTest {
     command_line->AppendSwitchPath(switches::kUserDataDir, tmp_profile);
   }
 
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
 };
 
 IN_PROC_BROWSER_TEST_F(LaunchBrowserWithNonAsciiUserDatadir,
@@ -1669,6 +1704,24 @@ IN_PROC_BROWSER_TEST_F(NoStartupWindowTest, NoStartupWindowBasicTest) {
   EXPECT_EQ(1u, BrowserList::size());
 }
 
+// Chromeos needs to track app windows because it considers them to be part of
+// session state.
+#if !defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(NoStartupWindowTest, DontInitSessionServiceForApps) {
+  Profile* profile = ProfileManager::GetDefaultProfile();
+
+  SessionService* session_service =
+      SessionServiceFactory::GetForProfile(profile);
+  ASSERT_FALSE(session_service->processed_any_commands());
+
+  ui_test_utils::BrowserAddedObserver browser_added_observer;
+  CreateBrowserForApp("blah", profile);
+  browser_added_observer.WaitForSingleNewBrowser();
+
+  ASSERT_FALSE(session_service->processed_any_commands());
+}
+#endif  // !defined(OS_CHROMEOS)
+
 // This test needs to be placed outside the anonymous namespace because we
 // need to access private type of Browser.
 class AppModeTest : public BrowserTest {
@@ -1692,7 +1745,7 @@ IN_PROC_BROWSER_TEST_F(AppModeTest, EnableAppModeTest) {
 // Confirm about:version contains some expected content.
 IN_PROC_BROWSER_TEST_F(BrowserTest, AboutVersion) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutVersionURL));
-  TabContents* tab = chrome::GetActiveTabContents(browser());
+  WebContents* tab = chrome::GetActiveWebContents(browser());
   ASSERT_GT(ui_test_utils::FindInPage(tab, ASCIIToUTF16("WebKit"), true, true,
                                       NULL, NULL),
             0);

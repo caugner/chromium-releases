@@ -17,7 +17,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -91,11 +90,8 @@ class HistoryBrowserTest : public InProcessBrowserTest {
     scoped_refptr<HistoryDBTask> task(new WaitForHistoryTask());
     HistoryService* history =
         HistoryServiceFactory::GetForProfile(GetProfile(),
-                                                Profile::EXPLICIT_ACCESS);
-    BrowserThread::PostTask(BrowserThread::UI,
-                            FROM_HERE,
-                            base::Bind(&HistoryService::ScheduleDBTask,
-                                       history, task, &request_consumer));
+                                             Profile::EXPLICIT_ACCESS);
+    history->HistoryService::ScheduleDBTask(task, &request_consumer);
     content::RunMessageLoop();
   }
 
@@ -276,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, HistorySearchXSS) {
   // so that we're not susceptible (less susceptible?) to a race condition.
   // Should a race condition ever trigger, it won't result in flakiness.
   int num = ui_test_utils::FindInPage(
-      chrome::GetActiveTabContents(browser()), ASCIIToUTF16("<img"), true,
+      chrome::GetActiveWebContents(browser()), ASCIIToUTF16("<img"), true,
       true, NULL, NULL);
   EXPECT_GT(num, 0);
   EXPECT_EQ(ASCIIToUTF16("History"),
@@ -493,10 +489,11 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, OneHistoryTabPerWindow) {
   chrome::ExecuteCommand(browser(), IDC_SHOW_HISTORY);
 
   content::WebContents* active_web_contents =
-      chrome::GetActiveWebContents(browser());
+      browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_EQ(web_contents, active_web_contents);
   ASSERT_EQ(history_url, active_web_contents->GetURL());
 
-  TabContents* second_tab = browser()->tab_strip_model()->GetTabContentsAt(1);
-  ASSERT_NE(history_url, second_tab->web_contents()->GetURL());
+  content::WebContents* second_tab =
+      browser()->tab_strip_model()->GetWebContentsAt(1);
+  ASSERT_NE(history_url, second_tab->GetURL());
 }

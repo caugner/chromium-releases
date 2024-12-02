@@ -7,17 +7,22 @@
 
 #include <map>
 #include <queue>
+#include <set>
 #include <string>
 
 #include "base/callback.h"
 #include "base/memory/linked_ptr.h"
-#include "base/process.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/gpu_memory_uma_stats.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
+#include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/gpu_info.h"
+#include "googleurl/src/gurl.h"
+#include "gpu/command_buffer/common/constants.h"
+#include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sender.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
@@ -61,6 +66,10 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   // This could return NULL if GPU access is not allowed (blacklisted).
   static GpuProcessHost* Get(GpuProcessKind kind, CauseForGpuLaunch cause);
 
+  // Retrieves a list of process handles for all gpu processes.
+  static void GetProcessHandles(
+      const GpuDataManager::GetGpuProcessHandlesCallback& callback);
+
   // Helper function to send the given message to the GPU process on the IO
   // thread.  Calls Get and if a host is returned, sends it.  Can be called from
   // any thread.  Deletes the message if it cannot be sent.
@@ -75,6 +84,9 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
 
   // IPC::Sender implementation.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
+
+  // Adds a message filter to the GpuProcessHost's channel.
+  void AddFilter(IPC::ChannelProxy::MessageFilter* filter);
 
   // Tells the GPU process to create a new channel for communication with a
   // client. Once the GPU process responds asynchronously with the IPC handle
@@ -133,7 +145,12 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   void OnCommandBufferCreated(const int32 route_id);
   void OnDestroyCommandBuffer(int32 surface_id);
   void OnImageCreated(const gfx::Size size);
-
+  void OnDidCreateOffscreenContext(const GURL& url);
+  void OnDidLoseContext(bool offscreen,
+                        gpu::error::ContextLostReason reason,
+                        const GURL& url);
+  void OnDidDestroyOffscreenContext(const GURL& url);
+  void OnGpuMemoryUmaStatsReceived(const GPUMemoryUmaStats& stats);
 #if defined(OS_MACOSX)
   void OnAcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
@@ -161,6 +178,8 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
                                 int32 route_id);
   void CreateImageError(const CreateImageCallback& callback,
                         const gfx::Size size);
+
+  void BlockLiveOffscreenContexts();
 
   // The serial number of the GpuProcessHost / GpuProcessHostUIShim pair.
   int host_id_;
@@ -217,6 +236,16 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   static bool hardware_gpu_enabled_;
 
   scoped_ptr<BrowserChildProcessHostImpl> process_;
+
+  // Track the URLs of the pages which have live offscreen contexts,
+  // assumed to be associated with untrusted content such as WebGL.
+  // For best robustness, when any context lost notification is
+  // received, assume all of these URLs are guilty, and block
+  // automatic execution of 3D content from those domains.
+  std::multiset<GURL> urls_with_live_offscreen_contexts_;
+
+  // Statics kept around to send to UMA histograms on GPU process lost.
+  GPUMemoryUmaStats uma_memory_stats_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuProcessHost);
 };

@@ -24,6 +24,12 @@ namespace content {
 
 namespace {
 
+class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
+ public:
+  MockRenderWidgetHostDelegate() {}
+  virtual ~MockRenderWidgetHostDelegate() {}
+};
+
 class MockRenderWidgetHostImpl : public RenderWidgetHostImpl {
  public:
   MockRenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
@@ -34,12 +40,6 @@ class MockRenderWidgetHostImpl : public RenderWidgetHostImpl {
 
   MOCK_METHOD0(Focus, void());
   MOCK_METHOD0(Blur, void());
-};
-
-class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
- public:
-  MockRenderWidgetHostDelegate() {}
-  virtual ~MockRenderWidgetHostDelegate() {}
 };
 
 // Generates the |length| of composition rectangle vector and save them to
@@ -103,14 +103,14 @@ class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
     rwhv_cocoa_.reset([rwhv_mac_->cocoa_view() retain]);
   }
   virtual void TearDown() {
-    // See comment in SetUp().
-    test_rvh()->SetView(old_rwhv_);
-
     // Make sure the rwhv_mac_ is gone once the superclass's |TearDown()| runs.
     rwhv_cocoa_.reset();
     pool_.Recycle();
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
     pool_.Recycle();
+
+    // See comment in SetUp().
+    test_rvh()->SetView(old_rwhv_);
 
     RenderViewHostImplTestHarness::TearDown();
   }
@@ -139,7 +139,7 @@ class RenderWidgetHostViewMacTest : public RenderViewHostImplTestHarness {
     geom.visible = true;
     geom.rects_valid = true;
     rwhv_mac_->MovePluginWindows(
-        gfx::Point(),
+        gfx::Vector2d(),
         std::vector<webkit::npapi::WebPluginGeometry>(1, geom));
 
     return accelerated_handle;
@@ -308,6 +308,35 @@ TEST_F(RenderWidgetHostViewMacTest, FullscreenCloseOnEscape) {
   [rwhv_mac_->cocoa_view() keyEvent:
       cocoa_test_event_utils::KeyEventWithKeyCode(53, 27, NSKeyUp, 0)];
   EXPECT_FALSE([rwhv_mac_->cocoa_view() suppressNextEscapeKeyUp]);
+}
+
+// Test that command accelerators which destroy the fullscreen window
+// don't crash when forwarded via the window's responder machinery.
+TEST_F(RenderWidgetHostViewMacTest, AcceleratorDestroy) {
+  // Use our own RWH since we need to destroy it.
+  MockRenderWidgetHostDelegate delegate;
+  TestBrowserContext browser_context;
+  MockRenderProcessHost* process_host =
+      new MockRenderProcessHost(&browser_context);
+  // Owned by its |cocoa_view()|.
+  RenderWidgetHostImpl* rwh = new RenderWidgetHostImpl(
+      &delegate, process_host, MSG_ROUTING_NONE);
+  RenderWidgetHostViewMac* view = static_cast<RenderWidgetHostViewMac*>(
+      RenderWidgetHostView::CreateViewForWidget(rwh));
+
+  view->InitAsFullscreen(rwhv_mac_);
+
+  WindowedNotificationObserver observer(
+      NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
+      Source<RenderWidgetHost>(rwh));
+
+  // Command-ESC will destroy the view, while the window is still in
+  // |-performKeyEquivalent:|.  There are other cases where this can
+  // happen, Command-ESC is the easiest to trigger.
+  [[view->cocoa_view() window] performKeyEquivalent:
+      cocoa_test_event_utils::KeyEventWithKeyCode(
+          53, 27, NSKeyDown, NSCommandKeyMask)];
+  observer.Wait();
 }
 
 TEST_F(RenderWidgetHostViewMacTest, GetFirstRectForCharacterRangeCaretCase) {

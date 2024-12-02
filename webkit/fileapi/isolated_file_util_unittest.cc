@@ -8,10 +8,10 @@
 #include <vector>
 
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
-#include "base/scoped_temp_dir.h"
 #include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
@@ -165,10 +165,10 @@ class IsolatedFileUtilTest : public testing::Test {
     FilePath root_path1 = root1.path();
     FilePath root_path2 = root2.path();
 
-    scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator> file_enum1;
     context.reset(new FileSystemOperationContext(file_system_context()));
-    file_enum1.reset(file_util1->CreateFileEnumerator(
-        context.get(), root1, true /* recursive */));
+    scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator> file_enum1 =
+        file_util1->CreateFileEnumerator(context.get(), root1,
+                                         true /* recursive */);
 
     FilePath current;
     std::set<FilePath> file_set1;
@@ -180,10 +180,10 @@ class IsolatedFileUtilTest : public testing::Test {
       file_set1.insert(relative);
     }
 
-    scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator> file_enum2;
     context.reset(new FileSystemOperationContext(file_system_context()));
-    file_enum2.reset(file_util2->CreateFileEnumerator(
-        context.get(), root2, true /* recursive */));
+    scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator> file_enum2 =
+        file_util2->CreateFileEnumerator(context.get(), root2,
+                                         true /* recursive */);
 
     while (!(current = file_enum2->Next()).empty()) {
       FilePath relative;
@@ -234,7 +234,7 @@ class IsolatedFileUtilTest : public testing::Test {
     filesystem_id_ = isolated_context()->RegisterDraggedFileSystem(toplevels);
   }
 
-  ScopedTempDir data_dir_;
+  base::ScopedTempDir data_dir_;
   MessageLoop message_loop_;
   std::string filesystem_id_;
   scoped_refptr<FileSystemContext> file_system_context_;

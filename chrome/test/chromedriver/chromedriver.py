@@ -5,13 +5,44 @@
 import ctypes
 import json
 
+class ChromeDriverException(Exception):
+  pass
+class UnknownCommand(ChromeDriverException):
+  pass
+class UnknownError(ChromeDriverException):
+  pass
+class SessionNotCreatedException(ChromeDriverException):
+  pass
+class NoSuchSession(ChromeDriverException):
+  pass
+
+def _ExceptionForResponse(response):
+  exception_class_map = {
+    9: UnknownCommand,
+    13: UnknownError,
+    33: SessionNotCreatedException,
+    100: NoSuchSession
+  }
+  status = response['status']
+  msg = response['value']['message']
+  return exception_class_map.get(status, ChromeDriverException)(msg)
 
 class ChromeDriver(object):
   """Starts and controls a single Chrome instance on this machine."""
 
-  def __init__(self, lib_path):
+  def __init__(self, lib_path, chrome_binary=None):
     self._lib = ctypes.CDLL(lib_path)
-    self._session_id = self._ExecuteCommand('newSession')
+    if chrome_binary is None:
+      params = {}
+    else:
+      params = {
+        'desiredCapabilities': {
+          'chrome': {
+            'binary': chrome_binary
+          }
+        }
+      }
+    self._session_id = self._ExecuteCommand('newSession', params)['sessionId']
 
   def _ExecuteCommand(self, name, params={}, session_id=''):
     cmd = {
@@ -29,10 +60,20 @@ class ChromeDriver(object):
         ctypes.byref(response_size))
     response_json = ctypes.string_at(response_data, response_size.value)
     self._lib.Free(response_data)
-    return json.loads(response_json)['value']
+    response = json.loads(response_json)
+    if response['status'] != 0:
+      raise _ExceptionForResponse(response)
+    return response
 
   def _ExecuteSessionCommand(self, name, params={}):
-    return self._ExecuteCommand(name, params, self._session_id)
+    return self._ExecuteCommand(name, params, self._session_id)['value']
+
+  def Load(self, url):
+    self._ExecuteSessionCommand('get', {'url': url})
+
+  def ExecuteScript(self, script, *args):
+    return self._ExecuteSessionCommand(
+         'executeScript', {'script': script, 'args': args})
 
   def Quit(self):
     """Quits the browser and ends the session."""

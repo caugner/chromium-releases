@@ -26,6 +26,7 @@
 #include "net/base/crypto_module.h"
 #include "net/base/net_errors.h"
 #include "net/base/nss_cert_database.h"
+#include "net/base/test_data_directory.h"
 #include "net/base/x509_certificate.h"
 #include "net/third_party/mozilla_security_manager/nsNSSCertificateDB.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -58,7 +59,7 @@ class CertDatabaseNSSTest : public testing::Test {
     // Run the message loop to process any observer callbacks (e.g. for the
     // ClientSocketFactory singleton) so that the scoped ref ptrs created in
     // NSSCertDatabase::NotifyObservers* get released.
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
 
     EXPECT_EQ(0U, ListCertsInSlot(slot_->os_module_handle()).size());
   }

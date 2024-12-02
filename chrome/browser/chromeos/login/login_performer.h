@@ -82,7 +82,7 @@ class LoginPerformer : public LoginStatusConsumer,
 
   // LoginStatusConsumer implementation:
   virtual void OnLoginFailure(const LoginFailure& error) OVERRIDE;
-  virtual void OnDemoUserLoginSuccess() OVERRIDE;
+  virtual void OnRetailModeLoginSuccess() OVERRIDE;
   virtual void OnLoginSuccess(
       const std::string& username,
       const std::string& password,
@@ -98,11 +98,14 @@ class LoginPerformer : public LoginStatusConsumer,
                     const std::string& password,
                     AuthorizationMode auth_mode);
 
-  // Performs login for the demo user.
-  void LoginDemoUser();
+  // Performs retail mode login.
+  void LoginRetailMode();
 
-  // Performs actions to prepare Guest mode login.
+  // Performs actions to prepare guest mode login.
   void LoginOffTheRecord();
+
+  // Performs a login into the public account identified by |username|.
+  void LoginAsPublicAccount(const std::string& username);
 
   // Migrates cryptohome using |old_password| specified.
   void RecoverEncryptedData(const std::string& old_password);
@@ -145,10 +148,6 @@ class LoginPerformer : public LoginStatusConsumer,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
-  // Callback for asynchronous profile creation.
-  void OnProfileCreated(Profile* profile,
-                        Profile::CreateStatus status);
 
   // Requests screen lock and subscribes to screen lock notifications.
   void RequestScreenLock();
@@ -216,9 +215,6 @@ class LoginPerformer : public LoginStatusConsumer,
 
   // Authorization mode type.
   AuthorizationMode auth_mode_;
-
-  // True if we use OAuth during authorization process.
-  bool using_oauth_;
 
   base::WeakPtrFactory<LoginPerformer> weak_factory_;
 

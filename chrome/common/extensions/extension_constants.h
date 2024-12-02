@@ -111,6 +111,12 @@ namespace extension_misc {
   // The extension id of the Crosh component app for ChromeOS.
   extern const char kCroshBuiltinAppId[];
 
+  // The extension id of the Office Viewer extension.
+  extern const char kQuickOfficeExtensionId[];
+
+  // The extension id of the Office Viewer dev extension.
+  extern const char kQuickOfficeDevExtensionId[];
+
   // The extension id of the Web Store component application.
   extern const char kWebStoreAppId[];
 
@@ -211,10 +217,12 @@ namespace extension_misc {
   };
 
 #if defined(OS_CHROMEOS)
-  // The directory path on a ChromeOS device where accessibility extensions are
-  // stored.
-  extern const char kAccessExtensionPath[];
-  extern const char kChromeVoxDirectoryName[];
+  // Path to preinstalled ChromeVox screen reader extension.
+  extern const char kChromeVoxExtensionPath[];
+  // Path to preinstalled speech synthesis extension.
+  extern const char kSpeechSynthesisExtensionPath[];
+  // The extension id of the speech synthesis extension.
+  extern const char kSpeechSynthesisExtensionId[];
   // The extension id of the wallpaper manager application.
   extern const char kWallpaperManagerId[];
 #endif
@@ -235,6 +243,7 @@ namespace extension_misc {
     UNLOAD_REASON_UPDATE,     // Extension is being updated to a newer version.
     UNLOAD_REASON_UNINSTALL,  // Extension is being uninstalled.
     UNLOAD_REASON_TERMINATE,  // Extension has terminated.
+    UNLOAD_REASON_BLACKLIST,  // Extension has been blacklisted.
   };
 
   // The states that an app can be in, as reported by chrome.app.installState

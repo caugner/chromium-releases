@@ -11,10 +11,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/download/download_item_impl.h"
+#include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_request_id.h"
@@ -22,6 +22,7 @@
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/cookie_store.h"
 #include "net/http/http_request_headers.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
@@ -110,7 +111,10 @@ void DownloadControllerAndroidImpl::PrepareDownloadInfo(
 
   net::URLRequest* request =
       ResourceDispatcherHostImpl::Get()->GetURLRequest(global_id);
-  DCHECK(request) << "Request to download not found.";
+  if (!request) {
+    LOG(ERROR) << "Request to download not found.";
+    return;
+  }
 
   DownloadInfoAndroid info_android(request);
 
@@ -137,9 +141,14 @@ void DownloadControllerAndroidImpl::CheckPolicyAndLoadCookies(
     const DownloadInfoAndroid& info, int render_process_id,
     int render_view_id, const GlobalRequestID& global_id,
     const net::CookieList& cookie_list) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
   net::URLRequest* request =
       ResourceDispatcherHostImpl::Get()->GetURLRequest(global_id);
-  DCHECK(request) << "Request to download not found.";
+  if (!request) {
+    LOG(ERROR) << "Request to download not found.";
+    return;
+  }
 
   if (request->context()->network_delegate()->CanGetCookies(
       *request, cookie_list)) {
@@ -152,12 +161,17 @@ void DownloadControllerAndroidImpl::CheckPolicyAndLoadCookies(
 void DownloadControllerAndroidImpl::DoLoadCookies(
     const DownloadInfoAndroid& info, int render_process_id,
     int render_view_id, const GlobalRequestID& global_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
   net::CookieOptions options;
   options.set_include_httponly();
 
   net::URLRequest* request =
       ResourceDispatcherHostImpl::Get()->GetURLRequest(global_id);
-  DCHECK(request) << "Request to download not found.";
+  if (!request) {
+    LOG(ERROR) << "Request to download not found.";
+    return;
+  }
 
   request->context()->cookie_store()->GetCookiesWithOptionsAsync(
       info.url, options,
@@ -326,7 +340,10 @@ DownloadControllerAndroidImpl::JavaObject*
 DownloadControllerAndroidImpl::DownloadInfoAndroid::DownloadInfoAndroid(
     net::URLRequest* request) {
   request->GetResponseHeaderByName("content-disposition", &content_disposition);
-  request->GetResponseHeaderByName("mime-type", &original_mime_type);
+
+  if (request->response_headers())
+    request->response_headers()->GetMimeType(&original_mime_type);
+
   request->extra_request_headers().GetHeader(
       net::HttpRequestHeaders::kUserAgent, &user_agent);
   GURL referer_url(request->GetSanitizedReferrer());

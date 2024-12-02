@@ -6,8 +6,10 @@
 
 #include <cmath>
 
+#include "ash/ash_constants.h"
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_delegate.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_views.h"
 #include "ash/volume_control_delegate.h"
@@ -42,12 +44,12 @@ const int kVolumeImageHeight = 25;
 const int kVolumeLevels = 4;
 
 bool IsAudioMuted() {
-  return Shell::GetInstance()->tray_delegate()->
+  return Shell::GetInstance()->system_tray_delegate()->
       GetVolumeControlDelegate()->IsAudioMuted();
 }
 
 float GetVolumeLevel() {
-  return Shell::GetInstance()->tray_delegate()->
+  return Shell::GetInstance()->system_tray_delegate()->
       GetVolumeControlDelegate()->GetVolumeLevel();
 }
 
@@ -80,7 +82,7 @@ class VolumeButton : public views::ToggleImageButton {
                        kVolumeImageWidth, kVolumeImageHeight);
       gfx::ImageSkia image_skia = gfx::ImageSkiaOperations::ExtractSubset(
           *(image_.ToImageSkia()), region);
-      SetImage(views::CustomButton::BS_NORMAL, &image_skia);
+      SetImage(views::CustomButton::STATE_NORMAL, &image_skia);
       image_index_ = image_index;
     }
     SchedulePaint();
@@ -187,7 +189,7 @@ class VolumeView : public views::View,
   virtual void ButtonPressed(views::Button* sender,
                              const ui::Event& event) OVERRIDE {
     CHECK(sender == icon_ || sender == mute_);
-    ash::Shell::GetInstance()->tray_delegate()->
+    ash::Shell::GetInstance()->system_tray_delegate()->
         GetVolumeControlDelegate()->SetAudioMuted(!IsAudioMuted());
   }
 
@@ -197,7 +199,7 @@ class VolumeView : public views::View,
                                   float old_value,
                                   views::SliderChangeReason reason) OVERRIDE {
     if (reason == views::VALUE_CHANGED_BY_USER) {
-      ash::Shell::GetInstance()->tray_delegate()->
+      ash::Shell::GetInstance()->system_tray_delegate()->
           GetVolumeControlDelegate()->SetVolumeLevel(value);
     }
     icon_->Update();
@@ -212,13 +214,15 @@ class VolumeView : public views::View,
 
 }  // namespace tray
 
-TrayVolume::TrayVolume()
-    : TrayImageItem(IDR_AURA_UBER_TRAY_VOLUME_MUTE),
+TrayVolume::TrayVolume(SystemTray* system_tray)
+    : TrayImageItem(system_tray, IDR_AURA_UBER_TRAY_VOLUME_MUTE),
       volume_view_(NULL),
       is_default_view_(false) {
+  Shell::GetInstance()->system_tray_notifier()->AddAudioObserver(this);
 }
 
 TrayVolume::~TrayVolume() {
+  Shell::GetInstance()->system_tray_notifier()->RemoveAudioObserver(this);
 }
 
 bool TrayVolume::GetInitialVisibility() {

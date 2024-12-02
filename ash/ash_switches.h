@@ -7,6 +7,8 @@
 
 #include "ash/ash_export.h"
 
+#include "build/build_config.h"
+
 namespace ash {
 namespace switches {
 
@@ -15,22 +17,29 @@ namespace switches {
 // see chromeos::LoginUtil::GetOffTheRecordCommandLine().)
 
 // Please keep alphabetized.
+ASH_EXPORT extern const char kAshAnimateFromBootSplashScreen[];
 ASH_EXPORT extern const char kAshBootAnimationFunction2[];
 ASH_EXPORT extern const char kAshBootAnimationFunction3[];
 ASH_EXPORT extern const char kAshConstrainPointerToRoot[];
 ASH_EXPORT extern const char kAshCopyHostBackgroundAtBoot[];
 ASH_EXPORT extern const char kAshDebugShortcuts[];
+ASH_EXPORT extern const char kAshDisableAutoWindowPlacement[];
+ASH_EXPORT extern const char kAshDisableDisplayChangeLimiter[];
 ASH_EXPORT extern const char kAshDisablePanelFitting[];
 ASH_EXPORT extern const char kAshDisableBootAnimation2[];
+ASH_EXPORT extern const char kAshDisableNewLockAnimations[];
 ASH_EXPORT extern const char kAshEnableAdvancedGestures[];
+#if defined(OS_LINUX)
+ASH_EXPORT extern const char kAshEnableMemoryMonitor[];
+#endif
+ASH_EXPORT extern const char kAshEnablePerAppLauncher[];
 ASH_EXPORT extern const char kAshEnableOak[];
 ASH_EXPORT extern const char kAshEnableTrayDragging[];
+ASH_EXPORT extern const char kAshEnableWorkspaceScrubbing[];
+ASH_EXPORT extern const char kAshImmersive[];
 ASH_EXPORT extern const char kAshLauncherPerDisplay[];
-ASH_EXPORT extern const char kAshNewLockAnimationsEnabled[];
 ASH_EXPORT extern const char kAshSecondaryDisplayLayout[];
 ASH_EXPORT extern const char kAshTouchHud[];
-ASH_EXPORT extern const char kAshWindowAnimationsDisabled[];
-ASH_EXPORT extern const char kAuraGoogleDialogFrames[];
 ASH_EXPORT extern const char kAuraLegacyPowerButton[];
 ASH_EXPORT extern const char kAuraNoShadows[];
 

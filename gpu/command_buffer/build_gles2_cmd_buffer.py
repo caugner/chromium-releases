@@ -67,7 +67,7 @@ _CAPABILITY_FLAGS = [
   {'name': 'polygon_offset_fill'},
   {'name': 'sample_alpha_to_coverage'},
   {'name': 'sample_coverage'},
-  {'name': 'scissor_test'},
+  {'name': 'scissor_test', 'state_flag': 'clear_state_dirty_'},
   {'name': 'stencil_test', 'state_flag': 'clear_state_dirty_'},
 ]
 
@@ -351,7 +351,13 @@ _STATES = {
     'type': 'Normal',
     'func': 'LineWidth',
     'enum': 'GL_LINE_WIDTH',
-    'states': [{'name': 'line_width', 'type': 'GLfloat', 'default': '1.0f'}],
+    'states': [
+      {
+        'name': 'line_width',
+        'type': 'GLfloat',
+        'default': '1.0f',
+        'range_checks': [{'check': "<= 0.0f", 'test_value': "0.0f"}],
+      }],
   },
   'DepthMask': {
     'type': 'Normal',
@@ -537,6 +543,8 @@ _ENUM_LISTS = {
       'GL_UNPACK_FLIP_Y_CHROMIUM',
       'GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM',
       'GL_UNPACK_UNPREMULTIPLY_ALPHA_CHROMIUM',
+      # we can add this because we emulate it if the driver does not support it.
+      'GL_VERTEX_ARRAY_BINDING_OES',
       'GL_VIEWPORT',
     ],
     'invalid': [
@@ -722,6 +730,14 @@ _ENUM_LISTS = {
       'GL_STENCIL_ATTACHMENT',
     ],
   },
+  'BackbufferAttachment': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_COLOR_EXT',
+      'GL_DEPTH_EXT',
+      'GL_STENCIL_EXT',
+    ],
+  },
   'BufferParameter': {
     'type': 'GLenum',
     'valid': [
@@ -775,6 +791,7 @@ _ENUM_LISTS = {
       'GL_ANY_SAMPLES_PASSED_CONSERVATIVE_EXT',
       'GL_COMMANDS_ISSUED_CHROMIUM',
       'GL_LATENCY_QUERY_CHROMIUM',
+      'GL_ASYNC_PIXEL_TRANSFERS_COMPLETED_CHROMIUM',
     ],
   },
   'RenderBufferParameter': {
@@ -828,11 +845,19 @@ _ENUM_LISTS = {
     'valid': [
       'GL_TEXTURE_MAG_FILTER',
       'GL_TEXTURE_MIN_FILTER',
+      'GL_TEXTURE_POOL_CHROMIUM',
       'GL_TEXTURE_WRAP_S',
       'GL_TEXTURE_WRAP_T',
     ],
     'invalid': [
       'GL_GENERATE_MIPMAP',
+    ],
+  },
+  'TexturePool': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_TEXTURE_POOL_MANAGED_CHROMIUM',
+      'GL_TEXTURE_POOL_UNMANAGED_CHROMIUM',
     ],
   },
   'TextureWrapMode': {
@@ -1089,6 +1114,14 @@ _ENUM_LISTS = {
       'true',
     ],
   },
+  'ResetStatus': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_GUILTY_CONTEXT_RESET_ARB',
+      'GL_INNOCENT_CONTEXT_RESET_ARB',
+      'GL_UNKNOWN_CONTEXT_RESET_ARB',
+    ],
+  },
 }
 
 # This table specifies the different pepper interfaces that are supported for
@@ -1174,12 +1207,16 @@ _FUNCTION_INFO = {
     'type': 'Bind',
     'decoder_func': 'DoBindTexture',
     'gen_func': 'GenTextures',
+    # TODO(gman): remove this once client side caching works.
+    'client_test': False,
   },
   'BlitFramebufferEXT': {
     'decoder_func': 'DoBlitFramebufferEXT',
     'unit_test': False,
     'extension': True,
     'pepper_interface': 'FramebufferBlit',
+    'defer_reads': True,
+    'defer_draws': True,
   },
   'BufferData': {
     'type': 'Manual',
@@ -1199,8 +1236,8 @@ _FUNCTION_INFO = {
     'result': ['GLenum'],
   },
   'Clear': {
-    'type': 'Manual',
-    'cmd_args': 'GLbitfield mask'
+    'decoder_func': 'DoClear',
+    'defer_draws': True,
   },
   'ClearColor': {
     'type': 'StateSet',
@@ -1211,6 +1248,9 @@ _FUNCTION_INFO = {
     'state': 'ClearDepthf',
     'decoder_func': 'glClearDepth',
     'gl_test_func': 'glClearDepth',
+    'valid_args': {
+      '0': '0.5f'
+    },
   },
   'ColorMask': {
     'type': 'StateSet',
@@ -1256,9 +1296,11 @@ _FUNCTION_INFO = {
   'CopyTexImage2D': {
     'decoder_func': 'DoCopyTexImage2D',
     'unit_test': False,
+    'defer_reads': True,
   },
   'CopyTexSubImage2D': {
     'decoder_func': 'DoCopyTexSubImage2D',
+    'defer_reads': True,
   },
   'CreateProgram': {
     'type': 'Create',
@@ -1275,10 +1317,16 @@ _FUNCTION_INFO = {
   'BlendEquation': {
     'type': 'StateSetRGBAlpha',
     'state': 'BlendEquation',
+    'valid_args': {
+      '0': 'GL_FUNC_SUBTRACT'
+    },
   },
   'BlendEquationSeparate': {
     'type': 'StateSet',
     'state': 'BlendEquation',
+    'valid_args': {
+      '0': 'GL_FUNC_SUBTRACT'
+    },
   },
   'BlendFunc': {
     'type': 'StateSetRGBAlpha',
@@ -1290,26 +1338,38 @@ _FUNCTION_INFO = {
   },
   'SampleCoverage': {'decoder_func': 'DoSampleCoverage'},
   'StencilFunc': {
-    'type': 'StencilFrontBack',
+    'type': 'StateSetFrontBack',
     'state': 'StencilFunc',
   },
   'StencilFuncSeparate': {
-    'type': 'StencilFrontBack',
+    'type': 'StateSetFrontBackSeparate',
     'state': 'StencilFunc',
   },
   'StencilOp': {
     'type': 'StateSetFrontBack',
     'state': 'StencilOp',
+    'valid_args': {
+      '1': 'GL_INCR'
+    },
   },
   'StencilOpSeparate': {
     'type': 'StateSetFrontBackSeparate',
     'state': 'StencilOp',
+    'valid_args': {
+      '1': 'GL_INCR'
+    },
   },
   'Hint': {'decoder_func': 'DoHint'},
   'CullFace': {'type': 'StateSet', 'state': 'CullFace'},
   'FrontFace': {'type': 'StateSet', 'state': 'FrontFace'},
   'DepthFunc': {'type': 'StateSet', 'state': 'DepthFunc'},
-  'LineWidth': {'type': 'StateSet', 'state': 'LineWidth'},
+  'LineWidth': {
+    'type': 'StateSet',
+    'state': 'LineWidth',
+    'valid_args': {
+      '0': '0.5f'
+    },
+  },
   'PolygonOffset': {
     'type': 'StateSet',
     'state': 'PolygonOffset',
@@ -1362,6 +1422,7 @@ _FUNCTION_INFO = {
   'Disable': {
     'decoder_func': 'DoDisable',
     'impl_func': False,
+    'client_test': False,
   },
   'DisableVertexAttribArray': {
     'decoder_func': 'DoDisableVertexAttribArray',
@@ -1370,16 +1431,19 @@ _FUNCTION_INFO = {
   'DrawArrays': {
     'type': 'Manual',
     'cmd_args': 'GLenumDrawMode mode, GLint first, GLsizei count',
+    'defer_draws': True,
   },
   'DrawElements': {
     'type': 'Manual',
     'cmd_args': 'GLenumDrawMode mode, GLsizei count, '
                 'GLenumIndexType type, GLuint index_offset',
-    'client_test': False
+    'client_test': False,
+    'defer_draws': True,
   },
   'Enable': {
     'decoder_func': 'DoEnable',
     'impl_func': False,
+    'client_test': False,
   },
   'EnableVertexAttribArray': {
     'decoder_func': 'DoEnableVertexAttribArray',
@@ -1700,6 +1764,13 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoLinkProgram',
     'impl_func':  False,
   },
+  'MapBufferCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
+    'chromium': True,
+  },
   'MapBufferSubDataCHROMIUM': {
     'gen_cmd': False,
     'extension': True,
@@ -1760,6 +1831,7 @@ _FUNCTION_INFO = {
         'uint32 pixels_shm_id, uint32 pixels_shm_offset, '
         'uint32 result_shm_id, uint32 result_shm_offset',
     'result': ['uint32'],
+    'defer_reads': True,
   },
   'RegisterSharedIdsCHROMIUM': {
     'type': 'Custom',
@@ -1922,6 +1994,13 @@ _FUNCTION_INFO = {
     'count': 16,
     'decoder_func': 'DoUniformMatrix4fv',
   },
+  'UnmapBufferCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
+    'chromium': True,
+  },
   'UnmapBufferSubDataCHROMIUM': {
     'gen_cmd': False,
     'extension': True,
@@ -1936,7 +2015,11 @@ _FUNCTION_INFO = {
     'client_test': False,
     'pepper_interface': 'ChromiumMapSub',
   },
-  'UseProgram': {'decoder_func': 'DoUseProgram', 'unit_test': False},
+  'UseProgram': {
+    'decoder_func': 'DoUseProgram',
+    'impl_func': False,
+    'unit_test': False,
+  },
   'ValidateProgram': {'decoder_func': 'DoValidateProgram'},
   'VertexAttrib1f': {'decoder_func': 'DoVertexAttrib1f'},
   'VertexAttrib1fv': {
@@ -2052,6 +2135,7 @@ _FUNCTION_INFO = {
     'extension': True,
     'unit_test': False,
     'pepper_interface': 'InstancedArrays',
+    'defer_draws': True,
   },
   'DrawElementsInstancedANGLE': {
     'type': 'Manual',
@@ -2061,6 +2145,7 @@ _FUNCTION_INFO = {
     'unit_test': False,
     'client_test': False,
     'pepper_interface': 'InstancedArrays',
+    'defer_draws': True,
   },
   'VertexAttribDivisorANGLE': {
     'type': 'Manual',
@@ -2151,6 +2236,7 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoBindVertexArrayOES',
     'gen_func': 'GenVertexArraysOES',
     'unit_test': False,
+    'client_test': False,
   },
   'DeleteVertexArraysOES': {
     'type': 'DELn',
@@ -2175,6 +2261,52 @@ _FUNCTION_INFO = {
   'ReleaseTexImage2DCHROMIUM': {
     'decoder_func': 'DoReleaseTexImage2DCHROMIUM',
     'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'TraceBeginCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'immediate': False,
+    'client_test': False,
+    'cmd_args': 'GLuint bucket_id',
+    'extension': True,
+    'chromium': True,
+  },
+  'TraceEndCHROMIUM': {
+    'decoder_func': 'DoTraceEndCHROMIUM',
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'AsyncTexImage2DCHROMIUM': {
+    'type': 'Manual',
+    'immediate': False,
+    'client_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'AsyncTexSubImage2DCHROMIUM': {
+    'type': 'Manual',
+    'immediate': False,
+    'client_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'DiscardFramebufferEXT': {
+    'type': 'PUTn',
+    'count': 1,
+    'data_type': 'GLenum',
+    'cmd_args': 'GLenum target, GLsizei count, '
+        'const GLenum* attachments',
+    'decoder_func': 'DoDiscardFramebufferEXT',
+    'unit_test': False,
+    'client_test': False,
+    'extension': True,
+  },
+  'LoseContextCHROMIUM': {
+    'type': 'Manual',
+    'impl_func': True,
     'extension': True,
     'chromium': True,
   },
@@ -2333,14 +2465,16 @@ class CHeaderWriter(CWriter):
 
   _non_alnum_re = re.compile(r'[^a-zA-Z0-9]')
 
-  def __init__(self, filename, file_comment = None, guard_depth = 3):
+  def __init__(self, filename, file_comment = None):
     CWriter.__init__(self, filename)
 
-    base = os.path.dirname(os.path.abspath(filename))
-    for i in range(guard_depth):
-      base = os.path.dirname(base)
+    base = os.path.abspath(filename)
+    while os.path.basename(base) != 'src':
+      new_base = os.path.dirname(base)
+      assert new_base != base  # Prevent infinite loop.
+      base = new_base
 
-    hpath = os.path.abspath(filename)[len(base) + 1:]
+    hpath = os.path.relpath(filename, base)
     self.guard = self._non_alnum_re.sub('_', hpath).upper() + '_'
 
     self.Write(_LICENSE)
@@ -2506,6 +2640,7 @@ COMPILE_ASSERT(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
         "error::Error GLES2DecoderImpl::Handle%s(\n" % func.name)
     file.Write(
         "    uint32 immediate_data_size, const gles2::%s& c) {\n" % func.name)
+    self.WriteHandlerDeferReadWrite(func, file);
     if len(func.GetOriginalArgs()) > 0:
       last_arg = func.GetLastOriginalArg()
       all_but_last_arg = func.GetOriginalArgs()[:-1]
@@ -2525,6 +2660,7 @@ COMPILE_ASSERT(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
         "error::Error GLES2DecoderImpl::Handle%s(\n" % func.name)
     file.Write(
         "    uint32 immediate_data_size, const gles2::%s& c) {\n" % func.name)
+    self.WriteHandlerDeferReadWrite(func, file);
     last_arg = func.GetLastOriginalArg()
     all_but_last_arg = func.GetOriginalArgs()[:-1]
     for arg in all_but_last_arg:
@@ -2543,6 +2679,7 @@ COMPILE_ASSERT(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
         "error::Error GLES2DecoderImpl::Handle%s(\n" % func.name)
     file.Write(
         "    uint32 immediate_data_size, const gles2::%s& c) {\n" % func.name)
+    self.WriteHandlerDeferReadWrite(func, file);
     last_arg = func.GetLastOriginalArg()
     all_but_last_arg = func.GetOriginalArgs()[:-1]
     for arg in all_but_last_arg:
@@ -2554,6 +2691,20 @@ COMPILE_ASSERT(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
     file.Write("  return error::kNoError;\n")
     file.Write("}\n")
     file.Write("\n")
+
+  def WriteHandlerDeferReadWrite(self, func, file):
+    """Writes the code to handle deferring reads or writes."""
+    defer_reads = func.GetInfo('defer_reads')
+    defer_draws = func.GetInfo('defer_draws')
+    conditions = []
+    if defer_draws:
+      conditions.append('ShouldDeferDraws()');
+    if defer_reads:
+      conditions.append('ShouldDeferReads()');
+    if not conditions:
+      return
+    file.Write("  if (%s)\n" % ' || '.join(conditions))
+    file.Write("    return error::kDeferCommandUntilLater;\n")
 
   def WriteValidUnitTest(self, func, file, test, extra = {}):
     """Writes a valid unit test."""
@@ -2677,6 +2828,10 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
                 func.MakeOriginalArgString("")))
     file.Write("}\n")
 
+  def WriteGLES2Header(self, func, file):
+    """Writes a re-write macro for GLES"""
+    file.Write("#define gl%s GLES2_GET_FUN(%s)\n" %(func.name, func.name))
+
   def WriteClientGLCallLog(self, func, file):
     """Writes a logging macro for the client side code."""
     comma = ""
@@ -2714,6 +2869,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
         arg.WriteClientSideValidationCode(file, func)
       file.Write("  helper_->%s(%s);\n" %
                  (func.name, func.MakeOriginalArgString("")))
+      file.Write("  CheckGLError();\n")
       self.WriteClientGLReturnLog(func, file)
       file.Write("}\n")
       file.Write("\n")
@@ -2778,6 +2934,10 @@ TEST_F(GLES2ImplementationTest, %(name)s) {
     """Writes the client side destintion initialization validation."""
     for arg in func.GetOriginalArgs():
       arg.WriteDestinationInitalizationValidation(file, func)
+
+  def WriteTraceEvent(self, func, file):
+    file.Write('  TRACE_EVENT0("gpu", "GLES2Implementation::%s");\n' %
+               func.original_name)
 
   def WriteImmediateCmdComputeSize(self, func, file):
     """Writes the size computation code for the immediate version of a cmd."""
@@ -2850,13 +3010,62 @@ class StateSetHandler(TypeHandler):
     state = _STATES[state_name]
     states = state['states']
     args = func.GetOriginalArgs()
+    code = []
     for ndx,item in enumerate(states):
-      file.Write("  state_.%s = %s;\n" % (item['name'], args[ndx].name))
+      if 'range_checks' in item:
+        for range_check in item['range_checks']:
+          code.append("%s %s" % (args[ndx].name, range_check['check']))
+    if len(code):
+      file.Write("  if (%s) {\n" % " ||\n      ".join(code))
+      file.Write(
+        '    SetGLError(GL_INVALID_VALUE, "%s", "%s out of range");\n' %
+        (func.name, args[ndx].name))
+      file.Write("    return error::kNoError;\n")
+      file.Write("  }\n")
+    code = []
+    for ndx,item in enumerate(states):
+      code.append("state_.%s != %s" % (item['name'], args[ndx].name))
+    file.Write("  if (%s) {\n" % " ||\n      ".join(code))
+    for ndx,item in enumerate(states):
+      file.Write("    state_.%s = %s;\n" % (item['name'], args[ndx].name))
     if 'state_flag' in state:
-      file.Write("  %s = true;\n" % state['state_flag'])
+      file.Write("    %s = true;\n" % state['state_flag'])
     if not func.GetInfo("no_gl"):
-      file.Write("  %s(%s);\n" %
+      file.Write("    %s(%s);\n" %
                  (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
+    file.Write("  }\n")
+
+  def WriteServiceUnitTest(self, func, file):
+    """Overrriden from TypeHandler."""
+    TypeHandler.WriteServiceUnitTest(self, func, file)
+    state_name = func.GetInfo('state')
+    state = _STATES[state_name]
+    states = state['states']
+    for ndx,item in enumerate(states):
+      if 'range_checks' in item:
+        for check_ndx, range_check in enumerate(item['range_checks']):
+          valid_test = """
+TEST_F(%(test_name)s, %(name)sInvalidValue%(ndx)d_%(check_ndx)d) {
+  SpecializedSetup<%(name)s, 0>(false);
+  %(name)s cmd;
+  cmd.Init(%(args)s);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+"""
+          name = func.name
+          arg_strings = []
+          for count, arg in enumerate(func.GetOriginalArgs()):
+            arg_strings.append(arg.GetValidArg(func, count, 0))
+          arg_strings[ndx] = range_check['test_value']
+          vars = {
+            'test_name': 'GLES2DecoderTest%d' % file.file_num,
+            'name': name,
+            'ndx': ndx,
+            'check_ndx': check_ndx,
+            'args': ", ".join(arg_strings),
+          }
+          file.Write(valid_test % vars)
 
 
 class StateSetRGBAlphaHandler(TypeHandler):
@@ -2872,14 +3081,19 @@ class StateSetRGBAlphaHandler(TypeHandler):
     states = state['states']
     args = func.GetOriginalArgs()
     num_args = len(args)
+    code = []
+    for ndx,item in enumerate(states):
+      code.append("state_.%s != %s" % (item['name'], args[ndx % num_args].name))
+    file.Write("  if (%s) {\n" % " ||\n      ".join(code))
     for ndx, item in enumerate(states):
-      file.Write("  state_.%s = %s;\n" %
+      file.Write("    state_.%s = %s;\n" %
                  (item['name'], args[ndx % num_args].name))
     if 'state_flag' in state:
-      file.Write("  %s = true;\n" % state['state_flag'])
+      file.Write("    %s = true;\n" % state['state_flag'])
     if not func.GetInfo("no_gl"):
-      file.Write("  %s(%s);\n" %
+      file.Write("    %s(%s);\n" %
                  (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
+      file.Write("  }\n")
 
 
 class StateSetFrontBackSeparateHandler(TypeHandler):
@@ -2896,17 +3110,29 @@ class StateSetFrontBackSeparateHandler(TypeHandler):
     args = func.GetOriginalArgs()
     face = args[0].name
     num_args = len(args)
+    file.Write("  bool changed = false;\n")
     for group_ndx, group in enumerate(Grouper(num_args - 1, states)):
       file.Write("  if (%s == %s || %s == GL_FRONT_AND_BACK) {\n" %
                  (face, ('GL_FRONT', 'GL_BACK')[group_ndx], face))
+      code = []
       for ndx, item in enumerate(group):
-        file.Write("    state_.%s = %s;\n" % (item['name'], args[ndx + 1].name))
+        code.append("state_.%s != %s" % (item['name'], args[ndx + 1].name))
+      file.Write("    changed |= %s;\n" % " ||\n        ".join(code))
       file.Write("  }\n")
+    file.Write("  if (changed) {\n")
+    for group_ndx, group in enumerate(Grouper(num_args - 1, states)):
+      file.Write("    if (%s == %s || %s == GL_FRONT_AND_BACK) {\n" %
+                 (face, ('GL_FRONT', 'GL_BACK')[group_ndx], face))
+      for ndx, item in enumerate(group):
+        file.Write("      state_.%s = %s;\n" %
+                   (item['name'], args[ndx + 1].name))
+      file.Write("    }\n")
     if 'state_flag' in state:
-      file.Write("  %s = true;\n" % state['state_flag'])
+      file.Write("    %s = true;\n" % state['state_flag'])
     if not func.GetInfo("no_gl"):
-      file.Write("  %s(%s);\n" %
+      file.Write("    %s(%s);\n" %
                  (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
+    file.Write("  }\n")
 
 
 class StateSetFrontBackHandler(TypeHandler):
@@ -2921,16 +3147,22 @@ class StateSetFrontBackHandler(TypeHandler):
     state = _STATES[state_name]
     states = state['states']
     args = func.GetOriginalArgs()
-    face = args[0].name
     num_args = len(args)
+    code = []
     for group_ndx, group in enumerate(Grouper(num_args, states)):
       for ndx, item in enumerate(group):
-        file.Write("  state_.%s = %s;\n" % (item['name'], args[ndx].name))
+        code.append("state_.%s != %s" % (item['name'], args[ndx].name))
+    file.Write("  if (%s) {\n" % " ||\n      ".join(code))
+    for group_ndx, group in enumerate(Grouper(num_args, states)):
+      for ndx, item in enumerate(group):
+        file.Write("    state_.%s = %s;\n" % (item['name'], args[ndx].name))
     if 'state_flag' in state:
-      file.Write("  %s = true;\n" % state['state_flag'])
+      file.Write("    %s = true;\n" % state['state_flag'])
     if not func.GetInfo("no_gl"):
-      file.Write("  %s(%s);\n" %
+      file.Write("    %s(%s);\n" %
                  (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
+    file.Write("  }\n")
+
 
 class CustomHandler(TypeHandler):
   """Handler for commands that are auto-generated but require minor tweaks."""
@@ -3136,7 +3368,8 @@ class ManualHandler(CustomHandler):
 
   def WriteGLES2Implementation(self, func, file):
     """Overrriden from TypeHandler."""
-    pass
+    if func.GetInfo('impl_func'):
+      super(ManualHandler, self).WriteGLES2Implementation(func, file)
 
   def WriteGLES2ImplementationHeader(self, func, file):
     """Overrriden from TypeHandler."""
@@ -3376,8 +3609,10 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     SetGLError(GL_INVALID_OPERATION, "%(name)s\", \"%(id)s reserved id");
     return;
   }
-  Bind%(type)sHelper(%(arg_string)s);
-  helper_->%(name)s(%(arg_string)s);
+  if (Bind%(type)sHelper(%(arg_string)s)) {
+    helper_->%(name)s(%(arg_string)s);
+  }
+  CheckGLError();
 }
 
 """
@@ -3395,6 +3630,39 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
           'id': name_arg.name,
           'type': name_arg.resource_type,
           'lc_type': name_arg.resource_type.lower(),
+        })
+
+  def WriteGLES2ImplementationUnitTest(self, func, file):
+    """Overrriden from TypeHandler."""
+    client_test = func.GetInfo('client_test')
+    if client_test == False:
+      return
+    code = """
+TEST_F(GLES2ImplementationTest, %(name)s) {
+  struct Cmds {
+    %(name)s cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(%(cmd_args)s);
+
+  gl_->%(name)s(%(args)s);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  ClearCommands();
+  gl_->%(name)s(%(args)s);
+  EXPECT_TRUE(NoCommandsWritten());
+}
+"""
+    cmd_arg_strings = []
+    for count, arg in enumerate(func.GetCmdArgs()):
+      cmd_arg_strings.append(arg.GetValidClientSideCmdArg(func, count, 0))
+      count += 1
+    gl_arg_strings = []
+    for count, arg in enumerate(func.GetOriginalArgs()):
+      gl_arg_strings.append(arg.GetValidClientSideArg(func, count, 0))
+    file.Write(code % {
+          'name': func.name,
+          'args': ", ".join(gl_arg_strings),
+          'cmd_args': ", ".join(cmd_arg_strings),
         })
 
 
@@ -3457,9 +3725,11 @@ class GENnHandler(TypeHandler):
     code = """  GPU_CLIENT_SINGLE_THREAD_CHECK();
   GetIdHandler(id_namespaces::k%(resource_types)s)->
       MakeIds(this, 0, %(args)s);
+  %(name)sHelper(%(args)s);
   helper_->%(name)sImmediate(%(args)s);
   helper_->CommandBufferHelper::Flush();
 %(log_code)s
+  CheckGLError();
 }
 
 """
@@ -3712,6 +3982,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("  helper_->%s(%s);\n" %
                (func.name, func.MakeCmdArgString("")))
     file.Write('  GPU_CLIENT_LOG("returned " << client_id);\n')
+    file.Write("  CheckGLError();\n")
     file.Write("  return client_id;\n")
     file.Write("}\n")
     file.Write("\n")
@@ -3741,6 +4012,7 @@ class DeleteHandler(TypeHandler):
         "  GPU_CLIENT_DCHECK(%s != 0);\n" % func.GetOriginalArgs()[-1].name)
     file.Write("  %sHelper(%s);\n" %
                (func.original_name, func.GetOriginalArgs()[-1].name))
+    file.Write("  CheckGLError();\n")
     file.Write("}\n")
     file.Write("\n")
 
@@ -3892,6 +4164,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs) {
       for arg in func.GetOriginalArgs():
         arg.WriteClientSideValidationCode(file, func)
       code = """  %(name)sHelper(%(args)s);
+  CheckGLError();
 }
 
 """
@@ -4057,6 +4330,7 @@ class GETnHandler(TypeHandler):
           ", ".join(["%s" % arg.name for arg in all_but_last_args]))
       all_arg_string = (
           ", ".join(["%s" % arg.name for arg in func.GetOriginalArgs()]))
+      self.WriteTraceEvent(func, file)
       code = """  if (%(func_name)sHelper(%(all_arg_string)s)) {
     return;
   }
@@ -4075,6 +4349,7 @@ class GETnHandler(TypeHandler):
       GPU_CLIENT_LOG("  " << i << ": " << result->GetData()[i]);
     }
   });
+  CheckGLError();
 }
 """
       file.Write(code % {
@@ -4282,6 +4557,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  helper_->%sImmediate(%s);\n" %
                (func.name, func.MakeOriginalArgString("")))
+    file.Write("  CheckGLError();\n")
     file.Write("}\n")
     file.Write("\n")
 
@@ -4545,6 +4821,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  helper_->%sImmediate(%s);\n" %
                (func.name, func.MakeOriginalArgString("")))
+    file.Write("  CheckGLError();\n")
     file.Write("}\n")
     file.Write("\n")
 
@@ -5003,6 +5280,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
                  (func.return_type, func.original_name,
                   func.MakeTypedOriginalArgString("")))
       file.Write("  GPU_CLIENT_SINGLE_THREAD_CHECK();\n")
+      self.WriteTraceEvent(func, file)
       func.WriteDestinationInitalizationValidation(file)
       self.WriteClientGLCallLog(func, file)
       file.Write("  typedef %s::Result Result;\n" % func.name)
@@ -5019,8 +5297,10 @@ TEST_F(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
           "  helper_->%s(%s%sGetResultShmId(), GetResultShmOffset());\n" %
                  (func.name, arg_string, comma))
       file.Write("  WaitForCmd();\n")
-      file.Write('  GPU_CLIENT_LOG("returned " << *result);\n')
-      file.Write("  return *result;\n")
+      file.Write("  %s result_value = *result;\n" % func.return_type)
+      file.Write('  GPU_CLIENT_LOG("returned " << result_value);\n')
+      file.Write("  CheckGLError();\n")
+      file.Write("  return result_value;\n")
       file.Write("}\n")
       file.Write("\n")
 
@@ -5097,6 +5377,7 @@ class STRnHandler(TypeHandler):
   if (%(length_name)s != NULL) {
     *%(length_name)s = max_size;
   }
+  CheckGLError();
 }
 """
     args = func.GetOriginalArgs()
@@ -6024,6 +6305,10 @@ class Function(object):
     """Writes the GLES2 Implemention definition."""
     self.type_handler.WriteGLES2Implementation(self, file)
 
+  def WriteGLES2Header(self, file):
+    """Writes the GLES2 Implemention unit test."""
+    self.type_handler.WriteGLES2Header(self, file)
+
   def WriteGLES2ImplementationUnitTest(self, file):
     """Writes the GLES2 Implemention unit test."""
     self.type_handler.WriteGLES2ImplementationUnitTest(self, file)
@@ -6313,8 +6598,11 @@ class GLGenerator(object):
 
   def GetTypeHandler(self, name):
     """Gets a type info for the given type."""
-    if name in self._type_handlers:
-      return self._type_handlers[name]
+    if len(name):
+      if name in self._type_handlers:
+        return self._type_handlers[name]
+      else:
+        raise KeyError("no such type handler: %s" % name)
     return self._empty_type_handler
 
   def GetFunctionInfo(self, name):
@@ -6488,8 +6776,8 @@ class GLGenerator(object):
 
     file.Close()
 
-  def WriteContextStateHeader(self, filename):
-    """Writes the context state header."""
+  def WriteServiceContextStateHeader(self, filename):
+    """Writes the service context state header."""
     file = CHeaderWriter(
         filename,
         "// It is included by context_state.h\n")
@@ -6507,8 +6795,64 @@ class GLGenerator(object):
 
     file.Close()
 
-  def WriteContextStateImpl(self, filename):
-    """Writes the context state implementation."""
+  def WriteClientContextStateHeader(self, filename):
+    """Writes the client context state header."""
+    file = CHeaderWriter(
+        filename,
+        "// It is included by client_context_state.h\n")
+    file.Write("struct EnableFlags {\n")
+    file.Write("  EnableFlags();\n")
+    for capability in _CAPABILITY_FLAGS:
+      file.Write("  bool %s;\n" % capability['name'])
+    file.Write("};\n\n")
+
+    file.Close()
+
+  def WriteContextStateGetters(self, file, class_name):
+    """Writes the state getters."""
+    for gl_type in ["GLint", "GLfloat"]:
+      file.Write("""
+bool %s::GetStateAs%s(
+    GLenum pname, %s* params, GLsizei* num_written) const {
+  switch (pname) {
+""" % (class_name, gl_type, gl_type))
+      for state_name in _STATES.keys():
+        state = _STATES[state_name]
+        if 'enum' in state:
+          file.Write("    case %s:\n" % state['enum'])
+          file.Write("      *num_written = %d;\n" % len(state['states']))
+          file.Write("      if (params) {\n")
+          for ndx,item in enumerate(state['states']):
+            file.Write("        params[%d] = static_cast<%s>(%s);\n" %
+                       (ndx, gl_type, item['name']))
+          file.Write("      }\n")
+          file.Write("      return true;\n")
+        else:
+          for item in state['states']:
+            file.Write("    case %s:\n" % item['enum'])
+            file.Write("      *num_written = 1;\n")
+            file.Write("      if (params) {\n")
+            file.Write("        params[0] = static_cast<%s>(%s);\n" %
+                       (gl_type, item['name']))
+            file.Write("      }\n")
+            file.Write("      return true;\n")
+      for capability in _CAPABILITY_FLAGS:
+            file.Write("    case GL_%s:\n" % capability['name'].upper())
+            file.Write("      *num_written = 1;\n")
+            file.Write("      if (params) {\n")
+            file.Write(
+                "        params[0] = static_cast<%s>(enable_flags.%s);\n" %
+                (gl_type, capability['name']))
+            file.Write("      }\n")
+            file.Write("      return true;\n")
+      file.Write("""    default:
+      return false;
+  }
+}
+""")
+
+  def WriteServiceContextStateImpl(self, filename):
+    """Writes the context state service implementation."""
     file = CHeaderWriter(
         filename,
         "// It is included by context_state.cc\n")
@@ -6529,14 +6873,14 @@ class GLGenerator(object):
     file.Write("}\n")
 
     file.Write("""
-void ContextState::InitCapabilities() {
+void ContextState::InitCapabilities() const {
 """)
     for capability in _CAPABILITY_FLAGS:
       file.Write("  EnableDisable(GL_%s, enable_flags.%s);\n" %
                  (capability['name'].upper(), capability['name']))
     file.Write("""}
 
-void ContextState::InitState() {
+void ContextState::InitState() const {
 """)
 
     # We need to sort the keys so the expectations match
@@ -6558,6 +6902,69 @@ void ContextState::InitState() {
         file.Write("  gl%s(%s);\n" % (state['func'], ", ".join(args)))
     file.Write("}\n")
 
+    file.Write("""bool ContextState::GetEnabled(GLenum cap) const {
+  switch (cap) {
+""")
+    for capability in _CAPABILITY_FLAGS:
+      file.Write("    case GL_%s:\n" % capability['name'].upper())
+      file.Write("      return enable_flags.%s;\n" % capability['name'])
+    file.Write("""    default:
+      GPU_NOTREACHED();
+      return false;
+  }
+}
+""")
+
+    self.WriteContextStateGetters(file, "ContextState")
+    file.Close()
+
+  def WriteClientContextStateImpl(self, filename):
+    """Writes the context state client side implementation."""
+    file = CHeaderWriter(
+        filename,
+        "// It is included by client_context_state.cc\n")
+    code = []
+    for capability in _CAPABILITY_FLAGS:
+      code.append("%s(%s)" %
+                  (capability['name'],
+                   ('false', 'true')['default' in capability]))
+    file.Write(
+      "ClientContextState::EnableFlags::EnableFlags()\n    : %s {\n}\n" %
+      ",\n      ".join(code))
+    file.Write("\n")
+
+    file.Write("""
+bool ClientContextState::SetCapabilityState(
+    GLenum cap, bool enabled, bool* changed) {
+  *changed = false;
+  switch (cap) {
+""")
+    for capability in _CAPABILITY_FLAGS:
+      file.Write("    case GL_%s:\n" % capability['name'].upper())
+      file.Write("""      if (enable_flags.%(name)s != enabled) {
+         *changed = true;
+         enable_flags.%(name)s = enabled;
+      }
+      return true;
+""" % capability)
+    file.Write("""    default:
+      return false;
+  }
+}
+""")
+    file.Write("""bool ClientContextState::GetEnabled(
+    GLenum cap, bool* enabled) const {
+  switch (cap) {
+""")
+    for capability in _CAPABILITY_FLAGS:
+      file.Write("    case GL_%s:\n" % capability['name'].upper())
+      file.Write("      *enabled = enable_flags.%s;\n" % capability['name'])
+      file.Write("      return true;\n")
+    file.Write("""    default:
+      return false;
+  }
+}
+""")
     file.Close()
 
   def WriteServiceImplementation(self, filename):
@@ -6591,59 +6998,6 @@ bool GLES2DecoderImpl::SetCapabilityState(GLenum cap, bool enabled) {
 """ % capability)
     file.Write("""    default:
       NOTREACHED();
-      return false;
-  }
-}
-
-bool GLES2DecoderImpl::DoIsEnabled(GLenum cap) {
-  switch (cap) {
-""")
-    for capability in _CAPABILITY_FLAGS:
-      file.Write("    case GL_%s:\n" % capability['name'].upper())
-      file.Write("      return state_.enable_flags.%s;\n" %
-                 capability['name'])
-    file.Write("""    default:
-      NOTREACHED();
-      return false;
-  }
-}
-""")
-    for gl_type in ["GLint", "GLfloat"]:
-      file.Write("""
-bool GLES2DecoderImpl::GetStateAs%s(
-    GLenum pname, %s* params, GLsizei* num_written) {
-  switch (pname) {
-""" % (gl_type, gl_type))
-      for state_name in _STATES.keys():
-        state = _STATES[state_name]
-        if 'enum' in state:
-          file.Write("    case %s:\n" % state['enum'])
-          file.Write("      *num_written = %d;\n" % len(state['states']))
-          file.Write("      if (params) {\n")
-          for ndx,item in enumerate(state['states']):
-            file.Write("        params[%d] = static_cast<%s>(state_.%s);\n" %
-                       (ndx, gl_type, item['name']))
-          file.Write("      }\n")
-          file.Write("      return true;\n")
-        else:
-          for item in state['states']:
-            file.Write("    case %s:\n" % item['enum'])
-            file.Write("      *num_written = 1;\n")
-            file.Write("      if (params) {\n")
-            file.Write("        params[0] = static_cast<%s>(state_.%s);\n" %
-                       (gl_type, item['name']))
-            file.Write("      }\n")
-            file.Write("      return true;\n")
-      for capability in _CAPABILITY_FLAGS:
-            file.Write("    case GL_%s:\n" % capability['name'].upper())
-            file.Write("      *num_written = 1;\n")
-            file.Write("      if (params) {\n")
-            file.Write("        params[0] = static_cast<%s>("
-                       "state_.enable_flags.%s);\n" %
-                       (gl_type, capability['name']))
-            file.Write("      }\n")
-            file.Write("      return true;\n")
-      file.Write("""    default:
       return false;
   }
 }
@@ -6723,6 +7077,27 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
 """)
     file.Close()
 
+  def WriteGLES2Header(self, filename):
+    """Writes the GLES2 header."""
+    file = CHeaderWriter(
+        filename,
+        "// Because we are using both the real system GL and our own.\n"
+        "// emulated GL we need to use different names to avoid conflicts.\n"
+        "\n")
+
+    file.Write("""#if defined(GLES2_USE_CPP_BINDINGS)
+#define GLES2_GET_FUN(name) gles2::GetGLContext()->name
+#else
+#define GLES2_GET_FUN(name) GLES2 ## name
+#endif
+
+""")
+
+    for func in self.original_functions:
+      func.WriteGLES2Header(file)
+
+    file.Write("\n")
+    file.Close()
 
   def WriteGLES2CLibImplementation(self, filename):
     """Writes the GLES2 c lib implementation."""
@@ -6732,8 +7107,21 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
 
     for func in self.original_functions:
       func.WriteGLES2CLibImplementation(file)
-    file.Write("\n")
 
+    file.Write("""
+namespace gles2 {
+
+NameToFunc g_gles2_function_table[] = {
+""")
+    for func in self.original_functions:
+      file.Write(
+          '  { "gl%s", reinterpret_cast<GLES2FunctionPointer>(gl%s), },\n' %
+          (func.name, func.name))
+    file.Write("""  { NULL, NULL, },
+};
+
+}  // namespace gles2
+""")
     file.Close()
 
   def WriteGLES2InterfaceHeader(self, filename):
@@ -6859,7 +7247,7 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
         if m:
           name = m.group(1)
           value = m.group(2)
-          if not value in dict:
+          if len(value) <= 10 and not value in dict:
             dict[value] = name
 
     file = CHeaderWriter(filename)
@@ -7178,14 +7566,18 @@ def main(argv):
     gen.WriteGLES2CLibImplementation("client/gles2_c_lib_autogen.h")
     gen.WriteCmdHelperHeader("client/gles2_cmd_helper_autogen.h")
     gen.WriteServiceImplementation("service/gles2_cmd_decoder_autogen.h")
-    gen.WriteContextStateHeader("service/context_state_autogen.h")
-    gen.WriteContextStateImpl("service/context_state_impl_autogen.h")
+    gen.WriteServiceContextStateHeader("service/context_state_autogen.h")
+    gen.WriteServiceContextStateImpl("service/context_state_impl_autogen.h")
+    gen.WriteClientContextStateHeader("client/client_context_state_autogen.h")
+    gen.WriteClientContextStateImpl(
+        "client/client_context_state_impl_autogen.h")
     gen.WriteServiceUnitTests("service/gles2_cmd_decoder_unittest_%d_autogen.h")
     gen.WriteServiceUtilsHeader("service/gles2_cmd_validation_autogen.h")
     gen.WriteServiceUtilsImplementation(
         "service/gles2_cmd_validation_implementation_autogen.h")
     gen.WriteCommonUtilsHeader("common/gles2_cmd_utils_autogen.h")
     gen.WriteCommonUtilsImpl("common/gles2_cmd_utils_implementation_autogen.h")
+    gen.WriteGLES2Header("../GLES2/gl2chromium.h")
 
   if gen.errors > 0:
     print "%d errors" % gen.errors

@@ -10,12 +10,13 @@ const char kFSUniqueIdPrefix[] = "UUID:";
 const char kVendorModelSerialPrefix[] = "VendorModelSerial:";
 
 #if defined(OS_LINUX)
-const char kLeftParen[] = "(";
-const char kRightParen[] = ")";
 const char kVendorModelVolumeStoragePrefix[] = "VendorModelVolumeStorage:";
 #endif
 
-const char kNonSpaceDelim[] = ":";
-const char kSpaceDelim[] = " ";
+#if defined(OS_WIN)
+const char16 kWPDDevInterfaceGUID[] = L"{6ac27878-a6fa-4155-ba85-f98f491d4f33}";
+#endif
+
+const FilePath::CharType kDCIMDirectoryName[] = FILE_PATH_LITERAL("DCIM");
 
 }  // namespace chrome

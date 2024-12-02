@@ -5,6 +5,10 @@
 cr.define('ntp', function() {
   'use strict';
 
+  var Tile = ntp.Tile;
+  var TilePage = ntp.TilePage;
+  var APP_LAUNCH = ntp.APP_LAUNCH;
+
   // Histogram buckets for UMA tracking of where a DnD drop came from.
   var DRAG_SOURCE = {
     SAME_APPS_PANE: 0,
@@ -116,19 +120,19 @@ cr.define('ntp', function() {
     setupForApp: function(app) {
       this.app_ = app;
 
-      this.launch_.textContent = app.appData.title;
+      this.launch_.textContent = app.data.title;
 
       this.forAllLaunchTypes_(function(launchTypeButton, id) {
         launchTypeButton.disabled = false;
-        launchTypeButton.checked = app.appData.launch_type == id;
+        launchTypeButton.checked = app.data.launch_type == id;
       });
 
-      this.options_.disabled = !app.appData.optionsUrl || !app.appData.enabled;
-      this.details_.disabled = !app.appData.detailsUrl;
-      this.uninstall_.disabled = !app.appData.mayDisable;
+      this.options_.disabled = !app.data.optionsUrl || !app.data.enabled;
+      this.details_.disabled = !app.data.detailsUrl;
+      this.uninstall_.disabled = !app.data.mayDisable;
 
       this.disableNotifications_.hidden = true;
-      var notificationsDisabled = app.appData.notifications_disabled;
+      var notificationsDisabled = app.data.notifications_disabled;
       if (typeof notificationsDisabled != 'undefined') {
         this.disableNotifications_.hidden = false;
         this.disableNotifications_.checked = notificationsDisabled;
@@ -151,15 +155,15 @@ cr.define('ntp', function() {
           chrome.send('setLaunchType', [app.appId, id]);
           // Manually update the launch type. We will only get
           // appsPrefChangeCallback calls after changes to other NTP instances.
-          app.appData.launch_type = id;
+          app.data.launch_type = id;
         }
       });
     },
     onShowOptions_: function(e) {
-      window.location = this.app_.appData.optionsUrl;
+      window.location = this.app_.data.optionsUrl;
     },
     onShowDetails_: function(e) {
-      var url = this.app_.appData.detailsUrl;
+      var url = this.app_.data.detailsUrl;
       url = appendParam(url, 'utm_source', 'chrome-ntp-launcher');
       window.location = url;
     },
@@ -168,78 +172,99 @@ cr.define('ntp', function() {
       app.removeBubble();
       // Toggle the current disable setting.
       var newSetting = !this.disableNotifications_.checked;
-      app.appData.notifications_disabled = newSetting;
-      chrome.send('setNotificationsDisabled', [app.appData.id, newSetting]);
+      app.data.notifications_disabled = newSetting;
+      chrome.send('setNotificationsDisabled', [app.data.id, newSetting]);
     },
     onUninstall_: function(e) {
-      chrome.send('uninstallApp', [this.app_.appData.id]);
+      chrome.send('uninstallApp', [this.app_.data.id]);
     },
     onCreateShortcut_: function(e) {
-      chrome.send('createAppShortcut', [this.app_.appData.id]);
+      chrome.send('createAppShortcut', [this.app_.data.id]);
     },
   };
 
   /**
    * Creates a new App object.
-   * @param {Object} appData The data object that describes the app.
+   * @param {Object=} opt_data The data representing the app.
    * @constructor
    * @extends {HTMLDivElement}
    */
-  function App(appData) {
+  function App(opt_data) {
     var el = cr.doc.createElement('div');
     el.__proto__ = App.prototype;
-    el.initialize(appData);
+    el.initialize_();
+
+    if (opt_data)
+      el.data = opt_data;
 
     return el;
   }
 
-  App.prototype = {
+  App.prototype = Tile.subclass({
     __proto__: HTMLDivElement.prototype,
 
     /**
      * Initialize the app object.
-     * @param {Object} appData The data object that describes the app.
+     * @private
      */
-    initialize: function(appData) {
-      this.appData = appData;
-      assert(this.appData_.id, 'Got an app without an ID');
-      this.id = this.appData_.id;
+    initialize_: function() {
+      Tile.prototype.initialize.apply(this, arguments);
+
+      this.classList.add('app');
+      this.classList.add('focusable');
+    },
+
+    /**
+     * Formats this app according to |data|.
+     * @param {Object} data The data object that describes the app.
+     * @private
+     */
+    formatApp_: function(data) {
+      assert(this.data_.id, 'Got an app without an ID');
+      this.id = this.data_.id;
       this.setAttribute('role', 'menuitem');
 
-      this.className = 'app focusable';
-
-      if (!this.appData_.icon_big_exists && this.appData_.icon_small_exists)
+      if (!this.data_.icon_big_exists && this.data_.icon_small_exists)
         this.useSmallIcon_ = true;
 
-      this.appContents_ = this.useSmallIcon_ ?
-          $('app-small-icon-template').cloneNode(true) :
-          $('app-large-icon-template').cloneNode(true);
-      this.appContents_.id = '';
-      this.appendChild(this.appContents_);
+      // TODO(pedrosimonetti): Fix crbug.com/165612
+      if (!this.appContents_) {
+        this.appContents_ = this.useSmallIcon_ ?
+            $('app-small-icon-template').cloneNode(true) :
+            $('app-large-icon-template').cloneNode(true);
+        this.appContents_.id = '';
+        this.appendChild(this.appContents_);
+      }
 
       this.appImgContainer_ = this.querySelector('.app-img-container');
       this.appImg_ = this.appImgContainer_.querySelector('img');
       this.setIcon();
 
+      var appTitle;
       if (this.useSmallIcon_) {
+        this.classList.add('small-icon');
         this.imgDiv_ = this.querySelector('.app-icon-div');
         this.addLaunchClickTarget_(this.imgDiv_);
-        this.imgDiv_.title = this.appData_.title;
+        this.imgDiv_.title = this.data_.title;
+        appTitle = formatTitle(this.data_.title);
         chrome.send('getAppIconDominantColor', [this.id]);
       } else {
+        this.classList.remove('small-icon');
         this.addLaunchClickTarget_(this.appImgContainer_);
-        this.appImgContainer_.title = this.appData_.title;
+        this.appImgContainer_.title = this.data_.title;
+        appTitle = this.data_.title;
       }
 
       var appSpan = this.appContents_.querySelector('.title');
-      appSpan.textContent = appSpan.title = this.appData_.title;
+      appSpan.textContent = appTitle;
+      appSpan.title = this.data_.title;
       this.addLaunchClickTarget_(appSpan);
 
-      var notification = this.appData_.notification;
+      var notification = this.data_.notification;
       var hasNotification = typeof notification != 'undefined' &&
                             typeof notification['title'] != 'undefined' &&
                             typeof notification['body'] != 'undefined' &&
-                            !this.appData_.notifications_disabled;
+                            !this.data_.notifications_disabled;
       if (hasNotification)
         this.setupNotification_(notification);
 
@@ -276,19 +301,27 @@ cr.define('ntp', function() {
       // Unset the ID immediately, because the app is already gone. But leave
       // the tile on the page as it animates out.
       this.id = '';
-      this.tile.doRemove(opt_animate);
+
+      if (opt_animate) {
+        var cell = this.tileCell;
+        var tilePage = cell.tilePage;
+        tilePage.dataList_.splice(cell.index, 1);
+        tilePage.animateTileRemoval(cell.index, tilePage.dataList_);
+      } else {
+        this.tileCell.doRemove(opt_animate);
+      }
     },
 
     /**
-     * Set the URL of the icon from |appData_|. This won't actually show the
+     * Set the URL of the icon from |this.data_|. This won't actually show the
      * icon until loadIcon() is called (for performance reasons; we don't want
      * to load icons until we have to).
      */
     setIcon: function() {
-      var src = this.useSmallIcon_ ? this.appData_.icon_small :
-                                     this.appData_.icon_big;
-      if (!this.appData_.enabled ||
-          (!this.appData_.offlineEnabled && !navigator.onLine)) {
+      var src = this.useSmallIcon_ ? this.data_.icon_small :
+                                     this.data_.icon_big;
+      if (!this.data_.enabled ||
+          (!this.data_.offlineEnabled && !navigator.onLine)) {
         src += '?grayscale=true';
       }
 
@@ -351,7 +384,7 @@ cr.define('ntp', function() {
           // Create a new bubble.
           infoBubble = new cr.ui.ExpandableBubble;
           infoBubble.anchorNode = this;
-          infoBubble.appId = this.appData_.id;
+          infoBubble.appId = this.data_.id;
           infoBubble.handleCloseEvent = function() {
             chrome.send('closeNotification', [this.appId]);
             infoBubble.hide();
@@ -382,46 +415,13 @@ cr.define('ntp', function() {
     },
 
     /**
-     * Set the size and position of the app tile.
-     * @param {number} size The total size of |this|.
-     * @param {number} x The x-position.
-     * @param {number} y The y-position.
-     *     animate.
-     */
-    setBounds: function(size, x, y) {
-      var imgSize = size * APP_IMG_SIZE_FRACTION;
-      this.appImgContainer_.style.width = this.appImgContainer_.style.height =
-          toCssPx(this.useSmallIcon_ ? 16 : imgSize);
-      if (this.useSmallIcon_) {
-        // 3/4 is the ratio of 96px to 128px (the used height and full height
-        // of icons in apps).
-        var iconSize = imgSize * 3 / 4;
-        // The -2 is for the div border to improve the visual alignment for the
-        // icon div.
-        this.imgDiv_.style.width = this.imgDiv_.style.height =
-            toCssPx(iconSize - 2);
-        // Margins set to get the icon placement right and the text to line up.
-        this.imgDiv_.style.marginTop = this.imgDiv_.style.marginBottom =
-            toCssPx((imgSize - iconSize) / 2);
-      }
-
-      this.style.width = this.style.height = toCssPx(size);
-      this.style.left = toCssPx(x);
-      this.style.right = toCssPx(x);
-      this.style.top = toCssPx(y);
-
-      if (this.currentBubbleShowing_)
-        this.currentBubbleShowing_.resizeAndReposition();
-    },
-
-    /**
      * Invoked when an app is clicked.
      * @param {Event} e The click event.
      * @private
      */
     onClick_: function(e) {
-      var url = !this.appData_.is_webstore ? '' :
-          appendParam(this.appData_.url,
+      var url = !this.data_.is_webstore ? '' :
+          appendParam(this.data_.url,
                       'utm_source',
                       'chrome-ntp-icon');
 
@@ -509,11 +509,12 @@ cr.define('ntp', function() {
     },
 
     /**
-     * Change the appData and update the appearance of the app.
-     * @param {Object} appData The new data object that describes the app.
+     * Change the data and update the appearance of the app.
+     * @param {Object} data The new data object that describes the app.
      */
-    replaceAppData: function(appData) {
-      this.appData_ = appData;
+    replaceAppData: function(data) {
+      assert(data);
+      this.data = data;
       this.setIcon();
       this.loadIcon();
     },
@@ -522,15 +523,18 @@ cr.define('ntp', function() {
      * The data and preferences for this app.
      * @type {Object}
      */
-    set appData(data) {
-      this.appData_ = data;
+    set data(data) {
+      Object.getOwnPropertyDescriptor(Tile.prototype, 'data').set.apply(this,
+          arguments);
+
+      this.formatApp_(data);
     },
-    get appData() {
-      return this.appData_;
+    get data() {
+      return this.data_;
     },
 
     get appId() {
-      return this.appData_.id;
+      return this.data_.id;
     },
 
     /**
@@ -551,49 +555,19 @@ cr.define('ntp', function() {
      * @return {boolean} True if the app can be uninstalled.
      */
     canBeRemoved: function() {
-      return this.appData_.mayDisable;
+      return this.data_.mayDisable;
     },
 
     /**
      * Uninstalls the app after it's been dropped on the trash.
      */
     removeFromChrome: function() {
-      chrome.send('uninstallApp', [this.appData_.id, true]);
+      chrome.send('uninstallApp', [this.data_.id, true]);
       this.tile.tilePage.removeTile(this.tile, true);
       if (this.currentBubbleShowing_)
-        currentBubbleShowing_.hide();
+        this.currentBubbleShowing_.hide();
     },
-
-    /**
-     * Called when a drag is starting on the tile. Updates dataTransfer with
-     * data for this tile.
-     */
-    setDragData: function(dataTransfer) {
-      dataTransfer.setData('Text', this.appData_.title);
-      dataTransfer.setData('URL', this.appData_.url);
-    },
-  };
-
-  var TilePage = ntp.TilePage;
-
-  // The fraction of the app tile size that the icon uses.
-  var APP_IMG_SIZE_FRACTION = 4 / 5;
-
-  var appsPageGridValues = {
-    // The fewest tiles we will show in a row.
-    minColCount: 3,
-    // The most tiles we will show in a row.
-    maxColCount: 6,
-
-    // The smallest a tile can be.
-    minTileWidth: 64 / APP_IMG_SIZE_FRACTION,
-    // The biggest a tile can be.
-    maxTileWidth: 128 / APP_IMG_SIZE_FRACTION,
-
-    // The padding between tiles, as a fraction of the tile width.
-    tileSpacingFraction: 1 / 8,
-  };
-  TilePage.initGridValues(appsPageGridValues);
+  });
 
   /**
    * Creates a new AppsPage object.
@@ -601,7 +575,7 @@ cr.define('ntp', function() {
    * @extends {TilePage}
    */
   function AppsPage() {
-    var el = new TilePage(appsPageGridValues);
+    var el = new TilePage();
     el.__proto__ = AppsPage.prototype;
     el.initialize();
 
@@ -611,7 +585,29 @@ cr.define('ntp', function() {
   AppsPage.prototype = {
     __proto__: TilePage.prototype,
 
+    /**
+     * Reference to the Tile subclass that will be used to create the tiles.
+     * @constructor
+     * @extends {Tile}
+     */
+    TileClass: App,
+
+    // The config object should be defined by a TilePage subclass if it
+    // wants the non-default behavior.
+    config: {
+      // The width of a cell.
+      cellWidth: 70,
+      // The start margin of a cell (left or right according to text direction).
+      cellMarginStart: 20,
+      // The maximum number of Tiles to be displayed.
+      maxTileCount: 512,
+      // Whether the TilePage content will be scrollable.
+      scrollable: true,
+    },
+
     initialize: function() {
+      TilePage.prototype.initialize.apply(this, arguments);
+
       this.classList.add('apps-page');
 
       this.addEventListener('cardselected', this.onCardSelected_);
@@ -623,37 +619,39 @@ cr.define('ntp', function() {
                             this.onCardChangeEnded_);
 
       this.addEventListener('tilePage:tile_added', this.onTileAdded_);
-
-      this.content_.addEventListener('scroll', this.onScroll_.bind(this));
     },
 
     /**
      * Highlight a newly installed app as it's added to the NTP.
-     * @param {Object} appData The data object that describes the app.
+     * @param {Object} data The data object that describes the app.
      */
-    insertAndHighlightApp: function(appData) {
+    insertAndHighlightApp: function(data) {
       ntp.getCardSlider().selectCardByValue(this);
-      this.content_.scrollTop = this.content_.scrollHeight;
-      this.insertApp(appData, true);
+      this.insertApp(data, true);
     },
 
     /**
-     * Similar to appendApp, but it respects the app_launch_ordinal field of
-     * |appData|.
-     * @param {Object} appData The data that describes the app.
+     * Inserts an App into the TilePage, preserving the alphabetical order.
+     * @param {Object} data The data that describes the app.
      * @param {boolean} animate Whether to animate the insertion.
      */
-    insertApp: function(appData, animate) {
-      var index = this.tileElements_.length;
-      for (var i = 0; i < this.tileElements_.length; i++) {
-        if (appData.app_launch_ordinal <
-            this.tileElements_[i].firstChild.appData.app_launch_ordinal) {
+    insertApp: function(data, animate) {
+      var index = this.tiles_.length;
+      for (var i = 0; i < this.tiles_.length; i++) {
+        if (data.title.toLocaleLowerCase() <
+            this.tiles_[i].data.title.toLocaleLowerCase()) {
           index = i;
           break;
         }
       }
 
-      this.addTileAt(new App(appData), index, animate);
+      if (animate) {
+        this.dataList_.splice(index, 0, data);
+        this.animateTileRestoration(index, this.dataList_);
+      } else {
+        var app = new App(data);
+        this.addTileAt(app, index);
+      }
     },
 
     /**
@@ -676,9 +674,9 @@ cr.define('ntp', function() {
      */
     onTileAdded_: function(e) {
       assert(e.currentTarget == this);
-      assert(e.addedTile.firstChild instanceof App);
+      assert(e.addedTile instanceof App);
       if (this.classList.contains('selected-card'))
-        e.addedTile.firstChild.loadIcon();
+        e.addedTile.loadIcon();
     },
 
     /**
@@ -688,8 +686,8 @@ cr.define('ntp', function() {
      * @private
      */
     onCardChangeEnded_: function(e) {
-      for (var i = 0; i < this.tileElements_.length; i++) {
-        var app = this.tileElements_[i].firstChild;
+      for (var i = 0; i < this.tiles_.length; i++) {
+        var app = this.tiles_[i];
         assert(app instanceof App);
         if (app.currentBubbleShowing_)
           app.currentBubbleShowing_.suppressed = false;
@@ -703,115 +701,24 @@ cr.define('ntp', function() {
      * @private
      */
     onCardDeselected_: function(e) {
-      for (var i = 0; i < this.tileElements_.length; i++) {
-        var app = this.tileElements_[i].firstChild;
+      for (var i = 0; i < this.tiles_.length; i++) {
+        var app = this.tiles_[i];
         assert(app instanceof App);
         if (app.currentBubbleShowing_)
           app.currentBubbleShowing_.suppressed = true;
       }
     },
 
-    /**
-     * A handler for when the apps page is scrolled (then we need to reposition
-     * the bubbles.
-     * @private
-     */
-    onScroll_: function(e) {
-      if (!this.selected)
-        return;
-      for (var i = 0; i < this.tileElements_.length; i++) {
-        var app = this.tileElements_[i].firstChild;
+    /** @override */
+    onScroll: function() {
+      TilePage.prototype.onScroll.apply(this, arguments);
+
+      for (var i = 0; i < this.tiles_.length; i++) {
+        var app = this.tiles_[i];
         assert(app instanceof App);
         if (app.currentBubbleShowing_)
           app.currentBubbleShowing_.resizeAndReposition();
         }
-    },
-
-    /** @inheritDoc */
-    doDragOver: function(e) {
-      // Only animatedly re-arrange if the user is currently dragging an app.
-      var tile = ntp.getCurrentlyDraggingTile();
-      if (tile && tile.querySelector('.app')) {
-        TilePage.prototype.doDragOver.call(this, e);
-      } else {
-        e.preventDefault();
-        this.setDropEffect(e.dataTransfer);
-      }
-    },
-
-    /** @inheritDoc */
-    shouldAcceptDrag: function(e) {
-      if (ntp.getCurrentlyDraggingTile())
-        return true;
-      if (!e.dataTransfer || !e.dataTransfer.types)
-        return false;
-      return Array.prototype.indexOf.call(e.dataTransfer.types,
-                                          'text/uri-list') != -1;
-    },
-
-    /** @inheritDoc */
-    addDragData: function(dataTransfer, index) {
-      var sourceId = -1;
-      var currentlyDraggingTile = ntp.getCurrentlyDraggingTile();
-      if (currentlyDraggingTile) {
-        var tileContents = currentlyDraggingTile.firstChild;
-        if (tileContents.classList.contains('app')) {
-          var originalPage = currentlyDraggingTile.tilePage;
-          var samePageDrag = originalPage == this;
-          sourceId = samePageDrag ? DRAG_SOURCE.SAME_APPS_PANE :
-                                    DRAG_SOURCE.OTHER_APPS_PANE;
-          this.tileGrid_.insertBefore(currentlyDraggingTile,
-                                      this.tileElements_[index]);
-          this.tileMoved(currentlyDraggingTile);
-          if (!samePageDrag) {
-            originalPage.fireRemovedEvent(currentlyDraggingTile, index, true);
-            this.fireAddedEvent(currentlyDraggingTile, index, true);
-          }
-        } else if (currentlyDraggingTile.querySelector('.most-visited')) {
-          this.generateAppForLink(tileContents.data);
-          sourceId = DRAG_SOURCE.MOST_VISITED_PANE;
-        }
-      } else {
-        this.addOutsideData_(dataTransfer);
-        sourceId = DRAG_SOURCE.OUTSIDE_NTP;
-      }
-
-      assert(sourceId != -1);
-      chrome.send('metricsHandler:recordInHistogram',
-          ['NewTabPage.AppsPageDragSource', sourceId, DRAG_SOURCE_LIMIT]);
-    },
-
-    /**
-     * Adds drag data that has been dropped from a source that is not a tile.
-     * @param {Object} dataTransfer The data transfer object that holds drop
-     *     data.
-     * @private
-     */
-    addOutsideData_: function(dataTransfer) {
-      var url = dataTransfer.getData('url');
-      assert(url);
-
-      // If the dataTransfer has html data, use that html's text contents as the
-      // title of the new link.
-      var html = dataTransfer.getData('text/html');
-      var title;
-      if (html) {
-        // It's important that we don't attach this node to the document
-        // because it might contain scripts.
-        var node = this.ownerDocument.createElement('div');
-        node.innerHTML = html;
-        title = node.textContent;
-      }
-
-      // Make sure title is >=1 and <=45 characters for Chrome app limits.
-      if (!title)
-        title = url;
-      if (title.length > 45)
-        title = title.substring(0, 45);
-      var data = {url: url, title: title};
-
-      // Synthesize an app.
-      this.generateAppForLink(data);
     },
 
     /**
@@ -822,35 +729,7 @@ cr.define('ntp', function() {
     generateAppForLink: function(data) {
       assert(data.url != undefined);
       assert(data.title != undefined);
-      var pageIndex = ntp.getAppsPageIndex(this);
-      chrome.send('generateAppForLink', [data.url, data.title, pageIndex]);
-    },
-
-    /** @inheritDoc */
-    tileMoved: function(draggedTile) {
-      if (!(draggedTile.firstChild instanceof App))
-        return;
-
-      var pageIndex = ntp.getAppsPageIndex(this);
-      chrome.send('setPageIndex', [draggedTile.firstChild.appId, pageIndex]);
-
-      var appIds = [];
-      for (var i = 0; i < this.tileElements_.length; i++) {
-        var tileContents = this.tileElements_[i].firstChild;
-        if (tileContents instanceof App)
-          appIds.push(tileContents.appId);
-      }
-
-      chrome.send('reorderApps', [draggedTile.firstChild.appId, appIds]);
-    },
-
-    /** @inheritDoc */
-    setDropEffect: function(dataTransfer) {
-      var tile = ntp.getCurrentlyDraggingTile();
-      if (tile && tile.querySelector('.app'))
-        ntp.setCurrentDropEffect(dataTransfer, 'move');
-      else
-        ntp.setCurrentDropEffect(dataTransfer, 'copy');
+      chrome.send('generateAppForLink', [data.url, data.title, 0]);
     },
   };
 
@@ -866,8 +745,18 @@ cr.define('ntp', function() {
   function appNotificationChanged(id, notification) {
     var app = $(id);
     // The app might have been uninstalled, or notifications might be disabled.
-    if (app && !app.appData.notifications_disabled)
+    if (app && !app.data.notifications_disabled)
       app.setupNotification_(notification);
+  }
+
+  /**
+   * Formats titles by removing the leading 'http://www.' part of the URL,
+   * and the last slash, so 'http://www.test.com/' becomes 'test.com'.
+   * @param {string} title Page's title.
+   * @return {string} The formatted title.
+   */
+  function formatTitle(title) {
+    return title.replace(/^(https?\:\/\/)?(www\.)?|\/$/gi, '');
   }
 
   return {

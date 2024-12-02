@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <CoreAudio/AudioHardware.h>
+#include "media/audio/mac/audio_manager_mac.h"
 
+#include <CoreAudio/AudioHardware.h>
 #include <string>
 
 #include "base/bind.h"
@@ -11,10 +12,10 @@
 #include "base/mac/mac_logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
+#include "media/audio/audio_util.h"
 #include "media/audio/mac/audio_input_mac.h"
 #include "media/audio/mac/audio_low_latency_input_mac.h"
 #include "media/audio/mac/audio_low_latency_output_mac.h"
-#include "media/audio/mac/audio_manager_mac.h"
 #include "media/audio/mac/audio_output_mac.h"
 #include "media/audio/mac/audio_synchronized_mac.h"
 #include "media/audio/mac/audio_unified_mac.h"
@@ -239,45 +240,64 @@ static const AudioObjectPropertyAddress kDeviceChangePropertyAddress = {
   kAudioObjectPropertyElementMaster
 };
 
-// Callback from the system when the default device changes.  This can be called
-// either on the main thread or on an audio thread managed by the system
-// depending on what kAudioHardwarePropertyRunLoop is set to.
+// Callback from the system when the default device changes; this must be called
+// on the MessageLoop that created the AudioManager.
 static OSStatus OnDefaultDeviceChangedCallback(
     AudioObjectID object,
-    UInt32 size,
+    UInt32 num_addresses,
     const AudioObjectPropertyAddress addresses[],
     void* context) {
-  static_cast<base::Closure*>(context)->Run();
+  if (object != kAudioObjectSystemObject)
+    return noErr;
+
+  for (UInt32 i = 0; i < num_addresses; ++i) {
+    if (addresses[i].mSelector == kDeviceChangePropertyAddress.mSelector &&
+        addresses[i].mScope == kDeviceChangePropertyAddress.mScope &&
+        addresses[i].mElement == kDeviceChangePropertyAddress.mElement &&
+        context) {
+      static_cast<AudioManagerMac*>(context)->OnDeviceChange();
+      break;
+    }
+  }
+
   return noErr;
 }
 
-AudioManagerMac::AudioManagerMac() {
+AudioManagerMac::AudioManagerMac()
+    : listener_registered_(false),
+      creating_message_loop_(base::MessageLoopProxy::current()) {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 
-  // Register a callback for device changes.
-  listener_cb_ = BindToLoop(GetMessageLoop(), base::Bind(
-      &AudioManagerMac::NotifyAllOutputDeviceChangeListeners,
-      base::Unretained(this)));
+  // AudioManagerMac is expected to be created by the root platform thread, this
+  // is generally BrowserMainLoop, it's MessageLoop will drive the NSApplication
+  // pump which in turn fires the property listener callbacks.
+  if (!creating_message_loop_)
+    return;
 
   OSStatus result = AudioObjectAddPropertyListener(
       kAudioObjectSystemObject,
       &kDeviceChangePropertyAddress,
       &OnDefaultDeviceChangedCallback,
-      &listener_cb_);
+      this);
 
   if (result != noErr) {
     OSSTATUS_DLOG(ERROR, result) << "AudioObjectAddPropertyListener() failed!";
-    listener_cb_.Reset();
+    return;
   }
+
+  listener_registered_ = true;
 }
 
 AudioManagerMac::~AudioManagerMac() {
-  if (!listener_cb_.is_null()) {
+  if (listener_registered_) {
+    // TODO(dalecurtis): CHECK destruction happens on |creating_message_loop_|,
+    // should be true, but currently several unit tests perform destruction in
+    // odd places so we can't CHECK here currently.
     OSStatus result = AudioObjectRemovePropertyListener(
         kAudioObjectSystemObject,
         &kDeviceChangePropertyAddress,
         &OnDefaultDeviceChangedCallback,
-        &listener_cb_);
+        this);
     OSSTATUS_DLOG_IF(ERROR, result != noErr, result)
         << "AudioObjectRemovePropertyListener() failed!";
   }
@@ -350,6 +370,33 @@ AudioInputStream* AudioManagerMac::MakeLowLatencyInputStream(
     stream = new AUAudioInputStream(this, params, audio_device_id);
 
   return stream;
+}
+
+AudioParameters AudioManagerMac::GetPreferredLowLatencyOutputStreamParameters(
+    const AudioParameters& input_params) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableWebAudioInput)) {
+    // TODO(crogers): given the limitations of the AudioOutputStream
+    // back-ends used with kEnableWebAudioInput, we hard-code to stereo.
+    // Specifically, this is a limitation of AudioSynchronizedStream which
+    // can be removed as part of the work to consolidate these back-ends.
+    return AudioParameters(
+        AudioParameters::AUDIO_PCM_LOW_LATENCY, CHANNEL_LAYOUT_STEREO,
+        GetAudioHardwareSampleRate(), 16, GetAudioHardwareBufferSize());
+  }
+
+  return AudioManagerBase::GetPreferredLowLatencyOutputStreamParameters(
+      input_params);
+}
+
+void AudioManagerMac::OnDeviceChange() {
+  // Post the task to the |creating_message_loop_| to execute our listener
+  // callback.  The callback is created using BindToLoop() so will hop over
+  // to the audio thread upon execution.
+  creating_message_loop_->PostTask(FROM_HERE, BindToLoop(
+      GetMessageLoop(), base::Bind(
+          &AudioManagerMac::NotifyAllOutputDeviceChangeListeners,
+          base::Unretained(this))));
 }
 
 AudioManager* CreateAudioManager() {

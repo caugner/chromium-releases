@@ -33,9 +33,11 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
+#include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -58,16 +60,12 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 
-#if defined(TOOLKIT_GTK)
-#include <gtk/gtk.h>
-#include "chrome/browser/ui/gtk/gtk_util.h"
-#endif
-
 #if defined(OS_WIN)
 #include "base/win/metro.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/enumerate_modules_model_win.h"
 #include "chrome/browser/ui/metro_pin_tab_helper_win.h"
+#include "win8/util/win8_util.h"
 #endif
 
 #if defined(USE_ASH)
@@ -213,12 +211,14 @@ void ToolsMenuModel::Build(Browser* browser) {
 // WrenchMenuModel
 
 WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
-                                 Browser* browser)
+                                 Browser* browser,
+                                 bool is_new_menu,
+                                 bool supports_new_separators)
     : ALLOW_THIS_IN_INITIALIZER_LIST(ui::SimpleMenuModel(this)),
       provider_(provider),
       browser_(browser),
       tab_strip_model_(browser_->tab_strip_model()) {
-  Build();
+  Build(is_new_menu, supports_new_separators);
   UpdateZoomControls();
 
   tab_strip_model_->AddObserver(this);
@@ -271,7 +271,7 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
       MetroPinTabHelper* tab_helper =
           web_contents ? MetroPinTabHelper::FromWebContents(web_contents)
                        : NULL;
-      if (tab_helper && tab_helper->is_pinned())
+      if (tab_helper && tab_helper->IsPinned())
         string_id = IDS_UNPIN_FROM_START_SCREEN;
       return l10n_util::GetStringUTF16(string_id);
     }
@@ -417,8 +417,8 @@ bool WrenchMenuModel::GetAcceleratorForCommandId(
   return provider_->GetAcceleratorForCommandId(command_id, accelerator);
 }
 
-void WrenchMenuModel::ActiveTabChanged(TabContents* old_contents,
-                                       TabContents* new_contents,
+void WrenchMenuModel::ActiveTabChanged(WebContents* old_contents,
+                                       WebContents* new_contents,
                                        int index,
                                        bool user_gesture) {
   // The user has switched between tabs and the new tab may have a different
@@ -427,8 +427,8 @@ void WrenchMenuModel::ActiveTabChanged(TabContents* old_contents,
 }
 
 void WrenchMenuModel::TabReplacedAt(TabStripModel* tab_strip_model,
-                                    TabContents* old_contents,
-                                    TabContents* new_contents,
+                                    WebContents* old_contents,
+                                    WebContents* new_contents,
                                     int index) {
   UpdateZoomControls();
 }
@@ -461,14 +461,7 @@ WrenchMenuModel::WrenchMenuModel()
       tab_strip_model_(NULL) {
 }
 
-void WrenchMenuModel::Build() {
-  // TODO(skuhne): Remove special casing when only the new menu style is left.
-#if defined(USE_AURA)
-  bool is_new_menu = true;
-#else
-  bool is_new_menu = ui::GetDisplayLayout() == ui::LAYOUT_TOUCH;
-#endif
-
+void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
 #if defined(USE_AURA)
   if (is_new_menu)
     AddSeparator(ui::SPACING_SEPARATOR);
@@ -476,11 +469,12 @@ void WrenchMenuModel::Build() {
 
   AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
 #if defined(OS_WIN)
-  if (base::win::IsMetroProcess()) {
-    // In Metro, we only show the New Window options if there isn't already
-    // a window of the requested type (incognito or not) that is available.
+  if (win8::IsSingleWindowMetroMode()) {
+    // In Win8's single window Metro mode, we only show the New Window options
+    // if there isn't already a window of the requested type (incognito or not)
+    // that is available.
     if (browser_->profile()->IsOffTheRecord()) {
-      if (browser::FindBrowserWithProfile(
+      if (chrome::FindBrowserWithProfile(
               browser_->profile()->GetOriginalProfile(),
               browser_->host_desktop_type()) == NULL) {
         AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
@@ -514,6 +508,14 @@ void WrenchMenuModel::Build() {
   bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
+
+  if (chrome::search::IsInstantExtendedAPIEnabled(browser_->profile())) {
+    recent_tabs_sub_menu_model_.reset(new RecentTabsSubMenuModel(provider_,
+                                                                 browser_,
+                                                                 NULL));
+    AddSubMenuWithStringId(IDC_RECENT_TABS_MENU, IDS_RECENT_TABS_MENU,
+                           recent_tabs_sub_menu_model_.get());
+  }
 
 #if defined(OS_WIN)
   if (base::win::IsMetroProcess()) {
@@ -623,10 +625,8 @@ void WrenchMenuModel::Build() {
     AddItemWithStringId(IDC_EXIT, IDS_EXIT);
   }
 
-#if defined(USE_AURA)
-  if (is_new_menu)
+  if (is_new_menu && supports_new_separators)
     AddSeparator(ui::SPACING_SEPARATOR);
-#endif
 }
 
 void WrenchMenuModel::AddGlobalErrorMenuItems() {

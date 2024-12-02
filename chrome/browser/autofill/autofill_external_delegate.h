@@ -9,13 +9,18 @@
 
 #include "base/compiler_specific.h"
 #include "base/string16.h"
+#include "chrome/browser/autofill/autofill_popup_delegate.h"
 #include "chrome/browser/autofill/password_autofill_manager.h"
 #include "chrome/common/form_data.h"
 #include "chrome/common/form_field_data.h"
 #include "chrome/common/password_form_fill_data.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "ui/gfx/rect.h"
 
 class AutofillManager;
+class AutofillPopupControllerImpl;
 
 namespace gfx {
 class Rect;
@@ -29,24 +34,27 @@ class WebContents;
 // Once Autofill is moved out of WebKit this class should be the only home for
 // this logic. See http://crbug.com/51644
 
-// Delegate for external processing of Autocomplete and Autofill
-// display and selection.
+// Delegate for in-browser Autocomplete and Autofill display and selection.
 class AutofillExternalDelegate
-    : public content::WebContentsUserData<AutofillExternalDelegate> {
+    : public content::WebContentsUserData<AutofillExternalDelegate>,
+      public content::NotificationObserver,
+      public AutofillPopupDelegate {
  public:
   // Creates an AutofillExternalDelegate and attaches it to the specified
   // contents; the second argument is an AutofillManager managing Autofill for
   // that WebContents.
-  //
-  // This call is implemented per-platform.
   static void CreateForWebContentsAndManager(content::WebContents* web_contents,
                                              AutofillManager* autofill_manager);
 
-  virtual ~AutofillExternalDelegate();
-
-  // When using an external Autofill delegate.  Allows Chrome to tell
-  // WebKit which Autofill selection has been chosen.
-  virtual void SelectAutofillSuggestionAtIndex(int unique_id);
+  // AutofillPopupDelegate implementation.
+  virtual void SelectAutofillSuggestionAtIndex(int unique_id) OVERRIDE;
+  virtual bool DidAcceptAutofillSuggestion(const string16& value,
+                                           int unique_id,
+                                           unsigned index) OVERRIDE;
+  virtual void ClearPreviewedForm() OVERRIDE;
+  virtual void RemoveAutocompleteEntry(const string16& value) OVERRIDE;
+  virtual void RemoveAutofillProfileOrCreditCard(int unique_id) OVERRIDE;
+  virtual void ControllerDestroyed() OVERRIDE;
 
   // Records and associates a query_id with web form data.  Called
   // when the renderer posts an Autofill query to the browser. |bounds|
@@ -58,7 +66,7 @@ class AutofillExternalDelegate
   virtual void OnQuery(int query_id,
                        const FormData& form,
                        const FormFieldData& field,
-                       const gfx::Rect& bounds,
+                       const gfx::Rect& element_bounds,
                        bool display_warning_if_disabled);
 
   // Records query results and correctly formats them before sending them off
@@ -81,27 +89,9 @@ class AutofillExternalDelegate
                                 const std::vector<string16>& autofill_icons,
                                 const std::vector<int>& autofill_unique_ids);
 
-  // Remove the given Autocomplete entry from the DB.
-  virtual void RemoveAutocompleteEntry(const string16& value);
-
-  // Remove the given Autofill profile or credit credit.
-  virtual void RemoveAutofillProfileOrCreditCard(int unique_id);
-
   // Inform the delegate that the text field editing has ended. This is
   // used to help record the metrics of when a new popup is shown.
   void DidEndTextFieldEditing();
-
-  // Inform the delegate that an Autofill suggestion has been chosen. Returns
-  // true if the suggestion was selected.
-  bool DidAcceptAutofillSuggestions(const string16& value,
-                                    int unique_id,
-                                    unsigned index);
-
-  // Informs the delegate that the Autofill previewed form should be cleared.
-  virtual void ClearPreviewedForm();
-
-  // Hide the Autofill poup.
-  virtual void HideAutofillPopup();
 
   // Returns the delegate to its starting state by removing any page specific
   // values or settings.
@@ -112,10 +102,13 @@ class AutofillExternalDelegate
       const FormFieldData& form,
       const PasswordFormFillData& fill_data);
 
+  virtual void HideAutofillPopup();
+
  protected:
   friend class content::WebContentsUserData<AutofillExternalDelegate>;
   AutofillExternalDelegate(content::WebContents* web_contents,
                            AutofillManager* autofill_manager);
+  virtual ~AutofillExternalDelegate();
 
   // Displays the Autofill results to the user with an external Autofill popup
   // that lives completely in the browser.  The suggestions have been correctly
@@ -124,17 +117,15 @@ class AutofillExternalDelegate
       const std::vector<string16>& autofill_values,
       const std::vector<string16>& autofill_labels,
       const std::vector<string16>& autofill_icons,
-      const std::vector<int>& autofill_unique_ids) = 0;
+      const std::vector<int>& autofill_unique_ids);
 
-  // Handle platform-dependent hiding.
-  virtual void HideAutofillPopupInternal() = 0;
+  // Create the popup if it doesn't already exist. |element_bounds| is the
+  // bounding rect for the element it is popping up for.
+  virtual void EnsurePopupForElement(const gfx::Rect& element_bounds);
 
-  // Set the bounds of the Autofill element being worked with.
-  virtual void SetBounds(const gfx::Rect& bounds) = 0;
-
-
-  // Return the web_contents associated with this delegate.
   content::WebContents* web_contents() { return web_contents_; }
+
+  AutofillPopupControllerImpl* controller() { return controller_; }
 
  private:
   // Fills the form with the Autofill data corresponding to |unique_id|.
@@ -164,8 +155,15 @@ class AutofillExternalDelegate
                             std::vector<string16>* autofill_icons,
                             std::vector<int>* autofill_unique_ids);
 
+  // content::NotificationObserver method override.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  // The web_contents associated with this delegate.
   content::WebContents* web_contents_;  // weak; owns me.
   AutofillManager* autofill_manager_;  // weak.
+  AutofillPopupControllerImpl* controller_;  // weak.
 
   // Password Autofill manager, handles all password-related Autofilling.
   PasswordAutofillManager password_autofill_manager_;
@@ -173,6 +171,9 @@ class AutofillExternalDelegate
   // The ID of the last request sent for form field Autofill.  Used to ignore
   // out of date responses.
   int autofill_query_id_;
+
+  // A scoped container for notification registries.
+  content::NotificationRegistrar registrar_;
 
   // The current form and field selected by Autofill.
   FormData autofill_query_form_;
@@ -184,9 +185,6 @@ class AutofillExternalDelegate
   // Have we already shown Autofill suggestions for the field the user is
   // currently editing?  Used to keep track of state for metrics logging.
   bool has_shown_autofill_popup_for_current_edit_;
-
-  // Used to indicate if a popup is currently being shown or not.
-  bool popup_visible_;
 
   // The current data list values.
   std::vector<string16> data_list_values_;

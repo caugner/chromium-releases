@@ -86,7 +86,7 @@ PasswordManager::PasswordManager(WebContents* web_contents,
       observer_(NULL) {
   DCHECK(delegate_);
   password_manager_enabled_.Init(prefs::kPasswordManagerEnabled,
-                                 delegate_->GetProfile()->GetPrefs(), NULL);
+                                 delegate_->GetProfile()->GetPrefs());
 
   ReportMetrics(*password_manager_enabled_);
 }
@@ -121,7 +121,8 @@ void PasswordManager::SetFormHasGeneratedPassword(const PasswordForm& form) {
 }
 
 bool PasswordManager::IsSavingEnabled() const {
-  return IsFillingEnabled() && !delegate_->GetProfile()->IsOffTheRecord();
+  return *password_manager_enabled_ &&
+         !delegate_->GetProfile()->IsOffTheRecord();
 }
 
 void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
@@ -180,6 +181,12 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
   if (!manager->HasValidPasswordForm())
     return;
 
+  // Always save generated passwords, as the user expresses explicit intent for
+  // Chrome to manage such passwords. For other passwords, respect the
+  // autocomplete attribute.
+  if (!manager->HasGeneratedPassword() && !form.password_autocomplete_set)
+    return;
+
   PasswordForm provisionally_saved_form(form);
   provisionally_saved_form.ssl_valid = form.origin.SchemeIsSecure() &&
       !delegate_->DidLastPageLoadEncounterSSLErrors();
@@ -222,9 +229,6 @@ bool PasswordManager::OnMessageReceived(const IPC::Message& message) {
 
 void PasswordManager::OnPasswordFormsParsed(
     const std::vector<PasswordForm>& forms) {
-  if (!IsFillingEnabled())
-    return;
-
   // Ask the SSLManager for current security.
   bool had_ssl_error = delegate_->DidLastPageLoadEncounterSSLErrors();
 
@@ -315,8 +319,4 @@ void PasswordManager::Autofill(
                                            preferred_match.password_value);
       }
   }
-}
-
-bool PasswordManager::IsFillingEnabled() const {
-  return delegate_->GetProfile() && *password_manager_enabled_;
 }

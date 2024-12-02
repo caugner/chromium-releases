@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
@@ -28,15 +29,15 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/screenshot_source.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
+#include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -169,7 +170,7 @@ std::string GetUserEmail() {
 int GetIndexOfFeedbackTab(Browser* browser) {
   GURL feedback_url(chrome::kChromeUIFeedbackURL);
   for (int i = 0; i < browser->tab_count(); ++i) {
-    WebContents* tab = chrome::GetWebContentsAt(browser, i);
+    WebContents* tab = browser->tab_strip_model()->GetWebContentsAt(i);
     if (tab && tab->GetURL().GetWithEmptyPath() == feedback_url)
       return i;
   }
@@ -194,11 +195,11 @@ void ShowFeedbackPage(Browser* browser,
   // First check if we're already open (we cannot depend on ShowSingletonTab
   // for this functionality since we need to make *sure* we never get
   // instantiated again while we are open - with singleton tabs, that can
-  // happen)
+  // happen).
   int feedback_tab_index = GetIndexOfFeedbackTab(browser);
   if (feedback_tab_index >= 0) {
-    // Do not refresh screenshot, do not create a new tab
-    chrome::ActivateTabAt(browser, feedback_tab_index, true);
+    // Do not refresh screenshot, do not create a new tab.
+    browser->tab_strip_model()->ActivateTabAt(feedback_tab_index, true);
     return;
   }
 
@@ -242,7 +243,7 @@ void ShowFeedbackPage(Browser* browser,
 
 // The handler for Javascript messages related to the "bug report" dialog
 class FeedbackHandler : public WebUIMessageHandler,
-                         public base::SupportsWeakPtr<FeedbackHandler> {
+                        public base::SupportsWeakPtr<FeedbackHandler> {
  public:
   explicit FeedbackHandler(content::WebContents* tab);
   virtual ~FeedbackHandler();
@@ -280,9 +281,9 @@ class FeedbackHandler : public WebUIMessageHandler,
   FeedbackData* feedback_data_;
   std::string target_tab_url_;
 #if defined(OS_CHROMEOS)
-  // Variables to track SyslogsProvider::RequestSyslogs callback.
-  chromeos::system::SyslogsProvider::Handle syslogs_handle_;
-  CancelableRequestConsumer syslogs_consumer_;
+  // Variables to track SyslogsProvider::RequestSyslogs.
+  CancelableTaskTracker::TaskId syslogs_task_id_;
+  CancelableTaskTracker syslogs_tracker_;
 
   // Timestamp of when the feedback request was initiated.
   std::string timestamp_;
@@ -317,6 +318,11 @@ ChromeWebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
                              IDS_FEEDBACK_CHOOSE_DIFFERENT_SCREENSHOT);
   source->AddLocalizedString("choose-original-screenshot",
                              IDS_FEEDBACK_CHOOSE_ORIGINAL_SCREENSHOT);
+  source->AddLocalizedString("attach-file-note",
+                             IDS_FEEDBACK_ATTACH_FILE_NOTE);
+  source->AddLocalizedString("attach-file-to-big",
+                             IDS_FEEDBACK_ATTACH_FILE_TO_BIG);
+  source->AddLocalizedString("reading-file", IDS_FEEDBACK_READING_FILE);
 #else
   source->AddLocalizedString("currentscreenshots",
                              IDS_FEEDBACK_INCLUDE_NEW_SCREEN_IMAGE);
@@ -350,10 +356,9 @@ FeedbackHandler::FeedbackHandler(WebContents* tab)
       screenshot_source_(NULL),
       feedback_data_(NULL)
 #if defined(OS_CHROMEOS)
-    , syslogs_handle_(0)
+      , syslogs_task_id_(CancelableTaskTracker::kBadTaskId)
 #endif
-{
-}
+{}
 
 FeedbackHandler::~FeedbackHandler() {
   // Just in case we didn't send off feedback_data_ to SendReport
@@ -445,13 +450,14 @@ bool FeedbackHandler::Init() {
     if (session_id == -1)
       return false;
 
-    Browser* browser = browser::FindBrowserWithID(session_id);
+    Browser* browser = chrome::FindBrowserWithID(session_id);
     // Sanity checks.
     if (!browser || index >= browser->tab_count())
       return false;
 
     if (index >= 0) {
-      WebContents* target_tab = chrome::GetWebContentsAt(browser, index);
+      WebContents* target_tab =
+          browser->tab_strip_model()->GetWebContentsAt(index);
       if (target_tab)
         target_tab_url_ = target_tab->GetURL().spec();
     }
@@ -526,12 +532,12 @@ void FeedbackHandler::HandleGetDialogDefaults(const ListValue*) {
   chromeos::system::SyslogsProvider* provider =
       chromeos::system::SyslogsProvider::GetInstance();
   if (provider) {
-    syslogs_handle_ = provider->RequestSyslogs(
+    syslogs_task_id_ = provider->RequestSyslogs(
         true,  // don't compress.
         chromeos::system::SyslogsProvider::SYSLOGS_FEEDBACK,
-        &syslogs_consumer_,
         base::Bind(&FeedbackData::SyslogsComplete,
-                   base::Unretained(feedback_data_)));
+                   base::Unretained(feedback_data_)),
+        &syslogs_tracker_);
   }
 
   // On ChromeOS if the user's email is blank, it means we don't
@@ -597,15 +603,6 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
     LOG(ERROR) << "Bug report hasn't been intialized yet.";
     return;
   }
-  // TODO(rkc): Find a better way to do this check.
-#if defined(OS_CHROMEOS)
-  if (list_value->GetSize() != 6) {
-#else
-  if (list_value->GetSize() != 5) {
-#endif
-    LOG(ERROR) << "Feedback data corrupt! Feedback not sent.";
-    return;
-  }
 
   ListValue::const_iterator i = list_value->begin();
   std::string page_url;
@@ -633,29 +630,46 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
   // If we aren't sending the sys_info, cancel the gathering of the syslogs.
   if (!send_sys_info)
     CancelFeedbackCollection();
+
+  std::string attached_filename;
+  std::string attached_filedata;
+  // If we have an attached file, we'll still have more data in the list.
+  if (i != list_value->end()) {
+    (*i++)->GetAsString(&attached_filename);
+    std::string encoded_filedata;
+    (*i++)->GetAsString(&encoded_filedata);
+    if (!base::Base64Decode(
+        base::StringPiece(encoded_filedata), &attached_filedata)) {
+      LOG(ERROR) << "Unable to attach file: " << attached_filename;
+      // Clear the filename so feedback_util doesn't try to attach the file.
+      attached_filename = "";
+    }
+  }
 #endif
 
   // Update the data in feedback_data_ so it can be sent
   feedback_data_->UpdateData(Profile::FromWebUI(web_ui())
-                               , target_tab_url_
-                               , std::string()
-                               , page_url
-                               , description
-                               , user_email
-                               , image_ptr
+                             , target_tab_url_
+                             , std::string()
+                             , page_url
+                             , description
+                             , user_email
+                             , image_ptr
 #if defined(OS_CHROMEOS)
-                               , send_sys_info
-                               , false  // sent_report
-                               , timestamp_
+                             , send_sys_info
+                             , false  // sent_report
+                             , timestamp_
+                             , attached_filename
+                             , attached_filedata
 #endif
-                               );
+                             );
 
 #if defined(OS_CHROMEOS)
   // If we don't require sys_info, or we have it, or we never requested it
   // (because libcros failed to load), then send the report now.
   // Otherwise, the report will get sent when we receive sys_info.
   if (!send_sys_info || feedback_data_->sys_info() != NULL ||
-      syslogs_handle_ == 0) {
+      syslogs_task_id_ == CancelableTaskTracker::kBadTaskId) {
     feedback_data_->SendReport();
   }
 #else
@@ -689,12 +703,8 @@ void FeedbackHandler::HandleOpenSystemTab(const ListValue* args) {
 
 void FeedbackHandler::CancelFeedbackCollection() {
 #if defined(OS_CHROMEOS)
-  if (syslogs_handle_ != 0) {
-    chromeos::system::SyslogsProvider* provider =
-        chromeos::system::SyslogsProvider::GetInstance();
-    if (provider && syslogs_consumer_.HasPendingRequests())
-      provider->CancelRequest(syslogs_handle_);
-  }
+  // Canceling a finished task ID or kBadTaskId is a noop.
+  syslogs_tracker_.TryCancel(syslogs_task_id_);
 #endif
 }
 
@@ -749,8 +759,8 @@ void FeedbackUI::GetMostRecentScreenshots(
                     ScreenshotTimestampComp);
   for (size_t i = 0; i < sort_size; ++i)
     saved_screenshots->push_back(
-                    std::string(ScreenshotSource::kScreenshotUrlRoot) +
-                    std::string(ScreenshotSource::kScreenshotSaved) +
-                    screenshot_filepaths[i]);
+        std::string(ScreenshotSource::kScreenshotUrlRoot) +
+        std::string(ScreenshotSource::kScreenshotSaved) +
+        screenshot_filepaths[i]);
 }
 #endif

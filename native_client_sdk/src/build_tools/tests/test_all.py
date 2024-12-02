@@ -5,10 +5,20 @@
 
 import sys
 import unittest
+import os
+
+# add tools folder to sys.path
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SDK_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+sys.path.append(os.path.join(SDK_DIR, 'tools', 'tests'))
 
 TEST_MODULES = [
-    'test_sdktools',
-    'test_update_nacl_manifest'
+    'oshelpers_test',
+    'httpd_test',
+    'sdktools_test',
+    'sdktools_commands_test',
+    'update_nacl_manifest_test',
+    'generate_make_test'
 ]
 
 def main():

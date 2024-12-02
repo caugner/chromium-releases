@@ -40,6 +40,36 @@
 
 using base::Time;
 
+namespace {
+
+// Creates an image with a 1x1 SkBitmap of the specified |color|.
+gfx::Image CreateImage(SkColor color) {
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
+  bitmap.allocPixels();
+  bitmap.eraseColor(color);
+  return gfx::Image(bitmap);
+}
+
+// Returns true if images |a| and |b| have the same pixel data.
+bool DoImagesMatch(const gfx::Image& a, const gfx::Image& b) {
+  // Assume that if the 1x bitmaps match, the images match.
+  SkBitmap a_bitmap = a.AsBitmap();
+  SkBitmap b_bitmap = b.AsBitmap();
+
+  if (a_bitmap.width() != b_bitmap.width() ||
+      a_bitmap.height() != b_bitmap.height()) {
+    return false;
+  }
+  SkAutoLockPixels a_bitmap_lock(a_bitmap);
+  SkAutoLockPixels b_bitmap_lock(b_bitmap);
+  return memcmp(a_bitmap.getPixels(),
+                b_bitmap.getPixels(),
+                a_bitmap.getSize()) == 0;
+}
+
+}  // namespace
+
 namespace content {
 
 // TimeSmoother tests ----------------------------------------------------------
@@ -107,25 +137,6 @@ class NavigationControllerTest : public RenderViewHostImplTestHarness {
 
   NavigationControllerImpl& controller_impl() {
     return static_cast<NavigationControllerImpl&>(controller());
-  }
-
-  bool DoImagesMatch(const gfx::Image& a, const gfx::Image& b) {
-    // Assume that if the 1x bitmaps match, the images match.
-    SkBitmap a_bitmap = a.AsBitmap();
-    SkBitmap b_bitmap = b.AsBitmap();
-
-    if (a_bitmap.width() != b_bitmap.width() ||
-        a_bitmap.height() != b_bitmap.height()) {
-      return false;
-    }
-
-    SkAutoLockPixels a_bitmap_lock(a_bitmap);
-    SkAutoLockPixels b_bitmap_lock(b_bitmap);
-
-    return memcmp(a_bitmap.getPixels(),
-                  b_bitmap.getPixels(),
-                  b_bitmap.getSize()) == 0;
-
   }
 };
 
@@ -819,7 +830,6 @@ TEST_F(NavigationControllerTest, LoadURL_RedirectAbortDoesntShowPendingURL) {
   test_rvh()->OnMessageReceived(
       ViewHostMsg_DidRedirectProvisionalLoad(0,  // routing_id
                                              -1,  // pending page_id
-                                             GURL(),  // opener
                                              kNewURL,  // old url
                                              kRedirectURL));  // new url
 
@@ -1916,9 +1926,8 @@ TEST_F(NavigationControllerTest, RestoreNavigate) {
   const base::Time timestamp = base::Time::Now();
   entry->SetTimestamp(timestamp);
   entries.push_back(entry);
-  scoped_ptr<WebContentsImpl> our_contents(
-      WebContentsImpl::Create(browser_context(), NULL, MSG_ROUTING_NONE,
-                              NULL));
+  scoped_ptr<WebContentsImpl> our_contents(static_cast<WebContentsImpl*>(
+      WebContents::Create(WebContents::CreateParams(browser_context()))));
   NavigationControllerImpl& our_controller = our_contents->GetController();
   our_controller.Restore(
       0,
@@ -1994,9 +2003,8 @@ TEST_F(NavigationControllerTest, RestoreNavigateAfterFailure) {
   entry->SetTitle(ASCIIToUTF16("Title"));
   entry->SetContentState("state");
   entries.push_back(entry);
-  scoped_ptr<WebContentsImpl> our_contents(
-      WebContentsImpl::Create(browser_context(), NULL, MSG_ROUTING_NONE,
-                              NULL));
+  scoped_ptr<WebContentsImpl> our_contents(static_cast<WebContentsImpl*>(
+      WebContents::Create(WebContents::CreateParams(browser_context()))));
   NavigationControllerImpl& our_controller = our_contents->GetController();
   our_controller.Restore(
       0, NavigationController::RESTORE_LAST_SESSION_EXITED_CLEANLY, &entries);
@@ -2153,6 +2161,7 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   const GURL url1("http://foo/1");
   const GURL url2("http://foo/2");
   const GURL url3("http://foo/3");
+  const GURL url3_ref("http://foo/3#bar");
   const GURL url4("http://foo/4");
   const GURL transient_url("http://foo/transient");
 
@@ -2267,12 +2276,21 @@ TEST_F(NavigationControllerTest, TransientEntry) {
   test_rvh()->SendNavigate(3, url3);
   EXPECT_EQ(url3, controller.GetVisibleEntry()->GetURL());
 
+  // Add a transient and do an in-page navigation, replacing the current entry.
+  transient_entry = new NavigationEntryImpl;
+  transient_entry->SetURL(transient_url);
+  controller.AddTransientEntry(transient_entry);
+  EXPECT_EQ(transient_url, controller.GetActiveEntry()->GetURL());
+  test_rvh()->SendNavigate(3, url3_ref);
+  // Transient entry should be gone.
+  EXPECT_EQ(url3_ref, controller.GetActiveEntry()->GetURL());
+
   // Ensure the URLs are correct.
   EXPECT_EQ(controller.GetEntryCount(), 5);
   EXPECT_EQ(controller.GetEntryAtIndex(0)->GetURL(), url0);
   EXPECT_EQ(controller.GetEntryAtIndex(1)->GetURL(), url1);
   EXPECT_EQ(controller.GetEntryAtIndex(2)->GetURL(), url2);
-  EXPECT_EQ(controller.GetEntryAtIndex(3)->GetURL(), url3);
+  EXPECT_EQ(controller.GetEntryAtIndex(3)->GetURL(), url3_ref);
   EXPECT_EQ(controller.GetEntryAtIndex(4)->GetURL(), url4);
 }
 
@@ -2929,12 +2947,8 @@ TEST_F(NavigationControllerTest, ClearFaviconOnRedirect) {
   EXPECT_EQ(kPageWithFavicon, entry->GetURL());
 
   // Simulate Chromium having set the favicon for |kPageWithFavicon|.
-  SkBitmap bitmap;
-  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
-  bitmap.allocPixels();
-
-  FaviconStatus& favicon_status = entry->GetFavicon();
-  favicon_status.image = gfx::Image(bitmap);
+  content::FaviconStatus& favicon_status = entry->GetFavicon();
+  favicon_status.image = CreateImage(SK_ColorWHITE);
   favicon_status.url = kIconURL;
   favicon_status.valid = true;
   EXPECT_FALSE(DoImagesMatch(kDefaultFavicon, entry->GetFavicon().image));
@@ -2968,14 +2982,11 @@ TEST_F(NavigationControllerTest, BackNavigationDoesNotClearFavicon) {
   EXPECT_TRUE(notifications.Check1AndReset(NOTIFICATION_NAV_ENTRY_COMMITTED));
 
   // Simulate Chromium having set the favicon for |kUrl1|.
-  SkBitmap favicon_bitmap;
-  favicon_bitmap.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
-  favicon_bitmap.allocPixels();
-
-  NavigationEntry* entry = controller.GetLastCommittedEntry();
+  gfx::Image favicon_image = CreateImage(SK_ColorWHITE);
+  content::NavigationEntry* entry = controller.GetLastCommittedEntry();
   EXPECT_TRUE(entry);
-  FaviconStatus& favicon_status = entry->GetFavicon();
-  favicon_status.image = gfx::Image(favicon_bitmap);
+  content::FaviconStatus& favicon_status = entry->GetFavicon();
+  favicon_status.image = favicon_image;
   favicon_status.url = kIconURL;
   favicon_status.valid = true;
 
@@ -2989,12 +3000,10 @@ TEST_F(NavigationControllerTest, BackNavigationDoesNotClearFavicon) {
   EXPECT_TRUE(notifications.Check1AndReset(NOTIFICATION_NAV_ENTRY_COMMITTED));
 
   // Verify that the favicon for the page at |kUrl1| was not cleared.
-  gfx::Image favicon_after_back;
   entry = controller.GetEntryAtIndex(0);
   EXPECT_TRUE(entry);
   EXPECT_EQ(kUrl1, entry->GetURL());
-  EXPECT_TRUE(DoImagesMatch(gfx::Image(favicon_bitmap),
-                            entry->GetFavicon().image));
+  EXPECT_TRUE(DoImagesMatch(favicon_image, entry->GetFavicon().image));
 }
 
 /* TODO(brettw) These test pass on my local machine but fail on the XP buildbot

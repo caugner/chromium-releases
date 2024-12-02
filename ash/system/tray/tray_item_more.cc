@@ -18,8 +18,12 @@
 namespace ash {
 namespace internal {
 
-TrayItemMore::TrayItemMore(SystemTrayItem* owner)
-    : owner_(owner) {
+TrayItemMore::TrayItemMore(SystemTrayItem* owner, bool show_more)
+    : owner_(owner),
+      show_more_(show_more),
+      icon_(NULL),
+      label_(NULL),
+      more_(NULL) {
   SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal,
       kTrayPopupPaddingHorizontal, 0, kTrayPopupPaddingBetweenItems));
 
@@ -27,13 +31,16 @@ TrayItemMore::TrayItemMore(SystemTrayItem* owner)
   AddChildView(icon_);
 
   label_ = new views::Label;
+  label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(label_);
 
-  more_ = new views::ImageView;
-  more_->EnableCanvasFlippingForRTLUI(true);
-  more_->SetImage(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-      IDR_AURA_UBER_TRAY_MORE).ToImageSkia());
-  AddChildView(more_);
+  if (show_more) {
+    more_ = new views::ImageView;
+    more_->EnableCanvasFlippingForRTLUI(true);
+    more_->SetImage(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+        IDR_AURA_UBER_TRAY_MORE).ToImageSkia());
+    AddChildView(more_);
+  }
 }
 
 TrayItemMore::~TrayItemMore() {
@@ -61,7 +68,10 @@ void TrayItemMore::ReplaceIcon(views::View* view) {
 }
 
 bool TrayItemMore::PerformAction(const ui::Event& event) {
-  owner_->TransitionDetailedView();
+  if (!show_more_)
+    return false;
+
+  owner()->TransitionDetailedView();
   return true;
 }
 
@@ -69,6 +79,9 @@ void TrayItemMore::Layout() {
   // Let the box-layout do the layout first. Then move the '>' arrow to right
   // align.
   views::View::Layout();
+
+  if (!show_more_)
+    return;
 
   // Make sure the chevron always has the full size.
   gfx::Size size = more_->GetPreferredSize();

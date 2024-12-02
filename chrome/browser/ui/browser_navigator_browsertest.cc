@@ -15,11 +15,6 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/omnibox/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
-#include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -82,7 +77,7 @@ chrome::NavigateParams BrowserNavigatorTest::MakeNavigateParams(
 Browser* BrowserNavigatorTest::CreateEmptyBrowserForType(Browser::Type type,
                                                          Profile* profile) {
   Browser* browser = new Browser(Browser::CreateParams(type, profile));
-  chrome::AddBlankTab(browser, true);
+  chrome::AddBlankTabAt(browser, -1, true);
   return browser;
 }
 
@@ -91,16 +86,14 @@ Browser* BrowserNavigatorTest::CreateEmptyBrowserForApp(Browser::Type type,
   Browser* browser = new Browser(
       Browser::CreateParams::CreateForApp(
           Browser::TYPE_POPUP, "Test", gfx::Rect(), profile));
-  chrome::AddBlankTab(browser, true);
+  chrome::AddBlankTabAt(browser, -1, true);
   return browser;
 }
 
-TabContents* BrowserNavigatorTest::CreateTabContents() {
-  return chrome::TabContentsFactory(
-      browser()->profile(),
-      NULL,
-      MSG_ROUTING_NONE,
-      chrome::GetActiveWebContents(browser()));
+WebContents* BrowserNavigatorTest::CreateWebContents() {
+  content::WebContents::CreateParams create_params(browser()->profile());
+  create_params.base_web_contents = chrome::GetActiveWebContents(browser());
+  return WebContents::Create(create_params);
 }
 
 void BrowserNavigatorTest::RunSuppressTest(WindowOpenDisposition disposition) {
@@ -194,9 +187,9 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_CurrentTab) {
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_SingletonTabExisting) {
   GURL singleton_url1("http://maps.google.com/");
 
-  // Register for a notification if an additional tab_contents was instantiated.
+  // Register for a notification if an additional WebContents was instantiated.
   // Opening a Singleton tab that is already opened should not be opening a new
-  // tab nor be creating a new TabContents object.
+  // tab nor be creating a new WebContents object.
   content::NotificationRegistrar registrar;
 
   // As the registrar object goes out of scope, this will get unregistered
@@ -310,7 +303,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_NewForegroundTab) {
   p.disposition = NEW_FOREGROUND_TAB;
   chrome::Navigate(&p);
   EXPECT_NE(old_contents, chrome::GetActiveWebContents(browser()));
-  EXPECT_EQ(chrome::GetActiveTabContents(browser()), p.target_contents);
+  EXPECT_EQ(browser()->tab_strip_model()->GetActiveWebContents(),
+            p.target_contents);
   EXPECT_EQ(2, browser()->tab_count());
 }
 
@@ -630,17 +624,18 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_IgnoreAction) {
   RunSuppressTest(IGNORE_ACTION);
 }
 
-// This tests adding a foreground tab with a predefined TabContents.
+// This tests adding a foreground tab with a predefined WebContents.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, TargetContents_ForegroundTab) {
   chrome::NavigateParams p(MakeNavigateParams());
   p.disposition = NEW_FOREGROUND_TAB;
-  p.target_contents = CreateTabContents();
+  p.target_contents = CreateWebContents();
   chrome::Navigate(&p);
 
   // Navigate() should have opened the contents in a new foreground in the
   // current Browser.
   EXPECT_EQ(browser(), p.browser);
-  EXPECT_EQ(chrome::GetActiveTabContents(browser()), p.target_contents);
+  EXPECT_EQ(browser()->tab_strip_model()->GetActiveWebContents(),
+            p.target_contents);
 
   // We should have one window, with two tabs.
   EXPECT_EQ(1u, BrowserList::size());
@@ -648,11 +643,11 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, TargetContents_ForegroundTab) {
 }
 
 #if defined(OS_WIN)
-// This tests adding a popup with a predefined TabContents.
+// This tests adding a popup with a predefined WebContents.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, DISABLED_TargetContents_Popup) {
   chrome::NavigateParams p(MakeNavigateParams());
   p.disposition = NEW_POPUP;
-  p.target_contents = CreateTabContents();
+  p.target_contents = CreateWebContents();
   p.window_bounds = gfx::Rect(10, 10, 500, 500);
   chrome::Navigate(&p);
 
@@ -664,7 +659,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, DISABLED_TargetContents_Popup) {
   // The web platform is weird. The window bounds specified in
   // |p.window_bounds| are used as follows:
   // - the origin is used to position the window
-  // - the size is used to size the TabContents of the window.
+  // - the size is used to size the WebContents of the window.
   // As such the position of the resulting window will always match
   // p.window_bounds.origin(), but its size will not. We need to match
   // the size against the selected tab's view's container size.
@@ -676,7 +671,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, DISABLED_TargetContents_Popup) {
   // All platforms should respect size however provided width > 400 (Mac has a
   // minimum window width of 400).
   EXPECT_EQ(p.window_bounds.size(),
-            p.target_contents->web_contents()->GetView()->GetContainerSize());
+            p.target_contents->GetView()->GetContainerSize());
 
   // We should have two windows, the new popup and the browser() provided by the
   // framework.
@@ -700,8 +695,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Tabstrip_InsertAtIndex) {
 
   // Navigate() should have inserted a new tab at slot 0 in the tabstrip.
   EXPECT_EQ(browser(), p.browser);
-  EXPECT_EQ(0, browser()->tab_strip_model()->GetIndexOfTabContents(
-      static_cast<const TabContents*>(p.target_contents)));
+  EXPECT_EQ(0, browser()->tab_strip_model()->GetIndexOfWebContents(
+      static_cast<const WebContents*>(p.target_contents)));
 
   // We should have one window - the browser() provided by the framework.
   EXPECT_EQ(1u, BrowserList::size());
@@ -972,9 +967,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateToCrashedSingletonTab) {
   GURL singleton_url(GetContentSettingsURL());
-  TabContents* tab_contents = chrome::AddSelectedTabWithURL(
+  WebContents* web_contents = chrome::AddSelectedTabWithURL(
       browser(), singleton_url, content::PAGE_TRANSITION_LINK);
-  WebContents* web_contents = tab_contents->web_contents();
 
   // We should have one browser with 2 tabs, the 2nd selected.
   EXPECT_EQ(1u, BrowserList::size());
@@ -1158,43 +1152,6 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   EXPECT_EQ(2, browser()->tab_count());
   EXPECT_EQ(GetSettingsURL(),
             ShortenUberURL(chrome::GetActiveWebContents(browser())->GetURL()));
-}
-
-// Tests that when a new tab is opened from the omnibox, the focus is moved from
-// the omnibox for the current tab.
-IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
-                       NavigateFromOmniboxIntoNewTab) {
-  GURL url("http://www.google.com/");
-  GURL url2("http://maps.google.com/");
-
-  // Navigate to url.
-  chrome::NavigateParams p(MakeNavigateParams());
-  p.disposition = CURRENT_TAB;
-  p.url = url;
-  chrome::Navigate(&p);
-
-  // Focus the omnibox.
-  chrome::FocusLocationBar(browser());
-
-  OmniboxEditController* controller =
-      browser()->window()->GetLocationBar()->GetLocationEntry()->model()->
-          controller();
-
-  // Simulate an alt-enter.
-  controller->OnAutocompleteAccept(url2, NEW_FOREGROUND_TAB,
-                                   content::PAGE_TRANSITION_TYPED, GURL());
-
-  // Make sure the second tab is selected.
-  EXPECT_EQ(1, browser()->active_index());
-
-  // The tab contents should have the focus in the second tab.
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
-
-  // Go back to the first tab. The focus should not be in the omnibox.
-  chrome::SelectPreviousTab(browser());
-  EXPECT_EQ(0, browser()->active_index());
-  EXPECT_FALSE(ui_test_utils::IsViewFocused(browser(),
-                                            VIEW_ID_LOCATION_BAR));
 }
 
 // TODO(csilv): Update this for uber page. http://crbug.com/111579.

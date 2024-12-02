@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <algorithm>
@@ -26,6 +27,16 @@
 #undef PostMessage
 #endif
 
+namespace {
+
+// This sample frequency is guaranteed to work.
+const PP_AudioSampleRate kSampleFrequency = PP_AUDIOSAMPLERATE_44100;
+const uint32_t kSampleCount = 1024;
+const uint32_t kChannelCount = 1;
+const char* const kDelimiter = "#__#";
+
+}  // namespace
+
 class MyInstance : public pp::Instance {
  public:
   explicit MyInstance(PP_Instance instance)
@@ -36,44 +47,25 @@ class MyInstance : public pp::Instance {
         samples_(NULL),
         timer_interval_(0),
         pending_paint_(false),
-        waiting_for_flush_completion_(false),
-        audio_input_0_1_(0),
-        audio_input_interface_0_1_(NULL) {
+        waiting_for_flush_completion_(false) {
   }
   virtual ~MyInstance() {
-    if (!audio_input_.is_null()) {
-      audio_input_.Close();
-    } else if (audio_input_0_1_ != 0) {
-      audio_input_interface_0_1_->StopCapture(audio_input_0_1_);
-      pp::Module::Get()->core()->ReleaseResource(audio_input_0_1_);
-    }
+    device_detector_.MonitorDeviceChange(NULL, NULL);
+    audio_input_.Close();
 
     delete[] samples_;
   }
 
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]) {
-    // This sample frequency is guaranteed to work.
-    const PP_AudioSampleRate kSampleFrequency = PP_AUDIOSAMPLERATE_44100;
-    const uint32_t kSampleCount = 1024;
-    const uint32_t kChannelCount = 1;
-
     sample_count_ = pp::AudioConfig::RecommendSampleFrameCount(this,
                                                                kSampleFrequency,
                                                                kSampleCount);
     PP_DCHECK(sample_count_ > 0);
     channel_count_ = kChannelCount;
-    pp::AudioConfig config = pp::AudioConfig(this,
-                                             kSampleFrequency,
-                                             sample_count_);
     samples_ = new int16_t[sample_count_ * channel_count_];
     memset(samples_, 0, sample_count_ * channel_count_ * sizeof(int16_t));
-    audio_input_ = pp::AudioInput_Dev(this, config, CaptureCallback, this);
 
-    audio_input_interface_0_1_ = static_cast<const PPB_AudioInput_Dev_0_1*>(
-        pp::Module::Get()->GetBrowserInterface(
-            PPB_AUDIO_INPUT_DEV_INTERFACE_0_1));
-    if (!audio_input_interface_0_1_)
-      return false;
+    device_detector_ = pp::AudioInput_Dev(this);
 
     // Try to ensure that we pick up a new set of samples between each
     // timer-generated repaint.
@@ -99,37 +91,37 @@ class MyInstance : public pp::Instance {
     if (message_data.is_string()) {
       std::string event = message_data.AsString();
       if (event == "PageInitialized") {
+        int32_t result = device_detector_.MonitorDeviceChange(
+            &MyInstance::MonitorDeviceChangeCallback, this);
+        if (result != PP_OK)
+          PostMessage(pp::Var("MonitorDeviceChangeFailed"));
+
         pp::CompletionCallbackWithOutput<std::vector<pp::DeviceRef_Dev> >
             callback = callback_factory_.NewCallbackWithOutput(
                 &MyInstance::EnumerateDevicesFinished);
-        int32_t result = audio_input_.EnumerateDevices(callback);
+        result = device_detector_.EnumerateDevices(callback);
         if (result != PP_OK_COMPLETIONPENDING)
           PostMessage(pp::Var("EnumerationFailed"));
       } else if (event == "UseDefault") {
         Open(pp::DeviceRef_Dev());
-      } else if (event == "UseDefault(v0.1)") {
-        audio_input_0_1_ = audio_input_interface_0_1_->Create(
-            pp_instance(), audio_input_.config().pp_resource(),
-            CaptureCallback, this);
-        if (audio_input_0_1_ != 0) {
-          if (!audio_input_interface_0_1_->StartCapture(audio_input_0_1_))
-            PostMessage(pp::Var("StartFailed"));
-        } else {
-          PostMessage(pp::Var("OpenFailed"));
-        }
-
-        audio_input_ = pp::AudioInput_Dev();
       } else if (event == "Stop") {
         Stop();
       } else if (event == "Start") {
         Start();
-      }
-    } else if (message_data.is_number()) {
-      int index = message_data.AsInt();
-      if (index >= 0 && index < static_cast<int>(devices_.size())) {
-        Open(devices_[index]);
-      } else {
-        PP_NOTREACHED();
+      } else if (event.find("Monitor:") == 0) {
+        std::string index_str = event.substr(strlen("Monitor:"));
+        int index = atoi(index_str.c_str());
+        if (index >= 0 && index < static_cast<int>(monitor_devices_.size()))
+          Open(monitor_devices_[index]);
+        else
+          PP_NOTREACHED();
+      } else if (event.find("Enumerate:") == 0) {
+        std::string index_str = event.substr(strlen("Enumerate:"));
+        int index = atoi(index_str.c_str());
+        if (index >= 0 && index < static_cast<int>(enumerate_devices_.size()))
+          Open(enumerate_devices_[index]);
+        else
+          PP_NOTREACHED();
       }
     }
   }
@@ -207,60 +199,38 @@ class MyInstance : public pp::Instance {
     return image;
   }
 
-  // TODO(viettrungluu): Danger! We really should lock, but which thread
-  // primitives to use? In any case, the |StopCapture()| in the destructor
-  // shouldn't return until this callback is done, so at least we should be
-  // writing to a valid region of memory.
-  static void CaptureCallback(const void* samples,
-                              uint32_t num_bytes,
-                              void* ctx) {
-    MyInstance* thiz = static_cast<MyInstance*>(ctx);
-    uint32_t buffer_size =
-        thiz->sample_count_ * thiz->channel_count_ * sizeof(int16_t);
-    PP_DCHECK(num_bytes <= buffer_size);
-    PP_DCHECK(num_bytes % (thiz->channel_count_ * sizeof(int16_t)) == 0);
-    memcpy(thiz->samples_, samples, num_bytes);
-    memset(reinterpret_cast<char*>(thiz->samples_) + num_bytes, 0,
-           buffer_size - num_bytes);
-  }
-
   void Open(const pp::DeviceRef_Dev& device) {
+    audio_input_.Close();
+    audio_input_ = pp::AudioInput_Dev(this);
+
+    pp::AudioConfig config = pp::AudioConfig(this,
+                                             kSampleFrequency,
+                                             sample_count_);
     pp::CompletionCallback callback = callback_factory_.NewCallback(
         &MyInstance::OpenFinished);
-    int32_t result = audio_input_.Open(device, callback);
+    int32_t result = audio_input_.Open(device, config, CaptureCallback, this,
+                                       callback);
     if (result != PP_OK_COMPLETIONPENDING)
       PostMessage(pp::Var("OpenFailed"));
   }
 
   void Stop() {
-    if (!audio_input_.is_null()) {
-      if (!audio_input_.StopCapture())
-        PostMessage(pp::Var("StopFailed"));
-    } else if (audio_input_0_1_ != 0) {
-      if (!audio_input_interface_0_1_->StopCapture(audio_input_0_1_))
-        PostMessage(pp::Var("StopFailed"));
-    }
+    if (!audio_input_.StopCapture())
+      PostMessage(pp::Var("StopFailed"));
   }
 
   void Start() {
-    if (!audio_input_.is_null()) {
-      if (!audio_input_.StartCapture())
-        PostMessage(pp::Var("StartFailed"));
-    } else if (audio_input_0_1_ != 0) {
-      if (!audio_input_interface_0_1_->StartCapture(audio_input_0_1_))
-        PostMessage(pp::Var("StartFailed"));
-    }
+    if (!audio_input_.StartCapture())
+      PostMessage(pp::Var("StartFailed"));
   }
 
   void EnumerateDevicesFinished(int32_t result,
                                 std::vector<pp::DeviceRef_Dev>& devices) {
-    static const char* const kDelimiter = "#__#";
-
     if (result == PP_OK) {
-      devices_.swap(devices);
-      std::string device_names;
-      for (size_t index = 0; index < devices_.size(); ++index) {
-        pp::Var name = devices_[index].GetName();
+      enumerate_devices_.swap(devices);
+      std::string device_names = "Enumerate:";
+      for (size_t index = 0; index < enumerate_devices_.size(); ++index) {
+        pp::Var name = enumerate_devices_[index].GetName();
         PP_DCHECK(name.is_string());
 
         if (index != 0)
@@ -282,6 +252,43 @@ class MyInstance : public pp::Instance {
     }
   }
 
+  // TODO(viettrungluu): Danger! We really should lock, but which thread
+  // primitives to use? In any case, the |StopCapture()| in the destructor
+  // shouldn't return until this callback is done, so at least we should be
+  // writing to a valid region of memory.
+  static void CaptureCallback(const void* samples,
+                              uint32_t num_bytes,
+                              void* ctx) {
+    MyInstance* thiz = static_cast<MyInstance*>(ctx);
+    uint32_t buffer_size =
+        thiz->sample_count_ * thiz->channel_count_ * sizeof(int16_t);
+    PP_DCHECK(num_bytes <= buffer_size);
+    PP_DCHECK(num_bytes % (thiz->channel_count_ * sizeof(int16_t)) == 0);
+    memcpy(thiz->samples_, samples, num_bytes);
+    memset(reinterpret_cast<char*>(thiz->samples_) + num_bytes, 0,
+           buffer_size - num_bytes);
+  }
+
+  static void MonitorDeviceChangeCallback(void* user_data,
+                                          uint32_t device_count,
+                                          const PP_Resource devices[]) {
+    MyInstance* thiz = static_cast<MyInstance*>(user_data);
+
+    std::string device_names = "Monitor:";
+    thiz->monitor_devices_.clear();
+    thiz->monitor_devices_.reserve(device_count);
+    for (size_t index = 0; index < device_count; ++index) {
+      thiz->monitor_devices_.push_back(pp::DeviceRef_Dev(devices[index]));
+      pp::Var name = thiz->monitor_devices_.back().GetName();
+      PP_DCHECK(name.is_string());
+
+      if (index != 0)
+        device_names += kDelimiter;
+      device_names += name.AsString();
+    }
+    thiz->PostMessage(pp::Var(device_names));
+  }
+
   pp::CompletionCallbackFactory<MyInstance> callback_factory_;
 
   uint32_t sample_count_;
@@ -296,12 +303,14 @@ class MyInstance : public pp::Instance {
   bool pending_paint_;
   bool waiting_for_flush_completion_;
 
+  // There is no need to have two resources to do capturing and device detecting
+  // separately. However, this makes the code of monitoring device change
+  // easier.
   pp::AudioInput_Dev audio_input_;
+  pp::AudioInput_Dev device_detector_;
 
-  PP_Resource audio_input_0_1_;
-  const PPB_AudioInput_Dev_0_1* audio_input_interface_0_1_;
-
-  std::vector<pp::DeviceRef_Dev> devices_;
+  std::vector<pp::DeviceRef_Dev> enumerate_devices_;
+  std::vector<pp::DeviceRef_Dev> monitor_devices_;
 };
 
 class MyModule : public pp::Module {

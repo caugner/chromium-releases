@@ -8,11 +8,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "third_party/skia/include/core/SkXfermode.h"
+#include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/stacking_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/shared/root_window_capture_client.h"
-#include "ui/aura/single_display_manager.h"
+#include "ui/aura/test/test_screen.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/events/event.h"
@@ -38,10 +38,13 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   virtual gfx::Size GetMinimumSize() const OVERRIDE {
     return gfx::Size();
   }
+
+  virtual gfx::Size GetMaximumSize() const OVERRIDE {
+    return gfx::Size();
+  }
+
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
                                const gfx::Rect& new_bounds) OVERRIDE {}
-  virtual void OnFocus(aura::Window* old_focused_window) OVERRIDE {}
-  virtual void OnBlur() OVERRIDE {}
   virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE {
     return gfx::kNullCursor;
   }
@@ -68,20 +71,6 @@ class DemoWindowDelegate : public aura::WindowDelegate {
     return scoped_refptr<ui::Texture>();
   }
 
-  // Overridden from ui::EventHandler:
-  virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE {
-    return ui::ER_UNHANDLED;
-  }
-  virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
-    return ui::ER_HANDLED;
-  }
-  virtual ui::EventResult OnTouchEvent(ui::TouchEvent* event) OVERRIDE {
-    return ui::ER_UNHANDLED;
-  }
-  virtual ui::EventResult OnGestureEvent(ui::GestureEvent* event) OVERRIDE {
-    return ui::ER_UNHANDLED;
-  }
-
  private:
   SkColor color_;
 
@@ -100,12 +89,12 @@ class DemoStackingClient : public aura::client::StackingClient {
   }
 
   // Overridden from aura::client::StackingClient:
-  virtual aura::Window* GetDefaultParent(aura::Window* window,
+  virtual aura::Window* GetDefaultParent(aura::Window* context,
+                                         aura::Window* window,
                                          const gfx::Rect& bounds) OVERRIDE {
-
     if (!capture_client_.get()) {
       capture_client_.reset(
-          new aura::shared::RootWindowCaptureClient(root_window_));
+          new aura::client::DefaultCaptureClient(root_window_));
     }
     return root_window_;
   }
@@ -113,7 +102,7 @@ class DemoStackingClient : public aura::client::StackingClient {
  private:
   aura::RootWindow* root_window_;
 
-  scoped_ptr<aura::shared::RootWindowCaptureClient> capture_client_;
+  scoped_ptr<aura::client::DefaultCaptureClient> capture_client_;
 
   DISALLOW_COPY_AND_ASSIGN(DemoStackingClient);
 };
@@ -122,9 +111,11 @@ int DemoMain() {
   // Create the message-loop here before creating the root window.
   MessageLoop message_loop(MessageLoop::TYPE_UI);
   ui::CompositorTestSupport::Initialize();
-  aura::Env::GetInstance()->SetDisplayManager(new aura::SingleDisplayManager);
+  aura::Env::GetInstance();
+  aura::TestScreen test_screen;
+  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, &test_screen);
   scoped_ptr<aura::RootWindow> root_window(
-      aura::DisplayManager::CreateRootWindowForPrimaryDisplay());
+      test_screen.CreateRootWindowForPrimaryDisplay());
   scoped_ptr<DemoStackingClient> stacking_client(new DemoStackingClient(
       root_window.get()));
 
@@ -135,7 +126,7 @@ int DemoMain() {
   window1.Init(ui::LAYER_TEXTURED);
   window1.SetBounds(gfx::Rect(100, 100, 400, 400));
   window1.Show();
-  window1.SetParent(NULL);
+  window1.SetDefaultParentByRootWindow(root_window.get(), gfx::Rect());
 
   DemoWindowDelegate window_delegate2(SK_ColorRED);
   aura::Window window2(&window_delegate2);
@@ -143,7 +134,7 @@ int DemoMain() {
   window2.Init(ui::LAYER_TEXTURED);
   window2.SetBounds(gfx::Rect(200, 200, 350, 350));
   window2.Show();
-  window2.SetParent(NULL);
+  window2.SetDefaultParentByRootWindow(root_window.get(), gfx::Rect());
 
   DemoWindowDelegate window_delegate3(SK_ColorGREEN);
   aura::Window window3(&window_delegate3);
@@ -151,7 +142,7 @@ int DemoMain() {
   window3.Init(ui::LAYER_TEXTURED);
   window3.SetBounds(gfx::Rect(10, 10, 50, 50));
   window3.Show();
-  window3.SetParent(&window2);
+  window2.AddChild(&window3);
 
   root_window->ShowRootWindow();
   MessageLoopForUI::current()->Run();

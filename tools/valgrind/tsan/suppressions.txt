@@ -354,6 +354,23 @@
 }
 
 {
+   benign race on Histogram::Add
+   ThreadSanitizer:Race
+   ...
+   fun:base::SampleVector::Accumulate
+   fun:base::Histogram::Add
+}
+
+{
+   benign race on Histogram::SnapshotSamples
+   ThreadSanitizer:Race
+   ...
+   fun:base::HistogramSamples::Add
+   fun:base::Histogram::SnapshotSampleVector
+   fun:base::Histogram::SnapshotSamples
+}
+
+{
   bug_62694 [benign races in Histogram in CookieMonster]
   ThreadSanitizer:Race
   ...
@@ -466,8 +483,8 @@
   ThreadSanitizer:Race
   fun:Replace_memcpy
   fun:memcpy
-  fun:Serialize
-  fun:UserScriptMaster::ScriptReloader::RunLoad
+  fun:extensions::Serialize
+  fun:extensions::UserScriptMaster::ScriptReloader::RunLoad
 }
 
 {
@@ -575,7 +592,6 @@
   fun:base::MD5Update
   fun:media::VideoFrame::HashFrameForTesting
   fun:media::PipelineIntegrationTestBase::OnVideoRendererPaint
-  fun:base::internal::RunnableAdapter::Run
 }
 {
   bug_93932_k
@@ -745,7 +761,7 @@
   bug_106196
   ThreadSanitizer:Race
   fun:tracked_objects::ThreadData::InitializeAndSetTrackingStatus
-  fun:ChildThread::OnSetProfilerStatus
+  fun:*ChildThread::OnSetProfilerStatus
   fun:DispatchToMethod
 }
 {
@@ -798,6 +814,14 @@
   ThreadSanitizer:Race
   ...
   fun:pa_rtpoll_run
+}
+{
+  bug_108539
+  ThreadSanitizer:Race
+  fun:tracked_objects::ThreadData::InitializeAndSetTrackingStatus
+  fun:tracked_objects::ThreadData::ShutdownSingleThreadedCleanup
+  fun:tracked_objects::TrackedObjectsTest::TrackedObjectsTest
+  fun:tracked_objects::TrackedObjectsTest_MinimalStartupShutdown_Test::TrackedObjectsTest_MinimalStartupShutdown_Test
 }
 {
   bug_112419
@@ -963,19 +987,6 @@
   fun:base::internal::RunnableAdapter::Run
 }
 {
-   bug_138691
-   ThreadSanitizer:Race
-   ...
-   fun:testing::internal::UntypedFunctionMockerBase::UntypedInvokeWith
-   fun:testing::internal::FunctionMockerBase::InvokeWith
-   fun:testing::internal::FunctionMocker::Invoke
-   fun:browser_sync::NewNonFrontendDataTypeControllerMock::RecordUnrecoverableError
-   fun:browser_sync::::NewNonFrontendDataTypeControllerFake::RecordUnrecoverableError
-   fun:browser_sync::NonFrontendDataTypeController::StartFailed
-   fun:browser_sync::NewNonFrontendDataTypeController::StartAssociationWithSharedChangeProcessor
-   fun:base::internal::RunnableAdapter::Run
-}
-{
   bug_144894
   ThreadSanitizer:Race
   fun:av_parser_close
@@ -999,20 +1010,4 @@
    fun:safe_browsing::::MockSafeBrowsingService::MatchCsdWhitelistUrl
    fun:safe_browsing::ClientSideDetectionHost::ShouldClassifyUrlRequest::CheckCsdWhitelist
    fun:base::internal::RunnableAdapter::Run
-}
-{
-   bug_158317_a
-   ThreadSanitizer:Race
-   ...
-   fun:content::::BackingStoreCopier::StartCopy
-   fun:base::internal::RunnableAdapter::Run
-}
-{
-   bug_158317_b
-   ThreadSanitizer:Race
-   ...
-   fun:content::RenderWidgetHostImpl::~RenderWidgetHostImpl
-   fun:StubRenderWidgetHost::~StubRenderWidgetHost
-   fun:scoped_ptr::reset
-   fun:WebContentsVideoCaptureDeviceTest::TearDown
 }

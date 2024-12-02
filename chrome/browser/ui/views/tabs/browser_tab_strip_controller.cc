@@ -9,31 +9,23 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/media/media_internals.h"
-#include "chrome/browser/media/media_stream_capture_indicator.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/search/search.h"
-#include "chrome/browser/ui/search/search_delegate.h"
-#include "chrome/browser/ui/search/search_model.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
+#include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
-#include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/layout.h"
@@ -82,14 +74,14 @@ TabStripLayoutType DetermineTabStripLayout(PrefService* prefs,
 class BrowserTabStripController::TabContextMenuContents
     : public ui::SimpleMenuModel::Delegate {
  public:
-  TabContextMenuContents(BaseTab* tab,
+  TabContextMenuContents(Tab* tab,
                          BrowserTabStripController* controller)
       : tab_(tab),
         controller_(controller),
         last_command_(TabStripModel::CommandFirst) {
     model_.reset(new TabMenuModel(
         this, controller->model_,
-        controller->tabstrip_->GetModelIndexOfBaseTab(tab)));
+        controller->tabstrip_->GetModelIndexOfTab(tab)));
     menu_model_adapter_.reset(new views::MenuModelAdapter(model_.get()));
     menu_runner_.reset(
         new views::MenuRunner(menu_model_adapter_->CreateMenu()));
@@ -157,7 +149,7 @@ class BrowserTabStripController::TabContextMenuContents
   scoped_ptr<views::MenuRunner> menu_runner_;
 
   // The tab we're showing a menu for.
-  BaseTab* tab_;
+  Tab* tab_;
 
   // A pointer back to our hosting controller, for command state information.
   BrowserTabStripController* controller_;
@@ -179,11 +171,12 @@ BrowserTabStripController::BrowserTabStripController(Browser* browser,
       browser_(browser),
       hover_tab_selector_(model) {
   model_->AddObserver(this);
-  browser_->search_model()->AddObserver(this);
-  browser_->search_delegate()->toolbar_search_animator().AddObserver(this);
 
   local_pref_registrar_.Init(g_browser_process->local_state());
-  local_pref_registrar_.Add(prefs::kTabStripLayoutType, this);
+  local_pref_registrar_.Add(
+      prefs::kTabStripLayoutType,
+      base::Bind(&BrowserTabStripController::UpdateLayoutType,
+                 base::Unretained(this)));
 }
 
 BrowserTabStripController::~BrowserTabStripController() {
@@ -194,8 +187,6 @@ BrowserTabStripController::~BrowserTabStripController() {
     context_menu_contents_->Cancel();
 
   model_->RemoveObserver(this);
-  browser_->search_delegate()->toolbar_search_animator().RemoveObserver(this);
-  browser_->search_model()->RemoveObserver(this);
 }
 
 void BrowserTabStripController::InitFromModel(TabStrip* tabstrip) {
@@ -206,27 +197,27 @@ void BrowserTabStripController::InitFromModel(TabStrip* tabstrip) {
   // Walk the model, calling our insertion observer method for each item within
   // it.
   for (int i = 0; i < model_->count(); ++i)
-    AddTab(model_->GetTabContentsAt(i), i, model_->active_index() == i);
+    AddTab(model_->GetWebContentsAt(i), i, model_->active_index() == i);
 }
 
 bool BrowserTabStripController::IsCommandEnabledForTab(
     TabStripModel::ContextMenuCommand command_id,
-    BaseTab* tab) const {
-  int model_index = tabstrip_->GetModelIndexOfBaseTab(tab);
+    Tab* tab) const {
+  int model_index = tabstrip_->GetModelIndexOfTab(tab);
   return model_->ContainsIndex(model_index) ?
       model_->IsContextMenuCommandEnabled(model_index, command_id) : false;
 }
 
 void BrowserTabStripController::ExecuteCommandForTab(
     TabStripModel::ContextMenuCommand command_id,
-    BaseTab* tab) {
-  int model_index = tabstrip_->GetModelIndexOfBaseTab(tab);
+    Tab* tab) {
+  int model_index = tabstrip_->GetModelIndexOfTab(tab);
   if (model_->ContainsIndex(model_index))
     model_->ExecuteContextMenuCommand(model_index, command_id);
 }
 
-bool BrowserTabStripController::IsTabPinned(BaseTab* tab) const {
-  return IsTabPinned(tabstrip_->GetModelIndexOfBaseTab(tab));
+bool BrowserTabStripController::IsTabPinned(Tab* tab) const {
+  return IsTabPinned(tabstrip_->GetModelIndexOfTab(tab));
 }
 
 const TabStripSelectionModel& BrowserTabStripController::GetSelectionModel() {
@@ -259,7 +250,7 @@ bool BrowserTabStripController::IsTabPinned(int model_index) const {
 
 bool BrowserTabStripController::IsNewTabPage(int model_index) const {
   return model_->ContainsIndex(model_index) &&
-      model_->GetTabContentsAt(model_index)->web_contents()->GetURL() ==
+      model_->GetWebContentsAt(model_index)->GetURL() ==
       GURL(chrome::kChromeUINewTabURL);
 }
 
@@ -285,12 +276,12 @@ void BrowserTabStripController::CloseTab(int model_index,
   hover_tab_selector_.CancelTabTransition();
 
   tabstrip_->PrepareForCloseAt(model_index, source);
-  model_->CloseTabContentsAt(model_index,
+  model_->CloseWebContentsAt(model_index,
                              TabStripModel::CLOSE_USER_GESTURE |
                              TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
 }
 
-void BrowserTabStripController::ShowContextMenuForTab(BaseTab* tab,
+void BrowserTabStripController::ShowContextMenuForTab(Tab* tab,
                                                       const gfx::Point& p) {
   context_menu_contents_.reset(new TabContextMenuContents(tab, this));
   context_menu_contents_->RunMenuAt(p);
@@ -303,9 +294,8 @@ void BrowserTabStripController::UpdateLoadingAnimations() {
   for (int i = 0, tab_count = tabstrip_->tab_count(); i < tab_count; ++i) {
     if (model_->ContainsIndex(i)) {
       Tab* tab = tabstrip_->tab_at(i);
-      TabContents* contents = model_->GetTabContentsAt(i);
-      tab->UpdateLoadingAnimation(
-          TabContentsNetworkState(contents->web_contents()));
+      WebContents* contents = model_->GetWebContentsAt(i);
+      tab->UpdateLoadingAnimation(TabContentsNetworkState(contents));
     }
   }
 }
@@ -337,7 +327,7 @@ void BrowserTabStripController::PerformDrop(bool drop_before,
   } else {
     content::RecordAction(UserMetricsAction("Tab_DropURLOnTab"));
     params.disposition = CURRENT_TAB;
-    params.source_contents = model_->GetTabContentsAt(index);
+    params.source_contents = model_->GetWebContentsAt(index);
   }
   params.window_action = chrome::NavigateParams::SHOW_WINDOW;
   chrome::Navigate(&params);
@@ -350,12 +340,7 @@ bool BrowserTabStripController::IsCompatibleWith(TabStrip* other) const {
 }
 
 void BrowserTabStripController::CreateNewTab() {
-  model_->delegate()->AddBlankTab(true);
-}
-
-void BrowserTabStripController::ClickActiveTab(int index) {
-  DCHECK(model_->active_index() == index);
-  model_->ActiveTabClicked(index);
+  model_->delegate()->AddBlankTabAt(-1, true);
 }
 
 bool BrowserTabStripController::IsIncognito() {
@@ -374,18 +359,10 @@ void BrowserTabStripController::LayoutTypeMaybeChanged() {
       static_cast<int>(tabstrip_->layout_type()));
 }
 
-bool BrowserTabStripController::IsInstantExtendedAPIEnabled() {
-  return chrome::search::IsInstantExtendedAPIEnabled(browser_->profile());
-}
-
-bool BrowserTabStripController::ShouldShowWhiteNTP() {
-  return InstantUI::ShouldShowWhiteNTP(browser_->profile());
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, TabStripModelObserver implementation:
 
-void BrowserTabStripController::TabInsertedAt(TabContents* contents,
+void BrowserTabStripController::TabInsertedAt(WebContents* contents,
                                               int model_index,
                                               bool is_active) {
   DCHECK(contents);
@@ -393,7 +370,7 @@ void BrowserTabStripController::TabInsertedAt(TabContents* contents,
   AddTab(contents, model_index, is_active);
 }
 
-void BrowserTabStripController::TabDetachedAt(TabContents* contents,
+void BrowserTabStripController::TabDetachedAt(WebContents* contents,
                                               int model_index) {
   // Cancel any pending tab transition.
   hover_tab_selector_.CancelTabTransition();
@@ -407,7 +384,7 @@ void BrowserTabStripController::TabSelectionChanged(
   tabstrip_->SetSelection(old_model, model_->selection_model());
 }
 
-void BrowserTabStripController::TabMoved(TabContents* contents,
+void BrowserTabStripController::TabMoved(WebContents* contents,
                                          int from_model_index,
                                          int to_model_index) {
   // Cancel any pending tab transition.
@@ -415,12 +392,11 @@ void BrowserTabStripController::TabMoved(TabContents* contents,
 
   // Pass in the TabRendererData as the pinned state may have changed.
   TabRendererData data;
-  SetTabRendererDataFromModel(contents->web_contents(), to_model_index, &data,
-                              EXISTING_TAB);
+  SetTabRendererDataFromModel(contents, to_model_index, &data, EXISTING_TAB);
   tabstrip_->MoveTab(from_model_index, to_model_index, data);
 }
 
-void BrowserTabStripController::TabChangedAt(TabContents* contents,
+void BrowserTabStripController::TabChangedAt(WebContents* contents,
                                              int model_index,
                                              TabChangeType change_type) {
   if (change_type == TITLE_NOT_LOADING) {
@@ -429,94 +405,29 @@ void BrowserTabStripController::TabChangedAt(TabContents* contents,
     return;
   }
 
-  SetTabDataAt(contents->web_contents(), model_index);
+  SetTabDataAt(contents, model_index);
 }
 
 void BrowserTabStripController::TabReplacedAt(TabStripModel* tab_strip_model,
-                                              TabContents* old_contents,
-                                              TabContents* new_contents,
+                                              WebContents* old_contents,
+                                              WebContents* new_contents,
                                               int model_index) {
-  SetTabDataAt(new_contents->web_contents(), model_index);
+  SetTabDataAt(new_contents, model_index);
 }
 
-void BrowserTabStripController::TabPinnedStateChanged(
-    TabContents* contents,
-    int model_index) {
+void BrowserTabStripController::TabPinnedStateChanged(WebContents* contents,
+                                                      int model_index) {
   // Currently none of the renderers render pinned state differently.
 }
 
-void BrowserTabStripController::TabMiniStateChanged(TabContents* contents,
+void BrowserTabStripController::TabMiniStateChanged(WebContents* contents,
                                                     int model_index) {
-  SetTabDataAt(contents->web_contents(), model_index);
+  SetTabDataAt(contents, model_index);
 }
 
-void BrowserTabStripController::TabBlockedStateChanged(TabContents* contents,
+void BrowserTabStripController::TabBlockedStateChanged(WebContents* contents,
                                                        int model_index) {
-  SetTabDataAt(contents->web_contents(), model_index);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// BrowserTabStripController, chrome::search::SearchModelObserver:
-
-void BrowserTabStripController::ModeChanged(
-    const chrome::search::Mode& old_mode,
-    const chrome::search::Mode& new_mode) {
-  // Mode has changed, set tab data based on new mode, which will trigger
-  // repainting of tab's background.
-  int active_index = GetActiveIndex();
-  DCHECK_NE(active_index, -1);
-  SetTabDataAt(chrome::GetWebContentsAt(browser_, active_index), active_index);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// BrowserTabStripController, chrome::search::ToolbarSearchAnimator::Observer:
-
-void BrowserTabStripController::OnToolbarBackgroundAnimatorProgressed() {
-  // We're fading in the tab background, set tab data based on new background
-  // state and possibly opacity value, which will trigger repainting of tab's
-  // background.
-  int active_index = GetActiveIndex();
-  DCHECK_NE(active_index, -1);
-  SetTabDataAt(chrome::GetWebContentsAt(browser_, active_index), active_index);
-}
-
-void BrowserTabStripController::OnToolbarBackgroundAnimatorCanceled(
-    content::WebContents* web_contents) {
-  // Fade in of tab background has been canceled, which can happen in 2
-  // scenarios:
-  // 1) a deactivated or detached or closing tab, whose |tab_contents| is the
-  //    the formal parameter: make sure |tab_contents| still exist in tab model.
-  // 2) mode change of active tab, as indicated by a NULL |tab_contents|: make
-  //    sure active tab exists, and retrieve its |tab_contents|.
-  // If we proceed, set tab data so that
-  // |TabRendererData::gradient_background_opacity| will be reset.
-  // Repainting of tab's background will be triggered in the process.
-  int index = web_contents ? model_->GetIndexOfWebContents(web_contents) :
-                             GetActiveIndex();
-  if (index == -1)
-    return;
-  SetTabDataAt(web_contents ? web_contents :
-      chrome::GetWebContentsAt(browser_, index), index);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// BrowserTabStripController, content::NotificationObserver implementation:
-
-void BrowserTabStripController::Observe(int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_PREF_CHANGED:
-      if (*content::Details<std::string>(details).ptr() ==
-          prefs::kTabStripLayoutType) {
-        UpdateLayoutType();
-      }
-      break;
-
-    default:
-      NOTREACHED();
-      break;
-  }
+  SetTabDataAt(contents, model_index);
 }
 
 void BrowserTabStripController::SetTabRendererDataFromModel(
@@ -538,16 +449,12 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
   data->mini = model_->IsMiniTab(model_index);
   data->blocked = model_->IsTabBlocked(model_index);
   data->app = extensions::TabHelper::FromWebContents(contents)->is_app();
-  int render_process_id = contents->GetRenderProcessHost()->GetID();
-  int render_view_id = contents->GetRenderViewHost()->GetRoutingID();
-  scoped_refptr<MediaStreamCaptureIndicator> capture_indicator =
-      MediaInternals::GetInstance()->GetMediaStreamCaptureIndicator();
-  data->recording =
-      capture_indicator->IsProcessCapturing(render_process_id, render_view_id);
-  data->mode = browser_->search_model()->mode().mode;
-  // Get current gradient background animation to paint.
-  data->gradient_background_opacity = browser_->search_delegate()->
-      toolbar_search_animator().GetGradientOpacity();
+  if (chrome::ShouldShowProjectingIndicator(contents))
+    data->capture_state = TabRendererData::CAPTURE_STATE_PROJECTING;
+  else if (chrome::ShouldShowRecordingIndicator(contents))
+    data->capture_state = TabRendererData::CAPTURE_STATE_RECORDING;
+  else
+    data->capture_state = TabRendererData::CAPTURE_STATE_NONE;
 }
 
 void BrowserTabStripController::SetTabDataAt(content::WebContents* web_contents,
@@ -559,10 +466,10 @@ void BrowserTabStripController::SetTabDataAt(content::WebContents* web_contents,
 
 void BrowserTabStripController::StartHighlightTabsForCommand(
     TabStripModel::ContextMenuCommand command_id,
-    BaseTab* tab) {
+    Tab* tab) {
   if (command_id == TabStripModel::CommandCloseOtherTabs ||
       command_id == TabStripModel::CommandCloseTabsToRight) {
-    int model_index = tabstrip_->GetModelIndexOfBaseTab(tab);
+    int model_index = tabstrip_->GetModelIndexOfTab(tab);
     if (IsValidIndex(model_index)) {
       std::vector<int> indices =
           model_->GetIndicesClosedByCommand(model_index, command_id);
@@ -576,7 +483,7 @@ void BrowserTabStripController::StartHighlightTabsForCommand(
 
 void BrowserTabStripController::StopHighlightTabsForCommand(
     TabStripModel::ContextMenuCommand command_id,
-    BaseTab* tab) {
+    Tab* tab) {
   if (command_id == TabStripModel::CommandCloseTabsToRight ||
       command_id == TabStripModel::CommandCloseOtherTabs) {
     // Just tell all Tabs to stop pulsing - it's safe.
@@ -584,14 +491,14 @@ void BrowserTabStripController::StopHighlightTabsForCommand(
   }
 }
 
-void BrowserTabStripController::AddTab(TabContents* contents,
+void BrowserTabStripController::AddTab(WebContents* contents,
                                        int index,
                                        bool is_active) {
   // Cancel any pending tab transition.
   hover_tab_selector_.CancelTabTransition();
 
   TabRendererData data;
-  SetTabRendererDataFromModel(contents->web_contents(), index, &data, NEW_TAB);
+  SetTabRendererDataFromModel(contents, index, &data, NEW_TAB);
   tabstrip_->AddTabAt(index, data, is_active);
 }
 

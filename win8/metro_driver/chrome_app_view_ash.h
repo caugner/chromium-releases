@@ -11,6 +11,7 @@
 #include <windows.ui.viewmanagement.h>
 
 #include "base/memory/scoped_ptr.h"
+#include "ui/base/events/event_constants.h"
 #include "win8/metro_driver/direct3d_helper.h"
 
 namespace IPC {
@@ -31,6 +32,8 @@ class ChromeAppViewAsh
   IFACEMETHOD(Run)();
   IFACEMETHOD(Uninitialize)();
 
+  void OnSetCursor(HCURSOR cursor);
+
  private:
   HRESULT OnActivate(winapp::Core::ICoreApplicationView* view,
                      winapp::Activation::IActivatedEventArgs* args);
@@ -44,12 +47,20 @@ class ChromeAppViewAsh
   HRESULT OnPointerReleased(winui::Core::ICoreWindow* sender,
                             winui::Core::IPointerEventArgs* args);
 
+  HRESULT OnWheel(winui::Core::ICoreWindow* sender,
+                  winui::Core::IPointerEventArgs* args);
+
   HRESULT OnKeyDown(winui::Core::ICoreWindow* sender,
                     winui::Core::IKeyEventArgs* args);
 
   HRESULT OnKeyUp(winui::Core::ICoreWindow* sender,
                   winui::Core::IKeyEventArgs* args);
 
+  HRESULT OnCharacterReceived(winui::Core::ICoreWindow* sender,
+                              winui::Core::ICharacterReceivedEventArgs* args);
+
+  HRESULT OnVisibilityChanged(winui::Core::ICoreWindow* sender,
+                              winui::Core::IVisibilityChangedEventArgs* args);
 
   mswr::ComPtr<winui::Core::ICoreWindow> window_;
   mswr::ComPtr<winapp::Core::ICoreApplicationView> view_;
@@ -57,12 +68,18 @@ class ChromeAppViewAsh
   EventRegistrationToken pointermoved_token_;
   EventRegistrationToken pointerpressed_token_;
   EventRegistrationToken pointerreleased_token_;
+  EventRegistrationToken wheel_token_;
   EventRegistrationToken keydown_token_;
   EventRegistrationToken keyup_token_;
+  EventRegistrationToken character_received_token_;
+  EventRegistrationToken visibility_changed_token_;
+
+  // Keep state about which button is currently down, if any, as PointerMoved
+  // events do not contain that state, but Ash's MouseEvents need it.
+  ui::EventFlags mouse_down_flags_;
 
   metro_driver::Direct3DHelper direct3d_helper_;
 
-  IPC::Listener* ui_channel_listener_;
   IPC::ChannelProxy* ui_channel_;
 };
 

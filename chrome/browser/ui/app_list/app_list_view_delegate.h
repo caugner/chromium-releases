@@ -16,6 +16,10 @@
 class AppsModelBuilder;
 class SearchBuilder;
 
+#if defined(USE_ASH)
+class AppSyncUIStateWatcher;
+#endif
+
 class AppListViewDelegate : public app_list::AppListViewDelegate {
  public:
   // The delegate will take ownership of the controller.
@@ -34,13 +38,17 @@ class AppListViewDelegate : public app_list::AppListViewDelegate {
   virtual void InvokeSearchResultAction(const app_list::SearchResult& result,
                                         int action_index,
                                         int event_flags) OVERRIDE;
-  virtual void Close() OVERRIDE;
+  virtual void Dismiss() OVERRIDE;
   virtual void ViewClosing() OVERRIDE;
   virtual void ViewActivationChanged(bool active) OVERRIDE;
 
   scoped_ptr<AppsModelBuilder> apps_builder_;
   scoped_ptr<SearchBuilder> search_builder_;
   scoped_ptr<AppListControllerDelegate> controller_;
+
+#if defined(USE_ASH)
+  scoped_ptr<AppSyncUIStateWatcher> app_sync_ui_state_watcher_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(AppListViewDelegate);
 };

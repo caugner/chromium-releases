@@ -10,10 +10,6 @@
 #include "base/observer_list.h"
 #include "base/prefs/public/pref_change_registrar.h"
 #include "base/threading/thread.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_source.h"
 
 template <typename T> struct DefaultSingletonTraits;
 
@@ -24,7 +20,7 @@ namespace chromeos {
 
 class AudioMixer;
 
-class AudioHandler : public content::NotificationObserver {
+class AudioHandler {
  public:
   class VolumeObserver {
    public:
@@ -76,11 +72,6 @@ class AudioHandler : public content::NotificationObserver {
   void AddVolumeObserver(VolumeObserver* observer);
   void RemoveVolumeObserver(VolumeObserver* observer);
 
-  // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
  private:
   // Defines the delete on exit Singleton traits we like.  Best to have this
   // and constructor/destructor private as recommended for Singletons.
@@ -107,7 +98,6 @@ class AudioHandler : public content::NotificationObserver {
   PrefService* local_state_;  // not owned
 
   PrefChangeRegistrar pref_change_registrar_;
-  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioHandler);
 };

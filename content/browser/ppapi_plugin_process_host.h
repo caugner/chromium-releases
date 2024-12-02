@@ -12,8 +12,8 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/process.h"
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
-#include "content/browser/renderer_host/pepper/pepper_file_message_filter.h"
 #include "content/browser/renderer_host/pepper/pepper_message_filter.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
@@ -47,6 +47,7 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
     //   0
     virtual void OnPpapiChannelOpened(
         const IPC::ChannelHandle& channel_handle,
+        base::ProcessId plugin_pid,
         int plugin_child_id) = 0;
 
     // Returns true if the current connection is off-the-record.
@@ -79,14 +80,15 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
   static PpapiPluginProcessHost* CreateBrokerHost(
       const PepperPluginInfo& info);
 
-  // Notification that a PP_Instance has been created for the given
-  // RenderView/Process pair for the given plugin. This is necessary so that
-  // when the plugin calls us with a PP_Instance we can find the RenderView
-  // associated with it without trusting the plugin.
-  static void DidCreateOutOfProcessInstance(int plugin_process_id,
-                                            int32 pp_instance,
-                                            int render_process_id,
-                                            int render_view_id);
+  // Notification that a PP_Instance has been created and the associated
+  // renderer related data including the RenderView/Process pair for the given
+  // plugin. This is necessary so that when the plugin calls us with a
+  // PP_Instance we can find the RenderView associated with it without trusting
+  // the plugin.
+  static void DidCreateOutOfProcessInstance(
+      int plugin_process_id,
+      int32 pp_instance,
+      const PepperRendererInstanceData& instance_data);
 
   // The opposite of DIdCreate... above.
   static void DidDeleteOutOfProcessInstance(int plugin_process_id,
@@ -138,10 +140,7 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
   scoped_refptr<PepperMessageFilter> filter_;
 
   ppapi::PpapiPermissions permissions_;
-  scoped_refptr<BrowserPpapiHostImpl> host_impl_;
-
-  // Handles filesystem requests from flash plugins. May be NULL.
-  scoped_refptr<PepperFileMessageFilter> file_filter_;
+  scoped_ptr<BrowserPpapiHostImpl> host_impl_;
 
   // Observes network changes. May be NULL.
   scoped_ptr<PluginNetworkObserver> network_observer_;

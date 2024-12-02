@@ -38,11 +38,15 @@ const int kDetailedBubbleMaxHeight = kTrayPopupItemHeight * 5;
 class TrayPopupItemContainer : public views::View {
  public:
   TrayPopupItemContainer(views::View* view,
-                         ShelfAlignment alignment,
-                         bool change_background)
+                         bool change_background,
+                         bool draw_border)
       : hover_(false),
         change_background_(change_background) {
     set_notify_enter_exit_on_child(true);
+    if (draw_border) {
+      set_border(
+          views::Border::CreateSolidSidedBorder(0, 0, 1, 0, kBorderLightColor));
+    }
     views::BoxLayout* layout = new views::BoxLayout(
         views::BoxLayout::kVertical, 0, 0, 0);
     layout->set_spread_blank_space(true);
@@ -165,7 +169,7 @@ void SystemTrayBubble::UpdateView(
     settings.SetTransitionDuration(swipe_duration);
     settings.SetTweenType(ui::Tween::EASE_OUT);
     gfx::Transform transform;
-    transform.SetTranslateX(layer->bounds().width());
+    transform.Translate(layer->bounds().width(), 0.0);
     layer->SetTransform(transform);
   }
 
@@ -198,7 +202,8 @@ void SystemTrayBubble::UpdateView(
 
   items_ = items;
   bubble_type_ = bubble_type;
-  CreateItemViews(Shell::GetInstance()->tray_delegate()->GetUserLoginStatus());
+  CreateItemViews(
+      Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus());
 
   // Close bubble view if we failed to create the item view.
   if (!bubble_view_->has_children()) {
@@ -218,7 +223,7 @@ void SystemTrayBubble::UpdateView(
     ui::Layer* new_layer = bubble_view_->layer();
     gfx::Rect bounds = new_layer->bounds();
     gfx::Transform transform;
-    transform.SetTranslateX(bounds.width());
+    transform.Translate(bounds.width(), 0.0);
     new_layer->SetTransform(transform);
     {
       ui::ScopedLayerAnimationSettings settings(new_layer->GetAnimator());
@@ -317,24 +322,26 @@ bool SystemTrayBubble::ShouldShowLauncher() const {
 }
 
 void SystemTrayBubble::CreateItemViews(user::LoginStatus login_status) {
-  for (std::vector<ash::SystemTrayItem*>::iterator it = items_.begin();
-       it != items_.end();
-       ++it) {
+  for (size_t i = 0; i < items_.size(); ++i) {
     views::View* view = NULL;
     switch (bubble_type_) {
       case BUBBLE_TYPE_DEFAULT:
-        view = (*it)->CreateDefaultView(login_status);
+        view = items_[i]->CreateDefaultView(login_status);
         break;
       case BUBBLE_TYPE_DETAILED:
-        view = (*it)->CreateDetailedView(login_status);
+        view = items_[i]->CreateDetailedView(login_status);
         break;
       case BUBBLE_TYPE_NOTIFICATION:
-        view = (*it)->CreateNotificationView(login_status);
+        view = items_[i]->CreateNotificationView(login_status);
         break;
     }
     if (view) {
+      // For default view, draw bottom border for each item, except the last
+      // 2 items, which are the bottom header row and the one just above it.
+      bool is_default_bubble = bubble_type_ == BUBBLE_TYPE_DEFAULT;
       bubble_view_->AddChildView(new TrayPopupItemContainer(
-          view, tray_->shelf_alignment(), bubble_type_ == BUBBLE_TYPE_DEFAULT));
+          view, is_default_bubble,
+          is_default_bubble && (i < items_.size() - 2)));
     }
   }
 }

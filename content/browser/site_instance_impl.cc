@@ -32,7 +32,7 @@ static bool IsURLSameAsAnySiteInstance(const GURL& url) {
   return url == GURL(chrome::kChromeUICrashURL) ||
          url == GURL(chrome::kChromeUIKillURL) ||
          url == GURL(chrome::kChromeUIHangURL) ||
-         url == GURL(chrome::kChromeUIShorthangURL);
+         url == GURL(kChromeUIShorthangURL);
 }
 
 int32 SiteInstanceImpl::next_site_instance_id_ = 1;
@@ -196,8 +196,12 @@ bool SiteInstanceImpl::IsRelatedSiteInstance(const SiteInstance* instance) {
       static_cast<const SiteInstanceImpl*>(instance)->browsing_instance_;
 }
 
-bool SiteInstanceImpl::HasWrongProcessForURL(const GURL& url) const {
+bool SiteInstanceImpl::HasWrongProcessForURL(const GURL& url) {
   // Having no process isn't a problem, since we'll assign it correctly.
+  // Note that HasProcess() may return true if process_ is null, in
+  // process-per-site cases where there's an existing process available.
+  // We want to use such a process in the IsSuitableHost check, so we
+  // may end up assigning process_ in the GetProcess() call below.
   if (!HasProcess())
     return false;
 
@@ -210,7 +214,7 @@ bool SiteInstanceImpl::HasWrongProcessForURL(const GURL& url) const {
   // process is not (or vice versa), make sure we notice and fix it.
   GURL site_url = GetSiteForURL(browsing_instance_->browser_context(), url);
   return !RenderProcessHostImpl::IsSuitableHost(
-      process_, browsing_instance_->browser_context(), site_url);
+      GetProcess(), browsing_instance_->browser_context(), site_url);
 }
 
 BrowserContext* SiteInstanceImpl::GetBrowserContext() const {
@@ -233,8 +237,37 @@ SiteInstance* SiteInstance::CreateForURL(BrowserContext* browser_context,
 }
 
 /*static*/
-GURL SiteInstanceImpl::GetSiteForURL(BrowserContext* browser_context,
-                                     const GURL& real_url) {
+bool SiteInstance::IsSameWebSite(BrowserContext* browser_context,
+                                 const GURL& real_url1,
+                                 const GURL& real_url2) {
+  GURL url1 = SiteInstanceImpl::GetEffectiveURL(browser_context, real_url1);
+  GURL url2 = SiteInstanceImpl::GetEffectiveURL(browser_context, real_url2);
+
+  // We infer web site boundaries based on the registered domain name of the
+  // top-level page and the scheme.  We do not pay attention to the port if
+  // one is present, because pages served from different ports can still
+  // access each other if they change their document.domain variable.
+
+  // Some special URLs will match the site instance of any other URL. This is
+  // done before checking both of them for validity, since we want these URLs
+  // to have the same site instance as even an invalid one.
+  if (IsURLSameAsAnySiteInstance(url1) || IsURLSameAsAnySiteInstance(url2))
+    return true;
+
+  // If either URL is invalid, they aren't part of the same site.
+  if (!url1.is_valid() || !url2.is_valid())
+    return false;
+
+  // If the schemes differ, they aren't part of the same site.
+  if (url1.scheme() != url2.scheme())
+    return false;
+
+  return net::RegistryControlledDomainService::SameDomainOrHost(url1, url2);
+}
+
+/*static*/
+GURL SiteInstance::GetSiteForURL(BrowserContext* browser_context,
+                                 const GURL& real_url) {
   // TODO(fsamuel, creis): For some reason appID is not recognized as a host.
   if (real_url.SchemeIs(chrome::kGuestScheme))
     return real_url;
@@ -273,35 +306,6 @@ GURL SiteInstanceImpl::GetSiteForURL(BrowserContext* browser_context,
 }
 
 /*static*/
-bool SiteInstance::IsSameWebSite(BrowserContext* browser_context,
-                                 const GURL& real_url1,
-                                 const GURL& real_url2) {
-  GURL url1 = SiteInstanceImpl::GetEffectiveURL(browser_context, real_url1);
-  GURL url2 = SiteInstanceImpl::GetEffectiveURL(browser_context, real_url2);
-
-  // We infer web site boundaries based on the registered domain name of the
-  // top-level page and the scheme.  We do not pay attention to the port if
-  // one is present, because pages served from different ports can still
-  // access each other if they change their document.domain variable.
-
-  // Some special URLs will match the site instance of any other URL. This is
-  // done before checking both of them for validity, since we want these URLs
-  // to have the same site instance as even an invalid one.
-  if (IsURLSameAsAnySiteInstance(url1) || IsURLSameAsAnySiteInstance(url2))
-    return true;
-
-  // If either URL is invalid, they aren't part of the same site.
-  if (!url1.is_valid() || !url2.is_valid())
-    return false;
-
-  // If the schemes differ, they aren't part of the same site.
-  if (url1.scheme() != url2.scheme())
-    return false;
-
-  return net::RegistryControlledDomainService::SameDomainOrHost(url1, url2);
-}
-
-/*static*/
 GURL SiteInstanceImpl::GetEffectiveURL(BrowserContext* browser_context,
                                        const GURL& url) {
   return GetContentClient()->browser()->
@@ -318,8 +322,11 @@ void SiteInstanceImpl::Observe(int type,
 }
 
 void SiteInstanceImpl::LockToOrigin() {
+  // We currently only restrict this process to a particular site if the
+  // --enable-strict-site-isolation or --site-per-process flags are present.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kEnableStrictSiteIsolation)) {
+  if (command_line.HasSwitch(switches::kEnableStrictSiteIsolation) ||
+      command_line.HasSwitch(switches::kSitePerProcess)) {
     ChildProcessSecurityPolicyImpl* policy =
         ChildProcessSecurityPolicyImpl::GetInstance();
     policy->LockToOrigin(process_->GetID(), site_);

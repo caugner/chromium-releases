@@ -81,6 +81,9 @@ TwoFingerDragHandler::~TwoFingerDragHandler() {
 
 bool TwoFingerDragHandler::ProcessGestureEvent(aura::Window* target,
                                                const ui::GestureEvent& event) {
+  if (!target->delegate())
+    return false;
+
   if (event.type() == ui::ET_GESTURE_BEGIN &&
       event.details().touch_points() == 1) {
     first_finger_hittest_ =
@@ -133,16 +136,13 @@ bool TwoFingerDragHandler::ProcessGestureEvent(aura::Window* target,
       } else if (event.details().swipe_down()) {
         wm::MinimizeWindow(target);
       } else {
-        internal::SnapSizer sizer(target,
-            gfx::Point(),
-            event.details().swipe_left() ? internal::SnapSizer::LEFT_EDGE :
-                                           internal::SnapSizer::RIGHT_EDGE);
-
         ui::ScopedLayerAnimationSettings scoped_setter(
             target->layer()->GetAnimator());
         scoped_setter.SetPreemptionStrategy(
             ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
-        target->SetBounds(sizer.target_bounds());
+        internal::SnapSizer::SnapWindow(target,
+            event.details().swipe_left() ? internal::SnapSizer::LEFT_EDGE :
+                                           internal::SnapSizer::RIGHT_EDGE);
       }
       return true;
     }

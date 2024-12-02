@@ -290,8 +290,8 @@ void WizardController::ShowUpdateScreen() {
 }
 
 void WizardController::ShowUserImageScreen() {
-  // Skip image selection for ephemeral users.
-  if (chromeos::UserManager::Get()->IsCurrentUserEphemeral()) {
+  // Skip image selection if the user is logging in as ephemeral.
+  if (chromeos::UserManager::Get()->IsCurrentUserNonCryptohomeDataEphemeral()) {
     OnUserImageSkipped();
     return;
   }
@@ -410,11 +410,6 @@ void WizardController::RegisterPrefs(PrefService* local_state) {
                                      false,
                                      PrefService::UNSYNCABLE_PREF);
   }
-  if (local_state->FindPreference(prefs::kScreenMagnifierEnabled) == NULL) {
-    local_state->RegisterBooleanPref(prefs::kScreenMagnifierEnabled,
-                                     false,
-                                     PrefService::UNSYNCABLE_PREF);
-  }
   if (local_state->FindPreference(prefs::kVirtualKeyboardEnabled) == NULL) {
     local_state->RegisterBooleanPref(prefs::kVirtualKeyboardEnabled,
                                      false,
@@ -423,6 +418,9 @@ void WizardController::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterBooleanPref(prefs::kOwnerPrimaryMouseButtonRight, false);
   local_state->RegisterBooleanPref(prefs::kOwnerTapToClickEnabled, true);
   local_state->RegisterBooleanPref(prefs::kFactoryResetRequested, false);
+  local_state->RegisterStringPref(prefs::kRLZBrand, std::string(),
+                                  PrefService::UNSYNCABLE_PREF);
+  local_state->RegisterBooleanPref(prefs::kRLZDisabled, false);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -461,7 +459,7 @@ void WizardController::OnUpdateCompleted() {
 void WizardController::OnEulaAccepted() {
   time_eula_accepted_ = base::Time::Now();
   MarkEulaAccepted();
-  bool enabled =
+  bool uma_enabled =
       OptionsUtil::ResolveMetricsReportingEnabled(usage_statistics_reporting_);
 
   content::NotificationService::current()->Notify(
@@ -469,8 +467,8 @@ void WizardController::OnEulaAccepted() {
       content::NotificationSource(content::Source<WizardController>(this)),
       content::NotificationService::NoDetails());
 
-  CrosSettings::Get()->SetBoolean(kStatsReportingPref, enabled);
-  if (enabled) {
+  CrosSettings::Get()->SetBoolean(kStatsReportingPref, uma_enabled);
+  if (uma_enabled) {
 #if defined(USE_LINUX_BREAKPAD)
     // The crash reporter initialization needs IO to complete.
     base::ThreadRestrictions::ScopedAllowIO allow_io;

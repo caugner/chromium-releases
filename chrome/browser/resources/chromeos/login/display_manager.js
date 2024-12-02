@@ -14,6 +14,8 @@
 /** @const */ var SCREEN_GAIA_SIGNIN = 'gaia-signin';
 /** @const */ var SCREEN_ACCOUNT_PICKER = 'account-picker';
 /** @const */ var SCREEN_USER_IMAGE_PICKER = 'user-image';
+/** @const */ var SCREEN_TPM_ERROR = 'tpm-error-message';
+/** @const */ var SCREEN_PASSWORD_CHANGED = 'password-changed';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
@@ -23,6 +25,13 @@
 
 /* Help topic identifiers. */
 /** @const */ var HELP_TOPIC_ENTERPRISE_REPORTING = 2535613;
+
+/* Signin UI state constants. Used to control header bar UI. */
+/** @const */ var SIGNIN_UI_STATE = {
+  HIDDEN: 0,
+  GAIA_SIGNIN: 1,
+  ACCOUNT_PICKER: 2
+};
 
 cr.define('cr.ui.login', function() {
   var Bubble = cr.ui.Bubble;
@@ -205,6 +214,9 @@ cr.define('cr.ui.login', function() {
 
       this.disableButtons_(newStep, false);
 
+      // Default control to be focused (if specified).
+      var defaultControl = newStep.defaultControl;
+
       if (this.isOobeUI()) {
         // Start gliding animation for OOBE steps.
         if (nextStepIndex > this.currentStep_) {
@@ -238,9 +250,13 @@ cr.define('cr.ui.login', function() {
               innerContainer.classList.remove('animation');
               oldStep.classList.add('hidden');
             }
+            if (defaultControl)
+              defaultControl.focus();
           });
         } else {
           oldStep.classList.add('hidden');
+          if (defaultControl)
+            defaultControl.focus();
         }
       } else {
         // First screen on OOBE launch.
@@ -251,7 +267,12 @@ cr.define('cr.ui.login', function() {
                 innerContainer.removeEventListener('webkitTransitionEnd', f);
                 $('progress-dots').classList.remove('down');
                 chrome.send('loginVisible', ['oobe']);
+                if (defaultControl)
+                  defaultControl.focus();
               });
+        } else {
+          if (defaultControl)
+            defaultControl.focus();
         }
         newHeader.classList.remove('right');  // Old OOBE.
       }
@@ -259,6 +280,8 @@ cr.define('cr.ui.login', function() {
       $('oobe').className = nextStepId;
 
       $('step-logo').hidden = newStep.classList.contains('no-logo');
+
+      chrome.send('updateCurrentScreen', [this.currentScreen.id]);
     },
 
     /**
@@ -299,7 +322,7 @@ cr.define('cr.ui.login', function() {
       var index = this.getScreenIndex_(screenId);
       if (index >= 0)
         this.toggleStep_(index, data);
-      $('error-message').update();
+      chrome.send('errorScreenUpdate');
     },
 
     /**
@@ -325,9 +348,14 @@ cr.define('cr.ui.login', function() {
 
       var header = document.createElement('span');
       header.id = 'header-' + screenId;
-      header.className = 'header-section right';
       header.textContent = el.header ? el.header : '';
-      $('header-sections').appendChild(header);
+      if (this.isNewOobe()) {
+        header.className = 'header-section';
+        $('header-sections').appendChild(header);
+      } else {
+        header.className = 'header-section-old right';
+        $('header-sections-old').appendChild(header);
+      }
 
       var dot = document.createElement('div');
       dot.id = screenId + '-dot';
@@ -455,6 +483,15 @@ cr.define('cr.ui.login', function() {
   };
 
   /**
+   * Initializes display manager.
+   */
+  DisplayManager.initialize = function() {
+    var link = $('enterprise-info-hint-link');
+    link.addEventListener(
+        'click', DisplayManager.handleEnterpriseHintLinkClick);
+  },
+
+  /**
    * Returns offset (top, left) of the element.
    * @param {!Element} element HTML element.
    * @return {!Object} The offset (top, left).
@@ -496,7 +533,11 @@ cr.define('cr.ui.login', function() {
    * @param {string} opt_email An optional email for signin UI.
    */
   DisplayManager.showSigninUI = function(opt_email) {
-    $('login-header-bar').signinUIActive = true;
+    var currentScreenId = Oobe.getInstance().currentScreen.id;
+    if (currentScreenId == SCREEN_GAIA_SIGNIN)
+      $('login-header-bar').signinUIState = SIGNIN_UI_STATE.GAIA_SIGNIN;
+    else if (currentScreenId == SCREEN_ACCOUNT_PICKER)
+      $('login-header-bar').signinUIState = SIGNIN_UI_STATE.ACCOUNT_PICKER;
     chrome.send('showAddUser', [opt_email]);
   };
 
@@ -548,6 +589,21 @@ cr.define('cr.ui.login', function() {
   };
 
   /**
+   * Shows password changed screen that offers migration.
+   * @param {boolean} showError Whether to show the incorrect password error.
+   */
+  DisplayManager.showPasswordChangedScreen = function(showError) {
+    login.PasswordChangedScreen.show(showError);
+  };
+
+  /**
+   * Shows TPM error screen.
+   */
+  DisplayManager.showTpmError = function() {
+    login.TPMErrorMessageScreen.show();
+  };
+
+  /**
    * Clears error bubble.
    */
   DisplayManager.clearErrors = function() {
@@ -564,22 +620,22 @@ cr.define('cr.ui.login', function() {
   };
 
   /**
+   * Shows help topic about enrolled devices.
+   * @param {MouseEvent} Event object.
+   */
+  DisplayManager.handleEnterpriseHintLinkClick = function(e) {
+    chrome.send('launchHelpApp', [HELP_TOPIC_ENTERPRISE_REPORTING]);
+    e.preventDefault();
+  }
+
+  /**
    * Sets the text content of the enterprise info message.
    * @param {string} messageText The message text.
-   * @param {boolean} showReportingHint Whether to show the reporting warning.
    */
-  DisplayManager.setEnterpriseInfo = function(messageText, showReportingHint) {
+  DisplayManager.setEnterpriseInfo = function(messageText) {
     $('enterprise-info-message').textContent = messageText;
     if (messageText) {
-      $('enterprise-info-container').hidden = false;
-      if (showReportingHint) {
-        $('enterprise-reporting-hint-container').hidden = false;
-        var link = $('enterprise-reporting-hint-link');
-        link.addEventListener('click', function(e) {
-          chrome.send('launchHelpApp', [HELP_TOPIC_ENTERPRISE_REPORTING]);
-          e.preventDefault();
-        });
-      }
+      $('enterprise-info').hidden = false;
     }
   };
 
@@ -589,7 +645,8 @@ cr.define('cr.ui.login', function() {
    */
   DisplayManager.updateAddUserButtonStatus = function(disable) {
     $('add-user-button').disabled = disable;
-    $('add-user-button').classList.add('button-restricted');
+    $('add-user-button').classList[
+        disable ? 'add' : 'remove']('button-restricted');
     $('add-user-button').title = disable ?
         localStrings.getString('disabledAddUserTooltip') : '';
   }

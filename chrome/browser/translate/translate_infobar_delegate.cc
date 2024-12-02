@@ -12,7 +12,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/translate_manager.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -79,6 +78,8 @@ void TranslateInfoBarDelegate::Translate() {
   TranslateManager::GetInstance()->TranslatePage(owner()->GetWebContents(),
                                                  original_language_code(),
                                                  target_language_code());
+
+  UMA_HISTOGRAM_COUNTS("Translate.Translate", 1);
 }
 
 void TranslateInfoBarDelegate::RevertTranslation() {
@@ -105,6 +106,8 @@ void TranslateInfoBarDelegate::TranslationDeclined() {
   TranslateTabHelper* translate_tab_helper =
       TranslateTabHelper::FromWebContents(owner()->GetWebContents());
   translate_tab_helper->language_state().set_translation_declined(true);
+
+  UMA_HISTOGRAM_COUNTS("Translate.DeclineTranslate", 1);
 }
 
 bool TranslateInfoBarDelegate::IsLanguageBlacklisted() {

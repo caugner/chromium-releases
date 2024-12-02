@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,13 @@ SearchBox::SearchBox(content::RenderView* render_view)
       selection_start_(0),
       selection_end_(0),
       results_base_(0),
+      start_margin_(0),
+      end_margin_(0),
       last_results_base_(0),
-      is_focused_(false),
-      active_tab_is_ntp_(false) {
+      is_key_capture_enabled_(false),
+      theme_area_height_(0),
+      display_instant_results_(false),
+      omnibox_font_size_(0) {
 }
 
 SearchBox::~SearchBox() {
@@ -45,20 +49,37 @@ void SearchBox::ShowInstantPreview(InstantShownReason reason,
       height, units));
 }
 
-gfx::Rect SearchBox::GetRect() {
-  // Need to adjust for scale.
-  if (rect_.IsEmpty())
-    return rect_;
-  WebKit::WebView* web_view = render_view()->GetWebView();
-  if (!web_view)
-    return rect_;
-  double zoom = WebKit::WebView::zoomLevelToZoomFactor(web_view->zoomLevel());
-  if (zoom == 0)
-    return rect_;
-  return gfx::Rect(static_cast<int>(static_cast<float>(rect_.x()) / zoom),
-                   static_cast<int>(static_cast<float>(rect_.y()) / zoom),
-                   static_cast<int>(static_cast<float>(rect_.width()) / zoom),
-                   static_cast<int>(static_cast<float>(rect_.height()) / zoom));
+void SearchBox::StartCapturingKeyStrokes() {
+  render_view()->Send(new ChromeViewHostMsg_StartCapturingKeyStrokes(
+      render_view()->GetRoutingID(), render_view()->GetPageId()));
+}
+
+void SearchBox::StopCapturingKeyStrokes() {
+  render_view()->Send(new ChromeViewHostMsg_StopCapturingKeyStrokes(
+      render_view()->GetRoutingID(), render_view()->GetPageId()));
+}
+
+void SearchBox::NavigateToURL(const GURL& url,
+                              content::PageTransition transition) {
+  render_view()->Send(new ChromeViewHostMsg_SearchBoxNavigate(
+      render_view()->GetRoutingID(), render_view()->GetPageId(),
+      url, transition));
+}
+
+int SearchBox::GetStartMargin() const {
+  return static_cast<int>(start_margin_ / GetZoom());
+}
+
+int SearchBox::GetEndMargin() const {
+  return static_cast<int>(end_margin_ / GetZoom());
+}
+
+gfx::Rect SearchBox::GetPopupBounds() const {
+  double zoom = GetZoom();
+  return gfx::Rect(static_cast<int>(popup_bounds_.x() / zoom),
+                   static_cast<int>(popup_bounds_.y() / zoom),
+                   static_cast<int>(popup_bounds_.width() / zoom),
+                   static_cast<int>(popup_bounds_.height() / zoom));
 }
 
 const std::vector<InstantAutocompleteResult>&
@@ -79,26 +100,47 @@ const InstantAutocompleteResult* SearchBox::GetAutocompleteResultWithId(
   return &last_autocomplete_results_[restricted_id - last_results_base_];
 }
 
+const ThemeBackgroundInfo& SearchBox::GetThemeBackgroundInfo() {
+  return theme_info_;
+}
+
+int SearchBox::GetThemeAreaHeight() {
+  return theme_area_height_;
+}
+
 bool SearchBox::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SearchBox, message)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxChange, OnChange)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxSubmit, OnSubmit)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxCancel, OnCancel)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxResize, OnResize)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxPopupResize, OnPopupResize)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxMarginChange, OnMarginChange)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_DetermineIfPageSupportsInstant,
                         OnDetermineIfPageSupportsInstant)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxAutocompleteResults,
                         OnAutocompleteResults)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxUpOrDownKeyPressed,
                         OnUpOrDownKeyPressed)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFocus, OnFocus)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxBlur, OnBlur)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxActiveTabModeChanged,
-                        OnActiveTabModeChanged)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxModeChanged,
+                        OnModeChanged)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxSetDisplayInstantResults,
+                        OnSetDisplayInstantResults)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxKeyCaptureChanged,
+                        OnKeyCaptureChange)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxThemeChanged,
+                        OnThemeChanged)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxThemeAreaHeightChanged,
+                        OnThemeAreaHeightChanged)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFontInformation,
+                        OnFontInformationReceived)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
+}
+
+void SearchBox::DidClearWindowObject(WebKit::WebFrame* frame) {
+  extensions_v8::SearchBoxExtension::DispatchOnWindowReady(frame);
 }
 
 void SearchBox::OnChange(const string16& query,
@@ -110,6 +152,7 @@ void SearchBox::OnChange(const string16& query,
   selection_start_ = selection_start;
   selection_end_ = selection_end;
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnChange";
     extensions_v8::SearchBoxExtension::DispatchChange(
         render_view()->GetWebView()->mainFrame());
   }
@@ -120,6 +163,7 @@ void SearchBox::OnSubmit(const string16& query) {
   verbatim_ = true;
   selection_start_ = selection_end_ = query_.size();
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnSubmit";
     extensions_v8::SearchBoxExtension::DispatchSubmit(
         render_view()->GetWebView()->mainFrame());
   }
@@ -131,16 +175,27 @@ void SearchBox::OnCancel(const string16& query) {
   verbatim_ = true;
   selection_start_ = selection_end_ = query_.size();
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnCancel";
     extensions_v8::SearchBoxExtension::DispatchCancel(
         render_view()->GetWebView()->mainFrame());
   }
   Reset();
 }
 
-void SearchBox::OnResize(const gfx::Rect& bounds) {
-  rect_ = bounds;
+void SearchBox::OnPopupResize(const gfx::Rect& bounds) {
+  popup_bounds_ = bounds;
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnPopupResize";
     extensions_v8::SearchBoxExtension::DispatchResize(
+        render_view()->GetWebView()->mainFrame());
+  }
+}
+
+void SearchBox::OnMarginChange(int start, int end) {
+  start_margin_ = start;
+  end_margin_ = end;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchMarginChange(
         render_view()->GetWebView()->mainFrame());
   }
 }
@@ -149,6 +204,7 @@ void SearchBox::OnDetermineIfPageSupportsInstant() {
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
     bool result = extensions_v8::SearchBoxExtension::PageSupportsInstant(
         render_view()->GetWebView()->mainFrame());
+    DVLOG(1) << render_view() << " PageSupportsInstant: " << result;
     render_view()->Send(new ChromeViewHostMsg_InstantSupportDetermined(
         render_view()->GetRoutingID(), render_view()->GetPageId(), result));
   }
@@ -159,6 +215,7 @@ void SearchBox::OnAutocompleteResults(
   results_base_ += autocomplete_results_.size();
   autocomplete_results_ = results;
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnAutocompleteResults";
     extensions_v8::SearchBoxExtension::DispatchAutocompleteResults(
         render_view()->GetWebView()->mainFrame());
   }
@@ -166,41 +223,84 @@ void SearchBox::OnAutocompleteResults(
 
 void SearchBox::OnUpOrDownKeyPressed(int count) {
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnKeyPress: " << count;
     extensions_v8::SearchBoxExtension::DispatchUpOrDownKeyPress(
         render_view()->GetWebView()->mainFrame(), count);
   }
 }
 
-void SearchBox::OnFocus() {
-  is_focused_ = true;
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    extensions_v8::SearchBoxExtension::DispatchFocus(
+void SearchBox::OnKeyCaptureChange(bool is_key_capture_enabled) {
+  if (is_key_capture_enabled != is_key_capture_enabled_ &&
+      render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    is_key_capture_enabled_ = is_key_capture_enabled;
+    DVLOG(1) << render_view() << " OnKeyCaptureChange";
+    extensions_v8::SearchBoxExtension::DispatchKeyCaptureChange(
         render_view()->GetWebView()->mainFrame());
   }
 }
 
-void SearchBox::OnBlur() {
-  is_focused_ = false;
+void SearchBox::OnModeChanged(const chrome::search::Mode& mode) {
+  mode_ = mode;
   if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    extensions_v8::SearchBoxExtension::DispatchBlur(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
-void SearchBox::OnActiveTabModeChanged(bool active_tab_is_ntp) {
-  active_tab_is_ntp_ = active_tab_is_ntp;
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnModeChanged";
     extensions_v8::SearchBoxExtension::DispatchContextChange(
         render_view()->GetWebView()->mainFrame());
   }
 }
 
+void SearchBox::OnSetDisplayInstantResults(bool display_instant_results) {
+  display_instant_results_ = display_instant_results;
+}
+
+void SearchBox::OnThemeChanged(const ThemeBackgroundInfo& theme_info) {
+  theme_info_ = theme_info;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchThemeChange(
+        render_view()->GetWebView()->mainFrame());
+  }
+}
+
+void SearchBox::OnThemeAreaHeightChanged(int height) {
+  theme_area_height_ = height;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchThemeAreaHeightChange(
+        render_view()->GetWebView()->mainFrame());
+  }
+}
+
+double SearchBox::GetZoom() const {
+  WebKit::WebView* web_view = render_view()->GetWebView();
+  if (web_view) {
+    double zoom = WebKit::WebView::zoomLevelToZoomFactor(web_view->zoomLevel());
+    if (zoom != 0)
+      return zoom;
+  }
+  return 1.0;
+}
+
+void SearchBox::OnFontInformationReceived(const string16& omnibox_font,
+                                          size_t omnibox_font_size) {
+  omnibox_font_ = omnibox_font;
+  omnibox_font_size_ = omnibox_font_size;
+}
+
 void SearchBox::Reset() {
   query_.clear();
   verbatim_ = false;
-  selection_start_ = selection_end_ = 0;
+  selection_start_ = 0;
+  selection_end_ = 0;
   results_base_ = 0;
-  rect_ = gfx::Rect();
+  popup_bounds_ = gfx::Rect();
+  start_margin_ = 0;
+  end_margin_ = 0;
   autocomplete_results_.clear();
-  is_focused_ = false;
+  is_key_capture_enabled_ = false;
+  mode_ = chrome::search::Mode();
+  theme_info_ = ThemeBackgroundInfo();
+  theme_area_height_ = 0;
+  // Don't reset display_instant_results_ to prevent clearing it on committed
+  // results pages in extended mode. Otherwise resetting it is a no-op because
+  // a new loader is created when it changes; see crbug.com/164662.
+  // Also don't reset omnibox_font_ or omnibox_font_size_ since it never
+  // changes.
 }

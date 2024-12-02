@@ -45,19 +45,49 @@ class WebContentsDelegate;
 class WebContentsView;
 struct RendererPreferences;
 
-// Describes what goes in the main content area of a tab.
+// WebContents is the core class in content/. A WebContents renders web content
+// (usually HTML) in a rectangular area.
+//
+// Instantiating one is simple:
+//   scoped_ptr<content::WebContents> web_contents(
+//       content::WebContents::Create(
+//           content::WebContents::CreateParams(browser_context)));
+//   gfx::NativeView view = web_contents->GetView()->GetNativeView();
+//   // |view| is an HWND, NSView*, GtkWidget*, etc.; insert it into the view
+//   // hierarchy wherever it needs to go.
+//
+// That's it; go to your kitchen, grab a scone, and chill. WebContents will do
+// all the multi-process stuff behind the scenes. More details are at
+// http://www.chromium.org/developers/design-documents/multi-process-architecture .
+//
+// Each WebContents has exactly one NavigationController; each
+// NavigationController belongs to one WebContents. The NavigationController can
+// be obtained from GetController(), and is used to load URLs into the
+// WebContents, navigate it backwards/forwards, etc. See navigation_controller.h
+// for more details.
 class WebContents : public PageNavigator,
                     public IPC::Sender,
                     public base::SupportsUserData {
  public:
-  // |base_web_contents| is used if we want to size the new WebContents's view
-  // based on the view of an existing WebContents.  This can be NULL if not
-  // needed.
-  CONTENT_EXPORT static WebContents* Create(
-      BrowserContext* browser_context,
-      SiteInstance* site_instance,
-      int routing_id,
-      const WebContents* base_web_contents);
+  struct CONTENT_EXPORT CreateParams {
+    explicit CreateParams(BrowserContext* context);
+    CreateParams(BrowserContext* context, SiteInstance* site);
+
+    BrowserContext* browser_context;
+    SiteInstance* site_instance;
+    int routing_id;
+
+    // Used if we want to size the new WebContents's view based on the view of
+    // an existing WebContents.  This can be NULL if not needed.
+    const WebContents* base_web_contents;
+
+    // Used to specify the location context which display the new view should
+    // belong. This can be NULL if not needed.
+    gfx::NativeView context;
+  };
+
+  // Creates a new WebContents.
+  CONTENT_EXPORT static WebContents* Create(const CreateParams& params);
 
   // Similar to Create() above but should be used when you need to prepopulate
   // the SessionStorageNamespaceMap of the WebContents. This can happen if
@@ -70,10 +100,7 @@ class WebContents : public PageNavigator,
   // they should not be shared by multiple WebContents, and what bad things
   // can happen if you share the object.
   CONTENT_EXPORT static WebContents* CreateWithSessionStorage(
-      BrowserContext* browser_context,
-      SiteInstance* site_instance,
-      int routing_id,
-      const WebContents* base_web_contents,
+      const CreateParams& params,
       const SessionStorageNamespaceMap& session_storage_namespace_map);
 
   // Returns a WebContents that wraps the RenderViewHost, or NULL if the
@@ -106,6 +133,18 @@ class WebContents : public PageNavigator,
 
   // Gets the current RenderViewHost for this tab.
   virtual RenderViewHost* GetRenderViewHost() const = 0;
+
+  typedef base::Callback<void(RenderViewHost* /* render_view_host */,
+                              int /* x */,
+                              int /* y */)> GetRenderViewHostCallback;
+  // Gets the RenderViewHost at coordinates (|x|, |y|) for this WebContents via
+  // |callback|.
+  // This can be different than the current RenderViewHost if there is a
+  // BrowserPlugin at the specified position.
+  virtual void GetRenderViewHostAtPosition(
+      int x,
+      int y,
+      const GetRenderViewHostCallback& callback) = 0;
 
   // Gets the current RenderViewHost's routing id. Returns
   // MSG_ROUTING_NONE when there is no RenderViewHost.
@@ -381,6 +420,23 @@ class WebContents : public PageNavigator,
 
   // Does this have an opener associated with it?
   virtual bool HasOpener() const = 0;
+
+  typedef base::Callback<void(int, /* id */
+                              const GURL&, /* image_url */
+                              bool, /* errored */
+                              int,  /* requested_size */
+                              const std::vector<SkBitmap>& /* bitmaps*/)>
+      FaviconDownloadCallback;
+
+  // Sends a request to download the given favicon |url| and returns the unique
+  // id of the download request. When the download is finished, |callback| will
+  // be called with the bitmaps received from the renderer. Note that
+  // |image_size| is a hint for images with multiple sizes. The downloaded image
+  // is not resized to the given image_size. If 0 is passed, the first frame of
+  // the image is returned.
+  virtual int DownloadFavicon(const GURL& url, int image_size,
+                              const FaviconDownloadCallback& callback) = 0;
+
 };
 
 }  // namespace content

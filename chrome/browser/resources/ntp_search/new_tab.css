@@ -34,13 +34,8 @@ body {
 }
 
 #notification-container {
-  -webkit-transition: opacity 200ms;
-  position: absolute;
-}
-
-#notification-container.inactive {
-  -webkit-transition: opacity 200ms;
-  opacity: 0;
+  height: 18px;
+  padding: 10px 0;
 }
 
 #notification {
@@ -70,17 +65,19 @@ body {
 }
 
 #bottom-panel {
-  -webkit-transition: opacity 250ms, -webkit-transform 250ms;
+  -webkit-transition: opacity 200ms;
   position: absolute;
+  top: 300px;
+  visibility: hidden;
   width: 100%;
 }
 
 .hide-bottom-panel {
-  -webkit-transform: translate3d(0, 170px, 0);
   opacity: 0;
 }
 
 #card-slider-frame {
+  height: 100px;
   overflow: hidden;
 }
 
@@ -93,21 +90,28 @@ body {
 #bottom-panel-header,
 #bottom-panel-footer,
 #bottom-panel-toolbar {
-  margin: 10px auto;
+  margin: 0 auto;
   text-align: center;
 }
 
-#bottom-panel-toolbar,
-#bottom-panel-footer {
-  height: 18px;
-}
-
 #bottom-panel-header {
-  margin-top: 38px;
+  padding: 10px 0 20px;
 }
 
-#bottom-panel-toolbar {
-  margin-top: 8px;
+#bookmark-bar-spacer {
+  height: 48px;
+}
+
+#promo-bubble-anchor {
+  bottom: 50px;
+  height: 10px;
+  left: 0;
+  position: absolute;
+  width: 90px;
+}
+
+.bubble .bubble-arrow {
+  display: none;
 }
 
 /* TODO(jeremycho): Figure out if we need this. */

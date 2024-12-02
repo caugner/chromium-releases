@@ -120,7 +120,7 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
     virtual base::WaitableEvent* GetShutdownEvent() OVERRIDE;
     virtual IPC::PlatformFileForTransit ShareHandleWithRemote(
         base::PlatformFile handle,
-        const IPC::SyncChannel& /* channel */,
+        base::ProcessId remote_pid,
         bool should_close_source) OVERRIDE;
 
     // PluginDispatcher::PluginDelegate implementation.
@@ -129,7 +129,6 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
     virtual void Unregister(uint32 plugin_dispatcher_id) OVERRIDE;
 
     // PluginProxyDelegate implementation.
-    virtual bool SendToBrowser(IPC::Message* msg) OVERRIDE;
     virtual IPC::Sender* GetBrowserSender() OVERRIDE;
     virtual std::string GetUILanguage() OVERRIDE;
     virtual void PreCacheFont(const void* logfontw) OVERRIDE;
@@ -203,7 +202,7 @@ class HostProxyTestHarness : public ProxyTestHarnessBase {
     virtual base::WaitableEvent* GetShutdownEvent();
     virtual IPC::PlatformFileForTransit ShareHandleWithRemote(
         base::PlatformFile handle,
-        const IPC::SyncChannel& /* channel */,
+        base::ProcessId remote_pid,
         bool should_close_source) OVERRIDE;
 
    private:

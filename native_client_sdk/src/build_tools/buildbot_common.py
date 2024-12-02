@@ -24,14 +24,20 @@ def IsSDKBuilder():
   False means it is either running on a trybot, or a user's machine.
 
   Trybot names:
-    naclsdkm-((pnacl-)?linux|mac|windows(32|64))
+    (win|mac|linux)_nacl_sdk
 
   Builder names:
-    (pnacl-)?(windows|mac|linux)-sdk-multi(rel)?
-
-    except there are currently no pnacl multirel bots, and
-    pnacl-windows-sdk-multi is actually called pnacl-win-sdk-multi."""
+    (windows|mac|linux)-sdk-multi(rel)?"""
   return '-sdk-multi' in os.getenv('BUILDBOT_BUILDERNAME', '')
+
+
+def IsSDKTrybot():
+  """Returns True if this script is running on an SDK trybot.
+
+  False means it is either running on an SDK builder, or a user's machine.
+
+  See IsSDKBuilder above for trybot/buildbot names."""
+  return '_nacl_sdk' in os.getenv('BUILDBOT_BUILDERNAME', '')
 
 
 def ErrorExit(msg):
@@ -49,7 +55,7 @@ def BuildStep(name):
 
 def Run(args, cwd=None, env=None, shell=False):
   """Start a process with the provided arguments.
-  
+
   Starts a process in the provided directory given the provided arguments. If
   shell is not False, the process is launched via the shell to provide shell
   interpretation of the arguments.  Shell behavior can differ between platforms
@@ -74,7 +80,7 @@ def CopyDir(src, dst, excludes=('.svn', '*/.svn')):
 
 
 def CopyFile(src, dst):
-  print 'cp -r %s %s' % (src, dst)
+  print 'cp %s %s' % (src, dst)
   if os.path.abspath(src) == os.path.abspath(dst):
     ErrorExit('ERROR: Copying file onto itself: ' + src)
   args = [src, dst]

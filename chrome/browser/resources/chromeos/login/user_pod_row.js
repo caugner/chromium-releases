@@ -15,6 +15,13 @@ cr.define('login', function() {
   var POD_WIDTH = 170 + 2 * (10 + 10);
 
   /**
+   * Number of displayed columns depending on user pod count.
+   * @type {Array.<number>}
+   * @const
+   */
+  var COLUMNS = [0, 1, 2, 3, 4, 5, 4, 4, 4, 5, 5, 6, 6, 5, 5, 6, 6, 6, 6];
+
+  /**
    * Whether to preselect the first pod automatically on login screen.
    * @type {boolean}
    * @const
@@ -50,8 +57,10 @@ cr.define('login', function() {
    */
   var OAuthTokenStatus = {
     UNKNOWN: 0,
-    INVALID: 1,
-    VALID: 2
+    INVALID_OLD: 1,
+    VALID_OLD: 2,
+    INVALID_NEW: 3,
+    VALID_NEW: 4
   };
 
   /**
@@ -93,13 +102,22 @@ cr.define('login', function() {
    * @extends {HTMLDivElement}
    */
   var UserPod = cr.ui.define(function() {
-    return $('user-pod-template').cloneNode(true);
+    var node = $('user-pod-template').cloneNode(true);
+    node.removeAttribute('id');
+    return node;
   });
+
+  /**
+   * Unique salt added to user image URLs to prevent caching. Dictionary with
+   * user names as keys.
+   * @type {Object}
+   */
+  UserPod.userImageSalt_ = {};
 
   UserPod.prototype = {
     __proto__: HTMLDivElement.prototype,
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       this.tabIndex = UserPodTabOrder.POD_INPUT;
       this.removeUserButtonElement.tabIndex = UserPodTabOrder.REMOVE_USER;
@@ -168,7 +186,7 @@ cr.define('login', function() {
      * @type {!HTMLDivElement}
      */
     get signedInIndicatorElement() {
-      return this.firstElementChild;
+      return this.querySelector('.signed-in-indicator');
     },
 
     /**
@@ -176,7 +194,7 @@ cr.define('login', function() {
      * @type {!HTMLImageElement}
      */
     get imageElement() {
-      return this.signedInIndicatorElement.nextElementSibling;
+      return this.querySelector('.user-image');
     },
 
     /**
@@ -184,7 +202,7 @@ cr.define('login', function() {
      * @type {!HTMLDivElement}
      */
     get nameElement() {
-      return this.imageElement.nextElementSibling;
+      return this.querySelector('.name');
     },
 
     /**
@@ -192,7 +210,7 @@ cr.define('login', function() {
      * @type {!HTMLInputElement}
      */
     get passwordElement() {
-      return this.nameElement.nextElementSibling;
+      return this.querySelector('.password');
     },
 
     /**
@@ -200,7 +218,7 @@ cr.define('login', function() {
      * @type {!HTMLImageElement}
      */
     get capslockHintElement() {
-      return this.signinButtonElement.previousElementSibling;
+      return this.querySelector('.capslock-hint');
     },
 
     /**
@@ -208,7 +226,7 @@ cr.define('login', function() {
      * @type {!HTMLInputElement}
      */
     get signinButtonElement() {
-      return this.removeUserButtonElement.previousElementSibling;
+      return this.querySelector('.signin-button');
     },
 
     /**
@@ -216,14 +234,15 @@ cr.define('login', function() {
      * @type {!HTMLInputElement}
      */
     get removeUserButtonElement() {
-      return this.lastElementChild;
+      return this.querySelector('.remove-user-button');
     },
 
     /**
      * Updates the user pod element.
      */
     update: function() {
-      this.updateUserImage();
+      this.imageElement.src = 'chrome://userimage/' + this.user.username +
+          '?id=' + UserPod.userImageSalt_[this.user.username];
 
       this.nameElement.textContent = this.user_.displayName;
       this.removeUserButtonElement.hidden = !this.user_.canRemove;
@@ -260,7 +279,8 @@ cr.define('login', function() {
     get needGaiaSignin() {
       // Gaia signin is performed if the user has an invalid oauth token and is
       // not currently signed in (i.e. not the lock screen).
-      return this.user.oauthTokenStatus != OAuthTokenStatus.VALID &&
+      return this.user.oauthTokenStatus != OAuthTokenStatus.VALID_OLD &&
+          this.user.oauthTokenStatus != OAuthTokenStatus.VALID_NEW &&
           !this.user.signedIn;
     },
 
@@ -303,8 +323,8 @@ cr.define('login', function() {
      * Updates the image element of the user.
      */
     updateUserImage: function() {
-      this.imageElement.src = 'chrome://userimage/' + this.user.username +
-          '?id=' + new Date().getTime();
+      UserPod.userImageSalt_[this.user.username] = new Date().getTime();
+      this.update();
     },
 
     /**
@@ -382,7 +402,7 @@ cr.define('login', function() {
 
     /**
      * Handles mousedown event on a user pod.
-     * @param {Event} e Mouseout event.
+     * @param {Event} e Mousedown event.
      */
     handleMouseDown_: function(e) {
       if (this.parentNode.disabled)
@@ -395,6 +415,140 @@ cr.define('login', function() {
     }
   };
 
+  /**
+   * Creates a public account user pod.
+   * @constructor
+   * @extends {UserPod}
+   */
+  var PublicAccountUserPod = cr.ui.define(function() {
+    var node = UserPod();
+
+    var extras = $('public-account-user-pod-extras-template').children;
+    for (var i = 0; i < extras.length; ++i) {
+      var el = extras[i].cloneNode(true);
+      node.appendChild(el);
+    }
+
+    return node;
+  });
+
+  PublicAccountUserPod.prototype = {
+    __proto__: UserPod.prototype,
+
+    /**
+     * "Enter" button in expanded side pane.
+     * @type {!HTMLButtonElement}
+     */
+    get enterButtonElement() {
+      return this.querySelector('.enter-button');
+    },
+
+    /**
+     * Boolean flag of whether the pod is showing the side pane. The flag
+     * controls whether 'expanded' class is added to the pod's class list and
+     * resets tab order because main input element changes when the 'expanded'
+     * state changes.
+     * @type {boolean}
+     */
+    get expanded() {
+      return this.classList.contains('expanded');
+    },
+    set expanded(expanded) {
+      if (this.expanded == expanded)
+        return;
+
+      this.resetTabOrder();
+      this.classList.toggle('expanded', expanded);
+
+      var self = this;
+      this.classList.add('animating');
+      this.addEventListener('webkitTransitionEnd', function f(e) {
+        self.removeEventListener('webkitTransitionEnd', f);
+        self.classList.remove('animating');
+      });
+    },
+
+    /** @override */
+    get needGaiaSignin() {
+      return false;
+    },
+
+    /** @override */
+    get mainInput() {
+      if (this.expanded)
+        return this.enterButtonElement;
+      else
+        return this.nameElement;
+    },
+
+    /** @override */
+    decorate: function() {
+      UserPod.prototype.decorate.call(this);
+
+      this.classList.remove('need-password');
+      this.classList.add('public-account');
+
+      this.nameElement.addEventListener('keydown', (function(e) {
+        if (e.keyIdentifier == 'Enter') {
+          this.parentNode.activatedPod = this;
+          // Stop this keydown event from bubbling up to PodRow handler.
+          e.stopPropagation();
+          // Prevent default so that we don't trigger a 'click' event on the
+          // newly focused "Enter" button.
+          e.preventDefault();
+        }
+      }).bind(this));
+
+      this.enterButtonElement.addEventListener('click', (function(e) {
+        chrome.send('launchPublicAccount', [this.user.username]);
+      }).bind(this));
+    },
+
+    /**
+     * Updates the user pod element.
+     */
+    update: function() {
+      UserPod.prototype.update.call(this);
+      this.querySelector('.side-pane-name').textContent =
+          this.user_.displayName;
+      this.querySelector('.info').textContent =
+          localStrings.getStringF('publicAccountInfoFormat',
+                                  this.user_.enterpriseDomain);
+    },
+
+    /** @override */
+    focusInput: function() {
+      // Move tabIndex from the whole pod to the main input.
+      this.tabIndex = -1;
+      this.mainInput.tabIndex = UserPodTabOrder.POD_INPUT;
+      this.mainInput.focus();
+    },
+
+    /** @override */
+    reset: function(takeFocus) {
+      if (!takeFocus)
+        this.expanded = false;
+      UserPod.prototype.reset.call(this, takeFocus);
+    },
+
+    /** @override */
+    activate: function() {
+      this.expanded = true;
+      this.focusInput();
+      return true;
+    },
+
+    /** @override */
+    handleMouseDown_: function(e) {
+      if (this.parentNode.disabled)
+        return;
+
+      this.parentNode.focusPod(this);
+      this.parentNode.activatedPod = this;
+      // Prevent default so that we don't trigger 'focus' event.
+      e.preventDefault();
+    }
+  };
 
   /**
    * Creates a new pod row element.
@@ -436,7 +590,7 @@ cr.define('login', function() {
     // Pods whose initial images haven't been loaded yet.
     podsWithPendingImages_: [],
 
-    /** @inheritDoc */
+    /** @override */
     decorate: function() {
       this.style.left = 0;
 
@@ -455,6 +609,14 @@ cr.define('login', function() {
      */
     get pods() {
       return this.children;
+    },
+
+    /**
+     * Return true if user pod row has only single user pod in it.
+     * @type {boolean}
+     */
+    get isSinglePod() {
+      return this.children.length == 1;
     },
 
     hideTitles: function() {
@@ -503,7 +665,12 @@ cr.define('login', function() {
      * @param {string} email User's email.
      */
     createUserPod: function(user) {
-      var userPod = new UserPod({user: user});
+      var userPod;
+      if (user.publicAccount)
+        userPod = new PublicAccountUserPod({user: user});
+      else
+        userPod = new UserPod({user: user});
+
       userPod.hidden = false;
       return userPod;
     },
@@ -535,29 +702,6 @@ cr.define('login', function() {
           return i;
       }
       return -1;
-    },
-
-    /**
-     * Ensures the given pod is visible.
-     * @param {UserPod} pod Pod to scroll into view.
-     */
-    scrollPodIntoView: function(pod) {
-      var podIndex = this.indexOf_(pod);
-      if (podIndex == -1)
-        return;
-
-      var left = podIndex * POD_WIDTH;
-      var right = left + POD_WIDTH;
-
-      var viewportLeft = -parseInt(this.style.left);
-      var viewportRight = viewportLeft + this.parentNode.clientWidth;
-
-      if (left < viewportLeft) {
-        this.style.left = -left + 'px';
-      } else if (right > viewportRight) {
-        var offset = right - viewportRight;
-        this.style.left = (viewportLeft - offset) + 'px';
-      }
     },
 
     /**
@@ -613,7 +757,67 @@ cr.define('login', function() {
         $('pod-row').classList.remove('images-loading');
       }, POD_ROW_IMAGES_LOAD_TIMEOUT_MS);
 
+      // loadPods is called after user list update (for ex. after deleting user)
+      // so make sure that tooltips are updated.
+      $('pod-row').updateTitles();
+
+      var columns = users.length < COLUMNS.length ?
+          COLUMNS[users.length] : COLUMNS[COLUMNS.length - 1];
+      var rows = Math.floor((users.length - 1) / columns) + 1;
+
+      // Cancel any pending resize operation.
+      this.removeEventListener('mouseout', this.deferredResizeListener_);
+
+      if (!this.columns || !this.rows) {
+        // Set initial dimensions.
+        this.resize_(columns, rows);
+      } else if (columns != this.columns || rows != this.rows) {
+        // Defer the resize until mouse cursor leaves the pod row.
+        this.deferredResizeListener_ = function(e) {
+          if (!findAncestorByClass(e.toElement, 'podrow')) {
+            this.resize_(columns, rows);
+          }
+        }.bind(this);
+        this.addEventListener('mouseout', this.deferredResizeListener_);
+      }
+
       this.focusPod(this.preselectedPod);
+    },
+
+    /**
+     * Resizes the pod row and cancel any pending resize operations.
+     * @param {number} columns Number of columns.
+     * @param {number} rows Number of rows.
+     * @private
+     */
+    resize_: function(columns, rows) {
+      this.removeEventListener('mouseout', this.deferredResizeListener_);
+      this.columns = columns;
+      this.rows = rows;
+    },
+
+    /**
+     * Number of columns.
+     * @type {?number}
+     */
+    set columns(columns) {
+      // Cannot use 'columns' here.
+      this.setAttribute('ncolumns', columns);
+    },
+    get columns() {
+      return this.getAttribute('ncolumns');
+    },
+
+    /**
+     * Number of rows.
+     * @type {?number}
+     */
+    set rows(rows) {
+      // Cannot use 'rows' here.
+      this.setAttribute('nrows', rows);
+    },
+    get rows() {
+      return this.getAttribute('nrows');
     },
 
     /**
@@ -654,13 +858,16 @@ cr.define('login', function() {
         }
       }
 
+      // Clear any error messages for previous pod.
+      if (!this.isFocused(podToFocus))
+        Oobe.clearErrors();
+
       var hadFocus = !!this.focusedPod_;
       this.focusedPod_ = podToFocus;
       if (podToFocus) {
         podToFocus.classList.remove('faded');
         podToFocus.classList.add('focused');
         podToFocus.reset(true);  // Reset and give focus.
-        this.scrollPodIntoView(podToFocus);
         if (hadFocus && this.keyboardActivated_) {
           // Delay wallpaper loading to let user tab through pods without lag.
           this.loadWallpaperTimeout_ = window.setTimeout(
@@ -768,7 +975,7 @@ cr.define('login', function() {
     resetUserOAuthTokenStatus: function(username) {
       var pod = this.getPodWithUsername_(username);
       if (pod) {
-        pod.user.oauthTokenStatus = OAuthTokenStatus.INVALID;
+        pod.user.oauthTokenStatus = OAuthTokenStatus.INVALID_OLD;
         pod.update();
       } else {
         console.log('Failed to update Gaia state for: ' + username);
@@ -783,10 +990,15 @@ cr.define('login', function() {
     handleClick_: function(e) {
       if (this.disabled)
         return;
-      // Clears focus if not clicked on a pod.
-      if (e.target.parentNode != this &&
-          e.target.parentNode.parentNode != this) {
+      // Clears focus if not clicked on a pod and if there's more than one pod.
+      var pod = findAncestorByClass(e.target, 'pod');
+      if ((!pod || pod.parentNode != this) && !this.isSinglePod) {
         this.focusPod();
+      }
+
+      // Return focus back to single pod.
+      if (this.isSinglePod) {
+        this.focusPod(this.focusedPod_, true /* force */);
       }
     },
 
@@ -804,18 +1016,27 @@ cr.define('login', function() {
           e.target.focusInput();
         else
           this.focusPod(e.target);
-      } else if (e.target.parentNode.parentNode == this) {
+        return;
+      }
+
+      var pod = findAncestorByClass(e.target, 'pod');
+      if (pod && pod.parentNode == this) {
         // Focus on a control of a pod but not on the Remove button.
-        if (!e.target.parentNode.classList.contains('focused') &&
+        if (!pod.classList.contains('focused') &&
             !e.target.classList.contains('remove-user-button')) {
-          this.focusPod(e.target.parentNode);
+          this.focusPod(pod);
           e.target.focus();
         }
-      } else {
-        // Clears pod focus when we reach here. It means new focus is neither
-        // on a pod nor on a button/input for a pod.
-        this.focusPod();
+        return;
       }
+
+      // Clears pod focus when we reach here. It means new focus is neither
+      // on a pod nor on a button/input for a pod.
+      // Do not "defocus" user pod when it is a single pod.
+      // That means that 'focused' class will not be removed and
+      // input field/button will always be visible.
+      if (!this.isSinglePod)
+        this.focusPod();
     },
 
     /**
@@ -856,7 +1077,8 @@ cr.define('login', function() {
           }
           break;
         case 'U+001B':  // Esc
-          this.focusPod();
+          if (!this.isSinglePod)
+            this.focusPod();
           break;
       }
     },

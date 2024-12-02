@@ -15,20 +15,21 @@ import android.util.Pair;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.util.CommonResources;
-import org.chromium.android_webview.test.util.TestWebServer;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.net.test.util.TestWebServer;
 
 import java.io.InputStream;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.List;
 
 /**
@@ -38,7 +39,7 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     private TestAwContentsClient mContentsClient = new TestAwContentsClient();
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     @UiThreadTest
     public void testCreateDestroy() throws Throwable {
         // NOTE this test runs on UI thread, so we cannot call any async methods.
@@ -70,7 +71,7 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testDocumentHasImages() throws Throwable {
         AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         AwContents awContents = testView.getAwContents();
@@ -92,18 +93,8 @@ public class AwContentsTest extends AndroidWebViewTestBase {
         assertEquals(1, result);
     }
 
-    private void clearCacheOnUiThread(final AwContents awContents,
-                                         final boolean includeDiskFiles) throws Throwable {
-        runTestOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-              awContents.clearCache(includeDiskFiles);
-            }
-        });
-    }
-
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testClearCacheMemoryAndDisk() throws Throwable {
         final TestAwContentsClient contentClient = new TestAwContentsClient();
         final AwTestContainerView testContainer =
@@ -157,7 +148,7 @@ public class AwContentsTest extends AndroidWebViewTestBase {
     }
 
     @SmallTest
-    @Feature({"Android-WebView"})
+    @Feature({"AndroidWebView"})
     public void testClearCacheInQuickSuccession() throws Throwable {
         final AwTestContainerView testContainer =
                 createAwTestContainerViewOnMainSync(false, new TestAwContentsClient());
@@ -178,7 +169,7 @@ public class AwContentsTest extends AndroidWebViewTestBase {
 
     /**
      * @SmallTest
-     * @Feature({"Android-WebView"})
+     * @Feature({"AndroidWebView"})
      * BUG 6094807
      */
     @DisabledTest
@@ -218,6 +209,82 @@ public class AwContentsTest extends AndroidWebViewTestBase {
 
             assertTrue(awContents.getFavicon().sameAs(originalFavicon));
 
+        } finally {
+            if (webServer != null) webServer.shutdown();
+        }
+    }
+
+    @Feature({"AndroidWebView", "Downloads"})
+    @SmallTest
+    public void testDownload() throws Throwable {
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+
+        // TODO(boliu): This is to work around disk cache corruption bug on
+        // unclean shutdown (crbug.com/154805).
+        clearCacheOnUiThread(awContents, true);
+
+        final String data = "download data";
+        final String contentDisposition = "attachment;filename=\"download.txt\"";
+        final String mimeType = "text/plain";
+
+        List<Pair<String, String>> downloadHeaders = new ArrayList<Pair<String, String>>();
+        downloadHeaders.add(Pair.create("Content-Disposition", contentDisposition));
+        downloadHeaders.add(Pair.create("Mime-Type", mimeType));
+        downloadHeaders.add(Pair.create("Content-Length", Integer.toString(data.length())));
+
+        TestWebServer webServer = null;
+        try {
+            webServer = new TestWebServer(false);
+            final String pageUrl = webServer.setResponse(
+                    "/download.txt", data, downloadHeaders);
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+
+            assertTrue(pollOnUiThread(new Callable<Boolean>() {
+                @Override
+                public Boolean call() {
+                    // Assert failures are treated as return false.
+                    assertEquals(pageUrl, mContentsClient.mLastDownloadUrl);
+                    assertEquals(contentDisposition,
+                                 mContentsClient.mLastDownloadContentDisposition);
+                    assertEquals(mimeType,
+                                 mContentsClient.mLastDownloadMimeType);
+                    assertEquals(data.length(),
+                                 mContentsClient.mLastDownloadContentLength);
+                    return true;
+                }
+            }));
+        } finally {
+            if (webServer != null) webServer.shutdown();
+        }
+    }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testUpdateVisitedHistoryCallback() throws Throwable {
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+
+        // TODO(boliu): This is to work around disk cache corruption bug on
+        // unclean shutdown (crbug.com/154805).
+        clearCacheOnUiThread(awContents, true);
+
+        final String path = "/testUpdateVisitedHistoryCallback.html";
+        final String html = "testUpdateVisitedHistoryCallback";
+
+        TestWebServer webServer = null;
+        try {
+            webServer = new TestWebServer(false);
+            final String pageUrl = webServer.setResponse(path, html, null);
+
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+            assertEquals(pageUrl, mContentsClient.mLastVisitedUrl);
+            assertEquals(false, mContentsClient.mLastVisitIsReload);
+
+            // Reload
+            loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+            assertEquals(pageUrl, mContentsClient.mLastVisitedUrl);
+            assertEquals(true, mContentsClient.mLastVisitIsReload);
         } finally {
             if (webServer != null) webServer.shutdown();
         }

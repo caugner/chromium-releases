@@ -34,7 +34,6 @@ using WebKit::WebKitPlatformSupport;
 using WebKit::WebMessagePortChannel;
 using WebKit::WebMimeRegistry;
 using WebKit::WebSandboxSupport;
-using WebKit::WebSharedWorkerRepository;
 using WebKit::WebStorageNamespace;
 using WebKit::WebString;
 using WebKit::WebURL;
@@ -169,11 +168,6 @@ void WorkerWebKitPlatformSupportImpl::dispatchStorageEvent(
     const WebString& new_value, const WebString& origin,
     const WebKit::WebURL& url, bool is_local_storage) {
   NOTREACHED();
-}
-
-WebSharedWorkerRepository*
-WorkerWebKitPlatformSupportImpl::sharedWorkerRepository() {
-    return 0;
 }
 
 WebKitPlatformSupport::FileHandle

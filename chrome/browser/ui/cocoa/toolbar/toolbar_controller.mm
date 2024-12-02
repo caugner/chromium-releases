@@ -87,7 +87,7 @@ const CGFloat kWrenchMenuLeftPadding = 3.0;
 @property(assign, nonatomic) Browser* browser;
 - (void)addAccessibilityDescriptions;
 - (void)initCommandStatus:(CommandUpdater*)commands;
-- (void)prefChanged:(std::string*)prefName;
+- (void)prefChanged:(const std::string&)prefName;
 - (BackgroundGradientView*)backgroundGradientView;
 - (void)toolbarFrameChanged;
 - (void)pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate;
@@ -105,7 +105,8 @@ namespace ToolbarControllerInternal {
 // A class registered for C++ notifications. This is used to detect changes in
 // preferences and upgrade available notifications. Bridges the notification
 // back to the ToolbarController.
-class NotificationBridge : public content::NotificationObserver {
+class NotificationBridge
+    : public content::NotificationObserver {
  public:
   explicit NotificationBridge(ToolbarController* controller)
       : controller_(controller) {
@@ -118,11 +119,8 @@ class NotificationBridge : public content::NotificationObserver {
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
-      case chrome::NOTIFICATION_PREF_CHANGED:
-        [controller_ prefChanged:content::Details<std::string>(details).ptr()];
-        break;
       case chrome::NOTIFICATION_UPGRADE_RECOMMENDED:
       case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
         [controller_ badgeWrenchMenuIfNeeded];
@@ -130,6 +128,10 @@ class NotificationBridge : public content::NotificationObserver {
       default:
         NOTREACHED();
     }
+  }
+
+  void OnPreferenceChanged(const std::string& pref_name) {
+    [controller_ prefChanged:pref_name];
   }
 
  private:
@@ -274,8 +276,11 @@ class NotificationBridge : public content::NotificationObserver {
   notificationBridge_.reset(
       new ToolbarControllerInternal::NotificationBridge(self));
   PrefService* prefs = profile_->GetPrefs();
-  showHomeButton_.Init(prefs::kShowHomeButton, prefs,
-                       notificationBridge_.get());
+  showHomeButton_.Init(
+      prefs::kShowHomeButton, prefs,
+      base::Bind(
+          &ToolbarControllerInternal::NotificationBridge::OnPreferenceChanged,
+          base::Unretained(notificationBridge_.get())));
   [self showOptionalHomeButton];
   [self installWrenchMenu];
 
@@ -563,9 +568,8 @@ class NotificationBridge : public content::NotificationObserver {
   [[wrenchButton_ cell] setOverlayImageID:error_badge_id];
 }
 
-- (void)prefChanged:(std::string*)prefName {
-  if (!prefName) return;
-  if (*prefName == prefs::kShowHomeButton) {
+- (void)prefChanged:(const std::string&)prefName {
+  if (prefName == prefs::kShowHomeButton) {
     [self showOptionalHomeButton];
   }
 }

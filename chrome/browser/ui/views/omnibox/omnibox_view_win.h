@@ -10,7 +10,6 @@
 #include <atlcrack.h>
 #include <atlctrls.h>
 #include <atlmisc.h>
-#include <peninputpanel.h>
 #include <tom.h>  // For ITextDocument, a COM interface to CRichEditCtrl.
 
 #include "base/memory/scoped_ptr.h"
@@ -43,7 +42,7 @@ class OmniboxViewWin
                                     ES_NOHIDESEL> >,
       public CRichEditCommands<OmniboxViewWin>,
       public ui::SimpleMenuModel::Delegate,
-      public ui::TsfEventRouterObserver,
+      public ui::TSFEventRouterObserver,
       public OmniboxView {
  public:
   struct State {
@@ -98,6 +97,7 @@ class OmniboxViewWin
   virtual void RevertAll() OVERRIDE;
   virtual void UpdatePopup() OVERRIDE;
   virtual void SetFocus() OVERRIDE;
+  virtual void ApplyCaretVisibility() OVERRIDE;
   virtual void OnTemporaryTextMaybeChanged(
       const string16& display_text,
       bool save_original_selection) OVERRIDE;
@@ -329,7 +329,7 @@ class OmniboxViewWin
   // If a host name is found, it makes it visually stronger.
   virtual void EmphasizeURLComponents() OVERRIDE;
 
-  // TsfEventRouter::Observer:
+  // TSFEventRouter::Observer:
   virtual void OnCandidateWindowCountChanged(size_t window_count) OVERRIDE;
   virtual void OnTextUpdated(const ui::Range& composition_range) OVERRIDE;
 
@@ -516,7 +516,7 @@ class OmniboxViewWin
   views::NativeViewHost* native_view_host_;
 
   // TSF related event router.
-  scoped_ptr<ui::TsfEventRouter> tsf_event_router_;
+  scoped_ptr<ui::TSFEventRouter> tsf_event_router_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewWin);
 };

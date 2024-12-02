@@ -18,12 +18,22 @@ using testing::_;
 
 namespace policy {
 
+class MockCloudPolicyServiceObserver : public CloudPolicyService::Observer {
+ public:
+  MockCloudPolicyServiceObserver() {}
+  virtual ~MockCloudPolicyServiceObserver() {}
+
+  MOCK_METHOD1(OnInitializationCompleted, void(CloudPolicyService* service));
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockCloudPolicyServiceObserver);
+};
+
 class CloudPolicyServiceTest : public testing::Test {
  public:
   CloudPolicyServiceTest()
       : service_(&client_, &store_) {}
 
-  MOCK_METHOD0(OnPolicyRefresh, void(void));
+  MOCK_METHOD1(OnPolicyRefresh, void(bool));
 
  protected:
   MockCloudPolicyClient client_;
@@ -80,7 +90,7 @@ TEST_F(CloudPolicyServiceTest, PolicyUpdateClientFailure) {
 TEST_F(CloudPolicyServiceTest, RefreshPolicySuccess) {
   testing::InSequence seq;
 
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(0);
+  EXPECT_CALL(*this, OnPolicyRefresh(_)).Times(0);
   client_.SetDMToken("fake token");
 
   // Trigger a fetch on the client.
@@ -99,7 +109,7 @@ TEST_F(CloudPolicyServiceTest, RefreshPolicySuccess) {
   store_.policy_.reset(new em::PolicyData());
   store_.policy_->set_request_token("token");
   store_.policy_->set_device_id("device-id");
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(1);
+  EXPECT_CALL(*this, OnPolicyRefresh(true)).Times(1);
   store_.NotifyStoreLoaded();
 }
 
@@ -108,7 +118,7 @@ TEST_F(CloudPolicyServiceTest, RefreshPolicyNotRegistered) {
   client_.SetDMToken("");
 
   EXPECT_CALL(client_, FetchPolicy()).Times(0);
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(1);
+  EXPECT_CALL(*this, OnPolicyRefresh(false)).Times(1);
   service_.RefreshPolicy(base::Bind(&CloudPolicyServiceTest::OnPolicyRefresh,
                                     base::Unretained(this)));
 }
@@ -116,7 +126,7 @@ TEST_F(CloudPolicyServiceTest, RefreshPolicyNotRegistered) {
 TEST_F(CloudPolicyServiceTest, RefreshPolicyClientError) {
   testing::InSequence seq;
 
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(0);
+  EXPECT_CALL(*this, OnPolicyRefresh(_)).Times(0);
   client_.SetDMToken("fake token");
 
   // Trigger a fetch on the client.
@@ -126,14 +136,14 @@ TEST_F(CloudPolicyServiceTest, RefreshPolicyClientError) {
 
   // Client responds with an error, which should trigger the callback.
   client_.SetStatus(DM_STATUS_REQUEST_FAILED);
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(1);
+  EXPECT_CALL(*this, OnPolicyRefresh(false)).Times(1);
   client_.NotifyClientError();
 }
 
 TEST_F(CloudPolicyServiceTest, RefreshPolicyStoreError) {
   testing::InSequence seq;
 
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(0);
+  EXPECT_CALL(*this, OnPolicyRefresh(_)).Times(0);
   client_.SetDMToken("fake token");
 
   // Trigger a fetch on the client.
@@ -149,14 +159,14 @@ TEST_F(CloudPolicyServiceTest, RefreshPolicyStoreError) {
   client_.NotifyPolicyFetched();
 
   // Store fails, which should trigger the callback.
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(1);
+  EXPECT_CALL(*this, OnPolicyRefresh(false)).Times(1);
   store_.NotifyStoreError();
 }
 
 TEST_F(CloudPolicyServiceTest, RefreshPolicyConcurrent) {
   testing::InSequence seq;
 
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(0);
+  EXPECT_CALL(*this, OnPolicyRefresh(_)).Times(0);
   client_.SetDMToken("fake token");
 
   // Trigger a fetch on the client.
@@ -182,7 +192,7 @@ TEST_F(CloudPolicyServiceTest, RefreshPolicyConcurrent) {
                                     base::Unretained(this)));
 
   // The store finishing the first load should not generate callbacks.
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(0);
+  EXPECT_CALL(*this, OnPolicyRefresh(_)).Times(0);
   store_.NotifyStoreLoaded();
 
   // Second policy fetch finishes.
@@ -190,8 +200,35 @@ TEST_F(CloudPolicyServiceTest, RefreshPolicyConcurrent) {
   client_.NotifyPolicyFetched();
 
   // Corresponding store operation finishes, all _three_ callbacks fire.
-  EXPECT_CALL(*this, OnPolicyRefresh()).Times(3);
+  EXPECT_CALL(*this, OnPolicyRefresh(true)).Times(3);
   store_.NotifyStoreLoaded();
+}
+
+TEST_F(CloudPolicyServiceTest, StoreAlreadyInitialized) {
+  // Service should start off initialized if the store has already loaded
+  // policy.
+  store_.NotifyStoreLoaded();
+  CloudPolicyService service(&client_, &store_);
+  EXPECT_TRUE(service.IsInitializationComplete());
+}
+
+TEST_F(CloudPolicyServiceTest, StoreLoadAfterCreation) {
+  // Service should start off un-initialized if the store has not yet loaded
+  // policy.
+  EXPECT_FALSE(service_.IsInitializationComplete());
+  MockCloudPolicyServiceObserver observer;
+  service_.AddObserver(&observer);
+  // Service should be marked as initialized and observer should be called back.
+  EXPECT_CALL(observer, OnInitializationCompleted(&service_)).Times(1);
+  store_.NotifyStoreLoaded();
+  EXPECT_TRUE(service_.IsInitializationComplete());
+  testing::Mock::VerifyAndClearExpectations(&observer);
+
+  // Now, the next time the store is loaded, the observer should not be called
+  // again.
+  EXPECT_CALL(observer, OnInitializationCompleted(&service_)).Times(0);
+  store_.NotifyStoreLoaded();
+  service_.RemoveObserver(&observer);
 }
 
 }  // namespace policy

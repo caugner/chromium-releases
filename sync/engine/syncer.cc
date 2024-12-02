@@ -36,7 +36,6 @@ using sync_pb::ClientCommand;
 
 namespace syncer {
 
-using sessions::ScopedSessionContextConflictResolver;
 using sessions::StatusController;
 using sessions::SyncSession;
 using syncable::IS_UNAPPLIED_UPDATE;
@@ -83,11 +82,9 @@ void Syncer::RequestEarlyExit() {
   early_exit_requested_ = true;
 }
 
-void Syncer::SyncShare(sessions::SyncSession* session,
+bool Syncer::SyncShare(sessions::SyncSession* session,
                        SyncerStep first_step,
                        SyncerStep last_step) {
-  ScopedSessionContextConflictResolver scoped(session->context(),
-                                              &resolver_);
   session->mutable_status_controller()->UpdateStartTime();
   SyncerStep current_step = first_step;
 
@@ -147,7 +144,7 @@ void Syncer::SyncShare(sessions::SyncSession* session,
       }
       case APPLY_UPDATES: {
         // These include encryption updates that should be applied early.
-        ApplyControlDataUpdates(session->context()->directory());
+        ApplyControlDataUpdates(session);
 
         ApplyUpdatesAndResolveConflictsCommand apply_updates;
         apply_updates.Execute(session);
@@ -179,17 +176,16 @@ void Syncer::SyncShare(sessions::SyncSession* session,
       }
       default:
         LOG(ERROR) << "Unknown command: " << current_step;
-    }
+    }  // switch
     DVLOG(2) << "last step: " << SyncerStepToString(last_step) << ", "
              << "current step: " << SyncerStepToString(current_step) << ", "
              << "next step: " << SyncerStepToString(next_step) << ", "
              << "snapshot: " << session->TakeSnapshot().ToString();
-    if (last_step == current_step) {
-      session->SetFinished();
-      break;
-    }
+    if (last_step == current_step)
+      return true;
     current_step = next_step;
-  }
+  }  // while
+  return false;
 }
 
 void CopyServerFields(syncable::Entry* src, syncable::MutableEntry* dest) {

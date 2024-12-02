@@ -79,7 +79,7 @@ views::Label* InfoBarView::CreateLabel(const string16& text) const {
       rb.GetFont(ui::ResourceBundle::MediumFont));
   label->SetBackgroundColor(background()->get_color());
   label->SetEnabledColor(SK_ColorBLACK);
-  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   return label;
 }
 
@@ -89,7 +89,7 @@ views::Link* InfoBarView::CreateLink(const string16& text,
   views::Link* link = new views::Link;
   link->SetText(text);
   link->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
-  link->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  link->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   link->set_listener(listener);
   link->SetBackgroundColor(background()->get_color());
   link->set_focusable(true);
@@ -226,11 +226,11 @@ void InfoBarView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
 
     close_button_ = new views::ImageButton(this);
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    close_button_->SetImage(views::CustomButton::BS_NORMAL,
+    close_button_->SetImage(views::CustomButton::STATE_NORMAL,
                             rb.GetImageNamed(IDR_CLOSE_BAR).ToImageSkia());
-    close_button_->SetImage(views::CustomButton::BS_HOT,
+    close_button_->SetImage(views::CustomButton::STATE_HOVERED,
                             rb.GetImageNamed(IDR_CLOSE_BAR_H).ToImageSkia());
-    close_button_->SetImage(views::CustomButton::BS_PUSHED,
+    close_button_->SetImage(views::CustomButton::STATE_PRESSED,
                             rb.GetImageNamed(IDR_CLOSE_BAR_P).ToImageSkia());
     close_button_->SetAccessibleName(
         l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));

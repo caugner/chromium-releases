@@ -27,80 +27,78 @@ class MockDriveService : public DriveServiceInterface {
   MOCK_METHOD1(Initialize, void(Profile* profile));
   MOCK_METHOD1(AddObserver, void(DriveServiceObserver* observer));
   MOCK_METHOD1(RemoveObserver,
-               void(DriveServiceObserver* observer));
+      void(DriveServiceObserver* observer));
   MOCK_CONST_METHOD0(CanStartOperation, bool());
   MOCK_METHOD0(CancelAll, void(void));
   MOCK_METHOD1(CancelForFilePath, bool(const FilePath& file_path));
   MOCK_CONST_METHOD0(GetProgressStatusList,
-                     OperationProgressStatusList());
-  MOCK_METHOD1(Authenticate,
-               void(const AuthStatusCallback& callback));
-  MOCK_METHOD5(GetDocuments,
-               void(const GURL& feed_url,
-                    int64 start_changestamp,
-                    const std::string& search_string,
-                    const std::string& directory_resource_id,
-                    const GetDataCallback& callback));
-  MOCK_METHOD2(GetDocumentEntry,
-               void(const std::string& resource_id,
-                    const GetDataCallback& callback));
+      OperationProgressStatusList());
+  MOCK_METHOD6(GetResourceList,
+      void(const GURL& feed_url,
+          int64 start_changestamp,
+          const std::string& search_string,
+          bool shared_with_me,
+          const std::string& directory_resource_id,
+          const GetResourceListCallback& callback));
+  MOCK_METHOD2(GetResourceEntry,
+      void(const std::string& resource_id,
+          const GetResourceEntryCallback& callback));
   MOCK_METHOD1(GetAccountMetadata,
-               void(const GetDataCallback& callback));
+      void(const GetAccountMetadataCallback& callback));
   MOCK_METHOD1(GetApplicationInfo,
-               void(const GetDataCallback& callback));
-  MOCK_METHOD2(DeleteDocument,
-               void(const GURL& document_url,
-                    const EntryActionCallback& callback));
-  MOCK_METHOD5(DownloadDocument,
-               void(const FilePath& virtual_path,
-                    const FilePath& local_cache_path,
-                    const GURL& content_url,
-                    DocumentExportFormat format,
-                    const DownloadActionCallback& callback));
-  MOCK_METHOD3(CopyDocument,
-               void(const std::string& resource_id,
-                    const FilePath::StringType& new_name,
-                    const GetDataCallback& callback));
+      void(const GetDataCallback& callback));
+  MOCK_METHOD2(DeleteResource,
+      void(const GURL& edit_url,
+          const EntryActionCallback& callback));
+  MOCK_METHOD5(DownloadHostedDocument,
+      void(const FilePath& virtual_path,
+          const FilePath& local_cache_path,
+          const GURL& content_url,
+          DocumentExportFormat format,
+          const DownloadActionCallback& callback));
+  MOCK_METHOD3(CopyHostedDocument,
+      void(const std::string& resource_id,
+           const FilePath::StringType& new_name,
+           const GetResourceEntryCallback& callback));
   MOCK_METHOD3(RenameResource,
-               void(const GURL& resource_url,
-                    const FilePath::StringType& new_name,
-                    const EntryActionCallback& callback));
+      void(const GURL& edit_url,
+          const FilePath::StringType& new_name,
+          const EntryActionCallback& callback));
   MOCK_METHOD3(AddResourceToDirectory,
-               void(const GURL& parent_content_url,
-                    const GURL& resource_url,
-                    const EntryActionCallback& callback));
-  MOCK_METHOD4(RemoveResourceFromDirectory,
-               void(const GURL& parent_content_url,
-                    const GURL& resource_url,
-                    const std::string& resource_id,
-                    const EntryActionCallback& callback));
-  MOCK_METHOD3(CreateDirectory,
-               void(const GURL& parent_content_url,
-                    const FilePath::StringType& directory_name,
-                    const GetDataCallback& callback));
+      void(const GURL& parent_content_url,
+          const GURL& edit_url,
+          const EntryActionCallback& callback));
+  MOCK_METHOD3(RemoveResourceFromDirectory,
+      void(const GURL& parent_content_url,
+          const std::string& resource_id,
+          const EntryActionCallback& callback));
+  MOCK_METHOD3(AddNewDirectory,
+      void(const GURL& parent_content_url,
+          const FilePath::StringType& directory_name,
+          const GetResourceEntryCallback& callback));
   MOCK_METHOD5(
       DownloadFile,
       void(const FilePath& virtual_path,
-           const FilePath& local_cache_path,
-           const GURL& content_url,
-           const DownloadActionCallback&
-           donwload_action_callback,
-           const GetContentCallback& get_content_callback));
+          const FilePath& local_cache_path,
+          const GURL& content_url,
+          const DownloadActionCallback&
+          donwload_action_callback,
+          const GetContentCallback& get_content_callback));
   MOCK_METHOD2(InitiateUpload,
-               void(const InitiateUploadParams& upload_file_info,
-                    const InitiateUploadCallback& callback));
+      void(const InitiateUploadParams& upload_file_info,
+          const InitiateUploadCallback& callback));
   MOCK_METHOD2(ResumeUpload,
-               void(const ResumeUploadParams& upload_file_info,
-                    const ResumeUploadCallback& callback));
+      void(const ResumeUploadParams& upload_file_info,
+          const ResumeUploadCallback& callback));
   MOCK_METHOD3(AuthorizeApp,
-               void(const GURL& resource_url,
-                    const std::string& app_ids,
-                    const GetDataCallback& callback));
+      void(const GURL& edit_url,
+          const std::string& app_id,
+          const AuthorizeAppCallback& callback));
   MOCK_CONST_METHOD0(HasAccessToken, bool());
   MOCK_CONST_METHOD0(HasRefreshToken, bool());
 
-  void set_account_metadata(base::Value* account_metadata) {
-    account_metadata_.reset(account_metadata);
+  void set_account_metadata(base::Value* account_metadata_data) {
+    account_metadata_data_.reset(account_metadata_data);
   }
 
   void set_feed_data(base::Value* feed_data) {
@@ -121,29 +119,26 @@ class MockDriveService : public DriveServiceInterface {
   // Helper stub methods for functions which take callbacks, so that
   // the callbacks get called with testable results.
 
-  // Will call |callback| with HTTP_SUCCESS and the token "test_auth_token"
-  // as the token.
-  void AuthenticateStub(const AuthStatusCallback& callback);
-
   // Will call |callback| with HTTP_SUCCESS and a StringValue with the current
   // value of |feed_data_|.
-  void GetDocumentsStub(const GURL& feed_url,
-                        int64 start_changestamp,
-                        const std::string& search_string,
-                        const std::string& directory_resource_id,
-                        const GetDataCallback& callback);
+  void GetResourceListStub(const GURL& feed_url,
+      int64 start_changestamp,
+      const std::string& search_string,
+      bool shared_with_me,
+      const std::string& directory_resource_id,
+      const GetResourceListCallback& callback);
 
   // Will call |callback| with HTTP_SUCCESS and a StringValue with the current
   // value of |account_metadata_|.
-  void GetAccountMetadataStub(const GetDataCallback& callback);
+  void GetAccountMetadataStub(const GetAccountMetadataCallback& callback);
 
-  // Will call |callback| with HTTP_SUCCESS and the |document_url|.
-  void DeleteDocumentStub(const GURL& document_url,
-                          const EntryActionCallback& callback);
+  // Will call |callback| with HTTP_SUCCESS.
+  void DeleteResourceStub(const GURL& edit_url,
+      const EntryActionCallback& callback);
 
   // Will call |callback| with HTTP_SUCCESS, the given URL, and the host+path
   // portion of the URL as the temporary file path.
-  void DownloadDocumentStub(
+  void DownloadHostedDocumentStub(
       const FilePath& virtual_path,
       const FilePath& local_tmp_path,
       const GURL& content_url,
@@ -152,33 +147,32 @@ class MockDriveService : public DriveServiceInterface {
 
   // Will call |callback| with HTTP_SUCCESS and the current value of
   // |document_data_|.
-  void CopyDocumentStub(const std::string& resource_id,
-                        const FilePath::StringType& new_name,
-                        const GetDataCallback& callback);
+  void CopyHostedDocumentStub(const std::string& resource_id,
+      const FilePath::StringType& new_name,
+      const GetResourceEntryCallback& callback);
 
-  // Will call |callback| with HTTP_SUCCESS and the |document_url|.
-  void RenameResourceStub(const GURL& document_url,
-                          const FilePath::StringType& new_name,
-                          const EntryActionCallback& callback);
-
-  // Will call |callback| with HTTP_SUCCESS and the |resource_url|.
-  void AddResourceToDirectoryStub(
-      const GURL& parent_content_url,
-      const GURL& resource_url,
+  // Will call |callback| with HTTP_SUCCESS.
+  void RenameResourceStub(const GURL& edit_url,
+      const FilePath::StringType& new_name,
       const EntryActionCallback& callback);
 
-  // Will call |callback| with HTTP_SUCCESS and the |resource_url|.
+  // Will call |callback| with HTTP_SUCCESS.
+  void AddResourceToDirectoryStub(
+      const GURL& parent_content_url,
+      const GURL& edit_url,
+      const EntryActionCallback& callback);
+
+  // Will call |callback| with HTTP_SUCCESS.
   void RemoveResourceFromDirectoryStub(
       const GURL& parent_content_url,
-      const GURL& resource_url,
       const std::string& resource_id,
       const EntryActionCallback& callback);
 
   // Will call |callback| with HTTP_SUCCESS and the current value of
   // |directory_data_|.
   void CreateDirectoryStub(const GURL& parent_content_url,
-                           const FilePath::StringType& directory_name,
-                           const GetDataCallback& callback);
+      const FilePath::StringType& directory_name,
+      const GetResourceEntryCallback& callback);
 
   // Will call |callback| with HTTP_SUCCESS, the given URL, and the host+path
   // portion of the URL as the temporary file path. If |file_data_| is not null,
@@ -191,23 +185,23 @@ class MockDriveService : public DriveServiceInterface {
       const GetContentCallback& get_content_callback);
 
   // Account meta data to be returned from GetAccountMetadata.
-  scoped_ptr<base::Value> account_metadata_;
+  scoped_ptr<base::Value> account_metadata_data_;
 
-  // Feed data to be returned from GetDocuments.
+  // Feed data to be returned from GetResourceList.
   scoped_ptr<base::Value> feed_data_;
 
   // Feed data to be returned from CreateDirectory.
   scoped_ptr<base::Value> directory_data_;
 
-  // Feed data to be returned from CopyDocument.
+  // Feed data to be returned from CopyHostedDocument.
   scoped_ptr<base::Value> document_data_;
 
-  // Feed data to be returned from GetDocuments if the search path is specified.
-  // The feed contains subset of the root_feed.
+  // Feed data to be returned from GetResourceList if the search path is
+  // specified. The feed contains subset of the root_feed.
   scoped_ptr<base::Value> search_result_;
 
   // File data to be written to the local temporary file when
-  // DownloadDocumentStub is called.
+  // DownloadHostedDocumentStub is called.
   scoped_ptr<std::string> file_data_;
 };
 

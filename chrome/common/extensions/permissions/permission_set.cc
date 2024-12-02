@@ -10,12 +10,14 @@
 
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
-#include "chrome/common/extensions/url_pattern.h"
-#include "chrome/common/extensions/url_pattern_set.h"
 #include "content/public/common/url_constants.h"
+#include "extensions/common/url_pattern.h"
+#include "extensions/common/url_pattern_set.h"
 #include "grit/generated_resources.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using extensions::URLPatternSet;
 
 namespace {
 
@@ -195,6 +197,23 @@ PermissionSet* PermissionSet::CreateUnion(
   return new PermissionSet(apis, explicit_hosts, scriptable_hosts);
 }
 
+// static
+PermissionSet* PermissionSet::ExcludeNotInManifestPermissions(
+    const PermissionSet* set) {
+  if (!set)
+    return new PermissionSet();
+
+  APIPermissionSet apis;
+  for (APIPermissionSet::const_iterator i = set->apis().begin();
+       i != set->apis().end(); ++i) {
+    if (!i->ManifestEntryForbidden())
+      apis.insert(i->Clone());
+  }
+
+  return new PermissionSet(
+      apis, set->explicit_hosts(), set->scriptable_hosts());
+}
+
 bool PermissionSet::operator==(
     const PermissionSet& rhs) const {
   return apis_ == rhs.apis_ &&
@@ -230,7 +249,7 @@ std::set<std::string> PermissionSet::GetAPIsAsStrings() const {
 
 bool PermissionSet::HasAnyAccessToAPI(
     const std::string& api_name) const {
-  if (HasAccessToFunction(api_name))
+  if (HasAccessToFunction(api_name, true))
     return true;
 
   for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
@@ -340,14 +359,16 @@ bool PermissionSet::CheckAPIPermissionWithParam(
 }
 
 bool PermissionSet::HasAccessToFunction(
-    const std::string& function_name) const {
+    const std::string& function_name, bool allow_implicit) const {
   // TODO(jstritar): Embed this information in each permission and add a method
   // like GrantsAccess(function_name) to APIPermission. A "default"
   // permission can then handle the modules and functions that everyone can
   // access.
-  for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
-    if (function_name == kNonPermissionFunctionNames[i])
-      return true;
+  if (allow_implicit) {
+    for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
+      if (function_name == kNonPermissionFunctionNames[i])
+        return true;
+    }
   }
 
   // Search for increasingly smaller substrings of |function_name| to see if we
@@ -361,9 +382,11 @@ bool PermissionSet::HasAccessToFunction(
     if (permission && apis_.count(permission->id()))
       return true;
 
-    for (size_t i = 0; i < kNumNonPermissionModuleNames; ++i) {
-      if (name == kNonPermissionModuleNames[i]) {
-        return true;
+    if (allow_implicit) {
+      for (size_t i = 0; i < kNumNonPermissionModuleNames; ++i) {
+        if (name == kNonPermissionModuleNames[i]) {
+          return true;
+        }
       }
     }
     lastdot = name.find_last_of("./");

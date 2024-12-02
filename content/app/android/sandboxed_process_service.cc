@@ -4,10 +4,14 @@
 
 #include "content/app/android/sandboxed_process_service.h"
 
+#include <cpu-features.h>
+
 #include "base/android/jni_array.h"
-#include "base/global_descriptors_posix.h"
 #include "base/logging.h"
+#include "base/posix/global_descriptors.h"
 #include "content/common/android/surface_texture_peer.h"
+#include "content/common/child_process.h"
+#include "content/common/child_thread.h"
 #include "content/public/app/android_library_loader_hooks.h"
 #include "content/public/common/content_descriptors.h"
 #include "ipc/ipc_descriptors.h"
@@ -58,7 +62,11 @@ void InternalInitSandboxedProcess(const std::vector<int>& file_ids,
                                   JNIEnv* env,
                                   jclass clazz,
                                   jobject context,
-                                  jobject service) {
+                                  jobject service,
+                                  jint cpu_count,
+                                  jlong cpu_features) {
+  // Set the CPU properties.
+  android_setCpu(cpu_count, cpu_features);
   // Register the file descriptors.
   // This includes the IPC channel, the crash dump signals and resource related
   // files.
@@ -71,6 +79,10 @@ void InternalInitSandboxedProcess(const std::vector<int>& file_ids,
 
 }
 
+void QuitSandboxMainThreadMessageLoop() {
+  MessageLoop::current()->Quit();
+}
+
 }  // namespace <anonymous>
 
 namespace content {
@@ -80,14 +92,17 @@ void InitSandboxedProcess(JNIEnv* env,
                           jobject context,
                           jobject service,
                           jintArray j_file_ids,
-                          jintArray j_file_fds) {
+                          jintArray j_file_fds,
+                          jint cpu_count,
+                          jlong cpu_features) {
   std::vector<int> file_ids;
   std::vector<int> file_fds;
   JavaIntArrayToIntVector(env, j_file_ids, &file_ids);
   JavaIntArrayToIntVector(env, j_file_fds, &file_fds);
 
   InternalInitSandboxedProcess(
-      file_ids, file_fds, env, clazz, context, service);
+      file_ids, file_fds, env, clazz, context, service,
+      cpu_count, cpu_features);
 }
 
 void ExitSandboxedProcess(JNIEnv* env, jclass clazz) {
@@ -98,6 +113,16 @@ void ExitSandboxedProcess(JNIEnv* env, jclass clazz) {
 
 bool RegisterSandboxedProcessService(JNIEnv* env) {
   return RegisterNativesImpl(env);
+}
+
+void ShutdownSandboxMainThread(JNIEnv* env, jobject obj) {
+  ChildProcess* current_process = ChildProcess::current();
+  if (!current_process)
+    return;
+  ChildThread* main_child_thread = current_process->main_thread();
+  if (main_child_thread && main_child_thread->message_loop())
+    main_child_thread->message_loop()->PostTask(FROM_HERE,
+        base::Bind(&QuitSandboxMainThreadMessageLoop));
 }
 
 }  // namespace content

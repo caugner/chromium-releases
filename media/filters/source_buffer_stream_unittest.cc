@@ -11,6 +11,7 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "media/base/data_buffer.h"
+#include "media/base/media_log.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace media {
@@ -28,7 +29,7 @@ class SourceBufferStreamTest : public testing::Test {
     config_.Initialize(kCodecVP8, VIDEO_CODEC_PROFILE_UNKNOWN,
                        VideoFrame::YV12, kCodedSize, gfx::Rect(kCodedSize),
                        kCodedSize, NULL, 0, false, false);
-    stream_.reset(new SourceBufferStream(config_));
+    stream_.reset(new SourceBufferStream(config_, LogCB()));
     SetStreamInfo(kDefaultFramesPerSecond, kDefaultKeyframesPerSecond);
   }
 
@@ -2346,6 +2347,27 @@ TEST_F(SourceBufferStreamTest, DISABLED_GarbageCollection_WaitingForKeyframe) {
   NewSegmentAppend(15, 1, &kDataA);
   CheckExpectedBuffers(15, 15, &kDataA);
   CheckExpectedRanges("{ [15,15) [20,28) }");
+}
+
+// Test the performance of garbage collection.
+TEST_F(SourceBufferStreamTest, GarbageCollection_Performance) {
+  // Force |keyframes_per_second_| to be equal to kDefaultFramesPerSecond.
+  SetStreamInfo(kDefaultFramesPerSecond, kDefaultFramesPerSecond);
+
+  const int kBuffersToKeep = 1000;
+  SetMemoryLimit(kBuffersToKeep);
+
+  int buffers_appended = 0;
+
+  NewSegmentAppend(0, kBuffersToKeep);
+  buffers_appended += kBuffersToKeep;
+
+  const int kBuffersToAppend = 1000;
+  const int kGarbageCollections = 3;
+  for (int i = 0; i < kGarbageCollections; ++i) {
+    AppendBuffers(buffers_appended, kBuffersToAppend);
+    buffers_appended += kBuffersToAppend;
+  }
 }
 
 TEST_F(SourceBufferStreamTest, ConfigChange_Basic) {

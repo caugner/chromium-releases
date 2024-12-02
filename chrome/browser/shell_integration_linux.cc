@@ -16,18 +16,19 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
-#include "base/eintr_wrapper.h"
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/process_util.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/web_applications/web_app.h"
@@ -76,7 +77,7 @@ std::string CreateShortcutIcon(
     return std::string();
 
   // TODO(phajdan.jr): Report errors from this function, possibly as infobars.
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   if (!temp_dir.CreateUniqueTempDir())
     return std::string();
 
@@ -161,7 +162,7 @@ void DeleteShortcutOnDesktop(const FilePath& shortcut_filename) {
 
 bool CreateShortcutInApplicationsMenu(const FilePath& shortcut_filename,
                                       const std::string& contents) {
-  ScopedTempDir temp_dir;
+  base::ScopedTempDir temp_dir;
   if (!temp_dir.CreateUniqueTempDir())
     return false;
 
@@ -336,9 +337,9 @@ bool SetDefaultWebClient(const std::string& protocol) {
 ShellIntegration::DefaultWebClientState GetIsDefaultWebClient(
     const std::string& protocol) {
 #if defined(OS_CHROMEOS)
-  return ShellIntegration::IS_DEFAULT_WEB_CLIENT;
+  return ShellIntegration::IS_DEFAULT;
 #else
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  base::ThreadRestrictions::AssertIOAllowed();
 
   scoped_ptr<base::Environment> env(base::Environment::Create());
 
@@ -366,12 +367,12 @@ ShellIntegration::DefaultWebClientState GetIsDefaultWebClient(
 
   if (!ran_ok || success_code != EXIT_SUCCESS) {
     // xdg-settings failed: we can't determine or set the default browser.
-    return ShellIntegration::UNKNOWN_DEFAULT_WEB_CLIENT;
+    return ShellIntegration::UNKNOWN_DEFAULT;
   }
 
   // Allow any reply that starts with "yes".
-  return (reply.find("yes") == 0) ? ShellIntegration::IS_DEFAULT_WEB_CLIENT :
-                                    ShellIntegration::NOT_DEFAULT_WEB_CLIENT;
+  return (reply.find("yes") == 0) ? ShellIntegration::IS_DEFAULT :
+                                    ShellIntegration::NOT_DEFAULT;
 #endif
 }
 
@@ -394,7 +395,7 @@ bool ShellIntegration::SetAsDefaultProtocolClient(const std::string& protocol) {
 }
 
 // static
-ShellIntegration::DefaultWebClientState ShellIntegration::IsDefaultBrowser() {
+ShellIntegration::DefaultWebClientState ShellIntegration::GetDefaultBrowser() {
   return GetIsDefaultWebClient("");
 }
 

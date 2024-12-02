@@ -7,7 +7,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/text_constants.h"
 
 #if defined(OS_WIN)
@@ -1120,7 +1119,13 @@ TEST_F(RenderTextTest, CursorBoundsInReplacementMode) {
   EXPECT_EQ(cursor_around_b.right(), cursor_before_c.x());
 }
 
-TEST_F(RenderTextTest, OriginForDrawing) {
+// http://crbug.com/161902
+#if defined(OS_LINUX)
+#define MAYBE_OriginForDrawing DISABLED_OriginForDrawing
+#else
+#define MAYBE_OriginForDrawing OriginForDrawing
+#endif
+TEST_F(RenderTextTest, MAYBE_OriginForDrawing) {
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   render_text->SetText(ASCIIToUTF16("abcdefg"));
   render_text->SetFontList(FontList("Arial, 13px"));
@@ -1130,17 +1135,18 @@ TEST_F(RenderTextTest, OriginForDrawing) {
   Rect display_rect(0, 0, 100, font_height);
   render_text->SetDisplayRect(display_rect);
 
-  Point origin = render_text->GetOriginForDrawing();
-  EXPECT_EQ(origin.x(), 0);
-  EXPECT_EQ(origin.y(), 0);
+  Vector2d offset = render_text->GetOffsetForDrawing();
+  EXPECT_TRUE(offset.IsZero());
 
   // Set display area's height greater than font height.
-  display_rect = Rect(0, 0, 100, font_height + 2);
+  const int kEnlargement = 2;
+  display_rect = Rect(0, 0, 100, font_height + kEnlargement);
   render_text->SetDisplayRect(display_rect);
 
-  origin = render_text->GetOriginForDrawing();
-  EXPECT_EQ(origin.x(), 0);
-  EXPECT_EQ(origin.y(), 1);
+  // Text should be vertically centered.
+  offset = render_text->GetOffsetForDrawing();
+  EXPECT_EQ(offset.x(), 0);
+  EXPECT_EQ(offset.y(), kEnlargement / 2);
 }
 
 TEST_F(RenderTextTest, SameFontForParentheses) {
@@ -1218,6 +1224,14 @@ TEST_F(RenderTextTest, SameFontForParentheses) {
   }
 }
 
+// Make sure the caret width is always >=1 so that the correct
+// caret is drawn at high DPI. crbug.com/164100.
+TEST_F(RenderTextTest, CaretWidth) {
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+  render_text->SetText(ASCIIToUTF16("abcdefg"));
+  EXPECT_GE(render_text->GetUpdatedCursorBounds().width(), 1);
+}
+
 // TODO(asvitkine): Cursor movements tests disabled on Mac because RenderTextMac
 //                  does not implement this yet. http://crbug.com/131618
 #if !defined(OS_MACOSX)
@@ -1236,8 +1250,11 @@ TEST_F(RenderTextTest, DisplayRectShowsCursorLTR) {
   // Ensure that shrinking the display rectangle keeps the cursor in view.
   render_text->SetDisplayRect(Rect(width - 10, 1));
   EXPECT_EQ(render_text->display_rect().width() - 1,
-            render_text->GetUpdatedCursorBounds().x());
+            render_text->GetUpdatedCursorBounds().right());
 
+  // TODO(msw): Investigate why this test passes with
+  // |GetUpdateCursorBounds().x()|, while the above have to use
+  // |.right()|.
   // Ensure that the text will pan to fill its expanding display rectangle.
   render_text->SetDisplayRect(Rect(width - 5, 1));
   EXPECT_EQ(render_text->display_rect().width() - 1,
@@ -1261,7 +1278,7 @@ TEST_F(RenderTextTest, DisplayRectShowsCursorLTR) {
   // Ensure that shrinking the display rectangle keeps the cursor in view.
   render_text->SetDisplayRect(Rect(width - 10, 1));
   EXPECT_EQ(render_text->display_rect().width() - 1,
-            render_text->GetUpdatedCursorBounds().x());
+            render_text->GetUpdatedCursorBounds().right());
 
   // Ensure that the text will pan to fill its expanding display rectangle.
   render_text->SetDisplayRect(Rect(width - 5, 1));

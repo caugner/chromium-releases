@@ -21,10 +21,10 @@ namespace content {
 // A class derived from the HyphenatorMessageFilter class used in unit tests.
 // This class overrides some methods so we can test the HyphenatorMessageFilter
 // class without posting tasks.
-class TestHyphenatorMessageFilter : public content::HyphenatorMessageFilter {
+class TestHyphenatorMessageFilter : public HyphenatorMessageFilter {
  public:
-  explicit TestHyphenatorMessageFilter(content::RenderProcessHost* host)
-      : content::HyphenatorMessageFilter(host),
+  explicit TestHyphenatorMessageFilter(RenderProcessHost* host)
+      : HyphenatorMessageFilter(host),
         type_(0),
         file_(base::kInvalidPlatformFileValue) {
   }
@@ -33,7 +33,7 @@ class TestHyphenatorMessageFilter : public content::HyphenatorMessageFilter {
   uint32 type() const { return type_; }
   base::PlatformFile file() const { return file_; }
 
-  // content::BrowserMessageFilter implementation.
+  // BrowserMessageFilter implementation.
   virtual bool Send(IPC::Message* message) OVERRIDE {
     if (message->type() != HyphenatorMsg_SetDictionary::ID)
       return false;
@@ -71,7 +71,7 @@ class TestHyphenatorMessageFilter : public content::HyphenatorMessageFilter {
   virtual ~TestHyphenatorMessageFilter() {
   }
 
-  // content::HyphenatorMessageFilter implementation. This function emulates the
+  // HyphenatorMessageFilter implementation. This function emulates the
   // original implementation without posting a task.
   virtual void OnOpenDictionary(const string16& locale) OVERRIDE {
     locale_ = locale;
@@ -85,21 +85,19 @@ class TestHyphenatorMessageFilter : public content::HyphenatorMessageFilter {
   base::PlatformFile file_;
 };
 
-}  // namespace content
-
 class HyphenatorMessageFilterTest : public testing::Test {
  public:
   HyphenatorMessageFilterTest() {
-    context_.reset(new content::TestBrowserContext);
-    host_.reset(new content::MockRenderProcessHost(context_.get()));
-    filter_ = new content::TestHyphenatorMessageFilter(host_.get());
+    context_.reset(new TestBrowserContext);
+    host_.reset(new MockRenderProcessHost(context_.get()));
+    filter_ = new TestHyphenatorMessageFilter(host_.get());
   }
 
   virtual ~HyphenatorMessageFilterTest() {}
 
-  scoped_ptr<content::TestBrowserContext> context_;
-  scoped_ptr<content::MockRenderProcessHost> host_;
-  scoped_refptr<content::TestHyphenatorMessageFilter> filter_;
+  scoped_ptr<TestBrowserContext> context_;
+  scoped_ptr<MockRenderProcessHost> host_;
+  scoped_refptr<TestHyphenatorMessageFilter> filter_;
 };
 
 // Verifies IPC messages sent by the HyphenatorMessageFilter class when it
@@ -133,6 +131,7 @@ TEST_F(HyphenatorMessageFilterTest, OpenDictionary) {
       NULL, NULL);
   EXPECT_NE(base::kInvalidPlatformFileValue, file);
   filter_->SetDictionary(file);
+  file = base::kInvalidPlatformFileValue;  // Ownership has been transferred.
 
   // Send a HyphenatorHostMsg_OpenDictionary message with an empty locale and
   // verify it sends a HyphenatorMsg_SetDictionary message with a valid file.
@@ -150,6 +149,6 @@ TEST_F(HyphenatorMessageFilterTest, OpenDictionary) {
 
   // Delete all resources used by this test.
   filter_->Reset();
-  if (file != base::kInvalidPlatformFileValue)
-    base::ClosePlatformFile(file);
 }
+
+}  // namespace content

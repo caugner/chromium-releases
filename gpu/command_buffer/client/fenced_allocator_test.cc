@@ -99,7 +99,7 @@ class FencedAllocatorTest : public BaseFencedAllocatorTest {
 
   virtual void TearDown() {
     // If the GpuScheduler posts any tasks, this forces them to run.
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
 
     EXPECT_TRUE(allocator_->CheckConsistency());
 
@@ -122,6 +122,14 @@ TEST_F(FencedAllocatorTest, TestBasic) {
   EXPECT_TRUE(allocator_->CheckConsistency());
 
   allocator_->Free(offset);
+  EXPECT_FALSE(allocator_->InUse());
+  EXPECT_TRUE(allocator_->CheckConsistency());
+}
+
+// Test alloc 0 fails.
+TEST_F(FencedAllocatorTest, TestAllocZero) {
+  FencedAllocator::Offset offset = allocator_->Alloc(0);
+  EXPECT_EQ(FencedAllocator::kInvalidOffset, offset);
   EXPECT_FALSE(allocator_->InUse());
   EXPECT_TRUE(allocator_->CheckConsistency());
 }
@@ -401,7 +409,7 @@ class FencedAllocatorWrapperTest : public BaseFencedAllocatorTest {
 
   virtual void TearDown() {
     // If the GpuScheduler posts any tasks, this forces them to run.
-    MessageLoop::current()->RunAllPending();
+    MessageLoop::current()->RunUntilIdle();
 
     EXPECT_TRUE(allocator_->CheckConsistency());
 
@@ -444,6 +452,15 @@ TEST_F(FencedAllocatorWrapperTest, TestBasic) {
   EXPECT_EQ(kBufferSize - kSize * sizeof(*pointer_uint),
             allocator_->GetLargestFreeSize());
   allocator_->Free(pointer_uint);
+}
+
+// Test alloc 0 fails.
+TEST_F(FencedAllocatorWrapperTest, TestAllocZero) {
+  allocator_->CheckConsistency();
+
+  void *pointer = allocator_->Alloc(0);
+  ASSERT_FALSE(pointer);
+  EXPECT_TRUE(allocator_->CheckConsistency());
 }
 
 // Checks out-of-memory condition.

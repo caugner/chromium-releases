@@ -203,6 +203,8 @@ bool AudioRendererHost::OnMessageReceived(const IPC::Message& message,
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(AudioRendererHost, message, *message_was_ok)
     IPC_MESSAGE_HANDLER(AudioHostMsg_CreateStream, OnCreateStream)
+    IPC_MESSAGE_HANDLER(AudioHostMsg_AssociateStreamWithProducer,
+                        OnAssociateStreamWithProducer)
     IPC_MESSAGE_HANDLER(AudioHostMsg_PlayStream, OnPlayStream)
     IPC_MESSAGE_HANDLER(AudioHostMsg_PauseStream, OnPauseStream)
     IPC_MESSAGE_HANDLER(AudioHostMsg_FlushStream, OnFlushStream)
@@ -217,26 +219,22 @@ bool AudioRendererHost::OnMessageReceived(const IPC::Message& message,
 void AudioRendererHost::OnCreateStream(
     int stream_id, const media::AudioParameters& params, int input_channels) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(LookupById(stream_id) == NULL);
+  // media::AudioParameters is validated in the deserializer.
+  if (input_channels < 0 ||
+      input_channels > media::limits::kMaxChannels ||
+      LookupById(stream_id) != NULL) {
+    SendErrorMessage(stream_id);
+    return;
+  }
 
   media::AudioParameters audio_params(params);
-  uint32 buffer_size = media::AudioBus::CalculateMemorySize(audio_params);
-  DCHECK_GT(buffer_size, 0U);
-  DCHECK_LE(buffer_size,
-            static_cast<uint32>(media::limits::kMaxPacketSizeInBytes));
-
-  DCHECK_GE(input_channels, 0);
-  DCHECK_LT(input_channels, media::limits::kMaxChannels);
 
   // Calculate output and input memory size.
   int output_memory_size = AudioBus::CalculateMemorySize(audio_params);
-  DCHECK_GT(output_memory_size, 0);
 
   int frames = audio_params.frames_per_buffer();
   int input_memory_size =
       AudioBus::CalculateMemorySize(input_channels, frames);
-
-  DCHECK_GE(input_memory_size, 0);
 
   scoped_ptr<AudioEntry> entry(new AudioEntry());
 
@@ -279,6 +277,14 @@ void AudioRendererHost::OnCreateStream(
   audio_entries_.insert(std::make_pair(stream_id, entry.release()));
   if (media_observer_)
     media_observer_->OnSetAudioStreamStatus(this, stream_id, "created");
+}
+
+void AudioRendererHost::OnAssociateStreamWithProducer(int stream_id,
+                                                      int render_view_id) {
+  // TODO(miu): Will use render_view_id in upcoming change.
+  DVLOG(1) << "AudioRendererHost@" << this
+           << "::OnAssociateStreamWithProducer(stream_id=" << stream_id
+           << ", render_view_id=" << render_view_id << ")";
 }
 
 void AudioRendererHost::OnPlayStream(int stream_id) {

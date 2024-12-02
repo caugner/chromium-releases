@@ -12,12 +12,13 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/win/registry.h"
@@ -1031,6 +1032,9 @@ installer::InstallStatus UninstallProducts(
       install_status = prod_status;
   }
 
+  installer::CleanUpInstallationDirectoryAfterUninstall(
+      original_state, installer_state, cmd_line, &install_status);
+
   // Tell Google Update that an uninstall has taken place.
   // Ignore the return value: success or failure of Google Update
   // has no bearing on the success or failure of Chrome's uninstallation.
@@ -1098,6 +1102,78 @@ void ActivateMetroChrome() {
                             << "hr=" << std::hex << hr;
 }
 
+installer::InstallStatus RegisterDevChrome(
+    const InstallationState& original_state,
+    const InstallerState& installer_state,
+    const CommandLine& cmd_line) {
+  BrowserDistribution* chrome_dist =
+      BrowserDistribution::GetSpecificDistribution(
+          BrowserDistribution::CHROME_BROWSER);
+
+  // Only proceed with registering a dev chrome if no real Chrome installation
+  // of the same distribution are present on this system.
+  const ProductState* existing_chrome =
+    original_state.GetProductState(false, BrowserDistribution::CHROME_BROWSER);
+  if (!existing_chrome) {
+    existing_chrome =
+      original_state.GetProductState(true, BrowserDistribution::CHROME_BROWSER);
+  }
+  if (existing_chrome) {
+    static const wchar_t kPleaseUninstallYourChromeMessage[] =
+        L"You already have a full-installation (non-dev) of %1ls, please "
+        L"uninstall it first using Add/Remove Programs in the control panel.";
+    string16 name(chrome_dist->GetAppShortCutName());
+    string16 message(base::StringPrintf(kPleaseUninstallYourChromeMessage,
+                                        name.c_str()));
+
+    LOG(ERROR) << "Aborting operation: another installation of " << name
+               << " was found, as a last resort (if the product is not present "
+                  "in Add/Remove Programs), try executing: "
+               << existing_chrome->uninstall_command().GetCommandLineString();
+    MessageBox(NULL, message.c_str(), NULL, MB_ICONERROR);
+    return installer::INSTALL_FAILED;
+  }
+
+  FilePath chrome_exe(
+      cmd_line.GetSwitchValuePath(installer::switches::kRegisterDevChrome));
+  if (chrome_exe.empty())
+    chrome_exe = cmd_line.GetProgram().DirName().Append(installer::kChromeExe);
+  if (!chrome_exe.IsAbsolute())
+    file_util::AbsolutePath(&chrome_exe);
+
+  installer::InstallStatus status = installer::FIRST_INSTALL_SUCCESS;
+  if (file_util::PathExists(chrome_exe)) {
+    Product chrome(chrome_dist);
+
+    // Create the Start menu shortcut and pin it to the taskbar.
+    ShellUtil::ShortcutProperties shortcut_properties(ShellUtil::CURRENT_USER);
+    chrome.AddDefaultShortcutProperties(chrome_exe, &shortcut_properties);
+    shortcut_properties.set_dual_mode(true);
+    shortcut_properties.set_pin_to_taskbar(true);
+    ShellUtil::CreateOrUpdateShortcut(
+        ShellUtil::SHORTCUT_LOCATION_START_MENU, chrome_dist,
+        shortcut_properties, ShellUtil::SHELL_SHORTCUT_CREATE_ALWAYS);
+
+    // Register Chrome at user-level and make it default.
+    scoped_ptr<WorkItemList> delegate_execute_list(
+        WorkItem::CreateWorkItemList());
+    installer::AddDelegateExecuteWorkItems(
+        installer_state, chrome_exe.DirName(), Version(), chrome,
+        delegate_execute_list.get());
+    delegate_execute_list->Do();
+    if (ShellUtil::CanMakeChromeDefaultUnattended()) {
+      ShellUtil::MakeChromeDefault(
+          chrome_dist, ShellUtil::CURRENT_USER, chrome_exe.value(), true);
+    } else {
+      ShellUtil::ShowMakeChromeDefaultSystemUI(chrome_dist, chrome_exe.value());
+    }
+  } else {
+    LOG(ERROR) << "Path not found: " << chrome_exe.value();
+    status = installer::INSTALL_FAILED;
+  }
+  return status;
+}
+
 // This method processes any command line options that make setup.exe do
 // various tasks other than installation (renaming chrome.exe, showing eula
 // among others). This function returns true if any such command line option
@@ -1119,7 +1195,7 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
     // patch to current exe, and store the resulting binary in the path
     // specified by --new-setup-exe. But we need to first unpack the file
     // given in --update-setup-exe.
-    ScopedTempDir temp_path;
+    base::ScopedTempDir temp_path;
     if (!temp_path.CreateUniqueTempDir()) {
       PLOG(ERROR) << "Could not create temporary path.";
     } else {
@@ -1188,6 +1264,10 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       LOG(DFATAL) << "chrome_install:" << chrome_install
                   << ", system_install:" << installer_state->system_install();
     }
+    *exit_code = InstallUtil::GetInstallReturnCode(status);
+  } else if (cmd_line.HasSwitch(installer::switches::kRegisterDevChrome)) {
+    installer::InstallStatus status = RegisterDevChrome(
+        original_state, *installer_state, cmd_line);
     *exit_code = InstallUtil::GetInstallReturnCode(status);
   } else if (cmd_line.HasSwitch(installer::switches::kRegisterChromeBrowser)) {
     installer::InstallStatus status = installer::UNKNOWN_STATUS;

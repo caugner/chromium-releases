@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_CREATE_APPLICATION_SHORTCUT_VIEW_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -14,6 +15,8 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/window/dialog_delegate.h"
 
+class FaviconDownloadHelper;
+class GURL;
 class Profile;
 class SkBitmap;
 
@@ -94,15 +97,19 @@ class CreateUrlApplicationShortcutView : public CreateApplicationShortcutView {
   // The first largest icon downloaded and decoded successfully will be used.
   void FetchIcon();
 
-  // Callback of icon download.
-  void OnIconDownloaded(bool errored, const SkBitmap& image);
+  // Favicon download callback.
+  void DidDownloadFavicon(
+      int id,
+      const GURL& image_url,
+      bool errored,
+      int requested_size,
+      const std::vector<SkBitmap>& bitmaps);
 
   // The tab whose URL is being turned into an app.
   content::WebContents* web_contents_;
 
   // Pending app icon download tracked by us.
-  class IconDownloadCallbackFunctor;
-  IconDownloadCallbackFunctor* pending_download_;
+  int pending_download_id_;
 
   // Unprocessed icons from the WebApplicationInfo passed in.
   web_app::IconInfoList unprocessed_icons_;

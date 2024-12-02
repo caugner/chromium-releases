@@ -17,8 +17,6 @@ class MockCloudPolicyStore : public CloudPolicyStore {
 
   MOCK_METHOD1(Store, void(const enterprise_management::PolicyFetchResponse&));
   MOCK_METHOD0(Load, void(void));
-  MOCK_METHOD0(Clear, void(void));
-  MOCK_METHOD0(RemoveStoredPolicy, void(void));
 
   // Publish the protected members.
   using CloudPolicyStore::NotifyStoreLoaded;
@@ -30,6 +28,18 @@ class MockCloudPolicyStore : public CloudPolicyStore {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockCloudPolicyStore);
+};
+
+class MockCloudPolicyStoreObserver : public CloudPolicyStore::Observer {
+ public:
+  MockCloudPolicyStoreObserver();
+  virtual ~MockCloudPolicyStoreObserver();
+
+  MOCK_METHOD1(OnStoreLoaded, void(CloudPolicyStore* store));
+  MOCK_METHOD1(OnStoreError, void(CloudPolicyStore* store));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockCloudPolicyStoreObserver);
 };
 
 }  // namespace policy

@@ -59,6 +59,7 @@ class Shell : public WebContentsDelegate,
   void UpdateNavigationControls();
   void Close();
   void ShowDevTools();
+  void CloseDevTools();
 
   // Do one time initialization at application startup.
   static void PlatformInitialize();
@@ -104,12 +105,16 @@ class Shell : public WebContentsDelegate,
 #if defined(OS_ANDROID)
   virtual void LoadProgressChanged(WebContents* source,
                                    double progress) OVERRIDE;
-  virtual void AttachLayer(WebContents* web_contents,
-                           WebKit::WebLayer* layer) OVERRIDE;
-  virtual void RemoveLayer(WebContents* web_contents,
-                           WebKit::WebLayer* layer) OVERRIDE;
 #endif
+  virtual void ToggleFullscreenModeForTab(WebContents* web_contents,
+                                          bool enter_fullscreen) OVERRIDE;
+  virtual bool IsFullscreenForTabOrPending(
+      const WebContents* web_contents) const OVERRIDE;
+  virtual void RequestToLockMouse(WebContents* web_contents,
+                                  bool user_gesture,
+                                  bool last_unlocked_by_target) OVERRIDE;
   virtual void CloseContents(WebContents* source) OVERRIDE;
+  virtual bool CanOverscrollContent() const OVERRIDE;
   virtual void WebContentsCreated(WebContents* source_contents,
                                   int64 source_frame_id,
                                   const GURL& target_url,
@@ -159,6 +164,12 @@ class Shell : public WebContentsDelegate,
   void PlatformSetIsLoading(bool loading);
   // Set the title of shell window
   void PlatformSetTitle(const string16& title);
+#if defined(OS_ANDROID)
+  void PlatformToggleFullscreenModeForTab(WebContents* web_contents,
+                                          bool enter_fullscreen);
+  bool PlatformIsFullscreenForTabOrPending(
+      const WebContents* web_contents) const;
+#endif
 
 #if (defined(OS_WIN) && !defined(USE_AURA)) || defined(TOOLKIT_GTK)
   // Resizes the main window to the given dimensions.
@@ -195,6 +206,10 @@ class Shell : public WebContentsDelegate,
   scoped_ptr<ShellJavaScriptDialogCreator> dialog_creator_;
 
   scoped_ptr<WebContents> web_contents_;
+
+  Shell* dev_tools_;
+
+  bool is_fullscreen_;
 
   gfx::NativeWindow window_;
   gfx::NativeEditView url_edit_view_;

@@ -30,7 +30,7 @@ void MessageCenter::SetMessageCenterVisible(bool visible) {
 }
 
 size_t MessageCenter::NotificationCount() const {
-  return notification_list_->notifications().size();
+  return notification_list_->NotificationCount();
 }
 
 size_t MessageCenter::UnreadNotificationCount() const {
@@ -44,23 +44,28 @@ bool MessageCenter::HasPopupNotifications() const {
 //------------------------------------------------------------------------------
 // Client code interface.
 
-void MessageCenter::AddNotification(const std::string& id,
-                                    const string16& title,
-                                    const string16& message,
-                                    const string16& display_source,
-                                    const std::string& extension_id) {
-  notification_list_->AddNotification(
-      id, title, message, display_source, extension_id);
+void MessageCenter::AddNotification(
+    ui::notifications::NotificationType type,
+    const std::string& id,
+    const string16& title,
+    const string16& message,
+    const string16& display_source,
+    const std::string& extension_id,
+    const base::DictionaryValue* optional_fields) {
+  notification_list_->AddNotification(type, id, title, message, display_source,
+                                      extension_id, optional_fields);
   if (host_)
     host_->MessageCenterChanged(true);
 }
 
-void MessageCenter::UpdateNotification(const std::string& old_id,
-                                       const std::string& new_id,
-                                       const string16& title,
-                                       const string16& message) {
+void MessageCenter::UpdateNotification(
+    const std::string& old_id,
+    const std::string& new_id,
+    const string16& title,
+    const string16& message,
+    const base::DictionaryValue* optional_fields) {
   notification_list_->UpdateNotificationMessage(
-      old_id, new_id, title, message);
+      old_id, new_id, title, message, optional_fields);
   if (host_)
     host_->MessageCenterChanged(true);
 }
@@ -90,8 +95,8 @@ void MessageCenter::SendRemoveNotification(const std::string& id) {
 
 void MessageCenter::SendRemoveAllNotifications() {
   if (delegate_) {
-    const NotificationList::Notifications& notifications =
-        notification_list_->notifications();
+    NotificationList::Notifications notifications;
+    notification_list_->GetNotifications(&notifications);
     for (NotificationList::Notifications::const_iterator loopiter =
              notifications.begin();
          loopiter != notifications.end(); ) {
@@ -128,8 +133,21 @@ void MessageCenter::OnNotificationClicked(const std::string& id) {
     delegate_->OnClicked(id);
 }
 
+void MessageCenter::OnQuietModeChanged(bool quiet_mode) {
+  host_->MessageCenterChanged(true);
+}
+
+void MessageCenter::OnButtonClicked(const std::string& id, int button_index) {
+  if (delegate_)
+    delegate_->OnButtonClicked(id, button_index);
+}
+
 NotificationList* MessageCenter::GetNotificationList() {
   return notification_list_.get();
+}
+
+void MessageCenter::Delegate::OnButtonClicked(const std::string& id,
+                                              int button_index) {
 }
 
 }  // namespace message_center

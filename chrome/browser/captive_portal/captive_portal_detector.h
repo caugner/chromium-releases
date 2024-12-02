@@ -39,6 +39,9 @@ class CaptivePortalDetector : public net::URLFetcherDelegate,
                               public base::NonThreadSafe {
  public:
   struct Results {
+    Results() : result(RESULT_NO_RESPONSE) {
+    }
+
     Result result;
     base::TimeDelta retry_after_delta;
   };
@@ -56,6 +59,8 @@ class CaptivePortalDetector : public net::URLFetcherDelegate,
       const scoped_refptr<net::URLRequestContextGetter>& request_context);
   virtual ~CaptivePortalDetector();
 
+  static std::string CaptivePortalResultToString(Result result);
+
   // Triggers a check for a captive portal. After completion, runs the
   // |callback|.
   void DetectCaptivePortal(const GURL& url, const DetectionCallback& callback);
@@ -64,7 +69,7 @@ class CaptivePortalDetector : public net::URLFetcherDelegate,
   void Cancel();
 
  private:
-  friend class CaptivePortalServiceTest;
+  friend class CaptivePortalDetectorTestBase;
 
   // net::URLFetcherDelegate:
   virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;

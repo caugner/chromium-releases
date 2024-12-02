@@ -31,10 +31,10 @@ def RunUnittests(input_api, output_api):
     if name_parts[0:2] == ['ppapi', 'generators']:
       generator_files.append(filename)
   if generator_files != []:
-    cmd = [ sys.executable, 'idl_gen_pnacl.py', '--wnone', '--test']
+    cmd = [ sys.executable, 'idl_tests.py']
     ppapi_dir = input_api.PresubmitLocalPath()
     results.extend(RunCmdAndCheck(cmd,
-                                  'PPAPI IDL Pnacl unittest failed.',
+                                  'PPAPI IDL unittests failed.',
                                   output_api,
                                   os.path.join(ppapi_dir, 'generators')))
   return results
@@ -66,7 +66,7 @@ def CheckTODO(input_api, output_api):
     name_parts = name.split(os.sep)
 
     # Only check normal build sources.
-    if ext not in ['.h', '.cc', '.idl']:
+    if ext not in ['.h', '.idl']:
       continue
 
     # Only examine the ppapi directory.
@@ -157,13 +157,24 @@ def CheckChange(input_api, output_api):
   missing = []
   for filename in idl_files:
     if filename not in set(h_files):
-      missing.append('  ppapi/c/%s.idl' % filename)
+      missing.append('ppapi/api/%s.idl' % filename)
+
+  # An IDL change that includes [generate_thunk] doesn't need to have
+  # an update to the corresponding .h file.
+  new_thunk_files = []
+  for filename in missing:
+    lines = input_api.RightHandSideLines(lambda f: f.LocalPath() == filename)
+    for line in lines:
+      if line[2].strip() == '[generate_thunk]':
+        new_thunk_files.append(filename)
+  for filename in new_thunk_files:
+    missing.remove(filename)
 
   if missing:
     results.append(
         output_api.PresubmitPromptWarning(
             'Missing PPAPI header, no change or skipped generation?',
-            long_text='\n'.join(missing)))
+            long_text='\n  '.join(missing)))
 
   missing_dev = []
   missing_stable = []

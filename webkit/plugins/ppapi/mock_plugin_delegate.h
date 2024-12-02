@@ -9,7 +9,6 @@
 
 struct PP_NetAddress_Private;
 namespace ppapi { class PPB_X509Certificate_Fields; }
-namespace webkit_glue { class ClipboardClient; }
 
 namespace webkit {
 namespace ppapi {
@@ -38,6 +37,8 @@ class MockPluginDelegate : public PluginDelegate {
   virtual SkBitmap* GetSadPluginBitmap();
   virtual WebKit::WebPlugin* CreatePluginReplacement(const FilePath& file_path);
   virtual PlatformImage2D* CreateImage2D(int width, int height);
+  virtual PlatformGraphics2D* GetGraphics2D(PluginInstance* instance,
+                                            PP_Resource graphics_2d);
   virtual PlatformContext3D* CreateContext3D();
   virtual void ReparentContext(PlatformContext3D*);
   virtual PlatformVideoDecoder* CreateVideoDecoder(
@@ -100,26 +101,6 @@ class MockPluginDelegate : public PluginDelegate {
                                    const AvailableSpaceCallback& callback);
   virtual void WillUpdateFile(const GURL& file_path);
   virtual void DidUpdateFile(const GURL& file_path, int64_t delta);
-  virtual base::PlatformFileError OpenFile(
-      const ::ppapi::PepperFilePath& path,
-      int flags,
-      base::PlatformFile* file);
-  virtual base::PlatformFileError RenameFile(
-      const ::ppapi::PepperFilePath& from_path,
-      const ::ppapi::PepperFilePath& to_path);
-  virtual base::PlatformFileError DeleteFileOrDir(
-      const ::ppapi::PepperFilePath& path,
-      bool recursive);
-  virtual base::PlatformFileError CreateDir(
-      const ::ppapi::PepperFilePath& path);
-  virtual base::PlatformFileError QueryFile(
-      const ::ppapi::PepperFilePath& path,
-      base::PlatformFileInfo* info);
-  virtual base::PlatformFileError GetDirContents(
-      const ::ppapi::PepperFilePath& path,
-      ::ppapi::DirContents* contents);
-  virtual base::PlatformFileError CreateTemporaryFile(
-      base::PlatformFile* file);
   virtual void SyncGetFileSystemPlatformPath(const GURL& url,
                                              FilePath* platform_path);
   virtual scoped_refptr<base::MessageLoopProxy>
@@ -179,24 +160,17 @@ class MockPluginDelegate : public PluginDelegate {
   virtual bool X509CertificateParseDER(
       const std::vector<char>& der,
       ::ppapi::PPB_X509Certificate_Fields* fields);
-
-  virtual int32_t ShowContextMenu(
-      PluginInstance* instance,
-      webkit::ppapi::PPB_Flash_Menu_Impl* menu,
-      const gfx::Point& position);
   virtual FullscreenContainer* CreateFullscreenContainer(
       PluginInstance* instance);
   virtual gfx::Size GetScreenSize();
   virtual std::string GetDefaultEncoding();
   virtual void ZoomLimitsChanged(double minimum_factor,
                                  double maximum_factor);
-  virtual std::string ResolveProxy(const GURL& url);
   virtual void DidStartLoading();
   virtual void DidStopLoading();
   virtual void SetContentRestriction(int restrictions);
   virtual void SaveURLAs(const GURL& url);
-  virtual double GetLocalTimeZoneOffset(base::Time t);
-  virtual base::SharedMemory* CreateAnonymousSharedMemory(uint32_t size);
+  virtual base::SharedMemory* CreateAnonymousSharedMemory(size_t size);
   virtual ::ppapi::Preferences GetPreferences();
   virtual bool LockMouse(PluginInstance* instance);
   virtual void UnlockMouse(PluginInstance* instance);
@@ -210,8 +184,6 @@ class MockPluginDelegate : public PluginDelegate {
   virtual int EnumerateDevices(PP_DeviceType_Dev type,
                                const EnumerateDevicesCallback& callback);
   virtual void StopEnumerateDevices(int request_id);
-  virtual webkit_glue::ClipboardClient* CreateClipboardClient() const;
-  virtual std::string GetDeviceID();
   virtual PP_FlashLSORestrictions GetLocalDataRestrictions(
       const GURL& document_url,
       const GURL& plugin_url);

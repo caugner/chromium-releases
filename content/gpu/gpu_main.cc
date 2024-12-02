@@ -131,11 +131,19 @@ int GpuMain(const MainFunctionParams& parameters) {
   enable_watchdog = false;
 #endif
 
+  bool delayed_watchdog_enable = false;
+
+#if defined(OS_CHROMEOS)
+  // Don't start watchdog immediately, to allow developers to switch to VT2 on
+  // startup.
+  delayed_watchdog_enable = true;
+#endif
+
   scoped_refptr<GpuWatchdogThread> watchdog_thread;
 
   // Start the GPU watchdog only after anything that is expected to be time
   // consuming has completed, otherwise the process is liable to be aborted.
-  if (enable_watchdog) {
+  if (enable_watchdog && !delayed_watchdog_enable) {
     watchdog_thread = new GpuWatchdogThread(kGpuTimeout);
     watchdog_thread->Start();
   }
@@ -160,18 +168,25 @@ int GpuMain(const MainFunctionParams& parameters) {
       command_line.GetSwitchValueASCII(switches::kGpuDriverVersion);
   GetContentClient()->SetGpuInfo(gpu_info);
 
+#if defined(OS_WIN)
+  // Asynchronously initialize DXVA while GL is being initialized because
+  // they both take tens of ms.
+  base::WaitableEvent dxva_initialized(true, false);
+  DXVAVideoDecodeAccelerator::PreSandboxInitialization(
+      base::Bind(&base::WaitableEvent::Signal,
+                 base::Unretained(&dxva_initialized)));
+#endif
+
   // We need to track that information for the WarmUpSandbox function.
   bool initialized_gl_context = false;
   // Load and initialize the GL implementation and locate the GL entry points.
   if (gfx::GLSurface::InitializeOneOff()) {
-    if (!command_line.HasSwitch(switches::kSkipGpuFullInfoCollection)) {
-      if (!gpu_info_collector::CollectGraphicsInfo(&gpu_info))
-        VLOG(1) << "gpu_info_collector::CollectGraphicsInfo failed";
-      GetContentClient()->SetGpuInfo(gpu_info);
+    if (!gpu_info_collector::CollectContextGraphicsInfo(&gpu_info))
+      VLOG(1) << "gpu_info_collector::CollectGraphicsInfo failed";
+    GetContentClient()->SetGpuInfo(gpu_info);
 
-      // We know that CollectGraphicsInfo will initialize a GLContext.
-      initialized_gl_context = true;
-    }
+    // We know that CollectGraphicsInfo will initialize a GLContext.
+    initialized_gl_context = true;
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
     if (gpu_info.gpu.vendor_id == 0x10de &&  // NVIDIA
@@ -189,6 +204,11 @@ int GpuMain(const MainFunctionParams& parameters) {
     gpu_info.gpu_accessible = false;
     gpu_info.finalized = true;
     dead_on_arrival = true;
+  }
+
+  if (enable_watchdog && delayed_watchdog_enable) {
+    watchdog_thread = new GpuWatchdogThread(kGpuTimeout);
+    watchdog_thread->Start();
   }
 
   // OSMesa is expected to run very slowly, so disable the watchdog in that
@@ -219,12 +239,22 @@ int GpuMain(const MainFunctionParams& parameters) {
 #endif
 
     if (do_init_sandbox) {
+      if (watchdog_thread.get())
+        watchdog_thread->Stop();
       gpu_info.sandboxed = InitializeSandbox();
+      if (watchdog_thread.get())
+        watchdog_thread->Start();
     }
   }
 #endif
 
 #if defined(OS_WIN)
+  {
+    // DXVA initialization must have completed before the token is lowered.
+    TRACE_EVENT0("gpu", "Wait for DXVA initialization");
+    dxva_initialized.Wait();
+  }
+
   {
     TRACE_EVENT0("gpu", "Lower token");
     // For windows, if the target_services interface is not zero, the process
@@ -325,22 +355,8 @@ void WarmUpSandbox(const GPUInfo& gpu_info,
 #endif
 
 #if defined(OS_WIN)
-  {
-    TRACE_EVENT0("gpu", "Initialize COM");
-    base::win::ScopedCOMInitializer com_initializer;
-  }
-
-  {
-    TRACE_EVENT0("gpu", "Preload setupapi.dll");
-    // Preload this DLL because the sandbox prevents it from loading.
-    LoadLibrary(L"setupapi.dll");
-  }
-
-  {
-    TRACE_EVENT0("gpu", "Initialize DXVA");
-    // Initialize H/W video decoding stuff which fails in the sandbox.
-    DXVAVideoDecodeAccelerator::PreSandboxInitialization();
-  }
+  // Preload these DLL because the sandbox prevents them from loading.
+  LoadLibrary(L"setupapi.dll");
 #endif
 }
 

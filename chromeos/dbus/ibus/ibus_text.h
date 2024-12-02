@@ -20,7 +20,7 @@ namespace chromeos {
 namespace ibus {
 
 // The IBusText is one of IBusObjects and it contains IBusAttrList object which
-// contains array of IBusAttribute object. The overview of each data strucutres
+// contains array of IBusAttribute object. The overview of each data structure
 // is as follows:
 //
 // DATA STRUCTURE OVERVIEW:
@@ -79,7 +79,7 @@ namespace ibus {
 class IBusText;
 
 // Pops a IBusText from |reader|.
-// Returns false if an error occures.
+// Returns false if an error occurs.
 bool CHROMEOS_EXPORT PopIBusText(dbus::MessageReader* reader,
                                  IBusText* ibus_text);
 // Pops a IBusText from |reader| and stores it's text field into text. Use
@@ -87,12 +87,15 @@ bool CHROMEOS_EXPORT PopIBusText(dbus::MessageReader* reader,
 // Returns true on success.
 bool CHROMEOS_EXPORT PopStringFromIBusText(dbus::MessageReader* reader,
                                            std::string* text);
-// Appends a IBusText to |writer|.
+// Appends a IBusText to |writer|. Annotation and description field is not
+// filled with AppendIBusText.
+// TODO(nona): Support annotation/description appending if necessary.
 void CHROMEOS_EXPORT AppendIBusText(const IBusText& ibus_text,
                                     dbus::MessageWriter* writer);
 
 // Appends a string to |writer| as IBusText without any attributes. Use
 // AppendIBusText instead in the case of using any attribute entries.
+// TODO(nona): Support annotation/description appending if necessary.
 void CHROMEOS_EXPORT AppendStringAsIBusText(const std::string& text,
                                             dbus::MessageWriter* writer);
 
@@ -115,7 +118,6 @@ void CHROMEOS_EXPORT AppendStringAsIBusText(const std::string& text,
 //
 // 3. Forward decoration
 //   Not supported in Chrome.
-// TODO(nona): Support attachment for mozc infolist feature(crosbug.com/30653).
 class CHROMEOS_EXPORT IBusText {
  public:
   enum IBusTextUnderlineType {
@@ -139,17 +141,44 @@ class CHROMEOS_EXPORT IBusText {
   IBusText();
   virtual ~IBusText();
 
-  std::string text() const;
-  void set_text(const std::string& text);
+  const std::string& text() const { return text_; }
+  void set_text(const std::string& text) { text_ = text; }
 
-  const std::vector<UnderlineAttribute>& underline_attributes() const;
-  std::vector<UnderlineAttribute>* mutable_underline_attributes();
+  const std::string& annotation() const { return annotation_; }
+  void set_annotation(const std::string& annotation) {
+    annotation_ = annotation;
+  }
 
-  const std::vector<SelectionAttribute>& selection_attributes() const;
-  std::vector<SelectionAttribute>* mutable_selection_attributes();
+  const std::string& description_title() const { return description_title_; }
+  void set_description_title(const std::string& title) {
+    description_title_ = title;
+  }
+
+  const std::string& description_body() const { return description_body_; }
+  void set_description_body(const std::string& body) {
+    description_body_ = body;
+  }
+
+  const std::vector<UnderlineAttribute>& underline_attributes() const {
+    return underline_attributes_;
+  }
+
+  std::vector<UnderlineAttribute>* mutable_underline_attributes() {
+    return &underline_attributes_;
+  }
+
+  const std::vector<SelectionAttribute>& selection_attributes() const {
+    return selection_attributes_;
+  }
+  std::vector<SelectionAttribute>* mutable_selection_attributes() {
+    return &selection_attributes_;
+  }
 
  private:
   std::string text_;
+  std::string annotation_;
+  std::string description_title_;
+  std::string description_body_;
   std::vector<UnderlineAttribute> underline_attributes_;
   std::vector<SelectionAttribute> selection_attributes_;
 

@@ -63,7 +63,7 @@ string16 FormatDayOfWeek(const base::Time& time) {
 
 views::Label* CreateLabel() {
   views::Label* label = new views::Label;
-  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetBackgroundColor(SkColorSetARGB(0, 255, 255, 255));
   return label;
 }
@@ -145,7 +145,7 @@ bool DateView::PerformAction(const ui::Event& event) {
   if (!actionable_)
     return false;
 
-  ash::Shell::GetInstance()->tray_delegate()->ShowDateSettings();
+  ash::Shell::GetInstance()->system_tray_delegate()->ShowDateSettings();
   return true;
 }
 
@@ -164,8 +164,8 @@ void DateView::OnMouseExited(const ui::MouseEvent& event) {
 }
 
 TimeView::TimeView(TrayDate::ClockLayout clock_layout)
-    : hour_type_(
-          ash::Shell::GetInstance()->tray_delegate()->GetHourClockType()) {
+    : hour_type_(ash::Shell::GetInstance()->system_tray_delegate()->
+                 GetHourClockType()) {
   SetupLabels();
   UpdateTextInternal(base::Time::Now());
   UpdateClockLayout(clock_layout);
@@ -176,7 +176,8 @@ TimeView::~TimeView() {
 }
 
 void TimeView::UpdateTimeFormat() {
-  hour_type_ = ash::Shell::GetInstance()->tray_delegate()->GetHourClockType();
+  hour_type_ =
+      ash::Shell::GetInstance()->system_tray_delegate()->GetHourClockType();
   UpdateText();
 }
 

@@ -25,24 +25,9 @@
 #include "grit/ui_strings.h"
 #include "net/base/net_util.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/tree_node_iterator.h"
-
-#if defined(OS_MACOSX)
-#include "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
-#endif
-
-#if defined(TOOLKIT_VIEWS)
-#include "ui/base/dragdrop/os_exchange_data.h"
-#include "ui/base/events/event.h"
-#include "ui/views/drag_utils.h"
-#include "ui/views/widget/native_widget.h"
-#include "ui/views/widget/widget.h"
-#endif
-
-#if defined(TOOLKIT_GTK)
-#include "chrome/browser/ui/gtk/custom_drag.h"
-#endif
 
 using base::Time;
 
@@ -100,10 +85,19 @@ const BookmarkNode* CreateNewNode(BookmarkModel* model,
                                   const string16& new_title,
                                   const GURL& new_url) {
   const BookmarkNode* node;
+  // When create the new one to right-clicked folder, add it to the next to the
+  // folder's position. Because |details.index| has a index of the folder when
+  // it was right-clicked, it might cause out of range exception when another
+  // bookmark manager edits contents of the folder.
+  // So we must check the range.
+  int child_count = parent->child_count();
+  int insert_index = (parent == details.parent_node && details.index >= 0 &&
+                      details.index <= child_count) ?
+                      details.index : child_count;
   if (details.type == BookmarkEditor::EditDetails::NEW_URL) {
-    node = model->AddURL(parent, parent->child_count(), new_title, new_url);
+    node = model->AddURL(parent, insert_index, new_title, new_url);
   } else if (details.type == BookmarkEditor::EditDetails::NEW_FOLDER) {
-    node = model->AddFolder(parent, parent->child_count(), new_title);
+    node = model->AddFolder(parent, insert_index, new_title);
     for (size_t i = 0; i < details.urls.size(); ++i) {
       model->AddURL(node, node->child_count(), details.urls[i].second,
                     details.urls[i].first);
@@ -140,8 +134,9 @@ int PreferredDropOperation(int source_operations, int operations) {
   return ui::DragDropTypes::DRAG_NONE;
 }
 
-int BookmarkDragOperation(Profile* profile, const BookmarkNode* node) {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile);
+int BookmarkDragOperation(content::BrowserContext* browser_context,
+                          const BookmarkNode* node) {
+  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(browser_context);
 
   int move = ui::DragDropTypes::DRAG_MOVE;
   if (!prefs->GetBoolean(prefs::kEditBookmarksEnabled))
@@ -243,46 +238,6 @@ void CloneBookmarkNode(BookmarkModel* model,
     CloneBookmarkNodeImpl(model, elements[i], parent, index_to_add_at + i);
 }
 
-
-// Bookmark dragging
-void DragBookmarks(Profile* profile,
-                   const std::vector<const BookmarkNode*>& nodes,
-                   gfx::NativeView view) {
-  DCHECK(!nodes.empty());
-
-#if defined(TOOLKIT_VIEWS)
-  // Set up our OLE machinery
-  ui::OSExchangeData data;
-  BookmarkNodeData drag_data(nodes);
-  drag_data.Write(profile, &data);
-
-  // Allow nested message loop so we get DnD events as we drag this around.
-  bool was_nested = MessageLoop::current()->IsNested();
-  MessageLoop::current()->SetNestableTasksAllowed(true);
-
-  int operation =
-      ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE |
-      ui::DragDropTypes::DRAG_LINK;
-  views::Widget* widget = views::Widget::GetWidgetForNativeView(view);
-  if (widget) {
-    widget->RunShellDrag(NULL, data, gfx::Point(), operation);
-  } else {
-    // We hit this case when we're using WebContentsViewWin or
-    // WebContentsViewAura, instead of TabContentsViewViews.
-    views::RunShellDrag(view, data, gfx::Point(), operation);
-  }
-
-  MessageLoop::current()->SetNestableTasksAllowed(was_nested);
-#elif defined(OS_MACOSX)
-  // Allow nested message loop so we get DnD events as we drag this around.
-  bool was_nested = MessageLoop::current()->IsNested();
-  MessageLoop::current()->SetNestableTasksAllowed(true);
-  bookmark_pasteboard_helper_mac::StartDrag(profile, nodes, view);
-  MessageLoop::current()->SetNestableTasksAllowed(was_nested);
-#elif defined(TOOLKIT_GTK)
-  BookmarkDrag::BeginDrag(profile, nodes);
-#endif
-}
 
 void CopyToClipboard(BookmarkModel* model,
                      const std::vector<const BookmarkNode*>& nodes,
@@ -486,15 +441,6 @@ const BookmarkNode* ApplyEditsWithPossibleFolderChange(
   model->SetTitle(node, new_title);
 
   return node;
-}
-
-// Formerly in BookmarkBarView.
-void ToggleWhenVisible(Profile* profile) {
-  PrefServiceBase* prefs = PrefServiceBase::FromBrowserContext(profile);
-  const bool always_show = !prefs->GetBoolean(prefs::kShowBookmarkBar);
-
-  // The user changed when the bookmark bar is shown, update the preferences.
-  prefs->SetBoolean(prefs::kShowBookmarkBar, always_show);
 }
 
 void RegisterUserPrefs(PrefServiceBase* prefs) {

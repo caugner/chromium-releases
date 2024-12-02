@@ -32,8 +32,7 @@ class RenderViewHost;
 // Tests verifying that the JavaScript Preferences class, the underlying C++
 // CoreOptionsHandler and the specialized classes handling Chrome OS device and
 // proxy prefs behave correctly.
-class PreferencesBrowserTest : public InProcessBrowserTest,
-                               public content::NotificationObserver {
+class PreferencesBrowserTest : public InProcessBrowserTest {
  public:
   PreferencesBrowserTest();
   ~PreferencesBrowserTest();
@@ -41,10 +40,7 @@ class PreferencesBrowserTest : public InProcessBrowserTest,
   // InProcessBrowserTest implementation:
   virtual void SetUpOnMainThread() OVERRIDE;
 
-  // content::NotificationObserver implementation:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void OnPreferenceChanged(const std::string& pref_name);
 
  protected:
   MOCK_METHOD1(OnCommit, void(const PrefService::Preference*));
@@ -65,9 +61,9 @@ class PreferencesBrowserTest : public InProcessBrowserTest,
 
   // Verifies that a dictionary contains a (key, value) pair. Takes ownership of
   // |expected|.
-  void VerifyKeyValue(const base::DictionaryValue* dict,
+  void VerifyKeyValue(const base::DictionaryValue& dict,
                       const std::string& key,
-                      base::Value* expected);
+                      const base::Value& expected);
   // Verifies that a dictionary contains a given pref and that its value has
   // been decorated correctly.
   void VerifyPref(const base::DictionaryValue* prefs,

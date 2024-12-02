@@ -40,13 +40,16 @@ TEST_F(ResourcesTest, MAYBE_ProductName) {
   std::string expected_product_name = "Chromoting";
 #endif  // !defined(GOOGLE_CHROME_BUILD)
   EXPECT_EQ(expected_product_name,
-            l10n_util::GetStringUTF8(IDR_REMOTING_PRODUCT_NAME));
+            l10n_util::GetStringUTF8(IDR_PRODUCT_NAME));
 }
 
 TEST_F(ResourcesTest, MAYBE_ProductLogo) {
-  gfx::Image logo = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+  gfx::Image logo16 = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
       IDR_PRODUCT_LOGO_16);
-  EXPECT_FALSE(logo.IsEmpty());
+  EXPECT_FALSE(logo16.IsEmpty());
+  gfx::Image logo32 = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+      IDR_PRODUCT_LOGO_32);
+  EXPECT_FALSE(logo32.IsEmpty());
 }
 
 }  // namespace remoting

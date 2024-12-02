@@ -32,13 +32,15 @@ NativeScrollBar::~NativeScrollBar() {
 }
 
 // static
-int NativeScrollBar::GetHorizontalScrollBarHeight() {
-  return NativeScrollBarWrapper::GetHorizontalScrollBarHeight();
+int NativeScrollBar::GetHorizontalScrollBarHeight(
+    const ui::NativeTheme* theme) {
+  return NativeScrollBarWrapper::GetHorizontalScrollBarHeight(theme);
 }
 
 // static
-int NativeScrollBar::GetVerticalScrollBarWidth() {
-  return NativeScrollBarWrapper::GetVerticalScrollBarWidth();
+int NativeScrollBar::GetVerticalScrollBarWidth(
+    const ui::NativeTheme* theme) {
+  return NativeScrollBarWrapper::GetVerticalScrollBarWidth(theme);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -76,11 +78,10 @@ bool NativeScrollBar::OnKeyPressed(const ui::KeyEvent& event) {
   return native_wrapper_->GetView()->OnKeyPressed(event);
 }
 
-ui::EventResult NativeScrollBar::OnGestureEvent(
-    const ui::GestureEvent& event) {
+void NativeScrollBar::OnGestureEvent(ui::GestureEvent* event) {
   if (!native_wrapper_)
-    return ui::ER_UNHANDLED;
-  return native_wrapper_->GetView()->OnGestureEvent(event);
+    return;
+  native_wrapper_->GetView()->OnGestureEvent(event);
 }
 
 bool NativeScrollBar::OnMouseWheel(const ui::MouseWheelEvent& event) {
@@ -102,7 +103,8 @@ void NativeScrollBar::Update(int viewport_size,
 
 int NativeScrollBar::GetLayoutSize() const {
   return IsHorizontal() ?
-      GetHorizontalScrollBarHeight() : GetVerticalScrollBarWidth();
+      GetHorizontalScrollBarHeight(GetNativeTheme()) :
+      GetVerticalScrollBarWidth(GetNativeTheme());
 }
 
 int NativeScrollBar::GetPosition() const {

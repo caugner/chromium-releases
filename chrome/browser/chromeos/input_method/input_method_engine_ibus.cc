@@ -11,6 +11,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "chrome/browser/chromeos/input_method/ibus_keymap.h"
+#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -57,8 +58,7 @@ InputMethodEngineIBus::InputMethodEngineIBus()
 
 InputMethodEngineIBus::~InputMethodEngineIBus() {
   GetCurrentService()->UnsetEngine();
-  input_method::InputMethodManager::GetInstance()->
-      RemoveInputMethodExtension(ibus_id_);
+  input_method::GetInputMethodManager()->RemoveInputMethodExtension(ibus_id_);
 }
 
 void InputMethodEngineIBus::Initialize(
@@ -79,13 +79,11 @@ void InputMethodEngineIBus::Initialize(
   ibus_id_ += engine_id;
 
   input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::GetInstance();
+      input_method::GetInputMethodManager();
   std::string layout;
   if (!layouts.empty()) {
     layout = JoinString(layouts, ',');
   } else {
-    input_method::InputMethodManager* manager =
-        input_method::InputMethodManager::GetInstance();
     const std::string fallback_id =
         manager->GetInputMethodUtil()->GetHardwareInputMethodId();
     const input_method::InputMethodDescriptor* fallback_desc =
@@ -273,9 +271,11 @@ bool InputMethodEngineIBus::SetCandidates(
   for (std::vector<Candidate>::const_iterator ix = candidates.begin();
        ix != candidates.end(); ++ix) {
     ibus::IBusLookupTable::Entry entry;
-    // TODO(nona): support annotation(crbug.com/140186).
-    entry.value = ix->value + " " + ix->annotation;
+    entry.value = ix->value;
     entry.label = ix->label;
+    entry.annotation = ix->annotation;
+    entry.description_title = ix->usage.title;
+    entry.description_body = ix->usage.body;
 
     // Store a mapping from the user defined ID to the candidate index.
     candidate_indexes_[ix->id] = candidate_ids_.size();
@@ -440,7 +440,7 @@ void InputMethodEngineIBus::ProcessKeyEvent(
 
 void InputMethodEngineIBus::CandidateClicked(
     uint32 index,
-    IBusMouseButton button,
+    ibus::IBusMouseButton button,
     uint32 state) {
   if (index > candidate_ids_.size()) {
     return;
@@ -448,13 +448,13 @@ void InputMethodEngineIBus::CandidateClicked(
 
   MouseButtonEvent pressed_button;
   switch (button) {
-    case IBusEngineHandlerInterface::IBUS_MOUSE_BUTTON_LEFT:
+    case ibus::IBUS_MOUSE_BUTTON_LEFT:
       pressed_button = MOUSE_BUTTON_LEFT;
       break;
-    case IBusEngineHandlerInterface::IBUS_MOUSE_BUTTON_MIDDLE:
+    case ibus::IBUS_MOUSE_BUTTON_MIDDLE:
       pressed_button = MOUSE_BUTTON_MIDDLE;
       break;
-    case IBusEngineHandlerInterface::IBUS_MOUSE_BUTTON_RIGHT:
+    case ibus::IBUS_MOUSE_BUTTON_RIGHT:
       pressed_button = MOUSE_BUTTON_RIGHT;
       break;
     default:

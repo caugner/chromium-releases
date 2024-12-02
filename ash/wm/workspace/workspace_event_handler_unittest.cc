@@ -31,7 +31,7 @@ class WorkspaceEventHandlerTest : public test::AshTestBase {
     aura::Window* window = new aura::Window(delegate);
     window->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window->Init(ui::LAYER_TEXTURED);
-    window->SetParent(NULL);
+    SetDefaultParentByPrimaryRootWindow(window);
     window->SetBounds(bounds);
     window->Show();
     return window;
@@ -99,6 +99,54 @@ TEST_F(WorkspaceEventHandlerTest, DoubleClickSingleAxisResizeEdge) {
   EXPECT_FALSE(wm::IsWindowMaximized(window.get()));
 }
 
+TEST_F(WorkspaceEventHandlerTest,
+    DoubleClickSingleAxisDoesntResizeVerticalEdgeIfConstrained) {
+  gfx::Rect restored_bounds(10, 10, 50, 50);
+  aura::test::TestWindowDelegate wd;
+  scoped_ptr<aura::Window> window(CreateTestWindow(&wd, restored_bounds));
+
+  wm::ActivateWindow(window.get());
+
+  gfx::Rect work_area = Shell::GetScreen()->GetDisplayNearestWindow(
+      window.get()).work_area();
+
+  wd.set_maximum_size(gfx::Size(0, 100));
+
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                       window.get());
+  // Double-click the top resize edge.
+  wd.set_window_component(HTTOP);
+  generator.DoubleClickLeftButton();
+
+  // The size of the window should be unchanged.
+  EXPECT_EQ(restored_bounds.y(), window->bounds().y());
+  EXPECT_EQ(restored_bounds.height(), window->bounds().height());
+}
+
+TEST_F(WorkspaceEventHandlerTest,
+    DoubleClickSingleAxisDoesntResizeHorizontalEdgeIfConstrained) {
+  gfx::Rect restored_bounds(10, 10, 50, 50);
+  aura::test::TestWindowDelegate wd;
+  scoped_ptr<aura::Window> window(CreateTestWindow(&wd, restored_bounds));
+
+  wm::ActivateWindow(window.get());
+
+  gfx::Rect work_area = Shell::GetScreen()->GetDisplayNearestWindow(
+      window.get()).work_area();
+
+  wd.set_maximum_size(gfx::Size(100, 0));
+
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                       window.get());
+  // Double-click the top resize edge.
+  wd.set_window_component(HTRIGHT);
+  generator.DoubleClickLeftButton();
+
+  // The size of the window should be unchanged.
+  EXPECT_EQ(restored_bounds.x(), window->bounds().x());
+  EXPECT_EQ(restored_bounds.width(), window->bounds().width());
+}
+
 TEST_F(WorkspaceEventHandlerTest, DoubleClickCaptionTogglesMaximize) {
   aura::test::TestWindowDelegate wd;
   scoped_ptr<aura::Window> window(CreateTestWindow(&wd, gfx::Rect(1, 2, 3, 4)));
@@ -154,10 +202,10 @@ TEST_F(WorkspaceEventHandlerTest, DeleteWhenDragging) {
   aura::test::EventGenerator generator(window->GetRootWindow());
   generator.MoveMouseToCenterOf(window.get());
   generator.PressLeftButton();
-  generator.MoveMouseTo(generator.current_location().Add(gfx::Point(50, 50)));
+  generator.MoveMouseTo(generator.current_location() + gfx::Vector2d(50, 50));
   DCHECK_NE(bounds.origin().ToString(), window->bounds().origin().ToString());
   window.reset();
-  generator.MoveMouseTo(generator.current_location().Add(gfx::Point(50, 50)));
+  generator.MoveMouseTo(generator.current_location() + gfx::Vector2d(50, 50));
 }
 
 // Verifies deleting the window while in a run loop doesn't crash.
@@ -170,7 +218,7 @@ TEST_F(WorkspaceEventHandlerTest, DeleteWhileInRunLoop) {
   ASSERT_TRUE(aura::client::GetWindowMoveClient(window->parent()));
   MessageLoop::current()->DeleteSoon(FROM_HERE, window.get());
   aura::client::GetWindowMoveClient(window->parent())->RunMoveLoop(
-      window.release(), gfx::Point());
+      window.release(), gfx::Vector2d());
 }
 
 }  // namespace internal

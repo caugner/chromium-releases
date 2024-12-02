@@ -167,7 +167,8 @@ CompositingIOSurfaceMac::CopyContext::CopyContext() {
 CompositingIOSurfaceMac::CopyContext::~CopyContext() {
 }
 
-CompositingIOSurfaceMac* CompositingIOSurfaceMac::Create() {
+// static
+CompositingIOSurfaceMac* CompositingIOSurfaceMac::Create(SurfaceOrder order) {
   TRACE_EVENT0("browser", "CompositingIOSurfaceMac::Create");
   IOSurfaceSupport* io_surface_support = IOSurfaceSupport::Initialize();
   if (!io_surface_support) {
@@ -198,10 +199,13 @@ CompositingIOSurfaceMac* CompositingIOSurfaceMac::Create() {
     return NULL;
   }
 
-  // We "punch a hole" in the window, and have the WindowServer render the
-  // OpenGL surface underneath so we can draw over it.
-  GLint belowWindow = -1;
-  [glContext setValues:&belowWindow forParameter:NSOpenGLCPSurfaceOrder];
+  // If requested, ask the WindowServer to render the OpenGL surface underneath
+  // the window. This, combined with a hole punched in the window, will allow
+  // for views to "overlap" the GL surface from the user's point of view.
+  if (order == SURFACE_ORDER_BELOW_WINDOW) {
+    GLint belowWindow = -1;
+    [glContext setValues:&belowWindow forParameter:NSOpenGLCPSurfaceOrder];
+  }
 
   CGLContextObj cglContext = (CGLContextObj)[glContext CGLContextObj];
   if (!cglContext) {
@@ -329,13 +333,13 @@ void CompositingIOSurfaceMac::DrawIOSurface(NSView* view, float scale_factor) {
   [glContext_ setView:view];
   gfx::Size window_size(NSSizeToCGSize([view frame].size));
   gfx::Size pixel_window_size = gfx::ToFlooredSize(
-      window_size.Scale(scale_factor));
+      gfx::ScaleSize(window_size, scale_factor));
   glViewport(0, 0, pixel_window_size.width(), pixel_window_size.height());
 
   // TODO: After a resolution change, the DPI-ness of the view and the
   // IOSurface might not be in sync.
   io_surface_size_ = gfx::ToFlooredSize(
-      pixel_io_surface_size_.Scale(1.0 / scale_factor));
+      gfx::ScaleSize(pixel_io_surface_size_, 1.0 / scale_factor));
   quad_.set_size(io_surface_size_, pixel_io_surface_size_);
 
   glMatrixMode(GL_PROJECTION);
@@ -381,6 +385,12 @@ void CompositingIOSurfaceMac::DrawIOSurface(NSView* view, float scale_factor) {
         DrawQuad(filler_quad);
       }
     }
+
+    // Workaround for issue 158469. Issue a dummy draw call with texture_ not
+    // bound to blit_rgb_sampler_location_, in order to shake all references
+    // to the IOSurface out of the driver.
+    glBegin(GL_TRIANGLES);
+    glEnd();
 
     glUseProgram(0); CHECK_GL_ERROR();
   } else {

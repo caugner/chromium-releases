@@ -6,6 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_constants.h"
@@ -83,14 +84,15 @@ TEST(WebRequestConditionAttributeTest, ResourceType) {
   EXPECT_EQ("", error);
   ASSERT_TRUE(attribute.get());
 
-  TestURLRequestContext context;
-  TestURLRequest url_request_ok(GURL("http://www.example.com"), NULL, &context);
+  net::TestURLRequestContext context;
+  net::TestURLRequest url_request_ok(
+      GURL("http://www.example.com"), NULL, &context);
   content::ResourceRequestInfo::AllocateForTesting(&url_request_ok,
       ResourceType::MAIN_FRAME, NULL, -1, -1);
   EXPECT_TRUE(attribute->IsFulfilled(
       WebRequestRule::RequestData(&url_request_ok, ON_BEFORE_REQUEST)));
 
-  TestURLRequest url_request_fail(
+  net::TestURLRequest url_request_fail(
       GURL("http://www.example.com"), NULL, &context);
   content::ResourceRequestInfo::AllocateForTesting(&url_request_ok,
       ResourceType::SUB_FRAME, NULL, -1, -1);
@@ -112,10 +114,10 @@ TEST(WebRequestConditionAttributeTest, ContentType) {
           "chrome/test/data/extensions/api_test/webrequest/declarative")));
   ASSERT_TRUE(test_server.Start());
 
-  TestURLRequestContext context;
-  TestDelegate delegate;
-  TestURLRequest url_request(test_server.GetURL("files/headers.html"),
-                                                &delegate, &context);
+  net::TestURLRequestContext context;
+  net::TestDelegate delegate;
+  net::TestURLRequest url_request(test_server.GetURL("files/headers.html"),
+                                                     &delegate, &context);
   url_request.Start();
   MessageLoop::current()->Run();
 
@@ -176,7 +178,7 @@ TEST(WebRequestConditionAttributeTest, ThirdParty) {
                                            &value_true,
                                            &error);
   ASSERT_EQ("", error);
-  ASSERT_TRUE(third_party_attribute.get() != NULL);
+  ASSERT_TRUE(third_party_attribute.get());
   const FundamentalValue value_false(false);
   // This attribute matches only first party requests.
   scoped_ptr<WebRequestConditionAttribute> first_party_attribute =
@@ -184,45 +186,115 @@ TEST(WebRequestConditionAttributeTest, ThirdParty) {
                                            &value_false,
                                            &error);
   ASSERT_EQ("", error);
-  ASSERT_TRUE(first_party_attribute.get() != NULL);
+  ASSERT_TRUE(first_party_attribute.get());
 
   const GURL url_empty;
   const GURL url_a("http://a.com");
   const GURL url_b("http://b.com");
-  TestURLRequestContext context;
-  TestDelegate delegate;
-  TestURLRequest url_request(url_a, &delegate, &context);
+  net::TestURLRequestContext context;
+  net::TestDelegate delegate;
+  net::TestURLRequest url_request(url_a, &delegate, &context);
 
-  static const RequestStage request_stages[] = {
-    ON_BEFORE_REQUEST,
-    ON_BEFORE_SEND_HEADERS,
-    ON_SEND_HEADERS,
-    ON_HEADERS_RECEIVED,
-    ON_AUTH_REQUIRED,
-    ON_BEFORE_REDIRECT,
-    ON_RESPONSE_STARTED,
-    ON_COMPLETED,
-    ON_ERROR
-  };
-
-  for (size_t i = 0; i < arraysize(request_stages); ++i) {
+  for (unsigned int i = 1; i <= kLastActiveStage; i <<= 1) {
+    if (!(kActiveStages & i))
+      continue;
+    const RequestStage stage = static_cast<RequestStage>(i);
     url_request.set_first_party_for_cookies(url_empty);
     EXPECT_FALSE(third_party_attribute->IsFulfilled(WebRequestRule::RequestData(
-        &url_request, request_stages[i])));
+        &url_request, stage)));
     EXPECT_TRUE(first_party_attribute->IsFulfilled(WebRequestRule::RequestData(
-        &url_request, request_stages[i])));
+        &url_request, stage)));
 
     url_request.set_first_party_for_cookies(url_b);
     EXPECT_TRUE(third_party_attribute->IsFulfilled(WebRequestRule::RequestData(
-        &url_request, request_stages[i])));
+        &url_request, stage)));
     EXPECT_FALSE(first_party_attribute->IsFulfilled(WebRequestRule::RequestData(
-        &url_request, request_stages[i])));
+        &url_request, stage)));
 
     url_request.set_first_party_for_cookies(url_a);
     EXPECT_FALSE(third_party_attribute->IsFulfilled(WebRequestRule::RequestData(
-        &url_request, request_stages[i])));
+        &url_request, stage)));
     EXPECT_TRUE(first_party_attribute->IsFulfilled(WebRequestRule::RequestData(
-        &url_request, request_stages[i])));
+        &url_request, stage)));
+  }
+}
+
+// Testing WebRequestConditionAttributeStages. This iterates over all stages,
+// and tests a couple of "stage" attributes -- one created with an empty set of
+// applicable stages, one for each stage applicable for that stage, and one
+// applicable in all stages.
+TEST(WebRequestConditionAttributeTest, Stages) {
+  // Necessary for TestURLRequest.
+  MessageLoop message_loop(MessageLoop::TYPE_IO);
+
+  typedef std::pair<RequestStage, const char*> StageNamePair;
+  static const StageNamePair active_stages[] = {
+    StageNamePair(ON_BEFORE_REQUEST, keys::kOnBeforeRequestEnum),
+    StageNamePair(ON_BEFORE_SEND_HEADERS, keys::kOnBeforeSendHeadersEnum),
+    StageNamePair(ON_HEADERS_RECEIVED, keys::kOnHeadersReceivedEnum),
+    StageNamePair(ON_AUTH_REQUIRED, keys::kOnAuthRequiredEnum)
+  };
+
+  // Check that exactly all active stages are considered in this test.
+  unsigned int covered_stages = 0;
+  for (size_t i = 0; i < arraysize(active_stages); ++i)
+    covered_stages |= active_stages[i].first;
+  EXPECT_EQ(kActiveStages, covered_stages);
+
+  std::string error;
+
+  // Create an attribute with an empty set of applicable stages.
+  ListValue empty_list;
+  scoped_ptr<WebRequestConditionAttribute> empty_attribute =
+      WebRequestConditionAttribute::Create(keys::kStagesKey,
+                                           &empty_list,
+                                           &error);
+  EXPECT_EQ("", error);
+  ASSERT_TRUE(empty_attribute.get());
+
+  // Create an attribute with all possible applicable stages.
+  ListValue all_stages;
+  for (size_t i = 0; i < arraysize(active_stages); ++i)
+    all_stages.AppendString(active_stages[i].second);
+  scoped_ptr<WebRequestConditionAttribute> attribute_with_all =
+      WebRequestConditionAttribute::Create(keys::kStagesKey,
+                                           &all_stages,
+                                           &error);
+  EXPECT_EQ("", error);
+  ASSERT_TRUE(attribute_with_all.get());
+
+  // Create one attribute for each single stage, to be applicable in that stage.
+  ScopedVector<WebRequestConditionAttribute> one_stage_attributes;
+
+  for (size_t i = 0; i < arraysize(active_stages); ++i) {
+    ListValue single_stage_list;
+    single_stage_list.AppendString(active_stages[i].second);
+    one_stage_attributes.push_back(
+        WebRequestConditionAttribute::Create(keys::kStagesKey,
+                                             &single_stage_list,
+                                             &error).release());
+    EXPECT_EQ("", error);
+    ASSERT_TRUE(one_stage_attributes.back() != NULL);
+  }
+
+  const GURL url_empty;
+  net::TestURLRequestContext context;
+  net::TestDelegate delegate;
+  net::TestURLRequest url_request(url_empty, &delegate, &context);
+
+  for (size_t i = 0; i < arraysize(active_stages); ++i) {
+    EXPECT_FALSE(empty_attribute->IsFulfilled(WebRequestRule::RequestData(
+       &url_request, active_stages[i].first)));
+
+    for (size_t j = 0; j < one_stage_attributes.size(); ++j) {
+      EXPECT_EQ(
+          i == j,
+          one_stage_attributes[j]->IsFulfilled(WebRequestRule::RequestData(
+              &url_request, active_stages[i].first)));
+    }
+
+    EXPECT_TRUE(attribute_with_all->IsFulfilled(WebRequestRule::RequestData(
+        &url_request, active_stages[i].first)));
   }
 }
 
@@ -304,7 +376,7 @@ void MatchAndCheck(const std::vector< std::vector<const std::string*> >& tests,
   ListValue contains_headers;
   for (size_t i = 0; i < tests.size(); ++i) {
     scoped_ptr<DictionaryValue> temp(GetDictionaryFromArray(tests[i]));
-    ASSERT_TRUE(temp.get() != NULL);
+    ASSERT_TRUE(temp.get());
     contains_headers.Append(temp.release());
   }
 
@@ -312,7 +384,7 @@ void MatchAndCheck(const std::vector< std::vector<const std::string*> >& tests,
   scoped_ptr<WebRequestConditionAttribute> attribute =
       WebRequestConditionAttribute::Create(key, &contains_headers, &error);
   ASSERT_EQ("", error);
-  ASSERT_TRUE(attribute.get() != NULL);
+  ASSERT_TRUE(attribute.get());
 
   *result = attribute->IsFulfilled(WebRequestRule::RequestData(
       url_request, stage, url_request->response_headers()));
@@ -328,10 +400,10 @@ TEST(WebRequestConditionAttributeTest, RequestHeaders) {
   // Necessary for TestURLRequest.
   MessageLoop message_loop(MessageLoop::TYPE_IO);
 
-  TestURLRequestContext context;
-  TestDelegate delegate;
-  TestURLRequest url_request(GURL("http://example.com"),  // Dummy URL.
-                             &delegate, &context);
+  net::TestURLRequestContext context;
+  net::TestDelegate delegate;
+  net::TestURLRequest url_request(GURL("http://example.com"),  // Dummy URL.
+                                  &delegate, &context);
   url_request.SetExtraRequestHeaderByName(
       "Custom-header", "custom/value", true /* overwrite */);
   url_request.Start();
@@ -413,10 +485,10 @@ TEST(WebRequestConditionAttributeTest, ResponseHeaders) {
           "chrome/test/data/extensions/api_test/webrequest/declarative")));
   ASSERT_TRUE(test_server.Start());
 
-  TestURLRequestContext context;
-  TestDelegate delegate;
-  TestURLRequest url_request(test_server.GetURL("files/headers.html"),
-                             &delegate, &context);
+  net::TestURLRequestContext context;
+  net::TestDelegate delegate;
+  net::TestURLRequest url_request(test_server.GetURL("files/headers.html"),
+                                  &delegate, &context);
   url_request.Start();
   MessageLoop::current()->Run();
 

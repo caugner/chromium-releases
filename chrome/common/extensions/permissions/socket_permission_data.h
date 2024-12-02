@@ -6,6 +6,10 @@
 
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
+#include "chrome/common/extensions/permissions/api_permission.h"
+#include "content/public/common/socket_permission_request.h"
+
 namespace extensions {
 
 // A pattern that can be used to match socket permission.
@@ -25,14 +29,6 @@ namespace extensions {
 //             <port number between 0 and 65535>)
 class SocketPermissionData {
  public:
-  enum OperationType {
-    NONE = 0,
-    TCP_CONNECT,
-    TCP_LISTEN,
-    UDP_BIND,
-    UDP_SEND_TO,
-  };
-
   enum HostType {
     ANY_HOST,
     HOSTS_IN_DOMAINS,
@@ -47,22 +43,40 @@ class SocketPermissionData {
   bool operator<(const SocketPermissionData& rhs) const;
   bool operator==(const SocketPermissionData& rhs) const;
 
-  bool Match(OperationType type, const std::string& host, int port) const;
+  // Check if |param| (which must be a SocketPermissionData::CheckParam)
+  // matches the spec of |this|.
+  bool Check(const APIPermission::CheckParam* param) const;
 
-  bool Parse(const std::string& permission);
+  // Convert |this| into a base::Value.
+  scoped_ptr<base::Value> ToValue() const;
+
+  // Populate |this| from a base::Value.
+  bool FromValue(const base::Value* value);
 
   HostType GetHostType() const;
   const std::string GetHost() const;
 
-  const std::string& GetAsString() const;
+  const content::SocketPermissionRequest& pattern() const { return pattern_; }
+  const bool& match_subdomains() const { return match_subdomains_; }
+
+  // These accessors are provided for IPC_STRUCT_TRAITS_MEMBER.  Please
+  // think twice before using them for anything else.
+  content::SocketPermissionRequest& pattern();
+  bool& match_subdomains();
+
+  // TODO(bryeung): SocketPermissionData should be encoded as a base::Value
+  // instead of a string.  Until that is done, expose these methods for
+  // testing.
+  bool ParseForTest(const std::string& permission) { return Parse(permission); }
+  const std::string& GetAsStringForTest() const { return GetAsString(); }
 
  private:
+  bool Parse(const std::string& permission);
+  const std::string& GetAsString() const;
   void Reset();
 
-  OperationType type_;
-  std::string host_;
+  content::SocketPermissionRequest pattern_;
   bool match_subdomains_;
-  int port_;
   mutable std::string spec_;
 };
 

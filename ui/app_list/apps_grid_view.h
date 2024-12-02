@@ -5,13 +5,12 @@
 #ifndef UI_APP_LIST_APPS_GRID_VIEW_H_
 #define UI_APP_LIST_APPS_GRID_VIEW_H_
 
-#include <vector>
-
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/timer.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/app_list/app_list_model.h"
+#include "ui/app_list/app_list_model_observer.h"
 #include "ui/app_list/pagination_model_observer.h"
 #include "ui/base/models/list_model_observer.h"
 #include "ui/views/animation/bounds_animator.h"
@@ -38,7 +37,8 @@ class PaginationModel;
 class APP_LIST_EXPORT AppsGridView : public views::View,
                                      public views::ButtonListener,
                                      public ui::ListModelObserver,
-                                     public PaginationModelObserver {
+                                     public PaginationModelObserver,
+                                     public AppListModelObserver {
  public:
   enum Pointer {
     NONE,
@@ -55,7 +55,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void SetLayout(int icon_size, int cols, int rows_per_page);
 
   // Sets |model| to use. Note this does not take ownership of |model|.
-  void SetModel(AppListModel::Apps* model);
+  void SetModel(AppListModel* model);
 
   void SetSelectedView(views::View* view);
   void ClearSelectedView(views::View* view);
@@ -113,6 +113,10 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // Updates page splits for item views.
   void UpdatePaging();
 
+  // Updates the number of pulsing block views based on AppListModel status and
+  // number of apps.
+  void UpdatePulsingBlockViews();
+
   views::View* CreateViewForItemAtIndex(size_t index);
 
   void SetSelectedItemByIndex(const Index& index);
@@ -139,9 +143,16 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
                             bool animate_target,
                             const gfx::Rect& target);
 
+  // Extracts drag location info from |event| into |drag_point|.
+  void ExtractDragLocation(const ui::LocatedEvent& event,
+                           gfx::Point* drag_point);
+
   // Calculates |drop_target_| based on |drag_point|. |drag_point| is in the
-  // grid view's coordinates.
-  void CalculateDropTarget(const gfx::Point& drag_point);
+  // grid view's coordinates. When |use_page_button_hovering| is true and
+  // |drag_point| is hovering on a page button, use the last slot on that page
+  // as drop target.
+  void CalculateDropTarget(const gfx::Point& drag_point,
+                           bool use_page_button_hovering);
 
   // Starts the page flip timer if |drag_point| is in left/right side page flip
   // zone or is over page switcher.
@@ -168,7 +179,10 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   virtual void SelectedPageChanged(int old_selected, int new_selected) OVERRIDE;
   virtual void TransitionChanged() OVERRIDE;
 
-  AppListModel::Apps* model_;  // Owned by AppListModel.
+  // Overridden from AppListModelObserver:
+  virtual void OnAppListModelStatusChanged() OVERRIDE;
+
+  AppListModel* model_;  // Owned by AppListView.
   AppsGridViewDelegate* delegate_;
   PaginationModel* pagination_model_;  // Owned by AppListController.
   PageSwitcher* page_switcher_view_;  // Owned by views hierarchy.
@@ -180,13 +194,17 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // Tracks app item views. There is a view per item in |model_|.
   views::ViewModel view_model_;
 
+  // Tracks pulsing block views.
+  views::ViewModel pulsing_blocks_model_;
+
   views::View* selected_view_;
 
   views::View* drag_view_;
-  gfx::Point drag_offset_;
+  gfx::Point drag_start_;
   Pointer drag_pointer_;
   Index drop_target_;
 
+  // Last mouse drag location in this view's coordinates.
   gfx::Point last_drag_point_;
 
   // Timer to auto flip page when dragging an item near the left/right edges.

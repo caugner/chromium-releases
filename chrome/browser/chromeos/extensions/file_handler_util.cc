@@ -55,6 +55,7 @@ namespace file_handler_util {
 const char kTaskFile[] = "file";
 const char kTaskDrive[] = "drive";
 const char kTaskWebIntent[] = "web-intent";
+const char kTaskApp[] = "app";
 
 namespace {
 
@@ -83,7 +84,6 @@ const int kReadOnlyFilePermissions = base::PLATFORM_FILE_OPEN |
                                      base::PLATFORM_FILE_ASYNC;
 
 const char kFileBrowserExtensionId[] = "hhaomjibdihmijegdhdafkllkbggdgoj";
-const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
 
 // Returns process id of the process the extension is running in.
 int ExtractProcessFromExtensionId(const std::string& extension_id,
@@ -103,7 +103,8 @@ int ExtractProcessFromExtensionId(const std::string& extension_id,
 
 bool IsBuiltinTask(const FileBrowserHandler* task) {
   return (task->extension_id() == kFileBrowserExtensionId ||
-          task->extension_id() == kQuickOfficeExtensionId);
+          task->extension_id() == extension_misc::kQuickOfficeDevExtensionId ||
+          task->extension_id() == extension_misc::kQuickOfficeExtensionId);
 }
 
 bool MatchesAllURLs(const FileBrowserHandler* handler) {
@@ -157,7 +158,8 @@ std::string EscapedUtf8ToLower(const std::string& str) {
 bool GetFileBrowserHandlers(Profile* profile,
                             const GURL& selected_file_url,
                             FileBrowserHandlerSet* results) {
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
   if (!service)
     return false;  // In unit-tests, we may not have an ExtensionService.
 
@@ -263,7 +265,8 @@ std::string MakeTaskID(const std::string& extension_id,
                        const std::string& action_id) {
   DCHECK(task_type == kTaskFile ||
          task_type == kTaskDrive ||
-         task_type == kTaskWebIntent);
+         task_type == kTaskWebIntent ||
+         task_type == kTaskApp);
   return base::StringPrintf("%s|%s|%s",
                             extension_id.c_str(),
                             task_type.c_str(),
@@ -313,7 +316,8 @@ bool CrackTaskID(const std::string& task_id,
     *task_type = result[1];
     DCHECK(*task_type == kTaskFile ||
            *task_type == kTaskDrive ||
-           *task_type == kTaskWebIntent);
+           *task_type == kTaskWebIntent ||
+           *task_type == kTaskApp);
   }
 
   if (action_id)
@@ -362,25 +366,31 @@ void FindDefaultTasks(Profile* profile,
     }
   }
 
+  const FileBrowserHandler* builtin_task = NULL;
   // Convert the default task IDs collected above to one of the handler pointers
   // from common_tasks.
   for (FileBrowserHandlerSet::const_iterator task_iter = common_tasks.begin();
        task_iter != common_tasks.end(); ++task_iter) {
     std::string task_id = MakeTaskID((*task_iter)->extension_id(), kTaskFile,
                                      (*task_iter)->id());
-    for (std::set<std::string>::iterator default_iter = default_ids.begin();
-         default_iter != default_ids.end(); ++default_iter) {
-      if (task_id == *default_iter) {
-        default_tasks->insert(*task_iter);
-        break;
-      }
-    }
-    // If it's a built in task, then we want to always insert it so that we have
-    // an initial default for all file types we can handle with built in
-    // handlers.
-    if (IsBuiltinTask(*task_iter))
+    std::set<std::string>::iterator default_iter = default_ids.find(task_id);
+    if (default_iter != default_ids.end()) {
       default_tasks->insert(*task_iter);
+      continue;
+    }
+
+    // If it's a built in task, remember it. If there are no default tasks among
+    // common tasks, builtin task will be used as a fallback.
+    // Note that builtin tasks are not overlapping, so there can be at most one
+    // builtin tasks for each set of files.
+    if (IsBuiltinTask(*task_iter))
+      builtin_task = *task_iter;
   }
+
+  // If there are no default tasks found, use builtin task (if found) as a
+  // default.
+  if (builtin_task && default_tasks->empty())
+    default_tasks->insert(builtin_task);
 }
 
 // Given the list of selected files, returns array of context menu tasks
@@ -450,6 +460,9 @@ bool GetTaskForURL(
   if (!FindCommonTasks(profile, file_urls, &common_tasks))
     return false;
 
+  if (common_tasks.empty())
+    return false;
+
   FindDefaultTasks(profile, file_urls, common_tasks, &default_tasks);
 
   // If there's none, or more than one, then we don't have a canonical default.
@@ -461,7 +474,11 @@ bool GetTaskForURL(
     return true;
   }
 
-  return false;
+  // If there are no default tasks, use first task in the list (file manager
+  // does the same in this situation).
+  // TODO(tbarzic): This is so not optimal behaviour.
+  *handler = *common_tasks.begin();
+  return true;
 }
 
 class ExtensionTaskExecutor : public FileTaskExecutor {
@@ -562,6 +579,27 @@ class WebIntentTaskExecutor : public FileTaskExecutor {
   const std::string action_id_;
 };
 
+class AppTaskExecutor : public FileTaskExecutor {
+ public:
+  // FileTaskExecutor overrides.
+  virtual bool ExecuteAndNotify(const std::vector<GURL>& file_urls,
+                                const FileTaskFinishedCallback& done) OVERRIDE;
+
+ private:
+  // FileTaskExecutor is the only class allowed to create one.
+  friend class FileTaskExecutor;
+
+  AppTaskExecutor(Profile* profile,
+                  const std::string& extension_id,
+                  const std::string& action_id);
+  virtual ~AppTaskExecutor();
+
+  bool ExecuteForURL(const GURL& file_url);
+
+  const std::string extension_id_;
+  const std::string action_id_;
+};
+
 // static
 FileTaskExecutor* FileTaskExecutor::Create(Profile* profile,
                                            const GURL source_url,
@@ -586,6 +624,11 @@ FileTaskExecutor* FileTaskExecutor::Create(Profile* profile,
                                      source_url,
                                      extension_id,
                                      action_id);
+
+  if (task_type == kTaskApp)
+    return new AppTaskExecutor(profile,
+                               extension_id,
+                               action_id);
 
   NOTREACHED();
   return NULL;
@@ -616,7 +659,8 @@ Browser* FileTaskExecutor::GetBrowser() const {
 const Extension* FileTaskExecutor::GetExtension() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile())->extension_service();
   return service ? service->GetExtensionById(extension_id_, false) :
                    NULL;
 }
@@ -941,7 +985,7 @@ void ExtensionTaskExecutor::SetupPermissionsAndDispatchEvent(
   SetupHandlerHostFileAccessPermissions(handler_pid);
 
   scoped_ptr<ListValue> event_args(new ListValue());
-  event_args->Append(Value::CreateStringValue(action_id_));
+  event_args->Append(new base::StringValue(action_id_));
   DictionaryValue* details = new DictionaryValue();
   event_args->Append(details);
   // Get file definitions. These will be replaced with Entry instances by
@@ -963,9 +1007,10 @@ void ExtensionTaskExecutor::SetupPermissionsAndDispatchEvent(
 
   details->SetInteger("tab_id", tab_id_);
 
-  event_router->DispatchEventToExtension(
-      extension_id(), std::string("fileBrowserHandler.onExecute"),
-      event_args.Pass(), profile(), GURL());
+  scoped_ptr<extensions::Event> event(new extensions::Event(
+      "fileBrowserHandler.onExecute", event_args.Pass()));
+  event->restrict_to_profile = profile();
+  event_router->DispatchEventToExtension(extension_id(), event.Pass());
   ExecuteDoneOnUIThread(true);
 }
 
@@ -1063,6 +1108,52 @@ bool WebIntentTaskExecutor::ExecuteForURL(const GURL& file_url) {
 
   FilePath local_path = url.path();
   extensions::LaunchPlatformAppWithPath(profile(), GetExtension(), local_path);
+  return true;
+}
+
+AppTaskExecutor::AppTaskExecutor(
+    Profile* profile,
+    const std::string& extension_id,
+    const std::string& action_id)
+    : FileTaskExecutor(profile, extension_id),
+      action_id_(action_id) {
+}
+
+AppTaskExecutor::~AppTaskExecutor() {}
+
+bool AppTaskExecutor::ExecuteAndNotify(
+    const std::vector<GURL>& file_urls,
+    const FileTaskFinishedCallback& done) {
+  bool success = true;
+
+  for (std::vector<GURL>::const_iterator i = file_urls.begin();
+       i != file_urls.end(); ++i) {
+    if (!ExecuteForURL(*i))
+      success = false;
+  }
+
+  if (!done.is_null())
+    done.Run(success);
+
+  return true;
+}
+
+bool AppTaskExecutor::ExecuteForURL(const GURL& file_url) {
+  fileapi::FileSystemURL url(file_url);
+  if (!chromeos::CrosMountPointProvider::CanHandleURL(url))
+    return false;
+
+  scoped_refptr<fileapi::FileSystemContext> file_system_context =
+      BrowserContext::GetDefaultStoragePartition(profile())->
+      GetFileSystemContext();
+  fileapi::ExternalFileSystemMountPointProvider* external_provider =
+      file_system_context->external_provider();
+  if (!external_provider || !external_provider->IsAccessAllowed(url))
+    return false;
+
+  FilePath local_path = url.path();
+  extensions::LaunchPlatformAppWithFileHandler(profile(), GetExtension(),
+      action_id_, local_path);
   return true;
 }
 

@@ -24,9 +24,9 @@
    Memcheck:Leak
    ...
    fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
-   fun:_ZN16HALDefaultDevice22InstallServerListenersEv
-   fun:_ZN16HALDefaultDevice10InitializeEv
+   ...
    fun:_ZN9HALSystem16CheckOutInstanceEv
+   ...
 }
 {
    # Mac test_shell_tests.  See http://crbug.com/11134
@@ -320,6 +320,7 @@
    fun:deflateSetDictionary
    fun:deflate
    fun:png_write_finish_row
+   ...
    fun:png_write_find_filter
    fun:_cg_png_write_row
    fun:writeOnePng
@@ -327,8 +328,7 @@
    fun:CGImageDestinationFinalize
    fun:+[NSBitmapImageRep(NSBitmapImageFileTypeExtensions) representationOfImageRepsInArray:usingType:properties:]
    fun:-[NSBitmapImageRep(NSBitmapImageFileTypeExtensions) representationUsingType:properties:]
-   fun:_ZN3gfx8internal14PNGFromNSImageEP7NSImagePSt6vectorIhSaIhEE
-   fun:_ZNK3gfx5Image10ToImagePNGEv
+   fun:_ZN3gfx8internal24Get1xPNGBytesFromNSImageEP7NSImage
 }
 
 # 2. Intentional unit test errors, stuff that is somehow a false positive
@@ -646,78 +646,6 @@
    ...
    fun:_ZN19extension_file_util13LoadExtensionERK8FilePathbPSs
    fun:_ZN12CrxInstaller15CompleteInstallEv
-}
-{
-   bug_46186_a
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
-   fun:_ZN16HALDefaultDevice22InstallServerListenersEv
-   fun:_ZN16HALDefaultDevice10InitializeEv
-   fun:_ZN9HALSystem16CheckOutInstanceEv
-   fun:AudioObjectAddPropertyListener
-   fun:_ZN10AQMEDeviceC2EmPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
-   fun:_Z11NewAQIONodembPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
-   fun:_ZN15AQIONodeManager13_FindAQIONodeEmbb
-   fun:_ZN15AQIONodeManager12FindAQIONodeEmbb
-   fun:_ZN16AudioQueueObject15DoIONodeConnectERK25AudioQueueStreamSpecifierPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
-   fun:_ZN16AudioQueueObject13EnqueueBufferEP16AudioQueueBufferjPK28AudioStreamPacketDescriptionjjjPK24AudioQueueParameterEventRK11AQTimeStampPS8_
-   fun:AQServer_EnqueueBuffer
-   fun:AudioQueueEnqueueBufferWithParameters
-   fun:AudioQueueEnqueueBuffer
-   fun:_ZN28PCMQueueOutAudioOutputStream5StartEPN17AudioOutputStream19AudioSourceCallbackE
-   fun:_ZN5media21AudioOutputController6DoPlayEv
-}
-{
-   bug_46186_b
-   Memcheck:Leak
-   fun:malloc_zone_malloc
-   fun:_ZN4base12_GLOBAL__N_137oom_killer_cfallocator_system_defaultElmPv
-   fun:_CFRuntimeCreateInstance
-   fun:CFRunLoopSourceCreate
-   fun:MSHCreateMIGServerSource
-   fun:_ZN20HALCADClientListenerC2EPFlmmPK26AudioObjectPropertyAddressPvES3_
-   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
-   fun:_ZN16HALDefaultDevice22InstallServerListenersEv
-   fun:_ZN16HALDefaultDevice10InitializeEv
-   fun:_ZN9HALSystem16CheckOutInstanceEv
-   fun:AudioObjectAddPropertyListener
-   fun:_ZN10AQMEDeviceC2EmPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
-   fun:_Z11NewAQIONodembPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
-   fun:_ZN15AQIONodeManager13_FindAQIONodeEmbb
-   fun:_ZN15AQIONodeManager12FindAQIONodeEmbb
-   fun:_ZN16AudioQueueObject15DoIONodeConnectERK25AudioQueueStreamSpecifierPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
-   fun:_ZN16AudioQueueObject13EnqueueBufferEP16AudioQueueBufferjPK28AudioStreamPacketDescriptionjjjPK24AudioQueueParameterEventRK11AQTimeStampPS8_
-   fun:AQServer_EnqueueBuffer
-   fun:AudioQueueEnqueueBufferWithParameters
-   fun:AudioQueueEnqueueBuffer
-   fun:_ZN28PCMQueueOutAudioOutputStream5StartEPN17AudioOutputStream19AudioSourceCallbackE
-   fun:_ZN17AudioRendererHost14IPCAudioSource4PlayEv
-}
-{
-   bug_46186_c
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
-   fun:_ZN16HALDefaultDevice22InstallServerListenersEv
-   fun:_ZN16HALDefaultDevice10InitializeEv
-   fun:_ZN9HALSystem15InitializeShellEv
-   fun:_ZN9HALSystem16CheckOutInstanceEv
-   fun:AudioObjectAddPropertyListener
-   fun:_ZN10AQMEDeviceC2EmbPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
-   fun:_Z11NewAQIONodembbPK27AudioStreamBasicDescriptionPK18AudioChannelLayout
-   fun:_ZN15AQIONodeManager13_FindAQIONodeEmbbb
-   fun:_ZN15AQIONodeManager12FindAQIONodeEmbbb
-}
-{
-   bug_46186_d
-   Memcheck:Leak
-   ...
-   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
-   ...
-   fun:_ZN9HALSystem15InitializeShellEv
-   fun:_ZN9HALSystem16CheckOutInstanceEv
-   fun:AudioObjectGetPropertyData*
 }
 {
    bug_47949_a
@@ -1779,32 +1707,6 @@
    fun:_ZN3net25DiskCacheBasedSSLHostInfo12OnIOCompleteEPNS0_22CacheOperationDataShimEi
 }
 {
-   bug_97818
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZL14NewFromFontRefPK8__CTFontPKc
-   fun:_Z26SkCreateTypefaceFromCTFontPK8__CTFont
-   fun:_ZN7WebCoreL10setupPaintEP7SkPaintPKNS_14SimpleFontDataEPKNS_4FontE*
-   fun:_ZNK7WebCore4Font10drawGlyphsEPNS_15GraphicsContextEPKNS_14SimpleFontDataERKNS_11GlyphBufferEiiRKNS_10FloatPointE
-   fun:_ZNK7WebCore4Font15drawGlyphBufferEPNS_15GraphicsContextERKNS_7TextRunERKNS_11GlyphBufferERKNS_10FloatPointE
-   fun:_ZNK7WebCore4Font14drawSimpleTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
-   fun:_ZNK7WebCore4Font8drawTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
-   fun:_ZN7WebCore15GraphicsContext8drawTextERKNS_4FontERKNS_7TextRunERKNS_10FloatPointEii
-   fun:_ZN7WebCoreL20paintTextWithShadowsEPNS_15GraphicsContextERKNS_4FontERKNS_7TextRunERKN3WTF12AtomicStringEiiiiRKNS_10FloatPointERKNS_9FloatRectEPKNS_10ShadowDataEbb
-   fun:_ZN7WebCore13InlineTextBox5paintERNS_9PaintInfoERKNS_*
-   fun:_ZN7WebCore13InlineFlowBox5paintERNS_9PaintInfoERKNS_*
-   fun:_ZN7WebCore13RootInlineBox5paintERNS_9PaintInfoERKNS_*
-   fun:_ZNK7WebCore17RenderLineBoxList5paintEPNS_20RenderBoxModelObjectERNS_9PaintInfoERKNS_*
-   fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_*
-   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_*
-   fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_*
-   ...
-   fun:_ZN7WebCore11RenderBlock13paintChildrenERNS_9PaintInfoERKNS_*
-   fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_*
-   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_*
-   fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_*
-}
-{
    bug_100022
    Memcheck:Unaddressable
    ...
@@ -1863,6 +1765,16 @@
    fun:-[NSPasteboard(ChimeraPasteboardURLUtils) getURLs:andTitles:convertingFilenames:]
    fun:_ZN2ui33PopulateURLAndTitleFromPasteboardEP4GURLPSbItN4base20string16_char_traitsESaItEEP12NSPasteboarda
    fun:_ZN24WebDragDestTest_URL_Test8TestBodyEv
+}
+{
+   bug_102920
+   Memcheck:Unaddressable
+   fun:MDItemCreate
+   fun:CSBackupSetItemExcluded
+   fun:_ZN4base3mac22SetFileBackupExclusionERK8FilePath
+   fun:_ZN7history17ThumbnailDatabase4InitERK8FilePathPKNS_16HistoryPublisherEPNS_11URLDatabaseE
+   fun:_ZN7history14HistoryBackend8InitImplERKSs
+   fun:_ZN7history14HistoryBackend4InitERKSsb
 }
 {
    bug_104756
@@ -2222,31 +2134,6 @@
    fun:_ZN4base14PlatformThread7SetNameEPKc
 }
 {
-   bug_107158
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZL14NewFromFontRefPK8__CTFontPKc
-   fun:_Z26SkCreateTypefaceFromCTFontPK8__CTFont
-   fun:_ZN7WebCoreL10setupPaintEP7SkPaintPKNS_14SimpleFontDataEPKNS_4FontEbb
-   fun:_ZNK7WebCore4Font10drawGlyphsEPNS_15GraphicsContextEPKNS_14SimpleFontDataERKNS_11GlyphBufferEiiRKNS_10FloatPointE
-   fun:_ZNK7WebCore4Font15drawGlyphBufferEPNS_15GraphicsContextERKNS_7TextRunERKNS_11GlyphBufferERKNS_10FloatPointE
-   fun:_ZNK7WebCore4Font14drawSimpleTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
-   fun:_ZNK7WebCore4Font8drawTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
-   fun:_ZN7WebCore15GraphicsContext8drawTextERKNS_4FontERKNS_7TextRunERKNS_10FloatPointEii
-   fun:_ZN7WebCoreL20paintTextWithShadowsEPNS_15GraphicsContextERKNS_4FontERKNS_7TextRunERKN3WTF12AtomicStringEiiiiRKNS_10FloatPointERKNS_9FloatRectEPKNS_10ShadowDataEbb
-   fun:_ZN7WebCore13InlineTextBox5paintERNS_9PaintInfoERKNS_8IntPointEii
-   fun:_ZN7WebCore13InlineFlowBox5paintERNS_9PaintInfoERKNS_8IntPointEii
-   fun:_ZN7WebCore13RootInlineBox5paintERNS_9PaintInfoERKNS_8IntPointEii
-   fun:_ZNK7WebCore17RenderLineBoxList5paintEPNS_20RenderBoxModelObjectERNS_9PaintInfoERKNS_8IntPointE
-   fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_8IntPointE
-   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_8IntPointE
-   fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_8IntPointE
-   fun:_ZN7WebCore11RenderBlock13paintChildrenERNS_9PaintInfoERKNS_8IntPointE
-   fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_8IntPointE
-   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_8IntPointE
-   fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_8IntPointE
-}
-{
    bug_107177
    Memcheck:Leak
    fun:calloc
@@ -2294,6 +2181,32 @@
    fun:_ZN6WebKit12WebFrameImpl16paintWithContextERN7WebCore15GraphicsContextERKNS_7WebRectE
 }
 {
+   bug_107541
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZL14NewFromFontRefPK8__CTFontPKc
+   fun:_Z26SkCreateTypefaceFromCTFontPK8__CTFont
+   fun:_ZN7WebCoreL10setupPaintEP7SkPaintPKNS_14SimpleFontDataEPKNS_4FontE*
+   fun:_ZNK7WebCore4Font10drawGlyphsEPNS_15GraphicsContextEPKNS_14SimpleFontDataERKNS_11GlyphBufferEiiRKNS_10FloatPointE
+   fun:_ZNK7WebCore4Font15drawGlyphBufferEPNS_15GraphicsContextERKNS_7TextRunERKNS_11GlyphBufferERKNS_10FloatPointE
+   fun:_ZNK7WebCore4Font14drawSimpleTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPointEii
+   fun:_ZNK7WebCore4Font8drawTextEPNS_15GraphicsContextERKNS_7TextRunERKNS_10FloatPoint*
+   fun:_ZN7WebCore15GraphicsContext8drawTextERKNS_4FontERKNS_7TextRunERKNS_10FloatPoint*
+   fun:_ZN7WebCoreL20paintTextWithShadowsEPNS_15GraphicsContextERKNS_4FontERKNS_7TextRunERKN3WTF12AtomicStringEiiiiRKNS_10FloatPointERKNS_9FloatRectEPKNS_10ShadowDataEbb
+   fun:_ZN7WebCore13InlineTextBox5paintERNS_9PaintInfoERKNS_*
+   fun:_ZN7WebCore13InlineFlowBox5paintERNS_9PaintInfoERKNS_*
+   fun:_ZN7WebCore13RootInlineBox5paintERNS_9PaintInfoERKNS_*
+   fun:_ZNK7WebCore17RenderLineBoxList5paintEPNS_20RenderBoxModelObjectERNS_9PaintInfoERKNS_*
+   fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_*
+   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_*
+   fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_*
+   ...
+   fun:_ZN7WebCore11RenderBlock13paintChildrenERNS_9PaintInfoERKNS_*
+   fun:_ZN7WebCore11RenderBlock13paintContentsERNS_9PaintInfoERKNS_*
+   fun:_ZN7WebCore11RenderBlock11paintObjectERNS_9PaintInfoERKNS_*
+   fun:_ZN7WebCore11RenderBlock5paintERNS_9PaintInfoERKNS_*
+}
+{
    bug_109994
    Memcheck:Leak
    ...
@@ -2307,16 +2220,6 @@
    fun:_ZN15ChromeTestSuite10InitializeEv
    fun:_ZN4base9TestSuite3RunEv
    fun:_ZN17UnitTestTestSuite3RunEv
-}
-{
-   bug_102920
-   Memcheck:Unaddressable
-   fun:MDItemCreate
-   fun:CSBackupSetItemExcluded
-   fun:_ZN4base3mac22SetFileBackupExclusionERK8FilePath
-   fun:_ZN7history17ThumbnailDatabase4InitERK8FilePathPKNS_16HistoryPublisherEPNS_11URLDatabaseE
-   fun:_ZN7history14HistoryBackend8InitImplERKSs
-   fun:_ZN7history14HistoryBackend4InitERKSsb
 }
 {
    bug_112078
@@ -2450,28 +2353,11 @@
    fun:_ZN7content21WebRTCAudioDeviceTest5SetUpEv
 }
 {
-   bug_155053a
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
-   fun:_ZN9HALSystem15InitializeShellEv
-   fun:_ZN9HALSystem16CheckOutInstanceEv
-   fun:AudioObjectGetPropertyDataSize
-   fun:_ZN5mediaL18GetAudioDeviceInfoEbPSt4listINS_15AudioDeviceNameESaIS1_EE
-   fun:_ZN5media15AudioManagerMac24GetAudioInputDeviceNamesEPSt4listINS_15AudioDeviceNameESaIS2_EE
-   fun:_ZN12media_stream23AudioInputDeviceManager23EnumerateOnDeviceThreadEv
-}
-{
-   bug_155053b
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
-   fun:_ZN16HALDefaultDevice22InstallServerListenersEv
-   fun:_ZN16HALDefaultDevice10InitializeEv
-   fun:_ZN9HALSystem15InitializeShellEv
-   fun:_ZN9HALSystem16CheckOutInstanceEv
-   fun:AudioObjectGetPropertyDataSize
-   fun:_ZN5mediaL18GetAudioDeviceInfoEbPSt4listINS_15AudioDeviceNameESaIS1_EE
-   fun:_ZN5media15AudioManagerMac24GetAudioInputDeviceNamesEPSt4listINS_15AudioDeviceNameESaIS2_EE
-   fun:_ZN12media_stream23AudioInputDeviceManager23EnumerateOnDeviceThreadEv
+   bug_159190
+   Memcheck:Uninitialized
+   ...
+   fun:_ZNK19TConcreteFontScaler15CopyGlyphBitmapEtjP6CGRectPm
+   ...
+   fun:_ZN9Offscreen5getCGERK19SkScalerContext_MacRK7SkGlyphtPmb
+   fun:_ZN19SkScalerContext_Mac13generateImageERK7SkGlyph
 }

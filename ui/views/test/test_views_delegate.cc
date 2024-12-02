@@ -9,8 +9,8 @@
 #include "content/public/test/web_contents_tester.h"
 
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #include "ui/views/widget/native_widget_aura.h"
-#include "ui/views/widget/desktop_native_widget_aura.h"
 #endif
 
 namespace views {
@@ -64,7 +64,8 @@ content::WebContents* TestViewsDelegate::CreateWebContents(
 NativeWidget* TestViewsDelegate::CreateNativeWidget(
     Widget::InitParams::Type type,
     internal::NativeWidgetDelegate* delegate,
-    gfx::NativeView parent) {
+    gfx::NativeView parent,
+    gfx::NativeView context) {
   return NULL;
 }
 

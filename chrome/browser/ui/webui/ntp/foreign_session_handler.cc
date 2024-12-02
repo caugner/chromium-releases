@@ -156,6 +156,9 @@ SessionModelAssociator* ForeignSessionHandler::GetModelAssociator(
 
 void ForeignSessionHandler::RegisterMessages() {
   Init();
+  web_ui()->RegisterMessageCallback("deleteForeignSession",
+      base::Bind(&ForeignSessionHandler::HandleDeleteForeignSession,
+                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback("getForeignSessions",
       base::Bind(&ForeignSessionHandler::HandleGetForeignSessions,
                  base::Unretained(this)));
@@ -217,7 +220,9 @@ bool ForeignSessionHandler::IsTabSyncEnabled() {
 
 string16 ForeignSessionHandler::FormatSessionTime(const base::Time& time) {
   // Return a time like "1 hour ago", "2 days ago", etc.
-  return TimeFormat::TimeElapsed(base::Time::Now() - time);
+  base::Time now = base::Time::Now();
+  // TimeElapsed does not support negative TimeDelta values, so then we use 0.
+  return TimeFormat::TimeElapsed(now < time ? base::TimeDelta() : now - time);
 }
 
 void ForeignSessionHandler::HandleGetForeignSessions(const ListValue* args) {
@@ -320,6 +325,24 @@ void ForeignSessionHandler::HandleOpenForeignSession(const ListValue* args) {
   } else {
     OpenForeignSessionWindows(web_ui(), session_string_value, window_num);
   }
+}
+
+void ForeignSessionHandler::HandleDeleteForeignSession(const ListValue* args) {
+  if (args->GetSize() != 1U) {
+    LOG(ERROR) << "Wrong number of args to deleteForeignSession";
+    return;
+  }
+
+  // Get the session tag argument (required).
+  std::string session_tag;
+  if (!args->GetString(0, &session_tag)) {
+    LOG(ERROR) << "Unable to extract session tag";
+    return;
+  }
+
+  SessionModelAssociator* associator = GetModelAssociator(web_ui());
+  if (associator)
+    associator->DeleteForeignSession(session_tag);
 }
 
 void ForeignSessionHandler::HandleSetForeignSessionCollapsed(

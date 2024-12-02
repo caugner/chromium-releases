@@ -9,22 +9,23 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "grit/devtools_discovery_page_resources.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::DevToolsHttpHandlerDelegate;
 using content::RenderViewHost;
 
-BrowserListTabContentsProvider::BrowserListTabContentsProvider() {
+BrowserListTabContentsProvider::BrowserListTabContentsProvider(
+    Profile* profile)
+    : profile_(profile) {
 }
 
 BrowserListTabContentsProvider::~BrowserListTabContentsProvider() {
@@ -46,8 +47,7 @@ std::string BrowserListTabContentsProvider::GetDiscoveryPageHTML() {
     }
   }
   return ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_DEVTOOLS_DISCOVERY_PAGE_HTML,
-      ui::SCALE_FACTOR_NONE).as_string();
+      IDR_DEVTOOLS_DISCOVERY_PAGE_HTML).as_string();
 }
 
 bool BrowserListTabContentsProvider::BundlesFrontendResources() {
@@ -83,11 +83,14 @@ std::string BrowserListTabContentsProvider::GetPageThumbnailData(
 
 RenderViewHost* BrowserListTabContentsProvider::CreateNewTarget() {
   if (BrowserList::empty())
+    chrome::NewEmptyWindow(profile_);
+
+  if (BrowserList::empty())
     return NULL;
 
-  TabContents* tab_contents = chrome::AddSelectedTabWithURL(
+  content::WebContents* web_contents = chrome::AddSelectedTabWithURL(
       *BrowserList::begin(),
       GURL(chrome::kAboutBlankURL),
       content::PAGE_TRANSITION_LINK);
-  return tab_contents->web_contents()->GetRenderViewHost();
+  return web_contents->GetRenderViewHost();
 }

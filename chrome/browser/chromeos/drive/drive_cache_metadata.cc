@@ -11,6 +11,7 @@
 #include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
+#include "chrome/browser/chromeos/drive/drive_cache.h"
 #include "chrome/browser/chromeos/drive/drive_file_system_util.h"
 
 namespace drive {
@@ -312,9 +313,7 @@ class FakeDriveCacheMetadata : public DriveCacheMetadata {
                              const std::string& md5,
                              DriveCacheEntry* cache_entry) OVERRIDE;
   virtual void RemoveTemporaryFiles() OVERRIDE;
-  virtual void Iterate(const IterateCallback& callback) OVERRIDE;
-  virtual void ForceRescanForTesting(
-      const std::vector<FilePath>& cache_paths) OVERRIDE;
+  virtual void Iterate(const CacheIterateCallback& callback) OVERRIDE;
 
   CacheMap cache_map_;
 
@@ -398,20 +397,13 @@ void FakeDriveCacheMetadata::RemoveTemporaryFiles() {
   }
 }
 
-void FakeDriveCacheMetadata::Iterate(const IterateCallback& callback) {
+void FakeDriveCacheMetadata::Iterate(const CacheIterateCallback& callback) {
   AssertOnSequencedWorkerPool();
 
   for (CacheMap::const_iterator iter = cache_map_.begin();
        iter != cache_map_.end(); ++iter) {
     callback.Run(iter->first, iter->second);
   }
-}
-
-void FakeDriveCacheMetadata::ForceRescanForTesting(
-    const std::vector<FilePath>& cache_paths) {
-  AssertOnSequencedWorkerPool();
-
-  ScanCachePaths(cache_paths, &cache_map_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -435,9 +427,7 @@ class DriveCacheMetadataDB : public DriveCacheMetadata {
                              const std::string& md5,
                              DriveCacheEntry* cache_entry) OVERRIDE;
   virtual void RemoveTemporaryFiles() OVERRIDE;
-  virtual void Iterate(const IterateCallback& callback) OVERRIDE;
-  virtual void ForceRescanForTesting(
-      const std::vector<FilePath>& cache_paths) OVERRIDE;
+  virtual void Iterate(const CacheIterateCallback& callback) OVERRIDE;
 
   // Helper function to insert |cache_map| entries into the database.
   void InsertMapIntoDB(const CacheMap& cache_map);
@@ -583,7 +573,7 @@ void DriveCacheMetadataDB::RemoveTemporaryFiles() {
   }
 }
 
-void DriveCacheMetadataDB::Iterate(const IterateCallback& callback) {
+void DriveCacheMetadataDB::Iterate(const CacheIterateCallback& callback) {
   AssertOnSequencedWorkerPool();
 
   scoped_ptr<leveldb::Iterator> iter(level_db_->NewIterator(
@@ -594,15 +584,6 @@ void DriveCacheMetadataDB::Iterate(const IterateCallback& callback) {
     if (ok)
       callback.Run(iter->key().ToString(), cache_entry);
   }
-}
-
-void DriveCacheMetadataDB::ForceRescanForTesting(
-    const std::vector<FilePath>& cache_paths) {
-  AssertOnSequencedWorkerPool();
-
-  CacheMap cache_map;
-  ScanCachePaths(cache_paths, &cache_map);
-  InsertMapIntoDB(cache_map);
 }
 
 }  // namespace

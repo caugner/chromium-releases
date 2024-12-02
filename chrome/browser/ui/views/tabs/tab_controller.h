@@ -6,16 +6,19 @@
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_CONTROLLER_H_
 
 #include "chrome/browser/ui/views/tabs/tab_strip_types.h"
-#include "ui/gfx/image/image_skia_rep.h"
 
-class BaseTab;
+class Tab;
 class TabStripSelectionModel;
 
 namespace gfx {
 class Point;
 }
-namespace views {
+namespace ui {
+class LocatedEvent;
 class MouseEvent;
+}
+namespace views {
+class View;
 }
 
 // Controller for tabs.
@@ -27,36 +30,36 @@ class TabController {
   virtual bool SupportsMultipleSelection() = 0;
 
   // Selects the tab.
-  virtual void SelectTab(BaseTab* tab) = 0;
+  virtual void SelectTab(Tab* tab) = 0;
 
   // Extends the selection from the anchor to |tab|.
-  virtual void ExtendSelectionTo(BaseTab* tab) = 0;
+  virtual void ExtendSelectionTo(Tab* tab) = 0;
 
   // Toggles whether |tab| is selected.
-  virtual void ToggleSelected(BaseTab* tab) = 0;
+  virtual void ToggleSelected(Tab* tab) = 0;
 
   // Adds the selection from the anchor to |tab|.
-  virtual void AddSelectionFromAnchorTo(BaseTab* tab) = 0;
+  virtual void AddSelectionFromAnchorTo(Tab* tab) = 0;
 
   // Closes the tab.
-  virtual void CloseTab(BaseTab* tab, CloseTabSource source) = 0;
+  virtual void CloseTab(Tab* tab, CloseTabSource source) = 0;
 
   // Shows a context menu for the tab at the specified point in screen coords.
-  virtual void ShowContextMenuForTab(BaseTab* tab, const gfx::Point& p) = 0;
+  virtual void ShowContextMenuForTab(Tab* tab, const gfx::Point& p) = 0;
 
   // Returns true if |tab| is the active tab. The active tab is the one whose
   // content is shown in the browser.
-  virtual bool IsActiveTab(const BaseTab* tab) const = 0;
+  virtual bool IsActiveTab(const Tab* tab) const = 0;
 
   // Returns true if the specified Tab is selected.
-  virtual bool IsTabSelected(const BaseTab* tab) const = 0;
+  virtual bool IsTabSelected(const Tab* tab) const = 0;
 
   // Returns true if the specified Tab is pinned.
-  virtual bool IsTabPinned(const BaseTab* tab) const = 0;
+  virtual bool IsTabPinned(const Tab* tab) const = 0;
 
   // Potentially starts a drag for the specified Tab.
   virtual void MaybeStartDrag(
-      BaseTab* tab,
+      Tab* tab,
       const ui::LocatedEvent& event,
       const TabStripSelectionModel& original_selection) = 0;
 
@@ -68,12 +71,8 @@ class TabController {
 
   // Returns the tab that contains the specified coordinates, in terms of |tab|,
   // or NULL if there is no tab that contains the specified point.
-  virtual BaseTab* GetTabAt(BaseTab* tab,
-                            const gfx::Point& tab_in_tab_coordinates) = 0;
-
-  // Informs that an active tab is selected when already active (ie - clicked
-  // when already active/foreground).
-  virtual void ClickActiveTab(const BaseTab* tab) const = 0;
+  virtual Tab* GetTabAt(Tab* tab,
+                        const gfx::Point& tab_in_tab_coordinates) = 0;
 
   // Invoked when a mouse event occurs on |source|.
   virtual void OnMouseEventInTab(views::View* source,
@@ -82,18 +81,10 @@ class TabController {
   // Returns true if |tab| needs to be painted. If false is returned the tab is
   // not painted. If true is returned the tab should be painted and |clip| is
   // set to the clip (if |clip| is empty means no clip).
-  virtual bool ShouldPaintTab(const BaseTab* tab, gfx::Rect* clip) = 0;
+  virtual bool ShouldPaintTab(const Tab* tab, gfx::Rect* clip) = 0;
 
-  // Returns true if Instant Extended API is enabled.
-  virtual bool IsInstantExtendedAPIEnabled() = 0;
-
-  // Returns true if Instant Extended is showing white NTP.
-  virtual bool ShouldShowWhiteNTP() = 0;
-
-  // Returns the NTP background theme to use for the active tab when Instant
-  // Extended API is enabled and theme is used.
-  virtual const gfx::ImageSkiaRep& GetNTPBackgroundTheme(
-      ui::ScaleFactor scale_factor) = 0;
+  // Returns true if tabs painted in the rectangular light-bar style.
+  virtual bool IsImmersiveStyle() const = 0;
 
  protected:
   virtual ~TabController() {}

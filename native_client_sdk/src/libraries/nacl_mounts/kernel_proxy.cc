@@ -12,12 +12,13 @@
 
 #include "nacl_mounts/kernel_handle.h"
 #include "nacl_mounts/mount.h"
+#include "nacl_mounts/mount_dev.h"
+#include "nacl_mounts/mount_html5fs.h"
 #include "nacl_mounts/mount_mem.h"
 #include "nacl_mounts/mount_node.h"
 #include "nacl_mounts/osstat.h"
-// TODO(binji): implement MountURL
-//#include "nacl_mounts/mount_url.h"
 #include "nacl_mounts/path.h"
+#include "nacl_mounts/pepper_interface.h"
 #include "utils/auto_lock.h"
 #include "utils/ref_object.h"
 
@@ -30,22 +31,29 @@
 #define GRP_ID 1003
 
 
-KernelProxy::KernelProxy() : dev_(0) {}
-KernelProxy::~KernelProxy() {}
+KernelProxy::KernelProxy()
+   : dev_(0),
+     ppapi_(NULL) {
+}
 
-void KernelProxy::Init() {
+KernelProxy::~KernelProxy() {
+  delete ppapi_;
+}
+
+void KernelProxy::Init(PepperInterface* ppapi) {
+  ppapi_ = ppapi;
   cwd_ = "/";
   dev_ = 1;
 
   factories_["memfs"] = MountMem::Create<MountMem>;
-  // TODO(binji): implement MountURL
-  //factories_["urlfs"] = MountURL::Create;
+  factories_["dev"] = MountDev::Create<MountDev>;
+  factories_["html5fs"] = MountHtml5Fs::Create<MountHtml5Fs>;
 
   // Create memory mount at root
   StringMap_t smap;
-  mounts_["/"] = MountMem::Create<MountMem>(dev_++, smap);
+  mounts_["/"] = MountMem::Create<MountMem>(dev_++, smap, ppapi_);
+  mounts_["/dev"] = MountDev::Create<MountDev>(dev_++, smap, ppapi_);
 }
-
 
 int KernelProxy::open(const char *path, int oflags) {
   Path rel;
@@ -65,6 +73,7 @@ int KernelProxy::open(const char *path, int oflags) {
 
   ReleaseHandle(handle);
   ReleaseMount(mnt);
+
   return fd;
 }
 
@@ -227,7 +236,7 @@ int KernelProxy::mount(const char *source, const char *target,
     free(str);
   }
 
-  Mount* mnt = factory->second(dev_++, smap);
+  Mount* mnt = factory->second(dev_++, smap, ppapi_);
   if (mnt) {
     mounts_[abs_targ] = mnt;
     return 0;
@@ -334,24 +343,44 @@ int KernelProxy::isatty(int fd) {
   return ret;
 }
 
+off_t KernelProxy::lseek(int fd, off_t offset, int whence) {
+  KernelHandle* handle = AcquireHandle(fd);
+
+  // check if fd is valid and handle exists
+  if (NULL == handle) return -1;
+  int ret = handle->Seek(offset, whence);
+
+  ReleaseHandle(handle);
+  return ret;
+}
+
+int KernelProxy::unlink(const char* path) {
+  Path rel;
+  Mount* mnt = AcquireMountAndPath(path, &rel);
+  if (mnt == NULL) return -1;
+
+  int val = mnt->Unlink(rel);
+  ReleaseMount(mnt);
+  return val;
+}
+
+int KernelProxy::remove(const char* path) {
+  Path rel;
+  Mount* mnt = AcquireMountAndPath(path, &rel);
+  if (mnt == NULL) return -1;
+
+  int val = mnt->Remove(rel);
+  ReleaseMount(mnt);
+  return val;
+}
+
 // TODO(noelallen): Needs implementation.
 int KernelProxy::fchmod(int fd, int mode) {
   errno = EINVAL;
   return -1;
 }
-int KernelProxy::remove(const char* path) {
-  errno = EINVAL;
-  return -1;
-}
-int KernelProxy::unlink(const char* path) {
-  errno = EINVAL;
-  return -1;
-}
+
 int KernelProxy::access(const char* path, int amode) {
-  errno = EINVAL;
-  return -1;
-}
-off_t KernelProxy::lseek(int fd, off_t offset, int whence) {
   errno = EINVAL;
   return -1;
 }

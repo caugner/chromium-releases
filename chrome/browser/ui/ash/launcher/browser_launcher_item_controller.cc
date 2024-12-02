@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "content/public/browser/web_contents.h"
@@ -37,7 +36,8 @@ BrowserLauncherItemController::BrowserLauncherItemController(
       window_(window),
       tab_model_(tab_model),
       is_incognito_(tab_model->profile()->GetOriginalProfile() !=
-                    tab_model->profile() && !Profile::IsGuestSession()) {
+                    tab_model->profile() &&
+                    !tab_model->profile()->IsGuestSession()) {
   DCHECK(window_);
   window_->AddObserver(this);
 }
@@ -64,8 +64,8 @@ void BrowserLauncherItemController::Init() {
         app_status);
   }
   // In testing scenarios we can get tab strips with no active contents.
-  if (tab_model_->GetActiveTabContents())
-    UpdateLauncher(tab_model_->GetActiveTabContents());
+  if (tab_model_->active_index() != TabStripModel::kNoTab)
+    UpdateLauncher(tab_model_->GetActiveWebContents());
 }
 
 // static
@@ -103,16 +103,16 @@ BrowserLauncherItemController* BrowserLauncherItemController::Create(
 }
 
 void BrowserLauncherItemController::BrowserActivationStateChanged() {
-  if (tab_model_->GetActiveTabContents())
-    UpdateAppState(tab_model_->GetActiveTabContents());
+  content::WebContents* active_contents = tab_model_->GetActiveWebContents();
+  if (active_contents)
+    UpdateAppState(active_contents);
   UpdateItemStatus();
 }
 
 string16 BrowserLauncherItemController::GetTitle() {
   if (type() == TYPE_TABBED || type() == TYPE_EXTENSION_PANEL) {
-    if (tab_model_->GetActiveTabContents()) {
-      const content::WebContents* contents =
-          tab_model_->GetActiveTabContents()->web_contents();
+    if (tab_model_->active_index() != TabStripModel::kNoTab) {
+      const content::WebContents* contents = tab_model_->GetActiveWebContents();
       if (contents)
         return contents->GetTitle();
     }
@@ -167,8 +167,8 @@ void BrowserLauncherItemController::LauncherItemChanged(
 }
 
 void BrowserLauncherItemController::ActiveTabChanged(
-    TabContents* old_contents,
-    TabContents* new_contents,
+    content::WebContents* old_contents,
+    content::WebContents* new_contents,
     int index,
     bool user_gesture) {
   // Update immediately on a tab change.
@@ -178,57 +178,47 @@ void BrowserLauncherItemController::ActiveTabChanged(
   UpdateLauncher(new_contents);
 }
 
-void BrowserLauncherItemController::TabInsertedAt(TabContents* contents,
-                                                  int index,
-                                                  bool foreground) {
+void BrowserLauncherItemController::TabInsertedAt(
+    content::WebContents* contents,
+    int index,
+    bool foreground) {
   UpdateAppState(contents);
 }
 
-void BrowserLauncherItemController::TabDetachedAt(TabContents* contents,
-                                                  int index) {
+void BrowserLauncherItemController::TabDetachedAt(
+    content::WebContents* contents,
+    int index) {
   launcher_controller()->UpdateAppState(
       contents, ChromeLauncherController::APP_STATE_REMOVED);
 }
 
 void BrowserLauncherItemController::TabChangedAt(
-    TabContents* tab,
+    content::WebContents* contents,
     int index,
     TabStripModelObserver::TabChangeType change_type) {
-  UpdateAppState(tab);
+  UpdateAppState(contents);
   if (index != tab_model_->active_index() ||
       !(change_type != TabStripModelObserver::LOADING_ONLY &&
         change_type != TabStripModelObserver::TITLE_NOT_LOADING)) {
     return;
   }
 
-  FaviconTabHelper* favicon_tab_helper =
-      FaviconTabHelper::FromWebContents(tab->web_contents());
-  if (favicon_tab_helper->FaviconIsValid() ||
-      !favicon_tab_helper->ShouldDisplayFavicon()) {
-    // We have the favicon, update immediately.
-    UpdateLauncher(tab);
-  } else {
-    int item_index = launcher_model()->ItemIndexByID(launcher_id());
-    if (item_index == -1)
-      return;
-    ash::LauncherItem item = launcher_model()->items()[item_index];
-    item.image = gfx::ImageSkia();
-    launcher_model()->Set(item_index, item);
-  }
+  UpdateLauncher(contents);
 }
 
 void BrowserLauncherItemController::TabReplacedAt(
     TabStripModel* tab_strip_model,
-    TabContents* old_contents,
-    TabContents* new_contents,
+    content::WebContents* old_contents,
+    content::WebContents* new_contents,
     int index) {
   launcher_controller()->UpdateAppState(
-      old_contents, ChromeLauncherController::APP_STATE_REMOVED);
+      old_contents,
+      ChromeLauncherController::APP_STATE_REMOVED);
   UpdateAppState(new_contents);
 }
 
 void BrowserLauncherItemController::FaviconUpdated() {
-  UpdateLauncher(tab_model_->GetActiveTabContents());
+  UpdateLauncher(tab_model_->GetActiveWebContents());
 }
 
 void BrowserLauncherItemController::OnWindowPropertyChanged(
@@ -254,7 +244,7 @@ void BrowserLauncherItemController::UpdateItemStatus() {
   launcher_controller()->SetItemStatus(launcher_id(), status);
 }
 
-void BrowserLauncherItemController::UpdateLauncher(TabContents* tab) {
+void BrowserLauncherItemController::UpdateLauncher(content::WebContents* tab) {
   if (type() == TYPE_APP_PANEL)
     return;  // Maintained entirely by ChromeLauncherController.
 
@@ -267,14 +257,12 @@ void BrowserLauncherItemController::UpdateLauncher(TabContents* tab) {
 
   ash::LauncherItem item = launcher_model()->items()[item_index];
   if (type() == TYPE_EXTENSION_PANEL) {
-    if (!favicon_loader_.get() ||
-        favicon_loader_->web_contents() != tab->web_contents()) {
-      favicon_loader_.reset(
-          new LauncherFaviconLoader(this, tab->web_contents()));
-    }
+    if (!favicon_loader_.get() || favicon_loader_->web_contents() != tab)
+      favicon_loader_.reset(new LauncherFaviconLoader(this, tab));
+
     // Update the icon for extension panels.
     extensions::TabHelper* extensions_tab_helper =
-        extensions::TabHelper::FromWebContents(tab->web_contents());
+        extensions::TabHelper::FromWebContents(tab);
     gfx::ImageSkia new_image = gfx::ImageSkia(favicon_loader_->GetFavicon());
     if (new_image.isNull() && extensions_tab_helper->GetExtensionAppIcon())
       new_image = gfx::ImageSkia(*extensions_tab_helper->GetExtensionAppIcon());
@@ -288,7 +276,7 @@ void BrowserLauncherItemController::UpdateLauncher(TabContents* tab) {
     DCHECK_EQ(TYPE_TABBED, type());
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     FaviconTabHelper* favicon_tab_helper =
-        FaviconTabHelper::FromWebContents(tab->web_contents());
+        FaviconTabHelper::FromWebContents(tab);
     if (favicon_tab_helper->ShouldDisplayFavicon()) {
       item.image = favicon_tab_helper->GetFavicon().AsImageSkia();
       if (item.image.isNull()) {
@@ -301,12 +289,12 @@ void BrowserLauncherItemController::UpdateLauncher(TabContents* tab) {
   launcher_model()->Set(item_index, item);
 }
 
-void BrowserLauncherItemController::UpdateAppState(TabContents* tab) {
+void BrowserLauncherItemController::UpdateAppState(content::WebContents* tab) {
   ChromeLauncherController::AppState app_state;
 
-  if (tab_model_->GetIndexOfTabContents(tab) == TabStripModel::kNoTab) {
+  if (tab_model_->GetIndexOfWebContents(tab) == TabStripModel::kNoTab) {
     app_state = ChromeLauncherController::APP_STATE_REMOVED;
-  } else if (tab_model_->GetActiveTabContents() == tab) {
+  } else if (tab_model_->GetActiveWebContents() == tab) {
     if (ash::wm::IsActiveWindow(window_))
       app_state = ChromeLauncherController::APP_STATE_WINDOW_ACTIVE;
     else

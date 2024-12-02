@@ -5,17 +5,23 @@
 #include "chrome/test/base/testing_browser_process.h"
 
 #include "base/string_util.h"
-#include "chrome/browser/notifications/notification_ui_manager.h"
+#include "build/build_config.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/prerender/prerender_tracker.h"
-#include "chrome/browser/printing/background_printing_manager.h"
-#include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
+#include "chrome/browser/ui/bookmarks/bookmark_prompt_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !defined(OS_IOS)
+#include "chrome/browser/media_gallery/media_file_system_registry.h"
+#include "chrome/browser/notifications/notification_ui_manager.h"
+#include "chrome/browser/prerender/prerender_tracker.h"
+#include "chrome/browser/printing/background_printing_manager.h"
+#include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
+#endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -27,9 +33,12 @@ TestingBrowserProcess::TestingBrowserProcess()
     : notification_service_(content::NotificationService::Create()),
       module_ref_count_(0),
       app_locale_("en"),
-      local_state_(NULL),
+#if !defined(OS_IOS)
       render_widget_snapshot_taker_(new RenderWidgetSnapshotTaker),
-      io_thread_(NULL) {
+#endif
+      local_state_(NULL),
+      io_thread_(NULL),
+      system_request_context_(NULL) {
 }
 
 TestingBrowserProcess::~TestingBrowserProcess() {
@@ -59,11 +68,18 @@ WatchDogThread* TestingBrowserProcess::watchdog_thread() {
 }
 
 ProfileManager* TestingBrowserProcess::profile_manager() {
+#if defined(OS_IOS)
+  NOTIMPLEMENTED();
+  return NULL;
+#else
   return profile_manager_.get();
+#endif
 }
 
 void TestingBrowserProcess::SetProfileManager(ProfileManager* profile_manager) {
+#if !defined(OS_IOS)
   profile_manager_.reset(profile_manager);
+#endif
 }
 
 PrefService* TestingBrowserProcess::local_state() {
@@ -87,7 +103,10 @@ policy::BrowserPolicyConnector*
 }
 
 policy::PolicyService* TestingBrowserProcess::policy_service() {
-#if defined(ENABLE_CONFIGURATION_POLICY)
+#if defined(OS_IOS)
+  NOTIMPLEMENTED();
+  return NULL;
+#elif defined(ENABLE_CONFIGURATION_POLICY)
   return browser_policy_connector()->GetPolicyService();
 #else
   if (!policy_service_)
@@ -100,9 +119,18 @@ IconManager* TestingBrowserProcess::icon_manager() {
   return NULL;
 }
 
+GLStringManager* TestingBrowserProcess::gl_string_manager() {
+  return NULL;
+}
+
 RenderWidgetSnapshotTaker*
 TestingBrowserProcess::GetRenderWidgetSnapshotTaker() {
+#if defined(OS_IOS)
+  NOTREACHED();
+  return NULL;
+#else
   return render_widget_snapshot_taker_.get();
+#endif
 }
 
 BackgroundModeManager* TestingBrowserProcess::background_mode_manager() {
@@ -114,7 +142,12 @@ StatusTray* TestingBrowserProcess::status_tray() {
 }
 
 SafeBrowsingService* TestingBrowserProcess::safe_browsing_service() {
+#if defined(OS_IOS)
+  NOTIMPLEMENTED();
+  return NULL;
+#else
   return sb_service_.get();
+#endif
 }
 
 safe_browsing::ClientSideDetectionService*
@@ -123,7 +156,7 @@ TestingBrowserProcess::safe_browsing_detection_service() {
 }
 
 net::URLRequestContextGetter* TestingBrowserProcess::system_request_context() {
-  return NULL;
+  return system_request_context_;
 }
 
 #if defined(OS_CHROMEOS)
@@ -224,18 +257,19 @@ DownloadRequestLimiter* TestingBrowserProcess::download_request_limiter() {
   return NULL;
 }
 
-bool TestingBrowserProcess::plugin_finder_disabled() const {
-  return false;
-}
-
 ChromeNetLog* TestingBrowserProcess::net_log() {
   return NULL;
 }
 
 prerender::PrerenderTracker* TestingBrowserProcess::prerender_tracker() {
+#if defined(OS_IOS)
+  NOTIMPLEMENTED();
+  return NULL;
+#else
   if (!prerender_tracker_.get())
     prerender_tracker_.reset(new prerender::PrerenderTracker());
   return prerender_tracker_.get();
+#endif
 }
 
 ComponentUpdateService* TestingBrowserProcess::component_updater() {
@@ -244,6 +278,43 @@ ComponentUpdateService* TestingBrowserProcess::component_updater() {
 
 CRLSetFetcher* TestingBrowserProcess::crl_set_fetcher() {
   return NULL;
+}
+
+BookmarkPromptController* TestingBrowserProcess::bookmark_prompt_controller() {
+#if defined(OS_IOS)
+  NOTIMPLEMENTED();
+  return NULL;
+#else
+  return bookmark_prompt_controller_.get();
+#endif
+}
+
+chrome::MediaFileSystemRegistry*
+TestingBrowserProcess::media_file_system_registry() {
+#if defined(OS_IOS)
+  NOTIMPLEMENTED();
+  return NULL;
+#else
+  if (!media_file_system_registry_)
+    media_file_system_registry_.reset(new chrome::MediaFileSystemRegistry());
+  return media_file_system_registry_.get();
+#endif
+}
+
+void TestingBrowserProcess::PlatformSpecificCommandLineProcessing(
+    const CommandLine& command_line) {
+}
+
+void TestingBrowserProcess::SetBookmarkPromptController(
+    BookmarkPromptController* controller) {
+#if !defined(OS_IOS)
+  bookmark_prompt_controller_.reset(controller);
+#endif
+}
+
+void TestingBrowserProcess::SetSystemRequestContext(
+    net::URLRequestContextGetter* context_getter) {
+  system_request_context_ = context_getter;
 }
 
 void TestingBrowserProcess::SetLocalState(PrefService* local_state) {
@@ -257,7 +328,9 @@ void TestingBrowserProcess::SetLocalState(PrefService* local_state) {
     // (assumedly as part of exiting the test and freeing TestingBrowserProcess)
     // any components owned by TestingBrowserProcess that depend on local_state
     // are also freed.
+#if !defined(OS_IOS)
     notification_ui_manager_.reset();
+#endif
 #if defined(ENABLE_CONFIGURATION_POLICY)
     SetBrowserPolicyConnector(NULL);
 #endif
@@ -282,5 +355,8 @@ void TestingBrowserProcess::SetBrowserPolicyConnector(
 
 void TestingBrowserProcess::SetSafeBrowsingService(
     SafeBrowsingService* sb_service) {
+#if !defined(OS_IOS)
+  NOTIMPLEMENTED();
   sb_service_ = sb_service;
+#endif
 }

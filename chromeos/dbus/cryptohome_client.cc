@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
+#include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/dbus/blocking_method_caller.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -125,14 +126,14 @@ class CryptohomeClientImpl : public CryptohomeClient {
   // CryptohomeClient override.
   virtual void AsyncMount(const std::string& username,
                           const std::string& key,
-                          const bool create_if_missing,
+                          int flags,
                           const AsyncMethodCallback& callback) OVERRIDE {
     INITIALIZE_METHOD_CALL(method_call, cryptohome::kCryptohomeAsyncMount);
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(username);
     writer.AppendString(key);
-    writer.AppendBool(create_if_missing);
-    writer.AppendBool(false);  // deprecated_replace_tracked_subdirectories
+    writer.AppendBool(flags & cryptohome::CREATE_IF_MISSING);
+    writer.AppendBool(flags & cryptohome::ENSURE_EPHEMERAL);
     // deprecated_tracked_subdirectories
     writer.AppendArrayOfStrings(std::vector<std::string>());
     proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
@@ -501,7 +502,7 @@ class CryptohomeClientStubImpl : public CryptohomeClient {
   // CryptohomeClient override.
   virtual void AsyncMount(const std::string& username,
                           const std::string& key,
-                          const bool create_if_missing,
+                          int flags,
                           const AsyncMethodCallback& callback) OVERRIDE {
     ReturnAsyncMethodResult(callback);
   }

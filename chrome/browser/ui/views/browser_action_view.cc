@@ -101,7 +101,7 @@ void BrowserActionView::PaintChildren(gfx::Canvas* canvas) {
   ExtensionAction* action = button()->browser_action();
   int tab_id = delegate_->GetCurrentTabId();
   if (tab_id >= 0)
-    action->PaintBadge(canvas, gfx::Rect(width(), height()), tab_id);
+    action->PaintBadge(canvas, GetLocalBounds(), tab_id);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -214,11 +214,11 @@ void BrowserActionButton::UpdateState() {
   SetShowMultipleIconStates(delegate_->NeedToShowMultipleIconStates());
 
   if (!IsEnabled(tab_id)) {
-    SetState(views::CustomButton::BS_DISABLED);
+    SetState(views::CustomButton::STATE_DISABLED);
   } else {
     SetState(menu_visible_ ?
-             views::CustomButton::BS_PUSHED :
-             views::CustomButton::BS_NORMAL);
+             views::CustomButton::STATE_PRESSED :
+             views::CustomButton::STATE_NORMAL);
   }
 
   gfx::ImageSkia icon = *icon_factory_.GetIcon(tab_id).ToImageSkia();
@@ -312,8 +312,8 @@ bool BrowserActionButton::Activate() {
 
 bool BrowserActionButton::OnMousePressed(const ui::MouseEvent& event) {
   if (!event.IsRightMouseButton()) {
-    return IsPopup() ? MenuButton::OnMousePressed(event)
-                     : TextButton::OnMousePressed(event);
+    return IsPopup() ? MenuButton::OnMousePressed(event) :
+                       TextButton::OnMousePressed(event);
   }
 
   // See comments in MenuButton::Activate() as to why this is needed.
@@ -341,8 +341,15 @@ void BrowserActionButton::OnMouseExited(const ui::MouseEvent& event) {
 }
 
 bool BrowserActionButton::OnKeyReleased(const ui::KeyEvent& event) {
-  return IsPopup() ? MenuButton::OnKeyReleased(event)
-                   : TextButton::OnKeyReleased(event);
+  return IsPopup() ? MenuButton::OnKeyReleased(event) :
+                     TextButton::OnKeyReleased(event);
+}
+
+void BrowserActionButton::OnGestureEvent(ui::GestureEvent* event) {
+  if (IsPopup())
+    MenuButton::OnGestureEvent(event);
+  else
+    TextButton::OnGestureEvent(event);
 }
 
 bool BrowserActionButton::AcceleratorPressed(
@@ -352,12 +359,12 @@ bool BrowserActionButton::AcceleratorPressed(
 }
 
 void BrowserActionButton::SetButtonPushed() {
-  SetState(views::CustomButton::BS_PUSHED);
+  SetState(views::CustomButton::STATE_PRESSED);
   menu_visible_ = true;
 }
 
 void BrowserActionButton::SetButtonNotPushed() {
-  SetState(views::CustomButton::BS_NORMAL);
+  SetState(views::CustomButton::STATE_NORMAL);
   menu_visible_ = false;
 }
 

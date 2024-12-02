@@ -51,8 +51,8 @@ std::string GetBitmapDataUrl(const SkBitmap& bitmap) {
 std::string GetBitmapDataUrlFromResource(int res) {
   // Load resource icon and covert to base64 encoded data url
   base::RefCountedStaticMemory* icon_data =
-      ResourceBundle::GetSharedInstance().LoadDataResourceBytes(res,
-          ui::SCALE_FACTOR_100P);
+      ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
+          res, ui::SCALE_FACTOR_100P);
   if (!icon_data)
     return std::string();
   scoped_refptr<base::RefCountedMemory> raw_icon(icon_data);
@@ -85,7 +85,7 @@ WindowOpenDisposition GetDispositionFromClick(const ListValue* args,
 
 bool ParseScaleFactor(const base::StringPiece& identifier,
                       ui::ScaleFactor* scale_factor) {
-  *scale_factor = ui::SCALE_FACTOR_NONE;
+  *scale_factor = ui::SCALE_FACTOR_100P;
   for (size_t i = 0; i < arraysize(kScaleFactorMap); i++) {
     if (identifier == kScaleFactorMap[i].name) {
       *scale_factor = kScaleFactorMap[i].scale_factor;

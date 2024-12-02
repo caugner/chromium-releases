@@ -176,6 +176,18 @@ AwContentsIoThreadClientImpl::~AwContentsIoThreadClientImpl() {
   // explict, out-of-line destructor.
 }
 
+AwContentsIoThreadClient::CacheMode
+AwContentsIoThreadClientImpl::GetCacheMode() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (java_object_.is_null())
+    return AwContentsIoThreadClient::LOAD_DEFAULT;
+
+  JNIEnv* env = AttachCurrentThread();
+  return static_cast<AwContentsIoThreadClient::CacheMode>(
+      Java_AwContentsIoThreadClient_getCacheMode(
+          env, java_object_.obj()));
+}
+
 scoped_ptr<InterceptedRequestData>
 AwContentsIoThreadClientImpl::ShouldInterceptRequest(
     const GURL& location,
@@ -224,6 +236,36 @@ bool AwContentsIoThreadClientImpl::ShouldBlockNetworkLoads() const {
   JNIEnv* env = AttachCurrentThread();
   return Java_AwContentsIoThreadClient_shouldBlockNetworkLoads(
       env, java_object_.obj());
+}
+
+void AwContentsIoThreadClientImpl::NewDownload(
+    const GURL& url,
+    const std::string& user_agent,
+    const std::string& content_disposition,
+    const std::string& mime_type,
+    int64 content_length) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (java_object_.is_null())
+    return;
+
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> jstring_url =
+      ConvertUTF8ToJavaString(env, url.spec());
+  ScopedJavaLocalRef<jstring> jstring_user_agent =
+      ConvertUTF8ToJavaString(env, user_agent);
+  ScopedJavaLocalRef<jstring> jstring_content_disposition =
+      ConvertUTF8ToJavaString(env, content_disposition);
+  ScopedJavaLocalRef<jstring> jstring_mime_type =
+      ConvertUTF8ToJavaString(env, mime_type);
+
+  Java_AwContentsIoThreadClient_onDownloadStart(
+      env,
+      java_object_.obj(),
+      jstring_url.obj(),
+      jstring_user_agent.obj(),
+      jstring_content_disposition.obj(),
+      jstring_mime_type.obj(),
+      content_length);
 }
 
 bool RegisterAwContentsIoThreadClientImpl(JNIEnv* env) {

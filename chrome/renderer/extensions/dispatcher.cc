@@ -277,7 +277,6 @@ class LoggingNativeHandler : public NativeHandler {
     std::string ascii_value = *v8::String::AsciiValue(v8_string);
     return ascii_value.empty() ? dflt : ascii_value;
   }
-
 };
 
 void InstallAppBindings(ModuleSystem* module_system,
@@ -541,7 +540,7 @@ namespace {
 // WebKit.
 static int g_hack_extension_group = 0;
 
-}
+}  // namespace
 
 bool Dispatcher::AllowScriptExtension(WebFrame* frame,
                                       const std::string& v8_extension_name,
@@ -638,7 +637,6 @@ void Dispatcher::PopulateSourceMap() {
                              IDR_CONTEXT_MENUS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("declarativeWebRequest",
                              IDR_DECLARATIVE_WEBREQUEST_CUSTOM_BINDINGS_JS);
-  source_map_.RegisterSource("devtools", IDR_DEVTOOLS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource(
       "experimental.mediaGalleries",
       IDR_EXPERIMENTAL_MEDIA_GALLERIES_CUSTOM_BINDINGS_JS);
@@ -661,10 +659,13 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("pageAction", IDR_PAGE_ACTION_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("pageCapture",
                              IDR_PAGE_CAPTURE_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("permissions", IDR_PERMISSIONS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("runtime", IDR_RUNTIME_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("storage", IDR_STORAGE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("syncFileSystem",
                              IDR_SYNC_FILE_SYSTEM_CUSTOM_BINDINGS_JS);
+  source_map_.RegisterSource("systemIndicator",
+                             IDR_SYSTEM_INDICATOR_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("tabCapture", IDR_TAB_CAPTURE_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("tabs", IDR_TABS_CUSTOM_BINDINGS_JS);
   source_map_.RegisterSource("tts", IDR_TTS_CUSTOM_BINDINGS_JS);
@@ -676,7 +677,9 @@ void Dispatcher::PopulateSourceMap() {
   source_map_.RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
 
   // Platform app sources that are not API-specific..
+  source_map_.RegisterSource("tagWatcher", IDR_TAG_WATCHER_JS);
   source_map_.RegisterSource("webview", IDR_WEB_VIEW_JS);
+  source_map_.RegisterSource("denyWebview", IDR_WEB_VIEW_DENY_JS);
   source_map_.RegisterSource("platformApp", IDR_PLATFORM_APP_JS);
   source_map_.RegisterSource("injectAppTitlebar", IDR_INJECT_APP_TITLEBAR_JS);
 }
@@ -706,6 +709,11 @@ void Dispatcher::InstallBindings(ModuleSystem* module_system,
 void Dispatcher::DidCreateScriptContext(
     WebFrame* frame, v8::Handle<v8::Context> v8_context, int extension_group,
     int world_id) {
+// Extensions are not supported on Android, so don't register any bindings.
+#if defined(OS_ANDROID)
+  return;
+#endif
+
   // TODO(koz): If the caller didn't pass extension_group, use the last value.
   if (extension_group == -1)
     extension_group = g_hack_extension_group;
@@ -802,9 +810,9 @@ void Dispatcher::DidCreateScriptContext(
   if (IsWithinPlatformApp(frame))
     module_system->Require("platformApp");
 
-  if (context_type == Feature::BLESSED_EXTENSION_CONTEXT &&
-      extension->HasAPIPermission(APIPermission::kWebView)) {
-    module_system->Require("webview");
+  if (context_type == Feature::BLESSED_EXTENSION_CONTEXT) {
+    bool has_permission = extension->HasAPIPermission(APIPermission::kWebView);
+    module_system->Require(has_permission ? "webview" : "denyWebview");
   }
 
   context->set_module_system(module_system.Pass());
@@ -857,8 +865,7 @@ void Dispatcher::DidCreateDocumentElement(WebKit::WebFrame* frame) {
     // loaded in each app.
     frame->document().insertUserStyleSheet(
         WebString::fromUTF8(ResourceBundle::GetSharedInstance().
-            GetRawDataResource(IDR_PLATFORM_APP_CSS,
-                               ui::SCALE_FACTOR_NONE)),
+            GetRawDataResource(IDR_PLATFORM_APP_CSS)),
         WebDocument::UserStyleUserLevel);
   }
 }
@@ -1048,7 +1055,8 @@ Feature::Context Dispatcher::ClassifyJavaScriptContext(
         Feature::CONTENT_SCRIPT_CONTEXT : Feature::UNSPECIFIED_CONTEXT;
   }
 
-  // We have an explicit check for sandboxed pages first since:
+  // We have an explicit check for sandboxed pages before checking whether the
+  // extension is active in this process because:
   // 1. Sandboxed pages run in the same process as regular extension pages, so
   //    the extension is considered active.
   // 2. ScriptContext creation (which triggers bindings injection) happens
@@ -1113,14 +1121,19 @@ bool Dispatcher::CheckCurrentContextAccessToExtensionAPI(
     return false;
   }
 
-  // We should never end up with sandboxed contexts trying to invoke extension
-  // APIs, they don't get extension bindings injected. If we end up here it
-  // means that a sandboxed page somehow managed to invoke an API anyway, so
-  // we should abort.
+  // Theoretically we could end up with bindings being injected into sandboxed
+  // frames, for example content scripts. Don't let them execute API functions.
   WebKit::WebFrame* frame = context->web_frame();
   ExtensionURLInfo url_info(frame->document().securityOrigin(),
-      UserScriptSlave::GetDataSourceURLForFrame(frame));
-  CHECK(!extensions_.IsSandboxedPage(url_info));
+                            UserScriptSlave::GetDataSourceURLForFrame(frame));
+  if (extensions_.IsSandboxedPage(url_info)) {
+    static const char kMessage[] =
+        "%s cannot be used within a sandboxed frame.";
+    std::string error_msg = base::StringPrintf(kMessage, function_name.c_str());
+    v8::ThrowException(
+        v8::Exception::Error(v8::String::New(error_msg.c_str())));
+    return false;
+  }
 
   return true;
 }

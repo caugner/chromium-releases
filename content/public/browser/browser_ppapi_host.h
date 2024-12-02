@@ -10,9 +10,21 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
+#include "googleurl/src/gurl.h"
 #include "ppapi/c/pp_instance.h"
 
+namespace IPC {
+class ChannelProxy;
+struct ChannelHandle;
+class Sender;
+}
+
+namespace net {
+class HostResolver;
+}
+
 namespace ppapi {
+class PpapiPermissions;
 namespace host {
 class PpapiHost;
 }
@@ -27,6 +39,19 @@ namespace content {
 // lives entirely on the I/O thread.
 class CONTENT_EXPORT BrowserPpapiHost {
  public:
+  // Creates a browser host and sets up an out-of-process proxy for an external
+  // pepper plugin process.
+  static BrowserPpapiHost* CreateExternalPluginProcess(
+      IPC::Sender* sender,
+      ppapi::PpapiPermissions permissions,
+      base::ProcessHandle plugin_child_process,
+      IPC::ChannelProxy* channel,
+      net::HostResolver* host_resolver,
+      int render_process_id,
+      int render_view_id);
+
+  virtual ~BrowserPpapiHost() {}
+
   // Returns the PpapiHost object.
   virtual ppapi::host::PpapiHost* GetPpapiHost() = 0;
 
@@ -49,8 +74,15 @@ class CONTENT_EXPORT BrowserPpapiHost {
                                            int* render_process_id,
                                            int* render_view_id) const = 0;
 
- protected:
-  virtual ~BrowserPpapiHost() {}
+  // Returns the name of the plugin.
+  virtual const std::string& GetPluginName() = 0;
+
+  // Returns the user's profile data directory.
+  virtual const FilePath& GetProfileDataDirectory() = 0;
+
+  // Get the Document/Plugin URLs for the given PP_Instance.
+  virtual GURL GetDocumentURLForInstance(PP_Instance instance) = 0;
+  virtual GURL GetPluginURLForInstance(PP_Instance instance) = 0;
 };
 
 }  // namespace content

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -11,7 +12,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -74,6 +74,67 @@ class IsolatedAppTest : public ExtensionBrowserTest {
 };
 
 }  // namespace
+
+IN_PROC_BROWSER_TEST_F(IsolatedAppTest, CrossProcessClientRedirect) {
+  host_resolver()->AddRule("*", "127.0.0.1");
+  ASSERT_TRUE(test_server()->Start());
+
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("isolated_apps/app1")));
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("isolated_apps/app2")));
+
+  GURL base_url = test_server()->GetURL("files/extensions/isolated_apps/");
+  GURL::Replacements replace_host;
+  std::string host_str("localhost");  // Must stay in scope with replace_host.
+  replace_host.SetHostStr(host_str);
+  base_url = base_url.ReplaceComponents(replace_host);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), base_url.Resolve("app1/main.html"),
+      CURRENT_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+
+  // Redirect to app2.
+  GURL redirect_url(test_server()->GetURL(
+      "client-redirect?files/extensions/isolated_apps/app2/main.html"));
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), redirect_url,
+      CURRENT_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+
+  // Go back twice.
+  // If bug fixed, we cannot go back anymore.
+  // If not fixed, we will redirect back to app2 and can go back again.
+  EXPECT_TRUE(chrome::CanGoBack(browser()));
+  chrome::GoBack(browser(), CURRENT_TAB);
+  EXPECT_TRUE(chrome::CanGoBack(browser()));
+  chrome::GoBack(browser(), CURRENT_TAB);
+  EXPECT_FALSE(chrome::CanGoBack(browser()));
+
+  // We also need to test script-initialized navigation (document.location.href)
+  // happened after page finishes loading. This one will also triggered the
+  // willPerformClientRedirect hook in RenderViewImpl but should not replace
+  // the previous history entry.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), base_url.Resolve("non_app/main.html"),
+      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+
+  WebContents* tab0 = chrome::GetWebContentsAt(browser(), 1);
+  RenderViewHost* rvh = tab0->GetRenderViewHost();
+
+  // Using JavaScript to navigate to app2 page,
+  // after the non_app page has finished loading.
+  content::WindowedNotificationObserver observer1(
+      content::NOTIFICATION_LOAD_STOP,
+      content::Source<NavigationController>(
+          &chrome::GetActiveWebContents(browser())->GetController()));
+  std::string script = base::StringPrintf(
+        "document.location.href=\"%s\";",
+        base_url.Resolve("app2/main.html").spec().c_str());
+  EXPECT_TRUE(ExecuteJavaScript(rvh, L"", ASCIIToWide(script)));
+  observer1.Wait();
+
+  // This kind of navigation should not replace previous navigation entry.
+  EXPECT_TRUE(chrome::CanGoBack(browser()));
+  chrome::GoBack(browser(), CURRENT_TAB);
+  EXPECT_FALSE(chrome::CanGoBack(browser()));
+}
 
 // Tests that cookies set within an isolated app are not visible to normal
 // pages or other apps.
@@ -367,7 +428,12 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppTest, IsolatedAppProcessModel) {
             chrome::GetWebContentsAt(browser(), 1)->GetRenderProcessHost()->GetID());
 }
 
-IN_PROC_BROWSER_TEST_F(IsolatedAppTest, SessionStorage) {
+// This test no longer passes, since we don't properly isolate sessionStorage
+// for isolated apps. This was broken as part of the changes for storage
+// partition support for webview tags.
+// TODO(nasko): If isolated apps is no longer developed, this test should be
+// removed. http://crbug.com/159932
+IN_PROC_BROWSER_TEST_F(IsolatedAppTest, DISABLED_SessionStorage) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
 

@@ -6,6 +6,7 @@
 
 #include <map>
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,6 +16,7 @@
 #include "chrome/browser/ui/views/panels/panel_frame_view.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
@@ -29,6 +31,11 @@
 #include "chrome/browser/ui/panels/taskbar_window_thumbnailer_win.h"
 #include "ui/base/win/shell.h"
 #include "ui/gfx/icon_util.h"
+#endif
+
+#if defined(OS_WIN) && defined(USE_AURA)
+#include "ui/aura/root_window.h"
+#include "ui/aura/window.h"
 #endif
 
 namespace {
@@ -127,6 +134,7 @@ void NativePanelTestingWin::FinishDragTitlebar() {
 }
 
 bool NativePanelTestingWin::VerifyDrawingAttention() const {
+  MessageLoop::current()->RunUntilIdle();
   return panel_view_->GetFrameView()->paint_state() ==
          PanelFrameView::PAINT_FOR_ATTENTION;
 }
@@ -200,6 +208,7 @@ PanelView::PanelView(Panel* panel, const gfx::Rect& bounds)
     : panel_(panel),
       bounds_(bounds),
       window_(NULL),
+      window_closed_(false),
       web_view_(NULL),
       always_on_top_(true),
       focused_(false),
@@ -310,7 +319,7 @@ void PanelView::AnimationProgressed(const ui::Animation* animation) {
 }
 
 void PanelView::SetWidgetBounds(const gfx::Rect& new_bounds) {
-#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+#if defined(OS_WIN)
   // An overlapped window is a top-level window that has a titlebar, border,
   // and client area. The Windows system will automatically put the shadow
   // around the whole window. Also the system will enforce the minimum height
@@ -357,7 +366,7 @@ void PanelView::SetWidgetBounds(const gfx::Rect& new_bounds) {
 
 void PanelView::ClosePanel() {
   // We're already closing. Do nothing.
-  if (!window_)
+  if (window_closed_)
     return;
 
   if (!panel_->ShouldCloseWindow())
@@ -375,8 +384,9 @@ void PanelView::ClosePanel() {
   }
 
   panel_->OnNativePanelClosed();
-  window_->Close();
-  window_ = NULL;
+  if (window_)
+    window_->Close();
+  window_closed_ = true;
 }
 
 void PanelView::ActivatePanel() {
@@ -387,7 +397,7 @@ void PanelView::DeactivatePanel() {
   if (!focused_)
     return;
 
-#if defined(OS_WIN) && !defined(AURA) && !defined(USE_ASH)
+#if defined(OS_WIN)
   // Need custom behavior for always-on-top panels to avoid
   // the OS activating a minimized panel when this one is
   // deactivated.
@@ -636,14 +646,14 @@ void PanelView::WindowClosing() {
   // When closing a panel via window.close, API or the close button,
   // ClosePanel() is called first, destroying the native |window_|
   // which results in this method being called. ClosePanel() sets
-  // |window_| to NULL.
-  // If we still have a |window_| here, the close was triggered by the OS,
-  // (e.g. clicking on taskbar menu), which destroys the native |window_|
+  // |window_closed_| to NULL.
+  // If we still have a |window_closed_| here, the close was triggered by the
+  // OS, (e.g. clicking on taskbar menu), which destroys the native |window_|
   // without invoking ClosePanel() beforehand.
-  if (window_) {
+  if (!window_closed_) {
     panel_->OnWindowClosing();
     ClosePanel();
-    DCHECK(!window_);
+    DCHECK(window_closed_);
   }
 }
 
@@ -667,7 +677,7 @@ void PanelView::OnWindowEndUserBoundsChange() {
   panel_->IncreaseMaxSize(bounds_.size());
   panel_->set_full_size(bounds_.size());
 
-  panel_->panel_strip()->RefreshLayout();
+  panel_->collection()->RefreshLayout();
 }
 
 views::Widget* PanelView::GetWidget() {
@@ -725,11 +735,21 @@ bool PanelView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return panel_->ExecuteCommandIfEnabled(iter->second);
 }
 
+void PanelView::OnWidgetClosing(views::Widget* widget) {
+  window_ = NULL;
+}
+
 void PanelView::OnWidgetActivationChanged(views::Widget* widget, bool active) {
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
   // The panel window is in focus (actually accepting keystrokes) if it is
   // active and belongs to a foreground application.
+#if !defined(USE_AURA)
   bool focused = active && widget->GetNativeWindow() == ::GetForegroundWindow();
+#else  // USE_AURA
+  bool focused = active &&
+      widget->GetNativeView()->GetRootWindow()->GetAcceleratedWidget() ==
+          ::GetForegroundWindow();
+#endif
 #else
   NOTIMPLEMENTED();
   bool focused = active;
@@ -767,10 +787,8 @@ bool PanelView::OnTitlebarMouseDragged(const gfx::Point& mouse_location) {
   if (!mouse_pressed_)
     return false;
 
-  int delta_x = mouse_location.x() - last_mouse_location_.x();
-  int delta_y = mouse_location.y() - last_mouse_location_.y();
   if (mouse_dragging_state_ == NO_DRAGGING &&
-      ExceededDragThreshold(delta_x, delta_y)) {
+      ExceededDragThreshold(mouse_location - last_mouse_location_)) {
     // When a drag begins, we do not want to the client area to still receive
     // the focus. We do not need to do this for the unfocused minimized panel.
     if (!panel_->IsMinimized()) {
@@ -853,12 +871,18 @@ bool PanelView::IsWithinResizingArea(const gfx::Point& mouse_location) const {
          mouse_location.y() >= bounds.bottom() - kResizeInsideBoundsSize;
 }
 
-#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+#if defined(OS_WIN)
 void PanelView::UpdateWindowAttribute(int attribute_index,
                                       int attribute_value_to_set,
                                       int attribute_value_to_reset,
                                       bool update_frame) {
-  gfx::NativeWindow native_window = window_->GetNativeWindow();
+  HWND native_window;
+#if defined(USE_AURA)
+  native_window =
+      window_->GetNativeWindow()->GetRootWindow()->GetAcceleratedWidget();
+#else
+  native_window = window_->GetNativeWindow();
+#endif
   int value = ::GetWindowLong(native_window, attribute_index);
   int expected_value = value;
   if (attribute_value_to_set)
@@ -886,14 +910,21 @@ void PanelView::OnViewWasResized() {
   if (!web_view_ || !web_contents)
     return;
 
-  // Make part of the inner area be used for mouse resizing.
+  // When the panel is frameless or has thin frame, the mouse resizing should
+  // also be triggered from the part of client area that is close to the window
+  // frame.
   int width = web_view_->size().width();
   int height = web_view_->size().height();
+  // Compute the thickness of the client area that needs to be counted towards
+  // mouse resizing.
+  int thickness_for_mouse_resizing =
+      kResizeInsideBoundsSize - GetFrameView()->BorderThickness();
+  DCHECK(thickness_for_mouse_resizing > 0);
   SkRegion* region = new SkRegion;
-  region->op(0, 0, kResizeInsideBoundsSize, height, SkRegion::kUnion_Op);
-  region->op(width - kResizeInsideBoundsSize, 0, width, height,
+  region->op(0, 0, thickness_for_mouse_resizing, height, SkRegion::kUnion_Op);
+  region->op(width - thickness_for_mouse_resizing, 0, width, height,
       SkRegion::kUnion_Op);
-  region->op(0, height - kResizeInsideBoundsSize, width, height,
+  region->op(0, height - thickness_for_mouse_resizing, width, height,
       SkRegion::kUnion_Op);
   web_contents->GetRenderViewHost()->GetView()->SetClickthroughRegion(region);
 #endif

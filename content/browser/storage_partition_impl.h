@@ -19,12 +19,6 @@ class StoragePartitionImpl : public StoragePartition {
  public:
   virtual ~StoragePartitionImpl();
 
-  // TODO(ajwong): Break the direct dependency on |context|. We only
-  // need 3 pieces of info from it.
-  static StoragePartitionImpl* Create(BrowserContext* context,
-                                      const std::string& partition_id,
-                                      const FilePath& profile_path);
-
   // StoragePartition interface.
   virtual FilePath GetPath() OVERRIDE;
   virtual net::URLRequestContextGetter* GetURLRequestContext() OVERRIDE;
@@ -35,9 +29,23 @@ class StoragePartitionImpl : public StoragePartition {
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker() OVERRIDE;
   virtual DOMStorageContextImpl* GetDOMStorageContext() OVERRIDE;
   virtual IndexedDBContextImpl* GetIndexedDBContext() OVERRIDE;
+  virtual void AsyncClearDataForOrigin(
+      const GURL& storage_origin,
+      net::URLRequestContextGetter* request_context_getter) OVERRIDE;
+  virtual void AsyncClearAllData() OVERRIDE;
 
  private:
   friend class StoragePartitionImplMap;
+
+  // The |partition_path| is the absolute path to the root of this
+  // StoragePartition's on-disk storage.
+  //
+  // If |in_memory| is true, the |partition_path| is (ab)used as a way of
+  // distinguishing different in-memory partitions, but nothing is persisted
+  // on to disk.
+  static StoragePartitionImpl* Create(BrowserContext* context,
+                                      bool in_memory,
+                                      const FilePath& profile_path);
 
   StoragePartitionImpl(
       const FilePath& partition_path,

@@ -11,7 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/browser/geolocation/fake_access_token_store.h"
-#include "content/browser/geolocation/location_arbitrator.h"
+#include "content/browser/geolocation/location_arbitrator_impl.h"
 #include "content/browser/geolocation/network_location_provider.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
@@ -264,7 +264,7 @@ class GeolocationNetworkProviderTest : public testing::Test {
     // Check to see that the api key is being appended for the default
     // network provider url.
     bool is_default_url = UrlWithoutQuery(request_url) ==
-        UrlWithoutQuery(GeolocationArbitrator::DefaultNetworkProviderURL());
+        UrlWithoutQuery(GeolocationArbitratorImpl::DefaultNetworkProviderURL());
     EXPECT_EQ(is_default_url, !request_url.query().empty());
 
     const std::string& upload_data = request.upload_data();
@@ -347,7 +347,7 @@ TEST_F(GeolocationNetworkProviderTest, StartProvider) {
 }
 
 TEST_F(GeolocationNetworkProviderTest, StartProviderDefaultUrl) {
-  test_server_url_ = GeolocationArbitrator::DefaultNetworkProviderURL();
+  test_server_url_ = GeolocationArbitratorImpl::DefaultNetworkProviderURL();
   scoped_ptr<LocationProviderBase> provider(CreateProvider(true));
   EXPECT_TRUE(provider->StartProvider(false));
   net::TestURLFetcher* fetcher = get_url_fetcher_and_advance_id();
@@ -361,7 +361,7 @@ TEST_F(GeolocationNetworkProviderTest, StartProviderLongRequest) {
   EXPECT_TRUE(provider->StartProvider(false));
   const int kFirstScanAps = 20;
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(kFirstScanAps));
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
   net::TestURLFetcher* fetcher = get_url_fetcher_and_advance_id();
   ASSERT_TRUE(fetcher != NULL);
   // The request url should have been shortened to less than 2048 characters
@@ -413,7 +413,7 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
   // Now wifi data arrives -- SetData will notify listeners.
   const int kFirstScanAps = 6;
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(kFirstScanAps));
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
   fetcher = get_url_fetcher_and_advance_id();
   ASSERT_TRUE(fetcher != NULL);
   // The request should have the wifi data.
@@ -450,7 +450,7 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
   // previous scan, so no new request made.
   const int kSecondScanAps = kFirstScanAps - 1;
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(kSecondScanAps));
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
   fetcher = get_url_fetcher_and_advance_id();
   EXPECT_FALSE(fetcher);
 
@@ -462,7 +462,7 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
   // Now a third scan with more than twice the original amount -> new request.
   const int kThirdScanAps = kFirstScanAps * 2 + 1;
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(kThirdScanAps));
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
   fetcher = get_url_fetcher_and_advance_id();
   EXPECT_TRUE(fetcher);
   CheckRequestIsValid(*fetcher, 0, kThirdScanAps, 0, REFERENCE_ACCESS_TOKEN);
@@ -480,7 +480,7 @@ TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
 
   // Wifi scan returns to original set: should be serviced from cache.
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(kFirstScanAps));
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
   EXPECT_FALSE(get_url_fetcher_and_advance_id());  // No new request created.
 
   provider->GetPosition(&position);
@@ -496,13 +496,13 @@ TEST_F(GeolocationNetworkProviderTest, NoRequestOnStartupUntilWifiData) {
   EXPECT_TRUE(provider->StartProvider(false));
   provider->RegisterListener(&listener);
 
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
   EXPECT_FALSE(get_url_fetcher_and_advance_id())
       << "Network request should not be created right away on startup when "
          "wifi data has not yet arrived";
 
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(1));
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
   EXPECT_TRUE(get_url_fetcher_and_advance_id());
 }
 
@@ -515,7 +515,7 @@ TEST_F(GeolocationNetworkProviderTest, NewDataReplacesExistingNetworkRequest) {
 
   // Now wifi data arrives; new request should be sent.
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(4));
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
   fetcher = get_url_fetcher_and_advance_id();
   EXPECT_TRUE(fetcher);
 }
@@ -544,7 +544,7 @@ TEST_F(GeolocationNetworkProviderTest,
 
   static const int kScanCount = 4;
   wifi_data_provider_->SetData(CreateReferenceWifiScanData(kScanCount));
-  main_message_loop_.RunAllPending();
+  main_message_loop_.RunUntilIdle();
 
   fetcher = get_url_fetcher_and_advance_id();
   EXPECT_FALSE(fetcher);

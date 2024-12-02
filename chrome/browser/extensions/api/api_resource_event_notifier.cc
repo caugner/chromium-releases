@@ -43,23 +43,25 @@ std::string ApiResourceEventNotifier::ApiResourceEventTypeToString(
 
 ApiResourceEventNotifier::~ApiResourceEventNotifier() {}
 
-void ApiResourceEventNotifier::DispatchEvent(const std::string &extension,
-                                             DictionaryValue* event) {
+void ApiResourceEventNotifier::DispatchEvent(
+    const std::string& event_name, DictionaryValue* args) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(
-          &ApiResourceEventNotifier::DispatchEventOnUIThread, this, extension,
-          event));
+          &ApiResourceEventNotifier::DispatchEventOnUIThread, this,
+          event_name, args));
 }
 
 void ApiResourceEventNotifier::DispatchEventOnUIThread(
-    const std::string &extension, DictionaryValue* event) {
+    const std::string& event_name, DictionaryValue* args) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   scoped_ptr<ListValue> arguments(new ListValue());
-  arguments->Set(0, event);
-  router_->DispatchEventToExtension(src_extension_id_, extension,
-                                    arguments.Pass(), profile_, src_url_);
+  arguments->Set(0, args);
+  scoped_ptr<Event> event(new Event(event_name, arguments.Pass()));
+  event->restrict_to_profile = profile_;
+  event->event_url = src_url_;
+  router_->DispatchEventToExtension(src_extension_id_, event.Pass());
 }
 
 DictionaryValue* ApiResourceEventNotifier::CreateApiResourceEvent(
@@ -75,18 +77,6 @@ DictionaryValue* ApiResourceEventNotifier::CreateApiResourceEvent(
   // The caller owns the created event, which typically is then given to a
   // ListValue to dispose of.
   return event;
-}
-
-void ApiResourceEventNotifier::SendEventWithResultCode(
-    const std::string &extension,
-    ApiResourceEventType event_type,
-    int result_code) {
-  if (src_id_ < 0)
-    return;
-
-  DictionaryValue* event = CreateApiResourceEvent(event_type);
-  event->SetInteger(kResultCodeKey, result_code);
-  DispatchEvent(extension, event);
 }
 
 }  // namespace extensions

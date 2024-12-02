@@ -42,6 +42,10 @@ using content::WebContents;
 
 const char kSyncDataKey[] = "about_sync_data";
 
+#if defined(OS_CHROMEOS)
+const char kHUDLogDataKey[] = "hud_log";
+#endif
+
 namespace {
 
 const int kFeedbackVersion = 1;
@@ -71,12 +75,7 @@ const int kHttpPostFailServerError = 500;
 #if defined(OS_CHROMEOS)
 const char kBZip2MimeType[] = "application/x-bzip2";
 const char kLogsAttachmentName[] = "system_logs.bz2";
-// Maximum number of lines in system info log chunk to be still included
-// in product specific data.
-const size_t kMaxLineCount       = 40;
-// Maximum number of bytes in system info log chunk to be still included
-// in product specific data.
-const size_t kMaxSystemLogLength = 4 * 1024;
+const char kArbitraryMimeType[] = "application/octet-stream";
 #endif
 
 const int64 kInitialRetryDelay = 900000;  // 15 minutes
@@ -224,17 +223,11 @@ void FeedbackUtil::AddFeedbackData(
 
 #if defined(OS_CHROMEOS)
 bool FeedbackUtil::ValidFeedbackSize(const std::string& content) {
-  if (content.length() > kMaxSystemLogLength)
+  if (content.length() > chromeos::system::kFeedbackMaxLength)
     return false;
-  size_t line_count = 0;
-  const char* text = content.c_str();
-  for (size_t i = 0; i < content.length(); i++) {
-    if (*(text + i) == '\n') {
-      line_count++;
-      if (line_count > kMaxLineCount)
-        return false;
-    }
-  }
+  const size_t line_count = std::count(content.begin(), content.end(), '\n');
+  if (line_count > chromeos::system::kFeedbackMaxLineCount)
+    return false;
   return true;
 }
 #endif
@@ -254,6 +247,8 @@ void FeedbackUtil::SendReport(
     , int zipped_logs_length
     , const chromeos::system::LogDictionaryType* const sys_info
     , const std::string& timestamp
+    , const std::string& attached_filename
+    , const std::string& attached_filedata
 #endif
     ) {
   // Create google feedback protocol buffer objects
@@ -329,7 +324,9 @@ void FeedbackUtil::SendReport(
     // Add the product specific data
     for (chromeos::system::LogDictionaryType::const_iterator i =
              sys_info->begin(); i != sys_info->end(); ++i) {
-      if (i->first == kSyncDataKey || ValidFeedbackSize(i->second)) {
+      if (i->first == kSyncDataKey ||
+          i->first == kHUDLogDataKey ||
+          ValidFeedbackSize(i->second)) {
         AddFeedbackData(&feedback_data, i->first, i->second);
       }
     }
@@ -346,6 +343,14 @@ void FeedbackUtil::SendReport(
 
   if (timestamp != "")
     AddFeedbackData(&feedback_data, std::string(kTimestampTag), timestamp);
+
+  if (attached_filename != "") {
+    userfeedback::ProductSpecificBinaryData attached_file;
+    attached_file.set_mime_type(kArbitraryMimeType);
+    attached_file.set_name(attached_filename);
+    attached_file.set_data(attached_filedata);
+    *(feedback_data.add_product_specific_binary_data()) = attached_file;
+  }
 #endif
 
   // Set our category tag if we have one
@@ -379,7 +384,7 @@ void FeedbackUtil::SendReport(
   DispatchFeedback(profile, post_body, 0);
 }
 
-#if defined(ENABLE_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING)
 // static
 void FeedbackUtil::ReportPhishing(WebContents* current_tab,
                                    const std::string& phishing_url) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,9 +21,23 @@ InstantSuggestion::~InstantSuggestion() {
 }
 
 InstantAutocompleteResult::InstantAutocompleteResult()
-    : is_search(false),
+    : transition(content::PAGE_TRANSITION_LINK),
       relevance(0) {
 }
 
 InstantAutocompleteResult::~InstantAutocompleteResult() {
+}
+
+ThemeBackgroundInfo::ThemeBackgroundInfo()
+    : color_r(0),
+      color_g(0),
+      color_b(0),
+      color_a(0),
+      image_horizontal_alignment(THEME_BKGRND_IMAGE_ALIGN_CENTER),
+      image_vertical_alignment(THEME_BKGRND_IMAGE_ALIGN_CENTER),
+      image_tiling(THEME_BKGRND_IMAGE_NO_REPEAT),
+      image_height(0) {
+}
+
+ThemeBackgroundInfo::~ThemeBackgroundInfo() {
 }

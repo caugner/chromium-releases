@@ -10,7 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/api/prefs/pref_member.h"
+#include "base/prefs/public/pref_member.h"
 #include "chrome/browser/command_observer.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
@@ -113,7 +113,7 @@ class BrowserToolbarGtk : public CommandObserver,
 
  private:
   // Connect/Disconnect signals for dragging a url onto the home button.
-  void SetUpDragForHomeButton(bool enable);
+  void SetUpDragForHomeButton();
 
   // Sets the top corners of the toolbar to rounded, or sets them to normal,
   // depending on the state of the browser window. Returns false if no action
@@ -143,9 +143,6 @@ class BrowserToolbarGtk : public CommandObserver,
   CHROMEGTK_CALLBACK_1(BrowserToolbarGtk, gboolean, OnWrenchMenuButtonExpose,
                        GdkEventExpose*);
 
-  // Updates preference-dependent state.
-  void NotifyPrefChanged(const std::string* pref);
-
   static void SetSyncMenuLabel(GtkWidget* widget, gpointer userdata);
 
   // Sometimes we only want to show the location w/o the toolbar buttons (e.g.,
@@ -154,6 +151,8 @@ class BrowserToolbarGtk : public CommandObserver,
 
   // Rebuilds the wrench menu.
   void RebuildWrenchMenu();
+
+  void UpdateShowHomeButton();
 
   // An event box that holds |toolbar_|. We need the toolbar to have its own
   // GdkWindow when we use the GTK drawing because otherwise the color from our

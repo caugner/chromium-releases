@@ -17,18 +17,15 @@ class BrowserPluginGuest;
 TestBrowserPluginGuest::TestBrowserPluginGuest(
     int instance_id,
     WebContentsImpl* web_contents,
-    RenderViewHost* render_view_host,
-    bool focused,
-    bool visible)
+    const BrowserPluginHostMsg_CreateGuest_Params& params)
     : BrowserPluginGuest(instance_id,
                          web_contents,
-                         render_view_host,
-                         focused,
-                         visible),
+                         params),
       update_rect_count_(0),
       damage_buffer_call_count_(0),
       exit_observed_(false),
       focus_observed_(false),
+      blur_observed_(false),
       advance_focus_observed_(false),
       was_hidden_observed_(false),
       stop_observed_(false),
@@ -72,6 +69,16 @@ void TestBrowserPluginGuest::Observe(int type,
 void TestBrowserPluginGuest::SendMessageToEmbedder(IPC::Message* msg) {
   if (msg->type() == BrowserPluginMsg_UpdateRect::ID) {
     update_rect_count_++;
+    int instance_id = 0;
+    int message_id = 0;
+    BrowserPluginMsg_UpdateRect_Params params;
+    BrowserPluginMsg_UpdateRect::Read(msg, &instance_id, &message_id, &params);
+    last_view_size_observed_ = params.view_size;
+    if (!expected_auto_view_size_.IsEmpty() &&
+        expected_auto_view_size_ == params.view_size) {
+      if (auto_view_size_message_loop_runner_)
+        auto_view_size_message_loop_runner_->Quit();
+    }
     if (send_message_loop_runner_)
       send_message_loop_runner_->Quit();
   }
@@ -111,13 +118,13 @@ void TestBrowserPluginGuest::RenderViewGone(base::TerminationStatus status) {
 
 void TestBrowserPluginGuest::HandleInputEvent(
     RenderViewHost* render_view_host,
-    const gfx::Rect& guest_rect,
-    const WebKit::WebInputEvent& event,
-    IPC::Message* reply_message) {
+    const gfx::Rect& guest_window_rect,
+    const gfx::Rect& guest_screen_rect,
+    const WebKit::WebInputEvent& event) {
   BrowserPluginGuest::HandleInputEvent(render_view_host,
-                                       guest_rect,
-                                       event,
-                                       reply_message);
+                                       guest_window_rect,
+                                       guest_screen_rect,
+                                       event);
   input_observed_ = true;
   if (input_message_loop_runner_)
     input_message_loop_runner_->Quit();
@@ -133,10 +140,23 @@ void TestBrowserPluginGuest::WaitForExit() {
 }
 
 void TestBrowserPluginGuest::WaitForFocus() {
-  if (focus_observed_)
+  if (focus_observed_) {
+    focus_observed_ = false;
     return;
+  }
   focus_message_loop_runner_ = new MessageLoopRunner();
   focus_message_loop_runner_->Run();
+  focus_observed_ = false;
+}
+
+void TestBrowserPluginGuest::WaitForBlur() {
+  if (blur_observed_) {
+    blur_observed_ = false;
+    return;
+  }
+  blur_message_loop_runner_ = new MessageLoopRunner();
+  blur_message_loop_runner_->Run();
+  blur_observed_ = false;
 }
 
 void TestBrowserPluginGuest::WaitForAdvanceFocus() {
@@ -200,10 +220,28 @@ void TestBrowserPluginGuest::WaitForLoadStop() {
   load_stop_observed_ = false;
 }
 
+void TestBrowserPluginGuest::WaitForViewSize(const gfx::Size& view_size) {
+  if (last_view_size_observed_ == view_size) {
+    last_view_size_observed_ = gfx::Size();
+    return;
+  }
+
+  expected_auto_view_size_ = view_size;
+  auto_view_size_message_loop_runner_ = new MessageLoopRunner();
+  auto_view_size_message_loop_runner_->Run();
+  last_view_size_observed_ = gfx::Size();
+}
+
 void TestBrowserPluginGuest::SetFocus(bool focused) {
-  focus_observed_ = true;
-  if (focus_message_loop_runner_)
-    focus_message_loop_runner_->Quit();
+  if (focused) {
+    focus_observed_ = true;
+    if (focus_message_loop_runner_)
+      focus_message_loop_runner_->Quit();
+  } else {
+    blur_observed_ = true;
+    if (blur_message_loop_runner_)
+      blur_message_loop_runner_->Quit();
+  }
   BrowserPluginGuest::SetFocus(focused);
 }
 
@@ -229,29 +267,18 @@ void TestBrowserPluginGuest::Stop() {
 }
 
 void TestBrowserPluginGuest::SetDamageBuffer(
-    TransportDIB* damage_buffer,
-#if defined(OS_WIN)
-    int damage_buffer_size,
-#endif
-    const gfx::Size& damage_view_size,
-    float scale_factor) {
+    const BrowserPluginHostMsg_ResizeGuest_Params& params) {
   ++damage_buffer_call_count_;
-  last_damage_buffer_size_ = damage_view_size;
+  last_damage_buffer_size_ = params.view_size;
 
   if (waiting_for_damage_buffer_with_size_ &&
-      expected_damage_buffer_size_ == damage_view_size &&
+      expected_damage_buffer_size_ == params.view_size &&
       damage_buffer_message_loop_runner_) {
     damage_buffer_message_loop_runner_->Quit();
     waiting_for_damage_buffer_with_size_ = false;
   }
 
-  BrowserPluginGuest::SetDamageBuffer(
-      damage_buffer,
-#if defined(OS_WIN)
-      damage_buffer_size,
-#endif
-      damage_view_size,
-      scale_factor);
+  BrowserPluginGuest::SetDamageBuffer(params);
 }
 
 void TestBrowserPluginGuest::DidStopLoading(

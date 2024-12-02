@@ -12,10 +12,6 @@
 #include "ui/views/focus/focus_search.h"
 #include "ui/views/view.h"
 
-namespace ui {
-enum TouchStatus;
-}
-
 namespace views {
 
 class Widget;
@@ -65,7 +61,10 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
   // Process a key event. Send the event to the focused view and up the focus
   // path, and finally to the default keyboard handler, until someone consumes
   // it. Returns whether anyone consumed the event.
-  bool OnKeyEvent(const ui::KeyEvent& event);
+  void DispatchKeyEvent(ui::KeyEvent* event);
+  void DispatchScrollEvent(ui::ScrollEvent* event);
+  void DispatchTouchEvent(ui::TouchEvent* event);
+  virtual void DispatchGestureEvent(ui::GestureEvent* event);
 
   // Focus ---------------------------------------------------------------------
 
@@ -104,10 +103,6 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
   virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
   virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
-  virtual bool OnScrollEvent(const ui::ScrollEvent& event) OVERRIDE;
-  virtual ui::TouchStatus OnTouchEvent(const ui::TouchEvent& event) OVERRIDE;
-  virtual ui::EventResult OnGestureEvent(
-      const ui::GestureEvent& event) OVERRIDE;
   virtual void SetMouseHandler(View* new_mouse_handler) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void ReorderChildLayers(ui::Layer* parent_layer) OVERRIDE;
@@ -117,8 +112,7 @@ class VIEWS_EXPORT RootView : public View, public FocusTraversable {
   virtual void ViewHierarchyChanged(bool is_add, View* parent,
                                     View* child) OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void CalculateOffsetToAncestorWithLayer(
-      gfx::Point* offset,
+  virtual gfx::Vector2d CalculateOffsetToAncestorWithLayer(
       ui::Layer** layer_parent) OVERRIDE;
 
  private:

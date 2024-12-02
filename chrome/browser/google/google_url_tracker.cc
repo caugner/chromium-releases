@@ -13,7 +13,6 @@
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -329,7 +328,7 @@ void GoogleURLTracker::StartFetchIfDesirable() {
 
   // Configure to max_retries at most kMaxRetries times for 5xx errors.
   static const int kMaxRetries = 5;
-  fetcher_->SetMaxRetries(kMaxRetries);
+  fetcher_->SetMaxRetriesOn5xx(kMaxRetries);
 
   fetcher_->Start();
 }

@@ -17,11 +17,14 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/ui/search/search.h"
 #include "content/public/browser/web_ui.h"
 
 OmniboxUIHandler::OmniboxUIHandler(Profile* profile ) {
   controller_.reset(new AutocompleteController(profile, this,
-      AutocompleteClassifier::kDefaultOmniboxProviders));
+      chrome::search::IsInstantExtendedAPIEnabled(profile) ?
+          AutocompleteClassifier::kInstantExtendedOmniboxProviders :
+          AutocompleteClassifier::kDefaultOmniboxProviders));
 }
 
 OmniboxUIHandler::~OmniboxUIHandler() {}
@@ -148,10 +151,12 @@ void OmniboxUIHandler::StartOmniboxQuery(
   // query before it starts the new one.  By the way, in this call to
   // Start(), we use the default/typical values for all parameters.
   time_omnibox_started_ = base::Time::Now();
-  controller_->Start(input_string,
-                     empty_string,  // user's desired tld (top-level domain)
-                     false,  // don't prevent inline autocompletion
-                     false,  // no preferred keyword provider
-                     true,  // allow exact keyword matches
-                     AutocompleteInput::ALL_MATCHES);  // want all matches
+  controller_->Start(AutocompleteInput(
+      input_string,
+      string16::npos,
+      empty_string,  // user's desired tld (top-level domain)
+      false,  // don't prevent inline autocompletion
+      false,  // no preferred keyword provider
+      true,  // allow exact keyword matches
+      AutocompleteInput::ALL_MATCHES));  // want all matches
 }

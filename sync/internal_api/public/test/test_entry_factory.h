@@ -24,7 +24,7 @@ class TestEntryFactory {
   ~TestEntryFactory();
 
   // Create a new unapplied folder node with a parent.
-  void CreateUnappliedNewItemWithParent(
+  int64 CreateUnappliedNewItemWithParent(
       const std::string& item_id,
       const sync_pb::EntitySpecifics& specifics,
       const std::string& parent_id);
@@ -55,6 +55,11 @@ class TestEntryFactory {
   // the created item.
   int64 CreateSyncedItem(const std::string& name,
                          ModelType model_type, bool is_folder);
+
+  // Creates a root node that IS_UNAPPLIED. Smiilar to what one would find in
+  // the database between the ProcessUpdates of an initial datatype configure
+  // cycle and the ApplyUpdates step of the same sync cycle.
+  int64 CreateUnappliedRootNode(ModelType model_type);
 
   // Looks up the item referenced by |meta_handle|. If successful, overwrites
   // the server specifics with |specifics|, sets

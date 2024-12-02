@@ -6,6 +6,7 @@
 
 #include "ash/wm/workspace/frame_maximize_button.h"
 #include "base/debug/stack_trace.h"
+#include "base/i18n/rtl.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "grit/ash_resources.h"
@@ -55,7 +56,9 @@ class AppNonClientFrameViewAsh::ControlView
         IDR_AURA_WINDOW_HEADER_BASE_INCOGNITO_ACTIVE :
         IDR_AURA_WINDOW_HEADER_BASE_ACTIVE;
     control_base_ = rb.GetImageNamed(control_base_resource_id).ToImageSkia();
-    shadow_ = rb.GetImageNamed(IDR_AURA_WINDOW_FULLSCREEN_SHADOW).ToImageSkia();
+    shadow_ = rb.GetImageNamed(
+        base::i18n::IsRTL() ? IDR_AURA_WINDOW_FULLSCREEN_SHADOW_RTL :
+                              IDR_AURA_WINDOW_FULLSCREEN_SHADOW).ToImageSkia();
 
     AddChildView(close_button_);
     AddChildView(restore_button_);
@@ -93,7 +96,7 @@ class AppNonClientFrameViewAsh::ControlView
 
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
     canvas->TileImageInt(*control_base_,
-        restore_button_->x(),
+        base::i18n::IsRTL() ? 0 : restore_button_->x(),
         restore_button_->y(),
         restore_button_->width() - kButtonOverlap + close_button_->width(),
         restore_button_->height());
@@ -108,9 +111,19 @@ class AppNonClientFrameViewAsh::ControlView
     if (sender == close_button_) {
       owner_->frame()->Close();
     } else if (sender == restore_button_) {
-      restore_button_->SetState(views::CustomButton::BS_NORMAL);
+      restore_button_->SetState(views::CustomButton::STATE_NORMAL);
       owner_->frame()->Restore();
     }
+  }
+
+  // Returns the insets of the control which are only covered by the shadow.
+  gfx::Insets GetShadowInsets() {
+    bool rtl = base::i18n::IsRTL();
+    return gfx::Insets(
+        0,
+        rtl ? 0 : restore_button_->x(),
+        shadow_->height() - close_button_->height(),
+        rtl ? restore_button_->x() : 0);
   }
 
  private:
@@ -119,11 +132,11 @@ class AppNonClientFrameViewAsh::ControlView
   void SetButtonImages(views::ImageButton* button, int normal_image_id,
                        int hot_image_id, int pushed_image_id) {
     ui::ThemeProvider* theme_provider = GetThemeProvider();
-    button->SetImage(views::CustomButton::BS_NORMAL,
+    button->SetImage(views::CustomButton::STATE_NORMAL,
                      theme_provider->GetImageSkiaNamed(normal_image_id));
-    button->SetImage(views::CustomButton::BS_HOT,
+    button->SetImage(views::CustomButton::STATE_HOVERED,
                      theme_provider->GetImageSkiaNamed(hot_image_id));
-    button->SetImage(views::CustomButton::BS_PUSHED,
+    button->SetImage(views::CustomButton::STATE_PRESSED,
                      theme_provider->GetImageSkiaNamed(pushed_image_id));
   }
 
@@ -183,6 +196,8 @@ AppNonClientFrameViewAsh::AppNonClientFrameViewAsh(
   control_widget_->SetContentsView(control_view_);
   aura::Window* window = control_widget_->GetNativeView();
   window->SetName(kControlWindowName);
+  // Need to exclude the shadow from the active control area.
+  window->SetHitTestBoundsOverrideOuter(control_view_->GetShadowInsets(), 1);
   gfx::Rect control_bounds = GetControlBounds();
   window->SetBounds(control_bounds);
   control_widget_->Show();
@@ -254,7 +269,7 @@ gfx::Rect AppNonClientFrameViewAsh::GetControlBounds() const {
     return gfx::Rect();
   gfx::Size preferred = control_view_->GetPreferredSize();
   return gfx::Rect(
-      width() - preferred.width(), 0,
+      base::i18n::IsRTL() ? 0 : (width() - preferred.width()), 0,
       preferred.width(), preferred.height());
 }
 

@@ -4,14 +4,21 @@
 
 #include "chrome/browser/net/dns_probe_job.h"
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/time.h"
+#include "net/base/address_list.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/dns/dns_client.h"
 #include "net/dns/dns_protocol.h"
+#include "net/dns/dns_response.h"
 #include "net/dns/dns_transaction.h"
 
+using base::TimeDelta;
+using net::AddressList;
 using net::BoundNetLog;
 using net::DnsClient;
 using net::DnsResponse;
@@ -22,6 +29,22 @@ namespace chrome_browser_net {
 
 namespace {
 
+// Returns true if the given net_error indicates that we received a response
+// from the DNS server containing an error, or false if the given net_error
+// indicates that we never received a response.
+bool DidReceiveDnsResponse(int net_error) {
+  switch (net_error) {
+  case net::ERR_NAME_NOT_RESOLVED:  // NXDOMAIN maps to this.
+  case net::ERR_DNS_MALFORMED_RESPONSE:
+  case net::ERR_DNS_SERVER_REQUIRES_TCP:
+  case net::ERR_DNS_SERVER_FAILED:
+  case net::ERR_DNS_SORT_ERROR:  // Can only happen if the server responds.
+    return true;
+  default:
+    return false;
+  }
+}
+
 class DnsProbeJobImpl : public DnsProbeJob {
  public:
   DnsProbeJobImpl(scoped_ptr<DnsClient> dns_client,
@@ -30,31 +53,39 @@ class DnsProbeJobImpl : public DnsProbeJob {
   virtual ~DnsProbeJobImpl();
 
  private:
-  enum QueryStatus {
+  enum QueryResult {
     QUERY_UNKNOWN,
     QUERY_CORRECT,
     QUERY_INCORRECT,
-    QUERY_ERROR,
-    QUERY_RUNNING,
+    QUERY_DNS_ERROR,
+    QUERY_NET_ERROR,
   };
 
-  void MaybeFinishProbe();
+  void Start();
+
   scoped_ptr<DnsTransaction> CreateTransaction(
       const std::string& hostname);
   void StartTransaction(DnsTransaction* transaction);
+  // Checks that |net_error| is OK, |response| parses, and has at least one
+  // address.
+  QueryResult EvaluateGoodResponse(int net_error, const DnsResponse* response);
+  // Checks that |net_error| is OK, |response| parses but has no addresses.
+  QueryResult EvaluateBadResponse(int net_error, const DnsResponse* response);
+  DnsProbeJob::Result EvaluateQueryResults();
   void OnTransactionComplete(DnsTransaction* transaction,
                              int net_error,
                              const DnsResponse* response);
-  void RunCallback(DnsProbeJob::Result result);
 
   BoundNetLog bound_net_log_;
   scoped_ptr<DnsClient> dns_client_;
   const DnsProbeJob::CallbackType callback_;
-  bool probe_running_;
   scoped_ptr<DnsTransaction> good_transaction_;
   scoped_ptr<DnsTransaction> bad_transaction_;
-  QueryStatus good_status_;
-  QueryStatus bad_status_;
+  bool good_running_;
+  bool bad_running_;
+  QueryResult good_result_;
+  QueryResult bad_result_;
+  base::WeakPtrFactory<DnsProbeJobImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DnsProbeJobImpl);
 };
@@ -66,48 +97,38 @@ DnsProbeJobImpl::DnsProbeJobImpl(scoped_ptr<DnsClient> dns_client,
           BoundNetLog::Make(net_log, NetLog::SOURCE_DNS_PROBER)),
       dns_client_(dns_client.Pass()),
       callback_(callback),
-      probe_running_(false),
-      good_status_(QUERY_UNKNOWN),
-      bad_status_(QUERY_UNKNOWN) {
+      good_running_(false),
+      bad_running_(false),
+      good_result_(QUERY_UNKNOWN),
+      bad_result_(QUERY_UNKNOWN),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK(dns_client_.get());
   DCHECK(dns_client_->GetConfig());
 
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&DnsProbeJobImpl::Start,
+                 weak_factory_.GetWeakPtr()));
+}
+
+DnsProbeJobImpl::~DnsProbeJobImpl() {
+}
+
+void DnsProbeJobImpl::Start() {
   // TODO(ttuttle): Pick a good random hostname for the bad case.
   //                Consider running transactions in series?
   good_transaction_ = CreateTransaction("google.com");
-  bad_transaction_  = CreateTransaction("thishostname.doesnotresolve");
+  bad_transaction_ = CreateTransaction("thishostname.doesnotresolve");
 
   // StartTransaction may call the callback synchrononously, so set these
   // before we call it.
-  probe_running_ = true;
-  good_status_ = QUERY_RUNNING;
-  bad_status_ = QUERY_RUNNING;
+  good_running_ = true;
+  bad_running_ = true;
 
   // TODO(ttuttle): Log probe started.
 
   StartTransaction(good_transaction_.get());
   StartTransaction(bad_transaction_.get());
-}
-
-DnsProbeJobImpl::~DnsProbeJobImpl() {
-  // TODO(ttuttle): Cleanup?  (Transactions stop themselves on destruction.)
-}
-
-void DnsProbeJobImpl::MaybeFinishProbe(void) {
-  DCHECK(probe_running_);
-
-  if (good_status_ == QUERY_RUNNING || bad_status_ == QUERY_RUNNING)
-    return;
-
-  probe_running_ = false;
-
-  // TODO(ttuttle): Flesh out logic.
-  if (good_status_ == QUERY_ERROR || bad_status_ == QUERY_ERROR)
-    RunCallback(DNS_BROKEN);
-  else
-    RunCallback(DNS_WORKING);
-
-  // TODO(ttuttle): Log probe finished.
 }
 
 scoped_ptr<DnsTransaction> DnsProbeJobImpl::CreateTransaction(
@@ -130,43 +151,76 @@ void DnsProbeJobImpl::StartTransaction(DnsTransaction* transaction) {
   // TODO(ttuttle): Log transaction started.
 }
 
+DnsProbeJobImpl::QueryResult DnsProbeJobImpl::EvaluateGoodResponse(
+    int net_error,
+    const DnsResponse* response) {
+  if (net_error != net::OK)
+    return DidReceiveDnsResponse(net_error) ? QUERY_DNS_ERROR : QUERY_NET_ERROR;
+
+  AddressList addr_list;
+  TimeDelta ttl;
+  DnsResponse::Result result = response->ParseToAddressList(&addr_list, &ttl);
+
+  if (result != DnsResponse::DNS_PARSE_OK)
+    return QUERY_DNS_ERROR;
+
+  if (addr_list.empty())
+    return QUERY_INCORRECT;
+
+  return QUERY_CORRECT;
+}
+
+DnsProbeJobImpl::QueryResult DnsProbeJobImpl::EvaluateBadResponse(
+    int net_error,
+    const DnsResponse* response) {
+  if (net_error == net::ERR_NAME_NOT_RESOLVED)  // NXDOMAIN maps to this
+    return QUERY_CORRECT;
+
+  if (net_error != net::OK)
+    return DidReceiveDnsResponse(net_error) ? QUERY_DNS_ERROR : QUERY_NET_ERROR;
+
+  return QUERY_INCORRECT;
+}
+
+DnsProbeJob::Result DnsProbeJobImpl::EvaluateQueryResults() {
+  if (good_result_ == QUERY_NET_ERROR || bad_result_ == QUERY_NET_ERROR)
+    return SERVERS_UNREACHABLE;
+
+  if (good_result_ == QUERY_DNS_ERROR || bad_result_ == QUERY_DNS_ERROR)
+    return SERVERS_FAILING;
+
+  // Ignore incorrect responses to known-bad query to avoid flagging domain
+  // helpers.
+  if (good_result_ == QUERY_INCORRECT)
+    return SERVERS_INCORRECT;
+
+  return SERVERS_CORRECT;
+}
+
 void DnsProbeJobImpl::OnTransactionComplete(DnsTransaction* transaction,
                                             int net_error,
                                             const DnsResponse* response) {
-  QueryStatus* status;
-
   if (transaction == good_transaction_.get()) {
-    status = &good_status_;
-    good_transaction_.reset();
+    DCHECK(good_running_);
+    DCHECK_EQ(QUERY_UNKNOWN, good_result_);
+    good_result_ = EvaluateGoodResponse(net_error, response);
+    good_running_ = false;
   } else if (transaction == bad_transaction_.get()) {
-    status = &bad_status_;
-    bad_transaction_.reset();
+    DCHECK(bad_running_);
+    DCHECK_EQ(QUERY_UNKNOWN, bad_result_);
+    bad_result_ = EvaluateBadResponse(net_error, response);
+    bad_running_ = false;
   } else {
     NOTREACHED();
     return;
   }
 
-  DCHECK_EQ(QUERY_RUNNING, *status);
+  if (good_running_ || bad_running_)
+    return;
 
-  if (net_error == net::OK) {
-    // TODO(ttuttle): Examine DNS response and make sure it's correct.
-    *status = QUERY_CORRECT;
-  } else {
-    *status = QUERY_ERROR;
-  }
+  callback_.Run(this, EvaluateQueryResults());
 
-  // TODO(ttuttle): Log transaction completed.
-
-  MaybeFinishProbe();
-}
-
-void DnsProbeJobImpl::RunCallback(DnsProbeJob::Result result) {
-  // Make sure we're not running the callback in the constructor.
-  // This avoids a race where our owner tries to destroy us while we're still
-  // being created, then ends up with a dangling pointer to us.
-  MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(callback_, base::Unretained(this), result));
+  // TODO(ttuttle): Log probe finished.
 }
 
 }  // namespace

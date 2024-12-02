@@ -4,12 +4,10 @@
 
 /**
  * @fileoverview New tab page
- * This is the main code for the new tab page used by touch-enabled Chrome
- * browsers. NewTabView manages page list and dot list and handles apps pages
- * callbacks from backend.
- *
- * Note that you need to have AppLauncherHandler in your WebUI to use this code.
-*/
+ * This is the main code for the new tab page. NewTabView manages page list,
+ * dot list and handles apps pages callbacks from backend. It also handles
+ * the layout of the Bottom Panel and the global UI states of the New Tab Page.
+ */
 
 // Use an anonymous function to enable strict mode just for this file (which
 // will be concatenated with other files when embedded in Chrome
@@ -29,6 +27,63 @@ cr.define('ntp', function() {
   };
 
   /**
+   * @type {number}
+   * @const
+   */
+  var BOTTOM_PANEL_HORIZONTAL_MARGIN = 100;
+
+  /**
+   * The height required to show the Bottom Panel.
+   * @type {number}
+   * @const
+   */
+  var HEIGHT_FOR_BOTTOM_PANEL = 531;
+
+  /**
+   * The Bottom Panel width required to show 6 cols of Tiles, which is used
+   * in the width computation.
+   * @type {number}
+   * @const
+   */
+  var MAX_BOTTOM_PANEL_WIDTH = 920;
+
+  /**
+   * The minimum width of the Bottom Panel's content.
+   * @type {number}
+   * @const
+   */
+  var MIN_BOTTOM_PANEL_CONTENT_WIDTH = 200;
+
+  /**
+   * The minimum Bottom Panel width. If the available width is smaller than
+   * this value, then the width of the Bottom Panel's content will be fixed to
+   * MIN_BOTTOM_PANEL_CONTENT_WIDTH.
+   * @type {number}
+   * @const
+   */
+  var MIN_BOTTOM_PANEL_WIDTH = 300;
+
+  /**
+   * The normal Bottom Panel width. If the window width is greater than or
+   * equal to this value, then the width of the Bottom Panel's content will be
+   * the available width minus side margin. If the available width is smaller
+   * than this value, then the width of the Bottom Panel's content will be an
+   * interpolation between the normal width, and the minimum width defined by
+   * the constant MIN_BOTTOM_PANEL_CONTENT_WIDTH.
+   * @type {number}
+   * @const
+   */
+  var NORMAL_BOTTOM_PANEL_WIDTH = 500;
+
+  /**
+   * @type {number}
+   * @const
+   */
+  var TILE_ROW_HEIGHT = 100;
+
+  //----------------------------------------------------------------------------
+
+  /**
    * NewTabView instance.
    * @type {!Object|undefined}
    */
@@ -39,6 +94,14 @@ cr.define('ntp', function() {
    * @type {!Element|undefined}
    */
   var notificationContainer;
+
+  /**
+   * If non-null, an info bubble for showing messages to the user. It points at
+   * the Most Visited label, and is used to draw more attention to the
+   * navigation dot UI.
+   * @type {!Element|undefined}
+   */
+  var promoBubble;
 
   /**
    * The total number of thumbnails that were hovered over.
@@ -53,6 +116,20 @@ cr.define('ntp', function() {
    * @private
    */
   var startTime;
+
+  /**
+   * The top position of the Bottom Panel.
+   * @type {number|undefined}
+   * @private
+   */
+  var bottomPanelOffsetTop;
+
+  /**
+   * The height of the Bottom Panel Header, in pixels.
+   * @type {number|undefined}
+   * @private
+   */
+  var headerHeight;
 
   /**
    * The time in milliseconds for most transitions.  This should match what's
@@ -109,10 +186,10 @@ cr.define('ntp', function() {
     tilePages: undefined,
 
     /**
-     * A list of all 'apps-page' elements.
-     * @type {!NodeList|undefined}
+     * The Apps page.
+     * @type {!Element|undefined}
      */
-    appsPages: undefined,
+    appsPage: undefined,
 
     /**
      * The Most Visited page.
@@ -152,12 +229,6 @@ cr.define('ntp', function() {
     shownPageIndex: 0,
 
     /**
-     * EventTracker for managing event listeners for page events.
-     * @type {!EventTracker}
-     */
-    eventTracker: new EventTracker,
-
-    /**
      * If non-null, this is the ID of the app to highlight to the user the next
      * time getAppsCallback runs. "Highlight" in this case means to switch to
      * the page and run the new tile animation.
@@ -183,25 +254,19 @@ cr.define('ntp', function() {
       this.shownPageIndex = loadTimeData.getInteger('shown_page_index');
 
       if (loadTimeData.getBoolean('showApps')) {
+        // When the Apps Page is available, then the dot list should be visible.
+        this.dotList.removeAttribute('hidden');
         // Request data on the apps so we can fill them in.
         // Note that this is kicked off asynchronously.  'getAppsCallback' will
         // be invoked at some point after this function returns.
-        if (!ntp.ntp5)
-          chrome.send('getApps');
+        chrome.send('getApps');
       } else if (this.shownPage == loadTimeData.getInteger('apps_page_id')) {
         // No apps page.
         this.setShownPage_(
             loadTimeData.getInteger('most_visited_page_id'), 0);
       }
 
-      document.addEventListener('keydown', this.onDocKeyDown_.bind(this));
-      // Prevent touch events from triggering any sort of native scrolling.
-      document.addEventListener('touchmove', function(e) {
-        e.preventDefault();
-      }, true);
-
       this.tilePages = this.pageList.getElementsByClassName('tile-page');
-      this.appsPages = this.pageList.getElementsByClassName('apps-page');
 
       // Initialize the cardSlider without any cards at the moment.
       this.sliderFrame = cardSliderFrame;
@@ -212,22 +277,34 @@ cr.define('ntp', function() {
       this.cardSlider.initialize(
           loadTimeData.getBoolean('isSwipeTrackingFromScrollEventsEnabled'));
 
+      // Prevent touch events from triggering any sort of native scrolling.
+      document.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+      }, true);
+
       // Handle events from the card slider.
       this.pageList.addEventListener('cardSlider:card_changed',
-                                     this.onCardChanged_.bind(this));
+          this.onCardChanged_.bind(this));
       this.pageList.addEventListener('cardSlider:card_added',
-                                     this.onCardAdded_.bind(this));
+          this.onCardAdded_.bind(this));
       this.pageList.addEventListener('cardSlider:card_removed',
-                                     this.onCardRemoved_.bind(this));
-
-      // Ensure the slider is resized appropriately with the window.
-      window.addEventListener('resize', this.onWindowResize_.bind(this));
+         this.onCardRemoved_.bind(this));
 
       // Update apps when online state changes.
       window.addEventListener('online',
           this.updateOfflineEnabledApps_.bind(this));
       window.addEventListener('offline',
           this.updateOfflineEnabledApps_.bind(this));
+    },
+
+    /**
+     * Starts listening to user input events. The resize and keydown events
+     * must be added only when all NTP have finished loading because they
+     * will act in the current selected page.
+     */
+    onReady: function() {
+      window.addEventListener('resize', this.onWindowResize_.bind(this));
+      document.addEventListener('keydown', this.onDocKeyDown_.bind(this));
     },
 
     /**
@@ -256,6 +333,11 @@ cr.define('ntp', function() {
         this.mostVisitedPage = page;
       }
 
+      if (typeof ntp.AppsPage != 'undefined' &&
+          page instanceof ntp.AppsPage) {
+        this.appsPage = page;
+      }
+
       if (typeof ntp.RecentlyClosedPage != 'undefined' &&
           page instanceof ntp.RecentlyClosedPage) {
         this.recentlyClosedPage = page;
@@ -279,36 +361,36 @@ cr.define('ntp', function() {
 
     /**
      * Called by chrome when an app has changed positions.
-     * @param {Object} appData The data for the app. This contains page and
+     * @param {Object} data The data for the app. This contains page and
      *     position indices.
      */
-    appMoved: function(appData) {
+    appMoved: function(data) {
       assert(loadTimeData.getBoolean('showApps'));
 
-      var app = $(appData.id);
+      var app = $(data.id);
       assert(app, 'trying to move an app that doesn\'t exist');
       app.remove(false);
 
-      this.appsPages[appData.page_index].insertApp(appData, false);
+      this.appsPage.insertApp(data, false);
     },
 
     /**
      * Called by chrome when an existing app has been disabled or
      * removed/uninstalled from chrome.
-     * @param {Object} appData A data structure full of relevant information for
+     * @param {Object} data A data structure full of relevant information for
      *     the app.
      * @param {boolean} isUninstall True if the app is being uninstalled;
      *     false if the app is being disabled.
      * @param {boolean} fromPage True if the removal was from the current page.
      */
-    appRemoved: function(appData, isUninstall, fromPage) {
+    appRemoved: function(data, isUninstall, fromPage) {
       assert(loadTimeData.getBoolean('showApps'));
 
-      var app = $(appData.id);
+      var app = $(data.id);
       assert(app, 'trying to remove an app that doesn\'t exist');
 
       if (!isUninstall)
-        app.replaceAppData(appData);
+        app.replaceAppData(data);
       else
         app.remove(!!fromPage);
     },
@@ -342,70 +424,33 @@ cr.define('ntp', function() {
 
       var startTime = Date.now();
 
-      // Remember this to select the correct card when done rebuilding.
-      var prevCurrentCard = this.cardSlider.currentCard;
-
-      // Make removal of pages and dots as quick as possible with less DOM
-      // operations, reflows, or repaints. We set currentCard = 0 and remove
-      // from the end to not encounter any auto-magic card selections in the
-      // process and we hide the card slider throughout.
-      this.cardSlider.currentCard = 0;
-
-      // Clear any existing apps pages and dots.
-      // TODO(rbyers): It might be nice to preserve animation of dots after an
-      // uninstall. Could we re-use the existing page and dot elements?  It
-      // seems unfortunate to have Chrome send us the entire apps list after an
-      // uninstall.
-      while (this.appsPages.length > 0)
-        this.removeTilePageAndDot_(this.appsPages[this.appsPages.length - 1]);
-
-      // Get the array of apps and add any special synthesized entries
+      // Get the array of apps and add any special synthesized entries.
       var apps = data.apps;
 
-      // Get a list of page names
-      var pageNames = data.appPageNames;
-
-      // Sort by launch ordinal
+      // Sort alphabetically.
       apps.sort(function(a, b) {
-        return a.app_launch_ordinal > b.app_launch_ordinal ? 1 :
-          a.app_launch_ordinal < b.app_launch_ordinal ? -1 : 0;
+        return a.title.toLocaleLowerCase() > b.title.toLocaleLowerCase() ? 1 :
+          a.title.toLocaleLowerCase() < b.title.toLocaleLowerCase() ? -1 : 0;
       });
 
       // An app to animate (in case it was just installed).
       var highlightApp;
 
-      // If there are any pages after the apps, add new pages before them.
-      var lastAppsPage = (this.appsPages.length > 0) ?
-          this.appsPages[this.appsPages.length - 1] : null;
-      var lastAppsPageIndex = (lastAppsPage != null) ?
-          Array.prototype.indexOf.call(this.tilePages, lastAppsPage) : -1;
-      var nextPageAfterApps = lastAppsPageIndex != -1 ?
-          this.tilePages[lastAppsPageIndex + 1] : null;
+      if (this.appsPage) {
+        this.appsPage.removeAllTiles();
+      } else {
+        var page = new ntp.AppsPage();
+        page.setDataList(apps);
+        this.appendTilePage(page, loadTimeData.getString('appDefaultPageName'));
+      }
 
-      // Add the apps, creating pages as necessary
       for (var i = 0; i < apps.length; i++) {
         var app = apps[i];
-        var pageIndex = app.page_index || 0;
-        while (pageIndex >= this.appsPages.length) {
-          var pageName = loadTimeData.getString('appDefaultPageName');
-          if (this.appsPages.length < pageNames.length)
-            pageName = pageNames[this.appsPages.length];
-
-          var origPageCount = this.appsPages.length;
-          this.appendTilePage(new ntp.AppsPage(), pageName, nextPageAfterApps);
-          // Confirm that appsPages is a live object, updated when a new page is
-          // added (otherwise we'd have an infinite loop)
-          assert(this.appsPages.length == origPageCount + 1,
-                 'expected new page');
-        }
-
         if (app.id == this.highlightAppId)
           highlightApp = app;
         else
-          this.appsPages[pageIndex].insertApp(app, false);
+          this.appsPage.insertApp(app, false);
       }
-
-      this.cardSlider.currentCard = prevCurrentCard;
 
       if (highlightApp)
         this.appAdded(highlightApp, true);
@@ -414,7 +459,6 @@ cr.define('ntp', function() {
 
       // Tell the slider about the pages and mark the current page.
       this.updateSliderCards();
-      this.cardSlider.currentCardValue.navigationDot.classList.add('selected');
 
       if (!this.appsLoaded_) {
         this.appsLoaded_ = true;
@@ -425,39 +469,31 @@ cr.define('ntp', function() {
     /**
      * Called by chrome when a new app has been added to chrome or has been
      * enabled if previously disabled.
-     * @param {Object} appData A data structure full of relevant information for
+     * @param {Object} data A data structure full of relevant information for
      *     the app.
      * @param {boolean=} opt_highlight Whether the app about to be added should
      *     be highlighted.
      */
-    appAdded: function(appData, opt_highlight) {
+    appAdded: function(data, opt_highlight) {
       assert(loadTimeData.getBoolean('showApps'));
 
-      if (appData.id == this.highlightAppId) {
+      if (data.id == this.highlightAppId) {
         opt_highlight = true;
         this.highlightAppId = null;
       }
 
-      var pageIndex = appData.page_index || 0;
+      if (!this.appsLoaded_)
+        opt_highlight = false;
 
-      if (pageIndex >= this.appsPages.length) {
-        while (pageIndex >= this.appsPages.length) {
-          this.appendTilePage(new ntp.AppsPage(),
-                              loadTimeData.getString('appDefaultPageName'));
-        }
-        this.updateSliderCards();
-      }
-
-      var page = this.appsPages[pageIndex];
-      var app = $(appData.id);
+      var app = $(data.id);
       if (app) {
-        app.replaceAppData(appData);
+        app.replaceAppData(data);
       } else if (opt_highlight) {
-        page.insertAndHighlightApp(appData);
+        this.appsPage.insertAndHighlightApp(data);
         this.setShownPage_(loadTimeData.getInteger('apps_page_id'),
-                           appData.page_index);
+                           data.page_index);
       } else {
-        page.insertApp(appData, false);
+        this.appsPage.insertApp(data, false);
       }
     },
 
@@ -470,7 +506,9 @@ cr.define('ntp', function() {
       assert(loadTimeData.getBoolean('showApps'));
 
       for (var i = 0; i < data.apps.length; ++i) {
-        $(data.apps[i].id).appData = data.apps[i];
+        var element = $(data.apps[i].id);
+        if (element)
+          element.data = data.apps[i];
       }
     },
 
@@ -483,21 +521,15 @@ cr.define('ntp', function() {
                                         this.tilePages.length - 1));
       this.cardSlider.setCards(Array.prototype.slice.call(this.tilePages),
                                pageNo);
-
-      assert(this.mostVisitedPage, 'Most Visited Page not found');
-      // NTP pages are not sticky anymore, so we should always select the Most
-      // Visited page when loading the card slider.
-      this.cardSlider.selectCardByValue(this.mostVisitedPage);
-    },
-
-    /**
-     * Returns the index of the given apps page.
-     * @param {AppsPage} page The AppsPage we wish to find.
-     * @return {number} The index of |page| or -1 if it is not in the
-     *    collection.
-     */
-    getAppsPageIndex: function(page) {
-      return Array.prototype.indexOf.call(this.appsPages, page);
+      switch (this.shownPage) {
+        case loadTimeData.getInteger('apps_page_id'):
+          this.cardSlider.selectCardByValue(this.appsPage);
+          break;
+        case loadTimeData.getInteger('most_visited_page_id'):
+          if (this.mostVisitedPage)
+            this.cardSlider.selectCardByValue(this.mostVisitedPage);
+          break;
+      }
     },
 
     /**
@@ -512,8 +544,7 @@ cr.define('ntp', function() {
       // reflect user actions).
       if (!this.isStartingUp_()) {
         if (page.classList.contains('apps-page')) {
-          this.setShownPage_(loadTimeData.getInteger('apps_page_id'),
-                             this.getAppsPageIndex(page));
+          this.setShownPage_(loadTimeData.getInteger('apps_page_id'), 0);
         } else if (page.classList.contains('most-visited-page')) {
           this.setShownPage_(
               loadTimeData.getInteger('most_visited_page_id'), 0);
@@ -557,7 +588,7 @@ cr.define('ntp', function() {
       // When the second arg passed to insertBefore is falsey, it acts just like
       // appendChild.
       this.pageList.insertBefore(page, this.tilePages[e.addedIndex]);
-      page.layout(true);
+      this.layout(false, page);
       this.onCardAddedOrRemoved_();
     },
 
@@ -566,7 +597,7 @@ cr.define('ntp', function() {
      * @param {Event} e A card removed or added event.
      */
     onCardRemoved_: function(e) {
-      e.removedCard.parentNode.removeChild(e.removedCard);
+      e.removedCard.remove();
       this.onCardAddedOrRemoved_();
     },
 
@@ -588,21 +619,7 @@ cr.define('ntp', function() {
      */
     onWindowResize_: function(e) {
       this.cardSlider.resize(this.sliderFrame.offsetWidth);
-    },
-
-    /**
-     * Listener for offline status change events. Updates apps that are
-     * not offline-enabled to be grayscale if the browser is offline.
-     * @private
-     */
-    updateOfflineEnabledApps_: function() {
-      var apps = document.querySelectorAll('.app');
-      for (var i = 0; i < apps.length; ++i) {
-        if (apps[i].appData.enabled && !apps[i].appData.offline_enabled) {
-          apps[i].setIcon();
-          apps[i].loadIcon();
-        }
-      }
+      this.layout(true);
     },
 
     /**
@@ -632,6 +649,21 @@ cr.define('ntp', function() {
     },
 
     /**
+     * Listener for offline status change events. Updates apps that are
+     * not offline-enabled to be grayscale if the browser is offline.
+     * @private
+     */
+    updateOfflineEnabledApps_: function() {
+      var apps = document.querySelectorAll('.app');
+      for (var i = 0; i < apps.length; ++i) {
+        if (apps[i].data.enabled && !apps[i].data.offline_enabled) {
+          apps[i].setIcon();
+          apps[i].loadIcon();
+        }
+      }
+    },
+
+    /**
      * Returns the index of a given tile page.
      * @param {TilePage} page The TilePage we wish to find.
      * @return {number} The index of |page| or -1 if it is not in the
@@ -650,44 +682,175 @@ cr.define('ntp', function() {
         page.navigationDot.remove();
       this.cardSlider.removeCard(page);
     },
+
+    /**
+     * The width of the Bottom Panel's content.
+     * @type {number}
+     */
+    contentWidth_: 0,
+
+    /**
+     * Calculates the layout of the NTP's Bottom Panel. This method will resize
+     * and position all container elements in the Bottom Panel. At the end of
+     * the layout process it will dispatch the layout method to the current
+     * selected TilePage. Alternatively, you can pass a specific TilePage in
+     * the |opt_page| parameter, which is useful for initializing the layout
+     * of a recently created TilePage.
+     *
+     * The |NewTabView.layout| deals with the global layout state while the
+     * |TilePage.layout| deals with the per-page layout state. A general rule
+     * would be: if you need to resize any element which is outside the
+     * card-slider-frame, it should be handled here in NewTabView. Otherwise,
+     * it should be handled in TilePage.
+     *
+     * @param {boolean=} opt_animate Whether the layout should be animated.
+     * @param {ntp.TilePage=} opt_page Alternative TilePage to calculate layout.
+     */
+    layout: function(opt_animate, opt_page) {
+      opt_animate = typeof opt_animate == 'undefined' ? false : opt_animate;
+
+      var viewHeight = cr.doc.documentElement.clientHeight;
+      var isBottomPanelVisible = viewHeight >= HEIGHT_FOR_BOTTOM_PANEL;
+      // Toggles the visibility of the Bottom Panel when there is (or there
+      // is not) space to show the entire panel.
+      this.showBottomPanel_(isBottomPanelVisible);
+
+      // The layout calculation can be skipped if Bottom Panel is not visible.
+      if (!isBottomPanelVisible && !opt_page)
+        return;
+
+      // Calculates the width of the Bottom Panel's Content.
+      var width = this.calculateContentWidth_();
+      if (width != this.contentWidth_) {
+        this.contentWidth_ = width;
+        $('bottom-panel-footer').style.width = width + 'px';
+      }
+
+      // Finally, dispatch the layout method to the current page.
+      var currentPage = opt_page || this.cardSlider.currentCardValue;
+
+      var contentHeight = TILE_ROW_HEIGHT;
+      if (!opt_page && currentPage.config.scrollable) {
+        contentHeight = viewHeight - bottomPanelOffsetTop -
+            headerHeight - $('bottom-panel-footer').offsetHeight;
+        contentHeight = Math.max(TILE_ROW_HEIGHT, contentHeight);
+      }
+      this.contentHeight_ = contentHeight;
+
+      $('card-slider-frame').style.height = contentHeight + 'px';
+
+      currentPage.layout(opt_animate);
+    },
+
+    /**
+     * @return {number} The height of the Bottom Panel's content.
+     */
+    get contentHeight() {
+      return this.contentHeight_;
+    },
+
+    /**
+     * @return {number} The width of the Bottom Panel's content.
+     */
+    get contentWidth() {
+      return this.contentWidth_;
+    },
+
+    /**
+     * @return {number} The width of the Bottom Panel's content.
+     * @private
+     */
+    calculateContentWidth_: function() {
+      var windowWidth = cr.doc.documentElement.clientWidth;
+      var margin = 2 * BOTTOM_PANEL_HORIZONTAL_MARGIN;
+
+      var width;
+      if (windowWidth >= MAX_BOTTOM_PANEL_WIDTH) {
+        width = MAX_BOTTOM_PANEL_WIDTH - margin;
+      } else if (windowWidth >= NORMAL_BOTTOM_PANEL_WIDTH) {
+        width = windowWidth - margin;
+      } else if (windowWidth >= MIN_BOTTOM_PANEL_WIDTH) {
+        // Interpolation between the previous and next states.
+        var minMargin = MIN_BOTTOM_PANEL_WIDTH - MIN_BOTTOM_PANEL_CONTENT_WIDTH;
+        var factor = (windowWidth - MIN_BOTTOM_PANEL_WIDTH) /
+            (NORMAL_BOTTOM_PANEL_WIDTH - MIN_BOTTOM_PANEL_WIDTH);
+        var interpolatedMargin = minMargin + factor * (margin - minMargin);
+        width = windowWidth - interpolatedMargin;
+      } else {
+        width = MIN_BOTTOM_PANEL_CONTENT_WIDTH;
+      }
+
+      return width;
+    },
+
+    /**
+     * Animates the display of the Bottom Panel.
+     * @param {boolean} show Whether or not to show the Bottom Panel.
+     */
+    showBottomPanel_: function(show) {
+      $('bottom-panel').classList.toggle('hide-bottom-panel', !show);
+    },
   };
 
   /**
    * Invoked at startup once the DOM is available to initialize the app.
    */
   function onLoad() {
+
+    if (!loadTimeData.getBoolean('showApps'))
+      cr.dispatchSimpleEvent(document, 'sectionready', true, true);
+
     // Load the current theme colors.
     themeChanged();
 
     newTabView = new NewTabView();
 
+    bottomPanelOffsetTop = $('bottom-panel').offsetTop;
+    headerHeight = $('bottom-panel-header').offsetHeight;
+
     notificationContainer = getRequiredElement('notification-container');
-    notificationContainer.addEventListener(
-        'webkitTransitionEnd', onNotificationTransitionEnd);
 
     var mostVisited = new ntp.MostVisitedPage();
     newTabView.appendTilePage(mostVisited,
                               loadTimeData.getString('mostvisited'));
     chrome.send('getMostVisited');
 
-    var recentlyClosed = new ntp.RecentlyClosedPage();
-    newTabView.appendTilePage(recentlyClosed,
-                              loadTimeData.getString('recentlyclosed'));
-    chrome.send('getRecentlyClosedTabs');
+    if (loadTimeData.valueExists('bubblePromoText')) {
+      promoBubble = new cr.ui.Bubble;
+      promoBubble.anchorNode = getRequiredElement('promo-bubble-anchor');
+      promoBubble.arrowLocation = cr.ui.ArrowLocation.BOTTOM_START;
+      promoBubble.bubbleAlignment = cr.ui.BubbleAlignment.ENTIRELY_VISIBLE;
+      promoBubble.deactivateToDismissDelay = 2000;
+      promoBubble.content = parseHtmlSubset(
+          loadTimeData.getString('bubblePromoText'), ['BR']);
 
-    var devices = new ntp.OtherDevicesPage();
-    newTabView.appendTilePage(devices, loadTimeData.getString('otherSessions'));
-    chrome.send('getForeignSessions');
+      var bubbleLink = promoBubble.querySelector('a');
+      if (bubbleLink) {
+        bubbleLink.addEventListener('click', function(e) {
+          chrome.send('bubblePromoLinkClicked');
+        });
+      }
+
+      promoBubble.handleCloseEvent = function() {
+        promoBubble.hide();
+        chrome.send('bubblePromoClosed');
+      };
+      promoBubble.show();
+      chrome.send('bubblePromoViewed');
+    }
 
     doWhenAllSectionsReady(function() {
       // Tell the slider about the pages.
       newTabView.updateSliderCards();
+      newTabView.onReady();
+
       // Restore the visibility only after calling updateSliderCards to avoid
       // flickering, otherwise for a small fraction of a second the Page List is
       // partially rendered.
-      newTabView.cardSlider.frame_.style.visibility = 'visible';
-      if (loadTimeData.valueExists('serverpromo')) {
-        var promo = loadTimeData.getString('serverpromo');
+      $('bottom-panel').style.visibility = 'visible';
+
+      if (loadTimeData.valueExists('notificationPromoText')) {
+        var promoText = loadTimeData.getString('notificationPromoText');
         var tags = ['IMG'];
         var attrs = {
           src: function(node, value) {
@@ -695,8 +858,17 @@ cr.define('ntp', function() {
                    /^data\:image\/(?:png|gif|jpe?g)/.test(value);
           },
         };
-        showNotification(parseHtmlSubset(promo, tags, attrs), [], function() {
-          chrome.send('closeNotificationPromo');
+
+        var promo = parseHtmlSubset(promoText, tags, attrs);
+        var promoLink = promo.querySelector('a');
+        if (promoLink) {
+          promoLink.addEventListener('click', function(e) {
+            chrome.send('notificationPromoLinkClicked');
+          });
+        }
+
+        showNotification(promo, [], function() {
+          chrome.send('notificationPromoClosed');
         }, 60000);
         chrome.send('notificationPromoViewed');
       }
@@ -712,7 +884,7 @@ cr.define('ntp', function() {
    * The number of sections to wait on.
    * @type {number}
    */
-  var sectionsToWaitFor = 3;
+  var sectionsToWaitFor = 2;
 
   /**
    * Queued callbacks which lie in wait for all sections to be ready.
@@ -760,14 +932,6 @@ cr.define('ntp', function() {
 
   function setBookmarkBarAttached(attached) {
     document.documentElement.setAttribute('bookmarkbarattached', attached);
-  }
-
-  /**
-   * Sets the backgroundPositionY of html element; this overrides the css
-   * style of html element in new_tab_theme.css.
-   */
-  function setBackgroundPositionY(yPosition) {
-    document.documentElement.style.backgroundPositionY = yPosition;
   }
 
   /**
@@ -838,55 +1002,51 @@ cr.define('ntp', function() {
     document.addEventListener('dragstart', closeFunc);
 
     notificationContainer.hidden = false;
-    window.setTimeout(function() {
-      notificationContainer.classList.remove('inactive');
-    }, 0);
 
     var timeout = opt_timeout || 10000;
     notificationTimeout = window.setTimeout(hideNotification, timeout);
+
+    layout();
   }
 
   /**
    * Hide the notification bubble.
    */
   function hideNotification() {
-    notificationContainer.classList.add('inactive');
+    notificationContainer.hidden = true;
+
+    layout();
   }
 
-  /**
-   * When done fading out, set hidden to true so the notification can't be
-   * tabbed to or clicked.
-   * @param {Event} e The webkitTransitionEnd event.
-   */
-  function onNotificationTransitionEnd(e) {
-    if (notificationContainer.classList.contains('inactive'))
-      notificationContainer.hidden = true;
-  }
-
-  function setRecentlyClosedTabs(dataList) {
-    newTabView.recentlyClosedPage.setDataList(dataList);
-    cr.dispatchSimpleEvent(document, 'sectionready', true, true);
-  }
-
-  function setMostVisitedPages(data, hasBlacklistedUrls) {
+  function setMostVisitedPages(dataList, hasBlacklistedUrls) {
     var page = newTabView.mostVisitedPage;
     var state = page.getTileRepositioningState();
     if (state) {
       if (state.isRemoving)
-        page.animateTileRemoval(state.index, data);
+        page.animateTileRemoval(state.index, dataList);
       else
-        page.animateTileRestoration(state.index, data);
+        page.animateTileRestoration(state.index, dataList);
 
       page.resetTileRepositioningState();
     } else {
-      page.setDataList(data);
+      page.setDataList(dataList);
       cr.dispatchSimpleEvent(document, 'sectionready', true, true);
     }
   }
 
-  function setForeignSessions(dataList, isTabSyncEnabled) {
-    newTabView.otherDevicesPage.setDataList(dataList);
-    cr.dispatchSimpleEvent(document, 'sectionready', true, true);
+  /**
+   * Set the dominant color for a node. This will be called in response to
+   * getFaviconDominantColor. The node represented by |id| better have a setter
+   * for stripeColor.
+   * @param {string} id The ID of a node.
+   * @param {string} color The color represented as a CSS string.
+   */
+  function setFaviconDominantColor(id, color) {
+    var node = $(id);
+    var prop = Object.getOwnPropertyDescriptor(node.__proto__, 'stripeColor');
+    assert(prop && prop.set, 'Node doesn\'t have a stripeColor setter');
+    if (node)
+      node.stripeColor = color;
   }
 
   function getThumbnailUrl(url) {
@@ -934,16 +1094,8 @@ cr.define('ntp', function() {
     return newTabView.appsPrefChangedCallback.apply(newTabView, arguments);
   }
 
-  function appsReordered() {
-    return newTabView.appsReordered.apply(newTabView, arguments);
-  }
-
   function getAppsCallback() {
     return newTabView.getAppsCallback.apply(newTabView, arguments);
-  }
-
-  function getAppsPageIndex() {
-    return newTabView.getAppsPageIndex.apply(newTabView, arguments);
   }
 
   function getCardSlider() {
@@ -954,33 +1106,49 @@ cr.define('ntp', function() {
     newTabView.highlightAppId = appId;
   }
 
+  function layout() {
+    newTabView.layout.apply(newTabView, arguments);
+  }
+
+  function getContentHeight() {
+    return newTabView.contentHeight;
+  }
+
+  function getContentWidth() {
+    return newTabView.contentWidth;
+  }
+
+  function noop() {
+    // Ignore some NTP4 callbacks for backwards compatibility purposes.
+  }
+
   // Return an object with all the exports
   return {
     APP_LAUNCH: APP_LAUNCH,
+    TILE_ROW_HEIGHT: TILE_ROW_HEIGHT,
     appAdded: appAdded,
     appMoved: appMoved,
     appRemoved: appRemoved,
     appsPrefChangeCallback: appsPrefChangeCallback,
     getAppsCallback: getAppsCallback,
-    getAppsPageIndex: getAppsPageIndex,
     getCardSlider: getCardSlider,
+    getContentHeight: getContentHeight,
+    getContentWidth: getContentWidth,
     getThumbnailUrl: getThumbnailUrl,
     incrementHoveredThumbnailCount: incrementHoveredThumbnailCount,
+    layout: layout,
     logTimeToClickAndHoverCount: logTimeToClickAndHoverCount,
-    onLoad: onLoad,
-    // This property is being used to disable NTP5 features that are not ready
-    // yet. Right now this is being used just to disable Apps page.
-    // TODO(pedrosimonetti): Remove this property after porting Apps Page.
-    ntp5: true,
     NtpFollowAction: NtpFollowAction,
+    onLoad: onLoad,
     setAppToBeHighlighted: setAppToBeHighlighted,
-    setBackgroundPositionY: setBackgroundPositionY,
     setBookmarkBarAttached: setBookmarkBarAttached,
-    setForeignSessions: setForeignSessions,
+    setFaviconDominantColor: setFaviconDominantColor,
+    setForeignSessions: noop,
     setMostVisitedPages: setMostVisitedPages,
-    setRecentlyClosedTabs: setRecentlyClosedTabs,
+    setRecentlyClosedTabs: noop,
     showNotification: showNotification,
     themeChanged: themeChanged,
+    updateLogin: noop,
   };
 });
 

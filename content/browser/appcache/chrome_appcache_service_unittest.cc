@@ -4,11 +4,11 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/scoped_temp_dir.h"
-#include "content/browser/browser_thread_impl.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/test/test_browser_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -81,7 +81,7 @@ class ChromeAppCacheServiceTest : public testing::Test {
   void InsertDataIntoAppCache(ChromeAppCacheService* appcache_service);
 
   MessageLoop message_loop_;
-  ScopedTempDir temp_dir_;
+  base::ScopedTempDir temp_dir_;
   const GURL kProtectedManifestURL;
   const GURL kNormalManifestURL;
   const GURL kSessionOnlyManifestURL;
@@ -116,14 +116,14 @@ ChromeAppCacheServiceTest::CreateAppCacheService(
                  mock_request_context_getter,
                  mock_policy));
   // Steps needed to initialize the storage of AppCache data.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
   if (init_storage) {
     appcache::AppCacheStorageImpl* storage =
         static_cast<appcache::AppCacheStorageImpl*>(
             appcache_service->storage());
     storage->database_->db_connection();
     storage->disk_cache();
-    message_loop_.RunAllPending();
+    message_loop_.RunUntilIdle();
   }
   return appcache_service;
 }
@@ -158,7 +158,7 @@ TEST_F(ChromeAppCacheServiceTest, KeepOnDestruction) {
 
   // Test: delete the ChromeAppCacheService
   appcache_service = NULL;
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // Recreate the appcache (for reading the data back)
   appcache_service = CreateAppCacheService(appcache_path, false);
@@ -178,7 +178,7 @@ TEST_F(ChromeAppCacheServiceTest, KeepOnDestruction) {
 
   // Delete and let cleanup tasks run prior to returning.
   appcache_service = NULL;
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 TEST_F(ChromeAppCacheServiceTest, SaveSessionState) {
@@ -197,7 +197,7 @@ TEST_F(ChromeAppCacheServiceTest, SaveSessionState) {
 
   // Test: delete the ChromeAppCacheService
   appcache_service = NULL;
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // Recreate the appcache (for reading the data back)
   appcache_service = CreateAppCacheService(appcache_path, false);
@@ -217,7 +217,7 @@ TEST_F(ChromeAppCacheServiceTest, SaveSessionState) {
 
   // Delete and let cleanup tasks run prior to returning.
   appcache_service = NULL;
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 }
 
 }  // namespace content

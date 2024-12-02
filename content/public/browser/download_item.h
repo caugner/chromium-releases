@@ -42,8 +42,6 @@ class BrowserContext;
 class DownloadId;
 class DownloadManager;
 class WebContents;
-struct DownloadCreateInfo;
-struct DownloadPersistentStoreInfo;
 
 // One DownloadItem per download. This is the model class that stores all the
 // state for a download. Multiple views, such as a tab's download shelf and the
@@ -88,10 +86,6 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
                                   // target. Implies
                                   // TARGET_DISPOSITION_OVERWRITE.
   };
-
-  // A fake download table ID which represents a download that has started,
-  // but is not yet in the table.
-  static const int kUninitializedHandle;
 
   static const char kEmptyFileHash[];
 
@@ -157,7 +151,6 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
 
   virtual int32 GetId() const = 0;
   virtual DownloadId GetGlobalId() const = 0;
-  virtual int64 GetDbHandle() const = 0;
   virtual DownloadState GetState() const = 0;
 
   // Only valid if |GetState() == DownloadItem::INTERRUPTED|.
@@ -165,7 +158,6 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
 
   virtual bool IsPaused() const = 0;
   virtual bool IsTemporary() const = 0;
-  virtual bool IsPersisted() const = 0;
 
   //    Convenience routines for accessing GetState() results conceptually -----
 
@@ -299,17 +291,12 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
 
   //    Misc State accessors ---------------------------------------------------
 
-  virtual DownloadPersistentStoreInfo GetPersistentStoreInfo() const = 0;
   virtual BrowserContext* GetBrowserContext() const = 0;
   virtual WebContents* GetWebContents() const = 0;
 
   // External state transitions/setters ----------------------------------------
   // TODO(rdsmith): These should all be removed; the download item should
   // control its own state transitions.
-
-  // Called by the delegate if it delayed opening the download after
-  // the download has actually been opened.
-  virtual void DelayedDownloadOpened(bool auto_opened) = 0;
 
   // Called if a check of the download contents was performed and the results of
   // the test are available. This should only be called after AllDataSaved() is

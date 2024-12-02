@@ -9,6 +9,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/size.h"
 #include "ui/message_center/message_view.h"
+#include "ui/message_center/message_view_factory.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/scroll_view.h"
@@ -102,31 +103,29 @@ class FixedSizedScrollView : public views::ScrollView {
   // views::View overrides.
   virtual gfx::Size GetPreferredSize() OVERRIDE {
     gfx::Size size = fixed_size_.IsEmpty() ?
-        GetContents()->GetPreferredSize() : fixed_size_;
+        contents()->GetPreferredSize() : fixed_size_;
     gfx::Insets insets = GetInsets();
     size.Enlarge(insets.width(), insets.height());
     return size;
   }
 
   virtual void Layout() OVERRIDE {
-    views::View* contents = GetContents();
-    gfx::Rect bounds = gfx::Rect(contents->GetPreferredSize());
+    gfx::Rect bounds = gfx::Rect(contents()->GetPreferredSize());
     bounds.set_width(std::max(0, width() - GetScrollBarWidth()));
-    contents->SetBoundsRect(bounds);
+    contents()->SetBoundsRect(bounds);
 
     views::ScrollView::Layout();
     if (!vertical_scroll_bar()->visible()) {
-      gfx::Rect bounds = contents->bounds();
+      gfx::Rect bounds = contents()->bounds();
       bounds.set_width(bounds.width() + GetScrollBarWidth());
-      contents->SetBoundsRect(bounds);
+      contents()->SetBoundsRect(bounds);
     }
   }
 
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE {
-    views::View* contents = GetContents();
-    gfx::Rect bounds = gfx::Rect(contents->GetPreferredSize());
+    gfx::Rect bounds = gfx::Rect(contents()->GetPreferredSize());
     bounds.set_width(std::max(0, width() - GetScrollBarWidth()));
-    contents->SetBoundsRect(bounds);
+    contents()->SetBoundsRect(bounds);
   }
 
  private:
@@ -194,9 +193,10 @@ class MessageCenterContentsView : public views::View {
     size_t num_children = 0;
     for (NotificationList::Notifications::const_iterator iter =
              notifications.begin(); iter != notifications.end(); ++iter) {
-      MessageView* view = new MessageView(
-          list_delegate_, *iter, scroller_->GetScrollBarWidth());
+      MessageView* view =
+          MessageViewFactory::ViewForNotification(*iter, list_delegate_);
       view->set_scroller(scroller_);
+      view->SetUpView();
       scroll_content_->AddChildView(view);
       if (++num_children >=
           NotificationList::kMaxVisibleMessageCenterNotifications) {
@@ -207,7 +207,6 @@ class MessageCenterContentsView : public views::View {
       views::Label* label = new views::Label(l10n_util::GetStringUTF16(
           IDS_MESSAGE_CENTER_NO_MESSAGES));
       label->SetFont(label->font().DeriveFont(1));
-      label->SetHorizontalAlignment(views::Label::ALIGN_CENTER);
       label->SetEnabledColor(SK_ColorGRAY);
       scroll_content_->AddChildView(label);
       button_view_->SetCloseAllVisible(false);
@@ -268,10 +267,10 @@ views::TrayBubbleView::InitParams MessageCenterBubble::GetInitParams(
 }
 
 void MessageCenterBubble::InitializeContents(
-    views::TrayBubbleView* bubble_view) {
-  bubble_view_ = bubble_view;
-  contents_view_ = new MessageCenterContentsView(list_delegate_);
-  bubble_view_->AddChildView(contents_view_);
+    views::TrayBubbleView* new_bubble_view) {
+  set_bubble_view(new_bubble_view);
+  contents_view_ = new MessageCenterContentsView(list_delegate());
+  bubble_view()->AddChildView(contents_view_);
   UpdateBubbleView();
   contents_view_->FocusContents();
 }
@@ -281,12 +280,13 @@ void MessageCenterBubble::OnBubbleViewDestroyed() {
 }
 
 void MessageCenterBubble::UpdateBubbleView() {
-  if (!bubble_view_)
+  if (!bubble_view())
     return;  // Could get called after view is closed
-  contents_view_->Update(
-      list_delegate_->GetNotificationList()->notifications());
-  bubble_view_->Show();
-  bubble_view_->UpdateBubble();
+  NotificationList::Notifications notifications;
+  list_delegate()->GetNotificationList()->GetNotifications(&notifications);
+  contents_view_->Update(notifications);
+  bubble_view()->Show();
+  bubble_view()->UpdateBubble();
 }
 
 void MessageCenterBubble::OnMouseEnteredView() {

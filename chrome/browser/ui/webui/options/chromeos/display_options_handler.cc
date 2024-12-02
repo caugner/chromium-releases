@@ -7,6 +7,7 @@
 #include <string>
 
 #include "ash/display/display_controller.h"
+#include "ash/display/display_manager.h"
 #include "ash/display/output_configurator_animation.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
@@ -17,13 +18,10 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/display/display_preferences.h"
 #include "chrome/browser/chromeos/display/overscan_calibrator.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/display/output_configurator.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
-#include "ui/aura/env.h"
-#include "ui/aura/display_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/rect.h"
@@ -33,11 +31,11 @@ namespace chromeos {
 namespace options {
 
 DisplayOptionsHandler::DisplayOptionsHandler() {
-  aura::Env::GetInstance()->display_manager()->AddObserver(this);
+  ash::Shell::GetScreen()->AddObserver(this);
 }
 
 DisplayOptionsHandler::~DisplayOptionsHandler() {
-  aura::Env::GetInstance()->display_manager()->RemoveObserver(this);
+  ash::Shell::GetScreen()->RemoveObserver(this);
 }
 
 void DisplayOptionsHandler::GetLocalizedValues(
@@ -108,7 +106,6 @@ void DisplayOptionsHandler::RegisterMessages() {
 
 void DisplayOptionsHandler::OnDisplayBoundsChanged(
     const gfx::Display& display) {
-  SendDisplayInfo();
 }
 
 void DisplayOptionsHandler::OnDisplayAdded(const gfx::Display& new_display) {
@@ -133,8 +130,8 @@ void DisplayOptionsHandler::UpdateDisplaySectionVisibility() {
 }
 
 void DisplayOptionsHandler::SendDisplayInfo() {
-  aura::DisplayManager* display_manager =
-      aura::Env::GetInstance()->display_manager();
+  ash::internal::DisplayManager* display_manager =
+      ash::Shell::GetInstance()->display_manager();
   ash::DisplayController* display_controller =
       ash::Shell::GetInstance()->display_controller();
   chromeos::OutputConfigurator* output_configurator =
@@ -156,6 +153,8 @@ void DisplayOptionsHandler::SendDisplayInfo() {
     js_display->SetString("name",
                           display_manager->GetDisplayNameFor(*display));
     js_display->SetBoolean("isPrimary", display->id() == primary_id);
+    js_display->SetBoolean("isInternal",
+                           display_manager->IsInternalDisplayId(display->id()));
     base::DictionaryValue* js_insets = new base::DictionaryValue();
     const gfx::Insets& insets =
         display_controller->GetOverscanInsets(display->id());
@@ -195,15 +194,9 @@ void DisplayOptionsHandler::OnFadeOutForMirroringFinished(bool is_mirroring) {
 
 void DisplayOptionsHandler::OnFadeOutForDisplayLayoutFinished(
     int layout, int offset) {
-  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
-  aura::DisplayManager* display_manager =
-      aura::Env::GetInstance()->display_manager();
-  // Assumes that there are two displays at most and the second item is the
-  // secondary display.
-  if (display_manager->GetNumDisplays() > 1) {
-    gfx::Display* display = display_manager->GetDisplayAt(1);
-    SetDisplayLayoutPref(pref_service, *display, layout, offset);
-  }
+  const gfx::Display& secondary_display = ash::ScreenAsh::GetSecondaryDisplay();
+  if (secondary_display.is_valid())
+    SetDisplayLayoutPref(secondary_display, layout, offset);
 
   SendDisplayInfo();
   ash::Shell::GetInstance()->output_configurator_animation()->
@@ -289,23 +282,27 @@ void DisplayOptionsHandler::HandleStartOverscanCalibration(
 
 void DisplayOptionsHandler::HandleFinishOverscanCalibration(
     const base::ListValue* args) {
-  DCHECK(overscan_calibrator_.get());
-  overscan_calibrator_->Commit();
-  overscan_calibrator_.reset();
+  if (overscan_calibrator_.get()) {
+    overscan_calibrator_->Commit();
+    overscan_calibrator_.reset();
+  }
   SendDisplayInfo();
 }
 
 void DisplayOptionsHandler::HandleClearOverscanCalibration(
     const base::ListValue* args) {
-  DCHECK(overscan_calibrator_.get());
-  overscan_calibrator_->UpdateInsets(gfx::Insets());
-  overscan_calibrator_->Commit();
+  if (overscan_calibrator_.get()) {
+    overscan_calibrator_->UpdateInsets(gfx::Insets());
+    overscan_calibrator_->Commit();
+  }
   SendDisplayInfo();
 }
 
 void DisplayOptionsHandler::HandleUpdateOverscanCalibration(
     const base::ListValue* args) {
-  DCHECK(overscan_calibrator_.get());
+  if (!overscan_calibrator_.get())
+    return;
+
   double top = 0, left = 0, bottom = 0, right = 0;
   if (!args->GetDouble(0, &top) || !args->GetDouble(1, &left) ||
       !args->GetDouble(2, &bottom) || !args->GetDouble(3, &right)) {

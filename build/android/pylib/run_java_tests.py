@@ -95,6 +95,7 @@ class TestRunner(BaseTestRunner):
       -  screenshot_failures: Take a screenshot for a test failure
       -  tool: Name of the Valgrind tool.
       -  wait_for_debugger: blocks until the debugger is connected.
+      -  disable_assertions: Whether to disable java assertions on the device.
       device: Attached android device.
       tests_iter: A list of tests to be run.
       coverage: Collects coverage information if opted.
@@ -117,9 +118,11 @@ class TestRunner(BaseTestRunner):
 
     self.build_type = options.build_type
     self.install_apk = options.install_apk
+    self.test_data = options.test_data
     self.save_perf_json = options.save_perf_json
     self.screenshot_failures = options.screenshot_failures
     self.wait_for_debugger = options.wait_for_debugger
+    self.disable_assertions = options.disable_assertions
 
     self.tests_iter = tests_iter
     self.coverage = coverage
@@ -160,12 +163,10 @@ class TestRunner(BaseTestRunner):
       logging.warning('Already copied test files to device %s, skipping.',
                       self.device)
       return
-    host_test_files = [
-        ('android_webview/test/data/device_files', 'webview'),
-        ('content/test/data/android/device_files', 'content'),
-        ('chrome/test/data/android/device_files', 'chrome')
-    ]
-    for (host_src, dst_layer) in host_test_files:
+    for dest_host_pair in self.test_data:
+      dst_src = dest_host_pair.split(':',1)
+      dst_layer = dst_src[0]
+      host_src = dst_src[1]
       host_test_files_path = constants.CHROME_DIR + '/' + host_src
       if os.path.exists(host_test_files_path):
         self.adb.PushIfNeeded(host_test_files_path,
@@ -241,19 +242,9 @@ class TestRunner(BaseTestRunner):
 
   def _TakeScreenshot(self, test):
     """Takes a screenshot from the device."""
-    screenshot_tool = os.path.join(constants.CHROME_DIR,
-        'third_party/android_tools/sdk/tools/monkeyrunner')
-    screenshot_script = os.path.join(constants.CHROME_DIR,
-        'build/android/monkeyrunner_screenshot.py')
-    screenshot_path = os.path.join(constants.CHROME_DIR,
-                                   'out_screenshots')
-    if not os.path.exists(screenshot_path):
-      os.mkdir(screenshot_path)
-    screenshot_name = os.path.join(screenshot_path, test + '.png')
+    screenshot_name = os.path.join(constants.SCREENSHOTS_DIR, test + '.png')
     logging.info('Taking screenshot named %s', screenshot_name)
-    cmd_helper.RunCmd([screenshot_tool, screenshot_script,
-                       '--serial', self.device,
-                       '--file', screenshot_name])
+    self.adb.TakeScreenshot(screenshot_name)
 
   def SetUp(self):
     """Sets up the test harness and device before all tests are run."""
@@ -262,7 +253,7 @@ class TestRunner(BaseTestRunner):
       logging.warning('Unable to enable java asserts for %s, non rooted device',
                       self.device)
     else:
-      if self.adb.SetJavaAssertsEnabled(enable=True):
+      if self.adb.SetJavaAssertsEnabled(enable=not self.disable_assertions):
         self.adb.Reboot(full_reboot=False)
 
     # We give different default value to launch HTTP server based on shard index
@@ -276,8 +267,8 @@ class TestRunner(BaseTestRunner):
       # We need to remember which ports the HTTP server is using, since the
       # forwarder will stomp on them otherwise.
       port_pairs.append(http_server_ports)
-      self.forwarder = Forwarder(
-         self.adb, port_pairs, self.tool, '127.0.0.1', self.build_type)
+      self.forwarder = Forwarder(self.adb, self.build_type)
+      self.forwarder.Run(port_pairs, self.tool, '127.0.0.1')
     self.CopyTestFilesOnce()
     self.flags.AddFlags(['--enable-test-intents'])
 
@@ -498,7 +489,7 @@ class TestSharder(BaseTestSharder):
   """Responsible for sharding the tests on the connected devices."""
 
   def __init__(self, attached_devices, options, tests, apks):
-    BaseTestSharder.__init__(self, attached_devices)
+    BaseTestSharder.__init__(self, attached_devices, options.build_type)
     self.options = options
     self.tests = tests
     self.apks = apks
@@ -538,20 +529,31 @@ def DispatchJavaTests(options, apks):
     FatalTestException: when there's no attached the devices.
   """
   test_apk = apks[0]
+  # The default annotation for tests which do not have any sizes annotation.
+  default_size_annotation = 'SmallTest'
+
+  def _GetTestsMissingAnnotation(test_apk):
+    test_size_annotations = frozenset(['Smoke', 'SmallTest', 'MediumTest',
+                                       'LargeTest', 'EnormousTest', 'FlakyTest',
+                                       'DisabledTest', 'Manual', 'PerfTest'])
+    tests_missing_annotations = []
+    for test_method in test_apk.GetTestMethods():
+      annotations = frozenset(test_apk.GetTestAnnotations(test_method))
+      if (annotations.isdisjoint(test_size_annotations) and
+          not apk_info.ApkInfo.IsPythonDrivenTest(test_method)):
+        tests_missing_annotations.append(test_method)
+    return sorted(tests_missing_annotations)
+
   if options.annotation:
     available_tests = test_apk.GetAnnotatedTests(options.annotation)
-    if len(options.annotation) == 1 and options.annotation[0] == 'SmallTest':
-      tests_without_annotation = [
-          m for m in
-          test_apk.GetTestMethods()
-          if not test_apk.GetTestAnnotations(m) and
-          not apk_info.ApkInfo.IsPythonDrivenTest(m)]
-      if tests_without_annotation:
-        tests_without_annotation.sort()
+    if options.annotation.count(default_size_annotation) > 0:
+      tests_missing_annotations = _GetTestsMissingAnnotation(test_apk)
+      if tests_missing_annotations:
         logging.warning('The following tests do not contain any annotation. '
-                        'Assuming "SmallTest":\n%s',
-                        '\n'.join(tests_without_annotation))
-        available_tests += tests_without_annotation
+                        'Assuming "%s":\n%s',
+                        default_size_annotation,
+                        '\n'.join(tests_missing_annotations))
+        available_tests += tests_missing_annotations
   else:
     available_tests = [m for m in test_apk.GetTestMethods()
                        if not apk_info.ApkInfo.IsPythonDrivenTest(m)]

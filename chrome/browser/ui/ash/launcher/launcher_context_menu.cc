@@ -4,11 +4,16 @@
 
 #include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
 
-#include "ash/desktop_background/desktop_background_controller.h"
+#include <string>
+
+#include "ash/desktop_background/user_wallpaper_delegate.h"
 #include "ash/shell.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_prefs.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/common/context_menu_params.h"
@@ -113,8 +118,7 @@ void LauncherContextMenu::Init() {
         int index = 0;
         extension_items_->AppendExtensionItems(
             app_id, string16(), &index);
-        if (index > 0)
-          AddSeparator(ui::NORMAL_SEPARATOR);
+        AddSeparatorIfNecessary(ui::NORMAL_SEPARATOR);
       }
     }
   }
@@ -170,8 +174,8 @@ bool LauncherContextMenu::IsCommandIdChecked(int command_id) const {
       return controller_->GetLaunchType(item_.id) ==
           extensions::ExtensionPrefs::LAUNCH_FULLSCREEN;
     case MENU_AUTO_HIDE:
-      return ash::Shell::GetInstance()->IsShelfAutoHideMenuHideChecked(
-          root_window_);
+      return controller_->GetShelfAutoHideBehavior(root_window_) ==
+          ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS;
     default:
       return extension_items_->IsCommandIdChecked(command_id);
   }
@@ -185,6 +189,16 @@ bool LauncherContextMenu::IsCommandIdEnabled(int command_id) const {
     case MENU_CHANGE_WALLPAPER:
       return ash::Shell::GetInstance()->user_wallpaper_delegate()->
           CanOpenSetWallpaperPage();
+    case MENU_NEW_WINDOW:
+      // "Normal" windows are not allowed when incognito is enforced.
+      return IncognitoModePrefs::GetAvailability(
+          controller_->profile()->GetPrefs()) != IncognitoModePrefs::FORCED;
+    case MENU_AUTO_HIDE:
+      return controller_->CanUserModifyShelfAutoHideBehavior(root_window_);
+    case MENU_NEW_INCOGNITO_WINDOW:
+      // Incognito windows are not allowed when incognito is disabled.
+      return IncognitoModePrefs::GetAvailability(
+          controller_->profile()->GetPrefs()) != IncognitoModePrefs::DISABLED;
     default:
       return extension_items_->IsCommandIdEnabled(command_id);
   }
@@ -224,10 +238,7 @@ void LauncherContextMenu::ExecuteCommand(int command_id) {
                                  extensions::ExtensionPrefs::LAUNCH_FULLSCREEN);
       break;
     case MENU_AUTO_HIDE:
-      controller_->SetAutoHideBehavior(
-          ash::Shell::GetInstance()->GetToggledShelfAutoHideBehavior(
-              root_window_),
-          root_window_);
+      controller_->ToggleShelfAutoHideBehavior(root_window_);
       break;
     case MENU_NEW_WINDOW:
       controller_->CreateNewWindow();
@@ -238,9 +249,9 @@ void LauncherContextMenu::ExecuteCommand(int command_id) {
     case MENU_ALIGNMENT_MENU:
       break;
     case MENU_CHANGE_WALLPAPER:
-       ash::Shell::GetInstance()->user_wallpaper_delegate()->
-           OpenSetWallpaperPage();
-       break;
+      ash::Shell::GetInstance()->user_wallpaper_delegate()->
+          OpenSetWallpaperPage();
+      break;
     default:
       extension_items_->ExecuteCommand(command_id, NULL,
                                        content::ContextMenuParams());

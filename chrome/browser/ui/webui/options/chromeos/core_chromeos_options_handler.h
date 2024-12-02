@@ -38,6 +38,9 @@ class CoreChromeOSOptionsHandler : public ::options::CoreOptionsHandler {
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
+  virtual void OnPreferenceChanged(PrefServiceBase* service,
+                                   const std::string& pref_name) OVERRIDE;
+
   // Notifies registered JS callbacks on ChromeOS setting change.
   void NotifySettingsChanged(const std::string* setting_name);
   void NotifyProxyPrefsChanged();

@@ -15,6 +15,7 @@
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/api/debugger/debugger_api.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -24,17 +25,18 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_list_impl.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
+#include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/load_notification_details.h"
@@ -100,15 +102,15 @@ void DevToolsWindow::RegisterUserPrefs(PrefService* prefs) {
 
 // static
 DevToolsWindow* DevToolsWindow::GetDockedInstanceForInspectedTab(
-    WebContents* inspected_tab) {
-  if (!inspected_tab)
+    WebContents* inspected_web_contents) {
+  if (!inspected_web_contents)
     return NULL;
 
   if (!DevToolsAgentHostRegistry::HasDevToolsAgentHost(
-      inspected_tab->GetRenderViewHost()))
+      inspected_web_contents->GetRenderViewHost()))
     return NULL;
   DevToolsAgentHost* agent = DevToolsAgentHostRegistry::GetDevToolsAgentHost(
-      inspected_tab->GetRenderViewHost());
+      inspected_web_contents->GetRenderViewHost());
   DevToolsManager* manager = DevToolsManager::GetInstance();
   DevToolsClientHost* client_host = manager->GetDevToolsClientHostFor(agent);
   DevToolsWindow* window = AsDevToolsWindow(client_host);
@@ -159,11 +161,11 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
     Browser* browser,
     DevToolsToggleAction action) {
   if (action == DEVTOOLS_TOGGLE_ACTION_TOGGLE && browser->is_devtools()) {
-    chrome::CloseAllTabs(browser);
+    browser->tab_strip_model()->CloseAllTabs();
     return NULL;
   }
   RenderViewHost* inspected_rvh =
-      chrome::GetActiveWebContents(browser)->GetRenderViewHost();
+      browser->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost();
 
   return ToggleDevToolsWindow(inspected_rvh,
                        action == DEVTOOLS_TOGGLE_ACTION_INSPECT,
@@ -187,41 +189,43 @@ DevToolsWindow* DevToolsWindow::Create(
     RenderViewHost* inspected_rvh,
     DevToolsDockSide dock_side,
     bool shared_worker_frontend) {
-  // Create TabContents with devtools.
-  TabContents* tab_contents =
-      chrome::TabContentsFactory(profile, NULL, MSG_ROUTING_NONE, NULL);
-  tab_contents->web_contents()->GetRenderViewHost()->AllowBindings(
-      content::BINDINGS_POLICY_WEB_UI);
-  tab_contents->web_contents()->GetController().LoadURL(
+  // Create WebContents with devtools.
+  WebContents* web_contents =
+      WebContents::Create(WebContents::CreateParams(profile));
+  web_contents->GetController().LoadURL(
       GetDevToolsUrl(profile, dock_side, shared_worker_frontend),
       content::Referrer(),
       content::PAGE_TRANSITION_AUTO_TOPLEVEL,
       std::string());
-  return new DevToolsWindow(tab_contents, profile, inspected_rvh, dock_side);
+
+  RenderViewHost* render_view_host = web_contents->GetRenderViewHost();
+  int process_id = render_view_host->GetProcess()->GetID();
+  content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
+      process_id, chrome::kFileScheme);
+  content::DevToolsClientHost::SetupDevToolsFrontendClient(render_view_host);
+  return new DevToolsWindow(web_contents, profile, inspected_rvh, dock_side);
 }
 
-DevToolsWindow::DevToolsWindow(TabContents* tab_contents,
+DevToolsWindow::DevToolsWindow(WebContents* web_contents,
                                Profile* profile,
                                RenderViewHost* inspected_rvh,
                                DevToolsDockSide dock_side)
     : profile_(profile),
-      inspected_tab_(NULL),
-      tab_contents_(tab_contents),
+      inspected_web_contents_(NULL),
+      web_contents_(web_contents),
       browser_(NULL),
       dock_side_(dock_side),
       is_loaded_(false),
       action_on_load_(DEVTOOLS_TOGGLE_ACTION_SHOW),
       width_(-1),
       height_(-1) {
-  frontend_host_ = DevToolsClientHost::CreateDevToolsFrontendHost(
-      tab_contents->web_contents(),
-      this);
+  frontend_host_ = DevToolsClientHost::CreateDevToolsFrontendHost(web_contents,
+                                                                  this);
   file_helper_.reset(new DevToolsFileHelper(profile, this));
 
   g_instances.Get().push_back(this);
   // Wipe out page icon so that the default application icon is used.
-  NavigationEntry* entry =
-      tab_contents_->web_contents()->GetController().GetActiveEntry();
+  NavigationEntry* entry = web_contents->GetController().GetActiveEntry();
   entry->GetFavicon().image = gfx::Image();
   entry->GetFavicon().valid = true;
 
@@ -229,24 +233,19 @@ DevToolsWindow::DevToolsWindow(TabContents* tab_contents,
   registrar_.Add(
       this,
       content::NOTIFICATION_LOAD_STOP,
-      content::Source<NavigationController>(
-          &tab_contents_->web_contents()->GetController()));
+      content::Source<NavigationController>(&web_contents->GetController()));
   registrar_.Add(
       this,
       chrome::NOTIFICATION_TAB_CLOSING,
-      content::Source<NavigationController>(
-          &tab_contents_->web_contents()->GetController()));
+      content::Source<NavigationController>(&web_contents->GetController()));
   registrar_.Add(
       this,
       chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
       content::Source<ThemeService>(
           ThemeServiceFactory::GetForProfile(profile_)));
   // There is no inspected_rvh in case of shared workers.
-  if (inspected_rvh) {
-    WebContents* tab = WebContents::FromRenderViewHost(inspected_rvh);
-    if (tab)
-      inspected_tab_ = TabContents::FromWebContents(tab);
-  }
+  if (inspected_rvh)
+    inspected_web_contents_ = WebContents::FromRenderViewHost(inspected_rvh);
 }
 
 DevToolsWindow::~DevToolsWindow() {
@@ -259,34 +258,27 @@ DevToolsWindow::~DevToolsWindow() {
 }
 
 void DevToolsWindow::InspectedContentsClosing() {
-  UpdateBrowserToolbar();
-
   if (IsDocked()) {
     // Update dev tools to reflect removed dev tools window.
     BrowserWindow* inspected_window = GetInspectedBrowserWindow();
     if (inspected_window)
       inspected_window->UpdateDevTools();
-    // In case of docked tab_contents we own it, so delete here.
-    delete tab_contents_;
+    // In case of docked web_contents_, we own it so delete here.
+    delete web_contents_;
 
     delete this;
   } else {
     // First, initiate self-destruct to free all the registrars.
-    // Then close all tabs. Browser will take care of deleting tab_contents
+    // Then close all tabs. Browser will take care of deleting web_contents_
     // for us.
     Browser* browser = browser_;
     delete this;
-    chrome::CloseAllTabs(browser);
+    browser->tab_strip_model()->CloseAllTabs();
   }
 }
 
 void DevToolsWindow::ContentsReplaced(WebContents* new_contents) {
-  TabContents* new_tab_contents = TabContents::FromWebContents(new_contents);
-  DCHECK(new_tab_contents);
-  if (!new_tab_contents)
-      return;
-  DCHECK_EQ(profile_, new_tab_contents->profile());
-  inspected_tab_ = new_tab_contents;
+  inspected_web_contents_ = new_contents;
 }
 
 void DevToolsWindow::Show(DevToolsToggleAction action) {
@@ -298,9 +290,9 @@ void DevToolsWindow::Show(DevToolsToggleAction action) {
         FindInspectedBrowserAndTabIndex(&inspected_browser,
                                         &inspected_tab_index)) {
       BrowserWindow* inspected_window = inspected_browser->window();
-      tab_contents_->web_contents()->SetDelegate(this);
+      web_contents_->SetDelegate(this);
       inspected_window->UpdateDevTools();
-      tab_contents_->web_contents()->GetView()->SetInitialFocus();
+      web_contents_->GetView()->SetInitialFocus();
       inspected_window->Show();
       TabStripModel* tab_strip_model = inspected_browser->tab_strip_model();
       tab_strip_model->ActivateTabAt(inspected_tab_index, true);
@@ -309,7 +301,6 @@ void DevToolsWindow::Show(DevToolsToggleAction action) {
     } else {
       // Sometimes we don't know where to dock. Stay undocked.
       dock_side_ = DEVTOOLS_DOCK_SIDE_UNDOCKED;
-      UpdateFrontendDockSide();
     }
   }
 
@@ -323,7 +314,7 @@ void DevToolsWindow::Show(DevToolsToggleAction action) {
 
   if (should_show_window) {
     browser_->window()->Show();
-    tab_contents_->web_contents()->GetView()->SetInitialFocus();
+    web_contents_->GetView()->SetInitialFocus();
   }
 
   ScheduleAction(action);
@@ -381,7 +372,7 @@ void DevToolsWindow::SetHeight(int height) {
 }
 
 RenderViewHost* DevToolsWindow::GetRenderViewHost() {
-  return tab_contents_->web_contents()->GetRenderViewHost();
+  return web_contents_->GetRenderViewHost();
 }
 
 void DevToolsWindow::CreateDevToolsBrowser() {
@@ -409,19 +400,45 @@ void DevToolsWindow::CreateDevToolsBrowser() {
   }
 
   browser_ = new Browser(Browser::CreateParams::CreateForDevTools(profile_));
-  browser_->tab_strip_model()->AddTabContents(
-      tab_contents_, -1, content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+  browser_->tab_strip_model()->AddWebContents(
+      web_contents_, -1, content::PAGE_TRANSITION_AUTO_TOPLEVEL,
       TabStripModel::ADD_ACTIVE);
 }
 
 bool DevToolsWindow::FindInspectedBrowserAndTabIndex(Browser** browser,
                                                      int* tab) {
-  if (!inspected_tab_)
+  if (!inspected_web_contents_)
     return false;
 
-  for (BrowserList::const_iterator it = BrowserList::begin();
-       it != BrowserList::end(); ++it) {
-    int tab_index = chrome::GetIndexOfTab(*it, inspected_tab_->web_contents());
+  bool found = FindInspectedBrowserAndTabIndexFromBrowserList(
+      chrome::BrowserListImpl::GetInstance(chrome::HOST_DESKTOP_TYPE_NATIVE),
+      browser,
+      tab);
+  // On Windows 8 we can have the desktop environment and the ASH environment
+  // active concurrently. If we fail to find the inspected web contents in the
+  // native browser list, then we should look in the ASH browser list.
+#if defined(OS_WIN) && defined(USE_AURA)
+  if (!found) {
+    found = FindInspectedBrowserAndTabIndexFromBrowserList(
+        chrome::BrowserListImpl::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH),
+        browser,
+        tab);
+  }
+#endif
+  return found;
+}
+
+bool DevToolsWindow::FindInspectedBrowserAndTabIndexFromBrowserList(
+    chrome::BrowserListImpl* browser_list,
+    Browser** browser,
+    int* tab) {
+  if (!inspected_web_contents_)
+    return false;
+
+  for (chrome::BrowserListImpl::const_iterator it = browser_list->begin();
+       it != browser_list->end(); ++it) {
+    int tab_index = (*it)->tab_strip_model()->GetIndexOfWebContents(
+        inspected_web_contents_);
     if (tab_index != TabStripModel::kNoTab) {
       *browser = *it;
       *tab = tab_index;
@@ -456,15 +473,19 @@ void DevToolsWindow::UpdateFrontendDockSide() {
 
 
 void DevToolsWindow::AddDevToolsExtensionsToClient() {
-  if (inspected_tab_) {
+  if (inspected_web_contents_) {
     SessionTabHelper* session_tab_helper =
-        SessionTabHelper::FromWebContents(inspected_tab_->web_contents());
-    base::FundamentalValue tabId(session_tab_helper->session_id().id());
-    CallClientFunction("WebInspector.setInspectedTabId", &tabId);
+        SessionTabHelper::FromWebContents(inspected_web_contents_);
+    if (session_tab_helper) {
+      base::FundamentalValue tabId(session_tab_helper->session_id().id());
+      CallClientFunction("WebInspector.setInspectedTabId", &tabId);
+    }
   }
   ListValue results;
-  const ExtensionService* extension_service =
-      tab_contents_->profile()->GetOriginalProfile()->GetExtensionService();
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+  const ExtensionService* extension_service = extensions::ExtensionSystem::Get(
+      profile->GetOriginalProfile())->extension_service();
   if (!extension_service)
     return;
 
@@ -489,8 +510,8 @@ void DevToolsWindow::AddDevToolsExtensionsToClient() {
 
 WebContents* DevToolsWindow::OpenURLFromTab(WebContents* source,
                                             const OpenURLParams& params) {
-  if (inspected_tab_)
-    return inspected_tab_->web_contents()->OpenURL(params);
+  if (inspected_web_contents_)
+    return inspected_web_contents_->OpenURL(params);
   return NULL;
 }
 
@@ -502,7 +523,7 @@ void DevToolsWindow::CallClientFunction(const std::string& function_name,
 
   string16 javascript =
       ASCIIToUTF16(function_name + "(" + json + ");");
-  tab_contents_->web_contents()->GetRenderViewHost()->
+  web_contents_->GetRenderViewHost()->
       ExecuteJavascriptInWebFrame(string16(), javascript);
 }
 
@@ -516,7 +537,7 @@ void DevToolsWindow::Observe(int type,
     AddDevToolsExtensionsToClient();
   } else if (type == chrome::NOTIFICATION_TAB_CLOSING) {
     if (content::Source<NavigationController>(source).ptr() ==
-            &tab_contents_->web_contents()->GetController()) {
+            &web_contents_->GetController()) {
       // This happens when browser closes all of its tabs as a result
       // of window.Close event.
       // Notify manager that this DevToolsClientHost no longer exists and
@@ -538,7 +559,6 @@ void DevToolsWindow::ScheduleAction(DevToolsToggleAction action) {
 
 void DevToolsWindow::DoAction() {
   UpdateFrontendDockSide();
-  // TODO: these messages should be pushed through the WebKit API instead.
   switch (action_on_load_) {
     case DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE:
       CallClientFunction("InspectorFrontendAPI.showConsole", NULL);
@@ -579,12 +599,9 @@ GURL DevToolsWindow::GetDevToolsUrl(Profile* profile,
   bool experiments_enabled =
       command_line.HasSwitch(switches::kEnableDevToolsExperiments);
 
-  // TODO(pfeldman): remove docked parameter once migrated to
-  // setDockSide.
   std::string url_string = StringPrintf("%sdevtools.html?"
-      "docked=%s&dockSide=%s&toolbarColor=%s&textColor=%s%s%s",
+      "dockSide=%s&toolbarColor=%s&textColor=%s%s%s",
       chrome::kChromeUIDevToolsURL,
-      dock_side == DEVTOOLS_DOCK_SIDE_UNDOCKED ? "false" : "true",
       SideToString(dock_side).c_str(),
       SkColorToRGBAString(color_toolbar).c_str(),
       SkColorToRGBAString(color_tab_text).c_str(),
@@ -605,7 +622,7 @@ void DevToolsWindow::UpdateTheme() {
       "InspectorFrontendAPI.setToolbarColors(\"%s\", \"%s\")",
       SkColorToRGBAString(color_toolbar).c_str(),
       SkColorToRGBAString(color_tab_text).c_str());
-  tab_contents_->web_contents()->GetRenderViewHost()->
+  web_contents_->GetRenderViewHost()->
       ExecuteJavascriptInWebFrame(string16(), UTF8ToUTF16(command));
 }
 
@@ -615,15 +632,15 @@ void DevToolsWindow::AddNewContents(WebContents* source,
                                     const gfx::Rect& initial_pos,
                                     bool user_gesture,
                                     bool* was_blocked) {
-  if (inspected_tab_) {
-    inspected_tab_->web_contents()->GetDelegate()->AddNewContents(
+  if (inspected_web_contents_) {
+    inspected_web_contents_->GetDelegate()->AddNewContents(
         source, new_contents, disposition, initial_pos, user_gesture,
         was_blocked);
   }
 }
 
 bool DevToolsWindow::PreHandleKeyboardEvent(
-    content::WebContents* source,
+    WebContents* source,
     const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
   if (IsDocked()) {
     BrowserWindow* inspected_window = GetInspectedBrowserWindow();
@@ -634,7 +651,7 @@ bool DevToolsWindow::PreHandleKeyboardEvent(
   return false;
 }
 
-void DevToolsWindow::HandleKeyboardEvent(content::WebContents* source,
+void DevToolsWindow::HandleKeyboardEvent(WebContents* source,
                                          const NativeWebKeyboardEvent& event) {
   if (IsDocked()) {
     if (event.windowsKeyCode == 0x08) {
@@ -659,7 +676,7 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
   DevToolsWindow* window = AsDevToolsWindow(host);
   if (host && !window) {
     // Break remote debugging / extension debugging session.
-    DebuggerApi::MarkDevToolsClientHostAsReplaced(host);
+    host->ReplacedWithAnotherClient();
     manager->UnregisterDevToolsClientHostFor(agent);
   }
 
@@ -707,7 +724,7 @@ DevToolsWindow* DevToolsWindow::AsDevToolsWindow(RenderViewHost* window_rvh) {
   DevToolsWindowList& instances = g_instances.Get();
   for (DevToolsWindowList::iterator it = instances.begin();
        it != instances.end(); ++it) {
-    if ((*it)->tab_contents_->web_contents()->GetRenderViewHost() == window_rvh)
+    if ((*it)->web_contents_->GetRenderViewHost() == window_rvh)
       return *it;
   }
   return NULL;
@@ -721,7 +738,7 @@ void DevToolsWindow::ActivateWindow() {
   } else {
     BrowserWindow* inspected_window = GetInspectedBrowserWindow();
     if (inspected_window)
-      tab_contents_->web_contents()->GetView()->Focus();
+      web_contents_->GetView()->Focus();
   }
 }
 
@@ -744,8 +761,8 @@ void DevToolsWindow::SetDockSide(const std::string& side) {
   bool dock_requested = requested_side != DEVTOOLS_DOCK_SIDE_UNDOCKED;
   bool is_docked = IsDocked();
 
-  if (dock_requested && (!inspected_tab_ || !GetInspectedBrowserWindow() ||
-      IsInspectedBrowserPopupOrPanel())) {
+  if (dock_requested && (!inspected_web_contents_ ||
+      !GetInspectedBrowserWindow() || IsInspectedBrowserPopupOrPanel())) {
       // Cannot dock, avoid window flashing due to close-reopen cycle.
     return;
   }
@@ -756,8 +773,8 @@ void DevToolsWindow::SetDockSide(const std::string& side) {
       // Detach window from the external devtools browser. It will lead to
       // the browser object's close and delete. Remove observer first.
       TabStripModel* tab_strip_model = browser_->tab_strip_model();
-      tab_strip_model->DetachTabContentsAt(
-          tab_strip_model->GetIndexOfTabContents(tab_contents_));
+      tab_strip_model->DetachWebContentsAt(
+          tab_strip_model->GetIndexOfWebContents(web_contents_));
       browser_ = NULL;
     }
   } else if (is_docked) {
@@ -790,8 +807,8 @@ void DevToolsWindow::OpenInNewTab(const std::string& url) {
                        NEW_FOREGROUND_TAB,
                        content::PAGE_TRANSITION_LINK,
                        false /* is_renderer_initiated */);
-  if (inspected_tab_) {
-    inspected_tab_->web_contents()->OpenURL(params);
+  if (inspected_web_contents_) {
+    inspected_web_contents_->OpenURL(params);
   } else {
     for (BrowserList::const_iterator it = BrowserList::begin();
          it != BrowserList::end(); ++it) {
@@ -825,8 +842,8 @@ void DevToolsWindow::AppendedTo(const std::string& url) {
 }
 
 content::JavaScriptDialogCreator* DevToolsWindow::GetJavaScriptDialogCreator() {
-  if (inspected_tab_ && inspected_tab_->web_contents()->GetDelegate()) {
-    return inspected_tab_->web_contents()->GetDelegate()->
+  if (inspected_web_contents_ && inspected_web_contents_->GetDelegate()) {
+    return inspected_web_contents_->GetDelegate()->
         GetJavaScriptDialogCreator();
   }
   return content::WebContentsDelegate::GetJavaScriptDialogCreator();
@@ -848,11 +865,11 @@ void DevToolsWindow::WebContentsFocused(WebContents* contents) {
 }
 
 void DevToolsWindow::UpdateBrowserToolbar() {
-  if (!inspected_tab_)
+  if (!inspected_web_contents_)
     return;
   BrowserWindow* inspected_window = GetInspectedBrowserWindow();
   if (inspected_window)
-    inspected_window->UpdateToolbar(inspected_tab_, false);
+    inspected_window->UpdateToolbar(inspected_web_contents_, false);
 }
 
 bool DevToolsWindow::IsDocked() {

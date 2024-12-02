@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/content_settings_pattern.h"
@@ -377,9 +376,8 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, Geoposition) {
   CheckGeoposition(fake_latitude_, fake_longitude_);
 }
 
-// Crashy, http://crbug.com/70585.
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       DISABLED_ErrorOnPermissionDenied) {
+                       ErrorOnPermissionDenied) {
   ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   AddGeolocationWatch(true);
   // Infobar was displayed, deny access and check for error code.
@@ -429,13 +427,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_NoInfobarForDeniedOrigin) {
   CheckStringValueFromJavascript("1", "geoGetLastError()");
 }
 
-// http://crbug.com/100763. Crashes occasionally on XP.
-#if defined(OS_WIN)
-#define MAYBE_NoInfobarForAllowedOrigin DISABLED_NoInfobarForAllowedOrigin
-#else
-#define MAYBE_NoInfobarForAllowedOrigin NoInfobarForAllowedOrigin
-#endif
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, MAYBE_NoInfobarForAllowedOrigin) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoInfobarForAllowedOrigin) {
   ASSERT_TRUE(Initialize(INITIALIZATION_NONE));
   current_browser_->profile()->GetHostContentSettingsMap()->
       SetContentSetting(ContentSettingsPattern::FromURLNoWildcard(current_url_),
@@ -463,9 +455,8 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, NoInfobarForOffTheRecord) {
   CheckGeoposition(fake_latitude_, fake_longitude_);
 }
 
-// Test fails: http://crbug.com/90927
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       DISABLED_IFramesWithFreshPosition) {
+                       IFramesWithFreshPosition) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
   ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
   LoadIFrames(2);
@@ -508,9 +499,8 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   LOG(WARNING) << "...done.";
 }
 
-// Test fails: http://crbug.com/90927
 IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       DISABLED_IFramesWithCachedPosition) {
+                       IFramesWithCachedPosition) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
   ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
   LoadIFrames(2);
@@ -546,9 +536,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   CheckGeoposition(cached_position_latitude, cached_position_lognitude);
 }
 
-// See http://crbug.com/56033
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
-                       DISABLED_CancelPermissionForFrame) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, CancelPermissionForFrame) {
   html_for_tests_ = "files/geolocation/iframes_different_origin.html";
   ASSERT_TRUE(Initialize(INITIALIZATION_IFRAMES));
   LoadIFrames(2);
@@ -575,8 +563,7 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   EXPECT_EQ(num_infobars_before_cancel, num_infobars_after_cancel + 1);
 }
 
-// Disabled, http://crbug.com/66959.
-IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, DISABLED_InvalidUrlRequest) {
+IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest, InvalidUrlRequest) {
   // Tests that an invalid URL (e.g. from a popup window) is rejected
   // correctly. Also acts as a regression test for http://crbug.com/40478
   html_for_tests_ = "files/geolocation/invalid_request_url.html";

@@ -458,7 +458,7 @@ sub parselicense($) {
 	$license = "University of Illinois/NCSA Open Source License (BSD like) $license";
     }
 
-    if ($licensetext  =~ /Permission to use, copy, modify, and(\/or)? distribute this software (and its documentation )?for any purpose (with or )?without fee is hereby granted, provided.*(copyright|entire) notice.*all copies/) {
+    if ($licensetext  =~ /Permission to use, copy, modify, and(\/or)? distribute this software (and its documentation )?for any purpose (with or )?without fee is hereby granted, provided.*(copyright|entire) notice.*all copies/i) {
 	$license = "ISC $license";
     }
 
@@ -481,8 +481,8 @@ sub parselicense($) {
         $license = "BSD-like $license";
     }
 
-    if ($licensetext =~ /Mozilla Public License Version ([^ ]+)/) {
-	$license = "MPL (v$1) $license";
+    if ($licensetext =~ /Mozilla Public License( Version|, v.) ([^ ]+[^. ])/) {
+	$license = "MPL (v$2) $license";
     }
 
     if ($licensetext =~ /Released under the terms of the Artistic License ([^ ]+)/) {

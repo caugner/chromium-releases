@@ -13,7 +13,6 @@
 
 class GURL;
 class SkBitmap;
-class TabContents;
 
 namespace browser_sync {
 class SyncedTabDelegate;
@@ -33,14 +32,6 @@ class TabAndroid {
   static TabAndroid* FromWebContents(content::WebContents* web_contents);
 
   static TabAndroid* GetNativeTab(JNIEnv* env, jobject obj);
-
-  // TODO(nileshagrawal): This should go away when all helpers
-  // have moved out of TabContents. crbug.com/153587
-  static TabContents* GetOrCreateTabContents(
-      content::WebContents* web_contents);
-
-  static TabContents* InitTabContentsFromView(JNIEnv* env,
-                                              jobject content_view);
 
   virtual browser_sync::SyncedTabDelegate* GetSyncedTabDelegate() = 0;
 
@@ -65,6 +56,8 @@ class TabAndroid {
   virtual void AddShortcutToBookmark(
       const GURL& url, const string16& title, const SkBitmap& skbitmap,
       int r_value, int g_value, int b_value) = 0;
+  // TODO(tedchoc): Make pure virtual once all derived classes can be updated.
+  virtual void EditBookmark(int64 node_id, bool is_folder) {}
 
   // Called when the common ExternalProtocolHandler wants to
   // run the external protocol dialog.
@@ -76,6 +69,9 @@ class TabAndroid {
   virtual ~TabAndroid();
 
   static void InitTabHelpers(content::WebContents* web_contents);
+
+  static content::WebContents* InitWebContentsFromView(JNIEnv* env,
+                                                       jobject content_view);
 
   int tab_id_;
 };

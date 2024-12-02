@@ -111,23 +111,6 @@ bool Link::OnKeyPressed(const ui::KeyEvent& event) {
   return true;
 }
 
-ui::EventResult Link::OnGestureEvent(const ui::GestureEvent& event) {
-  if (!enabled())
-    return ui::ER_UNHANDLED;
-
-  if (event.type() == ui::ET_GESTURE_TAP_DOWN) {
-    SetPressed(true);
-  } else if (event.type() == ui::ET_GESTURE_TAP) {
-    RequestFocus();
-    if (listener_)
-      listener_->LinkClicked(this, event.flags());
-  } else {
-    SetPressed(false);
-    return ui::ER_UNHANDLED;
-  }
-  return ui::ER_CONSUMED;
-}
-
 bool Link::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
   // Make sure we don't process space or enter as accelerators.
   return (event.key_code() == ui::VKEY_SPACE) ||
@@ -137,6 +120,23 @@ bool Link::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
 void Link::GetAccessibleState(ui::AccessibleViewState* state) {
   Label::GetAccessibleState(state);
   state->role = ui::AccessibilityTypes::ROLE_LINK;
+}
+
+void Link::OnGestureEvent(ui::GestureEvent* event) {
+  if (!enabled())
+    return;
+
+  if (event->type() == ui::ET_GESTURE_TAP_DOWN) {
+    SetPressed(true);
+  } else if (event->type() == ui::ET_GESTURE_TAP) {
+    RequestFocus();
+    if (listener_)
+      listener_->LinkClicked(this, event->flags());
+  } else {
+    SetPressed(false);
+    return;
+  }
+  event->SetHandled();
 }
 
 void Link::SetFont(const gfx::Font& font) {
@@ -154,6 +154,13 @@ void Link::SetPressedColor(SkColor color) {
   requested_pressed_color_ = color;
   if (pressed_)
     Label::SetEnabledColor(requested_pressed_color_);
+}
+
+void Link::SetUnderline(bool underline) {
+  if (underline_ == underline)
+    return;
+  underline_ = underline;
+  RecalculateFont();
 }
 
 void Link::Init() {
@@ -178,6 +185,7 @@ void Link::Init() {
 
   listener_ = NULL;
   pressed_ = false;
+  underline_ = true;
   SetEnabledColor(kDefaultEnabledColor);
   SetDisabledColor(kDefaultDisabledColor);
   SetPressedColor(kDefaultPressedColor);
@@ -196,9 +204,11 @@ void Link::SetPressed(bool pressed) {
 }
 
 void Link::RecalculateFont() {
-  // The font should be underlined iff the link is enabled.
-  if (enabled() == !(font().GetStyle() & gfx::Font::UNDERLINED)) {
-    Label::SetFont(font().DeriveFont(0, enabled() ?
+  // The font should be underlined iff the link is enabled and |underline_| is
+  // true.
+  if ((enabled() && underline_) ==
+      !(font().GetStyle() & gfx::Font::UNDERLINED)) {
+    Label::SetFont(font().DeriveFont(0, enabled() && underline_ ?
         (font().GetStyle() | gfx::Font::UNDERLINED) :
         (font().GetStyle() & ~gfx::Font::UNDERLINED)));
   }

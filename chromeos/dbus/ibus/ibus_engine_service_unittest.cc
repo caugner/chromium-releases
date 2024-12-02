@@ -46,7 +46,8 @@ class MockIBusEngineHandler : public IBusEngineHandlerInterface {
       uint32 keycode,
       uint32 state,
       const KeyEventDoneCallback& callback));
-  MOCK_METHOD3(CandidateClicked, void(uint32 index, IBusMouseButton button,
+  MOCK_METHOD3(CandidateClicked, void(uint32 index,
+                                      ibus::IBusMouseButton button,
                                       uint32 state));
   MOCK_METHOD3(SetSurroundingText, void(const std::string& text,
                                         uint32 cursor_pos,
@@ -64,7 +65,7 @@ class EmptyResponseExpectation {
   explicit EmptyResponseExpectation(const uint32 serial_no)
       : serial_no_(serial_no) {}
 
-  // Evaluates the given |resposne| has no argument.
+  // Evaluates the given |response| has no argument.
   void Evaluate(dbus::Response* response) {
     scoped_ptr<dbus::Response> response_deleter(response);
     EXPECT_EQ(serial_no_, response->GetReplySerial());
@@ -85,7 +86,7 @@ class BoolResponseExpectation {
       : serial_no_(serial_no),
         result_(result) {}
 
-  // Evaluates the given |resposne| has only one boolean and which is equals to
+  // Evaluates the given |response| has only one boolean and which is equals to
   // |result_| which is given in ctor.
   void Evaluate(dbus::Response* response) {
     scoped_ptr<dbus::Response> response_deleter(response);
@@ -465,7 +466,7 @@ class IBusEngineServiceTest : public testing::Test {
         .WillRepeatedly(
             Invoke(this, &IBusEngineServiceTest::OnMethodExported));
 
-    // Surpress uninteresting mock function call warning.
+    // Suppress uninteresting mock function call warning.
     EXPECT_CALL(*mock_bus_.get(),
                 AssertOnOriginThread())
         .WillRepeatedly(Return());
@@ -909,7 +910,7 @@ TEST_F(IBusEngineServiceTest, DelayProcessKeyEventTest) {
                  base::Unretained(&response_sender)));
 
   // Call KeyEventDone callback.
-  message_loop_.RunAllPending();
+  message_loop_.RunUntilIdle();
 
   // Call exported function without engine.
   service_->UnsetEngine();
@@ -926,8 +927,7 @@ TEST_F(IBusEngineServiceTest, CandidateClickedTest) {
   // Set expectations.
   const uint32 kSerialNo = 1;
   const uint32 kIndex = 4;
-  const IBusEngineHandlerInterface::IBusMouseButton kIBusMouseButton =
-      IBusEngineHandlerInterface::IBUS_MOUSE_BUTTON_MIDDLE;
+  const ibus::IBusMouseButton kIBusMouseButton = ibus::IBUS_MOUSE_BUTTON_MIDDLE;
   const uint32 kState = 3;
   EXPECT_CALL(*engine_handler_, CandidateClicked(kIndex, kIBusMouseButton,
                                                  kState));
@@ -1008,7 +1008,7 @@ TEST_F(IBusEngineServiceTest, SetSurroundingTextTest) {
 }
 
 TEST_F(IBusEngineServiceTest, RegisterProperties) {
-  // Set expetations.
+  // Set expectations.
   ibus::IBusPropertyList property_list;
   property_list.push_back(new ibus::IBusProperty());
   property_list[0]->set_key("Sample Key");
@@ -1027,7 +1027,7 @@ TEST_F(IBusEngineServiceTest, RegisterProperties) {
 }
 
 TEST_F(IBusEngineServiceTest, UpdatePreeditTest) {
-  // Set expetations.
+  // Set expectations.
   ibus::IBusText ibus_text;
   ibus_text.set_text("Sample Text");
   const uint32 kCursorPos = 9;

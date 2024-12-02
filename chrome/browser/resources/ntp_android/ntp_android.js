@@ -485,22 +485,6 @@ cr.define('ntp', function() {
   }
 
   /**
-   * Triggers the edit bookmark prompt for a given bookmark.
-   *
-   * @param {Object} item Object containing information for the selected
-   *     bookmark node.
-   */
-  function editBookmark(item) {
-    if (item['editable'] !== true)
-      return;
-    var editBookmarkUrl = 'chrome://editbookmark/' +
-        '?id=' + item.id;
-    if (item['folder'])
-      editBookmarkUrl += '&isfolder=true';
-    window.location = editBookmarkUrl;
-  }
-
-  /**
    * The default click handler for created item shortcuts.
    *
    * @param {Object} item The item specification.
@@ -815,7 +799,9 @@ cr.define('ntp', function() {
     var listItem = createDiv('list-item');
     addActiveTouchListener(listItem, ACTIVE_LIST_ITEM_CSS_CLASS);
     listItem.setAttribute(CONTEXT_MENU_URL_KEY, item.url);
-    var iconUrl = item.icon || 'chrome://touch-icon/size/64/' + item.url;
+    var iconSize = item.iconSize || 64;
+    var iconUrl = item.icon ||
+        'chrome://touch-icon/size/' + iconSize + '/' + item.url;
     listItem.appendChild(createDiv('icon', iconUrl));
     trackImageLoad(iconUrl);
     var title = createElement('span', {
@@ -1187,7 +1173,7 @@ cr.define('ntp', function() {
 
       case ContextMenuItemIds.BOOKMARK_EDIT:
         if (contextMenuItem != null)
-          editBookmark(contextMenuItem);
+          chrome.send('editBookmark', [contextMenuItem.id]);
         break;
 
       case ContextMenuItemIds.BOOKMARK_DELETE:
@@ -1741,19 +1727,19 @@ cr.define('ntp', function() {
         clientName = client.name;
 
       var iconStyle;
-      if (windows[0].deviceType == 'win' ||
-          windows[0].deviceType == 'macosx' ||
-          windows[0].deviceType == 'linux' ||
-          windows[0].deviceType == 'chromeos' ||
-          windows[0].deviceType == 'other') {
+      var deviceType = client.deviceType;
+      if (deviceType == 'win' ||
+          deviceType == 'macosx' ||
+          deviceType == 'linux' ||
+          deviceType == 'chromeos' ||
+          deviceType == 'other') {
         iconStyle = 'laptop';
-      } else if (windows[0].deviceType == 'phone') {
+      } else if (deviceType == 'phone') {
         iconStyle = 'phone';
-      } else if (windows[0].deviceType == 'tablet') {
+      } else if (deviceType == 'tablet') {
         iconStyle = 'tablet';
       } else {
-        console.error(
-            'Unknown sync device type found: ', windows[0].deviceType);
+        console.error('Unknown sync device type found: ', deviceType);
         iconStyle = 'laptop';
       }
       var headerList = [{
@@ -1788,6 +1774,7 @@ cr.define('ntp', function() {
             winNum: winNum,
             sessionId: tab.sessionId,
             icon: tab.icon,
+            iconSize: 32,
             divider: needSectionDivider ? 'section' : 'standard',
           });
         }
@@ -2459,7 +2446,7 @@ cr.define('ntp', function() {
         ],
         [
           ContextMenuItemIds.RECENTLY_CLOSED_REMOVE,
-          templateData.elementremove
+          templateData.removeall
         ]
       ];
     } else if (section == SectionType.FOREIGN_SESSION_HEADER) {

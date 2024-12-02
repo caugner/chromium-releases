@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/ui/idle_logout_dialog_view.h"
 
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/time.h"
@@ -15,6 +16,7 @@
 #include "chromeos/dbus/session_manager_client.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "ui/aura/root_window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/label.h"
@@ -121,7 +123,7 @@ void IdleLogoutDialogView::InitAndShow() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   restart_label_ = new views::Label();
-  restart_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  restart_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   restart_label_->SetMultiLine(true);
   restart_label_->SetFont(rb.GetFont(ui::ResourceBundle::BaseFont));
 
@@ -151,7 +153,8 @@ void IdleLogoutDialogView::Show() {
 
   UpdateCountdown();
 
-  views::Widget::CreateWindow(this);
+  views::Widget::CreateWindowWithContext(this,
+                                         ash::Shell::GetPrimaryRootWindow());
   GetWidget()->SetAlwaysOnTop(true);
   GetWidget()->Show();
 

@@ -26,12 +26,20 @@ public class TouchUtils extends android.test.TouchUtils {
      * @param y Relative y location.
      * @return the absolute x and y location in an array.
      */
-    private static int[] getAbsoluteLocationFromRelative(View v, int x, int y) {
+    public static int[] getAbsoluteLocationFromRelative(View v, int x, int y) {
         int location[] = new int[2];
         v.getLocationOnScreen(location);
         location[0] += x;
         location[1] += y;
         return location;
+    }
+
+    private static void sendAction(Instrumentation instrumentation, int action, long downTime,
+            float x, float y) {
+        long eventTime = SystemClock.uptimeMillis();
+        MotionEvent event = MotionEvent.obtain(downTime, eventTime, action, x, y, 0);
+        instrumentation.sendPointerSync(event);
+        instrumentation.waitForIdleSync();
     }
 
     /**
@@ -43,18 +51,8 @@ public class TouchUtils extends android.test.TouchUtils {
      */
     public static void singleClick(Instrumentation instrumentation, float x, float y) {
         long downTime = SystemClock.uptimeMillis();
-        long eventTime = SystemClock.uptimeMillis();
-
-        MotionEvent event = MotionEvent.obtain(downTime, eventTime,
-                MotionEvent.ACTION_DOWN, x, y, 0);
-        instrumentation.sendPointerSync(event);
-        instrumentation.waitForIdleSync();
-
-        eventTime = SystemClock.uptimeMillis();
-        event = MotionEvent.obtain(downTime, eventTime, MotionEvent.ACTION_UP,
-                x, y, 0);
-        instrumentation.sendPointerSync(event);
-        instrumentation.waitForIdleSync();
+        sendAction(instrumentation, MotionEvent.ACTION_DOWN, downTime, x, y);
+        sendAction(instrumentation, MotionEvent.ACTION_UP, downTime, x, y);
     }
 
     /**
@@ -85,6 +83,15 @@ public class TouchUtils extends android.test.TouchUtils {
     }
 
     /**
+     * Sleeps for at least the length of the double tap timeout.
+     *
+     * @param instrumentation Instrumentation object used by the test.
+     */
+    public static void sleepForDoubleTapTimeout(Instrumentation instrumentation) {
+        SystemClock.sleep((long)(ViewConfiguration.getDoubleTapTimeout() * 1.5));
+    }
+
+    /**
      * Sends (synchronously) a long click to the View at the specified coordinates.
      *
      * @param instrumentation Instrumentation object used by the test.
@@ -93,36 +100,14 @@ public class TouchUtils extends android.test.TouchUtils {
      * @param y Relative y location to the view.
      */
     public static void longClickView(Instrumentation instrumentation, View v, int x, int y) {
-        long downTime = SystemClock.uptimeMillis();
-        long eventTime = SystemClock.uptimeMillis();
-
         int location[] = getAbsoluteLocationFromRelative(v, x, y);
         int absoluteX = location[0];
         int absoluteY = location[1];
 
-        MotionEvent event = MotionEvent.obtain(downTime, eventTime,
-                MotionEvent.ACTION_DOWN, absoluteX, absoluteY, 0);
-        instrumentation.sendPointerSync(event);
-        instrumentation.waitForIdleSync();
-
-        eventTime = SystemClock.uptimeMillis();
-        final int touchSlop = ViewConfiguration.get(v.getContext()).getScaledTouchSlop();
-        event = MotionEvent.obtain(downTime, eventTime, MotionEvent.ACTION_MOVE,
-                absoluteX + touchSlop / 2, absoluteY + touchSlop / 2, 0);
-        instrumentation.sendPointerSync(event);
-        instrumentation.waitForIdleSync();
-
-        try {
-            Thread.sleep((long)(ViewConfiguration.getLongPressTimeout() * 1.5f));
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        eventTime = SystemClock.uptimeMillis();
-        event = MotionEvent.obtain(downTime, eventTime, MotionEvent.ACTION_UP,
-                absoluteX, absoluteY, 0);
-        instrumentation.sendPointerSync(event);
-        instrumentation.waitForIdleSync();
+        long downTime = SystemClock.uptimeMillis();
+        sendAction(instrumentation, MotionEvent.ACTION_DOWN, downTime, absoluteX, absoluteY);
+        SystemClock.sleep((long)(ViewConfiguration.getLongPressTimeout() * 1.5));
+        sendAction(instrumentation, MotionEvent.ACTION_UP, downTime, absoluteX, absoluteY);
     }
 
     /**
@@ -131,14 +116,12 @@ public class TouchUtils extends android.test.TouchUtils {
      * @param instrumentation Instrumentation object used by the test.
      * @param x The x location.
      * @param y The y location.
-     * @param downTime The initial time of the drag, in ms.
+     * @return The downTime of the triggered event.
      */
-    public static void dragStart(Instrumentation instrumentation, float x, float y,
-            long downTime) {
-        MotionEvent event = MotionEvent.obtain(downTime, downTime,
-                MotionEvent.ACTION_DOWN, x, y, 0);
-        instrumentation.sendPointerSync(event);
-        instrumentation.waitForIdleSync();
+    public static long dragStart(Instrumentation instrumentation, float x, float y) {
+        long downTime = SystemClock.uptimeMillis();
+        sendAction(instrumentation, MotionEvent.ACTION_DOWN, downTime, x, y);
+        return downTime;
     }
 
     /**
@@ -162,11 +145,7 @@ public class TouchUtils extends android.test.TouchUtils {
         for (int i = 0; i < stepCount; ++i) {
             y += yStep;
             x += xStep;
-            long eventTime = SystemClock.uptimeMillis();
-            MotionEvent event = MotionEvent.obtain(downTime, eventTime,
-                    MotionEvent.ACTION_MOVE, x, y, 0);
-            instrumentation.sendPointerSync(event);
-            instrumentation.waitForIdleSync();
+            sendAction(instrumentation, MotionEvent.ACTION_MOVE, downTime, x, y);
         }
     }
 
@@ -180,11 +159,7 @@ public class TouchUtils extends android.test.TouchUtils {
      * @param downTime The initial time of the drag, in ms.
      */
     public static void dragEnd(Instrumentation instrumentation, float x, float y, long downTime) {
-        long eventTime = SystemClock.uptimeMillis();
-        MotionEvent event = MotionEvent.obtain(downTime, eventTime,
-                MotionEvent.ACTION_UP, x, y, 0);
-        instrumentation.sendPointerSync(event);
-        instrumentation.waitForIdleSync();
+        sendAction(instrumentation, MotionEvent.ACTION_UP, downTime, x, y);
     }
 
     /**
@@ -198,13 +173,12 @@ public class TouchUtils extends android.test.TouchUtils {
      * @param fromY The relative y-coordinate of the start point of the drag.
      * @param toY The relative y-coordinate of the end point of the drag.
      * @param stepCount The total number of motion events that should be generated during the drag.
-     * @param downTime The initial time of the drag, in ms.
      */
     public static void dragCompleteView(Instrumentation instrumentation, View view,
-            int fromX, int toX, int fromY, int toY, int stepCount, long downTime) {
+            int fromX, int toX, int fromY, int toY, int stepCount) {
         int fromLocation[] = getAbsoluteLocationFromRelative(view, fromX, fromY);
         int toLocation[] = getAbsoluteLocationFromRelative(view, toX, toY);
-        dragStart(instrumentation, fromLocation[0], fromLocation[1], downTime);
+        long downTime = dragStart(instrumentation, fromLocation[0], fromLocation[1]);
         dragTo(instrumentation, fromLocation[0], toLocation[0], fromLocation[1], toLocation[1],
                 stepCount, downTime);
         dragEnd(instrumentation, toLocation[0], toLocation[1], downTime);

@@ -43,6 +43,8 @@ class AlternateErrorPageTabObserver
   // URL is empty, the default error page built into WebKit will be used.
   GURL GetAlternateErrorPageURL() const;
 
+  void OnAlternateErrorPagesEnabledChanged();
+
   // Send the alternate error page URL to the renderer.
   void UpdateAlternateErrorPageURL(content::RenderViewHost* rvh);
 

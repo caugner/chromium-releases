@@ -4,8 +4,13 @@
 
 package org.chromium.media;
 
+import android.Manifest.permission;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.telephony.PhoneStateListener;
+import android.telephony.TelephonyManager;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
@@ -13,24 +18,31 @@ import org.chromium.base.JNINamespace;
 // This class implements all the listener interface for android mediaplayer.
 // Callbacks will be sent to the native class for processing.
 @JNINamespace("media")
-class MediaPlayerListener implements MediaPlayer.OnPreparedListener,
-                                     MediaPlayer.OnCompletionListener,
-                                     MediaPlayer.OnBufferingUpdateListener,
-                                     MediaPlayer.OnSeekCompleteListener,
-                                     MediaPlayer.OnVideoSizeChangedListener,
-                                     MediaPlayer.OnErrorListener {
+class MediaPlayerListener extends PhoneStateListener implements MediaPlayer.OnPreparedListener,
+    MediaPlayer.OnCompletionListener,
+    MediaPlayer.OnBufferingUpdateListener,
+    MediaPlayer.OnSeekCompleteListener,
+    MediaPlayer.OnVideoSizeChangedListener,
+    MediaPlayer.OnErrorListener,
+    AudioManager.OnAudioFocusChangeListener {
     // These values are mirrored as enums in media/base/android/media_player_bridge.h.
     // Please ensure they stay in sync.
-    private static final int MEDIA_ERROR_UNKNOWN = 0;
-    private static final int MEDIA_ERROR_SERVER_DIED = 1;
+    private static final int MEDIA_ERROR_FORMAT = 0;
+    private static final int MEDIA_ERROR_DECODE = 1;
     private static final int MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK = 2;
     private static final int MEDIA_ERROR_INVALID_CODE = 3;
 
+    // These values are copied from android media player.
+    public static final int MEDIA_ERROR_MALFORMED = -1007;
+    public static final int MEDIA_ERROR_TIMED_OUT = -110;
+
     // Used to determine the class instance to dispatch the native call to.
     private int mNativeMediaPlayerListener = 0;
+    private final Context mContext;
 
-    private MediaPlayerListener(int nativeMediaPlayerListener) {
+    private MediaPlayerListener(int nativeMediaPlayerListener, Context context) {
         mNativeMediaPlayerListener = nativeMediaPlayerListener;
+        mContext = context;
     }
 
     @Override
@@ -38,10 +50,20 @@ class MediaPlayerListener implements MediaPlayer.OnPreparedListener,
         int errorType;
         switch (what) {
             case MediaPlayer.MEDIA_ERROR_UNKNOWN:
-                errorType = MEDIA_ERROR_UNKNOWN;
+                switch (extra) {
+                    case MEDIA_ERROR_MALFORMED:
+                        errorType = MEDIA_ERROR_DECODE;
+                        break;
+                    case MEDIA_ERROR_TIMED_OUT:
+                        errorType = MEDIA_ERROR_INVALID_CODE;
+                        break;
+                    default:
+                        errorType = MEDIA_ERROR_FORMAT;
+                        break;
+                }
                 break;
             case MediaPlayer.MEDIA_ERROR_SERVER_DIED:
-                errorType = MEDIA_ERROR_SERVER_DIED;
+                errorType = MEDIA_ERROR_DECODE;
                 break;
             case MediaPlayer.MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK:
                 errorType = MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK;
@@ -83,17 +105,68 @@ class MediaPlayerListener implements MediaPlayer.OnPreparedListener,
         nativeOnMediaPrepared(mNativeMediaPlayerListener);
     }
 
+    @Override
+    public void onCallStateChanged(int type, String number) {
+        if (type != TelephonyManager.CALL_STATE_IDLE) {
+            nativeOnMediaInterrupted(mNativeMediaPlayerListener);
+        }
+    }
+
+    @Override
+    public void onAudioFocusChange(int focusChange) {
+        if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
+            nativeOnMediaInterrupted(mNativeMediaPlayerListener);
+        }
+    }
+
     @CalledByNative
-    private static void create(int nativeMediaPlayerListener,
+    public void releaseResources() {
+        if (mContext != null) {
+            // Unregister the listener.
+            TelephonyManager mgr =
+                    (TelephonyManager) mContext.getSystemService(Context.TELEPHONY_SERVICE);
+            if (mgr != null) {
+                mgr.listen(this, PhoneStateListener.LISTEN_NONE);
+            }
+
+            // Unregister the wish for audio focus.
+            AudioManager am = (AudioManager) mContext.getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                am.abandonAudioFocus(this);
+            }
+        }
+    }
+
+    @CalledByNative
+    private static MediaPlayerListener create(int nativeMediaPlayerListener,
             Context context, MediaPlayer mediaPlayer) {
-        MediaPlayerListener listener = new MediaPlayerListener(nativeMediaPlayerListener);
+        final MediaPlayerListener listener =
+            new MediaPlayerListener(nativeMediaPlayerListener, context);
         mediaPlayer.setOnBufferingUpdateListener(listener);
         mediaPlayer.setOnCompletionListener(listener);
         mediaPlayer.setOnErrorListener(listener);
         mediaPlayer.setOnPreparedListener(listener);
         mediaPlayer.setOnSeekCompleteListener(listener);
         mediaPlayer.setOnVideoSizeChangedListener(listener);
-        mediaPlayer.setWakeMode(context, android.os.PowerManager.FULL_WAKE_LOCK);
+        if (PackageManager.PERMISSION_GRANTED ==
+                context.checkCallingOrSelfPermission(permission.WAKE_LOCK)) {
+            mediaPlayer.setWakeMode(context, android.os.PowerManager.FULL_WAKE_LOCK);
+        }
+
+        TelephonyManager mgr =
+                (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+        if (mgr != null) {
+            mgr.listen(listener, PhoneStateListener.LISTEN_CALL_STATE);
+        }
+
+        AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        am.requestAudioFocus(
+                listener,
+                AudioManager.STREAM_MUSIC,
+
+                // Request permanent focus.
+                AudioManager.AUDIOFOCUS_GAIN);
+        return listener;
     }
 
     /**
@@ -116,4 +189,6 @@ class MediaPlayerListener implements MediaPlayer.OnPreparedListener,
     private native void nativeOnPlaybackComplete(int nativeMediaPlayerListener);
 
     private native void nativeOnSeekComplete(int nativeMediaPlayerListener);
+
+    private native void nativeOnMediaInterrupted(int nativeMediaPlayerListener);
 }

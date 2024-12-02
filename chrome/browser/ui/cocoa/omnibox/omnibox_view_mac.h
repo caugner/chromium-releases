@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 
-class OmniboxPopupViewMac;
+class OmniboxPopupView;
 
 namespace ui {
 class Clipboard;
@@ -48,6 +48,7 @@ class OmniboxViewMac : public OmniboxView,
   virtual void UpdatePopup() OVERRIDE;
   virtual void CloseOmniboxPopup() OVERRIDE;
   virtual void SetFocus() OVERRIDE;
+  virtual void ApplyCaretVisibility() OVERRIDE;
   virtual void OnTemporaryTextMaybeChanged(
       const string16& display_text,
       bool save_original_selection) OVERRIDE;
@@ -85,6 +86,7 @@ class OmniboxViewMac : public OmniboxView,
   virtual bool OnDoCommandBySelector(SEL cmd) OVERRIDE;
   virtual void OnSetFocus(bool control_down) OVERRIDE;
   virtual void OnKillFocus() OVERRIDE;
+  virtual void OnMouseDown(NSInteger button_number) OVERRIDE;
 
   // Helper for LocationBarViewMac.  Optionally selects all in |field_|.
   void FocusLocation(bool select_all);
@@ -96,6 +98,8 @@ class OmniboxViewMac : public OmniboxView,
   // If |resource_id| has a PDF image which can be used, return it.
   // Otherwise return the PNG image from the resource bundle.
   static NSImage* ImageForResource(int resource_id);
+
+  AutocompleteTextField* field() const { return field_; }
 
  private:
   // Called when the user hits backspace in |field_|.  Checks whether
@@ -157,7 +161,7 @@ class OmniboxViewMac : public OmniboxView,
   // Returns true if the caret is at the end of the content.
   bool IsCaretAtEnd() const;
 
-  scoped_ptr<OmniboxPopupViewMac> popup_view_;
+  scoped_ptr<OmniboxPopupView> popup_view_;
 
   AutocompleteTextField* field_;  // owned by tab controller
 

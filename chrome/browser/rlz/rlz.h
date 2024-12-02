@@ -20,6 +20,11 @@
 #include "content/public/browser/notification_registrar.h"
 #include "rlz/lib/rlz_lib.h"
 
+class Profile;
+namespace net {
+class URLRequestContextGetter;
+}
+
 // RLZ is a library which is used to measure distribution scenarios.
 // Its job is to record certain lifetime events in the registry and to send
 // them encoded as a compact string at most twice. The sent data does
@@ -37,11 +42,9 @@ class RLZTracker : public content::NotificationObserver {
   // registers some events when 'first-run' is true.
   //
   // If the chrome brand is organic (no partners) then the pings don't occur.
-  static bool InitRlzDelayed(bool first_run,
-                             int delay,
-                             bool is_google_default_search,
-                             bool is_google_homepage,
-                             bool is_google_in_startpages);
+  static bool InitRlzFromProfileDelayed(Profile* profile,
+                                        bool first_run,
+                                        int delay);
 
   // Records an RLZ event. Some events can be access point independent.
   // Returns false it the event could not be recorded. Requires write access
@@ -69,14 +72,30 @@ class RLZTracker : public content::NotificationObserver {
   // Invoked during shutdown to clean up any state created by RLZTracker.
   static void CleanupRlz();
 
+#if defined(OS_CHROMEOS)
+  // Clears all product state. Should be called when turning RLZ off. On other
+  // platforms, this is done by product uninstaller.
+  static void ClearRlzState();
+#endif
+
   // This method is public for use by the Singleton class.
   static RLZTracker* GetInstance();
+
+  // Enables zero delay for InitRlzFromProfileDelayed. For testing only.
+  static void EnableZeroDelayForTesting();
 
   // The following methods are made protected so that they can be used for
   // testing purposes. Production code should never need to call these.
  protected:
   RLZTracker();
   virtual ~RLZTracker();
+
+  // Called by InitRlzFromProfileDelayed with values taken from |profile|.
+  static bool InitRlzDelayed(bool first_run,
+                             int delay,
+                             bool is_google_default_search,
+                             bool is_google_homepage,
+                             bool is_google_in_startpages);
 
   // Performs initialization of RLZ tracker that is purposefully delayed so
   // that it does not interfere with chrome startup time.
@@ -110,11 +129,29 @@ class RLZTracker : public content::NotificationObserver {
             bool is_google_in_startpages);
 
   // Implementation called from RecordProductEvent() static method.
+  bool RecordProductEventImpl(rlz_lib::Product product,
+                              rlz_lib::AccessPoint point,
+                              rlz_lib::Event event_id);
+
+  // Records FIRST_SEARCH event. Called from Observe() on blocking task runner.
+  void RecordFirstSearch(rlz_lib::AccessPoint point);
+
+  // Implementation called from GetAccessPointRlz() static method.
   bool GetAccessPointRlzImpl(rlz_lib::AccessPoint point, string16* rlz);
 
   // Schedules the delayed initialization. This method is virtual to allow
   // tests to override how the scheduling is done.
   virtual void ScheduleDelayedInit(int delay);
+
+  // Schedules a call to rlz_lib::RecordProductEvent(). This method is virtual
+  // to allow tests to override how the scheduling is done.
+  virtual bool ScheduleRecordProductEvent(rlz_lib::Product product,
+                                          rlz_lib::AccessPoint point,
+                                          rlz_lib::Event event_id);
+
+  // Schedules a call to rlz_lib::RecordFirstSearch(). This method is virtual
+  // to allow tests to override how the scheduling is done.
+  virtual bool ScheduleRecordFirstSearch(rlz_lib::AccessPoint point);
 
   // Schedules a call to rlz_lib::SendFinancialPing(). This method is virtual
   // to allow tests to override how the scheduling is done.
@@ -132,6 +169,15 @@ class RLZTracker : public content::NotificationObserver {
                                  const string16& lang,
                                  const string16& referral);
 
+#if defined(OS_CHROMEOS)
+  // Implementation called from ClearRlzState static method.
+  void ClearRlzStateImpl();
+
+  // Schedules a call to ClearRlzStateImpl(). This method is virtual
+  // to allow tests to override how the scheduling is done.
+  virtual bool ScheduleClearRlzState();
+#endif
+
   // Tracker used for testing purposes only. If this value is non-NULL, it
   // will be returned from GetInstance() instead of the regular singleton.
   static RLZTracker* tracker_;
@@ -147,6 +193,9 @@ class RLZTracker : public content::NotificationObserver {
   // sequentially in the blocking pool.
   base::SequencedWorkerPool::SequenceToken worker_pool_token_;
 
+  // URLRequestContextGetter used by RLZ library.
+  net::URLRequestContextGetter* url_request_context_;
+
   // Keeps track if the RLZ tracker has already performed its delayed
   // initialization.
   bool already_ran_;
@@ -161,7 +210,14 @@ class RLZTracker : public content::NotificationObserver {
   bool omnibox_used_;
   bool homepage_used_;
 
+  // Main and (optionally) reactivation brand codes, assigned on UI thread.
+  std::string brand_;
+  std::string reactivation_brand_;
+
   content::NotificationRegistrar registrar_;
+
+  // Minimum delay before sending financial ping after initialization.
+  int min_delay_;
 
   DISALLOW_COPY_AND_ASSIGN(RLZTracker);
 };

@@ -55,11 +55,17 @@ class PolicyWatcher {
   // The name of the host domain policy.
   static const char kHostDomainPolicyName[];
 
+  // The name of the username policy.
+  static const char kHostMatchUsernamePolicyName[];
+
   // The name of the policy that controls the host talkgadget prefix.
   static const char kHostTalkGadgetPrefixPolicyName[];
 
   // The name of the policy for requiring curtain-mode.
   static const char kHostRequireCurtainPolicyName[];
+
+  // The name of the policy for overriding policies, for use in testing.
+  static const char kHostDebugOverridePoliciesName[];
 
  protected:
   virtual void StartWatchingInternal() = 0;
@@ -78,13 +84,8 @@ class PolicyWatcher {
   void ScheduleFallbackReloadTask();
   void ScheduleReloadTask(const base::TimeDelta& delay);
 
-  // The names of policies with boolean values.
-  static const char* const kBooleanPolicyNames[];
-  static const int kBooleanPolicyNamesNum;
-
-  // The names of policies with string values.
-  static const char* const kStringPolicyNames[];
-  static const int kStringPolicyNamesNum;
+  // Returns a DictionaryValue containing the default values for each policy.
+  const base::DictionaryValue& Defaults() const;
 
  private:
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
@@ -92,6 +93,8 @@ class PolicyWatcher {
   PolicyCallback policy_callback_;
 
   scoped_ptr<base::DictionaryValue> old_policies_;
+  scoped_ptr<base::DictionaryValue> default_values_;
+  scoped_ptr<base::DictionaryValue> bad_type_values_;
 
   // Allows us to cancel any inflight FileWatcher events or scheduled reloads.
   base::WeakPtrFactory<PolicyWatcher> weak_factory_;

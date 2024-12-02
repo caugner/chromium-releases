@@ -71,7 +71,9 @@ FormField* CreditCardField::Parse(AutofillScanner* scanner,
     if (parse_new_field_types) {
       string16 type_pattern = UTF8ToUTF16(autofill::kCardTypeRe);
       if (!credit_card_field->type_ &&
-          ParseField(scanner, type_pattern, &credit_card_field->type_)) {
+          ParseFieldSpecifics(scanner, type_pattern,
+                              MATCH_DEFAULT | MATCH_SELECT,
+                              &credit_card_field->type_)) {
         continue;
       }
     }
@@ -194,6 +196,9 @@ CreditCardField::CreditCardField()
 
 bool CreditCardField::ClassifyField(FieldTypeMap* map) const {
   bool ok = AddClassification(number_, CREDIT_CARD_NUMBER, map);
+  ok = ok && AddClassification(type_, CREDIT_CARD_TYPE, map);
+  ok = ok && AddClassification(verification_, CREDIT_CARD_VERIFICATION_CODE,
+                               map);
 
   // If the heuristics detected first and last name in separate fields,
   // then ignore both fields. Putting them into separate fields is probably
@@ -202,7 +207,6 @@ bool CreditCardField::ClassifyField(FieldTypeMap* map) const {
   if (cardholder_last_ == NULL)
     ok = ok && AddClassification(cardholder_, CREDIT_CARD_NAME, map);
 
-  ok = ok && AddClassification(type_, CREDIT_CARD_TYPE, map);
   if (expiration_date_) {
     if (is_two_digit_year_) {
       ok = ok && AddClassification(expiration_date_,

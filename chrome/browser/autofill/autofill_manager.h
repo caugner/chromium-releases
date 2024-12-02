@@ -25,14 +25,16 @@
 #include "chrome/browser/autofill/autofill_download.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_structure.h"
-#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/ssl_status.h"
 
 class AutofillExternalDelegate;
 class AutofillField;
 class AutofillProfile;
 class AutofillMetrics;
 class CreditCard;
+class FormGroup;
+class GURL;
 class PersonalDataManager;
 class PrefService;
 class ProfileSyncService;
@@ -64,8 +66,7 @@ class Message;
 
 // Manages saving and restoring the user's personal information entered into web
 // forms.
-class AutofillManager : public content::NotificationObserver,
-                        public content::WebContentsObserver,
+class AutofillManager : public content::WebContentsObserver,
                         public AutofillDownloadManager::Observer,
                         public ProfileSyncServiceObserver,
                         public base::RefCounted<AutofillManager> {
@@ -171,6 +172,10 @@ class AutofillManager : public content::NotificationObserver,
   bool OnFormSubmitted(const FormData& form,
                        const base::TimeTicks& timestamp);
 
+  // Tell the renderer the current interactive autocomplete failed somehow.
+  // Exposed for testing.
+  virtual void ReturnAutocompleteError();
+
  private:
   // content::WebContentsObserver:
   virtual void RenderViewCreated(content::RenderViewHost* host) OVERRIDE;
@@ -191,10 +196,8 @@ class AutofillManager : public content::NotificationObserver,
   // Register as an observer with the sync service.
   void RegisterWithSyncService();
 
-  // content::NotificationObserver override
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // Called when password generation preference state changes.
+  void OnPasswordGenerationEnabledChanged();
 
   // Determines what the current state of password generation is, and if it has
   // changed from |password_generation_enabled_|. If it has changed or if
@@ -228,19 +231,23 @@ class AutofillManager : public content::NotificationObserver,
                      const std::vector<string16>& icons,
                      const std::vector<int>& unique_ids);
 
+  // Requests an interactive autocomplete UI be shown.
+  void OnRequestAutocomplete(const FormData& form,
+                             const GURL& frame_url,
+                             const content::SSLStatus& ssl_status);
+
+  // Passes return data for an OnRequestAutocomplete call back to the page.
+  void ReturnAutocompleteData(const FormStructure* result);
+
   // Fills |host| with the RenderViewHost for this tab.
   // Returns false if Autofill is disabled or if the host is unavailable.
-  bool GetHost(const std::vector<AutofillProfile*>& profiles,
-               const std::vector<CreditCard*>& credit_cards,
-               content::RenderViewHost** host) const WARN_UNUSED_RESULT;
+  bool GetHost(content::RenderViewHost** host) const WARN_UNUSED_RESULT;
 
-  // Unpacks |unique_id| and fills |profile| or |credit_card| with the
-  // appropriate data source.  Returns false if the unpacked id cannot be found.
+  // Unpacks |unique_id| and fills |form_group| and |variant| with the
+  // appropriate data source and variant index.  Returns false if the unpacked
+  // id cannot be found.
   bool GetProfileOrCreditCard(int unique_id,
-                              const std::vector<AutofillProfile*>& profiles,
-                              const std::vector<CreditCard*>& credit_cards,
-                              const AutofillProfile** profile,
-                              const CreditCard** credit_card,
+                              const FormGroup** form_group,
                               size_t* variant) const WARN_UNUSED_RESULT;
 
   // Fills |form_structure| cached element corresponding to |form|.
@@ -285,28 +292,6 @@ class AutofillManager : public content::NotificationObserver,
                                 std::vector<string16>* labels,
                                 std::vector<string16>* icons,
                                 std::vector<int>* unique_ids) const;
-
-  // Set |field|'s value based on |type| and contents of the |credit_card|.
-  void FillCreditCardFormField(const CreditCard& credit_card,
-                               AutofillFieldType type,
-                               FormFieldData* field);
-
-  // Set |field|'s value based on |cached_field|'s type and contents of the
-  // |profile|. The |variant| parameter specifies which value in a multi-valued
-  // profile.
-  void FillFormField(const AutofillProfile& profile,
-                     const AutofillField& cached_field,
-                     size_t variant,
-                     FormFieldData* field);
-
-  // Set |field|'s value for phone number based on contents of the |profile|.
-  // The |cached_field| specifies the type of the phone and whether this is a
-  // phone prefix or suffix.  The |variant| parameter specifies which value in a
-  // multi-valued profile.
-  void FillPhoneNumberField(const AutofillProfile& profile,
-                            const AutofillField& cached_field,
-                            size_t variant,
-                            FormFieldData* field);
 
   // Parses the forms using heuristic matching and querying the Autofill server.
   void ParseForms(const std::vector<FormData>& forms);
@@ -394,6 +379,8 @@ class AutofillManager : public content::NotificationObserver,
                            DeterminePossibleFieldTypesForUpload);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            DeterminePossibleFieldTypesForUploadStressTest);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           DisabledAutofillDispatchesError);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AddressSuggestionsCount);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AutofillIsEnabledAtPageLoad);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, DeveloperEngagement);

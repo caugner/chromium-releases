@@ -9,6 +9,7 @@
 #include <windows.h>
 #endif
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -18,8 +19,9 @@
 #include "base/shared_memory.h"
 #include "base/string16.h"
 #include "build/build_config.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
+#include "content/common/pepper_renderer_instance_data.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "content/public/common/three_d_api_types.h"
 #include "media/base/channel_layout.h"
 #include "net/cookies/canonical_cookie.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
@@ -52,6 +54,7 @@ struct MediaLogEvent;
 }
 
 namespace net {
+class URLRequestContext;
 class URLRequestContextGetter;
 }
 
@@ -143,11 +146,9 @@ class RenderMessageFilter : public BrowserMessageFilter {
   void SendLoadFontReply(IPC::Message* reply, FontLoader::Result* result);
 #endif
 
-#if defined(OS_WIN) && !defined(USE_AURA)
-  // On Windows, we handle these on the IO thread to avoid a deadlock with
-  // plugins.  On non-Windows systems, we need to handle them on the UI thread.
-  void OnGetWindowRect(gfx::NativeViewId window, gfx::Rect* rect);
-  void OnGetRootWindowRect(gfx::NativeViewId window, gfx::Rect* rect);
+#if defined(OS_WIN)
+  void OnPreCacheFontCharacters(const LOGFONT& log_font,
+                                const string16& characters);
 #endif
 
   void OnGetPlugins(bool refresh, IPC::Message* reply_msg);
@@ -167,11 +168,14 @@ class RenderMessageFilter : public BrowserMessageFilter {
                              IPC::Message* reply_msg);
   void OnOpenChannelToPepperPlugin(const FilePath& path,
                                    IPC::Message* reply_msg);
-  void OnDidCreateOutOfProcessPepperInstance(int plugin_child_id,
-                                             int32 pp_instance,
-                                             int render_view_id);
+  void OnDidCreateOutOfProcessPepperInstance(
+      int plugin_child_id,
+      int32 pp_instance,
+      PepperRendererInstanceData instance_data,
+      bool is_external);
   void OnDidDeleteOutOfProcessPepperInstance(int plugin_child_id,
-                                             int32 pp_instance);
+                                             int32 pp_instance,
+                                             bool is_external);
   void OnOpenChannelToPpapiBroker(int routing_id,
                                   int request_id,
                                   const FilePath& path);
@@ -244,6 +248,13 @@ class RenderMessageFilter : public BrowserMessageFilter {
       OpenChannelToNpapiPluginCallback* client);
 
   void OnUpdateIsDelayed(const IPC::Message& msg);
+  void OnAre3DAPIsBlocked(int render_view_id,
+                          const GURL& top_origin_url,
+                          ThreeDAPIType requester,
+                          bool* blocked);
+  void OnDidLose3DContext(const GURL& top_origin_url,
+                          ThreeDAPIType context_type,
+                          int arb_robustness_status_code);
 
   // Cached resource request dispatcher host and plugin service, guaranteed to
   // be non-null if Init succeeds. We do not own the objects, they are managed

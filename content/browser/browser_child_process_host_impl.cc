@@ -16,8 +16,8 @@
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "content/browser/histogram_message_filter.h"
+#include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/profiler_message_filter.h"
-#include "content/browser/renderer_host/resource_message_filter.h"
 #include "content/browser/trace_message_filter.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/plugin_messages.h"
@@ -194,7 +194,8 @@ base::TerminationStatus BrowserChildProcessHostImpl::GetTerminationStatus(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!child_process_.get())  // If the delegate doesn't use Launch() helper.
     return base::GetTerminationStatus(data_.handle, exit_code);
-  return child_process_->GetChildTerminationStatus(exit_code);
+  return child_process_->GetChildTerminationStatus(false /* known_dead */,
+                                                   exit_code);
 }
 
 bool BrowserChildProcessHostImpl::OnMessageReceived(

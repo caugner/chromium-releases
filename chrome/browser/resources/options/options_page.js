@@ -22,14 +22,20 @@ cr.define('options', function() {
     this.lastFocusedElement = null;
   }
 
-  /** @const */ var HORIZONTAL_OFFSET = 155;
-
   /**
    * This is the absolute difference maintained between standard and
    * fixed-width font sizes. Refer http://crbug.com/91922.
    * @const
    */
   OptionsPage.SIZE_DIFFERENCE_FIXED_STANDARD = 3;
+
+  /**
+   * Offset of page container in pixels, to allow room for side menu.
+   * Simplified settings pages can override this if they don't use the menu.
+   * The default (155) comes from -webkit-margin-start in uber_shared.css
+   * @private
+   */
+  OptionsPage.horizontalOffset = 155;
 
   /**
    * Main level option pages. Maps lower-case page names to the respective page
@@ -152,6 +158,10 @@ cr.define('options', function() {
     // Update tab title.
     this.setTitle_(targetPage.title);
 
+    // Update focus if any other control was focused before.
+    if (document.activeElement != document.body)
+      targetPage.focus();
+
     // Notify pages if they were shown.
     for (var i = 0; i < allPageNames.length; ++i) {
       var name = allPageNames[i];
@@ -256,7 +266,17 @@ cr.define('options', function() {
     // Update tab title.
     this.setTitle_(overlay.title);
 
+    // Change focus to the overlay if any other control was focused before.
+    if (document.activeElement != document.body)
+      overlay.focus();
+
     $('searchBox').setAttribute('aria-hidden', true);
+
+    if ($('search-field').value == '') {
+      var section = overlay.associatedSection;
+      if (section)
+        options.BrowserOptions.scrollToSection(section);
+    }
 
     return true;
   };
@@ -393,17 +413,21 @@ cr.define('options', function() {
 
   /**
    * Shows an informational bubble displaying |content| and pointing at the
-   * |anchor| element. If |content| has focusable elements, they join the
-   * current page's tab order as siblings of |anchor|.
+   * |target| element. If |content| has focusable elements, they join the
+   * current page's tab order as siblings of |domSibling|.
    * @param {HTMLDivElement} content The content of the bubble.
-   * @param {HTMLElement} anchor The element at which the bubble points.
+   * @param {HTMLElement} target The element at which the bubble points.
+   * @param {HTMLElement} domSibling The element after which the bubble is added
+   *                      to the DOM.
+   * @param {cr.ui.ArrowLocation} location The arrow location.
    */
-  OptionsPage.showBubble = function(content, anchor) {
+  OptionsPage.showBubble = function(content, target, domSibling, location) {
     OptionsPage.hideBubble();
 
     var bubble = new options.OptionsBubble;
-    bubble.anchorNode = anchor;
-    bubble.arrowLocation = cr.ui.ArrowLocation.TOP_END;
+    bubble.anchorNode = target;
+    bubble.domSibling = domSibling;
+    bubble.arrowLocation = location;
     bubble.content = content;
     bubble.show();
     OptionsPage.bubble_ = bubble;
@@ -651,10 +675,20 @@ cr.define('options', function() {
    * @private
    */
   OptionsPage.updateFrozenElementHorizontalPosition_ = function(e) {
-    if (isRTL())
-      e.style.right = HORIZONTAL_OFFSET + 'px';
-    else
-      e.style.left = HORIZONTAL_OFFSET - document.body.scrollLeft + 'px';
+    if (isRTL()) {
+      e.style.right = OptionsPage.horizontalOffset + 'px';
+    } else {
+      e.style.left = OptionsPage.horizontalOffset -
+          document.body.scrollLeft + 'px';
+    }
+  };
+
+  /**
+   * Change the horizontal offset used to reposition elements while showing an
+   * overlay from the default.
+   */
+  OptionsPage.setHorizontalOffset = function(value) {
+    OptionsPage.horizontalOffset = value;
   };
 
   OptionsPage.setClearPluginLSODataEnabled = function(enabled) {
@@ -704,6 +738,22 @@ cr.define('options', function() {
      * Initializes page content.
      */
     initializePage: function() {},
+
+    /**
+     * Sets focus on the first focusable element. Override for a custom focus
+     * strategy.
+     */
+    focus: function() {
+      var elements = this.pageDiv.querySelectorAll(
+          'input, list, select, textarea, button');
+      for (var i = 0; i < elements.length; i++) {
+        var element = elements[i];
+        // Try to focus. If fails, then continue.
+        element.focus();
+        if (document.activeElement == element)
+          return;
+      }
+    },
 
     /**
      * Gets the container div for this page if it is an overlay.

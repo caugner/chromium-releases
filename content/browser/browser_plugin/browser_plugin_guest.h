@@ -33,6 +33,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/id_map.h"
+#include "base/shared_memory.h"
 #include "base/time.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -41,10 +42,16 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragStatus.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 #include "ui/gfx/rect.h"
-#include "webkit/glue/webcursor.h"
+#include "ui/surface/transport_dib.h"
 
-class TransportDIB;
+struct BrowserPluginHostMsg_AutoSize_Params;
+struct BrowserPluginHostMsg_CreateGuest_Params;
+struct BrowserPluginHostMsg_ResizeGuest_Params;
+#if defined(OS_MACOSX)
+struct ViewHostMsg_ShowPopup_Params;
+#endif
 struct ViewHostMsg_UpdateRect_Params;
+class WebCursor;
 struct WebDropData;
 
 namespace WebKit {
@@ -68,11 +75,10 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
  public:
   virtual ~BrowserPluginGuest();
 
-  static BrowserPluginGuest* Create(int instance_id,
-                                    WebContentsImpl* web_contents,
-                                    content::RenderViewHost* render_view_host,
-                                    bool focused,
-                                    bool visible);
+  static BrowserPluginGuest* Create(
+      int instance_id,
+      WebContentsImpl* web_contents,
+      const BrowserPluginHostMsg_CreateGuest_Params& params);
 
   // Overrides factory for testing. Default (NULL) value indicates regular
   // (non-test) environment.
@@ -80,12 +86,17 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
     content::BrowserPluginGuest::factory_ = factory;
   }
 
+  void InstallHelper(content::RenderViewHost* render_view_host);
+
   void set_guest_hang_timeout_for_testing(const base::TimeDelta& timeout) {
     guest_hang_timeout_ = timeout;
   }
 
   void set_embedder_web_contents(WebContentsImpl* web_contents) {
     embedder_web_contents_ = web_contents;
+  }
+  WebContentsImpl* embedder_web_contents() const {
+    return embedder_web_contents_;
   }
 
   bool focused() const { return focused_; }
@@ -128,18 +139,28 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
                            const std::string& request_method) OVERRIDE;
   virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
   virtual void RendererUnresponsive(WebContents* source) OVERRIDE;
+  virtual void RendererResponsive(WebContents* source) OVERRIDE;
   virtual void RunFileChooser(WebContents* web_contents,
                               const FileChooserParams& params) OVERRIDE;
   virtual bool ShouldFocusPageAfterCrash() OVERRIDE;
 
   void UpdateRect(RenderViewHost* render_view_host,
                   const ViewHostMsg_UpdateRect_Params& params);
-  void UpdateRectACK(int message_id, const gfx::Size& size);
+  void UpdateRectACK(
+      int message_id,
+      const BrowserPluginHostMsg_AutoSize_Params& auto_size_params,
+      const BrowserPluginHostMsg_ResizeGuest_Params& resize_guest_params);
   // Overrides default ShowWidget message so we show them on the correct
   // coordinates.
   void ShowWidget(RenderViewHost* render_view_host,
                   int route_id,
                   const gfx::Rect& initial_pos);
+  // On MacOSX popups are painted by the browser process. We handle them here
+  // so that they are positioned correctly.
+#if defined(OS_MACOSX)
+  void ShowPopup(RenderViewHost* render_view_host,
+                 const ViewHostMsg_ShowPopup_Params& params);
+#endif
   void SetCursor(const WebCursor& cursor);
   // Handles input event acks so they are sent to browser plugin host (via
   // embedder) instead of default view/widget host.
@@ -176,6 +197,11 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
                         WebKit::WebDragOperationsMask drag_mask,
                         const gfx::Point& location);
 
+  // Updates the size state of the guest.
+  void SetSize(
+      const BrowserPluginHostMsg_AutoSize_Params& auto_size_params,
+      const BrowserPluginHostMsg_ResizeGuest_Params& resize_guest_params);
+
   // Updates the cursor during dragging.
   // During dragging, if the guest notifies to update the cursor for a drag,
   // then it is necessary to route the cursor update to the embedder correctly
@@ -188,13 +214,18 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   // Kill the guest process.
   void Terminate();
 
+  // Grab the new damage buffer from the embedder, and resize the guest's
+  // web contents.
+  void Resize(RenderViewHost* embedder_rvh,
+              const BrowserPluginHostMsg_ResizeGuest_Params& params);
+
   // Overridden in tests.
   // Handles input event routed through the embedder (which is initiated in the
   // browser plugin (renderer side of the embedder)).
   virtual void HandleInputEvent(RenderViewHost* render_view_host,
-                                const gfx::Rect& guest_rect,
-                                const WebKit::WebInputEvent& event,
-                                IPC::Message* reply_message);
+                                const gfx::Rect& guest_window_rect,
+                                const gfx::Rect& guest_screen_rect,
+                                const WebKit::WebInputEvent& event);
   virtual bool ViewTakeFocus(bool reverse);
   // If possible, navigate the guest to |relative_index| entries away from the
   // current navigation entry.
@@ -206,30 +237,40 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   // Stop loading the guest.
   virtual void Stop();
   // Overridden in tests.
-  virtual void SetDamageBuffer(TransportDIB* damage_buffer,
-#if defined(OS_WIN)
-                               int damage_buffer_size,
-#endif
-                               const gfx::Size& damage_view_size,
-                               float scale_factor);
+  virtual void SetDamageBuffer(
+      const BrowserPluginHostMsg_ResizeGuest_Params& params);
+
+  // Overridden in tests.
+  virtual void SetCompositingBufferData(int gpu_process_id,
+                                        uint32 client_id,
+                                        uint32 context_id,
+                                        uint32 texture_id_0,
+                                        uint32 texture_id_1,
+                                        uint32 sync_point);
+
+  gfx::Point GetScreenCoordinates(const gfx::Point& relative_position) const;
 
  private:
   friend class TestBrowserPluginGuest;
 
   BrowserPluginGuest(int instance_id,
                      WebContentsImpl* web_contents,
-                     RenderViewHost* render_view_host,
-                     bool focused,
-                     bool visible);
+                     const BrowserPluginHostMsg_CreateGuest_Params& params);
 
   // Returns the identifier that uniquely identifies a browser plugin guest
   // within an embedder.
   int instance_id() const { return instance_id_; }
-  TransportDIB* damage_buffer() const { return damage_buffer_.get(); }
+  base::SharedMemory* damage_buffer() const { return damage_buffer_.get(); }
   const gfx::Size& damage_view_size() const { return damage_view_size_; }
   float damage_buffer_scale_factor() const {
     return damage_buffer_scale_factor_;
   }
+  // Returns the damage buffer corresponding to the handle in resize |params|.
+  base::SharedMemory* GetDamageBufferFromEmbedder(
+      const BrowserPluginHostMsg_ResizeGuest_Params& params);
+
+  // Returns the embedder's routing ID.
+  int embedder_routing_id() const;
 
   // Helper to send messages to embedder. Overridden in test implementation
   // since we want to intercept certain messages for testing.
@@ -240,6 +281,7 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
                     const GURL& new_url,
                     bool is_top_level);
 
+  bool InAutoSizeBounds(const gfx::Size& size) const;
   // Static factory instance (always NULL for non-test).
   static content::BrowserPluginHostFactory* factory_;
 
@@ -248,20 +290,25 @@ class CONTENT_EXPORT BrowserPluginGuest : public NotificationObserver,
   // An identifier that uniquely identifies a browser plugin guest within an
   // embedder.
   int instance_id_;
-  scoped_ptr<TransportDIB> damage_buffer_;
-#if defined(OS_WIN)
+  scoped_ptr<base::SharedMemory> damage_buffer_;
+  // An identifier that uniquely identifies a damage buffer.
+  uint32 damage_buffer_sequence_id_;
   size_t damage_buffer_size_;
-#endif
   gfx::Size damage_view_size_;
   float damage_buffer_scale_factor_;
-  scoped_ptr<IPC::Message> pending_input_event_reply_;
-  gfx::Rect guest_rect_;
-  WebCursor cursor_;
+  gfx::Rect guest_window_rect_;
+  gfx::Rect guest_screen_rect_;
   IDMap<RenderViewHost> pending_updates_;
   int pending_update_counter_;
   base::TimeDelta guest_hang_timeout_;
   bool focused_;
   bool visible_;
+  bool auto_size_enabled_;
+  gfx::Size max_auto_size_;
+  gfx::Size min_auto_size_;
+
+  // Hardware Accelerated Surface Params
+  gfx::GLSurfaceHandle surface_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserPluginGuest);
 };

@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
-
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "cc/test/fake_web_graphics_context_3d.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace cc {
+namespace {
 
 class ContextThatCountsMakeCurrents : public WebKit::FakeWebGraphicsContext3D {
 public:
@@ -31,3 +32,6 @@ TEST(FakeGraphicsContext3DTest, ContextCreationShouldNotMakeCurrent)
     EXPECT_TRUE(context.get());
     EXPECT_EQ(0, context->makeCurrentCount());
 }
+
+}  // namespace
+}  // namespace cc

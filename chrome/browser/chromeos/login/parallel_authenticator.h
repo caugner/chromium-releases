@@ -50,6 +50,7 @@ class ParallelAuthenticator : public Authenticator,
     FAILED_MOUNT,    // Failed to mount existing cryptohome.
     FAILED_REMOVE,   // Failed to remove existing cryptohome.
     FAILED_TMPFS,    // Failed to mount tmpfs for guest user
+    FAILED_TPM,      // Failed to mount/create cryptohome because of TPM error.
     CREATE_NEW,      // Need to create cryptohome for a new user.
     RECOVER_MOUNT,   // After RecoverEncryptedData, mount cryptohome.
     POSSIBLE_PW_CHANGE,  // Offline login failed, user may have changed pw.
@@ -62,6 +63,7 @@ class ParallelAuthenticator : public Authenticator,
     UNLOCK,          // Screen unlock succeeded.
     ONLINE_FAILED,   // Online login disallowed, but offline succeeded.
     GUEST_LOGIN,     // Logged in guest mode.
+    PUBLIC_ACCOUNT_LOGIN,  // Logged into a public account.
     LOGIN_FAILED,    // Login denied.
     OWNER_REQUIRED   // Login is restricted to the owner only.
   };
@@ -111,17 +113,22 @@ class ParallelAuthenticator : public Authenticator,
   virtual void AuthenticateToUnlock(const std::string& username,
                                     const std::string& password) OVERRIDE;
 
-  // Initiates demo user login.
+  // Initiates retail mode login.
   // Mounts tmpfs and notifies consumer on the success/failure.
-  virtual void LoginDemoUser() OVERRIDE;
+  virtual void LoginRetailMode() OVERRIDE;
 
   // Initiates incognito ("browse without signing in") login.
   // Mounts tmpfs and notifies consumer on the success/failure.
   virtual void LoginOffTheRecord() OVERRIDE;
 
+  // Initiates login into the public account identified by |username|.
+  // Mounts an ephemeral cryptohome and notifies consumer on the
+  // success/failure.
+  virtual void LoginAsPublicAccount(const std::string& username) OVERRIDE;
+
   // These methods must be called on the UI thread, as they make DBus calls
   // and also call back to the login UI.
-  virtual void OnDemoUserLoginSuccess()  OVERRIDE;
+  virtual void OnRetailModeLoginSuccess()  OVERRIDE;
   virtual void OnLoginSuccess(bool request_pending)  OVERRIDE;
   virtual void OnLoginFailure(const LoginFailure& error) OVERRIDE;
   virtual void RecoverEncryptedData(
@@ -239,7 +246,7 @@ class ParallelAuthenticator : public Authenticator,
   scoped_ptr<OnlineAttempt> current_online_;
   bool migrate_attempted_;
   bool remove_attempted_;
-  bool mount_guest_attempted_;
+  bool ephemeral_mount_attempted_;
   bool check_key_attempted_;
 
   // When the user has changed her password, but gives us the old one, we will

@@ -15,10 +15,10 @@
 #include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
+#include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -105,8 +105,11 @@ TabSpecificContentSettings* TabSpecificContentSettings::Get(
   if (!view)
     return NULL;
 
-  return TabSpecificContentSettings::FromWebContents(
-      WebContents::FromRenderViewHost(view));
+  WebContents* web_contents = WebContents::FromRenderViewHost(view);
+  if (!web_contents)
+    return NULL;
+
+  return TabSpecificContentSettings::FromWebContents(web_contents);
 }
 
 // static
@@ -251,6 +254,8 @@ void TabSpecificContentSettings::OnContentBlocked(
     const std::string& resource_identifier) {
   DCHECK(type != CONTENT_SETTINGS_TYPE_GEOLOCATION)
       << "Geolocation settings handled by OnGeolocationPermissionSet";
+  if (type < 0 || type >= CONTENT_SETTINGS_NUM_TYPES)
+    return;
   content_accessed_[type] = true;
   // Unless UI for resource content settings is enabled, ignore the resource
   // identifier.

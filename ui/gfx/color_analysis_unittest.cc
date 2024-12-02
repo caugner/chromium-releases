@@ -7,7 +7,10 @@
 #include <vector>
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+
+using color_utils::FindClosestColor;
 
 namespace {
 
@@ -125,6 +128,11 @@ class MockKMeanImageSampler : public color_utils::KMeanImageSampler {
   size_t current_result_index_;
 };
 
+// Return true if a color channel is approximately equal to an expected value.
+bool ChannelApproximatelyEqual(int expected, uint8_t channel) {
+  return (abs(expected - static_cast<int>(channel)) <= 1);
+}
+
 } // namespace
 
 class ColorAnalysisTest : public testing::Test {
@@ -140,7 +148,8 @@ TEST_F(ColorAnalysisTest, CalculatePNGKMeanAllWhite) {
               k1x1White,
               k1x1White + sizeof(k1x1White) / sizeof(unsigned char))));
 
-  SkColor color = CalculateKMeanColorOfPNG(png, 100, 600, test_sampler);
+  SkColor color =
+      color_utils::CalculateKMeanColorOfPNG(png, 100, 600, &test_sampler);
 
   EXPECT_EQ(color, SK_ColorWHITE);
 }
@@ -157,7 +166,8 @@ TEST_F(ColorAnalysisTest, CalculatePNGKMeanIgnoreWhite) {
              k1x3BlueWhite,
              k1x3BlueWhite + sizeof(k1x3BlueWhite) / sizeof(unsigned char))));
 
-  SkColor color = CalculateKMeanColorOfPNG(png, 100, 600, test_sampler);
+  SkColor color =
+      color_utils::CalculateKMeanColorOfPNG(png, 100, 600, &test_sampler);
 
   EXPECT_EQ(color, SkColorSetARGB(0xFF, 0x00, 0x00, 0xFF));
 }
@@ -174,7 +184,76 @@ TEST_F(ColorAnalysisTest, CalculatePNGKMeanPickMostCommon) {
              k1x3BlueRed,
              k1x3BlueRed + sizeof(k1x3BlueRed) / sizeof(unsigned char))));
 
-  SkColor color = CalculateKMeanColorOfPNG(png, 100, 600, test_sampler);
+  SkColor color =
+      color_utils::CalculateKMeanColorOfPNG(png, 100, 600, &test_sampler);
 
   EXPECT_EQ(color, SkColorSetARGB(0xFF, 0xFF, 0x00, 0x00));
+}
+
+TEST_F(ColorAnalysisTest, GridSampler) {
+  color_utils::GridSampler sampler;
+  const int kWidth = 16;
+  const int kHeight = 16;
+  // Sample starts at 1,1.
+  EXPECT_EQ(1 + 1 * kWidth, sampler.GetSample(kWidth, kHeight));
+  EXPECT_EQ(1 + 4 * kWidth, sampler.GetSample(kWidth, kHeight));
+  EXPECT_EQ(1 + 7 * kWidth, sampler.GetSample(kWidth, kHeight));
+  EXPECT_EQ(1 + 10 * kWidth, sampler.GetSample(kWidth, kHeight));
+  // Step over by 3.
+  EXPECT_EQ(4 + 1 * kWidth, sampler.GetSample(kWidth, kHeight));
+  EXPECT_EQ(4 + 4 * kWidth, sampler.GetSample(kWidth, kHeight));
+  EXPECT_EQ(4 + 7 * kWidth, sampler.GetSample(kWidth, kHeight));
+  EXPECT_EQ(4 + 10 * kWidth, sampler.GetSample(kWidth, kHeight));
+}
+
+TEST_F(ColorAnalysisTest, FindClosestColor) {
+  // Empty image returns input color.
+  SkColor color = FindClosestColor(NULL, 0, 0, SK_ColorRED);
+  EXPECT_EQ(SK_ColorRED, color);
+
+  // Single color image returns that color.
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 16, 16);
+  bitmap.allocPixels();
+  bitmap.eraseColor(SK_ColorWHITE);
+  color = FindClosestColor(static_cast<uint8_t*>(bitmap.getPixels()),
+                           bitmap.width(),
+                           bitmap.height(),
+                           SK_ColorRED);
+  EXPECT_EQ(SK_ColorWHITE, color);
+
+  // Write a black pixel into the image. A dark grey input pixel should match
+  // the black one in the image.
+  uint32_t* pixel = bitmap.getAddr32(0, 0);
+  *pixel = SK_ColorBLACK;
+  color = FindClosestColor(static_cast<uint8_t*>(bitmap.getPixels()),
+                           bitmap.width(),
+                           bitmap.height(),
+                           SK_ColorDKGRAY);
+  EXPECT_EQ(SK_ColorBLACK, color);
+}
+
+TEST_F(ColorAnalysisTest, CalculateKMeanColorOfBitmap) {
+  // Create a 16x16 bitmap to represent a favicon.
+  SkBitmap bitmap;
+  bitmap.setConfig(SkBitmap::kARGB_8888_Config, 16, 16);
+  bitmap.allocPixels();
+  bitmap.eraseARGB(255, 100, 150, 200);
+
+  SkColor color = color_utils::CalculateKMeanColorOfBitmap(bitmap);
+  EXPECT_EQ(255u, SkColorGetA(color));
+  // Color values are not exactly equal due to reversal of premultiplied alpha.
+  EXPECT_TRUE(ChannelApproximatelyEqual(100, SkColorGetR(color)));
+  EXPECT_TRUE(ChannelApproximatelyEqual(150, SkColorGetG(color)));
+  EXPECT_TRUE(ChannelApproximatelyEqual(200, SkColorGetB(color)));
+
+  // Test a bitmap with an alpha channel.
+  bitmap.eraseARGB(128, 100, 150, 200);
+  color = color_utils::CalculateKMeanColorOfBitmap(bitmap);
+
+  // Alpha channel should be ignored for dominant color calculation.
+  EXPECT_EQ(255u, SkColorGetA(color));
+  EXPECT_TRUE(ChannelApproximatelyEqual(100, SkColorGetR(color)));
+  EXPECT_TRUE(ChannelApproximatelyEqual(150, SkColorGetG(color)));
+  EXPECT_TRUE(ChannelApproximatelyEqual(200, SkColorGetB(color)));
 }

@@ -26,7 +26,6 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
@@ -51,7 +50,6 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if !defined(OS_ANDROID)
@@ -166,19 +164,15 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   ChromeURLDataManager::AddDataSource(profile, html_source);
 
   pref_change_registrar_.Init(GetProfile()->GetPrefs());
-  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
+  pref_change_registrar_.Add(prefs::kShowBookmarkBar,
+                             base::Bind(&NewTabUI::OnShowBookmarkBarChanged,
+                                        base::Unretained(this)));
 
 #if defined(ENABLE_THEMES)
   // Listen for theme installation.
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(GetProfile())));
-  if (chrome::search::IsInstantExtendedAPIEnabled(GetProfile())) {
-    registrar_.Add(
-        this,
-        chrome::NOTIFICATION_NTP_BACKGROUND_THEME_Y_POS_CHANGED,
-        content::Source<Profile>(GetProfile()));
-  }
 #endif
 }
 
@@ -230,6 +224,9 @@ void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
 }
 
 bool NewTabUI::CanShowBookmarkBar() const {
+  if (web_ui()->GetWebContents()->GetURL().SchemeIs(chrome::kViewSourceScheme))
+    return false;
+
   PrefService* prefs = GetProfile()->GetPrefs();
   bool disabled_by_policy =
       prefs->IsManagedPreference(prefs::kShowBookmarkBar) &&
@@ -249,13 +246,6 @@ void NewTabUI::Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_PREF_CHANGED: {  // kShowBookmarkBar
-      StringValue attached(
-          GetProfile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar) ?
-              "true" : "false");
-      web_ui()->CallJavascriptFunction("ntp.setBookmarkBarAttached", attached);
-      break;
-    }
 #if defined(ENABLE_THEMES)
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
       InitializeCSSCaches();
@@ -263,19 +253,6 @@ void NewTabUI::Observe(int type,
           ThemeServiceFactory::GetForProfile(GetProfile())->HasCustomImage(
               IDR_THEME_NTP_ATTRIBUTION) ? "true" : "false");
       web_ui()->CallJavascriptFunction("ntp.themeChanged", attribution);
-      break;
-    }
-    case chrome::NOTIFICATION_NTP_BACKGROUND_THEME_Y_POS_CHANGED: {
-      int y_pos = *(content::Details<int>(details).ptr());
-      int alignment;
-      if (!ThemeServiceFactory::GetForProfile(GetProfile())->GetDisplayProperty(
-              ThemeService::NTP_BACKGROUND_ALIGNMENT, &alignment)) {
-        return;
-      }
-      StringValue background_pos_y(
-          NTPResourceCache::GetNewTabBackgroundPositionY(y_pos, alignment));
-      web_ui()->CallJavascriptFunction("ntp.setBackgroundPositionY",
-                                       background_pos_y);
       break;
     }
 #endif
@@ -286,6 +263,13 @@ void NewTabUI::Observe(int type,
     default:
       CHECK(false) << "Unexpected notification: " << type;
   }
+}
+
+void NewTabUI::OnShowBookmarkBarChanged() {
+  StringValue attached(
+      GetProfile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar) ?
+          "true" : "false");
+  web_ui()->CallJavascriptFunction("ntp.setBookmarkBarAttached", attached);
 }
 
 void NewTabUI::InitializeCSSCaches() {
@@ -315,7 +299,8 @@ bool NewTabUI::ShouldShowApps() {
   // Android does not have apps.
   return false;
 #else
-  return true;
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kShowAppListShortcut);
 #endif
 }
 
@@ -392,7 +377,7 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(const std::string& path,
     scoped_refptr<base::RefCountedStaticMemory> resource_bytes(
         it->second.second ?
             ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
-                it->second.second, ui::SCALE_FACTOR_NONE) :
+                it->second.second) :
             new base::RefCountedStaticMemory);
     SendResponse(request_id, resource_bytes);
     return;

@@ -35,6 +35,7 @@ class TabContentsProvider;
 }
 
 namespace base {
+class SequencedTaskRunner;
 class Time;
 }
 
@@ -67,7 +68,6 @@ class SSLConfigService;
 namespace policy {
 class ManagedModePolicyProvider;
 class PolicyService;
-class UserCloudPolicyManager;
 }
 
 class Profile : public content::BrowserContext {
@@ -140,6 +140,10 @@ class Profile : public content::BrowserContext {
   // time.
   static void RegisterUserPrefs(PrefService* prefs);
 
+  // Gets task runner for I/O operations associated with |profile|.
+  static scoped_refptr<base::SequencedTaskRunner> GetTaskRunnerForProfile(
+      Profile* profile);
+
   // Create a new profile given a path. If |create_mode| is
   // CREATE_MODE_ASYNCHRONOUS then the profile is initialized asynchronously.
   static Profile* CreateProfile(const FilePath& path,
@@ -156,6 +160,10 @@ class Profile : public content::BrowserContext {
 
   // Typesafe upcast.
   virtual TestingProfile* AsTestingProfile();
+
+  // Returns sequenced task runner where browser context dependent I/O
+  // operations should be performed.
+  virtual scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() = 0;
 
   // Returns the name associated with this profile. This name is displayed in
   // the browser frame.
@@ -200,10 +208,6 @@ class Profile : public content::BrowserContext {
   // Accessor. The instance is created upon first access.
   virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() = 0;
 
-  // Returns the UserCloudPolicyManager (if any) that handles this profile's
-  // connection to the cloud-based management service.
-  virtual policy::UserCloudPolicyManager* GetUserCloudPolicyManager() = 0;
-
   // Returns the ManagedModePolicyProvider for this profile, if it exists.
   virtual policy::ManagedModePolicyProvider* GetManagedModePolicyProvider() = 0;
 
@@ -228,7 +232,8 @@ class Profile : public content::BrowserContext {
 
   // Returns the request context used within |partition_id|.
   virtual net::URLRequestContextGetter* GetRequestContextForStoragePartition(
-      const std::string& partition_id) = 0;
+      const FilePath& partition_path,
+      bool in_memory) = 0;
 
   // Returns the SSLConfigService for this profile.
   virtual net::SSLConfigService* GetSSLConfigService() = 0;
@@ -293,10 +298,13 @@ class Profile : public content::BrowserContext {
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() = 0;
 
   // Deletes all network related data since |time|. It deletes transport
-  // security state since |time| and it also delete HttpServerProperties data.
-  // The implementation is free to run this on a background thread, so when this
-  // method returns data is not guaranteed to be deleted.
-  virtual void ClearNetworkingHistorySince(base::Time time) = 0;
+  // security state since |time| and it also deletes HttpServerProperties data.
+  // Works asynchronously, however if the |completion| callback is non-null, it
+  // will be posted on the UI thread once the removal process completes.
+  // Be aware that theoretically it is possible that |completion| will be
+  // invoked after the Profile instance has been destroyed.
+  virtual void ClearNetworkingHistorySince(base::Time time,
+                                           const base::Closure& completion) = 0;
 
   // Returns the home page for this profile.
   virtual GURL GetHomePage() = 0;
@@ -308,7 +316,7 @@ class Profile : public content::BrowserContext {
   std::string GetDebugName();
 
   // Returns whether it is a guest session.
-  static bool IsGuestSession();
+  bool IsGuestSession();
 
   // Did the user restore the last session? This is set by SessionRestore.
   void set_restored_last_session(bool restored_last_session) {

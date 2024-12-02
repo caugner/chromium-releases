@@ -10,19 +10,19 @@
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 
-namespace {
+namespace content {
 
-using content::GpuDataManager;
+namespace {
 
 bool CanDoAcceleratedCompositing() {
   const GpuDataManager* gpu_data_manager = GpuDataManager::GetInstance();
-  content::GpuFeatureType blacklisted_features =
+  GpuFeatureType blacklisted_features =
       gpu_data_manager->GetBlacklistedFeatures();
 
   // Don't run the field trial if gpu access has been blocked or
   // accelerated compositing is blacklisted.
   if (!gpu_data_manager->GpuAccessAllowed() ||
-      blacklisted_features & content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING)
+      blacklisted_features & GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING)
     return false;
 
   // Check for the software rasterizer (SwiftShader).
@@ -36,9 +36,14 @@ bool CanDoAcceleratedCompositing() {
   return true;
 }
 
-}  // namespace
+bool IsForceCompositingModeBlacklisted() {
+  GpuFeatureType blacklisted_features =
+      GpuDataManager::GetInstance()->GetBlacklistedFeatures();
+  return GPU_FEATURE_TYPE_FORCE_COMPOSITING_MODE ==
+      (blacklisted_features & GPU_FEATURE_TYPE_FORCE_COMPOSITING_MODE);
+}
 
-namespace content {
+}  // namespace
 
 bool IsThreadedCompositingEnabled() {
 #if defined(OS_WIN) && defined(USE_AURA)
@@ -49,18 +54,9 @@ bool IsThreadedCompositingEnabled() {
   if (!CanDoAcceleratedCompositing())
     return false;
 
-  const GpuDataManager* gpu_data_manager = GpuDataManager::GetInstance();
-  GpuFeatureType blacklisted_features =
-      gpu_data_manager->GetBlacklistedFeatures();
-  // Disallow threaded compositing when texture sharing is blacklisted since
-  // this triggers renderer-side readbacks for the thumbnailer / extensions.
-  // http://crbug.com/158747
-  if (blacklisted_features & GPU_FEATURE_TYPE_TEXTURE_SHARING)
-    return false;
-
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
-  // Command line switches take precedence over field trials.
+  // Command line switches take precedence over blacklist and field trials.
   if (command_line.HasSwitch(switches::kDisableForceCompositingMode) ||
       command_line.HasSwitch(switches::kDisableThreadedCompositing))
     return false;
@@ -68,11 +64,13 @@ bool IsThreadedCompositingEnabled() {
   if (command_line.HasSwitch(switches::kEnableThreadedCompositing))
     return true;
 
+  if (IsForceCompositingModeBlacklisted())
+    return false;
+
   base::FieldTrial* trial =
-      base::FieldTrialList::Find(content::kGpuCompositingFieldTrialName);
+      base::FieldTrialList::Find(kGpuCompositingFieldTrialName);
   return trial &&
-         trial->group_name() ==
-             content::kGpuCompositingFieldTrialThreadEnabledName;
+         trial->group_name() == kGpuCompositingFieldTrialThreadEnabledName;
 }
 
 bool IsForceCompositingModeEnabled() {
@@ -86,23 +84,25 @@ bool IsForceCompositingModeEnabled() {
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
-  // Command line switches take precedence over field trials.
+  // Command line switches take precedence over blacklisting and field trials.
   if (command_line.HasSwitch(switches::kDisableForceCompositingMode))
     return false;
 
   if (command_line.HasSwitch(switches::kForceCompositingMode))
     return true;
 
+  if (IsForceCompositingModeBlacklisted())
+    return false;
+
   base::FieldTrial* trial =
-      base::FieldTrialList::Find(content::kGpuCompositingFieldTrialName);
+      base::FieldTrialList::Find(kGpuCompositingFieldTrialName);
 
   // Force compositing is enabled in both the force compositing
   // and threaded compositing mode field trials.
   return trial &&
         (trial->group_name() ==
-            content::kGpuCompositingFieldTrialForceCompositingEnabledName ||
-         trial->group_name() ==
-            content::kGpuCompositingFieldTrialThreadEnabledName);
+            kGpuCompositingFieldTrialForceCompositingEnabledName ||
+         trial->group_name() == kGpuCompositingFieldTrialThreadEnabledName);
 }
 
 }  // namespace content

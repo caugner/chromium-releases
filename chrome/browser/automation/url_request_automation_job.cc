@@ -16,10 +16,14 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/upload_bytes_element_reader.h"
+#include "net/base/upload_data_stream.h"
+#include "net/base/upload_file_element_reader.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+#include "net/url_request/http_user_agent_settings.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
@@ -28,9 +32,11 @@ using base::TimeDelta;
 using content::BrowserThread;
 using content::ResourceRequestInfo;
 
+namespace {
+
 // The list of filtered headers that are removed from requests sent via
 // StartAsync(). These must be lower case.
-static const char* const kFilteredHeaderStrings[] = {
+const char* const kFilteredHeaderStrings[] = {
   "connection",
   "cookie",
   "expect",
@@ -41,6 +47,38 @@ static const char* const kFilteredHeaderStrings[] = {
   "upgrade",
   "via"
 };
+
+// Creates UploadData from UploadDataStream.
+net::UploadData* CreateUploadData(
+    const net::UploadDataStream* upload_data_stream) {
+  net::UploadData* upload_data = new net::UploadData();
+  const ScopedVector<net::UploadElementReader>& element_readers =
+      upload_data_stream->element_readers();
+  for (size_t i = 0; i < element_readers.size(); ++i) {
+    const net::UploadElementReader* reader = element_readers[i];
+    if (reader->AsBytesReader()) {
+      const net::UploadBytesElementReader* bytes_reader =
+          reader->AsBytesReader();
+      upload_data->AppendBytes(bytes_reader->bytes(), bytes_reader->length());
+    } else if (reader->AsFileReader()) {
+      const net::UploadFileElementReader* file_reader =
+          reader->AsFileReader();
+      upload_data->AppendFileRange(file_reader->path(),
+                                   file_reader->range_offset(),
+                                   file_reader->range_length(),
+                                   file_reader->expected_modification_time());
+    } else {
+      NOTIMPLEMENTED();
+    }
+  }
+  upload_data->set_identifier(upload_data_stream->identifier());
+  upload_data->set_is_chunked(upload_data_stream->is_chunked());
+  upload_data->set_last_chunk_appended(
+      upload_data_stream->last_chunk_appended());
+  return upload_data;
+}
+
+}  // namespace
 
 int URLRequestAutomationJob::instance_count_ = 0;
 bool URLRequestAutomationJob::is_protocol_factory_registered_ = false;
@@ -53,11 +91,13 @@ net::URLRequest::ProtocolFactory* URLRequestAutomationJob::old_https_factory_
 URLRequestAutomationJob::URLRequestAutomationJob(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate,
+    const net::HttpUserAgentSettings* http_user_agent_settings,
     int tab,
     int request_id,
     AutomationResourceMessageFilter* filter,
     bool is_pending)
     : net::URLRequestJob(request, network_delegate),
+      http_user_agent_settings_(http_user_agent_settings),
       id_(0),
       tab_(tab),
       message_filter_(filter),
@@ -113,6 +153,7 @@ net::URLRequestJob* URLRequestAutomationJob::Factory(
               child_id, route_id, &details)) {
         URLRequestAutomationJob* job = new URLRequestAutomationJob(
             request, network_delegate,
+            request->context()->http_user_agent_settings(),
             details.tab_handle, info->GetRequestID(), details.filter,
             details.is_pending_render_view);
         return job;
@@ -423,15 +464,22 @@ void URLRequestAutomationJob::StartAsync() {
   // didn't have them specified.
   if (!new_request_headers.HasHeader(
       net::HttpRequestHeaders::kAcceptLanguage) &&
-      !request_->context()->accept_language().empty()) {
-    new_request_headers.SetHeader(net::HttpRequestHeaders::kAcceptLanguage,
-                                  request_->context()->accept_language());
+      http_user_agent_settings_) {
+    std::string accept_language =
+        http_user_agent_settings_->GetAcceptLanguage();
+    if (!accept_language.empty()) {
+      new_request_headers.SetHeader(net::HttpRequestHeaders::kAcceptLanguage,
+                                    accept_language);
+    }
   }
   if (!new_request_headers.HasHeader(
       net::HttpRequestHeaders::kAcceptCharset) &&
-      !request_->context()->accept_charset().empty()) {
-    new_request_headers.SetHeader(net::HttpRequestHeaders::kAcceptCharset,
-                                  request_->context()->accept_charset());
+      http_user_agent_settings_) {
+    std::string accept_charset = http_user_agent_settings_->GetAcceptCharset();
+    if (!accept_charset.empty()) {
+      new_request_headers.SetHeader(net::HttpRequestHeaders::kAcceptCharset,
+                                    accept_charset);
+    }
   }
 
   // Ensure that we do not send username and password fields in the referrer.
@@ -452,13 +500,18 @@ void URLRequestAutomationJob::StartAsync() {
     resource_type = info->GetResourceType();
   }
 
+  // Construct UploadData from UploadDataStream.
+  scoped_refptr<net::UploadData> upload_data;
+  if (request_->get_upload())
+    upload_data = CreateUploadData(request_->get_upload());
+
   // Ask automation to start this request.
   AutomationURLRequest automation_request;
   automation_request.url = request_->url().spec();
   automation_request.method = request_->method();
   automation_request.referrer = referrer.spec();
   automation_request.extra_request_headers = new_request_headers.ToString();
-  automation_request.upload_data = request_->get_upload_mutable();
+  automation_request.upload_data = upload_data;
   automation_request.resource_type = resource_type;
   automation_request.load_flags = request_->load_flags();
 

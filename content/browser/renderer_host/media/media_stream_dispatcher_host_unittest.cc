@@ -163,7 +163,7 @@ class MediaStreamDispatcherHostTest : public testing::Test {
   }
 
   virtual void TearDown() OVERRIDE {
-    message_loop_->RunAllPending();
+    message_loop_->RunUntilIdle();
 
     // Recover the old browser client and content client.
     GetContentClient()->set_browser_for_testing(old_browser_client_);
@@ -229,7 +229,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateThreeStreams) {
   EXPECT_EQ(host_->audio_devices_.size(), 0u);
   EXPECT_EQ(host_->video_devices_.size(), 1u);
   std::string label1 = host_->label_;
-  std::string device_id1 = host_->video_devices_.front().device_id;
+  std::string device_id1 = host_->video_devices_.front().device.id;
 
   // Check that we now have one opened streams.
   EXPECT_EQ(host_->NumberOfStreams(), 1u);
@@ -246,7 +246,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateThreeStreams) {
   EXPECT_EQ(host_->audio_devices_.size(), 0u);
   EXPECT_EQ(host_->video_devices_.size(), 1u);
   std::string label2 = host_->label_;
-  std::string device_id2 = host_->video_devices_.front().device_id;
+  std::string device_id2 = host_->video_devices_.front().device.id;
   EXPECT_EQ(device_id1, device_id2);
   EXPECT_NE(label1, label2);
 
@@ -267,7 +267,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateThreeStreams) {
   EXPECT_EQ(host_->audio_devices_.size(), 0u);
   EXPECT_EQ(host_->video_devices_.size(), 1u);
   std::string label3 = host_->label_;
-  std::string device_id3 = host_->video_devices_.front().device_id;
+  std::string device_id3 = host_->video_devices_.front().device.id;
   EXPECT_EQ(device_id1, device_id3);
   EXPECT_NE(label1, label3);
   EXPECT_NE(label2, label3);

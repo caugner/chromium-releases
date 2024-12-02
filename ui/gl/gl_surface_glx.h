@@ -5,6 +5,8 @@
 #ifndef UI_GL_GL_SURFACE_GLX_H_
 #define UI_GL_GL_SURFACE_GLX_H_
 
+#include <string>
+
 #include "base/compiler_specific.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/native_widget_types.h"
@@ -26,8 +28,10 @@ class GL_EXPORT GLSurfaceGLX : public GLSurface {
   // initialization guards.
   static const char* GetGLXExtensions();
   static bool HasGLXExtension(const char* name);
+  static bool IsCreateContextSupported();
   static bool IsCreateContextRobustnessSupported();
   static bool IsTextureFromPixmapSupported();
+  static bool IsOMLSyncControlSupported();
 
   virtual void* GetDisplay() OVERRIDE;
 
@@ -58,6 +62,15 @@ class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX {
   virtual std::string GetExtensions() OVERRIDE;
   virtual void* GetConfig() OVERRIDE;
   virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
+  virtual void GetVSyncParameters(const UpdateVSyncCallback& callback) OVERRIDE;
+
+  class VSyncProvider {
+   public:
+    virtual ~VSyncProvider() { }
+
+    virtual void GetVSyncParameters(
+        const GLSurface::UpdateVSyncCallback& callback) = 0;
+  };
 
  protected:
   NativeViewGLSurfaceGLX();
@@ -68,6 +81,8 @@ class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX {
  private:
   void* config_;
   gfx::Size size_;
+
+  scoped_ptr<VSyncProvider> vsync_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceGLX);
 };

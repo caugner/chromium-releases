@@ -13,7 +13,7 @@
       'target_name': 'check_sdk_patch',
       'type': 'none',
       'variables': {
-        'check_sdk_script': '<(DEPTH)/chrome/tools/build/win/check_sdk_patch.py',
+        'check_sdk_script': 'util/check_sdk_patch.py',
         'output_path': '<(INTERMEDIATE_DIR)/check_sdk_patch',
       },
       'actions': [
@@ -33,6 +33,17 @@
                      '<(output_path)',
                      ],
         },
+      ],
+    },
+    {
+      'target_name': 'win8_util',
+      'type': 'static_library',
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'util/win8_util.cc',
+        'util/win8_util.h',
       ],
     },
   ],

@@ -16,9 +16,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/public/pref_member.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/api/prefs/pref_member.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
@@ -193,7 +193,7 @@ void PluginsDOMHandler::RegisterMessages() {
   Profile* profile = Profile::FromWebUI(web_ui());
 
   PrefService* prefs = profile->GetPrefs();
-  show_details_.Init(prefs::kPluginsShowDetails, prefs, NULL);
+  show_details_.Init(prefs::kPluginsShowDetails, prefs);
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
@@ -487,7 +487,7 @@ PluginsUI::PluginsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 base::RefCountedMemory* PluginsUI::GetFaviconResourceBytes(
       ui::ScaleFactor scale_factor) {
   return ResourceBundle::GetSharedInstance().
-      LoadDataResourceBytes(IDR_PLUGINS_FAVICON, scale_factor);
+      LoadDataResourceBytesForScale(IDR_PLUGINS_FAVICON, scale_factor);
 }
 
 // static

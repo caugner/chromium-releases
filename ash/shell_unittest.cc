@@ -267,7 +267,7 @@ TEST_F(ShellTest, IsScreenLocked) {
 
 // Fails on Mac, see http://crbug.com/115662
 #if defined(OS_MACOSX)
-#define MAYBE_ManagedWindowModeBasics FAILS_ManagedWindowModeBasics
+#define MAYBE_ManagedWindowModeBasics DISABLED_ManagedWindowModeBasics
 #else
 #define MAYBE_ManagedWindowModeBasics ManagedWindowModeBasics
 #endif
@@ -318,19 +318,19 @@ TEST_F(ShellTest, FullscreenWindowHidesShelf) {
 
   // Shelf defaults to visible.
   EXPECT_EQ(
-      internal::ShelfLayoutManager::VISIBLE,
+      SHELF_VISIBLE,
       Shell::GetPrimaryRootWindowController()->shelf()->visibility_state());
 
   // Fullscreen window hides it.
   widget->SetFullscreen(true);
   EXPECT_EQ(
-      internal::ShelfLayoutManager::HIDDEN,
+      SHELF_HIDDEN,
       Shell::GetPrimaryRootWindowController()->shelf()->visibility_state());
 
   // Restoring the window restores it.
   widget->Restore();
   EXPECT_EQ(
-      internal::ShelfLayoutManager::VISIBLE,
+      SHELF_VISIBLE,
       Shell::GetPrimaryRootWindowController()->shelf()->visibility_state());
 
   // Clean up.
@@ -352,39 +352,38 @@ std::vector<aura::Window*> BuildPathToRoot(aura::Window* window) {
 
 }  // namespace
 
-// Various assertions around IsAutoHideMenuHideChecked() and
-// ToggleAutoHideMenu().
+// Various assertions around SetShelfAutoHideBehavior() and
+// GetShelfAutoHideBehavior().
 TEST_F(ShellTest, ToggleAutoHide) {
   scoped_ptr<aura::Window> window(new aura::Window(NULL));
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
   window->SetType(aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
-  window->SetParent(NULL);
+  SetDefaultParentByPrimaryRootWindow(window.get());
   window->Show();
   wm::ActivateWindow(window.get());
 
-  internal::RootWindowController* controller =
-      Shell::GetPrimaryRootWindowController();
-  controller->SetShelfAutoHideBehavior(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  Shell* shell = Shell::GetInstance();
+  aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
+  shell->SetShelfAutoHideBehavior(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
+                                  root_window);
   EXPECT_EQ(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
-            controller->GetShelfAutoHideBehavior());
-  EXPECT_TRUE(controller->IsShelfAutoHideMenuHideChecked());
-  controller->SetShelfAutoHideBehavior(
-      controller->GetToggledShelfAutoHideBehavior());
+            shell->GetShelfAutoHideBehavior(root_window));
+  shell->SetShelfAutoHideBehavior(ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER,
+                                  root_window);
   EXPECT_EQ(ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER,
-            controller->GetShelfAutoHideBehavior());
-
+            shell->GetShelfAutoHideBehavior(root_window));
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
-  EXPECT_FALSE(controller->IsShelfAutoHideMenuHideChecked());
-  controller->SetShelfAutoHideBehavior(
-      controller->GetToggledShelfAutoHideBehavior());
-  EXPECT_EQ(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
-            controller->GetShelfAutoHideBehavior());
-  EXPECT_TRUE(controller->IsShelfAutoHideMenuHideChecked());
-  controller->SetShelfAutoHideBehavior(
-      controller->GetToggledShelfAutoHideBehavior());
   EXPECT_EQ(ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER,
-            controller->GetShelfAutoHideBehavior());
+            shell->GetShelfAutoHideBehavior(root_window));
+  shell->SetShelfAutoHideBehavior(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
+                                  root_window);
+  EXPECT_EQ(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
+            shell->GetShelfAutoHideBehavior(root_window));
+  shell->SetShelfAutoHideBehavior(ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER,
+                                  root_window);
+  EXPECT_EQ(ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER,
+            shell->GetShelfAutoHideBehavior(root_window));
 }
 
 // This verifies WindowObservers are removed when a window is destroyed after

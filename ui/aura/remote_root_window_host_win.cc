@@ -9,22 +9,25 @@
 #include <algorithm>
 
 #include "base/message_loop.h"
+#include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "ui/aura/client/capture_client.h"
-#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/cursor/cursor_loader_win.h"
 #include "ui/base/events/event.h"
+#include "ui/base/events/event_utils.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/view_prop.h"
-
-using std::max;
-using std::min;
+#include "ui/metro_viewer/metro_viewer_messages.h"
 
 namespace aura {
 
 namespace {
 
 const char* kRootWindowHostWinKey = "__AURA_REMOTE_ROOT_WINDOW_HOST_WIN__";
+
+// The touch id to be used for touch events coming in from Windows Ash.
+const int kRemoteWindowTouchId = 10;
 
 }  // namespace
 
@@ -41,11 +44,42 @@ RemoteRootWindowHostWin* RemoteRootWindowHostWin::Create(
 }
 
 RemoteRootWindowHostWin::RemoteRootWindowHostWin(const gfx::Rect& bounds)
-    : delegate_(NULL) {
+    : delegate_(NULL), host_(NULL) {
   prop_.reset(new ui::ViewProp(NULL, kRootWindowHostWinKey, this));
 }
 
 RemoteRootWindowHostWin::~RemoteRootWindowHostWin() {
+}
+
+void RemoteRootWindowHostWin::Connected(IPC::Sender* host) {
+  CHECK(host_ == NULL);
+  host_ = host;
+}
+
+void RemoteRootWindowHostWin::Disconnected() {
+  CHECK(host_ != NULL);
+  host_ = NULL;
+}
+
+bool RemoteRootWindowHostWin::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RemoteRootWindowHostWin, message)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_MouseMoved, OnMouseMoved)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_MouseButton, OnMouseButton)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_KeyDown, OnKeyDown)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_KeyUp, OnKeyUp)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_Character, OnChar)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_VisibilityChanged,
+                        OnVisibilityChanged)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_TouchDown,
+                        OnTouchDown)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_TouchUp,
+                        OnTouchUp)
+    IPC_MESSAGE_HANDLER(MetroViewerHostMsg_TouchMoved,
+                        OnTouchMoved)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;  
 }
 
 void RemoteRootWindowHostWin::SetDelegate(RootWindowHostDelegate* delegate) {
@@ -80,6 +114,7 @@ gfx::Rect RemoteRootWindowHostWin::GetBounds() const {
 }
 
 void RemoteRootWindowHostWin::SetBounds(const gfx::Rect& bounds) {
+  delegate_->OnHostResized(bounds.size());
 }
 
 gfx::Point RemoteRootWindowHostWin::GetLocationOnNativeScreen() const {
@@ -87,6 +122,10 @@ gfx::Point RemoteRootWindowHostWin::GetLocationOnNativeScreen() const {
 }
 
 void RemoteRootWindowHostWin::SetCursor(gfx::NativeCursor native_cursor) {
+  if (!host_)
+    return;
+  host_->Send(
+      new MetroViewerHostMsg_SetCursor(uint64(native_cursor.platform())));
 }
 
 void RemoteRootWindowHostWin::SetCapture() {
@@ -124,6 +163,10 @@ bool RemoteRootWindowHostWin::GrabSnapshot(
 void RemoteRootWindowHostWin::UnConfineCursor() {
 }
 
+void RemoteRootWindowHostWin::OnCursorVisibilityChanged(bool show) {
+  NOTIMPLEMENTED();
+}
+
 void RemoteRootWindowHostWin::MoveCursorTo(const gfx::Point& location) {
 }
 
@@ -141,41 +184,91 @@ void RemoteRootWindowHostWin::OnDeviceScaleFactorChanged(
 }
 
 void RemoteRootWindowHostWin::PrepareForShutdown() {
-  NOTIMPLEMENTED();
 }
 
-void RemoteRootWindowHostWin::OnMouseMoved(int32 x, int32 y, int32 extra) {
+void RemoteRootWindowHostWin::OnMouseMoved(int32 x, int32 y, int32 flags) {
   gfx::Point location(x, y);
-  ui::MouseEvent event(ui::ET_MOUSE_MOVED, location, location, 0);
+  ui::MouseEvent event(ui::ET_MOUSE_MOVED, location, location, flags);
   delegate_->OnHostMouseEvent(&event);
 }
 
-void RemoteRootWindowHostWin::OnMouseClick(int32 x, int32 y, int32 extra) {
+void RemoteRootWindowHostWin::OnMouseButton(
+    int32 x, int32 y, int32 extra, ui::EventType type, ui::EventFlags flags) {
   gfx::Point location(x, y);
-  ui::EventType type = (extra == 1) ?
-      ui::ET_MOUSE_PRESSED : ui::ET_MOUSE_RELEASED;
-  ui::MouseEvent event(type, location, location, 0);
-  event.SetClickCount(1);
-  event.set_flags(ui::EF_LEFT_MOUSE_BUTTON);
-  delegate_->OnHostMouseEvent(&event);
+  ui::MouseEvent mouse_event(type, location, location, 0);
+  mouse_event.set_flags(flags);
+
+  if (type == ui::ET_MOUSEWHEEL) {
+    ui::MouseWheelEvent wheel_event(mouse_event, extra);
+    delegate_->OnHostMouseEvent(&wheel_event);
+  } else {
+    mouse_event.SetClickCount(1);
+    delegate_->OnHostMouseEvent(&mouse_event);
+  }
 }
 
 void RemoteRootWindowHostWin::OnKeyDown(uint32 vkey,
                                         uint32 repeat_count,
-                                        uint32 scan_code) {
+                                        uint32 scan_code,
+                                        uint32 flags) {
   ui::KeyEvent event(ui::ET_KEY_PRESSED,
                      ui::KeyboardCodeForWindowsKeyCode(vkey),
-                     0);
+                     flags,
+                     false);
   delegate_->OnHostKeyEvent(&event);
 }
 
 void RemoteRootWindowHostWin::OnKeyUp(uint32 vkey,
                                       uint32 repeat_count,
-                                      uint32 scan_code) {
+                                      uint32 scan_code,
+                                      uint32 flags) {
   ui::KeyEvent event(ui::ET_KEY_RELEASED,
                      ui::KeyboardCodeForWindowsKeyCode(vkey),
-                     0);
+                     flags,
+                     false);
   delegate_->OnHostKeyEvent(&event);
+}
+
+void RemoteRootWindowHostWin::OnChar(uint32 key_code,
+                                     uint32 repeat_count,
+                                     uint32 scan_code,
+                                     uint32 flags) {
+  ui::KeyEvent event(ui::ET_KEY_PRESSED,
+                     ui::KeyboardCodeForWindowsKeyCode(key_code),
+                     flags,
+                     true);
+  delegate_->OnHostKeyEvent(&event);
+}
+
+void RemoteRootWindowHostWin::OnVisibilityChanged(bool visible) {
+  if (visible)
+    delegate_->OnHostActivated();
+}
+
+void RemoteRootWindowHostWin::OnTouchDown(int32 x, int32 y, uint64 timestamp) {
+  ui::TouchEvent event(ui::ET_TOUCH_PRESSED,
+                       gfx::Point(x, y),
+                       kRemoteWindowTouchId,
+                       base::TimeDelta::FromMicroseconds(timestamp));
+  delegate_->OnHostTouchEvent(&event);
+}
+
+void RemoteRootWindowHostWin::OnTouchUp(int32 x, int32 y, uint64 timestamp) {
+  ui::TouchEvent event(ui::ET_TOUCH_RELEASED,
+                       gfx::Point(x, y),
+                       kRemoteWindowTouchId,
+                       base::TimeDelta::FromMicroseconds(timestamp));
+  delegate_->OnHostTouchEvent(&event);
+}
+
+void RemoteRootWindowHostWin::OnTouchMoved(int32 x,
+                                           int32 y,
+                                           uint64 timestamp) {
+  ui::TouchEvent event(ui::ET_TOUCH_MOVED,
+                       gfx::Point(x, y),
+                       kRemoteWindowTouchId,
+                       base::TimeDelta::FromMicroseconds(timestamp));
+  delegate_->OnHostTouchEvent(&event);
 }
 
 }  // namespace aura

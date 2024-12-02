@@ -6,6 +6,12 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_CHROMEOS)
+#include "base/chromeos/chromeos_version.h"
+#include "base/command_line.h"
+#include "ui/base/ui_base_switches.h"
+#endif
+
 namespace ui {
 
 TEST(LayoutTest, GetScaleFactorScale) {
@@ -62,6 +68,46 @@ TEST(LayoutTest, GetScaleFactorFromScaleAllSupported) {
   EXPECT_EQ(SCALE_FACTOR_200P, GetScaleFactorFromScale(999.0f));
 
   test::SetSupportedScaleFactors(original_supported_factors);
+}
+
+TEST(LayoutTest, GetMaxScaleFactor) {
+#if defined(OS_CHROMEOS)
+  // On Chrome OS, the maximum scale factor is based on
+  // the available resource pack. In testing environment,
+  // we always have 200P.
+  EXPECT_EQ(SCALE_FACTOR_200P, GetMaxScaleFactor());
+#else
+  std::vector<ScaleFactor> original_supported_factors =
+      GetSupportedScaleFactors();
+  {
+    ScaleFactor scale_factors[] = { SCALE_FACTOR_100P };
+    std::vector<ScaleFactor> supported_factors(
+        scale_factors, scale_factors + arraysize(scale_factors));
+    test::SetSupportedScaleFactors(supported_factors);
+    EXPECT_EQ(SCALE_FACTOR_100P, GetMaxScaleFactor());
+  }
+
+  {
+    ScaleFactor scale_factors[] = { SCALE_FACTOR_100P,
+                                    SCALE_FACTOR_140P };
+    std::vector<ScaleFactor> supported_factors(
+        scale_factors, scale_factors + arraysize(scale_factors));
+    test::SetSupportedScaleFactors(supported_factors);
+    EXPECT_EQ(SCALE_FACTOR_140P, GetMaxScaleFactor());
+  }
+
+  {
+    ScaleFactor scale_factors[] = { SCALE_FACTOR_200P,
+                                    SCALE_FACTOR_180P,
+                                    SCALE_FACTOR_140P,
+                                    SCALE_FACTOR_100P };
+    std::vector<ScaleFactor> supported_factors(
+        scale_factors, scale_factors + arraysize(scale_factors));
+    test::SetSupportedScaleFactors(supported_factors);
+    EXPECT_EQ(SCALE_FACTOR_200P, GetMaxScaleFactor());
+  }
+  test::SetSupportedScaleFactors(original_supported_factors);
+#endif
 }
 
 }  // namespace ui

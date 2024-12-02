@@ -57,15 +57,15 @@ class Syncer {
   void RequestEarlyExit();
 
   // Runs a sync cycle from |first_step| to |last_step|.
-  virtual void SyncShare(sessions::SyncSession* session,
+  // Returns true if the cycle completed with |last_step|, and false
+  // if it terminated early due to error / exit requested.
+  virtual bool SyncShare(sessions::SyncSession* session,
                          SyncerStep first_step,
                          SyncerStep last_step);
 
  private:
   bool early_exit_requested_;
   base::Lock early_exit_requested_lock_;
-
-  ConflictResolver resolver_;
 
   friend class SyncerTest;
   FRIEND_TEST_ALL_PREFIXES(SyncerTest, NameClashWithResolver);

@@ -23,6 +23,7 @@ namespace proxy {
 
 namespace {
 
+#if !defined(OS_NACL)
 PP_Bool HandleInputEvent(PP_Instance instance, PP_Resource input_event) {
   EnterResourceNoLock<PPB_InputEvent_API> enter(input_event, false);
   if (enter.failed()) {
@@ -51,6 +52,10 @@ PP_Bool HandleInputEvent(PP_Instance instance, PP_Resource input_event) {
 static const PPP_InputEvent input_event_interface = {
   &HandleInputEvent
 };
+#else
+// The NaCl plugin doesn't need the host side interface - stub it out.
+static const PPP_InputEvent input_event_interface = {};
+#endif  // !defined(OS_NACL)
 
 InterfaceProxy* CreateInputEventProxy(Dispatcher* dispatcher) {
   return new PPP_InputEvent_Proxy(dispatcher);
@@ -83,6 +88,9 @@ const InterfaceProxy::Info* PPP_InputEvent_Proxy::GetInfo() {
 }
 
 bool PPP_InputEvent_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  if (!dispatcher()->IsPlugin())
+    return false;
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_InputEvent_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPInputEvent_HandleInputEvent,

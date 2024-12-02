@@ -17,6 +17,7 @@ var recordMockData = false;
 
   // Only messages registered in the callback map will be intercepted.
   var callbackMap = {
+    'appRemoved': 'ntp.appRemoved',
     'blacklistURLFromMostVisited': NO_CALLBACK,
     'clearMostVisitedURLsBlacklist': NO_CALLBACK,
     'getApps': 'ntp.getAppsCallback',
@@ -26,6 +27,7 @@ var recordMockData = false;
     'metricsHandler:logEventTime': NO_CALLBACK,
     'metricsHandler:recordInHistogram': NO_CALLBACK,
     'removeURLsFromMostVisitedBlacklist': NO_CALLBACK,
+    'uninstallApp': NO_CALLBACK,
   };
 
   // TODO(pedrosimonetti): include automatically in the recorded data
@@ -93,7 +95,10 @@ var recordMockData = false;
   function dispatchCallbackForMessage(message) {
     var callbackNamespace = callbackMap[message];
     var callback = namespace(callbackNamespace);
-    var data = filterMap[message](dataMap[message]);
+    var data = dataMap[message];
+    var filter = filterMap[message];
+    if (filter)
+      data = filter(data);
     callback.apply(window, data);
   }
 
@@ -122,9 +127,9 @@ var recordMockData = false;
       loadTimeData.data = dataMap['__loadTimeData__'];
   }
 
-  function getAnimationDuration(duration) {
+  function getTime(time) {
     var slownessFactor = debugArgs.slownessFactor || 1;
-    return Math.round(duration * slownessFactor);
+    return Math.round(time * slownessFactor);
   }
 
   //----------------------------------------------------------------------------
@@ -236,6 +241,21 @@ var recordMockData = false;
       mostVisitedBlackList = {};
       dispatchCallbackForMessage('getMostVisited');
     },
+
+    uninstallApp: function(id) {
+      var removedData;
+      var data = dataMap['getApps'][0].apps;
+      for (var i = 0, length = data.length; i < length; i++) {
+        if (data[i].id == id) {
+          removedData = data[i];
+          data.splice(i, 1);
+          break;
+        }
+      }
+      assert(removedData);
+      dataMap['appRemoved'] = [removedData, true, true];
+      dispatchCallbackForMessage('appRemoved');
+    },
   };
 
   //----------------------------------------------------------------------------
@@ -251,14 +271,15 @@ var recordMockData = false;
   var selectorDurationMap = {
     '.animate-grid-width': 200,
     '.animate-grid-width .tile-cell': 200,
-    '.animate-frame-height': 200,
     '.animate-tile-repositioning .tile': 200,
     '.animate-tile-repositioning .tile:not(.target-tile)': 400,
-    '#bottom-panel': 250,
+    '#bottom-panel': 200,
     '.dot': 200,
-    '#page-list': 200,
     '.tile-grid-content': 200,
     '.tile-row': 200,
+  };
+
+  var selectorDurationImportantMap = {
   };
 
   var selectorDelayMap = {
@@ -270,7 +291,14 @@ var recordMockData = false;
     for (var selector in selectorDurationMap) {
       if (selectorDurationMap.hasOwnProperty(selector)) {
         animationRules.push(selector + ' { -webkit-transition-duration: ' +
-            getAnimationDuration(selectorDurationMap[selector]) +
+            getTime(selectorDurationMap[selector]) + 'ms; }\n');
+      }
+    }
+
+    for (var selector in selectorDurationImportantMap) {
+      if (selectorDurationImportantMap.hasOwnProperty(selector)) {
+        animationRules.push(selector + ' { -webkit-transition-duration: ' +
+            getTime(selectorDurationImportantMap[selector]) +
             'ms !important; }\n');
       }
     }
@@ -278,8 +306,7 @@ var recordMockData = false;
     for (var selector in selectorDelayMap) {
       if (selectorDelayMap.hasOwnProperty(selector)) {
         animationRules.push(selector + ' { -webkit-transition-delay: ' +
-            getAnimationDuration(selectorDelayMap[selector]) +
-            'ms !important; }\n');
+            getTime(selectorDelayMap[selector]) + 'ms; }\n');
       }
     }
 

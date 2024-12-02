@@ -32,7 +32,6 @@
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
-#include "ui/base/gtk/menu_label_accelerator_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -371,7 +370,7 @@ void TaskManagerGtk::OnItemsChanged(int start, int length) {
 }
 
 void TaskManagerGtk::OnItemsAdded(int start, int length) {
-  AutoReset<bool> autoreset(&ignore_selection_changed_, true);
+  base::AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
   GtkTreeIter iter;
   if (start == 0) {
@@ -397,7 +396,7 @@ void TaskManagerGtk::OnItemsAdded(int start, int length) {
 
 void TaskManagerGtk::OnItemsRemoved(int start, int length) {
   {
-    AutoReset<bool> autoreset(&ignore_selection_changed_, true);
+    base::AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
     GtkTreeIter iter;
     gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(process_list_), &iter,
@@ -473,8 +472,7 @@ void TaskManagerGtk::Init() {
   }
 
   gtk_dialog_add_button(GTK_DIALOG(dialog_),
-      ui::ConvertAcceleratorsFromWindowsStyle(
-          l10n_util::GetStringUTF8(IDS_TASK_MANAGER_KILL)).c_str(),
+      l10n_util::GetStringUTF8(IDS_TASK_MANAGER_KILL).c_str(),
       kTaskManagerResponseKill);
 
   // The response button should not be sensitive when the dialog is first opened
@@ -659,7 +657,6 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
   // Hide some columns by default.
   TreeViewColumnSetVisible(treeview_, kTaskManagerProfileName, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerSharedMem, false);
-  TreeViewColumnSetVisible(treeview_, kTaskManagerProcessID, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerJavaScriptMemory, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerWebCoreImageCache, false);
   TreeViewColumnSetVisible(treeview_, kTaskManagerWebCoreScriptsCache, false);
@@ -966,7 +963,7 @@ void TaskManagerGtk::OnTreeViewRealize(GtkTreeView* treeview) {
 void TaskManagerGtk::OnSelectionChanged(GtkTreeSelection* selection) {
   if (ignore_selection_changed_)
     return;
-  AutoReset<bool> autoreset(&ignore_selection_changed_, true);
+  base::AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
   // The set of groups that should be selected.
   std::set<TaskManagerModel::GroupRange> ranges;

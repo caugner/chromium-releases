@@ -15,6 +15,7 @@
 #include "base/timer.h"
 #include "remoting/codec/video_encoder.h"
 #include "remoting/host/capture_scheduler.h"
+#include "remoting/host/video_frame_capturer.h"
 #include "remoting/proto/video.pb.h"
 
 namespace base {
@@ -68,14 +69,15 @@ class VideoStub;
 // rate-limit captures to avoid overloading the host system, either by consuming
 // too much CPU, or hogging the host's graphics subsystem.
 
-class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler> {
+class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler>,
+                       public VideoFrameCapturer::Delegate {
  public:
   // Creates a VideoScheduler running capture, encode and network tasks on the
   // supplied TaskRunners.  Video and cursor shape updates will be pumped to
   // |video_stub| and |client_stub|, which must remain valid until Stop() is
   // called. |capturer| is used to capture frames and must remain valid until
   // the |done_task| supplied to Stop() is executed.
-  VideoScheduler(
+  static scoped_refptr<VideoScheduler> Create(
       scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
@@ -83,6 +85,12 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler> {
       scoped_ptr<VideoEncoder> encoder,
       protocol::ClientStub* client_stub,
       protocol::VideoStub* video_stub);
+
+  // VideoFrameCapturer::Delegate implementation.
+  virtual void OnCaptureCompleted(
+      scoped_refptr<CaptureData> capture_data) OVERRIDE;
+  virtual void OnCursorShapeChanged(
+      scoped_ptr<protocol::CursorShapeInfo> cursor_shape) OVERRIDE;
 
   // Stop scheduling frame captures.  |done_task| is executed on the network
   // thread when capturing has stopped.  This object cannot be re-used once
@@ -99,6 +107,15 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler> {
 
  private:
   friend class base::RefCountedThreadSafe<VideoScheduler>;
+
+  VideoScheduler(
+      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
+      VideoFrameCapturer* capturer,
+      scoped_ptr<VideoEncoder> encoder,
+      protocol::ClientStub* client_stub,
+      protocol::VideoStub* video_stub);
   virtual ~VideoScheduler();
 
   // Capturer thread ----------------------------------------------------------
@@ -115,13 +132,6 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler> {
 
   // Starts the next frame capture, unless there are already too many pending.
   void CaptureNextFrame();
-
-  // Called when a frame capture completes.
-  void CaptureDoneCallback(scoped_refptr<CaptureData> capture_data);
-
-  // Called when the cursor shape changes.
-  void CursorShapeChangedCallback(
-      scoped_ptr<protocol::CursorShapeInfo> cursor_data);
 
   // Called when a frame capture has been encoded & sent to the client.
   void FrameCaptureCompleted();
@@ -144,6 +154,10 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler> {
   void EncodeFrame(scoped_refptr<CaptureData> capture_data);
 
   void EncodedDataAvailableCallback(scoped_ptr<VideoPacket> packet);
+
+  // Used to synchronize capture and encode thread teardown, notifying the
+  // network thread when done.
+  void StopOnEncodeThread(const base::Closure& done_task);
 
   // Task runners used by this class.
   scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner_;
@@ -173,12 +187,6 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler> {
   // True if capture of video frames is paused.
   bool is_paused_;
 
-  // Time when capture is started.
-  base::Time capture_start_time_;
-
-  // Time when encode is started.
-  base::Time encode_start_time_;
-
   // This is a number updated by client to trace performance.
   int64 sequence_number_;
 
@@ -190,4 +198,4 @@ class VideoScheduler : public base::RefCountedThreadSafe<VideoScheduler> {
 
 }  // namespace remoting
 
-#endif  // REMOTING_HOST_SCREEN_RECORDER_H_
+#endif  // REMOTING_HOST_VIDEO_SCHEDULER_H_

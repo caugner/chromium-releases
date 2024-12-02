@@ -20,11 +20,15 @@
 <link rel="stylesheet" href="content_settings.css">
 <link rel="stylesheet" href="cookies_view.css">
 <link rel="stylesheet" href="do_not_track_confirm_overlay.css">
+<link rel="stylesheet" href="managed_user_settings.css">
 <link rel="stylesheet" href="font_settings.css">
 <link rel="stylesheet" href="handler_options.css">
 <link rel="stylesheet" href="home_page_overlay.css">
 <link rel="stylesheet" href="import_data_overlay.css">
 <link rel="stylesheet" href="instant_confirm_overlay.css">
+<if expr="not is_macosx">
+  <link rel="stylesheet" href="language_dictionary_overlay.css">
+</if>
 <link rel="stylesheet" href="language_options.css">
 <link rel="stylesheet" href="manage_profile_overlay.css">
 <link rel="stylesheet" href="password_manager.css">
@@ -44,12 +48,12 @@
   <link rel="stylesheet" href="chromeos/pointer_overlay.css">
   <link rel="stylesheet" href="factory_reset_overlay.css">
 </if>
-<if expr="pp_ifdef('chromeos') and pp_ifdef('use_ash')">
-  <link rel="stylesheet" href="chromeos/set_wallpaper_options.css">
-</if>
 <if expr="pp_ifdef('use_nss')">
   <link rel="stylesheet" href="certificate_manager.css">
   <link rel="stylesheet" href="certificate_tree.css">
+</if>
+<if expr="pp_ifdef('enable_settings_app')">
+  <link rel="stylesheet" href="options_settings_app.css">
 </if>
 <script src="chrome://resources/css/tree.css.js"></script>
 <script src="chrome://resources/js/cr.js"></script>
@@ -89,6 +93,7 @@
   <include src="content_settings.html">
   <include src="content_settings2.html">
   <include src="do_not_track_confirm_overlay.html">
+  <include src="managed_user_settings.html">
   <include src="font_settings.html">
   <include src="home_page_overlay.html">
   <include src="import_data_overlay.html">
@@ -110,9 +115,6 @@
     <include src="chromeos/pointer_overlay.html">
     <include src="factory_reset_overlay.html">
   </if>
-  <if expr="pp_ifdef('chromeos') and pp_ifdef('use_ash')">
-    <include src="chromeos/set_wallpaper_options.html">
-  </if>
   <if expr="pp_ifdef('use_nss')">
     <include src="certificate_manager.html">
   </if>
@@ -123,9 +125,11 @@
   <include src="autofill_edit_creditcard_overlay.html">
   <include src="content_settings_exceptions_area.html">
   <include src="cookies_view.html">
-  <include src="cookies_view_app.html">
   <include src="handler_options.html">
   <include src="language_add_language_overlay.html">
+  <if expr="not is_macosx">
+    <include src="language_dictionary_overlay.html">
+  </if>
   <include src="media_galleries_manager_overlay.html">
   <if expr="pp_ifdef('chromeos')">
     <include src="chromeos/internet_detail.html">

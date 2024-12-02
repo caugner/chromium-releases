@@ -69,7 +69,7 @@ class VIEWS_EXPORT MenuDelegate {
   virtual string16 GetLabel(int id) const;
 
   // The font for the menu item label.
-  virtual const gfx::Font& GetLabelFont(int id) const;
+  virtual const gfx::Font* GetLabelFont(int id) const;
 
   // The tooltip shown for the menu item. This is invoked when the user
   // hovers over the item, and no tooltip text has been set for that item.
@@ -111,6 +111,11 @@ class VIEWS_EXPORT MenuDelegate {
   // flags). mouse_event_flags is 0 if this is triggered by a user gesture
   // other than a mouse event.
   virtual void ExecuteCommand(int id, int mouse_event_flags);
+
+  // Returns true if ExecuteCommand() should be invoked while leaving the
+  // menu open. Default implementation returns true.
+  virtual bool ShouldExecuteCommandWithoutClosingMenu(int id,
+                                                      const ui::Event& e);
 
   // Returns true if the specified event is one the user can use to trigger, or
   // accept, the item. Defaults to left or right mouse buttons or tap.

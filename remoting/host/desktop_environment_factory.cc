@@ -4,6 +4,7 @@
 
 #include "remoting/host/desktop_environment_factory.h"
 
+#include "base/single_thread_task_runner.h"
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/client_session.h"
@@ -25,12 +26,11 @@ DesktopEnvironmentFactory::~DesktopEnvironmentFactory() {
 
 scoped_ptr<DesktopEnvironment> DesktopEnvironmentFactory::Create(
     ClientSession* client) {
-  scoped_ptr<AudioCapturer> audio_capturer = AudioCapturer::Create();
-  scoped_ptr<EventExecutor> event_executor = EventExecutor::Create(
-      input_task_runner_, ui_task_runner_);
-  scoped_ptr<VideoFrameCapturer> video_capturer(VideoFrameCapturer::Create());
-  return scoped_ptr<DesktopEnvironment>(new DesktopEnvironment(
-      audio_capturer.Pass(), event_executor.Pass(), video_capturer.Pass()));
+  scoped_ptr<DesktopEnvironment> environment(new DesktopEnvironment(
+      AudioCapturer::Create(),
+      EventExecutor::Create(input_task_runner_, ui_task_runner_),
+      VideoFrameCapturer::Create()));
+  return environment.Pass();
 }
 
 bool DesktopEnvironmentFactory::SupportsAudioCapture() const {
