@@ -501,8 +501,10 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter name
 [Worker]     method constructor
 [Worker]     method isSameEntry
+[Worker]     method move
 [Worker]     method queryPermission
 [Worker]     method remove
+[Worker]     method rename
 [Worker]     method requestPermission
 [Worker] interface FileSystemWritableFileStream : WritableStream
 [Worker]     attribute @@toStringTag
@@ -2846,6 +2848,11 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method createBidirectionalStream
 [Worker]     method createUnidirectionalStream
 [Worker]     method setDatagramWritableQueueExpirationDuration
+[Worker] interface WebTransportError : DOMException
+[Worker]     attribute @@toStringTag
+[Worker]     getter applicationProtocolCode
+[Worker]     getter source
+[Worker]     method constructor
 [Worker] interface WorkerGlobalScope : EventTarget
 [Worker]     attribute @@toStringTag
 [Worker]     getter addressSpace
@@ -2877,6 +2884,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method fetch
 [Worker]     method importScripts
 [Worker]     method queueMicrotask
+[Worker]     method reportError
 [Worker]     method setInterval
 [Worker]     method setTimeout
 [Worker]     setter onerror

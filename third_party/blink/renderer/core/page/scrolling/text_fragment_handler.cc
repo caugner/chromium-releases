@@ -33,6 +33,7 @@ TextFragmentHandler::TextFragmentHandler(LocalFrame* main_frame)
 
 void TextFragmentHandler::BindTextFragmentReceiver(
     mojo::PendingReceiver<mojom::blink::TextFragmentReceiver> producer) {
+  StartPreemptiveGenerationIfNeeded();
   selector_producer_.reset();
   selector_producer_.Bind(
       std::move(producer),

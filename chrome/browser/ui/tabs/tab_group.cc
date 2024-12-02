@@ -88,6 +88,10 @@ bool TabGroup::IsCustomized() const {
   return is_customized_;
 }
 
+bool TabGroup::IsSaved() const {
+  return is_saved_;
+}
+
 absl::optional<int> TabGroup::GetFirstTab() const {
   for (int i = 0; i < controller_->GetTabCount(); ++i) {
     if (controller_->GetTabGroupForTab(i) == id_)
@@ -115,12 +119,21 @@ gfx::Range TabGroup::ListTabs() const {
   // Safe to assume GetLastTab() is not nullopt.
   int last_tab = GetLastTab().value();
 
-  // If DCHECKs are enabled, check for group contiguity. The result
-  // doesn't really make sense if the group is discontiguous.
-  if (DCHECK_IS_ON()) {
-    for (int i = first_tab; i <= last_tab; ++i)
-      DCHECK(controller_->GetTabGroupForTab(i) == id_);
+  // Check for group contiguity. The result doesn't really make sense if the
+  // group is discontiguous.
+  for (int i = first_tab; i <= last_tab; ++i) {
+    const absl::optional<tab_groups::TabGroupId> maybe_tab_id =
+        controller_->GetTabGroupForTab(i);
+    CHECK(maybe_tab_id && maybe_tab_id == id_);
   }
 
   return gfx::Range(first_tab, last_tab + 1);
+}
+
+void TabGroup::SaveGroup() {
+  is_saved_ = true;
+}
+
+void TabGroup::UnsaveGroup() {
+  is_saved_ = false;
 }

@@ -108,8 +108,7 @@ void CoordinatorImpl::RegisterClientProcess(
     const absl::optional<std::string>& service_name) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   mojo::Remote<mojom::ClientProcess> process(std::move(client_process));
-  if (receiver.is_valid())
-    coordinator_receivers_.Add(this, std::move(receiver), process_id);
+  coordinator_receivers_.Add(this, std::move(receiver), process_id);
   process.set_disconnect_handler(
       base::BindOnce(&CoordinatorImpl::UnregisterClientProcess,
                      base::Unretained(this), process_id));
@@ -261,12 +260,12 @@ void CoordinatorImpl::UnregisterClientProcess(base::ProcessId process_id) {
   }
 
   for (auto& pair : in_progress_vm_region_requests_) {
-    QueuedVmRegionRequest* request = pair.second.get();
-    auto it = request->pending_responses.begin();
-    while (it != request->pending_responses.end()) {
+    QueuedVmRegionRequest* in_progress_request = pair.second.get();
+    auto it = in_progress_request->pending_responses.begin();
+    while (it != in_progress_request->pending_responses.end()) {
       auto current = it++;
       if (*current == process_id) {
-        request->pending_responses.erase(current);
+        in_progress_request->pending_responses.erase(current);
       }
     }
   }

@@ -27,6 +27,7 @@
 #include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
@@ -297,7 +298,7 @@ class ASH_EXPORT WallpaperControllerImpl
       const AccountId& account_id) const override;
   void UpdateDailyRefreshWallpaper(
       RefreshWallpaperCallback callback = base::DoNothing()) override;
-  void SyncLocalAndRemotePrefs(const AccountId& account_id) override;
+  void OnGoogleDriveMounted(const AccountId& account_id) override;
 
   // WindowTreeHostManager::Observer:
   void OnDisplayConfigurationChanged() override;
@@ -422,10 +423,9 @@ class ASH_EXPORT WallpaperControllerImpl
       scoped_refptr<base::SequencedTaskRunner> task_runner,
       const base::FilePath& file_path);
 
-  // Sets wallpaper info for the user to default and saves it to local
-  // state the user is not ephemeral. Returns false if this fails.
-  bool SetDefaultWallpaperInfo(const AccountId& account_id,
-                               const base::Time& date);
+  // Initializes wallpaper info for the user to default and saves it to local
+  // state the user is not ephemeral. Returns false if initialization fails.
+  bool InitializeUserWallpaperInfo(const AccountId& account_id);
 
   // Used as the callback of checking ONLINE wallpaper existence in
   // |SetOnlineWallpaperIfExists|. Initiates reading and decoding the wallpaper
@@ -584,6 +584,7 @@ class ASH_EXPORT WallpaperControllerImpl
                               const WallpaperInfo& info);
   bool GetSyncedWallpaperInfo(const AccountId& account_id,
                               WallpaperInfo* info) const;
+  void SyncLocalAndRemotePrefs(const AccountId& account_id);
   void HandleWallpaperInfoSyncedIn(const AccountId& account_id,
                                    WallpaperInfo info);
   void OnAttemptSetOnlineWallpaper(const OnlineWallpaperParams& params,

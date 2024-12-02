@@ -984,6 +984,9 @@ void LayerTreeHost::UpdateScrollOffsetFromImpl(
     const ElementId& id,
     const gfx::ScrollOffset& delta,
     const absl::optional<TargetSnapAreaElementIds>& snap_target_ids) {
+  if (mutator_host_->WillCancelScrollAnimation(id))
+    return;
+
   if (IsUsingLayerLists()) {
     auto& scroll_tree = property_trees()->scroll_tree;
     auto new_offset = scroll_tree.current_scroll_offset(id) + delta;
@@ -1117,16 +1120,14 @@ void LayerTreeHost::AnimateLayers(base::TimeTicks monotonic_time) {
 
 int LayerTreeHost::ScheduleMicroBenchmark(
     const std::string& benchmark_name,
-    std::unique_ptr<base::Value> value,
+    base::Value settings,
     MicroBenchmark::DoneCallback callback) {
   return micro_benchmark_controller_.ScheduleRun(
-      benchmark_name, std::move(value), std::move(callback));
+      benchmark_name, std::move(settings), std::move(callback));
 }
 
-bool LayerTreeHost::SendMessageToMicroBenchmark(
-    int id,
-    std::unique_ptr<base::Value> value) {
-  return micro_benchmark_controller_.SendMessage(id, std::move(value));
+bool LayerTreeHost::SendMessageToMicroBenchmark(int id, base::Value message) {
+  return micro_benchmark_controller_.SendMessage(id, std::move(message));
 }
 
 void LayerTreeHost::SetLayerTreeMutator(

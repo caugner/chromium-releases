@@ -4,7 +4,6 @@
 
 #include "ash/components/pcie_peripheral/pcie_peripheral_manager.h"
 
-#include "ash/constants/ash_features.h"
 #include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -81,10 +80,6 @@ void PciePeripheralManager::NotifyPeripheralBlockedReceived() {
 
 void PciePeripheralManager::OnBillboardDeviceConnected(
     bool billboard_is_supported) {
-  if (!features::IsPcieBillboardNotificationEnabled()) {
-    return;
-  }
-
   if (!billboard_is_supported) {
     for (auto& observer : observer_list_)
       observer.OnBillboardDeviceConnected();

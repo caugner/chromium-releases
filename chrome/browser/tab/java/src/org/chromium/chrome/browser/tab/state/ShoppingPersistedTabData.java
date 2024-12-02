@@ -358,7 +358,7 @@ public class ShoppingPersistedTabData extends PersistedTabData {
         tab.addObserver(mUrlUpdatedObserver);
     }
 
-    protected void resetPriceData() {
+    private void resetPriceData() {
         delete();
         mPriceDropData = new PriceDropData();
     }
@@ -431,7 +431,7 @@ public class ShoppingPersistedTabData extends PersistedTabData {
                             : new PriceDataSnapshot(PersistedTabData.from(tab, USER_DATA_KEY));
                     ShoppingPersistedTabData.isShoppingPage(tab.getUrl(), (isShoppingPage) -> {
                         if (!isShoppingPage) {
-                            supplierCallback.onResult(getEmptyShoppingPersistedTabData(tab));
+                            supplierCallback.onResult(null);
                             return;
                         }
 
@@ -441,13 +441,10 @@ public class ShoppingPersistedTabData extends PersistedTabData {
                                     .canApplyOptimization(tab.getUrl(),
                                             HintsProto.OptimizationType.PRICE_TRACKING,
                                             (decision, metadata) -> {
-                                                if (tab.isDestroyed()) {
+                                                if (tab.isDestroyed()
+                                                        || decision
+                                                                != OptimizationGuideDecision.TRUE) {
                                                     supplierCallback.onResult(null);
-                                                    return;
-                                                }
-                                                if (decision != OptimizationGuideDecision.TRUE) {
-                                                    supplierCallback.onResult(
-                                                            getEmptyShoppingPersistedTabData(tab));
                                                     return;
                                                 }
                                                 try {
@@ -1027,11 +1024,5 @@ public class ShoppingPersistedTabData extends PersistedTabData {
             return Arrays.asList(HintsProto.OptimizationType.PRICE_TRACKING);
         }
         return Arrays.asList();
-    }
-
-    private static ShoppingPersistedTabData getEmptyShoppingPersistedTabData(Tab tab) {
-        ShoppingPersistedTabData shoppingPersistedTabData = ShoppingPersistedTabData.from(tab);
-        shoppingPersistedTabData.resetPriceData();
-        return shoppingPersistedTabData;
     }
 }

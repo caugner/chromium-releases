@@ -8,7 +8,9 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/gfx/canvas.h"
@@ -36,6 +38,9 @@ namespace image_editor {
 
 // Color for the selection rectangle.
 static constexpr SkColor kColorSelectionRect = SkColorSetRGB(0xEE, 0xEE, 0xEE);
+
+// Minimum selection rect edge size to treat as a valid capture region.
+static constexpr int kMinimumValidSelectionEdgePixels = 30;
 
 ScreenshotFlow::ScreenshotFlow(content::WebContents* web_contents)
     : web_contents_(web_contents->GetWeakPtr()) {
@@ -100,6 +105,8 @@ void ScreenshotFlow::CreateAndAddUIOverlay() {
   content_layer->StackAtTop(screen_capture_layer_.get());
   screen_capture_layer_->SetBounds(bounds);
   screen_capture_layer_->SetVisible(true);
+
+  SetCursor(ui::mojom::CursorType::kCross);
 }
 
 void ScreenshotFlow::RemoveUIOverlay() {
@@ -122,10 +129,17 @@ void ScreenshotFlow::RemoveUIOverlay() {
 
   screen_capture_layer_->set_delegate(nullptr);
   screen_capture_layer_.reset();
+
+  // Restore the cursor to pointer; there's no corresponding GetCursor()
+  // to store the pre-capture-mode cursor, and the pointer will have moved
+  // in the meantime.
+  SetCursor(ui::mojom::CursorType::kPointer);
 }
 
 void ScreenshotFlow::Start(ScreenshotCaptureCallback flow_callback) {
   flow_callback_ = std::move(flow_callback);
+  web_contents_observer_ = std::make_unique<UnderlyingWebContentsObserver>(
+      web_contents_.get(), this);
 #if defined(OS_MAC)
   const gfx::NativeView& native_view = web_contents_->GetContentNativeView();
   gfx::Image img;
@@ -150,6 +164,39 @@ void ScreenshotFlow::Start(ScreenshotCaptureCallback flow_callback) {
 #endif
 }
 
+void ScreenshotFlow::StartFullscreenCapture(
+    ScreenshotCaptureCallback flow_callback) {
+  flow_callback_ = std::move(flow_callback);
+  web_contents_observer_ = std::make_unique<UnderlyingWebContentsObserver>(
+      web_contents_.get(), this);
+#if defined(OS_MAC)
+  const gfx::NativeView& native_view = web_contents_->GetContentNativeView();
+  gfx::Image img;
+  bool rval = ui::GrabViewSnapshot(native_view,
+                                   gfx::Rect(web_contents_->GetSize()), &img);
+  // If |img| is empty, clients should treat it as a canceled action, but
+  // we have a DCHECK for development as we expected this call to succeed.
+  DCHECK(rval);
+  CompleteFullscreenCapture(img);
+#else
+  // Start the capture process by capturing the entire window, then allow
+  // the user to drag out a selection mask.
+  ui::GrabWindowSnapshotAsyncCallback screenshot_callback =
+      base::BindOnce(&ScreenshotFlow::CompleteFullscreenCapture, weak_this_);
+  const gfx::NativeWindow& native_window = web_contents_->GetNativeView();
+  // TODO(skare): Evaluate against other screenshot capture methods.
+  // The synchronous variant mentions support is different between platforms
+  // and another library might be better if there is a browser process.
+  ui::GrabWindowSnapshotAsync(native_window,
+                              gfx::Rect(web_contents_->GetSize()),
+                              std::move(screenshot_callback));
+#endif
+}
+
+void ScreenshotFlow::CancelCapture() {
+  CompleteCapture(gfx::Rect());
+}
+
 void ScreenshotFlow::OnKeyEvent(ui::KeyEvent* event) {
   if (event->type() == ui::ET_KEY_PRESSED &&
       event->key_code() == ui::VKEY_ESCAPE) {
@@ -167,10 +214,14 @@ void ScreenshotFlow::OnMouseEvent(ui::MouseEvent* event) {
 
   gfx::Point location = located_event->location();
   switch (event->type()) {
+    case ui::ET_MOUSE_MOVED:
+      SetCursor(ui::mojom::CursorType::kCross);
+      break;
     case ui::ET_MOUSE_PRESSED:
       if (event->IsLeftMouseButton()) {
         capture_mode_ = CaptureMode::SELECTION_RECTANGLE;
         drag_start_ = location;
+        drag_end_ = location;
         event->SetHandled();
       }
       break;
@@ -186,7 +237,15 @@ void ScreenshotFlow::OnMouseEvent(ui::MouseEvent* event) {
           capture_mode_ == CaptureMode::SELECTION_ELEMENT) {
         capture_mode_ = CaptureMode::NOT_CAPTURING;
         event->SetHandled();
-        CompleteCapture(gfx::BoundingRect(drag_start_, drag_end_));
+        gfx::Rect selection = gfx::BoundingRect(drag_start_, drag_end_);
+        drag_start_.SetPoint(0, 0);
+        drag_end_.SetPoint(0, 0);
+        if (selection.width() >= kMinimumValidSelectionEdgePixels &&
+            selection.height() >= kMinimumValidSelectionEdgePixels) {
+          CompleteCapture(selection);
+        } else {
+          RequestRepaint(gfx::Rect());
+        }
       }
       break;
     default:
@@ -210,6 +269,15 @@ void ScreenshotFlow::CompleteCapture(const gfx::Rect& region) {
   }
 
   RemoveUIOverlay();
+
+  std::move(flow_callback_).Run(result);
+}
+
+void ScreenshotFlow::CompleteFullscreenCapture(gfx::Image img) {
+  ScreenshotCaptureResult result;
+
+  result.image = img;
+  result.screen_bounds = web_contents_->GetViewBounds();
 
   std::move(flow_callback_).Run(result);
 }
@@ -270,5 +338,42 @@ void ScreenshotFlow::PaintSelectionLayer(gfx::Canvas* canvas,
   // Add a small border around the selection region.
   canvas->DrawRect(gfx::RectF(selection_scaled), kColorSelectionRect);
 }
+
+void ScreenshotFlow::SetCursor(ui::mojom::CursorType cursor_type) {
+  if (!web_contents_) {
+    return;
+  }
+  content::RenderWidgetHost* host =
+      web_contents_->GetMainFrame()->GetRenderWidgetHost();
+  if (host) {
+    ui::Cursor cursor(cursor_type);
+    host->SetCursor(cursor);
+  }
+}
+
+// UnderlyingWebContentsObserver monitors the WebContents and exits screen
+// capture mode if a navigation occurs.
+class ScreenshotFlow::UnderlyingWebContentsObserver
+    : public content::WebContentsObserver {
+ public:
+  UnderlyingWebContentsObserver(content::WebContents* web_contents,
+                                ScreenshotFlow* screenshot_flow)
+      : content::WebContentsObserver(web_contents),
+        screenshot_flow_(screenshot_flow) {}
+
+  ~UnderlyingWebContentsObserver() override = default;
+
+  UnderlyingWebContentsObserver(const UnderlyingWebContentsObserver&) = delete;
+  UnderlyingWebContentsObserver& operator=(
+      const UnderlyingWebContentsObserver&) = delete;
+
+  // content::WebContentsObserver
+  void PrimaryPageChanged(content::Page& page) override {
+    screenshot_flow_->CancelCapture();
+  }
+
+ private:
+  ScreenshotFlow* screenshot_flow_;
+};
 
 }  // namespace image_editor

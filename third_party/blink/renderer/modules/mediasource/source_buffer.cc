@@ -33,6 +33,7 @@
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <tuple>
 #include <utility>
 
 #include "base/numerics/checked_math.h"
@@ -231,7 +232,8 @@ SourceBuffer::SourceBuffer(std::unique_ptr<WebSourceBuffer> web_source_buffer,
     video_tracks_ = attachment->CreateVideoTrackList(tracer);
     DCHECK(video_tracks_);
   } else {
-    DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled() &&
+    DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled(
+               GetExecutionContext()) &&
            GetExecutionContext()->IsDedicatedWorkerGlobalScope());
     DCHECK(!IsMainThread());
 
@@ -1191,8 +1193,7 @@ void SourceBuffer::RemovedFromMediaSource() {
   // Update the underlying demuxer except in the cross-thread attachment case
   // where detachment or element context destruction may have already begun.
   scoped_refptr<MediaSourceAttachmentSupplement> attachment;
-  MediaSourceTracer* tracer;
-  std::tie(attachment, tracer) = source_->AttachmentAndTracer();
+  std::tie(attachment, std::ignore) = source_->AttachmentAndTracer();
   DCHECK(attachment);
   if (attachment->FullyAttachedOrSameThread(
           MediaSourceAttachmentSupplement::SourceBufferPassKey())) {
@@ -1416,7 +1417,6 @@ void SourceBuffer::AddPlaceholderCrossThreadTracks(
   // to tell the media element to populate appropriately identified tracks so
   // that the BackgroundVideoOptimization feature functions for MSE-in-Workers
   // playbacks.
-  DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled());
   DCHECK(!IsMainThread());
   DCHECK(!first_initialization_segment_received_);
   DCHECK(source_);
@@ -1483,7 +1483,6 @@ void SourceBuffer::RemovePlaceholderCrossThreadTracks(
     MediaSourceTracer* tracer) {
   // TODO(https://crbug.com/878133): Remove this special-casing once worker
   // thread track creation and tracklist modifications are supported.
-  DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled());
   DCHECK(!IsMainThread());
   DCHECK(!tracer);  // Cross-thread attachments don't use a tracer.
 
@@ -2107,6 +2106,9 @@ void SourceBuffer::AppendEncodedChunksAsyncPart_Locked(
       std::move(pending_chunks_to_buffer_), &timestamp_offset_);
 
   if (!append_success) {
+    // Note that AppendError() calls NotifyDurationChanged, so a cross-thread
+    // attachment will send updated buffered and seekable information to the
+    // main thread here, too.
     AppendError(pass_key);
     append_encoded_chunks_resolver_->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kSyntaxError,
@@ -2114,6 +2116,8 @@ void SourceBuffer::AppendEncodedChunksAsyncPart_Locked(
     append_encoded_chunks_resolver_ = nullptr;
   } else {
     updating_ = false;
+
+    source_->SendUpdatedInfoToMainThreadCache();
 
     // Don't schedule 'update' or 'updateend' for this promisified async
     // method's completion. Promise resolution/rejection will signal same,
@@ -2176,6 +2180,9 @@ void SourceBuffer::AppendBufferAsyncPart_Locked(
   if (!append_success) {
     pending_append_data_.clear();
     pending_append_data_offset_ = 0;
+    // Note that AppendError() calls NotifyDurationChanged, so a cross-thread
+    // attachment will send updated buffered and seekable information to the
+    // main thread here, too.
     AppendError(pass_key);
   } else {
     pending_append_data_offset_ += append_size;
@@ -2197,6 +2204,8 @@ void SourceBuffer::AppendBufferAsyncPart_Locked(
     updating_ = false;
     pending_append_data_.clear();
     pending_append_data_offset_ = 0;
+
+    source_->SendUpdatedInfoToMainThreadCache();
 
     // 4. Queue a task to fire a simple event named update at this SourceBuffer
     //    object.
@@ -2252,6 +2261,8 @@ void SourceBuffer::RemoveAsyncPart_Locked(
   updating_ = false;
   pending_remove_start_ = -1;
   pending_remove_end_ = -1;
+
+  source_->SendUpdatedInfoToMainThreadCache();
 
   // 11. Queue a task to fire a simple event named update at this SourceBuffer
   //     object.

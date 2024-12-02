@@ -28,7 +28,6 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/download_manager.h"
@@ -40,8 +39,11 @@
 #include "storage/browser/file_system/file_system_url.h"
 #include "storage/browser/file_system/isolated_context.h"
 #include "storage/common/file_system/file_system_util.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -323,8 +325,9 @@ void DevToolsFileHelper::AddFileSystem(
 void DevToolsFileHelper::UpgradeDraggedFileSystemPermissions(
     const std::string& file_system_url,
     const ShowInfoBarCallback& show_info_bar_callback) {
-  storage::FileSystemURL root_url =
-      isolated_context()->CrackURL(GURL(file_system_url));
+  const GURL gurl(file_system_url);
+  storage::FileSystemURL root_url = isolated_context()->CrackURL(
+      gurl, blink::StorageKey(url::Origin::Create(gurl)));
   if (!root_url.is_valid() || !root_url.path().empty())
     return;
 
@@ -377,14 +380,6 @@ void DevToolsFileHelper::FailedToAddFileSystem(const std::string& error) {
   delegate_->FileSystemAdded(error, nullptr);
 }
 
-namespace {
-
-void RunOnUIThread(base::OnceClosure callback) {
-  content::GetUIThreadTaskRunner({})->PostTask(FROM_HERE, std::move(callback));
-}
-
-}  // namespace
-
 std::vector<DevToolsFileHelper::FileSystem>
 DevToolsFileHelper::GetFileSystems() {
   file_system_paths_ = GetAddedFileSystemPaths(profile_);
@@ -394,12 +389,10 @@ DevToolsFileHelper::GetFileSystems() {
         base::BindRepeating(&DevToolsFileHelper::FilePathsChanged,
                             weak_factory_.GetWeakPtr()),
         base::SequencedTaskRunnerHandle::Get()));
-    auto change_handler_on_ui = base::BindRepeating(
-        &DevToolsFileHelper::FileSystemPathsSettingChangedOnUI,
-        weak_factory_.GetWeakPtr());
     pref_change_registrar_.Add(
         prefs::kDevToolsFileSystemPaths,
-        base::BindRepeating(RunOnUIThread, change_handler_on_ui));
+        base::BindRepeating(&DevToolsFileHelper::FileSystemPathsSettingChanged,
+                            base::Unretained(this)));
   }
   for (auto file_system_path : file_system_paths_) {
     base::FilePath path =
@@ -453,8 +446,7 @@ void DevToolsFileHelper::ShowItemInFolder(const std::string& file_system_path) {
                      weak_factory_.GetWeakPtr(), path));
 }
 
-void DevToolsFileHelper::FileSystemPathsSettingChangedOnUI() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+void DevToolsFileHelper::FileSystemPathsSettingChanged() {
   PathToType remaining;
   remaining.swap(file_system_paths_);
   DCHECK(file_watcher_.get());

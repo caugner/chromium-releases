@@ -95,7 +95,6 @@
 <translation id="1810764548349082891">无法预览</translation>
 <translation id="1812302367230252929">阿姆哈拉语音译</translation>
 <translation id="1813278315230285598">服务</translation>
-<translation id="1815861158988915678"><ph name="BEGIN_BOLD" />警告<ph name="END_BOLD" />：这些文件是临时文件，系统可能会自动删除这些文件以释放磁盘空间。<ph name="BEGIN_LINK" />了解详情<ph name="END_LINK" /></translation>
 <translation id="1829129547161959350">企鹅</translation>
 <translation id="183183971458492120">正在加载信息…</translation>
 <translation id="1834290891154666894">主题备用名称的匹配条目无效</translation>
@@ -225,6 +224,7 @@
 <translation id="299638574917407533">法语（加拿大）</translation>
 <translation id="3003189754374775221">第 <ph name="NETWORK_INDEX" /> 个网络（共 <ph name="NETWORK_COUNT" /> 个），<ph name="NETWORK_NAME" />，<ph name="NETWORK_PROVIDER_NAME" />，信号强度为 <ph name="SIGNAL_STRENGTH" />%，连接</translation>
 <translation id="3003633581067744647">切换到缩略图视图</translation>
+<translation id="3016566519832145558">警告：这些都是临时文件，可能会被系统自动删除以释放磁盘空间。</translation>
 <translation id="3029114385395636667">若要离线使用 Google 文档、表格及幻灯片，请启用 Google 文档的离线功能。</translation>
 <translation id="303198083543495566">地理位置</translation>
 <translation id="3047197340186497470">中文大易</translation>
@@ -575,6 +575,7 @@
 <translation id="6146563240635539929">视频</translation>
 <translation id="6150853954427645995">要保存此文件以供离线使用，请恢复联网状态，右键点击文件，然后选择<ph name="OFFLINE_CHECKBOX_NAME" />选项。</translation>
 <translation id="6164412158936057769">蝴蝶</translation>
+<translation id="6165508094623778733">了解详情</translation>
 <translation id="6170470584681422115">三明治</translation>
 <translation id="6187719147498869044">匈牙利语</translation>
 <translation id="6189412234224385711">使用“<ph name="EXTENSION_NAME" />”打开</translation>
@@ -925,6 +926,7 @@
 <translation id="943972244133411984">修改者</translation>
 <translation id="945522503751344254">发送反馈</translation>
 <translation id="947144732524271678">已选择从<ph name="FROM_ENTRY_NAME" />到<ph name="TO_ENTRY_NAME" />的 <ph name="ENTRY_COUNT" /> 个条目。</translation>
+<translation id="965477715979482472">英语（南非）</translation>
 <translation id="981121421437150478">离线</translation>
 <translation id="988685240266037636">已有名为“<ph name="FILE_NAME" />”的文件。要覆盖它吗？</translation>
 <translation id="992401651319295351">您还有 <ph name="RETRIES" /> 次尝试机会。在设置新 PIN 码之前，您将无法使用此网络。</translation>

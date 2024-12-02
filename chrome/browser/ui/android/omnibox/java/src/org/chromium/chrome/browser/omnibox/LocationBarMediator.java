@@ -58,7 +58,6 @@ import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.browser_ui.widget.animation.CancelAwareAnimatorListener;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.externalauth.ExternalAuthUtils;
-import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
 import org.chromium.components.search_engines.TemplateUrl;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
@@ -177,6 +176,8 @@ class LocationBarMediator
     private boolean mUrlHasFocus;
     private LensController mLensController;
     private final BooleanSupplier mIsToolbarMicEnabledSupplier;
+    // Tracks if the location bar is laid out in a focused state due to an ntp scroll.
+    private boolean mIsLocationBarFocusedFromNtpScroll;
 
     /*package */ LocationBarMediator(@NonNull Context context,
             @NonNull LocationBarLayout locationBarLayout,
@@ -320,12 +321,20 @@ class LocationBarMediator
         updateButtonVisibility();
     }
 
-    /*package */ void setUrlFocusChangeFraction(float fraction) {
+    /* package */ void setUrlFocusChangeFraction(float fraction) {
         mUrlFocusChangeFraction = fraction;
         if (mIsTablet) {
             mLocationBarDataProvider.getNewTabPageDelegate().setUrlFocusChangeAnimationPercent(
                     fraction);
         } else {
+            // Determine when the focus state changes as a result of ntp scrolling.
+            boolean isLocationBarFocusedFromNtpScroll =
+                    fraction > 0f && !mIsUrlFocusChangeInProgress;
+            if (isLocationBarFocusedFromNtpScroll != mIsLocationBarFocusedFromNtpScroll) {
+                mIsLocationBarFocusedFromNtpScroll = isLocationBarFocusedFromNtpScroll;
+                onUrlFocusedFromNtpScrollChanged();
+            }
+
             if (fraction > 0f) {
                 mLocationBarLayout.setUrlActionContainerVisibility(View.VISIBLE);
             } else if (fraction == 0f && !mIsUrlFocusChangeInProgress) {
@@ -336,8 +345,11 @@ class LocationBarMediator
             }
 
             mStatusCoordinator.setUrlFocusChangePercent(fraction);
-            updateButtonVisibility();
         }
+    }
+
+    /* package */ void onUrlFocusedFromNtpScrollChanged() {
+        updateButtonVisibility();
     }
 
     /*package */ void setUnfocusedWidth(int unfocusedWidth) {
@@ -1009,7 +1021,8 @@ class LocationBarMediator
             boolean deleteButtonVisible = shouldShowDeleteButton();
             boolean canShowMicButton = !mIsTablet || !isToolbarMicEnabled;
             return canShowMicButton && !deleteButtonVisible
-                    && (mUrlHasFocus || mIsUrlFocusChangeInProgress || mUrlFocusChangeFraction > 0f
+                    && (mUrlHasFocus || mIsUrlFocusChangeInProgress
+                            || mIsLocationBarFocusedFromNtpScroll
                             || mShouldShowMicButtonWhenUnfocused);
         }
     }
@@ -1024,19 +1037,9 @@ class LocationBarMediator
         if (mIsTablet && mShouldShowButtonsWhenUnfocused) {
             return (mUrlHasFocus || mIsUrlFocusChangeInProgress) && isLensOnOmniboxEnabled();
         }
-
-        // Never show Lens in the old search widget page context.
-        // This widget must guarantee consistent feature set regardless of search engine choice or
-        // other aspects that may not be met by Lens.
-        LocationBarDataProvider dataProvider = getLocationBarDataProvider();
-        if (dataProvider.getPageClassification(dataProvider.isIncognito())
-                == PageClassification.ANDROID_SEARCH_WIDGET_VALUE) {
-            return false;
-        }
-
         return !shouldShowDeleteButton()
-                && (mUrlHasFocus || mIsUrlFocusChangeInProgress || mUrlFocusChangeFraction > 0f
-                        || mShouldShowLensButtonWhenUnfocused)
+                && (mUrlHasFocus || mIsUrlFocusChangeInProgress
+                        || mIsLocationBarFocusedFromNtpScroll || mShouldShowLensButtonWhenUnfocused)
                 && isLensOnOmniboxEnabled();
     }
 
@@ -1262,6 +1265,11 @@ class LocationBarMediator
     @Override
     public void clearOmniboxFocus() {
         setUrlBarFocus(/*shouldBeFocused=*/false, /*pastedText=*/null, OmniboxFocusReason.UNFOCUS);
+    }
+
+    @Override
+    public void notifyVoiceRecognitionCanceled() {
+        mLocationBarLayout.notifyVoiceRecognitionCanceled();
     }
 
     // AssistantVoiceSearchService.Observer implementation.

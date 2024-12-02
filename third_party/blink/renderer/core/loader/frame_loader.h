@@ -140,6 +140,7 @@ class CORE_EXPORT FrameLoader final {
   void DidExplicitOpen();
 
   String UserAgent() const;
+  String ReducedUserAgent() const;
   absl::optional<blink::UserAgentMetadata> UserAgentMetadata() const;
 
   void DispatchDidClearWindowObjectInMainWorld();
@@ -177,7 +178,8 @@ class CORE_EXPORT FrameLoader final {
 
   void DidFinishSameDocumentNavigation(const KURL&,
                                        WebFrameLoadType,
-                                       HistoryItem*);
+                                       HistoryItem*,
+                                       bool may_restore_scroll_offset);
 
   // This will attempt to detach the current document. It will dispatch unload
   // events and abort XHR requests. Returns true if the frame is ready to
@@ -228,6 +230,8 @@ class CORE_EXPORT FrameLoader final {
   static bool NeedsHistoryItemRestore(WebFrameLoadType type);
 
   void WriteIntoTrace(perfetto::TracedValue context) const;
+
+  mojo::PendingRemote<blink::mojom::CodeCacheHost> CreateWorkerCodeCacheHost();
 
  private:
   bool AllowRequestForThisFrame(const FrameLoadRequest&);

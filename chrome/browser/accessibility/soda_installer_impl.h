@@ -43,7 +43,7 @@ class SodaInstallerImpl : public SodaInstaller,
                        PrefService* global_prefs) override;
   std::vector<std::string> GetAvailableLanguages() const override;
 
- protected:
+ private:
   // SodaInstaller:
   void InstallSoda(PrefService* global_prefs) override;
   void UninstallSoda(PrefService* global_prefs) override;
@@ -54,7 +54,6 @@ class SodaInstallerImpl : public SodaInstaller,
   void OnSodaBinaryInstalled();
   void OnSodaLanguagePackInstalled(speech::LanguageCode language_code);
 
- private:
   std::map<std::string, update_client::CrxUpdateItem> downloading_components_;
 
   base::ScopedObservation<component_updater::ComponentUpdateService,

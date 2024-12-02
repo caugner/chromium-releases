@@ -7,6 +7,8 @@
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/image_editor/screenshot_flow.h"
 #include "chrome/browser/lens/metrics/lens_metrics.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/lens/lens_side_panel_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "components/lens/lens_entrypoints.h"
 #include "components/lens/lens_features.h"
@@ -147,7 +149,8 @@ void LensRegionSearchController::OnCaptureCompleted(
   }
   core_tab_helper->SearchWithLensInNewTab(
       image, captured_image.Size(),
-      lens::EntryPoint::CHROME_REGION_SEARCH_MENU_ITEM);
+      lens::EntryPoint::CHROME_REGION_SEARCH_MENU_ITEM,
+      lens::features::kEnableSidePanelForLensRegionSearch.Get());
   RecordCaptureResult(lens::LensRegionSearchCaptureResult::SUCCESS);
 }
 
